@@ -1,0 +1,36 @@
+{
+  "page_key": "shopee_cn.sellercenter.date_picker.full",
+  "generated_at": "2025-09-09T00:00:00+08:00",
+  "url_pattern": "https://seller.shopee.cn/*",
+  "steps": [
+    {
+      "step_id": 1,
+      "action": "open_picker",
+      "description": "打开日期选择器（全量选择器集）",
+      "candidates": [
+        { "type": "css", "value": "div.bi-date-input.track-click-open-time-selector", "priority": 0 },
+        { "type": "css", "value": "div.bi-date-input", "priority": 1 },
+        { "type": "css", "value": ".date-range-picker", "priority": 2 },
+        { "type": "css", "value": ".eds-date-picker__input", "priority": 3 },
+        { "type": "css", "value": ".eds-date-selector-panel", "priority": 4 },
+        { "type": "css", "value": ".eds-date-picker__dropdown", "priority": 5 },
+        { "type": "css", "value": "div:has(.eds-date-shortcut-item__text)", "priority": 6 },
+        { "type": "css", "value": "div:has-text('昨天')", "priority": 7 }
+      ]
+    },
+    {
+      "step_id": 2,
+      "action": "select_shortcut",
+      "description": "选择目标日期快捷项（将被动态替换）",
+      "candidates": [
+        { "type": "text", "value": "昨天", "priority": 0 },
+        { "type": "text", "value": "过去7天", "priority": 1 },
+        { "type": "text", "value": "过去30天", "priority": 2 },
+        { "type": "css", "value": ".eds-date-shortcut-item__text:has-text('昨天')", "priority": 3 },
+        { "type": "css", "value": ".eds-date-shortcut-item__text:has-text('过去7天')", "priority": 4 },
+        { "type": "css", "value": ".eds-date-shortcut-item__text:has-text('过去30天')", "priority": 5 }
+      ]
+    }
+  ]
+}
+

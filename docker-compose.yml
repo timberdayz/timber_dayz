@@ -1,0 +1,197 @@
+# 西虹ERP系统 - Docker Compose配置
+# 支持开发/生产环境切换，一键部署
+# Note: version字段在Docker Compose v2中已废弃，无需指定
+
+services:
+  # ==================== PostgreSQL数据库 ====================
+  postgres:
+    image: postgres:15-alpine
+    container_name: xihong_erp_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-erp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_pass_2025}
+      POSTGRES_DB: ${POSTGRES_DB:-xihong_erp}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # ⭐ 默认使用15432端口避免与本地PostgreSQL冲突（Windows保留端口范围5433-5832）
+      # 容器内部仍使用5432端口，容器间通信使用服务名 postgres:5432
+      - "${POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./logs/postgres:/var/log/postgresql
+    networks:
+      - erp_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-erp_user} -d ${POSTGRES_DB:-xihong_erp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ==================== Redis缓存和消息队列 ====================
+  redis:
+    image: redis:latest
+    container_name: xihong_erp_redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - erp_network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    profiles:
+      - dev
+      - production
+      - full
+
+  # ==================== pgAdmin管理界面 ====================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: xihong_erp_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@xihong.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "${PGADMIN_PORT:-5051}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - erp_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - dev
+      - full
+
+  # ==================== 后端API服务 ====================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.11}
+    container_name: xihong_erp_backend
+    environment:
+      # 数据库配置
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}
+      DATABASE_ECHO: ${DATABASE_ECHO:-false}
+      
+      # 应用配置
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: ${DEBUG:-false}
+      SECRET_KEY: ${SECRET_KEY:-change-this-in-production}
+      
+      # 服务器配置
+      HOST: 0.0.0.0
+      PORT: 8000
+      
+      # CORS配置
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5174,http://localhost:80}
+    ports:
+      - "${BACKEND_PORT:-8001}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+      - ./config:/app/config
+    networks:
+      - erp_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    profiles:
+      - production
+      - full
+
+  # ==================== 前端Vue服务 ====================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NODE_VERSION: ${NODE_VERSION:-18}
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8001}
+    container_name: xihong_erp_frontend
+    ports:
+      - "${FRONTEND_PORT:-5174}:80"
+    volumes:
+      - ./logs/nginx:/var/log/nginx
+    networks:
+      - erp_network
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    profiles:
+      - production
+      - full
+
+# ==================== 网络配置 ====================
+networks:
+  erp_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ==================== 数据卷配置 ====================
+volumes:
+  postgres_data:
+    driver: local
+    name: xihong_erp_postgres_data
+  pgadmin_data:
+    driver: local
+    name: xihong_erp_pgadmin_data
+  redis_data:
+    driver: local
+    name: xihong_erp_redis_data

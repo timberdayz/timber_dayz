@@ -1,0 +1,163 @@
+# 妙手ERP数据采集配置文件
+
+# 基础配置
+miaoshou_erp:
+  # 登录信息 (请填入真实账号信息)
+  username: "your_username_here"
+  password: "your_password_here"
+  base_url: "https://erp.91miaoshou.com"
+
+  # 采集参数
+  collection:
+    update_frequency: 3600 # 更新频率(秒) - 1小时
+    data_range_days: 7 # 数据范围(天)
+    retry_times: 3 # 重试次数
+    timeout: 60 # 超时时间(秒)
+
+  # 数据类型配置
+  data_types:
+    collect_orders: true # 采集订单数据
+    collect_products: true # 采集商品数据
+    collect_customers: false # 采集客户数据 (可选)
+    collect_inventory: false # 采集库存数据 (可选)
+    collect_finance: true # 采集财务数据
+
+  # 浏览器配置
+  browser:
+    headless: true # 无头模式 (生产环境建议true)
+    use_proxy: false # 是否使用代理
+    proxy_url: null # 代理地址
+    window_size: "1920,1080" # 窗口大小
+
+  # 数据库配置
+  database:
+    path: "data/miaoshou_erp.db"
+    backup_enabled: true
+    cleanup_days: 30 # 保留数据天数
+
+  # 日志配置
+  logging:
+    level: "INFO" # DEBUG, INFO, WARNING, ERROR
+    file_path: "logs/miaoshou_erp.log"
+    max_file_size: "10MB"
+    backup_count: 5
+
+# 页面元素选择器配置 (根据实际页面调整)
+selectors:
+  login:
+    username_field: "input[name='username']"
+    password_field: "input[name='password']"
+    login_button: "button[type='submit']"
+    captcha_input: "input[name='captcha']"
+
+  dashboard:
+    visitor_count: ".visitor-stats .count"
+    page_views: ".page-views .count"
+    order_count: ".order-stats .count"
+    revenue_amount: ".revenue-stats .amount"
+
+  orders:
+    order_list: ".order-list-container"
+    order_item: ".order-item"
+    order_amount: ".order-amount"
+    order_status: ".order-status"
+    date_filter: ".date-filter select"
+
+  products:
+    product_list: ".product-list"
+    product_count: ".product-count"
+    active_products: ".active-products"
+
+  reviews:
+    rating_average: ".rating-average"
+    review_count: ".review-count"
+    rating_distribution: ".rating-distribution"
+
+# 数据映射配置
+data_mapping:
+  # KPI指标映射
+  kpi_fields:
+    visitors: "客流量"
+    page_views: "浏览量"
+    orders: "订单数"
+    revenue: "销售额"
+    conversion_rate: "转化率"
+    avg_order_value: "客单价"
+    rating: "好评度"
+    reviews: "评价数量"
+    return_rate: "退货率"
+
+  # 状态映射
+  status_mapping:
+    "正常": "online"
+    "异常": "error"
+    "维护": "offline"
+    "警告": "warning"
+
+# 错误处理配置
+error_handling:
+  # 重试策略
+  retry_strategy:
+    max_retries: 3
+    retry_delay: 5 # 重试间隔(秒)
+    exponential_backoff: true
+
+  # 错误类型处理
+  error_types:
+    login_failed:
+      action: "stop" # stop, retry, skip
+      notification: true
+
+    page_not_found:
+      action: "retry"
+      max_retries: 2
+
+    data_extraction_failed:
+      action: "skip"
+      log_level: "WARNING"
+
+    network_timeout:
+      action: "retry"
+      max_retries: 5
+
+# 通知配置 (可选)
+notifications:
+  enabled: false
+
+  # 邮件通知
+  email:
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    username: "your_email@gmail.com"
+    password: "your_app_password"
+    recipients: ["admin@company.com"]
+
+  # 企业微信通知 (可选)
+  wechat_work:
+    webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"
+
+# 性能优化配置
+performance:
+  # 并发配置
+  concurrent_stores: 1 # 同时处理的店铺数量
+  page_load_timeout: 30 # 页面加载超时
+  element_wait_timeout: 10 # 元素等待超时
+
+  # 内存管理
+  max_memory_usage: "512MB" # 最大内存使用
+  garbage_collection: true # 启用垃圾回收
+
+  # 缓存配置
+  cache_enabled: true
+  cache_duration: 300 # 缓存时间(秒)
+
+# 开发和调试配置
+development:
+  debug_mode: false # 调试模式
+  save_screenshots: false # 保存截图
+  screenshot_path: "debug/screenshots"
+  verbose_logging: false # 详细日志
+
+  # 测试数据
+  use_test_data: false # 使用测试数据
+  test_data_path: "tests/test_data.json"

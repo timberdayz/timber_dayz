@@ -1,0 +1,297 @@
+{
+  "identical": [
+    {
+      "platform": "shopee",
+      "file": "metrics_selector.py",
+      "lines": 16
+    },
+    {
+      "platform": "shopee",
+      "file": "login.py",
+      "lines": 45
+    },
+    {
+      "platform": "shopee",
+      "file": "products_export.py",
+      "lines": 480
+    },
+    {
+      "platform": "shopee",
+      "file": "finance_export.py",
+      "lines": 188
+    },
+    {
+      "platform": "shopee",
+      "file": "navigation.py",
+      "lines": 65
+    },
+    {
+      "platform": "shopee",
+      "file": "products_config.py",
+      "lines": 127
+    },
+    {
+      "platform": "shopee",
+      "file": "services_export.py",
+      "lines": 1367
+    },
+    {
+      "platform": "shopee",
+      "file": "finance_config.py",
+      "lines": 71
+    },
+    {
+      "platform": "shopee",
+      "file": "orders_config.py",
+      "lines": 69
+    },
+    {
+      "platform": "shopee",
+      "file": "orders_export.py",
+      "lines": 186
+    },
+    {
+      "platform": "shopee",
+      "file": "analytics_config.py",
+      "lines": 258
+    },
+    {
+      "platform": "shopee",
+      "file": "date_picker.py",
+      "lines": 31
+    },
+    {
+      "platform": "shopee",
+      "file": "services_config.py",
+      "lines": 78
+    },
+    {
+      "platform": "shopee",
+      "file": "__init__.py",
+      "lines": 2
+    },
+    {
+      "platform": "shopee",
+      "file": "export.py",
+      "lines": 45
+    },
+    {
+      "platform": "tiktok",
+      "file": "login.py",
+      "lines": 719
+    },
+    {
+      "platform": "tiktok",
+      "file": "navigation.py",
+      "lines": 127
+    },
+    {
+      "platform": "tiktok",
+      "file": "products_config.py",
+      "lines": 68
+    },
+    {
+      "platform": "tiktok",
+      "file": "service_config.py",
+      "lines": 45
+    },
+    {
+      "platform": "tiktok",
+      "file": "finance_config.py",
+      "lines": 49
+    },
+    {
+      "platform": "tiktok",
+      "file": "orders_config.py",
+      "lines": 53
+    },
+    {
+      "platform": "tiktok",
+      "file": "analytics_config.py",
+      "lines": 41
+    },
+    {
+      "platform": "tiktok",
+      "file": "date_picker.py",
+      "lines": 1574
+    },
+    {
+      "platform": "tiktok",
+      "file": "__init__.py",
+      "lines": 1
+    },
+    {
+      "platform": "tiktok",
+      "file": "shop_selector.py",
+      "lines": 180
+    },
+    {
+      "platform": "tiktok",
+      "file": "export.py",
+      "lines": 400
+    },
+    {
+      "platform": "miaoshou",
+      "file": "warehouse_config.py",
+      "lines": 117
+    },
+    {
+      "platform": "miaoshou",
+      "file": "login.py",
+      "lines": 229
+    },
+    {
+      "platform": "miaoshou",
+      "file": "overlay_guard.py",
+      "lines": 87
+    },
+    {
+      "platform": "miaoshou",
+      "file": "navigation.py",
+      "lines": 230
+    },
+    {
+      "platform": "miaoshou",
+      "file": "products_config.py",
+      "lines": 73
+    },
+    {
+      "platform": "miaoshou",
+      "file": "orders_config.py",
+      "lines": 94
+    },
+    {
+      "platform": "miaoshou",
+      "file": "date_picker.py",
+      "lines": 144
+    },
+    {
+      "platform": "miaoshou",
+      "file": "__init__.py",
+      "lines": 1
+    }
+  ],
+  "different": [
+    {
+      "status": "different",
+      "similarity": 0.998,
+      "legacy_lines": 593,
+      "target_lines": 593,
+      "diff_summary": [
+        "--- migration_temp\\legacy_components\\modules\\platforms\\shopee\\components\\analytics_export.py",
+        "+++ modules\\platforms\\shopee\\components\\analytics_export.py",
+        "@@ -33,7 +33,7 @@",
+        "                 \"shop_name\": shop_name,",
+        "                 \"shop_id\": (self.ctx.config or {}).get(\"shop_id\"),",
+        "                 \"region\": (self.ctx.account or {}).get(\"region\"),",
+        "-                \"data_type\": \"traffic\",",
+        "+                \"data_type\": \"analytics\",  # v4.10.0更新：统一使用analytics域，traffic域已废弃",
+        "                 \"granularity\": (cfg or {}).get(\"granularity\"),",
+        "                 \"start_date\": (cfg or {}).get(\"start_date\"),",
+        "                 \"end_date\": (cfg or {}).get(\"end_date\"),",
+        "@@ -211,7 +211,7 @@",
+        "                 self.logger.info(f\"[ShopeeAnalyticsExport] 导出按钮已点击: {export_button_used}，等待处理...\")",
+        " ",
+        "             # 统一输出目录（使用 build_output_path，支持 include_shop_id）",
+        "-            data_type = \"traffic\"",
+        "+            data_type = \"analytics\"  # v4.10.0更新：统一使用analytics域，traffic域已废弃",
+        "             gran = cfg.get(\"granularity\") or \"manual\"",
+        "             start_date = cfg.get(\"start_date\")",
+        "             end_date = cfg.get(\"end_date\")"
+      ],
+      "diff_line_count": 20,
+      "platform": "shopee",
+      "file": "analytics_export.py",
+      "legacy_path": "migration_temp\\legacy_components\\modules\\platforms\\shopee\\components\\analytics_export.py",
+      "target_path": "modules\\platforms\\shopee\\components\\analytics_export.py"
+    },
+    {
+      "status": "different",
+      "similarity": 0.996,
+      "legacy_lines": 224,
+      "target_lines": 224,
+      "diff_summary": [
+        "--- migration_temp\\legacy_components\\modules\\platforms\\shopee\\components\\config_registry.py",
+        "+++ modules\\platforms\\shopee\\components\\config_registry.py",
+        "@@ -44,7 +44,7 @@",
+        "         export_component=\"ShopeeAnalyticsExport\",",
+        "         navigation_target=\"TRAFFIC_OVERVIEW\",",
+        "         menu_display_name=\"流量表现数据导出\",",
+        "-        data_type_dir=\"traffic\"",
+        "+        data_type_dir=\"analytics\"  # v4.10.0更新：统一使用analytics域，traffic域已废弃",
+        "     ),",
+        "     DataDomain.PRODUCTS: DomainConfig(",
+        "         domain=DataDomain.PRODUCTS,"
+      ],
+      "diff_line_count": 11,
+      "platform": "shopee",
+      "file": "config_registry.py",
+      "legacy_path": "migration_temp\\legacy_components\\modules\\platforms\\shopee\\components\\config_registry.py",
+      "target_path": "modules\\platforms\\shopee\\components\\config_registry.py"
+    },
+    {
+      "status": "different",
+      "similarity": 0.994,
+      "legacy_lines": 147,
+      "target_lines": 147,
+      "diff_summary": [
+        "--- migration_temp\\legacy_components\\modules\\platforms\\tiktok\\components\\config_registry.py",
+        "+++ modules\\platforms\\tiktok\\components\\config_registry.py",
+        "@@ -42,7 +42,7 @@",
+        "         config_file=\"analytics_config.py\",",
+        "         navigation_target=\"TRAFFIC_OVERVIEW\",",
+        "         menu_display_name=\"流量表现数据导出\",",
+        "-        data_type_dir=\"traffic\",",
+        "+        data_type_dir=\"analytics\",  # v4.10.0更新：统一使用analytics域，traffic域已废弃",
+        "     ),",
+        "     DataDomain.PRODUCTS: DomainConfig(",
+        "         domain=DataDomain.PRODUCTS,"
+      ],
+      "diff_line_count": 11,
+      "platform": "tiktok",
+      "file": "config_registry.py",
+      "legacy_path": "migration_temp\\legacy_components\\modules\\platforms\\tiktok\\components\\config_registry.py",
+      "target_path": "modules\\platforms\\tiktok\\components\\config_registry.py"
+    },
+    {
+      "status": "different",
+      "similarity": 0.999,
+      "legacy_lines": 1929,
+      "target_lines": 1930,
+      "diff_summary": [
+        "--- migration_temp\\legacy_components\\modules\\platforms\\miaoshou\\components\\export.py",
+        "+++ modules\\platforms\\miaoshou\\components\\export.py",
+        "@@ -65,8 +65,9 @@",
+        "         if fallback:",
+        "             return fallback",
+        "         u = (url or \"\").lower()",
+        "+        # v4.10.0更新：warehouse页面返回inventory（库存快照），而非warehouse",
+        "         if \"warehouse\" in u:",
+        "-            return \"warehouse\"",
+        "+            return \"inventory\"",
+        "         if \"product\" in u or \"goods\" in u:",
+        "             return \"products\"",
+        "         if \"traffic\" in u or \"overview\" in u or \"analytics\" in u:",
+        "@@ -1763,8 +1764,8 @@",
+        " ",
+        "             cfg = self.ctx.config or {}",
+        "             gran = (\"snapshot\" if is_warehouse else (cfg.get(\"granularity\") or \"range\")).lower()",
+        "-            # 对于仓库清单页（商品表现），命名和分流一律归并到 products，避免出现意外的 'warehouse' 目录",
+        "-            data_domain = cfg.get(\"data_domain\") or (\"products\" if is_warehouse else None)",
+        "+            # v4.10.0更新：对于仓库清单页（库存快照），命名和分流一律归并到 inventory，避免出现意外的 'warehouse' 目录",
+        "+            data_domain = cfg.get(\"data_domain\") or (\"inventory\" if is_warehouse else None)",
+        "             data_type = self._infer_data_type(current_url, data_domain)",
+        "             # Use globally tapped download if normal flows missed it",
+        "             try:"
+      ],
+      "diff_line_count": 24,
+      "platform": "miaoshou",
+      "file": "export.py",
+      "legacy_path": "migration_temp\\legacy_components\\modules\\platforms\\miaoshou\\components\\export.py",
+      "target_path": "modules\\platforms\\miaoshou\\components\\export.py"
+    }
+  ],
+  "legacy_only": [],
+  "target_only": [],
+  "errors": []
+}

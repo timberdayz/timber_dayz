@@ -1,0 +1,207 @@
+version: '3.8'
+
+# 监控服务编排（Prometheus + Grafana + Exporters + AlertManager）
+# 启动: docker-compose -f docker/docker-compose.monitoring.yml up -d
+#
+# ⚠️ 重要：此文件需要与 docker-compose.prod.yml 一起使用
+# 网络名称必须与 docker-compose.prod.yml 中的 xihong_erp_network 一致
+#
+# 启动顺序：
+# 1. 先启动主服务：docker-compose -f docker-compose.prod.yml up -d
+# 2. 再启动监控服务：docker-compose -f docker/docker-compose.monitoring.yml up -d
+
+services:
+  # Celery Exporter（监控 Celery 任务队列）
+  # ⚠️ 注意：如果已在 docker-compose.prod.yml 中启动，可以跳过此服务
+  celery-exporter:
+    image: ovalmoney/celery-exporter:latest
+    container_name: xihong_erp_celery_exporter
+    restart: unless-stopped
+    ports:
+      - "9808:9540"  # 外部 9808 映射到容器内 9540
+    environment:
+      # ⚠️ ovalmoney/celery-exporter 使用 CELERY_EXPORTER_BROKER_URL 环境变量
+      CELERY_EXPORTER_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+    networks:
+      - erp_network
+    healthcheck:
+      # ⚠️ 容器内部监听 9540 端口，使用 Python 进行健康检查
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9540/metrics', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # PostgreSQL Exporter
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: xihong_erp_postgres_exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}?sslmode=disable"
+    ports:
+      - "9187:9187"
+    networks:
+      - erp_network
+    restart: unless-stopped
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: xihong_erp_prometheus
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - "19090:9090"  # 外部端口改为 19090，避免端口冲突（Windows 端口保留范围）
+    networks:
+      - erp_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # AlertManager
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: xihong_erp_alertmanager
+    ports:
+      - "19093:9093"  # 外部端口改为 19093，避免端口冲突
+    environment:
+      # ⚠️ 重要：SMTP 密码等敏感信息通过环境变量提供
+      - SMTP_HOST=${SMTP_HOST:-smtp.example.com:587}
+      - SMTP_FROM=${SMTP_FROM:-alerts@example.com}
+      - SMTP_USERNAME=${SMTP_USERNAME:-alerts@example.com}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}  # 必须设置
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-ops-team@example.com}
+      - ALERT_EMAIL_CRITICAL=${ALERT_EMAIL_CRITICAL:-critical-alerts@example.com}
+      - ALERT_EMAIL_WARNING=${ALERT_EMAIL_WARNING:-warning-alerts@example.com}
+      - ALERT_EMAIL_CELERY=${ALERT_EMAIL_CELERY:-celery-alerts@example.com}
+    volumes:
+      - ../monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager-data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    depends_on:
+      - prometheus
+    networks:
+      - erp_network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: xihong_erp_grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin2025}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # Provisioning 配置（自动配置数据源和仪表板）
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning
+      # 仪表板 JSON 文件
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3001:3000"
+    networks:
+      - erp_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Node Exporter（系统指标）
+  # ⚠️ Windows 不支持：无法挂载根文件系统
+  # Node Exporter 主要用于 Linux 系统监控，在 Windows 环境下无法正常工作
+  # 如果需要系统指标监控，请在 Linux 服务器上运行 Node Exporter
+  # 当前环境：Windows 开发/部署环境，已禁用
+  # node-exporter:
+  #   image: prom/node-exporter:latest
+  #   container_name: xihong-node-exporter
+  #   command:
+  #     - '--path.rootfs=/host'
+  #   volumes:
+  #     - '/:/host:ro,rslave'
+  #   networks:
+  #     - xihong_erp_network
+  #   restart: unless-stopped
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '0.25'
+  #         memory: 128M
+  #       reservations:
+  #         cpus: '0.1'
+  #         memory: 64M
+
+# ⚠️ 重要：网络配置
+# 使用主 docker-compose.yml 中定义的统一网络
+# 确保先启动主服务创建网络
+networks:
+  erp_network:
+    external: true
+    name: xihong_erp_erp_network
+
+volumes:
+  prometheus-data:
+    driver: local
+  alertmanager-data:
+    driver: local
+  grafana-data:
+    driver: local
+

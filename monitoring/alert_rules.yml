@@ -1,0 +1,241 @@
+# Prometheus告警规则
+
+groups:
+  # 系统资源告警
+  - name: system_alerts
+    interval: 30s
+    rules:
+      # CPU使用率过高
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "高CPU使用率 (实例 {{ $labels.instance }})"
+          description: "CPU使用率为 {{ $value }}%，超过80%阈值"
+
+      # 内存使用率过高
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "高内存使用率 (实例 {{ $labels.instance }})"
+          description: "内存使用率为 {{ $value }}%，超过85%阈值"
+
+      # 磁盘空间不足
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "磁盘空间不足 (实例 {{ $labels.instance }})"
+          description: "可用磁盘空间仅剩 {{ $value }}%"
+
+  # 应用服务告警
+  - name: application_alerts
+    interval: 30s
+    rules:
+      # 后端服务宕机
+      - alert: BackendDown
+        expr: up{job="backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "后端服务宕机 (实例 {{ $labels.instance }})"
+          description: "后端服务已宕机超过1分钟"
+
+      # 前端服务宕机
+      - alert: FrontendDown
+        expr: up{job="frontend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "前端服务宕机 (实例 {{ $labels.instance }})"
+          description: "前端服务已宕机超过1分钟"
+
+      # 响应时间过长
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "响应时间过长 (实例 {{ $labels.instance }})"
+          description: "95%请求响应时间超过1秒"
+
+      # 错误率过高
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) * 100 > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "错误率过高 (实例 {{ $labels.instance }})"
+          description: "5xx错误率为 {{ $value }}%，超过5%阈值"
+
+  # 数据库告警
+  - name: database_alerts
+    interval: 30s
+    rules:
+      # PostgreSQL宕机
+      - alert: PostgresDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL宕机"
+          description: "PostgreSQL数据库已宕机超过1分钟"
+
+      # 数据库连接数过高
+      - alert: HighDatabaseConnections
+        expr: pg_stat_database_numbackends / pg_settings_max_connections * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据库连接数过高"
+          description: "数据库连接使用率为 {{ $value }}%，超过80%阈值"
+
+      # 慢查询过多
+      - alert: TooManySlowQueries
+        expr: rate(pg_stat_activity_count{state="active"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "慢查询过多"
+          description: "活跃查询数量为 {{ $value }}，可能存在慢查询"
+
+  # Redis告警
+  - name: redis_alerts
+    interval: 30s
+    rules:
+      # Redis宕机
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis宕机"
+          description: "Redis服务已宕机超过1分钟"
+
+      # Redis内存使用率过高
+      - alert: HighRedisMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis内存使用率过高"
+          description: "Redis内存使用率为 {{ $value }}%，超过90%阈值"
+
+  # 业务指标告警
+  - name: business_alerts
+    interval: 60s
+    rules:
+      # 数据采集失败
+      - alert: DataCollectionFailure
+        expr: rate(data_collection_failed_total[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据采集失败率过高"
+          description: "数据采集失败率为 {{ $value }}/秒"
+
+      # 批量导入失败
+      - alert: BatchImportFailure
+        expr: rate(batch_import_failed_total[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "批量导入失败率过高"
+          description: "批量导入失败率为 {{ $value }}/秒"
+
+  # Celery 任务队列告警
+  - name: celery_alerts
+    interval: 30s
+    rules:
+      # 任务失败率告警
+      # ⚠️ 注意：指标名称可能需要根据实际 Celery Exporter 版本调整
+      - alert: HighCeleryTaskFailureRate
+        expr: |
+          rate(celery_tasks_total{state="failed"}[5m]) /
+          rate(celery_tasks_total{state="received"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: celery
+        annotations:
+          summary: "Celery 任务失败率过高"
+          description: "任务失败率 {{ $value | humanizePercentage }}，超过阈值 10%（初始阈值，需根据实际情况调整）"
+
+      # 任务队列长度告警
+      # ⚠️ 注意：如果 celery_queue_length 指标不存在，可能需要使用其他指标
+      - alert: HighCeleryQueueLength
+        expr: |
+          # 方案 A：如果存在 celery_queue_length 指标
+          celery_queue_length > 100
+          # 方案 B：如果不存在，使用任务总数估算（需要根据实际情况调整）
+          # sum(celery_tasks_total{state="pending"}) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: celery
+        annotations:
+          summary: "Celery 任务队列长度过高"
+          description: "队列长度 {{ $value }}，超过阈值 100（初始阈值，需根据实际情况调整）"
+
+      # 任务执行时间告警
+      # ⚠️ 注意：如果 celery_task_duration_seconds 指标不存在，可能需要使用其他指标
+      - alert: HighCeleryTaskExecutionTime
+        expr: |
+          # 方案 A：如果存在 histogram 指标
+          histogram_quantile(0.95,
+            rate(celery_task_duration_seconds_bucket[10m])
+          ) > 1800
+          # 方案 B：如果不存在 histogram，使用 summary 指标（需要根据实际情况调整）
+          # celery_task_duration_seconds{quantile="0.95"} > 1800
+        for: 10m
+        labels:
+          severity: warning
+          component: celery
+        annotations:
+          summary: "Celery 任务执行时间过长"
+          description: "P95 执行时间 {{ $value }}s，超过阈值 1800s（初始阈值，需根据实际情况调整）"
+
+      # Worker 状态告警
+      - alert: CeleryWorkerDown
+        expr: up{job="celery"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: celery
+        annotations:
+          summary: "Celery Worker 离线"
+          description: "Celery Exporter 无法连接，Worker 可能已离线"
+
+      # Redis 连接失败告警
+      # ⚠️ 注意：如果 celery_broker_connection_failures_total 指标不存在，可能需要使用其他指标
+      - alert: CeleryRedisConnectionFailed
+        expr: |
+          # 方案 A：如果存在连接失败指标
+          celery_broker_connection_failures_total > 0
+          # 方案 B：如果不存在，使用 Exporter 状态（需要根据实际情况调整）
+          # up{job="celery"} == 0
+        for: 0m
+        labels:
+          severity: critical
+          component: celery
+        annotations:
+          summary: "Celery Redis 连接失败"
+          description: "Redis 连接失败次数 {{ $value }}"

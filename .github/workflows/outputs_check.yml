@@ -1,0 +1,28 @@
+name: Outputs Directory Health Check
+
+on:
+  push:
+    paths:
+      - 'temp/development/**'
+      - 'modules/utils/path_sanitizer.py'
+      - '.github/workflows/outputs_check.yml'
+  pull_request:
+    paths:
+      - '**/*'
+
+jobs:
+  check-outputs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run outputs directory health check
+        run: |
+          python temp/development/check_outputs_ci.py
+

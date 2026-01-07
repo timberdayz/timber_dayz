@@ -1,0 +1,198 @@
+# 西虹ERP系统 - 开发环境Docker Compose配置
+# 用于本地开发，启用热重载和调试功能
+# 使用方式: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  # 开发环境数据库配置覆盖
+  # ⭐ 统一使用与生产环境相同的数据库配置，避免数据库连接混乱
+  postgres:
+    ports:
+      # ⭐ 使用15432端口避免与本地PostgreSQL冲突（本地PostgreSQL通常在5432端口）
+      # 容器内部仍使用5432端口，容器间通信使用服务名 postgres:5432
+      - "15432:5432"
+
+  pgadmin:
+    environment:
+      PGADMIN_DEFAULT_EMAIL: dev@xihong.com
+      PGADMIN_DEFAULT_PASSWORD: dev123
+    ports:
+      - "5051:80"
+
+  # 后端开发配置（可选，通常本地运行）
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      # ⭐ 修复：Dockerfile.backend 没有定义 development stage，移除 target
+      # 开发环境主要靠 volumes 挂载源代码实现热重载
+    container_name: xihong_erp_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
+      REDIS_URL: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
+      DATABASE_ECHO: "true"
+      DEBUG: "true"
+      APP_ENV: development
+      # ⭐ 路径配置（修复容器内路径检测问题）
+      PROJECT_ROOT: /app
+      DATA_DIR: /app/data
+      DATA_RAW_DIR: /app/data/raw
+    volumes:
+      # 挂载源代码，支持热重载
+      - ./backend:/app/backend
+      - ./modules:/app/modules
+      - ./models:/app/models
+      - ./migrations:/app/migrations
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - erp_network
+    # ⭐ 现代化Docker Compose最佳实践：添加健康检查
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s # 给服务40秒启动时间
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    profiles:
+      - dev-full
+
+  # 前端开发配置（可选，通常本地运行）
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend
+      target: development
+    environment:
+      VITE_API_URL: http://localhost:8001
+    volumes:
+      # 挂载源代码，支持热重载
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5174:5173"
+    profiles:
+      - dev-full
+
+  # Redis缓存（开发环境）
+  redis:
+    image: redis:7-alpine
+    container_name: xihong_erp_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-~!Qq11}
+    volumes:
+      - redis_data_dev:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - erp_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-~!Qq11}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    profiles:
+      - dev
+      - dev-full
+
+  # Celery Worker（开发环境）
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      # ⭐ 修复：Dockerfile.backend 没有定义 development stage，移除 target
+      # 开发环境主要靠 volumes 挂载源代码实现热重载
+    container_name: xihong_erp_celery_worker
+    restart: unless-stopped
+    command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=4
+    environment:
+      DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
+      REDIS_URL: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
+      APP_ENV: development
+      DEBUG: "true"
+      # ⭐ 路径配置（修复容器内路径检测问题）
+      PROJECT_ROOT: /app
+      DATA_DIR: /app/data
+      DATA_RAW_DIR: /app/data/raw
+    volumes:
+      - ./backend:/app/backend
+      - ./modules:/app/modules
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - erp_network
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep '[c]elery.*worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    profiles:
+      - dev-full
+
+  # Nginx反向代理（开发环境测试）
+  nginx:
+    image: nginx:alpine
+    container_name: xihong_erp_nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+      - ./logs/nginx:/var/log/nginx
+    ports:
+      - "8081:80" # 使用 8081 端口，避免与 Metabase (8080) 冲突
+    networks:
+      - erp_network
+    # Linux 用户需要添加以下配置以支持 host.docker.internal
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+    # 注意：开发环境中后端和前端在本地运行，不需要 Docker 依赖
+    # depends_on 已移除，因为 Nginx 通过 host.docker.internal 访问本地服务
+    profiles:
+      - dev-nginx # 可选启动
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.25"
+          memory: 64M
+
+volumes:
+  redis_data_dev:
+    driver: local
+    name: xihong_erp_redis_data

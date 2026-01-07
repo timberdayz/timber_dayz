@@ -1,0 +1,148 @@
+name: Deploy to Staging
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline", "Docker Build and Push"]
+    types:
+      - completed
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (default: latest)'
+        required: false
+        type: string
+        default: 'latest'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
+  IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    environment:
+      name: staging
+      url: ${{ secrets.STAGING_URL || 'http://staging.example.com' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+
+      - name: Determine image tag
+        id: image-tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.workflow_run.head_branch }}" == "main" ]; then
+            echo "tag=main-latest" >> $GITHUB_OUTPUT
+          else
+            echo "tag=develop-latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy to staging server
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER || 'root' }}
+          STAGING_PATH: ${{ secrets.STAGING_PATH || '/opt/xihong_erp' }}
+          IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
+        run: |
+          ssh -o StrictHostKeyChecking=no ${STAGING_USER}@${STAGING_HOST} << 'ENDSSH'
+            set -e
+            cd ${STAGING_PATH}
+            
+            # 登录到容器仓库
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+            
+            # 拉取指定标签的镜像（如果不存在则使用 latest）
+            echo "Pulling images with tag: ${IMAGE_TAG}"
+            BACKEND_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG}"
+            FRONTEND_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG}"
+            
+            docker pull ${BACKEND_IMAGE} || docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:latest
+            docker pull ${FRONTEND_IMAGE} || docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:latest
+            
+            # 标记镜像为本地名称（用于 docker-compose）
+            docker tag ${BACKEND_IMAGE} xihong_erp_backend:latest 2>/dev/null || \
+            docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:latest xihong_erp_backend:latest
+            docker tag ${FRONTEND_IMAGE} xihong_erp_frontend:latest 2>/dev/null || \
+            docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:latest xihong_erp_frontend:latest
+            
+            # 使用 docker-compose 部署（测试环境使用 staging profile）
+            # 注意：docker-compose.prod.yml 使用 build，我们需要临时覆盖为 image
+            export APP_ENV=staging
+            export COMPOSE_PROJECT_NAME=xihong_erp
+            
+            # 创建临时 compose 文件，覆盖 build 为 image
+            cat > docker-compose.deploy.yml <<EOF
+            services:
+              backend:
+                image: xihong_erp_backend:latest
+              frontend:
+                image: xihong_erp_frontend:latest
+            EOF
+            
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d
+            
+            # 等待服务启动
+            sleep 10
+            
+            # 健康检查
+            for i in {1..30}; do
+              if curl -f http://localhost:8001/health > /dev/null 2>&1; then
+                echo "✅ Backend health check passed"
+                break
+              fi
+              if [ $i -eq 30 ]; then
+                echo "❌ Backend health check failed"
+                # 重新创建临时文件以查看日志
+                cat > docker-compose.deploy.yml <<EOF
+                services:
+                  backend:
+                    image: xihong_erp_backend:latest
+                  frontend:
+                    image: xihong_erp_frontend:latest
+                EOF
+                docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml logs backend
+                rm -f docker-compose.deploy.yml
+                exit 1
+              fi
+              echo "Waiting for backend... ($i/30)"
+              sleep 2
+            done
+            
+            # 清理临时文件
+            rm -f docker-compose.deploy.yml
+            
+            echo "✅ Deployment completed successfully"
+          ENDSSH
+
+      - name: Health check verification
+        run: |
+          STAGING_URL=${{ secrets.STAGING_URL || 'http://staging.example.com' }}
+          if curl -f ${STAGING_URL}/health > /dev/null 2>&1; then
+            echo "✅ Health check passed"
+          else
+            echo "❌ Health check failed"
+            exit 1
+          fi
+
+      - name: Send deployment notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Staging deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+

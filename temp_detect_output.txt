@@ -1,0 +1,625 @@
+﻿[*] 扫描路径: backend
+
+================================================================================
+同步数据库调用检测报告
+================================================================================
+
+总计发现 437 个问题:
+  - CRITICAL (阻塞): 15
+  - WARNING (警告): 215
+  - INFO (建议): 207
+
+========================================
+CRITICAL (15 个)
+========================================
+
+backend\apply_migrations.py:
+  Line 49: async def 中直接创建 SessionLocal()
+
+backend\main.py:
+  Line 212: async def 中直接创建 SessionLocal()
+
+backend\models\database.py:
+  Line 197: async def 中使用 db.query()
+  Line 206: async def 中直接创建 SessionLocal()
+
+backend\routers\data_sync.py:
+  Line 767: async def 中直接创建 SessionLocal()
+  Line 1787: async def 中直接创建 SessionLocal()
+  Line 1825: async def 中使用 db.query()
+  Line 1839: async def 中使用 db.query()
+
+backend\services\collection_scheduler.py:
+  Line 423: async def 中直接创建 SessionLocal()
+
+backend\services\dynamic_column_manager.py:
+  Line 298: async def 中直接创建 SessionLocal()
+
+backend\services\platform_table_manager.py:
+  Line 438: async def 中直接创建 SessionLocal()
+
+backend\services\raw_data_importer.py:
+  Line 1164: async def 中直接创建 SessionLocal()
+
+backend\simple_test.py:
+  Line 23: async def 中使用 db.query()
+  Line 26: async def 中使用 db.query()
+  Line 91: async def 中使用 db.query()
+
+========================================
+WARNING (215 个)
+========================================
+
+backend\routers\account_alignment.py:
+  Line 582: 可能的同步 db.commit()
+  Line 588: 可能的同步 db.rollback()
+  Line 620: 可能的同步 db.commit()
+  Line 626: 可能的同步 db.rollback()
+
+backend\routers\account_management.py:
+  Line 105: 可能的同步 db.commit()
+  Line 220: 可能的同步 db.commit()
+  Line 245: 可能的同步 db.commit()
+  Line 307: 可能的同步 db.commit()
+  Line 393: 可能的同步 db.commit()
+
+backend\routers\auth.py:
+  Line 125: 可能的同步 db.commit()
+  Line 219: 可能的同步 db.commit()
+  Line 263: 可能的同步 db.commit()
+
+backend\routers\auto_ingest.py:
+  Line 848: 可能的同步 db.commit()
+  Line 881: 可能的同步 db.rollback()
+
+backend\routers\collection.py:
+  Line 151: 可能的同步 db.commit()
+  Line 192: 可能的同步 db.commit()
+  Line 212: 可能的同步 db.commit()
+  Line 359: 可能的同步 db.commit()
+  Line 375: 可能的同步 db.commit()
+  Line 464: 可能的同步 db.commit()
+  Line 507: 可能的同步 db.commit()
+  Line 518: 可能的同步 db.commit()
+  Line 556: 可能的同步 db.commit()
+  Line 803: 可能的同步 db.commit()
+  Line 1093: 可能的同步 db.commit()
+  Line 1111: 可能的同步 db.commit()
+  Line 1173: 可能的同步 db.commit()
+  Line 1193: 可能的同步 db.commit()
+
+backend\routers\component_recorder.py:
+  Line 803: 可能的同步 db.commit()
+  Line 838: 可能的同步 db.commit()
+
+backend\routers\component_versions.py:
+  Line 75: 可能的同步 db.commit()
+  Line 80: 可能的同步 db.rollback()
+  Line 410: 可能的同步 db.commit()
+  Line 481: 可能的同步 db.commit()
+  Line 537: 可能的同步 db.commit()
+  Line 555: 可能的同步 db.rollback()
+  Line 740: 可能的同步 db.commit()
+  Line 756: 可能的同步 db.rollback()
+  Line 1038: 可能的同步 db.commit()
+
+backend\routers\config_management.py:
+  Line 213: 可能的同步 db.commit()
+  Line 237: 可能的同步 db.rollback()
+  Line 282: 可能的同步 db.commit()
+  Line 309: 可能的同步 db.rollback()
+  Line 325: 可能的同步 db.commit()
+  Line 334: 可能的同步 db.rollback()
+  Line 411: 可能的同步 db.commit()
+  Line 421: 可能的同步 db.rollback()
+  Line 564: 可能的同步 db.commit()
+  Line 574: 可能的同步 db.rollback()
+  Line 674: 可能的同步 db.commit()
+  Line 703: 可能的同步 db.rollback()
+  Line 832: 可能的同步 db.commit()
+  Line 851: 可能的同步 db.rollback()
+
+backend\routers\data_quarantine.py:
+  Line 443: 可能的同步 db.commit()
+  Line 514: 可能的同步 db.commit()
+  Line 546: 可能的同步 db.commit()
+  Line 559: 可能的同步 db.rollback()
+
+backend\routers\data_sync.py:
+  Line 550: 可能的同步 db.rollback()
+  Line 1159: 可能的同步 db.rollback()
+  Line 1183: 可能的同步 db.rollback()
+  Line 1847: 可能的同步 db.commit()
+  Line 1860: 可能的同步 db.rollback()
+
+backend\routers\field_mapping.py:
+  Line 307: 可能的同步 db.commit()
+  Line 1316: 可能的同步 db.commit()
+  Line 1371: 可能的同步 db.commit()
+  Line 1405: 可能的同步 db.rollback()
+  Line 2234: 可能的同步 db.commit()
+  Line 2248: 可能的同步 db.rollback()
+  Line 2375: 可能的同步 db.commit()
+  Line 2397: 可能的同步 db.rollback()
+
+backend\routers\field_mapping_dictionary.py:
+  Line 472: 可能的同步 db.commit()
+  Line 488: 可能的同步 db.rollback()
+  Line 607: 可能的同步 db.commit()
+  Line 612: 可能的同步 db.rollback()
+
+backend\routers\hr_management.py:
+  Line 256: 可能的同步 db.commit()
+  Line 264: 可能的同步 db.rollback()
+  Line 291: 可能的同步 db.commit()
+  Line 299: 可能的同步 db.rollback()
+  Line 322: 可能的同步 db.commit()
+  Line 329: 可能的同步 db.rollback()
+  Line 417: 可能的同步 db.commit()
+  Line 425: 可能的同步 db.rollback()
+  Line 451: 可能的同步 db.commit()
+  Line 459: 可能的同步 db.rollback()
+  Line 480: 可能的同步 db.commit()
+  Line 487: 可能的同步 db.rollback()
+  Line 585: 可能的同步 db.commit()
+  Line 593: 可能的同步 db.rollback()
+  Line 630: 可能的同步 db.commit()
+  Line 638: 可能的同步 db.rollback()
+  Line 659: 可能的同步 db.commit()
+  Line 666: 可能的同步 db.rollback()
+
+backend\routers\inventory_management.py:
+  Line 525: 可能的同步 db.commit()
+  Line 544: 可能的同步 db.rollback()
+  Line 592: 可能的同步 db.commit()
+  Line 604: 可能的同步 db.rollback()
+
+backend\routers\management.py:
+  Line 421: 可能的同步 db.commit()
+
+backend\routers\mv.py:
+  Line 111: 可能的同步 db.commit()
+  Line 117: 可能的同步 db.rollback()
+  Line 120: 可能的同步 db.commit()
+  Line 145: 可能的同步 db.rollback()
+
+backend\routers\performance_management.py:
+  Line 233: 可能的同步 db.commit()
+  Line 262: 可能的同步 db.rollback()
+  Line 323: 可能的同步 db.commit()
+  Line 352: 可能的同步 db.rollback()
+  Line 386: 可能的同步 db.commit()
+  Line 395: 可能的同步 db.rollback()
+  Line 656: 可能的同步 db.commit()
+  Line 670: 可能的同步 db.rollback()
+
+backend\routers\roles.py:
+  Line 56: 可能的同步 db.commit()
+  Line 150: 可能的同步 db.commit()
+  Line 220: 可能的同步 db.commit()
+
+backend\routers\sales_campaign.py:
+  Line 296: 可能的同步 db.commit()
+  Line 332: 可能的同步 db.rollback()
+  Line 390: 可能的同步 db.commit()
+  Line 426: 可能的同步 db.rollback()
+  Line 470: 可能的同步 db.commit()
+  Line 497: 可能的同步 db.rollback()
+  Line 580: 可能的同步 db.commit()
+  Line 594: 可能的同步 db.rollback()
+  Line 635: 可能的同步 db.commit()
+  Line 644: 可能的同步 db.rollback()
+  Line 689: 可能的同步 db.rollback()
+
+backend\routers\target_management.py:
+  Line 290: 可能的同步 db.commit()
+  Line 326: 可能的同步 db.rollback()
+  Line 384: 可能的同步 db.commit()
+  Line 420: 可能的同步 db.rollback()
+  Line 464: 可能的同步 db.commit()
+  Line 491: 可能的同步 db.rollback()
+  Line 630: 可能的同步 db.commit()
+  Line 652: 可能的同步 db.rollback()
+  Line 746: 可能的同步 db.rollback()
+
+backend\routers\users.py:
+  Line 80: 可能的同步 db.commit()
+  Line 214: 可能的同步 db.commit()
+  Line 279: 可能的同步 db.commit()
+  Line 308: 可能的同步 db.commit()
+
+backend\services\audit_service.py:
+  Line 58: 可能的同步 db.commit()
+  Line 63: 可能的同步 db.rollback()
+  Line 186: 可能的同步 db.commit()
+  Line 191: 可能的同步 db.rollback()
+  Line 257: 可能的同步 db.commit()
+  Line 262: 可能的同步 db.rollback()
+
+backend\services\auto_ingest_orchestrator.py:
+  Line 137: 可能的同步 db.commit()
+  Line 149: 可能的同步 db.commit()
+  Line 224: 可能的同步 db.commit()
+  Line 245: 可能的同步 db.commit()
+  Line 327: 可能的同步 db.commit()
+  Line 342: 可能的同步 db.commit()
+  Line 355: 可能的同步 db.commit()
+
+backend\services\collection_scheduler.py:
+  Line 505: 可能的同步 db.commit()
+
+backend\services\component_test_service.py:
+  Line 409: 可能的同步 db.commit()
+  Line 412: 可能的同步 db.commit()
+  Line 422: 可能的同步 db.rollback()
+  Line 424: 可能的同步 db.rollback()
+
+backend\services\data_ingestion_service.py:
+  Line 317: 可能的同步 db.commit()
+  Line 319: 可能的同步 db.commit()
+  Line 667: 可能的同步 db.commit()
+  Line 669: 可能的同步 db.commit()
+  Line 675: 可能的同步 db.rollback()
+  Line 682: 可能的同步 db.rollback()
+  Line 696: 可能的同步 db.commit()
+  Line 698: 可能的同步 db.commit()
+  Line 702: 可能的同步 db.rollback()
+  Line 704: 可能的同步 db.rollback()
+  Line 774: 可能的同步 db.commit()
+  Line 776: 可能的同步 db.commit()
+  Line 952: 可能的同步 db.rollback()
+  Line 954: 可能的同步 db.rollback()
+
+backend\services\data_sync_service.py:
+  Line 228: 可能的同步 db.commit()
+  Line 230: 可能的同步 db.commit()
+  Line 264: 可能的同步 db.commit()
+  Line 266: 可能的同步 db.commit()
+  Line 285: 可能的同步 db.commit()
+  Line 287: 可能的同步 db.commit()
+  Line 364: 可能的同步 db.commit()
+  Line 366: 可能的同步 db.commit()
+  Line 428: 可能的同步 db.commit()
+  Line 430: 可能的同步 db.commit()
+  Line 515: 可能的同步 db.commit()
+  Line 517: 可能的同步 db.commit()
+  Line 593: 可能的同步 db.commit()
+  Line 595: 可能的同步 db.commit()
+  Line 615: 可能的同步 db.rollback()
+  Line 617: 可能的同步 db.rollback()
+  Line 621: 可能的同步 db.commit()
+  Line 623: 可能的同步 db.commit()
+  Line 629: 可能的同步 db.rollback()
+  Line 636: 可能的同步 db.rollback()
+  Line 645: 可能的同步 db.commit()
+  Line 647: 可能的同步 db.commit()
+  Line 675: 可能的同步 db.rollback()
+  Line 682: 可能的同步 db.rollback()
+  Line 692: 可能的同步 db.commit()
+  Line 694: 可能的同步 db.commit()
+  Line 710: 可能的同步 db.rollback()
+  Line 712: 可能的同步 db.rollback()
+
+backend\services\order_amount_ingestion.py:
+  Line 221: 可能的同步 db.commit()
+  Line 225: 可能的同步 db.rollback()
+
+backend\services\raw_data_importer.py:
+  Line 1182: 可能的同步 db.commit()
+  Line 1185: 可能的同步 db.rollback()
+
+backend\services\sync_progress_tracker.py:
+  Line 103: 可能的同步 db.commit()
+  Line 110: 可能的同步 db.rollback()
+  Line 166: 可能的同步 db.commit()
+  Line 172: 可能的同步 db.rollback()
+  Line 192: 可能的同步 db.rollback()
+  Line 220: 可能的同步 db.rollback()
+  Line 230: 可能的同步 db.rollback()
+  Line 275: 可能的同步 db.commit()
+  Line 282: 可能的同步 db.rollback()
+  Line 307: 可能的同步 db.commit()
+  Line 311: 可能的同步 db.rollback()
+  Line 335: 可能的同步 db.commit()
+  Line 339: 可能的同步 db.rollback()
+  Line 388: 可能的同步 db.commit()
+  Line 396: 可能的同步 db.rollback()
+
+========================================
+INFO (207 个)
+========================================
+
+backend\alter_fact_sales_orders.py:
+  Line 103: db.execute() 调用
+
+backend\main.py:
+  Line 189: 使用 asyncio.create_task()
+
+backend\routers\account_alignment.py:
+  Line 140: db.execute() 调用
+  Line 454: db.execute() 调用
+  Line 508: db.execute() 调用
+  Line 561: db.execute() 调用
+  Line 606: db.execute() 调用
+
+backend\routers\account_management.py:
+  Line 70: db.execute() 调用
+  Line 145: db.execute() 调用
+  Line 163: db.execute() 调用
+  Line 184: db.execute() 调用
+  Line 238: db.execute() 调用
+  Line 270: db.execute() 调用
+  Line 343: db.execute() 调用
+
+backend\routers\auth.py:
+  Line 41: db.execute() 调用
+  Line 71: db.execute() 调用
+  Line 300: db.execute() 调用
+
+backend\routers\auto_ingest.py:
+  Line 458: db.execute() 调用
+  Line 463: db.execute() 调用
+  Line 479: db.execute() 调用
+  Line 484: db.execute() 调用
+  Line 505: db.execute() 调用
+  Line 510: db.execute() 调用
+  Line 527: db.execute() 调用
+  Line 607: db.execute() 调用
+  Line 786: db.execute() 调用
+
+backend\routers\collection.py:
+  Line 72: db.execute() 调用
+  Line 95: db.execute() 调用
+  Line 119: db.execute() 调用
+  Line 164: db.execute() 调用
+  Line 180: db.execute() 调用
+  Line 205: db.execute() 调用
+  Line 380: 使用 asyncio.create_task()
+  Line 417: db.execute() 调用
+  Line 428: db.execute() 调用
+  Line 443: db.execute() 调用
+  Line 480: db.execute() 调用
+  Line 534: db.execute() 调用
+  Line 573: db.execute() 调用
+  Line 585: db.execute() 调用
+  Line 606: db.execute() 调用
+  Line 672: db.execute() 调用
+  Line 680: db.execute() 调用
+  Line 709: db.execute() 调用
+  Line 719: db.execute() 调用
+  Line 738: db.execute() 调用
+  Line 790: db.execute() 调用
+  Line 852: db.execute() 调用
+  Line 1085: db.execute() 调用
+  Line 1187: db.execute() 调用
+
+backend\routers\component_versions.py:
+  Line 212: db.execute() 调用
+  Line 221: db.execute() 调用
+  Line 268: db.execute() 调用
+  Line 357: db.execute() 调用
+  Line 399: db.execute() 调用
+  Line 436: db.execute() 调用
+  Line 470: db.execute() 调用
+  Line 511: db.execute() 调用
+  Line 669: db.execute() 调用
+  Line 824: db.execute() 调用
+  Line 837: db.execute() 调用
+  Line 1256: db.execute() 调用
+  Line 1263: db.execute() 调用
+
+backend\routers\data_quality.py:
+  Line 135: db.execute() 调用
+  Line 289: db.execute() 调用
+
+backend\routers\data_quarantine.py:
+  Line 151: db.execute() 调用
+  Line 157: db.execute() 调用
+  Line 248: db.execute() 调用
+  Line 615: db.execute() 调用
+  Line 635: db.execute() 调用
+  Line 720: db.execute() 调用
+  Line 726: db.execute() 调用
+  Line 788: db.execute() 调用
+  Line 797: db.execute() 调用
+  Line 808: db.execute() 调用
+  Line 819: db.execute() 调用
+
+backend\routers\data_sync.py:
+  Line 222: db.execute() 调用
+  Line 235: db.execute() 调用
+  Line 964: db.execute() 调用
+  Line 1392: db.execute() 调用
+  Line 1427: db.execute() 调用
+  Line 1476: db.execute() 调用
+  Line 1806: db.execute() 调用
+  Line 1811: db.execute() 调用
+  Line 1843: db.execute() 调用
+
+backend\routers\field_mapping.py:
+  Line 294: db.execute() 调用
+  Line 325: db.execute() 调用
+  Line 687: db.execute() 调用
+  Line 1031: db.execute() 调用
+  Line 1656: db.execute() 调用
+  Line 1770: db.execute() 调用
+  Line 1798: db.execute() 调用
+  Line 2266: db.execute() 调用
+  Line 2353: db.execute() 调用
+
+backend\routers\field_mapping_dictionary.py:
+  Line 506: db.execute() 调用
+  Line 508: db.execute() 调用
+
+backend\routers\hr_management.py:
+  Line 198: db.execute() 调用
+  Line 367: db.execute() 调用
+  Line 528: db.execute() 调用
+  Line 701: db.execute() 调用
+  Line 740: db.execute() 调用
+  Line 775: db.execute() 调用
+
+backend\routers\inventory_management.py:
+  Line 566: db.execute() 调用
+  Line 685: db.execute() 调用
+  Line 695: db.execute() 调用
+  Line 707: db.execute() 调用
+  Line 713: db.execute() 调用
+  Line 776: db.execute() 调用
+
+backend\routers\management.py:
+  Line 182: db.execute() 调用
+  Line 193: db.execute() 调用
+  Line 199: db.execute() 调用
+  Line 216: db.execute() 调用
+  Line 377: db.execute() 调用
+  Line 409: db.execute() 调用
+
+backend\routers\mv.py:
+  Line 62: db.execute() 调用
+  Line 110: db.execute() 调用
+  Line 119: db.execute() 调用
+  Line 128: db.execute() 调用
+  Line 221: db.execute() 调用
+  Line 231: db.execute() 调用
+
+backend\routers\performance_management.py:
+  Line 131: db.execute() 调用
+  Line 137: db.execute() 调用
+  Line 433: db.execute() 调用
+  Line 439: db.execute() 调用
+  Line 499: db.execute() 调用
+
+backend\routers\roles.py:
+  Line 37: db.execute() 调用
+  Line 105: db.execute() 调用
+  Line 132: db.execute() 调用
+  Line 179: db.execute() 调用
+
+backend\routers\sales_campaign.py:
+  Line 153: db.execute() 调用
+  Line 159: db.execute() 调用
+  Line 208: db.execute() 调用
+
+backend\routers\target_management.py:
+  Line 163: db.execute() 调用
+  Line 169: db.execute() 调用
+  Line 218: db.execute() 调用
+  Line 681: db.execute() 调用
+
+backend\routers\test_api.py:
+  Line 28: db.execute() 调用
+
+backend\routers\users.py:
+  Line 37: db.execute() 调用
+  Line 49: db.execute() 调用
+  Line 75: db.execute() 调用
+  Line 114: db.execute() 调用
+  Line 138: db.execute() 调用
+  Line 168: db.execute() 调用
+  Line 209: db.execute() 调用
+  Line 246: db.execute() 调用
+  Line 294: db.execute() 调用
+
+backend\services\auto_ingest_orchestrator.py:
+  Line 446: db.execute() 调用
+
+backend\services\c_class_data_service.py:
+  Line 216: db.execute() 调用
+  Line 223: db.execute() 调用
+  Line 300: db.execute() 调用
+  Line 690: db.execute() 调用
+  Line 697: db.execute() 调用
+  Line 829: db.execute() 调用
+  Line 833: db.execute() 调用
+  Line 915: db.execute() 调用
+  Line 997: db.execute() 调用
+  Line 1018: db.execute() 调用
+
+backend\services\c_class_data_validator.py:
+  Line 176: db.execute() 调用
+  Line 274: db.execute() 调用
+  Line 418: db.execute() 调用
+
+backend\services\collection_scheduler.py:
+  Line 517: 使用 asyncio.create_task()
+
+backend\services\currency_converter.py:
+  Line 203: db.execute() 调用
+  Line 336: db.execute() 调用
+
+backend\services\data_importer.py:
+  Line 870: db.execute() 调用
+  Line 1086: db.execute() 调用
+  Line 1482: db.execute() 调用
+
+backend\services\data_loss_analyzer.py:
+  Line 247: db.execute() 调用
+  Line 270: db.execute() 调用
+
+backend\services\deduplication_service.py:
+  Line 92: db.execute() 调用
+  Line 95: db.execute() 调用
+  Line 340: db.execute() 调用
+  Line 342: db.execute() 调用
+
+backend\services\dynamic_column_manager.py:
+  Line 223: db.execute() 调用
+
+backend\services\field_mapping_dictionary_service.py:
+  Line 204: db.execute() 调用
+
+backend\services\field_mapping_template_service.py:
+  Line 179: db.execute() 调用
+
+backend\services\governance_stats.py:
+  Line 59: db.execute() 调用
+  Line 84: db.execute() 调用
+  Line 146: db.execute() 调用
+  Line 212: db.execute() 调用
+  Line 269: db.execute() 调用
+
+backend\services\pattern_matcher.py:
+  Line 87: db.execute() 调用
+
+backend\services\platform_table_manager.py:
+  Line 212: db.execute() 调用
+  Line 247: db.execute() 调用
+  Line 258: db.execute() 调用
+  Line 322: db.execute() 调用
+  Line 337: db.execute() 调用
+  Line 364: db.execute() 调用
+  Line 374: db.execute() 调用
+
+backend\services\raw_data_importer.py:
+  Line 532: db.execute() 调用
+  Line 573: db.execute() 调用
+  Line 583: db.execute() 调用
+  Line 597: db.execute() 调用
+  Line 605: db.execute() 调用
+  Line 658: db.execute() 调用
+  Line 665: db.execute() 调用
+  Line 893: db.execute() 调用
+  Line 1005: db.execute() 调用
+  Line 1023: db.execute() 调用
+
+backend\services\sync_point_service.py:
+  Line 47: db.execute() 调用
+
+backend\services\sync_progress_tracker.py:
+  Line 361: db.execute() 调用
+
+backend\services\template_matcher.py:
+  Line 123: db.execute() 调用
+  Line 126: db.execute() 调用
+  Line 154: db.execute() 调用
+  Line 157: db.execute() 调用
+  Line 369: db.execute() 调用
+  Line 372: db.execute() 调用
+
+backend\tasks\auto_repair_files.py:
+  Line 83: 使用 asyncio.create_task()
+
+================================================================================
+建议: 按 CRITICAL > WARNING > INFO 的优先级修复
+================================================================================

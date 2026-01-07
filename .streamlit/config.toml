@@ -1,0 +1,26 @@
+[server]
+# 允许所有IP访问
+headless = true
+port = 8501
+address = "0.0.0.0"
+
+# 禁用文件监控（生产环境）
+fileWatcherType = "none"
+
+# 启用CORS
+enableCORS = false
+enableXsrfProtection = false
+
+# 最大上传文件大小
+maxUploadSize = 200
+
+[browser]
+# 禁用自动打开浏览器
+gatherUsageStats = false
+
+[theme]
+# 自定义主题
+primaryColor = "#FF6B6B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"

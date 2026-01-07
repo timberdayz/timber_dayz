@@ -1,0 +1,284 @@
+/**
+ * 企业级ERP页面布局标准
+ * 设计参考：SAP Fiori、Oracle EBS、金蝶云星空
+ * 版本：v4.9.3
+ * 最后更新：2025-11-05
+ */
+
+/* ========================================
+   页面容器标准
+   ======================================== */
+
+/* 主页面容器（最大宽度限制） */
+.erp-page-container {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+/* 内容区域容器 */
+.erp-content-container {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* 宽表格容器（数据浏览器等） */
+.erp-wide-container {
+  max-width: 1800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* ========================================
+   表格标准
+   ======================================== */
+
+/* 表格容器：支持横向滚动 */
+.erp-table-container {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+/* 表格样式优化 */
+.erp-table {
+  width: 100%;
+  min-width: 100%;
+}
+
+/* 单元格文本溢出处理 */
+.erp-table .el-table .cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Tooltip提示（完整内容） */
+.erp-table .el-table__body .el-tooltip {
+  width: 100%;
+}
+
+/* 固定列阴影增强（更明显的视觉分隔） */
+.erp-table .el-table__fixed-right {
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+}
+
+.erp-table .el-table__fixed-left {
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+}
+
+/* ========================================
+   列宽度标准（参考SAP Fiori）
+   ======================================== */
+
+/* 超小列（复选框、序号）*/
+.col-xs {
+  width: 60px;
+  min-width: 60px;
+}
+
+/* 小列（ID、状态标签）*/
+.col-sm {
+  width: 100px;
+  min-width: 100px;
+}
+
+/* 中列（SKU、日期、金额）*/
+.col-md {
+  width: 150px;
+  min-width: 150px;
+}
+
+/* 大列（产品名称、地址）*/
+.col-lg {
+  width: 250px;
+  min-width: 250px;
+}
+
+/* 超大列（描述、备注）*/
+.col-xl {
+  width: 300px;
+  min-width: 300px;
+}
+
+/* 操作列 */
+.col-actions {
+  width: 180px;
+  min-width: 180px;
+}
+
+/* ========================================
+   响应式断点（参考Element Plus）
+   ======================================== */
+
+/* 超小屏（手机）< 768px */
+@media (max-width: 768px) {
+  .erp-page-container {
+    max-width: 100%;
+    padding: 10px;
+  }
+  
+  /* 表格简化显示 */
+  .erp-table .el-table__column {
+    min-width: 100px !important;
+  }
+  
+  /* 隐藏次要列 */
+  .col-optional {
+    display: none;
+  }
+}
+
+/* 小屏（平板）768px - 1024px */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .erp-page-container {
+    max-width: 100%;
+    padding: 15px;
+  }
+}
+
+/* 中屏（笔记本）1024px - 1440px */
+@media (min-width: 1024px) and (max-width: 1440px) {
+  .erp-page-container {
+    max-width: 1400px;
+  }
+}
+
+/* 大屏（台式机）1440px - 1920px */
+@media (min-width: 1440px) and (max-width: 1920px) {
+  .erp-page-container {
+    max-width: 1600px;
+  }
+}
+
+/* 超大屏（4K）> 1920px */
+@media (min-width: 1920px) {
+  .erp-page-container {
+    max-width: 1800px;
+  }
+  
+  /* 可以显示更多列 */
+  .erp-table .col-optional {
+    display: table-cell;
+  }
+}
+
+/* ========================================
+   卡片和面板标准
+   ======================================== */
+
+/* 卡片间距 */
+.erp-card {
+  margin-bottom: 20px;
+}
+
+.erp-card-compact {
+  margin-bottom: 16px;
+}
+
+/* 面板内边距 */
+.erp-panel {
+  padding: 24px;
+}
+
+.erp-panel-compact {
+  padding: 16px;
+}
+
+/* ========================================
+   表单标准
+   ======================================== */
+
+/* 表单容器 */
+.erp-form-container {
+  max-width: 800px;  /* 表单不宜过宽 */
+}
+
+/* 表单项间距 */
+.erp-form .el-form-item {
+  margin-bottom: 20px;
+}
+
+/* ========================================
+   详情抽屉标准
+   ======================================== */
+
+/* 侧边详情抽屉（固定宽度） */
+.erp-drawer-detail {
+  width: 600px;
+}
+
+.erp-drawer-wide {
+  width: 800px;
+}
+
+.erp-drawer-full {
+  width: 1000px;
+}
+
+/* ========================================
+   数据密度控制
+   ======================================== */
+
+/* 紧凑模式（数据浏览器）*/
+.erp-compact .el-table {
+  font-size: 13px;
+}
+
+.erp-compact .el-table td,
+.erp-compact .el-table th {
+  padding: 8px 0;
+}
+
+/* 舒适模式（默认）*/
+.erp-comfortable .el-table td,
+.erp-comfortable .el-table th {
+  padding: 12px 0;
+}
+
+/* 宽松模式（表单）*/
+.erp-spacious .el-table td,
+.erp-comfortable .el-table th {
+  padding: 16px 0;
+}
+
+/* ========================================
+   滚动条美化（Windows兼容）
+   ======================================== */
+
+/* 横向滚动条 */
+.erp-table-container::-webkit-scrollbar {
+  height: 8px;
+}
+
+.erp-table-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.erp-table-container::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.erp-table-container::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* ========================================
+   性能优化
+   ======================================== */
+
+/* 虚拟滚动支持（大数据量）*/
+.erp-table-virtual {
+  height: 600px;
+  overflow-y: auto;
+}
+
+/* GPU加速 */
+.erp-table-fixed {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+

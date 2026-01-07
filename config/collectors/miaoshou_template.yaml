@@ -1,0 +1,218 @@
+# 妙手ERP采集器配置模板
+# 文件名: miaoshou_template.yaml
+# 用途: 妙手ERP平台数据采集配置
+
+platform_name: "miaoshou"
+platform_display_name: "妙手ERP"
+version: "1.0.0"
+
+# 基础连接配置
+connection:
+  base_url: "https://erp.91miaoshou.com"
+  login_url: "https://erp.91miaoshou.com/login"
+  dashboard_url: "https://erp.91miaoshou.com/dashboard"
+  timeout: 60
+  retry_times: 3
+  retry_delay: 5
+
+# 认证配置
+authentication:
+  username_field: "input[name='username']"
+  password_field: "input[name='password']"
+  login_button: "button[type='submit']"
+  captcha_field: "input[name='captcha']"
+  session_timeout: 3600
+
+# 数据采集配置
+data_collection:
+  # 采集频率（秒）
+  update_frequency: 3600
+  
+  # 数据范围（天）
+  data_range_days: 7
+  
+  # 数据类型开关
+  data_types:
+    orders: true
+    products: true
+    customers: false
+    inventory: false
+    finance: true
+    analytics: true
+
+# 页面元素选择器
+selectors:
+  # 登录页面
+  login:
+    username_input: "input[name='username']"
+    password_input: "input[name='password']"
+    login_button: "button[type='submit']"
+    error_message: ".error-message"
+    success_indicator: ".dashboard-container"
+
+  # 仪表板页面
+  dashboard:
+    visitor_count: ".visitor-stats .count"
+    page_views: ".page-views .count"
+    order_count: ".order-stats .count"
+    revenue_amount: ".revenue-stats .amount"
+    conversion_rate: ".conversion-rate .value"
+
+  # 订单页面
+  orders:
+    order_list: ".order-list-container"
+    order_item: ".order-item"
+    order_id: ".order-id"
+    order_amount: ".order-amount"
+    order_status: ".order-status"
+    order_date: ".order-date"
+    date_filter: ".date-filter select"
+    pagination: ".pagination"
+
+  # 商品页面
+  products:
+    product_list: ".product-list"
+    product_item: ".product-item"
+    product_name: ".product-name"
+    product_sku: ".product-sku"
+    product_price: ".product-price"
+    product_stock: ".product-stock"
+    product_status: ".product-status"
+
+  # 财务页面
+  finance:
+    revenue_chart: ".revenue-chart"
+    profit_chart: ".profit-chart"
+    expense_list: ".expense-list"
+    payment_methods: ".payment-methods"
+
+# 数据映射配置
+data_mapping:
+  # 订单字段映射
+  order_fields:
+    order_id: ["订单号", "Order ID", "order_id"]
+    order_amount: ["订单金额", "Amount", "total_amount"]
+    order_status: ["订单状态", "Status", "status"]
+    order_date: ["下单时间", "Order Date", "created_at"]
+    customer_name: ["买家姓名", "Customer", "buyer_name"]
+    product_name: ["商品名称", "Product", "product_title"]
+    quantity: ["数量", "Qty", "quantity"]
+    unit_price: ["单价", "Unit Price", "price"]
+
+  # 商品字段映射
+  product_fields:
+    product_name: ["商品名称", "Product Name", "title"]
+    product_sku: ["商品编码", "SKU", "sku"]
+    product_price: ["商品价格", "Price", "price"]
+    product_stock: ["库存数量", "Stock", "stock"]
+    product_status: ["商品状态", "Status", "status"]
+    category: ["商品分类", "Category", "category"]
+
+  # 状态映射
+  status_mapping:
+    "已支付": "paid"
+    "待支付": "pending"
+    "已发货": "shipped"
+    "已完成": "completed"
+    "已取消": "cancelled"
+    "正常": "active"
+    "下架": "inactive"
+
+# 错误处理配置
+error_handling:
+  # 重试策略
+  retry_strategy:
+    max_retries: 3
+    retry_delay: 5
+    exponential_backoff: true
+    
+  # 错误类型处理
+  error_types:
+    network_error:
+      action: "retry"
+      max_retries: 3
+    authentication_error:
+      action: "relogin"
+      max_retries: 1
+    element_not_found:
+      action: "wait_and_retry"
+      max_retries: 2
+    timeout_error:
+      action: "retry"
+      max_retries: 2
+
+# 性能配置
+performance:
+  # 页面加载超时
+  page_load_timeout: 30
+  
+  # 元素等待超时
+  element_wait_timeout: 10
+  
+  # 批量处理大小
+  batch_size: 50
+  
+  # 并发请求数
+  max_concurrent_requests: 3
+
+# 日志配置
+logging:
+  level: "INFO"
+  file_path: "logs/miaoshou_collector.log"
+  max_file_size: "10MB"
+  backup_count: 5
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# 数据存储配置
+storage:
+  # 数据库配置
+  database:
+    type: "sqlite"
+    path: "data/miaoshou_data.db"
+    backup_enabled: true
+    cleanup_days: 30
+  
+  # 文件存储配置
+  file_storage:
+    enabled: true
+    format: "csv"
+    path: "data/exports"
+    compression: false
+
+# 通知配置
+notifications:
+  enabled: false
+  email:
+    smtp_server: ""
+    smtp_port: 587
+    username: ""
+    password: ""
+    recipients: []
+  
+  webhook:
+    url: ""
+    headers: {}
+
+# 高级配置
+advanced:
+  # 代理配置
+  proxy:
+    enabled: false
+    proxy_url: ""
+    proxy_auth: null
+  
+  # 浏览器配置
+  browser:
+    headless: true
+    window_size: "1920,1080"
+    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    
+  # 数据验证
+  validation:
+    enabled: true
+    required_fields: ["order_id", "order_amount", "order_date"]
+    data_types:
+      order_id: "string"
+      order_amount: "float"
+      order_date: "datetime"
+

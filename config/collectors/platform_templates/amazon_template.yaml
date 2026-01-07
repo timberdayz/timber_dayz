@@ -1,0 +1,277 @@
+# Amazon采集器配置模板
+# 文件名: amazon_template.yaml
+# 用途: Amazon平台数据采集配置模板
+# 注意: 请根据实际需求修改配置参数
+
+platform_name: "amazon"
+platform_display_name: "Amazon"
+version: "1.0.0"
+enabled: false
+
+# 基础连接配置
+connection:
+  base_url: "https://sellercentral.amazon.com"
+  login_url: "https://sellercentral.amazon.com/signin"
+  dashboard_url: "https://sellercentral.amazon.com/homepage"
+  timeout: 60
+  retry_times: 3
+  retry_delay: 5
+
+# 认证配置
+authentication:
+  username_field: "input[name='email']"
+  password_field: "input[name='password']"
+  login_button: "input[type='submit']"
+  captcha_field: "input[name='captcha']"
+  session_timeout: 3600
+  requires_2fa: true
+  two_fa_field: "input[name='otp']"
+
+# 数据采集配置
+data_collection:
+  # 采集频率（秒）
+  update_frequency: 3600
+  
+  # 数据范围（天）
+  data_range_days: 7
+  
+  # 数据类型开关
+  data_types:
+    orders: true
+    products: true
+    customers: false
+    inventory: true
+    finance: true
+    analytics: true
+    advertising: false
+    fulfillment: false
+
+# 页面元素选择器
+selectors:
+  # 登录页面
+  login:
+    username_input: "input[name='email']"
+    password_input: "input[name='password']"
+    login_button: "input[type='submit']"
+    error_message: ".error-message"
+    success_indicator: ".dashboard-container"
+    two_fa_input: "input[name='otp']"
+    two_fa_submit: "button[type='submit']"
+
+  # 仪表板页面
+  dashboard:
+    visitor_count: ".visitor-stats .count"
+    page_views: ".page-views .count"
+    order_count: ".order-stats .count"
+    revenue_amount: ".revenue-stats .amount"
+    conversion_rate: ".conversion-rate .value"
+
+  # 订单页面
+  orders:
+    order_list: ".order-list-container"
+    order_item: ".order-item"
+    order_id: ".order-id"
+    order_amount: ".order-amount"
+    order_status: ".order-status"
+    order_date: ".order-date"
+    date_filter: ".date-filter select"
+    pagination: ".pagination"
+    export_button: "button[data-action='export']"
+
+  # 商品页面
+  products:
+    product_list: ".product-list-container"
+    product_item: ".product-item"
+    product_id: ".product-id"
+    product_name: ".product-name"
+    product_price: ".product-price"
+    product_status: ".product-status"
+    inventory_level: ".inventory-level"
+    category: ".product-category"
+
+  # 库存页面
+  inventory:
+    inventory_table: ".inventory-table"
+    stock_level: ".stock-level"
+    reorder_point: ".reorder-point"
+    supplier_info: ".supplier-info"
+    warehouse_location: ".warehouse-location"
+
+  # 财务页面
+  finance:
+    revenue_summary: ".revenue-summary"
+    payment_history: ".payment-history"
+    fee_breakdown: ".fee-breakdown"
+    tax_information: ".tax-information"
+    payout_schedule: ".payout-schedule"
+
+  # 分析页面
+  analytics:
+    sales_chart: ".sales-chart"
+    traffic_metrics: ".traffic-metrics"
+    conversion_data: ".conversion-data"
+    performance_metrics: ".performance-metrics"
+
+# 数据导出配置
+export:
+  # 支持的文件格式
+  supported_formats:
+    - "csv"
+    - "excel"
+    - "json"
+  
+  # 默认导出格式
+  default_format: "csv"
+  
+  # 导出选项
+  options:
+    include_headers: true
+    date_format: "YYYY-MM-DD"
+    number_format: "0.00"
+    encoding: "utf-8"
+
+# 反检测配置
+anti_detection:
+  # 浏览器指纹
+  browser_fingerprint:
+    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    viewport: "1920x1080"
+    language: "en-US"
+    timezone: "America/New_York"
+  
+  # 请求间隔
+  request_delays:
+    min_delay: 2
+    max_delay: 5
+    random_delay: true
+  
+  # 代理配置
+  proxy:
+    enabled: false
+    rotation: false
+    proxy_list: []
+
+# 错误处理配置
+error_handling:
+  # 重试策略
+  retry_strategy:
+    max_retries: 3
+    retry_delay: 30
+    exponential_backoff: true
+  
+  # 错误恢复
+  error_recovery:
+    auto_restart: true
+    session_refresh: true
+    fallback_methods: true
+  
+  # 错误日志
+  error_logging:
+    log_all_errors: true
+    log_stack_traces: true
+    error_notifications: false
+
+# 性能优化配置
+performance:
+  # 并发控制
+  concurrency:
+    max_concurrent_requests: 1
+    request_queue_size: 10
+  
+  # 缓存配置
+  caching:
+    enable_cache: true
+    cache_ttl: 3600
+    cache_size: 1000
+  
+  # 数据压缩
+  compression:
+    enable_compression: true
+    compression_level: 6
+
+# 监控配置
+monitoring:
+  # 健康检查
+  health_check:
+    enabled: true
+    check_interval: 300
+    timeout: 30
+  
+  # 性能监控
+  performance_monitoring:
+    enabled: true
+    metrics_interval: 60
+    alert_thresholds:
+      response_time: 10
+      error_rate: 5
+      success_rate: 95
+
+# 通知配置
+notifications:
+  # 邮件通知
+  email:
+    enabled: false
+    smtp_server: ""
+    smtp_port: 587
+    username: ""
+    password: ""
+    recipients: []
+  
+  # Webhook通知
+  webhook:
+    enabled: false
+    webhook_url: ""
+    headers: {}
+  
+  # 通知事件
+  events:
+    - "collection_started"
+    - "collection_completed"
+    - "collection_failed"
+    - "system_error"
+    - "resource_warning"
+
+# 数据验证配置
+data_validation:
+  # 字段验证
+  field_validation:
+    required_fields: ["order_id", "order_date", "order_amount"]
+    field_types:
+      order_id: "string"
+      order_date: "date"
+      order_amount: "number"
+  
+  # 数据完整性检查
+  integrity_check:
+    enabled: true
+    check_duplicates: true
+    check_missing_values: true
+    check_data_range: true
+  
+  # 数据清洗
+  data_cleaning:
+    enabled: true
+    remove_duplicates: true
+    fill_missing_values: false
+    normalize_data: true
+
+# 安全配置
+security:
+  # 数据加密
+  encryption:
+    enabled: false
+    algorithm: "AES-256"
+    key_rotation: false
+  
+  # 访问控制
+  access_control:
+    ip_whitelist: []
+    user_authentication: true
+    session_management: true
+  
+  # 审计日志
+  audit_logging:
+    enabled: true
+    log_user_actions: true
+    log_data_access: true
+    retention_days: 90 

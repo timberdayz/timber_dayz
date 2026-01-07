@@ -1,0 +1,67 @@
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0
+openpyxl>=3.1.0
+xlrd==1.2.0
+
+# 数据库
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9  # PostgreSQL驱动（同步）
+asyncpg>=0.29.0  # PostgreSQL异步驱动（v4.18.2新增）
+aiosqlite>=0.19.0  # SQLite异步驱动（开发/测试环境，v4.18.2新增）
+alembic>=1.13.0  # 数据库迁移工具
+
+# 异步文件操作（v4.18.2新增）
+aiofiles>=23.0.0  # 异步文件I/O，优化上传/下载性能
+
+# 异步任务队列和缓存
+celery>=5.3.0  # 异步任务队列
+redis>=5.0.0  # Redis客户端
+apscheduler>=3.10.0  # 定时任务调度器（C类数据计算）
+
+# Web框架
+# Streamlit已移除 - 项目已迁移到Vue.js 3前端
+# streamlit>=1.28.0
+# streamlit-aggrid>=0.3.0
+# streamlit-antd-components>=0.3.0
+# streamlit-option-menu>=0.3.6
+
+# 系统监控
+psutil>=5.9.0
+
+# 数据可视化
+plotly>=5.15.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# 网络请求
+requests>=2.31.0
+httpx>=0.24.0  # 异步HTTP客户端（Metabase API调用需要）
+
+# 数据采集 (Playwright替代Selenium)
+playwright>=1.40.0
+
+# 配置管理
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# 日志记录
+loguru>=0.7.0
+
+# 加密和安全
+cryptography>=41.0.0
+PyJWT>=2.8.0  # JWT认证（阶段2新增）
+passlib>=1.7.4  # 密码加密（阶段2新增）
+python-multipart>=0.0.6  # 文件上传支持（阶段2新增）
+
+# 其他工具
+python-dateutil>=2.8.0
+pytz>=2023.3
+pynput>=1.8.0
+
+
+
+# HTML/Excel 伪装文件解析（orders 域 .xls→HTML）
+lxml>=5.0.0
+beautifulsoup4>=4.13.0
+html5lib>=1.1

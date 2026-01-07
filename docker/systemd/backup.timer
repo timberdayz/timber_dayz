@@ -1,0 +1,13 @@
+[Unit]
+Description=西虹ERP系统 - 数据备份定时器
+Requires=backup.service
+
+[Timer]
+# 每天凌晨 2 点执行
+OnCalendar=daily
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

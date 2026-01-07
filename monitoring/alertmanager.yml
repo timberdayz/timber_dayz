@@ -1,0 +1,86 @@
+# AlertManager 配置文件 - 西虹ERP系统告警管理
+#
+# ⚠️ 重要：AlertManager 不支持 ${VAR:-default} 语法
+# 如果需要使用环境变量，请手动编辑此文件，替换下面的配置值
+#
+# 需要配置的值：
+# - smtp_smarthost: SMTP 服务器地址和端口（如 smtp.example.com:587）
+# - smtp_from: 发件人邮箱（如 alerts@example.com）
+# - smtp_auth_username: SMTP 用户名（如 alerts@example.com）
+# - smtp_auth_password: SMTP 密码（敏感信息）
+# - 所有 email_configs 中的 to 字段：告警收件人邮箱
+
+global:
+  resolve_timeout: 5m
+  # SMTP 配置
+  # ⚠️ 需要手动编辑下面的配置值
+  smtp_smarthost: 'smtp.example.com:587'
+  smtp_from: 'alerts@example.com'
+  smtp_auth_username: 'alerts@example.com'
+  smtp_auth_password: 'your_smtp_password_here'
+
+# 路由规则
+route:
+  group_by: ['alertname', 'severity', 'component']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default'
+  routes:
+    # Critical 告警路由到 critical 接收器
+    - match:
+        severity: critical
+      receiver: 'critical'
+    # Warning 告警路由到 warning 接收器
+    - match:
+        severity: warning
+      receiver: 'warning'
+    # Celery 相关告警路由到 celery 接收器
+    - match:
+        component: celery
+      receiver: 'celery'
+
+# 接收器配置
+receivers:
+  - name: 'default'
+    email_configs:
+      - to: 'ops-team@example.com'
+        headers:
+          Subject: '[Xihong ERP] {{ .GroupLabels.alertname }}'
+
+  - name: 'critical'
+    email_configs:
+      - to: 'critical-alerts@example.com'
+        headers:
+          Subject: '[CRITICAL] [Xihong ERP] {{ .GroupLabels.alertname }}'
+    # 可选：添加 Webhook 通知
+    # webhook_configs:
+    #   - url: 'https://your-webhook-endpoint.com/critical'
+    #     send_resolved: true
+
+  - name: 'warning'
+    email_configs:
+      - to: 'warning-alerts@example.com'
+        headers:
+          Subject: '[WARNING] [Xihong ERP] {{ .GroupLabels.alertname }}'
+
+  - name: 'celery'
+    email_configs:
+      - to: 'celery-alerts@example.com'
+        headers:
+          Subject: '[Celery] [Xihong ERP] {{ .GroupLabels.alertname }}'
+    # 可选：添加即时消息通知
+    # webhook_configs:
+    #   - url: 'https://your-webhook-endpoint.com/celery'
+    #     send_resolved: true
+
+# 抑制规则（减少重复告警）
+inhibit_rules:
+  # 如果 Worker 离线，抑制其他 Celery 告警
+  - source_match:
+      severity: 'critical'
+      component: 'celery'
+      alertname: 'CeleryWorkerDown'
+    target_match:
+      component: 'celery'
+    equal: ['instance']

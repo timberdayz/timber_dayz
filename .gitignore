@@ -1,0 +1,167 @@
+# 安全配置文件 - 绝对不上传
+local_accounts.py
+local_accounts.json
+local_accounts.yaml
+real_accounts.*
+production_accounts.*
+*.local
+*.private
+secure_accounts.enc
+secure_account_key.key
+
+# 会话和OTP文件 - 包含敏感信息
+data/sessions/
+data/session_profiles/
+data/device_fingerprints/
+temp/outputs/otp_emails/
+
+# Playwright 持久化浏览器配置文件（可能很大）
+profiles/
+backend/profiles/
+*.ldb
+*.old
+
+# 安全目录 - 包含加密凭证
+security/
+!security/__init__.py
+!security/*.py
+
+# 环境变量文件
+.env
+.env.local
+.env.production
+
+# 日志文件和压缩日志
+*.log
+*.log.*
+*.zip
+logs/
+logs/**/*
+
+# 数据库文件和相关产物
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+data/**/*.db*
+data/unified_*.db*
+data/erp_system.db*
+data/sales_analytics.db*
+
+# 备份文件
+*.backup
+*.bak
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+
+# 临时文件和构建产物
+temp/
+tmp/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 前端依赖和构建产物
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# 下载和采集产物
+downloads/
+test_downloads/
+data/output/
+data/processed/
+data/temp/
+data/archive/
+data/backup/
+data/recordings/
+temp/outputs/
+processed_data/
+
+# 备份目录（保留README）
+backups/
+!backups/README.md
+!backups/**/README.md
+
+# IDE文件
+.vscode/settings.json
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 测试输出和报告
+test_export.json
+security_report_*.json
+*.report
+*.csv
+*.xlsx
+*.parquet
+
+# 数据文件（可能很大）
+data/**/*.json
+data/**/*.xls
+data/**/*.xlsx
+data/**/*.ole_backup
+!data/**/README.md
+
+# Playwright 相关
+playwright-report/
+test-results/
+.playwright/
+
+# 密钥和证书文件
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+account_key.key
+encrypted_fingerprints.key
+
+# 媒体文件
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.avi
+screenshots/
+temp/screenshots/
+temp/media/
+
+# 配置文件中的敏感部分
+config/**/accounts_config.yaml
+config/**/proxy_config.yaml
+config/platform_accounts/
+!config/**/*.example.yaml
+!config/**/*.template.yaml
+
+# Docker 相关（构建缓存和临时文件）
+.docker/
+docker-compose.override.yml
+
+# Python 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+
+# 其他大文件目录
+migration_temp/
+reports/charts/

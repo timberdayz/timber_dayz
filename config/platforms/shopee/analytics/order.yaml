@@ -1,0 +1,167 @@
+# Shopee 订单表现数据分析配置
+# 基于流量表现模板，适配订单表现页面
+
+metadata:
+  name: "订单表现"
+  type: "order"
+  version: "1.0.0"
+  description: "Shopee 订单表现数据分析页面配置"
+  url_path: "/datacenter/order/performance"
+
+# 页面导航配置
+navigation:
+  base_url: "https://seller.shopee.cn"
+  path: "/datacenter/order/performance"
+  query_params:
+    - "cnsc_shop_id"
+  
+  # 页面就绪探针（订单表现特有）
+  ready_probes:
+    - "[class*='chart']"
+    - ".order-performance-container"
+    - "div:has-text('订单分析')"
+    - "div:has-text('订单表现')"
+    - ".data-table"
+    - ".order-metrics"
+
+# 日期选择器配置（继承流量表现配置）
+date_picker:
+  # 打开日期选择器的触发器
+  open_selectors:
+    - "div.bi-date-input.track-click-open-time-selector"
+    - "div.bi-date-input"
+    - "div.date-picker-trigger"
+    - ".date-range-picker"
+    - "[data-testid*='date']"
+    - "div:has-text('统计时间')"
+    - "div:has-text('时间范围')"
+    - ".time-selector"
+  
+  # 日期面板容器
+  panel_selectors:
+    - ".eds-date-selector-panel"
+    - ".eds-date-picker__dropdown"
+    - ".eds-dropdown__content:has(.eds-date-shortcut-item)"
+    - ".eds-date-range-panel"
+    - "div:has(.eds-date-shortcut-item__text)"
+    - "div:has-text('昨天')"
+  
+  # 快捷时间选项（与流量表现相同）
+  quick_options:
+    yesterday:
+      - "昨天"
+      - "昨日"
+      - "Yesterday"
+    last_7_days:
+      - "过去7天"
+      - "过去 7 天"
+      - "过去7"
+      - "最近7天"
+      - "最近 7 天"
+      - "7天"
+      - "7 天"
+      - "Last 7 days"
+    last_30_days:
+      - "过去30天"
+      - "过去 30 天"
+      - "过去30"
+      - "最近30天"
+      - "最近 30 天"
+      - "30天"
+      - "30 天"
+      - "Last 30 days"
+  
+  # 快捷项选择器模板
+  option_selectors:
+    - ".eds-date-shortcut-item__text:has-text('{option}')"
+    - ".eds-date-shortcut-item:has-text('{option}')"
+    - "li:has-text('{option}')"
+    - "span:has-text('{option}')"
+    - "button:has-text('{option}')"
+    - "div:has-text('{option}')"
+
+# 数据导出配置
+export:
+  # 导出按钮选择器（订单表现可能有不同文案）
+  button_selectors:
+    - "button:has-text('导出数据')"
+    - "button:has-text('导出订单数据')"
+    - "button:has-text('Export Data')"
+    - "button:has-text('Export Orders')"
+    - "button:has-text('导出')"
+    - "button:has-text('Export')"
+    - ".export-button"
+    - "[data-testid*='export']"
+    - "button[class*='export']"
+  
+  # 下载按钮选择器
+  download_selectors:
+    - "button:has-text('下载')"
+    - "button:has-text('Download')"
+    - ".download-button"
+    - "[data-testid*='download']"
+  
+  # 导出状态检测
+  status_selectors:
+    - ".export-status"
+    - ".download-progress"
+    - "div:has-text('导出中')"
+    - "div:has-text('Exporting')"
+
+# 弹窗处理配置
+popups:
+  # 订单表现可能有特有的引导弹窗
+  notification_selectors:
+    - ".notification-modal"
+    - ".guide-modal"
+    - ".tips-modal"
+    - ".order-guide-modal"
+    - "div[role='dialog']:has-text('提示')"
+    - "div[role='dialog']:has-text('通知')"
+    - "div[role='dialog']:has-text('订单')"
+  
+  # 关闭按钮选择器
+  close_selectors:
+    - "button:has-text('知道了')"
+    - "button:has-text('确定')"
+    - "button:has-text('关闭')"
+    - ".modal-close"
+    - "[aria-label='Close']"
+    - ".close-button"
+
+# 录制模式配置
+recording:
+  env_var: "PW_RECORD_DATE_PICKER"
+  pause_message: "🟡 调试模式：即将打开 Playwright Inspector 并暂停在订单表现日期面板，请点击 Recording 后手动完成操作…"
+  pause_after: "date_panel_opened"
+
+# 验证配置
+validation:
+  # 时间范围验证选择器
+  time_display_selectors:
+    - ".time-range-display"
+    - ".date-range-text"
+    - "span:has-text('GMT')"
+    - ".selected-date-range"
+  
+  # 订单数据加载验证
+  data_loaded_selectors:
+    - ".chart-container"
+    - ".order-chart"
+    - ".data-table tbody tr"
+    - ".order-metrics"
+    - ".metrics-card"
+    - "[class*='loaded']"
+
+# 错误处理配置
+error_handling:
+  max_retries: 3
+  retry_delay: 1000
+  timeouts:
+    navigation: 30000
+    element_wait: 5000
+    download_wait: 30000
+  fallback_enabled: true
+  fallback_selectors:
+    date_picker: "input[type='date']"
+    export_button: "button[class*='btn']"

@@ -1,0 +1,15 @@
+[Unit]
+Description=西虹ERP系统 - 数据备份服务
+After=network.target docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/path/to/xihong_erp
+ExecStart=/bin/bash /path/to/xihong_erp/scripts/backup_all.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

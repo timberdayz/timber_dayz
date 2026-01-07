@@ -1,0 +1,43 @@
+{
+  "accounts": [
+    {
+      "account_id": "miaoshou_001",
+      "platform": "miaoshou",
+      "username": "user1",
+      "password": "pass1",
+      "proxy_ip": "192.168.1.100",
+      "proxy_port": null,
+      "proxy_username": null,
+      "proxy_password": null,
+      "daily_collection_limit": 100,
+      "hourly_collection_limit": 10,
+      "cooldown_period": 300
+    },
+    {
+      "account_id": "miaoshou_002",
+      "platform": "miaoshou",
+      "username": "user2",
+      "password": "pass2",
+      "proxy_ip": "192.168.1.101",
+      "proxy_port": null,
+      "proxy_username": null,
+      "proxy_password": null,
+      "daily_collection_limit": 100,
+      "hourly_collection_limit": 10,
+      "cooldown_period": 300
+    },
+    {
+      "account_id": "shopee_001",
+      "platform": "shopee",
+      "username": "user3",
+      "password": "pass3",
+      "proxy_ip": "192.168.1.102",
+      "proxy_port": null,
+      "proxy_username": null,
+      "proxy_password": null,
+      "daily_collection_limit": 100,
+      "hourly_collection_limit": 10,
+      "cooldown_period": 300
+    }
+  ]
+}

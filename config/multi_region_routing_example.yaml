@@ -1,0 +1,108 @@
+# 多国IP路由配置 - 全局VPN环境下的实际配置方案
+# 适用场景：开发环境使用全局VPN，需要智能分流不同地区流量
+
+regions:
+  # 新加坡 - 使用当前VPN(假设您的VPN是新加坡节点)
+  SG:
+    country_name: "新加坡"
+    proxy_config:
+      type: "direct"  # 直接使用当前VPN连接
+      # 或者如果您的VPN支持API切换节点：
+      # type: "vpn_api"
+      # endpoint: "sg.your-vpn-provider.com"
+    
+  # 印尼 - 需要专门的印尼代理
+  ID:
+    country_name: "印尼"
+    proxy_config:
+      type: "http"
+      host: "indonesia-proxy.provider.com"  # 替换为真实的印尼代理
+      port: 8080
+      username: "your_username"
+      password: "your_password"
+    
+  # 越南 - 需要专门的越南代理  
+  VN:
+    country_name: "越南"
+    proxy_config:
+      type: "socks5"
+      host: "vietnam-proxy.provider.com"    # 替换为真实的越南代理
+      port: 1080
+      username: "your_username"
+      password: "your_password"
+    
+  # 中国 - 绕过VPN使用原始IP
+  CN:
+    country_name: "中国"
+    proxy_config:
+      type: "bypass_vpn"     # 特殊类型：绕过VPN
+      method: "direct_china" # 直接使用中国IP
+      # 实现方式：
+      # 1. 添加路由规则绕过VPN
+      # 2. 或使用专门的中国IP出口
+
+# 平台路由映射
+platform_routing:
+  shopee_sg:
+    required_region: "SG"
+    domains: ["seller.shopee.sg", "shopee.sg"]
+    
+  shopee_id:
+    required_region: "ID" 
+    domains: ["seller.shopee.co.id", "shopee.co.id"]
+    
+  shopee_vn:
+    required_region: "VN"
+    domains: ["seller.shopee.vn", "shopee.vn"]
+    
+  miaoshou_erp:
+    required_region: "CN"
+    domains: ["erp.91miaoshou.com", "91miaoshou.com"]
+    bypass_vpn: true  # 强制绕过VPN使用中国IP
+
+# VPN环境检测与智能分流
+vpn_settings:
+  # 检测当前是否在VPN环境
+  detect_vpn: true
+  
+  # VPN绕过规则（适用于中国网站）
+  bypass_rules:
+    # 中国域名直接使用原始IP
+    china_domains:
+      - "*.91miaoshou.com"
+      - "*.1688.com" 
+      - "*.taobao.com"
+      - "*.tmall.com"
+    
+    # 中国IP段直接连接
+    china_ip_ranges:
+      - "116.0.0.0/8"
+      - "117.0.0.0/8"
+      - "118.0.0.0/8"
+      - "119.0.0.0/8"
+
+# 实际使用的代理服务商配置
+proxy_providers:
+  # 推荐的住宅代理服务商
+  residential_proxy:
+    provider: "smartproxy"  # 或 "bright_data", "oxylabs"
+    indonesia:
+      endpoint: "rotating-residential.smartproxy.com:10000"
+      username: "user-session-indonesia"
+      password: "your_password"
+    vietnam:
+      endpoint: "rotating-residential.smartproxy.com:10001" 
+      username: "user-session-vietnam"
+      password: "your_password"
+  
+  # 备用数据中心代理
+  datacenter_proxy:
+    provider: "proxy_cheap"
+    indonesia:
+      endpoint: "premium-datacenter.proxy-cheap.com:1080"
+      username: "user-country-id"
+      password: "your_password"
+    vietnam:
+      endpoint: "premium-datacenter.proxy-cheap.com:1081"
+      username: "user-country-vn" 
+      password: "your_password" 

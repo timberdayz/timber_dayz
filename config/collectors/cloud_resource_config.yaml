@@ -1,0 +1,14 @@
+browser_optimization:
+  disable_images: true
+  headless_mode: true
+  max_browser_instances: 1
+  slow_mo_milliseconds: 2000
+collection_management:
+  collection_mode: resource_safe
+  max_concurrent_collectors: 1
+  max_concurrent_tasks: 2
+resource_management:
+  cpu_warning_threshold: 60.0
+  max_cpu_usage_percent: 70.0
+  max_memory_usage_percent: 75.0
+  memory_warning_threshold: 65.0

@@ -1,0 +1,53 @@
+{
+  "proxies": [
+    {
+      "proxy_id": "proxy_001",
+      "ip": "192.168.1.100",
+      "port": 8080,
+      "proxy_type": "http",
+      "username": "proxy_user1",
+      "password": "proxy_pass1",
+      "country": "CN",
+      "region": "Beijing",
+      "city": "Beijing",
+      "daily_usage_limit": 1000,
+      "hourly_usage_limit": 100,
+      "cooldown_period": 60,
+      "bound_accounts": [
+        "miaoshou_001"
+      ]
+    },
+    {
+      "proxy_id": "proxy_002",
+      "ip": "192.168.1.101",
+      "port": 8080,
+      "proxy_type": "http",
+      "username": "proxy_user2",
+      "password": "proxy_pass2",
+      "country": "US",
+      "region": "California",
+      "city": "Los Angeles",
+      "daily_usage_limit": 1000,
+      "hourly_usage_limit": 100,
+      "cooldown_period": 60,
+      "bound_accounts": [
+        "shopee_001"
+      ]
+    },
+    {
+      "proxy_id": "proxy_003",
+      "ip": "192.168.1.102",
+      "port": 8080,
+      "proxy_type": "http",
+      "username": "proxy_user3",
+      "password": "proxy_pass3",
+      "country": "JP",
+      "region": "Tokyo",
+      "city": "Tokyo",
+      "daily_usage_limit": 1000,
+      "hourly_usage_limit": 100,
+      "cooldown_period": 60,
+      "bound_accounts": []
+    }
+  ]
+}

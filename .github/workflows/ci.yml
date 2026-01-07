@@ -1,0 +1,205 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.10, 3.11]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov black ruff mypy
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f pyproject.toml ]; then pip install -e .; fi
+
+      - name: Install Playwright browsers
+        run: |
+          pip install playwright
+          playwright install chromium
+
+      - name: Create test environment
+        run: |
+          mkdir -p data logs temp
+          cp .env.template .env
+          # 设置测试用的环境变量
+          echo "TEST_MODE=true" >> .env
+          echo "DATABASE_NAME=test_sales_analytics.db" >> .env
+          echo "ACCOUNT_ENCRYPTION_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')" >> .env
+
+      - name: Code formatting check
+        run: |
+          black --check --diff modules/ tests/ scripts/ || exit 1
+
+      - name: Linting
+        run: |
+          ruff check modules/ tests/ scripts/ || exit 1
+
+      - name: Type checking (critical modules only)
+        run: |
+          mypy modules/core/ --ignore-missing-imports || true
+
+      - name: Validate configurations
+        run: |
+          python scripts/validate_configs.py --ci
+
+      - name: Database Design Rules Validation
+        run: |
+          echo "🔍 Validating database design rules..."
+          python scripts/validate_code_compliance.py || exit 1
+          echo "✅ Database design rules validation passed"
+
+      - name: System Health Check
+        run: |
+          python health_check.py --ci
+
+      - name: Run contract tests
+        run: |
+          python modules/apps/account_manager/contract_tests.py
+          python modules/apps/collection_center/contract_tests.py
+          python modules/apps/web_interface_manager/contract_tests.py
+
+      - name: Run unified health check
+        run: |
+          python tests/test_unified_health_check.py
+
+      - name: Run pytest (if test files exist)
+        run: |
+          if [ -d "tests" ] && [ "$(find tests -name 'test_*.py' | wc -l)" -gt 0 ]; then
+            pytest tests/ -v --cov=modules --cov-report=xml
+          else
+            echo "No pytest test files found, skipping pytest"
+          fi
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.10'
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install security tools
+        run: |
+          pip install bandit safety
+
+      - name: Run Bandit security scan
+        run: |
+          bandit -r modules/ -f json -o bandit-report.json || true
+          bandit -r modules/ || true
+
+      - name: Check for known vulnerabilities
+        run: |
+          safety check --json || true
+
+      - name: Check for secrets in code
+        run: |
+          # 检查是否有硬编码的密钥或密码
+          if grep -r -i "password\|secret\|key\|token" modules/ --include="*.py" | grep -v "# noqa" | grep -v "test" | grep -v "example"; then
+            echo "⚠️ Found potential hardcoded secrets"
+            exit 1
+          fi
+
+  build-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Check project structure
+        run: |
+          # 验证关键目录和文件存在
+          test -d modules/core || (echo "Missing modules/core directory" && exit 1)
+          test -d modules/apps || (echo "Missing modules/apps directory" && exit 1)
+          test -f health_check.py || (echo "Missing health_check.py" && exit 1)
+          test -f .env.template || (echo "Missing .env.template" && exit 1)
+          echo "✅ Project structure check passed"
+
+      - name: Check for large files
+        run: |
+          # 检查是否有大文件被意外提交
+          find . -type f -size +10M -not -path "./.git/*" | while read file; do
+            echo "⚠️ Large file found: $file"
+          done
+
+      - name: Validate configuration files
+        run: |
+          # 验证YAML配置文件语法
+          python -c "
+          import yaml
+          import os
+          from pathlib import Path
+
+          config_dir = Path('config')
+          if config_dir.exists():
+              for yaml_file in config_dir.rglob('*.yaml'):
+                  try:
+                      with open(yaml_file, 'r', encoding='utf-8') as f:
+                          yaml.safe_load(f)
+                      print(f'✅ {yaml_file} syntax OK')
+                  except Exception as e:
+                      print(f'❌ {yaml_file} syntax error: {e}')
+                      exit(1)
+          else:
+              print('No config directory found, skipping YAML validation')
+          "
+
+  # ⭐ Phase 3.1: Docker 镜像构建（可选集成）
+  # 注意：镜像构建已在独立的 docker-build.yml 工作流中实现
+  # 如需在 CI 中自动触发，可取消下面的注释
+  # build-images:
+  #   needs: [test, security-scan, build-check]
+  #   if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+  #   uses: ./.github/workflows/docker-build.yml
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [test, security-scan, build-check]
+    if: always()
+    steps:
+      - name: Notify results
+        run: |
+          if [ "${{ needs.test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ] && [ "${{ needs.build-check.result }}" == "success" ]; then
+            echo "✅ All CI checks passed!"
+          else
+            echo "❌ Some CI checks failed"
+            echo "Test: ${{ needs.test.result }}"
+            echo "Security: ${{ needs.security-scan.result }}"
+            echo "Build: ${{ needs.build-check.result }}"
+          fi

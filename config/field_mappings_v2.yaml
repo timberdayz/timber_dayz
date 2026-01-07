@@ -1,0 +1,676 @@
+# =====================================================
+# 智能字段映射配置（v2.0 - 粒度感知版）
+# =====================================================
+# 版本：v2.0.0
+# 创建日期：2025-01-26
+# 作者：AI 专家级数据工程师
+#
+# 结构说明：
+# - 三级结构：平台（platform）→ 数据域（data_type）→ 粒度（granularity）
+# - 对于粒度不影响字段结构的数据域（如products、orders），使用 common 节点
+# - 对于粒度严重影响字段结构的数据域（如traffic、services），分别定义 daily/weekly/monthly 节点
+# - 每个字段映射包含多个候选列名（按优先级排序）
+#
+# 映射键格式：
+# - 无粒度影响：{platform}:{data_type} (例如: "miaoshou:orders")
+# - 有粒度影响：{platform}:{data_type}_{granularity} (例如: "tiktok:traffic_daily")
+# =====================================================
+
+# =====================================================
+# 妙手ERP平台字段映射
+# =====================================================
+miaoshou:
+  # 订单数据（粒度不影响字段结构）
+  orders:
+    common:
+      order_id:
+        - "订单号"
+        - "订单编号"
+        - "Order ID"
+        - "order_no"
+
+      product_name:
+        - "商品名称"
+        - "产品名称"
+        - "商品标题"
+        - "Product Name"
+
+      quantity:
+        - "数量"
+        - "购买数量"
+        - "Quantity"
+        - "qty"
+
+      order_amount:
+        - "订单金额"
+        - "成交金额"
+        - "Order Amount"
+        - "amount"
+
+      profit:
+        - "利润"
+        - "毛利"
+        - "净利润"
+        - "Profit"
+
+      order_status:
+        - "订单状态"
+        - "状态"
+        - "Status"
+
+      order_date:
+        - "下单时间"
+        - "订单时间"
+        - "Order Date"
+        - "create_time"
+
+      platform:
+        - "平台"
+        - "Platform"
+        - "销售平台"
+
+      shop_name:
+        - "店铺"
+        - "店铺名称"
+        - "Shop Name"
+
+  # 商品数据（粒度不影响字段结构）
+  products:
+    common:
+      product_id:
+        - "商品ID"
+        - "商品编号"
+        - "Product ID"
+        - "sku"
+
+      product_name:
+        - "商品名称"
+        - "产品名称"
+        - "商品标题"
+        - "Product Name"
+
+      price:
+        - "价格"
+        - "单价"
+        - "售价"
+        - "Price"
+
+      stock:
+        - "库存"
+        - "库存数量"
+        - "Stock"
+        - "inventory"
+
+      sales:
+        - "销量"
+        - "已售"
+        - "销售数量"
+        - "Sales"
+
+      revenue:
+        - "营收"
+        - "销售额"
+        - "Revenue"
+        - "GMV"
+
+      platform:
+        - "平台"
+        - "Platform"
+        - "销售平台"
+
+      shop_name:
+        - "店铺"
+        - "店铺名称"
+        - "Shop Name"
+
+# =====================================================
+# Shopee平台字段映射
+# =====================================================
+shopee:
+  # 商品数据（粒度不影响字段结构）
+  products:
+    common:
+      product_id:
+        - "ID"
+        - "商品ID"
+        - "Product ID"
+        - "item_id"
+      variant_id:
+        - "Model ID"
+        - "model_id"
+        - "Variation ID"
+        - "variation_id"
+        - "规格编号"
+        - "型号"
+
+      product_name:
+        - "商品"
+        - "商品名称"
+        - "Product Name"
+        - "title"
+
+      status:
+        - "状态"
+        - "Status"
+        - "商品状态"
+
+      gmv:
+        - "商品交易总额"
+        - "GMV"
+        - "Total GMV"
+        - "revenue"
+
+      sold_count:
+        - "成交件数"
+        - "销量"
+        - "Sold Count"
+        - "sales"
+      views:
+        - "页面浏览次数"
+        - "浏览量"
+        - "Page Views"
+        - "views"
+      unique_visitors:
+        - "去重页面浏览次数"
+        - "独立访客"
+        - "Unique Visitors"
+        - "uv"
+      add_to_cart:
+        - "加购"
+        - "加购数"
+        - "加入购物车"
+        - "add to cart"
+      conversion_rate:
+        - "转化率"
+        - "Conversion Rate"
+        - "CVR"
+
+      order_count:
+        - "订单数"
+        - "Order Count"
+        - "orders"
+
+      views:
+        - "页面浏览次数"
+        - "浏览量"
+        - "Page Views"
+        - "views"
+
+      unique_visitors:
+        - "去重页面浏览次数"
+        - "独立访客"
+        - "Unique Visitors"
+        - "uv"
+
+      click_rate:
+        - "点击率"
+        - "Click Rate"
+        - "CTR"
+
+      conversion_rate:
+        - "转化率"
+        - "Conversion Rate"
+        - "CVR"
+
+  # 客流数据（粒度严重影响字段结构）
+  traffic:
+    daily:
+      time_dimension:
+        - "小时"
+        - "Hour"
+        - "时间"
+        - "Time"
+
+      page_views:
+        - "页面浏览次数"
+        - "Page Views"
+        - "浏览量"
+
+      unique_visitors:
+        - "去重页面浏览次数"
+        - "Unique Visitors"
+        - "独立访客"
+
+      click_rate:
+        - "点击率"
+        - "Click Rate"
+        - "CTR"
+
+      conversion_rate:
+        - "转化率"
+        - "Conversion Rate"
+        - "CVR"
+
+    weekly:
+      time_dimension:
+        - "日期"
+        - "Date"
+        - "时间"
+
+      page_views:
+        - "页面浏览次数"
+        - "Page Views"
+        - "浏览量"
+
+      unique_visitors:
+        - "去重页面浏览次数"
+        - "Unique Visitors"
+        - "独立访客"
+
+      click_rate:
+        - "点击率"
+        - "Click Rate"
+        - "CTR"
+
+      conversion_rate:
+        - "转化率"
+        - "Conversion Rate"
+        - "CVR"
+
+    monthly:
+      time_dimension:
+        - "日期"
+        - "Date"
+        - "时间"
+
+      page_views:
+        - "页面浏览次数"
+        - "Page Views"
+        - "浏览量"
+
+      unique_visitors:
+        - "去重页面浏览次数"
+        - "Unique Visitors"
+        - "独立访客"
+
+      click_rate:
+        - "点击率"
+        - "Click Rate"
+        - "CTR"
+
+      conversion_rate:
+        - "转化率"
+        - "Conversion Rate"
+        - "CVR"
+
+  # 服务数据（粒度严重影响字段结构）
+  services:
+    daily:
+      time_dimension:
+        - "小时"
+        - "Hour"
+        - "时间"
+
+      ai_assistant_usage:
+        - "AI助手使用次数"
+        - "AI Assistant Usage"
+
+      agent_usage:
+        - "客服使用次数"
+        - "Agent Usage"
+
+    weekly:
+      time_dimension:
+        - "日期"
+        - "Date"
+        - "时间"
+
+      ai_assistant_usage:
+        - "AI助手使用次数"
+        - "AI Assistant Usage"
+
+      agent_usage:
+        - "客服使用次数"
+        - "Agent Usage"
+
+    monthly:
+      time_dimension:
+        - "日期"
+        - "Date"
+        - "时间"
+
+      ai_assistant_usage:
+        - "AI助手使用次数"
+        - "AI Assistant Usage"
+
+      agent_usage:
+        - "客服使用次数"
+        - "Agent Usage"
+
+# =====================================================
+# TikTok平台字段映射
+# =====================================================
+tiktok:
+  # 商品数据（粒度不影响字段结构）
+  products:
+    common:
+      product_id:
+        - "ID"
+        - "商品ID"
+        - "Product ID"
+        - "item_id"
+
+      product_name:
+        - "商品"
+        - "商品名称"
+        - "Product Name"
+        - "title"
+
+      status:
+        - "状态"
+        - "Status"
+        - "商品状态"
+
+      gmv:
+        - "商品交易总额"
+        - "GMV"
+        - "Total GMV"
+        - "revenue"
+
+      sold_count:
+        - "成交件数"
+        - "销量"
+        - "Sold Count"
+        - "sales"
+
+      order_count:
+        - "订单数"
+        - "Order Count"
+        - "orders"
+
+      # 商城渠道数据
+      mall_gmv:
+        - "商城商品交易总额"
+        - "Mall GMV"
+
+      mall_sold_count:
+        - "商城商品成交件数"
+        - "Mall Sold Count"
+
+      mall_impressions:
+        - "商城发品曝光次数"
+        - "Mall Impressions"
+
+      mall_page_views:
+        - "商城页面浏览次数"
+        - "Mall Page Views"
+
+      mall_unique_visitors:
+        - "商城去重页面浏览次数"
+        - "Mall Unique Visitors"
+
+      mall_unique_customers:
+        - "商城去重商品客户数"
+        - "Mall Unique Customers"
+
+      mall_click_rate:
+        - "商城点击率"
+        - "Mall Click Rate"
+
+      mall_conversion_rate:
+        - "商城转化率"
+        - "Mall Conversion Rate"
+
+      # 直播渠道数据
+      live_gmv:
+        - "直播商品交易总额"
+        - "Live GMV"
+
+      live_sold_count:
+        - "直播商品成交件数"
+        - "Live Sold Count"
+
+      live_impressions:
+        - "直播曝光次数"
+        - "Live Impressions"
+
+      live_page_views:
+        - "直播的页面浏览次数"
+        - "Live Page Views"
+
+      live_unique_visitors:
+        - "直播的去重页面浏览次数"
+        - "Live Unique Visitors"
+
+      live_unique_customers:
+        - "直播去重商品客户数"
+        - "Live Unique Customers"
+
+      live_click_rate:
+        - "直播点击率"
+        - "Live Click Rate"
+
+      live_conversion_rate:
+        - "直播转化率"
+        - "Live Conversion Rate"
+
+      # 视频渠道数据
+      video_gmv:
+        - "视频商品交易总额"
+        - "Video GMV"
+
+      video_sold_count:
+        - "视频商品成交件数"
+        - "Video Sold Count"
+
+      video_impressions:
+        - "视频曝光次数"
+        - "Video Impressions"
+
+      video_page_views:
+        - "来自视频的页面浏览次数"
+        - "Video Page Views"
+
+      video_unique_visitors:
+        - "来自视频的去重页面浏览次数"
+        - "Video Unique Visitors"
+
+      video_unique_customers:
+        - "视频去重商品客户数"
+        - "Video Unique Customers"
+
+      video_click_rate:
+        - "视频点击率"
+        - "Video Click Rate"
+
+      video_conversion_rate:
+        - "视频转化率"
+        - "Video Conversion Rate"
+
+      # 商品卡片渠道数据
+      card_gmv:
+        - "商品卡片商品交易总额"
+        - "Card GMV"
+
+      card_sold_count:
+        - "商品卡片商品成交件数"
+        - "Card Sold Count"
+
+      card_impressions:
+        - "商品卡片曝光次数"
+        - "Card Impressions"
+
+      card_page_views:
+        - "商品卡片的页面浏览次数"
+        - "Card Page Views"
+
+      card_unique_visitors:
+        - "商品卡片的去重页面浏览次数"
+        - "Card Unique Visitors"
+
+      card_unique_customers:
+        - "商品卡片去重客户数"
+        - "Card Unique Customers"
+
+      card_click_rate:
+        - "商品卡片点击率"
+        - "Card Click Rate"
+
+      card_conversion_rate:
+        - "商品卡片转化率"
+        - "Card Conversion Rate"
+
+  # 客流数据（粒度严重影响字段结构）
+  traffic:
+    daily:
+      time_dimension:
+        - "小时"
+        - "Hour"
+        - "时间"
+
+      page_views:
+        - "页面浏览次数"
+        - "Page Views"
+        - "浏览量"
+
+      unique_visitors:
+        - "去重页面浏览次数"
+        - "Unique Visitors"
+        - "独立访客"
+
+      click_rate:
+        - "点击率"
+        - "Click Rate"
+        - "CTR"
+
+      conversion_rate:
+        - "转化率"
+        - "Conversion Rate"
+        - "CVR"
+
+    weekly:
+      time_dimension:
+        - "日期"
+        - "Date"
+        - "时间"
+
+      page_views:
+        - "页面浏览次数"
+        - "Page Views"
+        - "浏览量"
+
+      unique_visitors:
+        - "去重页面浏览次数"
+        - "Unique Visitors"
+        - "独立访客"
+
+      click_rate:
+        - "点击率"
+        - "Click Rate"
+        - "CTR"
+
+      conversion_rate:
+        - "转化率"
+        - "Conversion Rate"
+        - "CVR"
+
+    monthly:
+      time_dimension:
+        - "日期"
+        - "Date"
+        - "时间"
+
+      page_views:
+        - "页面浏览次数"
+        - "Page Views"
+        - "浏览量"
+
+      unique_visitors:
+        - "去重页面浏览次数"
+        - "Unique Visitors"
+        - "独立访客"
+
+      click_rate:
+        - "点击率"
+        - "Click Rate"
+        - "CTR"
+
+      conversion_rate:
+        - "转化率"
+        - "Conversion Rate"
+        - "CVR"
+
+  # 服务数据（粒度严重影响字段结构）
+  services:
+    daily:
+      time_dimension:
+        - "小时"
+        - "Hour"
+        - "时间"
+
+      service_usage:
+        - "服务使用次数"
+        - "Service Usage"
+
+    weekly:
+      time_dimension:
+        - "日期"
+        - "Date"
+        - "时间"
+
+      service_usage:
+        - "服务使用次数"
+        - "Service Usage"
+
+    monthly:
+      time_dimension:
+        - "日期"
+        - "Date"
+        - "时间"
+
+      service_usage:
+        - "服务使用次数"
+        - "Service Usage"
+
+# =====================================================
+# 通用字段映射（跨平台兜底）
+# =====================================================
+generic:
+  products:
+    common:
+      product_id:
+        - "id"
+        - "ID"
+        - "商品ID"
+        - "sku"
+
+      product_name:
+        - "name"
+        - "title"
+        - "商品"
+        - "产品"
+
+      price:
+        - "price"
+        - "价格"
+        - "单价"
+
+      quantity:
+        - "qty"
+        - "quantity"
+        - "数量"
+
+      revenue:
+        - "revenue"
+        - "gmv"
+        - "销售额"
+
+  orders:
+    common:
+      order_id:
+        - "order_id"
+        - "订单号"
+        - "id"
+
+      product_name:
+        - "product"
+        - "商品"
+        - "name"
+
+      quantity:
+        - "qty"
+        - "数量"
+
+      amount:
+        - "amount"
+        - "金额"

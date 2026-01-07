@@ -1,0 +1,969 @@
+# Cursor AI 编程规范 - 跨境电商ERP系统
+
+## ⚡ Agent快速参考（开发前必读）
+
+### 核心原则（4条铁律）
+1. **SSOT**: 所有ORM模型只在 `modules/core/db/schema.py` 定义
+2. **Contract-First**: 先定义类型/接口，后实现业务逻辑 ⭐
+3. **层次依赖**: Frontend → Backend → Core（禁止反向）
+4. **官方API优先**: 使用官方API和工具，不自己实现
+
+### Contract-First开发检查（必须）⭐⭐⭐
+```
+第1步：定义数据模型 → schema.py + Alembic迁移
+第2步：定义API契约 → backend/schemas/中的Pydantic模型（禁止在routers/定义）⭐
+第3步：定义路由签名 → @router + response_model（占位实现，response_model必填）⭐
+第4步：定义前端API → frontend/src/api/*.js
+第5步：实现业务逻辑 → 填充路由函数
+第6步：编写测试 → 验证契约
+```
+
+### 新API强制规则（2025-12-19起生效）⭐⭐⭐
+**所有新创建或修改的API端点必须遵守：**
+1. ✅ 所有Pydantic模型定义在`backend/schemas/`（禁止在routers/定义）
+2. ✅ 所有@router装饰器必须包含`response_model`参数
+3. ✅ 所有请求/响应必须有明确的类型定义
+4. ⚠️ 旧代码暂不强制迁移，但修改时建议同步升级
+
+### 开发前检查（5秒速查）
+```
+□ 新表？ → schema.py + Alembic迁移（绝不在其他地方定义ORM）
+□ 新API？ → 先在backend/schemas/定义Pydantic模型（请求+响应）⭐
+□ 新端点？ → 必须添加response_model参数⭐
+□ 导入ORM？ → from modules.core.db import ...
+□ 导入schemas？ → from backend.schemas import ...⭐
+□ 导入logger？ → from modules.core.logger import get_logger
+□ 创建文件？ → 确认正确目录，避免重复
+□ 使用Playwright？ → 优先使用get_by_role/label/text官方API
+□ 在FastAPI中使用Playwright？ → 必须使用async_playwright（禁止sync_playwright）⭐⭐⭐
+□ CPU密集型操作？ → 使用ExecutorManager.run_cpu_intensive()（进程池）⭐⭐⭐
+□ I/O密集型操作？ → 使用ExecutorManager.run_io_intensive()（线程池）⭐⭐⭐
+□ 前端刷新？ → 局部刷新优先，支持后台刷新（showLoading参数）⭐⭐⭐
+```
+
+### 禁止行为（零容忍）
+- ❌ 在schema.py之外定义ORM模型
+- ❌ 创建新的`Base = declarative_base()`
+- ❌ 创建`*_backup.py`、`legacy_*`目录
+- ❌ 删除`docs/DEVELOPMENT_RULES/`下的文件
+- ❌ 先写实现，后补类型（违反Contract-First）
+- ❌ 在routers/中定义Pydantic模型（必须在schemas/中定义）⭐⭐⭐
+- ❌ 新API缺少response_model参数（100%强制）⭐⭐⭐
+- ❌ 自定义Playwright选择器修复逻辑（用官方API）
+- ❌ 跳过等待机制直接操作元素（必须wait_for）
+- ❌ 使用emoji字符（会导致Windows UnicodeEncodeError）⭐⭐⭐
+- ❌ 全屏loading阻塞整个页面（应使用局部loading）⭐⭐⭐
+- ❌ 一个模块的工作导致全局刷新（应使用局部刷新）⭐⭐⭐
+
+### 验证命令（每次提交前必跑）⭐⭐⭐
+```bash
+# SSOT验证（ORM模型）
+python scripts/verify_architecture_ssot.py  # 期望: 100%
+
+# Contract-First验证（Pydantic模型）⭐
+python scripts/verify_contract_first.py
+# 检查: 重复定义、response_model覆盖率、schemas/覆盖率
+
+# Emoji检查（Windows编码兼容性）⭐⭐⭐
+python scripts/verify_no_emoji.py
+# 检查: print/logger中是否使用emoji字符
+
+# 前后端API一致性验证
+python scripts/verify_api_contract_consistency.py
+# 检查: 前端调用是否匹配后端端点
+
+# 死代码识别
+python scripts/identify_dead_code.py
+# 检查: 未使用路由、独立ORM模型、废弃API调用
+```
+
+---
+
+## 🆕 当前系统状态
+
+### **版本信息**
+- **版本**: v4.19.0（执行器统一管理和资源优化）
+- **状态**: ✅ 生产就绪
+- **架构合规**: ✅ 100% SSOT + Contract-First
+- **数据库**: PostgreSQL 15+，55张表
+- **完整功能**: 数据采集→字段映射→产品管理→财务管理→数据看板
+
+### **核心架构**
+- **SSOT**: modules/core/db/schema.py（唯一ORM定义）
+- **Contract-First**: 类型接口先行开发
+- **组件化采集**: 异步Python组件 + Playwright官方API（v4.8.0起废弃YAML组件）
+- **财务标准**: CNY本位币 + Universal Journal
+- **数据源**: catalog_files表（禁止文件系统递归搜索）
+
+### **关键文档**
+- [Agent开始指南](docs/AGENT_START_HERE.md) - Agent接手必读
+- [v4.6.0架构指南](docs/architecture/V4_6_0_ARCHITECTURE_GUIDE.md) - 维度表设计
+- [最终架构状态](docs/architecture/FINAL_ARCHITECTURE_STATUS.md) - 架构审计
+- [v4.4.0财务域指南](docs/guides/V4_4_0_FINANCE_DOMAIN_GUIDE.md) - 财务功能
+- [快速启动指南](docs/guides/QUICK_START_ALL_FEATURES.md) - 5分钟上手
+- [详细开发规范](docs/DEVELOPMENT_RULES/) - 企业级规范（受保护目录）
+
+---
+
+## 🏗️ 架构层次（严格遵守）
+
+### Layer 1: Core Infrastructure（基础设施层）
+**位置**: `modules/core/`  
+**职责**: Single Source of Truth（其他层只能导入）
+
+```
+modules/core/
+├── db/
+│   ├── schema.py          ✅ 所有ORM模型唯一定义（55张表）⭐
+│   └── __init__.py        ✅ 导出所有模型
+├── config.py              ✅ 模块配置管理
+├── secrets_manager.py     ✅ 环境变量和密钥管理
+├── logger.py              ✅ 统一Logger工厂
+└── exceptions.py          ✅ 统一异常定义
+```
+
+**强制规则**:
+- ❌ 禁止在core之外重复定义以上任何内容
+- ❌ 禁止在core之外创建新的Base类
+- ⭐ **每次修改前运行**: `python scripts/verify_architecture_ssot.py`
+
+### Layer 2: Backend API（后端API层）
+**位置**: `backend/`  
+**职责**: 提供RESTful API，从core导入基础设施
+
+```
+backend/
+├── models/database.py     ✅ 只包含：engine, SessionLocal, get_async_db, init_db
+│                          ⚠️ get_db 仅用于遗留同步服务（新代码禁止使用）
+│                          ❌ 禁止：定义任何ORM模型
+├── schemas/               ✅ Pydantic模型集中管理（Contract-First）⭐⭐⭐
+│   ├── __init__.py        ✅ 统一导出
+│   ├── account.py         ✅ 账号管理schemas
+│   ├── common.py          ✅ 通用响应schemas
+│   └── ...                ✅ 按业务域拆分
+├── utils/config.py        ✅ 只包含：后端专用Settings
+├── routers/               ✅ API路由定义（从schemas导入模型）
+├── services/              ✅ 业务逻辑服务
+└── main.py                ✅ FastAPI应用唯一入口
+```
+
+**强制规则**:
+- ✅ 所有ORM模型从`modules.core.db`导入
+- ✅ 所有Pydantic模型从`backend.schemas`导入（禁止在routers/定义）⭐
+- ✅ 所有logger从`modules.core.logger`导入
+- ✅ 所有API必须定义`response_model`参数
+- ✅ 所有路由函数必须使用`get_async_db()`（禁止使用`get_db()`）⭐⭐⭐
+- ✅ 所有数据库操作必须使用`await db.execute(select(...))`（禁止使用`db.query()`）⭐⭐⭐
+
+### Layer 3: Frontend（前端层）
+**位置**: `frontend/`  
+**职责**: 用户界面，通过API与后端交互
+
+```
+frontend/src/
+├── api/                   ✅ 统一API客户端
+├── stores/                ✅ Pinia状态管理
+├── views/                 ✅ 页面组件
+└── components/            ✅ 可复用组件
+```
+
+**强制规则**:
+- ❌ 禁止直接访问数据库
+- ✅ 所有API调用通过`frontend/src/api/*.js`
+
+---
+
+## 🎯 Contract-First Development（v4.7.0核心规范）⭐⭐⭐
+
+### **核心原则**
+在编写任何实现代码之前，必须先定义清晰的类型和接口契约。
+
+**为什么重要？**
+- ✅ 防止API滥用和运行时错误
+- ✅ 前后端可以并行开发
+- ✅ 接口变更可追溯
+- ✅ 自动生成文档和验证
+
+### **开发顺序（强制）**
+
+#### 第1步：定义数据模型
+```python
+# modules/core/db/schema.py
+class CollectionTask(Base):
+    __tablename__ = 'collection_tasks'
+    id = Column(Integer, primary_key=True)
+    task_id = Column(String(36), unique=True, nullable=False)
+    # ... 完整字段定义
+```
+
+#### 第2步：创建数据库迁移
+```bash
+alembic revision --autogenerate -m "add_collection_tasks_table"
+alembic upgrade head
+```
+
+#### 第3步：定义API契约
+```python
+# backend/routers/ 或 backend/schemas/
+from pydantic import BaseModel
+
+class TaskCreateRequest(BaseModel):
+    platform: str
+    account_id: str
+
+class TaskResponse(BaseModel):
+    task_id: str
+    status: str
+    
+    class Config:
+        from_attributes = True  # 支持ORM转换
+```
+
+#### 第4步：定义API端点签名
+```python
+from backend.models.database import get_async_db
+from sqlalchemy.ext.asyncio import AsyncSession
+
+@router.post("/tasks", response_model=TaskResponse)
+async def create_task(request: TaskCreateRequest, db: AsyncSession = Depends(get_async_db)):
+    """创建采集任务（占位实现）"""
+    # TODO: 实现业务逻辑
+    raise HTTPException(status_code=501, detail="Not Implemented")
+```
+
+#### 第5步：定义前端API
+```javascript
+// frontend/src/api/collection.js
+export const createTask = async (task) => {
+  const response = await api.post('/collection/tasks', task)
+  return response.data
+}
+```
+
+#### 第6步：实现业务逻辑
+```python
+# 最后才实现具体业务逻辑
+from sqlalchemy import select
+from backend.models.database import get_async_db
+from sqlalchemy.ext.asyncio import AsyncSession
+
+@router.post("/tasks", response_model=TaskResponse)
+async def create_task(request: TaskCreateRequest, db: AsyncSession = Depends(get_async_db)):
+    task = CollectionTask(**request.dict())
+    db.add(task)
+    await db.commit()  # ⭐ 必须使用 await
+    return task
+```
+
+### **Contract-First检查清单（开发前必查）**
+
+#### ✅ 数据库模型检查
+- [ ] 模型是否在 `modules/core/db/schema.py` 中唯一定义？
+- [ ] 是否创建了Alembic迁移脚本？
+- [ ] 字段类型、约束、索引是否完整？
+- [ ] 是否添加了 `created_at`/`updated_at` 时间戳？
+
+#### ✅ API契约检查
+- [ ] 是否定义了 Pydantic 请求/响应模型？
+- [ ] 模型字段是否与数据库模型一致？
+- [ ] 是否设置了 `from_attributes = True`？
+- [ ] 是否有完整的字段验证？
+
+#### ✅ 路由签名检查
+- [ ] 是否定义了 `response_model` 参数？
+- [ ] HTTP方法是否正确？
+- [ ] 是否有完整的 docstring 文档？
+
+#### ✅ 前端API检查
+- [ ] API函数签名是否与后端一致？
+- [ ] 错误处理是否完善？
+
+### **禁止的开发模式**
+```python
+# ❌ 错误：先写实现，后补类型
+def create_task(data):  # 无类型注解
+    task = {"id": uuid.uuid4(), "data": data}  # 无模型定义
+    return task  # 无响应模型
+
+# ✅ 正确：先定义类型，再实现
+class TaskCreate(BaseModel):
+    platform: str
+
+class TaskResponse(BaseModel):
+    task_id: str
+
+from backend.models.database import get_async_db
+from sqlalchemy.ext.asyncio import AsyncSession
+
+@router.post("/tasks", response_model=TaskResponse)
+async def create_task(request: TaskCreate, db: AsyncSession = Depends(get_async_db)):
+    task = CollectionTask(**request.dict())
+    db.add(task)
+    await db.commit()  # ⭐ 必须使用 await
+    return task
+```
+
+---
+
+## 🚨 严禁双维护（零容忍）
+
+### 🔴 绝对禁止的行为
+
+1. **禁止重复定义数据库模型** ❌ ⭐⭐⭐
+   - ✅ **唯一定义**: `modules/core/db/schema.py`（55张表）
+   - ❌ **禁止**: 在`backend/models/`或其他任何地方重复定义
+   - ❌ **禁止**: 创建新的`Base = declarative_base()`
+   - ✅ **正确**: `from modules.core.db import FactOrder`
+
+2. **禁止重复配置管理类** ❌
+   - ✅ **模块配置**: `modules/core/config.py`
+   - ✅ **后端配置**: `backend/utils/config.py`
+   - ❌ **禁止**: 创建新的配置类
+
+3. **禁止重复Logger定义** ❌
+   - ✅ **唯一Logger**: `modules/core/logger.py`
+   - ✅ **正确**: `from modules.core.logger import get_logger`
+
+4. **禁止拼音字段命名** ❌ ⭐⭐⭐
+   - ❌ **绝对禁止**: `xiao_shou_sgd`, `mai_jia_shu`
+   - ✅ **强制使用**: `sales_amount_completed`, `buyer_count`
+
+### 🔧 禁止创建的文件类型
+
+| 禁止创建 | 正确位置 |
+|---------|---------|
+| 独立的`Base = declarative_base()` | `modules/core/db/schema.py` |
+| 任何`*_backup.py`、`*_old.py` | 使用Git版本控制 |
+| `legacy_*`目录 | 归档到`backups/` |
+| 重复的logger.py | `modules/core/logger.py` |
+
+---
+
+## 🛠️ Playwright使用规范（v4.8.0）⭐⭐⭐
+
+### **核心原则：优先使用官方API和官方工具**
+- ✅ **官方API优先**: 使用Playwright官方API，不自己实现
+- ✅ **官方工具优先**: Playwright Inspector、Trace Viewer
+- ❌ **禁止自定义**: 不创建选择器修复逻辑
+- ❌ **禁止绕过**: 不绕过官方API直接操作底层
+
+### **录制模式（v4.8.0更新）⭐⭐⭐**
+
+**唯一录制方式**: Inspector 模式（Codegen 模式已废弃）
+
+| 模式 | 方式 | 状态 |
+|------|------|------|
+| Inspector 模式 | `page.pause()` + Trace | ✅ 唯一支持 |
+| Codegen 模式 | `playwright codegen` | ❌ 已废弃 |
+
+### **Inspector 模式特性**
+- ✅ **持久化会话**：使用 `PersistentBrowserManager` 复用登录状态
+- ✅ **固定指纹**：使用 `DeviceFingerprintManager` 降低检测风险
+- ✅ **自动登录**：非 login 组件自动执行登录
+- ✅ **弹窗处理**：自动处理弹窗
+- ✅ **Trace 录制**：完整操作记录，支持回放调试
+
+**相关文件**：
+- `backend/utils/trace_parser.py`：Trace 文件解析器
+- `tools/launch_inspector_recorder.py`：Inspector 录制脚本
+
+### **API选择规范（2025-12-21新增）⭐⭐⭐**
+
+#### **async_playwright vs sync_playwright**
+
+**官方建议**：
+- ✅ **异步框架（FastAPI/Django Async）**：**必须使用 `async_playwright`**
+- ✅ **独立命令行脚本**：可以使用 `sync_playwright` 或 `async_playwright` + `asyncio.run()`
+- ❌ **禁止**：在异步框架中使用 `sync_playwright`（会导致 `RuntimeError: Event loop is running`）
+
+**决策表**：
+
+| 场景 | 使用 API | 代码位置示例 |
+|------|---------|------------|
+| FastAPI 路由中的组件测试 | `async_playwright` | `backend/routers/component_versions.py` |
+| 批量采集任务 | `async_playwright` | `modules/apps/collection_center/executor_v2.py` |
+| 组件录制工具（独立进程） | `async_playwright` | `tools/launch_inspector_recorder.py` |
+| 命令行测试工具 | `async_playwright` + `asyncio.run()` | `tools/test_component.py` |
+
+#### **执行方式选择**
+
+**官方建议**：
+- ✅ **异步框架中**：直接使用 `async_playwright` + `asyncio.create_task()`
+- ⚠️ **独立脚本**：使用 `async_playwright` + subprocess（如果需要隔离）
+- ❌ **禁止**：在异步框架中使用 `sync_playwright` + threading（违反官方建议）
+
+**历史教训**：
+- ⚠️ **避免重复实现**：不要为了隔离而隔离，如果框架支持异步，直接使用异步
+- ⚠️ **遵循官方建议**：Playwright 官方明确建议在异步框架中使用 `async_playwright`
+- ⚠️ **避免过度设计**：简单的异步方案往往比复杂的线程/进程方案更好
+
+**详细规范**：参见 `openspec/changes/verify-collection-and-sync-e2e/proposal.md` 中的 "Playwright 使用规范" 章节
+
+### **元素定位规范（强制）**
+优先级顺序：
+1. ⭐⭐⭐ `page.get_by_role(role, name=xxx)` - 官方推荐
+2. ⭐⭐ `page.get_by_label(label_text)` - 表单元素
+3. ⭐⭐ `page.get_by_text(text)` - 文本定位
+4. ⭐ `page.get_by_placeholder(placeholder)`
+5. ⭐ `page.get_by_title(title)`
+6. `page.locator(selector)` - 降级方案（CSS/XPath）
+
+**禁止行为**:
+- ❌ 创建`_fix_selector()`方法
+- ❌ 创建`_get_smart_locator()`多策略降级
+- ❌ 手动转换`role=xxx[name=yyy]`为CSS selector
+
+**正确示例**:
+```python
+# ✅ 正确 - 使用官方API（自动处理特殊字符）
+locator = page.get_by_role("textbox", name="手机号/子账号/邮箱")
+locator.fill(username)
+
+# ❌ 错误 - 自己修复选择器
+selector = "role=textbox[name=手机号/子账号/邮箱]"
+fixed_selector = f'[role="textbox"][name="{name}"]'  # 不要这样做！
+```
+
+### **页面加载等待规范（强制）**
+三级等待机制（异步版本）：
+```python
+# ⭐ 在异步框架中必须使用 async_playwright
+async with async_playwright() as p:
+    browser = await p.chromium.launch()
+    page = await browser.new_page()
+    
+# 1. 基础等待
+    await page.goto(url, wait_until='domcontentloaded')
+
+# 2. 网络等待
+    await page.wait_for_load_state('networkidle', timeout=10000)
+
+# 3. 渲染等待
+    await page.wait_for_timeout(1000)
+
+# 元素交互前等待
+locator = page.get_by_role("button", name="登录")
+    await locator.wait_for(state='visible', timeout=30000)  # 等待可见
+    await locator.scroll_into_view_if_needed()              # 滚动到视图
+    await locator.click()                                    # 点击
+```
+
+**参考文件**: `tools/test_component.py`（已更新为异步版本）
+
+---
+
+## 🐍 Python组件开发规范（v4.8.0新增）⭐⭐⭐
+
+### **核心原则**
+- ✅ **异步优先**: 所有组件必须使用 `async def run()` 方法
+- ✅ **SSOT**: Python组件只在 `modules/platforms/{platform}/components/` 定义
+- ✅ **适配层调用**: 通过 `PythonComponentAdapter` 统一调用组件
+- ❌ **禁止同步**: 不使用 `def run()` 同步方法
+- ❌ **禁止YAML**: v4.8.0起不再支持YAML组件
+
+### **组件结构（强制）**
+```python
+# modules/platforms/{platform}/components/{component_name}.py
+class LoginComponent:
+    # 组件元数据（必需）
+    platform = "shopee"           # 平台标识
+    component_type = "login"      # 组件类型
+    data_domain = None            # 数据域（export组件必填）
+    
+    def __init__(self, ctx=None):
+        self.ctx = ctx
+        self.logger = ctx.logger if ctx else get_logger(__name__)
+    
+    async def run(self, page, account: dict, params: dict, **kwargs) -> dict:
+        """执行组件逻辑（必须异步）"""
+        # account['password'] 已由适配层解密
+        username = account.get('username')
+        password = account.get('password')
+        
+        # Playwright 操作必须 await
+        await page.goto(...)
+        await page.fill(...)
+        await page.click(...)
+        
+        return {"success": True}
+```
+
+### **组件类型**
+| 类型 | 说明 | 必填元数据 |
+|------|------|-----------|
+| login | 登录组件 | platform, component_type |
+| navigation | 导航组件 | platform, component_type |
+| date_picker | 日期选择 | platform, component_type |
+| export | 数据导出 | platform, component_type, **data_domain** |
+
+### **适配层使用**
+```python
+from modules.apps.collection_center.python_component_adapter import create_adapter
+
+# 创建适配器
+adapter = create_adapter(platform="shopee", ctx=execution_context)
+
+# 执行登录
+result = await adapter.login(page, account)
+
+# 执行导出
+result = await adapter.export(page, account, params, data_domain="orders")
+```
+
+### **禁止行为**
+- ❌ 在组件中直接访问 `account['password_encrypted']`（由适配层解密）
+- ❌ 使用同步 Playwright API（如 `page.goto()` 不加 `await`）
+- ❌ 在非 `modules/platforms/` 目录定义组件
+- ❌ 创建新的 YAML 组件文件
+
+### **参考文档**
+- `docs/guides/PYTHON_COMPONENT_TEMPLATE.md` - 组件编写模板
+- `modules/apps/collection_center/python_component_adapter.py` - 适配层实现
+
+---
+
+## 🔐 组件变量替换规范（v4.7.6）⭐⭐⭐
+
+### **核心原则：密码必须自动解密**
+
+**强制要求**：
+- ✅ `{{account.password}}` 变量替换时**必须自动解密**
+- ✅ 使用 `EncryptionService.decrypt_password()` 解密
+- ✅ 解密失败时降级为使用原值（可能是明文），并记录警告
+
+### **实现位置（必须统一）**
+| 位置 | 职责 | 解密方式 |
+|------|------|---------|
+| `launch_inspector_recorder._replace_template()` | 录制工具自动登录 | `get_encryption_service().decrypt_password()` |
+| `ComponentTestService.prepare_account_info()` | 测试服务预处理 | `get_encryption_service().decrypt_password()` |
+| `ComponentLoader._replace_variables()` | 统一组件变量替换 | 需要时添加解密逻辑 |
+
+### **正确导入方式**
+```python
+# 正确：使用 EncryptionService
+from backend.services.encryption_service import get_encryption_service
+encryption_service = get_encryption_service()
+decrypted = encryption_service.decrypt_password(encrypted_password)
+
+# 错误：不存在的函数
+from modules.core.secrets_manager import decrypt_password  # 不存在！
+```
+
+### **禁止行为**
+- ❌ 直接使用 `account.password_encrypted` 而不解密
+- ❌ 从错误的模块导入解密函数
+- ❌ 假设密码是明文
+- ❌ 在多个地方重复实现解密逻辑（应统一使用 EncryptionService）
+
+### **历史教训（2025-12-25）**
+- ✗ `from modules.core.secrets_manager import decrypt_password` → 函数不存在，导入失败
+- ✗ 导入失败后默默返回加密密码 → 登录失败但无明确错误
+
+---
+
+## 🖥️ 开发环境规范
+
+### **主要开发环境**
+- **操作系统**: Windows 10/11
+- **Python**: 3.9+ (建议3.11或3.13)
+- **数据库**: PostgreSQL 15+ (Docker容器)
+- **前端**: Vue.js 3 + Element Plus + Vite
+- **后端**: FastAPI + SQLAlchemy + Pydantic
+
+### **Windows平台注意事项**
+
+#### ❌ **禁止使用Emoji（零容忍）** ⭐⭐⭐
+**问题**：Windows控制台默认使用GBK编码，无法编码emoji字符，导致`UnicodeEncodeError`
+
+**禁止场景**：
+- ❌ print()语句中的emoji
+- ❌ logger输出中的emoji（所有级别：info/warning/error/debug）
+- ❌ 异常消息中的emoji
+- ❌ 文件名、注释、docstring中的emoji
+- ❌ 任何可能输出到控制台的内容
+
+**历史教训**：
+- ✗ `logger.info(f"✅ 测试成功")` → UnicodeEncodeError
+- ✗ `logger.info(f"⏱️ 等待{duration}ms")` → UnicodeEncodeError
+- ✗ `print(f"✓ 步骤完成")` → UnicodeEncodeError
+
+**正确做法（使用ASCII替代）**：
+```python
+# ✅ 正确：使用ASCII符号
+logger.info("[OK] 测试成功")
+logger.info("[WAIT] 等待1000ms")
+logger.info("[PASS] 步骤完成")
+logger.error("[FAIL] 步骤失败")
+logger.warning("[WARN] 注意事项")
+print("[INFO] 开始执行")
+```
+
+**标准ASCII符号替代表**：
+| Emoji | ASCII替代 | 用途 |
+|-------|----------|------|
+| ✅ ✓ | [OK] [PASS] | 成功/通过 |
+| ❌ ✗ | [FAIL] [ERROR] | 失败/错误 |
+| ⚠️ | [WARN] [!] | 警告 |
+| ℹ️ | [INFO] | 信息 |
+| ⏱️ 🕐 | [WAIT] [TIME] | 等待/时间 |
+| 🚀 | [START] | 开始 |
+| 🎉 | [DONE] | 完成 |
+| 🔄 | [RETRY] | 重试 |
+| 📊 | [DATA] | 数据 |
+| 🔍 | [SEARCH] | 搜索 |
+
+**其他Windows注意事项**：
+- ✅ **路径处理**: 使用`pathlib.Path`，转str后再用于f-string
+- ✅ **subprocess**: Windows需要`shell=True`执行npm
+- ✅ **文件编码**: 明确指定`encoding='utf-8'`读写文件
+
+---
+
+## 📖 核心编程规范
+
+### 代码格式
+- 使用4个空格缩进
+- 行长度88字符
+- snake_case命名变量和函数
+- PascalCase命名类
+- 使用类型注解（Type Hints）
+
+### 导入规范
+```python
+# 1. 标准库
+import os
+from pathlib import Path
+
+# 2. 第三方库
+from fastapi import APIRouter
+from sqlalchemy import Column
+
+# 3. 本地应用
+from modules.core.db import CatalogFile
+from modules.core.logger import get_logger
+```
+
+### 文档规范
+- 所有函数必须有docstring（Google风格）
+- 所有函数必须有类型注解
+- 所有API必须有OpenAPI文档
+
+---
+
+## 🎨 前端异步架构设计规范（v4.19.0新增）⭐⭐⭐
+
+### **核心原则：局部刷新，避免全局阻塞**
+- ✅ **局部刷新优先**：只刷新需要更新的区域，不影响其他模块
+- ✅ **后台刷新**：非关键数据在后台静默刷新，不显示loading
+- ✅ **乐观更新**：立即更新UI，后台验证，失败时回滚
+- ❌ **禁止全局刷新**：一个模块的工作不应导致整个页面刷新
+- ❌ **禁止全屏loading**：避免使用全屏loading阻塞用户操作
+
+### **开发前检查（5秒速查）**
+```
+□ 是否使用了全屏loading？
+□ 是否一个模块的工作导致全局刷新？
+□ 是否在任务进行中频繁刷新数据？
+□ 是否添加了超时机制？
+□ 是否支持后台刷新（showLoading参数）？
+```
+
+### **禁止行为（零容忍）**
+- ❌ 全屏loading阻塞整个页面
+- ❌ 一个模块的工作导致全局刷新
+- ❌ 任务进行中频繁刷新数据（应使用后台刷新）
+- ❌ 无超时机制的API调用
+
+### **详细规范**
+- 参见 `docs/DEVELOPMENT_RULES/UI_DESIGN.md` - UI设计详细规范
+
+---
+
+## 🔄 异步架构规范（v4.19.0核心规范）⭐⭐⭐
+
+### **核心原则：统一异步架构**
+- ✅ **所有服务类仅支持异步**：所有服务类构造函数只接受 `AsyncSession`，不再支持 `Union[Session, AsyncSession]`
+- ✅ **所有路由层使用异步**：所有路由函数必须使用 `get_async_db()` 而不是 `get_db()`
+- ✅ **数据库操作必须异步**：使用 `await db.execute(select(...))` 而不是 `db.query()`
+- ❌ **禁止双模式支持**：不再使用 `_is_async` 标志或 `isinstance(db, AsyncSession)` 检查（服务类中）
+- ❌ **禁止同步数据库操作**：在 `async def` 函数中禁止使用 `db.query()`、`db.commit()`、`db.rollback()` 等同步方法
+
+### **服务类开发规范（强制）**
+```python
+# ✅ 正确：只接受 AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
+
+class MyService:
+    def __init__(self, db: AsyncSession):
+        """初始化服务（仅支持异步）"""
+        self.db = db
+    
+    async def my_method(self):
+        # 使用异步查询
+        result = await self.db.execute(select(MyModel))
+        items = result.scalars().all()
+        
+        # 使用异步提交
+        await self.db.commit()
+
+# ❌ 错误：双模式支持（已废弃）
+class MyService:
+    def __init__(self, db: Union[Session, AsyncSession]):
+        self.db = db
+        self._is_async = isinstance(db, AsyncSession)  # 禁止！
+    
+    async def my_method(self):
+        if self._is_async:  # 禁止！
+            result = await self.db.execute(...)
+        else:
+            result = self.db.query(...)  # 禁止！
+```
+
+### **路由层开发规范（强制）**
+```python
+# ✅ 正确：使用 get_async_db()
+from backend.models.database import get_async_db
+from sqlalchemy.ext.asyncio import AsyncSession
+
+@router.get("/items")
+async def get_items(db: AsyncSession = Depends(get_async_db)):
+    result = await db.execute(select(Item))
+    items = result.scalars().all()
+    return items
+
+# ❌ 错误：使用 get_db()（已废弃）
+from backend.models.database import get_db
+from sqlalchemy.orm import Session
+
+@router.get("/items")
+async def get_items(db: Session = Depends(get_db)):  # 禁止！
+    items = db.query(Item).all()  # 禁止！
+    return items
+```
+
+### **数据库操作规范（强制）**
+```python
+# ✅ 正确：异步操作
+from sqlalchemy import select
+
+# 查询
+result = await db.execute(select(MyModel).where(MyModel.id == 1))
+item = result.scalar_one_or_none()
+
+# 提交/回滚
+await db.commit()
+await db.rollback()
+
+# 刷新
+await db.refresh(item)
+
+# ❌ 错误：同步操作（在 async def 中）
+# 禁止使用：
+# - db.query(...)
+# - db.commit()  # 缺少 await
+# - db.rollback()  # 缺少 await
+# - db.refresh(item)  # 缺少 await
+```
+
+### **DDL操作规范（特殊处理）**
+```python
+# ✅ 正确：DDL操作使用 run_in_executor 包装
+from backend.models.database import SessionLocal
+import asyncio
+
+async def ensure_table_exists():
+    def _sync_create_table():
+        sync_db = SessionLocal()
+        try:
+            sync_db.execute(text("CREATE TABLE IF NOT EXISTS ..."))
+            sync_db.commit()
+        finally:
+            sync_db.close()
+    
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _sync_create_table)
+```
+
+### **开发前检查（5秒速查）**
+```
+□ 服务类是否只接受 AsyncSession？
+□ 路由函数是否使用 get_async_db()？
+□ 数据库操作是否使用 await？
+□ 是否还有 _is_async 标志或 isinstance 检查？
+□ DDL操作是否使用 run_in_executor 包装？
+```
+
+### **禁止行为（零容忍）**
+- ❌ 服务类构造函数接受 `Union[Session, AsyncSession]`
+- ❌ 使用 `_is_async` 标志或 `isinstance(db, AsyncSession)` 检查（服务类中）
+- ❌ 在 `async def` 函数中使用 `db.query()`、`db.commit()`、`db.rollback()` 等同步方法
+- ❌ 路由函数使用 `get_db()` 而不是 `get_async_db()`
+- ❌ 数据库操作缺少 `await` 关键字
+
+### **迁移状态**
+- ✅ **已完成**：所有核心服务类（DataSyncService、DataIngestionService、AutoIngestOrchestrator、TemplateMatcher、DynamicColumnManager、DeduplicationService、PlatformTableManager、RawDataImporter）已移除双模式支持
+- ⚠️ **过渡期**：部分工具类（如 `component_test_service.py`、`account_loader_service.py`）仍保留 `isinstance` 检查，用于兼容性（可接受）
+- ⚠️ **遗留代码**：`get_db()` 函数仍保留，用于同步服务（如 `audit_service.py`），但新代码禁止使用
+
+---
+
+## 🗄️ 数据库和性能规范
+
+### PostgreSQL索引优先原则（强制）
+- ✅ **文件路径查找**: 从catalog_files表查询（禁止Path.rglob()）
+- ✅ **性能提升**: 30,000倍（60秒 → 2毫秒）
+- ❌ **禁止**: 递归搜索文件系统
+
+### catalog_files表使用规范
+- 文件元数据索引（平台/账号/店铺/数据域/粒度/日期）
+- 文件路径映射（file_name → file_path）
+- 文件状态跟踪（pending/ingested/failed）
+
+### Excel解析器规范
+- ✅ **统一使用**: `ExcelParser.read_excel()`
+- ✅ **智能检测**: 自动检测xlsx/xls/html格式
+- ❌ **禁止**: 直接使用`pd.read_excel()`
+
+---
+
+## 🔒 安全和测试规范
+
+### 安全规范
+- **认证**: JWT Token（15分钟Access + 7天Refresh）
+- **权限**: RBAC（Admin/Manager/Operator/Viewer）
+- **加密**: bcrypt密码哈希 + HTTPS
+- **防护**: SQL注入/XSS/CSRF防护
+- **详细规范**: 参见`docs/DEVELOPMENT_RULES/SECURITY.md`
+
+### 测试规范
+- **测试金字塔**: 单元70% + 集成20% + E2E10%
+- **覆盖率要求**: 核心≥80%，辅助≥50%，关键业务100%
+- **工具**: pytest + pytest-cov
+- **详细规范**: 参见`docs/DEVELOPMENT_RULES/TESTING.md`
+
+---
+
+## 📂 文件创建和管理规范
+
+### 严格的文件创建原则
+- **最小创建原则**: 优先修改现有文件
+- **架构一致性**: 新文件必须放在正确目录
+- **即时清理原则**: 临时文件立即移至temp/或backups/
+- **功能整合原则**: 相似功能必须合并
+
+### 项目根目录保持清洁
+**允许的文件**:
+- `run.py`, `run_new.py` (启动脚本)
+- `README.md`, `CHANGELOG.md`, `API_CONTRACT.md` (文档)
+- `.cursorrules`, `requirements.txt`, `package.json` (配置)
+
+**其他文件**: 必须按功能分类到对应目录
+
+### 受保护目录（禁止自动清理）⭐⭐⭐
+- ❌ **绝对禁止**: Agent自动删除`docs/DEVELOPMENT_RULES/`下的文件
+- ❌ **绝对禁止**: 移动此目录下的文件到archive/
+- ✅ **唯一例外**: 用户显式授权
+
+---
+
+## 🚀 开发工作流
+
+### Agent工作流规范
+- **启动阶段**: 一次高信号信息收集，避免盲目扫描
+- **任务清单**: 多文件修改、复杂任务必须创建TODO
+- **变更半径控制**: 单次编辑≤150行，分批提交
+- **验证**: 每次改动后必须最小验证（测试/smoke检查）
+- **文档同步**: 功能变更后立即更新文档
+
+### 变更检查清单（提交前自检）
+- [ ] 是否破坏接口/契约？
+- [ ] 是否新增或更新测试？
+- [ ] 是否限制了变更半径？
+- [ ] 是否更新了相关文档？
+- [ ] 是否遵循Contract-First原则？
+
+---
+
+## 📋 技术栈总结
+
+- **系统架构**: 模块化 + 插件化 + 零耦合
+- **数据采集**: Playwright (Python) + YAML配置
+- **前端**: Vue.js 3 + Element Plus + Pinia + Vite
+- **后端**: FastAPI + SQLAlchemy + Pydantic
+- **数据库**: PostgreSQL 15+ (Docker)
+- **配置**: YAML + 环境变量
+
+---
+
+## 🛡️ 历史遗漏防护机制
+
+### 验证脚本（定期执行）
+```bash
+# SSOT验证（每次修改core/db/schema.py后）
+python scripts/verify_architecture_ssot.py
+
+# Contract-First验证（每次提交前）⭐
+python scripts/verify_contract_first.py
+
+# API契约一致性验证（每周）
+python scripts/verify_api_contract_consistency.py
+
+# 死代码识别（每月）
+python scripts/identify_dead_code.py
+
+# 历史遗漏检查
+python scripts/check_historical_omissions.py
+
+# 根目录白名单验证
+python scripts/verify_root_md_whitelist.py
+```
+
+### 文档链接验证
+- ✅ **链接检查**: 自动检查引用的文档是否存在
+- ✅ **断链检测**: 发现断链立即修复
+- ✅ **文档索引**: `docs/README.md`作为索引
+
+---
+
+## 📝 详细规范文档（按需查阅）
+
+完整的详细规范见 `docs/DEVELOPMENT_RULES/` 目录：
+
+### P0级别（必须遵循）
+- **[DATABASE.md](docs/DEVELOPMENT_RULES/DATABASE.md)** - 数据库设计详细规范
+- **[ERROR_HANDLING_AND_LOGGING.md](docs/DEVELOPMENT_RULES/ERROR_HANDLING_AND_LOGGING.md)** - 错误处理和日志规范
+- **[MONITORING_AND_OBSERVABILITY.md](docs/DEVELOPMENT_RULES/MONITORING_AND_OBSERVABILITY.md)** - 监控和可观测性规范
+
+### P1级别（强烈建议）
+- **[API_DESIGN.md](docs/DEVELOPMENT_RULES/API_DESIGN.md)** - API设计详细规范
+- **[SECURITY.md](docs/DEVELOPMENT_RULES/SECURITY.md)** - 安全规范详细文档
+- **[CODE_QUALITY.md](docs/DEVELOPMENT_RULES/CODE_QUALITY.md)** - 代码质量保证规范
+
+### P2级别（建议）
+- **[TESTING.md](docs/DEVELOPMENT_RULES/TESTING.md)** - 测试策略详细文档
+- **[DEPLOYMENT.md](docs/DEVELOPMENT_RULES/DEPLOYMENT.md)** - 部署和运维规范
+- **[UI_DESIGN.md](docs/DEVELOPMENT_RULES/UI_DESIGN.md)** - UI设计规范
+
+### 其他重要文档
+- **[DUPLICATE_AND_HISTORICAL_PROTECTION.md](docs/DEVELOPMENT_RULES/DUPLICATE_AND_HISTORICAL_PROTECTION.md)** - 双维护和历史遗漏防护
+
+> ⚠️ **注意**: `.cursorrules` 只保留核心规则和快速参考，详细规范请查阅上述文档。  
+> 📖 **完整索引**: 参见 [docs/DEVELOPMENT_RULES/README.md](docs/DEVELOPMENT_RULES/README.md)
+
+---
+
+## ✅ 最后提醒
+
+### 开发前必做
+1. 阅读"Agent快速参考"（第1-50行）
+2. 确认Contract-First开发顺序
+3. 检查是否会造成双维护
+4. 运行验证脚本确认合规
+
+### 开发后必做
+1. 运行`python scripts/verify_architecture_ssot.py`
+2. 更新相关文档
+3. 完成变更检查清单
+4. 提交前自检
+
+**记住：永远Contract-First，永远SSOT，永远官方API优先！**

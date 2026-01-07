@@ -1,0 +1,173 @@
+# 西虹ERP系统 - 数据采集服务 Docker Compose配置
+# 专用于数据采集功能，包含Playwright浏览器自动化
+#
+# 使用方法:
+#   开发环境: docker-compose -f docker-compose.collection.yml up -d
+#   生产环境: docker-compose -f docker-compose.collection.yml --profile production up -d
+
+services:
+  # ==================== 数据采集服务 ====================
+  collection:
+    build:
+      context: .
+      dockerfile: Dockerfile.collection
+    container_name: xihong_erp_collection
+    environment:
+      # 数据库配置（连接主数据库）
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-xihong_erp}
+
+      # Playwright配置
+      PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
+      PLAYWRIGHT_TIMEOUT: ${PLAYWRIGHT_TIMEOUT:-30000}
+
+      # 采集配置
+      MAX_COLLECTION_TASKS: ${MAX_COLLECTION_TASKS:-3}
+      COMPONENT_TIMEOUT: ${COMPONENT_TIMEOUT:-300}
+      TASK_TIMEOUT: ${TASK_TIMEOUT:-1800}
+
+      # 代理配置
+      PROXY_MODE: ${PROXY_MODE:-none}
+      PROXY_HOST: ${PROXY_HOST:-}
+      PROXY_PORT: ${PROXY_PORT:-}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+      PROXY_POOL_API: ${PROXY_POOL_API:-}
+      PROXY_POOL_KEY: ${PROXY_POOL_KEY:-}
+
+      # 应用配置
+      APP_ENV: ${APP_ENV:-development}
+      DEBUG: ${DEBUG:-true}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key}
+
+      # 服务器配置
+      HOST: 0.0.0.0
+      PORT: 8000
+
+      # 日志配置
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      # ⭐ 路径配置（Linux服务器部署必需）
+      PROJECT_ROOT: /app
+      DATA_DIR: /app/data
+      DATA_RAW_DIR: /app/data/raw
+      DOWNLOADS_DIR: /app/downloads
+      TEMP_DIR: /app/temp
+      LOGS_DIR: /app/logs
+
+    ports:
+      - "${COLLECTION_PORT:-8002}:8000"
+
+    volumes:
+      # 数据卷
+      - ./data:/app/data
+      - ./temp:/app/temp
+      - ./logs/collection:/app/logs
+      - ./config:/app/config
+      # 浏览器会话持久化
+      - collection_browser_data:/app/data/browser_sessions
+      # 设备指纹持久化
+      - collection_fingerprints:/app/data/device_fingerprints
+
+    networks:
+      - erp_network
+
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+        reservations:
+          cpus: "1"
+          memory: 1G
+
+    # 重启策略
+    restart: unless-stopped
+
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/collection/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # 安全配置
+    security_opt:
+      - no-new-privileges:true
+
+    # 共享内存（Chromium需要）
+    shm_size: "2gb"
+
+  # ==================== 采集任务调度器（可选） ====================
+  # 独立的调度服务，用于分布式部署场景
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.collection
+    container_name: xihong_erp_scheduler
+    command: ["python", "-m", "backend.services.scheduler_worker"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-xihong_erp}
+      REDIS_URL: redis://${REDIS_HOST:-host.docker.internal}:${REDIS_PORT:-6379}/0
+      APP_ENV: ${APP_ENV:-development}
+    volumes:
+      - ./logs/scheduler:/app/logs
+    networks:
+      - erp_network
+    depends_on:
+      collection:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - distributed
+      - production
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+# ==================== 网络配置 ====================
+networks:
+  erp_network:
+    external: true
+    name: xihong_erp_erp_network
+
+# ==================== 数据卷配置 ====================
+volumes:
+  collection_browser_data:
+    driver: local
+    name: xihong_erp_collection_browser
+  collection_fingerprints:
+    driver: local
+    name: xihong_erp_collection_fingerprints
+# ===================================================
+# 使用说明:
+#
+# 1. 启动主服务（PostgreSQL等）:
+#    docker-compose up -d postgres
+#
+# 2. 启动采集服务:
+#    docker-compose -f docker-compose.collection.yml up -d
+#
+# 3. 查看日志:
+#    docker-compose -f docker-compose.collection.yml logs -f collection
+#
+# 4. 进入容器调试:
+#    docker exec -it xihong_erp_collection bash
+#
+# 5. 运行采集测试:
+#    docker exec xihong_erp_collection python tools/test_component.py -p shopee -c login
+#
+# 环境变量文件(.env)示例:
+#   POSTGRES_HOST=host.docker.internal
+#   POSTGRES_PORT=5432
+#   POSTGRES_USER=erp_user
+#   POSTGRES_PASSWORD=erp_pass_2025
+#   POSTGRES_DB=xihong_erp
+#   PLAYWRIGHT_HEADLESS=true
+#   MAX_COLLECTION_TASKS=3
+#   PROXY_MODE=none
+# ===================================================
+

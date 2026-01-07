@@ -1,0 +1,19 @@
+{
+  "normal_interval": 3600,
+  "promotion_interval": 1800,
+  "night_interval": 14400,
+  "night_start": "02:00",
+  "night_end": "06:00",
+  "promotion_dates": [
+    "2025-01-15",
+    "2025-01-16"
+  ],
+  "promotion_platforms": [
+    "miaoshou",
+    "shopee"
+  ],
+  "max_concurrent_accounts": 3,
+  "account_cooldown": 300,
+  "max_retries": 3,
+  "retry_delay": 60
+}

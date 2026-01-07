@@ -1,0 +1,106 @@
+/* 现代化UI设计变量 - 基于赛狐ERP设计理念 */
+
+:root {
+  /* 主色调 - 专业蓝 */
+  --primary-color: #2c3e50;
+  --primary-light: #34495e;
+  --primary-lighter: #7f8c8d;
+
+  /* 辅助色 - 活力蓝 */
+  --secondary-color: #3498db;
+  --secondary-light: #5dade2;
+  --secondary-lighter: #85c1e9;
+
+  /* 功能色 */
+  --success-color: #27ae60;
+  --warning-color: #f39c12;
+  --error-color: #e74c3c;
+  --info-color: #17a2b8;
+
+  /* 中性色 */
+  --text-primary: #2c3e50;
+  --text-secondary: #7f8c8d;
+  --text-disabled: #bdc3c7;
+  --border-color: #e9ecef;
+  --background-color: #f8f9fa;
+  --white: #ffffff;
+
+  /* 渐变色 */
+  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --gradient-secondary: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  --gradient-success: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  --gradient-card: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  --gradient-header: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+  /* 字体 */
+  --font-family-primary: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+  --font-family-mono: 'Fira Code', 'Monaco', 'Consolas', monospace;
+
+  /* 字体大小 */
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 30px;
+  --font-size-4xl: 36px;
+
+  /* 字体权重 */
+  --font-weight-light: 300;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* 间距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-base: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+  --spacing-3xl: 64px;
+
+  /* 圆角 */
+  --border-radius-sm: 4px;
+  --border-radius-base: 8px;
+  --border-radius-lg: 12px;
+  --border-radius-xl: 16px;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-base: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.15);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.2);
+
+  /* 过渡动画 */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.3s ease;
+  --transition-slow: 0.5s ease;
+
+  /* 布局 */
+  --sidebar-width: 250px;
+  --header-height: 60px;
+  --content-padding: var(--spacing-xl);
+}
+
+/* 响应式断点 */
+@media (max-width: 768px) {
+  :root {
+    --sidebar-width: 0px;
+    --content-padding: var(--spacing-base);
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  :root {
+    --sidebar-width: 200px;
+  }
+}
+
+@media (min-width: 1025px) {
+  :root {
+    --sidebar-width: 250px;
+  }
+}

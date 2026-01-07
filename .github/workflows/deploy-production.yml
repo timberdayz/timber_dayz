@@ -1,0 +1,212 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g., v4.19.7, main-abc123)'
+        required: true
+        type: string
+      confirm:
+        description: 'Type "DEPLOY" to confirm production deployment'
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
+  IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ secrets.PRODUCTION_URL || 'https://production.example.com' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify deployment confirmation
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
+            echo "❌ Deployment confirmation failed. Please type 'DEPLOY' to confirm."
+            exit 1
+          fi
+          echo "✅ Deployment confirmed"
+
+      - name: Determine image tag
+        id: image-tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_type }}" == "tag" ]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          fi
+          echo "Deploying with tag: ${{ steps.image-tag.outputs.tag }}"
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+
+      - name: Backup current deployment
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
+        run: |
+          ssh -o StrictHostKeyChecking=no ${PRODUCTION_USER}@${PRODUCTION_HOST} << 'ENDSSH'
+            set -e
+            cd ${PRODUCTION_PATH}
+            
+            # 备份当前配置和状态
+            BACKUP_DIR="backups/pre_deploy_$(date +%Y%m%d_%H%M%S)"
+            mkdir -p ${BACKUP_DIR}
+            
+            # 保存当前镜像标签
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml config > ${BACKUP_DIR}/docker-compose.config.yaml
+            
+            # 记录当前运行的容器
+            docker ps --format "{{.Names}} {{.Image}}" > ${BACKUP_DIR}/running_containers.txt
+            
+            echo "✅ Pre-deployment backup completed: ${BACKUP_DIR}"
+          ENDSSH
+
+      - name: Deploy to production server
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
+          IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
+        run: |
+          ssh -o StrictHostKeyChecking=no ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
+            set -e
+            cd ${PRODUCTION_PATH}
+            
+            # 登录到容器仓库
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+            
+            # 拉取指定版本的镜像
+            echo "Pulling images with tag: ${IMAGE_TAG}"
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG} || {
+              echo "❌ Failed to pull backend image with tag ${IMAGE_TAG}"
+              exit 1
+            }
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG} || {
+              echo "❌ Failed to pull frontend image with tag ${IMAGE_TAG}"
+              exit 1
+            }
+            
+            # 标记镜像为 latest（用于 docker-compose）
+            docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG} xihong_erp_backend:latest
+            docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG} xihong_erp_frontend:latest
+            
+            # 使用 docker-compose 部署（生产环境）
+            # 注意：docker-compose.prod.yml 使用 build，我们需要临时覆盖为 image
+            export APP_ENV=production
+            export COMPOSE_PROJECT_NAME=xihong_erp
+            
+            # 创建临时 compose 文件，覆盖 build 为 image
+            cat > docker-compose.deploy.yml <<EOF
+            services:
+              backend:
+                image: xihong_erp_backend:latest
+              frontend:
+                image: xihong_erp_frontend:latest
+            EOF
+            
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d
+            
+            # 等待服务启动
+            echo "Waiting for services to start..."
+            sleep 15
+            
+            # 健康检查
+            for i in {1..60}; do
+              if curl -f http://localhost:8001/health > /dev/null 2>&1; then
+                echo "✅ Backend health check passed"
+                break
+              fi
+              if [ $i -eq 60 ]; then
+                echo "❌ Backend health check failed after 2 minutes"
+                docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml logs backend 2>/dev/null || \
+                docker-compose -f docker-compose.yml -f docker-compose.prod.yml logs backend
+                exit 1
+              fi
+              echo "Waiting for backend... ($i/60)"
+              sleep 2
+            done
+            
+            # 验证前端（如果部署了前端）
+            if docker ps | grep -q frontend; then
+              for i in {1..30}; do
+                if curl -f http://localhost:5174 > /dev/null 2>&1; then
+                  echo "✅ Frontend health check passed"
+                  break
+                fi
+                if [ $i -eq 30 ]; then
+                  echo "⚠️ Frontend health check failed (non-critical)"
+                fi
+                sleep 2
+              done
+            fi
+            
+            echo "✅ Production deployment completed successfully"
+            echo "Deployed image tag: ${IMAGE_TAG}"
+            
+            # 清理临时文件
+            rm -f docker-compose.deploy.yml
+          ENDSSH
+
+      - name: Health check verification
+        run: |
+          PRODUCTION_URL=${{ secrets.PRODUCTION_URL || 'https://production.example.com' }}
+          if curl -f ${PRODUCTION_URL}/health > /dev/null 2>&1; then
+            echo "✅ Production health check passed"
+          else
+            echo "❌ Production health check failed"
+            exit 1
+          fi
+
+      - name: Rollback on failure
+        if: failure()
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
+        run: |
+          ssh -o StrictHostKeyChecking=no ${PRODUCTION_USER}@${PRODUCTION_HOST} << 'ENDSSH'
+            set -e
+            cd ${PRODUCTION_PATH}
+            
+            echo "⚠️ Deployment failed, attempting rollback..."
+            
+            # 查找上一个成功的部署备份
+            LAST_BACKUP=$(ls -td backups/pre_deploy_* 2>/dev/null | head -1)
+            if [ -n "$LAST_BACKUP" ]; then
+              echo "Found backup: $LAST_BACKUP"
+              # 这里可以实现回滚逻辑（恢复配置、拉取上一个镜像等）
+              echo "⚠️ Manual rollback required. Check backup: $LAST_BACKUP"
+            else
+              echo "⚠️ No backup found for rollback"
+            fi
+          ENDSSH
+
+      - name: Send deployment notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Production deployment ${{ job.status }} - Tag: ${{ steps.image-tag.outputs.tag }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+

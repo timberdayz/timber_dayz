@@ -1,0 +1,348 @@
+# ⭐ v4.19.5 更新：移除 version 字段（Docker Compose v2 已废弃）
+services:
+  # PostgreSQL数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: xihong_erp_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-xihong_erp}
+      POSTGRES_USER: ${POSTGRES_USER:-erp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_pass_2025}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+      - ./backups:/backups
+    ports:
+      - "5432:5432"
+    networks:
+      - erp_network
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-erp_user} -d ${POSTGRES_DB:-xihong_erp}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "1"
+          memory: 1G
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: xihong_erp_redis
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_pass_2025}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - erp_network
+    healthcheck:
+      # ⭐ v4.19.5 修复：健康检查需要提供密码
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
+  # FastAPI后端
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        - ENVIRONMENT=production
+    container_name: xihong_erp_backend
+    restart: always
+    environment:
+      # 数据库配置
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-erp_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_pass_2025}
+      POSTGRES_DB: ${POSTGRES_DB:-xihong_erp}
+
+      # Redis配置
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+
+      # 安全配置
+      SECRET_KEY: ${SECRET_KEY:-xihong-erp-secret-key-prod-2025}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-xihong-erp-jwt-secret-prod-2025}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+
+      # 应用配置
+      DEBUG: "false"
+      LOG_LEVEL: INFO
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+
+      # ⭐ 路径配置（Linux服务器部署必需）
+      PROJECT_ROOT: /app
+      DATA_DIR: /app/data
+      DATA_RAW_DIR: /app/data/raw
+      DOWNLOADS_DIR: /app/downloads
+      TEMP_DIR: /app/temp
+      LOGS_DIR: /app/logs
+
+      # 数据库连接池配置
+      DB_POOL_SIZE: 20
+      DB_MAX_OVERFLOW: 40
+      DB_POOL_TIMEOUT: 30
+      DB_POOL_RECYCLE: 3600
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+      - ./uploads:/app/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - erp_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "1"
+          memory: 1G
+
+  # Vue.js前端
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
+    container_name: xihong_erp_frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - erp_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
+  # Nginx反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: xihong_erp_nginx
+    restart: always
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - erp_network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256M
+        reservations:
+          cpus: "0.5"
+          memory: 128M
+
+  # Celery Worker（异步任务处理）
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        - ENVIRONMENT=production
+    container_name: xihong_erp_celery_worker
+    restart: always
+    # ⚠️ 重要：必须指定队列和并发数，与 backend/celery_app.py 中的配置一致
+    # 队列说明：
+    # - data_sync: 数据同步任务（主要业务任务）
+    # - scheduled: 定时任务（由 Celery Beat 调度）
+    # - data_processing: 数据处理任务（可选，如果不需要可以移除）
+    command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=4
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      # ⚠️ 重要：Celery 使用 CELERY_BROKER_URL 和 CELERY_RESULT_BACKEND，不是 REDIS_URL
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      # ⭐ 路径配置（与后端服务保持一致）
+      PROJECT_ROOT: /app
+      DATA_DIR: /app/data
+      DATA_RAW_DIR: /app/data/raw
+      DOWNLOADS_DIR: /app/downloads
+      TEMP_DIR: /app/temp
+      LOGS_DIR: /app/logs
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - erp_network
+    # ⚠️ 重要：添加健康检查，确保 Worker 正常运行
+    # 使用进程检查方式（更可靠），检查 celery worker 进程是否存在
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep '[c]elery.*worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  # Celery Beat（定时任务）
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        - ENVIRONMENT=production
+    container_name: xihong_erp_celery_beat
+    restart: always
+    command: celery -A backend.celery_app beat --loglevel=info
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      # ⚠️ 重要：Celery 使用 CELERY_BROKER_URL 和 CELERY_RESULT_BACKEND，不是 REDIS_URL
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - erp_network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  # Celery Exporter（监控指标导出）
+  # ⚠️ 注意：ovalmoney/celery-exporter 默认监听 9540 端口
+  celery-exporter:
+    image: ovalmoney/celery-exporter:latest
+    container_name: xihong_erp_celery_exporter
+    restart: always
+    ports:
+      - "9808:9540" # 外部 9808 映射到容器内 9540
+    environment:
+      # ⚠️ ovalmoney/celery-exporter 使用 CELERY_EXPORTER_BROKER_URL 环境变量
+      CELERY_EXPORTER_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - erp_network
+    healthcheck:
+      # ⚠️ 容器内部监听 9540 端口，使用 Python 进行健康检查（wget 在 Alpine 中有兼容性问题）
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9540/metrics', timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+networks:
+  erp_network:
+    driver: bridge
+    name: xihong_erp_erp_network
+
+volumes:
+  postgres_data:
+    driver: local
+    name: xihong_erp_postgres_data
+  redis_data:
+    driver: local
+    name: xihong_erp_redis_data

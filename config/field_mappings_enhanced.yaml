@@ -1,0 +1,208 @@
+# 增强版字段映射配置
+# 专门解决外键映射和数据准确度问题
+
+data_domains:
+  products:
+    standard_fields:
+      - platform_sku          # 产品SKU（外键到dim_products）
+      - shop_id               # 店铺ID（外键到dim_shops）
+      - platform_code         # 平台代码（外键到dim_platforms）
+      - product_name          # 产品名称
+      - product_price         # 产品价格
+      - currency              # 货币（外键到dim_currency_rates）
+      - category              # 产品分类
+      - brand                 # 品牌
+      - weight                # 重量
+      - dimensions            # 尺寸
+      - stock_quantity        # 库存数量
+      - status                # 状态
+      - created_at            # 创建时间
+      - updated_at            # 更新时间
+    
+    # 外键映射规则
+    foreign_key_mappings:
+      platform_sku:
+        target_table: "dim_products"
+        target_column: "platform_sku"
+        validation: "required|string|max:100"
+      
+      shop_id:
+        target_table: "dim_shops"
+        target_column: "shop_id"
+        validation: "required|string|max:50"
+      
+      platform_code:
+        target_table: "dim_platforms"
+        target_column: "platform_code"
+        validation: "required|string|in:shopee,tiktok,amazon,lazada,miaoshou"
+      
+      currency:
+        target_table: "dim_currency_rates"
+        target_column: "quote_currency"
+        validation: "required|string|in:USD,CNY,SGD,MYR,THB,IDR,VND"
+
+  orders:
+    standard_fields:
+      - order_id              # 订单ID
+      - shop_id               # 店铺ID（外键）
+      - platform_code         # 平台代码（外键）
+      - customer_id           # 客户ID
+      - order_date            # 订单日期
+      - order_amount          # 订单金额
+      - currency              # 货币（外键）
+      - payment_method        # 支付方式
+      - shipping_address      # 收货地址
+      - order_status          # 订单状态
+      - tracking_number       # 物流单号
+      - created_at            # 创建时间
+    
+    foreign_key_mappings:
+      shop_id:
+        target_table: "dim_shops"
+        target_column: "shop_id"
+        validation: "required|string|max:50"
+      
+      platform_code:
+        target_table: "dim_platforms"
+        target_column: "platform_code"
+        validation: "required|string|in:shopee,tiktok,amazon,lazada,miaoshou"
+      
+      currency:
+        target_table: "dim_currency_rates"
+        target_column: "quote_currency"
+        validation: "required|string|in:USD,CNY,SGD,MYR,THB,IDR,VND"
+
+  traffic:
+    standard_fields:
+      - date                  # 日期
+      - shop_id               # 店铺ID（外键）
+      - platform_code         # 平台代码（外键）
+      - page_views            # 页面浏览量
+      - unique_visitors       # 独立访客
+      - bounce_rate           # 跳出率
+      - avg_session_duration  # 平均会话时长
+      - conversion_rate       # 转化率
+      - revenue               # 收入
+      - currency              # 货币（外键）
+    
+    foreign_key_mappings:
+      shop_id:
+        target_table: "dim_shops"
+        target_column: "shop_id"
+        validation: "required|string|max:50"
+      
+      platform_code:
+        target_table: "dim_platforms"
+        target_column: "platform_code"
+        validation: "required|string|in:shopee,tiktok,amazon,lazada,miaoshou"
+
+# 智能匹配规则
+smart_matching:
+  # 字段名相似度匹配
+  fuzzy_matching:
+    enabled: true
+    threshold: 0.7  # 相似度阈值
+  
+  # 语义匹配规则
+  semantic_rules:
+    - pattern: ["sku", "product_code", "item_id"]
+      target: "platform_sku"
+    
+    - pattern: ["shop", "store", "account"]
+      target: "shop_id"
+    
+    - pattern: ["platform", "site", "channel"]
+      target: "platform_code"
+    
+    - pattern: ["price", "cost", "amount", "value"]
+      target: "product_price"
+    
+    - pattern: ["name", "title", "product_name"]
+      target: "product_name"
+    
+    - pattern: ["currency", "curr", "币种"]
+      target: "currency"
+    
+    - pattern: ["date", "time", "created", "updated"]
+      target: "created_at"
+
+# 数据验证规则
+validation_rules:
+  # 必填字段
+  required_fields:
+    products: ["platform_sku", "shop_id", "platform_code", "product_name"]
+    orders: ["order_id", "shop_id", "platform_code", "order_date"]
+    traffic: ["date", "shop_id", "platform_code"]
+  
+  # 数据类型验证
+  data_types:
+    platform_sku: "string"
+    shop_id: "string"
+    platform_code: "string"
+    product_price: "decimal"
+    order_amount: "decimal"
+    page_views: "integer"
+    unique_visitors: "integer"
+    date: "date"
+    created_at: "datetime"
+  
+  # 范围验证
+  ranges:
+    product_price:
+      min: 0
+      max: 999999.99
+    
+    order_amount:
+      min: 0
+      max: 999999.99
+    
+    page_views:
+      min: 0
+      max: 999999999
+
+# 错误处理配置
+error_handling:
+  # 数据隔离策略
+  quarantine_rules:
+    - condition: "validation_failed"
+      action: "quarantine"
+      message: "数据验证失败"
+    
+    - condition: "foreign_key_not_found"
+      action: "quarantine"
+      message: "外键引用不存在"
+    
+    - condition: "duplicate_key"
+      action: "update_existing"
+      message: "更新现有记录"
+  
+  # 自动修复规则
+  auto_fix_rules:
+    - field: "currency"
+      condition: "empty_or_null"
+      fix: "default_to_USD"
+    
+    - field: "platform_code"
+      condition: "case_mismatch"
+      fix: "to_lowercase"
+    
+    - field: "date"
+      condition: "invalid_format"
+      fix: "parse_flexible"
+
+# 性能优化配置
+performance:
+  # 批量处理配置
+  batch_processing:
+    max_batch_size: 1000
+    timeout_seconds: 300
+  
+  # 缓存配置
+  caching:
+    field_mappings_ttl: 3600  # 1小时
+    validation_rules_ttl: 1800  # 30分钟
+  
+  # 并发配置
+  concurrency:
+    max_workers: 4
+    queue_size: 100
