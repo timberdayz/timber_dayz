@@ -13,6 +13,9 @@ FROM node:18-alpine as build
 LABEL maintainer="西虹ERP团队"
 LABEL description="西虹ERP系统前端构建阶段"
 
+# 安装必要的系统依赖（某些 npm 包的原生模块需要）
+RUN apk add --no-cache python3 make g++
+
 # 设置工作目录
 WORKDIR /app
 
@@ -20,19 +23,21 @@ WORKDIR /app
 COPY frontend/package*.json ./
 
 # 验证 npm 和文件
-RUN npm --version && \
+RUN echo "=== Node/npm version ===" && \
+    node --version && \
+    npm --version && \
     ls -la package*.json
 
 # 安装依赖（构建需要 devDependencies，如 Vite）
 # 注意：不设置 NODE_ENV=production，确保安装所有依赖包括 devDependencies
-# 使用 npm install 而不是 npm ci，更兼容 Alpine Linux
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps && \
+    echo "=== npm install completed ===" && \
+    ls -la node_modules/.bin/ | head -20
 
-# 设置环境变量（在安装依赖后设置，用于构建）
-ENV NODE_ENV=production
-
-# 验证依赖安装
-RUN npm list --depth=0 || true
+# 验证 vite 已正确安装（必须成功，否则构建失败）
+RUN echo "=== Verifying vite installation ===" && \
+    test -f node_modules/.bin/vite && \
+    node_modules/.bin/vite --version
 
 # 复制源代码
 COPY frontend/ ./
@@ -41,11 +46,12 @@ COPY frontend/ ./
 ARG VITE_API_URL=http://localhost:8001
 ENV VITE_API_URL=$VITE_API_URL
 
-# 验证 vite 是否可用
-RUN which vite || npm list vite || true
+# 设置环境变量（用于构建优化）
+ENV NODE_ENV=production
 
-# 构建Vue应用
-RUN npm run build
+# 构建Vue应用（使用 npx 确保找到 vite）
+RUN echo "=== Building Vue application ===" && \
+    npx vite build
 
 # ==================== 运行阶段 ====================
 FROM nginx:alpine as production
