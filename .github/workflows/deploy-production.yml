@@ -21,11 +21,30 @@ env:
   IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
 
 jobs:
+  # 检查是否配置了必要的 secrets
+  check-config:
+    runs-on: ubuntu-latest
+    outputs:
+      can_deploy: ${{ steps.check.outputs.can_deploy }}
+    steps:
+      - name: Check deployment configuration
+        id: check
+        run: |
+          if [ -z "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" ] || [ -z "${{ secrets.PRODUCTION_HOST }}" ]; then
+            echo "Production deployment secrets not configured. Skipping deployment."
+            echo "Required secrets: PRODUCTION_SSH_PRIVATE_KEY, PRODUCTION_HOST"
+            echo "can_deploy=false" >> $GITHUB_OUTPUT
+          else
+            echo "Production deployment secrets configured. Proceeding with deployment."
+            echo "can_deploy=true" >> $GITHUB_OUTPUT
+          fi
+
   deploy:
     runs-on: ubuntu-latest
+    needs: check-config
+    if: ${{ needs.check-config.outputs.can_deploy == 'true' }}
     environment:
       name: production
-      # Note: URL will be set after deployment completes
 
     steps:
       - name: Checkout code
@@ -35,10 +54,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
-            echo "❌ Deployment confirmation failed. Please type 'DEPLOY' to confirm."
+            echo "Deployment confirmation failed. Please type 'DEPLOY' to confirm."
             exit 1
           fi
-          echo "✅ Deployment confirmed"
+          echo "Deployment confirmed"
 
       - name: Determine image tag
         id: image-tag
@@ -77,7 +96,7 @@ jobs:
             # 记录当前运行的容器
             docker ps --format "{{.Names}} {{.Image}}" > ${BACKUP_DIR}/running_containers.txt
             
-            echo "✅ Pre-deployment backup completed: ${BACKUP_DIR}"
+            echo "[OK] Pre-deployment backup completed: ${BACKUP_DIR}"
           ENDSSH
 
       - name: Deploy to production server
@@ -97,11 +116,11 @@ jobs:
             # 拉取指定版本的镜像
             echo "Pulling images with tag: ${IMAGE_TAG}"
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG} || {
-              echo "❌ Failed to pull backend image with tag ${IMAGE_TAG}"
+              echo "[FAIL] Failed to pull backend image with tag ${IMAGE_TAG}"
               exit 1
             }
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG} || {
-              echo "❌ Failed to pull frontend image with tag ${IMAGE_TAG}"
+              echo "[FAIL] Failed to pull frontend image with tag ${IMAGE_TAG}"
               exit 1
             }
             
@@ -132,11 +151,11 @@ jobs:
             # 健康检查
             for i in {1..60}; do
               if curl -f http://localhost:8001/health > /dev/null 2>&1; then
-                echo "✅ Backend health check passed"
+                echo "[OK] Backend health check passed"
                 break
               fi
               if [ $i -eq 60 ]; then
-                echo "❌ Backend health check failed after 2 minutes"
+                echo "[FAIL] Backend health check failed after 2 minutes"
                 docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml logs backend 2>/dev/null || \
                 docker-compose -f docker-compose.yml -f docker-compose.prod.yml logs backend
                 exit 1
@@ -149,17 +168,17 @@ jobs:
             if docker ps | grep -q frontend; then
               for i in {1..30}; do
                 if curl -f http://localhost:5174 > /dev/null 2>&1; then
-                  echo "✅ Frontend health check passed"
+                  echo "[OK] Frontend health check passed"
                   break
                 fi
                 if [ $i -eq 30 ]; then
-                  echo "⚠️ Frontend health check failed (non-critical)"
+                  echo "[WARN] Frontend health check failed (non-critical)"
                 fi
                 sleep 2
               done
             fi
             
-            echo "✅ Production deployment completed successfully"
+            echo "[OK] Production deployment completed successfully"
             echo "Deployed image tag: ${IMAGE_TAG}"
             
             # 清理临时文件
@@ -170,9 +189,9 @@ jobs:
         run: |
           PRODUCTION_URL=${{ secrets.PRODUCTION_URL || 'https://production.example.com' }}
           if curl -f ${PRODUCTION_URL}/health > /dev/null 2>&1; then
-            echo "✅ Production health check passed"
+            echo "[OK] Production health check passed"
           else
-            echo "❌ Production health check failed"
+            echo "[FAIL] Production health check failed"
             exit 1
           fi
 
@@ -187,26 +206,46 @@ jobs:
             set -e
             cd ${PRODUCTION_PATH}
             
-            echo "⚠️ Deployment failed, attempting rollback..."
+            echo "[WARNING] Deployment failed, attempting rollback..."
             
             # 查找上一个成功的部署备份
             LAST_BACKUP=$(ls -td backups/pre_deploy_* 2>/dev/null | head -1)
             if [ -n "$LAST_BACKUP" ]; then
               echo "Found backup: $LAST_BACKUP"
               # 这里可以实现回滚逻辑（恢复配置、拉取上一个镜像等）
-              echo "⚠️ Manual rollback required. Check backup: $LAST_BACKUP"
+              echo "[WARNING] Manual rollback required. Check backup: $LAST_BACKUP"
             else
-              echo "⚠️ No backup found for rollback"
+              echo "[WARNING] No backup found for rollback"
             fi
           ENDSSH
 
       - name: Send deployment notification
-        if: always()
+        if: always() && secrets.SLACK_WEBHOOK_URL != ''
         uses: 8398a7/action-slack@v3
         with:
           status: ${{ job.status }}
-          text: 'Production deployment ${{ job.status }} - Tag: ${{ steps.image-tag.outputs.tag }}'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+  # 当部署被跳过时显示消息
+  skip-notification:
+    runs-on: ubuntu-latest
+    needs: check-config
+    if: ${{ needs.check-config.outputs.can_deploy == 'false' }}
+    steps:
+      - name: Deployment skipped
+        run: |
+          echo "========================================"
+          echo "Deployment to production was SKIPPED"
+          echo "========================================"
+          echo ""
+          echo "Required GitHub Secrets not configured:"
+          echo "  - PRODUCTION_SSH_PRIVATE_KEY"
+          echo "  - PRODUCTION_HOST"
+          echo ""
+          echo "To enable deployment, configure these secrets in:"
+          echo "  Settings > Secrets and variables > Actions"
+          echo "========================================"
 

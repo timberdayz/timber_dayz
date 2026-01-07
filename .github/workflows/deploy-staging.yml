@@ -22,12 +22,31 @@ env:
   IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
 
 jobs:
-  deploy:
+  # 检查是否配置了必要的 secrets
+  check-config:
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    outputs:
+      can_deploy: ${{ steps.check.outputs.can_deploy }}
+    steps:
+      - name: Check deployment configuration
+        id: check
+        run: |
+          if [ -z "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" ] || [ -z "${{ secrets.STAGING_HOST }}" ]; then
+            echo "Deployment secrets not configured. Skipping deployment."
+            echo "Required secrets: STAGING_SSH_PRIVATE_KEY, STAGING_HOST"
+            echo "can_deploy=false" >> $GITHUB_OUTPUT
+          else
+            echo "Deployment secrets configured. Proceeding with deployment."
+            echo "can_deploy=true" >> $GITHUB_OUTPUT
+          fi
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: check-config
+    if: ${{ needs.check-config.outputs.can_deploy == 'true' }}
     environment:
       name: staging
-      # Note: URL will be set after deployment completes
 
     steps:
       - name: Checkout code
@@ -99,11 +118,11 @@ jobs:
             # 健康检查
             for i in {1..30}; do
               if curl -f http://localhost:8001/health > /dev/null 2>&1; then
-                echo "✅ Backend health check passed"
+                echo "[OK] Backend health check passed"
                 break
               fi
               if [ $i -eq 30 ]; then
-                echo "❌ Backend health check failed"
+                echo "[FAIL] Backend health check failed"
                 # 重新创建临时文件以查看日志
                 cat > docker-compose.deploy.yml <<EOF
                 services:
@@ -123,26 +142,46 @@ jobs:
             # 清理临时文件
             rm -f docker-compose.deploy.yml
             
-            echo "✅ Deployment completed successfully"
+            echo "[OK] Deployment completed successfully"
           ENDSSH
 
       - name: Health check verification
         run: |
           STAGING_URL=${{ secrets.STAGING_URL || 'http://staging.example.com' }}
           if curl -f ${STAGING_URL}/health > /dev/null 2>&1; then
-            echo "✅ Health check passed"
+            echo "[OK] Health check passed"
           else
-            echo "❌ Health check failed"
+            echo "[FAIL] Health check failed"
             exit 1
           fi
 
       - name: Send deployment notification
-        if: always()
+        if: always() && secrets.SLACK_WEBHOOK_URL != ''
         uses: 8398a7/action-slack@v3
         with:
           status: ${{ job.status }}
-          text: 'Staging deployment ${{ job.status }}'
-          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+  # 当部署被跳过时显示消息
+  skip-notification:
+    runs-on: ubuntu-latest
+    needs: check-config
+    if: ${{ needs.check-config.outputs.can_deploy == 'false' }}
+    steps:
+      - name: Deployment skipped
+        run: |
+          echo "========================================"
+          echo "Deployment to staging was SKIPPED"
+          echo "========================================"
+          echo ""
+          echo "Required GitHub Secrets not configured:"
+          echo "  - STAGING_SSH_PRIVATE_KEY"
+          echo "  - STAGING_HOST"
+          echo ""
+          echo "To enable deployment, configure these secrets in:"
+          echo "  Settings > Secrets and variables > Actions"
+          echo "========================================"
 
