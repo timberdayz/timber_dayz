@@ -22,8 +22,16 @@ ENV NODE_ENV=production
 # 复制package文件
 COPY frontend/package*.json ./
 
+# 验证 npm 和文件
+RUN npm --version && \
+    ls -la package*.json
+
 # 安装依赖（构建需要 devDependencies，如 Vite）
-RUN npm ci
+# 使用 npm install 而不是 npm ci，更兼容 Alpine Linux
+RUN npm install --legacy-peer-deps
+
+# 验证依赖安装
+RUN npm list --depth=0 || true
 
 # 复制源代码
 COPY frontend/ ./
@@ -31,6 +39,9 @@ COPY frontend/ ./
 # 构建参数
 ARG VITE_API_URL=http://localhost:8001
 ENV VITE_API_URL=$VITE_API_URL
+
+# 验证 vite 是否可用
+RUN which vite || npm list vite || true
 
 # 构建Vue应用
 RUN npm run build
