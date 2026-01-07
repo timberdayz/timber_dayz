@@ -82,38 +82,38 @@
 
 ### 3.1 Docker 镜像构建与推送
 
-- [ ] 3.1.1 创建 `.github/workflows/docker-build.yml`
-- [ ] 3.1.2 实现后端镜像构建（`Dockerfile.backend`）
-- [ ] 3.1.3 实现前端镜像构建（`Dockerfile.frontend`）
-- [ ] 3.1.4 配置 docker buildx + 缓存优化
-- [ ] 3.1.5 配置镜像仓库推送（Docker Hub / 阿里云 / GitHub Container Registry）
-- [ ] 3.1.6 配置镜像标签策略（`latest` / `v{version}` / `{branch}` / `{commit-sha}`）
-- [ ] 3.1.7 更新 `.github/workflows/ci.yml`（可选，集成镜像构建）
+- [x] 3.1.1 创建 `.github/workflows/docker-build.yml`
+- [x] 3.1.2 实现后端镜像构建（`Dockerfile.backend`）
+- [x] 3.1.3 实现前端镜像构建（`Dockerfile.frontend`）
+- [x] 3.1.4 配置 docker buildx + 缓存优化
+- [x] 3.1.5 配置镜像仓库推送（Docker Hub / 阿里云 / GitHub Container Registry）
+- [x] 3.1.6 配置镜像标签策略（`latest` / `v{version}` / `{branch}` / `{commit-sha}`）
+- [x] 3.1.7 更新 `.github/workflows/ci.yml`（可选，集成镜像构建）
 
 ### 3.2 自动部署到测试环境
 
-- [ ] 3.2.1 创建 `.github/workflows/deploy-staging.yml`
-- [ ] 3.2.2 实现 SSH 登录测试服务器
-- [ ] 3.2.3 实现镜像拉取和 docker-compose 部署
-- [ ] 3.2.4 实现健康检查验证
-- [ ] 3.2.5 实现部署通知（Slack / 邮件）
-- [ ] 3.2.6 更新 `.github/workflows/ci.yml`，挂接测试环境部署
+- [x] 3.2.1 创建 `.github/workflows/deploy-staging.yml`
+- [x] 3.2.2 实现 SSH 登录测试服务器
+- [x] 3.2.3 实现镜像拉取和 docker-compose 部署
+- [x] 3.2.4 实现健康检查验证
+- [x] 3.2.5 实现部署通知（Slack / 邮件）
+- [x] 3.2.6 更新 `.github/workflows/ci.yml`，挂接测试环境部署
 
 ### 3.3 生产环境部署与审批
 
-- [ ] 3.3.1 创建 `.github/workflows/deploy-production.yml`
-- [ ] 3.3.2 实现 `workflow_dispatch` 手动触发
-- [ ] 3.3.3 配置 GitHub Environments `production`
-- [ ] 3.3.4 实现回滚机制（基于镜像标签）
-- [ ] 3.3.5 实现部署通知（Slack / 邮件 / 企业微信）
-- [ ] 3.3.6 设置审批人和保护规则
+- [x] 3.3.1 创建 `.github/workflows/deploy-production.yml`
+- [x] 3.3.2 实现 `workflow_dispatch` 手动触发
+- [x] 3.3.3 配置 GitHub Environments `production`
+- [x] 3.3.4 实现回滚机制（基于镜像标签）
+- [x] 3.3.5 实现部署通知（Slack / 邮件 / 企业微信）
+- [x] 3.3.6 设置审批人和保护规则
 
 ### 3.4 CI/CD 文档
 
-- [ ] 3.4.1 创建 `docs/deployment/CI_CD_GUIDE.md`
-- [ ] 3.4.2 描述 CI 工作流（测试、构建、镜像推送）
-- [ ] 3.4.3 描述测试/生产环境部署流程
-- [ ] 3.4.4 描述回滚操作与故障排查指南
+- [x] 3.4.1 创建 `docs/deployment/CI_CD_GUIDE.md`
+- [x] 3.4.2 描述 CI 工作流（测试、构建、镜像推送）
+- [x] 3.4.3 描述测试/生产环境部署流程
+- [x] 3.4.4 描述回滚操作与故障排查指南
 
 ---
 
@@ -171,3 +171,9 @@
 - Phase 3 全部：23 个 ✅
 
 **可延后**: 6 个可选任务（Phase 2 可选：2.1.7, 2.2.4, 2.4.x）
+
+---
+
+## 更新记录
+
+- **2026-01-05**: Phase 3 全部任务标记为已完成 ✅
