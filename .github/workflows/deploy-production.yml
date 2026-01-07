@@ -220,14 +220,14 @@ jobs:
           ENDSSH
 
       - name: Send deployment notification
-        if: always() && secrets.SLACK_WEBHOOK_URL != ''
+        if: always()
         uses: 8398a7/action-slack@v3
         with:
           status: ${{ job.status }}
           fields: repo,message,commit,author,action,eventName,ref,workflow
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        continue-on-error: true
+        continue-on-error: true  # 如果 SLACK_WEBHOOK_URL 未配置会静默失败
 
   # 当部署被跳过时显示消息
   skip-notification:
