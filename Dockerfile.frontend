@@ -22,8 +22,8 @@ ENV NODE_ENV=production
 # 复制package文件
 COPY frontend/package*.json ./
 
-# 安装依赖
-RUN npm ci --only=production
+# 安装依赖（构建需要 devDependencies，如 Vite）
+RUN npm ci
 
 # 复制源代码
 COPY frontend/ ./
