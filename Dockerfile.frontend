@@ -16,9 +16,6 @@ LABEL description="西虹ERP系统前端构建阶段"
 # 设置工作目录
 WORKDIR /app
 
-# 设置环境变量
-ENV NODE_ENV=production
-
 # 复制package文件
 COPY frontend/package*.json ./
 
@@ -27,8 +24,12 @@ RUN npm --version && \
     ls -la package*.json
 
 # 安装依赖（构建需要 devDependencies，如 Vite）
+# 注意：不设置 NODE_ENV=production，确保安装所有依赖包括 devDependencies
 # 使用 npm install 而不是 npm ci，更兼容 Alpine Linux
 RUN npm install --legacy-peer-deps
+
+# 设置环境变量（在安装依赖后设置，用于构建）
+ENV NODE_ENV=production
 
 # 验证依赖安装
 RUN npm list --depth=0 || true
