@@ -57,10 +57,11 @@ export const useAuthStore = defineStore('auth', () => {
         userStore.roles = userInfo.roles
         userStore.token = accessToken
         
-        // 设置默认激活角色
-        if (userInfo.roles.length > 0) {
-          localStorage.setItem('activeRole', userInfo.roles[0])
-        }
+      // 设置默认激活角色：优先 admin，其次第一个角色
+      if (userInfo.roles.length > 0) {
+        const preferredRole = userInfo.roles.includes('admin') ? 'admin' : userInfo.roles[0]
+        localStorage.setItem('activeRole', preferredRole)
+      }
       }
       
       ElMessage.success('登录成功')

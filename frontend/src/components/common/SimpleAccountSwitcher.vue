@@ -2,10 +2,10 @@
   <div class="simple-account-switcher">
     <el-dropdown @command="handleCommand" trigger="click">
       <div class="account-trigger">
-        <el-avatar :size="32" :src="currentUser.avatar">
+        <el-avatar :size="32" :src="currentUser?.avatar || ''">
           <el-icon><User /></el-icon>
         </el-avatar>
-        <span class="account-name">{{ displayName }}</span>
+        <span class="account-name">{{ displayName || currentUser?.username || currentUser?.name || '用户' }}</span>
         <el-icon class="dropdown-icon"><ArrowDown /></el-icon>
       </div>
       <template #dropdown>
@@ -17,7 +17,7 @@
           
           <!-- 动态显示用户拥有的角色 -->
           <el-dropdown-item 
-            v-for="role in availableRoles"
+            v-for="role in (availableRoles || [])"
             :key="role.code"
             :command="`role:${role.code}`"
             :class="{ 'active-role': currentActiveRole === role.code }"
@@ -27,7 +27,7 @@
             <el-icon v-if="currentActiveRole === role.code" style="margin-left: auto; color: #67C23A;"><Check /></el-icon>
           </el-dropdown-item>
           
-          <el-dropdown-item v-if="availableRoles.length === 0" disabled>
+          <el-dropdown-item v-if="!availableRoles || availableRoles.length === 0" disabled>
             <span style="color: #909399;">暂无可用角色</span>
           </el-dropdown-item>
           
@@ -72,6 +72,7 @@ const authStore = useAuthStore()
 const currentActiveRole = ref(localStorage.getItem('activeRole') || '')
 
 // 角色配置（根据2026-01-08讨论的权限矩阵）
+// 必须在 normalizeRoleCode 之前定义，避免初始化顺序错误
 const ROLE_CONFIG = {
   admin: {
     name: '管理员',
@@ -234,25 +235,78 @@ const ROLE_CONFIG = {
   }
 }
 
+// 兼容：角色可能来自后端 role_name（如中文）或 role_code（如 admin/operator）
+const normalizeRoleCode = (roleCode) => {
+  if (!roleCode) return ''
+  const v = String(roleCode).trim()
+  if (ROLE_CONFIG[v]) return v
+  const map = {
+    '管理员': 'admin',
+    '主管': 'manager',
+    '经理': 'manager',
+    '操作员': 'operator',
+    '运营': 'operator',
+    '财务': 'finance'
+  }
+  if (map[v]) return map[v]
+  // 常见变体处理
+  const lower = v.toLowerCase()
+  if (ROLE_CONFIG[lower]) return lower
+  return v
+}
+
+// 统一 currentActiveRole（避免保存了不可识别的角色导致菜单权限为空）
+if (currentActiveRole.value) {
+  const normalized = normalizeRoleCode(currentActiveRole.value)
+  if (normalized !== currentActiveRole.value) {
+    currentActiveRole.value = normalized
+    localStorage.setItem('activeRole', normalized)
+  }
+}
+
 // 当前用户信息（优先使用authStore，降级到userStore）
 const currentUser = computed(() => {
-  if (authStore.user) {
-    return {
-      id: authStore.user.id,
-      username: authStore.user.username,
-      name: authStore.user.full_name || authStore.user.username,
-      email: authStore.user.email,
-      avatar: '',
-      roles: authStore.user.roles || []
+  try {
+    if (authStore.user) {
+      return {
+        id: authStore.user.id,
+        username: authStore.user.username,
+        name: authStore.user.full_name || authStore.user.username,
+        email: authStore.user.email,
+        avatar: '',
+        roles: authStore.user.roles || []
+      }
     }
-  }
-  return userStore.userInfo || {
-    id: 1,
-    username: 'admin',
-    name: '管理员',
-    email: 'admin@xihong-erp.com',
-    avatar: '',
-    roles: []
+    if (userStore.userInfo) {
+      return {
+        id: userStore.userInfo.id || 1,
+        username: userStore.userInfo.username || 'user',
+        name: userStore.userInfo.name || userStore.userInfo.username || '用户',
+        email: userStore.userInfo.email || '',
+        avatar: userStore.userInfo.avatar || '',
+        roles: userStore.userInfo.roles || []
+      }
+    }
+    // 默认用户信息（确保组件始终显示）
+    return {
+      id: 1,
+      username: 'user',
+      name: '用户',
+      email: '',
+      avatar: '',
+      roles: []
+    }
+  } catch (error) {
+    console.error('获取用户信息失败:', error)
+    // 返回默认值，确保组件可以渲染
+    return {
+      id: 1,
+      username: 'user',
+      name: '用户',
+      email: '',
+      avatar: '',
+      roles: []
+    }
   }
 })
 
@@ -270,14 +324,15 @@ const displayName = computed(() => {
 // 用户拥有的角色（优先使用authStore，降级到userStore）
 const userRoles = computed(() => {
   if (authStore.user && authStore.user.roles) {
-    return authStore.user.roles
+    return authStore.user.roles.map(normalizeRoleCode).filter(Boolean)
   }
-  return userStore.roles || []
+  return (userStore.roles || []).map(normalizeRoleCode).filter(Boolean)
 })
 
 // 可用的角色列表（只显示用户拥有的角色）
 const availableRoles = computed(() => {
-  return userRoles.value
+  const roles = userRoles.value || []
+  return roles
     .map(roleCode => {
       const config = ROLE_CONFIG[roleCode]
       if (!config) return null
@@ -309,11 +364,13 @@ watch(() => authStore.user, async (newUser) => {
       email: newUser.email,
       roles: newUser.roles
     })
-    userStore.roles = newUser.roles
+    userStore.roles = newUser.roles.map(normalizeRoleCode).filter(Boolean)
     
     // 如果当前激活角色未设置，使用第一个角色
     if (!currentActiveRole.value && newUser.roles.length > 0) {
-      currentActiveRole.value = newUser.roles[0]
+      const normalizedRoles = newUser.roles.map(normalizeRoleCode).filter(Boolean)
+      const preferredRole = normalizedRoles.includes('admin') ? 'admin' : normalizedRoles[0]
+      currentActiveRole.value = preferredRole
       localStorage.setItem('activeRole', currentActiveRole.value)
       applyRolePermissions(currentActiveRole.value)
     }
@@ -325,9 +382,11 @@ const loadUserInfo = async () => {
   try {
     // 优先使用authStore的用户信息
     if (authStore.user && authStore.user.roles) {
-      userStore.roles = authStore.user.roles
-      if (!currentActiveRole.value && authStore.user.roles.length > 0) {
-        currentActiveRole.value = authStore.user.roles[0]
+      const normalizedRoles = authStore.user.roles.map(normalizeRoleCode).filter(Boolean)
+      userStore.roles = normalizedRoles
+      if (!currentActiveRole.value && normalizedRoles.length > 0) {
+        const preferredRole = normalizedRoles.includes('admin') ? 'admin' : normalizedRoles[0]
+        currentActiveRole.value = preferredRole
         localStorage.setItem('activeRole', currentActiveRole.value)
         applyRolePermissions(currentActiveRole.value)
       } else if (currentActiveRole.value) {
@@ -341,12 +400,13 @@ const loadUserInfo = async () => {
       const response = await authApi.getCurrentUser()
       if (response && response.roles) {
         // 更新authStore
+        const normalizedRoles = response.roles.map(normalizeRoleCode).filter(Boolean)
         authStore.user = {
           id: response.id,
           username: response.username,
           full_name: response.full_name || response.username,
           email: response.email,
-          roles: response.roles
+          roles: normalizedRoles
         }
         
         // 同步到userStore
@@ -357,11 +417,12 @@ const loadUserInfo = async () => {
           email: response.email,
           roles: response.roles
         })
-        userStore.roles = response.roles
+        userStore.roles = normalizedRoles
         
         // 如果当前激活角色未设置，使用第一个角色
-        if (!currentActiveRole.value && response.roles.length > 0) {
-          currentActiveRole.value = response.roles[0]
+        if (!currentActiveRole.value && normalizedRoles.length > 0) {
+          const preferredRole = normalizedRoles.includes('admin') ? 'admin' : normalizedRoles[0]
+          currentActiveRole.value = preferredRole
           localStorage.setItem('activeRole', currentActiveRole.value)
           applyRolePermissions(currentActiveRole.value)
         }
@@ -369,7 +430,8 @@ const loadUserInfo = async () => {
     } else if (userStore.roles && userStore.roles.length > 0) {
       // 如果userStore有角色信息，使用它
       if (!currentActiveRole.value) {
-        currentActiveRole.value = userStore.roles[0]
+        const preferredRole = userStore.roles.includes('admin') ? 'admin' : userStore.roles[0]
+        currentActiveRole.value = preferredRole
         localStorage.setItem('activeRole', currentActiveRole.value)
         applyRolePermissions(currentActiveRole.value)
       } else if (currentActiveRole.value) {

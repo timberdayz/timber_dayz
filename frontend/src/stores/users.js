@@ -10,9 +10,12 @@ import { ElMessage } from 'element-plus'
 export const useUsersStore = defineStore('users', () => {
   // 状态
   const users = ref([])
+  const deletedUsers = ref([])
   const currentUser = ref(null)
   const isLoading = ref(false)
+  const isLoadingDeleted = ref(false)
   const total = ref(0)
+  const deletedTotal = ref(0)
 
   // 获取用户列表
   const fetchUsers = async (page = 1, pageSize = 20) => {
@@ -85,6 +88,36 @@ export const useUsersStore = defineStore('users', () => {
     }
   }
 
+  // 获取已删除用户列表
+  const fetchDeletedUsers = async (page = 1, pageSize = 20) => {
+    try {
+      isLoadingDeleted.value = true
+      const response = await usersApi.getDeletedUsers(page, pageSize)
+      const usersList = Array.isArray(response) ? response : (response.data || [])
+      deletedUsers.value = usersList
+      deletedTotal.value = response.pagination?.total || response.total || usersList.length
+      return usersList
+    } catch (error) {
+      ElMessage.error('获取已删除用户列表失败: ' + (error.response?.data?.detail || error.message))
+      throw error
+    } finally {
+      isLoadingDeleted.value = false
+    }
+  }
+
+  // 恢复用户
+  const restoreUser = async (userId) => {
+    try {
+      await usersApi.restoreUser(userId)
+      ElMessage.success('用户恢复成功')
+      // 刷新已删除用户列表
+      await fetchDeletedUsers()
+    } catch (error) {
+      ElMessage.error('恢复用户失败: ' + (error.response?.data?.detail || error.message))
+      throw error
+    }
+  }
+
   // 重置用户密码
   const resetUserPassword = async (userId, newPassword) => {
     try {
@@ -99,16 +132,21 @@ export const useUsersStore = defineStore('users', () => {
   return {
     // 状态
     users,
+    deletedUsers,
     currentUser,
     isLoading,
+    isLoadingDeleted,
     total,
+    deletedTotal,
     
     // 方法
     fetchUsers,
+    fetchDeletedUsers,
     fetchUser,
     createUser,
     updateUser,
     deleteUser,
+    restoreUser,
     resetUserPassword
   }
 })

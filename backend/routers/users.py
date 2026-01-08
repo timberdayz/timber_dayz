@@ -5,7 +5,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Request as FastAPIRequest
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from backend.models.database import get_db, get_async_db
 from modules.core.db import DimUser, DimRole, UserApprovalLog, UserSession, UserNotificationPreference  # v4.12.0 SSOT迁移, v4.19.0用户审批和会话管理, v4.19.0通知偏好
 from backend.schemas.auth import (
@@ -25,9 +25,10 @@ from backend.routers.auth import get_current_user
 from backend.services.audit_service import audit_service
 from backend.utils.api_response import success_response, error_response, pagination_response
 from backend.utils.error_codes import ErrorCode, get_error_type
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from functools import wraps
+from modules.core.logger import get_logger
 
 # v4.19.0新增：导入限流器
 # [*] v4.19.4更新：使用基于角色的动态限流
@@ -38,6 +39,7 @@ except ImportError:
     role_based_rate_limit = None
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
+logger = get_logger(__name__)
 
 async def require_admin(current_user: DimUser = Depends(get_current_user)):
     """要求管理员权限"""
@@ -148,14 +150,19 @@ async def get_users(
     
     offset = (page - 1) * page_size
     
-    # 查询总数
-    count_result = await db.execute(select(func.count(DimUser.user_id)))
+    # 查询总数（排除已删除用户）
+    count_result = await db.execute(
+        select(func.count(DimUser.user_id))
+        .where(DimUser.status != "deleted")
+    )
     total = count_result.scalar() or 0
     
     # [FIX] 预加载 roles，避免返回时访问 user.roles 触发懒加载（MissingGreenlet）
+    # [*] 软删除：过滤已删除用户
     result = await db.execute(
         select(DimUser)
         .options(selectinload(DimUser.roles))
+        .where(DimUser.status != "deleted")  # 过滤已删除用户
         .offset(offset)
         .limit(page_size)
         .order_by(DimUser.created_at.desc())
@@ -173,6 +180,59 @@ async def get_users(
             is_active=user.is_active,
             created_at=user.created_at,
             last_login_at=user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+        )
+        for user in users
+    ]
+    
+    # 使用分页响应格式
+    return pagination_response(
+        data=[user.dict() for user in user_responses],
+        page=page,
+        page_size=page_size,
+        total=total
+    )
+
+@router.get("/deleted")
+async def get_deleted_users(
+    page: int = 1,
+    page_size: int = 20,
+    current_user: DimUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """获取已删除用户列表（软删除）"""
+    from sqlalchemy import func
+    
+    offset = (page - 1) * page_size
+    
+    # 查询总数（仅已删除用户）
+    count_result = await db.execute(
+        select(func.count(DimUser.user_id))
+        .where(DimUser.status == "deleted")
+    )
+    total = count_result.scalar() or 0
+    
+    # 查询已删除用户列表
+    result = await db.execute(
+        select(DimUser)
+        .options(selectinload(DimUser.roles))
+        .where(DimUser.status == "deleted")
+        .offset(offset)
+        .limit(page_size)
+        .order_by(DimUser.updated_at.desc())  # 按删除时间倒序
+    )
+    users = result.scalars().all()
+    
+    # 转换为响应模型
+    user_responses = [
+        UserResponse(
+            id=user.user_id,
+            username=user.username,
+            email=user.email,
+            full_name=user.full_name,
+            roles=[role.role_name for role in user.roles],
+            is_active=user.is_active,
+            created_at=user.created_at,
+            last_login_at=user.last_login
         )
         for user in users
     ]
@@ -292,8 +352,10 @@ async def update_user(
                 reason="Account suspended by administrator"
             )
         elif user_update.is_active is True and not was_active:
-            # 用户被恢复：同步设置 status="active"（如果之前是suspended）
-            if user.status == "suspended":
+            # [*] 修复：用户被恢复时，同步设置 status="active"
+            # 处理所有非 deleted 状态（suspended、pending、rejected）
+            # 注意：deleted 状态应该通过 restore_user 接口恢复，这里不处理
+            if user.status != "deleted":
                 user.status = "active"
     
     # 更新角色
@@ -335,48 +397,183 @@ async def update_user(
 async def delete_user(
     user_id: int,
     current_user: DimUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_db),
+    reason: Optional[str] = None
+):
+    """
+    删除用户（软删除 - 业界标准）
+    
+    流程：
+    1. 验证用户存在且未删除
+    2. 撤销所有活跃会话（安全要求）
+    3. 软删除用户（status="deleted", is_active=False）
+    4. 记录删除操作（审计）
+    5. 保留数据用于合规和追溯
+    """
+    try:
+        # 1. 查询用户
+        result = await db.execute(
+            select(DimUser).where(DimUser.user_id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="用户不存在",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请检查用户ID是否正确，或确认该用户已创建",
+                status_code=404
+            )
+        
+        # 检查用户是否已被删除
+        if user.status == "deleted":
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="用户已被删除",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="该用户已被删除，如需恢复请使用恢复接口",
+                status_code=400
+            )
+        
+        # 2. 不能删除自己
+        if user.user_id == current_user.user_id:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="不能删除自己的账户",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="不能删除自己的账户",
+                status_code=400
+            )
+        
+        # 3. 撤销所有活跃会话（安全要求）
+        await db.execute(
+            update(UserSession)
+            .where(
+                UserSession.user_id == user_id,
+                UserSession.is_active == True
+            )
+            .values(
+                is_active=False,
+                revoked_at=datetime.utcnow(),
+                revoked_reason="用户已删除"
+            )
+        )
+        
+        # 4. 软删除用户
+        user.is_active = False
+        user.status = "deleted"
+        # 注意：如果需要 deleted_at 和 deleted_by 字段，需要先添加数据库迁移
+        
+        # 5. 记录审计日志（在删除前记录）
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            action="delete_user",
+            resource="user",
+            resource_id=str(user.user_id),
+            ip_address="127.0.0.1",
+            user_agent="Unknown",
+            details={
+                "username": user.username,
+                "email": user.email,
+                "reason": reason
+            }
+        )
+        
+        await db.commit()
+        
+        logger.info(f"用户已软删除: user_id={user_id}, username={user.username}, deleted_by={current_user.user_id}")
+        
+        return success_response(
+            data={"user_id": user_id},
+            message="用户已删除（软删除，数据已保留用于审计）"
+        )
+    
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"删除用户失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="删除用户失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            status_code=500
+        )
+
+@router.post("/{user_id}/restore")
+async def restore_user(
+    user_id: int,
+    current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """删除用户"""
-    result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))  # v4.12.0修复：使用user_id字段
-    user = result.scalar_one_or_none()
-    if not user:
-        return error_response(
-            code=ErrorCode.DATA_VALIDATION_FAILED,
-            message="User not found",
-            error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="请检查用户ID是否正确，或确认该用户已创建",
-            status_code=404
+    """
+    恢复已删除的用户（软删除恢复）
+    
+    注意：建议设置恢复期限（如30天），超过期限的用户需要管理员特殊权限才能恢复
+    """
+    try:
+        result = await db.execute(
+            select(DimUser).where(DimUser.user_id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="用户不存在",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请检查用户ID是否正确",
+                status_code=404
+            )
+        
+        if user.status != "deleted":
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="用户未被删除",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="该用户未被删除，无需恢复",
+                status_code=400
+            )
+        
+        # 恢复用户
+        user.status = "active"
+        user.is_active = True
+        
+        # 记录恢复操作
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            action="restore_user",
+            resource="user",
+            resource_id=str(user.user_id),
+            ip_address="127.0.0.1",
+            user_agent="Unknown",
+            details={
+                "username": user.username,
+                "email": user.email
+            }
+        )
+        
+        await db.commit()
+        
+        logger.info(f"用户已恢复: user_id={user_id}, username={user.username}, restored_by={current_user.user_id}")
+        
+        return success_response(
+            data={"user_id": user_id},
+            message="用户已恢复"
         )
     
-    # 不能删除自己
-    if user.user_id == current_user.user_id:  # v4.12.0修复：使用user_id字段
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"恢复用户失败: {e}", exc_info=True)
         return error_response(
-            code=ErrorCode.DATA_VALIDATION_FAILED,
-            message="Cannot delete yourself",
-            error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="不能删除自己的账户",
-            status_code=400
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="恢复用户失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            status_code=500
         )
-    
-    # 记录操作
-    await audit_service.log_action(
-        user_id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
-        action="delete_user",
-        resource="user",
-        resource_id=str(user.user_id),  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
-        ip_address="127.0.0.1",
-        user_agent="Unknown",
-        details={"username": user.username}
-    )
-    
-    await db.delete(user)
-    await db.commit()
-    
-    return success_response(
-        data={"user_id": user_id},
-        message="用户删除成功"
-    )
 
 @router.post("/{user_id}/reset-password", response_model=ResetPasswordResponse)
 async def reset_user_password(

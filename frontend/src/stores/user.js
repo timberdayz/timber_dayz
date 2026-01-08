@@ -7,11 +7,21 @@ import { ref, computed } from 'vue'
 import authApi from '@/api/auth'
 
 export const useUserStore = defineStore('user', () => {
+  const safeJsonParse = (value, fallback) => {
+    if (!value) return fallback
+    try {
+      return JSON.parse(value)
+    } catch (e) {
+      return fallback
+    }
+  }
+
   // 状态
-  const token = ref(localStorage.getItem('token') || '')
+  // 兼容：历史使用 token，新版使用 access_token
+  const token = ref(localStorage.getItem('access_token') || localStorage.getItem('token') || '')
   const userInfo = ref(null)
-  const permissions = ref([])
-  const roles = ref(['admin']) // 默认管理员角色
+  const permissions = ref(safeJsonParse(localStorage.getItem('permissions'), []))
+  const roles = ref(safeJsonParse(localStorage.getItem('roles'), ['admin'])) // 默认管理员角色
   const isLoggedIn = computed(() => !!token.value)
 
   // 登录
@@ -116,14 +126,22 @@ export const useUserStore = defineStore('user', () => {
     
     // 清除本地存储
     localStorage.removeItem('token')
+    localStorage.removeItem('access_token')
     localStorage.removeItem('userInfo')
     localStorage.removeItem('roles')
+    localStorage.removeItem('permissions')
   }
 
   // 更新用户信息
   const updateUserInfo = (newUserInfo) => {
     userInfo.value = { ...userInfo.value, ...newUserInfo }
     localStorage.setItem('userInfo', JSON.stringify(userInfo.value))
+
+    // 同步 roles（如果提供）
+    if (newUserInfo && Array.isArray(newUserInfo.roles)) {
+      roles.value = newUserInfo.roles
+      localStorage.setItem('roles', JSON.stringify(roles.value))
+    }
   }
 
   // 检查权限
@@ -140,11 +158,17 @@ export const useUserStore = defineStore('user', () => {
   const initUserInfo = async () => {
     const savedUserInfo = localStorage.getItem('userInfo')
     const savedRoles = localStorage.getItem('roles')
-    const savedToken = localStorage.getItem('token')
+    const savedPermissions = localStorage.getItem('permissions')
+    const savedToken = localStorage.getItem('access_token') || localStorage.getItem('token')
     
     // 如果有token，尝试从后端获取最新用户信息
     if (savedToken) {
       try {
+        // 恢复本地权限（避免页面首次渲染时菜单为空）
+        if (savedPermissions) {
+          permissions.value = safeJsonParse(savedPermissions, [])
+        }
+
         const response = await authApi.getCurrentUser()
         if (response && response.id) {
           userInfo.value = {

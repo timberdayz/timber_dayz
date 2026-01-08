@@ -67,7 +67,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
@@ -126,13 +126,18 @@ const handleLogin = async () => {
       })
 
       if (result.success) {
-        // 登录成功后重定向
+        // [*] 修复：登录成功后重定向
+        // 使用 nextTick 确保 authStore 状态更新完成，路由守卫能正确检测登录状态
+        await nextTick()
+        
         const redirect = route.query.redirect
         // 必须验证redirect参数，防止钓鱼攻击
         if (redirect && isValidRedirect(redirect)) {
-          router.push(redirect)
+          // 使用 replace 而不是 push，避免在历史记录中留下登录页面
+          router.replace(redirect)
         } else {
-          router.push('/business-overview')
+          // 默认跳转到业务概览页面
+          router.replace('/business-overview')
         }
       } else {
         // 错误处理（由store中的login方法处理，这里不需要额外处理）

@@ -31,6 +31,16 @@ export default {
   },
 
   /**
+   * 获取已删除用户列表
+   * @param {number} page - 页码（默认1）
+   * @param {number} pageSize - 每页条数（默认20）
+   * @returns {Promise} 已删除用户列表
+   */
+  async getDeletedUsers(page = 1, pageSize = 20) {
+    return await api._get('/users/deleted', { params: { page, page_size: pageSize } })
+  },
+
+  /**
    * 获取用户详情
    * @param {number} userId - 用户ID
    * @returns {Promise} 用户详情
@@ -56,6 +66,15 @@ export default {
    */
   async deleteUser(userId) {
     return await api._delete(`/users/${userId}`)
+  },
+
+  /**
+   * 恢复已删除的用户
+   * @param {number} userId - 用户ID
+   * @returns {Promise} 恢复结果
+   */
+  async restoreUser(userId) {
+    return await api._post(`/users/${userId}/restore`)
   },
 
   /**

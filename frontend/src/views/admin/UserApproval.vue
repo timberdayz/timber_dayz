@@ -251,12 +251,18 @@ const handleApprove = (user) => {
 const confirmApprove = async () => {
   approving.value = true
   try {
-    await usersApi.approveUser(approveForm.userId, {
+    const result = await usersApi.approveUser(approveForm.userId, {
       role_ids: approveForm.roleIds.length > 0 ? approveForm.roleIds : undefined,
       notes: approveForm.notes || undefined
     })
-    
-    ElMessage.success('用户批准成功')
+
+    // [*] 校验后端返回的审批结果，避免出现“前端提示成功但实际未生效”
+    if (result && result.status === 'active') {
+      ElMessage.success('用户批准成功')
+    } else {
+      ElMessage.warning(`用户已提交批准请求，但状态未变为active（当前：${result?.status || 'unknown'}）`)
+    }
+
     approveDialogVisible.value = false
     await loadPendingUsers()
   } catch (error) {

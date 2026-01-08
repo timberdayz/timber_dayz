@@ -222,14 +222,18 @@ const handleRegister = async () => {
         department: registerForm.department || undefined
       })
 
-      if (result.success || result.data) {
-        ElMessage.success('注册成功！请等待管理员审批')
+      // [*] 修复：响应拦截器返回的是 data.data（RegisterResponse 对象），不包含 success 字段
+      // 通过检查 user_id 或 status 来判断注册是否成功
+      if (result && (result.user_id || result.status === 'pending')) {
+        // 注册成功：result 包含 user_id 或 status 为 pending
+        ElMessage.success(result.message || '注册成功！请等待管理员审批')
         // 延迟跳转到登录页面
         setTimeout(() => {
           router.push('/login')
         }, 1500)
       } else {
-        ElMessage.error('注册失败: ' + (result.message || '未知错误'))
+        // 注册失败：result 为空或不包含预期字段
+        ElMessage.error('注册失败: ' + (result?.message || '未知错误'))
       }
     } catch (error) {
       console.error('Register error:', error)

@@ -318,6 +318,16 @@ async def login(
             status_code=403
         )
     
+    # [*] 软删除：检查用户是否已被删除
+    if user.status == "deleted":
+        return error_response(
+            code=ErrorCode.AUTH_ACCOUNT_INACTIVE,
+            message="账号已被删除",
+            error_type=get_error_type(ErrorCode.AUTH_ACCOUNT_INACTIVE),
+            recovery_suggestion="账号已被删除，如需恢复请联系管理员",
+            status_code=403
+        )
+    
     # [*] v4.19.0: 3. 检查status和is_active（只有active状态且is_active=True才能继续）
     if user.status != "active" or not user.is_active:
         return error_response(
@@ -452,8 +462,13 @@ async def login(
         )
     
     # 获取用户角色（已通过 selectinload 预加载）
-    # [*] 修复：使用 role_name 而不是 name（DimRole 使用 role_name 字段）
-    user_roles = [role.role_name for role in user.roles]
+    # 统一：前端 RBAC 和路由 meta.roles 使用 role_code（如 admin/operator/manager）
+    # 兼容旧数据：如果 role_code 不存在或为空，回退到 role_name
+    user_roles = [
+        (getattr(role, "role_code", None) or getattr(role, "role_name", None))
+        for role in user.roles
+    ]
+    user_roles = [r for r in user_roles if r]
     
     # 创建令牌
     tokens = auth_service.create_token_pair(
@@ -864,7 +879,11 @@ async def get_current_user_info(current_user: DimUser = Depends(get_current_user
         username=current_user.username,
         email=current_user.email,
         full_name=current_user.full_name,
-        roles=[role.role_name for role in current_user.roles],  # [*] 修复：使用 role_name 而不是 name
+        roles=[
+            (getattr(role, "role_code", None) or getattr(role, "role_name", None))
+            for role in current_user.roles
+            if (getattr(role, "role_code", None) or getattr(role, "role_name", None))
+        ],
         is_active=current_user.is_active,
         created_at=current_user.created_at,
         last_login_at=current_user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
@@ -913,7 +932,11 @@ async def update_current_user(
         username=current_user.username,
         email=current_user.email,
         full_name=current_user.full_name,
-        roles=[role.role_name for role in current_user.roles],  # [*] 修复：使用 role_name 而不是 name
+        roles=[
+            (getattr(role, "role_code", None) or getattr(role, "role_name", None))
+            for role in current_user.roles
+            if (getattr(role, "role_code", None) or getattr(role, "role_name", None))
+        ],
         is_active=current_user.is_active,
         created_at=current_user.created_at,
         last_login_at=current_user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）

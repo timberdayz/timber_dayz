@@ -34,21 +34,25 @@
       </el-row>
     </el-card>
 
-    <!-- 用户列表 -->
+    <!-- 用户列表（标签页） -->
     <el-card class="table-card">
       <template #header>
         <div class="card-header">
           <span>📋 用户列表</span>
-          <el-tag>共 {{ usersStore.total }} 个用户</el-tag>
+          <el-tag v-if="activeTab === 'active'">共 {{ usersStore.total }} 个用户</el-tag>
+          <el-tag v-else type="info">共 {{ usersStore.deletedTotal }} 个已删除用户</el-tag>
         </div>
       </template>
 
-      <el-table 
-        :data="usersStore.users" 
-        v-loading="usersStore.isLoading"
-        stripe
-        style="width: 100%"
-      >
+      <!-- 标签页 -->
+      <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+        <el-tab-pane label="活跃用户" name="active">
+              <el-table 
+            :data="usersStore.users" 
+            v-loading="usersStore.isLoading"
+            stripe
+            style="width: 100%"
+          >
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="username" label="用户名" width="150" />
         <el-table-column prop="email" label="邮箱" width="200" />
@@ -104,19 +108,90 @@
             </el-button>
           </template>
         </el-table-column>
-      </el-table>
+          </el-table>
 
-      <!-- 分页 -->
-      <div class="pagination-container">
-        <el-pagination
-          v-model:current-page="currentPage"
-          :total="usersStore.total"
-          :page-size="pageSize"
-          layout="total, sizes, prev, pager, next, jumper"
-          @current-change="handlePageChange"
-          @size-change="handleSizeChange"
-        />
-      </div>
+          <!-- 分页 -->
+          <div class="pagination-container">
+            <el-pagination
+              v-model:current-page="currentPage"
+              :total="usersStore.total"
+              :page-size="pageSize"
+              layout="total, sizes, prev, pager, next, jumper"
+              @current-change="handlePageChange"
+              @size-change="handleSizeChange"
+            />
+          </div>
+        </el-tab-pane>
+
+        <!-- 已删除用户标签页 -->
+        <el-tab-pane label="已删除用户" name="deleted">
+          <el-table 
+            :data="usersStore.deletedUsers" 
+            v-loading="usersStore.isLoadingDeleted"
+            stripe
+            style="width: 100%"
+          >
+            <el-table-column prop="id" label="ID" width="80" />
+            <el-table-column prop="username" label="用户名" width="150" />
+            <el-table-column prop="email" label="邮箱" width="200" />
+            <el-table-column prop="full_name" label="姓名" width="150" />
+            <el-table-column label="角色" width="200">
+              <template #default="{ row }">
+                <el-tag 
+                  v-for="role in row.roles" 
+                  :key="role" 
+                  :type="getRoleType(role)"
+                  style="margin-right: 5px; margin-bottom: 5px;"
+                >
+                  {{ getRoleText(role) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag type="info">已删除</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="创建时间" width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.created_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="last_login_at" label="最后登录" width="180">
+              <template #default="{ row }">
+                {{ row.last_login_at ? formatDateTime(row.last_login_at) : '从未登录' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="150" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="viewUser(row)">
+                  详情
+                </el-button>
+                <el-button 
+                  link 
+                  type="success" 
+                  size="small" 
+                  @click="restoreUser(row)"
+                >
+                  恢复
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <!-- 分页 -->
+          <div class="pagination-container">
+            <el-pagination
+              v-model:current-page="deletedPage"
+              :total="usersStore.deletedTotal"
+              :page-size="pageSize"
+              layout="total, sizes, prev, pager, next, jumper"
+              @current-change="handleDeletedPageChange"
+              @size-change="handleDeletedSizeChange"
+            />
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </el-card>
 
     <!-- 创建用户对话框 -->
@@ -265,8 +340,12 @@ const usersStore = useUsersStore()
 const rolesStore = useRolesStore()
 const authStore = useAuthStore()
 
+// 标签页
+const activeTab = ref('active')
+
 // 分页
 const currentPage = ref(1)
+const deletedPage = ref(1)
 const pageSize = ref(20)
 
 // 搜索
@@ -395,6 +474,21 @@ const initData = async () => {
   }
 }
 
+// 处理标签页切换
+const handleTabChange = async (tabName) => {
+  if (tabName === 'deleted') {
+    // 切换到已删除用户标签页时，加载已删除用户列表
+    try {
+      await usersStore.fetchDeletedUsers(deletedPage.value, pageSize.value)
+    } catch (error) {
+      ElMessage.error('加载已删除用户列表失败: ' + error.message)
+    }
+  } else {
+    // 切换到活跃用户标签页时，刷新活跃用户列表
+    await refreshUsers()
+  }
+}
+
 // 刷新用户列表
 const refreshUsers = async () => {
   try {
@@ -423,6 +517,18 @@ const handleSizeChange = (size) => {
   usersStore.fetchUsers(1, size)
 }
 
+// 已删除用户分页处理
+const handleDeletedPageChange = (page) => {
+  deletedPage.value = page
+  usersStore.fetchDeletedUsers(page, pageSize.value)
+}
+
+const handleDeletedSizeChange = (size) => {
+  pageSize.value = size
+  deletedPage.value = 1
+  usersStore.fetchDeletedUsers(1, size)
+}
+
 // 查看用户详情
 const viewUser = async (user) => {
   selectedUser.value = user
@@ -446,7 +552,7 @@ const editUser = (user) => {
 const deleteUser = async (user) => {
   try {
     await ElMessageBox.confirm(
-      `确定要删除用户 "${user.username}" 吗？此操作不可恢复。`,
+      `确定要删除用户 "${user.username}" 吗？用户将被软删除，可以在"已删除用户"标签页中恢复。`,
       '删除确认',
       {
         confirmButtonText: '确定删除',
@@ -461,6 +567,30 @@ const deleteUser = async (user) => {
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除用户失败: ' + error.message)
+    }
+  }
+}
+
+// 恢复用户
+const restoreUser = async (user) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要恢复用户 "${user.username}" 吗？恢复后用户将可以正常登录。`,
+      '恢复确认',
+      {
+        confirmButtonText: '确定恢复',
+        cancelButtonText: '取消',
+        type: 'success'
+      }
+    )
+    
+    await usersStore.restoreUser(user.id)
+    // 刷新已删除用户列表
+    await usersStore.fetchDeletedUsers(deletedPage.value, pageSize.value)
+    
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('恢复用户失败: ' + error.message)
     }
   }
 }
