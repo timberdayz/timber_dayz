@@ -21,7 +21,7 @@ from backend.services.file_path_resolver import get_file_path_resolver
 from backend.services.data_importer import (
     stage_orders,
     stage_product_metrics,
-    stage_inventory,  # ⭐ v4.11.4新增：库存数据暂存
+    stage_inventory,  # [*] v4.11.4新增：库存数据暂存
     upsert_orders,
     upsert_product_metrics,
     quarantine_failed_data,
@@ -30,7 +30,7 @@ from backend.services.data_importer import (
 from backend.services.data_standardizer import standardize_rows  # 新增：数据标准化服务
 from backend.services.progress_tracker import progress_tracker
 from backend.services.field_mapping_dictionary_service import get_dictionary_service  # v4.3.7
-from backend.services.currency_extractor import get_currency_extractor  # ⭐ v4.15.0新增
+from backend.services.currency_extractor import get_currency_extractor  # [*] v4.15.0新增
 from modules.core.logger import get_logger
 from pathlib import Path
 
@@ -168,7 +168,7 @@ async def get_file_groups(db: AsyncSession = Depends(get_async_db)):
                         domains[domain].append(granularity)
         
         # 查询所有文件（返回id与关键元数据）
-        # ⭐ 修复：使用COALESCE优先使用source_platform，如果为NULL则使用platform_code
+        # [*] 修复：使用COALESCE优先使用source_platform，如果为NULL则使用platform_code
         files_result = await db.execute(text("""
             SELECT id, 
                    COALESCE(source_platform, platform_code) AS platform,
@@ -274,10 +274,10 @@ async def bulk_ingest(payload: dict, db: AsyncSession = Depends(get_async_db)):
                 if domain == "orders":
                     validation_result = validate_orders(rows)
                 elif domain == "services":
-                    # ⭐ v4.6.1新增：services域使用专门的验证函数（不需要product_id）
+                    # [*] v4.6.1新增：services域使用专门的验证函数（不需要product_id）
                     validation_result = validate_services(rows)
                 elif domain == "inventory":
-                    # ⭐ v4.10.0新增：inventory域使用专门的验证函数
+                    # [*] v4.10.0新增：inventory域使用专门的验证函数
                     from backend.services.enhanced_data_validator import validate_inventory
                     validation_result = validate_inventory(rows)
                 else:
@@ -297,8 +297,8 @@ async def bulk_ingest(payload: dict, db: AsyncSession = Depends(get_async_db)):
                             target_file_id = cf.id
                     except Exception:
                         target_file_id = None
-                # ⭐ v4.6.1修复：获取header_row信息
-                header_row = b.get("header_row", 0)  # ⭐ 修复：统一使用0-based
+                # [*] v4.6.1修复：获取header_row信息
+                header_row = b.get("header_row", 0)  # [*] 修复：统一使用0-based
                 if header_row is None:
                     header_row = 0
                 
@@ -319,18 +319,18 @@ async def bulk_ingest(payload: dict, db: AsyncSession = Depends(get_async_db)):
                 # 数据入库
                 staged, imported = 0, 0
                 if valid_rows:
-                    # ⭐ v4.6.1修复：获取file_record以传递platform_code等信息
+                    # [*] v4.6.1修复：获取file_record以传递platform_code等信息
                     file_record = None
                     if target_file_id:
                         file_record_result = await db.execute(select(CatalogFile).where(CatalogFile.id == target_file_id))
                         file_record = file_record_result.scalar_one_or_none()
                     
                     if domain == "orders":
-                        staged = stage_orders(db, valid_rows, ingest_task_id=task_id, file_id=target_file_id)  # ⭐ v4.11.4新增：传递task_id和file_id
-                        imported = upsert_orders(db, valid_rows, file_record=file_record)  # ⭐ v4.6.1修复：传递file_record
+                        staged = stage_orders(db, valid_rows, ingest_task_id=task_id, file_id=target_file_id)  # [*] v4.11.4新增：传递task_id和file_id
+                        imported = upsert_orders(db, valid_rows, file_record=file_record)  # [*] v4.6.1修复：传递file_record
                     else:
-                        staged = stage_product_metrics(db, valid_rows, ingest_task_id=task_id, file_id=target_file_id)  # ⭐ v4.11.4新增：传递task_id和file_id
-                        imported = upsert_product_metrics(db, valid_rows, file_record=file_record)  # ⭐ v4.6.3修复：传递file_record，解决双维护问题
+                        staged = stage_product_metrics(db, valid_rows, ingest_task_id=task_id, file_id=target_file_id)  # [*] v4.11.4新增：传递task_id和file_id
+                        imported = upsert_product_metrics(db, valid_rows, file_record=file_record)  # [*] v4.6.3修复：传递file_record，解决双维护问题
                 
                 total_staged += staged
                 total_imported += imported
@@ -573,7 +573,7 @@ async def get_file_info(file_id: int, db: AsyncSession = Depends(get_async_db)):
             "file_name": catalog_record.file_name,
             "parsed_metadata": {
                 "timestamp": catalog_record.first_seen_at.strftime("%Y%m%d_%H%M%S") if catalog_record.first_seen_at else "unknown",
-                "account": catalog_record.account or "N/A",  # ⭐ 从.meta.json提取
+                "account": catalog_record.account or "N/A",  # [*] 从.meta.json提取
                 "shop": catalog_record.shop_id or "none",
                 "data_type": catalog_record.data_domain or "products",
                 "granularity": catalog_record.granularity or "daily",
@@ -619,9 +619,9 @@ async def get_files_by_period(
     
     示例：
     - /files-by-period?year=2025&month=9&data_domain=products
-      → 返回所有包含2025年9月数据的文件（包括跨月）
+      -> 返回所有包含2025年9月数据的文件（包括跨月）
     - /files-by-period?year=2025
-      → 返回所有包含2025年数据的文件（包括跨年）
+      -> 返回所有包含2025年数据的文件（包括跨年）
     """
     from sqlalchemy import or_, and_
     from datetime import date as date_class
@@ -731,7 +731,7 @@ async def preview_file(file_data: dict, db: AsyncSession = Depends(get_async_db)
     3. 避免递归搜索文件系统（避免超时）
     """
     file_id = int(file_data.get("file_id", 0))
-    header_row = int(file_data.get("header_row", 0))  # ⭐ 修复：统一使用0-based
+    header_row = int(file_data.get("header_row", 0))  # [*] 修复：统一使用0-based
     
     logger.info(f"[Preview] 开始预览: id={file_id}")
     
@@ -770,12 +770,12 @@ async def preview_file(file_data: dict, db: AsyncSession = Depends(get_async_db)
         # Step 3: 读取Excel（使用智能解析器，自动检测格式）
         from backend.services.excel_parser import ExcelParser
         
-        # ⭐ 修复：header_row已经是0-based（与pandas一致），直接使用
+        # [*] 修复：header_row已经是0-based（与pandas一致），直接使用
         # pandas的header参数：0表示第0行，None表示无表头
         if header_row < 0:
             header_param = None  # 负数表示无表头
         else:
-            header_param = header_row  # ⭐ 修复：直接使用，不需要减1
+            header_param = header_row  # [*] 修复：直接使用，不需要减1
         
         # 使用智能Excel解析器（自动检测文件格式）
         # 大文件保护：>10MB 的文件只读50行
@@ -811,7 +811,7 @@ async def preview_file(file_data: dict, db: AsyncSession = Depends(get_async_db)
         
         # Step 5: 转换为前端格式
         columns = df.columns.tolist()
-        # ⭐ v4.7.0增强：增加预览行数（从20行增加到100行）
+        # [*] v4.7.0增强：增加预览行数（从20行增加到100行）
         preview_rows_limit = 100
         data = df.head(preview_rows_limit).to_dict('records')
         
@@ -823,7 +823,7 @@ async def preview_file(file_data: dict, db: AsyncSession = Depends(get_async_db)
             "data": data,
             "total_rows": len(df),
             "preview_rows": len(data),
-            "preview_limit": preview_rows_limit,  # ⭐ v4.7.0新增：显示预览限制
+            "preview_limit": preview_rows_limit,  # [*] v4.7.0新增：显示预览限制
             
             # 方案B+新字段
             "source_platform": catalog_record.source_platform,
@@ -1012,16 +1012,16 @@ async def ingest_file(
     try:
         file_id = int(ingest_data.get("file_id", 0))
         platform = ingest_data.get("platform", "")
-        # ⭐ v4.6.1修复：同时支持domain和data_domain字段
+        # [*] v4.6.1修复：同时支持domain和data_domain字段
         domain = ingest_data.get("domain") or ingest_data.get("data_domain", "")
         mappings = ingest_data.get("mappings", {})  # 向后兼容：保留mappings参数
-        header_columns = ingest_data.get("header_columns", [])  # ⭐ v4.6.0新增：原始表头字段列表
+        header_columns = ingest_data.get("header_columns", [])  # [*] v4.6.0新增：原始表头字段列表
         rows = ingest_data.get("rows", [])  # 已按标准字段映射后的行（预览数据，实际会重新读取文件）
-        header_row = ingest_data.get("header_row", 0)  # ⭐ 修复：统一使用0-based，默认0（与数据库定义一致）
+        header_row = ingest_data.get("header_row", 0)  # [*] 修复：统一使用0-based，默认0（与数据库定义一致）
         if header_row is None:
-            header_row = 0  # ⭐ 修复：统一使用0-based
+            header_row = 0  # [*] 修复：统一使用0-based
         
-        # ⭐ v4.11.5新增：接收task_id参数（批量入库时传递，单文件入库时为空）
+        # [*] v4.11.5新增：接收task_id参数（批量入库时传递，单文件入库时为空）
         task_id = ingest_data.get("task_id")
         # 如果task_id为空，使用single_file_{file_id}作为默认值（单文件入库）
         if not task_id:
@@ -1040,16 +1040,16 @@ async def ingest_file(
                 status_code=404
             )
         
-        # ⭐ v4.6.1修复：如果domain为空，从文件记录中获取（二次确认）
+        # [*] v4.6.1修复：如果domain为空，从文件记录中获取（二次确认）
         if not domain and file_record.data_domain:
             domain = file_record.data_domain
             logger.info(f"[Ingest] 从文件记录获取data_domain（二次确认）: {domain}")
         
-        # ⭐ v4.6.1修复：记录domain用于调试
-        # ⭐ v4.10.0增强：记录header_row用于调试（确保入库时使用正确的表头行）
+        # [*] v4.6.1修复：记录domain用于调试
+        # [*] v4.10.0增强：记录header_row用于调试（确保入库时使用正确的表头行）
         logger.info(f"[Ingest] 数据域: {domain}, header_row: {header_row} (0-based, Excel第{header_row+1}行)")
         
-        # ⭐ v4.6.1新增：重复入库防护（全0文件）
+        # [*] v4.6.1新增：重复入库防护（全0文件）
         if file_record.status == "ingested":
             # 检查是否已标记为全0文件（使用error_message字段存储标识）
             error_msg = file_record.error_message or ""
@@ -1065,7 +1065,7 @@ async def ingest_file(
                 }
                 return success_response(data=data)
 
-        # ⭐ v4.7.0修复：重新读取完整文件，而不是使用前端传入的预览数据
+        # [*] v4.7.0修复：重新读取完整文件，而不是使用前端传入的预览数据
         # 这样可以确保入库所有数据行，而不受预览限制（20行）的影响
         logger.info(f"[Ingest] 开始重新读取完整文件: {file_record.file_path}")
         
@@ -1084,14 +1084,14 @@ async def ingest_file(
                 status_code=404
             )
         
-        # ⭐ 修复：header_row已经是0-based（与pandas一致），直接使用
+        # [*] 修复：header_row已经是0-based（与pandas一致），直接使用
         # pandas的header参数：0表示第0行，None表示无表头
         if header_row < 0:
             header_param = None  # 负数表示无表头
         else:
-            header_param = header_row  # ⭐ 修复：直接使用，不需要减1
+            header_param = header_row  # [*] 修复：直接使用，不需要减1
         
-        # ⭐ v4.10.0增强：记录实际使用的header_param值（用于调试）
+        # [*] v4.10.0增强：记录实际使用的header_param值（用于调试）
         logger.info(f"[Ingest] 实际使用的表头行: header_param={header_param} (0-based, Excel第{header_param+1 if header_param is not None else '无表头'}行)")
         
         # 读取完整文件（不限制行数）
@@ -1099,7 +1099,7 @@ async def ingest_file(
             df = ExcelParser.read_excel(
                 safe_path,
                 header=header_param,
-                nrows=None  # ⭐ 不限制行数，读取全部数据
+                nrows=None  # [*] 不限制行数，读取全部数据
             )
             
             # 规范化（通用合并单元格还原，v4.6.0增强版）
@@ -1137,11 +1137,11 @@ async def ingest_file(
                 status_code=500
             )
         
-        # ⭐ v4.6.0 DSS架构：使用新的B类数据表结构
+        # [*] v4.6.0 DSS架构：使用新的B类数据表结构
         # 如果提供了header_columns，使用RawDataImporter直接入库到fact_raw_data表
         # 否则，使用旧的字段映射逻辑（向后兼容）
         
-        # ⭐ v4.16.0修复：始终使用文件原始的列名（包含货币代码）用于追溯和货币代码提取
+        # [*] v4.16.0修复：始终使用文件原始的列名（包含货币代码）用于追溯和货币代码提取
         # 即使传入了归一化的header_columns（来自模板），也要使用文件原始列名
         file_original_columns = list(df.columns)  # 文件原始列名（包含货币代码）
         original_header_columns = file_original_columns  # 始终使用文件原始列名
@@ -1153,7 +1153,7 @@ async def ingest_file(
         else:
             logger.info(f"[Ingest] 使用传入的header_columns: {len(header_columns)}个字段（但实际使用文件原始列名）")
         
-        # ⭐ v4.6.0 DSS架构：直接使用原始数据（不进行字段映射）
+        # [*] v4.6.0 DSS架构：直接使用原始数据（不进行字段映射）
         # 原始数据将作为JSONB存储在raw_data字段中
         enhanced_rows = all_rows  # 使用原始数据，保留所有原始列名
         
@@ -1169,15 +1169,15 @@ async def ingest_file(
         
         logger.info(f"[Ingest] [DSS] 准备入库原始数据到B类数据表，{len(enhanced_rows)}行，{len(header_columns)}个字段")
         
-        # ⭐ DSS架构：跳过数据标准化，保留原始数据
+        # [*] DSS架构：跳过数据标准化，保留原始数据
         # DSS架构原则：数据同步只做数据采集和存储，数据标准化在Metabase中完成
         logger.info(f"[Ingest] [DSS] 跳过数据标准化，保留原始数据格式")
         
-        # ⭐ DSS架构：移除特殊处理，保留原始数据
+        # [*] DSS架构：移除特殊处理，保留原始数据
         # DSS架构原则：不修改原始数据，所有数据处理在Metabase中完成
         logger.info(f"[Ingest] [DSS] 跳过特殊处理，保留原始数据完整性")
         
-        # ⭐ DSS架构：跳过数据验证，直接使用所有数据
+        # [*] DSS架构：跳过数据验证，直接使用所有数据
         # DSS架构原则：数据同步只做去重和入库，不做业务逻辑验证
         # 业务逻辑验证应在Metabase中完成（Metabase知道字段映射关系）
         logger.info(f"[Ingest] [DSS] 跳过数据验证，所有{len(enhanced_rows)}行数据将直接进入去重和入库流程")
@@ -1189,16 +1189,16 @@ async def ingest_file(
         }
         quarantined_count = 0  # DSS架构下不隔离数据
 
-        # ⭐ DSS架构：使用所有数据（不筛选）
+        # [*] DSS架构：使用所有数据（不筛选）
         valid_rows = enhanced_rows  # 直接使用所有数据，不做验证筛选
 
-        # ⭐ v4.6.0 DSS架构：数据入库到B类数据表
+        # [*] v4.6.0 DSS架构：数据入库到B类数据表
         staged = 0
         imported = 0
-        amount_imported = 0  # ⭐ v4.18.2移除：订单金额维度表功能已移除，此变量保持为0用于向后兼容
+        amount_imported = 0  # [*] v4.18.2移除：订单金额维度表功能已移除，此变量保持为0用于向后兼容
         
         if valid_rows:
-            # ⭐ v4.6.0 DSS架构：优先使用RawDataImporter入库到fact_raw_data表
+            # [*] v4.6.0 DSS架构：优先使用RawDataImporter入库到fact_raw_data表
             try:
                 from backend.services.raw_data_importer import RawDataImporter
                 from backend.services.deduplication_service import DeduplicationService
@@ -1215,11 +1215,11 @@ async def ingest_file(
                 raw_data_importer = RawDataImporter(db)
                 deduplication_service = DeduplicationService(db)
                 
-                # ⭐ 修复：batch_calculate_data_hash接收字典列表，不是DataFrame
+                # [*] 修复：batch_calculate_data_hash接收字典列表，不是DataFrame
                 # 批量计算data_hash
                 data_hashes = deduplication_service.batch_calculate_data_hash(valid_rows)
                 
-                # ⭐ v4.15.0新增：货币代码提取和字段名归一化
+                # [*] v4.15.0新增：货币代码提取和字段名归一化
                 currency_extractor = get_currency_extractor()
                 normalized_rows = []
                 currency_codes = []
@@ -1232,66 +1232,66 @@ async def ingest_file(
                         normalized_row[normalized_field_name] = value
                     normalized_rows.append(normalized_row)
                     
-                    # ⭐ v4.16.0修复：提取货币代码时使用文件原始列名（row.keys()），而不是归一化的header_columns
+                    # [*] v4.16.0修复：提取货币代码时使用文件原始列名（row.keys()），而不是归一化的header_columns
                     # 原因：归一化的header_columns已经移除了货币代码，无法提取
                     # 使用 row.keys() 获取文件原始的字段名（包含货币代码）
                     currency_code = currency_extractor.extract_currency_from_row(
                         row,
-                        header_columns=None  # ⭐ 修复：传入None，让方法使用row.keys()（原始字段名）
+                        header_columns=None  # [*] 修复：传入None，让方法使用row.keys()（原始字段名）
                     )
                     currency_codes.append(currency_code)
                 
-                # ⭐ v4.16.0新增：获取sub_domain（services域必须提供）
+                # [*] v4.16.0新增：获取sub_domain（services域必须提供）
                 sub_domain_value = None
                 if file_record and hasattr(file_record, 'sub_domain'):
                     sub_domain_value = file_record.sub_domain
                 
-                # ⭐ v4.16.0修复：准备归一化的header_columns用于动态列管理
+                # [*] v4.16.0修复：准备归一化的header_columns用于动态列管理
                 # 动态列应该使用归一化的列名（不包含货币代码），避免创建重复的列
                 normalized_header_columns = currency_extractor.normalize_field_list(original_header_columns)
                 
                 # 批量插入到B类数据表
                 imported = raw_data_importer.batch_insert_raw_data(
-                    rows=normalized_rows,  # ⭐ v4.15.0更新：使用归一化后的数据
+                    rows=normalized_rows,  # [*] v4.15.0更新：使用归一化后的数据
                     data_hashes=data_hashes,
                     data_domain=domain,
                     granularity=granularity,
                     platform_code=file_record.platform_code or platform,
                     shop_id=file_record.shop_id,
                     file_id=file_record.id,
-                    header_columns=normalized_header_columns,  # ⭐ v4.16.0修复：使用归一化的header_columns用于动态列管理（避免创建重复列）
-                    currency_codes=currency_codes,  # ⭐ v4.15.0新增：货币代码列表
-                    sub_domain=sub_domain_value,  # ⭐ v4.16.0新增：子类型（services域必须提供）
-                    original_header_columns=original_header_columns  # ⭐ v4.16.0新增：原始header_columns（包含货币代码，用于保存到数据库）
+                    header_columns=normalized_header_columns,  # [*] v4.16.0修复：使用归一化的header_columns用于动态列管理（避免创建重复列）
+                    currency_codes=currency_codes,  # [*] v4.15.0新增：货币代码列表
+                    sub_domain=sub_domain_value,  # [*] v4.16.0新增：子类型（services域必须提供）
+                    original_header_columns=original_header_columns  # [*] v4.16.0新增：原始header_columns（包含货币代码，用于保存到数据库）
                 )
                 
-                # ⭐ v4.16.0更新：日志信息包含sub_domain
+                # [*] v4.16.0更新：日志信息包含sub_domain
                 table_suffix = f"{domain}_{granularity}"
                 if sub_domain_value:
                     table_suffix = f"{domain}_{sub_domain_value}_{granularity}"
                 logger.info(f"[Ingest] DSS架构：成功入库 {imported} 条记录到 fact_raw_data_{table_suffix}")
                 
-                # ⭐ 修复：如果DSS架构入库成功，设置staged并跳过旧逻辑
+                # [*] 修复：如果DSS架构入库成功，设置staged并跳过旧逻辑
                 staged = imported
                 
             except Exception as dss_error:
                 logger.error(f"[Ingest] DSS架构入库失败，降级到旧逻辑: {dss_error}", exc_info=True)
                 # 降级到旧的入库逻辑（向后兼容）
-            # ⭐ v4.11.5修复：使用传入的task_id（批量入库时使用批量task_id，单文件入库时使用single_file_{file_id}）
+            # [*] v4.11.5修复：使用传入的task_id（批量入库时使用批量task_id，单文件入库时使用single_file_{file_id}）
             
             if domain == "orders":
-                staged = stage_orders(db, valid_rows, ingest_task_id=task_id, file_id=file_id)  # ⭐ v4.11.5修复：使用传入的task_id
-                imported = upsert_orders(db, valid_rows, file_record=file_record)  # ⭐ v4.6.1修复：传递file_record
+                staged = stage_orders(db, valid_rows, ingest_task_id=task_id, file_id=file_id)  # [*] v4.11.5修复：使用传入的task_id
+                imported = upsert_orders(db, valid_rows, file_record=file_record)  # [*] v4.6.1修复：传递file_record
                 
-                # ⭐ v4.18.2移除：订单金额维度表功能已移除
+                # [*] v4.18.2移除：订单金额维度表功能已移除
                 # 原因：DSS架构下，数据已完整存储在 b_class.fact_raw_data_orders_* 表的 JSONB 字段中
                 # 货币代码已提取到 currency_code 系统字段，字段名已归一化
                 # 数据标准化应在 Metabase 中完成，该表属于"只写不读"的冗余数据
                 # 如需订单金额统计，请通过 Metabase 查询 b_class.fact_raw_data_orders_* 表
             elif domain == "inventory":
-                # ⭐ v4.10.0新增：inventory域数据入库到fact_product_metrics表
-                # ⭐ v4.11.5修复：使用传入的task_id
-                staged = stage_inventory(db, valid_rows, ingest_task_id=task_id, file_id=file_id)  # ⭐ v4.11.5修复：使用传入的task_id
+                # [*] v4.10.0新增：inventory域数据入库到fact_product_metrics表
+                # [*] v4.11.5修复：使用传入的task_id
+                staged = stage_inventory(db, valid_rows, ingest_task_id=task_id, file_id=file_id)  # [*] v4.11.5修复：使用传入的task_id
                 # 确保inventory域数据设置data_domain='inventory'和granularity='snapshot'
                 for row in valid_rows:
                     row['data_domain'] = 'inventory'
@@ -1300,8 +1300,8 @@ async def ingest_file(
                 imported = upsert_product_metrics(db, valid_rows, file_record=file_record, data_domain='inventory')
             else:
                 # products/traffic/analytics等其他域使用产品指标验证
-                staged = stage_product_metrics(db, valid_rows, ingest_task_id=task_id, file_id=file_id)  # ⭐ v4.11.5修复：使用传入的task_id
-                imported = upsert_product_metrics(db, valid_rows, file_record=file_record)  # ⭐ v4.6.3修复：传递file_record，解决双维护问题
+                staged = stage_product_metrics(db, valid_rows, ingest_task_id=task_id, file_id=file_id)  # [*] v4.11.5修复：使用传入的task_id
+                imported = upsert_product_metrics(db, valid_rows, file_record=file_record)  # [*] v4.6.3修复：传递file_record，解决双维护问题
 
         # 更新文件状态
         if validation_result.get("errors"):
@@ -1350,7 +1350,7 @@ async def ingest_file(
                 logger.warning(f"[Ingest] 图片提取任务提交失败（继续）: {img_error}")
 
         # v4.5.1新增：优化0条入库的提示（解决问题3）
-        # ⭐ v4.6.1增强：全0数据识别和重复入库防护
+        # [*] v4.6.1增强：全0数据识别和重复入库防护
         if imported == 0:
             # 检查是否为全0数据（增强版）
             all_zero = check_if_all_zero_data(valid_rows, domain, processed_mappings)
@@ -1365,7 +1365,7 @@ async def ingest_file(
             if all_zero:
                 reasons.append("数据源本身所有数值列均为0（非系统错误）")
                 
-                # ⭐ v4.6.1新增：标记全0文件，防止重复入库（使用error_message字段）
+                # [*] v4.6.1新增：标记全0文件，防止重复入库（使用error_message字段）
                 existing_msg = file_record.error_message or ""
                 file_record.error_message = existing_msg + f"\n[全0数据标识] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 所有数值字段为0，已识别"
                 await db.commit()
@@ -1376,18 +1376,18 @@ async def ingest_file(
         else:
             message = f"入库完成，成功导入{imported}条记录"
         
-        # ⭐ v4.18.2移除：订单金额维度表功能已移除，amount_imported 始终为 0
+        # [*] v4.18.2移除：订单金额维度表功能已移除，amount_imported 始终为 0
         # 保留此逻辑用于向后兼容，但不会再有维度表入库信息
         
         data = {
-            "message": message,  # ✅ 更详细的提示
+            "message": message,  # [OK] 更详细的提示
             "staged": staged, 
             "imported": imported,
-            "amount_imported": amount_imported,  # ⭐ v4.18.2：已移除，始终为0用于向后兼容
+            "amount_imported": amount_imported,  # [*] v4.18.2：已移除，始终为0用于向后兼容
             "quarantined": quarantined_count,
             "image_extraction": "processing" if image_extraction_started else "skipped",
             "validation": {
-                "total_rows": len(mapped_rows),  # ⭐ v4.7.0修复：使用完整文件行数（映射后）
+                "total_rows": len(mapped_rows),  # [*] v4.7.0修复：使用完整文件行数（映射后）
                 "preview_rows": len(rows) if rows else 0,  # 预览行数（用于参考）
                 "valid_rows": len(valid_rows),
                 "error_rows": len(error_rows),
@@ -1404,7 +1404,7 @@ async def ingest_file(
     except Exception as e:
         await db.rollback()
         logger.error(f"[Ingest] 入库失败: {e}", exc_info=True)
-        # ⭐ v4.7.0增强：提供更详细的错误信息
+        # [*] v4.7.0增强：提供更详细的错误信息
         error_detail = str(e)
         if hasattr(e, '__cause__') and e.__cause__:
             error_detail = f"{error_detail}\n原因: {str(e.__cause__)}"
@@ -1437,7 +1437,7 @@ def check_if_all_zero_data(rows: List[Dict], domain: str, mappings: Dict = None)
     if not rows:
         return False
     
-    # ⭐ v4.6.1增强：自动检测所有数值字段
+    # [*] v4.6.1增强：自动检测所有数值字段
     numeric_fields = set()
     
     # 方法1：从映射中识别数值字段（基于字段名模式，避免数据库查询）
@@ -1528,7 +1528,7 @@ async def validate_data(payload: dict):
         elif domain == "finance":
             result = validate_finance(rows)
         elif domain == "services":
-            # ⭐ v4.6.1新增：services域使用专门的验证函数（不需要product_id）
+            # [*] v4.6.1新增：services域使用专门的验证函数（不需要product_id）
             result = validate_services(rows)
         else:
             result = validate_product_metrics(rows)
@@ -1616,7 +1616,7 @@ async def apply_template_deprecated(payload: dict, db: AsyncSession = Depends(ge
     
     方案B+匹配规则（无回退）：
     1. 唯一精确匹配：source_platform + domain + sub_domain + granularity
-    2. 找不到模板 → 智能映射兜底
+    2. 找不到模板 -> 智能映射兜底
     
     改进：
     - 使用source_platform（数据来源）而非platform（采集平台）
@@ -1649,7 +1649,7 @@ async def apply_template_deprecated(payload: dict, db: AsyncSession = Depends(ge
         from backend.services.field_mapping.normalizer import normalize_template_key
         from backend.services.field_mapping.entry import get_key_fields
 
-        # ⭐ 新增：如果提供了file_id，优先从文件元数据获取granularity
+        # [*] 新增：如果提供了file_id，优先从文件元数据获取granularity
         file_id = payload.get("file_id")
         file_granularity = None
         if file_id:
@@ -1664,7 +1664,7 @@ async def apply_template_deprecated(payload: dict, db: AsyncSession = Depends(ge
         source_platform = key["source_platform"]
         domain = key["domain"]
         sub_domain = key["sub_domain"]
-        # ⭐ 修复：优先使用文件元数据的granularity
+        # [*] 修复：优先使用文件元数据的granularity
         granularity = file_granularity or key["granularity"]
         columns = payload.get("columns", [])
         
@@ -1674,11 +1674,11 @@ async def apply_template_deprecated(payload: dict, db: AsyncSession = Depends(ge
         template = None  # 不再查询已废弃的表
         
         if not template:
-            # ⭐ 新增：如果粒度不匹配，给出警告提示
+            # [*] 新增：如果粒度不匹配，给出警告提示
             if file_granularity and file_granularity != key["granularity"]:
                 logger.warning(f"[ApplyTemplate] 粒度不匹配：文件粒度={file_granularity}，用户选择={key['granularity']}，未找到匹配模板")
             
-            # 找不到模板 → 统一入口兜底（模板/AI融合）
+            # 找不到模板 -> 统一入口兜底（模板/AI融合）
             logger.info(f"[ApplyTemplate] 未找到模板，使用统一映射入口")
             from backend.services.field_mapping.entry import get_mappings
             suggestions = get_mappings(columns, domain, source_platform)

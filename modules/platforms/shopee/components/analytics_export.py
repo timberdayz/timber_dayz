@@ -15,7 +15,7 @@ class ShopeeAnalyticsExport(ExportComponent):
 
     - 只依赖 analytics_config 中的 URL/选择器
     - 统一落盘到 temp/outputs/shopee/<账号>/<店铺>/traffic/<粒度>/
-    - 优先 UI 导出（点击→等待→下载），后续可扩展 API 备选
+    - 优先 UI 导出（点击->等待->下载），后续可扩展 API 备选
     - 架构与 ShopeeProductsExport 保持一致
     """
 
@@ -356,7 +356,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                                 preferred.click()
                             download = dl_info.value
                     except Exception as e:
-                        # UI监听未命中 → 进行短时文件系统兜底（最多15秒，每秒检查一次）
+                        # UI监听未命中 -> 进行短时文件系统兜底（最多15秒，每秒检查一次）
                         for _ in range(15):
                             try:
                                 cur = set(out_root.glob("*"))
@@ -575,7 +575,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                         if btn and btn.is_visible() and btn.is_enabled():
                             return btn
 
-                    # 文本状态检测（处理中 → 继续等待）
+                    # 文本状态检测（处理中 -> 继续等待）
                     try:
                         status_text = page.text_content('body') or ''
                         indicators = get_config_value('data_collection', 'export_detection.processing_indicators', [

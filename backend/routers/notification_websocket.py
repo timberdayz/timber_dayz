@@ -547,14 +547,14 @@ async def websocket_notifications(
         connection_manager.disconnect(websocket, user_id)
 
 
-# ⭐ v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
 try:
     from backend.middleware.rate_limiter import role_based_rate_limit
 except ImportError:
     role_based_rate_limit = None
 
 @router.get("/ws/stats")
-@role_based_rate_limit(endpoint_type="default")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def websocket_stats(
     current_user = Depends(require_admin),
     request: Request = None

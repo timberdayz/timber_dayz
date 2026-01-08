@@ -35,7 +35,7 @@ async def export_lost_data(
     导出丢失数据到Excel（v4.13.0新增）
     
     功能：
-    - 导出Staging→Fact丢失的数据详情
+    - 导出Staging->Fact丢失的数据详情
     - 支持orders/products/traffic/analytics/inventory域
     - 导出为Excel格式
     

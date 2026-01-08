@@ -12,7 +12,7 @@ import sys
 import os
 from pathlib import Path
 
-# ⭐ 注意（2025-12-21）：
+# [*] 注意（2025-12-21）：
 # Windows 上 Playwright 需要 ProactorEventLoop（默认），因为需要 create_subprocess_exec
 # SelectorEventLoop 不支持 subprocess，会导致 NotImplementedError
 # 所以不要设置 WindowsSelectorEventLoopPolicy
@@ -39,8 +39,8 @@ import asyncio  # v4.3.3新增：支持后台任务
 from typing import List, Optional
 
 # 导入路由（全部启用 - v4.1.0优化后）
-# ⚠️ v4.6.0 DSS架构重构：已删除废弃的API（metrics, store_analytics, main_views, materialized_views, field_mapping_dictionary_mv_display）
-# ✅ v4.6.0 DSS架构重构：dashboard_api已恢复，通过Metabase Question查询提供数据
+# [WARN] v4.6.0 DSS架构重构：已删除废弃的API（metrics, store_analytics, main_views, materialized_views, field_mapping_dictionary_mv_display）
+# [OK] v4.6.0 DSS架构重构：dashboard_api已恢复，通过Metabase Question查询提供数据
 from backend.routers import (
     collection,
     management,
@@ -69,7 +69,7 @@ from backend.routers import (
     system,  # v4.3.5: 系统配置API
     account_alignment,  # v4.3.6: 账号对齐API
     # procurement,  # v4.17.0: 已删除（财务域表已删除，API路由已移除）
-    # ⚠️ v4.12.0移除：数据浏览器API已移除，使用Metabase替代
+    # [WARN] v4.12.0移除：数据浏览器API已移除，使用Metabase替代
     # data_browser,  # v4.7.0: 数据库浏览器API
     sales_campaign,  # v4.11.0: 销售战役管理API
     target_management,  # v4.11.0: 目标管理API
@@ -78,12 +78,12 @@ from backend.routers import (
     raw_layer_export,  # v4.13.1: 丢失数据导出API
     data_flow,  # v4.11.5: 数据流转追踪API
     data_consistency,  # v4.11.5: 数据一致性验证API
-    database_design_validator,  # ⭐ v4.12.0新增：数据库设计规范验证API
-    mv,  # ⭐ v4.12.0修复：物化视图管理API（修复刷新功能）
-    component_recorder,  # ⭐ Phase 8.1: UI化组件录制工具API
-    rate_limit,  # ⭐ v4.19.2: 限流管理API
+    database_design_validator,  # [*] v4.12.0新增：数据库设计规范验证API
+    mv,  # [*] v4.12.0修复：物化视图管理API（修复刷新功能）
+    component_recorder,  # [*] Phase 8.1: UI化组件录制工具API
+    rate_limit,  # [*] v4.19.2: 限流管理API
 )
-from backend.routers import rate_limit_config  # ⭐ v4.19.4: 限流配置管理API（Phase 3）
+from backend.routers import rate_limit_config  # [*] v4.19.4: 限流配置管理API（Phase 3）
 from backend.models.database import init_db, get_db
 from backend.utils.config import get_settings
 from modules.core.logger import get_logger
@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
 ╚══════════════════════════════════════════════════════════╝
         """)
         
-        # ⭐ v4.3.3新增：启动后台自动修复任务（零手动干预）
+        # [*] v4.3.3新增：启动后台自动修复任务（零手动干预）
         # v4.12.0修复：正确管理后台任务，避免关闭时的CancelledError
         try:
             from backend.tasks.auto_repair_files import auto_repair_all_xls_files
@@ -200,7 +200,7 @@ async def lifespan(app: FastAPI):
             from backend.utils.redis_client import init_redis
             redis_client = await init_redis(app)
             
-            # ⭐ Phase 3: 初始化统一缓存服务
+            # [*] Phase 3: 初始化统一缓存服务
             if redis_client:
                 from backend.services.cache_service import get_cache_service
                 cache_service = get_cache_service(redis_client=redis_client)
@@ -238,7 +238,7 @@ async def lifespan(app: FastAPI):
         except Exception as ws_err:
             logger.warning(f"[WS] WebSocket清理任务启动失败（不影响主功能）: {ws_err}")
         
-        # ⭐ v4.19.5 新增：检查限流器存储连接
+        # [*] v4.19.5 新增：检查限流器存储连接
         try:
             from backend.middleware.rate_limiter import check_redis_connection, limiter
             if limiter and limiter.enabled:
@@ -261,7 +261,7 @@ async def lifespan(app: FastAPI):
             from backend.models.database import SessionLocal
             import asyncio
             
-            # ⭐ v4.18.2修复：使用run_in_executor包装同步数据库操作
+            # [*] v4.18.2修复：使用run_in_executor包装同步数据库操作
             def _sync_mark_interrupted_tasks():
                 """同步标记中断任务（在线程池中执行）"""
                 db = SessionLocal()
@@ -320,7 +320,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"[ERROR] 系统启动失败: {e}")
         raise
     
-    # ⚠️ v4.6.0 DSS架构重构：物化视图和C类数据计算已迁移到Metabase
+    # [WARN] v4.6.0 DSS架构重构：物化视图和C类数据计算已迁移到Metabase
     # 不再需要后端调度器，Metabase直接查询PostgreSQL原始表
     
     yield
@@ -369,7 +369,7 @@ async def lifespan(app: FastAPI):
         # 捕获关闭过程中的所有异常，确保关闭流程继续
         logger.debug(f"[关闭] 关闭过程中出现异常（可忽略）: {e}")
     
-    # ⚠️ v4.6.0 DSS架构重构：物化视图和C类数据计算已迁移到Metabase
+    # [WARN] v4.6.0 DSS架构重构：物化视图和C类数据计算已迁移到Metabase
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -439,7 +439,7 @@ app.add_middleware(RequestIDMiddleware)
 # API性能监控中间件（基础监控 - 日志记录）
 app.add_middleware(PerformanceLoggingMiddleware)
 
-# ⭐ v6.0.0新增：CSRF 保护中间件（Phase 3: CSRF Token 保护）
+# [*] v6.0.0新增：CSRF 保护中间件（Phase 3: CSRF Token 保护）
 # 注意：可以通过环境变量 CSRF_ENABLED 禁用（开发环境可能需要禁用）
 csrf_enabled = os.getenv("CSRF_ENABLED", "false").lower() == "true"
 if csrf_enabled:
@@ -509,7 +509,7 @@ async def health_check(db: Session = Depends(get_db)):
     health_status = {
         "status": "healthy",
         "service": "西虹ERP系统API",
-        "version": "4.19.0",  # ⭐ 更新版本号
+        "version": "4.19.0",  # [*] 更新版本号
         "timestamp": datetime.now().isoformat(),
         "database": {
             "status": "unknown",
@@ -524,7 +524,7 @@ async def health_check(db: Session = Depends(get_db)):
             "checked_out": 0,
             "overflow": 0
         },
-        "executors": {  # ⭐ v4.19.0新增：执行器健康检查
+        "executors": {  # [*] v4.19.0新增：执行器健康检查
             "status": "unknown",
             "cpu_executor": {},
             "io_executor": {}
@@ -549,7 +549,7 @@ async def health_check(db: Session = Depends(get_db)):
     except Exception as e:
         health_status["pool"]["error"] = str(e)
     
-    # ⭐ v4.19.0新增：检查执行器健康状态
+    # [*] v4.19.0新增：检查执行器健康状态
     try:
         from backend.services.executor_manager import get_executor_manager
         executor_manager = get_executor_manager()
@@ -569,7 +569,7 @@ async def health_check(db: Session = Depends(get_db)):
             "status": "error",
             "error": f"执行器健康检查失败: {str(e)}"
         }
-        # ⚠️ 注意：执行器健康检查失败不应该导致整体健康检查失败
+        # [WARN] 注意：执行器健康检查失败不应该导致整体健康检查失败
         # 因为执行器是可选的（某些功能可能不使用执行器）
         # 但可以记录警告
         logger.warning(f"[HealthCheck] 执行器健康检查失败: {e}")
@@ -589,7 +589,7 @@ async def root():
 
 # 注册路由（全部启用 - v4.1.0优化版）
 
-# ✅ v4.6.0 DSS架构重构：dashboard_api已恢复，通过Metabase Question查询提供数据
+# [OK] v4.6.0 DSS架构重构：dashboard_api已恢复，通过Metabase Question查询提供数据
 app.include_router(
     dashboard_api.router,
     tags=["Dashboard"]
@@ -656,7 +656,7 @@ app.include_router(
     tags=["字段映射辞典"]
 )
 
-# ⚠️ v4.6.0 DSS架构重构：已删除field_mapping_dictionary_mv_display（DSS架构不再需要物化视图显示标识）
+# [WARN] v4.6.0 DSS架构重构：已删除field_mapping_dictionary_mv_display（DSS架构不再需要物化视图显示标识）
 
 # v4.12.0: 数据同步API（新统一入口）
 app.include_router(
@@ -693,13 +693,13 @@ app.include_router(
 )
 
 # v4.5.0: 自动入库API（v4.12.0已废弃，统一使用data_sync）
-# ⚠️ 注意：只保留治理统计API，自动入库API已移除
+# [WARN] 注意：只保留治理统计API，自动入库API已移除
 # 治理统计API（governance/*）仍然需要，因为数据治理功能依赖这些API
 from backend.routers import auto_ingest
 app.include_router(
     auto_ingest.router,
     prefix="/api/field-mapping",
-    tags=["数据治理统计"]  # ⭐ 只保留治理统计API，自动入库API已废弃
+    tags=["数据治理统计"]  # [*] 只保留治理统计API，自动入库API已废弃
 )
 
 # v4.6.0 数据隔离区API（查看和重新处理隔离数据）
@@ -819,7 +819,7 @@ app.include_router(
 #     tags=["采购管理"]
 # )
 
-# ⚠️ v4.12.0移除：数据浏览器API已移除，使用Metabase替代（http://localhost:8080）
+# [WARN] v4.12.0移除：数据浏览器API已移除，使用Metabase替代（http://localhost:8080）
 # v4.7.0 数据库浏览器API（查看已入库数据）
 # app.include_router(
 #     data_browser.router,
@@ -828,7 +828,7 @@ app.include_router(
 # )
 
 # v4.8.0 物化视图管理API（刷新、状态查询）
-# ⚠️ v4.6.0 DSS架构重构：已删除materialized_views（Metabase直接查询原始表，不再需要物化视图）
+# [WARN] v4.6.0 DSS架构重构：已删除materialized_views（Metabase直接查询原始表，不再需要物化视图）
 
 # v4.11.0 销售战役管理API
 app.include_router(
@@ -851,7 +851,7 @@ app.include_router(
     tags=["绩效管理"]
 )
 
-# ⚠️ v4.6.0 DSS架构重构：已删除store_analytics（使用Metabase Dashboard替代）
+# [WARN] v4.6.0 DSS架构重构：已删除store_analytics（使用Metabase Dashboard替代）
 
 # v4.11.5 原始数据层查看API
 app.include_router(
@@ -870,7 +870,7 @@ app.include_router(
     tags=["数据流转追踪"]
 )
 
-# ⚠️ v4.6.0 DSS架构重构：已删除metrics（使用Metabase Question API替代）
+# [WARN] v4.6.0 DSS架构重构：已删除metrics（使用Metabase Question API替代）
 
 # v4.11.5 数据一致性验证API
 app.include_router(
@@ -878,29 +878,29 @@ app.include_router(
     tags=["数据一致性验证"]
 )
 
-# ⚠️ v4.6.0 DSS架构重构：已删除main_views（使用Metabase直接查询原始表替代）
+# [WARN] v4.6.0 DSS架构重构：已删除main_views（使用Metabase直接查询原始表替代）
 
-# ⭐ v4.12.0新增：数据库设计规范验证API
+# [*] v4.12.0新增：数据库设计规范验证API
 app.include_router(
     database_design_validator.router,
     tags=["数据库设计规范验证"]
 )
 
-# ⭐ v4.12.0修复：物化视图管理API（修复刷新功能）
+# [*] v4.12.0修复：物化视图管理API（修复刷新功能）
 app.include_router(
     mv.router,
-    prefix="/api",  # ⭐ 修复：添加/api前缀，与其他路由保持一致
+    prefix="/api",  # [*] 修复：添加/api前缀，与其他路由保持一致
     tags=["物化视图管理"]
 )
 
-# ⭐ v4.19.2新增：限流管理API
+# [*] v4.19.2新增：限流管理API
 app.include_router(
     rate_limit.router,
     prefix="/api",
     tags=["限流管理"]
 )
 
-# ⭐ v4.19.4 新增：限流配置管理API（Phase 3）
+# [*] v4.19.4 新增：限流配置管理API（Phase 3）
 app.include_router(
     rate_limit_config.router,
     tags=["限流配置管理"]
@@ -986,7 +986,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 if __name__ == "__main__":
-    # ⭐ 注意（2025-12-21）：
+    # [*] 注意（2025-12-21）：
     # Windows 上 Playwright 需要 ProactorEventLoop（默认），因为需要 create_subprocess_exec
     # 不要设置 WindowsSelectorEventLoopPolicy，否则会导致 NotImplementedError
     uvicorn.run(

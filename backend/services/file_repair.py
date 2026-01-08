@@ -72,7 +72,7 @@ def get_repaired_path(original_path: Path) -> Path:
     Returns:
         修复后的.xlsx文件路径（可能不存在）
     """
-    # ⭐ 智能路径处理：支持data/raw、temp/outputs等任意目录
+    # [*] 智能路径处理：支持data/raw、temp/outputs等任意目录
     from modules.core.path_manager import get_data_raw_dir, get_output_dir, get_downloads_dir
     
     original_path = Path(original_path).absolute()
@@ -153,7 +153,7 @@ def auto_repair_xls(xls_path: Path, max_size_mb: float = 50.0) -> Optional[Path]
             excel.Visible = False
             excel.DisplayAlerts = False
             
-            # ⭐ 大文件优化：关闭自动计算和事件
+            # [*] 大文件优化：关闭自动计算和事件
             excel.EnableEvents = False
             excel.Calculation = -4135  # xlCalculationManual
             

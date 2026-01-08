@@ -272,7 +272,7 @@ class ConcurrentTester:
 
 async def run_concurrent_tests():
     """运行并发测试"""
-    print("🚀 开始并发压力测试")
+    print("[START] 开始并发压力测试")
     print("="*60)
     
     # 测试配置
@@ -287,7 +287,7 @@ async def run_concurrent_tests():
     
     async with ConcurrentTester() as tester:
         for config in test_configs:
-            print(f"\n🧪 {config['name']}: {config['users']}个并发用户, 每用户{config['requests']}个请求")
+            print(f"\n[TEST] {config['name']}: {config['users']}个并发用户, 每用户{config['requests']}个请求")
             print("-" * 60)
             
             # 健康检查测试
@@ -307,7 +307,7 @@ async def run_concurrent_tests():
             all_results.append(db_result)
             
             # 等待一段时间再进行下一轮测试
-            print(f"\n⏳ 等待5秒后进行下一轮测试...")
+            print(f"\n[WAIT] 等待5秒后进行下一轮测试...")
             await asyncio.sleep(5)
     
     # 保存所有测试结果
@@ -315,7 +315,7 @@ async def run_concurrent_tests():
     filename = f"temp/outputs/concurrent_test_results_{timestamp}.json"
     tester.save_test_results(all_results, filename)
     
-    print(f"\n🎉 并发压力测试完成！")
+    print(f"\n[DONE] 并发压力测试完成！")
     print(f"总共执行了 {len(all_results)} 个测试")
     print(f"结果已保存到: {filename}")
 

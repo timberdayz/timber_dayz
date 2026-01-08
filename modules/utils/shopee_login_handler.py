@@ -52,14 +52,14 @@ class ShopeeLoginHandler:
             if verification_success:
                 # 验证最终登录状态
                 final_success = self._verify_final_login_success(page)
-                logger.info(f"🎯 Shopee登录最终结果: {'成功' if final_success else '失败'}")
+                logger.info(f"[TARGET] Shopee登录最终结果: {'成功' if final_success else '失败'}")
                 return final_success
             else:
-                logger.error("❌ Shopee验证码处理失败")
+                logger.error("[FAIL] Shopee验证码处理失败")
                 return False
 
         except Exception as e:
-            logger.error(f"❌ Shopee登录异常: {e}")
+            logger.error(f"[FAIL] Shopee登录异常: {e}")
             return False
 
     def _perform_basic_login(self, account_info: Dict[str, Any]) -> Optional[Page]:
@@ -69,7 +69,7 @@ class ShopeeLoginHandler:
             username = account_info.get('Username', '')
             password = account_info.get('Password', '')
 
-            logger.info(f"🚀 开始Shopee基础登录: {username}")
+            logger.info(f"[START] 开始Shopee基础登录: {username}")
 
             # 创建新页面
             page = self.browser.new_page()
@@ -89,14 +89,14 @@ class ShopeeLoginHandler:
                 }
                 svc = LoginService()
                 if svc.ensure_logged_in("shopee", page, svc_account):
-                    logger.success("✅ 基础登录使用 LoginService 完成")
+                    logger.success("[OK] 基础登录使用 LoginService 完成")
                     return page
                 else:
-                    logger.error("❌ LoginService 未完成登录（修正模式统一入口），判定失败")
+                    logger.error("[FAIL] LoginService 未完成登录（修正模式统一入口），判定失败")
                     page.close()
                     return None
             except Exception as e:
-                logger.error(f"❌ LoginService 调用失败（修正模式统一入口）: {e}")
+                logger.error(f"[FAIL] LoginService 调用失败（修正模式统一入口）: {e}")
                 page.close()
                 return None
 
@@ -124,7 +124,7 @@ class ShopeeLoginHandler:
                     if username_input and username_input.is_visible():
                         username_input.clear()
                         username_input.fill(username)
-                        logger.info(f"✅ 用户名填写成功: {selector}")
+                        logger.info(f"[OK] 用户名填写成功: {selector}")
                         username_filled = True
                         break
                 except Exception as e:
@@ -132,7 +132,7 @@ class ShopeeLoginHandler:
                     continue
 
             if not username_filled:
-                logger.error("❌ 用户名填写失败")
+                logger.error("[FAIL] 用户名填写失败")
                 # 保存调试截图
                 try:
                     from pathlib import Path
@@ -140,7 +140,7 @@ class ShopeeLoginHandler:
                     screenshot_dir.mkdir(parents=True, exist_ok=True)
                     screenshot_path = screenshot_dir / f"debug_login_failed_{int(time.time())}.png"
                     page.screenshot(path=str(screenshot_path))
-                    logger.info(f"📸 已保存调试截图: {screenshot_path}")
+                    logger.info(f"[CAM] 已保存调试截图: {screenshot_path}")
                 except:
                     pass
                 page.close()
@@ -163,7 +163,7 @@ class ShopeeLoginHandler:
                     if password_input and password_input.is_visible():
                         password_input.clear()
                         password_input.fill(password)
-                        logger.info(f"✅ 密码填写成功: {selector}")
+                        logger.info(f"[OK] 密码填写成功: {selector}")
                         password_filled = True
                         break
                 except Exception as e:
@@ -171,7 +171,7 @@ class ShopeeLoginHandler:
                     continue
 
             if not password_filled:
-                logger.error("❌ 密码填写失败")
+                logger.error("[FAIL] 密码填写失败")
                 # 保存调试截图
                 try:
                     from pathlib import Path
@@ -179,7 +179,7 @@ class ShopeeLoginHandler:
                     screenshot_dir.mkdir(parents=True, exist_ok=True)
                     screenshot_path = screenshot_dir / f"debug_password_failed_{int(time.time())}.png"
                     page.screenshot(path=str(screenshot_path))
-                    logger.info(f"📸 已保存调试截图: {screenshot_path}")
+                    logger.info(f"[CAM] 已保存调试截图: {screenshot_path}")
                 except:
                     pass
                 page.close()
@@ -217,7 +217,7 @@ class ShopeeLoginHandler:
                                 except Exception:
                                     loc.click(force=True)
                                 tried = True
-                                logger.info("✅ 已尝试直接勾选‘记住我’复选框")
+                                logger.info("[OK] 已尝试直接勾选‘记住我’复选框")
                                 break
                         except Exception:
                             continue
@@ -229,7 +229,7 @@ class ShopeeLoginHandler:
                             if lab and lab.count() > 0:
                                 lab.first.click(force=True)
                                 tried = True
-                                logger.info("✅ 通过文本点击触发‘记住我’")
+                                logger.info("[OK] 通过文本点击触发‘记住我’")
                         except Exception:
                             pass
 
@@ -252,14 +252,14 @@ class ShopeeLoginHandler:
 
                     # 4) 再次验证状态
                     if _is_checked():
-                        logger.success("✅ ‘记住我’已处于勾选状态")
+                        logger.success("[OK] ‘记住我’已处于勾选状态")
                     else:
                         if tried:
-                            logger.warning("⚠️ 已尝试点击‘记住我’，但状态未改变，继续登录（不阻塞）")
+                            logger.warning("[WARN] 已尝试点击‘记住我’，但状态未改变，继续登录（不阻塞）")
                         else:
-                            logger.debug("ℹ️ 未找到‘记住我’元素，跳过勾选步骤")
+                            logger.debug("[i] 未找到‘记住我’元素，跳过勾选步骤")
                 else:
-                    logger.info("ℹ️ ‘记住我’已是勾选状态")
+                    logger.info("[i] ‘记住我’已是勾选状态")
             except Exception as e:
                 logger.debug(f"勾选‘记住我’过程忽略异常: {e}")
 
@@ -271,24 +271,24 @@ class ShopeeLoginHandler:
                     login_button = page.query_selector(selector)
                     if login_button and login_button.is_visible():
                         login_button.click()
-                        logger.info(f"✅ 登录按钮点击成功: {selector}")
+                        logger.info(f"[OK] 登录按钮点击成功: {selector}")
                         login_clicked = True
                         break
                 except:
                     continue
 
             if not login_clicked:
-                logger.error("❌ 登录按钮点击失败")
+                logger.error("[FAIL] 登录按钮点击失败")
                 page.close()
                 return None
 
             # 等待登录响应
             page.wait_for_timeout(3000)
-            logger.success("✅ Shopee基础登录操作完成")
+            logger.success("[OK] Shopee基础登录操作完成")
             return page
 
         except Exception as e:
-            logger.error(f"❌ Shopee基础登录失败: {e}")
+            logger.error(f"[FAIL] Shopee基础登录失败: {e}")
             if 'page' in locals():
                 try:
                     page.close()
@@ -298,25 +298,25 @@ class ShopeeLoginHandler:
 
     def _handle_verification_if_needed(self, page: Page, account_info: Dict[str, Any]) -> bool:
         """处理验证码（如果需要）"""
-        logger.info("🔍 检查是否需要验证码处理...")
+        logger.info("[SEARCH] 检查是否需要验证码处理...")
 
         # 检测验证码弹窗
         verification_popup = self._detect_verification_popup(page)
         if not verification_popup:
-            logger.info("ℹ️ 未检测到验证码弹窗，可能已直接登录成功")
+            logger.info("[i] 未检测到验证码弹窗，可能已直接登录成功")
             return True
 
-        logger.info("✅ 检测到验证码弹窗，开始处理...")
+        logger.info("[OK] 检测到验证码弹窗，开始处理...")
 
         # 点击发送至邮箱按钮
         email_sent = self._click_send_to_email_button(page)
         if not email_sent:
-            logger.error("❌ 发送至邮箱按钮点击失败")
+            logger.error("[FAIL] 发送至邮箱按钮点击失败")
             return False
 
         # 等待邮箱按钮响应
         wait_time = get_email_button_wait_time()
-        logger.info(f"⏱️ 等待验证码按钮响应... ({wait_time}秒)")
+        logger.info(f"[TIME] 等待验证码按钮响应... ({wait_time}秒)")
         time.sleep(wait_time)
 
         # 尝试自动获取验证码
@@ -327,7 +327,7 @@ class ShopeeLoginHandler:
             return self._input_verification_code(page, verification_code)
         else:
             # 转为手动输入模式
-            logger.warning("⚠️ 自动获取验证码失败，等待用户手动输入")
+            logger.warning("[WARN] 自动获取验证码失败，等待用户手动输入")
             return self._wait_for_manual_input(page)
 
     def _detect_verification_popup(self, page: Page) -> bool:
@@ -338,7 +338,7 @@ class ShopeeLoginHandler:
             try:
                 popup = page.query_selector(selector)
                 if popup and popup.is_visible():
-                    logger.info(f"✅ 检测到验证码弹窗: {selector}")
+                    logger.info(f"[OK] 检测到验证码弹窗: {selector}")
                     return True
             except:
                 continue
@@ -347,7 +347,7 @@ class ShopeeLoginHandler:
 
     def _click_send_to_email_button(self, page: Page) -> bool:
         """点击发送至邮箱按钮"""
-        logger.info("📧 尝试点击发送至邮箱按钮...")
+        logger.info("[EMAIL] 尝试点击发送至邮箱按钮...")
 
         email_button_selectors = self.config.email_button_selectors
 
@@ -356,18 +356,18 @@ class ShopeeLoginHandler:
                 button = page.query_selector(selector)
                 if button and button.is_visible():
                     button_text = button.text_content()
-                    logger.info(f"🔍 找到匹配按钮: {selector} (文本: '{button_text}')")
+                    logger.info(f"[SEARCH] 找到匹配按钮: {selector} (文本: '{button_text}')")
 
                     # 点击按钮
                     button.click()
-                    logger.success(f"✅ 成功点击发送至邮箱按钮: {selector}")
+                    logger.success(f"[OK] 成功点击发送至邮箱按钮: {selector}")
                     return True
 
             except Exception as e:
                 logger.debug(f"发送至邮箱按钮点击失败 {selector}: {e}")
                 continue
 
-        logger.error("❌ 未找到可用的发送至邮箱按钮")
+        logger.error("[FAIL] 未找到可用的发送至邮箱按钮")
         return False
 
     def _auto_get_verification_code(self, account_info: Dict[str, Any]) -> Optional[str]:
@@ -377,19 +377,19 @@ class ShopeeLoginHandler:
             email_password = account_info.get('Email password', '')
 
             if not email or not email_password:
-                logger.warning("⚠️ 缺少邮箱信息，无法自动获取验证码")
+                logger.warning("[WARN] 缺少邮箱信息，无法自动获取验证码")
                 return None
 
-            logger.info(f"📧 尝试自动获取验证码: {email}")
+            logger.info(f"[EMAIL] 尝试自动获取验证码: {email}")
 
             # 登录邮箱
             email_page = self.email_handler.login_to_email(email, email_password)
             if not email_page:
-                logger.error("❌ 邮箱登录失败")
+                logger.error("[FAIL] 邮箱登录失败")
                 return None
 
             # 等待邮件到达
-            logger.info("⏳ 等待验证码邮件到达...")
+            logger.info("[WAIT] 等待验证码邮件到达...")
             time.sleep(10)  # 等待邮件到达
 
             # 获取验证码
@@ -401,12 +401,12 @@ class ShopeeLoginHandler:
             return verification_code
 
         except Exception as e:
-            logger.error(f"❌ 自动获取验证码失败: {e}")
+            logger.error(f"[FAIL] 自动获取验证码失败: {e}")
             return None
 
     def _input_verification_code(self, page: Page, code: str) -> bool:
         """输入验证码"""
-        logger.info(f"🔢 尝试输入验证码: {code}")
+        logger.info(f"[123] 尝试输入验证码: {code}")
 
         input_selectors = self.config.verification_input_selectors
 
@@ -416,7 +416,7 @@ class ShopeeLoginHandler:
                 if input_field and input_field.is_visible():
                     input_field.clear()
                     input_field.fill(code)
-                    logger.info(f"✅ 验证码输入成功: {selector}")
+                    logger.info(f"[OK] 验证码输入成功: {selector}")
 
                     # 点击确认按钮
                     return self._click_confirm_button(page)
@@ -425,7 +425,7 @@ class ShopeeLoginHandler:
                 logger.debug(f"验证码输入失败 {selector}: {e}")
                 continue
 
-        logger.error("❌ 验证码输入失败")
+        logger.error("[FAIL] 验证码输入失败")
         return False
 
     def _click_confirm_button(self, page: Page) -> bool:
@@ -437,19 +437,19 @@ class ShopeeLoginHandler:
                 confirm_button = page.query_selector(selector)
                 if confirm_button and confirm_button.is_visible():
                     confirm_button.click()
-                    logger.success(f"✅ 确认按钮点击成功: {selector}")
+                    logger.success(f"[OK] 确认按钮点击成功: {selector}")
                     time.sleep(3)  # 等待验证完成
                     return True
             except Exception as e:
                 logger.debug(f"确认按钮点击失败 {selector}: {e}")
                 continue
 
-        logger.error("❌ 确认按钮点击失败")
+        logger.error("[FAIL] 确认按钮点击失败")
         return False
 
     def _wait_for_manual_input(self, page: Page) -> bool:
         """等待用户手动输入验证码"""
-        logger.info("⏳ 等待用户手动输入验证码...")
+        logger.info("[WAIT] 等待用户手动输入验证码...")
 
         # 显示用户指引
         self._show_user_guidance()
@@ -463,7 +463,7 @@ class ShopeeLoginHandler:
                 # 检查验证码输入框是否有内容
                 verification_code = self._get_current_verification_input(page)
                 if verification_code and len(verification_code) >= 6:
-                    logger.success(f"✅ 检测到验证码输入: {verification_code}")
+                    logger.success(f"[OK] 检测到验证码输入: {verification_code}")
 
                     # 点击确认按钮
                     if self._click_confirm_button(page):
@@ -477,7 +477,7 @@ class ShopeeLoginHandler:
                 time.sleep(1)
                 continue
 
-        logger.error("❌ 用户手动输入验证码超时")
+        logger.error("[FAIL] 用户手动输入验证码超时")
         return False
 
     def _get_current_verification_input(self, page: Page) -> Optional[str]:
@@ -502,7 +502,7 @@ class ShopeeLoginHandler:
 
         修复问题：空验证码被误判为成功
         """
-        logger.info("🔍 验证验证码验证结果...")
+        logger.info("[SEARCH] 验证验证码验证结果...")
 
         # 等待验证结果
         time.sleep(3)
@@ -523,14 +523,14 @@ class ShopeeLoginHandler:
             try:
                 error_element = page.query_selector(f'*:has-text("{indicator}")')
                 if error_element and error_element.is_visible():
-                    logger.error(f"❌ 验证码验证失败: {indicator}")
+                    logger.error(f"[FAIL] 验证码验证失败: {indicator}")
                     return False
             except:
                 continue
 
         # 检查验证码弹窗是否还存在（如果存在说明验证失败）
         if self._detect_verification_popup(page):
-            logger.error("❌ 验证码弹窗仍然存在，验证失败")
+            logger.error("[FAIL] 验证码弹窗仍然存在，验证失败")
             return False
 
         # 检查是否跳转到成功页面或出现成功标识
@@ -546,39 +546,39 @@ class ShopeeLoginHandler:
                 else:
                     el = page.query_selector(f'*:has-text("{ind}")')
                 if el and el.is_visible():
-                    logger.success("✅ 验证码验证成功（页面元素确认）")
+                    logger.success("[OK] 验证码验证成功（页面元素确认）")
                     return True
             except Exception:
                 continue
         if 'signin' not in current_url and 'login' not in current_url:
-            logger.success("✅ URL已变化，验证码验证成功")
+            logger.success("[OK] URL已变化，验证码验证成功")
             return True
 
-        logger.warning("⚠️ 验证码验证结果不确定（未检测到成功信号），按失败处理")
+        logger.warning("[WARN] 验证码验证结果不确定（未检测到成功信号），按失败处理")
         return False
 
     def _show_user_guidance(self):
         """显示用户操作指引"""
         print("\n" + "="*60)
-        print("📋 用户操作指引")
+        print("[LIST] 用户操作指引")
         print("="*60)
-        print("\n🎯 Shopee验证码处理指引")
-        print("\n📱 操作步骤:")
+        print("\n[TARGET] Shopee验证码处理指引")
+        print("\n[PHONE] 操作步骤:")
         print("   1. 检查您的邮箱新邮件")
         print("   2. 查找Shopee发送的验证码邮件")
         print("   3. 复制邮件中的6位数验证码")
         print("   4. 在弹窗中输入验证码")
         print("   5. 点击'确认'按钮完成验证")
-        print("\n⏰ 注意事项:")
+        print("\n[TIME] 注意事项:")
         print("   - 验证码通常在1-2分钟内到达")
         print("   - 验证码有效期约10分钟")
         print("   - 如未收到邮件，请检查垃圾邮件文件夹")
-        print("\n🔄 系统将自动检测验证码输入并完成后续流程")
+        print("\n[RETRY] 系统将自动检测验证码输入并完成后续流程")
         print("\n" + "="*60)
 
     def _verify_final_login_success(self, page: Page) -> bool:
         """验证最终登录成功状态"""
-        logger.info("🔍 验证最终登录成功状态...")
+        logger.info("[SEARCH] 验证最终登录成功状态...")
 
         # 等待页面加载
         time.sleep(5)
@@ -589,7 +589,7 @@ class ShopeeLoginHandler:
         except Exception:
             url_lc = ""
         if 'signin' in url_lc or 'login' in url_lc:
-            logger.warning("⚠️ 仍处于登录URL，判定为未登录")
+            logger.warning("[WARN] 仍处于登录URL，判定为未登录")
             return False
 
         # 仅使用登录后页面特有的容器/结构作为成功信号，避免‘卖家中心’等登录页文案误判
@@ -606,19 +606,19 @@ class ShopeeLoginHandler:
             try:
                 element = page.query_selector(indicator)
                 if element and element.is_visible():
-                    logger.success(f"✅ 登录成功标识验证通过: {indicator}")
+                    logger.success(f"[OK] 登录成功标识验证通过: {indicator}")
                     return True
             except Exception as e:
                 logger.debug(f"登录成功验证失败 {indicator}: {e}")
                 continue
 
-        logger.warning("⚠️ 登录成功状态验证不确定")
+        logger.warning("[WARN] 登录成功状态验证不确定")
 
         # 保存调试截图
         try:
             debug_screenshot = get_debug_screenshot_path("login_final_status")
             page.screenshot(path=debug_screenshot)
-            logger.info(f"📸 已保存最终状态截图: {debug_screenshot}")
+            logger.info(f"[CAM] 已保存最终状态截图: {debug_screenshot}")
         except:
             pass
 

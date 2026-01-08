@@ -64,18 +64,18 @@ class AccountManagerApp(BaseApplication):
     def _show_custom_menu(self):
         """显示账号管理自定义菜单"""
         while True:
-            print(f"\n📋 {self.name} - 功能菜单")
+            print(f"\n[LIST] {self.name} - 功能菜单")
             print("-" * 40)
-            print("1. 📝 查看所有账号")
-            print("2. ➕ 添加新账号")
-            print("3. ✏️  编辑账号")
-            print("4. 🗑️  删除账号")
-            print("5. ✅ 验证账号状态")
-            print("6. 📊 账号统计")
-            print("7. 🔄 同步账号配置")
-            print("8. 📁 导入账号")
-            print("9. 📤 导出账号")
-            print("0. 🔙 返回主菜单")
+            print("1. [NOTE] 查看所有账号")
+            print("2. [+] 添加新账号")
+            print("3. [EDIT]  编辑账号")
+            print("4. [DEL]  删除账号")
+            print("5. [OK] 验证账号状态")
+            print("6. [DATA] 账号统计")
+            print("7. [RETRY] 同步账号配置")
+            print("8. [DIR] 导入账号")
+            print("9. [SEND] 导出账号")
+            print("0. [BACK] 返回主菜单")
             
             choice = input("\n请选择操作 (0-9): ").strip()
             
@@ -101,19 +101,19 @@ class AccountManagerApp(BaseApplication):
                 elif choice == "0":
                     break
                 else:
-                    print("❌ 无效选择，请重新输入")
+                    print("[FAIL] 无效选择，请重新输入")
                 
                 if choice != "0":
                     input("\n按回车键继续...")
             
             except Exception as e:
                 logger.error(f"菜单操作异常: {e}")
-                print(f"❌ 操作失败: {e}")
+                print(f"[FAIL] 操作失败: {e}")
                 input("\n按回车键继续...")
     
     def _list_accounts(self):
         """列出所有账号"""
-        print(f"\n📋 账号列表")
+        print(f"\n[LIST] 账号列表")
         print("-" * 50)
         
         try:
@@ -128,33 +128,33 @@ class AccountManagerApp(BaseApplication):
                 username = account.get('username', '未设置')
                 status = account.get('status', '未知')
                 
-                status_icon = "✅" if status == "active" else "❌" if status == "error" else "⚪"
+                status_icon = "[OK]" if status == "active" else "[FAIL]" if status == "error" else "[WHITE]"
                 print(f"{i:2d}. {status_icon} {platform:10s} | {username:20s} | {status}")
         
         except Exception as e:
             logger.error(f"列出账号失败: {e}")
-            print(f"❌ 获取账号列表失败: {e}")
+            print(f"[FAIL] 获取账号列表失败: {e}")
     
     def _add_account(self):
         """添加新账号"""
-        print(f"\n➕ 添加新账号")
+        print(f"\n[+] 添加新账号")
         print("-" * 30)
         
         try:
             # 获取用户输入
             platform = input("平台名称 (如 shopee, amazon): ").strip()
             if not platform:
-                print("❌ 平台名称不能为空")
+                print("[FAIL] 平台名称不能为空")
                 return
             
             username = input("用户名/邮箱: ").strip()
             if not username:
-                print("❌ 用户名不能为空")
+                print("[FAIL] 用户名不能为空")
                 return
             
             password = input("密码: ").strip()
             if not password:
-                print("❌ 密码不能为空")
+                print("[FAIL] 密码不能为空")
                 return
             
             # 构建账号数据
@@ -167,54 +167,54 @@ class AccountManagerApp(BaseApplication):
             
             # 验证账号数据
             if not self.validator.validate_account(account_data):
-                print("❌ 账号数据验证失败")
+                print("[FAIL] 账号数据验证失败")
                 return
             
             # 添加账号
             success = self.handler.add_account(account_data)
             
             if success:
-                print(f"✅ 账号添加成功: {platform} - {username}")
+                print(f"[OK] 账号添加成功: {platform} - {username}")
             else:
-                print("❌ 账号添加失败")
+                print("[FAIL] 账号添加失败")
         
         except Exception as e:
             logger.error(f"添加账号失败: {e}")
-            print(f"❌ 添加账号失败: {e}")
+            print(f"[FAIL] 添加账号失败: {e}")
     
     def _edit_account(self):
         """编辑账号"""
-        print(f"\n✏️  编辑账号")
+        print(f"\n[EDIT]  编辑账号")
         print("-" * 30)
         print("功能开发中...")
     
     def _delete_account(self):
         """删除账号"""
-        print(f"\n🗑️  删除账号")
+        print(f"\n[DEL]  删除账号")
         print("-" * 30)
         print("功能开发中...")
     
     def _verify_accounts(self):
         """验证账号状态"""
-        print(f"\n✅ 验证账号状态")
+        print(f"\n[OK] 验证账号状态")
         print("-" * 30)
         
         try:
             print("正在验证所有账号...")
             results = self.handler.verify_all_accounts()
             
-            print(f"\n📊 验证结果:")
+            print(f"\n[DATA] 验证结果:")
             for platform, result in results.items():
-                status_icon = "✅" if result['success'] else "❌"
+                status_icon = "[OK]" if result['success'] else "[FAIL]"
                 print(f"   {status_icon} {platform}: {result['message']}")
         
         except Exception as e:
             logger.error(f"验证账号失败: {e}")
-            print(f"❌ 验证账号失败: {e}")
+            print(f"[FAIL] 验证账号失败: {e}")
     
     def _show_statistics(self):
         """显示账号统计"""
-        print(f"\n📊 账号统计")
+        print(f"\n[DATA] 账号统计")
         print("-" * 30)
         
         try:
@@ -232,22 +232,22 @@ class AccountManagerApp(BaseApplication):
         
         except Exception as e:
             logger.error(f"获取统计失败: {e}")
-            print(f"❌ 获取统计失败: {e}")
+            print(f"[FAIL] 获取统计失败: {e}")
     
     def _sync_accounts(self):
         """同步账号配置"""
-        print(f"\n🔄 同步账号配置")
+        print(f"\n[RETRY] 同步账号配置")
         print("-" * 30)
         print("功能开发中...")
     
     def _import_accounts(self):
         """导入账号"""
-        print(f"\n📁 导入账号")
+        print(f"\n[DIR] 导入账号")
         print("-" * 30)
         print("功能开发中...")
     
     def _export_accounts(self):
         """导出账号"""
-        print(f"\n📤 导出账号")
+        print(f"\n[SEND] 导出账号")
         print("-" * 30)
         print("功能开发中...") 

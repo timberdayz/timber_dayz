@@ -3,11 +3,11 @@
 =======================================
 
 功能特性：
-- 🔍 智能检测账号登录后的健康状态
-- ⚠️ 识别异常账号（权限不足、被封禁、店铺不匹配等）
-- 🚨 自动处理异常账号（停止操作、关闭进程、记录日志）
-- 📊 生成账号健康报告
-- 🔄 支持多平台（Shopee、Amazon、妙手ERP等）
+- [SEARCH] 智能检测账号登录后的健康状态
+- [WARN] 识别异常账号（权限不足、被封禁、店铺不匹配等）
+- [ALERT] 自动处理异常账号（停止操作、关闭进程、记录日志）
+- [DATA] 生成账号健康报告
+- [RETRY] 支持多平台（Shopee、Amazon、妙手ERP等）
 
 版本：v1.0.0
 作者：跨境电商ERP系统
@@ -58,7 +58,7 @@ class AccountHealthChecker:
             Tuple[AccountStatus, str, Dict]: (状态, 详细信息, 额外数据)
         """
         try:
-            logger.info(f"🔍 开始检测账号健康状态: {account.get('username', 'Unknown')}")
+            logger.info(f"[SEARCH] 开始检测账号健康状态: {account.get('username', 'Unknown')}")
 
             current_url = page.url
             page_content = page.text_content('body') or ""
@@ -76,17 +76,17 @@ class AccountHealthChecker:
                 return self._check_generic_health(page, current_url, page_content, account)
 
         except Exception as e:
-            logger.error(f"❌ 账号健康检测失败: {e}")
+            logger.error(f"[FAIL] 账号健康检测失败: {e}")
             return AccountStatus.UNKNOWN_ERROR, f"检测过程异常: {e}", {}
 
     def _check_shopee_health(self, page: Page, url: str, content: str, account: Dict) -> Tuple[AccountStatus, str, Dict]:
         """检查Shopee账号健康状态"""
         try:
-            logger.info(f"🔍 检查Shopee账号健康状态 - URL: {url}")
+            logger.info(f"[SEARCH] 检查Shopee账号健康状态 - URL: {url}")
 
             # 调试：输出页面内容的前500个字符
             content_preview = content[:500] if content else "无内容"
-            logger.debug(f"📄 页面内容预览: {content_preview}...")
+            logger.debug(f"[FILE] 页面内容预览: {content_preview}...")
 
             # 首先检查是否是正常的后台页面
             healthy_indicators = [
@@ -116,7 +116,7 @@ class AccountHealthChecker:
             has_healthy_content = any(indicator in content for indicator in healthy_indicators)
 
             if is_normal_backend_url and has_healthy_content:
-                logger.success("✅ 检测到正常后台页面，账号健康")
+                logger.success("[OK] 检测到正常后台页面，账号健康")
                 return AccountStatus.HEALTHY, "账号状态正常，功能完整可用", {
                     "url": url,
                     "shop_id": self._extract_shop_id_from_url(url),
@@ -137,7 +137,7 @@ class AccountHealthChecker:
             has_permission_denied_content = any(indicator in content for indicator in permission_denied_indicators)
 
             if has_no_permission_url or has_permission_denied_content:
-                logger.warning("⚠️ 检测到权限不足页面")
+                logger.warning("[WARN] 检测到权限不足页面")
                 return AccountStatus.PERMISSION_DENIED, "账号权限不足，无法访问指定店铺", {
                     "url": url,
                     "shop_id": self._extract_shop_id_from_url(url)
@@ -153,7 +153,7 @@ class AccountHealthChecker:
             ]
 
             if any(indicator in content for indicator in suspension_indicators):
-                logger.error("🚨 检测到账号被封禁")
+                logger.error("[ALERT] 检测到账号被封禁")
                 return AccountStatus.ACCOUNT_SUSPENDED, "账号已被平台封禁或暂停", {"url": url}
 
             # 3. 检查需要验证
@@ -166,7 +166,7 @@ class AccountHealthChecker:
             ]
 
             if any(indicator in content for indicator in verification_indicators):
-                logger.warning("🔐 检测到需要额外验证")
+                logger.warning("[LOCK] 检测到需要额外验证")
                 return AccountStatus.VERIFICATION_REQUIRED, "账号需要完成额外验证", {"url": url}
 
             # 4. 如果既不是明确的权限不足，也不是正常后台，进行更详细的检查
@@ -182,18 +182,18 @@ class AccountHealthChecker:
             ])
 
             if has_product_data or has_seller_elements:
-                logger.info("✅ 检测到商品数据或卖家中心元素，账号可能正常")
+                logger.info("[OK] 检测到商品数据或卖家中心元素，账号可能正常")
                 return AccountStatus.HEALTHY, "账号状态正常，检测到有效数据", {
                     "url": url,
                     "shop_id": self._extract_shop_id_from_url(url)
                 }
 
             # 5. 如果都不匹配，返回未知状态但不关闭页面
-            logger.warning("❓ 无法确定账号状态，建议人工检查")
+            logger.warning("[?] 无法确定账号状态，建议人工检查")
             return AccountStatus.UNKNOWN_ERROR, "无法确定账号状态，页面内容不明确，建议人工检查", {"url": url}
 
         except Exception as e:
-            logger.error(f"❌ Shopee账号检测失败: {e}")
+            logger.error(f"[FAIL] Shopee账号检测失败: {e}")
             return AccountStatus.UNKNOWN_ERROR, f"检测过程异常: {e}", {}
 
     def _check_amazon_health(self, page: Page, url: str, content: str, account: Dict) -> Tuple[AccountStatus, str, Dict]:
@@ -247,7 +247,7 @@ class AccountHealthChecker:
     def _check_tiktok_health(self, page: Page, url: str, content: str, account: Dict) -> Tuple[AccountStatus, str, Dict]:
         """检查TikTok卖家中心账号健康状态"""
         try:
-            logger.info(f"🔍 检查TikTok账号健康状态 - URL: {url}")
+            logger.info(f"[SEARCH] 检查TikTok账号健康状态 - URL: {url}")
 
             # 等待页面稳定，减少误判
             try:
@@ -344,66 +344,66 @@ class AccountHealthChecker:
         account_name = account.get('username', 'Unknown')
 
         if status == AccountStatus.HEALTHY:
-            logger.success(f"✅ 账号 {account_name} 状态正常，继续数据采集")
+            logger.success(f"[OK] 账号 {account_name} 状态正常，继续数据采集")
             return True
 
         # 记录异常账号
-        logger.error(f"🚨 账号异常检测 - {account_name}")
+        logger.error(f"[ALERT] 账号异常检测 - {account_name}")
         logger.error(f"   状态: {status.value}")
         logger.error(f"   详情: {message}")
         logger.error(f"   URL: {page.url}")
 
         # 根据不同状态采取不同处理策略
         if status in [AccountStatus.PERMISSION_DENIED, AccountStatus.SHOP_MISMATCH]:
-            logger.warning(f"⚠️ 账号 {account_name} 权限不足，停止操作并关闭进程")
+            logger.warning(f"[WARN] 账号 {account_name} 权限不足，停止操作并关闭进程")
             self._close_account_process(page, account)
             return False
 
         elif status in [AccountStatus.ACCOUNT_SUSPENDED, AccountStatus.ACCOUNT_LOCKED]:
-            logger.error(f"🚨 账号 {account_name} 被封禁/锁定，立即停止所有操作")
+            logger.error(f"[ALERT] 账号 {account_name} 被封禁/锁定，立即停止所有操作")
             self._close_account_process(page, account)
             self._mark_account_as_disabled(account)
             return False
 
         elif status == AccountStatus.VERIFICATION_REQUIRED:
-            logger.warning(f"🔐 账号 {account_name} 需要验证，暂停操作")
+            logger.warning(f"[LOCK] 账号 {account_name} 需要验证，暂停操作")
             return False
 
         else:
-            logger.warning(f"❓ 账号 {account_name} 状态不明确，建议人工检查")
+            logger.warning(f"[?] 账号 {account_name} 状态不明确，建议人工检查")
             # 对于未知状态，不自动关闭页面，让用户决定
             if status == AccountStatus.UNKNOWN_ERROR:
-                logger.info(f"💡 账号 {account_name} 状态不明确，但不自动关闭，请人工确认")
+                logger.info(f"[TIP] 账号 {account_name} 状态不明确，但不自动关闭，请人工确认")
                 return True  # 允许继续，让用户手动判断
             return False
 
     def _close_account_process(self, page: Page, account: Dict):
         """关闭账号进程，释放资源"""
         try:
-            logger.info(f"🔄 正在关闭账号进程: {account.get('username', 'Unknown')}")
+            logger.info(f"[RETRY] 正在关闭账号进程: {account.get('username', 'Unknown')}")
 
             # 关闭页面
             if page and not page.is_closed():
                 page.close()
-                logger.info("✅ 页面已关闭")
+                logger.info("[OK] 页面已关闭")
 
             # 可以在这里添加更多清理逻辑
             # 例如：清理临时文件、释放数据库连接等
 
         except Exception as e:
-            logger.error(f"❌ 关闭进程失败: {e}")
+            logger.error(f"[FAIL] 关闭进程失败: {e}")
 
     def _mark_account_as_disabled(self, account: Dict):
         """标记账号为禁用状态"""
         try:
             account_name = account.get('username', 'Unknown')
-            logger.warning(f"🚫 标记账号为禁用状态: {account_name}")
+            logger.warning(f"[NO] 标记账号为禁用状态: {account_name}")
 
             # 这里可以实现账号状态持久化
             # 例如：更新数据库、写入配置文件等
 
         except Exception as e:
-            logger.error(f"❌ 标记账号状态失败: {e}")
+            logger.error(f"[FAIL] 标记账号状态失败: {e}")
 
     def _extract_shop_id_from_url(self, url: str) -> Optional[str]:
         """从URL中提取店铺ID"""

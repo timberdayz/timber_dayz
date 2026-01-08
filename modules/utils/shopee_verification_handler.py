@@ -65,14 +65,14 @@ class ShopeeVerificationHandler:
         """
         try:
             self._last_state = "detecting"
-            logger.info("🔐 检测 Shopee 验证码/OTP 界面…")
+            logger.info("[LOCK] 检测 Shopee 验证码/OTP 界面...")
 
             if not self._maybe_on_verification_page():
-                logger.info("✅ 未检测到验证码输入需求，视为通过")
+                logger.info("[OK] 未检测到验证码输入需求，视为通过")
                 self._last_state = "no_verification"
                 return True
 
-            logger.info("🪄 检测到验证码流程，开始处理…")
+            logger.info("🪄 检测到验证码流程，开始处理...")
             self._last_state = "processing"
 
             # 优先尝试点击“发送至邮箱/发送验证码”等按钮
@@ -84,23 +84,23 @@ class ShopeeVerificationHandler:
 
             # 最终校验
             if ok and self._verify_login_success():
-                logger.success("🎉 验证码验证通过，登录成功！")
+                logger.success("[DONE] 验证码验证通过，登录成功！")
                 self._last_state = "login_success"
                 return True
 
             # 若已离开登录页也视作成功（部分站点无明确提示）
             if self._left_login_page():
-                logger.success("🎉 页面已离开登录页，视作登录成功")
+                logger.success("[DONE] 页面已离开登录页，视作登录成功")
                 self._last_state = "login_success"
                 return True
 
-            logger.warning("⚠️ 验证码处理可能失败或超时")
+            logger.warning("[WARN] 验证码处理可能失败或超时")
             self._last_state = "verification_failed"
             return False
         except Exception as e:  # noqa: BLE001
             self._last_error = str(e)
             self._last_state = "exception"
-            logger.error(f"❌ Shopee 验证码处理异常: {e}")
+            logger.error(f"[FAIL] Shopee 验证码处理异常: {e}")
             return False
 
     # 别名（兼容调用）
@@ -144,7 +144,7 @@ class ShopeeVerificationHandler:
     def _try_click_send_code_buttons(self) -> None:
         # Respect project policy: do not use email flows when disabled
         if getattr(self, "disable_email", True):
-            logger.info("✉️ 已禁用邮箱验证码流程，跳过 '发送至邮箱/发送验证码' 按钮点击")
+            logger.info("[EMAIL] 已禁用邮箱验证码流程，跳过 '发送至邮箱/发送验证码' 按钮点击")
             return
         btn_selectors = [
             "button:has-text('发送至邮箱')",
@@ -157,7 +157,7 @@ class ShopeeVerificationHandler:
             try:
                 loc = self.page.locator(sel)
                 if loc.count() > 0 and loc.first.is_visible() and loc.first.is_enabled():
-                    logger.info(f"📧 尝试点击按钮: {sel}")
+                    logger.info(f"[EMAIL] 尝试点击按钮: {sel}")
                     loc.first.click()
                     self.page.wait_for_timeout(800)
                     break
@@ -168,7 +168,7 @@ class ShopeeVerificationHandler:
         # When email flow is disabled, keep guidance minimal and avoid encouraging email usage
         if getattr(self, "disable_email", True):
             try:
-                logger.info("📋 已禁用邮箱验证码指引；请在弹窗内直接输入短信验证码并点击‘确认’。")
+                logger.info("[LIST] 已禁用邮箱验证码指引；请在弹窗内直接输入短信验证码并点击‘确认’。")
             except Exception:
                 pass
             return
@@ -180,26 +180,26 @@ class ShopeeVerificationHandler:
         )
         guidance = (
             "=" * 60
-            + "\n📋 用户操作指引\n"
+            + "\n[LIST] 用户操作指引\n"
             + "=" * 60
-            + "\n\n🎯 Shopee 验证码处理指引\n\n"
-            + f"📧 邮箱信息:\n   邮箱地址: {email_address}\n\n"
-            + "📱 操作步骤:\n"
+            + "\n\n[TARGET] Shopee 验证码处理指引\n\n"
+            + f"[EMAIL] 邮箱信息:\n   邮箱地址: {email_address}\n\n"
+            + "[PHONE] 操作步骤:\n"
             + f"   1. 检查邮箱 {email_address} 的新邮件\n"
             + "   2. 查找 Shopee 发送的验证码邮件\n"
             + "   3. 复制邮件中的 6 位数验证码\n"
             + "   4. 在页面输入验证码\n"
             + "   5. 点击“确认/验证”按钮完成验证\n\n"
-            + "⏰ 注意事项:\n"
+            + "[TIME] 注意事项:\n"
             + "   - 验证码通常在 1-2 分钟内到达\n"
             + "   - 验证码有效期约 10 分钟\n"
             + "   - 如未收到邮件，请检查垃圾邮件文件夹\n\n"
-            + "🔄 系统将自动检测验证码输入并完成后续流程\n"
+            + "[RETRY] 系统将自动检测验证码输入并完成后续流程\n"
             + "=" * 60
         )
         try:
             print(guidance)
-            logger.info("📋 已显示用户操作指引")
+            logger.info("[LIST] 已显示用户操作指引")
         except Exception as e:  # noqa: BLE001
             logger.error(f"显示用户指引失败: {e}")
 

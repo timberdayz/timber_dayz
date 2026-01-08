@@ -6,7 +6,7 @@
 v4.12.0新增：
 - 统一的数据入库服务，提取ingest_file的核心逻辑
 - 复用data_importer函数，不重复实现
-- 支持Raw → Fact → MV三层数据架构
+- 支持Raw -> Fact -> MV三层数据架构
 
 v4.13.0 DSS架构重构：
 - 移除字段映射应用（在Metabase中完成）
@@ -46,11 +46,11 @@ from backend.services.operational_data_importer import (
     upsert_service,
     upsert_analytics,
 )
-# ⭐ v4.6.0 DSS架构：使用RawDataImporter写入JSONB格式
+# [*] v4.6.0 DSS架构：使用RawDataImporter写入JSONB格式
 from backend.services.raw_data_importer import get_raw_data_importer
 from backend.services.deduplication_service import DeduplicationService
-from backend.services.currency_extractor import get_currency_extractor  # ⭐ v4.15.0新增
-# ⭐ DSS架构：移除验证、标准化、隔离相关导入
+from backend.services.currency_extractor import get_currency_extractor  # [*] v4.15.0新增
+# [*] DSS架构：移除验证、标准化、隔离相关导入
 # 这些功能在DSS架构下不再使用，数据处理在Metabase中完成
 # from backend.services.data_validator import (
 #     validate_orders,
@@ -199,9 +199,9 @@ class DataIngestionService:
         header_row: int = 0,
         task_id: Optional[str] = None,
         extract_images: bool = True,
-        header_columns: Optional[List[str]] = None,  # ⭐ v4.6.0 DSS架构：原始表头字段列表
-        deduplication_fields: Optional[List[str]] = None,  # ⭐ v4.14.0新增：核心去重字段列表
-        sub_domain: Optional[str] = None,  # ⭐ v4.14.0新增：子类型
+        header_columns: Optional[List[str]] = None,  # [*] v4.6.0 DSS架构：原始表头字段列表
+        deduplication_fields: Optional[List[str]] = None,  # [*] v4.14.0新增：核心去重字段列表
+        sub_domain: Optional[str] = None,  # [*] v4.14.0新增：子类型
     ) -> Dict[str, Any]:
         """
         数据入库主方法
@@ -249,7 +249,7 @@ class DataIngestionService:
                         "skip_reason": "all_zero_data_already_processed"
                     }
                 elif "[空文件标识]" in error_msg:
-                    # ⭐ v4.15.0新增：检查空文件重复处理
+                    # [*] v4.15.0新增：检查空文件重复处理
                     return {
                         "success": True,
                         "message": "该文件已识别为空文件（有表头但无数据行），无需重复入库。",
@@ -264,7 +264,7 @@ class DataIngestionService:
             # 4. 读取完整文件
             safe_path = self._safe_resolve_path(file_record.file_path)
             
-            # ⭐ v4.18.2修复：使用 run_in_executor 包装文件系统检查，避免阻塞事件循环
+            # [*] v4.18.2修复：使用 run_in_executor 包装文件系统检查，避免阻塞事件循环
             loop = asyncio.get_running_loop()
             file_exists = await loop.run_in_executor(
                 None,
@@ -276,7 +276,7 @@ class DataIngestionService:
             header_param = None if header_row < 0 else header_row
             logger.info(f"[Ingest] 实际使用的表头行: header_param={header_param}")
             
-            # ⭐ v4.19.0更新：使用进程池执行CPU密集型操作（Excel读取），完全隔离事件循环
+            # [*] v4.19.0更新：使用进程池执行CPU密集型操作（Excel读取），完全隔离事件循环
             executor_manager = get_executor_manager()
             df = await executor_manager.run_cpu_intensive(
                 ExcelParser.read_excel,
@@ -285,7 +285,7 @@ class DataIngestionService:
                 nrows=None  # 读取完整文件（不限制行数）
             )
             
-            # ⭐ v4.18.2修复：使用 run_in_executor 包装文件大小获取，避免阻塞事件循环
+            # [*] v4.18.2修复：使用 run_in_executor 包装文件大小获取，避免阻塞事件循环
             loop = asyncio.get_running_loop()
             file_size_mb = await loop.run_in_executor(
                 None,
@@ -313,7 +313,7 @@ class DataIngestionService:
             all_rows = df.to_dict('records')
             logger.info(f"[Ingest] 读取完整文件成功: {len(all_rows)}行数据")
             
-            # ⭐ v4.15.0新增：提前检测空文件（有表头但无数据行）
+            # [*] v4.15.0新增：提前检测空文件（有表头但无数据行）
             if len(all_rows) == 0:
                 # 情况：有表头但无数据行
                 logger.warning(
@@ -328,7 +328,7 @@ class DataIngestionService:
                 await self.db.commit()
                 
                 return {
-                    "success": True,  # ⭐ 改为成功（空文件不是错误，是正常情况）
+                    "success": True,  # [*] 改为成功（空文件不是错误，是正常情况）
                     "message": "文件为空：有表头但无数据行，已标记为已处理",
                     "staged": 0,
                     "imported": 0,
@@ -340,22 +340,22 @@ class DataIngestionService:
                     "normalization_report": normalization_report if 'normalization_report' in locals() else {},
                 }
             
-            # ⭐ v4.6.0 DSS架构：优先使用传入的header_columns，否则使用从文件读取的列名
-            # ⭐ v4.16.0修复：始终使用文件原始的列名（包含货币代码）用于追溯
+            # [*] v4.6.0 DSS架构：优先使用传入的header_columns，否则使用从文件读取的列名
+            # [*] v4.16.0修复：始终使用文件原始的列名（包含货币代码）用于追溯
             # 即使传入了归一化的header_columns（来自模板），也要使用文件原始列名
             file_original_columns = list(df.columns.tolist())  # 文件原始列名（包含货币代码）
             original_header_columns = file_original_columns  # 始终使用文件原始列名用于追溯
             
-            # ⭐ DSS架构：跳过字段映射，直接使用原始数据
+            # [*] DSS架构：跳过字段映射，直接使用原始数据
             # DSS架构原则：数据同步只做数据采集和存储，字段映射在Metabase中完成
             enhanced_rows = all_rows  # 直接使用原始数据，保留所有原始列名
             logger.info(f"[Ingest] [DSS] 跳过字段映射，直接使用原始数据: {len(enhanced_rows)}行，{len(original_header_columns)}个字段")
             
-            # ⭐ 向后兼容：如果提供了mappings，记录日志但不使用（DSS架构不需要字段映射）
+            # [*] 向后兼容：如果提供了mappings，记录日志但不使用（DSS架构不需要字段映射）
             if mappings:
                 logger.info(f"[Ingest] [DSS] 检测到mappings参数（{len(mappings)}个），DSS架构将忽略，直接使用原始数据")
             
-            # ⭐ v4.18.1优化：文件级别检查platform_code和shop_id（减少日志输出）
+            # [*] v4.18.1优化：文件级别检查platform_code和shop_id（减少日志输出）
             # 从file_record获取一次，然后批量应用到所有行
             if file_record:
                 # 文件级别确定platform_code
@@ -364,7 +364,7 @@ class DataIngestionService:
                     logger.warning(f"[Ingest] [v4.18.1] 文件级别platform_code为空，使用unknown")
                 
                 # 文件级别确定shop_id（从伴生JSON文件获取，没有则为'none'）
-                # ⭐ v4.18.1重构：shop_id完全从文件元数据获取，不再逐行检查
+                # [*] v4.18.1重构：shop_id完全从文件元数据获取，不再逐行检查
                 file_shop_id = file_record.shop_id or 'none'
                 if not file_record.shop_id:
                     logger.info(f"[Ingest] [v4.18.1] 文件级别shop_id为空，设为'none'（将使用Metabase关联账号管理表）")
@@ -376,18 +376,18 @@ class DataIngestionService:
                     if not row.get("shop_id"):
                         row["shop_id"] = file_shop_id
             
-            # ⭐ DSS架构：跳过数据标准化，保留原始数据
+            # [*] DSS架构：跳过数据标准化，保留原始数据
             # DSS架构原则：数据同步只做数据采集和存储，数据标准化在Metabase中完成
             # 如果需要数据类型转换，应在Metabase中通过字段映射或计算字段处理
             logger.info(f"[Ingest] [DSS] 跳过数据标准化，保留原始数据格式")
             # enhanced_rows 保持不变，直接使用原始数据
             
-            # ⭐ DSS架构：移除特殊处理，保留原始数据
+            # [*] DSS架构：移除特殊处理，保留原始数据
             # DSS架构原则：不修改原始数据，所有数据处理在Metabase中完成
             # 如果需要metric_date，应在Metabase中通过字段映射或计算字段处理
             logger.info(f"[Ingest] [DSS] 跳过特殊处理，保留原始数据完整性")
             
-            # ⭐ DSS架构：跳过数据验证，直接使用所有数据
+            # [*] DSS架构：跳过数据验证，直接使用所有数据
             # DSS架构原则：数据同步只做去重和入库，不做业务逻辑验证
             # 业务逻辑验证应在Metabase中完成（Metabase知道字段映射关系）
             logger.info(f"[Ingest] [DSS] 跳过数据验证，所有{len(enhanced_rows)}行数据将直接进入去重和入库流程")
@@ -399,11 +399,11 @@ class DataIngestionService:
             }
             quarantined_count = 0  # DSS架构下不隔离数据
             
-            # ⭐ DSS架构：使用所有数据（不筛选）
+            # [*] DSS架构：使用所有数据（不筛选）
             valid_rows = enhanced_rows  # 直接使用所有数据，不做验证筛选
             
-            # 11. 数据入库（使用RawDataImporter写入JSONB格式）⭐ v4.6.0 DSS架构
-            # ⭐ v4.12.2增强：添加数据丢失追踪日志
+            # 11. 数据入库（使用RawDataImporter写入JSONB格式）[*] v4.6.0 DSS架构
+            # [*] v4.12.2增强：添加数据丢失追踪日志
             logger.info(f"[Ingest] [DSS] 数据入库开始: file_id={file_id}, 总行数={len(valid_rows)}（DSS架构：跳过验证，所有数据入库）")
             
             staged = 0
@@ -414,7 +414,7 @@ class DataIngestionService:
                 task_id = f"single_file_{file_id}"
             
             if valid_rows:
-                # ⭐ v4.6.0 DSS架构：使用RawDataImporter写入JSONB格式（保留原始中文表头）
+                # [*] v4.6.0 DSS架构：使用RawDataImporter写入JSONB格式（保留原始中文表头）
                 try:
                     # 获取RawDataImporter和DeduplicationService实例
                     raw_importer = get_raw_data_importer(self.db)
@@ -423,7 +423,7 @@ class DataIngestionService:
                     # 获取granularity（从file_record或默认daily）
                     granularity = getattr(file_record, 'granularity', None) or "daily"
                     
-                    # ⭐ v4.14.0新增：获取核心去重字段（优先级：模板配置 > 默认配置 > 所有字段）
+                    # [*] v4.14.0新增：获取核心去重字段（优先级：模板配置 > 默认配置 > 所有字段）
                     from backend.services.deduplication_fields_config import get_deduplication_fields
                     final_deduplication_fields = get_deduplication_fields(
                         data_domain=domain,
@@ -438,7 +438,7 @@ class DataIngestionService:
                         )
                     else:
                         logger.warning(
-                            f"[Ingest] [v4.14.0] ⚠️ 未配置核心字段，使用所有业务字段计算data_hash "
+                            f"[Ingest] [v4.14.0] [WARN] 未配置核心字段，使用所有业务字段计算data_hash "
                             f"（数据行数={len(valid_rows)}）"
                         )
                     
@@ -451,8 +451,8 @@ class DataIngestionService:
                     logger.info(f"[Ingest] [DSS] data_hash计算完成: {len(data_hashes)}个哈希")
                     
                     # 准备header_columns（原始表头字段列表）
-                    # ⭐ v4.6.0 DSS架构：使用原始表头字段列表（保留中文表头）
-                    # ⭐ v4.16.0修复：始终使用文件原始列名（包含货币代码）用于追溯和货币代码提取
+                    # [*] v4.6.0 DSS架构：使用原始表头字段列表（保留中文表头）
+                    # [*] v4.16.0修复：始终使用文件原始列名（包含货币代码）用于追溯和货币代码提取
                     # 注意：original_header_columns在函数作用域中定义，可以直接访问
                     header_columns_for_storage = original_header_columns  # 用于保存到数据库（原始列名，包含货币代码）
                     if not header_columns_for_storage and valid_rows:
@@ -460,7 +460,7 @@ class DataIngestionService:
                         header_columns_for_storage = list(valid_rows[0].keys())
                         logger.warning(f"[Ingest] [DSS] 无法获取原始表头，使用数据键作为header_columns")
                     
-                    # ⭐ v4.15.0新增：货币代码提取和字段名归一化
+                    # [*] v4.15.0新增：货币代码提取和字段名归一化
                     currency_extractor = get_currency_extractor()
                     normalized_rows = []
                     currency_codes = []
@@ -473,12 +473,12 @@ class DataIngestionService:
                             normalized_row[normalized_field_name] = value
                         normalized_rows.append(normalized_row)
                         
-                        # ⭐ v4.16.0修复：提取货币代码时使用文件原始列名（row.keys()），而不是归一化的header_columns
+                        # [*] v4.16.0修复：提取货币代码时使用文件原始列名（row.keys()），而不是归一化的header_columns
                         # 原因：归一化的header_columns已经移除了货币代码，无法提取
                         # 使用 row.keys() 获取文件原始的字段名（包含货币代码）
                         currency_code = currency_extractor.extract_currency_from_row(
                             row,
-                            header_columns=None  # ⭐ 修复：传入None，让方法使用row.keys()（原始字段名）
+                            header_columns=None  # [*] 修复：传入None，让方法使用row.keys()（原始字段名）
                         )
                         currency_codes.append(currency_code)
                     
@@ -489,12 +489,12 @@ class DataIngestionService:
                     )
                     
                     # 批量插入（使用RawDataImporter）
-                    # ⭐ v4.16.0更新：获取sub_domain（services域必须提供）
+                    # [*] v4.16.0更新：获取sub_domain（services域必须提供）
                     sub_domain_value = sub_domain
                     if not sub_domain_value and file_record and hasattr(file_record, 'sub_domain'):
                         sub_domain_value = file_record.sub_domain
                     
-                    # ⭐ v4.16.0修复：services域必须提供sub_domain，否则抛出详细错误
+                    # [*] v4.16.0修复：services域必须提供sub_domain，否则抛出详细错误
                     if domain.lower() == 'services' and not sub_domain_value:
                         file_name = file_record.file_name if file_record else f"文件{file_id}"
                         error_msg = (
@@ -510,11 +510,11 @@ class DataIngestionService:
                         table_name_suffix = f"{domain}_{sub_domain_value}_{granularity}"
                     logger.info(f"[Ingest] [DSS] 开始批量插入到fact_raw_data_{table_name_suffix}表")
                     
-                    # ⭐ v4.16.0修复：准备归一化的header_columns用于动态列管理
+                    # [*] v4.16.0修复：准备归一化的header_columns用于动态列管理
                     # 动态列应该使用归一化的列名（不包含货币代码），避免创建重复的列
                     normalized_header_columns = currency_extractor.normalize_field_list(header_columns_for_storage)
                     
-                    # ⭐ v4.17.0修复：优先使用file_record.platform_code，确保表名正确
+                    # [*] v4.17.0修复：优先使用file_record.platform_code，确保表名正确
                     # 如果platform_code为空，会导致表名错误（如fact__inventory_snapshot）
                     platform_code_for_table = platform
                     if file_record and file_record.platform_code:
@@ -523,28 +523,28 @@ class DataIngestionService:
                         # 如果platform_code为空，使用"unknown"作为默认值
                         platform_code_for_table = "unknown"
                         logger.warning(
-                            f"[Ingest] [v4.17.0] ⚠️ platform_code为空，使用默认值: unknown "
+                            f"[Ingest] [v4.17.0] [WARN] platform_code为空，使用默认值: unknown "
                             f"(file_id={file_id}, file_name={file_record.file_name if file_record else 'unknown'}, "
                             f"platform_param={platform})"
                         )
                     
-                    # ⭐ v4.19.0更新：统一使用异步操作
+                    # [*] v4.19.0更新：统一使用异步操作
                     import_result = await raw_importer.async_batch_insert_raw_data(
-                        rows=normalized_rows,  # ⭐ v4.15.0更新：使用归一化后的数据（字段名不含货币代码）
+                        rows=normalized_rows,  # [*] v4.15.0更新：使用归一化后的数据（字段名不含货币代码）
                         data_hashes=data_hashes,
                         data_domain=domain,
                         granularity=granularity,
-                        platform_code=platform_code_for_table,  # ⭐ v4.17.0修复：使用正确的platform_code
+                        platform_code=platform_code_for_table,  # [*] v4.17.0修复：使用正确的platform_code
                         shop_id=getattr(file_record, 'shop_id', None) if file_record else None,
                         file_id=file_id,
-                        header_columns=normalized_header_columns,  # ⭐ v4.16.0修复：使用归一化的header_columns用于动态列管理（避免创建重复列）
-                        currency_codes=currency_codes,  # ⭐ v4.15.0新增：货币代码列表
-                        sub_domain=sub_domain_value,  # ⭐ v4.16.0新增：子类型（services域必须提供）
-                        original_header_columns=header_columns_for_storage,  # ⭐ v4.16.0新增：原始header_columns（包含货币代码，用于保存到数据库）
-                        template_id=None  # ⭐ v4.17.0新增：模板ID（暂时为None，后续从template获取）
+                        header_columns=normalized_header_columns,  # [*] v4.16.0修复：使用归一化的header_columns用于动态列管理（避免创建重复列）
+                        currency_codes=currency_codes,  # [*] v4.15.0新增：货币代码列表
+                        sub_domain=sub_domain_value,  # [*] v4.16.0新增：子类型（services域必须提供）
+                        original_header_columns=header_columns_for_storage,  # [*] v4.16.0新增：原始header_columns（包含货币代码，用于保存到数据库）
+                        template_id=None  # [*] v4.17.0新增：模板ID（暂时为None，后续从template获取）
                     )
                     
-                    # ⭐ v4.15.0修改：处理新的返回值格式（字典）
+                    # [*] v4.15.0修改：处理新的返回值格式（字典）
                     if isinstance(import_result, dict):
                         imported = import_result.get('inserted', 0) + import_result.get('updated', 0)
                         updated = import_result.get('updated', 0)
@@ -571,12 +571,12 @@ class DataIngestionService:
                         skipped = 0
                         logger.info(f"[Ingest] [DSS] 批量插入完成: {imported}行成功（表=fact_raw_data_{domain}_{granularity}）")
                     
-                    # ⭐ 添加行数验证：验证导入行数与源文件行数匹配
+                    # [*] 添加行数验证：验证导入行数与源文件行数匹配
                     if len(valid_rows) > 0:
                         loss_rate = (len(valid_rows) - imported) / len(valid_rows)
                         if loss_rate > 0.05:  # 超过5%的数据丢失
                             logger.warning(
-                                f"[Ingest] ⚠️ 警告：检测到显著数据丢失！"
+                                f"[Ingest] [WARN] 警告：检测到显著数据丢失！"
                                 f"源文件行数={len(valid_rows)}, "
                                 f"导入行数={imported}, "
                                 f"丢失率={loss_rate:.2%} "
@@ -584,7 +584,7 @@ class DataIngestionService:
                             )
                         elif imported == 1 and len(valid_rows) > 1:
                             logger.error(
-                                f"[Ingest] ❌ 严重错误：只导入了1行，但源文件有{len(valid_rows)}行！"
+                                f"[Ingest] [FAIL] 严重错误：只导入了1行，但源文件有{len(valid_rows)}行！"
                                 f"这可能是因为所有行的data_hash都相同，导致去重失败。"
                                 f"请检查核心字段配置是否正确。"
                             )
@@ -592,8 +592,8 @@ class DataIngestionService:
                     # staged等于imported（DSS架构不再需要Staging层）
                     staged = imported
                     
-                    # ⭐ v4.15.0新增：保存updated和skipped信息到结果中
-                    # ⭐ v4.16.0修复：检查import_result是否存在（避免变量作用域错误）
+                    # [*] v4.15.0新增：保存updated和skipped信息到结果中
+                    # [*] v4.16.0修复：检查import_result是否存在（避免变量作用域错误）
                     if 'import_result' in locals() and isinstance(import_result, dict):
                         import_stats = {
                             'inserted': import_result.get('inserted', 0),
@@ -608,8 +608,8 @@ class DataIngestionService:
                             'skipped': 0,
                         }
                     
-                    # ⭐ v4.15.0新增：构建详细消息
-                    # ⭐ v4.16.0更新：所有数据域都使用UPSERT策略，优先显示更新消息
+                    # [*] v4.15.0新增：构建详细消息
+                    # [*] v4.16.0更新：所有数据域都使用UPSERT策略，优先显示更新消息
                     if import_stats['updated'] > 0:
                         if import_stats['inserted'] > 0:
                             message = (
@@ -624,7 +624,7 @@ class DataIngestionService:
                     elif import_stats['inserted'] > 0:
                         message = f"数据同步完成：新插入{import_stats['inserted']}行"
                     elif import_stats['skipped'] > 0:
-                        # ⭐ v4.16.0更新：UPSERT策略下不应该有skipped，但保留兼容性
+                        # [*] v4.16.0更新：UPSERT策略下不应该有skipped，但保留兼容性
                         message = (
                             f"数据同步完成：插入{import_stats['inserted']}行，"
                             f"跳过{import_stats['skipped']}行（重复数据）"
@@ -632,7 +632,7 @@ class DataIngestionService:
                     else:
                         message = f"数据入库成功：暂存{staged}行，入库{imported}行（DSS架构：跳过验证，所有数据入库）"
                     
-                    # ⭐ v4.18.2移除：订单金额维度表功能已移除
+                    # [*] v4.18.2移除：订单金额维度表功能已移除
                     # 原因：DSS架构下，数据已完整存储在 b_class.fact_raw_data_orders_* 表的 JSONB 字段中
                     # 货币代码已提取到 currency_code 系统字段，字段名已归一化
                     # 数据标准化应在 Metabase 中完成，该表属于"只写不读"的冗余数据
@@ -643,11 +643,11 @@ class DataIngestionService:
                     # 如果RawDataImporter失败，记录错误但不抛出异常（让后续流程继续）
                     imported = 0
                     staged = 0
-                    import_result = None  # ⭐ v4.16.0修复：确保import_result被定义，避免后续访问错误
+                    import_result = None  # [*] v4.16.0修复：确保import_result被定义，避免后续访问错误
             
             # 12. 更新文件状态
             try:
-                # ⭐ DSS架构：不再有验证错误，所有数据都成功入库
+                # [*] DSS架构：不再有验证错误，所有数据都成功入库
                 file_record.status = "ingested"
                 
                 try:
@@ -657,7 +657,7 @@ class DataIngestionService:
                 
                 await self.db.commit()
             except Exception as commit_error:
-                # ⭐ 修复：处理数据库事务回滚问题
+                # [*] 修复：处理数据库事务回滚问题
                 logger.error(f"[Ingest] 更新文件状态失败: {commit_error}", exc_info=True)
                 try:
                     await self.db.rollback()
@@ -667,7 +667,7 @@ class DataIngestionService:
                     )
                     file_record = result.scalar_one_or_none()
                     if file_record:
-                        # ⭐ DSS架构：不再有验证错误，所有数据都成功入库
+                        # [*] DSS架构：不再有验证错误，所有数据都成功入库
                         file_record.status = "ingested"
                         try:
                             setattr(file_record, "last_processed_at", datetime.now())
@@ -731,7 +731,7 @@ class DataIngestionService:
                     logger.warning(f"[Ingest] 触发DATA_INGESTED事件失败: {event_err}")
             
             # 15. 返回结果
-            # ⭐ v4.15.0修复：区分"空文件"和"全部重复"的情况
+            # [*] v4.15.0修复：区分"空文件"和"全部重复"的情况
             # 注意：空文件应该在上面的提前检测中已经处理，这里是兜底检测
             if imported == 0 and staged == 0:
                 # 检查是否是空文件（兜底检测，正常情况下不应该到达这里）
@@ -747,9 +747,9 @@ class DataIngestionService:
                         file_record.error_message = "[空文件标识] 文件为空，无数据可入库"
                         await self.db.commit()
                     
-                    # ⭐ v4.15.0修改：空文件返回成功（不是错误）
+                    # [*] v4.15.0修改：空文件返回成功（不是错误）
                     return {
-                        "success": True,  # ⭐ 改为成功（空文件不是错误）
+                        "success": True,  # [*] 改为成功（空文件不是错误）
                         "message": "文件为空：无数据可入库，已标记为已处理",
                         "staged": 0,
                         "imported": 0,
@@ -761,10 +761,10 @@ class DataIngestionService:
                         "normalization_report": normalization_report,
                     }
                 else:
-                    # ⭐ v4.16.0修复：有数据但入库0行的情况
+                    # [*] v4.16.0修复：有数据但入库0行的情况
                     # 在UPSERT策略下，即使所有数据都是重复的，也应该更新它们
                     # 如果imported == 0，可能是import_result格式问题，需要检查import_stats
-                    # ⭐ v4.16.0修复：检查import_result是否存在（避免变量作用域错误）
+                    # [*] v4.16.0修复：检查import_result是否存在（避免变量作用域错误）
                     if 'import_result' in locals() and isinstance(import_result, dict):
                         # 如果import_result是字典，应该已经有import_stats了
                         # 这种情况不应该到达这里，因为imported = inserted + updated
@@ -785,7 +785,7 @@ class DataIngestionService:
                                 "imported": updated_count + inserted_count,
                                 "amount_imported": 0,
                                 "quarantined": 0,
-                                "skipped": False,  # ⭐ v4.16.0修复：UPSERT策略下不应该标记为跳过
+                                "skipped": False,  # [*] v4.16.0修复：UPSERT策略下不应该标记为跳过
                                 "import_stats": {
                                     'inserted': inserted_count,
                                     'updated': updated_count,
@@ -797,7 +797,7 @@ class DataIngestionService:
                         else:
                             # 异常情况：有数据但updated和inserted都是0
                             logger.warning(
-                                f"[Ingest] [v4.16.0] ⚠️ 异常情况：有{len(valid_rows)}行数据，"
+                                f"[Ingest] [v4.16.0] [WARN] 异常情况：有{len(valid_rows)}行数据，"
                                 f"但imported=0, updated={updated_count}, inserted={inserted_count}"
                             )
                             return {
@@ -817,14 +817,14 @@ class DataIngestionService:
                                 "normalization_report": normalization_report,
                             }
                     elif 'import_result' in locals() and import_result is not None:
-                        # ⭐ v4.16.0修复：import_result不是字典格式（旧格式兼容，但排除None）
+                        # [*] v4.16.0修复：import_result不是字典格式（旧格式兼容，但排除None）
                         # 在UPSERT策略下，这种情况不应该发生，但为了兼容性保留
                         # 注意：只有当import_result不是None时才处理（None表示异常，已在上面处理）
                         logger.warning(
-                            f"[Ingest] [v4.16.0] ⚠️ import_result不是字典格式（旧格式）: "
+                            f"[Ingest] [v4.16.0] [WARN] import_result不是字典格式（旧格式）: "
                             f"type={type(import_result)}, value={import_result}"
                         )
-                        # ⭐ v4.16.0更新：在UPSERT策略下，即使import_result是旧格式（整数），
+                        # [*] v4.16.0更新：在UPSERT策略下，即使import_result是旧格式（整数），
                         # 也应该假设数据被更新了，而不是跳过
                         from backend.services.deduplication_fields_config import get_deduplication_strategy
                         strategy = get_deduplication_strategy(domain)
@@ -841,7 +841,7 @@ class DataIngestionService:
                                 "imported": len(valid_rows),
                                 "amount_imported": 0,
                                 "quarantined": 0,
-                                "skipped": False,  # ⭐ v4.16.0修复：UPSERT策略下不应该标记为跳过
+                                "skipped": False,  # [*] v4.16.0修复：UPSERT策略下不应该标记为跳过
                                 "import_stats": {
                                     'inserted': 0,
                                     'updated': len(valid_rows),
@@ -853,7 +853,7 @@ class DataIngestionService:
                         else:
                             # INSERT策略：跳过重复数据（旧逻辑，保留兼容性）
                             logger.info(
-                                f"[Ingest] ✅ 所有数据都已存在（重复数据），已跳过: "
+                                f"[Ingest] [OK] 所有数据都已存在（重复数据），已跳过: "
                                 f"准备入库{len(valid_rows)}行，实际入库0行（全部重复，这是正常情况）"
                             )
                             return {
@@ -873,9 +873,9 @@ class DataIngestionService:
                                 "normalization_report": normalization_report,
                             }
                     else:
-                        # ⭐ v4.16.0修复：import_result不存在的情况（异常发生在batch_insert_raw_data之前）
+                        # [*] v4.16.0修复：import_result不存在的情况（异常发生在batch_insert_raw_data之前）
                         logger.error(
-                            f"[Ingest] [v4.16.0] ⚠️ 严重错误：有{len(valid_rows)}行数据，"
+                            f"[Ingest] [v4.16.0] [WARN] 严重错误：有{len(valid_rows)}行数据，"
                             f"但import_result未定义（可能异常发生在batch_insert_raw_data之前）"
                         )
                         return {
@@ -895,7 +895,7 @@ class DataIngestionService:
                             "normalization_report": normalization_report,
                         }
             
-            # ⭐ v4.16.0修复：确保import_stats被定义（避免变量作用域错误）
+            # [*] v4.16.0修复：确保import_stats被定义（避免变量作用域错误）
             if 'import_stats' not in locals():
                 import_stats = {
                     'inserted': imported if 'imported' in locals() else 0,
@@ -909,16 +909,16 @@ class DataIngestionService:
                 "staged": staged,
                 "imported": imported,
                 "amount_imported": amount_imported,
-                "quarantined": quarantined_count,  # ⭐ DSS架构：始终为0，保留字段以兼容API
+                "quarantined": quarantined_count,  # [*] DSS架构：始终为0，保留字段以兼容API
                 "skipped": False,
                 "image_extraction_started": image_extraction_started,
                 "normalization_report": normalization_report,
-                "import_stats": import_stats,  # ⭐ v4.15.0新增：详细统计信息
+                "import_stats": import_stats,  # [*] v4.15.0新增：详细统计信息
             }
             
         except Exception as e:
             logger.error(f"[Ingest] 数据入库失败: {e}", exc_info=True)
-            # ⭐ 修复：确保异常时回滚事务，避免"transaction has been rolled back"错误
+            # [*] 修复：确保异常时回滚事务，避免"transaction has been rolled back"错误
             try:
                 await self.db.rollback()
             except Exception as rollback_error:

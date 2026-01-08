@@ -195,7 +195,7 @@ def _infer_metric_date_from_filename(file_name: str) -> date:
 def _derive_shop_id_from_path(file_path: str, platform_code: str) -> Optional[str]:
     """Best-effort derive shop_id from path or file name.
     Strategy:
-      1) Any path segment containing platform_code (case-insensitive) → return that segment
+      1) Any path segment containing platform_code (case-insensitive) -> return that segment
       2) Filename tokens split by "__": pick the token that is likely the shop (3rd token)
     """
     try:
@@ -324,7 +324,7 @@ def _read_excel_with_header_inference(file_path: Path) -> pd.DataFrame:
     try:
         xls = pd.ExcelFile(file_path, engine=engine) if engine else pd.ExcelFile(file_path)
 
-        # 🚀 性能优化：优先扫描第一个Sheet（快速路径）
+        # [START] 性能优化：优先扫描第一个Sheet（快速路径）
         if len(xls.sheet_names) > 0:
             first_sheet = xls.sheet_names[0]
             try:

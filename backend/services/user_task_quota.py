@@ -1,7 +1,7 @@
 """
 用户任务配额服务
 
-⭐ Phase 4.2: 用户隔离功能
+[*] Phase 4.2: 用户隔离功能
 - 跟踪每个用户正在运行的任务数量
 - 实现用户级别的任务配额限制
 - 防止单个用户提交过多任务影响其他用户
@@ -62,7 +62,7 @@ class UserTaskQuotaService:
         """
         redis_client = self._get_redis_client()
         if not redis_client:
-            # ⭐ v4.19.5 优化：降低日志级别（WARNING → DEBUG），减少日志噪音
+            # [*] v4.19.5 优化：降低日志级别（WARNING -> DEBUG），减少日志噪音
             logger.debug(f"[UserTaskQuota] Redis 不可用，返回默认任务数量 0")
             return 0
         
@@ -71,7 +71,7 @@ class UserTaskQuotaService:
             count = await redis_client.get(key)
             return int(count) if count else 0
         except Exception as e:
-            # ⭐ v4.19.5 优化：区分不同类型的错误
+            # [*] v4.19.5 优化：区分不同类型的错误
             error_msg = str(e).lower()
             if "authentication" in error_msg or "auth" in error_msg:
                 logger.debug(f"[UserTaskQuota] Redis 认证失败，返回默认任务数量 0（降级处理）")
@@ -91,7 +91,7 @@ class UserTaskQuotaService:
         """
         redis_client = self._get_redis_client()
         if not redis_client:
-            # ⭐ v4.19.5 优化：降低日志级别
+            # [*] v4.19.5 优化：降低日志级别
             logger.debug(f"[UserTaskQuota] Redis 不可用，允许提交任务（降级策略）")
             # Redis 不可用时，允许提交（降级策略）
             return True
@@ -130,7 +130,7 @@ class UserTaskQuotaService:
         """
         redis_client = self._get_redis_client()
         if not redis_client:
-            # ⭐ v4.19.5 优化：降低日志级别
+            # [*] v4.19.5 优化：降低日志级别
             logger.debug(f"[UserTaskQuota] Redis 不可用，跳过减少任务计数")
             return
         
@@ -146,7 +146,7 @@ class UserTaskQuotaService:
             
             logger.debug(f"[UserTaskQuota] 用户 {user_id} 任务计数减少: {current_count if current_count > 0 else 0}/{self.max_concurrent_tasks}")
         except Exception as e:
-            # ⭐ v4.19.5 优化：区分不同类型的错误，静默处理认证错误
+            # [*] v4.19.5 优化：区分不同类型的错误，静默处理认证错误
             error_msg = str(e).lower()
             if "authentication" in error_msg or "auth" in error_msg:
                 logger.debug(f"[UserTaskQuota] Redis 认证失败，跳过任务计数操作（降级处理）")

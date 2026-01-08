@@ -46,18 +46,18 @@ class DataManagementCenterApp(BaseApplication):
 
     def _show_custom_menu(self):
         while True:
-            print(f"\n📦 {self.name} - 功能菜单")
+            print(f"\n[PKG] {self.name} - 功能菜单")
             print("-" * 40)
-            print("1. 📁 扫描目录并登记 (catalog_scanner)")
-            print("2. 🏭 执行一次入库 (ingestion_worker.run_once)")
-            print("3. 🧾 查看入库队列统计 (pending/ingested/failed)")
-            print("4. ❌ 查看失败详情 Top 20")
-            print("5. 🔁 将最近 N 条失败重置为 pending (默认20)")
-            print("6. 🔍 预览失败文件列头/前5行 (输入 catalog_files.id)")
-            print("7. 🌐 打开新DB仪表盘（Streamlit，可选）")
-            print("8. 🔄 自动循环入库（直到 pending<阈值 或 超时）")
-            print("9. 📚 表统计概览（维度/事实行数）")
-            print("0. 🔙 返回主菜单")
+            print("1. [DIR] 扫描目录并登记 (catalog_scanner)")
+            print("2. [FACTORY] 执行一次入库 (ingestion_worker.run_once)")
+            print("3. [RECEIPT] 查看入库队列统计 (pending/ingested/failed)")
+            print("4. [FAIL] 查看失败详情 Top 20")
+            print("5. [LOOP] 将最近 N 条失败重置为 pending (默认20)")
+            print("6. [SEARCH] 预览失败文件列头/前5行 (输入 catalog_files.id)")
+            print("7. [WEB] 打开新DB仪表盘（Streamlit，可选）")
+            print("8. [RETRY] 自动循环入库（直到 pending<阈值 或 超时）")
+            print("9. [DOCS] 表统计概览（维度/事实行数）")
+            print("0. [BACK] 返回主菜单")
 
             choice = input("\n请选择操作 (0-9): ").strip()
             try:
@@ -82,25 +82,25 @@ class DataManagementCenterApp(BaseApplication):
                 elif choice == "9":
                     self._show_table_overview()
                 else:
-                    print("❌ 无效选择，请重试")
+                    print("[FAIL] 无效选择，请重试")
                 input("\n按回车键继续...")
             except KeyboardInterrupt:
-                print("\n🔙 返回上级菜单")
+                print("\n[BACK] 返回上级菜单")
                 break
             except Exception as e:
                 logger.error(f"菜单操作异常: {e}")
-                print(f"❌ 操作失败: {e}")
+                print(f"[FAIL] 操作失败: {e}")
                 input("按回车键继续...")
 
     # 动作实现
     def _scan_catalog(self):
-        print("\n📁 扫描目录并登记…")
+        print("\n[DIR] 扫描目录并登记...")
         try:
             from modules.services.catalog_scanner import main as scan_main
             scan_main()
-            print("✅ 扫描完成")
+            print("[OK] 扫描完成")
         except Exception as e:
-            print(f"❌ 扫描失败: {e}")
+            print(f"[FAIL] 扫描失败: {e}")
     def _pending_counts(self, domains: Optional[str] = None) -> int:
         sql = "select count(*) from catalog_files where status='pending'"
         params = {}
@@ -114,7 +114,7 @@ class DataManagementCenterApp(BaseApplication):
             return int(c.execute(T(sql), params).scalar() or 0)
 
     def _run_ingestion_once(self):
-        print("\n[Batch] 执行入库 (一次批处理)…")
+        print("\n[Batch] 执行入库 (一次批处理)...")
         try:
             from modules.services.ingestion_worker import run_once
             # 步骤1：输入参数
@@ -139,13 +139,13 @@ class DataManagementCenterApp(BaseApplication):
             stats = run_once(limit=limit, domains=(domains.split(',') if domains else None), recent_hours=recent_hours, progress_cb=_cb)
             print(f"- 步骤5/5: 执行完成 picked={stats.picked}, succeeded={stats.succeeded}, failed={stats.failed}")
         except Exception as e:
-            print(f"❌ 入库执行失败: {e}")
+            print(f"[FAIL] 入库执行失败: {e}")
 
 
 
 
     def _show_queue_stats(self):
-        print("\n🧾 入库队列统计…")
+        print("\n[RECEIPT] 入库队列统计...")
         with self._engine().connect() as c:
             rows = c.execute(T("select data_domain, status, count(*) cnt from catalog_files group by 1,2 order by 1,2"))
             data = rows.mappings().all()
@@ -160,7 +160,7 @@ class DataManagementCenterApp(BaseApplication):
                 print(f"{str(dd):<12} | {str(st):<8} | {cnt}")
 
     def _show_failed_details(self):
-        print("\n❌ 失败详情 Top 20…")
+        print("\n[FAIL] 失败详情 Top 20...")
         with self._engine().connect() as c:
             rows = c.execute(T("select id, file_name, platform_code, data_domain, error_message from catalog_files where status='failed' order by id desc limit 20")).mappings().all()
             if not rows:
@@ -170,7 +170,7 @@ class DataManagementCenterApp(BaseApplication):
                 print(f"#{r['id']:>4d} | {r['platform_code'] or '-':<8s} | {r['data_domain'] or '-':<9s} | {r['file_name']}")
 
     def _show_table_overview(self):
-        print("\n📚 表统计概览…")
+        print("\n[DOCS] 表统计概览...")
         with self._engine().connect() as c:
             def _count(tbl: str):
                 try:
@@ -212,10 +212,10 @@ class DataManagementCenterApp(BaseApplication):
                 print(f"catalog_files: {cf}")
 
                 if r.get('error_message'):
-                    print(f"   ↳ {r['error_message']}")
+                    print(f"    -> {r['error_message']}")
 
     def _run_ingestion_auto_loop(self):
-        print("\n[Auto] 自动循环入库…")
+        print("\n[Auto] 自动循环入库...")
         try:
             from time import sleep, time
             from modules.services.ingestion_worker import run_once
@@ -290,19 +290,19 @@ class DataManagementCenterApp(BaseApplication):
                 print("(无可重置的失败记录)")
                 return
             c.execute(T("update catalog_files set status='pending', error_message=null where id in (%s)" % ",".join(map(str, ids))))
-        print(f"✅ 已重置 {len(ids)} 条失败记录为 pending")
+        print(f"[OK] 已重置 {len(ids)} 条失败记录为 pending")
 
     def _peek_failed_columns(self):
         try:
             cid = int(input("输入 catalog_files.id: ").strip())
         except Exception:
-            print("❌ 无效ID")
+            print("[FAIL] 无效ID")
             return
         from modules.services.ingestion_worker import _read_dataframe2
         with self._engine().connect() as c:
             row = c.execute(T("select file_path from catalog_files where id=:i"), {"i": cid}).first()
             if not row:
-                print("❌ 未找到记录")
+                print("[FAIL] 未找到记录")
                 return
             path = Path(row[0])
         try:
@@ -312,21 +312,21 @@ class DataManagementCenterApp(BaseApplication):
             print("HEAD (5):")
             print(df.head(5).to_string(index=False))
         except Exception as e:
-            print(f"❌ 读取失败: {e}")
+            print(f"[FAIL] 读取失败: {e}")
 
     def _open_new_db_dashboard(self):
         try:
             import subprocess
             frontend = Path(__file__).resolve().parents[3] / "frontend_streamlit" / "pages" / "10_new_db_dashboard.py"
             if not frontend.exists():
-                print("❌ 找不到前端页: frontend_streamlit/pages/10_new_db_dashboard.py")
+                print("[FAIL] 找不到前端页: frontend_streamlit/pages/10_new_db_dashboard.py")
                 return
             port = os.environ.get("STREAMLIT_PORT", "8510")
             cmd = [sys.executable, "-m", "streamlit", "run", str(frontend), "--server.port", str(port), "--server.address", "0.0.0.0", "--server.headless", "true"]
             subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parents[3]))
-            print(f"✅ 已启动，新DB仪表盘: http://localhost:{port}")
+            print(f"[OK] 已启动，新DB仪表盘: http://localhost:{port}")
         except Exception as e:
-            print(f"❌ 启动失败: {e}")
+            print(f"[FAIL] 启动失败: {e}")
 
     # 运行入口
     def run(self) -> bool:

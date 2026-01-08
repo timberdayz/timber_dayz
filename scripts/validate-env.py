@@ -25,6 +25,35 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from urllib.parse import urlparse
 
+# [FIX] Windows编码兼容：设置标准输出编码
+if sys.platform == 'win32':
+    try:
+        # 尝试设置UTF-8编码
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+
+def safe_print(text, file=None):
+    """安全打印（处理Windows GBK编码）"""
+    try:
+        if file:
+            print(text, file=file, flush=True)
+        else:
+            print(text, flush=True)
+    except UnicodeEncodeError:
+        # Windows GBK编码兼容：移除无法编码的字符
+        try:
+            safe_text = text.encode('gbk', errors='ignore').decode('gbk')
+        except:
+            safe_text = text.encode('ascii', errors='ignore').decode('ascii')
+        if file:
+            print(safe_text, file=file, flush=True)
+        else:
+            print(safe_text, flush=True)
+
 # P0 级别变量（必须配置）
 P0_VARIABLES = {
     "ENVIRONMENT": {
@@ -304,28 +333,39 @@ class EnvValidator:
                 "warnings": self.warnings,
                 "variables_checked": len(self.env_vars),
             }
-            print(json.dumps(result, indent=2, ensure_ascii=False))
+            safe_print(json.dumps(result, indent=2, ensure_ascii=False))
         else:
             if self.errors:
-                print("[ERROR] 环境变量验证失败：\n", file=sys.stderr)
+                safe_print("[ERROR] 环境变量验证失败：\n", file=sys.stderr)
                 for error in self.errors:
-                    print(f"  {error}", file=sys.stderr)
-                print("", file=sys.stderr)
+                    safe_print(f"  {error}", file=sys.stderr)
+                safe_print("", file=sys.stderr)
             
             if self.warnings:
-                print("[WARNING] 环境变量警告：\n")
+                safe_print("[WARNING] 环境变量警告：\n")
                 for warning in self.warnings:
-                    print(f"  {warning}")
-                print("")
+                    safe_print(f"  {warning}")
+                safe_print("")
             
             if not self.errors and not self.warnings:
-                print("[OK] 环境变量验证通过")
+                safe_print("[OK] 环境变量验证通过")
             elif not self.errors:
-                print("[OK] 环境变量验证通过（有警告）")
+                safe_print("[OK] 环境变量验证通过（有警告）")
 
 
 def main():
     """主函数"""
+    # [FIX] Windows编码兼容：确保输出编码正确
+    if sys.platform == 'win32':
+        import io
+        try:
+            # 重新配置标准输出流
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+                sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+        except Exception:
+            pass
+    
     parser = argparse.ArgumentParser(description="环境变量验证工具")
     parser.add_argument(
         "--env-file",

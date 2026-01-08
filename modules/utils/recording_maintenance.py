@@ -348,7 +348,7 @@ if __name__ == "__main__":
     after_size = _dir_size(outputs_dir)
     saved = before_size - after_size if before_size >= after_size else 0
     mode = "APPLY" if not tool.policy.dry_run else "DRY-RUN"
-    print(f"✅ 维护完成 [{mode}]：归档前 {before_size/1024/1024:.2f} MB，归档后 {after_size/1024/1024:.2f} MB，表观释放 {saved/1024/1024:.2f} MB（移动至 backups）")
+    print(f"[OK] 维护完成 [{mode}]：归档前 {before_size/1024/1024:.2f} MB，归档后 {after_size/1024/1024:.2f} MB，表观释放 {saved/1024/1024:.2f} MB（移动至 backups）")
 
     # 写出报告
     try:
@@ -368,6 +368,6 @@ if __name__ == "__main__":
             ]),
             encoding="utf-8"
         )
-        print(f"📝 报告已生成: {report}")
+        print(f"[NOTE] 报告已生成: {report}")
     except Exception:
         pass

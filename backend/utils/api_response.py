@@ -89,7 +89,7 @@ def error_response(
     }
     
     if detail:
-        # ⭐ v4.14.0修复：支持detail为字符串或字典
+        # [*] v4.14.0修复：支持detail为字符串或字典
         if isinstance(detail, dict):
             error_data["detail"] = detail
         else:
@@ -105,7 +105,7 @@ def error_response(
         "timestamp": get_timestamp()
     }
     
-    # ⭐ v4.14.0新增：支持在错误响应中包含额外的结构化数据
+    # [*] v4.14.0新增：支持在错误响应中包含额外的结构化数据
     if data is not None:
         formatted_data = format_response_data(data)
         response_data["data"] = formatted_data

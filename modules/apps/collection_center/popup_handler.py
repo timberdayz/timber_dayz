@@ -423,7 +423,7 @@ class StepPopupHandler:
         """
         步骤执行失败时的弹窗处理（v4.7.2增强）
         
-        ⭐ 改进：
+        [*] 改进：
         1. 关闭弹窗
         2. 等待页面稳定（Playwright官方推荐）
         3. 短暂延迟，确保DOM更新完成
@@ -438,19 +438,19 @@ class StepPopupHandler:
         check_on_error = popup_handling.get('check_on_error', True)
         
         if check_on_error:
-            # 1️⃣ 关闭弹窗
+            # 1⃣ 关闭弹窗
             closed_count = await self.popup_handler.close_popups(page, platform=self.platform)
             
             if closed_count > 0:
                 logger.info(f"Closed {closed_count} popup(s) after step failure")
                 
-                # 2️⃣ ⭐ 官方推荐：等待页面网络空闲（确保弹窗关闭完成）
+                # 2⃣ [*] 官方推荐：等待页面网络空闲（确保弹窗关闭完成）
                 try:
                     await page.wait_for_load_state('networkidle', timeout=5000)
                 except Exception as e:
                     logger.debug(f"Network idle wait timed out (may be normal): {e}")
                 
-                # 3️⃣ ⭐ 短暂延迟，确保DOM更新和动画完成
+                # 3⃣ [*] 短暂延迟，确保DOM更新和动画完成
                 await asyncio.sleep(0.5)
                 
                 logger.debug("Page stabilized after popup closure, ready to retry")

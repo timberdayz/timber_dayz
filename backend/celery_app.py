@@ -1,7 +1,7 @@
 """
 Celery配置 - 西虹ERP系统异步任务队列
 
-⭐ v4.19.1 恢复 Celery 任务队列：
+[*] v4.19.1 恢复 Celery 任务队列：
 - 数据同步任务（支持任务持久化、恢复、重试）
 - 定时任务（自动入库、低库存告警、应收账款逾期检查、数据库备份）
 
@@ -28,10 +28,10 @@ celery_app = Celery(
     include=[
         "backend.tasks.data_processing",
         "backend.tasks.scheduled_tasks",
-        "backend.tasks.data_sync_tasks",  # ⭐ v4.19.1 恢复：数据同步任务模块
-        "backend.tasks.image_extraction",  # ⭐ 图片提取任务模块
-        # ⚠️ v4.6.0 DSS架构重构：已删除mv_refresh（Metabase直接查询原始表，无需物化视图）
-        # ⚠️ v4.6.0 DSS架构重构：已删除c_class_calculation（C类数据由Metabase定时计算）
+        "backend.tasks.data_sync_tasks",  # [*] v4.19.1 恢复：数据同步任务模块
+        "backend.tasks.image_extraction",  # [*] 图片提取任务模块
+        # [WARN] v4.6.0 DSS架构重构：已删除mv_refresh（Metabase直接查询原始表，无需物化视图）
+        # [WARN] v4.6.0 DSS架构重构：已删除c_class_calculation（C类数据由Metabase定时计算）
     ]
 )
 
@@ -58,25 +58,25 @@ celery_app.conf.update(
     task_routes={
         'backend.tasks.data_processing.*': {'queue': 'data_processing'},
         'backend.tasks.scheduled_tasks.*': {'queue': 'scheduled'},
-        'backend.tasks.data_sync_tasks.*': {'queue': 'data_sync'},  # ⭐ v4.19.1 恢复：数据同步队列
-        'extract_product_images': {'queue': 'data_processing'},  # ⭐ 图片提取任务路由到 data_processing 队列
+        'backend.tasks.data_sync_tasks.*': {'queue': 'data_sync'},  # [*] v4.19.1 恢复：数据同步队列
+        'extract_product_images': {'queue': 'data_processing'},  # [*] 图片提取任务路由到 data_processing 队列
     },
     
-    # ⭐ v4.19.1 新增：任务优先级（需要 Redis >= 5.0 支持）
+    # [*] v4.19.1 新增：任务优先级（需要 Redis >= 5.0 支持）
     task_default_priority=5,  # 默认优先级（1-10，10最高）
     
-    # ⭐ v4.19.1 新增：任务持久化
+    # [*] v4.19.1 新增：任务持久化
     task_acks_late=True,  # 任务完成后才确认（支持任务恢复）
     task_reject_on_worker_lost=True,  # Worker 崩溃时重新分配任务
     
-    # ⭐ v4.19.1 新增：任务超时
+    # [*] v4.19.1 新增：任务超时
     task_time_limit=1800,  # 30分钟硬超时（强制终止）
     task_soft_time_limit=1500,  # 25分钟软超时（发送 SoftTimeLimitExceeded 异常）
 )
 
 # 定时任务配置
 celery_app.conf.beat_schedule = {
-    # ⚠️ v4.6.0 DSS架构重构：已删除物化视图刷新任务（Metabase直接查询原始表）
+    # [WARN] v4.6.0 DSS架构重构：已删除物化视图刷新任务（Metabase直接查询原始表）
     # 'refresh-sales-views-every-5min': {
     #     'task': 'backend.tasks.scheduled_tasks.refresh_sales_materialized_views',
     #     'schedule': crontab(minute='*/5'),

@@ -90,7 +90,7 @@ class PageAnalysisTool:
             }
         }
         
-        logger.info(f"🔍 初始化页面分析工具: {platform}")
+        logger.info(f"[SEARCH] 初始化页面分析工具: {platform}")
     
     def analyze_current_page(self) -> PageAnalysisResult:
         """
@@ -100,7 +100,7 @@ class PageAnalysisTool:
             PageAnalysisResult: 页面分析结果
         """
         try:
-            logger.info(f"🔍 开始分析页面: {self.page.url}")
+            logger.info(f"[SEARCH] 开始分析页面: {self.page.url}")
             
             # 获取页面基本信息
             url = self.page.url
@@ -134,12 +134,12 @@ class PageAnalysisTool:
             )
             
             self.analysis_results.append(result)
-            logger.info(f"✅ 页面分析完成，发现 {len(elements)} 个元素，{len(download_options)} 个下载选项")
+            logger.info(f"[OK] 页面分析完成，发现 {len(elements)} 个元素，{len(download_options)} 个下载选项")
             
             return result
             
         except Exception as e:
-            logger.error(f"❌ 页面分析失败: {e}")
+            logger.error(f"[FAIL] 页面分析失败: {e}")
             raise
     
     def _analyze_page_elements(self) -> List[PageElement]:
@@ -173,11 +173,11 @@ class PageAnalysisTool:
                 except Exception:
                     continue
             
-            logger.info(f"📊 分析了 {len(elements)} 个页面元素")
+            logger.info(f"[DATA] 分析了 {len(elements)} 个页面元素")
             return elements
             
         except Exception as e:
-            logger.error(f"❌ 分析页面元素失败: {e}")
+            logger.error(f"[FAIL] 分析页面元素失败: {e}")
             return []
     
     def _extract_element_info(self, element: Locator, selector: str) -> Optional[PageElement]:
@@ -274,11 +274,11 @@ class PageAnalysisTool:
                     except Exception:
                         continue
             
-            logger.info(f"📥 发现 {len(download_options)} 个下载选项")
+            logger.info(f"[RECV] 发现 {len(download_options)} 个下载选项")
             return download_options
             
         except Exception as e:
-            logger.error(f"❌ 分析下载选项失败: {e}")
+            logger.error(f"[FAIL] 分析下载选项失败: {e}")
             return []
     
     def _detect_file_types(self, element: Locator) -> List[str]:
@@ -428,7 +428,7 @@ class PageAnalysisTool:
             return menus
             
         except Exception as e:
-            logger.error(f"❌ 分析导航菜单失败: {e}")
+            logger.error(f"[FAIL] 分析导航菜单失败: {e}")
             return []
     
     def _extract_menu_items(self, menu_element: Locator) -> List[Dict[str, str]]:
@@ -497,7 +497,7 @@ class PageAnalysisTool:
             return containers
             
         except Exception as e:
-            logger.error(f"❌ 分析数据容器失败: {e}")
+            logger.error(f"[FAIL] 分析数据容器失败: {e}")
             return []
     
     def _check_has_data(self, element: Locator) -> bool:
@@ -556,7 +556,7 @@ class PageAnalysisTool:
             return interactive_elements
             
         except Exception as e:
-            logger.error(f"❌ 分析交互元素失败: {e}")
+            logger.error(f"[FAIL] 分析交互元素失败: {e}")
             return []
     
     def save_analysis_result(self, result: PageAnalysisResult, output_dir: str = "temp/analysis") -> str:
@@ -585,11 +585,11 @@ class PageAnalysisTool:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(result_dict, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"💾 分析结果已保存: {file_path}")
+            logger.info(f"[SAVE] 分析结果已保存: {file_path}")
             return str(file_path)
             
         except Exception as e:
-            logger.error(f"❌ 保存分析结果失败: {e}")
+            logger.error(f"[FAIL] 保存分析结果失败: {e}")
             raise
     
     def generate_analysis_report(self, result: PageAnalysisResult) -> str:
@@ -605,15 +605,15 @@ class PageAnalysisTool:
         try:
             report = []
             report.append("=" * 60)
-            report.append(f"📊 {self.platform.upper()} 页面分析报告")
+            report.append(f"[DATA] {self.platform.upper()} 页面分析报告")
             report.append("=" * 60)
-            report.append(f"📅 分析时间: {result.analysis_time}")
-            report.append(f"🌐 页面URL: {result.url}")
-            report.append(f"📄 页面标题: {result.title}")
+            report.append(f"[DATE] 分析时间: {result.analysis_time}")
+            report.append(f"[WEB] 页面URL: {result.url}")
+            report.append(f"[FILE] 页面标题: {result.title}")
             report.append("")
             
             # 下载选项
-            report.append("📥 下载选项:")
+            report.append("[RECV] 下载选项:")
             if result.download_options:
                 for i, option in enumerate(result.download_options, 1):
                     report.append(f"  {i}. {option.name}")
@@ -621,14 +621,14 @@ class PageAnalysisTool:
                     report.append(f"     文件类型: {', '.join(option.file_types) if option.file_types else '未知'}")
                     report.append(f"     日期范围: {', '.join(option.date_ranges) if option.date_ranges else '未知'}")
                     report.append(f"     数据类型: {', '.join(option.data_types) if option.data_types else '未知'}")
-                    report.append(f"     可用状态: {'✅' if option.is_available else '❌'}")
+                    report.append(f"     可用状态: {'[OK]' if option.is_available else '[FAIL]'}")
                     report.append("")
             else:
-                report.append("  ❌ 未发现下载选项")
+                report.append("  [FAIL] 未发现下载选项")
                 report.append("")
             
             # 导航菜单
-            report.append("🧭 导航菜单:")
+            report.append("[COMPASS] 导航菜单:")
             if result.navigation_menus:
                 for i, menu in enumerate(result.navigation_menus, 1):
                     report.append(f"  {i}. {menu['text'][:50]}...")
@@ -637,36 +637,36 @@ class PageAnalysisTool:
                             report.append(f"     - {item['text']}")
                     report.append("")
             else:
-                report.append("  ❌ 未发现导航菜单")
+                report.append("  [FAIL] 未发现导航菜单")
                 report.append("")
             
             # 数据容器
-            report.append("📊 数据容器:")
+            report.append("[DATA] 数据容器:")
             if result.data_containers:
                 for i, container in enumerate(result.data_containers, 1):
                     report.append(f"  {i}. {container['selector']}")
                     report.append(f"     数据项数: {container['data_count']}")
-                    report.append(f"     包含数据: {'✅' if container['has_data'] else '❌'}")
+                    report.append(f"     包含数据: {'[OK]' if container['has_data'] else '[FAIL]'}")
                     report.append("")
             else:
-                report.append("  ❌ 未发现数据容器")
+                report.append("  [FAIL] 未发现数据容器")
                 report.append("")
             
             # 交互元素统计
-            report.append("🖱️ 交互元素统计:")
+            report.append("[MOUSE] 交互元素统计:")
             report.append(f"  总元素数: {len(result.elements)}")
             report.append(f"  可点击元素: {len([e for e in result.elements if e.is_clickable])}")
             report.append(f"  交互元素: {len(result.interactive_elements)}")
             report.append("")
             
             report.append("=" * 60)
-            report.append("📋 分析完成")
+            report.append("[LIST] 分析完成")
             report.append("=" * 60)
             
             return "\n".join(report)
             
         except Exception as e:
-            logger.error(f"❌ 生成分析报告失败: {e}")
+            logger.error(f"[FAIL] 生成分析报告失败: {e}")
             return f"生成报告失败: {e}"
 
 

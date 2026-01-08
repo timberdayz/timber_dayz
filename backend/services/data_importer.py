@@ -1,4 +1,4 @@
-"""入库服务：raw→staging→unified（占位实现，含UPSERT接口）"""
+"""入库服务：raw->staging->unified（占位实现，含UPSERT接口）"""
 
 from __future__ import annotations
 
@@ -11,16 +11,16 @@ from fastapi import HTTPException
 from backend.models.database import (
     StagingOrders,
     StagingProductMetrics,
-    StagingInventory,  # ⭐ v4.11.4新增：库存数据暂存表
+    StagingInventory,  # [*] v4.11.4新增：库存数据暂存表
     FactOrder,
-    FactOrderItem,  # ⭐ v4.10.0新增：导入订单明细表
+    FactOrderItem,  # [*] v4.10.0新增：导入订单明细表
     FactProductMetric,
     DimProduct,
     DataQuarantine,
     CatalogFile,
 )
-from modules.core.db import BridgeProductKeys  # ⭐ v4.12.0新增：用于关联product_id
-from modules.core.logger import get_logger  # ⭐ v4.6.1新增：导入logger
+from modules.core.db import BridgeProductKeys  # [*] v4.12.0新增：用于关联product_id
+from modules.core.logger import get_logger  # [*] v4.6.1新增：导入logger
 
 logger = get_logger(__name__)
 
@@ -35,7 +35,7 @@ def _sanitize_attributes(attrs: Dict[str, Any]) -> Dict[str, Any]:
     """
     清洗attributes，执行黑名单与限额策略。
     
-    ⭐ v4.7.0修复：处理datetime/date对象和NaN值JSON序列化问题
+    [*] v4.7.0修复：处理datetime/date对象和NaN值JSON序列化问题
     - datetime和date对象需要转换为ISO格式字符串才能序列化为JSON
     - NaN值需要转换为None（JSON标准不支持NaN）
     """
@@ -54,7 +54,7 @@ def _sanitize_attributes(attrs: Dict[str, Any]) -> Dict[str, Any]:
         elif isinstance(val, str):
             return None if not val.strip() else val
         elif isinstance(val, (int, float)):
-            # ⭐ v4.7.0修复：NaN值转换为None（JSON不支持NaN）
+            # [*] v4.7.0修复：NaN值转换为None（JSON不支持NaN）
             if isinstance(val, float) and math.isnan(val):
                 return None
             return val
@@ -71,7 +71,7 @@ def _sanitize_attributes(attrs: Dict[str, Any]) -> Dict[str, Any]:
         if any(kl.startswith(p) for p in _ATTR_BLACKLIST_PREFIX):
             continue
         
-        # ⭐ v4.7.0修复：使用递归清理函数
+        # [*] v4.7.0修复：使用递归清理函数
         val = sanitize_value(v)
         
         # 长度限制
@@ -94,8 +94,8 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
     修复说明：
     - StagingOrders表只有order_data字段（JSON），不是单独的字段
     - 所有订单数据都应该存储在order_data JSON中
-    - ⭐ v4.6.1修复：date/datetime对象需要转换为字符串才能序列化为JSON
-    - ⭐ v4.12.1修复：验证file_id是否存在，避免外键约束错误
+    - [*] v4.6.1修复：date/datetime对象需要转换为字符串才能序列化为JSON
+    - [*] v4.12.1修复：验证file_id是否存在，避免外键约束错误
     """
     import json
     from datetime import datetime, date
@@ -104,8 +104,8 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
     
     logger = get_logger(__name__)
     
-    # ⭐ v4.12.1修复：验证file_id是否存在，避免外键约束错误
-    # ⚠️ 注意：外键约束已修复为指向catalog_files表
+    # [*] v4.12.1修复：验证file_id是否存在，避免外键约束错误
+    # [WARN] 注意：外键约束已修复为指向catalog_files表
     if file_id is not None:
         # 检查catalog_files表（正确的表）
         file_record = db.query(CatalogFile).filter(CatalogFile.id == file_id).first()
@@ -121,8 +121,8 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
     
     objs = []
     for r in rows:
-        # ⭐ v4.6.1修复：将所有数据存储在order_data JSON中
-        # ⭐ v4.7.0企业级ERP空值处理：确保datetime字段正确处理
+        # [*] v4.6.1修复：将所有数据存储在order_data JSON中
+        # [*] v4.7.0企业级ERP空值处理：确保datetime字段正确处理
         order_data = {
             "platform_code": r.get("platform_code"),
             "shop_id": r.get("shop_id"),
@@ -142,9 +142,9 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
             "order_date": r.get("order_date"),
             "order_date_local": r.get("order_date_local"),
             "order_time_utc": r.get("order_time_utc"),
-            "payment_time": r.get("payment_time"),  # ⭐ v4.7.0新增：支付时间
-            "ship_time": r.get("ship_time"),  # ⭐ v4.7.0新增：发货时间
-            "account": r.get("account"),  # ⭐ v4.6.1新增：账号字段
+            "payment_time": r.get("payment_time"),  # [*] v4.7.0新增：支付时间
+            "ship_time": r.get("ship_time"),  # [*] v4.7.0新增：发货时间
+            "account": r.get("account"),  # [*] v4.6.1新增：账号字段
             # 保留所有其他字段（用于后续处理）
             **{k: v for k, v in r.items() if k not in [
                 "platform_code", "shop_id", "order_id", "product_id", "platform_sku", 
@@ -154,8 +154,8 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
             ]}
         }
         
-        # ⭐ v4.7.0企业级ERP空值处理：确保datetime字段正确处理
-        # ⭐ v4.7.0修复：递归序列化所有嵌套的datetime对象
+        # [*] v4.7.0企业级ERP空值处理：确保datetime字段正确处理
+        # [*] v4.7.0修复：递归序列化所有嵌套的datetime对象
         def serialize_for_json(obj):
             """递归序列化对象，确保所有datetime/date对象都被转换为字符串"""
             if obj is None:
@@ -180,7 +180,7 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
         
         serialized_data = serialize_for_json(order_data)
         
-        # ⭐ v4.7.0修复：确保order_id是字符串类型或None（不能是空字符串或数字）
+        # [*] v4.7.0修复：确保order_id是字符串类型或None（不能是空字符串或数字）
         order_id_value = r.get("order_id")
         if order_id_value is None:
             order_id_value = None
@@ -199,7 +199,7 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
             # 其他类型转换为字符串
             order_id_value = str(order_id_value) if order_id_value else None
         
-        # ⭐ v4.7.0修复：确保platform_code和shop_id也是字符串或None
+        # [*] v4.7.0修复：确保platform_code和shop_id也是字符串或None
         platform_code_value = r.get("platform_code")
         if platform_code_value is None or (isinstance(platform_code_value, str) and not platform_code_value.strip()):
             platform_code_value = None
@@ -217,13 +217,13 @@ def stage_orders(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Option
             platform_code=platform_code_value,
             shop_id=shop_id_value,
             order_id=order_id_value,
-            order_data=serialized_data,  # ⭐ v4.6.1修复：使用序列化后的数据
-            ingest_task_id=ingest_task_id,  # ⭐ v4.11.4新增：关联同步任务
-            file_id=file_id  # ⭐ v4.11.4新增：关联文件记录
+            order_data=serialized_data,  # [*] v4.6.1修复：使用序列化后的数据
+            ingest_task_id=ingest_task_id,  # [*] v4.11.4新增：关联同步任务
+            file_id=file_id  # [*] v4.11.4新增：关联文件记录
         )
         objs.append(obj)
     
-    # ⭐ v4.12.2增强：staging阶段错误处理，确保失败的数据被隔离
+    # [*] v4.12.2增强：staging阶段错误处理，确保失败的数据被隔离
     successful_count = 0
     failed_rows = []
     
@@ -292,7 +292,7 @@ def stage_product_metrics(db: Session, rows: List[Dict[str, Any]], ingest_task_i
     v4.11.4增强：
     - 添加ingest_task_id和file_id参数，关联同步任务和文件记录
     - 实际写入staging_product_metrics表
-    - ⭐ v4.12.1修复：验证file_id是否存在，避免外键约束错误
+    - [*] v4.12.1修复：验证file_id是否存在，避免外键约束错误
     """
     import json
     from datetime import datetime, date
@@ -301,7 +301,7 @@ def stage_product_metrics(db: Session, rows: List[Dict[str, Any]], ingest_task_i
     
     logger = get_logger(__name__)
     
-    # ⭐ v4.12.1修复：验证file_id是否存在，避免外键约束错误
+    # [*] v4.12.1修复：验证file_id是否存在，避免外键约束错误
     if file_id is not None:
         file_record = db.query(CatalogFile).filter(CatalogFile.id == file_id).first()
         if not file_record:
@@ -358,12 +358,12 @@ def stage_product_metrics(db: Session, rows: List[Dict[str, Any]], ingest_task_i
             shop_id=shop_id_value,
             platform_sku=platform_sku_value,
             metric_data=metric_data,
-            ingest_task_id=ingest_task_id,  # ⭐ v4.11.4新增：关联同步任务
-            file_id=file_id  # ⭐ v4.11.4新增：关联文件记录
+            ingest_task_id=ingest_task_id,  # [*] v4.11.4新增：关联同步任务
+            file_id=file_id  # [*] v4.11.4新增：关联文件记录
         )
         objs.append(obj)
     
-    # ⭐ v4.12.2增强：staging阶段错误处理，确保失败的数据被隔离
+    # [*] v4.12.2增强：staging阶段错误处理，确保失败的数据被隔离
     successful_count = 0
     failed_rows = []
     
@@ -434,7 +434,7 @@ def stage_inventory(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Opt
     - inventory域数据暂存表
     - 支持原始数据JSON存储
     - 关联同步任务和文件记录
-    - ⭐ v4.12.1修复：验证file_id是否存在，避免外键约束错误
+    - [*] v4.12.1修复：验证file_id是否存在，避免外键约束错误
     """
     import json
     from datetime import datetime, date
@@ -443,7 +443,7 @@ def stage_inventory(db: Session, rows: List[Dict[str, Any]], ingest_task_id: Opt
     
     logger = get_logger(__name__)
     
-    # ⭐ v4.12.1修复：验证file_id是否存在，避免外键约束错误
+    # [*] v4.12.1修复：验证file_id是否存在，避免外键约束错误
     if file_id is not None:
         file_record = db.query(CatalogFile).filter(CatalogFile.id == file_id).first()
         if not file_record:
@@ -537,9 +537,9 @@ def upsert_orders(db: Session, rows: List[Dict[str, Any]], file_record: Optional
     - 使用upsert_orders_v2函数，它使用_FACT_ORDER_CORE_FIELDS筛选字段
     - 其他字段（如product_id, sku等）会自动进入attributes JSON字段
     
-    ⭐ v4.6.1修复：传递file_record参数，用于获取platform_code
+    [*] v4.6.1修复：传递file_record参数，用于获取platform_code
     """
-    # ⭐ v4.6.1修复：使用v2版本，它使用正确的字段筛选逻辑
+    # [*] v4.6.1修复：使用v2版本，它使用正确的字段筛选逻辑
     return upsert_orders_v2(db, rows, file_record=file_record)
 
 
@@ -578,7 +578,7 @@ _FACT_ORDER_CORE_FIELDS = {
     "account",
     "aligned_account_id",
     "file_id",
-    "attributes",  # ⭐ v4.6.1修复：添加attributes字段到核心字段列表
+    "attributes",  # [*] v4.6.1修复：添加attributes字段到核心字段列表
 }
 
 
@@ -587,16 +587,16 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
 
     要求：rows中的字典使用事实表字段名；额外来源列将自动进入attributes。
     
-    ⭐ v4.6.1增强：自动账号对齐
+    [*] v4.6.1增强：自动账号对齐
     - 如果account字段有值但aligned_account_id为空，自动调用账号对齐服务
     - 支持部分匹配（如"3C店"匹配"shopee新加坡3C店"）
     
-    ⭐ v4.6.1修复：确保platform_code和order_id不为空
+    [*] v4.6.1修复：确保platform_code和order_id不为空
     - 如果rows中没有platform_code，从file_record中获取
     - 如果rows中没有order_id，使用attributes中的订单号或生成唯一ID
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
-    from datetime import datetime  # ⭐ v4.6.1修复：导入datetime
+    from datetime import datetime  # [*] v4.6.1修复：导入datetime
 
     if not rows:
         return 0
@@ -604,7 +604,7 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
     is_postgresql = 'postgresql' in str(db.bind.url)
     total = 0
     
-    # ⭐ v4.6.1新增：初始化账号对齐服务（如果需要）
+    # [*] v4.6.1新增：初始化账号对齐服务（如果需要）
     alignment_service = None
     try:
         from modules.services.account_alignment import AccountAlignmentService
@@ -617,14 +617,14 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
         core = {k: v for k, v in r.items() if k in _FACT_ORDER_CORE_FIELDS}
         extras = {k: v for k, v in r.items() if k not in _FACT_ORDER_CORE_FIELDS}
         
-        # ⭐ v4.7.0修复：确保datetime字段在core中（不在attributes中）
-        # ⚠️ 注意：FactOrder表中只有 order_time_utc 和 order_date_local 字段
+        # [*] v4.7.0修复：确保datetime字段在core中（不在attributes中）
+        # [WARN] 注意：FactOrder表中只有 order_time_utc 和 order_date_local 字段
         # ship_time 和 payment_time 不在表中，应该进入 attributes JSON
         # 只将 order_time_utc 和 order_date_local 移到 core 中
         datetime_fields_for_core = {
-            "order_time_utc",  # ✅ FactOrder表中有此字段
-            "order_date_local",  # ✅ FactOrder表中有此字段
-            "metric_date"  # ✅ 可能用于某些场景
+            "order_time_utc",  # [OK] FactOrder表中有此字段
+            "order_date_local",  # [OK] FactOrder表中有此字段
+            "metric_date"  # [OK] 可能用于某些场景
         }
         # ship_time 和 payment_time 不在 FactOrder 表中，应该留在 extras 中（进入 attributes）
         
@@ -632,9 +632,9 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
             if field in extras and field not in core:
                 core[field] = extras.pop(field)
         
-        # ⭐ v4.7.0企业级ERP空值处理：确保datetime字段为None而不是空字符串
+        # [*] v4.7.0企业级ERP空值处理：确保datetime字段为None而不是空字符串
         # 对于可选时间字段（nullable=True），空值应该统一为None
-        for field in ["order_time_utc", "order_date_local"]:  # ⚠️ 只处理FactOrder表中存在的字段
+        for field in ["order_time_utc", "order_date_local"]:  # [WARN] 只处理FactOrder表中存在的字段
             if field in core:
                 value = core[field]
                 # 空字符串、空列表等统一转换为None
@@ -648,7 +648,7 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                     except:
                         pass
         
-        # ⭐ v4.7.0修复：确保所有数值字段都是正确的类型（float）
+        # [*] v4.7.0修复：确保所有数值字段都是正确的类型（float）
         # 防止字符串被插入到数值字段（会导致PostgreSQL类型错误）
         numeric_fields_in_core = {
             "subtotal", "subtotal_rmb", "shipping_fee", "shipping_fee_rmb",
@@ -693,11 +693,11 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                         logger.warning(f"[UpsertOrders] 数值字段 {field} 类型错误: {type(value)}，设置为0.0")
                         core[field] = 0.0
         
-        # ⭐ v4.7.0修复：处理attributes中的datetime对象（ship_time/payment_time会在这里）
+        # [*] v4.7.0修复：处理attributes中的datetime对象（ship_time/payment_time会在这里）
         # 确保extras中的datetime字段（如ship_time、payment_time）正确处理
         core["attributes"] = _sanitize_attributes(extras) or None
         
-        # ⭐ v4.6.1修复：确保platform_code不为空（主键字段）
+        # [*] v4.6.1修复：确保platform_code不为空（主键字段）
         if not core.get("platform_code"):
             if file_record and file_record.platform_code:
                 core["platform_code"] = file_record.platform_code
@@ -725,8 +725,8 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                 else:
                     core["platform_code"] = "unknown"  # 默认值
         
-        # ⭐ v4.6.1修复：确保order_id不为空（主键字段）
-        # ⭐ v4.10.0修复：确保order_id是字符串类型（避免科学计数法问题）
+        # [*] v4.6.1修复：确保order_id不为空（主键字段）
+        # [*] v4.10.0修复：确保order_id是字符串类型（避免科学计数法问题）
         if not core.get("order_id"):
             # 尝试从attributes中提取订单号
             if core.get("attributes") and isinstance(core["attributes"], dict):
@@ -737,7 +737,7 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                     core["attributes"].get("order_number")
                 )
                 if order_id:
-                    # ⭐ v4.10.0修复：确保order_id是字符串，不是科学计数法
+                    # [*] v4.10.0修复：确保order_id是字符串，不是科学计数法
                     if isinstance(order_id, float):
                         # 如果是浮点数（科学计数法），转换为整数再转字符串
                         core["order_id"] = str(int(order_id))
@@ -754,7 +754,7 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                 # 生成唯一ID
                 core["order_id"] = f"ORDER_{int(datetime.now().timestamp() * 1000)}_{idx}"
         else:
-            # ⭐ v4.10.0修复：确保order_id是字符串类型（避免科学计数法问题）
+            # [*] v4.10.0修复：确保order_id是字符串类型（避免科学计数法问题）
             order_id_value = core.get("order_id")
             if isinstance(order_id_value, float):
                 # 如果是浮点数（科学计数法），转换为整数再转字符串
@@ -770,12 +770,12 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                 # 已经是字符串，确保不是科学计数法格式
                 core["order_id"] = str(order_id_value).strip()
         
-        # ⭐ v4.12.1修复：shop_id是主键，优先从file_record获取，避免数据丢失
+        # [*] v4.12.1修复：shop_id是主键，优先从file_record获取，避免数据丢失
         if not core.get("shop_id"):
             if file_record and file_record.shop_id:
                 core["shop_id"] = file_record.shop_id
             else:
-                # ⚠️ 注意：shop_id是主键的一部分，不能为空字符串
+                # [WARN] 注意：shop_id是主键的一部分，不能为空字符串
                 # 如果file_record也没有shop_id，使用文件名或其他标识符作为shop_id
                 if file_record and file_record.file_name:
                     # 尝试从文件名提取shop_id（如：shopee_orders_weekly_20250926_183956.xls）
@@ -791,7 +791,7 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                     core["shop_id"] = f"unknown_{int(datetime.now().timestamp())}"
                 logger.warning(f"[UpsertOrders] shop_id为空，使用兜底值: {core.get('shop_id')}")
         
-        # ⭐ v4.6.1新增：处理已取消订单的信息空白问题
+        # [*] v4.6.1新增：处理已取消订单的信息空白问题
         # 已取消订单通常缺少采购、付款、发货等信息，这是正常的
         # 我们需要确保已取消订单能够正常入库，使用默认值填充缺失字段
         order_status = core.get("order_status")
@@ -806,7 +806,7 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                 core["is_cancelled"] = True
                 core["order_status"] = "cancelled"
                 
-                # ⭐ v4.6.1新增：已取消订单使用默认值填充缺失字段
+                # [*] v4.6.1新增：已取消订单使用默认值填充缺失字段
                 if not core.get("payment_status"):
                     core["payment_status"] = "cancelled"
                 if not core.get("shipping_status"):
@@ -828,11 +828,11 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                     core["tax_amount"] = 0.0
                 logger.debug(f"[UpsertOrders] 已取消订单处理: order_id={core.get('order_id')}, 使用默认值填充缺失字段")
         
-        # ⭐ v4.12.1修复：确保file_id字段被设置（用于数据血缘追踪）
+        # [*] v4.12.1修复：确保file_id字段被设置（用于数据血缘追踪）
         if not core.get("file_id") and file_record:
             core["file_id"] = file_record.id
         
-        # ⭐ v4.6.1新增：自动账号对齐
+        # [*] v4.6.1新增：自动账号对齐
         # 如果account字段有值但aligned_account_id为空，尝试自动匹配
         if alignment_service and core.get("account") and not core.get("aligned_account_id"):
             platform_code = core.get("platform_code", "")
@@ -855,7 +855,7 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
         if is_postgresql:
             try:
                 stmt = pg_insert(FactOrder).values(**core)
-                # ⭐ v4.6.1修复：修复stmt.excluded访问方式
+                # [*] v4.6.1修复：修复stmt.excluded访问方式
                 # stmt.excluded是ReadOnlyColumnCollection，不能使用__getattribute__
                 # 正确方式：直接使用列名作为键，通过stmt.excluded[column_name]访问
                 update_dict = {
@@ -868,14 +868,14 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                     set_=update_dict,
                 )
                 db.execute(stmt)
-                # ⭐ v4.10.0修复：每个订单入库成功后立即提交，避免事务失败影响其他订单
+                # [*] v4.10.0修复：每个订单入库成功后立即提交，避免事务失败影响其他订单
                 db.commit()
             except Exception as order_error:
-                # ⭐ v4.10.0修复：订单入库失败时回滚并记录错误，但不影响其他订单
+                # [*] v4.10.0修复：订单入库失败时回滚并记录错误，但不影响其他订单
                 db.rollback()
                 logger.error(f"[UpsertOrders] 订单入库失败: order_id={core.get('order_id')}, platform_code={core.get('platform_code')}, error={order_error}", exc_info=True)
                 
-                # ⭐ v4.12.1新增：自动隔离失败的订单（用于数据丢失追踪）
+                # [*] v4.12.1新增：自动隔离失败的订单（用于数据丢失追踪）
                 try:
                     if file_record:
                         from modules.core.db import DataQuarantine
@@ -919,8 +919,8 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                 ).update(core)
                 db.commit()
 
-        # ⭐ v4.10.0新增：如果数据包含订单明细字段，同时入库到fact_order_items表
-        # ⚠️ 注意：只有在订单入库成功后才入库订单明细
+        # [*] v4.10.0新增：如果数据包含订单明细字段，同时入库到fact_order_items表
+        # [WARN] 注意：只有在订单入库成功后才入库订单明细
         # 检查是否包含订单明细字段（platform_sku, quantity, line_amount等）
         # 字段可能存在于：
         #   1. r（字段映射后的标准字段，如platform_sku, quantity）
@@ -1036,7 +1036,7 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                 unit_price = float(unit_price) if unit_price else 0.0
                 unit_price_rmb = float(unit_price_rmb) if unit_price_rmb else 0.0
                 
-                # ⭐ v4.12.0新增：通过BridgeProductKeys查找product_id
+                # [*] v4.12.0新增：通过BridgeProductKeys查找product_id
                 product_id = None
                 try:
                     bridge = db.query(BridgeProductKeys).filter(
@@ -1056,7 +1056,7 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                     "shop_id": core.get("shop_id", ""),
                     "order_id": core.get("order_id"),
                     "platform_sku": str(platform_sku).strip(),
-                    "product_id": product_id,  # ⭐ v4.12.0新增：产品ID（冗余字段）
+                    "product_id": product_id,  # [*] v4.12.0新增：产品ID（冗余字段）
                     "product_title": str(product_title).strip() if product_title else None,
                     "quantity": quantity,
                     "currency": core.get("currency"),
@@ -1084,11 +1084,11 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
                             set_=item_update_dict,
                         )
                         db.execute(item_stmt)
-                        # ⭐ v4.10.0修复：订单明细入库成功后立即提交
+                        # [*] v4.10.0修复：订单明细入库成功后立即提交
                         db.commit()
                         logger.debug(f"[UpsertOrders] 已入库订单明细: order_id={core.get('order_id')}, platform_sku={platform_sku}, quantity={quantity}, line_amount={line_amount_rmb}")
                     except Exception as item_db_error:
-                        # ⭐ v4.10.0修复：订单明细入库失败时回滚并记录错误
+                        # [*] v4.10.0修复：订单明细入库失败时回滚并记录错误
                         db.rollback()
                         logger.warning(f"[UpsertOrders] 入库订单明细失败: order_id={core.get('order_id')}, platform_sku={platform_sku}, error={item_db_error}", exc_info=True)
                         # 订单明细入库失败不影响订单级别数据入库，继续执行
@@ -1114,7 +1114,7 @@ def upsert_orders_v2(db: Session, rows: List[Dict[str, Any]], file_record: Optio
 
         total += 1
     
-    # ⭐ v4.10.0修复：PostgreSQL使用逐条提交，不需要批量提交
+    # [*] v4.10.0修复：PostgreSQL使用逐条提交，不需要批量提交
     # 每个订单入库成功后已经立即提交，这里不需要再次提交
     # if is_postgresql:
     #     db.commit()
@@ -1133,10 +1133,10 @@ def quarantine_failed_data(db: Session, file_id: int, validation_result: Dict[st
     - error_type (不是 issue_type)
     - error_msg (不是 message)
     
-    ⭐ v4.6.1修复：row_number计算
+    [*] v4.6.1修复：row_number计算
     - validation_result中的row是数组索引（从0开始）
     - 需要转换为Excel实际行号：Excel行号 = header_row + row_index
-    - 例如：header_row=2, row_index=0 → Excel行号=2（第一行数据）
+    - 例如：header_row=2, row_index=0 -> Excel行号=2（第一行数据）
     """
     import json
     
@@ -1151,9 +1151,9 @@ def quarantine_failed_data(db: Session, file_id: int, validation_result: Dict[st
     
     # 处理错误数据
     for error in validation_result.get("errors", []):
-        # ⭐ v4.6.1修复：将数组索引转换为Excel实际行号
+        # [*] v4.6.1修复：将数组索引转换为Excel实际行号
         row_index = error.get("row", 0)  # 数组索引（从0开始）
-        # ⭐ v4.6.1修复：Excel行号 = header_row + row_index + 1
+        # [*] v4.6.1修复：Excel行号 = header_row + row_index + 1
         # 因为pandas的header参数会跳过表头行，所以第一个数据行对应Excel行号 = header_row + 1
         excel_row_number = header_row + row_index + 1  # Excel实际行号
         
@@ -1165,19 +1165,19 @@ def quarantine_failed_data(db: Session, file_id: int, validation_result: Dict[st
         # 构建row_data（JSON格式）
         row_data_dict = {
             "row": row_index,
-            "excel_row": excel_row_number,  # ⭐ v4.6.1新增：Excel实际行号
+            "excel_row": excel_row_number,  # [*] v4.6.1新增：Excel实际行号
             "col": error.get("col", ""),
             "raw_value": error.get("raw_value", ""),
             "suggested": error.get("suggested", "")
         }
         
         quarantine_record = DataQuarantine(
-            catalog_file_id=file_id,  # ✅ 正确字段名
-            source_file=source_file_name,  # ✅ 必填字段
-            row_number=excel_row_number,  # ⭐ v4.6.1修复：使用Excel实际行号
-            row_data=json.dumps(row_data_dict, ensure_ascii=False),  # ✅ 正确字段名，JSON格式
-            error_type=error.get("type", "unknown"),  # ✅ 正确字段名
-            error_msg=error.get("msg", ""),  # ✅ 正确字段名
+            catalog_file_id=file_id,  # [OK] 正确字段名
+            source_file=source_file_name,  # [OK] 必填字段
+            row_number=excel_row_number,  # [*] v4.6.1修复：使用Excel实际行号
+            row_data=json.dumps(row_data_dict, ensure_ascii=False),  # [OK] 正确字段名，JSON格式
+            error_type=error.get("type", "unknown"),  # [OK] 正确字段名
+            error_msg=error.get("msg", ""),  # [OK] 正确字段名
             platform_code=platform_code,
             shop_id=shop_id,
             data_domain=data_domain,
@@ -1190,9 +1190,9 @@ def quarantine_failed_data(db: Session, file_id: int, validation_result: Dict[st
     for warning in validation_result.get("warnings", []):
         # 只隔离严重警告
         if warning.get("type") in ["range", "date"]:
-            # ⭐ v4.6.1修复：将数组索引转换为Excel实际行号
+            # [*] v4.6.1修复：将数组索引转换为Excel实际行号
             row_index = warning.get("row", 0)
-            # ⭐ v4.6.1修复：Excel行号 = header_row + row_index + 1
+            # [*] v4.6.1修复：Excel行号 = header_row + row_index + 1
             excel_row_number = header_row + row_index + 1
             
             # 如果header_row > 1，跳过表头行之前的数据
@@ -1201,19 +1201,19 @@ def quarantine_failed_data(db: Session, file_id: int, validation_result: Dict[st
             
             row_data_dict = {
                 "row": row_index,
-                "excel_row": excel_row_number,  # ⭐ v4.6.1新增：Excel实际行号
+                "excel_row": excel_row_number,  # [*] v4.6.1新增：Excel实际行号
                 "col": warning.get("col", ""),
                 "raw_value": warning.get("raw_value", ""),
                 "suggested": warning.get("suggested", "")
             }
             
             quarantine_record = DataQuarantine(
-                catalog_file_id=file_id,  # ✅ 正确字段名
+                catalog_file_id=file_id,  # [OK] 正确字段名
                 source_file=source_file_name,
-                row_number=excel_row_number,  # ⭐ v4.6.1修复：使用Excel实际行号
-                row_data=json.dumps(row_data_dict, ensure_ascii=False),  # ✅ 正确字段名
-                error_type=f"warning_{warning.get('type', 'unknown')}",  # ✅ 正确字段名
-                error_msg=warning.get("msg", ""),  # ✅ 正确字段名
+                row_number=excel_row_number,  # [*] v4.6.1修复：使用Excel实际行号
+                row_data=json.dumps(row_data_dict, ensure_ascii=False),  # [OK] 正确字段名
+                error_type=f"warning_{warning.get('type', 'unknown')}",  # [OK] 正确字段名
+                error_msg=warning.get("msg", ""),  # [OK] 正确字段名
                 platform_code=platform_code,
                 shop_id=shop_id,
                 data_domain=data_domain,
@@ -1229,14 +1229,14 @@ def get_quarantine_summary(db: Session, file_id: int = None) -> Dict[str, Any]:
     """获取隔离区数据摘要（v4.4.1修复字段名）"""
     query = db.query(DataQuarantine)
     if file_id:
-        query = query.filter(DataQuarantine.catalog_file_id == file_id)  # ✅ 修复字段名
+        query = query.filter(DataQuarantine.catalog_file_id == file_id)  # [OK] 修复字段名
     
     total_quarantined = query.count()
     
     # 按问题类型分组
     issue_types = {}
     for record in query.all():
-        issue_type = record.error_type  # ✅ 修复字段名
+        issue_type = record.error_type  # [OK] 修复字段名
         if issue_type not in issue_types:
             issue_types[issue_type] = 0
         issue_types[issue_type] += 1
@@ -1244,7 +1244,7 @@ def get_quarantine_summary(db: Session, file_id: int = None) -> Dict[str, Any]:
     return {
         "total_quarantined": total_quarantined,
         "issue_types": issue_types,
-        "files_affected": len(set(r.catalog_file_id for r in query.all() if r.catalog_file_id))  # ✅ 修复字段名
+        "files_affected": len(set(r.catalog_file_id for r in query.all() if r.catalog_file_id))  # [OK] 修复字段名
     }
 
 
@@ -1253,14 +1253,14 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
     批量UPSERT产品指标数据（优化版）
     性能：1万行从60秒优化到10秒
     
-    ⭐ v4.7.0修复：metric_date字段NOT NULL约束处理
+    [*] v4.7.0修复：metric_date字段NOT NULL约束处理
     - 如果metric_date为None，使用默认值（今天）或跳过该行
     
-    ⭐ v4.6.3修复：双维护问题 - 接收file_record参数，确保platform_code正确
+    [*] v4.6.3修复：双维护问题 - 接收file_record参数，确保platform_code正确
     - 如果rows中没有platform_code，从file_record获取
     - 避免数据被错误标记为"unknown"平台
     
-    ⭐ v4.10.0新增：支持data_domain参数
+    [*] v4.10.0新增：支持data_domain参数
     - 从file_record.data_domain读取，如果没有则使用默认值'products'
     - 支持inventory域数据入库
     """
@@ -1283,7 +1283,7 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
         
         try:
             for r in rows:
-                # ⭐ v4.7.0修复：处理metric_date字段（NOT NULL约束）
+                # [*] v4.7.0修复：处理metric_date字段（NOT NULL约束）
                 metric_date = r.get("metric_date")
                 
                 # 如果metric_date为None，尝试从其他字段获取或使用默认值
@@ -1310,8 +1310,8 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                         logger.warning(f"[upsert_product_metrics] metric_date字符串无法解析，使用默认值: {metric_date}, 原始值: {r.get('metric_date')}")
                 
                 # 构造UPSERT数据（适配扁平化schema的实际字段名）
-                # ⭐ v4.6.3修复：双维护问题 - 确保platform_code正确（优先使用file_record）
-                # ⭐ v4.10.0更新：inventory域允许platform_code和shop_id为空（仓库级数据）
+                # [*] v4.6.3修复：双维护问题 - 确保platform_code正确（优先使用file_record）
+                # [*] v4.10.0更新：inventory域允许platform_code和shop_id为空（仓库级数据）
                 platform_code_value = r.get("platform_code")
                 if not platform_code_value:
                     if file_record and file_record.platform_code:
@@ -1346,8 +1346,8 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                         else:
                             shop_id_value = "unknown"  # 其他域兜底
                 
-                # ⭐ v4.6.3修复：兼容多种SKU字段名（product_sku, product_sku_1, platform_sku, sku, spec_sku）
-                # ⭐ v4.10.0更新：支持SKU分层分级（商品SKU/产品SKU/规格货号）
+                # [*] v4.6.3修复：兼容多种SKU字段名（product_sku, product_sku_1, platform_sku, sku, spec_sku）
+                # [*] v4.10.0更新：支持SKU分层分级（商品SKU/产品SKU/规格货号）
                 sku_value = (
                     r.get("platform_sku") or      # 产品SKU（具体规格级别，优先）
                     r.get("product_sku") or       # 商品SKU（品类级别）
@@ -1357,7 +1357,7 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                     "unknown"
                 )
                 
-                # ⭐ v4.10.0新增：获取data_domain（优先级：参数 > file_record > 行数据 > 默认值）
+                # [*] v4.10.0新增：获取data_domain（优先级：参数 > file_record > 行数据 > 默认值）
                 domain_value = (
                     data_domain or 
                     (file_record.data_domain if file_record and hasattr(file_record, 'data_domain') and file_record.data_domain else None) or
@@ -1365,28 +1365,28 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                     "products"  # 默认值：向后兼容
                 )
                 
-                # ⭐ 修复：确保created_at不为null（虽然schema有server_default，但显式设置更安全）
+                # [*] 修复：确保created_at不为null（虽然schema有server_default，但显式设置更安全）
                 current_time = datetime.utcnow()
                 
                 data = {
                     "platform_code": platform_code_value,
                     "shop_id": shop_id_value,
                     "platform_sku": sku_value,
-                    "metric_date": metric_date,  # ⭐ v4.7.0修复：确保不为None
+                    "metric_date": metric_date,  # [*] v4.7.0修复：确保不为None
                     "granularity": r.get("granularity", "daily"),
-                    "data_domain": domain_value,  # ⭐ v4.10.0新增：数据域标识
+                    "data_domain": domain_value,  # [*] v4.10.0新增：数据域标识
                     "sku_scope": r.get("sku_scope", "product"),  # 新增：sku_scope字段
                     "parent_platform_sku": r.get("parent_platform_sku"),  # 可选：父SKU
-                    "source_catalog_id": r.get("source_catalog_id") or (file_record.id if file_record else None),  # ⭐ v4.13.2修复：优先使用行数据，否则使用file_record.id
-                    "created_at": current_time,  # ⭐ 修复：显式设置created_at，避免null值
-                    "updated_at": current_time,  # ⭐ 修复：显式设置updated_at
+                    "source_catalog_id": r.get("source_catalog_id") or (file_record.id if file_record else None),  # [*] v4.13.2修复：优先使用行数据，否则使用file_record.id
+                    "created_at": current_time,  # [*] 修复：显式设置created_at，避免null值
+                    "updated_at": current_time,  # [*] 修复：显式设置updated_at
                     # 商品基础信息
                     "product_name": r.get("product_name"),
                     "category": r.get("category"),
                     "brand": r.get("brand"),
                     "specification": r.get("specification") or r.get("product_specification"),  # v4.6.3新增：规格
                     # 价格信息
-                    # ⭐ v4.6.3修复：妙手ERP数据默认为CNY（人民币），不是USD
+                    # [*] v4.6.3修复：妙手ERP数据默认为CNY（人民币），不是USD
                     "currency": r.get("currency") or ("CNY" if platform_code_value == "miaoshou" else "USD"),  # 货币
                     "price": r.get("price"),  # 价格
                     "price_rmb": r.get("price_rmb"),  # 人民币价格
@@ -1428,16 +1428,16 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                 # PostgreSQL ON CONFLICT DO UPDATE（基于复合唯一索引，包含sku_scope和data_domain）
                 stmt = pg_insert(FactProductMetric).values(**data)
                 stmt = stmt.on_conflict_do_update(
-                    index_elements=['platform_code', 'shop_id', 'platform_sku', 'metric_date', 'granularity', 'sku_scope', 'data_domain'],  # ⭐ v4.10.0新增：添加data_domain
+                    index_elements=['platform_code', 'shop_id', 'platform_sku', 'metric_date', 'granularity', 'sku_scope', 'data_domain'],  # [*] v4.10.0新增：添加data_domain
                     set_={
-                        # ⭐ 修复：更新时也更新updated_at
+                        # [*] 修复：更新时也更新updated_at
                         "updated_at": datetime.utcnow(),
                         # 商品基础信息
                         "product_name": stmt.excluded.product_name,
                         "category": stmt.excluded.category,
                         "brand": stmt.excluded.brand,
                         "specification": stmt.excluded.specification,  # v4.6.3新增
-                        "data_domain": stmt.excluded.data_domain,  # ⭐ v4.10.0新增：更新data_domain字段
+                        "data_domain": stmt.excluded.data_domain,  # [*] v4.10.0新增：更新data_domain字段
                         "parent_platform_sku": stmt.excluded.parent_platform_sku,
                         "source_catalog_id": stmt.excluded.source_catalog_id,
                         # 价格信息
@@ -1498,7 +1498,7 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
     else:
         # SQLite: 使用扁平化schema（实际字段名）
         for r in rows:
-            # ⭐ v4.7.0修复：处理metric_date字段（NOT NULL约束）
+            # [*] v4.7.0修复：处理metric_date字段（NOT NULL约束）
             metric_date = r.get("metric_date")
             
             # 如果metric_date为None，尝试从其他字段获取或使用默认值
@@ -1520,8 +1520,8 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                     metric_date = date.today()
                     logger.warning(f"[upsert_product_metrics] metric_date字符串无法解析，使用默认值: {metric_date}")
             
-            # ⭐ v4.6.3修复：双维护问题 - 确保platform_code正确（优先使用file_record）
-            # ⭐ v4.10.0更新：inventory域允许platform_code和shop_id为空（仓库级数据）
+            # [*] v4.6.3修复：双维护问题 - 确保platform_code正确（优先使用file_record）
+            # [*] v4.10.0更新：inventory域允许platform_code和shop_id为空（仓库级数据）
             platform_code_value = r.get("platform_code")
             if not platform_code_value:
                 if file_record and file_record.platform_code:
@@ -1556,8 +1556,8 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                     else:
                         shop_id_value = "unknown"  # 其他域兜底
             
-            # ⭐ v4.6.3修复：兼容多种SKU字段名（product_sku, product_sku_1, platform_sku, sku, spec_sku）
-            # ⭐ v4.10.0更新：支持SKU分层分级（商品SKU/产品SKU/规格货号）
+            # [*] v4.6.3修复：兼容多种SKU字段名（product_sku, product_sku_1, platform_sku, sku, spec_sku）
+            # [*] v4.10.0更新：支持SKU分层分级（商品SKU/产品SKU/规格货号）
             sku_value = (
                 r.get("platform_sku") or      # 产品SKU（具体规格级别，优先）
                 r.get("product_sku") or       # 商品SKU（品类级别）
@@ -1567,7 +1567,7 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                 "unknown"
             )
             
-            # ⭐ v4.10.0新增：获取data_domain（优先级：参数 > file_record > 行数据 > 默认值）
+            # [*] v4.10.0新增：获取data_domain（优先级：参数 > file_record > 行数据 > 默认值）
             domain_value = (
                 data_domain or 
                 (file_record.data_domain if file_record and hasattr(file_record, 'data_domain') and file_record.data_domain else None) or
@@ -1579,19 +1579,19 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                 platform_code=platform_code_value,
                 shop_id=shop_id_value,
                 platform_sku=sku_value,
-                metric_date=metric_date,  # ⭐ v4.7.0修复：确保不为None
+                metric_date=metric_date,  # [*] v4.7.0修复：确保不为None
                 granularity=r.get("granularity", "daily"),
-                data_domain=domain_value,  # ⭐ v4.10.0新增：数据域标识
+                data_domain=domain_value,  # [*] v4.10.0新增：数据域标识
                 sku_scope=r.get("sku_scope", "product"),  # 新增：sku_scope字段
                 parent_platform_sku=r.get("parent_platform_sku"),  # 可选：父SKU
-                source_catalog_id=r.get("source_catalog_id") or (file_record.id if file_record else None),  # ⭐ v4.13.2修复：优先使用行数据，否则使用file_record.id
+                source_catalog_id=r.get("source_catalog_id") or (file_record.id if file_record else None),  # [*] v4.13.2修复：优先使用行数据，否则使用file_record.id
                 # 商品基础信息
                 product_name=r.get("product_name"),
                 category=r.get("category"),
                 brand=r.get("brand"),
                 specification=r.get("specification") or r.get("product_specification"),  # v4.6.3新增
                 # 价格信息
-                # ⭐ v4.6.3修复：妙手ERP数据默认为CNY（人民币），不是USD
+                # [*] v4.6.3修复：妙手ERP数据默认为CNY（人民币），不是USD
                 currency=r.get("currency") or ("CNY" if platform_code_value == "miaoshou" else "USD"),
                 price=r.get("price"),
                 price_rmb=r.get("price_rmb"),
@@ -1643,14 +1643,14 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                     FactProductMetric.metric_date == obj.metric_date,
                     FactProductMetric.granularity == obj.granularity,
                     FactProductMetric.sku_scope == obj.sku_scope,  # 新增：sku_scope条件
-                    FactProductMetric.data_domain == obj.data_domain,  # ⭐ v4.10.0新增：data_domain条件
+                    FactProductMetric.data_domain == obj.data_domain,  # [*] v4.10.0新增：data_domain条件
                 ).update({
                     # 商品基础信息
                     "product_name": obj.product_name,
                     "category": obj.category,
                     "brand": obj.brand,
                     "specification": obj.specification,  # v4.6.3新增
-                    "data_domain": obj.data_domain,  # ⭐ v4.10.0新增：更新data_domain字段
+                    "data_domain": obj.data_domain,  # [*] v4.10.0新增：更新data_domain字段
                     "parent_platform_sku": obj.parent_platform_sku,
                     "source_catalog_id": obj.source_catalog_id,
                     # 价格信息
@@ -1697,7 +1697,7 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
     return count
 
 
-# ✅ v4.4.1修复：删除重复定义，这是第二个定义（保留第一个）
+# [OK] v4.4.1修复：删除重复定义，这是第二个定义（保留第一个）
 # 第一个定义在行292，已修复字段名匹配问题
 
 
@@ -1705,14 +1705,14 @@ def get_quarantine_summary(db: Session, file_id: int = None) -> Dict[str, Any]:
     """获取隔离区数据摘要（v4.4.1修复字段名）"""
     query = db.query(DataQuarantine)
     if file_id:
-        query = query.filter(DataQuarantine.catalog_file_id == file_id)  # ✅ 修复字段名
+        query = query.filter(DataQuarantine.catalog_file_id == file_id)  # [OK] 修复字段名
     
     total_quarantined = query.count()
     
     # 按问题类型分组
     issue_types = {}
     for record in query.all():
-        issue_type = record.error_type  # ✅ 修复字段名
+        issue_type = record.error_type  # [OK] 修复字段名
         if issue_type not in issue_types:
             issue_types[issue_type] = 0
         issue_types[issue_type] += 1
@@ -1720,7 +1720,7 @@ def get_quarantine_summary(db: Session, file_id: int = None) -> Dict[str, Any]:
     return {
         "total_quarantined": total_quarantined,
         "issue_types": issue_types,
-        "files_affected": len(set(r.catalog_file_id for r in query.all() if r.catalog_file_id))  # ✅ 修复字段名
+        "files_affected": len(set(r.catalog_file_id for r in query.all() if r.catalog_file_id))  # [OK] 修复字段名
     }
 
 

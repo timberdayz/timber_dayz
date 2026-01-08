@@ -33,7 +33,7 @@ class AccountEncryptionService:
             # 首次启动，生成密钥
             encryption_key = Fernet.generate_key().decode()
             logger.warning("="*60)
-            logger.warning("⚠️  首次启动检测：未找到加密密钥")
+            logger.warning("[WARN]  首次启动检测：未找到加密密钥")
             logger.warning("="*60)
             logger.warning(f"请将以下密钥添加到 .env 文件:")
             logger.warning(f"ACCOUNT_ENCRYPTION_KEY={encryption_key}")

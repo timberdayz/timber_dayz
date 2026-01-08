@@ -38,7 +38,7 @@ class RecipeExecutor:
 
             # 加载配方
             recipe = json.loads(recipe_path.read_text(encoding='utf-8'))
-            logger.info(f"📖 加载配方: {recipe.get('page_key', 'unknown')}")
+            logger.info(f"[BOOK] 加载配方: {recipe.get('page_key', 'unknown')}")
             logger.info(f"   生成时间: {recipe.get('generated_at', 'unknown')}")
             logger.info(f"   操作步骤: {len(recipe.get('steps', []))}")
 
@@ -60,7 +60,7 @@ class RecipeExecutor:
                 else:
                     logger.warning(f"步骤 {step.get('step_id')} 执行失败，继续下一步")
 
-            logger.info(f"✅ 配方执行完成: {success_count}/{len(steps)} 步骤成功")
+            logger.info(f"[OK] 配方执行完成: {success_count}/{len(steps)} 步骤成功")
             return success_count > 0
 
         except Exception as e:
@@ -74,7 +74,7 @@ class RecipeExecutor:
         description = step.get('description', '')
         candidates = step.get('candidates', [])
 
-        logger.info(f"🎯 执行步骤 {step_id}: {description}")
+        logger.info(f"[TARGET] 执行步骤 {step_id}: {description}")
 
         # 按优先级排序候选选择器，确保文本选择器优先
         sorted_candidates = sorted(candidates, key=lambda x: (x.get('priority', 999), 0 if x.get('type') == 'text' else 1))
@@ -90,10 +90,10 @@ class RecipeExecutor:
 
                 # 对于选择快捷项，强制优先使用文本选择器
                 if action == 'select_shortcut' and selector_type == 'text':
-                    logger.info(f"  🎯 优先使用文本选择器: '{selector_value}'")
+                    logger.info(f"  [TARGET] 优先使用文本选择器: '{selector_value}'")
 
                 if self._try_selector(page, selector_type, selector_value, action):
-                    logger.info(f"  ✅ 步骤 {step_id} 成功 (使用: {selector_type})")
+                    logger.info(f"  [OK] 步骤 {step_id} 成功 (使用: {selector_type})")
 
                     # 如果是打开日期选择器的步骤，立即扫描可用选项
                     if action == 'open_picker':
@@ -108,12 +108,12 @@ class RecipeExecutor:
 
         # 最后的fallback：如果是选择快捷项，尝试智能查找
         if action == 'select_shortcut':
-            logger.info(f"  🔄 尝试智能fallback查找: {step.get('description', '')}")
+            logger.info(f"  [RETRY] 尝试智能fallback查找: {step.get('description', '')}")
             if self._smart_fallback_selection(page, step):
-                logger.info(f"  ✅ 步骤 {step_id} 智能fallback成功")
+                logger.info(f"  [OK] 步骤 {step_id} 智能fallback成功")
                 return True
 
-        logger.error(f"  ❌ 步骤 {step_id} 所有选择器都失败")
+        logger.error(f"  [FAIL] 步骤 {step_id} 所有选择器都失败")
         return False
 
     def _try_selector(self, page, selector_type: str, selector_value: str, action: str) -> bool:
@@ -237,17 +237,17 @@ class RecipeExecutor:
             # 查找最新的日期控件配方（包含内置配方与输出目录配方）
             recipe_path = self._find_latest_date_picker_recipe()
             if recipe_path:
-                logger.info(f"🎬 开始复刻日期控件操作，目标选项: {target_option}")
+                logger.info(f"[ACTION] 开始复刻日期控件操作，目标选项: {target_option}")
                 return self.execute_recipe_with_target(page, recipe_path, target_option)
 
-            # 未找到配方 → 降级为 WARNING，并启用通用兜底策略
+            # 未找到配方 -> 降级为 WARNING，并启用通用兜底策略
             logger.warning("未找到日期控件配方文件，启用通用兜底日期选择策略")
             ok = self._execute_analytics_date_recipe(page, target_option, "traffic")
             if ok:
-                logger.info("✅ 兜底日期选择成功")
+                logger.info("[OK] 兜底日期选择成功")
                 return True
             else:
-                logger.error("❌ 兜底日期选择失败")
+                logger.error("[FAIL] 兜底日期选择失败")
                 return False
 
         except Exception as e:
@@ -273,7 +273,7 @@ class RecipeExecutor:
 
             # 加载配方
             recipe = json.loads(recipe_path.read_text(encoding='utf-8'))
-            logger.info(f"📖 加载配方: {recipe.get('page_key', 'unknown')}")
+            logger.info(f"[BOOK] 加载配方: {recipe.get('page_key', 'unknown')}")
             logger.info(f"   目标选项: {target_option}")
             logger.info(f"   操作步骤: {len(recipe.get('steps', []))}")
 
@@ -288,12 +288,12 @@ class RecipeExecutor:
 
             # 特殊处理：如果目标是"今日实时"，先检查当前状态
             if target_option == "今日实时":
-                logger.info(f"🔍 检查页面是否已经是'今日实时'状态...")
+                logger.info(f"[SEARCH] 检查页面是否已经是'今日实时'状态...")
                 if self._check_current_time_selection(page, target_option):
-                    logger.info(f"✅ 页面已经是'今日实时'状态，跳过时间选择操作")
+                    logger.info(f"[OK] 页面已经是'今日实时'状态，跳过时间选择操作")
                     return True
                 else:
-                    logger.info(f"📝 页面不是'今日实时'状态，继续执行配方")
+                    logger.info(f"[NOTE] 页面不是'今日实时'状态，继续执行配方")
 
             # 动态调整配方中的目标文本
             adjusted_steps = self._adjust_recipe_target(recipe.get('steps', []), target_option)
@@ -301,7 +301,7 @@ class RecipeExecutor:
             # 调试：显示调整后的配方
             for step in adjusted_steps:
                 if step.get('action') == 'select_shortcut':
-                    logger.info(f"📝 调整后的步骤: {step.get('description')}")
+                    logger.info(f"[NOTE] 调整后的步骤: {step.get('description')}")
                     for candidate in step.get('candidates', []):
                         logger.info(f"   候选器: {candidate.get('type')}='{candidate.get('value')}' (优先级:{candidate.get('priority')})")
 
@@ -317,24 +317,24 @@ class RecipeExecutor:
                         time.sleep(1.5)  # 增加等待时间，确保页面更新
                         verification_result = self._verify_selection(page, target_option)
                         if verification_result:
-                            logger.info(f"✅ 验证成功：已正确选择 {target_option}")
+                            logger.info(f"[OK] 验证成功：已正确选择 {target_option}")
                         else:
                             # 宽容处理：如果操作步骤成功，不强制重试
-                            logger.info(f"⚠️ 验证不确定：目标是 {target_option}，但验证方法可能不适用当前页面状态")
-                            logger.info(f"💡 操作步骤已成功执行，继续后续流程（验证失败不影响实际功能）")
+                            logger.info(f"[WARN] 验证不确定：目标是 {target_option}，但验证方法可能不适用当前页面状态")
+                            logger.info(f"[TIP] 操作步骤已成功执行，继续后续流程（验证失败不影响实际功能）")
 
                             # 可选的轻量重试（不影响主流程）
                             try:
                                 if self._light_retry_verification(page, target_option):
-                                    logger.info(f"✅ 轻量重试验证成功：{target_option}")
+                                    logger.info(f"[OK] 轻量重试验证成功：{target_option}")
                                 else:
-                                    logger.debug(f"🔍 轻量重试验证仍失败，但不影响主流程")
+                                    logger.debug(f"[SEARCH] 轻量重试验证仍失败，但不影响主流程")
                             except Exception as e:
                                 logger.debug(f"轻量重试过程异常: {e}")
                 else:
                     logger.warning(f"步骤 {step.get('step_id')} 执行失败，继续下一步")
 
-            logger.info(f"✅ 配方执行完成: {success_count}/{len(adjusted_steps)} 步骤成功")
+            logger.info(f"[OK] 配方执行完成: {success_count}/{len(adjusted_steps)} 步骤成功")
             return success_count > 0
 
         except Exception as e:
@@ -405,14 +405,14 @@ class RecipeExecutor:
             for method in verification_methods:
                 try:
                     if method(page, target_normalized):
-                        logger.debug(f"✅ 验证成功 (方法: {method.__name__}): {target_option}")
+                        logger.debug(f"[OK] 验证成功 (方法: {method.__name__}): {target_option}")
                         return True
                 except Exception as e:
                     logger.debug(f"验证方法 {method.__name__} 失败: {e}")
                     continue
 
             # 如果所有验证都失败，但操作步骤成功，给予宽容处理
-            logger.debug(f"⚠️ 所有验证方法都失败，但操作可能仍然成功: {target_option}")
+            logger.debug(f"[WARN] 所有验证方法都失败，但操作可能仍然成功: {target_option}")
             return False
 
         except Exception as e:
@@ -598,7 +598,7 @@ class RecipeExecutor:
             if not target_text:
                 return False
 
-            logger.info(f"🔍 智能扫描页面选项，目标: '{target_text}'")
+            logger.info(f"[SEARCH] 智能扫描页面选项，目标: '{target_text}'")
 
             # 扫描页面上所有可能的日期选项
             available_options = self._scan_date_options(page)
@@ -607,19 +607,19 @@ class RecipeExecutor:
             simple_texts = [opt['text'] for opt in available_options
                           if opt['selector'] == '.eds-date-shortcut-item__text' and len(opt['text']) < 20]
             if simple_texts:
-                logger.info(f"📋 发现页面选项: {simple_texts}")
+                logger.info(f"[LIST] 发现页面选项: {simple_texts}")
             else:
-                logger.debug(f"📋 发现页面选项: {len(available_options)} 个（详细信息已省略）")
+                logger.debug(f"[LIST] 发现页面选项: {len(available_options)} 个（详细信息已省略）")
 
             # 智能匹配目标选项
             best_match = self._find_best_match(target_text, available_options)
 
             if best_match:
-                logger.info(f"🎯 最佳匹配: '{target_text}' -> '{best_match['text']}'")
+                logger.info(f"[TARGET] 最佳匹配: '{target_text}' -> '{best_match['text']}'")
                 try:
                     best_match['element'].click(timeout=3000)
                     time.sleep(1.5)  # 等待页面响应
-                    logger.info(f"✅ 智能选择成功: {best_match['text']}")
+                    logger.info(f"[OK] 智能选择成功: {best_match['text']}")
                     return True
                 except Exception as e:
                     logger.debug(f"点击匹配元素失败: {e}")
@@ -713,7 +713,7 @@ class RecipeExecutor:
     def _retry_selection(self, page, target_option: str) -> bool:
         """重试选择目标选项"""
         try:
-            logger.info(f"🔄 重试选择: {target_option}")
+            logger.info(f"[RETRY] 重试选择: {target_option}")
 
             # 尝试直接点击目标文本
             try:
@@ -767,7 +767,7 @@ class RecipeExecutor:
                         text = element.text_content().strip()
                         text_normalized = ' '.join(text.split())
                         if target_normalized in text_normalized or text_normalized in target_normalized:
-                            logger.info(f"✅ 检测到当前已选择: {text}")
+                            logger.info(f"[OK] 检测到当前已选择: {text}")
                             return True
                 except:
                     continue
@@ -781,7 +781,7 @@ class RecipeExecutor:
     def _close_notification_modal(self, page):
         """检查并关闭可能的通知/问卷弹窗（含 iframe 内部）。"""
         try:
-            logger.debug("🔍 检查是否有通知/问卷弹窗需要关闭…")
+            logger.debug("[SEARCH] 检查是否有通知/问卷弹窗需要关闭...")
 
             # 等待页面稳定
             try:
@@ -846,7 +846,7 @@ class RecipeExecutor:
                             try:
                                 element = root.locator(selector).first
                                 if element.count() > 0 and element.is_visible():
-                                    logger.info(f"🎯 发现弹窗，点击关闭按钮: {selector} (in {root_name})")
+                                    logger.info(f"[TARGET] 发现弹窗，点击关闭按钮: {selector} (in {root_name})")
                                     try:
                                         element.click()
                                     except Exception:
@@ -876,7 +876,7 @@ class RecipeExecutor:
                                     try:
                                         root.keyboard.press('Escape')
                                         modal_closed = True
-                                        logger.info("🎯 通过 Escape 关闭弹窗/遮罩")
+                                        logger.info("[TARGET] 通过 Escape 关闭弹窗/遮罩")
                                         break
                                     except Exception:
                                         pass
@@ -896,13 +896,13 @@ class RecipeExecutor:
                 waited += step_ms
 
             if modal_closed:
-                logger.info("✅ 弹窗已关闭")
+                logger.info("[OK] 弹窗已关闭")
                 try:
                     page.wait_for_timeout(500)
                 except Exception:
                     pass
             else:
-                logger.debug("📝 未发现需要关闭的弹窗")
+                logger.debug("[NOTE] 未发现需要关闭的弹窗")
 
         except Exception as e:
             logger.debug(f"检查并关闭弹窗失败: {e}")
@@ -944,7 +944,7 @@ class RecipeExecutor:
         try:
             type_names = {"traffic": "流量表现", "order": "订单表现", "finance": "财务表现"}
             type_name = type_names.get(analytics_type, analytics_type)
-            logger.info(f"🎯 执行{type_name}日期选择: {target_option}")
+            logger.info(f"[TARGET] 执行{type_name}日期选择: {target_option}")
 
             # 在执行配方前，先检查并关闭可能的通知弹窗
             self._close_notification_modal(page)
@@ -959,7 +959,7 @@ class RecipeExecutor:
                 "div:has-text('统计时间')",
                 ".time-selector",
             ]
-            logger.info("🎯 执行步骤 1: 打开日期选择器")
+            logger.info("[TARGET] 执行步骤 1: 打开日期选择器")
             opened = False
             last_used = None
             for sel in open_selectors:
@@ -970,12 +970,12 @@ class RecipeExecutor:
                         page.wait_for_timeout(250)
                         opened = True
                         last_used = sel
-                        logger.info(f"✅ 步骤 1 成功 (使用: {sel})")
+                        logger.info(f"[OK] 步骤 1 成功 (使用: {sel})")
                         break
                 except Exception as e:
                     logger.debug(f"打开日期选择器失败 {sel}: {e}")
             if not opened:
-                logger.error("❌ 步骤 1 失败: 打开日期选择器")
+                logger.error("[FAIL] 步骤 1 失败: 打开日期选择器")
                 return False
 
             # 等待面板真正出现（避免动画/延迟导致后续找不到快捷项）
@@ -1017,7 +1017,7 @@ class RecipeExecutor:
                     except Exception:
                         continue
             if panel is None:
-                logger.error("❌ 步骤 1.5 失败: 日期面板未出现")
+                logger.error("[FAIL] 步骤 1.5 失败: 日期面板未出现")
                 return False
 
             # 可选：录制模式（Inspector+事件监听）挂点
@@ -1025,14 +1025,14 @@ class RecipeExecutor:
             try:
                 import os
                 if os.getenv("PW_RECORD_DATE_PICKER") == "1":
-                    logger.info("🟡 调试模式：即将打开 Playwright Inspector 并暂停在日期面板，请点击 Recording 后手动完成操作…")
+                    logger.info("[YELLOW] 调试模式：即将打开 Playwright Inspector 并暂停在日期面板，请点击 Recording 后手动完成操作...")
                     page.pause()
             except Exception as _e:
                 logger.debug(f"录制模式挂点初始化失败: {_e}")
 
 
             # 2) 选择目标快捷项
-            logger.info(f"🎯 执行步骤 2: 选择{target_option}")
+            logger.info(f"[TARGET] 执行步骤 2: 选择{target_option}")
             # 生成多变体匹配（避免"过去30天"vs"过去30"的严格匹配失败）
             variants = self._generate_date_option_variants(target_option)
             option_selectors = []
@@ -1056,13 +1056,13 @@ class RecipeExecutor:
                         page.wait_for_timeout(600)
                         picked = True
                         used_selector = sel
-                        logger.info(f"✅ 步骤 2 成功 (使用: {sel})")
+                        logger.info(f"[OK] 步骤 2 成功 (使用: {sel})")
                         break
                 except Exception as e:
                     logger.debug(f"点击快捷项失败 {sel}: {e}")
 
             if not picked:
-                logger.warning(f"⚠️ 配方阶段未命中: 选择{target_option}，进入回退策略...")
+                logger.warning(f"[WARN] 配方阶段未命中: 选择{target_option}，进入回退策略...")
                 return False  # 触发回退，但不记为严重错误
 
             return True  # 配方阶段成功
@@ -1116,7 +1116,7 @@ class RecipeExecutor:
         simplified_candidates = glob.glob(simplified_pattern, recursive=True)
         if simplified_candidates:
             latest_simplified = max(simplified_candidates, key=lambda p: os.path.getmtime(p))
-            logger.info(f"🎯 使用简化配方: {Path(latest_simplified).name}")
+            logger.info(f"[TARGET] 使用简化配方: {Path(latest_simplified).name}")
             return Path(latest_simplified)
 
         # 2) 回退到输出目录中的原始配方
@@ -1124,7 +1124,7 @@ class RecipeExecutor:
         candidates = glob.glob(pattern, recursive=True)
         if candidates:
             latest_path = max(candidates, key=lambda p: os.path.getmtime(p))
-            logger.info(f"📋 使用原始配方: {Path(latest_path).name}")
+            logger.info(f"[LIST] 使用原始配方: {Path(latest_path).name}")
             return Path(latest_path)
 
         # 3) 最后回退到仓库内置配方（精准命中 CN Seller Center 通用结构）
@@ -1134,7 +1134,7 @@ class RecipeExecutor:
         ]
         existing = [p for p in builtins if p.exists()]
         if existing:
-            logger.info(f"🧩 使用内置配方: {existing[0].name}")
+            logger.info(f"[PUZZLE] 使用内置配方: {existing[0].name}")
             return existing[0]
 
         return None
@@ -1155,7 +1155,7 @@ class RecipeExecutor:
                     continue
 
             if simple_options:
-                logger.info(f"📋 发现日期选项: {simple_options}")
+                logger.info(f"[LIST] 发现日期选项: {simple_options}")
             else:
                 logger.debug("未发现有效的日期选项")
 

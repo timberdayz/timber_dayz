@@ -56,7 +56,7 @@ class CollectionTemplateGenerator:
         # 写入文件
         output_path.write_text(template_content, encoding='utf-8')
         
-        logger.info(f"✅ 生成采集模板: {output_path}")
+        logger.info(f"[OK] 生成采集模板: {output_path}")
         return str(output_path)
     
     def _get_template_content(self, data_type: RecordingType, shop_id: Optional[str]) -> str:
@@ -129,7 +129,7 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
         **kwargs: 额外参数（如日期范围等）
     """
     try:
-        print(f"🚀 开始采集 {{data_type.value}} 数据...")
+        print(f"[START] 开始采集 {{data_type.value}} 数据...")
         
         # 1. 构造深链接（如果提供了shop_id）
         if shop_id:
@@ -145,7 +145,7 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
                 if params:
                     deep_link += "&" + "&".join(params)
             
-            print(f"🔗 导航到深链接: {{deep_link}}")
+            print(f"[LINK] 导航到深链接: {{deep_link}}")
             page.goto(deep_link, wait_until="domcontentloaded", timeout=60000)
             
             # 等待页面稳定
@@ -159,13 +159,13 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
         data_table_selector = "{selectors.get('data_table', '.data-content')}"
         try:
             page.wait_for_selector(data_table_selector, timeout=20000)
-            print("✅ 数据表格已加载")
+            print("[OK] 数据表格已加载")
         except:
-            print("⚠️ 数据表格加载超时，但继续执行")
+            print("[WARN] 数据表格加载超时，但继续执行")
         
         # 3. 尝试API导出（优先方案）
         try:
-            print("🚀 尝试API导出...")
+            print("[START] 尝试API导出...")
             
             # TODO: 通过录制确定真实的API端点
             api_endpoint = f"https://seller.shopee.cn/api/{data_type.value}/export"
@@ -187,13 +187,13 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
                 output_path = output_dir / filename
                 
                 output_path.write_bytes(response.body())
-                print(f"✅ API导出成功: {{output_path}}")
+                print(f"[OK] API导出成功: {{output_path}}")
                 return
             else:
-                print(f"⚠️ API导出失败 (状态码: {{response.status}})，尝试点击导出")
+                print(f"[WARN] API导出失败 (状态码: {{response.status}})，尝试点击导出")
                 
         except Exception as api_error:
-            print(f"⚠️ API导出异常: {{api_error}}，尝试点击导出")
+            print(f"[WARN] API导出异常: {{api_error}}，尝试点击导出")
         
         # 4. 点击导出按钮（兜底方案）
         export_button_selector = "{selectors.get('export_button', 'text=导出')}"
@@ -206,7 +206,7 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
         # 监听下载事件
         with page.expect_download(timeout=60000) as download_info:
             page.click(export_button_selector)
-            print("🖱️ 已点击导出按钮，等待下载...")
+            print("[MOUSE] 已点击导出按钮，等待下载...")
         
         download = download_info.value
         
@@ -220,10 +220,10 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
         output_path = output_dir / filename
         
         download.save_as(str(output_path))
-        print(f"✅ 点击导出成功: {{output_path}}")
+        print(f"[OK] 点击导出成功: {{output_path}}")
         
     except Exception as e:
-        print(f"❌ {data_type.value} 数据采集失败: {{e}}")
+        print(f"[FAIL] {data_type.value} 数据采集失败: {{e}}")
         raise
 
 
@@ -264,7 +264,7 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
         **kwargs: 额外参数
     """
     try:
-        print(f"🚀 开始采集 {data_type.value} 数据...")
+        print(f"[START] 开始采集 {data_type.value} 数据...")
         
         # TODO: 根据具体平台实现采集逻辑
         # 1. 导航到目标页面
@@ -272,10 +272,10 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
         # 3. 执行数据导出
         # 4. 保存文件
         
-        print("⚠️ 通用模板需要根据具体平台进行实现")
+        print("[WARN] 通用模板需要根据具体平台进行实现")
         
     except Exception as e:
-        print(f"❌ {data_type.value} 数据采集失败: {{e}}")
+        print(f"[FAIL] {data_type.value} 数据采集失败: {{e}}")
         raise
 
 

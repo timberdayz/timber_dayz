@@ -15,7 +15,7 @@ class SingleFileSyncRequest(BaseModel):
     only_with_template: bool = Field(True, description="只处理有模板的文件")
     allow_quarantine: bool = Field(True, description="允许隔离错误数据")
     use_template_header_row: bool = Field(True, description="使用模板表头行（严格模式，不自动检测）")
-    priority: int = Field(5, description="任务优先级（1-10，10最高，默认5）", ge=1, le=10)  # ⭐ Phase 4: 任务优先级
+    priority: int = Field(5, description="任务优先级（1-10，10最高，默认5）", ge=1, le=10)  # [*] Phase 4: 任务优先级
 
 
 class BatchSyncRequest(BaseModel):
@@ -27,7 +27,7 @@ class BatchSyncRequest(BaseModel):
     limit: int = Field(100, description="最多处理N个文件", ge=1, le=1000)
     only_with_template: bool = Field(True, description="只处理有模板的文件")
     allow_quarantine: bool = Field(True, description="允许隔离错误数据")
-    priority: int = Field(5, description="任务优先级（1-10，10最高，默认5）", ge=1, le=10)  # ⭐ Phase 4: 任务优先级
+    priority: int = Field(5, description="任务优先级（1-10，10最高，默认5）", ge=1, le=10)  # [*] Phase 4: 任务优先级
 
 
 class BatchSyncByFileIdsRequest(BaseModel):
@@ -36,7 +36,7 @@ class BatchSyncByFileIdsRequest(BaseModel):
     only_with_template: bool = Field(True, description="只处理有模板的文件")
     allow_quarantine: bool = Field(True, description="允许隔离错误数据")
     use_template_header_row: bool = Field(True, description="使用模板表头行（严格模式）")
-    priority: int = Field(5, description="任务优先级（1-10，10最高，默认5）", ge=1, le=10)  # ⭐ Phase 4: 任务优先级
+    priority: int = Field(5, description="任务优先级（1-10，10最高，默认5）", ge=1, le=10)  # [*] Phase 4: 任务优先级
 
 
 class DataSyncFilePreviewRequest(BaseModel):
@@ -50,7 +50,7 @@ class FileListRequest(BaseModel):
     platform: Optional[str] = Field(None, description="平台代码")
 
 
-# ⭐ Phase 1.4.3: 任务状态管理 Schemas
+# [*] Phase 1.4.3: 任务状态管理 Schemas
 class CeleryTaskStatusResponse(BaseModel):
     """Celery 任务状态响应"""
     celery_task_id: str = Field(..., description="Celery 任务ID")

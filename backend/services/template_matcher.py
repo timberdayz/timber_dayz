@@ -25,7 +25,7 @@ from datetime import datetime
 from modules.core.db import FieldMappingTemplate
 # FieldMappingTemplateItem,  # v4.6.0移除：不再使用明细表，改用header_columns JSONB
 from modules.core.logger import get_logger
-from backend.services.currency_extractor import get_currency_extractor  # ⭐ v4.15.0新增
+from backend.services.currency_extractor import get_currency_extractor  # [*] v4.15.0新增
 
 logger = get_logger(__name__)
 
@@ -111,7 +111,7 @@ class TemplateMatcher:
                 FieldMappingTemplate.status == 'published',
             ]
 
-            # ⭐ v4.16.0修复：只有当调用方提供了sub_domain时，才要求模板的sub_domain与之匹配
+            # [*] v4.16.0修复：只有当调用方提供了sub_domain时，才要求模板的sub_domain与之匹配
             # 当文件没有sub_domain时，不添加sub_domain条件，允许匹配任何sub_domain的模板
             if norm_sub_domain is not None:
                 level1_conditions.append(
@@ -123,12 +123,12 @@ class TemplateMatcher:
                 *level1_conditions
             ).order_by(desc(FieldMappingTemplate.version))
 
-            # ⭐ v4.18.2：支持异步会话
+            # [*] v4.18.2：支持异步会话
             result = await self.db.execute(stmt)
             template = result.scalars().first()
             
             if template:
-                # ⭐ v4.19.5 优化：降低日志级别（INFO → DEBUG），减少日志噪音
+                # [*] v4.19.5 优化：降低日志级别（INFO -> DEBUG），减少日志噪音
                 logger.debug(
                     f"[Level 1] 精确匹配: {template.template_name} "
                     f"(v{template.version}, {platform}/{data_domain}/{norm_sub_domain or 'None'}/{norm_granularity or 'None'})"
@@ -136,12 +136,12 @@ class TemplateMatcher:
                 return template
             
             # Level 2: 忽略sub_domain（向后兼容）
-            # ⭐ v4.16.0修复：services域不允许忽略sub_domain（ai_assistant和agent表头完全不同）
+            # [*] v4.16.0修复：services域不允许忽略sub_domain（ai_assistant和agent表头完全不同）
             # 对于services域，如果提供了sub_domain但没有匹配到模板，不应该降级匹配其他sub_domain的模板
             if norm_granularity is not None or (sub_domain is not None and data_domain.lower() != 'services'):
                 # 对于services域，如果提供了sub_domain，不允许降级匹配
                 if data_domain.lower() == 'services' and norm_sub_domain is not None:
-                    # ⭐ v4.19.5 优化：降低日志级别
+                    # [*] v4.19.5 优化：降低日志级别
                     logger.debug(
                         f"[Level 2] services域已提供sub_domain={norm_sub_domain}，不允许降级匹配其他sub_domain的模板"
                     )
@@ -153,12 +153,12 @@ class TemplateMatcher:
                         FieldMappingTemplate.status == 'published'
                     ).order_by(desc(FieldMappingTemplate.version))
                     
-                    # ⭐ v4.18.2：支持异步会话
+                    # [*] v4.18.2：支持异步会话
                     result = await self.db.execute(stmt)
                     template = result.scalars().first()
                     
                     if template:
-                        # ⭐ v4.19.5 优化：降低日志级别
+                        # [*] v4.19.5 优化：降低日志级别
                         logger.debug(
                             f"[Level 2] 模糊匹配（忽略sub_domain）: {template.template_name} "
                             f"(v{template.version}, {platform}/{data_domain}/{norm_granularity or 'None'})"
@@ -195,7 +195,7 @@ class TemplateMatcher:
         - header_columns: 原始表头字段列表（v4.6.0新增）
         """
         try:
-            # ⭐ v4.18.2：支持异步会话
+            # [*] v4.18.2：支持异步会话
             result = await self.db.execute(
                 select(FieldMappingTemplate).where(
                     FieldMappingTemplate.id == template_id
@@ -242,7 +242,7 @@ class TemplateMatcher:
             {original_field: {standard_field, confidence, ...}}
         """
         try:
-            # ⭐ v4.18.2：支持异步会话
+            # [*] v4.18.2：支持异步会话
             result = await self.db.execute(
                 select(FieldMappingTemplate).where(
                     FieldMappingTemplate.id == template_id
@@ -295,7 +295,7 @@ class TemplateMatcher:
         import re
         
         try:
-            # ⭐ v4.18.2：获取模板映射（异步）
+            # [*] v4.18.2：获取模板映射（异步）
             template_mappings = await self.get_template_mappings(template.id)
             
             # 应用到列
@@ -358,7 +358,7 @@ class TemplateMatcher:
             if platform:
                 stmt = stmt.where(CatalogFile.platform_code == platform)
             
-            # ⭐ v4.18.2：支持异步会话
+            # [*] v4.18.2：支持异步会话
             result = await self.db.execute(stmt)
             all_combinations = result.all()
             
@@ -372,7 +372,7 @@ class TemplateMatcher:
                 if granularity is None:
                     continue  # 跳过无粒度的文件
                 
-                # ⭐ v4.18.2：异步调用
+                # [*] v4.18.2：异步调用
                 template = await self.find_best_template(
                     platform or 'shopee',  # 如果未指定，默认shopee
                     domain,
@@ -413,7 +413,7 @@ class TemplateMatcher:
         """
         检测表头变化（v4.14.0安全版本，v4.18.2异步支持）
         
-        ⚠️ 安全原则：不进行相似度匹配，任何变化都需要用户手动确认
+        [WARN] 安全原则：不进行相似度匹配，任何变化都需要用户手动确认
         
         比较当前表头与模板表头，检测：
         - 新增字段（current中有，template中没有）
@@ -436,7 +436,7 @@ class TemplateMatcher:
             }
         """
         try:
-            # ⭐ v4.18.2：支持异步会话
+            # [*] v4.18.2：支持异步会话
             result = await self.db.execute(
                 select(FieldMappingTemplate).where(
                     FieldMappingTemplate.id == template_id
@@ -458,7 +458,7 @@ class TemplateMatcher:
             
             template_columns = template.header_columns or []
             
-            # ⭐ v4.15.0新增：货币代码归一化
+            # [*] v4.15.0新增：货币代码归一化
             # 在比较前，将字段名归一化（移除货币代码部分）
             currency_extractor = get_currency_extractor()
             normalized_current = currency_extractor.normalize_field_list(current_columns)
@@ -474,9 +474,9 @@ class TemplateMatcher:
             # 2. 检测删除字段（template中有，current中没有）
             removed_fields = list(template_set - current_set)
             
-            # ⭐ v4.14.0安全版本：移除相似度匹配逻辑
+            # [*] v4.14.0安全版本：移除相似度匹配逻辑
             # 任何字段名变化都需要用户手动确认
-            # ⭐ v4.15.0更新：但货币代码差异不视为变化（已通过归一化处理）
+            # [*] v4.15.0更新：但货币代码差异不视为变化（已通过归一化处理）
             
             # 3. 计算匹配率（基于归一化后的字段集合的交集）
             matched_fields = len(current_set & template_set)
@@ -491,7 +491,7 @@ class TemplateMatcher:
             )
             
             # 5. 判断是否检测到变化
-            # ⚠️ 安全原则：任何变化（新增、删除、顺序变化）都视为变化
+            # [WARN] 安全原则：任何变化（新增、删除、顺序变化）都视为变化
             detected = not is_exact_match
             
             result_dict = {
@@ -502,8 +502,8 @@ class TemplateMatcher:
                 'is_exact_match': is_exact_match,
                 'template_columns': template_columns,  # 返回原始模板字段列表（供前端对比，保留货币代码）
                 'current_columns': current_columns,     # 返回原始当前字段列表（供前端对比，保留货币代码）
-                'normalized_template_columns': normalized_template,  # ⭐ v4.15.0新增：归一化后的模板字段
-                'normalized_current_columns': normalized_current     # ⭐ v4.15.0新增：归一化后的当前字段
+                'normalized_template_columns': normalized_template,  # [*] v4.15.0新增：归一化后的模板字段
+                'normalized_current_columns': normalized_current     # [*] v4.15.0新增：归一化后的当前字段
             }
             
             if detected:

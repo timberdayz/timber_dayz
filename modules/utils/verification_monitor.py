@@ -26,7 +26,7 @@ class VerificationMonitor:
         """创建监控界面"""
         self.current_handler = verification_handler
         
-        st.title("🔐 智能验证码处理监控中心")
+        st.title("[LOCK] 智能验证码处理监控中心")
         st.markdown("---")
         
         # 状态概览区域
@@ -45,7 +45,7 @@ class VerificationMonitor:
         self._render_user_guidance()
         
         # 性能统计区域
-        with st.expander("📊 性能统计", expanded=False):
+        with st.expander("[DATA] 性能统计", expanded=False):
             self._render_performance_stats()
     
     def _render_status_overview(self):
@@ -67,7 +67,7 @@ class VerificationMonitor:
                 st.metric(
                     label="弹窗检测",
                     value=popup_status,
-                    delta="✅" if status['popup_detected'] else "❌"
+                    delta="[OK]" if status['popup_detected'] else "[FAIL]"
                 )
             
             with col3:
@@ -82,12 +82,12 @@ class VerificationMonitor:
                 st.metric(
                     label="系统状态", 
                     value=error_status,
-                    delta="🟢" if not status['last_error'] else "🔴"
+                    delta="[GREEN]" if not status['last_error'] else "[RED]"
                 )
     
     def _render_real_time_status(self):
         """渲染实时状态"""
-        st.subheader("📊 实时状态监控")
+        st.subheader("[DATA] 实时状态监控")
         
         if self.current_handler:
             status = self.current_handler.get_current_status()
@@ -100,15 +100,15 @@ class VerificationMonitor:
             state_color = self._get_state_color(status['state'])
             st.markdown(f"""
             <div style="padding: 10px; border-radius: 5px; background-color: {state_color}; margin: 10px 0;">
-                <h4>🔄 {self._get_status_display(status['state'])}</h4>
+                <h4>[RETRY] {self._get_status_display(status['state'])}</h4>
                 <p>尝试次数: {status['attempt_count']}</p>
-                {f'<p style="color: red;">❌ 错误: {status["last_error"]}</p>' if status['last_error'] else ''}
+                {f'<p style="color: red;">[FAIL] 错误: {status["last_error"]}</p>' if status['last_error'] else ''}
             </div>
             """, unsafe_allow_html=True)
             
             # 状态历史
             if self.status_history:
-                st.subheader("📈 状态历史")
+                st.subheader("[CHART] 状态历史")
                 history_data = []
                 for i, record in enumerate(self.status_history[-10:]):
                     history_data.append({
@@ -120,27 +120,27 @@ class VerificationMonitor:
     
     def _render_control_panel(self):
         """渲染控制面板"""
-        st.subheader("🎮 控制面板")
+        st.subheader("[GAME] 控制面板")
         
         # 开始/停止监控按钮
-        if st.button("▶️ 开始处理"):
+        if st.button("[START] 开始处理"):
             self._start_processing()
         
-        if st.button("⏹️ 停止监控"):
+        if st.button("[STOP] 停止监控"):
             self.monitoring_active = False
             st.success("监控已停止")
         
-        if st.button("🔄 刷新状态"):
+        if st.button("[RETRY] 刷新状态"):
             st.rerun()
         
         # 手动操作选项
         st.markdown("---")
-        st.markdown("**🛠️ 手动操作**")
+        st.markdown("**[TOOLS] 手动操作**")
         
-        if st.button("📧 手动发送邮箱验证码"):
+        if st.button("[EMAIL] 手动发送邮箱验证码"):
             st.info("请在浏览器中手动点击'发送至邮箱'按钮")
         
-        if st.button("✅ 确认验证码已输入"):
+        if st.button("[OK] 确认验证码已输入"):
             if self.current_handler:
                 # 强制进入确认状态
                 st.success("系统将检测验证码并自动点击确认按钮")
@@ -151,7 +151,7 @@ class VerificationMonitor:
             status = self.current_handler.get_current_status()
             
             if status['user_guidance']:
-                st.subheader("📋 用户操作指引")
+                st.subheader("[LIST] 用户操作指引")
                 
                 # 美化指引显示
                 st.markdown(f"""
@@ -161,7 +161,7 @@ class VerificationMonitor:
                 """, unsafe_allow_html=True)
                 
                 # 添加操作完成确认
-                if st.button("✅ 我已完成上述操作"):
+                if st.button("[OK] 我已完成上述操作"):
                     st.success("系统将继续自动处理...")
                     self._trigger_continue_processing()
     
@@ -170,7 +170,7 @@ class VerificationMonitor:
         if self.current_handler:
             stats = self.current_handler.get_performance_stats()
             
-            st.subheader("📊 选择器成功率统计")
+            st.subheader("[DATA] 选择器成功率统计")
             
             if stats['selector_stats']:
                 selector_data = []
@@ -190,16 +190,16 @@ class VerificationMonitor:
     def _get_status_display(self, state: str) -> str:
         """获取状态显示文本"""
         status_map = {
-            "detecting": "🔍 检测验证码弹窗",
-            "email_stage": "📧 邮箱验证阶段",
-            "phone_stage": "📱 电话验证阶段",
-            "otp_input": "🔢 等待验证码输入",
-            "confirming": "✅ 确认提交中",
-            "success": "🎉 处理成功",
-            "failed": "❌ 处理失败",
-            "user_required": "👤 需要用户操作"
+            "detecting": "[SEARCH] 检测验证码弹窗",
+            "email_stage": "[EMAIL] 邮箱验证阶段",
+            "phone_stage": "[PHONE] 电话验证阶段",
+            "otp_input": "[123] 等待验证码输入",
+            "confirming": "[OK] 确认提交中",
+            "success": "[DONE] 处理成功",
+            "failed": "[FAIL] 处理失败",
+            "user_required": "[USER] 需要用户操作"
         }
-        return status_map.get(state, f"❓ 未知状态: {state}")
+        return status_map.get(state, f"[?] 未知状态: {state}")
     
     def _get_progress_value(self, state: str) -> int:
         """获取进度值"""
@@ -240,16 +240,16 @@ class VerificationMonitor:
                 self.monitoring_active = False
                 
                 if result:
-                    st.success("🎉 验证码处理成功！")
+                    st.success("[DONE] 验证码处理成功！")
                 else:
-                    st.error("❌ 验证码处理失败，请查看详细信息")
+                    st.error("[FAIL] 验证码处理失败，请查看详细信息")
             
             # 启动后台处理线程
             processing_thread = threading.Thread(target=process_verification)
             processing_thread.daemon = True
             processing_thread.start()
             
-            st.info("⏳ 验证码处理已开始，请关注状态变化...")
+            st.info("[WAIT] 验证码处理已开始，请关注状态变化...")
     
     def _trigger_continue_processing(self):
         """触发继续处理"""
@@ -275,7 +275,7 @@ def create_verification_monitor_app():
     """创建验证码监控应用"""
     st.set_page_config(
         page_title="智能验证码监控",
-        page_icon="🔐",
+        page_icon="[LOCK]",
         layout="wide"
     )
     
@@ -294,11 +294,11 @@ def create_verification_monitor_app():
     if st.session_state.mock_handler:
         monitor.create_monitoring_interface(st.session_state.mock_handler)
     else:
-        st.warning("⚠️ 未检测到活跃的验证码处理器")
+        st.warning("[WARN] 未检测到活跃的验证码处理器")
         st.info("请先启动验证码处理流程")
         
         # 提供启动选项
-        if st.button("🚀 启动模拟验证码处理器"):
+        if st.button("[START] 启动模拟验证码处理器"):
             # 这里可以创建一个模拟的处理器用于演示
             st.success("验证码处理器启动成功！")
             st.rerun()

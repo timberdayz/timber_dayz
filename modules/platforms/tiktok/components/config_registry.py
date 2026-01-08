@@ -5,9 +5,9 @@ TikTok 组件配置注册中心
 
 统一管理各数据域的配置文件与组件映射，实现智能配置编辑。
 
-- get_config_path("analytics") → analytics_config.py 路径
-- get_config_class("products") → ProductsSelectors 配置类
-- get_navigation_target("products") → TargetPage.PRODUCTS_PERFORMANCE
+- get_config_path("analytics") -> analytics_config.py 路径
+- get_config_class("products") -> ProductsSelectors 配置类
+- get_navigation_target("products") -> TargetPage.PRODUCTS_PERFORMANCE
 
 注意：仅定义映射与便捷函数；禁止在导入阶段做任何 I/O 或实例化。
 """

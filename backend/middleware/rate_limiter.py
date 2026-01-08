@@ -79,16 +79,16 @@ def get_rate_limit_key(request: Request) -> str:
     return f"ip:{ip}"
 
 
-# ⭐ v4.19.5 重构：使用 Redis 作为存储后端（生产环境标准做法）
+# [*] v4.19.5 重构：使用 Redis 作为存储后端（生产环境标准做法）
 # 创建限流器
 # 注意：使用一个不存在的文件名避免自动读取.env文件（Windows GBK编码问题）
 # 配置通过环境变量或os.getenv()读取
 # 警告信息是正常的，不影响功能
 limiter = Limiter(
-    key_func=get_rate_limit_key,  # ⭐ v4.19.2: 使用用户级限流键
+    key_func=get_rate_limit_key,  # [*] v4.19.2: 使用用户级限流键
     default_limits=["100/minute"],  # 默认限制：每分钟100次
     enabled=os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true",  # 可通过环境变量禁用
-    storage_uri=settings.rate_limit_storage_uri,  # ⭐ v4.19.5: 使用环境感知的存储URI（Redis/内存）
+    storage_uri=settings.rate_limit_storage_uri,  # [*] v4.19.5: 使用环境感知的存储URI（Redis/内存）
     config_filename="__nonexistent_config__.env"  # 使用不存在的文件名
 )
 
@@ -99,7 +99,7 @@ def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
     
     返回429状态码和友好提示
     
-    ⭐ v4.19.2 改进:
+    [*] v4.19.2 改进:
     - 添加标准限流响应头
     - 提供更详细的错误信息
     """
@@ -186,8 +186,8 @@ def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
     )
 
 
-# ⭐ v4.19.2 新增：分级限流配置
-# ⭐ v4.19.3 修复：移除不存在的 premium 角色，添加实际系统角色（manager/operator/finance）
+# [*] v4.19.2 新增：分级限流配置
+# [*] v4.19.3 修复：移除不存在的 premium 角色，添加实际系统角色（manager/operator/finance）
 RATE_LIMIT_TIERS = {
     "admin": {
         "default": "200/minute",
@@ -222,7 +222,7 @@ RATE_LIMIT_TIERS = {
 }
 
 
-# ⭐ v4.19.4 优化：角色优先级配置（提高可维护性）
+# [*] v4.19.4 优化：角色优先级配置（提高可维护性）
 ROLE_PRIORITY = ["admin", "manager", "finance", "operator"]
 ROLE_ALIASES = {
     "admin": ["admin", "administrator", "管理员"],
@@ -236,14 +236,14 @@ def get_user_rate_limit_tier(user) -> str:
     """
     获取用户的限流等级
     
-    ⭐ v4.19.3 修复：
+    [*] v4.19.3 修复：
     - 同时检查 role_code 和 role_name
     - 移除不存在的 premium 角色
     - 添加实际系统角色（manager/operator/finance）
     - 实现角色优先级逻辑（admin > manager > finance > operator）
     - 改进降级机制：检查 is_superuser 标志
     
-    ⭐ v4.19.4 优化：
+    [*] v4.19.4 优化：
     - 添加空字符串检查（role_code 和 role_name 不能为空字符串或仅空白字符）
     - 添加角色对象类型检查（支持字典和对象两种格式）
     - 优化多角色优先级实现（使用优先级列表，提高可维护性）
@@ -270,7 +270,7 @@ def get_user_rate_limit_tier(user) -> str:
         role_names = []
         
         for role in roles:
-            # ⭐ v4.19.4 优化：支持字典和对象两种格式
+            # [*] v4.19.4 优化：支持字典和对象两种格式
             if isinstance(role, dict):
                 role_code = role.get("role_code", "")
                 role_name = role.get("role_name", "") or role.get("name", "")
@@ -283,13 +283,13 @@ def get_user_rate_limit_tier(user) -> str:
             else:
                 continue
             
-            # ⭐ v4.19.4 优化：添加空字符串检查（不能为空字符串或仅空白字符）
+            # [*] v4.19.4 优化：添加空字符串检查（不能为空字符串或仅空白字符）
             if role_code and role_code.strip():
                 role_codes.append(role_code.lower().strip())
             if role_name and role_name.strip():
                 role_names.append(role_name.lower().strip())
         
-        # ⭐ v4.19.4 优化：使用优先级列表，提高可维护性
+        # [*] v4.19.4 优化：使用优先级列表，提高可维护性
         for priority_role in ROLE_PRIORITY:
             aliases = ROLE_ALIASES[priority_role]
             if any(alias in role_codes or alias in role_names for alias in aliases):
@@ -307,7 +307,7 @@ def get_user_rate_limit_tier(user) -> str:
     return "normal"
 
 
-# ⭐ v4.19.4 新增：数据库配置缓存（Phase 3）
+# [*] v4.19.4 新增：数据库配置缓存（Phase 3）
 _db_config_cache: Optional[Dict[str, Dict[str, str]]] = None
 _db_config_cache_timestamp: Optional[datetime] = None
 
@@ -316,7 +316,7 @@ def get_rate_limit_for_endpoint(user, endpoint_type: str = "default") -> str:
     """
     获取指定端点类型的限流值
     
-    ⭐ v4.19.4 更新：支持从数据库读取配置（Phase 3）
+    [*] v4.19.4 更新：支持从数据库读取配置（Phase 3）
     - 优先使用数据库配置（如果存在）
     - 降级到默认配置（RATE_LIMIT_TIERS）
     
@@ -329,7 +329,7 @@ def get_rate_limit_for_endpoint(user, endpoint_type: str = "default") -> str:
     """
     tier = get_user_rate_limit_tier(user)
     
-    # ⭐ v4.19.4 新增：尝试从数据库配置读取
+    # [*] v4.19.4 新增：尝试从数据库配置读取
     if _db_config_cache is not None:
         tier_limits = _db_config_cache.get(tier)
         if tier_limits:
@@ -346,7 +346,7 @@ async def refresh_rate_limit_config_cache(db: AsyncSession):
     """
     刷新限流配置缓存（从数据库加载）
     
-    ⭐ v4.19.4 新增：Phase 3 数据库配置支持
+    [*] v4.19.4 新增：Phase 3 数据库配置支持
     
     Args:
         db: 数据库会话（异步）
@@ -364,14 +364,14 @@ async def refresh_rate_limit_config_cache(db: AsyncSession):
         _db_config_cache = None
 
 
-# ⭐ v4.19.5 重构：基于角色的动态限流装饰器（使用 slowapi 标准接口）
+# [*] v4.19.5 重构：基于角色的动态限流装饰器（使用 slowapi 标准接口）
 def role_based_rate_limit(endpoint_type: str = "default"):
     """
     基于角色的动态限流装饰器（重构版）
     
     根据用户角色动态获取限流值，使用 slowapi 标准接口实现。
     
-    ⭐ v4.19.5 重构：
+    [*] v4.19.5 重构：
     - 使用 slowapi 的 limiter.limit() 装饰器（标准接口）
     - 通过动态创建装饰器实现动态限流
     - 完全符合 slowapi 设计规范
@@ -434,7 +434,7 @@ def role_based_rate_limit(endpoint_type: str = "default"):
             # 获取限流值（动态）
             limit_str = get_rate_limit_for_endpoint(user, endpoint_type)
             
-            # ✅ v4.19.5 重构：使用 slowapi 标准接口实现动态限流
+            # [OK] v4.19.5 重构：使用 slowapi 标准接口实现动态限流
             # 由于 slowapi 的 @limiter.limit() 是静态装饰器，我们使用改进的存储访问方式
             # 但通过正确访问 slowapi 的存储后端来实现
             try:
@@ -465,7 +465,7 @@ def role_based_rate_limit(endpoint_type: str = "default"):
                     window_start = current_time - (current_time % period_seconds)
                     window_key = f"{storage_key}:{window_start}"
                     
-                    # ✅ v4.19.5 改进：正确访问 slowapi 存储后端
+                    # [OK] v4.19.5 改进：正确访问 slowapi 存储后端
                     # slowapi 的存储后端可能通过不同方式暴露
                     storage = None
                     try:
@@ -591,7 +591,7 @@ def role_based_rate_limit(endpoint_type: str = "default"):
                     window_start = current_time - (current_time % period_seconds)
                     window_key = f"{storage_key}:{window_start}"
                     
-                    # ✅ v4.19.5 改进：正确访问 slowapi 存储后端
+                    # [OK] v4.19.5 改进：正确访问 slowapi 存储后端
                     storage = None
                     try:
                         if hasattr(limiter, 'storage'):
@@ -641,7 +641,7 @@ async def _cleanup_storage_key(storage, key: str, ttl: int):
         pass
 
 
-# ⭐ v4.19.5 新增：Redis 连接检查函数
+# [*] v4.19.5 新增：Redis 连接检查函数
 async def check_redis_connection() -> bool:
     """
     检查 Redis 连接是否可用

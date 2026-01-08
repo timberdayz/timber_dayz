@@ -151,12 +151,12 @@ class VpnBypassManager:
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode == 0:
                     success_count += 1
-                    logger.success(f"✅ {domain} ({ip}) → {original_gateway}")
+                    logger.success(f"[OK] {domain} ({ip}) -> {original_gateway}")
                 else:
-                    logger.warning(f"❌ {domain} 路由添加失败: {result.stderr}")
+                    logger.warning(f"[FAIL] {domain} 路由添加失败: {result.stderr}")
                     
             except Exception as e:
-                logger.warning(f"❌ {domain} 处理失败: {e}")
+                logger.warning(f"[FAIL] {domain} 处理失败: {e}")
         
         logger.info(f"绕过路由创建完成: {success_count}/{len(target_domains)} 成功")
         return success_count > 0
@@ -203,38 +203,38 @@ class VpnBypassManager:
             # 检测环境
             result = self.test_bypass_effectiveness()
             if result.get("status") != "available":
-                logger.info("🔗 本地网络环境，无需路由绕过")
+                logger.info("[LINK] 本地网络环境，无需路由绕过")
                 return True
             
             # 静默创建绕过路由
             success = self.create_bypass_routes()
             if success:
-                logger.success("✅ 已应用中国网站VPN绕过路由")
+                logger.success("[OK] 已应用中国网站VPN绕过路由")
                 return True
             else:
-                logger.warning("⚠️ VPN绕过路由配置失败")
+                logger.warning("[WARN] VPN绕过路由配置失败")
                 return False
                 
         except Exception as e:
-            logger.warning(f"⚠️ 应用中国路由失败: {e}")
+            logger.warning(f"[WARN] 应用中国路由失败: {e}")
             return False
 
 def main():
     """命令行测试入口"""
-    print("🌐 VPN绕过管理器测试")
+    print("[WEB] VPN绕过管理器测试")
     print("=" * 40)
     
     manager = VpnBypassManager()
     
     # 测试网络环境
-    print("\n🔍 网络环境检测:")
+    print("\n[SEARCH] 网络环境检测:")
     test_results = manager.test_bypass_effectiveness()
     
     for key, value in test_results.items():
         print(f"  {key}: {value}")
     
     # 获取绕过配置
-    print("\n⚙️  绕过配置:")
+    print("\n[GEAR]  绕过配置:")
     bypass_config = manager.get_vpn_bypass_proxy_config()
     
     for key, value in bypass_config.items():
@@ -246,12 +246,12 @@ def main():
         if choice == 'y':
             success = manager.create_bypass_routes()
             if success:
-                print("✅ 绕过路由创建成功！")
-                print("💡 现在妙手ERP等中国网站应该使用原始中国IP访问")
+                print("[OK] 绕过路由创建成功！")
+                print("[TIP] 现在妙手ERP等中国网站应该使用原始中国IP访问")
             else:
-                print("❌ 绕过路由创建失败")
+                print("[FAIL] 绕过路由创建失败")
     else:
-        print("⚠️  绕过功能当前不可用")
+        print("[WARN]  绕过功能当前不可用")
 
 if __name__ == "__main__":
     main() 

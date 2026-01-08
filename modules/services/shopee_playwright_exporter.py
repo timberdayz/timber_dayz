@@ -46,8 +46,8 @@ class ShopeePlaywrightExporter:
         from modules.utils.persistent_browser_manager import PersistentBrowserManager
 
         # 兼容两种传参：
-        # 1) Playwright 实例 → 创建新的 PersistentBrowserManager
-        # 2) PersistentBrowserManager 实例 → 直接复用，避免重复初始化（减少“初始化会话管理器”日志）
+        # 1) Playwright 实例 -> 创建新的 PersistentBrowserManager
+        # 2) PersistentBrowserManager 实例 -> 直接复用，避免重复初始化（减少“初始化会话管理器”日志）
         if hasattr(playwright, 'get_or_create_persistent_context') and hasattr(playwright, 'playwright'):
             # 视为 PersistentBrowserManager
             self.pb = playwright
@@ -104,7 +104,7 @@ class ShopeePlaywrightExporter:
                 flags = {}
             use_enhanced = bool(flags.get("use_enhanced_login", True))
             if use_enhanced:
-                # 走“🤖 自动登录流程修正”同源实现，获取更强的自适应与详尽日志
+                # 走“[BOT] 自动登录流程修正”同源实现，获取更强的自适应与详尽日志
                 try:
                     from modules.utils.enhanced_recording_wizard import EnhancedRecordingWizard
                     _wiz = EnhancedRecordingWizard()
@@ -157,7 +157,7 @@ class ShopeePlaywrightExporter:
                 logger.warning('检测到未登录，但账号未提供用户名/密码，无法自动登录')
                 return
 
-            logger.info('🔐 检测到登录页，尝试自动登录…')
+            logger.info('[LOCK] 检测到登录页，尝试自动登录...')
             # 填写用户名
             for sel in ['input[name="loginKey"]', 'input[name="username"]', 'input[placeholder*="邮箱"]', 'input[placeholder*="手机"]', 'input[type="text"]']:
                 try:
@@ -206,7 +206,7 @@ class ShopeePlaywrightExporter:
                                 except Exception:
                                     loc.click(force=True)
                                 tried = True
-                                logger.info('✅ 已尝试直接勾选“记住我”复选框')
+                                logger.info('[OK] 已尝试直接勾选“记住我”复选框')
                                 break
                         except Exception:
                             continue
@@ -217,7 +217,7 @@ class ShopeePlaywrightExporter:
                             if lab and lab.count() > 0:
                                 lab.first.click(force=True)
                                 tried = True
-                                logger.info('✅ 通过文本点击触发“记住我”')
+                                logger.info('[OK] 通过文本点击触发“记住我”')
                         except Exception:
                             pass
 
@@ -238,14 +238,14 @@ class ShopeePlaywrightExporter:
                             pass
 
                     if _is_checked():
-                        logger.success('✅ “记住我”已处于勾选状态')
+                        logger.success('[OK] “记住我”已处于勾选状态')
                     else:
                         if tried:
-                            logger.warning('⚠️ 已尝试点击“记住我”，但状态未改变，继续登录（不阻塞）')
+                            logger.warning('[WARN] 已尝试点击“记住我”，但状态未改变，继续登录（不阻塞）')
                         else:
-                            logger.debug('ℹ️ 未找到“记住我”元素，跳过勾选步骤')
+                            logger.debug('[i] 未找到“记住我”元素，跳过勾选步骤')
                 else:
-                    logger.info('ℹ️ “记住我”已是勾选状态')
+                    logger.info('[i] “记住我”已是勾选状态')
             except Exception:
                 logger.debug('勾选“记住我”过程忽略异常')
 
@@ -310,16 +310,16 @@ class ShopeePlaywrightExporter:
                     from modules.utils.smart_verification_handler_v2 import SmartVerificationHandlerV2
 
                     if _has_verification_modal_anywhere():
-                        logger.info('🔐 检测到验证码弹窗，启动验证码处理流程…')
+                        logger.info('[LOCK] 检测到验证码弹窗，启动验证码处理流程...')
                     else:
-                        logger.info('🔐 未显式检测到验证码弹窗，但仍停留在登录页，尝试走验证码处理兜底…')
+                        logger.info('[LOCK] 未显式检测到验证码弹窗，但仍停留在登录页，尝试走验证码处理兜底...')
 
                     handler = SmartVerificationHandlerV2(page, account)
                     handled = handler.handle_verification()
                     page.wait_for_timeout(2000)
 
                     if not self._is_on_login_page(page):
-                        logger.info('✅ 自动登录+验证码处理完成（检测通过）')
+                        logger.info('[OK] 自动登录+验证码处理完成（检测通过）')
                         return
 
                     if handled:
@@ -329,7 +329,7 @@ class ShopeePlaywrightExporter:
                 except Exception as ve:
                     logger.warning(f'验证码处理过程中出现异常: {ve}')
             else:
-                logger.info('✅ 自动登录完成（检测通过）')
+                logger.info('[OK] 自动登录完成（检测通过）')
         except Exception as e:
             logger.debug(f'_ensure_shopee_logged_in 异常: {e}')
 
@@ -477,7 +477,7 @@ class ShopeePlaywrightExporter:
 
             # 根据时间范围选择合适的选项
             time_option = self._determine_traffic_time_option(start_date, end_date)
-            logger.info(f"🎯 流量表现时间选择: {time_option}")
+            logger.info(f"[TARGET] 流量表现时间选择: {time_option}")
 
             # 执行时间选择（如需要）并进行校验
             if time_option != "昨天":
@@ -485,14 +485,14 @@ class ShopeePlaywrightExporter:
                     return False, f"时间选择失败: {time_option}", None
                 page.wait_for_timeout(800)
                 if not self._verify_traffic_time_selection(page, start_date, end_date, time_option):
-                    logger.info("⏳ 时间未生效，重试一次时间选择…")
+                    logger.info("[WAIT] 时间未生效，重试一次时间选择...")
                     if not self._execute_traffic_time_selection(page, time_option, diag_dir, enable_recording_mode):
                         return False, f"时间选择失败(重试): {time_option}", None
                     page.wait_for_timeout(800)
                     if not self._verify_traffic_time_selection(page, start_date, end_date, time_option):
                         return False, "时间选择未生效，请检查页面或稍后重试", None
             else:
-                logger.info("✅ 页面默认为'昨天'，跳过时间选择操作")
+                logger.info("[OK] 页面默认为'昨天'，跳过时间选择操作")
 
             # 等待数据加载
             page.wait_for_timeout(1500)
@@ -513,7 +513,7 @@ class ShopeePlaywrightExporter:
                     shutil.move(str(suggested), str(target_path))
             download_path = target_path
 
-            logger.info(f"✅ 流量表现数据导出成功: {download_path}")
+            logger.info(f"[OK] 流量表现数据导出成功: {download_path}")
             return True, f"导出成功，文件保存至: {download_path}", download_path
 
         except Exception as e:
@@ -559,7 +559,7 @@ class ShopeePlaywrightExporter:
     def _execute_traffic_time_selection(self, page, time_option: str, diag_dir: Path, enable_recording_mode: bool) -> bool:
         """执行流量表现页面的时间选择"""
         try:
-            logger.info(f"🎬 开始流量表现时间选择，目标选项: {time_option}")
+            logger.info(f"[ACTION] 开始流量表现时间选择，目标选项: {time_option}")
 
             # 使用配方执行器
             from modules.services.recipe_executor import RecipeExecutor
@@ -568,10 +568,10 @@ class ShopeePlaywrightExporter:
             # 执行时间选择配方
             success = executor.execute_traffic_date_recipe(page, time_option)
             if success:
-                logger.info(f"✅ 时间选择成功: {time_option}")
+                logger.info(f"[OK] 时间选择成功: {time_option}")
                 return True
             else:
-                logger.error(f"❌ 时间选择失败: {time_option}")
+                logger.error(f"[FAIL] 时间选择失败: {time_option}")
                 return False
 
         except Exception as e:
@@ -595,20 +595,20 @@ class ShopeePlaywrightExporter:
                 s = dt.fromtimestamp(start_ms / 1000, tz).date().isoformat()
                 e = (dt.fromtimestamp(end_ms / 1000, tz) - timedelta(days=1)).date().isoformat()
                 if s == start_date and e == end_date:
-                    logger.info("✅ 时间范围校验通过(UI)")
+                    logger.info("[OK] 时间范围校验通过(UI)")
                     return True
 
             # 回退：基于时间显示文本做关键字校验
             info = (self._read_time_display(page) or {})
             val = (info.get("value") or info.get("text") or "").strip()
             if time_option == "昨天" and ("昨天" in val or "Yesterday" in val):
-                logger.info("✅ 时间范围校验通过(文本=昨天)")
+                logger.info("[OK] 时间范围校验通过(文本=昨天)")
                 return True
             if "7" in time_option and any(k in val for k in ["过去7", "近7", "Last 7", "7天", "7 Days", "7D"]):
-                logger.info("✅ 时间范围校验通过(文本=过去7天)")
+                logger.info("[OK] 时间范围校验通过(文本=过去7天)")
                 return True
             if "30" in time_option and any(k in val for k in ["过去30", "近30", "Last 30", "30天", "30 Days", "30D"]):
-                logger.info("✅ 时间范围校验通过(文本=过去30天)")
+                logger.info("[OK] 时间范围校验通过(文本=过去30天)")
                 return True
 
             logger.warning(f"时间范围校验未通过，显示='{val}'，期望={start_date}~{end_date}({time_option})")
@@ -620,7 +620,7 @@ class ShopeePlaywrightExporter:
     def _execute_traffic_export(self, page, diag_dir: Path, enable_recording_mode: bool) -> Tuple[bool, str]:
         """执行流量表现页面的导出操作"""
         try:
-            logger.info("🎬 开始流量表现数据导出...")
+            logger.info("[ACTION] 开始流量表现数据导出...")
 
             # 查找导出按钮
             export_selectors = [
@@ -636,7 +636,7 @@ class ShopeePlaywrightExporter:
                 try:
                     element = page.locator(selector).first
                     if element.count() > 0 and element.is_visible():
-                        logger.info(f"🎯 点击导出按钮: {selector}")
+                        logger.info(f"[TARGET] 点击导出按钮: {selector}")
                         element.click()
                         export_clicked = True
                         break
@@ -650,7 +650,7 @@ class ShopeePlaywrightExporter:
             # 等待导出处理
             page.wait_for_timeout(2000)
 
-            logger.info("✅ 导出操作执行成功")
+            logger.info("[OK] 导出操作执行成功")
             return True, "导出操作成功"
 
         except Exception as e:
@@ -714,7 +714,7 @@ class ShopeePlaywrightExporter:
 
         try:
             # 跳过登录/导航/日期设置，直接执行导出流程
-            logger.info("🎯 纯导出模式：跳过登录/导航/日期设置，直接导出")
+            logger.info("[TARGET] 纯导出模式：跳过登录/导航/日期设置，直接导出")
 
             # 诊断目录
             diag_dir = out_dir / ".diag"
@@ -760,23 +760,23 @@ class ShopeePlaywrightExporter:
                             pass
                         return True, ui_msg, target_path
                     else:
-                        logger.warning(f"⚠️ UI导出返回成功但文件不存在: {target_path}")
+                        logger.warning(f"[WARN] UI导出返回成功但文件不存在: {target_path}")
                         # 继续尝试API方案
             except Exception as e:
                 logger.debug(f"UI导出流程未成功，回退到API方案: {e}")
 
             # API备选路径（可配置开关，默认禁用避免timestamp error）
             if not enable_api_fallback:
-                logger.info("🚫 API备选已禁用，导出失败")
+                logger.info("[NO] API备选已禁用，导出失败")
                 return False, "UI导出失败且API备选已禁用", None
 
-            logger.info("🔄 启用API备选路径...")
-            # 在浏览器上下文内发起 export → 轮询 report → 生成下载链接
+            logger.info("[RETRY] 启用API备选路径...")
+            # 在浏览器上下文内发起 export -> 轮询 report -> 生成下载链接
             export_url = f"{self.base}/api/mydata/cnsc/shop/v2/product/performance/export/"
             download_api = f"{self.base}/api/v3/settings/download_report/"
 
             # 指标勾选已禁用：导出获取全量数据
-            logger.info("📊 跳过指标勾选（导出获取全量数据）")
+            logger.info("[DATA] 跳过指标勾选（导出获取全量数据）")
 
             # 优先使用UI读取到的秒级时间戳；若UI不可用，回退到入参计算（严格 +08:00，右开区间）
             try:
@@ -1020,7 +1020,7 @@ class ShopeePlaywrightExporter:
         end_date: str,
         download_path: str = None,
     ) -> Tuple[bool, str, Optional[object], Optional[object]]:
-        """准备导出上下文：登录 → 导航 → 日期设置。
+        """准备导出上下文：登录 -> 导航 -> 日期设置。
 
         Args:
             download_path: 可选的下载目录路径
@@ -1090,7 +1090,7 @@ class ShopeePlaywrightExporter:
         )
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # 准备步骤：登录 → 导航 → 日期设置（设置下载目录）
+        # 准备步骤：登录 -> 导航 -> 日期设置（设置下载目录）
         success, msg, page, ctx = self._prepare_export_context(
             account, shop, start_date, end_date, str(out_dir)
         )
@@ -1128,13 +1128,13 @@ class ShopeePlaywrightExporter:
 
             # 录制模式：启用tracing、注入监听器、打开Inspector
             if enable_recording_mode:
-                logger.info("🎬 启动录制模式...")
+                logger.info("[ACTION] 启动录制模式...")
 
                 # 启动tracing
                 trace_path = diag_dir / f"{ts}_recording_trace.zip"
                 try:
                     ctx.tracing.start(screenshots=True, snapshots=True, sources=True)
-                    logger.info(f"📹 Playwright tracing已启动，将保存到: {trace_path}")
+                    logger.info(f"[VID] Playwright tracing已启动，将保存到: {trace_path}")
                 except Exception as e:
                     logger.warning(f"启动tracing失败: {e}")
 
@@ -1142,7 +1142,7 @@ class ShopeePlaywrightExporter:
                 self._install_recording_monitors(page)
 
                 # 显示录制指引并立即打开Inspector
-                print("\n🎯 录制模式已启动：")
+                print("\n[TARGET] 录制模式已启动：")
                 print("1. 页面已导航到商品表现页面")
                 print("2. 日期控件监听器已安装（支持iframe）")
                 print("3. 正在打开Playwright Inspector...")
@@ -1151,27 +1151,27 @@ class ShopeePlaywrightExporter:
                 print("6. 系统将自动生成录制配方和trace文件")
 
                 # 立即打开Inspector进行录制
-                logger.info("🔍 打开Playwright Inspector进行录制...")
+                logger.info("[SEARCH] 打开Playwright Inspector进行录制...")
                 page.pause()
 
                 # 录制完成后的处理
-                logger.info("📊 录制完成，正在生成配方...")
+                logger.info("[DATA] 录制完成，正在生成配方...")
                 self.generate_date_picker_recipe(page, diag_dir, ts)
 
                 # 停止tracing
                 try:
                     ctx.tracing.stop(path=str(trace_path))
-                    logger.info(f"✅ Tracing已保存: {trace_path}")
+                    logger.info(f"[OK] Tracing已保存: {trace_path}")
                 except Exception as e:
                     logger.warning(f"停止tracing失败: {e}")
 
                 # 不执行自动时间设置，因为用户已手动操作
-                logger.info("🎯 录制模式：跳过自动时间设置（用户已手动操作）")
+                logger.info("[TARGET] 录制模式：跳过自动时间设置（用户已手动操作）")
 
             # 对比诊断模式：先保存 before 快照
             elif enable_compare_diagnostics:
                 # 日期控件探测
-                logger.info("🔍 执行日期控件探测...")
+                logger.info("[SEARCH] 执行日期控件探测...")
                 date_picker_info = self.inspect_date_picker(page)
                 self.install_date_picker_monitor(page)
 
@@ -1182,7 +1182,7 @@ class ShopeePlaywrightExporter:
                     self._install_mutation_observer(page)
                 except Exception as _:
                     pass
-                print("\n🔧 对比诊断模式：")
+                print("\n[TOOL] 对比诊断模式：")
                 print("请手动完成以下操作：")
                 print("1. 切换到'按周'模式")
                 print("2. 设置日期范围为 2025-08-25 ~ 2025-08-31")
@@ -1200,7 +1200,7 @@ class ShopeePlaywrightExporter:
                 # 获取日期控件交互事件
                 events = self.get_date_picker_events(page)
                 if events:
-                    logger.info(f"📊 捕获到 {len(events)} 个日期控件交互事件")
+                    logger.info(f"[DATA] 捕获到 {len(events)} 个日期控件交互事件")
                     for event in events[-3:]:  # 显示最后3个事件
                         logger.info(f"  {event['type']}: {event.get('details', {})}")
 
@@ -1219,7 +1219,7 @@ class ShopeePlaywrightExporter:
                 # 标准模式：尝试使用录制配方，失败则回退到传统方法
                 recipe_success = self._try_recipe_automation(page, start_date, end_date)
                 if not recipe_success:
-                    logger.info("📋 配方自动化失败，回退到传统时间设置方法")
+                    logger.info("[LIST] 配方自动化失败，回退到传统时间设置方法")
                     self._set_weekly_timerange(page, start_date, end_date)
                 else:
                     # 配方自动化成功，设置标记跳过后续日期控件探测
@@ -1250,10 +1250,10 @@ class ShopeePlaywrightExporter:
         # 指标勾选应当发生在导出之前（标准模式）
         # 在标准模式下也执行日期控件探测（但配方自动化成功时跳过）
         if not enable_compare_diagnostics and not enable_recording_mode and not recipe_automation_success:
-            logger.info("🔍 执行日期控件探测...")
+            logger.info("[SEARCH] 执行日期控件探测...")
             self.inspect_date_picker(page)
         # 指标勾选已禁用：导出获取全量数据
-        logger.info("📊 标准模式：跳过指标勾选（导出获取全量数据）")
+        logger.info("[DATA] 标准模式：跳过指标勾选（导出获取全量数据）")
 
         # 先尝试“页面交互式导出”（点击页面上的导出/下载按钮并捕获下载）
         try:
@@ -1279,16 +1279,16 @@ class ShopeePlaywrightExporter:
 
         # API备选路径（可配置开关，默认禁用避免timestamp error）
         if not enable_api_fallback:
-            logger.info("🚫 API备选已禁用，导出失败")
+            logger.info("[NO] API备选已禁用，导出失败")
             return False, "UI导出失败且API备选已禁用", None
 
-        logger.info("🔄 启用API备选路径...")
-        # 在浏览器上下文内发起 export → 轮询 report → 生成下载链接
+        logger.info("[RETRY] 启用API备选路径...")
+        # 在浏览器上下文内发起 export -> 轮询 report -> 生成下载链接
         export_url = f"{self.base}/api/mydata/cnsc/shop/v2/product/performance/export/"
         download_api = f"{self.base}/api/v3/settings/download_report/"
 
         # 指标勾选已禁用：导出获取全量数据
-        logger.info("📊 跳过指标勾选（导出获取全量数据）")
+        logger.info("[DATA] 跳过指标勾选（导出获取全量数据）")
         if False:  # 指标勾选已禁用
             try:
                 self._select_metrics(page, metrics)
@@ -1345,7 +1345,7 @@ class ShopeePlaywrightExporter:
         start_ts_fallback = start_ts
         end_ts_fallback = end_ts
 
-        logger.info("发起导出请求（页面上下文）…")
+        logger.info("发起导出请求（页面上下文）...")
         script_export = """
         async ({export_url, download_api, shop_id, start_ts, end_ts}) => {
           const p = new URL(export_url);
@@ -1608,7 +1608,7 @@ class ShopeePlaywrightExporter:
                     shop_id = shop_id_match.group(1)
                     recipe = self.load_date_picker_recipe(shop_id)
                     if recipe:
-                        logger.info("🎬 尝试使用配方复刻打开日期控件")
+                        logger.info("[ACTION] 尝试使用配方复刻打开日期控件")
                         if self.replay_date_picker_recipe(page, recipe):
                             page.wait_for_timeout(500)
                             if is_open():
@@ -1978,7 +1978,7 @@ class ShopeePlaywrightExporter:
     def _close_notification_modal(self, page):
         """检查并关闭可能的通知弹窗"""
         try:
-            logger.info("🔍 检查是否有通知弹窗需要关闭...")
+            logger.info("[SEARCH] 检查是否有通知弹窗需要关闭...")
 
             # 等待页面稳定
             page.wait_for_timeout(1000)
@@ -2018,7 +2018,7 @@ class ShopeePlaywrightExporter:
                     # 检查元素是否存在且可见
                     element = page.locator(selector).first
                     if element.count() > 0 and element.is_visible():
-                        logger.info(f"🎯 发现通知弹窗，点击关闭按钮: {selector}")
+                        logger.info(f"[TARGET] 发现通知弹窗，点击关闭按钮: {selector}")
                         element.click()
                         page.wait_for_timeout(500)  # 等待弹窗关闭动画
                         modal_closed = True
@@ -2028,10 +2028,10 @@ class ShopeePlaywrightExporter:
                     continue
 
             if modal_closed:
-                logger.info("✅ 通知弹窗已关闭")
+                logger.info("[OK] 通知弹窗已关闭")
                 page.wait_for_timeout(1000)  # 等待页面稳定
             else:
-                logger.debug("📝 未发现需要关闭的通知弹窗")
+                logger.debug("[NOTE] 未发现需要关闭的通知弹窗")
 
         except Exception as e:
             logger.debug(f"检查通知弹窗失败: {e}")
@@ -2502,7 +2502,7 @@ class ShopeePlaywrightExporter:
 
     def _select_metrics(self, page: "Page", metrics: List[str]) -> None:
         """指标勾选已禁用：导出获取全量数据"""
-        logger.info("📊 指标勾选已禁用：导出获取全量数据")
+        logger.info("[DATA] 指标勾选已禁用：导出获取全量数据")
         return
 
         # 确保“选择指标”区域已打开并可见
@@ -2545,11 +2545,11 @@ class ShopeePlaywrightExporter:
                                     arg=item.element_handle(),
                                     timeout=3000,
                                 )
-                                logger.info(f"✓ 已勾选指标: {target_text}")
+                                logger.info(f"[OK] 已勾选指标: {target_text}")
                             except Exception:
-                                logger.info(f"✓ 点击指标: {target_text} (状态待确认)")
+                                logger.info(f"[OK] 点击指标: {target_text} (状态待确认)")
                         else:
-                            logger.info(f"✓ 指标已勾选: {target_text}")
+                            logger.info(f"[OK] 指标已勾选: {target_text}")
                         continue
                 except Exception as e:
                     logger.debug(f"multi-selector 方法失败 {metric}: {e}")
@@ -2571,9 +2571,9 @@ class ShopeePlaywrightExporter:
                                     )
                                 except Exception:
                                     pass
-                                logger.info(f"✓ 通过模糊匹配勾选: {target_text}")
+                                logger.info(f"[OK] 通过模糊匹配勾选: {target_text}")
                             else:
-                                logger.info(f"✓ 模糊匹配指标已勾选: {target_text}")
+                                logger.info(f"[OK] 模糊匹配指标已勾选: {target_text}")
                             continue
                 except Exception as e:
                     logger.debug(f"模糊匹配方法失败 {metric}: {e}")
@@ -2586,16 +2586,16 @@ class ShopeePlaywrightExporter:
                         if container.count() > 0:
                             container.scroll_into_view_if_needed(timeout=1000)
                             container.click()
-                            logger.info(f"✓ 通过文本容器点击: {target_text}")
+                            logger.info(f"[OK] 通过文本容器点击: {target_text}")
                             continue
                         label.click()
-                        logger.info(f"✓ 通过文本点击: {target_text}")
+                        logger.info(f"[OK] 通过文本点击: {target_text}")
                         continue
                 except Exception as e:
                     logger.debug(f"文本点击方法失败 {metric}: {e}")
 
             except Exception as e:
-                logger.warning(f"⚠ 勾选指标失败 {metric}: {e}")
+                logger.warning(f"[WARN] 勾选指标失败 {metric}: {e}")
 
     def _confirm_metrics_selection(self, page: "Page") -> None:
         """在指标选择面板内点击“确定/完成/应用”之类的按钮，确保勾选生效。"""
@@ -2699,7 +2699,7 @@ class ShopeePlaywrightExporter:
     def inspect_date_picker(self, page: "Page") -> Dict:
         """日期控件探测器：分析页面上的日期选择控件类型与状态"""
         try:
-            logger.info("🔍 开始日期控件探测...")
+            logger.info("[SEARCH] 开始日期控件探测...")
 
             # 注入探测脚本
             script = """
@@ -2768,11 +2768,11 @@ class ShopeePlaywrightExporter:
             result = page.evaluate(script)
 
             # 格式化输出
-            logger.info("📊 日期控件探测结果:")
+            logger.info("[DATA] 日期控件探测结果:")
             logger.info(f"  控件类型: {result['controlType']}")
-            logger.info(f"  快捷按钮: {'✓' if result['hasShortcuts'] else '✗'}")
-            logger.info(f"  输入框: {'✓' if result['hasInputs'] else '✗'}")
-            logger.info(f"  日历表格: {'✓' if result['hasCalendar'] else '✗'}")
+            logger.info(f"  快捷按钮: {'[OK]' if result['hasShortcuts'] else '[FAIL]'}")
+            logger.info(f"  输入框: {'[OK]' if result['hasInputs'] else '[FAIL]'}")
+            logger.info(f"  日历表格: {'[OK]' if result['hasCalendar'] else '[FAIL]'}")
 
             if result['shortcuts']:
                 logger.info(f"  可用快捷项: {result['shortcuts']}")
@@ -2908,7 +2908,7 @@ class ShopeePlaywrightExporter:
                 frame_info = f" (URL: {url[:50]}...)" if len(url) > 50 else f" (URL: {url})"
             except:
                 frame_info = ""
-            logger.info(f"🎯 日期控件录制监听器已安装{frame_info}")
+            logger.info(f"[TARGET] 日期控件录制监听器已安装{frame_info}")
 
         except Exception as e:
             logger.error(f"安装日期控件监听器失败: {e}")
@@ -2916,7 +2916,7 @@ class ShopeePlaywrightExporter:
     def _install_recording_monitors(self, page: "Page") -> None:
         """为录制模式安装全局监听器（支持iframe）"""
         try:
-            logger.info("🎯 安装录制模式监听器（支持iframe）...")
+            logger.info("[TARGET] 安装录制模式监听器（支持iframe）...")
 
             # 为主页面安装监听器
             self.install_date_picker_monitor(page)
@@ -2952,7 +2952,7 @@ class ShopeePlaywrightExporter:
                     logger.debug(f"处理新frame失败: {e}")
 
             page.on("frameattached", handle_frame_attached)
-            logger.info("✅ 录制监听器安装完成（包括iframe支持）")
+            logger.info("[OK] 录制监听器安装完成（包括iframe支持）")
 
         except Exception as e:
             logger.error(f"安装录制监听器失败: {e}")
@@ -2969,10 +2969,10 @@ class ShopeePlaywrightExporter:
             success = executor.execute_date_picker_recipe(page, target_option=target_option)
 
             if success:
-                logger.info(f"🎬 配方自动化成功：已选择 {target_option}")
+                logger.info(f"[ACTION] 配方自动化成功：已选择 {target_option}")
                 return True
             else:
-                logger.warning("📋 配方自动化失败")
+                logger.warning("[LIST] 配方自动化失败")
                 return False
 
         except Exception as e:
@@ -3080,7 +3080,7 @@ class ShopeePlaywrightExporter:
                 encoding="utf-8"
             )
 
-            logger.info(f"📝 日期控件操作配方已生成: {recipe_file}")
+            logger.info(f"[NOTE] 日期控件操作配方已生成: {recipe_file}")
             logger.info(f"   包含 {len(recipe['steps'])} 个操作步骤")
 
         except Exception as e:
@@ -3108,7 +3108,7 @@ class ShopeePlaywrightExporter:
             latest_path = max(candidates, key=lambda p: os.path.getmtime(p))
             recipe_text = Path(latest_path).read_text(encoding="utf-8")
             recipe = json.loads(recipe_text)
-            logger.info(f"📖 已加载日期控件配方: {latest_path}")
+            logger.info(f"[BOOK] 已加载日期控件配方: {latest_path}")
             return recipe
 
         except Exception as e:
@@ -3123,7 +3123,7 @@ class ShopeePlaywrightExporter:
                 logger.warning("配方中无操作步骤")
                 return False
 
-            logger.info(f"🎬 开始复刻日期控件操作，共 {len(steps)} 个步骤")
+            logger.info(f"[ACTION] 开始复刻日期控件操作，共 {len(steps)} 个步骤")
 
             for step in steps:
                 step_id = step.get("step_id", 0)
@@ -3172,7 +3172,7 @@ class ShopeePlaywrightExporter:
 
                             page.wait_for_timeout(300)
                             success = True
-                            logger.info(f"    ✓ 成功: {selector_type}='{selector_value}'")
+                            logger.info(f"    [OK] 成功: {selector_type}='{selector_value}'")
                             break
 
                         except Exception as e:
@@ -3186,7 +3186,7 @@ class ShopeePlaywrightExporter:
                 if not success:
                     logger.warning(f"  步骤 {step_id} 执行失败，尝试继续")
 
-            logger.info("🎬 配方复刻执行完成")
+            logger.info("[ACTION] 配方复刻执行完成")
             return True
 
         except Exception as e:
@@ -3222,7 +3222,7 @@ class ShopeePlaywrightExporter:
             except Exception as e:
                 logger.warning(f"{phase} 可访问性树快照失败: {e}")
 
-            logger.info(f"✅ {phase} 快照保存完成")
+            logger.info(f"[OK] {phase} 快照保存完成")
 
         except Exception as e:
             logger.error(f"{phase} 快照保存失败: {e}")
@@ -3336,8 +3336,8 @@ class ShopeePlaywrightExporter:
             diff_file = diag_dir / f"{timestamp}_diff.json"
             diff_file.write_text(json.dumps(diff_report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-            logger.info(f"📊 对比报告已生成: {diff_file}")
-            logger.info(f"📈 变化摘要: 时间控件{'已变化' if diff_report['summary']['time_changed'] else '未变化'}, "
+            logger.info(f"[DATA] 对比报告已生成: {diff_file}")
+            logger.info(f"[CHART] 变化摘要: 时间控件{'已变化' if diff_report['summary']['time_changed'] else '未变化'}, "
                        f"指标勾选{'已变化' if diff_report['summary']['metrics_changed'] else '未变化'}, "
                        f"多选器{'已变化' if diff_report['summary']['multi_selector_changed'] else '未变化'}")
 
@@ -3390,11 +3390,11 @@ class ShopeePlaywrightExporter:
           });
 
           window.__x_mutation_observer__ = observer;
-          console.log('🧩 DOM MutationObserver 已安装');
+          console.log('[PUZZLE] DOM MutationObserver 已安装');
         }
         """
         page.evaluate(script)
-        logger.info("🧩 DOM变化监听器已安装")
+        logger.info("[PUZZLE] DOM变化监听器已安装")
 
     def _dump_mutations(self, page: "Page", diag_dir: Path, timestamp: str) -> None:
         """导出 DOM 变化记录"""
@@ -3429,8 +3429,8 @@ class ShopeePlaywrightExporter:
             mutations_file = diag_dir / f"{timestamp}_mutations.json"
             mutations_file.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
 
-            logger.info(f"🧩 DOM变化记录已保存: {mutations_file}")
-            logger.info(f"📊 变化统计: 总计{out['total_mutations']}条, 过滤后{out['filtered_count']}条")
+            logger.info(f"[PUZZLE] DOM变化记录已保存: {mutations_file}")
+            logger.info(f"[DATA] 变化统计: 总计{out['total_mutations']}条, 过滤后{out['filtered_count']}条")
 
         except Exception as e:
             logger.error(f"导出DOM变化记录失败: {e}")
@@ -3634,7 +3634,7 @@ class ShopeePlaywrightExporter:
                             logger.info(f"触发重新生成: {sel}")
                             break
                     if clicked_regen:
-                        # 等待进行中→下载
+                        # 等待进行中->下载
                         self._wait_for_download_ready(page, max_wait_seconds=90)
                         # 尝试再次点击并等待下载
                         rows = page.locator('div[role="dialog"] .ant-table-row, .el-dialog .el-table__row')
@@ -3667,7 +3667,7 @@ class ShopeePlaywrightExporter:
             try:
                 no_download_text = page.locator('text="这是您还没下载的报告"')
                 if no_download_text.count() > 0 and no_download_text.first.is_visible():
-                    logger.warning("⚠️ 检测到'这是您还没下载的报告'，可能需要重新生成报告")
+                    logger.warning("[WARN] 检测到'这是您还没下载的报告'，可能需要重新生成报告")
                     return False, "没有可下载的报告，请重新生成"
             except Exception:
                 pass
@@ -3705,7 +3705,7 @@ class ShopeePlaywrightExporter:
                     return True, message
 
                 # 如果开启自动重生，已经在上文尝试过；此处走最终失败路径
-                logger.error("❌ 下载失败，文件未生成")
+                logger.error("[FAIL] 下载失败，文件未生成")
                 return False, f"下载失败: {download_error}"
         except Exception as e:
             logger.debug(f"UI导出失败: {e}")
@@ -3794,7 +3794,7 @@ class ShopeePlaywrightExporter:
             if btn.count() > 0 and btn.first.is_visible():
                 btn.first.click()
                 page.wait_for_timeout(1000)  # 等待面板加载
-                logger.info("✓ 通过按钮角色打开指标选择面板")
+                logger.info("[OK] 通过按钮角色打开指标选择面板")
                 return
         except Exception as e:
             logger.debug(f"按钮角色方法失败: {e}")
@@ -3805,7 +3805,7 @@ class ShopeePlaywrightExporter:
             if text_btn and text_btn.is_visible():
                 text_btn.click()
                 page.wait_for_timeout(1000)
-                logger.info("✓ 通过文本查找打开指标选择面板")
+                logger.info("[OK] 通过文本查找打开指标选择面板")
                 return
         except Exception as e:
             logger.debug(f"文本查找方法失败: {e}")
@@ -3829,7 +3829,7 @@ class ShopeePlaywrightExporter:
                     if element.count() > 0 and element.is_visible():
                         element.click()
                         page.wait_for_timeout(1000)
-                        logger.info(f"✓ 通过选择器打开指标面板: {selector}")
+                        logger.info(f"[OK] 通过选择器打开指标面板: {selector}")
                         return
                 except:
                     continue
@@ -3837,7 +3837,7 @@ class ShopeePlaywrightExporter:
         except Exception as e:
             logger.debug(f"选择器方法失败: {e}")
 
-        logger.warning("⚠ 未能自动打开指标选择面板，请确保手动操作时面板已打开")
+        logger.warning("[WARN] 未能自动打开指标选择面板，请确保手动操作时面板已打开")
 
     def _wait_for_download_ready(self, page, max_wait_seconds: int = 60) -> bool:
         """
@@ -3853,7 +3853,7 @@ class ShopeePlaywrightExporter:
         try:
             import time
 
-            logger.info("⏳ 等待导出完成，监控状态变化...")
+            logger.info("[WAIT] 等待导出完成，监控状态变化...")
 
             start_time = time.time()
             check_interval = 2  # 每2秒检查一次
@@ -3900,14 +3900,14 @@ class ShopeePlaywrightExporter:
                             try:
                                 elements = page.locator(selector)
                                 if elements.count() > 0 and elements.first.is_visible():
-                                    logger.info("✅ 导出完成，下载按钮已就绪")
+                                    logger.info("[OK] 导出完成，下载按钮已就绪")
                                     return True
                             except Exception:
                                 continue
 
                     # 显示等待进度
                     elapsed = int(time.time() - start_time)
-                    logger.info(f"⏳ 等待导出完成... ({elapsed}s/{max_wait_seconds}s)")
+                    logger.info(f"[WAIT] 等待导出完成... ({elapsed}s/{max_wait_seconds}s)")
 
                     time.sleep(check_interval)
 
@@ -3915,7 +3915,7 @@ class ShopeePlaywrightExporter:
                     logger.debug(f"状态检查异常: {e}")
                     time.sleep(check_interval)
 
-            logger.warning(f"⚠️ 等待超时 ({max_wait_seconds}s)，继续尝试下载")
+            logger.warning(f"[WARN] 等待超时 ({max_wait_seconds}s)，继续尝试下载")
             return False
 
         except Exception as e:
@@ -3953,12 +3953,12 @@ class ShopeePlaywrightExporter:
             import time
             from pathlib import Path
 
-            logger.info("🔍 检查是否有其他下载方式...")
+            logger.info("[SEARCH] 检查是否有其他下载方式...")
 
             # 0. 首先检查目标文件是否已经存在（可能已经下载完成）
             if target_path.exists() and target_path.stat().st_size > 0:
                 size = target_path.stat().st_size
-                logger.success(f"✅ 目标文件已存在: {target_path} ({size:,} bytes)")
+                logger.success(f"[OK] 目标文件已存在: {target_path} ({size:,} bytes)")
                 return True, f"文件已存在: {size:,} bytes)"
 
             # 1. 检查多个可能的下载目录
@@ -4002,7 +4002,7 @@ class ShopeePlaywrightExporter:
                                         import shutil
                                         shutil.copy2(latest_file, target_path)
                                     size = target_path.stat().st_size
-                                    logger.success(f"✅ 从下载目录获取文件: {target_path} ({size:,} bytes)")
+                                    logger.success(f"[OK] 从下载目录获取文件: {target_path} ({size:,} bytes)")
                                     return True, f"从下载目录获取文件: {size:,} bytes"
                                 except Exception as e:
                                     logger.warning(f"处理下载目录文件失败: {e}")
@@ -4017,7 +4017,7 @@ class ShopeePlaywrightExporter:
                     if link.is_visible():
                         href = link.get_attribute('href')
                         if href:
-                            logger.info(f"🔗 发现直接下载链接: {href}")
+                            logger.info(f"[LINK] 发现直接下载链接: {href}")
                             # 这里可以添加直接下载逻辑
                             return False, "发现下载链接但未实现直接下载"
             except Exception:
@@ -4037,10 +4037,10 @@ class ShopeePlaywrightExporter:
                     try:
                         elements = page.locator(selector)
                         if elements.count() > 0 and elements.first.is_visible():
-                            logger.info(f"🎯 检测到下载状态指示: {selector}")
+                            logger.info(f"[TARGET] 检测到下载状态指示: {selector}")
 
                             # 如果页面显示已下载，再次尝试查找文件（可能需要更多时间）
-                            logger.info("⏳ 页面显示已下载，等待文件出现...")
+                            logger.info("[WAIT] 页面显示已下载，等待文件出现...")
                             for wait_attempt in range(6):  # 等待最多30秒
                                 time.sleep(5)
 
@@ -4057,21 +4057,21 @@ class ShopeePlaywrightExporter:
                                                 target_path.parent.mkdir(parents=True, exist_ok=True)
                                                 shutil.copy2(latest_file, target_path)
                                                 size = target_path.stat().st_size
-                                                logger.success(f"✅ 延迟获取到文件: {target_path} ({size:,} bytes)")
+                                                logger.success(f"[OK] 延迟获取到文件: {target_path} ({size:,} bytes)")
                                                 return True, f"延迟获取文件成功: {size:,} bytes"
                                             except Exception as e:
                                                 logger.debug(f"延迟获取文件失败: {e}")
 
-                                logger.info(f"⏳ 等待文件出现... ({(wait_attempt+1)*5}s/30s)")
+                                logger.info(f"[WAIT] 等待文件出现... ({(wait_attempt+1)*5}s/30s)")
 
-                            logger.warning("⚠️ 页面显示已下载但30秒内未获取到文件")
+                            logger.warning("[WARN] 页面显示已下载但30秒内未获取到文件")
                             return False, "页面显示已下载但文件获取超时"
                     except Exception:
                         continue
             except Exception:
                 pass
 
-            logger.warning("❌ 未找到可用的下载方式")
+            logger.warning("[FAIL] 未找到可用的下载方式")
             return False, "下载失败，未找到文件"
 
         except Exception as e:

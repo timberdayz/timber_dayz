@@ -5,7 +5,7 @@
 
 使用 PostgreSQL COPY 命令实现高性能批量导入：
 - 性能：10000行从100秒优化到10-20秒（5-10倍提升）
-- 流程：DataFrame → CSV → COPY to staging → UPSERT to fact
+- 流程：DataFrame -> CSV -> COPY to staging -> UPSERT to fact
 - 安全：会话级优化，不影响全局
 """
 
@@ -240,7 +240,7 @@ class BulkImporter:
     def _copy_to_staging_product_metrics(self, df: pd.DataFrame) -> int:
         """COPY 数据到暂存表（产品指标）
         
-        ⚠️ v4.6.0修复：更新为JSON格式存储（匹配StagingProductMetrics实际schema）
+        [WARN] v4.6.0修复：更新为JSON格式存储（匹配StagingProductMetrics实际schema）
         """
         import json
         
@@ -289,8 +289,8 @@ class BulkImporter:
     def _upsert_from_staging_product_metrics(self) -> int:
         """从暂存表 UPSERT 到事实表（产品指标）
         
-        ⚠️ v4.6.0修复：更新为扁平化schema（platform_sku + sku_scope）
-        ⚠️ v4.10.0修复：更新唯一索引，添加data_domain字段
+        [WARN] v4.6.0修复：更新为扁平化schema（platform_sku + sku_scope）
+        [WARN] v4.10.0修复：更新唯一索引，添加data_domain字段
         匹配新的唯一索引：ix_product_unique_with_scope（包含data_domain）
         """
         result = self.db.execute(text("""

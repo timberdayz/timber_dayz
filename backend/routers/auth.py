@@ -19,24 +19,24 @@ from modules.core.db import DimUser, DimRole, FactAuditLog, UserSession  # v4.12
 from backend.services.audit_service import audit_service
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
-from backend.utils.config import get_settings  # ⭐ v6.0.0修复：导入 settings（Vulnerability 24）
+from backend.utils.config import get_settings  # [*] v6.0.0修复：导入 settings（Vulnerability 24）
 from modules.core.logger import get_logger
 from typing import List, Optional
-import os  # ⭐ v6.0.0新增：用于检查 CSRF_ENABLED 环境变量
+import os  # [*] v6.0.0新增：用于检查 CSRF_ENABLED 环境变量
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["认证管理"])
-security = HTTPBearer(auto_error=False)  # ⭐ v6.0.0修改：auto_error=False 允许可选认证（支持 Cookie）
+security = HTTPBearer(auto_error=False)  # [*] v6.0.0修改：auto_error=False 允许可选认证（支持 Cookie）
 
-# ⭐ v4.19.0新增：导入限流器
-# ⭐ v4.19.4更新：使用基于角色的动态限流
+# [*] v4.19.0新增：导入限流器
+# [*] v4.19.4更新：使用基于角色的动态限流
 try:
     from backend.middleware.rate_limiter import limiter, role_based_rate_limit
 except ImportError:
     limiter = None
     role_based_rate_limit = None
 
-# ⭐ v6.0.0修复：获取配置实例（Vulnerability 24）
+# [*] v6.0.0修复：获取配置实例（Vulnerability 24）
 settings = get_settings()
 
 async def get_current_user(
@@ -47,13 +47,13 @@ async def get_current_user(
     """
     获取当前用户
     
-    ⭐ v6.0.0新增：支持从 Cookie 和 Header 两种方式读取 token
+    [*] v6.0.0新增：支持从 Cookie 和 Header 两种方式读取 token
     - 优先从 Cookie 读取（httpOnly Cookie，更安全）
     - 其次从 Header 读取（向后兼容）
     """
     token = None
     
-    # ⭐ v6.0.0新增：优先从 Cookie 读取 token
+    # [*] v6.0.0新增：优先从 Cookie 读取 token
     if "access_token" in request.cookies:
         token = request.cookies.get("access_token")
     # 其次从 Header 读取（向后兼容）
@@ -89,7 +89,7 @@ async def get_current_user(
                 detail="User not found or inactive"
             )
         
-        # ⭐ v4.19.0 P1安全要求：检查用户 status 字段
+        # [*] v4.19.0 P1安全要求：检查用户 status 字段
         # 防止被暂停的用户使用现有 token 访问系统
         if user.status != "active":
             raise HTTPException(
@@ -107,9 +107,9 @@ async def get_current_user(
             detail="Invalid token"
         )
 
-# ⭐ v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
 @router.post("/register")
-@role_based_rate_limit(endpoint_type="auth")  # ⭐ v4.19.4: 基于角色的动态限流（匿名用户使用 anonymous 配额）
+@role_based_rate_limit(endpoint_type="auth")  # [*] v4.19.4: 基于角色的动态限流（匿名用户使用 anonymous 配额）
 async def register(
     request_body: RegisterRequest,
     request: Request,
@@ -120,14 +120,14 @@ async def register(
     
     速率限制：5次/分钟（防止暴力注册）
     """
-    # ⭐ v4.19.0: 合并检查用户名和邮箱唯一性（统一错误消息，防止用户名/邮箱枚举）
+    # [*] v4.19.0: 合并检查用户名和邮箱唯一性（统一错误消息，防止用户名/邮箱枚举）
     result = await db.execute(select(DimUser).where(DimUser.username == request_body.username))
     existing_user_by_username = result.scalar_one_or_none()
     
     result = await db.execute(select(DimUser).where(DimUser.email == request_body.email))
     existing_user_by_email = result.scalar_one_or_none()
     
-    # ⭐ v4.19.0: 处理rejected用户重新注册
+    # [*] v4.19.0: 处理rejected用户重新注册
     # 如果用户名和邮箱都匹配同一个rejected用户，允许重新注册
     if (existing_user_by_username and existing_user_by_email and 
         existing_user_by_username.user_id == existing_user_by_email.user_id and
@@ -186,7 +186,7 @@ async def register(
             message="注册成功，请等待管理员审批"
         )
     
-    # ⭐ v4.19.0: 统一错误消息（防止用户名/邮箱枚举）
+    # [*] v4.19.0: 统一错误消息（防止用户名/邮箱枚举）
     # 检查是否存在冲突（非rejected状态的用户）
     username_exists = (existing_user_by_username is not None and 
                       existing_user_by_username.status != "rejected")
@@ -277,7 +277,7 @@ async def login(
     )
     user = result.scalar_one_or_none()
     
-    # ⭐ v4.19.0: 1. 先检查用户是否存在（不泄露信息，统一错误消息）
+    # [*] v4.19.0: 1. 先检查用户是否存在（不泄露信息，统一错误消息）
     if not user:
         return error_response(
             code=ErrorCode.AUTH_CREDENTIALS_INVALID,
@@ -287,7 +287,7 @@ async def login(
             status_code=401
         )
     
-    # ⭐ v4.19.0: 2. 检查用户状态（在密码验证之前）
+    # [*] v4.19.0: 2. 检查用户状态（在密码验证之前）
     if user.status == "pending":
         return error_response(
             code=ErrorCode.AUTH_ACCOUNT_PENDING,
@@ -315,7 +315,7 @@ async def login(
             status_code=403
         )
     
-    # ⭐ v4.19.0: 3. 检查status和is_active（只有active状态且is_active=True才能继续）
+    # [*] v4.19.0: 3. 检查status和is_active（只有active状态且is_active=True才能继续）
     if user.status != "active" or not user.is_active:
         return error_response(
             code=ErrorCode.AUTH_ACCOUNT_INACTIVE,
@@ -325,7 +325,7 @@ async def login(
             status_code=403
         )
     
-    # ⭐ v4.19.0: 4. 检查账户是否被锁定（在密码验证之前）
+    # [*] v4.19.0: 4. 检查账户是否被锁定（在密码验证之前）
     from datetime import datetime, timedelta
     if user.locked_until and user.locked_until > datetime.utcnow():
         # 账户仍被锁定
@@ -363,7 +363,7 @@ async def login(
         # 获取User-Agent
         user_agent = request.headers.get("User-Agent", "Unknown")
         
-        # ⭐ v4.19.0: 增加失败登录计数
+        # [*] v4.19.0: 增加失败登录计数
         from datetime import datetime, timedelta
         user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
         
@@ -445,24 +445,24 @@ async def login(
         )
     
     # 获取用户角色（已通过 selectinload 预加载）
-    # ⭐ 修复：使用 role_name 而不是 name（DimRole 使用 role_name 字段）
+    # [*] 修复：使用 role_name 而不是 name（DimRole 使用 role_name 字段）
     user_roles = [role.role_name for role in user.roles]
     
     # 创建令牌
     tokens = auth_service.create_token_pair(
-        user_id=user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        user_id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         username=user.username,
         roles=user_roles
     )
     
     # 更新最后登录时间和重置失败计数
     from datetime import datetime
-    user.last_login = datetime.utcnow()  # ⭐ v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
-    user.failed_login_attempts = 0  # ⭐ v4.19.0: 登录成功，重置失败计数
-    user.locked_until = None  # ⭐ v4.19.0: 清除锁定状态（如果存在）
+    user.last_login = datetime.utcnow()  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+    user.failed_login_attempts = 0  # [*] v4.19.0: 登录成功，重置失败计数
+    user.locked_until = None  # [*] v4.19.0: 清除锁定状态（如果存在）
     await db.commit()
     
-    # ⭐ v6.0.0修复：获取真实IP和User-Agent（Vulnerability 25, 26）
+    # [*] v6.0.0修复：获取真实IP和User-Agent（Vulnerability 25, 26）
     # 获取真实IP（考虑代理）
     ip_address = request.client.host if request.client else "127.0.0.1"
     forwarded_for = request.headers.get("X-Forwarded-For")
@@ -474,15 +474,15 @@ async def login(
     
     # 记录登录成功
     await audit_service.log_action(
-        user_id=user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        user_id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         action="login_success",
         resource="auth",
-        ip_address=ip_address,  # ⭐ v6.0.0修复：使用真实IP（Vulnerability 25）
-        user_agent=user_agent,  # ⭐ v6.0.0修复：使用真实User-Agent（Vulnerability 25）
-        details={"remember_me": credentials.remember_me}  # ⭐ v6.0.0修复：使用credentials.remember_me（Vulnerability 26）
+        ip_address=ip_address,  # [*] v6.0.0修复：使用真实IP（Vulnerability 25）
+        user_agent=user_agent,  # [*] v6.0.0修复：使用真实User-Agent（Vulnerability 25）
+        details={"remember_me": credentials.remember_me}  # [*] v6.0.0修复：使用credentials.remember_me（Vulnerability 26）
     )
     
-    # ⭐ v4.19.0: 创建会话记录
+    # [*] v4.19.0: 创建会话记录
     import hashlib
     from datetime import datetime, timedelta
     session_id = hashlib.sha256(tokens["access_token"].encode()).hexdigest()
@@ -514,7 +514,7 @@ async def login(
         existing_session.expires_at = expires_at
         await db.commit()
     
-    # ⭐ v6.0.0新增：创建响应对象，用于设置 Cookie
+    # [*] v6.0.0新增：创建响应对象，用于设置 Cookie
     from fastapi.responses import JSONResponse
     response_data = {
         "access_token": tokens["access_token"],
@@ -522,7 +522,7 @@ async def login(
         "token_type": tokens["token_type"],
         "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         "user_info": {
-            "id": user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+            "id": user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
@@ -530,14 +530,14 @@ async def login(
         }
     }
     
-    # ⭐ v6.0.0新增：将 token 存储在 httpOnly Cookie 中（提升安全性）
+    # [*] v6.0.0新增：将 token 存储在 httpOnly Cookie 中（提升安全性）
     response = JSONResponse(content=response_data)
     
     # 设置 Access Token Cookie
     # httpOnly: 防止 JavaScript 访问（防止 XSS 攻击）
     # secure: 仅在 HTTPS 连接时发送（开发环境可以设为 False）
     # sameSite: 防止 CSRF 攻击
-    # ⭐ v6.0.0修复：更准确地判断是否使用 secure Cookie（检查请求是否是 HTTPS）
+    # [*] v6.0.0修复：更准确地判断是否使用 secure Cookie（检查请求是否是 HTTPS）
     is_https = request.url.scheme == "https"
     import os
     is_production = os.getenv("ENVIRONMENT", "development") == "production"
@@ -549,7 +549,7 @@ async def login(
         value=tokens["access_token"],
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # 30 分钟
         httponly=True,  # 防止 XSS 攻击
-        secure=secure_cookie,  # ⭐ v6.0.0修复：使用更准确的 secure 判断
+        secure=secure_cookie,  # [*] v6.0.0修复：使用更准确的 secure 判断
         samesite="lax",  # 防止 CSRF 攻击
         path="/"
     )
@@ -560,12 +560,12 @@ async def login(
         value=tokens["refresh_token"],
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,  # 7 天
         httponly=True,
-        secure=secure_cookie,  # ⭐ v6.0.0修复：使用更准确的 secure 判断
+        secure=secure_cookie,  # [*] v6.0.0修复：使用更准确的 secure 判断
         samesite="lax",
         path="/"
     )
     
-    # ⭐ v6.0.0新增：设置 CSRF Token Cookie（Phase 3: CSRF 保护）
+    # [*] v6.0.0新增：设置 CSRF Token Cookie（Phase 3: CSRF 保护）
     # 仅在 CSRF 保护启用时设置 CSRF Token
     csrf_enabled = os.getenv("CSRF_ENABLED", "false").lower() == "true"
     if csrf_enabled:
@@ -583,15 +583,15 @@ async def refresh_token(
     """
     刷新访问令牌
     
-    ⭐ v6.0.0新增：支持从 Cookie 和请求体两种方式读取 refresh token
+    [*] v6.0.0新增：支持从 Cookie 和请求体两种方式读取 refresh token
     - 优先从 Cookie 读取（httpOnly Cookie，更安全）
     - 其次从请求体读取（向后兼容）
     
-    ⭐ v4.19.0 P0安全要求：刷新token前必须验证账户状态
+    [*] v4.19.0 P0安全要求：刷新token前必须验证账户状态
     """
     refresh_token_value = None
     
-    # ⭐ v6.0.0新增：优先从 Cookie 读取 refresh token
+    # [*] v6.0.0新增：优先从 Cookie 读取 refresh token
     if "refresh_token" in http_request.cookies:
         refresh_token_value = http_request.cookies.get("refresh_token")
     # 其次从请求体读取（向后兼容）
@@ -608,7 +608,7 @@ async def refresh_token(
         )
     
     try:
-        # ⭐ v4.19.0 P0安全要求：验证token并获取用户ID
+        # [*] v4.19.0 P0安全要求：验证token并获取用户ID
         payload = auth_service.verify_token(refresh_token_value)
         user_id = payload.get("user_id")
         
@@ -621,7 +621,7 @@ async def refresh_token(
                 status_code=401
             )
         
-        # ⭐ v4.19.0 P0安全要求：从数据库获取用户信息并检查状态
+        # [*] v4.19.0 P0安全要求：从数据库获取用户信息并检查状态
         result = await db.execute(
             select(DimUser).where(DimUser.user_id == user_id)
         )
@@ -636,7 +636,7 @@ async def refresh_token(
                 status_code=401
             )
         
-        # ⭐ v4.19.0 P0安全要求：检查用户状态
+        # [*] v4.19.0 P0安全要求：检查用户状态
         if user.status != "active" or not user.is_active:
             return error_response(
                 code=ErrorCode.AUTH_ACCOUNT_INACTIVE,
@@ -646,7 +646,7 @@ async def refresh_token(
                 status_code=403
             )
         
-        # ⭐ v4.19.0 P0安全要求：检查账户是否被锁定
+        # [*] v4.19.0 P0安全要求：检查账户是否被锁定
         from datetime import datetime
         if user.locked_until and user.locked_until > datetime.utcnow():
             return error_response(
@@ -657,7 +657,7 @@ async def refresh_token(
                 status_code=403
             )
         
-        # ⭐ v4.19.0 P0安全要求：检查会话是否已被撤销
+        # [*] v4.19.0 P0安全要求：检查会话是否已被撤销
         import hashlib
         # 从当前access_token（如果有）计算session_id
         current_token = None
@@ -685,11 +685,11 @@ async def refresh_token(
                     status_code=401
                 )
         
-        # ⭐ v6.0.0修复：使用 refresh_token_pair 同时生成新的 access token 和 refresh token
-        # ⭐ v6.0.0修复：refresh_token_pair 现在是异步方法（需要访问 Redis 黑名单）
+        # [*] v6.0.0修复：使用 refresh_token_pair 同时生成新的 access token 和 refresh token
+        # [*] v6.0.0修复：refresh_token_pair 现在是异步方法（需要访问 Redis 黑名单）
         new_tokens = await auth_service.refresh_token_pair(refresh_token_value)
         
-        # ⭐ v4.19.0: 更新会话的 last_active_at（在单独的数据库会话中）
+        # [*] v4.19.0: 更新会话的 last_active_at（在单独的数据库会话中）
         # 注意：这里不能使用当前的db依赖，因为refresh_token端点没有db参数
         # 使用临时数据库连接更新会话
         try:
@@ -732,17 +732,17 @@ async def refresh_token(
         except Exception as e:
             logger.warning(f"Failed to update session on token refresh: {e}")
         
-        # ⭐ v6.0.0新增：创建响应对象，用于设置 Cookie
+        # [*] v6.0.0新增：创建响应对象，用于设置 Cookie
         from fastapi.responses import JSONResponse
         response_data = {
             "access_token": new_tokens["access_token"],
-            "refresh_token": new_tokens["refresh_token"],  # ⭐ v6.0.0修复：同时返回新的 refresh_token（用于前端同步）
+            "refresh_token": new_tokens["refresh_token"],  # [*] v6.0.0修复：同时返回新的 refresh_token（用于前端同步）
             "token_type": "bearer",
             "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         }
         
-        # ⭐ v6.0.0新增：将新的 access token 和 refresh token 存储在 httpOnly Cookie 中
-        # ⭐ v6.0.0修复：更准确地判断是否使用 secure Cookie（检查请求是否是 HTTPS）
+        # [*] v6.0.0新增：将新的 access token 和 refresh token 存储在 httpOnly Cookie 中
+        # [*] v6.0.0修复：更准确地判断是否使用 secure Cookie（检查请求是否是 HTTPS）
         is_https = http_request.url.scheme == "https"
         import os
         is_production = os.getenv("ENVIRONMENT", "development") == "production"
@@ -757,18 +757,18 @@ async def refresh_token(
             value=new_tokens["access_token"],
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             httponly=True,
-            secure=secure_cookie,  # ⭐ v6.0.0修复：使用更准确的 secure 判断
+            secure=secure_cookie,  # [*] v6.0.0修复：使用更准确的 secure 判断
             samesite="lax",
             path="/"
         )
         
-        # ⭐ v6.0.0修复：同时更新 Refresh Token Cookie（支持 Refresh Token 轮换）
+        # [*] v6.0.0修复：同时更新 Refresh Token Cookie（支持 Refresh Token 轮换）
         json_response.set_cookie(
             key="refresh_token",
             value=new_tokens["refresh_token"],
             max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
             httponly=True,
-            secure=secure_cookie,  # ⭐ v6.0.0修复：使用更准确的 secure 判断
+            secure=secure_cookie,  # [*] v6.0.0修复：使用更准确的 secure 判断
             samesite="lax",
             path="/"
         )
@@ -795,9 +795,9 @@ async def logout(
     """
     用户登出
     
-    ⭐ v6.0.0修复：清除所有认证相关的 Cookie
+    [*] v6.0.0修复：清除所有认证相关的 Cookie
     """
-    # ⭐ v6.0.0修复：获取真实IP和User-Agent（Vulnerability 27）
+    # [*] v6.0.0修复：获取真实IP和User-Agent（Vulnerability 27）
     # 获取真实IP（考虑代理）
     ip_address = request.client.host if request.client else "127.0.0.1"
     forwarded_for = request.headers.get("X-Forwarded-For")
@@ -809,14 +809,14 @@ async def logout(
     
     # 记录登出操作
     await audit_service.log_action(
-        user_id=current_user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        user_id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         action="logout",
         resource="auth",
-        ip_address=ip_address,  # ⭐ v6.0.0修复：使用真实IP（Vulnerability 27）
-        user_agent=user_agent  # ⭐ v6.0.0修复：使用真实User-Agent（Vulnerability 27）
+        ip_address=ip_address,  # [*] v6.0.0修复：使用真实IP（Vulnerability 27）
+        user_agent=user_agent  # [*] v6.0.0修复：使用真实User-Agent（Vulnerability 27）
     )
     
-    # ⭐ v6.0.0修复：清除所有认证相关的 Cookie
+    # [*] v6.0.0修复：清除所有认证相关的 Cookie
     from fastapi.responses import JSONResponse
     response = JSONResponse(content={
         "success": True,
@@ -824,7 +824,7 @@ async def logout(
         "data": None
     })
     
-    # ⭐ v6.0.0修复：清除 Access Token Cookie
+    # [*] v6.0.0修复：清除 Access Token Cookie
     # 注意：如果将来设置了 domain，删除时也需要指定相同的 domain
     response.delete_cookie(
         key="access_token", 
@@ -832,7 +832,7 @@ async def logout(
         domain=None,  # 当前未设置 domain，如果将来设置了，需要指定相同的 domain
         samesite="lax"  # 必须与设置 Cookie 时的值一致
     )
-    # ⭐ v6.0.0修复：清除 Refresh Token Cookie
+    # [*] v6.0.0修复：清除 Refresh Token Cookie
     response.delete_cookie(
         key="refresh_token", 
         path="/",
@@ -840,7 +840,7 @@ async def logout(
         samesite="lax"  # 必须与设置 Cookie 时的值一致
     )
     
-    # ⭐ v6.0.0新增：清除 CSRF Token Cookie（Phase 3: CSRF 保护）
+    # [*] v6.0.0新增：清除 CSRF Token Cookie（Phase 3: CSRF 保护）
     # 仅在 CSRF 保护启用时清除 CSRF Token
     csrf_enabled = os.getenv("CSRF_ENABLED", "false").lower() == "true"
     if csrf_enabled:
@@ -853,20 +853,20 @@ async def logout(
 async def get_current_user_info(current_user: DimUser = Depends(get_current_user)):
     """获取当前用户信息"""
     return UserResponse(
-        id=current_user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         username=current_user.username,
         email=current_user.email,
         full_name=current_user.full_name,
-        roles=[role.role_name for role in current_user.roles],  # ⭐ 修复：使用 role_name 而不是 name
+        roles=[role.role_name for role in current_user.roles],  # [*] 修复：使用 role_name 而不是 name
         is_active=current_user.is_active,
         created_at=current_user.created_at,
-        last_login_at=current_user.last_login  # ⭐ v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+        last_login_at=current_user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
     )
 
 @router.put("/me", response_model=UserResponse)
 async def update_current_user(
     user_update: UserUpdate,
-    request: Request,  # ⭐ v6.0.0修复：添加 request 参数以获取真实IP和User-Agent（Vulnerability 27）
+    request: Request,  # [*] v6.0.0修复：添加 request 参数以获取真实IP和User-Agent（Vulnerability 27）
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -880,7 +880,7 @@ async def update_current_user(
     await db.commit()
     await db.refresh(current_user)
     
-    # ⭐ v6.0.0修复：获取真实IP和User-Agent（Vulnerability 27）
+    # [*] v6.0.0修复：获取真实IP和User-Agent（Vulnerability 27）
     # 获取真实IP（考虑代理）
     ip_address = request.client.host if request.client else "127.0.0.1"
     forwarded_for = request.headers.get("X-Forwarded-For")
@@ -892,30 +892,30 @@ async def update_current_user(
     
     # 记录更新操作
     await audit_service.log_action(
-        user_id=current_user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        user_id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         action="update_profile",
         resource="user",
-        resource_id=str(current_user.user_id),  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
-        ip_address=ip_address,  # ⭐ v6.0.0修复：使用真实IP（Vulnerability 27）
-        user_agent=user_agent,  # ⭐ v6.0.0修复：使用真实User-Agent（Vulnerability 27）
+        resource_id=str(current_user.user_id),  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        ip_address=ip_address,  # [*] v6.0.0修复：使用真实IP（Vulnerability 27）
+        user_agent=user_agent,  # [*] v6.0.0修复：使用真实User-Agent（Vulnerability 27）
         details=user_update.dict(exclude_unset=True)
     )
     
     return UserResponse(
-        id=current_user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         username=current_user.username,
         email=current_user.email,
         full_name=current_user.full_name,
-        roles=[role.role_name for role in current_user.roles],  # ⭐ 修复：使用 role_name 而不是 name
+        roles=[role.role_name for role in current_user.roles],  # [*] 修复：使用 role_name 而不是 name
         is_active=current_user.is_active,
         created_at=current_user.created_at,
-        last_login_at=current_user.last_login  # ⭐ v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+        last_login_at=current_user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
     )
 
 @router.post("/change-password")
 async def change_password(
-    password_request: ChangePasswordRequest,  # ⭐ v6.0.0修复：重命名参数避免与 Request 冲突（Vulnerability 27）
-    http_request: Request,  # ⭐ v6.0.0修复：添加 request 参数以获取真实IP和User-Agent（Vulnerability 27）
+    password_request: ChangePasswordRequest,  # [*] v6.0.0修复：重命名参数避免与 Request 冲突（Vulnerability 27）
+    http_request: Request,  # [*] v6.0.0修复：添加 request 参数以获取真实IP和User-Agent（Vulnerability 27）
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -934,7 +934,7 @@ async def change_password(
     current_user.password_hash = auth_service.hash_password(password_request.new_password)
     await db.commit()
     
-    # ⭐ v6.0.0修复：获取真实IP和User-Agent（Vulnerability 27）
+    # [*] v6.0.0修复：获取真实IP和User-Agent（Vulnerability 27）
     # 获取真实IP（考虑代理）
     ip_address = http_request.client.host if http_request.client else "127.0.0.1"
     forwarded_for = http_request.headers.get("X-Forwarded-For")
@@ -946,12 +946,12 @@ async def change_password(
     
     # 记录密码修改
     await audit_service.log_action(
-        user_id=current_user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        user_id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         action="change_password",
         resource="user",
-        resource_id=str(current_user.user_id),  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
-        ip_address=ip_address,  # ⭐ v6.0.0修复：使用真实IP（Vulnerability 27）
-        user_agent=user_agent  # ⭐ v6.0.0修复：使用真实User-Agent（Vulnerability 27）
+        resource_id=str(current_user.user_id),  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        ip_address=ip_address,  # [*] v6.0.0修复：使用真实IP（Vulnerability 27）
+        user_agent=user_agent  # [*] v6.0.0修复：使用真实User-Agent（Vulnerability 27）
     )
     
     return success_response(
@@ -968,7 +968,7 @@ async def get_audit_logs(
 ):
     """获取审计日志（仅管理员）"""
     # 检查权限
-    if not any(role.role_name == "admin" for role in current_user.roles):  # ⭐ 修复：使用 role_name 而不是 name
+    if not any(role.role_name == "admin" for role in current_user.roles):  # [*] 修复：使用 role_name 而不是 name
         return error_response(
             code=ErrorCode.PERMISSION_DENIED,
             message="Insufficient permissions",

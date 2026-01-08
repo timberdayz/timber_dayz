@@ -45,7 +45,7 @@ router = APIRouter()
 active_test_tasks: Dict[str, Any] = {}
 
 
-# ⭐ v4.18.2修复：移除本地 save_test_history 函数，统一使用 ComponentTestService.save_test_history
+# [*] v4.18.2修复：移除本地 save_test_history 函数，统一使用 ComponentTestService.save_test_history
 
 
 # ==================== Pydantic Models ====================
@@ -629,8 +629,8 @@ async def test_component(
             'success_criteria': [
                 {
                     'type': 'url_contains',
-                    'value': '',  # ⭐ 空字符串，表示需要填写
-                    'optional': True,  # ⭐ 标记为可选，避免测试失败
+                    'value': '',  # [*] 空字符串，表示需要填写
+                    'optional': True,  # [*] 标记为可选，避免测试失败
                     'comment': '临时测试：建议保存后补充验证条件（使用 Playwright Inspector 提取）'
                 }
             ]
@@ -642,10 +642,10 @@ async def test_component(
         
         logger.info(f"Temporary component file created: {temp_yaml_path}")
         
-        # 3. 使用统一服务准备账号信息 ⭐
+        # 3. 使用统一服务准备账号信息 [*]
         account_info = ComponentTestService.prepare_account_info(account)
         
-        # 4. 使用统一服务执行测试 ⭐
+        # 4. 使用统一服务执行测试 [*]
         result = ComponentTestService.run_component_test_subprocess(
             platform=request.platform,
             component_name=component_name,
@@ -656,11 +656,11 @@ async def test_component(
             screenshot_on_error=True
         )
         
-        # 5. 使用统一服务格式化响应 ⭐
+        # 5. 使用统一服务格式化响应 [*]
         response = ComponentTestService.format_test_response(result)
         
-        # 6. 使用统一服务保存测试历史 ⭐
-        # ⭐ v4.18.2修复：使用异步方法保存测试历史
+        # 6. 使用统一服务保存测试历史 [*]
+        # [*] v4.18.2修复：使用异步方法保存测试历史
         await ComponentTestService.save_test_history(
             db=db,
             component_name=component_name,

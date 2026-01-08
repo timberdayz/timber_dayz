@@ -229,77 +229,77 @@ class ProxyMonitor:
 def print_test_result(result: Dict[str, Any]) -> None:
     """打印测试结果"""
     print(f"\n{'='*60}")
-    print(f"📋 账号代理测试报告")
+    print(f"[LIST] 账号代理测试报告")
     print(f"{'='*60}")
     
     if "error" in result:
-        print(f"❌ 错误: {result['error']}")
+        print(f"[FAIL] 错误: {result['error']}")
         return
     
-    print(f"🔍 账号ID: {result['account_id']}")
-    print(f"🌐 平台: {result['platform']}")
-    print(f"📍 地区: {result['region']}")
-    print(f"⏰ 测试时间: {result['test_time']}")
+    print(f"[SEARCH] 账号ID: {result['account_id']}")
+    print(f"[WEB] 平台: {result['platform']}")
+    print(f"[LOC] 地区: {result['region']}")
+    print(f"[TIME] 测试时间: {result['test_time']}")
     
     if result['proxy_status'] == 'no_proxy':
-        print(f"✅ 代理状态: {result['message']}")
+        print(f"[OK] 代理状态: {result['message']}")
         return
     
-    print(f"🔗 代理服务器: {result['proxy_config']['server']}")
+    print(f"[LINK] 代理服务器: {result['proxy_config']['server']}")
     
     conn_test = result.get('connectivity_test', {})
     status = conn_test.get('status', 'unknown')
     
     status_icons = {
-        'excellent': '🟢',
-        'good': '🟡', 
-        'poor': '🟠',
-        'failed': '🔴',
-        'unknown': '⚪'
+        'excellent': '[GREEN]',
+        'good': '[YELLOW]', 
+        'poor': '[ORANGE]',
+        'failed': '[RED]',
+        'unknown': '[WHITE]'
     }
     
-    print(f"{status_icons.get(status, '⚪')} 连接状态: {status.upper()}")
-    print(f"✅ 成功率: {conn_test.get('success_count', 0)}/{conn_test.get('total_tests', 0)}")
-    print(f"⚡ 平均响应时间: {conn_test.get('average_response_time', 0):.2f}秒")
+    print(f"{status_icons.get(status, '[WHITE]')} 连接状态: {status.upper()}")
+    print(f"[OK] 成功率: {conn_test.get('success_count', 0)}/{conn_test.get('total_tests', 0)}")
+    print(f"[FLASH] 平均响应时间: {conn_test.get('average_response_time', 0):.2f}秒")
     
     if conn_test.get('detected_ip'):
-        print(f"🌍 检测到的IP: {conn_test['detected_ip']}")
+        print(f"[GLOBE] 检测到的IP: {conn_test['detected_ip']}")
     
     # 显示详细测试结果
-    print(f"\n📊 详细测试结果:")
+    print(f"\n[DATA] 详细测试结果:")
     for i, test in enumerate(conn_test.get('tests', []), 1):
-        status_icon = "✅" if test['success'] else "❌"
+        status_icon = "[OK]" if test['success'] else "[FAIL]"
         print(f"  {i}. {status_icon} {test['url']}")
         if test['success']:
-            print(f"     ⏱️ 响应时间: {test['response_time']:.2f}秒")
+            print(f"     [TIME] 响应时间: {test['response_time']:.2f}秒")
         else:
-            print(f"     ❌ 错误: {test.get('error', '未知错误')}")
+            print(f"     [FAIL] 错误: {test.get('error', '未知错误')}")
 
 
 def print_stats(stats: Dict[str, Any]) -> None:
     """打印统计信息"""
     print(f"\n{'='*60}")
-    print(f"📊 代理使用统计")
+    print(f"[DATA] 代理使用统计")
     print(f"{'='*60}")
     
-    print(f"🔧 配置统计:")
-    print(f"  📍 配置地区数: {stats.get('configured_regions', 0)}")
-    print(f"  🔌 启用提供商: {stats.get('enabled_providers', 0)}")
-    print(f"  📦 总提供商数: {stats.get('total_providers', 0)}")
+    print(f"[TOOL] 配置统计:")
+    print(f"  [LOC] 配置地区数: {stats.get('configured_regions', 0)}")
+    print(f"  [PLUG] 启用提供商: {stats.get('enabled_providers', 0)}")
+    print(f"  [PKG] 总提供商数: {stats.get('total_providers', 0)}")
     
-    print(f"\n🎯 使用统计:")
-    print(f"  📝 总分配数: {stats.get('total_assignments', 0)}")
-    print(f"  ✅ 活跃代理: {stats.get('active_proxies', 0)}")
-    print(f"  ⏰ 过期代理: {stats.get('expired_proxies', 0)}")
+    print(f"\n[TARGET] 使用统计:")
+    print(f"  [NOTE] 总分配数: {stats.get('total_assignments', 0)}")
+    print(f"  [OK] 活跃代理: {stats.get('active_proxies', 0)}")
+    print(f"  [TIME] 过期代理: {stats.get('expired_proxies', 0)}")
     
     regions = stats.get('regions', {})
     if regions:
-        print(f"\n🌍 按地区统计:")
+        print(f"\n[GLOBE] 按地区统计:")
         for region, region_stats in regions.items():
-            print(f"  📍 {region}:")
-            print(f"    📊 总数: {region_stats.get('count', 0)}")
-            print(f"    ✅ 活跃: {region_stats.get('active', 0)}")
-            print(f"    ⏰ 过期: {region_stats.get('expired', 0)}")
+            print(f"  [LOC] {region}:")
+            print(f"    [DATA] 总数: {region_stats.get('count', 0)}")
+            print(f"    [OK] 活跃: {region_stats.get('active', 0)}")
+            print(f"    [TIME] 过期: {region_stats.get('expired', 0)}")
 
 
 def main():
@@ -323,7 +323,7 @@ def main():
     elif args.all:
         # 监控所有账号
         results = monitor.monitor_all_accounts()
-        print(f"\n🔍 监控 {len(results)} 个账号的代理状态")
+        print(f"\n[SEARCH] 监控 {len(results)} 个账号的代理状态")
         
         for result in results:
             print_test_result(result)
@@ -336,7 +336,7 @@ def main():
     elif args.cleanup:
         # 清理过期代理
         result = monitor.cleanup_expired_proxies()
-        print(f"\n🧹 {result['message']}")
+        print(f"\n[CLEAN] {result['message']}")
     
     elif args.test_proxy:
         # 测试指定代理
@@ -344,20 +344,20 @@ def main():
         result = monitor.test_proxy_connectivity(proxy_config)
         
         print(f"\n{'='*60}")
-        print(f"🧪 代理连接测试")
+        print(f"[TEST] 代理连接测试")
         print(f"{'='*60}")
-        print(f"🔗 代理服务器: {result['proxy_server']}")
-        print(f"✅ 成功率: {result['success_count']}/{result['total_tests']}")
-        print(f"⚡ 平均响应时间: {result['average_response_time']:.2f}秒")
-        print(f"📊 状态: {result['status'].upper()}")
+        print(f"[LINK] 代理服务器: {result['proxy_server']}")
+        print(f"[OK] 成功率: {result['success_count']}/{result['total_tests']}")
+        print(f"[FLASH] 平均响应时间: {result['average_response_time']:.2f}秒")
+        print(f"[DATA] 状态: {result['status'].upper()}")
         
         if result.get('detected_ip'):
-            print(f"🌍 检测到的IP: {result['detected_ip']}")
+            print(f"[GLOBE] 检测到的IP: {result['detected_ip']}")
     
     else:
         # 显示帮助信息
         parser.print_help()
-        print(f"\n💡 使用示例:")
+        print(f"\n[TIP] 使用示例:")
         print(f"  python tools/proxy_monitor.py --account shopee_cn_001  # 测试指定账号")
         print(f"  python tools/proxy_monitor.py --all                    # 监控所有账号")
         print(f"  python tools/proxy_monitor.py --stats                  # 查看统计信息")

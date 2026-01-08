@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 智能字段匹配引擎 - v4.3.7
-四层匹配策略：同义词 → 关键词相似 → 值模式检测 → 平台特定规则
+四层匹配策略：同义词 -> 关键词相似 -> 值模式检测 -> 平台特定规则
 """
 
 from typing import List, Dict, Optional, Tuple, Any
@@ -31,8 +31,8 @@ class SmartFieldMatcher:
     
     def _build_lookup_index(self):
         """构建查找索引（加速匹配）"""
-        self.synonym_index = {}  # 同义词 → field_code
-        self.keyword_index = {}  # 关键词 → field_code（带权重）
+        self.synonym_index = {}  # 同义词 -> field_code
+        self.keyword_index = {}  # 关键词 -> field_code（带权重）
         
         for field in self.dictionary:
             field_code = field['field_code']
@@ -166,7 +166,7 @@ class SmartFieldMatcher:
         # 统计每个字段的关键词命中数
         field_scores = {}
         matched_keywords = {}
-        field_similarity = {}  # ⭐ v4.6.1新增：字段名相似度
+        field_similarity = {}  # [*] v4.6.1新增：字段名相似度
         
         for kw in keywords:
             if kw in self.keyword_index:
@@ -174,7 +174,7 @@ class SmartFieldMatcher:
                     if field_code not in field_scores:
                         field_scores[field_code] = 0
                         matched_keywords[field_code] = []
-                        # ⭐ 计算字段名相似度
+                        # [*] 计算字段名相似度
                         field_dict = next((f for f in self.dictionary if f.get('field_code') == field_code), None)
                         if field_dict:
                             cn_name = field_dict.get('cn_name', '')
@@ -187,7 +187,7 @@ class SmartFieldMatcher:
         if not field_scores:
             return None
         
-        # ⭐ v4.6.1增强：综合考虑得分和相似度
+        # [*] v4.6.1增强：综合考虑得分和相似度
         # 优先选择：1) 得分高 + 2) 相似度高
         def combined_score(field_code):
             score = field_scores[field_code]
@@ -205,7 +205,7 @@ class SmartFieldMatcher:
         keywords_matched = len(matched_keywords[field_code])
         total_keywords = len(keywords)
         
-        # ⭐ v4.6.1增强：相似度高时提升置信度
+        # [*] v4.6.1增强：相似度高时提升置信度
         if similarity >= 0.8:  # 高度相似
             base_confidence = 0.90
         elif similarity >= 0.6:  # 中等相似
@@ -530,7 +530,7 @@ class SmartFieldMatcher:
         medium_conf = sum(1 for r in results.values() if 0.70 <= r['confidence'] < 0.90)
         low_conf = sum(1 for r in results.values() if r['confidence'] < 0.70)
         
-        logger.info(f"[Matcher] 批量匹配完成: {len(columns)}列 → 高{high_conf}/中{medium_conf}/低{low_conf}")
+        logger.info(f"[Matcher] 批量匹配完成: {len(columns)}列 -> 高{high_conf}/中{medium_conf}/低{low_conf}")
         
         return results
 

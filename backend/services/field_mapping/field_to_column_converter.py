@@ -11,7 +11,7 @@
 
 from typing import Dict, Optional
 
-# 标准字段 → 数据库列名映射表（Orders域）
+# 标准字段 -> 数据库列名映射表（Orders域）
 FIELD_TO_COLUMN_ORDERS: Dict[str, str] = {
     # 英文标准字段（直接映射）
     "order_id": "order_id",
@@ -39,7 +39,7 @@ FIELD_TO_COLUMN_ORDERS: Dict[str, str] = {
     "账号": "account",
 }
 
-# 标准字段 → 数据库列名映射表（Products域）
+# 标准字段 -> 数据库列名映射表（Products域）
 FIELD_TO_COLUMN_PRODUCTS: Dict[str, str] = {
     "platform_sku": "platform_sku",
     "product_name": "product_name",
@@ -51,7 +51,7 @@ FIELD_TO_COLUMN_PRODUCTS: Dict[str, str] = {
     "库存": "stock",
 }
 
-# 标准字段 → 数据库列名映射表（Analytics/Traffic域）
+# 标准字段 -> 数据库列名映射表（Analytics/Traffic域）
 FIELD_TO_COLUMN_ANALYTICS: Dict[str, str] = {
     "metric_date": "metric_date",
     "page_views": "page_views",
@@ -63,7 +63,7 @@ FIELD_TO_COLUMN_ANALYTICS: Dict[str, str] = {
     "转化率": "conversion_rate",
 }
 
-# 标准字段 → 数据库列名映射表（Services域）
+# 标准字段 -> 数据库列名映射表（Services域）
 FIELD_TO_COLUMN_SERVICES: Dict[str, str] = {
     "service_date": "service_date",
     "service_type": "service_type",

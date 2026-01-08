@@ -120,7 +120,7 @@ async def view_raw_excel(
             )
         
         # Step 3: 读取Excel（使用智能解析器）
-        # ⭐ v4.12.1修复：如果用户设置了表头行，跳过表头行之前的数据
+        # [*] v4.12.1修复：如果用户设置了表头行，跳过表头行之前的数据
         if header_row < 0:
             header_param = None
             skiprows_param = None
@@ -135,7 +135,7 @@ async def view_raw_excel(
         
         logger.info(f"[RawLayer] 文件大小: {file_size_mb:.2f}MB, 预览行数: {preview_rows}, 表头行: {header_row}, 跳过行: {skiprows_param}")
         
-        # ⭐ v4.12.1修复：使用skiprows跳过表头行之前的数据
+        # [*] v4.12.1修复：使用skiprows跳过表头行之前的数据
         read_kwargs = {}
         if skiprows_param:
             read_kwargs['skiprows'] = skiprows_param
@@ -393,7 +393,7 @@ async def compare_raw_and_staging(
             )
         
         # 读取完整文件（不限制行数）
-        # ⭐ v4.12.1修复：如果用户设置了表头行，跳过表头行之前的数据
+        # [*] v4.12.1修复：如果用户设置了表头行，跳过表头行之前的数据
         if header_row < 0:
             header_param = None
             skiprows_param = None
@@ -454,7 +454,7 @@ async def compare_raw_and_staging(
         
         if data_domain == "orders":
             from modules.core.db import FactOrder
-            # ⭐ v4.12.1修复：FactOrder使用file_id字段（数据血缘）
+            # [*] v4.12.1修复：FactOrder使用file_id字段（数据血缘）
             count_result = await db.execute(
                 select(func.count(FactOrder.order_id)).where(FactOrder.file_id == file_id)
             )
@@ -463,7 +463,7 @@ async def compare_raw_and_staging(
         
         elif data_domain in ["products", "traffic", "analytics"]:
             from modules.core.db import FactProductMetric
-            # ⭐ v4.12.1修复：FactProductMetric使用source_catalog_id字段，不是file_id
+            # [*] v4.12.1修复：FactProductMetric使用source_catalog_id字段，不是file_id
             count_result = await db.execute(
                 select(func.count(FactProductMetric.id)).where(FactProductMetric.source_catalog_id == file_id)
             )
@@ -473,7 +473,7 @@ async def compare_raw_and_staging(
         elif data_domain == "inventory":
             # inventory域可能没有独立的fact表，使用fact_product_metrics
             from modules.core.db import FactProductMetric
-            # ⭐ v4.12.1修复：FactProductMetric使用source_catalog_id字段，不是file_id
+            # [*] v4.12.1修复：FactProductMetric使用source_catalog_id字段，不是file_id
             count_result = await db.execute(
                 select(func.count(FactProductMetric.id)).where(
                     FactProductMetric.source_catalog_id == file_id,
@@ -483,26 +483,26 @@ async def compare_raw_and_staging(
             fact_row_count = count_result.scalar() or 0
             fact_table_name = "fact_product_metrics"
         
-        # Step 6: 查询隔离区，统计隔离行数（⭐ v4.12.1修复：使用catalog_file_id字段）
+        # Step 6: 查询隔离区，统计隔离行数（[*] v4.12.1修复：使用catalog_file_id字段）
         from modules.core.db import DataQuarantine
         count_result = await db.execute(
             select(func.count(DataQuarantine.id)).where(DataQuarantine.catalog_file_id == file_id)
         )
         quarantined_count = count_result.scalar() or 0
         
-        # Step 7: ⭐ v4.12.1新增：查询丢失的数据详情
+        # Step 7: [*] v4.12.1新增：查询丢失的数据详情
         lost_in_staging_details = []
         lost_in_fact_details = []
         
-        # 7.1: 查询Raw→Staging丢失的数据（如果有）
+        # 7.1: 查询Raw->Staging丢失的数据（如果有）
         if lost_rows > 0 and data_domain == "orders":
             # 对于订单数据，尝试从原始Excel中找出丢失的行
             # 由于无法精确匹配，这里只返回统计信息
             pass
         
-        # 7.2: 查询Staging→Fact丢失的数据（⭐ 重点）
+        # 7.2: 查询Staging->Fact丢失的数据（[*] 重点）
         lost_in_fact_count = max(0, staging_row_count - fact_row_count)
-        logger.info(f"[RawLayer] Staging→Fact丢失数据统计: staging={staging_row_count}, fact={fact_row_count}, lost={lost_in_fact_count}")
+        logger.info(f"[RawLayer] Staging->Fact丢失数据统计: staging={staging_row_count}, fact={fact_row_count}, lost={lost_in_fact_count}")
         
         if lost_in_fact_count > 0 and data_domain == "orders":
             from modules.core.db import FactOrder
@@ -528,7 +528,7 @@ async def compare_raw_and_staging(
                 
                 logger.info(f"[RawLayer] Staging中有 {len(staging_order_ids)} 个唯一订单ID")
                 
-                # 查询Fact中已存在的订单ID（⭐ v4.12.1修复：使用file_id字段）
+                # 查询Fact中已存在的订单ID（[*] v4.12.1修复：使用file_id字段）
                 fact_result = await db.execute(
                     select(FactOrder).where(FactOrder.file_id == file_id)
                 )
@@ -613,7 +613,7 @@ async def compare_raw_and_staging(
                         staging_metric.platform_sku
                     ))
             
-            # ⭐ v4.12.1修复：FactProductMetric使用source_catalog_id字段，不是file_id
+            # [*] v4.12.1修复：FactProductMetric使用source_catalog_id字段，不是file_id
             fact_result = await db.execute(
                 select(FactProductMetric).where(FactProductMetric.source_catalog_id == file_id)
             )
@@ -692,18 +692,18 @@ async def compare_raw_and_staging(
             "data_flow": {
                 "raw_to_staging": {
                     "success": staging_row_count == raw_row_count,
-                    "message": f"原始数据 → Staging: {staging_row_count}/{raw_row_count} ({success_rate:.2f}%)"
+                    "message": f"原始数据 -> Staging: {staging_row_count}/{raw_row_count} ({success_rate:.2f}%)"
                 },
                 "staging_to_fact": {
                     "success": fact_row_count == staging_row_count,
-                    "message": f"Staging → Fact: {fact_row_count}/{staging_row_count} ({round((fact_row_count / staging_row_count * 100) if staging_row_count > 0 else 0, 2)}%)"
+                    "message": f"Staging -> Fact: {fact_row_count}/{staging_row_count} ({round((fact_row_count / staging_row_count * 100) if staging_row_count > 0 else 0, 2)}%)"
                 },
                 "overall": {
                     "success": fact_row_count == raw_row_count,
-                    "message": f"原始数据 → Fact: {fact_row_count}/{raw_row_count} ({round((fact_row_count / raw_row_count * 100) if raw_row_count > 0 else 0, 2)}%)"
+                    "message": f"原始数据 -> Fact: {fact_row_count}/{raw_row_count} ({round((fact_row_count / raw_row_count * 100) if raw_row_count > 0 else 0, 2)}%)"
                 }
             },
-            # ⭐ v4.12.1新增：丢失数据详情
+            # [*] v4.12.1新增：丢失数据详情
             "lost_data_details": {
                 "lost_in_staging": lost_in_staging_details,
                 "lost_in_fact": lost_in_fact_details

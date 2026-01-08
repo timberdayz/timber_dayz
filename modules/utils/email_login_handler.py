@@ -38,7 +38,7 @@ class EmailLoginHandler:
         Returns:
             Page: 登录成功的页面对象，失败返回None
         """
-        logger.info(f"📧 开始邮箱登录: {email}")
+        logger.info(f"[EMAIL] 开始邮箱登录: {email}")
         
         # 获取邮箱域名
         email_domain = email.split('@')[-1] if '@' in email else 'qq.com'
@@ -49,7 +49,7 @@ class EmailLoginHandler:
             email_page = self.browser.new_page()
             
             # 导航到邮箱登录页面
-            logger.info(f"🌐 导航到邮箱: {email_config['login_url']}")
+            logger.info(f"[WEB] 导航到邮箱: {email_config['login_url']}")
             email_page.goto(email_config['login_url'], wait_until='domcontentloaded')
             
             # 等待页面加载
@@ -59,21 +59,21 @@ class EmailLoginHandler:
             if email_config.get('needs_password_switch', False):
                 success = self._switch_to_password_login(email_page, email_config)
                 if not success:
-                    logger.warning("⚠️ 密码登录切换失败，尝试继续登录")
+                    logger.warning("[WARN] 密码登录切换失败，尝试继续登录")
             
             # 执行登录操作
             success = self._perform_login(email_page, email, password, email_config)
             
             if success:
-                logger.success(f"✅ 邮箱登录成功: {email}")
+                logger.success(f"[OK] 邮箱登录成功: {email}")
                 return email_page
             else:
-                logger.error(f"❌ 邮箱登录失败: {email}")
+                logger.error(f"[FAIL] 邮箱登录失败: {email}")
                 email_page.close()
                 return None
                 
         except Exception as e:
-            logger.error(f"❌ 邮箱登录异常 {email}: {e}")
+            logger.error(f"[FAIL] 邮箱登录异常 {email}: {e}")
             if 'email_page' in locals():
                 try:
                     email_page.close()
@@ -92,13 +92,13 @@ class EmailLoginHandler:
         Returns:
             bool: 切换是否成功
         """
-        logger.info("🔄 尝试切换到密码登录模式...")
+        logger.info("[RETRY] 尝试切换到密码登录模式...")
         
         password_switch_selectors = email_config.get('password_switch_selectors', [])
         
         for selector in password_switch_selectors:
             try:
-                logger.debug(f"🔍 尝试选择器: {selector}")
+                logger.debug(f"[SEARCH] 尝试选择器: {selector}")
                 
                 # 等待元素加载
                 page.wait_for_timeout(1000)
@@ -111,14 +111,14 @@ class EmailLoginHandler:
                     switch_button = page.query_selector(selector)
                 
                 if switch_button and switch_button.is_visible():
-                    logger.info(f"✅ 找到密码登录切换按钮: {selector}")
+                    logger.info(f"[OK] 找到密码登录切换按钮: {selector}")
                     
                     # 滚动到元素可见区域
                     switch_button.scroll_into_view_if_needed()
                     
                     # 点击切换按钮
                     switch_button.click()
-                    logger.success("🔄 成功切换到密码登录模式")
+                    logger.success("[RETRY] 成功切换到密码登录模式")
                     
                     # 等待切换完成
                     page.wait_for_timeout(3000)
@@ -128,7 +128,7 @@ class EmailLoginHandler:
                 logger.debug(f"切换按钮尝试失败 {selector}: {e}")
                 continue
         
-        logger.warning("⚠️ 未找到有效的密码登录切换按钮")
+        logger.warning("[WARN] 未找到有效的密码登录切换按钮")
         return False
     
     def _perform_login(self, page: Page, email: str, password: str, email_config: Dict[str, Any]) -> bool:
@@ -148,19 +148,19 @@ class EmailLoginHandler:
             # 填写用户名
             username_filled = self._fill_username(page, email, email_config)
             if not username_filled:
-                logger.error("❌ 用户名填写失败")
+                logger.error("[FAIL] 用户名填写失败")
                 return False
             
             # 填写密码
             password_filled = self._fill_password(page, password, email_config)
             if not password_filled:
-                logger.error("❌ 密码填写失败")
+                logger.error("[FAIL] 密码填写失败")
                 return False
             
             # 点击登录按钮
             login_clicked = self._click_login_button(page, email_config)
             if not login_clicked:
-                logger.error("❌ 登录按钮点击失败")
+                logger.error("[FAIL] 登录按钮点击失败")
                 return False
             
             # 等待登录结果
@@ -170,12 +170,12 @@ class EmailLoginHandler:
             return self._verify_login_success(page, email_config)
             
         except Exception as e:
-            logger.error(f"❌ 登录操作失败: {e}")
+            logger.error(f"[FAIL] 登录操作失败: {e}")
             # 保存调试截图
             try:
                 debug_screenshot = get_debug_screenshot_path("email_login_failed")
                 page.screenshot(path=debug_screenshot)
-                logger.info(f"📸 已保存调试截图: {debug_screenshot}")
+                logger.info(f"[CAM] 已保存调试截图: {debug_screenshot}")
             except:
                 pass
             return False
@@ -190,13 +190,13 @@ class EmailLoginHandler:
                 if username_input and username_input.is_visible():
                     username_input.clear()
                     username_input.fill(email)
-                    logger.info(f"✅ 用户名填写成功: {selector}")
+                    logger.info(f"[OK] 用户名填写成功: {selector}")
                     return True
             except Exception as e:
                 logger.debug(f"用户名填写失败 {selector}: {e}")
                 continue
         
-        logger.error("❌ 未找到可用的用户名输入框")
+        logger.error("[FAIL] 未找到可用的用户名输入框")
         return False
     
     def _fill_password(self, page: Page, password: str, email_config: Dict[str, Any]) -> bool:
@@ -209,13 +209,13 @@ class EmailLoginHandler:
                 if password_input and password_input.is_visible():
                     password_input.clear()
                     password_input.fill(password)
-                    logger.info(f"✅ 密码填写成功: {selector}")
+                    logger.info(f"[OK] 密码填写成功: {selector}")
                     return True
             except Exception as e:
                 logger.debug(f"密码填写失败 {selector}: {e}")
                 continue
         
-        logger.error("❌ 未找到可用的密码输入框")
+        logger.error("[FAIL] 未找到可用的密码输入框")
         return False
     
     def _click_login_button(self, page: Page, email_config: Dict[str, Any]) -> bool:
@@ -240,13 +240,13 @@ class EmailLoginHandler:
                 login_button = page.query_selector(selector)
                 if login_button and login_button.is_visible():
                     login_button.click()
-                    logger.info(f"✅ 登录按钮点击成功: {selector}")
+                    logger.info(f"[OK] 登录按钮点击成功: {selector}")
                     return True
             except Exception as e:
                 logger.debug(f"登录按钮点击失败 {selector}: {e}")
                 continue
         
-        logger.error("❌ 未找到可用的登录按钮")
+        logger.error("[FAIL] 未找到可用的登录按钮")
         return False
     
     def _verify_login_success(self, page: Page, email_config: Dict[str, Any]) -> bool:
@@ -274,7 +274,7 @@ class EmailLoginHandler:
                     element = page.query_selector(f'*:has-text("{indicator}")')
                 
                 if element and element.is_visible():
-                    logger.success(f"✅ 邮箱登录成功验证: {indicator}")
+                    logger.success(f"[OK] 邮箱登录成功验证: {indicator}")
                     return True
             except Exception as e:
                 logger.debug(f"登录验证失败 {indicator}: {e}")
@@ -283,10 +283,10 @@ class EmailLoginHandler:
         # 检查URL是否变化（也是成功的标识）
         current_url = page.url
         if 'login' not in current_url and 'signin' not in current_url:
-            logger.success("✅ 邮箱登录成功（URL验证）")
+            logger.success("[OK] 邮箱登录成功（URL验证）")
             return True
         
-        logger.warning("⚠️ 邮箱登录状态不确定")
+        logger.warning("[WARN] 邮箱登录状态不确定")
         return False
     
     def get_verification_code_from_email(self, email_page: Page, sender_keywords: list = None) -> Optional[str]:
@@ -303,7 +303,7 @@ class EmailLoginHandler:
         if sender_keywords is None:
             sender_keywords = ['shopee', 'Shopee', 'SHOPEE', '虾皮']
         
-        logger.info("📧 开始从邮箱获取验证码...")
+        logger.info("[EMAIL] 开始从邮箱获取验证码...")
         
         try:
             # 刷新邮箱页面
@@ -317,14 +317,14 @@ class EmailLoginHandler:
                 # 提取验证码
                 verification_code = self._extract_verification_code(verification_email)
                 if verification_code:
-                    logger.success(f"✅ 成功获取验证码: {verification_code}")
+                    logger.success(f"[OK] 成功获取验证码: {verification_code}")
                     return verification_code
             
-            logger.warning("⚠️ 未找到验证码邮件")
+            logger.warning("[WARN] 未找到验证码邮件")
             return None
             
         except Exception as e:
-            logger.error(f"❌ 获取验证码失败: {e}")
+            logger.error(f"[FAIL] 获取验证码失败: {e}")
             return None
     
     def _find_verification_email(self, page: Page, sender_keywords: list) -> Optional[str]:
@@ -346,7 +346,7 @@ class EmailLoginHandler:
                 for email in emails[:5]:  # 只检查最新的5封邮件
                     email_text = email.text_content()
                     if any(keyword in email_text for keyword in sender_keywords):
-                        logger.info(f"✅ 找到验证码邮件: {email_text[:50]}...")
+                        logger.info(f"[OK] 找到验证码邮件: {email_text[:50]}...")
                         
                         # 点击邮件查看详情
                         email.click()

@@ -27,7 +27,7 @@ from modules.core.db import (
     CatalogFile
 )
 from backend.services.image_processor import get_image_processor
-# ⚠️ v4.6.0 DSS架构重构：已删除MaterializedViewService（改为直接查询原始表）
+# [WARN] v4.6.0 DSS架构重构：已删除MaterializedViewService（改为直接查询原始表）
 # v4.17.0+: 不再导入旧的固定表类，使用动态表名
 from modules.core.logger import get_logger
 
@@ -188,7 +188,7 @@ async def get_products(
             platform_code = product.get("platform_code")
             shop_id_value = product.get("shop_id")
             
-            # ⭐ v4.10.0修复：inventory域数据platform_code和shop_id可能为NULL
+            # [*] v4.10.0修复：inventory域数据platform_code和shop_id可能为NULL
             # 图片查询优先级：1) ProductImage表 2) fact_product_metrics表的image_url字段
             images = []
             if platform_code and shop_id_value:
@@ -204,7 +204,7 @@ async def get_products(
                 )
                 images = result.scalars().all()
             else:
-                # ⭐ v4.10.0新增：inventory域数据可能platform_code/shop_id为NULL
+                # [*] v4.10.0新增：inventory域数据可能platform_code/shop_id为NULL
                 # 只使用platform_sku查询（图片可能只关联SKU，不关联平台/店铺）
                 result = await db.execute(
                     select(ProductImage).where(
@@ -219,7 +219,7 @@ async def get_products(
                 main_image = images[0].thumbnail_url
                 all_images = [img.image_url for img in images]
             elif product.get('image_url'):
-                # ⭐ v4.10.0新增：如果ProductImage表没有图片，使用fact表的image_url
+                # [*] v4.10.0新增：如果ProductImage表没有图片，使用fact表的image_url
                 # mv_inventory_by_sku视图已包含image_url字段
                 main_image = product.get('image_url')
                 all_images = [product.get('image_url')]
@@ -229,7 +229,7 @@ async def get_products(
                 all_images = []
             
             # 组装库存数据（使用mv_inventory_by_sku视图字段）
-            # ⚠️ v4.10.0更新：inventory域数据字段较少，不包含价格、销售指标等
+            # [WARN] v4.10.0更新：inventory域数据字段较少，不包含价格、销售指标等
             inventory_data = {
                 'platform_code': platform_code,
                 'shop_id': shop_id_value,
@@ -397,7 +397,7 @@ async def get_product_detail(
             'brand': product.brand,
             'price': float(product.price) if product.price else 0,
             'currency': product.currency,
-            # ⭐ v4.6.3修复：优先使用available_stock（可售库存）
+            # [*] v4.6.3修复：优先使用available_stock（可售库存）
             'stock': (
                 product.available_stock if product.available_stock is not None else
                 (product.total_stock if product.total_stock is not None else (product.stock or 0))
@@ -669,12 +669,12 @@ async def get_platform_summary(
             query = query.where(FactProductMetric.platform_code == platform)
         
         # 统计指标
-        # ⭐ v4.18.2修复：使用异步查询
+        # [*] v4.18.2修复：使用异步查询
         from sqlalchemy import case
         count_result = await db.execute(select(func.count()).select_from(query.subquery()))
         total_products = count_result.scalar() or 0
         
-        # ⭐ v4.6.3修复：统计库存时使用available_stock优先
+        # [*] v4.6.3修复：统计库存时使用available_stock优先
         total_stock_query = select(
             func.sum(case(
                 (FactProductMetric.available_stock.isnot(None), FactProductMetric.available_stock),
@@ -695,7 +695,7 @@ async def get_platform_summary(
         total_value_result = await db.execute(total_value_query)
         total_value = total_value_result.scalar() or 0
         
-        # ⭐ v4.6.3修复：低库存判断使用available_stock优先
+        # [*] v4.6.3修复：低库存判断使用available_stock优先
         stock_field = case(
             (FactProductMetric.available_stock.isnot(None), FactProductMetric.available_stock),
             (FactProductMetric.total_stock.isnot(None), FactProductMetric.total_stock),
@@ -761,8 +761,8 @@ async def get_platform_summary(
                         )
                     )
                     
-                    # ⭐ v4.18.2修复：使用异步查询
-                    # ⭐ v4.6.3修复：统计时使用available_stock优先
+                    # [*] v4.18.2修复：使用异步查询
+                    # [*] v4.6.3修复：统计时使用available_stock优先
                     plt_count_result = await db.execute(select(func.count()).select_from(plt_query.subquery()))
                     plt_count = plt_count_result.scalar() or 0
                     

@@ -5,7 +5,7 @@
 
 功能：
 1. 根据文件真实内容（而非扩展名）自动选择正确的解析引擎
-2. 自动检测并修复损坏的.xls文件（零手动干预）⭐
+2. 自动检测并修复损坏的.xls文件（零手动干预）[*]
 3. 智能缓存修复结果，提升性能
 """
 
@@ -96,7 +96,7 @@ class ExcelParser:
         if real_format == 'xlsx':
             # 标准XLSX文件（ZIP格式）
             logger.debug("使用openpyxl引擎读取.xlsx")
-            # ⭐ v4.19.8修复：移除engine_kwargs避免参数冲突（pandas会自动处理读取模式）
+            # [*] v4.19.8修复：移除engine_kwargs避免参数冲突（pandas会自动处理读取模式）
             df = pd.read_excel(
                 file_path,
                 engine='openpyxl',
@@ -138,7 +138,7 @@ class ExcelParser:
                 # 终极兜底：返回友好错误，建议用户操作
                 raise ValueError(
                     f"无法读取此文件（OLE格式XLSX，含大量图片）。"
-                    f"建议：在Excel中打开 → 另存为 → Excel工作簿(.xlsx) → 重新上传。"
+                    f"建议：在Excel中打开 -> 另存为 -> Excel工作簿(.xlsx) -> 重新上传。"
                     f"或联系技术支持处理此类文件。"
                 )
             
@@ -171,7 +171,7 @@ class ExcelParser:
             except (ImportError, Exception) as xlrd_error:
                 logger.warning(f"xlrd读取失败: {type(xlrd_error).__name__}: {str(xlrd_error)[:100]}")
                 
-                # ⭐ 新增兜底策略1：尝试用openpyxl强制读取（忽略扩展名）
+                # [*] 新增兜底策略1：尝试用openpyxl强制读取（忽略扩展名）
                 try:
                     logger.info("尝试openpyxl强制读取.xls文件（可能是xlsx伪装）")
                     df = pd.read_excel(
@@ -185,7 +185,7 @@ class ExcelParser:
                 except Exception as openpyxl_err:
                     logger.debug(f"openpyxl失败: {type(openpyxl_err).__name__}: {str(openpyxl_err)[:100]}")
                 
-                # ⭐ 新增兜底策略2：自动修复损坏的.xls文件（零手动干预）
+                # [*] 新增兜底策略2：自动修复损坏的.xls文件（零手动干预）
                 try:
                     from backend.services.file_repair import auto_repair_xls
                     repaired_path = auto_repair_xls(file_path)

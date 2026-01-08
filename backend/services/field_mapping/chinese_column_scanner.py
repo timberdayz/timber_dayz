@@ -36,7 +36,7 @@ def is_date_range_column(column_name: str) -> bool:
     """
     判断字段名是否为日期范围格式（如：2025_09_25_2025_09_25 或 2025-09-25 ~ 2025-09-25）
     
-    ⭐ 重要：日期范围字段不应该进入辞典，因为会带来时间索引混乱
+    [*] 重要：日期范围字段不应该进入辞典，因为会带来时间索引混乱
     所有时间字段应该统一为date或datetime两种格式
     
     Args:
@@ -62,11 +62,11 @@ def is_date_range_column(column_name: str) -> bool:
         if re.search(pattern, col_str):
             return True
     
-    # ⭐ 新增：匹配包含"日期范围"、"fan_wei"、"范围"等关键词的字段
+    # [*] 新增：匹配包含"日期范围"、"fan_wei"、"范围"等关键词的字段
     if 'fan_wei' in col_str.lower() or '日期范围' in col_str or '[日期范围]' in col_str:
         return True
     
-    # ⭐ 新增：匹配包含两个日期格式的字段（如：2025_09_25_2025_09_25）
+    # [*] 新增：匹配包含两个日期格式的字段（如：2025_09_25_2025_09_25）
     date_pattern = r'\d{4}[-_]\d{1,2}[-_]\d{1,2}'
     matches = re.findall(date_pattern, col_str)
     if len(matches) >= 2:

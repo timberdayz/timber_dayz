@@ -111,7 +111,7 @@ class StabilityTester:
     
     async def run_stability_test(self):
         """运行稳定性测试"""
-        print(f"🚀 开始稳定性测试，持续时间: {self.duration_hours} 小时")
+        print(f"[START] 开始稳定性测试，持续时间: {self.duration_hours} 小时")
         print("="*60)
         
         self.is_running = True
@@ -136,7 +136,7 @@ class StabilityTester:
                 # 检查是否达到测试时间
                 elapsed = (datetime.now() - self.start_time).total_seconds()
                 if elapsed >= self.duration_hours * 3600:
-                    print(f"\n⏰ 测试时间达到 {self.duration_hours} 小时，停止测试")
+                    print(f"\n[TIME] 测试时间达到 {self.duration_hours} 小时，停止测试")
                     break
                 
                 # 随机选择端点进行测试
@@ -157,9 +157,9 @@ class StabilityTester:
                 await asyncio.sleep(random.uniform(1, 5))
                 
         except KeyboardInterrupt:
-            print("\n⏹️ 用户中断测试")
+            print("\n[STOP] 用户中断测试")
         except Exception as e:
-            print(f"\n❌ 测试过程中发生错误: {e}")
+            print(f"\n[FAIL] 测试过程中发生错误: {e}")
         finally:
             self.is_running = False
             await self._generate_final_report()
@@ -199,7 +199,7 @@ class StabilityTester:
                 
                 # 每5分钟记录一次详细指标
                 if len(self.metrics_history) % 300 == 0:  # 5分钟 = 300秒
-                    print(f"\n📊 系统指标 (运行时间: {elapsed/3600:.2f}小时)")
+                    print(f"\n[DATA] 系统指标 (运行时间: {elapsed/3600:.2f}小时)")
                     print(f"  CPU使用率: {cpu_percent:.1f}%")
                     print(f"  内存使用率: {memory_percent:.1f}% ({memory_used_mb:.1f}MB)")
                     print(f"  总请求数: {self.total_requests}")
@@ -215,10 +215,10 @@ class StabilityTester:
     
     async def _generate_final_report(self):
         """生成最终报告"""
-        print(f"\n📋 生成稳定性测试报告...")
+        print(f"\n[LIST] 生成稳定性测试报告...")
         
         if not self.metrics_history:
-            print("❌ 没有收集到监控数据")
+            print("[FAIL] 没有收集到监控数据")
             return
         
         # 计算总体统计
@@ -295,10 +295,10 @@ class StabilityTester:
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
             
-            print(f"📄 稳定性测试报告已保存到: {filename}")
+            print(f"[FILE] 稳定性测试报告已保存到: {filename}")
             
             # 打印摘要
-            print(f"\n📊 稳定性测试摘要")
+            print(f"\n[DATA] 稳定性测试摘要")
             print(f"{'='*60}")
             print(f"测试持续时间: {total_duration/3600:.2f} 小时")
             print(f"总请求数: {self.total_requests}")
@@ -311,7 +311,7 @@ class StabilityTester:
             print(f"最终平均响应时间: {final_metrics.average_response_time:.3f}秒")
             
             # 稳定性分析
-            print(f"\n🔍 稳定性分析")
+            print(f"\n[SEARCH] 稳定性分析")
             print(f"CPU稳定性: {report['stability_analysis']['cpu_stability']}")
             print(f"内存稳定性: {report['stability_analysis']['memory_stability']}")
             print(f"响应时间稳定性: {report['stability_analysis']['response_time_stability']}")
@@ -322,7 +322,7 @@ class StabilityTester:
 
 async def run_stability_test(duration_hours: int = 24):
     """运行稳定性测试"""
-    print(f"🚀 开始 {duration_hours} 小时稳定性测试")
+    print(f"[START] 开始 {duration_hours} 小时稳定性测试")
     print("按 Ctrl+C 可以提前停止测试")
     print("="*60)
     
@@ -339,6 +339,6 @@ if __name__ == "__main__":
     try:
         asyncio.run(run_stability_test(args.duration))
     except KeyboardInterrupt:
-        print("\n⏹️ 测试被用户中断")
+        print("\n[STOP] 测试被用户中断")
     except Exception as e:
-        print(f"\n❌ 测试失败: {e}")
+        print(f"\n[FAIL] 测试失败: {e}")

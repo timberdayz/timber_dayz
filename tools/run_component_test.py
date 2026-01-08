@@ -12,7 +12,7 @@ import asyncio
 from pathlib import Path
 from dataclasses import asdict
 
-# ⭐ 注意（2025-12-21）：
+# [*] 注意（2025-12-21）：
 # Windows 上 Playwright 需要 ProactorEventLoop（默认），因为需要 create_subprocess_exec
 # SelectorEventLoop 不支持 subprocess，会导致 NotImplementedError
 # 所以不要设置 WindowsSelectorEventLoopPolicy
@@ -30,7 +30,7 @@ async def main():
     
     config_path = sys.argv[1]
     result_path = sys.argv[2]
-    # ⭐ v4.7.4: 进度文件路径（与配置文件同目录）
+    # [*] v4.7.4: 进度文件路径（与配置文件同目录）
     config_dir = Path(config_path).parent
     progress_path = str(config_dir / 'progress.json')
     
@@ -39,7 +39,7 @@ async def main():
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
         
-        # ⭐ v4.7.4: 进度回调函数（写入进度文件供主进程读取）
+        # [*] v4.7.4: 进度回调函数（写入进度文件供主进程读取）
         # 用于存储步骤总数（step_start 时设置，step_success 时复用）
         progress_state = {'step_total': 0}
         
@@ -92,10 +92,10 @@ async def main():
             screenshot_on_error=config.get('screenshot_on_error', True),
             output_dir=config.get('output_dir'),
             account_info=config.get('account_info'),
-            progress_callback=progress_callback  # ⭐ v4.7.4: 传递进度回调
+            progress_callback=progress_callback  # [*] v4.7.4: 传递进度回调
         )
         
-        # ⭐ 支持 component_path：如果提供了路径，直接读取文件
+        # [*] 支持 component_path：如果提供了路径，直接读取文件
         component_path = config.get('component_path')
         if component_path:
             from datetime import datetime
@@ -103,7 +103,7 @@ async def main():
             
             # v4.8.0: 判断是 Python 组件还是 YAML 组件
             if component_path.endswith('.py'):
-                # ⭐ Python 组件测试（v4.8.0新增）
+                # [*] Python 组件测试（v4.8.0新增）
                 result = await tester.test_python_component(
                     component_path=component_path,
                     component_name=config['component_name']
@@ -139,7 +139,7 @@ async def main():
                     # 执行浏览器测试（异步，内部已包含成功条件验证）
                     browser_test_passed = await tester._test_with_browser(component, result)
                     
-                    # ⭐ _test_with_browser 已经验证了成功条件，返回值已包含结果
+                    # [*] _test_with_browser 已经验证了成功条件，返回值已包含结果
                     if browser_test_passed:
                         result.status = TestStatus.PASSED
                     else:
@@ -160,7 +160,7 @@ async def main():
         # 将结果转换为字典并保存
         result_dict = asdict(result)
         
-        # ⭐ v4.7.4: 计算步骤成功率（百分比）
+        # [*] v4.7.4: 计算步骤成功率（百分比）
         if result.steps_total > 0:
             result_dict['success_rate'] = (result.steps_passed / result.steps_total) * 100  # 转换为百分比
         else:

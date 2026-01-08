@@ -110,7 +110,7 @@ def _compute_sha256(file_path: Path, block_size: int = 1024 * 1024, shop_id: str
     """
     计算文件SHA256哈希（包含shop_id和platform_code）
     
-    ⭐ v4.17.3修复：将shop_id和platform_code纳入hash计算，避免不同店铺/平台的相同内容文件被误判为重复
+    [*] v4.17.3修复：将shop_id和platform_code纳入hash计算，避免不同店铺/平台的相同内容文件被误判为重复
     
     Args:
         file_path: 文件路径
@@ -123,7 +123,7 @@ def _compute_sha256(file_path: Path, block_size: int = 1024 * 1024, shop_id: str
     """
     h = hashlib.sha256()
     
-    # ⭐ v4.17.3修复：先加入shop_id和platform_code（如果存在）
+    # [*] v4.17.3修复：先加入shop_id和platform_code（如果存在）
     # 这样可以区分不同店铺/平台的相同内容文件
     if shop_id:
         h.update(f"shop_id:{shop_id}".encode('utf-8'))
@@ -372,12 +372,12 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                             date_from = _parse_date(biz_meta.get('date_from'))
                             date_to = _parse_date(biz_meta.get('date_to'))
                             
-                            # ⭐ 提取账号和店铺信息（collection_info）
+                            # [*] 提取账号和店铺信息（collection_info）
                             collection_info = meta_content.get('collection_info', {})
                             meta_account = collection_info.get('account')
                             meta_shop_id = collection_info.get('shop_id')
                             
-                            # ⭐ v4.17.0修复：对于miaoshou平台的inventory和orders数据域，统一shop_id
+                            # [*] v4.17.0修复：对于miaoshou平台的inventory和orders数据域，统一shop_id
                             # 检测并统一处理包含日期的shop_id（如 products_snapshot_20250926）
                             if meta_shop_id and file_metadata:
                                 # 提前计算norm_platform和norm_domain用于判断
@@ -428,7 +428,7 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                                 if legacy.get('shop_id'):
                                     meta_for_resolver['shop_id'] = legacy['shop_id']
                     
-                    # 3. 解析店铺归属（全域智能解析）- ⭐ v4.17.3修复：先解析店铺归属，再计算hash
+                    # 3. 解析店铺归属（全域智能解析）- [*] v4.17.3修复：先解析店铺归属，再计算hash
                     resolver = get_shop_resolver()
                     # 如果.meta.json提供了shop_id，直接以最高置信度使用，不再推断
                     if meta_for_resolver.get('shop_id'):
@@ -442,7 +442,7 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                         resolved_shop = resolver.resolve(
                             file_path=str(file_path),
                             platform_code=file_metadata['source_platform'],
-                            file_metadata=meta_for_resolver  # ⭐ 传递.meta.json中的shop_id/account
+                            file_metadata=meta_for_resolver  # [*] 传递.meta.json中的shop_id/account
                         )
                     
                     # 决定初始状态：高置信度直接写shop_id并保持pending；低置信度标记needs_shop
@@ -456,10 +456,10 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                     
                     # v4.3.6: miaoshou平台特殊处理需要提前计算norm_platform
                     norm_platform = normalize_platform(file_metadata['source_platform'])
-                    # ⭐ 需要提前计算norm_domain（用于判断订单和库存数据域）
+                    # [*] 需要提前计算norm_domain（用于判断订单和库存数据域）
                     norm_domain = normalize_data_domain(file_metadata.get('data_domain', ''))
                     
-                    # ⭐ v4.18.1重构：简化shop_id逻辑
+                    # [*] v4.18.1重构：简化shop_id逻辑
                     # 规则：shop_id完全从伴生JSON文件获取，如果没有则设为'none'
                     # 移除needs_shop状态，所有文件都可以直接同步
                     if resolved_shop.shop_id:
@@ -472,7 +472,7 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                         initial_status = 'pending'
                         logger.info(f"[{file_path.name}] .meta.json无shop_id，设为'none'")
                     
-                    # 3.5. ⭐ v4.17.3修复：计算文件哈希（包含shop_id和platform_code）
+                    # 3.5. [*] v4.17.3修复：计算文件哈希（包含shop_id和platform_code）
                     # 这样可以区分不同店铺/平台的相同内容文件
                     file_hash = _compute_sha256(
                         file_path,
@@ -485,7 +485,7 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                     norm_granularity = normalize_granularity(file_metadata['granularity'])
                     norm_sub_domain = file_metadata.get('sub_domain', '').lower().strip()
                     
-                    # ⭐ 新增：services数据域，如果sub_domain为空，默认设置为'agent'（适用于所有平台）
+                    # [*] 新增：services数据域，如果sub_domain为空，默认设置为'agent'（适用于所有平台）
                     if norm_domain == 'services' and not norm_sub_domain:
                         norm_sub_domain = 'agent'
                         logger.info(f"[{file_path.name}] services数据域缺少sub_domain，自动设置为'agent'")
@@ -524,7 +524,7 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                         sub_domain=norm_sub_domain,
                         granularity=norm_granularity,
                         
-                        # ⭐ 账号和店铺归属（从.meta.json提取）
+                        # [*] 账号和店铺归属（从.meta.json提取）
                         account=meta_for_resolver.get('account'),
                         shop_id=initial_shop_id,
                         
@@ -547,8 +547,8 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                     )
                     
                     # 6. Upsert（基于file_hash和file_path双重去重）
-                    # ⭐ v4.17.3修复：增强去重机制，同时检查file_hash和file_path
-                    # ⭐ v4.18.0修复：使用相对路径匹配，保持与存储格式一致，确保云端迁移兼容
+                    # [*] v4.17.3修复：增强去重机制，同时检查file_hash和file_path
+                    # [*] v4.18.0修复：使用相对路径匹配，保持与存储格式一致，确保云端迁移兼容
                     existing = session.execute(
                         select(CatalogFile).where(
                             or_(
@@ -572,18 +572,18 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                         existing.quality_score = quality_score
                         existing.meta_file_path = relative_meta_path  # v4.18.0: 存储相对路径
                         
-                        # ⭐ 账号信息更新（从.meta.json提取）
+                        # [*] 账号信息更新（从.meta.json提取）
                         if meta_for_resolver.get('account'):
                             existing.account = meta_for_resolver['account']
 
                         # 店铺归属更新策略（v4.3.5 修复）：
-                        # 1) 若 .meta.json 提供 shop_id → 无条件覆盖，置信度1.0
-                        # 2) 否则：若当前解析得到的置信度更高，或原值为空 → 覆盖
+                        # 1) 若 .meta.json 提供 shop_id -> 无条件覆盖，置信度1.0
+                        # 2) 否则：若当前解析得到的置信度更高，或原值为空 -> 覆盖
                         existing_meta = existing.file_metadata or {}
                         prev_resolution = existing_meta.get('shop_resolution', {}) if isinstance(existing_meta, dict) else {}
                         prev_confidence = prev_resolution.get('confidence', 0) if isinstance(prev_resolution, dict) else 0
 
-                        # ⭐ v4.17.0修复：在更新记录时也应用shop_id修复逻辑
+                        # [*] v4.17.0修复：在更新记录时也应用shop_id修复逻辑
                         final_shop_id = None
                         if meta_for_resolver.get('shop_id'):
                             # meta_for_resolver中的shop_id已经经过修复处理（第356-376行）
@@ -630,7 +630,7 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                         elif not initial_shop_id and existing.status == 'pending':
                             existing.status = 'needs_shop'
                         
-                        # ⭐ v4.17.3修复：更新file_hash（如果hash计算方式改变）
+                        # [*] v4.17.3修复：更新file_hash（如果hash计算方式改变）
                         if existing.file_hash != file_hash:
                             logger.info(f"[CatalogScanner] [v4.17.3] 更新file_hash: {file_path.name} (旧hash: {existing.file_hash[:16] if existing.file_hash else 'None'}..., 新hash: {file_hash[:16]}...)")
                             existing.file_hash = file_hash
@@ -644,7 +644,7 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
                             new_file_ids.append(catalog.id)
                         logger.debug(f"注册: {file_path.name}")
                         
-                        # ⭐ v4.17.0新增：文件注册时确保对应的表存在
+                        # [*] v4.17.0新增：文件注册时确保对应的表存在
                         try:
                             from backend.services.platform_table_manager import get_platform_table_manager
                             table_manager = get_platform_table_manager(session)
@@ -794,7 +794,7 @@ def register_single_file(file_path: str) -> Optional[int]:
                 if legacy.get('shop_id'):
                     meta_for_resolver['shop_id'] = legacy['shop_id']
         
-        # 3. ⭐ v4.17.3修复：先解析店铺归属，再计算hash
+        # 3. [*] v4.17.3修复：先解析店铺归属，再计算hash
         resolver = get_shop_resolver()
         if meta_for_resolver.get('shop_id'):
             resolved_shop = type('RS', (), {
@@ -820,10 +820,10 @@ def register_single_file(file_path: str) -> Optional[int]:
         }
         norm_platform = normalize_platform(file_metadata['source_platform'])
         
-        # ⭐ 需要先获取norm_domain（在判断之前）
+        # [*] 需要先获取norm_domain（在判断之前）
         norm_domain = normalize_data_domain(file_metadata.get('data_domain', ''))
         
-        # ⭐ v4.18.1重构：简化shop_id逻辑
+        # [*] v4.18.1重构：简化shop_id逻辑
         # 规则：shop_id完全从伴生JSON文件获取，如果没有则设为'none'
         # 移除needs_shop状态，所有文件都可以直接同步
         if resolved_shop.shop_id:
@@ -836,7 +836,7 @@ def register_single_file(file_path: str) -> Optional[int]:
             initial_status = 'pending'
             logger.info(f"[{file_path_obj.name}] .meta.json无shop_id，设为'none'")
         
-        # 5. ⭐ v4.17.3修复：计算文件哈希（包含shop_id和platform_code）
+        # 5. [*] v4.17.3修复：计算文件哈希（包含shop_id和platform_code）
         # 这样可以区分不同店铺/平台的相同内容文件
         file_hash = _compute_sha256(
             file_path_obj,
@@ -849,7 +849,7 @@ def register_single_file(file_path: str) -> Optional[int]:
         norm_granularity = normalize_granularity(file_metadata['granularity'])
         norm_sub_domain = file_metadata.get('sub_domain', '').lower().strip()
         
-        # ⭐ 新增：services数据域，如果sub_domain为空，默认设置为'agent'（适用于所有平台）
+        # [*] 新增：services数据域，如果sub_domain为空，默认设置为'agent'（适用于所有平台）
         if norm_domain == 'services' and not norm_sub_domain:
             norm_sub_domain = 'agent'
             logger.info(f"[{file_path_obj.name}] services数据域缺少sub_domain，自动设置为'agent'")
@@ -865,8 +865,8 @@ def register_single_file(file_path: str) -> Optional[int]:
             return None
         
         # 7. 检查是否已存在（基于file_hash和file_path双重去重）
-        # ⭐ v4.17.3修复：增强去重机制，同时检查file_hash和file_path
-        # ⭐ v4.18.0修复：使用相对路径匹配，保持与存储格式一致，确保云端迁移兼容
+        # [*] v4.17.3修复：增强去重机制，同时检查file_hash和file_path
+        # [*] v4.18.0修复：使用相对路径匹配，保持与存储格式一致，确保云端迁移兼容
         relative_file_path = to_relative_path(file_path_obj)
         relative_meta_path = to_relative_path(meta_file) if meta_file.exists() else None
         
@@ -899,7 +899,7 @@ def register_single_file(file_path: str) -> Optional[int]:
             prev_resolution = existing_meta.get('shop_resolution', {}) if isinstance(existing_meta, dict) else {}
             prev_confidence = prev_resolution.get('confidence', 0) if isinstance(prev_resolution, dict) else 0
             
-            # ⭐ v4.17.0修复：在更新记录时也应用shop_id修复逻辑
+            # [*] v4.17.0修复：在更新记录时也应用shop_id修复逻辑
             final_shop_id = None
             if meta_for_resolver.get('shop_id'):
                 # meta_for_resolver中的shop_id已经经过修复处理
@@ -944,7 +944,7 @@ def register_single_file(file_path: str) -> Optional[int]:
             elif not initial_shop_id and existing.status == 'pending':
                 existing.status = 'needs_shop'
             
-            # ⭐ v4.17.3修复：更新file_hash（如果hash计算方式改变）
+            # [*] v4.17.3修复：更新file_hash（如果hash计算方式改变）
             if existing.file_hash != file_hash:
                 logger.info(f"[AutoRegister] [v4.17.3] 更新file_hash: {file_path_obj.name} (旧hash: {existing.file_hash[:16] if existing.file_hash else 'None'}..., 新hash: {file_hash[:16]}...)")
                 existing.file_hash = file_hash
@@ -981,7 +981,7 @@ def register_single_file(file_path: str) -> Optional[int]:
             session.flush()
             file_id = catalog.id
             
-            # ⭐ v4.17.0新增：文件注册时确保对应的表存在
+            # [*] v4.17.0新增：文件注册时确保对应的表存在
             try:
                 from backend.services.platform_table_manager import get_platform_table_manager
                 table_manager = get_platform_table_manager(session)

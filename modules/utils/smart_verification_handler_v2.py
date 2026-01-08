@@ -142,7 +142,7 @@ class SmartVerificationHandlerV2:
 
     def handle_verification(self) -> bool:
         """主入口方法 - 处理验证码流程"""
-        logger.info("🚀 开始智能验证码处理流程 V2.0")
+        logger.info("[START] 开始智能验证码处理流程 V2.0")
 
         try:
             # 状态机主循环
@@ -158,14 +158,14 @@ class SmartVerificationHandlerV2:
                 # 防止无限循环
                 self.context.attempt_count += 1
                 if self.context.attempt_count > 20:
-                    logger.error("❌ 状态机执行次数超限，终止处理")
+                    logger.error("[FAIL] 状态机执行次数超限，终止处理")
                     self.context.current_state = VerificationState.FAILED
                     break
 
             return self.context.current_state == VerificationState.SUCCESS
 
         except Exception as e:
-            logger.error(f"❌ 验证码处理过程异常: {e}")
+            logger.error(f"[FAIL] 验证码处理过程异常: {e}")
             return False
 
     def _execute_current_state(self) -> bool:
@@ -180,58 +180,58 @@ class SmartVerificationHandlerV2:
 
         handler = state_handlers.get(self.context.current_state)
         if handler:
-            logger.info(f"🔄 执行状态: {self.context.current_state.value}")
+            logger.info(f"[RETRY] 执行状态: {self.context.current_state.value}")
             return handler()
         else:
-            logger.error(f"❌ 未知状态: {self.context.current_state}")
+            logger.error(f"[FAIL] 未知状态: {self.context.current_state}")
             return False
 
     def _handle_detecting_state(self) -> bool:
         """处理弹窗检测状态"""
-        logger.info("🔍 开始检测验证码弹窗...")
+        logger.info("[SEARCH] 开始检测验证码弹窗...")
 
         # 使用分层选择器检测弹窗
         for selector_group in self.popup_detectors:
             element = self._try_selector_group(selector_group)
             if element:
                 self.context.popup_element = element
-                logger.info(f"✅ 弹窗检测成功，使用: {selector_group.name}")
+                logger.info(f"[OK] 弹窗检测成功，使用: {selector_group.name}")
 
                 # 分析弹窗类型并转换状态
                 next_state = self._analyze_popup_type(element)
                 self.context.current_state = next_state
                 return True
 
-        logger.warning("❌ 未检测到验证码弹窗")
+        logger.warning("[FAIL] 未检测到验证码弹窗")
         self.context.current_state = VerificationState.FAILED
         return False
 
     def _handle_email_stage(self) -> bool:
         """处理邮箱验证阶段"""
-        logger.info("📧 处理邮箱验证阶段...")
+        logger.info("[EMAIL] 处理邮箱验证阶段...")
 
         # 点击发送至邮箱按钮
         if self._click_button('send_to_email'):
-            logger.info("✅ 成功点击'发送至邮箱'按钮")
+            logger.info("[OK] 成功点击'发送至邮箱'按钮")
 
             # 等待状态变化
             if self._wait_for_state_transition():
                 self.context.current_state = VerificationState.OTP_INPUT
                 return True
             else:
-                logger.warning("⚠️ 等待状态变化超时")
+                logger.warning("[WARN] 等待状态变化超时")
                 self.context.current_state = VerificationState.USER_INTERVENTION
                 self.context.user_guidance = "请手动点击'发送至邮箱'按钮，然后等待页面变化"
                 return False
         else:
-            logger.error("❌ 无法点击'发送至邮箱'按钮")
+            logger.error("[FAIL] 无法点击'发送至邮箱'按钮")
             self.context.current_state = VerificationState.USER_INTERVENTION
             self.context.user_guidance = "请手动点击'发送至邮箱'按钮"
             return False
 
     def _handle_otp_input_state(self) -> bool:
         """处理OTP输入状态"""
-        logger.info("🔢 进入OTP输入等待阶段...")
+        logger.info("[123] 进入OTP输入等待阶段...")
 
         # 设计理念改变：不自动处理邮箱，而是智能引导用户
         self.context.user_guidance = self._generate_user_guidance()
@@ -246,21 +246,21 @@ class SmartVerificationHandlerV2:
 
     def _handle_confirming_state(self) -> bool:
         """处理确认提交状态"""
-        logger.info("✅ 处理确认提交...")
+        logger.info("[OK] 处理确认提交...")
 
         if self._click_button('confirm'):
-            logger.info("✅ 成功点击确认按钮")
+            logger.info("[OK] 成功点击确认按钮")
 
             # 等待页面响应
             if self._wait_for_login_success():
                 self.context.current_state = VerificationState.SUCCESS
                 return True
             else:
-                logger.warning("⚠️ 登录可能失败，请检查")
+                logger.warning("[WARN] 登录可能失败，请检查")
                 self.context.current_state = VerificationState.FAILED
                 return False
         else:
-            logger.error("❌ 无法点击确认按钮")
+            logger.error("[FAIL] 无法点击确认按钮")
             self.context.current_state = VerificationState.USER_INTERVENTION
             self.context.user_guidance = "请手动点击确认按钮"
             return False
@@ -268,7 +268,7 @@ class SmartVerificationHandlerV2:
     def _handle_phone_stage(self) -> bool:
         """处理手机验证阶段（最小实现）：直接进入 OTP 输入阶段。"""
         try:
-            logger.info("📱 处理手机验证阶段(最小) -> 进入OTP输入阶段")
+            logger.info("[PHONE] 处理手机验证阶段(最小) -> 进入OTP输入阶段")
         except Exception:
             pass
         self.context.current_state = VerificationState.OTP_INPUT
@@ -286,10 +286,10 @@ class SmartVerificationHandlerV2:
                 if element and element.is_visible():
                     # 记录成功统计
                     self._record_selector_success(selector)
-                    logger.info(f"✅ 选择器成功: {selector}")
+                    logger.info(f"[OK] 选择器成功: {selector}")
                     return element
             except Exception as e:
-                logger.debug(f"⚠️ 选择器失败: {selector} - {e}")
+                logger.debug(f"[WARN] 选择器失败: {selector} - {e}")
                 continue
         return None
 
@@ -308,17 +308,17 @@ class SmartVerificationHandlerV2:
                 element.click()
                 return True
             except Exception as e:
-                logger.error(f"❌ 点击失败: {e}")
+                logger.error(f"[FAIL] 点击失败: {e}")
                 return False
         return False
 
     def _analyze_popup_type(self, element) -> VerificationState:
         """分析弹窗类型，决定下一状态（适配“验证电话号码”短信页）
         判定原则：
-        - 若出现“验证电话号码/手机号/短信/OTP/请输入”等关键词 → 视为手机验证码页（OTP_INPUT）
-        - 若出现“发送至邮箱” → 表示当前是手机验证页，可切换到邮箱；仍判定为 OTP_INPUT
-        - 若出现“发送至电话/确认发送至电话” → 表示当前是邮箱验证页，可切换到手机；判定为 EMAIL_STAGE
-        - 若能定位到验证码输入框 → OTP_INPUT；否则 EMAIL_STAGE
+        - 若出现“验证电话号码/手机号/短信/OTP/请输入”等关键词 -> 视为手机验证码页（OTP_INPUT）
+        - 若出现“发送至邮箱” -> 表示当前是手机验证页，可切换到邮箱；仍判定为 OTP_INPUT
+        - 若出现“发送至电话/确认发送至电话” -> 表示当前是邮箱验证页，可切换到手机；判定为 EMAIL_STAGE
+        - 若能定位到验证码输入框 -> OTP_INPUT；否则 EMAIL_STAGE
         """
         try:
             text_content_raw = (element.inner_text() or '')
@@ -339,7 +339,7 @@ class SmartVerificationHandlerV2:
                 return VerificationState.OTP_INPUT
             return VerificationState.EMAIL_STAGE
         except Exception as e:
-            logger.error(f"❌ 弹窗类型分析失败: {e}")
+            logger.error(f"[FAIL] 弹窗类型分析失败: {e}")
             return VerificationState.EMAIL_STAGE
 
     def _generate_user_guidance(self) -> str:
@@ -348,7 +348,7 @@ class SmartVerificationHandlerV2:
         if email_config:
             email_addr = email_config.get('username', '您的邮箱')
             return f"""
-📧 请按以下步骤手动获取验证码：
+[EMAIL] 请按以下步骤手动获取验证码：
 
 1. 打开您的邮箱: {email_addr}
 2. 查找来自Shopee的验证码邮件
@@ -356,11 +356,11 @@ class SmartVerificationHandlerV2:
 4. 返回此页面，在验证码输入框中填入验证码
 5. 系统将自动检测并点击确认按钮
 
-💡 提示：验证码邮件通常在1-2分钟内到达
+[TIP] 提示：验证码邮件通常在1-2分钟内到达
             """
         else:
             return """
-📧 请手动获取验证码：
+[EMAIL] 请手动获取验证码：
 
 1. 检查您的邮箱中的Shopee验证码邮件
 2. 复制验证码并填入验证码输入框
@@ -369,7 +369,7 @@ class SmartVerificationHandlerV2:
 
     def _monitor_code_input(self, timeout: int = 300) -> bool:
         """监控验证码输入 - 等待用户输入验证码"""
-        logger.info(f"👁️ 监控验证码输入，超时: {timeout}秒")
+        logger.info(f"[VIEW] 监控验证码输入，超时: {timeout}秒")
 
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -379,7 +379,7 @@ class SmartVerificationHandlerV2:
                 try:
                     value = input_element.input_value()
                     if value and len(value.strip()) >= 4:  # 至少4位数字
-                        logger.info(f"✅ 检测到验证码输入: {len(value)}位")
+                        logger.info(f"[OK] 检测到验证码输入: {len(value)}位")
                         return True
                 except:
                     pass
@@ -387,12 +387,12 @@ class SmartVerificationHandlerV2:
             # 每秒检查一次
             time.sleep(1)
 
-        logger.warning("⏰ 验证码输入监控超时")
+        logger.warning("[TIME] 验证码输入监控超时")
         return False
 
     def _wait_for_state_transition(self) -> bool:
         """等待页面状态变化"""
-        logger.info("⏳ 等待页面状态变化...")
+        logger.info("[WAIT] 等待页面状态变化...")
 
         # 等待按钮变化或新元素出现
         transition_indicators = [
@@ -404,12 +404,12 @@ class SmartVerificationHandlerV2:
         for indicator in transition_indicators:
             try:
                 self.page.wait_for_selector(indicator, timeout=10000, state='visible')
-                logger.info(f"✅ 检测到状态变化: {indicator}")
+                logger.info(f"[OK] 检测到状态变化: {indicator}")
                 return True
             except:
                 continue
 
-        logger.warning("❌ 未检测到状态变化")
+        logger.warning("[FAIL] 未检测到状态变化")
         return False
 
     def _wait_for_login_success(self) -> bool:
@@ -418,7 +418,7 @@ class SmartVerificationHandlerV2:
         - 成功：URL离开 signin/login，或出现卖家中心/仪表板等强信号元素；
         - 失败：出现“验证码错误/不正确/已过期/请重试”等提示，或长时间仍停留在验证码弹窗。
         """
-        logger.info("⏳ 等待登录完成（严格模式）...")
+        logger.info("[WAIT] 等待登录完成（严格模式）...")
         try:
             start = time.time()
             timeout = 20
@@ -435,7 +435,7 @@ class SmartVerificationHandlerV2:
                 try:
                     page_text = (self.page.content() or '')
                     if any(k in page_text for k in error_keywords):
-                        logger.error("❌ 检测到验证码错误提示，登录失败")
+                        logger.error("[FAIL] 检测到验证码错误提示，登录失败")
                         return False
                 except Exception:
                     pass
@@ -445,13 +445,13 @@ class SmartVerificationHandlerV2:
                     for ind in success_indicators:
                         try:
                             if self.page.locator(ind).count() > 0:
-                                logger.success("✅ 登录成功元素检测通过")
+                                logger.success("[OK] 登录成功元素检测通过")
                                 return True
                         except Exception:
                             continue
                     url = self.page.url
                     if 'signin' not in url and 'login' not in url:
-                        logger.success("✅ URL验证通过，登录成功")
+                        logger.success("[OK] URL验证通过，登录成功")
                         return True
                 except Exception:
                     pass
@@ -467,10 +467,10 @@ class SmartVerificationHandlerV2:
 
                 time.sleep(1)
 
-            logger.warning("⚠️ 登录状态不明确或可能失败")
+            logger.warning("[WARN] 登录状态不明确或可能失败")
             return False
         except Exception as e:
-            logger.error(f"❌ 等待登录成功异常: {e}")
+            logger.error(f"[FAIL] 等待登录成功异常: {e}")
             return False
 
     def _handle_state_failure(self):

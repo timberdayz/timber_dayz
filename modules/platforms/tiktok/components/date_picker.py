@@ -11,7 +11,7 @@ class TiktokDatePicker(DatePickerComponent):
     """TikTok Shop 日期选择组件（EDS 日期控件 + iframe + testId 优先）。
 
     设计约束:
-    - 仅做 UI 操作（打开面板 → 选择快捷项/自定义），不做硬编码导航
+    - 仅做 UI 操作（打开面板 -> 选择快捷项/自定义），不做硬编码导航
     - 优先使用 data-testid（time-selector-last-7-days / -last-28-days）
     - 面板在 iframe 内，使用 frame_locator("iframe").first 进入
     - 失败不抛异常，由上层决定是否兜底
@@ -464,7 +464,7 @@ class TiktokDatePicker(DatePickerComponent):
                         if opened and self._is_panel_open(page):
                             log("panel opened via container choices")
                             return True
-                    # 容器未命中 → 通用触发器
+                    # 容器未命中 -> 通用触发器
                     generic = [
                         ".theme-arco-picker-suffix-icon",
                         ".theme-arco-picker-input",
@@ -673,7 +673,7 @@ class TiktokDatePicker(DatePickerComponent):
     async def select_custom_range(self, page: Any, start: date, end: date) -> bool:
         """
         切到“自定义”并选择起止日期（best-effort, 更稳健）。
-        步骤：确保面板 → 切到自定义(可选) → 锁定左右月份容器 → 点击起/止日期 → 点击“确定/应用”。
+        步骤：确保面板 -> 切到自定义(可选) -> 锁定左右月份容器 -> 点击起/止日期 -> 点击“确定/应用”。
         对齐 TikTok Arco 双月面板，优先在对应月份容器内定位日期，避免误点灰色日期。
         """
         try:
@@ -1009,7 +1009,7 @@ class TiktokDatePicker(DatePickerComponent):
                     pass
                 return False
 
-            # 新对齐器：根据“当前右侧标题”与目标截止月比较，决定 ← 或 →，每步后校验
+            # 新对齐器：根据“当前右侧标题”与目标截止月比较，决定 <- 或 ->，每步后校验
             def _parse_header_month(idx: int) -> tuple[int, int] | None:
                 try:
                     import re
@@ -1342,7 +1342,7 @@ class TiktokDatePicker(DatePickerComponent):
 
     async def select_natural_day(self, page: Any, target_day: date) -> bool:
         """服务表现页面的“自然日”单日选择。
-        流程：打开面板 → 点击“自然日”Tab → 校验/对齐月份 → 点击当月日历中的目标日期。
+        流程：打开面板 -> 点击“自然日”Tab -> 校验/对齐月份 -> 点击当月日历中的目标日期。
         只做 UI 操作，不写入输入框。
         """
         try:
@@ -1547,7 +1547,7 @@ class TiktokDatePicker(DatePickerComponent):
             panels = f.locator(".theme-arco-picker-panel")
             clicked = False
             try:
-                # 左 → 右尝试
+                # 左 -> 右尝试
                 if panels.count() > 0:
                     if click_in_container(panels.nth(0), day):
                         clicked = True

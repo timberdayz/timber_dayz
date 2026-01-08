@@ -195,7 +195,7 @@ class ShopeeServicesExport(ExportComponent):
                             continue
                     page.wait_for_timeout(500)
 
-                    # 二次能力守卫：SIP 店铺或 404/无入口 → 跳过（不视为失败）
+                    # 二次能力守卫：SIP 店铺或 404/无入口 -> 跳过（不视为失败）
                     try:
                         if self._is_404_or_not_found(page) or self._is_sip_shop(page):
                             if self.logger:
@@ -368,7 +368,7 @@ class ShopeeServicesExport(ExportComponent):
                         except Exception:
                             continue
                     if not clicked:
-                        # 补救：尝试在“更多/…/下拉菜单”中寻找导出项
+                        # 补救：尝试在“更多/.../下拉菜单”中寻找导出项
                         try:
                             menu_triggers = [
                                 '.ant-dropdown-trigger',
@@ -445,7 +445,7 @@ class ShopeeServicesExport(ExportComponent):
                             if elapsed >= next_beat:
                                 remain = int(max(0, deadline - datetime.now().timestamp()))
                                 if self.logger:
-                                    self.logger.info(f"[ShopeeServicesExport] 仍在等待下载入口… ({elapsed}/30s，剩余{remain}s)")
+                                    self.logger.info(f"[ShopeeServicesExport] 仍在等待下载入口... ({elapsed}/30s，剩余{remain}s)")
                                 next_beat += 5
                         except Exception:
                             pass
@@ -455,7 +455,7 @@ class ShopeeServicesExport(ExportComponent):
                         except Exception:
                             pass
 
-                            # 达到回退间隔仍未就绪 → 重试点击“导出数据”，并续期等待窗口
+                            # 达到回退间隔仍未就绪 -> 重试点击“导出数据”，并续期等待窗口
                             try:
                                 elapsed_retry = int(datetime.now().timestamp() - start_ts)
                                 # 满足下一次重试触发条件（间隔 backoff_sec），且未超过最大重试次数
@@ -492,7 +492,7 @@ class ShopeeServicesExport(ExportComponent):
 
                         if preferred_loc:
                             if self.logger:
-                                self.logger.info(f"[ShopeeServicesExport] 最新导出记录就绪 → 优先点击下载")
+                                self.logger.info(f"[ShopeeServicesExport] 最新导出记录就绪 -> 优先点击下载")
                             # 统一输出目录（预先计算，支持 UI 监听与文件系统兜底）
                             cfg = self.ctx.config or {}
                             gran = cfg.get("granularity") or "manual"
@@ -560,7 +560,7 @@ class ShopeeServicesExport(ExportComponent):
                                 downloaded = True
                                 break
                             except Exception as e:
-                                # UI 监听未命中 → 文件系统兜底（Agent页）
+                                # UI 监听未命中 -> 文件系统兜底（Agent页）
                                 if self.logger:
                                     self.logger.info(f"[ShopeeServicesExport] UI下载监听超时，启用文件系统兜底(agent): {e}")
                                 for _ in range(15):
@@ -681,7 +681,7 @@ class ShopeeServicesExport(ExportComponent):
                                         downloaded = True
                                         break
                                     except Exception as e:
-                                        # UI 监听未命中 → 文件系统兜底（Agent页）
+                                        # UI 监听未命中 -> 文件系统兜底（Agent页）
                                         if self.logger:
                                             self.logger.info(f"[ShopeeServicesExport] UI下载监听超时，启用文件系统兜底(agent): {e}")
                                         for _ in range(15):
@@ -747,7 +747,7 @@ class ShopeeServicesExport(ExportComponent):
             if successes and failures:
                 return ExportResult(True, f"部分成功，失败: {','.join(failures)}", None, str(successes[-1]))
             if (not successes) and (not failures) and skipped:
-                # 典型场景：SIP 店铺不提供服务表现 → 全部跳过
+                # 典型场景：SIP 店铺不提供服务表现 -> 全部跳过
                 return ExportResult(True, f"不适用(已跳过): {','.join(skipped)}")
             return ExportResult(False, "services 全部导出失败")
         except Exception as e:
@@ -881,7 +881,7 @@ class ShopeeServicesExport(ExportComponent):
                         except Exception:
                             pass
 
-                    # 快速路径：监控“下载”按钮数量增加 → 新记录出现即返回顶部下载按钮
+                    # 快速路径：监控“下载”按钮数量增加 -> 新记录出现即返回顶部下载按钮
                     try:
                         cur_count = download_buttons_all.count()
                     except Exception:
@@ -1017,7 +1017,7 @@ class ShopeeServicesExport(ExportComponent):
             export_url = f"{base}{mapping[key]}"
             needle = mapping[key].rstrip("/")  # 用于HAR匹配
 
-            # 2) 参数来源：HAR → ctx.config → 兜底
+            # 2) 参数来源：HAR -> ctx.config -> 兜底
             params = {}
             har_method = "GET"
             har_path = self._latest_har_path()

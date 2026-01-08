@@ -7,15 +7,15 @@
 - FastAPI依赖注入（get_db/get_async_db函数）
 
 架构规范（v4.18.2）:
-- ✅ 所有模型定义在 modules/core/db/schema.py（单一数据源）
-- ✅ 本文件只负责引擎配置和Session管理
-- ✅ 不重复定义任何模型
-- ✅ 符合 Single Source of Truth 原则
-- ✅ 符合 .cursorrules 架构规范
-- ✅ 支持同步/异步双模式（过渡期）
+- [OK] 所有模型定义在 modules/core/db/schema.py（单一数据源）
+- [OK] 本文件只负责引擎配置和Session管理
+- [OK] 不重复定义任何模型
+- [OK] 符合 Single Source of Truth 原则
+- [OK] 符合 .cursorrules 架构规范
+- [OK] 支持同步/异步双模式（过渡期）
 
 依赖方向:
-  Frontend → backend/routers → backend/models/database → modules/core/db
+  Frontend -> backend/routers -> backend/models/database -> modules/core/db
 
 版本: v4.18.2
 更新: 2026-01-01 - 添加异步SQLAlchemy支持
@@ -41,7 +41,7 @@ from modules.core.db import (
     BridgeProductKeys,
     DimCurrencyRate,
     # 事实表
-    # ⚠️ v4.6.0 DSS架构重构：以下表已废弃，但仍在使用中（31个文件引用）
+    # [WARN] v4.6.0 DSS架构重构：以下表已废弃，但仍在使用中（31个文件引用）
     # 新数据应写入fact_raw_data_*表（按data_domain+granularity分表）
     # 计划在Phase 6.1中删除（需要先完成数据迁移）
     FactOrder,  # 已废弃，使用fact_raw_data_orders_*替代
@@ -75,8 +75,8 @@ def get_async_database_url(database_url: str) -> str:
     将同步数据库URL转换为异步URL
     
     支持的数据库类型：
-    - PostgreSQL: postgresql:// → postgresql+asyncpg://
-    - SQLite: sqlite:// → sqlite+aiosqlite://
+    - PostgreSQL: postgresql:// -> postgresql+asyncpg://
+    - SQLite: sqlite:// -> sqlite+aiosqlite://
     
     Args:
         database_url: 同步数据库URL
@@ -154,7 +154,7 @@ if ASYNC_DATABASE_URL.startswith("sqlite"):
     )
 else:
     # PostgreSQL 支持连接池，使用完整配置
-    # ⭐ v4.19.0更新：使用环境感知的配置（与同步引擎保持一致）
+    # [*] v4.19.0更新：使用环境感知的配置（与同步引擎保持一致）
     async_engine = create_async_engine(
         ASYNC_DATABASE_URL,
         pool_size=settings.DB_POOL_SIZE,
@@ -165,7 +165,7 @@ else:
         echo=settings.DATABASE_ECHO,
     )
 
-# ⭐ v4.18.2修复：asyncpg 需要通过事件监听器设置 search_path
+# [*] v4.18.2修复：asyncpg 需要通过事件监听器设置 search_path
 # asyncpg 不支持通过 connect_args 传递 options
 from sqlalchemy import event, text
 
@@ -332,7 +332,7 @@ async def warm_up_async_pool(pool_size: int = 10):
         session = AsyncSessionLocal()
         try:
             result = await session.execute(text("SELECT 1"))
-            # ⭐ 修复：fetchone() 不需要 await（它返回 Row，不是协程）
+            # [*] 修复：fetchone() 不需要 await（它返回 Row，不是协程）
             result.fetchone()
         except Exception as e:
             logger.warning(f"[async] 连接 {i} 测试失败: {e}")
@@ -382,7 +382,7 @@ __all__ = [
     "BridgeProductKeys",
     "DimCurrencyRate",
     # 事实表
-    # ⚠️ v4.6.0 DSS架构重构：以下表已废弃，但仍在使用中
+    # [WARN] v4.6.0 DSS架构重构：以下表已废弃，但仍在使用中
     "FactOrder",  # 已废弃，使用fact_raw_data_orders_*替代
     "FactOrderItem",  # 已废弃，使用fact_raw_data_orders_*替代
     "FactProductMetric",  # 已废弃，使用fact_raw_data_products_*替代

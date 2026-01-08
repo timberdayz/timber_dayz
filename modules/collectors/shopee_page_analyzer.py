@@ -109,7 +109,7 @@ class ShopeePageAnalyzer:
             }
         }
         
-        logger.info(f"🔍 初始化Shopee页面分析器: {self.store_name}")
+        logger.info(f"[SEARCH] 初始化Shopee页面分析器: {self.store_name}")
     
     def analyze_shopee_platform(self) -> ShopeeAnalysisResult:
         """
@@ -119,7 +119,7 @@ class ShopeePageAnalyzer:
             ShopeeAnalysisResult: Shopee分析结果
         """
         try:
-            logger.info(f"🔍 开始分析Shopee平台: {self.store_name}")
+            logger.info(f"[SEARCH] 开始分析Shopee平台: {self.store_name}")
             
             # 分析当前页面
             current_page_analysis = self.analysis_tool.analyze_current_page()
@@ -153,12 +153,12 @@ class ShopeePageAnalyzer:
                 recommended_collection_strategy=collection_strategy
             )
             
-            logger.info(f"✅ Shopee平台分析完成: {len(available_sections)} 个可用区域")
+            logger.info(f"[OK] Shopee平台分析完成: {len(available_sections)} 个可用区域")
             
             return result
             
         except Exception as e:
-            logger.error(f"❌ Shopee平台分析失败: {e}")
+            logger.error(f"[FAIL] Shopee平台分析失败: {e}")
             raise
     
     def analyze_shopee_platform_logged_in(self) -> ShopeeAnalysisResult:
@@ -169,20 +169,20 @@ class ShopeePageAnalyzer:
             ShopeeAnalysisResult: Shopee分析结果
         """
         try:
-            logger.info(f"🔍 开始分析已登录的Shopee平台: {self.store_name}")
+            logger.info(f"[SEARCH] 开始分析已登录的Shopee平台: {self.store_name}")
             
             # 检查当前是否在登录页面
             current_url = self.page.url
             if any(keyword in current_url.lower() for keyword in ['login', 'signin', 'auth']):
-                logger.warning(f"⚠️ 当前在登录页面，跳过页面跳转分析: {current_url}")
+                logger.warning(f"[WARN] 当前在登录页面，跳过页面跳转分析: {current_url}")
                 # 如果在登录页面，先跳转到仪表板
                 try:
                     dashboard_url = "https://seller.shopee.cn/"
                     self.page.goto(dashboard_url, timeout=30000)
                     time.sleep(3)
-                    logger.info(f"✅ 已跳转到仪表板: {dashboard_url}")
+                    logger.info(f"[OK] 已跳转到仪表板: {dashboard_url}")
                 except Exception as e:
-                    logger.warning(f"⚠️ 跳转到仪表板失败: {e}")
+                    logger.warning(f"[WARN] 跳转到仪表板失败: {e}")
             
             # 分析当前页面
             current_page_analysis = self.analysis_tool.analyze_current_page()
@@ -216,12 +216,12 @@ class ShopeePageAnalyzer:
                 recommended_collection_strategy=collection_strategy
             )
             
-            logger.info(f"✅ 已登录Shopee平台分析完成: {len(available_sections)} 个推断区域")
+            logger.info(f"[OK] 已登录Shopee平台分析完成: {len(available_sections)} 个推断区域")
             
             return result
             
         except Exception as e:
-            logger.error(f"❌ 已登录Shopee平台分析失败: {e}")
+            logger.error(f"[FAIL] 已登录Shopee平台分析失败: {e}")
             # 返回基础的分析结果而不是抛出异常
             return ShopeeAnalysisResult(
                 account_id=self.account_id,
@@ -258,18 +258,18 @@ class ShopeePageAnalyzer:
                             access_level=self._determine_section_access_level(page_key)
                         )
                         sections.append(section)
-                        logger.info(f"✅ 发现可访问区域: {page_info['name']}")
+                        logger.info(f"[OK] 发现可访问区域: {page_info['name']}")
                     else:
-                        logger.warning(f"⚠️ 页面不可访问: {page_info['name']}")
+                        logger.warning(f"[WARN] 页面不可访问: {page_info['name']}")
                         
                 except Exception as e:
-                    logger.warning(f"⚠️ 检查页面失败 {page_info['name']}: {e}")
+                    logger.warning(f"[WARN] 检查页面失败 {page_info['name']}: {e}")
                     continue
             
             return sections
             
         except Exception as e:
-            logger.error(f"❌ 分析可访问区域失败: {e}")
+            logger.error(f"[FAIL] 分析可访问区域失败: {e}")
             return []
     
     def _is_page_accessible(self) -> bool:
@@ -356,7 +356,7 @@ class ShopeePageAnalyzer:
             return menu_structures
             
         except Exception as e:
-            logger.error(f"❌ 分析菜单结构失败: {e}")
+            logger.error(f"[FAIL] 分析菜单结构失败: {e}")
             return []
     
     def _extract_main_menu_items(self, menu_element: Locator) -> List[Dict[str, str]]:
@@ -445,7 +445,7 @@ class ShopeePageAnalyzer:
             return capabilities
             
         except Exception as e:
-            logger.error(f"❌ 分析下载能力失败: {e}")
+            logger.error(f"[FAIL] 分析下载能力失败: {e}")
             return []
     
     def _analyze_platform_specific_features(self, download_option) -> Dict[str, Any]:
@@ -568,7 +568,7 @@ class ShopeePageAnalyzer:
             return strategy
             
         except Exception as e:
-            logger.error(f"❌ 生成采集策略失败: {e}")
+            logger.error(f"[FAIL] 生成采集策略失败: {e}")
             return strategy
     
     def save_analysis_result(self, result: ShopeeAnalysisResult, 
@@ -599,11 +599,11 @@ class ShopeePageAnalyzer:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(result_dict, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"💾 Shopee分析结果已保存: {file_path}")
+            logger.info(f"[SAVE] Shopee分析结果已保存: {file_path}")
             return str(file_path)
             
         except Exception as e:
-            logger.error(f"❌ 保存Shopee分析结果失败: {e}")
+            logger.error(f"[FAIL] 保存Shopee分析结果失败: {e}")
             raise
     
     def generate_shopee_report(self, result: ShopeeAnalysisResult) -> str:
@@ -619,17 +619,17 @@ class ShopeePageAnalyzer:
         try:
             report = []
             report.append("=" * 80)
-            report.append(f"🦐 SHOPEE商家端平台分析报告")
+            report.append(f"[*] SHOPEE商家端平台分析报告")
             report.append("=" * 80)
-            report.append(f"📅 分析时间: {result.analysis_time}")
-            report.append(f"🏪 店铺名称: {result.store_name}")
-            report.append(f"🆔 账号ID: {result.account_id}")
-            report.append(f"🌐 当前页面: {result.current_page}")
-            report.append(f"📊 数据访问级别: {result.data_access_level}")
+            report.append(f"[DATE] 分析时间: {result.analysis_time}")
+            report.append(f"[STORE] 店铺名称: {result.store_name}")
+            report.append(f"[ID] 账号ID: {result.account_id}")
+            report.append(f"[WEB] 当前页面: {result.current_page}")
+            report.append(f"[DATA] 数据访问级别: {result.data_access_level}")
             report.append("")
             
             # 可访问的数据区域
-            report.append("📂 可访问的数据区域:")
+            report.append("[FOLDER] 可访问的数据区域:")
             if result.available_sections:
                 for i, section in enumerate(result.available_sections, 1):
                     report.append(f"  {i}. {section.name}")
@@ -639,37 +639,37 @@ class ShopeePageAnalyzer:
                     report.append(f"     访问级别: {section.access_level}")
                     report.append("")
             else:
-                report.append("  ❌ 未发现可访问的数据区域")
+                report.append("  [FAIL] 未发现可访问的数据区域")
                 report.append("")
             
             # 菜单结构
-            report.append("🧭 菜单结构:")
+            report.append("[COMPASS] 菜单结构:")
             if result.menu_structure:
                 for i, menu in enumerate(result.menu_structure, 1):
                     report.append(f"  {i}. {menu.main_menu}")
                     if menu.sub_menus:
                         for sub_menu in menu.sub_menus:
                             report.append(f"     - {sub_menu}")
-                    report.append(f"     数据可用: {'✅' if menu.data_available else '❌'}")
+                    report.append(f"     数据可用: {'[OK]' if menu.data_available else '[FAIL]'}")
                     report.append("")
             else:
-                report.append("  ❌ 未发现菜单结构")
+                report.append("  [FAIL] 未发现菜单结构")
                 report.append("")
             
             # 下载能力
-            report.append("📥 下载能力:")
+            report.append("[RECV] 下载能力:")
             if result.download_capabilities:
                 for i, capability in enumerate(result.download_capabilities, 1):
                     report.append(f"  {i}. {capability['name']}")
                     report.append(f"     文件类型: {', '.join(capability['file_types']) if capability['file_types'] else '未知'}")
-                    report.append(f"     可用状态: {'✅' if capability['is_available'] else '❌'}")
+                    report.append(f"     可用状态: {'[OK]' if capability['is_available'] else '[FAIL]'}")
                     report.append("")
             else:
-                report.append("  ❌ 未发现下载能力")
+                report.append("  [FAIL] 未发现下载能力")
                 report.append("")
             
             # 推荐采集策略
-            report.append("🎯 推荐采集策略:")
+            report.append("[TARGET] 推荐采集策略:")
             strategy = result.recommended_collection_strategy
             
             report.append("  推荐数据区域:")
@@ -686,13 +686,13 @@ class ShopeePageAnalyzer:
             
             report.append("")
             report.append("=" * 80)
-            report.append("📋 分析完成")
+            report.append("[LIST] 分析完成")
             report.append("=" * 80)
             
             return "\n".join(report)
             
         except Exception as e:
-            logger.error(f"❌ 生成Shopee报告失败: {e}")
+            logger.error(f"[FAIL] 生成Shopee报告失败: {e}")
             return f"生成报告失败: {e}"
 
 
@@ -738,11 +738,11 @@ class ShopeePageAnalyzer:
                 if menu_structures:
                     break  # 找到菜单就停止检查其他选择器
             
-            logger.info(f"✅ 分析当前页面菜单: {len(menu_structures)} 个菜单项")
+            logger.info(f"[OK] 分析当前页面菜单: {len(menu_structures)} 个菜单项")
             return menu_structures
             
         except Exception as e:
-            logger.warning(f"⚠️ 分析菜单结构失败: {e}")
+            logger.warning(f"[WARN] 分析菜单结构失败: {e}")
             return []
     
     def _extract_menu_items_safe(self, menu_element: Locator) -> List[Dict[str, Any]]:
@@ -823,7 +823,7 @@ class ShopeePageAnalyzer:
                                 access_level="basic"
                             )
                             sections.append(section)
-                            logger.info(f"✅ 推断可用区域: {section.name}")
+                            logger.info(f"[OK] 推断可用区域: {section.name}")
             
             # 如果没有找到匹配的菜单，添加基础区域
             if not sections:
@@ -840,7 +840,7 @@ class ShopeePageAnalyzer:
             return sections
             
         except Exception as e:
-            logger.warning(f"⚠️ 推断可用区域失败: {e}")
+            logger.warning(f"[WARN] 推断可用区域失败: {e}")
             return []
     
     def _analyze_current_page_downloads(self) -> List[Dict[str, Any]]:
@@ -889,11 +889,11 @@ class ShopeePageAnalyzer:
                     "available": True
                 })
             
-            logger.info(f"✅ 发现下载选项: {len(downloads)} 个")
+            logger.info(f"[OK] 发现下载选项: {len(downloads)} 个")
             return downloads
             
         except Exception as e:
-            logger.warning(f"⚠️ 分析下载能力失败: {e}")
+            logger.warning(f"[WARN] 分析下载能力失败: {e}")
             return []
     
     def _guess_download_format(self, text: str) -> str:

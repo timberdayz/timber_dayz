@@ -103,7 +103,7 @@ async def refresh_all_materialized_views(db: AsyncSession = Depends(get_async_db
                 logger.info(f"[物化视图刷新] 正在刷新: {view_name}...")
                 
                 # 尝试使用 CONCURRENTLY（需要唯一索引）
-                # ⭐ 修复：CONCURRENTLY需要唯一索引，如果失败则使用普通刷新
+                # [*] 修复：CONCURRENTLY需要唯一索引，如果失败则使用普通刷新
                 refresh_method = None
                 try:
                     refresh_sql = text(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view_name}")

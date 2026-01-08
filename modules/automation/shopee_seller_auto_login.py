@@ -84,7 +84,7 @@ class ShopeeSellerAutoLogin:
             'retry_delay': 2.0
         }
         
-        logger.info("🤖 Shopee卖家端自动登录器已初始化")
+        logger.info("[BOT] Shopee卖家端自动登录器已初始化")
     
     def __enter__(self):
         """上下文管理器入口"""
@@ -98,7 +98,7 @@ class ShopeeSellerAutoLogin:
     def start_browser(self) -> bool:
         """启动浏览器"""
         try:
-            logger.info("🚀 启动浏览器...")
+            logger.info("[START] 启动浏览器...")
             
             self.playwright = sync_playwright().start()
             
@@ -124,11 +124,11 @@ class ShopeeSellerAutoLogin:
             self.login_handler = ShopeeLoginHandler(self.browser)
             self.recording_wizard = EnhancedRecordingWizard()
             
-            logger.success("✅ 浏览器启动成功")
+            logger.success("[OK] 浏览器启动成功")
             return True
             
         except Exception as e:
-            logger.error(f"❌ 浏览器启动失败: {e}")
+            logger.error(f"[FAIL] 浏览器启动失败: {e}")
             return False
     
     def close_browser(self):
@@ -136,14 +136,14 @@ class ShopeeSellerAutoLogin:
         try:
             if self.browser:
                 self.browser.close()
-                logger.info("✅ 浏览器已关闭")
+                logger.info("[OK] 浏览器已关闭")
             
             if self.playwright:
                 self.playwright.stop()
-                logger.info("✅ Playwright已停止")
+                logger.info("[OK] Playwright已停止")
                 
         except Exception as e:
-            logger.error(f"⚠️ 关闭浏览器时出错: {e}")
+            logger.error(f"[WARN] 关闭浏览器时出错: {e}")
     
     def login_single_account(self, account_info: Dict[str, Any]) -> LoginResult:
         """
@@ -159,8 +159,8 @@ class ShopeeSellerAutoLogin:
         account_id = account_info.get('account_id', 'Unknown')
         login_url = account_info.get('login_url', '')
         
-        logger.info(f"🎯 开始登录账号: {account_id}")
-        logger.info(f"🔗 登录URL: {login_url}")
+        logger.info(f"[TARGET] 开始登录账号: {account_id}")
+        logger.info(f"[LINK] 登录URL: {login_url}")
         
         try:
             # 步骤1: 验证账号信息
@@ -188,9 +188,9 @@ class ShopeeSellerAutoLogin:
                 if svc.ensure_logged_in("shopee", page, account_info):
                     final_url = page.url
                     login_time = time.time() - start_time
-                    logger.success(f"🎉 账号 {account_id} 登录成功！（LoginService）")
-                    logger.info(f"📊 登录耗时: {login_time:.2f} 秒")
-                    logger.info(f"🔗 最终URL: {final_url}")
+                    logger.success(f"[DONE] 账号 {account_id} 登录成功！（LoginService）")
+                    logger.info(f"[DATA] 登录耗时: {login_time:.2f} 秒")
+                    logger.info(f"[LINK] 最终URL: {final_url}")
                     return LoginResult(
                         success=True,
                         account_id=account_id,
@@ -199,9 +199,9 @@ class ShopeeSellerAutoLogin:
                         login_time=login_time,
                     )
                 else:
-                    logger.warning("⚠️ LoginService 未完成登录，回退到 legacy 自动登录")
+                    logger.warning("[WARN] LoginService 未完成登录，回退到 legacy 自动登录")
             except Exception as e:
-                logger.warning(f"⚠️ LoginService 调用失败，回退到 legacy 自动登录: {e}")
+                logger.warning(f"[WARN] LoginService 调用失败，回退到 legacy 自动登录: {e}")
 
             # 步骤3(b): 执行 legacy 自动登录
             login_success = self._perform_auto_login(page, account_info)
@@ -211,9 +211,9 @@ class ShopeeSellerAutoLogin:
                 final_url = page.url
                 login_time = time.time() - start_time
                 
-                logger.success(f"🎉 账号 {account_id} 登录成功！")
-                logger.info(f"📊 登录耗时: {login_time:.2f} 秒")
-                logger.info(f"🔗 最终URL: {final_url}")
+                logger.success(f"[DONE] 账号 {account_id} 登录成功！")
+                logger.info(f"[DATA] 登录耗时: {login_time:.2f} 秒")
+                logger.info(f"[LINK] 最终URL: {final_url}")
                 
                 return LoginResult(
                     success=True,
@@ -232,7 +232,7 @@ class ShopeeSellerAutoLogin:
                 
         except Exception as e:
             error_msg = f"登录过程异常: {e}"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"[FAIL] {error_msg}")
             
             return LoginResult(
                 success=False,
@@ -251,13 +251,13 @@ class ShopeeSellerAutoLogin:
         Returns:
             List[LoginResult]: 登录结果列表
         """
-        logger.info(f"🚀 开始批量登录 {len(accounts)} 个账号")
+        logger.info(f"[START] 开始批量登录 {len(accounts)} 个账号")
         
         results = []
         
         for i, account in enumerate(accounts, 1):
             account_id = account.get('account_id', f'Account_{i}')
-            logger.info(f"📋 正在处理账号 {i}/{len(accounts)}: {account_id}")
+            logger.info(f"[LIST] 正在处理账号 {i}/{len(accounts)}: {account_id}")
             
             try:
                 # 登录单个账号
@@ -266,11 +266,11 @@ class ShopeeSellerAutoLogin:
                 
                 # 短暂休息，避免请求过快
                 if i < len(accounts):
-                    logger.info("⏳ 账号间隔休息...")
+                    logger.info("[WAIT] 账号间隔休息...")
                     time.sleep(3.0)
                     
             except Exception as e:
-                logger.error(f"❌ 账号 {account_id} 处理异常: {e}")
+                logger.error(f"[FAIL] 账号 {account_id} 处理异常: {e}")
                 results.append(LoginResult(
                     success=False,
                     account_id=account_id,
@@ -289,16 +289,16 @@ class ShopeeSellerAutoLogin:
         
         for field in required_fields:
             if not account_info.get(field):
-                logger.error(f"❌ 缺少必要字段: {field}")
+                logger.error(f"[FAIL] 缺少必要字段: {field}")
                 return False
         
         # 验证URL格式
         login_url = account_info.get('login_url', '')
         if not login_url.startswith(('http://', 'https://')):
-            logger.error(f"❌ 登录URL格式无效: {login_url}")
+            logger.error(f"[FAIL] 登录URL格式无效: {login_url}")
             return False
         
-        logger.success("✅ 账号信息验证通过")
+        logger.success("[OK] 账号信息验证通过")
         return True
     
     def _open_login_page(self, account_info: Dict[str, Any]) -> Optional[Page]:
@@ -306,7 +306,7 @@ class ShopeeSellerAutoLogin:
         login_url = account_info.get('login_url', '')
         
         try:
-            logger.info(f"🌐 正在打开登录页面: {login_url}")
+            logger.info(f"[WEB] 正在打开登录页面: {login_url}")
             
             # 创建新页面
             page = self.browser.new_page()
@@ -319,20 +319,20 @@ class ShopeeSellerAutoLogin:
             page.goto(login_url, wait_until='domcontentloaded')
             
             # 等待页面稳定
-            logger.info("⏳ 等待页面加载完成...")
+            logger.info("[WAIT] 等待页面加载完成...")
             time.sleep(3.0)
             
             # 验证页面是否正确加载
             if self._verify_login_page(page):
-                logger.success("✅ 登录页面加载成功")
+                logger.success("[OK] 登录页面加载成功")
                 return page
             else:
-                logger.error("❌ 登录页面验证失败")
+                logger.error("[FAIL] 登录页面验证失败")
                 page.close()
                 return None
                 
         except Exception as e:
-            logger.error(f"❌ 打开登录页面失败: {e}")
+            logger.error(f"[FAIL] 打开登录页面失败: {e}")
             if 'page' in locals():
                 try:
                     page.close()
@@ -346,7 +346,7 @@ class ShopeeSellerAutoLogin:
             # 检查页面标题
             title = page.title().lower()
             if any(keyword in title for keyword in ['login', 'signin', 'seller', 'shopee']):
-                logger.info(f"✅ 页面标题验证通过: {title}")
+                logger.info(f"[OK] 页面标题验证通过: {title}")
                 return True
             
             # 检查关键元素
@@ -366,22 +366,22 @@ class ShopeeSellerAutoLogin:
                 try:
                     element = page.query_selector(indicator)
                     if element and element.is_visible():
-                        logger.info(f"✅ 找到登录元素: {indicator}")
+                        logger.info(f"[OK] 找到登录元素: {indicator}")
                         return True
                 except:
                     continue
             
-            logger.warning("⚠️ 未找到明确的登录页面标识")
+            logger.warning("[WARN] 未找到明确的登录页面标识")
             return False
             
         except Exception as e:
-            logger.error(f"❌ 验证登录页面时出错: {e}")
+            logger.error(f"[FAIL] 验证登录页面时出错: {e}")
             return False
     
     def _perform_auto_login(self, page: Page, account_info: Dict[str, Any]) -> bool:
         """执行自动登录过程"""
         try:
-            logger.info("🤖 开始执行自动登录...")
+            logger.info("[BOT] 开始执行自动登录...")
             
             # 方法1: 使用改进的录制向导
             if self._try_enhanced_recording_wizard(page, account_info):
@@ -395,20 +395,20 @@ class ShopeeSellerAutoLogin:
             if self._try_basic_login(page, account_info):
                 return True
             
-            logger.error("❌ 所有登录方法均失败")
+            logger.error("[FAIL] 所有登录方法均失败")
             return False
             
         except Exception as e:
-            logger.error(f"❌ 自动登录执行异常: {e}")
+            logger.error(f"[FAIL] 自动登录执行异常: {e}")
             return False
     
     def _try_enhanced_recording_wizard(self, page: Page, account_info: Dict[str, Any]) -> bool:
         """尝试使用改进的录制向导"""
         try:
-            logger.info("🎯 尝试使用改进的录制向导...")
+            logger.info("[TARGET] 尝试使用改进的录制向导...")
             
             if not self.recording_wizard:
-                logger.warning("⚠️ 录制向导未初始化")
+                logger.warning("[WARN] 录制向导未初始化")
                 return False
             
             # 使用录制向导执行登录
@@ -420,23 +420,23 @@ class ShopeeSellerAutoLogin:
             )
             
             if result:
-                logger.success("✅ 录制向导登录成功")
+                logger.success("[OK] 录制向导登录成功")
                 return True
             else:
-                logger.warning("⚠️ 录制向导登录失败")
+                logger.warning("[WARN] 录制向导登录失败")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ 录制向导登录异常: {e}")
+            logger.error(f"[FAIL] 录制向导登录异常: {e}")
             return False
     
     def _try_login_handler(self, account_info: Dict[str, Any]) -> bool:
         """尝试使用登录处理器"""
         try:
-            logger.info("🎯 尝试使用登录处理器...")
+            logger.info("[TARGET] 尝试使用登录处理器...")
             
             if not self.login_handler:
-                logger.warning("⚠️ 登录处理器未初始化")
+                logger.warning("[WARN] 登录处理器未初始化")
                 return False
             
             # 转换账号信息格式
@@ -451,20 +451,20 @@ class ShopeeSellerAutoLogin:
             result = self.login_handler.login_to_shopee(handler_account_info)
             
             if result:
-                logger.success("✅ 登录处理器登录成功")
+                logger.success("[OK] 登录处理器登录成功")
                 return True
             else:
-                logger.warning("⚠️ 登录处理器登录失败")
+                logger.warning("[WARN] 登录处理器登录失败")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ 登录处理器异常: {e}")
+            logger.error(f"[FAIL] 登录处理器异常: {e}")
             return False
     
     def _try_basic_login(self, page: Page, account_info: Dict[str, Any]) -> bool:
         """尝试基础登录方法"""
         try:
-            logger.info("🎯 尝试基础登录方法...")
+            logger.info("[TARGET] 尝试基础登录方法...")
             
             username = account_info.get('username', '')
             password = account_info.get('password', '')
@@ -482,19 +482,19 @@ class ShopeeSellerAutoLogin:
                 return False
             
             # 等待登录响应
-            logger.info("⏳ 等待登录响应...")
+            logger.info("[WAIT] 等待登录响应...")
             time.sleep(5.0)
             
             # 检查是否需要验证码
             if self._detect_verification_needed(page):
-                logger.info("📱 检测到验证码需求，等待手动处理...")
+                logger.info("[PHONE] 检测到验证码需求，等待手动处理...")
                 return self._handle_verification_manually(page)
             
             # 验证登录成功
             return self._verify_login_success(page)
             
         except Exception as e:
-            logger.error(f"❌ 基础登录方法异常: {e}")
+            logger.error(f"[FAIL] 基础登录方法异常: {e}")
             return False
     
     def _fill_username(self, page: Page, username: str) -> bool:
@@ -514,12 +514,12 @@ class ShopeeSellerAutoLogin:
                 if element and element.is_visible():
                     element.clear()
                     element.fill(username)
-                    logger.success(f"✅ 用户名填写成功: {selector}")
+                    logger.success(f"[OK] 用户名填写成功: {selector}")
                     return True
             except:
                 continue
         
-        logger.error("❌ 用户名填写失败")
+        logger.error("[FAIL] 用户名填写失败")
         return False
     
     def _fill_password(self, page: Page, password: str) -> bool:
@@ -537,12 +537,12 @@ class ShopeeSellerAutoLogin:
                 if element and element.is_visible():
                     element.clear()
                     element.fill(password)
-                    logger.success(f"✅ 密码填写成功: {selector}")
+                    logger.success(f"[OK] 密码填写成功: {selector}")
                     return True
             except:
                 continue
         
-        logger.error("❌ 密码填写失败")
+        logger.error("[FAIL] 密码填写失败")
         return False
     
     def _click_login_button(self, page: Page) -> bool:
@@ -562,12 +562,12 @@ class ShopeeSellerAutoLogin:
                 element = page.query_selector(selector)
                 if element and element.is_visible():
                     element.click()
-                    logger.success(f"✅ 登录按钮点击成功: {selector}")
+                    logger.success(f"[OK] 登录按钮点击成功: {selector}")
                     return True
             except:
                 continue
         
-        logger.error("❌ 登录按钮点击失败")
+        logger.error("[FAIL] 登录按钮点击失败")
         return False
     
     def _detect_verification_needed(self, page: Page) -> bool:
@@ -587,7 +587,7 @@ class ShopeeSellerAutoLogin:
             try:
                 element = page.query_selector(indicator)
                 if element and element.is_visible():
-                    logger.info(f"✅ 检测到验证码需求: {indicator}")
+                    logger.info(f"[OK] 检测到验证码需求: {indicator}")
                     return True
             except:
                 continue
@@ -596,7 +596,7 @@ class ShopeeSellerAutoLogin:
     
     def _handle_verification_manually(self, page: Page) -> bool:
         """手动处理验证码"""
-        logger.info("📱 等待用户手动处理验证码...")
+        logger.info("[PHONE] 等待用户手动处理验证码...")
         
         # 显示用户指引
         self._show_verification_guidance()
@@ -609,7 +609,7 @@ class ShopeeSellerAutoLogin:
             try:
                 # 检查验证码是否已处理
                 if not self._detect_verification_needed(page):
-                    logger.success("✅ 验证码已处理")
+                    logger.success("[OK] 验证码已处理")
                     return self._verify_login_success(page)
                 
                 time.sleep(2)  # 每2秒检查一次
@@ -618,27 +618,27 @@ class ShopeeSellerAutoLogin:
                 time.sleep(2)
                 continue
         
-        logger.error("❌ 验证码处理超时")
+        logger.error("[FAIL] 验证码处理超时")
         return False
     
     def _show_verification_guidance(self):
         """显示验证码处理指引"""
         print("\n" + "="*60)
-        print("📱 验证码处理指引")
+        print("[PHONE] 验证码处理指引")
         print("="*60)
-        print("\n🎯 请按照以下步骤处理验证码:")
+        print("\n[TARGET] 请按照以下步骤处理验证码:")
         print("   1. 查看弹出的验证码窗口")
         print("   2. 根据提示获取验证码（邮箱/短信）")
         print("   3. 在输入框中输入验证码")
         print("   4. 点击确认按钮")
-        print("\n⏰ 系统将自动检测处理结果")
-        print("💡 如有问题，请查看浏览器窗口进行手动操作")
+        print("\n[TIME] 系统将自动检测处理结果")
+        print("[TIP] 如有问题，请查看浏览器窗口进行手动操作")
         print("\n" + "="*60)
     
     def _verify_login_success(self, page: Page) -> bool:
         """验证登录是否成功"""
         try:
-            logger.info("🔍 验证登录成功状态...")
+            logger.info("[SEARCH] 验证登录成功状态...")
             
             # 等待页面加载
             time.sleep(3.0)
@@ -646,7 +646,7 @@ class ShopeeSellerAutoLogin:
             # 检查URL变化
             current_url = page.url
             if any(keyword not in current_url.lower() for keyword in ['signin', 'login']):
-                logger.success("✅ URL验证：已离开登录页面")
+                logger.success("[OK] URL验证：已离开登录页面")
                 return True
             
             # 检查页面内容
@@ -666,7 +666,7 @@ class ShopeeSellerAutoLogin:
                 try:
                     element = page.query_selector(f'*:has-text("{indicator}")')
                     if element and element.is_visible():
-                        logger.success(f"✅ 内容验证：找到成功标识 {indicator}")
+                        logger.success(f"[OK] 内容验证：找到成功标识 {indicator}")
                         return True
                 except:
                     continue
@@ -674,14 +674,14 @@ class ShopeeSellerAutoLogin:
             # 检查页面标题
             title = page.title().lower()
             if any(keyword in title for keyword in ['seller', 'dashboard', '卖家', '后台']):
-                logger.success(f"✅ 标题验证：{title}")
+                logger.success(f"[OK] 标题验证：{title}")
                 return True
             
-            logger.warning("⚠️ 登录成功状态验证不确定")
+            logger.warning("[WARN] 登录成功状态验证不确定")
             return False
             
         except Exception as e:
-            logger.error(f"❌ 验证登录成功时出错: {e}")
+            logger.error(f"[FAIL] 验证登录成功时出错: {e}")
             return False
     
     def _print_batch_summary(self, results: List[LoginResult]):
@@ -690,22 +690,22 @@ class ShopeeSellerAutoLogin:
         success_count = sum(1 for r in results if r.success)
         
         print("\n" + "="*80)
-        print("📊 批量登录汇总报告")
+        print("[DATA] 批量登录汇总报告")
         print("="*80)
-        print(f"\n📈 整体统计:")
+        print(f"\n[CHART] 整体统计:")
         print(f"   总账号数: {total}")
         print(f"   成功登录: {success_count}")
         print(f"   失败登录: {total - success_count}")
         print(f"   成功率: {success_count/total*100:.1f}%")
         
         if success_count > 0:
-            print(f"\n✅ 成功登录的账号:")
+            print(f"\n[OK] 成功登录的账号:")
             for result in results:
                 if result.success:
                     print(f"   - {result.account_id} ({result.login_time:.1f}s)")
         
         if total - success_count > 0:
-            print(f"\n❌ 失败登录的账号:")
+            print(f"\n[FAIL] 失败登录的账号:")
             for result in results:
                 if not result.success:
                     print(f"   - {result.account_id}: {result.error_message}")

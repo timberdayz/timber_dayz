@@ -13,7 +13,7 @@ def validate_inventory(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     验证库存数据（DSS架构 - 最小化验证）
     
-    ⭐ v4.6.0 DSS架构原则：
+    [*] v4.6.0 DSS架构原则：
     - 表头字段完全参考源文件的实际表头行
     - PostgreSQL只做数据存储（JSONB格式，保留原始中文表头）
     - 目标：把正确不重复的数据入库到PostgreSQL即可
@@ -31,14 +31,14 @@ def validate_inventory(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     for idx, r in enumerate(rows):
         row_errors = []
         
-        # ⭐ DSS架构：不再验证必填字段（product_id、platform_sku等）
+        # [*] DSS架构：不再验证必填字段（product_id、platform_sku等）
         # 原因：
         # 1. 数据保留原始中文表头，字段名可能不固定
         # 2. 去重通过data_hash实现，不依赖业务字段名
         # 3. PostgreSQL支持NULL值，允许空值入库
         # 4. platform_code和shop_id从file_record获取，不需要验证
         
-        # ⭐ 只验证数据格式（如果字段存在且不为空）
+        # [*] 只验证数据格式（如果字段存在且不为空）
         # 1. 数值字段格式验证（支持中英文字段名）
         numeric_int_fields = [
             # 英文字段名

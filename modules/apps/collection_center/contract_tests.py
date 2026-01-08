@@ -39,7 +39,7 @@ def test_contract_discovery():
     assert count > 0, "应该能发现至少一个应用"
     assert "collection_center" in registry.list_applications(), "应该能发现 collection_center"
 
-    logger.info("✅ 应用发现测试通过")
+    logger.info("[OK] 应用发现测试通过")
 
 
 def test_contract_registration():
@@ -57,7 +57,7 @@ def test_contract_registration():
     assert info.get("version") == "1.0.0", "应用版本应该正确"
     assert "description" in info, "应该有描述信息"
 
-    logger.info("✅ 应用注册测试通过")
+    logger.info("[OK] 应用注册测试通过")
 
 
 def test_contract_health_check():
@@ -72,7 +72,7 @@ def test_contract_health_check():
     is_healthy = app.health_check()
     assert is_healthy, "健康检查应该通过"
 
-    logger.info("✅ 健康检查测试通过")
+    logger.info("[OK] 健康检查测试通过")
 
 
 def test_contract_basic_interface():
@@ -92,7 +92,7 @@ def test_contract_basic_interface():
     # 测试运行状态
     assert not app.is_running(), "初始状态应该是未运行"
 
-    logger.info("✅ 基本接口测试通过")
+    logger.info("[OK] 基本接口测试通过")
 
 
 def test_new_architecture_modules():
@@ -103,7 +103,7 @@ def test_new_architecture_modules():
         from modules.utils.step_runner import StepRunner
         from modules.utils.data_processing_pipeline import DataProcessingPipeline
 
-        logger.info("✅ 新架构模块导入测试通过")
+        logger.info("[OK] 新架构模块导入测试通过")
 
         # 测试StepRunner基础功能
         class MockBrowser:
@@ -116,7 +116,7 @@ def test_new_architecture_modules():
         templates = step_runner.create_all_platform_templates()
         assert len(templates) >= 3, "应该创建至少3个平台模板"
 
-        logger.info("✅ 新架构模块功能测试通过")
+        logger.info("[OK] 新架构模块功能测试通过")
 
     except Exception as e:
         logger.error(f"新架构模块测试失败: {e}")
@@ -139,7 +139,7 @@ def test_handlers_integration():
         accounts_with_login_url = sum(1 for acc in accounts if acc.get('login_url'))
         logger.info(f"配置login_url的账号: {accounts_with_login_url}/{len(accounts)}")
 
-        logger.info("✅ 处理器集成测试通过")
+        logger.info("[OK] 处理器集成测试通过")
 
     except Exception as e:
         logger.error(f"处理器集成测试失败: {e}")
@@ -211,18 +211,18 @@ def test_time_policy_resolution_and_routing():
     ok, _ = apply_time_policy_tiktok(None, adapter, RollingDaysPolicy(28))
     assert ok and dp.called[-1][0] == "run"
 
-    # week index → week
+    # week index -> week
     ok, _ = apply_time_policy_tiktok(None, adapter, WeekInMonthPolicy(2025, 1, 1))
     assert ok and dp.called[-1][0] == "week"
 
-    # custom range → custom
+    # custom range -> custom
     ok, _ = apply_time_policy_tiktok(None, adapter, CustomRangePolicy(date(2025,1,6), date(2025,1,12)))
     assert ok and dp.called[-1][0] == "custom"
 
 
 def run_all_contract_tests():
     """运行所有契约测试"""
-    print("🔍 开始数据采集中心应用契约测试...")
+    print("[SEARCH] 开始数据采集中心应用契约测试...")
 
     try:
         test_contract_discovery()
@@ -232,11 +232,11 @@ def run_all_contract_tests():
         test_new_architecture_modules()
         test_handlers_integration()
 
-        print("✅ 所有契约测试通过")
+        print("[OK] 所有契约测试通过")
         return True
 
     except Exception as e:
-        print(f"❌ 契约测试失败: {e}")
+        print(f"[FAIL] 契约测试失败: {e}")
         logger.error(f"契约测试失败: {e}")
         return False
 

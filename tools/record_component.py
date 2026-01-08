@@ -306,7 +306,7 @@ class ComponentRecorder:
         print(f"录制步骤数: {len(self.recorded_actions)}")
         if trace_path:
             print(f"Trace文件: {trace_path}")
-            print(f"\n💡 使用以下命令查看trace：")
+            print(f"\n[TIP] 使用以下命令查看trace：")
             print(f"   playwright show-trace {trace_path}")
         print("\n请检查并手动完善生成的YAML文件。")
         
@@ -556,20 +556,20 @@ class ComponentRecorder:
         """
         提取步骤（从recorded_actions）
         
-        ✅ v4.7.2改进：
+        [OK] v4.7.2改进：
         - navigate 步骤自动包含等待逻辑
         - wait 步骤自动添加 type 字段
         - 关键操作步骤自动添加重试配置
         - 不生成 TODO 占位符
         """
         if self.recorded_actions:
-            # ⭐ 关键改进：增强所有步骤的配置
+            # [*] 关键改进：增强所有步骤的配置
             enhanced_steps = []
             
             for i, action in enumerate(self.recorded_actions):
                 current_action = dict(action)  # 复制以避免修改原数据
                 
-                # ⭐ v4.7.2: 为 wait 步骤添加 type 字段
+                # [*] v4.7.2: 为 wait 步骤添加 type 字段
                 if current_action.get('action') == 'wait':
                     if 'type' not in current_action:
                         # 有 duration 表示固定延迟
@@ -588,7 +588,7 @@ class ComponentRecorder:
                     
                     enhanced_steps.append(current_action)
                 
-                # ⭐ 官方最佳实践：navigate 使用 wait_until 参数
+                # [*] 官方最佳实践：navigate 使用 wait_until 参数
                 elif current_action.get('action') in ['navigate', 'goto']:
                     # 确保使用官方推荐的 wait_until
                     if 'wait_until' not in current_action:
@@ -596,7 +596,7 @@ class ComponentRecorder:
                     
                     enhanced_steps.append(current_action)
                     
-                    # ⭐ 官方推荐：SPA应用需要额外的 networkidle 等待
+                    # [*] 官方推荐：SPA应用需要额外的 networkidle 等待
                     # 检查下一步是否已经是 wait 步骤
                     next_is_wait = (
                         i + 1 < len(self.recorded_actions) and 
@@ -612,7 +612,7 @@ class ComponentRecorder:
                             'comment': 'Auto-added: Wait for network idle (Playwright best practice for SPA)'
                         })
                 
-                # ⭐ v4.7.2: 为关键操作步骤添加重试配置
+                # [*] v4.7.2: 为关键操作步骤添加重试配置
                 elif current_action.get('action') in ['click', 'fill']:
                     # 默认重试2次（失败时自动关闭弹窗后重试）
                     if 'max_retries' not in current_action:
@@ -625,19 +625,19 @@ class ComponentRecorder:
             
             return enhanced_steps
         
-        # ✅ 模板步骤：遵循官方最佳实践，不使用 TODO 占位符
+        # [OK] 模板步骤：遵循官方最佳实践，不使用 TODO 占位符
         return [
             {
                 'action': 'navigate',
                 'url': '{{params.url}}',
-                'wait_until': 'domcontentloaded',  # ⭐ Playwright 官方推荐
+                'wait_until': 'domcontentloaded',  # [*] Playwright 官方推荐
                 'timeout': 60000,
                 'comment': 'Navigate with built-in wait (Playwright default)'
             },
             {
                 'action': 'wait',
                 'type': 'navigation',
-                'wait_until': 'networkidle',  # ⭐ 官方推荐用于 SPA
+                'wait_until': 'networkidle',  # [*] 官方推荐用于 SPA
                 'timeout': 30000,
                 'comment': 'Wait for network idle (recommended for dynamic pages)'
             }
@@ -647,13 +647,13 @@ class ComponentRecorder:
         """
         生成成功判定条件
         
-        ✅ v4.7.1改进：
+        [OK] v4.7.1改进：
         - 不生成 TODO 占位符
         - 使用官方推荐的验证方式
         - 自动从录制中提取实际 URL
         """
         if component_type == 'login':
-            # ⭐ 官方推荐：使用 URL 模式匹配 + 元素存在性验证
+            # [*] 官方推荐：使用 URL 模式匹配 + 元素存在性验证
             return [
                 {
                     'type': 'url_contains',
@@ -662,14 +662,14 @@ class ComponentRecorder:
                 },
                 {
                     'type': 'element_exists',
-                    'selector': 'role=navigation',  # ⭐ 使用官方推荐的 role selector
+                    'selector': 'role=navigation',  # [*] 使用官方推荐的 role selector
                     'timeout': 5000,
                     'comment': 'Verify navigation menu exists (using get_by_role)'
                 }
             ]
         
         elif component_type == 'navigation':
-            # ⭐ 尝试从录制中提取目标 URL
+            # [*] 尝试从录制中提取目标 URL
             target_url_pattern = self._extract_target_url_from_actions()
             
             if target_url_pattern:
@@ -681,7 +681,7 @@ class ComponentRecorder:
                     }
                 ]
             else:
-                # ⭐ 如果无法提取，返回空数组（而不是 TODO）
+                # [*] 如果无法提取，返回空数组（而不是 TODO）
                 # 让测试工具提示用户手动添加
                 logger.info("No target URL detected in navigation. Please add success_criteria manually.")
                 return []
@@ -695,7 +695,7 @@ class ComponentRecorder:
             ]
         
         else:
-            # ⭐ 默认：空数组，不生成 TODO
+            # [*] 默认：空数组，不生成 TODO
             logger.info(f"No default success_criteria for type '{component_type}'. Please add manually if needed.")
             return []
     
@@ -703,7 +703,7 @@ class ComponentRecorder:
         """
         从录制的操作中提取目标 URL 特征
         
-        ✅ 遵循官方推荐：从实际操作中推断，而不是猜测
+        [OK] 遵循官方推荐：从实际操作中推断，而不是猜测
         
         Returns:
             str: 提取的URL特征（如 '/orders', '/products'），失败返回 None

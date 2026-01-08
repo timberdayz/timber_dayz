@@ -26,7 +26,7 @@ def _validate_core_ownership_fields(row: Dict[str, Any], domain: str) -> List[Di
     """
     验证核心归属字段（DSS架构 - 最小化验证）
     
-    ⭐ v4.6.0 DSS架构原则：
+    [*] v4.6.0 DSS架构原则：
     - 表头字段完全参考源文件的实际表头行
     - PostgreSQL只做数据存储（JSONB格式，保留原始中文表头）
     - 目标：把正确不重复的数据入库到PostgreSQL即可
@@ -47,14 +47,14 @@ def _validate_core_ownership_fields(row: Dict[str, Any], domain: str) -> List[Di
     """
     errors = []
     
-    # ⭐ DSS架构：不进行任何必填字段验证
+    # [*] DSS架构：不进行任何必填字段验证
     # 原因：
     # 1. 数据保留原始中文表头，字段名可能不固定
     # 2. 去重通过data_hash实现，不依赖业务字段名
     # 3. PostgreSQL支持NULL值，允许空值入库
     # 4. platform_code和shop_id从file_record获取，不需要验证
     
-    # ⭐ 只验证数据格式（如果字段存在且不为空）
+    # [*] 只验证数据格式（如果字段存在且不为空）
     # 1. shop_id格式验证（如果存在）
     shop_id = row.get("shop_id")
     if shop_id and str(shop_id).strip() and len(str(shop_id).strip()) < 2:
@@ -73,7 +73,7 @@ def _validate_core_ownership_fields(row: Dict[str, Any], domain: str) -> List[Di
             "msg": "账号长度至少2位"
         })
     
-    # ⭐ 不再验证日期字段（即使格式错误也不隔离）
+    # [*] 不再验证日期字段（即使格式错误也不隔离）
     # 原因：日期字段不是主键，格式错误不影响数据入库
     # 日期格式验证可以在数据标准化阶段处理，但不应该导致数据隔离
     
@@ -101,7 +101,7 @@ def _parse_date(v: Any) -> str | None:
     if not s or s.lower() in ['none', 'null', '暂无数据', '']:
         return None
     
-    # ⭐ v4.6.1修复：处理截断的时间格式（如"2025-09-25 0"）
+    # [*] v4.6.1修复：处理截断的时间格式（如"2025-09-25 0"）
     # 如果格式是"YYYY-MM-DD 0"或"YYYY-MM-DD 0:0"等，补全为"YYYY-MM-DD 00:00:00"
     if re.match(r'^\d{4}-\d{2}-\d{2}\s+0(?::0)*$', s):
         s = s.split()[0] + ' 00:00:00'
@@ -173,19 +173,19 @@ def validate_orders(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     验证订单数据（v4.6.1优化 - 极简验证，只保留警告）
     
     核心原则：
-    - ⭐ v4.6.1优化：orders域不进行任何必填验证，所有数据都允许入库
-    - ⭐ v4.6.1优化：主键字段（platform_code、order_id）会在入库时自动处理
-    - ⭐ v4.6.1优化：所有验证只记录警告，不隔离数据
+    - [*] v4.6.1优化：orders域不进行任何必填验证，所有数据都允许入库
+    - [*] v4.6.1优化：主键字段（platform_code、order_id）会在入库时自动处理
+    - [*] v4.6.1优化：所有验证只记录警告，不隔离数据
     - 隔离区只针对真正无法入库的数据（主键字段为空且无法自动生成）
     """
     errors, warnings = [], []
     ok = 0
     
     for idx, r in enumerate(rows):
-        # ⭐ v4.6.1优化：orders域不进行任何必填验证
+        # [*] v4.6.1优化：orders域不进行任何必填验证
         # 主键字段会在upsert_orders_v2中自动处理（从file_record提取或生成）
         
-        # ⭐ v4.6.1新增：已取消订单的特殊处理
+        # [*] v4.6.1新增：已取消订单的特殊处理
         # 已取消订单通常缺少采购、付款、发货等信息，这是正常的，不应该报错
         order_status = r.get("order_status") or r.get("订单状态")
         is_cancelled = False
@@ -197,7 +197,7 @@ def validate_orders(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         # order_id验证（只警告，不隔离）
         order_id = r.get("order_id")
         if not order_id:
-            # ⭐ v4.6.1新增：已取消订单如果没有order_id，尝试从attributes中提取
+            # [*] v4.6.1新增：已取消订单如果没有order_id，尝试从attributes中提取
             if is_cancelled and r.get("attributes") and isinstance(r.get("attributes"), dict):
                 order_id = (
                     r["attributes"].get("订单号") or 
@@ -223,10 +223,10 @@ def validate_orders(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             })
         
         # product_id验证（只警告，不隔离）
-        # ⭐ v4.6.1新增：已取消订单可能没有product_id，这是正常的
+        # [*] v4.6.1新增：已取消订单可能没有product_id，这是正常的
         product_id = r.get("product_id") or r.get("platform_sku")
         if not product_id:
-            # ⭐ v4.6.1新增：已取消订单如果没有product_id，尝试从attributes中提取
+            # [*] v4.6.1新增：已取消订单如果没有product_id，尝试从attributes中提取
             if is_cancelled and r.get("attributes") and isinstance(r.get("attributes"), dict):
                 product_id = (
                     r["attributes"].get("产品ID") or 
@@ -260,7 +260,7 @@ def validate_orders(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "msg": "产品ID或SKU长度至少2位（建议格式）"
             })
         
-        # ⭐ v4.6.1优化：数值字段验证改为只警告，不隔离
+        # [*] v4.6.1优化：数值字段验证改为只警告，不隔离
         # 只要有核心归属字段（shop_id、date），就不隔离
         
         # 数量验证（只警告）
@@ -308,7 +308,7 @@ def validate_orders(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         if order_status and order_status.lower() not in valid_statuses:
             warnings.append({"row": idx, "col": "order_status", "type": "format", "msg": f"订单状态可能不正确: {order_status}"})
         
-        # ⭐ v4.6.1优化：不添加任何错误，所有数据都允许入库
+        # [*] v4.6.1优化：不添加任何错误，所有数据都允许入库
         # 主键字段会在upsert_orders_v2中自动处理
         
         # 统计通过的行（所有行都通过）
@@ -321,7 +321,7 @@ def validate_services(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     验证服务/运营数据（DSS架构 - 最小化验证）
     
-    ⭐ v4.6.0 DSS架构原则：
+    [*] v4.6.0 DSS架构原则：
     - 表头字段完全参考源文件的实际表头行
     - PostgreSQL只做数据存储（JSONB格式，保留原始中文表头）
     - 目标：把正确不重复的数据入库到PostgreSQL即可
@@ -339,7 +339,7 @@ def validate_services(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     for idx, r in enumerate(rows):
         row_errors = []
         
-        # ⭐ DSS架构：不进行任何必填字段验证
+        # [*] DSS架构：不进行任何必填字段验证
         # 只验证数据格式（如果字段存在且不为空）
         
         # 1. 日期格式验证（如果存在）
@@ -418,7 +418,7 @@ def validate_traffic(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     验证流量数据（DSS架构 - 最小化验证）
     
-    ⭐ v4.6.0 DSS架构原则：
+    [*] v4.6.0 DSS架构原则：
     - 表头字段完全参考源文件的实际表头行
     - PostgreSQL只做数据存储（JSONB格式，保留原始中文表头）
     - 目标：把正确不重复的数据入库到PostgreSQL即可
@@ -436,7 +436,7 @@ def validate_traffic(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     for idx, r in enumerate(rows):
         row_errors = []
         
-        # ⭐ DSS架构：不进行任何必填字段验证
+        # [*] DSS架构：不进行任何必填字段验证
         # 只验证数据格式（如果字段存在且不为空）
         
         # 1. 日期格式验证（如果存在）
@@ -515,7 +515,7 @@ def validate_analytics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     验证分析数据（DSS架构 - 最小化验证）
     
-    ⭐ v4.6.0 DSS架构原则：
+    [*] v4.6.0 DSS架构原则：
     - 表头字段完全参考源文件的实际表头行
     - PostgreSQL只做数据存储（JSONB格式，保留原始中文表头）
     - 目标：把正确不重复的数据入库到PostgreSQL即可
@@ -533,7 +533,7 @@ def validate_analytics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     for idx, r in enumerate(rows):
         row_errors = []
         
-        # ⭐ DSS架构：不进行任何必填字段验证
+        # [*] DSS架构：不进行任何必填字段验证
         # 只验证数据格式（如果字段存在且不为空）
         
         # 1. 日期格式验证（如果存在）
@@ -613,7 +613,7 @@ def validate_product_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     验证产品指标数据（DSS架构 - 最小化验证）
     
-    ⭐ v4.6.0 DSS架构原则：
+    [*] v4.6.0 DSS架构原则：
     - 表头字段完全参考源文件的实际表头行
     - PostgreSQL只做数据存储（JSONB格式，保留原始中文表头）
     - 目标：把正确不重复的数据入库到PostgreSQL即可
@@ -631,7 +631,7 @@ def validate_product_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     for idx, r in enumerate(rows):
         row_errors = []
         
-        # ⭐ DSS架构：不进行任何必填字段验证
+        # [*] DSS架构：不进行任何必填字段验证
         # 只验证数据格式（如果字段存在且不为空）
         
         # 1. 日期格式验证（如果存在）

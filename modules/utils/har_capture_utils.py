@@ -41,7 +41,7 @@ def run_har_capture(playwright, current_page, *, platform_key: str, account_id: 
     har_path = out_dir / f"{ts}_{platform_key}_{safe_account}_{data_type_key}.har"
     meta_path = out_dir / f"{ts}_{platform_key}_{safe_account}_{data_type_key}.metadata.json"
 
-    print("\n🧰 正在创建录制专用窗口（开启 HAR 捕获）…")
+    print("\n[TOOLKIT] 正在创建录制专用窗口（开启 HAR 捕获）...")
     browser = playwright.chromium.launch(headless=False)
     context = browser.new_context(
         storage_state=storage_state,
@@ -52,11 +52,11 @@ def run_har_capture(playwright, current_page, *, platform_key: str, account_id: 
     )
     page = context.new_page()
     if current_url and current_url != "about:blank":
-        print(f"🔗 录制窗口直达: {current_url}")
+        print(f"[LINK] 录制窗口直达: {current_url}")
         try:
             page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
         except Exception as e:
-            print(f"⚠️ 录制窗口导航异常: {e}")
+            print(f"[WARN] 录制窗口导航异常: {e}")
 
     keywords = ["export", "datacenter", "traffic", "product", "finance", "order"]
 
@@ -64,7 +64,7 @@ def run_har_capture(playwright, current_page, *, platform_key: str, account_id: 
         try:
             url = resp.url
             if any(k in url for k in keywords):
-                print(f"📡 RESPONSE {resp.status}: {url}")
+                print(f"[SIGNAL] RESPONSE {resp.status}: {url}")
         except Exception:
             pass
 
@@ -72,19 +72,19 @@ def run_har_capture(playwright, current_page, *, platform_key: str, account_id: 
 
     # 自动打开 Playwright Inspector（可视化录制面板）
     try:
-        print("\n🛠️ 正在启动Playwright Inspector（可视化录制面板）…")
+        print("\n[TOOLS] 正在启动Playwright Inspector（可视化录制面板）...")
         page.pause()  # 将弹出 Inspector，用户点击“Resume”后继续
     except Exception as e:
-        print(f"⚠️ 无法自动打开Inspector: {e}")
+        print(f"[WARN] 无法自动打开Inspector: {e}")
 
-    print("\n📋 说明：")
+    print("\n[LIST] 说明：")
     print("- 请在【录制专用窗口】中进行以下操作：")
-    print("  1) 切换 统计时间 → 按周，选择目标周度")
+    print("  1) 切换 统计时间 -> 按周，选择目标周度")
     print("  2) 勾选需要的指标")
     print("  3) 点击 导出")
-    print("- 操作完成后，回到终端按 Enter 结束 HAR 捕获…")
+    print("- 操作完成后，回到终端按 Enter 结束 HAR 捕获...")
 
-    input("\n⏹️  按 Enter 结束捕获并保存 HAR… ")
+    input("\n[STOP]  按 Enter 结束捕获并保存 HAR... ")
 
     meta = {
         "platform": platform_display,
@@ -98,17 +98,17 @@ def run_har_capture(playwright, current_page, *, platform_key: str, account_id: 
     }
     try:
         meta_path.write_text(import_json_dumps(meta), encoding="utf-8")
-        print(f"📝 已保存元数据: {meta_path}")
+        print(f"[NOTE] 已保存元数据: {meta_path}")
     except Exception as e:
-        print(f"⚠️ 无法写入元数据: {e}")
+        print(f"[WARN] 无法写入元数据: {e}")
 
     try:
         context.close()
         browser.close()
     except Exception as e:
-        print(f"⚠️ 关闭录制窗口失败: {e}")
+        print(f"[WARN] 关闭录制窗口失败: {e}")
 
-    print(f"\n✅ HAR 捕获完成: {har_path}")
+    print(f"\n[OK] HAR 捕获完成: {har_path}")
     print("   请把该文件或路径发我，我将解析参数并生成参数化导出配置。")
     return har_path
 

@@ -378,7 +378,7 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
 @celery_app.task(name="backend.tasks.scheduled_tasks.verify_backup")
 def verify_backup():
     """
-    ⭐ Phase 2.2: 备份验证任务（业务层）
+    [*] Phase 2.2: 备份验证任务（业务层）
     验证最新备份的完整性
     执行频率：每天凌晨 4:00（备份后 1 小时）
     
@@ -435,7 +435,7 @@ def verify_backup():
 @celery_app.task(name="backend.tasks.scheduled_tasks.cleanup_old_backups")
 def cleanup_old_backups(retention_days: int = 30):
     """
-    ⭐ Phase 2.2: 备份清理任务（业务层）
+    [*] Phase 2.2: 备份清理任务（业务层）
     按保留策略删除旧备份
     执行频率：每天凌晨 5:00
     
@@ -504,7 +504,7 @@ def cleanup_old_backups(retention_days: int = 30):
 @celery_app.task(name="backend.tasks.scheduled_tasks.trigger_system_backup")
 def trigger_system_backup():
     """
-    ⭐ Phase 2.2: 触发系统级备份（业务层）
+    [*] Phase 2.2: 触发系统级备份（业务层）
     通过 subprocess 间接调用统一备份脚本（不直接执行备份逻辑）
     执行频率：按需（手动触发或特殊场景）
     

@@ -223,15 +223,15 @@ async def delete_config(
 async def list_accounts(
     platform: Optional[str] = Query(None, description="按平台筛选"),
     db: AsyncSession = Depends(get_async_db),
-    request: Request = None  # ⭐ Phase 3: 用于获取缓存服务
+    request: Request = None  # [*] Phase 3: 用于获取缓存服务
 ):
     """
     获取账号列表（脱敏）
     
     v4.7.0: 从数据库读取账号信息，返回脱敏后的数据
-    ⭐ Phase 3: 添加缓存支持（5分钟TTL）
+    [*] Phase 3: 添加缓存支持（5分钟TTL）
     """
-    # ⭐ Phase 3: 尝试从缓存获取
+    # [*] Phase 3: 尝试从缓存获取
     if request and hasattr(request.app.state, 'cache_service'):
         cache_service = request.app.state.cache_service
         cached_data = await cache_service.get("accounts_list", platform=platform)
@@ -276,7 +276,7 @@ async def list_accounts(
         
         logger.info(f"返回账号列表: {len(result)} 条记录")
         
-        # ⭐ Phase 3: 写入缓存
+        # [*] Phase 3: 写入缓存
         if request and hasattr(request.app.state, 'cache_service'):
             cache_service = request.app.state.cache_service
             await cache_service.set("accounts_list", result, ttl=300, platform=platform)  # 5分钟TTL
@@ -403,8 +403,8 @@ async def create_task(
             date_range=request.date_range,
             granularity=request.granularity,
             debug_mode=request.debug_mode,
-            parallel_mode=request.parallel_mode,  # ⭐ Phase 9.1: 并行执行模式
-            max_parallel=request.max_parallel,  # ⭐ Phase 9.1: 最大并发数
+            parallel_mode=request.parallel_mode,  # [*] Phase 9.1: 并行执行模式
+            max_parallel=request.max_parallel,  # [*] Phase 9.1: 最大并发数
             db_session_maker=db.get_bind()  # 传递数据库引擎
         )
     )
@@ -1070,8 +1070,8 @@ async def _execute_collection_task_background(
     date_range: Dict[str, str],
     granularity: str,
     debug_mode: bool,
-    parallel_mode: bool,  # ⭐ Phase 9.1
-    max_parallel: int,  # ⭐ Phase 9.1
+    parallel_mode: bool,  # [*] Phase 9.1
+    max_parallel: int,  # [*] Phase 9.1
     db_session_maker
 ):
     """
@@ -1086,8 +1086,8 @@ async def _execute_collection_task_background(
         date_range: 日期范围
         granularity: 粒度
         debug_mode: 调试模式
-        parallel_mode: ⭐ 并行执行模式（Phase 9.1）
-        max_parallel: ⭐ 最大并发数（Phase 9.1）
+        parallel_mode: [*] 并行执行模式（Phase 9.1）
+        max_parallel: [*] 最大并发数（Phase 9.1）
         db_session_maker: 数据库引擎（用于创建新session）
     """
     from backend.models.database import AsyncSessionLocal
@@ -1113,7 +1113,7 @@ async def _execute_collection_task_background(
                 from backend.services.account_loader_service import get_account_loader_service
                 
                 account_loader = get_account_loader_service()
-                # ⭐ v4.18.2修复：使用异步方法加载账号
+                # [*] v4.18.2修复：使用异步方法加载账号
                 account = await account_loader.load_account_async(account_id, db)
                 
                 if not account:
@@ -1143,7 +1143,7 @@ async def _execute_collection_task_background(
                 page = await context.new_page()
                 
                 try:
-                    # ⭐ Phase 9.1: 根据parallel_mode选择执行方式
+                    # [*] Phase 9.1: 根据parallel_mode选择执行方式
                     if parallel_mode:
                         # 并行执行模式（每个域独立浏览器上下文）
                         logger.info(f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})")

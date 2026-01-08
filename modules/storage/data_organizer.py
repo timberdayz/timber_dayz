@@ -18,7 +18,7 @@ import shutil
 try:
     from local_accounts import get_all_local_accounts, get_accounts_by_platform
 except ImportError:
-    print("⚠️ 警告：未找到local_accounts.py，使用默认配置")
+    print("[WARN] 警告：未找到local_accounts.py，使用默认配置")
     def get_all_local_accounts():
         return []
     def get_accounts_by_platform(platform):
@@ -45,7 +45,7 @@ class DataOrganizer:
     
     def _initialize_storage_structure(self):
         """初始化存储结构"""
-        print("🗂️ 初始化账号存储结构...")
+        print("[FILES] 初始化账号存储结构...")
         
         # 读取所有账号配置
         all_accounts = get_all_local_accounts()
@@ -92,7 +92,7 @@ class DataOrganizer:
             )
         
         except Exception as e:
-            print(f"❌ 创建账号存储信息失败: {e}")
+            print(f"[FAIL] 创建账号存储信息失败: {e}")
             return None
     
     def _sanitize_name(self, name: str) -> str:
@@ -201,7 +201,7 @@ class DataOrganizer:
         # 创建账号配置文件
         self._create_account_config_file(account_info)
         
-        print(f"✅ 创建目录结构: {account_info.platform}/{account_info.account_id}")
+        print(f"[OK] 创建目录结构: {account_info.platform}/{account_info.account_id}")
     
     def _create_account_config_file(self, account_info: AccountStorageInfo):
         """创建账号配置文件"""
@@ -241,7 +241,7 @@ class DataOrganizer:
     def _print_storage_overview(self):
         """打印存储结构总览"""
         print("\n" + "="*80)
-        print("📁 账号存储结构总览")
+        print("[DIR] 账号存储结构总览")
         print("="*80)
         
         platform_stats = {}
@@ -264,21 +264,21 @@ class DataOrganizer:
             })
         
         for platform, stats in platform_stats.items():
-            print(f"\n🏪 {platform.upper()} 平台 ({stats['enabled']}/{stats['total']} 账号启用)")
+            print(f"\n[STORE] {platform.upper()} 平台 ({stats['enabled']}/{stats['total']} 账号启用)")
             print("-" * 60)
             
             for account in stats["accounts"]:
-                status = "🟢" if account["enabled"] else "🔴"
+                status = "[GREEN]" if account["enabled"] else "[RED]"
                 print(f"  {status} {account['account_id']} ({account['store_name']}) - {account['region']}")
-                print(f"     📂 {account['path']}")
+                print(f"     [FOLDER] {account['path']}")
         
-        print(f"\n📊 总计: {len(self.account_storage_map)} 个账号配置")
+        print(f"\n[DATA] 总计: {len(self.account_storage_map)} 个账号配置")
         print("="*80)
     
     def get_account_path(self, account_id: str, data_type: str = "", sub_category: str = "") -> Optional[Path]:
         """获取账号的数据路径"""
         if account_id not in self.account_storage_map:
-            print(f"❌ 未找到账号: {account_id}")
+            print(f"[FAIL] 未找到账号: {account_id}")
             return None
         
         account_info = self.account_storage_map[account_id]
@@ -306,7 +306,7 @@ class DataOrganizer:
             if source_path and Path(source_path).exists():
                 # 复制源文件
                 shutil.copy2(source_path, target_file)
-                print(f"✅ 文件已存储: {target_file}")
+                print(f"[OK] 文件已存储: {target_file}")
             elif data is not None:
                 # 保存数据
                 if isinstance(data, (dict, list)):
@@ -315,14 +315,14 @@ class DataOrganizer:
                 else:
                     with open(target_file, 'w', encoding='utf-8') as f:
                         f.write(str(data))
-                print(f"✅ 数据已存储: {target_file}")
+                print(f"[OK] 数据已存储: {target_file}")
             
             # 更新账号统计信息
             self._update_account_statistics(account_id)
             return True
             
         except Exception as e:
-            print(f"❌ 存储文件失败: {e}")
+            print(f"[FAIL] 存储文件失败: {e}")
             return False
     
     def _update_account_statistics(self, account_id: str):
@@ -359,7 +359,7 @@ class DataOrganizer:
                     json.dump(config_data, f, ensure_ascii=False, indent=2)
                     
             except Exception as e:
-                print(f"⚠️ 更新统计信息失败: {e}")
+                print(f"[WARN] 更新统计信息失败: {e}")
     
     def get_account_statistics(self, account_id: str = None) -> Dict:
         """获取账号统计信息"""
@@ -427,6 +427,6 @@ if __name__ == "__main__":
             
             # 获取统计信息
             stats = organizer.get_account_statistics(account_id)
-            print(f"\n📊 账号 {account_id} 统计信息:")
+            print(f"\n[DATA] 账号 {account_id} 统计信息:")
             print(f"   文件数量: {stats.get('total_files', 0)}")
             print(f"   总大小: {stats.get('total_size_mb', 0)} MB") 

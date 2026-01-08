@@ -17,21 +17,21 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# ⭐ v4.15.0新增：去重策略配置
-# ⭐ v4.16.0更新：所有数据域统一使用UPSERT策略（更新而非跳过）
+# [*] v4.15.0新增：去重策略配置
+# [*] v4.16.0更新：所有数据域统一使用UPSERT策略（更新而非跳过）
 # 原因：核心关键字字段名的原因，如果有重复数据，都应该是更新的数据
 # 例如：库存数量、销售数量等指标字段应该更新，而不是跳过
 DEDUPLICATION_STRATEGY: Dict[str, str] = {
     'inventory': 'UPSERT',  # 库存数据域使用UPSERT（更新而非重复插入）
-    'orders': 'UPSERT',     # ⭐ v4.16.0更新：订单数据域使用UPSERT（更新订单金额、数量等）
-    'products': 'UPSERT',  # ⭐ v4.16.0更新：产品数据域使用UPSERT（更新产品指标）
-    'traffic': 'UPSERT',   # ⭐ v4.16.0更新：流量数据域使用UPSERT（更新流量指标）
-    'services': 'UPSERT',  # ⭐ v4.16.0更新：服务数据域使用UPSERT（更新服务指标）
-    'analytics': 'UPSERT', # ⭐ v4.16.0更新：分析数据域使用UPSERT（更新分析指标）
+    'orders': 'UPSERT',     # [*] v4.16.0更新：订单数据域使用UPSERT（更新订单金额、数量等）
+    'products': 'UPSERT',  # [*] v4.16.0更新：产品数据域使用UPSERT（更新产品指标）
+    'traffic': 'UPSERT',   # [*] v4.16.0更新：流量数据域使用UPSERT（更新流量指标）
+    'services': 'UPSERT',  # [*] v4.16.0更新：服务数据域使用UPSERT（更新服务指标）
+    'analytics': 'UPSERT', # [*] v4.16.0更新：分析数据域使用UPSERT（更新分析指标）
 }
 
-# ⭐ v4.15.0新增：UPSERT更新字段配置（统一配置，保持一致性）
-# ⭐ v4.16.0更新：所有数据域统一使用UPSERT策略，此配置定义冲突时更新的字段
+# [*] v4.15.0新增：UPSERT更新字段配置（统一配置，保持一致性）
+# [*] v4.16.0更新：所有数据域统一使用UPSERT策略，此配置定义冲突时更新的字段
 # 更新字段说明：
 # - raw_data: 业务数据（JSONB格式，包含所有指标字段，如库存数量、销售数量等）
 # - ingest_timestamp: 入库时间戳（记录最新更新时间）
@@ -144,7 +144,7 @@ def get_deduplication_strategy(data_domain: str) -> str:
     """
     获取去重策略（INSERT vs UPSERT）
     
-    ⭐ v4.16.0更新：所有数据域统一使用UPSERT策略（更新而非跳过）
+    [*] v4.16.0更新：所有数据域统一使用UPSERT策略（更新而非跳过）
     原因：核心关键字字段名的原因，如果有重复数据，都应该是更新的数据
     例如：库存数量、销售数量等指标字段应该更新，而不是跳过
     
@@ -154,7 +154,7 @@ def get_deduplication_strategy(data_domain: str) -> str:
     Returns:
         策略名称：'INSERT' 或 'UPSERT'（v4.16.0后默认返回'UPSERT'）
     """
-    strategy = DEDUPLICATION_STRATEGY.get(data_domain, 'UPSERT')  # ⭐ v4.16.0更新：默认策略改为UPSERT
+    strategy = DEDUPLICATION_STRATEGY.get(data_domain, 'UPSERT')  # [*] v4.16.0更新：默认策略改为UPSERT
     logger.debug(
         f"[DedupStrategy] 数据域 {data_domain} 使用策略: {strategy}"
     )

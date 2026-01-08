@@ -27,7 +27,7 @@ class EnhancedRecordingWizard:
         self.am = AccountManager()
 
     def _select_platform(self) -> Optional[str]:
-        print("\n🌐 选择平台：")
+        print("\n[WEB] 选择平台：")
         print("  1. Shopee    2. TikTok    3. 妙手ERP    0. 返回")
         ch = input("请选择 (0-3): ").strip()
         if ch == "1":
@@ -41,9 +41,9 @@ class EnhancedRecordingWizard:
     def _select_account(self, platform: str) -> Optional[Dict[str, Any]]:
         accounts = self.am.get_accounts_by_platform(platform)
         if not accounts:
-            print("❌ 未找到账号，请先在账号管理中配置")
+            print("[FAIL] 未找到账号，请先在账号管理中配置")
             return None
-        print("\n👤 选择账号：")
+        print("\n[USER] 选择账号：")
         for i, a in enumerate(accounts, 1):
             label = (
                 a.get('label') or a.get('store_name') or a.get('account_label')
@@ -57,11 +57,11 @@ class EnhancedRecordingWizard:
                 return accounts[i]
         except Exception:
             pass
-        print("❌ 无效选择")
+        print("[FAIL] 无效选择")
         return None
 
     def _select_dtype(self) -> Optional[str]:
-        print("\n📊 选择录制数据类型：")
+        print("\n[DATA] 选择录制数据类型：")
         print("  1. orders    2. products    3. analytics    4. finance    5. services    0. 返回")
         ch = input("请选择 (0-5): ").strip()
         return {
@@ -105,7 +105,7 @@ class EnhancedRecordingWizard:
             ctx = pb.get_or_create_persistent_context(platform, str(acc_label), account)
             page = ctx.new_page()
             url = self._default_entry(platform, dtype, account)
-            print(f"\n🚀 已启动持久化上下文，打开入口: {url}")
+            print(f"\n[START] 已启动持久化上下文，打开入口: {url}")
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=45000)
             except Exception:
@@ -114,7 +114,7 @@ class EnhancedRecordingWizard:
                 except Exception as e:
                     logger.warning(f"打开入口失败: {e}")
 
-            print("\n🎬 现在你可以开始进行录制：")
+            print("\n[ACTION] 现在你可以开始进行录制：")
             print("   • 登录并进入目标页面")
             print("   • 完成你要录制的操作路径（如时间选择、导出等）")
             print("   • 你的录制脚本保存路径建议：temp/recordings/<platform>/...")
@@ -129,5 +129,5 @@ class EnhancedRecordingWizard:
             except Exception:
                 pass
 
-        print("\n✅ 录制会话结束。你可以在‘运行录制脚本’菜单回放。")
+        print("\n[OK] 录制会话结束。你可以在‘运行录制脚本’菜单回放。")
 

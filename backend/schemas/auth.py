@@ -28,7 +28,7 @@ class RefreshTokenRequest(BaseModel):
 class RefreshTokenResponse(BaseModel):
     """刷新令牌响应"""
     access_token: str
-    refresh_token: Optional[str] = None  # ⭐ v6.0.0修复：可选字段，支持 Refresh Token 轮换
+    refresh_token: Optional[str] = None  # [*] v6.0.0修复：可选字段，支持 Refresh Token 轮换
     token_type: str = "bearer"
     expires_in: int
 
@@ -57,7 +57,7 @@ class UserResponse(BaseModel):
     roles: List[str]
     is_active: bool
     created_at: datetime
-    last_login_at: Optional[datetime] = None  # ⭐ v6.0.0修复：映射到数据库字段 last_login（Vulnerability 29）
+    last_login_at: Optional[datetime] = None  # [*] v6.0.0修复：映射到数据库字段 last_login（Vulnerability 29）
     # 注意：数据库字段名是 last_login，但 API 响应使用 last_login_at 保持一致性
 
 class RoleCreate(BaseModel):

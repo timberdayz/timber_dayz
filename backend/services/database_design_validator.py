@@ -3,7 +3,7 @@
 """
 数据库设计规范验证工具
 
-⭐ v4.12.0新增：验证数据库模型是否符合设计规范
+[*] v4.12.0新增：验证数据库模型是否符合设计规范
 
 功能：
 1. 验证数据库模型是否符合主键设计规则
@@ -393,6 +393,6 @@ def validate_database_design(db: Session) -> ValidationResult:
     return validator.validate_all()
 
 
-# ⭐ v4.12.0新增：导入数据入库流程验证器
+# [*] v4.12.0新增：导入数据入库流程验证器
 from backend.services.data_ingestion_validator import validate_data_ingestion_process
 

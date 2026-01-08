@@ -65,13 +65,13 @@ class StepRunner:
         start_time = time.time()
         
         try:
-            logger.info(f"🎬 开始执行{platform}平台的{step_type}录制步骤")
+            logger.info(f"[ACTION] 开始执行{platform}平台的{step_type}录制步骤")
             
             # 1. 查找录制脚本
             script_files = self._find_recording_scripts(platform, step_type)
             if not script_files:
                 result["error"] = f"未找到{platform}平台的{step_type}录制脚本"
-                logger.warning(f"⚠️ {result['error']}")
+                logger.warning(f"[WARN] {result['error']}")
                 return result
             
             # 2. 执行找到的脚本
@@ -92,20 +92,20 @@ class StepRunner:
                 
                 # 如果某个步骤失败，记录但继续执行其他步骤
                 if not step_result["success"]:
-                    logger.warning(f"⚠️ 步骤执行失败: {script_file}")
+                    logger.warning(f"[WARN] 步骤执行失败: {script_file}")
             
             # 3. 判断整体成功状态
             successful_steps = [step for step in result["executed_steps"] if step["success"]]
             if successful_steps:
                 result["success"] = True
-                logger.info(f"✅ 录制步骤执行完成，成功{len(successful_steps)}/{len(result['executed_steps'])}个步骤")
+                logger.info(f"[OK] 录制步骤执行完成，成功{len(successful_steps)}/{len(result['executed_steps'])}个步骤")
             else:
                 result["error"] = "所有录制步骤都执行失败"
-                logger.error(f"❌ {result['error']}")
+                logger.error(f"[FAIL] {result['error']}")
             
         except Exception as e:
             result["error"] = f"录制步骤执行异常: {e}"
-            logger.error(f"❌ {result['error']}")
+            logger.error(f"[FAIL] {result['error']}")
         
         finally:
             result["execution_time"] = time.time() - start_time
@@ -117,7 +117,7 @@ class StepRunner:
         try:
             platform_dir = self.recordings_base_dir / platform.lower()
             if not platform_dir.exists():
-                logger.info(f"📁 创建录制目录: {platform_dir}")
+                logger.info(f"[DIR] 创建录制目录: {platform_dir}")
                 platform_dir.mkdir(parents=True, exist_ok=True)
                 return []
             
@@ -141,11 +141,11 @@ class StepRunner:
             unique_scripts = list(set(found_scripts))
             unique_scripts.sort(key=lambda x: x.stat().st_mtime, reverse=True)  # 按修改时间倒序
             
-            logger.info(f"🔍 找到{len(unique_scripts)}个录制脚本: {[s.name for s in unique_scripts]}")
+            logger.info(f"[SEARCH] 找到{len(unique_scripts)}个录制脚本: {[s.name for s in unique_scripts]}")
             return unique_scripts
             
         except Exception as e:
-            logger.error(f"❌ 查找录制脚本失败: {e}")
+            logger.error(f"[FAIL] 查找录制脚本失败: {e}")
             return []
     
     def _execute_single_script(self, script_file: Path, platform: str, 
@@ -158,7 +158,7 @@ class StepRunner:
         }
         
         try:
-            logger.info(f"📜 执行录制脚本: {script_file.name}")
+            logger.info(f"[SCROLL] 执行录制脚本: {script_file.name}")
             
             # 尝试作为模块导入并执行
             if self._try_import_and_execute(script_file, account, page, date_range, result):
@@ -172,7 +172,7 @@ class StepRunner:
             
         except Exception as e:
             result["error"] = f"脚本执行异常: {e}"
-            logger.error(f"❌ {result['error']}")
+            logger.error(f"[FAIL] {result['error']}")
         
         return result
     
@@ -203,7 +203,7 @@ class StepRunner:
                 if hasattr(module, func_name):
                     func = getattr(module, func_name)
                     if callable(func):
-                        logger.info(f"🎯 调用函数: {func_name}")
+                        logger.info(f"[TARGET] 调用函数: {func_name}")
                         
                         # 尝试不同的参数组合
                         try:
@@ -222,7 +222,7 @@ class StepRunner:
                                 result["success"] = bool(func_result)
                             
                             executed = True
-                            logger.info(f"✅ 函数{func_name}执行完成")
+                            logger.info(f"[OK] 函数{func_name}执行完成")
                             break
                             
                         except TypeError:
@@ -231,31 +231,31 @@ class StepRunner:
                                 func_result = func()
                                 result["success"] = bool(func_result)
                                 executed = True
-                                logger.info(f"✅ 函数{func_name}(无参数)执行完成")
+                                logger.info(f"[OK] 函数{func_name}(无参数)执行完成")
                                 break
                             except Exception as e:
-                                logger.warning(f"⚠️ 函数{func_name}调用失败: {e}")
+                                logger.warning(f"[WARN] 函数{func_name}调用失败: {e}")
                                 continue
                         
                         except Exception as e:
-                            logger.warning(f"⚠️ 函数{func_name}执行失败: {e}")
+                            logger.warning(f"[WARN] 函数{func_name}执行失败: {e}")
                             continue
             
             if not executed:
-                logger.warning("⚠️ 未找到可执行的函数")
+                logger.warning("[WARN] 未找到可执行的函数")
                 return False
             
             return True
             
         except Exception as e:
-            logger.warning(f"⚠️ 脚本导入失败: {e}")
+            logger.warning(f"[WARN] 脚本导入失败: {e}")
             return False
     
     def _try_subprocess_execute(self, script_file: Path, account: Dict, 
                               page: Page, result: Dict) -> bool:
         """尝试作为独立脚本执行（适用于codegen生成的脚本）"""
         try:
-            logger.info(f"🔄 尝试子进程执行脚本: {script_file.name}")
+            logger.info(f"[RETRY] 尝试子进程执行脚本: {script_file.name}")
             
             # 注意：这种方式无法传递page对象，适用于完全独立的脚本
             # 主要用于codegen生成的完整脚本
@@ -271,24 +271,24 @@ class StepRunner:
             
             if process.returncode == 0:
                 result["success"] = True
-                logger.info(f"✅ 子进程脚本执行成功")
+                logger.info(f"[OK] 子进程脚本执行成功")
                 
                 # 尝试从输出中提取信息
                 if process.stdout:
-                    logger.info(f"📄 脚本输出: {process.stdout[:500]}...")
+                    logger.info(f"[FILE] 脚本输出: {process.stdout[:500]}...")
                 
                 return True
             else:
-                logger.warning(f"⚠️ 子进程脚本执行失败，返回码: {process.returncode}")
+                logger.warning(f"[WARN] 子进程脚本执行失败，返回码: {process.returncode}")
                 if process.stderr:
                     logger.warning(f"错误输出: {process.stderr[:500]}...")
                 return False
                 
         except subprocess.TimeoutExpired:
-            logger.error("❌ 脚本执行超时")
+            logger.error("[FAIL] 脚本执行超时")
             return False
         except Exception as e:
-            logger.warning(f"⚠️ 子进程执行失败: {e}")
+            logger.warning(f"[WARN] 子进程执行失败: {e}")
             return False
     
     def list_available_scripts(self, platform: str = None) -> Dict[str, List[str]]:
@@ -313,7 +313,7 @@ class StepRunner:
             return scripts_info
             
         except Exception as e:
-            logger.error(f"❌ 列出录制脚本失败: {e}")
+            logger.error(f"[FAIL] 列出录制脚本失败: {e}")
             return {}
     
     def create_all_platform_templates(self) -> Dict[str, Path]:
@@ -325,9 +325,9 @@ class StepRunner:
             try:
                 template_path = self.create_script_template(platform, "collection")
                 templates[platform] = template_path
-                logger.info(f"✅ 创建{platform}平台模板: {template_path}")
+                logger.info(f"[OK] 创建{platform}平台模板: {template_path}")
             except Exception as e:
-                logger.error(f"❌ 创建{platform}平台模板失败: {e}")
+                logger.error(f"[FAIL] 创建{platform}平台模板失败: {e}")
 
         return templates
 
@@ -361,7 +361,7 @@ def run_step(page, account, date_range, context):
         Dict: {{"success": bool, "notes": str, "downloaded_files": []}}
     """
     try:
-        print(f"🎬 开始执行{platform}平台{step_type}步骤")
+        print(f"[ACTION] 开始执行{platform}平台{step_type}步骤")
         
         # TODO: 在这里添加您录制的操作步骤
         # 示例：
@@ -375,7 +375,7 @@ def run_step(page, account, date_range, context):
         }}
         
     except Exception as e:
-        print(f"❌ 步骤执行失败: {{e}}")
+        print(f"[FAIL] 步骤执行失败: {{e}}")
         return {{
             "success": False,
             "error": str(e)
@@ -387,10 +387,10 @@ if __name__ == "__main__":
 '''
             
             template_file.write_text(template_content, encoding='utf-8')
-            logger.info(f"✅ 创建录制脚本模板: {template_file}")
+            logger.info(f"[OK] 创建录制脚本模板: {template_file}")
             
             return template_file
             
         except Exception as e:
-            logger.error(f"❌ 创建脚本模板失败: {e}")
+            logger.error(f"[FAIL] 创建脚本模板失败: {e}")
             raise

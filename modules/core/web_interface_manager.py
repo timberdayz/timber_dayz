@@ -335,13 +335,13 @@ if __name__ == "__main__":
     
     print("\n启动Vue字段映射系统...")
     if manager.start_vue_field_mapping_system():
-        print("✅ 系统启动成功")
+        print("[OK] 系统启动成功")
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
             print("\n停止所有应用...")
             manager.stop_all_apps()
-            print("✅ 所有应用已停止")
+            print("[OK] 所有应用已停止")
     else:
-        print("❌ 系统启动失败")
+        print("[FAIL] 系统启动失败")

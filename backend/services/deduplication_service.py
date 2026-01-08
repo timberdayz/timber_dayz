@@ -17,7 +17,7 @@ v4.6.0新增：
 """
 
 from typing import List, Dict, Any, Set, Optional, Tuple
-from sqlalchemy.ext.asyncio import AsyncSession  # ⭐ v4.18.2新增：异步支持
+from sqlalchemy.ext.asyncio import AsyncSession  # [*] v4.18.2新增：异步支持
 from sqlalchemy import select, func, and_
 from datetime import datetime
 import hashlib
@@ -67,7 +67,7 @@ class DeduplicationService:
         v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
         """
         try:
-            # ⭐ v4.18.2：支持异步会话
+            # [*] v4.18.2：支持异步会话
             result = await self.db.execute(
                 select(CatalogFile).where(CatalogFile.id == file_id)
             )
@@ -156,7 +156,7 @@ class DeduplicationService:
             # 如果所有核心字段都缺失，记录严重警告
             if len(missing_fields) == len(deduplication_fields):
                 logger.warning(
-                    f"[Dedup] ⚠️ 所有核心字段都未找到: {deduplication_fields}，"
+                    f"[Dedup] [WARN] 所有核心字段都未找到: {deduplication_fields}，"
                     f"将使用空字典计算hash（可能导致所有行产生相同的hash）"
                 )
             elif missing_fields:
@@ -232,7 +232,7 @@ class DeduplicationService:
                 unique_hashes = set(hashes[:min(10, len(hashes))])
                 if len(unique_hashes) == 1 and len(hashes) > 1:
                     logger.warning(
-                        f"[Dedup] ⚠️ 警告：前{min(10, len(hashes))}行的data_hash都相同: {hashes[0][:8]}...，"
+                        f"[Dedup] [WARN] 警告：前{min(10, len(hashes))}行的data_hash都相同: {hashes[0][:8]}...，"
                         f"可能导致去重失败（所有行被识别为重复）"
                     )
             return hashes
@@ -272,7 +272,7 @@ class DeduplicationService:
         data_hashes: List[str],
         data_domain: str,
         granularity: str,
-        sub_domain: Optional[str] = None  # ⭐ v4.16.0新增：子类型（services域必须提供）
+        sub_domain: Optional[str] = None  # [*] v4.16.0新增：子类型（services域必须提供）
     ) -> Set[str]:
         """
         批量查询已存在的哈希（跨文件去重）
@@ -292,7 +292,7 @@ class DeduplicationService:
             return set()
         
         try:
-            # ⭐ v4.16.0更新：根据data_domain+granularity+sub_domain选择目标表
+            # [*] v4.16.0更新：根据data_domain+granularity+sub_domain选择目标表
             if data_domain.lower() == 'services' and sub_domain:
                 # Services域按sub_domain分表
                 table_name = f"fact_raw_data_services_{sub_domain.lower()}_{granularity}"
@@ -307,7 +307,7 @@ class DeduplicationService:
             
             placeholders = ','.join([f"'{h}'" for h in data_hashes])
             
-            # ⭐ v4.16.0更新：services域的表有sub_domain字段，需要额外过滤
+            # [*] v4.16.0更新：services域的表有sub_domain字段，需要额外过滤
             if data_domain.lower() == 'services' and sub_domain:
                 sql = text(f"""
                     SELECT DISTINCT data_hash 
@@ -335,7 +335,7 @@ class DeduplicationService:
                     "granularity": granularity
                 }
             
-            # ⭐ v4.18.2：支持异步会话
+            # [*] v4.18.2：支持异步会话
             result = await self.db.execute(sql, params)
             
             existing_hashes = {row[0] for row in result}
@@ -404,7 +404,7 @@ class DeduplicationService:
         granularity: str,
         file_id: Optional[int] = None,
         exclude_fields: Optional[List[str]] = None,
-        sub_domain: Optional[str] = None  # ⭐ v4.16.0新增：子类型（services域必须提供）
+        sub_domain: Optional[str] = None  # [*] v4.16.0新增：子类型（services域必须提供）
     ) -> Tuple[List[Dict[str, Any]], List[str], Dict[str, int]]:
         """
         批量去重（完整流程）
@@ -430,7 +430,7 @@ class DeduplicationService:
             # 1. 批量计算哈希
             data_hashes = self.batch_calculate_data_hash(rows, exclude_fields)
             
-            # 2. 批量查询已存在的哈希（⭐ v4.18.2：异步方法）
+            # 2. 批量查询已存在的哈希（[*] v4.18.2：异步方法）
             existing_hashes = await self.batch_check_existing_hashes(data_hashes, data_domain, granularity, sub_domain)
             
             # 3. 过滤重复数据
@@ -476,8 +476,8 @@ def get_deduplication_service(db: AsyncSession) -> DeduplicationService:
     """
     获取去重服务实例
     
-    ⭐ v4.18.2：支持异步会话
-    ⭐ v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
+    [*] v4.18.2：支持异步会话
+    [*] v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
     """
     return DeduplicationService(db)
 

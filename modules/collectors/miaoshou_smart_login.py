@@ -125,9 +125,9 @@ class MiaoshouSmartLogin:
             if login_url:
                 proxy_config = get_smart_proxy_for_url(login_url)
                 if proxy_config:
-                    logger.info(f"🔗 为 {login_url} 配置智能代理: {proxy_config.get('server', 'unknown')}")
+                    logger.info(f"[LINK] 为 {login_url} 配置智能代理: {proxy_config.get('server', 'unknown')}")
                 else:
-                    logger.info(f"🌐 {login_url} 使用直连（无代理）")
+                    logger.info(f"[WEB] {login_url} 使用直连（无代理）")
             
             # 如果使用会话，设置持久化上下文
             if use_session:
@@ -385,9 +385,9 @@ class MiaoshouSmartLogin:
             
             # 在控制台请求用户输入验证码
             print("\n" + "="*60)
-            print("🔐 妙手ERP平台需要验证码")
-            print("📧 请检查您的邮箱或手机短信获取验证码")
-            print("💡 如果长时间收不到验证码，可以尝试重新发送")
+            print("[LOCK] 妙手ERP平台需要验证码")
+            print("[EMAIL] 请检查您的邮箱或手机短信获取验证码")
+            print("[TIP] 如果长时间收不到验证码，可以尝试重新发送")
             print("="*60)
             
             manual_code = input("请输入验证码（4-8位数字）: ").strip()

@@ -342,7 +342,7 @@ if __name__ == "__main__":
     mappings = mapper.map_fields(columns, "products", "shopee")
     
     for orig, mapped in mappings.items():
-        print(f"{orig:15} → {mapped['standard']:20} (置信度={mapped['confidence']:5.1f}%, 方法={mapped['method']})")
+        print(f"{orig:15} -> {mapped['standard']:20} (置信度={mapped['confidence']:5.1f}%, 方法={mapped['method']})")
     
     stats = mapper.get_mapping_statistics(mappings)
     print(f"\n映射统计:")

@@ -28,8 +28,8 @@ def upsert_traffic(
     导入流量数据到fact_traffic表
     
     设计规则：
-    - shop_id获取优先级：源数据 → file_record → account映射 → NULL（平台级数据）
-    - platform_code获取优先级：源数据 → file_record → "unknown"
+    - shop_id获取优先级：源数据 -> file_record -> account映射 -> NULL（平台级数据）
+    - platform_code获取优先级：源数据 -> file_record -> "unknown"
     - 业务唯一索引：platform_code + shop_id + traffic_date + granularity + metric_type + data_domain
     
     Args:
@@ -59,7 +59,7 @@ def upsert_traffic(
                 "file_id": file_record.id if file_record else None,
             }
             
-            # ⭐ 获取platform_code（优先级：源数据 → file_record → "unknown"）
+            # [*] 获取platform_code（优先级：源数据 -> file_record -> "unknown"）
             if not core["platform_code"]:
                 if file_record and file_record.platform_code:
                     core["platform_code"] = file_record.platform_code
@@ -67,7 +67,7 @@ def upsert_traffic(
                     core["platform_code"] = "unknown"
                     logger.warning(f"[UpsertTraffic] platform_code为空，使用默认值: unknown")
             
-            # ⭐ 获取shop_id（优先级：源数据 → file_record → account映射 → NULL）
+            # [*] 获取shop_id（优先级：源数据 -> file_record -> account映射 -> NULL）
             if not core["shop_id"]:
                 if file_record and file_record.shop_id:
                     core["shop_id"] = file_record.shop_id
@@ -80,7 +80,7 @@ def upsert_traffic(
                     core["shop_id"] = None
                     logger.warning(f"[UpsertTraffic] shop_id为空，允许NULL（平台级数据）")
             
-            # ⭐ 验证必填字段
+            # [*] 验证必填字段
             if not core["traffic_date"]:
                 logger.error(f"[UpsertTraffic] 行{idx+1}: traffic_date为空，跳过")
                 continue
@@ -176,7 +176,7 @@ def upsert_service(
                 "file_id": file_record.id if file_record else None,
             }
             
-            # ⭐ 获取platform_code
+            # [*] 获取platform_code
             if not core["platform_code"]:
                 if file_record and file_record.platform_code:
                     core["platform_code"] = file_record.platform_code
@@ -184,7 +184,7 @@ def upsert_service(
                     core["platform_code"] = "unknown"
                     logger.warning(f"[UpsertService] platform_code为空，使用默认值: unknown")
             
-            # ⭐ 获取shop_id
+            # [*] 获取shop_id
             if not core["shop_id"]:
                 if file_record and file_record.shop_id:
                     core["shop_id"] = file_record.shop_id
@@ -195,7 +195,7 @@ def upsert_service(
                     core["shop_id"] = None
                     logger.warning(f"[UpsertService] shop_id为空，允许NULL（平台级数据）")
             
-            # ⭐ 验证必填字段
+            # [*] 验证必填字段
             if not core["service_date"]:
                 logger.error(f"[UpsertService] 行{idx+1}: service_date为空，跳过")
                 continue
@@ -291,7 +291,7 @@ def upsert_analytics(
                 "file_id": file_record.id if file_record else None,
             }
             
-            # ⭐ 获取platform_code
+            # [*] 获取platform_code
             if not core["platform_code"]:
                 if file_record and file_record.platform_code:
                     core["platform_code"] = file_record.platform_code
@@ -299,7 +299,7 @@ def upsert_analytics(
                     core["platform_code"] = "unknown"
                     logger.warning(f"[UpsertAnalytics] platform_code为空，使用默认值: unknown")
             
-            # ⭐ 获取shop_id
+            # [*] 获取shop_id
             if not core["shop_id"]:
                 if file_record and file_record.shop_id:
                     core["shop_id"] = file_record.shop_id
@@ -310,7 +310,7 @@ def upsert_analytics(
                     core["shop_id"] = None
                     logger.warning(f"[UpsertAnalytics] shop_id为空，允许NULL（平台级数据）")
             
-            # ⭐ 验证必填字段
+            # [*] 验证必填字段
             if not core["analytics_date"]:
                 logger.error(f"[UpsertAnalytics] 行{idx+1}: analytics_date为空，跳过")
                 continue

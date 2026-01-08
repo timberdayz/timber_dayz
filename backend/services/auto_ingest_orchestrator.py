@@ -33,7 +33,7 @@ class AutoIngestOrchestrator:
     自动入库编排服务
     
     职责：
-    - 编排流程（查找模板 → 预览文件 → 应用模板 → 调用ingest）
+    - 编排流程（查找模板 -> 预览文件 -> 应用模板 -> 调用ingest）
     - 不重复实现（复用现有服务）
     - 并发控制（状态机）
     - 进度跟踪（复用progress_tracker）
@@ -41,8 +41,8 @@ class AutoIngestOrchestrator:
     
     def __init__(self, db: AsyncSession):
         """
-        ⭐ v4.18.2修复：支持 AsyncSession
-        ⭐ v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
+        [*] v4.18.2修复：支持 AsyncSession
+        [*] v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
         
         Args:
             db: 异步数据库会话（AsyncSession）
@@ -92,7 +92,7 @@ class AutoIngestOrchestrator:
     ) -> Dict[str, Any]:
         try:
             # 1. 获取文件信息
-            # ⭐ v4.18.2修复：统一使用异步查询
+            # [*] v4.18.2修复：统一使用异步查询
             result = await self.db.execute(
                 select(CatalogFile).where(CatalogFile.id == file_id)
             )
@@ -131,7 +131,7 @@ class AutoIngestOrchestrator:
             # 3. 查找模板
             # 3. 查找模板（规范化sub_domain：空字符串转为None）
             normalized_sub_domain = catalog_file.sub_domain if catalog_file.sub_domain else None
-            # ⭐ v4.18.2：添加 await
+            # [*] v4.18.2：添加 await
             template = await self.template_matcher.find_best_template(
                 platform=catalog_file.platform_code,
                 data_domain=catalog_file.data_domain,
@@ -158,7 +158,7 @@ class AutoIngestOrchestrator:
             # 5. 预览文件（复用ExcelParser）
             try:
                 file_path = catalog_file.file_path
-                # ⭐ v4.10.0修复：如果用户已设置表头行，严格使用用户设置的值，不进行自动检测
+                # [*] v4.10.0修复：如果用户已设置表头行，严格使用用户设置的值，不进行自动检测
                 user_defined_header = None
                 if template:
                     user_defined_header = template.header_row if hasattr(template, "header_row") else None
@@ -180,10 +180,10 @@ class AutoIngestOrchestrator:
                 # 应用模板映射
                 initial_mapping = {}
                 if template:
-                    # ⭐ v4.18.2：添加 await
+                    # [*] v4.18.2：添加 await
                     initial_mapping = await self.template_matcher.apply_template_to_columns(template, columns)
                 
-                # ⭐ v4.10.0修复：如果用户已设置表头行，不进行自动检测，直接使用用户设置的值
+                # [*] v4.10.0修复：如果用户已设置表头行，不进行自动检测，直接使用用户设置的值
                 if user_defined_header is not None:
                     # 用户已设置表头行，严格使用用户设置的值
                     if not initial_mapping or len(initial_mapping) < len(columns) * 0.3:
@@ -207,7 +207,7 @@ class AutoIngestOrchestrator:
                                 test_df = ExcelParser.read_excel(file_path, header=test_header, nrows=10)
                                 test_columns = test_df.columns.tolist()
                                 # 尝试应用模板
-                                # ⭐ v4.18.2：添加 await
+                                # [*] v4.18.2：添加 await
                                 test_mapping = await self.template_matcher.apply_template_to_columns(
                                     template, test_columns
                                 )
@@ -240,7 +240,7 @@ class AutoIngestOrchestrator:
             # 6. 应用模板（如果有）
             field_mapping = {}
             if template:
-                # ⭐ v4.18.2：添加 await
+                # [*] v4.18.2：添加 await
                 field_mapping = await self.template_matcher.apply_template_to_columns(
                     template, columns
                 )
@@ -261,8 +261,8 @@ class AutoIngestOrchestrator:
             # 7. 调用ingest接口（通过HTTP API）
             try:
                 # 通过HTTP调用现有的ingest API
-                # ⭐ 修复：传递完整的参数，确保与手动入库一致
-                # ⭐ v4.11.5新增：传递task_id到ingest API
+                # [*] 修复：传递完整的参数，确保与手动入库一致
+                # [*] v4.11.5新增：传递task_id到ingest API
                 # 如果task_id为空，使用single_file_{file_id}作为默认值
                 ingest_task_id = task_id if task_id else f"single_file_{file_id}"
                 
@@ -274,14 +274,14 @@ class AutoIngestOrchestrator:
                                 'file_id': file_id,
                                 'platform': catalog_file.platform_code or catalog_file.source_platform or '',
                                 'domain': catalog_file.data_domain or '',
-                                'mappings': field_mapping,  # ⭐ 修复：使用mappings而不是field_mapping
-                                'header_row': header_row,  # ⭐ 修复：传递header_row参数
-                                'task_id': ingest_task_id  # ⭐ v4.11.5新增：传递task_id用于追踪
+                                'mappings': field_mapping,  # [*] 修复：使用mappings而不是field_mapping
+                                'header_row': header_row,  # [*] 修复：传递header_row参数
+                                'task_id': ingest_task_id  # [*] v4.11.5新增：传递task_id用于追踪
                             },
                             timeout=180.0  # 3分钟超时
                         )
                         
-                        # ⭐ v4.11.6修复：检查HTTP响应状态
+                        # [*] v4.11.6修复：检查HTTP响应状态
                         if response.status_code != 200:
                             error_text = response.text
                             logger.error(f"[AutoIngest] HTTP请求失败: status={response.status_code}, body={error_text}")
@@ -289,15 +289,15 @@ class AutoIngestOrchestrator:
                         
                         result = response.json()
                     except httpx.HTTPError as e:
-                        # ⭐ v4.11.6修复：处理HTTP错误（连接错误、超时等）
+                        # [*] v4.11.6修复：处理HTTP错误（连接错误、超时等）
                         logger.error(f"[AutoIngest] HTTP请求异常: {e}", exc_info=True)
                         raise Exception(f"HTTP请求异常: {str(e)}")
                     except Exception as e:
-                        # ⭐ v4.11.6修复：处理其他异常（JSON解析错误等）
+                        # [*] v4.11.6修复：处理其他异常（JSON解析错误等）
                         logger.error(f"[AutoIngest] 处理HTTP响应异常: {e}", exc_info=True)
                         raise
                 
-                # ⭐ 修复：检查实际入库行数，而不仅仅是success标志
+                # [*] 修复：检查实际入库行数，而不仅仅是success标志
                 imported = result.get('imported', 0)  # 实际入库行数
                 quarantined = result.get('quarantined', 0)  # 隔离行数
                 staged = result.get('staged', 0)  # 暂存行数
@@ -307,7 +307,7 @@ class AutoIngestOrchestrator:
                     await self.db.refresh(catalog_file)
                     catalog_status = (catalog_file.status or '').lower()
                     
-                    # ⭐ 修复：如果imported=0且quarantined=0，说明没有数据入库，应该标记为失败
+                    # [*] 修复：如果imported=0且quarantined=0，说明没有数据入库，应该标记为失败
                     if imported == 0 and quarantined == 0:
                         # 检查是否是全0数据文件（这是正常情况）
                         analysis = result.get('analysis', {})
@@ -338,7 +338,7 @@ class AutoIngestOrchestrator:
                         'file_name': catalog_file.file_name,
                         'status': final_status,
                         'message': message,
-                        'rows_ingested': imported,  # ⭐ 修复：使用imported而不是rows_ingested
+                        'rows_ingested': imported,  # [*] 修复：使用imported而不是rows_ingested
                         'quarantined': quarantined,
                         'staged': staged
                     }
@@ -498,7 +498,7 @@ class AutoIngestOrchestrator:
                         file_id=file.id,
                         only_with_template=only_with_template,
                         allow_quarantine=allow_quarantine,
-                        task_id=task_id  # ⭐ v4.11.5新增：传递批量task_id
+                        task_id=task_id  # [*] v4.11.5新增：传递批量task_id
                     )
                     
                     # 统计结果
@@ -548,7 +548,7 @@ class AutoIngestOrchestrator:
                 'skipped_no_template': skipped_no_template
             }
             
-            # ⭐ v4.11.5新增：批量入库完成后执行数据质量检查
+            # [*] v4.11.5新增：批量入库完成后执行数据质量检查
             quality_check_results = {}
             try:
                 # 收集所有成功处理的文件的平台和店铺信息
@@ -557,7 +557,7 @@ class AutoIngestOrchestrator:
                     if file_result.get('status') == 'success':
                         file_id = file_result.get('file_id')
                         if file_id:
-                            # ⭐ v4.18.2修复：统一使用异步查询
+                            # [*] v4.18.2修复：统一使用异步查询
                             result = await self.db.execute(
                                 select(CatalogFile).where(CatalogFile.id == file_id)
                             )
@@ -619,7 +619,7 @@ class AutoIngestOrchestrator:
                 'failed': failed,
                 'skipped': skipped_no_template,
                 'files': processed_files[-10:],
-                'quality_check': quality_check_results  # ⭐ v4.11.5新增：数据质量检查结果
+                'quality_check': quality_check_results  # [*] v4.11.5新增：数据质量检查结果
             })
             
             logger.info(f"[AutoIngest] 批量入库完成: {summary}")
@@ -629,7 +629,7 @@ class AutoIngestOrchestrator:
                 'task_id': task_id,
                 'summary': summary,
                 'files': processed_files,
-                'quality_check': quality_check_results  # ⭐ v4.11.5新增：返回质量检查结果
+                'quality_check': quality_check_results  # [*] v4.11.5新增：返回质量检查结果
             }
             
         except Exception as e:
@@ -645,8 +645,8 @@ def get_auto_ingest_orchestrator(db: AsyncSession) -> AutoIngestOrchestrator:
     """
     获取自动入库编排器实例
     
-    ⭐ v4.18.2修复：支持 AsyncSession
-    ⭐ v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
+    [*] v4.18.2修复：支持 AsyncSession
+    [*] v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
     """
     return AutoIngestOrchestrator(db)
 

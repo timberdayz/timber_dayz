@@ -103,7 +103,7 @@ class ResourceMonitor:
     
     async def _check_resources(self):
         """检查资源使用情况"""
-        # ⭐ 使用 run_in_executor 包装 psutil 调用，避免阻塞事件循环
+        # [*] 使用 run_in_executor 包装 psutil 调用，避免阻塞事件循环
         loop = asyncio.get_running_loop()
         
         # CPU使用率（需要间隔时间，使用0.1秒）
@@ -122,20 +122,20 @@ class ResourceMonitor:
         # 检查阈值
         if cpu_usage >= self.cpu_threshold:
             logger.warning(
-                f"[ResourceMonitor] ⚠️ CPU使用率过高: {cpu_usage:.1f}% "
+                f"[ResourceMonitor] [WARN] CPU使用率过高: {cpu_usage:.1f}% "
                 f"(阈值: {self.cpu_threshold}%)"
             )
         
         if memory_usage >= self.memory_threshold:
             logger.warning(
-                f"[ResourceMonitor] ⚠️ 内存使用率过高: {memory_usage:.1f}% "
+                f"[ResourceMonitor] [WARN] 内存使用率过高: {memory_usage:.1f}% "
                 f"(阈值: {self.memory_threshold}%)"
             )
         
         # 可选：同时触发告警时记录更详细的日志
         if cpu_usage >= self.cpu_threshold and memory_usage >= self.memory_threshold:
             logger.error(
-                f"[ResourceMonitor] 🚨 资源使用率严重超标 - "
+                f"[ResourceMonitor] [ALERT] 资源使用率严重超标 - "
                 f"CPU: {cpu_usage:.1f}%, 内存: {memory_usage:.1f}%"
             )
 

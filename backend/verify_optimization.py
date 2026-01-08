@@ -24,7 +24,7 @@ def print_header(text):
 
 def print_status(text, status):
     """打印状态"""
-    symbol = "✅" if status else "❌"
+    symbol = "[OK]" if status else "[FAIL]"
     print(f"{symbol} {text}")
 
 
@@ -168,9 +168,9 @@ def test_key_endpoints():
 
 def main():
     """主函数"""
-    print("\n" + "🚀 "*30)
+    print("\n" + "[START] "*30)
     print("  西虹ERP系统后端优化验证 v4.1.0")
-    print("🚀 "*30)
+    print("[START] "*30)
     
     results = []
     
@@ -192,14 +192,14 @@ def main():
     print(f"\n  总计: {passed}/{total} 项测试通过 ({passed/total*100:.0f}%)")
     
     if passed == total:
-        print("\n  ✅ 所有测试通过！后端优化成功！")
-        print("\n  📚 下一步:")
+        print("\n  [OK] 所有测试通过！后端优化成功！")
+        print("\n  [DOCS] 下一步:")
         print("     1. 访问 http://localhost:8001/api/docs 查看完整API")
         print("     2. 启动前端: python run.py --frontend-only")
         print("     3. 访问 http://localhost:5173 使用系统")
     else:
-        print(f"\n  ⚠️  {total - passed} 项测试失败，请检查配置")
-        print("\n  💡 常见问题:")
+        print(f"\n  [WARN]  {total - passed} 项测试失败，请检查配置")
+        print("\n  [TIP] 常见问题:")
         print("     - PostgreSQL服务未运行")
         print("     - 端口8001被占用")
         print("     - 数据库配置错误")

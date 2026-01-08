@@ -304,5 +304,5 @@ if __name__ == "__main__":
     stats = manager.get_statistics()
     logger.info(f"  {stats}")
     
-    logger.info("\n✅ 映射历史管理器测试完成")
+    logger.info("\n[OK] 映射历史管理器测试完成")
 

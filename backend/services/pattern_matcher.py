@@ -8,7 +8,7 @@
 1. Pattern-based Field Mapping（正则模式匹配）
 2. 多维度提取（订单状态、货币、其他维度）
 3. 配置驱动（零硬编码）
-4. 智能降级（精确→模糊→AI建议）
+4. 智能降级（精确->模糊->AI建议）
 
 使用示例：
     matcher = PatternMatcher(db)
@@ -43,7 +43,7 @@ class PatternMatcher:
     设计原则：
     - 配置驱动：规则存储在数据库，零硬编码
     - 多维度支持：提取订单状态、货币等多个维度
-    - 智能降级：精确匹配→模式匹配→模糊匹配
+    - 智能降级：精确匹配->模式匹配->模糊匹配
     """
     
     def __init__(self, db: Session):
@@ -165,7 +165,7 @@ class PatternMatcher:
         for entry in dictionary:
             # 1. 中文名称匹配
             if entry.cn_name and entry.cn_name.lower().strip() == original_lower:
-                logger.debug(f"Exact match (cn_name): '{original_field}' → '{entry.field_code}'")
+                logger.debug(f"Exact match (cn_name): '{original_field}' -> '{entry.field_code}'")
                 return {
                     "matched": True,
                     "standard_field": entry.field_code,
@@ -181,7 +181,7 @@ class PatternMatcher:
             if entry.synonyms:
                 synonyms_list = entry.synonyms if isinstance(entry.synonyms, list) else []
                 if original_field in synonyms_list:
-                    logger.debug(f"Exact match (synonym): '{original_field}' → '{entry.field_code}'")
+                    logger.debug(f"Exact match (synonym): '{original_field}' -> '{entry.field_code}'")
                     return {
                         "matched": True,
                         "standard_field": entry.field_code,
@@ -195,7 +195,7 @@ class PatternMatcher:
             
             # 3. 英文名称匹配
             if entry.en_name and entry.en_name.lower().strip() == original_lower:
-                logger.debug(f"Exact match (en_name): '{original_field}' → '{entry.field_code}'")
+                logger.debug(f"Exact match (en_name): '{original_field}' -> '{entry.field_code}'")
                 return {
                     "matched": True,
                     "standard_field": entry.field_code,
@@ -215,7 +215,7 @@ class PatternMatcher:
         dictionary: List[FieldMappingDictionary]
     ) -> Dict[str, Any]:
         """
-        模式匹配策略（v4.6.0核心功能）⭐⭐⭐
+        模式匹配策略（v4.6.0核心功能）[*][*][*]
         
         匹配规则：
         1. 使用field_pattern正则表达式匹配
@@ -244,7 +244,7 @@ class PatternMatcher:
                     # 映射维度值
                     mapped_dimensions = self._map_dimensions(dimensions, entry.dimension_config or {})
                     
-                    logger.debug(f"Pattern match: '{original_field}' → '{entry.field_code}' with dimensions {mapped_dimensions}")
+                    logger.debug(f"Pattern match: '{original_field}' -> '{entry.field_code}' with dimensions {mapped_dimensions}")
                     
                     return {
                         "matched": True,
@@ -351,7 +351,7 @@ class PatternMatcher:
                 best_match = entry
         
         if best_match:
-            logger.debug(f"Fuzzy match: '{original_field}' → '{best_match.field_code}' (score={best_score:.2f})")
+            logger.debug(f"Fuzzy match: '{original_field}' -> '{best_match.field_code}' (score={best_score:.2f})")
             return {
                 "matched": True,
                 "standard_field": best_match.field_code,

@@ -16,7 +16,7 @@ v4.19.0更新：
 - 移除同步/异步双模式支持，统一为异步架构
 
 职责：
-- 编排流程（查找模板 → 预览文件 → 应用模板 → 调用DataIngestionService）
+- 编排流程（查找模板 -> 预览文件 -> 应用模板 -> 调用DataIngestionService）
 - 不重复实现（复用现有服务）
 - 并发控制（状态机）
 - 进度跟踪
@@ -50,7 +50,7 @@ class DataSyncService:
     v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
     
     职责：
-    - 编排流程（查找模板 → 预览文件 → 应用模板 → 调用DataIngestionService）
+    - 编排流程（查找模板 -> 预览文件 -> 应用模板 -> 调用DataIngestionService）
     - 不重复实现（复用现有服务）
     - 并发控制（状态机）
     - 进度跟踪
@@ -111,7 +111,7 @@ class DataSyncService:
             return file_path
         
         # 相对路径：从项目根目录解析
-        # ⭐ v4.19.8修复：先处理Windows路径分隔符，确保路径正确解析
+        # [*] v4.19.8修复：先处理Windows路径分隔符，确保路径正确解析
         file_path_normalized = file_path.replace("\\", "/")
         resolved_path = project_root / file_path_normalized
         
@@ -175,7 +175,7 @@ class DataSyncService:
         only_with_template: bool = True,
         allow_quarantine: bool = True,
         task_id: Optional[str] = None,
-        use_template_header_row: bool = True  # ⭐ 新增：使用模板表头行（严格模式）
+        use_template_header_row: bool = True  # [*] 新增：使用模板表头行（严格模式）
     ) -> Dict[str, Any]:
         """
         同步单个文件
@@ -215,7 +215,7 @@ class DataSyncService:
                 }
             
             if catalog_file.status in ['ingested', 'partial_success']:
-                # ⭐ v4.17.0修复：UPSERT策略下，允许已入库文件重新同步（更新数据）
+                # [*] v4.17.0修复：UPSERT策略下，允许已入库文件重新同步（更新数据）
                 # 检查去重策略：如果是UPSERT策略，允许重新同步
                 from backend.services.deduplication_fields_config import get_deduplication_strategy
                 strategy = get_deduplication_strategy(catalog_file.data_domain or 'unknown')
@@ -235,7 +235,7 @@ class DataSyncService:
                         f"[DataSync] 文件{catalog_file.file_name}({file_id})已入库（status={catalog_file.status}），跳过同步"
                     )
                     return {
-                        'success': True,  # ⭐ 改为成功（已入库不是错误）
+                        'success': True,  # [*] 改为成功（已入库不是错误）
                         'file_id': file_id,
                         'file_name': catalog_file.file_name,
                         'status': 'skipped',
@@ -243,14 +243,14 @@ class DataSyncService:
                         'staged': 0,
                         'imported': 0,
                         'quarantined': 0,
-                        'skipped': True,  # ⭐ 标记为跳过
-                        'skip_reason': 'file_already_ingested'  # ⭐ 跳过原因
+                        'skipped': True,  # [*] 标记为跳过
+                        'skip_reason': 'file_already_ingested'  # [*] 跳过原因
                     }
             
             # 记录尝试
             self._record_attempt(catalog_file)
             
-            # 3. 查找模板（⭐ v4.18.2：异步调用）
+            # 3. 查找模板（[*] v4.18.2：异步调用）
             normalized_sub_domain = catalog_file.sub_domain if catalog_file.sub_domain else None
             template = await self.template_matcher.find_best_template(
                 platform=catalog_file.platform_code,
@@ -264,7 +264,7 @@ class DataSyncService:
                 await self.db.commit()
                 
                 logger.warning(
-                    f"[DataSync] [v4.16.0] ⚠️ 文件{catalog_file.file_name}({file_id})无模板，跳过同步: "
+                    f"[DataSync] [v4.16.0] [WARN] 文件{catalog_file.file_name}({file_id})无模板，跳过同步: "
                     f"platform={catalog_file.platform_code}, domain={catalog_file.data_domain}, "
                     f"granularity={catalog_file.granularity}, sub_domain={catalog_file.sub_domain}"
                 )
@@ -281,12 +281,12 @@ class DataSyncService:
             catalog_file.status = 'processing'
             await self.db.commit()
             
-            # 5. 预览文件（复用ExcelParser）⭐ **v4.6.0重构：严格执行模板表头行**
+            # 5. 预览文件（复用ExcelParser）[*] **v4.6.0重构：严格执行模板表头行**
             try:
-                # ⭐ 修复：使用安全路径解析，确保文件路径正确
+                # [*] 修复：使用安全路径解析，确保文件路径正确
                 file_path = self._safe_resolve_path(catalog_file.file_path)
                 
-                # ⭐ v4.18.2修复：使用 run_in_executor 包装文件系统检查，避免阻塞事件循环
+                # [*] v4.18.2修复：使用 run_in_executor 包装文件系统检查，避免阻塞事件循环
                 loop = asyncio.get_running_loop()
                 file_exists = await loop.run_in_executor(
                     None,
@@ -295,14 +295,14 @@ class DataSyncService:
                 if not file_exists:
                     raise FileNotFoundError(f"文件不存在: {file_path}（原始路径: {catalog_file.file_path}）")
                 
-                # ⭐ v4.6.0重构：如果模板存在且use_template_header_row=True，严格执行模板表头行（不自动检测）
+                # [*] v4.6.0重构：如果模板存在且use_template_header_row=True，严格执行模板表头行（不自动检测）
                 if use_template_header_row and template and hasattr(template, "header_row") and template.header_row is not None:
                     # 模板存在且设置了表头行：严格执行，不自动检测
                     header_row = template.header_row
                     logger.info(f"[DataSync] [STRICT] 使用模板表头行: {header_row}（严格模式，不自动检测）")
                     
                     # 直接使用模板指定的表头行读取文件
-                    # ⭐ v4.19.0更新：使用进程池执行CPU密集型操作（Excel读取），完全隔离事件循环
+                    # [*] v4.19.0更新：使用进程池执行CPU密集型操作（Excel读取），完全隔离事件循环
                     executor_manager = get_executor_manager()
                     df = await executor_manager.run_cpu_intensive(
                         ExcelParser.read_excel,
@@ -336,7 +336,7 @@ class DataSyncService:
                         logger.warning(f"[DataSync] 无模板，使用默认表头行0（建议用户创建模板）")
                     
                     # 使用默认表头行读取文件
-                    # ⭐ v4.19.0更新：使用进程池执行CPU密集型操作（Excel读取），完全隔离事件循环
+                    # [*] v4.19.0更新：使用进程池执行CPU密集型操作（Excel读取），完全隔离事件循环
                     executor_manager = get_executor_manager()
                     df = await executor_manager.run_cpu_intensive(
                         ExcelParser.read_excel,
@@ -346,7 +346,7 @@ class DataSyncService:
                     )
                     columns = df.columns.tolist()
                     
-                    # ⭐ v4.6.0重构：无模板时不进行自动检测，直接使用默认值0
+                    # [*] v4.6.0重构：无模板时不进行自动检测，直接使用默认值0
                     # 原因：自动检测效果不佳，用户应该手动选择表头行并创建模板
             except Exception as e:
                 logger.error(f"[DataSync] 预览文件失败: {e}")
@@ -361,20 +361,20 @@ class DataSyncService:
                     'message': f'预览失败: {str(e)}'
                 }
             
-            # 6. ⭐ v4.14.0安全版本：检测表头变化，任何变化都阻止同步
+            # 6. [*] v4.14.0安全版本：检测表头变化，任何变化都阻止同步
             # 如果有模板，检测表头是否完全匹配；否则使用从文件读取的columns
             if template and hasattr(template, 'header_columns') and template.header_columns:
                 template_header_columns = template.header_columns
                 file_header_columns = columns  # 使用文件实际的列名
                 
-                # ⭐ 检测表头变化（不进行相似度匹配，任何变化都需要用户确认）
-                # ⭐ v4.18.2：异步调用
+                # [*] 检测表头变化（不进行相似度匹配，任何变化都需要用户确认）
+                # [*] v4.18.2：异步调用
                 header_changes = await self.template_matcher.detect_header_changes(
                     template_id=template.id,
                     current_columns=file_header_columns
                 )
                 
-                # ⚠️ 安全原则：任何变化都阻止同步，要求用户更新模板
+                # [WARN] 安全原则：任何变化都阻止同步，要求用户更新模板
                 if header_changes.get('detected'):
                     # 构建详细的错误信息
                     added_fields = header_changes.get('added_fields', [])
@@ -396,9 +396,9 @@ class DataSyncService:
                         if not added_fields and not removed_fields:
                             error_reason.append("字段顺序变化")
                         
-                        # ⭐ v4.17.0增强：记录详细的表头变化日志
+                        # [*] v4.17.0增强：记录详细的表头变化日志
                         logger.error(
-                            f"[DataSync] [v4.17.0] ❌ 表头字段不匹配，阻止同步: "
+                            f"[DataSync] [v4.17.0] [FAIL] 表头字段不匹配，阻止同步: "
                             f"文件={catalog_file.file_name}, "
                             f"模板={template.template_name if template else 'None'}, "
                             f"新增字段={len(added_fields)}个, "
@@ -406,7 +406,7 @@ class DataSyncService:
                             f"匹配率={match_rate:.1%}"
                         )
                         
-                        # ⭐ v4.16.0增强：构建详细的错误消息，包含文件名和变化详情
+                        # [*] v4.16.0增强：构建详细的错误消息，包含文件名和变化详情
                         error_message_parts = [f"文件{catalog_file.file_name}的表头字段已变化"]
                         error_message_parts.append("; ".join(error_reason))
                         error_message_parts.append(f"（匹配率: {match_rate:.1%}）")
@@ -420,7 +420,7 @@ class DataSyncService:
                             'file_id': file_id,
                             'file_name': catalog_file.file_name,
                             'status': 'failed',
-                            'message': error_message,  # ⭐ v4.16.0增强：包含文件名和详细变化信息
+                            'message': error_message,  # [*] v4.16.0增强：包含文件名和详细变化信息
                             'header_changes': header_changes,  # 返回详细变化信息
                             'error_code': 'HEADER_CHANGED',
                             'error_details': {
@@ -440,13 +440,13 @@ class DataSyncService:
                 header_columns = columns
                 logger.info(f"[DataSync] [DSS] 使用文件读取的header_columns: {len(header_columns)}个字段")
             
-            # ⭐ v4.14.0新增：从模板读取核心去重字段（deduplication_fields）
+            # [*] v4.14.0新增：从模板读取核心去重字段（deduplication_fields）
             deduplication_fields = None
             if template and hasattr(template, 'deduplication_fields') and template.deduplication_fields:
                 deduplication_fields = template.deduplication_fields
                 logger.info(f"[DataSync] [v4.14.0] 使用模板的核心去重字段: {deduplication_fields}")
             else:
-                # ⭐ v4.17.0修复：如果没有模板或模板没有配置核心字段，使用默认配置
+                # [*] v4.17.0修复：如果没有模板或模板没有配置核心字段，使用默认配置
                 # 确保同一数据域+子类型的文件使用相同的核心字段配置
                 from backend.services.deduplication_fields_config import get_default_deduplication_fields
                 default_fields = get_default_deduplication_fields(
@@ -461,11 +461,11 @@ class DataSyncService:
                     )
                 else:
                     logger.warning(
-                        f"[DataSync] [v4.17.0] ⚠️ 未找到数据域 {catalog_file.data_domain} 的默认核心字段配置，"
+                        f"[DataSync] [v4.17.0] [WARN] 未找到数据域 {catalog_file.data_domain} 的默认核心字段配置，"
                         f"将使用所有业务字段计算data_hash（可能导致去重失败）"
                     )
             
-            # ⭐ v4.17.0增强：记录使用的核心字段配置，便于排查data_hash计算一致性问题
+            # [*] v4.17.0增强：记录使用的核心字段配置，便于排查data_hash计算一致性问题
             logger.info(
                 f"[DataSync] [v4.17.0] 核心字段配置: "
                 f"文件={catalog_file.file_name}, "
@@ -475,7 +475,7 @@ class DataSyncService:
                 f"子类型={normalized_sub_domain or 'None'}"
             )
             
-            # ⭐ DSS架构：不再需要字段映射检查，直接使用header_columns入库
+            # [*] DSS架构：不再需要字段映射检查，直接使用header_columns入库
             # 向后兼容：保留field_mapping参数（但可以为空）
             field_mapping = {}  # DSS架构不需要字段映射，但保留参数以兼容旧代码
             
@@ -483,12 +483,12 @@ class DataSyncService:
             try:
                 ingest_task_id = task_id if task_id else f"single_file_{file_id}"
                 
-                # ⭐ v4.16.0修复：优先从catalog_file获取sub_domain（因为template可能没有sub_domain）
+                # [*] v4.16.0修复：优先从catalog_file获取sub_domain（因为template可能没有sub_domain）
                 sub_domain_value = catalog_file.sub_domain if catalog_file.sub_domain else None
                 if not sub_domain_value and template:
                     sub_domain_value = getattr(template, 'sub_domain', None)
                 
-                # ⭐ v4.16.0新增：验证services域必须有sub_domain
+                # [*] v4.16.0新增：验证services域必须有sub_domain
                 if catalog_file.data_domain.lower() == 'services' and not sub_domain_value:
                     error_msg = (
                         f"services域必须提供sub_domain，但文件{catalog_file.file_name}({file_id})的sub_domain为空。"
@@ -506,10 +506,10 @@ class DataSyncService:
                         'message': error_msg
                     }
                 
-                # ⭐ v4.16.0新增：无模板时的警告日志
+                # [*] v4.16.0新增：无模板时的警告日志
                 if not template:
                     logger.warning(
-                        f"[DataSync] [v4.16.0] ⚠️ 文件{catalog_file.file_name}({file_id})无模板，但继续处理: "
+                        f"[DataSync] [v4.16.0] [WARN] 文件{catalog_file.file_name}({file_id})无模板，但继续处理: "
                         f"platform={catalog_file.platform_code}, domain={catalog_file.data_domain}, "
                         f"granularity={catalog_file.granularity}, sub_domain={sub_domain_value}"
                     )
@@ -519,17 +519,17 @@ class DataSyncService:
                     platform=catalog_file.platform_code or catalog_file.source_platform or '',
                     domain=catalog_file.data_domain or '',
                     mappings=field_mapping,  # 向后兼容：保留参数，但DSS架构不使用
-                    header_columns=header_columns,  # ⭐ DSS架构：传递原始表头字段列表
+                    header_columns=header_columns,  # [*] DSS架构：传递原始表头字段列表
                     header_row=header_row,
                     task_id=ingest_task_id,
                     extract_images=True,
-                    deduplication_fields=deduplication_fields,  # ⭐ v4.14.0新增：传递核心去重字段
-                    sub_domain=sub_domain_value,  # ⭐ v4.16.0修复：优先从catalog_file获取
+                    deduplication_fields=deduplication_fields,  # [*] v4.14.0新增：传递核心去重字段
+                    sub_domain=sub_domain_value,  # [*] v4.16.0修复：优先从catalog_file获取
                 )
                 
                 # 更新状态
                 if result.get("success"):
-                    # ⭐ v4.15.0增强：区分跳过原因（重复数据 vs 空文件）
+                    # [*] v4.15.0增强：区分跳过原因（重复数据 vs 空文件）
                     skip_reason = result.get("skip_reason", "")
                     if result.get("skipped", False):
                         if skip_reason in ["empty_file_no_data_rows", "empty_file_no_data", "empty_file_already_processed"]:
@@ -537,11 +537,11 @@ class DataSyncService:
                             catalog_file.status = "ingested"
                             self._record_status(catalog_file, "success", f"文件为空，已标记为已处理")
                             logger.info(
-                                f"[DataSync] [v4.15.0] ✅ 文件{catalog_file.file_name}({file_id})为空文件，"
+                                f"[DataSync] [v4.15.0] [OK] 文件{catalog_file.file_name}({file_id})为空文件，"
                                 f"已标记为已同步（ingested）"
                             )
                         else:
-                            # ⭐ v4.16.0更新：在UPSERT策略下，重复数据应该被更新，而不是跳过
+                            # [*] v4.16.0更新：在UPSERT策略下，重复数据应该被更新，而不是跳过
                             # 检查是否有更新统计信息
                             import_stats = result.get("import_stats", {})
                             updated_count = import_stats.get('updated', 0)
@@ -551,7 +551,7 @@ class DataSyncService:
                                 catalog_file.status = "ingested"
                                 self._record_status(catalog_file, "success", f"所有数据都已存在，已更新{updated_count}行（UPSERT策略）")
                                 logger.info(
-                                    f"[DataSync] [v4.16.0] ✅ 文件{catalog_file.file_name}({file_id})所有数据都已存在，"
+                                    f"[DataSync] [v4.16.0] [OK] 文件{catalog_file.file_name}({file_id})所有数据都已存在，"
                                     f"已更新{updated_count}行（UPSERT策略）"
                                 )
                             else:
@@ -559,7 +559,7 @@ class DataSyncService:
                                 catalog_file.status = "ingested"
                                 self._record_status(catalog_file, "success", f"所有数据都已存在，已跳过重复数据")
                                 logger.warning(
-                                    f"[DataSync] [v4.16.0] ⚠️ 文件{catalog_file.file_name}({file_id})所有数据都已存在，"
+                                    f"[DataSync] [v4.16.0] [WARN] 文件{catalog_file.file_name}({file_id})所有数据都已存在，"
                                     f"但updated=0（异常情况，应该不会发生）"
                                 )
                     elif result.get("quarantined", 0) > 0:
@@ -579,17 +579,17 @@ class DataSyncService:
                     'file_id': file_id,
                     'file_name': catalog_file.file_name,
                     'status': 'success' if result.get("success") else 'failed',
-                    'message': result.get("message") or "数据入库失败（未提供错误信息）",  # ⭐ v4.15.0修复：确保有错误消息
+                    'message': result.get("message") or "数据入库失败（未提供错误信息）",  # [*] v4.15.0修复：确保有错误消息
                     'staged': result.get("staged", 0),
                     'imported': result.get("imported", 0),
                     'quarantined': result.get("quarantined", 0),
-                    'skipped': result.get("skipped", False),  # ⭐ 新增：传递skipped标志
-                    'import_stats': result.get("import_stats")  # ⭐ v4.15.0新增：传递详细统计信息
+                    'skipped': result.get("skipped", False),  # [*] 新增：传递skipped标志
+                    'import_stats': result.get("import_stats")  # [*] v4.15.0新增：传递详细统计信息
                 }
                 
             except Exception as e:
                 logger.error(f"[DataSync] 数据入库失败: {e}", exc_info=True)
-                # ⭐ 修复：处理数据库事务回滚问题
+                # [*] 修复：处理数据库事务回滚问题
                 try:
                     await self.db.rollback()  # 先回滚，清除错误状态
                     catalog_file.status = 'failed'
@@ -622,7 +622,7 @@ class DataSyncService:
                 
         except Exception as e:
             logger.error(f"[DataSync] 同步文件失败: {e}", exc_info=True)
-            # ⭐ v4.15.0修复：处理数据库事务回滚问题（更健壮）
+            # [*] v4.15.0修复：处理数据库事务回滚问题（更健壮）
             try:
                 # 检查是否是事务错误
                 error_str = str(e)
@@ -666,7 +666,7 @@ class DataSyncService:
                 except Exception:
                     pass
             
-            # ⭐ v4.15.0修复：确保错误消息详细且有用
+            # [*] v4.15.0修复：确保错误消息详细且有用
             error_message = f'同步失败: {str(e)}'
             # 如果是事务错误，添加更详细的说明
             error_str = str(e)

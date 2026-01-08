@@ -6,7 +6,7 @@ Shopee 商品数据导出服务
 
 基于 HAR 解析结果，实现参数化的 Shopee 商品表现数据导出：
 - 支持按周导出
-- 自动处理 export → report_id → download 流程
+- 自动处理 export -> report_id -> download 流程
 - 复用持久化登录态，直连 API
 """
 

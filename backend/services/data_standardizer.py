@@ -62,7 +62,7 @@ def standardize_date_value(value: Any, prefer_dayfirst: Optional[bool] = None, k
     - datetime对象：根据keep_time决定是否保留时间
     - date对象：直接返回（如果keep_time=True，转换为datetime 00:00:00）
     
-    ⭐ v4.7.0企业级ERP空值处理：
+    [*] v4.7.0企业级ERP空值处理：
     - None、空字符串""、NaN、空列表/字典都视为空值
     - 空值统一返回None（符合数据库NULL语义）
     - 空值不会导致错误，优雅处理
@@ -75,7 +75,7 @@ def standardize_date_value(value: Any, prefer_dayfirst: Optional[bool] = None, k
     Returns:
         标准化后的date或datetime对象，如果无法解析或为空值则返回None
     """
-    # ⭐ v4.7.0企业级ERP空值处理：统一检测空值
+    # [*] v4.7.0企业级ERP空值处理：统一检测空值
     if value is None:
         return None
     
@@ -177,7 +177,7 @@ def standardize_numeric_value(value: Any) -> Optional[float]:
     - 去除货币符号（如：$100 -> 100）
     - 处理空值和无效值
     
-    ⭐ v4.7.0企业级ERP空值处理：
+    [*] v4.7.0企业级ERP空值处理：
     - None、空字符串、NaN都视为空值，统一返回None
     - 无法解析的值返回None（调用方应设置为0.0）
     - 支持更多货币符号和格式
@@ -207,7 +207,7 @@ def standardize_numeric_value(value: Any) -> Optional[float]:
     if not s or s.lower() in ["nan", "none", "null", "n/a", "na", "-", ""]:
         return None
     
-    # ⭐ v4.7.0增强：去除常见货币符号和千分位
+    # [*] v4.7.0增强：去除常见货币符号和千分位
     # 支持更多货币符号和格式
     s = s.replace(",", "")  # 去除千分位
     s = s.replace("$", "").replace("¥", "").replace("€", "").replace("£", "").replace("RMB", "").replace("CNY", "")
@@ -218,12 +218,12 @@ def standardize_numeric_value(value: Any) -> Optional[float]:
     if not s:
         return None
     
-    # ⭐ v4.7.0修复：如果去除符号后不是纯数字，返回None
+    # [*] v4.7.0修复：如果去除符号后不是纯数字，返回None
     # 避免字符串（如"g待发货證."）被转换为数值
     try:
         return float(s)
     except (ValueError, TypeError):
-        # ⭐ v4.7.0修复：无法解析的值返回None（而不是抛出异常）
+        # [*] v4.7.0修复：无法解析的值返回None（而不是抛出异常）
         # 调用方应该将None转换为0.0
         return None
 
@@ -259,7 +259,7 @@ def standardize_row(row: Dict[str, Any], domain: str, date_fields: Optional[List
     # 获取DateTime字段列表（需要保留时间）
     datetime_fields = DATETIME_FIELDS_BY_DOMAIN.get(domain, [])
     
-    # ⭐ 新增：从detected_types中提取字段类型信息
+    # [*] 新增：从detected_types中提取字段类型信息
     if detected_types:
         for standard_field, detected_type in detected_types.items():
             if detected_type == "datetime" and standard_field not in datetime_fields:
@@ -286,7 +286,7 @@ def standardize_row(row: Dict[str, Any], domain: str, date_fields: Optional[List
         if field in standardized:
             original_value = standardized[field]
             
-            # ⭐ v4.7.0企业级ERP空值处理：统一检测空值
+            # [*] v4.7.0企业级ERP空值处理：统一检测空值
             # None、空字符串、NaN都视为空值，统一返回None
             is_empty = False
             if original_value is None:
@@ -313,7 +313,7 @@ def standardize_row(row: Dict[str, Any], domain: str, date_fields: Optional[List
                 if standardized_value is not None:
                     standardized[field] = standardized_value
                 else:
-                    # ⭐ v4.7.0修复：无法解析的非空值才记录警告
+                    # [*] v4.7.0修复：无法解析的非空值才记录警告
                     # 如果是空值，已经在上面处理了，这里不需要警告
                     logger.warning(f"日期字段 {field} 无法解析: {original_value}，设置为None")
                     standardized[field] = None  # 无法解析的统一设置为None
@@ -324,7 +324,7 @@ def standardize_row(row: Dict[str, Any], domain: str, date_fields: Optional[List
         if field in standardized:
             original_value = standardized[field]
             
-            # ⭐ v4.7.0企业级ERP空值处理：统一检测空值
+            # [*] v4.7.0企业级ERP空值处理：统一检测空值
             is_empty = False
             if original_value is None:
                 is_empty = True
@@ -348,7 +348,7 @@ def standardize_row(row: Dict[str, Any], domain: str, date_fields: Optional[List
                 if standardized_value is not None:
                     standardized[field] = standardized_value
                 else:
-                    # ⭐ v4.7.0修复：无法解析的非空值设置为0.0（而不是保留原值）
+                    # [*] v4.7.0修复：无法解析的非空值设置为0.0（而不是保留原值）
                     # 保留原值会导致类型错误（字符串被插入float字段）
                     logger.warning(f"数值字段 {field} 无法解析: {original_value}，设置为0.0")
                     standardized[field] = 0.0
@@ -388,11 +388,11 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
     # 获取DateTime字段列表（需要保留时间）
     datetime_fields = DATETIME_FIELDS_BY_DOMAIN.get(domain, [])
     
-    # ⭐ 新增：从映射建议中提取detected_type信息
+    # [*] 新增：从映射建议中提取detected_type信息
     # 如果映射建议中包含detected_type，使用它来确定字段类型
     detected_types = {}
     date_range_fields = {}  # 时间范围字段映射：{原始字段: {"start_time": "开始时间字段", "end_time": "结束时间字段"}}
-    time_range_fields = []  # ⭐ 新增：time_range字段列表（用户手动选择的时间范围字段）
+    time_range_fields = []  # [*] 新增：time_range字段列表（用户手动选择的时间范围字段）
     
     if field_mappings:
         for orig_col, mapping_info in field_mappings.items():
@@ -404,13 +404,13 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
                 if standard_field and detected_type:
                     detected_types[standard_field] = detected_type
                 
-                # ⭐ 新增：检测time_range字段（用户手动选择的时间范围字段）
+                # [*] 新增：检测time_range字段（用户手动选择的时间范围字段）
                 if standard_field == "time_range":
                     time_range_fields.append(orig_col)
                     logger.info(f"[Standardizer] 检测到time_range字段: {orig_col}，将在标准化时自动拆分")
                     continue  # 跳过后续的日期时间检测逻辑
                 
-                # ⭐ 原有的自动检测时间范围字段（保留兼容性）
+                # [*] 原有的自动检测时间范围字段（保留兼容性）
                 if is_date_range:
                     split_fields = mapping_info.get("split_fields", {})
                     date_range_fields[orig_col] = {
@@ -426,14 +426,14 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
             if standard_field not in date_fields:
                 date_fields.append(standard_field)
     
-    # ⭐ 新增：时间范围字段也需要添加到datetime_fields
+    # [*] 新增：时间范围字段也需要添加到datetime_fields
     for orig_col, split_info in date_range_fields.items():
         if "start_time" not in datetime_fields:
             datetime_fields.append("start_time")
         if "end_time" not in datetime_fields:
             datetime_fields.append("end_time")
     
-    # ⭐ 新增：time_range字段也需要添加到datetime_fields和date_fields
+    # [*] 新增：time_range字段也需要添加到datetime_fields和date_fields
     if time_range_fields:
         if "start_time" not in datetime_fields:
             datetime_fields.append("start_time")
@@ -443,7 +443,7 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
         if "metric_date" not in date_fields:
             date_fields.append("metric_date")
     
-    # ⭐ 新增：处理时间范围字段的拆分
+    # [*] 新增：处理时间范围字段的拆分
     # 1. 处理time_range字段（用户手动选择）
     # 2. 处理自动检测的时间范围字段（兼容性）
     processed_rows = []
@@ -459,7 +459,7 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
                     range_result = detect_date_range_format(range_value)
                     if range_result:
                         start_str, end_str = range_result
-                        # ⭐ 修复：时间范围解析时优先使用dayfirst=True（因为原始数据可能是dd/mm/yyyy格式）
+                        # [*] 修复：时间范围解析时优先使用dayfirst=True（因为原始数据可能是dd/mm/yyyy格式）
                         start_time = standardize_date_value(start_str, prefer_dayfirst=True, keep_time=True)
                         end_time = standardize_date_value(end_str, prefer_dayfirst=True, keep_time=True)
                         
@@ -472,7 +472,7 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
                             processed_row["start_time"] = start_time
                             processed_row["end_time"] = end_time
                             
-                            # ⭐ 新增：设置metric_date（用于按日期聚合）
+                            # [*] 新增：设置metric_date（用于按日期聚合）
                             # 对于周/月数据，metric_date使用开始日期，便于按日期范围查询和聚合
                             if isinstance(start_time, datetime):
                                 processed_row["metric_date"] = start_time.date()
@@ -487,7 +487,7 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
                                 except:
                                     pass
                             
-                            # ⭐ 新增：自动检测粒度（granularity）
+                            # [*] 新增：自动检测粒度（granularity）
                             # 计算时间范围的天数
                             if isinstance(start_time, datetime):
                                 start_date = start_time.date()
@@ -533,7 +533,7 @@ def standardize_rows(rows: List[Dict[str, Any]], domain: str,
                     range_result = detect_date_range_format(range_value)
                     if range_result:
                         start_str, end_str = range_result
-                        # ⭐ 修复：时间范围解析时优先使用dayfirst=True
+                        # [*] 修复：时间范围解析时优先使用dayfirst=True
                         start_time = standardize_date_value(start_str, prefer_dayfirst=True, keep_time=True)
                         end_time = standardize_date_value(end_str, prefer_dayfirst=True, keep_time=True)
                         

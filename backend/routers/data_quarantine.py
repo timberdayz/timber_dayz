@@ -102,7 +102,7 @@ async def list_quarantine_data(
     data_domain: Optional[str] = Query(None, description="数据域"),
     error_type: Optional[str] = Query(None, description="错误类型"),
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=200, description="每页数量"),  # ⭐ v4.6.1修复：增加上限到200
+    page_size: int = Query(20, ge=1, le=200, description="每页数量"),  # [*] v4.6.1修复：增加上限到200
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -510,7 +510,7 @@ async def delete_quarantine_data(
         }
     """
     try:
-        # ⭐ v4.6.1新增：支持一键全部清理
+        # [*] v4.6.1新增：支持一键全部清理
         if request.get("all") == True:
             # 删除所有隔离数据
             result = await db.execute(select(func.count()).select_from(DataQuarantine))

@@ -90,7 +90,7 @@ class PlatformAccountsManager:
         # 加载账号数据
         self._load_accounts()
         
-        logger.info(f"✅ 平台账号管理器初始化完成，已加载 {len(self.accounts)} 个账号")
+        logger.info(f"[OK] 平台账号管理器初始化完成，已加载 {len(self.accounts)} 个账号")
 
     def _load_accounts(self) -> None:
         """加载账号数据"""
@@ -103,10 +103,10 @@ class PlatformAccountsManager:
             if self.encrypted_accounts_file.exists():
                 self._load_from_encrypted_config()
                 
-            logger.info(f"✅ 成功加载 {len(self.accounts)} 个账号配置")
+            logger.info(f"[OK] 成功加载 {len(self.accounts)} 个账号配置")
             
         except Exception as e:
-            logger.error(f"❌ 加载账号配置失败: {e}")
+            logger.error(f"[FAIL] 加载账号配置失败: {e}")
             self.accounts = {}
 
     def _load_from_local_config(self) -> None:
@@ -140,12 +140,12 @@ class PlatformAccountsManager:
                 
                 self.accounts[account.account_id] = account
                 
-            logger.info(f"✅ 从local_accounts.py加载了 {len(local_accounts.ACCOUNTS)} 个账号")
+            logger.info(f"[OK] 从local_accounts.py加载了 {len(local_accounts.ACCOUNTS)} 个账号")
             
         except ImportError:
-            logger.warning("⚠️ local_accounts.py文件不存在或导入失败")
+            logger.warning("[WARN] local_accounts.py文件不存在或导入失败")
         except Exception as e:
-            logger.error(f"❌ 从本地配置加载账号失败: {e}")
+            logger.error(f"[FAIL] 从本地配置加载账号失败: {e}")
 
     def _load_from_encrypted_config(self) -> None:
         """从加密配置文件加载账号"""
@@ -168,10 +168,10 @@ class PlatformAccountsManager:
                     
                 self.accounts[account.account_id] = account
                 
-            logger.info(f"✅ 从加密配置加载了 {len(decrypted_data.get('accounts', []))} 个账号")
+            logger.info(f"[OK] 从加密配置加载了 {len(decrypted_data.get('accounts', []))} 个账号")
             
         except Exception as e:
-            logger.error(f"❌ 从加密配置加载账号失败: {e}")
+            logger.error(f"[FAIL] 从加密配置加载账号失败: {e}")
 
     def get_all_accounts(self) -> List[PlatformAccount]:
         """获取所有账号"""
@@ -280,7 +280,7 @@ class PlatformAccountsManager:
         try:
             account = self.accounts.get(account_id)
             if not account:
-                logger.warning(f"⚠️ 账号 {account_id} 不存在")
+                logger.warning(f"[WARN] 账号 {account_id} 不存在")
                 return False
             
             # 更新登录统计
@@ -304,11 +304,11 @@ class PlatformAccountsManager:
             account.risk_level = self._assess_risk_level(account)
             account.updated_at = datetime.now()
             
-            logger.info(f"✅ 更新账号 {account_id} 统计信息成功")
+            logger.info(f"[OK] 更新账号 {account_id} 统计信息成功")
             return True
             
         except Exception as e:
-            logger.error(f"❌ 更新账号统计信息失败: {e}")
+            logger.error(f"[FAIL] 更新账号统计信息失败: {e}")
             return False
 
     def export_accounts_summary(self) -> pd.DataFrame:
@@ -332,11 +332,11 @@ class PlatformAccountsManager:
                 })
             
             df = pd.DataFrame(data)
-            logger.info(f"✅ 导出账号汇总表成功，共 {len(data)} 个账号")
+            logger.info(f"[OK] 导出账号汇总表成功，共 {len(data)} 个账号")
             return df
             
         except Exception as e:
-            logger.error(f"❌ 导出账号汇总表失败: {e}")
+            logger.error(f"[FAIL] 导出账号汇总表失败: {e}")
             return pd.DataFrame()
 
     def get_dashboard_data(self) -> Dict[str, Any]:
@@ -388,7 +388,7 @@ class PlatformAccountsManager:
             }
             
         except Exception as e:
-            logger.error(f"❌ 获取仪表板数据失败: {e}")
+            logger.error(f"[FAIL] 获取仪表板数据失败: {e}")
             return {}
 
 # 全局实例

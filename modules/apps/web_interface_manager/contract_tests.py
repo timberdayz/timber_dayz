@@ -39,7 +39,7 @@ def test_contract_discovery():
     assert count > 0, "应该能发现至少一个应用"
     assert "web_interface_manager" in registry.list_applications(), "应该能发现 web_interface_manager"
     
-    logger.info("✅ 应用发现测试通过")
+    logger.info("[OK] 应用发现测试通过")
 
 
 def test_contract_registration():
@@ -57,7 +57,7 @@ def test_contract_registration():
     assert info.get("version") == "1.0.0", "应用版本应该正确"
     assert "description" in info, "应该有描述信息"
     
-    logger.info("✅ 应用注册测试通过")
+    logger.info("[OK] 应用注册测试通过")
 
 
 def test_contract_health_check():
@@ -72,7 +72,7 @@ def test_contract_health_check():
     is_healthy = app.health_check()
     assert is_healthy, "健康检查应该通过"
     
-    logger.info("✅ 健康检查测试通过")
+    logger.info("[OK] 健康检查测试通过")
 
 
 def test_contract_basic_interface():
@@ -92,12 +92,12 @@ def test_contract_basic_interface():
     # 测试运行状态
     assert not app.is_running(), "初始状态应该是未运行"
     
-    logger.info("✅ 基本接口测试通过")
+    logger.info("[OK] 基本接口测试通过")
 
 
 def run_all_contract_tests():
     """运行所有契约测试"""
-    print("🔍 开始Web界面管理应用契约测试...")
+    print("[SEARCH] 开始Web界面管理应用契约测试...")
     
     try:
         test_contract_discovery()
@@ -105,11 +105,11 @@ def run_all_contract_tests():
         test_contract_health_check()
         test_contract_basic_interface()
         
-        print("✅ 所有契约测试通过")
+        print("[OK] 所有契约测试通过")
         return True
         
     except Exception as e:
-        print(f"❌ 契约测试失败: {e}")
+        print(f"[FAIL] 契约测试失败: {e}")
         logger.error(f"契约测试失败: {e}")
         return False
 

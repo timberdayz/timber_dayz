@@ -187,7 +187,7 @@ class CollectionScheduler:
         
         loaded_count = 0
         
-        # ⭐ v4.18.2修复：使用异步数据库操作
+        # [*] v4.18.2修复：使用异步数据库操作
         from backend.models.database import AsyncSessionLocal
         async with AsyncSessionLocal() as db:
             # 查询所有启用定时的配置
@@ -378,7 +378,7 @@ class CollectionScheduler:
         """
         logger.info(f"Executing scheduled task for config {config_id}")
         
-        # ⭐ v4.18.2修复：使用异步数据库操作
+        # [*] v4.18.2修复：使用异步数据库操作
         from backend.models.database import AsyncSessionLocal
         async with AsyncSessionLocal() as db:
             # 获取配置
@@ -417,7 +417,7 @@ class CollectionScheduler:
                     from backend.models.database import SessionLocal
                     import asyncio
                     
-                    # ⭐ v4.18.2修复：使用run_in_executor包装同步账号加载操作
+                    # [*] v4.18.2修复：使用run_in_executor包装同步账号加载操作
                     def _sync_load_accounts():
                         """同步加载账号（在executor中执行）"""
                         temp_db = SessionLocal()
@@ -596,7 +596,7 @@ class CollectionScheduler:
 
 # 常用 Cron 表达式预设
 CRON_PRESETS = {
-    # ⭐ v4.7.0标准预设（Phase 4.1.6）⭐
+    # [*] v4.7.0标准预设（Phase 4.1.6）[*]
     'daily_realtime': '0 6,12,18,22 * * *',    # 日度实时（每天4次：6点/12点/18点/22点）
     'weekly_summary': '0 5 * * 1',              # 周度汇总（每周一 05:00）
     'monthly_summary': '0 5 1 * *',             # 月度汇总（每月1号 05:00）

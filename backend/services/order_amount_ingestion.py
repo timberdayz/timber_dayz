@@ -4,7 +4,7 @@
 """
 订单金额维度入库服务（v4.6.0）
 
-⚠️ v4.18.2 已废弃：此功能已移除，不再被调用
+[WARN] v4.18.2 已废弃：此功能已移除，不再被调用
 原因：
 - DSS架构下，数据已完整存储在 b_class.fact_raw_data_orders_* 表的 JSONB 字段中
 - 货币代码已提取到 currency_code 系统字段，字段名已归一化
@@ -73,7 +73,7 @@ async def ingest_order_amounts(
     converter = CurrencyConverter(db)
     
     # 2. 识别pattern-based字段
-    # ⭐ v4.12.1修复：跳过已经映射的字段，避免Pattern Matcher警告
+    # [*] v4.12.1修复：跳过已经映射的字段，避免Pattern Matcher警告
     # 只处理未映射的字段或明确标记为pattern-based的字段
     pattern_fields = {}
     mapped_standard_fields = set()
@@ -87,7 +87,7 @@ async def ingest_order_amounts(
                     mapped_standard_fields.add(standard_field)
     
     for orig_col in original_columns:
-        # ⭐ v4.12.1修复：跳过已经映射的字段
+        # [*] v4.12.1修复：跳过已经映射的字段
         mapping_info = field_mappings.get(orig_col) if field_mappings else None
         if mapping_info and isinstance(mapping_info, dict):
             standard_field = mapping_info.get("standard_field")

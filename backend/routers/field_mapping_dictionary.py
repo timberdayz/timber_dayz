@@ -80,7 +80,7 @@ async def get_field_dictionary(
         groups = {}
         required_fields = []
         
-        # ⭐ 新增：过滤掉日期范围字段（避免时间索引混乱）
+        # [*] 新增：过滤掉日期范围字段（避免时间索引混乱）
         def is_date_range_field(field_code: str, cn_name: str) -> bool:
             """判断是否为日期范围字段"""
             import re
@@ -124,7 +124,7 @@ async def get_field_dictionary(
             if field.get("is_required"):
                 required_fields.append(field)
         
-        # ⭐ 修复：使用标准API响应格式
+        # [*] 修复：使用标准API响应格式
         return success_response(
             data={
                 "fields": filtered_fields,  # 返回过滤后的字段
@@ -266,7 +266,7 @@ async def suggest_field_mappings(
                 status_code=404
             )
         
-        # ⭐ v4.6.0: 优先使用PatternMatcher（支持货币字段等Pattern-based映射）
+        # [*] v4.6.0: 优先使用PatternMatcher（支持货币字段等Pattern-based映射）
         from backend.services.pattern_matcher import PatternMatcher
         pattern_matcher = PatternMatcher(db)
         
@@ -294,7 +294,7 @@ async def suggest_field_mappings(
             traditional_mappings = matcher.batch_match(unmatched_cols, sample_data)
             mappings.update(traditional_mappings)
         
-        # ⭐ 新增：自动检测字段类型（date或datetime）
+        # [*] 新增：自动检测字段类型（date或datetime）
         # 根据样本数据自动识别是否需要保留时间信息
         from backend.services.field_mapping.type_detector import enhance_mapping_with_type_detection
         
@@ -644,7 +644,7 @@ async def save_mapping_template(
         if not request.get('data_domain'):
             raise ValueError("data_domain参数必填")
         
-        # ⭐ v4.6.0 DSS架构：使用header_columns而非mappings
+        # [*] v4.6.0 DSS架构：使用header_columns而非mappings
         header_columns = request.get('header_columns')
         if not header_columns and 'mappings' in request:
             # 兼容旧格式：从mappings提取header_columns
@@ -657,7 +657,7 @@ async def save_mapping_template(
         if not header_columns:
             raise ValueError("header_columns参数必填（DSS架构：保存原始表头字段列表）")
         
-        # ⭐ v4.16.0新增：自动归一化header_columns（移除货币代码部分）
+        # [*] v4.16.0新增：自动归一化header_columns（移除货币代码部分）
         # 这样保存的模板中，header_columns不包含货币代码，后续同步时表头也不会包含货币代码
         from backend.services.currency_extractor import get_currency_extractor
         currency_extractor = get_currency_extractor()
@@ -673,7 +673,7 @@ async def save_mapping_template(
             changed_fields = []
             for orig, norm in zip(original_header_columns, normalized_header_columns):
                 if orig != norm:
-                    changed_fields.append(f"{orig} → {norm}")
+                    changed_fields.append(f"{orig} -> {norm}")
             
             logger.info(
                 f"[Template] [v4.16.0] 自动归一化header_columns: "
@@ -698,7 +698,7 @@ async def save_mapping_template(
                 sub_domain=request.get('sub_domain')
             )
             logger.warning(
-                f"[Template] ⚠️ 警告：保存模板时未提供deduplication_fields，"
+                f"[Template] [WARN] 警告：保存模板时未提供deduplication_fields，"
                 f"使用默认配置: {deduplication_fields}。"
                 f"建议用户手动选择核心字段以确保去重正确。"
             )
@@ -712,7 +712,7 @@ async def save_mapping_template(
                 raise ValueError("deduplication_fields列表中的元素必须是字符串")
             
             # 验证核心字段是否在归一化后的header_columns中（软验证，记录警告但不阻止保存）
-            # ⭐ v4.16.0修复：使用归一化后的header_columns（已在上面处理）
+            # [*] v4.16.0修复：使用归一化后的header_columns（已在上面处理）
             if header_columns:
                 missing_fields = []
                 for field in deduplication_fields:
@@ -727,14 +727,14 @@ async def save_mapping_template(
                 
                 if missing_fields:
                     logger.warning(
-                        f"[Template] ⚠️ 警告：以下核心字段不在表头中: {missing_fields}，"
+                        f"[Template] [WARN] 警告：以下核心字段不在表头中: {missing_fields}，"
                         f"可能导致去重失败。表头字段: {header_columns[:10]}..."
                     )
         
         template_id = template_service.save_template(
             platform=request['platform'],
             data_domain=request['data_domain'],
-            header_columns=header_columns,  # ⭐ v4.6.0 DSS架构：使用header_columns
+            header_columns=header_columns,  # [*] v4.6.0 DSS架构：使用header_columns
             granularity=request.get('granularity'),
             account=request.get('account'),
             template_name=request.get('template_name'),
@@ -1001,7 +1001,7 @@ async def detect_header_changes(
     """
     检测表头变化（v4.14.0安全版本）
     
-    ⚠️ 安全原则：不进行相似度匹配，任何变化都需要用户手动确认
+    [WARN] 安全原则：不进行相似度匹配，任何变化都需要用户手动确认
     
     比较当前表头与模板表头，检测：
     - 新增字段（current中有，template中没有）

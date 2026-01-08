@@ -445,7 +445,7 @@ async def batch_calculate_achievement_rate(
             params.append(year_month)
         
         # 查询所有销售目标
-        # ⚠️ 注意：sales_targets表没有shop_id字段，需要通过target_breakdown表关联店铺
+        # [WARN] 注意：sales_targets表没有shop_id字段，需要通过target_breakdown表关联店铺
         # 但根据提案，用户确认sales_targets表需要platform_code
         # 这里先查询target_breakdown表获取店铺信息
         result = await db.execute(

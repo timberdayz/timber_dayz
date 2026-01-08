@@ -97,7 +97,7 @@ def detect_date_range_format(value: Any) -> Optional[tuple]:
     # 时间范围分隔符：~、-、至、to、～
     separators = [r'~', r'—', r'—', r'至', r'to', r'To', r'TO', r'-', r'到']
     
-    # ⭐ 修复：支持日期时间格式（包含时间）
+    # [*] 修复：支持日期时间格式（包含时间）
     # 格式1：2025-08-18-15:01~2025-08-25-15:01 (日期和时间用-分隔)
     datetime_pattern_with_dash = r'(\d{4}[-/]\d{1,2}[-/]\d{1,2}[-]\d{1,2}:\d{2}(?::\d{2})?)'
     # 格式2：2025-08-25 17:01 (日期和时间用空格分隔)
@@ -200,7 +200,7 @@ def enhance_mapping_with_type_detection(
     """
     增强映射建议，添加自动检测的字段类型
     
-    ⭐ 新增：支持时间范围字段的自动识别和拆分
+    [*] 新增：支持时间范围字段的自动识别和拆分
     
     Args:
         mapping: 原始映射建议
@@ -213,7 +213,7 @@ def enhance_mapping_with_type_detection(
     """
     enhanced = mapping.copy()
     
-    # ⭐ 新增：检测是否为时间范围字段（优先检测，即使standard_field为"未映射"也要检测）
+    # [*] 新增：检测是否为时间范围字段（优先检测，即使standard_field为"未映射"也要检测）
     if sample_values:
         # 检查样本中是否包含时间范围格式
         range_count = 0
@@ -231,7 +231,7 @@ def enhance_mapping_with_type_detection(
                 "end_time": "结束时间"
             }
             enhanced["detection_reason"] = f"检测到时间范围格式（{range_count}/{len(valid_samples)}个样本），将自动拆分为开始时间和结束时间"
-            # ⭐ 重要：即使standard_field已有值（如"datetime"），时间范围字段也应该优先拆分
+            # [*] 重要：即使standard_field已有值（如"datetime"），时间范围字段也应该优先拆分
             # 清空standard_field，让前端根据is_date_range自动拆分，而不是映射到单个datetime字段
             enhanced["standard_field"] = None  # 或保留原值，但前端会优先检查is_date_range
             enhanced["standard"] = None  # 兼容字段

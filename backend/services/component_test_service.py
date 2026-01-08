@@ -60,7 +60,7 @@ class ComponentTestService:
         }
         
         logger.debug(f"Account info prepared for {account.account_id}")
-        return account_info  # ⭐ 修复：必须返回account_info！
+        return account_info  # [*] 修复：必须返回account_info！
     
     @staticmethod
     def run_component_test_subprocess(
@@ -343,7 +343,7 @@ class ComponentTestService:
         """
         保存测试历史记录（统一实现，异步版本）
         
-        ⭐ v4.18.2修复：改为异步方法，支持 AsyncSession
+        [*] v4.18.2修复：改为异步方法，支持 AsyncSession
         
         Args:
             db: 数据库会话（Session 或 AsyncSession）
@@ -404,7 +404,7 @@ class ComponentTestService:
             )
             
             db.add(history)
-            # ⭐ v4.18.2修复：统一使用异步操作
+            # [*] v4.18.2修复：统一使用异步操作
             if isinstance(db, AsyncSession):
                 await db.commit()
             else:

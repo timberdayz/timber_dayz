@@ -199,8 +199,8 @@ class AccountAlias(Base):
     
     用途：将妙手(miaoshou)等ERP导出的口语化店铺名映射到统一账号ID
     示例：
-    - platform=miaoshou, account=虾皮巴西, store_label_raw="菲律宾1店" → target_id="shopee_ph_1"
-    - platform=miaoshou, account=虾皮巴西, store_label_raw="3C店" → target_id="shopee_sg_3c"
+    - platform=miaoshou, account=虾皮巴西, store_label_raw="菲律宾1店" -> target_id="shopee_ph_1"
+    - platform=miaoshou, account=虾皮巴西, store_label_raw="3C店" -> target_id="shopee_sg_3c"
     """
     __tablename__ = "account_aliases"
     
@@ -261,7 +261,7 @@ class DimCurrencyRate(Base):
 
 class FactOrder(Base):
     """
-    ⚠️ v4.6.0 DSS架构重构：已废弃
+    [WARN] v4.6.0 DSS架构重构：已废弃
     - 已被fact_raw_data_orders_*表替代（按data_domain+granularity分表）
     - 表结构保留用于兼容性，但新数据应写入fact_raw_data_*表
     - 计划在Phase 6.1中删除（需要先迁移所有数据）
@@ -278,16 +278,16 @@ class FactOrder(Base):
 
     # currency & amounts (original + RMB)
     currency = Column(String(8), nullable=True)
-    subtotal = Column(Float, default=0.0, nullable=False)  # ⭐ v4.12.0修复：NOT NULL
-    subtotal_rmb = Column(Float, default=0.0, nullable=False)  # ⭐ v4.12.0修复：NOT NULL
+    subtotal = Column(Float, default=0.0, nullable=False)  # [*] v4.12.0修复：NOT NULL
+    subtotal_rmb = Column(Float, default=0.0, nullable=False)  # [*] v4.12.0修复：NOT NULL
     shipping_fee = Column(Float, default=0.0)
     shipping_fee_rmb = Column(Float, default=0.0)
     tax_amount = Column(Float, default=0.0)
     tax_amount_rmb = Column(Float, default=0.0)
     discount_amount = Column(Float, default=0.0)
     discount_amount_rmb = Column(Float, default=0.0)
-    total_amount = Column(Float, default=0.0, nullable=False)  # ⭐ v4.12.0修复：NOT NULL
-    total_amount_rmb = Column(Float, default=0.0, nullable=False)  # ⭐ v4.12.0修复：NOT NULL
+    total_amount = Column(Float, default=0.0, nullable=False)  # [*] v4.12.0修复：NOT NULL
+    total_amount_rmb = Column(Float, default=0.0, nullable=False)  # [*] v4.12.0修复：NOT NULL
 
     payment_method = Column(String(64), nullable=True)
     payment_status = Column(String(32), default="pending")
@@ -326,7 +326,7 @@ class FactOrder(Base):
 
 class FactOrderItem(Base):
     """
-    ⚠️ v4.6.0 DSS架构重构：已废弃
+    [WARN] v4.6.0 DSS架构重构：已废弃
     - 已被fact_raw_data_orders_*表替代（按data_domain+granularity分表）
     - 表结构保留用于兼容性，但新数据应写入fact_raw_data_*表
     - 计划在Phase 6.1中删除（需要先迁移所有数据）
@@ -338,15 +338,15 @@ class FactOrderItem(Base):
     order_id = Column(String(128), primary_key=True)
     platform_sku = Column(String(128), primary_key=True)
 
-    # ⭐ v4.12.0新增：产品ID冗余字段（便于直接查询，无需通过BridgeProductKeys关联）
+    # [*] v4.12.0新增：产品ID冗余字段（便于直接查询，无需通过BridgeProductKeys关联）
     product_id = Column(Integer, ForeignKey("dim_product_master.product_id", ondelete="SET NULL"), nullable=True, comment="产品ID（冗余字段，通过BridgeProductKeys自动关联）")
 
     product_title = Column(String(512), nullable=True)
-    quantity = Column(Integer, default=1, nullable=False)  # ⭐ v4.12.0修复：NOT NULL
+    quantity = Column(Integer, default=1, nullable=False)  # [*] v4.12.0修复：NOT NULL
 
     currency = Column(String(8), nullable=True)
-    unit_price = Column(Float, default=0.0, nullable=False)  # ⭐ v4.12.0修复：NOT NULL
-    unit_price_rmb = Column(Float, default=0.0, nullable=False)  # ⭐ v4.12.0修复：NOT NULL
+    unit_price = Column(Float, default=0.0, nullable=False)  # [*] v4.12.0修复：NOT NULL
+    unit_price_rmb = Column(Float, default=0.0, nullable=False)  # [*] v4.12.0修复：NOT NULL
     line_amount = Column(Float, default=0.0)
     line_amount_rmb = Column(Float, default=0.0)
     # 通用扩展属性：用于存放未晋升为标准列的长尾字段（入库兜底）
@@ -358,7 +358,7 @@ class FactOrderItem(Base):
     __table_args__ = (
         Index("ix_fact_items_plat_shop_order", "platform_code", "shop_id", "order_id"),
         Index("ix_fact_items_plat_shop_sku", "platform_code", "shop_id", "platform_sku"),
-        Index("ix_fact_items_product_id", "product_id"),  # ⭐ v4.12.0新增：支持通过product_id高效查询
+        Index("ix_fact_items_product_id", "product_id"),  # [*] v4.12.0新增：支持通过product_id高效查询
     )
 
 
@@ -376,8 +376,8 @@ class FactOrderAmount(Base):
     - currency: BRL/SGD/CNY/USD/EUR/...
     
     示例：
-    - 销售额（已付款订单）（BRL） → {metric_type: sales_amount, metric_subtype: paid, currency: BRL}
-    - 退款金额（SGD） → {metric_type: refund_amount, metric_subtype: standard, currency: SGD}
+    - 销售额（已付款订单）（BRL） -> {metric_type: sales_amount, metric_subtype: paid, currency: BRL}
+    - 退款金额（SGD） -> {metric_type: refund_amount, metric_subtype: standard, currency: SGD}
     """
     __tablename__ = "fact_order_amounts"
     
@@ -411,7 +411,7 @@ class FactOrderAmount(Base):
 
 class FactProductMetric(Base):
     """
-    ⚠️ v4.6.0 DSS架构重构：已废弃
+    [WARN] v4.6.0 DSS架构重构：已废弃
     - 已被fact_raw_data_products_*表替代（按data_domain+granularity分表）
     - 表结构保留用于兼容性，但新数据应写入fact_raw_data_*表
     - 计划在Phase 6.1中删除（需要先迁移所有数据）
@@ -509,13 +509,13 @@ class FactProductMetric(Base):
             "platform_code", "shop_id", "platform_sku", "metric_date", "granularity", "sku_scope",
             name="ix_product_unique_with_scope"
         ),
-        # 外键约束：source_catalog_id → catalog_files.id
+        # 外键约束：source_catalog_id -> catalog_files.id
         ForeignKeyConstraint(
             ["source_catalog_id"],
             ["catalog_files.id"],
             ondelete="SET NULL"
         ),
-        # 外键约束：platform_code + shop_id + platform_sku → dim_products
+        # 外键约束：platform_code + shop_id + platform_sku -> dim_products
         ForeignKeyConstraint(
             ["platform_code", "shop_id", "platform_sku"],
             ["dim_products.platform_code", "dim_products.shop_id", "dim_products.platform_sku"]
@@ -647,7 +647,7 @@ class CatalogFile(Base):
     file_hash = Column(String(64), nullable=True)  # sha256 or md5
 
     platform_code = Column(String(32), nullable=True)
-    account = Column(String(128), nullable=True)  # ⭐ 账号信息（从.meta.json提取）
+    account = Column(String(128), nullable=True)  # [*] 账号信息（从.meta.json提取）
     shop_id = Column(String(256), nullable=True)  # v4.3.4: 扩展到256以支持长shop_id
     data_domain = Column(String(64), nullable=True)  # orders/products/metrics
     granularity = Column(String(16), nullable=True)   # daily/weekly/monthly
@@ -761,7 +761,7 @@ class CollectionConfig(Base):
     - 日期范围配置
     
     v4.7.0 更新：
-    - sub_domain → sub_domains (改为数组，支持多选)
+    - sub_domain -> sub_domains (改为数组，支持多选)
     - account_ids=[] 表示使用该平台所有活跃账号
     """
     __tablename__ = "collection_configs"
@@ -1083,7 +1083,7 @@ class PlatformAccount(Base):
     # 店铺信息
     shop_type = Column(String(50), nullable=True, comment="店铺类型: local/global")
     shop_region = Column(String(50), nullable=True, comment="店铺区域: SG/MY/GLOBAL等")
-    shop_id = Column(String(256), nullable=True, comment="店铺ID（用于关联数据同步中的shop_id，可编辑）")  # ⭐ v4.18.1新增
+    shop_id = Column(String(256), nullable=True, comment="店铺ID（用于关联数据同步中的shop_id，可编辑）")  # [*] v4.18.1新增
     
     # 登录信息（敏感）
     username = Column(String(200), nullable=False, comment="登录用户名")
@@ -1130,7 +1130,7 @@ class PlatformAccount(Base):
         Index("ix_platform_accounts_parent", "parent_account"),
         Index("ix_platform_accounts_enabled", "enabled"),
         Index("ix_platform_accounts_shop_type", "shop_type"),
-        Index("ix_platform_accounts_shop_id", "shop_id"),  # ⭐ v4.18.1新增
+        Index("ix_platform_accounts_shop_id", "shop_id"),  # [*] v4.18.1新增
     )
 
 
@@ -1490,7 +1490,7 @@ class FieldMappingTemplateItem(Base):
     """
     字段映射模板明细表
     
-    ⚠️ v4.6.0 DSS架构重构：已废弃
+    [WARN] v4.6.0 DSS架构重构：已废弃
     - 已被FieldMappingTemplate.header_columns JSONB字段替代
     - 表结构保留用于兼容性，但不再使用
     - 新代码应使用header_columns字段
@@ -3133,7 +3133,7 @@ class SyncProgressTask(Base):
 # -------------------- DSS Architecture Tables (v4.6.0+) --------------------
 
 # B-Class Data Tables (按平台-数据域-子类型-粒度分表，动态创建)
-# ⚠️ v4.17.0+ 架构调整：旧的固定表类已删除，所有B类数据表通过PlatformTableManager动态创建
+# [WARN] v4.17.0+ 架构调整：旧的固定表类已删除，所有B类数据表通过PlatformTableManager动态创建
 # 表名格式：fact_{platform}_{data_domain}_{sub_domain}_{granularity}
 # 所有表创建在b_class schema中
 
@@ -3623,7 +3623,7 @@ class UserNotificationPreference(Base):
     )
 
 
-# ⭐ v4.19.4 新增：限流配置表（Phase 3）
+# [*] v4.19.4 新增：限流配置表（Phase 3）
 class DimRateLimitConfig(Base):
     """
     限流配置维度表
@@ -3665,7 +3665,7 @@ class DimRateLimitConfig(Base):
     )
 
 
-# ⭐ v4.19.4 新增：限流配置审计日志表（Phase 3）
+# [*] v4.19.4 新增：限流配置审计日志表（Phase 3）
 class FactRateLimitConfigAudit(Base):
     """
     限流配置变更审计日志表

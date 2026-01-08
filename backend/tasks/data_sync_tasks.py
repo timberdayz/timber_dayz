@@ -1,7 +1,7 @@
 """
 数据同步 Celery 任务模块
 
-⭐ v4.19.1 恢复：使用 Celery 任务队列执行数据同步
+[*] v4.19.1 恢复：使用 Celery 任务队列执行数据同步
 - 任务持久化：任务存储在 Redis 中，服务器重启后自动恢复
 - 资源隔离：任务在独立的 Celery worker 进程中执行，不影响 API 服务
 - 水平扩展：可以通过增加 worker 来扩展处理能力
@@ -37,7 +37,7 @@ def sync_single_file_task(
     only_with_template: bool = True,
     allow_quarantine: bool = True,
     use_template_header_row: bool = True,
-    user_id: int = None  # ⭐ Phase 4.2: 用户ID（可选，用于配额管理）
+    user_id: int = None  # [*] Phase 4.2: 用户ID（可选，用于配额管理）
 ):
     """
     单文件同步 Celery 任务
@@ -66,7 +66,7 @@ def sync_single_file_task(
         try:
             logger.info(f"[CeleryTask] 开始单文件同步 file_id={file_id}, task_id={task_id}")
             
-            # ⭐ 修复：检查进度任务是否已存在（API层可能已创建）
+            # [*] 修复：检查进度任务是否已存在（API层可能已创建）
             existing_task = await progress_tracker.get_task(task_id)
             if not existing_task:
                 # 如果不存在，则创建进度任务（降级模式或API层未创建的情况）
@@ -122,12 +122,12 @@ def sync_single_file_task(
             # 重新抛出异常，让外层处理重试逻辑
             raise
         finally:
-            # ⭐ Phase 4.2: 减少用户任务计数（任务完成或失败时）
+            # [*] Phase 4.2: 减少用户任务计数（任务完成或失败时）
             if user_id:
                 try:
                     from backend.services.user_task_quota import get_user_task_quota_service
                     quota_service = get_user_task_quota_service()
-                    # ⭐ 修复：在异步函数内部，可以直接使用 await
+                    # [*] 修复：在异步函数内部，可以直接使用 await
                     await quota_service.decrement_user_task_count(user_id)
                 except Exception as quota_error:
                     logger.warning(f"[CeleryTask] 减少用户 {user_id} 任务计数失败: {quota_error}")
@@ -143,12 +143,12 @@ def sync_single_file_task(
         result = asyncio.run(_async_task())
         return result
     except Exception as exc:
-        # ⭐ Phase 4.2: 任务异常时也要减少用户任务计数
+        # [*] Phase 4.2: 任务异常时也要减少用户任务计数
         if user_id:
             try:
                 from backend.services.user_task_quota import get_user_task_quota_service
                 quota_service = get_user_task_quota_service()
-                # ⭐ 修复：在同步函数中使用 asyncio.run() 执行异步代码
+                # [*] 修复：在同步函数中使用 asyncio.run() 执行异步代码
                 asyncio.run(quota_service.decrement_user_task_count(user_id))
             except Exception as quota_error:
                 logger.warning(f"[CeleryTask] 减少用户 {user_id} 任务计数失败: {quota_error}")
@@ -189,7 +189,7 @@ def sync_batch_task(
     allow_quarantine: bool = True,
     use_template_header_row: bool = True,
     max_concurrent: int = 10,
-    user_id: int = None  # ⭐ Phase 4.2: 用户ID（可选，用于配额管理）
+    user_id: int = None  # [*] Phase 4.2: 用户ID（可选，用于配额管理）
 ):
     """
     批量同步 Celery 任务
@@ -223,7 +223,7 @@ def sync_batch_task(
         try:
             logger.info(f"[CeleryTask] 开始批量同步 {len(file_ids)} 个文件, task_id={task_id}")
             
-            # ⭐ 修复：检查进度任务是否已存在（API层可能已创建）
+            # [*] 修复：检查进度任务是否已存在（API层可能已创建）
             existing_task = await progress_tracker.get_task(task_id)
             if not existing_task:
                 # 如果不存在，则创建进度任务（降级模式或API层未创建的情况）
@@ -457,12 +457,12 @@ def sync_batch_task(
                 pass
             raise
         finally:
-            # ⭐ Phase 4.2: 减少用户任务计数（任务完成或失败时）
+            # [*] Phase 4.2: 减少用户任务计数（任务完成或失败时）
             if user_id:
                 try:
                     from backend.services.user_task_quota import get_user_task_quota_service
                     quota_service = get_user_task_quota_service()
-                    # ⭐ 修复：在异步函数内部，可以直接使用 await
+                    # [*] 修复：在异步函数内部，可以直接使用 await
                     await quota_service.decrement_user_task_count(user_id)
                 except Exception as quota_error:
                     logger.warning(f"[CeleryTask] 减少用户 {user_id} 任务计数失败: {quota_error}")
@@ -477,12 +477,12 @@ def sync_batch_task(
         result = asyncio.run(_async_task())
         return result
     except Exception as exc:
-        # ⭐ Phase 4.2: 任务异常时也要减少用户任务计数
+        # [*] Phase 4.2: 任务异常时也要减少用户任务计数
         if user_id:
             try:
                 from backend.services.user_task_quota import get_user_task_quota_service
                 quota_service = get_user_task_quota_service()
-                # ⭐ 修复：在同步函数中使用 asyncio.run() 执行异步代码
+                # [*] 修复：在同步函数中使用 asyncio.run() 执行异步代码
                 asyncio.run(quota_service.decrement_user_task_count(user_id))
             except Exception as quota_error:
                 logger.warning(f"[CeleryTask] 减少用户 {user_id} 任务计数失败: {quota_error}")

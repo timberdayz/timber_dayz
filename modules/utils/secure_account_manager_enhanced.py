@@ -80,7 +80,7 @@ class SecureAccountManagerEnhanced:
                 master_key = fernet.decrypt(encrypted_key)
                 self._runtime_key = master_key
                 
-                logger.success("✅ 主密钥解锁成功")
+                logger.success("[OK] 主密钥解锁成功")
                 return master_key
                 
             except Exception as e:
@@ -109,7 +109,7 @@ class SecureAccountManagerEnhanced:
                 f.write(salt + encrypted_master_key)
             
             self._runtime_key = master_key
-            logger.success("✅ 主密钥创建成功")
+            logger.success("[OK] 主密钥创建成功")
             return master_key
     
     def _encrypt_accounts(self, accounts_data: Dict) -> bool:
@@ -134,7 +134,7 @@ class SecureAccountManagerEnhanced:
             with open(self.hash_file, 'w') as f:
                 f.write(data_hash)
             
-            logger.success("✅ 账号数据加密保存成功")
+            logger.success("[OK] 账号数据加密保存成功")
             return True
             
         except Exception as e:
@@ -167,10 +167,10 @@ class SecureAccountManagerEnhanced:
                 
                 current_hash = hashlib.sha256(json_data.encode('utf-8')).hexdigest()
                 if stored_hash != current_hash:
-                    logger.warning("⚠️  数据完整性验证失败")
+                    logger.warning("[WARN]  数据完整性验证失败")
             
             accounts_data = json.loads(json_data)
-            logger.success("✅ 账号数据解密成功")
+            logger.success("[OK] 账号数据解密成功")
             return accounts_data
             
         except Exception as e:
@@ -216,7 +216,7 @@ class SecureAccountManagerEnhanced:
             
             # 加密存储
             if self._encrypt_accounts(accounts_data):
-                logger.success(f"✅ 成功导入并加密 {len(all_accounts)} 个账号")
+                logger.success(f"[OK] 成功导入并加密 {len(all_accounts)} 个账号")
                 
                 # 清空运行时缓存，强制重新加载
                 self._cached_accounts = None
@@ -313,7 +313,7 @@ class SecureAccountManagerEnhanced:
             
             if self._encrypt_accounts(accounts_data):
                 self._cached_accounts = None  # 清空缓存
-                logger.success("✅ 账号添加成功")
+                logger.success("[OK] 账号添加成功")
                 return True
             else:
                 logger.error("账号保存失败")
@@ -341,7 +341,7 @@ class SecureAccountManagerEnhanced:
             
             if self._encrypt_accounts(accounts_data):
                 self._cached_accounts = None  # 清空缓存
-                logger.success("✅ 账号更新成功")
+                logger.success("[OK] 账号更新成功")
                 return True
             else:
                 logger.error("账号保存失败")
@@ -368,7 +368,7 @@ class SecureAccountManagerEnhanced:
             
             if self._encrypt_accounts(accounts_data):
                 self._cached_accounts = None  # 清空缓存
-                logger.success("✅ 账号删除成功")
+                logger.success("[OK] 账号删除成功")
                 return True
             else:
                 logger.error("账号保存失败")
@@ -401,7 +401,7 @@ class SecureAccountManagerEnhanced:
                 if self.hash_file.exists():
                     shutil.copy2(self.hash_file, hash_backup)
                 
-                logger.success(f"✅ 账号备份成功: {backup_path}")
+                logger.success(f"[OK] 账号备份成功: {backup_path}")
                 return str(backup_path)
             else:
                 logger.error("没有找到加密账号文件")
@@ -436,7 +436,7 @@ class SecureAccountManagerEnhanced:
             # 清空缓存
             self._cached_accounts = None
             
-            logger.success("✅ 账号恢复成功")
+            logger.success("[OK] 账号恢复成功")
             return True
             
         except Exception as e:

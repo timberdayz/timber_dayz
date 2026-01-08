@@ -75,9 +75,9 @@ def format_response_data(data: Any) -> Any:
     递归格式化响应数据中的日期时间和金额字段
     
     自动处理：
-    - datetime对象 → ISO 8601格式字符串
-    - date对象 → ISO 8601日期格式字符串
-    - Decimal对象 → float（保留2位小数）
+    - datetime对象 -> ISO 8601格式字符串
+    - date对象 -> ISO 8601日期格式字符串
+    - Decimal对象 -> float（保留2位小数）
     
     Args:
         data: 要格式化的数据（可以是字典、列表、对象等）

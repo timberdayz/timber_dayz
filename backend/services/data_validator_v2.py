@@ -134,11 +134,11 @@ def validate_product_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         
         # 2. metric_date
         date_str = row.get("metric_date") or row.get("date")
-        granularity = row.get("granularity", "daily")  # ⭐ v4.6.2新增：获取粒度
+        granularity = row.get("granularity", "daily")  # [*] v4.6.2新增：获取粒度
         date_parsed = _parse_date(date_str)
         
         if not date_parsed:
-            # ⭐ v4.6.2新增：snapshot数据允许缺少日期（自动补充）
+            # [*] v4.6.2新增：snapshot数据允许缺少日期（自动补充）
             if granularity == "snapshot":
                 # 自动使用今天日期（入库时会从文件名提取更准确的日期）
                 from datetime import date as dt_date

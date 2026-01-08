@@ -4,9 +4,9 @@ Shopee 组件配置注册中心
 统一管理各数据域的配置文件与组件映射，实现智能配置编辑。
 
 使用方式：
-- get_config_path("analytics") → analytics_config.py 路径
-- get_export_component("orders") → OrdersExport 组件类
-- get_navigation_target("products") → TargetPage.PRODUCTS_PERFORMANCE
+- get_config_path("analytics") -> analytics_config.py 路径
+- get_export_component("orders") -> OrdersExport 组件类
+- get_navigation_target("products") -> TargetPage.PRODUCTS_PERFORMANCE
 """
 from __future__ import annotations
 
@@ -180,10 +180,10 @@ class ConfigRegistry:
             
             print(f"\n[EDIT] 快速修改 {config.menu_display_name} 组件配置")
             print("=" * 50)
-            print(f"📁 配置文件: {config_path}")
+            print(f"[DIR] 配置文件: {config_path}")
             print(f"[DOMAIN] 数据域: {config.domain.value}")
             print(f"[DATA] 输出目录: temp/outputs/shopee/<账号>/<店铺>/{config.data_type_dir}/")
-            print("\n💡 提示：修改以下配置项即可适配不同页面：")
+            print("\n[TIP] 提示：修改以下配置项即可适配不同页面：")
             print("   - BASE_URL: 基础域名")
             print("   - *_PATH: 目标页面路径")
             print("   - EXPORT_BUTTON_SELECTORS: 导出按钮选择器")
@@ -204,7 +204,7 @@ class ConfigRegistry:
         except Exception as e:
             print(f"[FAIL] 无法打开配置文件: {e}")
             config_path = ConfigRegistry.get_config_path(domain)
-            print(f"📝 请手动打开文件: {config_path.absolute()}")
+            print(f"[NOTE] 请手动打开文件: {config_path.absolute()}")
             return False
 
 

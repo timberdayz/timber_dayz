@@ -13,10 +13,10 @@ JWT认证和授权系统 - 阶段2核心组件
 4. RBAC权限控制（admin/manager/user）
 
 企业级安全标准：
-- ✅ 密码bcrypt加密（不可逆）
-- ✅ JWT Token过期控制
-- ✅ 角色权限隔离
-- ✅ 操作审计日志
+- [OK] 密码bcrypt加密（不可逆）
+- [OK] JWT Token过期控制
+- [OK] 角色权限隔离
+- [OK] 操作审计日志
 """
 
 from datetime import datetime, timedelta
@@ -41,7 +41,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))  # �
 
 # 安全警告：检查是否使用默认密钥
 if SECRET_KEY == "xihong-erp-secret-key-2025-change-in-production":
-    logger.warning("⚠️  使用默认JWT密钥！生产环境必须设置JWT_SECRET_KEY环境变量！")
+    logger.warning("[WARN]  使用默认JWT密钥！生产环境必须设置JWT_SECRET_KEY环境变量！")
     logger.warning("    设置方法: export JWT_SECRET_KEY='your-secure-random-key'")
 
 # 密码加密配置（使用scrypt替代bcrypt，避免版本兼容问题）

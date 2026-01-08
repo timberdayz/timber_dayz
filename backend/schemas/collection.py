@@ -79,8 +79,8 @@ class TaskCreateRequest(BaseModel):
     date_range: Dict[str, str] = Field(..., description="日期范围 {'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD'}")
     config_id: Optional[int] = Field(None, description="关联配置ID")
     debug_mode: bool = Field(False, description="调试模式（临时有头浏览器）")
-    parallel_mode: bool = Field(False, description="⭐ Phase 9.1: 并行执行模式（多域并行采集）")
-    max_parallel: int = Field(3, ge=1, le=5, description="⭐ Phase 9.1: 最大并发数（1-5）")
+    parallel_mode: bool = Field(False, description="[*] Phase 9.1: 并行执行模式（多域并行采集）")
+    max_parallel: int = Field(3, ge=1, le=5, description="[*] Phase 9.1: 最大并发数（1-5）")
 
 
 class TaskResponse(BaseModel):

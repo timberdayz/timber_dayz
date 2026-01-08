@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request, Body, Pat
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from pathlib import Path as PathLib  # ⭐ 修复：重命名避免与 fastapi.Path 冲突
+from pathlib import Path as PathLib  # [*] 修复：重命名避免与 fastapi.Path 冲突
 import uuid
 import asyncio
 import pandas as pd
@@ -28,11 +28,11 @@ from backend.models.database import get_db, get_async_db, SessionLocal, AsyncSes
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.services.data_sync_service import DataSyncService
 from backend.services.sync_progress_tracker import SyncProgressTracker
-from backend.routers.auth import get_current_user  # ⭐ Phase 4.2: 用户认证
-from backend.services.user_task_quota import get_user_task_quota_service  # ⭐ Phase 4.2: 用户任务配额
+from backend.routers.auth import get_current_user  # [*] Phase 4.2: 用户认证
+from backend.services.user_task_quota import get_user_task_quota_service  # [*] Phase 4.2: 用户任务配额
 
-# ⭐ Phase 2: API 限流（使用 slowapi）
-# ⭐ v4.19.4 更新：使用基于角色的动态限流
+# [*] Phase 2: API 限流（使用 slowapi）
+# [*] v4.19.4 更新：使用基于角色的动态限流
 try:
     from backend.middleware.rate_limiter import limiter, role_based_rate_limit
     RATE_LIMIT_ENABLED = True
@@ -41,7 +41,7 @@ except ImportError:
     role_based_rate_limit = None
     RATE_LIMIT_ENABLED = False
 
-# ⭐ v4.19.4 保留：条件装饰器辅助函数（向后兼容，但建议使用 role_based_rate_limit）
+# [*] v4.19.4 保留：条件装饰器辅助函数（向后兼容，但建议使用 role_based_rate_limit）
 def conditional_rate_limit(limit_str: str):
     """条件应用限流装饰器（已废弃，建议使用 role_based_rate_limit）"""
     if RATE_LIMIT_ENABLED and limiter:
@@ -52,13 +52,13 @@ def conditional_rate_limit(limit_str: str):
             return func
         return noop_decorator
 
-# ⭐ v4.18.2修复：全局并发控制，限制同时运行的后台同步任务数量
+# [*] v4.18.2修复：全局并发控制，限制同时运行的后台同步任务数量
 # 最多允许10个并发任务，避免资源耗尽
 MAX_CONCURRENT_SYNC_TASKS = asyncio.Semaphore(10)
 from backend.services.c_class_data_validator import get_c_class_data_validator
 from backend.services.data_loss_analyzer import (
     analyze_data_loss, check_data_loss_threshold,
-    async_analyze_data_loss, async_check_data_loss_threshold  # ⭐ v4.18.2新增：异步版本
+    async_analyze_data_loss, async_check_data_loss_threshold  # [*] v4.18.2新增：异步版本
 )
 from backend.services.field_mapping_validator import validate_field_mapping, calculate_mapping_quality_score
 from backend.utils.api_response import success_response, error_response
@@ -74,9 +74,9 @@ from backend.schemas.data_sync import (
     BatchSyncByFileIdsRequest,
     DataSyncFilePreviewRequest,
     FileListRequest,
-    CeleryTaskStatusResponse,  # ⭐ Phase 1.4.3: 任务状态管理
-    CancelTaskResponse,  # ⭐ Phase 1.4.3: 任务状态管理
-    RetryTaskResponse,  # ⭐ Phase 1.4.3: 任务状态管理
+    CeleryTaskStatusResponse,  # [*] Phase 1.4.3: 任务状态管理
+    CancelTaskResponse,  # [*] Phase 1.4.3: 任务状态管理
+    RetryTaskResponse,  # [*] Phase 1.4.3: 任务状态管理
 )
 
 logger = get_logger(__name__)
@@ -88,10 +88,10 @@ router = APIRouter()
 @router.post("/data-sync/preview")
 async def preview_file(
     request: DataSyncFilePreviewRequest,
-    db: AsyncSession = Depends(get_async_db)  # ⭐ v4.18.2：改为异步会话
+    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2：改为异步会话
 ):
     """
-    文件预览API（支持表头行参数）⭐ **新增（2025-01-31）**
+    文件预览API（支持表头行参数）[*] **新增（2025-01-31）**
     
     功能：
     - 使用用户手动选择的表头行读取文件
@@ -107,7 +107,7 @@ async def preview_file(
     try:
         from backend.services.excel_parser import ExcelParser
         
-        # 1. 获取文件信息（⭐ v4.18.2：使用 await）
+        # 1. 获取文件信息（[*] v4.18.2：使用 await）
         result = await db.execute(
             select(CatalogFile).where(CatalogFile.id == request.file_id)
         )
@@ -125,11 +125,11 @@ async def preview_file(
         
         file_path_relative = catalog_record.file_path
         
-        # ⭐ v4.19.8修复：使用 to_absolute_path 正确解析路径（支持Docker容器和Windows环境）
+        # [*] v4.19.8修复：使用 to_absolute_path 正确解析路径（支持Docker容器和Windows环境）
         from modules.core.path_manager import to_absolute_path
         file_path = to_absolute_path(file_path_relative)
         
-        # ⭐ v4.18.2修复：使用 run_in_executor 包装文件系统检查，避免阻塞事件循环
+        # [*] v4.18.2修复：使用 run_in_executor 包装文件系统检查，避免阻塞事件循环
         loop = asyncio.get_running_loop()
         file_exists = await loop.run_in_executor(
             None,
@@ -148,19 +148,19 @@ async def preview_file(
         # 2. 使用用户选择的表头行读取文件（不自动检测）
         logger.info(f"[DataSync Preview] 使用表头行 {request.header_row} 读取文件: {catalog_record.file_name}")
         
-        # ⭐ v4.18.2修复：使用 run_in_executor 包装文件大小获取，避免阻塞事件循环
+        # [*] v4.18.2修复：使用 run_in_executor 包装文件大小获取，避免阻塞事件循环
         file_size_mb = await loop.run_in_executor(
             None,
             lambda: PathLib(file_path).stat().st_size / (1024 * 1024)
         )
         preview_rows = 50 if file_size_mb > 10 else 100
         
-        # ⭐ v4.18.2修复：使用 run_in_executor 包装文件读取，避免阻塞事件循环
+        # [*] v4.18.2修复：使用 run_in_executor 包装文件读取，避免阻塞事件循环
         df = await loop.run_in_executor(
             None,
             ExcelParser.read_excel,
             file_path,
-            request.header_row,  # ⭐ 直接使用用户选择的表头行
+            request.header_row,  # [*] 直接使用用户选择的表头行
             preview_rows
         )
         
@@ -225,14 +225,14 @@ async def list_files(
     domain: Optional[str] = Query(None, description="数据域"),
     granularity: Optional[str] = Query(None, description="粒度"),
     sub_domain: Optional[str] = Query(None, description="子类型"),
-    status: Optional[str] = Query(None, description="状态（pending/ingested/failed/partial_success/quarantined/needs_shop，为空则显示所有状态）"),  # ⭐ v4.17.3修复：默认None，显示所有状态
+    status: Optional[str] = Query(None, description="状态（pending/ingested/failed/partial_success/quarantined/needs_shop，为空则显示所有状态）"),  # [*] v4.17.3修复：默认None，显示所有状态
     page: int = Query(1, description="页码", ge=1),  # v4.18.0新增：分页支持
     page_size: int = Query(50, description="每页数量", ge=1, le=200),  # v4.18.0新增：分页支持
     limit: int = Query(None, description="数量限制（已废弃，使用page和page_size）"),  # v4.18.0：向后兼容
-    db: AsyncSession = Depends(get_async_db)  # ⭐ v4.18.2：改为异步会话
+    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2：改为异步会话
 ):
     """
-    文件列表API ⭐ **新增（2025-01-31）**
+    文件列表API [*] **新增（2025-01-31）**
     
     功能：
     - 显示待同步文件列表
@@ -263,7 +263,7 @@ async def list_files(
             query = query.where(*conditions)
         
         # v4.18.0: 计算总数（用于分页）
-        # ⭐ v4.18.2：使用 await 进行异步查询
+        # [*] v4.18.2：使用 await 进行异步查询
         count_query = select(func.count(CatalogFile.id))
         if conditions:
             count_query = count_query.where(*conditions)
@@ -279,11 +279,11 @@ async def list_files(
             offset = (page - 1) * page_size
             query = query.order_by(CatalogFile.first_seen_at.desc()).offset(offset).limit(page_size)
         
-        # 2. 查询文件列表（⭐ v4.18.2：使用 await）
+        # 2. 查询文件列表（[*] v4.18.2：使用 await）
         result = await db.execute(query)
         files = result.scalars().all()
         
-        # ⭐ v4.19.5 优化：预加载所有已发布模板，减少重复查询
+        # [*] v4.19.5 优化：预加载所有已发布模板，减少重复查询
         from modules.core.db import FieldMappingTemplate
         from sqlalchemy import desc
         
@@ -312,11 +312,11 @@ async def list_files(
         template_matcher = get_template_matcher(db)
         file_list = []
         
-        # ⭐ v4.18.2修复：在循环外获取事件循环，避免重复获取
+        # [*] v4.18.2修复：在循环外获取事件循环，避免重复获取
         loop = asyncio.get_running_loop()
         
         for file_record in files:
-            # ⭐ v4.19.5 优化：使用缓存快速匹配模板，避免重复查询数据库
+            # [*] v4.19.5 优化：使用缓存快速匹配模板，避免重复查询数据库
             template = None
             platform = file_record.platform_code or ""
             data_domain = file_record.data_domain or ""
@@ -341,7 +341,7 @@ async def list_files(
                         sub_domain=sub_domain if sub_domain else None
                     )
             
-            # ⭐ 修复：使用安全路径解析，确保文件大小正确显示
+            # [*] 修复：使用安全路径解析，确保文件大小正确显示
             from modules.core.path_manager import get_project_root, get_data_input_dir, get_data_raw_dir
             
             # 解析文件路径（支持相对路径和绝对路径）
@@ -353,7 +353,7 @@ async def list_files(
                 project_root = get_project_root()
                 resolved_path = project_root / file_path_str
             
-            # ⭐ v4.18.2修复：使用 run_in_executor 包装文件系统操作，避免阻塞事件循环
+            # [*] v4.18.2修复：使用 run_in_executor 包装文件系统操作，避免阻塞事件循环
             # 获取文件大小（如果文件存在）
             file_size = 0
             file_exists = await loop.run_in_executor(
@@ -377,11 +377,11 @@ async def list_files(
                 "granularity": file_record.granularity,
                 "sub_domain": file_record.sub_domain,
                 "file_size": file_size,
-                "file_path": str(resolved_path),  # ⭐ 新增：返回解析后的文件路径（用于调试）
+                "file_path": str(resolved_path),  # [*] 新增：返回解析后的文件路径（用于调试）
                 "collected_at": file_record.first_seen_at.isoformat() if file_record.first_seen_at else None,
                 "has_template": template is not None,
                 "template_name": template.template_name if template else None,
-                "template_header_row": template.header_row if template and hasattr(template, 'header_row') else None,  # ⭐ 新增：模板表头行
+                "template_header_row": template.header_row if template and hasattr(template, 'header_row') else None,  # [*] 新增：模板表头行
                 "status": file_record.status
             })
         
@@ -409,17 +409,17 @@ async def list_files(
 
 
 @router.post("/data-sync/single")
-@role_based_rate_limit(endpoint_type="data_sync")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="data_sync")  # [*] v4.19.4: 基于角色的动态限流
 async def sync_single_file(
-    body: SingleFileSyncRequest,  # ⭐ 修复：重命名为 body 避免与 slowapi 的 request 参数冲突
-    request: Request,  # ⭐ 修复：参数名必须为 request（slowapi 要求）
+    body: SingleFileSyncRequest,  # [*] 修复：重命名为 body 避免与 slowapi 的 request 参数冲突
+    request: Request,  # [*] 修复：参数名必须为 request（slowapi 要求）
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(get_current_user)  # ⭐ Phase 4.2: 用户认证
+    current_user = Depends(get_current_user)  # [*] Phase 4.2: 用户认证
 ):
     """
     单文件数据同步（使用 Celery 任务）
     
-    ⭐ Phase 2: 限流（10次/分钟）
+    [*] Phase 2: 限流（10次/分钟）
     """
     """
     单文件数据同步（使用 Celery 任务）
@@ -456,7 +456,7 @@ async def sync_single_file(
                 status_code=409
             )
         
-        # ⭐ Phase 4.2: 检查用户任务配额
+        # [*] Phase 4.2: 检查用户任务配额
         user_id = current_user.user_id
         quota_service = get_user_task_quota_service()
         can_submit, error_message = await quota_service.can_submit_task(user_id)
@@ -477,7 +477,7 @@ async def sync_single_file(
         try:
             from backend.tasks.data_sync_tasks import sync_single_file_task
             
-            # ⭐ 修复：在提交Celery任务之前，先创建进度记录（避免前端查询404）
+            # [*] 修复：在提交Celery任务之前，先创建进度记录（避免前端查询404）
             # 注意：create_task默认状态就是pending（数据库约束允许的状态）
             progress_tracker = SyncProgressTracker(db)
             await progress_tracker.create_task(
@@ -490,19 +490,19 @@ async def sync_single_file(
                 "message": "任务已提交，等待Celery worker处理"
             })
             
-            # ⭐ Phase 4.2: 增加用户任务计数
+            # [*] Phase 4.2: 增加用户任务计数
             await quota_service.increment_user_task_count(user_id)
             
-            # ⭐ Phase 4: 使用 apply_async 支持优先级参数
+            # [*] Phase 4: 使用 apply_async 支持优先级参数
             celery_task = sync_single_file_task.apply_async(
                 args=(body.file_id, task_id),
                 kwargs={
                     'only_with_template': body.only_with_template,
                     'allow_quarantine': body.allow_quarantine,
                     'use_template_header_row': body.use_template_header_row,
-                    'user_id': user_id  # ⭐ Phase 4.2: 添加用户ID（用于审计和配额管理）
+                    'user_id': user_id  # [*] Phase 4.2: 添加用户ID（用于审计和配额管理）
                 },
-                priority=body.priority  # ⭐ Phase 4: 任务优先级（1-10，10最高）
+                priority=body.priority  # [*] Phase 4: 任务优先级（1-10，10最高）
             )
             
             logger.info(
@@ -517,7 +517,7 @@ async def sync_single_file(
                     'celery_task_id': celery_task.id,
                     'file_id': body.file_id,
                     'file_name': catalog_file.file_name,
-                    'status': 'pending',  # ⭐ 修复：使用pending状态（与数据库一致）
+                    'status': 'pending',  # [*] 修复：使用pending状态（与数据库一致）
                     'message': '同步任务已提交，正在后台处理'
                 },
                 message='同步任务已提交'
@@ -537,7 +537,7 @@ async def sync_single_file(
                     total_files=1
                 )
                 
-                # ⭐ Phase 4.2: 增加用户任务计数（降级模式也需要配额管理）
+                # [*] Phase 4.2: 增加用户任务计数（降级模式也需要配额管理）
                 await quota_service.increment_user_task_count(user_id)
                 
                 # 降级到 asyncio.create_task()
@@ -548,7 +548,7 @@ async def sync_single_file(
                         only_with_template=body.only_with_template,
                         allow_quarantine=body.allow_quarantine,
                         use_template_header_row=body.use_template_header_row,
-                        user_id=user_id  # ⭐ Phase 4.2: 传递用户ID
+                        user_id=user_id  # [*] Phase 4.2: 传递用户ID
                     )
                 )
                 
@@ -561,7 +561,7 @@ async def sync_single_file(
                         'task_id': task_id,
                         'file_id': body.file_id,
                         'file_name': catalog_file.file_name,
-                        'status': 'pending',  # ⭐ 修复：使用pending状态（与数据库一致）
+                        'status': 'pending',  # [*] 修复：使用pending状态（与数据库一致）
                         'fallback': True,
                         'message': 'Celery不可用，使用降级模式'
                     },
@@ -591,7 +591,7 @@ async def process_single_sync_background(
     only_with_template: bool = True,
     allow_quarantine: bool = True,
     use_template_header_row: bool = True,
-    user_id: int = None  # ⭐ Phase 4.2: 用户ID（可选，用于配额管理）
+    user_id: int = None  # [*] Phase 4.2: 用户ID（可选，用于配额管理）
 ):
     """
     后台单文件同步处理函数（使用 asyncio.create_task）
@@ -604,12 +604,12 @@ async def process_single_sync_background(
     - 进度跟踪（数据库存储）
     - 并发控制（Semaphore）
     """
-    # ⭐ v4.18.2修复：使用 Semaphore 控制并发
-    # ⭐ v4.18.2性能监控：记录任务开始时间
+    # [*] v4.18.2修复：使用 Semaphore 控制并发
+    # [*] v4.18.2性能监控：记录任务开始时间
     import time
     task_start_time = time.time()
     async with MAX_CONCURRENT_SYNC_TASKS:
-        # ⭐ v4.18.2修复：使用异步会话
+        # [*] v4.18.2修复：使用异步会话
         db = AsyncSessionLocal()
         progress_tracker = SyncProgressTracker(db)
     
@@ -644,7 +644,7 @@ async def process_single_sync_background(
                         "file_progress": 100.0
                     })
                     await progress_tracker.complete_task(task_id, success=True)
-                    # ⭐ v4.18.2性能监控：记录任务总耗时
+                    # [*] v4.18.2性能监控：记录任务总耗时
                     task_elapsed = (time.time() - task_start_time) * 1000
                     logger.info(
                         f"[BackgroundTask] 单文件同步成功 file_id={file_id}, task_id={task_id}, "
@@ -660,7 +660,7 @@ async def process_single_sync_background(
                     })
                     await progress_tracker.add_error(task_id, error_msg)
                     await progress_tracker.complete_task(task_id, success=False, error=error_msg)
-                    # ⭐ v4.18.2性能监控：记录任务总耗时
+                    # [*] v4.18.2性能监控：记录任务总耗时
                     task_elapsed = (time.time() - task_start_time) * 1000
                     logger.warning(
                         f"[BackgroundTask] 单文件同步失败 file_id={file_id}, task_id={task_id}, "
@@ -678,7 +678,7 @@ async def process_single_sync_background(
             except Exception:
                 pass
         finally:
-            # ⭐ Phase 4.2: 减少用户任务计数（任务完成或失败时）
+            # [*] Phase 4.2: 减少用户任务计数（任务完成或失败时）
             if user_id:
                 try:
                     quota_service = get_user_task_quota_service()
@@ -697,24 +697,24 @@ async def process_batch_sync_background(
     task_id: str,
     only_with_template: bool = True,
     allow_quarantine: bool = True,
-    use_template_header_row: bool = True,  # ⭐ 新增：使用模板表头行
+    use_template_header_row: bool = True,  # [*] 新增：使用模板表头行
     max_concurrent: int = 10,
-    user_id: int = None  # ⭐ Phase 4.2: 用户ID（可选，用于配额管理）
+    user_id: int = None  # [*] Phase 4.2: 用户ID（可选，用于配额管理）
 ):
     """
     后台批量同步处理函数（使用FastAPI BackgroundTasks）
     
-    ⭐ v4.12.2简化：使用FastAPI BackgroundTasks替代Celery
+    [*] v4.12.2简化：使用FastAPI BackgroundTasks替代Celery
     v4.18.2更新：使用AsyncSessionLocal真异步会话，避免阻塞事件循环
     - 支持并发控制（最多10个并发）
     - 自动数据质量Gate检查
     - 进度跟踪（数据库存储）
     """
-    # ⭐ v4.18.2修复：使用异步会话
+    # [*] v4.18.2修复：使用异步会话
     db_main = AsyncSessionLocal()
     progress_tracker = SyncProgressTracker(db_main)
     
-    # ⭐ v4.17.1新增：任务超时保护（默认30分钟）
+    # [*] v4.17.1新增：任务超时保护（默认30分钟）
     TASK_TIMEOUT_SECONDS = 30 * 60  # 30分钟
     task_start_time = datetime.now()
     
@@ -725,7 +725,7 @@ async def process_batch_sync_background(
         processed_files = 0
         success_files = 0
         failed_files = 0
-        skipped_files = 0  # ⭐ 新增：跳过文件数（全部数据重复）
+        skipped_files = 0  # [*] 新增：跳过文件数（全部数据重复）
         total_rows = 0
         valid_rows = 0
         error_rows = 0
@@ -741,18 +741,18 @@ async def process_batch_sync_background(
                 return True
             return False
         
-        # ⭐ 并发控制（使用信号量限制并发数）
+        # [*] 并发控制（使用信号量限制并发数）
         semaphore = asyncio.Semaphore(max_concurrent)
         
         async def sync_file_with_semaphore(file_id: int) -> Dict[str, Any]:
             """
             带信号量的文件同步
             
-            ⭐ 修复：每个协程使用独立的数据库会话，避免并发冲突
+            [*] 修复：每个协程使用独立的数据库会话，避免并发冲突
             v4.18.2更新：使用异步会话
             """
             async with semaphore:
-                # ⭐ v4.18.2修复：为每个协程创建独立的异步数据库会话
+                # [*] v4.18.2修复：为每个协程创建独立的异步数据库会话
                 db = AsyncSessionLocal()
                 try:
                     sync_service = DataSyncService(db)
@@ -767,7 +767,7 @@ async def process_batch_sync_background(
                 except Exception as e:
                     # 记录协程级别的异常
                     logger.error(f"[BackgroundTask] 文件{file_id}同步异常: {e}", exc_info=True)
-                    # ⭐ v4.18.2修复：确保异常时回滚事务并关闭会话（异步）
+                    # [*] v4.18.2修复：确保异常时回滚事务并关闭会话（异步）
                     try:
                         await db.rollback()
                     except Exception:
@@ -780,13 +780,13 @@ async def process_batch_sync_background(
                         'message': f'同步异常: {str(e)}'
                     }
                 finally:
-                    # ⭐ v4.18.2修复：确保每个协程的异步会话都被正确关闭
+                    # [*] v4.18.2修复：确保每个协程的异步会话都被正确关闭
                     try:
                         await db.close()
                     except Exception:
                         pass
         
-        # ⭐ v4.17.1新增：超时检查 - 在开始处理前检查
+        # [*] v4.17.1新增：超时检查 - 在开始处理前检查
         if check_timeout():
             raise TimeoutError(f"任务{task_id}在开始处理前已超时")
         
@@ -794,13 +794,13 @@ async def process_batch_sync_background(
         tasks = [sync_file_with_semaphore(file_id) for file_id in file_ids]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # ⭐ v4.17.1新增：超时检查 - 在处理完成后检查
+        # [*] v4.17.1新增：超时检查 - 在处理完成后检查
         if check_timeout():
             logger.warning(f"[BackgroundTask] 任务{task_id}在处理完成后发现超时，但已完成处理")
         
         # 处理结果（使用主会话查询文件信息）
         for i, result in enumerate(results):
-            # ⭐ v4.17.1新增：在处理每个文件结果时检查超时
+            # [*] v4.17.1新增：在处理每个文件结果时检查超时
             if check_timeout():
                 logger.warning(
                     f"[BackgroundTask] 任务{task_id}在处理结果时超时，已处理{processed_files}/{len(file_ids)}个文件，"
@@ -814,7 +814,7 @@ async def process_batch_sync_background(
             
             file_id = file_ids[i]
             
-            # ⭐ v4.15.0修复：获取文件信息时处理事务错误
+            # [*] v4.15.0修复：获取文件信息时处理事务错误
             file_name = f"文件{file_id}"
             try:
                 # v4.18.2更新：使用异步查询
@@ -848,7 +848,7 @@ async def process_batch_sync_background(
                     logger.error(f"[BackgroundTask] 查询文件信息失败: {query_error}")
             
             if isinstance(result, Exception):
-                # ⭐ v4.15.0修复：异常情况（这种情况不应该发生，因为我们已经修复了协程异常处理）
+                # [*] v4.15.0修复：异常情况（这种情况不应该发生，因为我们已经修复了协程异常处理）
                 processed_files += 1
                 failed_files += 1
                 error_str = str(result)
@@ -879,7 +879,7 @@ async def process_batch_sync_background(
                 quarantined_rows += result.get("quarantined", 0)
                 
                 if result.get("success"):
-                    # ⭐ v4.15.0增强：区分INSERT策略的跳过和UPSERT策略的更新
+                    # [*] v4.15.0增强：区分INSERT策略的跳过和UPSERT策略的更新
                     skip_reason = result.get("skip_reason", "")
                     
                     # 检查是否是已入库文件跳过
@@ -899,7 +899,7 @@ async def process_batch_sync_background(
                                 f"新插入{import_stats.get('inserted', 0)}行，更新{import_stats.get('updated', 0)}行"
                             )
                         elif result.get("skipped", False):
-                            # ⭐ v4.16.0更新：检查是否有更新统计信息（UPSERT策略）
+                            # [*] v4.16.0更新：检查是否有更新统计信息（UPSERT策略）
                             import_stats = result.get("import_stats", {})
                             updated_count = import_stats.get('updated', 0) if import_stats else 0
                             
@@ -923,7 +923,7 @@ async def process_batch_sync_background(
                     failed_files += 1
                     error_rows += result.get("staged", 0)
                     
-                    # ⭐ v4.15.0修复：获取详细的错误消息
+                    # [*] v4.15.0修复：获取详细的错误消息
                     error_message = result.get('message')
                     if not error_message or error_message == '未知错误':
                         # 尝试从其他字段获取错误信息
@@ -944,19 +944,19 @@ async def process_batch_sync_background(
                     "error_rows": error_rows,
                     "current_file": file_name,
                     "status": "processing",
-                    "task_details": task_details  # ⭐ 新增：存储跳过文件数
+                    "task_details": task_details  # [*] 新增：存储跳过文件数
                 })
         
-        # ⭐ v4.17.1新增：超时检查 - 在质量检查前检查
+        # [*] v4.17.1新增：超时检查 - 在质量检查前检查
         if check_timeout():
             logger.warning(f"[BackgroundTask] 任务{task_id}在质量检查前超时，跳过质量检查")
         else:
-            # ⭐ 数据质量Gate（批量同步完成后自动质量检查）
-            # ⭐ v4.17.1修复：使用独立的数据库会话进行质量检查，避免事务错误影响主流程
+            # [*] 数据质量Gate（批量同步完成后自动质量检查）
+            # [*] v4.17.1修复：使用独立的数据库会话进行质量检查，避免事务错误影响主流程
             quality_check_result = None
             db_quality = None
             try:
-                # ⭐ v4.18.2修复：使用异步会话查询成功文件
+                # [*] v4.18.2修复：使用异步会话查询成功文件
                 success_file_ids = [
                     fid for i, fid in enumerate(file_ids) 
                     if not isinstance(results[i], Exception) and results[i].get("success")
@@ -970,7 +970,7 @@ async def process_batch_sync_background(
                 else:
                     successful_files = []
                 
-                # ⭐ v4.18.2修复：质量检查使用run_in_executor包装同步调用
+                # [*] v4.18.2修复：质量检查使用run_in_executor包装同步调用
                 if successful_files:
                     # 按平台+店铺分组
                     platform_shops = {}
@@ -1002,11 +1002,11 @@ async def process_batch_sync_background(
                                     
                                     if check_result and not check_result.get("error"):
                                         quality_scores.append(check_result.get("data_quality_score", 0))
-                                        missing_fields = check_result.get("missing_fields", [])  # ⭐ 修复：使用正确的字段名（check_b_class_completeness 返回的是 missing_fields，不是 missing_core_fields）
+                                        missing_fields = check_result.get("missing_fields", [])  # [*] 修复：使用正确的字段名（check_b_class_completeness 返回的是 missing_fields，不是 missing_core_fields）
                                         if missing_fields:
                                             missing_fields_list.extend(missing_fields)
                                 except Exception as check_error:
-                                    # ⭐ v4.17.1修复：单个平台的质量检查失败不影响其他平台
+                                    # [*] v4.17.1修复：单个平台的质量检查失败不影响其他平台
                                     error_str = str(check_error)
                                     if 'InFailedSqlTransaction' in error_str or 'UndefinedColumn' in error_str:
                                         logger.warning(
@@ -1056,7 +1056,7 @@ async def process_batch_sync_background(
                     logger.info(f"[BackgroundTask] 数据质量检查完成: 平均评分={avg_quality_score:.2f}")
             except Exception as e:
                 logger.warning(f"[BackgroundTask] 数据质量检查失败: {e}", exc_info=True)
-                # ⭐ v4.17.1修复：确保质量检查会话回滚，不影响主流程
+                # [*] v4.17.1修复：确保质量检查会话回滚，不影响主流程
                 if db_quality:
                     try:
                         db_quality.rollback()
@@ -1064,7 +1064,7 @@ async def process_batch_sync_background(
                         pass
                 # 质量检查失败不影响同步结果
             finally:
-                # ⭐ v4.17.1修复：确保质量检查会话被关闭
+                # [*] v4.17.1修复：确保质量检查会话被关闭
                 if db_quality:
                     try:
                         db_quality.close()
@@ -1087,7 +1087,7 @@ async def process_batch_sync_background(
         else:
             completion_message = f"成功{success_files}个，失败{failed_files}个"
         
-        # ⭐ v4.17.1新增：检查是否因超时失败
+        # [*] v4.17.1新增：检查是否因超时失败
         task_elapsed = (datetime.now() - task_start_time).total_seconds()
         if task_elapsed > TASK_TIMEOUT_SECONDS:
             completion_message = f"任务超时（已运行{task_elapsed:.1f}秒，超过限制{TASK_TIMEOUT_SECONDS}秒）: {completion_message}"
@@ -1106,7 +1106,7 @@ async def process_batch_sync_background(
             logger.info(f"[BackgroundTask] 批量同步完成: {completion_message}（耗时{task_elapsed:.1f}秒）")
         
     except Exception as e:
-        # ⭐ v4.15.0修复：捕获批量同步的整体异常，记录详细错误信息
+        # [*] v4.15.0修复：捕获批量同步的整体异常，记录详细错误信息
         error_str = str(e)
         error_type = type(e).__name__
         
@@ -1131,7 +1131,7 @@ async def process_batch_sync_background(
             logger.error(f"[BackgroundTask] 完成任务失败: {complete_err}")
             # 如果complete_task也失败，至少记录日志
     finally:
-        # ⭐ Phase 4.2: 减少用户任务计数（任务完成或失败时）
+        # [*] Phase 4.2: 减少用户任务计数（任务完成或失败时）
         if user_id:
             try:
                 quota_service = get_user_task_quota_service()
@@ -1139,17 +1139,17 @@ async def process_batch_sync_background(
             except Exception as quota_error:
                 logger.warning(f"[BackgroundTask] 减少用户 {user_id} 任务计数失败: {quota_error}")
         
-        # ⭐ v4.18.2修复：关闭主异步会话
+        # [*] v4.18.2修复：关闭主异步会话
         await db_main.close()
 
 
 @router.post("/data-sync/batch")
-@role_based_rate_limit(endpoint_type="data_sync")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="data_sync")  # [*] v4.19.4: 基于角色的动态限流
 async def sync_batch(
-    body: BatchSyncRequest,  # ⭐ 修复：重命名为 body 避免与 slowapi 的 request 参数冲突
-    request: Request,  # ⭐ 修复：参数名必须为 request（slowapi 要求）
+    body: BatchSyncRequest,  # [*] 修复：重命名为 body 避免与 slowapi 的 request 参数冲突
+    request: Request,  # [*] 修复：参数名必须为 request（slowapi 要求）
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(get_current_user)  # ⭐ Phase 4.2: 用户认证
+    current_user = Depends(get_current_user)  # [*] Phase 4.2: 用户认证
 ):
     """
     批量数据同步（使用 Celery 任务）
@@ -1207,7 +1207,7 @@ async def sync_batch(
                 message="没有待处理的文件"
             )
         
-        # ⭐ Phase 4.2: 检查用户任务配额
+        # [*] Phase 4.2: 检查用户任务配额
         user_id = current_user.user_id
         quota_service = get_user_task_quota_service()
         can_submit, error_message = await quota_service.can_submit_task(user_id)
@@ -1232,13 +1232,13 @@ async def sync_batch(
         try:
             from backend.tasks.data_sync_tasks import sync_batch_task
             
-            # ⭐ Phase 4.2: 增加用户任务计数
+            # [*] Phase 4.2: 增加用户任务计数
             await quota_service.increment_user_task_count(user_id)
             
             # 动态并发数（最多20个并发）
             max_concurrent = min(20, max(5, len(file_ids) // 10 + 1))
             
-            # ⭐ Phase 4: 使用 apply_async 支持优先级参数
+            # [*] Phase 4: 使用 apply_async 支持优先级参数
             celery_task = sync_batch_task.apply_async(
                 args=(file_ids, task_id),
                 kwargs={
@@ -1246,9 +1246,9 @@ async def sync_batch(
                     'allow_quarantine': body.allow_quarantine,
                     'use_template_header_row': True,  # BatchSyncRequest没有此字段，使用固定值True
                     'max_concurrent': max_concurrent,
-                    'user_id': user_id  # ⭐ Phase 4.2: 添加用户ID（用于审计和配额管理）
+                    'user_id': user_id  # [*] Phase 4.2: 添加用户ID（用于审计和配额管理）
                 },
-                priority=body.priority  # ⭐ Phase 4: 任务优先级（1-10，10最高）
+                priority=body.priority  # [*] Phase 4: 任务优先级（1-10，10最高）
             )
             
             logger.info(f"[API] 批量同步任务已提交: task_id={task_id}, 文件数={total_files}, celery_task_id={celery_task.id}")
@@ -1273,7 +1273,7 @@ async def sync_batch(
                 # 动态并发数
                 max_concurrent = min(20, max(5, len(file_ids) // 10 + 1))
                 
-                # ⭐ Phase 4.2: 增加用户任务计数（降级模式也需要配额管理）
+                # [*] Phase 4.2: 增加用户任务计数（降级模式也需要配额管理）
                 await quota_service.increment_user_task_count(user_id)
                 
                 # 降级到 asyncio.create_task()
@@ -1285,7 +1285,7 @@ async def sync_batch(
                         allow_quarantine=body.allow_quarantine,
                         use_template_header_row=True,
                         max_concurrent=max_concurrent,
-                        user_id=user_id  # ⭐ Phase 4.2: 传递用户ID
+                        user_id=user_id  # [*] Phase 4.2: 传递用户ID
                     )
                 )
                 
@@ -1318,12 +1318,12 @@ async def sync_batch(
 
 
 @router.post("/data-sync/batch-by-ids")
-@role_based_rate_limit(endpoint_type="data_sync")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="data_sync")  # [*] v4.19.4: 基于角色的动态限流
 async def sync_batch_by_file_ids(
-    body: BatchSyncByFileIdsRequest,  # ⭐ 修复：重命名为 body 避免与 slowapi 的 request 参数冲突
-    request: Request,  # ⭐ 修复：参数名必须为 request（slowapi 要求）
+    body: BatchSyncByFileIdsRequest,  # [*] 修复：重命名为 body 避免与 slowapi 的 request 参数冲突
+    request: Request,  # [*] 修复：参数名必须为 request（slowapi 要求）
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(get_current_user)  # ⭐ Phase 4.2: 用户认证
+    current_user = Depends(get_current_user)  # [*] Phase 4.2: 用户认证
 ):
     """
     批量数据同步（基于文件ID列表，使用 Celery 任务）
@@ -1392,7 +1392,7 @@ async def sync_batch_by_file_ids(
                 status_code=404
             )
         
-        # ⭐ Phase 4.2: 检查用户任务配额
+        # [*] Phase 4.2: 检查用户任务配额
         user_id = current_user.user_id
         quota_service = get_user_task_quota_service()
         can_submit, error_message = await quota_service.can_submit_task(user_id)
@@ -1417,13 +1417,13 @@ async def sync_batch_by_file_ids(
         try:
             from backend.tasks.data_sync_tasks import sync_batch_task
             
-            # ⭐ Phase 4.2: 增加用户任务计数
+            # [*] Phase 4.2: 增加用户任务计数
             await quota_service.increment_user_task_count(user_id)
             
             # 动态并发数（最多20个并发）
             max_concurrent = min(20, max(5, len(file_ids) // 10 + 1))
             
-            # ⭐ Phase 4: 使用 apply_async 支持优先级参数
+            # [*] Phase 4: 使用 apply_async 支持优先级参数
             celery_task = sync_batch_task.apply_async(
                 args=(file_ids, task_id),
                 kwargs={
@@ -1431,9 +1431,9 @@ async def sync_batch_by_file_ids(
                     'allow_quarantine': body.allow_quarantine,
                     'use_template_header_row': body.use_template_header_row,
                     'max_concurrent': max_concurrent,
-                    'user_id': user_id  # ⭐ Phase 4.2: 添加用户ID（用于审计和配额管理）
+                    'user_id': user_id  # [*] Phase 4.2: 添加用户ID（用于审计和配额管理）
                 },
-                priority=body.priority  # ⭐ Phase 4: 任务优先级（1-10，10最高）
+                priority=body.priority  # [*] Phase 4: 任务优先级（1-10，10最高）
             )
             
             logger.info(f"[API] 批量同步任务已提交: task_id={task_id}, 文件数={total_files}, celery_task_id={celery_task.id}")
@@ -1503,7 +1503,7 @@ async def sync_batch_by_file_ids(
 @router.get("/data-sync/progress/{task_id}")
 async def get_sync_progress(
     task_id: str,
-    db: AsyncSession = Depends(get_async_db)  # ⭐ v4.18.2：改为异步会话
+    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2：改为异步会话
 ):
     """
     获取同步进度
@@ -1513,7 +1513,7 @@ async def get_sync_progress(
     v4.18.2: 迁移到异步会话（AsyncSession）
     """
     try:
-        # ⭐ v4.18.2修复：确保使用干净的事务（先回滚任何失败的事务）
+        # [*] v4.18.2修复：确保使用干净的事务（先回滚任何失败的事务）
         try:
             await db.rollback()
         except:
@@ -1537,7 +1537,7 @@ async def get_sync_progress(
         raise
     except Exception as e:
         logger.error(f"[API] 获取同步进度失败: {e}", exc_info=True)
-        # ⭐ v4.18.2修复：确保异常时回滚事务
+        # [*] v4.18.2修复：确保异常时回滚事务
         try:
             await db.rollback()
         except:
@@ -1556,7 +1556,7 @@ async def get_sync_progress(
 async def list_sync_tasks(
     status: Optional[str] = Query(None, description="状态筛选"),
     limit: int = Query(100, description="返回数量限制", ge=1, le=1000),
-    db: AsyncSession = Depends(get_async_db)  # ⭐ v4.18.2：改为异步会话
+    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2：改为异步会话
 ):
     """
     列出所有同步任务
@@ -1591,7 +1591,7 @@ async def analyze_data_loss_endpoint(
     file_id: Optional[int] = Query(None, description="文件ID"),
     task_id: Optional[str] = Query(None, description="任务ID"),
     data_domain: Optional[str] = Query(None, description="数据域"),
-    db: AsyncSession = Depends(get_async_db)  # ⭐ v4.18.2：改为异步会话
+    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2：改为异步会话
 ):
     """
     分析数据丢失情况
@@ -1600,12 +1600,12 @@ async def analyze_data_loss_endpoint(
     - 统计各层数据数量（Raw、Staging、Fact、Quarantine）
     - 计算数据丢失率
     - 分析丢失数据的共同特征
-    - 识别丢失位置（Raw→Staging、Staging→Fact）
+    - 识别丢失位置（Raw->Staging、Staging->Fact）
     
     v4.18.2: 迁移到异步会话（AsyncSession）
     """
     try:
-        # ⭐ v4.18.2：使用异步版本
+        # [*] v4.18.2：使用异步版本
         result = await async_analyze_data_loss(db, file_id, task_id, data_domain)
         
         if not result.get("success"):
@@ -1641,7 +1641,7 @@ async def check_data_loss_alert(
     task_id: Optional[str] = Query(None, description="任务ID"),
     data_domain: Optional[str] = Query(None, description="数据域"),
     threshold: float = Query(5.0, description="丢失率阈值（%）", ge=0, le=100),
-    db: AsyncSession = Depends(get_async_db)  # ⭐ v4.18.2：改为异步会话
+    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2：改为异步会话
 ):
     """
     检查数据丢失预警
@@ -1654,7 +1654,7 @@ async def check_data_loss_alert(
     v4.18.2: 迁移到异步会话（AsyncSession）
     """
     try:
-        # ⭐ v4.18.2：使用异步版本
+        # [*] v4.18.2：使用异步版本
         result = await async_check_data_loss_threshold(db, file_id, task_id, data_domain, threshold)
         
         if not result.get("success"):
@@ -1686,10 +1686,10 @@ async def check_data_loss_alert(
 
 @router.get("/data-sync/platforms")
 async def get_available_platforms(
-    db: AsyncSession = Depends(get_async_db)  # ⭐ v4.18.2：改为异步会话
+    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2：改为异步会话
 ):
     """
-    获取可用的平台列表 ⭐ **新增（2025-02-01）**
+    获取可用的平台列表 [*] **新增（2025-02-01）**
     
     功能：
     - 从catalog_files表中获取所有有文件的平台
@@ -1698,7 +1698,7 @@ async def get_available_platforms(
     v4.18.2: 迁移到异步会话（AsyncSession）
     """
     try:
-        # 查询所有有文件的平台（⭐ v4.18.2：使用 await）
+        # 查询所有有文件的平台（[*] v4.18.2：使用 await）
         result = await db.execute(
             select(distinct(CatalogFile.platform_code))
             .where(CatalogFile.platform_code.isnot(None))
@@ -1725,10 +1725,10 @@ async def get_available_platforms(
 
 @router.get("/data-sync/governance/detailed-coverage")
 async def get_detailed_template_coverage(
-    db: AsyncSession = Depends(get_async_db)  # ⭐ v4.18.2：改为异步会话
+    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2：改为异步会话
 ):
     """
-    获取详细的模板覆盖统计 ⭐ **新增（2025-02-01）**
+    获取详细的模板覆盖统计 [*] **新增（2025-02-01）**
     
     功能：
     - 按平台、数据域、子类型、粒度统计模板覆盖情况
@@ -1742,8 +1742,8 @@ async def get_detailed_template_coverage(
         
         template_matcher = get_template_matcher(db)
         
-        # ⭐ v4.15.0修复：基于所有模板统计，而不是只基于待同步文件
-        # 1. 查询所有模板（published状态）（⭐ v4.18.2：使用 await）
+        # [*] v4.15.0修复：基于所有模板统计，而不是只基于待同步文件
+        # 1. 查询所有模板（published状态）（[*] v4.18.2：使用 await）
         from modules.core.db import FieldMappingTemplate
         templates_stmt = select(FieldMappingTemplate).where(
             FieldMappingTemplate.status == 'published'
@@ -1779,10 +1779,10 @@ async def get_detailed_template_coverage(
             CatalogFile.platform_code.isnot(None),
             CatalogFile.data_domain.isnot(None),
             CatalogFile.granularity.isnot(None),
-            CatalogFile.status.in_(['pending', 'ingested'])  # ⭐ 包括已同步的文件
+            CatalogFile.status.in_(['pending', 'ingested'])  # [*] 包括已同步的文件
         ).distinct()
         
-        # ⭐ v4.18.2：使用 await
+        # [*] v4.18.2：使用 await
         file_combinations_result = await db.execute(files_stmt)
         all_file_combinations_raw = file_combinations_result.all()
         
@@ -1815,7 +1815,7 @@ async def get_detailed_template_coverage(
             if not platform or not domain or not granularity:
                 continue
             
-            # 查找模板（⭐ v4.18.2：添加 await）
+            # 查找模板（[*] v4.18.2：添加 await）
             template = await template_matcher.find_best_template(
                 platform=platform,
                 data_domain=domain,
@@ -1823,14 +1823,14 @@ async def get_detailed_template_coverage(
                 sub_domain=sub_domain
             )
             
-            # ⭐ v4.15.0修复：统计该组合的文件数（包括pending和ingested）
-            # ⭐ v4.18.2：使用 await
+            # [*] v4.15.0修复：统计该组合的文件数（包括pending和ingested）
+            # [*] v4.18.2：使用 await
             file_count_stmt = select(func.count(CatalogFile.id)).where(
                 CatalogFile.platform_code == platform,
                 CatalogFile.data_domain == domain,
                 CatalogFile.granularity == granularity,
                 CatalogFile.sub_domain == sub_domain,
-                CatalogFile.status.in_(['pending', 'ingested'])  # ⭐ 包括已同步的文件
+                CatalogFile.status.in_(['pending', 'ingested'])  # [*] 包括已同步的文件
             )
             file_count_result = await db.execute(file_count_stmt)
             file_count = file_count_result.scalar() or 0
@@ -1848,15 +1848,15 @@ async def get_detailed_template_coverage(
                 needs_update = False
                 update_reason = None
                 
-                # ⭐ v4.15.0修复：获取该组合的一个示例文件（优先pending，其次ingested）
-                # ⭐ v4.18.2：使用 await
+                # [*] v4.15.0修复：获取该组合的一个示例文件（优先pending，其次ingested）
+                # [*] v4.18.2：使用 await
                 sample_file_result = await db.execute(
                     select(CatalogFile).where(
                         CatalogFile.platform_code == platform,
                         CatalogFile.data_domain == domain,
                         CatalogFile.granularity == granularity,
                         CatalogFile.sub_domain == sub_domain,
-                        CatalogFile.status.in_(['pending', 'ingested'])  # ⭐ 包括已同步的文件
+                        CatalogFile.status.in_(['pending', 'ingested'])  # [*] 包括已同步的文件
                     ).order_by(
                         # 优先pending，其次ingested
                         CatalogFile.status.desc()  # 'pending' > 'ingested' (字母序)
@@ -1869,7 +1869,7 @@ async def get_detailed_template_coverage(
                         from backend.services.excel_parser import ExcelParser
                         import pandas as pd
                         
-                        # ⭐ v4.18.2修复：使用 run_in_executor 包装文件读取，避免阻塞事件循环
+                        # [*] v4.18.2修复：使用 run_in_executor 包装文件读取，避免阻塞事件循环
                         loop = asyncio.get_running_loop()
                         df = await loop.run_in_executor(
                             None,
@@ -1880,7 +1880,7 @@ async def get_detailed_template_coverage(
                         )
                         current_columns = df.columns.tolist()
                         
-                        # 检测表头变化（⭐ v4.18.2：添加 await）
+                        # 检测表头变化（[*] v4.18.2：添加 await）
                         header_changes = await template_matcher.detect_header_changes(
                             template_id=template.id,
                             current_columns=current_columns
@@ -1917,14 +1917,14 @@ async def get_detailed_template_coverage(
                 missing_list.append(combo_info)
         
         # 3. 计算统计
-        # ⭐ v4.15.0修复：覆盖率应该基于所有模板，而不是基于文件组合
+        # [*] v4.15.0修复：覆盖率应该基于所有模板，而不是基于文件组合
         # total_combinations = 所有模板数 + 缺少模板的文件组合数
         total_combinations = len(template_combinations) + len(missing_list)
         covered_count = len(covered_list)
         missing_count = len(missing_list)
         needs_update_count = len(needs_update_list)
         
-        # ⭐ v4.15.0修复：覆盖率 = 有模板的组合数 / 总组合数
+        # [*] v4.15.0修复：覆盖率 = 有模板的组合数 / 总组合数
         # 总组合数 = 所有模板数（已覆盖）+ 缺少模板的文件组合数（未覆盖）
         coverage_percentage = (len(template_combinations) / total_combinations * 100) if total_combinations > 0 else 0
         
@@ -1958,10 +1958,10 @@ async def get_detailed_template_coverage(
 
 @router.get("/data-sync/governance/stats")
 async def get_governance_stats(
-    db: AsyncSession = Depends(get_async_db)  # ⭐ v4.18.2：改为异步会话
+    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2：改为异步会话
 ):
     """
-    数据治理统计API ⭐ **新增（2025-02-01）**
+    数据治理统计API [*] **新增（2025-02-01）**
     
     功能：
     - 统计待同步文件数量
@@ -1976,11 +1976,11 @@ async def get_governance_stats(
     v4.18.2: 迁移到异步会话（AsyncSession）
     """
     try:
-        # ⭐ v4.18.1修复：统一从数据库查询，保持数据一致性
+        # [*] v4.18.1修复：统一从数据库查询，保持数据一致性
         # 之前的问题：pending_count通过文件系统扫描，ingested_count通过数据库查询
         # 导致同步后，pending_count不减少（因为文件仍在文件系统中）
         
-        # ⭐ v4.18.2：使用 await 进行异步查询
+        # [*] v4.18.2：使用 await 进行异步查询
         # 统计待同步文件（status='pending'）
         pending_result = await db.execute(
             select(func.count(CatalogFile.id)).where(CatalogFile.status == 'pending')
@@ -1993,13 +1993,13 @@ async def get_governance_stats(
         )
         ingested_count = ingested_result.scalar() or 0
         
-        # ⭐ v4.17.2修复：单独统计失败文件（status='failed'），用于显示失败文件数
+        # [*] v4.17.2修复：单独统计失败文件（status='failed'），用于显示失败文件数
         failed_result = await db.execute(
             select(func.count(CatalogFile.id)).where(CatalogFile.status == 'failed')
         )
         failed_count = failed_result.scalar() or 0
         
-        # ⭐ v4.17.2新增：统计各状态的详细数量（用于调试和显示）
+        # [*] v4.17.2新增：统计各状态的详细数量（用于调试和显示）
         status_counts = {}
         for status_name in ['pending', 'partial_success', 'failed', 'quarantined', 'needs_shop', 'ingested', 'processing']:
             count_result = await db.execute(
@@ -2015,11 +2015,11 @@ async def get_governance_stats(
         
         return success_response(
             data={
-                "pending_count": pending_count,  # ⭐ v4.18.1修复：从数据库查询status='pending'
+                "pending_count": pending_count,  # [*] v4.18.1修复：从数据库查询status='pending'
                 "ingested_count": ingested_count,
                 "failed_count": failed_count,  # 仅failed状态的文件数
-                "total_count": total_count,  # ⭐ v4.18.1修复：总文件数从数据库查询
-                "status_counts": status_counts  # ⭐ 各状态的详细数量
+                "total_count": total_count,  # [*] v4.18.1修复：总文件数从数据库查询
+                "status_counts": status_counts  # [*] 各状态的详细数量
             },
             message="数据治理统计查询成功"
         )
@@ -2037,14 +2037,14 @@ async def get_governance_stats(
 
 
 @router.post("/data-sync/batch-all")
-@role_based_rate_limit(endpoint_type="data_sync")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="data_sync")  # [*] v4.19.4: 基于角色的动态限流
 async def sync_all_with_template(
-    request: Request,  # ⭐ 修复：参数名必须为 request（slowapi 要求）
-    db: AsyncSession = Depends(get_async_db),  # ⭐ v4.18.2：改为异步会话
-    current_user = Depends(get_current_user)  # ⭐ Phase 4.2: 用户认证
+    request: Request,  # [*] 修复：参数名必须为 request（slowapi 要求）
+    db: AsyncSession = Depends(get_async_db),  # [*] v4.18.2：改为异步会话
+    current_user = Depends(get_current_user)  # [*] Phase 4.2: 用户认证
 ):
     """
-    手动全部数据同步API ⭐ **新增（2025-02-01）**
+    手动全部数据同步API [*] **新增（2025-02-01）**
     
     功能：
     - 同步所有有模板的待同步文件
@@ -2057,7 +2057,7 @@ async def sync_all_with_template(
     try:
         from backend.services.template_matcher import get_template_matcher
         
-        # 1. 查询所有待同步文件（⭐ v4.18.2：使用 await）
+        # 1. 查询所有待同步文件（[*] v4.18.2：使用 await）
         result = await db.execute(
             select(CatalogFile).where(CatalogFile.status == 'pending')
         )
@@ -2068,7 +2068,7 @@ async def sync_all_with_template(
         files_with_template = []
         
         for file_record in pending_files:
-            # ⭐ v4.18.2：添加 await
+            # [*] v4.18.2：添加 await
             template = await template_matcher.find_best_template(
                 platform=file_record.platform_code or "",
                 data_domain=file_record.data_domain or "",
@@ -2088,7 +2088,7 @@ async def sync_all_with_template(
         task_id = f"batch_all_{uuid.uuid4().hex[:8]}"
         progress_tracker = SyncProgressTracker(db)
         
-        # ⭐ Phase 4.2: 检查用户任务配额
+        # [*] Phase 4.2: 检查用户任务配额
         user_id = current_user.user_id
         quota_service = get_user_task_quota_service()
         can_submit, error_message = await quota_service.can_submit_task(user_id)
@@ -2109,17 +2109,17 @@ async def sync_all_with_template(
             task_type="batch_sync_all"
         )
         
-        # ⭐ v4.19.0修复：使用 Celery 任务替代 asyncio.create_task()
+        # [*] v4.19.0修复：使用 Celery 任务替代 asyncio.create_task()
         max_concurrent = min(20, max(5, len(files_with_template) // 10 + 1))
         
         try:
-            # ⭐ v4.19.8修复：添加缺失的导入语句
+            # [*] v4.19.8修复：添加缺失的导入语句
             from backend.tasks.data_sync_tasks import sync_batch_task
             
-            # ⭐ Phase 4.2: 增加用户任务计数
+            # [*] Phase 4.2: 增加用户任务计数
             await quota_service.increment_user_task_count(user_id)
             
-            # ⭐ Phase 4: 使用 apply_async 支持优先级参数（batch-all 使用默认优先级 5）
+            # [*] Phase 4: 使用 apply_async 支持优先级参数（batch-all 使用默认优先级 5）
             celery_task = sync_batch_task.apply_async(
                 args=(files_with_template, task_id),
                 kwargs={
@@ -2127,9 +2127,9 @@ async def sync_all_with_template(
                     'allow_quarantine': True,
                     'use_template_header_row': True,
                     'max_concurrent': max_concurrent,
-                    'user_id': user_id  # ⭐ Phase 4.2: 添加用户ID（用于审计和配额管理）
+                    'user_id': user_id  # [*] Phase 4.2: 添加用户ID（用于审计和配额管理）
                 },
-                priority=5  # ⭐ Phase 4: batch-all 使用默认优先级
+                priority=5  # [*] Phase 4: batch-all 使用默认优先级
             )
             
             return success_response(
@@ -2142,13 +2142,13 @@ async def sync_all_with_template(
                 message=f"批量同步任务已启动（{len(files_with_template)}个文件）"
             )
         except Exception as e:
-            # ⭐ 修复：Celery任务提交失败时的降级处理
+            # [*] 修复：Celery任务提交失败时的降级处理
             error_type = type(e).__name__
             if "OperationalError" in error_type or "ConnectionError" in error_type:
                 # Redis连接失败，降级到 asyncio.create_task()
                 logger.warning(f"[API] Redis/Celery连接失败（{error_type}），降级到 asyncio.create_task()")
                 
-                # ⭐ Phase 4.2: 增加用户任务计数（降级模式也需要配额管理）
+                # [*] Phase 4.2: 增加用户任务计数（降级模式也需要配额管理）
                 await quota_service.increment_user_task_count(user_id)
                 
                 asyncio.create_task(
@@ -2159,7 +2159,7 @@ async def sync_all_with_template(
                         allow_quarantine=True,
                         use_template_header_row=True,
                         max_concurrent=max_concurrent,
-                        user_id=user_id  # ⭐ Phase 4.2: 传递用户ID
+                        user_id=user_id  # [*] Phase 4.2: 传递用户ID
                     )
                 )
                 
@@ -2190,10 +2190,10 @@ async def sync_all_with_template(
 
 @router.post("/data-sync/cleanup-database")
 async def cleanup_database(
-    db: AsyncSession = Depends(get_async_db)  # ⭐ v4.18.2：改为异步会话
+    db: AsyncSession = Depends(get_async_db)  # [*] v4.18.2：改为异步会话
 ):
     """
-    清理数据库API ⭐ **新增（2025-02-01）**
+    清理数据库API [*] **新增（2025-02-01）**
     
     功能：
     - 清理所有已入库的数据（B类数据表）
@@ -2203,7 +2203,7 @@ async def cleanup_database(
     v4.18.2: 迁移到异步会话（使用run_in_executor包装DDL操作）
     """
     try:
-        # ⭐ v4.18.2：由于inspect()需要同步引擎，使用run_in_executor包装整个操作
+        # [*] v4.18.2：由于inspect()需要同步引擎，使用run_in_executor包装整个操作
         def _sync_cleanup():
             """同步执行清理操作"""
             from sqlalchemy import inspect, text
@@ -2246,7 +2246,7 @@ async def cleanup_database(
                 
                 # 2. 重置所有已入库文件状态为pending（包括ingested、partial_success、processing、failed）
                 from sqlalchemy import select, update
-                # ⭐ v4.18.2修复：使用select查询替代db.query()
+                # [*] v4.18.2修复：使用select查询替代db.query()
                 result = sync_db.execute(
                     select(CatalogFile).where(
                         CatalogFile.status.in_(['ingested', 'partial_success', 'processing', 'failed'])
@@ -2260,7 +2260,7 @@ async def cleanup_database(
                     status_distribution[status] = status_distribution.get(status, 0) + 1
                 
                 # 批量更新文件状态为pending
-                # ⭐ v4.18.2修复：使用update语句替代db.query().update()
+                # [*] v4.18.2修复：使用update语句替代db.query().update()
                 update_stmt = update(CatalogFile).where(
                     CatalogFile.status.in_(['ingested', 'partial_success', 'processing', 'failed'])
                 ).values(status="pending")
@@ -2307,7 +2307,7 @@ async def cleanup_database(
         )
 
 
-# ⭐ Phase 1.4.3: 任务状态管理 API
+# [*] Phase 1.4.3: 任务状态管理 API
 @router.get("/data-sync/task-status/{celery_task_id}", response_model=CeleryTaskStatusResponse)
 async def get_celery_task_status(
     celery_task_id: str = Path(..., description="Celery 任务ID")
@@ -2353,7 +2353,7 @@ async def get_celery_task_status(
                     traceback = None
         
         # 获取任务详细信息
-        # ⭐ 修复：info 可能是异常对象，需要转换为字典或 None
+        # [*] 修复：info 可能是异常对象，需要转换为字典或 None
         info = None
         if hasattr(task_result, 'info') and task_result.info is not None:
             if isinstance(task_result.info, dict):
@@ -2391,7 +2391,7 @@ async def get_celery_task_status(
 async def cancel_celery_task(
     celery_task_id: str = Path(..., description="Celery 任务ID"),
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(get_current_user)  # ⭐ Phase 4.2: 用户认证
+    current_user = Depends(get_current_user)  # [*] Phase 4.2: 用户认证
 ):
     """
     取消 Celery 任务
@@ -2454,14 +2454,14 @@ async def cancel_celery_task(
 async def retry_celery_task(
     celery_task_id: str = Path(..., description="Celery 任务ID"),
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(get_current_user)  # ⭐ Phase 4.2: 用户认证
+    current_user = Depends(get_current_user)  # [*] Phase 4.2: 用户认证
 ):
     """
     重试 Celery 任务
     
     对于失败的任务，重新提交执行。会创建新的 Celery 任务。
     
-    ⚠️ 注意：当前实现暂不支持直接重试，需要从数据库查询原始任务参数。
+    [WARN] 注意：当前实现暂不支持直接重试，需要从数据库查询原始任务参数。
     建议使用原始 API 端点重新提交任务。
     
     Args:

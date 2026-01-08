@@ -2,7 +2,7 @@
 应用数据库迁移脚本
 创建所有新表并更新现有表结构
 
-⭐ v4.18.2 更新：
+[*] v4.18.2 更新：
 - 自动检查并修复 catalog_files 表的缺失列
 - 确保表结构与 modules/core/db/schema.py（SSOT）一致
 
@@ -52,7 +52,7 @@ async def apply_migrations():
         # Step 2: 验证表创建并修复缺失列
         print("[2/3] Verifying tables and fixing missing columns...")
         
-        # ⭐ v4.18.2修复：使用run_in_executor包装同步数据库操作
+        # [*] v4.18.2修复：使用run_in_executor包装同步数据库操作
         def _sync_verify_tables():
             """同步验证表创建并修复缺失列（在线程池中执行）"""
             db = SessionLocal()
@@ -78,7 +78,7 @@ async def apply_migrations():
                 for schema, tables in tables_by_schema.items():
                     all_tables.extend(tables)
                 
-                # ⭐ 新增：检查并修复 catalog_files 表的缺失列
+                # [*] 新增：检查并修复 catalog_files 表的缺失列
                 # 注意：catalog_files 表只在 public schema 中（core schema 中的重复表已清理）
                 catalog_files_fixed = False
                 schema = 'public'  # 只检查 public schema

@@ -197,13 +197,13 @@ class ShopeeVerificationConfig:
     
     def log_config_info(self, logger):
         """记录配置信息"""
-        logger.info("📊 验证码处理配置信息:")
-        logger.info(f"  ⏱️ 按钮点击等待时间: {self.config.button_click_wait}秒")
-        logger.info(f"  📄 页面加载等待时间: {self.config.page_load_wait}秒")
-        logger.info(f"  🔄 最大重试次数: {self.config.max_retries}")
-        logger.info(f"  📧 邮件检查间隔: {self.config.email_check_interval}秒")
-        logger.info(f"  🔍 QQ密码登录选择器: {len(self.qq_password_login_selectors)}个")
-        logger.info(f"  📧 邮箱按钮选择器: {len(self.email_button_selectors)}个")
+        logger.info("[DATA] 验证码处理配置信息:")
+        logger.info(f"  [TIME] 按钮点击等待时间: {self.config.button_click_wait}秒")
+        logger.info(f"  [FILE] 页面加载等待时间: {self.config.page_load_wait}秒")
+        logger.info(f"  [RETRY] 最大重试次数: {self.config.max_retries}")
+        logger.info(f"  [EMAIL] 邮件检查间隔: {self.config.email_check_interval}秒")
+        logger.info(f"  [SEARCH] QQ密码登录选择器: {len(self.qq_password_login_selectors)}个")
+        logger.info(f"  [EMAIL] 邮箱按钮选择器: {len(self.email_button_selectors)}个")
 
 # 全局配置实例
 _global_config = None

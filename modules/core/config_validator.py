@@ -73,19 +73,19 @@ class ConfigValidator:
                 
                 if validation_result['valid']:
                     results['valid_files'] += 1
-                    logger.info(f"✅ {config_file} 验证通过")
+                    logger.info(f"[OK] {config_file} 验证通过")
                 else:
                     results['invalid_files'] += 1
                     results['success'] = False
                     results['errors'].extend(validation_result['errors'])
-                    logger.error(f"❌ {config_file} 验证失败")
+                    logger.error(f"[FAIL] {config_file} 验证失败")
                     
             except Exception as e:
                 results['invalid_files'] += 1
                 results['success'] = False
                 error_msg = f"{config_file}: {str(e)}"
                 results['errors'].append(error_msg)
-                logger.error(f"❌ {config_file} 验证异常: {e}")
+                logger.error(f"[FAIL] {config_file} 验证异常: {e}")
         
         # 检查配置文件完整性
         self._check_config_completeness(results)
@@ -257,19 +257,19 @@ class ConfigValidator:
             str: 格式化的验证报告
         """
         report_lines = [
-            "📋 配置文件验证报告",
+            "[LIST] 配置文件验证报告",
             "=" * 50,
             f"总文件数: {results['total_files']}",
             f"有效文件: {results['valid_files']}",
             f"无效文件: {results['invalid_files']}",
-            f"整体状态: {'✅ 通过' if results['success'] else '❌ 失败'}",
+            f"整体状态: {'[OK] 通过' if results['success'] else '[FAIL] 失败'}",
             ""
         ]
         
         # 详细结果
         for config_file, detail in results['details'].items():
-            status = "✅ 有效" if detail['valid'] else "❌ 无效"
-            report_lines.append(f"📄 {config_file}: {status}")
+            status = "[OK] 有效" if detail['valid'] else "[FAIL] 无效"
+            report_lines.append(f"[FILE] {config_file}: {status}")
             
             if detail['errors']:
                 report_lines.append("  错误:")
@@ -285,14 +285,14 @@ class ConfigValidator:
         
         # 全局警告
         if results['warnings']:
-            report_lines.append("⚠️ 全局警告:")
+            report_lines.append("[WARN] 全局警告:")
             for warning in results['warnings']:
                 report_lines.append(f"  - {warning}")
             report_lines.append("")
         
         # 全局错误
         if results['errors']:
-            report_lines.append("❌ 全局错误:")
+            report_lines.append("[FAIL] 全局错误:")
             for error in results['errors']:
                 report_lines.append(f"  - {error}")
         

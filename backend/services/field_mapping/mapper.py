@@ -1,7 +1,7 @@
 """
 字段映射建议与模板应用（v4.6.0+）
 
-⭐ v4.6.0更新: 集成PatternMatcher支持Pattern-based Mapping
+[*] v4.6.0更新: 集成PatternMatcher支持Pattern-based Mapping
 """
 
 from __future__ import annotations
@@ -256,7 +256,7 @@ def suggest_mappings(columns: List[str], domain: str, db: Optional[Session] = No
     智能字段映射（v4.6.0+ Pattern-based Mapping）
     
     策略优先级（v4.6.0新增）：
-    0. ⭐ Pattern-based匹配（支持货币字段）← 新增!
+    0. [*] Pattern-based匹配（支持货币字段）<- 新增!
     1. 精确匹配（ALIAS_DICTIONARY）
     2. 模糊匹配（去除空格、大小写）
     3. 关键词匹配（包含关系）
@@ -273,7 +273,7 @@ def suggest_mappings(columns: List[str], domain: str, db: Optional[Session] = No
     """
     suggestions = {}
     
-    # ⭐ v4.6.0: 优先使用Pattern-based匹配(如果提供了db)
+    # [*] v4.6.0: 优先使用Pattern-based匹配(如果提供了db)
     if db:
         try:
             from backend.services.pattern_matcher import PatternMatcher

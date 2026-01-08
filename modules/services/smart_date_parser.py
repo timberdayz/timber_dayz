@@ -61,7 +61,7 @@ def parse_date(value, *, prefer_dayfirst: Optional[bool] = None, granularity: st
     """Parse a variety of date representations into a date object.
 
     - prefer_dayfirst: if specified, pass to pandas.to_datetime
-    - granularity: 'daily'|'weekly'|'monthly' → used only by callers to set metric_date semantics
+    - granularity: 'daily'|'weekly'|'monthly' -> used only by callers to set metric_date semantics
     """
     if value is None:
         return None

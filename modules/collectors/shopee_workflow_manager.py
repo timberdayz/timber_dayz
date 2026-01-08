@@ -98,7 +98,7 @@ class ShopeeWorkflowManager:
         self.output_base = Path("temp/outputs/shopee_workflow")
         self.output_base.mkdir(parents=True, exist_ok=True)
         
-        logger.info(f"🚀 初始化Shopee工作流管理器: {self.workflow_id}")
+        logger.info(f"[START] 初始化Shopee工作流管理器: {self.workflow_id}")
         logger.info(f"   开始时间: {self.start_time}")
 
     def execute_collection(self, collection_mode: Dict[str, Any]) -> Dict[str, Any]:
@@ -124,7 +124,7 @@ class ShopeeWorkflowManager:
             }
 
         except Exception as e:
-            logger.error(f"❌ 采集执行失败: {e}")
+            logger.error(f"[FAIL] 采集执行失败: {e}")
             return {
                 "success": False,
                 "error": str(e)
@@ -144,7 +144,7 @@ class ShopeeWorkflowManager:
         steps = []
         
         try:
-            logger.info(f"🔄 开始账号工作流: {account_config.get('account_id', 'unknown')}")
+            logger.info(f"[RETRY] 开始账号工作流: {account_config.get('account_id', 'unknown')}")
             
             # 步骤1: 账号验证
             step1 = self._execute_step("account_validation", 
@@ -253,7 +253,7 @@ class ShopeeWorkflowManager:
                     browser.close()
         
         except Exception as e:
-            logger.error(f"❌ 账号工作流执行失败: {e}")
+            logger.error(f"[FAIL] 账号工作流执行失败: {e}")
             return self._create_failed_result(account_config, steps, workflow_start, str(e))
     
     def run_multi_account_workflow(self, account_configs: List[Dict[str, Any]], 
@@ -273,7 +273,7 @@ class ShopeeWorkflowManager:
         successful_count = 0
         failed_count = 0
         
-        logger.info(f"🚀 开始多账号工作流: {len(account_configs)} 个账号")
+        logger.info(f"[START] 开始多账号工作流: {len(account_configs)} 个账号")
         
         try:
             # 使用线程池并行执行
@@ -293,14 +293,14 @@ class ShopeeWorkflowManager:
                         
                         if result.success:
                             successful_count += 1
-                            logger.info(f"✅ 账号 {result.account_id} 工作流完成")
+                            logger.info(f"[OK] 账号 {result.account_id} 工作流完成")
                         else:
                             failed_count += 1
-                            logger.error(f"❌ 账号 {result.account_id} 工作流失败: {result.error_summary}")
+                            logger.error(f"[FAIL] 账号 {result.account_id} 工作流失败: {result.error_summary}")
                             
                     except Exception as e:
                         failed_count += 1
-                        logger.error(f"❌ 账号 {account_config.get('account_id', 'unknown')} 工作流异常: {e}")
+                        logger.error(f"[FAIL] 账号 {account_config.get('account_id', 'unknown')} 工作流异常: {e}")
                         
                         # 创建失败结果
                         failed_result = AccountWorkflowResult(
@@ -338,7 +338,7 @@ class ShopeeWorkflowManager:
             # 保存工作流结果
             self._save_workflow_result(result)
             
-            logger.info(f"🎉 多账号工作流完成")
+            logger.info(f"[DONE] 多账号工作流完成")
             logger.info(f"   总账号数: {len(account_configs)}")
             logger.info(f"   成功账号: {successful_count}")
             logger.info(f"   失败账号: {failed_count}")
@@ -347,7 +347,7 @@ class ShopeeWorkflowManager:
             return result
             
         except Exception as e:
-            logger.error(f"❌ 多账号工作流执行失败: {e}")
+            logger.error(f"[FAIL] 多账号工作流执行失败: {e}")
             raise
     
     def _execute_step(self, step_name: str, step_function) -> WorkflowStep:
@@ -360,7 +360,7 @@ class ShopeeWorkflowManager:
         )
         
         try:
-            logger.info(f"🔄 执行步骤: {step_name}")
+            logger.info(f"[RETRY] 执行步骤: {step_name}")
             result = step_function()
             
             step.status = "completed"
@@ -368,7 +368,7 @@ class ShopeeWorkflowManager:
             step.duration = (datetime.now() - step_start).total_seconds()
             step.result = result
             
-            logger.info(f"✅ 步骤完成: {step_name} (耗时: {step.duration:.2f}秒)")
+            logger.info(f"[OK] 步骤完成: {step_name} (耗时: {step.duration:.2f}秒)")
             return step
             
         except Exception as e:
@@ -377,7 +377,7 @@ class ShopeeWorkflowManager:
             step.duration = (datetime.now() - step_start).total_seconds()
             step.error = str(e)
             
-            logger.error(f"❌ 步骤失败: {step_name} - {e}")
+            logger.error(f"[FAIL] 步骤失败: {step_name} - {e}")
             return step
     
     def _validate_account(self, account_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -434,7 +434,7 @@ class ShopeeWorkflowManager:
             return {"session_valid": False, "session_restored": session_restored}
             
         except Exception as e:
-            logger.warning(f"⚠️ 会话恢复失败: {e}")
+            logger.warning(f"[WARN] 会话恢复失败: {e}")
             return {"session_valid": False, "session_restored": False}
     
     def _is_logged_in(self, page: Page) -> bool:
@@ -501,7 +501,7 @@ class ShopeeWorkflowManager:
                     otp_input = page.locator(selector)
                     if otp_input.count() > 0:
                         otp_input.fill(otp_code)
-                        logger.info(f"✅ 验证码已输入: {otp_code}")
+                        logger.info(f"[OK] 验证码已输入: {otp_code}")
                         
                         # 查找确认按钮
                         confirm_selectors = [
@@ -516,7 +516,7 @@ class ShopeeWorkflowManager:
                                 confirm_button = page.locator(confirm_selector)
                                 if confirm_button.count() > 0:
                                     confirm_button.click()
-                                    logger.info("✅ 验证码确认按钮已点击")
+                                    logger.info("[OK] 验证码确认按钮已点击")
                                     return True
                             except Exception:
                                 continue
@@ -525,17 +525,17 @@ class ShopeeWorkflowManager:
                 except Exception:
                     continue
             
-            logger.warning("⚠️ 未找到验证码输入框或确认按钮")
+            logger.warning("[WARN] 未找到验证码输入框或确认按钮")
             return False
             
         except Exception as e:
-            logger.error(f"❌ 输入验证码失败: {e}")
+            logger.error(f"[FAIL] 输入验证码失败: {e}")
             return False
     
     def _perform_login_verification(self, page: Page, account_config: Dict[str, Any]) -> Dict[str, Any]:
         """执行登录验证"""
         try:
-            logger.info(f"🔐 开始登录验证: {account_config.get('account_id', '')}")
+            logger.info(f"[LOCK] 开始登录验证: {account_config.get('account_id', '')}")
             
             # 首先访问登录页面
             login_url = account_config.get('login_url', 'https://seller.shopee.cn/account/signin')
@@ -544,7 +544,7 @@ class ShopeeWorkflowManager:
             
             # 检查是否已经登录
             if self._is_logged_in(page):
-                logger.info("✅ 已登录，无需验证码")
+                logger.info("[OK] 已登录，无需验证码")
                 return {"login_success": True, "otp_used": False}
             
             # 创建Shopee采集器进行登录
@@ -556,7 +556,7 @@ class ShopeeWorkflowManager:
             login_result = collector.login()
             
             if login_result:
-                logger.info("✅ 登录成功")
+                logger.info("[OK] 登录成功")
                 return {
                     "login_success": True,
                     "otp_used": True,
@@ -565,7 +565,7 @@ class ShopeeWorkflowManager:
             else:
                 # 检查是否需要验证码
                 if self._needs_verification(page):
-                    logger.info("📧 检测到需要验证码，开始处理...")
+                    logger.info("[EMAIL] 检测到需要验证码，开始处理...")
                     
                     # 使用统一验证码服务
                     otp_code = self.verification_service.request_otp(
@@ -575,11 +575,11 @@ class ShopeeWorkflowManager:
                     )
                     
                     if otp_code:
-                        logger.info(f"✅ OTP获取成功: {otp_code}")
+                        logger.info(f"[OK] OTP获取成功: {otp_code}")
                         
                         # 输入验证码
                         if self._input_verification_code(page, otp_code):
-                            logger.info("✅ 验证码输入成功")
+                            logger.info("[OK] 验证码输入成功")
                             
                             # 等待验证结果
                             time.sleep(3)
@@ -602,14 +602,14 @@ class ShopeeWorkflowManager:
                                 "error": "验证码输入失败"
                             }
                     else:
-                        logger.warning("⚠️ OTP获取失败")
+                        logger.warning("[WARN] OTP获取失败")
                         
                         # 尝试手动输入
-                        logger.info("💡 尝试手动输入验证码...")
+                        logger.info("[TIP] 尝试手动输入验证码...")
                         manual_otp = self._get_manual_otp()
                         
                         if manual_otp and self._input_verification_code(page, manual_otp):
-                            logger.info("✅ 手动验证码输入成功")
+                            logger.info("[OK] 手动验证码输入成功")
                             time.sleep(3)
                             
                             if self._is_logged_in(page):
@@ -631,7 +631,7 @@ class ShopeeWorkflowManager:
                     }
             
         except Exception as e:
-            logger.error(f"❌ 登录验证失败: {e}")
+            logger.error(f"[FAIL] 登录验证失败: {e}")
             return {"login_success": False, "error": str(e)}
     
     def _analyze_shopee_pages(self, page: Page, account_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -639,10 +639,10 @@ class ShopeeWorkflowManager:
         try:
             # 首先确认已经登录
             if not self._is_logged_in(page):
-                logger.error("❌ 未登录状态，无法进行页面分析")
+                logger.error("[FAIL] 未登录状态，无法进行页面分析")
                 return {"error": "未登录状态，无法进行页面分析"}
             
-            logger.info("🔍 开始分析Shopee页面（已登录状态）")
+            logger.info("[SEARCH] 开始分析Shopee页面（已登录状态）")
             
             # 创建页面分析器
             analyzer = ShopeePageAnalyzer(page, account_config)
@@ -666,7 +666,7 @@ class ShopeeWorkflowManager:
             }
             
         except Exception as e:
-            logger.error(f"❌ 页面分析失败: {e}")
+            logger.error(f"[FAIL] 页面分析失败: {e}")
             return {"error": str(e)}
     
     def _collect_shopee_data(self, page: Page, account_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -688,7 +688,7 @@ class ShopeeWorkflowManager:
             }
             
         except Exception as e:
-            logger.error(f"❌ 数据采集失败: {e}")
+            logger.error(f"[FAIL] 数据采集失败: {e}")
             return {"collection_success": False, "error": str(e)}
     
     def _download_shopee_data(self, page: Page, account_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -709,7 +709,7 @@ class ShopeeWorkflowManager:
             }
             
         except Exception as e:
-            logger.error(f"❌ 数据下载失败: {e}")
+            logger.error(f"[FAIL] 数据下载失败: {e}")
             return {"download_success": False, "error": str(e)}
     
     def _consolidate_account_data(self, account_config: Dict[str, Any], 
@@ -752,7 +752,7 @@ class ShopeeWorkflowManager:
             }
             
         except Exception as e:
-            logger.error(f"❌ 数据归总失败: {e}")
+            logger.error(f"[FAIL] 数据归总失败: {e}")
             return {"consolidation_success": False, "error": str(e)}
     
     def _cleanup_resources(self, browser: Browser, page: Page, account_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -766,7 +766,7 @@ class ShopeeWorkflowManager:
             return {"cleanup_success": True}
             
         except Exception as e:
-            logger.warning(f"⚠️ 资源清理失败: {e}")
+            logger.warning(f"[WARN] 资源清理失败: {e}")
             return {"cleanup_success": False, "error": str(e)}
     
     def _create_failed_result(self, account_config: Dict[str, Any], steps: List[WorkflowStep], 
@@ -807,7 +807,7 @@ class ShopeeWorkflowManager:
             return str(report_file)
             
         except Exception as e:
-            logger.error(f"❌ 保存分析报告失败: {e}")
+            logger.error(f"[FAIL] 保存分析报告失败: {e}")
             return ""
     
     def _generate_workflow_summary(self, account_results: List[AccountWorkflowResult], 
@@ -832,7 +832,7 @@ class ShopeeWorkflowManager:
             return summary
             
         except Exception as e:
-            logger.error(f"❌ 生成工作流汇总失败: {e}")
+            logger.error(f"[FAIL] 生成工作流汇总失败: {e}")
             return {}
     
     def _save_workflow_result(self, result: MultiAccountWorkflowResult) -> str:
@@ -846,20 +846,20 @@ class ShopeeWorkflowManager:
             with open(workflow_file, 'w', encoding='utf-8') as f:
                 json.dump(asdict(result), f, ensure_ascii=False, indent=2)
             
-            logger.info(f"💾 工作流结果已保存: {workflow_file}")
+            logger.info(f"[SAVE] 工作流结果已保存: {workflow_file}")
             return str(workflow_file)
             
         except Exception as e:
-            logger.error(f"❌ 保存工作流结果失败: {e}")
+            logger.error(f"[FAIL] 保存工作流结果失败: {e}")
             return ""
     
     def _get_manual_otp(self) -> Optional[str]:
         """获取手动输入的OTP"""
         try:
             print("\n" + "="*60)
-            print("🔐 需要验证码")
-            print("📧 请检查您的邮箱获取验证码")
-            print("💡 如果长时间收不到验证码，可以尝试重新发送")
+            print("[LOCK] 需要验证码")
+            print("[EMAIL] 请检查您的邮箱获取验证码")
+            print("[TIP] 如果长时间收不到验证码，可以尝试重新发送")
             print("="*60)
             
             manual_code = input("请输入验证码（4-8位数字）: ").strip()

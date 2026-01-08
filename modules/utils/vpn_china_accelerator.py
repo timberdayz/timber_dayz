@@ -50,9 +50,9 @@ class VpnChinaAccelerator:
             self.is_vpn_environment = self._detect_vpn()
             
             if self.is_vpn_environment:
-                logger.warning("🌐 检测到VPN环境，启动中国网站加速优化")
+                logger.warning("[WEB] 检测到VPN环境，启动中国网站加速优化")
             else:
-                logger.info("🔗 本地网络环境，无需特殊优化")
+                logger.info("[LINK] 本地网络环境，无需特殊优化")
                 
         except Exception as e:
             logger.error(f"环境检测失败: {e}")
@@ -159,7 +159,7 @@ class VpnChinaAccelerator:
             return True
         
         try:
-            logger.info("🚀 开始优化中国网站访问...")
+            logger.info("[START] 开始优化中国网站访问...")
             
             # 方法1: 配置DNS
             self._configure_china_dns()
@@ -171,7 +171,7 @@ class VpnChinaAccelerator:
             # 方法3: 配置本地代理绕过
             self._setup_bypass_proxy()
             
-            logger.success("✅ 中国网站访问优化完成")
+            logger.success("[OK] 中国网站访问优化完成")
             return True
             
         except Exception as e:
@@ -308,7 +308,7 @@ class VpnChinaAccelerator:
             with open(config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(bypass_config, f, allow_unicode=True)
             
-            logger.info("✅ 绕过代理配置已保存")
+            logger.info("[OK] 绕过代理配置已保存")
             
         except Exception as e:
             logger.warning(f"代理绕过配置失败: {e}")
@@ -316,7 +316,7 @@ class VpnChinaAccelerator:
     def test_china_website_speed(self, url: str = "https://www.baidu.com") -> Dict:
         """测试中国网站访问速度"""
         try:
-            logger.info(f"🧪 测试访问: {url}")
+            logger.info(f"[TEST] 测试访问: {url}")
             
             start_time = time.time()
             response = requests.get(url, timeout=15)
@@ -332,9 +332,9 @@ class VpnChinaAccelerator:
             }
             
             if result["success"]:
-                logger.success(f"✅ 访问成功: {response_time:.2f}秒")
+                logger.success(f"[OK] 访问成功: {response_time:.2f}秒")
             else:
-                logger.error(f"❌ 访问失败: HTTP {response.status_code}")
+                logger.error(f"[FAIL] 访问失败: HTTP {response.status_code}")
             
             return result
             
@@ -350,7 +350,7 @@ class VpnChinaAccelerator:
     def test_ip_location(self) -> Dict:
         """测试IP地址位置（验收标准：显示中国成都IP）"""
         try:
-            logger.info("🔍 测试IP地址位置...")
+            logger.info("[SEARCH] 测试IP地址位置...")
             
             # 访问百度搜索IP地址
             search_url = "https://www.baidu.com/s?wd=IP地址"
@@ -378,7 +378,7 @@ class VpnChinaAccelerator:
                     "location_test": "百度搜索IP地址结果"
                 }
                 
-                logger.success(f"✅ IP测试完成，当前IP: {current_ip}")
+                logger.success(f"[OK] IP测试完成，当前IP: {current_ip}")
                 return result
             else:
                 raise Exception(f"百度访问失败: HTTP {response.status_code}")
@@ -397,7 +397,7 @@ class VpnChinaAccelerator:
             if not self.added_routes:
                 return
             
-            logger.info("🧹 清理路由规则...")
+            logger.info("[CLEAN] 清理路由规则...")
             
             for ip_range in self.added_routes:
                 try:
@@ -411,7 +411,7 @@ class VpnChinaAccelerator:
                     continue
             
             self.added_routes.clear()
-            logger.success("✅ 路由规则清理完成")
+            logger.success("[OK] 路由规则清理完成")
             
         except Exception as e:
             logger.warning(f"清理路由失败: {e}")

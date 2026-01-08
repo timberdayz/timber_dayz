@@ -52,7 +52,7 @@ class CacheService:
         """
         获取缓存值
         
-        优先级：内存 → 文件 → None
+        优先级：内存 -> 文件 -> None
         
         Args:
             key: 缓存键

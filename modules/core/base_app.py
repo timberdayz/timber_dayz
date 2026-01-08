@@ -222,15 +222,15 @@ class BaseApplication(ApplicationInterface):
         默认实现显示基本信息，子类可重写实现自定义菜单
         """
         print(f"\n{'='*50}")
-        print(f"🎯 {self.name} v{self.version}")
+        print(f"[TARGET] {self.name} v{self.version}")
         print(f"{'='*50}")
-        print(f"📋 {self.description}")
-        print(f"🟢 状态: {'运行中' if self._is_running else '未运行'}")
+        print(f"[LIST] {self.description}")
+        print(f"[GREEN] 状态: {'运行中' if self._is_running else '未运行'}")
         
         if self._is_running and self._startup_time:
             uptime = self.get_uptime()
             if uptime:
-                print(f"⏱️  运行时长: {uptime:.1f}秒")
+                print(f"[TIME]  运行时长: {uptime:.1f}秒")
         
         print(f"{'='*50}")
         
@@ -257,14 +257,14 @@ class BaseApplication(ApplicationInterface):
         elif choice == "0":
             return
         else:
-            print("❌ 无效选择")
+            print("[FAIL] 无效选择")
         
         input("\n按回车键继续...")
     
     def _show_app_info(self):
         """显示应用详细信息"""
         info = self.get_info()
-        print(f"\n📋 应用详细信息:")
+        print(f"\n[LIST] 应用详细信息:")
         print(f"   名称: {info['name']}")
         print(f"   版本: {info['version']}")
         print(f"   描述: {info['description']}")
@@ -279,16 +279,16 @@ class BaseApplication(ApplicationInterface):
     
     def _show_health_status(self):
         """显示健康状态"""
-        print(f"\n🔍 执行健康检查...")
+        print(f"\n[SEARCH] 执行健康检查...")
         
         try:
             is_healthy = self.health_check()
             if is_healthy:
-                print("✅ 应用状态健康")
+                print("[OK] 应用状态健康")
             else:
-                print("❌ 应用状态异常")
+                print("[FAIL] 应用状态异常")
         except Exception as e:
-            print(f"❌ 健康检查失败: {e}")
+            print(f"[FAIL] 健康检查失败: {e}")
     
     def __str__(self) -> str:
         """字符串表示"""

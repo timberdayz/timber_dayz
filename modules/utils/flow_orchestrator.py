@@ -62,7 +62,7 @@ class FlowOrchestrator:
                 logger.error("未找到登录录制脚本，请先完成自动登录录制")
                 return False
 
-            logger.info(f"🎬 深链接模式: 登录 -> 直达 {data_type.value} 页面 (店铺: {shop_id})")
+            logger.info(f"[ACTION] 深链接模式: 登录 -> 直达 {data_type.value} 页面 (店铺: {shop_id})")
         else:
             # 传统模式：需要登录+采集脚本
             login_path, collect_path = self.plan(account_name, data_type)
@@ -73,7 +73,7 @@ class FlowOrchestrator:
                 logger.error("未找到采集录制脚本，请先完成该类型的数据采集录制")
                 return False
 
-            logger.info(f"🎬 传统模式: 登录= {login_path} -> 采集= {collect_path}")
+            logger.info(f"[ACTION] 传统模式: 登录= {login_path} -> 采集= {collect_path}")
 
         browser, context, page = playwright_context_factory()
         try:
@@ -93,10 +93,10 @@ class FlowOrchestrator:
             else:
                 # 传统模式：回放采集脚本
                 self._run_script(collect_path, page, account)
-                logger.success("✅ 传统流程执行完成")
+                logger.success("[OK] 传统流程执行完成")
                 return True
         except Exception as e:
-            logger.error(f"❌ 流程执行异常: {e}")
+            logger.error(f"[FAIL] 流程执行异常: {e}")
             return False
         finally:
             # 注意：由上层统一关闭 context / browser
@@ -108,7 +108,7 @@ class FlowOrchestrator:
         try:
             # 1) 构造深链接并导航
             deep_link = self.adapter.build_deep_link(data_type, shop_id, **kwargs)
-            logger.info(f"🔗 导航到深链接: {deep_link}")
+            logger.info(f"[LINK] 导航到深链接: {deep_link}")
 
             page.goto(deep_link, wait_until="domcontentloaded", timeout=60000)
 
@@ -118,10 +118,10 @@ class FlowOrchestrator:
             # 2) 验证店铺访问权限
             has_access, access_msg = self.adapter.validate_shop_access(page, shop_id)
             if not has_access:
-                logger.error(f"❌ 店铺访问验证失败: {access_msg}")
+                logger.error(f"[FAIL] 店铺访问验证失败: {access_msg}")
                 return False
 
-            logger.success(f"✅ 店铺访问验证通过: {access_msg}")
+            logger.success(f"[OK] 店铺访问验证通过: {access_msg}")
 
             # 3) 等待页面关键元素加载
             selectors = self.adapter.get_page_selectors(data_type)
@@ -130,15 +130,15 @@ class FlowOrchestrator:
             if "data_table" in selectors:
                 try:
                     page.wait_for_selector(selectors["data_table"], timeout=20000)
-                    logger.info("✅ 数据表格已加载")
+                    logger.info("[OK] 数据表格已加载")
                 except:
-                    logger.warning("⚠️ 数据表格加载超时，但继续执行")
+                    logger.warning("[WARN] 数据表格加载超时，但继续执行")
 
             # 4) 尝试直接导出（优先）或点击导出按钮（兜底）
             return self._perform_data_export(page, data_type, shop_id, **kwargs)
 
         except Exception as e:
-            logger.error(f"❌ 深链接采集执行失败: {e}")
+            logger.error(f"[FAIL] 深链接采集执行失败: {e}")
             return False
 
     def _perform_data_export(self, page, data_type: RecordingType, shop_id: str, **kwargs) -> bool:
@@ -147,7 +147,7 @@ class FlowOrchestrator:
             # 方案A：直接调用导出API（推荐）
             try:
                 export_config = self.adapter.get_export_config(data_type, shop_id, **kwargs)
-                logger.info(f"🚀 尝试直接API导出: {export_config.endpoint}")
+                logger.info(f"[START] 尝试直接API导出: {export_config.endpoint}")
 
                 response = page.request.get(
                     export_config.endpoint,
@@ -162,19 +162,19 @@ class FlowOrchestrator:
                     output_path.parent.mkdir(parents=True, exist_ok=True)
                     output_path.write_bytes(response.body())
 
-                    logger.success(f"✅ API导出成功: {output_path}")
+                    logger.success(f"[OK] API导出成功: {output_path}")
                     return True
                 else:
-                    logger.warning(f"⚠️ API导出失败 (状态码: {response.status})，尝试点击导出")
+                    logger.warning(f"[WARN] API导出失败 (状态码: {response.status})，尝试点击导出")
 
             except Exception as api_error:
-                logger.warning(f"⚠️ API导出异常: {api_error}，尝试点击导出")
+                logger.warning(f"[WARN] API导出异常: {api_error}，尝试点击导出")
 
             # 方案B：点击导出按钮（兜底）
             return self._click_export_button(page, data_type, shop_id)
 
         except Exception as e:
-            logger.error(f"❌ 数据导出失败: {e}")
+            logger.error(f"[FAIL] 数据导出失败: {e}")
             return False
 
     def _click_export_button(self, page, data_type: RecordingType, shop_id: str) -> bool:
@@ -184,20 +184,20 @@ class FlowOrchestrator:
             export_button = selectors.get("export_button")
 
             if not export_button:
-                logger.error("❌ 未配置导出按钮选择器")
+                logger.error("[FAIL] 未配置导出按钮选择器")
                 return False
 
             # 等待导出按钮出现
             try:
                 page.wait_for_selector(export_button, timeout=10000)
             except:
-                logger.error(f"❌ 导出按钮未找到: {export_button}")
+                logger.error(f"[FAIL] 导出按钮未找到: {export_button}")
                 return False
 
             # 监听下载事件
             with page.expect_download(timeout=60000) as download_info:
                 page.click(export_button)
-                logger.info("🖱️ 已点击导出按钮，等待下载...")
+                logger.info("[MOUSE] 已点击导出按钮，等待下载...")
 
             download = download_info.value
 
@@ -207,11 +207,11 @@ class FlowOrchestrator:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
             download.save_as(str(output_path))
-            logger.success(f"✅ 点击导出成功: {output_path}")
+            logger.success(f"[OK] 点击导出成功: {output_path}")
             return True
 
         except Exception as e:
-            logger.error(f"❌ 点击导出失败: {e}")
+            logger.error(f"[FAIL] 点击导出失败: {e}")
             return False
 
     def _generate_output_path(self, data_type: RecordingType, shop_id: str, file_extension: str) -> Path:
@@ -239,7 +239,7 @@ class FlowOrchestrator:
         spec.loader.exec_module(module)
 
         if hasattr(module, "run"):
-            logger.info(f"▶️ 回放脚本: {script_file.name}")
+            logger.info(f"[START] 回放脚本: {script_file.name}")
             module.run(page, account)
         else:
             raise AttributeError(f"录制脚本缺少 run(page, account) 入口: {script_file}")

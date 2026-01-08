@@ -55,7 +55,7 @@ class LoginService:
 
         Strategy:
         - If not on login page, assume already logged in
-        - If on login page: fill credentials ➜ remember-me ➜ submit ➜ handle verification (plugin chain) ➜ validate
+        - If on login page: fill credentials -> remember-me -> submit -> handle verification (plugin chain) -> validate
         """
         if not self._shopee_is_on_login_page(page):
             return True
@@ -556,7 +556,7 @@ class LoginService:
 
                 # If error toast appears, retry (do NOT spam clicks)
                 if self._shopee_detect_otp_error(page):
-                    self.logger.warning("[ShopeeLogin] 验证码错误，准备重试…")
+                    self.logger.warning("[ShopeeLogin] 验证码错误，准备重试...")
                     continue
 
                 # If we left login page or OTP modal disappeared, treat as success
@@ -575,7 +575,7 @@ class LoginService:
         """
         try:
             if self._shopee_detect_phone_verification(page):
-                self.logger.info("[ShopeeLogin] 检测到手机/短信验证码页面，等待用户输入并代为提交…")
+                self.logger.info("[ShopeeLogin] 检测到手机/短信验证码页面，等待用户输入并代为提交...")
                 try:
                     if self._shopee_try_manual_phone_otp(page):
                         page.wait_for_timeout(800)
@@ -618,7 +618,7 @@ class LoginService:
 
         Strategy:
         - If not on login page, treat as already logged in
-        - If on login page: fill phone/username + password ➜ submit ➜ validate by URL
+        - If on login page: fill phone/username + password -> submit -> validate by URL
         - 2FA is handled by higher-level component for now
         """
         if not self._tiktok_is_on_login_page(page):

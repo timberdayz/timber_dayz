@@ -27,21 +27,21 @@ def demo_basic_loading():
     
     # 初始化加载器（热重载模式）
     loader = ComponentLoader(hot_reload=True)
-    print(f"✓ ComponentLoader initialized")
+    print(f"[OK] ComponentLoader initialized")
     print(f"  Components directory: {loader.components_dir}")
     print(f"  Hot reload: {loader.hot_reload}")
     
     # 加载登录模板
     try:
         component = loader.load('_templates/login')
-        print(f"\n✓ Loaded component: {component['name']}")
+        print(f"\n[OK] Loaded component: {component['name']}")
         print(f"  Platform: {component['platform']}")
         print(f"  Type: {component['type']}")
         print(f"  Steps: {len(component['steps'])}")
     except FileNotFoundError:
-        print("\n✗ Template not found (this is expected if no templates exist yet)")
+        print("\n[FAIL] Template not found (this is expected if no templates exist yet)")
     except Exception as e:
-        print(f"\n✗ Error loading component: {e}")
+        print(f"\n[FAIL] Error loading component: {e}")
 
 
 def demo_variable_replacement():
@@ -74,7 +74,7 @@ def demo_variable_replacement():
         # 加载组件并替换变量
         component = loader.load('_templates/login', params=params)
         
-        print("✓ Variables replaced successfully")
+        print("[OK] Variables replaced successfully")
         print(f"\nOriginal: {{{{account.username}}}}")
         print(f"Replaced: {params['account']['username']}")
         
@@ -84,7 +84,7 @@ def demo_variable_replacement():
                 print(f"\nStep {i} ({step['action']}): {step.get('value', 'N/A')}")
     
     except Exception as e:
-        print(f"✗ Error: {e}")
+        print(f"[FAIL] Error: {e}")
 
 
 def demo_validation():
@@ -108,9 +108,9 @@ def demo_validation():
         print(f"  - {pattern}: ", end="")
         try:
             loader._validate_string_security(pattern, "test_field")
-            print("✗ NOT DETECTED (bug!)")
+            print("[FAIL] NOT DETECTED (bug!)")
         except ComponentValidationError:
-            print("✓ Detected")
+            print("[OK] Detected")
 
 
 def demo_cache():
@@ -125,18 +125,18 @@ def demo_cache():
     try:
         print("Loading component (first time)...")
         loader.load('_templates/login')
-        print(f"✓ Cache size: {len(loader._cache)}")
+        print(f"[OK] Cache size: {len(loader._cache)}")
         
         print("\nLoading same component (from cache)...")
         loader.load('_templates/login')
-        print(f"✓ Cache size: {len(loader._cache)}")
+        print(f"[OK] Cache size: {len(loader._cache)}")
         
         print("\nClearing cache...")
         loader.clear_cache()
-        print(f"✓ Cache size after clear: {len(loader._cache)}")
+        print(f"[OK] Cache size after clear: {len(loader._cache)}")
         
     except Exception as e:
-        print(f"✗ Error: {e}")
+        print(f"[FAIL] Error: {e}")
 
 
 def demo_component_info():
@@ -155,7 +155,7 @@ def demo_component_info():
             print(f"  {key}: {value}")
     
     except Exception as e:
-        print(f"✗ Error: {e}")
+        print(f"[FAIL] Error: {e}")
 
 
 def main():
@@ -174,7 +174,7 @@ def main():
         print("\n" + "="*80)
         print(" 演示完成")
         print("="*80)
-        print("\n✓ ComponentLoader 所有核心功能正常工作")
+        print("\n[OK] ComponentLoader 所有核心功能正常工作")
         print("\n下一步:")
         print("  1. 创建平台特定组件（shopee/tiktok/miaoshou）")
         print("  2. 实现 CollectionExecutorV2 执行引擎")
@@ -183,7 +183,7 @@ def main():
         
     except Exception as e:
         logger.exception("Demo failed")
-        print(f"\n✗ Demo failed: {e}")
+        print(f"\n[FAIL] Demo failed: {e}")
         return 1
     
     return 0

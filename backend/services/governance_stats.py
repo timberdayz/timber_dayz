@@ -48,7 +48,7 @@ class GovernanceStats:
                 CatalogFile.status == 'pending'
             )
             if platform:
-                # ⭐ v4.10.0修复：同时使用platform_code和source_platform筛选
+                # [*] v4.10.0修复：同时使用platform_code和source_platform筛选
                 stmt = stmt.where(
                     or_(
                         func.lower(CatalogFile.platform_code) == platform.lower(),
@@ -73,7 +73,7 @@ class GovernanceStats:
                 )
             )
             if platform:
-                # ⭐ v4.10.0修复：同时使用platform_code和source_platform筛选
+                # [*] v4.10.0修复：同时使用platform_code和source_platform筛选
                 stmt = stmt.where(
                     or_(
                         func.lower(CatalogFile.platform_code) == platform.lower(),
@@ -135,7 +135,7 @@ class GovernanceStats:
                     CatalogFile.status == 'pending'
                 )
                 if platform:
-                    # ⭐ v4.10.0修复：同时使用platform_code和source_platform筛选
+                    # [*] v4.10.0修复：同时使用platform_code和source_platform筛选
                     stmt = stmt.where(
                         or_(
                             func.lower(CatalogFile.platform_code) == platform.lower(),
@@ -190,7 +190,7 @@ class GovernanceStats:
             
             # 筛选条件
             if platform:
-                # ⭐ v4.10.0修复：同时使用platform_code和source_platform筛选
+                # [*] v4.10.0修复：同时使用platform_code和source_platform筛选
                 stmt = stmt.where(
                     or_(
                         func.lower(CatalogFile.platform_code) == platform.lower(),

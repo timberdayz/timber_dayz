@@ -21,7 +21,7 @@ from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 
-# ⭐ 注意（2025-12-21）：
+# [*] 注意（2025-12-21）：
 # Windows 上 Playwright 需要 ProactorEventLoop（默认），因为需要 create_subprocess_exec
 # SelectorEventLoop 不支持 subprocess，会导致 NotImplementedError
 # 所以不要设置 WindowsSelectorEventLoopPolicy
@@ -91,7 +91,7 @@ class ComponentTester:
         screenshot_on_error: bool = True,
         output_dir: str = None,
         account_info: Dict[str, Any] = None,  # 新增：直接传入账号信息
-        progress_callback: Callable[[str, dict], None] = None,  # ⭐ v4.7.3: 进度回调
+        progress_callback: Callable[[str, dict], None] = None,  # [*] v4.7.3: 进度回调
     ):
         """
         初始化测试器（v4.7.3增强：支持实时进度回调）
@@ -112,7 +112,7 @@ class ComponentTester:
         self.headless = headless
         self.screenshot_on_error = screenshot_on_error
         self._account_info = account_info  # 缓存传入的账号信息
-        self.progress_callback = progress_callback  # ⭐ v4.7.3: 进度回调
+        self.progress_callback = progress_callback  # [*] v4.7.3: 进度回调
         
         # 组件加载器
         self.component_loader = ComponentLoader()
@@ -547,7 +547,7 @@ class ComponentTester:
                 logger.error(f"Step {i+1}: 'navigate' requires 'url'")
                 return False
             
-            # ✅ v4.7.0修复：wait步骤验证逻辑（与executor_v2.py对齐）
+            # [OK] v4.7.0修复：wait步骤验证逻辑（与executor_v2.py对齐）
             if action == 'wait':
                 wait_type = step.get('type', 'timeout')
                 
@@ -586,7 +586,7 @@ class ComponentTester:
                 logger.error(f"Step {i+1}: 'fill' requires 'value'")
                 return False
         
-        # ⭐ v4.7.1新增：检查 success_criteria 的有效性
+        # [*] v4.7.1新增：检查 success_criteria 的有效性
         success_criteria = component.get('success_criteria', [])
         
         if not success_criteria:
@@ -613,7 +613,7 @@ class ComponentTester:
                     logger.warning(f"Criterion {i+1}: '{criterion_type}' has empty value (not optional, may cause test to fail)")
                     logger.info(f"  Tip: Use Playwright Inspector to find the right selector or URL pattern")
             
-            # ⭐ 推荐使用官方 role-based selector
+            # [*] 推荐使用官方 role-based selector
             if criterion_type in ['element_exists', 'element_visible']:
                 selector = criterion.get('selector', '')
                 if selector and not any(prefix in selector for prefix in ['role=', 'text=', 'label=', 'placeholder=']):
@@ -791,9 +791,9 @@ class ComponentTester:
                 for i, step in enumerate(steps):
                     step_id = step.get('id', f'step_{i+1}')
                     action = step.get('action', 'unknown')
-                    is_optional = step.get('optional', False)  # ✅ 读取optional标记
+                    is_optional = step.get('optional', False)  # [OK] 读取optional标记
                     
-                    # ⭐ v4.7.3: 步骤开始回调（异步）
+                    # [*] v4.7.3: 步骤开始回调（异步）
                     if self.progress_callback:
                         try:
                             if asyncio.iscoroutinefunction(self.progress_callback):
@@ -835,7 +835,7 @@ class ComponentTester:
                     last_error = None
                     step_succeeded = False
                     
-                    # ⭐ v4.7.4: 带弹窗处理的重试机制
+                    # [*] v4.7.4: 带弹窗处理的重试机制
                     for retry_count in range(max_retries + 1):
                         try:
                             await self._execute_step(page, step, account_info)
@@ -847,7 +847,7 @@ class ComponentTester:
                             else:
                                 print(f"  [OK] Step {i+1}: {action}")
                             
-                            # ⭐ v4.7.3: 步骤成功回调（异步）
+                            # [*] v4.7.3: 步骤成功回调（异步）
                             if self.progress_callback:
                                 try:
                                     if asyncio.iscoroutinefunction(self.progress_callback):
@@ -877,7 +877,7 @@ class ComponentTester:
                                 logger.info(f"[RETRY] Step {i+1} failed ({type(e).__name__}), attempting popup handling before retry {retry_count + 1}...")
                                 print(f"  [RETRY] Step {i+1}: {action} - Attempting popup handling...")
                                 
-                                # ⭐ v4.7.4: 弹窗处理 - 尝试关闭弹窗/通知
+                                # [*] v4.7.4: 弹窗处理 - 尝试关闭弹窗/通知
                                 popup_handled = await self._handle_popups_and_notifications(page)
                                 if popup_handled:
                                     logger.info(f"[POPUP] Popups handled, retrying step {i+1}")
@@ -897,7 +897,7 @@ class ComponentTester:
                                 f.write(json.dumps({'location':'test_component.py:357','message':f'_test_with_browser: step {i+1} timeout','data':{'step_id':step_id,'action':action,'is_optional':is_optional,'error':str(e)},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'I'})+'\n')
                             # #endregion
                             
-                            # ✅ 检查是否为可选步骤
+                            # [OK] 检查是否为可选步骤
                             if is_optional:
                                 step_result.status = TestStatus.SKIPPED
                                 step_result.error = f"Optional step skipped (timeout): {e}"
@@ -922,7 +922,7 @@ class ComponentTester:
                                 f.write(json.dumps({'location':'test_component.py:371','message':f'_test_with_browser: step {i+1} exception','data':{'step_id':step_id,'action':action,'is_optional':is_optional,'error_type':type(e).__name__,'error':str(e)},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'I'})+'\n')
                             # #endregion
                             
-                            # ✅ 检查是否为可选步骤
+                            # [OK] 检查是否为可选步骤
                             if is_optional:
                                 step_result.status = TestStatus.SKIPPED
                                 step_result.error = f"Optional step skipped: {str(e)[:100]}"
@@ -938,7 +938,7 @@ class ComponentTester:
                                 if diagnosis:
                                     print(diagnosis)
                                 
-                                # ⭐ v4.7.3: 步骤失败回调（异步）
+                                # [*] v4.7.3: 步骤失败回调（异步）
                                 if self.progress_callback:
                                     try:
                                         if asyncio.iscoroutinefunction(self.progress_callback):
@@ -969,7 +969,7 @@ class ComponentTester:
                     step_result.duration_ms = (end_time - start_time).total_seconds() * 1000
                     result.step_results.append(step_result)
                     
-                    # ✅ 只有非可选步骤失败才停止测试
+                    # [OK] 只有非可选步骤失败才停止测试
                     if step_result.status == TestStatus.FAILED and not is_optional:
                         logger.warning(f"Stopping test due to failed required step {i+1}")
                         break
@@ -979,7 +979,7 @@ class ComponentTester:
                     f.write(json.dumps({'location':'test_component.py:396','message':'_test_with_browser: all steps completed, closing browser','data':{'steps_total':len(steps),'steps_passed':result.steps_passed,'steps_failed':result.steps_failed,'current_url':page.url if page else None},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H5,H7,H8'})+'\n')
                 # #endregion
                 
-                # ✅ 新增：验证success_criteria（如果有）
+                # [OK] 新增：验证success_criteria（如果有）
                 success_criteria_passed = True
                 if result.steps_failed == 0:  # 只有步骤全部成功才验证
                     success_criteria = component.get('success_criteria', [])
@@ -1626,7 +1626,7 @@ class ComponentTester:
             await locator.fill(value, timeout=timeout)
         
         elif action == 'wait':
-            # ✅ v4.7.0修复：与executor_v2.py对齐，使用Playwright官方API
+            # [OK] v4.7.0修复：与executor_v2.py对齐，使用Playwright官方API
             # 支持三种等待类型：
             # 1. type='timeout': 固定时间延迟（毫秒）
             # 2. type='selector': 等待元素出现
@@ -1682,7 +1682,7 @@ class ComponentTester:
             Locator对象
             
         Note:
-            ⭐ v4.7.3修复：使用 await locator.count() 正确检查元素存在
+            [*] v4.7.3修复：使用 await locator.count() 正确检查元素存在
         """
         import re
         
@@ -1696,7 +1696,7 @@ class ComponentTester:
                     logger.debug(f"[Playwright Official] get_by_role('{role}', name='{name}')")
                     locator = page.get_by_role(role, name=name)
                     
-                    # ⭐ 修复：异步API需要await
+                    # [*] 修复：异步API需要await
                     count = await locator.count()
                     if count > 0:
                         logger.info(f"[OK] Official API found element: get_by_role('{role}', name='{name}')")

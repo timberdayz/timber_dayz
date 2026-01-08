@@ -52,7 +52,7 @@ class PlaywrightCollector:
             bool: 是否成功启动
         """
         try:
-            logger.info("🚀 启动Playwright浏览器...")
+            logger.info("[START] 启动Playwright浏览器...")
             
             self.playwright = sync_playwright().start()
             
@@ -65,7 +65,7 @@ class PlaywrightCollector:
             # 添加代理配置
             if self.proxy_config:
                 launch_args["proxy"] = self.proxy_config
-                logger.info(f"🔗 使用代理: {self.proxy_config.get('server', 'unknown')}")
+                logger.info(f"[LINK] 使用代理: {self.proxy_config.get('server', 'unknown')}")
             
             # 启动浏览器
             self.browser = self.playwright.chromium.launch(**launch_args)
@@ -89,11 +89,11 @@ class PlaywrightCollector:
             self.page = self.context.new_page()
             self.page.set_default_timeout(self.browser_config["timeout"])
             
-            logger.info("✅ 浏览器启动成功")
+            logger.info("[OK] 浏览器启动成功")
             return True
             
         except Exception as e:
-            logger.error(f"❌ 浏览器启动失败: {e}")
+            logger.error(f"[FAIL] 浏览器启动失败: {e}")
             return False
     
     def close_browser(self):
@@ -107,9 +107,9 @@ class PlaywrightCollector:
                 self.browser.close()
             if hasattr(self, 'playwright'):
                 self.playwright.stop()
-            logger.info("🔒 浏览器已关闭")
+            logger.info("[LOCK] 浏览器已关闭")
         except Exception as e:
-            logger.error(f"❌ 关闭浏览器时出错: {e}")
+            logger.error(f"[FAIL] 关闭浏览器时出错: {e}")
     
     def take_screenshot(self, name: str) -> Optional[str]:
         """
@@ -128,11 +128,11 @@ class PlaywrightCollector:
             
             if self.page:
                 self.page.screenshot(path=str(filepath))
-                logger.info(f"📸 截图保存: {filepath}")
+                logger.info(f"[CAM] 截图保存: {filepath}")
                 return str(filepath)
             return None
         except Exception as e:
-            logger.error(f"❌ 截图失败: {e}")
+            logger.error(f"[FAIL] 截图失败: {e}")
             return None
     
     def wait_for_element(self, selector: str, timeout: int = 10000) -> bool:
@@ -152,7 +152,7 @@ class PlaywrightCollector:
                 return True
             return False
         except Exception as e:
-            logger.warning(f"⚠️ 等待元素超时 {selector}: {e}")
+            logger.warning(f"[WARN] 等待元素超时 {selector}: {e}")
             return False
     
     def click_element(self, selector: str) -> bool:
@@ -168,11 +168,11 @@ class PlaywrightCollector:
         try:
             if self.page and self.wait_for_element(selector):
                 self.page.click(selector)
-                logger.info(f"🖱️ 点击元素: {selector}")
+                logger.info(f"[MOUSE] 点击元素: {selector}")
                 return True
             return False
         except Exception as e:
-            logger.error(f"❌ 点击元素失败 {selector}: {e}")
+            logger.error(f"[FAIL] 点击元素失败 {selector}: {e}")
             return False
     
     def fill_input(self, selector: str, value: str) -> bool:
@@ -189,11 +189,11 @@ class PlaywrightCollector:
         try:
             if self.page and self.wait_for_element(selector):
                 self.page.fill(selector, value)
-                logger.info(f"✏️ 填充输入框 {selector}: {value}")
+                logger.info(f"[EDIT] 填充输入框 {selector}: {value}")
                 return True
             return False
         except Exception as e:
-            logger.error(f"❌ 填充输入框失败 {selector}: {e}")
+            logger.error(f"[FAIL] 填充输入框失败 {selector}: {e}")
             return False
     
     def get_text(self, selector: str) -> Optional[str]:
@@ -212,7 +212,7 @@ class PlaywrightCollector:
                 return text.strip() if text else None
             return None
         except Exception as e:
-            logger.error(f"❌ 获取文本失败 {selector}: {e}")
+            logger.error(f"[FAIL] 获取文本失败 {selector}: {e}")
             return None
     
     def navigate_to(self, url: str) -> bool:
@@ -227,13 +227,13 @@ class PlaywrightCollector:
         """
         try:
             if self.page:
-                logger.info(f"🌐 导航到: {url}")
+                logger.info(f"[WEB] 导航到: {url}")
                 self.page.goto(url)
                 self.page.wait_for_load_state("networkidle")
                 return True
             return False
         except Exception as e:
-            logger.error(f"❌ 导航失败 {url}: {e}")
+            logger.error(f"[FAIL] 导航失败 {url}: {e}")
             return False
     
     def wait_for_download(self, timeout: int = 30000):
@@ -253,7 +253,7 @@ class PlaywrightCollector:
                     return download
             return None
         except Exception as e:
-            logger.error(f"❌ 等待下载失败: {e}")
+            logger.error(f"[FAIL] 等待下载失败: {e}")
             return None
     
     def __enter__(self):

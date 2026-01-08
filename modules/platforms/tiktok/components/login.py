@@ -347,7 +347,7 @@ class TiktokLogin(LoginComponent):
             else:
                 try:
                     tip = "之前验证码错误，请重新输入" if last_error else "需要输入TikTok双重验证验证码"
-                    print(f"🔐 {tip}（留空直接取消并返回）")
+                    print(f"[LOCK] {tip}（留空直接取消并返回）")
                     otp = input("请输入TikTok二次验证码: ").strip()
                 except Exception:
                     otp = ""

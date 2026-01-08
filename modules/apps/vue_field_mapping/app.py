@@ -138,35 +138,35 @@ class VueFieldMappingApp(BaseApplication):
     
     def run(self) -> None:
         """运行应用"""
-        logger.info(f"🚀 启动 {self.name} v{self.version}")
+        logger.info(f"[START] 启动 {self.name} v{self.version}")
         
         # 健康检查
         health = self.health_check()
         if health["status"] == "unhealthy":
-            logger.error(f"❌ 应用不健康: {health.get('error', '未知错误')}")
+            logger.error(f"[FAIL] 应用不健康: {health.get('error', '未知错误')}")
             return
         
         # 显示依赖状态
         dependencies = health["dependencies"]
-        logger.info("📋 依赖检查:")
+        logger.info("[LIST] 依赖检查:")
         for dep, status in dependencies.items():
-            status_icon = "✅" if status else "❌"
+            status_icon = "[OK]" if status else "[FAIL]"
             logger.info(f"   {status_icon} {dep}")
         
         # 检查关键依赖
         if not dependencies.get("fastapi") or not dependencies.get("uvicorn"):
-            logger.error("❌ 缺少Python依赖，请运行: pip install fastapi uvicorn")
+            logger.error("[FAIL] 缺少Python依赖，请运行: pip install fastapi uvicorn")
             return
         
         if not dependencies.get("nodejs") or not dependencies.get("npm"):
-            logger.error("❌ 无法检测到Node.js依赖")
+            logger.error("[FAIL] 无法检测到Node.js依赖")
             logger.info("请尝试以下解决方案:")
             logger.info("  1. 如果刚安装Node.js，请重启VSCode/终端")
             logger.info("  2. 在新的PowerShell窗口中运行: node --version")
             logger.info("  3. 如果命令有效，请关闭VSCode并重新打开")
             logger.info("  4. 或者使用独立终端运行此程序")
             logger.info("")
-            logger.info("💡 快速验证: 打开新的PowerShell窗口，运行:")
+            logger.info("[TIP] 快速验证: 打开新的PowerShell窗口，运行:")
             logger.info("   node --version")
             logger.info("   npm --version")
             return
@@ -181,7 +181,7 @@ class VueFieldMappingApp(BaseApplication):
                 
                 if choice == "0":
                     self._stop_services()
-                    logger.info("👋 退出Vue字段映射审核系统")
+                    logger.info("[HI] 退出Vue字段映射审核系统")
                     break
                 elif choice == "1":
                     self._start_backend()
@@ -194,43 +194,43 @@ class VueFieldMappingApp(BaseApplication):
                 elif choice == "5":
                     self._show_menu()
                 else:
-                    logger.warning("❌ 无效选择，请重新输入")
+                    logger.warning("[FAIL] 无效选择，请重新输入")
                     
             except KeyboardInterrupt:
-                logger.info("\n⏹️ 用户中断，正在停止服务...")
+                logger.info("\n[STOP] 用户中断，正在停止服务...")
                 self._stop_services()
                 break
             except Exception as e:
-                logger.error(f"❌ 操作失败: {e}")
+                logger.error(f"[FAIL] 操作失败: {e}")
     
     def _show_menu(self) -> None:
         """显示菜单"""
         print("\n" + "="*60)
-        print(f"🎯 {self.name} v{self.version}")
+        print(f"[TARGET] {self.name} v{self.version}")
         print("="*60)
-        print("📋 功能:")
-        print("   ✅ Vue.js现代化界面（无死循环问题）")
-        print("   ✅ FastAPI高性能后端")
-        print("   ✅ 智能字段映射")
-        print("   ✅ 数据预览和入库")
+        print("[LIST] 功能:")
+        print("   [OK] Vue.js现代化界面（无死循环问题）")
+        print("   [OK] FastAPI高性能后端")
+        print("   [OK] 智能字段映射")
+        print("   [OK] 数据预览和入库")
         print("="*60)
-        print("🔧 操作选项:")
-        print("  1. 🚀 启动后端API服务")
-        print("  2. 🎨 启动前端界面")
-        print("  3. 🌟 启动完整系统")
-        print("  4. 📊 查看服务状态")
-        print("  5. 📋 显示菜单")
-        print("  0. ❌ 退出")
+        print("[TOOL] 操作选项:")
+        print("  1. [START] 启动后端API服务")
+        print("  2. [ART] 启动前端界面")
+        print("  3. [STAR] 启动完整系统")
+        print("  4. [DATA] 查看服务状态")
+        print("  5. [LIST] 显示菜单")
+        print("  0. [FAIL] 退出")
         print("="*60)
     
     def _start_backend(self) -> None:
         """启动后端服务"""
         if self.backend_process and self.backend_process.poll() is None:
-            logger.info("✅ 后端服务已在运行")
+            logger.info("[OK] 后端服务已在运行")
             return
         
         try:
-            logger.info(f"🚀 启动后端API服务 (端口 {self.backend_port})...")
+            logger.info(f"[START] 启动后端API服务 (端口 {self.backend_port})...")
             
             # 启动FastAPI服务
             self.backend_process = subprocess.Popen([
@@ -245,21 +245,21 @@ class VueFieldMappingApp(BaseApplication):
             time.sleep(3)
             
             if self.backend_process.poll() is None:
-                logger.info("✅ 后端服务启动成功")
-                logger.info(f"📡 API地址: http://localhost:{self.backend_port}")
-                logger.info(f"📚 API文档: http://localhost:{self.backend_port}/docs")
+                logger.info("[OK] 后端服务启动成功")
+                logger.info(f"[SIGNAL] API地址: http://localhost:{self.backend_port}")
+                logger.info(f"[DOCS] API文档: http://localhost:{self.backend_port}/docs")
             else:
-                logger.error("❌ 后端服务启动失败")
+                logger.error("[FAIL] 后端服务启动失败")
                 
         except Exception as e:
-            logger.error(f"❌ 启动后端服务失败: {e}")
+            logger.error(f"[FAIL] 启动后端服务失败: {e}")
     
     def _start_frontend(self) -> None:
         """启动前端服务"""
         try:
             # 统一入口：不再启动模块内置前端，直接跳转到主前端的字段映射页面
             target_url = 'http://localhost:5173/#/field-mapping'
-            logger.info("🔗 统一入口已启用：优先检测并打开主前端的字段映射页面")
+            logger.info("[LINK] 统一入口已启用：优先检测并打开主前端的字段映射页面")
 
             # 检测5173端口是否有服务在跑
             import socket
@@ -278,22 +278,22 @@ class VueFieldMappingApp(BaseApplication):
                     pass
 
             if not running:
-                logger.info("⚙️ 检测到主前端未运行，尝试在 frontend/ 下启动 npm run dev ...")
+                logger.info("[GEAR] 检测到主前端未运行，尝试在 frontend/ 下启动 npm run dev ...")
                 try:
                     subprocess.Popen('npm run dev', cwd=Path('frontend'), shell=True)
                     time.sleep(3)
                 except Exception as ee:
-                    logger.warning(f"⚠️ 启动主前端失败: {ee}")
+                    logger.warning(f"[WARN] 启动主前端失败: {ee}")
 
             webbrowser.open(target_url)
-            logger.info(f"🌐 已打开: {target_url}")
-            logger.info("ℹ️ 如需独立调试模块前端，可手动进入 modules/apps/vue_field_mapping/frontend 运行 npm run dev")
+            logger.info(f"[WEB] 已打开: {target_url}")
+            logger.info("[i] 如需独立调试模块前端，可手动进入 modules/apps/vue_field_mapping/frontend 运行 npm run dev")
         except Exception as e:
-            logger.warning(f"⚠️ 无法打开主前端: {e}")
+            logger.warning(f"[WARN] 无法打开主前端: {e}")
             # 兜底：如果主前端未运行，仍尝试启动模块内置前端
             try:
                 if not self.frontend_dir.exists():
-                    logger.error("❌ 前端目录不存在，请先初始化前端")
+                    logger.error("[FAIL] 前端目录不存在，请先初始化前端")
                     return
                 node_modules = self.frontend_dir / "node_modules"
                 if not node_modules.exists():
@@ -302,13 +302,13 @@ class VueFieldMappingApp(BaseApplication):
                 time.sleep(5)
                 if self.frontend_process.poll() is None:
                     webbrowser.open(f'http://localhost:{self.frontend_port}')
-                    logger.info(f"🌐 已启动模块内置前端: http://localhost:{self.frontend_port}")
+                    logger.info(f"[WEB] 已启动模块内置前端: http://localhost:{self.frontend_port}")
             except Exception as ee:
-                logger.error(f"❌ 启动模块内置前端失败: {ee}")
+                logger.error(f"[FAIL] 启动模块内置前端失败: {ee}")
     
     def _start_full_system(self) -> None:
         """启动完整系统"""
-        logger.info("🌟 启动完整系统...")
+        logger.info("[STAR] 启动完整系统...")
         
         # 启动后端
         self._start_backend()
@@ -319,8 +319,8 @@ class VueFieldMappingApp(BaseApplication):
         # 启动前端
         self._start_frontend()
         
-        logger.info("🎉 完整系统启动完成！")
-        logger.info("📝 使用说明:")
+        logger.info("[DONE] 完整系统启动完成！")
+        logger.info("[NOTE] 使用说明:")
         logger.info(f"   - 前端界面: http://localhost:{self.frontend_port}")
         logger.info(f"   - 后端API: http://localhost:{self.backend_port}")
         logger.info(f"   - API文档: http://localhost:{self.backend_port}/docs")
@@ -328,43 +328,43 @@ class VueFieldMappingApp(BaseApplication):
     
     def _show_status(self) -> None:
         """显示服务状态"""
-        print("\n📊 服务状态:")
+        print("\n[DATA] 服务状态:")
         print("-" * 40)
         
         # 后端状态
         if self.backend_process and self.backend_process.poll() is None:
-            print(f"✅ 后端服务: 运行中 (端口 {self.backend_port})")
+            print(f"[OK] 后端服务: 运行中 (端口 {self.backend_port})")
         else:
-            print(f"❌ 后端服务: 未运行")
+            print(f"[FAIL] 后端服务: 未运行")
         
         # 前端状态
         if self.frontend_process and self.frontend_process.poll() is None:
-            print(f"✅ 前端服务: 运行中 (端口 {self.frontend_port})")
+            print(f"[OK] 前端服务: 运行中 (端口 {self.frontend_port})")
         else:
-            print(f"❌ 前端服务: 未运行")
+            print(f"[FAIL] 前端服务: 未运行")
         
         # 健康检查
         health = self.health_check()
-        print(f"📋 健康状态: {health['status']}")
+        print(f"[LIST] 健康状态: {health['status']}")
         
         # 依赖状态
         dependencies = health["dependencies"]
-        print("📦 依赖状态:")
+        print("[PKG] 依赖状态:")
         for dep, status in dependencies.items():
-            status_icon = "✅" if status else "❌"
+            status_icon = "[OK]" if status else "[FAIL]"
             print(f"   {status_icon} {dep}")
     
     def _stop_services(self) -> None:
         """停止服务"""
-        logger.info("⏹️ 正在停止服务...")
+        logger.info("[STOP] 正在停止服务...")
         
         if self.frontend_process and self.frontend_process.poll() is None:
             self.frontend_process.terminate()
-            logger.info("✅ 前端服务已停止")
+            logger.info("[OK] 前端服务已停止")
         
         if self.backend_process and self.backend_process.poll() is None:
             self.backend_process.terminate()
-            logger.info("✅ 后端服务已停止")
+            logger.info("[OK] 后端服务已停止")
     
     def get_app_info(self) -> Dict[str, Any]:
         """获取应用信息"""

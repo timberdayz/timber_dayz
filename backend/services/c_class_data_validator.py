@@ -26,11 +26,11 @@ from decimal import Decimal
 
 from modules.core.db import (
     FactOrder,
-    FactProductMetric,  # ⚠️ 保留导入用于兼容性，但不再使用
+    FactProductMetric,  # [WARN] 保留导入用于兼容性，但不再使用
     FieldMappingDictionary
 )
 from modules.core.logger import get_logger
-from backend.services.platform_table_manager import get_platform_table_manager  # ⭐ v4.17.1新增
+from backend.services.platform_table_manager import get_platform_table_manager  # [*] v4.17.1新增
 
 logger = get_logger(__name__)
 
@@ -221,7 +221,7 @@ class CClassDataValidator:
         """
         检查产品数据完整性（v4.17.1重构：查询B类表）
         
-        ⭐ v4.17.1修复：从查询已废弃的FactProductMetric表改为查询b_class.fact_*表
+        [*] v4.17.1修复：从查询已废弃的FactProductMetric表改为查询b_class.fact_*表
         """
         result = {
             "complete": False,
@@ -231,7 +231,7 @@ class CClassDataValidator:
         }
         
         try:
-            # ⭐ v4.17.1修复：使用PlatformTableManager获取B类表名
+            # [*] v4.17.1修复：使用PlatformTableManager获取B类表名
             table_manager = get_platform_table_manager(self.db)
             
             # 获取产品数据表名（尝试多个粒度）
@@ -288,7 +288,7 @@ class CClassDataValidator:
                 # header_columns是JSONB数组，包含字段名列表（可能是中文）
                 available_fields = set(header_columns) if isinstance(header_columns, list) else set()
                 
-                # ⭐ 注意：核心字段是英文的，但header_columns中可能是中文的
+                # [*] 注意：核心字段是英文的，但header_columns中可能是中文的
                 # 简化处理：如果header_columns不为空，认为有字段映射，标记所有核心字段为存在
                 # 更严格的检查需要字段映射表，这里先简化
                 if available_fields:
@@ -331,7 +331,7 @@ class CClassDataValidator:
         """
         检查库存数据完整性（v4.17.1重构：查询B类表）
         
-        ⭐ v4.17.1修复：从查询已废弃的FactProductMetric表改为查询b_class.fact_*表
+        [*] v4.17.1修复：从查询已废弃的FactProductMetric表改为查询b_class.fact_*表
         """
         result = {
             "complete": False,
@@ -341,7 +341,7 @@ class CClassDataValidator:
         }
         
         try:
-            # ⭐ v4.17.1修复：使用PlatformTableManager获取B类表名
+            # [*] v4.17.1修复：使用PlatformTableManager获取B类表名
             table_manager = get_platform_table_manager(self.db)
             
             # 获取库存数据表名（优先inventory域，如果没有则尝试products域）
@@ -432,7 +432,7 @@ class CClassDataValidator:
                 # header_columns是JSONB数组，包含字段名列表（可能是中文）
                 available_fields = set(header_columns) if isinstance(header_columns, list) else set()
                 
-                # ⭐ 注意：核心字段是英文的，但header_columns中可能是中文的
+                # [*] 注意：核心字段是英文的，但header_columns中可能是中文的
                 # 简化处理：如果header_columns不为空，认为有字段映射，标记所有核心字段为存在
                 if available_fields:
                     result["present_fields"].extend([f"inventory.{field}" for field in required_fields])

@@ -261,7 +261,7 @@ if __name__ == "__main__":
     print("\n路径解析测试:")
     for path in test_paths:
         result = GranularityParser.parse_from_path(path)
-        print(f"  {path:50s} → {result or 'None'}")
+        print(f"  {path:50s} -> {result or 'None'}")
     
     # 测试文件名解析
     test_filenames = [
@@ -274,7 +274,7 @@ if __name__ == "__main__":
     print("\n文件名解析测试:")
     for filename in test_filenames:
         result = GranularityParser.parse_from_filename(filename)
-        print(f"  {filename:50s} → {result or 'None'}")
+        print(f"  {filename:50s} -> {result or 'None'}")
     
     # 测试日期范围推断
     test_date_ranges = [
@@ -291,7 +291,7 @@ if __name__ == "__main__":
             __import__("datetime").datetime.strptime(end, "%Y-%m-%d") -
             __import__("datetime").datetime.strptime(start, "%Y-%m-%d")
         ).days
-        print(f"  {start} ~ {end} ({delta:2d}天) → {result or 'None'}")
+        print(f"  {start} ~ {end} ({delta:2d}天) -> {result or 'None'}")
     
     # 测试综合解析
     print("\n综合解析测试:")
@@ -304,7 +304,7 @@ if __name__ == "__main__":
     
     for case in test_cases:
         result = parse_granularity(**case)
-        print(f"  {str(case):60s} → {result}")
+        print(f"  {str(case):60s} -> {result}")
     
     print("\n" + "=" * 60)
 

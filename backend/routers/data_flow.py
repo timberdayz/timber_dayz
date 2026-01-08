@@ -4,7 +4,7 @@
 数据流转追踪API（v4.11.5新增）
 
 功能：
-1. 追踪任务数据流转（Raw → Fact → MV）
+1. 追踪任务数据流转（Raw -> Fact -> MV）
 2. 按文件追踪数据流转
 3. 识别数据丢失位置
 """
@@ -432,17 +432,17 @@ async def trace_file_data_flow(
             "flow_status": {
                 "raw_to_staging": {
                     "success": raw_to_staging_success,
-                    "message": f"原始数据 → Staging: {staging_count}/{raw_count} ({round((staging_count / raw_count * 100) if raw_count > 0 else 0, 2)}%)",
+                    "message": f"原始数据 -> Staging: {staging_count}/{raw_count} ({round((staging_count / raw_count * 100) if raw_count > 0 else 0, 2)}%)",
                     "lost_rows": raw_to_staging_lost
                 },
                 "staging_to_fact": {
                     "success": staging_to_fact_success,
-                    "message": f"Staging → Fact: {fact_count}/{staging_count} ({round((fact_count / staging_count * 100) if staging_count > 0 else 0, 2)}%)",
+                    "message": f"Staging -> Fact: {fact_count}/{staging_count} ({round((fact_count / staging_count * 100) if staging_count > 0 else 0, 2)}%)",
                     "lost_rows": staging_to_fact_lost
                 },
                 "overall": {
                     "success": overall_success,
-                    "message": f"原始数据 → Fact: {fact_count}/{raw_count} ({round(overall_success_rate, 2)}%)",
+                    "message": f"原始数据 -> Fact: {fact_count}/{raw_count} ({round(overall_success_rate, 2)}%)",
                     "success_rate": round(overall_success_rate, 2)
                 }
             }

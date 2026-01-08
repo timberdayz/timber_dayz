@@ -120,9 +120,9 @@ class MultiRegionRouter:
         """配置地区代理"""
         if region_code in self.regions:
             self.regions[region_code].proxy_config = proxy_config
-            logger.info(f"✅ 已配置{self.regions[region_code].country_name}代理")
+            logger.info(f"[OK] 已配置{self.regions[region_code].country_name}代理")
         else:
-            logger.error(f"❌ 未知地区代码: {region_code}")
+            logger.error(f"[FAIL] 未知地区代码: {region_code}")
     
     def get_platform_routing(self, platform: str) -> Optional[PlatformRouting]:
         """获取平台路由配置"""
@@ -195,7 +195,7 @@ class MultiRegionRouter:
         """测试所有地区连通性"""
         results = {}
         
-        logger.info("🧪 开始测试所有地区连通性...")
+        logger.info("[TEST] 开始测试所有地区连通性...")
         
         # 并发测试所有地区
         future_to_region = {}
@@ -211,9 +211,9 @@ class MultiRegionRouter:
                 results[region_code] = result
                 
                 if result["success"]:
-                    logger.success(f"✅ {self.regions[region_code].country_name}: {result['ip']} ({result['response_time']}秒)")
+                    logger.success(f"[OK] {self.regions[region_code].country_name}: {result['ip']} ({result['response_time']}秒)")
                 else:
-                    logger.error(f"❌ {self.regions[region_code].country_name}: {result['error']}")
+                    logger.error(f"[FAIL] {self.regions[region_code].country_name}: {result['error']}")
                     
             except Exception as e:
                 results[region_code] = {
@@ -221,7 +221,7 @@ class MultiRegionRouter:
                     "error": f"测试超时: {e}",
                     "response_time": 0
                 }
-                logger.error(f"❌ {self.regions[region_code].country_name}: 测试超时")
+                logger.error(f"[FAIL] {self.regions[region_code].country_name}: 测试超时")
         
         return results
     
@@ -279,7 +279,7 @@ class MultiRegionRouter:
         """批量创建平台会话"""
         sessions = {}
         
-        logger.info(f"🚀 批量创建 {len(platforms)} 个平台会话...")
+        logger.info(f"[START] 批量创建 {len(platforms)} 个平台会话...")
         
         # 并发创建会话
         future_to_platform = {}
@@ -296,12 +296,12 @@ class MultiRegionRouter:
                     sessions[platform] = config
                     region_name = config["region_name"]
                     current_ip = config.get("current_ip", "unknown")
-                    logger.success(f"✅ {platform} → {region_name} ({current_ip})")
+                    logger.success(f"[OK] {platform} -> {region_name} ({current_ip})")
                 else:
-                    logger.error(f"❌ {platform}: {config['error']}")
+                    logger.error(f"[FAIL] {platform}: {config['error']}")
                     
             except Exception as e:
-                logger.error(f"❌ {platform}: 会话创建超时 {e}")
+                logger.error(f"[FAIL] {platform}: 会话创建超时 {e}")
         
         return sessions
     
@@ -340,10 +340,10 @@ class MultiRegionRouter:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
             
-            logger.success(f"✅ 配置已保存: {self.config_path}")
+            logger.success(f"[OK] 配置已保存: {self.config_path}")
             
         except Exception as e:
-            logger.error(f"❌ 保存配置失败: {e}")
+            logger.error(f"[FAIL] 保存配置失败: {e}")
     
     def _load_config(self):
         """从文件加载配置"""
@@ -365,7 +365,7 @@ class MultiRegionRouter:
                         region_data["country_code"] = code
                         self.regions[code] = RegionConfig(**region_data)
                     else:
-                        logger.warning(f"⚠️ 跳过无效地区配置: {code}")
+                        logger.warning(f"[WARN] 跳过无效地区配置: {code}")
             
             # 加载平台路由
             if "platform_routing" in config_data:
@@ -379,25 +379,25 @@ class MultiRegionRouter:
                             routing_data["test_endpoints"] = []
                         self.platform_routing[platform] = PlatformRouting(**routing_data)
                     else:
-                        logger.warning(f"⚠️ 跳过无效平台配置: {platform}")
+                        logger.warning(f"[WARN] 跳过无效平台配置: {platform}")
             
-            logger.success(f"✅ 配置已加载: {self.config_path}")
+            logger.success(f"[OK] 配置已加载: {self.config_path}")
             
         except Exception as e:
-            logger.error(f"❌ 加载配置失败: {e}")
+            logger.error(f"[FAIL] 加载配置失败: {e}")
 
     def get_playwright_proxy_config(self, platform: str) -> Optional[Dict[str, Any]]:
         """获取指定平台的Playwright代理配置"""
         # 找到平台对应的地区
         platform_routing = self.platform_routing.get(platform)
         if not platform_routing:
-            logger.warning(f"⚠️ 未找到平台 {platform} 的路由配置")
+            logger.warning(f"[WARN] 未找到平台 {platform} 的路由配置")
             return None
         
         region_code = platform_routing.required_region
         region = self.regions.get(region_code)
         if not region or not region.proxy_config:
-            logger.warning(f"⚠️ 地区 {region_code} 无代理配置")
+            logger.warning(f"[WARN] 地区 {region_code} 无代理配置")
             return None
         
         proxy_config = region.proxy_config
@@ -405,7 +405,7 @@ class MultiRegionRouter:
         
         # 处理中国代理模式（新策略：使用代理而非VPN绕过）
         if region_code == "CN":
-            logger.info(f"🇨🇳 使用中国代理模式访问 {platform}")
+            logger.info(f"[CN] 使用中国代理模式访问 {platform}")
             # 中国地区也使用标准的HTTP/SOCKS5代理处理逻辑
         
         # 处理HTTP/SOCKS5代理（包括中国地区）
@@ -416,7 +416,7 @@ class MultiRegionRouter:
             password = proxy_config.get("password")
             
             if not host or not port:
-                logger.warning(f"⚠️ 代理配置不完整: {region_code}")
+                logger.warning(f"[WARN] 代理配置不完整: {region_code}")
                 return None
             
             playwright_proxy = {
@@ -427,16 +427,16 @@ class MultiRegionRouter:
                 playwright_proxy["username"] = username
                 playwright_proxy["password"] = password
             
-            logger.success(f"✅ 已配置 {proxy_type.upper()} 代理: {host}:{port}")
+            logger.success(f"[OK] 已配置 {proxy_type.upper()} 代理: {host}:{port}")
             return playwright_proxy
         
         # 直连模式
         elif proxy_type == "direct":
-            logger.info(f"📡 使用直连模式访问 {platform}")
+            logger.info(f"[SIGNAL] 使用直连模式访问 {platform}")
             return None
         
         else:
-            logger.warning(f"⚠️ 不支持的代理类型: {proxy_type}")
+            logger.warning(f"[WARN] 不支持的代理类型: {proxy_type}")
             return None
 
 
@@ -444,7 +444,7 @@ def demo_multi_region_setup():
     """演示多地区配置"""
     router = MultiRegionRouter()
     
-    print("🌐 多国IP路由管理器演示")
+    print("[WEB] 多国IP路由管理器演示")
     print("=" * 50)
     
     # 示例：配置新加坡代理
@@ -468,18 +468,18 @@ def demo_multi_region_setup():
     # 测试所有地区
     results = router.test_all_regions()
     
-    print(f"\n📊 测试结果:")
+    print(f"\n[DATA] 测试结果:")
     for region_code, result in results.items():
-        status = "✅" if result["success"] else "❌"
+        status = "[OK]" if result["success"] else "[FAIL]"
         print(f"{status} {router.regions[region_code].country_name}: {result}")
     
     # 批量创建会话
     platforms = ["shopee_sg", "shopee_id", "miaoshou_erp"]
     sessions = router.batch_create_sessions(platforms)
     
-    print(f"\n🔗 平台会话:")
+    print(f"\n[LINK] 平台会话:")
     for platform, config in sessions.items():
-        print(f"📱 {platform} → {config['region_name']} ({config.get('current_ip')})")
+        print(f"[PHONE] {platform} -> {config['region_name']} ({config.get('current_ip')})")
     
     # 保存配置
     router.save_config()

@@ -33,7 +33,7 @@ class RecipeOptimizer:
             
             # 加载原始配方
             original_recipe = json.loads(recipe_path.read_text(encoding='utf-8'))
-            logger.info(f"📖 加载原始配方: {len(original_recipe.get('steps', []))} 个步骤")
+            logger.info(f"[BOOK] 加载原始配方: {len(original_recipe.get('steps', []))} 个步骤")
             
             # 优化步骤
             optimized_steps = self._optimize_steps(original_recipe.get('steps', []))
@@ -55,7 +55,7 @@ class RecipeOptimizer:
                 encoding='utf-8'
             )
             
-            logger.info(f"✅ 配方优化完成: {optimized_path}")
+            logger.info(f"[OK] 配方优化完成: {optimized_path}")
             logger.info(f"   原始步骤: {len(original_recipe.get('steps', []))}")
             logger.info(f"   优化步骤: {len(optimized_steps)}")
             logger.info(f"   移除重复: {len(original_recipe.get('steps', [])) - len(optimized_steps)}")
@@ -204,7 +204,7 @@ class RecipeOptimizer:
                 encoding='utf-8'
             )
             
-            logger.info(f"✅ 简化配方创建完成: {simplified_path}")
+            logger.info(f"[OK] 简化配方创建完成: {simplified_path}")
             logger.info(f"   简化为 {len(simplified_recipe['steps'])} 个核心步骤")
             
             return True

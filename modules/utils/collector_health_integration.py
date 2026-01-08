@@ -5,11 +5,11 @@
 为所有平台采集器提供统一的账号健康检查和异常处理机制
 
 功能特性：
-- 🔍 统一的健康检查接口
-- 🚨 自动异常账号处理
-- 📊 健康状态统计和报告
-- 🔄 多平台支持（Shopee、Amazon、妙手ERP等）
-- 💾 健康状态持久化存储
+- [SEARCH] 统一的健康检查接口
+- [ALERT] 自动异常账号处理
+- [DATA] 健康状态统计和报告
+- [RETRY] 多平台支持（Shopee、Amazon、妙手ERP等）
+- [SAVE] 健康状态持久化存储
 
 版本：v1.0.0
 作者：跨境电商ERP系统
@@ -69,11 +69,11 @@ class CollectorHealthIntegration:
         try:
             # 1. 检查账号是否已被标记为禁用
             if self._is_account_disabled(account_id):
-                logger.warning(f"🚫 账号 {account_id} 已被标记为禁用，跳过操作")
+                logger.warning(f"[NO] 账号 {account_id} 已被标记为禁用，跳过操作")
                 return False
             
             # 2. 执行健康检查
-            logger.info(f"🔍 开始健康检查 - 账号: {account_id}, 操作: {operation_name}")
+            logger.info(f"[SEARCH] 开始健康检查 - 账号: {account_id}, 操作: {operation_name}")
             status, message, extra_data = self.health_checker.check_account_health(page, account)
             
             # 3. 记录健康检查日志
@@ -93,7 +93,7 @@ class CollectorHealthIntegration:
             return should_continue
             
         except Exception as e:
-            logger.error(f"❌ 健康检查过程异常 - 账号: {account_id}, 错误: {e}")
+            logger.error(f"[FAIL] 健康检查过程异常 - 账号: {account_id}, 错误: {e}")
             return False
     
     def batch_check_accounts(self, accounts: List[Dict], operation_name: str = "批量检查") -> Dict[str, bool]:
@@ -111,7 +111,7 @@ class CollectorHealthIntegration:
         healthy_count = 0
         total_count = len(accounts)
         
-        logger.info(f"🔍 开始批量健康检查 - 总计 {total_count} 个账号")
+        logger.info(f"[SEARCH] 开始批量健康检查 - 总计 {total_count} 个账号")
         
         for i, account in enumerate(accounts, 1):
             account_id = account.get('username', f'Account_{i}')
@@ -124,15 +124,15 @@ class CollectorHealthIntegration:
                 
                 if is_healthy:
                     healthy_count += 1
-                    logger.info(f"✅ [{i}/{total_count}] {account_id} - 健康")
+                    logger.info(f"[OK] [{i}/{total_count}] {account_id} - 健康")
                 else:
-                    logger.warning(f"❌ [{i}/{total_count}] {account_id} - 已禁用")
+                    logger.warning(f"[FAIL] [{i}/{total_count}] {account_id} - 已禁用")
                     
             except Exception as e:
-                logger.error(f"❌ [{i}/{total_count}] {account_id} - 检查失败: {e}")
+                logger.error(f"[FAIL] [{i}/{total_count}] {account_id} - 检查失败: {e}")
                 results[account_id] = False
         
-        logger.info(f"📊 批量检查完成 - 健康: {healthy_count}/{total_count}")
+        logger.info(f"[DATA] 批量检查完成 - 健康: {healthy_count}/{total_count}")
         return results
     
     def get_health_statistics(self, days: int = 7) -> Dict[str, Any]:
@@ -184,7 +184,7 @@ class CollectorHealthIntegration:
             }
             
         except Exception as e:
-            logger.error(f"❌ 获取健康统计失败: {e}")
+            logger.error(f"[FAIL] 获取健康统计失败: {e}")
             return {}
     
     def _is_account_disabled(self, account_id: str) -> bool:
@@ -202,10 +202,10 @@ class CollectorHealthIntegration:
             }
             
             self._save_disabled_accounts()
-            logger.warning(f"🚫 账号 {account_id} 已添加到禁用列表")
+            logger.warning(f"[NO] 账号 {account_id} 已添加到禁用列表")
             
         except Exception as e:
-            logger.error(f"❌ 添加禁用账号失败: {e}")
+            logger.error(f"[FAIL] 添加禁用账号失败: {e}")
     
     def _load_disabled_accounts(self) -> Dict[str, Any]:
         """加载已禁用账号列表"""
@@ -215,7 +215,7 @@ class CollectorHealthIntegration:
                     return json.load(f)
             return {}
         except Exception as e:
-            logger.error(f"❌ 加载禁用账号列表失败: {e}")
+            logger.error(f"[FAIL] 加载禁用账号列表失败: {e}")
             return {}
     
     def _save_disabled_accounts(self):
@@ -224,7 +224,7 @@ class CollectorHealthIntegration:
             with open(self.disabled_accounts_file, 'w', encoding='utf-8') as f:
                 json.dump(self.disabled_accounts, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error(f"❌ 保存禁用账号列表失败: {e}")
+            logger.error(f"[FAIL] 保存禁用账号列表失败: {e}")
     
     def _log_health_check(self, account_id: str, status: AccountStatus, message: str, extra_data: Dict, operation: str):
         """记录健康检查日志"""
@@ -253,7 +253,7 @@ class CollectorHealthIntegration:
                 json.dump(logs, f, ensure_ascii=False, indent=2)
                 
         except Exception as e:
-            logger.error(f"❌ 记录健康检查日志失败: {e}")
+            logger.error(f"[FAIL] 记录健康检查日志失败: {e}")
     
     def _load_health_logs(self) -> List[Dict]:
         """加载健康检查日志"""
@@ -263,7 +263,7 @@ class CollectorHealthIntegration:
                     return json.load(f)
             return []
         except Exception as e:
-            logger.error(f"❌ 加载健康检查日志失败: {e}")
+            logger.error(f"[FAIL] 加载健康检查日志失败: {e}")
             return []
     
     def enable_account(self, account_id: str) -> bool:
@@ -272,13 +272,13 @@ class CollectorHealthIntegration:
             if account_id in self.disabled_accounts:
                 del self.disabled_accounts[account_id]
                 self._save_disabled_accounts()
-                logger.info(f"✅ 账号 {account_id} 已重新启用")
+                logger.info(f"[OK] 账号 {account_id} 已重新启用")
                 return True
             else:
-                logger.warning(f"⚠️ 账号 {account_id} 不在禁用列表中")
+                logger.warning(f"[WARN] 账号 {account_id} 不在禁用列表中")
                 return False
         except Exception as e:
-            logger.error(f"❌ 启用账号失败: {e}")
+            logger.error(f"[FAIL] 启用账号失败: {e}")
             return False
     
     def get_disabled_accounts(self) -> Dict[str, Any]:

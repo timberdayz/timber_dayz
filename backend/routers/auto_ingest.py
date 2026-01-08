@@ -147,7 +147,7 @@ async def get_pending_files(
             limit=limit
         )
         
-        # ⭐ v4.11.5新增：按数据域+粒度分组统计
+        # [*] v4.11.5新增：按数据域+粒度分组统计
         if group_by_batch:
             from collections import defaultdict
             batches = defaultdict(lambda: {'domain': '', 'granularity': '', 'file_count': 0, 'files': []})
@@ -218,7 +218,7 @@ async def auto_ingest_single_file(
     """
     try:
         orchestrator = get_auto_ingest_orchestrator(db)
-        # ⭐ v4.11.6修复：单文件同步时生成task_id用于追踪
+        # [*] v4.11.6修复：单文件同步时生成task_id用于追踪
         import uuid
         task_id = f"single_file_{request.file_id}_{uuid.uuid4().hex[:8]}"
         
@@ -226,10 +226,10 @@ async def auto_ingest_single_file(
             file_id=request.file_id,
             only_with_template=request.only_with_template,
             allow_quarantine=request.allow_quarantine,
-            task_id=task_id  # ⭐ v4.11.6修复：传递task_id用于追踪
+            task_id=task_id  # [*] v4.11.6修复：传递task_id用于追踪
         )
         
-        # ⭐ v4.11.6修复：在返回结果中包含task_id，方便前端追踪
+        # [*] v4.11.6修复：在返回结果中包含task_id，方便前端追踪
         if result and isinstance(result, dict):
             result['task_id'] = task_id
         
@@ -353,7 +353,7 @@ async def get_auto_ingest_progress(task_id: str):
         # 计算百分比
         percentage = (processed / total * 100) if total > 0 else 0
         
-        # 🆕 v4.11.5增强：添加当前文件、处理阶段、预计时间、错误详情
+        # [NEW] v4.11.5增强：添加当前文件、处理阶段、预计时间、错误详情
         current_file = progress.get('current_file', '')
         current_stage = progress.get('current_stage', '')
         
@@ -376,7 +376,7 @@ async def get_auto_ingest_progress(task_id: str):
         errors = progress.get('errors', [])
         warnings = progress.get('warnings', [])
         
-        # ⭐ v4.11.5新增：获取数据质量检查结果
+        # [*] v4.11.5新增：获取数据质量检查结果
         quality_check = progress.get('quality_check', None)
         
         data = {
@@ -391,7 +391,7 @@ async def get_auto_ingest_progress(task_id: str):
                 'status': status,
                 'percentage': round(percentage, 1),
                 'files': progress.get('files', []),
-                # 🆕 v4.11.5增强字段
+                # [NEW] v4.11.5增强字段
                 'current_file': current_file,
                 'current_stage': current_stage,
                 'estimated_time_remaining': estimated_time_remaining,
@@ -399,7 +399,7 @@ async def get_auto_ingest_progress(task_id: str):
                 'warnings': warnings[-10:] if warnings else [],  # 最近10个警告
                 'start_time': start_time_str,
                 'elapsed_seconds': round((datetime.now() - datetime.fromisoformat(start_time_str)).total_seconds(), 1) if start_time_str else None,
-                'quality_check': quality_check  # ⭐ v4.11.5新增：数据质量检查结果
+                'quality_check': quality_check  # [*] v4.11.5新增：数据质量检查结果
             }
         
         return success_response(data=data)
@@ -541,7 +541,7 @@ async def get_task_logs(task_id: str, limit: int = Query(50, ge=1, le=200), db: 
                     """), {"file_id": file_id})
                     imported = result.scalar() or 0
                 
-                # 查询隔离数量（⭐ v4.12.1修复：使用catalog_file_id字段）
+                # 查询隔离数量（[*] v4.12.1修复：使用catalog_file_id字段）
                 result = await db.execute(text("""
                     SELECT COUNT(*) FROM data_quarantine WHERE catalog_file_id = :file_id
                 """), {"file_id": file_id})
@@ -648,7 +648,7 @@ async def get_file_logs(file_id: int, limit: int = Query(50, ge=1, le=200), db: 
             """), {"file_id": file_id})
             imported = result.scalar() or 0
         
-        # 查询隔离区数据量（⭐ v4.12.1修复：使用catalog_file_id字段）
+        # 查询隔离区数据量（[*] v4.12.1修复：使用catalog_file_id字段）
         result = await db.execute(text("""
             SELECT COUNT(*) FROM data_quarantine WHERE catalog_file_id = :file_id
         """), {"file_id": file_id})
@@ -739,7 +739,7 @@ async def clear_all_data(
         fact_tables = [
             'fact_orders',
             'fact_order_items',
-            'fact_order_amounts',  # ⭐ v4.18.2：已不再写入新数据，但保留清理逻辑以清理旧数据
+            'fact_order_amounts',  # [*] v4.18.2：已不再写入新数据，但保留清理逻辑以清理旧数据
             'fact_product_metrics',
             'fact_expenses_month',
             'fact_expenses_allocated_day_shop_sku'  # 修正表名
@@ -867,7 +867,7 @@ async def clear_all_data(
             message = f"数据库清理完成，共清理 {total_cleared} 行数据"
             logger.info(f"[DB Cleanup] 数据库清理完成: 共清理 {total_cleared} 行数据")
         
-        # ⭐ 修复：使用标准API响应格式
+        # [*] 修复：使用标准API响应格式
         from backend.utils.api_response import success_response
         return success_response(
             data={

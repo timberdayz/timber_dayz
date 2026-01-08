@@ -4,7 +4,7 @@
 """
 统一登录编排器
 支持妙手ERP、Shopee卖家、TikTok卖家的智能登录流程
-包含：登录环节 → 验证码识别 → 邮箱OTP → SMS用户输入
+包含：登录环节 -> 验证码识别 -> 邮箱OTP -> SMS用户输入
 """
 
 import time
@@ -41,7 +41,7 @@ class LoginOrchestrator:
         self.persistent_manager = None
         if playwright:
             self.persistent_manager = PersistentBrowserManager(playwright)
-            logger.info("✅ 持久化浏览器管理器已启用")
+            logger.info("[OK] 持久化浏览器管理器已启用")
 
         # 平台特定的登录处理器
         self.platform_handlers = {
@@ -76,22 +76,22 @@ class LoginOrchestrator:
         try:
             if platform_key == 'shopee' and not self.platform_handlers['shopee']:
                 self.platform_handlers['shopee'] = ShopeeLoginHandler(self.browser)
-                logger.info("✅ Shopee登录处理器初始化完成")
+                logger.info("[OK] Shopee登录处理器初始化完成")
                 
             elif platform_key == 'miaoshou' and not self.platform_handlers['miaoshou']:
                 # 妙手ERP使用通用处理器
                 self.platform_handlers['miaoshou'] = MiaoshouLoginHandler(self.browser)
-                logger.info("✅ 妙手ERP登录处理器初始化完成")
+                logger.info("[OK] 妙手ERP登录处理器初始化完成")
                 
             elif platform_key == 'tiktok' and not self.platform_handlers['tiktok']:
                 # TikTok使用通用处理器
                 self.platform_handlers['tiktok'] = TikTokLoginHandler(self.browser)
-                logger.info("✅ TikTok登录处理器初始化完成")
+                logger.info("[OK] TikTok登录处理器初始化完成")
                 
             return True
             
         except Exception as e:
-            logger.error(f"❌ 初始化{platform_key}登录处理器失败: {e}")
+            logger.error(f"[FAIL] 初始化{platform_key}登录处理器失败: {e}")
             return False
     
     def _init_verification_handler(self) -> bool:
@@ -99,10 +99,10 @@ class LoginOrchestrator:
         try:
             if not self.verification_handler and self.page:
                 self.verification_handler = SmartVerificationHandlerV2(self.page)
-                logger.info("✅ 验证码处理器初始化完成")
+                logger.info("[OK] 验证码处理器初始化完成")
             return True
         except Exception as e:
-            logger.error(f"❌ 验证码处理器初始化失败: {e}")
+            logger.error(f"[FAIL] 验证码处理器初始化失败: {e}")
             return False
     
     async def orchestrate_login(self, account: Dict[str, Any]) -> Tuple[bool, str, Optional[Page]]:
@@ -124,26 +124,26 @@ class LoginOrchestrator:
 
             if not all([platform, username or account.get('phone', ''), password, login_url]):
                 error_msg = "账号信息不完整，缺少platform/username(或phone)/password/login_url"
-                logger.error(f"❌ {error_msg}")
+                logger.error(f"[FAIL] {error_msg}")
                 return False, error_msg, None
 
             platform_key = self._get_platform_key(platform)
             # TikTok 优先使用 phone 作为登录名
             login_name = account.get('phone') if platform_key == 'tiktok' and account.get('phone') else username
-            logger.info(f"🚀 开始{platform}平台登录流程: {login_name}")
+            logger.info(f"[START] 开始{platform}平台登录流程: {login_name}")
 
             # 2. 创建浏览器上下文和页面（优先使用持久化）
             account_id = account.get('account_id', username)
 
             if self.persistent_manager:
                 # 使用持久化上下文（减少验证码）
-                logger.info(f"🔄 使用持久化浏览器上下文: {platform}/{account_id}")
+                logger.info(f"[RETRY] 使用持久化浏览器上下文: {platform}/{account_id}")
                 self.context = self.persistent_manager.get_or_create_persistent_context(
                     platform, account_id, account
                 )
             else:
                 # 回退到普通上下文
-                logger.info("🔄 使用普通浏览器上下文")
+                logger.info("[RETRY] 使用普通浏览器上下文")
                 self.context = self.browser.new_context(
                     viewport={"width": 1920, "height": 1080},
                     user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -165,12 +165,12 @@ class LoginOrchestrator:
             if not login_success:
                 return False, login_error, None
             
-            logger.info(f"✅ {platform}平台登录成功: {username}")
+            logger.info(f"[OK] {platform}平台登录成功: {username}")
             return True, "登录成功", self.page
             
         except Exception as e:
             error_msg = f"登录编排过程异常: {e}"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"[FAIL] {error_msg}")
             return False, error_msg, None
     
     async def _execute_login_flow(self, platform_key: str, account: Dict, 
@@ -178,7 +178,7 @@ class LoginOrchestrator:
         """执行具体的登录流程"""
         try:
             # 步骤1: 访问登录页面
-            logger.info(f"🌐 访问登录页面: {login_url}")
+            logger.info(f"[WEB] 访问登录页面: {login_url}")
             self.page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
             time.sleep(2)
             
@@ -221,30 +221,30 @@ class LoginOrchestrator:
             verification_type = await self._detect_verification_type()
 
             if verification_type == 'none':
-                logger.info("✅ 无需验证码，登录流程继续")
+                logger.info("[OK] 无需验证码，登录流程继续")
                 return True, "无需验证码"
 
             elif verification_type == 'image_captcha':
-                logger.info("🖼️ 检测到图片验证码")
+                logger.info("[IMG] 检测到图片验证码")
                 return await self._handle_image_captcha()
 
             elif verification_type == 'sms_code':
-                logger.info("📱 检测到SMS验证码")
+                logger.info("[PHONE] 检测到SMS验证码")
                 return await self._handle_sms_verification()
 
             elif verification_type == 'email_otp':
-                logger.info("📧 检测到邮箱OTP")
+                logger.info("[EMAIL] 检测到邮箱OTP")
                 if self.auto_email_otp:
                     return await self._handle_email_otp_auto(account)
                 else:
                     return await self._handle_email_otp_manual(account)
 
             else:
-                logger.warning(f"⚠️ 未知验证码类型: {verification_type}")
+                logger.warning(f"[WARN] 未知验证码类型: {verification_type}")
                 return True, "跳过未知验证码类型"
 
         except Exception as e:
-            logger.error(f"❌ 验证码处理异常: {e}")
+            logger.error(f"[FAIL] 验证码处理异常: {e}")
             return False, f"验证码处理异常: {e}"
 
     async def _detect_verification_type(self) -> str:
@@ -291,7 +291,7 @@ class LoginOrchestrator:
             return 'none'
 
         except Exception as e:
-            logger.error(f"❌ 验证码类型检测失败: {e}")
+            logger.error(f"[FAIL] 验证码类型检测失败: {e}")
             return 'none'
 
     async def _handle_image_captcha(self) -> Tuple[bool, str]:
@@ -308,17 +308,17 @@ class LoginOrchestrator:
                 return False, "验证码处理器未初始化"
 
         except Exception as e:
-            logger.error(f"❌ 图片验证码处理异常: {e}")
+            logger.error(f"[FAIL] 图片验证码处理异常: {e}")
             return False, f"图片验证码处理异常: {e}"
 
     async def _handle_sms_verification(self) -> Tuple[bool, str]:
         """处理SMS验证码 - 用户输入模式"""
         try:
-            logger.info("📱 检测到SMS验证码需求")
+            logger.info("[PHONE] 检测到SMS验证码需求")
 
             # 在生产环境（无头模式）下，提示用户输入
             print("\n" + "="*50)
-            print("🔔 需要SMS验证码")
+            print("[BELL] 需要SMS验证码")
             print("="*50)
             print("系统检测到需要手机短信验证码")
             print("请查收手机短信并输入验证码")
@@ -345,7 +345,7 @@ class LoginOrchestrator:
                 try:
                     if self.page.query_selector(selector):
                         self.page.fill(selector, sms_code)
-                        logger.info(f"✅ SMS验证码填入成功: {selector}")
+                        logger.info(f"[OK] SMS验证码填入成功: {selector}")
                         code_filled = True
                         break
                 except Exception:
@@ -367,7 +367,7 @@ class LoginOrchestrator:
                 try:
                     if self.page.query_selector(selector):
                         self.page.click(selector)
-                        logger.info(f"✅ SMS验证确认按钮点击成功")
+                        logger.info(f"[OK] SMS验证确认按钮点击成功")
                         time.sleep(2)
                         break
                 except Exception:
@@ -376,20 +376,20 @@ class LoginOrchestrator:
             return True, "SMS验证码处理完成"
 
         except Exception as e:
-            logger.error(f"❌ SMS验证码处理异常: {e}")
+            logger.error(f"[FAIL] SMS验证码处理异常: {e}")
             return False, f"SMS验证码处理异常: {e}"
 
     async def _handle_email_otp(self, account: Dict) -> Tuple[bool, str]:
         """处理邮箱OTP - Playwright模拟真实用户登录"""
         try:
-            logger.info("📧 开始邮箱OTP处理流程")
+            logger.info("[EMAIL] 开始邮箱OTP处理流程")
 
             # 获取邮箱信息
             email = account.get('email', '')
             email_password = account.get('email_password', '')
 
             if not email or not email_password:
-                logger.warning("⚠️ 账号未配置邮箱信息，跳过邮箱OTP")
+                logger.warning("[WARN] 账号未配置邮箱信息，跳过邮箱OTP")
                 return True, "跳过邮箱OTP（未配置邮箱）"
 
             # 使用现有的邮箱登录处理器
@@ -412,7 +412,7 @@ class LoginOrchestrator:
                         try:
                             if self.page.query_selector(selector):
                                 self.page.fill(selector, otp_code)
-                                logger.info(f"✅ 邮箱OTP填入成功")
+                                logger.info(f"[OK] 邮箱OTP填入成功")
                                 return True, "邮箱OTP处理成功"
                         except Exception:
                             continue
@@ -422,11 +422,11 @@ class LoginOrchestrator:
                     return False, "未能获取邮箱OTP"
 
             except ImportError:
-                logger.warning("⚠️ 邮箱登录处理器不可用，跳过邮箱OTP")
+                logger.warning("[WARN] 邮箱登录处理器不可用，跳过邮箱OTP")
                 return True, "跳过邮箱OTP（处理器不可用）"
 
         except Exception as e:
-            logger.error(f"❌ 邮箱OTP处理异常: {e}")
+            logger.error(f"[FAIL] 邮箱OTP处理异常: {e}")
             return False, f"邮箱OTP处理异常: {e}"
 
     async def _verify_login_success(self, platform_key: str) -> bool:
@@ -441,7 +441,7 @@ class LoginOrchestrator:
             url_indicates_login_page = any(keyword in current_url.lower() for keyword in login_keywords)
 
             if not url_indicates_login_page:
-                logger.info(f"✅ 登录成功确认：URL已跳转离开登录页 ({current_url})")
+                logger.info(f"[OK] 登录成功确认：URL已跳转离开登录页 ({current_url})")
                 return True
 
             # 平台特定的登录成功判断
@@ -454,14 +454,14 @@ class LoginOrchestrator:
             if platform_key in success_indicators:
                 indicators = success_indicators[platform_key]
                 if any(indicator in current_url for indicator in indicators):
-                    logger.info(f"✅ {platform_key}平台登录成功确认")
+                    logger.info(f"[OK] {platform_key}平台登录成功确认")
                     return True
 
-            logger.warning(f"⚠️ 登录状态不确定，当前URL: {current_url}")
+            logger.warning(f"[WARN] 登录状态不确定，当前URL: {current_url}")
             return False
 
         except Exception as e:
-            logger.error(f"❌ 登录状态验证异常: {e}")
+            logger.error(f"[FAIL] 登录状态验证异常: {e}")
             return False
 
     async def _generic_login(self, handler, username: str, password: str) -> bool:
@@ -469,7 +469,7 @@ class LoginOrchestrator:
         try:
             return await handler.login(username, password, self.page)
         except Exception as e:
-            logger.error(f"❌ 通用登录处理失败: {e}")
+            logger.error(f"[FAIL] 通用登录处理失败: {e}")
             return False
 
     def close(self):
@@ -479,9 +479,9 @@ class LoginOrchestrator:
                 self.context.close()
                 self.context = None
             self.page = None
-            logger.info("✅ 登录编排器资源清理完成")
+            logger.info("[OK] 登录编排器资源清理完成")
         except Exception as e:
-            logger.error(f"⚠️ 资源清理异常: {e}")
+            logger.error(f"[WARN] 资源清理异常: {e}")
 
 
 # 平台特定的登录处理器基类
@@ -516,14 +516,14 @@ class MiaoshouLoginHandler(BasePlatformLoginHandler):
                 try:
                     if page.query_selector(selector):
                         page.fill(selector, username)
-                        logger.info(f"✅ 妙手ERP用户名填写成功: {selector}")
+                        logger.info(f"[OK] 妙手ERP用户名填写成功: {selector}")
                         username_filled = True
                         break
                 except Exception:
                     continue
             
             if not username_filled:
-                logger.error("❌ 妙手ERP未找到用户名输入框")
+                logger.error("[FAIL] 妙手ERP未找到用户名输入框")
                 return False
             
             # 智能填写密码
@@ -538,14 +538,14 @@ class MiaoshouLoginHandler(BasePlatformLoginHandler):
                 try:
                     if page.query_selector(selector):
                         page.fill(selector, password)
-                        logger.info(f"✅ 妙手ERP密码填写成功")
+                        logger.info(f"[OK] 妙手ERP密码填写成功")
                         password_filled = True
                         break
                 except Exception:
                     continue
             
             if not password_filled:
-                logger.error("❌ 妙手ERP未找到密码输入框")
+                logger.error("[FAIL] 妙手ERP未找到密码输入框")
                 return False
             
             # 点击登录按钮
@@ -561,7 +561,7 @@ class MiaoshouLoginHandler(BasePlatformLoginHandler):
                 try:
                     if page.query_selector(selector):
                         page.click(selector)
-                        logger.info(f"✅ 妙手ERP登录按钮点击成功")
+                        logger.info(f"[OK] 妙手ERP登录按钮点击成功")
                         login_clicked = True
                         time.sleep(2)
                         break
@@ -569,13 +569,13 @@ class MiaoshouLoginHandler(BasePlatformLoginHandler):
                     continue
             
             if not login_clicked:
-                logger.error("❌ 妙手ERP未找到登录按钮")
+                logger.error("[FAIL] 妙手ERP未找到登录按钮")
                 return False
             
             return True
             
         except Exception as e:
-            logger.error(f"❌ 妙手ERP登录失败: {e}")
+            logger.error(f"[FAIL] 妙手ERP登录失败: {e}")
             return False
 
 
@@ -604,13 +604,13 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
             return bool(getattr(result, "success", False))
 
         except Exception as e:
-            logger.error(f"❌ TikTok登录失败: {e}")
+            logger.error(f"[FAIL] TikTok登录失败: {e}")
             return False
 
     async def _handle_email_otp_auto(self, account: Dict) -> Tuple[bool, str]:
         """自动处理邮箱OTP验证"""
         try:
-            logger.info("🤖 启动邮箱OTP自动化处理...")
+            logger.info("[BOT] 启动邮箱OTP自动化处理...")
 
             # 获取邮箱配置（支持多种字段名）
             email = (account.get('email', '') or
@@ -620,7 +620,7 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
                             account.get('Email password', ''))
 
             if not email or not email_password:
-                logger.warning("⚠️ 邮箱配置不完整，回退到手动模式")
+                logger.warning("[WARN] 邮箱配置不完整，回退到手动模式")
                 return await self._handle_email_otp_manual(account)
 
             # 检测邮箱OTP输入框
@@ -636,15 +636,15 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
             for selector in otp_input_selectors:
                 otp_input = self.page.query_selector(selector)
                 if otp_input and otp_input.is_visible():
-                    logger.info(f"✅ 找到OTP输入框: {selector}")
+                    logger.info(f"[OK] 找到OTP输入框: {selector}")
                     break
 
             if not otp_input:
-                logger.error("❌ 未找到OTP输入框")
+                logger.error("[FAIL] 未找到OTP输入框")
                 return False, "未找到OTP输入框"
 
             # 创建新的浏览器页面用于邮箱登录
-            logger.info("📧 正在打开邮箱页面获取验证码...")
+            logger.info("[EMAIL] 正在打开邮箱页面获取验证码...")
             email_page = self.context.new_page()
 
             try:
@@ -653,7 +653,7 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
 
                 if otp_code:
                     # 自动填入验证码
-                    logger.info(f"🔑 自动填入验证码: {otp_code}")
+                    logger.info(f"[KEY] 自动填入验证码: {otp_code}")
                     otp_input.fill(otp_code)
                     time.sleep(1)
 
@@ -669,7 +669,7 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
                         confirm_btn = self.page.query_selector(selector)
                         if confirm_btn and confirm_btn.is_visible():
                             confirm_btn.click()
-                            logger.info("✅ 已点击确认按钮")
+                            logger.info("[OK] 已点击确认按钮")
                             break
 
                     # 等待验证结果
@@ -677,13 +677,13 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
 
                     # 检查是否验证成功
                     if self._is_login_successful():
-                        logger.success("🎉 邮箱OTP自动验证成功！")
+                        logger.success("[DONE] 邮箱OTP自动验证成功！")
                         return True, "邮箱OTP自动验证成功"
                     else:
-                        logger.warning("⚠️ OTP验证可能失败，请检查")
+                        logger.warning("[WARN] OTP验证可能失败，请检查")
                         return False, "OTP验证失败"
                 else:
-                    logger.error("❌ 无法获取邮箱验证码")
+                    logger.error("[FAIL] 无法获取邮箱验证码")
                     return False, "无法获取邮箱验证码"
 
             finally:
@@ -691,17 +691,17 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
                 email_page.close()
 
         except Exception as e:
-            logger.error(f"❌ 邮箱OTP自动化处理失败: {e}")
+            logger.error(f"[FAIL] 邮箱OTP自动化处理失败: {e}")
             return False, f"邮箱OTP自动化失败: {e}"
 
     async def _handle_email_otp_manual(self, account: Dict) -> Tuple[bool, str]:
         """手动处理邮箱OTP验证"""
         try:
-            logger.info("✋ 邮箱OTP手动处理模式")
+            logger.info("[STOP] 邮箱OTP手动处理模式")
 
             # 提示用户手动处理
             print("\n" + "="*50)
-            print("📧 邮箱验证码处理")
+            print("[EMAIL] 邮箱验证码处理")
             print("="*50)
             print("请按以下步骤操作：")
             print("1. 打开您的邮箱")
@@ -716,14 +716,14 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
 
             # 检查登录状态
             if self._is_login_successful():
-                logger.success("✅ 邮箱验证完成")
+                logger.success("[OK] 邮箱验证完成")
                 return True, "邮箱验证完成"
             else:
-                logger.warning("⚠️ 登录状态未确认")
+                logger.warning("[WARN] 登录状态未确认")
                 return True, "等待登录确认"
 
         except Exception as e:
-            logger.error(f"❌ 邮箱OTP手动处理失败: {e}")
+            logger.error(f"[FAIL] 邮箱OTP手动处理失败: {e}")
             return False, f"邮箱OTP手动处理失败: {e}"
 
     async def _get_otp_from_email(self, email_page: Page, email: str, email_password: str) -> Optional[str]:
@@ -739,26 +739,26 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
             elif '126.com' in email:
                 email_url = 'https://mail.126.com/'
             else:
-                logger.warning(f"⚠️ 未知邮箱类型: {email}")
+                logger.warning(f"[WARN] 未知邮箱类型: {email}")
                 return None
 
-            logger.info(f"📧 正在登录邮箱: {email_url}")
+            logger.info(f"[EMAIL] 正在登录邮箱: {email_url}")
             email_page.goto(email_url, timeout=30000)
             email_page.wait_for_load_state("networkidle")
 
             # 这里可以集成现有的邮箱登录处理器
             # 简化版：等待用户手动登录邮箱
-            logger.info("⏳ 请在邮箱页面完成登录...")
+            logger.info("[WAIT] 请在邮箱页面完成登录...")
             time.sleep(10)  # 给用户时间登录
 
             # 查找最新的验证码邮件
             # 这里需要根据不同邮箱的DOM结构来实现
             # 简化版：返回None，让用户手动处理
-            logger.info("💡 邮箱OTP自动提取功能开发中，请手动获取验证码")
+            logger.info("[TIP] 邮箱OTP自动提取功能开发中，请手动获取验证码")
             return None
 
         except Exception as e:
-            logger.error(f"❌ 邮箱OTP获取失败: {e}")
+            logger.error(f"[FAIL] 邮箱OTP获取失败: {e}")
             return None
 
     def _is_login_successful(self) -> bool:
@@ -787,5 +787,5 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
             return False
 
         except Exception as e:
-            logger.error(f"❌ 登录状态检查失败: {e}")
+            logger.error(f"[FAIL] 登录状态检查失败: {e}")
             return False

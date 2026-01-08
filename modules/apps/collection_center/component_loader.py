@@ -494,8 +494,8 @@ class ComponentLoader:
         在模块中查找组件类
         
         命名约定（按优先级）：
-        1. 平台前缀：login.py → ShopeeLogin（优先，因为这是实际的命名约定）
-        2. 标准命名：login.py → LoginComponent（仅在模块中定义的类）
+        1. 平台前缀：login.py -> ShopeeLogin（优先，因为这是实际的命名约定）
+        2. 标准命名：login.py -> LoginComponent（仅在模块中定义的类）
         3. 后缀匹配：任何以 Component 或 Export 结尾的类（仅在模块中定义的类）
         
         Args:
@@ -508,7 +508,7 @@ class ComponentLoader:
         module_path = module.__name__
         
         # 1. 平台前缀命名（优先，因为这是当前项目的实际命名约定）
-        # 例如：modules.platforms.shopee.components.login → ShopeeLogin
+        # 例如：modules.platforms.shopee.components.login -> ShopeeLogin
         if 'platforms' in module_path:
             try:
                 parts = module_path.split('.')
@@ -539,7 +539,7 @@ class ComponentLoader:
             except (ValueError, IndexError, AttributeError):
                 pass  # 降级到下一步
         
-        # 2. 标准命名：snake_case → PascalCase + Component（仅在模块中定义的类）
+        # 2. 标准命名：snake_case -> PascalCase + Component（仅在模块中定义的类）
         class_name = ''.join(word.capitalize() for word in component_name.split('_')) + 'Component'
         if hasattr(module, class_name):
             cls = getattr(module, class_name)

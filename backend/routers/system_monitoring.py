@@ -35,8 +35,8 @@ async def get_resource_usage(
         - process_count: 进程数
         - thread_count: 线程数
     """
-    # ⚠️ 仅管理员可访问，避免信息泄露
-    # ⭐ 注意：current_user 是 DimUser 对象，需要检查 role 属性
+    # [WARN] 仅管理员可访问，避免信息泄露
+    # [*] 注意：current_user 是 DimUser 对象，需要检查 role 属性
     if not hasattr(current_user, 'role') or getattr(current_user, 'role', None) != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -67,8 +67,8 @@ async def get_executor_stats(
             - max_workers: 最大worker数
             - active_tasks: 活跃任务数（N/A，无法直接获取）
     """
-    # ⚠️ 仅管理员可访问
-    # ⭐ 注意：current_user 是 DimUser 对象，需要检查 role 属性
+    # [WARN] 仅管理员可访问
+    # [*] 注意：current_user 是 DimUser 对象，需要检查 role 属性
     if not hasattr(current_user, 'role') or getattr(current_user, 'role', None) != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -77,16 +77,16 @@ async def get_executor_stats(
     
     executor_manager = get_executor_manager()
     
-    # ⭐ 注意：ProcessPoolExecutor和ThreadPoolExecutor没有公开API获取活跃任务数
+    # [*] 注意：ProcessPoolExecutor和ThreadPoolExecutor没有公开API获取活跃任务数
     # 可以通过跟踪提交的Future对象来估算（P2可选功能）
     return {
         "cpu_executor": {
-            "max_workers": executor_manager.cpu_max_workers,  # ⭐ 使用公开属性，避免访问私有属性
-            "active_tasks": "N/A"  # ⚠️ 无法直接获取，需要额外实现（P2可选）
+            "max_workers": executor_manager.cpu_max_workers,  # [*] 使用公开属性，避免访问私有属性
+            "active_tasks": "N/A"  # [WARN] 无法直接获取，需要额外实现（P2可选）
         },
         "io_executor": {
-            "max_workers": executor_manager.io_max_workers,  # ⭐ 使用公开属性，避免访问私有属性
-            "active_tasks": "N/A"  # ⚠️ 无法直接获取，需要额外实现（P2可选）
+            "max_workers": executor_manager.io_max_workers,  # [*] 使用公开属性，避免访问私有属性
+            "active_tasks": "N/A"  # [WARN] 无法直接获取，需要额外实现（P2可选）
         }
     }
 
@@ -109,8 +109,8 @@ async def get_db_pool_stats(
             - checked_out: 已检出连接数
             - overflow: 溢出连接数
     """
-    # ⚠️ 仅管理员可访问
-    # ⭐ 注意：current_user 是 DimUser 对象，需要检查 role 属性
+    # [WARN] 仅管理员可访问
+    # [*] 注意：current_user 是 DimUser 对象，需要检查 role 属性
     if not hasattr(current_user, 'role') or getattr(current_user, 'role', None) != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

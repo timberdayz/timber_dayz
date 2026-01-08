@@ -123,7 +123,7 @@ class ConnectionManager:
             current_step: 当前步骤
             status: 任务状态
         """
-        # ⭐ v4.7.4: 检查是否有活跃连接
+        # [*] v4.7.4: 检查是否有活跃连接
         conn_count = len(self.active_connections.get(task_id, set()))
         logger.info(f"[WS] send_progress: task_id={task_id}, progress={progress}, connections={conn_count}")
         

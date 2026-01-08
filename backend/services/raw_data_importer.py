@@ -29,11 +29,11 @@ from modules.core.logger import get_logger
 from backend.services.executor_manager import get_executor_manager  # v4.19.0新增：使用统一执行器管理器
 
 from backend.services.dynamic_column_manager import get_dynamic_column_manager
-from backend.services.deduplication_fields_config import (  # ⭐ v4.15.0新增
+from backend.services.deduplication_fields_config import (  # [*] v4.15.0新增
     get_deduplication_strategy,
     get_upsert_update_fields
 )
-from backend.services.platform_table_manager import get_platform_table_manager  # ⭐ v4.17.0新增
+from backend.services.platform_table_manager import get_platform_table_manager  # [*] v4.17.0新增
 
 logger = get_logger(__name__)
 
@@ -73,7 +73,7 @@ class RawDataImporter:
         """
         获取目标表名（动态生成）
         
-        ⭐ v4.17.0重构：从固定表映射改为动态表名生成
+        [*] v4.17.0重构：从固定表映射改为动态表名生成
         表名格式：fact_{platform}_{data_domain}_{sub_domain}_{granularity}
         
         Args:
@@ -142,10 +142,10 @@ class RawDataImporter:
         v4.18.0新增：从数据行中提取period_start_date、period_end_date、period_start_time、period_end_time
         
         支持的格式：
-        - 单日期：2025-09-17 → (2025-09-17, 2025-09-17, None, None)
-        - 日期范围：16/09/2025 - 20/09/2025 → (2025-09-16, 2025-09-20, None, None)
-        - 日期时间范围：2025-08-25 17:01~2025-08-26 11:02 → (2025-08-25, 2025-08-26, datetime, datetime)
-        - 反斜杠格式：19\\9\\25 → (2019-09-25, 2019-09-25, None, None)
+        - 单日期：2025-09-17 -> (2025-09-17, 2025-09-17, None, None)
+        - 日期范围：16/09/2025 - 20/09/2025 -> (2025-09-16, 2025-09-20, None, None)
+        - 日期时间范围：2025-08-25 17:01~2025-08-26 11:02 -> (2025-08-25, 2025-08-26, datetime, datetime)
+        - 反斜杠格式：19\\9\\25 -> (2019-09-25, 2019-09-25, None, None)
         
         Returns:
             (start_date, end_date, start_time, end_time)
@@ -371,12 +371,12 @@ class RawDataImporter:
         platform_code: str,
         shop_id: Optional[str] = None,
         file_id: Optional[int] = None,
-        header_columns: Optional[List[str]] = None,  # ⭐ v4.16.0更新：归一化的header_columns（用于动态列管理）
-        currency_codes: Optional[List[Optional[str]]] = None,  # ⭐ v4.15.0新增：货币代码列表
-        sub_domain: Optional[str] = None,  # ⭐ v4.16.0新增：子类型（services域必须提供）
-        original_header_columns: Optional[List[str]] = None,  # ⭐ v4.16.0新增：原始header_columns（包含货币代码，用于保存到数据库）
-        template_id: Optional[int] = None  # ⭐ v4.17.0新增：模板ID（用于动态列管理）
-    ) -> Dict[str, int]:  # ⭐ v4.15.0修改：返回详细统计信息
+        header_columns: Optional[List[str]] = None,  # [*] v4.16.0更新：归一化的header_columns（用于动态列管理）
+        currency_codes: Optional[List[Optional[str]]] = None,  # [*] v4.15.0新增：货币代码列表
+        sub_domain: Optional[str] = None,  # [*] v4.16.0新增：子类型（services域必须提供）
+        original_header_columns: Optional[List[str]] = None,  # [*] v4.16.0新增：原始header_columns（包含货币代码，用于保存到数据库）
+        template_id: Optional[int] = None  # [*] v4.17.0新增：模板ID（用于动态列管理）
+    ) -> Dict[str, int]:  # [*] v4.15.0修改：返回详细统计信息
         """
         批量插入B类数据（v4.17.0重构：按平台分表）
         
@@ -401,7 +401,7 @@ class RawDataImporter:
             return {'inserted': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
         
         try:
-            # ⭐ v4.17.0重构：使用动态表名（基于平台+数据域+粒度+子类型）
+            # [*] v4.17.0重构：使用动态表名（基于平台+数据域+粒度+子类型）
             # 确保表存在（如果不存在则创建）
             table_name = self.table_manager.ensure_table_exists(
                 platform=platform_code,
@@ -410,7 +410,7 @@ class RawDataImporter:
                 granularity=granularity
             )
             
-            # ⭐ v4.17.0新增：根据模板同步表列（如果提供了header_columns）
+            # [*] v4.17.0新增：根据模板同步表列（如果提供了header_columns）
             if header_columns:
                 self.table_manager.sync_table_columns(
                     table_name=table_name,
@@ -421,7 +421,7 @@ class RawDataImporter:
             # 准备插入数据
             insert_data = []
             for i, (row, data_hash) in enumerate(zip(rows, data_hashes)):
-                # ⭐ v4.18.0增强：提取period_start_date/end_date和period_start_time/end_time
+                # [*] v4.18.0增强：提取period_start_date/end_date和period_start_time/end_time
                 period_start_date, period_end_date, period_start_time, period_end_time = \
                     self.extract_period_dates(row, header_columns or [])
                 
@@ -436,13 +436,13 @@ class RawDataImporter:
                 # 向后兼容：metric_date使用period_start_date
                 metric_date = period_start_date
                 
-                # ⭐ v4.15.0新增：获取货币代码
+                # [*] v4.15.0新增：获取货币代码
                 currency_code = None
                 if currency_codes and i < len(currency_codes):
                     currency_code = currency_codes[i]
                 
                 # 准备插入记录
-                # ⭐ v4.16.0修复：header_columns字段保存原始列名（包含货币代码）用于追溯
+                # [*] v4.16.0修复：header_columns字段保存原始列名（包含货币代码）用于追溯
                 # 但动态列管理使用归一化的列名（避免创建重复列）
                 header_columns_for_storage = original_header_columns if original_header_columns else header_columns
                 
@@ -452,26 +452,26 @@ class RawDataImporter:
                     'data_domain': data_domain,
                     'granularity': granularity,
                     'metric_date': metric_date,
-                    'period_start_date': period_start_date,  # ⭐ v4.18.0新增
-                    'period_end_date': period_end_date,      # ⭐ v4.18.0新增
-                    'period_start_time': period_start_time,  # ⭐ v4.18.0新增（可为None）
-                    'period_end_time': period_end_time,      # ⭐ v4.18.0新增（可为None）
+                    'period_start_date': period_start_date,  # [*] v4.18.0新增
+                    'period_end_date': period_end_date,      # [*] v4.18.0新增
+                    'period_start_time': period_start_time,  # [*] v4.18.0新增（可为None）
+                    'period_end_time': period_end_time,      # [*] v4.18.0新增（可为None）
                     'file_id': file_id,
                     'raw_data': row,  # JSONB格式，中文字段名作为键（已归一化，不含货币代码）
-                    'header_columns': header_columns_for_storage,  # ⭐ v4.16.0修复：保存原始字段名（含货币代码）用于追溯
+                    'header_columns': header_columns_for_storage,  # [*] v4.16.0修复：保存原始字段名（含货币代码）用于追溯
                     'data_hash': data_hash,
                     'ingest_timestamp': datetime.utcnow(),
-                    'currency_code': currency_code  # ⭐ v4.15.0新增：货币代码
+                    'currency_code': currency_code  # [*] v4.15.0新增：货币代码
                 }
                 
-                # ⭐ v4.16.0新增：services域的表需要sub_domain字段
+                # [*] v4.16.0新增：services域的表需要sub_domain字段
                 if data_domain.lower() == 'services' and sub_domain:
                     insert_record['sub_domain'] = sub_domain.lower()
                 
                 insert_data.append(insert_record)
             
-            # ⭐ v4.14.0新增：动态列管理（确保源数据表头字段作为列存在）
-            # ⭐ v4.17.0重构：table_name已在前面从table_manager获取，这里直接使用
+            # [*] v4.14.0新增：动态列管理（确保源数据表头字段作为列存在）
+            # [*] v4.17.0重构：table_name已在前面从table_manager获取，这里直接使用
             # 注意：动态列管理已集成到table_manager.sync_table_columns中，这里保留作为备用
             if header_columns:
                 try:
@@ -496,12 +496,12 @@ class RawDataImporter:
                     )
                     # 动态列管理失败不影响数据入库（继续使用raw_data JSONB）
             
-            # ⭐ v4.14.0修复：不要在这里填充动态列
+            # [*] v4.14.0修复：不要在这里填充动态列
             # 原因：SQLAlchemy ORM模型不包含动态列，会导致"Unconsumed column names"错误
             # 解决方案：先使用ORM插入系统字段，然后使用原始SQL更新动态列
             # 动态列的填充将在后面的UPDATE语句中完成
             
-            # ⭐ v4.15.0增强：插入前查询已存在的data_hash（用于区分INSERT和UPDATE）
+            # [*] v4.15.0增强：插入前查询已存在的data_hash（用于区分INSERT和UPDATE）
             # 获取去重策略
             strategy = get_deduplication_strategy(data_domain)
             is_upsert = (strategy == 'UPSERT')
@@ -509,7 +509,7 @@ class RawDataImporter:
             # 查询已存在的data_hash（仅UPSERT策略需要）
             existing_hashes = set()
             if is_upsert:
-                # ⭐ v4.17.0修复：确保在查询existing_hashes之前，前一个事务已提交
+                # [*] v4.17.0修复：确保在查询existing_hashes之前，前一个事务已提交
                 # 显式刷新事务状态，确保能看到已提交的数据
                 try:
                     self.db.commit()  # 如果当前有未提交的事务，先提交
@@ -522,7 +522,7 @@ class RawDataImporter:
                         f"[RawDataImporter] [v4.17.0] 前一个事务已提交或无事务: {e}"
                     )
                 
-                # ⭐ v4.17.0修复：先检查索引类型，以便使用正确的查询条件
+                # [*] v4.17.0修复：先检查索引类型，以便使用正确的查询条件
                 new_index_name = f"uq_{table_name}_hash"
                 is_expression_index_for_query = False
                 try:
@@ -537,7 +537,7 @@ class RawDataImporter:
                 except Exception as e:
                     logger.debug(f"[RawDataImporter] [v4.17.0] 检查索引类型失败（继续）: {e}")
                 
-                # ⭐ v4.17.0重构：使用原始SQL查询（表是动态的，没有ORM Model）
+                # [*] v4.17.0重构：使用原始SQL查询（表是动态的，没有ORM Model）
                 where_clause = "data_domain = :data_domain AND granularity = :granularity AND platform_code = :platform_code"
                 where_params = {
                     'data_domain': data_domain,
@@ -545,7 +545,7 @@ class RawDataImporter:
                     'platform_code': platform_code
                 }
                 
-                # ⭐ v4.17.0修复：existing_hashes查询必须与索引表达式一致
+                # [*] v4.17.0修复：existing_hashes查询必须与索引表达式一致
                 # 如果索引使用COALESCE(shop_id, '')，查询也必须使用COALESCE才能正确匹配
                 if is_expression_index_for_query:
                     # 表达式索引：使用COALESCE匹配（与索引定义一致）
@@ -568,7 +568,7 @@ class RawDataImporter:
                     where_clause += " AND sub_domain = :sub_domain"
                     where_params['sub_domain'] = sub_domain
                 
-                # ⭐ v4.17.1优化：使用LIMIT优化查询（如果只需要检查是否存在，不需要全部数据）
+                # [*] v4.17.1优化：使用LIMIT优化查询（如果只需要检查是否存在，不需要全部数据）
                 # 但为了准确统计INSERT/UPDATE，我们需要查询所有匹配的data_hash
                 query_sql = text(f'SELECT data_hash FROM b_class."{table_name}" WHERE {where_clause}')
                 existing_records = self.db.execute(query_sql, where_params).fetchall()
@@ -579,11 +579,11 @@ class RawDataImporter:
                     f"表达式索引={is_expression_index_for_query}）"
                 )
             
-            # ⭐ 修复：插入前查询当前记录数（用于计算实际插入数）
+            # [*] 修复：插入前查询当前记录数（用于计算实际插入数）
             count_sql = text(f'SELECT COUNT(*) FROM b_class."{table_name}"')
             before_count = self.db.execute(count_sql).scalar() or 0
             
-            # ⭐ v4.17.0重构：表名已从table_manager获取，直接使用
+            # [*] v4.17.0重构：表名已从table_manager获取，直接使用
             # 检查唯一索引名称（用于ON CONFLICT）
             new_index_name = f"uq_{table_name}_hash"
             
@@ -597,7 +597,7 @@ class RawDataImporter:
                 )
                 index_exists = self.db.execute(check_index_sql).scalar() > 0
                 
-                # ⭐ v4.14.0修复：如果索引存在，检查是否是表达式索引
+                # [*] v4.14.0修复：如果索引存在，检查是否是表达式索引
                 if index_exists:
                     check_index_def_sql = text(
                         f"SELECT indexdef FROM pg_indexes "
@@ -625,13 +625,13 @@ class RawDataImporter:
             system_fields = {
                 'platform_code', 'shop_id', 'data_domain', 'granularity',
                 'metric_date', 'file_id', 'raw_data', 'header_columns',
-                'data_hash', 'ingest_timestamp', 'currency_code',  # ⭐ v4.15.0新增
-                'sub_domain', 'template_id',  # ⭐ v4.16.0新增：services域需要；v4.17.0新增：template_id
-                'period_start_date', 'period_end_date',  # ⭐ v4.18.0新增：日期范围
-                'period_start_time', 'period_end_time'   # ⭐ v4.18.0新增：时间范围（可选）
+                'data_hash', 'ingest_timestamp', 'currency_code',  # [*] v4.15.0新增
+                'sub_domain', 'template_id',  # [*] v4.16.0新增：services域需要；v4.17.0新增：template_id
+                'period_start_date', 'period_end_date',  # [*] v4.18.0新增：日期范围
+                'period_start_time', 'period_end_time'   # [*] v4.18.0新增：时间范围（可选）
             }
             
-            # ⭐ v4.17.0新增：添加template_id到插入数据
+            # [*] v4.17.0新增：添加template_id到插入数据
             for record in insert_data:
                 if template_id is not None:
                     record['template_id'] = template_id
@@ -647,7 +647,7 @@ class RawDataImporter:
                     f"[RawDataImporter] [v4.15.0] 数据域 {data_domain} 使用UPSERT策略（更新而非跳过）"
                 )
             
-            # ⭐ v4.17.0重构：统一使用原始SQL插入（表是动态的，没有ORM Model）
+            # [*] v4.17.0重构：统一使用原始SQL插入（表是动态的，没有ORM Model）
             # 检查索引类型（表达式索引 vs 普通索引）
             index_exists = False
             is_expression_index = False
@@ -670,18 +670,18 @@ class RawDataImporter:
                 index_exists = False
                 is_expression_index = False
             
-            # ⭐ v4.17.0重构：统一使用原始SQL插入
+            # [*] v4.17.0重构：统一使用原始SQL插入
             if True:  # 总是使用原始SQL（因为表是动态的）
                 # 表达式索引：使用原始SQL的ON CONFLICT，明确指定表达式
                 logger.info(
                     f"[RawDataImporter] [v4.14.0] 使用原始SQL插入（表达式索引）: {new_index_name}"
                 )
                 
-                # ⭐ v4.15.0新增：根据策略构建SQL
-                # ⭐ v4.17.0重构：统一使用原始SQL，支持动态表名
+                # [*] v4.15.0新增：根据策略构建SQL
+                # [*] v4.17.0重构：统一使用原始SQL，支持动态表名
                 
                 # 构建INSERT列和值（基础字段）
-                # ⭐ v4.18.0增强：添加period_start_date, period_end_date, period_start_time, period_end_time
+                # [*] v4.18.0增强：添加period_start_date, period_end_date, period_start_time, period_end_time
                 base_columns = [
                     "platform_code", "shop_id", "data_domain", "granularity",
                     "metric_date", "period_start_date", "period_end_date",
@@ -710,15 +710,15 @@ class RawDataImporter:
                 insert_columns = ", ".join(base_columns)
                 insert_values = ", ".join(base_values)
                 
-                # ⭐ v4.17.0修复：构建ON CONFLICT子句
+                # [*] v4.17.0修复：构建ON CONFLICT子句
                 # PostgreSQL的ON CONFLICT对于表达式索引，必须使用表达式本身，不能使用索引名称
-                # ⚠️ 注意：PostgreSQL不支持ON CONFLICT ON INDEX语法，必须使用表达式
+                # [WARN] 注意：PostgreSQL不支持ON CONFLICT ON INDEX语法，必须使用表达式
                 if is_expression_index:
                     # 表达式索引：使用表达式本身（与索引定义一致）
                     if data_domain.lower() == 'services' and sub_domain:
                         conflict_clause = "(data_domain, sub_domain, granularity, data_hash)"
                     else:
-                        # ⭐ 关键：表达式索引使用COALESCE表达式，与索引定义完全一致
+                        # [*] 关键：表达式索引使用COALESCE表达式，与索引定义完全一致
                         conflict_clause = "(platform_code, COALESCE(shop_id, ''), data_domain, granularity, data_hash)"
                 else:
                     # 普通索引：使用列名列表
@@ -733,10 +733,10 @@ class RawDataImporter:
                     update_clauses = []
                     for field in update_fields:
                         if field == 'raw_data':
-                            # ⭐ v4.17.0修复：raw_data已经是JSON字符串，PostgreSQL会自动转换为JSONB
+                            # [*] v4.17.0修复：raw_data已经是JSON字符串，PostgreSQL会自动转换为JSONB
                             update_clauses.append(f'raw_data = EXCLUDED.raw_data')
                         elif field == 'header_columns':
-                            # ⭐ v4.17.0修复：header_columns已经是JSON字符串，PostgreSQL会自动转换为JSONB
+                            # [*] v4.17.0修复：header_columns已经是JSON字符串，PostgreSQL会自动转换为JSONB
                             update_clauses.append(f'header_columns = EXCLUDED.header_columns')
                         else:
                             update_clauses.append(f'{field} = EXCLUDED.{field}')
@@ -758,7 +758,7 @@ class RawDataImporter:
                         ON CONFLICT {conflict_clause} DO NOTHING
                     """)
                 
-                # ⭐ v4.18.1性能优化：真正的批量插入（使用executemany）
+                # [*] v4.18.1性能优化：真正的批量插入（使用executemany）
                 # 将BATCH_SIZE从100增加到500，提升批处理效率
                 BATCH_SIZE = 500  # 每批500行（提升性能）
                 processed_count = 0
@@ -788,17 +788,17 @@ class RawDataImporter:
                     elif 'header_columns' in record_copy and record_copy['header_columns'] is None:
                         record_copy['header_columns'] = None
                     
-                    # ⭐ v4.17.0新增：确保sub_domain字段存在（services域）
+                    # [*] v4.17.0新增：确保sub_domain字段存在（services域）
                     if data_domain.lower() == 'services' and sub_domain and 'sub_domain' not in record_copy:
                         record_copy['sub_domain'] = sub_domain.lower()
                     
-                    # ⭐ v4.17.0新增：确保template_id字段存在
+                    # [*] v4.17.0新增：确保template_id字段存在
                     if template_id is not None and 'template_id' not in record_copy:
                         record_copy['template_id'] = template_id
                     
                     prepared_records.append(record_copy)
                 
-                # ⭐ v4.18.1优化：使用executemany进行真正的批量插入
+                # [*] v4.18.1优化：使用executemany进行真正的批量插入
                 # PostgreSQL + psycopg2 的 executemany 会自动优化为批量INSERT
                 # 性能提升：从每行1次SQL调用改为每批1次SQL调用
                 from sqlalchemy import Connection
@@ -813,7 +813,7 @@ class RawDataImporter:
                     batch_errors = 0
                     
                     try:
-                        # ⭐ v4.18.1核心优化：使用原生connection的executemany
+                        # [*] v4.18.1核心优化：使用原生connection的executemany
                         # 这比循环execute快5-10倍
                         connection = self.db.connection()
                         raw_conn = connection.connection
@@ -913,7 +913,7 @@ class RawDataImporter:
                                 exc_info=True
                             )
                 
-                # ⭐ v4.18.1优化：批量插入已完成，所有批次都已提交
+                # [*] v4.18.1优化：批量插入已完成，所有批次都已提交
                 # 不需要再次commit（每批都已提交）
                 
                 logger.info(
@@ -925,13 +925,13 @@ class RawDataImporter:
                     f"（实际插入/更新数稍后通过计数计算）"
                 )
                 
-                # ⭐ 注意：表达式索引插入后，实际插入数会在后面通过比较前后记录数计算
+                # [*] 注意：表达式索引插入后，实际插入数会在后面通过比较前后记录数计算
                 # 这里先跳过，在后面的代码中统一计算
                 
                 # 验证：确保所有行都被处理
                 if processed_count + skipped_count + error_count != len(insert_data_prepared):
                     logger.warning(
-                        f"[RawDataImporter] ⚠️ 警告：处理行数不匹配！"
+                        f"[RawDataImporter] [WARN] 警告：处理行数不匹配！"
                         f"准备插入={len(insert_data_prepared)}, "
                         f"已处理={processed_count}, "
                         f"跳过={skipped_count}, "
@@ -939,7 +939,7 @@ class RawDataImporter:
                         f"总计={processed_count + skipped_count + error_count}"
                     )
             
-            # ⭐ v4.14.0新增：使用原始SQL更新动态列（如果存在）
+            # [*] v4.14.0新增：使用原始SQL更新动态列（如果存在）
             # 从原始rows数据中获取动态列的值
             if header_columns and rows:
                 try:
@@ -1019,20 +1019,20 @@ class RawDataImporter:
             
             self.db.commit()
             
-            # ⭐ 修复：插入后查询实际记录数
+            # [*] 修复：插入后查询实际记录数
             after_count_sql = text(f'SELECT COUNT(*) FROM b_class."{table_name}"')
             after_count = self.db.execute(after_count_sql).scalar() or 0
             
-            # ⭐ 修复：计算实际插入数
+            # [*] 修复：计算实际插入数
             actual_inserted = after_count - before_count
             
-            # ⭐ 添加行数验证：检测显著数据丢失
+            # [*] 添加行数验证：检测显著数据丢失
             expected_inserted = len(insert_data)
             if expected_inserted > 0:
                 loss_rate = (expected_inserted - actual_inserted) / expected_inserted
                 if loss_rate > 0.05:  # 超过5%的数据丢失
                     logger.warning(
-                        f"[RawDataImporter] ⚠️ 警告：检测到显著数据丢失！"
+                        f"[RawDataImporter] [WARN] 警告：检测到显著数据丢失！"
                         f"准备插入={expected_inserted}行, "
                         f"实际插入={actual_inserted}行, "
                         f"丢失率={loss_rate:.2%} "
@@ -1040,18 +1040,18 @@ class RawDataImporter:
                     )
                 elif actual_inserted == 1 and expected_inserted > 1:
                     logger.error(
-                        f"[RawDataImporter] ❌ 严重错误：只插入了1行，但准备插入{expected_inserted}行！"
+                        f"[RawDataImporter] [FAIL] 严重错误：只插入了1行，但准备插入{expected_inserted}行！"
                         f"这可能是因为所有行的data_hash都相同，导致去重失败。"
                         f"请检查核心字段配置是否正确。"
                     )
             
-            # ⭐ v4.15.0新增：计算详细统计信息（区分INSERT/UPDATE/SKIP）
+            # [*] v4.15.0新增：计算详细统计信息（区分INSERT/UPDATE/SKIP）
             inserted_count = 0
             updated_count = 0
             skipped_count = 0
             
             if is_upsert:
-                # ⭐ v4.17.0修复：UPSERT策略下，使用existing_hashes准确区分INSERT和UPDATE
+                # [*] v4.17.0修复：UPSERT策略下，使用existing_hashes准确区分INSERT和UPDATE
                 # existing_hashes在第284行已经查询（仅UPSERT策略）
                 if existing_hashes:
                     # 有已存在的数据：区分新插入和更新
@@ -1071,12 +1071,12 @@ class RawDataImporter:
                 
                 skipped_count = 0
                 
-                # ⭐ v4.17.0验证：actual_inserted应该等于inserted_count（允许小误差）
+                # [*] v4.17.0验证：actual_inserted应该等于inserted_count（允许小误差）
                 # actual_inserted = after_count - before_count（实际数据库变化）
                 # 由于并发、事务等因素，可能有小误差
                 if abs(actual_inserted - inserted_count) > 5:  # 允许5行的误差
                     logger.warning(
-                        f"[RawDataImporter] [v4.17.0] ⚠️ 统计不匹配（使用actual_inserted修正）: "
+                        f"[RawDataImporter] [v4.17.0] [WARN] 统计不匹配（使用actual_inserted修正）: "
                         f"actual_inserted={actual_inserted}, inserted_count={inserted_count}, "
                         f"updated_count={updated_count}, expected_inserted={expected_inserted}"
                     )
@@ -1084,10 +1084,10 @@ class RawDataImporter:
                     inserted_count = max(0, actual_inserted)
                     updated_count = max(0, expected_inserted - inserted_count)
                 
-                # ⭐ v4.17.0验证：确保统计总数正确
+                # [*] v4.17.0验证：确保统计总数正确
                 if inserted_count + updated_count != expected_inserted:
                     logger.warning(
-                        f"[RawDataImporter] [v4.17.0] ⚠️ 统计总数不匹配: "
+                        f"[RawDataImporter] [v4.17.0] [WARN] 统计总数不匹配: "
                         f"插入={inserted_count}, 更新={updated_count}, 总计={inserted_count + updated_count}, "
                         f"期望={expected_inserted}"
                     )
@@ -1114,7 +1114,7 @@ class RawDataImporter:
                     f"跳过={skipped_count}行"
                 )
             
-            # ⭐ v4.15.0修改：返回详细统计信息
+            # [*] v4.15.0修改：返回详细统计信息
             return {
                 'inserted': inserted_count,
                 'updated': updated_count,
@@ -1145,7 +1145,7 @@ class RawDataImporter:
         """
         异步批量插入B类数据（v4.18.2新增）
         
-        ⭐ 使用run_in_executor包装同步批量操作，避免阻塞事件循环
+        [*] 使用run_in_executor包装同步批量操作，避免阻塞事件循环
         
         注意：由于批量插入使用psycopg2原生连接，目前采用线程池包装方式。
         未来可以迁移到asyncpg原生批量插入以获得更好性能。
@@ -1156,7 +1156,7 @@ class RawDataImporter:
         if not rows:
             return {'inserted': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
         
-        # ⭐ v4.18.2：对于异步模式，需要使用同步会话执行批量操作
+        # [*] v4.18.2：对于异步模式，需要使用同步会话执行批量操作
         # 因为psycopg2.extras.execute_batch不支持异步
         from backend.models.database import SessionLocal
         
@@ -1200,8 +1200,8 @@ def get_raw_data_importer(db: AsyncSession) -> RawDataImporter:
     """
     获取B类数据入库服务实例
     
-    ⭐ v4.18.2：支持异步会话
-    ⭐ v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
+    [*] v4.18.2：支持异步会话
+    [*] v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
     """
     return RawDataImporter(db)
 

@@ -30,7 +30,7 @@ from datetime import datetime
 from functools import wraps
 
 # v4.19.0新增：导入限流器
-# ⭐ v4.19.4更新：使用基于角色的动态限流
+# [*] v4.19.4更新：使用基于角色的动态限流
 try:
     from backend.middleware.rate_limiter import limiter, role_based_rate_limit
 except ImportError:
@@ -115,24 +115,24 @@ async def create_user(
     
     # 记录操作
     await audit_service.log_action(
-        user_id=current_user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        user_id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         action="create_user",
         resource="user",
-        resource_id=str(user.user_id),  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        resource_id=str(user.user_id),  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         ip_address="127.0.0.1",
         user_agent="Unknown",
         details={"username": user.username, "email": user.email}
     )
     
     return UserResponse(
-        id=user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         username=user.username,
         email=user.email,
         full_name=user.full_name,
         roles=[role.role_name for role in user.roles],
         is_active=user.is_active,
         created_at=user.created_at,
-        last_login_at=user.last_login  # ⭐ v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+        last_login_at=user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
     )
 
 @router.get("/", response_model=List[UserResponse])
@@ -149,14 +149,14 @@ async def get_users(
     
     return [
         UserResponse(
-            id=user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+            id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
             username=user.username,
             email=user.email,
             full_name=user.full_name,
             roles=[role.role_name for role in user.roles],
             is_active=user.is_active,
             created_at=user.created_at,
-            last_login_at=user.last_login  # ⭐ v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+            last_login_at=user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
         )
         for user in users
     ]
@@ -180,14 +180,14 @@ async def get_user(
         )
     
     return UserResponse(
-        id=user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         username=user.username,
         email=user.email,
         full_name=user.full_name,
         roles=[role.role_name for role in user.roles],
         is_active=user.is_active,
         created_at=user.created_at,
-        last_login_at=user.last_login  # ⭐ v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+        last_login_at=user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
     )
 
 @router.put("/{user_id}", response_model=UserResponse)
@@ -276,24 +276,24 @@ async def update_user(
     
     # 记录操作
     await audit_service.log_action(
-        user_id=current_user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        user_id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         action="update_user",
         resource="user",
-        resource_id=str(user.user_id),  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        resource_id=str(user.user_id),  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         ip_address="127.0.0.1",
         user_agent="Unknown",
         details=user_update.dict(exclude_unset=True)
     )
     
     return UserResponse(
-        id=user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         username=user.username,
         email=user.email,
         full_name=user.full_name,
         roles=[role.role_name for role in user.roles],
         is_active=user.is_active,
         created_at=user.created_at,
-        last_login_at=user.last_login  # ⭐ v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+        last_login_at=user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
     )
 
 @router.delete("/{user_id}")
@@ -326,10 +326,10 @@ async def delete_user(
     
     # 记录操作
     await audit_service.log_action(
-        user_id=current_user.user_id,  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        user_id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         action="delete_user",
         resource="user",
-        resource_id=str(user.user_id),  # ⭐ v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        resource_id=str(user.user_id),  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
         ip_address="127.0.0.1",
         user_agent="Unknown",
         details={"username": user.username}
@@ -524,13 +524,13 @@ async def unlock_user_account(
         message="账户解锁成功"
     )
 
-# ⭐ v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
 @router.post("/{user_id}/approve")
-@role_based_rate_limit(endpoint_type="default")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def approve_user(
     user_id: int,
     request_body: ApproveUserRequest,
-    request: Request,  # ⭐ v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
     current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -652,13 +652,13 @@ async def approve_user(
         message="用户审批成功"
     )
 
-# ⭐ v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
 @router.post("/{user_id}/reject")
-@role_based_rate_limit(endpoint_type="default")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def reject_user(
     user_id: int,
     request_body: RejectUserRequest,
-    request: Request,  # ⭐ v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
     current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -744,11 +744,11 @@ async def reject_user(
     )
 
 # v4.19.0 P1安全要求：待审批用户列表API限流装饰器（条件应用）
-# ⭐ v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
 @router.get("/pending", response_model=List[PendingUserResponse])
-@role_based_rate_limit(endpoint_type="default")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def get_pending_users(
-    request: Request,  # ⭐ v4.19.4新增：添加 request 参数用于限流（必须放在有默认值参数之前）
+    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流（必须放在有默认值参数之前）
     page: int = 1,
     page_size: int = 20,
     current_user: DimUser = Depends(require_admin),
@@ -993,11 +993,11 @@ async def revoke_other_sessions(
 
 # v4.19.0: 用户通知偏好 API
 
-# ⭐ v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
 @router.get("/me/notification-preferences", response_model=NotificationPreferenceListResponse)
-@role_based_rate_limit(endpoint_type="default")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def get_notification_preferences(
-    request: Request,  # ⭐ v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -1022,10 +1022,10 @@ async def get_notification_preferences(
 
 
 @router.put("/me/notification-preferences", response_model=NotificationPreferenceListResponse)
-@role_based_rate_limit(endpoint_type="default")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def update_notification_preferences(
     batch_update: NotificationPreferenceBatchUpdate,
-    request: Request,  # ⭐ v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -1082,10 +1082,10 @@ async def update_notification_preferences(
 
 
 @router.get("/me/notification-preferences/{notification_type}", response_model=NotificationPreferenceResponse)
-@role_based_rate_limit(endpoint_type="default")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def get_notification_preference(
     notification_type: str,
-    request: Request,  # ⭐ v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -1119,11 +1119,11 @@ async def get_notification_preference(
 
 
 @router.put("/me/notification-preferences/{notification_type}", response_model=NotificationPreferenceResponse)
-@role_based_rate_limit(endpoint_type="default")  # ⭐ v4.19.4: 基于角色的动态限流
+@role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def update_notification_preference(
     notification_type: str,
     update_data: NotificationPreferenceUpdate,
-    request: Request,  # ⭐ v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):

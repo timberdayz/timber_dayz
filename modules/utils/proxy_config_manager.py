@@ -110,10 +110,10 @@ class ProxyConfigManager:
                 self.account_mapping = getattr(proxy_config_module, "ACCOUNT_PROXY_MAPPING", {})
                 self.strategy_config = getattr(proxy_config_module, "PROXY_STRATEGY", {})
                 
-                logger.info(f"✅ 加载代理配置: {len(self.proxy_config)} 个地区")
+                logger.info(f"[OK] 加载代理配置: {len(self.proxy_config)} 个地区")
                 
         except Exception as e:
-            logger.error(f"❌ 加载代理配置失败: {e}")
+            logger.error(f"[FAIL] 加载代理配置失败: {e}")
             # 使用默认配置
             self.proxy_config = {}
             self.account_mapping = {}
@@ -207,15 +207,15 @@ class ProxyConfigManager:
                         expires_at=expires_at
                     )
                     
-                    logger.info(f"✅ 获取API代理成功: {proxy_info.ip}:{proxy_info.port}")
+                    logger.info(f"[OK] 获取API代理成功: {proxy_info.ip}:{proxy_info.port}")
                     return proxy_info
                 
             else:
                 # 处理其他格式的响应
-                logger.warning(f"⚠️ 未知的API响应格式: {response.text[:200]}")
+                logger.warning(f"[WARN] 未知的API响应格式: {response.text[:200]}")
                 
         except Exception as e:
-            logger.error(f"❌ 获取API代理失败: {e}")
+            logger.error(f"[FAIL] 获取API代理失败: {e}")
         
         return None
     
@@ -238,7 +238,7 @@ class ProxyConfigManager:
             static_proxies = provider_config.get("static_proxies", [])
         
         if not static_proxies:
-            logger.warning(f"⚠️ 静态代理配置为空: {provider_config.get('provider_name')}")
+            logger.warning(f"[WARN] 静态代理配置为空: {provider_config.get('provider_name')}")
             return None
         
         # 选择有效的代理
@@ -260,7 +260,7 @@ class ProxyConfigManager:
             valid_proxies.append(proxy_data)
         
         if not valid_proxies:
-            logger.warning(f"⚠️ 没有有效的静态代理")
+            logger.warning(f"[WARN] 没有有效的静态代理")
             return None
         
         # 简单轮询选择
@@ -281,7 +281,7 @@ class ProxyConfigManager:
             provider=provider_config.get("provider_name", "unknown")
         )
         
-        logger.info(f"✅ 获取静态代理: {proxy_info.ip}:{proxy_info.port}")
+        logger.info(f"[OK] 获取静态代理: {proxy_info.ip}:{proxy_info.port}")
         return proxy_info
     
     def get_proxy_for_account(self, account_info: Dict[str, Any]) -> Optional[ProxyInfo]:
@@ -300,7 +300,7 @@ class ProxyConfigManager:
         if account_id in self.account_proxy_assignments:
             existing_proxy = self.account_proxy_assignments[account_id]
             if existing_proxy.is_active and not existing_proxy.is_expired:
-                logger.info(f"🔄 使用已分配的代理: {account_id} -> {existing_proxy.ip}:{existing_proxy.port}")
+                logger.info(f"[RETRY] 使用已分配的代理: {account_id} -> {existing_proxy.ip}:{existing_proxy.port}")
                 return existing_proxy
             else:
                 # 清理过期代理
@@ -332,14 +332,14 @@ class ProxyConfigManager:
                 if proxy_info:
                     # 分配给账号
                     self.account_proxy_assignments[account_id] = proxy_info
-                    logger.info(f"🎯 为账号分配代理: {account_id} -> {proxy_info.ip}:{proxy_info.port}")
+                    logger.info(f"[TARGET] 为账号分配代理: {account_id} -> {proxy_info.ip}:{proxy_info.port}")
                     return proxy_info
                     
             except Exception as e:
-                logger.error(f"❌ 从提供商获取代理失败 {provider.get('provider_name')}: {e}")
+                logger.error(f"[FAIL] 从提供商获取代理失败 {provider.get('provider_name')}: {e}")
                 continue
         
-        logger.warning(f"⚠️ 无法为账号获取代理: {account_id} (地区: {proxy_region})")
+        logger.warning(f"[WARN] 无法为账号获取代理: {account_id} (地区: {proxy_region})")
         return None
     
     def test_proxy(self, proxy_info: ProxyInfo, test_url: str = "https://httpbin.org/ip") -> bool:
@@ -371,12 +371,12 @@ class ProxyConfigManager:
             proxy_info.success_count += 1
             proxy_info.last_used = datetime.now()
             
-            logger.info(f"✅ 代理测试成功: {proxy_info.ip}:{proxy_info.port}")
+            logger.info(f"[OK] 代理测试成功: {proxy_info.ip}:{proxy_info.port}")
             return True
             
         except Exception as e:
             proxy_info.failure_count += 1
-            logger.error(f"❌ 代理测试失败 {proxy_info.ip}:{proxy_info.port}: {e}")
+            logger.error(f"[FAIL] 代理测试失败 {proxy_info.ip}:{proxy_info.port}: {e}")
             return False
     
     def get_proxy_stats(self) -> Dict[str, Any]:
@@ -419,7 +419,7 @@ class ProxyConfigManager:
         
         for account_id in expired_accounts:
             del self.account_proxy_assignments[account_id]
-            logger.info(f"🧹 清理过期代理: {account_id}")
+            logger.info(f"[CLEAN] 清理过期代理: {account_id}")
         
         return expired_count
     
@@ -488,7 +488,7 @@ def get_account_proxy(account_info: Dict[str, Any]) -> Optional[Dict[str, str]]:
 
 if __name__ == "__main__":
     # 测试代理配置管理器
-    print("🧪 测试代理配置管理器")
+    print("[TEST] 测试代理配置管理器")
     
     # 模拟账号信息
     test_account = {
@@ -501,10 +501,10 @@ if __name__ == "__main__":
     # 测试代理分配
     proxy_config = get_account_proxy(test_account)
     if proxy_config:
-        print(f"✅ 获取代理配置: {proxy_config}")
+        print(f"[OK] 获取代理配置: {proxy_config}")
     else:
-        print("ℹ️ 当前环境不需要使用代理")
+        print("[i] 当前环境不需要使用代理")
     
     # 显示统计信息
     stats = proxy_config_manager.get_proxy_stats()
-    print(f"📊 代理使用统计: {stats}") 
+    print(f"[DATA] 代理使用统计: {stats}") 

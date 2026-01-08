@@ -11,11 +11,11 @@
 
 from typing import Dict, Any, List, Optional, Union
 from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession  # ⭐ v4.18.2新增：异步支持
+from sqlalchemy.ext.asyncio import AsyncSession  # [*] v4.18.2新增：异步支持
 from sqlalchemy import func, select, and_, or_
 from datetime import datetime, timedelta
 from collections import Counter
-import asyncio  # ⭐ v4.18.2新增：用于run_in_executor
+import asyncio  # [*] v4.18.2新增：用于run_in_executor
 
 from modules.core.db import (
     CatalogFile,
@@ -39,7 +39,7 @@ async def analyze_data_loss(
     data_domain: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    ⭐ v4.18.2更新：完全过渡到异步架构，只接受AsyncSession
+    [*] v4.18.2更新：完全过渡到异步架构，只接受AsyncSession
     """
     """
     分析数据丢失情况
@@ -87,7 +87,7 @@ async def analyze_data_loss(
             stats["staging_count"] = stats["raw_count"]
             
             # Fact层：从fact_order表统计
-            # ⭐ 修复：FactOrder使用复合主键，没有id字段，使用func.count(1)或主键字段之一
+            # [*] 修复：FactOrder使用复合主键，没有id字段，使用func.count(1)或主键字段之一
             if file_id:
                 result = await db.execute(
                     select(func.count(FactOrder.platform_code)).where(FactOrder.file_id == file_id)
@@ -133,8 +133,8 @@ async def analyze_data_loss(
             stats["staging_count"] = stats["raw_count"]
             
             # Fact层：从fact_product_metric表统计
-            # ⭐ 修复：FactProductMetric使用复合主键，没有id字段，使用func.count(1)或主键字段之一
-            # ⭐ 修复：FactProductMetric使用source_catalog_id字段，不是file_id
+            # [*] 修复：FactProductMetric使用复合主键，没有id字段，使用func.count(1)或主键字段之一
+            # [*] 修复：FactProductMetric使用source_catalog_id字段，不是file_id
             if file_id:
                 result = await db.execute(
                     select(func.count(FactProductMetric.platform_code)).where(
@@ -182,8 +182,8 @@ async def analyze_data_loss(
             stats["staging_count"] = stats["raw_count"]
             
             # Fact层：从fact_product_metric表统计（inventory数据存储在fact_product_metric表中）
-            # ⭐ 修复：FactProductMetric使用复合主键，没有id字段，使用func.count(1)或主键字段之一
-            # ⭐ 修复：FactProductMetric使用source_catalog_id字段，不是file_id
+            # [*] 修复：FactProductMetric使用复合主键，没有id字段，使用func.count(1)或主键字段之一
+            # [*] 修复：FactProductMetric使用source_catalog_id字段，不是file_id
             if file_id:
                 result = await db.execute(
                     select(func.count(FactProductMetric.platform_code)).where(
@@ -277,18 +277,18 @@ async def analyze_data_loss(
         # Step 5: 分析丢失位置
         loss_details = []
         
-        # Raw → Staging 丢失
+        # Raw -> Staging 丢失
         if stats["raw_count"] > stats["staging_count"]:
             loss_details.append({
-                "stage": "Raw → Staging",
+                "stage": "Raw -> Staging",
                 "lost_count": stats["raw_count"] - stats["staging_count"],
                 "loss_rate": ((stats["raw_count"] - stats["staging_count"]) / stats["raw_count"] * 100) if stats["raw_count"] > 0 else 0
             })
         
-        # Staging → Fact 丢失
+        # Staging -> Fact 丢失
         if stats["staging_count"] > stats["fact_count"]:
             loss_details.append({
-                "stage": "Staging → Fact",
+                "stage": "Staging -> Fact",
                 "lost_count": stats["staging_count"] - stats["fact_count"],
                 "loss_rate": ((stats["staging_count"] - stats["fact_count"]) / stats["staging_count"] * 100) if stats["staging_count"] > 0 else 0
             })
@@ -320,7 +320,7 @@ async def check_data_loss_threshold(
     threshold: float = 5.0
 ) -> Dict[str, Any]:
     """
-    ⭐ v4.18.2更新：完全过渡到异步架构，只接受AsyncSession
+    [*] v4.18.2更新：完全过渡到异步架构，只接受AsyncSession
     """
     """
     检查数据丢失率是否超过阈值
@@ -387,9 +387,9 @@ async def async_analyze_data_loss(
     data_domain: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    异步分析数据丢失（⭐ v4.18.2更新：直接调用异步函数）
+    异步分析数据丢失（[*] v4.18.2更新：直接调用异步函数）
     
-    ⭐ v4.18.2更新：analyze_data_loss已改为异步函数，直接调用
+    [*] v4.18.2更新：analyze_data_loss已改为异步函数，直接调用
     """
     return await analyze_data_loss(db, file_id, task_id, data_domain)
 
@@ -402,9 +402,9 @@ async def async_check_data_loss_threshold(
     threshold: float = 5.0
 ) -> Dict[str, Any]:
     """
-    异步检查数据丢失阈值（⭐ v4.18.2更新：直接调用异步函数）
+    异步检查数据丢失阈值（[*] v4.18.2更新：直接调用异步函数）
     
-    ⭐ v4.18.2更新：check_data_loss_threshold已改为异步函数，直接调用
+    [*] v4.18.2更新：check_data_loss_threshold已改为异步函数，直接调用
     """
     return await check_data_loss_threshold(db, file_id, task_id, data_domain, threshold)
 

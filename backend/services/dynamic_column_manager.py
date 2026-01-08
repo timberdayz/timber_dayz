@@ -17,10 +17,10 @@ v4.14.0新增：
 """
 
 from typing import List, Set, Optional
-from sqlalchemy.ext.asyncio import AsyncSession  # ⭐ v4.18.2新增：异步支持
+from sqlalchemy.ext.asyncio import AsyncSession  # [*] v4.18.2新增：异步支持
 from sqlalchemy import text, inspect
 from sqlalchemy.exc import ProgrammingError
-import asyncio  # ⭐ v4.18.2新增：用于run_in_executor
+import asyncio  # [*] v4.18.2新增：用于run_in_executor
 
 from modules.core.logger import get_logger
 
@@ -64,7 +64,7 @@ class DynamicColumnManager:
         """
         规范化列名（符合PostgreSQL要求 + 移除货币代码）
         
-        ⭐ v4.16.0增强：统一列名管理（最佳实践）
+        [*] v4.16.0增强：统一列名管理（最佳实践）
         - 先移除货币代码（防御性处理，避免创建包含货币代码的列）
         - 再进行PostgreSQL列名规范化（符合数据库标识符规则）
         
@@ -88,7 +88,7 @@ class DynamicColumnManager:
         if column_name in SYSTEM_FIELDS:
             return column_name
         
-        # ⭐ v4.16.0新增：先移除货币代码（防御性处理）
+        # [*] v4.16.0新增：先移除货币代码（防御性处理）
         # 即使传入的列名已经归一化，这里也会再次处理，确保不会创建包含货币代码的列
         try:
             from backend.services.currency_extractor import get_currency_extractor
@@ -270,8 +270,8 @@ def get_dynamic_column_manager(db: AsyncSession) -> DynamicColumnManager:
     """
     获取动态列管理服务实例
     
-    ⭐ v4.18.2：支持异步会话
-    ⭐ v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
+    [*] v4.18.2：支持异步会话
+    [*] v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
     """
     return DynamicColumnManager(db)
 
@@ -283,9 +283,9 @@ async def async_ensure_columns_exist(
     schema: str = 'b_class'
 ) -> List[str]:
     """
-    异步确保列存在（⭐ v4.18.2新增，v4.19.0更新）
+    异步确保列存在（[*] v4.18.2新增，v4.19.0更新）
     
-    ⭐ v4.19.0更新：统一为异步架构，使用run_in_executor将DDL操作包装为异步
+    [*] v4.19.0更新：统一为异步架构，使用run_in_executor将DDL操作包装为异步
     
     Args:
         db: 异步数据库会话（AsyncSession）
@@ -296,7 +296,7 @@ async def async_ensure_columns_exist(
     Returns:
         新添加的列名列表
     """
-    # ⭐ v4.19.0更新：统一使用run_in_executor包装DDL操作
+    # [*] v4.19.0更新：统一使用run_in_executor包装DDL操作
     from backend.models.database import SessionLocal
     
     def _sync_ensure_columns():

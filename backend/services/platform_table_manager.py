@@ -16,10 +16,10 @@ v4.17.0新增：
 """
 
 from typing import Optional, Set
-from sqlalchemy.ext.asyncio import AsyncSession  # ⭐ v4.18.2新增：异步支持
+from sqlalchemy.ext.asyncio import AsyncSession  # [*] v4.18.2新增：异步支持
 from sqlalchemy import text, inspect
 from sqlalchemy.exc import ProgrammingError
-import asyncio  # ⭐ v4.18.2新增：用于run_in_executor
+import asyncio  # [*] v4.18.2新增：用于run_in_executor
 
 from modules.core.logger import get_logger
 from backend.services.dynamic_column_manager import get_dynamic_column_manager, SYSTEM_FIELDS
@@ -50,7 +50,7 @@ class PlatformTableManager:
         """
         self.db = db
         self.dynamic_column_manager = get_dynamic_column_manager(db)
-        # ⭐ v4.19.0更新：异步模式下不在构造函数中执行DDL，由调用者显式调用
+        # [*] v4.19.0更新：异步模式下不在构造函数中执行DDL，由调用者显式调用
     
     def _ensure_b_class_schema(self):
         """确保b_class schema存在"""
@@ -86,12 +86,12 @@ class PlatformTableManager:
         Returns:
             表名
         """
-        # ⭐ v4.17.0修复：验证platform不为空，避免表名错误（如fact__inventory_snapshot）
+        # [*] v4.17.0修复：验证platform不为空，避免表名错误（如fact__inventory_snapshot）
         platform = platform.lower().strip() if platform else "unknown"
         if not platform or platform == '':
             platform = "unknown"
             logger.warning(
-                f"[PlatformTableManager] ⚠️ platform为空，使用默认值: unknown "
+                f"[PlatformTableManager] [WARN] platform为空，使用默认值: unknown "
                 f"(data_domain={data_domain}, granularity={granularity})"
             )
         
@@ -137,7 +137,7 @@ class PlatformTableManager:
             )
             self._create_base_table(table_name, platform, data_domain, sub_domain, granularity)
         else:
-            # ⭐ v4.18.1新增：表存在时，检查并补齐缺失的period列（兼容旧表）
+            # [*] v4.18.1新增：表存在时，检查并补齐缺失的period列（兼容旧表）
             self._ensure_period_columns_exist(table_name)
             logger.debug(f"[PlatformTableManager] 表已存在: {table_name}")
         
@@ -288,7 +288,7 @@ class PlatformTableManager:
         """
         try:
             # 构建CREATE TABLE SQL
-            # ⭐ 注意：services域的表需要sub_domain字段，其他域sub_domain可为NULL
+            # [*] 注意：services域的表需要sub_domain字段，其他域sub_domain可为NULL
             sub_domain_column = ""
             if data_domain.lower() == 'services':
                 # services域必须提供sub_domain
@@ -325,7 +325,7 @@ class PlatformTableManager:
             self.db.execute(create_table_sql)
             
             # 创建唯一索引（使用COALESCE处理NULL值）
-            # ⚠️ PostgreSQL的UNIQUE约束不支持表达式，需要使用唯一索引
+            # [WARN] PostgreSQL的UNIQUE约束不支持表达式，需要使用唯一索引
             if data_domain.lower() == 'services':
                 unique_index_sql = text(f"""
                     CREATE UNIQUE INDEX IF NOT EXISTS "uq_{table_name}_hash" 
@@ -370,7 +370,7 @@ class PlatformTableManager:
             
             self.db.commit()
             
-            # ⭐ v4.17.0修复：索引创建后，显式刷新统计信息，确保索引立即可用
+            # [*] v4.17.0修复：索引创建后，显式刷新统计信息，确保索引立即可用
             # 这对于表达式索引特别重要，确保ON CONFLICT能正确匹配
             try:
                 refresh_stats_sql = text(f'ANALYZE b_class."{table_name}"')
@@ -403,8 +403,8 @@ def get_platform_table_manager(db: AsyncSession) -> PlatformTableManager:
     """
     获取平台表管理服务实例
     
-    ⭐ v4.18.2：支持异步会话
-    ⭐ v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
+    [*] v4.18.2：支持异步会话
+    [*] v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
     """
     return PlatformTableManager(db)
 
@@ -418,9 +418,9 @@ async def async_ensure_table_exists(
     business_fields: Optional[Set[str]] = None
 ) -> str:
     """
-    异步确保表存在（⭐ v4.18.2新增，v4.19.0更新）
+    异步确保表存在（[*] v4.18.2新增，v4.19.0更新）
     
-    ⭐ v4.19.0更新：统一为异步架构，使用run_in_executor将DDL操作包装为异步
+    [*] v4.19.0更新：统一为异步架构，使用run_in_executor将DDL操作包装为异步
     
     Args:
         db: 异步数据库会话（AsyncSession）
@@ -433,7 +433,7 @@ async def async_ensure_table_exists(
     Returns:
         表名
     """
-    # ⭐ v4.19.0更新：统一使用run_in_executor包装DDL操作
+    # [*] v4.19.0更新：统一使用run_in_executor包装DDL操作
     from backend.models.database import SessionLocal
     
     def _sync_ensure_table():

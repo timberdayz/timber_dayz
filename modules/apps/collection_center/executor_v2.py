@@ -120,7 +120,7 @@ class CollectionExecutorV2:
     5. 任务取消检测
     6. 验证码暂停处理
     7. 文件处理和注册
-    8. ⭐ Phase 9.1: 并行执行支持（多域并行采集）
+    8. [*] Phase 9.1: 并行执行支持（多域并行采集）
     """
     
     # 默认超时配置
@@ -472,7 +472,7 @@ class CollectionExecutorV2:
         
         # Phase 9 架构简化（方案B）：导出组件自包含
         # 
-        # 执行顺序简化为: Login → Export（循环各数据域）
+        # 执行顺序简化为: Login -> Export（循环各数据域）
         # 
         # 导出组件职责（自包含）：
         # 1. 导航到目标页面（URL 或点击菜单）
@@ -505,7 +505,7 @@ class CollectionExecutorV2:
             
             # 检查是否需要跳过登录（恢复任务）
             if context.current_component_index == 0:
-                # 1. 执行登录组件（⭐ Phase 9.4: 使用版本选择）
+                # 1. 执行登录组件（[*] Phase 9.4: 使用版本选择）
                 await self._update_status(task_id, 5, "正在加载登录组件...")
                 await self._check_cancelled(task_id)
                 
@@ -525,7 +525,7 @@ class CollectionExecutorV2:
                 context.current_component_index = 1
             
             # Phase 9 架构简化（方案B）：导出组件自包含
-            # 执行顺序简化为: Login → Export（循环各数据域）
+            # 执行顺序简化为: Login -> Export（循环各数据域）
             # 
             # 导出组件现在包含完整流程：
             # - 导航到目标页面
@@ -582,7 +582,7 @@ class CollectionExecutorV2:
                         # 加载并执行导出组件
                         component_name = f"{platform}/{domain}_export"
                         if sub_domain:
-                            # 尝试子域特定组件，如 shopee/services_agent_export（⭐ Phase 9.4: 版本选择）
+                            # 尝试子域特定组件，如 shopee/services_agent_export（[*] Phase 9.4: 版本选择）
                             component_name = f"{platform}/{domain}_{sub_domain}_export"
                             try:
                                 export_component = self._load_component_with_version(component_name, params, enable_ab_test=True)
@@ -1072,7 +1072,7 @@ class CollectionExecutorV2:
         for i, step in enumerate(steps):
             step_name = step.get('action', 'unknown')
             optional = step.get('optional', False)
-            max_retries = step.get('max_retries', 2)  # ⭐ 可配置重试次数，默认2次
+            max_retries = step.get('max_retries', 2)  # [*] 可配置重试次数，默认2次
             
             # 步骤执行前检查弹窗
             await step_popup_handler.before_step(page, step, component)
@@ -1080,7 +1080,7 @@ class CollectionExecutorV2:
             success = False
             last_error = None
             
-            # ⭐ 改进：支持多次重试
+            # [*] 改进：支持多次重试
             for attempt in range(max_retries + 1):
                 try:
                     # 执行步骤
@@ -1092,33 +1092,33 @@ class CollectionExecutorV2:
                     last_error = e
                     
                     if attempt < max_retries:
-                        # ⭐ 还有重试机会，处理弹窗后重试
+                        # [*] 还有重试机会，处理弹窗后重试
                         logger.warning(
                             f"Component {component_name}: Step {i} ({step_name}) failed "
                             f"(attempt {attempt + 1}/{max_retries + 1}): {str(e)[:100]}"
                         )
                         
-                        # ⭐ 关键改进：关闭弹窗并等待页面稳定
+                        # [*] 关键改进：关闭弹窗并等待页面稳定
                         await step_popup_handler.on_error(page, step, component)
                         
                         logger.info(f"Retrying step {i} ({step_name})...")
                     else:
-                        # ⭐ 所有重试都失败了
+                        # [*] 所有重试都失败了
                         logger.error(
                             f"Component {component_name}: Step {i} ({step_name}) failed "
                             f"after {max_retries + 1} attempts: {str(e)[:100]}"
                         )
             
-            # ⭐ 改进：根据步骤类型决定是否继续
+            # [*] 改进：根据步骤类型决定是否继续
             if not success:
                 if optional:
-                    # ⭐ Optional 步骤失败，记录警告但继续执行
+                    # [*] Optional 步骤失败，记录警告但继续执行
                     logger.warning(
                         f"Component {component_name}: Optional step {i} ({step_name}) failed, "
                         f"continuing with next steps"
                     )
                 else:
-                    # ⭐ 必需步骤失败，标记并退出
+                    # [*] 必需步骤失败，标记并退出
                     logger.error(
                         f"Component {component_name}: Required step {i} ({step_name}) failed, "
                         f"stopping component execution"
@@ -1174,7 +1174,7 @@ class CollectionExecutorV2:
                 logger.debug(f"Component {component_name}: No success criteria, assuming success")
                 success_result = True
         
-        # ⭐ Phase 9.4: 记录版本使用情况
+        # [*] Phase 9.4: 记录版本使用情况
         self._record_version_usage(component, success_result)
         
         return success_result
@@ -2542,7 +2542,7 @@ class CollectionExecutorV2:
         debug_mode: bool = False,
     ) -> CollectionResult:
         """
-        ⭐ Phase 9.1: 并行执行多个数据域
+        [*] Phase 9.1: 并行执行多个数据域
         
         每个数据域使用独立的浏览器上下文（BrowserContext），共享登录Cookie
         
@@ -2724,7 +2724,7 @@ class CollectionExecutorV2:
         total_domains: int,
     ) -> tuple:
         """
-        ⭐ Phase 9.1: 在独立浏览器上下文中执行单个数据域采集
+        [*] Phase 9.1: 在独立浏览器上下文中执行单个数据域采集
         
         Returns:
             tuple: (file_path, success)

@@ -53,13 +53,13 @@ class EmailOTPService:
     def connect_imap(self) -> Optional[imaplib.IMAP4_SSL]:
         """连接IMAP服务器"""
         try:
-            logger.info(f"🔗 连接IMAP服务器: {self.imap_server}:{self.imap_port}")
+            logger.info(f"[LINK] 连接IMAP服务器: {self.imap_server}:{self.imap_port}")
             imap = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
             imap.login(self.email, self.password)
-            logger.info("✅ IMAP连接成功")
+            logger.info("[OK] IMAP连接成功")
             return imap
         except Exception as e:
-            logger.error(f"❌ IMAP连接失败: {e}")
+            logger.error(f"[FAIL] IMAP连接失败: {e}")
             return None
     
     def search_otp_emails(self, imap: imaplib.IMAP4_SSL, minutes_back: int = 10) -> List[str]:
@@ -79,16 +79,16 @@ class EmailOTPService:
             
             # 构建搜索条件
             search_criteria = f'(SINCE "{self._get_date_string(minutes_back)}")'
-            logger.info(f"🔍 搜索邮件: {search_criteria}")
+            logger.info(f"[SEARCH] 搜索邮件: {search_criteria}")
             
             # 搜索邮件
             status, messages = imap.search(None, search_criteria)
             if status != 'OK':
-                logger.error(f"❌ 邮件搜索失败: {status}")
+                logger.error(f"[FAIL] 邮件搜索失败: {status}")
                 return []
             
             email_ids = messages[0].split()
-            logger.info(f"📧 找到 {len(email_ids)} 封邮件")
+            logger.info(f"[EMAIL] 找到 {len(email_ids)} 封邮件")
             
             # 过滤包含验证码关键词的邮件
             otp_email_ids = []
@@ -106,17 +106,17 @@ class EmailOTPService:
                     # 检查是否包含验证码关键词
                     if self._contains_otp_keywords(subject):
                         otp_email_ids.append(email_id.decode())
-                        logger.info(f"✅ 找到验证码邮件: {subject}")
+                        logger.info(f"[OK] 找到验证码邮件: {subject}")
                 
                 except Exception as e:
                     logger.debug(f"处理邮件 {email_id} 失败: {e}")
                     continue
             
-            logger.info(f"📧 找到 {len(otp_email_ids)} 封验证码邮件")
+            logger.info(f"[EMAIL] 找到 {len(otp_email_ids)} 封验证码邮件")
             return otp_email_ids
             
         except Exception as e:
-            logger.error(f"❌ 搜索验证码邮件失败: {e}")
+            logger.error(f"[FAIL] 搜索验证码邮件失败: {e}")
             return []
     
     def extract_otp_from_email(self, imap: imaplib.IMAP4_SSL, email_id: str) -> Optional[str]:
@@ -134,7 +134,7 @@ class EmailOTPService:
             # 获取邮件内容
             status, msg_data = imap.fetch(email_id, '(RFC822)')
             if status != 'OK':
-                logger.error(f"❌ 获取邮件内容失败: {status}")
+                logger.error(f"[FAIL] 获取邮件内容失败: {status}")
                 return None
             
             # 解析邮件
@@ -143,20 +143,20 @@ class EmailOTPService:
             # 获取邮件正文
             body = self._get_email_body(email_message)
             if not body:
-                logger.warning("⚠️ 邮件正文为空")
+                logger.warning("[WARN] 邮件正文为空")
                 return None
             
             # 提取验证码
             otp = self._extract_otp_from_text(body)
             if otp:
-                logger.info(f"✅ 从邮件中提取到验证码: {otp}")
+                logger.info(f"[OK] 从邮件中提取到验证码: {otp}")
                 return otp
             
-            logger.warning("⚠️ 未从邮件中提取到验证码")
+            logger.warning("[WARN] 未从邮件中提取到验证码")
             return None
             
         except Exception as e:
-            logger.error(f"❌ 提取验证码失败: {e}")
+            logger.error(f"[FAIL] 提取验证码失败: {e}")
             return None
     
     def get_latest_otp(self, minutes_back: int = 10, max_attempts: int = 3) -> Optional[str]:
@@ -172,7 +172,7 @@ class EmailOTPService:
         """
         for attempt in range(max_attempts):
             try:
-                logger.info(f"🔄 第 {attempt + 1} 次尝试获取验证码...")
+                logger.info(f"[RETRY] 第 {attempt + 1} 次尝试获取验证码...")
                 
                 # 连接IMAP
                 imap = self.connect_imap()
@@ -183,7 +183,7 @@ class EmailOTPService:
                     # 搜索验证码邮件
                     otp_email_ids = self.search_otp_emails(imap, minutes_back)
                     if not otp_email_ids:
-                        logger.warning("⚠️ 未找到验证码邮件")
+                        logger.warning("[WARN] 未找到验证码邮件")
                         time.sleep(5)
                         continue
                     
@@ -204,15 +204,15 @@ class EmailOTPService:
             
                 # 等待一段时间后重试
                 if attempt < max_attempts - 1:
-                    logger.info(f"⏳ 等待 10 秒后重试...")
+                    logger.info(f"[WAIT] 等待 10 秒后重试...")
                     time.sleep(10)
             
         except Exception as e:
-                logger.error(f"❌ 第 {attempt + 1} 次尝试失败: {e}")
+                logger.error(f"[FAIL] 第 {attempt + 1} 次尝试失败: {e}")
                 if attempt < max_attempts - 1:
                     time.sleep(5)
         
-        logger.error("❌ 所有尝试都失败了")
+        logger.error("[FAIL] 所有尝试都失败了")
             return None
     
     def _get_date_string(self, minutes_back: int) -> str:
@@ -303,7 +303,7 @@ def create_email_otp_service(account_config: Dict[str, Any]) -> Optional[EmailOT
         
         # 检查必要的配置
         if not email_config['email'] or not email_config['password']:
-            logger.warning("⚠️ 邮箱配置不完整")
+            logger.warning("[WARN] 邮箱配置不完整")
             return None
         
         # 根据邮箱域名设置默认服务器
@@ -318,13 +318,13 @@ def create_email_otp_service(account_config: Dict[str, Any]) -> Optional[EmailOT
             elif 'outlook.com' in email_domain or 'hotmail.com' in email_domain:
                 email_config['imap_server'] = 'outlook.office365.com'
             else:
-                logger.warning(f"⚠️ 未知邮箱域名: {email_domain}")
+                logger.warning(f"[WARN] 未知邮箱域名: {email_domain}")
                 return None
         
     return EmailOTPService(email_config)
         
     except Exception as e:
-        logger.error(f"❌ 创建邮箱验证码服务失败: {e}")
+        logger.error(f"[FAIL] 创建邮箱验证码服务失败: {e}")
         return None
 
 
@@ -359,7 +359,7 @@ EMAIL_CONFIGS = {
 
 if __name__ == "__main__":
     # 测试代码
-    print("🧪 邮箱验证码服务测试")
+    print("[TEST] 邮箱验证码服务测试")
     print("=" * 50)
     
     # 测试配置
@@ -372,11 +372,11 @@ if __name__ == "__main__":
     
     # 创建服务
     service = EmailOTPService(test_config)
-    print(f"✅ 服务创建成功: {service.email}")
+    print(f"[OK] 服务创建成功: {service.email}")
         
     # 测试验证码提取
     test_text = "您的验证码是 123456，请在5分钟内完成验证。"
     otp = service._extract_otp_from_text(test_text)
-    print(f"✅ 验证码提取测试: {otp}")
+    print(f"[OK] 验证码提取测试: {otp}")
     
-    print("\n🎉 测试完成") 
+    print("\n[DONE] 测试完成") 

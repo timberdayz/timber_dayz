@@ -57,7 +57,7 @@ class CurrencyExtractor:
         # 获取所有有效的货币代码列表（用于验证）
         self.valid_codes = set(self.normalizer.CODE_TO_NAME.keys())
         
-        # ⭐ v4.16.0增强：支持多种货币代码格式（按常见程度排序）
+        # [*] v4.16.0增强：支持多种货币代码格式（按常见程度排序）
         # 1. ISO代码格式（3位字母，支持大小写混合）
         self.ISO_CODE_PATTERNS = [
             re.compile(r'\(([A-Z]{3})\)$', re.IGNORECASE),      # 格式1: (BRL) - 末尾括号，最常见
@@ -111,7 +111,7 @@ class CurrencyExtractor:
         """
         从字段名中提取货币代码（支持多种格式）
         
-        ⭐ v4.16.0增强：支持更多格式
+        [*] v4.16.0增强：支持更多格式
         - ISO代码格式：(BRL), _BRL, -BRL,  BRL（支持末尾和中间位置，大小写混合）
         - 货币符号格式：R$, S$, €, £, ¥等（支持括号和末尾）
         - 中文名称格式：巴西雷亚尔, 新加坡元等（支持括号和末尾）
@@ -126,7 +126,7 @@ class CurrencyExtractor:
             return None
         
         # 1. 优先尝试ISO代码格式（最常见）
-        # ⭐ v4.16.0修复：当有多个货币代码时，匹配第一个出现的（按位置排序）
+        # [*] v4.16.0修复：当有多个货币代码时，匹配第一个出现的（按位置排序）
         iso_matches = []
         for pattern in self.ISO_CODE_PATTERNS:
             for match in pattern.finditer(field_name):
@@ -206,7 +206,7 @@ class CurrencyExtractor:
         """
         归一化字段名（移除货币代码部分，支持多种格式）
         
-        ⭐ v4.16.0增强：支持清理更多格式
+        [*] v4.16.0增强：支持清理更多格式
         - 移除ISO代码部分（支持末尾和中间位置）
         - 移除货币符号（支持括号和末尾）
         - 移除中文货币名称（支持括号和末尾）
@@ -302,7 +302,7 @@ class CurrencyExtractor:
         """
         提取货币代码并归一化字段名（一步完成）
         
-        ⭐ v4.16.0增强：支持更多货币代码格式
+        [*] v4.16.0增强：支持更多货币代码格式
         
         Args:
             field_name: 原始字段名（如 "销售额（已付款订单）(BRL)" 或 "销售R$" 或 "销售额（巴西雷亚尔）"）
@@ -320,7 +320,7 @@ class CurrencyExtractor:
         """
         提取货币代码并返回调试信息（用于问题排查）
         
-        ⭐ v4.16.0新增：调试功能
+        [*] v4.16.0新增：调试功能
         
         Args:
             field_name: 原始字段名

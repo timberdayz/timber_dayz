@@ -70,13 +70,13 @@ def _auto_format_script(script_path: Path):
             compile(formatted_content, str(script_path), 'exec')
             # 语法正确，保存格式化后的内容
             script_path.write_text(formatted_content, encoding='utf-8')
-            logger.debug(f"✅ 脚本自动格式化完成: {script_path}")
+            logger.debug(f"[OK] 脚本自动格式化完成: {script_path}")
         except SyntaxError as se:
-            logger.warning(f"⚠️ 脚本语法检查失败，保持原内容: {se}")
+            logger.warning(f"[WARN] 脚本语法检查失败，保持原内容: {se}")
             # 语法错误时不覆盖原文件
 
     except Exception as e:
-        logger.warning(f"⚠️ 自动格式化失败: {e}")
+        logger.warning(f"[WARN] 自动格式化失败: {e}")
         # 格式化失败不影响主流程
 
 def create_platform_recording_template(account: Dict, platform: str, 
@@ -115,7 +115,7 @@ def create_platform_recording_template(account: Dict, platform: str,
         return template_path
         
     except Exception as e:
-        print(f"❌ 创建录制模板失败: {e}")
+        print(f"[FAIL] 创建录制模板失败: {e}")
         return None
 
 def _generate_template_content(account: Dict, platform: str, 
@@ -169,11 +169,11 @@ class {platform.replace(' ', '')}Recorder:
             
 {_get_recording_logic(platform, recording_type, data_type_key)}
             
-            logger.info(f"✅ {platform}录制完成")
+            logger.info(f"[OK] {platform}录制完成")
             return True
             
         except Exception as e:
-            logger.error(f"❌ {platform}录制失败: {{e}}")
+            logger.error(f"[FAIL] {platform}录制失败: {{e}}")
             return False
 '''
 
@@ -188,7 +188,7 @@ def main():
         'store_name': '{account_name}'
     }}
     
-    print("🚀 启动{platform}录制...")
+    print("[START] 启动{platform}录制...")
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, slow_mo=500)
@@ -266,7 +266,7 @@ def _get_auto_login_logic(platform: str) -> str:
                     try:
                         if page.locator(selector).count() > 0:
                             page.fill(selector, self.account_config['username'])
-                            logger.info(f"✅ 用户名已填写: {self.account_config['username']}")
+                            logger.info(f"[OK] 用户名已填写: {self.account_config['username']}")
                             break
                     except:
                         continue
@@ -283,7 +283,7 @@ def _get_auto_login_logic(platform: str) -> str:
                     try:
                         if page.locator(selector).count() > 0:
                             page.fill(selector, self.account_config['password'])
-                            logger.info("✅ 密码已填写")
+                            logger.info("[OK] 密码已填写")
                             break
                     except:
                         continue
@@ -302,13 +302,13 @@ def _get_auto_login_logic(platform: str) -> str:
                     try:
                         if page.locator(selector).count() > 0:
                             page.click(selector)
-                            logger.info("✅ 登录按钮已点击")
+                            logger.info("[OK] 登录按钮已点击")
                             break
                     except:
                         continue
                 
                 # 等待登录结果
-                logger.info("⏳ 等待登录完成...")
+                logger.info("[WAIT] 等待登录完成...")
                 time.sleep(5)
                 
                 # 检查验证码弹窗
@@ -325,15 +325,15 @@ def _get_auto_login_logic(platform: str) -> str:
                     try:
                         if page.locator(selector).count() > 0:
                             has_verification = True
-                            logger.info(f"📱 检测到验证码弹窗: {selector}")
+                            logger.info(f"[PHONE] 检测到验证码弹窗: {selector}")
                             break
                     except:
                         continue
                 
                 if has_verification:
-                    logger.info("📱 检测到验证码，启动智能处理...")
+                    logger.info("[PHONE] 检测到验证码，启动智能处理...")
                     # 这里可以添加智能验证码处理逻辑
-                    print("💡 验证码处理演示：")
+                    print("[TIP] 验证码处理演示：")
                     print("  1. 检测验证码类型（邮箱/短信）")
                     print("  2. 自动获取验证码")
                     print("  3. 自动填写验证码")
@@ -342,18 +342,18 @@ def _get_auto_login_logic(platform: str) -> str:
                     # 暂停让用户观察
                     page.pause()
                 else:
-                    logger.info("✅ 未检测到验证码需求")
+                    logger.info("[OK] 未检测到验证码需求")
                 
                 # 检查登录结果
                 current_url = page.url
                 if "seller.shopee" in current_url:
-                    logger.info("✅ 登录成功，已进入Shopee卖家后台")
+                    logger.info("[OK] 登录成功，已进入Shopee卖家后台")
                 else:
-                    logger.warning("⚠️ 登录状态待确认")
+                    logger.warning("[WARN] 登录状态待确认")
                     
             except Exception as e:
-                logger.error(f"❌ 自动登录演示失败: {e}")
-                print("💡 请手动完成登录流程")
+                logger.error(f"[FAIL] 自动登录演示失败: {e}")
+                print("[TIP] 请手动完成登录流程")
                 page.pause()'''
     
     elif platform in ["妙手ERP", "miaoshou", "miaoshou_erp"]:
@@ -381,7 +381,7 @@ def _get_auto_login_logic(platform: str) -> str:
                     try:
                         if page.locator(selector).count() > 0:
                             page.fill(selector, username)
-                            logger.info(f"✅ 用户名已填写: {username}")
+                            logger.info(f"[OK] 用户名已填写: {username}")
                             break
                     except:
                         continue
@@ -398,7 +398,7 @@ def _get_auto_login_logic(platform: str) -> str:
                     try:
                         if page.locator(selector).count() > 0:
                             page.fill(selector, password)
-                            logger.info("✅ 密码已填写")
+                            logger.info("[OK] 密码已填写")
                             break
                     except:
                         continue
@@ -419,13 +419,13 @@ def _get_auto_login_logic(platform: str) -> str:
                     try:
                         if page.locator(selector).count() > 0:
                             page.click(selector)
-                            logger.info("✅ 登录按钮已点击")
+                            logger.info("[OK] 登录按钮已点击")
                             break
                     except:
                         continue
                 
                 # 等待登录结果
-                logger.info("⏳ 等待登录完成...")
+                logger.info("[WAIT] 等待登录完成...")
                 time.sleep(5)
                 
                 # 检查验证码
@@ -445,8 +445,8 @@ def _get_auto_login_logic(platform: str) -> str:
                         continue
                 
                 if need_captcha:
-                    logger.info("📱 检测到验证码，启动智能处理...")
-                    print("💡 验证码处理演示：")
+                    logger.info("[PHONE] 检测到验证码，启动智能处理...")
+                    print("[TIP] 验证码处理演示：")
                     print("  1. 自动请求邮箱验证码")
                     print("  2. 从邮箱获取验证码")
                     print("  3. 自动填写验证码")
@@ -454,11 +454,11 @@ def _get_auto_login_logic(platform: str) -> str:
                     
                     page.pause()
                 else:
-                    logger.info("✅ 未检测到验证码需求")
+                    logger.info("[OK] 未检测到验证码需求")
                     
             except Exception as e:
-                logger.error(f"❌ 自动登录演示失败: {e}")
-                print("💡 请手动完成登录流程")
+                logger.error(f"[FAIL] 自动登录演示失败: {e}")
+                print("[TIP] 请手动完成登录流程")
                 page.pause()'''
     
     else:
@@ -473,12 +473,12 @@ def _get_auto_login_logic(platform: str) -> str:
                          self.account_config['password'])
                 page.click('button[type="submit"], input[type="submit"], button:has-text("登录")')
                 
-                logger.info("✅ 自动登录演示完成")
+                logger.info("[OK] 自动登录演示完成")
                 time.sleep(3)
                 
             except Exception as e:
-                logger.error(f"❌ 自动登录失败: {e}")
-                print("💡 请手动完成登录流程")
+                logger.error(f"[FAIL] 自动登录失败: {e}")
+                print("[TIP] 请手动完成登录流程")
                 
             page.pause()'''
 
@@ -497,8 +497,8 @@ def _get_collection_logic(platform: str, data_type_key: Optional[str]) -> str:
             time.sleep(5)
             
             # 进入数据采集录制阶段
-            logger.info("✅ 登录完成，开始录制数据采集操作")
-            print("📊 请在浏览器中录制以下操作：")
+            logger.info("[OK] 登录完成，开始录制数据采集操作")
+            print("[DATA] 请在浏览器中录制以下操作：")
             print("  1. 导航到{data_type_desc}页面")
             print("  2. 设置筛选条件（日期范围等）")
             print("  3. 执行数据查询/导出操作")
@@ -515,7 +515,7 @@ def _get_complete_logic(platform: str, data_type_key: Optional[str]) -> str:
     return f'''            # 完整流程录制（登录 + {data_type_desc}采集）
             logger.info("开始完整流程录制...")
             
-            print("🔄 请在浏览器中录制完整流程：")
+            print("[RETRY] 请在浏览器中录制完整流程：")
             print("  第一阶段: 登录流程")
             print("    1. 填写用户名和密码")
             print("    2. 处理验证码（如有）")
@@ -669,17 +669,17 @@ def validate_config():
         assert ACCOUNT_CONFIG['account_id'], "账号ID不能为空"
         assert ACCOUNT_CONFIG['login_config']['url'], "登录URL不能为空"
         assert ACCOUNT_CONFIG['login_config']['username'], "用户名不能为空"
-        print("✅ 账号配置验证通过")
+        print("[OK] 账号配置验证通过")
         return True
     except AssertionError as e:
-        print(f"❌ 配置验证失败: {{e}}")
+        print(f"[FAIL] 配置验证失败: {{e}}")
         return False
     except Exception as e:
-        print(f"❌ 配置验证异常: {{e}}")
+        print(f"[FAIL] 配置验证异常: {{e}}")
         return False
 
 if __name__ == "__main__":
-    print("🔧 妙手ERP账号覆盖配置")
+    print("[TOOL] 妙手ERP账号覆盖配置")
     print("=" * 40)
     validate_config()
     print(f"账号: {{ACCOUNT_CONFIG['store_name']}}")
@@ -692,7 +692,7 @@ if __name__ == "__main__":
         return template_path
         
     except Exception as e:
-        print(f"❌ 创建妙手ERP模板失败: {e}")
+        print(f"[FAIL] 创建妙手ERP模板失败: {e}")
         return None 
 
 def generate_script_from_events(account: Dict, platform: str, recording_type: str, events_file: Path, output_dir: Path) -> Path:

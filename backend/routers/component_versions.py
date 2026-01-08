@@ -170,15 +170,15 @@ async def list_versions(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
-    request: Request = None  # ⭐ Phase 3: 用于获取缓存服务
+    request: Request = None  # [*] Phase 3: 用于获取缓存服务
 ):
     """
     查询组件版本列表
     
     支持按平台、组件类型、状态筛选，分页查询
-    ⭐ Phase 3: 添加缓存支持（5分钟TTL）
+    [*] Phase 3: 添加缓存支持（5分钟TTL）
     """
-    # ⭐ Phase 3: 尝试从缓存获取
+    # [*] Phase 3: 尝试从缓存获取
     if request and hasattr(request.app.state, 'cache_service'):
         cache_service = request.app.state.cache_service
         cached_data = await cache_service.get(
@@ -270,7 +270,7 @@ async def list_versions(
             page_size=page_size
         )
         
-        # ⭐ Phase 3: 写入缓存
+        # [*] Phase 3: 写入缓存
         if request and hasattr(request.app.state, 'cache_service'):
             cache_service = request.app.state.cache_service
             await cache_service.set(
@@ -915,7 +915,7 @@ async def test_component_version(
             platform = component_config.get('platform', version.component_name.split('/')[0])
         component_name = component_path.stem
         
-        # 4. 使用统一服务准备账号信息 ⭐
+        # 4. 使用统一服务准备账号信息 [*]
         account_info = ComponentTestService.prepare_account_info(account)
         
         # #region agent log
@@ -933,7 +933,7 @@ async def test_component_version(
         # #endregion
         
         # 6. 使用独立进程运行测试（subprocess 方案）
-        # ⭐ v4.7.4: 移除 WebSocket，使用 HTTP 轮询获取进度
+        # [*] v4.7.4: 移除 WebSocket，使用 HTTP 轮询获取进度
         # 进度和结果保存在 temp/ 目录下，通过状态查询接口获取
         
         # 创建进度/结果目录
@@ -1045,7 +1045,7 @@ async def test_component_version(
                         with open(result_path, 'r', encoding='utf-8') as f:
                             result_dict = json_lib.load(f)
                         
-                        # ⭐ v4.18.2修复：使用异步数据库操作，避免阻塞
+                        # [*] v4.18.2修复：使用异步数据库操作，避免阻塞
                         async def update_version_stats_async():
                             from backend.models.database import AsyncSessionLocal
                             from sqlalchemy import select
@@ -1096,7 +1096,7 @@ async def test_component_version(
                                     )
                                     result.step_results.append(step_result)
                                 
-                                # ⭐ v4.18.2修复：使用本文件中的异步 save_test_history 函数
+                                # [*] v4.18.2修复：使用本文件中的异步 save_test_history 函数
                                 await save_test_history(
                                     db=test_db,
                                     component_name=version.component_name,
@@ -1234,7 +1234,7 @@ async def get_test_status(
             with open(result_path, 'r', encoding='utf-8') as f:
                 test_result = json.load(f)
             
-            # ⭐ v4.7.4: 如果缺少 success_rate，计算它（兼容旧数据）
+            # [*] v4.7.4: 如果缺少 success_rate，计算它（兼容旧数据）
             if 'success_rate' not in test_result or test_result.get('success_rate') is None:
                 steps_total = test_result.get('steps_total', 0)
                 steps_passed = test_result.get('steps_passed', 0)

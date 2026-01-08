@@ -7,7 +7,7 @@
 1. 创建.meta.json伴生文件
 2. 读取和更新元数据文件
 3. 记录数据处理历史（数据血缘）
-4. 支持多阶段数据流转（raw→staging→curated）
+4. 支持多阶段数据流转（raw->staging->curated）
 
 元数据文件格式：
 {
@@ -167,7 +167,7 @@ class MetadataManager:
             with open(meta_path, 'w', encoding='utf-8') as f:
                 json.dump(metadata, f, indent=2, ensure_ascii=False)
             
-            logger.debug(f"元数据已更新: {meta_path} → {stage}/{status}")
+            logger.debug(f"元数据已更新: {meta_path} -> {stage}/{status}")
             
         except Exception as e:
             logger.error(f"更新元数据失败 {meta_path}: {e}")

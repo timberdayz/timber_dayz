@@ -84,7 +84,7 @@ class ShopResolver:
         """
         解析店铺归属（仅从.meta.json提取）
         
-        ⭐ 修改：只从.meta.json伴生文件中提取shop_id，不从其他来源提取
+        [*] 修改：只从.meta.json伴生文件中提取shop_id，不从其他来源提取
         
         Args:
             file_path: 文件路径
@@ -96,7 +96,7 @@ class ShopResolver:
         """
         path = Path(file_path)
         
-        # ⭐ 唯一策略：.meta.json伴生文件
+        # [*] 唯一策略：.meta.json伴生文件
         meta_file = path.with_suffix('.meta.json')
         if meta_file.exists():
             try:
@@ -125,7 +125,7 @@ class ShopResolver:
             except Exception as e:
                 logger.debug(f"读取.meta.json失败: {e}")
         
-        # ⭐ 如果没有.meta.json或其中没有shop_id，返回失败（但不阻止同步）
+        # [*] 如果没有.meta.json或其中没有shop_id，返回失败（但不阻止同步）
         return ResolvedShop(
             shop_id=None,
             confidence=0.0,
@@ -214,7 +214,7 @@ class ShopResolver:
             m = re.search(r'shop_([a-zA-Z0-9_\-\.]+)', filename, re.IGNORECASE)
             if m:
                 candidate = m.group(1)
-                # ⭐ v4.17.0修复：排除包含日期或snapshot的模式
+                # [*] v4.17.0修复：排除包含日期或snapshot的模式
                 if not (re.search(r'\d{8}', candidate) or '_snapshot_' in candidate.lower()):
                     return candidate
             
@@ -224,7 +224,7 @@ class ShopResolver:
                 m = re.search(pattern, filename, re.IGNORECASE)
                 if m:
                     candidate = m.group(1)
-                    # ⭐ v4.17.0修复：排除包含日期或snapshot的模式
+                    # [*] v4.17.0修复：排除包含日期或snapshot的模式
                     has_date_pattern = bool(re.search(r'\d{8}', candidate))
                     has_snapshot = '_snapshot_' in candidate.lower()
                     if has_date_pattern or has_snapshot:
@@ -235,7 +235,7 @@ class ShopResolver:
                         return candidate
             
             # 模式3：纯数字ID（至少8位）
-            # ⚠️ 注意：8位数字可能是日期（YYYYMMDD），需要谨慎处理
+            # [WARN] 注意：8位数字可能是日期（YYYYMMDD），需要谨慎处理
             # 对于miaoshou平台，8位数字很可能是日期，不应作为shop_id
             m = re.search(r'(\d{8,})', filename)
             if m:

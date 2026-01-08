@@ -321,7 +321,7 @@ class BatchImportTester:
 
 async def run_batch_import_tests():
     """运行批量导入测试"""
-    print("🚀 开始批量数据导入测试")
+    print("[START] 开始批量数据导入测试")
     print("="*60)
     
     # 测试配置
@@ -336,7 +336,7 @@ async def run_batch_import_tests():
     
     async with BatchImportTester() as tester:
         for config in test_configs:
-            print(f"\n🧪 {config['name']}: {config['records']} 条记录, 批次大小: {config['batch_size']}")
+            print(f"\n[TEST] {config['name']}: {config['records']} 条记录, 批次大小: {config['batch_size']}")
             print("-" * 60)
             
             # 生成测试数据
@@ -355,7 +355,7 @@ async def run_batch_import_tests():
                 all_results.append(individual_result)
             
             # 等待一段时间再进行下一轮测试
-            print(f"\n⏳ 等待10秒后进行下一轮测试...")
+            print(f"\n[WAIT] 等待10秒后进行下一轮测试...")
             await asyncio.sleep(10)
     
     # 保存所有测试结果
@@ -363,7 +363,7 @@ async def run_batch_import_tests():
     filename = f"temp/outputs/batch_import_test_results_{timestamp}.json"
     tester.save_test_results(all_results, filename)
     
-    print(f"\n🎉 批量数据导入测试完成！")
+    print(f"\n[DONE] 批量数据导入测试完成！")
     print(f"总共执行了 {len(all_results)} 个测试")
     print(f"结果已保存到: {filename}")
 

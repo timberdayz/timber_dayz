@@ -101,7 +101,7 @@ class Settings:
     SECRET_KEY: str = os.getenv("SECRET_KEY", "xihong-erp-secret-key-2025")
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "xihong-erp-jwt-secret-2025")
     JWT_ALGORITHM: str = "HS256"
-    # ⭐ v6.0.0更新：缩短 Access Token 过期时间（Phase 4: 优化 Token 过期时间）
+    # [*] v6.0.0更新：缩短 Access Token 过期时间（Phase 4: 优化 Token 过期时间）
     # 从 30 分钟缩短到 15 分钟，提升安全性（token 泄露后有效期更短）
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
@@ -128,7 +128,7 @@ class Settings:
     TEMP_DIR: str = "temp"
     
     # Redis配置（可选）
-    # ⭐ v4.19.5 新增：支持 Redis 密码配置
+    # [*] v4.19.5 新增：支持 Redis 密码配置
     # 优先级：REDIS_URL > (REDIS_HOST + REDIS_PORT + REDIS_PASSWORD)
     _redis_url = os.getenv("REDIS_URL")
     if _redis_url:
@@ -162,7 +162,7 @@ class Settings:
         """
         获取限流器存储URI（环境感知）
         
-        ⭐ v4.19.5 新增：限流器存储配置
+        [*] v4.19.5 新增：限流器存储配置
         
         策略：
         - 生产环境：强制使用 Redis（分布式、高性能）

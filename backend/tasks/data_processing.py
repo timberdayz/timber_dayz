@@ -11,7 +11,7 @@ sys.path.insert(0, str(root_dir))
 
 from backend.celery_app import celery_app
 from backend.models.database import SessionLocal
-# ⚠️ v4.19.1：preview 函数已重构，使用 ExcelParser.read_excel 替代
+# [WARN] v4.19.1：preview 函数已重构，使用 ExcelParser.read_excel 替代
 from backend.services.excel_parser import ExcelParser
 from backend.services.field_mapping.mapper import suggest_mappings
 from backend.services.data_validator import validate_orders, validate_product_metrics
@@ -47,7 +47,7 @@ def process_excel_file(file_path: str, platform: str, data_domain: str, mappings
         
         # 1. 读取Excel文件
         logger.info("  Step 1: Reading Excel...")
-        # ⚠️ v4.19.1：使用 ExcelParser 替代旧的 preview_service
+        # [WARN] v4.19.1：使用 ExcelParser 替代旧的 preview_service
         df = ExcelParser.read_excel(file_path)
         rows = df.to_dict('records') if df is not None else []
         

@@ -15,7 +15,7 @@ class ShopeeFinanceExport(ExportComponent):
 
     - 只依赖 finance_config 中的 URL/选择器
     - 统一落盘到 temp/outputs/shopee/<账号>/<店铺>/finance/<粒度>/
-    - 优先 UI 导出（点击→等待→下载），后续可扩展 API 备选
+    - 优先 UI 导出（点击->等待->下载），后续可扩展 API 备选
     """
 
     # Component metadata
@@ -54,7 +54,7 @@ class ShopeeFinanceExport(ExportComponent):
                     continue
             await page.wait_for_timeout(500)
 
-            # 1.1) 统一日期设置（可选）：若上游注入了 date_preset，则执行"配方优先→快捷项回退→严格校验"
+            # 1.1) 统一日期设置（可选）：若上游注入了 date_preset，则执行"配方优先->快捷项回退->严格校验"
             try:
                 cfg = (self.ctx.config or {})
                 preset = cfg.get("date_preset")

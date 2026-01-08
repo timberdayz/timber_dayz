@@ -30,9 +30,16 @@ import os
 def safe_print(text):
     """安全打印（处理Windows GBK编码）"""
     try:
-        print(text)
+        print(text, flush=True)
     except UnicodeEncodeError:
-        print(text.encode('gbk', errors='ignore').decode('gbk'))
+        try:
+            # 尝试GBK编码
+            safe_text = text.encode('gbk', errors='ignore').decode('gbk')
+            print(safe_text, flush=True)
+        except:
+            # 降级到ASCII
+            safe_text = text.encode('ascii', errors='ignore').decode('ascii')
+            print(safe_text, flush=True)
 
 def print_banner():
     """打印系统横幅"""
@@ -84,7 +91,7 @@ def check_redis():
     
     try:
         import redis
-        # ⭐ 修复：从环境变量读取REDIS_URL（支持密码）
+        # [FIX] 修复：从环境变量读取REDIS_URL（支持密码）
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         
         # 如果REDIS_URL中没有密码，尝试从REDIS_PASSWORD读取
@@ -133,7 +140,7 @@ def check_redis():
                     else:
                         safe_print(f"  当前REDIS_URL: {current_redis_url}")
                 else:
-                safe_print("  提示: 请检查Redis是否正常启动")
+                    safe_print("  提示: 请检查Redis是否正常启动")
                 return False
         except:
             pass
@@ -338,7 +345,7 @@ def start_services_with_docker_compose():
     
     project_root = Path(__file__).parent
     
-    # ⭐ Phase 1.3: 环境变量验证（开发环境可跳过）
+    # [PHASE 1.3] 环境变量验证（开发环境可跳过）
     env_file = project_root / ".env"
     skip_validation = os.getenv("SKIP_ENV_VALIDATION", "false").lower() == "true"
     
@@ -347,6 +354,10 @@ def start_services_with_docker_compose():
         validate_script = project_root / "scripts" / "validate-env.py"
         if validate_script.exists():
             try:
+                # [FIX] 设置Python IO编码环境变量，确保subprocess输出UTF-8
+                env = os.environ.copy()
+                env['PYTHONIOENCODING'] = 'utf-8'
+                
                 result = subprocess.run(
                     [sys.executable, str(validate_script), "--env-file", str(env_file), "--skip-p1"],
                     cwd=project_root,
@@ -354,11 +365,24 @@ def start_services_with_docker_compose():
                     text=True,
                     timeout=10,
                     encoding='utf-8',
-                    errors='ignore'
+                    errors='replace',
+                    env=env
                 )
                 if result.returncode != 0:
                     safe_print("  [WARNING] 环境变量验证失败（开发环境仅检查P0变量）")
-                    safe_print(f"  错误: {result.stderr[:200] if result.stderr else result.stdout[:200]}")
+                    error_msg = result.stderr if result.stderr else result.stdout
+                    if error_msg:
+                        # [FIX] 改进错误消息处理：subprocess输出已经是UTF-8字符串，直接显示
+                        # 但需要确保在Windows控制台正确显示
+                        try:
+                            # 错误消息已经是UTF-8编码的字符串（通过subprocess的encoding='utf-8'）
+                            # 直接使用safe_print，它会处理GBK编码问题
+                            error_lines = error_msg.split('\n')[:5]  # 只显示前5行
+                            for line in error_lines:
+                                if line.strip():
+                                    safe_print(f"    {line}")
+                        except Exception as e:
+                            safe_print(f"  错误: [无法显示错误详情: {type(e).__name__}]")
                     safe_print("  提示: 可以设置 SKIP_ENV_VALIDATION=true 跳过验证")
                     # 开发环境不阻止启动，仅警告
                 else:
@@ -400,7 +424,7 @@ def start_services_with_docker_compose():
         safe_print("  [等待] 服务启动中...")
         time.sleep(8)  # 增加等待时间，确保Redis和PostgreSQL完全就绪
         
-        # ⭐ 新增：检查PostgreSQL数据库连接（诊断数据库用户问题）
+        # [NEW] 新增：检查PostgreSQL数据库连接（诊断数据库用户问题）
         safe_print("  [检查] PostgreSQL数据库连接...")
         try:
             result = subprocess.run(
@@ -431,7 +455,7 @@ def start_services_with_docker_compose():
         backend_container = "xihong_erp_backend"
         try:
             cmd = ["docker-compose"] + compose_files + ["--profile", profile_name, "up", "-d", "backend"]
-            # ⭐ 增加超时到300秒（5分钟），首次构建需要更长时间
+            # [FIX] 增加超时到300秒（5分钟），首次构建需要更长时间
             result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='ignore')
             
             if result.returncode != 0:
@@ -445,7 +469,7 @@ def start_services_with_docker_compose():
                         safe_print(f"    {line}")
                 return False
             
-            # ⭐ 验证容器是否真的在运行
+            # [CHECK] 验证容器是否真的在运行
             safe_print("  [验证] 检查后端容器状态...")
             time.sleep(3)  # 给容器一些启动时间
             
@@ -475,14 +499,14 @@ def start_services_with_docker_compose():
                 safe_print("    3. 手动启动: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d backend")
                 return False
             
-            # ⭐ 现代化Docker最佳实践：等待后端服务健康检查通过（容器运行 ≠ 服务就绪）
+            # [BEST PRACTICE] 现代化Docker最佳实践：等待后端服务健康检查通过（容器运行 != 服务就绪）
             safe_print("  [等待] 后端服务健康检查...")
             max_health_retries = 30  # 最多等待5分钟（30 * 10秒）
             backend_healthy = False
             log_check_interval = 10  # 每10次重试（100秒）显示一次容器日志
             
             for i in range(max_health_retries):
-                # ⭐ 改进：定期检查容器日志，及早发现启动失败
+                # [IMPROVE] 改进：定期检查容器日志，及早发现启动失败
                 if i > 0 and i % log_check_interval == 0:
                     safe_print(f"  [诊断] 检查容器状态（尝试 {i}/{max_health_retries}）...")
                     # 检查容器是否仍在运行
@@ -574,7 +598,7 @@ def start_services_with_docker_compose():
         celery_container = "xihong_erp_celery_worker"
         try:
             cmd = ["docker-compose"] + compose_files + ["--profile", profile_name, "up", "-d", "celery-worker"]
-            # ⭐ 增加超时到300秒（5分钟）
+            # [FIX] 增加超时到300秒（5分钟）
             result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=300, encoding='utf-8', errors='ignore')
             
             if result.returncode != 0:
@@ -588,7 +612,7 @@ def start_services_with_docker_compose():
                         safe_print(f"    {line}")
                 return False
             
-            # ⭐ 验证Celery Worker容器是否真的在运行
+            # [CHECK] 验证Celery Worker容器是否真的在运行
             safe_print("  [验证] 检查Celery Worker容器状态...")
             time.sleep(3)
             
@@ -672,7 +696,7 @@ def main():
     
     print_banner()
     
-    # ⭐ v4.19.6新增：Docker Compose模式
+    # [v4.19.6] 新增：Docker Compose模式
     if args.use_docker:
         safe_print("\n[模式] Docker Compose模式（统一管理服务）")
         if not args.frontend_only:
@@ -806,8 +830,8 @@ def main():
             safe_print("[提示] 停止服务: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full down")
             safe_print("[提示] 查看日志: docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f")
         else:
-        safe_print("\n[提示] 服务已在独立窗口运行，关闭窗口即可停止服务")
-        safe_print("[提示] 按 Ctrl+C 退出此脚本（服务继续运行）")
+            safe_print("\n[提示] 服务已在独立窗口运行，关闭窗口即可停止服务")
+            safe_print("[提示] 按 Ctrl+C 退出此脚本（服务继续运行）")
             if celery_process:
                 safe_print("[提示] Celery Worker处理数据同步任务，请保持运行")
         safe_print("="*80)

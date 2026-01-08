@@ -26,7 +26,7 @@ class PerformanceTest:
     
     async def test_health_check(self):
         """测试健康检查响应时间"""
-        print("\n📊 测试1: 健康检查响应时间")
+        print("\n[DATA] 测试1: 健康检查响应时间")
         times = []
         
         async with httpx.AsyncClient() as client:
@@ -54,12 +54,12 @@ class PerformanceTest:
             }
             self.results.append(result)
             
-            print(f"  ✓ 平均响应: {avg_time:.0f}ms (最小: {min_time:.0f}ms, 最大: {max_time:.0f}ms)")
-            print(f"  {'✅ 通过' if result['passed'] else '❌ 失败'} (目标: <500ms)")
+            print(f"  [OK] 平均响应: {avg_time:.0f}ms (最小: {min_time:.0f}ms, 最大: {max_time:.0f}ms)")
+            print(f"  {'[OK] 通过' if result['passed'] else '[FAIL] 失败'} (目标: <500ms)")
     
     async def test_concurrent_requests(self, num_requests: int = 20):
         """测试并发请求处理"""
-        print(f"\n📊 测试2: 并发请求处理 ({num_requests}个并发)")
+        print(f"\n[DATA] 测试2: 并发请求处理 ({num_requests}个并发)")
         
         async def make_request(client, i):
             start = time.time()
@@ -95,14 +95,14 @@ class PerformanceTest:
             }
             self.results.append(result)
             
-            print(f"  ✓ 总耗时: {total_time:.2f}秒")
-            print(f"  ✓ 成功: {success_count}/{num_requests}")
-            print(f"  ✓ 平均响应: {avg_time:.0f}ms")
-            print(f"  {'✅ 通过' if result['passed'] else '❌ 失败'} (目标: <5秒且全部成功)")
+            print(f"  [OK] 总耗时: {total_time:.2f}秒")
+            print(f"  [OK] 成功: {success_count}/{num_requests}")
+            print(f"  [OK] 平均响应: {avg_time:.0f}ms")
+            print(f"  {'[OK] 通过' if result['passed'] else '[FAIL] 失败'} (目标: <5秒且全部成功)")
     
     async def test_dashboard_api(self):
         """测试Dashboard API性能"""
-        print("\n📊 测试3: Dashboard API查询性能")
+        print("\n[DATA] 测试3: Dashboard API查询性能")
         
         async with httpx.AsyncClient() as client:
             start = time.time()
@@ -120,11 +120,11 @@ class PerformanceTest:
                 }
                 self.results.append(result)
                 
-                print(f"  ✓ 查询耗时: {elapsed:.2f}秒")
-                print(f"  {'✅ 通过' if result['passed'] else '❌ 失败'} (目标: <3秒)")
+                print(f"  [OK] 查询耗时: {elapsed:.2f}秒")
+                print(f"  {'[OK] 通过' if result['passed'] else '[FAIL] 失败'} (目标: <3秒)")
                 
             except Exception as e:
-                print(f"  ✗ 查询失败: {e}")
+                print(f"  [FAIL] 查询失败: {e}")
                 self.results.append({
                     "test": "Dashboard查询",
                     "error": str(e),
@@ -133,7 +133,7 @@ class PerformanceTest:
     
     async def test_connection_pool(self):
         """测试连接池性能"""
-        print("\n📊 测试4: 连接池性能（100个顺序请求）")
+        print("\n[DATA] 测试4: 连接池性能（100个顺序请求）")
         
         times = []
         
@@ -162,21 +162,21 @@ class PerformanceTest:
             }
             self.results.append(result)
             
-            print(f"  ✓ 总耗时: {total_time:.2f}秒")
-            print(f"  ✓ 平均响应: {avg_time:.0f}ms")
-            print(f"  {'✅ 通过' if result['passed'] else '❌ 失败'} (目标: <10秒)")
+            print(f"  [OK] 总耗时: {total_time:.2f}秒")
+            print(f"  [OK] 平均响应: {avg_time:.0f}ms")
+            print(f"  {'[OK] 通过' if result['passed'] else '[FAIL] 失败'} (目标: <10秒)")
     
     def print_summary(self):
         """打印测试总结"""
         print("\n" + "="*60)
-        print("🎯 性能测试总结报告")
+        print("[TARGET] 性能测试总结报告")
         print("="*60)
         
         passed_count = sum(1 for r in self.results if r.get("passed", False))
         total_count = len(self.results)
         
         for result in self.results:
-            status = "✅ 通过" if result.get("passed", False) else "❌ 失败"
+            status = "[OK] 通过" if result.get("passed", False) else "[FAIL] 失败"
             print(f"\n{status} - {result['test']}")
             
             if "avg_ms" in result:
@@ -189,7 +189,7 @@ class PerformanceTest:
                 print(f"  错误: {result['error']}")
         
         print("\n" + "="*60)
-        print(f"📊 总计: {passed_count}/{total_count} 测试通过 ({passed_count/total_count*100:.0f}%)")
+        print(f"[DATA] 总计: {passed_count}/{total_count} 测试通过 ({passed_count/total_count*100:.0f}%)")
         print("="*60)
         
         return passed_count == total_count
@@ -198,7 +198,7 @@ class PerformanceTest:
 async def main():
     """运行所有性能测试"""
     print("="*60)
-    print("🚀 西虹ERP系统性能测试 v4.1.0")
+    print("[START] 西虹ERP系统性能测试 v4.1.0")
     print("="*60)
     print("\n请确保后端服务已启动在 http://localhost:8001")
     

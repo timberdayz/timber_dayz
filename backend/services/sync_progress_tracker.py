@@ -46,7 +46,7 @@ class SyncProgressTracker:
     
     def __init__(self, db: AsyncSession):
         """
-        ⭐ v4.18.2更新：完全过渡到异步架构，只接受AsyncSession
+        [*] v4.18.2更新：完全过渡到异步架构，只接受AsyncSession
         """
         self.db = db
     
@@ -134,7 +134,7 @@ class SyncProgressTracker:
             if not task:
                 raise ValueError(f"Task {task_id} not found")
             
-            # ⭐ v4.17.1修复：合并task_details而不是覆盖
+            # [*] v4.17.1修复：合并task_details而不是覆盖
             if "task_details" in updates:
                 current_details = task.task_details or {}
                 new_details = updates["task_details"]
@@ -187,7 +187,7 @@ class SyncProgressTracker:
         
         while retry_count < max_retries:
             try:
-                # ⭐ 修复：每次查询前先回滚，确保使用干净的事务
+                # [*] 修复：每次查询前先回滚，确保使用干净的事务
                 try:
                     await self.db.rollback()
                 except:
@@ -220,7 +220,7 @@ class SyncProgressTracker:
                         await self.db.rollback()
                     except:
                         pass
-                    # ⭐ v4.18.2修复：使用 asyncio.sleep 替代 time.sleep
+                    # [*] v4.18.2修复：使用 asyncio.sleep 替代 time.sleep
                     await asyncio.sleep(0.1 * retry_count)
                     continue
                 else:
@@ -421,16 +421,16 @@ class SyncProgressTracker:
             "quarantined_rows": task.quarantined_rows,
             "file_progress": task.file_progress,
             "row_progress": task.row_progress,
-            # ⭐ 修复：使用format_datetime确保返回带Z标识符的UTC时间
+            # [*] 修复：使用format_datetime确保返回带Z标识符的UTC时间
             "start_time": format_datetime(task.start_time),
             "end_time": format_datetime(task.end_time),
             "updated_at": format_datetime(task.updated_at),
             "errors": task.errors or [],
-            # ⭐ v4.15.0修复：从errors中提取最后一条错误消息作为message
+            # [*] v4.15.0修复：从errors中提取最后一条错误消息作为message
             "message": self._extract_message_from_errors(task.errors) if task.errors else None,
             "warnings": task.warnings or [],
             "task_details": task_details,
-            # ⭐ 新增：从task_details中提取文件统计信息（用于前端显示）
+            # [*] 新增：从task_details中提取文件统计信息（用于前端显示）
             "success_files": task_details.get("success_files", 0),
             "failed_files": task_details.get("failed_files", 0),
             "skipped_files": task_details.get("skipped_files", 0),

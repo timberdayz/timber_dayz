@@ -16,7 +16,7 @@ class ShopeeProductsExport(ExportComponent):
 
     - 只依赖 products_config 中的 URL/选择器
     - 统一落盘到 temp/outputs/shopee/<账号>/<店铺>/products/<粒度>/
-    - 优先 UI 导出（点击→等待→下载），后续可扩展 API 备选
+    - 优先 UI 导出（点击->等待->下载），后续可扩展 API 备选
     """
 
     # Component metadata
@@ -207,7 +207,7 @@ class ShopeeProductsExport(ExportComponent):
                     print(f"\n[OK] 导出成功: {target}")
                     return ExportResult(True, "下载完成(UI)", None, str(target))
                 except Exception as e:
-                    # UI监听未命中 → 文件系统兜底
+                    # UI监听未命中 -> 文件系统兜底
                     if self.logger:
                         self.logger.info(f"[ShopeeProductsExport] UI下载监听超时，启用文件系统兜底: {e}")
 
@@ -388,7 +388,7 @@ class ShopeeProductsExport(ExportComponent):
                         except Exception:
                             continue
 
-                    # 快速路径：监控"下载"按钮数量的增加 → 出现新记录后立即返回顶部下载按钮
+                    # 快速路径：监控"下载"按钮数量的增加 -> 出现新记录后立即返回顶部下载按钮
                     try:
                         cur_count = await download_buttons_all.count()
                     except Exception:

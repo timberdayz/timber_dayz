@@ -117,7 +117,7 @@ class ProxyConfigWizard:
             return True
             
         except Exception as e:
-            print(f"❌ 更新天启IP配置失败: {e}")
+            print(f"[FAIL] 更新天启IP配置失败: {e}")
             return False
     
     def add_static_proxy(self, region: str, provider_name: str, proxies: List[Dict[str, Any]]) -> bool:
@@ -135,8 +135,8 @@ class ProxyConfigWizard:
         try:
             # 这里可以实现静态代理的添加逻辑
             # 由于配置文件格式复杂，建议用户手动编辑
-            print(f"💡 请手动编辑 {self.config_file} 文件添加静态代理配置")
-            print(f"📝 在 {region} 地区的 providers 列表中添加:")
+            print(f"[TIP] 请手动编辑 {self.config_file} 文件添加静态代理配置")
+            print(f"[NOTE] 在 {region} 地区的 providers 列表中添加:")
             
             proxy_template = {
                 "provider_name": provider_name,
@@ -150,7 +150,7 @@ class ProxyConfigWizard:
             return True
             
         except Exception as e:
-            print(f"❌ 添加静态代理配置失败: {e}")
+            print(f"[FAIL] 添加静态代理配置失败: {e}")
             return False
     
     def disable_provider(self, region: str, provider_name: str) -> bool:
@@ -166,7 +166,7 @@ class ProxyConfigWizard:
         """
         try:
             if not self.config_file.exists():
-                print("❌ 配置文件不存在")
+                print("[FAIL] 配置文件不存在")
                 return False
             
             with open(self.config_file, 'r', encoding='utf-8') as f:
@@ -182,14 +182,14 @@ class ProxyConfigWizard:
                 with open(self.config_file, 'w', encoding='utf-8') as f:
                     f.write(content)
                 
-                print(f"✅ 已禁用 {region}/{provider_name} 提供商")
+                print(f"[OK] 已禁用 {region}/{provider_name} 提供商")
                 return True
             else:
-                print(f"⚠️ 未找到 {region}/{provider_name} 提供商")
+                print(f"[WARN] 未找到 {region}/{provider_name} 提供商")
                 return False
                 
         except Exception as e:
-            print(f"❌ 禁用提供商失败: {e}")
+            print(f"[FAIL] 禁用提供商失败: {e}")
             return False
     
     def enable_provider(self, region: str, provider_name: str) -> bool:
@@ -205,7 +205,7 @@ class ProxyConfigWizard:
         """
         try:
             if not self.config_file.exists():
-                print("❌ 配置文件不存在")
+                print("[FAIL] 配置文件不存在")
                 return False
             
             with open(self.config_file, 'r', encoding='utf-8') as f:
@@ -221,14 +221,14 @@ class ProxyConfigWizard:
                 with open(self.config_file, 'w', encoding='utf-8') as f:
                     f.write(content)
                 
-                print(f"✅ 已启用 {region}/{provider_name} 提供商")
+                print(f"[OK] 已启用 {region}/{provider_name} 提供商")
                 return True
             else:
-                print(f"⚠️ 未找到 {region}/{provider_name} 提供商或已启用")
+                print(f"[WARN] 未找到 {region}/{provider_name} 提供商或已启用")
                 return False
                 
         except Exception as e:
-            print(f"❌ 启用提供商失败: {e}")
+            print(f"[FAIL] 启用提供商失败: {e}")
             return False
     
     def show_current_config(self) -> None:
@@ -239,7 +239,7 @@ class ProxyConfigWizard:
             import importlib.util
             
             if not self.config_file.exists():
-                print("❌ 配置文件不存在")
+                print("[FAIL] 配置文件不存在")
                 return
             
             spec = importlib.util.spec_from_file_location("proxy_config", str(self.config_file))
@@ -251,18 +251,18 @@ class ProxyConfigWizard:
                 proxy_config = getattr(proxy_config_module, "PROXY_CONFIG", {})
                 
                 print(f"\n{'='*60}")
-                print(f"📋 当前代理配置")
+                print(f"[LIST] 当前代理配置")
                 print(f"{'='*60}")
                 
                 for region, config in proxy_config.items():
-                    print(f"\n🌍 {config.get('name', region)} ({region})")
-                    print(f"   📝 描述: {config.get('description', '无描述')}")
+                    print(f"\n[GLOBE] {config.get('name', region)} ({region})")
+                    print(f"   [NOTE] 描述: {config.get('description', '无描述')}")
                     
                     providers = config.get('providers', [])
                     if providers:
-                        print(f"   🔧 提供商:")
+                        print(f"   [TOOL] 提供商:")
                         for provider in providers:
-                            status = "✅ 启用" if provider.get('enabled', False) else "❌ 禁用"
+                            status = "[OK] 启用" if provider.get('enabled', False) else "[FAIL] 禁用"
                             priority = provider.get('priority', 999)
                             provider_type = provider.get('provider_type', 'unknown')
                             
@@ -274,10 +274,10 @@ class ProxyConfigWizard:
                                 api_url = api_config.get('api_url', '未配置')
                                 print(f"       API: {api_url}")
                     else:
-                        print(f"   ⚠️ 无配置的提供商")
+                        print(f"   [WARN] 无配置的提供商")
                 
         except Exception as e:
-            print(f"❌ 显示配置失败: {e}")
+            print(f"[FAIL] 显示配置失败: {e}")
     
     def _get_default_config_template(self) -> str:
         """获取默认配置模板"""
@@ -387,13 +387,13 @@ def get_proxy_strategy() -> Dict[str, Any]:
     def interactive_setup(self) -> None:
         """交互式设置"""
         print(f"\n{'='*60}")
-        print(f"🔧 代理配置向导")
+        print(f"[TOOL] 代理配置向导")
         print(f"{'='*60}")
         
         # 备份现有配置
         backup_file = self.backup_current_config()
         if backup_file != "无需备份（配置文件不存在）":
-            print(f"📁 已备份现有配置到: {backup_file}")
+            print(f"[DIR] 已备份现有配置到: {backup_file}")
         
         print(f"\n请选择配置类型:")
         print(f"1. 更新天启IP配置")
@@ -418,14 +418,14 @@ def get_proxy_strategy() -> Dict[str, Any]:
                 self.show_current_config()
                 break
             elif choice == "5":
-                print("👋 退出配置向导")
+                print("[HI] 退出配置向导")
                 break
             else:
-                print("❌ 无效选择，请重新输入")
+                print("[FAIL] 无效选择，请重新输入")
     
     def _setup_tianqi_ip(self) -> None:
         """设置天启IP"""
-        print(f"\n🔧 天启IP配置")
+        print(f"\n[TOOL] 天启IP配置")
         print(f"{'='*40}")
         
         print(f"请输入天启IP的配置信息:")
@@ -440,27 +440,27 @@ def get_proxy_strategy() -> Dict[str, Any]:
             time_hours = int(time_hours_str)
         except ValueError:
             time_hours = 1
-            print("⚠️ 无效的时长，使用默认值1小时")
+            print("[WARN] 无效的时长，使用默认值1小时")
         
         if secret and sign:
             success = self.update_tianqi_ip_config(secret, sign, region, time_hours)
             if success:
-                print(f"✅ 天启IP配置更新成功！")
-                print(f"📝 配置详情:")
+                print(f"[OK] 天启IP配置更新成功！")
+                print(f"[NOTE] 配置详情:")
                 print(f"   Secret: {secret}")
                 print(f"   Sign: {sign}")
                 print(f"   地区: {region}")
                 print(f"   有效时长: {time_hours}小时")
-                print(f"\n💡 现在可以使用代理监控工具测试配置:")
+                print(f"\n[TIP] 现在可以使用代理监控工具测试配置:")
                 print(f"   python tools/proxy_monitor.py --stats")
             else:
-                print(f"❌ 配置更新失败")
+                print(f"[FAIL] 配置更新失败")
         else:
-            print(f"❌ Secret和Sign不能为空")
+            print(f"[FAIL] Secret和Sign不能为空")
     
     def _setup_static_proxy(self) -> None:
         """设置静态代理"""
-        print(f"\n🔧 静态代理配置")
+        print(f"\n[TOOL] 静态代理配置")
         print(f"{'='*40}")
         
         print(f"请输入静态代理信息:")
@@ -487,9 +487,9 @@ def get_proxy_strategy() -> Dict[str, Any]:
                         "password": password
                     }
                     proxies.append(proxy)
-                    print(f"✅ 已添加代理: {ip}:{port}")
+                    print(f"[OK] 已添加代理: {ip}:{port}")
                 except ValueError:
-                    print(f"❌ 无效的端口号")
+                    print(f"[FAIL] 无效的端口号")
             
             more = input("是否添加更多代理? (y/n): ").strip().lower()
             if more != 'y':
@@ -498,13 +498,13 @@ def get_proxy_strategy() -> Dict[str, Any]:
         if region and provider_name and proxies:
             success = self.add_static_proxy(region, provider_name, proxies)
             if success:
-                print(f"✅ 静态代理配置模板已生成")
+                print(f"[OK] 静态代理配置模板已生成")
         else:
-            print(f"❌ 配置信息不完整")
+            print(f"[FAIL] 配置信息不完整")
     
     def _manage_providers(self) -> None:
         """管理提供商"""
-        print(f"\n🔧 提供商管理")
+        print(f"\n[TOOL] 提供商管理")
         print(f"{'='*40}")
         
         print(f"请选择操作:")
@@ -521,7 +521,7 @@ def get_proxy_strategy() -> Dict[str, Any]:
         elif choice == "2":
             self.disable_provider(region, provider_name)
         else:
-            print("❌ 无效选择")
+            print("[FAIL] 无效选择")
 
 
 def main():
@@ -544,9 +544,9 @@ def main():
         secret, sign = args.tianqi
         success = wizard.update_tianqi_ip_config(secret, sign, args.region, args.time)
         if success:
-            print(f"✅ 天启IP配置更新成功")
+            print(f"[OK] 天启IP配置更新成功")
         else:
-            print(f"❌ 天启IP配置更新失败")
+            print(f"[FAIL] 天启IP配置更新失败")
     
     elif args.show:
         # 显示当前配置
@@ -569,7 +569,7 @@ def main():
     else:
         # 显示帮助信息
         parser.print_help()
-        print(f"\n💡 使用示例:")
+        print(f"\n[TIP] 使用示例:")
         print(f"  python tools/proxy_config_wizard.py --tianqi SECRET SIGN     # 更新天启IP")
         print(f"  python tools/proxy_config_wizard.py --show                   # 显示配置")
         print(f"  python tools/proxy_config_wizard.py --enable china tianqi_ip # 启用提供商")

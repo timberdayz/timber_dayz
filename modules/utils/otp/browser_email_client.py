@@ -355,13 +355,13 @@ class BrowserEmailOTPClient:
                 return False
             
             # 找到了验证码输入框，提示用户输入
-            logger.warning("🔐 检测到需要短信验证码！")
-            logger.info("📱 请查看您的手机短信，获取验证码")
+            logger.warning("[LOCK] 检测到需要短信验证码！")
+            logger.info("[PHONE] 请查看您的手机短信，获取验证码")
             
             # 在控制台请求用户输入验证码
             print("\n" + "="*50)
-            print("🔐 邮箱登录需要短信验证码")
-            print("📱 请查看您的手机短信获取验证码")
+            print("[LOCK] 邮箱登录需要短信验证码")
+            print("[PHONE] 请查看您的手机短信获取验证码")
             print("="*50)
             
             sms_code = input("请输入6位短信验证码: ").strip()
@@ -417,7 +417,7 @@ class BrowserEmailOTPClient:
             # 检查是否成功登录
             current_url = self.page.url
             if "mail.163.com" in current_url and ("/js6/" in current_url or "/m/" in current_url or "/home/" in current_url):
-                logger.success("✅ 短信验证码验证成功，邮箱登录完成！")
+                logger.success("[OK] 短信验证码验证成功，邮箱登录完成！")
                 return True
             else:
                 logger.warning("短信验证码提交后状态未确定，继续等待...")

@@ -3,7 +3,7 @@
 
 """
 智能数据处理管道
-负责：文件重命名 → 目录组织 → 数据清洗 → 数据库记录
+负责：文件重命名 -> 目录组织 -> 数据清洗 -> 数据库记录
 按data_organizer规范实现细粒度账号级别分离
 """
 
@@ -57,7 +57,7 @@ class DataProcessingPipeline:
         start_time = datetime.now()
         
         try:
-            logger.info(f"🔄 开始数据处理流程")
+            logger.info(f"[RETRY] 开始数据处理流程")
             
             # 1. 文件重命名和组织
             if collection_result.get("downloaded_files"):
@@ -83,13 +83,13 @@ class DataProcessingPipeline:
             successful_files = [f for f in processing_result["processed_files"] if f["success"]]
             if successful_files or db_record:
                 processing_result["success"] = True
-                logger.info(f"✅ 数据处理完成，处理{len(successful_files)}个文件")
+                logger.info(f"[OK] 数据处理完成，处理{len(successful_files)}个文件")
             else:
                 processing_result["error"] = "没有成功处理的文件"
                 
         except Exception as e:
             processing_result["error"] = f"数据处理异常: {e}"
-            logger.error(f"❌ {processing_result['error']}")
+            logger.error(f"[FAIL] {processing_result['error']}")
         
         finally:
             end_time = datetime.now()
@@ -150,11 +150,11 @@ class DataProcessingPipeline:
             result["success"] = True
             result["new_path"] = str(new_file_path)
             
-            logger.info(f"✅ 文件重命名完成: {original_file.name} → {new_filename}")
+            logger.info(f"[OK] 文件重命名完成: {original_file.name} -> {new_filename}")
             
         except Exception as e:
             result["error"] = f"文件重命名失败: {e}"
-            logger.error(f"❌ {result['error']}")
+            logger.error(f"[FAIL] {result['error']}")
         
         return result
     
@@ -196,7 +196,7 @@ class DataProcessingPipeline:
             return filename
             
         except Exception as e:
-            logger.error(f"❌ 生成文件名失败: {e}")
+            logger.error(f"[FAIL] 生成文件名失败: {e}")
             # 降级到简单文件名
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             return f"{timestamp}_{platform}_{data_type}{file_extension}"
@@ -238,11 +238,11 @@ class DataProcessingPipeline:
             result["cleaned_file"] = str(processed_file)
             result["row_count"] = len(df_cleaned)
             
-            logger.info(f"✅ 数据清洗完成: {result['row_count']}行数据")
+            logger.info(f"[OK] 数据清洗完成: {result['row_count']}行数据")
             
         except Exception as e:
             result["error"] = f"数据清洗失败: {e}"
-            logger.error(f"❌ {result['error']}")
+            logger.error(f"[FAIL] {result['error']}")
         
         return result
     
@@ -282,7 +282,7 @@ class DataProcessingPipeline:
             return df_cleaned
             
         except Exception as e:
-            logger.error(f"❌ 数据清洗处理失败: {e}")
+            logger.error(f"[FAIL] 数据清洗处理失败: {e}")
             return df
     
     def _save_cleaned_data(self, df: pd.DataFrame, original_file: Path, account: Dict) -> Path:
@@ -322,11 +322,11 @@ class DataProcessingPipeline:
             # 保存为Parquet格式（更高效）
             df.to_parquet(processed_file, index=False)
             
-            logger.info(f"✅ 清洗数据已保存: {processed_filename}")
+            logger.info(f"[OK] 清洗数据已保存: {processed_filename}")
             return processed_file
             
         except Exception as e:
-            logger.error(f"❌ 保存清洗数据失败: {e}")
+            logger.error(f"[FAIL] 保存清洗数据失败: {e}")
             # 降级保存为CSV
             fallback_file = original_file.parent / f"cleaned_{original_file.stem}.csv"
             df.to_csv(fallback_file, index=False, encoding='utf-8-sig')
@@ -357,9 +357,9 @@ class DataProcessingPipeline:
             task_id = task.id
             session.close()
             
-            logger.info(f"✅ 数据库记录创建成功: Task ID {task_id}")
+            logger.info(f"[OK] 数据库记录创建成功: Task ID {task_id}")
             return task_id
             
         except Exception as e:
-            logger.error(f"❌ 创建数据库记录失败: {e}")
+            logger.error(f"[FAIL] 创建数据库记录失败: {e}")
             return None

@@ -11,7 +11,7 @@ from datetime import datetime, date
 
 from backend.models.database import get_db, get_async_db, DataRecord, DataFile, DimProduct, FactSalesOrders, FactProductMetrics
 from backend.services.unifier import rebuild_unified
-# ⚠️ v4.6.0 DSS架构重构：已删除MaterializedViewService（Metabase直接查询原始表）
+# [WARN] v4.6.0 DSS架构重构：已删除MaterializedViewService（Metabase直接查询原始表）
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.logger import get_logger
