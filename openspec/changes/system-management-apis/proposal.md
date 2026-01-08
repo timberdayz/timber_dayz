@@ -124,7 +124,20 @@
     - `POST /api/system/logs/export` - 导出日志（Excel/CSV）
     - `DELETE /api/system/logs` - 清空日志（可选，谨慎使用）
 
-  **注意**：路由前缀统一使用 `/api/system/*`，与现有路由保持一致。需要修改 `backend/main.py` 中 `system.router` 的注册方式，添加 `/api` 前缀（或修改 `backend/routers/system.py` 中的 router 定义，改为 `prefix="/api/system"`）。
+  **注意**：路由前缀统一使用 `/api/system/*`，与现有路由保持一致。
+
+  **路由前缀迁移**：
+
+  - 需要修改 `backend/routers/system.py` 中的 router 定义，改为 `prefix="/api/system"`
+  - 需要修改 `backend/main.py` 中 `system.router` 的注册方式，移除 `prefix` 参数（或设为空）
+  - **现有路由迁移**：`/system/platforms` → `/api/system/platforms`、`/system/data-domains` → `/api/system/data-domains` 等
+  - **向后兼容**（可选，过渡期）：
+    - 方案 A：添加重定向路由（`/system/platforms` → `/api/system/platforms`）
+    - 方案 B：同时支持两个路径（过渡期 3 个月后移除旧路径）
+    - 方案 C：直接迁移，前端同步更新（推荐，避免技术债务）
+  - **前端更新**：需要更新前端调用这些路由的代码（如果有）
+    - 搜索前端代码中的 `/system/platforms`、`/system/data-domains` 等路径
+    - 更新为 `/api/system/platforms`、`/api/system/data-domains`
 
 - **实现业务逻辑**：
   - 实现日志查询（支持级别、模块、时间范围筛选）
@@ -207,7 +220,7 @@
   - **重要**：修改现有硬编码密码策略，改为从 `SecurityConfig` 表读取配置
     - 现有代码：`backend/routers/auth.py` 和 `backend/services/auth_service.py` 中可能有硬编码的密码策略
     - 修改方案：创建 `SecurityConfigService`，提供 `get_password_policy()` 方法
-    - 向后兼容：如果配置不存在，使用默认值（最小长度8、需要数字和字母、90天过期）
+    - 向后兼容：如果配置不存在，使用默认值（最小长度 8、需要数字和字母、90 天过期）
   - 实现密码策略验证（在用户修改密码时应用）
 
 **文件变更**：
@@ -250,7 +263,7 @@
   - **重要**：修改现有硬编码登录限制策略，改为从 `SecurityConfig` 表读取配置
     - 现有代码：`backend/routers/auth.py` 中有硬编码的登录限制（`MAX_FAILED_ATTEMPTS = 5`、`LOCKOUT_DURATION_MINUTES = 30`）
     - 修改方案：使用 `SecurityConfigService.get_login_restrictions()` 方法获取配置
-    - 向后兼容：如果配置不存在，使用默认值（5次失败、锁定30分钟）
+    - 向后兼容：如果配置不存在，使用默认值（5 次失败、锁定 30 分钟）
   - 实现 IP 白名单管理（存储到 `SecurityConfig` 表，JSON 数组格式）
   - 在登录逻辑中应用登录限制（失败次数、锁定时间、IP 白名单，修改 `backend/routers/auth.py` 中的登录逻辑，使用动态配置）
 
@@ -284,7 +297,7 @@
   - **重要**：修改现有会话管理逻辑，改为从 `SecurityConfig` 表读取配置
     - 现有代码：`backend/routers/auth.py` 和 `backend/services/auth_service.py` 中可能有硬编码的会话超时时间
     - 修改方案：使用 `SecurityConfigService.get_session_config()` 方法获取配置
-    - 向后兼容：如果配置不存在，使用默认值（15分钟超时、最多5个并发会话）
+    - 向后兼容：如果配置不存在，使用默认值（15 分钟超时、最多 5 个并发会话）
   - 在 JWT Token 生成时应用会话配置（超时时间，修改 `backend/routers/auth.py` 中的登录逻辑）
   - 实现并发会话限制（在登录时检查，修改登录逻辑）
   - 实现会话超时检查（在用户请求时验证，修改 `get_current_user` 依赖）
@@ -358,14 +371,26 @@
 
 - **实现业务逻辑**：
   - 实现备份创建：
-    - **优先方案**：如果 `scripts/backup_all.sh` 存在（由 `improve-infra-and-ops` 提案实现），则调用脚本执行备份
-      - **注意**：`improve-infra-and-ops` 提案中计划创建统一备份脚本，但文件名可能为 `backup_all.sh` 或其他名称
-      - **实现时**：需要检查脚本是否存在，如果不存在则使用降级方案
-    - **降级方案**：如果脚本不存在，API 直接实现备份逻辑（数据库备份使用 `pg_dump`，文件备份使用 `tar`/`zip`）
-      - 数据库备份：使用 `pg_dump` 命令导出 PostgreSQL 数据库
-      - 文件备份：使用 `tar`/`zip` 压缩关键目录（如 `uploads/`、`logs/` 等）
-      - 备份文件命名：`backup_{timestamp}_{type}.tar.gz` 或 `backup_{timestamp}_{type}.zip`
-    - 备份完成后记录到 `BackupRecord` 表，生成备份清单和校验和
+    - **Docker 环境实现**（系统部署在 Docker 容器中）：
+      - **容器内执行**：API 在 backend 容器内执行备份操作
+      - **数据库备份**：使用 `pg_dump` 连接 `postgres:5432`（Docker 网络内，通过服务名连接）
+        - 连接字符串：`postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}`
+        - 备份格式：使用 `pg_dump` 导出为 SQL 格式，然后使用 `gzip` 压缩
+      - **文件备份**：备份挂载的 volume（容器内路径）
+        - `/app/data` - 数据文件
+        - `/app/downloads` - 下载文件
+        - `/app/logs` - 日志文件
+        - `/app/config` - 配置文件
+        - 使用 `tar` 压缩：`tar -czf backup_files_{timestamp}.tar.gz /app/data /app/downloads /app/logs /app/config`
+      - **备份存储**：保存到挂载的 `./backups` volume
+        - 宿主机路径：`./backups`（项目根目录）
+        - 容器内路径：`/app/backups`
+        - 备份文件命名：`backup_{timestamp}_{type}.tar.gz` 或 `backup_{timestamp}_{type}.sql.gz`
+      - **备份文件路径**：使用容器内路径 `/app/backups/backup_{timestamp}_{type}.tar.gz`
+    - **降级方案**（如果需要在宿主机执行）：
+      - 如果 `scripts/backup_all.sh` 存在，可以通过 `subprocess` 调用（需要容器有宿主机脚本访问权限）
+      - 但推荐使用容器内执行方案（更安全、更简单）
+    - 备份完成后记录到 `BackupRecord` 表，生成备份清单和校验和（SHA-256）
   - 实现备份列表查询（分页、筛选）
   - 实现备份记录管理（删除、详情）
   - 实现备份文件完整性验证（校验和）
@@ -388,7 +413,17 @@
 
   - 在 `backend/schemas/backup.py` 中定义：
     - `RestoreRequest` - 恢复请求
+      - `confirmed: bool` - 二次确认标志（必须为 True）
+      - `confirmed_by: List[int]` - 确认的管理员 ID 列表（至少 2 个不同的管理员 ID）
+      - `force_outside_window: bool` - 是否在维护窗口外强制执行（默认 False）
+      - `reason: Optional[str]` - 恢复原因说明（可选，最多 500 字符）
     - `RestoreResponse` - 恢复响应模型
+      - `backup_id: int` - 备份 ID
+      - `status: str` - 恢复状态（pending/completed/failed）
+      - `emergency_backup_id: Optional[int]` - 恢复前创建的紧急备份 ID
+      - `started_at: datetime` - 恢复开始时间
+      - `completed_at: Optional[datetime]` - 恢复完成时间
+      - `message: str` - 恢复结果消息
 
 - **定义路由签名**：
 
@@ -397,16 +432,33 @@
     - `GET /api/system/backup/{backup_id}/restore/status` - 获取恢复状态
 
 - **实现业务逻辑**：
-  - **多重安全防护**（必须全部满足）：
-    1. 环境变量检查：禁止在生产环境执行（`ENVIRONMENT == "production"` 时拒绝）
-    2. 管理员权限：仅管理员可执行（使用 `require_admin` 依赖）
-    3. 交互确认：需要二次确认（`RestoreRequest.confirmed == True`）
-    4. 备份文件完整性验证：验证备份文件存在性和校验和
-    5. 恢复前自动备份：执行恢复前自动创建紧急备份
-    6. 超时控制：恢复操作最多 1 小时超时
-  - 调用恢复脚本执行恢复
+  - **多重安全防护**（必须全部满足，适用于生产环境）：
+    1. **维护窗口检查**：仅在维护窗口内执行（可配置，默认：凌晨 2-4 点，通过 `SystemConfig` 表配置）
+       - 检查当前时间是否在维护窗口内
+       - 如果不在维护窗口，需要管理员明确确认（`RestoreRequest.force_outside_window == True`）
+    2. **管理员权限**：仅管理员可执行（使用 `require_admin` 依赖）
+    3. **多重确认**：需要至少 2 名管理员确认（`RestoreRequest.confirmed_by` 数组包含 2 个不同的管理员 ID）
+       - 验证两个管理员 ID 不同
+       - 验证两个管理员都有管理员权限
+    4. **交互确认**：需要二次确认（`RestoreRequest.confirmed == True`）
+    5. **备份文件完整性验证**：验证备份文件存在性和校验和
+       - 验证备份文件路径存在（容器内路径：`/app/backups/backup_{timestamp}_{type}.tar.gz`）
+       - 验证校验和（SHA-256）匹配
+    6. **恢复前自动备份**：执行恢复前自动创建紧急备份
+       - 自动调用备份 API 创建紧急备份
+       - 紧急备份命名：`emergency_backup_{timestamp}.tar.gz`
+    7. **超时控制**：恢复操作最多 1 小时超时
+    8. **操作通知**：恢复前后发送通知给所有管理员（通过通知系统）
+  - **Docker 环境实现**：
+    - **容器内执行**：API 在 backend 容器内执行恢复操作
+    - **数据库恢复**：使用 `psql` 连接 `postgres:5432` 执行 SQL 恢复
+      - 解压备份文件：`gunzip backup_{timestamp}_database.sql.gz`
+      - 执行恢复：`psql -h postgres -U ${POSTGRES_USER} -d ${POSTGRES_DB} < backup_{timestamp}_database.sql`
+    - **文件恢复**：解压文件备份到对应目录
+      - 解压备份文件：`tar -xzf backup_{timestamp}_files.tar.gz -C /`
+      - 恢复文件到：`/app/data`、`/app/downloads`、`/app/logs`、`/app/config`
   - 记录恢复操作到审计日志（包含恢复前后状态对比）
-  - 实现恢复状态查询（支持实时进度）
+  - 实现恢复状态查询（支持实时进度，使用 Celery 异步任务）
 
 **文件变更**：
 
@@ -467,9 +519,14 @@
     - `POST /api/system/maintenance/cache/clear` - 清理缓存
 
 - **实现业务逻辑**：
-  - 实现 Redis 缓存清理
-  - 实现应用缓存清理
-  - 实现缓存状态查询
+  - **Docker 环境实现**：
+    - **Redis 缓存清理**：连接 Redis 容器（通过 Docker 网络）
+      - Redis 服务名：`redis:6379`（Docker 网络内）
+      - 使用 `redis-cli` 或 Redis Python 客户端连接
+      - 清理所有缓存：`redis-cli -h redis FLUSHALL` 或 `redis_client.flushall()`
+      - 清理特定前缀：`redis-cli -h redis --scan --pattern "prefix:*" | xargs redis-cli -h redis DEL`
+    - **应用缓存清理**：清理应用内存缓存（Python 字典、缓存对象等）
+  - 实现缓存状态查询（显示 Redis 内存使用、键数量等）
 
 **文件变更**：
 
@@ -497,11 +554,16 @@
     - `POST /api/system/maintenance/data/clean` - 清理数据
 
 - **实现业务逻辑**：
+  - **Docker 环境路径**（使用容器内路径）：
+    - 所有路径使用容器内路径（对应挂载的 volume）
+    - 临时文件路径：`/app/temp`（对应宿主机 `./temp`）
+    - 数据文件路径：`/app/data`（对应宿主机 `./data`）
+    - 日志文件路径：`/app/logs`（对应宿主机 `./logs`）
   - **可清理的数据类型**：
     1. **系统日志**（`system_logs` 表）：按时间范围清理（保留最近 N 天，默认 30 天）
     2. **任务日志**（`collection_task_logs` 表）：清理已完成任务的历史日志（保留最近 N 天，默认 90 天）
     3. **临时数据**：
-       - `temp/` 目录下的临时文件（按时间清理，默认 7 天）
+       - `/app/temp/` 目录下的临时文件（按时间清理，默认 7 天）
        - `staging_*` 表数据（清理已处理的数据，保留最近 N 天，默认 7 天）
     4. **审计日志**：**禁止清理**（审计日志必须永久保留，仅支持归档）
   - **清理策略**：
@@ -541,13 +603,26 @@
     - `GET /api/system/maintenance/upgrade/check` - 检查系统升级（仅查看，不执行）
     - `POST /api/system/maintenance/upgrade` - 执行系统升级（需要多重管理员确认）
 
-- **实现业务逻辑**（必须全部实现）：
-  1. **版本验证**：仅允许从可信源（GitHub Release）下载，验证发布者签名
+- **实现业务逻辑**（必须全部实现，Docker 环境适配）：
+
+  1. **版本验证**：检查 Docker Registry 中的新版本镜像（如 `xihong-erp-backend:latest`）
+     - 从 Docker Hub 或私有 Registry 检查新版本
+     - 验证镜像标签和摘要（digest）
   2. **多重确认**：需要至少 2 名管理员确认才能执行
-  3. **自动备份**：升级前自动创建完整备份
-  4. **沙箱测试**：在独立沙箱环境中测试升级包
-  5. **回滚机制**：升级失败时自动回滚到上一个版本
+  3. **自动备份**：升级前自动创建完整备份（调用备份 API）
+  4. **Docker 升级流程**：
+     - 拉取新镜像：`docker pull xihong-erp-backend:new-version`
+     - 停止旧容器：`docker-compose stop backend`
+     - 启动新容器：`docker-compose up -d backend`
+     - 健康检查：等待新容器健康检查通过
+     - 验证升级：检查 API 版本和功能
+  5. **回滚机制**：升级失败时自动回滚
+     - 停止新容器：`docker-compose stop backend`
+     - 启动旧容器：使用旧镜像标签启动
+     - 恢复备份：如果数据库有变更，恢复备份
   6. **审计日志**：记录所有升级操作（包含升级前后版本对比）
+
+  **注意**：在 Docker 环境中，系统升级通常通过 CI/CD 流程完成，不建议通过 API 实现。本功能标记为 P3，建议在 Phase 7 之后评估是否需要实现。
 
 **文件变更**：
 
@@ -715,14 +790,20 @@
     - `GET /api/system/config` - 获取系统基础配置
     - `PUT /api/system/config` - 更新系统基础配置
 
-  **重要：路由前缀统一**：
+  **重要：路由前缀统一**（与 Phase 1.1 保持一致）：
 
   - 现有 `system.router` 使用 `prefix="/system"`，在 `main.py` 中注册时没有添加 `/api` 前缀
   - 实际路径：`/system/platforms`、`/system/data-domains` 等
   - **需要修改**：将 `backend/routers/system.py` 中的 router 定义改为 `prefix="/api/system"`
   - **需要修改**：`backend/main.py` 中 `system.router` 的注册方式，移除 `prefix` 参数（或设为空）
-  - **向后兼容**：现有路由（`/system/platforms` 等）需要迁移到 `/api/system/platforms`
+  - **现有路由迁移**：`/system/platforms` → `/api/system/platforms`、`/system/data-domains` → `/api/system/data-domains` 等
+  - **向后兼容**（可选，过渡期）：
+    - 方案 A：添加重定向路由（`/system/platforms` → `/api/system/platforms`）
+    - 方案 B：同时支持两个路径（过渡期 3 个月后移除旧路径）
+    - 方案 C：直接迁移，前端同步更新（推荐，避免技术债务）
   - **前端更新**：需要更新前端调用这些路由的代码（如果有）
+    - 搜索前端代码中的 `/system/platforms`、`/system/data-domains` 等路径
+    - 更新为 `/api/system/platforms`、`/api/system/data-domains`
 
 - **实现业务逻辑**：
   - 实现系统基础配置 CRUD（系统名称、版本、时区、语言、货币）
@@ -764,19 +845,33 @@
   **注意**：与 Phase 6.1 使用同一个 `system.router`，路由前缀已统一为 `/api/system`。
 
 - **实现业务逻辑**：
-  - 实现数据库配置查看（从 `.env` 或环境变量读取，敏感字段使用 `EncryptionService` 加密后返回）
-  - 实现数据库配置更新：
-    - 将新配置保存到 `SystemConfig` 表，状态标记为 `pending`
-    - 记录配置变更到审计日志
-    - **重要**：配置不会立即生效，需要重启应用后从 `SystemConfig` 表读取并应用到数据库连接
-    - 提供配置回滚功能（恢复到上一个有效配置）
-  - 实现数据库连接测试（使用提供的配置测试连接，不保存到数据库或 `.env`）
+  - **Docker 环境实现**：
+    - **配置查看**：从容器环境变量读取（`DATABASE_URL` 或 `POSTGRES_*` 环境变量）
+      - 环境变量在 `docker-compose.yml` 中定义
+      - 敏感字段使用 `EncryptionService` 加密后返回
+    - **配置测试**：使用提供的配置测试连接（不保存）
+      - 测试连接：`postgresql://{user}:{password}@{host}:{port}/{database}`
+      - 验证连接成功性（执行 `SELECT 1` 查询）
+    - **配置更新**：
+      - 将新配置保存到 `SystemConfig` 表，状态标记为 `pending`
+      - 记录配置变更到审计日志
+      - **重要**：在 Docker 环境中，数据库连接通过 `docker-compose.yml` 和环境变量配置
+      - **配置应用方式**（两种方案）：
+        - **方案 A（推荐）**：支持动态配置（从 `SystemConfig` 表读取并应用到数据库连接，无需重启容器）
+          - 应用启动时从 `SystemConfig` 表读取 `pending` 状态的配置
+          - 应用到数据库连接池
+          - 标记配置为 `active` 状态
+        - **方案 B（降级）**：需要手动应用配置
+          - 导出配置为 `.env` 格式
+          - 更新 `docker-compose.yml` 中的环境变量
+          - 重启服务栈：`docker-compose restart backend postgres`
+      - 提供配置回滚功能（恢复到上一个有效配置）
   - **安全措施**（必须全部实现）：
     1. **配置验证**：验证数据库配置格式（URL、端口、用户名等）
     2. **连接测试**：更新配置前必须测试新配置的连接性
     3. **旧配置保存**：保存旧配置用于回滚
     4. **敏感数据加密**：数据库密码必须加密存储（使用 `EncryptionService`）
-    5. **配置状态管理**：新配置标记为"pending"，需要重启系统才能生效
+    5. **配置状态管理**：新配置标记为"pending"，应用后标记为"active"
     6. **审计日志**：记录所有配置变更（包含变更前后对比）
   - 实现数据库配置 CRUD（连接信息）
   - 实现数据库连接测试（更新前和更新后都要测试）

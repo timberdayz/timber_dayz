@@ -352,15 +352,19 @@ async def clear_cache(...):
 
 ### 数据备份恢复安全
 
-数据恢复API必须多重安全防护（**所有检查必须全部通过**）：
+数据恢复API必须多重安全防护（**所有检查必须全部通过**，适用于生产环境）：
 
-1. **环境变量检查**：禁止在生产环境执行（`ENVIRONMENT == "production"` 时拒绝）
+1. **维护窗口检查**：仅在维护窗口内执行（可配置，默认：凌晨2-4点）
+   - 检查当前时间是否在维护窗口内
+   - 如果不在维护窗口，需要管理员明确确认（`RestoreRequest.force_outside_window == True`）
 2. **管理员权限**：仅管理员可执行（使用 `require_admin` 依赖）
-3. **交互确认**：需要二次确认（`RestoreRequest.confirmed == True`）
-4. **备份文件完整性验证**：验证备份文件存在性和校验和
-5. **恢复前自动备份**：执行恢复前自动创建紧急备份
-6. **超时控制**：恢复操作最多1小时超时
-7. **审计日志**：所有恢复操作记录到审计日志（包含恢复前后状态对比）
+3. **多重确认**：需要至少2名管理员确认（`RestoreRequest.confirmed_by` 数组包含2个不同的管理员ID）
+4. **交互确认**：需要二次确认（`RestoreRequest.confirmed == True`）
+5. **备份文件完整性验证**：验证备份文件存在性和校验和（SHA-256）
+6. **恢复前自动备份**：执行恢复前自动创建紧急备份
+7. **超时控制**：恢复操作最多1小时超时
+8. **操作通知**：恢复前后发送通知给所有管理员
+9. **审计日志**：所有恢复操作记录到审计日志（包含恢复前后状态对比）
 
 ```python
 @router.post("/api/system/backup/{backup_id}/restore")
@@ -374,14 +378,63 @@ async def restore_backup(
     from pathlib import Path
     import hashlib
     
-    # 1. 环境变量检查（禁止生产环境）
-    if os.getenv("ENVIRONMENT") == "production":
+    # 1. 维护窗口检查（允许生产环境，但需要维护窗口或强制确认）
+    from datetime import datetime, time
+    current_time = datetime.now().time()
+    maintenance_window_start = time(2, 0)  # 凌晨2点
+    maintenance_window_end = time(4, 0)    # 凌晨4点
+    
+    in_maintenance_window = maintenance_window_start <= current_time <= maintenance_window_end
+    
+    if not in_maintenance_window and not restore_request.force_outside_window:
         raise HTTPException(
             status_code=403,
-            detail="恢复操作禁止在生产环境执行"
+            detail="恢复操作应在维护窗口内执行（凌晨2-4点），或需要强制确认"
         )
     
-    # 2. 二次确认
+    # 2. 多重管理员确认（至少2名管理员）
+    if len(restore_request.confirmed_by) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="需要至少2名管理员确认才能执行恢复操作"
+        )
+    
+    # 验证两个管理员ID不同且都有管理员权限
+    admin_ids = set(restore_request.confirmed_by)
+    if len(admin_ids) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="需要2个不同的管理员确认"
+        )
+    
+    # 验证管理员权限（查询数据库验证）
+    from sqlalchemy import select
+    from modules.core.db import DimUser
+    
+    for admin_id in admin_ids:
+        result = await db.execute(
+            select(DimUser).where(DimUser.user_id == admin_id)
+        )
+        admin_user = result.scalar_one_or_none()
+        if not admin_user:
+            raise HTTPException(
+                status_code=404,
+                detail=f"管理员 {admin_id} 不存在"
+            )
+        
+        # 检查是否为管理员（使用现有的require_admin逻辑）
+        is_admin = admin_user.is_superuser or any(
+            (hasattr(role, "role_code") and role.role_code == "admin") or
+            (hasattr(role, "role_name") and role.role_name == "admin")
+            for role in admin_user.roles
+        )
+        if not is_admin:
+            raise HTTPException(
+                status_code=403,
+                detail=f"用户 {admin_id} 不是管理员"
+            )
+    
+    # 3. 二次确认
     if not restore_request.confirmed:
         raise HTTPException(
             status_code=400,

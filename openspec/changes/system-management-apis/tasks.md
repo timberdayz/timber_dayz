@@ -138,26 +138,50 @@
   - [ ] `GET /api/system/backup/{backup_id}` - 获取备份详情
   - [ ] `GET /api/system/backup/{backup_id}/download` - 下载备份文件
 - [ ] 实现业务逻辑：
-  - [ ] 调用 `scripts/backup_all.sh` 执行备份
-  - [ ] 记录备份信息到数据库
-  - [ ] 备份列表查询
+  - [ ] Docker环境实现（容器内执行）：
+    - [ ] 数据库备份：使用 `pg_dump` 连接 `postgres:5432`（Docker网络内）
+    - [ ] 文件备份：备份挂载的volume（`/app/data`、`/app/downloads`、`/app/logs`、`/app/config`）
+    - [ ] 备份存储：保存到 `/app/backups`（容器内路径）
+  - [ ] 记录备份信息到数据库（生成备份清单和校验和SHA-256）
+  - [ ] 备份列表查询（分页、筛选）
   - [ ] 备份文件下载
+  - [ ] 备份文件完整性验证（校验和）
 - [ ] 在 `backend/main.py` 中注册路由
 - [ ] 编写单元测试
 
 ### 3.2 数据恢复 API
 
 - [ ] 在 `backend/schemas/backup.py` 中定义 Pydantic 模型：
-  - [ ] `RestoreRequest`
-  - [ ] `RestoreResponse`
+  - [ ] `RestoreRequest` - 恢复请求
+    - [ ] `confirmed: bool` - 二次确认标志（必须为 True）
+    - [ ] `confirmed_by: List[int]` - 确认的管理员ID列表（至少2个不同的管理员ID）
+    - [ ] `force_outside_window: bool` - 是否在维护窗口外强制执行（默认 False）
+    - [ ] `reason: Optional[str]` - 恢复原因说明（可选，最多500字符）
+  - [ ] `RestoreResponse` - 恢复响应模型
+    - [ ] `backup_id: int` - 备份ID
+    - [ ] `status: str` - 恢复状态（pending/completed/failed）
+    - [ ] `emergency_backup_id: Optional[int]` - 恢复前创建的紧急备份ID
+    - [ ] `started_at: datetime` - 恢复开始时间
+    - [ ] `completed_at: Optional[datetime]` - 恢复完成时间
+    - [ ] `message: str` - 恢复结果消息
 - [ ] 在 `backend/routers/backup.py` 中定义路由签名（带 response_model）：
   - [ ] `POST /api/system/backup/{backup_id}/restore` - 恢复备份
   - [ ] `GET /api/system/backup/{backup_id}/restore/status` - 获取恢复状态
 - [ ] 实现业务逻辑：
-  - [ ] 多重安全防护（环境变量检查、交互确认、管理员权限）
-  - [ ] 调用恢复脚本执行恢复
-  - [ ] 记录恢复操作到审计日志
-  - [ ] 恢复状态查询
+  - [ ] 多重安全防护（必须全部满足）：
+    - [ ] 维护窗口检查（默认凌晨2-4点，可配置，通过SystemConfig表）
+    - [ ] 管理员权限（使用 `require_admin` 依赖）
+    - [ ] 多重确认（至少2名管理员确认，验证管理员ID不同且都有管理员权限）
+    - [ ] 交互确认（`RestoreRequest.confirmed == True`）
+    - [ ] 备份文件完整性验证（验证备份文件存在性和校验和SHA-256）
+    - [ ] 恢复前自动备份（自动创建紧急备份）
+    - [ ] 超时控制（恢复操作最多1小时超时，超时自动回滚）
+    - [ ] 操作通知（恢复前后发送通知给所有管理员）
+  - [ ] Docker环境实现（容器内执行）：
+    - [ ] 数据库恢复：使用 `psql` 连接 `postgres:5432` 执行SQL恢复
+    - [ ] 文件恢复：解压文件备份到对应目录（`/app/data`、`/app/downloads`、`/app/logs`、`/app/config`）
+  - [ ] 记录恢复操作到审计日志（包含恢复前后状态对比）
+  - [ ] 恢复状态查询（支持实时进度，使用Celery异步任务）
 - [ ] 编写单元测试
 
 ### 3.3 自动备份配置 API
