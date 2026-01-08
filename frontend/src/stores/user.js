@@ -4,6 +4,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import authApi from '@/api/auth'
 
 export const useUserStore = defineStore('user', () => {
   // 状态
@@ -135,70 +136,56 @@ export const useUserStore = defineStore('user', () => {
     return requiredRoles.some(role => roles.value.includes(role))
   }
 
-  // 初始化用户信息
-  const initUserInfo = () => {
+  // 初始化用户信息（从后端获取）
+  const initUserInfo = async () => {
     const savedUserInfo = localStorage.getItem('userInfo')
     const savedRoles = localStorage.getItem('roles')
+    const savedToken = localStorage.getItem('token')
     
-    // 设置默认权限和角色（即使没有保存的用户信息）
-    // ✅ 管理员拥有所有53个菜单项的权限（v4.6.1 - 2025-11-04）
-    permissions.value = [
-      // 工作台
-      'business-overview',
-      
-      // 数据采集与管理（6项，v4.6.0新增数据同步，v4.6.1删除字段映射审核）
-      'collection-config', 'collection-tasks', 'collection-history',
-      'data-sync',  // ⭐ v4.6.0新增：数据同步权限
-      'data-quarantine', 'data-browser',
-      
-      // 产品与库存（3项）
-      'product-management', 'inventory-management', 'inventory-dashboard-v3',
-      
-      // 采购管理（4项）
-      'purchase-orders', 'grn-management', 'vendor-management', 'invoice-management',
-      
-      // 销售与分析（6项）
-      'sales-dashboard-v3', 'sales-analysis', 'customer-management', 'order-management',
-      'campaign:read', 'target:read',  // A类数据配置权限
-      
-      // 财务管理（5项）
-      'financial-management', 'expense-management', 'finance-reports', 
-      'fx-management', 'fiscal-periods',
-      
-      // 店铺运营（4项）
-      'store-management', 'store-analytics', 'account-management', 'account-alignment',
-      
-      // 报表中心（5项）
-      'sales-reports', 'inventory-reports', 'finance-reports-detail', 
-      'vendor-reports', 'custom-reports',
-      
-      // 人力资源（4项）
-      'human-resources', 'employee-management', 'attendance-management',
-      'performance:read',  // 绩效管理权限
-      
-      // 审批中心（4项）
-      'my-tasks', 'my-requests', 'approval-history', 'workflow-config',
-      
-      // 消息中心（3项）
-      'system-notifications', 'alerts', 'message-settings',
-      
-      // 系统管理（6项）
-      'user-management', 'role-management', 'permission-management',
-      'system-settings', 'system-logs', 'personal-settings',
-      
-      // 帮助中心（3项）
-      'user-guide', 'video-tutorials', 'faq',
-      
-      // 开发工具（4项 - 开发环境）
-      'debug', 'test', 'ultra-simple', 'api-docs',
-      
-      // 兼容旧权限标识和分组级别权限
-      'data-governance', 'sales-dashboard', 'data-collection', 'procurement',
-      'report-center', 'approval-center', 'message-center', 'help-center',
-      'notifications', 'product-category', 'inventory-alert'
-    ]
-    roles.value = ['admin'] // 默认管理员角色
+    // 如果有token，尝试从后端获取最新用户信息
+    if (savedToken) {
+      try {
+        const response = await authApi.getCurrentUser()
+        if (response && response.id) {
+          userInfo.value = {
+            id: response.id,
+            username: response.username,
+            name: response.full_name || response.username,
+            email: response.email,
+            avatar: '',
+            roles: response.roles || []
+          }
+          roles.value = response.roles || []
+          
+          // 保存到本地存储
+          localStorage.setItem('userInfo', JSON.stringify(userInfo.value))
+          localStorage.setItem('roles', JSON.stringify(roles.value))
+          
+          // 如果有激活的角色，应用其权限（由SimpleAccountSwitcher组件处理）
+          const activeRole = localStorage.getItem('activeRole')
+          if (activeRole && roles.value.includes(activeRole)) {
+            // 权限由SimpleAccountSwitcher组件应用
+            return
+          }
+          
+          // 如果没有激活的角色，使用第一个角色
+          if (roles.value.length > 0) {
+            localStorage.setItem('activeRole', roles.value[0])
+          }
+          
+          return
+        }
+      } catch (error) {
+        console.error('获取用户信息失败:', error)
+        // 如果获取失败，清除token，要求重新登录
+        if (error.response && error.response.status === 401) {
+          logout()
+          return
+        }
+      }
+    }
     
+    // 如果没有token或获取失败，使用本地存储的信息
     if (savedUserInfo) {
       try {
         userInfo.value = JSON.parse(savedUserInfo)
@@ -220,6 +207,7 @@ export const useUserStore = defineStore('user', () => {
         avatar: '',
         role: 'admin'
       }
+      roles.value = ['admin']
     }
   }
 

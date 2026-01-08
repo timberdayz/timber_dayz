@@ -8,18 +8,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.models.database import get_db, get_async_db
 from modules.core.db import DimRole, DimUser  # v4.12.0 SSOT迁移
-from backend.schemas.auth import RoleCreate, RoleUpdate, RoleResponse, PermissionResponse
+from backend.schemas.auth import RoleCreate, RoleUpdate, RoleResponse
+# 注意：PermissionResponse在backend/schemas/permission.py中定义（v4.20.0）
+# 但roles.py中使用的是旧版格式（id为int），需要适配
+from backend.schemas.permission import PermissionResponse as NewPermissionResponse
+from typing import List as TypingList
 from backend.routers.auth import get_current_user
 from backend.services.audit_service import audit_service
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from typing import List
+import json
 
 router = APIRouter(prefix="/roles", tags=["角色管理"])
 
 async def require_admin(current_user: DimUser = Depends(get_current_user)):
     """要求管理员权限"""
-    if not any(role.name == "admin" for role in current_user.roles):
+    if not any(role.role_name == "admin" for role in current_user.roles):
         raise HTTPException(
             status_code=403,
             detail="Insufficient permissions"
@@ -34,7 +39,7 @@ async def create_role(
 ):
     """创建角色"""
     # 检查角色名是否已存在
-    result = await db.execute(select(DimRole).where(DimRole.name == role_data.name))
+    result = await db.execute(select(DimRole).where(DimRole.role_name == role_data.name))
     existing_role = result.scalar_one_or_none()
     if existing_role:
         return error_response(
@@ -47,9 +52,9 @@ async def create_role(
     
     # 创建角色
     role = DimRole(
-        name=role_data.name,
+        role_name=role_data.name,
         description=role_data.description,
-        permissions=role_data.permissions
+        permissions=json.dumps(role_data.permissions) if isinstance(role_data.permissions, list) else role_data.permissions
     )
     
     db.add(role)
@@ -58,20 +63,23 @@ async def create_role(
     
     # 记录操作
     await audit_service.log_action(
-        user_id=current_user.id,
+        user_id=current_user.user_id,
         action="create_role",
         resource="role",
-        resource_id=str(role.id),
+        resource_id=str(role.role_id),
         ip_address="127.0.0.1",
         user_agent="Unknown",
-        details={"role_name": role.name}
+        details={"role_name": role.role_name}
     )
     
+    # 解析 permissions JSON 字符串
+    permissions_list = json.loads(role.permissions) if isinstance(role.permissions, str) else role.permissions
+    
     return RoleResponse(
-        id=role.id,
-        name=role.name,
+        id=role.role_id,
+        name=role.role_name,
         description=role.description,
-        permissions=role.permissions,
+        permissions=permissions_list,
         created_at=role.created_at
     )
 
@@ -84,12 +92,13 @@ async def get_roles(
     result = await db.execute(select(DimRole))
     roles = result.scalars().all()
     
+    # 解析 permissions JSON 字符串
     return [
         RoleResponse(
-            id=role.id,
-            name=role.name,
+            id=role.role_id,
+            name=role.role_name,
             description=role.description,
-            permissions=role.permissions,
+            permissions=json.loads(role.permissions) if isinstance(role.permissions, str) else role.permissions,
             created_at=role.created_at
         )
         for role in roles
@@ -113,11 +122,14 @@ async def get_role(
             status_code=404
         )
     
+    # 解析 permissions JSON 字符串
+    permissions_list = json.loads(role.permissions) if isinstance(role.permissions, str) else role.permissions
+    
     return RoleResponse(
-        id=role.id,
-        name=role.name,
+        id=role.role_id,
+        name=role.role_name,
         description=role.description,
-        permissions=role.permissions,
+        permissions=permissions_list,
         created_at=role.created_at
     )
 
@@ -145,27 +157,30 @@ async def update_role(
         role.description = role_update.description
     
     if role_update.permissions is not None:
-        role.permissions = role_update.permissions
+        role.permissions = json.dumps(role_update.permissions) if isinstance(role_update.permissions, list) else role_update.permissions
     
     await db.commit()
     await db.refresh(role)
     
     # 记录操作
     await audit_service.log_action(
-        user_id=current_user.id,
+        user_id=current_user.user_id,
         action="update_role",
         resource="role",
-        resource_id=str(role.id),
+        resource_id=str(role.role_id),
         ip_address="127.0.0.1",
         user_agent="Unknown",
         details=role_update.dict(exclude_unset=True)
     )
     
+    # 解析 permissions JSON 字符串
+    permissions_list = json.loads(role.permissions) if isinstance(role.permissions, str) else role.permissions
+    
     return RoleResponse(
-        id=role.id,
-        name=role.name,
+        id=role.role_id,
+        name=role.role_name,
         description=role.description,
-        permissions=role.permissions,
+        permissions=permissions_list,
         created_at=role.created_at
     )
 
@@ -207,13 +222,13 @@ async def delete_role(
     
     # 记录操作
     await audit_service.log_action(
-        user_id=current_user.id,
+        user_id=current_user.user_id,
         action="delete_role",
         resource="role",
-        resource_id=str(role.id),
+        resource_id=str(role.role_id),
         ip_address="127.0.0.1",
         user_agent="Unknown",
-        details={"role_name": role.name}
+        details={"role_name": role.role_name}
     )
     
     await db.delete(role)
@@ -224,83 +239,97 @@ async def delete_role(
         message="角色删除成功"
     )
 
-@router.get("/permissions/available", response_model=List[PermissionResponse])
+@router.get("/permissions/available", response_model=TypingList[NewPermissionResponse])
 async def get_available_permissions(
     current_user = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取可用权限列表"""
-    # 定义系统权限
+    """
+    获取可用权限列表（兼容旧版API）
+    
+    注意：此API返回的权限列表是简化版本，完整权限列表请使用 /api/system/permissions
+    """
+    # 定义系统权限（简化版本，兼容旧版格式）
     permissions = [
-        PermissionResponse(
-            id=1,
-            name="business-overview",
+        NewPermissionResponse(
+            id="business-overview",
+            name="业务概览",
             description="业务概览",
             resource="dashboard",
-            action="read"
+            action="read",
+            category="工作台"
         ),
-        PermissionResponse(
-            id=2,
-            name="sales-analysis",
+        NewPermissionResponse(
+            id="sales-analysis",
+            name="销售分析",
             description="销售分析",
             resource="sales",
-            action="read"
+            action="read",
+            category="销售与分析"
         ),
-        PermissionResponse(
-            id=3,
-            name="sales-dashboard",
+        NewPermissionResponse(
+            id="sales-dashboard",
+            name="销售看板",
             description="销售看板",
             resource="dashboard",
-            action="read"
+            action="read",
+            category="销售与分析"
         ),
-        PermissionResponse(
-            id=4,
-            name="inventory-management",
+        NewPermissionResponse(
+            id="inventory-management",
+            name="库存管理",
             description="库存管理",
             resource="inventory",
-            action="all"
+            action="all",
+            category="产品与库存"
         ),
-        PermissionResponse(
-            id=5,
-            name="financial-management",
+        NewPermissionResponse(
+            id="financial-management",
+            name="财务管理",
             description="财务管理",
             resource="finance",
-            action="all"
+            action="all",
+            category="财务管理"
         ),
-        PermissionResponse(
-            id=6,
-            name="store-management",
+        NewPermissionResponse(
+            id="store-management",
+            name="店铺管理",
             description="店铺管理",
             resource="store",
-            action="all"
+            action="all",
+            category="店铺运营"
         ),
-        PermissionResponse(
-            id=7,
-            name="user-management",
+        NewPermissionResponse(
+            id="user-management",
+            name="用户管理",
             description="用户管理",
             resource="user",
-            action="all"
+            action="all",
+            category="系统管理"
         ),
-        PermissionResponse(
-            id=8,
-            name="role-management",
+        NewPermissionResponse(
+            id="role-management",
+            name="角色管理",
             description="角色管理",
             resource="role",
-            action="all"
+            action="all",
+            category="系统管理"
         ),
-        PermissionResponse(
-            id=9,
-            name="system-settings",
+        NewPermissionResponse(
+            id="system-settings",
+            name="系统设置",
             description="系统设置",
             resource="system",
-            action="all"
+            action="all",
+            category="系统管理"
         ),
-        PermissionResponse(
-            id=10,
-            name="field-mapping",
+        NewPermissionResponse(
+            id="field-mapping",
+            name="字段映射",
             description="字段映射",
             resource="mapping",
-            action="all"
+            action="all",
+            category="数据采集与管理"
         )
     ]
     

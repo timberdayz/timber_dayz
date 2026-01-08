@@ -125,6 +125,14 @@ from .schema import (
     # v4.19.4: 限流配置表（Phase 3）
     DimRateLimitConfig,  # v4.19.4: 限流配置维度表
     FactRateLimitConfigAudit,  # v4.19.4: 限流配置审计日志表
+    # v4.20.0: 系统管理表
+    SystemLog,  # v4.20.0: 系统日志表
+    SecurityConfig,  # v4.20.0: 安全配置表
+    BackupRecord,  # v4.20.0: 备份记录表
+    SMTPConfig,  # v4.20.0: SMTP配置表
+    NotificationTemplate,  # v4.20.0: 通知模板表
+    AlertRule,  # v4.20.0: 告警规则表
+    SystemConfig,  # v4.20.0: 系统配置表
     # v4.12.0: 数据同步进度跟踪
     SyncProgressTask,
     # v4.6.0+: DSS架构表
@@ -246,6 +254,14 @@ __all__ = [
     # v4.19.4: 限流配置表（Phase 3）
     "DimRateLimitConfig",  # v4.19.4: 限流配置维度表
     "FactRateLimitConfigAudit",  # v4.19.4: 限流配置审计日志表
+    # v4.20.0: 系统管理表
+    "SystemLog",  # v4.20.0: 系统日志表
+    "SecurityConfig",  # v4.20.0: 安全配置表
+    "BackupRecord",  # v4.20.0: 备份记录表
+    "SMTPConfig",  # v4.20.0: SMTP配置表
+    "NotificationTemplate",  # v4.20.0: 通知模板表
+    "AlertRule",  # v4.20.0: 告警规则表
+    "SystemConfig",  # v4.20.0: 系统配置表
     # v4.12.0: 数据同步进度跟踪
     "SyncProgressTask",
     # v4.6.0+: DSS架构表

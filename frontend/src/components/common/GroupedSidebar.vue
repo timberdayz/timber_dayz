@@ -17,7 +17,7 @@
           <!-- 分组标题 -->
           <div 
             class="group-header"
-            @click="toggleGroup(group.id)"
+            @click.stop="toggleGroup(group.id)"
             :class="{ 'is-expanded': expandedGroups[group.id] }"
           >
             <div class="group-title">
@@ -198,7 +198,33 @@ const visibleGroups = computed(() => {
 
 // 切换分组展开/收起
 const toggleGroup = (groupId) => {
-  expandedGroups.value[groupId] = !expandedGroups.value[groupId]
+  const group = visibleGroups.value.find(g => g.id === groupId)
+  if (!group || group.visibleRoutes.length === 0) {
+    // 如果组不存在或没有可见路由，不执行任何操作
+    return
+  }
+  
+  // 如果组已展开，则收起
+  if (expandedGroups.value[groupId]) {
+    expandedGroups.value[groupId] = false
+  } else {
+    // 如果组未展开，则展开
+    expandedGroups.value[groupId] = true
+    
+    // 如果组内只有一个可见路由，直接跳转到该路由
+    if (group.visibleRoutes.length === 1) {
+      const targetRoute = group.visibleRoutes[0]
+      if (targetRoute && targetRoute.path) {
+        router.push(targetRoute.path).catch(err => {
+          // 忽略导航重复的错误
+          if (err.name !== 'NavigationDuplicated') {
+            console.error('导航失败:', err)
+          }
+        })
+      }
+    }
+  }
+  
   // 保存到localStorage
   localStorage.setItem('expandedGroups', JSON.stringify(expandedGroups.value))
 }

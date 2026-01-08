@@ -43,6 +43,26 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('refresh_token', refreshToken.value)
       localStorage.setItem('user_info', JSON.stringify(user.value))
       
+      // ✅ 2026-01-08: 同步用户信息到userStore（用于权限管理）
+      if (userInfo && userInfo.roles) {
+        const { useUserStore } = await import('@/stores/user')
+        const userStore = useUserStore()
+        userStore.updateUserInfo({
+          id: userInfo.id,
+          username: userInfo.username,
+          name: userInfo.full_name || userInfo.username,
+          email: userInfo.email,
+          roles: userInfo.roles
+        })
+        userStore.roles = userInfo.roles
+        userStore.token = accessToken
+        
+        // 设置默认激活角色
+        if (userInfo.roles.length > 0) {
+          localStorage.setItem('activeRole', userInfo.roles[0])
+        }
+      }
+      
       ElMessage.success('登录成功')
       return { success: true, data: response }
     } catch (error) {

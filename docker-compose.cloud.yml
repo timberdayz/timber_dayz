@@ -1,0 +1,115 @@
+# =====================================================
+# 腾讯云2核4G服务器优化配置
+# =====================================================
+# 用于生产环境部署（单服务器，测试和生产共用）
+# 使用方式: docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml --profile production up -d
+# =====================================================
+
+services:
+  # PostgreSQL数据库 - 资源优化
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'      # 从2核降到1核
+          memory: 1.5G     # 从2G降到1.5G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis缓存 - 资源优化
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'      # 从1核降到0.5核
+          memory: 256M     # 从512M降到256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # FastAPI后端 - 资源优化
+  backend:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'      # 从2核降到1核
+          memory: 1G       # 从2G降到1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    # 优化Gunicorn workers（2核服务器）
+    command: ["gunicorn", "backend.main:app",
+              "--workers", "2",  # 从4降到2
+              "--worker-class", "uvicorn.workers.UvicornWorker",
+              "--bind", "0.0.0.0:8000",
+              "--timeout", "120",
+              "--keep-alive", "5",
+              "--access-logfile", "/app/logs/access.log",
+              "--error-logfile", "/app/logs/error.log",
+              "--log-level", "info"]
+
+  # Vue.js前端 - 资源优化
+  frontend:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'      # 从1核降到0.5核
+          memory: 256M     # 从512M降到256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Celery Worker - 资源优化
+  celery-worker:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'      # 从1核降到0.5核
+          memory: 512M     # 从1G降到512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    # 降低并发数（2核服务器）
+    command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=2
+
+  # Celery Beat - 资源优化
+  celery-beat:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'     # 从0.5核降到0.25核
+          memory: 128M     # 从256M降到128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # Nginx反向代理 - 资源优化
+  nginx:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'     # 从0.5核降到0.25核
+          memory: 128M     # 从256M降到128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # Celery Exporter - 资源优化
+  celery-exporter:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+# =====================================================
+# 资源总计（2核4G服务器）
+# =====================================================
+# CPU: 约2核（所有服务limits总和）
+# 内存: 约3.5G（所有服务limits总和）
+# 预留: CPU约1.5核，内存约1.5G
+# =====================================================

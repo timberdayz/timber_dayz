@@ -3,7 +3,7 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Request as FastAPIRequest
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.models.database import get_db, get_async_db
@@ -23,7 +23,7 @@ from backend.schemas.notification import (  # v4.19.0: 通知偏好
 )
 from backend.routers.auth import get_current_user
 from backend.services.audit_service import audit_service
-from backend.utils.api_response import success_response, error_response
+from backend.utils.api_response import success_response, error_response, pagination_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from typing import List
 from datetime import datetime
@@ -111,7 +111,8 @@ async def create_user(
             user.roles.append(role)
     
     await db.commit()
-    await db.refresh(user)
+    # [FIX] AsyncSession 下访问 user.roles 可能触发懒加载（MissingGreenlet），这里显式加载关系
+    await db.refresh(user, ["roles"])
     
     # 记录操作
     await audit_service.log_action(
@@ -135,19 +136,34 @@ async def create_user(
         last_login_at=user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
     )
 
-@router.get("/", response_model=List[UserResponse])
+@router.get("/")
 async def get_users(
     page: int = 1,
     page_size: int = 20,
     current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取用户列表"""
+    """获取用户列表（分页）"""
+    from sqlalchemy import func
+    
     offset = (page - 1) * page_size
-    result = await db.execute(select(DimUser).offset(offset).limit(page_size))
+    
+    # 查询总数
+    count_result = await db.execute(select(func.count(DimUser.user_id)))
+    total = count_result.scalar() or 0
+    
+    # [FIX] 预加载 roles，避免返回时访问 user.roles 触发懒加载（MissingGreenlet）
+    result = await db.execute(
+        select(DimUser)
+        .options(selectinload(DimUser.roles))
+        .offset(offset)
+        .limit(page_size)
+        .order_by(DimUser.created_at.desc())
+    )
     users = result.scalars().all()
     
-    return [
+    # 转换为响应模型
+    user_responses = [
         UserResponse(
             id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
             username=user.username,
@@ -160,6 +176,14 @@ async def get_users(
         )
         for user in users
     ]
+    
+    # 使用分页响应格式
+    return pagination_response(
+        data=[user.dict() for user in user_responses],
+        page=page,
+        page_size=page_size,
+        total=total
+    )
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
@@ -168,7 +192,12 @@ async def get_user(
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取用户详情"""
-    result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))  # v4.12.0修复：使用user_id字段
+    # [FIX] 预加载 roles，避免返回时访问 user.roles 触发懒加载（MissingGreenlet）
+    result = await db.execute(
+        select(DimUser)
+        .options(selectinload(DimUser.roles))
+        .where(DimUser.user_id == user_id)  # v4.12.0修复：使用user_id字段
+    )
     user = result.scalar_one_or_none()
     if not user:
         return error_response(
@@ -198,7 +227,12 @@ async def update_user(
     db: AsyncSession = Depends(get_async_db)
 ):
     """更新用户信息"""
-    result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))  # v4.12.0修复：使用user_id字段
+    # [FIX] 预加载 roles 关系，避免更新角色时触发懒加载（MissingGreenlet）
+    result = await db.execute(
+        select(DimUser)
+        .options(selectinload(DimUser.roles))
+        .where(DimUser.user_id == user_id)  # v4.12.0修复：使用user_id字段
+    )
     user = result.scalar_one_or_none()
     if not user:
         return error_response(
@@ -272,7 +306,8 @@ async def update_user(
                 user.roles.append(role)
     
     await db.commit()
-    await db.refresh(user)
+    # [FIX] AsyncSession 下访问 user.roles 可能触发懒加载（MissingGreenlet），这里显式加载关系
+    await db.refresh(user, ["roles"])
     
     # 记录操作
     await audit_service.log_action(
@@ -539,8 +574,12 @@ async def approve_user(
     
     v4.19.0新增：用户审批流程
     """
-    # 查找用户
-    result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))
+    # 查找用户（预加载 roles 关系，避免访问时触发懒加载）
+    result = await db.execute(
+        select(DimUser)
+        .where(DimUser.user_id == user_id)
+        .options(selectinload(DimUser.roles))
+    )
     user = result.scalar_one_or_none()
     if not user:
         return error_response(
@@ -604,6 +643,8 @@ async def approve_user(
         user.roles.append(operator_role)
     
     await db.flush()
+    # [FIX] AsyncSession 下修改关系后，刷新以确保关系已加载
+    await db.refresh(user, ["roles"])
     
     # 记录审批日志（UserApprovalLog）
     approval_log = UserApprovalLog(

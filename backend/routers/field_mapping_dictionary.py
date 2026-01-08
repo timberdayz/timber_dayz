@@ -848,9 +848,9 @@ async def get_default_deduplication_fields(
     except Exception as e:
         logger.error(f"获取默认核心字段推荐失败: {e}", exc_info=True)
         return error_response(
-            code=ErrorCode.INTERNAL_ERROR,
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
             message=f"获取默认核心字段推荐失败: {str(e)}",
-            error_type=get_error_type(ErrorCode.INTERNAL_ERROR),
+            error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
             recovery_suggestion="请检查数据域参数是否正确",
             status_code=500

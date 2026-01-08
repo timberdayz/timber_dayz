@@ -162,12 +162,34 @@ const routes = [
     }
   },
   {
-    path: '/system-settings',
-    name: 'SystemSettings',
-    component: () => import('../views/SystemSettings.vue'),
+    path: '/system-config',
+    name: 'SystemConfig',
+    component: () => import('../views/system/SystemConfig.vue'),
     meta: {
-      title: '系统设置',
+      title: '系统配置',
       icon: 'Setting',
+      permission: 'system-settings',
+      roles: ['admin']
+    }
+  },
+  {
+    path: '/database-config',
+    name: 'DatabaseConfig',
+    component: () => import('../views/system/DatabaseConfig.vue'),
+    meta: {
+      title: '数据库配置',
+      icon: 'Connection',
+      permission: 'system-settings',
+      roles: ['admin']
+    }
+  },
+  {
+    path: '/security-settings',
+    name: 'SecuritySettings',
+    component: () => import('../views/system/SecuritySettings.vue'),
+    meta: {
+      title: '安全设置',
+      icon: 'Lock',
       permission: 'system-settings',
       roles: ['admin']
     }
@@ -217,6 +239,7 @@ const routes = [
     }
   },
   // ⭐ v4.6.0 DSS架构重构：新增数据同步路由（完全独立于字段映射审核）
+  // ✅ 2026-01-08: 数据同步功能仅管理员可访问
   {
     path: '/data-sync/files',
     name: 'DataSyncFiles',
@@ -225,7 +248,7 @@ const routes = [
       title: '文件列表',
       icon: 'Document',
       permission: 'data-sync',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin']  // ✅ 仅管理员可访问
     }
   },
   {
@@ -236,7 +259,7 @@ const routes = [
       title: '文件详情',
       icon: 'Document',
       permission: 'data-sync',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin']  // ✅ 仅管理员可访问
     }
   },
   {
@@ -247,7 +270,7 @@ const routes = [
       title: '同步任务',
       icon: 'Loading',
       permission: 'data-sync',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin']  // ✅ 仅管理员可访问
     }
   },
   {
@@ -258,7 +281,7 @@ const routes = [
       title: '同步历史',
       icon: 'Clock',
       permission: 'data-sync',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin']  // ✅ 仅管理员可访问
     }
   },
   {
@@ -269,7 +292,7 @@ const routes = [
       title: '模板管理',
       icon: 'Files',
       permission: 'data-sync',
-      roles: ['admin', 'manager']
+      roles: ['admin']  // ✅ 仅管理员可访问
     }
   },
   // ⚠️ v4.12.0移除：数据浏览器功能已移除，使用Metabase替代
@@ -435,7 +458,7 @@ const routes = [
       title: '目标管理',
       icon: 'Aim',
       permission: 'target:read',
-      roles: ['admin', 'manager']
+      roles: ['admin']  // ✅ 仅管理员可访问
     }
   },
   // ============================================================================
@@ -449,7 +472,7 @@ const routes = [
       title: '销售目标配置',
       icon: 'Histogram',
       permission: 'config:sales-targets',
-      roles: ['admin', 'manager']
+      roles: ['admin']  // ✅ 仅管理员可访问
     }
   },
   {
@@ -854,6 +877,39 @@ const routes = [
       title: '系统日志',
       icon: 'Document',
       permission: 'system-logs',
+      roles: ['admin']
+    }
+  },
+  {
+    path: '/data-backup',
+    name: 'DataBackup',
+    component: () => import('../views/system/DataBackup.vue'),
+    meta: {
+      title: '数据备份',
+      icon: 'Folder',
+      permission: 'system-settings',
+      roles: ['admin']
+    }
+  },
+  {
+    path: '/system-maintenance',
+    name: 'SystemMaintenance',
+    component: () => import('../views/system/SystemMaintenance.vue'),
+    meta: {
+      title: '系统维护',
+      icon: 'Tools',
+      permission: 'system-settings',
+      roles: ['admin']
+    }
+  },
+  {
+    path: '/notification-config',
+    name: 'NotificationConfig',
+    component: () => import('../views/system/NotificationConfig.vue'),
+    meta: {
+      title: '通知配置',
+      icon: 'Bell',
+      permission: 'system-settings',
       roles: ['admin']
     }
   },

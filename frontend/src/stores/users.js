@@ -19,9 +19,12 @@ export const useUsersStore = defineStore('users', () => {
     try {
       isLoading.value = true
       const response = await usersApi.getUsers(page, pageSize)
-      users.value = response.data
-      total.value = response.total || response.data.length
-      return response.data
+      // 处理响应格式：可能是数组（直接返回）或对象（包含data和pagination字段）
+      const usersList = Array.isArray(response) ? response : (response.data || [])
+      users.value = usersList
+      // 支持分页响应格式：response.pagination.total 或 response.total
+      total.value = response.pagination?.total || response.total || usersList.length
+      return usersList
     } catch (error) {
       ElMessage.error('获取用户列表失败: ' + (error.response?.data?.detail || error.message))
       throw error

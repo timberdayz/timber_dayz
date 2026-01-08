@@ -77,13 +77,20 @@
         </el-form-item>
 
         <el-form-item prop="department">
-          <el-input
+          <el-select
             v-model="registerForm.department"
-            placeholder="部门（可选）"
+            placeholder="请选择部门（可选）"
             size="large"
-            prefix-icon="OfficeBuilding"
             clearable
-          />
+            style="width: 100%"
+          >
+            <el-option
+              v-for="dept in departmentOptions"
+              :key="dept.value"
+              :label="dept.label"
+              :value="dept.value"
+            />
+          </el-select>
         </el-form-item>
 
         <el-form-item>
@@ -117,6 +124,18 @@ import authApi from '@/api/auth'
 const router = useRouter()
 const registerFormRef = ref(null)
 const loading = ref(false)
+
+// 部门选项列表
+const departmentOptions = [
+  { label: '销售部', value: '销售部' },
+  { label: '运营部', value: '运营部' },
+  { label: '技术部', value: '技术部' },
+  { label: '财务部', value: '财务部' },
+  { label: '人事部', value: '人事部' },
+  { label: '市场部', value: '市场部' },
+  { label: '客服部', value: '客服部' },
+  { label: '采购部', value: '采购部' }
+]
 
 const registerForm = reactive({
   username: '',

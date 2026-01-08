@@ -253,6 +253,7 @@ import {
   Check,
   Refresh
 } from '@element-plus/icons-vue'
+import * as systemAPI from '@/api/system'
 
 const rolesStore = useRolesStore()
 const usersStore = useUsersStore()
@@ -322,16 +323,42 @@ const initData = async () => {
   try {
     loading.value = true
     
-    // 加载权限列表
-    await rolesStore.fetchPermissions()
-    permissions.value = rolesStore.permissions
+    // 优先使用新的权限API
+    try {
+      const data = await systemAPI.getPermissions()
+      // 处理响应格式：可能是数组（直接返回）或对象（包含data字段）
+      if (Array.isArray(data)) {
+        permissions.value = data
+      } else if (data && data.permissions && Array.isArray(data.permissions)) {
+        permissions.value = data.permissions
+      } else if (data && Array.isArray(data.data)) {
+        permissions.value = data.data
+      } else {
+        // 降级到旧的store方法
+        await rolesStore.fetchPermissions()
+        permissions.value = rolesStore.permissions
+      }
+    } catch (apiError) {
+      console.warn('新权限API失败，使用旧方法:', apiError)
+      // 降级到旧的store方法
+      await rolesStore.fetchPermissions()
+      permissions.value = rolesStore.permissions
+    }
     
     // 加载角色列表（用于统计使用情况）
-    await rolesStore.fetchRoles()
+    try {
+      await rolesStore.fetchRoles()
+    } catch (error) {
+      console.warn('加载角色列表失败:', error)
+    }
     
     // 加载用户列表（用于测试）
-    await usersStore.fetchUsers()
-    testUsers.value = usersStore.users
+    try {
+      await usersStore.fetchUsers()
+      testUsers.value = usersStore.users
+    } catch (error) {
+      console.warn('加载用户列表失败:', error)
+    }
     
   } catch (error) {
     ElMessage.error('初始化数据失败: ' + error.message)

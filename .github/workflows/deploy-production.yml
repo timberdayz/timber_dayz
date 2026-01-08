@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Image tag to deploy (e.g., v4.19.7, main-abc123)'
+        description: "Image tag to deploy (e.g., v4.19.7, main-abc123)"
         required: true
         type: string
       confirm:
@@ -13,7 +13,7 @@ on:
         type: string
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 env:
   REGISTRY: ghcr.io
@@ -142,7 +142,14 @@ jobs:
                 image: xihong_erp_frontend:latest
             EOF
             
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d
+            # 检查是否存在云服务器优化配置（2核4G）
+            if [ -f docker-compose.cloud.yml ]; then
+              echo "[INFO] 使用云服务器优化配置（2核4G）"
+              docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d
+            else
+              echo "[INFO] 使用标准生产配置"
+              docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d
+            fi
             
             # 等待服务启动
             echo "Waiting for services to start..."
@@ -227,7 +234,7 @@ jobs:
           fields: repo,message,commit,author,action,eventName,ref,workflow
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        continue-on-error: true  # 如果 SLACK_WEBHOOK_URL 未配置会静默失败
+        continue-on-error: true # 如果 SLACK_WEBHOOK_URL 未配置会静默失败
 
   # 当部署被跳过时显示消息
   skip-notification:
@@ -248,4 +255,3 @@ jobs:
           echo "To enable deployment, configure these secrets in:"
           echo "  Settings > Secrets and variables > Actions"
           echo "========================================"
-

@@ -2,7 +2,7 @@
 认证相关的Pydantic模型
 """
 
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, validator, field_validator, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 import re
@@ -37,7 +37,7 @@ class UserCreate(BaseModel):
     username: str
     email: EmailStr
     password: str
-    full_name: str
+    full_name: Optional[str] = None
     roles: List[str] = []
     is_active: bool = True
 
@@ -53,7 +53,8 @@ class UserResponse(BaseModel):
     id: int
     username: str
     email: str
-    full_name: str
+    # DimUser.full_name 在数据库中允许为空；前端展示时可为空字符串/空值
+    full_name: Optional[str] = None
     roles: List[str]
     is_active: bool
     created_at: datetime
@@ -75,17 +76,13 @@ class RoleResponse(BaseModel):
     """角色响应"""
     id: int
     name: str
-    description: str
+    # DimRole.description 在数据库中允许为空
+    description: Optional[str] = None
     permissions: List[str]
     created_at: datetime
 
-class PermissionResponse(BaseModel):
-    """权限响应"""
-    id: int
-    name: str
-    description: str
-    resource: str
-    action: str
+# 注意：PermissionResponse已迁移到backend/schemas/permission.py（v4.20.0）
+# 如需使用，请从backend.schemas.permission导入
 
 class ChangePasswordRequest(BaseModel):
     """修改密码请求"""
@@ -104,6 +101,57 @@ class AuditLogResponse(BaseModel):
     user_agent: str
     created_at: datetime
     details: Optional[dict] = None
+
+
+class AuditLogFilterRequest(BaseModel):
+    """审计日志筛选请求"""
+    action: Optional[str] = Field(None, description="操作类型（支持模糊匹配）")
+    resource: Optional[str] = Field(None, description="资源类型（支持模糊匹配）")
+    user_id: Optional[int] = Field(None, description="用户ID")
+    username: Optional[str] = Field(None, description="用户名（支持模糊匹配）")
+    ip_address: Optional[str] = Field(None, description="IP地址（支持模糊匹配）")
+    start_time: Optional[datetime] = Field(None, description="开始时间")
+    end_time: Optional[datetime] = Field(None, description="结束时间")
+    page: int = Field(1, ge=1, description="页码（1-based）")
+    page_size: int = Field(20, ge=1, le=100, description="每页条数（最大100）")
+
+
+class AuditLogExportRequest(BaseModel):
+    """审计日志导出请求"""
+    action: Optional[str] = Field(None, description="操作类型（支持模糊匹配）")
+    resource: Optional[str] = Field(None, description="资源类型（支持模糊匹配）")
+    user_id: Optional[int] = Field(None, description="用户ID")
+    username: Optional[str] = Field(None, description="用户名（支持模糊匹配）")
+    ip_address: Optional[str] = Field(None, description="IP地址（支持模糊匹配）")
+    start_time: Optional[datetime] = Field(None, description="开始时间")
+    end_time: Optional[datetime] = Field(None, description="结束时间")
+    format: str = Field("excel", description="导出格式（excel 或 csv）")
+    max_records: int = Field(10000, ge=1, le=50000, description="最大导出记录数（防止导出过多数据）")
+    
+    @field_validator('format')
+    @classmethod
+    def validate_format(cls, v):
+        if v.lower() not in ['excel', 'csv']:
+            raise ValueError('导出格式必须是 excel 或 csv')
+        return v.lower()
+
+
+class AuditLogDetailResponse(BaseModel):
+    """审计日志详情响应（包含变更前后对比）"""
+    id: int
+    user_id: int
+    username: str
+    action: str
+    resource: str
+    resource_id: Optional[str] = None
+    ip_address: str
+    user_agent: str
+    created_at: datetime
+    details: Optional[dict] = None
+    before_data: Optional[dict] = Field(None, description="变更前的数据（如果details中包含）")
+    after_data: Optional[dict] = Field(None, description="变更后的数据（如果details中包含）")
+    
+    model_config = ConfigDict(from_attributes=True)
 
 class RegisterRequest(BaseModel):
     """用户注册请求"""

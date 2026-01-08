@@ -36,12 +36,35 @@ from modules.core.db import (
     SalesTarget,
     TargetBreakdown,
     FactOrder,
-    DimShop
+    DimShop,
+    DimUser  # ✅ 2026-01-08: 添加用户模型用于权限检查
 )
 from modules.core.logger import get_logger
+from backend.routers.auth import get_current_user  # ✅ 2026-01-08: 添加用户认证
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/targets", tags=["目标管理"])
+
+# ✅ 2026-01-08: 添加管理员权限检查
+async def require_admin(current_user: DimUser = Depends(get_current_user)):
+    """要求管理员权限"""
+    # 优先检查 is_superuser 标志
+    if current_user.is_superuser:
+        return current_user
+    
+    # 检查角色（使用 role_code 或 role_name）
+    is_admin = any(
+        (hasattr(role, "role_code") and role.role_code == "admin") or
+        (hasattr(role, "role_name") and role.role_name == "admin")
+        for role in current_user.roles
+    )
+    
+    if not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Insufficient permissions: Admin access required"
+        )
+    return current_user
 
 
 # ==================== Request/Response Models ====================
@@ -137,7 +160,8 @@ async def list_targets(
     period_end: Optional[date] = Query(None, description="结束日期筛选（<=）"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
 ):
     """
     查询目标列表
@@ -188,7 +212,8 @@ async def list_targets(
 @router.get("/{target_id}", response_model=Dict[str, Any])
 async def get_target(
     target_id: int,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
 ):
     """
     查询目标详情
@@ -257,7 +282,8 @@ async def get_target(
 async def create_target(
     request: TargetCreateRequest,
     db: AsyncSession = Depends(get_async_db),
-    created_by: str = "admin"  # TODO: 从认证中获取当前用户
+    current_user: DimUser = Depends(require_admin),  # ✅ 2026-01-08: 仅管理员可访问
+    created_by: str = None  # ✅ 2026-01-08: 从current_user获取
 ):
     """
     创建目标
@@ -282,7 +308,7 @@ async def create_target(
             target_amount=request.target_amount,
             target_quantity=request.target_quantity,
             description=request.description,
-            created_by=created_by,
+            created_by=current_user.username if current_user else "admin",  # ✅ 2026-01-08: 从current_user获取
             status="active"
         )
         
@@ -339,7 +365,8 @@ async def create_target(
 async def update_target(
     target_id: int,
     request: TargetUpdateRequest,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
 ):
     """
     更新目标
@@ -432,7 +459,8 @@ async def update_target(
 @router.delete("/{target_id}", response_model=Dict[str, Any])
 async def delete_target(
     target_id: int,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
 ):
     """
     删除目标
@@ -504,7 +532,8 @@ async def delete_target(
 async def create_breakdown(
     target_id: int,
     request: BreakdownCreateRequest,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
 ):
     """
     创建目标分解
@@ -665,7 +694,8 @@ async def create_breakdown(
 async def list_breakdowns(
     target_id: int,
     breakdown_type: Optional[str] = Query(None, description="分解类型筛选：shop/time"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
 ):
     """
     查询目标分解列表
@@ -714,7 +744,8 @@ async def list_breakdowns(
 @router.post("/{target_id}/calculate", response_model=Dict[str, Any])
 async def calculate_target_achievement(
     target_id: int,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
 ):
     """
     计算目标达成情况（C类数据：系统自动计算）

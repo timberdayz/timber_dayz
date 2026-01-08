@@ -78,7 +78,8 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token expired"
             )
-        except jwt.JWTError:
+        # PyJWT: 通用异常基类为 PyJWTError（jwt.JWTError 不存在，会导致 AttributeError）
+        except jwt.PyJWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token"

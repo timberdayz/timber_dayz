@@ -102,6 +102,10 @@ class ErrorCode(IntEnum):
     DATA_QUARANTINED = 3301
     DATA_ISOLATION_FAILED = 3302
     
+    # 3400-3499: 数据查找错误
+    DATA_NOT_FOUND = 3401
+    DATA_ALREADY_EXISTS = 3402
+    
     # ========== 4xxx - 用户错误 ==========
     
     # 4001-4099: 认证错误
@@ -184,6 +188,8 @@ def get_error_message(code: int, default_message: str = "操作失败") -> str:
         ErrorCode.DATA_VALIDATION_FAILED: "数据验证失败",
         ErrorCode.DATA_FORMAT_INVALID: "数据格式无效",
         ErrorCode.DATA_INTEGRITY_VIOLATION: "数据完整性违反",
+        ErrorCode.DATA_NOT_FOUND: "数据不存在",
+        ErrorCode.DATA_ALREADY_EXISTS: "数据已存在",
         
         # 用户错误
         ErrorCode.AUTH_REQUIRED: "需要认证",

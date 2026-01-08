@@ -42,6 +42,8 @@ from typing import List, Optional
 # [WARN] v4.6.0 DSS架构重构：已删除废弃的API（metrics, store_analytics, main_views, materialized_views, field_mapping_dictionary_mv_display）
 # [OK] v4.6.0 DSS架构重构：dashboard_api已恢复，通过Metabase Question查询提供数据
 from backend.routers import (
+    permissions,  # v4.20.0: 权限树API
+    permission,  # v4.20.0: 权限列表API
     collection,
     management,
     # accounts,  # v4.18.0: 已删除，使用account_management替代
@@ -67,6 +69,11 @@ from backend.routers import (
     performance,
     inventory_management,  # v4.10.0更新：库存管理API（原产品管理）
     system,  # v4.3.5: 系统配置API
+    system_logs,  # v4.20.0: 系统日志API
+    security,  # v4.20.0: 安全设置API
+    backup,  # v4.20.0: 数据备份与恢复API
+    maintenance,  # v4.20.0: 系统维护API
+    notification_config,  # v4.20.0: 通知配置API
     account_alignment,  # v4.3.6: 账号对齐API
     # procurement,  # v4.17.0: 已删除（财务域表已删除，API路由已移除）
     # [WARN] v4.12.0移除：数据浏览器API已移除，使用Metabase替代
@@ -772,6 +779,17 @@ app.include_router(
     tags=["角色管理"]
 )
 
+# v4.20.0: 权限管理路由
+app.include_router(
+    permissions.router,  # /api/permissions/tree
+    tags=["权限管理"]
+)
+
+app.include_router(
+    permission.router,  # /api/system/permissions
+    tags=["权限管理"]
+)
+
 # v4.19.0: 通知管理路由
 app.include_router(
     notifications.router,
@@ -801,8 +819,39 @@ app.include_router(
 
 # v4.3.5 系统配置API（白名单平台/域/粒度）
 app.include_router(
-    system.router,
+    system.router,  # v4.20.0: 前缀已更新为 /api/system
     tags=["系统配置"]
+)
+
+# v4.20.0 系统日志API
+app.include_router(
+    system_logs.router,  # 前缀: /api/system/logs
+    tags=["系统日志"]
+)
+
+# v4.20.0 安全设置API
+from backend.routers import security as security_router
+app.include_router(
+    security_router.router,  # 前缀: /api/system/security
+    tags=["安全设置"]
+)
+
+# v4.20.0 数据备份与恢复API
+app.include_router(
+    backup.router,  # 前缀: /api/system/backup
+    tags=["数据备份"]
+)
+
+# v4.20.0 系统维护API
+app.include_router(
+    maintenance.router,  # 前缀: /api/system/maintenance
+    tags=["系统维护"]
+)
+
+# v4.20.0 通知配置API
+app.include_router(
+    notification_config.router,  # 前缀: /api/system/notification
+    tags=["通知配置"]
 )
 
 # v4.3.6 账号对齐API（妙手订单账号级归并）

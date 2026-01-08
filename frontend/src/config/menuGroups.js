@@ -178,8 +178,13 @@ export const menuGroups = [
       '/user-management',        // 用户管理
       '/role-management',        // 角色管理
       '/permission-management',  // 权限管理
-      '/system-settings',        // 系统设置
+      '/system-config',          // 系统配置
+      '/database-config',        // 数据库配置
+      '/security-settings',      // 安全设置
       '/system-logs',            // 系统日志
+      '/data-backup',            // 数据备份
+      '/system-maintenance',     // 系统维护
+      '/notification-config',    // 通知配置
       '/personal-settings'       // 个人设置
     ]
   },

@@ -2,17 +2,19 @@
 认证相关API路由
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, and_
 from backend.models.database import get_db, get_async_db
 from backend.services.auth_service import auth_service
 from backend.schemas.auth import (
     LoginRequest, LoginResponse, RefreshTokenRequest, RefreshTokenResponse,
     UserCreate, UserUpdate, UserResponse, RoleCreate, RoleUpdate, RoleResponse,
-    PermissionResponse, ChangePasswordRequest, AuditLogResponse,
+    # 注意：PermissionResponse已迁移到backend.schemas.permission（v4.20.0）
+    ChangePasswordRequest, AuditLogResponse,
+    AuditLogFilterRequest, AuditLogExportRequest, AuditLogDetailResponse,  # v4.20.0: 审计日志增强
     RegisterRequest, RegisterResponse  # v4.19.0: 用户注册
 )
 from modules.core.db import DimUser, DimRole, FactAuditLog, UserSession  # v4.12.0 SSOT迁移, v4.19.0会话管理
@@ -22,6 +24,7 @@ from backend.utils.error_codes import ErrorCode, get_error_type
 from backend.utils.config import get_settings  # [*] v6.0.0修复：导入 settings（Vulnerability 24）
 from modules.core.logger import get_logger
 from typing import List, Optional
+from datetime import datetime
 import os  # [*] v6.0.0新增：用于检查 CSRF_ENABLED 环境变量
 
 logger = get_logger(__name__)
@@ -367,13 +370,17 @@ async def login(
         from datetime import datetime, timedelta
         user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
         
-        # 配置锁定策略：5次失败，锁定30分钟
-        MAX_FAILED_ATTEMPTS = 5
-        LOCKOUT_DURATION_MINUTES = 30
+        # v4.20.0: 使用SecurityConfigService获取登录限制配置（替代硬编码策略）
+        from backend.services.security_config_service import get_security_config_service
+        security_service = get_security_config_service(db)
+        login_restrictions = await security_service.get_login_restrictions()
+        
+        max_failed_attempts = login_restrictions.get("max_failed_attempts", 5)
+        lockout_duration_minutes = login_restrictions.get("lockout_duration_minutes", 30)
         
         # 如果达到阈值，锁定账户
-        if user.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
-            user.locked_until = datetime.utcnow() + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+        if user.failed_login_attempts >= max_failed_attempts:
+            user.locked_until = datetime.utcnow() + timedelta(minutes=lockout_duration_minutes)
             
             # v4.19.0 P0安全要求：账户锁定后强制撤销所有活跃会话
             from backend.routers.notifications import revoke_all_user_sessions, notify_account_locked
@@ -405,7 +412,7 @@ async def login(
             await notify_account_locked(
                 db=db,
                 user_id=user.user_id,
-                locked_minutes=LOCKOUT_DURATION_MINUTES,
+                locked_minutes=lockout_duration_minutes,
                 failed_attempts=user.failed_login_attempts
             )
             await db.commit()
@@ -414,7 +421,7 @@ async def login(
                 code=ErrorCode.AUTH_ACCOUNT_LOCKED,
                 message="账户已被锁定",
                 error_type=get_error_type(ErrorCode.AUTH_ACCOUNT_LOCKED),
-                recovery_suggestion=f"因多次登录失败，账户已被锁定 {LOCKOUT_DURATION_MINUTES} 分钟，请稍后重试或联系管理员解锁",
+                recovery_suggestion=f"因多次登录失败，账户已被锁定 {lockout_duration_minutes} 分钟，请稍后重试或联系管理员解锁",
                 status_code=403
             )
         else:
@@ -431,11 +438,11 @@ async def login(
             details={
                 "reason": "invalid_password",
                 "failed_attempts": user.failed_login_attempts,
-                "remaining_attempts": MAX_FAILED_ATTEMPTS - user.failed_login_attempts
+                "remaining_attempts": max_failed_attempts - user.failed_login_attempts
             }
         )
         
-        remaining_attempts = MAX_FAILED_ATTEMPTS - user.failed_login_attempts
+        remaining_attempts = max_failed_attempts - user.failed_login_attempts
         return error_response(
             code=ErrorCode.AUTH_CREDENTIALS_INVALID,
             message="Invalid credentials",
@@ -919,7 +926,11 @@ async def change_password(
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """修改密码"""
+    """
+    修改密码
+    
+    v4.20.0: 使用SecurityConfigService验证密码策略
+    """
     # 验证旧密码
     if not auth_service.verify_password(password_request.old_password, current_user.password_hash):
         return error_response(
@@ -927,6 +938,26 @@ async def change_password(
             message="Invalid old password",
             error_type=get_error_type(ErrorCode.AUTH_CREDENTIALS_INVALID),
             recovery_suggestion="旧密码不正确，请重新输入",
+            status_code=400
+        )
+    
+    # v4.20.0: 使用SecurityConfigService验证密码策略
+    from backend.services.security_config_service import get_security_config_service
+    security_service = get_security_config_service(db)
+    password_policy = await security_service.get_password_policy()
+    
+    # 验证新密码是否符合策略
+    is_valid, error_message = security_service.validate_password(
+        password_request.new_password,
+        password_policy
+    )
+    
+    if not is_valid:
+        return error_response(
+            code=ErrorCode.VALIDATION_ERROR,
+            message=error_message or "密码不符合策略要求",
+            error_type=get_error_type(ErrorCode.VALIDATION_ERROR),
+            recovery_suggestion=error_message,
             status_code=400
         )
     
@@ -961,14 +992,26 @@ async def change_password(
 
 @router.get("/audit-logs", response_model=List[AuditLogResponse])
 async def get_audit_logs(
-    page: int = 1,
-    page_size: int = 20,
+    action: Optional[str] = Query(None, description="操作类型（支持模糊匹配）"),
+    resource: Optional[str] = Query(None, description="资源类型（支持模糊匹配）"),
+    user_id: Optional[int] = Query(None, description="用户ID"),
+    username: Optional[str] = Query(None, description="用户名（支持模糊匹配）"),
+    ip_address: Optional[str] = Query(None, description="IP地址（支持模糊匹配）"),
+    start_time: Optional[datetime] = Query(None, description="开始时间"),
+    end_time: Optional[datetime] = Query(None, description="结束时间"),
+    page: int = Query(1, ge=1, description="页码（1-based）"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数（最大100）"),
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取审计日志（仅管理员）"""
-    # 检查权限
-    if not any(role.role_name == "admin" for role in current_user.roles):  # [*] 修复：使用 role_name 而不是 name
+    """
+    获取审计日志列表（支持筛选、分页）
+    
+    需要管理员权限
+    v4.20.0: 增强筛选功能
+    """
+    # 检查权限（使用require_admin依赖更简洁，但保持向后兼容）
+    if not any(role.role_name == "admin" for role in current_user.roles):
         return error_response(
             code=ErrorCode.PERMISSION_DENIED,
             message="Insufficient permissions",
@@ -977,13 +1020,116 @@ async def get_audit_logs(
             status_code=403
         )
     
-    # 查询审计日志
-    offset = (page - 1) * page_size
-    result = await db.execute(select(FactAuditLog).offset(offset).limit(page_size))
-    logs = result.scalars().all()
+    try:
+        # 构建查询条件
+        conditions = []
+        
+        if action:
+            conditions.append(FactAuditLog.action.ilike(f"%{action}%"))
+        
+        if resource:
+            conditions.append(FactAuditLog.resource.ilike(f"%{resource}%"))
+        
+        if user_id:
+            conditions.append(FactAuditLog.user_id == user_id)
+        
+        if username:
+            conditions.append(FactAuditLog.username.ilike(f"%{username}%"))
+        
+        if ip_address:
+            conditions.append(FactAuditLog.ip_address.ilike(f"%{ip_address}%"))
+        
+        if start_time:
+            conditions.append(FactAuditLog.created_at >= start_time)
+        
+        if end_time:
+            conditions.append(FactAuditLog.created_at <= end_time)
+        
+        # 查询数据
+        query = select(FactAuditLog).order_by(FactAuditLog.created_at.desc())
+        if conditions:
+            query = query.where(and_(*conditions))
+        
+        # 分页
+        offset = (page - 1) * page_size
+        query = query.offset(offset).limit(page_size)
+        
+        result = await db.execute(query)
+        logs = result.scalars().all()
+        
+        return [
+            AuditLogResponse(
+                id=log.id,
+                user_id=log.user_id,
+                username=log.username,
+                action=log.action,
+                resource=log.resource,
+                resource_id=log.resource_id,
+                ip_address=log.ip_address,
+                user_agent=log.user_agent,
+                created_at=log.created_at,
+                details=log.details
+            )
+            for log in logs
+        ]
+        
+    except Exception as e:
+        logger.error(f"获取审计日志列表失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message="获取审计日志列表失败",
+            error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
+            detail=str(e),
+            status_code=500
+        )
+
+
+@router.get("/audit-logs/{log_id}", response_model=AuditLogDetailResponse)
+async def get_audit_log_detail(
+    log_id: int,
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    获取审计日志详情（包含变更前后对比）
     
-    return [
-        AuditLogResponse(
+    需要管理员权限
+    v4.20.0: 新增端点
+    """
+    # 检查权限
+    if not any(role.role_name == "admin" for role in current_user.roles):
+        return error_response(
+            code=ErrorCode.PERMISSION_DENIED,
+            message="Insufficient permissions",
+            error_type=get_error_type(ErrorCode.PERMISSION_DENIED),
+            recovery_suggestion="需要管理员权限才能执行此操作",
+            status_code=403
+        )
+    
+    try:
+        result = await db.execute(
+            select(FactAuditLog).where(FactAuditLog.id == log_id)
+        )
+        log = result.scalar_one_or_none()
+        
+        if not log:
+            return error_response(
+                code=ErrorCode.DATA_NOT_FOUND,
+                message="审计日志不存在",
+                error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
+                detail=f"审计日志ID {log_id} 不存在",
+                status_code=404
+            )
+        
+        # 解析变更前后数据（如果details中包含）
+        before_data = None
+        after_data = None
+        if log.details:
+            if isinstance(log.details, dict):
+                before_data = log.details.get("before")
+                after_data = log.details.get("after")
+        
+        return AuditLogDetailResponse(
             id=log.id,
             user_id=log.user_id,
             username=log.username,
@@ -993,7 +1139,196 @@ async def get_audit_logs(
             ip_address=log.ip_address,
             user_agent=log.user_agent,
             created_at=log.created_at,
-            details=log.details
+            details=log.details,
+            before_data=before_data,
+            after_data=after_data
         )
-        for log in logs
-    ]
+        
+    except Exception as e:
+        logger.error(f"获取审计日志详情失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message="获取审计日志详情失败",
+            error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
+            detail=str(e),
+            status_code=500
+        )
+
+
+@router.post("/audit-logs/export")
+async def export_audit_logs(
+    request: AuditLogExportRequest,
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    导出审计日志（Excel/CSV格式）
+    
+    需要管理员权限
+    限流：防止大量导出导致性能问题
+    v4.20.0: 新增端点
+    """
+    # 检查权限
+    if not any(role.role_name == "admin" for role in current_user.roles):
+        return error_response(
+            code=ErrorCode.PERMISSION_DENIED,
+            message="Insufficient permissions",
+            error_type=get_error_type(ErrorCode.PERMISSION_DENIED),
+            recovery_suggestion="需要管理员权限才能执行此操作",
+            status_code=403
+        )
+    
+    # 限流配置
+    if role_based_rate_limit:
+        @role_based_rate_limit(requests_per_minute=5, requests_per_hour=20)
+        async def _export():
+            pass
+        await _export()
+    
+    try:
+        import io
+        import csv
+        
+        # 构建查询条件
+        conditions = []
+        
+        if request.action:
+            conditions.append(FactAuditLog.action.ilike(f"%{request.action}%"))
+        
+        if request.resource:
+            conditions.append(FactAuditLog.resource.ilike(f"%{request.resource}%"))
+        
+        if request.user_id:
+            conditions.append(FactAuditLog.user_id == request.user_id)
+        
+        if request.username:
+            conditions.append(FactAuditLog.username.ilike(f"%{request.username}%"))
+        
+        if request.ip_address:
+            conditions.append(FactAuditLog.ip_address.ilike(f"%{request.ip_address}%"))
+        
+        if request.start_time:
+            conditions.append(FactAuditLog.created_at >= request.start_time)
+        
+        if request.end_time:
+            conditions.append(FactAuditLog.created_at <= request.end_time)
+        
+        # 查询数据（限制最大记录数）
+        query = select(FactAuditLog).order_by(FactAuditLog.created_at.desc())
+        if conditions:
+            query = query.where(and_(*conditions))
+        
+        query = query.limit(request.max_records)
+        
+        result = await db.execute(query)
+        logs = result.scalars().all()
+        
+        if not logs:
+            return error_response(
+                code=ErrorCode.DATA_NOT_FOUND,
+                message="没有可导出的审计日志",
+                error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
+                detail="根据筛选条件未找到任何审计日志",
+                status_code=404
+            )
+        
+        # 导出为CSV或Excel
+        if request.format == "csv":
+            # CSV导出
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # 写入表头
+            writer.writerow(["ID", "用户ID", "用户名", "操作", "资源", "资源ID", "IP地址", "用户代理", "创建时间", "详情"])
+            
+            # 写入数据
+            for log in logs:
+                writer.writerow([
+                    log.id,
+                    log.user_id,
+                    log.username,
+                    log.action,
+                    log.resource,
+                    log.resource_id or "",
+                    log.ip_address,
+                    log.user_agent,
+                    log.created_at.isoformat() if log.created_at else "",
+                    str(log.details) if log.details else ""
+                ])
+            
+            from fastapi.responses import Response
+            return Response(
+                content=output.getvalue(),
+                media_type="text/csv",
+                headers={
+                    "Content-Disposition": f"attachment; filename=audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                }
+            )
+        else:
+            # Excel导出（需要openpyxl）
+            try:
+                from openpyxl import Workbook
+                from openpyxl.styles import Font, Alignment
+                
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "审计日志"
+                
+                # 写入表头
+                headers = ["ID", "用户ID", "用户名", "操作", "资源", "资源ID", "IP地址", "用户代理", "创建时间", "详情"]
+                ws.append(headers)
+                
+                # 设置表头样式
+                for cell in ws[1]:
+                    cell.font = Font(bold=True)
+                    cell.alignment = Alignment(horizontal="center")
+                
+                # 写入数据
+                for log in logs:
+                    ws.append([
+                        log.id,
+                        log.user_id,
+                        log.username,
+                        log.action,
+                        log.resource,
+                        log.resource_id or "",
+                        log.ip_address,
+                        log.user_agent,
+                        log.created_at.isoformat() if log.created_at else "",
+                        str(log.details) if log.details else ""
+                    ])
+                
+                # 保存到内存
+                output = io.BytesIO()
+                wb.save(output)
+                output.seek(0)
+                
+                from fastapi.responses import Response
+                return Response(
+                    content=output.getvalue(),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={
+                        "Content-Disposition": f"attachment; filename=audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    }
+                )
+            except ImportError:
+                # 如果没有openpyxl，降级为CSV
+                logger.warning("openpyxl未安装，降级为CSV格式导出")
+                return await export_audit_logs(
+                    AuditLogExportRequest(
+                        **request.model_dump(),
+                        format="csv"
+                    ),
+                    current_user,
+                    db
+                )
+        
+    except Exception as e:
+        logger.error(f"导出审计日志失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message="导出审计日志失败",
+            error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
+            detail=str(e),
+            status_code=500
+        )

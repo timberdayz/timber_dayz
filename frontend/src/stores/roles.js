@@ -19,8 +19,10 @@ export const useRolesStore = defineStore('roles', () => {
     try {
       isLoading.value = true
       const response = await rolesApi.getRoles()
-      roles.value = response.data
-      return response.data
+      // 处理响应格式：可能是数组（直接返回）或对象（包含data字段）
+      const rolesList = Array.isArray(response) ? response : (response.data || [])
+      roles.value = rolesList
+      return rolesList
     } catch (error) {
       ElMessage.error('获取角色列表失败: ' + (error.response?.data?.detail || error.message))
       throw error
@@ -85,8 +87,10 @@ export const useRolesStore = defineStore('roles', () => {
   const fetchPermissions = async () => {
     try {
       const response = await rolesApi.getAvailablePermissions()
-      permissions.value = response.data
-      return response.data
+      // 处理响应格式：可能是数组（直接返回）或对象（包含data字段）
+      const permissionsList = Array.isArray(response) ? response : (response.data || [])
+      permissions.value = permissionsList
+      return permissionsList
     } catch (error) {
       ElMessage.error('获取权限列表失败: ' + (error.response?.data?.detail || error.message))
       throw error

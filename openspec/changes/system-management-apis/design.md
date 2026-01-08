@@ -429,10 +429,10 @@ async def restore_backup(
             for role in admin_user.roles
         )
         if not is_admin:
-            raise HTTPException(
-                status_code=403,
+        raise HTTPException(
+            status_code=403,
                 detail=f"用户 {admin_id} 不是管理员"
-            )
+        )
     
     # 3. 二次确认
     if not restore_request.confirmed:

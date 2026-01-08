@@ -3714,3 +3714,192 @@ class FactRateLimitConfigAudit(Base):
         Index("idx_rate_limit_audit_operator", "operator_id", "created_at"),
         Index("idx_rate_limit_audit_action", "action_type", "created_at"),
     )
+
+
+# ==================== System Management Tables (v4.20.0) ====================
+
+class SystemLog(Base):
+    """
+    系统日志表
+    
+    用于存储应用运行时产生的结构化日志。
+    与文件日志、审计日志、任务日志不同：
+    - 文件日志：modules/core/logger.py 写入文件
+    - 审计日志：FactAuditLog 表记录用户操作
+    - 任务日志：CollectionTaskLog 表记录采集任务
+    - 系统日志：本表记录应用运行时的结构化日志
+    """
+    __tablename__ = "system_logs"
+    
+    id = Column(Integer, primary_key=True)
+    level = Column(String(10), nullable=False)  # ERROR, WARN, INFO, DEBUG
+    module = Column(String(64), nullable=False)  # 模块名称
+    message = Column(Text, nullable=False)  # 日志消息
+    user_id = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    ip_address = Column(String(45), nullable=True)  # IPv4/IPv6
+    user_agent = Column(String(512), nullable=True)
+    details = Column(JSONB, nullable=True)  # 详细信息（JSON格式）
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        Index("ix_system_logs_level", "level"),
+        Index("ix_system_logs_module", "module"),
+        Index("ix_system_logs_created_at", "created_at"),
+        ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], name='fk_system_logs_user_id'),
+    )
+
+
+class SecurityConfig(Base):
+    """
+    安全配置表
+    
+    用于存储系统安全相关配置（密码策略、登录限制、会话配置、2FA配置等）
+    使用JSONB存储配置值，支持灵活的配置结构
+    """
+    __tablename__ = "security_config"
+    
+    id = Column(Integer, primary_key=True)
+    config_key = Column(String(64), unique=True, nullable=False)  # password_policy, login_restrictions, session_config, 2fa_config
+    config_value = Column(JSONB, nullable=False)  # 配置值（JSON格式）
+    description = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint('config_key', name='uq_security_config_key'),  # 唯一约束
+        Index('ix_security_config_key', 'config_key'),  # 索引
+        ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], name='fk_security_config_updated_by'),
+    )
+
+
+class BackupRecord(Base):
+    """
+    备份记录表
+    
+    用于记录系统备份操作的历史记录
+    """
+    __tablename__ = "backup_records"
+    
+    id = Column(Integer, primary_key=True)
+    backup_type = Column(String(32), nullable=False)  # full, incremental
+    backup_path = Column(String(512), nullable=False)  # 备份文件路径（容器内路径）
+    backup_size = Column(BigInteger, nullable=False)  # 备份大小（字节）
+    checksum = Column(String(64), nullable=True)  # 文件校验和（SHA-256）
+    status = Column(String(32), nullable=False)  # pending, completed, failed
+    description = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    
+    __table_args__ = (
+        Index("ix_backup_records_status", "status"),
+        Index("ix_backup_records_created_at", "created_at"),
+        ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], name='fk_backup_records_created_by'),
+    )
+
+
+class SMTPConfig(Base):
+    """
+    SMTP配置表
+    
+    用于存储邮件服务器配置（密码加密存储）
+    """
+    __tablename__ = "smtp_config"
+    
+    id = Column(Integer, primary_key=True)
+    smtp_server = Column(String(256), nullable=False)
+    smtp_port = Column(Integer, nullable=False)
+    use_tls = Column(Boolean, default=True, nullable=False)
+    username = Column(String(256), nullable=False)
+    password_encrypted = Column(Text, nullable=False)  # 加密存储
+    from_email = Column(String(256), nullable=False)
+    from_name = Column(String(128), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    
+    __table_args__ = (
+        ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], name='fk_smtp_config_updated_by'),
+    )
+
+
+class NotificationTemplate(Base):
+    """
+    通知模板表
+    
+    用于存储通知内容模板（支持变量替换）
+    """
+    __tablename__ = "notification_templates"
+    
+    id = Column(Integer, primary_key=True)
+    template_name = Column(String(128), unique=True, nullable=False)
+    template_type = Column(String(64), nullable=False)  # email/sms/push
+    subject = Column(String(256), nullable=True)  # 邮件主题（email类型）
+    content = Column(Text, nullable=False)  # 模板内容（支持变量如 {{user_name}}）
+    variables = Column(JSONB, nullable=True)  # 可用变量说明（JSON格式）
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    
+    __table_args__ = (
+        Index("ix_notification_templates_template_name", "template_name"),
+        Index("ix_notification_templates_template_type", "template_type"),
+        ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], name='fk_notification_templates_created_by'),
+        ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], name='fk_notification_templates_updated_by'),
+    )
+
+
+class AlertRule(Base):
+    """
+    告警规则表
+    
+    用于配置系统告警规则（何时触发通知）
+    """
+    __tablename__ = "alert_rules"
+    
+    id = Column(Integer, primary_key=True)
+    rule_name = Column(String(128), unique=True, nullable=False)
+    rule_type = Column(String(64), nullable=False)  # system/performance/security/business
+    condition = Column(JSONB, nullable=False)  # 触发条件（JSON格式）
+    template_id = Column(Integer, ForeignKey("notification_templates.id"), nullable=True)
+    recipients = Column(JSONB, nullable=True)  # 收件人列表（JSON格式，支持用户ID、邮箱等）
+    enabled = Column(Boolean, default=True, nullable=False)
+    priority = Column(String(16), nullable=False, default="medium")  # low/medium/high/critical
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    
+    __table_args__ = (
+        Index("ix_alert_rules_rule_name", "rule_name"),
+        Index("ix_alert_rules_rule_type", "rule_type"),
+        Index("ix_alert_rules_enabled", "enabled"),
+        ForeignKeyConstraint(['template_id'], ['notification_templates.id'], name='fk_alert_rules_template_id'),
+        ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], name='fk_alert_rules_created_by'),
+        ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], name='fk_alert_rules_updated_by'),
+    )
+
+
+class SystemConfig(Base):
+    """
+    系统配置表
+    
+    用于存储系统基础配置（系统名称、版本、时区、语言、货币等）
+    使用键值对存储，支持灵活的配置项
+    """
+    __tablename__ = "system_config"
+    
+    id = Column(Integer, primary_key=True)
+    config_key = Column(String(64), unique=True, nullable=False)  # system_name, version, timezone, language, currency
+    config_value = Column(String(512), nullable=False)
+    description = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint('config_key', name='uq_system_config_key'),  # 唯一约束
+        Index('ix_system_config_key', 'config_key'),  # 索引
+        ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], name='fk_system_config_updated_by'),
+    )

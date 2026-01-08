@@ -1,0 +1,232 @@
+================================================================================
+懒加载问题扫描报告
+================================================================================
+
+总计: 75 个问题
+  - 错误 (Error): 42 个
+  - 警告 (Warning): 0 个
+  - 信息 (Info): 33 个
+
+================================================================================
+错误 (Error) - 必须修复
+================================================================================
+
+
+文件: backend\routers\account_alignment.py
+  行 450: export_yaml_aliases()
+    在异步函数 export_yaml_aliases 中，查询 AccountAlias 后访问了关系属性 a.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: a.platform
+
+
+文件: backend\routers\account_management.py
+  行 70: create_account()
+    在异步函数 create_account 中，查询 PlatformAccount 后访问了关系属性 account.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: account.platform
+
+  行 130: list_accounts()
+    在异步函数 list_accounts 中，查询 PlatformAccount 后访问了关系属性 PlatformAccount.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: PlatformAccount.platform
+
+  行 270: batch_create_accounts()
+    在异步函数 batch_create_accounts 中，查询 PlatformAccount 后访问了关系属性 batch_request.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: batch_request.platform
+
+  行 419: get_account_stats()
+    在异步函数 get_account_stats 中，查询 PlatformAccount 后访问了关系属性 account.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: account.platform
+
+
+文件: backend\routers\collection.py
+  行 63: list_configs()
+    在异步函数 list_configs 中，查询 CollectionConfig 后访问了关系属性 CollectionConfig.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: CollectionConfig.platform
+
+  行 91: create_config()
+    在异步函数 create_config 中，查询 CollectionConfig 后访问了关系属性 CollectionConfig.platform, config.platform, CollectionConfig.platform, config.platform, config.platform, config.platform, db_config.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: CollectionConfig.platform, config.platform, CollectionConfig.platform, config.platform, config.platform, config.platform, db_config.platform
+
+  行 115: create_config()
+    在异步函数 create_config 中，查询 CollectionConfig 后访问了关系属性 CollectionConfig.platform, config.platform, config.platform, config.platform, db_config.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: CollectionConfig.platform, config.platform, config.platform, config.platform, db_config.platform
+
+  行 424: list_tasks()
+    在异步函数 list_tasks 中，查询 CollectionTask 后访问了关系属性 CollectionTask.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: CollectionTask.platform
+
+  行 496: retry_task()
+    在异步函数 retry_task 中，查询 CollectionTask 后访问了关系属性 original_task.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: original_task.platform
+
+  行 719: get_history_stats()
+    在异步函数 get_history_stats 中，查询 status 后访问了关系属性 CollectionTask.platform, CollectionTask.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: CollectionTask.platform, CollectionTask.platform
+
+  行 729: get_history_stats()
+    在异步函数 get_history_stats 中，查询 platform 后访问了关系属性 CollectionTask.platform, CollectionTask.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: CollectionTask.platform, CollectionTask.platform
+
+
+文件: backend\routers\component_recorder.py
+  行 331: start_recording()
+    在异步函数 start_recording 中，查询 PlatformAccount 后访问了关系属性 request.platform, request.platform, request.platform, account.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: request.platform, request.platform, request.platform, account.platform
+
+  行 590: test_component()
+    在异步函数 test_component 中，查询 PlatformAccount 后访问了关系属性 request.platform, request.platform, request.platform, request.platform, request.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: request.platform, request.platform, request.platform, request.platform, request.platform
+
+
+文件: backend\routers\component_versions.py
+  行 857: test_component_version()
+    在异步函数 test_component_version 中，查询 ComponentVersion 后访问了关系属性 account.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: account.platform
+
+  行 870: test_component_version()
+    在异步函数 test_component_version 中，查询 PlatformAccount 后访问了关系属性 account.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: account.platform
+
+  行 1278: get_test_history()
+    在异步函数 get_test_history 中，查询 ComponentTestHistory 后访问了关系属性 record.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: record.platform
+
+
+文件: backend\routers\data_sync.py
+  行 248: list_files()
+    在异步函数 list_files 中，查询 CatalogFile 后访问了关系属性 t.platform, t.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: t.platform, t.platform
+
+  行 292: list_files()
+    在异步函数 list_files 中，查询 FieldMappingTemplate 后访问了关系属性 t.platform, t.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: t.platform, t.platform
+
+  行 1169: sync_batch()
+    在异步函数 sync_batch 中，查询 CatalogFile 后访问了关系属性 body.platform, body.platform, body.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: body.platform, body.platform, body.platform
+
+  行 1748: get_detailed_template_coverage()
+    在异步函数 get_detailed_template_coverage 中，查询 FieldMappingTemplate 后访问了关系属性 template.platform, template.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: template.platform, template.platform
+
+
+文件: backend\routers\field_mapping.py
+  行 1656: apply_template_deprecated()
+    在异步函数 apply_template_deprecated 中，查询 CatalogFile 后访问了关系属性 FieldMapping.platform, template.platform, template.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: FieldMapping.platform, template.platform, template.platform
+
+  行 1703: apply_template_deprecated()
+    在异步函数 apply_template_deprecated 中，查询 FieldMapping 后访问了关系属性 FieldMapping.platform, template.platform, template.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: FieldMapping.platform, template.platform, template.platform
+
+  行 1761: list_templates()
+    在异步函数 list_templates 中，查询 FieldMapping 后访问了关系属性 FieldMapping.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: FieldMapping.platform
+
+
+文件: backend\routers\management.py
+  行 85: get_data_records()
+    在异步函数 get_data_records 中，查询 DataRecord 后访问了关系属性 record.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: record.platform
+
+
+文件: backend\routers\notifications.py
+  行 517: execute_notification_action()
+    在异步函数 execute_notification_action 中，查询 Notification 后访问了关系属性 current_user.roles，但没有使用 selectinload/joinedload 预加载
+    关系属性: current_user.roles
+
+
+文件: backend\routers\test_api.py
+  行 28: test_database()
+    在异步函数 test_database 中，查询 DataFile 后访问了关系属性 f.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: f.platform
+
+
+文件: backend\routers\users.py
+  行 70: create_user()
+    在异步函数 create_user 中，查询 DimUser 后访问了关系属性 user_data.roles, user.roles, user.roles，但没有使用 selectinload/joinedload 预加载
+    关系属性: user_data.roles, user.roles, user.roles
+
+  行 82: create_user()
+    在异步函数 create_user 中，查询 DimUser 后访问了关系属性 user_data.roles, user.roles, user.roles，但没有使用 selectinload/joinedload 预加载
+    关系属性: user_data.roles, user.roles, user.roles
+
+  行 108: create_user()
+    在异步函数 create_user 中，查询 DimRole 后访问了关系属性 user.roles, user.roles，但没有使用 selectinload/joinedload 预加载
+    关系属性: user.roles, user.roles
+
+  行 213: update_user()
+    在异步函数 update_user 中，查询 DimUser 后访问了关系属性 user_update.roles, user.roles, user_update.roles, user.roles, user.roles，但没有使用 selectinload/joinedload 预加载
+    关系属性: user_update.roles, user.roles, user_update.roles, user.roles, user.roles
+
+  行 228: update_user()
+    在异步函数 update_user 中，查询 DimUser 后访问了关系属性 user_update.roles, user.roles, user_update.roles, user.roles, user.roles，但没有使用 selectinload/joinedload 预加载
+    关系属性: user_update.roles, user.roles, user_update.roles, user.roles, user.roles
+
+  行 281: update_user()
+    在异步函数 update_user 中，查询 DimRole 后访问了关系属性 user.roles, user.roles，但没有使用 selectinload/joinedload 预加载
+    关系属性: user.roles, user.roles
+
+  行 556: approve_user()
+    在异步函数 approve_user 中，查询 DimUser 后访问了关系属性 user.roles, user.roles, user.roles, user.roles，但没有使用 selectinload/joinedload 预加载
+    关系属性: user.roles, user.roles, user.roles, user.roles
+
+  行 587: approve_user()
+    在异步函数 approve_user 中，查询 DimRole 后访问了关系属性 user.roles, user.roles, user.roles, user.roles，但没有使用 selectinload/joinedload 预加载
+    关系属性: user.roles, user.roles, user.roles, user.roles
+
+  行 606: approve_user()
+    在异步函数 approve_user 中，查询 DimRole 后访问了关系属性 user.roles, user.roles，但没有使用 selectinload/joinedload 预加载
+    关系属性: user.roles, user.roles
+
+
+文件: backend\services\account_loader_service.py
+  行 40: load_account_async()
+    在异步函数 load_account_async 中，查询 PlatformAccount 后访问了关系属性 account.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: account.platform
+
+
+文件: backend\services\collection_scheduler.py
+  行 386: _execute_scheduled_task()
+    在异步函数 _execute_scheduled_task 中，查询 CollectionConfig 后访问了关系属性 config.platform, config.platform, CollectionTask.platform, config.platform, config.platform, config.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: config.platform, config.platform, CollectionTask.platform, config.platform, config.platform, config.platform
+
+  行 399: _execute_scheduled_task()
+    在异步函数 _execute_scheduled_task 中，查询 CollectionTask 后访问了关系属性 config.platform, config.platform, CollectionTask.platform, config.platform, config.platform, config.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: config.platform, config.platform, CollectionTask.platform, config.platform, config.platform, config.platform
+
+  行 446: _execute_scheduled_task()
+    在异步函数 _execute_scheduled_task 中，查询 CollectionTask 后访问了关系属性 CollectionTask.platform, config.platform, config.platform, config.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: CollectionTask.platform, config.platform, config.platform, config.platform
+
+
+文件: backend\services\template_matcher.py
+  行 122: find_best_template()
+    在异步函数 find_best_template 中，查询 FieldMappingTemplate 后访问了关系属性 FieldMappingTemplate.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: FieldMappingTemplate.platform
+
+  行 149: find_best_template()
+    在异步函数 find_best_template 中，查询 FieldMappingTemplate 后访问了关系属性 FieldMappingTemplate.platform，但没有使用 selectinload/joinedload 预加载
+    关系属性: FieldMappingTemplate.platform
+
+================================================================================
+信息 (Info) - 仅供参考
+================================================================================
+
+共 33 个信息项（通常是安全的，如从参数传入的对象）
+
+================================================================================
+修复建议
+================================================================================
+
+对于错误级别的问题，请使用以下方式修复：
+
+1. 在查询时使用 selectinload 预加载关系：
+   from sqlalchemy.orm import selectinload
+   result = await db.execute(
+       select(Model)
+       .options(selectinload(Model.relationship))
+   )
+
+2. 或者在修改关系后使用 db.refresh：
+   await db.refresh(model, ['relationship'])
+
+================================================================================
