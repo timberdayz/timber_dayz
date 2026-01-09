@@ -1,0 +1,24 @@
+# =====================================================
+# Metabase 端口锁定配置
+# =====================================================
+# 目的：Metabase 不对外暴露独立端口，通过 Nginx 反向代理访问
+# =====================================================
+# 使用方式：
+# docker-compose -f docker-compose.yml \
+#   -f docker-compose.prod.yml \
+#   -f docker-compose.metabase.yml \
+#   -f docker-compose.metabase.lockdown.yml \
+#   --profile production up -d
+# =====================================================
+# 访问方式：
+# 1. 通过 Nginx 反向代理：http://YOUR_SERVER_IP/metabase/
+# 2. 前端 iframe：使用相对路径 /metabase/embed/dashboard/...
+# 3. 后端代理：使用容器网络地址 http://metabase:3000
+# =====================================================
+
+services:
+  # Metabase - 完全移除端口映射（仅容器网络可访问）
+  # 通过 Nginx 反向代理 /metabase/ 路径访问，不暴露独立端口
+  # 访问方式：http://YOUR_SERVER_IP/metabase/
+  metabase:
+    ports: []  # 完全移除端口映射，服务仍可通过 metabase:3000 在容器网络内访问

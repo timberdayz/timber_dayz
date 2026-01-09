@@ -39,6 +39,9 @@ services:
         reservations:
           cpus: '0.25'
           memory: 128M
+    profiles:
+      - production
+      - full
 
   # PostgreSQL Exporter
   postgres-exporter:
@@ -51,6 +54,9 @@ services:
     networks:
       - erp_network
     restart: unless-stopped
+    profiles:
+      - production
+      - full
 
   # Prometheus
   prometheus:
@@ -85,6 +91,9 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
+    profiles:
+      - production
+      - full
 
   # AlertManager
   alertmanager:
@@ -127,6 +136,9 @@ services:
         reservations:
           cpus: '0.25'
           memory: 128M
+    profiles:
+      - production
+      - full
 
   # Grafana
   grafana:
@@ -164,6 +176,9 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
+    profiles:
+      - production
+      - full
 
   # Node Exporter（系统指标）
   # ⚠️ Windows 不支持：无法挂载根文件系统

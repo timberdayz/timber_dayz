@@ -1,7 +1,7 @@
 # 错误处理和日志规范 - 企业级ERP标准
 
-**版本**: v4.4.0  
-**更新**: 2025-01-30  
+**版本**: v4.19.7  
+**更新**: 2026-01-08  
 **标准**: 企业级错误处理和日志管理标准
 
 ---
@@ -326,7 +326,271 @@ logger.info(
 
 ---
 
-**最后更新**: 2025-01-30  
+## 🎨 前端错误处理规范（v4.19.7新增）⭐⭐⭐
+
+### 1. Vue组件错误处理
+
+#### 组件级错误处理
+- ✅ **try-catch包装**: 关键逻辑使用try-catch包装
+- ✅ **错误边界**: 使用Vue 3错误边界（onErrorCaptured）
+- ✅ **默认值**: 错误时返回默认值，确保组件可渲染
+- ✅ **用户提示**: 向用户显示友好的错误信息
+
+**示例**：
+```vue
+<script setup>
+import { computed, onErrorCaptured } from 'vue'
+import { ElMessage } from 'element-plus'
+
+// 错误边界
+onErrorCaptured((err, instance, info) => {
+  console.error('组件错误:', err, info)
+  ElMessage.error('组件加载失败，请刷新页面')
+  return false  // 阻止错误继续传播
+})
+
+// 计算属性错误处理
+const currentUser = computed(() => {
+  try {
+    if (authStore.user) {
+      return authStore.user
+    }
+    // ...
+  } catch (error) {
+    console.error('获取用户信息失败:', error)
+    // 返回默认值，确保组件可以渲染
+    return {
+      id: 1,
+      username: 'user',
+      name: '用户',
+      roles: []
+    }
+  }
+})
+
+// 异步函数错误处理
+const loadUserInfo = async () => {
+  try {
+    const response = await authApi.getCurrentUser()
+    if (response && response.roles) {
+      authStore.user = response
+    }
+  } catch (error) {
+    console.error('加载用户信息失败:', error)
+    ElMessage.error('加载用户信息失败，请刷新页面重试')
+    // 使用降级数据
+    if (userStore.userInfo) {
+      authStore.user = userStore.userInfo
+    }
+  }
+}
+</script>
+```
+
+### 2. API调用错误处理
+
+#### 统一错误拦截
+- ✅ **响应拦截器**: 统一处理API响应错误
+- ✅ **错误分类**: 区分网络错误、业务错误、系统错误
+- ✅ **用户提示**: 根据错误类型显示不同的用户提示
+- ✅ **错误日志**: 记录详细的错误信息
+
+**示例**：
+```javascript
+// frontend/src/api/index.js
+import axios from 'axios'
+import { ElMessage } from 'element-plus'
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL,
+  timeout: 30000
+})
+
+// 响应拦截器
+api.interceptors.response.use(
+  (response) => {
+    const data = response.data
+    // 统一响应格式处理
+    if (data && typeof data === "object" && "success" in data) {
+      if (data.success === true) {
+        return data.data || data
+      } else {
+        // 业务错误
+        const error = new Error(data.message || "操作失败")
+        error.code = data.error?.code
+        error.type = data.error?.type
+        return Promise.reject(error)
+      }
+    }
+    return data
+  },
+  async (error) => {
+    // 网络错误
+    if (!error.response) {
+      console.error('网络错误:', error)
+      ElMessage.error('网络连接失败，请检查网络设置')
+      return Promise.reject(error)
+    }
+    
+    // HTTP错误
+    const status = error.response.status
+    const data = error.response.data
+    
+    // 401: 未授权
+    if (status === 401) {
+      ElMessage.error('登录已过期，请重新登录')
+      // 清除token，跳转到登录页
+      localStorage.removeItem('access_token')
+      window.location.href = '/login'
+      return Promise.reject(error)
+    }
+    
+    // 403: 权限不足
+    if (status === 403) {
+      ElMessage.error('权限不足，无法执行此操作')
+      return Promise.reject(error)
+    }
+    
+    // 404: 资源不存在
+    if (status === 404) {
+      ElMessage.error('请求的资源不存在')
+      return Promise.reject(error)
+    }
+    
+    // 422: 数据验证失败
+    if (status === 422) {
+      const message = data?.message || '数据验证失败'
+      ElMessage.error(message)
+      return Promise.reject(error)
+    }
+    
+    // 500: 服务器错误
+    if (status >= 500) {
+      console.error('服务器错误:', error)
+      ElMessage.error('服务器错误，请稍后重试')
+      return Promise.reject(error)
+    }
+    
+    // 其他错误
+    const message = data?.message || error.message || '操作失败'
+    ElMessage.error(message)
+    return Promise.reject(error)
+  }
+)
+```
+
+### 3. 前端错误日志
+
+#### 错误日志记录
+- ✅ **控制台日志**: 开发环境记录详细错误信息
+- ✅ **错误上报**: 生产环境上报错误到日志服务
+- ✅ **上下文信息**: 包含用户ID、页面路径、操作类型等
+- ✅ **敏感信息脱敏**: 不记录密码、token等敏感信息
+
+**示例**：
+```javascript
+// frontend/src/utils/errorLogger.js
+export const logError = (error, context = {}) => {
+  const errorInfo = {
+    message: error.message,
+    stack: error.stack,
+    type: error.constructor.name,
+    code: error.code,
+    timestamp: new Date().toISOString(),
+    userAgent: navigator.userAgent,
+    url: window.location.href,
+    ...context
+  }
+  
+  // 开发环境：控制台输出
+  if (import.meta.env.DEV) {
+    console.error('前端错误:', errorInfo)
+  }
+  
+  // 生产环境：上报到日志服务
+  if (import.meta.env.PROD) {
+    // 上报到日志服务（如Sentry、LogRocket等）
+    // errorReportingService.captureException(error, errorInfo)
+  }
+}
+
+// 使用示例
+try {
+  await api.getUserInfo()
+} catch (error) {
+  logError(error, {
+    action: 'getUserInfo',
+    userId: authStore.user?.id
+  })
+  ElMessage.error('获取用户信息失败')
+}
+```
+
+### 4. 用户友好的错误提示
+
+#### 错误提示规范
+- ✅ **简洁明了**: 错误信息简洁明了，用户易于理解
+- ✅ **操作建议**: 提供操作建议（如"请刷新页面重试"）
+- ✅ **错误分类**: 根据错误类型显示不同的提示
+- ✅ **避免技术术语**: 避免显示技术术语（如"500 Internal Server Error"）
+
+**错误提示示例**：
+```javascript
+// ✅ 正确：用户友好的错误提示
+if (error.code === 'NETWORK_ERROR') {
+  ElMessage.error('网络连接失败，请检查网络设置后重试')
+} else if (error.code === 'AUTH_FAILED') {
+  ElMessage.error('登录已过期，请重新登录')
+} else if (error.code === 'PERMISSION_DENIED') {
+  ElMessage.error('权限不足，无法执行此操作')
+} else {
+  ElMessage.error('操作失败，请稍后重试')
+}
+
+// ❌ 错误：显示技术术语
+ElMessage.error(`Error: ${error.message} (${error.code})`)
+```
+
+### 5. 前端错误处理检查清单
+
+#### 组件开发
+- [ ] 关键逻辑使用try-catch包装
+- [ ] 计算属性有错误处理和默认值
+- [ ] 异步函数有错误处理
+- [ ] 错误时返回默认值，确保组件可渲染
+
+#### API调用
+- [ ] 响应拦截器已统一处理错误
+- [ ] 错误分类正确（网络错误、业务错误、系统错误）
+- [ ] 用户提示友好（不显示技术术语）
+- [ ] 错误日志已记录
+
+#### 错误日志
+- [ ] 开发环境记录详细错误信息
+- [ ] 生产环境上报错误到日志服务
+- [ ] 包含足够的上下文信息
+- [ ] 敏感信息已脱敏
+
+### 6. 前端错误处理最佳实践
+
+#### DO（推荐）
+- ✅ 使用try-catch包装关键逻辑
+- ✅ 计算属性返回默认值
+- ✅ 统一错误拦截和处理
+- ✅ 记录详细的错误日志
+- ✅ 向用户显示友好的错误提示
+- ✅ 错误时使用降级策略
+
+#### DON'T（禁止）
+- ❌ 忽略错误处理（缺少try-catch）
+- ❌ 向用户显示技术术语
+- ❌ 不记录错误日志
+- ❌ 错误时导致整个应用崩溃
+- ❌ 不提供降级策略
+
+---
+
+**最后更新**: 2026-01-08  
 **维护**: AI Agent Team  
-**状态**: ✅ 企业级标准
+**状态**: ✅ 企业级标准（v4.19.7新增前端错误处理规范）
 

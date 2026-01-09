@@ -14,8 +14,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./sql/init:/docker-entrypoint-initdb.d:ro
       - ./backups:/backups
-    ports:
-      - "5432:5432"
+    # 生产最小端口暴露：postgres 不映射宿主机端口（仅容器网络可访问）
     networks:
       - erp_network
     healthcheck:
@@ -35,6 +34,9 @@ services:
         reservations:
           cpus: "1"
           memory: 1G
+    profiles:
+      - production
+      - full
 
   # Redis缓存
   redis:
@@ -44,13 +46,12 @@ services:
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_pass_2025}
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
+    # 生产最小端口暴露：redis 不映射宿主机端口（仅容器网络可访问）
     networks:
       - erp_network
     healthcheck:
-      # ⭐ v4.19.5 修复：健康检查需要提供密码
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      # ⭐ v4.19.5 修复：健康检查需要提供密码（支持默认值）
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_pass_2025}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -62,6 +63,9 @@ services:
         reservations:
           cpus: "0.5"
           memory: 256M
+    profiles:
+      - production
+      - full
 
   # FastAPI后端
   backend:
@@ -113,8 +117,7 @@ services:
       - ./logs:/app/logs
       - ./temp:/app/temp
       - ./uploads:/app/uploads
-    ports:
-      - "8000:8000"
+    # 生产最小端口暴露：backend 不映射宿主机端口（通过 nginx 反向代理访问 /api/）
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,18 +139,20 @@ services:
         reservations:
           cpus: "1"
           memory: 1G
+    profiles:
+      - production
+      - full
 
   # Vue.js前端
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
+      context: .
+      dockerfile: Dockerfile.frontend
       args:
         - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
     container_name: xihong_erp_frontend
     restart: always
-    ports:
-      - "3000:80"
+    # 生产最小端口暴露：frontend 不映射宿主机端口（通过 nginx 反向代理访问 /）
     depends_on:
       - backend
     networks:
@@ -165,6 +170,9 @@ services:
         reservations:
           cpus: "0.5"
           memory: 256M
+    profiles:
+      - production
+      - full
 
   # Nginx反向代理
   nginx:
@@ -190,12 +198,13 @@ services:
           "wget",
           "--quiet",
           "--tries=1",
-          "--spider",
-          "http://localhost/health",
+          "--output-document=/dev/null",
+          "http://127.0.0.1/health",
         ]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 30s
     deploy:
       resources:
         limits:
@@ -204,6 +213,9 @@ services:
         reservations:
           cpus: "0.5"
           memory: 128M
+    profiles:
+      - production
+      - full
 
   # Celery Worker（异步任务处理）
   celery-worker:
@@ -245,13 +257,19 @@ services:
     networks:
       - erp_network
     # ⚠️ 重要：添加健康检查，确保 Worker 正常运行
-    # 使用进程检查方式（更可靠），检查 celery worker 进程是否存在
+    # 使用 Redis 连接检查（更可靠），验证 Celery 能否连接到 broker
     healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep '[c]elery.*worker' || exit 1"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, redis; r=redis.from_url(os.environ['CELERY_BROKER_URL']); r.ping(); print('ok')",
+        ]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:
@@ -260,6 +278,9 @@ services:
         reservations:
           cpus: "0.5"
           memory: 512M
+    profiles:
+      - production
+      - full
 
   # Celery Beat（定时任务）
   celery-beat:
@@ -287,6 +308,20 @@ services:
         condition: service_healthy
     networks:
       - erp_network
+    # ⚠️ 重要：添加健康检查，确保 Beat 正常运行
+    # 使用 Redis 连接检查（更可靠），验证 Celery Beat 能否连接到 broker
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, redis; r=redis.from_url(os.environ['CELERY_BROKER_URL']); r.ping(); print('ok')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:
@@ -295,6 +330,9 @@ services:
         reservations:
           cpus: "0.25"
           memory: 128M
+    profiles:
+      - production
+      - full
 
   # Celery Exporter（监控指标导出）
   # ⚠️ 注意：ovalmoney/celery-exporter 默认监听 9540 端口
@@ -302,8 +340,7 @@ services:
     image: ovalmoney/celery-exporter:latest
     container_name: xihong_erp_celery_exporter
     restart: always
-    ports:
-      - "9808:9540" # 外部 9808 映射到容器内 9540
+    # 生产最小端口暴露：celery-exporter 不映射宿主机端口（监控侧在容器网络内抓取）
     environment:
       # ⚠️ ovalmoney/celery-exporter 使用 CELERY_EXPORTER_BROKER_URL 环境变量
       CELERY_EXPORTER_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
@@ -333,6 +370,9 @@ services:
         reservations:
           cpus: "0.25"
           memory: 128M
+    profiles:
+      - production
+      - full
 
 networks:
   erp_network:

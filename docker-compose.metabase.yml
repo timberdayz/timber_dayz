@@ -14,63 +14,63 @@ services:
       # 数据库配置（Metabase内部数据库，使用H2）
       MB_DB_TYPE: h2
       MB_DB_FILE: /metabase-data/metabase.db
-      
+
       # 应用配置
       MB_ENCRYPTION_SECRET_KEY: ${METABASE_ENCRYPTION_SECRET_KEY:-change-this-encryption-key-in-production}
-      
+
       # 嵌入配置（用于前端iframe嵌入）
       MB_EMBEDDING_SECRET_KEY: ${METABASE_EMBEDDING_SECRET_KEY:-change-this-embedding-key-in-production}
-      
+
       # 语言配置
       MB_SITE_LOCALE: zh
       MB_SITE_NAME: 西虹ERP数据看板
-      
+
       # 邮件配置（可选，用于告警）
       # MB_EMAIL_SMTP_HOST: smtp.example.com
       # MB_EMAIL_SMTP_PORT: 587
       # MB_EMAIL_SMTP_USERNAME: your-email@example.com
       # MB_EMAIL_SMTP_PASSWORD: your-password
-      
+
       # 时区配置
       JAVA_TIMEZONE: Asia/Shanghai
-      
+
       # 性能配置
       JAVA_OPTS: "-Xmx2g -Xms1g"
-      
-    ports:
-      - "${METABASE_PORT:-8080}:3000"  # 使用8080端口避免Windows端口权限问题
-    
+
+    # 生产最小端口暴露：默认不映射宿主机端口（通过 nginx 反向代理 /metabase/ 访问）
+    # 如需本地开发直连 Metabase，请使用 docker-compose.metabase.dev.yml 添加 8080:3000 端口映射
+
     volumes:
       - metabase_data:/metabase-data
       - ./logs/metabase:/logs
-    
+
     networks:
       - erp_network
-    
+
     # 注意：postgres服务在主docker-compose.yml中定义
     # 如果独立运行此文件，需要确保postgres容器已启动
     # depends_on:
     #   postgres:
     #     condition: service_healthy
-    
+
     restart: unless-stopped
-    
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 60s
-    
+
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 4G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 1G
-    
+
     profiles:
       - dev
       - production
@@ -91,4 +91,3 @@ volumes:
   metabase_data:
     driver: local
     name: xihong_erp_metabase_data
-

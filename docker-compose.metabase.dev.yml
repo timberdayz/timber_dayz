@@ -1,0 +1,19 @@
+# =====================================================
+# Metabase - 仅开发环境端口映射（本地直连用）
+# =====================================================
+# 用途：
+# - 本地开发需要直接访问 Metabase UI（http://localhost:8080）
+# - 生产/云端部署时不要包含此文件（生产仅通过 Nginx /metabase/ 访问）
+#
+# 使用方式（本地）：
+# docker-compose -f docker-compose.yml \
+#   -f docker-compose.prod.yml \
+#   -f docker-compose.metabase.yml \
+#   -f docker-compose.metabase.dev.yml \
+#   --profile production up -d
+# =====================================================
+
+services:
+  metabase:
+    ports:
+      - "8080:3000"

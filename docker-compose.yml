@@ -12,19 +12,21 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_pass_2025}
       POSTGRES_DB: ${POSTGRES_DB:-xihong_erp}
       PGDATA: /var/lib/postgresql/data/pgdata
-    ports:
-      # ⭐ 默认使用15432端口避免与本地PostgreSQL冲突（Windows保留端口范围5433-5832）
-      # 容器内部仍使用5432端口，容器间通信使用服务名 postgres:5432
-      - "${POSTGRES_PORT:-15432}:5432"
+    # 生产最小端口暴露：postgres 不映射宿主机端口（仅容器网络可访问）
+    # 如需本地开发直连数据库，请使用 docker-compose.dev.yml 覆盖端口映射
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
       - ./logs/postgres:/var/log/postgresql
     networks:
       - erp_network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-erp_user} -d ${POSTGRES_DB:-xihong_erp}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-erp_user} -d ${POSTGRES_DB:-xihong_erp}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -32,18 +34,18 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 2G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 
   # ==================== Redis缓存和消息队列 ====================
   redis:
     image: redis:latest
     container_name: xihong_erp_redis
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    # 生产最小端口暴露：redis 不映射宿主机端口（仅容器网络可访问）
+    # 如需本地开发直连 redis，请使用 docker-compose.dev.yml 覆盖端口映射
     volumes:
       - redis_data:/data
     networks:
@@ -68,7 +70,7 @@ services:
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@xihong.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_SERVER_MODE: "False"
     ports:
       - "${PGADMIN_PORT:-5051}:80"
     volumes:
@@ -95,20 +97,19 @@ services:
       # 数据库配置
       DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}
       DATABASE_ECHO: ${DATABASE_ECHO:-false}
-      
+
       # 应用配置
       APP_ENV: ${APP_ENV:-production}
       DEBUG: ${DEBUG:-false}
       SECRET_KEY: ${SECRET_KEY:-change-this-in-production}
-      
+
       # 服务器配置
       HOST: 0.0.0.0
       PORT: 8000
-      
+
       # CORS配置
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5174,http://localhost:80}
-    ports:
-      - "${BACKEND_PORT:-8001}:8000"
+    # 生产最小端口暴露：backend 不映射宿主机端口（通过 nginx 反向代理访问 /api/）
     volumes:
       - ./data:/app/data
       - ./temp:/app/temp
@@ -130,10 +131,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 2G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
     profiles:
       - production
@@ -148,8 +149,7 @@ services:
         NODE_VERSION: ${NODE_VERSION:-18}
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8001}
     container_name: xihong_erp_frontend
-    ports:
-      - "${FRONTEND_PORT:-5174}:80"
+    # 生产最小端口暴露：frontend 不映射宿主机端口（通过 nginx 反向代理访问 /）
     volumes:
       - ./logs/nginx:/var/log/nginx
     networks:
@@ -167,10 +167,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: "1"
           memory: 512M
         reservations:
-          cpus: '0.25'
+          cpus: "0.25"
           memory: 128M
     profiles:
       - production
