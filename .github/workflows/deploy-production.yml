@@ -93,27 +93,24 @@ jobs:
             echo "[INFO] Git repository detected on server, attempting git pull..."
             
             # 通过 SSH 执行 git pull
+            # ⭐ 修复：使用单引号 heredoc，防止变量在本地展开
+            # 通过 bash -c 传递环境变量，确保变量在远程服务器上可用
             ssh -o StrictHostKeyChecking=no \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
-                ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
-              set -e
-              cd ${PRODUCTION_PATH}
-              
-              # 检查是否有未提交的更改
-              if [ -n "\$(git status --porcelain 2>/dev/null)" ]; then
-                echo "[WARN] Uncommitted changes detected, stashing them..."
-                git stash save "Auto-stash before deployment \$(date +%Y%m%d_%H%M%S)" || true
-              fi
-              
-              # 尝试拉取最新代码（支持 main 或 master 分支）
-              if git pull origin main 2>/dev/null || git pull origin master 2>/dev/null; then
-                echo "[OK] Git pull successful, compose files synced"
-              else
-                echo "[WARN] Git pull failed, falling back to SCP method..."
-                exit 1
-              fi
-            ENDSSH
+                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+                "bash -c 'set -e; \
+                cd \"${PRODUCTION_PATH}\"; \
+                if [ -n \"\$(git status --porcelain 2>/dev/null)\" ]; then \
+                  echo \"[WARN] Uncommitted changes detected, stashing them...\"; \
+                  git stash save \"Auto-stash before deployment \$(date +%Y%m%d_%H%M%S)\" || true; \
+                fi; \
+                if git pull origin main 2>/dev/null || git pull origin master 2>/dev/null; then \
+                  echo \"[OK] Git pull successful, compose files synced\"; \
+                else \
+                  echo \"[WARN] Git pull failed, falling back to SCP method...\"; \
+                  exit 1; \
+                fi'"
             
             if [ $? -eq 0 ]; then
               echo "[OK] Compose files synced via git pull"
