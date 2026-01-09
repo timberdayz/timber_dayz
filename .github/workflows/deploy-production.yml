@@ -82,7 +82,10 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
             set -e
             cd ${PRODUCTION_PATH}
             
@@ -108,34 +111,46 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
             set -e
             cd ${PRODUCTION_PATH}
             
             # 登录到容器仓库
+            echo "[INFO] Logging in to container registry..."
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+            echo "[OK] Successfully logged in to container registry"
             
-            # 拉取指定版本的镜像
-            echo "Pulling images with tag: ${IMAGE_TAG}"
+            # 拉取指定版本的镜像（添加进度输出）
+            echo "[INFO] Pulling images with tag: ${IMAGE_TAG}"
+            echo "[INFO] Pulling backend image..."
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG} || {
               echo "[FAIL] Failed to pull backend image with tag ${IMAGE_TAG}"
               exit 1
             }
+            echo "[OK] Backend image pulled successfully"
+            
+            echo "[INFO] Pulling frontend image..."
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG} || {
               echo "[FAIL] Failed to pull frontend image with tag ${IMAGE_TAG}"
               exit 1
             }
+            echo "[OK] Frontend image pulled successfully"
             
             # 标记镜像为 latest（用于 docker-compose）
+            echo "[INFO] Tagging images as latest..."
             docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG} xihong_erp_backend:latest
             docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG} xihong_erp_frontend:latest
+            echo "[OK] Images tagged successfully"
             
             # 使用 docker-compose 部署（生产环境）
-            # 注意：docker-compose.prod.yml 使用 build，我们需要临时覆盖为 image
             export APP_ENV=production
             export COMPOSE_PROJECT_NAME=xihong_erp
             
             # 创建临时 compose 文件，覆盖 build 为 image
+            echo "[INFO] Creating temporary docker-compose.deploy.yml..."
             cat > docker-compose.deploy.yml <<EOF
             services:
               backend:
@@ -143,6 +158,7 @@ jobs:
               frontend:
                 image: xihong_erp_frontend:latest
             EOF
+            echo "[OK] Temporary compose file created"
             
             # 检查是否存在云服务器优化配置（2核4G）
             if [ -f docker-compose.cloud.yml ]; then
@@ -152,12 +168,15 @@ jobs:
               echo "[INFO] 使用标准生产配置"
               docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d
             fi
+            echo "[OK] Docker Compose services started"
             
             # 等待服务启动
-            echo "Waiting for services to start..."
+            echo "[INFO] Waiting for services to start..."
             sleep 15
+            echo "[INFO] Services should be starting now..."
             
-            # 健康检查
+            # 健康检查（添加更多输出）
+            echo "[INFO] Starting backend health check..."
             for i in {1..60}; do
               if curl -f http://localhost:8001/health > /dev/null 2>&1; then
                 echo "[OK] Backend health check passed"
@@ -165,16 +184,20 @@ jobs:
               fi
               if [ $i -eq 60 ]; then
                 echo "[FAIL] Backend health check failed after 2 minutes"
+                echo "[INFO] Checking backend logs..."
                 docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml logs backend 2>/dev/null || \
                 docker-compose -f docker-compose.yml -f docker-compose.prod.yml logs backend
                 exit 1
               fi
-              echo "Waiting for backend... ($i/60)"
+              if [ $((i % 5)) -eq 0 ]; then
+                echo "[INFO] Waiting for backend... ($i/60)"
+              fi
               sleep 2
             done
             
             # 验证前端（如果部署了前端）
             if docker ps | grep -q frontend; then
+              echo "[INFO] Checking frontend health..."
               for i in {1..30}; do
                 if curl -f http://localhost:5174 > /dev/null 2>&1; then
                   echo "[OK] Frontend health check passed"
@@ -185,13 +208,17 @@ jobs:
                 fi
                 sleep 2
               done
+            else
+              echo "[INFO] Frontend container not found, skipping frontend health check"
             fi
             
             echo "[OK] Production deployment completed successfully"
             echo "Deployed image tag: ${IMAGE_TAG}"
             
             # 清理临时文件
+            echo "[INFO] Cleaning up temporary files..."
             rm -f docker-compose.deploy.yml
+            echo "[OK] Cleanup completed"
           ENDSSH
 
       - name: Health check verification
@@ -217,7 +244,10 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
             set -e
             cd ${PRODUCTION_PATH}
             
