@@ -1,20 +1,22 @@
 name: Deploy to Staging
 
 on:
-  workflow_run:
-    workflows: ["CI Pipeline", "Docker Build and Push"]
-    types:
-      - completed
-    branches:
-      - main
-      - develop
+  # [DISABLED] 自动部署已禁用，避免重复部署和资源竞争
+  # 如果只有一个服务器，建议只使用 Production 手动部署
+  # workflow_run:
+  #   workflows: ["CI Pipeline", "Docker Build and Push"]
+  #   types:
+  #     - completed
+  #   branches:
+  #     - main
+  #     - develop
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Image tag to deploy (default: latest)'
+        description: "Image tag to deploy (default: latest)"
         required: false
         type: string
-        default: 'latest'
+        default: "latest"
 
 env:
   REGISTRY: ghcr.io
@@ -25,7 +27,8 @@ jobs:
   # 检查是否配置了必要的 secrets
   check-config:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    # [UPDATED] 现在只支持手动触发（workflow_dispatch）
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     outputs:
       can_deploy: ${{ steps.check.outputs.can_deploy }}
     steps:
@@ -60,13 +63,13 @@ jobs:
       - name: Determine image tag
         id: image-tag
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          # [UPDATED] 现在只支持手动触发，直接使用输入的 image_tag
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
             echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.workflow_run.head_branch }}" == "main" ]; then
-            echo "tag=main-latest" >> $GITHUB_OUTPUT
           else
-            echo "tag=develop-latest" >> $GITHUB_OUTPUT
+            echo "tag=latest" >> $GITHUB_OUTPUT
           fi
+          echo "Deploying with tag: ${{ steps.image-tag.outputs.tag }}"
 
       - name: Deploy to staging server
         env:
@@ -163,7 +166,7 @@ jobs:
           fields: repo,message,commit,author,action,eventName,ref,workflow
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        continue-on-error: true  # 如果 SLACK_WEBHOOK_URL 未配置会静默失败
+        continue-on-error: true # 如果 SLACK_WEBHOOK_URL 未配置会静默失败
 
   # 当部署被跳过时显示消息
   skip-notification:
@@ -184,4 +187,3 @@ jobs:
           echo "To enable deployment, configure these secrets in:"
           echo "  Settings > Secrets and variables > Actions"
           echo "========================================"
-
