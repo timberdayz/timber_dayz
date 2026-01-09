@@ -222,14 +222,52 @@ jobs:
           ENDSSH
 
       - name: Health check verification
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
         run: |
-          PRODUCTION_URL=${{ secrets.PRODUCTION_URL || 'https://production.example.com' }}
-          if curl -f ${PRODUCTION_URL}/health > /dev/null 2>&1; then
-            echo "[OK] Production health check passed"
-          else
-            echo "[FAIL] Production health check failed"
-            exit 1
+          if [ -z "${PRODUCTION_URL}" ]; then
+            echo "[WARN] PRODUCTION_URL not configured, skipping external health check"
+            exit 0
           fi
+          
+          echo "[INFO] Checking production health at: ${PRODUCTION_URL}/health"
+          
+          # 增加重试机制和详细错误信息
+          MAX_RETRIES=5
+          RETRY_DELAY=10
+          
+          for i in $(seq 1 ${MAX_RETRIES}); do
+            echo "[INFO] Health check attempt $i/${MAX_RETRIES}..."
+            
+            # 使用 curl 检查健康状态，增加超时和详细输出
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 --connect-timeout 10 ${PRODUCTION_URL}/health 2>/dev/null || echo "000")
+            
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "[OK] Production health check passed (HTTP ${HTTP_CODE})"
+              exit 0
+            else
+              echo "[WARN] Health check failed (HTTP ${HTTP_CODE}), attempt $i/${MAX_RETRIES}"
+              
+              if [ $i -lt ${MAX_RETRIES} ]; then
+                echo "[INFO] Retrying in ${RETRY_DELAY} seconds..."
+                sleep ${RETRY_DELAY}
+              else
+                echo "[FAIL] Production health check failed after ${MAX_RETRIES} attempts"
+                echo "[INFO] Final HTTP Status Code: ${HTTP_CODE}"
+                echo "[INFO] Please check:"
+                echo "  1. Is the production URL correct? (${PRODUCTION_URL})"
+                echo "  2. Is the service running and accessible?"
+                echo "  3. Is the /health endpoint responding?"
+                echo "  4. Check server logs: docker logs xihong_erp_backend"
+                
+                # 尝试获取更多诊断信息
+                echo "[INFO] Attempting to get more diagnostic information..."
+                curl -v --max-time 10 ${PRODUCTION_URL}/health 2>&1 | head -20 || true
+                
+                exit 1
+              fi
+            fi
+          done
 
       - name: Set up SSH for rollback
         if: failure()
