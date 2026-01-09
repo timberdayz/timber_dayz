@@ -82,21 +82,21 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${PRODUCTION_USER}@${PRODUCTION_HOST} << 'ENDSSH'
+          ssh -o StrictHostKeyChecking=no ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
             set -e
             cd ${PRODUCTION_PATH}
             
             # 备份当前配置和状态
-            BACKUP_DIR="backups/pre_deploy_$(date +%Y%m%d_%H%M%S)"
-            mkdir -p ${BACKUP_DIR}
+            BACKUP_DIR="backups/pre_deploy_\$(date +%Y%m%d_%H%M%S)"
+            mkdir -p \${BACKUP_DIR}
             
             # 保存当前镜像标签
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml config > ${BACKUP_DIR}/docker-compose.config.yaml
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml config > \${BACKUP_DIR}/docker-compose.config.yaml
             
             # 记录当前运行的容器
-            docker ps --format "{{.Names}} {{.Image}}" > ${BACKUP_DIR}/running_containers.txt
+            docker ps --format "{{.Names}} {{.Image}}" > \${BACKUP_DIR}/running_containers.txt
             
-            echo "[OK] Pre-deployment backup completed: ${BACKUP_DIR}"
+            echo "[OK] Pre-deployment backup completed: \${BACKUP_DIR}"
           ENDSSH
 
       - name: Deploy to production server
@@ -202,6 +202,12 @@ jobs:
             exit 1
           fi
 
+      - name: Set up SSH for rollback
+        if: failure()
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+
       - name: Rollback on failure
         if: failure()
         env:
@@ -209,18 +215,18 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${PRODUCTION_USER}@${PRODUCTION_HOST} << 'ENDSSH'
+          ssh -o StrictHostKeyChecking=no ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
             set -e
             cd ${PRODUCTION_PATH}
             
             echo "[WARNING] Deployment failed, attempting rollback..."
             
             # 查找上一个成功的部署备份
-            LAST_BACKUP=$(ls -td backups/pre_deploy_* 2>/dev/null | head -1)
-            if [ -n "$LAST_BACKUP" ]; then
-              echo "Found backup: $LAST_BACKUP"
+            LAST_BACKUP=\$(ls -td backups/pre_deploy_* 2>/dev/null | head -1)
+            if [ -n "\$LAST_BACKUP" ]; then
+              echo "Found backup: \$LAST_BACKUP"
               # 这里可以实现回滚逻辑（恢复配置、拉取上一个镜像等）
-              echo "[WARNING] Manual rollback required. Check backup: $LAST_BACKUP"
+              echo "[WARNING] Manual rollback required. Check backup: \$LAST_BACKUP"
             else
               echo "[WARNING] No backup found for rollback"
             fi
