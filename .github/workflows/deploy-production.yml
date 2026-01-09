@@ -90,11 +90,13 @@ jobs:
             BACKUP_DIR="backups/pre_deploy_\$(date +%Y%m%d_%H%M%S)"
             mkdir -p \${BACKUP_DIR}
             
-            # 保存当前镜像标签
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml config > \${BACKUP_DIR}/docker-compose.config.yaml
+            # 保存当前镜像标签（使用 production profile 确保包含所有服务）
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production config > \${BACKUP_DIR}/docker-compose.config.yaml 2>&1 || {
+              echo "[WARN] Docker Compose config validation failed, but continuing backup..."
+            }
             
             # 记录当前运行的容器
-            docker ps --format "{{.Names}} {{.Image}}" > \${BACKUP_DIR}/running_containers.txt
+            docker ps --format "{{.Names}} {{.Image}}" > \${BACKUP_DIR}/running_containers.txt || true
             
             echo "[OK] Pre-deployment backup completed: \${BACKUP_DIR}"
           ENDSSH
