@@ -82,7 +82,7 @@ services:
       - ./frontend/public:/app/public
     command: npm run dev -- --host 0.0.0.0
     ports:
-      - "5174:5173"
+      - "${FRONTEND_PORT:-5174}:80" # 开发环境可以暴露端口
     profiles:
       - dev-full
 

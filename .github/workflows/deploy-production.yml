@@ -76,6 +76,88 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
 
+      - name: Sync compose files to production server
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
+        run: |
+          # 检查服务器上是否有 git 仓库
+          HAS_GIT=$(ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+              "cd ${PRODUCTION_PATH} && [ -d .git ] && echo 'yes' || echo 'no'")
+
+          if [ "${HAS_GIT}" = "yes" ]; then
+            echo "[INFO] Git repository detected on server, attempting git pull..."
+            
+            # 通过 SSH 执行 git pull
+            ssh -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
+              set -e
+              cd ${PRODUCTION_PATH}
+              
+              # 检查是否有未提交的更改
+              if [ -n "\$(git status --porcelain 2>/dev/null)" ]; then
+                echo "[WARN] Uncommitted changes detected, stashing them..."
+                git stash save "Auto-stash before deployment \$(date +%Y%m%d_%H%M%S)" || true
+              fi
+              
+              # 尝试拉取最新代码（支持 main 或 master 分支）
+              if git pull origin main 2>/dev/null || git pull origin master 2>/dev/null; then
+                echo "[OK] Git pull successful, compose files synced"
+              else
+                echo "[WARN] Git pull failed, falling back to SCP method..."
+                exit 1
+              fi
+            ENDSSH
+            
+            if [ $? -eq 0 ]; then
+              echo "[OK] Compose files synced via git pull"
+              exit 0
+            fi
+          else
+            echo "[INFO] No git repository found on server, using SCP method..."
+          fi
+
+          # 方案2：使用 SCP 上传必要的 compose 文件
+          echo "[INFO] Uploading compose files via SCP..."
+
+          echo "[INFO] Uploading docker-compose.yml..."
+          scp -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              docker-compose.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.yml || {
+            echo "[FAIL] Failed to upload docker-compose.yml"
+            exit 1
+          }
+
+          if [ -f "docker-compose.prod.yml" ]; then
+            echo "[INFO] Uploading docker-compose.prod.yml..."
+            scp -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                docker-compose.prod.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.prod.yml || {
+              echo "[FAIL] Failed to upload docker-compose.prod.yml"
+              exit 1
+            }
+          fi
+
+          if [ -f "docker-compose.cloud.yml" ]; then
+            echo "[INFO] Uploading docker-compose.cloud.yml..."
+            scp -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                docker-compose.cloud.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.cloud.yml || {
+              echo "[WARN] Failed to upload docker-compose.cloud.yml (optional file)"
+            }
+          fi
+
+          echo "[OK] Compose files synced successfully via SCP"
+
       - name: Backup current deployment
         env:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
@@ -145,11 +227,28 @@ jobs:
             docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG} xihong_erp_frontend:latest
             echo "[OK] Images tagged successfully"
             
+            # ⭐ 清理可能占用端口80的旧容器
+            echo "[INFO] Cleaning up old containers that might conflict with port 80..."
+            # 停止并删除可能占用端口80的旧 frontend 容器
+            docker stop xihong_erp_frontend 2>/dev/null || true
+            docker rm xihong_erp_frontend 2>/dev/null || true
+            # 检查是否有其他容器占用端口80
+            PORT_80_CONTAINER=$(docker ps --format "{{.Names}}" --filter "publish=80" 2>/dev/null | head -1 || echo "")
+            if [ -n "${PORT_80_CONTAINER}" ] && [ "${PORT_80_CONTAINER}" != "xihong_erp_nginx" ]; then
+              echo "[WARN] Found container ${PORT_80_CONTAINER} using port 80, stopping it..."
+              docker stop ${PORT_80_CONTAINER} 2>/dev/null || true
+            fi
+            echo "[OK] Cleanup completed"
+            
             # 使用 docker-compose 部署（生产环境）
             export APP_ENV=production
             export COMPOSE_PROJECT_NAME=xihong_erp
             
-            # 创建临时 compose 文件，覆盖 build 为 image
+            # ⭐ 说明：同步 compose 文件后，docker-compose up -d 会自动检测配置变化
+            # 如果配置有变化（如端口、环境变量等），docker-compose 会自动重新创建容器
+            # 因此不需要手动重新部署，工作流会自动完成部署
+            
+            # 创建临时 compose 文件，覆盖 build 为 image，并确保 frontend 不暴露端口
             echo "[INFO] Creating temporary docker-compose.deploy.yml..."
             cat > docker-compose.deploy.yml <<EOF
             services:
@@ -157,29 +256,34 @@ jobs:
                 image: xihong_erp_backend:latest
               frontend:
                 image: xihong_erp_frontend:latest
+                # ⭐ 确保生产环境 frontend 不暴露端口（通过 nginx 反向代理访问）
+                ports: []
             EOF
             echo "[OK] Temporary compose file created"
             
             # 检查是否存在云服务器优化配置（2核4G）
             if [ -f docker-compose.cloud.yml ]; then
               echo "[INFO] 使用云服务器优化配置（2核4G）"
+              echo "[INFO] 应用最新的 compose 配置并启动/更新服务..."
               docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d
             else
               echo "[INFO] 使用标准生产配置"
+              echo "[INFO] 应用最新的 compose 配置并启动/更新服务..."
               docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d
             fi
-            echo "[OK] Docker Compose services started"
+            echo "[OK] Docker Compose services started/updated"
             
             # 等待服务启动
             echo "[INFO] Waiting for services to start..."
             sleep 15
             echo "[INFO] Services should be starting now..."
             
-            # 健康检查（添加更多输出）
+            # 健康检查（通过容器网络检查，不依赖宿主机端口）
             echo "[INFO] Starting backend health check..."
             for i in {1..60}; do
-              if curl -f http://localhost:8001/health > /dev/null 2>&1; then
-                echo "[OK] Backend health check passed"
+              # ⭐ 修复：通过容器网络检查，不依赖宿主机端口映射
+              if docker exec xihong_erp_backend curl -f http://localhost:8000/health > /dev/null 2>&1; then
+                echo "[OK] Backend health check passed (container internal)"
                 break
               fi
               if [ $i -eq 60 ]; then
@@ -195,12 +299,13 @@ jobs:
               sleep 2
             done
             
-            # 验证前端（如果部署了前端）
-            if docker ps | grep -q frontend; then
-              echo "[INFO] Checking frontend health..."
+            # 验证前端（通过容器网络检查，不依赖宿主机端口）
+            if docker ps | grep -q xihong_erp_frontend; then
+              echo "[INFO] Checking frontend health (container internal)..."
               for i in {1..30}; do
-                if curl -f http://localhost:5174 > /dev/null 2>&1; then
-                  echo "[OK] Frontend health check passed"
+                # ⭐ 修复：通过容器网络检查，不依赖宿主机端口映射
+                if docker exec xihong_erp_frontend curl -f http://localhost:80 > /dev/null 2>&1; then
+                  echo "[OK] Frontend health check passed (container internal)"
                   break
                 fi
                 if [ $i -eq 30 ]; then
@@ -210,6 +315,23 @@ jobs:
               done
             else
               echo "[INFO] Frontend container not found, skipping frontend health check"
+            fi
+            
+            # 验证 Nginx（如果部署了 Nginx）
+            if docker ps | grep -q xihong_erp_nginx; then
+              echo "[INFO] Checking Nginx health..."
+              for i in {1..30}; do
+                if curl -f http://localhost/health > /dev/null 2>&1; then
+                  echo "[OK] Nginx health check passed (port 80)"
+                  break
+                fi
+                if [ $i -eq 30 ]; then
+                  echo "[WARN] Nginx health check failed (non-critical)"
+                fi
+                sleep 2
+              done
+            else
+              echo "[INFO] Nginx container not found, skipping Nginx health check"
             fi
             
             echo "[OK] Production deployment completed successfully"
@@ -229,13 +351,13 @@ jobs:
             echo "[WARN] PRODUCTION_URL not configured, skipping external health check"
             exit 0
           fi
-          
+
           echo "[INFO] Checking production health at: ${PRODUCTION_URL}/health"
-          
+
           # 增加重试机制和详细错误信息
           MAX_RETRIES=5
           RETRY_DELAY=10
-          
+
           for i in $(seq 1 ${MAX_RETRIES}); do
             echo "[INFO] Health check attempt $i/${MAX_RETRIES}..."
             

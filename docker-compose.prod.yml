@@ -51,7 +51,8 @@ services:
       - erp_network
     healthcheck:
       # ⭐ v4.19.5 修复：健康检查需要提供密码（支持默认值）
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_pass_2025}", "ping"]
+      test:
+        ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_pass_2025}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -153,6 +154,8 @@ services:
     container_name: xihong_erp_frontend
     restart: always
     # 生产最小端口暴露：frontend 不映射宿主机端口（通过 nginx 反向代理访问 /）
+    # 明确清空端口映射，确保生产环境不暴露端口
+    ports: [] # 清空端口映射，服务仍可通过 frontend:80 在容器网络内访问
     depends_on:
       - backend
     networks:
