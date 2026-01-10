@@ -130,62 +130,11 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          # 检查服务器上是否有 git 仓库
-          HAS_GIT=$(ssh -o StrictHostKeyChecking=no \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=10 \
-              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-              "cd ${PRODUCTION_PATH} && [ -d .git ] && echo 'yes' || echo 'no'")
-
-          if [ "${HAS_GIT}" = "yes" ]; then
-            echo "[INFO] Git repository detected on server, attempting git pull..."
-            
-            # 通过 SSH 执行 git pull
-            # ⭐ 修复：使用单引号 heredoc，防止变量在本地展开
-            # 通过 bash -c 传递环境变量，确保变量在远程服务器上可用
-            ssh -o StrictHostKeyChecking=no \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "bash -c 'set -e; \
-                cd \"${PRODUCTION_PATH}\"; \
-                if [ -n \"\$(git status --porcelain 2>/dev/null)\" ]; then \
-                  echo \"[WARN] Uncommitted changes detected, stashing them...\"; \
-                  git stash save \"Auto-stash before deployment \$(date +%Y%m%d_%H%M%S)\" || true; \
-                fi; \
-                if git pull origin main 2>/dev/null || git pull origin master 2>/dev/null; then \
-                  echo \"[OK] Git pull successful, compose files synced\"; \
-                  if [ -f docker-compose.metabase.yml ]; then \
-                    echo \"[OK] docker-compose.metabase.yml found after git pull\"; \
-                  else \
-                    echo \"[WARN] docker-compose.metabase.yml not found after git pull, but continuing...\"; \
-                  fi \
-                else \
-                  echo \"[WARN] Git pull failed, falling back to SCP method...\"; \
-                  exit 1; \
-                fi'"
-            
-            if [ $? -eq 0 ]; then
-              echo "[OK] Compose files synced via git pull"
-              # ⭐ 验证：确保 Metabase compose 文件已同步
-              ssh -o StrictHostKeyChecking=no \
-                  -o ServerAliveInterval=30 \
-                  -o ServerAliveCountMax=10 \
-                  ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                  "bash -c 'cd \"${PRODUCTION_PATH}\" && if [ -f docker-compose.metabase.yml ]; then echo \"[OK] Metabase compose file verified\"; else echo \"[WARN] Metabase compose file missing, will use SCP method\"; exit 1; fi'"
-              if [ $? -eq 0 ]; then
-                exit 0
-              else
-                echo "[WARN] Metabase compose file missing after git pull, falling back to SCP..."
-              fi
-            fi
-          else
-            echo "[INFO] No git repository found on server, using SCP method..."
-          fi
-
-          # 方案2：使用 SCP 上传必要的 compose 文件
+          # ⭐ 方案A1：直接使用 SCP 上传 compose 文件（移除 git pull，更简单、更稳定）
+          # compose 文件很小，对 5MB 带宽影响很小，不需要配置服务器 git 凭据
           echo "[INFO] Uploading compose files via SCP..."
 
+          # 1. 上传 docker-compose.yml（必需）
           echo "[INFO] Uploading docker-compose.yml..."
           scp -o StrictHostKeyChecking=no \
               -o ServerAliveInterval=30 \
@@ -194,7 +143,9 @@ jobs:
             echo "[FAIL] Failed to upload docker-compose.yml"
             exit 1
           }
+          echo "[OK] docker-compose.yml uploaded successfully"
 
+          # 2. 上传 docker-compose.prod.yml（必需，如果存在）
           if [ -f "docker-compose.prod.yml" ]; then
             echo "[INFO] Uploading docker-compose.prod.yml..."
             scp -o StrictHostKeyChecking=no \
@@ -204,31 +155,42 @@ jobs:
               echo "[FAIL] Failed to upload docker-compose.prod.yml"
               exit 1
             }
+            echo "[OK] docker-compose.prod.yml uploaded successfully"
+          else
+            echo "[WARN] docker-compose.prod.yml not found, skipping..."
           fi
 
+          # 3. 上传 docker-compose.cloud.yml（可选，如果存在）
           if [ -f "docker-compose.cloud.yml" ]; then
             echo "[INFO] Uploading docker-compose.cloud.yml..."
-            scp -o StrictHostKeyChecking=no \
+            if scp -o StrictHostKeyChecking=no \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
-                docker-compose.cloud.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.cloud.yml || {
-              echo "[WARN] Failed to upload docker-compose.cloud.yml (optional file)"
-            }
+                docker-compose.cloud.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.cloud.yml; then
+              echo "[OK] docker-compose.cloud.yml uploaded successfully"
+            else
+              echo "[WARN] Failed to upload docker-compose.cloud.yml (optional file, continuing...)"
+            fi
+          else
+            echo "[INFO] docker-compose.cloud.yml not found, skipping (optional file)..."
           fi
 
-          # ⭐ 新增：同步 Metabase compose 文件（生产必需组件）
+          # 4. 上传 docker-compose.metabase.yml（生产必需组件，如果存在）
           if [ -f "docker-compose.metabase.yml" ]; then
             echo "[INFO] Uploading docker-compose.metabase.yml..."
             scp -o StrictHostKeyChecking=no \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
                 docker-compose.metabase.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.metabase.yml || {
-              echo "[FAIL] Failed to upload docker-compose.metabase.yml"
+              echo "[FAIL] Failed to upload docker-compose.metabase.yml (required for production)"
               exit 1
             }
+            echo "[OK] docker-compose.metabase.yml uploaded successfully"
+          else
+            echo "[WARN] docker-compose.metabase.yml not found (required for production, deployment may fail if Metabase is not configured)"
           fi
 
-          echo "[OK] Compose files synced successfully via SCP"
+          echo "[OK] All compose files synced successfully via SCP"
 
       - name: Backup current deployment
         env:
