@@ -234,56 +234,82 @@ jobs:
           echo \"[OK] Successfully logged in to container registry\"
 
           # ⭐ 修复：使用 tag 而非 latest（提升可追溯性）
-          # 拉取指定版本的镜像（添加进度输出和重试机制）
+          # 拉取指定版本的镜像（添加进度输出、重试机制和容错机制）
           # ⭐ 修复：${IMAGE_TAG} 在外层双引号中会展开，传递给远程服务器
           # 在 bash -c 单引号内，先赋值给变量，确保正确使用
           IMAGE_TAG_VAL=\"${IMAGE_TAG}\"
+          ORIGINAL_REQUESTED_TAG=\"\${IMAGE_TAG_VAL}\"
           echo \"[INFO] Pulling images with tag: \${IMAGE_TAG_VAL}\"
+
+          # ⭐ 容错函数：尝试多个 tag 变体（v4.20.4 -> 4.20.4 -> latest）
+          pull_image_with_fallback() {
+            local IMAGE_NAME=\$1
+            local PRIMARY_TAG=\$2
+            local FALLBACK_TAG=\"\${PRIMARY_TAG#v}\"
+            local FULL_IMAGE=\"${{ env.REGISTRY }}/\${IMAGE_NAME}:\${PRIMARY_TAG}\"
+            
+            echo \"[INFO] Attempting to pull \${FULL_IMAGE}...\"
+            
+            # 先尝试主 tag（如 v4.20.4）
+            for retry in {1..3}; do
+              if docker pull \${FULL_IMAGE} 2>/dev/null; then
+                echo \"[OK] Image pulled successfully with tag \${PRIMARY_TAG} (attempt \$retry/3)\"
+                echo \"\${PRIMARY_TAG}\"
+                return 0
+              fi
+              if [ \$retry -lt 3 ]; then
+                echo \"[WARN] Pull failed (attempt \$retry/3), retrying in 5 seconds...\"
+                sleep 5
+              fi
+            done
+            
+            # 如果主 tag 失败，尝试不带 v 前缀的 tag（如 4.20.4）
+            if [ \"\${PRIMARY_TAG}\" != \"\${FALLBACK_TAG}\" ]; then
+              FULL_IMAGE_FALLBACK=\"${{ env.REGISTRY }}/\${IMAGE_NAME}:\${FALLBACK_TAG}\"
+              echo \"[WARN] Primary tag \${PRIMARY_TAG} failed, trying fallback tag \${FALLBACK_TAG}...\"
+              
+              for retry in {1..3}; do
+                if docker pull \${FULL_IMAGE_FALLBACK} 2>/dev/null; then
+                  echo \"[OK] Image pulled successfully with fallback tag \${FALLBACK_TAG} (attempt \$retry/3)\"
+                  echo \"\${FALLBACK_TAG}\"
+                  return 0
+                fi
+                if [ \$retry -lt 3 ]; then
+                  echo \"[WARN] Fallback pull failed (attempt \$retry/3), retrying in 5 seconds...\"
+                  sleep 5
+                fi
+              done
+            fi
+            
+            # 所有尝试都失败
+            echo \"[FAIL] Failed to pull image \${IMAGE_NAME} with both tags \${PRIMARY_TAG} and \${FALLBACK_TAG}\"
+            echo \"[INFO] Checking available tags...\"
+            docker pull ${{ env.REGISTRY }}/\${IMAGE_NAME} --all-tags 2>&1 | grep -E \"(v[0-9]|[0-9]+\.[0-9]|latest)\" | head -10 || true
+            return 1
+          }
+
+          # 拉取 Backend 镜像
           echo \"[INFO] Pulling backend image...\"
+          BACKEND_TAG=\$(pull_image_with_fallback \"${{ env.IMAGE_NAME_BACKEND }}\" \"\${IMAGE_TAG_VAL}\")
+          if [ \$? -ne 0 ]; then
+            echo \"[FAIL] Backend image pull failed\"
+            exit 1
+          fi
+          echo \"[OK] Backend image tag resolved: \${BACKEND_TAG}\"
 
-          # 重试机制：最多重试3次，每次等待10秒
-          # ⭐ 修复：使用变量构建完整镜像路径
-          BACKEND_IMAGE=\"${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:\${IMAGE_TAG_VAL}\"
-          for retry in {1..3}; do
-            if docker pull \${BACKEND_IMAGE}; then
-              echo \"[OK] Backend image pulled successfully (attempt \$retry/3)\"
-              break
-            else
-              if [ \$retry -eq 3 ]; then
-                echo \"[FAIL] Failed to pull backend image with tag \${IMAGE_TAG_VAL} after 3 attempts\"
-                echo \"[INFO] Attempted image: \${BACKEND_IMAGE}\"
-                echo \"[INFO] Checking available tags...\"
-                docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }} --all-tags 2>&1 | grep -E \"(v[0-9]|latest)\" | head -10 || true
-                exit 1
-              fi
-              echo \"[WARN] Pull failed (attempt \$retry/3), retrying in 10 seconds...\"
-              sleep 10
-            fi
-          done
-
+          # 拉取 Frontend 镜像
           echo \"[INFO] Pulling frontend image...\"
-          # ⭐ 修复：使用变量构建完整镜像路径
-          FRONTEND_IMAGE=\"${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:\${IMAGE_TAG_VAL}\"
-          for retry in {1..3}; do
-            if docker pull \${FRONTEND_IMAGE}; then
-              echo \"[OK] Frontend image pulled successfully (attempt \$retry/3)\"
-              break
-            else
-              if [ \$retry -eq 3 ]; then
-                echo \"[FAIL] Failed to pull frontend image with tag \${IMAGE_TAG_VAL} after 3 attempts\"
-                echo \"[INFO] Attempted image: \${FRONTEND_IMAGE}\"
-                echo \"[INFO] Checking available tags...\"
-                docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }} --all-tags 2>&1 | grep -E \"(v[0-9]|latest)\" | head -10 || true
-                exit 1
-              fi
-              echo \"[WARN] Pull failed (attempt \$retry/3), retrying in 10 seconds...\"
-              sleep 10
-            fi
-          done
+          FRONTEND_TAG=\$(pull_image_with_fallback \"${{ env.IMAGE_NAME_FRONTEND }}\" \"\${IMAGE_TAG_VAL}\")
+          if [ \$? -ne 0 ]; then
+            echo \"[FAIL] Frontend image pull failed\"
+            exit 1
+          fi
+          echo \"[OK] Frontend image tag resolved: \${FRONTEND_TAG}\"
 
-          # ⭐ 修复：直接使用 tag，不标记为 latest（提升可追溯性和回滚能力）
-          echo \"[INFO] Images pulled successfully with tag: \${IMAGE_TAG_VAL}\"
-          echo \"[INFO] Using tag directly (not latest) for better traceability\"
+          # ⭐ 修复：使用实际拉取成功的 tag（可能是 PRIMARY_TAG 或 FALLBACK_TAG）
+          IMAGE_TAG_VAL=\"\${BACKEND_TAG}\"
+          echo \"[INFO] Images pulled successfully with resolved tags: Backend=\${BACKEND_TAG}, Frontend=\${FRONTEND_TAG}\"
+          echo \"[INFO] Using resolved tag for deployment (not latest) for better traceability\"
 
           # ⭐ 清理可能占用端口80的旧容器
           echo \"[INFO] Cleaning up old containers that might conflict with port 80...\"
@@ -304,12 +330,12 @@ jobs:
           # 如果配置有变化（如端口、环境变量等），docker-compose 会自动重新创建容器
           # 因此不需要手动重新部署，工作流会自动完成部署
 
-          # ⭐ 修复：创建临时 compose 文件，使用 tag 而非 latest
+          # ⭐ 修复：创建临时 compose 文件，使用实际拉取成功的 tag（可能是 PRIMARY_TAG 或 FALLBACK_TAG）
           echo \"[INFO] Creating temporary docker-compose.deploy.yml...\"
-          # 使用 tag 直接指定镜像（提升可追溯性）
-          # ⭐ 注意：使用 IMAGE_TAG_VAL 变量确保正确展开
-          printf \"services:\\n  backend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:\${IMAGE_TAG_VAL}\\n  frontend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:\${IMAGE_TAG_VAL}\\n    ports: []\\n\" > docker-compose.deploy.yml
-          echo \"[OK] Temporary compose file created with tag: \${IMAGE_TAG_VAL}\"
+          # 使用实际拉取成功的 tag 直接指定镜像（提升可追溯性）
+          # ⭐ 注意：分别使用 BACKEND_TAG 和 FRONTEND_TAG，因为它们可能不同（容错机制可能返回不同的 tag）
+          printf \"services:\\n  backend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:\${BACKEND_TAG}\\n  frontend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:\${FRONTEND_TAG}\\n    ports: []\\n\" > docker-compose.deploy.yml
+          echo \"[OK] Temporary compose file created with tags: Backend=\${BACKEND_TAG}, Frontend=\${FRONTEND_TAG}\"
 
           # ⭐ 新增：分阶段启动服务（确保 Metabase 在 Nginx 之前启动）
           echo \"[INFO] 阶段1: 启动基础设施层（PostgreSQL, Redis）...\"
@@ -471,7 +497,8 @@ jobs:
           fi
 
           echo \"[OK] Production deployment completed successfully\"
-          echo \"Deployed image tag: \${IMAGE_TAG_VAL}\"
+          echo \"Deployed image tags: Backend=\${BACKEND_TAG}, Frontend=\${FRONTEND_TAG}\"
+          echo \"Original requested tag: \${ORIGINAL_REQUESTED_TAG}\"
 
           # 清理临时文件
           echo \"[INFO] Cleaning up temporary files...\"
