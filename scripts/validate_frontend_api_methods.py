@@ -11,6 +11,7 @@
 
 import sys
 import re
+import argparse
 from pathlib import Path
 from typing import List, Dict, Any, Set
 from collections import defaultdict
@@ -28,6 +29,53 @@ class FrontendAPIMethodValidator:
         self.api_calls = []  # API调用列表
         self.errors = []
         self.warnings = []
+        self.validated_files: List[Path] = []
+
+    def _normalize_frontend_target_files(self, target_files: List[Path]) -> List[Path]:
+        """过滤并规范化目标文件列表（仅保留 frontend/src 下的 .vue/.js/.ts 文件）。"""
+        frontend_dir = (project_root / "frontend" / "src").resolve()
+        api_dir = (frontend_dir / "api").resolve()
+        allowed_suffixes = {".vue", ".js", ".ts"}
+
+        normalized: List[Path] = []
+        for raw in target_files:
+            if not raw:
+                continue
+
+            candidate = raw
+            if not candidate.is_absolute():
+                candidate = project_root / candidate
+
+            try:
+                candidate = candidate.resolve()
+            except Exception:
+                # resolve 失败时尽量继续（CI/本地都不应发生）
+                candidate = candidate.absolute()
+
+            if candidate.suffix not in allowed_suffixes:
+                continue
+
+            try:
+                candidate.relative_to(frontend_dir)
+            except ValueError:
+                continue
+
+            # [SCHEME A] 不扫描 API 封装层（该层可能也会使用名为 api 的 axios 实例，易造成误判）
+            try:
+                candidate.relative_to(api_dir)
+                continue
+            except ValueError:
+                pass
+
+            if not candidate.exists():
+                # git diff 可能包含已删除文件；跳过即可
+                continue
+
+            normalized.append(candidate)
+
+        # 去重并稳定排序
+        unique = sorted({p.as_posix(): p for p in normalized}.values(), key=lambda p: p.as_posix())
+        return unique
     
     def extract_api_methods(self, api_file: Path) -> Set[str]:
         """从API文件中提取已定义的方法"""
@@ -43,9 +91,8 @@ class FrontendAPIMethodValidator:
             
             for match in matches:
                 method_name = match.group(1)
-                # 排除私有方法（以下划线开头）
-                if not method_name.startswith('_'):
-                    methods.add(method_name)
+                # [FIX] 允许下划线开头的方法（如 _post/_delete），否则会误报缺失
+                methods.add(method_name)
         
         except Exception as e:
             self.errors.append({
@@ -72,6 +119,11 @@ class FrontendAPIMethodValidator:
                 method_name = match.group(1)
                 line_num = content[:match.start()].count('\n') + 1
                 line_content = lines[line_num - 1].strip()
+
+                # [FIX] 跳过注释中的调用（避免历史注释代码触发误报）
+                stripped = line_content.lstrip()
+                if stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*"):
+                    continue
                 
                 calls.append({
                     "method": method_name,
@@ -88,17 +140,22 @@ class FrontendAPIMethodValidator:
         
         return calls
     
-    def scan_frontend_files(self) -> List[Path]:
-        """扫描所有前端文件"""
+    def scan_frontend_files(self, target_files: List[Path] | None = None) -> List[Path]:
+        """扫描前端文件（全量或指定文件列表）。"""
         frontend_dir = project_root / "frontend" / "src"
-        vue_files = list(frontend_dir.rglob("*.vue"))
-        js_files = list(frontend_dir.rglob("*.js"))
-        ts_files = list(frontend_dir.rglob("*.ts"))
-        
+        api_dir = frontend_dir / "api"
+
+        if target_files is not None:
+            return self._normalize_frontend_target_files(target_files)
+
+        vue_files = [p for p in frontend_dir.rglob("*.vue") if not str(p).startswith(str(api_dir))]
+        js_files = [p for p in frontend_dir.rglob("*.js") if not str(p).startswith(str(api_dir))]
+        ts_files = [p for p in frontend_dir.rglob("*.ts") if not str(p).startswith(str(api_dir))]
+
         return vue_files + js_files + ts_files
     
-    def validate_all(self) -> Dict[str, Any]:
-        """验证所有API方法调用"""
+    def validate_all(self, target_files: List[Path] | None = None) -> Dict[str, Any]:
+        """验证API方法调用（全量或指定前端文件）。"""
         # 1. 提取API文件中定义的方法
         api_file = project_root / "frontend" / "src" / "api" / "index.js"
         if api_file.exists():
@@ -120,7 +177,24 @@ class FrontendAPIMethodValidator:
             }
         
         # 2. 扫描所有前端文件，提取API调用
-        frontend_files = self.scan_frontend_files()
+        frontend_files = self.scan_frontend_files(target_files)
+        self.validated_files = frontend_files
+
+        if target_files is not None and len(frontend_files) == 0:
+            # [SCHEME A] 没有前端文件改动时，跳过校验（返回成功）
+            return {
+                "errors": self.errors,
+                "warnings": self.warnings,
+                "missing_methods": [],
+                "stats": {
+                    "total_methods": len(self.api_methods),
+                    "total_calls": 0,
+                    "missing_calls": 0,
+                    "validated_files": 0,
+                    "skipped": True,
+                },
+            }
+
         for frontend_file in frontend_files:
             calls = self.extract_api_calls(frontend_file)
             self.api_calls.extend(calls)
@@ -138,8 +212,10 @@ class FrontendAPIMethodValidator:
             "stats": {
                 "total_methods": len(self.api_methods),
                 "total_calls": len(self.api_calls),
-                "missing_calls": len(missing_methods)
-            }
+                "missing_calls": len(missing_methods),
+                "validated_files": len(frontend_files),
+                "skipped": False,
+            },
         }
     
     def generate_report(self, results: Dict[str, Any]) -> str:
@@ -153,6 +229,8 @@ class FrontendAPIMethodValidator:
         # 统计信息
         stats = results["stats"]
         report.append(f"已定义API方法数: {stats['total_methods']}")
+        if "validated_files" in stats:
+            report.append(f"本次验证前端文件数: {stats['validated_files']}")
         report.append(f"API调用总数: {stats['total_calls']}")
         report.append(f"缺失方法调用数: {stats['missing_calls']}")
         report.append("")
@@ -189,6 +267,10 @@ class FrontendAPIMethodValidator:
         report.append("\n" + "=" * 60)
         report.append("总结")
         report.append("=" * 60)
+        if stats.get("skipped") is True:
+            report.append("[SKIP] 本次发布未改动前端文件，跳过前端API方法校验")
+            return "\n".join(report)
+
         if stats['missing_calls'] == 0 and not results["errors"]:
             report.append("[OK] 所有API方法调用都存在！")
         else:
@@ -210,10 +292,36 @@ def safe_print(text):
 
 def main():
     """主函数"""
+    parser = argparse.ArgumentParser(description="检查前端API方法是否存在")
+    parser.add_argument(
+        "--files",
+        nargs="+",
+        help="只检查指定文件列表（相对于项目根目录，如 frontend/src/views/xxx.vue）",
+    )
+    parser.add_argument(
+        "--changed-files",
+        help="从文件读取改动的文件列表（每行一个路径，通常来自 git diff --name-only）",
+    )
+    args = parser.parse_args()
+
     validator = FrontendAPIMethodValidator()
     
     safe_print("开始检查前端API方法...")
-    results = validator.validate_all()
+
+    target_files: List[Path] | None = None
+    if args.files:
+        target_files = [Path(p.strip()) for p in args.files if p and p.strip()]
+        safe_print(f"[INFO] 仅验证指定文件: {len(target_files)}")
+    elif args.changed_files:
+        changed_files_path = Path(args.changed_files)
+        if changed_files_path.exists():
+            lines = changed_files_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            target_files = [Path(line.strip()) for line in lines if line.strip()]
+            safe_print(f"[INFO] 仅验证改动文件: {len(target_files)}")
+        else:
+            safe_print(f"[WARN] 改动文件列表不存在: {args.changed_files}，将验证所有前端文件")
+
+    results = validator.validate_all(target_files)
     
     report = validator.generate_report(results)
     safe_print(report)

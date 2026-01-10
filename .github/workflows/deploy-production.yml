@@ -75,15 +75,15 @@ jobs:
         run: |
           # 获取所有 tag，按版本号排序
           git fetch --tags --force
-          
+
           # 获取当前 tag
           CURRENT_TAG="${{ github.ref_name }}"
           echo "[INFO] Current tag: ${CURRENT_TAG}"
-          
+
           # 获取上一个 tag（按版本号排序，排除当前 tag，取最新的）
           ALL_TAGS=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$')
           PREV_TAG=$(echo "${ALL_TAGS}" | grep -v "^${CURRENT_TAG}$" | head -n 1)
-          
+
           if [ -z "${PREV_TAG}" ]; then
             echo "[INFO] 未找到上一个 tag，将验证所有文件（首次发布或只有一个 tag）"
             echo "has_prev_tag=false" >> $GITHUB_OUTPUT
@@ -129,7 +129,14 @@ jobs:
           fi
 
       - name: Validate Frontend API Methods (Release Gate)
-        run: python scripts/validate_frontend_api_methods.py
+        run: |
+          if [ "${{ steps.changed-files.outputs.has_prev_tag }}" == "true" ] && [ -f "temp/changed_files.txt" ]; then
+            echo "[INFO] 只验证改动的前端文件..."
+            python scripts/validate_frontend_api_methods.py --changed-files temp/changed_files.txt
+          else
+            echo "[INFO] 未找到改动文件列表，验证所有前端文件..."
+            python scripts/validate_frontend_api_methods.py
+          fi
 
       - name: Validate Database Fields (Release Gate)
         run: python scripts/validate_database_fields.py
@@ -340,10 +347,10 @@ jobs:
               -o ServerAliveCountMax=10 \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
           "bash -c '
-          set -e
+            set -e
           cd \"${PRODUCTION_PATH}\"
-
-          # 登录到容器仓库
+            
+            # 登录到容器仓库
           echo \"[INFO] Logging in to container registry...\"
           echo \"${{ secrets.GITHUB_TOKEN }}\" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
           echo \"[OK] Successfully logged in to container registry\"
@@ -452,11 +459,11 @@ jobs:
             docker stop \${PORT_80_CONTAINER} 2>/dev/null || true
           fi
           echo \"[OK] Cleanup completed\"
-
-          # 使用 docker-compose 部署（生产环境）
-          export APP_ENV=production
-          export COMPOSE_PROJECT_NAME=xihong_erp
-
+            
+            # 使用 docker-compose 部署（生产环境）
+            export APP_ENV=production
+            export COMPOSE_PROJECT_NAME=xihong_erp
+            
           # [NOTE] 同步 compose 文件后，docker-compose up -d 会自动检测配置变化
           # 如果配置有变化（如端口、环境变量等），docker-compose 会自动重新创建容器
           # 因此不需要手动重新部署，工作流会自动完成部署
@@ -470,7 +477,7 @@ jobs:
 
           # [NOTE] 分阶段启动服务（确保 Metabase 在 Nginx 之前启动）
           echo \"[INFO] 阶段1: 启动基础设施层（PostgreSQL, Redis）...\"
-          if [ -f docker-compose.cloud.yml ]; then
+            if [ -f docker-compose.cloud.yml ]; then
             docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml --profile production up -d postgres redis
           else
             docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production up -d postgres redis
@@ -488,12 +495,12 @@ jobs:
           else
             echo \"[WARN] .env 文件不存在，使用默认值\"
           fi
-          
+
           # [FIX] 使用环境变量（如果未设置则使用默认值）
           POSTGRES_USER_VAL=\"\${POSTGRES_USER:-erp_user}\"
           POSTGRES_DB_VAL=\"\${POSTGRES_DB:-xihong_erp}\"
           REDIS_PASSWORD_VAL=\"\${REDIS_PASSWORD:-redis_pass_2025}\"
-          
+
           for i in {1..60}; do
             # [FIX] 移除 2>/dev/null，让 PostgreSQL 错误可见
             postgres_output=\$(docker exec xihong_erp_postgres pg_isready -U \"\${POSTGRES_USER_VAL}\" -d \"\${POSTGRES_DB_VAL}\" 2>&1)
@@ -544,7 +551,7 @@ jobs:
             echo \"等待基础设施... (\$i/60)\"
             sleep 2
           done
-
+            
           # [NOTE] 关键：先启动 Metabase（生产必需组件，必须在 Nginx 之前）
           echo \"[INFO] 阶段2: 启动 Metabase 服务（必须在 Nginx 之前）...\"
           if [ -f docker-compose.metabase.yml ]; then
@@ -635,10 +642,10 @@ jobs:
             if [ \$i -eq 60 ]; then
               echo \"[FAIL] Backend health check failed after 2 minutes\"
               echo \"[INFO] Checking backend logs...\"
-              docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml logs backend 2>/dev/null || \
-              docker-compose -f docker-compose.yml -f docker-compose.prod.yml logs backend
-              exit 1
-            fi
+                docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml logs backend 2>/dev/null || \
+                docker-compose -f docker-compose.yml -f docker-compose.prod.yml logs backend
+                exit 1
+              fi
             if [ \$((i % 5)) -eq 0 ]; then
               echo \"[INFO] Waiting for backend... (\$i/60)\"
             fi
@@ -661,29 +668,29 @@ jobs:
           else
             echo \"[INFO] Frontend container not found, skipping frontend health check\"
           fi
-
+            
           # 验证 Nginx（如果部署了 Nginx）
           if docker ps | grep -q xihong_erp_nginx; then
             echo \"[INFO] Checking Nginx health...\"
-            for i in {1..30}; do
+              for i in {1..30}; do
               if curl -f http://localhost/health > /dev/null 2>&1; then
                 echo \"[OK] Nginx health check passed (port 80)\"
-                break
-              fi
+                  break
+                fi
               if [ \$i -eq 30 ]; then
                 echo \"[WARN] Nginx health check failed (non-critical)\"
-              fi
-              sleep 2
-            done
+                fi
+                sleep 2
+              done
           else
             echo \"[INFO] Nginx container not found, skipping Nginx health check\"
-          fi
-
+            fi
+            
           echo \"[OK] Production deployment completed successfully\"
           echo \"Deployed image tags: Backend=\${BACKEND_TAG}, Frontend=\${FRONTEND_TAG}\"
           echo \"Original requested tag: \${ORIGINAL_REQUESTED_TAG}\"
-
-          # 清理临时文件
+            
+            # 清理临时文件
           echo \"[INFO] Cleaning up temporary files...\"
           rm -f docker-compose.deploy.yml
           echo \"[OK] Cleanup completed\"
@@ -814,7 +821,7 @@ jobs:
           fi
           echo \"[OK] Production deployment completed successfully\"
           echo \"Original requested tag: ${ORIGINAL_REQUESTED_TAG}\"
-          rm -f docker-compose.deploy.yml
+            rm -f docker-compose.deploy.yml
           '"
 
       - name: Health check verification
@@ -888,7 +895,7 @@ jobs:
                 curl -v --max-time 10 ${HEALTH_CHECK_URL}/health 2>&1 | head -20 || true
                 
                 exit 1
-              fi
+          fi
             fi
           done
 
@@ -911,20 +918,20 @@ jobs:
               -o ServerAliveCountMax=10 \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
               "bash -c '
-              set -e
+            set -e
               cd \"${PRODUCTION_PATH}\"
-              
+            
               echo \"[WARNING] Deployment failed, attempting rollback...\"
-              
-              # 查找上一个成功的部署备份
+            
+            # 查找上一个成功的部署备份
               LAST_BACKUP=\$(ls -td backups/pre_deploy_* 2>/dev/null | head -1)
               if [ -n \"\${LAST_BACKUP}\" ]; then
                 echo \"Found backup: \${LAST_BACKUP}\"
-                # 这里可以实现回滚逻辑（恢复配置、拉取上一个镜像等）
+              # 这里可以实现回滚逻辑（恢复配置、拉取上一个镜像等）
                 echo \"[WARNING] Manual rollback required. Check backup: \${LAST_BACKUP}\"
-              else
+            else
                 echo \"[WARNING] No backup found for rollback\"
-              fi
+            fi
               '"
 
       - name: Send deployment notification
