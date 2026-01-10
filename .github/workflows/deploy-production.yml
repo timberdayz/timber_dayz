@@ -1,16 +1,24 @@
 name: Deploy to Production
 
 on:
+  # ⭐ 自动部署：等待 Docker Build and Push 成功后触发（解决并行竞态）
+  # 注意：只有当 build workflow 由 push tag (v*) 触发且成功时才自动部署
+  workflow_run:
+    workflows: ["Docker Build and Push"]
+    types:
+      - completed
+  # 手动部署：支持手动指定镜像标签部署
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Image tag to deploy (e.g., v4.19.7, main-abc123)"
+        description: "Image tag to deploy (e.g., v4.19.7)"
         required: true
         type: string
       confirm:
         description: 'Type "DEPLOY" to confirm production deployment'
         required: true
         type: string
+  # ⭐ 保留：push tag 触发（如果 workflow_run 失败，可以手动触发）
   push:
     tags:
       - "v*"
@@ -42,13 +50,17 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: check-config
-    if: ${{ needs.check-config.outputs.can_deploy == 'true' }}
+    # ⭐ 修复：workflow_run 触发时，只有当 build workflow 成功时才执行部署（tag 检查在脚本中完成）
+    if: ${{ needs.check-config.outputs.can_deploy == 'true' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
     environment:
       name: production
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        # ⭐ 修复：workflow_run 触发时，使用触发构建的 ref（tag 或分支）
+        with:
+          ref: ${{ github.event.workflow_run.head_ref || github.event.workflow_run.head_branch || github.ref }}
 
       - name: Verify deployment confirmation
         if: github.event_name == 'workflow_dispatch'
@@ -59,12 +71,45 @@ jobs:
           fi
           echo "Deployment confirmed"
 
+      - name: Check if auto-deploy should proceed
+        id: check-auto-deploy
+        if: github.event_name == 'workflow_run'
+        run: |
+          # ⭐ 自动部署：只有当 build workflow 由 push tag (v*) 触发时才部署
+          REF="${{ github.event.workflow_run.head_ref || github.event.workflow_run.head_branch || '' }}"
+          if [[ "${REF}" == refs/tags/v* ]] || [[ "${REF}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "Auto-deploy: Build was triggered by push tag, proceeding with deployment"
+          else
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+            echo "Auto-deploy: Build was not triggered by push tag (v*), skipping deployment"
+            echo "REF was: ${REF}"
+          fi
+
       - name: Determine image tag
         id: image-tag
+        # ⭐ 修复：workflow_run 且不是 tag 触发时，跳过部署
+        if: github.event_name != 'workflow_run' || steps.check-auto-deploy.outputs.should_deploy == 'true'
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # 手动触发：使用用户输入的标签
             echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "workflow_run" ]; then
+            # ⭐ 自动触发：从触发构建的 workflow_run 中提取标签
+            REF="${{ github.event.workflow_run.head_ref || github.event.workflow_run.head_branch }}"
+            if [[ "${REF}" == refs/tags/v* ]]; then
+              # 提取标签名（去掉 refs/tags/ 前缀）
+              TAG="${REF#refs/tags/}"
+              echo "tag=${TAG}" >> $GITHUB_OUTPUT
+            elif [[ "${REF}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              # 直接是 vX.Y.Z 格式
+              echo "tag=${REF}" >> $GITHUB_OUTPUT
+            else
+              echo "[ERROR] Cannot determine tag from ref: ${REF}"
+              exit 1
+            fi
           elif [ "${{ github.ref_type }}" == "tag" ]; then
+            # push tag 触发：直接使用标签名
             echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             echo "tag=latest" >> $GITHUB_OUTPUT
@@ -107,6 +152,11 @@ jobs:
                 fi; \
                 if git pull origin main 2>/dev/null || git pull origin master 2>/dev/null; then \
                   echo \"[OK] Git pull successful, compose files synced\"; \
+                  if [ -f docker-compose.metabase.yml ]; then \
+                    echo \"[OK] docker-compose.metabase.yml found after git pull\"; \
+                  else \
+                    echo \"[WARN] docker-compose.metabase.yml not found after git pull, but continuing...\"; \
+                  fi \
                 else \
                   echo \"[WARN] Git pull failed, falling back to SCP method...\"; \
                   exit 1; \
@@ -114,7 +164,17 @@ jobs:
             
             if [ $? -eq 0 ]; then
               echo "[OK] Compose files synced via git pull"
-              exit 0
+              # ⭐ 验证：确保 Metabase compose 文件已同步
+              ssh -o StrictHostKeyChecking=no \
+                  -o ServerAliveInterval=30 \
+                  -o ServerAliveCountMax=10 \
+                  ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+                  "bash -c 'cd \"${PRODUCTION_PATH}\" && if [ -f docker-compose.metabase.yml ]; then echo \"[OK] Metabase compose file verified\"; else echo \"[WARN] Metabase compose file missing, will use SCP method\"; exit 1; fi'"
+              if [ $? -eq 0 ]; then
+                exit 0
+              else
+                echo "[WARN] Metabase compose file missing after git pull, falling back to SCP..."
+              fi
             fi
           else
             echo "[INFO] No git repository found on server, using SCP method..."
@@ -153,6 +213,18 @@ jobs:
             }
           fi
 
+          # ⭐ 新增：同步 Metabase compose 文件（生产必需组件）
+          if [ -f "docker-compose.metabase.yml" ]; then
+            echo "[INFO] Uploading docker-compose.metabase.yml..."
+            scp -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                docker-compose.metabase.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.metabase.yml || {
+              echo "[FAIL] Failed to upload docker-compose.metabase.yml"
+              exit 1
+            }
+          fi
+
           echo "[OK] Compose files synced successfully via SCP"
 
       - name: Backup current deployment
@@ -161,27 +233,18 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
+          # ⭐ 修复：使用单引号 heredoc，防止变量在本地展开
           ssh -o StrictHostKeyChecking=no \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
-              ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
-            set -e
-            cd ${PRODUCTION_PATH}
-            
-            # 备份当前配置和状态
-            BACKUP_DIR="backups/pre_deploy_\$(date +%Y%m%d_%H%M%S)"
-            mkdir -p \${BACKUP_DIR}
-            
-            # 保存当前镜像标签（使用 production profile 确保包含所有服务）
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production config > \${BACKUP_DIR}/docker-compose.config.yaml 2>&1 || {
-              echo "[WARN] Docker Compose config validation failed, but continuing backup..."
-            }
-            
-            # 记录当前运行的容器
-            docker ps --format "{{.Names}} {{.Image}}" > \${BACKUP_DIR}/running_containers.txt || true
-            
-            echo "[OK] Pre-deployment backup completed: \${BACKUP_DIR}"
-          ENDSSH
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+              "bash -c 'set -e; \
+              cd \"${PRODUCTION_PATH}\"; \
+              BACKUP_DIR=\"backups/pre_deploy_\$(date +%Y%m%d_%H%M%S)\"; \
+              mkdir -p \"\${BACKUP_DIR}\"; \
+              docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production config > \"\${BACKUP_DIR}/docker-compose.config.yaml\" 2>&1 || echo \"[WARN] Docker Compose config validation failed, but continuing backup...\"; \
+              docker ps --format \"{{.Names}} {{.Image}}\" > \"\${BACKUP_DIR}/running_containers.txt\" || true; \
+              echo \"[OK] Pre-deployment backup completed: \${BACKUP_DIR}\"'"
 
       - name: Deploy to production server
         env:
@@ -190,155 +253,266 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
+          # ⭐ 修复：避免 heredoc 语法问题，使用 bash -c 执行远程命令
+          # ⭐ 注意：外层双引号允许本地变量展开（${IMAGE_TAG}），内层单引号中的变量需转义（\$retry）
           ssh -o StrictHostKeyChecking=no \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
-              ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
-            set -e
-            cd ${PRODUCTION_PATH}
-            
-            # 登录到容器仓库
-            echo "[INFO] Logging in to container registry..."
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
-            echo "[OK] Successfully logged in to container registry"
-            
-            # 拉取指定版本的镜像（添加进度输出）
-            echo "[INFO] Pulling images with tag: ${IMAGE_TAG}"
-            echo "[INFO] Pulling backend image..."
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG} || {
-              echo "[FAIL] Failed to pull backend image with tag ${IMAGE_TAG}"
-              exit 1
-            }
-            echo "[OK] Backend image pulled successfully"
-            
-            echo "[INFO] Pulling frontend image..."
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG} || {
-              echo "[FAIL] Failed to pull frontend image with tag ${IMAGE_TAG}"
-              exit 1
-            }
-            echo "[OK] Frontend image pulled successfully"
-            
-            # 标记镜像为 latest（用于 docker-compose）
-            echo "[INFO] Tagging images as latest..."
-            docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG} xihong_erp_backend:latest
-            docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG} xihong_erp_frontend:latest
-            echo "[OK] Images tagged successfully"
-            
-            # ⭐ 清理可能占用端口80的旧容器
-            echo "[INFO] Cleaning up old containers that might conflict with port 80..."
-            # 停止并删除可能占用端口80的旧 frontend 容器
-            docker stop xihong_erp_frontend 2>/dev/null || true
-            docker rm xihong_erp_frontend 2>/dev/null || true
-            # 检查是否有其他容器占用端口80
-            PORT_80_CONTAINER=$(docker ps --format "{{.Names}}" --filter "publish=80" 2>/dev/null | head -1 || echo "")
-            if [ -n "${PORT_80_CONTAINER}" ] && [ "${PORT_80_CONTAINER}" != "xihong_erp_nginx" ]; then
-              echo "[WARN] Found container ${PORT_80_CONTAINER} using port 80, stopping it..."
-              docker stop ${PORT_80_CONTAINER} 2>/dev/null || true
-            fi
-            echo "[OK] Cleanup completed"
-            
-            # 使用 docker-compose 部署（生产环境）
-            export APP_ENV=production
-            export COMPOSE_PROJECT_NAME=xihong_erp
-            
-            # ⭐ 说明：同步 compose 文件后，docker-compose up -d 会自动检测配置变化
-            # 如果配置有变化（如端口、环境变量等），docker-compose 会自动重新创建容器
-            # 因此不需要手动重新部署，工作流会自动完成部署
-            
-            # 创建临时 compose 文件，覆盖 build 为 image，并确保 frontend 不暴露端口
-            echo "[INFO] Creating temporary docker-compose.deploy.yml..."
-            cat > docker-compose.deploy.yml <<EOF
-            services:
-              backend:
-                image: xihong_erp_backend:latest
-              frontend:
-                image: xihong_erp_frontend:latest
-                # ⭐ 确保生产环境 frontend 不暴露端口（通过 nginx 反向代理访问）
-                ports: []
-            EOF
-            echo "[OK] Temporary compose file created"
-            
-            # 检查是否存在云服务器优化配置（2核4G）
-            if [ -f docker-compose.cloud.yml ]; then
-              echo "[INFO] 使用云服务器优化配置（2核4G）"
-              echo "[INFO] 应用最新的 compose 配置并启动/更新服务..."
-              docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+          "bash -c '
+          set -e
+          cd \"${PRODUCTION_PATH}\"
+
+          # 登录到容器仓库
+          echo \"[INFO] Logging in to container registry...\"
+          echo \"${{ secrets.GITHUB_TOKEN }}\" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+          echo \"[OK] Successfully logged in to container registry\"
+
+          # ⭐ 修复：使用 tag 而非 latest（提升可追溯性）
+          # 拉取指定版本的镜像（添加进度输出和重试机制）
+          # ⭐ 修复：${IMAGE_TAG} 在外层双引号中会展开，传递给远程服务器
+          # 在 bash -c 单引号内，先赋值给变量，确保正确使用
+          IMAGE_TAG_VAL=\"${IMAGE_TAG}\"
+          echo \"[INFO] Pulling images with tag: \${IMAGE_TAG_VAL}\"
+          echo \"[INFO] Pulling backend image...\"
+
+          # 重试机制：最多重试3次，每次等待10秒
+          # ⭐ 修复：使用变量构建完整镜像路径
+          BACKEND_IMAGE=\"${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:\${IMAGE_TAG_VAL}\"
+          for retry in {1..3}; do
+            if docker pull \${BACKEND_IMAGE}; then
+              echo \"[OK] Backend image pulled successfully (attempt \$retry/3)\"
+              break
             else
-              echo "[INFO] 使用标准生产配置"
-              echo "[INFO] 应用最新的 compose 配置并启动/更新服务..."
-              docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d
-            fi
-            echo "[OK] Docker Compose services started/updated"
-            
-            # 等待服务启动
-            echo "[INFO] Waiting for services to start..."
-            sleep 15
-            echo "[INFO] Services should be starting now..."
-            
-            # 健康检查（通过容器网络检查，不依赖宿主机端口）
-            echo "[INFO] Starting backend health check..."
-            for i in {1..60}; do
-              # ⭐ 修复：通过容器网络检查，不依赖宿主机端口映射
-              if docker exec xihong_erp_backend curl -f http://localhost:8000/health > /dev/null 2>&1; then
-                echo "[OK] Backend health check passed (container internal)"
-                break
-              fi
-              if [ $i -eq 60 ]; then
-                echo "[FAIL] Backend health check failed after 2 minutes"
-                echo "[INFO] Checking backend logs..."
-                docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml logs backend 2>/dev/null || \
-                docker-compose -f docker-compose.yml -f docker-compose.prod.yml logs backend
+              if [ \$retry -eq 3 ]; then
+                echo \"[FAIL] Failed to pull backend image with tag \${IMAGE_TAG_VAL} after 3 attempts\"
+                echo \"[INFO] Attempted image: \${BACKEND_IMAGE}\"
+                echo \"[INFO] Checking available tags...\"
+                docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }} --all-tags 2>&1 | grep -E \"(v[0-9]|latest)\" | head -10 || true
                 exit 1
               fi
-              if [ $((i % 5)) -eq 0 ]; then
-                echo "[INFO] Waiting for backend... ($i/60)"
+              echo \"[WARN] Pull failed (attempt \$retry/3), retrying in 10 seconds...\"
+              sleep 10
+            fi
+          done
+
+          echo \"[INFO] Pulling frontend image...\"
+          # ⭐ 修复：使用变量构建完整镜像路径
+          FRONTEND_IMAGE=\"${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:\${IMAGE_TAG_VAL}\"
+          for retry in {1..3}; do
+            if docker pull \${FRONTEND_IMAGE}; then
+              echo \"[OK] Frontend image pulled successfully (attempt \$retry/3)\"
+              break
+            else
+              if [ \$retry -eq 3 ]; then
+                echo \"[FAIL] Failed to pull frontend image with tag \${IMAGE_TAG_VAL} after 3 attempts\"
+                echo \"[INFO] Attempted image: \${FRONTEND_IMAGE}\"
+                echo \"[INFO] Checking available tags...\"
+                docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }} --all-tags 2>&1 | grep -E \"(v[0-9]|latest)\" | head -10 || true
+                exit 1
+              fi
+              echo \"[WARN] Pull failed (attempt \$retry/3), retrying in 10 seconds...\"
+              sleep 10
+            fi
+          done
+
+          # ⭐ 修复：直接使用 tag，不标记为 latest（提升可追溯性和回滚能力）
+          echo \"[INFO] Images pulled successfully with tag: \${IMAGE_TAG_VAL}\"
+          echo \"[INFO] Using tag directly (not latest) for better traceability\"
+
+          # ⭐ 清理可能占用端口80的旧容器
+          echo \"[INFO] Cleaning up old containers that might conflict with port 80...\"
+          docker stop xihong_erp_frontend 2>/dev/null || true
+          docker rm xihong_erp_frontend 2>/dev/null || true
+          PORT_80_CONTAINER=\$(docker ps --format \"{{.Names}}\" --filter \"publish=80\" 2>/dev/null | head -1 || echo \"\")
+          if [ -n \"\${PORT_80_CONTAINER}\" ] && [ \"\${PORT_80_CONTAINER}\" != \"xihong_erp_nginx\" ]; then
+            echo \"[WARN] Found container \${PORT_80_CONTAINER} using port 80, stopping it...\"
+            docker stop \${PORT_80_CONTAINER} 2>/dev/null || true
+          fi
+          echo \"[OK] Cleanup completed\"
+
+          # 使用 docker-compose 部署（生产环境）
+          export APP_ENV=production
+          export COMPOSE_PROJECT_NAME=xihong_erp
+
+          # ⭐ 说明：同步 compose 文件后，docker-compose up -d 会自动检测配置变化
+          # 如果配置有变化（如端口、环境变量等），docker-compose 会自动重新创建容器
+          # 因此不需要手动重新部署，工作流会自动完成部署
+
+          # ⭐ 修复：创建临时 compose 文件，使用 tag 而非 latest
+          echo \"[INFO] Creating temporary docker-compose.deploy.yml...\"
+          # 使用 tag 直接指定镜像（提升可追溯性）
+          # ⭐ 注意：使用 IMAGE_TAG_VAL 变量确保正确展开
+          printf \"services:\\n  backend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:\${IMAGE_TAG_VAL}\\n  frontend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:\${IMAGE_TAG_VAL}\\n    ports: []\\n\" > docker-compose.deploy.yml
+          echo \"[OK] Temporary compose file created with tag: \${IMAGE_TAG_VAL}\"
+
+          # ⭐ 新增：分阶段启动服务（确保 Metabase 在 Nginx 之前启动）
+          echo \"[INFO] 阶段1: 启动基础设施层（PostgreSQL, Redis）...\"
+          if [ -f docker-compose.cloud.yml ]; then
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml --profile production up -d postgres redis
+          else
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production up -d postgres redis
+          fi
+
+          # 等待基础设施健康
+          echo \"[INFO] 等待基础设施服务健康...\"
+          for i in {1..60}; do
+            postgres_ready=\$(docker exec xihong_erp_postgres pg_isready -U erp_user -d xihong_erp 2>/dev/null && echo \"ok\" || echo \"\")
+            redis_ready=\$(docker exec xihong_erp_redis redis-cli -a redis_pass_2025 ping 2>/dev/null | grep -q \"PONG\" && echo \"ok\" || echo \"\")
+            if [ -n \"\${postgres_ready}\" ] && [ -n \"\${redis_ready}\" ]; then
+              echo \"[OK] 基础设施服务已健康\"
+              break
+            fi
+            if [ \$i -eq 60 ]; then
+              echo \"[FAIL] 基础设施服务启动超时\"
+              exit 1
+            fi
+            echo \"等待基础设施... (\$i/60)\"
+            sleep 2
+          done
+
+          # ⭐ 关键：先启动 Metabase（生产必需组件，必须在 Nginx 之前）
+          echo \"[INFO] 阶段2: 启动 Metabase 服务（必须在 Nginx 之前）...\"
+          if [ -f docker-compose.metabase.yml ]; then
+            docker-compose -f docker-compose.metabase.yml --profile production up -d metabase
+            echo \"[INFO] 等待 Metabase 健康（最多60秒）...\"
+            for i in {1..60}; do
+              if docker exec xihong_erp_metabase curl -f http://localhost:3000/api/health > /dev/null 2>&1; then
+                echo \"[OK] Metabase 已健康\"
+                break
+              fi
+              if [ \$i -eq 60 ]; then
+                echo \"[WARN] Metabase 启动超时，但继续部署（Nginx 可能失败）\"
+                docker logs xihong_erp_metabase --tail 30
+              fi
+              echo \"等待 Metabase... (\$i/60)\"
+              sleep 2
+            done
+          else
+            echo \"[FAIL] docker-compose.metabase.yml 不存在，Metabase 是生产必需组件！\"
+            exit 1
+          fi
+
+          # 启动应用层（Backend, Celery）
+          echo \"[INFO] 阶段3: 启动应用层（Backend, Celery）...\"
+          if [ -f docker-compose.cloud.yml ]; then
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d backend celery-worker celery-beat celery-exporter
+          else
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d backend celery-worker celery-beat celery-exporter
+          fi
+
+          # 等待 Backend 健康（Frontend 依赖 Backend）
+          echo \"[INFO] 等待 Backend 健康...\"
+          for i in {1..60}; do
+            if docker exec xihong_erp_backend curl -f http://localhost:8000/health > /dev/null 2>&1; then
+              echo \"[OK] Backend 已健康\"
+              break
+            fi
+            if [ \$i -eq 60 ]; then
+              echo \"[FAIL] Backend 启动超时\"
+              docker logs xihong_erp_backend --tail 50
+              exit 1
+            fi
+            echo \"等待 Backend... (\$i/60)\"
+            sleep 2
+          done
+
+          # 启动前端
+          echo \"[INFO] 阶段4: 启动前端层（Frontend）...\"
+          if [ -f docker-compose.cloud.yml ]; then
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d frontend
+          else
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d frontend
+          fi
+
+          # 等待 Frontend 健康（可选）
+          echo \"[INFO] 等待 Frontend 健康...\"
+          for i in {1..30}; do
+            if docker exec xihong_erp_frontend curl -f http://localhost:80 > /dev/null 2>&1; then
+              echo \"[OK] Frontend 已健康\"
+              break
+            fi
+            echo \"等待 Frontend... (\$i/30)\"
+            sleep 2
+          done
+
+          # ⭐ 关键：最后启动 Nginx（确保所有上游服务已就绪）
+          echo \"[INFO] 阶段5: 启动网关层（Nginx，最后启动）...\"
+          if [ -f docker-compose.cloud.yml ]; then
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d nginx
+          else
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d nginx
+          fi
+
+          echo \"[OK] Docker Compose services started/updated in correct order\"
+
+          # 等待服务启动
+          echo \"[INFO] Waiting for services to start...\"
+          sleep 15
+          echo \"[INFO] Services should be starting now...\"
+
+          # 健康检查（通过容器网络检查，不依赖宿主机端口）
+          echo \"[INFO] Starting backend health check...\"
+          for i in {1..60}; do
+            if docker exec xihong_erp_backend curl -f http://localhost:8000/health > /dev/null 2>&1; then
+              echo \"[OK] Backend health check passed (container internal)\"
+              break
+            fi
+            if [ \$i -eq 60 ]; then
+              echo \"[FAIL] Backend health check failed after 2 minutes\"
+              echo \"[INFO] Checking backend logs...\"
+              docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml logs backend 2>/dev/null || \
+              docker-compose -f docker-compose.yml -f docker-compose.prod.yml logs backend
+              exit 1
+            fi
+            if [ \$((i % 5)) -eq 0 ]; then
+              echo \"[INFO] Waiting for backend... (\$i/60)\"
+            fi
+            sleep 2
+          done
+
+          # 验证前端（通过容器网络检查，不依赖宿主机端口）
+          if docker ps | grep -q xihong_erp_frontend; then
+            echo \"[INFO] Checking frontend health (container internal)...\"
+            for i in {1..30}; do
+              if docker exec xihong_erp_frontend curl -f http://localhost:80 > /dev/null 2>&1; then
+                echo \"[OK] Frontend health check passed (container internal)\"
+                break
+              fi
+              if [ \$i -eq 30 ]; then
+                echo \"[WARN] Frontend health check failed (non-critical)\"
               fi
               sleep 2
             done
-            
-            # 验证前端（通过容器网络检查，不依赖宿主机端口）
-            if docker ps | grep -q xihong_erp_frontend; then
-              echo "[INFO] Checking frontend health (container internal)..."
-              for i in {1..30}; do
-                # ⭐ 修复：通过容器网络检查，不依赖宿主机端口映射
-                if docker exec xihong_erp_frontend curl -f http://localhost:80 > /dev/null 2>&1; then
-                  echo "[OK] Frontend health check passed (container internal)"
-                  break
-                fi
-                if [ $i -eq 30 ]; then
-                  echo "[WARN] Frontend health check failed (non-critical)"
-                fi
-                sleep 2
-              done
-            else
-              echo "[INFO] Frontend container not found, skipping frontend health check"
-            fi
-            
-            # 验证 Nginx（如果部署了 Nginx）
-            if docker ps | grep -q xihong_erp_nginx; then
-              echo "[INFO] Checking Nginx health..."
-              for i in {1..30}; do
-                if curl -f http://localhost/health > /dev/null 2>&1; then
-                  echo "[OK] Nginx health check passed (port 80)"
-                  break
-                fi
-                if [ $i -eq 30 ]; then
-                  echo "[WARN] Nginx health check failed (non-critical)"
-                fi
-                sleep 2
-              done
-            else
-              echo "[INFO] Nginx container not found, skipping Nginx health check"
-            fi
-            
-            echo "[OK] Production deployment completed successfully"
-            echo "Deployed image tag: ${IMAGE_TAG}"
-            
-            # 清理临时文件
-            echo "[INFO] Cleaning up temporary files..."
-            rm -f docker-compose.deploy.yml
-            echo "[OK] Cleanup completed"
-          ENDSSH
+          else
+            echo \"[INFO] Frontend container not found, skipping frontend health check\"
+          fi
+
+          # 验证 Nginx（如果部署了 Nginx）
+          if docker ps | grep -q xihong_erp_nginx; then
+            echo \"[INFO] Checking Nginx health...\"
+            for i in {1..30}; do
+              if curl -f http://localhost/health > /dev/null 2>&1; then
+                echo \"[OK] Nginx health check passed (port 80)\"
+                break
+              fi
+              if [ \$i -eq 30 ]; then
+                echo \"[WARN] Nginx health check failed (non-critical)\"
+              fi
+              sleep 2
+            done
+          else
+            echo \"[INFO] Nginx container not found, skipping Nginx health check\"
+          fi
+
+          echo \"[OK] Production deployment completed successfully\"
+          echo \"Deployed image tag: \${IMAGE_TAG_VAL}\"
+
+          # 清理临时文件
+          echo \"[INFO] Cleaning up temporary files...\"
+          rm -f docker-compose.deploy.yml
+          echo \"[OK] Cleanup completed\"
+          '"
 
       - name: Health check verification
         env:
@@ -349,7 +523,27 @@ jobs:
             exit 0
           fi
 
-          echo "[INFO] Checking production health at: ${PRODUCTION_URL}/health"
+          # ⭐ 修复：域名备案期间，如果配置了 HTTPS 但 SSL 证书未配置，自动降级到 HTTP
+          HEALTH_CHECK_URL="${PRODUCTION_URL}"
+          if [[ "${PRODUCTION_URL}" == https://* ]]; then
+            echo "[INFO] PRODUCTION_URL is HTTPS, attempting HTTPS health check first..."
+            
+            # 先尝试 HTTPS（如果 SSL 已配置）
+            HTTPS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 --connect-timeout 5 ${PRODUCTION_URL}/health 2>/dev/null || echo "000")
+            
+            if [ "${HTTPS_CODE}" = "200" ]; then
+              echo "[OK] HTTPS health check passed, using HTTPS"
+            else
+              # HTTPS 失败，降级到 HTTP（域名备案期间，SSL 证书可能未配置）
+              HTTP_URL="${PRODUCTION_URL/https:\/\//http:\/\/}"
+              echo "[INFO] HTTPS health check failed (HTTP ${HTTPS_CODE}), domain may be in ICP filing process"
+              echo "[INFO] Falling back to HTTP for health check: ${HTTP_URL}/health"
+              echo "[INFO] Note: After ICP filing is completed and SSL certificate is configured, HTTPS will be used"
+              HEALTH_CHECK_URL="${HTTP_URL}"
+            fi
+          fi
+
+          echo "[INFO] Checking production health at: ${HEALTH_CHECK_URL}/health"
 
           # 增加重试机制和详细错误信息
           MAX_RETRIES=5
@@ -359,10 +553,13 @@ jobs:
             echo "[INFO] Health check attempt $i/${MAX_RETRIES}..."
             
             # 使用 curl 检查健康状态，增加超时和详细输出
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 --connect-timeout 10 ${PRODUCTION_URL}/health 2>/dev/null || echo "000")
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 --connect-timeout 10 ${HEALTH_CHECK_URL}/health 2>/dev/null || echo "000")
             
             if [ "${HTTP_CODE}" = "200" ]; then
               echo "[OK] Production health check passed (HTTP ${HTTP_CODE})"
+              if [[ "${HEALTH_CHECK_URL}" == http://* ]] && [[ "${PRODUCTION_URL}" == https://* ]]; then
+                echo "[INFO] Using HTTP during ICP filing period. HTTPS will be enabled after SSL certificate is configured."
+              fi
               exit 0
             else
               echo "[WARN] Health check failed (HTTP ${HTTP_CODE}), attempt $i/${MAX_RETRIES}"
@@ -373,15 +570,19 @@ jobs:
               else
                 echo "[FAIL] Production health check failed after ${MAX_RETRIES} attempts"
                 echo "[INFO] Final HTTP Status Code: ${HTTP_CODE}"
+                echo "[INFO] Health Check URL used: ${HEALTH_CHECK_URL}/health"
+                echo "[INFO] Original PRODUCTION_URL: ${PRODUCTION_URL}"
                 echo "[INFO] Please check:"
                 echo "  1. Is the production URL correct? (${PRODUCTION_URL})"
                 echo "  2. Is the service running and accessible?"
                 echo "  3. Is the /health endpoint responding?"
                 echo "  4. Check server logs: docker logs xihong_erp_backend"
+                echo "  5. If domain is in ICP filing process, ensure DNS points to server IP"
+                echo "  6. Check server firewall/security group allows port 80 (HTTP)"
                 
                 # 尝试获取更多诊断信息
                 echo "[INFO] Attempting to get more diagnostic information..."
-                curl -v --max-time 10 ${PRODUCTION_URL}/health 2>&1 | head -20 || true
+                curl -v --max-time 10 ${HEALTH_CHECK_URL}/health 2>&1 | head -20 || true
                 
                 exit 1
               fi
@@ -401,25 +602,27 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
+          # ⭐ 修复：避免 heredoc 语法问题，使用 bash -c 执行远程命令
           ssh -o StrictHostKeyChecking=no \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
-              ${PRODUCTION_USER}@${PRODUCTION_HOST} << ENDSSH
-            set -e
-            cd ${PRODUCTION_PATH}
-            
-            echo "[WARNING] Deployment failed, attempting rollback..."
-            
-            # 查找上一个成功的部署备份
-            LAST_BACKUP=\$(ls -td backups/pre_deploy_* 2>/dev/null | head -1)
-            if [ -n "\$LAST_BACKUP" ]; then
-              echo "Found backup: \$LAST_BACKUP"
-              # 这里可以实现回滚逻辑（恢复配置、拉取上一个镜像等）
-              echo "[WARNING] Manual rollback required. Check backup: \$LAST_BACKUP"
-            else
-              echo "[WARNING] No backup found for rollback"
-            fi
-          ENDSSH
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+              "bash -c '
+              set -e
+              cd \"${PRODUCTION_PATH}\"
+              
+              echo \"[WARNING] Deployment failed, attempting rollback...\"
+              
+              # 查找上一个成功的部署备份
+              LAST_BACKUP=\$(ls -td backups/pre_deploy_* 2>/dev/null | head -1)
+              if [ -n \"\${LAST_BACKUP}\" ]; then
+                echo \"Found backup: \${LAST_BACKUP}\"
+                # 这里可以实现回滚逻辑（恢复配置、拉取上一个镜像等）
+                echo \"[WARNING] Manual rollback required. Check backup: \${LAST_BACKUP}\"
+              else
+                echo \"[WARNING] No backup found for rollback\"
+              fi
+              '"
 
       - name: Send deployment notification
         if: always()

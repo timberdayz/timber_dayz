@@ -189,9 +189,13 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # ⭐ 修复：Nginx 依赖 Metabase（生产必需组件，必须在 Metabase 之后启动）
+    # 注意：Metabase 服务在 docker-compose.metabase.yml 中定义，但通过同一网络访问
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
     networks:
       - erp_network
     healthcheck:

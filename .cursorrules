@@ -54,6 +54,7 @@
 - ❌ 使用emoji字符（会导致Windows UnicodeEncodeError）⭐⭐⭐
 - ❌ 全屏loading阻塞整个页面（应使用局部loading）⭐⭐⭐
 - ❌ 一个模块的工作导致全局刷新（应使用局部刷新）⭐⭐⭐
+- ❌ 在GitHub Actions workflow中使用heredoc（`<< ENDSSH`）（会导致变量展开冲突和语法错误）⭐⭐⭐
 
 ### 验证命令（每次提交前必跑）⭐⭐⭐
 ```bash
@@ -76,6 +77,47 @@ python scripts/verify_api_contract_consistency.py
 python scripts/identify_dead_code.py
 # 检查: 未使用路由、独立ORM模型、废弃API调用
 ```
+
+### CI/CD 自动发布规则（v4.20.0）⭐⭐⭐
+**发布流程**：
+- ✅ **开发/测试**：`git push` 到 `main/develop` → 仅构建镜像（不自动部署）
+- ✅ **正式上线**：`git tag vX.Y.Z && git push origin vX.Y.Z` → 自动构建 + 自动部署生产
+- ✅ **手动部署**：GitHub Actions → "Deploy to Production" → 输入 `image_tag` + `confirm=DEPLOY`
+
+**关键规则**：
+- ⭐ **发布入口唯一**：只通过 `push tag (v*)` 自动部署生产（最安全）
+- ⭐ **串行执行**：Deploy 等待 Build 成功后再执行（避免并行竞态）
+- ⭐ **服务启动顺序**：基础设施(PostgreSQL/Redis) → Metabase → 应用层(Backend/Celery) → Frontend → Nginx
+- ⭐ **镜像标签**：生产部署直接使用 `vX.Y.Z` tag（不使用 latest，提升可追溯性）
+- ⭐ **Metabase 必需**：生产必需组件，必须在 Nginx 之前启动（避免 Nginx 启动失败）
+
+**GitHub Actions Workflow 语法规范（v4.20.0）**：⭐⭐⭐
+- ✅ **SSH远程命令**：必须使用 `bash -c '...'` 替代 heredoc（`<< ENDSSH`）
+- ✅ **变量展开控制**：外层双引号展开 GitHub Actions 变量（`${PRODUCTION_PATH}`），内层单引号展开远程变量（`\$retry`）
+- ✅ **转义规则**：远程变量需转义（`\$`、`\"`），本地变量不转义（`${IMAGE_TAG}`）
+- ❌ **禁止heredoc**：`ssh user@host << ENDSSH` 会导致变量展开冲突和语法错误
+- ⭐ **原因**：GitHub Actions 的 YAML 解析和 Shell 的 heredoc 解析冲突，变量展开时机不确定
+
+**正确示例**：
+```yaml
+# ✅ 正确：使用 bash -c，变量作用域清晰
+ssh user@host \
+  "bash -c '
+  cd \"${PRODUCTION_PATH}\"  # GitHub Actions 展开
+  IMAGE_TAG_VAL=\"${IMAGE_TAG}\"  # GitHub Actions 展开
+  docker pull image:\${IMAGE_TAG_VAL}  # 远程展开（需转义 $）
+  '"
+
+# ❌ 错误：使用 heredoc，变量展开冲突
+ssh user@host << 'ENDSSH'
+  cd ${STAGING_PATH}  # 不会展开（单引号阻止）
+  docker pull image:${IMAGE_TAG}  # 不会展开
+ENDSSH
+```
+
+**用户操作变化**：
+- 日常开发：`git push`（不自动部署）
+- 正式上线：`git tag vX.Y.Z && git push origin vX.Y.Z`（自动部署）
 
 ---
 
