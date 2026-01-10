@@ -312,6 +312,17 @@ jobs:
             echo "[WARN] docker-compose.metabase.yml not found (required for production, deployment may fail if Metabase is not configured)"
           fi
 
+          # 5. 上传远程部署脚本（方案A：避免在 workflow 中维护超长 bash -c 片段）
+          echo "[INFO] Uploading deploy_remote_production.sh..."
+          scp -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              scripts/deploy_remote_production.sh ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/deploy_remote_production.sh || {
+            echo "[FAIL] Failed to upload deploy_remote_production.sh"
+            exit 1
+          }
+          echo "[OK] deploy_remote_production.sh uploaded successfully"
+
           echo "[OK] All compose files synced successfully via SCP"
 
       - name: Backup current deployment
@@ -340,383 +351,21 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
-          # [FIX] 避免 heredoc 语法问题，使用 bash -c 执行远程命令
-          # [NOTE] 外层双引号允许本地变量展开（${IMAGE_TAG}），内层单引号中的变量需转义（\$retry）
-          ssh -o StrictHostKeyChecking=no \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=10 \
-              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-          "bash -c '
-            set -e
-          cd \"${PRODUCTION_PATH}\"
-            
-            # 登录到容器仓库
-          echo \"[INFO] Logging in to container registry...\"
-          echo \"${{ secrets.GITHUB_TOKEN }}\" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
-          echo \"[OK] Successfully logged in to container registry\"
-
-          # [FIX] 使用 tag 而非 latest（提升可追溯性）
-          # 拉取指定版本的镜像（添加进度输出、重试机制和容错机制）
-          # [FIX] ${IMAGE_TAG} 在外层双引号中会展开，传递给远程服务器
-          # 在 bash -c 单引号内，先赋值给变量，确保正确使用
-          IMAGE_TAG_VAL=\"${IMAGE_TAG}\"
-          ORIGINAL_REQUESTED_TAG=\"\${IMAGE_TAG_VAL}\"
-          echo \"[INFO] Pulling images with tag: \${IMAGE_TAG_VAL}\"
-
-          # [NOTE] 容错函数：尝试多个 tag 变体（v4.20.4 -> 4.20.4）
-          # [FIX] 移除 2>/dev/null，让 docker pull 的真实错误输出可见（便于诊断网络/权限/tag 问题）
-          pull_image_with_fallback() {
-            local IMAGE_NAME=\$1
-            local PRIMARY_TAG=\$2
-            local FALLBACK_TAG=\"\${PRIMARY_TAG#v}\"
-            local FULL_IMAGE=\"${{ env.REGISTRY }}/\${IMAGE_NAME}:\${PRIMARY_TAG}\"
-            
-            echo \"[INFO] Attempting to pull \${FULL_IMAGE}...\"
-            
-            # 先尝试主 tag（如 v4.20.4）
-            for retry in {1..3}; do
-              echo \"[INFO] Pull attempt \$retry/3 for \${FULL_IMAGE}...\"
-              # [FIX] 移除 2>/dev/null，让错误直接输出到日志
-              # 直接执行 docker pull，让所有输出（包括错误）都显示到日志
-              # 使用 || 捕获失败，同时保持错误输出可见
-              docker pull \${FULL_IMAGE} 2>&1
-              PULL_EXIT_CODE=\$?
-              if [ \${PULL_EXIT_CODE} -eq 0 ]; then
-                echo \"[OK] Image pulled successfully with tag \${PRIMARY_TAG} (attempt \$retry/3)\"
-                echo \"\${PRIMARY_TAG}\"
-                return 0
-              else
-                echo \"[WARN] Pull failed with exit code \${PULL_EXIT_CODE} (attempt \$retry/3)\"
-                echo \"[INFO] Error details shown above. Retrying in 5 seconds...\"
-                if [ \$retry -lt 3 ]; then
-                  sleep 5
-                fi
-              fi
-            done
-            
-            # 如果主 tag 失败，尝试不带 v 前缀的 tag（如 4.20.4）
-            if [ \"\${PRIMARY_TAG}\" != \"\${FALLBACK_TAG}\" ]; then
-              FULL_IMAGE_FALLBACK=\"${{ env.REGISTRY }}/\${IMAGE_NAME}:\${FALLBACK_TAG}\"
-              echo \"[WARN] Primary tag \${PRIMARY_TAG} failed after 3 attempts, trying fallback tag \${FALLBACK_TAG}...\"
-              
-              for retry in {1..3}; do
-                echo \"[INFO] Fallback pull attempt \$retry/3 for \${FULL_IMAGE_FALLBACK}...\"
-                # [FIX] 移除 2>/dev/null，让错误直接输出到日志
-                # 直接执行 docker pull，让所有输出（包括错误）都显示到日志
-                docker pull \${FULL_IMAGE_FALLBACK} 2>&1
-                PULL_EXIT_CODE=\$?
-                if [ \${PULL_EXIT_CODE} -eq 0 ]; then
-                  echo \"[OK] Image pulled successfully with fallback tag \${FALLBACK_TAG} (attempt \$retry/3)\"
-                  echo \"\${FALLBACK_TAG}\"
-                  return 0
-                else
-                  echo \"[WARN] Fallback pull failed with exit code \${PULL_EXIT_CODE} (attempt \$retry/3)\"
-                  echo \"[INFO] Error details shown above. Retrying in 5 seconds...\"
-                  if [ \$retry -lt 3 ]; then
-                    sleep 5
-                  fi
-                fi
-              done
-            fi
-            
-            # 所有尝试都失败
-            echo \"[FAIL] Failed to pull image \${IMAGE_NAME} with both tags \${PRIMARY_TAG} and \${FALLBACK_TAG}\"
-            echo \"[INFO] Checking available tags...\"
-            docker pull ${{ env.REGISTRY }}/\${IMAGE_NAME} --all-tags 2>&1 | grep -E \"(v[0-9]|[0-9]+\.[0-9]|latest)\" | head -10 || true
-            return 1
-          }
-
-          # 拉取 Backend 镜像
-          echo \"[INFO] Pulling backend image...\"
-          BACKEND_TAG=\$(pull_image_with_fallback \"${{ env.IMAGE_NAME_BACKEND }}\" \"\${IMAGE_TAG_VAL}\")
-          if [ \$? -ne 0 ]; then
-            echo \"[FAIL] Backend image pull failed\"
-            exit 1
-          fi
-          echo \"[OK] Backend image tag resolved: \${BACKEND_TAG}\"
-
-          # 拉取 Frontend 镜像
-          echo \"[INFO] Pulling frontend image...\"
-          FRONTEND_TAG=\$(pull_image_with_fallback \"${{ env.IMAGE_NAME_FRONTEND }}\" \"\${IMAGE_TAG_VAL}\")
-          if [ \$? -ne 0 ]; then
-            echo \"[FAIL] Frontend image pull failed\"
-            exit 1
-          fi
-          echo \"[OK] Frontend image tag resolved: \${FRONTEND_TAG}\"
-
-          # [FIX] 使用实际拉取成功的 tag（可能是 PRIMARY_TAG 或 FALLBACK_TAG）
-          IMAGE_TAG_VAL=\"\${BACKEND_TAG}\"
-          echo \"[INFO] Images pulled successfully with resolved tags: Backend=\${BACKEND_TAG}, Frontend=\${FRONTEND_TAG}\"
-          echo \"[INFO] Using resolved tag for deployment (not latest) for better traceability\"
-
-          # [NOTE] 清理可能占用端口80的旧容器
-          echo \"[INFO] Cleaning up old containers that might conflict with port 80...\"
-          docker stop xihong_erp_frontend 2>/dev/null || true
-          docker rm xihong_erp_frontend 2>/dev/null || true
-          PORT_80_CONTAINER=\$(docker ps --format \"{{.Names}}\" --filter \"publish=80\" 2>/dev/null | head -1 || echo \"\")
-          if [ -n \"\${PORT_80_CONTAINER}\" ] && [ \"\${PORT_80_CONTAINER}\" != \"xihong_erp_nginx\" ]; then
-            echo \"[WARN] Found container \${PORT_80_CONTAINER} using port 80, stopping it...\"
-            docker stop \${PORT_80_CONTAINER} 2>/dev/null || true
-          fi
-          echo \"[OK] Cleanup completed\"
-            
-            # 使用 docker-compose 部署（生产环境）
-            export APP_ENV=production
-            export COMPOSE_PROJECT_NAME=xihong_erp
-            
-          # [NOTE] 同步 compose 文件后，docker-compose up -d 会自动检测配置变化
-          # 如果配置有变化（如端口、环境变量等），docker-compose 会自动重新创建容器
-          # 因此不需要手动重新部署，工作流会自动完成部署
-
-          # [FIX] 创建临时 compose 文件，使用实际拉取成功的 tag（可能是 PRIMARY_TAG 或 FALLBACK_TAG）
-          echo \"[INFO] Creating temporary docker-compose.deploy.yml...\"
-          # 使用实际拉取成功的 tag 直接指定镜像（提升可追溯性）
-          # [NOTE] 分别使用 BACKEND_TAG 和 FRONTEND_TAG，因为它们可能不同
-          printf \"services:\\n  backend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:\${BACKEND_TAG}\\n  frontend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:\${FRONTEND_TAG}\\n    ports: []\\n\" > docker-compose.deploy.yml
-          echo \"[OK] Temporary compose file created with tags: Backend=\${BACKEND_TAG}, Frontend=\${FRONTEND_TAG}\"
-
-          # [NOTE] 分阶段启动服务（确保 Metabase 在 Nginx 之前启动）
-          echo \"[INFO] 阶段1: 启动基础设施层（PostgreSQL, Redis）...\"
-            if [ -f docker-compose.cloud.yml ]; then
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml --profile production up -d postgres redis
-          else
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production up -d postgres redis
-          fi
-
-          # [FIX] 等待基础设施健康：从服务器 .env 读取环境变量（避免硬编码密码）
-          echo \"[INFO] 等待基础设施服务健康...\"
-          # [FIX] 从服务器 .env 加载环境变量（如果存在），支持自定义密码/用户
-          if [ -f \".env\" ]; then
-            echo \"[INFO] 从 .env 加载环境变量...\"
-            set -a
-            . ./.env
-            set +a
-            echo \"[INFO] 已加载环境变量：POSTGRES_USER=\${POSTGRES_USER:-erp_user}, POSTGRES_DB=\${POSTGRES_DB:-xihong_erp}, REDIS_PASSWORD=\${REDIS_PASSWORD:+***已设置}\"
-          else
-            echo \"[WARN] .env 文件不存在，使用默认值\"
-          fi
-
-          # [FIX] 使用环境变量（如果未设置则使用默认值）
-          POSTGRES_USER_VAL=\"\${POSTGRES_USER:-erp_user}\"
-          POSTGRES_DB_VAL=\"\${POSTGRES_DB:-xihong_erp}\"
-          REDIS_PASSWORD_VAL=\"\${REDIS_PASSWORD:-redis_pass_2025}\"
-
-          # [FIX] 清理环境变量中可能的换行符（Windows CRLF 兼容性）
-          # 防止 .env 文件是 Windows 格式（CRLF）时，变量值包含 \\r 导致连接失败
-          # 注意：密码不使用 xargs，避免处理空格；用户名和数据库名使用 xargs 清理首尾空格
-          POSTGRES_USER_VAL=\$(echo \"\${POSTGRES_USER_VAL}\" | tr -d '\\r' | tr -d '\\n' | xargs)
-          POSTGRES_DB_VAL=\$(echo \"\${POSTGRES_DB_VAL}\" | tr -d '\\r' | tr -d '\\n' | xargs)
-          REDIS_PASSWORD_VAL=\$(echo \"\${REDIS_PASSWORD_VAL}\" | tr -d '\\r' | tr -d '\\n')
-
-          for i in {1..60}; do
-            # [FIX] 移除 2>/dev/null，让 PostgreSQL 错误可见
-            postgres_output=\$(docker exec xihong_erp_postgres pg_isready -U \"\${POSTGRES_USER_VAL}\" -d \"\${POSTGRES_DB_VAL}\" 2>&1)
-            postgres_exit_code=\$?
-            if [ \${postgres_exit_code} -eq 0 ]; then
-              postgres_ready=\"ok\"
-            else
-              postgres_ready=\"\"
-              if [ \$i -eq 1 ] || [ \$((i % 10)) -eq 0 ]; then
-                echo \"[WARN] PostgreSQL 健康检查失败 (attempt \$i/60): \${postgres_output}\"
-              fi
-            fi
-            
-            # [FIX] 移除 2>/dev/null，让 Redis 错误可见（WRONGPASS 等）
-            redis_output=\$(docker exec xihong_erp_redis redis-cli -a \"\${REDIS_PASSWORD_VAL}\" ping 2>&1)
-            if echo \"\${redis_output}\" | grep -q \"^PONG\"; then
-              redis_ready=\"ok\"
-            else
-              redis_ready=\"\"
-              if [ \$i -eq 1 ] || [ \$((i % 10)) -eq 0 ]; then
-                echo \"[WARN] Redis 健康检查失败 (attempt \$i/60): \${redis_output}\"
-                # [FIX] 如果检测到 WRONGPASS 错误，给出明确提示
-                if echo \"\${redis_output}\" | grep -qi \"WRONGPASS\|NOAUTH\"; then
-                  echo \"[ERROR] Redis 密码错误！请检查服务器 .env 中的 REDIS_PASSWORD 是否与 docker-compose.prod.yml 中配置一致\"
-                  echo \"[INFO] 当前使用的密码变量: REDIS_PASSWORD=***\"
-                fi
-              fi
-            fi
-            
-            if [ -n \"\${postgres_ready}\" ] && [ -n \"\${redis_ready}\" ]; then
-              echo \"[OK] 基础设施服务已健康 (PostgreSQL: \${POSTGRES_USER_VAL}@\${POSTGRES_DB_VAL}, Redis: 已认证)\"
-              break
-            fi
-            
-            if [ \$i -eq 60 ]; then
-              echo \"[FAIL] 基础设施服务启动超时（60次检查，共120秒）\"
-              echo \"[INFO] 诊断信息：\"
-              echo \"  - PostgreSQL 用户: \${POSTGRES_USER_VAL}, 数据库: \${POSTGRES_DB_VAL}\"
-              echo \"  - Redis 密码变量: REDIS_PASSWORD=***\"
-              echo \"[INFO] 容器状态：\"
-              docker ps --format \"table {{.Names}}\\t{{.Status}}\" | grep -E \"xihong_erp_(postgres|redis)\" || echo \"  容器未找到\"
-              echo \"[INFO] 容器日志（最后30行）：\"
-              docker logs xihong_erp_postgres --tail 30 2>&1 | sed 's/^/  [PostgreSQL] /' || echo \"  无法获取 PostgreSQL 日志\"
-              docker logs xihong_erp_redis --tail 30 2>&1 | sed 's/^/  [Redis] /' || echo \"  无法获取 Redis 日志\"
-              exit 1
-            fi
-            
-            echo \"等待基础设施... (\$i/60)\"
-            sleep 2
-          done
-
-          # [NOTE] 关键：在启动应用服务之前执行数据库迁移，确保表结构与当前版本一致
-          echo \"[INFO] 阶段2: 执行数据库迁移（Alembic upgrade head）...\"
-          if [ -f docker-compose.cloud.yml ]; then
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production run --rm --no-deps backend alembic upgrade head || {
-              echo \"[FAIL] 数据库迁移失败（alembic upgrade head）\"
-              exit 1
-            }
-          else
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production run --rm --no-deps backend alembic upgrade head || {
-              echo \"[FAIL] 数据库迁移失败（alembic upgrade head）\"
-              exit 1
-            }
-          fi
-          echo \"[OK] 数据库迁移完成\"
-            
-          # [NOTE] 关键：先启动 Metabase（生产必需组件，必须在 Nginx 之前）
-          echo \"[INFO] 阶段3: 启动 Metabase 服务（必须在 Nginx 之前）...\"
-          if [ -f docker-compose.metabase.yml ]; then
-            docker-compose -f docker-compose.metabase.yml --profile production up -d metabase
-            echo \"[INFO] 等待 Metabase 健康（最多60秒）...\"
-            for i in {1..60}; do
-              if docker exec xihong_erp_metabase curl -f http://localhost:3000/api/health > /dev/null 2>&1; then
-                echo \"[OK] Metabase 已健康\"
-                break
-              fi
-              if [ \$i -eq 60 ]; then
-                echo \"[WARN] Metabase 启动超时，但继续部署（Nginx 可能失败）\"
-                docker logs xihong_erp_metabase --tail 30
-              fi
-              echo \"等待 Metabase... (\$i/60)\"
-              sleep 2
-            done
-          else
-            echo \"[FAIL] docker-compose.metabase.yml 不存在，Metabase 是生产必需组件！\"
-            exit 1
-          fi
-
-          # 启动应用层（Backend, Celery）
-          echo \"[INFO] 阶段4: 启动应用层（Backend, Celery）...\"
-          if [ -f docker-compose.cloud.yml ]; then
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d backend celery-worker celery-beat celery-exporter
-          else
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d backend celery-worker celery-beat celery-exporter
-          fi
-
-          # 等待 Backend 健康（Frontend 依赖 Backend）
-          echo \"[INFO] 等待 Backend 健康...\"
-          for i in {1..60}; do
-            if docker exec xihong_erp_backend curl -f http://localhost:8000/health > /dev/null 2>&1; then
-              echo \"[OK] Backend 已健康\"
-              break
-            fi
-            if [ \$i -eq 60 ]; then
-              echo \"[FAIL] Backend 启动超时\"
-              docker logs xihong_erp_backend --tail 50
-              exit 1
-            fi
-            echo \"等待 Backend... (\$i/60)\"
-            sleep 2
-          done
-
-          # 启动前端
-          echo \"[INFO] 阶段4: 启动前端层（Frontend）...\"
-          if [ -f docker-compose.cloud.yml ]; then
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d frontend
-          else
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d frontend
-          fi
-
-          # 等待 Frontend 健康（可选）
-          echo \"[INFO] 等待 Frontend 健康...\"
-          for i in {1..30}; do
-            if docker exec xihong_erp_frontend curl -f http://localhost:80 > /dev/null 2>&1; then
-              echo \"[OK] Frontend 已健康\"
-              break
-            fi
-            echo \"等待 Frontend... (\$i/30)\"
-            sleep 2
-          done
-
-          # [NOTE] 关键：最后启动 Nginx（确保所有上游服务已就绪）
-          echo \"[INFO] 阶段5: 启动网关层（Nginx，最后启动）...\"
-          if [ -f docker-compose.cloud.yml ]; then
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d nginx
-          else
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d nginx
-          fi
-
-          echo \"[OK] Docker Compose services started/updated in correct order\"
-
-          # 等待服务启动
-          echo \"[INFO] Waiting for services to start...\"
-          sleep 15
-          echo \"[INFO] Services should be starting now...\"
-
-          # 健康检查（通过容器网络检查，不依赖宿主机端口）
-          echo \"[INFO] Starting backend health check...\"
-          for i in {1..60}; do
-            if docker exec xihong_erp_backend curl -f http://localhost:8000/health > /dev/null 2>&1; then
-              echo \"[OK] Backend health check passed (container internal)\"
-              break
-            fi
-            if [ \$i -eq 60 ]; then
-              echo \"[FAIL] Backend health check failed after 2 minutes\"
-              echo \"[INFO] Checking backend logs...\"
-                docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml logs backend 2>/dev/null || \
-                docker-compose -f docker-compose.yml -f docker-compose.prod.yml logs backend
-                exit 1
-              fi
-            if [ \$((i % 5)) -eq 0 ]; then
-              echo \"[INFO] Waiting for backend... (\$i/60)\"
-            fi
-            sleep 2
-          done
-
-          # 验证前端（通过容器网络检查，不依赖宿主机端口）
-          if docker ps | grep -q xihong_erp_frontend; then
-            echo \"[INFO] Checking frontend health (container internal)...\"
-            for i in {1..30}; do
-              if docker exec xihong_erp_frontend curl -f http://localhost:80 > /dev/null 2>&1; then
-                echo \"[OK] Frontend health check passed (container internal)\"
-                break
-              fi
-              if [ \$i -eq 30 ]; then
-                echo \"[WARN] Frontend health check failed (non-critical)\"
-              fi
-              sleep 2
-            done
-          else
-            echo \"[INFO] Frontend container not found, skipping frontend health check\"
-          fi
-            
-          # 验证 Nginx（如果部署了 Nginx）
-          if docker ps | grep -q xihong_erp_nginx; then
-            echo \"[INFO] Checking Nginx health...\"
-              for i in {1..30}; do
-              if curl -f http://localhost/health > /dev/null 2>&1; then
-                echo \"[OK] Nginx health check passed (port 80)\"
-                  break
-                fi
-              if [ \$i -eq 30 ]; then
-                echo \"[WARN] Nginx health check failed (non-critical)\"
-                fi
-                sleep 2
-              done
-          else
-            echo \"[INFO] Nginx container not found, skipping Nginx health check\"
-            fi
-            
-          echo \"[OK] Production deployment completed successfully\"
-          echo \"Deployed image tags: Backend=\${BACKEND_TAG}, Frontend=\${FRONTEND_TAG}\"
-          echo \"Original requested tag: \${ORIGINAL_REQUESTED_TAG}\"
-            
-            # 清理临时文件
-          echo \"[INFO] Cleaning up temporary files...\"
-          rm -f docker-compose.deploy.yml
-          echo \"[OK] Cleanup completed\"
-          '"
+          # [FIX] 方案A：部署逻辑统一封装到脚本，避免超长 bash -c 片段导致引号/换行问题
+          # 通过 stdin 传递 token，避免把 token 写进远程命令行参数
+          printf '%s\n' "${{ secrets.GITHUB_TOKEN }}" | ssh -o StrictHostKeyChecking=no \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+            "bash -c 'set -e; cd \"${PRODUCTION_PATH}\"; \
+              read -r GHCR_TOKEN; export GHCR_TOKEN; \
+              chmod +x ./deploy_remote_production.sh; \
+              export GHCR_REGISTRY=\"${{ env.REGISTRY }}\"; \
+              export GHCR_USER=\"${{ github.actor }}\"; \
+              export IMAGE_NAME_BACKEND=\"${{ env.IMAGE_NAME_BACKEND }}\"; \
+              export IMAGE_NAME_FRONTEND=\"${{ env.IMAGE_NAME_FRONTEND }}\"; \
+              export IMAGE_TAG=\"${IMAGE_TAG}\"; \
+              bash ./deploy_remote_production.sh'"
 
   deploy-manual:
     name: Deploy to Production (Manual)
@@ -790,6 +439,15 @@ jobs:
               exit 1
             }
           fi
+
+          # 同步远程部署脚本（方案A：deploy-tag 与 deploy-manual 共用同一套部署逻辑）
+          scp -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              scripts/deploy_remote_production.sh ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/deploy_remote_production.sh || {
+            echo "[FAIL] Failed to upload deploy_remote_production.sh"
+            exit 1
+          }
           echo "[OK] All compose files synced successfully via SCP"
 
       - name: Backup current deployment
@@ -817,34 +475,20 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
-          ssh -o StrictHostKeyChecking=no \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=10 \
-              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-          "bash -c '
-          set -e
-          cd \"${PRODUCTION_PATH}\"
-          echo \"[INFO] Logging in to container registry...\"
-          echo \"${{ secrets.GITHUB_TOKEN }}\" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
-          echo \"[OK] Logged in\"
-          IMAGE_TAG_VAL=\"${IMAGE_TAG}\"
-          ORIGINAL_REQUESTED_TAG=\"${IMAGE_TAG}\"
-          echo \"[INFO] Pulling images with tag: ${IMAGE_TAG_VAL}\"
-          BACKEND_IMAGE=\"${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG_VAL}\"
-          FRONTEND_IMAGE=\"${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG_VAL}\"
-          docker pull ${BACKEND_IMAGE}
-          docker pull ${FRONTEND_IMAGE}
-          echo \"[OK] Images pulled\"
-          printf \"services:\\n  backend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG_VAL}\\n  frontend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG_VAL}\\n    ports: []\\n\" > docker-compose.deploy.yml
-          if [ -f docker-compose.cloud.yml ]; then
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d
-          else
-            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d
-          fi
-          echo \"[OK] Production deployment completed successfully\"
-          echo \"Original requested tag: ${ORIGINAL_REQUESTED_TAG}\"
-            rm -f docker-compose.deploy.yml
-          '"
+          # [FIX] 方案A：与 deploy-tag 使用同一脚本，确保手动部署/回滚路径与自动发布一致
+          printf '%s\n' "${{ secrets.GITHUB_TOKEN }}" | ssh -o StrictHostKeyChecking=no \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+            "bash -c 'set -e; cd \"${PRODUCTION_PATH}\"; \
+              read -r GHCR_TOKEN; export GHCR_TOKEN; \
+              chmod +x ./deploy_remote_production.sh; \
+              export GHCR_REGISTRY=\"${{ env.REGISTRY }}\"; \
+              export GHCR_USER=\"${{ github.actor }}\"; \
+              export IMAGE_NAME_BACKEND=\"${{ env.IMAGE_NAME_BACKEND }}\"; \
+              export IMAGE_NAME_FRONTEND=\"${{ env.IMAGE_NAME_FRONTEND }}\"; \
+              export IMAGE_TAG=\"${IMAGE_TAG}\"; \
+              bash ./deploy_remote_production.sh'"
 
       - name: Health check verification
         env:
