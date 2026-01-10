@@ -155,15 +155,55 @@ async def lifespan(app: FastAPI):
             logger.error(f"[ERROR] 数据库连接失败: {e}")
             raise
         
-        # 3. 数据库表初始化（<3秒）
+        # 3. 数据库表验证（<3秒）
+        # [SCHEMA MIGRATION] 生产环境：只验证，不创建；开发环境：可以使用 init_db()
         step_start = time.time()
         try:
-            init_db()  # 创建缺失的表
-            startup_metrics["table_init"] = time.time() - step_start
-            logger.info(f"[OK] 数据库表初始化完成 ({startup_metrics['table_init']:.2f}秒)")
+            if settings.ENVIRONMENT == "production":
+                # 生产环境：验证表结构完整性，不创建表
+                from backend.models.database import verify_schema_completeness
+                
+                result = verify_schema_completeness()
+                
+                if not result["all_tables_exist"]:
+                    missing_tables = result["missing_tables"][:10]
+                    logger.error(
+                        f"[ERROR] 生产环境表结构不完整！缺失表 ({len(result['missing_tables'])} 张): "
+                        f"{', '.join(missing_tables)}"
+                    )
+                    if len(result["missing_tables"]) > 10:
+                        logger.error(f"[ERROR] ... 还有 {len(result['missing_tables']) - 10} 张表缺失")
+                    logger.error("[ERROR] 请运行: alembic upgrade head")
+                    raise RuntimeError(f"Schema incompleteness: {len(result['missing_tables'])} tables missing")
+                
+                if result["migration_status"] not in ["up_to_date", "not_initialized"]:
+                    logger.error(
+                        f"[ERROR] Alembic 迁移状态异常: {result['migration_status']}"
+                    )
+                    logger.error(f"[ERROR] 当前版本: {result.get('current_revision', 'N/A')}")
+                    logger.error(f"[ERROR] 最新版本: {result.get('head_revision', 'N/A')}")
+                    logger.error("[ERROR] 请运行: alembic upgrade head")
+                    raise RuntimeError(f"Migration status invalid: {result['migration_status']}")
+                
+                startup_metrics["table_init"] = time.time() - step_start
+                logger.info(
+                    f"[OK] 数据库表验证通过 ({result['actual_table_count']} 张表, "
+                    f"{startup_metrics['table_init']:.2f}秒)"
+                )
+            else:
+                # 开发环境：可以使用 init_db()，但记录警告
+                init_db()
+                startup_metrics["table_init"] = time.time() - step_start
+                logger.info(f"[OK] 数据库表初始化完成（开发模式） ({startup_metrics['table_init']:.2f}秒)")
         except Exception as e:
             startup_metrics["table_init"] = time.time() - step_start
-            logger.warning(f"[WARN] 数据库表初始化部分失败: {e}")
+            if settings.ENVIRONMENT == "production":
+                # 生产环境必须失败，不继续启动
+                logger.error(f"[ERROR] 数据库验证失败: {e}")
+                raise
+            else:
+                # 开发环境：仅警告
+                logger.warning(f"[WARN] 数据库表初始化部分失败: {e}")
         
         # 4. 连接池预热（<2秒）
         step_start = time.time()

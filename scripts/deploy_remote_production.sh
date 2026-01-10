@@ -198,12 +198,28 @@ EOF
 
 echo "[OK] Temporary compose file created"
 
+# [BOOTSTRAP] Phase 0.5: Clean .env file (remove CRLF and trailing whitespace)
+# Note: PRODUCTION_PATH is the working directory (set by caller or defaults to current directory)
+PRODUCTION_PATH="${PRODUCTION_PATH:-$(pwd)}"
+echo "[INFO] Phase 0.5: Cleaning .env file (removing CRLF and trailing whitespace)..."
+if [ -f "${PRODUCTION_PATH}/.env" ]; then
+  sed -e 's/\r$//' -e 's/[ \t]*$//' "${PRODUCTION_PATH}/.env" > "${PRODUCTION_PATH}/.env.cleaned"
+  echo "[OK] .env file cleaned: ${PRODUCTION_PATH}/.env.cleaned"
+else
+  echo "[WARN] .env file not found at ${PRODUCTION_PATH}/.env, skipping cleaning"
+  # Create empty .env.cleaned to avoid errors in subsequent docker-compose commands
+  touch "${PRODUCTION_PATH}/.env.cleaned"
+fi
+
 # [FIX] 立即验证 YAML 语法（更稳的防护，提前发现问题）
 echo "[INFO] Validating docker-compose config..."
 compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production)
 if [ -f docker-compose.cloud.yml ]; then
   compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production)
 fi
+
+# [BOOTSTRAP] Add --env-file to all docker-compose commands (use cleaned .env file)
+compose_cmd_base=("${compose_cmd_base[@]}" "--env-file" "${PRODUCTION_PATH}/.env.cleaned")
 
 if ! "${compose_cmd_base[@]}" config >/dev/null 2>&1; then
   echo "[FAIL] docker-compose config validation failed"
@@ -258,13 +274,81 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
-echo "[INFO] Phase 2: running DB migrations (alembic upgrade head)..."
+# [SCHEMA MIGRATION] Phase 2: 运行 Alembic 迁移（必须成功）
+echo "[INFO] Phase 2: Running Alembic migrations (alembic upgrade head)..."
 "${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade head
-echo "[OK] DB migrations completed"
+MIGRATION_EXIT_CODE=$?
+
+if [ ${MIGRATION_EXIT_CODE} -ne 0 ]; then
+  echo "[FAIL] Alembic migrations failed (exit code: ${MIGRATION_EXIT_CODE})"
+  echo "[INFO] Deployment blocked due to migration failure"
+  echo "[INFO] Please check migration logs and fix errors before retrying"
+  exit 1
+fi
+echo "[OK] Alembic migrations completed successfully"
+
+# [SCHEMA VERIFICATION] Phase 2.5: 验证表结构完整性（新增）
+echo "[INFO] Phase 2.5: Verifying schema completeness..."
+SCHEMA_VERIFY_OUTPUT=$("${compose_cmd_base[@]}" run --rm --no-deps backend python3 -c "
+from backend.models.database import verify_schema_completeness
+import json
+import sys
+
+try:
+    result = verify_schema_completeness()
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    
+    if not result['all_tables_exist']:
+        print(f\"[FAIL] Missing tables: {', '.join(result['missing_tables'][:10])}\", file=sys.stderr)
+        if len(result['missing_tables']) > 10:
+            print(f\"[FAIL] ... and {len(result['missing_tables']) - 10} more tables\", file=sys.stderr)
+        sys.exit(1)
+    
+    if result['migration_status'] not in ['up_to_date', 'not_initialized']:
+        print(f\"[FAIL] Migration status: {result['migration_status']}\", file=sys.stderr)
+        print(f\"[FAIL] Current revision: {result.get('current_revision', 'N/A')}\", file=sys.stderr)
+        print(f\"[FAIL] Head revision: {result.get('head_revision', 'N/A')}\", file=sys.stderr)
+        sys.exit(1)
+    
+    print(f\"[OK] Schema verification passed: {result['actual_table_count']} tables\", file=sys.stderr)
+    sys.exit(0)
+except Exception as e:
+    print(f\"[FAIL] Schema verification error: {e}\", file=sys.stderr)
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+" 2>&1)
+
+VERIFY_EXIT_CODE=$?
+
+# 显示验证输出（包括错误信息）
+echo "${SCHEMA_VERIFY_OUTPUT}"
+
+if [ ${VERIFY_EXIT_CODE} -ne 0 ]; then
+  echo "[FAIL] Schema verification failed (exit code: ${VERIFY_EXIT_CODE})"
+  echo "[INFO] Deployment blocked due to schema incompleteness"
+  echo "[INFO] Please check migration logs and verify all tables are created"
+  exit 1
+fi
+
+echo "[OK] Schema verification completed successfully"
+
+# [BOOTSTRAP] Phase 2.5: Bootstrap initialization (after migrations, before application layer)
+echo "[INFO] Phase 2.5: Running production bootstrap..."
+"${compose_cmd_base[@]}" run --rm --no-deps backend python3 /app/scripts/bootstrap_production.py
+if [ $? -ne 0 ]; then
+  echo "[FAIL] Bootstrap execution failed, deployment blocked"
+  echo "[INFO] Bootstrap failure diagnostics (without sensitive information):"
+  echo "  - Check bootstrap script logs above for details"
+  echo "  - Verify environment variables in .env file"
+  echo "  - Check database connection settings"
+  exit 1
+fi
+echo "[OK] Bootstrap completed successfully"
 
 echo "[INFO] Phase 3: starting Metabase (required before Nginx)..."
 if [ -f docker-compose.metabase.yml ]; then
-  docker-compose -f docker-compose.metabase.yml --profile production up -d metabase
+  docker-compose -f docker-compose.metabase.yml --env-file "${PRODUCTION_PATH}/.env.cleaned" --profile production up -d metabase
   # Do not require curl inside container; just ensure it's running.
   sleep 5
   if docker ps --format "{{.Names}}" | grep -q "^xihong_erp_metabase$"; then
@@ -334,5 +418,10 @@ fi
 
 echo "[INFO] Cleaning up temporary files..."
 rm -f docker-compose.deploy.yml || true
+# [BOOTSTRAP] Clean up .env.cleaned file after successful deployment
+if [ -f "${PRODUCTION_PATH}/.env.cleaned" ]; then
+  rm -f "${PRODUCTION_PATH}/.env.cleaned"
+  echo "[OK] Cleaned up .env.cleaned file"
+fi
 echo "[OK] Deployment completed. Tags: Backend=${BACKEND_TAG}, Frontend=${FRONTEND_TAG}"
 

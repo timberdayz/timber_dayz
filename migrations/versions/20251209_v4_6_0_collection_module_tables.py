@@ -19,7 +19,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = 'collection_module_v460'
-down_revision = None  # 独立迁移，不依赖其他迁移
+down_revision = '20251205_153442'  # 前一个迁移：v4_16_0_add_analytics_and_sub_domain_tables
 branch_labels = None
 depends_on = None
 

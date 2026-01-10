@@ -145,15 +145,45 @@ git push origin v4.21.0
 
 #### 2.4 分阶段部署服务
 
+**阶段 0.5：环境变量清洗** ⭐ 新增（v4.21.0+）
+
+```bash
+# 清洗 .env 文件（去除 CRLF 和尾随空格）
+sed -e 's/\r$//' -e 's/[ \t]*$//' "${PRODUCTION_PATH}/.env" > "${PRODUCTION_PATH}/.env.cleaned"
+# 所有后续 docker-compose 命令统一使用 --env-file "${PRODUCTION_PATH}/.env.cleaned"
+```
+
 **阶段 1：基础设施层**
 
 ```bash
 # 启动 PostgreSQL 和 Redis
-docker-compose ... up -d postgres redis
+docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" up -d postgres redis
 # 等待健康检查通过
 ```
 
-**阶段 2：Metabase（生产必需组件）**
+**阶段 2：数据库迁移**
+
+```bash
+# 执行数据库迁移（Alembic）
+docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" run --rm --no-deps backend alembic upgrade head
+# 失败时阻断部署
+```
+
+**阶段 2.5：Bootstrap 初始化** ⭐ 新增（v4.21.0+）
+
+```bash
+# 执行 Day-1 Bootstrap（创建基础角色、可选管理员账号）
+docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" run --rm --no-deps backend \
+  python3 /app/scripts/bootstrap_production.py
+# 失败时阻断部署
+```
+
+**Bootstrap 功能**：
+- 验证环境变量（CRLF检查、默认值检查）
+- 创建基础角色（admin, manager, operator, finance）- 幂等
+- 可选：创建管理员账号（需显式启用，默认关闭）
+
+**阶段 3：Metabase（生产必需组件）**
 
 ```bash
 # 启动 Metabase（必须在 Nginx 之前启动）
@@ -161,19 +191,19 @@ docker-compose -f docker-compose.metabase.yml --profile production up -d metabas
 # 等待健康检查通过（最多60秒）
 ```
 
-**阶段 3：应用层**
+**阶段 4：应用层**
 
 ```bash
 # 启动 Backend、Celery Worker、Celery Beat、Celery Exporter
-docker-compose ... up -d backend celery-worker celery-beat celery-exporter
+docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" up -d backend celery-worker celery-beat celery-exporter
 # 等待 Backend 健康检查通过
 ```
 
-**阶段 4：前端层**
+**阶段 4b：前端层**
 
 ```bash
 # 启动 Frontend
-docker-compose ... up -d frontend
+docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" up -d frontend
 # 等待健康检查通过
 ```
 
@@ -181,8 +211,15 @@ docker-compose ... up -d frontend
 
 ```bash
 # 启动 Nginx（依赖所有上游服务）
-docker-compose ... up -d nginx
+docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" up -d nginx
 # 等待健康检查通过
+```
+
+**部署后清理**：
+
+```bash
+# 部署成功后删除 .env.cleaned（避免敏感信息残留）
+rm -f "${PRODUCTION_PATH}/.env.cleaned"
 ```
 
 #### 2.5 健康检查验证
@@ -217,6 +254,36 @@ docker-compose ... up -d nginx
 | `PRODUCTION_HOST`            | 生产服务器地址               | `134.175.222.171`                        |
 | `PRODUCTION_USER`            | SSH 用户                     | `deploy`                                 |
 | `PRODUCTION_PATH`            | 部署路径                     | `/opt/xihong_erp`                        |
+
+### 服务器端环境变量（.env 文件）
+
+**必需变量**：
+
+```bash
+# 数据库配置
+DATABASE_URL=postgresql://user:password@postgres:5432/xihong_erp
+
+# 安全配置（必须使用强随机值，不能使用默认值）
+SECRET_KEY=your-32-char-random-string  # ⚠️ 不能使用默认值
+JWT_SECRET_KEY=your-32-char-random-string  # ⚠️ 不能使用默认值
+
+# 其他配置...
+```
+
+**Bootstrap 相关变量**（可选）：
+
+```bash
+# 管理员创建（可选，默认关闭）
+BOOTSTRAP_CREATE_ADMIN=false  # 必须显式设置为 true 才会创建
+BOOTSTRAP_ADMIN_USERNAME=admin  # 可选，默认 admin
+BOOTSTRAP_ADMIN_PASSWORD=your-secure-password  # 必须设置（如果启用创建）
+BOOTSTRAP_ADMIN_EMAIL=admin@xihong.com  # 可选，默认 admin@xihong.com
+```
+
+**注意事项**：
+- `.env` 文件会在部署时自动清洗（去除 CRLF 和尾随空格）
+- 所有 secrets 必须来自服务器 `.env` 文件或 secrets 文件，不能硬编码
+- 生产环境禁止使用默认占位符（如 `your-secret-key-change-this`）
 | `PRODUCTION_URL`             | 生产环境 URL（用于健康检查） | `https://www.xihong.site`                |
 | `GITHUB_TOKEN`               | GitHub Token（自动提供）     | -                                        |
 
@@ -224,8 +291,20 @@ docker-compose ... up -d nginx
 
 - [OK] Docker 和 Docker Compose 已安装
 - [OK] 部署用户（`deploy`）在 `docker` 组中
-- [OK] `.env` 文件权限允许部署用户读取
+- [OK] `.env` 文件权限允许部署用户读取（推荐：`600` 或 `640`）
 - [OK] 网络连接正常（可以访问 `ghcr.io` 拉取镜像）
+
+**Secrets 文件权限建议**：
+
+```bash
+# 设置 .env 文件权限（仅所有者可读写）
+chmod 600 .env
+
+# 或使用 secrets 文件（更安全）
+chmod 600 .secrets
+```
+
+**注意**：`.env.cleaned` 文件会在部署时自动创建，部署成功后自动删除。
 
 ---
 

@@ -246,20 +246,130 @@ def init_db():
     """
     初始化数据库（创建所有表）
     
-    注意：所有表定义来自 modules/core/db/schema.py
+    注意：
+    - 生产环境：禁止使用此函数，必须使用 Alembic 迁移（alembic upgrade head）
+    - 开发环境：可以使用此函数快速创建表（但不推荐）
+    - 此函数仅作为辅助，不保证表结构完整性和迁移历史
+    
+    推荐方式：使用 Alembic 迁移
     """
+    import os
+    
+    # 生产环境禁止使用
+    environment = os.getenv("ENVIRONMENT", "").lower()
+    if environment == "production":
+        logger.warning(
+            "[WARN] 生产环境禁止使用 init_db()，请使用 Alembic 迁移: alembic upgrade head"
+        )
+        return
+    
+    # 开发环境：仅作为快速原型，记录警告
+    logger.warning(
+        "[WARN] 使用 init_db() 创建表，这不是推荐方式。"
+        "请使用 Alembic 迁移: alembic upgrade head"
+    )
+    
+    missing_tables = []
+    created_tables = []
+    
     try:
+        # 执行前检查
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        existing_before = set(inspector.get_table_names())
+        
+        # 创建表
         Base.metadata.create_all(bind=engine)
-        logger.info("数据库表初始化完成")
+        
+        # 执行后验证
+        existing_after = set(inspector.get_table_names())
+        expected_tables = set(Base.metadata.tables.keys())
+        
+        created_tables = existing_after - existing_before
+        missing_tables = expected_tables - existing_after
+        
+        if missing_tables:
+            logger.error(
+                f"[ERROR] 以下表创建失败: {', '.join(sorted(missing_tables))}"
+            )
+            # 开发环境也抛出错误，让开发者知道问题
+            raise RuntimeError(f"Missing tables: {', '.join(sorted(missing_tables))}")
+        
+        logger.info(
+            f"[OK] 数据库表初始化完成（开发模式）: 创建 {len(created_tables)} 张表, "
+            f"总计 {len(existing_after)} 张表"
+        )
+            
     except Exception as e:
-        # PostgreSQL索引已存在时的错误（DuplicateTable/DuplicateObject）
-        # 这些错误不影响功能，只是警告
         error_str = str(e)
-        if "已经存在" in error_str or "already exists" in error_str.lower() or "duplicate" in error_str.lower():
-            logger.warning(f"数据库表/索引可能已存在，跳过创建: {e}")
+        # 区分真正的错误和可以忽略的重复错误
+        if "already exists" in error_str.lower() or "duplicate" in error_str.lower():
+            # 索引/约束重复是可以接受的
+            logger.warning(f"数据库对象可能已存在，跳过创建: {e}")
         else:
-            # 其他错误需要抛出
+            # 其他错误必须抛出
+            logger.error(f"[ERROR] init_db() 失败: {e}")
             raise
+
+
+def verify_schema_completeness():
+    """
+    验证数据库表结构完整性（生产环境必须）
+    
+    检查：
+    1. schema.py 中定义的所有表是否都存在
+    2.  Alembic 迁移状态是否与代码一致
+    
+    Returns:
+        dict: {
+            "all_tables_exist": bool,
+            "missing_tables": List[str],
+            "migration_status": str,
+            "current_revision": str,
+            "head_revision": str,
+            "expected_table_count": int,
+            "actual_table_count": int
+        }
+    """
+    from sqlalchemy import inspect
+    
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    
+    # 获取 schema.py 中定义的所有表
+    expected_tables = set(Base.metadata.tables.keys())
+    
+    missing_tables = expected_tables - existing_tables
+    
+    # 检查 Alembic 版本
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        from alembic.runtime.migration import MigrationContext
+        
+        alembic_cfg = Config("alembic.ini")
+        script = ScriptDirectory.from_config(alembic_cfg)
+        context = MigrationContext.configure(engine.connect())
+        current_rev = context.get_current_revision()
+        head_rev = script.get_current_head()
+        
+        migration_status = "up_to_date" if current_rev == head_rev else "outdated"
+        if current_rev is None:
+            migration_status = "not_initialized"
+    except Exception as e:
+        migration_status = f"error: {str(e)}"
+        current_rev = None
+        head_rev = None
+    
+    return {
+        "all_tables_exist": len(missing_tables) == 0,
+        "missing_tables": sorted(list(missing_tables)),
+        "migration_status": migration_status,
+        "current_revision": current_rev,
+        "head_revision": head_rev,
+        "expected_table_count": len(expected_tables),
+        "actual_table_count": len(existing_tables)
+    }
 
 
 def warm_up_pool(pool_size: int = 10):

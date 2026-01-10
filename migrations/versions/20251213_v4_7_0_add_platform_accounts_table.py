@@ -11,6 +11,12 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
+# revision identifiers, used by Alembic.
+revision = '20251213_platform_accounts'
+down_revision = 'collection_task_granularity_v470'
+branch_labels = None
+depends_on = None
+
 
 def upgrade():
     """创建platform_accounts表"""
@@ -74,8 +80,8 @@ def upgrade():
     op.create_index('ix_platform_accounts_enabled', 'platform_accounts', ['enabled'])
     op.create_index('ix_platform_accounts_shop_type', 'platform_accounts', ['shop_type'])
     
-    print("✅ platform_accounts表创建成功")
-    print("📝 提示：")
+    print("[OK] platform_accounts表创建成功")
+    print("[INFO] 提示：")
     print("   1. 使用前端界面管理账号：/account-management")
     print("   2. 从local_accounts.py导入：POST /api/accounts/import-from-local")
     print("   3. 密码将被加密存储，需配置ACCOUNT_ENCRYPTION_KEY环境变量")
@@ -88,5 +94,5 @@ def downgrade():
     op.drop_index('ix_platform_accounts_parent', table_name='platform_accounts')
     op.drop_index('ix_platform_accounts_platform', table_name='platform_accounts')
     op.drop_table('platform_accounts')
-    print("❌ platform_accounts表已删除")
+    print("[OK] platform_accounts表已删除")
 

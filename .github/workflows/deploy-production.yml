@@ -391,7 +391,7 @@ jobs:
       - name: Determine deploy tag (manual input)
         id: image-tag
         run: |
-          echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
           echo "Deploying with tag: ${{ github.event.inputs.image_tag }}"
 
       - name: Set up SSH
@@ -561,7 +561,7 @@ jobs:
                 curl -v --max-time 10 ${HEALTH_CHECK_URL}/health 2>&1 | head -20 || true
                 
                 exit 1
-          fi
+              fi
             fi
           done
 

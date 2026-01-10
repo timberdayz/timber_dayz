@@ -36,10 +36,11 @@ COPY config /app/config
 COPY migrations /app/migrations
 COPY alembic.ini /app/alembic.ini
 
-# [OPS] 运维脚本：生产环境常用脚本（如创建管理员）
+# [OPS] 运维脚本：生产环境常用脚本（如创建管理员、Bootstrap）
 # 注意：scripts/ 目录内容较多，避免整体 COPY 导致镜像膨胀，按需复制关键脚本
 RUN mkdir -p /app/scripts
 COPY scripts/create_admin_user.py /app/scripts/create_admin_user.py
+COPY scripts/bootstrap_production.py /app/scripts/bootstrap_production.py
 
 # 创建必要的目录
 RUN mkdir -p /app/data /app/logs /app/temp /app/uploads
