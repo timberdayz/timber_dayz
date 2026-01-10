@@ -79,7 +79,7 @@ services:
     restart: always
     environment:
       # 数据库配置
-      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}
+      DATABASE_URL: ${DATABASE_URL}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-erp_user}
@@ -240,7 +240,7 @@ services:
     # - data_processing: 数据处理任务（可选，如果不需要可以移除）
     command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=4
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}
+      DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
       # ⚠️ 重要：Celery 使用 CELERY_BROKER_URL 和 CELERY_RESULT_BACKEND，不是 REDIS_URL
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
@@ -300,7 +300,7 @@ services:
     restart: always
     command: celery -A backend.celery_app beat --loglevel=info
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}
+      DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
       # ⚠️ 重要：Celery 使用 CELERY_BROKER_URL 和 CELERY_RESULT_BACKEND，不是 REDIS_URL
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0

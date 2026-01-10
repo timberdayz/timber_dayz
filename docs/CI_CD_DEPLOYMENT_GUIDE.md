@@ -58,8 +58,9 @@ git push origin v4.21.0
 
 - [OK] GitHub Actions 自动触发 `Deploy to Production` workflow
 - [OK] 在同一个 workflow 内完成：
-  1. **构建阶段**：构建 Backend 和 Frontend 镜像，推送到 `ghcr.io`（标签：`v4.21.0`, `4.21.0` 等）
-  2. **部署阶段**：服务器自动拉取镜像并部署到生产环境
+  1. **验证阶段（发布门禁）**：执行 `Validate Data Flow` 的关键校验（失败会阻断发布）
+  2. **构建阶段**：构建 Backend 和 Frontend 镜像，推送到 `ghcr.io`（标签：`v4.21.0`, `4.21.0` 等）
+  3. **部署阶段**：服务器自动拉取镜像并部署到生产环境
 - [OK] Tag 来源唯一且可靠（直接从 `GITHUB_REF_NAME` 获取，不会出现 `IMAGE_TAG` 为空的问题）
 
 ### 手动部署/回滚（紧急情况）
@@ -221,10 +222,10 @@ docker-compose ... up -d nginx
 
 ### 服务器环境要求
 
-- ✅ Docker 和 Docker Compose 已安装
-- ✅ 部署用户（`deploy`）在 `docker` 组中
-- ✅ `.env` 文件权限允许部署用户读取
-- ✅ 网络连接正常（可以访问 `ghcr.io` 拉取镜像）
+- [OK] Docker 和 Docker Compose 已安装
+- [OK] 部署用户（`deploy`）在 `docker` 组中
+- [OK] `.env` 文件权限允许部署用户读取
+- [OK] 网络连接正常（可以访问 `ghcr.io` 拉取镜像）
 
 ---
 
@@ -318,13 +319,17 @@ docker-compose ... up -d nginx
 
 ```
 T=0s      [Deploy to Production 触发（push tag v4.21.0）]
-          └─ Job: build-and-push
+          ├─ Job: validate（发布门禁）
+          │  ├─ Validate API Contracts
+          │  ├─ Validate Frontend API Methods
+          │  └─ Validate Database Fields
+          └─ Job: build-and-push（依赖 validate）
              ├─ 构建 Backend 镜像（~5-10分钟）
              ├─ 构建 Frontend 镜像（~3-5分钟）
              └─ 推送到 ghcr.io（标签：v4.21.0, 4.21.0, v4.21, 4.21 等）
 
 T=10min   [build-and-push job 成功]
-          └─ Job: deploy-tag（依赖 build-and-push）
+          └─ Job: deploy-tag（依赖 validate + build-and-push）
              ├─ 同步 Compose 文件（~30秒，SCP 上传）
              ├─ 备份当前部署（~10秒）
              ├─ 拉取镜像（~2-5分钟，取决于网络，带容错机制）

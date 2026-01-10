@@ -46,10 +46,44 @@ jobs:
             echo "can_deploy=true" >> $GITHUB_OUTPUT
           fi
 
+  validate:
+    name: Validate Data Flow (Release Gate)
+    runs-on: ubuntu-latest
+    needs: check-config
+    if: ${{ needs.check-config.outputs.can_deploy == 'true' && github.event_name == 'push' }}
+    steps:
+      - name: Checkout code (tag)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Create temp directory
+        run: mkdir -p temp
+
+      # [NOTE] 发布门禁：tag 发布必须通过这些检查；失败会阻断 build 和 deploy
+      - name: Validate API Contracts (Release Gate)
+        run: python scripts/validate_api_contracts.py
+
+      - name: Validate Frontend API Methods (Release Gate)
+        run: python scripts/validate_frontend_api_methods.py
+
+      - name: Validate Database Fields (Release Gate)
+        run: python scripts/validate_database_fields.py
+
   build-and-push:
     name: Build and Push Images (Release Tag)
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    needs: validate
+    if: ${{ github.event_name == 'push' }}
     permissions:
       contents: read
       packages: write
@@ -128,7 +162,7 @@ jobs:
   deploy-tag:
     name: Deploy to Production (Tag Release)
     runs-on: ubuntu-latest
-    needs: [check-config, build-and-push]
+    needs: [check-config, validate, build-and-push]
     if: ${{ needs.check-config.outputs.can_deploy == 'true' && github.event_name == 'push' }}
     environment:
       name: production
@@ -268,6 +302,7 @@ jobs:
           echo \"[INFO] Pulling images with tag: \${IMAGE_TAG_VAL}\"
 
           # [NOTE] 容错函数：尝试多个 tag 变体（v4.20.4 -> 4.20.4）
+          # [FIX] 移除 2>/dev/null，让 docker pull 的真实错误输出可见（便于诊断网络/权限/tag 问题）
           pull_image_with_fallback() {
             local IMAGE_NAME=\$1
             local PRIMARY_TAG=\$2
@@ -278,31 +313,46 @@ jobs:
             
             # 先尝试主 tag（如 v4.20.4）
             for retry in {1..3}; do
-              if docker pull \${FULL_IMAGE} 2>/dev/null; then
+              echo \"[INFO] Pull attempt \$retry/3 for \${FULL_IMAGE}...\"
+              # [FIX] 移除 2>/dev/null，让错误直接输出到日志
+              # 直接执行 docker pull，让所有输出（包括错误）都显示到日志
+              # 使用 || 捕获失败，同时保持错误输出可见
+              docker pull \${FULL_IMAGE} 2>&1
+              PULL_EXIT_CODE=\$?
+              if [ \${PULL_EXIT_CODE} -eq 0 ]; then
                 echo \"[OK] Image pulled successfully with tag \${PRIMARY_TAG} (attempt \$retry/3)\"
                 echo \"\${PRIMARY_TAG}\"
                 return 0
-              fi
-              if [ \$retry -lt 3 ]; then
-                echo \"[WARN] Pull failed (attempt \$retry/3), retrying in 5 seconds...\"
-                sleep 5
+              else
+                echo \"[WARN] Pull failed with exit code \${PULL_EXIT_CODE} (attempt \$retry/3)\"
+                echo \"[INFO] Error details shown above. Retrying in 5 seconds...\"
+                if [ \$retry -lt 3 ]; then
+                  sleep 5
+                fi
               fi
             done
             
             # 如果主 tag 失败，尝试不带 v 前缀的 tag（如 4.20.4）
             if [ \"\${PRIMARY_TAG}\" != \"\${FALLBACK_TAG}\" ]; then
               FULL_IMAGE_FALLBACK=\"${{ env.REGISTRY }}/\${IMAGE_NAME}:\${FALLBACK_TAG}\"
-              echo \"[WARN] Primary tag \${PRIMARY_TAG} failed, trying fallback tag \${FALLBACK_TAG}...\"
+              echo \"[WARN] Primary tag \${PRIMARY_TAG} failed after 3 attempts, trying fallback tag \${FALLBACK_TAG}...\"
               
               for retry in {1..3}; do
-                if docker pull \${FULL_IMAGE_FALLBACK} 2>/dev/null; then
+                echo \"[INFO] Fallback pull attempt \$retry/3 for \${FULL_IMAGE_FALLBACK}...\"
+                # [FIX] 移除 2>/dev/null，让错误直接输出到日志
+                # 直接执行 docker pull，让所有输出（包括错误）都显示到日志
+                docker pull \${FULL_IMAGE_FALLBACK} 2>&1
+                PULL_EXIT_CODE=\$?
+                if [ \${PULL_EXIT_CODE} -eq 0 ]; then
                   echo \"[OK] Image pulled successfully with fallback tag \${FALLBACK_TAG} (attempt \$retry/3)\"
                   echo \"\${FALLBACK_TAG}\"
                   return 0
-                fi
-                if [ \$retry -lt 3 ]; then
-                  echo \"[WARN] Fallback pull failed (attempt \$retry/3), retrying in 5 seconds...\"
-                  sleep 5
+                else
+                  echo \"[WARN] Fallback pull failed with exit code \${PULL_EXIT_CODE} (attempt \$retry/3)\"
+                  echo \"[INFO] Error details shown above. Retrying in 5 seconds...\"
+                  if [ \$retry -lt 3 ]; then
+                    sleep 5
+                  fi
                 fi
               done
             fi
@@ -371,19 +421,71 @@ jobs:
             docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production up -d postgres redis
           fi
 
-          # 等待基础设施健康
+          # [FIX] 等待基础设施健康：从服务器 .env 读取环境变量（避免硬编码密码）
           echo \"[INFO] 等待基础设施服务健康...\"
+          # [FIX] 从服务器 .env 加载环境变量（如果存在），支持自定义密码/用户
+          if [ -f \".env\" ]; then
+            echo \"[INFO] 从 .env 加载环境变量...\"
+            set -a
+            . ./.env
+            set +a
+            echo \"[INFO] 已加载环境变量：POSTGRES_USER=\${POSTGRES_USER:-erp_user}, POSTGRES_DB=\${POSTGRES_DB:-xihong_erp}, REDIS_PASSWORD=\${REDIS_PASSWORD:+***已设置}\"
+          else
+            echo \"[WARN] .env 文件不存在，使用默认值\"
+          fi
+          
+          # [FIX] 使用环境变量（如果未设置则使用默认值）
+          POSTGRES_USER_VAL=\"\${POSTGRES_USER:-erp_user}\"
+          POSTGRES_DB_VAL=\"\${POSTGRES_DB:-xihong_erp}\"
+          REDIS_PASSWORD_VAL=\"\${REDIS_PASSWORD:-redis_pass_2025}\"
+          
           for i in {1..60}; do
-            postgres_ready=\$(docker exec xihong_erp_postgres pg_isready -U erp_user -d xihong_erp 2>/dev/null && echo \"ok\" || echo \"\")
-            redis_ready=\$(docker exec xihong_erp_redis redis-cli -a redis_pass_2025 ping 2>/dev/null | grep -q \"PONG\" && echo \"ok\" || echo \"\")
+            # [FIX] 移除 2>/dev/null，让 PostgreSQL 错误可见
+            postgres_output=\$(docker exec xihong_erp_postgres pg_isready -U \"\${POSTGRES_USER_VAL}\" -d \"\${POSTGRES_DB_VAL}\" 2>&1)
+            postgres_exit_code=\$?
+            if [ \${postgres_exit_code} -eq 0 ]; then
+              postgres_ready=\"ok\"
+            else
+              postgres_ready=\"\"
+              if [ \$i -eq 1 ] || [ \$((i % 10)) -eq 0 ]; then
+                echo \"[WARN] PostgreSQL 健康检查失败 (attempt \$i/60): \${postgres_output}\"
+              fi
+            fi
+            
+            # [FIX] 移除 2>/dev/null，让 Redis 错误可见（WRONGPASS 等）
+            redis_output=\$(docker exec xihong_erp_redis redis-cli -a \"\${REDIS_PASSWORD_VAL}\" ping 2>&1)
+            if echo \"\${redis_output}\" | grep -q \"^PONG\"; then
+              redis_ready=\"ok\"
+            else
+              redis_ready=\"\"
+              if [ \$i -eq 1 ] || [ \$((i % 10)) -eq 0 ]; then
+                echo \"[WARN] Redis 健康检查失败 (attempt \$i/60): \${redis_output}\"
+                # [FIX] 如果检测到 WRONGPASS 错误，给出明确提示
+                if echo \"\${redis_output}\" | grep -qi \"WRONGPASS\|NOAUTH\"; then
+                  echo \"[ERROR] Redis 密码错误！请检查服务器 .env 中的 REDIS_PASSWORD 是否与 docker-compose.prod.yml 中配置一致\"
+                  echo \"[INFO] 当前使用的密码变量值: REDIS_PASSWORD=\${REDIS_PASSWORD_VAL}\"
+                fi
+              fi
+            fi
+            
             if [ -n \"\${postgres_ready}\" ] && [ -n \"\${redis_ready}\" ]; then
-              echo \"[OK] 基础设施服务已健康\"
+              echo \"[OK] 基础设施服务已健康 (PostgreSQL: \${POSTGRES_USER_VAL}@\${POSTGRES_DB_VAL}, Redis: 已认证)\"
               break
             fi
+            
             if [ \$i -eq 60 ]; then
-              echo \"[FAIL] 基础设施服务启动超时\"
+              echo \"[FAIL] 基础设施服务启动超时（60次检查，共120秒）\"
+              echo \"[INFO] 诊断信息：\"
+              echo \"  - PostgreSQL 用户: \${POSTGRES_USER_VAL}, 数据库: \${POSTGRES_DB_VAL}\"
+              echo \"  - Redis 密码变量: REDIS_PASSWORD=\${REDIS_PASSWORD_VAL}\"
+              echo \"[INFO] 容器状态：\"
+              docker ps --format \"table {{.Names}}\\t{{.Status}}\" | grep -E \"xihong_erp_(postgres|redis)\" || echo \"  容器未找到\"
+              echo \"[INFO] 容器日志（最后30行）：\"
+              docker logs xihong_erp_postgres --tail 30 2>&1 | sed 's/^/  [PostgreSQL] /' || echo \"  无法获取 PostgreSQL 日志\"
+              docker logs xihong_erp_redis --tail 30 2>&1 | sed 's/^/  [Redis] /' || echo \"  无法获取 Redis 日志\"
               exit 1
             fi
+            
             echo \"等待基础设施... (\$i/60)\"
             sleep 2
           done
