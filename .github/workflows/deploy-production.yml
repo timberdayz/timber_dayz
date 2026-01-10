@@ -18,10 +18,11 @@ on:
         description: 'Type "DEPLOY" to confirm production deployment'
         required: true
         type: string
-  # ⭐ 保留：push tag 触发（如果 workflow_run 失败，可以手动触发）
-  push:
-    tags:
-      - "v*"
+
+# ⭐ 新增：并发控制，确保同一时间只有一个生产部署在运行（避免带宽冲突）
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -59,6 +60,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         # ⭐ 修复：workflow_run 触发时，使用触发构建的 ref（tag 或分支）
+        # ⭐ 注意：已移除 push tag 触发，现在只支持 workflow_run 和 workflow_dispatch
         with:
           ref: ${{ github.event.workflow_run.head_ref || github.event.workflow_run.head_branch || github.ref }}
 
@@ -89,6 +91,7 @@ jobs:
       - name: Determine image tag
         id: image-tag
         # ⭐ 修复：workflow_run 且不是 tag 触发时，跳过部署
+        # ⭐ 注意：已移除 push tag 触发，现在只支持 workflow_run 和 workflow_dispatch
         if: github.event_name != 'workflow_run' || steps.check-auto-deploy.outputs.should_deploy == 'true'
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
@@ -108,11 +111,11 @@ jobs:
               echo "[ERROR] Cannot determine tag from ref: ${REF}"
               exit 1
             fi
-          elif [ "${{ github.ref_type }}" == "tag" ]; then
-            # push tag 触发：直接使用标签名
-            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=latest" >> $GITHUB_OUTPUT
+            # ⭐ 移除：push tag 触发已移除，不应该到达这里
+            echo "[ERROR] Unsupported trigger type: ${{ github.event_name }}"
+            echo "[ERROR] Only workflow_run and workflow_dispatch are supported"
+            exit 1
           fi
           echo "Deploying with tag: ${{ steps.image-tag.outputs.tag }}"
 
