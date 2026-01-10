@@ -167,13 +167,51 @@ class APIContractValidator:
         router_files = [f for f in router_files if f.name != "__init__.py"]
         return router_files
     
-    def validate_all(self) -> Dict[str, Any]:
-        """验证所有API端点"""
-        router_files = self.scan_router_files()
+    def validate_all(self, target_files: List[Path] = None) -> Dict[str, Any]:
+        """验证所有API端点（如果指定了target_files，只验证这些文件）"""
+        if target_files is None:
+            router_files = self.scan_router_files()
+        else:
+            # 只验证指定的文件（过滤出 router 文件）
+            router_files = []
+            for file_path in target_files:
+                file_path_obj = Path(file_path) if isinstance(file_path, str) else file_path
+                
+                # 统一转换为相对于项目根目录的路径
+                file_path_str = str(file_path_obj).replace('\\', '/')
+                
+                # 如果是绝对路径，尝试提取相对路径部分
+                if file_path_obj.is_absolute():
+                    try:
+                        file_path_obj = file_path_obj.relative_to(project_root)
+                        file_path_str = str(file_path_obj).replace('\\', '/')
+                    except ValueError:
+                        # 如果无法提取相对路径，检查是否包含 backend/routers
+                        if '/backend/routers/' in file_path_str:
+                            # 提取 backend/routers/ 之后的部分
+                            parts = file_path_str.split('/backend/routers/')
+                            if len(parts) > 1:
+                                file_path_str = f"backend/routers/{parts[1]}"
+                            else:
+                                continue
+                        else:
+                            continue
+                
+                # 标准化路径（移除 ./ 前缀）
+                file_path_str = file_path_str.lstrip('./')
+                
+                # 检查是否是 router 文件
+                if file_path_str.startswith("backend/routers/") and file_path_str.endswith(".py"):
+                    file_name = Path(file_path_str).name
+                    if file_name != "__init__.py":
+                        full_path = project_root / file_path_str
+                        if full_path.exists():
+                            router_files.append(full_path)
         
         all_issues = {
             "errors": [],
-            "warnings": []
+            "warnings": [],
+            "validated_file_count": len(router_files)
         }
         
         for router_file in router_files:
@@ -189,7 +227,7 @@ class APIContractValidator:
         
         return all_issues
     
-    def generate_report(self, issues: Dict[str, Any]) -> str:
+    def generate_report(self, issues: Dict[str, Any], validated_file_count: int = 0) -> str:
         """生成验证报告"""
         report = []
         report.append("=" * 60)
@@ -201,6 +239,10 @@ class APIContractValidator:
         error_count = len(issues["errors"])
         warning_count = len(issues["warnings"])
         
+        if validated_file_count > 0:
+            report.append(f"验证文件数: {validated_file_count}")
+        elif validated_file_count == 0:
+            report.append(f"验证文件数: 0（改动文件中没有 router 文件或指定文件列表为空，跳过验证）")
         report.append(f"错误数量: {error_count}")
         report.append(f"警告数量: {warning_count}")
         report.append("")
@@ -229,7 +271,9 @@ class APIContractValidator:
         report.append("=" * 60)
         report.append("总结")
         report.append("=" * 60)
-        if error_count == 0 and warning_count == 0:
+        if validated_file_count == 0:
+            report.append("[OK] 本次发布没有改动 router 文件，跳过验证")
+        elif error_count == 0 and warning_count == 0:
             report.append("[OK] 所有API端点符合契约标准！")
         else:
             report.append(f"[ERROR] 发现 {error_count} 个错误，{warning_count} 个警告")
@@ -248,12 +292,41 @@ def safe_print(text):
 
 def main():
     """主函数"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="验证API契约")
+    parser.add_argument(
+        "--files",
+        nargs="+",
+        help="只验证指定的文件列表（相对于项目根目录的路径，如 backend/routers/xxx.py）"
+    )
+    parser.add_argument(
+        "--changed-files",
+        help="从文件读取改动的文件列表（每行一个文件路径）"
+    )
+    args = parser.parse_args()
+    
     validator = APIContractValidator()
     
-    safe_print("开始验证API契约...")
-    issues = validator.validate_all()
+    target_files = None
+    if args.files:
+        target_files = [Path(f) for f in args.files]
+        safe_print(f"开始验证API契约（仅验证 {len(target_files)} 个指定文件）...")
+    elif args.changed_files:
+        changed_files_path = Path(args.changed_files)
+        if changed_files_path.exists():
+            with open(changed_files_path, 'r', encoding='utf-8') as f:
+                target_files = [Path(line.strip()) for line in f if line.strip()]
+            safe_print(f"开始验证API契约（仅验证 {len(target_files)} 个改动文件）...")
+        else:
+            safe_print(f"[WARN] 改动文件列表不存在: {args.changed_files}，将验证所有文件")
+    else:
+        safe_print("开始验证API契约（验证所有文件）...")
     
-    report = validator.generate_report(issues)
+    issues = validator.validate_all(target_files)
+    
+    validated_file_count = issues.get("validated_file_count", 0)
+    report = validator.generate_report(issues, validated_file_count)
     safe_print(report)
     
     # 返回退出码

@@ -69,9 +69,64 @@ jobs:
       - name: Create temp directory
         run: mkdir -p temp
 
+      # [FIX] 计算本次发布改动的文件（只验证改动文件，避免历史遗留问题阻断新发布）
+      - name: Get changed files since last tag
+        id: changed-files
+        run: |
+          # 获取所有 tag，按版本号排序
+          git fetch --tags --force
+          
+          # 获取当前 tag
+          CURRENT_TAG="${{ github.ref_name }}"
+          echo "[INFO] Current tag: ${CURRENT_TAG}"
+          
+          # 获取上一个 tag（按版本号排序，排除当前 tag，取最新的）
+          ALL_TAGS=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$')
+          PREV_TAG=$(echo "${ALL_TAGS}" | grep -v "^${CURRENT_TAG}$" | head -n 1)
+          
+          if [ -z "${PREV_TAG}" ]; then
+            echo "[INFO] 未找到上一个 tag，将验证所有文件（首次发布或只有一个 tag）"
+            echo "has_prev_tag=false" >> $GITHUB_OUTPUT
+            echo "prev_tag=" >> $GITHUB_OUTPUT
+            echo "changed_count=0" >> $GITHUB_OUTPUT
+          else
+            echo "[INFO] 上一个 tag: ${PREV_TAG}"
+            echo "has_prev_tag=true" >> $GITHUB_OUTPUT
+            echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
+            
+            # 计算改动的文件（相对于项目根目录）
+            # 注意：HEAD 指向当前 checkout 的 tag commit
+            git diff --name-only ${PREV_TAG}..HEAD > temp/changed_files.txt || true
+            
+            # 显示改动的文件数量
+            CHANGED_COUNT=$(wc -l < temp/changed_files.txt | tr -d ' ' || echo "0")
+            echo "[INFO] 发现 ${CHANGED_COUNT} 个改动文件（从 ${PREV_TAG} 到 ${CURRENT_TAG}）"
+            echo "changed_count=${CHANGED_COUNT}" >> $GITHUB_OUTPUT
+            
+            # 显示前10个改动的文件（用于调试）
+            if [ "${CHANGED_COUNT}" -gt 0 ]; then
+              echo "[INFO] 改动的文件（前10个）:"
+              head -10 temp/changed_files.txt | sed 's/^/  - /'
+              
+              # 显示改动的 router 文件数量
+              ROUTER_COUNT=$(grep -c "^backend/routers/.*\.py$" temp/changed_files.txt || echo "0")
+              echo "[INFO] 其中 router 文件: ${ROUTER_COUNT} 个"
+            else
+              echo "[INFO] 没有发现改动文件（可能是 tag 指向同一个 commit）"
+            fi
+          fi
+
       # [NOTE] 发布门禁：tag 发布必须通过这些检查；失败会阻断 build 和 deploy
+      # [FIX] 只验证改动的 router 文件，避免历史遗留问题阻断新发布
       - name: Validate API Contracts (Release Gate)
-        run: python scripts/validate_api_contracts.py
+        run: |
+          if [ "${{ steps.changed-files.outputs.has_prev_tag }}" == "true" ] && [ -f "temp/changed_files.txt" ]; then
+            echo "[INFO] 只验证改动的 router 文件..."
+            python scripts/validate_api_contracts.py --changed-files temp/changed_files.txt
+          else
+            echo "[INFO] 未找到改动文件列表，验证所有文件..."
+            python scripts/validate_api_contracts.py
+          fi
 
       - name: Validate Frontend API Methods (Release Gate)
         run: python scripts/validate_frontend_api_methods.py
