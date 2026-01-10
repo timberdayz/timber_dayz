@@ -55,7 +55,9 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
+            # [FIX] 避免某些事件下 {{branch}} 渲染为 "<sha>" 造成 Docker tag 非法（含尖括号）
+            # 统一使用短 sha，并使用固定前缀，确保 tag 始终符合 Docker tag 规范
+            type=sha,format=short,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
 
@@ -69,7 +71,8 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
+            # [FIX] 同 backend：固定 sha tag 规则，避免生成非法 tag
+            type=sha,format=short,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
 
