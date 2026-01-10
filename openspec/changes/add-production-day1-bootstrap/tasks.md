@@ -5,24 +5,27 @@
   - [ ] 必须使用异步架构（AsyncSession、await db.execute，禁止 db.query）
   - [ ] 脚本入口必须使用 `asyncio.run(main())` 启动异步事件循环
   - [ ] 必须使用 `AsyncSessionLocal()` 作为上下文管理器（禁止使用 `get_async_db()`，那是 FastAPI 依赖注入函数）
-  - [ ] 必须手动管理事务（`await db.commit()` 和 `await db.rollback()`）
+  - [ ] 必须手动管理事务（`async with` 块内调用 `await db.commit()` 和 `await db.rollback()`）
+  - [ ] 注意：`async with AsyncSessionLocal() as db:` 会自动关闭会话，但不会自动提交或回滚事务
   - [ ] 异常时必须回滚并重新抛出，确保脚本失败时部署被阻断
+  - [ ] 脚本退出码：成功时 `sys.exit(0)`，失败时 `sys.exit(1)`（确保部署流程检测失败）
   - [ ] 必须遵循无 emoji 日志规范（使用 ASCII 符号：[OK], [FAIL], [WARN]）
   - [ ] 必须通过 `scripts/verify_no_emoji.py` 验证
   - [ ] 确认脚本在容器内路径为 `/app/scripts/bootstrap_production.py`
 - [ ] 1.3 规范 secrets 来源与加载顺序（GitHub Secrets/服务器端/`.env`），并实现 CRLF/空格清理与"来源可诊断但不泄露"
   - [ ] 明确区分部署态 secrets（GitHub Secrets，仅 CI 使用）和运行态 secrets（服务器 `.env`/`.secrets`）
-  - [ ] 在部署流程开始前清洗 `.env` 文件（去除 CRLF 和尾随空格）：`sed -e 's/\r$//' -e 's/[ \t]*$//' .env > .env.cleaned`
-  - [ ] 所有 `docker-compose` 命令统一使用 `--env-file .env.cleaned`（禁止依赖自动 `.env` 读取）
+  - [ ] 在部署流程开始前清洗 `.env` 文件（去除 CRLF 和尾随空格）：`sed -e 's/\r$//' -e 's/[ \t]*$//' "${PRODUCTION_PATH}/.env" > "${PRODUCTION_PATH}/.env.cleaned"`（使用完整路径）
+  - [ ] 所有 `docker-compose` 命令统一使用 `--env-file "${PRODUCTION_PATH}/.env.cleaned"`（禁止依赖自动 `.env` 读取，使用完整路径）
   - [ ] Bootstrap 脚本启动时验证关键环境变量不包含 `\r` 字符（fail fast）
 - [ ] 1.4 在 `deploy-production.yml` 增加 bootstrap 阶段（基础设施健康后、应用层启动前），失败阻断
   - [ ] 位置：阶段 0.5（在阶段 1 之前清洗 `.env` 文件）和阶段 2.5（迁移后、应用层启动前执行 bootstrap）
-  - [ ] 阶段 0.5：清洗 `.env` 文件：`sed -e 's/\r$//' -e 's/[ \t]*$//' .env > .env.cleaned`
-  - [ ] 阶段 2.5：使用 `docker-compose ... --env-file .env.cleaned ... run --rm --no-deps backend python3 /app/scripts/bootstrap_production.py`
-  - [ ] 所有后续 `docker-compose` 命令统一使用 `--env-file .env.cleaned`（确保环境变量正确传递）
+  - [ ] 阶段 0.5：清洗 `.env` 文件：`sed -e 's/\r$//' -e 's/[ \t]*$//' "${PRODUCTION_PATH}/.env" > "${PRODUCTION_PATH}/.env.cleaned"`（使用完整路径）
+  - [ ] 阶段 2.5：使用 `docker-compose ... --env-file "${PRODUCTION_PATH}/.env.cleaned" ... run --rm --no-deps backend python3 /app/scripts/bootstrap_production.py`
+  - [ ] 在 bootstrap 命令后检查退出码（`$?`），失败时阻断部署：`if [ $? -ne 0 ]; then echo "[FAIL] Bootstrap 失败"; exit 1; fi`
+  - [ ] 所有后续 `docker-compose` 命令统一使用 `--env-file "${PRODUCTION_PATH}/.env.cleaned"`（使用完整路径）
   - [ ] 失败时阻断部署并输出诊断信息（不含 secrets，使用 ASCII 符号）
   - [ ] 确保使用 `bash -c '...'` 执行远程命令（禁止 heredoc，符合 v4.20.0 规范）
-  - [ ] 部署成功后删除 `.env.cleaned` 文件（避免敏感信息残留）
+  - [ ] 部署成功后删除 `.env.cleaned` 文件：`rm -f "${PRODUCTION_PATH}/.env.cleaned"`（避免敏感信息残留）
   - [ ] 部署失败时保留 `.env.cleaned` 用于诊断，但下次部署前必须手动清理
 - [ ] 1.5 完善管理员创建流程（默认关闭；仅在无 superuser 时允许；密码必须来自 secret；不得输出明文）
   - [ ] 定义环境变量：`BOOTSTRAP_CREATE_ADMIN`（默认 false）、`BOOTSTRAP_ADMIN_USERNAME`（默认 admin）、`BOOTSTRAP_ADMIN_PASSWORD`（必须）、`BOOTSTRAP_ADMIN_EMAIL`（可选）

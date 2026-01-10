@@ -42,13 +42,14 @@
 
 - Bootstrap 脚本必须遵循异步架构规范（v4.19.0）：
 
-  - 使用 `AsyncSession` 和 `get_async_db()`（禁止使用 `get_db()`）
+  - 使用 `AsyncSession` 和 `AsyncSessionLocal()`（禁止在独立脚本中使用 `get_async_db()`；`get_async_db()` 仅用于 FastAPI Depends）
   - 所有数据库操作使用 `await db.execute(select(...))`（禁止使用 `db.query()`）
   - 所有服务类只接受 `AsyncSession`，不再支持 `Union[Session, AsyncSession]`
   - **脚本入口规范**：必须使用 `asyncio.run(main())` 启动异步事件循环，并使用 `AsyncSessionLocal()` 作为上下文管理器
 
     ```python
     import asyncio
+    import sys
     from backend.models.database import AsyncSessionLocal
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,15 +68,23 @@
                 raise  # 重新抛出异常，让脚本失败
 
     if __name__ == "__main__":
-        asyncio.run(main())
+        try:
+            asyncio.run(main())
+            sys.exit(0)  # 成功退出
+        except Exception as e:
+            # 输出诊断信息（不含敏感信息）
+            print(f"[FAIL] Bootstrap failed: {type(e).__name__}: {str(e)}")
+            sys.exit(1)  # 失败退出，部署流程会检测到非零退出码
     ```
 
-    **注意**：
+    **重要说明**：
 
     - `get_async_db()` 是 FastAPI 依赖注入函数，**不能在独立脚本中使用**
     - 独立脚本必须使用 `AsyncSessionLocal()` 作为上下文管理器
-    - 必须手动管理事务（`commit()` 和 `rollback()`）
+    - `async with AsyncSessionLocal() as db:` 会自动关闭会话，但**不会自动提交或回滚事务**
+    - 必须手动管理事务（在 `async with` 块内调用 `commit()` 和 `rollback()`）
     - 异常时必须回滚并重新抛出，确保脚本失败时部署被阻断
+    - 脚本退出码：成功返回 0，失败返回 1（确保部署流程能够检测失败）
 
 - 日志输出规范（Windows 兼容性）：
   - 禁止使用 emoji 字符（会导致 `UnicodeEncodeError`）
@@ -96,22 +105,32 @@ Bootstrap 插入到 `deploy-production.yml` 的以下位置：
 
 ```bash
 # 步骤1：清洗 .env 文件（去除 CRLF 和尾随空格）
-sed -e 's/\r$//' -e 's/[ \t]*$//' .env > .env.cleaned
+# 注意：使用项目根目录的绝对路径或相对路径，确保 .env.cleaned 在正确位置
+sed -e 's/\r$//' -e 's/[ \t]*$//' "${PRODUCTION_PATH}/.env" > "${PRODUCTION_PATH}/.env.cleaned"
 
 # 步骤2：使用清洗后的 .env 文件执行 bootstrap
 docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml \
-  --env-file .env.cleaned \
+  --env-file "${PRODUCTION_PATH}/.env.cleaned" \
   --profile production run --rm --no-deps backend \
   python3 /app/scripts/bootstrap_production.py
+
+# 步骤3：检查退出码，失败时阻断部署
+if [ $? -ne 0 ]; then
+  echo "[FAIL] Bootstrap 执行失败，部署被阻断"
+  exit 1
+fi
 ```
 
 **注意事项**：
 
 - 必须在**部署开始阶段**（阶段 1 之前）清洗 `.env` 文件
-- 所有后续 `docker-compose` 命令统一使用 `--env-file .env.cleaned`
+- 使用绝对路径或环境变量（如 `PRODUCTION_PATH`）确保 `.env.cleaned` 文件路径正确
+- 所有后续 `docker-compose` 命令统一使用 `--env-file "${PRODUCTION_PATH}/.env.cleaned"`（使用完整路径）
+- 必须在 bootstrap 命令后检查退出码（`$?`），失败时阻断部署
 - `.env.cleaned` 文件在部署完成后**必须删除**（避免敏感信息残留）
   - 删除时机：部署成功后的清理步骤
   - 如果部署失败，保留 `.env.cleaned` 用于诊断（但在下次部署前必须手动清理）
+  - 删除命令：`rm -f "${PRODUCTION_PATH}/.env.cleaned"`
 
 ### Decision: Secrets 的处理原则
 
@@ -144,12 +163,13 @@ docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compos
 
    ```bash
    # 生成清洗后的 .env 文件（去除 CRLF 和尾随空格）
-   sed -e 's/\r$//' -e 's/[ \t]*$//' .env > .env.cleaned
+   # 注意：使用完整路径确保在正确的目录下执行
+   sed -e 's/\r$//' -e 's/[ \t]*$//' "${PRODUCTION_PATH}/.env" > "${PRODUCTION_PATH}/.env.cleaned"
    ```
 
 2. **统一使用 `--env-file`**：
 
-   - 所有 `docker-compose` 命令必须使用 `--env-file .env.cleaned`
+   - 所有 `docker-compose` 命令必须使用 `--env-file "${PRODUCTION_PATH}/.env.cleaned"`（使用完整路径）
    - 禁止直接依赖 Docker Compose 的自动 `.env` 读取（无法保证清理）
 
 3. **验证步骤**：

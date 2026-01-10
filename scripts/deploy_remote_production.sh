@@ -69,13 +69,14 @@ pull_image_with_fallback() {
   local fallback_tag="${primary_tag#v}"
   local full_image="${GHCR_REGISTRY}/${image_name}:${primary_tag}"
 
-  echo "[INFO] Attempting to pull ${full_image}..."
+  # [FIX] 所有日志输出到 stderr，stdout 只输出 tag（避免命令替换捕获日志）
+  echo "[INFO] Attempting to pull ${full_image}..." >&2
   for retry in 1 2 3; do
-    echo "[INFO] Pull attempt ${retry}/3 for ${full_image}..."
-    docker pull "${full_image}" 2>&1 || true
+    echo "[INFO] Pull attempt ${retry}/3 for ${full_image}..." >&2
+    docker pull "${full_image}" >&2 || true
     if docker image inspect "${full_image}" >/dev/null 2>&1; then
-      echo "[OK] Image pulled successfully with tag ${primary_tag}"
-      echo "${primary_tag}"
+      echo "[OK] Image pulled successfully with tag ${primary_tag}" >&2
+      echo "${primary_tag}"  # stdout: only tag (no newline/whitespace)
       return 0
     fi
     sleep 5
@@ -83,28 +84,70 @@ pull_image_with_fallback() {
 
   if [ "${primary_tag}" != "${fallback_tag}" ]; then
     local full_image_fallback="${GHCR_REGISTRY}/${image_name}:${fallback_tag}"
-    echo "[WARN] Primary tag ${primary_tag} failed, trying fallback tag ${fallback_tag}..."
+    echo "[WARN] Primary tag ${primary_tag} failed, trying fallback tag ${fallback_tag}..." >&2
     for retry in 1 2 3; do
-      echo "[INFO] Fallback pull attempt ${retry}/3 for ${full_image_fallback}..."
-      docker pull "${full_image_fallback}" 2>&1 || true
+      echo "[INFO] Fallback pull attempt ${retry}/3 for ${full_image_fallback}..." >&2
+      docker pull "${full_image_fallback}" >&2 || true
       if docker image inspect "${full_image_fallback}" >/dev/null 2>&1; then
-        echo "[OK] Image pulled successfully with fallback tag ${fallback_tag}"
-        echo "${fallback_tag}"
+        echo "[OK] Image pulled successfully with fallback tag ${fallback_tag}" >&2
+        echo "${fallback_tag}"  # stdout: only tag (no newline/whitespace)
         return 0
       fi
       sleep 5
     done
   fi
 
-  echo "[FAIL] Failed to pull image ${image_name} with tag ${primary_tag} (and fallback ${fallback_tag})"
-  echo "[INFO] Please verify the tag exists in GHCR and server has network access."
+  echo "[FAIL] Failed to pull image ${image_name} with tag ${primary_tag} (and fallback ${fallback_tag})" >&2
+  echo "[INFO] Please verify the tag exists in GHCR and server has network access." >&2
   return 1
 }
 
 echo "[INFO] Pulling backend image..."
-BACKEND_TAG="$(pull_image_with_fallback "${IMAGE_NAME_BACKEND}" "${IMAGE_TAG}")" || exit 1
+# [FIX] 使用进程替换（process substitution）方案：stderr（日志）通过 tee 输出到终端，stdout（tag）被捕获
+# 函数内部所有日志通过 >&2 输出到 stderr，stdout 只输出 tag
+# 使用 2> >(tee >&2) 让 stderr 同时显示在终端和管道中，但实际捕获时只捕获 stdout
+# 更简单的方法：先执行并捕获所有输出，然后从 stdout 中提取 tag，stderr 已经在执行时显示了
+# 但实际上，由于函数内部日志都输出到 stderr（>&2），stdout 只有 tag，所以直接捕获 stdout 即可
+# 但为了能看到 stderr 日志，我们需要使用 tee 或者让 stderr 保持原样
+# 最简单可靠的方法：将 stdout 和 stderr 都重定向，然后从 stdout 部分提取 tag，stderr 部分显示日志
+# 但由于我们在函数内部已经明确分离了 stdout 和 stderr，所以可以这样：
+TEMP_OUTPUT_FILE=$(mktemp)
+TEMP_STDERR_FILE=$(mktemp)
+# 将 stdout 和 stderr 分别捕获，stderr 同时显示在终端
+if ! pull_image_with_fallback "${IMAGE_NAME_BACKEND}" "${IMAGE_TAG}" > "${TEMP_OUTPUT_FILE}" 2> "${TEMP_STDERR_FILE}"; then
+  # 拉取失败，显示错误日志
+  cat "${TEMP_STDERR_FILE}" >&2
+  echo "[FAIL] Failed to pull backend image" >&2
+  rm -f "${TEMP_OUTPUT_FILE}" "${TEMP_STDERR_FILE}"
+  exit 1
+fi
+# 显示拉取进度日志（stderr）
+cat "${TEMP_STDERR_FILE}" >&2
+# 从 stdout 中提取 tag（过滤掉可能的日志行，以防万一）
+BACKEND_TAG="$(grep -v '^\[.*\]' "${TEMP_OUTPUT_FILE}" | tail -n 1 | tr -d '\r\n' | xargs)"
+rm -f "${TEMP_OUTPUT_FILE}" "${TEMP_STDERR_FILE}"
+if [ -z "${BACKEND_TAG}" ]; then
+  echo "[FAIL] Backend tag is empty after pull (tag extraction failed)" >&2
+  exit 1
+fi
+
 echo "[INFO] Pulling frontend image..."
-FRONTEND_TAG="$(pull_image_with_fallback "${IMAGE_NAME_FRONTEND}" "${IMAGE_TAG}")" || exit 1
+TEMP_OUTPUT_FILE=$(mktemp)
+TEMP_STDERR_FILE=$(mktemp)
+if ! pull_image_with_fallback "${IMAGE_NAME_FRONTEND}" "${IMAGE_TAG}" > "${TEMP_OUTPUT_FILE}" 2> "${TEMP_STDERR_FILE}"; then
+  cat "${TEMP_STDERR_FILE}" >&2
+  echo "[FAIL] Failed to pull frontend image" >&2
+  rm -f "${TEMP_OUTPUT_FILE}" "${TEMP_STDERR_FILE}"
+  exit 1
+fi
+cat "${TEMP_STDERR_FILE}" >&2
+FRONTEND_TAG="$(grep -v '^\[.*\]' "${TEMP_OUTPUT_FILE}" | tail -n 1 | tr -d '\r\n' | xargs)"
+rm -f "${TEMP_OUTPUT_FILE}" "${TEMP_STDERR_FILE}"
+if [ -z "${FRONTEND_TAG}" ]; then
+  echo "[FAIL] Frontend tag is empty after pull (tag extraction failed)" >&2
+  exit 1
+fi
+
 echo "[OK] Resolved tags: Backend=${BACKEND_TAG}, Frontend=${FRONTEND_TAG}"
 
 echo "[INFO] Cleaning up old containers that might conflict with port 80..."
@@ -121,16 +164,56 @@ export APP_ENV=production
 export COMPOSE_PROJECT_NAME=xihong_erp
 
 echo "[INFO] Creating temporary docker-compose.deploy.yml..."
-printf "services:\n  backend:\n    image: %s/%s:%s\n  frontend:\n    image: %s/%s:%s\n    ports: []\n" \
-  "${GHCR_REGISTRY}" "${IMAGE_NAME_BACKEND}" "${BACKEND_TAG}" \
-  "${GHCR_REGISTRY}" "${IMAGE_NAME_FRONTEND}" "${FRONTEND_TAG}" \
-  > docker-compose.deploy.yml
+
+# [FIX] 验证所有必需变量不为空且不包含特殊字符（防止 YAML 注入和格式错误）
+if [ -z "${GHCR_REGISTRY}" ] || [ -z "${IMAGE_NAME_BACKEND}" ] || [ -z "${IMAGE_NAME_FRONTEND}" ]; then
+  echo "[FAIL] Required variables are empty:"
+  echo "  GHCR_REGISTRY='${GHCR_REGISTRY}'"
+  echo "  IMAGE_NAME_BACKEND='${IMAGE_NAME_BACKEND}'"
+  echo "  IMAGE_NAME_FRONTEND='${IMAGE_NAME_FRONTEND}'"
+  exit 1
+fi
+
+if [ -z "${BACKEND_TAG}" ] || [ -z "${FRONTEND_TAG}" ]; then
+  echo "[FAIL] Tag variables are empty: Backend='${BACKEND_TAG}', Frontend='${FRONTEND_TAG}'"
+  exit 1
+fi
+
+# [FIX] 验证 tag 不包含特殊字符（防止 YAML 注入）
+if echo "${BACKEND_TAG}" | grep -qE '[^a-zA-Z0-9._-]' || echo "${FRONTEND_TAG}" | grep -qE '[^a-zA-Z0-9._-]'; then
+  echo "[FAIL] Tag contains invalid characters: Backend='${BACKEND_TAG}', Frontend='${FRONTEND_TAG}'"
+  echo "[INFO] Tags must only contain alphanumeric characters, dots, underscores, and hyphens"
+  exit 1
+fi
+
+# [FIX] 使用 cat 和 heredoc 创建 YAML（更安全，避免 printf 转义问题）
+cat > docker-compose.deploy.yml <<EOF
+services:
+  backend:
+    image: ${GHCR_REGISTRY}/${IMAGE_NAME_BACKEND}:${BACKEND_TAG}
+  frontend:
+    image: ${GHCR_REGISTRY}/${IMAGE_NAME_FRONTEND}:${FRONTEND_TAG}
+    ports: []
+EOF
+
 echo "[OK] Temporary compose file created"
 
+# [FIX] 立即验证 YAML 语法（更稳的防护，提前发现问题）
+echo "[INFO] Validating docker-compose config..."
 compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production)
 if [ -f docker-compose.cloud.yml ]; then
   compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production)
 fi
+
+if ! "${compose_cmd_base[@]}" config >/dev/null 2>&1; then
+  echo "[FAIL] docker-compose config validation failed"
+  echo "[INFO] docker-compose.deploy.yml content (first 20 lines):"
+  head -20 docker-compose.deploy.yml | nl -ba || true
+  echo "[INFO] docker-compose config error output:"
+  "${compose_cmd_base[@]}" config 2>&1 | head -30 || true
+  exit 1
+fi
+echo "[OK] docker-compose config validated"
 
 echo "[INFO] Phase 1: starting infrastructure (PostgreSQL, Redis)..."
 "${compose_cmd_base[@]}" up -d postgres redis

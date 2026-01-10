@@ -84,7 +84,8 @@ The system MUST robustly load environment variables for production deployments, 
 #### Scenario: CRLF `.env` file
 - **WHEN** the server `.env` file uses CRLF line endings
 - **THEN** the deployment MUST clean the `.env` file before passing it to Docker Compose (remove `\r` and trailing whitespace)
-- **AND** all `docker-compose` commands MUST use `--env-file .env.cleaned` (not rely on automatic `.env` reading)
+- **AND** the cleaning command MUST use full path: `sed -e 's/\r$//' -e 's/[ \t]*$//' "${PRODUCTION_PATH}/.env" > "${PRODUCTION_PATH}/.env.cleaned"`
+- **AND** all `docker-compose` commands MUST use `--env-file "${PRODUCTION_PATH}/.env.cleaned"` (not rely on automatic `.env` reading, use full path)
 - **AND** environment variables are parsed correctly in containers
 - **AND** authentication/connection checks do not fail due to hidden `\r`
 - **AND** the bootstrap script MUST validate that critical environment variables do not contain `\r` (fail fast if detected)
