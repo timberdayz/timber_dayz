@@ -501,6 +501,13 @@ jobs:
           POSTGRES_DB_VAL=\"\${POSTGRES_DB:-xihong_erp}\"
           REDIS_PASSWORD_VAL=\"\${REDIS_PASSWORD:-redis_pass_2025}\"
 
+          # [FIX] 清理环境变量中可能的换行符（Windows CRLF 兼容性）
+          # 防止 .env 文件是 Windows 格式（CRLF）时，变量值包含 \\r 导致连接失败
+          # 注意：密码不使用 xargs，避免处理空格；用户名和数据库名使用 xargs 清理首尾空格
+          POSTGRES_USER_VAL=\$(echo \"\${POSTGRES_USER_VAL}\" | tr -d '\\r' | tr -d '\\n' | xargs)
+          POSTGRES_DB_VAL=\$(echo \"\${POSTGRES_DB_VAL}\" | tr -d '\\r' | tr -d '\\n' | xargs)
+          REDIS_PASSWORD_VAL=\$(echo \"\${REDIS_PASSWORD_VAL}\" | tr -d '\\r' | tr -d '\\n')
+
           for i in {1..60}; do
             # [FIX] 移除 2>/dev/null，让 PostgreSQL 错误可见
             postgres_output=\$(docker exec xihong_erp_postgres pg_isready -U \"\${POSTGRES_USER_VAL}\" -d \"\${POSTGRES_DB_VAL}\" 2>&1)
@@ -525,7 +532,7 @@ jobs:
                 # [FIX] 如果检测到 WRONGPASS 错误，给出明确提示
                 if echo \"\${redis_output}\" | grep -qi \"WRONGPASS\|NOAUTH\"; then
                   echo \"[ERROR] Redis 密码错误！请检查服务器 .env 中的 REDIS_PASSWORD 是否与 docker-compose.prod.yml 中配置一致\"
-                  echo \"[INFO] 当前使用的密码变量值: REDIS_PASSWORD=\${REDIS_PASSWORD_VAL}\"
+                  echo \"[INFO] 当前使用的密码变量: REDIS_PASSWORD=***\"
                 fi
               fi
             fi
@@ -539,7 +546,7 @@ jobs:
               echo \"[FAIL] 基础设施服务启动超时（60次检查，共120秒）\"
               echo \"[INFO] 诊断信息：\"
               echo \"  - PostgreSQL 用户: \${POSTGRES_USER_VAL}, 数据库: \${POSTGRES_DB_VAL}\"
-              echo \"  - Redis 密码变量: REDIS_PASSWORD=\${REDIS_PASSWORD_VAL}\"
+              echo \"  - Redis 密码变量: REDIS_PASSWORD=***\"
               echo \"[INFO] 容器状态：\"
               docker ps --format \"table {{.Names}}\\t{{.Status}}\" | grep -E \"xihong_erp_(postgres|redis)\" || echo \"  容器未找到\"
               echo \"[INFO] 容器日志（最后30行）：\"
@@ -551,9 +558,24 @@ jobs:
             echo \"等待基础设施... (\$i/60)\"
             sleep 2
           done
+
+          # [NOTE] 关键：在启动应用服务之前执行数据库迁移，确保表结构与当前版本一致
+          echo \"[INFO] 阶段2: 执行数据库迁移（Alembic upgrade head）...\"
+          if [ -f docker-compose.cloud.yml ]; then
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production run --rm --no-deps backend alembic upgrade head || {
+              echo \"[FAIL] 数据库迁移失败（alembic upgrade head）\"
+              exit 1
+            }
+          else
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production run --rm --no-deps backend alembic upgrade head || {
+              echo \"[FAIL] 数据库迁移失败（alembic upgrade head）\"
+              exit 1
+            }
+          fi
+          echo \"[OK] 数据库迁移完成\"
             
           # [NOTE] 关键：先启动 Metabase（生产必需组件，必须在 Nginx 之前）
-          echo \"[INFO] 阶段2: 启动 Metabase 服务（必须在 Nginx 之前）...\"
+          echo \"[INFO] 阶段3: 启动 Metabase 服务（必须在 Nginx 之前）...\"
           if [ -f docker-compose.metabase.yml ]; then
             docker-compose -f docker-compose.metabase.yml --profile production up -d metabase
             echo \"[INFO] 等待 Metabase 健康（最多60秒）...\"
@@ -575,7 +597,7 @@ jobs:
           fi
 
           # 启动应用层（Backend, Celery）
-          echo \"[INFO] 阶段3: 启动应用层（Backend, Celery）...\"
+          echo \"[INFO] 阶段4: 启动应用层（Backend, Celery）...\"
           if [ -f docker-compose.cloud.yml ]; then
             docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d backend celery-worker celery-beat celery-exporter
           else
