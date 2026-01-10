@@ -1,13 +1,11 @@
 name: Deploy to Production
 
 on:
-  # ⭐ 自动部署：等待 Docker Build and Push 成功后触发（解决并行竞态）
-  # 注意：只有当 build workflow 由 push tag (v*) 触发且成功时才自动部署
-  workflow_run:
-    workflows: ["Docker Build and Push"]
-    types:
-      - completed
-  # 手动部署：支持手动指定镜像标签部署
+  # [NOTE] 方案A：生产发布只通过 push tag(v*) 触发（同一条流水线内 build -> deploy）
+  push:
+    tags:
+      - "v*"
+  # [NOTE] 手动部署：用于回滚或重试（不会重新 build 镜像，只部署指定 tag）
   workflow_dispatch:
     inputs:
       image_tag:
@@ -19,7 +17,7 @@ on:
         required: true
         type: string
 
-# ⭐ 新增：并发控制，确保同一时间只有一个生产部署在运行（避免带宽冲突）
+# [NOTE] 并发控制：同一时间只允许一个生产部署在运行（避免带宽/资源冲突）
 concurrency:
   group: deploy-production
   cancel-in-progress: true
@@ -48,76 +46,104 @@ jobs:
             echo "can_deploy=true" >> $GITHUB_OUTPUT
           fi
 
-  deploy:
+  build-and-push:
+    name: Build and Push Images (Release Tag)
     runs-on: ubuntu-latest
-    needs: check-config
-    # ⭐ 修复：workflow_run 触发时，只有当 build workflow 成功时才执行部署（tag 检查在脚本中完成）
-    if: ${{ needs.check-config.outputs.can_deploy == 'true' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code (tag)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # [FIX] 同时推送带 v 前缀的 tag（v4.20.5 / 4.20.5），避免部署端找不到 manifest
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            # [FIX] 固定 sha tag 规则，避免生成非法 tag
+            type=sha,format=short,prefix=sha-
+
+      - name: Extract metadata (tags, labels) for frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # [FIX] 同时推送带 v 前缀的 tag（v4.20.5 / 4.20.5）
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            # [FIX] 固定 sha tag 规则，避免生成非法 tag
+            type=sha,format=short,prefix=sha-
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            PYTHON_VERSION=3.11
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          target: production
+          build-args: |
+            NODE_VERSION=18
+            VITE_API_URL=${{ secrets.VITE_API_URL || 'http://localhost:8001' }}
+
+  deploy-tag:
+    name: Deploy to Production (Tag Release)
+    runs-on: ubuntu-latest
+    needs: [check-config, build-and-push]
+    if: ${{ needs.check-config.outputs.can_deploy == 'true' && github.event_name == 'push' }}
     environment:
       name: production
 
     steps:
-      - name: Checkout code
+      - name: Checkout code (tag)
         uses: actions/checkout@v4
-        # ⭐ 修复：workflow_run 触发时，使用触发构建的 ref（tag 或分支）
-        # ⭐ 注意：已移除 push tag 触发，现在只支持 workflow_run 和 workflow_dispatch
         with:
-          ref: ${{ github.event.workflow_run.head_ref || github.event.workflow_run.head_branch || github.ref }}
+          ref: ${{ github.ref }}
 
-      - name: Verify deployment confirmation
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
-            echo "Deployment confirmation failed. Please type 'DEPLOY' to confirm."
-            exit 1
-          fi
-          echo "Deployment confirmed"
-
-      - name: Check if auto-deploy should proceed
-        id: check-auto-deploy
-        if: github.event_name == 'workflow_run'
-        run: |
-          # ⭐ 自动部署：只有当 build workflow 由 push tag (v*) 触发时才部署
-          REF="${{ github.event.workflow_run.head_ref || github.event.workflow_run.head_branch || '' }}"
-          if [[ "${REF}" == refs/tags/v* ]] || [[ "${REF}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "should_deploy=true" >> $GITHUB_OUTPUT
-            echo "Auto-deploy: Build was triggered by push tag, proceeding with deployment"
-          else
-            echo "should_deploy=false" >> $GITHUB_OUTPUT
-            echo "Auto-deploy: Build was not triggered by push tag (v*), skipping deployment"
-            echo "REF was: ${REF}"
-          fi
-
-      - name: Determine image tag
+      - name: Determine deploy tag (from ref)
         id: image-tag
-        # ⭐ 修复：workflow_run 且不是 tag 触发时，跳过部署
-        # ⭐ 注意：已移除 push tag 触发，现在只支持 workflow_run 和 workflow_dispatch
-        if: github.event_name != 'workflow_run' || steps.check-auto-deploy.outputs.should_deploy == 'true'
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # 手动触发：使用用户输入的标签
-            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "workflow_run" ]; then
-            # ⭐ 自动触发：从触发构建的 workflow_run 中提取标签
-            REF="${{ github.event.workflow_run.head_ref || github.event.workflow_run.head_branch }}"
-            if [[ "${REF}" == refs/tags/v* ]]; then
-              # 提取标签名（去掉 refs/tags/ 前缀）
-              TAG="${REF#refs/tags/}"
-              echo "tag=${TAG}" >> $GITHUB_OUTPUT
-            elif [[ "${REF}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              # 直接是 vX.Y.Z 格式
-              echo "tag=${REF}" >> $GITHUB_OUTPUT
-            else
-              echo "[ERROR] Cannot determine tag from ref: ${REF}"
-              exit 1
-            fi
-          else
-            # ⭐ 移除：push tag 触发已移除，不应该到达这里
-            echo "[ERROR] Unsupported trigger type: ${{ github.event_name }}"
-            echo "[ERROR] Only workflow_run and workflow_dispatch are supported"
-            exit 1
-          fi
-          echo "Deploying with tag: ${{ steps.image-tag.outputs.tag }}"
+          echo "tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          echo "Deploying with tag: ${GITHUB_REF_NAME}"
 
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.8.0
@@ -130,7 +156,7 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          # ⭐ 方案A1：直接使用 SCP 上传 compose 文件（移除 git pull，更简单、更稳定）
+          # [NOTE] 方案A1：直接使用 SCP 上传 compose 文件（移除 git pull，更简单、更稳定）
           # compose 文件很小，对 5MB 带宽影响很小，不需要配置服务器 git 凭据
           echo "[INFO] Uploading compose files via SCP..."
 
@@ -198,7 +224,7 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          # ⭐ 修复：使用单引号 heredoc，防止变量在本地展开
+          # [FIX] 使用 bash -c 远程执行，避免 heredoc 语法问题
           ssh -o StrictHostKeyChecking=no \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
@@ -218,8 +244,8 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
-          # ⭐ 修复：避免 heredoc 语法问题，使用 bash -c 执行远程命令
-          # ⭐ 注意：外层双引号允许本地变量展开（${IMAGE_TAG}），内层单引号中的变量需转义（\$retry）
+          # [FIX] 避免 heredoc 语法问题，使用 bash -c 执行远程命令
+          # [NOTE] 外层双引号允许本地变量展开（${IMAGE_TAG}），内层单引号中的变量需转义（\$retry）
           ssh -o StrictHostKeyChecking=no \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
@@ -233,15 +259,15 @@ jobs:
           echo \"${{ secrets.GITHUB_TOKEN }}\" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
           echo \"[OK] Successfully logged in to container registry\"
 
-          # ⭐ 修复：使用 tag 而非 latest（提升可追溯性）
+          # [FIX] 使用 tag 而非 latest（提升可追溯性）
           # 拉取指定版本的镜像（添加进度输出、重试机制和容错机制）
-          # ⭐ 修复：${IMAGE_TAG} 在外层双引号中会展开，传递给远程服务器
+          # [FIX] ${IMAGE_TAG} 在外层双引号中会展开，传递给远程服务器
           # 在 bash -c 单引号内，先赋值给变量，确保正确使用
           IMAGE_TAG_VAL=\"${IMAGE_TAG}\"
           ORIGINAL_REQUESTED_TAG=\"\${IMAGE_TAG_VAL}\"
           echo \"[INFO] Pulling images with tag: \${IMAGE_TAG_VAL}\"
 
-          # ⭐ 容错函数：尝试多个 tag 变体（v4.20.4 -> 4.20.4 -> latest）
+          # [NOTE] 容错函数：尝试多个 tag 变体（v4.20.4 -> 4.20.4）
           pull_image_with_fallback() {
             local IMAGE_NAME=\$1
             local PRIMARY_TAG=\$2
@@ -306,12 +332,12 @@ jobs:
           fi
           echo \"[OK] Frontend image tag resolved: \${FRONTEND_TAG}\"
 
-          # ⭐ 修复：使用实际拉取成功的 tag（可能是 PRIMARY_TAG 或 FALLBACK_TAG）
+          # [FIX] 使用实际拉取成功的 tag（可能是 PRIMARY_TAG 或 FALLBACK_TAG）
           IMAGE_TAG_VAL=\"\${BACKEND_TAG}\"
           echo \"[INFO] Images pulled successfully with resolved tags: Backend=\${BACKEND_TAG}, Frontend=\${FRONTEND_TAG}\"
           echo \"[INFO] Using resolved tag for deployment (not latest) for better traceability\"
 
-          # ⭐ 清理可能占用端口80的旧容器
+          # [NOTE] 清理可能占用端口80的旧容器
           echo \"[INFO] Cleaning up old containers that might conflict with port 80...\"
           docker stop xihong_erp_frontend 2>/dev/null || true
           docker rm xihong_erp_frontend 2>/dev/null || true
@@ -326,18 +352,18 @@ jobs:
           export APP_ENV=production
           export COMPOSE_PROJECT_NAME=xihong_erp
 
-          # ⭐ 说明：同步 compose 文件后，docker-compose up -d 会自动检测配置变化
+          # [NOTE] 同步 compose 文件后，docker-compose up -d 会自动检测配置变化
           # 如果配置有变化（如端口、环境变量等），docker-compose 会自动重新创建容器
           # 因此不需要手动重新部署，工作流会自动完成部署
 
-          # ⭐ 修复：创建临时 compose 文件，使用实际拉取成功的 tag（可能是 PRIMARY_TAG 或 FALLBACK_TAG）
+          # [FIX] 创建临时 compose 文件，使用实际拉取成功的 tag（可能是 PRIMARY_TAG 或 FALLBACK_TAG）
           echo \"[INFO] Creating temporary docker-compose.deploy.yml...\"
           # 使用实际拉取成功的 tag 直接指定镜像（提升可追溯性）
-          # ⭐ 注意：分别使用 BACKEND_TAG 和 FRONTEND_TAG，因为它们可能不同（容错机制可能返回不同的 tag）
+          # [NOTE] 分别使用 BACKEND_TAG 和 FRONTEND_TAG，因为它们可能不同
           printf \"services:\\n  backend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:\${BACKEND_TAG}\\n  frontend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:\${FRONTEND_TAG}\\n    ports: []\\n\" > docker-compose.deploy.yml
           echo \"[OK] Temporary compose file created with tags: Backend=\${BACKEND_TAG}, Frontend=\${FRONTEND_TAG}\"
 
-          # ⭐ 新增：分阶段启动服务（确保 Metabase 在 Nginx 之前启动）
+          # [NOTE] 分阶段启动服务（确保 Metabase 在 Nginx 之前启动）
           echo \"[INFO] 阶段1: 启动基础设施层（PostgreSQL, Redis）...\"
           if [ -f docker-compose.cloud.yml ]; then
             docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml --profile production up -d postgres redis
@@ -362,7 +388,7 @@ jobs:
             sleep 2
           done
 
-          # ⭐ 关键：先启动 Metabase（生产必需组件，必须在 Nginx 之前）
+          # [NOTE] 关键：先启动 Metabase（生产必需组件，必须在 Nginx 之前）
           echo \"[INFO] 阶段2: 启动 Metabase 服务（必须在 Nginx 之前）...\"
           if [ -f docker-compose.metabase.yml ]; then
             docker-compose -f docker-compose.metabase.yml --profile production up -d metabase
@@ -427,7 +453,7 @@ jobs:
             sleep 2
           done
 
-          # ⭐ 关键：最后启动 Nginx（确保所有上游服务已就绪）
+          # [NOTE] 关键：最后启动 Nginx（确保所有上游服务已就绪）
           echo \"[INFO] 阶段5: 启动网关层（Nginx，最后启动）...\"
           if [ -f docker-compose.cloud.yml ]; then
             docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d nginx
@@ -506,6 +532,134 @@ jobs:
           echo \"[OK] Cleanup completed\"
           '"
 
+  deploy-manual:
+    name: Deploy to Production (Manual)
+    runs-on: ubuntu-latest
+    needs: check-config
+    if: ${{ needs.check-config.outputs.can_deploy == 'true' && github.event_name == 'workflow_dispatch' }}
+    environment:
+      name: production
+    steps:
+      - name: Checkout code (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Verify deployment confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
+            echo "Deployment confirmation failed. Please type 'DEPLOY' to confirm."
+            exit 1
+          fi
+          echo "Deployment confirmed"
+
+      - name: Determine deploy tag (manual input)
+        id: image-tag
+        run: |
+          echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          echo "Deploying with tag: ${{ github.event.inputs.image_tag }}"
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+
+      - name: Sync compose files to production server
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
+        run: |
+          echo "[INFO] Uploading compose files via SCP..."
+          scp -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              docker-compose.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.yml || {
+            echo "[FAIL] Failed to upload docker-compose.yml"
+            exit 1
+          }
+          if [ -f "docker-compose.prod.yml" ]; then
+            scp -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                docker-compose.prod.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.prod.yml || {
+              echo "[FAIL] Failed to upload docker-compose.prod.yml"
+              exit 1
+            }
+          fi
+          if [ -f "docker-compose.cloud.yml" ]; then
+            scp -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                docker-compose.cloud.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.cloud.yml || {
+              echo "[WARN] Failed to upload docker-compose.cloud.yml (optional file, continuing...)"
+            }
+          fi
+          if [ -f "docker-compose.metabase.yml" ]; then
+            scp -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                docker-compose.metabase.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.metabase.yml || {
+              echo "[FAIL] Failed to upload docker-compose.metabase.yml (required for production)"
+              exit 1
+            }
+          fi
+          echo "[OK] All compose files synced successfully via SCP"
+
+      - name: Backup current deployment
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
+        run: |
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+              "bash -c 'set -e; \
+              cd \"${PRODUCTION_PATH}\"; \
+              BACKUP_DIR=\"backups/pre_deploy_$(date +%Y%m%d_%H%M%S)\"; \
+              mkdir -p \"${BACKUP_DIR}\"; \
+              docker-compose -f docker-compose.yml -f docker-compose.prod.yml --profile production config > \"${BACKUP_DIR}/docker-compose.config.yaml\" 2>&1 || echo \"[WARN] Docker Compose config validation failed, but continuing backup...\"; \
+              docker ps --format \"{{.Names}} {{.Image}}\" > \"${BACKUP_DIR}/running_containers.txt\" || true; \
+              echo \"[OK] Pre-deployment backup completed: ${BACKUP_DIR}\"'"
+
+      - name: Deploy to production server
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
+          IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
+        run: |
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+          "bash -c '
+          set -e
+          cd \"${PRODUCTION_PATH}\"
+          echo \"[INFO] Logging in to container registry...\"
+          echo \"${{ secrets.GITHUB_TOKEN }}\" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+          echo \"[OK] Logged in\"
+          IMAGE_TAG_VAL=\"${IMAGE_TAG}\"
+          ORIGINAL_REQUESTED_TAG=\"${IMAGE_TAG}\"
+          echo \"[INFO] Pulling images with tag: ${IMAGE_TAG_VAL}\"
+          BACKEND_IMAGE=\"${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG_VAL}\"
+          FRONTEND_IMAGE=\"${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG_VAL}\"
+          docker pull ${BACKEND_IMAGE}
+          docker pull ${FRONTEND_IMAGE}
+          echo \"[OK] Images pulled\"
+          printf \"services:\\n  backend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${IMAGE_TAG_VAL}\\n  frontend:\\n    image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${IMAGE_TAG_VAL}\\n    ports: []\\n\" > docker-compose.deploy.yml
+          if [ -f docker-compose.cloud.yml ]; then
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production up -d
+          else
+            docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production up -d
+          fi
+          echo \"[OK] Production deployment completed successfully\"
+          echo \"Original requested tag: ${ORIGINAL_REQUESTED_TAG}\"
+          rm -f docker-compose.deploy.yml
+          '"
+
       - name: Health check verification
         env:
           PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
@@ -515,7 +669,7 @@ jobs:
             exit 0
           fi
 
-          # ⭐ 修复：域名备案期间，如果配置了 HTTPS 但 SSL 证书未配置，自动降级到 HTTP
+          # [FIX] 域名备案期间，如果配置了 HTTPS 但 SSL 证书未配置，自动降级到 HTTP
           HEALTH_CHECK_URL="${PRODUCTION_URL}"
           if [[ "${PRODUCTION_URL}" == https://* ]]; then
             echo "[INFO] PRODUCTION_URL is HTTPS, attempting HTTPS health check first..."
@@ -594,7 +748,7 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          # ⭐ 修复：避免 heredoc 语法问题，使用 bash -c 执行远程命令
+          # [FIX] 避免 heredoc 语法问题，使用 bash -c 执行远程命令
           ssh -o StrictHostKeyChecking=no \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \

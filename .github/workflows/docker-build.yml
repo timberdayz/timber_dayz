@@ -5,8 +5,6 @@ on:
     branches:
       - main
       - develop
-    tags:
-      - 'v*'
   pull_request:
     branches:
       - main
@@ -55,7 +53,7 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            # ⭐ 修复：添加带 v 前缀的 tag，确保部署时能找到镜像（v4.20.4 和 4.20.4 都推送）
+            # [FIX] 添加带 v 前缀的 tag，确保部署时能找到镜像（v4.20.4 和 4.20.4 都推送）
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
             # [FIX] 避免某些事件下 {{branch}} 渲染为 "<sha>" 造成 Docker tag 非法（含尖括号）
@@ -74,7 +72,7 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            # ⭐ 修复：添加带 v 前缀的 tag，确保部署时能找到镜像（v4.20.4 和 4.20.4 都推送）
+            # [FIX] 添加带 v 前缀的 tag，确保部署时能找到镜像（v4.20.4 和 4.20.4 都推送）
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
             # [FIX] 同 backend：固定 sha tag 规则，避免生成非法 tag
