@@ -53,11 +53,22 @@ def upgrade() -> None:
                     ['platform', 'data_domain', 'sub_domain', 'granularity', 'account'])
     
     # 3. 添加CHECK约束（header_row范围验证）
-    op.create_check_constraint(
-        'ck_template_header_row_range',
-        'field_mapping_templates',
-        'header_row >= 0 AND header_row <= 100'
-    )
+    # [FIX] 添加错误处理，避免重复创建约束导致事务中止
+    try:
+        op.create_check_constraint(
+            'ck_template_header_row_range',
+            'field_mapping_templates',
+            'header_row >= 0 AND header_row <= 100'
+        )
+        print("[OK] CHECK 约束 ck_template_header_row_range 创建成功")
+    except Exception as e:
+        # [FIX] 如果约束已存在，跳过
+        error_msg = str(e).lower()
+        if 'already exists' in error_msg or 'duplicate' in error_msg:
+            print("[SKIP] CHECK 约束 ck_template_header_row_range 已存在")
+        else:
+            # 其他错误需要重新抛出
+            raise
     
     # 4. 添加注释（PostgreSQL）
     op.execute("""

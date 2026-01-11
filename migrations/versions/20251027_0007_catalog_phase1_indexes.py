@@ -34,8 +34,8 @@ def upgrade() -> None:
         unique=False
     )
     
-    # 2. GIN 索引：file_metadata（JSONB 列，支持 JSON 查询）
-    # 注意：仅当列类型为 JSONB 时创建 GIN 索引
+    # 2. GIN 索引：file_metadata（仅当列类型为 JSONB 时创建）
+    # [FIX] PostgreSQL GIN 索引只能用于 jsonb 类型，不能用于 json 类型
     try:
         conn = op.get_bind()
         # 检查列类型
@@ -47,16 +47,30 @@ def upgrade() -> None:
         """))
         row = result.fetchone()
         
-        if row and row[0] in ('jsonb', 'json'):
+        # [FIX] 只对 jsonb 类型创建 GIN 索引，json 类型不支持 GIN
+        if row and row[0] == 'jsonb':
             op.execute("""
                 CREATE INDEX IF NOT EXISTS ix_catalog_files_file_metadata_gin 
                 ON catalog_files USING gin (file_metadata)
             """)
+            print("[OK] file_metadata GIN 索引创建成功")
+        elif row and row[0] == 'json':
+            print("[SKIP] file_metadata 列为 json 类型，不支持 GIN 索引（需要 jsonb 类型）")
+        else:
+            print(f"[SKIP] file_metadata 列类型为 {row[0] if row else 'unknown'}，跳过 GIN 索引")
     except Exception as e:
-        print(f"跳过 file_metadata GIN 索引（可能不是 JSONB 列）: {e}")
+        # [FIX] 如果事务被中止，需要回滚
+        try:
+            conn = op.get_bind()
+            conn.rollback()
+        except:
+            pass
+        print(f"[SKIP] 跳过 file_metadata GIN 索引: {e}")
     
-    # 3. GIN 索引：validation_errors（JSONB 列）
+    # 3. GIN 索引：validation_errors（仅当列类型为 JSONB 时创建）
+    # [FIX] PostgreSQL GIN 索引只能用于 jsonb 类型，不能用于 json 类型
     try:
+        # [FIX] 重新获取连接，确保事务正常
         conn = op.get_bind()
         result = conn.execute(sa.text("""
             SELECT data_type 
@@ -66,29 +80,84 @@ def upgrade() -> None:
         """))
         row = result.fetchone()
         
-        if row and row[0] in ('jsonb', 'json'):
+        # [FIX] 只对 jsonb 类型创建 GIN 索引，json 类型不支持 GIN
+        if row and row[0] == 'jsonb':
             op.execute("""
                 CREATE INDEX IF NOT EXISTS ix_catalog_files_validation_errors_gin 
                 ON catalog_files USING gin (validation_errors)
             """)
+            print("[OK] validation_errors GIN 索引创建成功")
+        elif row and row[0] == 'json':
+            print("[SKIP] validation_errors 列为 json 类型，不支持 GIN 索引（需要 jsonb 类型）")
+        else:
+            print(f"[SKIP] validation_errors 列类型为 {row[0] if row else 'unknown'}，跳过 GIN 索引")
     except Exception as e:
-        print(f"跳过 validation_errors GIN 索引（可能不是 JSONB 列）: {e}")
+        # [FIX] 如果事务被中止，需要回滚
+        try:
+            conn = op.get_bind()
+            conn.rollback()
+        except:
+            pass
+        print(f"[SKIP] 跳过 validation_errors GIN 索引: {e}")
     
     # 4. CHECK 约束：date_from <= date_to
-    op.create_check_constraint(
-        'ck_catalog_files_date_range',
-        'catalog_files',
-        'date_from IS NULL OR date_to IS NULL OR date_from <= date_to'
-    )
+    # [FIX] 确保事务正常，如果之前有错误，需要重新开始
+    try:
+        conn = op.get_bind()
+        # 测试连接是否正常
+        conn.execute(sa.text("SELECT 1"))
+    except Exception:
+        # 如果连接异常，尝试回滚
+        try:
+            conn = op.get_bind()
+            conn.rollback()
+        except:
+            pass
+    
+    try:
+        op.create_check_constraint(
+            'ck_catalog_files_date_range',
+            'catalog_files',
+            'date_from IS NULL OR date_to IS NULL OR date_from <= date_to'
+        )
+        print("[OK] CHECK 约束 ck_catalog_files_date_range 创建成功")
+    except Exception as e:
+        # [FIX] 如果约束已存在，跳过
+        error_msg = str(e).lower()
+        if 'already exists' in error_msg or 'duplicate' in error_msg:
+            print("[SKIP] CHECK 约束 ck_catalog_files_date_range 已存在")
+        else:
+            # 其他错误需要回滚并重新抛出
+            try:
+                conn = op.get_bind()
+                conn.rollback()
+            except:
+                pass
+            raise
     
     # 5. CHECK 约束：status 枚举值
-    op.create_check_constraint(
-        'ck_catalog_files_status',
-        'catalog_files',
-        "status IN ('pending', 'validated', 'ingested', 'partial_success', 'failed', 'quarantined')"
-    )
+    try:
+        op.create_check_constraint(
+            'ck_catalog_files_status',
+            'catalog_files',
+            "status IN ('pending', 'validated', 'ingested', 'partial_success', 'failed', 'quarantined')"
+        )
+        print("[OK] CHECK 约束 ck_catalog_files_status 创建成功")
+    except Exception as e:
+        # [FIX] 如果约束已存在，跳过
+        error_msg = str(e).lower()
+        if 'already exists' in error_msg or 'duplicate' in error_msg:
+            print("[SKIP] CHECK 约束 ck_catalog_files_status 已存在")
+        else:
+            # 其他错误需要回滚并重新抛出
+            try:
+                conn = op.get_bind()
+                conn.rollback()
+            except:
+                pass
+            raise
     
-    print("✓ 第一阶段索引与约束优化完成")
+    print("[OK] 第一阶段索引与约束优化完成")
 
 
 def downgrade() -> None:
