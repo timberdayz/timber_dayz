@@ -179,12 +179,24 @@ if [ -z "${BACKEND_TAG}" ] || [ -z "${FRONTEND_TAG}" ]; then
   exit 1
 fi
 
+# [FIX] 额外清理：确保 tag 不包含换行符、制表符等控制字符
+BACKEND_TAG="$(echo "${BACKEND_TAG}" | tr -d '\r\n\t' | xargs)"
+FRONTEND_TAG="$(echo "${FRONTEND_TAG}" | tr -d '\r\n\t' | xargs)"
+
 # [FIX] 验证 tag 不包含特殊字符（防止 YAML 注入）
 if echo "${BACKEND_TAG}" | grep -qE '[^a-zA-Z0-9._-]' || echo "${FRONTEND_TAG}" | grep -qE '[^a-zA-Z0-9._-]'; then
   echo "[FAIL] Tag contains invalid characters: Backend='${BACKEND_TAG}', Frontend='${FRONTEND_TAG}'"
   echo "[INFO] Tags must only contain alphanumeric characters, dots, underscores, and hyphens"
   exit 1
 fi
+
+# [DEBUG] 显示变量值（用于诊断）
+echo "[DEBUG] Variables before YAML generation:"
+echo "  GHCR_REGISTRY='${GHCR_REGISTRY}'"
+echo "  IMAGE_NAME_BACKEND='${IMAGE_NAME_BACKEND}'"
+echo "  IMAGE_NAME_FRONTEND='${IMAGE_NAME_FRONTEND}'"
+echo "  BACKEND_TAG='${BACKEND_TAG}' (length: ${#BACKEND_TAG})"
+echo "  FRONTEND_TAG='${FRONTEND_TAG}' (length: ${#FRONTEND_TAG})"
 
 # [FIX] 使用 cat 和 heredoc 创建 YAML（更安全，避免 printf 转义问题）
 # [FIX] 显式添加 networks 配置，确保一次性容器（docker-compose run）能正确连接到 Docker 网络
@@ -200,6 +212,11 @@ services:
     networks:
       - erp_network
 EOF
+
+# [DEBUG] 显示生成的 YAML 内容（用于诊断）
+echo "[DEBUG] Generated docker-compose.deploy.yml content:"
+cat docker-compose.deploy.yml
+echo "[DEBUG] End of docker-compose.deploy.yml"
 
 echo "[OK] Temporary compose file created"
 
