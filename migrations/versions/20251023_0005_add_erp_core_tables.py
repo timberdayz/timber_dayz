@@ -137,7 +137,7 @@ def upgrade() -> None:
         sa.Column('reorder_point', sa.Integer(), nullable=True),
         sa.Column('last_updated', sa.DateTime(), nullable=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=True),
-        sa.ForeignKeyConstraint(['product_id'], ['dim_product.product_surrogate_id'], ),
+        sa.ForeignKeyConstraint(['product_id'], ['dim_product_master.product_id'], ),
         sa.PrimaryKeyConstraint('inventory_id'),
         sa.UniqueConstraint('platform_code', 'shop_id', 'warehouse_code', 'product_id', name='uq_inventory_location_product')
     )
@@ -163,7 +163,7 @@ def upgrade() -> None:
         sa.Column('notes', sa.String(length=500), nullable=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=True),
         sa.ForeignKeyConstraint(['inventory_id'], ['fact_inventory.inventory_id'], ),
-        sa.ForeignKeyConstraint(['product_id'], ['dim_product.product_surrogate_id'], ),
+        sa.ForeignKeyConstraint(['product_id'], ['dim_product_master.product_id'], ),
         sa.PrimaryKeyConstraint('transaction_id')
     )
     op.create_index('idx_inv_trans_reference', 'fact_inventory_transactions', ['reference_type', 'reference_id'])
@@ -271,7 +271,7 @@ def upgrade() -> None:
         sa.Column('refund_amount', sa.Numeric(precision=15, scale=2), nullable=True),
         sa.Column('refund_amount_cny', sa.Numeric(precision=15, scale=2), nullable=True),
         sa.ForeignKeyConstraint(['order_id'], ['fact_sales_orders.id'], ),
-        sa.ForeignKeyConstraint(['product_id'], ['dim_product.product_surrogate_id'], ),
+        sa.ForeignKeyConstraint(['product_id'], ['dim_product_master.product_id'], ),
         sa.PrimaryKeyConstraint('item_id')
     )
     op.create_index('idx_items_order', 'fact_order_items', ['order_id'])
