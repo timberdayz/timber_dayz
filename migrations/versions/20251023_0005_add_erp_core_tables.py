@@ -5,6 +5,7 @@ Revises: 20251016_0004
 Create Date: 2025-10-23 14:00:00.000000
 
 新增表：
+- dim_product_master - 产品主表（必需，其他表依赖）
 - dim_users, dim_roles - 用户权限管理
 - fact_inventory, fact_inventory_transactions - 库存管理
 - fact_accounts_receivable, fact_payment_receipts, fact_expenses - 财务管理
@@ -17,6 +18,7 @@ Create Date: 2025-10-23 14:00:00.000000
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -29,8 +31,32 @@ depends_on = None
 def upgrade() -> None:
     """应用迁移 - 创建新表和添加新字段"""
     
+    # ==================== 0. 创建产品主表（必需，其他表依赖）====================
+    print("[0/11] Creating dim_product_master table (required for foreign keys)...")
+    
+    # 检查表是否已存在（避免重复创建）
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = inspector.get_table_names()
+    
+    if 'dim_product_master' not in existing_tables:
+        op.create_table(
+            'dim_product_master',
+            sa.Column('product_id', sa.Integer(), nullable=False, autoincrement=True),
+            sa.Column('company_sku', sa.String(length=128), nullable=False),
+            sa.Column('product_title', sa.String(length=512), nullable=True),
+            sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+            sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+            sa.PrimaryKeyConstraint('product_id'),
+            sa.UniqueConstraint('company_sku')
+        )
+        op.create_index('idx_product_master_sku', 'dim_product_master', ['company_sku'])
+        print("[OK] dim_product_master table created")
+    else:
+        print("[SKIP] dim_product_master table already exists")
+    
     # ==================== 1. 创建用户权限表 ====================
-    print("[1/10] Creating user permission tables...")
+    print("[1/11] Creating user permission tables...")
     
     # 创建角色表
     op.create_table(
@@ -91,7 +117,7 @@ def upgrade() -> None:
     )
     
     # ==================== 2. 创建审计日志表 ====================
-    print("[2/10] Creating audit log table...")
+    print("[2/11] Creating audit log table...")
     
     op.create_table(
         'fact_audit_logs',
@@ -117,7 +143,7 @@ def upgrade() -> None:
     op.create_index('idx_audit_recent', 'fact_audit_logs', ['created_at'])
     
     # ==================== 3. 创建库存管理表 ====================
-    print("[3/10] Creating inventory tables...")
+    print("[3/11] Creating inventory tables...")
     
     # 创建库存主表
     op.create_table(
@@ -170,7 +196,7 @@ def upgrade() -> None:
     op.create_index('idx_inv_trans_type_time', 'fact_inventory_transactions', ['transaction_type', 'transaction_time'])
     
     # ==================== 4. 创建财务管理表 ====================
-    print("[4/10] Creating finance tables...")
+    print("[4/11] Creating finance tables...")
     
     # 创建应收账款表
     op.create_table(
@@ -248,7 +274,7 @@ def upgrade() -> None:
     op.create_index('idx_expenses_category', 'fact_expenses', ['expense_category'])
     
     # ==================== 5. 创建订单明细表 ====================
-    print("[5/10] Creating order items table...")
+    print("[5/11] Creating order items table...")
     
     op.create_table(
         'fact_order_items',
@@ -279,7 +305,7 @@ def upgrade() -> None:
     op.create_index('idx_items_sku', 'fact_order_items', ['platform_sku'])
     
     # ==================== 6. 增强 fact_sales_orders 表 ====================
-    print("[6/10] Enhancing fact_sales_orders table...")
+    print("[6/11] Enhancing fact_sales_orders table...")
     
     # 添加平台费用字段
     op.add_column('fact_sales_orders', sa.Column('platform_commission', sa.Numeric(precision=15, scale=2), nullable=True))
@@ -350,6 +376,14 @@ def downgrade() -> None:
     op.drop_table('user_roles')
     op.drop_table('dim_users')
     op.drop_table('dim_roles')
+    
+    # 删除 dim_product_master 表（在其他表删除后）
+    # 注意：只在表存在时删除，避免错误
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = inspector.get_table_names()
+    if 'dim_product_master' in existing_tables:
+        op.drop_table('dim_product_master')
     
     print("[OK] Rollback completed!")
 

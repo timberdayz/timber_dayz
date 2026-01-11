@@ -107,16 +107,20 @@ pull_image_with_fallback() {
         echo "${CNB_TOKEN}" | docker login "${CNB_REGISTRY}" -u cnb --password-stdin >&2 || true
       fi
       
-      # 尝试从 CNB 拉取（最多3次重试）
+      # 尝试从 CNB 拉取（最多3次重试，每次超时5分钟）
       for retry in 1 2 3; do
         echo "[INFO] CNB pull attempt ${retry}/3 for ${cnb_image}..." >&2
-        docker pull "${cnb_image}" >&2 || true
+        # [FIX] 添加超时机制（5分钟），避免无限等待
+        timeout 300 docker pull "${cnb_image}" >&2 || true
         if docker image inspect "${cnb_image}" >/dev/null 2>&1; then
           echo "[OK] Image pulled from CNB successfully with tag ${primary_tag}" >&2
           echo "${primary_tag}"  # stdout: only tag
           return 0
         fi
-        sleep 5
+        if [ ${retry} -lt 3 ]; then
+          echo "[WARN] CNB pull attempt ${retry}/3 failed, retrying in 10 seconds..." >&2
+          sleep 10
+        fi
       done
       
       # CNB 拉取失败，尝试 fallback tag
@@ -125,13 +129,17 @@ pull_image_with_fallback() {
         echo "[WARN] CNB primary tag ${primary_tag} failed, trying fallback tag ${fallback_tag}..." >&2
         for retry in 1 2 3; do
           echo "[INFO] CNB fallback pull attempt ${retry}/3 for ${cnb_image_fallback}..." >&2
-          docker pull "${cnb_image_fallback}" >&2 || true
+          # [FIX] 添加超时机制（5分钟），避免无限等待
+          timeout 300 docker pull "${cnb_image_fallback}" >&2 || true
           if docker image inspect "${cnb_image_fallback}" >/dev/null 2>&1; then
             echo "[OK] Image pulled from CNB successfully with fallback tag ${fallback_tag}" >&2
             echo "${fallback_tag}"  # stdout: only tag
             return 0
           fi
-          sleep 5
+          if [ ${retry} -lt 3 ]; then
+            echo "[WARN] CNB fallback pull attempt ${retry}/3 failed, retrying in 10 seconds..." >&2
+            sleep 10
+          fi
         done
       fi
       
@@ -144,13 +152,17 @@ pull_image_with_fallback() {
   echo "[INFO] Attempting to pull ${full_image} from GHCR..." >&2
   for retry in 1 2 3; do
     echo "[INFO] GHCR pull attempt ${retry}/3 for ${full_image}..." >&2
-    docker pull "${full_image}" >&2 || true
+    # [FIX] 添加超时机制（5分钟），避免无限等待
+    timeout 300 docker pull "${full_image}" >&2 || true
     if docker image inspect "${full_image}" >/dev/null 2>&1; then
       echo "[OK] Image pulled successfully with tag ${primary_tag}" >&2
       echo "${primary_tag}"  # stdout: only tag
       return 0
     fi
-    sleep 5
+    if [ ${retry} -lt 3 ]; then
+      echo "[WARN] GHCR pull attempt ${retry}/3 failed, retrying in 10 seconds..." >&2
+      sleep 10
+    fi
   done
 
   if [ "${primary_tag}" != "${fallback_tag}" ]; then
@@ -158,13 +170,17 @@ pull_image_with_fallback() {
     echo "[WARN] Primary tag ${primary_tag} failed, trying fallback tag ${fallback_tag}..." >&2
     for retry in 1 2 3; do
       echo "[INFO] GHCR fallback pull attempt ${retry}/3 for ${full_image_fallback}..." >&2
-      docker pull "${full_image_fallback}" >&2 || true
+      # [FIX] 添加超时机制（5分钟），避免无限等待
+      timeout 300 docker pull "${full_image_fallback}" >&2 || true
       if docker image inspect "${full_image_fallback}" >/dev/null 2>&1; then
         echo "[OK] Image pulled successfully with fallback tag ${fallback_tag}" >&2
         echo "${fallback_tag}"  # stdout: only tag
         return 0
       fi
-      sleep 5
+      if [ ${retry} -lt 3 ]; then
+        echo "[WARN] GHCR fallback pull attempt ${retry}/3 failed, retrying in 10 seconds..." >&2
+        sleep 10
+      fi
     done
   fi
 
