@@ -41,7 +41,7 @@ def upgrade() -> None:
         sa.Column('data_domain', sa.String(length=64), nullable=True),
         
         # 处理状态
-        sa.Column('is_resolved', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('is_resolved', sa.Boolean(), nullable=False, server_default='false'),
         sa.Column('resolved_at', sa.DateTime(), nullable=True),
         sa.Column('resolution_note', sa.Text(), nullable=True),
         
