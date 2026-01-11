@@ -55,6 +55,33 @@ def upgrade() -> None:
     else:
         print("[SKIP] dim_product_master table already exists")
     
+    # ==================== 0.5. 创建销售订单表（必需，财务表依赖）====================
+    print("[0.5/11] Creating fact_sales_orders table (required for finance tables)...")
+    
+    if 'fact_sales_orders' not in existing_tables:
+        op.create_table(
+            'fact_sales_orders',
+            sa.Column('id', sa.BigInteger(), nullable=False, autoincrement=True),
+            sa.Column('platform_code', sa.String(length=50), nullable=False),
+            sa.Column('shop_id', sa.String(length=100), nullable=False),
+            sa.Column('order_id', sa.String(length=150), nullable=False),
+            sa.Column('order_ts', sa.DateTime(), nullable=True),
+            sa.Column('order_date', sa.Date(), nullable=True),
+            sa.Column('currency', sa.String(length=10), nullable=True),
+            sa.Column('gmv', sa.Numeric(precision=15, scale=2), nullable=True),
+            sa.Column('order_status', sa.String(length=50), nullable=True),
+            sa.Column('payment_status', sa.String(length=50), nullable=True),
+            sa.Column('buyer_id', sa.String(length=150), nullable=True),
+            sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=True),
+            sa.PrimaryKeyConstraint('id'),
+            sa.UniqueConstraint('platform_code', 'shop_id', 'order_id', name='uq_fact_sales_orders_order')
+        )
+        op.create_index('idx_fact_sales_orders_platform_shop', 'fact_sales_orders', ['platform_code', 'shop_id'])
+        op.create_index('idx_fact_sales_orders_date', 'fact_sales_orders', ['order_date'])
+        print("[OK] fact_sales_orders table created")
+    else:
+        print("[SKIP] fact_sales_orders table already exists")
+    
     # ==================== 1. 创建用户权限表 ====================
     print("[1/11] Creating user permission tables...")
     
@@ -377,11 +404,13 @@ def downgrade() -> None:
     op.drop_table('dim_users')
     op.drop_table('dim_roles')
     
-    # 删除 dim_product_master 表（在其他表删除后）
+    # 删除 dim_product_master 和 fact_sales_orders 表（在其他表删除后）
     # 注意：只在表存在时删除，避免错误
     conn = op.get_bind()
     inspector = inspect(conn)
     existing_tables = inspector.get_table_names()
+    if 'fact_sales_orders' in existing_tables:
+        op.drop_table('fact_sales_orders')
     if 'dim_product_master' in existing_tables:
         op.drop_table('dim_product_master')
     
