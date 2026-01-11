@@ -391,7 +391,7 @@ jobs:
       - name: Determine deploy tag (manual input)
         id: image-tag
         run: |
-            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
           echo "Deploying with tag: ${{ github.event.inputs.image_tag }}"
 
       - name: Set up SSH

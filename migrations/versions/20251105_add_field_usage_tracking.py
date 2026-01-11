@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = 'add_field_usage_tracking'
-down_revision = None  # 将被Alembic自动设置
+down_revision = '20251027_0011'  # 前一个迁移：20251027_0011_create_product_images
 branch_labels = None
 depends_on = None
 

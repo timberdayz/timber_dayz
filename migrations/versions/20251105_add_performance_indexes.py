@@ -21,7 +21,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '20251105_performance_indexes'
-down_revision = None  # 或设置为上一个迁移的revision
+down_revision = '20251027_0011'  # 前一个迁移：20251027_0011_create_product_images
 branch_labels = None
 depends_on = None
 
