@@ -187,13 +187,18 @@ if echo "${BACKEND_TAG}" | grep -qE '[^a-zA-Z0-9._-]' || echo "${FRONTEND_TAG}" 
 fi
 
 # [FIX] 使用 cat 和 heredoc 创建 YAML（更安全，避免 printf 转义问题）
+# [FIX] 显式添加 networks 配置，确保一次性容器（docker-compose run）能正确连接到 Docker 网络
 cat > docker-compose.deploy.yml <<EOF
 services:
   backend:
     image: ${GHCR_REGISTRY}/${IMAGE_NAME_BACKEND}:${BACKEND_TAG}
+    networks:
+      - erp_network
   frontend:
     image: ${GHCR_REGISTRY}/${IMAGE_NAME_FRONTEND}:${FRONTEND_TAG}
     ports: []
+    networks:
+      - erp_network
 EOF
 
 echo "[OK] Temporary compose file created"

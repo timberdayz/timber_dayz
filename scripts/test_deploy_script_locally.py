@@ -148,13 +148,17 @@ def test_yaml_generation():
     
     safe_print("[OK] Tag validation passed")
     
-    # 生成 YAML（与实际脚本一致）
+    # 生成 YAML（与实际脚本一致，包含 networks 配置）
     yaml_content = f"""services:
   backend:
     image: {ghcr_registry}/{image_name_backend}:{backend_tag}
+    networks:
+      - erp_network
   frontend:
     image: {ghcr_registry}/{image_name_frontend}:{frontend_tag}
     ports: []
+    networks:
+      - erp_network
 """
     
     safe_print("\nGenerated YAML content:")
@@ -168,6 +172,14 @@ def test_yaml_generation():
         safe_print("[FAIL] YAML missing 'image:' key")
         return False
     
+    # [FIX] 验证 networks 配置（新增）
+    if "networks:" not in yaml_content:
+        safe_print("[FAIL] YAML missing 'networks:' configuration")
+        return False
+    if "erp_network" not in yaml_content:
+        safe_print("[FAIL] YAML missing 'erp_network' in networks")
+        return False
+    
     # 检查每行是否以空格或字母开头（基本 YAML 格式检查）
     lines = yaml_content.strip().split('\n')
     for i, line in enumerate(lines):
@@ -176,6 +188,7 @@ def test_yaml_generation():
             return False
     
     safe_print("[OK] YAML structure valid")
+    safe_print("[OK] YAML networks configuration valid")
     return True
 
 def test_docker_compose_validation():

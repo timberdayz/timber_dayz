@@ -75,15 +75,19 @@ if echo "${BACKEND_TAG}" | grep -qE '[^a-zA-Z0-9._-]' || echo "${FRONTEND_TAG}" 
 fi
 echo "[OK] Tag validation passed"
 
-# 生成 YAML（与实际脚本一致）
+# 生成 YAML（与实际脚本一致，包含 networks 配置）
 TEST_COMPOSE_FILE="/tmp/test-docker-compose.deploy.yml"
 cat > "${TEST_COMPOSE_FILE}" <<EOF
 services:
   backend:
     image: ${GHCR_REGISTRY}/${IMAGE_NAME_BACKEND}:${BACKEND_TAG}
+    networks:
+      - erp_network
   frontend:
     image: ${GHCR_REGISTRY}/${IMAGE_NAME_FRONTEND}:${FRONTEND_TAG}
     ports: []
+    networks:
+      - erp_network
 EOF
 
 echo "Generated YAML content:"
@@ -100,6 +104,17 @@ if ! grep -q "image:" "${TEST_COMPOSE_FILE}"; then
   exit 1
 fi
 echo "[OK] YAML structure valid"
+
+# [FIX] 验证 networks 配置（新增）
+if ! grep -q "networks:" "${TEST_COMPOSE_FILE}"; then
+  echo "[FAIL] YAML missing 'networks:' configuration"
+  exit 1
+fi
+if ! grep -q "erp_network" "${TEST_COMPOSE_FILE}"; then
+  echo "[FAIL] YAML missing 'erp_network' in networks"
+  exit 1
+fi
+echo "[OK] YAML networks configuration valid"
 
 # 如果有 docker-compose，验证语法
 if command -v docker-compose >/dev/null 2>&1; then
