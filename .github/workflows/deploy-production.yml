@@ -256,41 +256,68 @@ jobs:
           # compose 文件很小，对 5MB 带宽影响很小，不需要配置服务器 git 凭据
           echo "[INFO] Uploading compose files via SCP..."
 
-          # 1. 上传 docker-compose.yml（必需）
-          echo "[INFO] Uploading docker-compose.yml..."
-          scp -o StrictHostKeyChecking=no \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=10 \
-              docker-compose.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.yml || {
-            echo "[FAIL] Failed to upload docker-compose.yml"
-            exit 1
+          # [FIX] SCP 重试函数（处理网络连接不稳定问题）
+          scp_with_retry() {
+            local file="$1"
+            local remote_path="$2"
+            local max_retries=3
+            local retry_delay=5
+            
+            for i in $(seq 1 ${max_retries}); do
+              echo "[INFO] Upload attempt ${i}/${max_retries} for $(basename ${file})..."
+              if scp -o StrictHostKeyChecking=no \
+                  -o ServerAliveInterval=30 \
+                  -o ServerAliveCountMax=10 \
+                  -o ConnectTimeout=30 \
+                  "${file}" ${PRODUCTION_USER}@${PRODUCTION_HOST}:${remote_path}; then
+                echo "[OK] $(basename ${file}) uploaded successfully"
+                return 0
+              else
+                if [ ${i} -eq ${max_retries} ]; then
+                  echo "[FAIL] Failed to upload $(basename ${file}) after ${max_retries} attempts"
+                  echo "[INFO] Possible causes:"
+                  echo "  - SSH server is temporarily unavailable"
+                  echo "  - Network connectivity issues"
+                  echo "  - SSH connection limit reached"
+                  echo "[INFO] Please check server SSH service and network status"
+                  return 1
+                else
+                  echo "[WARN] Upload failed, retrying in ${retry_delay} seconds..."
+                  sleep ${retry_delay}
+                fi
+              fi
+            done
           }
-          echo "[OK] docker-compose.yml uploaded successfully"
+
+          # [FIX] 测试 SSH 连接（在上传前验证连接可用性）
+          echo "[INFO] Testing SSH connection..."
+          if ssh -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=10 \
+              -o BatchMode=yes \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+              "echo '[OK] SSH connection successful'" 2>/dev/null; then
+            echo "[OK] SSH connection test passed"
+          else
+            echo "[WARN] SSH connection test failed, but continuing with upload (may be transient issue)..."
+          fi
+
+          # 1. 上传 docker-compose.yml（必需）
+          if ! scp_with_retry docker-compose.yml ${PRODUCTION_PATH}/docker-compose.yml; then
+            exit 1
+          fi
 
           # 2. 上传 docker-compose.prod.yml（必需，如果存在）
           if [ -f "docker-compose.prod.yml" ]; then
-            echo "[INFO] Uploading docker-compose.prod.yml..."
-            scp -o StrictHostKeyChecking=no \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                docker-compose.prod.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.prod.yml || {
-              echo "[FAIL] Failed to upload docker-compose.prod.yml"
+            if ! scp_with_retry docker-compose.prod.yml ${PRODUCTION_PATH}/docker-compose.prod.yml; then
               exit 1
-            }
-            echo "[OK] docker-compose.prod.yml uploaded successfully"
+            fi
           else
             echo "[WARN] docker-compose.prod.yml not found, skipping..."
           fi
 
           # 3. 上传 docker-compose.cloud.yml（可选，如果存在）
           if [ -f "docker-compose.cloud.yml" ]; then
-            echo "[INFO] Uploading docker-compose.cloud.yml..."
-            if scp -o StrictHostKeyChecking=no \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                docker-compose.cloud.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.cloud.yml; then
-              echo "[OK] docker-compose.cloud.yml uploaded successfully"
-            else
+            if ! scp_with_retry docker-compose.cloud.yml ${PRODUCTION_PATH}/docker-compose.cloud.yml; then
               echo "[WARN] Failed to upload docker-compose.cloud.yml (optional file, continuing...)"
             fi
           else
@@ -299,29 +326,18 @@ jobs:
 
           # 4. 上传 docker-compose.metabase.yml（生产必需组件，如果存在）
           if [ -f "docker-compose.metabase.yml" ]; then
-            echo "[INFO] Uploading docker-compose.metabase.yml..."
-            scp -o StrictHostKeyChecking=no \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                docker-compose.metabase.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.metabase.yml || {
+            if ! scp_with_retry docker-compose.metabase.yml ${PRODUCTION_PATH}/docker-compose.metabase.yml; then
               echo "[FAIL] Failed to upload docker-compose.metabase.yml (required for production)"
               exit 1
-            }
-            echo "[OK] docker-compose.metabase.yml uploaded successfully"
+            fi
           else
             echo "[WARN] docker-compose.metabase.yml not found (required for production, deployment may fail if Metabase is not configured)"
           fi
 
           # 5. 上传远程部署脚本（方案A：避免在 workflow 中维护超长 bash -c 片段）
-          echo "[INFO] Uploading deploy_remote_production.sh..."
-          scp -o StrictHostKeyChecking=no \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=10 \
-              scripts/deploy_remote_production.sh ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/deploy_remote_production.sh || {
-            echo "[FAIL] Failed to upload deploy_remote_production.sh"
+          if ! scp_with_retry scripts/deploy_remote_production.sh ${PRODUCTION_PATH}/deploy_remote_production.sh; then
             exit 1
-          }
-          echo "[OK] deploy_remote_production.sh uploaded successfully"
+          fi
 
           echo "[OK] All compose files synced successfully via SCP"
 
@@ -406,48 +422,77 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
           echo "[INFO] Uploading compose files via SCP..."
-          scp -o StrictHostKeyChecking=no \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=10 \
-              docker-compose.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.yml || {
-            echo "[FAIL] Failed to upload docker-compose.yml"
-            exit 1
+
+          # [FIX] SCP 重试函数（处理网络连接不稳定问题）
+          scp_with_retry() {
+            local file="$1"
+            local remote_path="$2"
+            local max_retries=3
+            local retry_delay=5
+            
+            for i in $(seq 1 ${max_retries}); do
+              echo "[INFO] Upload attempt ${i}/${max_retries} for $(basename ${file})..."
+              if scp -o StrictHostKeyChecking=no \
+                  -o ServerAliveInterval=30 \
+                  -o ServerAliveCountMax=10 \
+                  -o ConnectTimeout=30 \
+                  "${file}" ${PRODUCTION_USER}@${PRODUCTION_HOST}:${remote_path}; then
+                echo "[OK] $(basename ${file}) uploaded successfully"
+                return 0
+              else
+                if [ ${i} -eq ${max_retries} ]; then
+                  echo "[FAIL] Failed to upload $(basename ${file}) after ${max_retries} attempts"
+                  echo "[INFO] Possible causes:"
+                  echo "  - SSH server is temporarily unavailable"
+                  echo "  - Network connectivity issues"
+                  echo "  - SSH connection limit reached"
+                  echo "[INFO] Please check server SSH service and network status"
+                  return 1
+                else
+                  echo "[WARN] Upload failed, retrying in ${retry_delay} seconds..."
+                  sleep ${retry_delay}
+                fi
+              fi
+            done
           }
+
+          # [FIX] 测试 SSH 连接（在上传前验证连接可用性）
+          echo "[INFO] Testing SSH connection..."
+          if ssh -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=10 \
+              -o BatchMode=yes \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+              "echo '[OK] SSH connection successful'" 2>/dev/null; then
+            echo "[OK] SSH connection test passed"
+          else
+            echo "[WARN] SSH connection test failed, but continuing with upload (may be transient issue)..."
+          fi
+
+          # 上传所有 compose 文件
+          if ! scp_with_retry docker-compose.yml ${PRODUCTION_PATH}/docker-compose.yml; then
+            exit 1
+          fi
           if [ -f "docker-compose.prod.yml" ]; then
-            scp -o StrictHostKeyChecking=no \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                docker-compose.prod.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.prod.yml || {
-              echo "[FAIL] Failed to upload docker-compose.prod.yml"
+            if ! scp_with_retry docker-compose.prod.yml ${PRODUCTION_PATH}/docker-compose.prod.yml; then
               exit 1
-            }
+            fi
           fi
           if [ -f "docker-compose.cloud.yml" ]; then
-            scp -o StrictHostKeyChecking=no \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                docker-compose.cloud.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.cloud.yml || {
+            if ! scp_with_retry docker-compose.cloud.yml ${PRODUCTION_PATH}/docker-compose.cloud.yml; then
               echo "[WARN] Failed to upload docker-compose.cloud.yml (optional file, continuing...)"
-            }
+            fi
           fi
           if [ -f "docker-compose.metabase.yml" ]; then
-            scp -o StrictHostKeyChecking=no \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                docker-compose.metabase.yml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/docker-compose.metabase.yml || {
+            if ! scp_with_retry docker-compose.metabase.yml ${PRODUCTION_PATH}/docker-compose.metabase.yml; then
               echo "[FAIL] Failed to upload docker-compose.metabase.yml (required for production)"
               exit 1
-            }
+            fi
           fi
 
           # 同步远程部署脚本（方案A：deploy-tag 与 deploy-manual 共用同一套部署逻辑）
-          scp -o StrictHostKeyChecking=no \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=10 \
-              scripts/deploy_remote_production.sh ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/deploy_remote_production.sh || {
-            echo "[FAIL] Failed to upload deploy_remote_production.sh"
+          if ! scp_with_retry scripts/deploy_remote_production.sh ${PRODUCTION_PATH}/deploy_remote_production.sh; then
             exit 1
-          }
+          fi
           echo "[OK] All compose files synced successfully via SCP"
 
       - name: Backup current deployment
