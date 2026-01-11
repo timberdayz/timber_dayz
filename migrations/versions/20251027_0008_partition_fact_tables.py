@@ -38,10 +38,51 @@ def upgrade() -> None:
     op.rename_table('fact_sales_orders', 'fact_sales_orders_old')
     
     # 2. 创建分区父表
+    # [FIX] PostgreSQL分区表要求：主键必须包含所有分区键列
+    # 原主键是 id，分区键是 order_date，需要改为复合主键 (id, order_date)
     op.execute("""
         CREATE TABLE fact_sales_orders (
-            LIKE fact_sales_orders_old INCLUDING ALL
+            LIKE fact_sales_orders_old INCLUDING DEFAULTS INCLUDING INDEXES
         ) PARTITION BY RANGE (order_date)
+    """)
+    
+    # [FIX] 删除旧主键和唯一约束（如果存在），添加包含分区键的复合主键和唯一约束
+    op.execute("""
+        DO $$
+        BEGIN
+            -- 删除旧主键（如果存在）
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint 
+                WHERE conname = 'fact_sales_orders_pkey' 
+                AND conrelid = 'fact_sales_orders'::regclass
+            ) THEN
+                ALTER TABLE fact_sales_orders DROP CONSTRAINT fact_sales_orders_pkey;
+            END IF;
+            
+            -- 删除旧唯一约束（如果存在）- PostgreSQL分区表要求唯一约束必须包含分区键
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint 
+                WHERE conname = 'uq_fact_sales_orders_order' 
+                AND conrelid = 'fact_sales_orders'::regclass
+            ) THEN
+                ALTER TABLE fact_sales_orders DROP CONSTRAINT uq_fact_sales_orders_order;
+            END IF;
+            
+            -- 添加新的复合主键（包含分区键 order_date）
+            ALTER TABLE fact_sales_orders 
+            ADD PRIMARY KEY (id, order_date);
+            
+            -- 添加新的唯一约束（包含分区键 order_date）
+            ALTER TABLE fact_sales_orders 
+            ADD CONSTRAINT uq_fact_sales_orders_order 
+            UNIQUE (platform_code, shop_id, order_id, order_date);
+        END $$;
+    """)
+    
+    # [FIX] 确保 order_date 列不为 NULL（分区键不能为 NULL）
+    op.execute("""
+        ALTER TABLE fact_sales_orders 
+        ALTER COLUMN order_date SET NOT NULL;
     """)
     
     # 3. 创建月分区（2024-2026）
@@ -78,9 +119,27 @@ def upgrade() -> None:
             """)
     
     # 4. 迁移数据（从旧表到分区表）
+    # [FIX] 确保只迁移 order_date 不为 NULL 的记录（分区键不能为 NULL）
     op.execute("""
         INSERT INTO fact_sales_orders 
         SELECT * FROM fact_sales_orders_old
+        WHERE order_date IS NOT NULL
+    """)
+    
+    # [FIX] 检查是否有 order_date 为 NULL 的记录需要处理
+    op.execute("""
+        DO $$
+        DECLARE
+            null_count INTEGER;
+        BEGIN
+            SELECT COUNT(*) INTO null_count 
+            FROM fact_sales_orders_old 
+            WHERE order_date IS NULL;
+            
+            IF null_count > 0 THEN
+                RAISE WARNING '发现 % 条 order_date 为 NULL 的记录，已跳过迁移', null_count;
+            END IF;
+        END $$;
     """)
     
     print("fact_sales_orders 分区迁移完成")
@@ -91,10 +150,17 @@ def upgrade() -> None:
     op.rename_table('fact_product_metrics', 'fact_product_metrics_old')
     
     # 2. 创建分区父表
+    # [NOTE] fact_product_metrics 的主键已经包含 metric_date，符合分区表要求
     op.execute("""
         CREATE TABLE fact_product_metrics (
             LIKE fact_product_metrics_old INCLUDING ALL
         ) PARTITION BY RANGE (metric_date)
+    """)
+    
+    # [FIX] 确保 metric_date 列不为 NULL（分区键不能为 NULL）
+    op.execute("""
+        ALTER TABLE fact_product_metrics 
+        ALTER COLUMN metric_date SET NOT NULL;
     """)
     
     # 3. 创建月分区（2024-2026）
@@ -127,9 +193,27 @@ def upgrade() -> None:
             """)
     
     # 4. 迁移数据
+    # [FIX] 确保只迁移 metric_date 不为 NULL 的记录（分区键不能为 NULL）
     op.execute("""
         INSERT INTO fact_product_metrics 
         SELECT * FROM fact_product_metrics_old
+        WHERE metric_date IS NOT NULL
+    """)
+    
+    # [FIX] 检查是否有 metric_date 为 NULL 的记录需要处理
+    op.execute("""
+        DO $$
+        DECLARE
+            null_count INTEGER;
+        BEGIN
+            SELECT COUNT(*) INTO null_count 
+            FROM fact_product_metrics_old 
+            WHERE metric_date IS NULL;
+            
+            IF null_count > 0 THEN
+                RAISE WARNING '发现 % 条 metric_date 为 NULL 的记录，已跳过迁移', null_count;
+            END IF;
+        END $$;
     """)
     
     print("fact_product_metrics 分区迁移完成")
