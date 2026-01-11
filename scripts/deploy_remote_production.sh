@@ -63,20 +63,91 @@ echo "[INFO] Logging in to ${GHCR_REGISTRY}..."
 docker login "${GHCR_REGISTRY}" -u "${GHCR_USER}" --password-stdin <<<"${GHCR_TOKEN}"
 echo "[OK] Logged in to ${GHCR_REGISTRY}"
 
+# [NEW] CNB 配置状态显示（混合模式：优先使用 CNB，失败时回退到 GHCR）
+echo "[INFO] CNB configuration (optional, for faster image pull in China):"
+if [ -n "${CNB_REGISTRY:-}" ] && [ -n "${CNB_TOKEN:-}" ]; then
+  echo "  CNB_REGISTRY: ${CNB_REGISTRY}"
+  echo "  CNB_TOKEN: ***set"
+  if [ -n "${CNB_IMAGE_NAME_BACKEND:-}" ] && [ -n "${CNB_IMAGE_NAME_FRONTEND:-}" ]; then
+    echo "  CNB_IMAGE_NAME_BACKEND: ${CNB_IMAGE_NAME_BACKEND}"
+    echo "  CNB_IMAGE_NAME_FRONTEND: ${CNB_IMAGE_NAME_FRONTEND}"
+    echo "[OK] CNB configuration complete, will use CNB as primary source (GHCR as fallback)"
+  else
+    echo "[WARN] CNB_IMAGE_NAME_BACKEND or CNB_IMAGE_NAME_FRONTEND not set, CNB pull disabled"
+  fi
+else
+  echo "[INFO] CNB not configured, will use GHCR only"
+fi
+
 pull_image_with_fallback() {
   local image_name="$1"
   local primary_tag="$2"
   local fallback_tag="${primary_tag#v}"
+  
+  # [NEW] 混合模式：优先从 CNB 拉取（如果配置了 CNB_REGISTRY 和 CNB_IMAGE_NAME）
+  # 注意：CNB 镜像路径格式：docker.cnb.cool/timberdayz/xihong_erp/backend 或 frontend
+  if [ -n "${CNB_REGISTRY:-}" ] && [ -n "${CNB_TOKEN:-}" ] && [ -n "${CNB_IMAGE_NAME_BACKEND:-}" ] && [ -n "${CNB_IMAGE_NAME_FRONTEND:-}" ]; then
+    # 根据 image_name 判断是 backend 还是 frontend
+    local cnb_image_name=""
+    if [ "${image_name}" = "${IMAGE_NAME_BACKEND}" ]; then
+      cnb_image_name="${CNB_IMAGE_NAME_BACKEND}"
+    elif [ "${image_name}" = "${IMAGE_NAME_FRONTEND}" ]; then
+      cnb_image_name="${CNB_IMAGE_NAME_FRONTEND}"
+    else
+      echo "[WARN] Unknown image name: ${image_name}, skipping CNB pull" >&2
+    fi
+    
+    if [ -n "${cnb_image_name}" ]; then
+      local cnb_image="${CNB_REGISTRY}/${cnb_image_name}:${primary_tag}"
+      echo "[INFO] Attempting to pull from CNB (primary source): ${cnb_image}..." >&2
+      
+      # 先尝试登录 CNB（如果还没有登录）
+      if ! docker info 2>/dev/null | grep -q "docker.cnb.cool" || ! docker image inspect "${cnb_image}" >/dev/null 2>&1; then
+        echo "[INFO] Logging in to CNB registry..." >&2
+        echo "${CNB_TOKEN}" | docker login "${CNB_REGISTRY}" -u cnb --password-stdin >&2 || true
+      fi
+      
+      # 尝试从 CNB 拉取（最多3次重试）
+      for retry in 1 2 3; do
+        echo "[INFO] CNB pull attempt ${retry}/3 for ${cnb_image}..." >&2
+        docker pull "${cnb_image}" >&2 || true
+        if docker image inspect "${cnb_image}" >/dev/null 2>&1; then
+          echo "[OK] Image pulled from CNB successfully with tag ${primary_tag}" >&2
+          echo "${primary_tag}"  # stdout: only tag
+          return 0
+        fi
+        sleep 5
+      done
+      
+      # CNB 拉取失败，尝试 fallback tag
+      if [ "${primary_tag}" != "${fallback_tag}" ]; then
+        local cnb_image_fallback="${CNB_REGISTRY}/${cnb_image_name}:${fallback_tag}"
+        echo "[WARN] CNB primary tag ${primary_tag} failed, trying fallback tag ${fallback_tag}..." >&2
+        for retry in 1 2 3; do
+          echo "[INFO] CNB fallback pull attempt ${retry}/3 for ${cnb_image_fallback}..." >&2
+          docker pull "${cnb_image_fallback}" >&2 || true
+          if docker image inspect "${cnb_image_fallback}" >/dev/null 2>&1; then
+            echo "[OK] Image pulled from CNB successfully with fallback tag ${fallback_tag}" >&2
+            echo "${fallback_tag}"  # stdout: only tag
+            return 0
+          fi
+          sleep 5
+        done
+      fi
+      
+      echo "[WARN] CNB pull failed, falling back to GHCR..." >&2
+    fi
+  fi
+  
+  # 方案2：从 GHCR 拉取（原有逻辑，作为备选）
   local full_image="${GHCR_REGISTRY}/${image_name}:${primary_tag}"
-
-  # [FIX] 所有日志输出到 stderr，stdout 只输出 tag（避免命令替换捕获日志）
-  echo "[INFO] Attempting to pull ${full_image}..." >&2
+  echo "[INFO] Attempting to pull ${full_image} from GHCR..." >&2
   for retry in 1 2 3; do
-    echo "[INFO] Pull attempt ${retry}/3 for ${full_image}..." >&2
+    echo "[INFO] GHCR pull attempt ${retry}/3 for ${full_image}..." >&2
     docker pull "${full_image}" >&2 || true
     if docker image inspect "${full_image}" >/dev/null 2>&1; then
       echo "[OK] Image pulled successfully with tag ${primary_tag}" >&2
-      echo "${primary_tag}"  # stdout: only tag (no newline/whitespace)
+      echo "${primary_tag}"  # stdout: only tag
       return 0
     fi
     sleep 5
@@ -86,11 +157,11 @@ pull_image_with_fallback() {
     local full_image_fallback="${GHCR_REGISTRY}/${image_name}:${fallback_tag}"
     echo "[WARN] Primary tag ${primary_tag} failed, trying fallback tag ${fallback_tag}..." >&2
     for retry in 1 2 3; do
-      echo "[INFO] Fallback pull attempt ${retry}/3 for ${full_image_fallback}..." >&2
+      echo "[INFO] GHCR fallback pull attempt ${retry}/3 for ${full_image_fallback}..." >&2
       docker pull "${full_image_fallback}" >&2 || true
       if docker image inspect "${full_image_fallback}" >/dev/null 2>&1; then
         echo "[OK] Image pulled successfully with fallback tag ${fallback_tag}" >&2
-        echo "${fallback_tag}"  # stdout: only tag (no newline/whitespace)
+        echo "${fallback_tag}"  # stdout: only tag
         return 0
       fi
       sleep 5
@@ -98,7 +169,7 @@ pull_image_with_fallback() {
   fi
 
   echo "[FAIL] Failed to pull image ${image_name} with tag ${primary_tag} (and fallback ${fallback_tag})" >&2
-  echo "[INFO] Please verify the tag exists in GHCR and server has network access." >&2
+  echo "[INFO] Please verify the tag exists in both CNB and GHCR, and server has network access." >&2
   return 1
 }
 

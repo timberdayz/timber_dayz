@@ -221,6 +221,53 @@ jobs:
             NODE_VERSION=18
             VITE_API_URL=${{ secrets.VITE_API_URL || 'http://localhost:8001' }}
 
+      # [NEW] 混合模式：同时推送到 CNB.cool（国内镜像仓库，加速部署）
+      - name: Log in to CNB Registry
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: docker.cnb.cool
+          username: cnb
+          password: ${{ secrets.CNB_TOKEN }}
+
+      - name: Push backend image to CNB
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # 获取镜像标签（从 ref 中提取，例如 v4.22.4）
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "[INFO] Pushing backend to CNB with tag: ${TAG}"
+          
+          # 从 GHCR 拉取镜像（刚构建的）
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${TAG}
+          
+          # 标记为 CNB 镜像
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${TAG} \
+            docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_BACKEND }}:${TAG}
+          
+          # 推送到 CNB
+          docker push docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_BACKEND }}:${TAG}
+          
+          echo "[OK] Backend image pushed to CNB successfully"
+
+      - name: Push frontend image to CNB
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # 获取镜像标签
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "[INFO] Pushing frontend to CNB with tag: ${TAG}"
+          
+          # 从 GHCR 拉取镜像（刚构建的）
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${TAG}
+          
+          # 标记为 CNB 镜像
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${TAG} \
+            docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_FRONTEND }}:${TAG}
+          
+          # 推送到 CNB
+          docker push docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_FRONTEND }}:${TAG}
+          
+          echo "[OK] Frontend image pushed to CNB successfully"
+
   deploy-tag:
     name: Deploy to Production (Tag Release)
     runs-on: ubuntu-latest
@@ -369,18 +416,25 @@ jobs:
         run: |
           # [FIX] 方案A：部署逻辑统一封装到脚本，避免超长 bash -c 片段导致引号/换行问题
           # 通过 stdin 传递 token，避免把 token 写进远程命令行参数
-          printf '%s\n' "${{ secrets.GITHUB_TOKEN }}" | ssh -o StrictHostKeyChecking=no \
+          # [NEW] 混合模式：同时传递 GHCR 和 CNB token，优先使用 CNB（国内更快）
+          printf '%s\n%s\n' "${{ secrets.GITHUB_TOKEN }}" "${{ secrets.CNB_TOKEN }}" | ssh -o StrictHostKeyChecking=no \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
             ${PRODUCTION_USER}@${PRODUCTION_HOST} \
             "bash -c 'set -e; cd \"${PRODUCTION_PATH}\"; \
-              read -r GHCR_TOKEN; export GHCR_TOKEN; \
+              read -r GHCR_TOKEN; \
+              read -r CNB_TOKEN; \
+              export GHCR_TOKEN; \
+              export CNB_TOKEN; \
               chmod +x ./deploy_remote_production.sh; \
               export GHCR_REGISTRY=\"${{ env.REGISTRY }}\"; \
               export GHCR_USER=\"${{ github.actor }}\"; \
               export IMAGE_NAME_BACKEND=\"${{ env.IMAGE_NAME_BACKEND }}\"; \
               export IMAGE_NAME_FRONTEND=\"${{ env.IMAGE_NAME_FRONTEND }}\"; \
               export IMAGE_TAG=\"${IMAGE_TAG}\"; \
+              export CNB_REGISTRY=\"${{ secrets.CNB_REGISTRY }}\"; \
+              export CNB_IMAGE_NAME_BACKEND=\"${{ secrets.CNB_IMAGE_NAME_BACKEND }}\"; \
+              export CNB_IMAGE_NAME_FRONTEND=\"${{ secrets.CNB_IMAGE_NAME_FRONTEND }}\"; \
               bash ./deploy_remote_production.sh'"
 
   deploy-manual:
@@ -521,18 +575,25 @@ jobs:
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
           # [FIX] 方案A：与 deploy-tag 使用同一脚本，确保手动部署/回滚路径与自动发布一致
-          printf '%s\n' "${{ secrets.GITHUB_TOKEN }}" | ssh -o StrictHostKeyChecking=no \
+          # [NEW] 混合模式：同时传递 GHCR 和 CNB token，优先使用 CNB（国内更快）
+          printf '%s\n%s\n' "${{ secrets.GITHUB_TOKEN }}" "${{ secrets.CNB_TOKEN }}" | ssh -o StrictHostKeyChecking=no \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
             ${PRODUCTION_USER}@${PRODUCTION_HOST} \
             "bash -c 'set -e; cd \"${PRODUCTION_PATH}\"; \
-              read -r GHCR_TOKEN; export GHCR_TOKEN; \
+              read -r GHCR_TOKEN; \
+              read -r CNB_TOKEN; \
+              export GHCR_TOKEN; \
+              export CNB_TOKEN; \
               chmod +x ./deploy_remote_production.sh; \
               export GHCR_REGISTRY=\"${{ env.REGISTRY }}\"; \
               export GHCR_USER=\"${{ github.actor }}\"; \
               export IMAGE_NAME_BACKEND=\"${{ env.IMAGE_NAME_BACKEND }}\"; \
               export IMAGE_NAME_FRONTEND=\"${{ env.IMAGE_NAME_FRONTEND }}\"; \
               export IMAGE_TAG=\"${IMAGE_TAG}\"; \
+              export CNB_REGISTRY=\"${{ secrets.CNB_REGISTRY }}\"; \
+              export CNB_IMAGE_NAME_BACKEND=\"${{ secrets.CNB_IMAGE_NAME_BACKEND }}\"; \
+              export CNB_IMAGE_NAME_FRONTEND=\"${{ secrets.CNB_IMAGE_NAME_FRONTEND }}\"; \
               bash ./deploy_remote_production.sh'"
 
       - name: Health check verification
