@@ -38,11 +38,22 @@ def upgrade() -> None:
     ]
     
     # 为每个表添加currency_code字段和索引
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+    
     for table_name in tables:
+        # 检查表是否存在
+        if table_name not in existing_tables:
+            print(f"[SKIP] 表 {table_name} 不存在，跳过")
+            continue
+        
         # ⭐ 检查字段是否已存在（避免重复添加）
-        conn = op.get_bind()
-        inspector = sa.inspect(conn)
-        columns = [col['name'] for col in inspector.get_columns(table_name)]
+        try:
+            columns = [col['name'] for col in inspector.get_columns(table_name)]
+        except Exception as e:
+            print(f"[SKIP] 无法获取表 {table_name} 的列信息: {e}")
+            continue
         
         if 'currency_code' not in columns:
             # 添加currency_code字段

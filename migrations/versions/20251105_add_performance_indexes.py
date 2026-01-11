@@ -28,70 +28,92 @@ depends_on = None
 
 def upgrade() -> None:
     """创建性能优化索引"""
+    from sqlalchemy import inspect
+    
+    conn = op.get_bind()
+    inspector = inspect(conn)
     
     # 1. 字段辞典复合索引
-    op.create_index(
-        'ix_field_dict_composite',
-        'field_mapping_dictionary',
-        ['data_domain', 'version', 'status'],
-        unique=False
-    )
+    # 检查索引是否已存在
+    existing_indexes = [idx['name'] for idx in inspector.get_indexes('field_mapping_dictionary')]
+    if 'ix_field_dict_composite' not in existing_indexes:
+        op.create_index(
+            'ix_field_dict_composite',
+            'field_mapping_dictionary',
+            ['data_domain', 'version', 'status'],
+            unique=False
+        )
     
     # 2. 字段辞典Pattern索引
-    op.create_index(
-        'ix_field_dict_pattern',
-        'field_mapping_dictionary',
-        ['is_pattern_based'],
-        unique=False
-    )
+    # 检查列是否存在（is_pattern_based列可能还未创建）
+    existing_columns = [col['name'] for col in inspector.get_columns('field_mapping_dictionary')]
+    if 'is_pattern_based' in existing_columns:
+        # 检查索引是否已存在
+        if 'ix_field_dict_pattern' not in existing_indexes:
+            op.create_index(
+                'ix_field_dict_pattern',
+                'field_mapping_dictionary',
+                ['is_pattern_based'],
+                unique=False
+            )
+    else:
+        print("[WARNING] 列 is_pattern_based 不存在，跳过 ix_field_dict_pattern 索引创建")
     
     # 3. 订单日期+平台复合索引
-    op.create_index(
-        'ix_orders_date_platform',
-        'fact_orders',
-        ['order_date_local', 'platform_code'],
-        unique=False
-    )
+    existing_indexes = [idx['name'] for idx in inspector.get_indexes('fact_orders')]
+    if 'ix_orders_date_platform' not in existing_indexes:
+        op.create_index(
+            'ix_orders_date_platform',
+            'fact_orders',
+            ['order_date_local', 'platform_code'],
+            unique=False
+        )
     
     # 4. 订单店铺+日期索引
-    op.create_index(
-        'ix_orders_shop_date',
-        'fact_orders',
-        ['shop_id', 'order_date_local'],
-        unique=False
-    )
+    if 'ix_orders_shop_date' not in existing_indexes:
+        op.create_index(
+            'ix_orders_shop_date',
+            'fact_orders',
+            ['shop_id', 'order_date_local'],
+            unique=False
+        )
     
     # 5. 订单状态索引
-    op.create_index(
-        'ix_orders_status',
-        'fact_orders',
-        ['order_status'],
-        unique=False
-    )
+    if 'ix_orders_status' not in existing_indexes:
+        op.create_index(
+            'ix_orders_status',
+            'fact_orders',
+            ['order_status'],
+            unique=False
+        )
     
     # 6. 产品指标日期范围索引
-    op.create_index(
-        'ix_metrics_date_range',
-        'fact_product_metrics',
-        ['metric_date', 'platform_code', 'shop_id'],
-        unique=False
-    )
+    existing_indexes = [idx['name'] for idx in inspector.get_indexes('fact_product_metrics')]
+    if 'ix_metrics_date_range' not in existing_indexes:
+        op.create_index(
+            'ix_metrics_date_range',
+            'fact_product_metrics',
+            ['metric_date', 'platform_code', 'shop_id'],
+            unique=False
+        )
     
     # 7. 产品SKU索引
-    op.create_index(
-        'ix_metrics_sku_date',
-        'fact_product_metrics',
-        ['platform_sku', 'metric_date'],
-        unique=False
-    )
+    if 'ix_metrics_sku_date' not in existing_indexes:
+        op.create_index(
+            'ix_metrics_sku_date',
+            'fact_product_metrics',
+            ['platform_sku', 'metric_date'],
+            unique=False
+        )
     
     # 8. 产品粒度索引
-    op.create_index(
-        'ix_metrics_granularity',
-        'fact_product_metrics',
-        ['granularity'],
-        unique=False
-    )
+    if 'ix_metrics_granularity' not in existing_indexes:
+        op.create_index(
+            'ix_metrics_granularity',
+            'fact_product_metrics',
+            ['granularity'],
+            unique=False
+        )
 
 
 def downgrade() -> None:

@@ -19,21 +19,39 @@ depends_on = None
 
 def upgrade() -> None:
     """添加image_url字段"""
+    from sqlalchemy import inspect
     
-    # 添加image_url字段到fact_product_metrics表
-    op.add_column(
-        'fact_product_metrics',
-        sa.Column('image_url', sa.String(1024), nullable=True, comment="产品图片URL")
-    )
+    conn = op.get_bind()
+    inspector = inspect(conn)
     
-    # 添加索引（可选，如果需要按图片筛选）
-    op.create_index(
-        'ix_metrics_has_image',
-        'fact_product_metrics',
-        ['platform_code', 'shop_id'],
-        postgresql_where=sa.text('image_url IS NOT NULL'),
-        unique=False
-    )
+    # 检查列是否已存在
+    existing_columns = [col['name'] for col in inspector.get_columns('fact_product_metrics')]
+    
+    if 'image_url' not in existing_columns:
+        # 添加image_url字段到fact_product_metrics表
+        op.add_column(
+            'fact_product_metrics',
+            sa.Column('image_url', sa.String(1024), nullable=True, comment="产品图片URL")
+        )
+        print("[OK] 添加image_url字段到fact_product_metrics表")
+    else:
+        print("[INFO] image_url字段已存在，跳过添加")
+    
+    # 检查索引是否已存在
+    existing_indexes = [idx['name'] for idx in inspector.get_indexes('fact_product_metrics')]
+    
+    if 'ix_metrics_has_image' not in existing_indexes:
+        # 添加索引（可选，如果需要按图片筛选）
+        op.create_index(
+            'ix_metrics_has_image',
+            'fact_product_metrics',
+            ['platform_code', 'shop_id'],
+            postgresql_where=sa.text('image_url IS NOT NULL'),
+            unique=False
+        )
+        print("[OK] 添加ix_metrics_has_image索引")
+    else:
+        print("[INFO] ix_metrics_has_image索引已存在，跳过创建")
 
 
 def downgrade() -> None:

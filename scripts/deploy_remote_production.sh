@@ -297,8 +297,9 @@ for i in $(seq 1 60); do
 done
 
 # [SCHEMA MIGRATION] Phase 2: 运行 Alembic 迁移（必须成功）
-echo "[INFO] Phase 2: Running Alembic migrations (alembic upgrade head)..."
-"${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade head
+# 使用 heads（复数）以支持多头迁移分支，确保所有分支都被应用
+echo "[INFO] Phase 2: Running Alembic migrations (alembic upgrade heads)..."
+"${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads
 MIGRATION_EXIT_CODE=$?
 
 if [ ${MIGRATION_EXIT_CODE} -ne 0 ]; then

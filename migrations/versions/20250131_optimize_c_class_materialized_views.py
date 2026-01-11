@@ -178,153 +178,108 @@ def upgrade():
     # 保持现有结构不变，无需修改
     
     # ========== 3. 新建mv_campaign_achievement（销售战役达成率）==========
-    # 注意：此视图需要依赖sales_campaigns表，如果表不存在则跳过
-    op.execute(text("""
-        CREATE MATERIALIZED VIEW IF NOT EXISTS mv_campaign_achievement AS
-        SELECT 
-            sc.platform_code,
-            sc.shop_id,
-            sc.campaign_id,
-            sc.campaign_name,
-            sc.start_date,
-            sc.end_date,
-            sc.target_gmv,
-            sc.target_order_count,
-            
-            -- 实际达成（从fact_orders聚合）
-            COALESCE(SUM(fo.total_amount_rmb), 0) AS actual_gmv,
-            COALESCE(COUNT(DISTINCT fo.order_id), 0) AS actual_order_count,
-            
-            -- 达成率（计算）
-            CASE 
-                WHEN sc.target_gmv > 0 
-                THEN (COALESCE(SUM(fo.total_amount_rmb), 0)::numeric / sc.target_gmv * 100)
-                ELSE 0 
-            END AS gmv_achievement_rate,
-            
-            CASE 
-                WHEN sc.target_order_count > 0 
-                THEN (COALESCE(COUNT(DISTINCT fo.order_id), 0)::numeric / sc.target_order_count * 100)
-                ELSE 0 
-            END AS order_achievement_rate,
-            
-            -- 时间戳
-            CURRENT_TIMESTAMP AS refreshed_at
-            
-        FROM sales_campaigns sc
-        LEFT JOIN fact_orders fo ON 
-            sc.platform_code = fo.platform_code 
-            AND sc.shop_id = fo.shop_id
-            AND fo.order_date_local >= sc.start_date
-            AND fo.order_date_local <= sc.end_date
-            AND fo.order_status IN ('completed', 'paid')
-        
-        WHERE sc.status = 'active'
-        
-        GROUP BY 
-            sc.platform_code,
-            sc.shop_id,
-            sc.campaign_id,
-            sc.campaign_name,
-            sc.start_date,
-            sc.end_date,
-            sc.target_gmv,
-            sc.target_order_count
-        
-        WITH DATA;
-    """))
+    # 注意：此视图需要依赖sales_campaigns和sales_campaign_shops表，如果表不存在则跳过
+    from sqlalchemy import inspect
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = set(inspector.get_table_names())
     
-    # 创建索引
-    op.execute(text("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_campaign_achievement_pk 
-        ON mv_campaign_achievement(platform_code, shop_id, campaign_id);
-    """))
+    # 检查必要的表是否存在
+    if 'sales_campaigns' in existing_tables and 'sales_campaign_shops' in existing_tables:
+        # 检查sales_campaign_shops表的列
+        scs_columns = [col['name'] for col in inspector.get_columns('sales_campaign_shops')]
+        sc_columns = [col['name'] for col in inspector.get_columns('sales_campaigns')]
+        
+        # 检查必要的列是否存在
+        if 'platform_code' in scs_columns and 'shop_id' in scs_columns and 'campaign_id' in scs_columns:
+            op.execute(text("""
+                CREATE MATERIALIZED VIEW IF NOT EXISTS mv_campaign_achievement AS
+                SELECT 
+                    scs.platform_code,
+                    scs.shop_id,
+                    sc.id AS campaign_id,
+                    sc.campaign_name,
+                    sc.start_date,
+                    sc.end_date,
+                    scs.target_amount AS target_gmv,
+                    scs.target_quantity AS target_order_count,
+                    
+                    -- 实际达成（从fact_orders聚合）
+                    COALESCE(SUM(fo.total_amount_rmb), 0) AS actual_gmv,
+                    COALESCE(COUNT(DISTINCT fo.order_id), 0) AS actual_order_count,
+                    
+                    -- 达成率（计算）
+                    CASE 
+                        WHEN scs.target_amount > 0 
+                        THEN (COALESCE(SUM(fo.total_amount_rmb), 0)::numeric / scs.target_amount * 100)
+                        ELSE 0 
+                    END AS gmv_achievement_rate,
+                    
+                    CASE 
+                        WHEN scs.target_quantity > 0 
+                        THEN (COALESCE(COUNT(DISTINCT fo.order_id), 0)::numeric / scs.target_quantity * 100)
+                        ELSE 0 
+                    END AS order_achievement_rate,
+                    
+                    -- 时间戳
+                    CURRENT_TIMESTAMP AS refreshed_at
+                    
+                FROM sales_campaigns sc
+                INNER JOIN sales_campaign_shops scs ON sc.id = scs.campaign_id
+                LEFT JOIN fact_orders fo ON 
+                    scs.platform_code = fo.platform_code 
+                    AND scs.shop_id = fo.shop_id
+                    AND fo.order_date_local >= sc.start_date
+                    AND fo.order_date_local <= sc.end_date
+                    AND fo.order_status IN ('completed', 'paid')
+                
+                WHERE sc.status = 'active'
+                
+                GROUP BY 
+                    scs.platform_code,
+                    scs.shop_id,
+                    sc.id,
+                    sc.campaign_name,
+                    sc.start_date,
+                    sc.end_date,
+                    scs.target_amount,
+                    scs.target_quantity
+                
+                WITH DATA;
+            """))
+        else:
+            print("[WARNING] sales_campaign_shops表缺少必要列，跳过mv_campaign_achievement创建")
+    else:
+        print("[WARNING] sales_campaigns或sales_campaign_shops表不存在，跳过mv_campaign_achievement创建")
     
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_campaign_achievement_date 
-        ON mv_campaign_achievement(start_date DESC, end_date DESC);
-    """))
-    
-    op.execute(text("""
-        COMMENT ON MATERIALIZED VIEW mv_campaign_achievement IS 
-        '销售战役达成率物化视图（C类数据计算优化）- 聚合销售战役GMV和订单数达成率';
-    """))
+    # 创建索引（仅在视图创建成功时）
+    if 'sales_campaigns' in existing_tables and 'sales_campaign_shops' in existing_tables:
+        scs_columns = [col['name'] for col in inspector.get_columns('sales_campaign_shops')]
+        if 'platform_code' in scs_columns and 'shop_id' in scs_columns and 'campaign_id' in scs_columns:
+            # 检查视图是否存在
+            try:
+                op.execute(text("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_campaign_achievement_pk 
+                    ON mv_campaign_achievement(platform_code, shop_id, campaign_id);
+                """))
+                
+                op.execute(text("""
+                    CREATE INDEX IF NOT EXISTS idx_mv_campaign_achievement_date 
+                    ON mv_campaign_achievement(start_date DESC, end_date DESC);
+                """))
+                
+                op.execute(text("""
+                    COMMENT ON MATERIALIZED VIEW mv_campaign_achievement IS 
+                    '销售战役达成率物化视图（C类数据计算优化）- 聚合销售战役GMV和订单数达成率';
+                """))
+            except Exception as e:
+                print(f"[WARNING] 无法创建mv_campaign_achievement索引: {e}")
     
     # ========== 4. 新建mv_target_achievement（目标达成率）==========
-    # 注意：此视图需要依赖target_management表，如果表不存在则跳过
-    op.execute(text("""
-        CREATE MATERIALIZED VIEW IF NOT EXISTS mv_target_achievement AS
-        SELECT 
-            tm.platform_code,
-            tm.shop_id,
-            tm.target_id,
-            tm.target_name,
-            tm.target_type,
-            tm.target_period,
-            tm.target_value,
-            
-            -- 实际达成（根据target_type从不同表聚合）
-            CASE 
-                WHEN tm.target_type = 'gmv' THEN 
-                    COALESCE(SUM(fo.total_amount_rmb), 0)
-                WHEN tm.target_type = 'order_count' THEN 
-                    COALESCE(COUNT(DISTINCT fo.order_id), 0)
-                ELSE 0 
-            END AS actual_value,
-            
-            -- 达成率（计算）
-            CASE 
-                WHEN tm.target_value > 0 THEN 
-                    (CASE 
-                        WHEN tm.target_type = 'gmv' THEN 
-                            COALESCE(SUM(fo.total_amount_rmb), 0)::numeric / tm.target_value * 100
-                        WHEN tm.target_type = 'order_count' THEN 
-                            COALESCE(COUNT(DISTINCT fo.order_id), 0)::numeric / tm.target_value * 100
-                        ELSE 0 
-                    END)
-                ELSE 0 
-            END AS achievement_rate,
-            
-            -- 时间戳
-            CURRENT_TIMESTAMP AS refreshed_at
-            
-        FROM target_management tm
-        LEFT JOIN fact_orders fo ON 
-            tm.platform_code = fo.platform_code 
-            AND tm.shop_id = fo.shop_id
-            AND fo.order_date_local >= tm.target_period::date - INTERVAL '1 month'
-            AND fo.order_date_local <= tm.target_period::date
-            AND fo.order_status IN ('completed', 'paid')
-        
-        WHERE tm.status = 'active'
-        
-        GROUP BY 
-            tm.platform_code,
-            tm.shop_id,
-            tm.target_id,
-            tm.target_name,
-            tm.target_type,
-            tm.target_period,
-            tm.target_value
-        
-        WITH DATA;
-    """))
-    
-    # 创建索引
-    op.execute(text("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_target_achievement_pk 
-        ON mv_target_achievement(platform_code, shop_id, target_id);
-    """))
-    
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_target_achievement_period 
-        ON mv_target_achievement(target_period DESC);
-    """))
-    
-    op.execute(text("""
-        COMMENT ON MATERIALIZED VIEW mv_target_achievement IS 
-        '目标达成率物化视图（C类数据计算优化）- 聚合目标GMV和订单数达成率';
-    """))
+    # 注意：sales_targets表没有platform_code和shop_id列，此视图暂时跳过
+    # 如果需要创建此视图，需要先关联到店铺表
+    print("[WARNING] sales_targets表没有platform_code和shop_id列，跳过mv_target_achievement创建")
+    print("[INFO] 如果需要创建此视图，需要先修改sales_targets表结构或使用其他关联方式")
 
 
 def downgrade():

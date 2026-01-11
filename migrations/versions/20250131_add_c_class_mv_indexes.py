@@ -32,70 +32,98 @@ depends_on = None
 
 def upgrade():
     """添加C类数据物化视图性能优化索引"""
+    from sqlalchemy import inspect
+    
+    conn = op.get_bind()
+    
+    # 检查物化视图是否存在
+    existing_views = []
+    try:
+        result = conn.execute(text("""
+            SELECT matviewname 
+            FROM pg_matviews 
+            WHERE schemaname = 'public'
+        """))
+        existing_views = [row[0] for row in result]
+    except Exception as e:
+        print(f"[WARNING] 无法检查物化视图: {e}")
+        existing_views = []
     
     # ========== mv_shop_daily_performance索引优化 ==========
     # 注意：基础索引已在物化视图创建时创建，这里只添加额外的性能优化索引
     
-    # 数据质量标识字段查询索引（用于筛选数据质量问题）
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_shop_daily_perf_quality 
-        ON mv_shop_daily_performance(missing_gmv_flag, missing_uv_flag, missing_stock_flag, missing_rating_flag);
-    """))
-    
-    # 平台+店铺+日期组合查询索引（优化常见查询模式）
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_shop_daily_perf_platform_shop_date 
-        ON mv_shop_daily_performance(platform_code, shop_id, metric_date DESC);
-    """))
+    if 'mv_shop_daily_performance' in existing_views:
+        # 数据质量标识字段查询索引（用于筛选数据质量问题）
+        op.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_shop_daily_perf_quality 
+            ON mv_shop_daily_performance(missing_gmv_flag, missing_uv_flag, missing_stock_flag, missing_rating_flag);
+        """))
+        
+        # 平台+店铺+日期组合查询索引（优化常见查询模式）
+        op.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_shop_daily_perf_platform_shop_date 
+            ON mv_shop_daily_performance(platform_code, shop_id, metric_date DESC);
+        """))
+    else:
+        print("[WARNING] mv_shop_daily_performance视图不存在，跳过索引创建")
     
     # ========== mv_shop_health_summary索引优化 ==========
     # 注意：基础索引已在物化视图创建时创建，这里只添加额外的性能优化索引
     
-    # 健康度评分范围查询索引（用于筛选健康/不健康店铺）
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_shop_health_score_range 
-        ON mv_shop_health_summary(health_score DESC, metric_date DESC);
-    """))
-    
-    # 风险等级+日期查询索引（用于风险监控）
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_shop_health_risk_date 
-        ON mv_shop_health_summary(risk_level, metric_date DESC, granularity);
-    """))
+    if 'mv_shop_health_summary' in existing_views:
+        # 健康度评分范围查询索引（用于筛选健康/不健康店铺）
+        op.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_shop_health_score_range 
+            ON mv_shop_health_summary(health_score DESC, metric_date DESC);
+        """))
+        
+        # 风险等级+日期查询索引（用于风险监控）
+        op.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_shop_health_risk_date 
+            ON mv_shop_health_summary(risk_level, metric_date DESC, granularity);
+        """))
+    else:
+        print("[WARNING] mv_shop_health_summary视图不存在，跳过索引创建")
     
     # ========== mv_campaign_achievement索引优化 ==========
     
-    # 达成率范围查询索引（用于筛选达成/未达成战役）
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_campaign_achievement_rate 
-        ON mv_campaign_achievement(gmv_achievement_rate DESC, order_achievement_rate DESC);
-    """))
-    
-    # 平台+店铺+日期范围查询索引
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_campaign_achievement_platform_shop 
-        ON mv_campaign_achievement(platform_code, shop_id, start_date DESC, end_date DESC);
-    """))
+    if 'mv_campaign_achievement' in existing_views:
+        # 达成率范围查询索引（用于筛选达成/未达成战役）
+        op.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_campaign_achievement_rate 
+            ON mv_campaign_achievement(gmv_achievement_rate DESC, order_achievement_rate DESC);
+        """))
+        
+        # 平台+店铺+日期范围查询索引
+        op.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_campaign_achievement_platform_shop 
+            ON mv_campaign_achievement(platform_code, shop_id, start_date DESC, end_date DESC);
+        """))
+    else:
+        print("[WARNING] mv_campaign_achievement视图不存在，跳过索引创建")
     
     # ========== mv_target_achievement索引优化 ==========
     
-    # 达成率范围查询索引（用于筛选达成/未达成目标）
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_target_achievement_rate 
-        ON mv_target_achievement(achievement_rate DESC, target_period DESC);
-    """))
-    
-    # 目标类型+期间查询索引
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_target_achievement_type_period 
-        ON mv_target_achievement(target_type, target_period DESC);
-    """))
-    
-    # 平台+店铺+目标类型查询索引
-    op.execute(text("""
-        CREATE INDEX IF NOT EXISTS idx_mv_target_achievement_platform_shop_type 
-        ON mv_target_achievement(platform_code, shop_id, target_type);
-    """))
+    if 'mv_target_achievement' in existing_views:
+        # 达成率范围查询索引（用于筛选达成/未达成目标）
+        op.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_target_achievement_rate 
+            ON mv_target_achievement(achievement_rate DESC, target_period DESC);
+        """))
+        
+        # 目标类型+期间查询索引
+        op.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_target_achievement_type_period 
+            ON mv_target_achievement(target_type, target_period DESC);
+        """))
+        
+        # 平台+店铺+目标类型查询索引
+        op.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_target_achievement_platform_shop_type 
+            ON mv_target_achievement(platform_code, shop_id, target_type);
+        """))
+    else:
+        print("[WARNING] mv_target_achievement视图不存在，跳过索引创建")
 
 
 def downgrade():

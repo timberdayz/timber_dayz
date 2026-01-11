@@ -16,6 +16,26 @@ depends_on = None
 
 
 def upgrade():
+    from sqlalchemy import inspect
+    
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+    
+    if 'field_usage_tracking' in existing_tables:
+        print("[INFO] field_usage_tracking表已存在，跳过创建")
+        # 检查索引是否存在，如果不存在则创建
+        existing_indexes = [idx['name'] for idx in inspector.get_indexes('field_usage_tracking')]
+        if 'idx_usage_field' not in existing_indexes:
+            op.create_index('idx_usage_field', 'field_usage_tracking', ['table_name', 'field_name'])
+        if 'idx_usage_api' not in existing_indexes:
+            op.create_index('idx_usage_api', 'field_usage_tracking', ['api_endpoint'])
+        if 'idx_usage_frontend' not in existing_indexes:
+            op.create_index('idx_usage_frontend', 'field_usage_tracking', ['frontend_component'])
+        if 'idx_usage_type' not in existing_indexes:
+            op.create_index('idx_usage_type', 'field_usage_tracking', ['usage_type'])
+        return
+    
     op.create_table(
         'field_usage_tracking',
         sa.Column('id', sa.Integer(), nullable=False),
