@@ -3290,8 +3290,8 @@ class SalesCampaignA(Base):
     
     __table_args__ = (
         CheckConstraint("end_date >= start_date", name="chk_campaign_dates"),
-        Index("ix_sales_campaigns_type", "campaign_type"),
-        Index("ix_sales_campaigns_status", "status"),
+        Index("ix_sales_campaigns_a_type", "campaign_type"),
+        Index("ix_sales_campaigns_a_status", "status"),
     )
 
 
@@ -3395,7 +3395,7 @@ class PerformanceConfigA(Base):
     
     __table_args__ = (
         UniqueConstraint("config_name", name="uq_performance_config_name"),
-        Index("ix_performance_config_active", "active"),
+        Index("ix_performance_config_a_active", "active"),
     )
 
 

@@ -2059,7 +2059,7 @@ def upgrade():
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('config_name', name='uq_performance_config_name')
         )
-        op.create_index('ix_performance_config_active', 'performance_config_a', ['active'])
+        op.create_index('ix_performance_config_a_active', 'performance_config_a', ['active'])
         safe_print("[OK] performance_config_a table created")
     else:
         safe_print("[SKIP] performance_config_a table already exists")
@@ -2462,8 +2462,8 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('id')
         )
-        op.create_index('ix_sales_campaigns_status', 'sales_campaigns_a', ['status'])
-        op.create_index('ix_sales_campaigns_type', 'sales_campaigns_a', ['campaign_type'])
+        op.create_index('ix_sales_campaigns_a_status', 'sales_campaigns_a', ['status'])
+        op.create_index('ix_sales_campaigns_a_type', 'sales_campaigns_a', ['campaign_type'])
         safe_print("[OK] sales_campaigns_a table created")
     else:
         safe_print("[SKIP] sales_campaigns_a table already exists")
