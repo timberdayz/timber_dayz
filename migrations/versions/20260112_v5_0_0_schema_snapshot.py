@@ -2,7 +2,7 @@
 
 Revision ID: v5_0_0_schema_snapshot
 Revises: None
-Create Date: 2026-01-11 23:33:40
+Create Date: 2026-01-12 14:23:13
 
 完整的数据库结构快照迁移。
 包含所有在 schema.py 中定义的表。
@@ -11,6 +11,7 @@ Create Date: 2026-01-11 23:33:40
 - 此迁移是幂等的，可以重复执行
 - 如果表已存在，将跳过创建
 - 可作为新环境的起点，不依赖旧迁移历史
+- 表按依赖顺序创建（被引用的表优先创建）
 """
 
 from alembic import op
@@ -96,38 +97,8 @@ def upgrade():
     else:
         safe_print("[SKIP] accounts table already exists")
 
-    # ==================== 3. alert_rules ====================
-    safe_print("[3/106] Creating alert_rules table...")
-
-    if 'alert_rules' not in existing_tables:
-        op.create_table(
-            'alert_rules',
-            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column('rule_name', sa.String(length=128), nullable=False),
-            sa.Column('rule_type', sa.String(length=64), nullable=False),
-            sa.Column('condition', sa.dialects.postgresql.JSONB, nullable=False),
-            sa.Column('template_id', sa.Integer()),
-            sa.Column('recipients', sa.dialects.postgresql.JSONB),
-            sa.Column('enabled', sa.Boolean(), nullable=False),
-            sa.Column('priority', sa.String(length=16), nullable=False),
-            sa.Column('created_at', sa.DateTime(), nullable=False),
-            sa.Column('updated_at', sa.DateTime(), nullable=False),
-            sa.Column('created_by', sa.Integer()),
-            sa.Column('updated_by', sa.Integer()),
-            sa.UniqueConstraint('rule_name'),
-            sa.ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], ),
-            sa.ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], ),
-            sa.ForeignKeyConstraint(['template_id'], ['notification_templates.id'], )
-        )
-        op.create_index('ix_alert_rules_enabled', 'alert_rules', ['enabled'])
-        op.create_index('ix_alert_rules_rule_name', 'alert_rules', ['rule_name'])
-        op.create_index('ix_alert_rules_rule_type', 'alert_rules', ['rule_type'])
-        safe_print("[OK] alert_rules table created")
-    else:
-        safe_print("[SKIP] alert_rules table already exists")
-
-    # ==================== 4. allocation_rules ====================
-    safe_print("[4/106] Creating allocation_rules table...")
+    # ==================== 3. allocation_rules ====================
+    safe_print("[3/106] Creating allocation_rules table...")
 
     if 'allocation_rules' not in existing_tables:
         op.create_table(
@@ -148,8 +119,8 @@ def upgrade():
     else:
         safe_print("[SKIP] allocation_rules table already exists")
 
-    # ==================== 5. approval_logs ====================
-    safe_print("[5/106] Creating approval_logs table...")
+    # ==================== 4. approval_logs ====================
+    safe_print("[4/106] Creating approval_logs table...")
 
     if 'approval_logs' not in existing_tables:
         op.create_table(
@@ -168,8 +139,8 @@ def upgrade():
     else:
         safe_print("[SKIP] approval_logs table already exists")
 
-    # ==================== 6. attendance_records ====================
-    safe_print("[6/106] Creating attendance_records table...")
+    # ==================== 5. attendance_records ====================
+    safe_print("[5/106] Creating attendance_records table...")
 
     if 'attendance_records' not in existing_tables:
         op.create_table(
@@ -185,60 +156,14 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.UniqueConstraint('employee_code', 'attendance_date', name='uq_attendance_records')
         )
-        op.create_index('ix_attendance_records_employee', 'attendance_records', ['employee_code'])
         op.create_index('ix_attendance_records_date', 'attendance_records', ['attendance_date'])
+        op.create_index('ix_attendance_records_employee', 'attendance_records', ['employee_code'])
         safe_print("[OK] attendance_records table created")
     else:
         safe_print("[SKIP] attendance_records table already exists")
 
-    # ==================== 7. backup_records ====================
-    safe_print("[7/106] Creating backup_records table...")
-
-    if 'backup_records' not in existing_tables:
-        op.create_table(
-            'backup_records',
-            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column('backup_type', sa.String(length=32), nullable=False),
-            sa.Column('backup_path', sa.String(length=512), nullable=False),
-            sa.Column('backup_size', sa.BigInteger(), nullable=False),
-            sa.Column('checksum', sa.String(length=64)),
-            sa.Column('status', sa.String(length=32), nullable=False),
-            sa.Column('description', sa.String()),
-            sa.Column('created_by', sa.Integer()),
-            sa.Column('created_at', sa.DateTime(), nullable=False),
-            sa.Column('completed_at', sa.DateTime()),
-            sa.ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], )
-        )
-        op.create_index('ix_backup_records_status', 'backup_records', ['status'])
-        op.create_index('ix_backup_records_created_at', 'backup_records', ['created_at'])
-        safe_print("[OK] backup_records table created")
-    else:
-        safe_print("[SKIP] backup_records table already exists")
-
-    # ==================== 8. bridge_product_keys ====================
-    safe_print("[8/106] Creating bridge_product_keys table...")
-
-    if 'bridge_product_keys' not in existing_tables:
-        op.create_table(
-            'bridge_product_keys',
-            sa.Column('product_id', sa.Integer(), nullable=False),
-            sa.Column('platform_code', sa.String(length=32), nullable=False),
-            sa.Column('shop_id', sa.String(length=64), nullable=False),
-            sa.Column('platform_sku', sa.String(length=128), nullable=False),
-            sa.PrimaryKeyConstraint('product_id', 'platform_code', 'shop_id', 'platform_sku'),
-            sa.UniqueConstraint('platform_code', 'shop_id', 'platform_sku', name='uq_bridge_platform_sku'),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_products.platform_code'], ),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_products.shop_id'], ),
-            sa.ForeignKeyConstraint(['product_id'], ['dim_product_master.product_id'], ),
-            sa.ForeignKeyConstraint(['platform_sku'], ['dim_products.platform_sku'], )
-        )
-        op.create_index('ix_bridge_product_id', 'bridge_product_keys', ['product_id'])
-        safe_print("[OK] bridge_product_keys table created")
-    else:
-        safe_print("[SKIP] bridge_product_keys table already exists")
-
-    # ==================== 9. catalog_files ====================
-    safe_print("[9/106] Creating catalog_files table...")
+    # ==================== 6. catalog_files ====================
+    safe_print("[6/106] Creating catalog_files table...")
 
     if 'catalog_files' not in existing_tables:
         op.create_table(
@@ -269,48 +194,19 @@ def upgrade():
             sa.Column('last_processed_at', sa.DateTime()),
             sa.UniqueConstraint('file_hash', name='uq_catalog_files_hash')
         )
-        op.create_index('ix_catalog_storage_layer', 'catalog_files', ['storage_layer'])
-        op.create_index('ix_catalog_files_dates', 'catalog_files', ['date_from', 'date_to'])
         op.create_index('ix_catalog_quality_score', 'catalog_files', ['quality_score'])
         op.create_index('ix_catalog_source_domain', 'catalog_files', ['source_platform', 'data_domain'])
         op.create_index('ix_catalog_files_status', 'catalog_files', ['status'])
         op.create_index('ix_catalog_sub_domain', 'catalog_files', ['sub_domain'])
         op.create_index('ix_catalog_files_platform_shop', 'catalog_files', ['platform_code', 'shop_id'])
+        op.create_index('ix_catalog_storage_layer', 'catalog_files', ['storage_layer'])
+        op.create_index('ix_catalog_files_dates', 'catalog_files', ['date_from', 'date_to'])
         safe_print("[OK] catalog_files table created")
     else:
         safe_print("[SKIP] catalog_files table already exists")
 
-    # ==================== 10. clearance_rankings ====================
-    safe_print("[10/106] Creating clearance_rankings table...")
-
-    if 'clearance_rankings' not in existing_tables:
-        op.create_table(
-            'clearance_rankings',
-            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column('platform_code', sa.String(length=32), nullable=False),
-            sa.Column('shop_id', sa.String(length=64), nullable=False),
-            sa.Column('metric_date', sa.Date(), nullable=False),
-            sa.Column('granularity', sa.String(length=16), nullable=False),
-            sa.Column('clearance_amount', sa.Numeric(), nullable=False),
-            sa.Column('clearance_quantity', sa.Integer(), nullable=False),
-            sa.Column('incentive_amount', sa.Numeric(), nullable=False),
-            sa.Column('total_incentive', sa.Numeric(), nullable=False),
-            sa.Column('rank', sa.Integer()),
-            sa.Column('created_at', sa.DateTime(), nullable=False),
-            sa.Column('updated_at', sa.DateTime(), nullable=False),
-            sa.UniqueConstraint('platform_code', 'shop_id', 'metric_date', 'granularity', name='uq_clearance_ranking'),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], ),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], )
-        )
-        op.create_index('ix_clearance_ranking_amount', 'clearance_rankings', ['clearance_amount'])
-        op.create_index('ix_clearance_ranking_date', 'clearance_rankings', ['metric_date', 'granularity'])
-        op.create_index('ix_clearance_ranking_rank', 'clearance_rankings', ['rank'])
-        safe_print("[OK] clearance_rankings table created")
-    else:
-        safe_print("[SKIP] clearance_rankings table already exists")
-
-    # ==================== 11. collection_configs ====================
-    safe_print("[11/106] Creating collection_configs table...")
+    # ==================== 7. collection_configs ====================
+    safe_print("[7/106] Creating collection_configs table...")
 
     if 'collection_configs' not in existing_tables:
         op.create_table(
@@ -334,14 +230,14 @@ def upgrade():
             sa.Column('created_by', sa.String(length=100)),
             sa.UniqueConstraint('name', 'platform', name='uq_collection_configs_name_platform')
         )
-        op.create_index('ix_collection_configs_active', 'collection_configs', ['is_active'])
         op.create_index('ix_collection_configs_platform', 'collection_configs', ['platform'])
+        op.create_index('ix_collection_configs_active', 'collection_configs', ['is_active'])
         safe_print("[OK] collection_configs table created")
     else:
         safe_print("[SKIP] collection_configs table already exists")
 
-    # ==================== 12. collection_sync_points ====================
-    safe_print("[12/106] Creating collection_sync_points table...")
+    # ==================== 8. collection_sync_points ====================
+    safe_print("[8/106] Creating collection_sync_points table...")
 
     if 'collection_sync_points' not in existing_tables:
         op.create_table(
@@ -359,35 +255,14 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.UniqueConstraint('platform', 'account_id', 'data_domain', name='uq_sync_point')
         )
-        op.create_index('ix_sync_points_platform_account', 'collection_sync_points', ['platform', 'account_id'])
         op.create_index('ix_sync_points_last_sync', 'collection_sync_points', ['last_sync_at'])
+        op.create_index('ix_sync_points_platform_account', 'collection_sync_points', ['platform', 'account_id'])
         safe_print("[OK] collection_sync_points table created")
     else:
         safe_print("[SKIP] collection_sync_points table already exists")
 
-    # ==================== 13. collection_task_logs ====================
-    safe_print("[13/106] Creating collection_task_logs table...")
-
-    if 'collection_task_logs' not in existing_tables:
-        op.create_table(
-            'collection_task_logs',
-            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column('task_id', sa.Integer(), nullable=False),
-            sa.Column('level', sa.String(length=10), nullable=False),
-            sa.Column('message', sa.String(), nullable=False),
-            sa.Column('details', sa.JSON),
-            sa.Column('timestamp', sa.DateTime(), nullable=False),
-            sa.ForeignKeyConstraint(['task_id'], ['collection_tasks.id'], )
-        )
-        op.create_index('ix_collection_task_logs_level', 'collection_task_logs', ['level'])
-        op.create_index('ix_collection_task_logs_time', 'collection_task_logs', ['timestamp'])
-        op.create_index('ix_collection_task_logs_task', 'collection_task_logs', ['task_id'])
-        safe_print("[OK] collection_task_logs table created")
-    else:
-        safe_print("[SKIP] collection_task_logs table already exists")
-
-    # ==================== 14. collection_tasks ====================
-    safe_print("[14/106] Creating collection_tasks table...")
+    # ==================== 9. collection_tasks ====================
+    safe_print("[9/106] Creating collection_tasks table...")
 
     if 'collection_tasks' not in existing_tables:
         op.create_table(
@@ -425,52 +300,37 @@ def upgrade():
             sa.ForeignKeyConstraint(['config_id'], ['collection_configs.id'], ),
             sa.ForeignKeyConstraint(['parent_task_id'], ['collection_tasks.id'], )
         )
-        op.create_index('ix_collection_tasks_config', 'collection_tasks', ['config_id'])
         op.create_index('ix_collection_tasks_created', 'collection_tasks', ['created_at'])
         op.create_index('ix_collection_tasks_platform', 'collection_tasks', ['platform'])
         op.create_index('ix_collection_tasks_status', 'collection_tasks', ['status'])
+        op.create_index('ix_collection_tasks_config', 'collection_tasks', ['config_id'])
         safe_print("[OK] collection_tasks table created")
     else:
         safe_print("[SKIP] collection_tasks table already exists")
 
-    # ==================== 15. component_test_history ====================
-    safe_print("[15/106] Creating component_test_history table...")
+    # ==================== 10. collection_task_logs ====================
+    safe_print("[10/106] Creating collection_task_logs table...")
 
-    if 'component_test_history' not in existing_tables:
+    if 'collection_task_logs' not in existing_tables:
         op.create_table(
-            'component_test_history',
+            'collection_task_logs',
             sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column('test_id', sa.String(length=36), nullable=False),
-            sa.Column('component_name', sa.String(length=100), nullable=False),
-            sa.Column('component_version', sa.String(length=20)),
-            sa.Column('version_id', sa.Integer()),
-            sa.Column('platform', sa.String(length=50), nullable=False),
-            sa.Column('account_id', sa.String(length=100), nullable=False),
-            sa.Column('headless', sa.Boolean()),
-            sa.Column('status', sa.String(length=20), nullable=False),
-            sa.Column('duration_ms', sa.Integer(), nullable=False),
-            sa.Column('steps_total', sa.Integer(), nullable=False),
-            sa.Column('steps_passed', sa.Integer(), nullable=False),
-            sa.Column('steps_failed', sa.Integer(), nullable=False),
-            sa.Column('success_rate', sa.Numeric(), nullable=False),
-            sa.Column('step_results', sa.dialects.postgresql.JSONB, nullable=False),
-            sa.Column('error_message', sa.String()),
-            sa.Column('browser_info', sa.dialects.postgresql.JSONB),
-            sa.Column('tested_by', sa.String(length=100)),
-            sa.Column('tested_at', sa.DateTime(), nullable=False),
-            sa.UniqueConstraint('test_id'),
-            sa.ForeignKeyConstraint(['version_id'], ['component_versions.id'], )
+            sa.Column('task_id', sa.Integer(), nullable=False),
+            sa.Column('level', sa.String(length=10), nullable=False),
+            sa.Column('message', sa.String(), nullable=False),
+            sa.Column('details', sa.JSON),
+            sa.Column('timestamp', sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(['task_id'], ['collection_tasks.id'], )
         )
-        op.create_index('ix_test_history_tested_at', 'component_test_history', ['tested_at'])
-        op.create_index('ix_test_history_version', 'component_test_history', ['version_id'])
-        op.create_index('ix_test_history_component', 'component_test_history', ['component_name'])
-        op.create_index('ix_test_history_status', 'component_test_history', ['status'])
-        safe_print("[OK] component_test_history table created")
+        op.create_index('ix_collection_task_logs_time', 'collection_task_logs', ['timestamp'])
+        op.create_index('ix_collection_task_logs_task', 'collection_task_logs', ['task_id'])
+        op.create_index('ix_collection_task_logs_level', 'collection_task_logs', ['level'])
+        safe_print("[OK] collection_task_logs table created")
     else:
-        safe_print("[SKIP] component_test_history table already exists")
+        safe_print("[SKIP] collection_task_logs table already exists")
 
-    # ==================== 16. component_versions ====================
-    safe_print("[16/106] Creating component_versions table...")
+    # ==================== 11. component_versions ====================
+    safe_print("[11/106] Creating component_versions table...")
 
     if 'component_versions' not in existing_tables:
         op.create_table(
@@ -502,8 +362,44 @@ def upgrade():
     else:
         safe_print("[SKIP] component_versions table already exists")
 
-    # ==================== 17. data_files ====================
-    safe_print("[17/106] Creating data_files table...")
+    # ==================== 12. component_test_history ====================
+    safe_print("[12/106] Creating component_test_history table...")
+
+    if 'component_test_history' not in existing_tables:
+        op.create_table(
+            'component_test_history',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
+            sa.Column('test_id', sa.String(length=36), nullable=False),
+            sa.Column('component_name', sa.String(length=100), nullable=False),
+            sa.Column('component_version', sa.String(length=20)),
+            sa.Column('version_id', sa.Integer()),
+            sa.Column('platform', sa.String(length=50), nullable=False),
+            sa.Column('account_id', sa.String(length=100), nullable=False),
+            sa.Column('headless', sa.Boolean()),
+            sa.Column('status', sa.String(length=20), nullable=False),
+            sa.Column('duration_ms', sa.Integer(), nullable=False),
+            sa.Column('steps_total', sa.Integer(), nullable=False),
+            sa.Column('steps_passed', sa.Integer(), nullable=False),
+            sa.Column('steps_failed', sa.Integer(), nullable=False),
+            sa.Column('success_rate', sa.Numeric(), nullable=False),
+            sa.Column('step_results', sa.dialects.postgresql.JSONB, nullable=False),
+            sa.Column('error_message', sa.String()),
+            sa.Column('browser_info', sa.dialects.postgresql.JSONB),
+            sa.Column('tested_by', sa.String(length=100)),
+            sa.Column('tested_at', sa.DateTime(), nullable=False),
+            sa.UniqueConstraint('test_id'),
+            sa.ForeignKeyConstraint(['version_id'], ['component_versions.id'], )
+        )
+        op.create_index('ix_test_history_version', 'component_test_history', ['version_id'])
+        op.create_index('ix_test_history_component', 'component_test_history', ['component_name'])
+        op.create_index('ix_test_history_status', 'component_test_history', ['status'])
+        op.create_index('ix_test_history_tested_at', 'component_test_history', ['tested_at'])
+        safe_print("[OK] component_test_history table created")
+    else:
+        safe_print("[SKIP] component_test_history table already exists")
+
+    # ==================== 13. data_files ====================
+    safe_print("[13/106] Creating data_files table...")
 
     if 'data_files' not in existing_tables:
         op.create_table(
@@ -516,14 +412,14 @@ def upgrade():
             sa.Column('status', sa.String(length=50), nullable=False),
             sa.Column('discovery_time', sa.DateTime(), nullable=False)
         )
-        op.create_index('ix_data_files_status', 'data_files', ['status'])
         op.create_index('ix_data_files_platform', 'data_files', ['platform'])
+        op.create_index('ix_data_files_status', 'data_files', ['status'])
         safe_print("[OK] data_files table created")
     else:
         safe_print("[SKIP] data_files table already exists")
 
-    # ==================== 18. data_quarantine ====================
-    safe_print("[18/106] Creating data_quarantine table...")
+    # ==================== 14. data_quarantine ====================
+    safe_print("[14/106] Creating data_quarantine table...")
 
     if 'data_quarantine' not in existing_tables:
         op.create_table(
@@ -544,17 +440,17 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.ForeignKeyConstraint(['catalog_file_id'], ['catalog_files.id'], )
         )
-        op.create_index('ix_quarantine_resolved', 'data_quarantine', ['is_resolved'])
-        op.create_index('ix_quarantine_error_type', 'data_quarantine', ['error_type'])
         op.create_index('ix_quarantine_platform_shop', 'data_quarantine', ['platform_code', 'shop_id'])
         op.create_index('ix_quarantine_source_file', 'data_quarantine', ['source_file'])
         op.create_index('ix_quarantine_created', 'data_quarantine', ['created_at'])
+        op.create_index('ix_quarantine_error_type', 'data_quarantine', ['error_type'])
+        op.create_index('ix_quarantine_resolved', 'data_quarantine', ['is_resolved'])
         safe_print("[OK] data_quarantine table created")
     else:
         safe_print("[SKIP] data_quarantine table already exists")
 
-    # ==================== 19. data_records ====================
-    safe_print("[19/106] Creating data_records table...")
+    # ==================== 15. data_records ====================
+    safe_print("[15/106] Creating data_records table...")
 
     if 'data_records' not in existing_tables:
         op.create_table(
@@ -571,8 +467,8 @@ def upgrade():
     else:
         safe_print("[SKIP] data_records table already exists")
 
-    # ==================== 20. dim_currencies ====================
-    safe_print("[20/106] Creating dim_currencies table...")
+    # ==================== 16. dim_currencies ====================
+    safe_print("[16/106] Creating dim_currencies table...")
 
     if 'dim_currencies' not in existing_tables:
         op.create_table(
@@ -588,8 +484,8 @@ def upgrade():
     else:
         safe_print("[SKIP] dim_currencies table already exists")
 
-    # ==================== 21. dim_currency_rates ====================
-    safe_print("[21/106] Creating dim_currency_rates table...")
+    # ==================== 17. dim_currency_rates ====================
+    safe_print("[17/106] Creating dim_currency_rates table...")
 
     if 'dim_currency_rates' not in existing_tables:
         op.create_table(
@@ -607,8 +503,8 @@ def upgrade():
     else:
         safe_print("[SKIP] dim_currency_rates table already exists")
 
-    # ==================== 22. dim_exchange_rates ====================
-    safe_print("[22/106] Creating dim_exchange_rates table...")
+    # ==================== 18. dim_exchange_rates ====================
+    safe_print("[18/106] Creating dim_exchange_rates table...")
 
     if 'dim_exchange_rates' not in existing_tables:
         op.create_table(
@@ -624,17 +520,17 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.UniqueConstraint('from_currency', 'to_currency', 'rate_date', name='uq_exchange_rate')
         )
-        op.create_index('ix_dim_exchange_rates_rate_date', 'dim_exchange_rates', ['rate_date'])
-        op.create_index('ix_dim_exchange_rates_from_currency', 'dim_exchange_rates', ['from_currency'])
-        op.create_index('ix_exchange_rate_date', 'dim_exchange_rates', ['rate_date'])
         op.create_index('ix_exchange_rate_lookup', 'dim_exchange_rates', ['from_currency', 'to_currency', 'rate_date'])
         op.create_index('ix_dim_exchange_rates_to_currency', 'dim_exchange_rates', ['to_currency'])
+        op.create_index('ix_dim_exchange_rates_rate_date', 'dim_exchange_rates', ['rate_date'])
+        op.create_index('ix_exchange_rate_date', 'dim_exchange_rates', ['rate_date'])
+        op.create_index('ix_dim_exchange_rates_from_currency', 'dim_exchange_rates', ['from_currency'])
         safe_print("[OK] dim_exchange_rates table created")
     else:
         safe_print("[SKIP] dim_exchange_rates table already exists")
 
-    # ==================== 23. dim_fiscal_calendar ====================
-    safe_print("[23/106] Creating dim_fiscal_calendar table...")
+    # ==================== 19. dim_fiscal_calendar ====================
+    safe_print("[19/106] Creating dim_fiscal_calendar table...")
 
     if 'dim_fiscal_calendar' not in existing_tables:
         op.create_table(
@@ -652,14 +548,14 @@ def upgrade():
             sa.UniqueConstraint('period_code'),
             sa.UniqueConstraint('period_year', 'period_month', name='uq_fiscal_period')
         )
-        op.create_index('ix_fiscal_calendar_year_month', 'dim_fiscal_calendar', ['period_year', 'period_month'])
         op.create_index('ix_fiscal_calendar_status', 'dim_fiscal_calendar', ['status'])
+        op.create_index('ix_fiscal_calendar_year_month', 'dim_fiscal_calendar', ['period_year', 'period_month'])
         safe_print("[OK] dim_fiscal_calendar table created")
     else:
         safe_print("[SKIP] dim_fiscal_calendar table already exists")
 
-    # ==================== 24. dim_metric_formulas ====================
-    safe_print("[24/106] Creating dim_metric_formulas table...")
+    # ==================== 20. dim_metric_formulas ====================
+    safe_print("[20/106] Creating dim_metric_formulas table...")
 
     if 'dim_metric_formulas' not in existing_tables:
         op.create_table(
@@ -689,8 +585,8 @@ def upgrade():
     else:
         safe_print("[SKIP] dim_metric_formulas table already exists")
 
-    # ==================== 25. dim_platforms ====================
-    safe_print("[25/106] Creating dim_platforms table...")
+    # ==================== 21. dim_platforms ====================
+    safe_print("[21/106] Creating dim_platforms table...")
 
     if 'dim_platforms' not in existing_tables:
         op.create_table(
@@ -706,8 +602,8 @@ def upgrade():
     else:
         safe_print("[SKIP] dim_platforms table already exists")
 
-    # ==================== 26. dim_product_master ====================
-    safe_print("[26/106] Creating dim_product_master table...")
+    # ==================== 22. dim_product_master ====================
+    safe_print("[22/106] Creating dim_product_master table...")
 
     if 'dim_product_master' not in existing_tables:
         op.create_table(
@@ -723,8 +619,8 @@ def upgrade():
     else:
         safe_print("[SKIP] dim_product_master table already exists")
 
-    # ==================== 27. dim_products ====================
-    safe_print("[27/106] Creating dim_products table...")
+    # ==================== 23. dim_products ====================
+    safe_print("[23/106] Creating dim_products table...")
 
     if 'dim_products' not in existing_tables:
         op.create_table(
@@ -747,8 +643,30 @@ def upgrade():
     else:
         safe_print("[SKIP] dim_products table already exists")
 
-    # ==================== 28. dim_rate_limit_config ====================
-    safe_print("[28/106] Creating dim_rate_limit_config table...")
+    # ==================== 24. bridge_product_keys ====================
+    safe_print("[24/106] Creating bridge_product_keys table...")
+
+    if 'bridge_product_keys' not in existing_tables:
+        op.create_table(
+            'bridge_product_keys',
+            sa.Column('product_id', sa.Integer(), nullable=False),
+            sa.Column('platform_code', sa.String(length=32), nullable=False),
+            sa.Column('shop_id', sa.String(length=64), nullable=False),
+            sa.Column('platform_sku', sa.String(length=128), nullable=False),
+            sa.PrimaryKeyConstraint('product_id', 'platform_code', 'shop_id', 'platform_sku'),
+            sa.UniqueConstraint('platform_code', 'shop_id', 'platform_sku', name='uq_bridge_platform_sku'),
+            sa.ForeignKeyConstraint(['platform_code'], ['dim_products.platform_code'], ),
+            sa.ForeignKeyConstraint(['shop_id'], ['dim_products.shop_id'], ),
+            sa.ForeignKeyConstraint(['product_id'], ['dim_product_master.product_id'], ),
+            sa.ForeignKeyConstraint(['platform_sku'], ['dim_products.platform_sku'], )
+        )
+        op.create_index('ix_bridge_product_id', 'bridge_product_keys', ['product_id'])
+        safe_print("[OK] bridge_product_keys table created")
+    else:
+        safe_print("[SKIP] bridge_product_keys table already exists")
+
+    # ==================== 25. dim_rate_limit_config ====================
+    safe_print("[25/106] Creating dim_rate_limit_config table...")
 
     if 'dim_rate_limit_config' not in existing_tables:
         op.create_table(
@@ -765,17 +683,17 @@ def upgrade():
             sa.Column('updated_by', sa.String(length=100)),
             sa.UniqueConstraint('role_code', 'endpoint_type', name='uq_rate_limit_config_role_endpoint')
         )
-        op.create_index('ix_rate_limit_config_role', 'dim_rate_limit_config', ['role_code', 'endpoint_type'])
         op.create_index('ix_dim_rate_limit_config_is_active', 'dim_rate_limit_config', ['is_active'])
         op.create_index('ix_dim_rate_limit_config_role_code', 'dim_rate_limit_config', ['role_code'])
         op.create_index('ix_rate_limit_config_active', 'dim_rate_limit_config', ['is_active', 'role_code'])
         op.create_index('ix_dim_rate_limit_config_endpoint_type', 'dim_rate_limit_config', ['endpoint_type'])
+        op.create_index('ix_rate_limit_config_role', 'dim_rate_limit_config', ['role_code', 'endpoint_type'])
         safe_print("[OK] dim_rate_limit_config table created")
     else:
         safe_print("[SKIP] dim_rate_limit_config table already exists")
 
-    # ==================== 29. dim_roles ====================
-    safe_print("[29/106] Creating dim_roles table...")
+    # ==================== 26. dim_roles ====================
+    safe_print("[26/106] Creating dim_roles table...")
 
     if 'dim_roles' not in existing_tables:
         op.create_table(
@@ -799,8 +717,8 @@ def upgrade():
     else:
         safe_print("[SKIP] dim_roles table already exists")
 
-    # ==================== 30. dim_shops ====================
-    safe_print("[30/106] Creating dim_shops table...")
+    # ==================== 27. dim_shops ====================
+    safe_print("[27/106] Creating dim_shops table...")
 
     if 'dim_shops' not in existing_tables:
         op.create_table(
@@ -823,8 +741,37 @@ def upgrade():
     else:
         safe_print("[SKIP] dim_shops table already exists")
 
-    # ==================== 31. dim_users ====================
-    safe_print("[31/106] Creating dim_users table...")
+    # ==================== 28. clearance_rankings ====================
+    safe_print("[28/106] Creating clearance_rankings table...")
+
+    if 'clearance_rankings' not in existing_tables:
+        op.create_table(
+            'clearance_rankings',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
+            sa.Column('platform_code', sa.String(length=32), nullable=False),
+            sa.Column('shop_id', sa.String(length=64), nullable=False),
+            sa.Column('metric_date', sa.Date(), nullable=False),
+            sa.Column('granularity', sa.String(length=16), nullable=False),
+            sa.Column('clearance_amount', sa.Numeric(), nullable=False),
+            sa.Column('clearance_quantity', sa.Integer(), nullable=False),
+            sa.Column('incentive_amount', sa.Numeric(), nullable=False),
+            sa.Column('total_incentive', sa.Numeric(), nullable=False),
+            sa.Column('rank', sa.Integer()),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(), nullable=False),
+            sa.UniqueConstraint('platform_code', 'shop_id', 'metric_date', 'granularity', name='uq_clearance_ranking'),
+            sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], ),
+            sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], )
+        )
+        op.create_index('ix_clearance_ranking_date', 'clearance_rankings', ['metric_date', 'granularity'])
+        op.create_index('ix_clearance_ranking_rank', 'clearance_rankings', ['rank'])
+        op.create_index('ix_clearance_ranking_amount', 'clearance_rankings', ['clearance_amount'])
+        safe_print("[OK] clearance_rankings table created")
+    else:
+        safe_print("[SKIP] clearance_rankings table already exists")
+
+    # ==================== 29. dim_users ====================
+    safe_print("[29/106] Creating dim_users table...")
 
     if 'dim_users' not in existing_tables:
         op.create_table(
@@ -853,18 +800,42 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), server_default=now()),
             sa.ForeignKeyConstraint(['approved_by'], ['dim_users.user_id'], )
         )
-        op.create_index('ix_dim_users_email', 'dim_users', ['email'])
-        op.create_index('ix_dim_users_status', 'dim_users', ['status'])
         op.create_index('idx_users_active', 'dim_users', ['is_active'])
+        op.create_index('ix_dim_users_status', 'dim_users', ['status'])
         op.create_index('ix_dim_users_username', 'dim_users', ['username'])
         op.create_index('idx_users_email_active', 'dim_users', ['email', 'is_active'])
         op.create_index('ix_dim_users_user_id', 'dim_users', ['user_id'])
+        op.create_index('ix_dim_users_email', 'dim_users', ['email'])
         safe_print("[OK] dim_users table created")
     else:
         safe_print("[SKIP] dim_users table already exists")
 
-    # ==================== 32. dim_vendors ====================
-    safe_print("[32/106] Creating dim_vendors table...")
+    # ==================== 30. backup_records ====================
+    safe_print("[30/106] Creating backup_records table...")
+
+    if 'backup_records' not in existing_tables:
+        op.create_table(
+            'backup_records',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
+            sa.Column('backup_type', sa.String(length=32), nullable=False),
+            sa.Column('backup_path', sa.String(length=512), nullable=False),
+            sa.Column('backup_size', sa.BigInteger(), nullable=False),
+            sa.Column('checksum', sa.String(length=64)),
+            sa.Column('status', sa.String(length=32), nullable=False),
+            sa.Column('description', sa.String()),
+            sa.Column('created_by', sa.Integer()),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('completed_at', sa.DateTime()),
+            sa.ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], )
+        )
+        op.create_index('ix_backup_records_status', 'backup_records', ['status'])
+        op.create_index('ix_backup_records_created_at', 'backup_records', ['created_at'])
+        safe_print("[OK] backup_records table created")
+    else:
+        safe_print("[SKIP] backup_records table already exists")
+
+    # ==================== 31. dim_vendors ====================
+    safe_print("[31/106] Creating dim_vendors table...")
 
     if 'dim_vendors' not in existing_tables:
         op.create_table(
@@ -887,8 +858,8 @@ def upgrade():
     else:
         safe_print("[SKIP] dim_vendors table already exists")
 
-    # ==================== 33. employee_commissions ====================
-    safe_print("[33/106] Creating employee_commissions table...")
+    # ==================== 32. employee_commissions ====================
+    safe_print("[32/106] Creating employee_commissions table...")
 
     if 'employee_commissions' not in existing_tables:
         op.create_table(
@@ -908,8 +879,8 @@ def upgrade():
     else:
         safe_print("[SKIP] employee_commissions table already exists")
 
-    # ==================== 34. employee_performance ====================
-    safe_print("[34/106] Creating employee_performance table...")
+    # ==================== 33. employee_performance ====================
+    safe_print("[33/106] Creating employee_performance table...")
 
     if 'employee_performance' not in existing_tables:
         op.create_table(
@@ -923,14 +894,14 @@ def upgrade():
             sa.Column('calculated_at', sa.DateTime(), nullable=False),
             sa.UniqueConstraint('employee_code', 'year_month', name='uq_employee_performance')
         )
-        op.create_index('ix_employee_performance_month', 'employee_performance', ['year_month'])
         op.create_index('ix_employee_performance_employee', 'employee_performance', ['employee_code'])
+        op.create_index('ix_employee_performance_month', 'employee_performance', ['year_month'])
         safe_print("[OK] employee_performance table created")
     else:
         safe_print("[SKIP] employee_performance table already exists")
 
-    # ==================== 35. employee_targets ====================
-    safe_print("[35/106] Creating employee_targets table...")
+    # ==================== 34. employee_targets ====================
+    safe_print("[34/106] Creating employee_targets table...")
 
     if 'employee_targets' not in existing_tables:
         op.create_table(
@@ -944,14 +915,14 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.UniqueConstraint('employee_code', 'year_month', 'target_type', name='uq_employee_targets')
         )
-        op.create_index('ix_employee_targets_month', 'employee_targets', ['year_month'])
         op.create_index('ix_employee_targets_employee', 'employee_targets', ['employee_code'])
+        op.create_index('ix_employee_targets_month', 'employee_targets', ['year_month'])
         safe_print("[OK] employee_targets table created")
     else:
         safe_print("[SKIP] employee_targets table already exists")
 
-    # ==================== 36. employees ====================
-    safe_print("[36/106] Creating employees table...")
+    # ==================== 35. employees ====================
+    safe_print("[35/106] Creating employees table...")
 
     if 'employees' not in existing_tables:
         op.create_table(
@@ -973,8 +944,8 @@ def upgrade():
     else:
         safe_print("[SKIP] employees table already exists")
 
-    # ==================== 37. entity_aliases ====================
-    safe_print("[37/106] Creating entity_aliases table...")
+    # ==================== 36. entity_aliases ====================
+    safe_print("[36/106] Creating entity_aliases table...")
 
     if 'entity_aliases' not in existing_tables:
         op.create_table(
@@ -999,20 +970,20 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.UniqueConstraint('source_platform', 'source_type', 'source_name', 'source_account', 'source_site', name='uq_entity_alias_source')
         )
-        op.create_index('ix_entity_aliases_target_type', 'entity_aliases', ['target_type'])
-        op.create_index('ix_entity_aliases_active', 'entity_aliases', ['active'])
         op.create_index('ix_entity_aliases_source_name', 'entity_aliases', ['source_name'])
         op.create_index('ix_entity_aliases_source_platform', 'entity_aliases', ['source_platform'])
         op.create_index('ix_entity_aliases_target_id', 'entity_aliases', ['target_id'])
         op.create_index('ix_entity_aliases_source', 'entity_aliases', ['source_platform', 'source_type', 'source_name'])
         op.create_index('ix_entity_aliases_source_type', 'entity_aliases', ['source_type'])
         op.create_index('ix_entity_aliases_target', 'entity_aliases', ['target_type', 'target_id', 'active'])
+        op.create_index('ix_entity_aliases_target_type', 'entity_aliases', ['target_type'])
+        op.create_index('ix_entity_aliases_active', 'entity_aliases', ['active'])
         safe_print("[OK] entity_aliases table created")
     else:
         safe_print("[SKIP] entity_aliases table already exists")
 
-    # ==================== 38. fact_analytics ====================
-    safe_print("[38/106] Creating fact_analytics table...")
+    # ==================== 37. fact_analytics ====================
+    safe_print("[37/106] Creating fact_analytics table...")
 
     if 'fact_analytics' not in existing_tables:
         op.create_table(
@@ -1033,16 +1004,16 @@ def upgrade():
             sa.UniqueConstraint('platform_code', 'shop_id', 'analytics_date', 'granularity', 'metric_type', 'data_domain', name='uq_fact_analytics_business'),
             sa.ForeignKeyConstraint(['file_id'], ['catalog_files.id'], )
         )
-        op.create_index('ix_fact_analytics_platform_code', 'fact_analytics', ['platform_code'])
         op.create_index('ix_fact_analytics_file_id', 'fact_analytics', ['file_id'])
         op.create_index('ix_fact_analytics_shop_id', 'fact_analytics', ['shop_id'])
         op.create_index('ix_fact_analytics_analytics_date', 'fact_analytics', ['analytics_date'])
+        op.create_index('ix_fact_analytics_platform_code', 'fact_analytics', ['platform_code'])
         safe_print("[OK] fact_analytics table created")
     else:
         safe_print("[SKIP] fact_analytics table already exists")
 
-    # ==================== 39. fact_audit_logs ====================
-    safe_print("[39/106] Creating fact_audit_logs table...")
+    # ==================== 38. fact_audit_logs ====================
+    safe_print("[38/106] Creating fact_audit_logs table...")
 
     if 'fact_audit_logs' not in existing_tables:
         op.create_table(
@@ -1062,44 +1033,19 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
             sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], )
         )
-        op.create_index('idx_audit_recent', 'fact_audit_logs', ['created_at'])
-        op.create_index('idx_audit_user_time', 'fact_audit_logs', ['user_id', 'created_at'])
-        op.create_index('ix_fact_audit_logs_log_id', 'fact_audit_logs', ['log_id'])
         op.create_index('ix_fact_audit_logs_created_at', 'fact_audit_logs', ['created_at'])
+        op.create_index('ix_fact_audit_logs_log_id', 'fact_audit_logs', ['log_id'])
         op.create_index('idx_audit_action_time', 'fact_audit_logs', ['action_type', 'created_at'])
         op.create_index('ix_fact_audit_logs_action_type', 'fact_audit_logs', ['action_type'])
         op.create_index('idx_audit_resource', 'fact_audit_logs', ['resource_type', 'resource_id'])
+        op.create_index('idx_audit_recent', 'fact_audit_logs', ['created_at'])
+        op.create_index('idx_audit_user_time', 'fact_audit_logs', ['user_id', 'created_at'])
         safe_print("[OK] fact_audit_logs table created")
     else:
         safe_print("[SKIP] fact_audit_logs table already exists")
 
-    # ==================== 40. fact_expenses_allocated_day_shop_sku ====================
-    safe_print("[40/106] Creating fact_expenses_allocated_day_shop_sku table...")
-
-    if 'fact_expenses_allocated_day_shop_sku' not in existing_tables:
-        op.create_table(
-            'fact_expenses_allocated_day_shop_sku',
-            sa.Column('allocation_id', sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column('expense_id', sa.Integer(), nullable=False),
-            sa.Column('allocation_date', sa.Date(), nullable=False),
-            sa.Column('platform_code', sa.String(length=32), nullable=False),
-            sa.Column('shop_id', sa.String(length=64), nullable=False),
-            sa.Column('platform_sku', sa.String(length=128)),
-            sa.Column('allocated_amt', sa.Numeric()),
-            sa.Column('allocation_driver', sa.String(length=64)),
-            sa.Column('allocation_weight', sa.Numeric()),
-            sa.Column('created_at', sa.DateTime(), nullable=False),
-            sa.ForeignKeyConstraint(['expense_id'], ['fact_expenses_month.expense_id'], )
-        )
-        op.create_index('ix_expenses_allocated_sku', 'fact_expenses_allocated_day_shop_sku', ['platform_code', 'shop_id', 'platform_sku', 'allocation_date'])
-        op.create_index('ix_expenses_allocated_date', 'fact_expenses_allocated_day_shop_sku', ['allocation_date'])
-        op.create_index('ix_expenses_allocated_shop', 'fact_expenses_allocated_day_shop_sku', ['platform_code', 'shop_id', 'allocation_date'])
-        safe_print("[OK] fact_expenses_allocated_day_shop_sku table created")
-    else:
-        safe_print("[SKIP] fact_expenses_allocated_day_shop_sku table already exists")
-
-    # ==================== 41. fact_expenses_month ====================
-    safe_print("[41/106] Creating fact_expenses_month table...")
+    # ==================== 39. fact_expenses_month ====================
+    safe_print("[39/106] Creating fact_expenses_month table...")
 
     if 'fact_expenses_month' not in existing_tables:
         op.create_table(
@@ -1121,15 +1067,40 @@ def upgrade():
             sa.ForeignKeyConstraint(['source_file_id'], ['catalog_files.id'], ),
             sa.ForeignKeyConstraint(['period_month'], ['dim_fiscal_calendar.period_code'], )
         )
-        op.create_index('ix_expenses_month_shop', 'fact_expenses_month', ['platform_code', 'shop_id'])
         op.create_index('ix_expenses_month_period', 'fact_expenses_month', ['period_month'])
         op.create_index('ix_expenses_month_type', 'fact_expenses_month', ['expense_type'])
+        op.create_index('ix_expenses_month_shop', 'fact_expenses_month', ['platform_code', 'shop_id'])
         safe_print("[OK] fact_expenses_month table created")
     else:
         safe_print("[SKIP] fact_expenses_month table already exists")
 
-    # ==================== 42. fact_order_amounts ====================
-    safe_print("[42/106] Creating fact_order_amounts table...")
+    # ==================== 40. fact_expenses_allocated_day_shop_sku ====================
+    safe_print("[40/106] Creating fact_expenses_allocated_day_shop_sku table...")
+
+    if 'fact_expenses_allocated_day_shop_sku' not in existing_tables:
+        op.create_table(
+            'fact_expenses_allocated_day_shop_sku',
+            sa.Column('allocation_id', sa.Integer(), nullable=False, autoincrement=True),
+            sa.Column('expense_id', sa.Integer(), nullable=False),
+            sa.Column('allocation_date', sa.Date(), nullable=False),
+            sa.Column('platform_code', sa.String(length=32), nullable=False),
+            sa.Column('shop_id', sa.String(length=64), nullable=False),
+            sa.Column('platform_sku', sa.String(length=128)),
+            sa.Column('allocated_amt', sa.Numeric()),
+            sa.Column('allocation_driver', sa.String(length=64)),
+            sa.Column('allocation_weight', sa.Numeric()),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(['expense_id'], ['fact_expenses_month.expense_id'], )
+        )
+        op.create_index('ix_expenses_allocated_date', 'fact_expenses_allocated_day_shop_sku', ['allocation_date'])
+        op.create_index('ix_expenses_allocated_shop', 'fact_expenses_allocated_day_shop_sku', ['platform_code', 'shop_id', 'allocation_date'])
+        op.create_index('ix_expenses_allocated_sku', 'fact_expenses_allocated_day_shop_sku', ['platform_code', 'shop_id', 'platform_sku', 'allocation_date'])
+        safe_print("[OK] fact_expenses_allocated_day_shop_sku table created")
+    else:
+        safe_print("[SKIP] fact_expenses_allocated_day_shop_sku table already exists")
+
+    # ==================== 41. fact_order_amounts ====================
+    safe_print("[41/106] Creating fact_order_amounts table...")
 
     if 'fact_order_amounts' not in existing_tables:
         op.create_table(
@@ -1145,20 +1116,20 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.Column('updated_at', sa.DateTime(), nullable=False)
         )
-        op.create_index('ix_order_amounts_currency', 'fact_order_amounts', ['currency', 'created_at'])
         op.create_index('ix_fact_order_amounts_metric_type', 'fact_order_amounts', ['metric_type'])
         op.create_index('ix_order_amounts_composite', 'fact_order_amounts', ['order_id', 'metric_type', 'metric_subtype', 'currency'])
-        op.create_index('ix_fact_order_amounts_currency', 'fact_order_amounts', ['currency'])
         op.create_index('ix_order_amounts_order', 'fact_order_amounts', ['order_id'])
+        op.create_index('ix_fact_order_amounts_currency', 'fact_order_amounts', ['currency'])
         op.create_index('ix_order_amounts_metric', 'fact_order_amounts', ['metric_type', 'metric_subtype'])
         op.create_index('ix_fact_order_amounts_metric_subtype', 'fact_order_amounts', ['metric_subtype'])
         op.create_index('ix_fact_order_amounts_order_id', 'fact_order_amounts', ['order_id'])
+        op.create_index('ix_order_amounts_currency', 'fact_order_amounts', ['currency', 'created_at'])
         safe_print("[OK] fact_order_amounts table created")
     else:
         safe_print("[SKIP] fact_order_amounts table already exists")
 
-    # ==================== 43. fact_order_items ====================
-    safe_print("[43/106] Creating fact_order_items table...")
+    # ==================== 42. fact_order_items ====================
+    safe_print("[42/106] Creating fact_order_items table...")
 
     if 'fact_order_items' not in existing_tables:
         op.create_table(
@@ -1188,8 +1159,8 @@ def upgrade():
     else:
         safe_print("[SKIP] fact_order_items table already exists")
 
-    # ==================== 44. fact_orders ====================
-    safe_print("[44/106] Creating fact_orders table...")
+    # ==================== 43. fact_orders ====================
+    safe_print("[43/106] Creating fact_orders table...")
 
     if 'fact_orders' not in existing_tables:
         op.create_table(
@@ -1231,15 +1202,15 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('platform_code', 'shop_id', 'order_id')
         )
-        op.create_index('ix_fact_orders_status', 'fact_orders', ['platform_code', 'shop_id', 'order_status'])
         op.create_index('ix_fact_orders_file_id', 'fact_orders', ['file_id'])
+        op.create_index('ix_fact_orders_status', 'fact_orders', ['platform_code', 'shop_id', 'order_status'])
         op.create_index('ix_fact_orders_plat_shop_date', 'fact_orders', ['platform_code', 'shop_id', 'order_date_local'])
         safe_print("[OK] fact_orders table created")
     else:
         safe_print("[SKIP] fact_orders table already exists")
 
-    # ==================== 45. fact_product_metrics ====================
-    safe_print("[45/106] Creating fact_product_metrics table...")
+    # ==================== 44. fact_product_metrics ====================
+    safe_print("[44/106] Creating fact_product_metrics table...")
 
     if 'fact_product_metrics' not in existing_tables:
         op.create_table(
@@ -1292,28 +1263,28 @@ def upgrade():
             sa.PrimaryKeyConstraint('platform_code', 'shop_id', 'platform_sku', 'metric_date', 'metric_type'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'platform_sku', 'metric_date', 'granularity', 'sku_scope', name='ix_product_unique_with_scope'),
             sa.ForeignKeyConstraint(['platform_sku'], ['dim_products.platform_sku'], ),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_products.shop_id'], ),
+            sa.ForeignKeyConstraint(['platform_code'], ['dim_products.platform_code'], ),
             sa.ForeignKeyConstraint(['source_catalog_id'], ['catalog_files.id'], ),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_products.platform_code'], )
+            sa.ForeignKeyConstraint(['shop_id'], ['dim_products.shop_id'], )
         )
-        op.create_index('ix_fact_product_metrics_granularity', 'fact_product_metrics', ['granularity'])
-        op.create_index('ix_product_parent_date', 'fact_product_metrics', ['platform_code', 'shop_id', 'parent_platform_sku', 'metric_date'])
-        op.create_index('ix_fact_product_metrics_platform_code', 'fact_product_metrics', ['platform_code'])
-        op.create_index('ix_fact_product_metrics_data_domain', 'fact_product_metrics', ['data_domain'])
         op.create_index('ix_metrics_plat_shop_date_gran', 'fact_product_metrics', ['platform_code', 'shop_id', 'metric_date', 'granularity'])
         op.create_index('ix_fact_product_metrics_metric_date', 'fact_product_metrics', ['metric_date'])
+        op.create_index('ix_product_parent_date', 'fact_product_metrics', ['platform_code', 'shop_id', 'parent_platform_sku', 'metric_date'])
         op.create_index('ix_fact_product_metrics_source_catalog_id', 'fact_product_metrics', ['source_catalog_id'])
         op.create_index('ix_fact_product_metrics_sku_scope', 'fact_product_metrics', ['sku_scope'])
         op.create_index('ix_metrics_plat_shop_type', 'fact_product_metrics', ['platform_code', 'shop_id', 'metric_type'])
         op.create_index('ix_fact_product_metrics_shop_id', 'fact_product_metrics', ['shop_id'])
         op.create_index('ix_fact_product_metrics_platform_sku', 'fact_product_metrics', ['platform_sku'])
         op.create_index('ix_fact_product_metrics_parent_platform_sku', 'fact_product_metrics', ['parent_platform_sku'])
+        op.create_index('ix_fact_product_metrics_granularity', 'fact_product_metrics', ['granularity'])
+        op.create_index('ix_fact_product_metrics_platform_code', 'fact_product_metrics', ['platform_code'])
+        op.create_index('ix_fact_product_metrics_data_domain', 'fact_product_metrics', ['data_domain'])
         safe_print("[OK] fact_product_metrics table created")
     else:
         safe_print("[SKIP] fact_product_metrics table already exists")
 
-    # ==================== 46. fact_rate_limit_config_audit ====================
-    safe_print("[46/106] Creating fact_rate_limit_config_audit table...")
+    # ==================== 45. fact_rate_limit_config_audit ====================
+    safe_print("[45/106] Creating fact_rate_limit_config_audit table...")
 
     if 'fact_rate_limit_config_audit' not in existing_tables:
         op.create_table(
@@ -1337,8 +1308,6 @@ def upgrade():
             sa.ForeignKeyConstraint(['operator_id'], ['dim_users.user_id'], ),
             sa.ForeignKeyConstraint(['config_id'], ['dim_rate_limit_config.config_id'], )
         )
-        op.create_index('ix_fact_rate_limit_config_audit_audit_id', 'fact_rate_limit_config_audit', ['audit_id'])
-        op.create_index('idx_rate_limit_audit_operator', 'fact_rate_limit_config_audit', ['operator_id', 'created_at'])
         op.create_index('ix_fact_rate_limit_config_audit_endpoint_type', 'fact_rate_limit_config_audit', ['endpoint_type'])
         op.create_index('ix_fact_rate_limit_config_audit_role_code', 'fact_rate_limit_config_audit', ['role_code'])
         op.create_index('idx_rate_limit_audit_action', 'fact_rate_limit_config_audit', ['action_type', 'created_at'])
@@ -1346,12 +1315,14 @@ def upgrade():
         op.create_index('idx_rate_limit_audit_role', 'fact_rate_limit_config_audit', ['role_code', 'endpoint_type', 'created_at'])
         op.create_index('ix_fact_rate_limit_config_audit_created_at', 'fact_rate_limit_config_audit', ['created_at'])
         op.create_index('ix_fact_rate_limit_config_audit_action_type', 'fact_rate_limit_config_audit', ['action_type'])
+        op.create_index('ix_fact_rate_limit_config_audit_audit_id', 'fact_rate_limit_config_audit', ['audit_id'])
+        op.create_index('idx_rate_limit_audit_operator', 'fact_rate_limit_config_audit', ['operator_id', 'created_at'])
         safe_print("[OK] fact_rate_limit_config_audit table created")
     else:
         safe_print("[SKIP] fact_rate_limit_config_audit table already exists")
 
-    # ==================== 47. fact_service ====================
-    safe_print("[47/106] Creating fact_service table...")
+    # ==================== 46. fact_service ====================
+    safe_print("[46/106] Creating fact_service table...")
 
     if 'fact_service' not in existing_tables:
         op.create_table(
@@ -1372,16 +1343,16 @@ def upgrade():
             sa.UniqueConstraint('platform_code', 'shop_id', 'service_date', 'granularity', 'metric_type', 'data_domain', name='uq_fact_service_business'),
             sa.ForeignKeyConstraint(['file_id'], ['catalog_files.id'], )
         )
-        op.create_index('ix_fact_service_service_date', 'fact_service', ['service_date'])
         op.create_index('ix_fact_service_platform_code', 'fact_service', ['platform_code'])
         op.create_index('ix_fact_service_file_id', 'fact_service', ['file_id'])
         op.create_index('ix_fact_service_shop_id', 'fact_service', ['shop_id'])
+        op.create_index('ix_fact_service_service_date', 'fact_service', ['service_date'])
         safe_print("[OK] fact_service table created")
     else:
         safe_print("[SKIP] fact_service table already exists")
 
-    # ==================== 48. fact_traffic ====================
-    safe_print("[48/106] Creating fact_traffic table...")
+    # ==================== 47. fact_traffic ====================
+    safe_print("[47/106] Creating fact_traffic table...")
 
     if 'fact_traffic' not in existing_tables:
         op.create_table(
@@ -1402,16 +1373,16 @@ def upgrade():
             sa.UniqueConstraint('platform_code', 'shop_id', 'traffic_date', 'granularity', 'metric_type', 'data_domain', name='uq_fact_traffic_business'),
             sa.ForeignKeyConstraint(['file_id'], ['catalog_files.id'], )
         )
-        op.create_index('ix_fact_traffic_shop_id', 'fact_traffic', ['shop_id'])
         op.create_index('ix_fact_traffic_traffic_date', 'fact_traffic', ['traffic_date'])
         op.create_index('ix_fact_traffic_platform_code', 'fact_traffic', ['platform_code'])
         op.create_index('ix_fact_traffic_file_id', 'fact_traffic', ['file_id'])
+        op.create_index('ix_fact_traffic_shop_id', 'fact_traffic', ['shop_id'])
         safe_print("[OK] fact_traffic table created")
     else:
         safe_print("[SKIP] fact_traffic table already exists")
 
-    # ==================== 49. field_mapping_audit ====================
-    safe_print("[49/106] Creating field_mapping_audit table...")
+    # ==================== 48. field_mapping_audit ====================
+    safe_print("[48/106] Creating field_mapping_audit table...")
 
     if 'field_mapping_audit' not in existing_tables:
         op.create_table(
@@ -1429,15 +1400,15 @@ def upgrade():
             sa.Column('ip_address', sa.String(length=64)),
             sa.Column('user_agent', sa.String(length=256))
         )
-        op.create_index('ix_field_mapping_audit_operated_at', 'field_mapping_audit', ['operated_at'])
         op.create_index('ix_audit_entity', 'field_mapping_audit', ['entity_type', 'entity_id'])
         op.create_index('ix_audit_operator', 'field_mapping_audit', ['operator', 'operated_at'])
+        op.create_index('ix_field_mapping_audit_operated_at', 'field_mapping_audit', ['operated_at'])
         safe_print("[OK] field_mapping_audit table created")
     else:
         safe_print("[SKIP] field_mapping_audit table already exists")
 
-    # ==================== 50. field_mapping_dictionary ====================
-    safe_print("[50/106] Creating field_mapping_dictionary table...")
+    # ==================== 49. field_mapping_dictionary ====================
+    safe_print("[49/106] Creating field_mapping_dictionary table...")
 
     if 'field_mapping_dictionary' not in existing_tables:
         op.create_table(
@@ -1475,19 +1446,19 @@ def upgrade():
             sa.Column('source_priority', sa.JSON),
             sa.UniqueConstraint('cn_name', name='uq_dictionary_cn_name')
         )
-        op.create_index('ix_dictionary_required', 'field_mapping_dictionary', ['is_required', 'data_domain'])
         op.create_index('ix_dictionary_status', 'field_mapping_dictionary', ['status', 'data_domain'])
         op.create_index('ix_field_mapping_dictionary_field_code', 'field_mapping_dictionary', ['field_code'])
         op.create_index('ix_dictionary_mv_display', 'field_mapping_dictionary', ['is_mv_display', 'data_domain'])
         op.create_index('ix_dictionary_domain_group', 'field_mapping_dictionary', ['data_domain', 'field_group'])
         op.create_index('ix_field_mapping_dictionary_data_domain', 'field_mapping_dictionary', ['data_domain'])
         op.create_index('ix_dictionary_currency_policy', 'field_mapping_dictionary', ['currency_policy'])
+        op.create_index('ix_dictionary_required', 'field_mapping_dictionary', ['is_required', 'data_domain'])
         safe_print("[OK] field_mapping_dictionary table created")
     else:
         safe_print("[SKIP] field_mapping_dictionary table already exists")
 
-    # ==================== 51. field_mapping_template_items ====================
-    safe_print("[51/106] Creating field_mapping_template_items table...")
+    # ==================== 50. field_mapping_template_items ====================
+    safe_print("[50/106] Creating field_mapping_template_items table...")
 
     if 'field_mapping_template_items' not in existing_tables:
         op.create_table(
@@ -1508,8 +1479,8 @@ def upgrade():
     else:
         safe_print("[SKIP] field_mapping_template_items table already exists")
 
-    # ==================== 52. field_mapping_templates ====================
-    safe_print("[52/106] Creating field_mapping_templates table...")
+    # ==================== 51. field_mapping_templates ====================
+    safe_print("[51/106] Creating field_mapping_templates table...")
 
     if 'field_mapping_templates' not in existing_tables:
         op.create_table(
@@ -1537,16 +1508,16 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime()),
             sa.Column('notes', sa.String())
         )
-        op.create_index('ix_field_mapping_templates_data_domain', 'field_mapping_templates', ['data_domain'])
         op.create_index('ix_template_status', 'field_mapping_templates', ['status', 'platform'])
         op.create_index('ix_field_mapping_templates_platform', 'field_mapping_templates', ['platform'])
         op.create_index('ix_template_dimension_v2', 'field_mapping_templates', ['platform', 'data_domain', 'sub_domain', 'granularity', 'account'])
+        op.create_index('ix_field_mapping_templates_data_domain', 'field_mapping_templates', ['data_domain'])
         safe_print("[OK] field_mapping_templates table created")
     else:
         safe_print("[SKIP] field_mapping_templates table already exists")
 
-    # ==================== 53. field_mappings ====================
-    safe_print("[53/106] Creating field_mappings table...")
+    # ==================== 52. field_mappings ====================
+    safe_print("[52/106] Creating field_mappings table...")
 
     if 'field_mappings' not in existing_tables:
         op.create_table(
@@ -1566,16 +1537,16 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.ForeignKeyConstraint(['file_id'], ['data_files.id'], )
         )
-        op.create_index('ix_field_mappings_version', 'field_mappings', ['version'])
         op.create_index('ix_field_mappings_template_key', 'field_mappings', ['platform', 'domain', 'sub_domain', 'granularity'])
         op.create_index('ix_field_mappings_platform', 'field_mappings', ['platform'])
         op.create_index('ix_field_mappings_domain', 'field_mappings', ['domain'])
+        op.create_index('ix_field_mappings_version', 'field_mappings', ['version'])
         safe_print("[OK] field_mappings table created")
     else:
         safe_print("[SKIP] field_mappings table already exists")
 
-    # ==================== 54. field_usage_tracking ====================
-    safe_print("[54/106] Creating field_usage_tracking table...")
+    # ==================== 53. field_usage_tracking ====================
+    safe_print("[53/106] Creating field_usage_tracking table...")
 
     if 'field_usage_tracking' not in existing_tables:
         op.create_table(
@@ -1598,18 +1569,18 @@ def upgrade():
             sa.Column('created_by', sa.String(length=64), nullable=False),
             sa.UniqueConstraint('table_name', 'field_name', 'api_endpoint', 'frontend_component', name='uq_field_usage')
         )
-        op.create_index('ix_field_usage_tracking_field_name', 'field_usage_tracking', ['field_name'])
-        op.create_index('idx_usage_type', 'field_usage_tracking', ['usage_type'])
         op.create_index('idx_usage_field', 'field_usage_tracking', ['table_name', 'field_name'])
         op.create_index('idx_usage_api', 'field_usage_tracking', ['api_endpoint'])
         op.create_index('ix_field_usage_tracking_table_name', 'field_usage_tracking', ['table_name'])
         op.create_index('idx_usage_frontend', 'field_usage_tracking', ['frontend_component'])
+        op.create_index('ix_field_usage_tracking_field_name', 'field_usage_tracking', ['field_name'])
+        op.create_index('idx_usage_type', 'field_usage_tracking', ['usage_type'])
         safe_print("[OK] field_usage_tracking table created")
     else:
         safe_print("[SKIP] field_usage_tracking table already exists")
 
-    # ==================== 55. fx_rates ====================
-    safe_print("[55/106] Creating fx_rates table...")
+    # ==================== 54. fx_rates ====================
+    safe_print("[54/106] Creating fx_rates table...")
 
     if 'fx_rates' not in existing_tables:
         op.create_table(
@@ -1628,8 +1599,8 @@ def upgrade():
     else:
         safe_print("[SKIP] fx_rates table already exists")
 
-    # ==================== 56. gl_accounts ====================
-    safe_print("[56/106] Creating gl_accounts table...")
+    # ==================== 55. gl_accounts ====================
+    safe_print("[55/106] Creating gl_accounts table...")
 
     if 'gl_accounts' not in existing_tables:
         op.create_table(
@@ -1647,57 +1618,8 @@ def upgrade():
     else:
         safe_print("[SKIP] gl_accounts table already exists")
 
-    # ==================== 57. grn_headers ====================
-    safe_print("[57/106] Creating grn_headers table...")
-
-    if 'grn_headers' not in existing_tables:
-        op.create_table(
-            'grn_headers',
-            sa.Column('grn_id', sa.String(length=64), nullable=False),
-            sa.Column('po_id', sa.String(length=64), nullable=False),
-            sa.Column('receipt_date', sa.Date(), nullable=False),
-            sa.Column('warehouse', sa.String(length=64)),
-            sa.Column('status', sa.String(length=32), nullable=False),
-            sa.Column('created_by', sa.String(length=64)),
-            sa.Column('created_at', sa.DateTime(), nullable=False),
-            sa.ForeignKeyConstraint(['po_id'], ['po_headers.po_id'], )
-        )
-        op.create_index('ix_grn_headers_po_id', 'grn_headers', ['po_id'])
-        op.create_index('ix_grn_headers_date', 'grn_headers', ['receipt_date'])
-        safe_print("[OK] grn_headers table created")
-    else:
-        safe_print("[SKIP] grn_headers table already exists")
-
-    # ==================== 58. grn_lines ====================
-    safe_print("[58/106] Creating grn_lines table...")
-
-    if 'grn_lines' not in existing_tables:
-        op.create_table(
-            'grn_lines',
-            sa.Column('grn_line_id', sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column('grn_id', sa.String(length=64), nullable=False),
-            sa.Column('po_line_id', sa.Integer(), nullable=False),
-            sa.Column('platform_sku', sa.String(length=128), nullable=False),
-            sa.Column('qty_received', sa.Integer()),
-            sa.Column('unit_cost', sa.Numeric(), nullable=False),
-            sa.Column('currency', sa.String(length=8), nullable=False),
-            sa.Column('ext_value', sa.Numeric()),
-            sa.Column('base_ext_value', sa.Numeric()),
-            sa.Column('weight_kg', sa.Numeric()),
-            sa.Column('volume_m3', sa.Numeric()),
-            sa.Column('created_at', sa.DateTime(), nullable=False),
-            sa.ForeignKeyConstraint(['grn_id'], ['grn_headers.grn_id'], ),
-            sa.ForeignKeyConstraint(['po_line_id'], ['po_lines.po_line_id'], )
-        )
-        op.create_index('ix_grn_lines_po_line', 'grn_lines', ['po_line_id'])
-        op.create_index('ix_grn_lines_sku', 'grn_lines', ['platform_sku'])
-        op.create_index('ix_grn_lines_grn_id', 'grn_lines', ['grn_id'])
-        safe_print("[OK] grn_lines table created")
-    else:
-        safe_print("[SKIP] grn_lines table already exists")
-
-    # ==================== 59. inventory_ledger ====================
-    safe_print("[59/106] Creating inventory_ledger table...")
+    # ==================== 56. inventory_ledger ====================
+    safe_print("[56/106] Creating inventory_ledger table...")
 
     if 'inventory_ledger' not in existing_tables:
         op.create_table(
@@ -1724,38 +1646,16 @@ def upgrade():
             sa.Column('created_by', sa.String(length=64)),
             sa.Column('created_at', sa.DateTime(), nullable=False)
         )
-        op.create_index('ix_inventory_ledger_order', 'inventory_ledger', ['link_order_id'])
         op.create_index('ix_inventory_ledger_sku_date', 'inventory_ledger', ['platform_code', 'shop_id', 'platform_sku', 'transaction_date'])
         op.create_index('ix_inventory_ledger_type', 'inventory_ledger', ['movement_type', 'transaction_date'])
         op.create_index('ix_inventory_ledger_grn', 'inventory_ledger', ['link_grn_id'])
+        op.create_index('ix_inventory_ledger_order', 'inventory_ledger', ['link_order_id'])
         safe_print("[OK] inventory_ledger table created")
     else:
         safe_print("[SKIP] inventory_ledger table already exists")
 
-    # ==================== 60. invoice_attachments ====================
-    safe_print("[60/106] Creating invoice_attachments table...")
-
-    if 'invoice_attachments' not in existing_tables:
-        op.create_table(
-            'invoice_attachments',
-            sa.Column('attachment_id', sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column('invoice_id', sa.Integer(), nullable=False),
-            sa.Column('file_path', sa.String(length=1024), nullable=False),
-            sa.Column('file_type', sa.String(length=32)),
-            sa.Column('file_size', sa.Integer()),
-            sa.Column('ocr_text', sa.String()),
-            sa.Column('ocr_fields', sa.JSON),
-            sa.Column('uploaded_by', sa.String(length=64)),
-            sa.Column('uploaded_at', sa.DateTime(), nullable=False),
-            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], )
-        )
-        op.create_index('ix_invoice_attachments_invoice', 'invoice_attachments', ['invoice_id'])
-        safe_print("[OK] invoice_attachments table created")
-    else:
-        safe_print("[SKIP] invoice_attachments table already exists")
-
-    # ==================== 61. invoice_headers ====================
-    safe_print("[61/106] Creating invoice_headers table...")
+    # ==================== 57. invoice_headers ====================
+    safe_print("[57/106] Creating invoice_headers table...")
 
     if 'invoice_headers' not in existing_tables:
         op.create_table(
@@ -1779,41 +1679,36 @@ def upgrade():
             sa.ForeignKeyConstraint(['vendor_code'], ['dim_vendors.vendor_code'], ),
             sa.ForeignKeyConstraint(['source_file_id'], ['catalog_files.id'], )
         )
-        op.create_index('ix_invoice_headers_status', 'invoice_headers', ['status'])
         op.create_index('ix_invoice_headers_vendor_date', 'invoice_headers', ['vendor_code', 'invoice_date'])
+        op.create_index('ix_invoice_headers_status', 'invoice_headers', ['status'])
         safe_print("[OK] invoice_headers table created")
     else:
         safe_print("[SKIP] invoice_headers table already exists")
 
-    # ==================== 62. invoice_lines ====================
-    safe_print("[62/106] Creating invoice_lines table...")
+    # ==================== 58. invoice_attachments ====================
+    safe_print("[58/106] Creating invoice_attachments table...")
 
-    if 'invoice_lines' not in existing_tables:
+    if 'invoice_attachments' not in existing_tables:
         op.create_table(
-            'invoice_lines',
-            sa.Column('invoice_line_id', sa.Integer(), nullable=False, autoincrement=True),
+            'invoice_attachments',
+            sa.Column('attachment_id', sa.Integer(), nullable=False, autoincrement=True),
             sa.Column('invoice_id', sa.Integer(), nullable=False),
-            sa.Column('po_line_id', sa.Integer()),
-            sa.Column('grn_line_id', sa.Integer()),
-            sa.Column('platform_sku', sa.String(length=128), nullable=False),
-            sa.Column('qty', sa.Integer()),
-            sa.Column('unit_price', sa.Numeric(), nullable=False),
-            sa.Column('line_amt', sa.Numeric()),
-            sa.Column('tax_amt', sa.Numeric()),
-            sa.Column('created_at', sa.DateTime(), nullable=False),
-            sa.ForeignKeyConstraint(['grn_line_id'], ['grn_lines.grn_line_id'], ),
-            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], ),
-            sa.ForeignKeyConstraint(['po_line_id'], ['po_lines.po_line_id'], )
+            sa.Column('file_path', sa.String(length=1024), nullable=False),
+            sa.Column('file_type', sa.String(length=32)),
+            sa.Column('file_size', sa.Integer()),
+            sa.Column('ocr_text', sa.String()),
+            sa.Column('ocr_fields', sa.JSON),
+            sa.Column('uploaded_by', sa.String(length=64)),
+            sa.Column('uploaded_at', sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], )
         )
-        op.create_index('ix_invoice_lines_invoice', 'invoice_lines', ['invoice_id'])
-        op.create_index('ix_invoice_lines_po_line', 'invoice_lines', ['po_line_id'])
-        op.create_index('ix_invoice_lines_grn_line', 'invoice_lines', ['grn_line_id'])
-        safe_print("[OK] invoice_lines table created")
+        op.create_index('ix_invoice_attachments_invoice', 'invoice_attachments', ['invoice_id'])
+        safe_print("[OK] invoice_attachments table created")
     else:
-        safe_print("[SKIP] invoice_lines table already exists")
+        safe_print("[SKIP] invoice_attachments table already exists")
 
-    # ==================== 63. journal_entries ====================
-    safe_print("[63/106] Creating journal_entries table...")
+    # ==================== 59. journal_entries ====================
+    safe_print("[59/106] Creating journal_entries table...")
 
     if 'journal_entries' not in existing_tables:
         op.create_table(
@@ -1831,15 +1726,15 @@ def upgrade():
             sa.UniqueConstraint('entry_no'),
             sa.ForeignKeyConstraint(['period_month'], ['dim_fiscal_calendar.period_code'], )
         )
-        op.create_index('ix_journal_entries_period', 'journal_entries', ['period_month'])
         op.create_index('ix_journal_entries_status', 'journal_entries', ['status'])
         op.create_index('ix_journal_entries_date', 'journal_entries', ['entry_date'])
+        op.create_index('ix_journal_entries_period', 'journal_entries', ['period_month'])
         safe_print("[OK] journal_entries table created")
     else:
         safe_print("[SKIP] journal_entries table already exists")
 
-    # ==================== 64. journal_entry_lines ====================
-    safe_print("[64/106] Creating journal_entry_lines table...")
+    # ==================== 60. journal_entry_lines ====================
+    safe_print("[60/106] Creating journal_entry_lines table...")
 
     if 'journal_entry_lines' not in existing_tables:
         op.create_table(
@@ -1862,14 +1757,14 @@ def upgrade():
             sa.ForeignKeyConstraint(['entry_id'], ['journal_entries.entry_id'], ),
             sa.ForeignKeyConstraint(['account_code'], ['gl_accounts.account_code'], )
         )
-        op.create_index('ix_journal_lines_account', 'journal_entry_lines', ['account_code'])
         op.create_index('ix_journal_lines_entry', 'journal_entry_lines', ['entry_id'])
+        op.create_index('ix_journal_lines_account', 'journal_entry_lines', ['account_code'])
         safe_print("[OK] journal_entry_lines table created")
     else:
         safe_print("[SKIP] journal_entry_lines table already exists")
 
-    # ==================== 65. logistics_allocation_rules ====================
-    safe_print("[65/106] Creating logistics_allocation_rules table...")
+    # ==================== 61. logistics_allocation_rules ====================
+    safe_print("[61/106] Creating logistics_allocation_rules table...")
 
     if 'logistics_allocation_rules' not in existing_tables:
         op.create_table(
@@ -1888,37 +1783,8 @@ def upgrade():
     else:
         safe_print("[SKIP] logistics_allocation_rules table already exists")
 
-    # ==================== 66. logistics_costs ====================
-    safe_print("[66/106] Creating logistics_costs table...")
-
-    if 'logistics_costs' not in existing_tables:
-        op.create_table(
-            'logistics_costs',
-            sa.Column('logistics_id', sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column('grn_id', sa.String(length=64)),
-            sa.Column('order_id', sa.String(length=128)),
-            sa.Column('logistics_provider', sa.String(length=128)),
-            sa.Column('tracking_no', sa.String(length=128)),
-            sa.Column('cost_type', sa.String(length=64), nullable=False),
-            sa.Column('currency', sa.String(length=8), nullable=False),
-            sa.Column('currency_amt', sa.Numeric()),
-            sa.Column('base_amt', sa.Numeric()),
-            sa.Column('weight_kg', sa.Numeric()),
-            sa.Column('volume_m3', sa.Numeric()),
-            sa.Column('invoice_id', sa.Integer()),
-            sa.Column('created_at', sa.DateTime(), nullable=False),
-            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], ),
-            sa.ForeignKeyConstraint(['grn_id'], ['grn_headers.grn_id'], )
-        )
-        op.create_index('ix_logistics_costs_order', 'logistics_costs', ['order_id'])
-        op.create_index('ix_logistics_costs_invoice', 'logistics_costs', ['invoice_id'])
-        op.create_index('ix_logistics_costs_grn', 'logistics_costs', ['grn_id'])
-        safe_print("[OK] logistics_costs table created")
-    else:
-        safe_print("[SKIP] logistics_costs table already exists")
-
-    # ==================== 67. mapping_sessions ====================
-    safe_print("[67/106] Creating mapping_sessions table...")
+    # ==================== 62. mapping_sessions ====================
+    safe_print("[62/106] Creating mapping_sessions table...")
 
     if 'mapping_sessions' not in existing_tables:
         op.create_table(
@@ -1935,8 +1801,8 @@ def upgrade():
     else:
         safe_print("[SKIP] mapping_sessions table already exists")
 
-    # ==================== 68. mv_refresh_log ====================
-    safe_print("[68/106] Creating mv_refresh_log table...")
+    # ==================== 63. mv_refresh_log ====================
+    safe_print("[63/106] Creating mv_refresh_log table...")
 
     if 'mv_refresh_log' not in existing_tables:
         op.create_table(
@@ -1951,15 +1817,15 @@ def upgrade():
             sa.Column('error_message', sa.String()),
             sa.Column('triggered_by', sa.String(length=64), nullable=False)
         )
-        op.create_index('ix_mv_refresh_log_view_name', 'mv_refresh_log', ['view_name'])
         op.create_index('ix_mv_refresh_log_view', 'mv_refresh_log', ['view_name', 'refresh_started_at'])
         op.create_index('ix_mv_refresh_log_status', 'mv_refresh_log', ['status', 'refresh_started_at'])
+        op.create_index('ix_mv_refresh_log_view_name', 'mv_refresh_log', ['view_name'])
         safe_print("[OK] mv_refresh_log table created")
     else:
         safe_print("[SKIP] mv_refresh_log table already exists")
 
-    # ==================== 69. notification_templates ====================
-    safe_print("[69/106] Creating notification_templates table...")
+    # ==================== 64. notification_templates ====================
+    safe_print("[64/106] Creating notification_templates table...")
 
     if 'notification_templates' not in existing_tables:
         op.create_table(
@@ -1979,14 +1845,44 @@ def upgrade():
             sa.ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], ),
             sa.ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], )
         )
-        op.create_index('ix_notification_templates_template_name', 'notification_templates', ['template_name'])
         op.create_index('ix_notification_templates_template_type', 'notification_templates', ['template_type'])
+        op.create_index('ix_notification_templates_template_name', 'notification_templates', ['template_name'])
         safe_print("[OK] notification_templates table created")
     else:
         safe_print("[SKIP] notification_templates table already exists")
 
-    # ==================== 70. notifications ====================
-    safe_print("[70/106] Creating notifications table...")
+    # ==================== 65. alert_rules ====================
+    safe_print("[65/106] Creating alert_rules table...")
+
+    if 'alert_rules' not in existing_tables:
+        op.create_table(
+            'alert_rules',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
+            sa.Column('rule_name', sa.String(length=128), nullable=False),
+            sa.Column('rule_type', sa.String(length=64), nullable=False),
+            sa.Column('condition', sa.dialects.postgresql.JSONB, nullable=False),
+            sa.Column('template_id', sa.Integer()),
+            sa.Column('recipients', sa.dialects.postgresql.JSONB),
+            sa.Column('enabled', sa.Boolean(), nullable=False),
+            sa.Column('priority', sa.String(length=16), nullable=False),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(), nullable=False),
+            sa.Column('created_by', sa.Integer()),
+            sa.Column('updated_by', sa.Integer()),
+            sa.UniqueConstraint('rule_name'),
+            sa.ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], ),
+            sa.ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], ),
+            sa.ForeignKeyConstraint(['template_id'], ['notification_templates.id'], )
+        )
+        op.create_index('ix_alert_rules_rule_name', 'alert_rules', ['rule_name'])
+        op.create_index('ix_alert_rules_rule_type', 'alert_rules', ['rule_type'])
+        op.create_index('ix_alert_rules_enabled', 'alert_rules', ['enabled'])
+        safe_print("[OK] alert_rules table created")
+    else:
+        safe_print("[SKIP] alert_rules table already exists")
+
+    # ==================== 66. notifications ====================
+    safe_print("[66/106] Creating notifications table...")
 
     if 'notifications' not in existing_tables:
         op.create_table(
@@ -2005,19 +1901,19 @@ def upgrade():
             sa.ForeignKeyConstraint(['recipient_id'], ['dim_users.user_id'], ),
             sa.ForeignKeyConstraint(['related_user_id'], ['dim_users.user_id'], )
         )
-        op.create_index('ix_notifications_is_read', 'notifications', ['is_read'])
-        op.create_index('idx_notification_type_created', 'notifications', ['notification_type', 'created_at'])
-        op.create_index('ix_notifications_notification_type', 'notifications', ['notification_type'])
         op.create_index('ix_notifications_priority', 'notifications', ['priority'])
         op.create_index('ix_notifications_created_at', 'notifications', ['created_at'])
         op.create_index('idx_notification_user_unread', 'notifications', ['recipient_id', 'is_read'])
         op.create_index('ix_notifications_recipient_id', 'notifications', ['recipient_id'])
+        op.create_index('ix_notifications_is_read', 'notifications', ['is_read'])
+        op.create_index('idx_notification_type_created', 'notifications', ['notification_type', 'created_at'])
+        op.create_index('ix_notifications_notification_type', 'notifications', ['notification_type'])
         safe_print("[OK] notifications table created")
     else:
         safe_print("[SKIP] notifications table already exists")
 
-    # ==================== 71. opening_balances ====================
-    safe_print("[71/106] Creating opening_balances table...")
+    # ==================== 67. opening_balances ====================
+    safe_print("[67/106] Creating opening_balances table...")
 
     if 'opening_balances' not in existing_tables:
         op.create_table(
@@ -2036,14 +1932,14 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.UniqueConstraint('period', 'platform_code', 'shop_id', 'platform_sku', name='uq_opening_balance')
         )
-        op.create_index('ix_opening_balances_period', 'opening_balances', ['period'])
         op.create_index('ix_opening_balances_sku', 'opening_balances', ['platform_code', 'shop_id', 'platform_sku'])
+        op.create_index('ix_opening_balances_period', 'opening_balances', ['period'])
         safe_print("[OK] opening_balances table created")
     else:
         safe_print("[SKIP] opening_balances table already exists")
 
-    # ==================== 72. operating_costs ====================
-    safe_print("[72/106] Creating operating_costs table...")
+    # ==================== 68. operating_costs ====================
+    safe_print("[68/106] Creating operating_costs table...")
 
     if 'operating_costs' not in existing_tables:
         op.create_table(
@@ -2059,14 +1955,14 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.UniqueConstraint('shop_id', 'year_month', name='uq_operating_costs_shop_month')
         )
-        op.create_index('ix_operating_costs_month', 'operating_costs', ['year_month'])
         op.create_index('ix_operating_costs_shop', 'operating_costs', ['shop_id'])
+        op.create_index('ix_operating_costs_month', 'operating_costs', ['year_month'])
         safe_print("[OK] operating_costs table created")
     else:
         safe_print("[SKIP] operating_costs table already exists")
 
-    # ==================== 73. performance_config ====================
-    safe_print("[73/106] Creating performance_config table...")
+    # ==================== 69. performance_config ====================
+    safe_print("[69/106] Creating performance_config table...")
 
     if 'performance_config' not in existing_tables:
         op.create_table(
@@ -2089,8 +1985,8 @@ def upgrade():
     else:
         safe_print("[SKIP] performance_config table already exists")
 
-    # ==================== 74. performance_config_a ====================
-    safe_print("[74/106] Creating performance_config_a table...")
+    # ==================== 70. performance_config_a ====================
+    safe_print("[70/106] Creating performance_config_a table...")
 
     if 'performance_config_a' not in existing_tables:
         op.create_table(
@@ -2110,8 +2006,8 @@ def upgrade():
     else:
         safe_print("[SKIP] performance_config_a table already exists")
 
-    # ==================== 75. performance_scores ====================
-    safe_print("[75/106] Creating performance_scores table...")
+    # ==================== 71. performance_scores ====================
+    safe_print("[71/106] Creating performance_scores table...")
 
     if 'performance_scores' not in existing_tables:
         op.create_table(
@@ -2134,16 +2030,16 @@ def upgrade():
             sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], ),
             sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], )
         )
-        op.create_index('ix_performance_rank', 'performance_scores', ['rank'])
         op.create_index('ix_performance_period', 'performance_scores', ['period'])
         op.create_index('ix_performance_shop', 'performance_scores', ['platform_code', 'shop_id'])
         op.create_index('ix_performance_score', 'performance_scores', ['total_score'])
+        op.create_index('ix_performance_rank', 'performance_scores', ['rank'])
         safe_print("[OK] performance_scores table created")
     else:
         safe_print("[SKIP] performance_scores table already exists")
 
-    # ==================== 76. performance_scores_c ====================
-    safe_print("[76/106] Creating performance_scores_c table...")
+    # ==================== 72. performance_scores_c ====================
+    safe_print("[72/106] Creating performance_scores_c table...")
 
     if 'performance_scores_c' not in existing_tables:
         op.create_table(
@@ -2157,14 +2053,14 @@ def upgrade():
             sa.Column('calculated_at', sa.DateTime(), nullable=False),
             sa.UniqueConstraint('shop_id', 'period', name='uq_performance_scores')
         )
-        op.create_index('ix_performance_scores_shop', 'performance_scores_c', ['shop_id'])
         op.create_index('ix_performance_scores_period', 'performance_scores_c', ['period'])
+        op.create_index('ix_performance_scores_shop', 'performance_scores_c', ['shop_id'])
         safe_print("[OK] performance_scores_c table created")
     else:
         safe_print("[SKIP] performance_scores_c table already exists")
 
-    # ==================== 77. platform_accounts ====================
-    safe_print("[77/106] Creating platform_accounts table...")
+    # ==================== 73. platform_accounts ====================
+    safe_print("[73/106] Creating platform_accounts table...")
 
     if 'platform_accounts' not in existing_tables:
         op.create_table(
@@ -2196,17 +2092,17 @@ def upgrade():
             sa.Column('extra_config', sa.dialects.postgresql.JSONB),
             sa.UniqueConstraint('account_id')
         )
-        op.create_index('ix_platform_accounts_shop_type', 'platform_accounts', ['shop_type'])
-        op.create_index('ix_platform_accounts_platform', 'platform_accounts', ['platform'])
         op.create_index('ix_platform_accounts_shop_id', 'platform_accounts', ['shop_id'])
         op.create_index('ix_platform_accounts_parent', 'platform_accounts', ['parent_account'])
         op.create_index('ix_platform_accounts_enabled', 'platform_accounts', ['enabled'])
+        op.create_index('ix_platform_accounts_shop_type', 'platform_accounts', ['shop_type'])
+        op.create_index('ix_platform_accounts_platform', 'platform_accounts', ['platform'])
         safe_print("[OK] platform_accounts table created")
     else:
         safe_print("[SKIP] platform_accounts table already exists")
 
-    # ==================== 78. po_headers ====================
-    safe_print("[78/106] Creating po_headers table...")
+    # ==================== 74. po_headers ====================
+    safe_print("[74/106] Creating po_headers table...")
 
     if 'po_headers' not in existing_tables:
         op.create_table(
@@ -2233,8 +2129,58 @@ def upgrade():
     else:
         safe_print("[SKIP] po_headers table already exists")
 
-    # ==================== 79. po_lines ====================
-    safe_print("[79/106] Creating po_lines table...")
+    # ==================== 75. grn_headers ====================
+    safe_print("[75/106] Creating grn_headers table...")
+
+    if 'grn_headers' not in existing_tables:
+        op.create_table(
+            'grn_headers',
+            sa.Column('grn_id', sa.String(length=64), nullable=False),
+            sa.Column('po_id', sa.String(length=64), nullable=False),
+            sa.Column('receipt_date', sa.Date(), nullable=False),
+            sa.Column('warehouse', sa.String(length=64)),
+            sa.Column('status', sa.String(length=32), nullable=False),
+            sa.Column('created_by', sa.String(length=64)),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(['po_id'], ['po_headers.po_id'], )
+        )
+        op.create_index('ix_grn_headers_po_id', 'grn_headers', ['po_id'])
+        op.create_index('ix_grn_headers_date', 'grn_headers', ['receipt_date'])
+        safe_print("[OK] grn_headers table created")
+    else:
+        safe_print("[SKIP] grn_headers table already exists")
+
+    # ==================== 76. logistics_costs ====================
+    safe_print("[76/106] Creating logistics_costs table...")
+
+    if 'logistics_costs' not in existing_tables:
+        op.create_table(
+            'logistics_costs',
+            sa.Column('logistics_id', sa.Integer(), nullable=False, autoincrement=True),
+            sa.Column('grn_id', sa.String(length=64)),
+            sa.Column('order_id', sa.String(length=128)),
+            sa.Column('logistics_provider', sa.String(length=128)),
+            sa.Column('tracking_no', sa.String(length=128)),
+            sa.Column('cost_type', sa.String(length=64), nullable=False),
+            sa.Column('currency', sa.String(length=8), nullable=False),
+            sa.Column('currency_amt', sa.Numeric()),
+            sa.Column('base_amt', sa.Numeric()),
+            sa.Column('weight_kg', sa.Numeric()),
+            sa.Column('volume_m3', sa.Numeric()),
+            sa.Column('invoice_id', sa.Integer()),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], ),
+            sa.ForeignKeyConstraint(['grn_id'], ['grn_headers.grn_id'], )
+        )
+        op.create_index('ix_logistics_costs_invoice', 'logistics_costs', ['invoice_id'])
+        op.create_index('ix_logistics_costs_grn', 'logistics_costs', ['grn_id'])
+        op.create_index('ix_logistics_costs_order', 'logistics_costs', ['order_id'])
+        safe_print("[OK] logistics_costs table created")
+    else:
+        safe_print("[SKIP] logistics_costs table already exists")
+
+    # ==================== 77. po_lines ====================
+    safe_print("[77/106] Creating po_lines table...")
 
     if 'po_lines' not in existing_tables:
         op.create_table(
@@ -2254,11 +2200,66 @@ def upgrade():
             sa.UniqueConstraint('po_id', 'line_number', name='uq_po_line'),
             sa.ForeignKeyConstraint(['po_id'], ['po_headers.po_id'], )
         )
-        op.create_index('ix_po_lines_po_id', 'po_lines', ['po_id'])
         op.create_index('ix_po_lines_sku', 'po_lines', ['platform_sku'])
+        op.create_index('ix_po_lines_po_id', 'po_lines', ['po_id'])
         safe_print("[OK] po_lines table created")
     else:
         safe_print("[SKIP] po_lines table already exists")
+
+    # ==================== 78. grn_lines ====================
+    safe_print("[78/106] Creating grn_lines table...")
+
+    if 'grn_lines' not in existing_tables:
+        op.create_table(
+            'grn_lines',
+            sa.Column('grn_line_id', sa.Integer(), nullable=False, autoincrement=True),
+            sa.Column('grn_id', sa.String(length=64), nullable=False),
+            sa.Column('po_line_id', sa.Integer(), nullable=False),
+            sa.Column('platform_sku', sa.String(length=128), nullable=False),
+            sa.Column('qty_received', sa.Integer()),
+            sa.Column('unit_cost', sa.Numeric(), nullable=False),
+            sa.Column('currency', sa.String(length=8), nullable=False),
+            sa.Column('ext_value', sa.Numeric()),
+            sa.Column('base_ext_value', sa.Numeric()),
+            sa.Column('weight_kg', sa.Numeric()),
+            sa.Column('volume_m3', sa.Numeric()),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(['grn_id'], ['grn_headers.grn_id'], ),
+            sa.ForeignKeyConstraint(['po_line_id'], ['po_lines.po_line_id'], )
+        )
+        op.create_index('ix_grn_lines_sku', 'grn_lines', ['platform_sku'])
+        op.create_index('ix_grn_lines_grn_id', 'grn_lines', ['grn_id'])
+        op.create_index('ix_grn_lines_po_line', 'grn_lines', ['po_line_id'])
+        safe_print("[OK] grn_lines table created")
+    else:
+        safe_print("[SKIP] grn_lines table already exists")
+
+    # ==================== 79. invoice_lines ====================
+    safe_print("[79/106] Creating invoice_lines table...")
+
+    if 'invoice_lines' not in existing_tables:
+        op.create_table(
+            'invoice_lines',
+            sa.Column('invoice_line_id', sa.Integer(), nullable=False, autoincrement=True),
+            sa.Column('invoice_id', sa.Integer(), nullable=False),
+            sa.Column('po_line_id', sa.Integer()),
+            sa.Column('grn_line_id', sa.Integer()),
+            sa.Column('platform_sku', sa.String(length=128), nullable=False),
+            sa.Column('qty', sa.Integer()),
+            sa.Column('unit_price', sa.Numeric(), nullable=False),
+            sa.Column('line_amt', sa.Numeric()),
+            sa.Column('tax_amt', sa.Numeric()),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(['grn_line_id'], ['grn_lines.grn_line_id'], ),
+            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], ),
+            sa.ForeignKeyConstraint(['po_line_id'], ['po_lines.po_line_id'], )
+        )
+        op.create_index('ix_invoice_lines_invoice', 'invoice_lines', ['invoice_id'])
+        op.create_index('ix_invoice_lines_po_line', 'invoice_lines', ['po_line_id'])
+        op.create_index('ix_invoice_lines_grn_line', 'invoice_lines', ['grn_line_id'])
+        safe_print("[OK] invoice_lines table created")
+    else:
+        safe_print("[SKIP] invoice_lines table already exists")
 
     # ==================== 80. product_images ====================
     safe_print("[80/106] Creating product_images table...")
@@ -2283,9 +2284,9 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.Column('updated_at', sa.DateTime(), nullable=False)
         )
-        op.create_index('idx_product_images_sku', 'product_images', ['platform_sku'])
         op.create_index('idx_product_images_product', 'product_images', ['platform_code', 'shop_id', 'platform_sku'])
         op.create_index('idx_product_images_order', 'product_images', ['platform_sku', 'image_order'])
+        op.create_index('idx_product_images_sku', 'product_images', ['platform_sku'])
         safe_print("[OK] product_images table created")
     else:
         safe_print("[SKIP] product_images table already exists")
@@ -2314,8 +2315,37 @@ def upgrade():
     else:
         safe_print("[SKIP] return_orders table already exists")
 
-    # ==================== 82. sales_campaign_shops ====================
-    safe_print("[82/106] Creating sales_campaign_shops table...")
+    # ==================== 82. sales_campaigns ====================
+    safe_print("[82/106] Creating sales_campaigns table...")
+
+    if 'sales_campaigns' not in existing_tables:
+        op.create_table(
+            'sales_campaigns',
+            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
+            sa.Column('campaign_name', sa.String(length=200), nullable=False),
+            sa.Column('campaign_type', sa.String(length=32), nullable=False),
+            sa.Column('start_date', sa.Date(), nullable=False),
+            sa.Column('end_date', sa.Date(), nullable=False),
+            sa.Column('target_amount', sa.Numeric(), nullable=False),
+            sa.Column('target_quantity', sa.Integer(), nullable=False),
+            sa.Column('actual_amount', sa.Numeric(), nullable=False),
+            sa.Column('actual_quantity', sa.Integer(), nullable=False),
+            sa.Column('achievement_rate', sa.Numeric(), nullable=False),
+            sa.Column('status', sa.String(length=32), nullable=False),
+            sa.Column('description', sa.String()),
+            sa.Column('created_by', sa.String(length=64)),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(), nullable=False)
+        )
+        op.create_index('ix_sales_campaigns_type', 'sales_campaigns', ['campaign_type'])
+        op.create_index('ix_sales_campaigns_dates', 'sales_campaigns', ['start_date', 'end_date'])
+        op.create_index('ix_sales_campaigns_status', 'sales_campaigns', ['status'])
+        safe_print("[OK] sales_campaigns table created")
+    else:
+        safe_print("[SKIP] sales_campaigns table already exists")
+
+    # ==================== 83. sales_campaign_shops ====================
+    safe_print("[83/106] Creating sales_campaign_shops table...")
 
     if 'sales_campaign_shops' not in existing_tables:
         op.create_table(
@@ -2342,35 +2372,6 @@ def upgrade():
         safe_print("[OK] sales_campaign_shops table created")
     else:
         safe_print("[SKIP] sales_campaign_shops table already exists")
-
-    # ==================== 83. sales_campaigns ====================
-    safe_print("[83/106] Creating sales_campaigns table...")
-
-    if 'sales_campaigns' not in existing_tables:
-        op.create_table(
-            'sales_campaigns',
-            sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
-            sa.Column('campaign_name', sa.String(length=200), nullable=False),
-            sa.Column('campaign_type', sa.String(length=32), nullable=False),
-            sa.Column('start_date', sa.Date(), nullable=False),
-            sa.Column('end_date', sa.Date(), nullable=False),
-            sa.Column('target_amount', sa.Numeric(), nullable=False),
-            sa.Column('target_quantity', sa.Integer(), nullable=False),
-            sa.Column('actual_amount', sa.Numeric(), nullable=False),
-            sa.Column('actual_quantity', sa.Integer(), nullable=False),
-            sa.Column('achievement_rate', sa.Numeric(), nullable=False),
-            sa.Column('status', sa.String(length=32), nullable=False),
-            sa.Column('description', sa.String()),
-            sa.Column('created_by', sa.String(length=64)),
-            sa.Column('created_at', sa.DateTime(), nullable=False),
-            sa.Column('updated_at', sa.DateTime(), nullable=False)
-        )
-        op.create_index('ix_sales_campaigns_status', 'sales_campaigns', ['status'])
-        op.create_index('ix_sales_campaigns_type', 'sales_campaigns', ['campaign_type'])
-        op.create_index('ix_sales_campaigns_dates', 'sales_campaigns', ['start_date', 'end_date'])
-        safe_print("[OK] sales_campaigns table created")
-    else:
-        safe_print("[SKIP] sales_campaigns table already exists")
 
     # ==================== 84. sales_campaigns_a ====================
     safe_print("[84/106] Creating sales_campaigns_a table...")
@@ -2441,8 +2442,8 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.UniqueConstraint('shop_id', 'year_month', name='uq_sales_targets_shop_month')
         )
-        op.create_index('ix_sales_targets_shop', 'sales_targets_a', ['shop_id'])
         op.create_index('ix_sales_targets_month', 'sales_targets_a', ['year_month'])
+        op.create_index('ix_sales_targets_shop', 'sales_targets_a', ['shop_id'])
         safe_print("[OK] sales_targets_a table created")
     else:
         safe_print("[SKIP] sales_targets_a table already exists")
@@ -2492,10 +2493,10 @@ def upgrade():
             sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], ),
             sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], )
         )
-        op.create_index('ix_shop_alerts_created', 'shop_alerts', ['created_at'])
         op.create_index('ix_shop_alerts_level', 'shop_alerts', ['alert_level'])
         op.create_index('ix_shop_alerts_shop', 'shop_alerts', ['platform_code', 'shop_id'])
         op.create_index('ix_shop_alerts_resolved', 'shop_alerts', ['is_resolved'])
+        op.create_index('ix_shop_alerts_created', 'shop_alerts', ['created_at'])
         safe_print("[OK] shop_alerts table created")
     else:
         safe_print("[SKIP] shop_alerts table already exists")
@@ -2549,10 +2550,10 @@ def upgrade():
             sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], ),
             sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], )
         )
-        op.create_index('ix_shop_health_risk', 'shop_health_scores', ['risk_level'])
         op.create_index('ix_shop_health_date', 'shop_health_scores', ['metric_date'])
         op.create_index('ix_shop_health_shop', 'shop_health_scores', ['platform_code', 'shop_id'])
         op.create_index('ix_shop_health_score', 'shop_health_scores', ['health_score'])
+        op.create_index('ix_shop_health_risk', 'shop_health_scores', ['risk_level'])
         safe_print("[OK] shop_health_scores table created")
     else:
         safe_print("[SKIP] shop_health_scores table already exists")
@@ -2597,12 +2598,12 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.ForeignKeyConstraint(['file_id'], ['catalog_files.id'], )
         )
-        op.create_index('ix_staging_inventory_sku', 'staging_inventory', ['platform_code', 'shop_id', 'platform_sku'])
-        op.create_index('ix_staging_inventory_platform', 'staging_inventory', ['platform_code'])
-        op.create_index('ix_staging_inventory_task', 'staging_inventory', ['ingest_task_id'])
         op.create_index('ix_staging_inventory_file_id', 'staging_inventory', ['file_id'])
+        op.create_index('ix_staging_inventory_task', 'staging_inventory', ['ingest_task_id'])
         op.create_index('ix_staging_inventory_ingest_task_id', 'staging_inventory', ['ingest_task_id'])
         op.create_index('ix_staging_inventory_file', 'staging_inventory', ['file_id'])
+        op.create_index('ix_staging_inventory_sku', 'staging_inventory', ['platform_code', 'shop_id', 'platform_sku'])
+        op.create_index('ix_staging_inventory_platform', 'staging_inventory', ['platform_code'])
         safe_print("[OK] staging_inventory table created")
     else:
         safe_print("[SKIP] staging_inventory table already exists")
@@ -2623,11 +2624,11 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.ForeignKeyConstraint(['file_id'], ['catalog_files.id'], )
         )
-        op.create_index('ix_staging_orders_platform', 'staging_orders', ['platform_code'])
         op.create_index('ix_staging_orders_task', 'staging_orders', ['ingest_task_id'])
         op.create_index('ix_staging_orders_file_id', 'staging_orders', ['file_id'])
-        op.create_index('ix_staging_orders_ingest_task_id', 'staging_orders', ['ingest_task_id'])
         op.create_index('ix_staging_orders_file', 'staging_orders', ['file_id'])
+        op.create_index('ix_staging_orders_ingest_task_id', 'staging_orders', ['ingest_task_id'])
+        op.create_index('ix_staging_orders_platform', 'staging_orders', ['platform_code'])
         safe_print("[OK] staging_orders table created")
     else:
         safe_print("[SKIP] staging_orders table already exists")
@@ -2648,11 +2649,11 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.ForeignKeyConstraint(['file_id'], ['catalog_files.id'], )
         )
-        op.create_index('ix_staging_metrics_platform', 'staging_product_metrics', ['platform_code'])
         op.create_index('ix_staging_metrics_task', 'staging_product_metrics', ['ingest_task_id'])
         op.create_index('ix_staging_product_metrics_file_id', 'staging_product_metrics', ['file_id'])
         op.create_index('ix_staging_product_metrics_ingest_task_id', 'staging_product_metrics', ['ingest_task_id'])
         op.create_index('ix_staging_metrics_file', 'staging_product_metrics', ['file_id'])
+        op.create_index('ix_staging_metrics_platform', 'staging_product_metrics', ['platform_code'])
         safe_print("[OK] staging_product_metrics table created")
     else:
         safe_print("[SKIP] staging_product_metrics table already exists")
@@ -2677,13 +2678,13 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.ForeignKeyConstraint(['file_id'], ['catalog_files.id'], )
         )
-        op.create_index('ix_staging_raw_data_status', 'staging_raw_data', ['status'])
         op.create_index('ix_staging_raw_data_domain_gran', 'staging_raw_data', ['data_domain', 'granularity'])
         op.create_index('ix_staging_raw_data_data_domain', 'staging_raw_data', ['data_domain'])
         op.create_index('ix_staging_raw_data_file_id', 'staging_raw_data', ['file_id'])
         op.create_index('ix_staging_raw_data_file', 'staging_raw_data', ['file_id', 'status'])
         op.create_index('ix_staging_raw_data_shop_id', 'staging_raw_data', ['shop_id'])
         op.create_index('ix_staging_raw_data_platform_code', 'staging_raw_data', ['platform_code'])
+        op.create_index('ix_staging_raw_data_status', 'staging_raw_data', ['status'])
         safe_print("[OK] staging_raw_data table created")
     else:
         safe_print("[SKIP] staging_raw_data table already exists")
@@ -2714,11 +2715,11 @@ def upgrade():
             sa.Column('warnings', sa.JSON),
             sa.Column('task_details', sa.JSON)
         )
+        op.create_index('ix_sync_progress_status', 'sync_progress_tasks', ['status', 'start_time'])
         op.create_index('ix_sync_progress_tasks_start_time', 'sync_progress_tasks', ['start_time'])
         op.create_index('ix_sync_progress_tasks_task_id', 'sync_progress_tasks', ['task_id'])
         op.create_index('ix_sync_progress_tasks_status', 'sync_progress_tasks', ['status'])
         op.create_index('ix_sync_progress_updated', 'sync_progress_tasks', ['updated_at'])
-        op.create_index('ix_sync_progress_status', 'sync_progress_tasks', ['status', 'start_time'])
         safe_print("[OK] sync_progress_tasks table created")
     else:
         safe_print("[SKIP] sync_progress_tasks table already exists")
@@ -2888,12 +2889,12 @@ def upgrade():
             sa.ForeignKeyConstraint(['approved_by'], ['dim_users.user_id'], ),
             sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], )
         )
-        op.create_index('ix_user_approval_logs_user_id', 'user_approval_logs', ['user_id'])
-        op.create_index('idx_approval_action_time', 'user_approval_logs', ['action', 'created_at'])
         op.create_index('ix_user_approval_logs_log_id', 'user_approval_logs', ['log_id'])
         op.create_index('ix_user_approval_logs_created_at', 'user_approval_logs', ['created_at'])
         op.create_index('ix_user_approval_logs_action', 'user_approval_logs', ['action'])
         op.create_index('idx_approval_user_time', 'user_approval_logs', ['user_id', 'created_at'])
+        op.create_index('ix_user_approval_logs_user_id', 'user_approval_logs', ['user_id'])
+        op.create_index('idx_approval_action_time', 'user_approval_logs', ['action', 'created_at'])
         safe_print("[OK] user_approval_logs table created")
     else:
         safe_print("[SKIP] user_approval_logs table already exists")
@@ -2914,8 +2915,8 @@ def upgrade():
             sa.UniqueConstraint('user_id', 'notification_type', name='uq_user_notification_preference'),
             sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], )
         )
-        op.create_index('ix_user_notification_preferences_user_id', 'user_notification_preferences', ['user_id'])
         op.create_index('idx_user_notification_user', 'user_notification_preferences', ['user_id'])
+        op.create_index('ix_user_notification_preferences_user_id', 'user_notification_preferences', ['user_id'])
         safe_print("[OK] user_notification_preferences table created")
     else:
         safe_print("[SKIP] user_notification_preferences table already exists")
@@ -2957,10 +2958,10 @@ def upgrade():
             sa.Column('revoked_reason', sa.String(length=100)),
             sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], )
         )
-        op.create_index('ix_user_sessions_user_id', 'user_sessions', ['user_id'])
         op.create_index('idx_session_user_active', 'user_sessions', ['user_id', 'is_active'])
         op.create_index('ix_user_sessions_session_id', 'user_sessions', ['session_id'])
         op.create_index('idx_session_expires', 'user_sessions', ['expires_at'])
+        op.create_index('ix_user_sessions_user_id', 'user_sessions', ['user_id'])
         safe_print("[OK] user_sessions table created")
     else:
         safe_print("[SKIP] user_sessions table already exists")
@@ -2970,6 +2971,7 @@ def upgrade():
 def downgrade():
     """回滚：删除所有表（谨慎使用）"""
     # 注意：downgrade 会删除所有表，生产环境请谨慎使用
+    # 按相反顺序删除表（处理外键依赖）
     conn = op.get_bind()
     inspector = inspect(conn)
     existing_tables = set(inspector.get_table_names())
@@ -3066,13 +3068,13 @@ def downgrade():
         op.drop_table('sales_campaigns_a')
         safe_print("[OK] sales_campaigns_a table dropped")
 
-    if 'sales_campaigns' in existing_tables:
-        op.drop_table('sales_campaigns')
-        safe_print("[OK] sales_campaigns table dropped")
-
     if 'sales_campaign_shops' in existing_tables:
         op.drop_table('sales_campaign_shops')
         safe_print("[OK] sales_campaign_shops table dropped")
+
+    if 'sales_campaigns' in existing_tables:
+        op.drop_table('sales_campaigns')
+        safe_print("[OK] sales_campaigns table dropped")
 
     if 'return_orders' in existing_tables:
         op.drop_table('return_orders')
@@ -3082,9 +3084,25 @@ def downgrade():
         op.drop_table('product_images')
         safe_print("[OK] product_images table dropped")
 
+    if 'invoice_lines' in existing_tables:
+        op.drop_table('invoice_lines')
+        safe_print("[OK] invoice_lines table dropped")
+
+    if 'grn_lines' in existing_tables:
+        op.drop_table('grn_lines')
+        safe_print("[OK] grn_lines table dropped")
+
     if 'po_lines' in existing_tables:
         op.drop_table('po_lines')
         safe_print("[OK] po_lines table dropped")
+
+    if 'logistics_costs' in existing_tables:
+        op.drop_table('logistics_costs')
+        safe_print("[OK] logistics_costs table dropped")
+
+    if 'grn_headers' in existing_tables:
+        op.drop_table('grn_headers')
+        safe_print("[OK] grn_headers table dropped")
 
     if 'po_headers' in existing_tables:
         op.drop_table('po_headers')
@@ -3122,6 +3140,10 @@ def downgrade():
         op.drop_table('notifications')
         safe_print("[OK] notifications table dropped")
 
+    if 'alert_rules' in existing_tables:
+        op.drop_table('alert_rules')
+        safe_print("[OK] alert_rules table dropped")
+
     if 'notification_templates' in existing_tables:
         op.drop_table('notification_templates')
         safe_print("[OK] notification_templates table dropped")
@@ -3133,10 +3155,6 @@ def downgrade():
     if 'mapping_sessions' in existing_tables:
         op.drop_table('mapping_sessions')
         safe_print("[OK] mapping_sessions table dropped")
-
-    if 'logistics_costs' in existing_tables:
-        op.drop_table('logistics_costs')
-        safe_print("[OK] logistics_costs table dropped")
 
     if 'logistics_allocation_rules' in existing_tables:
         op.drop_table('logistics_allocation_rules')
@@ -3150,29 +3168,17 @@ def downgrade():
         op.drop_table('journal_entries')
         safe_print("[OK] journal_entries table dropped")
 
-    if 'invoice_lines' in existing_tables:
-        op.drop_table('invoice_lines')
-        safe_print("[OK] invoice_lines table dropped")
+    if 'invoice_attachments' in existing_tables:
+        op.drop_table('invoice_attachments')
+        safe_print("[OK] invoice_attachments table dropped")
 
     if 'invoice_headers' in existing_tables:
         op.drop_table('invoice_headers')
         safe_print("[OK] invoice_headers table dropped")
 
-    if 'invoice_attachments' in existing_tables:
-        op.drop_table('invoice_attachments')
-        safe_print("[OK] invoice_attachments table dropped")
-
     if 'inventory_ledger' in existing_tables:
         op.drop_table('inventory_ledger')
         safe_print("[OK] inventory_ledger table dropped")
-
-    if 'grn_lines' in existing_tables:
-        op.drop_table('grn_lines')
-        safe_print("[OK] grn_lines table dropped")
-
-    if 'grn_headers' in existing_tables:
-        op.drop_table('grn_headers')
-        safe_print("[OK] grn_headers table dropped")
 
     if 'gl_accounts' in existing_tables:
         op.drop_table('gl_accounts')
@@ -3234,13 +3240,13 @@ def downgrade():
         op.drop_table('fact_order_amounts')
         safe_print("[OK] fact_order_amounts table dropped")
 
-    if 'fact_expenses_month' in existing_tables:
-        op.drop_table('fact_expenses_month')
-        safe_print("[OK] fact_expenses_month table dropped")
-
     if 'fact_expenses_allocated_day_shop_sku' in existing_tables:
         op.drop_table('fact_expenses_allocated_day_shop_sku')
         safe_print("[OK] fact_expenses_allocated_day_shop_sku table dropped")
+
+    if 'fact_expenses_month' in existing_tables:
+        op.drop_table('fact_expenses_month')
+        safe_print("[OK] fact_expenses_month table dropped")
 
     if 'fact_audit_logs' in existing_tables:
         op.drop_table('fact_audit_logs')
@@ -3274,9 +3280,17 @@ def downgrade():
         op.drop_table('dim_vendors')
         safe_print("[OK] dim_vendors table dropped")
 
+    if 'backup_records' in existing_tables:
+        op.drop_table('backup_records')
+        safe_print("[OK] backup_records table dropped")
+
     if 'dim_users' in existing_tables:
         op.drop_table('dim_users')
         safe_print("[OK] dim_users table dropped")
+
+    if 'clearance_rankings' in existing_tables:
+        op.drop_table('clearance_rankings')
+        safe_print("[OK] clearance_rankings table dropped")
 
     if 'dim_shops' in existing_tables:
         op.drop_table('dim_shops')
@@ -3289,6 +3303,10 @@ def downgrade():
     if 'dim_rate_limit_config' in existing_tables:
         op.drop_table('dim_rate_limit_config')
         safe_print("[OK] dim_rate_limit_config table dropped")
+
+    if 'bridge_product_keys' in existing_tables:
+        op.drop_table('bridge_product_keys')
+        safe_print("[OK] bridge_product_keys table dropped")
 
     if 'dim_products' in existing_tables:
         op.drop_table('dim_products')
@@ -3334,21 +3352,21 @@ def downgrade():
         op.drop_table('data_files')
         safe_print("[OK] data_files table dropped")
 
-    if 'component_versions' in existing_tables:
-        op.drop_table('component_versions')
-        safe_print("[OK] component_versions table dropped")
-
     if 'component_test_history' in existing_tables:
         op.drop_table('component_test_history')
         safe_print("[OK] component_test_history table dropped")
 
-    if 'collection_tasks' in existing_tables:
-        op.drop_table('collection_tasks')
-        safe_print("[OK] collection_tasks table dropped")
+    if 'component_versions' in existing_tables:
+        op.drop_table('component_versions')
+        safe_print("[OK] component_versions table dropped")
 
     if 'collection_task_logs' in existing_tables:
         op.drop_table('collection_task_logs')
         safe_print("[OK] collection_task_logs table dropped")
+
+    if 'collection_tasks' in existing_tables:
+        op.drop_table('collection_tasks')
+        safe_print("[OK] collection_tasks table dropped")
 
     if 'collection_sync_points' in existing_tables:
         op.drop_table('collection_sync_points')
@@ -3358,21 +3376,9 @@ def downgrade():
         op.drop_table('collection_configs')
         safe_print("[OK] collection_configs table dropped")
 
-    if 'clearance_rankings' in existing_tables:
-        op.drop_table('clearance_rankings')
-        safe_print("[OK] clearance_rankings table dropped")
-
     if 'catalog_files' in existing_tables:
         op.drop_table('catalog_files')
         safe_print("[OK] catalog_files table dropped")
-
-    if 'bridge_product_keys' in existing_tables:
-        op.drop_table('bridge_product_keys')
-        safe_print("[OK] bridge_product_keys table dropped")
-
-    if 'backup_records' in existing_tables:
-        op.drop_table('backup_records')
-        safe_print("[OK] backup_records table dropped")
 
     if 'attendance_records' in existing_tables:
         op.drop_table('attendance_records')
@@ -3385,10 +3391,6 @@ def downgrade():
     if 'allocation_rules' in existing_tables:
         op.drop_table('allocation_rules')
         safe_print("[OK] allocation_rules table dropped")
-
-    if 'alert_rules' in existing_tables:
-        op.drop_table('alert_rules')
-        safe_print("[OK] alert_rules table dropped")
 
     if 'accounts' in existing_tables:
         op.drop_table('accounts')

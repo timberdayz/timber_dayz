@@ -5,6 +5,7 @@
 Schema Snapshot Migration Generator
 
 从 modules/core/db/schema.py 自动生成完整的 Schema 快照迁移文件。
+使用拓扑排序确保表按依赖顺序创建（被引用的表优先创建）。
 
 用法:
     python scripts/generate_schema_snapshot.py
@@ -16,7 +17,8 @@ Schema Snapshot Migration Generator
 import sys
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List, Set, Tuple
+from collections import defaultdict, deque
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent
@@ -120,6 +122,86 @@ def column_to_sa_column(column: Column, is_single_pk: bool = False) -> str:
         return f"sa.Column('{column.name}', {type_str})"
 
 
+def get_table_dependencies(tables: Dict[str, Any]) -> Dict[str, Set[str]]:
+    """
+    获取所有表的依赖关系
+    
+    Returns:
+        Dict[str, Set[str]]: {table_name: {依赖的表名集合}}
+    """
+    dependencies = defaultdict(set)
+    
+    for table_name, table in tables.items():
+        # 收集所有外键引用的表
+        for fk in table.foreign_keys:
+            ref_table = fk.column.table.name
+            # 只记录实际存在的表（排除自引用）
+            if ref_table != table_name and ref_table in tables:
+                dependencies[table_name].add(ref_table)
+    
+    return dict(dependencies)
+
+
+def topological_sort_tables(tables: Dict[str, Any]) -> List[Tuple[str, Any]]:
+    """
+    使用拓扑排序按依赖顺序排序表
+    
+    Args:
+        tables: Base.metadata.tables 字典
+        
+    Returns:
+        List[Tuple[str, Any]]: 按依赖顺序排序的 (表名, 表对象) 列表
+    """
+    # 获取依赖关系
+    dependencies = get_table_dependencies(tables)
+    
+    # 计算每个表的入度（被依赖的次数）
+    in_degree = defaultdict(int)
+    for table_name in tables.keys():
+        in_degree[table_name] = 0
+    
+    # 构建反向依赖图（用于计算入度）
+    reverse_deps = defaultdict(set)
+    for table_name, deps in dependencies.items():
+        for dep_table in deps:
+            reverse_deps[dep_table].add(table_name)
+            in_degree[table_name] += 1
+    
+    # 拓扑排序：Kahn 算法
+    queue = deque()
+    result = []
+    
+    # 将所有入度为 0 的表（无依赖的表）加入队列
+    for table_name in tables.keys():
+        if in_degree[table_name] == 0:
+            queue.append(table_name)
+    
+    # 处理队列
+    while queue:
+        # 按表名排序，确保相同依赖级别的表有稳定的顺序
+        queue = deque(sorted(queue))
+        current = queue.popleft()
+        result.append((current, tables[current]))
+        
+        # 更新依赖此表的其他表的入度
+        for dependent_table in reverse_deps[current]:
+            in_degree[dependent_table] -= 1
+            if in_degree[dependent_table] == 0:
+                queue.append(dependent_table)
+    
+    # 检查是否有循环依赖
+    if len(result) != len(tables):
+        # 找出未处理的表（可能存在循环依赖）
+        processed = set(name for name, _ in result)
+        remaining = set(tables.keys()) - processed
+        print(f"[WARN] 检测到可能的循环依赖，以下表未处理: {remaining}")
+        # 将剩余表按字母顺序添加到末尾
+        for table_name in sorted(remaining):
+            result.append((table_name, tables[table_name]))
+    
+    return result
+
+
 def generate_table_creation_code(table_name: str, table: Any) -> str:
     """生成表创建代码"""
     lines = []
@@ -159,7 +241,8 @@ def generate_table_creation_code(table_name: str, table: Any) -> str:
         # 使用 (local_col, ref_table, ref_col) 作为唯一键
         fk_key = (fk.parent.name, ref_table, ref_col)
         if fk_key not in fk_constraints:
-            fk_constraints[fk_key] = f"sa.ForeignKeyConstraint(['{fk.parent.name}'], ['{ref_table}.{ref_col}'], )"
+            fk_constraint = f"sa.ForeignKeyConstraint(['{fk.parent.name}'], ['{ref_table}.{ref_col}'], )"
+            fk_constraints[fk_key] = fk_constraint
     
     for fk_constraint in fk_constraints.values():
         lines.append(f"            {fk_constraint},")
@@ -188,8 +271,8 @@ def generate_migration_file() -> str:
     # 获取所有表
     tables = Base.metadata.tables
     
-    # 按表名排序（确保依赖顺序）
-    sorted_tables = sorted(tables.items())
+    # [FIX] 使用拓扑排序按依赖顺序排序表（被引用的表优先创建）
+    sorted_tables = topological_sort_tables(tables)
     
     # 生成文件内容
     lines = []
@@ -208,6 +291,7 @@ def generate_migration_file() -> str:
     lines.append('- 此迁移是幂等的，可以重复执行')
     lines.append('- 如果表已存在，将跳过创建')
     lines.append('- 可作为新环境的起点，不依赖旧迁移历史')
+    lines.append('- 表按依赖顺序创建（被引用的表优先创建）')
     lines.append('"""')
     lines.append('')
     lines.append('from alembic import op')
@@ -247,6 +331,7 @@ def generate_migration_file() -> str:
     lines.append('def downgrade():')
     lines.append('    """回滚：删除所有表（谨慎使用）"""')
     lines.append('    # 注意：downgrade 会删除所有表，生产环境请谨慎使用')
+    lines.append('    # 按相反顺序删除表（处理外键依赖）')
     lines.append('    conn = op.get_bind()')
     lines.append('    inspector = inspect(conn)')
     lines.append('    existing_tables = set(inspector.get_table_names())')
@@ -288,6 +373,16 @@ def main():
     except SyntaxError as e:
         print(f"[ERROR] Generated file has syntax errors: {e}")
         sys.exit(1)
+    
+    # 显示依赖关系信息
+    tables = Base.metadata.tables
+    dependencies = get_table_dependencies(tables)
+    if dependencies:
+        print(f"[INFO] Table dependencies detected: {len(dependencies)} tables have foreign key dependencies")
+        # 显示前几个依赖关系作为示例
+        sample_deps = list(dependencies.items())[:5]
+        for table_name, deps in sample_deps:
+            print(f"  - {table_name} depends on: {', '.join(sorted(deps))}")
 
 
 if __name__ == "__main__":
