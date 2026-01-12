@@ -107,16 +107,14 @@ class Settings:
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
     
     # CORS配置
-    ALLOWED_ORIGINS: List[str] = [
-        "http://localhost:8080",  # Metabase端口（从3000改为8080，避免Windows端口权限问题）
-        "http://localhost:5173",
-        "http://localhost:5174",  # 前端端口
-        "http://127.0.0.1:8080",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-        "http://localhost:8001",  # 后端端口（用于Swagger UI）
-        "http://127.0.0.1:8001"
-    ]
+    # [*] 从环境变量读取 ALLOWED_ORIGINS（支持逗号分隔的多个值）
+    # 如果环境变量未设置，使用开发环境的默认值（兼容性）
+    _allowed_origins_str = os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:8080,http://localhost:5173,http://localhost:5174,http://127.0.0.1:8080,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:8001,http://127.0.0.1:8001"
+    )
+    ALLOWED_ORIGINS: List[str] = [o.strip() for o in _allowed_origins_str.split(",") if o.strip()]
+    
     # [*] 从环境变量读取 ALLOWED_HOSTS（支持逗号分隔的多个值）
     _allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1")
     ALLOWED_HOSTS: List[str] = [h.strip() for h in _allowed_hosts_str.split(",") if h.strip()]
