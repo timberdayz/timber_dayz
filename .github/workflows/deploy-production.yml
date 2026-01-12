@@ -468,7 +468,42 @@ jobs:
             exit 1
           fi
 
-          echo "[OK] All compose files synced successfully via SCP"
+          # 6. 上传 Nginx 配置文件（生产必需组件）
+          if [ -d "nginx" ]; then
+            # 确保服务器上 nginx 目录存在
+            if ! ssh -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                -o ConnectTimeout=30 \
+                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+                "mkdir -p ${PRODUCTION_PATH}/nginx"; then
+              echo "[WARN] Failed to create nginx directory on server, but continuing..."
+            fi
+
+            # 上传 nginx.prod.conf（生产必需）
+            if [ -f "nginx/nginx.prod.conf" ]; then
+              if ! scp_with_retry nginx/nginx.prod.conf ${PRODUCTION_PATH}/nginx/nginx.prod.conf; then
+                echo "[FAIL] Failed to upload nginx/nginx.prod.conf (required for production)"
+                exit 1
+              fi
+            else
+              echo "[WARN] nginx/nginx.prod.conf not found (required for production, deployment may fail if Nginx is not configured)"
+            fi
+
+            # 确保 SSL 证书目录存在（SSL 证书通常不需要通过 Git 同步，这里只是确保目录存在）
+            if ! ssh -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                -o ConnectTimeout=30 \
+                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+                "mkdir -p ${PRODUCTION_PATH}/nginx/ssl"; then
+              echo "[WARN] Failed to create nginx/ssl directory on server, but continuing..."
+            fi
+          else
+            echo "[WARN] nginx directory not found, skipping Nginx configuration sync..."
+          fi
+
+          echo "[OK] All compose files and Nginx configuration synced successfully via SCP"
 
       - name: Backup current deployment
         env:
@@ -630,7 +665,43 @@ jobs:
           if ! scp_with_retry scripts/deploy_remote_production.sh ${PRODUCTION_PATH}/deploy_remote_production.sh; then
             exit 1
           fi
-          echo "[OK] All compose files synced successfully via SCP"
+
+          # 上传 Nginx 配置文件（生产必需组件）
+          if [ -d "nginx" ]; then
+            # 确保服务器上 nginx 目录存在
+            if ! ssh -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                -o ConnectTimeout=30 \
+                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+                "mkdir -p ${PRODUCTION_PATH}/nginx"; then
+              echo "[WARN] Failed to create nginx directory on server, but continuing..."
+            fi
+
+            # 上传 nginx.prod.conf（生产必需）
+            if [ -f "nginx/nginx.prod.conf" ]; then
+              if ! scp_with_retry nginx/nginx.prod.conf ${PRODUCTION_PATH}/nginx/nginx.prod.conf; then
+                echo "[FAIL] Failed to upload nginx/nginx.prod.conf (required for production)"
+                exit 1
+              fi
+            else
+              echo "[WARN] nginx/nginx.prod.conf not found (required for production, deployment may fail if Nginx is not configured)"
+            fi
+
+            # 确保 SSL 证书目录存在（SSL 证书通常不需要通过 Git 同步，这里只是确保目录存在）
+            if ! ssh -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                -o ConnectTimeout=30 \
+                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+                "mkdir -p ${PRODUCTION_PATH}/nginx/ssl"; then
+              echo "[WARN] Failed to create nginx/ssl directory on server, but continuing..."
+            fi
+          else
+            echo "[WARN] nginx directory not found, skipping Nginx configuration sync..."
+          fi
+
+          echo "[OK] All compose files and Nginx configuration synced successfully via SCP"
 
       - name: Backup current deployment
         env:
