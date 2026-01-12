@@ -2,7 +2,7 @@
 
 Revision ID: v5_0_0_schema_snapshot
 Revises: None
-Create Date: 2026-01-12 15:27:06
+Create Date: 2026-01-12 17:08:09
 
 完整的数据库结构快照迁移。
 包含所有在 schema.py 中定义的表。
@@ -71,9 +71,9 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime()),
             sa.PrimaryKeyConstraint('id')
         )
-        op.create_index('ix_account_alias_platform_domain', 'account_aliases', ['platform', 'data_domain'])
         op.create_index('ix_account_alias_target', 'account_aliases', ['target_id', 'active'])
         op.create_index('uq_account_alias_source', 'account_aliases', ['platform', 'data_domain', 'account', 'site', 'store_label_raw'])
+        op.create_index('ix_account_alias_platform_domain', 'account_aliases', ['platform', 'data_domain'])
         safe_print("[OK] account_aliases table created")
     else:
         safe_print("[SKIP] account_aliases table already exists")
@@ -307,8 +307,8 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('task_id', name='uq_collection_tasks_task_id'),
-            sa.ForeignKeyConstraint(['config_id'], ['collection_configs.id'], ),
-            sa.ForeignKeyConstraint(['parent_task_id'], ['collection_tasks.id'], )
+            sa.ForeignKeyConstraint(['parent_task_id'], ['collection_tasks.id'], ),
+            sa.ForeignKeyConstraint(['config_id'], ['collection_configs.id'], )
         )
         op.create_index('ix_collection_tasks_created', 'collection_tasks', ['created_at'])
         op.create_index('ix_collection_tasks_platform', 'collection_tasks', ['platform'])
@@ -538,11 +538,11 @@ def upgrade():
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('from_currency', 'to_currency', 'rate_date', name='uq_exchange_rate')
         )
-        op.create_index('ix_exchange_rate_lookup', 'dim_exchange_rates', ['from_currency', 'to_currency', 'rate_date'])
+        op.create_index('ix_exchange_rate_date', 'dim_exchange_rates', ['rate_date'])
         op.create_index('ix_dim_exchange_rates_to_currency', 'dim_exchange_rates', ['to_currency'])
         op.create_index('ix_dim_exchange_rates_rate_date', 'dim_exchange_rates', ['rate_date'])
-        op.create_index('ix_exchange_rate_date', 'dim_exchange_rates', ['rate_date'])
         op.create_index('ix_dim_exchange_rates_from_currency', 'dim_exchange_rates', ['from_currency'])
+        op.create_index('ix_exchange_rate_lookup', 'dim_exchange_rates', ['from_currency', 'to_currency', 'rate_date'])
         safe_print("[OK] dim_exchange_rates table created")
     else:
         safe_print("[SKIP] dim_exchange_rates table already exists")
@@ -677,12 +677,8 @@ def upgrade():
             sa.Column('platform_sku', sa.String(length=128), nullable=False),
             sa.PrimaryKeyConstraint('product_id', 'platform_code', 'shop_id', 'platform_sku'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'platform_sku', name='uq_bridge_platform_sku'),
-            sa.ForeignKeyConstraint(['product_id'], ['dim_product_master.product_id'], ondelete='CASCADE'),
-            sa.ForeignKeyConstraint(
-                ['platform_code', 'shop_id', 'platform_sku'],
-                ['dim_products.platform_code', 'dim_products.shop_id', 'dim_products.platform_sku'],
-                ondelete='CASCADE'
-            )
+            sa.ForeignKeyConstraint(['platform_code', 'shop_id', 'platform_sku'], ['dim_products.platform_code', 'dim_products.shop_id', 'dim_products.platform_sku'], ),
+            sa.ForeignKeyConstraint(['product_id'], ['dim_product_master.product_id'], )
         )
         op.create_index('ix_bridge_product_id', 'bridge_product_keys', ['product_id'])
         safe_print("[OK] bridge_product_keys table created")
@@ -787,8 +783,7 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'metric_date', 'granularity', name='uq_clearance_ranking'),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], ),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], )
+            sa.ForeignKeyConstraint(['platform_code', 'shop_id'], ['dim_shops.platform_code', 'dim_shops.shop_id'], )
         )
         op.create_index('ix_clearance_ranking_date', 'clearance_rankings', ['metric_date', 'granularity'])
         op.create_index('ix_clearance_ranking_rank', 'clearance_rankings', ['rank'])
@@ -828,8 +823,8 @@ def upgrade():
             sa.PrimaryKeyConstraint('user_id'),
             sa.ForeignKeyConstraint(['approved_by'], ['dim_users.user_id'], )
         )
-        op.create_index('idx_users_active', 'dim_users', ['is_active'])
         op.create_index('ix_dim_users_status', 'dim_users', ['status'])
+        op.create_index('idx_users_active', 'dim_users', ['is_active'])
         op.create_index('ix_dim_users_username', 'dim_users', ['username'])
         op.create_index('idx_users_email_active', 'dim_users', ['email', 'is_active'])
         op.create_index('ix_dim_users_user_id', 'dim_users', ['user_id'])
@@ -1070,13 +1065,13 @@ def upgrade():
             sa.PrimaryKeyConstraint('log_id'),
             sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], )
         )
+        op.create_index('idx_audit_user_time', 'fact_audit_logs', ['user_id', 'created_at'])
         op.create_index('ix_fact_audit_logs_created_at', 'fact_audit_logs', ['created_at'])
-        op.create_index('ix_fact_audit_logs_log_id', 'fact_audit_logs', ['log_id'])
         op.create_index('idx_audit_action_time', 'fact_audit_logs', ['action_type', 'created_at'])
         op.create_index('ix_fact_audit_logs_action_type', 'fact_audit_logs', ['action_type'])
         op.create_index('idx_audit_resource', 'fact_audit_logs', ['resource_type', 'resource_id'])
         op.create_index('idx_audit_recent', 'fact_audit_logs', ['created_at'])
-        op.create_index('idx_audit_user_time', 'fact_audit_logs', ['user_id', 'created_at'])
+        op.create_index('ix_fact_audit_logs_log_id', 'fact_audit_logs', ['log_id'])
         safe_print("[OK] fact_audit_logs table created")
     else:
         safe_print("[SKIP] fact_audit_logs table already exists")
@@ -1102,8 +1097,8 @@ def upgrade():
             sa.Column('memo', sa.String()),
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('expense_id'),
-            sa.ForeignKeyConstraint(['source_file_id'], ['catalog_files.id'], ),
-            sa.ForeignKeyConstraint(['period_month'], ['dim_fiscal_calendar.period_code'], )
+            sa.ForeignKeyConstraint(['period_month'], ['dim_fiscal_calendar.period_code'], ),
+            sa.ForeignKeyConstraint(['source_file_id'], ['catalog_files.id'], )
         )
         op.create_index('ix_expenses_month_period', 'fact_expenses_month', ['period_month'])
         op.create_index('ix_expenses_month_type', 'fact_expenses_month', ['expense_type'])
@@ -1192,8 +1187,8 @@ def upgrade():
             sa.PrimaryKeyConstraint('platform_code', 'shop_id', 'order_id', 'platform_sku'),
             sa.ForeignKeyConstraint(['product_id'], ['dim_product_master.product_id'], )
         )
-        op.create_index('ix_fact_items_plat_shop_sku', 'fact_order_items', ['platform_code', 'shop_id', 'platform_sku'])
         op.create_index('ix_fact_items_plat_shop_order', 'fact_order_items', ['platform_code', 'shop_id', 'order_id'])
+        op.create_index('ix_fact_items_plat_shop_sku', 'fact_order_items', ['platform_code', 'shop_id', 'platform_sku'])
         op.create_index('ix_fact_items_product_id', 'fact_order_items', ['product_id'])
         safe_print("[OK] fact_order_items table created")
     else:
@@ -1242,9 +1237,9 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('platform_code', 'shop_id', 'order_id')
         )
-        op.create_index('ix_fact_orders_file_id', 'fact_orders', ['file_id'])
         op.create_index('ix_fact_orders_status', 'fact_orders', ['platform_code', 'shop_id', 'order_status'])
         op.create_index('ix_fact_orders_plat_shop_date', 'fact_orders', ['platform_code', 'shop_id', 'order_date_local'])
+        op.create_index('ix_fact_orders_file_id', 'fact_orders', ['file_id'])
         safe_print("[OK] fact_orders table created")
     else:
         safe_print("[SKIP] fact_orders table already exists")
@@ -1260,8 +1255,8 @@ def upgrade():
             sa.Column('platform_sku', sa.String(length=128), nullable=False),
             sa.Column('metric_date', sa.Date(), nullable=False),
             sa.Column('metric_type', sa.String(length=64), nullable=False),
-            sa.Column('granularity', sa.String(length=16), nullable=False, server_default=sa.text('daily')),
-            sa.Column('sku_scope', sa.String(length=8), nullable=False, server_default=sa.text('product')),
+            sa.Column('granularity', sa.String(length=16), nullable=False, server_default='daily'),
+            sa.Column('sku_scope', sa.String(length=8), nullable=False, server_default='product'),
             sa.Column('data_domain', sa.String(length=50)),
             sa.Column('parent_platform_sku', sa.String(length=128)),
             sa.Column('source_catalog_id', sa.Integer()),
@@ -1270,43 +1265,40 @@ def upgrade():
             sa.Column('brand', sa.String(length=100)),
             sa.Column('specification', sa.String(length=500)),
             sa.Column('currency', sa.String(length=8)),
-            sa.Column('price', sa.Numeric(), nullable=False, server_default=sa.text('0.0')),
-            sa.Column('price_rmb', sa.Numeric(), nullable=False, server_default=sa.text('0.0')),
-            sa.Column('stock', sa.Integer(), nullable=False, server_default=sa.text('0')),
+            sa.Column('price', sa.Numeric(), nullable=False, server_default='0.0'),
+            sa.Column('price_rmb', sa.Numeric(), nullable=False, server_default='0.0'),
+            sa.Column('stock', sa.Integer(), nullable=False, server_default='0'),
             sa.Column('total_stock', sa.Integer()),
             sa.Column('available_stock', sa.Integer()),
             sa.Column('reserved_stock', sa.Integer()),
             sa.Column('in_transit_stock', sa.Integer()),
             sa.Column('warehouse', sa.String(length=100)),
             sa.Column('image_url', sa.String(length=500)),
-            sa.Column('sales_volume', sa.Integer(), nullable=False, server_default=sa.text('0')),
-            sa.Column('sales_amount', sa.Numeric(), nullable=False, server_default=sa.text('0.0')),
-            sa.Column('sales_amount_rmb', sa.Numeric(), nullable=False, server_default=sa.text('0.0')),
+            sa.Column('sales_volume', sa.Integer(), nullable=False, server_default='0'),
+            sa.Column('sales_amount', sa.Numeric(), nullable=False, server_default='0.0'),
+            sa.Column('sales_amount_rmb', sa.Numeric(), nullable=False, server_default='0.0'),
             sa.Column('sales_volume_7d', sa.Integer()),
             sa.Column('sales_volume_30d', sa.Integer()),
             sa.Column('sales_volume_60d', sa.Integer()),
             sa.Column('sales_volume_90d', sa.Integer()),
-            sa.Column('page_views', sa.Integer(), nullable=False, server_default=sa.text('0')),
-            sa.Column('unique_visitors', sa.Integer(), nullable=False, server_default=sa.text('0')),
+            sa.Column('page_views', sa.Integer(), nullable=False, server_default='0'),
+            sa.Column('unique_visitors', sa.Integer(), nullable=False, server_default='0'),
             sa.Column('click_through_rate', sa.Numeric()),
-            sa.Column('order_count', sa.Integer(), server_default=sa.text('0')),
+            sa.Column('order_count', sa.Integer(), server_default='0'),
             sa.Column('conversion_rate', sa.Numeric()),
-            sa.Column('add_to_cart_count', sa.Integer(), nullable=False, server_default=sa.text('0')),
+            sa.Column('add_to_cart_count', sa.Integer(), nullable=False, server_default='0'),
             sa.Column('rating', sa.Numeric()),
-            sa.Column('review_count', sa.Integer(), nullable=False, server_default=sa.text('0')),
+            sa.Column('review_count', sa.Integer(), nullable=False, server_default='0'),
             sa.Column('period_start', sa.Date()),
             sa.Column('metric_date_utc', sa.Date()),
-            sa.Column('metric_value', sa.Numeric(), nullable=False, server_default=sa.text('0')),
-            sa.Column('metric_value_rmb', sa.Numeric(), nullable=False, server_default=sa.text('0')),
+            sa.Column('metric_value', sa.Numeric(), nullable=False, server_default='0'),
+            sa.Column('metric_value_rmb', sa.Numeric(), nullable=False, server_default='0'),
             sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('platform_code', 'shop_id', 'platform_sku', 'metric_date', 'metric_type'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'platform_sku', 'metric_date', 'granularity', 'sku_scope', name='ix_product_unique_with_scope'),
-            sa.ForeignKeyConstraint(['source_catalog_id'], ['catalog_files.id'], ondelete='SET NULL'),
-            sa.ForeignKeyConstraint(
-                ['platform_code', 'shop_id', 'platform_sku'],
-                ['dim_products.platform_code', 'dim_products.shop_id', 'dim_products.platform_sku']
-            )
+            sa.ForeignKeyConstraint(['source_catalog_id'], ['catalog_files.id'], ),
+            sa.ForeignKeyConstraint(['platform_code', 'shop_id', 'platform_sku'], ['dim_products.platform_code', 'dim_products.shop_id', 'dim_products.platform_sku'], )
         )
         op.create_index('ix_metrics_plat_shop_date_gran', 'fact_product_metrics', ['platform_code', 'shop_id', 'metric_date', 'granularity'])
         op.create_index('ix_fact_product_metrics_metric_date', 'fact_product_metrics', ['metric_date'])
@@ -1729,8 +1721,8 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime()),
             sa.PrimaryKeyConstraint('invoice_id'),
             sa.UniqueConstraint('invoice_no'),
-            sa.ForeignKeyConstraint(['vendor_code'], ['dim_vendors.vendor_code'], ),
-            sa.ForeignKeyConstraint(['source_file_id'], ['catalog_files.id'], )
+            sa.ForeignKeyConstraint(['source_file_id'], ['catalog_files.id'], ),
+            sa.ForeignKeyConstraint(['vendor_code'], ['dim_vendors.vendor_code'], )
         )
         op.create_index('ix_invoice_headers_vendor_date', 'invoice_headers', ['vendor_code', 'invoice_date'])
         op.create_index('ix_invoice_headers_status', 'invoice_headers', ['status'])
@@ -1810,8 +1802,8 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('line_id'),
             sa.UniqueConstraint('entry_id', 'line_number', name='uq_journal_line'),
-            sa.ForeignKeyConstraint(['entry_id'], ['journal_entries.entry_id'], ),
-            sa.ForeignKeyConstraint(['account_code'], ['gl_accounts.account_code'], )
+            sa.ForeignKeyConstraint(['account_code'], ['gl_accounts.account_code'], ),
+            sa.ForeignKeyConstraint(['entry_id'], ['journal_entries.entry_id'], )
         )
         op.create_index('ix_journal_lines_entry', 'journal_entry_lines', ['entry_id'])
         op.create_index('ix_journal_lines_account', 'journal_entry_lines', ['account_code'])
@@ -1931,8 +1923,8 @@ def upgrade():
             sa.Column('updated_by', sa.Integer()),
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('rule_name'),
-            sa.ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], ),
             sa.ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], ),
+            sa.ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], ),
             sa.ForeignKeyConstraint(['template_id'], ['notification_templates.id'], )
         )
         op.create_index('ix_alert_rules_rule_name', 'alert_rules', ['rule_name'])
@@ -1960,8 +1952,8 @@ def upgrade():
             sa.Column('read_at', sa.DateTime()),
             sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('notification_id'),
-            sa.ForeignKeyConstraint(['recipient_id'], ['dim_users.user_id'], ),
-            sa.ForeignKeyConstraint(['related_user_id'], ['dim_users.user_id'], )
+            sa.ForeignKeyConstraint(['related_user_id'], ['dim_users.user_id'], ),
+            sa.ForeignKeyConstraint(['recipient_id'], ['dim_users.user_id'], )
         )
         op.create_index('ix_notifications_priority', 'notifications', ['priority'])
         op.create_index('ix_notifications_created_at', 'notifications', ['created_at'])
@@ -2094,8 +2086,7 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'period', name='uq_performance_shop_period'),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], ),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], )
+            sa.ForeignKeyConstraint(['platform_code', 'shop_id'], ['dim_shops.platform_code', 'dim_shops.shop_id'], )
         )
         op.create_index('ix_performance_period', 'performance_scores', ['period'])
         op.create_index('ix_performance_shop', 'performance_scores', ['platform_code', 'shop_id'])
@@ -2241,8 +2232,8 @@ def upgrade():
             sa.Column('invoice_id', sa.Integer()),
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('logistics_id'),
-            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], ),
-            sa.ForeignKeyConstraint(['grn_id'], ['grn_headers.grn_id'], )
+            sa.ForeignKeyConstraint(['grn_id'], ['grn_headers.grn_id'], ),
+            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], )
         )
         op.create_index('ix_logistics_costs_invoice', 'logistics_costs', ['invoice_id'])
         op.create_index('ix_logistics_costs_grn', 'logistics_costs', ['grn_id'])
@@ -2298,8 +2289,8 @@ def upgrade():
             sa.Column('volume_m3', sa.Numeric()),
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('grn_line_id'),
-            sa.ForeignKeyConstraint(['grn_id'], ['grn_headers.grn_id'], ),
-            sa.ForeignKeyConstraint(['po_line_id'], ['po_lines.po_line_id'], )
+            sa.ForeignKeyConstraint(['po_line_id'], ['po_lines.po_line_id'], ),
+            sa.ForeignKeyConstraint(['grn_id'], ['grn_headers.grn_id'], )
         )
         op.create_index('ix_grn_lines_sku', 'grn_lines', ['platform_sku'])
         op.create_index('ix_grn_lines_grn_id', 'grn_lines', ['grn_id'])
@@ -2326,8 +2317,8 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('invoice_line_id'),
             sa.ForeignKeyConstraint(['grn_line_id'], ['grn_lines.grn_line_id'], ),
-            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], ),
-            sa.ForeignKeyConstraint(['po_line_id'], ['po_lines.po_line_id'], )
+            sa.ForeignKeyConstraint(['po_line_id'], ['po_lines.po_line_id'], ),
+            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], )
         )
         op.create_index('ix_invoice_lines_invoice', 'invoice_lines', ['invoice_id'])
         op.create_index('ix_invoice_lines_po_line', 'invoice_lines', ['po_line_id'])
@@ -2442,9 +2433,8 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('campaign_id', 'platform_code', 'shop_id', name='uq_campaign_shop'),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], ),
             sa.ForeignKeyConstraint(['campaign_id'], ['sales_campaigns.id'], ),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], )
+            sa.ForeignKeyConstraint(['platform_code', 'shop_id'], ['dim_shops.platform_code', 'dim_shops.shop_id'], )
         )
         op.create_index('ix_campaign_shops_campaign', 'sales_campaign_shops', ['campaign_id'])
         op.create_index('ix_campaign_shops_shop', 'sales_campaign_shops', ['platform_code', 'shop_id'])
@@ -2574,8 +2564,7 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('id'),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], ),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], )
+            sa.ForeignKeyConstraint(['platform_code', 'shop_id'], ['dim_shops.platform_code', 'dim_shops.shop_id'], )
         )
         op.create_index('ix_shop_alerts_level', 'shop_alerts', ['alert_level'])
         op.create_index('ix_shop_alerts_shop', 'shop_alerts', ['platform_code', 'shop_id'])
@@ -2633,8 +2622,7 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'metric_date', 'granularity', name='uq_shop_health'),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], ),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], )
+            sa.ForeignKeyConstraint(['platform_code', 'shop_id'], ['dim_shops.platform_code', 'dim_shops.shop_id'], )
         )
         op.create_index('ix_shop_health_date', 'shop_health_scores', ['metric_date'])
         op.create_index('ix_shop_health_shop', 'shop_health_scores', ['platform_code', 'shop_id'])
@@ -2885,9 +2873,8 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('id'),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_shops.shop_id'], ),
             sa.ForeignKeyConstraint(['target_id'], ['sales_targets.id'], ),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_shops.platform_code'], )
+            sa.ForeignKeyConstraint(['platform_code', 'shop_id'], ['dim_shops.platform_code', 'dim_shops.shop_id'], )
         )
         op.create_index('ix_target_breakdown_shop', 'target_breakdown', ['platform_code', 'shop_id'])
         op.create_index('ix_target_breakdown_target', 'target_breakdown', ['target_id'])
@@ -2935,8 +2922,8 @@ def upgrade():
             sa.Column('filing_status', sa.String(length=64)),
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('voucher_id'),
-            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], ),
-            sa.ForeignKeyConstraint(['period_month'], ['dim_fiscal_calendar.period_code'], )
+            sa.ForeignKeyConstraint(['period_month'], ['dim_fiscal_calendar.period_code'], ),
+            sa.ForeignKeyConstraint(['invoice_id'], ['invoice_headers.invoice_id'], )
         )
         op.create_index('ix_tax_vouchers_period', 'tax_vouchers', ['period_month'])
         op.create_index('ix_tax_vouchers_type', 'tax_vouchers', ['voucher_type', 'status'])
@@ -2963,8 +2950,8 @@ def upgrade():
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.PrimaryKeyConstraint('match_id'),
             sa.ForeignKeyConstraint(['invoice_line_id'], ['invoice_lines.invoice_line_id'], ),
-            sa.ForeignKeyConstraint(['po_line_id'], ['po_lines.po_line_id'], ),
-            sa.ForeignKeyConstraint(['grn_line_id'], ['grn_lines.grn_line_id'], )
+            sa.ForeignKeyConstraint(['grn_line_id'], ['grn_lines.grn_line_id'], ),
+            sa.ForeignKeyConstraint(['po_line_id'], ['po_lines.po_line_id'], )
         )
         op.create_index('ix_three_way_match_po', 'three_way_match_log', ['po_line_id'])
         op.create_index('ix_three_way_match_status', 'three_way_match_log', ['match_status'])
@@ -2985,8 +2972,8 @@ def upgrade():
             sa.Column('reason', sa.String()),
             sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('log_id'),
-            sa.ForeignKeyConstraint(['approved_by'], ['dim_users.user_id'], ),
-            sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], )
+            sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], ),
+            sa.ForeignKeyConstraint(['approved_by'], ['dim_users.user_id'], )
         )
         op.create_index('ix_user_approval_logs_log_id', 'user_approval_logs', ['log_id'])
         op.create_index('ix_user_approval_logs_created_at', 'user_approval_logs', ['created_at'])

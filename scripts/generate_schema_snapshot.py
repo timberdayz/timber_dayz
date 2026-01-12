@@ -112,9 +112,10 @@ def column_to_sa_column(column: Column, is_single_pk: bool = False) -> str:
                 func_name = default_arg.__name__
                 params.append(f"server_default=func.{func_name}()")
             elif isinstance(default_arg, str):
-                # 字符串：使用 sa.text()
-                default_arg = default_arg.replace("'", "\\'")
-                params.append(f"server_default=sa.text('{default_arg}')")
+                # 字符串：直接使用字符串字面量（SQLAlchemy会自动添加引号）
+                # 注意：不能使用 sa.text()，因为 PostgreSQL 会将其视为SQL表达式而不是字符串字面量
+                default_arg_escaped = default_arg.replace("'", "\\'")
+                params.append(f"server_default='{default_arg_escaped}'")
             else:
                 # 其他情况：直接使用（可能需要更复杂的处理）
                 params.append(f"server_default={default_arg}")
@@ -241,19 +242,29 @@ def generate_table_creation_code(table_name: str, table: Any) -> str:
             else:
                 lines.append(f"            sa.UniqueConstraint({cols_str}),")
     
-    # 添加外键约束（去重）
-    fk_constraints = {}
-    for fk in table.foreign_keys:
-        ref_table = fk.column.table.name
-        ref_col = fk.column.name
-        # 使用 (local_col, ref_table, ref_col) 作为唯一键
-        fk_key = (fk.parent.name, ref_table, ref_col)
-        if fk_key not in fk_constraints:
-            fk_constraint = f"sa.ForeignKeyConstraint(['{fk.parent.name}'], ['{ref_table}.{ref_col}'], )"
-            fk_constraints[fk_key] = fk_constraint
-    
-    for fk_constraint in fk_constraints.values():
-        lines.append(f"            {fk_constraint},")
+    # 添加外键约束（从 constraints 获取，正确处理复合外键）
+    # [FIX] 修复：从 table.constraints 获取 ForeignKeyConstraint，而不是从 table.foreign_keys
+    # 这样可以正确处理复合外键（多列引用）
+    fk_constraints_seen = set()
+    for constraint in table.constraints:
+        if isinstance(constraint, sa.ForeignKeyConstraint):
+            # 获取本地列名
+            local_cols = [col.name for col in constraint.columns]
+            # 获取引用列名（通过 elements 获取）
+            ref_cols = []
+            for fk_element in constraint.elements:
+                ref_table = fk_element.column.table.name
+                ref_col = fk_element.column.name
+                ref_cols.append(f"{ref_table}.{ref_col}")
+            
+            # 构建复合键用于去重
+            fk_key = (tuple(local_cols), tuple(ref_cols))
+            if fk_key not in fk_constraints_seen:
+                local_cols_str = ', '.join([f"'{c}'" for c in local_cols])
+                ref_cols_str = ', '.join([f"'{c}'" for c in ref_cols])
+                fk_constraint = f"sa.ForeignKeyConstraint([{local_cols_str}], [{ref_cols_str}], )"
+                lines.append(f"            {fk_constraint},")
+                fk_constraints_seen.add(fk_key)
     
     # 移除最后一个逗号
     if lines[-1].endswith(','):
