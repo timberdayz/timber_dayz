@@ -52,6 +52,39 @@ def test_1_migration_script_syntax():
         safe_print(f"  [FAIL] 检查失败: {e}")
         return False
 
+def test_1_5_migration_runtime_check():
+    """测试1.5: 迁移脚本运行时检查（检查未定义的函数/变量）"""
+    safe_print("\n[TEST 1.5] 迁移脚本运行时检查...")
+    
+    migration_file = Path(__file__).parent.parent / "migrations" / "versions" / "20260112_v5_0_0_schema_snapshot.py"
+    
+    if not migration_file.exists():
+        safe_print("  [SKIP] 迁移文件不存在，跳过")
+        return True
+    
+    try:
+        # 读取文件内容，检查常见的运行时错误
+        content = migration_file.read_text(encoding='utf-8')
+        
+        errors = []
+        
+        # 检查1：是否使用了 now() 但没有导入 func
+        if 'server_default=now()' in content or 'server_default=now()' in content:
+            if 'from sqlalchemy.sql import func' not in content and 'from sqlalchemy import func' not in content:
+                errors.append("使用了 now() 但未导入 func（应该是 func.now()）")
+        
+        if errors:
+            safe_print("  [FAIL] 发现运行时错误风险:")
+            for error in errors:
+                safe_print(f"    - {error}")
+            return False
+        else:
+            safe_print("  [OK] 迁移脚本运行时检查通过")
+            return True
+    except Exception as e:
+        safe_print(f"  [WARN] 运行时检查失败: {e}")
+        return True  # 不阻止其他测试
+
 def test_2_key_tables_foreign_keys():
     """测试2: 关键表外键定义检查"""
     safe_print("\n[TEST 2] 关键表外键定义检查...")
@@ -212,6 +245,9 @@ def main():
     
     # 测试1: 迁移脚本语法检查
     results.append(("迁移脚本语法检查", test_1_migration_script_syntax()))
+    
+    # 测试1.5: 迁移脚本运行时检查
+    results.append(("迁移脚本运行时检查", test_1_5_migration_runtime_check()))
     
     # 测试2: 关键表外键定义检查
     results.append(("关键表外键定义检查", test_2_key_tables_foreign_keys()))

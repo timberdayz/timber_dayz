@@ -17,6 +17,7 @@ Create Date: 2026-01-12 15:27:06
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
+from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
 
 
@@ -730,8 +731,8 @@ def upgrade():
             sa.Column('data_scope', sa.String(length=50)),
             sa.Column('is_active', sa.Boolean(), nullable=False),
             sa.Column('is_system', sa.Boolean()),
-            sa.Column('created_at', sa.DateTime(), server_default=now()),
-            sa.Column('updated_at', sa.DateTime(), server_default=now()),
+            sa.Column('created_at', sa.DateTime(), server_default=func.now()),
+            sa.Column('updated_at', sa.DateTime(), server_default=func.now()),
             sa.PrimaryKeyConstraint('role_id'),
             sa.UniqueConstraint('role_code')
         )
@@ -822,8 +823,8 @@ def upgrade():
             sa.Column('login_count', sa.Integer()),
             sa.Column('failed_login_attempts', sa.Integer()),
             sa.Column('locked_until', sa.DateTime()),
-            sa.Column('created_at', sa.DateTime(), server_default=now()),
-            sa.Column('updated_at', sa.DateTime(), server_default=now()),
+            sa.Column('created_at', sa.DateTime(), server_default=func.now()),
+            sa.Column('updated_at', sa.DateTime(), server_default=func.now()),
             sa.PrimaryKeyConstraint('user_id'),
             sa.ForeignKeyConstraint(['approved_by'], ['dim_users.user_id'], )
         )
@@ -1033,8 +1034,8 @@ def upgrade():
             sa.Column('data_domain', sa.String(length=50), nullable=False),
             sa.Column('attributes', sa.dialects.postgresql.JSONB),
             sa.Column('file_id', sa.Integer()),
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
-            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
+            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'analytics_date', 'granularity', 'metric_type', 'data_domain', name='uq_fact_analytics_business'),
             sa.ForeignKeyConstraint(['file_id'], ['catalog_files.id'], )
@@ -1065,7 +1066,7 @@ def upgrade():
             sa.Column('user_agent', sa.String(length=500)),
             sa.Column('is_success', sa.Boolean()),
             sa.Column('error_message', sa.String()),
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('log_id'),
             sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], )
         )
@@ -1297,8 +1298,8 @@ def upgrade():
             sa.Column('metric_date_utc', sa.Date()),
             sa.Column('metric_value', sa.Numeric(), nullable=False, server_default=sa.text('0')),
             sa.Column('metric_value_rmb', sa.Numeric(), nullable=False, server_default=sa.text('0')),
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
-            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
+            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('platform_code', 'shop_id', 'platform_sku', 'metric_date', 'metric_type'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'platform_sku', 'metric_date', 'granularity', 'sku_scope', name='ix_product_unique_with_scope'),
             sa.ForeignKeyConstraint(['source_catalog_id'], ['catalog_files.id'], ondelete='SET NULL'),
@@ -1344,7 +1345,7 @@ def upgrade():
             sa.Column('user_agent', sa.String(length=500)),
             sa.Column('is_success', sa.Boolean(), nullable=False),
             sa.Column('error_message', sa.String()),
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('audit_id'),
             sa.ForeignKeyConstraint(['operator_id'], ['dim_users.user_id'], ),
             sa.ForeignKeyConstraint(['config_id'], ['dim_rate_limit_config.config_id'], )
@@ -1379,8 +1380,8 @@ def upgrade():
             sa.Column('data_domain', sa.String(length=50), nullable=False),
             sa.Column('attributes', sa.dialects.postgresql.JSONB),
             sa.Column('file_id', sa.Integer()),
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
-            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
+            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'service_date', 'granularity', 'metric_type', 'data_domain', name='uq_fact_service_business'),
             sa.ForeignKeyConstraint(['file_id'], ['catalog_files.id'], )
@@ -1410,8 +1411,8 @@ def upgrade():
             sa.Column('data_domain', sa.String(length=50), nullable=False),
             sa.Column('attributes', sa.dialects.postgresql.JSONB),
             sa.Column('file_id', sa.Integer()),
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
-            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
+            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'traffic_date', 'granularity', 'metric_type', 'data_domain', name='uq_fact_traffic_business'),
             sa.ForeignKeyConstraint(['file_id'], ['catalog_files.id'], )
@@ -1957,7 +1958,7 @@ def upgrade():
             sa.Column('priority', sa.String(length=10), nullable=False),
             sa.Column('is_read', sa.Boolean(), nullable=False),
             sa.Column('read_at', sa.DateTime()),
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('notification_id'),
             sa.ForeignKeyConstraint(['recipient_id'], ['dim_users.user_id'], ),
             sa.ForeignKeyConstraint(['related_user_id'], ['dim_users.user_id'], )
@@ -2982,7 +2983,7 @@ def upgrade():
             sa.Column('action', sa.String(length=20), nullable=False),
             sa.Column('approved_by', sa.BigInteger(), nullable=False),
             sa.Column('reason', sa.String()),
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('log_id'),
             sa.ForeignKeyConstraint(['approved_by'], ['dim_users.user_id'], ),
             sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], )
@@ -3008,8 +3009,8 @@ def upgrade():
             sa.Column('notification_type', sa.String(length=50), nullable=False),
             sa.Column('enabled', sa.Boolean(), nullable=False),
             sa.Column('desktop_enabled', sa.Boolean(), nullable=False),
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
-            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
+            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.PrimaryKeyConstraint('preference_id'),
             sa.UniqueConstraint('user_id', 'notification_type', name='uq_user_notification_preference'),
             sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], )
@@ -3028,7 +3029,7 @@ def upgrade():
             'user_roles',
             sa.Column('user_id', sa.BigInteger(), nullable=False),
             sa.Column('role_id', sa.BigInteger(), nullable=False),
-            sa.Column('assigned_at', sa.DateTime(), server_default=now()),
+            sa.Column('assigned_at', sa.DateTime(), server_default=func.now()),
             sa.Column('assigned_by', sa.String(length=100)),
             sa.PrimaryKeyConstraint('user_id', 'role_id'),
             sa.ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], ),
@@ -3049,9 +3050,9 @@ def upgrade():
             sa.Column('device_info', sa.String(length=255)),
             sa.Column('ip_address', sa.String(length=45)),
             sa.Column('location', sa.String(length=100)),
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.Column('expires_at', sa.DateTime(), nullable=False),
-            sa.Column('last_active_at', sa.DateTime(), nullable=False, server_default=now()),
+            sa.Column('last_active_at', sa.DateTime(), nullable=False, server_default=func.now()),
             sa.Column('is_active', sa.Boolean(), nullable=False),
             sa.Column('revoked_at', sa.DateTime()),
             sa.Column('revoked_reason', sa.String(length=100)),

@@ -106,11 +106,17 @@ def column_to_sa_column(column: Column, is_single_pk: bool = False) -> str:
     if column.server_default is not None:
         if hasattr(column.server_default, 'arg'):
             default_arg = column.server_default.arg
-            if isinstance(default_arg, str):
-                # 转义单引号
+            # 检查是否是 SQLAlchemy func 对象（如 func.now()）
+            if hasattr(default_arg, '__name__') and hasattr(default_arg, '__call__'):
+                # func.now() -> sa.func.now()
+                func_name = default_arg.__name__
+                params.append(f"server_default=func.{func_name}()")
+            elif isinstance(default_arg, str):
+                # 字符串：使用 sa.text()
                 default_arg = default_arg.replace("'", "\\'")
                 params.append(f"server_default=sa.text('{default_arg}')")
             else:
+                # 其他情况：直接使用（可能需要更复杂的处理）
                 params.append(f"server_default={default_arg}")
     
     # 过滤空参数
@@ -299,6 +305,7 @@ def generate_migration_file() -> str:
     lines.append('from alembic import op')
     lines.append('import sqlalchemy as sa')
     lines.append('from sqlalchemy import inspect')
+    lines.append('from sqlalchemy.sql import func')
     lines.append('from sqlalchemy.dialects.postgresql import JSONB')
     lines.append('')
     lines.append('')
