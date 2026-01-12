@@ -117,7 +117,9 @@ class Settings:
         "http://localhost:8001",  # 后端端口（用于Swagger UI）
         "http://127.0.0.1:8001"
     ]
-    ALLOWED_HOSTS: List[str] = ["localhost", "127.0.0.1"]
+    # [*] 从环境变量读取 ALLOWED_HOSTS（支持逗号分隔的多个值）
+    _allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1")
+    ALLOWED_HOSTS: List[str] = [h.strip() for h in _allowed_hosts_str.split(",") if h.strip()]
     
     # 日志配置
     LOG_LEVEL: str = "INFO"
