@@ -51,6 +51,21 @@ jobs:
     runs-on: ubuntu-latest
     needs: check-config
     if: ${{ needs.check-config.outputs.can_deploy == 'true' && github.event_name == 'push' }}
+    services:
+      # 添加临时 PostgreSQL 服务用于迁移测试
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: migration_test_user
+          POSTGRES_PASSWORD: migration_test_pass
+          POSTGRES_DB: migration_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout code (tag)
         uses: actions/checkout@v4
@@ -115,6 +130,73 @@ jobs:
               echo "[INFO] 没有发现改动文件（可能是 tag 指向同一个 commit）"
             fi
           fi
+
+      # [NEW] 迁移脚本一致性验证（比对迁移脚本与 schema.py）
+      - name: Verify Migration Consistency (Release Gate)
+        run: |
+          echo "[INFO] 验证迁移脚本与 schema.py 的一致性..."
+          python scripts/verify_migration_consistency.py || {
+            echo "[FAIL] 迁移脚本一致性检查失败"
+            echo "[INFO] 请修复迁移脚本中的外键约束定义错误"
+            exit 1
+          }
+
+      # [NEW] 数据库迁移测试（在临时数据库中执行迁移）
+      - name: Validate Database Migrations (Release Gate)
+        env:
+          DATABASE_URL: postgresql://migration_test_user:migration_test_pass@localhost:5432/migration_test_db
+        run: |
+          echo "[INFO] 在临时数据库中测试迁移..."
+          
+          # 等待 PostgreSQL 就绪
+          echo "[INFO] 等待 PostgreSQL 就绪..."
+          for i in $(seq 1 30); do
+            if PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -c "SELECT 1" >/dev/null 2>&1; then
+              echo "[OK] PostgreSQL 已就绪"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "[FAIL] PostgreSQL 启动超时"
+              exit 1
+            fi
+            sleep 1
+          done
+          
+          # 执行迁移
+          echo "[INFO] 执行数据库迁移..."
+          alembic upgrade heads || {
+            echo "[FAIL] 迁移执行失败"
+            echo "[INFO] 请检查迁移脚本中的错误"
+            exit 1
+          }
+          
+          # 验证表数量
+          TABLE_COUNT=$(PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -t -c \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'" | tr -d ' \n')
+          
+          echo "[INFO] 创建了 ${TABLE_COUNT} 张表"
+          
+          if [ "${TABLE_COUNT}" -lt 50 ]; then
+            echo "[WARNING] 表数量过少（期望至少 50 张，实际 ${TABLE_COUNT} 张）"
+            echo "[INFO] 这可能表示迁移不完整"
+          else
+            echo "[OK] 表数量正常（${TABLE_COUNT} 张）"
+          fi
+          
+          # 验证关键表是否存在
+          KEY_TABLES=("dim_products" "bridge_product_keys" "fact_product_metrics" "dim_product_master")
+          for table_name in "${KEY_TABLES[@]}"; do
+            EXISTS=$(PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -t -c \
+              "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema='public' AND table_name='${table_name}')" | tr -d ' \n')
+            if [ "${EXISTS}" = "t" ]; then
+              echo "[OK] 表 ${table_name} 存在"
+            else
+              echo "[FAIL] 表 ${table_name} 不存在"
+              exit 1
+            fi
+          done
+          
+          echo "[OK] 数据库迁移测试通过"
 
       # [NOTE] 发布门禁：tag 发布必须通过这些检查；失败会阻断 build 和 deploy
       # [FIX] 只验证改动的 router 文件，避免历史遗留问题阻断新发布

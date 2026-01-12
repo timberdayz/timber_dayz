@@ -676,10 +676,12 @@ def upgrade():
             sa.Column('platform_sku', sa.String(length=128), nullable=False),
             sa.PrimaryKeyConstraint('product_id', 'platform_code', 'shop_id', 'platform_sku'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'platform_sku', name='uq_bridge_platform_sku'),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_products.platform_code'], ),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_products.shop_id'], ),
-            sa.ForeignKeyConstraint(['product_id'], ['dim_product_master.product_id'], ),
-            sa.ForeignKeyConstraint(['platform_sku'], ['dim_products.platform_sku'], )
+            sa.ForeignKeyConstraint(['product_id'], ['dim_product_master.product_id'], ondelete='CASCADE'),
+            sa.ForeignKeyConstraint(
+                ['platform_code', 'shop_id', 'platform_sku'],
+                ['dim_products.platform_code', 'dim_products.shop_id', 'dim_products.platform_sku'],
+                ondelete='CASCADE'
+            )
         )
         op.create_index('ix_bridge_product_id', 'bridge_product_keys', ['product_id'])
         safe_print("[OK] bridge_product_keys table created")
@@ -1299,10 +1301,11 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=now()),
             sa.PrimaryKeyConstraint('platform_code', 'shop_id', 'platform_sku', 'metric_date', 'metric_type'),
             sa.UniqueConstraint('platform_code', 'shop_id', 'platform_sku', 'metric_date', 'granularity', 'sku_scope', name='ix_product_unique_with_scope'),
-            sa.ForeignKeyConstraint(['platform_sku'], ['dim_products.platform_sku'], ),
-            sa.ForeignKeyConstraint(['platform_code'], ['dim_products.platform_code'], ),
-            sa.ForeignKeyConstraint(['source_catalog_id'], ['catalog_files.id'], ),
-            sa.ForeignKeyConstraint(['shop_id'], ['dim_products.shop_id'], )
+            sa.ForeignKeyConstraint(['source_catalog_id'], ['catalog_files.id'], ondelete='SET NULL'),
+            sa.ForeignKeyConstraint(
+                ['platform_code', 'shop_id', 'platform_sku'],
+                ['dim_products.platform_code', 'dim_products.shop_id', 'dim_products.platform_sku']
+            )
         )
         op.create_index('ix_metrics_plat_shop_date_gran', 'fact_product_metrics', ['platform_code', 'shop_id', 'metric_date', 'granularity'])
         op.create_index('ix_fact_product_metrics_metric_date', 'fact_product_metrics', ['metric_date'])
