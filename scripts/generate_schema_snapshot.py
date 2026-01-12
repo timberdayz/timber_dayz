@@ -218,8 +218,10 @@ def generate_table_creation_code(table_name: str, table: Any) -> str:
         col_code = column_to_sa_column(column, is_single_pk=is_single_pk and column.primary_key)
         lines.append(f"            {col_code},")
     
-    # 添加主键约束（复合主键）
-    if pk_cols and not is_single_pk:
+    # 添加主键约束（所有表都需要，包括单列主键和复合主键）
+    # [FIX] 修复：单列主键表也需要显式添加 PrimaryKeyConstraint
+    # 否则外键引用会失败（PostgreSQL 要求被引用的列必须有唯一约束）
+    if pk_cols:
         pk_cols_str = ', '.join([f"'{c}'" for c in pk_cols])
         lines.append(f"            sa.PrimaryKeyConstraint({pk_cols_str}),")
     
