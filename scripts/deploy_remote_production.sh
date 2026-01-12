@@ -79,6 +79,83 @@ else
   echo "[INFO] CNB not configured, will use GHCR only"
 fi
 
+# [IMAGE_CLEANUP] Clean up old Docker images (keep latest N versions)
+cleanup_old_images() {
+  local keep_count="${KEEP_IMAGES_COUNT:-5}"  # 默认保留 5 个版本，可通过环境变量覆盖
+  local registry="${GHCR_REGISTRY}"
+  
+  echo "[INFO] Cleaning up old images (keeping latest ${keep_count} versions)..."
+  
+  # 安全措施：只清理版本号格式的 tag（如 v4.20.5），避免误删 latest、sha-* 等特殊标签
+  local version_pattern="v[0-9]+\.[0-9]+\.[0-9]+$"
+  
+  # 清理 backend 镜像
+  local backend_images
+  backend_images=$(docker images --format "{{.Repository}}:{{.Tag}}" | \
+    grep "^${registry}/${IMAGE_NAME_BACKEND}:" | \
+    grep -E "${version_pattern}" | \
+    sort -V -r 2>/dev/null || echo "")
+  
+  if [ -n "${backend_images}" ]; then
+    local backend_count
+    backend_count=$(echo "${backend_images}" | wc -l | tr -d ' \n\r')
+    echo "[INFO] Found ${backend_count} backend version(s)"
+    
+    if [ "${backend_count}" -gt "${keep_count}" ]; then
+      local to_remove_count=$((backend_count - keep_count))
+      echo "[INFO] Removing ${to_remove_count} old backend image(s)..."
+      echo "${backend_images}" | tail -n +$((keep_count + 1)) | \
+        while read -r img; do
+          if [ -n "${img}" ]; then
+            echo "  [INFO] Removing: ${img}"
+            docker rmi "${img}" 2>/dev/null || echo "  [WARN] Failed to remove ${img} (may be in use)"
+          fi
+        done
+    else
+      echo "[INFO] Backend images count (${backend_count}) <= keep count (${keep_count}), skipping cleanup"
+    fi
+  else
+    echo "[INFO] No backend version images found to clean"
+  fi
+  
+  # 清理 frontend 镜像
+  local frontend_images
+  frontend_images=$(docker images --format "{{.Repository}}:{{.Tag}}" | \
+    grep "^${registry}/${IMAGE_NAME_FRONTEND}:" | \
+    grep -E "${version_pattern}" | \
+    sort -V -r 2>/dev/null || echo "")
+  
+  if [ -n "${frontend_images}" ]; then
+    local frontend_count
+    frontend_count=$(echo "${frontend_images}" | wc -l | tr -d ' \n\r')
+    echo "[INFO] Found ${frontend_count} frontend version(s)"
+    
+    if [ "${frontend_count}" -gt "${keep_count}" ]; then
+      local to_remove_count=$((frontend_count - keep_count))
+      echo "[INFO] Removing ${to_remove_count} old frontend image(s)..."
+      echo "${frontend_images}" | tail -n +$((keep_count + 1)) | \
+        while read -r img; do
+          if [ -n "${img}" ]; then
+            echo "  [INFO] Removing: ${img}"
+            docker rmi "${img}" 2>/dev/null || echo "  [WARN] Failed to remove ${img} (may be in use)"
+          fi
+        done
+    else
+      echo "[INFO] Frontend images count (${frontend_count}) <= keep count (${keep_count}), skipping cleanup"
+    fi
+  else
+    echo "[INFO] No frontend version images found to clean"
+  fi
+  
+  # 清理 dangling 镜像（未标记的中间层，这些通常是构建过程中的临时层）
+  echo "[INFO] Cleaning up dangling images..."
+  local pruned_size
+  pruned_size=$(docker image prune -f 2>&1 | grep -i "space" | grep -oE "[0-9]+\.[0-9]+ [KMGT]B" || echo "unknown")
+  echo "[OK] Dangling images cleaned (freed: ${pruned_size})"
+  
+  echo "[OK] Image cleanup completed"
+}
+
 pull_image_with_fallback() {
   local image_name="$1"
   local primary_tag="$2"
@@ -669,6 +746,10 @@ if command -v curl >/dev/null 2>&1; then
 else
   echo "[INFO] Host has no curl; skipping Nginx /health check"
 fi
+
+# [IMAGE_CLEANUP] Clean up old Docker images (keep latest N versions)
+# 在部署成功后执行清理，释放磁盘空间
+cleanup_old_images
 
 echo "[INFO] Cleaning up temporary files..."
 rm -f docker-compose.deploy.yml || true

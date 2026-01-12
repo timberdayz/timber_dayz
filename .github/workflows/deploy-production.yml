@@ -435,6 +435,7 @@ jobs:
               export CNB_REGISTRY=\"${{ secrets.CNB_REGISTRY }}\"; \
               export CNB_IMAGE_NAME_BACKEND=\"${{ secrets.CNB_IMAGE_NAME_BACKEND }}\"; \
               export CNB_IMAGE_NAME_FRONTEND=\"${{ secrets.CNB_IMAGE_NAME_FRONTEND }}\"; \
+              export KEEP_IMAGES_COUNT=\"${{ secrets.KEEP_IMAGES_COUNT || '5' }}\"; \
               bash ./deploy_remote_production.sh'"
 
   deploy-manual:
@@ -594,6 +595,7 @@ jobs:
               export CNB_REGISTRY=\"${{ secrets.CNB_REGISTRY }}\"; \
               export CNB_IMAGE_NAME_BACKEND=\"${{ secrets.CNB_IMAGE_NAME_BACKEND }}\"; \
               export CNB_IMAGE_NAME_FRONTEND=\"${{ secrets.CNB_IMAGE_NAME_FRONTEND }}\"; \
+              export KEEP_IMAGES_COUNT=\"${{ secrets.KEEP_IMAGES_COUNT || '5' }}\"; \
               bash ./deploy_remote_production.sh'"
 
       - name: Health check verification

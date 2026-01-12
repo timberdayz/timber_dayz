@@ -17,9 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.database import get_async_db, Base
 from backend.routers.users import require_admin
 from modules.core.db import DimUser
+from modules.core.logger import get_logger
+from backend.utils.api_response import error_response
+from backend.utils.error_codes import ErrorCode, get_error_type
 from typing import List, Dict, Any, Optional
 import re
 
+logger = get_logger(__name__)
 router = APIRouter(prefix="/data", tags=["数据迁移"])
 
 
@@ -73,9 +77,13 @@ async def export_data(
         try:
             # [安全] 白名单验证
             if not validate_table_name(table_name):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"不允许导出表 {table_name}（不在白名单中）"
+                return error_response(
+                    code=ErrorCode.PARAMETER_INVALID,
+                    message=f"不允许导出表 {table_name}（不在白名单中）",
+                    error_type=get_error_type(ErrorCode.PARAMETER_INVALID),
+                    detail=f"表 {table_name} 不在白名单中",
+                    recovery_suggestion="请使用正确的表名或联系管理员添加表到白名单",
+                    status_code=400
                 )
 
             # 验证表是否存在
@@ -84,9 +92,13 @@ async def export_data(
                 {"table_name": table_name}
             )
             if not result.scalar():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"表 {table_name} 不存在"
+                return error_response(
+                    code=ErrorCode.DATA_NOT_FOUND,
+                    message=f"表 {table_name} 不存在",
+                    error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
+                    detail=f"表 {table_name} 在数据库中不存在",
+                    recovery_suggestion="请检查表名是否正确，或确认表是否已创建",
+                    status_code=404
                 )
 
             # [安全] 使用参数化查询 + 白名单验证后的表名
@@ -99,11 +111,17 @@ async def export_data(
             columns = result.keys()
             data[table_name] = [dict(zip(columns, row)) for row in rows]
         except HTTPException:
+            # 重新抛出依赖注入中的 HTTPException（如 require_admin），依赖注入函数已记录日志
             raise
         except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"导出表 {table_name} 失败: {str(e)}"
+            logger.error(f"导出表 {table_name} 失败: {str(e)}", exc_info=True)
+            return error_response(
+                code=ErrorCode.DATABASE_QUERY_ERROR,
+                message=f"导出表 {table_name} 失败",
+                error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+                detail=str(e),
+                recovery_suggestion="请稍后重试，如问题持续存在请联系系统管理员",
+                status_code=500
             )
 
     return {
@@ -138,9 +156,13 @@ async def import_data(
     - error：遇到冲突时报错
     """
     if on_conflict not in ("skip", "update", "error"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="on_conflict 参数必须是 skip、update 或 error"
+        return error_response(
+            code=ErrorCode.PARAMETER_INVALID,
+            message="on_conflict 参数必须是 skip、update 或 error",
+            error_type=get_error_type(ErrorCode.PARAMETER_INVALID),
+            detail=f"无效的 on_conflict 值: {on_conflict}",
+            recovery_suggestion="请使用 skip、update 或 error 作为 on_conflict 参数值",
+            status_code=400
         )
 
     try:
@@ -154,9 +176,13 @@ async def import_data(
             try:
                 # [安全] 白名单验证
                 if not validate_table_name(table_name):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"不允许导入表 {table_name}（不在白名单中）"
+                    return error_response(
+                        code=ErrorCode.PARAMETER_INVALID,
+                        message=f"不允许导入表 {table_name}（不在白名单中）",
+                        error_type=get_error_type(ErrorCode.PARAMETER_INVALID),
+                        detail=f"表 {table_name} 不在白名单中",
+                        recovery_suggestion="请使用正确的表名或联系管理员添加表到白名单",
+                        status_code=400
                     )
 
                 # 验证表是否存在
@@ -165,9 +191,13 @@ async def import_data(
                     {"table_name": table_name}
                 )
                 if not result.scalar():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"表 {table_name} 不存在"
+                    return error_response(
+                        code=ErrorCode.DATA_NOT_FOUND,
+                        message=f"表 {table_name} 不存在",
+                        error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
+                        detail=f"表 {table_name} 在数据库中不存在",
+                        recovery_suggestion="请检查表名是否正确，或确认表是否已创建",
+                        status_code=404
                     )
 
                 # [安全] 获取表的有效列名（用于白名单验证）
@@ -184,14 +214,19 @@ async def import_data(
                     # [安全] 列名白名单验证
                     if not validate_column_names(columns, valid_columns):
                         invalid_cols = set(columns) - valid_columns
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"无效列名: {invalid_cols}"
+                        return error_response(
+                            code=ErrorCode.PARAMETER_INVALID,
+                            message=f"无效列名: {invalid_cols}",
+                            error_type=get_error_type(ErrorCode.PARAMETER_INVALID),
+                            detail=f"表 {table_name} 中不存在以下列: {invalid_cols}",
+                            recovery_suggestion="请检查列名是否正确，或确认列是否存在于表中",
+                            status_code=400
                         )
 
                     # [安全] 构建参数化插入语句
                     # 注意：表名和列名不能参数化，但已通过白名单验证确保安全
-                    columns_str = ", ".join(columns)
+                    # 为安全起见，列名使用引号转义
+                    columns_str = ", ".join([f'"{col}"' for col in columns])
                     placeholders = ", ".join([f":{col}" for col in columns])
 
                     # [功能] 根据冲突处理策略构建 SQL
@@ -217,17 +252,25 @@ async def import_data(
                         
                         if not pk_columns:
                             # 表没有主键，降级为 skip
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail=f"表 {table_name} 没有主键，无法使用 update 策略"
+                            return error_response(
+                                code=ErrorCode.DATA_VALIDATION_FAILED,
+                                message=f"表 {table_name} 没有主键，无法使用 update 策略",
+                                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                                detail=f"表 {table_name} 缺少主键约束",
+                                recovery_suggestion="请使用 skip 或 error 策略，或为表添加主键",
+                                status_code=400
                             )
                         
                         # 验证主键列是否在导入的列中
                         missing_pk_cols = set(pk_columns) - set(columns)
                         if missing_pk_cols:
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail=f"主键列 {missing_pk_cols} 不在导入数据中，无法使用 update 策略"
+                            return error_response(
+                                code=ErrorCode.DATA_VALIDATION_FAILED,
+                                message=f"主键列 {missing_pk_cols} 不在导入数据中，无法使用 update 策略",
+                                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                                detail=f"表 {table_name} 的主键列 {missing_pk_cols} 未在导入数据中提供",
+                                recovery_suggestion="请确保导入数据中包含所有主键列",
+                                status_code=400
                             )
                         
                         # 构建 ON CONFLICT 子句（支持复合主键）
@@ -241,8 +284,9 @@ async def import_data(
                             # 只有主键列，降级为 skip
                             sql = f'INSERT INTO "{table_name}" ({columns_str}) VALUES ({placeholders}) ON CONFLICT ({pk_cols_str}) DO NOTHING'
                         else:
-                            update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_columns])
-                            sql = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders}) {conflict_clause} DO UPDATE SET {update_set_clause}"
+                            # 注意：列名已通过白名单验证，为安全起见使用引号转义
+                            update_set_clause = ", ".join([f'"{col}" = EXCLUDED."{col}"' for col in update_columns])
+                            sql = f'INSERT INTO "{table_name}" ({columns_str}) VALUES ({placeholders}) {conflict_clause} DO UPDATE SET {update_set_clause}'
 
                     # 批量插入
                     for record in records:
@@ -250,16 +294,23 @@ async def import_data(
                             await db.execute(text(sql), record)
                         except Exception as e:
                             if on_conflict == "error":
+                                logger.error(f"导入表 {table_name} 记录失败: {str(e)}", exc_info=True)
                                 raise
+                            logger.warning(f"导入表 {table_name} 记录冲突，跳过: {str(e)}")
                             skipped_count += 1
 
                 imported_tables.append(table_name)
             except HTTPException:
-                raise
+                raise  # 重新抛出依赖注入中的 HTTPException
             except Exception as e:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"导入表 {table_name} 失败: {str(e)}"
+                logger.error(f"导入表 {table_name} 失败: {str(e)}", exc_info=True)
+                return error_response(
+                    code=ErrorCode.DATABASE_QUERY_ERROR,
+                    message=f"导入表 {table_name} 失败",
+                    error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+                    detail=str(e),
+                    recovery_suggestion="请检查数据格式和表结构，或稍后重试",
+                    status_code=500
                 )
 
         await db.commit()
@@ -272,10 +323,16 @@ async def import_data(
         }
     except HTTPException:
         await db.rollback()
+        # 重新抛出依赖注入中的 HTTPException，依赖注入函数已记录日志
         raise
     except Exception as e:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"数据导入失败: {str(e)}"
+        logger.error(f"数据导入失败: {str(e)}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="数据导入失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据格式和表结构，或稍后重试",
+            status_code=500
         )
