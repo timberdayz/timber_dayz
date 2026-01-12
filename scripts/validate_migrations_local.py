@@ -80,14 +80,15 @@ def validate_migrations_local(skip_cleanup: bool = False):
     """在本地验证迁移脚本"""
     project_root = Path(__file__).parent.parent
     container_name = "xihong_erp_migration_test_postgres"
+    network_name = "xihong_erp_migration_test_network"
     
     # 检查 Docker
     if not check_docker_available():
         safe_print("[ERROR] Docker 不可用，请先安装 Docker")
         sys.exit(1)
     
-    # 清理可能存在的旧容器
-    safe_print(f"[INFO] 清理可能存在的旧容器: {container_name}")
+    # 清理可能存在的旧容器和网络
+    safe_print(f"[INFO] 清理可能存在的旧容器和网络...")
     subprocess.run(
         ['docker', 'stop', container_name],
         stdout=subprocess.DEVNULL,
@@ -98,17 +99,27 @@ def validate_migrations_local(skip_cleanup: bool = False):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
+    subprocess.run(
+        ['docker', 'network', 'rm', network_name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
     
     try:
+        # 0. 创建临时网络
+        safe_print(f"[INFO] 创建临时网络: {network_name}")
+        subprocess.run(['docker', 'network', 'create', network_name], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
         # 1. 启动临时 PostgreSQL 容器
         safe_print(f"[INFO] 启动临时 PostgreSQL 容器: {container_name}")
         result = subprocess.run([
             'docker', 'run', '-d', '--rm',
             '--name', container_name,
+            '--network', network_name,
             '-e', 'POSTGRES_USER=migration_test_user',
             '-e', 'POSTGRES_PASSWORD=migration_test_pass',
             '-e', 'POSTGRES_DB=migration_test_db',
-            '-p', '5434:5432',  # 使用 5434 端口，避免与本地 PostgreSQL 冲突
             'postgres:15'
         ], capture_output=True, text=True, check=True)
         
@@ -120,19 +131,19 @@ def validate_migrations_local(skip_cleanup: bool = False):
             safe_print("[ERROR] 数据库启动失败")
             return False
         
-        # 3. 设置环境变量
-        env = os.environ.copy()
-        env['DATABASE_URL'] = 'postgresql://migration_test_user:migration_test_pass@localhost:5434/migration_test_db'
-        
-        # 4. 执行迁移
-        safe_print("[INFO] 执行数据库迁移...")
-        result = subprocess.run(
-            ['alembic', 'upgrade', 'heads'],
-            cwd=project_root,
-            env=env,
-            capture_output=True,
-            text=True
-        )
+        # 3. 执行迁移（使用Docker容器运行alembic，避免Windows编码问题）
+        safe_print("[INFO] 执行数据库迁移（使用Docker容器）...")
+        # 使用Docker容器运行alembic，连接到测试PostgreSQL容器
+        # 注意：使用网络连接，PostgreSQL容器名为hostname
+        result = subprocess.run([
+            'docker', 'run', '--rm',
+            '--network', network_name,
+            '-v', f'{project_root}:/app',
+            '-w', '/app',
+            '-e', 'DATABASE_URL=postgresql://migration_test_user:migration_test_pass@xihong_erp_migration_test_postgres:5432/migration_test_db',
+            'python:3.11-slim',
+            'bash', '-c', 'pip install -q alembic psycopg2-binary sqlalchemy && alembic upgrade heads'
+        ], cwd=project_root, capture_output=True, text=True, encoding='utf-8', errors='replace')
         
         if result.returncode != 0:
             safe_print("[FAIL] 迁移执行失败")
@@ -189,19 +200,25 @@ def validate_migrations_local(skip_cleanup: bool = False):
         safe_print("\n[WARNING] 用户中断，正在清理...")
         return False
     finally:
-        # 清理临时容器
+        # 清理临时容器和网络
         if not skip_cleanup:
-            safe_print(f"\n[INFO] 清理临时容器: {container_name}")
+            safe_print(f"\n[INFO] 清理临时容器和网络...")
             subprocess.run(
                 ['docker', 'stop', container_name],
-                capture_output=True,
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            safe_print("[OK] 临时容器已清理")
+            subprocess.run(
+                ['docker', 'network', 'rm', network_name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            safe_print("[OK] 临时容器和网络已清理")
         else:
-            safe_print(f"\n[INFO] 保留临时容器用于调试: {container_name}")
-            safe_print(f"[INFO] 数据库连接: postgresql://migration_test_user:migration_test_pass@localhost:5434/migration_test_db")
-            safe_print(f"[INFO] 手动清理: docker stop {container_name}")
+            safe_print(f"\n[INFO] 保留临时容器和网络用于调试")
+            safe_print(f"[INFO] 容器: {container_name}")
+            safe_print(f"[INFO] 网络: {network_name}")
+            safe_print(f"[INFO] 手动清理: docker stop {container_name} && docker network rm {network_name}")
 
 
 def main():

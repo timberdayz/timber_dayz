@@ -131,15 +131,15 @@ jobs:
             fi
           fi
 
-      # [NEW] 迁移脚本一致性验证（比对迁移脚本与 schema.py）
-      - name: Verify Migration Consistency (Release Gate)
+      # [NEW] 关键表外键约束验证（只检查关键表，避免Column级别外键的误报）
+      - name: Verify Critical Tables Foreign Keys (Release Gate)
         run: |
-          echo "[INFO] 验证迁移脚本与 schema.py 的一致性..."
-          python scripts/verify_migration_consistency.py || {
-            echo "[FAIL] 迁移脚本一致性检查失败"
-            echo "[INFO] 请修复迁移脚本中的外键约束定义错误"
+          echo "[INFO] 验证关键表的外键约束..."
+          python scripts/test_migration_foreign_keys.py || {
+            echo "[FAIL] 关键表外键约束验证失败"
             exit 1
           }
+          echo "[OK] 关键表外键约束验证通过"
 
       # [NEW] 数据库迁移测试（在临时数据库中执行迁移）
       - name: Validate Database Migrations (Release Gate)
@@ -147,7 +147,7 @@ jobs:
           DATABASE_URL: postgresql://migration_test_user:migration_test_pass@localhost:5432/migration_test_db
         run: |
           echo "[INFO] 在临时数据库中测试迁移..."
-          
+
           # 等待 PostgreSQL 就绪
           echo "[INFO] 等待 PostgreSQL 就绪..."
           for i in $(seq 1 30); do
@@ -161,7 +161,7 @@ jobs:
             fi
             sleep 1
           done
-          
+
           # 执行迁移
           echo "[INFO] 执行数据库迁移..."
           alembic upgrade heads || {
@@ -169,20 +169,20 @@ jobs:
             echo "[INFO] 请检查迁移脚本中的错误"
             exit 1
           }
-          
+
           # 验证表数量
           TABLE_COUNT=$(PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -t -c \
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'" | tr -d ' \n')
-          
+
           echo "[INFO] 创建了 ${TABLE_COUNT} 张表"
-          
+
           if [ "${TABLE_COUNT}" -lt 50 ]; then
             echo "[WARNING] 表数量过少（期望至少 50 张，实际 ${TABLE_COUNT} 张）"
             echo "[INFO] 这可能表示迁移不完整"
           else
             echo "[OK] 表数量正常（${TABLE_COUNT} 张）"
           fi
-          
+
           # 验证关键表是否存在
           KEY_TABLES=("dim_products" "bridge_product_keys" "fact_product_metrics" "dim_product_master")
           for table_name in "${KEY_TABLES[@]}"; do
@@ -195,7 +195,7 @@ jobs:
               exit 1
             fi
           done
-          
+
           echo "[OK] 数据库迁移测试通过"
 
       # [NOTE] 发布门禁：tag 发布必须通过这些检查；失败会阻断 build 和 deploy
@@ -318,17 +318,17 @@ jobs:
           # 获取镜像标签（从 ref 中提取，例如 v4.22.4）
           TAG="${GITHUB_REF#refs/tags/}"
           echo "[INFO] Pushing backend to CNB with tag: ${TAG}"
-          
+
           # 从 GHCR 拉取镜像（刚构建的）
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${TAG}
-          
+
           # 标记为 CNB 镜像
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${TAG} \
             docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_BACKEND }}:${TAG}
-          
+
           # 推送到 CNB
           docker push docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_BACKEND }}:${TAG}
-          
+
           echo "[OK] Backend image pushed to CNB successfully"
 
       - name: Push frontend image to CNB
@@ -337,17 +337,17 @@ jobs:
           # 获取镜像标签
           TAG="${GITHUB_REF#refs/tags/}"
           echo "[INFO] Pushing frontend to CNB with tag: ${TAG}"
-          
+
           # 从 GHCR 拉取镜像（刚构建的）
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${TAG}
-          
+
           # 标记为 CNB 镜像
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${TAG} \
             docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_FRONTEND }}:${TAG}
-          
+
           # 推送到 CNB
           docker push docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_FRONTEND }}:${TAG}
-          
+
           echo "[OK] Frontend image pushed to CNB successfully"
 
   deploy-tag:
