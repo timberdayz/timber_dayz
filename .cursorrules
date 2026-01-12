@@ -240,8 +240,15 @@ class CollectionTask(Base):
 
 #### 第2步：创建数据库迁移
 ```bash
+# 使用 autogenerate 生成迁移（推荐）
 alembic revision --autogenerate -m "add_collection_tasks_table"
-alembic upgrade head
+# 手动检查生成的迁移文件，添加幂等性检查
+
+# 执行迁移（使用 heads 支持多头迁移）
+alembic upgrade heads
+
+# 验证幂等性：重复执行应不报错
+alembic upgrade heads
 ```
 
 #### 第3步：定义API契约
@@ -850,6 +857,71 @@ async def ensure_table_exists():
 ---
 
 ## 🗄️ 数据库和性能规范
+
+### 数据库迁移规范（v5.0.0新增）⭐⭐⭐
+
+#### **核心原则**
+- ✅ **幂等性强制**：所有迁移必须可重复执行，不报错
+- ✅ **存在性检查**：创建表/字段/索引前必须检查是否存在
+- ✅ **使用 safe_print()**：避免 Windows GBK 编码问题
+- ✅ **禁止 INCLUDING ALL/INDEXES**：分区表迁移时会导致主键约束错误
+- ❌ **禁止生产环境使用 init_db()**：必须使用 Alembic 迁移
+
+#### **迁移开发流程**
+1. **使用 autogenerate 生成基础迁移**：
+   ```bash
+   alembic revision --autogenerate -m "描述性消息"
+   ```
+2. **使用模板创建迁移**：
+   ```bash
+   # 复制模板
+   cp migrations/templates/idempotent_migration.py.template migrations/versions/YYYYMMDD_HHMMSS_description.py
+   # 编辑迁移文件，填写 revision、down_revision 等
+   ```
+3. **添加幂等性检查**：
+   - 表创建：检查 `if 'table_name' not in existing_tables:`
+   - 字段添加：检查 `if 'column_name' not in existing_columns:`
+   - 索引创建：检查 `if 'index_name' not in existing_indexes:`
+4. **验证迁移**：
+   ```bash
+   # 测试升级
+   alembic upgrade head
+   # 测试回滚
+   alembic downgrade -1
+   # 再次测试升级（验证幂等性）
+   alembic upgrade head
+   ```
+
+#### **重要规则**
+- ⭐ **快照迁移后的第一个增量迁移**：`down_revision` 必须指向 `v5_0_0_schema_snapshot`
+- ⭐ **后续迁移**：按正常链式指向前一个迁移
+- ⭐ **新环境部署**：使用 Schema 快照迁移（`alembic upgrade v5_0_0_schema_snapshot`）
+- ⭐ **已有环境**：使用增量迁移（`alembic upgrade heads`）
+
+#### **迁移检查清单**
+- [ ] 所有 `op.create_table()` 都有存在性检查
+- [ ] 所有 `op.add_column()` 都有存在性检查
+- [ ] 所有 `op.create_index()` 都有存在性检查
+- [ ] 使用 `safe_print()` 替代 `print()`
+- [ ] `downgrade()` 函数也是幂等的
+- [ ] 迁移可以重复执行不报错
+- [ ] 没有使用 `INCLUDING ALL` 或 `INCLUDING INDEXES`
+
+#### **Alembic autogenerate 使用指南**
+- ✅ **适用场景**：表结构变更（新增表、字段、索引）
+- ⚠️ **局限性**：不支持表重命名、数据迁移、复杂约束变更
+- 📝 **使用步骤**：
+  1. 修改 `modules/core/db/schema.py`
+  2. 运行 `alembic revision --autogenerate -m "描述"`
+  3. **必须手动检查生成的迁移文件**，添加幂等性检查
+  4. 测试迁移（升级 + 回滚 + 再次升级）
+
+#### **禁止行为**
+- ❌ 创建迁移时不检查表/字段/索引是否存在
+- ❌ 使用 `print()` 而不是 `safe_print()`
+- ❌ 在生产环境使用 `init_db()`
+- ❌ 使用 `INCLUDING ALL` 或 `INCLUDING INDEXES`（分区表迁移）
+- ❌ 迁移文件不可重复执行
 
 ### PostgreSQL索引优先原则（强制）
 - ✅ **文件路径查找**: 从catalog_files表查询（禁止Path.rglob()）

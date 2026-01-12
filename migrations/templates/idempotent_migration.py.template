@@ -1,0 +1,127 @@
+"""${message}
+
+幂等迁移模板：
+- 所有表创建都检查是否存在
+- 所有字段添加都检查是否存在
+- 所有索引创建都检查是否存在
+- 使用 safe_print() 避免编码问题
+
+Revision ID: ${rev_id}
+Revises: ${down_revision}
+Create Date: ${create_date}
+"""
+
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy import inspect
+
+
+# revision identifiers, used by Alembic.
+revision = '${rev_id}'
+down_revision = ${down_revision}
+branch_labels = None
+depends_on = None
+
+
+def safe_print(text):
+    """安全打印（处理Windows GBK编码）"""
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:
+        try:
+            safe_text = text.encode('gbk', errors='ignore').decode('gbk')
+            print(safe_text, flush=True)
+        except:
+            safe_text = text.encode('ascii', errors='ignore').decode('ascii')
+            print(safe_text, flush=True)
+
+
+def upgrade():
+    """应用迁移（幂等）"""
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+    
+    # ==================== 示例：创建新表 ====================
+    # safe_print("[1/1] Creating new_table...")
+    # 
+    # if 'new_table' not in existing_tables:
+    #     op.create_table(
+    #         'new_table',
+    #         sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
+    #         sa.Column('name', sa.String(length=100), nullable=False),
+    #         sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    #         sa.PrimaryKeyConstraint('id'),
+    #         sa.UniqueConstraint('name')
+    #     )
+    #     op.create_index('idx_new_table_name', 'new_table', ['name'])
+    #     safe_print("[OK] new_table created")
+    # else:
+    #     safe_print("[SKIP] new_table already exists")
+    
+    # ==================== 示例：添加新字段 ====================
+    # if 'existing_table' in existing_tables:
+    #     existing_columns = {c['name'] for c in inspector.get_columns('existing_table')}
+    #     
+    #     if 'new_column' not in existing_columns:
+    #         safe_print("[1/1] Adding new_column to existing_table...")
+    #         op.add_column('existing_table', sa.Column('new_column', sa.String(length=100), nullable=True))
+    #         safe_print("[OK] new_column added")
+    #     else:
+    #         safe_print("[SKIP] new_column already exists")
+    # else:
+    #     safe_print("[WARN] existing_table does not exist, skipping column addition")
+    
+    # ==================== 示例：创建索引 ====================
+    # if 'target_table' in existing_tables:
+    #     existing_indexes = {idx['name'] for idx in inspector.get_indexes('target_table')}
+    #     
+    #     if 'idx_target_table_column' not in existing_indexes:
+    #         safe_print("[1/1] Creating index idx_target_table_column...")
+    #         op.create_index('idx_target_table_column', 'target_table', ['column_name'])
+    #         safe_print("[OK] Index created")
+    #     else:
+    #         safe_print("[SKIP] Index already exists")
+    # else:
+    #     safe_print("[WARN] target_table does not exist, skipping index creation")
+    
+    pass  # 替换为实际迁移逻辑
+
+
+def downgrade():
+    """回滚迁移（幂等）"""
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+    
+    # ==================== 示例：删除表 ====================
+    # if 'new_table' in existing_tables:
+    #     safe_print("[1/1] Dropping new_table...")
+    #     op.drop_table('new_table')
+    #     safe_print("[OK] new_table dropped")
+    # else:
+    #     safe_print("[SKIP] new_table does not exist")
+    
+    # ==================== 示例：删除字段 ====================
+    # if 'existing_table' in existing_tables:
+    #     existing_columns = {c['name'] for c in inspector.get_columns('existing_table')}
+    #     
+    #     if 'new_column' in existing_columns:
+    #         safe_print("[1/1] Dropping new_column from existing_table...")
+    #         op.drop_column('existing_table', 'new_column')
+    #         safe_print("[OK] new_column dropped")
+    #     else:
+    #         safe_print("[SKIP] new_column does not exist")
+    
+    # ==================== 示例：删除索引 ====================
+    # if 'target_table' in existing_tables:
+    #     existing_indexes = {idx['name'] for idx in inspector.get_indexes('target_table')}
+    #     
+    #     if 'idx_target_table_column' in existing_indexes:
+    #         safe_print("[1/1] Dropping index idx_target_table_column...")
+    #         op.drop_index('idx_target_table_column', table_name='target_table')
+    #         safe_print("[OK] Index dropped")
+    #     else:
+    #         safe_print("[SKIP] Index does not exist")
+    
+    pass  # 替换为实际回滚逻辑

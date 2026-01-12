@@ -89,6 +89,7 @@ from backend.routers import (
     mv,  # [*] v4.12.0修复：物化视图管理API（修复刷新功能）
     component_recorder,  # [*] Phase 8.1: UI化组件录制工具API
     rate_limit,  # [*] v4.19.2: 限流管理API
+    data_migration,  # v5.0.0: 数据迁移API
 )
 from backend.routers import rate_limit_config  # [*] v4.19.4: 限流配置管理API（Phase 3）
 from backend.models.database import init_db, get_db
@@ -993,6 +994,13 @@ app.include_router(
 app.include_router(
     rate_limit_config.router,
     tags=["限流配置管理"]
+)
+
+# v5.0.0 新增：数据迁移API
+app.include_router(
+    data_migration.router,
+    prefix="/api",
+    tags=["数据迁移"]
 )
 
 # 全局异常处理（v4.6.0统一响应格式）
