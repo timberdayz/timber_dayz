@@ -1,7 +1,7 @@
 # 数据库设计规范 - 企业级ERP标准
 
-**版本**: v4.4.0  
-**更新**: 2025-01-30  
+**版本**: v4.4.1  
+**更新**: 2025-01-XX  
 **标准**: 参考SAP/Oracle ERP数据库设计标准
 
 ---
@@ -237,6 +237,328 @@ class FactOrder(Base):
 
 ---
 
+## 📝 SQL编写规范（Metabase Model SQL）
+
+**版本**: v1.0.0  
+**更新**: 2025-01-XX  
+**参考标准**: GitLab、Mozilla、Meltano、dbt、SQLFluff 等业界主流规范  
+**适用场景**: Metabase Model SQL、数据仓库查询、BI 报表 SQL
+
+### 1. 命名规范
+- ✅ **表名/字段名**: 使用 `snake_case`（全小写+下划线）
+- ✅ **别名**: 必须使用 `AS` 关键字，别名与标准字段名一致
+- ✅ **CTE命名**: 使用 `all_{data_domain}` 格式，有语义
+
+### 2. 格式规范
+- ✅ **关键字**: 统一使用**小写**（`select`、`from`、`where`）
+- ✅ **缩进**: 使用**2个空格**（不使用Tab）
+- ✅ **字段列表**: 每个字段一行，逗号在行尾
+- ✅ **行长度**: 控制在120字符以内（横屏编辑友好）
+- ✅ **COALESCE格式**: 
+  - **短COALESCE**（≤120字符）：推荐一行内，便于横屏查看和维护
+  - **长COALESCE**（>120字符）：多行格式，每个参数一行，参数对齐
+
+### 3. 字段映射规范
+- ✅ **字符串字段**: 使用 `COALESCE()` 支持多平台字段名（至少3-5个候选）
+  - **推荐格式**（横屏友好）：`coalesce(raw_data->>'订单号', raw_data->>'订单ID', raw_data->>'order_id') as order_id,`
+  - **长格式**（>120字符时）：多行格式，参数对齐
+- ✅ **数值字段**: 使用 `NULLIF(field, '')::numeric` 处理空字符串，默认值 `0`
+  - **普通数值字段**（横屏友好）：`coalesce(nullif(replace(replace(raw_data->>'销售额', ',', ''), ' ', ''), '')::numeric, nullif(replace(replace(raw_data->>'销售金额', ',', ''), ' ', ''), '')::numeric, 0) as sales_amount,`
+  - **处理规则**：移除千分位（`,`）和空格，再转换为 numeric
+- ✅ **百分比字段**: 必须移除百分号、处理欧洲格式（逗号→点号），并除以100（如果原始数据是百分比格式）
+  - **推荐格式**（横屏友好）：`coalesce(nullif(replace(replace(replace(raw_data->>'转化率', '%', ''), ',', '.'), ' ', ''), '')::numeric / 100.0, nullif(replace(replace(replace(raw_data->>'conversion_rate', '%', ''), ',', '.'), ' ', ''), '')::numeric / 100.0, 0) as conversion_rate,`
+  - **处理规则**：
+    1. 移除百分号（`%`）
+    2. 替换逗号为点号（欧洲格式：`0,00` → `0.00`）
+    3. 移除空格
+    4. 转换为 numeric
+    5. 除以 100.0（如果原始数据是百分比格式，如 `"0,00%"` = 0.0000）
+  - **常见百分比字段**：`click_rate`（点击率）、`conversion_rate`（转化率）、`bounce_rate`（跳出率）、`positive_rate`（好评率）
+- ✅ **时间字段**: 提供降级策略（`raw_data` → `period_start_time` → `metric_date`）
+  - **必须使用 NULLIF**：先使用 `NULLIF(field, '')` 处理空字符串，再类型转换（避免空字符串转换错误）
+  - **推荐格式**（横屏友好）：`coalesce(nullif(raw_data->>'下单时间', '')::timestamp, nullif(raw_data->>'订单时间', '')::timestamp, period_start_time) as order_time,`
+  - **错误示例**：`coalesce((raw_data->>'下单时间')::timestamp, ...)` - 空字符串会导致转换错误
+
+### 4. CTE使用规范（CTE分层架构）⭐⭐⭐
+- ✅ **强制使用CTE分层**：所有 Metabase Model SQL 必须使用 CTE 分层架构
+- ✅ **分层结构**：`字段映射 → 数据清洗 → 去重 → 最终输出`
+- ✅ **性能说明**：PostgreSQL 12+ 默认内联 CTE（单次引用），性能影响为零，甚至可能提升（查询优化器更容易优化）
+- ✅ **CTE注释**：每个CTE前必须有注释说明用途和层级
+
+#### 4.1 CTE分层架构（4层结构）
+
+**第1层：字段映射（field_mapping）**
+- **职责**：提取所有候选字段，不做格式化
+- **优势**：字段映射逻辑集中，易于维护
+- **示例**：
+```sql
+field_mapping AS (
+  SELECT 
+    platform_code,
+    shop_id,
+    -- 字段映射：提取所有候选字段（不做格式化）
+    COALESCE(
+      raw_data->>'访客数',
+      raw_data->>'独立访客',
+      raw_data->>'unique_visitors',
+      raw_data->>'Unique Visitors',
+      raw_data->>'uv',
+      raw_data->>'visitor_count'
+    ) AS visitor_count_raw,
+    -- ... 其他字段
+  FROM b_class.fact_shopee_analytics_daily
+  UNION ALL
+  -- ... 其他平台和粒度
+)
+```
+
+**第2层：数据清洗（cleaned）**
+- **职责**：统一格式化逻辑（数值、百分比、时间格式）
+- **优势**：格式化逻辑只写一次，易于维护和修改
+- **示例**：
+```sql
+cleaned AS (
+  SELECT 
+    platform_code,
+    shop_id,
+    -- 普通数值字段清洗（统一逻辑）
+    NULLIF(REPLACE(REPLACE(visitor_count_raw, ',', ''), ' ', ''), '')::NUMERIC AS visitor_count,
+    -- 百分比字段清洗（统一逻辑）
+    NULLIF(REPLACE(REPLACE(REPLACE(click_rate_raw, '%', ''), ',', '.'), ' ', ''), '')::NUMERIC / 100.0 AS click_rate,
+    -- 时间格式字段清洗（处理 "00:00:00" 格式）
+    CASE 
+      WHEN avg_session_duration_raw ~ '^[0-9]+:[0-9]+:[0-9]+$' THEN
+        EXTRACT(EPOCH FROM (avg_session_duration_raw)::INTERVAL)::NUMERIC
+      ELSE
+        NULLIF(REPLACE(REPLACE(avg_session_duration_raw, ',', ''), ' ', ''), '')::NUMERIC
+    END AS avg_session_duration,
+    -- ... 其他字段
+  FROM field_mapping
+)
+```
+
+**第3层：去重（deduplicated）**
+- **职责**：基于 data_hash 去重，优先级 daily > weekly > monthly
+- **优势**：去重逻辑独立，职责清晰
+- **示例**：
+```sql
+deduplicated AS (
+  SELECT 
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY platform_code, shop_id, data_hash 
+      ORDER BY 
+        CASE granularity
+          WHEN 'daily' THEN 1
+          WHEN 'weekly' THEN 2
+          WHEN 'monthly' THEN 3
+        END ASC,
+        ingest_timestamp DESC
+    ) AS rn
+  FROM cleaned
+)
+```
+
+**第4层：最终输出（SELECT）**
+- **职责**：只保留去重后的数据，设置默认值
+- **优势**：输出格式统一，便于前端使用
+- **示例**：
+```sql
+SELECT 
+  platform_code,
+  shop_id,
+  COALESCE(visitor_count, 0) AS visitor_count,
+  COALESCE(click_rate, 0) AS click_rate,
+  -- ... 其他字段
+FROM deduplicated
+WHERE rn = 1
+```
+
+#### 4.2 CTE分层优势
+
+| 优势 | 说明 |
+|------|------|
+| **可读性** | 字段映射、数据清洗、去重逻辑分离，职责清晰 |
+| **维护性** | 修改格式化逻辑只需修改第2层（cleaned CTE） |
+| **代码复用** | 格式化逻辑只写一次，减少90%以上代码重复 |
+| **性能** | PostgreSQL 12+ 内联优化，性能影响为零，甚至可能提升 |
+
+#### 4.3 CTE性能说明
+
+- ✅ **PostgreSQL 12+ 默认行为**：单次引用的 CTE 会被内联到主查询中
+- ✅ **执行计划**：与不使用 CTE 的查询相同或更好（查询优化器更容易优化）
+- ✅ **多次引用**：只有在 CTE 被多次引用时才会物化（我们的场景不适用）
+- ✅ **性能验证**：使用 `EXPLAIN ANALYZE` 对比执行计划，确认无性能损失
+
+### 5. 注释规范
+- ✅ **文件头**: 包含模型名称、用途、数据源、平台、粒度
+- ✅ **字段分组**: 使用注释分组（系统字段、基础字段、金额字段等）
+- ✅ **UNION ALL**: 每个块前注释说明平台和粒度
+
+### 6. 性能优化
+- ✅ **索引字段**: 优先使用 `period_start_date`、`platform_code`、`shop_id` 过滤
+- ✅ **避免函数**: 不在WHERE中对列使用函数（阻止索引使用）
+- ✅ **明确字段**: 避免 `SELECT *`，明确列出所有字段
+
+### 7. 示例模板（CTE分层架构）⭐⭐⭐
+
+```sql
+-- ====================================================
+-- {Model Name} Model - {数据域}数据域模型（CTE分层）
+-- ====================================================
+-- 用途：{模型用途说明}
+-- 数据源：b_class schema 下的所有 {数据域} 相关表
+-- 平台：{平台列表}
+-- 粒度：{粒度列表}
+-- 优化：CTE分层架构，提升可读性和维护性
+-- ====================================================
+
+WITH 
+-- ====================================================
+-- 第1层：字段映射（提取所有候选字段，不做格式化）
+-- ====================================================
+field_mapping AS (
+  -- {平台} {粒度} {数据域}数据
+  SELECT 
+    -- 系统字段（必须）
+    platform_code,
+    shop_id,
+    data_domain,
+    granularity,
+    metric_date,
+    period_start_date,
+    period_end_date,
+    period_start_time,
+    period_end_time,
+    
+    -- 标准业务字段映射（提取所有候选字段）
+    COALESCE(
+      raw_data->>'订单号',
+      raw_data->>'订单ID',
+      raw_data->>'order_id',
+      raw_data->>'Order ID'
+    ) AS order_id_raw,
+    
+    COALESCE(
+      raw_data->>'销售额',
+      raw_data->>'销售金额',
+      raw_data->>'sales_amount',
+      raw_data->>'Sales Amount'
+    ) AS sales_amount_raw,
+    
+    COALESCE(
+      raw_data->>'下单时间',
+      raw_data->>'订单时间',
+      raw_data->>'order_time',
+      raw_data->>'Order Time'
+    ) AS order_time_raw,
+    
+    -- 系统字段（必须，用于去重）
+    raw_data,
+    header_columns,
+    data_hash,
+    ingest_timestamp,
+    currency_code
+  FROM b_class.fact_{platform}_{data_domain}_{granularity}
+  
+  UNION ALL
+  
+  -- 其他平台和粒度...
+  SELECT ... FROM b_class.fact_{platform2}_{data_domain}_{granularity2}
+  -- ... 更多平台和粒度
+),
+
+-- ====================================================
+-- 第2层：数据清洗（统一格式化逻辑，只写一次）
+-- ====================================================
+cleaned AS (
+  SELECT 
+    -- 系统字段（直接传递）
+    platform_code,
+    shop_id,
+    data_domain,
+    granularity,
+    metric_date,
+    period_start_date,
+    period_end_date,
+    period_start_time,
+    period_end_time,
+    
+    -- 字符串字段（直接使用）
+    order_id_raw AS order_id,
+    
+    -- 普通数值字段清洗（统一逻辑）
+    NULLIF(REPLACE(REPLACE(sales_amount_raw, ',', ''), ' ', ''), '')::NUMERIC AS sales_amount,
+    
+    -- 时间字段清洗（使用 NULLIF 处理空字符串）
+    COALESCE(
+      NULLIF(order_time_raw, '')::TIMESTAMP,
+      period_start_time,
+      metric_date::TIMESTAMP
+    ) AS order_time,
+    
+    -- 系统字段（用于去重）
+    raw_data,
+    header_columns,
+    data_hash,
+    ingest_timestamp,
+    currency_code
+  FROM field_mapping
+),
+
+-- ====================================================
+-- 第3层：去重（基于 data_hash，优先级 daily > weekly > monthly）
+-- ====================================================
+deduplicated AS (
+  SELECT 
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY platform_code, shop_id, data_hash 
+      ORDER BY 
+        CASE granularity
+          WHEN 'daily' THEN 1
+          WHEN 'weekly' THEN 2
+          WHEN 'monthly' THEN 3
+        END ASC,
+        ingest_timestamp DESC
+    ) AS rn
+  FROM cleaned
+)
+
+-- ====================================================
+-- 第4层：最终输出（只保留去重后的数据，设置默认值）
+-- ====================================================
+SELECT 
+  platform_code,
+  shop_id,
+  data_domain,
+  granularity,
+  metric_date,
+  period_start_date,
+  period_end_date,
+  period_start_time,
+  period_end_time,
+  order_id,
+  COALESCE(sales_amount, 0) AS sales_amount,
+  order_time,
+  raw_data,
+  header_columns,
+  data_hash,
+  ingest_timestamp,
+  currency_code
+FROM deduplicated
+WHERE rn = 1
+```
+
+**格式说明**：
+- ✅ **CTE分层**：必须使用4层CTE架构（字段映射 → 数据清洗 → 去重 → 最终输出）
+- ✅ **字段映射**：第1层只做字段提取，不做格式化
+- ✅ **数据清洗**：第2层统一格式化逻辑，只写一次
+- ✅ **去重逻辑**：第3层独立处理去重，职责清晰
+- ✅ **最终输出**：第4层设置默认值，统一输出格式
+
+---
+
 ## 📚 参考标准
 
 - **SAP数据库设计标准**: 参考SAP ERP数据库设计原则
@@ -346,7 +668,7 @@ order_item = FactOrderItem(
 
 ---
 
-**最后更新**: 2025-11-20（v4.12.0：产品ID原子级设计）  
+**最后更新**: 2025-01-XX（v4.4.1：新增SQL编写规范）  
 **维护**: AI Agent Team  
 **状态**: ✅ 企业级标准
 

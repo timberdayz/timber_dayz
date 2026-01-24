@@ -85,10 +85,31 @@ class MetabaseQuestionService:
             raise ValueError(f"Metabase认证异常: {str(e)}")
     
     def _get_question_id(self, question_key: str) -> int:
-        """获取Question ID"""
+        """
+        获取Question ID（增强错误提示）
+        
+        Args:
+            question_key: Question键名
+            
+        Returns:
+            Question ID
+            
+        Raises:
+            ValueError: Question ID未配置时抛出，包含详细的配置说明
+        """
         question_id = self.question_ids.get(question_key)
         if not question_id or question_id == 0:
-            raise ValueError(f"Question ID未配置: {question_key}。请在环境变量中设置METABASE_QUESTION_{question_key.upper()}")
+            env_var_name = f"METABASE_QUESTION_{question_key.upper()}"
+            error_msg = (
+                f"Question ID未配置: {question_key}\n"
+                f"请在环境变量中设置 {env_var_name}\n"
+                f"获取方式：\n"
+                f"  1. 在Metabase UI中创建Question\n"
+                f"  2. 记录Question ID（在Question URL或详情中）\n"
+                f"  3. 配置到.env文件: {env_var_name}=<question_id>"
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         return question_id
     
     def _convert_params(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -202,10 +223,27 @@ class MetabaseQuestionService:
                 "value": int(params["limit"])
             })
         
+        # 记录参数转换日志（调试用）
+        if metabase_params:
+            logger.debug(
+                f"参数转换完成: {len(metabase_params)}个参数\n"
+                f"原始参数: {params}\n"
+                f"转换后参数: {metabase_params}"
+            )
+        
         return metabase_params
     
     def _convert_response(self, question_key: str, metabase_response: Dict[str, Any]) -> Dict[str, Any]:
-        """转换Metabase响应为前端格式"""
+        """
+        转换Metabase响应为前端格式（根据question_key进行不同转换）
+        
+        Args:
+            question_key: Question键名
+            metabase_response: Metabase原始响应
+            
+        Returns:
+            转换后的数据格式（根据question_key可能返回不同结构）
+        """
         # Metabase响应格式：
         # {
         #   "data": {
@@ -218,19 +256,101 @@ class MetabaseQuestionService:
         rows = data.get("rows", [])
         cols = data.get("cols", [])
         
-        # 转换为字典列表格式
-        result = []
+        # 先转换为字典列表格式（基础转换）
+        result_list = []
         for row in rows:
             row_dict = {}
             for idx, col in enumerate(cols):
                 col_name = col.get("name") or col.get("display_name", f"col_{idx}")
                 row_dict[col_name] = row[idx] if idx < len(row) else None
-            result.append(row_dict)
+            result_list.append(row_dict)
         
+        # ⭐ 根据question_key进行特定格式转换
+        if question_key == "business_overview_kpi":
+            # KPI数据：转换为单个对象，包含嵌套对象（current/change格式）
+            if result_list and len(result_list) > 0:
+                first_row = result_list[0]
+                return {
+                    "conversion_rate": {
+                        "current": first_row.get("conversion_rate"),
+                        "change": first_row.get("conversion_rate_change")
+                    },
+                    "traffic": {
+                        "current": first_row.get("traffic"),
+                        "change": first_row.get("traffic_change")
+                    },
+                    "average_order_value": {
+                        "current": first_row.get("avg_order_value") or first_row.get("average_order_value"),
+                        "change": first_row.get("avg_order_value_change") or first_row.get("average_order_value_change")
+                    },
+                    "attach_rate": {
+                        "current": first_row.get("attach_rate"),
+                        "change": first_row.get("attach_rate_change")
+                    },
+                    "labor_efficiency": {
+                        "current": first_row.get("labor_efficiency"),
+                        "change": first_row.get("labor_efficiency_change")
+                    }
+                }
+            logger.warning(f"[{question_key}] 返回数据为空，返回空对象")
+            return {}
+        
+        elif question_key == "business_overview_comparison":
+            # 对比数据：返回metrics对象（包含today/yesterday/average/change）
+            if result_list and len(result_list) > 0:
+                first_row = result_list[0]
+                metrics = {}
+                
+                # 动态提取所有指标（以_today, _yesterday, _average, _change结尾的字段）
+                for key, value in first_row.items():
+                    if key.endswith("_today"):
+                        metric_name = key[:-6]  # 移除"_today"后缀
+                        if metric_name not in metrics:
+                            metrics[metric_name] = {}
+                        metrics[metric_name]["today"] = value
+                    elif key.endswith("_yesterday"):
+                        metric_name = key[:-10]  # 移除"_yesterday"后缀
+                        if metric_name not in metrics:
+                            metrics[metric_name] = {}
+                        metrics[metric_name]["yesterday"] = value
+                    elif key.endswith("_average"):
+                        metric_name = key[:-8]  # 移除"_average"后缀
+                        if metric_name not in metrics:
+                            metrics[metric_name] = {}
+                        metrics[metric_name]["average"] = value
+                    elif key.endswith("_change"):
+                        metric_name = key[:-7]  # 移除"_change"后缀
+                        if metric_name not in metrics:
+                            metrics[metric_name] = {}
+                        metrics[metric_name]["change"] = value
+                
+                # 如果没有找到结构化字段，尝试常见字段名
+                if not metrics:
+                    metrics = {
+                        "sales_amount": {
+                            "today": first_row.get("sales_today") or first_row.get("sales_amount_today"),
+                            "yesterday": first_row.get("sales_yesterday") or first_row.get("sales_amount_yesterday"),
+                            "average": first_row.get("sales_average") or first_row.get("sales_amount_average"),
+                            "change": first_row.get("sales_change") or first_row.get("sales_amount_change")
+                        },
+                        "order_count": {
+                            "today": first_row.get("orders_today") or first_row.get("order_count_today"),
+                            "yesterday": first_row.get("orders_yesterday") or first_row.get("order_count_yesterday"),
+                            "average": first_row.get("orders_average") or first_row.get("order_count_average"),
+                            "change": first_row.get("orders_change") or first_row.get("order_count_change")
+                        },
+                        # ... 其他指标可以继续添加
+                    }
+                
+                return {"metrics": metrics}
+            logger.warning(f"[{question_key}] 返回数据为空，返回空metrics对象")
+            return {"metrics": {}}
+        
+        # 默认返回字典列表格式（适用于表格数据）
         return {
-            "data": result,
+            "data": result_list,
             "columns": [col.get("display_name") or col.get("name", "") for col in cols],
-            "row_count": len(result)
+            "row_count": len(result_list)
         }
     
     async def query_question(
@@ -280,7 +400,12 @@ class MetabaseQuestionService:
             if metabase_params:
                 payload["parameters"] = metabase_params
                 # 调试日志：记录传递给Metabase的参数
-                logger.info(f"[Metabase Question {question_id}] 参数: {metabase_params}")
+                logger.info(
+                    f"[Metabase Question {question_id} ({question_key})] 查询参数:\n"
+                    f"  URL: {url}\n"
+                    f"  参数数量: {len(metabase_params)}\n"
+                    f"  参数详情: {metabase_params}"
+                )
             
             # 禁用代理，避免通过代理连接 localhost
             # 通过设置环境变量 NO_PROXY 来禁用代理（在初始化时已设置）

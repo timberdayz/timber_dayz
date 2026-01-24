@@ -953,9 +953,7 @@ export default {
 
   // 取消采集任务
   async cancelCollectionTask(taskId) {
-    return await axios.delete(
-      `http://localhost:8000/api/collection/tasks/${taskId}`
-    );
+    return await this._delete(`/collection/tasks/${taskId}`);
   },
 
   // 获取文件完整路径

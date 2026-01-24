@@ -99,7 +99,9 @@ services:
       # 应用配置
       DEBUG: "false"
       LOG_LEVEL: INFO
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      # ⚠️ 重要：ALLOWED_HOSTS 必须包含 'backend'（Nginx 代理时设置的 Host 头）
+      # 生产环境建议通过 .env 文件明确配置：ALLOWED_HOSTS=localhost,127.0.0.1,backend,your-domain.com
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
 
       # ⭐ 路径配置（Linux服务器部署必需）
       PROJECT_ROOT: /app

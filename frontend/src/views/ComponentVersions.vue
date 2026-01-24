@@ -773,10 +773,6 @@ const loadTestAccounts = async (componentName) => {
     // 从组件名称提取平台
     const platform = componentName.split('/')[0]
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/b19377c4-4cc0-48a0-b4b5-1a0a5b6ad0ac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ComponentVersions.vue:loadTestAccounts:start',message:'Loading test accounts',data:{componentName:componentName,platform:platform},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
-    
     console.log('[DEBUG] Loading accounts for platform:', platform, 'from component:', componentName)
     
     // 加载该平台的账号
@@ -787,19 +783,11 @@ const loadTestAccounts = async (componentName) => {
       enabled: true
     })
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/b19377c4-4cc0-48a0-b4b5-1a0a5b6ad0ac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ComponentVersions.vue:loadTestAccounts:response',message:'API response received',data:{responseType:typeof response,isArray:Array.isArray(response),length:response?.length,firstItem:response?.[0],sample:JSON.stringify(response?.slice(0,2))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H2'})}).catch(()=>{});
-    // #endregion
-    
     console.log('[DEBUG] API response:', response)
     console.log('[DEBUG] API response type:', Array.isArray(response) ? 'array' : typeof response)
     
     // BUG FIX: response已经是数组，不需要.data
     testAccounts.value = response || []
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/b19377c4-4cc0-48a0-b4b5-1a0a5b6ad0ac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ComponentVersions.vue:loadTestAccounts:assigned',message:'Test accounts assigned',data:{count:testAccounts.value.length,accounts:testAccounts.value.map(a=>({id:a?.id,name:a?.name,shop_id:a?.shop_id,platform:a?.platform,allKeys:Object.keys(a||{})}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3,H4'})}).catch(()=>{});
-    // #endregion
     
     console.log('[DEBUG] Final testAccounts:', testAccounts.value)
     console.log('[DEBUG] testAccounts count:', testAccounts.value.length)

@@ -1041,10 +1041,7 @@ router.beforeEach((to, from, next) => {
   if (!isAdmin && to.meta.permission) {
       if (!userStore.hasPermission(to.meta.permission)) {
       console.warn(`[权限拦截] 缺少权限: ${to.meta.permission}`)
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/b19377c4-4cc0-48a0-b4b5-1a0a5b6ad0ac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'router/index.js:879',message:'Permission check FAILED - redirecting',data:{permission:to.meta.permission},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
-      // #endregion
-        next('/business-overview')
+      next('/business-overview')
         return
     }
   }

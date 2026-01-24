@@ -15,6 +15,7 @@
    - 表设计原则、索引设计、约束设计
    - 字段类型规范、命名规范
    - 性能优化建议
+   - **SQL编写规范**（Metabase Model SQL）⭐⭐⭐
 
 2. **[错误处理和日志规范](ERROR_HANDLING_AND_LOGGING.md)** ⭐
    - 统一错误码体系、错误分类

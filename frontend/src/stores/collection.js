@@ -1,7 +1,9 @@
 /**
  * 数据采集状态管理 - 混合架构版本
  * 
- * 集成统一后端API (http://localhost:8000/api/collection)
+ * 集成统一后端API (/api/collection)
+ * 开发环境：通过 Vite 代理访问
+ * 生产环境：通过 Nginx 反向代理访问
  */
 
 import { defineStore } from 'pinia'

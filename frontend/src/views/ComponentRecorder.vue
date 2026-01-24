@@ -1701,50 +1701,12 @@ const startTest = async () => {
       duration: 3000,
     });
 
-    // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/b19377c4-4cc0-48a0-b4b5-1a0a5b6ad0ac", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "ComponentRecorder.vue:714",
-        message: "startTest: preparing request",
-        data: {
-          platform: recorderForm.value.platform,
-          component_type: recorderForm.value.componentType,
-          account_id: testAccountId.value,
-          steps_count: recordedSteps.value.length,
-        },
-        timestamp: Date.now(),
-        sessionId: "debug-session",
-        hypothesisId: "A_C",
-      }),
-    }).catch(() => {});
-    // #endregion
-
     const response = await api.post("/collection/recorder/test", {
       platform: recorderForm.value.platform,
       component_type: recorderForm.value.componentType,
       account_id: testAccountId.value,
       steps: recordedSteps.value,
     });
-
-    // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/b19377c4-4cc0-48a0-b4b5-1a0a5b6ad0ac", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "ComponentRecorder.vue:728",
-        message: "startTest: received response",
-        data: {
-          success: response.success,
-          status: response.test_result?.status,
-        },
-        timestamp: Date.now(),
-        sessionId: "debug-session",
-        hypothesisId: "A_B",
-      }),
-    }).catch(() => {});
-    // #endregion
 
     // Phase 12.5: 无论成功失败都显示测试结果和步骤
     testResult.value = response.test_result;
@@ -1799,25 +1761,6 @@ const startTest = async () => {
       }
     }
   } catch (error) {
-    // #region agent log
-    fetch("http://127.0.0.1:7242/ingest/b19377c4-4cc0-48a0-b4b5-1a0a5b6ad0ac", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "ComponentRecorder.vue:752",
-        message: "startTest: ERROR caught",
-        data: {
-          error_message: error.message,
-          error_response: error.response?.data,
-          error_status: error.response?.status,
-          error_stack: error.stack,
-        },
-        timestamp: Date.now(),
-        sessionId: "debug-session",
-        hypothesisId: "A_B_C",
-      }),
-    }).catch(() => {});
-    // #endregion
     console.error("组件测试失败:", error);
     ElMessage.error("组件测试失败: " + error.message);
   } finally {

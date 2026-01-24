@@ -398,6 +398,9 @@ def start_services_with_docker_compose():
     # 检查docker-compose文件
     compose_base = project_root / "docker-compose.yml"
     compose_dev = project_root / "docker-compose.dev.yml"
+    # [NEW] 添加 Metabase 配置文件检查
+    compose_metabase = project_root / "docker-compose.metabase.yml"
+    compose_metabase_dev = project_root / "docker-compose.metabase.dev.yml"
     
     if not compose_base.exists():
         safe_print("  [ERROR] docker-compose.yml 不存在")
@@ -408,6 +411,13 @@ def start_services_with_docker_compose():
     
     if compose_dev.exists():
         compose_files.extend(["-f", str(compose_dev)])
+    
+    # [NEW] 添加 Metabase 配置文件（开发环境需要端口映射）
+    if compose_metabase.exists():
+        compose_files.extend(["-f", str(compose_metabase)])
+    if compose_metabase_dev.exists():
+        compose_files.extend(["-f", str(compose_metabase_dev)])
+        safe_print("  [INFO] 已加载 Metabase 开发配置（端口映射: 8080:3000）")
     
     try:
         # 启动Redis和PostgreSQL
@@ -648,6 +658,72 @@ def start_services_with_docker_compose():
             safe_print("    docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d celery-worker")
             return False
         
+        # [NEW] 启动 Metabase（开发环境完整测试）
+        safe_print("  [启动] Metabase BI服务...")
+        safe_print("  提示: 首次启动需要30-60秒初始化...")
+        metabase_container = "xihong_erp_metabase"
+        try:
+            # 使用 dev profile 启动 Metabase（包含端口映射）
+            cmd = ["docker-compose"] + compose_files + ["--profile", "dev", "up", "-d", "metabase"]
+            result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=120, encoding='utf-8', errors='ignore')
+            
+            if result.returncode != 0:
+                error_msg = result.stderr or result.stdout or "未知错误"
+                safe_print(f"  [WARNING] Metabase启动失败: {error_msg[:200]}")
+                safe_print("  提示: Metabase是可选服务，系统仍可正常运行")
+                # 不阻止启动，仅警告
+            else:
+                # 验证容器是否在运行
+                safe_print("  [验证] 检查Metabase容器状态...")
+                time.sleep(3)
+                
+                max_retries = 10
+                for i in range(max_retries):
+                    if check_docker_container_running(metabase_container):
+                        safe_print(f"  [OK] Metabase容器正在运行（尝试 {i+1}/{max_retries}）")
+                        break
+                    else:
+                        status = get_docker_container_status(metabase_container)
+                        safe_print(f"  [等待] 容器状态: {status} (尝试 {i+1}/{max_retries})")
+                        if i < max_retries - 1:
+                            time.sleep(2)
+                
+                # 等待 Metabase 健康检查（首次启动需要更长时间）
+                safe_print("  [等待] Metabase服务初始化中（首次启动需要30-60秒）...")
+                max_health_retries = 20  # 最多等待3分钟（20 * 10秒）
+                metabase_healthy = False
+                
+                for i in range(max_health_retries):
+                    try:
+                        import urllib.request
+                        import urllib.error
+                        response = urllib.request.urlopen("http://localhost:8080/api/health", timeout=5)
+                        if response.status == 200:
+                            safe_print(f"  [OK] Metabase服务健康检查通过（尝试 {i+1}/{max_health_retries}）")
+                            metabase_healthy = True
+                            break
+                    except urllib.error.URLError:
+                        if i < max_health_retries - 1:
+                            if (i + 1) % 3 == 0:
+                                safe_print(f"  [等待] Metabase初始化中... (尝试 {i+1}/{max_health_retries})")
+                            time.sleep(10)
+                    except Exception:
+                        if i < max_health_retries - 1:
+                            time.sleep(10)
+                
+                if not metabase_healthy:
+                    safe_print("  [WARNING] Metabase健康检查超时（可能仍在初始化）")
+                    safe_print("  提示: 可以稍后访问 http://localhost:8080 检查状态")
+                    safe_print("  提示: 查看日志: docker logs xihong_erp_metabase")
+                else:
+                    safe_print("  [OK] Metabase服务已就绪")
+                    safe_print("  访问地址: http://localhost:8080")
+                    safe_print("  默认账号: admin@xihong.com / admin")
+                    
+        except Exception as e:
+            safe_print(f"  [WARNING] Metabase启动异常: {type(e).__name__}")
+            safe_print("  提示: Metabase是可选服务，系统仍可正常运行")
+        
         return True
     except FileNotFoundError:
         safe_print("  [ERROR] docker-compose 命令未找到")
@@ -820,9 +896,16 @@ def main():
         if not args.backend_only:
             safe_print("[前端] 主界面:   http://localhost:5173")
         
+        # [IMPROVE] 改进：在 Docker 模式下也检查 Metabase 状态
+        if args.use_docker:
+            # Docker 模式下，Metabase 可能已通过 start_services_with_docker_compose() 启动
+            metabase_running = check_metabase()
+        # 非 Docker 模式下，使用原有的 metabase_running 变量
+        
         if metabase_running:
             safe_print("[BI]   Metabase:  http://localhost:8080")
             safe_print("       账号: admin@xihong.com / admin")
+            safe_print("       用途: 配置SQL模型和问题，用于数据看板")
         
         safe_print("="*80)
         if args.use_docker:
