@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from datetime import date, datetime
 
 from backend.models.database import get_db, get_async_db
-from backend.utils.api_response import success_response, error_response, pagination_response
+from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import (
     SalesTarget,
@@ -161,7 +161,7 @@ async def list_targets(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
+    current_user: DimUser = Depends(get_current_user),  # 列表仅需登录可访问
 ):
     """
     查询目标列表
@@ -172,7 +172,7 @@ async def list_targets(
     try:
         query = select(SalesTarget)
         
-        # 筛选条件
+        # 筛选条件（与下面 count 查询保持一致）
         if target_type:
             query = query.where(SalesTarget.target_type == target_type)
         if status:
@@ -182,22 +182,39 @@ async def list_targets(
         if period_end:
             query = query.where(SalesTarget.period_end <= period_end)
         
-        # 总数查询
-        total_query = select(func.count()).select_from(query.subquery())
-        total = db.execute(total_query).scalar() or 0
+        # 总数查询：使用独立 count 避免子查询在部分驱动下的兼容性问题
+        count_query = select(func.count(SalesTarget.id)).select_from(SalesTarget)
+        if target_type:
+            count_query = count_query.where(SalesTarget.target_type == target_type)
+        if status:
+            count_query = count_query.where(SalesTarget.status == status)
+        if period_start:
+            count_query = count_query.where(SalesTarget.period_start >= period_start)
+        if period_end:
+            count_query = count_query.where(SalesTarget.period_end <= period_end)
+        total = (await db.execute(count_query)).scalar() or 0
         
         # 分页查询
         query = query.order_by(SalesTarget.created_at.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)
         
-        targets = db.execute(query).scalars().all()
+        targets = (await db.execute(query)).scalars().all()
         
-        return pagination_response(
-            data=[TargetResponse.from_orm(t).dict() for t in targets],
-            page=page,
-            page_size=page_size,
-            total=total
-        )
+        # 使用 mode='json' 确保日期/时间/Decimal 可序列化，避免 500
+        items = [TargetResponse.model_validate(t).model_dump(mode="json") for t in targets]
+        
+        # 返回 items + total，便于前端在拦截器只返回 data 时仍能拿到分页信息
+        return {
+            "success": True,
+            "data": {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            },
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"查询目标列表失败: {e}", exc_info=True)
         return error_response(
@@ -213,7 +230,7 @@ async def list_targets(
 async def get_target(
     target_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
+    current_user: DimUser = Depends(get_current_user),  # 详情仅需登录可访问
 ):
     """
     查询目标详情
@@ -222,9 +239,9 @@ async def get_target(
     """
     try:
         # 查询目标
-        target = db.execute(
+        target = (await db.execute(
             select(SalesTarget).where(SalesTarget.id == target_id)
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
         
         if not target:
             return error_response(
@@ -240,19 +257,19 @@ async def get_target(
             TargetBreakdown.target_id == target_id
         )
         
-        breakdowns = db.execute(breakdowns_query).scalars().all()
+        breakdowns = (await db.execute(breakdowns_query)).scalars().all()
         
         # 获取店铺名称
         breakdown_responses = []
         for breakdown in breakdowns:
-            breakdown_data = BreakdownResponse.from_orm(breakdown).dict()
+            breakdown_data = BreakdownResponse.model_validate(breakdown).model_dump()
             if breakdown.breakdown_type == "shop" and breakdown.platform_code and breakdown.shop_id:
-                dim_shop = db.execute(
+                dim_shop = (await db.execute(
                     select(DimShop).where(
                         DimShop.platform_code == breakdown.platform_code,
                         DimShop.shop_id == breakdown.shop_id
                     )
-                ).scalar_one_or_none()
+                )).scalar_one_or_none()
                 if dim_shop:
                     breakdown_data["shop_name"] = dim_shop.shop_name
             breakdown_responses.append(breakdown_data)
@@ -260,7 +277,7 @@ async def get_target(
         return {
             "success": True,
             "data": {
-                "target": TargetResponse.from_orm(target).dict(),
+                "target": TargetResponse.model_validate(target).model_dump(),
                 "breakdowns": breakdown_responses
             }
         }
@@ -322,9 +339,9 @@ async def create_target(
             from backend.services.event_listeners import event_listener
             
             # 获取受影响的店铺和平台（从分解中获取）
-            breakdowns = db.execute(
+            breakdowns = (await db.execute(
                 select(TargetBreakdown).where(TargetBreakdown.target_id == target.id)
-            ).scalars().all()
+            )).scalars().all()
             affected_shops = [bd.shop_id for bd in breakdowns if bd.shop_id]
             affected_platforms = list(set([bd.platform_code for bd in breakdowns if bd.platform_code]))
             
@@ -343,7 +360,7 @@ async def create_target(
         
         return {
             "success": True,
-            "data": TargetResponse.from_orm(target).dict(),
+            "data": TargetResponse.model_validate(target).model_dump(),
             "message": "目标创建成功"
         }
     except HTTPException:
@@ -374,9 +391,9 @@ async def update_target(
     只更新提供的字段
     """
     try:
-        target = db.execute(
+        target = (await db.execute(
             select(SalesTarget).where(SalesTarget.id == target_id)
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
         
         if not target:
             return error_response(
@@ -417,9 +434,9 @@ async def update_target(
             from backend.services.event_listeners import event_listener
             
             # 获取受影响的店铺和平台（从分解中获取）
-            breakdowns = db.execute(
+            breakdowns = (await db.execute(
                 select(TargetBreakdown).where(TargetBreakdown.target_id == target_id)
-            ).scalars().all()
+            )).scalars().all()
             affected_shops = [bd.shop_id for bd in breakdowns if bd.shop_id]
             affected_platforms = list(set([bd.platform_code for bd in breakdowns if bd.platform_code]))
             
@@ -438,7 +455,7 @@ async def update_target(
         
         return {
             "success": True,
-            "data": TargetResponse.from_orm(target).dict(),
+            "data": TargetResponse.model_validate(target).model_dump(),
             "message": "目标更新成功"
         }
     except HTTPException:
@@ -468,9 +485,9 @@ async def delete_target(
     同时删除关联的分解记录（CASCADE）
     """
     try:
-        target = db.execute(
+        target = (await db.execute(
             select(SalesTarget).where(SalesTarget.id == target_id)
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
         
         if not target:
             return error_response(
@@ -482,9 +499,9 @@ async def delete_target(
             )
         
         # 获取受影响的店铺和平台（删除前）
-        breakdowns = db.execute(
+        breakdowns = (await db.execute(
             select(TargetBreakdown).where(TargetBreakdown.target_id == target_id)
-        ).scalars().all()
+        )).scalars().all()
         affected_shops = [bd.shop_id for bd in breakdowns if bd.shop_id]
         affected_platforms = list(set([bd.platform_code for bd in breakdowns if bd.platform_code]))
         
@@ -544,9 +561,9 @@ async def create_breakdown(
     """
     try:
         # 验证目标存在
-        target = db.execute(
+        target = (await db.execute(
             select(SalesTarget).where(SalesTarget.id == target_id)
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
         
         if not target:
             return error_response(
@@ -569,12 +586,12 @@ async def create_breakdown(
                 )
             
             # 验证店铺存在
-            shop = db.execute(
+            shop = (await db.execute(
                 select(DimShop).where(
                     DimShop.platform_code == request.platform_code,
                     DimShop.shop_id == request.shop_id
                 )
-            ).scalar_one_or_none()
+            )).scalar_one_or_none()
             
             if not shop:
                 return error_response(
@@ -586,14 +603,14 @@ async def create_breakdown(
                 )
             
             # 检查是否已存在
-            existing = db.execute(
+            existing = (await db.execute(
                 select(TargetBreakdown).where(
                     TargetBreakdown.target_id == target_id,
                     TargetBreakdown.breakdown_type == "shop",
                     TargetBreakdown.platform_code == request.platform_code,
                     TargetBreakdown.shop_id == request.shop_id
                 )
-            ).scalar_one_or_none()
+            )).scalar_one_or_none()
             
             if existing:
                 return error_response(
@@ -659,14 +676,14 @@ async def create_breakdown(
         await db.commit()
         await db.refresh(breakdown)
         
-        breakdown_data = BreakdownResponse.from_orm(breakdown).dict()
+        breakdown_data = BreakdownResponse.model_validate(breakdown).model_dump()
         if request.breakdown_type == "shop":
-            shop = db.execute(
+            shop = (await db.execute(
                 select(DimShop).where(
                     DimShop.platform_code == request.platform_code,
                     DimShop.shop_id == request.shop_id
                 )
-            ).scalar_one_or_none()
+            )).scalar_one_or_none()
             if shop:
                 breakdown_data["shop_name"] = shop.shop_name
         
@@ -695,7 +712,7 @@ async def list_breakdowns(
     target_id: int,
     breakdown_type: Optional[str] = Query(None, description="分解类型筛选：shop/time"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
+    current_user: DimUser = Depends(get_current_user),  # 查询分解仅需登录
 ):
     """
     查询目标分解列表
@@ -708,19 +725,19 @@ async def list_breakdowns(
         if breakdown_type:
             query = query.where(TargetBreakdown.breakdown_type == breakdown_type)
         
-        breakdowns = db.execute(query).scalars().all()
+        breakdowns = (await db.execute(query)).scalars().all()
         
         # 获取店铺名称
         breakdown_responses = []
         for breakdown in breakdowns:
-            breakdown_data = BreakdownResponse.from_orm(breakdown).dict()
+            breakdown_data = BreakdownResponse.model_validate(breakdown).model_dump()
             if breakdown.breakdown_type == "shop" and breakdown.platform_code and breakdown.shop_id:
-                shop = db.execute(
+                shop = (await db.execute(
                     select(DimShop).where(
                         DimShop.platform_code == breakdown.platform_code,
                         DimShop.shop_id == breakdown.shop_id
                     )
-                ).scalar_one_or_none()
+                )).scalar_one_or_none()
                 if shop:
                     breakdown_data["shop_name"] = shop.shop_name
             breakdown_responses.append(breakdown_data)
@@ -760,7 +777,7 @@ async def calculate_target_achievement(
         result = service.calculate_target_achievement(target_id)
         
         return success_response(
-            data=TargetResponse.from_orm(result["target"]).dict(),
+            data=TargetResponse.model_validate(result["target"]).model_dump(),
             message="达成情况计算完成"
         )
     except ValueError as e:

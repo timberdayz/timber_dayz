@@ -13,10 +13,44 @@
       </div>
     </div>
 
-    <!-- 核心KPI指标卡片（6个） -->
-    <div class="kpi-cards" v-loading="loadingKPI">
-      <el-row :gutter="20">
-        <el-col :xs="24" :sm="12" :md="8" :lg="4" v-for="kpi in kpiData" :key="kpi.key">
+    <!-- 核心KPI指标卡片 -->
+    <div class="kpi-section">
+      <!-- KPI 筛选器 -->
+      <div class="kpi-filters">
+        <span class="filter-label">核心KPI指标</span>
+        <el-date-picker
+          v-model="kpiMonth"
+          type="month"
+          format="YYYY-MM"
+          value-format="YYYY-MM-01"
+          placeholder="选择月份"
+          size="small"
+          style="width: 140px"
+          @change="onKpiFilterChange"
+        />
+        <el-select
+          v-model="kpiPlatform"
+          placeholder="全部平台"
+          clearable
+          size="small"
+          style="width: 120px"
+          @change="onKpiFilterChange"
+        >
+          <el-option label="全部平台" value="" />
+          <el-option label="Shopee" value="shopee" />
+          <el-option label="TikTok" value="tiktok" />
+          <el-option label="妙手" value="miaoshou" />
+        </el-select>
+        <el-button size="small" @click="onKpiFilterChange" :loading="loadingKPI">
+          <el-icon><Refresh /></el-icon>
+          刷新
+        </el-button>
+      </div>
+      
+      <!-- KPI 卡片 -->
+      <div class="kpi-cards" v-loading="loadingKPI">
+        <el-row :gutter="20">
+          <el-col :xs="24" :sm="12" :md="8" :lg="4" v-for="kpi in kpiData" :key="kpi.key">
           <el-card class="kpi-card" shadow="hover">
             <div class="kpi-content">
               <div class="kpi-icon" :class="kpi.iconClass">
@@ -33,7 +67,8 @@
             </div>
           </el-card>
         </el-col>
-      </el-row>
+        </el-row>
+      </div>
     </div>
 
     <!-- 经营指标表格（门店经营） -->
@@ -529,6 +564,10 @@ const loadingKPI = ref(false)
 const loadingComparison = ref(false)
 const loadingInventory = ref(false)
 
+// KPI 筛选参数
+const kpiMonth = ref(new Date())  // 默认当前月份
+const kpiPlatform = ref('')  // 默认全部平台
+
 // KPI数据
 const kpiData = ref([
   {
@@ -858,58 +897,85 @@ const getTimeGapTagType = (gap) => {
   return 'info'
 }
 
+// 核心KPI 筛选变化时同时刷新 KPI 与经营指标
+const onKpiFilterChange = () => {
+  loadKPIData()
+  loadOperationalMetrics()
+}
+
 // 加载KPI数据
 const loadKPIData = async () => {
   loadingKPI.value = true
   try {
-    const today = new Date()
-    const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate())
+    // 格式化月份参数
+    let monthStr = ''
+    if (kpiMonth.value) {
+      const date = new Date(kpiMonth.value)
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      monthStr = `${year}-${month}-01`
+    }
     
     const response = await api.getBusinessOverviewKPI({
-      start_date: lastMonth.toISOString().split('T')[0],
-      end_date: today.toISOString().split('T')[0]
+      month: monthStr,
+      platform: kpiPlatform.value || undefined  // 空字符串时不传递
     })
     
     // 响应拦截器已处理success字段，直接使用data
     if (response) {
       const data = response
-      
-      // 更新转化率
-      kpiData.value[0].value = formatPercent(data.conversion_rate?.current)
-      kpiData.value[0].change = data.conversion_rate?.change ? `${data.conversion_rate.change > 0 ? '+' : ''}${formatPercent(Math.abs(data.conversion_rate.change))}` : '--'
-      kpiData.value[0].changeType = getChangeType(data.conversion_rate?.change)
-      kpiData.value[0].changeIcon = getChangeIcon(data.conversion_rate?.change)
-      
-      // 更新客流量
-      kpiData.value[1].value = data.traffic?.current ? Number(data.traffic.current).toLocaleString() : '--'
-      kpiData.value[1].change = data.traffic?.change ? `${data.traffic.change > 0 ? '+' : ''}${(data.traffic.change * 100).toFixed(2)}%` : '--'
-      kpiData.value[1].changeType = getChangeType(data.traffic?.change)
-      kpiData.value[1].changeIcon = getChangeIcon(data.traffic?.change)
-      
-      // 更新客单价
-      kpiData.value[2].value = formatCurrency(data.average_order_value?.current)
-      kpiData.value[2].change = data.average_order_value?.change ? `${data.average_order_value.change > 0 ? '+' : ''}${formatPercent(Math.abs(data.average_order_value.change))}` : '--'
-      kpiData.value[2].changeType = getChangeType(data.average_order_value?.change)
-      kpiData.value[2].changeIcon = getChangeIcon(data.average_order_value?.change)
-      
-      // 更新连带率
-      kpiData.value[3].value = data.attach_rate?.current ? Number(data.attach_rate.current).toFixed(2) : '--'
-      kpiData.value[3].change = data.attach_rate?.change ? `${data.attach_rate.change > 0 ? '+' : ''}${(data.attach_rate.change * 100).toFixed(2)}%` : '--'
-      kpiData.value[3].changeType = getChangeType(data.attach_rate?.change)
-      kpiData.value[3].changeIcon = getChangeIcon(data.attach_rate?.change)
-      
-      // 更新人效（如果有数据）
-      if (data.labor_efficiency?.current !== null && data.labor_efficiency?.current !== undefined) {
-        kpiData.value[4].value = formatCurrency(data.labor_efficiency.current)
-        kpiData.value[4].change = data.labor_efficiency.change ? `${data.labor_efficiency.change > 0 ? '+' : ''}${formatPercent(Math.abs(data.labor_efficiency.change))}` : '--'
-        kpiData.value[4].changeType = getChangeType(data.labor_efficiency.change)
-        kpiData.value[4].changeIcon = getChangeIcon(data.labor_efficiency.change)
-      } else {
-        kpiData.value[4].value = '暂无数据'
-        kpiData.value[4].change = '--'
+      // 环比展示：有数值时格式化为 +x.xx% / -x.xx%，否则显示 --
+      const formatChange = (num) => {
+        if (num === null || num === undefined) return '--'
+        const n = Number(num)
+        if (Number.isNaN(n)) return '--'
+        return (n > 0 ? '+' : '') + n.toFixed(2) + '%'
       }
-      
-      // 销售单数会在loadOperationalMetrics中更新
+      // 主值展示：0 也显示，仅无数据时显示 --
+      const showValue = (v, formatter) => (v != null && v !== '') ? formatter(Number(v)) : '--'
+
+      // 转化率（索引0）
+      const conversionRate = data.conversion_rate
+      kpiData.value[0].value = showValue(conversionRate, (n) => `${n.toFixed(2)}%`)
+      kpiData.value[0].change = formatChange(data.conversion_rate_change)
+      kpiData.value[0].changeType = getChangeType(data.conversion_rate_change)
+      kpiData.value[0].changeIcon = getChangeIcon(data.conversion_rate_change)
+
+      // 客流量/访客数（索引1）
+      const visitorCount = data.visitor_count ?? data.traffic?.current
+      kpiData.value[1].value = showValue(visitorCount, (n) => formatInteger(n))
+      kpiData.value[1].change = formatChange(data.visitor_count_change)
+      kpiData.value[1].changeType = getChangeType(data.visitor_count_change)
+      kpiData.value[1].changeIcon = getChangeIcon(data.visitor_count_change)
+
+      // 客单价（索引2）
+      const avgOrderValue = data.avg_order_value ?? data.average_order_value?.current
+      kpiData.value[2].value = showValue(avgOrderValue, (n) => formatCurrency(n))
+      kpiData.value[2].change = formatChange(data.avg_order_value_change)
+      kpiData.value[2].changeType = getChangeType(data.avg_order_value_change)
+      kpiData.value[2].changeIcon = getChangeIcon(data.avg_order_value_change)
+
+      // GMV（索引3）
+      const gmv = data.gmv
+      kpiData.value[3].title = 'GMV'
+      kpiData.value[3].value = showValue(gmv, (n) => formatCurrency(n))
+      kpiData.value[3].change = formatChange(data.gmv_change)
+      kpiData.value[3].changeType = getChangeType(data.gmv_change)
+      kpiData.value[3].changeIcon = getChangeIcon(data.gmv_change)
+      kpiData.value[3].icon = 'Wallet'
+      kpiData.value[3].iconClass = 'kpi-gmv'
+
+      // 订单数（索引4）
+      const orderCount = data.order_count
+      kpiData.value[4].title = '订单数'
+      kpiData.value[4].value = showValue(orderCount, (n) => formatInteger(n))
+      kpiData.value[4].change = formatChange(data.order_count_change)
+      kpiData.value[4].changeType = getChangeType(data.order_count_change)
+      kpiData.value[4].changeIcon = getChangeIcon(data.order_count_change)
+      kpiData.value[4].icon = 'Document'
+      kpiData.value[4].iconClass = 'kpi-orders'
+
+      // 索引5：销售单数（由经营指标或其它接口更新）
     }
   } catch (error) {
     console.error('加载KPI数据失败:', error)
@@ -1148,11 +1214,21 @@ const loadShopRacingData = async () => {
   }
 }
 
-// 加载经营指标数据
+// 加载经营指标数据（与核心KPI使用相同月份、平台）
 const loadOperationalMetrics = async () => {
   loadingOperational.value = true
   try {
-    const response = await api.getBusinessOverviewOperationalMetrics()
+    let monthStr = ''
+    if (kpiMonth.value) {
+      const date = new Date(kpiMonth.value)
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      monthStr = `${year}-${month}-01`
+    }
+    const response = await api.getBusinessOverviewOperationalMetrics({
+      month: monthStr || undefined,
+      platform: kpiPlatform.value || undefined
+    })
     
     // 响应拦截器已处理success字段，直接使用data
     if (response) {
@@ -1340,8 +1416,30 @@ onMounted(() => {
   gap: 12px;
 }
 
-.kpi-cards {
+.kpi-section {
   margin-bottom: 24px;
+}
+
+.kpi-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.filter-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+  margin-right: 8px;
+}
+
+.kpi-cards {
+  /* margin-bottom: 24px; */
 }
 
 .kpi-card {
@@ -1395,6 +1493,10 @@ onMounted(() => {
 
 .kpi-icon.kpi-orders {
   background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);
+}
+
+.kpi-icon.kpi-gmv {
+  background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
 }
 
 .kpi-info {

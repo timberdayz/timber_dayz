@@ -1894,8 +1894,13 @@ export default {
   // ========== 业务概览API（v4.11.0新增） ==========
   
   // 获取业务概览5个核心KPI指标
+  // v4.x.x 更新：支持 month 和 platform 参数
   async getBusinessOverviewKPI(params = {}) {
     const queryParams = new URLSearchParams();
+    // 新参数：月份（格式：YYYY-MM-DD）和平台筛选
+    if (params.month) queryParams.append("month", params.month);
+    if (params.platform) queryParams.append("platform", params.platform);
+    // 保留旧参数用于兼容
     if (params.platforms) queryParams.append("platforms", params.platforms);
     if (params.shops) queryParams.append("shops", params.shops);
     if (params.start_date) queryParams.append("start_date", params.start_date);
@@ -1960,12 +1965,11 @@ export default {
     );
   },
   
-  // 获取经营指标数据（门店经营表格）
+  // 获取经营指标数据（与核心KPI同参数：month YYYY-MM-01，platform）
   async getBusinessOverviewOperationalMetrics(params = {}) {
     const queryParams = new URLSearchParams();
-    if (params.date) queryParams.append("date", params.date);
-    if (params.platforms) queryParams.append("platforms", params.platforms);
-    if (params.shops) queryParams.append("shops", params.shops);
+    if (params.month) queryParams.append("month", params.month);
+    if (params.platform) queryParams.append("platform", params.platform);
     const queryString = queryParams.toString();
     return await this._get(
       `/dashboard/business-overview/operational-metrics${

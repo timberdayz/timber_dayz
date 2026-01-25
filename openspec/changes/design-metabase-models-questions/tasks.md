@@ -7,35 +7,41 @@
 **Metabase 官方警告**：
 > "The embedded H2 database is for development and evaluation purposes only. For production deployments, use PostgreSQL or MySQL."
 
-### 0.1 创建 Metabase 应用数据库
+### 0.1 创建 Metabase 应用数据库 ✅ 已完成
 
-- [ ] 0.1.1 修改 `docker/init/01-init.sql`
-  - 添加 `CREATE DATABASE metabase_app;`
-  - 授权 `GRANT ALL PRIVILEGES ON DATABASE metabase_app TO erp_user;`
+- [x] 0.1.1 修改 `docker/postgres/init.sql` ✅
+  - ✅ 添加 `CREATE DATABASE metabase_app;`
+  - ✅ 授权 `GRANT ALL PRIVILEGES ON DATABASE metabase_app TO erp_user;`
+  - ✅ 添加详细注释说明数据库用途
 
-### 0.2 修改 Docker Compose 配置
+### 0.2 修改 Docker Compose 配置 ✅ 已完成
 
-- [ ] 0.2.1 修改 `docker-compose.metabase.yml`
-  - 将 `MB_DB_TYPE: h2` 改为 `MB_DB_TYPE: postgres`
-  - 添加 `MB_DB_HOST`, `MB_DB_PORT`, `MB_DB_DBNAME`, `MB_DB_USER`, `MB_DB_PASS`
-  - 移除 `MB_DB_FILE` 配置
+- [x] 0.2.1 修改 `docker-compose.metabase.yml` ✅
+  - ✅ 将 `MB_DB_TYPE: h2` 改为 `MB_DB_TYPE: postgres`
+  - ✅ 添加 `MB_DB_HOST`, `MB_DB_PORT`, `MB_DB_DBNAME`, `MB_DB_USER`, `MB_DB_PASS`
+  - ✅ 移除 `MB_DB_FILE` 配置
+  - ✅ 添加详细的配置说明和架构图
 
 - [ ] 0.2.2 修改 `docker-compose.prod.yml`（如有单独 Metabase 配置）
-  - 确保生产环境使用 PostgreSQL 配置
+  - 确保生产环境使用 PostgreSQL 配置（需检查是否有单独配置）
 
-### 0.3 更新环境变量
+### 0.3 更新环境变量 ✅ 已完成
 
-- [ ] 0.3.1 更新 `env.example`
-  - 添加 `METABASE_DB_USER`, `METABASE_DB_PASS` 变量
-  - 添加注释说明
+- [x] 0.3.1 更新 `env.example` ✅
+  - ✅ 添加 `METABASE_DB_HOST`, `METABASE_DB_PORT`, `METABASE_DB_DBNAME` 变量
+  - ✅ 添加 `METABASE_DB_USER`, `METABASE_DB_PASS` 变量
+  - ✅ 添加官方警告注释说明
+  - ✅ 标记 Question ID 配置为"已废弃，保留用于向后兼容"
 
-- [ ] 0.3.2 更新 `env.production.example`
-  - 确保生产环境变量模板完整
+- [x] 0.3.2 更新 `env.production.example` ✅
+  - ✅ 添加 Metabase PostgreSQL 环境变量
+  - ✅ 添加密钥生成命令说明
+  - ✅ 确保生产环境变量模板完整
 
-### 0.4 验证和测试
+### 0.4 验证和测试 ⏳ 待执行
 
 - [ ] 0.4.1 本地测试
-  - 重建 Docker 容器
+  - 重建 Docker 容器（需先删除旧的 metabase_data 卷）
   - 验证 Metabase 正常启动
   - 验证数据源连接正常
   - 验证 Models/Questions 能正常创建
@@ -240,23 +246,25 @@
   - **返回格式**：多行数据，每行一个商品，包含排名
   - **后端API**：`GET /api/dashboard/clearance-ranking`
 
-## 4. 部署架构实现 [TODO]
+## 4. 部署架构实现 ✅ 部分完成
 
-### 4.1 创建配置清单
+### 4.1 创建配置清单 ✅ 已完成
 
-- [ ] 4.1.1 创建 `config/metabase_config.yaml`
-  - 定义所有 Models 配置（名称、SQL文件路径、描述）
-  - 定义所有 Questions 配置（名称、显示名、SQL文件路径、参数）
-  - 定义数据库连接配置
+- [x] 4.1.1 创建 `config/metabase_config.yaml` ✅
+  - ✅ 定义所有 Models 配置（名称、SQL文件路径、描述）
+  - ✅ 定义所有 Questions 配置（名称、显示名、SQL文件路径、参数）
+  - ✅ 定义数据库连接配置
+  - ✅ 定义 Collection 组织结构
 
-### 4.2 创建初始化脚本
+### 4.2 创建初始化脚本 ✅ 已完成
 
-- [ ] 4.2.1 创建 `scripts/init_metabase.py`
-  - 实现 MetabaseInitializer 类
-  - 实现幂等操作（存在则更新，不存在则创建）
-  - 通过名称查找 Model/Question
-  - 支持 API Key 认证
-  - 添加错误处理和日志
+- [x] 4.2.1 创建 `scripts/init_metabase.py` ✅
+  - ✅ 实现 MetabaseInitializer 类
+  - ✅ 实现幂等操作（存在则更新，不存在则创建）
+  - ✅ 通过名称查找 Model/Question
+  - ✅ 支持 API Key 认证
+  - ✅ 添加错误处理和日志
+  - ✅ 支持 --dry-run 和 --verbose 参数
 
 ### 4.3 修改 MetabaseQuestionService
 
@@ -283,17 +291,17 @@
   - 移除 Question ID 环境变量
   - 添加注释说明
 
-### 4.6 创建 Question SQL 文件目录
+### 4.6 创建 Question SQL 文件目录 ✅ 已完成
 
-- [ ] 4.6.1 创建 `sql/metabase_questions/` 目录
-- [ ] 4.6.2 创建 Question SQL 模板文件
-  - business_overview_kpi.sql
-  - business_overview_comparison.sql
-  - business_overview_shop_racing.sql
-  - business_overview_traffic_ranking.sql
-  - business_overview_inventory_backlog.sql
-  - business_overview_operational_metrics.sql
-  - clearance_ranking.sql
+- [x] 4.6.1 创建 `sql/metabase_questions/` 目录 ✅
+- [x] 4.6.2 创建 Question SQL 模板文件 ✅
+  - ✅ business_overview_kpi.sql
+  - ✅ business_overview_comparison.sql
+  - ✅ business_overview_shop_racing.sql
+  - ✅ business_overview_traffic_ranking.sql
+  - ✅ business_overview_inventory_backlog.sql
+  - ✅ business_overview_operational_metrics.sql
+  - ✅ clearance_ranking.sql
 
 ## 5. 测试和验证 [TODO]
 

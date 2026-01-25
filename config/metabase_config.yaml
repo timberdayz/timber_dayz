@@ -1,0 +1,296 @@
+# =====================================================
+# Metabase 配置清单
+# =====================================================
+# 用途：定义所有 Models 和 Questions 的配置
+# 使用方式：scripts/init_metabase.py 读取此文件自动创建/更新 Metabase 配置
+# 
+# 设计原则：
+# - 通过名称（name）唯一标识 Model/Question，而非 ID
+# - 支持幂等操作：存在则更新，不存在则创建
+# - SQL 文件存储在 sql/metabase_models/ 和 sql/metabase_questions/
+# =====================================================
+
+# ==================== 数据库配置 ====================
+database:
+  name: "xihong_erp"
+  engine: postgres
+  # 连接信息从环境变量读取，这里只定义名称用于匹配
+  # 注意：此名称必须与 Metabase 中配置的数据源名称完全一致
+
+# ==================== Metabase Models（B类数据模型） ====================
+# Models 是预定义的 SQL 查询，可以被 Questions 引用
+# 每个 Model 对应一个数据域
+models:
+  # -------------------- Analytics Model --------------------
+  - name: "Analytics Model"
+    description: "分析数据域模型 - 整合访客数、浏览量、转化率等流量分析数据"
+    sql_file: "sql/metabase_models/analytics_model.sql"
+    collection: "B类数据模型"
+    tags:
+      - analytics
+      - traffic
+      - b_class
+
+  # -------------------- Orders Model --------------------
+  - name: "Orders Model"
+    description: "订单数据域模型 - 整合销售额、订单数、买家数等订单数据"
+    sql_file: "sql/metabase_models/orders_model.sql"
+    collection: "B类数据模型"
+    tags:
+      - orders
+      - sales
+      - b_class
+
+  # -------------------- Products Model --------------------
+  - name: "Products Model"
+    description: "产品数据域模型 - 整合产品ID、SKU、产品名称等产品数据"
+    sql_file: "sql/metabase_models/products_model.sql"
+    collection: "B类数据模型"
+    tags:
+      - products
+      - sku
+      - b_class
+
+  # -------------------- Inventory Model --------------------
+  - name: "Inventory Model"
+    description: "库存数据域模型 - 整合库存数量、仓库信息等库存快照数据"
+    sql_file: "sql/metabase_models/inventory_model.sql"
+    collection: "B类数据模型"
+    tags:
+      - inventory
+      - stock
+      - b_class
+
+  # -------------------- Services Model --------------------
+  - name: "Services Model"
+    description: "服务数据域模型 - 整合客服聊天、AI助手等服务数据"
+    sql_file: "sql/metabase_models/services_model.sql"
+    collection: "B类数据模型"
+    tags:
+      - services
+      - customer_service
+      - b_class
+
+# ==================== Metabase Questions（C类数据实时计算） ====================
+# Questions 是参数化的 SQL 查询，用于前端数据展示
+# 支持动态参数：{{variable}} 语法
+questions:
+  # -------------------- 业务概览页面 Questions（P0 - 必须） --------------------
+  
+  # 核心KPI指标
+  - name: "business_overview_kpi"
+    display_name: "业务概览 - 核心KPI指标"
+    description: "提供业务概览页面的核心KPI指标（GMV、订单数、访客数、转化率、客单价）- 全公司月度汇总"
+    sql_file: "sql/metabase_questions/business_overview_kpi.sql"
+    collection: "C类数据报表/业务概览"
+    parameters:
+      - name: month
+        display_name: "月份"
+        type: date
+        required: true
+      - name: platform
+        display_name: "平台"
+        type: text
+        required: false
+    tags:
+      - kpi
+      - business_overview
+      - c_class
+
+  # 数据对比
+  - name: "business_overview_comparison"
+    display_name: "业务概览 - 数据对比"
+    description: "提供日/周/月度数据对比（同比、环比）"
+    sql_file: "sql/metabase_questions/business_overview_comparison.sql"
+    collection: "C类数据报表/业务概览"
+    parameters:
+      - name: granularity
+        display_name: "粒度"
+        type: text
+        required: true
+        default: "daily"
+      - name: date
+        display_name: "日期"
+        type: date
+        required: true
+      - name: platforms
+        display_name: "平台"
+        type: text
+        required: false
+      - name: shops
+        display_name: "店铺"
+        type: text
+        required: false
+    tags:
+      - comparison
+      - business_overview
+      - c_class
+
+  # 店铺赛马
+  - name: "business_overview_shop_racing"
+    display_name: "业务概览 - 店铺赛马"
+    description: "店铺/平台排名对比（GMV排序）"
+    sql_file: "sql/metabase_questions/business_overview_shop_racing.sql"
+    collection: "C类数据报表/业务概览"
+    parameters:
+      - name: granularity
+        display_name: "粒度"
+        type: text
+        required: true
+        default: "daily"
+      - name: date
+        display_name: "日期"
+        type: date
+        required: true
+      - name: group_by
+        display_name: "分组维度"
+        type: text
+        required: false
+        default: "shop"
+      - name: platforms
+        display_name: "平台"
+        type: text
+        required: false
+    tags:
+      - shop_racing
+      - ranking
+      - business_overview
+      - c_class
+
+  # 流量排名
+  - name: "business_overview_traffic_ranking"
+    display_name: "业务概览 - 流量排名"
+    description: "流量相关指标排名（访客数、浏览量）"
+    sql_file: "sql/metabase_questions/business_overview_traffic_ranking.sql"
+    collection: "C类数据报表/业务概览"
+    parameters:
+      - name: granularity
+        display_name: "粒度"
+        type: text
+        required: true
+        default: "daily"
+      - name: dimension
+        display_name: "维度"
+        type: text
+        required: false
+        default: "shop"
+      - name: date
+        display_name: "日期"
+        type: date
+        required: true
+      - name: platforms
+        display_name: "平台"
+        type: text
+        required: false
+      - name: shops
+        display_name: "店铺"
+        type: text
+        required: false
+    tags:
+      - traffic
+      - ranking
+      - business_overview
+      - c_class
+
+  # 库存积压
+  - name: "business_overview_inventory_backlog"
+    display_name: "业务概览 - 库存积压"
+    description: "库存积压分析（积压商品、积压天数）"
+    sql_file: "sql/metabase_questions/business_overview_inventory_backlog.sql"
+    collection: "C类数据报表/业务概览"
+    parameters:
+      - name: days
+        display_name: "积压天数阈值"
+        type: number
+        required: false
+        default: 30
+      - name: platforms
+        display_name: "平台"
+        type: text
+        required: false
+      - name: shops
+        display_name: "店铺"
+        type: text
+        required: false
+    tags:
+      - inventory
+      - backlog
+      - business_overview
+      - c_class
+
+  # 经营指标（与核心KPI同参数：month、platform）
+  - name: "business_overview_operational_metrics"
+    display_name: "业务概览 - 经营指标"
+    description: "月目标、达成率、时间GAP、费用、毛利（A类+Orders Model），与核心KPI同参数"
+    sql_file: "sql/metabase_questions/business_overview_operational_metrics.sql"
+    collection: "C类数据报表/业务概览"
+    parameters:
+      - name: month
+        display_name: "月份"
+        type: date
+        required: true
+      - name: platform
+        display_name: "平台"
+        type: text
+        required: false
+    tags:
+      - operational
+      - achievement_rate
+      - a_class_join
+      - business_overview
+      - c_class
+
+  # -------------------- 其他功能 Questions（P1 - 重要） --------------------
+  
+  # 清仓排名
+  - name: "clearance_ranking"
+    display_name: "清仓排名"
+    description: "清仓商品排名（滞销商品分析）"
+    sql_file: "sql/metabase_questions/clearance_ranking.sql"
+    collection: "C类数据报表/清仓管理"
+    parameters:
+      - name: start_date
+        display_name: "开始日期"
+        type: date
+        required: true
+      - name: end_date
+        display_name: "结束日期"
+        type: date
+        required: true
+      - name: platforms
+        display_name: "平台"
+        type: text
+        required: false
+      - name: shops
+        display_name: "店铺"
+        type: text
+        required: false
+      - name: limit
+        display_name: "返回数量"
+        type: number
+        required: false
+        default: 100
+    tags:
+      - clearance
+      - ranking
+      - products
+      - c_class
+
+# ==================== Collection 配置 ====================
+# Metabase Collection 用于组织 Models 和 Questions
+collections:
+  - name: "B类数据模型"
+    description: "B类数据（业务数据）的 Metabase Models"
+    parent: null
+    
+  - name: "C类数据报表"
+    description: "C类数据（计算数据）的 Metabase Questions"
+    parent: null
+    
+  - name: "C类数据报表/业务概览"
+    description: "业务概览页面相关 Questions"
+    parent: "C类数据报表"
+    
+  - name: "C类数据报表/清仓管理"
+    description: "清仓管理相关 Questions"
+    parent: "C类数据报表"

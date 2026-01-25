@@ -39,20 +39,20 @@
         <el-table-column prop="period_end" label="结束时间" width="120" />
         <el-table-column prop="target_amount" label="目标金额" width="150" align="right" sortable>
           <template #default="{ row }">
-            ¥{{ row.target_amount.toFixed(2) }}
+            ¥{{ (Number(row.target_amount) || 0).toFixed(2) }}
           </template>
         </el-table-column>
         <el-table-column prop="target_quantity" label="目标数量" width="120" align="right" sortable />
         <el-table-column prop="achieved_amount" label="达成金额" width="150" align="right" sortable>
           <template #default="{ row }">
-            ¥{{ row.achieved_amount.toFixed(2) }}
+            ¥{{ (Number(row.achieved_amount) || 0).toFixed(2) }}
           </template>
         </el-table-column>
         <el-table-column prop="achieved_quantity" label="达成数量" width="120" align="right" sortable />
         <el-table-column prop="achievement_rate" label="达成率" width="120" sortable>
           <template #default="{ row }">
-            <el-tag :type="row.achievement_rate >= 90 ? 'success' : row.achievement_rate >= 80 ? 'warning' : 'danger'" size="small">
-              {{ row.achievement_rate.toFixed(1) }}%
+            <el-tag :type="(Number(row.achievement_rate) || 0) >= 90 ? 'success' : (Number(row.achievement_rate) || 0) >= 80 ? 'warning' : 'danger'" size="small">
+              {{ (Number(row.achievement_rate) || 0).toFixed(1) }}%
             </el-tag>
           </template>
         </el-table-column>
@@ -307,14 +307,32 @@ import { formatCurrency, formatNumber, formatPercent, formatInteger } from '@/ut
 
 const userStore = useUserStore()
 
-// 权限检查
+// 角色代码规范化（中文 → 英文）
+const normalizeRoleCode = (role) => {
+  if (!role) return ''
+  const map = { '管理员': 'admin', '主管': 'manager', '经理': 'manager', '操作员': 'operator', '运营': 'operator', '财务': 'finance' }
+  return map[role] || role
+}
+
+// 权限检查 - 使用系统统一权限架构（基于 activeRole + permissions）
 const hasPermission = (permission) => {
-  const user = userStore.userInfo
-  if (!user) return false
-  if (user.role === 'admin') return true
-  if (user.role === 'manager') {
-    return ['target:create', 'target:update', 'target:read', 'target:export'].includes(permission)
+  // 获取当前激活的角色（与 SimpleAccountSwitcher 保持一致）
+  const activeRole = normalizeRoleCode(localStorage.getItem('activeRole'))
+  
+  // 管理员拥有所有目标管理权限
+  if (activeRole === 'admin') return true
+  
+  // 检查用户是否拥有管理员角色（即使不是当前激活角色）
+  const userRoles = (userStore.roles || []).map(normalizeRoleCode)
+  if (userRoles.includes('admin')) return true
+  
+  // 主管角色的目标管理权限（根据权限矩阵，主管不能访问目标管理）
+  // 但保留只读权限作为防御性设计
+  if (activeRole === 'manager') {
+    return ['target:read', 'target:export'].includes(permission)
   }
+  
+  // 其他角色只有只读权限
   return permission === 'target:read'
 }
 
@@ -433,16 +451,23 @@ const loadTargets = async () => {
       page_size: targets.pageSize
     })
     
-    // 处理分页响应
+    // 处理分页响应（后端返回 { items, total, page, page_size } 或兼容旧格式）
     if (response && Array.isArray(response)) {
       targets.data = response
       targets.total = response.length
+    } else if (response && typeof response === 'object' && 'items' in response) {
+      targets.data = response.items ?? []
+      targets.total = Number(response.total ?? 0)
+      if (response.page != null) targets.page = response.page
+      if (response.page_size != null) targets.pageSize = response.page_size
     } else {
-      targets.data = response?.data || response || []
-      targets.total = response?.total || 0
+      targets.data = response?.data ?? response ?? []
+      targets.total = Number(response?.total ?? response?.pagination?.total ?? 0)
     }
   } catch (error) {
     handleApiError(error, { showMessage: true, logError: true })
+    targets.data = []
+    targets.total = 0
   } finally {
     targets.loading = false
   }

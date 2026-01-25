@@ -263,14 +263,31 @@ import { formatCurrency, formatNumber, formatPercent, formatInteger } from '@/ut
 
 const userStore = useUserStore()
 
-// 权限检查
+// 角色代码规范化（中文 → 英文）
+const normalizeRoleCode = (role) => {
+  if (!role) return ''
+  const map = { '管理员': 'admin', '主管': 'manager', '经理': 'manager', '操作员': 'operator', '运营': 'operator', '财务': 'finance' }
+  return map[role] || role
+}
+
+// 权限检查 - 使用系统统一权限架构（基于 activeRole + permissions）
 const hasPermission = (permission) => {
-  const user = userStore.userInfo
-  if (!user) return false
-  if (user.role === 'admin') return true
-  if (user.role === 'manager') {
+  // 获取当前激活的角色（与 SimpleAccountSwitcher 保持一致）
+  const activeRole = normalizeRoleCode(localStorage.getItem('activeRole'))
+  
+  // 管理员拥有所有绩效管理权限
+  if (activeRole === 'admin') return true
+  
+  // 检查用户是否拥有管理员角色（即使不是当前激活角色）
+  const userRoles = (userStore.roles || []).map(normalizeRoleCode)
+  if (userRoles.includes('admin')) return true
+  
+  // 主管角色的绩效管理权限
+  if (activeRole === 'manager') {
     return ['performance:read', 'performance:export'].includes(permission)
   }
+  
+  // 其他角色只有只读权限
   return permission === 'performance:read'
 }
 

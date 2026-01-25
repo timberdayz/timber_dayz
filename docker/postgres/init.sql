@@ -9,6 +9,30 @@
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 
+-- ==================== 创建 Metabase 应用数据库 ====================
+-- Metabase 官方建议：生产环境必须使用 PostgreSQL/MySQL，不要使用 H2
+-- 参考：https://www.metabase.com/docs/latest/installation-and-operation/migrating-from-h2
+-- 
+-- metabase_app 数据库用于存储 Metabase 自己的配置：
+-- - Models、Questions、Dashboards
+-- - 用户账号和权限设置
+-- - 数据源连接配置
+-- 
+-- 注意：此数据库与业务数据库 xihong_erp 完全独立
+CREATE DATABASE metabase_app
+    WITH 
+    OWNER = erp_user
+    ENCODING = 'UTF8'
+    LC_COLLATE = 'en_US.utf8'
+    LC_CTYPE = 'en_US.utf8'
+    TEMPLATE = template0;
+
+COMMENT ON DATABASE metabase_app IS 'Metabase 应用数据库：存储 Metabase 自己的配置（Models、Questions、Dashboards、用户设置等）';
+
+-- 授权 erp_user 完全访问 metabase_app 数据库
+GRANT ALL PRIVILEGES ON DATABASE metabase_app TO erp_user;
+
+-- ==================== 连接到业务数据库 ====================
 -- 创建数据库（如果不存在）
 -- 注意：通过环境变量POSTGRES_DB已创建，这里仅确认
 

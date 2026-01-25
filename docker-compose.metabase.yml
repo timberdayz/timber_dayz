@@ -4,6 +4,27 @@
 # 用于DSS架构的BI层
 # 使用方式: docker-compose -f docker-compose.metabase.yml up -d
 # =====================================================
+#
+# [重要] Metabase 应用数据库配置说明：
+# 
+# 生产环境必须使用 PostgreSQL，不要使用 H2！
+# Metabase 官方警告：
+# "The embedded H2 database is for development and evaluation purposes only.
+#  For production deployments, use PostgreSQL or MySQL."
+#
+# 本配置使用 PostgreSQL 作为 Metabase 应用数据库，支持：
+# - 50-100+ 并发用户同时操作
+# - 热备份（pg_dump）
+# - 事务保护，数据安全
+# - 高可用部署
+#
+# Metabase 数据架构：
+# ┌─────────────────────────────────────────────────────┐
+# │  PostgreSQL 容器                                     │
+# │  ├── xihong_erp      # 业务数据库（Metabase 数据源）│
+# │  └── metabase_app    # Metabase 应用数据库          │
+# └─────────────────────────────────────────────────────┘
+# =====================================================
 
 services:
   # ==================== Metabase BI服务 ====================
@@ -11,9 +32,17 @@ services:
     image: metabase/metabase:latest
     container_name: xihong_erp_metabase
     environment:
-      # 数据库配置（Metabase内部数据库，使用H2）
-      MB_DB_TYPE: h2
-      MB_DB_FILE: /metabase-data/metabase.db
+      # ==================== 应用数据库配置（PostgreSQL） ====================
+      # Metabase 使用此数据库存储自己的配置：
+      # - Models、Questions、Dashboards
+      # - 用户账号和权限设置
+      # - 数据源连接配置
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: ${METABASE_DB_HOST:-postgres}
+      MB_DB_PORT: ${METABASE_DB_PORT:-5432}
+      MB_DB_DBNAME: ${METABASE_DB_DBNAME:-metabase_app}
+      MB_DB_USER: ${METABASE_DB_USER:-erp_user}
+      MB_DB_PASS: ${METABASE_DB_PASS:-erp_pass_2025}
 
       # 应用配置
       MB_ENCRYPTION_SECRET_KEY: ${METABASE_ENCRYPTION_SECRET_KEY:-change-this-encryption-key-in-production}
@@ -40,6 +69,8 @@ services:
     # 生产最小端口暴露：默认不映射宿主机端口（通过 nginx 反向代理 /metabase/ 访问）
     # 如需本地开发直连 Metabase，请使用 docker-compose.metabase.dev.yml 添加 8080:3000 端口映射
 
+    # 注意：使用 PostgreSQL 后，不再需要 metabase_data 卷存储 H2 文件
+    # 但保留卷用于日志和临时文件
     volumes:
       - metabase_data:/metabase-data
       - ./logs/metabase:/logs

@@ -127,6 +127,24 @@ class MetabaseQuestionService:
         """
         metabase_params = []
         
+        # 月份参数（用于核心KPI等月度筛选）
+        # 格式：YYYY-MM-DD（月初日期）
+        if params.get("month"):
+            metabase_params.append({
+                "type": "date",
+                "target": ["variable", ["template-tag", "month"]],
+                "value": params["month"]
+            })
+        
+        # 单平台参数（用于核心KPI的平台筛选，可选）
+        # 注意：与 platforms 不同，这是单个平台代码
+        if params.get("platform"):
+            metabase_params.append({
+                "type": "text",
+                "target": ["variable", ["template-tag", "platform"]],
+                "value": params["platform"]
+            })
+        
         # 日期范围参数
         if params.get("start_date"):
             metabase_params.append({
@@ -258,42 +276,89 @@ class MetabaseQuestionService:
         
         # 先转换为字典列表格式（基础转换）
         result_list = []
-        for row in rows:
-            row_dict = {}
-            for idx, col in enumerate(cols):
-                col_name = col.get("name") or col.get("display_name", f"col_{idx}")
-                row_dict[col_name] = row[idx] if idx < len(row) else None
-            result_list.append(row_dict)
+        
+        # ⭐ 修复：Metabase /api/card/{id}/query/json 返回的是字典列表
+        # 如果 rows 中的元素已经是字典，直接使用它们
+        if rows and isinstance(rows[0], dict):
+            # 已经是字典列表格式，直接使用
+            result_list = rows
+            logger.debug(f"[_convert_response] 使用字典列表格式，行数: {len(result_list)}")
+        else:
+            # 需要用 cols 来映射列名（传统的 data.rows + data.cols 格式）
+            for row in rows:
+                row_dict = {}
+                for idx, col in enumerate(cols):
+                    col_name = col.get("name") or col.get("display_name", f"col_{idx}")
+                    row_dict[col_name] = row[idx] if idx < len(row) else None
+                result_list.append(row_dict)
+            logger.debug(f"[_convert_response] 使用 cols 映射格式，行数: {len(result_list)}")
         
         # ⭐ 根据question_key进行特定格式转换
         if question_key == "business_overview_kpi":
-            # KPI数据：转换为单个对象，包含嵌套对象（current/change格式）
+            # KPI数据：转换为单个对象
+            # Metabase SQL 返回：GMV(元), 订单数, 访客数, 转化率(%), 客单价(元) + 5 个环比列
             if result_list and len(result_list) > 0:
                 first_row = result_list[0]
+                
+                # 提取本月指标（支持中文和英文字段名）
+                gmv = first_row.get("GMV(元)") or first_row.get("gmv") or first_row.get("total_gmv") or 0
+                order_count = first_row.get("订单数") or first_row.get("order_count") or first_row.get("total_orders") or 0
+                visitor_count = first_row.get("访客数") or first_row.get("visitor_count") or first_row.get("total_visitors") or 0
+                conversion_rate = first_row.get("转化率(%)") or first_row.get("conversion_rate") or 0
+                avg_order_value = first_row.get("客单价(元)") or first_row.get("avg_order_value") or first_row.get("average_order_value") or 0
+                
+                # 提取环比（SQL 返回 "GMV环比(%)" 等，上月为 0 时为 None）
+                def _num_or_none(v):
+                    if v is None:
+                        return None
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return None
+                gmv_change = _num_or_none(first_row.get("GMV环比(%)"))
+                order_count_change = _num_or_none(first_row.get("订单数环比(%)"))
+                visitor_count_change = _num_or_none(first_row.get("访客数环比(%)"))
+                conversion_rate_change = _num_or_none(first_row.get("转化率环比(%)"))
+                avg_order_value_change = _num_or_none(first_row.get("客单价环比(%)"))
+                
                 return {
-                    "conversion_rate": {
-                        "current": first_row.get("conversion_rate"),
-                        "change": first_row.get("conversion_rate_change")
-                    },
-                    "traffic": {
-                        "current": first_row.get("traffic"),
-                        "change": first_row.get("traffic_change")
-                    },
-                    "average_order_value": {
-                        "current": first_row.get("avg_order_value") or first_row.get("average_order_value"),
-                        "change": first_row.get("avg_order_value_change") or first_row.get("average_order_value_change")
-                    },
-                    "attach_rate": {
-                        "current": first_row.get("attach_rate"),
-                        "change": first_row.get("attach_rate_change")
-                    },
-                    "labor_efficiency": {
-                        "current": first_row.get("labor_efficiency"),
-                        "change": first_row.get("labor_efficiency_change")
-                    }
+                    # 核心 KPI 指标（直接返回数值）
+                    "gmv": gmv,
+                    "order_count": order_count,
+                    "visitor_count": visitor_count,
+                    "conversion_rate": conversion_rate,
+                    "avg_order_value": avg_order_value,
+                    # 环比（百分比数值，可为 None）
+                    "gmv_change": gmv_change,
+                    "order_count_change": order_count_change,
+                    "visitor_count_change": visitor_count_change,
+                    "conversion_rate_change": conversion_rate_change,
+                    "avg_order_value_change": avg_order_value_change,
+                    # 兼容旧格式（current/change）
+                    "traffic": {"current": visitor_count, "change": visitor_count_change},
+                    "average_order_value": {"current": avg_order_value, "change": avg_order_value_change},
+                    "conversion_rate_obj": {"current": conversion_rate, "change": conversion_rate_change},
+                    "attach_rate": {"current": None, "change": None},
+                    "labor_efficiency": {"current": None, "change": None},
                 }
             logger.warning(f"[{question_key}] 返回数据为空，返回空对象")
-            return {}
+            return {
+                "gmv": 0,
+                "order_count": 0,
+                "visitor_count": 0,
+                "conversion_rate": 0,
+                "avg_order_value": 0,
+                "gmv_change": None,
+                "order_count_change": None,
+                "visitor_count_change": None,
+                "conversion_rate_change": None,
+                "avg_order_value_change": None,
+                "traffic": {"current": 0, "change": None},
+                "average_order_value": {"current": 0, "change": None},
+                "conversion_rate_obj": {"current": 0, "change": None},
+                "attach_rate": {"current": None, "change": None},
+                "labor_efficiency": {"current": None, "change": None},
+            }
         
         elif question_key == "business_overview_comparison":
             # 对比数据：返回metrics对象（包含today/yesterday/average/change）
@@ -345,6 +410,55 @@ class MetabaseQuestionService:
                 return {"metrics": metrics}
             logger.warning(f"[{question_key}] 返回数据为空，返回空metrics对象")
             return {"metrics": {}}
+        
+        elif question_key == "business_overview_operational_metrics":
+            # 经营指标：单行汇总，映射为 API 对象（金额字段转为万元）
+            if result_list and len(result_list) > 0:
+                r = result_list[0]
+                def _v(key, default=0):
+                    v = r.get(key)
+                    if v is None:
+                        return default
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return default
+                def _i(key, default=0):
+                    v = r.get(key)
+                    if v is None:
+                        return default
+                    try:
+                        return int(v)
+                    except (TypeError, ValueError):
+                        return default
+                # 金额类字段 SQL 返回元，转为万元与前端「(w)」一致
+                to_wan = 10000.0
+                return {
+                    "monthly_target": _v("monthly_target") / to_wan,
+                    "monthly_total_achieved": _v("monthly_total_achieved") / to_wan,
+                    "today_sales": _v("today_sales") / to_wan,
+                    "monthly_achievement_rate": _v("monthly_achievement_rate"),
+                    "time_gap": _v("time_gap"),
+                    "estimated_gross_profit": _v("estimated_gross_profit") / to_wan,
+                    "estimated_expenses": _v("estimated_expenses") / to_wan,
+                    "operating_result": (_v("operating_result") or 0) / to_wan,
+                    "operating_result_text": r.get("operating_result_text") or "亏损",
+                    "monthly_order_count": _i("monthly_order_count"),
+                    "today_order_count": _i("today_order_count"),
+                }
+            return {
+                "monthly_target": 0,
+                "monthly_total_achieved": 0,
+                "today_sales": 0,
+                "monthly_achievement_rate": 0,
+                "time_gap": 0,
+                "estimated_gross_profit": 0,
+                "estimated_expenses": 0,
+                "operating_result": 0,
+                "operating_result_text": "--",
+                "monthly_order_count": 0,
+                "today_order_count": 0,
+            }
         
         # 默认返回字典列表格式（适用于表格数据）
         return {
@@ -417,6 +531,14 @@ class MetabaseQuestionService:
             response.raise_for_status()
             metabase_data = response.json()
             
+            # ⭐ 调试日志：打印 Metabase 原始返回数据
+            logger.info(f"[Metabase 原始响应] 类型: {type(metabase_data).__name__}")
+            if isinstance(metabase_data, list) and len(metabase_data) > 0:
+                logger.info(f"[Metabase 原始响应] 第一行数据: {metabase_data[0]}")
+                logger.info(f"[Metabase 原始响应] 第一行键名: {list(metabase_data[0].keys()) if isinstance(metabase_data[0], dict) else 'N/A'}")
+            elif isinstance(metabase_data, dict):
+                logger.info(f"[Metabase 原始响应] 键: {list(metabase_data.keys())}")
+            
             # 5. 处理返回数据格式
             # Metabase 的 /api/card/{id}/query/json 可能返回列表或字典
             if isinstance(metabase_data, list):
@@ -439,7 +561,9 @@ class MetabaseQuestionService:
             # 6. 转换响应格式
             result = self._convert_response(question_key, metabase_data)
             
-            logger.debug(f"Question查询成功: {question_key} (ID: {question_id}), 返回{result['row_count']}行")
+            # 对于 KPI 类型返回，没有 row_count 字段，使用 .get() 安全获取
+            row_count = result.get('row_count', '1行' if question_key.endswith('kpi') else '未知')
+            logger.debug(f"Question查询成功: {question_key} (ID: {question_id}), 返回 {row_count}")
             return result
             
         except httpx.HTTPStatusError as e:

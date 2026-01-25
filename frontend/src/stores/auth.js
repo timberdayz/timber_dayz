@@ -58,8 +58,15 @@ export const useAuthStore = defineStore('auth', () => {
         userStore.token = accessToken
         
       // 设置默认激活角色：优先 admin，其次第一个角色
+      // ✅ 2026-01-24修复：规范化角色代码（后端可能返回中文角色名）
       if (userInfo.roles.length > 0) {
-        const preferredRole = userInfo.roles.includes('admin') ? 'admin' : userInfo.roles[0]
+        const normalizeRole = (role) => {
+          if (!role) return ''
+          const map = { '管理员': 'admin', '主管': 'manager', '经理': 'manager', '操作员': 'operator', '运营': 'operator', '财务': 'finance' }
+          return map[role] || role
+        }
+        const normalizedRoles = userInfo.roles.map(normalizeRole)
+        const preferredRole = normalizedRoles.includes('admin') ? 'admin' : normalizedRoles[0]
         localStorage.setItem('activeRole', preferredRole)
       }
       }
