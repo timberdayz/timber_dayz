@@ -4,20 +4,20 @@ Platform Adapters - 平台适配器
 
 为不同电商平台提供统一的深链接构造、数据类型映射和导出接口适配
 
-核心功能：
-- [LINK] 深链接构造：登录后直达指定数据页面
-- [DATA] 数据类型映射：统一的数据类型到平台特定URL的映射
-- [RECV] 导出接口适配：标准化的数据导出流程
-- [STORE] 店铺切换：基于shop_id的店铺数据访问
+核心功能:
+- [LINK] 深链接构造:登录后直达指定数据页面
+- [DATA] 数据类型映射:统一的数据类型到平台特定URL的映射
+- [RECV] 导出接口适配:标准化的数据导出流程
+- [STORE] 店铺切换:基于shop_id的店铺数据访问
 
-支持平台：
+支持平台:
 - Shopee 卖家端
-- Amazon Seller Central（预留）
-- 妙手ERP（预留）
+- Amazon Seller Central(预留)
+- 妙手ERP(预留)
 
-版本：v1.0.0
-作者：跨境电商ERP系统
-更新：2025-08-29
+版本:v1.0.0
+作者:跨境电商ERP系统
+更新:2025-08-29
 """
 
 from abc import ABC, abstractmethod
@@ -120,7 +120,7 @@ class ShopeeAdapter(PlatformAdapter):
         Args:
             data_type: 数据类型
             shop_id: 店铺ID
-            **kwargs: 额外参数（如日期范围等）
+            **kwargs: 额外参数(如日期范围等)
             
         Returns:
             str: 完整的深链接URL
@@ -145,9 +145,9 @@ class ShopeeAdapter(PlatformAdapter):
     
     def get_export_config(self, data_type: RecordingType, shop_id: str, **kwargs) -> ExportConfig:
         """
-        获取导出配置（需要通过录制确定具体接口）
+        获取导出配置(需要通过录制确定具体接口)
         
-        注意：这里提供的是模板配置，实际使用时需要通过录制确定真实的API端点
+        注意:这里提供的是模板配置,实际使用时需要通过录制确定真实的API端点
         """
         base_config = {
             "headers": {
@@ -260,14 +260,14 @@ class ShopeeAdapter(PlatformAdapter):
             if has_normal_content:
                 return True, f"店铺 {shop_id} 访问正常"
             
-            return False, "页面内容异常，无法确认店铺访问权限"
+            return False, "页面内容异常,无法确认店铺访问权限"
             
         except Exception as e:
             return False, f"验证店铺权限时发生异常: {e}"
 
 
 class AmazonAdapter(PlatformAdapter):
-    """Amazon Seller Central 适配器（预留）"""
+    """Amazon Seller Central 适配器(预留)"""
     
     def __init__(self):
         super().__init__("amazon")
@@ -290,7 +290,7 @@ class AmazonAdapter(PlatformAdapter):
 
 
 class MiaoshouAdapter(PlatformAdapter):
-    """妙手ERP适配器（预留）"""
+    """妙手ERP适配器(预留)"""
     
     def __init__(self):
         super().__init__("miaoshow")

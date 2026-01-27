@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FX转换辅助函数（同步版本）
+FX转换辅助函数(同步版本)
 
 用于在同步函数中快速进行货币转换
 从dim_exchange_rates表查询汇率
@@ -26,11 +26,11 @@ def simple_convert_to_cny(
     db: Session
 ) -> Decimal:
     """
-    简化的CNY转换（同步版本）
+    简化的CNY转换(同步版本)
     
     参数:
         amount: 原币金额
-        from_currency: 原币种（如USD、SGD）
+        from_currency: 原币种(如USD、SGD)
         rate_date: 汇率日期
         db: 数据库会话
     
@@ -46,12 +46,12 @@ def simple_convert_to_cny(
     # 标准化货币代码
     from_currency = from_currency.upper().strip()
     
-    # 如果已经是CNY，直接返回
+    # 如果已经是CNY,直接返回
     if from_currency == 'CNY':
         return Decimal(str(amount))
     
     try:
-        # 查询最近的汇率（<=rate_date的最新汇率）
+        # 查询最近的汇率(<=rate_date的最新汇率)
         rate_record = db.execute(
             select(DimExchangeRate).where(
                 and_(
@@ -69,12 +69,12 @@ def simple_convert_to_cny(
             logger.debug(f"FX转换: {amount} {from_currency} = {cny_amount} CNY (rate: {rate})")
             return round(cny_amount, 2)
         else:
-            # 找不到汇率，记录警告
+            # 找不到汇率,记录警告
             logger.warning(
                 f"汇率未找到: {from_currency} -> CNY on {rate_date}, "
                 f"返回原值 {amount}"
             )
-            # 返回原值（作为降级策略）
+            # 返回原值(作为降级策略)
             return Decimal(str(amount))
     
     except Exception as e:
@@ -98,7 +98,7 @@ def get_exchange_rate(
         db: 数据库会话
     
     返回:
-        汇率（Decimal）或None
+        汇率(Decimal)或None
     """
     try:
         rate_record = db.execute(

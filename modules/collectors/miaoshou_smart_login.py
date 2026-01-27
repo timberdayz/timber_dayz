@@ -67,15 +67,15 @@ class MiaoshouSmartLogin:
             if not await self._start_browser(headless, use_session, account_id, login_url):
                 return False
             
-            # 检查是否已登录（会话复用）
+            # 检查是否已登录(会话复用)
             if use_session and await self._check_login_status():
-                logger.success("检测到已登录状态，跳过登录流程")
+                logger.success("检测到已登录状态,跳过登录流程")
                 return True
             
             # 访问登录页面 - 直接跳转不显示空白页面
             logger.info(f"正在访问登录页面: {login_url}")
             await self.page.goto(login_url, timeout=90000, wait_until='domcontentloaded')  # 适应VPN环境
-            logger.info("页面基础内容加载完成，等待网络稳定...")
+            logger.info("页面基础内容加载完成,等待网络稳定...")
             await self.page.wait_for_load_state('networkidle', timeout=60000)
             
             # 创建智能元素查找器
@@ -127,9 +127,9 @@ class MiaoshouSmartLogin:
                 if proxy_config:
                     logger.info(f"[LINK] 为 {login_url} 配置智能代理: {proxy_config.get('server', 'unknown')}")
                 else:
-                    logger.info(f"[WEB] {login_url} 使用直连（无代理）")
+                    logger.info(f"[WEB] {login_url} 使用直连(无代理)")
             
-            # 如果使用会话，设置持久化上下文
+            # 如果使用会话,设置持久化上下文
             if use_session:
                 session_dir = self.session_manager.get_profile_path("miaoshou_erp", account_id)
                 if session_dir and session_dir.exists():
@@ -158,15 +158,15 @@ class MiaoshouSmartLogin:
                 self.context = await self.browser.new_context()
                 self.page = await self.context.new_page()
             
-            # 设置页面超时时间，智能调整
+            # 设置页面超时时间,智能调整
             if proxy_config:
-                # 使用代理时，可能需要更长的超时时间
+                # 使用代理时,可能需要更长的超时时间
                 timeout = 120000  # 120秒
-                logger.info("使用代理，设置超时时间为120秒")
+                logger.info("使用代理,设置超时时间为120秒")
             else:
-                # 直连时，根据VPN环境调整
-                timeout = 90000  # 90秒，适应新加坡VPN访问中国网站
-                logger.info("直连模式，设置超时时间为90秒")
+                # 直连时,根据VPN环境调整
+                timeout = 90000  # 90秒,适应新加坡VPN访问中国网站
+                logger.info("直连模式,设置超时时间为90秒")
             
             self.page.set_default_timeout(timeout)
             
@@ -182,7 +182,7 @@ class MiaoshouSmartLogin:
         try:
             current_url = self.page.url
             
-            # 如果URL中包含主页面特征，说明已登录
+            # 如果URL中包含主页面特征,说明已登录
             login_indicators = [
                 "/main/",
                 "/dashboard/",
@@ -246,19 +246,19 @@ class MiaoshouSmartLogin:
             # 等待登录提交
             await asyncio.sleep(3)
             
-            # 先快速检查是否登录成功，成功则无需验证码流程
+            # 先快速检查是否登录成功,成功则无需验证码流程
             if await self._quick_login_check():
-                logger.success("登录成功，无需验证码")
+                logger.success("登录成功,无需验证码")
                 return True
             
-            # 如果登录未成功，检查是否需要验证码（按需触发）
-            logger.info("登录未立即成功，检查是否需要验证码...")
+            # 如果登录未成功,检查是否需要验证码(按需触发)
+            logger.info("登录未立即成功,检查是否需要验证码...")
             need_captcha = await self._check_captcha_required()
             
             if need_captcha:
-                logger.info("检测到需要验证码，启动验证码流程")
+                logger.info("检测到需要验证码,启动验证码流程")
                 
-                # 请求验证码（通过邮箱或短信）
+                # 请求验证码(通过邮箱或短信)
                 captcha_code = await self._get_verification_code(account_config)
                 
                 if captcha_code:
@@ -279,7 +279,7 @@ class MiaoshouSmartLogin:
                     logger.error("未能获取验证码")
                     return False
             else:
-                logger.info("未检测到验证码需求，可能是其他登录问题")
+                logger.info("未检测到验证码需求,可能是其他登录问题")
             
             # 等待登录完成
             await asyncio.sleep(5)
@@ -299,9 +299,9 @@ class MiaoshouSmartLogin:
         """快速检查登录是否成功"""
         try:
             current_url = self.page.url
-            # 如果URL不再包含login，说明可能已经登录成功
+            # 如果URL不再包含login,说明可能已经登录成功
             if "login" not in current_url.lower():
-                logger.info("URL已跳转，可能登录成功")
+                logger.info("URL已跳转,可能登录成功")
                 return True
             
             # 检查是否有成功登录的页面元素
@@ -334,7 +334,7 @@ class MiaoshouSmartLogin:
     async def _check_captcha_required(self) -> bool:
         """检查是否需要验证码"""
         try:
-            # 查找验证码输入框（快速检测，避免长时间等待）
+            # 查找验证码输入框(快速检测,避免长时间等待)
             captcha_element = await self.element_finder.find_element(
                 ElementType.CAPTCHA_INPUT,
                 timeout=5000,  # 5秒快速检测
@@ -342,7 +342,7 @@ class MiaoshouSmartLogin:
             )
             
             if captcha_element:
-                logger.info("发现验证码输入框，需要验证码")
+                logger.info("发现验证码输入框,需要验证码")
                 return True
             
             # 检查页面上的验证码相关提示
@@ -379,18 +379,18 @@ class MiaoshouSmartLogin:
                 logger.success(f"成功自动获取验证码: {otp_code}")
                 return otp_code
             
-            # 如果自动获取失败，提示用户手动输入
-            logger.warning("自动获取验证码失败，请手动输入")
+            # 如果自动获取失败,提示用户手动输入
+            logger.warning("自动获取验证码失败,请手动输入")
             logger.info("请检查您的邮箱或手机短信获取验证码")
             
             # 在控制台请求用户输入验证码
             print("\n" + "="*60)
             print("[LOCK] 妙手ERP平台需要验证码")
             print("[EMAIL] 请检查您的邮箱或手机短信获取验证码")
-            print("[TIP] 如果长时间收不到验证码，可以尝试重新发送")
+            print("[TIP] 如果长时间收不到验证码,可以尝试重新发送")
             print("="*60)
             
-            manual_code = input("请输入验证码（4-8位数字）: ").strip()
+            manual_code = input("请输入验证码(4-8位数字): ").strip()
             
             if manual_code and len(manual_code) >= 4:
                 logger.info(f"用户手动输入验证码: {manual_code}")
@@ -406,10 +406,10 @@ class MiaoshouSmartLogin:
     async def _verify_login_success(self) -> bool:
         """验证登录是否成功"""
         try:
-            # 等待页面基础加载完成（避免networkidle超时）
+            # 等待页面基础加载完成(避免networkidle超时)
             await self.page.wait_for_load_state('domcontentloaded', timeout=15000)
             
-            # 短暂等待，让页面可能的跳转完成
+            # 短暂等待,让页面可能的跳转完成
             await asyncio.sleep(3)
             
             current_url = self.page.url
@@ -432,11 +432,11 @@ class MiaoshouSmartLogin:
             
             # 检查是否还在登录页面
             if "/login" in current_url or "login.html" in current_url:
-                logger.warning("仍在登录页面，检查登录失败原因...")
+                logger.warning("仍在登录页面,检查登录失败原因...")
                 await self._check_login_errors()
                 return False
             
-            # 查找登录后的页面元素（增加更多选择器）
+            # 查找登录后的页面元素(增加更多选择器)
             success_selectors = [
                 '.user-info',
                 '.user-name', 
@@ -460,14 +460,14 @@ class MiaoshouSmartLogin:
                 except:
                     continue
             
-            # 如果URL已经不是登录页且找不到明确的失败标识，认为可能成功
+            # 如果URL已经不是登录页且找不到明确的失败标识,认为可能成功
             if "/login" not in current_url and "login.html" not in current_url:
-                logger.success("URL已跳转离开登录页，认为登录成功")
+                logger.success("URL已跳转离开登录页,认为登录成功")
                 return True
             
             # 检查是否有登录失败的错误信息
             await self._check_login_errors()
-            logger.warning("无法确定登录状态，但未检测到明确错误，认为可能成功")
+            logger.warning("无法确定登录状态,但未检测到明确错误,认为可能成功")
             return True
             
         except Exception as e:
@@ -546,7 +546,7 @@ def login_miaoshou_account(
     use_session: bool = True
 ) -> bool:
     """
-    妙手ERP账号登录（同步接口）
+    妙手ERP账号登录(同步接口)
     
     Args:
         account_config: 账号配置

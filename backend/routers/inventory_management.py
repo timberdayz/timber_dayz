@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-库存管理API路由（v4.10.0更新：原产品管理）
+库存管理API路由(v4.10.0更新:原产品管理)
 
-提供SKU级库存管理功能：
-- 库存列表（带图片）
+提供SKU级库存管理功能:
+- 库存列表(带图片)
 - 库存详情
 - 图片管理
 - SKU搜索
@@ -22,13 +22,13 @@ from backend.models.database import get_db, get_async_db
 from backend.utils.api_response import success_response, error_response, pagination_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import (
-    FactProductMetric,  # 使用产品指标表（含产品基本信息）
+    FactProductMetric,  # 使用产品指标表(含产品基本信息)
     ProductImage,
     CatalogFile
 )
 from backend.services.image_processor import get_image_processor
-# [WARN] v4.6.0 DSS架构重构：已删除MaterializedViewService（改为直接查询原始表）
-# v4.17.0+: 不再导入旧的固定表类，使用动态表名
+# [WARN] v4.6.0 DSS架构重构:已删除MaterializedViewService(改为直接查询原始表)
+# v4.17.0+: 不再导入旧的固定表类,使用动态表名
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -42,9 +42,9 @@ image_processor = get_image_processor()
 async def get_products(
     platform: Optional[str] = Query(None, description="平台筛选"),
     shop_id: Optional[str] = Query(None, description="店铺筛选"),
-    keyword: Optional[str] = Query(None, description="关键词搜索（SKU/名称）"),
+    keyword: Optional[str] = Query(None, description="关键词搜索(SKU/名称)"),
     category: Optional[str] = Query(None, description="分类筛选"),
-    status: Optional[str] = Query(None, description="状态筛选：active/inactive"),
+    status: Optional[str] = Query(None, description="状态筛选:active/inactive"),
     has_image: Optional[bool] = Query(None, description="是否有图片"),
     low_stock: Optional[bool] = Query(None, description="低库存预警"),
     page: int = Query(1, ge=1, description="页码"),
@@ -52,12 +52,12 @@ async def get_products(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    获取库存列表（带缩略图）
+    获取库存列表(带缩略图)
     
-    用于：
+    用于:
     - 库存管理界面
-    - 销售看板（产品维度）
-    - 库存看板（产品列表）
+    - 销售看板(产品维度)
+    - 库存看板(产品列表)
     """
     try:
         logger.info(f"[GetProducts] 查询: platform={platform}, keyword={keyword}, category={category}")
@@ -69,7 +69,7 @@ async def get_products(
         
         platform_table_manager = get_platform_table_manager(db)
         
-        # 构建查询条件（不包含platform，因为platform用于表名）
+        # 构建查询条件(不包含platform,因为platform用于表名)
         conditions = ["1=1"]
         params = {}
         
@@ -78,7 +78,7 @@ async def get_products(
             params["keyword"] = f"%{keyword}%"
         
         if low_stock:
-            # 低库存：可用库存 < 10（从JSONB字段读取）
+            # 低库存:可用库存 < 10(从JSONB字段读取)
             conditions.append("(raw_data->>'可用库存')::numeric < 10")
         
         where_clause = " AND ".join(conditions)
@@ -88,7 +88,7 @@ async def get_products(
             # 单平台查询
             platforms = [platform]
         else:
-            # 跨平台查询：从dim_platforms表查询所有平台
+            # 跨平台查询:从dim_platforms表查询所有平台
             platform_rows = db.execute(
                 text("SELECT platform_code FROM dim_platforms WHERE is_active = true")
             ).fetchall()
@@ -97,7 +97,7 @@ async def get_products(
         if not platforms:
             return pagination_response([], 0, page, page_size)
         
-        # 构建UNION ALL查询（跨平台）
+        # 构建UNION ALL查询(跨平台)
         union_queries = []
         for platform_code in platforms:
             table_name = platform_table_manager.get_table_name(
@@ -117,7 +117,7 @@ async def get_products(
                 WHERE {where_clause}
             """)
         
-        # 查询总数（所有平台）
+        # 查询总数(所有平台)
         count_queries = []
         for platform_code in platforms:
             table_name = platform_table_manager.get_table_name(
@@ -134,9 +134,9 @@ async def get_products(
                 count = db.execute(text(count_sql), params).scalar() or 0
                 total += count
             except Exception as e:
-                logger.warning(f"查询表 {count_sql.split('FROM')[1].split('WHERE')[0].strip()} 失败（可能不存在）: {e}")
+                logger.warning(f"查询表 {count_sql.split('FROM')[1].split('WHERE')[0].strip()} 失败(可能不存在): {e}")
         
-        # 查询数据（分页，使用UNION ALL）
+        # 查询数据(分页,使用UNION ALL)
         offset = (page - 1) * page_size
         union_sql = " UNION ALL ".join(union_queries)
         data_sql = f"""
@@ -152,7 +152,7 @@ async def get_products(
         result = db.execute(text(data_sql), params)
         rows = result.fetchall()
         
-        # 转换为字典列表（从JSONB字段提取数据）
+        # 转换为字典列表(从JSONB字段提取数据)
         mv_result = {
             "data": [],
             "total": total,
@@ -181,18 +181,18 @@ async def get_products(
             }
             mv_result["data"].append(product)
         
-        # 加载图片信息（保留旧逻辑，因为图片在单独表中）
+        # 加载图片信息(保留旧逻辑,因为图片在单独表中)
         results = []
         for product in mv_result["data"]:
             platform_sku = product.get("platform_sku")
             platform_code = product.get("platform_code")
             shop_id_value = product.get("shop_id")
             
-            # [*] v4.10.0修复：inventory域数据platform_code和shop_id可能为NULL
-            # 图片查询优先级：1) ProductImage表 2) fact_product_metrics表的image_url字段
+            # [*] v4.10.0修复:inventory域数据platform_code和shop_id可能为NULL
+            # 图片查询优先级:1) ProductImage表 2) fact_product_metrics表的image_url字段
             images = []
             if platform_code and shop_id_value:
-                # 标准查询：使用platform_code + shop_id + platform_sku
+                # 标准查询:使用platform_code + shop_id + platform_sku
                 result = await db.execute(
                     select(ProductImage).where(
                         and_(
@@ -204,8 +204,8 @@ async def get_products(
                 )
                 images = result.scalars().all()
             else:
-                # [*] v4.10.0新增：inventory域数据可能platform_code/shop_id为NULL
-                # 只使用platform_sku查询（图片可能只关联SKU，不关联平台/店铺）
+                # [*] v4.10.0新增:inventory域数据可能platform_code/shop_id为NULL
+                # 只使用platform_sku查询(图片可能只关联SKU,不关联平台/店铺)
                 result = await db.execute(
                     select(ProductImage).where(
                         ProductImage.platform_sku == platform_sku
@@ -213,13 +213,13 @@ async def get_products(
                 )
                 images = result.scalars().all()
             
-            # 图片处理：优先使用ProductImage表，其次使用fact表的image_url
+            # 图片处理:优先使用ProductImage表,其次使用fact表的image_url
             if images:
                 # 使用ProductImage表的图片
                 main_image = images[0].thumbnail_url
                 all_images = [img.image_url for img in images]
             elif product.get('image_url'):
-                # [*] v4.10.0新增：如果ProductImage表没有图片，使用fact表的image_url
+                # [*] v4.10.0新增:如果ProductImage表没有图片,使用fact表的image_url
                 # mv_inventory_by_sku视图已包含image_url字段
                 main_image = product.get('image_url')
                 all_images = [product.get('image_url')]
@@ -228,8 +228,8 @@ async def get_products(
                 main_image = None
                 all_images = []
             
-            # 组装库存数据（使用mv_inventory_by_sku视图字段）
-            # [WARN] v4.10.0更新：inventory域数据字段较少，不包含价格、销售指标等
+            # 组装库存数据(使用mv_inventory_by_sku视图字段)
+            # [WARN] v4.10.0更新:inventory域数据字段较少,不包含价格、销售指标等
             inventory_data = {
                 'platform_code': platform_code,
                 'shop_id': shop_id_value,
@@ -237,7 +237,7 @@ async def get_products(
                 'product_name': product.get('product_name'),
                 'warehouse': product.get('warehouse'),
                 
-                # 库存信息（inventory域核心字段）
+                # 库存信息(inventory域核心字段)
                 'stock': product.get('available_stock') or product.get('total_stock') or 0,
                 'total_stock': product.get('total_stock') or 0,
                 'available_stock': product.get('available_stock') or 0,
@@ -245,7 +245,7 @@ async def get_products(
                 'in_transit_stock': product.get('in_transit_stock') or 0,
                 'stock_status': product.get('stock_status'),
                 
-                # inventory域不包含的字段（设为默认值）
+                # inventory域不包含的字段(设为默认值)
                 'category': None,  # inventory域可能没有分类
                 'brand': None,  # inventory域可能没有品牌
                 'price': 0,  # inventory域不包含价格
@@ -261,9 +261,9 @@ async def get_products(
                 'add_to_cart_rate': 0,
                 'product_health_score': 0,
                 
-                # 图片信息（优先级：ProductImage表 > fact表的image_url）
+                # 图片信息(优先级:ProductImage表 > fact表的image_url)
                 'thumbnail_url': main_image,
-                'image_url': product.get('image_url') or main_image,  # v4.10.0新增：使用视图的image_url字段
+                'image_url': product.get('image_url') or main_image,  # v4.10.0新增:使用视图的image_url字段
                 'image_count': len(images) if images else (1 if product.get('image_url') else 0),
                 'all_images': all_images,
                 
@@ -291,7 +291,7 @@ async def get_products(
             f"results={len(results)}"
         )
         
-        # 使用success_response包装分页数据（包含额外的stats和performance信息）
+        # 使用success_response包装分页数据(包含额外的stats和performance信息)
         pagination_data = {
             'data': results,
             'total': mv_result["total"],
@@ -316,7 +316,7 @@ async def get_products(
             message="查询库存列表失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -329,16 +329,16 @@ async def get_product_detail(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    获取库存详情（含完整图片）
+    获取库存详情(含完整图片)
     
-    用于：
+    用于:
     - 库存详情页
     - 看板产品快速查看
     """
     try:
         logger.info(f"[GetProductDetail] 查询: sku={sku}, platform={platform}, shop_id={shop_id}")
         
-        # 查询产品（获取最新指标数据）
+        # 查询产品(获取最新指标数据)
         result = await db.execute(
             select(FactProductMetric).where(
                 and_(
@@ -355,7 +355,7 @@ async def get_product_detail(
                 code=ErrorCode.INVENTORY_NOT_FOUND,
                 message=f"库存记录未找到: {sku}",
                 error_type=get_error_type(ErrorCode.INVENTORY_NOT_FOUND),
-                recovery_suggestion="请检查SKU、平台和店铺ID是否正确，或确认该产品已入库",
+                recovery_suggestion="请检查SKU、平台和店铺ID是否正确,或确认该产品已入库",
                 status_code=404
             )
         
@@ -387,7 +387,7 @@ async def get_product_detail(
                 'quality_score': img.quality_score
             })
         
-        # 组装产品详情（使用FactProductMetric字段）
+        # 组装产品详情(使用FactProductMetric字段)
         detail = {
             'platform_code': product.platform_code,
             'shop_id': product.shop_id,
@@ -397,7 +397,7 @@ async def get_product_detail(
             'brand': product.brand,
             'price': float(product.price) if product.price else 0,
             'currency': product.currency,
-            # [*] v4.6.3修复：优先使用available_stock（可售库存）
+            # [*] v4.6.3修复:优先使用available_stock(可售库存)
             'stock': (
                 product.available_stock if product.available_stock is not None else
                 (product.total_stock if product.total_stock is not None else (product.stock or 0))
@@ -414,7 +414,7 @@ async def get_product_detail(
             # 流量指标
             'page_views': product.page_views or 0,
             
-            # v4.6.3新增：仓库和规格信息
+            # v4.6.3新增:仓库和规格信息
             'warehouse': product.warehouse,
             'specification': product.specification,
             'unique_visitors': product.unique_visitors or 0,
@@ -447,7 +447,7 @@ async def get_product_detail(
             message="查询库存详情失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -464,7 +464,7 @@ async def upload_product_image(
     """
     上传产品图片
     
-    用于：
+    用于:
     - 手动补充产品图片
     - 更新产品主图
     """
@@ -488,14 +488,14 @@ async def upload_product_image(
                 code=ErrorCode.INVENTORY_NOT_FOUND,
                 message=f"库存记录未找到: {sku}",
                 error_type=get_error_type(ErrorCode.INVENTORY_NOT_FOUND),
-                recovery_suggestion="请检查SKU、平台和店铺ID是否正确，或确认该产品已入库",
+                recovery_suggestion="请检查SKU、平台和店铺ID是否正确,或确认该产品已入库",
                 status_code=404
             )
         
         # 读取图片数据
         image_data = await file.read()
         
-        # 处理图片（压缩+缩略图）
+        # 处理图片(压缩+缩略图)
         result = image_processor.process_product_image(
             image_data,
             sku,
@@ -548,7 +548,7 @@ async def upload_product_image(
             message="图片上传失败",
             error_type=get_error_type(ErrorCode.FILE_WRITE_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查文件格式和大小，确保有足够的磁盘空间，或联系系统管理员",
+            recovery_suggestion="请检查文件格式和大小,确保有足够的磁盘空间,或联系系统管理员",
             status_code=500
         )
 
@@ -571,7 +571,7 @@ async def delete_product_image(
                 code=ErrorCode.FILE_NOT_FOUND,
                 message="图片未找到",
                 error_type=get_error_type(ErrorCode.FILE_NOT_FOUND),
-                recovery_suggestion="请检查图片ID是否正确，或确认该图片已上传",
+                recovery_suggestion="请检查图片ID是否正确,或确认该图片已上传",
                 status_code=404
             )
         
@@ -585,7 +585,7 @@ async def delete_product_image(
             if thumbnail_path.exists():
                 thumbnail_path.unlink()
         except Exception as e:
-            logger.warning(f"[DeleteImage] 删除物理文件失败（继续）: {e}")
+            logger.warning(f"[DeleteImage] 删除物理文件失败(继续): {e}")
         
         # 删除数据库记录
         await db.delete(image)
@@ -608,7 +608,7 @@ async def delete_product_image(
             message="图片删除失败",
             error_type=get_error_type(ErrorCode.FILE_WRITE_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查图片是否存在，或联系系统管理员",
+            recovery_suggestion="请检查图片是否存在,或联系系统管理员",
             status_code=500
         )
 
@@ -621,25 +621,25 @@ async def get_platform_summary(
     """
     平台库存汇总统计
     
-    用于：
+    用于:
     - 销售看板概览
     - 库存看板概览
     """
     try:
         logger.info(f"[PlatformSummary] platform={platform}")
         
-        # 子查询：获取每个SKU的最新数据（v4.10.0更新：同时包含products和inventory域）
+        # 子查询:获取每个SKU的最新数据(v4.10.0更新:同时包含products和inventory域)
         latest_date_subq = select(
             FactProductMetric.platform_code,
             FactProductMetric.shop_id,
             FactProductMetric.platform_sku,
-            FactProductMetric.data_domain,  # v4.10.0新增：包含data_domain用于分组
+            FactProductMetric.data_domain,  # v4.10.0新增:包含data_domain用于分组
             func.max(FactProductMetric.metric_date).label('latest_date')
         ).group_by(
             FactProductMetric.platform_code,
             FactProductMetric.shop_id,
             FactProductMetric.platform_sku,
-            FactProductMetric.data_domain  # v4.10.0新增：按data_domain分组
+            FactProductMetric.data_domain  # v4.10.0新增:按data_domain分组
         ).subquery()
         
         query = select(FactProductMetric).join(
@@ -648,19 +648,19 @@ async def get_platform_summary(
                 FactProductMetric.platform_code == latest_date_subq.c.platform_code,
                 FactProductMetric.shop_id == latest_date_subq.c.shop_id,
                 FactProductMetric.platform_sku == latest_date_subq.c.platform_sku,
-                FactProductMetric.data_domain == latest_date_subq.c.data_domain,  # v4.10.0新增：匹配data_domain
+                FactProductMetric.data_domain == latest_date_subq.c.data_domain,  # v4.10.0新增:匹配data_domain
                 FactProductMetric.metric_date == latest_date_subq.c.latest_date
             )
         )
         
-        # v4.10.0更新：同时包含products和inventory域的数据
+        # v4.10.0更新:同时包含products和inventory域的数据
         query = query.filter(
             or_(
                 FactProductMetric.data_domain == 'products',
                 FactProductMetric.data_domain == 'inventory',
                 and_(
                     FactProductMetric.data_domain.is_(None),
-                    FactProductMetric.platform_code.isnot(None)  # 向后兼容：NULL data_domain但platform_code不为空
+                    FactProductMetric.platform_code.isnot(None)  # 向后兼容:NULL data_domain但platform_code不为空
                 )
             )
         )
@@ -669,12 +669,12 @@ async def get_platform_summary(
             query = query.where(FactProductMetric.platform_code == platform)
         
         # 统计指标
-        # [*] v4.18.2修复：使用异步查询
+        # [*] v4.18.2修复:使用异步查询
         from sqlalchemy import case
         count_result = await db.execute(select(func.count()).select_from(query.subquery()))
         total_products = count_result.scalar() or 0
         
-        # [*] v4.6.3修复：统计库存时使用available_stock优先
+        # [*] v4.6.3修复:统计库存时使用available_stock优先
         total_stock_query = select(
             func.sum(case(
                 (FactProductMetric.available_stock.isnot(None), FactProductMetric.available_stock),
@@ -695,7 +695,7 @@ async def get_platform_summary(
         total_value_result = await db.execute(total_value_query)
         total_value = total_value_result.scalar() or 0
         
-        # [*] v4.6.3修复：低库存判断使用available_stock优先
+        # [*] v4.6.3修复:低库存判断使用available_stock优先
         stock_field = case(
             (FactProductMetric.available_stock.isnot(None), FactProductMetric.available_stock),
             (FactProductMetric.total_stock.isnot(None), FactProductMetric.total_stock),
@@ -713,7 +713,7 @@ async def get_platform_summary(
         out_of_stock_result = await db.execute(out_of_stock_query)
         out_of_stock_count = out_of_stock_result.scalar() or 0
         
-        # 分平台统计（v4.10.0更新：处理inventory域platform_code可能为NULL的情况）
+        # 分平台统计(v4.10.0更新:处理inventory域platform_code可能为NULL的情况)
         platform_stats = []
         if not platform:
             # 查询所有非NULL的platform_code
@@ -761,8 +761,8 @@ async def get_platform_summary(
                         )
                     )
                     
-                    # [*] v4.18.2修复：使用异步查询
-                    # [*] v4.6.3修复：统计时使用available_stock优先
+                    # [*] v4.18.2修复:使用异步查询
+                    # [*] v4.6.3修复:统计时使用available_stock优先
                     plt_count_result = await db.execute(select(func.count()).select_from(plt_query.subquery()))
                     plt_count = plt_count_result.scalar() or 0
                     
@@ -803,7 +803,7 @@ async def get_platform_summary(
             message="统计查询失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 

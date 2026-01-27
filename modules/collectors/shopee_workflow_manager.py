@@ -103,7 +103,7 @@ class ShopeeWorkflowManager:
 
     def execute_collection(self, collection_mode: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行数据采集（兼容性方法）
+        执行数据采集(兼容性方法)
 
         Args:
             collection_mode: 采集模式配置
@@ -180,7 +180,7 @@ class ShopeeWorkflowManager:
                     if step4.status == "failed":
                         return self._create_failed_result(account_config, steps, workflow_start, step4.error)
                 else:
-                    # 会话有效，跳过登录
+                    # 会话有效,跳过登录
                     step4 = WorkflowStep(
                         name="login_verification",
                         status="completed",
@@ -544,7 +544,7 @@ class ShopeeWorkflowManager:
             
             # 检查是否已经登录
             if self._is_logged_in(page):
-                logger.info("[OK] 已登录，无需验证码")
+                logger.info("[OK] 已登录,无需验证码")
                 return {"login_success": True, "otp_used": False}
             
             # 创建Shopee采集器进行登录
@@ -565,7 +565,7 @@ class ShopeeWorkflowManager:
             else:
                 # 检查是否需要验证码
                 if self._needs_verification(page):
-                    logger.info("[EMAIL] 检测到需要验证码，开始处理...")
+                    logger.info("[EMAIL] 检测到需要验证码,开始处理...")
                     
                     # 使用统一验证码服务
                     otp_code = self.verification_service.request_otp(
@@ -627,7 +627,7 @@ class ShopeeWorkflowManager:
                 else:
                     return {
                         "login_success": False,
-                        "error": "登录失败，原因未知"
+                        "error": "登录失败,原因未知"
                     }
             
         except Exception as e:
@@ -639,15 +639,15 @@ class ShopeeWorkflowManager:
         try:
             # 首先确认已经登录
             if not self._is_logged_in(page):
-                logger.error("[FAIL] 未登录状态，无法进行页面分析")
-                return {"error": "未登录状态，无法进行页面分析"}
+                logger.error("[FAIL] 未登录状态,无法进行页面分析")
+                return {"error": "未登录状态,无法进行页面分析"}
             
-            logger.info("[SEARCH] 开始分析Shopee页面（已登录状态）")
+            logger.info("[SEARCH] 开始分析Shopee页面(已登录状态)")
             
             # 创建页面分析器
             analyzer = ShopeePageAnalyzer(page, account_config)
             
-            # 分析平台（仅在登录状态下）
+            # 分析平台(仅在登录状态下)
             analysis_result = analyzer.analyze_shopee_platform_logged_in()
             
             # 保存分析结果
@@ -859,10 +859,10 @@ class ShopeeWorkflowManager:
             print("\n" + "="*60)
             print("[LOCK] 需要验证码")
             print("[EMAIL] 请检查您的邮箱获取验证码")
-            print("[TIP] 如果长时间收不到验证码，可以尝试重新发送")
+            print("[TIP] 如果长时间收不到验证码,可以尝试重新发送")
             print("="*60)
             
-            manual_code = input("请输入验证码（4-8位数字）: ").strip()
+            manual_code = input("请输入验证码(4-8位数字): ").strip()
             
             if manual_code and len(manual_code) >= 4:
                 logger.info(f"用户手动输入验证码: {manual_code}")

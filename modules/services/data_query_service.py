@@ -3,12 +3,12 @@
 """
 统一数据查询服务
 
-为前端提供统一的数据查询接口，支持：
+为前端提供统一的数据查询接口,支持:
 - 订单数据查询
 - 产品指标查询
 - Catalog状态查询
-- 数据聚合（日/周/月）
-- 查询缓存（5分钟TTL）
+- 数据聚合(日/周/月)
+- 查询缓存(5分钟TTL)
 
 使用示例:
     from modules.services.data_query_service import DataQueryService
@@ -51,7 +51,7 @@ class DataQueryService:
     """
     统一数据查询服务
     
-    提供各种数据查询接口，自动处理：
+    提供各种数据查询接口,自动处理:
     - 数据库连接管理
     - 查询结果缓存
     - 数据清洗和格式化
@@ -63,7 +63,7 @@ class DataQueryService:
         self._engine: Optional[Engine] = None
     
     def _get_engine(self) -> Engine:
-        """获取数据库引擎（懒加载）"""
+        """获取数据库引擎(懒加载)"""
         if self._engine is None:
             url = os.getenv('DATABASE_URL')
             if not url:
@@ -94,15 +94,15 @@ class DataQueryService:
         查询订单数据
         
         Args:
-            platforms: 平台列表，如['shopee', 'tiktok']
+            platforms: 平台列表,如['shopee', 'tiktok']
             shops: 店铺ID列表
-            start_date: 开始日期，格式YYYY-MM-DD
-            end_date: 结束日期，格式YYYY-MM-DD
+            start_date: 开始日期,格式YYYY-MM-DD
+            end_date: 结束日期,格式YYYY-MM-DD
             status: 订单状态过滤
             limit: 返回记录数限制
         
         Returns:
-            订单数据DataFrame，包含列：
+            订单数据DataFrame,包含列:
                 order_id, platform_code, shop_id, order_date_local,
                 total_amount, currency, order_status, payment_status
         """
@@ -159,7 +159,7 @@ class DataQueryService:
                 df = pd.read_sql_query(text(sql), conn, params=params)
             return df
         except Exception as e:
-            # 返回空DataFrame（带正确的列）
+            # 返回空DataFrame(带正确的列)
             return pd.DataFrame(columns=[
                 'order_id', 'platform_code', 'shop_id', 'order_date_local',
                 'total_amount', 'total_amount_rmb', 'currency', 
@@ -181,10 +181,10 @@ class DataQueryService:
             platforms: 平台列表
             start_date: 开始日期
             end_date: 结束日期
-            group_by: 分组方式（day/week/month/platform/shop）
+            group_by: 分组方式(day/week/month/platform/shop)
         
         Returns:
-            汇总数据，包含：订单数、总金额、平均订单金额等
+            汇总数据,包含:订单数、总金额、平均订单金额等
         """
         # 构建分组字段
         group_fields = []
@@ -268,7 +268,7 @@ class DataQueryService:
             platforms: 平台列表
             shops: 店铺ID列表
             skus: SKU列表
-            metric_type: 指标类型（gmv/units_sold/page_views等）
+            metric_type: 指标类型(gmv/units_sold/page_views等)
             start_date: 开始日期
             end_date: 结束日期
             limit: 返回记录数限制
@@ -352,7 +352,7 @@ class DataQueryService:
         
         Args:
             platforms: 平台列表
-            metric_type: 排序指标（gmv/units_sold）
+            metric_type: 排序指标(gmv/units_sold)
             start_date: 开始日期
             end_date: 结束日期
             top_n: 返回Top N
@@ -409,13 +409,13 @@ class DataQueryService:
     # Catalog状态查询
     # ========================================
     
-    @cached(ttl_seconds=60)  # 1分钟缓存（状态变化快）
+    @cached(ttl_seconds=60)  # 1分钟缓存(状态变化快)
     def get_catalog_status(self) -> Dict[str, Any]:
         """
         获取Catalog状态统计
         
         Returns:
-            状态统计字典，包含：
+            状态统计字典,包含:
                 - total: 总文件数
                 - by_status: 按状态分组统计
                 - by_domain: 按数据域分组统计
@@ -473,7 +473,7 @@ class DataQueryService:
         获取最近处理的文件
         
         Args:
-            status: 状态过滤（pending/ingested/failed）
+            status: 状态过滤(pending/ingested/failed)
             limit: 返回记录数
         
         Returns:
@@ -528,9 +528,9 @@ class DataQueryService:
             days: 统计天数
         
         Returns:
-            汇总数据字典，包含：
+            汇总数据字典,包含:
                 - order_count: 订单总数
-                - total_gmv: 总GMV（RMB）
+                - total_gmv: 总GMV(RMB)
                 - avg_order_amount: 平均订单金额
                 - top_products: Top 5产品
                 - daily_trend: 每日趋势
@@ -568,7 +568,7 @@ class DataQueryService:
         }
     
     # ========================================
-    # 产品指标统一查询（层级感知）
+    # 产品指标统一查询(层级感知)
     # ========================================
     
     @cached(ttl_seconds=300)
@@ -583,19 +583,19 @@ class DataQueryService:
         include_metadata: bool = True
     ) -> pd.DataFrame:
         """
-        统一产品指标查询（支持层级感知，避免重复计数）
+        统一产品指标查询(支持层级感知,避免重复计数)
         
         Args:
             platforms: 平台列表
             shops: 店铺列表
             skus: SKU列表
-            start_date: 开始日期（YYYY-MM-DD）
-            end_date: 结束日期（YYYY-MM-DD）
+            start_date: 开始日期(YYYY-MM-DD)
+            end_date: 结束日期(YYYY-MM-DD)
             prefer_scope: 查询策略
-                - 'auto': 优先商品级，缺失时聚合规格级（推荐，避免重复计数）
+                - 'auto': 优先商品级,缺失时聚合规格级(推荐,避免重复计数)
                 - 'product': 仅商品级
                 - 'variant': 仅规格级
-                - 'both': 商品级+规格级（需自行处理重复计数）
+                - 'both': 商品级+规格级(需自行处理重复计数)
             include_metadata: 是否包含metric_source/quality_score等元数据
         
         Returns:
@@ -607,7 +607,7 @@ class DataQueryService:
         """
         try:
             if prefer_scope == 'auto':
-                # 策略：优先取product行；若某SKU无product行，则聚合其variant行
+                # 策略:优先取product行;若某SKU无product行,则聚合其variant行
                 sql = """
                 WITH product_level AS (
                     SELECT * FROM fact_product_metrics
@@ -718,17 +718,17 @@ def get_data_query_service() -> DataQueryService:
 
 # 便捷函数
 def query_orders(**kwargs) -> pd.DataFrame:
-    """便捷函数：查询订单"""
+    """便捷函数:查询订单"""
     return get_data_query_service().get_orders(**kwargs)
 
 
 def query_product_metrics(**kwargs) -> pd.DataFrame:
-    """便捷函数：查询产品指标"""
+    """便捷函数:查询产品指标"""
     return get_data_query_service().get_product_metrics(**kwargs)
 
 
 def query_catalog_status() -> Dict[str, Any]:
-    """便捷函数：查询Catalog状态"""
+    """便捷函数:查询Catalog状态"""
     return get_data_query_service().get_catalog_status()
 
 

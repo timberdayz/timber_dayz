@@ -45,7 +45,7 @@ def check_backend_running():
     except Exception:
         pass
     
-    print("[FAIL] 后端服务未运行，请先启动后端服务")
+    print("[FAIL] 后端服务未运行,请先启动后端服务")
     print("运行命令: python backend/main.py")
     return False
 
@@ -177,7 +177,7 @@ def main():
             run_performance_monitoring()
             print("\n[DONE] 所有测试完成！")
         else:
-            print("[FAIL] 无效选择，请重新输入")
+            print("[FAIL] 无效选择,请重新输入")
         
         input("\n按回车键继续...")
 

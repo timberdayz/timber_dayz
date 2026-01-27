@@ -11,18 +11,18 @@ from backend.services.data_validator import _parse_int, _parse_float, _parse_dat
 
 def validate_inventory(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    验证库存数据（DSS架构 - 最小化验证）
+    验证库存数据(DSS架构 - 最小化验证)
     
-    [*] v4.6.0 DSS架构原则：
+    [*] v4.6.0 DSS架构原则:
     - 表头字段完全参考源文件的实际表头行
-    - PostgreSQL只做数据存储（JSONB格式，保留原始中文表头）
-    - 目标：把正确不重复的数据入库到PostgreSQL即可
-    - 去重通过data_hash实现，不依赖业务字段名
+    - PostgreSQL只做数据存储(JSONB格式,保留原始中文表头)
+    - 目标:把正确不重复的数据入库到PostgreSQL即可
+    - 去重通过data_hash实现,不依赖业务字段名
     
-    验证原则：
-    - 只验证数据格式（日期、数字等）
-    - 不强制标准字段名（不再要求product_id、platform_sku等）
-    - 允许空值（PostgreSQL支持NULL）
+    验证原则:
+    - 只验证数据格式(日期、数字等)
+    - 不强制标准字段名(不再要求product_id、platform_sku等)
+    - 允许空值(PostgreSQL支持NULL)
     - 数据去重通过data_hash实现
     """
     errors, warnings = [], []
@@ -31,15 +31,15 @@ def validate_inventory(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     for idx, r in enumerate(rows):
         row_errors = []
         
-        # [*] DSS架构：不再验证必填字段（product_id、platform_sku等）
-        # 原因：
-        # 1. 数据保留原始中文表头，字段名可能不固定
-        # 2. 去重通过data_hash实现，不依赖业务字段名
-        # 3. PostgreSQL支持NULL值，允许空值入库
-        # 4. platform_code和shop_id从file_record获取，不需要验证
+        # [*] DSS架构:不再验证必填字段(product_id、platform_sku等)
+        # 原因:
+        # 1. 数据保留原始中文表头,字段名可能不固定
+        # 2. 去重通过data_hash实现,不依赖业务字段名
+        # 3. PostgreSQL支持NULL值,允许空值入库
+        # 4. platform_code和shop_id从file_record获取,不需要验证
         
-        # [*] 只验证数据格式（如果字段存在且不为空）
-        # 1. 数值字段格式验证（支持中英文字段名）
+        # [*] 只验证数据格式(如果字段存在且不为空)
+        # 1. 数值字段格式验证(支持中英文字段名)
         numeric_int_fields = [
             # 英文字段名
             'quantity_on_hand', 'quantity_available', 'quantity_reserved',
@@ -78,7 +78,7 @@ def validate_inventory(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                         "row": idx,
                         "col": field,
                         "type": "range",
-                        "msg": f"{field}超过10000000，请确认"
+                        "msg": f"{field}超过10000000,请确认"
                     })
         
         # 小数字段验证
@@ -103,10 +103,10 @@ def validate_inventory(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                         "row": idx,
                         "col": field,
                         "type": "range",
-                        "msg": f"{field}超过100000000，请确认"
+                        "msg": f"{field}超过100000000,请确认"
                     })
         
-        # 2. 日期字段格式验证（如果存在）
+        # 2. 日期字段格式验证(如果存在)
         date_fields = [
             'metric_date', 'date', '日期', '时间', '统计日期', '库存日期'
         ]
@@ -119,11 +119,11 @@ def validate_inventory(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                     row_errors.append({
                         "col": field,
                         "type": "data_type",
-                        "msg": f"{field}格式不正确（应为日期格式）"
+                        "msg": f"{field}格式不正确(应为日期格式)"
                     })
         
-        # 3. 库存逻辑验证（如果相关字段都存在）
-        # 尝试多种字段名（中英文）
+        # 3. 库存逻辑验证(如果相关字段都存在)
+        # 尝试多种字段名(中英文)
         qty_on_hand = (
             _parse_int(r.get("quantity_on_hand")) or
             _parse_int(r.get("实际库存")) or
@@ -216,7 +216,7 @@ def validate_finance(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                     if parsed_val < min_val:
                         row_errors.append({"col": field, "type": "range", "msg": f"{field_name}不能小于{min_val}"})
                     elif parsed_val > max_val:
-                        warnings.append({"row": idx, "col": field, "type": "range", "msg": f"{field_name}超过{max_val}，请确认"})
+                        warnings.append({"row": idx, "col": field, "type": "range", "msg": f"{field_name}超过{max_val},请确认"})
                 else:
                     row_errors.append({"col": field, "type": "data_type", "msg": f"{field_name}必须为数字"})
         
@@ -270,7 +270,7 @@ def validate_finance(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             if overdue_days < 0:
                 row_errors.append({"col": "overdue_days", "type": "range", "msg": "逾期天数不能为负数"})
             elif overdue_days > 365:
-                warnings.append({"row": idx, "col": "overdue_days", "type": "range", "msg": "逾期天数超过365天，请确认"})
+                warnings.append({"row": idx, "col": "overdue_days", "type": "range", "msg": "逾期天数超过365天,请确认"})
         
         # 添加行错误
         for error in row_errors:
@@ -362,7 +362,7 @@ def validate_order_finance_relation(orders: List[Dict[str, Any]],
         if fin_data:
             ar_amount = _parse_decimal(fin_data.get("ar_amount_cny", 0))
             if ar_amount is not None and total_amount is not None:
-                # 检查应收账款是否与订单金额匹配（考虑汇率）
+                # 检查应收账款是否与订单金额匹配(考虑汇率)
                 exchange_rate = _parse_decimal(order.get("exchange_rate", 1))
                 expected_ar = total_amount * exchange_rate
                 

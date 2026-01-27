@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-数据丢失分析服务（v4.13.0新增）
+数据丢失分析服务(v4.13.0新增)
 
-功能：
+功能:
 1. 分析数据丢失的共同特征
 2. 提供数据丢失统计信息
 3. 实现数据丢失预警机制
@@ -11,19 +11,18 @@
 
 from typing import Dict, Any, List, Optional, Union
 from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession  # [*] v4.18.2新增：异步支持
+from sqlalchemy.ext.asyncio import AsyncSession  # [*] v4.18.2新增:异步支持
 from sqlalchemy import func, select, and_, or_
 from datetime import datetime, timedelta
 from collections import Counter
-import asyncio  # [*] v4.18.2新增：用于run_in_executor
+import asyncio  # [*] v4.18.2新增:用于run_in_executor
 
 from modules.core.db import (
     CatalogFile,
     StagingOrders,
     StagingProductMetrics,
     StagingInventory,
-    FactOrder,
-    FactOrderItem,
+    # [DELETED] v4.19.0: FactOrder, FactOrderItem 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
     FactProductMetric,
     DataQuarantine
 )
@@ -39,16 +38,16 @@ async def analyze_data_loss(
     data_domain: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    [*] v4.18.2更新：完全过渡到异步架构，只接受AsyncSession
+    [*] v4.18.2更新:完全过渡到异步架构,只接受AsyncSession
     """
     """
     分析数据丢失情况
     
     Args:
         db: 数据库会话
-        file_id: 文件ID（可选）
-        task_id: 任务ID（可选）
-        data_domain: 数据域（可选）
+        file_id: 文件ID(可选)
+        task_id: 任务ID(可选)
+        data_domain: 数据域(可选)
     
     Returns:
         数据丢失分析结果
@@ -68,7 +67,7 @@ async def analyze_data_loss(
         
         # Step 2: 根据数据域统计
         if data_domain == "orders":
-            # Raw层：从staging表统计（staging表是raw数据的暂存）
+            # Raw层:从staging表统计(staging表是raw数据的暂存)
             if file_id:
                 result = await db.execute(
                     select(func.count(StagingOrders.id)).where(StagingOrders.file_id == file_id)
@@ -83,21 +82,15 @@ async def analyze_data_loss(
                 result = await db.execute(select(func.count(StagingOrders.id)))
                 stats["raw_count"] = result.scalar() or 0
             
-            # Staging层：同上（staging表就是staging层）
+            # Staging层:同上(staging表就是staging层)
             stats["staging_count"] = stats["raw_count"]
             
-            # Fact层：从fact_order表统计
-            # [*] 修复：FactOrder使用复合主键，没有id字段，使用func.count(1)或主键字段之一
-            if file_id:
-                result = await db.execute(
-                    select(func.count(FactOrder.platform_code)).where(FactOrder.file_id == file_id)
-                )
-                stats["fact_count"] = result.scalar() or 0
-            else:
-                result = await db.execute(select(func.count(FactOrder.platform_code)))
-                stats["fact_count"] = result.scalar() or 0
+            # Fact层:从fact_order表统计
+            # [DELETED] v4.19.0: FactOrder 已删除,订单数据现在在 b_class.fact_{platform}_orders_{granularity}
+            # [TODO] 需要查询 b_class schema 下的分表来统计订单数据
+            stats["fact_count"] = 0  # 暂时返回0,待实现新的查询逻辑
             
-            # 隔离区：从data_quarantine表统计
+            # 隔离区:从data_quarantine表统计
             if file_id:
                 result = await db.execute(
                     select(func.count(DataQuarantine.id)).where(
@@ -115,7 +108,7 @@ async def analyze_data_loss(
                 stats["quarantine_count"] = result.scalar() or 0
         
         elif data_domain in ["products", "traffic", "analytics"]:
-            # Raw层：从staging表统计
+            # Raw层:从staging表统计
             if file_id:
                 result = await db.execute(
                     select(func.count(StagingProductMetrics.id)).where(StagingProductMetrics.file_id == file_id)
@@ -132,9 +125,9 @@ async def analyze_data_loss(
             
             stats["staging_count"] = stats["raw_count"]
             
-            # Fact层：从fact_product_metric表统计
-            # [*] 修复：FactProductMetric使用复合主键，没有id字段，使用func.count(1)或主键字段之一
-            # [*] 修复：FactProductMetric使用source_catalog_id字段，不是file_id
+            # Fact层:从fact_product_metric表统计
+            # [*] 修复:FactProductMetric使用复合主键,没有id字段,使用func.count(1)或主键字段之一
+            # [*] 修复:FactProductMetric使用source_catalog_id字段,不是file_id
             if file_id:
                 result = await db.execute(
                     select(func.count(FactProductMetric.platform_code)).where(
@@ -164,7 +157,7 @@ async def analyze_data_loss(
                 stats["quarantine_count"] = result.scalar() or 0
         
         elif data_domain == "inventory":
-            # Raw层：从staging_inventory表统计
+            # Raw层:从staging_inventory表统计
             if file_id:
                 result = await db.execute(
                     select(func.count(StagingInventory.id)).where(StagingInventory.file_id == file_id)
@@ -181,9 +174,9 @@ async def analyze_data_loss(
             
             stats["staging_count"] = stats["raw_count"]
             
-            # Fact层：从fact_product_metric表统计（inventory数据存储在fact_product_metric表中）
-            # [*] 修复：FactProductMetric使用复合主键，没有id字段，使用func.count(1)或主键字段之一
-            # [*] 修复：FactProductMetric使用source_catalog_id字段，不是file_id
+            # Fact层:从fact_product_metric表统计(inventory数据存储在fact_product_metric表中)
+            # [*] 修复:FactProductMetric使用复合主键,没有id字段,使用func.count(1)或主键字段之一
+            # [*] 修复:FactProductMetric使用source_catalog_id字段,不是file_id
             if file_id:
                 result = await db.execute(
                     select(func.count(FactProductMetric.platform_code)).where(
@@ -320,17 +313,17 @@ async def check_data_loss_threshold(
     threshold: float = 5.0
 ) -> Dict[str, Any]:
     """
-    [*] v4.18.2更新：完全过渡到异步架构，只接受AsyncSession
+    [*] v4.18.2更新:完全过渡到异步架构,只接受AsyncSession
     """
     """
     检查数据丢失率是否超过阈值
     
     Args:
         db: 数据库会话
-        file_id: 文件ID（可选）
-        task_id: 任务ID（可选）
-        data_domain: 数据域（可选）
-        threshold: 丢失率阈值（默认5%）
+        file_id: 文件ID(可选)
+        task_id: 任务ID(可选)
+        data_domain: 数据域(可选)
+        threshold: 丢失率阈值(默认5%)
     
     Returns:
         预警信息
@@ -378,7 +371,7 @@ async def check_data_loss_threshold(
         }
 
 
-# ==================== 异步包装函数（v4.18.2新增）====================
+# ==================== 异步包装函数(v4.18.2新增)====================
 
 async def async_analyze_data_loss(
     db: AsyncSession,
@@ -387,9 +380,9 @@ async def async_analyze_data_loss(
     data_domain: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    异步分析数据丢失（[*] v4.18.2更新：直接调用异步函数）
+    异步分析数据丢失([*] v4.18.2更新:直接调用异步函数)
     
-    [*] v4.18.2更新：analyze_data_loss已改为异步函数，直接调用
+    [*] v4.18.2更新:analyze_data_loss已改为异步函数,直接调用
     """
     return await analyze_data_loss(db, file_id, task_id, data_domain)
 
@@ -402,9 +395,9 @@ async def async_check_data_loss_threshold(
     threshold: float = 5.0
 ) -> Dict[str, Any]:
     """
-    异步检查数据丢失阈值（[*] v4.18.2更新：直接调用异步函数）
+    异步检查数据丢失阈值([*] v4.18.2更新:直接调用异步函数)
     
-    [*] v4.18.2更新：check_data_loss_threshold已改为异步函数，直接调用
+    [*] v4.18.2更新:check_data_loss_threshold已改为异步函数,直接调用
     """
     return await check_data_loss_threshold(db, file_id, task_id, data_domain, threshold)
 

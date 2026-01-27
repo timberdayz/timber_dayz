@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-字段映射质量评分API端点（v4.13.0新增）
+字段映射质量评分API端点(v4.13.0新增)
 """
 
 from fastapi import APIRouter, Depends, Query
@@ -31,8 +31,8 @@ async def get_mapping_quality(
     """
     获取字段映射质量评分
     
-    功能：
-    - 计算字段映射质量评分（0-100分）
+    功能:
+    - 计算字段映射质量评分(0-100分)
     - 识别映射问题
     - 提供改进建议
     """
@@ -62,9 +62,9 @@ async def get_mapping_quality(
                 status_code=404
             )
         
-        # 3. 获取字段映射配置（通过模板匹配器）
+        # 3. 获取字段映射配置(通过模板匹配器)
         template_matcher = get_template_matcher(db)
-        # [*] v4.18.2：添加 await
+        # [*] v4.18.2:添加 await
         template = await template_matcher.find_best_template(
             platform=catalog_file.platform_code,
             data_domain=catalog_file.data_domain,
@@ -81,8 +81,8 @@ async def get_mapping_quality(
                 status_code=404
             )
         
-        # 4. 读取文件数据（预览前100行用于评分）
-        # [*] 修复：CatalogFile没有header_row字段，使用模板的header_row或默认0
+        # 4. 读取文件数据(预览前100行用于评分)
+        # [*] 修复:CatalogFile没有header_row字段,使用模板的header_row或默认0
         header_row = 0
         if template and hasattr(template, 'header_row') and template.header_row is not None:
             header_row = template.header_row
@@ -98,7 +98,7 @@ async def get_mapping_quality(
         
         # 5. 获取列名并应用字段映射
         columns = df.columns.tolist()
-        # [*] v4.18.2：添加 await
+        # [*] v4.18.2:添加 await
         mappings = await template_matcher.apply_template_to_columns(template, columns)
         
         if not mappings:

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, desc
 from modules.core.db import (
     FieldMappingTemplate,
-    # FieldMappingTemplateItem,  # v4.6.0移除：不再使用明细表，改用header_columns JSONB
+    # FieldMappingTemplateItem,  # v4.6.0移除:不再使用明细表,改用header_columns JSONB
 )
 from modules.core.logger import get_logger
 from datetime import datetime
@@ -29,7 +29,7 @@ class FieldMappingTemplateService:
         self,
         platform: str,
         data_domain: str,
-        header_columns: List[str],  # v4.6.0修改：改为原始表头字段列表
+        header_columns: List[str],  # v4.6.0修改:改为原始表头字段列表
         granularity: str = None,
         account: str = None,
         template_name: str = None,
@@ -40,55 +40,55 @@ class FieldMappingTemplateService:
         sheet_name: str = None,
         encoding: str = 'utf-8',
         # v4.14.0新增参数
-        deduplication_fields: Optional[List[str]] = None  # 核心去重字段列表（可选）
+        deduplication_fields: Optional[List[str]] = None  # 核心去重字段列表(可选)
     ) -> int:
         """
-        保存映射模板（v4.6.0重构版 + v4.14.0增强）
+        保存映射模板(v4.6.0重构版 + v4.14.0增强)
         
-        v4.6.0变更：
-        - 不再保存字段映射关系（FieldMappingTemplateItem）
-        - 改为保存原始表头字段列表（header_columns JSONB）
+        v4.6.0变更:
+        - 不再保存字段映射关系(FieldMappingTemplateItem)
+        - 改为保存原始表头字段列表(header_columns JSONB)
         - 匹配逻辑基于原始表头字段列表
         
-        v4.14.0新增：
-        - 支持保存核心去重字段列表（deduplication_fields）
-        - 如果用户未指定，使用默认核心字段配置
+        v4.14.0新增:
+        - 支持保存核心去重字段列表(deduplication_fields)
+        - 如果用户未指定,使用默认核心字段配置
         
         Args:
             platform: 平台代码
             data_domain: 数据域
-            header_columns: 原始表头字段列表（v4.6.0新增）
-            granularity: 粒度（可选）
-            account: 账号（可选）
-            template_name: 模板名称（可选）
+            header_columns: 原始表头字段列表(v4.6.0新增)
+            granularity: 粒度(可选)
+            account: 账号(可选)
+            template_name: 模板名称(可选)
             created_by: 创建人
-            header_row: 表头行索引（v4.5.1新增，默认0）
-            sub_domain: 子数据类型（v4.5.1新增，如ai_assistant/agent）
-            sheet_name: Excel工作表名称（v4.5.1新增）
-            encoding: 文件编码（v4.5.1新增，默认utf-8）
-            deduplication_fields: 核心去重字段列表（v4.14.0新增，可选）
+            header_row: 表头行索引(v4.5.1新增,默认0)
+            sub_domain: 子数据类型(v4.5.1新增,如ai_assistant/agent)
+            sheet_name: Excel工作表名称(v4.5.1新增)
+            encoding: 文件编码(v4.5.1新增,默认utf-8)
+            deduplication_fields: 核心去重字段列表(v4.14.0新增,可选)
             
         Returns:
             template_id: 新创建的模板ID
         """
         try:
-            # 验证header_row范围（企业级数据治理标准）
+            # 验证header_row范围(企业级数据治理标准)
             if not (0 <= header_row <= 100):
-                raise ValueError(f"header_row必须在0-100之间，当前值: {header_row}")
+                raise ValueError(f"header_row必须在0-100之间,当前值: {header_row}")
             
             # 验证header_columns
             if not header_columns or not isinstance(header_columns, list):
-                raise ValueError(f"header_columns必须是非空列表，当前值: {header_columns}")
+                raise ValueError(f"header_columns必须是非空列表,当前值: {header_columns}")
             
-            # v4.14.0新增：处理deduplication_fields
-            # 如果用户未指定，使用默认核心字段配置
+            # v4.14.0新增:处理deduplication_fields
+            # 如果用户未指定,使用默认核心字段配置
             if deduplication_fields is None:
                 deduplication_fields = get_default_deduplication_fields(data_domain, sub_domain)
                 logger.debug(f"[Template] 使用默认核心字段配置: {deduplication_fields}")
             elif not isinstance(deduplication_fields, list):
-                raise ValueError(f"deduplication_fields必须是列表，当前值: {deduplication_fields}")
+                raise ValueError(f"deduplication_fields必须是列表,当前值: {deduplication_fields}")
             
-            # 查找是否已有同维度的published模板（v4.5.1扩展：包含sub_domain）
+            # 查找是否已有同维度的published模板(v4.5.1扩展:包含sub_domain)
             existing = self.db.execute(
                 select(FieldMappingTemplate).where(
                     and_(
@@ -111,7 +111,7 @@ class FieldMappingTemplateService:
             else:
                 new_version = 1
             
-            # 创建新模板（v4.6.0：保存header_columns JSONB + v4.14.0：保存deduplication_fields）
+            # 创建新模板(v4.6.0:保存header_columns JSONB + v4.14.0:保存deduplication_fields)
             template = FieldMappingTemplate(
                 platform=platform,
                 data_domain=data_domain,
@@ -121,16 +121,16 @@ class FieldMappingTemplateService:
                 header_row=header_row,  # v4.5.1新增
                 sheet_name=sheet_name,  # v4.5.1新增
                 encoding=encoding,  # v4.5.1新增
-                header_columns=header_columns,  # v4.6.0新增：原始表头字段列表
-                deduplication_fields=deduplication_fields,  # v4.14.0新增：核心去重字段列表
+                header_columns=header_columns,  # v4.6.0新增:原始表头字段列表
+                deduplication_fields=deduplication_fields,  # v4.14.0新增:核心去重字段列表
                 template_name=template_name or f"{platform}_{data_domain}_{sub_domain or ''}_{granularity}_v{new_version}",
                 version=new_version,
                 status='published',
-                field_count=len(header_columns),  # v4.6.0：使用header_columns长度
+                field_count=len(header_columns),  # v4.6.0:使用header_columns长度
                 usage_count=0,
                 success_rate=0.0,
                 created_by=created_by,
-                notes=f"DSS架构重构（v4.6.0）+ 核心字段去重（v4.14.0）"
+                notes=f"DSS架构重构(v4.6.0)+ 核心字段去重(v4.14.0)"
             )
             
             self.db.add(template)
@@ -156,7 +156,7 @@ class FieldMappingTemplateService:
         Args:
             platform: 平台过滤
             data_domain: 数据域过滤
-            status: 状态过滤（published/archived/draft）
+            status: 状态过滤(published/archived/draft)
             
         Returns:
             模板列表
@@ -194,7 +194,7 @@ class FieldMappingTemplateService:
                     "version": tmpl.version,
                     "status": tmpl.status,
                     "field_count": tmpl.field_count,
-                    "deduplication_fields": tmpl.deduplication_fields if hasattr(tmpl, 'deduplication_fields') and tmpl.deduplication_fields else [],  # v4.14.0新增：核心字段列表
+                    "deduplication_fields": tmpl.deduplication_fields if hasattr(tmpl, 'deduplication_fields') and tmpl.deduplication_fields else [],  # v4.14.0新增:核心字段列表
                     "usage_count": tmpl.usage_count,
                     "success_rate": tmpl.success_rate,
                     "created_by": tmpl.created_by,
@@ -210,9 +210,9 @@ class FieldMappingTemplateService:
     
     def get_template(self, template_id: int) -> Optional[Dict]:
         """
-        获取模板详情（v4.6.0重构版）
+        获取模板详情(v4.6.0重构版)
         
-        v4.6.0变更：
+        v4.6.0变更:
         - 不再查询FieldMappingTemplateItem表
         - 改为返回header_columns数组
         """
@@ -222,7 +222,7 @@ class FieldMappingTemplateService:
             if not template:
                 return None
             
-            # v4.6.0：从header_columns JSONB读取原始表头字段列表
+            # v4.6.0:从header_columns JSONB读取原始表头字段列表
             header_columns = template.header_columns or []
             
             return {
@@ -240,7 +240,7 @@ class FieldMappingTemplateService:
                     "field_count": template.field_count or len(header_columns),
                     "status": template.status
                 },
-                "header_columns": header_columns  # v4.6.0：返回原始表头字段列表
+                "header_columns": header_columns  # v4.6.0:返回原始表头字段列表
             }
             
         except Exception as e:
@@ -253,11 +253,11 @@ class FieldMappingTemplateService:
         current_columns: List[str]
     ) -> Dict:
         """
-        应用模板到当前文件（v4.6.0重构版）
+        应用模板到当前文件(v4.6.0重构版)
         
-        v4.6.0变更：
+        v4.6.0变更:
         - 基于header_columns进行匹配
-        - 如果当前文件的列名与模板的header_columns匹配，则认为可以使用该模板
+        - 如果当前文件的列名与模板的header_columns匹配,则认为可以使用该模板
         
         Args:
             template_id: 模板ID
@@ -282,13 +282,13 @@ class FieldMappingTemplateService:
             
             template_header_columns = template_data.get('header_columns', [])
             
-            # 应用模板：基于原始表头字段列表进行匹配
+            # 应用模板:基于原始表头字段列表进行匹配
             matched = 0
             unmatched_columns = []
             
-            # 创建模板字段的标准化集合（用于模糊匹配）
+            # 创建模板字段的标准化集合(用于模糊匹配)
             template_normalized = {
-                re.sub(r'[\s_\-()（）]', '', col.lower()): col
+                re.sub(r'[\s_\-()()]', '', col.lower()): col
                 for col in template_header_columns
             }
             
@@ -297,8 +297,8 @@ class FieldMappingTemplateService:
                 if col in template_header_columns:
                     matched += 1
                 else:
-                    # 2. 模糊匹配（去除空格、特殊字符）
-                    col_normalized = re.sub(r'[\s_\-()（）]', '', col.lower())
+                    # 2. 模糊匹配(去除空格、特殊字符)
+                    col_normalized = re.sub(r'[\s_\-()()]', '', col.lower())
                     if col_normalized in template_normalized:
                         matched += 1
                     else:

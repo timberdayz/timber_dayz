@@ -3,7 +3,7 @@
 
 """
 录制步骤执行框架
-加载并执行用户录制的采集脚本，支持函数导入和codegen脚本适配
+加载并执行用户录制的采集脚本,支持函数导入和codegen脚本适配
 """
 
 import os
@@ -90,7 +90,7 @@ class StepRunner:
                 # 合并下载文件列表
                 result["downloaded_files"].extend(step_result.get("downloaded_files", []))
                 
-                # 如果某个步骤失败，记录但继续执行其他步骤
+                # 如果某个步骤失败,记录但继续执行其他步骤
                 if not step_result["success"]:
                     logger.warning(f"[WARN] 步骤执行失败: {script_file}")
             
@@ -98,7 +98,7 @@ class StepRunner:
             successful_steps = [step for step in result["executed_steps"] if step["success"]]
             if successful_steps:
                 result["success"] = True
-                logger.info(f"[OK] 录制步骤执行完成，成功{len(successful_steps)}/{len(result['executed_steps'])}个步骤")
+                logger.info(f"[OK] 录制步骤执行完成,成功{len(successful_steps)}/{len(result['executed_steps'])}个步骤")
             else:
                 result["error"] = "所有录制步骤都执行失败"
                 logger.error(f"[FAIL] {result['error']}")
@@ -164,11 +164,11 @@ class StepRunner:
             if self._try_import_and_execute(script_file, account, page, date_range, result):
                 return result
             
-            # 如果导入失败，尝试作为独立脚本执行
+            # 如果导入失败,尝试作为独立脚本执行
             if self._try_subprocess_execute(script_file, account, page, result):
                 return result
             
-            result["error"] = "脚本执行失败：无法导入或运行"
+            result["error"] = "脚本执行失败:无法导入或运行"
             
         except Exception as e:
             result["error"] = f"脚本执行异常: {e}"
@@ -207,7 +207,7 @@ class StepRunner:
                         
                         # 尝试不同的参数组合
                         try:
-                            # 标准接口：run_step(page, account, date_range, context)
+                            # 标准接口:run_step(page, account, date_range, context)
                             if func_name == "run_step":
                                 context = {"platform": account.get("platform"), "step_type": "collection"}
                                 func_result = func(page, account, date_range or {}, context)
@@ -226,7 +226,7 @@ class StepRunner:
                             break
                             
                         except TypeError:
-                            # 参数不匹配，尝试无参数调用
+                            # 参数不匹配,尝试无参数调用
                             try:
                                 func_result = func()
                                 result["success"] = bool(func_result)
@@ -253,11 +253,11 @@ class StepRunner:
     
     def _try_subprocess_execute(self, script_file: Path, account: Dict, 
                               page: Page, result: Dict) -> bool:
-        """尝试作为独立脚本执行（适用于codegen生成的脚本）"""
+        """尝试作为独立脚本执行(适用于codegen生成的脚本)"""
         try:
             logger.info(f"[RETRY] 尝试子进程执行脚本: {script_file.name}")
             
-            # 注意：这种方式无法传递page对象，适用于完全独立的脚本
+            # 注意:这种方式无法传递page对象,适用于完全独立的脚本
             # 主要用于codegen生成的完整脚本
             
             cmd = [sys.executable, str(script_file)]
@@ -279,7 +279,7 @@ class StepRunner:
                 
                 return True
             else:
-                logger.warning(f"[WARN] 子进程脚本执行失败，返回码: {process.returncode}")
+                logger.warning(f"[WARN] 子进程脚本执行失败,返回码: {process.returncode}")
                 if process.stderr:
                     logger.warning(f"错误输出: {process.stderr[:500]}...")
                 return False
@@ -352,7 +352,7 @@ def run_step(page, account, date_range, context):
     标准录制步骤接口
     
     Args:
-        page: Playwright页面对象（已登录）
+        page: Playwright页面对象(已登录)
         account: 账号信息字典
         date_range: 日期范围 {{"start_date": "2025-01-01", "end_date": "2025-01-31"}}
         context: 上下文信息 {{"platform": "{platform}", "step_type": "{step_type}"}}
@@ -364,7 +364,7 @@ def run_step(page, account, date_range, context):
         print(f"[ACTION] 开始执行{platform}平台{step_type}步骤")
         
         # TODO: 在这里添加您录制的操作步骤
-        # 示例：
+        # 示例:
         # page.click("button:has-text('导出')")
         # page.wait_for_download()
         
@@ -383,7 +383,7 @@ def run_step(page, account, date_range, context):
 
 
 if __name__ == "__main__":
-    print("这是一个录制脚本模板，请使用StepRunner调用run_step函数")
+    print("这是一个录制脚本模板,请使用StepRunner调用run_step函数")
 '''
             
             template_file.write_text(template_content, encoding='utf-8')

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 账号对齐API - v4.3.6 现代化ERP版
-运行时仅用DB+缓存，YAML作为导入/导出通道
+运行时仅用DB+缓存,YAML作为导入/导出通道
 
 v4.18.0: 添加response_model支持Contract-First架构
 """
@@ -23,7 +23,7 @@ from modules.services.account_alignment import get_account_alignment_service
 from modules.core.db import AccountAlias
 from modules.core.logger import get_logger
 
-# v4.18.0: 导入schemas（Contract-First架构）
+# v4.18.0: 导入schemas(Contract-First架构)
 from backend.schemas.account_alignment import (
     AlignmentStatsResponse,
     MissingSuggestionsResponse,
@@ -86,7 +86,7 @@ async def get_missing_mappings(min_orders: int = 5, db: AsyncSession = Depends(g
     获取缺失映射建议
     
     Args:
-        min_orders: 最小订单数（过滤低频店铺）
+        min_orders: 最小订单数(过滤低频店铺)
         
     Returns:
         list: 建议映射列表
@@ -107,7 +107,7 @@ async def get_missing_mappings(min_orders: int = 5, db: AsyncSession = Depends(g
             message="获取建议失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -119,7 +119,7 @@ async def list_all_aliases(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    列出所有别名映射（供UI显示和编辑）
+    列出所有别名映射(供UI显示和编辑)
     
     Args:
         platform: 平台代码
@@ -168,7 +168,7 @@ async def list_all_aliases(
             message="列出别名失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -213,7 +213,7 @@ async def add_alias(request: Dict, db: AsyncSession = Depends(get_async_db)):
             code=ErrorCode.DATA_REQUIRED_FIELD_MISSING,
             message=f"缺少必填字段: {e}",
             error_type=get_error_type(ErrorCode.DATA_REQUIRED_FIELD_MISSING),
-            recovery_suggestion="请检查请求参数，确保所有必填字段都已提供",
+            recovery_suggestion="请检查请求参数,确保所有必填字段都已提供",
             status_code=400
         )
     except Exception as e:
@@ -223,7 +223,7 @@ async def add_alias(request: Dict, db: AsyncSession = Depends(get_async_db)):
             message="添加别名失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -269,7 +269,7 @@ async def batch_add_aliases(request: Dict, db: AsyncSession = Depends(get_async_
             message="批量添加失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据格式和数据库连接，或联系系统管理员",
+            recovery_suggestion="请检查数据格式和数据库连接,或联系系统管理员",
             status_code=500
         )
 
@@ -277,10 +277,10 @@ async def batch_add_aliases(request: Dict, db: AsyncSession = Depends(get_async_
 @router.post("/backfill", response_model=BackfillResponse)
 async def backfill_alignment(limit: int = None, db: AsyncSession = Depends(get_async_db)):
     """
-    执行回填（将别名映射应用到历史订单）
+    执行回填(将别名映射应用到历史订单)
     
     Args:
-        limit: 限制处理数量（None=全量）
+        limit: 限制处理数量(None=全量)
         
     Returns:
         对齐统计
@@ -292,7 +292,7 @@ async def backfill_alignment(limit: int = None, db: AsyncSession = Depends(get_a
         return BackfillResponse(
             success=True,
             updated=stats.aligned,
-            message=f"回填完成：对齐{stats.aligned}个订单，覆盖率{stats.coverage_rate:.1f}%"
+            message=f"回填完成:对齐{stats.aligned}个订单,覆盖率{stats.coverage_rate:.1f}%"
         )
     except Exception as e:
         logger.error(f"回填失败: {e}")
@@ -301,7 +301,7 @@ async def backfill_alignment(limit: int = None, db: AsyncSession = Depends(get_a
             message="回填失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -309,9 +309,9 @@ async def backfill_alignment(limit: int = None, db: AsyncSession = Depends(get_a
 @router.post("/import-yaml", response_model=ImportResponse)
 async def import_yaml_aliases(file: UploadFile = File(...), db: AsyncSession = Depends(get_async_db)):
     """
-    导入YAML格式别名（批量导入通道）
+    导入YAML格式别名(批量导入通道)
     
-    格式：
+    格式:
     ```yaml
     shop_aliases:
       'miaoshou:账号:站点:店铺名': 'target_id'
@@ -327,7 +327,7 @@ async def import_yaml_aliases(file: UploadFile = File(...), db: AsyncSession = D
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="YAML文件中未找到shop_aliases节点",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请检查YAML文件格式，确保包含shop_aliases节点",
+                recovery_suggestion="请检查YAML文件格式,确保包含shop_aliases节点",
                 status_code=400
             )
         
@@ -366,7 +366,7 @@ async def import_yaml_aliases(file: UploadFile = File(...), db: AsyncSession = D
             code=ErrorCode.DATA_FORMAT_INVALID,
             message=f"YAML格式错误: {str(e)}",
             error_type=get_error_type(ErrorCode.DATA_FORMAT_INVALID),
-            recovery_suggestion="请检查YAML文件格式是否正确，或参考示例文件",
+            recovery_suggestion="请检查YAML文件格式是否正确,或参考示例文件",
             status_code=400
         )
     except Exception as e:
@@ -376,7 +376,7 @@ async def import_yaml_aliases(file: UploadFile = File(...), db: AsyncSession = D
             message="YAML导入失败",
             error_type=get_error_type(ErrorCode.FILE_READ_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查文件格式和内容，或联系系统管理员",
+            recovery_suggestion="请检查文件格式和内容,或联系系统管理员",
             status_code=500
         )
 
@@ -384,9 +384,9 @@ async def import_yaml_aliases(file: UploadFile = File(...), db: AsyncSession = D
 @router.post("/import-csv", response_model=ImportResponse)
 async def import_csv_aliases(file: UploadFile = File(...), db: AsyncSession = Depends(get_async_db)):
     """
-    导入CSV格式别名（批量导入通道）
+    导入CSV格式别名(批量导入通道)
     
-    CSV格式（必须包含表头）：
+    CSV格式(必须包含表头):
     account,site,store_label_raw,target_id,notes
     虾皮巴西_东朗照明主体,菲律宾,菲律宾1店,shopee_ph_1,主力店
     """
@@ -426,7 +426,7 @@ async def import_csv_aliases(file: UploadFile = File(...), db: AsyncSession = De
             message="CSV导入失败",
             error_type=get_error_type(ErrorCode.FILE_READ_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查CSV文件格式和内容，或联系系统管理员",
+            recovery_suggestion="请检查CSV文件格式和内容,或联系系统管理员",
             status_code=500
         )
 
@@ -438,7 +438,7 @@ async def export_yaml_aliases(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    导出别名为YAML格式（备份/分享）
+    导出别名为YAML格式(备份/分享)
     
     Returns:
         YAML文本内容
@@ -480,7 +480,7 @@ async def export_yaml_aliases(
             message="YAML导出失败",
             error_type=get_error_type(ErrorCode.FILE_WRITE_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查磁盘空间和文件权限，或联系系统管理员",
+            recovery_suggestion="请检查磁盘空间和文件权限,或联系系统管理员",
             status_code=500
         )
 
@@ -492,7 +492,7 @@ async def export_csv_aliases(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    导出别名为CSV格式（Excel友好）
+    导出别名为CSV格式(Excel友好)
     
     Returns:
         CSV文本内容
@@ -543,7 +543,7 @@ async def export_csv_aliases(
             message="CSV导出失败",
             error_type=get_error_type(ErrorCode.FILE_WRITE_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查磁盘空间和文件权限，或联系系统管理员",
+            recovery_suggestion="请检查磁盘空间和文件权限,或联系系统管理员",
             status_code=500
         )
 
@@ -565,7 +565,7 @@ async def update_alias(alias_id: int, request: Dict, db: AsyncSession = Depends(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="别名不存在",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请检查别名ID是否正确，或确认该别名已创建",
+                recovery_suggestion="请检查别名ID是否正确,或确认该别名已创建",
                 status_code=404
             )
         
@@ -592,7 +592,7 @@ async def update_alias(alias_id: int, request: Dict, db: AsyncSession = Depends(
             message="更新别名失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -600,7 +600,7 @@ async def update_alias(alias_id: int, request: Dict, db: AsyncSession = Depends(
 @router.delete("/delete-alias/{alias_id}", response_model=UpdateAliasResponse)
 async def delete_alias(alias_id: int, db: AsyncSession = Depends(get_async_db)):
     """
-    删除别名映射（软删除：设置active=false）
+    删除别名映射(软删除:设置active=false)
     """
     try:
         result = await db.execute(select(AccountAlias).where(AccountAlias.id == alias_id))
@@ -610,7 +610,7 @@ async def delete_alias(alias_id: int, db: AsyncSession = Depends(get_async_db)):
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="别名不存在",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请检查别名ID是否正确，或确认该别名已创建",
+                recovery_suggestion="请检查别名ID是否正确,或确认该别名已创建",
                 status_code=404
             )
         
@@ -630,7 +630,7 @@ async def delete_alias(alias_id: int, db: AsyncSession = Depends(get_async_db)):
             message="删除别名失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -642,7 +642,7 @@ async def get_distinct_raw_stores(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    获取未对齐的唯一店铺名列表（供UI快速配置）
+    获取未对齐的唯一店铺名列表(供UI快速配置)
     
     Returns:
         list: 唯一店铺名及其统计信息
@@ -700,13 +700,13 @@ async def get_distinct_raw_stores(
             message="获取未对齐店铺失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
 
 def _generate_suggested_id(account: str, site: str, store_label: str) -> str:
-    """生成建议的target_id（简化版）"""
+    """生成建议的target_id(简化版)"""
     import re
     
     # 平台前缀

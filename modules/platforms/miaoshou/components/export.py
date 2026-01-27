@@ -70,7 +70,7 @@ class MiaoshouExporterComponent(ExportComponent):
         if fallback:
             return fallback
         u = (url or "").lower()
-        # v4.10.0更新：warehouse页面返回inventory（库存快照），而非warehouse
+        # v4.10.0更新:warehouse页面返回inventory(库存快照),而非warehouse
         if "warehouse" in u:
             return "inventory"
         if "product" in u or "goods" in u:
@@ -87,14 +87,14 @@ class MiaoshouExporterComponent(ExportComponent):
         return "unknown"
 
     def _close_popups(self, page: Any) -> None:
-        """统一的“观察-关闭弹窗”守护：从配置读取选择器与轮询策略，遍历顶层与所有 frame，并包含 ESC 兜底。"""
+        """统一的“观察-关闭弹窗”守护:从配置读取选择器与轮询策略,遍历顶层与所有 frame,并包含 ESC 兜底。"""
         try:
             if self.logger:
                 try:
                     self.logger.info("[MiaoshouExporter] [SCAN] Check and close possible notification popups...")
                 except Exception:
                     pass
-            # 从配置读取关闭选择器与轮询策略（优先 Warehouse，其次 Products 合并）
+            # 从配置读取关闭选择器与轮询策略(优先 Warehouse,其次 Products 合并)
             from modules.platforms.miaoshou.components.products_config import ProductsSelectors as _PS
             ws = WarehouseSelectors()
             try:
@@ -376,7 +376,7 @@ class MiaoshouExporterComponent(ExportComponent):
             except Exception:
                 pass
             try:
-                print("[MiaoshouExporter] 已打开‘订单状态’，准备点击‘全选’...")
+                print("[MiaoshouExporter] 已打开‘订单状态’,准备点击‘全选’...")
             except Exception:
                 pass
             # Repeatedly click the header '全选' until is-checked appears
@@ -400,7 +400,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             break
                     except Exception:
                         continue
-                # 兜底：通过“全选”文本反推父级 label
+                # 兜底:通过“全选”文本反推父级 label
                 if (not header) or (header.count() < 1):
                     for sc in scopes:
                         try:
@@ -415,7 +415,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                     break
                         except Exception:
                             continue
-                # 最终兜底：通过角色定位复选框
+                # 最终兜底:通过角色定位复选框
                 if (not header) or (header.count() < 1):
                     for sc in scopes:
                         try:
@@ -427,7 +427,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 break
                         except Exception:
                             continue
-                # 多次尝试点击，直到 .is-checked 出现
+                # 多次尝试点击,直到 .is-checked 出现
                 for i in range(6):
                     try:
                         cls = (inpt.get_attribute("class") or "") if inpt else ""
@@ -440,7 +440,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             pass
                         break
                     try:
-                        # 优先点击专用 inner；退化为点击文本或 checkbox 本体
+                        # 优先点击专用 inner;退化为点击文本或 checkbox 本体
                         if toggler and toggler.count() >= 1:
                             toggler.click(timeout=1200)
                         elif header and header.count() >= 1:
@@ -448,7 +448,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         else:
                             page.get_by_text("全选", exact=False).first.click(timeout=1200)
                         page.wait_for_timeout(100)
-                        print(f"[MiaoshouExporter] 正在尝试勾选‘全选’，第{i+1}次...")
+                        print(f"[MiaoshouExporter] 正在尝试勾选‘全选’,第{i+1}次...")
                     except Exception:
                         try:
                             page.get_by_text("全选", exact=False).first.click(timeout=1200)
@@ -564,7 +564,7 @@ class MiaoshouExporterComponent(ExportComponent):
             cur_s, cur_e = self._get_range_values(page)
             if cur_s == s and cur_e == e:
                 try:
-                    print("[MiaoshouExporter] 检测到时间区间已正确，跳过重复设置")
+                    print("[MiaoshouExporter] 检测到时间区间已正确,跳过重复设置")
                 except Exception:
                     pass
                 return
@@ -624,7 +624,7 @@ class MiaoshouExporterComponent(ExportComponent):
             try:
                 btn.hover(timeout=1200)
                 try:
-                    print("[MiaoshouExporter] 已悬停‘导出数据’，等待下拉菜单...")
+                    print("[MiaoshouExporter] 已悬停‘导出数据’,等待下拉菜单...")
                 except Exception:
                     pass
             except Exception:
@@ -676,15 +676,15 @@ class MiaoshouExporterComponent(ExportComponent):
                 # Try clicking the target menu item
                 for sc in scopes:
                     try:
-                        # 1) 精确类名命中（你提供的 DOM）：li.J_purchaseBillExportAllOrderBill.jx-dropdown-menu__item[role='menuitem']
+                        # 1) 精确类名命中(你提供的 DOM):li.J_purchaseBillExportAllOrderBill.jx-dropdown-menu__item[role='menuitem']
                         try:
                             item_by_class = sc.locator("li.J_purchaseBillExportAllOrderBill.jx-dropdown-menu__item[role='menuitem'][aria-disabled='false']").first
                             if item_by_class and item_by_class.count() >= 1:
                                 try:
-                                    print("[MiaoshouExporter] 点击目标（class=J_purchaseBillExportAllOrderBill）...")
+                                    print("[MiaoshouExporter] 点击目标(class=J_purchaseBillExportAllOrderBill)...")
                                 except Exception:
                                     pass
-                                # 保持菜单容器处于 hover，防止项被收起
+                                # 保持菜单容器处于 hover,防止项被收起
                                 try:
                                     sc.hover(timeout=800)
                                 except Exception:
@@ -712,7 +712,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                     return dl_early.value
                                 except Exception:
                                     pass
-                                # 多策略点击（用于弹出确认框的场景）
+                                # 多策略点击(用于弹出确认框的场景)
                                 tried = False
                                 try:
                                     item_by_class.click(timeout=2500, force=True)
@@ -767,12 +767,12 @@ class MiaoshouExporterComponent(ExportComponent):
                                 return None
                         except Exception:
                             pass
-                        # 2) 语义命中：role=menuitem + name
+                        # 2) 语义命中:role=menuitem + name
                         try:
                             item_by_role = sc.get_by_role('menuitem', name='导出全部订单').first
                             if item_by_role and item_by_role.count() >= 1:
                                 try:
-                                    print("[MiaoshouExporter] 点击目标（role=menuitem, name=导出全部订单）...")
+                                    print("[MiaoshouExporter] 点击目标(role=menuitem, name=导出全部订单)...")
                                 except Exception:
                                     pass
                                 #  hover 
@@ -857,7 +857,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 return None
                         except Exception:
                             pass
-                        # 3) 文本命中（包含匹配）：导出全部订单/导出全部数据/导出全部
+                        # 3) 文本命中(包含匹配):导出全部订单/导出全部数据/导出全部
                         for text in ["导出全部订单", "导出全部数据", "导出全部"]:
                             try:
                                 dd_item = sc.get_by_text(text, exact=False).first
@@ -997,7 +997,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 try:
                     btn.click(timeout=1500)
                     try:
-                        print("[MiaoshouExporter] 已点击‘导出数据’，展开下拉...")
+                        print("[MiaoshouExporter] 已点击‘导出数据’,展开下拉...")
                     except Exception:
                         pass
                 except Exception:
@@ -1021,7 +1021,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 ])
                 for sc in scope_list:
                     try:
-                        # 优先按 class 精确命中（你提供的 DOM）
+                        # 优先按 class 精确命中(你提供的 DOM)
                         item_by_class = sc.locator("li.J_purchaseBillExportAllOrderBill.jx-dropdown-menu__item[role='menuitem'][aria-disabled='false']").first
                         if item_by_class and item_by_class.count() >= 1:
                             try: item_by_class.scroll_into_view_if_needed(timeout=1200)
@@ -1142,7 +1142,7 @@ class MiaoshouExporterComponent(ExportComponent):
             is_warehouse = "warehouse/checklist" in current_url
 
             # 预防性关闭可能的公告/通知弹窗
-            # 网络层候选下载链接收集（用于最终兜底：HAR-like轻量抓取）
+            # 网络层候选下载链接收集(用于最终兜底:HAR-like轻量抓取)
             net_candidates: list[str] = []
             def _on_response(res):
                 try:
@@ -1181,12 +1181,12 @@ class MiaoshouExporterComponent(ExportComponent):
                     self.logger.info("[MiaoshouExporter] warehouse/checklist flow detected, using iFrame export path")
                 # 【步骤3】点击导出
                 try:
-                    print("[MiaoshouExporter] 步骤3: 点击导出按钮（iFrame）...")
+                    print("[MiaoshouExporter] 步骤3: 点击导出按钮(iFrame)...")
                     if self.logger:
-                        self.logger.info("[MiaoshouExporter] 步骤3: 点击导出按钮（iFrame）...")
+                        self.logger.info("[MiaoshouExporter] 步骤3: 点击导出按钮(iFrame)...")
                 except Exception:
                     pass
-                # 强制保证“全部时间”：若为商品表现域，重置或清空时间筛选，避免误用昨日/近7天
+                # 强制保证“全部时间”:若为商品表现域,重置或清空时间筛选,避免误用昨日/近7天
                 try:
                     cfg = self.ctx.config or {}
                     if str(cfg.get("data_domain") or "").lower() == "products":
@@ -1230,14 +1230,14 @@ class MiaoshouExporterComponent(ExportComponent):
                 if not self._first_click(page, list(selectors.open_export_menu), timeout=7000):
                     return ExportResult(success=False, message="open export menu failed")
                 try:
-                    print("[MiaoshouExporter] 已点击‘导入/导出商品’，准备选择‘导出搜索的商品’...")
+                    print("[MiaoshouExporter] 已点击‘导入/导出商品’,准备选择‘导出搜索的商品’...")
                 except Exception:
                     pass
                 ok_menu = self._first_click(page, list(selectors.menu_export_searched), timeout=6000)
                 if not ok_menu:
                     return ExportResult(success=False, message="menu item '导出搜索的商品' not found")
                 try:
-                    print("[MiaoshouExporter] 已选择‘导出搜索的商品’，弹出字段选择弹窗...")
+                    print("[MiaoshouExporter] 已选择‘导出搜索的商品’,弹出字段选择弹窗...")
                 except Exception:
                     pass
 
@@ -1280,7 +1280,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             if 'is-checked' in cls:
                                 group_marked += 1
                                 continue
-                        # B. label.pro-checkbox-group-all-select（常见于“其他信息”）
+                        # B. label.pro-checkbox-group-all-select(常见于“其他信息”)
                         container = header.locator('..').locator('..')
                         label = container.locator('label.pro-checkbox-group-all-select').first
                         if label.count() > 0:
@@ -1383,7 +1383,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                     pass
                                 fbtn.click(timeout=4000)
                                 clicked = True
-                                print("[MiaoshouExporter] 已点击导出按钮（footer role=button）")
+                                print("[MiaoshouExporter] 已点击导出按钮(footer role=button)")
                         except Exception:
                             pass
                         # b) primary button selector with text filter
@@ -1397,7 +1397,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                         pass
                                     fbtn2.click(timeout=4000)
                                     clicked = True
-                                    print("[MiaoshouExporter] 已点击导出按钮（footer .jx-button--primary）")
+                                    print("[MiaoshouExporter] 已点击导出按钮(footer .jx-button--primary)")
                             except Exception:
                                 pass
                         # c) click inner span as last try
@@ -1407,7 +1407,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 if fspan and fspan.count() >= 0:
                                     fspan.click(timeout=4000)
                                     clicked = True
-                                    print("[MiaoshouExporter] 已点击导出按钮（footer span）")
+                                    print("[MiaoshouExporter] 已点击导出按钮(footer span)")
                             except Exception:
                                 pass
                 except Exception:
@@ -1432,7 +1432,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             loc.click(timeout=4000)
                             clicked = True
                             try:
-                                print(f"[MiaoshouExporter] 已点击导出按钮（selector={btn}）")
+                                print(f"[MiaoshouExporter] 已点击导出按钮(selector={btn})")
                             except Exception:
                                 pass
                             break
@@ -1444,12 +1444,12 @@ class MiaoshouExporterComponent(ExportComponent):
                     try:
                         page.get_by_role('button', name='导出').first.click(timeout=4000)
                         clicked = True
-                        print("[MiaoshouExporter] 已点击导出按钮（role=button, name=导出）")
+                        print("[MiaoshouExporter] 已点击导出按钮(role=button, name=导出)")
                     except Exception:
                         pass
                 if not clicked:
                     return ExportResult(success=False, message="export button not found or not clickable")
-                # 【步骤4】等待下载（持久监听context级事件，避免遗漏）
+                # 【步骤4】等待下载(持久监听context级事件,避免遗漏)
                 if download is None:
                     try:
                         print("[MiaoshouExporter] 步骤5: 等待下载任务完成...")
@@ -1458,11 +1458,11 @@ class MiaoshouExporterComponent(ExportComponent):
                     except Exception:
                         pass
 
-                    # 标记等待起始时间（用于目录扫描兜底）
+                    # 标记等待起始时间(用于目录扫描兜底)
                     import time as _t
                     start_ts = _t.time()
 
-                    # 最终网络层兜底：若捕获到可疑直连URL，使用 fetch(blob) 触发浏览器下载
+                    # 最终网络层兜底:若捕获到可疑直连URL,使用 fetch(blob) 触发浏览器下载
                     if downloaded_file is None and net_candidates:
                         try:
                             candidate_url = net_candidates[-1]
@@ -1478,7 +1478,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         except Exception:
                             pass
 
-                    # 再触发一次受保护点击，确保捕获事件
+                    # 再触发一次受保护点击,确保捕获事件
                     try:
                         with page.context.expect_download(timeout=15000) as dl_info:
                             try:
@@ -1489,7 +1489,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 pass
                         download = dl_info.value
                     except Exception:
-                        # 回退1：短时进度监听，若仍未捕获则进入目录扫描兜底
+                        # 回退1:短时进度监听,若仍未捕获则进入目录扫描兜底
                         try:
                             texts = list(getattr(selectors, 'progress_texts', []))
                         except Exception:
@@ -1501,7 +1501,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             downloaded_file = self._scan_latest_download(start_ts, max_age_sec=900, suffixes=None)
             else:
                 # Generic export flow (non-warehouse pages)
-                # 再次尝试关闭弹窗，确保按钮可点击
+                # 再次尝试关闭弹窗,确保按钮可点击
                 self._close_popups(page)
                 # Ensure '订单状态' is set to 全选, and apply filters
                 try:
@@ -1510,10 +1510,10 @@ class MiaoshouExporterComponent(ExportComponent):
                         print("[MiaoshouExporter] 步骤2: 设置筛选-订单状态=全选")
                     except Exception:
                         pass
-                    # 再设置时间区间（使用先前写入 ctx.config 的 start/end）
+                    # 再设置时间区间(使用先前写入 ctx.config 的 start/end)
                     self._ensure_date_range_from_config(page)
                     try:
-                        print("[MiaoshouExporter] 步骤3: 点击‘搜索’应用筛选（已设置时间区间）...")
+                        print("[MiaoshouExporter] 步骤3: 点击‘搜索’应用筛选(已设置时间区间)...")
                     except Exception:
                         pass
                     self._trigger_search(page)
@@ -1579,12 +1579,12 @@ class MiaoshouExporterComponent(ExportComponent):
                     page.context.on("page", _on_new_page)
                 except Exception:
                     pass
-                # 直接在 context 级别也监听下载，最大化捕获概率
+                # 直接在 context 级别也监听下载,最大化捕获概率
                 try:
                     page.context.on("download", _on_download)
                 except Exception:
                     pass
-                # 将 tap 容器挂到 context，供进度等待函数即时退出
+                # 将 tap 容器挂到 context,供进度等待函数即时退出
                 try:
                     setattr(page.context, "_aug_latest_download", _latest_download)
                 except Exception:
@@ -1592,11 +1592,11 @@ class MiaoshouExporterComponent(ExportComponent):
 
                 triggered_processing = False
 
-                # 优先使用“导出数据”下拉 -> “导出全部订单” 专用流程（带重试）
-                # 修复：一旦捕获到任意下载事件（全局 listener），立刻停止重复点击，避免多次导出
+                # 优先使用“导出数据”下拉 -> “导出全部订单” 专用流程(带重试)
+                # 修复:一旦捕获到任意下载事件(全局 listener),立刻停止重复点击,避免多次导出
                 for attempt in range(1, 4):
                     try:
-                        # 若全局监听已捕获下载，直接退出重试循环
+                        # 若全局监听已捕获下载,直接退出重试循环
                         try:
                             if _latest_download.get("dl") is not None:
                                 download = _latest_download["dl"]
@@ -1606,11 +1606,11 @@ class MiaoshouExporterComponent(ExportComponent):
 
                         if attempt > 1:
                             try:
-                                print(f"[MiaoshouExporter] 导出下拉点击重试，第{attempt}次...")
+                                print(f"[MiaoshouExporter] 导出下拉点击重试,第{attempt}次...")
                             except Exception:
                                 pass
                         dl0 = self._export_via_dropdown(page)
-                        # 再次检查：如果函数未返回但全局监听已捕获，仍然视为成功并停止
+                        # 再次检查:如果函数未返回但全局监听已捕获,仍然视为成功并停止
                         try:
                             if dl0 is None and _latest_download.get("dl") is not None:
                                 download = _latest_download["dl"]
@@ -1625,7 +1625,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             from modules.platforms.miaoshou.components.orders_config import OrdersSelectors as _OS
                             _texts = list(getattr(_OS(), "progress_texts", []))
                         except Exception:
-                            _texts = ["导出成功，正在下载", "导出成功", "正在下载", "正在导出", "生成中", "处理中", "排队中", "Processing", "Generating"]
+                            _texts = ["导出成功,正在下载", "导出成功", "正在下载", "正在导出", "生成中", "处理中", "排队中", "Processing", "Generating"]
                         try:
                             found_progress = False
                             # wait up to ~3.5s after click for the progress modal to appear
@@ -1637,7 +1637,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                             found_progress = True
                                             triggered_processing = True
                                             try:
-                                                print("[MiaoshouExporter] 检测到导出进度弹窗，停止重复点击，进入轮询等待...")
+                                                print("[MiaoshouExporter] 检测到导出进度弹窗,停止重复点击,进入轮询等待...")
                                             except Exception:
                                                 pass
                                             break
@@ -1666,13 +1666,13 @@ class MiaoshouExporterComponent(ExportComponent):
                         except Exception:
                             pass
 
-                        # 已识别到进度弹窗/加载遮罩，停止后续重试与按键，直接进入下载等待
+                        # 已识别到进度弹窗/加载遮罩,停止后续重试与按键,直接进入下载等待
                         if triggered_processing:
                             break
 
                     except Exception:
                         pass
-                    # 仅在未检测到进度的情况下，关闭可能残留的下拉/遮挡后再试
+                    # 仅在未检测到进度的情况下,关闭可能残留的下拉/遮挡后再试
                     if not triggered_processing:
                         try:
                             page.keyboard.press("Escape")
@@ -1680,14 +1680,14 @@ class MiaoshouExporterComponent(ExportComponent):
                         except Exception:
                             pass
 
-                    # Escape 后再做一次兜底检查：若此时已有下载，停止重试
+                    # Escape 后再做一次兜底检查:若此时已有下载,停止重试
                     try:
                         if _latest_download.get("dl") is not None:
                             download = _latest_download["dl"]
                             break
                     except Exception:
                         pass
-                # 若下拉流程未捕获，优先尝试对话框确认按钮
+                # 若下拉流程未捕获,优先尝试对话框确认按钮
                 # If we saw progress texts, switch to progress-waiting mode instead of re-clicking
                 if download is None and triggered_processing:
                     try:
@@ -1695,7 +1695,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             from modules.platforms.miaoshou.components.orders_config import OrdersSelectors as _OS
                             texts = list(getattr(_OS(), "progress_texts", []))
                         except Exception:
-                            texts = ["导出成功，正在下载", "导出成功", "正在下载", "正在导出", "生成中", "处理中", "排队中", "Processing", "Generating"]
+                            texts = ["导出成功,正在下载", "导出成功", "正在下载", "正在导出", "生成中", "处理中", "排队中", "Processing", "Generating"]
                         dl_info = self._wait_download_with_progress(page, texts, total_ms=240000, interval_ms=3000)
                         download = dl_info
                     except Exception:
@@ -1718,7 +1718,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                     continue
                     except Exception:
                         pass
-                # 若仍未捕获，回退到通用按钮点击流程
+                # 若仍未捕获,回退到通用按钮点击流程
                 if download is None:
                     try:
                         with page.context.expect_download(timeout=60000) as dl_info:
@@ -1729,7 +1729,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 page.wait_for_timeout(600)
                             except Exception:
                                 pass
-                            # 可能弹出确认框，再次兜底关闭遮挡
+                            # 可能弹出确认框,再次兜底关闭遮挡
                             self._close_popups(page)
                             self._first_click(page, confirm_buttons, timeout=3000)
                         download = dl_info.value
@@ -1738,13 +1738,13 @@ class MiaoshouExporterComponent(ExportComponent):
                             from modules.platforms.miaoshou.components.orders_config import OrdersSelectors as _OS
                             texts = list(getattr(_OS(), "progress_texts", []))
                         except Exception:
-                            texts = ["导出成功，正在下载", "导出成功", "正在下载", "正在导出", "生成中", "处理中", "排队中", "Processing", "Generating"]
+                            texts = ["导出成功,正在下载", "导出成功", "正在下载", "正在导出", "生成中", "处理中", "排队中", "Processing", "Generating"]
                         try:
                             dl_info = self._wait_download_with_progress(page, texts, total_ms=600000, interval_ms=3000)
                             download = dl_info
                         except Exception:
                             downloaded_file = self._scan_latest_download(start_ts, max_age_sec=900, suffixes=None)
-                # 最终网络层兜底（通用流程）：若存在可疑直连URL，使用 fetch(blob) 触发浏览器下载
+                # 最终网络层兜底(通用流程):若存在可疑直连URL,使用 fetch(blob) 触发浏览器下载
                 if download is None and downloaded_file is None and net_candidates:
                     try:
                         candidate_url = net_candidates[-1]
@@ -1768,7 +1768,7 @@ class MiaoshouExporterComponent(ExportComponent):
 
             cfg = self.ctx.config or {}
             gran = ("snapshot" if is_warehouse else (cfg.get("granularity") or "range")).lower()
-            # v4.10.0更新：对于仓库清单页（库存快照），命名和分流一律归并到 inventory，避免出现意外的 'warehouse' 目录
+            # v4.10.0更新:对于仓库清单页(库存快照),命名和分流一律归并到 inventory,避免出现意外的 'warehouse' 目录
             data_domain = cfg.get("data_domain") or ("inventory" if is_warehouse else None)
             data_type = self._infer_data_type(current_url, data_domain)
             # Use globally tapped download if normal flows missed it

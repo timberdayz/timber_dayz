@@ -30,7 +30,7 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/system/maintenance", tags=["系统维护"])
 
-# 限流配置（如果可用）
+# 限流配置(如果可用)
 try:
     from backend.middleware.rate_limiter import role_based_rate_limit
 except ImportError:
@@ -80,7 +80,7 @@ async def clear_cache(
     清理缓存
     
     需要管理员权限
-    Docker环境：连接redis:6379（Docker网络内）
+    Docker环境:连接redis:6379(Docker网络内)
     """
     # 限流配置
     if role_based_rate_limit:
@@ -176,9 +176,9 @@ async def clean_data(
     清理数据
     
     需要管理员权限
-    警告：清理操作不可逆，请谨慎使用
+    警告:清理操作不可逆,请谨慎使用
     """
-    # 限流配置（数据清理操作更严格）
+    # 限流配置(数据清理操作更严格)
     if role_based_rate_limit:
         @role_based_rate_limit(requests_per_minute=2, requests_per_hour=10)
         async def _clean():
@@ -198,7 +198,7 @@ async def clean_data(
             deleted_count=deleted_count,
             freed_space=freed_space,
             retention_days=request.retention_days,
-            message=f"成功清理 {deleted_count} 条记录/文件（保留最近{request.retention_days}天）"
+            message=f"成功清理 {deleted_count} 条记录/文件(保留最近{request.retention_days}天)"
         )
     except Exception as e:
         await db.rollback()
@@ -212,7 +212,7 @@ async def clean_data(
         )
 
 
-# ==================== 系统升级 API（P3 - 可选，不推荐） ====================
+# ==================== 系统升级 API(P3 - 可选,不推荐) ====================
 
 @router.get("/upgrade/check", response_model=UpgradeCheckResponse)
 async def check_upgrade(
@@ -220,10 +220,10 @@ async def check_upgrade(
     current_user = Depends(require_admin)
 ):
     """
-    检查系统升级（仅查看，不执行）
+    检查系统升级(仅查看,不执行)
     
     需要管理员权限
-    P3功能：不推荐通过API实现系统升级
+    P3功能:不推荐通过API实现系统升级
     """
     try:
         service = get_maintenance_service(db)
@@ -257,12 +257,12 @@ async def upgrade_system(
     执行系统升级
     
     需要管理员权限
-    多重安全防护：多重确认、自动备份等
-    P3功能：不推荐通过API实现系统升级，建议通过CI/CD流程完成
+    多重安全防护:多重确认、自动备份等
+    P3功能:不推荐通过API实现系统升级,建议通过CI/CD流程完成
     
-    警告：此功能存在严重安全风险，仅用于紧急情况
+    警告:此功能存在严重安全风险,仅用于紧急情况
     """
-    # 限流配置（升级操作最严格）
+    # 限流配置(升级操作最严格)
     if role_based_rate_limit:
         @role_based_rate_limit(requests_per_minute=1, requests_per_hour=1)
         async def _upgrade():
@@ -270,7 +270,7 @@ async def upgrade_system(
         await _upgrade()
     
     try:
-        # 验证多重确认（至少2名不同的管理员）
+        # 验证多重确认(至少2名不同的管理员)
         from modules.core.db import DimUser
         from sqlalchemy.orm import selectinload
         
@@ -301,7 +301,7 @@ async def upgrade_system(
             
             confirmed_users.append(user)
         
-        # 升级前自动备份（除非明确跳过）
+        # 升级前自动备份(除非明确跳过)
         backup_id = None
         if not request.skip_backup:
             from backend.services.backup_service import get_backup_service
@@ -309,7 +309,7 @@ async def upgrade_system(
             try:
                 backup = await backup_service.create_backup(
                     backup_type="full",
-                    description=f"系统升级前自动备份（目标版本: {request.target_version}）",
+                    description=f"系统升级前自动备份(目标版本: {request.target_version})",
                     created_by=current_user.user_id
                 )
                 backup_id = backup.id
@@ -320,12 +320,12 @@ async def upgrade_system(
                     code=ErrorCode.INTERNAL_SERVER_ERROR,
                     message="创建升级前备份失败",
                     error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
-                    detail="升级操作前必须创建备份，但创建失败",
+                    detail="升级操作前必须创建备份,但创建失败",
                     status_code=500
                 )
         
-        # TODO: 实现实际的升级逻辑（Docker环境）
-        # 这里只是占位实现，实际升级应该通过CI/CD流程完成
+        # TODO: 实现实际的升级逻辑(Docker环境)
+        # 这里只是占位实现,实际升级应该通过CI/CD流程完成
         started_at = datetime.utcnow()
         
         logger.warning(f"系统升级操作已启动: 目标版本={request.target_version}, 备份ID={backup_id}")
@@ -352,7 +352,7 @@ async def upgrade_system(
             backup_id=backup_id,
             started_at=started_at,
             completed_at=None,
-            message="系统升级操作已启动，正在后台执行（P3功能，建议通过CI/CD流程完成）"
+            message="系统升级操作已启动,正在后台执行(P3功能,建议通过CI/CD流程完成)"
         )
         
     except Exception as e:

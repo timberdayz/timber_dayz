@@ -51,7 +51,7 @@ class PostgresPathManager:
         3. 常见安装路径
         
         Returns:
-            PostgreSQL bin目录路径，如果未找到返回None
+            PostgreSQL bin目录路径,如果未找到返回None
         """
         # 1. 检查环境变量
         custom_path = os.getenv("POSTGRES_BIN_PATH")
@@ -118,7 +118,7 @@ class PostgresPathManager:
     @classmethod
     def get_postgres_bin_path(cls) -> Optional[str]:
         """
-        获取PostgreSQL bin目录路径（字符串格式）
+        获取PostgreSQL bin目录路径(字符串格式)
         
         Returns:
             PostgreSQL bin目录路径字符串
@@ -155,7 +155,7 @@ class PostgresPathManager:
 
 def auto_configure_postgres_path():
     """
-    自动配置PostgreSQL PATH（在应用启动时调用）
+    自动配置PostgreSQL PATH(在应用启动时调用)
     
     Usage:
         from backend.utils.postgres_path import auto_configure_postgres_path
@@ -178,7 +178,7 @@ def auto_configure_postgres_path():
 
 
 def safe_print(text):
-    """安全打印（处理GBK编码问题）"""
+    """安全打印(处理GBK编码问题)"""
     try:
         print(text)
     except UnicodeEncodeError:

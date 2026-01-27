@@ -2,17 +2,17 @@
 数据库配置和连接管理 - 西虹ERP系统
 
 职责:
-- 数据库引擎配置（PostgreSQL/SQLite）
-- Session管理和连接池（同步+异步）
-- FastAPI依赖注入（get_db/get_async_db函数）
+- 数据库引擎配置(PostgreSQL/SQLite)
+- Session管理和连接池(同步+异步)
+- FastAPI依赖注入(get_db/get_async_db函数)
 
-架构规范（v4.18.2）:
-- [OK] 所有模型定义在 modules/core/db/schema.py（单一数据源）
+架构规范(v4.18.2):
+- [OK] 所有模型定义在 modules/core/db/schema.py(单一数据源)
 - [OK] 本文件只负责引擎配置和Session管理
 - [OK] 不重复定义任何模型
 - [OK] 符合 Single Source of Truth 原则
 - [OK] 符合 .cursorrules 架构规范
-- [OK] 支持同步/异步双模式（过渡期）
+- [OK] 支持同步/异步双模式(过渡期)
 
 依赖方向:
   Frontend -> backend/routers -> backend/models/database -> modules/core/db
@@ -29,7 +29,7 @@ from urllib.parse import urlparse, urlunparse
 import asyncio
 import logging
 
-# ==================== 从core导入统一Schema（Single Source of Truth） ====================
+# ==================== 从core导入统一Schema(Single Source of Truth) ====================
 
 from modules.core.db import (
     Base,
@@ -41,12 +41,8 @@ from modules.core.db import (
     BridgeProductKeys,
     DimCurrencyRate,
     # 事实表
-    # [WARN] v4.6.0 DSS架构重构：以下表已废弃，但仍在使用中（31个文件引用）
-    # 新数据应写入fact_raw_data_*表（按data_domain+granularity分表）
-    # 计划在Phase 6.1中删除（需要先完成数据迁移）
-    FactOrder,  # 已废弃，使用fact_raw_data_orders_*替代
-    FactOrderItem,  # 已废弃，使用fact_raw_data_orders_*替代
-    FactProductMetric,  # 已废弃，使用fact_raw_data_products_*替代
+    # [DELETED] v4.19.0: FactOrder, FactOrderItem 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
+    FactProductMetric,  # 已废弃,使用fact_raw_data_products_*替代
     # 管理表
     CatalogFile,
     DataQuarantine,
@@ -59,9 +55,9 @@ from modules.core.db import (
     # 暂存表
     StagingOrders,
     StagingProductMetrics,
-    StagingInventory,  # v4.11.4新增：库存数据暂存表
+    StagingInventory,  # v4.11.4新增:库存数据暂存表
     # 物化视图管理
-    MaterializedViewRefreshLog,  # v4.11.4新增：物化视图刷新日志表
+    MaterializedViewRefreshLog,  # v4.11.4新增:物化视图刷新日志表
 )
 
 from backend.utils.config import get_settings
@@ -74,7 +70,7 @@ def get_async_database_url(database_url: str) -> str:
     """
     将同步数据库URL转换为异步URL
     
-    支持的数据库类型：
+    支持的数据库类型:
     - PostgreSQL: postgresql:// -> postgresql+asyncpg://
     - SQLite: sqlite:// -> sqlite+aiosqlite://
     
@@ -88,7 +84,7 @@ def get_async_database_url(database_url: str) -> str:
         ValueError: 不支持的数据库类型
     """
     parsed = urlparse(database_url)
-    scheme = parsed.scheme.split('+')[0]  # 移除现有驱动（如 +psycopg2）
+    scheme = parsed.scheme.split('+')[0]  # 移除现有驱动(如 +psycopg2)
     
     # 根据数据库类型选择异步驱动
     if scheme == "postgresql":
@@ -111,7 +107,7 @@ if DATABASE_URL.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
     pool_config = {}
 else:
-    # PostgreSQL连接池配置（第二阶段优化）
+    # PostgreSQL连接池配置(第二阶段优化)
     # v4.12.0: 配置search_path以支持多schema访问
     connect_args = {
         "options": "-c statement_timeout=30000 -c idle_in_transaction_session_timeout=300000 -c search_path=public,b_class,a_class,c_class,core,finance"
@@ -141,11 +137,11 @@ SessionLocal = sessionmaker(
 
 logger.info(f"[sync] 数据库连接已配置: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else 'SQLite'}")
 
-# ==================== 异步数据库引擎配置（v4.18.2新增） ====================
+# ==================== 异步数据库引擎配置(v4.18.2新增) ====================
 
 ASYNC_DATABASE_URL = get_async_database_url(DATABASE_URL)
 
-# SQLite 不支持连接池，使用简化配置
+# SQLite 不支持连接池,使用简化配置
 if ASYNC_DATABASE_URL.startswith("sqlite"):
     async_engine = create_async_engine(
         ASYNC_DATABASE_URL,
@@ -153,8 +149,8 @@ if ASYNC_DATABASE_URL.startswith("sqlite"):
         # SQLite 不需要连接池配置
     )
 else:
-    # PostgreSQL 支持连接池，使用完整配置
-    # [*] v4.19.0更新：使用环境感知的配置（与同步引擎保持一致）
+    # PostgreSQL 支持连接池,使用完整配置
+    # [*] v4.19.0更新:使用环境感知的配置(与同步引擎保持一致)
     async_engine = create_async_engine(
         ASYNC_DATABASE_URL,
         pool_size=settings.DB_POOL_SIZE,
@@ -165,7 +161,7 @@ else:
         echo=settings.DATABASE_ECHO,
     )
 
-# [*] v4.18.2修复：asyncpg 需要通过事件监听器设置 search_path
+# [*] v4.18.2修复:asyncpg 需要通过事件监听器设置 search_path
 # asyncpg 不支持通过 connect_args 传递 options
 from sqlalchemy import event, text
 
@@ -190,7 +186,7 @@ logger.info(f"[async] 异步数据库连接已配置: {ASYNC_DATABASE_URL.split(
 
 def get_db() -> Generator[Session, None, None]:
     """
-    FastAPI数据库Session依赖注入（同步版本）
+    FastAPI数据库Session依赖注入(同步版本)
     
     Usage:
         @router.get("/items")
@@ -202,7 +198,7 @@ def get_db() -> Generator[Session, None, None]:
         Session: SQLAlchemy数据库会话
         
     Note:
-        v4.18.2: 此函数保留用于过渡期，新代码请使用 get_async_db()
+        v4.18.2: 此函数保留用于过渡期,新代码请使用 get_async_db()
     """
     db = SessionLocal()
     try:
@@ -213,7 +209,7 @@ def get_db() -> Generator[Session, None, None]:
 
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    FastAPI数据库Session依赖注入（异步版本，v4.18.2新增）
+    FastAPI数据库Session依赖注入(异步版本,v4.18.2新增)
     
     Usage:
         @router.get("/items")
@@ -226,15 +222,15 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
         AsyncSession: SQLAlchemy异步数据库会话
         
     Note:
-        事务策略说明：
-        - 成功时自动 commit（请求结束后）
+        事务策略说明:
+        - 成功时自动 commit(请求结束后)
         - 异常时自动 rollback
-        - 如果路由函数内已手动 commit，此处再次 commit 是无害的（空操作）
+        - 如果路由函数内已手动 commit,此处再次 commit 是无害的(空操作)
     """
     session = AsyncSessionLocal()
     try:
         yield session
-        await session.commit()  # 自动提交（如果有未提交的更改）
+        await session.commit()  # 自动提交(如果有未提交的更改)
     except Exception:
         await session.rollback()
         raise
@@ -244,14 +240,14 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
 
 def init_db():
     """
-    初始化数据库（创建所有表）
+    初始化数据库(创建所有表)
     
-    注意：
-    - 生产环境：禁止使用此函数，必须使用 Alembic 迁移（alembic upgrade head）
-    - 开发环境：可以使用此函数快速创建表（但不推荐）
-    - 此函数仅作为辅助，不保证表结构完整性和迁移历史
+    注意:
+    - 生产环境:禁止使用此函数,必须使用 Alembic 迁移(alembic upgrade head)
+    - 开发环境:可以使用此函数快速创建表(但不推荐)
+    - 此函数仅作为辅助,不保证表结构完整性和迁移历史
     
-    推荐方式：使用 Alembic 迁移
+    推荐方式:使用 Alembic 迁移
     """
     import os
     
@@ -259,13 +255,13 @@ def init_db():
     environment = os.getenv("ENVIRONMENT", "").lower()
     if environment == "production":
         logger.warning(
-            "[WARN] 生产环境禁止使用 init_db()，请使用 Alembic 迁移: alembic upgrade head"
+            "[WARN] 生产环境禁止使用 init_db(),请使用 Alembic 迁移: alembic upgrade head"
         )
         return
     
-    # 开发环境：仅作为快速原型，记录警告
+    # 开发环境:仅作为快速原型,记录警告
     logger.warning(
-        "[WARN] 使用 init_db() 创建表，这不是推荐方式。"
+        "[WARN] 使用 init_db() 创建表,这不是推荐方式。"
         "请使用 Alembic 迁移: alembic upgrade head"
     )
     
@@ -292,11 +288,11 @@ def init_db():
             logger.error(
                 f"[ERROR] 以下表创建失败: {', '.join(sorted(missing_tables))}"
             )
-            # 开发环境也抛出错误，让开发者知道问题
+            # 开发环境也抛出错误,让开发者知道问题
             raise RuntimeError(f"Missing tables: {', '.join(sorted(missing_tables))}")
         
         logger.info(
-            f"[OK] 数据库表初始化完成（开发模式）: 创建 {len(created_tables)} 张表, "
+            f"[OK] 数据库表初始化完成(开发模式): 创建 {len(created_tables)} 张表, "
             f"总计 {len(existing_after)} 张表"
         )
             
@@ -305,7 +301,7 @@ def init_db():
         # 区分真正的错误和可以忽略的重复错误
         if "already exists" in error_str.lower() or "duplicate" in error_str.lower():
             # 索引/约束重复是可以接受的
-            logger.warning(f"数据库对象可能已存在，跳过创建: {e}")
+            logger.warning(f"数据库对象可能已存在,跳过创建: {e}")
         else:
             # 其他错误必须抛出
             logger.error(f"[ERROR] init_db() 失败: {e}")
@@ -314,9 +310,9 @@ def init_db():
 
 def verify_schema_completeness():
     """
-    验证数据库表结构完整性（生产环境必须）
+    验证数据库表结构完整性(生产环境必须)
     
-    检查：
+    检查:
     1. schema.py 中定义的所有表是否都存在
     2.  Alembic 迁移状态是否与代码一致
     
@@ -374,12 +370,12 @@ def verify_schema_completeness():
 
 def warm_up_pool(pool_size: int = 10):
     """
-    预热数据库连接池（同步版本，v4.1.0新增）
+    预热数据库连接池(同步版本,v4.1.0新增)
     
-    通过预先创建和测试连接，避免首次请求时的冷启动延迟。
+    通过预先创建和测试连接,避免首次请求时的冷启动延迟。
     
     Args:
-        pool_size: 预热连接数量，默认10个
+        pool_size: 预热连接数量,默认10个
     
     Returns:
         None
@@ -391,7 +387,7 @@ def warm_up_pool(pool_size: int = 10):
     
     connections = []
     try:
-        logger.info(f"[sync] 开始预热连接池（目标: {pool_size}个连接）")
+        logger.info(f"[sync] 开始预热连接池(目标: {pool_size}个连接)")
         
         # 创建连接并执行测试查询
         for i in range(pool_size):
@@ -399,7 +395,7 @@ def warm_up_pool(pool_size: int = 10):
             conn.execute(text("SELECT 1"))
             connections.append(conn)
         
-        # 关闭所有连接（返回连接池）
+        # 关闭所有连接(返回连接池)
         for conn in connections:
             conn.close()
         
@@ -418,12 +414,12 @@ def warm_up_pool(pool_size: int = 10):
 
 async def warm_up_async_pool(pool_size: int = 10):
     """
-    预热异步数据库连接池（v4.18.2新增）
+    预热异步数据库连接池(v4.18.2新增)
     
-    通过并发创建和测试连接，避免首次请求时的冷启动延迟。
+    通过并发创建和测试连接,避免首次请求时的冷启动延迟。
     
     Args:
-        pool_size: 预热连接数量，默认10个
+        pool_size: 预热连接数量,默认10个
     
     Returns:
         None
@@ -432,7 +428,7 @@ async def warm_up_async_pool(pool_size: int = 10):
         Exception: 连接池预热失败时抛出异常
         
     Note:
-        必须并发创建多个连接，才能真正预热连接池。
+        必须并发创建多个连接,才能真正预热连接池。
         单个 session 循环执行只会复用同一连接。
     """
     from sqlalchemy import text
@@ -442,7 +438,7 @@ async def warm_up_async_pool(pool_size: int = 10):
         session = AsyncSessionLocal()
         try:
             result = await session.execute(text("SELECT 1"))
-            # [*] 修复：fetchone() 不需要 await（它返回 Row，不是协程）
+            # [*] 修复:fetchone() 不需要 await(它返回 Row,不是协程)
             result.fetchone()
         except Exception as e:
             logger.warning(f"[async] 连接 {i} 测试失败: {e}")
@@ -454,9 +450,9 @@ async def warm_up_async_pool(pool_size: int = 10):
                 pass  # 忽略关闭时的错误
     
     try:
-        logger.info(f"[async] 开始预热异步连接池（目标: {pool_size}个连接）")
+        logger.info(f"[async] 开始预热异步连接池(目标: {pool_size}个连接)")
         
-        # 并发创建多个连接，真正预热连接池
+        # 并发创建多个连接,真正预热连接池
         tasks = [test_single_connection(i) for i in range(pool_size)]
         await asyncio.gather(*tasks)
         
@@ -469,16 +465,16 @@ async def warm_up_async_pool(pool_size: int = 10):
 # ==================== 导出接口 ====================
 
 # 导出给backend/routers使用
-# 注意：所有模型都来自 modules/core/db/schema.py，此处只是重新导出
+# 注意:所有模型都来自 modules/core/db/schema.py,此处只是重新导出
 __all__ = [
-    # 数据库配置（同步）
+    # 数据库配置(同步)
     "Base",
     "engine",
     "SessionLocal",
     "get_db",
     "init_db",
     "warm_up_pool",  # v4.1.0新增
-    # 数据库配置（异步，v4.18.2新增）
+    # 数据库配置(异步,v4.18.2新增)
     "async_engine",
     "AsyncSessionLocal",
     "get_async_db",
@@ -492,10 +488,8 @@ __all__ = [
     "BridgeProductKeys",
     "DimCurrencyRate",
     # 事实表
-    # [WARN] v4.6.0 DSS架构重构：以下表已废弃，但仍在使用中
-    "FactOrder",  # 已废弃，使用fact_raw_data_orders_*替代
-    "FactOrderItem",  # 已废弃，使用fact_raw_data_orders_*替代
-    "FactProductMetric",  # 已废弃，使用fact_raw_data_products_*替代
+    # [DELETED] v4.19.0: "FactOrder", "FactOrderItem" 已删除
+    "FactProductMetric",  # 已废弃,使用fact_raw_data_products_*替代
     # 管理表
     "CatalogFile",
     "DataQuarantine",
@@ -512,6 +506,5 @@ __all__ = [
 
 # ==================== 向后兼容别名 ====================
 
-# 为了兼容可能使用旧名称的代码
-FactSalesOrders = FactOrder  # 别名
+# [DELETED] v4.19.0: FactOrder 别名已删除
 FactProductMetrics = FactProductMetric  # 别名

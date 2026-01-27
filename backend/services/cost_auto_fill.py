@@ -125,7 +125,7 @@ class CostAutoFillService:
                         if isinstance(quantity, (int, float)) and quantity > 0:
                             enhanced_order["line_cost"] = product_cost["cost_price"] * quantity
                         
-                        # 计算人民币成本（如果有汇率）
+                        # 计算人民币成本(如果有汇率)
                         exchange_rate = order.get("exchange_rate")
                         if exchange_rate and product_cost["cost_currency"] != "CNY":
                             enhanced_order["line_cost_cny"] = enhanced_order["line_cost"] * exchange_rate
@@ -142,7 +142,7 @@ class CostAutoFillService:
                     if product_cost["suggested_price"]:
                         enhanced_order["suggested_price"] = product_cost["suggested_price"]
                 
-                # 获取库存成本信息（作为备选）
+                # 获取库存成本信息(作为备选)
                 if not enhanced_order.get("unit_cost") and product_cost:
                     inventory_cost = self.get_inventory_cost(
                         platform_code, shop_id, product_cost["product_id"]

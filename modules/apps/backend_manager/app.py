@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 class BackendManagerApp(BaseApplication):
     """后端API管理应用"""
     
-    # 类级元数据（避免实例化副作用）
+    # 类级元数据(避免实例化副作用)
     APP_ID = "backend_manager"
     NAME = "后端API管理"
     VERSION = "1.0.0"
-    DESCRIPTION = "管理FastAPI后端服务，支持启动、停止、重启API服务器"
+    DESCRIPTION = "管理FastAPI后端服务,支持启动、停止、重启API服务器"
     
     def __init__(self):
         """初始化后端管理应用"""
@@ -66,12 +66,12 @@ class BackendManagerApp(BaseApplication):
                 self._test_api()
             elif choice == "0":
                 if self.process:
-                    print("\n[WARN]  后端服务正在运行，是否停止? (y/n): ", end="")
+                    print("\n[WARN]  后端服务正在运行,是否停止? (y/n): ", end="")
                     if input().strip().lower() == 'y':
                         self._stop_backend()
                 break
             else:
-                print("[FAIL] 无效选择，请重试")
+                print("[FAIL] 无效选择,请重试")
             
             if choice != "0":
                 input("\n按回车键继续...")
@@ -143,7 +143,7 @@ class BackendManagerApp(BaseApplication):
         # 检查是否需要安装依赖
         print("[PKG] 检查依赖...")
         try:
-            # 尝试导入fastapi，如果失败则需要安装依赖
+            # 尝试导入fastapi,如果失败则需要安装依赖
             result = subprocess.run(
                 [sys.executable, "-c", "import fastapi"],
                 capture_output=True,
@@ -151,8 +151,8 @@ class BackendManagerApp(BaseApplication):
             )
             
             if result.returncode != 0:
-                print("[PKG] 首次运行，正在安装依赖...")
-                print("[WAIT] 这可能需要几分钟，请耐心等待...")
+                print("[PKG] 首次运行,正在安装依赖...")
+                print("[WAIT] 这可能需要几分钟,请耐心等待...")
                 
                 install_result = subprocess.run(
                     [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
@@ -304,7 +304,7 @@ class BackendManagerApp(BaseApplication):
     def _open_api_docs(self):
         """打开API文档"""
         if not self._is_backend_running():
-            print("[WARN]  后端服务未运行，请先启动服务")
+            print("[WARN]  后端服务未运行,请先启动服务")
             return
         
         print(f"\n[DOCS] 在浏览器中打开API文档: {self.api_docs_url}")

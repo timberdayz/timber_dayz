@@ -3,8 +3,8 @@
 """
 销售战役服务
 
-负责销售战役的达成率计算逻辑（C类数据）
-从路由层提取业务逻辑，符合分层架构规范
+负责销售战役的达成率计算逻辑(C类数据)
+从路由层提取业务逻辑,符合分层架构规范
 """
 
 from sqlalchemy.orm import Session
@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional
 from modules.core.db import (
     SalesCampaign,
     SalesCampaignShop,
-    FactOrder
+    # [DELETED] v4.19.0: FactOrder 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
 )
 from modules.core.logger import get_logger
 
@@ -30,7 +30,7 @@ class SalesCampaignService:
     
     def calculate_campaign_achievement(self, campaign_id: int) -> Dict[str, Any]:
         """
-        计算战役达成情况（C类数据：系统自动计算）
+        计算战役达成情况(C类数据:系统自动计算)
         
         从fact_orders表聚合计算实际销售额和订单数
         更新战役和参与店铺的达成数据
@@ -39,7 +39,7 @@ class SalesCampaignService:
             campaign_id: 战役ID
             
         Returns:
-            计算结果的字典，包含战役信息和店铺信息
+            计算结果的字典,包含战役信息和店铺信息
         """
         # 查询战役
         campaign = self.db.execute(
@@ -64,6 +64,13 @@ class SalesCampaignService:
             if not shop.platform_code or not shop.shop_id:
                 continue
             
+            # [TODO] v4.19.0: 达成率计算先搁置,待实现 OrdersDataService 后修复
+            # 当前使用 FactOrder 表(已废弃),需要改为查询 b_class.fact_{platform}_orders_{granularity}
+            # 暂时返回0,避免报错
+            result = type('obj', (object,), {'amount': 0, 'quantity': 0})()
+            
+            # [DEPRECATED] 以下代码已注释,待实现 OrdersDataService 后删除
+            """
             # 从fact_orders聚合计算
             result = self.db.execute(
                 select(
@@ -77,6 +84,7 @@ class SalesCampaignService:
                     FactOrder.order_status.in_(["completed", "paid"])  # 只统计已完成/已付款订单
                 )
             ).first()
+            """
             
             shop.actual_amount = float(result.amount or 0)
             shop.actual_quantity = int(result.quantity or 0)

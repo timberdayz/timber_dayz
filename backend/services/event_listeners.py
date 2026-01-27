@@ -1,14 +1,14 @@
 """
 事件监听器 - 数据流转流程自动化
 
-[WARN] v4.6.0 DSS架构重构：已禁用物化视图和C类数据相关事件监听
-- 物化视图：Metabase直接查询原始表，不再需要刷新
-- C类数据：由Metabase定时计算任务计算（每20分钟）
+[WARN] v4.6.0 DSS架构重构:已禁用物化视图和C类数据相关事件监听
+- 物化视图:Metabase直接查询原始表,不再需要刷新
+- C类数据:由Metabase定时计算任务计算(每20分钟)
 
-监听的事件（已禁用）：
-- DATA_INGESTED: B类数据入库完成 -> 自动刷新物化视图（已禁用）
-- MV_REFRESHED: 物化视图刷新完成 -> 自动计算C类数据（已禁用）
-- A_CLASS_UPDATED: A类数据更新 -> 自动重新计算C类数据（已禁用）
+监听的事件(已禁用):
+- DATA_INGESTED: B类数据入库完成 -> 自动刷新物化视图(已禁用)
+- MV_REFRESHED: 物化视图刷新完成 -> 自动计算C类数据(已禁用)
+- A_CLASS_UPDATED: A类数据更新 -> 自动重新计算C类数据(已禁用)
 """
 
 from typing import Dict, Any, Optional
@@ -31,58 +31,58 @@ class EventListener:
         """
         处理B类数据入库完成事件
         
-        [WARN] v4.6.0 DSS架构重构：已禁用物化视图刷新
-        根据DSS架构，Metabase直接查询原始表，不再需要刷新物化视图。
+        [WARN] v4.6.0 DSS架构重构:已禁用物化视图刷新
+        根据DSS架构,Metabase直接查询原始表,不再需要刷新物化视图。
         
         Args:
             event: 数据入库事件
         """
-        # [WARN] v4.6.0 DSS架构重构：已禁用物化视图刷新逻辑
+        # [WARN] v4.6.0 DSS架构重构:已禁用物化视图刷新逻辑
         logger.info(
-            f"[事件监听] 收到DATA_INGESTED事件（物化视图刷新已禁用）: "
+            f"[事件监听] 收到DATA_INGESTED事件(物化视图刷新已禁用): "
             f"file_id={event.file_id}, domain={event.data_domain}, "
             f"granularity={event.granularity}, rows={event.row_count}"
         )
-        logger.debug("[事件监听] DSS架构：Metabase直接查询原始表，无需刷新物化视图")
+        logger.debug("[事件监听] DSS架构:Metabase直接查询原始表,无需刷新物化视图")
     
     @staticmethod
     def handle_mv_refreshed(event: MVRefreshedEvent) -> None:
         """
         处理物化视图刷新完成事件
         
-        [WARN] v4.6.0 DSS架构重构：已废弃（Metabase直接查询原始表，无需物化视图）
-        此方法保留仅为兼容性，实际不会被调用。
+        [WARN] v4.6.0 DSS架构重构:已废弃(Metabase直接查询原始表,无需物化视图)
+        此方法保留仅为兼容性,实际不会被调用。
         
         Args:
             event: 物化视图刷新事件
         """
-        # [WARN] v4.6.0 DSS架构重构：已废弃，不再处理物化视图刷新事件
-        logger.debug("[事件监听] MV_REFRESHED事件已废弃（DSS架构）")
+        # [WARN] v4.6.0 DSS架构重构:已废弃,不再处理物化视图刷新事件
+        logger.debug("[事件监听] MV_REFRESHED事件已废弃(DSS架构)")
         logger.info(
-            f"[事件监听] 收到MV_REFRESHED事件（C类数据计算已禁用）: "
+            f"[事件监听] 收到MV_REFRESHED事件(C类数据计算已禁用): "
             f"view={event.view_name}, rows={event.row_count}, "
             f"duration={event.duration_seconds:.2f}s"
         )
-        logger.debug("[事件监听] DSS架构：C类数据由Metabase定时计算任务计算")
+        logger.debug("[事件监听] DSS架构:C类数据由Metabase定时计算任务计算")
     
     @staticmethod
     def handle_a_class_updated(event: AClassUpdatedEvent) -> None:
         """
         处理A类数据更新事件
         
-        [WARN] v4.6.0 DSS架构重构：已禁用C类数据重新计算
-        根据DSS架构，C类数据应该由Metabase定时计算任务计算（每20分钟）。
+        [WARN] v4.6.0 DSS架构重构:已禁用C类数据重新计算
+        根据DSS架构,C类数据应该由Metabase定时计算任务计算(每20分钟)。
         
         Args:
             event: A类数据更新事件
         """
-        # [WARN] v4.6.0 DSS架构重构：已禁用C类数据重新计算逻辑
+        # [WARN] v4.6.0 DSS架构重构:已禁用C类数据重新计算逻辑
         logger.info(
-            f"[事件监听] 收到A_CLASS_UPDATED事件（C类数据重新计算已禁用）: "
+            f"[事件监听] 收到A_CLASS_UPDATED事件(C类数据重新计算已禁用): "
             f"type={event.data_type}, id={event.record_id}, "
             f"action={event.action}"
         )
-        logger.debug("[事件监听] DSS架构：C类数据由Metabase定时计算任务计算")
+        logger.debug("[事件监听] DSS架构:C类数据由Metabase定时计算任务计算")
     
     @staticmethod
     def _determine_views_to_refresh(
@@ -93,8 +93,8 @@ class EventListener:
         根据数据域和粒度判断需要刷新的物化视图
         
         Args:
-            data_domain: 数据域（orders/products/inventory/traffic/services）
-            granularity: 粒度（daily/weekly/monthly/snapshot）
+            data_domain: 数据域(orders/products/inventory/traffic/services)
+            granularity: 粒度(daily/weekly/monthly/snapshot)
             
         Returns:
             需要刷新的视图名称列表
@@ -140,7 +140,7 @@ class EventListener:
                 "mv_vendor_performance"
             ])
         
-        # 根据粒度进一步筛选（如果粒度是daily，不需要刷新weekly/monthly视图）
+        # 根据粒度进一步筛选(如果粒度是daily,不需要刷新weekly/monthly视图)
         if granularity == "daily":
             views_to_refresh = [
                 v for v in views_to_refresh 
@@ -164,10 +164,10 @@ class EventListener:
         
         Args:
             view_name: 物化视图名称
-            view_type: 视图类型（sales/inventory/finance/traffic）
+            view_type: 视图类型(sales/inventory/finance/traffic)
             
         Returns:
-            需要计算的C类数据类型列表（health_score/achievement_rate/ranking）
+            需要计算的C类数据类型列表(health_score/achievement_rate/ranking)
         """
         c_class_types = []
         
@@ -198,8 +198,8 @@ class EventListener:
         根据A类数据类型和操作判断需要重新计算的C类数据类型
         
         Args:
-            data_type: A类数据类型（sales_campaign/target/performance_config）
-            action: 操作类型（create/update/delete）
+            data_type: A类数据类型(sales_campaign/target/performance_config)
+            action: 操作类型(create/update/delete)
             
         Returns:
             需要重新计算的C类数据类型列表

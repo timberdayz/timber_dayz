@@ -2,14 +2,14 @@
 应用数据库迁移脚本
 创建所有新表并更新现有表结构
 
-[*] v4.18.2 更新：
+[*] v4.18.2 更新:
 - 自动检查并修复 catalog_files 表的缺失列
-- 确保表结构与 modules/core/db/schema.py（SSOT）一致
+- 确保表结构与 modules/core/db/schema.py(SSOT)一致
 
-注意：
-- 所有表定义来自 modules/core/db/schema.py（Single Source of Truth）
-- 此脚本会自动添加缺失的列，但不会删除多余的列
-- catalog_files 表只在 public schema 中（core schema 中的重复表已清理，2026-01-02）
+注意:
+- 所有表定义来自 modules/core/db/schema.py(Single Source of Truth)
+- 此脚本会自动添加缺失的列,但不会删除多余的列
+- catalog_files 表只在 public schema 中(core schema 中的重复表已清理,2026-01-02)
 """
 
 import sys
@@ -52,13 +52,13 @@ async def apply_migrations():
         # Step 2: 验证表创建并修复缺失列
         print("[2/3] Verifying tables and fixing missing columns...")
         
-        # [*] v4.18.2修复：使用run_in_executor包装同步数据库操作
+        # [*] v4.18.2修复:使用run_in_executor包装同步数据库操作
         def _sync_verify_tables():
-            """同步验证表创建并修复缺失列（在线程池中执行）"""
+            """同步验证表创建并修复缺失列(在线程池中执行)"""
             db = SessionLocal()
             try:
-                # 获取所有表名（检查多个schema）
-                # 注意：catalog_files 表只在 public schema 中，但其他表可能在 core schema 中
+                # 获取所有表名(检查多个schema)
+                # 注意:catalog_files 表只在 public schema 中,但其他表可能在 core schema 中
                 result = db.execute(text("""
                     SELECT table_schema, table_name 
                     FROM information_schema.tables 
@@ -73,13 +73,13 @@ async def apply_migrations():
                         tables_by_schema[schema] = []
                     tables_by_schema[schema].append(table)
                 
-                # 合并所有表名（用于验证）
+                # 合并所有表名(用于验证)
                 all_tables = []
                 for schema, tables in tables_by_schema.items():
                     all_tables.extend(tables)
                 
-                # [*] 新增：检查并修复 catalog_files 表的缺失列
-                # 注意：catalog_files 表只在 public schema 中（core schema 中的重复表已清理）
+                # [*] 新增:检查并修复 catalog_files 表的缺失列
+                # 注意:catalog_files 表只在 public schema 中(core schema 中的重复表已清理)
                 catalog_files_fixed = False
                 schema = 'public'  # 只检查 public schema
                 if 'catalog_files' in tables_by_schema.get(schema, []):
@@ -94,7 +94,7 @@ async def apply_migrations():
                     """))
                     existing_columns = {row[0] for row in result_columns}
                     
-                    # 定义需要的列（根据 modules/core/db/schema.py 中的 CatalogFile 类）
+                    # 定义需要的列(根据 modules/core/db/schema.py 中的 CatalogFile 类)
                     required_columns = {
                         'platform_code': ('VARCHAR(32)', 'NULL'),
                         'account': ('VARCHAR(128)', 'NULL'),

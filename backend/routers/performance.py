@@ -1,9 +1,9 @@
 """
 系统性能测试和监控API路由
 
-[WARN] v4.18.0: 修改prefix为/system/performance，避免与绩效管理API冲突
-- 本路由: /system/performance - 系统性能监控（CPU/内存/API响应时间）
-- 绩效管理: /performance - 员工绩效管理（销售目标/绩效评分）
+[WARN] v4.18.0: 修改prefix为/system/performance,避免与绩效管理API冲突
+- 本路由: /system/performance - 系统性能监控(CPU/内存/API响应时间)
+- 绩效管理: /performance - 员工绩效管理(销售目标/绩效评分)
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status

@@ -7,14 +7,14 @@ Vue.js字段映射审核系统 - FastAPI后端
 [WARN] 【已弃用 - v4.0.0混合架构】
 ==========================================
 
-此模块内置后端仅作为兼容性保留，将在v5.0.0中移除。
+此模块内置后端仅作为兼容性保留,将在v5.0.0中移除。
 
-请使用统一后端API：
+请使用统一后端API:
 - 主后端入口: backend/main.py
 - 字段映射API: backend/routers/field_mapping.py  
 - 统一启动: python run.py
 
-迁移说明：
+迁移说明:
 1. 所有API已迁移到 backend/routers/field_mapping.py
 2. 前端请调用统一后端 http://localhost:8000/api/field-mapping
 3. 不要在此文件添加新功能
@@ -47,7 +47,7 @@ from modules.core.secrets_manager import get_secrets_manager
 
 app = FastAPI(
     title="Vue字段映射审核系统 API",
-    description="现代化的字段映射审核API，解决Streamlit死循环问题",
+    description="现代化的字段映射审核API,解决Streamlit死循环问题",
     version="1.0.0"
 )
 
@@ -76,7 +76,7 @@ class FileGroupsResponse(BaseModel):
     files: Dict[str, Dict[str, List[str]]]
 
 class FieldMappingFilePreviewRequest(BaseModel):
-    """字段映射应用的文件预览请求（使用file_path）"""
+    """字段映射应用的文件预览请求(使用file_path)"""
     file_path: str
     platform: str
     data_domain: str
@@ -168,7 +168,7 @@ async def scan_files(request: ScanRequest, background_tasks: BackgroundTasks):
         
         return ScanResponse(
             success=True,
-            message=f"扫描完成：发现{result.seen}个文件，新注册{result.registered}个",
+            message=f"扫描完成:发现{result.seen}个文件,新注册{result.registered}个",
             data={
                 "seen": result.seen,
                 "registered": result.registered,
@@ -211,7 +211,7 @@ async def get_file_groups(service=Depends(get_query_service)):
             """))
             domains_list = [row[0] for row in domains_result]
             
-            # 构建域字典（简化版本）
+            # 构建域字典(简化版本)
             domains = {}
             for domain in domains_list:
                 domains[domain] = ["daily", "weekly", "monthly"]  # 简化处理
@@ -238,7 +238,7 @@ async def get_file_groups(service=Depends(get_query_service)):
             files=files
         )
     except Exception as e:
-        # 如果数据库查询失败，返回错误信息
+        # 如果数据库查询失败,返回错误信息
         print(f"File groups API error: {e}")
         raise HTTPException(status_code=500, detail=f"获取文件分组失败: {str(e)}")
 
@@ -285,10 +285,10 @@ async def preview_file(request: FieldMappingFilePreviewRequest):
                     error=f"文件不存在: {actual_file_path}"
                 )
             
-            # 使用改进的Excel读取逻辑，支持表头行设置
+            # 使用改进的Excel读取逻辑,支持表头行设置
             df = None
             header_row = request.header_row if request.header_row is not None else 0
-            print(f"DEBUG: 开始读取文件 {actual_file_path}，表头行: {header_row}")
+            print(f"DEBUG: 开始读取文件 {actual_file_path},表头行: {header_row}")
             try:
                 df = pd.read_excel(actual_file_path, nrows=100, header=header_row, engine='calamine')
                 print(f"DEBUG: calamine引擎成功")
@@ -306,7 +306,7 @@ async def preview_file(request: FieldMappingFilePreviewRequest):
                         print(f"DEBUG: xlrd引擎失败: {e}")
                         return FilePreviewResponse(
                             success=False,
-                            error="无法读取Excel文件，请检查文件格式"
+                            error="无法读取Excel文件,请检查文件格式"
                         )
             
             if df is None:
@@ -318,20 +318,20 @@ async def preview_file(request: FieldMappingFilePreviewRequest):
             # 调试信息
             print(f"DEBUG: df.empty = {df.empty}, len(df.columns) = {len(df.columns)}")
             
-            # 即使没有数据行，如果有列名也认为是有效的
+            # 即使没有数据行,如果有列名也认为是有效的
             if df.empty and len(df.columns) == 0:
-                print("DEBUG: 文件确实为空，没有列名")
+                print("DEBUG: 文件确实为空,没有列名")
                 return FilePreviewResponse(
                     success=False,
                     error="文件为空或无法读取"
                 )
             
-            print("DEBUG: 文件有列名，继续处理")
+            print("DEBUG: 文件有列名,继续处理")
             
-            # 临时修复：强制处理空数据文件
+            # 临时修复:强制处理空数据文件
             if df.empty and len(df.columns) > 0:
-                print("DEBUG: 文件有列名但无数据行，创建空数据")
-                # 创建一个空的数据行，但保留列名
+                print("DEBUG: 文件有列名但无数据行,创建空数据")
+                # 创建一个空的数据行,但保留列名
                 data = []
                 columns = df.columns.tolist()
                 return FilePreviewResponse(
@@ -363,7 +363,7 @@ async def get_field_mapping(request: FieldMappingRequest):
         # 获取智能映射引擎
         mapping_engine = get_mapping_engine()
         
-        # 定义目标字段（根据数据域）
+        # 定义目标字段(根据数据域)
         target_fields_map = {
             "products": [
                 "product_id", "product_name", "product_sku", "product_price",
@@ -401,7 +401,7 @@ async def get_field_mapping(request: FieldMappingRequest):
             mappings[result.source_column] = result.target_field
             confidence[result.source_column] = result.confidence
             
-            # 如果是外键，记录外键信息
+            # 如果是外键,记录外键信息
             if result.mapping_type == 'foreign_key' and result.foreign_key_info:
                 foreign_keys[result.source_column] = result.foreign_key_info
         
@@ -449,7 +449,7 @@ async def validate_data(request: DataValidationRequest):
             if not actual_file_path.exists():
                 raise HTTPException(status_code=404, detail="文件不存在")
         
-        # 读取数据（使用多引擎策略）
+        # 读取数据(使用多引擎策略)
         df = None
         engines = ['calamine', 'openpyxl', 'xlrd']
         
@@ -526,7 +526,7 @@ async def ingest_file(request: IngestRequest, background_tasks: BackgroundTasks)
     """数据入库"""
     try:
         # 这里应该调用实际的入库逻辑
-        # 为了演示，我们返回成功响应
+        # 为了演示,我们返回成功响应
         
         background_tasks.add_task(
             process_ingestion,
@@ -585,7 +585,7 @@ async def cleanup_invalid_files(service=Depends(get_query_service)):
             invalid_files = []
             for row in result:
                 file_path = row[0]
-                # 确保file_path是字符串，然后转换为Path对象
+                # 确保file_path是字符串,然后转换为Path对象
                 if isinstance(file_path, str):
                     path_obj = Path(file_path)
                 else:

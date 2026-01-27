@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-数据血缘追踪服务（Data Lineage Service）
+数据血缘追踪服务(Data Lineage Service)
 
-v4.12.0新增：
-- 数据血缘追踪（数据来源、处理过程、目标表）
-- 数据影响分析（下游影响、上游依赖）
-- 复用现有字段和表，不创建新表
+v4.12.0新增:
+- 数据血缘追踪(数据来源、处理过程、目标表)
+- 数据影响分析(下游影响、上游依赖)
+- 复用现有字段和表,不创建新表
 
-职责：
-- 追踪数据流转（使用ingest_task_id和file_id）
-- 存储血缘信息（使用catalog_files.file_metadata）
+职责:
+- 追踪数据流转(使用ingest_task_id和file_id)
+- 存储血缘信息(使用catalog_files.file_metadata)
 - 提供数据影响分析
 """
 
@@ -20,7 +20,10 @@ from sqlalchemy import select, and_, or_
 import json
 
 from modules.core.db import CatalogFile, StagingOrders, StagingProductMetrics, StagingInventory
-from modules.core.db import FactOrder, FactOrderItem, FactProductMetric
+from modules.core.db import (
+    # [DELETED] v4.19.0: FactOrder, FactOrderItem 已删除
+    FactProductMetric
+)
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,9 +33,9 @@ class DataLineageService:
     """
     数据血缘追踪服务
     
-    职责：
-    - 追踪数据流转（使用ingest_task_id和file_id）
-    - 存储血缘信息（使用catalog_files.file_metadata）
+    职责:
+    - 追踪数据流转(使用ingest_task_id和file_id)
+    - 存储血缘信息(使用catalog_files.file_metadata)
     - 提供数据影响分析
     """
     
@@ -132,7 +135,7 @@ class DataLineageService:
             task_id: 同步任务ID
             
         Returns:
-            数据血缘信息字典，如果不存在则返回None
+            数据血缘信息字典,如果不存在则返回None
         """
         try:
             # 通过ingest_task_id查找staging表
@@ -229,17 +232,18 @@ class DataLineageService:
                     "task_ids": list(set([s.ingest_task_id for s in staging_inventory if s.ingest_task_id])),
                 })
             
-            # 查找fact表数据（通过file_id）
-            fact_orders = self.db.query(FactOrder).filter(
-                FactOrder.file_id == file_id
-            ).all()
-            if fact_orders:
-                flow_info["fact"].append({
-                    "table": "fact_orders",
-                    "row_count": len(fact_orders),
-                })
+            # [DELETED] v4.19.0: fact_orders 表已删除,数据现在在 b_class.fact_{platform}_orders_{granularity}
+            # 如需查询订单数据血缘,请查询 b_class schema 下的订单表
+            # fact_orders = self.db.query(FactOrder).filter(
+            #     FactOrder.file_id == file_id
+            # ).all()
+            # if fact_orders:
+            #     flow_info["fact"].append({
+            #         "table": "fact_orders",
+            #         "row_count": len(fact_orders),
+            #     })
             
-            # 查找fact_product_metrics（通过catalog_file_id）
+            # 查找fact_product_metrics(通过catalog_file_id)
             fact_products = self.db.query(FactProductMetric).filter(
                 FactProductMetric.catalog_file_id == file_id
             ).all()
@@ -260,7 +264,7 @@ class DataLineageService:
         file_id: int
     ) -> Dict[str, Any]:
         """
-        分析数据影响（下游影响）
+        分析数据影响(下游影响)
         
         Args:
             file_id: 文件ID
@@ -288,7 +292,7 @@ class DataLineageService:
                 impact_info["affected_rows"] += fact_info.get("row_count", 0)
                 impact_info["affected_tables"].append(fact_info["table"])
             
-            # 查找下游物化视图（简化处理，实际应该查询物化视图定义）
+            # 查找下游物化视图(简化处理,实际应该查询物化视图定义)
             # 这里假设所有fact表都有对应的物化视图
             for fact_info in flow_info.get("fact", []):
                 table_name = fact_info["table"]
@@ -311,11 +315,11 @@ class DataLineageService:
         record_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        查找上游依赖（数据来源）
+        查找上游依赖(数据来源)
         
         Args:
             table_name: 表名
-            record_id: 记录ID（可选）
+            record_id: 记录ID(可选)
             
         Returns:
             上游依赖列表
@@ -323,28 +327,16 @@ class DataLineageService:
         try:
             dependencies = []
             
-            # 根据表名查找上游数据
+            # [DELETED] v4.19.0: fact_orders 表已删除,数据现在在 b_class.fact_{platform}_orders_{granularity}
+            # 如需查询订单数据血缘,请查询 b_class schema 下的订单表
             if table_name == "fact_orders":
-                query = self.db.query(FactOrder)
-                if record_id:
-                    query = query.filter(FactOrder.order_id == record_id)
-                
-                orders = query.all()
-                for order in orders:
-                    if order.file_id:
-                        catalog_file = self.db.query(CatalogFile).filter(
-                            CatalogFile.id == order.file_id
-                        ).first()
-                        if catalog_file:
-                            dependencies.append({
-                                "source_type": "file",
-                                "file_id": catalog_file.id,
-                                "file_name": catalog_file.file_name,
-                                "platform": catalog_file.platform_code,
-                                "data_domain": catalog_file.data_domain,
-                            })
+                # [TODO] 实现查询 b_class.fact_{platform}_orders_{granularity} 的数据血缘逻辑
+                pass
+            # [DEPRECATED] 以下 FactOrder 相关代码已废弃
+            # [TODO] 如需查询订单血缘, 请查询 b_class.fact_{platform}_orders_{granularity}
             
-            elif table_name == "fact_product_metrics":
+            # 检查 fact_product_metrics 表
+            if table_name == "fact_product_metrics":
                 query = self.db.query(FactProductMetric)
                 if record_id:
                     query = query.filter(FactProductMetric.platform_sku == record_id)
@@ -371,7 +363,7 @@ class DataLineageService:
             return []
     
     def _get_current_timestamp(self) -> str:
-        """获取当前时间戳（ISO格式）"""
+        """获取当前时间戳(ISO格式)"""
         from datetime import datetime
         return datetime.utcnow().isoformat()
 

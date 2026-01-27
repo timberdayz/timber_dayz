@@ -1,7 +1,7 @@
 """
 智能重试策略服务 (Phase 9.3)
 
-提供：
+提供:
 1. 指数退避重试
 2. 步骤级备用选择器
 3. 组件级降级策略
@@ -35,23 +35,23 @@ class RetryStrategy:
         计算退避延迟时间
         
         Args:
-            attempt: 当前尝试次数（1-based）
-            strategy: 退避策略（exponential/linear/fixed）
-            base: 基础延迟（秒）
+            attempt: 当前尝试次数(1-based)
+            strategy: 退避策略(exponential/linear/fixed)
+            base: 基础延迟(秒)
             multiplier: 倍数
-            max_delay: 最大延迟（秒）
+            max_delay: 最大延迟(秒)
             
         Returns:
-            延迟时间（秒）
+            延迟时间(秒)
         """
         if strategy == "exponential":
-            # 指数退避：1秒、2秒、4秒、8秒...
+            # 指数退避:1秒、2秒、4秒、8秒...
             delay = base * (multiplier ** (attempt - 1))
         elif strategy == "linear":
-            # 线性增长：1秒、2秒、3秒、4秒...
+            # 线性增长:1秒、2秒、3秒、4秒...
             delay = base * attempt
         elif strategy == "fixed":
-            # 固定延迟：1秒、1秒、1秒...
+            # 固定延迟:1秒、1秒、1秒...
             delay = base
         else:
             delay = base
@@ -74,7 +74,7 @@ class RetryStrategy:
             func: 要执行的异步函数
             *args: 函数参数
             retry_config: 重试配置
-            step_id: 步骤ID（用于日志）
+            step_id: 步骤ID(用于日志)
             **kwargs: 函数关键字参数
             
         Returns:
@@ -86,7 +86,7 @@ class RetryStrategy:
         
         enabled = retry_config.get('enabled', True)
         if not enabled:
-            # 不重试，直接执行
+            # 不重试,直接执行
             return await func(*args, **kwargs)
         
         max_attempts = retry_config.get('max_attempts', 3)
@@ -148,11 +148,11 @@ class RetryStrategy:
         **action_kwargs
     ) -> Any:
         """
-        执行操作，支持备用选择器
+        执行操作,支持备用选择器
         
         Args:
             page: Playwright Page对象
-            action: 操作类型（click/fill/wait等）
+            action: 操作类型(click/fill/wait等)
             main_selector: 主选择器
             fallback_selectors: 备用选择器列表
             step_id: 步骤ID
@@ -195,7 +195,7 @@ class RetryStrategy:
                     )
                     result = True
                 else:
-                    # 其他action（扩展）
+                    # 其他action(扩展)
                     result = None
                 
                 # 成功
@@ -285,7 +285,7 @@ class ComponentFallbackStrategy:
         download_dir: Path
     ) -> Any:
         """
-        执行组件，支持降级到备用组件
+        执行组件,支持降级到备用组件
         
         Args:
             executor: CollectionExecutorV2实例

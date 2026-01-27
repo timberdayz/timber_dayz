@@ -20,8 +20,7 @@ from .schema import (
     DimCurrencyRate,
     DimExchangeRate,  # v4.6.0: 汇率维度表
     # 事实表
-    FactOrder,
-    FactOrderItem,
+    # [DELETED] v4.19.0: FactOrder, FactOrderItem 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
     FactOrderAmount,  # v4.6.0: 订单金额维度表
     FactProductMetric,
     FactTraffic,  # v4.12.0: 运营数据 - 流量数据
@@ -35,9 +34,9 @@ from .schema import (
     CollectionConfig,  # v4.6.0: 采集配置表
     CollectionTask,
     CollectionTaskLog,  # v4.6.0: 采集任务日志表
-    CollectionSyncPoint,  # Phase 9.2: 增量采集同步点表（已取消功能，保留表）
+    CollectionSyncPoint,  # Phase 9.2: 增量采集同步点表(已取消功能,保留表)
     ComponentVersion,  # Phase 9.4: 组件版本管理表
-    ComponentTestHistory,  # Phase 8.2: 组件测试历史记录表（2025-12-17）
+    ComponentTestHistory,  # Phase 8.2: 组件测试历史记录表(2025-12-17)
     PlatformAccount,  # v4.7.0: 平台账号管理表
     DataFile,
     DataRecord,
@@ -46,15 +45,15 @@ from .schema import (
     # 暂存表
     StagingOrders,
     StagingProductMetrics,
-    StagingInventory,  # v4.11.4新增：库存数据暂存表
+    StagingInventory,  # v4.11.4新增:库存数据暂存表
     # v3.0 产品图片表
     ProductImage,
     # 物化视图管理
-    MaterializedViewRefreshLog,  # v4.11.4新增：物化视图刷新日志表
+    MaterializedViewRefreshLog,  # v4.11.4新增:物化视图刷新日志表
 )
 
 # v4.3.7: 字段映射辞典与模板
-# v4.3.7: 字段映射系统（已并入schema，消除重复Base）
+# v4.3.7: 字段映射系统(已并入schema,消除重复Base)
 from .schema import (
     FieldMappingDictionary,
     FieldMappingTemplate,
@@ -62,7 +61,7 @@ from .schema import (
     FieldMappingAudit,
 )
 
-# v4.4.0: 财务域表（Modern ERP）
+# v4.4.0: 财务域表(Modern ERP)
 from .schema import (
     # 指标公式
     DimMetricFormula,
@@ -113,7 +112,7 @@ from .schema import (
     PerformanceScore,
     PerformanceConfig,
     ClearanceRanking,
-    # v4.12.0: 用户权限和审计（SSOT迁移）
+    # v4.12.0: 用户权限和审计(SSOT迁移)
     DimUser,
     DimRole,
     UserApprovalLog,  # v4.19.0: 用户审批记录表
@@ -122,7 +121,7 @@ from .schema import (
     UserNotificationPreference,  # v4.19.0: 用户通知偏好表
     FactAuditLog,
     user_roles,
-    # v4.19.4: 限流配置表（Phase 3）
+    # v4.19.4: 限流配置表(Phase 3)
     DimRateLimitConfig,  # v4.19.4: 限流配置维度表
     FactRateLimitConfigAudit,  # v4.19.4: 限流配置审计日志表
     # v4.20.0: 系统管理表
@@ -136,8 +135,8 @@ from .schema import (
     # v4.12.0: 数据同步进度跟踪
     SyncProgressTask,
     # v4.6.0+: DSS架构表
-    # B类数据表（v4.17.0+：所有旧的固定表类已删除，通过PlatformTableManager动态创建）
-    # 表名格式：fact_{platform}_{data_domain}_{sub_domain}_{granularity}
+    # B类数据表(v4.17.0+:所有旧的固定表类已删除,通过PlatformTableManager动态创建)
+    # 表名格式:fact_{platform}_{data_domain}_{sub_domain}_{granularity}
     # 所有表创建在b_class schema中
     # 统一对齐表
     EntityAlias,
@@ -169,8 +168,7 @@ __all__ = [
     "DimCurrencyRate",
     "DimExchangeRate",  # v4.6.0
     # 事实表
-    "FactOrder",
-    "FactOrderItem",
+    # [DELETED] v4.19.0: "FactOrder", "FactOrderItem" 已删除
     "FactOrderAmount",  # v4.6.0
     "FactProductMetric",
     "FactTraffic",  # v4.12.0: 运营数据 - 流量数据
@@ -184,9 +182,9 @@ __all__ = [
     "CollectionConfig",  # v4.6.0: 采集配置表
     "CollectionTask",
     "CollectionTaskLog",  # v4.6.0: 采集任务日志表
-    "CollectionSyncPoint",  # Phase 9.2: 增量采集同步点表（已取消功能，保留表）
+    "CollectionSyncPoint",  # Phase 9.2: 增量采集同步点表(已取消功能,保留表)
     "ComponentVersion",  # Phase 9.4: 组件版本管理表
-    "ComponentTestHistory",  # Phase 8.2: 组件测试历史记录表（2025-12-17）
+    "ComponentTestHistory",  # Phase 8.2: 组件测试历史记录表(2025-12-17)
     "PlatformAccount",  # v4.7.0: 平台账号管理表
     "DataFile",
     "DataRecord",
@@ -242,7 +240,7 @@ __all__ = [
     "PerformanceScore",
     "PerformanceConfig",
     "ClearanceRanking",
-    # v4.12.0: 用户权限和审计（SSOT迁移）
+    # v4.12.0: 用户权限和审计(SSOT迁移)
     "DimUser",
     "DimRole",
     "UserApprovalLog",  # v4.19.0: 用户审批记录表
@@ -251,7 +249,7 @@ __all__ = [
     "UserNotificationPreference",  # v4.19.0: 用户通知偏好表
     "FactAuditLog",
     "user_roles",
-    # v4.19.4: 限流配置表（Phase 3）
+    # v4.19.4: 限流配置表(Phase 3)
     "DimRateLimitConfig",  # v4.19.4: 限流配置维度表
     "FactRateLimitConfigAudit",  # v4.19.4: 限流配置审计日志表
     # v4.20.0: 系统管理表
@@ -265,7 +263,7 @@ __all__ = [
     # v4.12.0: 数据同步进度跟踪
     "SyncProgressTask",
     # v4.6.0+: DSS架构表
-    # B类数据表（v4.17.0+：所有旧的固定表类已删除，通过PlatformTableManager动态创建）
+    # B类数据表(v4.17.0+:所有旧的固定表类已删除,通过PlatformTableManager动态创建)
     # 统一对齐表
     "EntityAlias",
     # Staging表

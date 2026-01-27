@@ -13,7 +13,7 @@ v4.19.2 新增:
 - 记录每次限流触发事件
 - 统计每个 API 的限流触发频率
 - 统计每个用户/IP 的限流触发次数
-- 识别异常流量模式（如单个 IP 频繁触发）
+- 识别异常流量模式(如单个 IP 频繁触发)
 """
 
 from typing import Dict, List, Optional, Any
@@ -39,7 +39,7 @@ class RateLimitStatsService:
         self._stats_key_prefix = "xihong_erp:rate_limit_stats"
         self._event_key_prefix = "xihong_erp:rate_limit_events"
         self._max_events_per_key = 1000  # 每个键最多保留 1000 条事件
-        self._event_expire_seconds = 86400  # 事件过期时间：24 小时
+        self._event_expire_seconds = 86400  # 事件过期时间:24 小时
     
     def _get_redis_client(self) -> Optional[redis.Redis]:
         """获取 Redis 客户端"""
@@ -65,12 +65,12 @@ class RateLimitStatsService:
         记录限流事件
         
         Args:
-            rate_limit_key: 限流键（user:xxx 或 ip:xxx）
+            rate_limit_key: 限流键(user:xxx 或 ip:xxx)
             path: API 路径
             method: HTTP 方法
             detail: 限流详情
-            ip_address: IP 地址（可选）
-            user_agent: User-Agent（可选）
+            ip_address: IP 地址(可选)
+            user_agent: User-Agent(可选)
         """
         event = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -107,11 +107,11 @@ class RateLimitStatsService:
                 # 降级到本地统计
                 self._record_local_event(event)
         else:
-            # Redis 不可用，使用本地统计
+            # Redis 不可用,使用本地统计
             self._record_local_event(event)
     
     def _record_local_event(self, event: Dict[str, Any]) -> None:
-        """记录事件到本地内存（降级方案）"""
+        """记录事件到本地内存(降级方案)"""
         today = datetime.utcnow().strftime('%Y-%m-%d')
         self._local_stats[today]["total"] += 1
         self._local_stats[today][f"path:{event['path']}"] += 1
@@ -122,7 +122,7 @@ class RateLimitStatsService:
         获取限流统计数据
         
         Args:
-            date: 日期（YYYY-MM-DD 格式），默认为今天
+            date: 日期(YYYY-MM-DD 格式),默认为今天
             
         Returns:
             Dict: 统计数据
@@ -182,7 +182,7 @@ class RateLimitStatsService:
         获取最近的限流事件
         
         Args:
-            date: 日期（YYYY-MM-DD 格式），默认为今天
+            date: 日期(YYYY-MM-DD 格式),默认为今天
             limit: 返回数量限制
             
         Returns:
@@ -207,7 +207,7 @@ class RateLimitStatsService:
         检查异常流量模式
         
         Args:
-            threshold: 触发告警的阈值（单个 key 在一天内的限流次数）
+            threshold: 触发告警的阈值(单个 key 在一天内的限流次数)
             
         Returns:
             List: 异常列表
@@ -244,7 +244,7 @@ class RateLimitStatsService:
         清除统计数据
         
         Args:
-            date: 日期（YYYY-MM-DD 格式），默认为今天
+            date: 日期(YYYY-MM-DD 格式),默认为今天
         """
         if date is None:
             date = datetime.utcnow().strftime('%Y-%m-%d')

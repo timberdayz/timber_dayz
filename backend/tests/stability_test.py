@@ -52,7 +52,7 @@ class StabilityTester:
     
     def _signal_handler(self, signum, frame):
         """信号处理器"""
-        print(f"\n收到信号 {signum}，正在停止测试...")
+        print(f"\n收到信号 {signum},正在停止测试...")
         self.is_running = False
     
     async def __aenter__(self):
@@ -111,7 +111,7 @@ class StabilityTester:
     
     async def run_stability_test(self):
         """运行稳定性测试"""
-        print(f"[START] 开始稳定性测试，持续时间: {self.duration_hours} 小时")
+        print(f"[START] 开始稳定性测试,持续时间: {self.duration_hours} 小时")
         print("="*60)
         
         self.is_running = True
@@ -136,7 +136,7 @@ class StabilityTester:
                 # 检查是否达到测试时间
                 elapsed = (datetime.now() - self.start_time).total_seconds()
                 if elapsed >= self.duration_hours * 3600:
-                    print(f"\n[TIME] 测试时间达到 {self.duration_hours} 小时，停止测试")
+                    print(f"\n[TIME] 测试时间达到 {self.duration_hours} 小时,停止测试")
                     break
                 
                 # 随机选择端点进行测试
@@ -153,7 +153,7 @@ class StabilityTester:
                           f"总请求: {self.total_requests}, "
                           f"成功率: {self.successful_requests/self.total_requests*100:.1f}%")
                 
-                # 随机间隔（1-5秒）
+                # 随机间隔(1-5秒)
                 await asyncio.sleep(random.uniform(1, 5))
                 
         except KeyboardInterrupt:
@@ -333,7 +333,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="稳定性测试工具")
-    parser.add_argument("--duration", type=int, default=24, help="测试持续时间（小时）")
+    parser.add_argument("--duration", type=int, default=24, help="测试持续时间(小时)")
     args = parser.parse_args()
     
     try:

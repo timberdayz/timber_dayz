@@ -48,7 +48,7 @@ def build_output_path(
 ) -> Path:
     """构建输出路径
 
-    目录层级：
+    目录层级:
       <root>/<platform>/<account>/<shop>[__shop_id]/<data_type>/<subtype?>/<granularity>
 
     Args:
@@ -58,13 +58,13 @@ def build_output_path(
         shop_name: 店铺名称
         data_type: 数据类型
         granularity: 粒度
-        shop_id: 店铺ID（可选）
-        include_shop_id: 是否在路径中包含shop_id（默认False，保持向后兼容）
-        subtype: 子数据类型（如 services 下的 ai_assistant/agent），默认不添加该层
+        shop_id: 店铺ID(可选)
+        include_shop_id: 是否在路径中包含shop_id(默认False,保持向后兼容)
+        subtype: 子数据类型(如 services 下的 ai_assistant/agent),默认不添加该层
     """
     root_path = Path(root)
 
-    # 构建店铺目录名：如果启用shop_id且提供了shop_id，则追加到店铺名后（两侧均做 slug 规范化）
+    # 构建店铺目录名:如果启用shop_id且提供了shop_id,则追加到店铺名后(两侧均做 slug 规范化)
     if include_shop_id and shop_id:
         shop_dir = f"{safe_slug(shop_name)}__{safe_slug(str(shop_id))}"
     else:

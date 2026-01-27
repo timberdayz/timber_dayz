@@ -84,7 +84,7 @@ def test_api_startup():
         all_paths = [path for path, _ in routes]
         
         for expected_path, description in new_routes:
-            # 部分匹配（因为可能有路径参数）
+            # 部分匹配(因为可能有路径参数)
             found = any(expected_path in path for path in all_paths)
             if found:
                 print(f"  [OK] {description:30s} - {expected_path}")

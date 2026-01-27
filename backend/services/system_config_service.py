@@ -22,7 +22,7 @@ class SystemConfigService:
     """系统配置服务类"""
     
     def __init__(self, db: AsyncSession):
-        """初始化服务（仅支持异步）"""
+        """初始化服务(仅支持异步)"""
         self.db = db
         self.settings = get_settings()
         self.encryption_service = get_encryption_service()
@@ -55,7 +55,7 @@ class SystemConfigService:
                         config["updated_at"] = config_record.updated_at
                         config["updated_by"] = config_record.updated_by
         except Exception as e:
-            logger.warning(f"读取系统配置失败，使用默认值: {e}")
+            logger.warning(f"读取系统配置失败,使用默认值: {e}")
         
         return config
     
@@ -105,7 +105,7 @@ class SystemConfigService:
     # ==================== 数据库配置 ====================
     
     async def get_database_config(self) -> Dict[str, Any]:
-        """获取数据库配置（从环境变量读取，敏感字段加密）"""
+        """获取数据库配置(从环境变量读取,敏感字段加密)"""
         try:
             # 从环境变量或settings读取
             database_url = self.settings.DATABASE_URL
@@ -194,9 +194,9 @@ class SystemConfigService:
         updated_by_user_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        更新数据库配置（保存为pending状态）
+        更新数据库配置(保存为pending状态)
         
-        注意：在Docker环境中，配置需要手动应用到docker-compose.yml或通过动态配置应用
+        注意:在Docker环境中,配置需要手动应用到docker-compose.yml或通过动态配置应用
         """
         try:
             # 先测试新配置的连接性
@@ -217,7 +217,7 @@ class SystemConfigService:
                 plain_password = config_update.pop("password")
                 config_update["password_encrypted"] = self.encryption_service.encrypt_password(plain_password)
             
-            # 保存配置到SystemConfig表（标记为pending）
+            # 保存配置到SystemConfig表(标记为pending)
             config_json = {
                 "host": config_update.get("host"),
                 "port": config_update.get("port"),
@@ -246,14 +246,14 @@ class SystemConfigService:
                 config_record = SystemConfig(
                     config_key="database_config_pending",
                     config_value=json.dumps(config_json),
-                    description="数据库配置（pending状态，需要手动应用）",
+                    description="数据库配置(pending状态,需要手动应用)",
                     updated_by=updated_by_user_id
                 )
                 self.db.add(config_record)
             
             await self.db.commit()
             
-            # 返回更新后的配置（隐藏密码）
+            # 返回更新后的配置(隐藏密码)
             return await self.get_database_config()
         except Exception as e:
             await self.db.rollback()

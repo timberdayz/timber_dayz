@@ -9,8 +9,8 @@ from sqlalchemy import select
 from backend.models.database import get_db, get_async_db
 from modules.core.db import DimRole, DimUser  # v4.12.0 SSOT迁移
 from backend.schemas.auth import RoleCreate, RoleUpdate, RoleResponse
-# 注意：PermissionResponse在backend/schemas/permission.py中定义（v4.20.0）
-# 但roles.py中使用的是旧版格式（id为int），需要适配
+# 注意:PermissionResponse在backend/schemas/permission.py中定义(v4.20.0)
+# 但roles.py中使用的是旧版格式(id为int),需要适配
 from backend.schemas.permission import PermissionResponse as NewPermissionResponse
 from typing import List as TypingList
 from backend.routers.auth import get_current_user
@@ -111,14 +111,14 @@ async def get_role(
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取角色详情"""
-    result = await db.execute(select(DimRole).where(DimRole.role_id == role_id))  # v4.12.0修复：使用role_id字段
+    result = await db.execute(select(DimRole).where(DimRole.role_id == role_id))  # v4.12.0修复:使用role_id字段
     role = result.scalar_one_or_none()
     if not role:
         return error_response(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message="Role not found",
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="请检查角色ID是否正确，或确认该角色已创建",
+            recovery_suggestion="请检查角色ID是否正确,或确认该角色已创建",
             status_code=404
         )
     
@@ -141,14 +141,14 @@ async def update_role(
     db: AsyncSession = Depends(get_async_db)
 ):
     """更新角色信息"""
-    result = await db.execute(select(DimRole).where(DimRole.role_id == role_id))  # v4.12.0修复：使用role_id字段
+    result = await db.execute(select(DimRole).where(DimRole.role_id == role_id))  # v4.12.0修复:使用role_id字段
     role = result.scalar_one_or_none()
     if not role:
         return error_response(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message="Role not found",
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="请检查角色ID是否正确，或确认该角色已创建",
+            recovery_suggestion="请检查角色ID是否正确,或确认该角色已创建",
             status_code=404
         )
     
@@ -191,14 +191,14 @@ async def delete_role(
     db: AsyncSession = Depends(get_async_db)
 ):
     """删除角色"""
-    result = await db.execute(select(DimRole).where(DimRole.role_id == role_id))  # v4.12.0修复：使用role_id字段
+    result = await db.execute(select(DimRole).where(DimRole.role_id == role_id))  # v4.12.0修复:使用role_id字段
     role = result.scalar_one_or_none()
     if not role:
         return error_response(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message="Role not found",
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="请检查角色ID是否正确，或确认该角色已创建",
+            recovery_suggestion="请检查角色ID是否正确,或确认该角色已创建",
             status_code=404
         )
     
@@ -216,7 +216,7 @@ async def delete_role(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message="Cannot delete role that is assigned to users",
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="请先移除该角色的所有用户，然后再删除角色",
+            recovery_suggestion="请先移除该角色的所有用户,然后再删除角色",
             status_code=400
         )
     
@@ -245,11 +245,11 @@ async def get_available_permissions(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    获取可用权限列表（兼容旧版API）
+    获取可用权限列表(兼容旧版API)
     
-    注意：此API返回的权限列表是简化版本，完整权限列表请使用 /api/system/permissions
+    注意:此API返回的权限列表是简化版本,完整权限列表请使用 /api/system/permissions
     """
-    # 定义系统权限（简化版本，兼容旧版格式）
+    # 定义系统权限(简化版本,兼容旧版格式)
     permissions = [
         NewPermissionResponse(
             id="business-overview",

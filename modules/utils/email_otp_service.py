@@ -3,7 +3,7 @@
 
 """
 邮箱验证码服务
-自动从邮箱获取验证码，支持多种邮箱服务商
+自动从邮箱获取验证码,支持多种邮箱服务商
 """
 
 import imaplib
@@ -275,7 +275,7 @@ class EmailOTPService:
         for pattern in self.otp_patterns:
             matches = re.findall(pattern, text)
             if matches:
-                # 返回最后一个匹配的验证码（通常是最新的）
+                # 返回最后一个匹配的验证码(通常是最新的)
                 return matches[-1]
         return None
 
@@ -375,7 +375,7 @@ if __name__ == "__main__":
     print(f"[OK] 服务创建成功: {service.email}")
         
     # 测试验证码提取
-    test_text = "您的验证码是 123456，请在5分钟内完成验证。"
+    test_text = "您的验证码是 123456,请在5分钟内完成验证。"
     otp = service._extract_otp_from_text(test_text)
     print(f"[OK] 验证码提取测试: {otp}")
     

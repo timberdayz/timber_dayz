@@ -28,10 +28,10 @@ logger = get_logger(__name__)
 class WebInterfaceManagerApp(BaseApplication):
     """Web界面管理应用"""
 
-    # 类级元数据 - 供注册器读取，避免实例化副作用
+    # 类级元数据 - 供注册器读取,避免实例化副作用
     NAME = "Web界面管理"
     VERSION = "1.0.0"
-    DESCRIPTION = "集成所有Web界面功能，支持统一管理、店铺管理、采集管理界面"
+    DESCRIPTION = "集成所有Web界面功能,支持统一管理、店铺管理、采集管理界面"
 
     def __init__(self):
         """初始化Web界面管理应用"""
@@ -39,7 +39,7 @@ class WebInterfaceManagerApp(BaseApplication):
         
         self.name = "Web界面管理"
         self.version = "1.0.0"
-        self.description = "集成所有Web界面功能，支持统一管理、店铺管理、采集管理界面"
+        self.description = "集成所有Web界面功能,支持统一管理、店铺管理、采集管理界面"
         self.author = "跨境电商ERP团队"
         
         # 界面配置
@@ -48,7 +48,7 @@ class WebInterfaceManagerApp(BaseApplication):
                 "name": "统一管理界面",
                 "file": "unified_dashboard.py",
                 "port": 8503,
-                "description": "企业级统一管理界面，集成所有功能"
+                "description": "企业级统一管理界面,集成所有功能"
             },
             "store": {
                 "name": "店铺管理界面", 
@@ -96,7 +96,7 @@ class WebInterfaceManagerApp(BaseApplication):
             
             if missing_files:
                 logger.warning(f"缺少界面文件: {missing_files}")
-                # 不将此作为健康检查失败，因为可能需要创建这些文件
+                # 不将此作为健康检查失败,因为可能需要创建这些文件
             
             return True
             
@@ -157,7 +157,7 @@ class WebInterfaceManagerApp(BaseApplication):
                 elif choice == str(len(self.interfaces) + 3):
                     self._stop_all_interfaces()
                 else:
-                    print("[FAIL] 无效选项，请重新选择")
+                    print("[FAIL] 无效选项,请重新选择")
                     input("按回车键继续...")
                     
             except KeyboardInterrupt:
@@ -254,7 +254,7 @@ class WebInterfaceManagerApp(BaseApplication):
             port += 1
             
         if port != default_port:
-            logger.info(f"端口 {default_port} 被占用，改用 {port}")
+            logger.info(f"端口 {default_port} 被占用,改用 {port}")
             
         return port
     

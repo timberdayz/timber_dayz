@@ -3,15 +3,15 @@ Flow Orchestrator
 =================
 
 目标
-- 以“账号”为单位，将“自动登录 + 自动采集(orders/products/analytics/finance)”编排为可复用流程。
-- 严格遵守登录入口 login_url 规范；自动采集阶段只在确认“已在后台且账号健康”的前提下执行。
-- 统一回放录制脚本的入口，支持 Playwright Inspector。
+- 以“账号”为单位,将“自动登录 + 自动采集(orders/products/analytics/finance)”编排为可复用流程。
+- 严格遵守登录入口 login_url 规范;自动采集阶段只在确认“已在后台且账号健康”的前提下执行。
+- 统一回放录制脚本的入口,支持 Playwright Inspector。
 
 设计
-- Orchestrator 接受 platform/account/data_type 三元组；
-- 基于 recording_registry 选择“稳定版/最新”的脚本组合；
-- 运行时注入会话管理/设备指纹/健康检查；
-- 全链路日志、错误兜底，不破坏现有代码。
+- Orchestrator 接受 platform/account/data_type 三元组;
+- 基于 recording_registry 选择“稳定版/最新”的脚本组合;
+- 运行时注入会话管理/设备指纹/健康检查;
+- 全链路日志、错误兜底,不破坏现有代码。
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ class FlowOrchestrator:
         """执行“自动登录 + 自动采集(data_type)”组合。
 
         Args:
-            playwright_context_factory: 一个回调，返回 (browser, context, page)，由现有系统提供
+            playwright_context_factory: 一个回调,返回 (browser, context, page),由现有系统提供
             account: 账号配置
             data_type: RecordingType
         Returns:
@@ -55,22 +55,22 @@ class FlowOrchestrator:
         """
         account_name = account.get("name") or account.get("username")
 
-        # 如果使用深链接模式，只需要登录脚本
+        # 如果使用深链接模式,只需要登录脚本
         if use_deep_link and shop_id:
             login_path, _ = self.plan(account_name, data_type)
             if not login_path:
-                logger.error("未找到登录录制脚本，请先完成自动登录录制")
+                logger.error("未找到登录录制脚本,请先完成自动登录录制")
                 return False
 
             logger.info(f"[ACTION] 深链接模式: 登录 -> 直达 {data_type.value} 页面 (店铺: {shop_id})")
         else:
-            # 传统模式：需要登录+采集脚本
+            # 传统模式:需要登录+采集脚本
             login_path, collect_path = self.plan(account_name, data_type)
             if not login_path:
-                logger.error("未找到登录录制脚本，请先完成自动登录录制")
+                logger.error("未找到登录录制脚本,请先完成自动登录录制")
                 return False
             if not collect_path:
-                logger.error("未找到采集录制脚本，请先完成该类型的数据采集录制")
+                logger.error("未找到采集录制脚本,请先完成该类型的数据采集录制")
                 return False
 
             logger.info(f"[ACTION] 传统模式: 登录= {login_path} -> 采集= {collect_path}")
@@ -84,14 +84,14 @@ class FlowOrchestrator:
             checker = AccountHealthChecker(self.platform)
             status, msg, _ = checker.check_account_health(page, account)
             if not checker.handle_unhealthy_account(status, msg, account, page):
-                logger.error("登录后账号健康校验未通过，停止采集")
+                logger.error("登录后账号健康校验未通过,停止采集")
                 return False
 
             # 3) 深链接直达或传统采集
             if use_deep_link and shop_id:
                 return self._execute_deep_link_collection(page, account, data_type, shop_id, **kwargs)
             else:
-                # 传统模式：回放采集脚本
+                # 传统模式:回放采集脚本
                 self._run_script(collect_path, page, account)
                 logger.success("[OK] 传统流程执行完成")
                 return True
@@ -99,7 +99,7 @@ class FlowOrchestrator:
             logger.error(f"[FAIL] 流程执行异常: {e}")
             return False
         finally:
-            # 注意：由上层统一关闭 context / browser
+            # 注意:由上层统一关闭 context / browser
             pass
 
     def _execute_deep_link_collection(self, page, account: Dict, data_type: RecordingType,
@@ -132,9 +132,9 @@ class FlowOrchestrator:
                     page.wait_for_selector(selectors["data_table"], timeout=20000)
                     logger.info("[OK] 数据表格已加载")
                 except:
-                    logger.warning("[WARN] 数据表格加载超时，但继续执行")
+                    logger.warning("[WARN] 数据表格加载超时,但继续执行")
 
-            # 4) 尝试直接导出（优先）或点击导出按钮（兜底）
+            # 4) 尝试直接导出(优先)或点击导出按钮(兜底)
             return self._perform_data_export(page, data_type, shop_id, **kwargs)
 
         except Exception as e:
@@ -144,7 +144,7 @@ class FlowOrchestrator:
     def _perform_data_export(self, page, data_type: RecordingType, shop_id: str, **kwargs) -> bool:
         """执行数据导出"""
         try:
-            # 方案A：直接调用导出API（推荐）
+            # 方案A:直接调用导出API(推荐)
             try:
                 export_config = self.adapter.get_export_config(data_type, shop_id, **kwargs)
                 logger.info(f"[START] 尝试直接API导出: {export_config.endpoint}")
@@ -165,12 +165,12 @@ class FlowOrchestrator:
                     logger.success(f"[OK] API导出成功: {output_path}")
                     return True
                 else:
-                    logger.warning(f"[WARN] API导出失败 (状态码: {response.status})，尝试点击导出")
+                    logger.warning(f"[WARN] API导出失败 (状态码: {response.status}),尝试点击导出")
 
             except Exception as api_error:
-                logger.warning(f"[WARN] API导出异常: {api_error}，尝试点击导出")
+                logger.warning(f"[WARN] API导出异常: {api_error},尝试点击导出")
 
-            # 方案B：点击导出按钮（兜底）
+            # 方案B:点击导出按钮(兜底)
             return self._click_export_button(page, data_type, shop_id)
 
         except Exception as e:
@@ -197,7 +197,7 @@ class FlowOrchestrator:
             # 监听下载事件
             with page.expect_download(timeout=60000) as download_info:
                 page.click(export_button)
-                logger.info("[MOUSE] 已点击导出按钮，等待下载...")
+                logger.info("[MOUSE] 已点击导出按钮,等待下载...")
 
             download = download_info.value
 
@@ -225,7 +225,7 @@ class FlowOrchestrator:
         return output_dir / filename
 
     def _run_script(self, script_path: str, page, account: Dict):
-        """简单的脚本执行加载器：以模块方式 import 并调用 run(page, account)。
+        """简单的脚本执行加载器:以模块方式 import 并调用 run(page, account)。
         录制模板需要暴露 def run(page, account): -> None
         """
         script_file = Path(script_path)

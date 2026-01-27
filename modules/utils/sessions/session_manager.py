@@ -34,7 +34,7 @@ class SessionManager:
         self.profiles_path = Path("data/session_profiles")
         self.profiles_path.mkdir(parents=True, exist_ok=True)
 
-        # 持久化Profile路径（每账号独立目录）
+        # 持久化Profile路径(每账号独立目录)
         self.persistent_profiles_path = Path("profiles")
         self.persistent_profiles_path.mkdir(parents=True, exist_ok=True)
 
@@ -52,7 +52,7 @@ class SessionManager:
         Returns:
             持久化Profile目录路径
         """
-        # 清理平台名称和账号ID，确保文件系统安全
+        # 清理平台名称和账号ID,确保文件系统安全
         safe_platform = "".join(c for c in platform.lower() if c.isalnum() or c in "_-")
         safe_account_id = "".join(c for c in str(account_id) if c.isalnum() or c in "_-")
 
@@ -75,7 +75,7 @@ class SessionManager:
         platform_path = self.sessions_path / platform.lower()
         platform_path.mkdir(parents=True, exist_ok=True)
         
-        # 使用账号ID作为目录名（安全的文件名）
+        # 使用账号ID作为目录名(安全的文件名)
         safe_account_id = self._safe_filename(account_id)
         account_path = platform_path / safe_account_id
         account_path.mkdir(parents=True, exist_ok=True)
@@ -154,10 +154,10 @@ class SessionManager:
         Args:
             platform: 平台名称
             account_id: 账号ID
-            max_age_days: 最大有效期（天）
+            max_age_days: 最大有效期(天)
             
         Returns:
-            会话数据，失败或过期返回None
+            会话数据,失败或过期返回None
         """
         try:
             session_file = self.get_session_path(platform, account_id)
@@ -274,7 +274,7 @@ class SessionManager:
                 logger.info(f"会话已删除: {platform}/{account_id}")
                 return True
             else:
-                logger.debug(f"会话文件不存在，无需删除: {platform}/{account_id}")
+                logger.debug(f"会话文件不存在,无需删除: {platform}/{account_id}")
                 return True
                 
         except Exception as e:
@@ -293,7 +293,7 @@ class SessionManager:
         Args:
             platform: 平台名称
             account_id: 账号ID
-            max_age_days: 最大有效期（天）
+            max_age_days: 最大有效期(天)
             
         Returns:
             会话是否有效
@@ -394,7 +394,7 @@ class SessionManager:
         清理过期的会话
         
         Args:
-            max_age_days: 最大有效期（天）
+            max_age_days: 最大有效期(天)
             
         Returns:
             清理的会话数量

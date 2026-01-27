@@ -1,6 +1,6 @@
 """
 业务自动化服务
-包含：订单入库自动流程、库存管理、财务管理
+包含:订单入库自动流程、库存管理、财务管理
 """
 
 from typing import Dict, Any, List
@@ -49,12 +49,12 @@ class OrderAutomation:
             
             results = {}
             
-            # 1. 扣减库存（如果还未扣减）
+            # 1. 扣减库存(如果还未扣减)
             if not order.inventory_deducted:
                 result = OrderAutomation._deduct_inventory(db, order)
                 results["inventory"] = result
             
-            # 2. 创建应收账款（如果还未创建）
+            # 2. 创建应收账款(如果还未创建)
             if not order.is_invoiced:
                 result = OrderAutomation._create_accounts_receivable(db, order)
                 results["accounts_receivable"] = result
@@ -99,7 +99,7 @@ class OrderAutomation:
             # 检查库存是否充足
             if inventory.quantity_available < order.qty:
                 logger.warning(f"[WARN] Insufficient inventory: available={inventory.quantity_available}, required={order.qty}")
-                # 仍然允许扣减（负库存）
+                # 仍然允许扣减(负库存)
             
             # 扣减库存
             db.execute(text("""
@@ -240,7 +240,7 @@ class OrderAutomation:
     def _calculate_profit(db: Session, order) -> Dict[str, Any]:
         """计算订单利润"""
         try:
-            # 查询商品成本（从库存表）
+            # 查询商品成本(从库存表)
             inventory = db.execute(text("""
                 SELECT avg_cost
                 FROM fact_inventory
@@ -327,7 +327,7 @@ class OrderAutomation:
             if not order:
                 return {"success": False, "error": "Order not found"}
             
-            # 如果库存已扣减，恢复库存
+            # 如果库存已扣减,恢复库存
             if order.inventory_deducted:
                 db.execute(text("""
                     UPDATE fact_inventory
@@ -450,7 +450,7 @@ class InventoryAutomation:
         notes: str = None
     ) -> Dict[str, Any]:
         """
-        库存调整（盘点、补货等）
+        库存调整(盘点、补货等)
         """
         try:
             # 查询当前库存
@@ -530,7 +530,7 @@ class InventoryAutomation:
             return {"success": False, "error": str(e)}
 
 
-# v4.17.0: 财务域表已删除，FinanceAutomation类已废弃
+# v4.17.0: 财务域表已删除,FinanceAutomation类已废弃
 # class FinanceAutomation:
 #     """财务管理自动化"""
 #     
@@ -606,7 +606,7 @@ class InventoryAutomation:
 #                 "ar_id": ar_id
 #             })
 #             
-#             # 如果全额收款，更新订单状态
+#             # 如果全额收款,更新订单状态
 #             if new_status == 'paid':
 #                 db.execute(text("""
 #                     UPDATE fact_sales_orders

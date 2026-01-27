@@ -96,7 +96,7 @@ class ProxyTester:
         
         Args:
             platform: 平台名称
-            proxy_config: 代理配置（可选）
+            proxy_config: 代理配置(可选)
             
         Returns:
             测试结果
@@ -242,7 +242,7 @@ class ProxyTester:
         测试所有支持的平台
         
         Args:
-            proxy_config: 代理配置（可选）
+            proxy_config: 代理配置(可选)
             
         Returns:
             测试结果

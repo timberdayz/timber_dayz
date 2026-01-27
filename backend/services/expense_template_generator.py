@@ -4,7 +4,7 @@
 """
 费用导入Excel模板生成器
 
-生成标准的费用导入模板，包含：
+生成标准的费用导入模板,包含:
 - 标准字段列
 - 字段说明
 - 示例数据
@@ -29,8 +29,8 @@ class ExpenseTemplateGenerator:
         生成费用导入模板
         
         Args:
-            output_path: 输出路径（不指定则生成到temp/）
-            period_month: 会计期间（如2025-01）
+            output_path: 输出路径(不指定则生成到temp/)
+            period_month: 会计期间(如2025-01)
         
         Returns:
             str: 生成的文件路径
@@ -100,21 +100,21 @@ class ExpenseTemplateGenerator:
             "必填": ["是", "是", "否", "是", "是", "否", "否", "否", "否"],
             "数据类型": ["文本(YYYY-MM)", "文本", "文本", "数字", "文本(CNY/USD等)", "小数(0-1)", "文本", "文本", "文本"],
             "说明": [
-                "会计期间，格式YYYY-MM",
-                "费用类型（如：租金/工资/广告费/水电费等）",
-                "供应商名称（可选）",
-                "费用金额（正数）",
-                "货币代码（CNY/USD/SGD等）",
-                "税率（如0.09表示9%，0表示无税）",
-                "店铺代码（不填则需分摊到所有店铺）",
-                "成本中心（可选分类）",
+                "会计期间,格式YYYY-MM",
+                "费用类型(如:租金/工资/广告费/水电费等)",
+                "供应商名称(可选)",
+                "费用金额(正数)",
+                "货币代码(CNY/USD/SGD等)",
+                "税率(如0.09表示9%,0表示无税)",
+                "店铺代码(不填则需分摊到所有店铺)",
+                "成本中心(可选分类)",
                 "备注说明"
             ]
         }
         
         df_descriptions = pd.DataFrame(field_descriptions)
         
-        # 写入Excel（多sheet）
+        # 写入Excel(多sheet)
         with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
             # Sheet1: 示例数据
             df_examples.to_excel(writer, sheet_name='示例数据', index=False)
@@ -122,7 +122,7 @@ class ExpenseTemplateGenerator:
             # Sheet2: 字段说明
             df_descriptions.to_excel(writer, sheet_name='字段说明', index=False)
             
-            # Sheet3: 空白模板（供用户填写）
+            # Sheet3: 空白模板(供用户填写)
             df_blank = pd.DataFrame(columns=columns)
             df_blank.to_excel(writer, sheet_name='导入数据', index=False)
         

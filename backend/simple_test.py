@@ -53,7 +53,7 @@ async def test_database(db: Session = Depends(get_db)):
 async def test_file_system():
     """测试文件系统"""
     try:
-        # 检查temp/outputs目录（使用统一路径管理，支持云端迁移）
+        # 检查temp/outputs目录(使用统一路径管理,支持云端迁移)
         temp_outputs = get_output_dir()
         if not temp_outputs.exists():
             return {

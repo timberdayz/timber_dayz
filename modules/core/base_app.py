@@ -1,7 +1,7 @@
 """
 应用基类
 
-定义所有应用模块的基础类，提供统一的接口和通用功能。
+定义所有应用模块的基础类,提供统一的接口和通用功能。
 """
 
 from abc import ABC, abstractmethod
@@ -58,7 +58,7 @@ class BaseApplication(ApplicationInterface):
         """
         健康检查
         
-        默认实现检查基本状态，子类可重写以添加特定检查
+        默认实现检查基本状态,子类可重写以添加特定检查
         
         Returns:
             bool: 健康状态
@@ -170,7 +170,7 @@ class BaseApplication(ApplicationInterface):
         self.logger.info(f"重启应用: {self.name}")
         
         if not self.stop():
-            self.logger.error("应用停止失败，无法重启")
+            self.logger.error("应用停止失败,无法重启")
             return False
         
         return self.start()
@@ -205,10 +205,10 @@ class BaseApplication(ApplicationInterface):
     
     def get_uptime(self) -> Optional[float]:
         """
-        获取应用运行时长（秒）
+        获取应用运行时长(秒)
         
         Returns:
-            Optional[float]: 运行时长，未运行返回None
+            Optional[float]: 运行时长,未运行返回None
         """
         if self._startup_time and self._is_running:
             import time
@@ -219,7 +219,7 @@ class BaseApplication(ApplicationInterface):
         """
         显示应用菜单
         
-        默认实现显示基本信息，子类可重写实现自定义菜单
+        默认实现显示基本信息,子类可重写实现自定义菜单
         """
         print(f"\n{'='*50}")
         print(f"[TARGET] {self.name} v{self.version}")

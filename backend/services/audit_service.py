@@ -1,7 +1,7 @@
 """
 审计日志服务
 
-v4.12.0 SSOT迁移：从modules.core.db导入FactAuditLog
+v4.12.0 SSOT迁移:从modules.core.db导入FactAuditLog
 """
 
 from sqlalchemy.orm import Session
@@ -26,7 +26,7 @@ class AuditService:
         details: Optional[Dict[str, Any]] = None,
         db: AsyncSession = None
     ):
-        """记录操作日志（异步模式）"""
+        """记录操作日志(异步模式)"""
         if db is None:
             from backend.models.database import AsyncSessionLocal
             db = AsyncSessionLocal()
@@ -44,8 +44,8 @@ class AuditService:
             audit_log = FactAuditLog(
                 user_id=user_id,
                 username=username,
-                action_type=action,  # v4.12.0修复：使用action_type字段
-                resource_type=resource,  # v4.12.0修复：使用resource_type字段
+                action_type=action,  # v4.12.0修复:使用action_type字段
+                resource_type=resource,  # v4.12.0修复:使用resource_type字段
                 resource_id=resource_id,
                 action_description=f"{action} {resource} {resource_id or ''}",
                 ip_address=ip_address,
@@ -93,7 +93,7 @@ class AuditService:
             db = next(get_db())
         
         offset = (page - 1) * page_size
-        query = db.query(FactAuditLog).filter(FactAuditLog.resource_type == resource)  # v4.12.0修复：使用resource_type字段
+        query = db.query(FactAuditLog).filter(FactAuditLog.resource_type == resource)  # v4.12.0修复:使用resource_type字段
         
         if resource_id:
             query = query.filter(FactAuditLog.resource_id == resource_id)
@@ -122,7 +122,7 @@ class AuditService:
         
         return logs
     
-    # v4.12.0新增：数据同步操作日志
+    # v4.12.0新增:数据同步操作日志
     async def log_sync_operation(
         self,
         user_id: Optional[int],
@@ -133,15 +133,15 @@ class AuditService:
         db: AsyncSession = None
     ) -> None:
         """
-        记录数据同步操作日志（复用FactAuditLog表，异步模式）
+        记录数据同步操作日志(复用FactAuditLog表,异步模式)
         
         Args:
-            user_id: 用户ID（可选，系统操作时为None）
+            user_id: 用户ID(可选,系统操作时为None)
             file_id: 文件ID
-            task_id: 同步任务ID（可选）
-            operation: 操作类型（sync_start/sync_success/sync_failed等）
+            task_id: 同步任务ID(可选)
+            operation: 操作类型(sync_start/sync_success/sync_failed等)
             details: 操作详情
-            db: 数据库会话（可选）
+            db: 数据库会话(可选)
         """
         if db is None:
             from backend.models.database import AsyncSessionLocal
@@ -190,7 +190,7 @@ class AuditService:
             print(f"Audit log failed: {e}")
             await db.rollback()
     
-    # v4.12.0新增：数据变更历史（使用changes_json字段）
+    # v4.12.0新增:数据变更历史(使用changes_json字段)
     async def log_data_change(
         self,
         user_id: Optional[int],
@@ -202,16 +202,16 @@ class AuditService:
         db: AsyncSession = None
     ) -> None:
         """
-        记录数据变更历史（使用changes_json字段，异步模式）
+        记录数据变更历史(使用changes_json字段,异步模式)
         
         Args:
-            user_id: 用户ID（可选）
-            resource_type: 资源类型（order/product/inventory等）
+            user_id: 用户ID(可选)
+            resource_type: 资源类型(order/product/inventory等)
             resource_id: 资源ID
-            action: 操作类型（create/update/delete）
-            before: 变更前的数据（可选）
-            after: 变更后的数据（可选）
-            db: 数据库会话（可选）
+            action: 操作类型(create/update/delete)
+            before: 变更前的数据(可选)
+            after: 变更后的数据(可选)
+            db: 数据库会话(可选)
         """
         if db is None:
             from backend.models.database import AsyncSessionLocal
@@ -230,7 +230,7 @@ class AuditService:
                 user = result.scalar_one_or_none()
                 username = user.username if user else "unknown"
             
-            # 构建变更详情（JSON格式）
+            # 构建变更详情(JSON格式)
             changes_data = {
                 "before": before,
                 "after": after,
@@ -261,7 +261,7 @@ class AuditService:
             print(f"Audit log failed: {e}")
             await db.rollback()
     
-    # v4.12.0新增：获取数据同步审计追溯
+    # v4.12.0新增:获取数据同步审计追溯
     def get_sync_audit_trail(
         self,
         file_id: Optional[int] = None,
@@ -274,11 +274,11 @@ class AuditService:
         获取数据同步审计追溯
         
         Args:
-            file_id: 文件ID（可选）
-            task_id: 任务ID（可选）
+            file_id: 文件ID(可选)
+            task_id: 任务ID(可选)
             page: 页码
             page_size: 每页数量
-            db: 数据库会话（可选）
+            db: 数据库会话(可选)
             
         Returns:
             审计日志列表
@@ -296,7 +296,7 @@ class AuditService:
         
         if task_id:
             # 通过changes_json或action_description查找task_id
-            # 注意：这里简化处理，实际应该从task_details中查询
+            # 注意:这里简化处理,实际应该从task_details中查询
             query = query.filter(
                 FactAuditLog.action_description.like(f"%{task_id}%")
             )

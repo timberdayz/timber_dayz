@@ -396,7 +396,7 @@ class LoginService:
     # ----- Phone/SMS OTP helpers (manual) -----
     def _shopee_detect_phone_verification(self, page: Any) -> bool:
         try:
-            # 关键词检测（覆盖“验证电话号码”弹窗）
+            # 关键词检测(覆盖“验证电话号码”弹窗)
             hints = [
                 'text=验证电话号码', 'text=验证手机号', 'text=验证手机号码',
                 'text=短信', 'text=手机', 'text=验证码', 'text=安全验证',
@@ -407,7 +407,7 @@ class LoginService:
                 if self._is_visible(page, sel, timeout=300):
                     return True
 
-            # 弹窗容器 + 内部输入框（role=dialog 或 aria-modal=true）
+            # 弹窗容器 + 内部输入框(role=dialog 或 aria-modal=true)
             dialog_selectors = [
                 'div[role="dialog"]', 'div[aria-modal="true"]',
                 '.modal', '.shopee-modal', '.shopee-modal__container',
@@ -465,7 +465,7 @@ class LoginService:
             max_attempts = int(login_flags.get("shopee_otp_max_attempts", 3))
 
             for attempt in range(1, max_attempts + 1):
-                code = input(f"请输入短信验证码（第{attempt}/{max_attempts}次，留空取消）：").strip()
+                code = input(f"请输入短信验证码(第{attempt}/{max_attempts}次,留空取消):").strip()
                 if not code:
                     return False
 
@@ -556,7 +556,7 @@ class LoginService:
 
                 # If error toast appears, retry (do NOT spam clicks)
                 if self._shopee_detect_otp_error(page):
-                    self.logger.warning("[ShopeeLogin] 验证码错误，准备重试...")
+                    self.logger.warning("[ShopeeLogin] 验证码错误,准备重试...")
                     continue
 
                 # If we left login page or OTP modal disappeared, treat as success
@@ -564,7 +564,7 @@ class LoginService:
                     return True
 
             # Attempts exhausted
-            self.logger.warning("[ShopeeLogin] 已达到验证码最大重试次数，放弃以避免异常检测")
+            self.logger.warning("[ShopeeLogin] 已达到验证码最大重试次数,放弃以避免异常检测")
             return False
         except Exception:
             return False
@@ -575,7 +575,7 @@ class LoginService:
         """
         try:
             if self._shopee_detect_phone_verification(page):
-                self.logger.info("[ShopeeLogin] 检测到手机/短信验证码页面，等待用户输入并代为提交...")
+                self.logger.info("[ShopeeLogin] 检测到手机/短信验证码页面,等待用户输入并代为提交...")
                 try:
                     if self._shopee_try_manual_phone_otp(page):
                         page.wait_for_timeout(800)

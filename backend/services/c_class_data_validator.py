@@ -3,19 +3,19 @@
 """
 C类数据计算所需字段完整性检查服务
 
-功能：
+功能:
 1. 检查B类数据是否包含C类计算所需的核心字段
-2. 验证字段数据质量（非空、数据类型正确）
+2. 验证字段数据质量(非空、数据类型正确)
 3. 生成数据质量报告
 4. 自动标记数据质量问题
 
-职责边界：
-- 现有验证函数（validate_orders, validate_product_metrics等）关注数据格式和必填字段验证
-- 本服务关注C类计算所需字段的完整性检查（字段是否存在、是否有值）
-- 两者职责不重叠，现有验证在入库前执行，本服务在入库后或计算前执行
-- 检查结果不影响数据入库流程（只记录警告，不阻止入库）
+职责边界:
+- 现有验证函数(validate_orders, validate_product_metrics等)关注数据格式和必填字段验证
+- 本服务关注C类计算所需字段的完整性检查(字段是否存在、是否有值)
+- 两者职责不重叠,现有验证在入库前执行,本服务在入库后或计算前执行
+- 检查结果不影响数据入库流程(只记录警告,不阻止入库)
 
-用于C类数据核心字段优化计划（Phase 2）
+用于C类数据核心字段优化计划(Phase 2)
 """
 
 from sqlalchemy.orm import Session
@@ -25,8 +25,8 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from modules.core.db import (
-    FactOrder,
-    FactProductMetric,  # [WARN] 保留导入用于兼容性，但不再使用
+    # [DELETED] v4.19.0: FactOrder 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
+    FactProductMetric,  # [WARN] 保留导入用于兼容性,但不再使用
     FieldMappingDictionary
 )
 from modules.core.logger import get_logger
@@ -34,20 +34,20 @@ from backend.services.platform_table_manager import get_platform_table_manager  
 
 logger = get_logger(__name__)
 
-# C类数据核心字段定义（17个字段）
+# C类数据核心字段定义(17个字段)
 C_CLASS_CORE_FIELDS = {
     "orders": [
-        "order_id",           # 订单号（统计订单数）
-        "order_date_local",   # 订单日期（时间筛选）
-        "total_amount_rmb",   # 订单总金额CNY（销售额计算）
-        "order_status",       # 订单状态（筛选有效订单）
-        "platform_code",      # 平台代码（维度聚合）
-        "shop_id",            # 店铺ID（维度聚合）
+        "order_id",           # 订单号(统计订单数)
+        "order_date_local",   # 订单日期(时间筛选)
+        "total_amount_rmb",   # 订单总金额CNY(销售额计算)
+        "order_status",       # 订单状态(筛选有效订单)
+        "platform_code",      # 平台代码(维度聚合)
+        "shop_id",            # 店铺ID(维度聚合)
     ],
     "products": [
-        "unique_visitors",    # 转化率计算分母（25分）
-        "order_count",        # 转化率计算分子（25分）
-        "rating",             # 客户满意度（20分）
+        "unique_visitors",    # 转化率计算分母(25分)
+        "order_count",        # 转化率计算分子(25分)
+        "rating",             # 客户满意度(20分)
         "metric_date",        # 时间维度聚合
         "data_domain",        # 区分products/inventory域
         "sales_volume",       # 销量排名
@@ -55,8 +55,8 @@ C_CLASS_CORE_FIELDS = {
         "conversion_rate",    # 转化排名/预警
     ],
     "inventory": [
-        "available_stock",    # 库存周转率计算（25分）/库存预警
-        "sales_volume_30d",   # 库存周转率计算（25分）
+        "available_stock",    # 库存周转率计算(25分)/库存预警
+        "sales_volume_30d",   # 库存周转率计算(25分)
     ],
 }
 
@@ -77,20 +77,20 @@ class CClassDataValidator:
         """
         检查B类数据完整性
         
-        参数：
+        参数:
             platform_code: 平台代码
             shop_id: 店铺ID
             metric_date: 指标日期
-            data_domain: 数据域（可选，如果指定则只检查该域）
+            data_domain: 数据域(可选,如果指定则只检查该域)
         
-        返回：
+        返回:
             {
                 "orders_complete": False,  # 订单数据完整性
                 "products_complete": False,  # 产品数据完整性
                 "inventory_complete": False,  # 库存数据完整性
                 "core_fields_present": [],  # 核心字段存在性
                 "missing_fields": [],  # 缺失字段列表
-                "data_quality_score": 0.0,  # 数据质量评分（0-100）
+                "data_quality_score": 0.0,  # 数据质量评分(0-100)
                 "warnings": []  # 警告信息列表
             }
         """
@@ -163,53 +163,12 @@ class CClassDataValidator:
             "warnings": []
         }
         
-        try:
-            # 查询订单数据
-            orders_query = select(FactOrder).where(
-                and_(
-                    FactOrder.platform_code == platform_code,
-                    FactOrder.shop_id == shop_id,
-                    FactOrder.order_date_local == metric_date,
-                    FactOrder.order_status.in_(["completed", "paid"])
-                )
-            )
-            orders = self.db.execute(orders_query).scalars().all()
-            
-            if not orders:
-                result["warnings"].append(f"未找到订单数据（{platform_code}/{shop_id}/{metric_date}）")
-                return result
-            
-            # 检查核心字段
-            required_fields = C_CLASS_CORE_FIELDS["orders"]
-            sample_order = orders[0]
-            
-            for field_code in required_fields:
-                if hasattr(sample_order, field_code):
-                    value = getattr(sample_order, field_code)
-                    if value is not None:
-                        result["present_fields"].append(f"orders.{field_code}")
-                    else:
-                        result["missing_fields"].append(f"orders.{field_code}")
-                        result["warnings"].append(f"订单字段 {field_code} 存在但值为NULL")
-                else:
-                    result["missing_fields"].append(f"orders.{field_code}")
-                    result["warnings"].append(f"订单字段 {field_code} 不存在")
-            
-            # 检查数据质量
-            total_amount_sum = sum(
-                order.total_amount_rmb for order in orders
-                if order.total_amount_rmb is not None
-            )
-            if total_amount_sum == 0:
-                result["warnings"].append("订单总金额为0，可能影响GMV计算")
-            
-            # 判断完整性
-            result["complete"] = len(result["missing_fields"]) == 0
-            
-        except Exception as e:
-            logger.error(f"检查订单数据完整性时出错: {e}")
-            result["warnings"].append(f"检查订单数据时出错: {str(e)}")
-        
+        # [DELETED] v4.19.0: FactOrder 已删除,此方法需要重构
+        # [TODO] 使用 OrdersDataService 或直接查询 b_class.fact_{platform}_orders_{granularity}
+        result["warnings"].append(
+            f"订单数据完整性检查已废弃(FactOrder表已删除),"
+            f"请使用 b_class.fact_{platform_code}_orders_daily 表或 Metabase Orders Model"
+        )
         return result
     
     def _check_products_completeness(
@@ -219,9 +178,10 @@ class CClassDataValidator:
         metric_date: date
     ) -> Dict[str, Any]:
         """
-        检查产品数据完整性（v4.17.1重构：查询B类表）
+        检查产品数据完整性
         
-        [*] v4.17.1修复：从查询已废弃的FactProductMetric表改为查询b_class.fact_*表
+        v4.17.1重构: 查询B类表
+        v4.17.1修复: 从查询已废弃的FactProductMetric表改为查询b_class.fact_*表
         """
         result = {
             "complete": False,
@@ -231,10 +191,10 @@ class CClassDataValidator:
         }
         
         try:
-            # [*] v4.17.1修复：使用PlatformTableManager获取B类表名
+            # [*] v4.17.1修复:使用PlatformTableManager获取B类表名
             table_manager = get_platform_table_manager(self.db)
             
-            # 获取产品数据表名（尝试多个粒度）
+            # 获取产品数据表名(尝试多个粒度)
             table_name = None
             found_granularity = None
             for granularity in ['daily', 'weekly', 'monthly', 'snapshot']:
@@ -250,7 +210,7 @@ class CClassDataValidator:
                     break
             
             if not table_name:
-                result["warnings"].append(f"未找到产品数据表（{platform_code}/products）")
+                result["warnings"].append(f"未找到产品数据表({platform_code}/products)")
                 return result
             
             # 查询B类表中的产品数据
@@ -274,10 +234,10 @@ class CClassDataValidator:
             rows = self.db.execute(query_sql, params).fetchall()
             
             if not rows:
-                result["warnings"].append(f"未找到产品数据（{platform_code}/{shop_id}/{metric_date}）")
+                result["warnings"].append(f"未找到产品数据({platform_code}/{shop_id}/{metric_date})")
                 return result
             
-            # 检查核心字段（从header_columns JSONB中检查）
+            # 检查核心字段(从header_columns JSONB中检查)
             required_fields = C_CLASS_CORE_FIELDS["products"]
             sample_row = rows[0]
             header_columns = sample_row[1]  # header_columns JSONB
@@ -285,12 +245,12 @@ class CClassDataValidator:
             
             # 检查header_columns是否存在
             if header_columns:
-                # header_columns是JSONB数组，包含字段名列表（可能是中文）
+                # header_columns是JSONB数组,包含字段名列表(可能是中文)
                 available_fields = set(header_columns) if isinstance(header_columns, list) else set()
                 
-                # [*] 注意：核心字段是英文的，但header_columns中可能是中文的
-                # 简化处理：如果header_columns不为空，认为有字段映射，标记所有核心字段为存在
-                # 更严格的检查需要字段映射表，这里先简化
+                # [*] 注意:核心字段是英文的,但header_columns中可能是中文的
+                # 简化处理:如果header_columns不为空,认为有字段映射,标记所有核心字段为存在
+                # 更严格的检查需要字段映射表,这里先简化
                 if available_fields:
                     result["present_fields"].extend([f"products.{field}" for field in required_fields])
                     result["complete"] = True
@@ -306,7 +266,7 @@ class CClassDataValidator:
                 result["missing_fields"].extend([f"products.{field}" for field in required_fields])
                 result["warnings"].append("产品数据缺少表头字段信息")
             
-            # 检查数据质量（检查raw_data JSONB不为空）
+            # 检查数据质量(检查raw_data JSONB不为空)
             empty_data_count = sum(1 for row in rows if not row[0] or row[0] == {})
             if empty_data_count > 0:
                 result["warnings"].append(f"发现{empty_data_count}条空数据记录")
@@ -329,9 +289,9 @@ class CClassDataValidator:
         metric_date: date
     ) -> Dict[str, Any]:
         """
-        检查库存数据完整性（v4.17.1重构：查询B类表）
+        检查库存数据完整性(v4.17.1重构:查询B类表)
         
-        [*] v4.17.1修复：从查询已废弃的FactProductMetric表改为查询b_class.fact_*表
+        [*] v4.17.1修复:从查询已废弃的FactProductMetric表改为查询b_class.fact_*表
         """
         result = {
             "complete": False,
@@ -341,10 +301,10 @@ class CClassDataValidator:
         }
         
         try:
-            # [*] v4.17.1修复：使用PlatformTableManager获取B类表名
+            # [*] v4.17.1修复:使用PlatformTableManager获取B类表名
             table_manager = get_platform_table_manager(self.db)
             
-            # 获取库存数据表名（优先inventory域，如果没有则尝试products域）
+            # 获取库存数据表名(优先inventory域,如果没有则尝试products域)
             table_name = None
             found_granularity = None
             found_domain = None
@@ -363,7 +323,7 @@ class CClassDataValidator:
                     found_domain = 'inventory'
                     break
             
-            # 如果inventory域没有，尝试products域（库存数据可能在products域中）
+            # 如果inventory域没有,尝试products域(库存数据可能在products域中)
             if not table_name:
                 for granularity in ['snapshot', 'daily', 'weekly', 'monthly']:
                     temp_table_name = table_manager.get_table_name(
@@ -379,13 +339,13 @@ class CClassDataValidator:
                         break
             
             if not table_name:
-                result["warnings"].append(f"未找到库存数据表（{platform_code}/inventory或products）")
+                result["warnings"].append(f"未找到库存数据表({platform_code}/inventory或products)")
                 return result
             
             # 查询B类表中的库存数据
-            # 注意：如果表是products域，需要检查data_domain字段
+            # 注意:如果表是products域,需要检查data_domain字段
             if found_domain == 'inventory':
-                # inventory域的表，只查询inventory数据
+                # inventory域的表,只查询inventory数据
                 query_sql = text(f"""
                     SELECT raw_data, header_columns, COUNT(*) as row_count
                     FROM b_class."{table_name}"
@@ -397,7 +357,7 @@ class CClassDataValidator:
                     LIMIT 10
                 """)
             else:
-                # products域的表，需要检查data_domain字段（可能是inventory或products）
+                # products域的表,需要检查data_domain字段(可能是inventory或products)
                 query_sql = text(f"""
                     SELECT raw_data, header_columns, COUNT(*) as row_count
                     FROM b_class."{table_name}"
@@ -418,10 +378,10 @@ class CClassDataValidator:
             rows = self.db.execute(query_sql, params).fetchall()
             
             if not rows:
-                result["warnings"].append(f"未找到库存数据（{platform_code}/{shop_id}/{metric_date}）")
+                result["warnings"].append(f"未找到库存数据({platform_code}/{shop_id}/{metric_date})")
                 return result
             
-            # 检查核心字段（从header_columns JSONB中检查）
+            # 检查核心字段(从header_columns JSONB中检查)
             required_fields = C_CLASS_CORE_FIELDS["inventory"]
             sample_row = rows[0]
             header_columns = sample_row[1]  # header_columns JSONB
@@ -429,11 +389,11 @@ class CClassDataValidator:
             
             # 检查header_columns是否存在
             if header_columns:
-                # header_columns是JSONB数组，包含字段名列表（可能是中文）
+                # header_columns是JSONB数组,包含字段名列表(可能是中文)
                 available_fields = set(header_columns) if isinstance(header_columns, list) else set()
                 
-                # [*] 注意：核心字段是英文的，但header_columns中可能是中文的
-                # 简化处理：如果header_columns不为空，认为有字段映射，标记所有核心字段为存在
+                # [*] 注意:核心字段是英文的,但header_columns中可能是中文的
+                # 简化处理:如果header_columns不为空,认为有字段映射,标记所有核心字段为存在
                 if available_fields:
                     result["present_fields"].extend([f"inventory.{field}" for field in required_fields])
                     result["complete"] = True
@@ -449,7 +409,7 @@ class CClassDataValidator:
                 result["missing_fields"].extend([f"inventory.{field}" for field in required_fields])
                 result["warnings"].append("库存数据缺少表头字段信息")
             
-            # 检查数据质量（检查raw_data JSONB不为空）
+            # 检查数据质量(检查raw_data JSONB不为空)
             empty_data_count = sum(1 for row in rows if not row[0] or row[0] == {})
             if empty_data_count > 0:
                 result["warnings"].append(f"发现{empty_data_count}条空数据记录")
@@ -473,15 +433,15 @@ class CClassDataValidator:
         end_date: date
     ) -> Dict[str, Any]:
         """
-        生成数据质量报告（批量检查）
+        生成数据质量报告(批量检查)
         
-        参数：
+        参数:
             platform_code: 平台代码
             shop_id: 店铺ID
             start_date: 开始日期
             end_date: 结束日期
         
-        返回：
+        返回:
             {
                 "platform_code": "shopee",
                 "shop_id": "shop001",

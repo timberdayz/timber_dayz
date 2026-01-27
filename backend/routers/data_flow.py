@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-数据流转追踪API（v4.11.5新增）
+数据流转追踪API(v4.11.5新增)
 
-功能：
-1. 追踪任务数据流转（Raw -> Fact -> MV）
+功能:
+1. 追踪任务数据流转(Raw -> Fact -> MV)
 2. 按文件追踪数据流转
 3. 识别数据丢失位置
 """
@@ -23,8 +23,7 @@ from modules.core.db import (
     StagingOrders, 
     StagingProductMetrics, 
     StagingInventory,
-    FactOrder,
-    FactOrderItem,
+    # [DELETED] v4.19.0: FactOrder, FactOrderItem 已删除
     FactProductMetric,
     DataQuarantine
 )
@@ -42,12 +41,12 @@ async def trace_task_data_flow(
     """
     追踪任务数据流转
     
-    功能：
+    功能:
     - 查询Raw层、Fact层、隔离区的数据统计
     - 计算流转成功率
     - 识别数据丢失位置
     
-    返回：
+    返回:
     {
         success: bool,
         task_id: str,
@@ -74,7 +73,7 @@ async def trace_task_data_flow(
     try:
         logger.info(f"[DataFlow] 追踪任务数据流转: task_id={task_id}")
         
-        # Step 1: 查询Raw层数据统计（按task_id）
+        # Step 1: 查询Raw层数据统计(按task_id)
         raw_orders_result = await db.execute(
             select(func.count(StagingOrders.id)).where(StagingOrders.ingest_task_id == task_id)
         )
@@ -92,7 +91,7 @@ async def trace_task_data_flow(
         
         raw_total = raw_orders_count + raw_products_count + raw_inventory_count
         
-        # Step 2: 查询Fact层数据统计（通过file_id关联）
+        # Step 2: 查询Fact层数据统计(通过file_id关联)
         # 获取任务相关的所有file_id
         file_ids = set()
         
@@ -130,9 +129,11 @@ async def trace_task_data_flow(
         
         if file_ids:
             fact_orders_result = await db.execute(
-                select(func.count(FactOrder.order_id)).where(FactOrder.file_id.in_(list(file_ids)))
+                # [DELETED] v4.19.0: FactOrder 已删除
+                # select(func.count(FactOrder.order_id)).where(FactOrder.file_id.in_(list(file_ids)))
+                text("SELECT 0")  # 暂时返回0
             )
-            fact_orders_count = fact_orders_result.scalar() or 0
+            fact_orders_count = 0  # [TODO] 查询 b_class.fact_{platform}_orders_{granularity} 表
             
             fact_products_result = await db.execute(
                 select(func.count(FactProductMetric.platform_code)).where(FactProductMetric.source_catalog_id.in_(list(file_ids)))
@@ -192,16 +193,18 @@ async def trace_task_data_flow(
                 )
                 file_raw_count = file_raw_result.scalar() or 0
             
-            # 查询该文件的Staging层数据（与Raw层相同，因为staging就是raw）
+            # 查询该文件的Staging层数据(与Raw层相同,因为staging就是raw)
             file_staging_count = file_raw_count
             
             # 查询该文件的Fact层数据
             file_fact_count = 0
             if data_domain == "orders":
                 file_fact_result = await db.execute(
-                    select(func.count(FactOrder.order_id)).where(FactOrder.file_id == file_id)
+                    # [DELETED] v4.19.0: FactOrder 已删除
+                    # select(func.count(FactOrder.order_id)).where(FactOrder.file_id == file_id)
+                    text("SELECT 0")  # 暂时返回0
                 )
-                file_fact_count = file_fact_result.scalar() or 0
+                file_fact_count = 0  # [TODO] 查询 b_class.fact_{platform}_orders_{granularity} 表
             elif data_domain in ["products", "traffic", "analytics", "inventory"]:
                 file_fact_result = await db.execute(
                     select(func.count(FactProductMetric.platform_code)).where(FactProductMetric.source_catalog_id == file_id)
@@ -268,18 +271,18 @@ async def trace_task_data_flow(
 @router.get("/trace/file/{file_id}")
 async def trace_file_data_flow(
     file_id: int,
-    header_row: int = Query(0, description="表头行（0-based）"),
+    header_row: int = Query(0, description="表头行(0-based)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     按文件追踪数据流转
     
-    功能：
+    功能:
     - 追踪单个文件的数据流转路径
     - 显示文件在各层的数据量
     - 显示流转状态和错误信息
     
-    返回：
+    返回:
     {
         success: bool,
         file_id: int,
@@ -338,13 +341,13 @@ async def trace_file_data_flow(
                 code=ErrorCode.FILE_NOT_FOUND,
                 message=f"文件未注册: id={file_id}",
                 error_type=get_error_type(ErrorCode.FILE_NOT_FOUND),
-                recovery_suggestion="请检查文件ID是否正确，或确认该文件已注册",
+                recovery_suggestion="请检查文件ID是否正确,或确认该文件已注册",
                 status_code=404
             )
         
         data_domain = catalog_record.data_domain or "products"
         
-        # Step 2: 查询Raw层数据（通过staging表）
+        # Step 2: 查询Raw层数据(通过staging表)
         raw_count = 0
         staging_count = 0
         
@@ -375,10 +378,12 @@ async def trace_file_data_flow(
         
         if data_domain == "orders":
             fact_result = await db.execute(
-                select(func.count(FactOrder.order_id)).where(FactOrder.file_id == file_id)
+                # [DELETED] v4.19.0: FactOrder 已删除
+                # select(func.count(FactOrder.order_id)).where(FactOrder.file_id == file_id)
+                text("SELECT 0")  # 暂时返回0
             )
-            fact_count = fact_result.scalar() or 0
-            fact_table_name = "fact_orders"
+            fact_count = 0  # [TODO] 查询 b_class.fact_{platform}_orders_{granularity} 表
+            fact_table_name = "b_class.fact_*_orders_*"  # 新表结构
         
         elif data_domain in ["products", "traffic", "analytics", "inventory"]:
             fact_result = await db.execute(

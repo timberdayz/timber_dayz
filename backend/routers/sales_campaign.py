@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-销售战役管理API（v4.11.0新增）
+销售战役管理API(v4.11.0新增)
 
-功能：
-1. 销售战役CRUD（创建、查询、更新、删除）
+功能:
+1. 销售战役CRUD(创建、查询、更新、删除)
 2. 战役参与店铺管理
-3. 战役达成情况查询（自动计算）
-4. 战役列表查询（分页、筛选）
+3. 战役达成情况查询(自动计算)
+4. 战役列表查询(分页、筛选)
 
-路由：
+路由:
 - GET /api/sales-campaigns - 查询战役列表
 - GET /api/sales-campaigns/{campaign_id} - 查询战役详情
 - POST /api/sales-campaigns - 创建战役
@@ -35,7 +35,7 @@ from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import (
     SalesCampaign,
     SalesCampaignShop,
-    FactOrder,
+    # [DELETED] v4.19.0: FactOrder 已删除
     DimShop
 )
 from modules.core.logger import get_logger
@@ -48,13 +48,13 @@ router = APIRouter(prefix="/sales-campaigns", tags=["销售战役管理"])
 class CampaignCreateRequest(BaseModel):
     """创建战役请求"""
     campaign_name: str = Field(..., description="战役名称")
-    campaign_type: str = Field(..., description="战役类型：holiday/new_product/special_event")
+    campaign_type: str = Field(..., description="战役类型:holiday/new_product/special_event")
     start_date: date = Field(..., description="开始日期")
     end_date: date = Field(..., description="结束日期")
-    target_amount: float = Field(0.0, ge=0, description="目标销售额（CNY）")
+    target_amount: float = Field(0.0, ge=0, description="目标销售额(CNY)")
     target_quantity: int = Field(0, ge=0, description="目标订单数/销量")
     description: Optional[str] = Field(None, description="战役描述")
-    shop_ids: Optional[List[Dict[str, str]]] = Field(None, description="参与店铺列表：[{platform_code, shop_id, target_amount, target_quantity}]")
+    shop_ids: Optional[List[Dict[str, str]]] = Field(None, description="参与店铺列表:[{platform_code, shop_id, target_amount, target_quantity}]")
 
 
 class CampaignUpdateRequest(BaseModel):
@@ -121,10 +121,10 @@ class CampaignShopResponse(BaseModel):
 
 @router.get("", response_model=Dict[str, Any])
 async def list_campaigns(
-    status: Optional[str] = Query(None, description="状态筛选：active/completed/pending/cancelled"),
+    status: Optional[str] = Query(None, description="状态筛选:active/completed/pending/cancelled"),
     campaign_type: Optional[str] = Query(None, description="战役类型筛选"),
-    start_date: Optional[date] = Query(None, description="开始日期筛选（>=）"),
-    end_date: Optional[date] = Query(None, description="结束日期筛选（<=）"),
+    start_date: Optional[date] = Query(None, description="开始日期筛选(>=)"),
+    end_date: Optional[date] = Query(None, description="结束日期筛选(<=)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
@@ -132,7 +132,7 @@ async def list_campaigns(
     """
     查询战役列表
     
-    支持筛选：状态、类型、日期范围
+    支持筛选:状态、类型、日期范围
     支持分页
     """
     try:
@@ -199,7 +199,7 @@ async def get_campaign(
                 code=ErrorCode.SALES_CAMPAIGN_NOT_FOUND,
                 message="战役不存在",
                 error_type=get_error_type(ErrorCode.SALES_CAMPAIGN_NOT_FOUND),
-                recovery_suggestion="请检查战役ID是否正确，或确认该战役已创建",
+                recovery_suggestion="请检查战役ID是否正确,或确认该战役已创建",
                 status_code=404
             )
         
@@ -241,7 +241,7 @@ async def get_campaign(
             message="查询战役详情失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -264,7 +264,7 @@ async def create_campaign(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="结束日期必须大于等于开始日期",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请调整日期范围，确保结束日期大于等于开始日期",
+                recovery_suggestion="请调整日期范围,确保结束日期大于等于开始日期",
                 status_code=400
             )
         
@@ -299,7 +299,7 @@ async def create_campaign(
         await db.commit()
         await db.refresh(campaign)
         
-        # 触发A_CLASS_UPDATED事件（数据流转流程自动化）
+        # 触发A_CLASS_UPDATED事件(数据流转流程自动化)
         try:
             from backend.utils.events import AClassUpdatedEvent
             from backend.services.event_listeners import event_listener
@@ -339,7 +339,7 @@ async def create_campaign(
             message="创建战役失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -366,7 +366,7 @@ async def update_campaign(
                 code=ErrorCode.SALES_CAMPAIGN_NOT_FOUND,
                 message="战役不存在",
                 error_type=get_error_type(ErrorCode.SALES_CAMPAIGN_NOT_FOUND),
-                recovery_suggestion="请检查战役ID是否正确，或确认该战役已创建",
+                recovery_suggestion="请检查战役ID是否正确,或确认该战役已创建",
                 status_code=404
             )
         
@@ -382,7 +382,7 @@ async def update_campaign(
                     code=ErrorCode.DATA_VALIDATION_FAILED,
                     message="结束日期必须大于等于开始日期",
                     error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                    recovery_suggestion="请调整日期范围，确保结束日期大于等于开始日期",
+                    recovery_suggestion="请调整日期范围,确保结束日期大于等于开始日期",
                     status_code=400
                 )
         
@@ -394,7 +394,7 @@ async def update_campaign(
         await db.commit()
         await db.refresh(campaign)
         
-        # 触发A_CLASS_UPDATED事件（数据流转流程自动化）
+        # 触发A_CLASS_UPDATED事件(数据流转流程自动化)
         try:
             from backend.utils.events import AClassUpdatedEvent
             from backend.services.event_listeners import event_listener
@@ -434,7 +434,7 @@ async def update_campaign(
             message="更新战役失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -447,7 +447,7 @@ async def delete_campaign(
     """
     删除战役
     
-    同时删除关联的参与店铺记录（CASCADE）
+    同时删除关联的参与店铺记录(CASCADE)
     """
     try:
         result = await db.execute(
@@ -460,11 +460,11 @@ async def delete_campaign(
                 code=ErrorCode.SALES_CAMPAIGN_NOT_FOUND,
                 message="战役不存在",
                 error_type=get_error_type(ErrorCode.SALES_CAMPAIGN_NOT_FOUND),
-                recovery_suggestion="请检查战役ID是否正确，或确认该战役已创建",
+                recovery_suggestion="请检查战役ID是否正确,或确认该战役已创建",
                 status_code=404
             )
         
-        # 获取受影响的店铺和平台（删除前）
+        # 获取受影响的店铺和平台(删除前)
         shops = db.execute(
             select(SalesCampaignShop).where(SalesCampaignShop.campaign_id == campaign_id)
         ).scalars().all()
@@ -474,7 +474,7 @@ async def delete_campaign(
         await db.delete(campaign)
         await db.commit()
         
-        # 触发A_CLASS_UPDATED事件（数据流转流程自动化）
+        # 触发A_CLASS_UPDATED事件(数据流转流程自动化)
         try:
             from backend.utils.events import AClassUpdatedEvent
             from backend.services.event_listeners import event_listener
@@ -506,7 +506,7 @@ async def delete_campaign(
             message="删除战役失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -534,7 +534,7 @@ async def add_campaign_shop(
                 code=ErrorCode.SALES_CAMPAIGN_NOT_FOUND,
                 message="战役不存在",
                 error_type=get_error_type(ErrorCode.SALES_CAMPAIGN_NOT_FOUND),
-                recovery_suggestion="请检查战役ID是否正确，或确认该战役已创建",
+                recovery_suggestion="请检查战役ID是否正确,或确认该战役已创建",
                 status_code=404
             )
         
@@ -551,7 +551,7 @@ async def add_campaign_shop(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="店铺不存在",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请检查店铺ID是否正确，或确认该店铺已创建",
+                recovery_suggestion="请检查店铺ID是否正确,或确认该店铺已创建",
                 status_code=404
             )
         
@@ -569,7 +569,7 @@ async def add_campaign_shop(
                 code=ErrorCode.DATA_UNIQUE_CONSTRAINT_VIOLATION,
                 message="店铺已参与该战役",
                 error_type=get_error_type(ErrorCode.DATA_UNIQUE_CONSTRAINT_VIOLATION),
-                recovery_suggestion="该店铺已参与此战役，无需重复添加",
+                recovery_suggestion="该店铺已参与此战役,无需重复添加",
                 status_code=400
             )
         
@@ -604,7 +604,7 @@ async def add_campaign_shop(
             message="添加店铺失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -633,7 +633,7 @@ async def remove_campaign_shop(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="店铺未参与该战役",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请检查店铺ID是否正确，或确认该店铺已参与此战役",
+                recovery_suggestion="请检查店铺ID是否正确,或确认该店铺已参与此战役",
                 status_code=404
             )
         
@@ -654,7 +654,7 @@ async def remove_campaign_shop(
             message="移除店铺失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -665,7 +665,7 @@ async def calculate_campaign_achievement(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    计算战役达成情况（C类数据：系统自动计算）
+    计算战役达成情况(C类数据:系统自动计算)
     
     从fact_orders表聚合计算实际销售额和订单数
     更新战役和参与店铺的达成数据
@@ -686,7 +686,7 @@ async def calculate_campaign_achievement(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message=str(e),
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="请检查战役ID是否正确，或确认该战役已创建",
+            recovery_suggestion="请检查战役ID是否正确,或确认该战役已创建",
             status_code=404
         )
     except HTTPException:
@@ -699,7 +699,7 @@ async def calculate_campaign_achievement(
             message="计算达成情况失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 

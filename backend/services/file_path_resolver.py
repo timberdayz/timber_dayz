@@ -1,13 +1,13 @@
 """
 文件路径解析和重建服务
 
-职责：
-- 从标准文件名解析元数据（平台/账号/店铺/数据域/粒度）
+职责:
+- 从标准文件名解析元数据(平台/账号/店铺/数据域/粒度)
 - 基于落盘规则重建完整文件路径
 - 支持多路径搜索和文件查找
 - 应用safe_slug规范化
 
-参考：docs/guides/OUTPUTS_NAMING.md
+参考:docs/guides/OUTPUTS_NAMING.md
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ class FilePathResolver:
     # 标准路径模板
     PATH_TEMPLATE = "temp/outputs/{platform}/{account}/{shop}/{data_type}/{granularity}/{filename}"
     
-    # 平台关键词映射（支持中文）
+    # 平台关键词映射(支持中文)
     PLATFORM_KEYWORDS = {
         'shopee': ['shopee', '虾皮', 'xiāpí'],
         'tiktok': ['tiktok', 'tik tok', 'tt'],
@@ -78,17 +78,17 @@ class FilePathResolver:
         """
         解析标准文件名格式
         
-        格式：{TS}__{account}__{shop}__{data_type}__{granularity}[__{start}_{end}].xlsx
-        示例：20250924_185940__虾皮巴西_东朗照明主体__the_king_s_lucky_shop__products__daily__2025-09-23_2025-09-23.xlsx
+        格式:{TS}__{account}__{shop}__{data_type}__{granularity}[__{start}_{end}].xlsx
+        示例:20250924_185940__虾皮巴西_东朗照明主体__the_king_s_lucky_shop__products__daily__2025-09-23_2025-09-23.xlsx
         
         Args:
-            filename: 文件名（可以包含路径）
+            filename: 文件名(可以包含路径)
         
         Returns:
-            ParsedFileMetadata对象，解析失败返回None
+            ParsedFileMetadata对象,解析失败返回None
         """
         try:
-            # 提取文件名（去除路径和扩展名）
+            # 提取文件名(去除路径和扩展名)
             name = Path(filename).stem
             
             # 分割文件名
@@ -105,7 +105,7 @@ class FilePathResolver:
                 data_type=parts[3],
             )
             
-            # 处理粒度和日期范围（如果存在）
+            # 处理粒度和日期范围(如果存在)
             if len(parts) >= 5:
                 # 第5部分可能是粒度或粒度+日期范围
                 remaining = '__'.join(parts[4:])
@@ -124,7 +124,7 @@ class FilePathResolver:
             # 从账号名推断平台
             parsed.platform = self._infer_platform_from_text(parsed.account)
             
-            # 如果还是unknown，尝试从店铺名推断
+            # 如果还是unknown,尝试从店铺名推断
             if parsed.platform == 'unknown':
                 parsed.platform = self._infer_platform_from_text(parsed.shop)
             
@@ -140,10 +140,10 @@ class FilePathResolver:
         从文本推断平台
         
         Args:
-            text: 要分析的文本（账号名或店铺名）
+            text: 要分析的文本(账号名或店铺名)
         
         Returns:
-            平台代码，未识别返回'unknown'
+            平台代码,未识别返回'unknown'
         """
         text_lower = text.lower()
         
@@ -162,7 +162,7 @@ class FilePathResolver:
             text: 要分析的文本
         
         Returns:
-            数据域，未识别返回None
+            数据域,未识别返回None
         """
         text_lower = text.lower()
         
@@ -177,13 +177,13 @@ class FilePathResolver:
         """
         应用safe_slug规范化
         
-        参考：docs/guides/OUTPUTS_NAMING.md
+        参考:docs/guides/OUTPUTS_NAMING.md
         
-        规则：
-        - Unicode正规化：NFKD分解并去除音标；再执行NFKC
-        - 小写化：统一为小写
-        - 允许字符：字母、数字、-_.；其余替换为_
-        - 连续下划线折叠：多个_折叠为一个
+        规则:
+        - Unicode正规化:NFKD分解并去除音标;再执行NFKC
+        - 小写化:统一为小写
+        - 允许字符:字母、数字、-_.;其余替换为_
+        - 连续下划线折叠:多个_折叠为一个
         - 去除首尾的.与_
         - 为空时回退为unknown
         
@@ -204,7 +204,7 @@ class FilePathResolver:
         # 小写化
         text = text.lower()
         
-        # 允许字符：字母、数字、-_.
+        # 允许字符:字母、数字、-_.
         text = re.sub(r'[^a-z0-9\-_.]', '_', text)
         
         # 连续下划线折叠
@@ -228,15 +228,15 @@ class FilePathResolver:
             use_slug: 是否对账号和店铺名应用safe_slug规范化
         
         Returns:
-            完整文件路径，如果解析失败返回None
+            完整文件路径,如果解析失败返回None
         """
         parsed = self.parse_filename(filename)
         
         if not parsed or parsed.platform == 'unknown':
-            logger.warning(f"无法重建文件路径，解析失败或平台未识别: {filename}")
+            logger.warning(f"无法重建文件路径,解析失败或平台未识别: {filename}")
             return None
         
-        # 应用safe_slug规范化（可选）
+        # 应用safe_slug规范化(可选)
         if use_slug:
             account = self.safe_slug(parsed.account)
             shop = self.safe_slug(parsed.shop)
@@ -273,8 +273,8 @@ class FilePathResolver:
         """
         查找文件可能存在的所有位置
         
-        优先级：
-        1. 标准路径（从文件名重建）
+        优先级:
+        1. 标准路径(从文件名重建)
         2. 标准路径的slug变体
         3. 递归搜索基础目录
         
@@ -283,11 +283,11 @@ class FilePathResolver:
             include_slug_variants: 是否包含slug变体
         
         Returns:
-            可能的文件路径列表（按优先级排序，已验证存在）
+            可能的文件路径列表(按优先级排序,已验证存在)
         """
         locations = []
         
-        # 1. 标准路径（从文件名重建）
+        # 1. 标准路径(从文件名重建)
         standard_path = self.rebuild_file_path(filename, use_slug=False)
         if standard_path:
             if self.verify_file_exists(standard_path):
@@ -300,9 +300,9 @@ class FilePathResolver:
                 if self.verify_file_exists(slug_path):
                     locations.append(slug_path)
         
-        # 3. 如果标准路径没找到，递归搜索基础目录
+        # 3. 如果标准路径没找到,递归搜索基础目录
         if not locations:
-            logger.debug(f"标准路径未找到文件，开始递归搜索: {filename}")
+            logger.debug(f"标准路径未找到文件,开始递归搜索: {filename}")
             for base_dir in self.SEARCH_BASE_DIRS:
                 if not base_dir.exists():
                     continue

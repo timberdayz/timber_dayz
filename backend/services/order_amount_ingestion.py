@@ -2,22 +2,22 @@
 # -*- coding: utf-8 -*-
 
 """
-订单金额维度入库服务（v4.6.0）
+订单金额维度入库服务(v4.6.0)
 
-[WARN] v4.18.2 已废弃：此功能已移除，不再被调用
-原因：
-- DSS架构下，数据已完整存储在 b_class.fact_raw_data_orders_* 表的 JSONB 字段中
-- 货币代码已提取到 currency_code 系统字段，字段名已归一化
-- 数据标准化应在 Metabase 中完成，该表属于"只写不读"的冗余数据
-- 如需订单金额统计，请通过 Metabase 查询 b_class.fact_raw_data_orders_* 表
+[WARN] v4.18.2 已废弃:此功能已移除,不再被调用
+原因:
+- DSS架构下,数据已完整存储在 b_class.fact_raw_data_orders_* 表的 JSONB 字段中
+- 货币代码已提取到 currency_code 系统字段,字段名已归一化
+- 数据标准化应在 Metabase 中完成,该表属于"只写不读"的冗余数据
+- 如需订单金额统计,请通过 Metabase 查询 b_class.fact_raw_data_orders_* 表
 
-原用途（已废弃）：
+原用途(已废弃):
 - 识别多货币、多状态的销售额和退款字段
-- 提取维度（metric_type, metric_subtype, currency）
+- 提取维度(metric_type, metric_subtype, currency)
 - 批量转换货币
 - 写入FactOrderAmount表
 
-保留此文件仅用于兼容性，不推荐使用。
+保留此文件仅用于兼容性,不推荐使用。
 """
 
 from typing import List, Dict, Optional
@@ -43,19 +43,19 @@ async def ingest_order_amounts(
     """
     入库订单金额维度数据
     
-    参数：
+    参数:
         db: 数据库会话
-        rows: 数据行列表（已映射到标准字段）
+        rows: 数据行列表(已映射到标准字段)
         original_columns: 原始列名列表
         field_mappings: 字段映射字典
-        order_date: 订单日期（可选，默认使用今天）
+        order_date: 订单日期(可选,默认使用今天)
     
-    返回：
+    返回:
         插入的记录数
     
-    流程：
+    流程:
     1. 使用PatternMatcher识别pattern-based字段
-    2. 提取维度（metric_type, metric_subtype, currency）
+    2. 提取维度(metric_type, metric_subtype, currency)
     3. 准备转换数据
     4. 批量货币转换
     5. 批量插入FactOrderAmount表
@@ -73,12 +73,12 @@ async def ingest_order_amounts(
     converter = CurrencyConverter(db)
     
     # 2. 识别pattern-based字段
-    # [*] v4.12.1修复：跳过已经映射的字段，避免Pattern Matcher警告
+    # [*] v4.12.1修复:跳过已经映射的字段,避免Pattern Matcher警告
     # 只处理未映射的字段或明确标记为pattern-based的字段
     pattern_fields = {}
     mapped_standard_fields = set()
     
-    # 收集已映射的标准字段（避免重复匹配）
+    # 收集已映射的标准字段(避免重复匹配)
     if field_mappings:
         for orig_col, mapping_info in field_mappings.items():
             if isinstance(mapping_info, dict):
@@ -87,11 +87,11 @@ async def ingest_order_amounts(
                     mapped_standard_fields.add(standard_field)
     
     for orig_col in original_columns:
-        # [*] v4.12.1修复：跳过已经映射的字段
+        # [*] v4.12.1修复:跳过已经映射的字段
         mapping_info = field_mappings.get(orig_col) if field_mappings else None
         if mapping_info and isinstance(mapping_info, dict):
             standard_field = mapping_info.get("standard_field")
-            # 如果字段已经映射到标准字段，跳过Pattern匹配（避免警告）
+            # 如果字段已经映射到标准字段,跳过Pattern匹配(避免警告)
             if standard_field and standard_field != "未映射":
                 continue
         
@@ -108,12 +108,12 @@ async def ingest_order_amounts(
     
     logger.info(f"Found {len(pattern_fields)} pattern-based fields for dimension table ingestion")
     
-    # 3. 准备数据（收集所有需要转换的金额）
+    # 3. 准备数据(收集所有需要转换的金额)
     records_to_convert = []
     records_metadata = []
     
     for row_idx, row in enumerate(rows):
-        # 提取order_id（优先使用标准字段，降级使用中文字段）
+        # 提取order_id(优先使用标准字段,降级使用中文字段)
         order_id = (
             row.get("order_id") or 
             row.get("订单号") or 
@@ -122,7 +122,7 @@ async def ingest_order_amounts(
         )
         
         for orig_col, match_result in pattern_fields.items():
-            # 从原始行数据中获取值（使用原始列名）
+            # 从原始行数据中获取值(使用原始列名)
             value = row.get(orig_col)
             
             if value is None or value == "" or value == 0:
@@ -175,7 +175,7 @@ async def ingest_order_amounts(
         logger.info(f"Currency conversion completed: {len(cny_amounts)} amounts converted")
     except Exception as e:
         logger.error(f"Batch currency conversion failed: {e}")
-        # 降级：使用原币金额
+        # 降级:使用原币金额
         cny_amounts = [Decimal(str(rec["amount"])) for rec in records_to_convert]
         logger.warning("Using original amounts as CNY (conversion failed)")
     
@@ -185,7 +185,7 @@ async def ingest_order_amounts(
     
     for idx, metadata in enumerate(records_metadata):
         try:
-            # 计算汇率（用于审计）
+            # 计算汇率(用于审计)
             amount_original = Decimal(str(metadata["amount_original"]))
             amount_cny = cny_amounts[idx]
             
@@ -232,10 +232,10 @@ def extract_order_date_from_row(row: Dict) -> Optional[date]:
     """
     从行数据中提取订单日期
     
-    参数：
+    参数:
         row: 数据行字典
     
-    返回：
+    返回:
         订单日期或None
     """
     # 尝试从多个可能的字段中提取日期
@@ -248,13 +248,13 @@ def extract_order_date_from_row(row: Dict) -> Optional[date]:
         value = row.get(field)
         if value:
             try:
-                # 如果是date或datetime对象，直接返回
+                # 如果是date或datetime对象,直接返回
                 if isinstance(value, date):
                     return value
                 elif isinstance(value, datetime):
                     return value.date()
                 
-                # 如果是字符串，尝试解析
+                # 如果是字符串,尝试解析
                 # TODO: 添加更智能的日期解析逻辑
                 return date.today()
             except Exception as e:

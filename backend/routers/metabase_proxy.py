@@ -39,7 +39,7 @@ async def check_metabase_health():
     """
     try:
         # Metabase健康检查端点不需要认证
-        # 使用更长的超时时间，并添加重试逻辑
+        # 使用更长的超时时间,并添加重试逻辑
         response = requests.get(
             f"{METABASE_URL}/api/health",
             timeout=10,
@@ -59,7 +59,7 @@ async def check_metabase_health():
                 "healthy": True,
                 "metabase_url": METABASE_URL,
                 "status": "available_but_setup_required",
-                "message": "Metabase正在运行，但可能需要完成初始设置"
+                "message": "Metabase正在运行,但可能需要完成初始设置"
             }
         else:
             return {
@@ -91,14 +91,14 @@ async def get_embedding_token(request: EmbeddingTokenRequest):
     """
     获取Metabase嵌入token
     
-    注意：实际实现中，应该使用Metabase API生成JWT token
-    这里简化处理，返回配置的密钥（生产环境需要实现JWT生成逻辑）
+    注意:实际实现中,应该使用Metabase API生成JWT token
+    这里简化处理,返回配置的密钥(生产环境需要实现JWT生成逻辑)
     """
     try:
         # TODO: 实现JWT token生成逻辑
-        # 参考Metabase文档：https://www.metabase.com/docs/latest/embedding/signed-embeds
+        # 参考Metabase文档:https://www.metabase.com/docs/latest/embedding/signed-embeds
         
-        # 简化实现：返回配置的密钥
+        # 简化实现:返回配置的密钥
         # 生产环境应该使用jwt库生成token
         token = METABASE_EMBEDDING_SECRET_KEY
         
@@ -172,7 +172,7 @@ async def refresh_metabase_views():
     """
     刷新Metabase相关的物化视图
     
-    注意：这个接口应该触发PostgreSQL物化视图刷新
+    注意:这个接口应该触发PostgreSQL物化视图刷新
     而不是Metabase的视图刷新
     """
     try:

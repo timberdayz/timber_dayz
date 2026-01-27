@@ -4,7 +4,7 @@
 """
 账号信息加密服务 (v4.7.0)
 
-功能：
+功能:
 - 使用 Fernet 对称加密算法加密/解密密码
 - 密钥从环境变量读取
 - 首次启动时自动生成密钥
@@ -22,7 +22,7 @@ class AccountEncryptionService:
     """
     账号信息加密服务
     
-    使用Fernet对称加密算法，密钥存储在环境变量ACCOUNT_ENCRYPTION_KEY中
+    使用Fernet对称加密算法,密钥存储在环境变量ACCOUNT_ENCRYPTION_KEY中
     """
     
     def __init__(self):
@@ -30,22 +30,22 @@ class AccountEncryptionService:
         encryption_key = os.getenv('ACCOUNT_ENCRYPTION_KEY')
         
         if not encryption_key:
-            # 首次启动，生成密钥
+            # 首次启动,生成密钥
             encryption_key = Fernet.generate_key().decode()
             logger.warning("="*60)
-            logger.warning("[WARN]  首次启动检测：未找到加密密钥")
+            logger.warning("[WARN]  首次启动检测:未找到加密密钥")
             logger.warning("="*60)
             logger.warning(f"请将以下密钥添加到 .env 文件:")
             logger.warning(f"ACCOUNT_ENCRYPTION_KEY={encryption_key}")
             logger.warning("="*60)
             logger.warning("安全提示:")
-            logger.warning("1. 此密钥用于加密账号密码，请妥善保管")
+            logger.warning("1. 此密钥用于加密账号密码,请妥善保管")
             logger.warning("2. 密钥泄露将导致所有账号密码可被解密")
             logger.warning("3. 密钥丢失将导致无法解密已有账号密码")
             logger.warning("="*60)
             
-            # 使用临时生成的密钥（仅本次运行有效）
-            logger.info("使用临时密钥（仅本次运行有效，重启后失效）")
+            # 使用临时生成的密钥(仅本次运行有效)
+            logger.info("使用临时密钥(仅本次运行有效,重启后失效)")
         
         try:
             self.cipher = Fernet(encryption_key.encode())
@@ -119,7 +119,7 @@ class AccountEncryptionService:
             return False
 
 
-# 全局单例（延迟初始化）
+# 全局单例(延迟初始化)
 _encryption_service = None
 
 

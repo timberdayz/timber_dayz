@@ -3,8 +3,8 @@
 """
 账号对齐服务 - v4.3.6
 
-功能：
-- 基于account_aliases表，将妙手(miaoshou)导出的订单数据对齐到标准账号ID
+功能:
+- 基于account_aliases表,将妙手(miaoshou)导出的订单数据对齐到标准账号ID
 - 仅影响platform=miaoshou且data_domain=orders的数据
 - 支持批量回填历史数据和增量对齐新数据
 """
@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, func, text
 
-from modules.core.db import AccountAlias, FactOrder
+from modules.core.db import AccountAlias
+# [DELETED] v4.19.0: FactOrder 已删除
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,11 +29,11 @@ class AlignmentStats:
     unaligned: int = 0
     coverage_rate: float = 0.0
     unique_raw_labels: int = 0
-    missing_mappings: List[str] = None  # 缺失的映射（待补充）
+    missing_mappings: List[str] = None  # 缺失的映射(待补充)
 
 
 class AccountAlignmentService:
-    """账号对齐服务（仅针对miaoshou/orders）"""
+    """账号对齐服务(仅针对miaoshou/orders)"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -50,8 +51,8 @@ class AccountAlignmentService:
             aliases = self.db.execute(stmt).scalars().all()
             
             for alias in aliases:
-                # 缓存key：(account, site, store_label_raw)
-                # site可选（None时仅按account+label匹配）
+                # 缓存key:(account, site, store_label_raw)
+                # site可选(None时仅按account+label匹配)
                 key = (
                     alias.account or '',
                     alias.site or '',
@@ -69,47 +70,47 @@ class AccountAlignmentService:
         account: Optional[str],
         site: Optional[str],
         store_label_raw: Optional[str],
-        platform_code: Optional[str] = None  # [*] v4.6.1新增：平台代码
+        platform_code: Optional[str] = None  # [*] v4.6.1新增:平台代码
     ) -> Optional[str]:
         """
-        对齐单个订单（v4.6.1增强 - 支持部分匹配和自动认领）
+        对齐单个订单(v4.6.1增强 - 支持部分匹配和自动认领)
         
         Args:
-            account: 采购账号或原始账号名（如"3C店"）
+            account: 采购账号或原始账号名(如"3C店")
             site: 站点
-            store_label_raw: 原始店铺名（如"3C店"）
-            platform_code: 平台代码（如"shopee"、"miaoshou"）
+            store_label_raw: 原始店铺名(如"3C店")
+            platform_code: 平台代码(如"shopee"、"miaoshou")
             
         Returns:
-            str: 标准账号ID，未找到返回None
+            str: 标准账号ID,未找到返回None
         """
-        # [*] v4.6.1增强：如果account字段有值，优先使用account进行匹配
+        # [*] v4.6.1增强:如果account字段有值,优先使用account进行匹配
         match_label = account or store_label_raw
         
         if not match_label:
             return None
         
-        # 1. 尝试精确匹配（优先使用AccountAlias表）
-        # 尝试精确匹配（account + site + label）
+        # 1. 尝试精确匹配(优先使用AccountAlias表)
+        # 尝试精确匹配(account + site + label)
         key_full = (account or '', site or '', match_label)
         if key_full in self._alias_cache:
             return self._alias_cache[key_full]
         
-        # 尝试宽松匹配（仅account + label，忽略site）
+        # 尝试宽松匹配(仅account + label,忽略site)
         key_loose = (account or '', '', match_label)
         if key_loose in self._alias_cache:
             return self._alias_cache[key_loose]
         
-        # 尝试最宽松匹配（仅label，忽略account和site）
+        # 尝试最宽松匹配(仅label,忽略account和site)
         for (cached_acc, cached_site, cached_label), target in self._alias_cache.items():
             if cached_label == match_label:
                 return target
         
-        # [*] v4.6.1新增：2. 尝试部分匹配（从local_accounts.py读取账号列表）
+        # [*] v4.6.1新增:2. 尝试部分匹配(从local_accounts.py读取账号列表)
         if platform_code:
             matched_account_id = self._try_partial_match(match_label, platform_code)
             if matched_account_id:
-                # 自动创建AccountAlias映射记录（方便后续查询）
+                # 自动创建AccountAlias映射记录(方便后续查询)
                 self._auto_create_alias(
                     platform_code=platform_code,
                     account=account,
@@ -123,21 +124,21 @@ class AccountAlignmentService:
     
     def _try_partial_match(self, account_label: str, platform_code: str) -> Optional[str]:
         """
-        尝试部分匹配账号（v4.6.1增强 - 支持another_name字段）
+        尝试部分匹配账号(v4.6.1增强 - 支持another_name字段)
         
-        匹配规则（优先级递减）：
-        1. another_name精确匹配：account_label == another_name（最高优先级）
-        2. another_name包含匹配：account_label in another_name
-        3. account_id精确匹配：account_label == account_id
-        4. account_id包含匹配：account_label in account_id（如"3C店"匹配"shopee新加坡3C店"）
-        5. account_id后缀匹配：account_id.endswith(account_label)
+        匹配规则(优先级递减):
+        1. another_name精确匹配:account_label == another_name(最高优先级)
+        2. another_name包含匹配:account_label in another_name
+        3. account_id精确匹配:account_label == account_id
+        4. account_id包含匹配:account_label in account_id(如"3C店"匹配"shopee新加坡3C店")
+        5. account_id后缀匹配:account_id.endswith(account_label)
         
         Args:
-            account_label: 原始账号标签（如"3C店"）
-            platform_code: 平台代码（如"shopee"）
+            account_label: 原始账号标签(如"3C店")
+            platform_code: 平台代码(如"shopee")
             
         Returns:
-            str: 匹配的标准账号ID，未找到返回None
+            str: 匹配的标准账号ID,未找到返回None
         """
         try:
             # 加载local_accounts.py中的账号列表
@@ -155,14 +156,14 @@ class AccountAlignmentService:
             if not platform_accounts:
                 return None
             
-            # [*] v4.6.1新增：1. another_name精确匹配（最高优先级）
+            # [*] v4.6.1新增:1. another_name精确匹配(最高优先级)
             for acc in platform_accounts:
                 another_name = acc.get('another_name')
                 if another_name and another_name == account_label:
                     logger.info(f"[AccountAlignment] another_name精确匹配: '{account_label}' -> '{acc.get('account_id')}'")
                     return acc.get('account_id')
             
-            # [*] v4.6.1新增：2. another_name包含匹配
+            # [*] v4.6.1新增:2. another_name包含匹配
             for acc in platform_accounts:
                 another_name = acc.get('another_name')
                 if another_name and account_label in another_name:
@@ -176,14 +177,14 @@ class AccountAlignmentService:
                     logger.info(f"[AccountAlignment] account_id精确匹配: '{account_label}' -> '{account_id}'")
                     return account_id
             
-            # 4. account_id包含匹配（account_label包含在account_id中）
+            # 4. account_id包含匹配(account_label包含在account_id中)
             for acc in platform_accounts:
                 account_id = acc.get('account_id', '')
                 if account_label in account_id:
                     logger.info(f"[AccountAlignment] account_id包含匹配: '{account_label}' -> '{account_id}'")
                     return account_id
             
-            # 5. account_id后缀匹配（account_id以account_label结尾）
+            # 5. account_id后缀匹配(account_id以account_label结尾)
             for acc in platform_accounts:
                 account_id = acc.get('account_id', '')
                 if account_id.endswith(account_label):
@@ -197,7 +198,7 @@ class AccountAlignmentService:
             return None
     
     def _load_local_accounts(self) -> List[Dict]:
-        """加载local_accounts.py中的账号列表（v4.6.1新增）"""
+        """加载local_accounts.py中的账号列表(v4.6.1新增)"""
         try:
             import importlib.util
             import sys
@@ -229,12 +230,12 @@ class AccountAlignmentService:
         site: Optional[str],
         store_label_raw: str,
         target_id: str,
-        confidence: float = 0.8  # [*] 自动匹配的置信度较低（0.8），人工确认=1.0
+        confidence: float = 0.8  # [*] 自动匹配的置信度较低(0.8),人工确认=1.0
     ):
         """
-        自动创建AccountAlias映射记录（v4.6.1新增）
+        自动创建AccountAlias映射记录(v4.6.1新增)
         
-        注意：如果映射已存在，不会重复创建
+        注意:如果映射已存在,不会重复创建
         """
         try:
             from sqlalchemy import select
@@ -251,7 +252,7 @@ class AccountAlignmentService:
             ).scalar_one_or_none()
             
             if existing:
-                # 如果已存在但target_id不同，更新它
+                # 如果已存在但target_id不同,更新它
                 if existing.target_id != target_id:
                     existing.target_id = target_id
                     existing.confidence = confidence
@@ -272,7 +273,7 @@ class AccountAlignmentService:
                 confidence=confidence,
                 active=True,
                 created_by='system_auto_match',
-                notes=f'自动匹配（部分匹配：{store_label_raw} -> {target_id}）'
+                notes=f'自动匹配(部分匹配:{store_label_raw} -> {target_id})'
             )
             
             self.db.add(new_alias)
@@ -293,7 +294,7 @@ class AccountAlignmentService:
         回填历史数据的aligned_account_id
         
         Args:
-            limit: 限制处理数量（None=全量）
+            limit: 限制处理数量(None=全量)
             
         Returns:
             AlignmentStats: 对齐统计
@@ -305,11 +306,14 @@ class AccountAlignmentService:
         stats = AlignmentStats(missing_mappings=[])
         
         try:
-            # 查询需要对齐的订单（仅miaoshou且shop_id=none）
-            stmt = select(FactOrder).where(
-                FactOrder.platform_code == 'miaoshou',
-                FactOrder.shop_id == 'none'
-            )
+            # 查询需要对齐的订单(仅miaoshou且shop_id=none)
+            # [DELETED] v4.19.0: FactOrder 已删除
+            # [TODO] 实现查询 b_class.fact_miaoshou_orders_{granularity} 的逻辑
+            stmt = select(text("1")).where(text("1=0"))  # 返回空结果
+            # stmt = select(FactOrder).where(
+            #     FactOrder.platform_code == 'miaoshou',
+            #     FactOrder.shop_id == 'none'
+            # )
             
             if limit:
                 stmt = stmt.limit(limit)
@@ -323,12 +327,12 @@ class AccountAlignmentService:
             missing_labels = set()
             
             for order in orders:
-                # 尝试对齐（v4.6.1增强：传递platform_code参数）
+                # 尝试对齐(v4.6.1增强:传递platform_code参数)
                 aligned_id = self.align_order(
                     order.account,
                     order.site,
                     order.store_label_raw,
-                    platform_code=order.platform_code  # [*] v4.6.1新增：传递platform_code
+                    platform_code=order.platform_code  # [*] v4.6.1新增:传递platform_code
                 )
                 
                 if aligned_id:
@@ -374,7 +378,7 @@ class AccountAlignmentService:
     
     def get_alignment_stats(self) -> AlignmentStats:
         """
-        获取对齐统计（不执行回填）
+        获取对齐统计(不执行回填)
         
         Returns:
             AlignmentStats: 统计信息
@@ -382,6 +386,16 @@ class AccountAlignmentService:
         stats = AlignmentStats(missing_mappings=[])
         
         try:
+            # [DELETED] v4.19.0: FactOrder 已删除
+            # [TODO] 实现查询 b_class.fact_miaoshou_orders_{granularity} 的逻辑
+            stats.total_orders = 0
+            stats.aligned = 0
+            stats.unaligned = 0
+            stats.coverage_rate = 0.0
+            unique_labels = 0
+            
+            # [DEPRECATED] 以下代码已注释
+            """
             # 统计总订单数
             total = self.db.execute(
                 select(func.count(FactOrder.order_id)).where(
@@ -415,6 +429,7 @@ class AccountAlignmentService:
                     FactOrder.store_label_raw.isnot(None)
                 )
             ).scalar()
+            """
             
             stats.unique_raw_labels = unique_labels or 0
             
@@ -426,10 +441,10 @@ class AccountAlignmentService:
     
     def suggest_missing_mappings(self, min_orders: int = 5) -> List[Dict]:
         """
-        生成缺失映射建议（按订单数量排序）
+        生成缺失映射建议(按订单数量排序)
         
         Args:
-            min_orders: 最小订单数（过滤低频店铺）
+            min_orders: 最小订单数(过滤低频店铺)
             
         Returns:
             list: 建议映射列表
@@ -485,11 +500,11 @@ class AccountAlignmentService:
         """
         生成建议的target_id
         
-        逻辑：
+        逻辑:
         - 账号前缀 + 站点简称 + 店铺序号
-        - 示例：虾皮巴西_东朗 + 菲律宾 + 1店 -> shopee_ph_1
+        - 示例:虾皮巴西_东朗 + 菲律宾 + 1店 -> shopee_ph_1
         """
-        # 简化账号名（取前缀）
+        # 简化账号名(取前缀)
         acc_prefix = 'shopee'  # 默认
         if account:
             if '虾皮' in account or 'shopee' in account.lower():
@@ -512,10 +527,10 @@ class AccountAlignmentService:
             }
             site_code = site_map.get(site, site.lower()[:2])
         
-        # 店铺标识（从label提取）
+        # 店铺标识(从label提取)
         shop_suffix = ''
         import re
-        # 提取数字（如"1店"->"1"）
+        # 提取数字(如"1店"->"1")
         match = re.search(r'(\d+)店', store_label)
         if match:
             shop_suffix = match.group(1)
@@ -524,7 +539,7 @@ class AccountAlignmentService:
         elif '玩具' in store_label:
             shop_suffix = 'toys'
         else:
-            # 使用完整label（简化）
+            # 使用完整label(简化)
             shop_suffix = re.sub(r'[^\w]', '_', store_label.lower())[:10]
         
         # 组合
@@ -597,7 +612,7 @@ class AccountAlignmentService:
         批量添加别名映射
         
         Args:
-            mappings: 映射列表，每项包含：
+            mappings: 映射列表,每项包含:
                 {
                     'account': str,
                     'site': str,

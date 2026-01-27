@@ -1,12 +1,12 @@
 """
-Shopee 流量表现（Analytics）组件配置
+Shopee 流量表现(Analytics)组件配置
 
-单一入口：只修改本文件即可快速适配不同页面布局/语言。
+单一入口:只修改本文件即可快速适配不同页面布局/语言。
 
-说明：
-- URL 与选择器均集中在此处，供导航与导出组件复用
-- 如页面文案语言不同（英文/繁体等），可补充同义选择器
-- 若平台升级导致结构变化，只需更新这里即可
+说明:
+- URL 与选择器均集中在此处,供导航与导出组件复用
+- 如页面文案语言不同(英文/繁体等),可补充同义选择器
+- 若平台升级导致结构变化,只需更新这里即可
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ DATE_APPLY_BUTTONS: Final[List[str]] = [
     'button:has-text("Apply")',
 ]
 
-# 导出弹窗与按钮选择器集合（按优先级从上到下）
+# 导出弹窗与按钮选择器集合(按优先级从上到下)
 EXPORT_BUTTON_SELECTORS: Final[List[str]] = [
     # 基于截图的精确选择器
     'button:has-text("导出数据")',
@@ -82,7 +82,7 @@ EXPORT_BUTTON_SELECTORS: Final[List[str]] = [
     # 位置相关选择器
     '[style*="float: right"] button:has-text("导出")',
     '[style*="text-align: right"] button:has-text("导出")',
-    # 跨地区差异选择器（英文/繁体/其他语言）
+    # 跨地区差异选择器(英文/繁体/其他语言)
     'button:has-text("匯出")',  # 繁体中文
     'button:has-text("匯出數據")',
     'button:has-text("Exportar")',  # 西班牙语/葡萄牙语
@@ -126,7 +126,7 @@ DOWNLOAD_BUTTON_SELECTORS: Final[List[str]] = [
     '[role="button"]:has-text("Download")',
 ]
 
-# 表格或图表就绪的探针（用于在点击导出前确认页面加载完毕）
+# 表格或图表就绪的探针(用于在点击导出前确认页面加载完毕)
 DATA_READY_PROBES: Final[List[str]] = [
     # 流量相关的数据元素
     "[data-testid*='traffic']",
@@ -143,8 +143,8 @@ DATA_READY_PROBES: Final[List[str]] = [
     ".data-table",
     ".traffic-table",
     "[class*='table']",
-    # 加载状态检测（反向探针 - 这些消失表示加载完成）
-    # 注意：这些需要特殊处理，检测它们不可见
+    # 加载状态检测(反向探针 - 这些消失表示加载完成)
+    # 注意:这些需要特殊处理,检测它们不可见
     # ".loading", ".spinner", "[class*='loading']",
     # 数据容器
     ".data-container",
@@ -162,7 +162,7 @@ DATA_READY_PROBES: Final[List[str]] = [
     "[data-ready='true']",
 ]
 
-# 常见提示/升级通知弹窗的关闭按钮选择器（按优先级）
+# 常见提示/升级通知弹窗的关闭按钮选择器(按优先级)
 POPUP_CLOSE_SELECTORS: Final[List[str]] = [
     '.ant-modal-close',
     'button:has-text("我知道了")',
@@ -173,7 +173,7 @@ POPUP_CLOSE_SELECTORS: Final[List[str]] = [
     '[aria-label="Close"]',
 ]
 
-# "最新报告"面板相关选择器（流量表现特有的报告生成机制）
+# "最新报告"面板相关选择器(流量表现特有的报告生成机制)
 LATEST_REPORTS_PANEL_SELECTORS: Final[List[str]] = [
     # 最新报告面板
     '[class*="latest-report"]',
@@ -191,7 +191,7 @@ LATEST_REPORTS_PANEL_SELECTORS: Final[List[str]] = [
     '[class*="report-download"]',
     '.report-item a',
     '.download-item a',
-    # 右侧面板（常见的报告面板位置）
+    # 右侧面板(常见的报告面板位置)
     '.sidebar [class*="report"]',
     '.right-panel [class*="report"]',
     '[class*="side-panel"] [class*="report"]',
@@ -225,7 +225,7 @@ DATA_TYPE_DIR: Final[str] = "traffic"
 
 @dataclass(frozen=True)
 class AnalyticsSelectors:
-    """打包的选择器与常量（便于一次性传入组件）。"""
+    """打包的选择器与常量(便于一次性传入组件)。"""
 
     base_url: str = BASE_URL
     overview_path: str = TRAFFIC_OVERVIEW_PATH
@@ -249,7 +249,7 @@ class AnalyticsSelectors:
     # 弹窗关闭
     popup_close_buttons: List[str] = tuple(POPUP_CLOSE_SELECTORS)  # type: ignore[assignment]
 
-    # 流量表现特有：最新报告面板与状态检测
+    # 流量表现特有:最新报告面板与状态检测
     latest_reports_panel: List[str] = tuple(LATEST_REPORTS_PANEL_SELECTORS)  # type: ignore[assignment]
     export_status_selectors: List[str] = tuple(EXPORT_STATUS_SELECTORS)  # type: ignore[assignment]
 

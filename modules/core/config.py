@@ -1,7 +1,7 @@
 """
 配置管理模块
 
-提供统一的配置管理功能，支持YAML格式配置文件的加载、保存和验证。
+提供统一的配置管理功能,支持YAML格式配置文件的加载、保存和验证。
 """
 
 import yaml
@@ -19,8 +19,8 @@ def get_export_settings(platform: str = "shopee", granularity: str = "daily") ->
     获取导出行为配置
 
     Args:
-        platform: 平台名称（如 shopee）
-        granularity: 数据粒度（daily/weekly/monthly）
+        platform: 平台名称(如 shopee)
+        granularity: 数据粒度(daily/weekly/monthly)
 
     Returns:
         Dict包含 auto_regenerate 和 api_fallback 布尔值
@@ -58,7 +58,7 @@ def get_export_settings(platform: str = "shopee", granularity: str = "daily") ->
         return result
 
     except Exception as e:
-        logger.warning(f"读取导出配置失败，使用默认值: {e}")
+        logger.warning(f"读取导出配置失败,使用默认值: {e}")
         return {"auto_regenerate": True, "api_fallback": False}
 
 
@@ -76,7 +76,7 @@ class ConfigManager:
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self._configs = {}
         
-        logger.info(f"配置管理器初始化，配置目录: {self.config_dir}")
+        logger.info(f"配置管理器初始化,配置目录: {self.config_dir}")
     
     def load_config(self, config_name: str, config_path: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -84,7 +84,7 @@ class ConfigManager:
         
         Args:
             config_name: 配置名称
-            config_path: 配置文件路径，如果为None则使用默认路径
+            config_path: 配置文件路径,如果为None则使用默认路径
             
         Returns:
             Dict[str, Any]: 配置数据
@@ -125,7 +125,7 @@ class ConfigManager:
         Args:
             config_name: 配置名称
             config_data: 配置数据
-            config_path: 配置文件路径，如果为None则使用默认路径
+            config_path: 配置文件路径,如果为None则使用默认路径
             
         Returns:
             bool: 保存是否成功
@@ -179,7 +179,7 @@ class ConfigManager:
         
         Args:
             config_name: 配置名称
-            key: 配置键，支持点号分隔的嵌套键
+            key: 配置键,支持点号分隔的嵌套键
             default: 默认值
             
         Returns:
@@ -187,7 +187,7 @@ class ConfigManager:
         """
         config = self.get_config(config_name)
         
-        # 支持嵌套键，如 "database.host"
+        # 支持嵌套键,如 "database.host"
         keys = key.split('.')
         value = config
         
@@ -196,7 +196,7 @@ class ConfigManager:
                 value = value[k]
             return value
         except (KeyError, TypeError):
-            logger.debug(f"配置项不存在: {config_name}.{key}，使用默认值: {default}")
+            logger.debug(f"配置项不存在: {config_name}.{key},使用默认值: {default}")
             return default
     
     def set_config_value(self, config_name: str, key: str, value: Any) -> bool:
@@ -205,7 +205,7 @@ class ConfigManager:
         
         Args:
             config_name: 配置名称
-            key: 配置键，支持点号分隔的嵌套键
+            key: 配置键,支持点号分隔的嵌套键
             value: 配置值
             
         Returns:

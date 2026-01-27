@@ -3,14 +3,14 @@
 """
 ShopResolver - 全域店铺归属解析器
 
-功能：
+功能:
 - 从文件路径/元数据/配置多策略解析shop_id
-- 返回置信度与来源，便于审计
+- 返回置信度与来源,便于审计
 - 失败时提供可操作建议
 
-优先级：
+优先级:
 1. .meta.json伴生文件
-2. 路径规则（profiles/<platform>/<account>/<shop_id>/...）
+2. 路径规则(profiles/<platform>/<account>/<shop_id>/...)
 3. config/platform_accounts/*.json别名映射
 4. local_accounts.py店铺映射
 5. 文件名正则提取
@@ -46,16 +46,16 @@ class ShopResolver:
         """
         初始化店铺解析器
         
-        v4.3.6: 改用数据库+缓存（现代化ERP标准）
+        v4.3.6: 改用数据库+缓存(现代化ERP标准)
         - YAML仅作导入/导出通道
         - 运行时从account_aliases表+内存缓存读取
         """
         self._db_session = db_session
         self._alias_cache: Dict[str, str] = {}
-        # YAML不再在线读取（已废弃）
+        # YAML不再在线读取(已废弃)
     
     def _load_db_aliases(self):
-        """从数据库加载别名到缓存（按需加载）"""
+        """从数据库加载别名到缓存(按需加载)"""
         if not self._db_session or self._alias_cache:
             return  # 已加载或无DB会话
         
@@ -67,13 +67,13 @@ class ShopResolver:
             aliases = self._db_session.execute(stmt).scalars().all()
             
             for alias in aliases:
-                # 构建查找key（兼容旧格式）
+                # 构建查找key(兼容旧格式)
                 key = f"{alias.platform}:{alias.account or ''}:{alias.site or ''}:{alias.store_label_raw}"
                 self._alias_cache[key] = alias.target_id
             
             logger.debug(f"从数据库加载店铺别名: {len(self._alias_cache)}条")
         except Exception as e:
-            logger.warning(f"加载数据库别名失败（可能表未创建）: {e}")
+            logger.warning(f"加载数据库别名失败(可能表未创建): {e}")
     
     def resolve(
         self,
@@ -82,21 +82,21 @@ class ShopResolver:
         file_metadata: Optional[Dict] = None
     ) -> ResolvedShop:
         """
-        解析店铺归属（仅从.meta.json提取）
+        解析店铺归属(仅从.meta.json提取)
         
-        [*] 修改：只从.meta.json伴生文件中提取shop_id，不从其他来源提取
+        [*] 修改:只从.meta.json伴生文件中提取shop_id,不从其他来源提取
         
         Args:
             file_path: 文件路径
-            platform_code: 平台代码（保留参数以兼容，但不使用）
-            file_metadata: 文件元数据（保留参数以兼容，但不使用）
+            platform_code: 平台代码(保留参数以兼容,但不使用)
+            file_metadata: 文件元数据(保留参数以兼容,但不使用)
             
         Returns:
             ResolvedShop: 解析结果
         """
         path = Path(file_path)
         
-        # [*] 唯一策略：.meta.json伴生文件
+        # [*] 唯一策略:.meta.json伴生文件
         meta_file = path.with_suffix('.meta.json')
         if meta_file.exists():
             try:
@@ -113,7 +113,7 @@ class ShopResolver:
                             detail=f'从{meta_file.name}的business_metadata读取'
                         )
                     
-                    # 尝试从 collection_info 提取（兼容旧格式）
+                    # 尝试从 collection_info 提取(兼容旧格式)
                     shop_id = meta.get('collection_info', {}).get('shop_id')
                     if shop_id:
                         return ResolvedShop(
@@ -125,7 +125,7 @@ class ShopResolver:
             except Exception as e:
                 logger.debug(f"读取.meta.json失败: {e}")
         
-        # [*] 如果没有.meta.json或其中没有shop_id，返回失败（但不阻止同步）
+        # [*] 如果没有.meta.json或其中没有shop_id,返回失败(但不阻止同步)
         return ResolvedShop(
             shop_id=None,
             confidence=0.0,
@@ -134,7 +134,7 @@ class ShopResolver:
         )
     
     def _extract_shop_from_path(self, path: Path, platform_code: str) -> Optional[str]:
-        """从路径提取店铺ID（profiles/<platform>/<account>/<shop_id>/...）"""
+        """从路径提取店铺ID(profiles/<platform>/<account>/<shop_id>/...)"""
         try:
             parts = [p.lower() for p in path.parts]
             pc = platform_code.lower()
@@ -149,7 +149,7 @@ class ShopResolver:
             if platform_idx >= 0 and platform_idx + 2 < len(parts):
                 # profiles/<platform>/<account>/<shop_id>
                 candidate = parts[platform_idx + 2]
-                # 验证：至少6位数字或包含连字符
+                # 验证:至少6位数字或包含连字符
                 if len(candidate) >= 6 or '-' in candidate or '.' in candidate:
                     return candidate
             
@@ -166,7 +166,7 @@ class ShopResolver:
             
             with open(config_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # 简单匹配：filename包含alias则返回对应shop_id
+                # 简单匹配:filename包含alias则返回对应shop_id
                 for account_data in data.get('accounts', []):
                     for shop in account_data.get('shops', []):
                         alias = shop.get('alias', '').lower()
@@ -210,39 +210,39 @@ class ShopResolver:
     def _extract_shop_from_filename(self, filename: str, platform_code: Optional[str]) -> Optional[str]:
         """从文件名正则提取店铺ID"""
         try:
-            # 模式1：shop_<id>
+            # 模式1:shop_<id>
             m = re.search(r'shop_([a-zA-Z0-9_\-\.]+)', filename, re.IGNORECASE)
             if m:
                 candidate = m.group(1)
-                # [*] v4.17.0修复：排除包含日期或snapshot的模式
+                # [*] v4.17.0修复:排除包含日期或snapshot的模式
                 if not (re.search(r'\d{8}', candidate) or '_snapshot_' in candidate.lower()):
                     return candidate
             
-            # 模式2：<platform>_<shop_id>_...
+            # 模式2:<platform>_<shop_id>_...
             if platform_code:
                 pattern = rf'{re.escape(platform_code)}_([a-zA-Z0-9_\-\.]+)_'
                 m = re.search(pattern, filename, re.IGNORECASE)
                 if m:
                     candidate = m.group(1)
-                    # [*] v4.17.0修复：排除包含日期或snapshot的模式
+                    # [*] v4.17.0修复:排除包含日期或snapshot的模式
                     has_date_pattern = bool(re.search(r'\d{8}', candidate))
                     has_snapshot = '_snapshot_' in candidate.lower()
                     if has_date_pattern or has_snapshot:
                         return None
-                    # 排除常见非店铺标识（orders/products/traffic等）
+                    # 排除常见非店铺标识(orders/products/traffic等)
                     excluded = {'orders', 'products', 'traffic', 'services', 'daily', 'weekly', 'monthly', 'inventory', 'snapshot'}
                     if candidate.lower() not in excluded:
                         return candidate
             
-            # 模式3：纯数字ID（至少8位）
-            # [WARN] 注意：8位数字可能是日期（YYYYMMDD），需要谨慎处理
-            # 对于miaoshou平台，8位数字很可能是日期，不应作为shop_id
+            # 模式3:纯数字ID(至少8位)
+            # [WARN] 注意:8位数字可能是日期(YYYYMMDD),需要谨慎处理
+            # 对于miaoshou平台,8位数字很可能是日期,不应作为shop_id
             m = re.search(r'(\d{8,})', filename)
             if m:
                 candidate = m.group(1)
-                # 如果平台是miaoshou，且8位数字看起来像日期（在合理范围内），跳过
+                # 如果平台是miaoshou,且8位数字看起来像日期(在合理范围内),跳过
                 if platform_code and platform_code.lower() == 'miaoshou':
-                    # 检查是否是合理的日期范围（2000-2099）
+                    # 检查是否是合理的日期范围(2000-2099)
                     if len(candidate) == 8 and candidate.startswith(('20', '21')):
                         return None
                 return candidate

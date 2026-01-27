@@ -16,8 +16,8 @@ from datetime import datetime
 
 class RateLimitEventResponse(BaseModel):
     """限流事件响应"""
-    timestamp: str = Field(..., description="事件时间戳（ISO 格式）")
-    rate_limit_key: str = Field(..., description="限流键（user:xxx 或 ip:xxx）")
+    timestamp: str = Field(..., description="事件时间戳(ISO 格式)")
+    rate_limit_key: str = Field(..., description="限流键(user:xxx 或 ip:xxx)")
     path: str = Field(..., description="API 路径")
     method: str = Field(..., description="HTTP 方法")
     detail: str = Field(..., description="限流详情")
@@ -30,11 +30,11 @@ class RateLimitEventResponse(BaseModel):
 
 class RateLimitStatsResponse(BaseModel):
     """限流统计响应"""
-    date: str = Field(..., description="统计日期（YYYY-MM-DD）")
+    date: str = Field(..., description="统计日期(YYYY-MM-DD)")
     total: int = Field(..., description="总限流次数")
     by_path: Dict[str, int] = Field(default_factory=dict, description="按 API 路径统计")
     by_key: Dict[str, int] = Field(default_factory=dict, description="按限流键统计")
-    source: str = Field(..., description="数据来源（redis/local）")
+    source: str = Field(..., description="数据来源(redis/local)")
     
     class Config:
         from_attributes = True
@@ -47,7 +47,7 @@ class RateLimitAnomalyResponse(BaseModel):
     path: Optional[str] = Field(None, description="API 路径")
     count: int = Field(..., description="限流次数")
     threshold: int = Field(..., description="告警阈值")
-    severity: str = Field(..., description="严重程度（warning/critical）")
+    severity: str = Field(..., description="严重程度(warning/critical)")
     
     class Config:
         from_attributes = True

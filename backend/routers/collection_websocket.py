@@ -1,7 +1,7 @@
 """
 数据采集 WebSocket 路由
 
-提供任务状态实时推送功能，支持JWT认证
+提供任务状态实时推送功能,支持JWT认证
 """
 
 import os
@@ -77,7 +77,7 @@ class ConnectionManager:
         if task_id in self.active_connections:
             self.active_connections[task_id].discard(websocket)
             
-            # 如果没有连接了，删除任务条目
+            # 如果没有连接了,删除任务条目
             if not self.active_connections[task_id]:
                 del self.active_connections[task_id]
         
@@ -213,7 +213,7 @@ class ConnectionManager:
         获取连接数量
         
         Args:
-            task_id: 任务ID（可选，不传则返回总数）
+            task_id: 任务ID(可选,不传则返回总数)
             
         Returns:
             int: 连接数量
@@ -271,10 +271,10 @@ async def websocket_task_status(
     """
     任务状态WebSocket端点
     
-    连接时需要通过query参数传递JWT token进行认证：
+    连接时需要通过query参数传递JWT token进行认证:
     ws://host/ws/collection/{task_id}?token=xxx
     
-    消息格式：
+    消息格式:
     - 进度更新: {"type": "progress", "task_id": "...", "progress": 50, ...}
     - 日志消息: {"type": "log", "task_id": "...", "level": "info", ...}
     - 完成通知: {"type": "complete", "task_id": "...", "status": "completed", ...}
@@ -310,10 +310,10 @@ async def websocket_task_status(
             "timestamp": datetime.utcnow().isoformat()
         })
         
-        # 保持连接，等待客户端断开
+        # 保持连接,等待客户端断开
         while True:
             try:
-                # 接收客户端消息（心跳等）
+                # 接收客户端消息(心跳等)
                 data = await websocket.receive_text()
                 
                 # 处理心跳

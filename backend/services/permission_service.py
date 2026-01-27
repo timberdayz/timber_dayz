@@ -11,7 +11,7 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 
-# 系统预定义权限列表（基于前端权限定义）
+# 系统预定义权限列表(基于前端权限定义)
 SYSTEM_PERMISSIONS = [
     # 工作台
     {"id": "business-overview", "name": "业务概览", "description": "查看业务概览数据", "resource": "dashboard", "action": "read", "category": "工作台"},
@@ -112,7 +112,7 @@ class PermissionService:
     
     @staticmethod
     def build_permission_tree() -> List[Dict[str, Any]]:
-        """构建权限树（按模块分组）"""
+        """构建权限树(按模块分组)"""
         # 按分类分组
         category_map: Dict[str, List[Dict[str, Any]]] = {}
         for perm in SYSTEM_PERMISSIONS:

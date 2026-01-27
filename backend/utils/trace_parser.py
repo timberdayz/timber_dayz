@@ -2,7 +2,7 @@
 Trace 解析器 - Playwright Trace 文件解析
 
 v4.7.5: Inspector API 支持
-- 解析 Playwright Trace 文件（.zip）
+- 解析 Playwright Trace 文件(.zip)
 - 提取操作步骤并转换为组件 YAML 格式
 - 符合 Playwright 官方 Trace 格式规范
 
@@ -73,7 +73,7 @@ class TraceParser:
         steps = result.steps  # YAML 格式步骤
     """
     
-    # 支持的操作类型映射（Trace 事件 -> 组件步骤）
+    # 支持的操作类型映射(Trace 事件 -> 组件步骤)
     ACTION_MAPPING = {
         'click': 'click',
         'fill': 'fill',
@@ -113,7 +113,7 @@ class TraceParser:
         初始化 Trace 解析器
         
         Args:
-            output_dir: 解压输出目录（默认：temp/traces）
+            output_dir: 解压输出目录(默认:temp/traces)
         """
         if output_dir is None:
             output_dir = Path(__file__).parent.parent.parent / 'temp' / 'traces'
@@ -128,7 +128,7 @@ class TraceParser:
         解析 Trace 文件
         
         Args:
-            trace_path: Trace 文件路径（.zip）
+            trace_path: Trace 文件路径(.zip)
             
         Returns:
             TraceParseResult: 解析结果
@@ -199,7 +199,7 @@ class TraceParser:
         Returns:
             Path: 解压目录
         """
-        # 创建解压目录（使用时间戳避免冲突）
+        # 创建解压目录(使用时间戳避免冲突)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         extract_dir = self.output_dir / f"trace_{timestamp}"
         extract_dir.mkdir(parents=True, exist_ok=True)
@@ -223,14 +223,14 @@ class TraceParser:
         """
         events = []
         
-        # 查找 trace 文件（可能是 trace.trace 或 trace.json）
+        # 查找 trace 文件(可能是 trace.trace 或 trace.json)
         trace_files = list(extract_dir.glob('*.trace')) + list(extract_dir.glob('*.json'))
         
         for trace_file in trace_files:
             try:
                 content = trace_file.read_text(encoding='utf-8')
                 
-                # Trace 文件可能是 NDJSON 格式（每行一个 JSON）
+                # Trace 文件可能是 NDJSON 格式(每行一个 JSON)
                 for line in content.strip().split('\n'):
                     if line.strip():
                         try:
@@ -273,7 +273,7 @@ class TraceParser:
                 if action:
                     actions.append(action)
             
-            # 处理 before/after 类型事件（Playwright 新版格式）
+            # 处理 before/after 类型事件(Playwright 新版格式)
             elif event_type in ('before', 'after') and 'apiName' in event:
                 action = self._parse_api_event(event)
                 if action:
@@ -317,7 +317,7 @@ class TraceParser:
         elif 'text' in action_data:
             value = action_data['text']
         
-        # 提取 URL（用于导航）
+        # 提取 URL(用于导航)
         url = None
         if 'url' in action_data:
             url = action_data['url']
@@ -362,7 +362,7 @@ class TraceParser:
     
     def _parse_api_event(self, event: Dict[str, Any]) -> Optional[ParsedAction]:
         """
-        解析 API 事件（Playwright 新版格式）
+        解析 API 事件(Playwright 新版格式)
         
         Args:
             event: API 事件数据
@@ -372,7 +372,7 @@ class TraceParser:
         """
         api_name = event.get('apiName', '')
         
-        # 提取方法名（如 page.click -> click）
+        # 提取方法名(如 page.click -> click)
         if '.' in api_name:
             method = api_name.split('.')[-1]
         else:
@@ -438,7 +438,7 @@ class TraceParser:
         """
         将单个操作转换为步骤
         
-        v4.8.0: 支持多选择器生成（Phase 10）
+        v4.8.0: 支持多选择器生成(Phase 10)
         
         Args:
             action: 操作
@@ -539,26 +539,26 @@ class TraceParser:
     
     def _generate_multi_selectors(self, action: ParsedAction) -> List[Dict[str, Any]]:
         """
-        生成多重选择器（Phase 10）
+        生成多重选择器(Phase 10)
         
-        按优先级生成：
-        1. role + name（最稳定）
-        2. 文本匹配（较稳定）
-        3. CSS 选择器（可能变化）
+        按优先级生成:
+        1. role + name(最稳定)
+        2. 文本匹配(较稳定)
+        3. CSS 选择器(可能变化)
         
         Args:
             action: 操作对象
             
         Returns:
-            List[Dict]: 选择器列表，按优先级排序
+            List[Dict]: 选择器列表,按优先级排序
         """
         selectors = []
         
-        # 如果已有 selectors，直接使用
+        # 如果已有 selectors,直接使用
         if action.selectors:
             return action.selectors
         
-        # 1. Role + Name（最稳定）
+        # 1. Role + Name(最稳定)
         if action.element_role and action.text_content:
             selectors.append({
                 'type': 'role',
@@ -566,7 +566,7 @@ class TraceParser:
                 'priority': 1
             })
         
-        # 2. 文本匹配（较稳定）
+        # 2. 文本匹配(较稳定)
         if action.text_content and len(action.text_content) < 50:
             selectors.append({
                 'type': 'text',
@@ -574,7 +574,7 @@ class TraceParser:
                 'priority': 2
             })
         
-        # 3. CSS 选择器（降级）
+        # 3. CSS 选择器(降级)
         if action.selector:
             selectors.append({
                 'type': 'css',
@@ -665,10 +665,10 @@ class TraceParser:
         
         Args:
             result: Trace 解析结果
-            platform: 平台代码（shopee/tiktok/miaoshou）
-            component_type: 组件类型（login/navigation/export 等）
-            data_domain: 数据域（orders/products 等，仅 export 组件需要）
-            class_name: 自定义类名（默认根据 component_type 生成）
+            platform: 平台代码(shopee/tiktok/miaoshou)
+            component_type: 组件类型(login/navigation/export 等)
+            data_domain: 数据域(orders/products 等,仅 export 组件需要)
+            class_name: 自定义类名(默认根据 component_type 生成)
         
         Returns:
             str: Python 组件代码
@@ -903,7 +903,7 @@ class TraceParser:
 
 def parse_trace_file(trace_path: str) -> TraceParseResult:
     """
-    便捷函数：解析 Trace 文件
+    便捷函数:解析 Trace 文件
     
     Args:
         trace_path: Trace 文件路径
@@ -929,8 +929,8 @@ def generate_component_from_trace(
         trace_path: Trace 文件路径
         platform: 平台代码
         component_type: 组件类型
-        data_domain: 数据域（可选）
-        output_path: 输出文件路径（可选，如果提供则保存文件）
+        data_domain: 数据域(可选)
+        output_path: 输出文件路径(可选,如果提供则保存文件)
     
     Returns:
         str: 生成的 Python 代码

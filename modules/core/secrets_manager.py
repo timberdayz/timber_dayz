@@ -4,7 +4,7 @@
 """
 安全秘密管理器
 
-提供统一的秘密管理功能：
+提供统一的秘密管理功能:
 - 环境变量读取
 - 密钥生成和验证
 - 安全存储和检索
@@ -97,13 +97,13 @@ class SecretsManager:
     def get_unified_database_path(self) -> Path:
         """获取统一数据库路径"""
         unified_path = self.get_secret('UNIFIED_DATABASE_PATH', 'data/unified_erp_system.db')
-        # 确保使用绝对路径，避免相对路径问题
+        # 确保使用绝对路径,避免相对路径问题
         if not Path(unified_path).is_absolute():
-            # 从项目根目录开始计算路径（使用统一路径管理器）
+            # 从项目根目录开始计算路径(使用统一路径管理器)
             from .path_manager import get_project_root
             project_root = get_project_root()
             full_path = project_root / unified_path
-            # 如果路径不存在，尝试从当前工作目录开始
+            # 如果路径不存在,尝试从当前工作目录开始
             if not full_path.exists():
                 current_dir = Path.cwd()
                 full_path = current_dir / unified_path
@@ -161,7 +161,7 @@ class SecretsManager:
             key_name: 密钥名称
             
         Returns:
-            str: 加密后的数据（base64编码）
+            str: 加密后的数据(base64编码)
         """
         cipher = self.get_fernet_cipher(key_name)
         encrypted_data = cipher.encrypt(data.encode('utf-8'))
@@ -172,7 +172,7 @@ class SecretsManager:
         解密数据
         
         Args:
-            encrypted_data: 加密的数据（base64编码）
+            encrypted_data: 加密的数据(base64编码)
             key_name: 密钥名称
             
         Returns:

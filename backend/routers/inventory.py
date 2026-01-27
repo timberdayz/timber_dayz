@@ -30,7 +30,7 @@ async def get_inventory_list(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    获取库存列表（支持分页和筛选）
+    获取库存列表(支持分页和筛选)
     
     Args:
         platform: 平台代码筛选
@@ -141,7 +141,7 @@ async def get_inventory_detail(
     product_id: int,
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取库存详情（包括库存流水）"""
+    """获取库存详情(包括库存流水)"""
     try:
         # 查询库存信息
         inventory = db.execute(text("""
@@ -159,11 +159,11 @@ async def get_inventory_detail(
                 code=ErrorCode.INVENTORY_NOT_FOUND,
                 message="库存记录不存在",
                 error_type=get_error_type(ErrorCode.INVENTORY_NOT_FOUND),
-                recovery_suggestion="请检查库存记录ID是否正确，或确认该记录已创建",
+                recovery_suggestion="请检查库存记录ID是否正确,或确认该记录已创建",
                 status_code=404
             )
         
-        # 查询库存流水（最近100条）
+        # 查询库存流水(最近100条)
         transactions = db.execute(text("""
             SELECT
                 transaction_id,
@@ -240,7 +240,7 @@ async def adjust_inventory(
     """
     库存调整
     
-    请求体：
+    请求体:
     {
         "product_id": 1,
         "platform_code": "shopee",
@@ -268,7 +268,7 @@ async def adjust_inventory(
                 code=ErrorCode.INVENTORY_OPERATION_FAILED,
                 message=result.get("error", "库存调整失败"),
                 error_type=get_error_type(ErrorCode.INVENTORY_OPERATION_FAILED),
-                recovery_suggestion="请检查库存调整参数，或联系系统管理员",
+                recovery_suggestion="请检查库存调整参数,或联系系统管理员",
                 status_code=400
             )
             
@@ -281,7 +281,7 @@ async def adjust_inventory(
             message="库存调整失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -306,7 +306,7 @@ async def get_low_stock_alert(db: AsyncSession = Depends(get_async_db)):
             message="获取低库存预警失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 

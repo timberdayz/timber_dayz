@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-数据同步进度跟踪服务（Sync Progress Tracker）
+数据同步进度跟踪服务(Sync Progress Tracker)
 
-v4.12.0新增：
-- 使用数据库存储的进度跟踪器（持久化）
-- 替代内存存储的ProgressTracker（用于数据同步场景）
+v4.12.0新增:
+- 使用数据库存储的进度跟踪器(持久化)
+- 替代内存存储的ProgressTracker(用于数据同步场景)
 - 支持服务重启后恢复进度
 
-v4.18.2更新：
-- 支持异步数据库操作（AsyncSession）
-- 移除阻塞的 time.sleep()，改用 asyncio.sleep()
+v4.18.2更新:
+- 支持异步数据库操作(AsyncSession)
+- 移除阻塞的 time.sleep(),改用 asyncio.sleep()
 - 所有方法改为 async def
 
-职责：
+职责:
 - 创建、更新、查询同步任务进度
-- 持久化存储，支持历史查询
-- 与现有ProgressTracker并行运行（不同场景）
+- 持久化存储,支持历史查询
+- 与现有ProgressTracker并行运行(不同场景)
 """
 
 from typing import Dict, Any, Optional, List
@@ -34,19 +34,19 @@ logger = get_logger(__name__)
 
 class SyncProgressTracker:
     """
-    数据同步进度跟踪器（数据库存储，支持异步）
+    数据同步进度跟踪器(数据库存储,支持异步)
     
-    v4.18.2更新：支持 AsyncSession，所有方法改为 async def
+    v4.18.2更新:支持 AsyncSession,所有方法改为 async def
     
-    职责：
+    职责:
     - 创建、更新、查询同步任务进度
-    - 持久化存储，支持历史查询
-    - 与现有ProgressTracker并行运行（不同场景）
+    - 持久化存储,支持历史查询
+    - 与现有ProgressTracker并行运行(不同场景)
     """
     
     def __init__(self, db: AsyncSession):
         """
-        [*] v4.18.2更新：完全过渡到异步架构，只接受AsyncSession
+        [*] v4.18.2更新:完全过渡到异步架构,只接受AsyncSession
         """
         self.db = db
     
@@ -62,7 +62,7 @@ class SyncProgressTracker:
         Args:
             task_id: 任务ID
             total_files: 总文件数
-            task_type: 任务类型（bulk_ingest/single_file）
+            task_type: 任务类型(bulk_ingest/single_file)
             
         Returns:
             任务信息字典
@@ -134,15 +134,15 @@ class SyncProgressTracker:
             if not task:
                 raise ValueError(f"Task {task_id} not found")
             
-            # [*] v4.17.1修复：合并task_details而不是覆盖
+            # [*] v4.17.1修复:合并task_details而不是覆盖
             if "task_details" in updates:
                 current_details = task.task_details or {}
                 new_details = updates["task_details"]
-                # 合并字典（新值覆盖旧值）
+                # 合并字典(新值覆盖旧值)
                 if isinstance(current_details, dict) and isinstance(new_details, dict):
                     merged_details = {**current_details, **new_details}
                     updates["task_details"] = merged_details
-                # 如果不是字典，直接使用新值
+                # 如果不是字典,直接使用新值
             
             # 更新字段
             for key, value in updates.items():
@@ -180,18 +180,18 @@ class SyncProgressTracker:
             task_id: 任务ID
             
         Returns:
-            任务信息字典，如果不存在则返回None
+            任务信息字典,如果不存在则返回None
         """
         max_retries = 3
         retry_count = 0
         
         while retry_count < max_retries:
             try:
-                # [*] 修复：每次查询前先回滚，确保使用干净的事务
+                # [*] 修复:每次查询前先回滚,确保使用干净的事务
                 try:
                     await self.db.rollback()
                 except:
-                    pass  # 如果回滚失败（可能没有活动事务），忽略
+                    pass  # 如果回滚失败(可能没有活动事务),忽略
                 
                 # 尝试查询
                 result = await self.db.execute(
@@ -220,11 +220,11 @@ class SyncProgressTracker:
                         await self.db.rollback()
                     except:
                         pass
-                    # [*] v4.18.2修复：使用 asyncio.sleep 替代 time.sleep
+                    # [*] v4.18.2修复:使用 asyncio.sleep 替代 time.sleep
                     await asyncio.sleep(0.1 * retry_count)
                     continue
                 else:
-                    # 其他错误或重试次数用完，记录并返回None
+                    # 其他错误或重试次数用完,记录并返回None
                     logger.error(f"[SyncProgress] Failed to get task {task_id} (retry {retry_count}/{max_retries}): {query_error}", exc_info=True)
                     try:
                         await self.db.rollback()
@@ -246,7 +246,7 @@ class SyncProgressTracker:
         Args:
             task_id: 任务ID
             success: 是否成功
-            error: 错误信息（可选）
+            error: 错误信息(可选)
             
         Returns:
             任务信息字典
@@ -347,7 +347,7 @@ class SyncProgressTracker:
         列出所有任务
         
         Args:
-            status: 状态筛选（可选）
+            status: 状态筛选(可选)
             limit: 返回数量限制
             
         Returns:
@@ -421,16 +421,16 @@ class SyncProgressTracker:
             "quarantined_rows": task.quarantined_rows,
             "file_progress": task.file_progress,
             "row_progress": task.row_progress,
-            # [*] 修复：使用format_datetime确保返回带Z标识符的UTC时间
+            # [*] 修复:使用format_datetime确保返回带Z标识符的UTC时间
             "start_time": format_datetime(task.start_time),
             "end_time": format_datetime(task.end_time),
             "updated_at": format_datetime(task.updated_at),
             "errors": task.errors or [],
-            # [*] v4.15.0修复：从errors中提取最后一条错误消息作为message
+            # [*] v4.15.0修复:从errors中提取最后一条错误消息作为message
             "message": self._extract_message_from_errors(task.errors) if task.errors else None,
             "warnings": task.warnings or [],
             "task_details": task_details,
-            # [*] 新增：从task_details中提取文件统计信息（用于前端显示）
+            # [*] 新增:从task_details中提取文件统计信息(用于前端显示)
             "success_files": task_details.get("success_files", 0),
             "failed_files": task_details.get("failed_files", 0),
             "skipped_files": task_details.get("skipped_files", 0),
@@ -444,7 +444,7 @@ class SyncProgressTracker:
             errors: 错误列表
             
         Returns:
-            最后一条错误消息，如果没有则返回None
+            最后一条错误消息,如果没有则返回None
         """
         if not errors or len(errors) == 0:
             return None

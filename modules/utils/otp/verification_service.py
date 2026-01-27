@@ -4,7 +4,7 @@
 """
 统一验证码服务
 
-提供多种验证码通道的统一接口，支持邮箱OTP、短信OTP等。
+提供多种验证码通道的统一接口,支持邮箱OTP、短信OTP等。
 """
 
 import time
@@ -33,13 +33,13 @@ class VerificationCodeService:
         
         Args:
             channel: 验证码通道 ('email', 'sms', 'totp')
-            context: 上下文信息，包含账号配置等
-            timeout_seconds: 超时时间（秒）
+            context: 上下文信息,包含账号配置等
+            timeout_seconds: 超时时间(秒)
             
         Returns:
-            验证码字符串，失败返回None
+            验证码字符串,失败返回None
         """
-        logger.info(f"开始请求 {channel} 验证码，超时时间: {timeout_seconds}秒")
+        logger.info(f"开始请求 {channel} 验证码,超时时间: {timeout_seconds}秒")
         
         try:
             if channel == "email":
@@ -81,21 +81,21 @@ class VerificationCodeService:
         email_password = context.get("Email password")  # 网页登录密码
         
         if not email_address or (not email_license and not email_password):
-            logger.error("邮箱配置不完整：缺少邮箱地址或密码/授权码")
+            logger.error("邮箱配置不完整:缺少邮箱地址或密码/授权码")
             return None
         
-        # 优先尝试IMAP模式（如果有授权码）
+        # 优先尝试IMAP模式(如果有授权码)
         if email_license:
             logger.info("尝试IMAP模式获取验证码...")
             otp_code = self._try_imap_otp(context, timeout_seconds, email_license)
             if otp_code:
                 return otp_code
             
-            logger.warning("IMAP模式失败，回退到浏览器模式...")
+            logger.warning("IMAP模式失败,回退到浏览器模式...")
         else:
-            logger.info("未配置IMAP授权码，使用浏览器模式...")
+            logger.info("未配置IMAP授权码,使用浏览器模式...")
         
-        # 回退到浏览器模式（使用网页登录密码）
+        # 回退到浏览器模式(使用网页登录密码)
         if email_password:
             logger.info("尝试浏览器模式获取验证码...")
             return self._try_browser_otp(context, timeout_seconds, email_password)
@@ -146,7 +146,7 @@ class VerificationCodeService:
                     
                     if otp_code:
                         elapsed_time = time.time() - start_time
-                        logger.success(f"IMAP模式成功获取验证码: {otp_code}，耗时: {elapsed_time:.2f}秒")
+                        logger.success(f"IMAP模式成功获取验证码: {otp_code},耗时: {elapsed_time:.2f}秒")
                         return otp_code
                     
                     time.sleep(poll_interval)
@@ -155,9 +155,9 @@ class VerificationCodeService:
                         
                 except Exception as e:
                     logger.debug(f"IMAP轮询时出错: {e}")
-                    # 如果出现"不安全登录"错误，立即放弃IMAP模式
+                    # 如果出现"不安全登录"错误,立即放弃IMAP模式
                     if "Unsafe Login" in str(e):
-                        logger.warning("检测到163邮箱安全限制，放弃IMAP模式")
+                        logger.warning("检测到163邮箱安全限制,放弃IMAP模式")
                         return None
                     time.sleep(poll_interval)
             

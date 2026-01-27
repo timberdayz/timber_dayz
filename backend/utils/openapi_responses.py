@@ -1,6 +1,6 @@
 """
 FastAPI OpenAPI响应示例配置
-提供统一的响应格式示例，用于自动生成API文档
+提供统一的响应格式示例,用于自动生成API文档
 """
 
 from typing import Dict, Any
@@ -28,7 +28,7 @@ ERROR_RESPONSE_EXAMPLE: Dict[str, Any] = {
         "detail": "资源不存在",
         "recovery_suggestion": "请检查资源ID是否正确"
     },
-    "message": "业务错误：资源不存在",
+    "message": "业务错误:资源不存在",
     "timestamp": "2025-01-16T10:30:00Z"
 }
 
@@ -83,7 +83,7 @@ BAD_REQUEST_RESPONSE_EXAMPLE: Dict[str, Any] = {
     "error": {
         "code": 4201,
         "type": "UserError",
-        "detail": "参数验证失败：page必须大于0",
+        "detail": "参数验证失败:page必须大于0",
         "recovery_suggestion": "请检查输入参数是否正确"
     },
     "message": "请求参数错误",
@@ -99,7 +99,7 @@ UNAUTHORIZED_RESPONSE_EXAMPLE: Dict[str, Any] = {
         "detail": "Token已过期",
         "recovery_suggestion": "请重新登录"
     },
-    "message": "未认证，请重新登录",
+    "message": "未认证,请重新登录",
     "timestamp": "2025-01-16T10:30:00Z"
 }
 
@@ -138,11 +138,11 @@ INTERNAL_SERVER_ERROR_RESPONSE_EXAMPLE: Dict[str, Any] = {
         "detail": "数据库连接失败",
         "recovery_suggestion": "请稍后重试"
     },
-    "message": "服务器错误，请稍后重试",
+    "message": "服务器错误,请稍后重试",
     "timestamp": "2025-01-16T10:30:00Z"
 }
 
-# 响应示例字典（用于FastAPI的responses参数）
+# 响应示例字典(用于FastAPI的responses参数)
 RESPONSES: Dict[int, Dict[str, Any]] = {
     200: {
         "description": "成功响应",
@@ -194,10 +194,10 @@ RESPONSES: Dict[int, Dict[str, Any]] = {
     }
 }
 
-# 分页响应示例（用于FastAPI的responses参数）
+# 分页响应示例(用于FastAPI的responses参数)
 PAGINATION_RESPONSES: Dict[int, Dict[str, Any]] = {
     200: {
-        "description": "成功响应（分页）",
+        "description": "成功响应(分页)",
         "content": {
             "application/json": {
                 "example": PAGINATION_RESPONSE_EXAMPLE
@@ -222,10 +222,10 @@ PAGINATION_RESPONSES: Dict[int, Dict[str, Any]] = {
     }
 }
 
-# 列表响应示例（用于FastAPI的responses参数）
+# 列表响应示例(用于FastAPI的responses参数)
 LIST_RESPONSES: Dict[int, Dict[str, Any]] = {
     200: {
-        "description": "成功响应（列表）",
+        "description": "成功响应(列表)",
         "content": {
             "application/json": {
                 "example": LIST_RESPONSE_EXAMPLE

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-丢失数据导出API（v4.13.0新增）
+丢失数据导出API(v4.13.0新增)
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from typing import Optional, Dict, Any, List
 import io
 import json
@@ -18,7 +18,8 @@ from datetime import datetime
 from backend.models.database import get_db, get_async_db
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
-from modules.core.db import CatalogFile, StagingOrders, StagingProductMetrics, FactOrder, FactProductMetric
+from modules.core.db import CatalogFile, StagingOrders, StagingProductMetrics, FactProductMetric
+# [DELETED] v4.19.0: FactOrder 已删除
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,18 +29,18 @@ router = APIRouter(prefix="/api/raw-layer", tags=["原始数据层"])
 @router.get("/export-lost-data/{file_id}")
 async def export_lost_data(
     file_id: int,
-    header_row: int = Query(0, description="表头行（0-based）"),
+    header_row: int = Query(0, description="表头行(0-based)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    导出丢失数据到Excel（v4.13.0新增）
+    导出丢失数据到Excel(v4.13.0新增)
     
-    功能：
+    功能:
     - 导出Staging->Fact丢失的数据详情
     - 支持orders/products/traffic/analytics/inventory域
     - 导出为Excel格式
     
-    返回：
+    返回:
     Excel文件流
     """
     try:
@@ -61,7 +62,7 @@ async def export_lost_data(
         
         data_domain = catalog_record.data_domain or "products"
         
-        # Step 2: 获取丢失数据详情（复用compareRawAndStaging的逻辑）
+        # Step 2: 获取丢失数据详情(复用compareRawAndStaging的逻辑)
         lost_in_fact_details = []
         
         if data_domain == "orders":
@@ -80,9 +81,11 @@ async def export_lost_data(
                     ))
             
             result = await db.execute(
-                select(FactOrder).where(FactOrder.file_id == file_id)
+                # [DELETED] v4.19.0: FactOrder 已删除,订单数据现在在 b_class.fact_{platform}_orders_{granularity}
+                # select(FactOrder).where(FactOrder.file_id == file_id)
+                text("SELECT 1 WHERE 1=0")  # 返回空结果
             )
-            fact_orders = result.scalars().all()
+            fact_orders = []  # [TODO] 查询 b_class.fact_{platform}_orders_{granularity} 表
             
             fact_order_ids = set()
             for fact_order in fact_orders:
@@ -179,7 +182,7 @@ async def export_lost_data(
                         "创建时间": staging_metric.created_at.isoformat() if staging_metric.created_at else ""
                     })
         
-        # Step 3: 如果没有丢失数据，返回空文件
+        # Step 3: 如果没有丢失数据,返回空文件
         if not lost_in_fact_details:
             df = pd.DataFrame(columns=["提示"])
             df.loc[0] = ["没有丢失数据"]

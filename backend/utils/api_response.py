@@ -11,7 +11,7 @@ from backend.utils.data_formatter import format_response_data
 
 
 def get_timestamp() -> str:
-    """获取ISO 8601格式的时间戳（UTC）"""
+    """获取ISO 8601格式的时间戳(UTC)"""
     return datetime.utcnow().isoformat() + "Z"
 
 
@@ -25,18 +25,18 @@ def success_response(
     统一成功响应格式
     
     Args:
-        data: 响应数据（可以是字典、列表等）
+        data: 响应数据(可以是字典、列表等)
         message: 可选的成功消息
-        status_code: HTTP状态码（默认200）
+        status_code: HTTP状态码(默认200)
     
     Returns:
         JSONResponse: 统一格式的成功响应
     
     Note:
         - 自动格式化data中的日期时间字段为ISO 8601格式
-        - 自动格式化data中的Decimal字段为float（保留2位小数）
+        - 自动格式化data中的Decimal字段为float(保留2位小数)
     """
-    # 格式化响应数据（日期时间、金额等）
+    # 格式化响应数据(日期时间、金额等)
     formatted_data = format_response_data(data) if data is not None else None
     
     response_data = {
@@ -73,12 +73,12 @@ def error_response(
     Args:
         code: 4位数字错误码
         message: 用户友好的错误消息
-        error_type: 错误类型（SystemError、BusinessError、DataError、UserError）
-        detail: 详细错误信息（可选，可以是字符串或字典）
-        recovery_suggestion: 错误恢复建议（可选）
-        status_code: HTTP状态码（默认200，业务错误也返回200）
-        request_id: 请求ID（可选）
-        data: 额外的错误数据（可选，用于传递结构化数据如表头变化详情）
+        error_type: 错误类型(SystemError、BusinessError、DataError、UserError)
+        detail: 详细错误信息(可选,可以是字符串或字典)
+        recovery_suggestion: 错误恢复建议(可选)
+        status_code: HTTP状态码(默认200,业务错误也返回200)
+        request_id: 请求ID(可选)
+        data: 额外的错误数据(可选,用于传递结构化数据如表头变化详情)
     
     Returns:
         JSONResponse: 统一格式的错误响应
@@ -89,7 +89,7 @@ def error_response(
     }
     
     if detail:
-        # [*] v4.14.0修复：支持detail为字符串或字典
+        # [*] v4.14.0修复:支持detail为字符串或字典
         if isinstance(detail, dict):
             error_data["detail"] = detail
         else:
@@ -105,7 +105,7 @@ def error_response(
         "timestamp": get_timestamp()
     }
     
-    # [*] v4.14.0新增：支持在错误响应中包含额外的结构化数据
+    # [*] v4.14.0新增:支持在错误响应中包含额外的结构化数据
     if data is not None:
         formatted_data = format_response_data(data)
         response_data["data"] = formatted_data
@@ -132,7 +132,7 @@ def pagination_response(
     
     Args:
         data: 数据数组
-        page: 当前页码（从1开始）
+        page: 当前页码(从1开始)
         page_size: 每页数量
         total: 总记录数
         message: 可选的成功消息
@@ -142,9 +142,9 @@ def pagination_response(
     
     Note:
         - 自动格式化data中的日期时间字段为ISO 8601格式
-        - 自动格式化data中的Decimal字段为float（保留2位小数）
+        - 自动格式化data中的Decimal字段为float(保留2位小数)
     """
-    # 格式化响应数据（日期时间、金额等）
+    # 格式化响应数据(日期时间、金额等)
     formatted_data = format_response_data(data) if data else []
     
     total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
@@ -184,11 +184,11 @@ def list_response(
     request_id: Optional[str] = None
 ) -> JSONResponse:
     """
-    统一列表响应格式（无分页）
+    统一列表响应格式(无分页)
     
     Args:
         data: 数据数组
-        total: 总记录数（可选）
+        total: 总记录数(可选)
         message: 可选的成功消息
     
     Returns:
@@ -196,9 +196,9 @@ def list_response(
     
     Note:
         - 自动格式化data中的日期时间字段为ISO 8601格式
-        - 自动格式化data中的Decimal字段为float（保留2位小数）
+        - 自动格式化data中的Decimal字段为float(保留2位小数)
     """
-    # 格式化响应数据（日期时间、金额等）
+    # 格式化响应数据(日期时间、金额等)
     formatted_data = format_response_data(data) if data else []
     
     response_data = {

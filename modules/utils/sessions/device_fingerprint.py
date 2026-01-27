@@ -4,7 +4,7 @@
 """
 设备指纹管理器
 
-为每个账号生成和维护稳定的设备指纹，包括：
+为每个账号生成和维护稳定的设备指纹,包括:
 - 用户代理 (User Agent)
 - 浏览器视口 (Viewport)
 - 时区和语言设置
@@ -21,7 +21,7 @@ from loguru import logger
 class DeviceFingerprintManager:
     """设备指纹管理器"""
     
-    # 扩展的用户代理列表（20+ 不同 UA - v4.7.0 扩展）
+    # 扩展的用户代理列表(20+ 不同 UA - v4.7.0 扩展)
     STABLE_USER_AGENTS = [
         # Chrome Windows (最新版本)
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -57,7 +57,7 @@ class DeviceFingerprintManager:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Brave/120",
     ]
     
-    # 扩展的视口尺寸列表（10+ 常用分辨率 - v4.7.0 扩展）
+    # 扩展的视口尺寸列表(10+ 常用分辨率 - v4.7.0 扩展)
     COMMON_VIEWPORTS = [
         # 桌面显示器
         {"width": 1920, "height": 1080},  # Full HD (最常见)
@@ -75,7 +75,7 @@ class DeviceFingerprintManager:
         {"width": 2880, "height": 1800},  # MacBook Pro Retina
     ]
     
-    # 地区指纹模板（v4.7.0 新增 - 东南亚6国）
+    # 地区指纹模板(v4.7.0 新增 - 东南亚6国)
     REGION_TEMPLATES = {
         # 中国大陆
         "CN": {
@@ -217,7 +217,7 @@ class DeviceFingerprintManager:
         platform_path = self.base_path / platform.lower()
         platform_path.mkdir(parents=True, exist_ok=True)
         
-        # 使用账号ID的哈希值作为文件名（避免文件名过长或包含特殊字符）
+        # 使用账号ID的哈希值作为文件名(避免文件名过长或包含特殊字符)
         account_hash = hashlib.md5(account_id.encode('utf-8')).hexdigest()[:16]
         return platform_path / f"fingerprint_{account_hash}.json"
     
@@ -233,7 +233,7 @@ class DeviceFingerprintManager:
         Args:
             platform: 平台名称
             account_id: 账号ID
-            account_config: 账号配置（可选，用于生成指纹）
+            account_config: 账号配置(可选,用于生成指纹)
             
         Returns:
             设备指纹字典
@@ -250,7 +250,7 @@ class DeviceFingerprintManager:
                 return fingerprint
                 
             except Exception as e:
-                logger.warning(f"加载设备指纹失败，将重新生成: {e}")
+                logger.warning(f"加载设备指纹失败,将重新生成: {e}")
         
         # 生成新指纹
         fingerprint = self._generate_fingerprint(platform, account_id, account_config)
@@ -295,7 +295,7 @@ class DeviceFingerprintManager:
         user_agent = self.STABLE_USER_AGENTS[ua_index]
         viewport = self.COMMON_VIEWPORTS[viewport_index].copy()
         
-        # 从账号配置中获取地区信息，使用地区模板（v4.7.0 扩展）
+        # 从账号配置中获取地区信息,使用地区模板(v4.7.0 扩展)
         region = "CN"
         if account_config:
             region = account_config.get("region", "CN").upper()

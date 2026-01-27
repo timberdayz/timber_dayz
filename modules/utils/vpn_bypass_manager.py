@@ -32,7 +32,7 @@ class VpnBypassManager:
             "weixin.qq.com"
         ]
         
-        # 中国IP段（简化版，实际可扩展更多）
+        # 中国IP段(简化版,实际可扩展更多)
         self.china_ip_ranges = [
             "1.0.1.0/24",
             "1.0.2.0/23", 
@@ -47,7 +47,7 @@ class VpnBypassManager:
         ]
     
     def detect_original_gateway(self) -> Optional[str]:
-        """检测原始网关IP（VPN前的网关）"""
+        """检测原始网关IP(VPN前的网关)"""
         try:
             if self.system == "windows":
                 # Windows: 通过route命令找到原始网关
@@ -95,12 +95,12 @@ class VpnBypassManager:
     def get_china_ip_via_direct_connection(self) -> Optional[str]:
         """通过直连方式获取中国IP"""
         try:
-            # 方法1：使用系统原始网关
+            # 方法1:使用系统原始网关
             original_gateway = self.detect_original_gateway()
             if original_gateway:
                 logger.info(f"检测到原始网关: {original_gateway}")
                 
-                # 临时添加路由，让特定IP查询走原始网关
+                # 临时添加路由,让特定IP查询走原始网关
                 china_ip_service = "myip.ipip.net"  # 中国的IP查询服务
                 
                 if self.system == "windows":
@@ -112,10 +112,10 @@ class VpnBypassManager:
                 # 查询IP
                 response = requests.get(f"http://{china_ip_service}", timeout=10)
                 if response.status_code == 200:
-                    # 解析IP（ipip.net返回格式: "当前 IP：1.2.3.4 来自于：中国 ..."）
+                    # 解析IP(ipip.net返回格式: "当前 IP:1.2.3.4 来自于:中国 ...")
                     content = response.text
-                    if "IP：" in content:
-                        ip_part = content.split("IP：")[1].split(" ")[0]
+                    if "IP:" in content:
+                        ip_part = content.split("IP:")[1].split(" ")[0]
                         return ip_part
                         
         except Exception as e:
@@ -130,10 +130,10 @@ class VpnBypassManager:
             
         original_gateway = self.detect_original_gateway()
         if not original_gateway:
-            logger.error("无法检测到原始网关，无法创建绕过路由")
+            logger.error("无法检测到原始网关,无法创建绕过路由")
             return False
         
-        logger.info(f"为 {len(target_domains)} 个域名创建绕过路由，网关: {original_gateway}")
+        logger.info(f"为 {len(target_domains)} 个域名创建绕过路由,网关: {original_gateway}")
         
         success_count = 0
         for domain in target_domains:
@@ -178,7 +178,7 @@ class VpnBypassManager:
         """测试绕过效果"""
         results = {}
         
-        # 测试1：通过VPN访问
+        # 测试1:通过VPN访问
         try:
             response = requests.get("https://httpbin.org/ip", timeout=10)
             if response.status_code == 200:
@@ -187,23 +187,23 @@ class VpnBypassManager:
         except Exception as e:
             results["vpn_ip"] = f"error: {e}"
         
-        # 测试2：尝试绕过VPN访问中国网站
+        # 测试2:尝试绕过VPN访问中国网站
         china_ip = self.get_china_ip_via_direct_connection()
         results["china_ip"] = china_ip or "获取失败"
         
-        # 测试3：检测网络环境
+        # 测试3:检测网络环境
         results["original_gateway"] = self.detect_original_gateway()
         results["system"] = self.system
         
         return results
     
     def apply_china_routes(self) -> bool:
-        """应用中国网站路由绕过（静默执行）"""
+        """应用中国网站路由绕过(静默执行)"""
         try:
             # 检测环境
             result = self.test_bypass_effectiveness()
             if result.get("status") != "available":
-                logger.info("[LINK] 本地网络环境，无需路由绕过")
+                logger.info("[LINK] 本地网络环境,无需路由绕过")
                 return True
             
             # 静默创建绕过路由

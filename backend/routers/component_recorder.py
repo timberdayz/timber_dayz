@@ -3,14 +3,14 @@
 Phase 8.1: UI化组件录制工具
 v4.8.0: 仅支持 Inspector API 模式
 
-功能：
-1. 启动Playwright Inspector录制会话（支持持久化上下文和固定指纹）
-2. 实时返回录制步骤（支持 Trace 解析）
-3. 保存组件配置（支持 Python 组件代码生成）
+功能:
+1. 启动Playwright Inspector录制会话(支持持久化上下文和固定指纹)
+2. 实时返回录制步骤(支持 Trace 解析)
+3. 保存组件配置(支持 Python 组件代码生成)
 4. 测试组件有效性
 
-录制模式：
-- Inspector 模式（唯一）：使用 page.pause() + Trace 录制，支持持久化会话
+录制模式:
+- Inspector 模式(唯一):使用 page.pause() + Trace 录制,支持持久化会话
 - v4.8.0: 移除 Codegen 模式支持
 """
 
@@ -34,7 +34,7 @@ from modules.core.db import PlatformAccount, ComponentVersion, ComponentTestHist
 
 logger = get_logger(__name__)
 
-# v4.8.0: 仅支持 Inspector 模式（移除 Codegen）
+# v4.8.0: 仅支持 Inspector 模式(移除 Codegen)
 # 保留常量用于兼容性
 RECORDING_MODE = "inspector"
 
@@ -45,7 +45,7 @@ router = APIRouter()
 active_test_tasks: Dict[str, Any] = {}
 
 
-# [*] v4.18.2修复：移除本地 save_test_history 函数，统一使用 ComponentTestService.save_test_history
+# [*] v4.18.2修复:移除本地 save_test_history 函数,统一使用 ComponentTestService.save_test_history
 
 
 # ==================== Pydantic Models ====================
@@ -69,15 +69,15 @@ class RecorderStepResponse(BaseModel):
 
 
 class RecorderSaveRequest(BaseModel):
-    """保存组件请求（v4.8.0 支持 Python 组件）"""
+    """保存组件请求(v4.8.0 支持 Python 组件)"""
     platform: str
     component_type: str
     component_name: str
     # v4.8.0: 支持 Python 组件
     python_code: Optional[str] = None  # Python 组件代码
-    data_domain: Optional[str] = None  # 数据域（export 组件必填）
-    # 向后兼容：保留 YAML 支持
-    yaml_content: Optional[str] = None  # 已废弃，保留兼容
+    data_domain: Optional[str] = None  # 数据域(export 组件必填)
+    # 向后兼容:保留 YAML 支持
+    yaml_content: Optional[str] = None  # 已废弃,保留兼容
 
 
 class RecorderTestRequest(BaseModel):
@@ -91,7 +91,7 @@ class RecorderTestRequest(BaseModel):
 # ==================== 全局录制会话管理 ====================
 
 class RecorderSession:
-    """录制会话管理（v4.8.0 仅 Inspector 模式）"""
+    """录制会话管理(v4.8.0 仅 Inspector 模式)"""
     def __init__(self):
         self.active = False
         self.platform = None
@@ -103,7 +103,7 @@ class RecorderSession:
         self.page = None
         self.browser = None
         self.playwright_task = None  # 存储后台任务引用
-        self.output_file = None  # 存储录制输出文件路径（trace.zip）
+        self.output_file = None  # 存储录制输出文件路径(trace.zip)
         # v4.8.0: 仅支持 Inspector 模式
         self.recording_mode = "inspector"  # 唯一模式
         self.steps_file = None  # Inspector 模式的步骤输出文件
@@ -132,9 +132,9 @@ class RecorderSession:
         logger.debug(f"Step added: {step['action']}")
     
     def cleanup_sync(self):
-        """清理浏览器资源（同步）"""
+        """清理浏览器资源(同步)"""
         try:
-            # 如果playwright_task是subprocess.Popen对象，终止进程
+            # 如果playwright_task是subprocess.Popen对象,终止进程
             if self.playwright_task and hasattr(self.playwright_task, 'terminate'):
                 logger.info(f"Terminating Playwright subprocess (PID: {self.playwright_task.pid})")
                 self.playwright_task.terminate()
@@ -196,20 +196,20 @@ def _launch_inspector_recorder_subprocess(
     component_type: str
 ):
     """
-    [新模式] 使用 Inspector API + Trace 录制（v4.7.5）
+    [新模式] 使用 Inspector API + Trace 录制(v4.7.5)
     
-    功能：
+    功能:
     1. 使用 PersistentBrowserManager 创建持久化上下文
-    2. 应用固定指纹（DeviceFingerprintManager）
-    3. 自动执行登录组件（如果不是 login 组件）
+    2. 应用固定指纹(DeviceFingerprintManager)
+    3. 自动执行登录组件(如果不是 login 组件)
     4. 启动 Trace 录制
-    5. 打开 Inspector（page.pause()）
+    5. 打开 Inspector(page.pause())
     6. 停止后解析 Trace 文件
     
-    优势：
-    - 持久化会话：复用已登录状态
-    - 固定指纹：降低检测风险
-    - Trace 录制：更准确的步骤提取
+    优势:
+    - 持久化会话:复用已登录状态
+    - 固定指纹:降低检测风险
+    - Trace 录制:更准确的步骤提取
     """
     try:
         # 构建启动脚本路径
@@ -292,14 +292,14 @@ def _launch_playwright_browser_subprocess(
     component_type: str
 ):
     """
-    v4.8.0: 启动 Inspector 录制器（唯一模式）
+    v4.8.0: 启动 Inspector 录制器(唯一模式)
     
-    功能：
+    功能:
     1. 使用 PersistentBrowserManager 创建持久化上下文
-    2. 应用固定指纹（DeviceFingerprintManager）
-    3. 自动执行登录组件（如果不是 login 组件）
+    2. 应用固定指纹(DeviceFingerprintManager)
+    3. 自动执行登录组件(如果不是 login 组件)
     4. 启动 Trace 录制
-    5. 打开 Inspector（page.pause()）
+    5. 打开 Inspector(page.pause())
     """
     _launch_inspector_recorder_subprocess(account, platform, component_type)
 
@@ -312,9 +312,9 @@ async def start_recording(
     """
     开始录制组件
     
-    功能：
+    功能:
     1. 验证账号存在
-    2. 启动Playwright浏览器（后台任务）
+    2. 启动Playwright浏览器(后台任务)
     3. 打开Playwright Inspector
     4. 开始监听用户操作
     """
@@ -323,7 +323,7 @@ async def start_recording(
         if recorder_session.active:
             return {
                 "success": False,
-                "message": "已有活跃的录制会话，请先停止"
+                "message": "已有活跃的录制会话,请先停止"
             }
         
         # 验证账号存在
@@ -342,8 +342,8 @@ async def start_recording(
             request.account_id
         )
         
-        # 启动Playwright浏览器（使用subprocess在独立进程中运行）
-        # 在单独线程中启动subprocess，避免阻塞API响应
+        # 启动Playwright浏览器(使用subprocess在独立进程中运行)
+        # 在单独线程中启动subprocess,避免阻塞API响应
         thread = threading.Thread(
             target=_launch_playwright_browser_subprocess,
             args=(account, request.platform, request.component_type),
@@ -358,7 +358,7 @@ async def start_recording(
         
         return {
             "success": True,
-            "message": "录制已开始，Playwright浏览器正在启动...",
+            "message": "录制已开始,Playwright浏览器正在启动...",
             "session_id": id(recorder_session),
             "account": {
                 "account_id": account.account_id,
@@ -376,19 +376,19 @@ async def start_recording(
 
 def _parse_inspector_output() -> Dict[str, Any]:
     """
-    解析 Inspector 模式的输出（Trace 文件或步骤 JSON）
+    解析 Inspector 模式的输出(Trace 文件或步骤 JSON)
     
-    v4.7.5: 优先读取步骤 JSON 文件（由录制脚本生成）
-    如果不存在，则解析 Trace 文件
+    v4.7.5: 优先读取步骤 JSON 文件(由录制脚本生成)
+    如果不存在,则解析 Trace 文件
     
-    Phase 11: 支持发现模式，返回完整的数据结构
+    Phase 11: 支持发现模式,返回完整的数据结构
     - 步骤模式: {"mode": "steps", "steps": [...]}
     - 发现模式: {"mode": "discovery", "open_action": {...}, "available_options": [...]}
     
     Returns:
         Dict: 包含 mode 和相应数据的字典
     """
-    # 1. 优先读取步骤 JSON 文件（由录制脚本直接生成）
+    # 1. 优先读取步骤 JSON 文件(由录制脚本直接生成)
     if recorder_session.steps_file:
         steps_path = Path(recorder_session.steps_file)
         if steps_path.exists():
@@ -421,7 +421,7 @@ def _parse_inspector_output() -> Dict[str, Any]:
             except Exception as e:
                 logger.error(f"Failed to read steps JSON: {e}", exc_info=True)
     
-    # 2. 备选：解析 Trace 文件
+    # 2. 备选:解析 Trace 文件
     if recorder_session.output_file:
         trace_path = Path(recorder_session.output_file)
         if trace_path.exists() and trace_path.suffix == '.zip':
@@ -451,13 +451,13 @@ def _parse_inspector_output() -> Dict[str, Any]:
 @router.post("/recorder/stop")
 async def stop_recording():
     """
-    停止录制（v4.7.5 支持 Inspector API）
+    停止录制(v4.7.5 支持 Inspector API)
     
-    功能：
+    功能:
     1. 等待subprocess结束
-    2. 根据录制模式读取输出文件：
-       - Codegen 模式：解析生成的 Python 代码
-       - Inspector 模式：解析 Trace 文件或步骤 JSON 文件
+    2. 根据录制模式读取输出文件:
+       - Codegen 模式:解析生成的 Python 代码
+       - Inspector 模式:解析 Trace 文件或步骤 JSON 文件
     3. 返回录制的步骤
     """
     try:
@@ -467,11 +467,11 @@ async def stop_recording():
                 "message": "当前没有活跃的录制会话"
             }
         
-        # 等待subprocess结束（用户关闭浏览器）
+        # 等待subprocess结束(用户关闭浏览器)
         if recorder_session.playwright_task:
             logger.info("Waiting for Playwright subprocess to finish...")
             try:
-                # 等待进程结束（最多120秒，Inspector模式可能需要更长时间）
+                # 等待进程结束(最多120秒,Inspector模式可能需要更长时间)
                 recorder_session.playwright_task.wait(timeout=120)
                 logger.info("Playwright subprocess finished")
             except subprocess.TimeoutExpired:
@@ -483,7 +483,7 @@ async def stop_recording():
         # Phase 11: 支持发现模式
         parsed_data = _parse_inspector_output()
         
-        # 更新 session 的步骤（兼容旧逻辑）
+        # 更新 session 的步骤(兼容旧逻辑)
         if parsed_data.get('mode') == 'discovery':
             recorder_session.steps = []  # 发现模式没有 steps
             steps_count = len(parsed_data.get('available_options', []))
@@ -491,7 +491,7 @@ async def stop_recording():
             recorder_session.steps = parsed_data.get('steps', [])
             steps_count = len(recorder_session.steps)
         
-        # 关闭浏览器资源（清理subprocess引用）
+        # 关闭浏览器资源(清理subprocess引用)
         def cleanup_thread():
             try:
                 recorder_session.cleanup_sync()
@@ -511,7 +511,7 @@ async def stop_recording():
             
             response = {
                 "success": True,
-                "message": f"录制已停止，共发现 {steps_count} 个选项",
+                "message": f"录制已停止,共发现 {steps_count} 个选项",
                 "mode": "discovery",
                 "options_count": steps_count,
                 "open_action": parsed_data.get('open_action'),
@@ -522,12 +522,12 @@ async def stop_recording():
         else:
             logger.info(f"Recording stopped: {steps_count} steps recorded")
             
-            # 不清空steps，让前端可以获取
+            # 不清空steps,让前端可以获取
             steps = recorder_session.steps.copy()
             
             response = {
                 "success": True,
-                "message": f"录制已停止，共记录 {steps_count} 个步骤",
+                "message": f"录制已停止,共记录 {steps_count} 个步骤",
                 "mode": "steps",
                 "steps_count": steps_count,
                 "steps": steps,
@@ -544,7 +544,7 @@ async def stop_recording():
 @router.get("/recorder/steps")
 async def get_recording_steps():
     """
-    获取录制步骤（用于前端轮询）
+    获取录制步骤(用于前端轮询)
     
     返回当前会话中录制的所有步骤
     """
@@ -570,14 +570,14 @@ async def test_component(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    测试组件（录制器）- 使用统一服务层
+    测试组件(录制器)- 使用统一服务层
     
-    功能：
+    功能:
     1. 使用录制的步骤创建临时组件
-    2. 使用指定账号执行组件（有头模式）
-    3. 返回详细执行结果（每步状态/耗时/截图）
+    2. 使用指定账号执行组件(有头模式)
+    3. 返回详细执行结果(每步状态/耗时/截图)
     
-    重构说明：使用 ComponentTestService 统一服务，消除与 component_versions.py 的重复代码
+    重构说明:使用 ComponentTestService 统一服务,消除与 component_versions.py 的重复代码
     """
     import yaml
     from pathlib import Path
@@ -629,9 +629,9 @@ async def test_component(
             'success_criteria': [
                 {
                     'type': 'url_contains',
-                    'value': '',  # [*] 空字符串，表示需要填写
-                    'optional': True,  # [*] 标记为可选，避免测试失败
-                    'comment': '临时测试：建议保存后补充验证条件（使用 Playwright Inspector 提取）'
+                    'value': '',  # [*] 空字符串,表示需要填写
+                    'optional': True,  # [*] 标记为可选,避免测试失败
+                    'comment': '临时测试:建议保存后补充验证条件(使用 Playwright Inspector 提取)'
                 }
             ]
         }
@@ -660,7 +660,7 @@ async def test_component(
         response = ComponentTestService.format_test_response(result)
         
         # 6. 使用统一服务保存测试历史 [*]
-        # [*] v4.18.2修复：使用异步方法保存测试历史
+        # [*] v4.18.2修复:使用异步方法保存测试历史
         await ComponentTestService.save_test_history(
             db=db,
             component_name=component_name,
@@ -697,15 +697,15 @@ async def test_component(
 @router.post("/recorder/save")
 async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depends(get_async_db)):
     """
-    保存组件到文件并自动注册到版本管理系统（v4.8.0 支持 Python 组件）
+    保存组件到文件并自动注册到版本管理系统(v4.8.0 支持 Python 组件)
     
-    功能：
-    1. 优先保存 Python 组件（推荐）
+    功能:
+    1. 优先保存 Python 组件(推荐)
     2. 向后兼容 YAML 组件
     3. 验证代码/配置格式
     4. 保存到正确目录
     5. 自动注册到 component_versions 表
-    6. 同名组件更新现有版本（不创建新版本）
+    6. 同名组件更新现有版本(不创建新版本)
     """
     import ast
     from pathlib import Path
@@ -753,7 +753,7 @@ async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depend
             relative_file_path = f"modules/platforms/{request.platform}/components/{filename}"
             
         else:
-            # ==================== YAML 组件保存逻辑（向后兼容） ====================
+            # ==================== YAML 组件保存逻辑(向后兼容) ====================
             
             if not request.yaml_content:
                 raise HTTPException(status_code=400, detail="必须提供 python_code 或 yaml_content")
@@ -788,16 +788,16 @@ async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depend
             component_name = f"{request.platform}/{request.component_type}"
             relative_file_path = f"config/collection_components/{request.platform}/{filename}"
         
-        # ==================== 版本管理逻辑（通用） ====================
+        # ==================== 版本管理逻辑(通用) ====================
         
-        # 查询现有版本（按 file_path 查询，确保更新正确的版本）
+        # 查询现有版本(按 file_path 查询,确保更新正确的版本)
         result = await db.execute(
             select(ComponentVersion).where(ComponentVersion.file_path == relative_file_path)
         )
         existing_version = result.scalar_one_or_none()
         
         if existing_version:
-            # 更新现有版本（不创建新版本）
+            # 更新现有版本(不创建新版本)
             existing_version.description = f"录制工具更新 - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             existing_version.updated_at = datetime.utcnow()
             await db.commit()
@@ -866,7 +866,7 @@ async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depend
 @router.post("/recorder/add-step")
 async def add_recording_step(step: Dict[str, Any]):
     """
-    添加录制步骤（由Playwright监听器调用）
+    添加录制步骤(由Playwright监听器调用)
     
     这个endpoint用于后台服务推送录制的步骤
     """

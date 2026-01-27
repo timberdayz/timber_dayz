@@ -9,7 +9,7 @@ v4.19.2 新增:
 - 限流异常检测
 - 当前用户限流信息
 
-访问控制：
+访问控制:
 - 统计和配置 API 需要管理员权限
 - 当前用户限流信息 API 需要登录
 """
@@ -57,7 +57,7 @@ def require_admin(current_user = Depends(get_current_user)):
     if "admin" in role_names or "administrator" in role_names:
         return current_user
     
-    # 回退机制：检查用户名是否为 admin（用于没有分配角色的情况）
+    # 回退机制:检查用户名是否为 admin(用于没有分配角色的情况)
     username = getattr(current_user, "username", None)
     if username and username.lower() == "admin":
         return current_user
@@ -73,9 +73,9 @@ async def get_rate_limit_config(
     current_user = Depends(require_admin)
 ):
     """
-    获取限流配置（需要管理员权限）
+    获取限流配置(需要管理员权限)
     
-    返回当前系统的限流配置，包括：
+    返回当前系统的限流配置,包括:
     - 限流是否启用
     - 默认限流值
     - 分级限流配置
@@ -97,13 +97,13 @@ async def get_rate_limit_config(
 
 @router.get("/stats", response_model=RateLimitStatsResponse)
 async def get_rate_limit_stats(
-    date: Optional[str] = Query(None, description="日期（YYYY-MM-DD 格式），默认为今天"),
+    date: Optional[str] = Query(None, description="日期(YYYY-MM-DD 格式),默认为今天"),
     current_user = Depends(require_admin)
 ):
     """
-    获取限流统计（需要管理员权限）
+    获取限流统计(需要管理员权限)
     
-    返回指定日期的限流统计数据，包括：
+    返回指定日期的限流统计数据,包括:
     - 总限流次数
     - 按 API 路径统计
     - 按限流键统计
@@ -122,14 +122,14 @@ async def get_rate_limit_stats(
 
 @router.get("/events", response_model=List[RateLimitEventResponse])
 async def get_rate_limit_events(
-    date: Optional[str] = Query(None, description="日期（YYYY-MM-DD 格式），默认为今天"),
+    date: Optional[str] = Query(None, description="日期(YYYY-MM-DD 格式),默认为今天"),
     limit: int = Query(100, description="返回数量限制", ge=1, le=1000),
     current_user = Depends(require_admin)
 ):
     """
-    获取限流事件列表（需要管理员权限）
+    获取限流事件列表(需要管理员权限)
     
-    返回最近的限流触发事件，用于分析和调试。
+    返回最近的限流触发事件,用于分析和调试。
     """
     stats_service = get_rate_limit_stats_service()
     events = await stats_service.get_recent_events(date, limit)
@@ -149,9 +149,9 @@ async def check_rate_limit_anomalies(
     current_user = Depends(require_admin)
 ):
     """
-    检查限流异常（需要管理员权限）
+    检查限流异常(需要管理员权限)
     
-    检测异常流量模式，如：
+    检测异常流量模式,如:
     - 单个用户/IP 频繁触发限流
     - 单个 API 频繁触发限流
     """
@@ -172,7 +172,7 @@ async def get_my_rate_limit_info(
     current_user = Depends(get_current_user)
 ):
     """
-    获取当前用户的限流信息（需要登录）
+    获取当前用户的限流信息(需要登录)
     
     返回当前用户的限流等级和各端点的限流配置。
     """
@@ -196,11 +196,11 @@ async def get_my_rate_limit_info(
 
 @router.delete("/stats", status_code=204)
 async def clear_rate_limit_stats(
-    date: Optional[str] = Query(None, description="日期（YYYY-MM-DD 格式），默认为今天"),
+    date: Optional[str] = Query(None, description="日期(YYYY-MM-DD 格式),默认为今天"),
     current_user = Depends(require_admin)
 ):
     """
-    清除限流统计（需要管理员权限）
+    清除限流统计(需要管理员权限)
     
     清除指定日期的限流统计数据。
     """

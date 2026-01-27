@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-运营数据导入服务（v4.12.0新增）
+运营数据导入服务(v4.12.0新增)
 
-支持运营数据（traffic、services、analytics）的导入和入库
-符合运营数据主键设计规则（自增ID主键 + shop_id为核心的唯一索引）
+支持运营数据(traffic、services、analytics)的导入和入库
+符合运营数据主键设计规则(自增ID主键 + shop_id为核心的唯一索引)
 """
 
 from datetime import date, datetime
@@ -27,16 +27,16 @@ def upsert_traffic(
     """
     导入流量数据到fact_traffic表
     
-    设计规则：
-    - shop_id获取优先级：源数据 -> file_record -> account映射 -> NULL（平台级数据）
-    - platform_code获取优先级：源数据 -> file_record -> "unknown"
-    - 业务唯一索引：platform_code + shop_id + traffic_date + granularity + metric_type + data_domain
+    设计规则:
+    - shop_id获取优先级:源数据 -> file_record -> account映射 -> NULL(平台级数据)
+    - platform_code获取优先级:源数据 -> file_record -> "unknown"
+    - 业务唯一索引:platform_code + shop_id + traffic_date + granularity + metric_type + data_domain
     
     Args:
         db: 数据库会话
-        rows: 数据行列表（每行包含platform_code、shop_id、traffic_date、granularity、metric_type、metric_value等）
-        file_record: 文件元数据记录（可选）
-        ingest_task_id: 导入任务ID（可选）
+        rows: 数据行列表(每行包含platform_code、shop_id、traffic_date、granularity、metric_type、metric_value等)
+        file_record: 文件元数据记录(可选)
+        ingest_task_id: 导入任务ID(可选)
     
     Returns:
         成功导入的行数
@@ -59,34 +59,34 @@ def upsert_traffic(
                 "file_id": file_record.id if file_record else None,
             }
             
-            # [*] 获取platform_code（优先级：源数据 -> file_record -> "unknown"）
+            # [*] 获取platform_code(优先级:源数据 -> file_record -> "unknown")
             if not core["platform_code"]:
                 if file_record and file_record.platform_code:
                     core["platform_code"] = file_record.platform_code
                 else:
                     core["platform_code"] = "unknown"
-                    logger.warning(f"[UpsertTraffic] platform_code为空，使用默认值: unknown")
+                    logger.warning(f"[UpsertTraffic] platform_code为空,使用默认值: unknown")
             
-            # [*] 获取shop_id（优先级：源数据 -> file_record -> account映射 -> NULL）
+            # [*] 获取shop_id(优先级:源数据 -> file_record -> account映射 -> NULL)
             if not core["shop_id"]:
                 if file_record and file_record.shop_id:
                     core["shop_id"] = file_record.shop_id
                 elif core.get("account"):
                     # TODO: 通过AccountAlias映射account到shop_id
-                    # 暂时允许shop_id为NULL（平台级数据）
+                    # 暂时允许shop_id为NULL(平台级数据)
                     core["shop_id"] = None
-                    logger.info(f"[UpsertTraffic] shop_id为空，使用account: {core.get('account')}")
+                    logger.info(f"[UpsertTraffic] shop_id为空,使用account: {core.get('account')}")
                 else:
                     core["shop_id"] = None
-                    logger.warning(f"[UpsertTraffic] shop_id为空，允许NULL（平台级数据）")
+                    logger.warning(f"[UpsertTraffic] shop_id为空,允许NULL(平台级数据)")
             
             # [*] 验证必填字段
             if not core["traffic_date"]:
-                logger.error(f"[UpsertTraffic] 行{idx+1}: traffic_date为空，跳过")
+                logger.error(f"[UpsertTraffic] 行{idx+1}: traffic_date为空,跳过")
                 continue
             
             if not core["metric_type"]:
-                logger.error(f"[UpsertTraffic] 行{idx+1}: metric_type为空，跳过")
+                logger.error(f"[UpsertTraffic] 行{idx+1}: metric_type为空,跳过")
                 continue
             
             # 转换日期格式
@@ -105,9 +105,9 @@ def upsert_traffic(
                     core["metric_value"] = float(core["metric_value"])
                 except (ValueError, TypeError):
                     core["metric_value"] = 0.0
-                    logger.warning(f"[UpsertTraffic] 行{idx+1}: metric_value转换失败，使用默认值0.0")
+                    logger.warning(f"[UpsertTraffic] 行{idx+1}: metric_value转换失败,使用默认值0.0")
             
-            # 查询现有记录（业务唯一索引）
+            # 查询现有记录(业务唯一索引)
             existing = db.query(FactTraffic).filter(
                 and_(
                     FactTraffic.platform_code == core["platform_code"],
@@ -156,7 +156,7 @@ def upsert_service(
     """
     导入服务数据到fact_service表
     
-    设计规则同upsert_traffic，但使用service_date字段
+    设计规则同upsert_traffic,但使用service_date字段
     """
     count = 0
     
@@ -182,7 +182,7 @@ def upsert_service(
                     core["platform_code"] = file_record.platform_code
                 else:
                     core["platform_code"] = "unknown"
-                    logger.warning(f"[UpsertService] platform_code为空，使用默认值: unknown")
+                    logger.warning(f"[UpsertService] platform_code为空,使用默认值: unknown")
             
             # [*] 获取shop_id
             if not core["shop_id"]:
@@ -190,18 +190,18 @@ def upsert_service(
                     core["shop_id"] = file_record.shop_id
                 elif core.get("account"):
                     core["shop_id"] = None
-                    logger.info(f"[UpsertService] shop_id为空，使用account: {core.get('account')}")
+                    logger.info(f"[UpsertService] shop_id为空,使用account: {core.get('account')}")
                 else:
                     core["shop_id"] = None
-                    logger.warning(f"[UpsertService] shop_id为空，允许NULL（平台级数据）")
+                    logger.warning(f"[UpsertService] shop_id为空,允许NULL(平台级数据)")
             
             # [*] 验证必填字段
             if not core["service_date"]:
-                logger.error(f"[UpsertService] 行{idx+1}: service_date为空，跳过")
+                logger.error(f"[UpsertService] 行{idx+1}: service_date为空,跳过")
                 continue
             
             if not core["metric_type"]:
-                logger.error(f"[UpsertService] 行{idx+1}: metric_type为空，跳过")
+                logger.error(f"[UpsertService] 行{idx+1}: metric_type为空,跳过")
                 continue
             
             # 转换日期格式
@@ -220,7 +220,7 @@ def upsert_service(
                     core["metric_value"] = float(core["metric_value"])
                 except (ValueError, TypeError):
                     core["metric_value"] = 0.0
-                    logger.warning(f"[UpsertService] 行{idx+1}: metric_value转换失败，使用默认值0.0")
+                    logger.warning(f"[UpsertService] 行{idx+1}: metric_value转换失败,使用默认值0.0")
             
             # 查询现有记录
             existing = db.query(FactService).filter(
@@ -271,7 +271,7 @@ def upsert_analytics(
     """
     导入分析数据到fact_analytics表
     
-    设计规则同upsert_traffic，但使用analytics_date字段
+    设计规则同upsert_traffic,但使用analytics_date字段
     """
     count = 0
     
@@ -297,7 +297,7 @@ def upsert_analytics(
                     core["platform_code"] = file_record.platform_code
                 else:
                     core["platform_code"] = "unknown"
-                    logger.warning(f"[UpsertAnalytics] platform_code为空，使用默认值: unknown")
+                    logger.warning(f"[UpsertAnalytics] platform_code为空,使用默认值: unknown")
             
             # [*] 获取shop_id
             if not core["shop_id"]:
@@ -305,18 +305,18 @@ def upsert_analytics(
                     core["shop_id"] = file_record.shop_id
                 elif core.get("account"):
                     core["shop_id"] = None
-                    logger.info(f"[UpsertAnalytics] shop_id为空，使用account: {core.get('account')}")
+                    logger.info(f"[UpsertAnalytics] shop_id为空,使用account: {core.get('account')}")
                 else:
                     core["shop_id"] = None
-                    logger.warning(f"[UpsertAnalytics] shop_id为空，允许NULL（平台级数据）")
+                    logger.warning(f"[UpsertAnalytics] shop_id为空,允许NULL(平台级数据)")
             
             # [*] 验证必填字段
             if not core["analytics_date"]:
-                logger.error(f"[UpsertAnalytics] 行{idx+1}: analytics_date为空，跳过")
+                logger.error(f"[UpsertAnalytics] 行{idx+1}: analytics_date为空,跳过")
                 continue
             
             if not core["metric_type"]:
-                logger.error(f"[UpsertAnalytics] 行{idx+1}: metric_type为空，跳过")
+                logger.error(f"[UpsertAnalytics] 行{idx+1}: metric_type为空,跳过")
                 continue
             
             # 转换日期格式
@@ -335,7 +335,7 @@ def upsert_analytics(
                     core["metric_value"] = float(core["metric_value"])
                 except (ValueError, TypeError):
                     core["metric_value"] = 0.0
-                    logger.warning(f"[UpsertAnalytics] 行{idx+1}: metric_value转换失败，使用默认值0.0")
+                    logger.warning(f"[UpsertAnalytics] 行{idx+1}: metric_value转换失败,使用默认值0.0")
             
             # 查询现有记录
             existing = db.query(FactAnalytics).filter(

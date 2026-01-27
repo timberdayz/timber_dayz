@@ -23,14 +23,14 @@ class NotificationConfigService:
     """通知配置服务类"""
     
     def __init__(self, db: AsyncSession):
-        """初始化服务（仅支持异步）"""
+        """初始化服务(仅支持异步)"""
         self.db = db
         self.encryption_service = get_encryption_service()
     
     # ==================== SMTP配置 ====================
     
     async def get_smtp_config(self) -> Optional[SMTPConfig]:
-        """获取SMTP配置（仅返回激活的配置）"""
+        """获取SMTP配置(仅返回激活的配置)"""
         try:
             result = await self.db.execute(
                 select(SMTPConfig).where(SMTPConfig.is_active == True).order_by(SMTPConfig.updated_at.desc())
@@ -50,7 +50,7 @@ class NotificationConfigService:
             # 获取现有配置
             existing_config = await self.get_smtp_config()
             
-            # 如果密码需要更新，加密密码
+            # 如果密码需要更新,加密密码
             if "password" in config_update and config_update["password"]:
                 plain_password = config_update.pop("password")
                 config_update["password_encrypted"] = self.encryption_service.encrypt_password(plain_password)
@@ -170,7 +170,7 @@ class NotificationConfigService:
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[NotificationTemplate], int]:
-        """获取通知模板列表（分页、筛选）"""
+        """获取通知模板列表(分页、筛选)"""
         try:
             conditions = []
             
@@ -258,7 +258,7 @@ class NotificationConfigService:
             if not template:
                 return None
             
-            # 如果更新模板名称，检查是否冲突
+            # 如果更新模板名称,检查是否冲突
             if "template_name" in template_data and template_data["template_name"] != template.template_name:
                 existing = await self.db.execute(
                     select(NotificationTemplate).where(
@@ -308,7 +308,7 @@ class NotificationConfigService:
         page: int = 1,
         page_size: int = 20
     ) -> Tuple[List[AlertRule], int]:
-        """获取告警规则列表（分页、筛选）"""
+        """获取告警规则列表(分页、筛选)"""
         try:
             conditions = []
             
@@ -396,7 +396,7 @@ class NotificationConfigService:
             if not rule:
                 return None
             
-            # 如果更新规则名称，检查是否冲突
+            # 如果更新规则名称,检查是否冲突
             if "rule_name" in rule_data and rule_data["rule_name"] != rule.rule_name:
                 existing = await self.db.execute(
                     select(AlertRule).where(

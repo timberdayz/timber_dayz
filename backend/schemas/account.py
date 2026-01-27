@@ -21,14 +21,14 @@ class CapabilitiesModel(BaseModel):
 class AccountCreate(BaseModel):
     """创建账号请求模型"""
     account_id: str = Field(..., description="账号唯一标识")
-    parent_account: Optional[str] = Field(None, description="主账号（多店铺共用时填写）")
+    parent_account: Optional[str] = Field(None, description="主账号(多店铺共用时填写)")
     platform: str = Field(..., description="平台代码")
-    account_alias: Optional[str] = Field(None, description="账号别名（用于关联导出数据中的自定义名称）")
+    account_alias: Optional[str] = Field(None, description="账号别名(用于关联导出数据中的自定义名称)")
     store_name: str = Field(..., description="店铺名称")
     shop_type: Optional[str] = Field(None, description="店铺类型: local/global")
     shop_region: Optional[str] = Field(None, description="店铺区域: SG/MY/GLOBAL等")
     username: str = Field(..., description="登录用户名")
-    password: str = Field(..., description="登录密码（明文，后端加密）")
+    password: str = Field(..., description="登录密码(明文,后端加密)")
     login_url: Optional[str] = Field(None, description="登录URL")
     email: Optional[str] = Field(None, description="邮箱")
     phone: Optional[str] = Field(None, description="手机号")
@@ -41,7 +41,7 @@ class AccountCreate(BaseModel):
 
 
 class AccountUpdate(BaseModel):
-    """更新账号请求模型（所有字段可选）"""
+    """更新账号请求模型(所有字段可选)"""
     parent_account: Optional[str] = None
     platform: Optional[str] = None
     account_alias: Optional[str] = None
@@ -62,7 +62,7 @@ class AccountUpdate(BaseModel):
 
 
 class AccountResponse(BaseModel):
-    """账号响应模型（不含密码）"""
+    """账号响应模型(不含密码)"""
     id: int
     account_id: str
     parent_account: Optional[str]
@@ -100,7 +100,7 @@ class AccountStats(BaseModel):
 
 
 class AccountImportResponse(BaseModel):
-    """账号导入响应（从local_accounts.py导入）"""
+    """账号导入响应(从local_accounts.py导入)"""
     message: str = Field(description="导入消息")
     imported_count: int = Field(description="成功导入数量")
     skipped_count: int = Field(description="跳过数量")

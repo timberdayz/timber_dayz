@@ -1,7 +1,7 @@
 """
 日志管理模块
 
-提供统一的日志管理功能，支持不同级别的日志记录和格式化输出。
+提供统一的日志管理功能,支持不同级别的日志记录和格式化输出。
 """
 
 import logging
@@ -25,18 +25,18 @@ class ColoredFormatter(logging.Formatter):
     }
     
     def format(self, record):
-        """格式化日志记录（Windows兼容：处理UnicodeEncodeError）"""
+        """格式化日志记录(Windows兼容:处理UnicodeEncodeError)"""
         log_color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
         reset_color = self.COLORS['RESET']
         
         # 格式化时间
         record.asctime = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S')
         
-        # 获取消息（安全处理Unicode）
+        # 获取消息(安全处理Unicode)
         try:
             message = record.getMessage()
         except UnicodeEncodeError:
-            # Windows GBK编码兼容：移除无法编码的字符
+            # Windows GBK编码兼容:移除无法编码的字符
             message = str(record.msg).encode('gbk', errors='ignore').decode('gbk')
             if record.args:
                 try:
@@ -50,12 +50,12 @@ class ColoredFormatter(logging.Formatter):
         # 创建格式化的消息
         formatted_message = f"{log_color}[{record.levelname}]{reset_color} {record.asctime} - {record.name} - {message}"
         
-        # 如果有异常信息，添加异常堆栈
+        # 如果有异常信息,添加异常堆栈
         if record.exc_info:
             try:
                 formatted_message += f"\n{self.formatException(record.exc_info)}"
             except UnicodeEncodeError:
-                formatted_message += "\n[异常信息包含无法编码的字符，已跳过]"
+                formatted_message += "\n[异常信息包含无法编码的字符,已跳过]"
         
         return formatted_message
 

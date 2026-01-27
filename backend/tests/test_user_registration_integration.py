@@ -3,7 +3,7 @@
 """
 用户注册和审批流程 - 集成测试
 
-测试内容：
+测试内容:
 1. 完整的注册-审批-登录流程测试
 2. 管理员审批工作流测试
 3. 密码重置和账户解锁流程测试
@@ -55,7 +55,7 @@ def print_result(test_name: str, success: bool, message: str = ""):
 
 
 def login_as_admin() -> Optional[str]:
-    """登录管理员账号，返回token"""
+    """登录管理员账号,返回token"""
     url = f"{BASE_URL}{API_PREFIX}/auth/login"
     data = {
         "username": admin_username,
@@ -99,7 +99,7 @@ def test_complete_registration_approval_login_flow():
         user_id = register_result.get("data", {}).get("user_id")
         print_result("注册步骤", True, f"用户ID: {user_id}, 状态: pending")
         
-        # 步骤2: 尝试登录（应该被拒绝）
+        # 步骤2: 尝试登录(应该被拒绝)
         login_url = f"{BASE_URL}{API_PREFIX}/auth/login"
         login_data = {
             "username": test_data["username"],
@@ -112,11 +112,11 @@ def test_complete_registration_approval_login_flow():
         if login_response.status_code == 403:
             error_code = login_result.get("error", {}).get("code")
             if error_code == 4005:  # AUTH_ACCOUNT_PENDING
-                print_result("登录步骤（pending状态）", True, "正确拒绝pending状态用户")
+                print_result("登录步骤(pending状态)", True, "正确拒绝pending状态用户")
             else:
-                print_result("登录步骤（pending状态）", False, f"错误码不正确: {error_code}")
+                print_result("登录步骤(pending状态)", False, f"错误码不正确: {error_code}")
         else:
-            print_result("登录步骤（pending状态）", False, "应该拒绝pending状态用户")
+            print_result("登录步骤(pending状态)", False, "应该拒绝pending状态用户")
         
         # 步骤3: 管理员批准用户
         token = login_as_admin()
@@ -135,20 +135,20 @@ def test_complete_registration_approval_login_flow():
             print_result("审批步骤", False, f"批准失败: {approve_result.get('message')}")
             return False
         
-        # 步骤4: 再次尝试登录（应该成功）
+        # 步骤4: 再次尝试登录(应该成功)
         login_response2 = requests.post(login_url, json=login_data, timeout=5)
         login_result2 = login_response2.json()
         
         if login_response2.status_code == 200:
             token = login_result2.get("access_token") or login_result2.get("data", {}).get("access_token")
             if token:
-                print_result("登录步骤（active状态）", True, "登录成功，获取到token")
+                print_result("登录步骤(active状态)", True, "登录成功,获取到token")
                 return True
             else:
-                print_result("登录步骤（active状态）", False, "登录成功但未返回token")
+                print_result("登录步骤(active状态)", False, "登录成功但未返回token")
                 return False
         else:
-            print_result("登录步骤（active状态）", False, f"登录失败: {login_result2.get('message')}")
+            print_result("登录步骤(active状态)", False, f"登录失败: {login_result2.get('message')}")
             return False
         
     except Exception as e:
@@ -267,7 +267,7 @@ def test_password_reset_and_unlock_flow():
         approve_url = f"{BASE_URL}{API_PREFIX}/users/{user_id}/approve"
         requests.post(approve_url, json={}, headers=headers, timeout=5)
         
-        # 步骤2: 重置密码（生成临时密码）
+        # 步骤2: 重置密码(生成临时密码)
         reset_url = f"{BASE_URL}{API_PREFIX}/users/{user_id}/reset-password"
         reset_data = {"generate_temp_password": True}
         reset_response = requests.post(reset_url, json=reset_data, headers=headers, timeout=5)
@@ -276,11 +276,11 @@ def test_password_reset_and_unlock_flow():
         if reset_response.status_code == 200 and reset_result.get("success"):
             temp_password = reset_result.get("data", {}).get("temp_password")
             if temp_password:
-                print_result("密码重置（临时密码）", True, f"临时密码已生成: {temp_password[:4]}****")
+                print_result("密码重置(临时密码)", True, f"临时密码已生成: {temp_password[:4]}****")
             else:
-                print_result("密码重置（临时密码）", False, "未返回临时密码")
+                print_result("密码重置(临时密码)", False, "未返回临时密码")
         else:
-            print_result("密码重置（临时密码）", False, "重置失败")
+            print_result("密码重置(临时密码)", False, "重置失败")
         
         # 步骤3: 使用临时密码登录
         if temp_password:
@@ -297,7 +297,7 @@ def test_password_reset_and_unlock_flow():
                 print_result("使用临时密码登录", False, "登录失败")
         
         # 步骤4: 测试账户锁定和解锁
-        # 先锁定账户（通过5次错误登录）
+        # 先锁定账户(通过5次错误登录)
         login_data_wrong = {
             "username": test_data["username"],
             "password": "WrongPassword"
@@ -358,7 +358,7 @@ def test_session_management_flow():
             sessions = sessions_result.get("data", [])
             print_result("获取会话列表", True, f"找到 {len(sessions)} 个活跃会话")
             
-            # 步骤2: 如果有其他会话，撤销一个
+            # 步骤2: 如果有其他会话,撤销一个
             if len(sessions) > 1:
                 # 找到非当前会话
                 other_session = None
@@ -433,7 +433,7 @@ def main():
         # 检查服务是否可用
         response = requests.get(f"{BASE_URL}/docs", timeout=5)
         if response.status_code != 200:
-            print("\n[WARN] 后端服务可能未启动，部分测试可能失败")
+            print("\n[WARN] 后端服务可能未启动,部分测试可能失败")
     except Exception as e:
         print(f"\n[WARN] 无法连接到后端服务: {e}")
         print(f"[WARN] 请确保后端服务已启动在 {BASE_URL}")

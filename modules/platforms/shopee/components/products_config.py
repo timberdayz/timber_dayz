@@ -1,12 +1,12 @@
 """
-Shopee 商品表现（Products）组件配置
+Shopee 商品表现(Products)组件配置
 
-单一入口：只修改本文件即可快速适配商品表现页面的不同布局/语言。
+单一入口:只修改本文件即可快速适配商品表现页面的不同布局/语言。
 
-说明：
-- URL 与选择器均集中在此处，供导航与导出组件复用
-- 如页面文案语言不同（英文/繁体等），可补充同义选择器
-- 若平台升级导致结构变化，只需更新这里即可
+说明:
+- URL 与选择器均集中在此处,供导航与导出组件复用
+- 如页面文案语言不同(英文/繁体等),可补充同义选择器
+- 若平台升级导致结构变化,只需更新这里即可
 """
 from __future__ import annotations
 
@@ -25,10 +25,10 @@ class TargetPage(Enum):
 
 BASE_URL: Final[str] = "https://seller.shopee.cn"
 
-# 目标页面（商品表现）深链接
+# 目标页面(商品表现)深链接
 PRODUCTS_PERFORMANCE_PATH: Final[str] = "/datacenter/product/performance"
 
-# 导出弹窗与按钮选择器集合（按优先级从上到下）
+# 导出弹窗与按钮选择器集合(按优先级从上到下)
 EXPORT_BUTTON_SELECTORS: Final[List[str]] = [
     # 精确文本
     'button:has-text("导出数据")',
@@ -89,7 +89,7 @@ DOWNLOAD_BUTTON_SELECTORS: Final[List[str]] = [
     '[role="button"]:has-text("Download")',
 ]
 
-# 表格或图表就绪的探针（用于在点击导出前确认页面加载完毕）
+# 表格或图表就绪的探针(用于在点击导出前确认页面加载完毕)
 DATA_READY_PROBES: Final[List[str]] = [
     "[data-testid*='product']",
     "[data-testid*='performance']",
@@ -99,7 +99,7 @@ DATA_READY_PROBES: Final[List[str]] = [
     ".data-table",
 ]
 
-# 常见通知/升级提示弹窗的关闭按钮选择器（按优先级）
+# 常见通知/升级提示弹窗的关闭按钮选择器(按优先级)
 POPUP_CLOSE_SELECTORS: Final[List[str]] = [
     '.ant-modal-close',
     'button:has-text("我知道了")',
@@ -116,7 +116,7 @@ DATA_TYPE_DIR: Final[str] = "products"
 
 @dataclass(frozen=True)
 class ProductsSelectors:
-    """打包的选择器与常量（便于一次性传入组件）。"""
+    """打包的选择器与常量(便于一次性传入组件)。"""
 
     base_url: str = BASE_URL
     performance_path: str = PRODUCTS_PERFORMANCE_PATH

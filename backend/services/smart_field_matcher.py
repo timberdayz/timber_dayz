@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 智能字段匹配引擎 - v4.3.7
-四层匹配策略：同义词 -> 关键词相似 -> 值模式检测 -> 平台特定规则
+四层匹配策略:同义词 -> 关键词相似 -> 值模式检测 -> 平台特定规则
 """
 
 from typing import List, Dict, Optional, Tuple, Any
@@ -23,16 +23,16 @@ class SmartFieldMatcher:
         
         Args:
             dictionary_fields: 辞典字段列表
-            platform: 平台代码（用于平台特定规则）
+            platform: 平台代码(用于平台特定规则)
         """
         self.dictionary = dictionary_fields
         self.platform = platform
         self._build_lookup_index()
     
     def _build_lookup_index(self):
-        """构建查找索引（加速匹配）"""
+        """构建查找索引(加速匹配)"""
         self.synonym_index = {}  # 同义词 -> field_code
-        self.keyword_index = {}  # 关键词 -> field_code（带权重）
+        self.keyword_index = {}  # 关键词 -> field_code(带权重)
         
         for field in self.dictionary:
             field_code = field['field_code']
@@ -52,14 +52,14 @@ class SmartFieldMatcher:
                     syn_lower = syn.lower()
                     if syn_lower not in self.synonym_index:
                         self.synonym_index[syn_lower] = []
-                    # 平台特定同义词权重更高（插入到列表前面）
+                    # 平台特定同义词权重更高(插入到列表前面)
                     self.synonym_index[syn_lower].insert(0, field_code)
             
-            # 索引关键词（从中文名和同义词提取）
+            # 索引关键词(从中文名和同义词提取)
             cn_name = field.get('cn_name', '')
             all_text = [cn_name] + synonyms
             for text in all_text:
-                # 提取中文关键词（2-4字）
+                # 提取中文关键词(2-4字)
                 keywords = self._extract_keywords(text)
                 for kw in keywords:
                     if kw not in self.keyword_index:
@@ -75,7 +75,7 @@ class SmartFieldMatcher:
         if not text:
             return []
         
-        # 简化版：提取2-4个连续汉字
+        # 简化版:提取2-4个连续汉字
         keywords = []
         
         # 匹配2-4个汉字
@@ -97,7 +97,7 @@ class SmartFieldMatcher:
         
         Args:
             original_column: 原始列名
-            sample_values: 样例值（可选，用于值模式检测）
+            sample_values: 样例值(可选,用于值模式检测)
         
         Returns:
             (standard_field, confidence, method, reason)
@@ -105,17 +105,17 @@ class SmartFieldMatcher:
         # 清洗列名
         cleaned_column = self._clean_column_name(original_column)
         
-        # 策略1：精确同义词匹配（置信度0.95）
+        # 策略1:精确同义词匹配(置信度0.95)
         result = self._match_by_synonym(cleaned_column)
         if result:
             return result
         
-        # 策略2：关键词相似度（置信度0.70-0.85）
+        # 策略2:关键词相似度(置信度0.70-0.85)
         result = self._match_by_keywords(cleaned_column)
         if result:
             return result
         
-        # 策略3：值模式检测（置信度0.80-0.90）
+        # 策略3:值模式检测(置信度0.80-0.90)
         if sample_values:
             result = self._match_by_value_pattern(cleaned_column, sample_values)
             if result:
@@ -125,7 +125,7 @@ class SmartFieldMatcher:
         return ("未映射", 0.0, "no_match", "未找到匹配的标准字段")
     
     def _clean_column_name(self, column: str) -> str:
-        """清洗列名（去括号/单位/空格）"""
+        """清洗列名(去括号/单位/空格)"""
         # 去除括号内容
         column = re.sub(r'\([^)]*\)', '', column)
         column = re.sub(r'\[[^\]]*\]', '', column)
@@ -136,13 +136,13 @@ class SmartFieldMatcher:
         return column
     
     def _match_by_synonym(self, column: str) -> Optional[Tuple[str, float, str, str]]:
-        """策略1：同义词精确匹配"""
+        """策略1:同义词精确匹配"""
         column_lower = column.lower()
         
         if column_lower in self.synonym_index:
             matched_fields = self.synonym_index[column_lower]
             if matched_fields:
-                field_code = matched_fields[0]  # 取第一个（平台特定优先）
+                field_code = matched_fields[0]  # 取第一个(平台特定优先)
                 
                 # 检查是否为平台特定匹配
                 confidence = 0.98 if len(matched_fields) == 1 else 0.95
@@ -157,7 +157,7 @@ class SmartFieldMatcher:
         return None
     
     def _match_by_keywords(self, column: str) -> Optional[Tuple[str, float, str, str]]:
-        """策略2：关键词相似度匹配（v4.6.1增强 - 优先精确匹配）"""
+        """策略2:关键词相似度匹配(v4.6.1增强 - 优先精确匹配)"""
         keywords = self._extract_keywords(column)
         
         if not keywords:
@@ -166,7 +166,7 @@ class SmartFieldMatcher:
         # 统计每个字段的关键词命中数
         field_scores = {}
         matched_keywords = {}
-        field_similarity = {}  # [*] v4.6.1新增：字段名相似度
+        field_similarity = {}  # [*] v4.6.1新增:字段名相似度
         
         for kw in keywords:
             if kw in self.keyword_index:
@@ -178,7 +178,7 @@ class SmartFieldMatcher:
                         field_dict = next((f for f in self.dictionary if f.get('field_code') == field_code), None)
                         if field_dict:
                             cn_name = field_dict.get('cn_name', '')
-                            # 计算相似度（字段名包含原始列名的程度）
+                            # 计算相似度(字段名包含原始列名的程度)
                             similarity = self._calculate_name_similarity(column, cn_name)
                             field_similarity[field_code] = similarity
                     field_scores[field_code] += count
@@ -187,12 +187,12 @@ class SmartFieldMatcher:
         if not field_scores:
             return None
         
-        # [*] v4.6.1增强：综合考虑得分和相似度
-        # 优先选择：1) 得分高 + 2) 相似度高
+        # [*] v4.6.1增强:综合考虑得分和相似度
+        # 优先选择:1) 得分高 + 2) 相似度高
         def combined_score(field_code):
             score = field_scores[field_code]
             similarity = field_similarity.get(field_code, 0.0)
-            # 相似度权重更高（0.7），得分权重较低（0.3）
+            # 相似度权重更高(0.7),得分权重较低(0.3)
             return score * 0.3 + similarity * 0.7
         
         # 找到综合得分最高的字段
@@ -201,11 +201,11 @@ class SmartFieldMatcher:
         score = best_field[1]
         similarity = field_similarity.get(field_code, 0.0)
         
-        # 计算置信度（基于匹配关键词数量和相似度）
+        # 计算置信度(基于匹配关键词数量和相似度)
         keywords_matched = len(matched_keywords[field_code])
         total_keywords = len(keywords)
         
-        # [*] v4.6.1增强：相似度高时提升置信度
+        # [*] v4.6.1增强:相似度高时提升置信度
         if similarity >= 0.8:  # 高度相似
             base_confidence = 0.90
         elif similarity >= 0.6:  # 中等相似
@@ -217,7 +217,7 @@ class SmartFieldMatcher:
         else:
             base_confidence = 0.65
         
-        # 置信度阈值：>=0.65才返回
+        # 置信度阈值:>=0.65才返回
         if base_confidence < 0.65:
             return None
         
@@ -230,11 +230,11 @@ class SmartFieldMatcher:
     
     def _calculate_name_similarity(self, original: str, target: str) -> float:
         """
-        计算字段名相似度（v4.6.1新增）
+        计算字段名相似度(v4.6.1新增)
         
         Args:
             original: 原始字段名
-            target: 目标字段名（CN Name）
+            target: 目标字段名(CN Name)
             
         Returns:
             相似度分数 (0.0 - 1.0)
@@ -245,11 +245,11 @@ class SmartFieldMatcher:
         original_lower = original.lower()
         target_lower = target.lower()
         
-        # 方法1：完全包含（最高分）
+        # 方法1:完全包含(最高分)
         if original_lower in target_lower or target_lower in original_lower:
             return 0.95
         
-        # 方法2：字符重叠度
+        # 方法2:字符重叠度
         original_chars = set(original_lower)
         target_chars = set(target_lower)
         
@@ -268,7 +268,7 @@ class SmartFieldMatcher:
         column: str,
         sample_values: List[Any]
     ) -> Optional[Tuple[str, float, str, str]]:
-        """策略3：值模式检测"""
+        """策略3:值模式检测"""
         # 过滤None值
         valid_values = [v for v in sample_values if v is not None and str(v).strip()]
         
@@ -332,7 +332,7 @@ class SmartFieldMatcher:
                             field['field_code'],
                             0.85,
                             "value_pattern_date",
-                            f"值模式检测: 日期格式（{date_count}/{len(values[:20])}样本）"
+                            f"值模式检测: 日期格式({date_count}/{len(values[:20])}样本)"
                         )
         
         return None
@@ -363,11 +363,11 @@ class SmartFieldMatcher:
                     detected_currency = currency
                     break
             
-            # 检测纯数字金额（带小数点）
+            # 检测纯数字金额(带小数点)
             if re.match(r'^\d+\.\d{2}$', val_str):
                 currency_count += 1
         
-        # 如果≥50%的值是金额格式，且列名包含"金额"/"价格"等关键词
+        # 如果≥50%的值是金额格式,且列名包含"金额"/"价格"等关键词
         if currency_count / len(values[:20]) >= 0.5:
             amount_keywords = ['金额', '价格', '费', '优惠', 'amount', 'price', 'fee', 'discount']
             
@@ -393,7 +393,7 @@ class SmartFieldMatcher:
                             target,
                             0.82,
                             "value_pattern_currency",
-                            f"值模式检测: 金额格式（{currency_count}/{len(values[:20])}样本）"
+                            f"值模式检测: 金额格式({currency_count}/{len(values[:20])}样本)"
                         )
         
         return None
@@ -409,7 +409,7 @@ class SmartFieldMatcher:
         for val in values[:20]:
             val_str = str(val).strip()
             
-            # 检测纯整数（可能有逗号分隔符）
+            # 检测纯整数(可能有逗号分隔符)
             if re.match(r'^\d{1,3}(,\d{3})*$', val_str) or re.match(r'^\d+$', val_str):
                 integer_count += 1
         
@@ -436,7 +436,7 @@ class SmartFieldMatcher:
                         target,
                         0.80,
                         "value_pattern_quantity",
-                        f"值模式检测: 整数数量（{integer_count}/{len(values[:20])}样本）"
+                        f"值模式检测: 整数数量({integer_count}/{len(values[:20])}样本)"
                     )
         
         return None
@@ -452,7 +452,7 @@ class SmartFieldMatcher:
         for val in values[:20]:
             val_str = str(val).strip()
             
-            # 检测百分比（如：5%，0.05）
+            # 检测百分比(如:5%,0.05)
             if re.match(r'^\d+(\.\d+)?%$', val_str):
                 ratio_count += 1
             elif re.match(r'^0\.\d+$', val_str):
@@ -472,14 +472,14 @@ class SmartFieldMatcher:
                 ratio_fields = [f for f in self.dictionary if f.get('data_type') == 'ratio']
                 
                 if ratio_fields:
-                    # 默认匹配第一个比率字段（通常是conversion_rate）
+                    # 默认匹配第一个比率字段(通常是conversion_rate)
                     target = ratio_fields[0]['field_code']
                     
                     return (
                         target,
                         0.78,
                         "value_pattern_ratio",
-                        f"值模式检测: 比率格式（{ratio_count}/{len(values[:20])}样本）"
+                        f"值模式检测: 比率格式({ratio_count}/{len(values[:20])}样本)"
                     )
         
         return None
@@ -494,7 +494,7 @@ class SmartFieldMatcher:
         
         Args:
             columns: 原始列名列表
-            sample_data: 样例数据（可选）
+            sample_data: 样例数据(可选)
         
         Returns:
             {

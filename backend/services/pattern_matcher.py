@@ -2,21 +2,21 @@
 # -*- coding: utf-8 -*-
 
 """
-模式匹配引擎（v4.6.0核心）
+模式匹配引擎(v4.6.0核心)
 
-功能：
-1. Pattern-based Field Mapping（正则模式匹配）
-2. 多维度提取（订单状态、货币、其他维度）
-3. 配置驱动（零硬编码）
-4. 智能降级（精确->模糊->AI建议）
+功能:
+1. Pattern-based Field Mapping(正则模式匹配)
+2. 多维度提取(订单状态、货币、其他维度)
+3. 配置驱动(零硬编码)
+4. 智能降级(精确->模糊->AI建议)
 
-使用示例：
+使用示例:
     matcher = PatternMatcher(db)
     result = await matcher.match_field(
         original_field="销售额 (已付款订单) (BRL)",
         data_domain="orders"
     )
-    # 返回：{
+    # 返回:{
     #     "matched": True,
     #     "standard_field": "sales_amount",
     #     "dimensions": {"order_status": "paid", "currency": "BRL"},
@@ -40,17 +40,17 @@ class PatternMatcher:
     """
     模式匹配引擎
     
-    设计原则：
-    - 配置驱动：规则存储在数据库，零硬编码
-    - 多维度支持：提取订单状态、货币等多个维度
-    - 智能降级：精确匹配->模式匹配->模糊匹配
+    设计原则:
+    - 配置驱动:规则存储在数据库,零硬编码
+    - 多维度支持:提取订单状态、货币等多个维度
+    - 智能降级:精确匹配->模式匹配->模糊匹配
     """
     
     def __init__(self, db: Session):
         """
         初始化模式匹配引擎
         
-        参数：
+        参数:
             db: 数据库会话
         """
         self.db = db
@@ -61,12 +61,12 @@ class PatternMatcher:
     
     def load_dictionary(self, data_domain: Optional[str] = None) -> List[FieldMappingDictionary]:
         """
-        加载字段辞典（支持缓存）
+        加载字段辞典(支持缓存)
         
-        参数：
-            data_domain: 数据域（如orders/products），None表示加载全部
+        参数:
+            data_domain: 数据域(如orders/products),None表示加载全部
         
-        返回：
+        返回:
             字段辞典列表
         """
         cache_key = f"dict_{data_domain or 'all'}"
@@ -97,19 +97,19 @@ class PatternMatcher:
         data_domain: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        匹配字段（智能降级策略）
+        匹配字段(智能降级策略)
         
-        策略：
-        1. 精确匹配（cn_name或synonyms）
-        2. 模式匹配（field_pattern正则）
-        3. 模糊匹配（相似度匹配）
+        策略:
+        1. 精确匹配(cn_name或synonyms)
+        2. 模式匹配(field_pattern正则)
+        3. 模糊匹配(相似度匹配)
         
-        参数：
-            original_field: 原始字段名（如"销售额 (已付款订单) (BRL)"）
-            data_domain: 数据域（可选）
+        参数:
+            original_field: 原始字段名(如"销售额 (已付款订单) (BRL)")
+            data_domain: 数据域(可选)
         
-        返回：
-            匹配结果字典：
+        返回:
+            匹配结果字典:
             {
                 "matched": bool,
                 "standard_field": str,
@@ -122,17 +122,17 @@ class PatternMatcher:
         """
         dictionary = self.load_dictionary(data_domain)
         
-        # 策略1：精确匹配
+        # 策略1:精确匹配
         result = self._exact_match(original_field, dictionary)
         if result["matched"]:
             return result
         
-        # 策略2：模式匹配（v4.6.0核心功能）
+        # 策略2:模式匹配(v4.6.0核心功能)
         result = self._pattern_match(original_field, dictionary)
         if result["matched"]:
             return result
         
-        # 策略3：模糊匹配
+        # 策略3:模糊匹配
         result = self._fuzzy_match(original_field, dictionary)
         if result["matched"]:
             return result
@@ -155,7 +155,7 @@ class PatternMatcher:
         """
         精确匹配策略
         
-        匹配规则：
+        匹配规则:
         1. cn_name完全匹配
         2. synonyms完全匹配
         3. en_name完全匹配
@@ -215,18 +215,18 @@ class PatternMatcher:
         dictionary: List[FieldMappingDictionary]
     ) -> Dict[str, Any]:
         """
-        模式匹配策略（v4.6.0核心功能）[*][*][*]
+        模式匹配策略(v4.6.0核心功能)[*][*][*]
         
-        匹配规则：
+        匹配规则:
         1. 使用field_pattern正则表达式匹配
-        2. 提取命名组作为维度（如order_status, currency）
+        2. 提取命名组作为维度(如order_status, currency)
         3. 使用dimension_config映射维度值
         
-        示例：
-            原始字段："销售额 (已付款订单) (BRL)"
-            正则："销售额\\s*\\((?P<order_status>.+?)\\)\\s*\\((?P<currency>[A-Z]{3})\\)"
-            提取：{"order_status": "已付款订单", "currency": "BRL"}
-            映射：{"order_status": "paid", "currency": "BRL"}
+        示例:
+            原始字段:"销售额 (已付款订单) (BRL)"
+            正则:"销售额\\s*\\((?P<order_status>.+?)\\)\\s*\\((?P<currency>[A-Z]{3})\\)"
+            提取:{"order_status": "已付款订单", "currency": "BRL"}
+            映射:{"order_status": "paid", "currency": "BRL"}
         """
         for entry in dictionary:
             # 只处理启用了pattern-based的字段
@@ -275,12 +275,12 @@ class PatternMatcher:
         """
         映射维度值
         
-        参数：
-            dimensions: 提取的原始维度（如{"order_status": "已付款订单", "currency": "BRL"}）
-            dimension_config: 维度配置（如{"order_status": {"已付款订单": "paid"}, "currency": {"type": "normalize"}}）
+        参数:
+            dimensions: 提取的原始维度(如{"order_status": "已付款订单", "currency": "BRL"})
+            dimension_config: 维度配置(如{"order_status": {"已付款订单": "paid"}, "currency": {"type": "normalize"}})
         
-        返回：
-            映射后的维度（如{"order_status": "paid", "currency": "BRL"}）
+        返回:
+            映射后的维度(如{"order_status": "paid", "currency": "BRL"})
         """
         mapped = {}
         
@@ -293,7 +293,7 @@ class PatternMatcher:
             dim_config = dimension_config.get(dim_name, {})
             
             if not dim_config:
-                # 无配置，直接使用原值
+                # 无配置,直接使用原值
                 mapped[dim_name] = dim_value
                 continue
             
@@ -327,13 +327,13 @@ class PatternMatcher:
         dictionary: List[FieldMappingDictionary]
     ) -> Dict[str, Any]:
         """
-        模糊匹配策略（最后降级）
+        模糊匹配策略(最后降级)
         
-        匹配规则：
+        匹配规则:
         1. 计算字符串相似度
-        2. 返回最相似的（相似度>0.7）
+        2. 返回最相似的(相似度>0.7)
         
-        注意：此方法为简化实现，生产环境建议使用更复杂的相似度算法
+        注意:此方法为简化实现,生产环境建议使用更复杂的相似度算法
         """
         original_lower = original_field.lower().strip()
         best_match = None
@@ -343,7 +343,7 @@ class PatternMatcher:
             if not entry.cn_name:
                 continue
             
-            # 简单相似度计算：Jaccard相似度
+            # 简单相似度计算:Jaccard相似度
             score = self._jaccard_similarity(original_lower, entry.cn_name.lower().strip())
             
             if score > best_score and score > 0.7:  # 阈值0.7
@@ -369,7 +369,7 @@ class PatternMatcher:
         """
         计算Jaccard相似度
         
-        公式：|A ∩ B| / |A ∪ B|
+        公式:|A ∩ B| / |A ∪ B|
         """
         set1 = set(str1)
         set2 = set(str2)
@@ -385,13 +385,13 @@ class PatternMatcher:
         data_domain: Optional[str] = None
     ) -> Dict[str, Dict[str, Any]]:
         """
-        批量匹配字段（性能优化）
+        批量匹配字段(性能优化)
         
-        参数：
+        参数:
             field_list: 字段列表
             data_domain: 数据域
         
-        返回：
+        返回:
             {original_field: match_result} 字典
         """
         results = {}
@@ -409,11 +409,11 @@ class PatternMatcher:
         logger.debug("Pattern matcher cache cleared")
 
 
-# 全局单例（推荐用法）
+# 全局单例(推荐用法)
 _matcher_instance = None
 
 def get_pattern_matcher(db: Session) -> PatternMatcher:
-    """获取模式匹配引擎（工厂方法）"""
+    """获取模式匹配引擎(工厂方法)"""
     return PatternMatcher(db)
 
 

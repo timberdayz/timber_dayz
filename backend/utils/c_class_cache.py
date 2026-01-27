@@ -1,15 +1,15 @@
 """
 C类数据缓存工具
 
-实现C类数据的缓存策略：
-- 健康度评分缓存（5分钟）
-- 达成率缓存（1分钟）
-- 排名数据缓存（5分钟）
+实现C类数据的缓存策略:
+- 健康度评分缓存(5分钟)
+- 达成率缓存(1分钟)
+- 排名数据缓存(5分钟)
 
-缓存失效机制：
+缓存失效机制:
 - 数据更新时自动失效缓存
 - 支持手动刷新缓存
-- 监控缓存命中率（日志记录）
+- 监控缓存命中率(日志记录)
 """
 
 import json
@@ -20,7 +20,7 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 尝试导入Redis（同步版本）
+# 尝试导入Redis(同步版本)
 try:
     import redis
     REDIS_AVAILABLE = True
@@ -32,7 +32,7 @@ except ImportError:
 class CClassCache:
     """C类数据缓存管理器"""
     
-    # 缓存过期时间（秒）
+    # 缓存过期时间(秒)
     CACHE_TTL = {
         "health_score": 300,  # 5分钟
         "achievement_rate": 60,  # 1分钟
@@ -47,11 +47,11 @@ class CClassCache:
         初始化缓存管理器
         
         Args:
-            redis_client: Redis客户端（可选，如果为None则尝试连接Redis或使用内存缓存）
-            redis_url: Redis连接URL（可选，如果redis_client为None且redis_url提供，则尝试连接）
+            redis_client: Redis客户端(可选,如果为None则尝试连接Redis或使用内存缓存)
+            redis_url: Redis连接URL(可选,如果redis_client为None且redis_url提供,则尝试连接)
         """
         self.redis_client = redis_client
-        self.memory_cache = {}  # 内存缓存（Redis不可用时的降级方案）
+        self.memory_cache = {}  # 内存缓存(Redis不可用时的降级方案)
         self.cache_stats = {
             "hits": 0,
             "misses": 0,
@@ -59,7 +59,7 @@ class CClassCache:
             "deletes": 0
         }
         
-        # 如果未提供redis_client但提供了redis_url，尝试连接
+        # 如果未提供redis_client但提供了redis_url,尝试连接
         if self.redis_client is None and redis_url and REDIS_AVAILABLE:
             try:
                 self.redis_client = redis.from_url(
@@ -71,7 +71,7 @@ class CClassCache:
                 self.redis_client.ping()  # 测试连接
                 logger.info(f"[Cache] Redis连接成功: {redis_url}")
             except Exception as e:
-                logger.warning(f"[Cache] Redis连接失败，使用内存缓存: {e}")
+                logger.warning(f"[Cache] Redis连接失败,使用内存缓存: {e}")
                 self.redis_client = None
     
     def _generate_cache_key(
@@ -83,13 +83,13 @@ class CClassCache:
         生成缓存key
         
         Args:
-            cache_type: 缓存类型（health_score/achievement_rate/ranking）
+            cache_type: 缓存类型(health_score/achievement_rate/ranking)
             **kwargs: 查询参数
             
         Returns:
             缓存key字符串
         """
-        # 将参数排序后序列化，生成唯一key
+        # 将参数排序后序列化,生成唯一key
         params_str = json.dumps(kwargs, sort_keys=True, default=str)
         params_hash = hashlib.md5(params_str.encode()).hexdigest()[:16]
         return f"{self.CACHE_PREFIX}{cache_type}:{params_hash}"
@@ -100,7 +100,7 @@ class CClassCache:
         **kwargs
     ) -> Optional[Any]:
         """
-        获取缓存数据（同步版本）
+        获取缓存数据(同步版本)
         
         Args:
             cache_type: 缓存类型
@@ -113,7 +113,7 @@ class CClassCache:
         
         try:
             if self.redis_client:
-                # 使用Redis缓存（同步）
+                # 使用Redis缓存(同步)
                 cached_data = self.redis_client.get(cache_key)
                 if cached_data:
                     self.cache_stats["hits"] += 1
@@ -133,7 +133,7 @@ class CClassCache:
                         logger.debug(f"[Cache] 内存缓存命中: {cache_key}")
                         return cached_item["data"]
                     else:
-                        # 过期，删除
+                        # 过期,删除
                         del self.memory_cache[cache_key]
                         self.cache_stats["misses"] += 1
                         logger.debug(f"[Cache] 内存缓存过期: {cache_key}")
@@ -155,12 +155,12 @@ class CClassCache:
         **kwargs
     ) -> bool:
         """
-        设置缓存数据（同步版本）
+        设置缓存数据(同步版本)
         
         Args:
             cache_type: 缓存类型
             data: 要缓存的数据
-            ttl: 过期时间（秒），如果为None则使用默认TTL
+            ttl: 过期时间(秒),如果为None则使用默认TTL
             **kwargs: 查询参数
             
         Returns:
@@ -173,7 +173,7 @@ class CClassCache:
         
         try:
             if self.redis_client:
-                # 使用Redis缓存（同步）
+                # 使用Redis缓存(同步)
                 self.redis_client.setex(
                     cache_key,
                     ttl,
@@ -201,7 +201,7 @@ class CClassCache:
         **kwargs
     ) -> bool:
         """
-        删除缓存数据（同步版本）
+        删除缓存数据(同步版本)
         
         Args:
             cache_type: 缓存类型
@@ -214,7 +214,7 @@ class CClassCache:
         
         try:
             if self.redis_client:
-                # 删除Redis缓存（同步）
+                # 删除Redis缓存(同步)
                 self.redis_client.delete(cache_key)
                 self.cache_stats["deletes"] += 1
                 logger.debug(f"[Cache] 删除Redis缓存: {cache_key}")
@@ -236,7 +236,7 @@ class CClassCache:
         cache_type: str
     ) -> int:
         """
-        清除指定类型的所有缓存（同步版本）
+        清除指定类型的所有缓存(同步版本)
         
         Args:
             cache_type: 缓存类型
@@ -249,7 +249,7 @@ class CClassCache:
         
         try:
             if self.redis_client:
-                # 清除Redis缓存（同步）
+                # 清除Redis缓存(同步)
                 keys = self.redis_client.keys(pattern)
                 if keys:
                     count = self.redis_client.delete(*keys)
@@ -271,7 +271,7 @@ class CClassCache:
     
     def clear_all(self) -> int:
         """
-        清除所有C类数据缓存（同步版本）
+        清除所有C类数据缓存(同步版本)
         
         Returns:
             清除的缓存数量
@@ -281,7 +281,7 @@ class CClassCache:
         
         try:
             if self.redis_client:
-                # 清除Redis缓存（同步）
+                # 清除Redis缓存(同步)
                 keys = self.redis_client.keys(pattern)
                 if keys:
                     count = self.redis_client.delete(*keys)
@@ -335,17 +335,17 @@ class CClassCache:
         }
 
 
-# 全局缓存实例（延迟初始化）
+# 全局缓存实例(延迟初始化)
 _cache_instance: Optional[CClassCache] = None
 
 
 def get_c_class_cache(redis_client=None, redis_url: Optional[str] = None) -> CClassCache:
     """
-    获取C类数据缓存实例（单例模式）
+    获取C类数据缓存实例(单例模式)
     
     Args:
-        redis_client: Redis客户端（可选）
-        redis_url: Redis连接URL（可选，如果redis_client为None且redis_url提供，则尝试连接）
+        redis_client: Redis客户端(可选)
+        redis_url: Redis连接URL(可选,如果redis_client为None且redis_url提供,则尝试连接)
         
     Returns:
         CClassCache实例
@@ -353,7 +353,7 @@ def get_c_class_cache(redis_client=None, redis_url: Optional[str] = None) -> CCl
     global _cache_instance
     
     if _cache_instance is None:
-        # 如果没有提供redis_url，尝试从环境变量读取
+        # 如果没有提供redis_url,尝试从环境变量读取
         if redis_url is None:
             import os
             redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")

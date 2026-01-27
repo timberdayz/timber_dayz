@@ -1,7 +1,7 @@
 """
 数据采集中心核心功能处理器
 
-迁移原系统中的核心数据采集功能，包括：
+迁移原系统中的核心数据采集功能,包括:
 - 录制向导功能
 - 数据采集功能
 - 智能登录功能
@@ -32,9 +32,9 @@ def _auto_register_downloaded_files(downloaded_files: List[str]) -> Dict[str, An
     """
     自动注册下载的文件到 catalog_files 表
     
-    Phase 0 - 数据采集器自动注册功能：
+    Phase 0 - 数据采集器自动注册功能:
     - 在数据采集器下载文件后自动调用
-    - 只注册新下载的文件，不扫描整个目录
+    - 只注册新下载的文件,不扫描整个目录
     - 注册失败不影响采集流程
     
     Args:
@@ -67,7 +67,7 @@ def _auto_register_downloaded_files(downloaded_files: List[str]) -> Dict[str, An
             except Exception as e:
                 failed_count += 1
                 logger.warning(f"[AutoRegister] 注册文件失败 {file_path}: {e}", exc_info=True)
-                # 注册失败不影响采集流程，继续处理下一个文件
+                # 注册失败不影响采集流程,继续处理下一个文件
         
         result = {
             "registered": registered_count,
@@ -95,14 +95,14 @@ class RecordingWizardHandler:
         self.supported_platforms = ['妙手ERP', 'Shopee', 'Amazon', 'miaoshou', 'miaoshou_erp']
         self.recording_types = [
             ("login", "[LOCK] 登录流程录制", "录制账号登录、验证码处理等认证流程"),
-            ("login_auto", "[BOT] 自动登录流程修正", "系统自动完成验证码输入和登录，无需手动操作"),
-            ("collection", "[DATA] 数据采集录制", "自动登录后直接到登录后的网页，录制数据采集操作"),
+            ("login_auto", "[BOT] 自动登录流程修正", "系统自动完成验证码输入和登录,无需手动操作"),
+            ("collection", "[DATA] 数据采集录制", "自动登录后直接到登录后的网页,录制数据采集操作"),
             ("complete", "[RETRY] 完整流程录制", "录制从登录到数据采集的完整流程")
         ]
 
     def run_recording_wizard(self):
-        """运行录制向导（兼容旧版交互）。
-        默认走旧版完整流程（平台->账号->录制类型->数据类型->模板->执行）。
+        """运行录制向导(兼容旧版交互)。
+        默认走旧版完整流程(平台->账号->录制类型->数据类型->模板->执行)。
         """
         try:
             self.run_legacy_recording_flow()
@@ -111,15 +111,15 @@ class RecordingWizardHandler:
             print(f"[FAIL] 录制向导失败: {e}")
 
     def run_legacy_recording_flow(self, dtype_key: Optional[str] = None, preset_type: Optional[str] = None) -> None:
-        """旧版录制流程：
-        - 选择平台 -> 选择账号（要求 enabled 且配置 login_url）
-        - 选择录制类型（登录/自动登录修正/数据采集/完整流程）或使用外部预设 preset_type
-        - 选择数据类型（当需要时；登录-only 可省略）或使用外部预设 dtype_key
+        """旧版录制流程:
+        - 选择平台 -> 选择账号(要求 enabled 且配置 login_url)
+        - 选择录制类型(登录/自动登录修正/数据采集/完整流程)或使用外部预设 preset_type
+        - 选择数据类型(当需要时;登录-only 可省略)或使用外部预设 dtype_key
         - 生成录制模板 -> 执行对应录制/回放流程
         """
         accounts = self._load_accounts()
         if not accounts:
-            print("[FAIL] 未找到任何账号，请先在 local_accounts.py 或加密配置中添加账号")
+            print("[FAIL] 未找到任何账号,请先在 local_accounts.py 或加密配置中添加账号")
             return
 
         # 平台与账号
@@ -135,7 +135,7 @@ class RecordingWizardHandler:
         if not rec_type:
             return
 
-        # 数据类型（仅当需要）
+        # 数据类型(仅当需要)
         dt_key = dtype_key
         if not dt_key and rec_type in ("data_collection", "collection", "complete", "full_process"):
             dt_key = self._select_data_type(plat)
@@ -149,7 +149,7 @@ class RecordingWizardHandler:
         self._execute_recording(account, plat, rec_type, dt_key, template)
 
     def _load_accounts(self) -> List[Dict]:
-        """从数据库加载账号配置（v4.7.0）"""
+        """从数据库加载账号配置(v4.7.0)"""
         try:
             from backend.services.account_loader_service import get_account_loader_service
             from backend.models.database import SessionLocal
@@ -185,7 +185,7 @@ class RecordingWizardHandler:
                 platforms[platform] = []
             platforms[platform].append(account)
 
-        print(f"\n[PHONE] 第一步：选择平台 (共发现 {len(platforms)} 个平台)")
+        print(f"\n[PHONE] 第一步:选择平台 (共发现 {len(platforms)} 个平台)")
         print("-" * 40)
         platform_list = list(platforms.keys())
         for i, platform in enumerate(platform_list, 1):
@@ -208,15 +208,15 @@ class RecordingWizardHandler:
 
     def _select_account(self, platform_accounts: List[Dict], platform: str) -> Optional[Dict]:
         """选择账号"""
-        # 仅显示“启用且已配置 login_url”的账号（统一登录网址规范）
+        # 仅显示“启用且已配置 login_url”的账号(统一登录网址规范)
         enabled_accounts = [acc for acc in platform_accounts if acc.get('enabled', True) and acc.get('login_url')]
 
         if not enabled_accounts:
             print(f"[FAIL] {platform} 平台没有启用且已配置 login_url 的账号")
-            print("[TIP] 提示：请在 local_accounts.py 中设置 'enabled': True 且补充 'login_url'")
+            print("[TIP] 提示:请在 local_accounts.py 中设置 'enabled': True 且补充 'login_url'")
             return None
 
-        print(f"\n[USER] 第二步：选择 {platform} 账号 (共 {len(enabled_accounts)} 个启用账号)")
+        print(f"\n[USER] 第二步:选择 {platform} 账号 (共 {len(enabled_accounts)} 个启用账号)")
         print("-" * 40)
         for i, acc in enumerate(enabled_accounts, 1):
             label = acc.get('store_name') or acc.get('username') or acc.get('account_id') or f"账号{i}"
@@ -240,14 +240,14 @@ class RecordingWizardHandler:
         selected_account = enabled_accounts[account_idx]
 
         if not selected_account.get('login_url'):
-            print("[FAIL] 该账号未配置login_url，请先补充配置")
+            print("[FAIL] 该账号未配置login_url,请先补充配置")
             return None
 
         return selected_account
 
     def _select_recording_type(self):
         """选择录制类型"""
-        print(f"\n[TARGET] 第三步：选择录制类型")
+        print(f"\n[TARGET] 第三步:选择录制类型")
         print("-" * 40)
 
         for i, (key, title, desc) in enumerate(self.recording_types, 1):
@@ -267,17 +267,17 @@ class RecordingWizardHandler:
         return self.recording_types[type_idx][0]
 
     def _select_data_type(self, platform: str):
-        """选择数据类型（统一为五大数据类型：orders/products/analytics/finance/services）。"""
-        print(f"\n[FOLDER] 第四步：选择数据类型")
+        """选择数据类型(统一为五大数据类型:orders/products/analytics/finance/services)。"""
+        print(f"\n[FOLDER] 第四步:选择数据类型")
         print("-" * 40)
 
-        # 统一五大数据类型，跨 TikTok / Shopee / 妙手ERP
+        # 统一五大数据类型,跨 TikTok / Shopee / 妙手ERP
         data_types = [
             ("orders", "订单数据采集"),
             ("products", "商品数据采集"),
             ("analytics", "客流/流量数据采集"),
             ("finance", "财务数据采集"),
-            ("services", "服务数据采集（客服/聊天）"),
+            ("services", "服务数据采集(客服/聊天)"),
         ]
 
         for i, (_, label) in enumerate(data_types, 1):
@@ -409,7 +409,7 @@ if __name__ == "__main__":
 
             login_url = account['login_url']
             account_label = account.get('store_name') or account.get('username') or "未知账号"
-            # 兼容别名：data_collection -> collection
+            # 兼容别名:data_collection -> collection
             rt_key = "collection" if recording_type == "data_collection" else recording_type
             recording_title = next(title for key, title, _ in self.recording_types if key == rt_key)
 
@@ -432,21 +432,21 @@ if __name__ == "__main__":
             elif recording_type == "login_auto":
                 # [BOT] 自动登录流程修正 - 执行真正的自动化登录
                 print("[BOT] 启动自动登录流程修正...")
-                print("[TIP] 这将执行真正的自动化登录，您可以观察整个过程")
+                print("[TIP] 这将执行真正的自动化登录,您可以观察整个过程")
                 input("按 Enter 继续...")
 
                 # 执行自动登录
                 self._execute_auto_login_test(account, platform, login_url)
             elif recording_type == "data_collection" or recording_type == "collection":
-                # [DATA] 数据采集录制 - 先自动登录，再录制采集（Inspector + HAR）
+                # [DATA] 数据采集录制 - 先自动登录,再录制采集(Inspector + HAR)
                 self._execute_data_collection_recording(account, platform, login_url, data_type_key)
             elif recording_type == "full_process" or recording_type == "complete":
-                # [RETRY] 完整流程录制 - 登录 + 采集（Inspector + HAR）
+                # [RETRY] 完整流程录制 - 登录 + 采集(Inspector + HAR)
                 self._execute_full_process_recording(account, platform, login_url, data_type_key)
             else:
                 print(f"[WARN] 未知的录制类型: {recording_type}")
 
-            return  # 直接返回，不需要执行其他录制逻辑
+            return  # 直接返回,不需要执行其他录制逻辑
 
         except Exception as e:
             logger.error(f"执行录制失败: {e}")
@@ -461,9 +461,9 @@ if __name__ == "__main__":
 
     def _execute_auto_login_test(self, account: Dict, platform: str, login_url: str):
         """
-        执行自动登录测试（恢复可用性）：
-        - Shopee：沿用旧版 Shopee 自动登录处理器。
-        - TikTok：使用同步组件化登录（避免 asyncio 事件循环冲突）。
+        执行自动登录测试(恢复可用性):
+        - Shopee:沿用旧版 Shopee 自动登录处理器。
+        - TikTok:使用同步组件化登录(避免 asyncio 事件循环冲突)。
         """
         try:
             print(f"[START] 开始自动登录测试: {account.get('store_name', '未知账号')}")
@@ -477,14 +477,14 @@ if __name__ == "__main__":
             }
 
             if plat in tiktok_aliases:
-                # 使用同步组件化登录，避免 asyncio.run 冲突
+                # 使用同步组件化登录,避免 asyncio.run 冲突
                 from playwright.sync_api import sync_playwright
                 from modules.utils.persistent_browser_manager import PersistentBrowserManager
                 from modules.components.base import ExecutionContext
                 from modules.platforms.tiktok.components.login import TiktokLogin
                 from modules.core.logger import get_logger
 
-                print("[BOT] 启动 TikTok 组件化自动登录（同步）...")
+                print("[BOT] 启动 TikTok 组件化自动登录(同步)...")
                 with sync_playwright() as p:
                     pb = PersistentBrowserManager(p)
                     account_id = (
@@ -495,7 +495,7 @@ if __name__ == "__main__":
                     page = ctx.new_page()
 
                     if not login_url:
-                        print("[FAIL] 账号缺少 login_url，请在 local_accounts.py 补充后再试")
+                        print("[FAIL] 账号缺少 login_url,请在 local_accounts.py 补充后再试")
                         return
                     try:
                         page.goto(login_url, wait_until='domcontentloaded', timeout=45000)
@@ -512,14 +512,14 @@ if __name__ == "__main__":
                         print(f"[WARN] TikTok 登录组件运行异常: {_e}")
 
                     if success:
-                        print("\n[OK] 自动登录成功（TikTok）")
+                        print("\n[OK] 自动登录成功(TikTok)")
                         try:
                             pb.save_context_state(ctx, 'tiktok', str(account_id))
                         except Exception:
                             pass
                         input("按回车键关闭浏览器并返回...")
                     else:
-                        print("\n[FAIL] 自动登录失败（TikTok）")
+                        print("\n[FAIL] 自动登录失败(TikTok)")
                         input("按回车键返回...")
 
                     try:
@@ -548,12 +548,12 @@ if __name__ == "__main__":
 
                     if result:
                         print("[OK] 自动登录成功！")
-                        print("[LIST] 登录过程中的关键步骤:\n   1. 页面加载完成\n   2. 输入用户名密码\n   3. 处理验证码（如需要）\n   4. 登录成功验证")
-                        input("\n[PAUSE] 登录成功！请观察页面状态，按回车键继续...")
+                        print("[LIST] 登录过程中的关键步骤:\n   1. 页面加载完成\n   2. 输入用户名密码\n   3. 处理验证码(如需要)\n   4. 登录成功验证")
+                        input("\n[PAUSE] 登录成功！请观察页面状态,按回车键继续...")
                     else:
                         print("[FAIL] 自动登录失败")
                         print("[TIP] 可能的原因:\n   1. 账号信息不正确\n   2. 验证码处理失败\n   3. 网络连接问题\n   4. 页面结构发生变化")
-                        input("\n[PAUSE] 登录失败，请观察页面状态，按回车键继续...")
+                        input("\n[PAUSE] 登录失败,请观察页面状态,按回车键继续...")
 
                     try:
                         browser.close()
@@ -569,7 +569,7 @@ if __name__ == "__main__":
                 from modules.platforms.miaoshou.components.login import MiaoshouLogin
                 from modules.core.logger import get_logger
 
-                print("[BOT] 启动 妙手ERP 组件化自动登录（同步）...")
+                print("[BOT] 启动 妙手ERP 组件化自动登录(同步)...")
                 with sync_playwright() as p:
                     pb = PersistentBrowserManager(p)
                     account_id = (
@@ -580,7 +580,7 @@ if __name__ == "__main__":
                     page = ctx.new_page()
 
                     if not login_url:
-                        print("[FAIL] 账号缺少 login_url，请在 local_accounts.py 补充后再试")
+                        print("[FAIL] 账号缺少 login_url,请在 local_accounts.py 补充后再试")
                         return
                     try:
                         page.goto(login_url, wait_until='domcontentloaded', timeout=45000)
@@ -597,14 +597,14 @@ if __name__ == "__main__":
                         print(f"[WARN] 妙手ERP 登录组件运行异常: {_e}")
 
                     if success:
-                        print("\n[OK] 自动登录成功（妙手ERP）")
+                        print("\n[OK] 自动登录成功(妙手ERP)")
                         try:
                             pb.save_context_state(ctx, 'miaoshou', str(account_id))
                         except Exception:
                             pass
                         input("按回车键关闭浏览器并返回...")
                     else:
-                        print("\n[FAIL] 自动登录失败（妙手ERP）")
+                        print("\n[FAIL] 自动登录失败(妙手ERP)")
                         input("按回车键返回...")
 
                     try:
@@ -614,7 +614,7 @@ if __name__ == "__main__":
                 return
 
             print(f"[WARN] 暂不支持 {platform} 平台的自动登录测试")
-            print("[LIST] 支持的平台: Shopee, TikTok, 妙手ERP（已通过组件化登录实现）")
+            print("[LIST] 支持的平台: Shopee, TikTok, 妙手ERP(已通过组件化登录实现)")
 
         except Exception as e:
             logger.error(f"自动登录测试失败: {e}")
@@ -701,7 +701,7 @@ if __name__ == "__main__":
             print(f"[FAIL] 创建手动录制模板失败: {e}")
 
     def _cleanup_old_recordings(self, platform: str, account_id: str, recording_type: str):
-        """清理旧的录制文件，确保每个账号+类型只保留最新一个"""
+        """清理旧的录制文件,确保每个账号+类型只保留最新一个"""
         try:
             recordings_dir = Path("temp/recordings")
             platform_dir = recordings_dir / platform.lower()
@@ -763,7 +763,7 @@ if __name__ == "__main__":
             print(f"[DIR] 输出文件: {template_path}")
             print("=" * 50)
 
-            # 使用原始路径，确保路径正确
+            # 使用原始路径,确保路径正确
             safe_template_path = Path(template_path)
             # 确保父目录存在
             safe_template_path.parent.mkdir(parents=True, exist_ok=True)
@@ -778,7 +778,7 @@ if __name__ == "__main__":
 
             print("[WAIT] 正在启动 Playwright Inspector...")
 
-            # 检测Playwright环境问题，提供替代方案
+            # 检测Playwright环境问题,提供替代方案
             try:
                 # 确保输出目录存在
                 safe_template_path.parent.mkdir(parents=True, exist_ok=True)
@@ -807,14 +807,14 @@ if __name__ == "__main__":
                 print("[ACTION] Playwright Inspector 录制工具启动中...")
                 print("[LIST] 使用说明:")
                 print("   1. 即将打开浏览器窗口和Inspector界面")
-                print("   2. 在浏览器中进行您的操作（登录、填表、点击等）")
+                print("   2. 在浏览器中进行您的操作(登录、填表、点击等)")
                 print("   3. 代码会实时生成在Inspector界面中")
                 print("   4. 录制完成后直接关闭Inspector界面")
                 print(f"   5. 代码将自动保存到: {safe_template_path}")
                 print()
                 print("[WAIT] 启动录制工具...")
 
-                # 使用subprocess.run，这是正确的方法
+                # 使用subprocess.run,这是正确的方法
                 result = subprocess.run(cmd, cwd=str(Path.cwd()))
 
                 print("[LIST] 录制界面已关闭")
@@ -832,9 +832,9 @@ if __name__ == "__main__":
                             print("-" * 50)
                             return True
                         else:
-                            print("[WARN] 录制文件为空，可能没有录制任何操作")
+                            print("[WARN] 录制文件为空,可能没有录制任何操作")
                 else:
-                    print("[WARN] 录制文件未生成，可能用户取消了录制")
+                    print("[WARN] 录制文件未生成,可能用户取消了录制")
 
                 return result.returncode == 0
 
@@ -875,7 +875,7 @@ if __name__ == "__main__":
 
         print("[TOOLS] 手动录制指导:")
         if "login" in flow_type.lower():
-            print("   1. 打开浏览器，访问登录页面:")
+            print("   1. 打开浏览器,访问登录页面:")
             print(f"      {login_url}")
             print("   2. 打开浏览器开发者工具 (F12)")
             print("   3. 在控制台中记录以下操作的元素选择器:")
@@ -883,7 +883,7 @@ if __name__ == "__main__":
             print("      - 密码输入框")
             print("      - 验证码输入框 (如有)")
             print("      - 登录按钮")
-            print("   4. 根据上面的模板，手动编写Playwright代码")
+            print("   4. 根据上面的模板,手动编写Playwright代码")
             print("   5. 完成后将代码粘贴到下面")
 
         print()
@@ -924,7 +924,7 @@ if __name__ == "__main__":
                 print("[WARN] 录制取消")
                 return False
         else:
-            print("[WARN] 未输入任何代码，录制取消")
+            print("[WARN] 未输入任何代码,录制取消")
             return False
 
     def _generate_recording_template(self, account_label, login_url, flow_type):
@@ -973,31 +973,31 @@ with sync_playwright() as playwright:
     def _show_recording_guidance(self, recording_type: str):
         """显示录制指导"""
         if recording_type == "login":
-            print("[TARGET] 录制指导 - 登录流程录制：")
-            print("  1. 页面加载完成后，填写用户名和密码")
-            print("  2. 处理验证码（如有）")
+            print("[TARGET] 录制指导 - 登录流程录制:")
+            print("  1. 页面加载完成后,填写用户名和密码")
+            print("  2. 处理验证码(如有)")
             print("  3. 点击登录按钮")
-            print("  4. 等待登录成功，到达主页面")
+            print("  4. 等待登录成功,到达主页面")
             print("  5. 完成后关闭录制界面")
 
         elif recording_type == "login_auto":
-            print("[TARGET] 录制指导 - 自动登录流程修正：")
+            print("[TARGET] 录制指导 - 自动登录流程修正:")
             print("  1. 系统将自动填写用户名和密码")
-            print("  2. 系统将自动处理验证码（如需要）")
+            print("  2. 系统将自动处理验证码(如需要)")
             print("  3. 系统将自动完成登录流程")
-            print("  4. 观察自动登录过程，发现问题点")
+            print("  4. 观察自动登录过程,发现问题点")
             print("  5. 完成后关闭录制界面")
 
         elif recording_type == "collection":
-            print("[TARGET] 录制指导 - 数据采集流程：")
-            print("  1. 系统将自动完成登录，直接进入登录后的页面")
+            print("[TARGET] 录制指导 - 数据采集流程:")
+            print("  1. 系统将自动完成登录,直接进入登录后的页面")
             print("  2. 导航到相关数据页面")
-            print("  3. 设置筛选条件（日期范围等）")
+            print("  3. 设置筛选条件(日期范围等)")
             print("  4. 执行数据查询/导出操作")
             print("  5. 完成后关闭录制界面")
 
         elif recording_type == "complete":
-            print("[TARGET] 录制指导 - 完整流程：")
+            print("[TARGET] 录制指导 - 完整流程:")
             print("  1. 完成登录流程")
             print("  2. 导航到数据采集页面")
             print("  3. 执行数据采集操作")
@@ -1024,7 +1024,7 @@ with sync_playwright() as playwright:
             print(f"[WARN] 自动登录过程中出现错误: {e}")
             print("[TIP] 请手动完成登录流程")
 
-        # 自动登录完成，等待用户确认结果
+        # 自动登录完成,等待用户确认结果
         print("\n[TARGET] 自动登录流程修正完成！")
         print("[LOOK] 请观察浏览器中的登录结果")
         input("按 Enter 结束测试...")
@@ -1054,7 +1054,7 @@ with sync_playwright() as playwright:
                 processing_time = time.time() - start_time
 
                 if verification_success:
-                    print(f"[DONE] Shopee登录验证码处理完成，登录成功！")
+                    print(f"[DONE] Shopee登录验证码处理完成,登录成功！")
                     print(f"[DATA] 处理统计: 耗时 {processing_time:.1f}秒, 状态: login_success")
 
                     # 等待页面跳转
@@ -1065,13 +1065,13 @@ with sync_playwright() as playwright:
                     if 'seller.shopee' in current_url and 'signin' not in current_url:
                         print("[OK] 已成功进入Shopee卖家后台！")
                     else:
-                        print("[WARN] 登录可能成功，但页面跳转异常")
+                        print("[WARN] 登录可能成功,但页面跳转异常")
                         print(f"当前URL: {current_url}")
                 else:
                     print("[FAIL] 验证码处理失败")
 
             except ImportError:
-                print("[WARN] Shopee验证码处理器模块导入失败，使用备用方案")
+                print("[WARN] Shopee验证码处理器模块导入失败,使用备用方案")
                 # 导入旧的智能录制向导作为备用
                 from modules.utils.enhanced_recording_wizard import EnhancedRecordingWizard
                 wizard = EnhancedRecordingWizard()
@@ -1172,7 +1172,7 @@ with sync_playwright() as playwright:
                 print("[FAIL] 未找到登录按钮")
                 return False
 
-            print("[OK] 基础登录操作完成，等待验证码处理...")
+            print("[OK] 基础登录操作完成,等待验证码处理...")
             return True
 
         except Exception as e:
@@ -1266,17 +1266,17 @@ with sync_playwright() as playwright:
                     continue
 
             if need_captcha:
-                print("[PHONE] 检测到验证码，启动智能处理...")
+                print("[PHONE] 检测到验证码,启动智能处理...")
                 # 这里可以调用智能验证码处理
                 try:
                     from modules.collectors.miaoshou_smart_login import MiaoshouSmartLogin
                     smart_login = MiaoshouSmartLogin()
-                    # 调用验证码处理逻辑（需要适配）
+                    # 调用验证码处理逻辑(需要适配)
                     print("[TIP] 验证码处理功能需要异步适配")
                 except Exception as e:
                     print(f"[WARN] 智能验证码处理失败: {e}")
 
-                print("请手动处理验证码，然后继续...")
+                print("请手动处理验证码,然后继续...")
                 page.pause()
             else:
                 print("[OK] 未检测到验证码需求")
@@ -1287,25 +1287,25 @@ with sync_playwright() as playwright:
 
     def _execute_collection_recording(self, playwright, page, account: Dict, platform: str, login_url: str, data_type_key: Optional[str] = None):
         """
-        执行数据采集录制（带登录成功检测 + Inspector + HAR）：
-        - 如未登录：执行对应平台的自动登录（TikTok 走组件化登录；Shopee/妙手走各自实现）
-        - 登录成功后：在新窗口启动 Inspector 与 HAR 捕获，指导录制登录后的采集操作
+        执行数据采集录制(带登录成功检测 + Inspector + HAR):
+        - 如未登录:执行对应平台的自动登录(TikTok 走组件化登录;Shopee/妙手走各自实现)
+        - 登录成功后:在新窗口启动 Inspector 与 HAR 捕获,指导录制登录后的采集操作
         """
         from modules.utils.har_capture_utils import run_har_capture
         plat = (platform or '').strip().lower()
         account_label = account.get('store_name') or account.get('username') or str(account.get('account_id') or 'account')
 
-        print("[DATA] 开始自动登录/校验登录，准备数据采集录制...")
-        # 导航到登录入口（更稳健的加载策略）
+        print("[DATA] 开始自动登录/校验登录,准备数据采集录制...")
+        # 导航到登录入口(更稳健的加载策略)
         try:
             page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
         except Exception as e:
-            print(f"[WARN] 首次导航异常，继续尝试: {e}")
+            print(f"[WARN] 首次导航异常,继续尝试: {e}")
             try:
                 page.goto(login_url, wait_until="load", timeout=60000)
             except Exception as e2:
-                print(f"[WARN] 备用导航也异常（忽略，继续尝试登录检测）: {e2}")
-        # 尝试等待网络空闲，但不因超时中断
+                print(f"[WARN] 备用导航也异常(忽略,继续尝试登录检测): {e2}")
+        # 尝试等待网络空闲,但不因超时中断
         try:
             page.wait_for_load_state("networkidle", timeout=45000)
         except Exception:
@@ -1327,7 +1327,7 @@ with sync_playwright() as playwright:
             elif plat in ["妙手erp", "miaoshou", "miaoshou_erp", "miaoshou erp"]:
                 self._perform_miaoshou_auto_login(page, account)
             elif plat.startswith("tiktok"):
-                # TikTok：如未登录则执行组件化自动登录
+                # TikTok:如未登录则执行组件化自动登录
                 if not _is_tiktok_logged_in():
                     from modules.platforms.tiktok.components.login import TiktokLogin
                     from modules.components.base import ExecutionContext
@@ -1341,16 +1341,16 @@ with sync_playwright() as playwright:
                         ok = False
                         print(f"[WARN] TikTok 登录组件异常: {e}")
                     if not ok:
-                        print("[FAIL] TikTok 自动登录失败，请手动完成后继续")
+                        print("[FAIL] TikTok 自动登录失败,请手动完成后继续")
                 # 最后再判定一次
                 if not _is_tiktok_logged_in():
-                    print("[WARN] 仍未检测到 TikTok 后台页面，您可以手动导航到后台首页后再开始录制")
+                    print("[WARN] 仍未检测到 TikTok 后台页面,您可以手动导航到后台首页后再开始录制")
             else:
-                print("[TIP] 通用平台：请确保已登录并到达后台页面")
+                print("[TIP] 通用平台:请确保已登录并到达后台页面")
         except Exception as e:
-            print(f"[WARN] 自动登录/检测过程异常（可忽略，手动继续）: {e}")
+            print(f"[WARN] 自动登录/检测过程异常(可忽略,手动继续): {e}")
 
-        # 启动 HAR 捕获 + Inspector（在新的录制窗口中进行，复用当前 storage state）
+        # 启动 HAR 捕获 + Inspector(在新的录制窗口中进行,复用当前 storage state)
         dt_key = (data_type_key or "collection").lower()
         har_path = run_har_capture(
             playwright,
@@ -1365,7 +1365,7 @@ with sync_playwright() as playwright:
 
     def _execute_complete_recording(self, page, account: Dict, platform: str, login_url: str):
         """执行完整流程录制"""
-        print("[RETRY] 开始完整流程录制（登录 + 数据采集）...")
+        print("[RETRY] 开始完整流程录制(登录 + 数据采集)...")
         page.goto(login_url)
         page.pause()  # 让用户录制完整流程
 
@@ -1378,7 +1378,7 @@ with sync_playwright() as playwright:
 
     def _execute_data_collection_recording(self, account: Dict, platform: str, login_url: str, data_type_key: Optional[str] = None):
         """
-        启动“对应账号”的持久化上下文 -> 自动登录/校验登录成功 -> 打开 Inspector + 启动 HAR 捕获，录制登录后数据采集流程。
+        启动“对应账号”的持久化上下文 -> 自动登录/校验登录成功 -> 打开 Inspector + 启动 HAR 捕获,录制登录后数据采集流程。
         """
         from playwright.sync_api import sync_playwright
         from modules.utils.persistent_browser_manager import PersistentBrowserManager
@@ -1390,9 +1390,9 @@ with sync_playwright() as playwright:
             account_id = str(account_label)
             ctx = pb.get_or_create_persistent_context(plat, account_id, account)
             page = ctx.new_page()
-            # 内部将完成：导航、登录检测/自动登录、停留在后台首页
+            # 内部将完成:导航、登录检测/自动登录、停留在后台首页
             self._execute_collection_recording(p, page, account, platform, login_url, data_type_key)
-            # 保存并关闭上下文（必须在 Playwright 关闭之前）
+            # 保存并关闭上下文(必须在 Playwright 关闭之前)
             try:
                 pb.save_context_state(ctx, plat, account_id)
             except Exception:
@@ -1404,7 +1404,7 @@ with sync_playwright() as playwright:
 
     def _execute_full_process_recording(self, account: Dict, platform: str, login_url: str, data_type_key: Optional[str] = None):
         """
-        启动“对应账号”的持久化上下文 -> 打开 Inspector，录制“登录+采集”的完整流程。
+        启动“对应账号”的持久化上下文 -> 打开 Inspector,录制“登录+采集”的完整流程。
         复用 _execute_complete_recording(page, ...)。
         """
         from playwright.sync_api import sync_playwright
@@ -1418,7 +1418,7 @@ with sync_playwright() as playwright:
             page = ctx.new_page()
             # 完整流程交由页面内 pause 完成
             self._execute_complete_recording(page, account, platform, login_url)
-            # 结束后保存并关闭（在 Playwright 关闭之前）
+            # 结束后保存并关闭(在 Playwright 关闭之前)
             try:
                 pb.save_context_state(ctx, plat, account_id)
             except Exception:
@@ -1432,7 +1432,7 @@ class DataCollectionHandler:
     """数据采集处理器 - 迁移自原系统 run_data_collection"""
 
     def __init__(self):
-        # v4.7.0: 已迁移到数据库账号管理，不再使用AccountManager
+        # v4.7.0: 已迁移到数据库账号管理,不再使用AccountManager
         pass
 
     def run_data_collection(self):
@@ -1454,19 +1454,19 @@ class DataCollectionHandler:
             account_list, source = self._load_accounts_for_run()
             enabled_accounts = [acc for acc in account_list if acc.get('enabled', True)]
             if not enabled_accounts:
-                print("[FAIL] 没有启用的账号，无法进行数据采集")
+                print("[FAIL] 没有启用的账号,无法进行数据采集")
                 print("请先添加并启用账号")
                 return
 
-            print(f"\n[START] 数据采集配置 (共 {len(enabled_accounts)} 个启用账号，来源: {source})")
+            print(f"\n[START] 数据采集配置 (共 {len(enabled_accounts)} 个启用账号,来源: {source})")
             print("=" * 60)
 
-            # 第一步：选择采集账号
+            # 第一步:选择采集账号
             selected_accounts = self._select_collection_accounts(enabled_accounts)
             if not selected_accounts:
                 return
 
-            # 第二步：选择日期范围
+            # 第二步:选择日期范围
             date_range = self._select_date_range()
             if not date_range:
                 return
@@ -1528,7 +1528,7 @@ class DataCollectionHandler:
             print(f"[FAIL] 数据采集异常: {e}")
 
     def _load_accounts_for_run(self):
-        """从数据库加载账号（v4.7.0）"""
+        """从数据库加载账号(v4.7.0)"""
         try:
             from backend.services.account_loader_service import get_account_loader_service
             from backend.models.database import SessionLocal
@@ -1540,7 +1540,7 @@ class DataCollectionHandler:
                 
                 if not accounts:
                     logger.warning("数据库中没有启用的账号")
-                    return [], "数据库（无账号）"
+                    return [], "数据库(无账号)"
                 
                 logger.info(f"从数据库加载了 {len(accounts)} 个账号")
                 return accounts, "数据库"
@@ -1553,7 +1553,7 @@ class DataCollectionHandler:
 
     def _select_collection_accounts(self, enabled_accounts):
         """选择要采集的账号"""
-        print("\n[PHONE] 第一步：选择采集账号")
+        print("\n[PHONE] 第一步:选择采集账号")
         print("-" * 40)
         print("  1. [LIST] 全部账号采集")
         print("  2. [TARGET] 单个账号采集")
@@ -1629,7 +1629,7 @@ class DataCollectionHandler:
 
     def _select_date_range(self):
         """选择日期范围"""
-        print("\n[DATE] 第二步：选择日期范围")
+        print("\n[DATE] 第二步:选择日期范围")
         print("-" * 40)
         print("  1. [DATE] 今天")
         print("  2. [DATE] 昨天")
@@ -1735,11 +1735,11 @@ class DataCollectionHandler:
         try:
             print(f"[START] 开始妙手ERP数据采集: {account.get('store_name', 'unknown')}")
 
-            # 强制要求login_url，符合规范
+            # 强制要求login_url,符合规范
             if not account.get('login_url'):
                 return {
                     "success": False,
-                    "error": "账号未配置login_url，按照规范禁止硬编码或猜测URL",
+                    "error": "账号未配置login_url,按照规范禁止硬编码或猜测URL",
                     "platform": "妙手ERP",
                     "account_id": account.get("account_id", "")
                 }
@@ -1842,11 +1842,11 @@ class DataCollectionHandler:
         try:
             print(f"[START] 开始Shopee数据采集: {account.get('store_name', 'unknown')}")
 
-            # 强制要求login_url，符合规范
+            # 强制要求login_url,符合规范
             if not account.get('login_url'):
                 return {
                     "success": False,
-                    "error": "账号未配置login_url，按照规范禁止硬编码或猜测URL",
+                    "error": "账号未配置login_url,按照规范禁止硬编码或猜测URL",
                     "platform": "Shopee",
                     "account_id": account.get("account_id", "")
                 }
@@ -1949,16 +1949,16 @@ class DataCollectionHandler:
         try:
             print("[RETRY] 启动Amazon数据采集...")
 
-            # 强制要求login_url，符合规范
+            # 强制要求login_url,符合规范
             if not account.get('login_url'):
                 return {
                     "success": False,
-                    "error": "账号未配置login_url，按照规范禁止硬编码或猜测URL",
+                    "error": "账号未配置login_url,按照规范禁止硬编码或猜测URL",
                     "platform": "Amazon",
                     "account_id": account.get("account_id", "")
                 }
 
-            # Amazon采集功能开发中，暂时返回占位结果
+            # Amazon采集功能开发中,暂时返回占位结果
             print("[TIP] Amazon采集功能开发中")
 
             return {
@@ -1979,11 +1979,11 @@ class DataCollectionHandler:
         try:
             print(f"[START] 开始TikTok数据采集: {account.get('store_name', 'unknown')}")
 
-            # 强制要求login_url，符合规范
+            # 强制要求login_url,符合规范
             if not account.get('login_url'):
                 return {
                     "success": False,
-                    "error": "账号未配置login_url，按照规范禁止硬编码或猜测URL",
+                    "error": "账号未配置login_url,按照规范禁止硬编码或猜测URL",
                     "platform": "TikTok",
                     "account_id": account.get("account_id", "")
                 }
@@ -2086,7 +2086,7 @@ class ShopeeCollectionHandler:
     """Shopee专属采集处理器"""
 
     def __init__(self):
-        # v4.7.0: 已迁移到数据库账号管理，不再使用AccountManager
+        # v4.7.0: 已迁移到数据库账号管理,不再使用AccountManager
         pass
 
     def run_shopee_collection_only(self):
@@ -2128,7 +2128,7 @@ class ShopeeCollectionHandler:
             print(f"[FAIL] Shopee专属采集失败: {e}")
 
     def _load_accounts_for_run(self):
-        """从数据库加载账号（v4.7.0）"""
+        """从数据库加载账号(v4.7.0)"""
         try:
             from backend.services.account_loader_service import get_account_loader_service
             from backend.models.database import SessionLocal
@@ -2140,7 +2140,7 @@ class ShopeeCollectionHandler:
                 
                 if not accounts:
                     logger.warning("数据库中没有启用的账号")
-                    return [], "数据库（无账号）"
+                    return [], "数据库(无账号)"
                 
                 logger.info(f"从数据库加载了 {len(accounts)} 个账号")
                 return accounts, "数据库"
@@ -2224,7 +2224,7 @@ class ShopeeCollectionHandler:
             return {
                 'type': 'auto_login',
                 'name': '自动登录模式',
-                'description': '专家级自动登录系统，自动打开登录页面并完成登录'
+                'description': '专家级自动登录系统,自动打开登录页面并完成登录'
             }
         elif choice == "5":
             return None

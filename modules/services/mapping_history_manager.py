@@ -4,7 +4,7 @@
 映射历史管理器
 
 功能:
-1. 读取和写入映射历史（data/mapping_history.json）
+1. 读取和写入映射历史(data/mapping_history.json)
 2. 支持用户确认的映射记录持久化
 3. 支持映射历史查询和应用
 
@@ -35,7 +35,7 @@ class MappingHistoryManager:
     def _load_history(self) -> Dict:
         """加载映射历史"""
         if not self.history_file.exists():
-            logger.info(f"映射历史文件不存在，创建新文件: {self.history_file}")
+            logger.info(f"映射历史文件不存在,创建新文件: {self.history_file}")
             self._save_history({})
             return {}
         
@@ -71,7 +71,7 @@ class MappingHistoryManager:
             standard_field: 标准字段名
         
         Returns:
-            源列名（如果存在历史映射）
+            源列名(如果存在历史映射)
         """
         if mapping_key not in self.history:
             return None
@@ -115,7 +115,7 @@ class MappingHistoryManager:
         self.history[mapping_key]["mappings"][standard_field] = source_column
         self.history[mapping_key]["updated_at"] = datetime.now().isoformat()
         
-        # 保存元数据（可选）
+        # 保存元数据(可选)
         if "metadata" not in self.history[mapping_key]:
             self.history[mapping_key]["metadata"] = {}
         
@@ -185,7 +185,7 @@ class MappingHistoryManager:
         
         Args:
             mapping_key: 映射键
-            standard_field: 标准字段名（如果为None，删除整个映射键）
+            standard_field: 标准字段名(如果为None,删除整个映射键)
         
         Returns:
             是否删除成功

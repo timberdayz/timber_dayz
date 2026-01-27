@@ -1,6 +1,6 @@
 """
 定时任务 - Celery Beat定时执行的任务
-包含：物化视图刷新、库存告警、应收账款检查、数据库备份
+包含:物化视图刷新、库存告警、应收账款检查、数据库备份
 """
 
 import asyncio
@@ -29,8 +29,8 @@ AUTO_INGEST_MAX_FILES_PER_RUN = 50
 def refresh_sales_materialized_views():
     """
     刷新销售相关物化视图
-    执行频率：每5分钟
-    性能：增量刷新（CONCURRENTLY），不锁表
+    执行频率:每5分钟
+    性能:增量刷新(CONCURRENTLY),不锁表
     """
     db = SessionLocal()
     
@@ -42,7 +42,7 @@ def refresh_sales_materialized_views():
         db.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_sales"))
         db.commit()
         
-        # 刷新周度销售视图（依赖日度视图）
+        # 刷新周度销售视图(依赖日度视图)
         logger.info("  Refreshing mv_weekly_sales...")
         db.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_weekly_sales"))
         db.commit()
@@ -72,7 +72,7 @@ def refresh_sales_materialized_views():
 def refresh_inventory_finance_views():
     """
     刷新库存和财务物化视图
-    执行频率：每10分钟
+    执行频率:每10分钟
     """
     db = SessionLocal()
     
@@ -104,7 +104,7 @@ def refresh_inventory_finance_views():
 def check_low_stock_alert():
     """
     检查低库存并发送告警
-    执行频率：每6小时
+    执行频率:每6小时
     """
     db = SessionLocal()
     
@@ -164,7 +164,7 @@ def check_low_stock_alert():
 def check_overdue_accounts_receivable():
     """
     检查应收账款逾期并更新状态
-    执行频率：每天早上9点
+    执行频率:每天早上9点
     """
     db = SessionLocal()
     
@@ -228,10 +228,10 @@ def check_overdue_accounts_receivable():
 @celery_app.task(name="backend.tasks.scheduled_tasks.auto_ingest_pending_files")
 def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
     """
-    自动处理待入库文件（兜底机制）
-    执行频率：每15分钟（由Celery Beat配置）
+    自动处理待入库文件(兜底机制)
+    执行频率:每15分钟(由Celery Beat配置)
     
-    v4.18.2优化：使用并发处理替代顺序处理，性能提升约5-10倍
+    v4.18.2优化:使用并发处理替代顺序处理,性能提升约5-10倍
     """
     db = SessionLocal()
     try:
@@ -246,26 +246,26 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
             logger.info("[AutoIngest] 未发现待自动入库的文件")
             return {"status": "success", "processed": 0, "details": []}
 
-        # v4.18.2优化：使用并发处理（类似手动同步）
+        # v4.18.2优化:使用并发处理(类似手动同步)
         from backend.services.data_sync_service import DataSyncService
         
-        # 动态调整并发数：5-20之间，根据文件数量
+        # 动态调整并发数:5-20之间,根据文件数量
         max_concurrent = min(20, max(5, len(pending_ids) // 10 + 1))
         
         async def _process_ids_concurrent(ids: List[int]) -> List[Dict[str, Any]]:
-            """并发处理文件（使用信号量控制并发数）
+            """并发处理文件(使用信号量控制并发数)
             
-            v4.18.2更新：使用AsyncSessionLocal实现真异步数据库操作
+            v4.18.2更新:使用AsyncSessionLocal实现真异步数据库操作
             """
             semaphore = asyncio.Semaphore(max_concurrent)
             
-            # v4.18.2更新：导入AsyncSessionLocal
+            # v4.18.2更新:导入AsyncSessionLocal
             from backend.models.database import AsyncSessionLocal
             
             async def process_single(file_id: int) -> Dict[str, Any]:
                 """带信号量的单文件处理"""
                 async with semaphore:
-                    # v4.18.2更新：使用异步会话（真异步）
+                    # v4.18.2更新:使用异步会话(真异步)
                     db_local = AsyncSessionLocal()
                     try:
                         sync_service = DataSyncService(db_local)
@@ -318,7 +318,7 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
             return processed_results
 
         logger.info(
-            "[AutoIngest] 开始并发处理 %s 个文件（并发数=%s）",
+            "[AutoIngest] 开始并发处理 %s 个文件(并发数=%s)",
             len(pending_ids),
             max_concurrent
         )
@@ -378,12 +378,12 @@ def auto_ingest_pending_files(max_files: int = AUTO_INGEST_MAX_FILES_PER_RUN):
 @celery_app.task(name="backend.tasks.scheduled_tasks.verify_backup")
 def verify_backup():
     """
-    [*] Phase 2.2: 备份验证任务（业务层）
+    [*] Phase 2.2: 备份验证任务(业务层)
     验证最新备份的完整性
-    执行频率：每天凌晨 4:00（备份后 1 小时）
+    执行频率:每天凌晨 4:00(备份后 1 小时)
     
-    注意：系统级全量备份由宿主机 cron/systemd 负责（scripts/backup_all.sh）
-    此任务仅用于验证备份状态，不执行实际备份
+    注意:系统级全量备份由宿主机 cron/systemd 负责(scripts/backup_all.sh)
+    此任务仅用于验证备份状态,不执行实际备份
     """
     import subprocess
     from pathlib import Path
@@ -406,7 +406,7 @@ def verify_backup():
         latest_backup = backup_dirs[0]
         logger.info(f"[BACKUP] Verifying backup: {latest_backup}")
         
-        # 调用验证脚本（通过 subprocess，不直接执行备份逻辑）
+        # 调用验证脚本(通过 subprocess,不直接执行备份逻辑)
         verify_script = root_dir / "scripts" / "verify_backup.sh"
         if not verify_script.exists():
             logger.warning("[BACKUP] Verify script not found")
@@ -435,12 +435,12 @@ def verify_backup():
 @celery_app.task(name="backend.tasks.scheduled_tasks.cleanup_old_backups")
 def cleanup_old_backups(retention_days: int = 30):
     """
-    [*] Phase 2.2: 备份清理任务（业务层）
+    [*] Phase 2.2: 备份清理任务(业务层)
     按保留策略删除旧备份
-    执行频率：每天凌晨 5:00
+    执行频率:每天凌晨 5:00
     
-    注意：系统级全量备份由宿主机 cron/systemd 负责
-    此任务仅用于清理旧备份，不执行实际备份
+    注意:系统级全量备份由宿主机 cron/systemd 负责
+    此任务仅用于清理旧备份,不执行实际备份
     """
     from pathlib import Path
     from datetime import datetime, timedelta
@@ -462,7 +462,7 @@ def cleanup_old_backups(retention_days: int = 30):
             if not backup_dir.is_dir():
                 continue
             
-            # 从目录名提取时间戳（backup_YYYYMMDD_HHMMSS）
+            # 从目录名提取时间戳(backup_YYYYMMDD_HHMMSS)
             try:
                 timestamp_str = backup_dir.name.replace("backup_", "")
                 backup_date = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
@@ -504,21 +504,21 @@ def cleanup_old_backups(retention_days: int = 30):
 @celery_app.task(name="backend.tasks.scheduled_tasks.trigger_system_backup")
 def trigger_system_backup():
     """
-    [*] Phase 2.2: 触发系统级备份（业务层）
-    通过 subprocess 间接调用统一备份脚本（不直接执行备份逻辑）
-    执行频率：按需（手动触发或特殊场景）
+    [*] Phase 2.2: 触发系统级备份(业务层)
+    通过 subprocess 间接调用统一备份脚本(不直接执行备份逻辑)
+    执行频率:按需(手动触发或特殊场景)
     
-    注意：
-    - 系统级全量备份主要由宿主机 cron/systemd 负责（scripts/backup_all.sh）
+    注意:
+    - 系统级全量备份主要由宿主机 cron/systemd 负责(scripts/backup_all.sh)
     - 此任务仅用于应用层触发系统级备份的场景
-    - 不直接执行 pg_dump 等命令，而是调用统一备份脚本
+    - 不直接执行 pg_dump 等命令,而是调用统一备份脚本
     """
     import subprocess
     
     try:
         logger.info("[BACKUP] Triggering system backup from application layer...")
         
-        # 调用统一备份脚本（通过 subprocess）
+        # 调用统一备份脚本(通过 subprocess)
         backup_script = root_dir / "scripts" / "backup_all.sh"
         if not backup_script.exists():
             logger.error("[BACKUP] Backup script not found")

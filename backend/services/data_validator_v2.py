@@ -1,11 +1,11 @@
 """
 数据验证服务 v2.0 - 适配扁平化宽表schema
 
-改进点：
-1. 适配新schema（fact_product_metrics 25列，fact_orders 29列）
-2. 放宽验证规则（必填字段从10+减少到4个）
-3. 优化错误提示（批量汇总而非逐行）
-4. 智能数据清洗（自动修正常见格式问题）
+改进点:
+1. 适配新schema(fact_product_metrics 25列,fact_orders 29列)
+2. 放宽验证规则(必填字段从10+减少到4个)
+3. 优化错误提示(批量汇总而非逐行)
+4. 智能数据清洗(自动修正常见格式问题)
 """
 
 from __future__ import annotations
@@ -84,25 +84,25 @@ def _validate_currency(currency: str) -> bool:
 
 def validate_product_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    验证商品指标数据（v2.0 - 适配扁平化宽表）
+    验证商品指标数据(v2.0 - 适配扁平化宽表)
     
     fact_product_metrics新schema:
-    必填字段（4个）:
+    必填字段(4个):
       - platform_code: 平台代码
       - shop_id: 店铺ID
       - platform_sku: 平台SKU
       - metric_date: 指标日期
     
-    可选字段（19个）:
-      - product_name, category, brand（商品信息）
-      - price, currency, price_rmb（价格）
-      - stock（库存）
-      - sales_volume, sales_amount, sales_amount_rmb（销售）
-      - page_views, unique_visitors, click_through_rate（流量）
-      - conversion_rate, add_to_cart_count（转化）
-      - rating, review_count（评价）
-      - granularity（粒度，默认daily）
-      - created_at, updated_at（时间戳，自动）
+    可选字段(19个):
+      - product_name, category, brand(商品信息)
+      - price, currency, price_rmb(价格)
+      - stock(库存)
+      - sales_volume, sales_amount, sales_amount_rmb(销售)
+      - page_views, unique_visitors, click_through_rate(流量)
+      - conversion_rate, add_to_cart_count(转化)
+      - rating, review_count(评价)
+      - granularity(粒度,默认daily)
+      - created_at, updated_at(时间戳,自动)
     
     Args:
         rows: 数据行列表
@@ -120,9 +120,9 @@ def validate_product_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     for idx, row in enumerate(rows):
         row_errors = []
         
-        # === 必填字段验证（仅4个） ===
+        # === 必填字段验证(仅4个) ===
         
-        # 1. platform_sku（最重要）
+        # 1. platform_sku(最重要)
         sku = row.get("platform_sku") or row.get("sku") or row.get("product_id")
         if not sku or len(str(sku).strip()) < 1:
             row_errors.append({
@@ -134,31 +134,31 @@ def validate_product_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         
         # 2. metric_date
         date_str = row.get("metric_date") or row.get("date")
-        granularity = row.get("granularity", "daily")  # [*] v4.6.2新增：获取粒度
+        granularity = row.get("granularity", "daily")  # [*] v4.6.2新增:获取粒度
         date_parsed = _parse_date(date_str)
         
         if not date_parsed:
-            # [*] v4.6.2新增：snapshot数据允许缺少日期（自动补充）
+            # [*] v4.6.2新增:snapshot数据允许缺少日期(自动补充)
             if granularity == "snapshot":
-                # 自动使用今天日期（入库时会从文件名提取更准确的日期）
+                # 自动使用今天日期(入库时会从文件名提取更准确的日期)
                 from datetime import date as dt_date
                 row['metric_date'] = dt_date.today().strftime("%Y-%m-%d")
                 warnings.append({
                     "row": idx,
                     "col": "metric_date",
                     "type": "auto_fill",
-                    "msg": "snapshot数据已自动补充日期（快照导出日期）"
+                    "msg": "snapshot数据已自动补充日期(快照导出日期)"
                 })
             else:
-                # 其他粒度（daily/weekly/monthly）必须有日期
+                # 其他粒度(daily/weekly/monthly)必须有日期
                 row_errors.append({
                     "row": idx,
                     "col": "metric_date",
                     "type": "required",
-                    "msg": "指标日期必填且格式正确（YYYY-MM-DD）"
+                    "msg": "指标日期必填且格式正确(YYYY-MM-DD)"
                 })
         else:
-            # 日期合理性检查（仅警告）
+            # 日期合理性检查(仅警告)
             try:
                 metric_dt = dt.datetime.strptime(date_parsed, "%Y-%m-%d")
                 if metric_dt > dt.datetime.now():
@@ -178,30 +178,30 @@ def validate_product_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             except Exception:
                 pass
         
-        # 3. platform_code（宽松验证）
+        # 3. platform_code(宽松验证)
         platform = row.get("platform_code") or row.get("platform")
         if not platform:
-            # 不是错误，仅警告（可能在入库时自动填充）
+            # 不是错误,仅警告(可能在入库时自动填充)
             warnings.append({
                 "row": idx,
                 "col": "platform_code",
                 "type": "missing",
-                "msg": "平台代码未提供，将使用默认值"
+                "msg": "平台代码未提供,将使用默认值"
             })
         
-        # 4. shop_id（宽松验证）
+        # 4. shop_id(宽松验证)
         shop = row.get("shop_id") or row.get("shop")
         if not shop:
             warnings.append({
                 "row": idx,
                 "col": "shop_id",
                 "type": "missing",
-                "msg": "店铺ID未提供，将使用默认值"
+                "msg": "店铺ID未提供,将使用默认值"
             })
         
-        # === 可选字段验证（仅做合理性检查） ===
+        # === 可选字段验证(仅做合理性检查) ===
         
-        # 数值范围检查（宽松）
+        # 数值范围检查(宽松)
         numeric_checks = {
             "price": (0, 1000000, "价格"),
             "stock": (0, 10000000, "库存"),
@@ -225,16 +225,16 @@ def validate_product_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                             "type": "range",
                             "msg": f"{field_name}不能为负数"
                         })
-                    # 超过最大值仅警告（不阻止入库）
+                    # 超过最大值仅警告(不阻止入库)
                     elif parsed_val > max_val:
                         warnings.append({
                             "row": idx,
                             "col": field,
                             "type": "range_high",
-                            "msg": f"{field_name}值异常大（{parsed_val}），请确认"
+                            "msg": f"{field_name}值异常大({parsed_val}),请确认"
                         })
         
-        # 百分比检查（0-100或0-1）
+        # 百分比检查(0-100或0-1)
         percentage_checks = {
             "click_through_rate": "点击率",
             "conversion_rate": "转化率",
@@ -257,10 +257,10 @@ def validate_product_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                             "row": idx,
                             "col": field,
                             "type": "percentage",
-                            "msg": f"{field_name}超过100%（可能是小数格式0-1）"
+                            "msg": f"{field_name}超过100%(可能是小数格式0-1)"
                         })
         
-        # 评分检查（0-5）
+        # 评分检查(0-5)
         rating = row.get("rating")
         if rating is not None and str(rating).strip() != '':
             parsed_rating = _parse_float(rating)
@@ -303,20 +303,20 @@ def validate_product_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def validate_orders(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    验证订单数据（v2.0 - 适配扁平化宽表）
+    验证订单数据(v2.0 - 适配扁平化宽表)
     
     fact_orders新schema:
-    必填字段（4个）:
+    必填字段(4个):
       - platform_code: 平台代码
       - shop_id: 店铺ID
       - order_id: 订单ID
       - order_date_local: 订单日期
     
-    重要字段（建议有）:
+    重要字段(建议有):
       - total_amount: 总金额
       - currency: 货币
     
-    可选字段（23个）:
+    可选字段(23个):
       详细金额、状态、买家信息、收货地址等
     
     Args:
@@ -353,7 +353,7 @@ def validate_orders(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "msg": "订单日期必填"
             })
         
-        # 3. platform_code & shop_id（宽松）
+        # 3. platform_code & shop_id(宽松)
         if not row.get("platform_code"):
             warnings.append({"row": idx, "col": "platform_code", "type": "missing", "msg": "平台代码缺失"})
         if not row.get("shop_id"):
@@ -382,7 +382,7 @@ def validate_orders(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                             "msg": f"{field_name}不能为负数"
                         })
         
-        # === 状态验证（仅警告） ===
+        # === 状态验证(仅警告) ===
         
         order_status = row.get("order_status")
         if order_status:
@@ -452,12 +452,12 @@ if __name__ == "__main__":
     print(f"验证通过: {result['validation_pass']}")
     
     if result['errors']:
-        print(f"\n错误详情（前5个）:")
+        print(f"\n错误详情(前5个):")
         for err in result['errors'][:5]:
             print(f"  行{err['row']}, {err['col']}: {err['msg']}")
     
     if result['warnings']:
-        print(f"\n警告详情（前5个）:")
+        print(f"\n警告详情(前5个):")
         for warn in result['warnings'][:5]:
             print(f"  行{warn['row']}, {warn['col']}: {warn['msg']}")
 

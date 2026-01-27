@@ -9,9 +9,10 @@ from sqlalchemy import text, select, func
 from typing import List, Optional
 from datetime import datetime, date
 
-from backend.models.database import get_db, get_async_db, DataRecord, DataFile, DimProduct, FactSalesOrders, FactProductMetrics
+from backend.models.database import get_db, get_async_db, DataRecord, DataFile, DimProduct, FactProductMetrics
+# [DELETED] v4.19.0: FactSalesOrders (FactOrder 别名) 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
 from backend.services.unifier import rebuild_unified
-# [WARN] v4.6.0 DSS架构重构：已删除MaterializedViewService（Metabase直接查询原始表）
+# [WARN] v4.6.0 DSS架构重构:已删除MaterializedViewService(Metabase直接查询原始表)
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.logger import get_logger
@@ -74,7 +75,7 @@ async def get_quality_metrics(db: AsyncSession = Depends(get_async_db)):
             message="获取质量指标失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -100,7 +101,7 @@ async def get_data_records(db: AsyncSession = Depends(get_async_db)):
             message="获取数据记录失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -117,7 +118,7 @@ async def run_quality_check(db: AsyncSession = Depends(get_async_db)):
             message="质量检查失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -134,7 +135,7 @@ async def run_data_cleaning(db: AsyncSession = Depends(get_async_db)):
             message="数据清理失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -151,14 +152,14 @@ async def generate_quality_report(db: AsyncSession = Depends(get_async_db)):
             message="生成报告失败",
             error_type=get_error_type(ErrorCode.FILE_WRITE_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查磁盘空间和文件权限，或联系系统管理员",
+            recovery_suggestion="请检查磁盘空间和文件权限,或联系系统管理员",
             status_code=500
         )
 
 
 @router.post("/rebuild-unified")
 async def rebuild_unified_data(db: AsyncSession = Depends(get_async_db)):
-    """重建统一事实层（占位返回统计）"""
+    """重建统一事实层(占位返回统计)"""
     try:
         stats = rebuild_unified(db)
         return {"success": True, **stats}
@@ -169,14 +170,14 @@ async def rebuild_unified_data(db: AsyncSession = Depends(get_async_db)):
             message="重建统一事实失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
 
 @router.get("/product/{product_id}/unified")
 async def get_product_unified(product_id: str, db: AsyncSession = Depends(get_async_db)):
-    """返回某product_id的销售+运营汇总（跨平台/店铺）。"""
+    """返回某product_id的销售+运营汇总(跨平台/店铺)。"""
     try:
         # 找到所有该product_id的代理键
         result = await db.execute(select(DimProduct).where(DimProduct.product_id == product_id))
@@ -186,15 +187,11 @@ async def get_product_unified(product_id: str, db: AsyncSession = Depends(get_as
             return {"success": True, "sales": {"qty": 0, "gmv": 0}, "metrics": {}}
 
         # 销售汇总
-        sales_stmt = select(
-            func.sum(FactSalesOrders.qty),
-            func.sum(FactSalesOrders.gmv),
-        ).where(FactSalesOrders.product_surrogate_id.in_(psids))
-        sales_result = await db.execute(sales_stmt)
-        sales_q = sales_result.one()
-        sales = {"qty": int(sales_q[0] or 0), "gmv": float(sales_q[1] or 0)}
+        # [DELETED] v4.19.0: FactSalesOrders (FactOrder 别名) 已删除,订单数据现在在 b_class.fact_{platform}_orders_{granularity}
+        # [TODO] 需要查询 b_class schema 下的分表来获取销售数据
+        sales = {"qty": 0, "gmv": 0.0}  # 暂时返回0,待实现新的查询逻辑
 
-        # 最近指标（以最新日期为主）
+        # 最近指标(以最新日期为主)
         latest_stmt = select(func.max(FactProductMetrics.metric_date)).where(FactProductMetrics.product_surrogate_id.in_(psids))
         latest_result = await db.execute(latest_stmt)
         latest = latest_result.scalar()
@@ -235,14 +232,14 @@ async def get_product_unified(product_id: str, db: AsyncSession = Depends(get_as
             message="获取产品统一数据失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
 
 @router.get("/sales-detail-by-product")
 async def get_sales_detail_by_product(
-    product_id: Optional[int] = Query(None, description="产品ID（SN）"),
+    product_id: Optional[int] = Query(None, description="产品ID(SN)"),
     platform_code: Optional[str] = Query(None, description="平台代码"),
     shop_id: Optional[str] = Query(None, description="店铺ID"),
     platform_sku: Optional[str] = Query(None, description="平台SKU"),
@@ -254,12 +251,12 @@ async def get_sales_detail_by_product(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    查询销售明细（以product_id为原子级）
+    查询销售明细(以product_id为原子级)
     
-    类似华为ISRP系统的销售明细表，每行代表一个产品实例的销售明细
+    类似华为ISRP系统的销售明细表,每行代表一个产品实例的销售明细
     
     Args:
-        product_id: 产品ID（SN），唯一标识每个产品实例
+        product_id: 产品ID(SN),唯一标识每个产品实例
         platform_code: 平台代码筛选
         shop_id: 店铺ID筛选
         platform_sku: 平台SKU筛选
@@ -270,7 +267,7 @@ async def get_sales_detail_by_product(
         page_size: 每页数量
     
     Returns:
-        销售明细列表，包含产品、订单、价格、店铺等完整信息
+        销售明细列表,包含产品、订单、价格、店铺等完整信息
     """
     try:
         start_time = datetime.now()
@@ -362,7 +359,7 @@ async def get_sales_detail_by_product(
             message="查询销售明细失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -371,25 +368,25 @@ async def get_sales_detail_by_product(
 async def get_order_detail(order_id: str, db: AsyncSession = Depends(get_async_db)):
     """返回订单项及其产品维度信息的快照。"""
     try:
-        stmt = select(FactSalesOrders, DimProduct).join(
-            DimProduct, DimProduct.product_surrogate_id == FactSalesOrders.product_surrogate_id
-        ).where(FactSalesOrders.order_id == order_id)
-        result = await db.execute(stmt)
-        items = result.all()
+        # [DELETED] v4.19.0: FactSalesOrders (FactOrder 别名) 已删除,订单数据现在在 b_class.fact_{platform}_orders_{granularity}
+        # [TODO] 需要查询 b_class schema 下的分表来获取订单详情
+        items = []  # 暂时返回空列表,待实现新的查询逻辑
+        # [DELETED] v4.19.0: FactSalesOrders 已删除,暂时返回空列表
         result = []
-        for s, p in items:
-            result.append({
-                "platform": s.platform_code,
-                "shop_id": s.shop_id,
-                "order_id": s.order_id,
-                "sku": s.sku,
-                "qty": s.qty,
-                "gmv": float(s.gmv or 0),
-                "status": s.status,
-                "product_id": p.product_id,
-                "platform_sku": p.platform_sku,
-                "title": p.title,
-            })
+        # 原代码已注释,待实现新的查询逻辑
+        # for s, p in items:
+        #     result.append({
+        #         "platform": s.platform_code,
+        #         "shop_id": s.shop_id,
+        #         "order_id": s.order_id,
+        #         "sku": s.sku,
+        #         "qty": s.qty,
+        #         "gmv": float(s.gmv or 0),
+        #         "status": s.status,
+        #         "product_id": p.product_id,
+        #         "platform_sku": p.platform_sku,
+        #         "title": p.title,
+        #     })
         return {"success": True, "items": result}
     except Exception as e:
         logger.error(f"获取订单详情失败: {e}", exc_info=True)
@@ -398,7 +395,7 @@ async def get_order_detail(order_id: str, db: AsyncSession = Depends(get_async_d
             message="获取订单详情失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -413,7 +410,7 @@ async def delete_record(record_id: int, db: AsyncSession = Depends(get_async_db)
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="记录不存在",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请检查记录ID是否正确，或确认该记录已创建",
+                recovery_suggestion="请检查记录ID是否正确,或确认该记录已创建",
                 status_code=404
             )
         
@@ -428,6 +425,6 @@ async def delete_record(record_id: int, db: AsyncSession = Depends(get_async_db)
             message="删除记录失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )

@@ -1,12 +1,12 @@
 """
-Shopee 订单表现（Orders）组件配置
+Shopee 订单表现(Orders)组件配置
 
-单一入口：只修改本文件即可快速适配订单表现页面的不同布局/语言。
+单一入口:只修改本文件即可快速适配订单表现页面的不同布局/语言。
 
-说明：
-- URL 与选择器均集中在此处，供导航与导出组件复用
-- 如页面文案语言不同（英文/繁体等），可补充同义选择器
-- 若平台升级导致结构变化，只需更新这里即可
+说明:
+- URL 与选择器均集中在此处,供导航与导出组件复用
+- 如页面文案语言不同(英文/繁体等),可补充同义选择器
+- 若平台升级导致结构变化,只需更新这里即可
 """
 from __future__ import annotations
 
@@ -24,10 +24,10 @@ class TargetPage(Enum):
 
 BASE_URL: Final[str] = "https://seller.shopee.cn"
 
-# 目标页面（订单表现）深链接
+# 目标页面(订单表现)深链接
 ORDERS_PERFORMANCE_PATH: Final[str] = "datacenter/orders/performance"
 
-# 导出弹窗与按钮选择器集合（按优先级从上到下）
+# 导出弹窗与按钮选择器集合(按优先级从上到下)
 EXPORT_BUTTON_SELECTORS: Final[List[str]] = [
     'button:has-text("导出数据")',
     'button:has-text("导出")',
@@ -43,7 +43,7 @@ DOWNLOAD_BUTTON_SELECTORS: Final[List[str]] = [
     '.download-btn',
 ]
 
-# 表格或图表就绪的探针（用于在点击导出前确认页面加载完毕）
+# 表格或图表就绪的探针(用于在点击导出前确认页面加载完毕)
 DATA_READY_PROBES: Final[List[str]] = [
     "[data-testid*='order']",
     "[data-testid*='performance']",
@@ -59,7 +59,7 @@ DATA_TYPE_DIR: Final[str] = "orders"
 
 @dataclass(frozen=True)
 class OrdersSelectors:
-    """打包的选择器与常量（便于一次性传入组件）。"""
+    """打包的选择器与常量(便于一次性传入组件)。"""
 
     base_url: str = BASE_URL
     performance_path: str = ORDERS_PERFORMANCE_PATH

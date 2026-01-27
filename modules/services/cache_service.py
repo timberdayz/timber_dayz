@@ -3,15 +3,15 @@
 """
 缓存服务
 
-提供多层缓存机制，提升系统性能：
-1. 内存缓存（LRU）- 用于频繁访问的数据
+提供多层缓存机制,提升系统性能:
+1. 内存缓存(LRU)- 用于频繁访问的数据
 2. 文件缓存 - 用于持久化缓存数据
-3. 数据库缓存 - 用于共享缓存（多进程）
+3. 数据库缓存 - 用于共享缓存(多进程)
 
-使用场景：
-- 文件hash缓存（避免重复计算SHA256）
-- 汇率缓存（减少API调用）
-- Excel数据缓存（减少文件读取）
+使用场景:
+- 文件hash缓存(避免重复计算SHA256)
+- 汇率缓存(减少API调用)
+- Excel数据缓存(减少文件读取)
 """
 
 from __future__ import annotations
@@ -29,10 +29,10 @@ class CacheService:
     """
     统一缓存服务
     
-    提供三层缓存：
-    1. 内存缓存（最快，进程内）
-    2. 文件缓存（持久化，跨进程）
-    3. 数据库缓存（共享，适合多进程）
+    提供三层缓存:
+    1. 内存缓存(最快,进程内)
+    2. 文件缓存(持久化,跨进程)
+    3. 数据库缓存(共享,适合多进程)
     """
     
     def __init__(self, cache_dir: Optional[Path] = None):
@@ -40,26 +40,26 @@ class CacheService:
         初始化缓存服务
         
         Args:
-            cache_dir: 缓存文件目录，默认为 temp/cache
+            cache_dir: 缓存文件目录,默认为 temp/cache
         """
         self.cache_dir = cache_dir or Path("temp/cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
-        # 内存缓存（字典）
+        # 内存缓存(字典)
         self._memory_cache: Dict[str, tuple[Any, datetime]] = {}
     
     def get(self, key: str, ttl_seconds: Optional[int] = None) -> Optional[Any]:
         """
         获取缓存值
         
-        优先级：内存 -> 文件 -> None
+        优先级:内存 -> 文件 -> None
         
         Args:
             key: 缓存键
-            ttl_seconds: 有效期（秒），None表示永不过期
+            ttl_seconds: 有效期(秒),None表示永不过期
         
         Returns:
-            缓存值，如果不存在或已过期返回None
+            缓存值,如果不存在或已过期返回None
         """
         # 1. 检查内存缓存
         if key in self._memory_cache:
@@ -67,7 +67,7 @@ class CacheService:
             if ttl_seconds is None or (datetime.now() - timestamp).total_seconds() < ttl_seconds:
                 return value
             else:
-                # 过期，删除
+                # 过期,删除
                 del self._memory_cache[key]
         
         # 2. 检查文件缓存
@@ -85,10 +85,10 @@ class CacheService:
                     self._memory_cache[key] = (value, timestamp)
                     return value
                 else:
-                    # 过期，删除文件
+                    # 过期,删除文件
                     cache_file.unlink()
             except Exception:
-                # 读取失败，删除损坏的缓存文件
+                # 读取失败,删除损坏的缓存文件
                 cache_file.unlink(missing_ok=True)
         
         return None
@@ -166,18 +166,18 @@ def get_cache_service() -> CacheService:
 
 
 # ============================================================
-# 装饰器：缓存函数结果
+# 装饰器:缓存函数结果
 # ============================================================
 
 def cached(ttl_seconds: Optional[int] = 3600, key_func: Optional[Callable] = None):
     """
     缓存装饰器
     
-    自动缓存函数结果，减少重复计算
+    自动缓存函数结果,减少重复计算
     
     Args:
-        ttl_seconds: 缓存有效期（秒），默认1小时
-        key_func: 自定义key生成函数，接收函数参数，返回cache key
+        ttl_seconds: 缓存有效期(秒),默认1小时
+        key_func: 自定义key生成函数,接收函数参数,返回cache key
     
     Example:
         @cached(ttl_seconds=3600)
@@ -244,7 +244,7 @@ def get_cached_file_hash(file_path: Path) -> Optional[str]:
         file_path: 文件路径
     
     Returns:
-        hash值，如果不存在或文件已修改返回None
+        hash值,如果不存在或文件已修改返回None
     """
     cache = get_cache_service()
     
@@ -262,7 +262,7 @@ def cache_exchange_rate(currency: str, date_obj: datetime, rate: float):
     缓存汇率
     
     Args:
-        currency: 货币代码（如USD）
+        currency: 货币代码(如USD)
         date_obj: 日期
         rate: 对CNY的汇率
     """
@@ -271,7 +271,7 @@ def cache_exchange_rate(currency: str, date_obj: datetime, rate: float):
     date_str = date_obj.strftime('%Y-%m-%d')
     cache_key = f"exchange_rate:{currency}:{date_str}"
     
-    # 汇率缓存7天（一般不会频繁变化）
+    # 汇率缓存7天(一般不会频繁变化)
     cache.set(cache_key, rate, persist=True)
 
 
@@ -280,11 +280,11 @@ def get_cached_exchange_rate(currency: str, date_obj: datetime) -> Optional[floa
     获取缓存的汇率
     
     Args:
-        currency: 货币代码（如USD）
+        currency: 货币代码(如USD)
         date_obj: 日期
     
     Returns:
-        汇率，如果不存在返回None
+        汇率,如果不存在返回None
     """
     cache = get_cache_service()
     
@@ -302,7 +302,7 @@ def cache_excel_data(file_path: Path, sheet_name: str, data: Any):
     Args:
         file_path: Excel文件路径
         sheet_name: Sheet名称
-        data: 数据（通常是DataFrame）
+        data: 数据(通常是DataFrame)
     """
     cache = get_cache_service()
     
@@ -310,7 +310,7 @@ def cache_excel_data(file_path: Path, sheet_name: str, data: Any):
     mtime = file_path.stat().st_mtime if file_path.exists() else 0
     cache_key = f"excel_data:{file_path}:{sheet_name}:{mtime}"
     
-    # 只保存在内存（不持久化，避免占用磁盘空间）
+    # 只保存在内存(不持久化,避免占用磁盘空间)
     cache.set(cache_key, data, persist=False)
 
 
@@ -323,7 +323,7 @@ def get_cached_excel_data(file_path: Path, sheet_name: str) -> Optional[Any]:
         sheet_name: Sheet名称
     
     Returns:
-        数据，如果不存在或文件已修改返回None
+        数据,如果不存在或文件已修改返回None
     """
     cache = get_cache_service()
     
@@ -372,7 +372,7 @@ def get_cache_stats() -> Dict[str, Any]:
 # ============================================================
 
 if __name__ == '__main__':
-    # 示例1：使用装饰器缓存函数
+    # 示例1:使用装饰器缓存函数
     @cached(ttl_seconds=60)
     def expensive_calculation(x: int, y: int) -> int:
         print(f"计算 {x} + {y}...")
@@ -381,16 +381,16 @@ if __name__ == '__main__':
     print(expensive_calculation(1, 2))  # 计算
     print(expensive_calculation(1, 2))  # 从缓存读取
     
-    # 示例2：手动使用缓存
+    # 示例2:手动使用缓存
     cache = get_cache_service()
     cache.set('my_key', {'data': [1, 2, 3]})
     print(cache.get('my_key'))
     
-    # 示例3：缓存文件hash
+    # 示例3:缓存文件hash
     test_file = Path('test.txt')
     cache_file_hash(test_file, 'abc123')
     print(get_cached_file_hash(test_file))
     
-    # 示例4：查看统计
+    # 示例4:查看统计
     print(get_cache_stats())
 

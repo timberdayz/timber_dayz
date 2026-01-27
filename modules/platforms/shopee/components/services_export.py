@@ -1,14 +1,14 @@
 """
-Shopee 服务表现（Services）导出组件
+Shopee 服务表现(Services)导出组件
 
-职责：
-- 在同一数据域下，分别导出两个子类型：AI 助手(ai_assistant)、人工聊天(agent)
+职责:
+- 在同一数据域下,分别导出两个子类型:AI 助手(ai_assistant)、人工聊天(agent)
 - 统一落盘到 temp/outputs/shopee/<account>/<shop>/services/<granularity>/
-- 文件名以 variant 标识子类型：...__services.ai_assistant__manual.xlsx / ...__services.agent__manual.xlsx
+- 文件名以 variant 标识子类型:...__services.ai_assistant__manual.xlsx / ...__services.agent__manual.xlsx
 
-说明：
-- 默认导出全部子类型；可通过 ctx.config.get("services_subtype") 指定单个子类型
-- 避免在导入阶段产生副作用；仅在 run 时执行浏览器动作
+说明:
+- 默认导出全部子类型;可通过 ctx.config.get("services_subtype") 指定单个子类型
+- 避免在导入阶段产生副作用;仅在 run 时执行浏览器动作
 """
 from __future__ import annotations
 
@@ -35,8 +35,8 @@ class _VariantSpec:
 class ShopeeServicesExport(ExportComponent):
     """Shopee 服务表现导出器
 
-    兼容 3PF 与 SIP 店铺：
-    - SIP 店铺不提供"服务表现"页，命中后应"跳过且不视为失败"。
+    兼容 3PF 与 SIP 店铺:
+    - SIP 店铺不提供"服务表现"页,命中后应"跳过且不视为失败"。
     - 以页面要素与 404 URL 双重判定。
     """
 
@@ -51,9 +51,9 @@ class ShopeeServicesExport(ExportComponent):
 
     # --- Capability guards -------------------------------------------------
     def _is_sip_shop(self, page) -> bool:
-        """判断是否为 SIP 附属店铺（保守、避免误杀）。
-        仅基于明确的 SIP 徽标/提示做判断；不再以“侧边栏无服务表现入口”作为依据，
-        因为深链接页面通常不包含侧边栏，容易误判。
+        """判断是否为 SIP 附属店铺(保守、避免误杀)。
+        仅基于明确的 SIP 徽标/提示做判断;不再以“侧边栏无服务表现入口”作为依据,
+        因为深链接页面通常不包含侧边栏,容易误判。
         """
         try:
             candidates = [
@@ -73,7 +73,7 @@ class ShopeeServicesExport(ExportComponent):
         return False
 
     def _is_404_or_not_found(self, page) -> bool:
-        """检测 404/无权限/不存在 页面（更全面）。"""
+        """检测 404/无权限/不存在 页面(更全面)。"""
         try:
             url = page.url or ""
             url_lower = url.lower()
@@ -98,7 +98,7 @@ class ShopeeServicesExport(ExportComponent):
         return False
 
     def _await_404_if_any(self, page, timeout_ms: int = 3000) -> bool:
-        """在短时间内反复检测是否进入404/无权限页，处理前端延迟跳转。
+        """在短时间内反复检测是否进入404/无权限页,处理前端延迟跳转。
         返回 True 表示检测到不可用页面。"""
         try:
             deadline = datetime.now().timestamp() + max(0, int(timeout_ms)) / 1000.0
@@ -137,7 +137,7 @@ class ShopeeServicesExport(ExportComponent):
         try:
             account = self.ctx.account
             cfg = self.ctx.config or {}
-            # 店铺命名优先级：菜单显示名 > 账号里显式的display/menu字段 > store_name > 配置里的shop_name
+            # 店铺命名优先级:菜单显示名 > 账号里显式的display/menu字段 > store_name > 配置里的shop_name
             shop_name = (
                 account.get("menu_display_name")
                 or account.get("menu_name")
@@ -148,12 +148,12 @@ class ShopeeServicesExport(ExportComponent):
                 or cfg.get("shop_name")
                 or "unknown_shop"
             )
-            # 账号标签仍保持 label 优先，回退到 store_name/username，避免路径大范围变化
+            # 账号标签仍保持 label 优先,回退到 store_name/username,避免路径大范围变化
             account_label = account.get("label") or account.get("store_name") or account.get("username", "unknown")
 
             successes: List[Path] = []
             failures: List[str] = []
-            skipped: List[str] = []  # SIP 店或权限限制：功能不适用的变体
+            skipped: List[str] = []  # SIP 店或权限限制:功能不适用的变体
 
             for spec in self._get_target_variants():
                 try:
@@ -162,15 +162,15 @@ class ShopeeServicesExport(ExportComponent):
                         self.logger.info(f"[ShopeeServicesExport] 导航: {spec.key} -> {target_url}")
                     resp = page.goto(target_url, wait_until="domcontentloaded")
                     try:
-                        # 若命中404页，尝试不同参数名的兜底（cnsc_shop_id -> shop_id）
+                        # 若命中404页,尝试不同参数名的兜底(cnsc_shop_id -> shop_id)
                         if '/404' in (page.url or '') or (resp and getattr(resp, 'status', lambda:0)() == 404):
                             if self.logger:
-                                self.logger.warning(f"[ShopeeServicesExport] 检测到404，尝试参数名兜底: {target_url}")
+                                self.logger.warning(f"[ShopeeServicesExport] 检测到404,尝试参数名兜底: {target_url}")
                             self._fallback_navigate_with_alt_params(page, spec)
                     except Exception:
                         pass
 
-                    # 导航后快速守卫：短轮询确认是否 404/无权限，命中则立即跳过
+                    # 导航后快速守卫:短轮询确认是否 404/无权限,命中则立即跳过
                     try:
                         if self._await_404_if_any(page, timeout_ms=3000):
                             if self.logger:
@@ -180,13 +180,13 @@ class ShopeeServicesExport(ExportComponent):
                     except Exception:
                         pass
 
-                    # 关弹窗，避免遮挡按钮
+                    # 关弹窗,避免遮挡按钮
                     try:
                         self._close_notification_modal(page)
                     except Exception:
                         pass
 
-                    # 探针：页面就绪
+                    # 探针:页面就绪
                     for probe in self.sel.data_ready_probes:
                         try:
                             if page.locator(probe).first.is_visible():
@@ -195,17 +195,17 @@ class ShopeeServicesExport(ExportComponent):
                             continue
                     page.wait_for_timeout(500)
 
-                    # 二次能力守卫：SIP 店铺或 404/无入口 -> 跳过（不视为失败）
+                    # 二次能力守卫:SIP 店铺或 404/无入口 -> 跳过(不视为失败)
                     try:
                         if self._is_404_or_not_found(page) or self._is_sip_shop(page):
                             if self.logger:
-                                self.logger.warning("[ShopeeServicesExport] 当前店铺不支持‘服务表现’（SIP/权限/404），已跳过")
+                                self.logger.warning("[ShopeeServicesExport] 当前店铺不支持‘服务表现’(SIP/权限/404),已跳过")
                             skipped.append(spec.key)
                             continue
                     except Exception:
                         pass
 
-                    # 时间范围：复用商品/流量表现的日期配方，按 granularity 自动选择
+                    # 时间范围:复用商品/流量表现的日期配方,按 granularity 自动选择
                     try:
                         from modules.components.date_picker.base import DateOption
                         from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
@@ -224,7 +224,7 @@ class ShopeeServicesExport(ExportComponent):
                             _dp = ShopeeDatePicker(self.ctx)
                             _res = _dp.run(page, opt)
                             page.wait_for_timeout(600)
-                            # 若基于配方的日期选择失败，则使用轻量通用逻辑兜底
+                            # 若基于配方的日期选择失败,则使用轻量通用逻辑兜底
                             try:
                                 ok = bool(getattr(_res, 'success', False))
                             except Exception:
@@ -239,7 +239,7 @@ class ShopeeServicesExport(ExportComponent):
                                     variants = ["过去30天", "过去 30 天", "最近30天", "Last 30 days", "30天"]
                                 if variants:
                                     if self.logger:
-                                        self.logger.info(f"[ShopeeServicesExport] 日期配方未命中，启用轻量兜底: {variants}")
+                                        self.logger.info(f"[ShopeeServicesExport] 日期配方未命中,启用轻量兜底: {variants}")
                                     self._pick_date_light(page, variants)
                                     page.wait_for_timeout(400)
                     except Exception:
@@ -247,13 +247,13 @@ class ShopeeServicesExport(ExportComponent):
 
                     # 点击导出
                     clicked = False
-                    skip_wait = False  # AI助手为点击即下载：成功后跳过后续等待
+                    skip_wait = False  # AI助手为点击即下载:成功后跳过后续等待
                     for btn in self.sel.export_buttons:
                         try:
                             loc = page.locator(btn)
                             cand = loc.first
                             if cand.count() > 0 and cand.is_visible():
-                                # 显式屏蔽“聊天记录/Transcript”类按钮（避免误点 track-transcript-button）
+                                # 显式屏蔽“聊天记录/Transcript”类按钮(避免误点 track-transcript-button)
                                 try:
                                     cls = (cand.get_attribute("class") or "")
                                     txt = (cand.inner_text() or "")
@@ -267,7 +267,7 @@ class ShopeeServicesExport(ExportComponent):
                                 if self.logger:
                                     self.logger.info(f"[ShopeeServicesExport] 点击导出按钮: {btn}")
                                 if spec.key == "ai_assistant":
-                                    # AI助手：点击即下载，围绕点击监听下载事件（30s 超时）+ 文件系统兜底
+                                    # AI助手:点击即下载,围绕点击监听下载事件(30s 超时)+ 文件系统兜底
                                     from datetime import datetime as _dt
                                     import time
 
@@ -289,7 +289,7 @@ class ShopeeServicesExport(ExportComponent):
                                     )
                                     out_root.mkdir(parents=True, exist_ok=True)
 
-                                    # 记录点击前的下载目录文件列表（用于文件系统兜底）
+                                    # 记录点击前的下载目录文件列表(用于文件系统兜底)
                                     try:
                                         downloads_dir = out_root
                                         pre_files = set(downloads_dir.glob("*")) if downloads_dir.exists() else set()
@@ -299,7 +299,7 @@ class ShopeeServicesExport(ExportComponent):
                                     download_success = False
                                     target = None
 
-                                    # 尝试 expect_download 监听（短超时）。若未立即开始下载，则进入统一轮询+重试机制。
+                                    # 尝试 expect_download 监听(短超时)。若未立即开始下载,则进入统一轮询+重试机制。
                                     try:
                                         with page.expect_download(timeout=5000) as dl_info:
                                             cand.click()
@@ -331,7 +331,7 @@ class ShopeeServicesExport(ExportComponent):
                                             except Exception:
                                                 pass
 
-                                        # 写入导出元数据清单（便于后续入库/追溯）
+                                        # 写入导出元数据清单(便于后续入库/追溯)
                                         try:
                                             self._write_manifest(target, spec.key, cfg, account_label, shop_name)
                                         except Exception:
@@ -342,10 +342,10 @@ class ShopeeServicesExport(ExportComponent):
                                         download_success = True
 
                                     except Exception as e:
-                                        # 未能在5s内直接触发下载：通常因平台1分钟限制或异步生成。改为进入统一轮询+重试。
+                                        # 未能在5s内直接触发下载:通常因平台1分钟限制或异步生成。改为进入统一轮询+重试。
                                         if self.logger:
-                                            self.logger.info(f"[ShopeeServicesExport] 未检测到立即下载，进入统一轮询+重试机制: {e}")
-                                        # 标记已点击，交由后续 wait-loop 处理“最新记录就绪”与“30s重试导出”
+                                            self.logger.info(f"[ShopeeServicesExport] 未检测到立即下载,进入统一轮询+重试机制: {e}")
+                                        # 标记已点击,交由后续 wait-loop 处理“最新记录就绪”与“30s重试导出”
                                         clicked = True
                                         skip_wait = False
                                         break
@@ -360,7 +360,7 @@ class ShopeeServicesExport(ExportComponent):
                                         clicked = True
                                         break
 
-                                    # 若走到此处，说明未成功；继续尝试其他选择器
+                                    # 若走到此处,说明未成功;继续尝试其他选择器
                                 else:
                                     cand.click()
                                     clicked = True
@@ -368,7 +368,7 @@ class ShopeeServicesExport(ExportComponent):
                         except Exception:
                             continue
                     if not clicked:
-                        # 补救：尝试在“更多/.../下拉菜单”中寻找导出项
+                        # 补救:尝试在“更多/.../下拉菜单”中寻找导出项
                         try:
                             menu_triggers = [
                                 '.ant-dropdown-trigger',
@@ -414,19 +414,19 @@ class ShopeeServicesExport(ExportComponent):
                         continue
 
                     if skip_wait:
-                        # AI助手已在点击时完成下载，跳过后续等待逻辑
+                        # AI助手已在点击时完成下载,跳过后续等待逻辑
                         continue
 
-                    # 导出后，若出现“生成报告/立即生成”等按钮，先点击以生成导出任务
+                    # 导出后,若出现“生成报告/立即生成”等按钮,先点击以生成导出任务
                     try:
                         self._maybe_generate_report(page)
                     except Exception:
                         pass
 
                     if self.logger:
-                        self.logger.info("[ShopeeServicesExport] 已触发导出，等待生成/下载入口出现...")
+                        self.logger.info("[ShopeeServicesExport] 已触发导出,等待生成/下载入口出现...")
 
-                    # 导出后轮询下载入口（按配置的回退间隔与重试次数），并每5秒输出心跳日志
+                    # 导出后轮询下载入口(按配置的回退间隔与重试次数),并每5秒输出心跳日志
                     downloaded = False
                     start_ts = datetime.now().timestamp()
                     from modules.core.config import get_config_value as _cfg
@@ -437,31 +437,31 @@ class ShopeeServicesExport(ExportComponent):
                     export_retries = 0
 
                     while not downloaded and datetime.now().timestamp() < deadline:
-                        # 每轮尝试前，先短暂等待
+                        # 每轮尝试前,先短暂等待
                         page.wait_for_timeout(1500)
-                        # 心跳日志（每5秒一次）
+                        # 心跳日志(每5秒一次)
                         try:
                             elapsed = int(datetime.now().timestamp() - start_ts)
                             if elapsed >= next_beat:
                                 remain = int(max(0, deadline - datetime.now().timestamp()))
                                 if self.logger:
-                                    self.logger.info(f"[ShopeeServicesExport] 仍在等待下载入口... ({elapsed}/30s，剩余{remain}s)")
+                                    self.logger.info(f"[ShopeeServicesExport] 仍在等待下载入口... ({elapsed}/30s,剩余{remain}s)")
                                 next_beat += 5
                         except Exception:
                             pass
-                        # 若有弹窗弹出，尝试关闭
+                        # 若有弹窗弹出,尝试关闭
                         try:
                             self._close_notification_modal(page)
                         except Exception:
                             pass
 
-                            # 达到回退间隔仍未就绪 -> 重试点击“导出数据”，并续期等待窗口
+                            # 达到回退间隔仍未就绪 -> 重试点击“导出数据”,并续期等待窗口
                             try:
                                 elapsed_retry = int(datetime.now().timestamp() - start_ts)
-                                # 满足下一次重试触发条件（间隔 backoff_sec），且未超过最大重试次数
+                                # 满足下一次重试触发条件(间隔 backoff_sec),且未超过最大重试次数
                                 if (export_retries < max_retries) and (elapsed_retry >= (export_retries + 1) * backoff_sec):
                                     if self.logger:
-                                        self.logger.info(f"[ShopeeServicesExport] 第{export_retries + 1}次重试点击导出（间隔{backoff_sec}s）")
+                                        self.logger.info(f"[ShopeeServicesExport] 第{export_retries + 1}次重试点击导出(间隔{backoff_sec}s)")
                                     for btn in self.sel.export_buttons:
                                         try:
                                             loc = page.locator(btn).first
@@ -485,7 +485,7 @@ class ShopeeServicesExport(ExportComponent):
                             except Exception:
                                 pass
 
-                        # 等待最新导出记录变为可下载状态（短轮询，命中即优先点击最新一条）
+                        # 等待最新导出记录变为可下载状态(短轮询,命中即优先点击最新一条)
                         from modules.core.config import get_config_value
                         wait_timeout = max(5, int(get_config_value('data_collection', 'download.wait_timeout', 30)))
                         preferred_loc = self._wait_for_latest_export_ready(page, spec.key, timeout=wait_timeout)
@@ -493,7 +493,7 @@ class ShopeeServicesExport(ExportComponent):
                         if preferred_loc:
                             if self.logger:
                                 self.logger.info(f"[ShopeeServicesExport] 最新导出记录就绪 -> 优先点击下载")
-                            # 统一输出目录（预先计算，支持 UI 监听与文件系统兜底）
+                            # 统一输出目录(预先计算,支持 UI 监听与文件系统兜底)
                             cfg = self.ctx.config or {}
                             gran = cfg.get("granularity") or "manual"
                             start_date = cfg.get("start_date")
@@ -511,7 +511,7 @@ class ShopeeServicesExport(ExportComponent):
                             )
                             out_root.mkdir(parents=True, exist_ok=True)
 
-                            # 点击前快照现有文件（用于兜底识别）
+                            # 点击前快照现有文件(用于兜底识别)
                             try:
                                 pre_files = set(out_root.glob("*"))
                             except Exception:
@@ -548,7 +548,7 @@ class ShopeeServicesExport(ExportComponent):
                                     except Exception:
                                         pass
 
-                                # 写入导出元数据清单（便于后续入库/追溯）
+                                # 写入导出元数据清单(便于后续入库/追溯)
                                 try:
                                     self._write_manifest(target, spec.key, cfg, account_label, shop_name)
                                 except Exception:
@@ -560,9 +560,9 @@ class ShopeeServicesExport(ExportComponent):
                                 downloaded = True
                                 break
                             except Exception as e:
-                                # UI 监听未命中 -> 文件系统兜底（Agent页）
+                                # UI 监听未命中 -> 文件系统兜底(Agent页)
                                 if self.logger:
-                                    self.logger.info(f"[ShopeeServicesExport] UI下载监听超时，启用文件系统兜底(agent): {e}")
+                                    self.logger.info(f"[ShopeeServicesExport] UI下载监听超时,启用文件系统兜底(agent): {e}")
                                 for _ in range(15):
                                     try:
                                         cur = set(out_root.glob("*"))
@@ -591,7 +591,7 @@ class ShopeeServicesExport(ExportComponent):
                                                         newest.unlink(missing_ok=True)
                                                     except Exception:
                                                         pass
-                                                # 写入导出元数据清单（便于后续入库/追溯）
+                                                # 写入导出元数据清单(便于后续入库/追溯)
                                                 try:
                                                     self._write_manifest(target, spec.key, cfg, account_label, shop_name)
                                                 except Exception:
@@ -613,7 +613,7 @@ class ShopeeServicesExport(ExportComponent):
                                 if loc.count() > 0 and loc.first.is_visible():
                                     if self.logger:
                                         self.logger.info(f"[ShopeeServicesExport] 点击下载按钮: {btn}")
-                                    # 统一输出目录（预先计算，支持 UI 监听与文件系统兜底）
+                                    # 统一输出目录(预先计算,支持 UI 监听与文件系统兜底)
                                     cfg = self.ctx.config or {}
                                     gran = cfg.get("granularity") or "manual"
                                     start_date = cfg.get("start_date")
@@ -632,7 +632,7 @@ class ShopeeServicesExport(ExportComponent):
                                     )
                                     out_root.mkdir(parents=True, exist_ok=True)
 
-                                    # 点击前快照现有文件（用于兜底识别）
+                                    # 点击前快照现有文件(用于兜底识别)
                                     try:
                                         pre_files = set(out_root.glob("*"))
                                     except Exception:
@@ -669,7 +669,7 @@ class ShopeeServicesExport(ExportComponent):
                                             except Exception:
                                                 pass
 
-                                        # 写入导出元数据清单（便于后续入库/追溯）
+                                        # 写入导出元数据清单(便于后续入库/追溯)
                                         try:
                                             self._write_manifest(target, spec.key, cfg, account_label, shop_name)
                                         except Exception:
@@ -681,9 +681,9 @@ class ShopeeServicesExport(ExportComponent):
                                         downloaded = True
                                         break
                                     except Exception as e:
-                                        # UI 监听未命中 -> 文件系统兜底（Agent页）
+                                        # UI 监听未命中 -> 文件系统兜底(Agent页)
                                         if self.logger:
-                                            self.logger.info(f"[ShopeeServicesExport] UI下载监听超时，启用文件系统兜底(agent): {e}")
+                                            self.logger.info(f"[ShopeeServicesExport] UI下载监听超时,启用文件系统兜底(agent): {e}")
                                         for _ in range(15):
                                             try:
                                                 cur = set(out_root.glob("*"))
@@ -712,7 +712,7 @@ class ShopeeServicesExport(ExportComponent):
                                                                 newest.unlink(missing_ok=True)
                                                             except Exception:
                                                                 pass
-                                                        # 写入导出元数据清单（便于后续入库/追溯）
+                                                        # 写入导出元数据清单(便于后续入库/追溯)
                                                         try:
                                                             self._write_manifest(target, spec.key, cfg, account_label, shop_name)
                                                         except Exception:
@@ -745,9 +745,9 @@ class ShopeeServicesExport(ExportComponent):
             if successes and not failures:
                 return ExportResult(True, "全部成功(UI)", None, str(successes[-1]))
             if successes and failures:
-                return ExportResult(True, f"部分成功，失败: {','.join(failures)}", None, str(successes[-1]))
+                return ExportResult(True, f"部分成功,失败: {','.join(failures)}", None, str(successes[-1]))
             if (not successes) and (not failures) and skipped:
-                # 典型场景：SIP 店铺不提供服务表现 -> 全部跳过
+                # 典型场景:SIP 店铺不提供服务表现 -> 全部跳过
                 return ExportResult(True, f"不适用(已跳过): {','.join(skipped)}")
             return ExportResult(False, "services 全部导出失败")
         except Exception as e:
@@ -778,7 +778,7 @@ class ShopeeServicesExport(ExportComponent):
         account_label: str,
         shop_name: str,
     ) -> None:
-        """在导出文件旁生成元数据清单（.json），便于后续入库与追踪。"""
+        """在导出文件旁生成元数据清单(.json),便于后续入库与追踪。"""
         try:
             meta = {
                 "platform": self.ctx.platform,
@@ -801,7 +801,7 @@ class ShopeeServicesExport(ExportComponent):
             pass
 
     def _wait_for_latest_export_ready(self, page, subtype: str, timeout: Optional[int] = None) -> bool:
-        """等待最新导出记录变为可下载状态，避免点击到旧记录"""
+        """等待最新导出记录变为可下载状态,避免点击到旧记录"""
         try:
             # 从配置文件获取参数
             from modules.core.config import get_config_value
@@ -811,12 +811,12 @@ class ShopeeServicesExport(ExportComponent):
             heartbeat_sec = int(get_config_value('data_collection', 'download.heartbeat_interval', 3))
 
             if self.logger:
-                self.logger.info(f"[ShopeeServicesExport] 等待最新导出记录就绪（超时:{timeout}s）...")
+                self.logger.info(f"[ShopeeServicesExport] 等待最新导出记录就绪(超时:{timeout}s)...")
 
             start_time = datetime.now()
             deadline = start_time.timestamp() + timeout
 
-            # 快速路径基础：记录当前页面“下载”按钮数量，用于检测新增记录出现
+            # 快速路径基础:记录当前页面“下载”按钮数量,用于检测新增记录出现
             download_buttons_all = page.locator('button:has-text("下载"), a:has-text("下载"), button:has-text("Download")')
             try:
                 base_count = download_buttons_all.count()
@@ -826,15 +826,15 @@ class ShopeeServicesExport(ExportComponent):
 
             while datetime.now().timestamp() < deadline:
                 try:
-                    # 查找导出记录列表/表格（针对Shopee界面优化）
+                    # 查找导出记录列表/表格(针对Shopee界面优化)
                     export_list_selectors = [
-                        # 优先尝试最新一行（first-child），以命中“最新报告”面板的顶部记录
+                        # 优先尝试最新一行(first-child),以命中“最新报告”面板的顶部记录
                         '.latest-report .report-item:first-child',
                         '.report-list .report-item:first-child',
                         '.download-list .download-item:first-child',
                         'table tbody tr:first-child',
                         'tbody tr:first-child',
-                        # 其次再尝试包含下载按钮的容器（用于反向定位）
+                        # 其次再尝试包含下载按钮的容器(用于反向定位)
                         'table tbody tr:has(button:has-text("下载"))',
                         'tbody tr:has(button:has-text("下载"))',
                         '[class*="report"]:has(button:has-text("下载"))',
@@ -859,14 +859,14 @@ class ShopeeServicesExport(ExportComponent):
                                 self.logger.debug(f"[ShopeeServicesExport] 选择器失败 {selector}: {e}")
                             continue
 
-                    # 如果没有找到，尝试更通用的方法
+                    # 如果没有找到,尝试更通用的方法
                     if not latest_row:
                         try:
                             # 查找包含"下载"按钮的任何元素
                             download_buttons = page.locator('button:has-text("下载"), a:has-text("下载")')
                             if download_buttons.count() > 0:
                                 first_btn = download_buttons.first
-                                # 尝试找到包含此按钮的行或容器（不做全局立即点击，避免点到历史记录）
+                                # 尝试找到包含此按钮的行或容器(不做全局立即点击,避免点到历史记录)
                                 possible_containers = ['tr', 'div[class*="item"]', 'div[class*="row"]', 'li']
                                 for container in possible_containers:
                                     try:
@@ -881,7 +881,7 @@ class ShopeeServicesExport(ExportComponent):
                         except Exception:
                             pass
 
-                    # 快速路径：监控“下载”按钮数量增加 -> 新记录出现即返回顶部下载按钮
+                    # 快速路径:监控“下载”按钮数量增加 -> 新记录出现即返回顶部下载按钮
                     try:
                         cur_count = download_buttons_all.count()
                     except Exception:
@@ -892,14 +892,14 @@ class ShopeeServicesExport(ExportComponent):
                             btn_top = page.locator('table tbody tr:first-child button:has-text("下载"), tbody tr:first-child button:has-text("下载"), .latest-report .report-item:first-child :is(button,a):has-text("下载")')
                             if btn_top.count() > 0 and btn_top.first.is_visible() and btn_top.first.is_enabled():
                                 if self.logger:
-                                    self.logger.info("[ShopeeServicesExport] 发现新增下载记录，优先点击最新一条")
+                                    self.logger.info("[ShopeeServicesExport] 发现新增下载记录,优先点击最新一条")
                                 return btn_top.first
                         except Exception:
                             pass
                         if download_buttons_all.count() > 0:
                             return download_buttons_all.first
 
-                    # 心跳探测：每 3s 再尝试一次顶部“下载”
+                    # 心跳探测:每 3s 再尝试一次顶部“下载”
                     now_ts = datetime.now().timestamp()
                     if now_ts - last_probe >= heartbeat_sec:
                         last_probe = now_ts
@@ -912,24 +912,24 @@ class ShopeeServicesExport(ExportComponent):
 
 
                     if latest_row:
-                        # 检查状态文本（从配置文件获取状态指示词）
+                        # 检查状态文本(从配置文件获取状态指示词)
                         row_text = latest_row.text_content() or ""
                         status_indicators = get_config_value('data_collection', 'export_detection.processing_indicators', [
                             "执行中", "生成中", "队列中", "处理中", "导出中", "进行中",
                             "processing", "generating", "queued", "exporting", "in progress"
                         ])
 
-                        # 如果包含执行状态，继续等待
+                        # 如果包含执行状态,继续等待
                         if any(indicator.lower() in row_text.lower() for indicator in status_indicators):
                             if self.logger:
                                 self.logger.info(f"[ShopeeServicesExport] 最新导出记录仍在处理中: {row_text[:50]}...")
-                            # 更快轮询：不超过400ms，且不少于200ms（更灵敏）
+                            # 更快轮询:不超过400ms,且不少于200ms(更灵敏)
                             page.wait_for_timeout(int(min(400, max(200, retry_interval * 1000))))
                             continue
 
                         # 检查是否有可点击的下载按钮
                         download_btn = latest_row.locator('button:has-text("下载"), a:has-text("下载"), button:has-text("Download")')
-                        # 先短等待按钮出现，避免错过就绪瞬间
+                        # 先短等待按钮出现,避免错过就绪瞬间
                         try:
                             from datetime import datetime as _now
                             remaining_ms = max(100, int((deadline - _now.now().timestamp()) * 1000))
@@ -937,12 +937,12 @@ class ShopeeServicesExport(ExportComponent):
                         except Exception:
                             pass
                         if download_btn.count() > 0:
-                            # 进一步检查按钮是否可用（非禁用状态）
+                            # 进一步检查按钮是否可用(非禁用状态)
                             try:
                                 first_btn = download_btn.first
                                 if first_btn.is_enabled() and first_btn.is_visible():
                                     if self.logger:
-                                        self.logger.info(f"[ShopeeServicesExport] 最新导出记录已就绪，可以下载")
+                                        self.logger.info(f"[ShopeeServicesExport] 最新导出记录已就绪,可以下载")
                                     return first_btn
                             except Exception:
                                 pass
@@ -1017,7 +1017,7 @@ class ShopeeServicesExport(ExportComponent):
             export_url = f"{base}{mapping[key]}"
             needle = mapping[key].rstrip("/")  # 用于HAR匹配
 
-            # 2) 参数来源：HAR -> ctx.config -> 兜底
+            # 2) 参数来源:HAR -> ctx.config -> 兜底
             params = {}
             har_method = "GET"
             har_path = self._latest_har_path()
@@ -1044,7 +1044,7 @@ class ShopeeServicesExport(ExportComponent):
             if not params.get("end_ts") and cfg.get("end_date"):
                 params["end_ts"] = _to_ts(cfg.get("end_date"))
 
-            # 同义键补齐（start_ts/start_time, end_ts/end_time）
+            # 同义键补齐(start_ts/start_time, end_ts/end_time)
             if params.get("start_ts") is not None and not params.get("start_time"):
                 params["start_time"] = params["start_ts"]
             if params.get("end_ts") is not None and not params.get("end_time"):
@@ -1054,7 +1054,7 @@ class ShopeeServicesExport(ExportComponent):
             if params.get("end_time") is not None and not params.get("end_ts"):
                 params["end_ts"] = params["end_time"]
 
-            # period 默认：按选择范围推断
+            # period 默认:按选择范围推断
             if not params.get("period"):
                 gran_sel = (cfg.get("granularity") or "").lower()
                 if gran_sel == "day":
@@ -1104,7 +1104,7 @@ class ShopeeServicesExport(ExportComponent):
                 const res = await fetch(finalUrl, init);
                 const ct = res.headers.get('content-type') || '';
                 if (ct.includes('application/json')) {
-                  // 尝试直接下载字段（若存在）
+                  // 尝试直接下载字段(若存在)
                   try {
                     const j = await res.json();
                     const link = j?.data?.download_link || j?.download_link || j?.url;
@@ -1155,7 +1155,7 @@ class ShopeeServicesExport(ExportComponent):
                 except Exception:
                     pass
 
-            # 写入导出元数据清单（便于后续入库/追溯）
+            # 写入导出元数据清单(便于后续入库/追溯)
             try:
                 self._write_manifest(target, key, cfg, account_label, shop_name)
             except Exception:
@@ -1169,8 +1169,8 @@ class ShopeeServicesExport(ExportComponent):
                 self.logger.warning(f"[ShopeeServicesExport] API fallback 失败 variant={spec.key}: {e}")
             return False, None
     def _fallback_navigate_with_alt_params(self, page, spec: _VariantSpec) -> None:
-        """在出现 404 时，尝试替换不同的 shop_id 参数名重新导航。
-        优先顺序：cnsc_shop_id -> shop_id -> 无参数。
+        """在出现 404 时,尝试替换不同的 shop_id 参数名重新导航。
+        优先顺序:cnsc_shop_id -> shop_id -> 无参数。
         """
         try:
             base = self.sel.base_url.rstrip("/")
@@ -1191,7 +1191,7 @@ class ShopeeServicesExport(ExportComponent):
                 try:
                     if '/404' not in (page.url or '') and not (resp and getattr(resp, 'status', lambda:0)() == 404):
                         if self.logger:
-                            self.logger.info(f"[ShopeeServicesExport] 已切换至备用URL，404消失: {page.url}")
+                            self.logger.info(f"[ShopeeServicesExport] 已切换至备用URL,404消失: {page.url}")
                         break
                 except Exception:
                     continue
@@ -1199,7 +1199,7 @@ class ShopeeServicesExport(ExportComponent):
             pass
 
     def _pick_date_light(self, page, target_texts: list[str]) -> bool:
-        """轻量日期选择：通用开关/快捷项匹配，避免依赖产品页配方。
+        """轻量日期选择:通用开关/快捷项匹配,避免依赖产品页配方。
         返回 True/False 表示是否成功选择。
         """
         try:
@@ -1304,7 +1304,7 @@ class ShopeeServicesExport(ExportComponent):
             return False, None
 
     def _close_notification_modal(self, page) -> None:
-        """尝试关闭常见的通知/公告弹窗，避免遮挡按钮。"""
+        """尝试关闭常见的通知/公告弹窗,避免遮挡按钮。"""
         try:
             page.wait_for_timeout(300)
             close_selectors = [

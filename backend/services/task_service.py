@@ -30,11 +30,11 @@ class TaskService:
     """
     任务服务
     
-    功能：
+    功能:
     1. 乐观锁状态更新
     2. 任务队列管理
     3. 任务状态转换
-    4. 账号能力过滤（v4.7.0 Phase 2.5.1）
+    4. 账号能力过滤(v4.7.0 Phase 2.5.1)
     """
     
     # 最大并发任务数
@@ -67,7 +67,7 @@ class TaskService:
         requested_domains: List[str]
     ) -> tuple[List[str], List[str]]:
         """
-        根据账号能力过滤数据域（Phase 2.5.1）
+        根据账号能力过滤数据域(Phase 2.5.1)
         
         Args:
             account_info: 账号信息字典
@@ -91,7 +91,7 @@ class TaskService:
         # 获取账号能力配置
         capabilities = account_info.get('capabilities')
         
-        # 如果没有配置capabilities或为空，默认所有域都支持
+        # 如果没有配置capabilities或为空,默认所有域都支持
         if not capabilities:
             logger.warning(f"Account {account_id} missing capabilities, assuming all supported")
             return requested_domains, []
@@ -100,7 +100,7 @@ class TaskService:
         unsupported_domains = []
         
         for domain in requested_domains:
-            # 检查该域是否被支持（默认为True）
+            # 检查该域是否被支持(默认为True)
             is_supported = capabilities.get(domain, True)
             
             if is_supported:
@@ -140,7 +140,7 @@ class TaskService:
         Args:
             task_id: 任务数据库ID
             new_status: 新状态
-            expected_version: 期望的版本号（乐观锁）
+            expected_version: 期望的版本号(乐观锁)
             expected_status: 期望的当前状态
             progress: 进度百分比
             current_step: 当前步骤
@@ -234,7 +234,7 @@ class TaskService:
         
         Args:
             task_id: 任务数据库ID
-            level: 日志级别（info/warning/error）
+            level: 日志级别(info/warning/error)
             message: 日志消息
             details: 额外详情
             
@@ -266,7 +266,7 @@ class TaskService:
     
     def get_queued_tasks(self, limit: int = 10) -> List[CollectionTask]:
         """
-        获取排队中的任务（按创建时间排序）
+        获取排队中的任务(按创建时间排序)
         
         Args:
             limit: 最大返回数量
@@ -280,7 +280,7 @@ class TaskService:
     
     def can_start_new_task(self) -> bool:
         """
-        检查是否可以启动新任务（基于并发限制）
+        检查是否可以启动新任务(基于并发限制)
         
         Returns:
             bool: 是否可以启动
@@ -295,7 +295,7 @@ class TaskService:
         使用乐观锁确保只有一个任务被启动
         
         Returns:
-            Optional[CollectionTask]: 启动的任务，如果没有则返回None
+            Optional[CollectionTask]: 启动的任务,如果没有则返回None
         """
         if not self.can_start_new_task():
             logger.debug("Cannot start new task: max concurrent tasks reached")
@@ -323,7 +323,7 @@ class TaskService:
                 return task
             
             except OptimisticLockError:
-                # 其他进程已经启动了这个任务，尝试下一个
+                # 其他进程已经启动了这个任务,尝试下一个
                 logger.debug(f"Task {task.task_id} already claimed, trying next")
                 continue
             
@@ -335,7 +335,7 @@ class TaskService:
     
     def mark_interrupted_tasks(self) -> int:
         """
-        标记中断的任务（服务重启时调用）
+        标记中断的任务(服务重启时调用)
         
         将所有running状态的任务标记为interrupted
         
@@ -413,7 +413,7 @@ class TaskService:
         data_domains: List[str]
     ) -> tuple[List[str], List[str]]:
         """
-        根据账号能力过滤数据域（v4.7.0新增）
+        根据账号能力过滤数据域(v4.7.0新增)
         
         Args:
             account_info: 账号信息字典
@@ -424,7 +424,7 @@ class TaskService:
         """
         capabilities = account_info.get('capabilities', {})
         
-        # 如果没有capabilities字段，默认全部支持
+        # 如果没有capabilities字段,默认全部支持
         if not capabilities:
             logger.warning(f"Account {account_info.get('account_id')} missing capabilities, assuming all supported")
             return data_domains, []
@@ -433,7 +433,7 @@ class TaskService:
         unsupported = []
         
         for domain in data_domains:
-            if capabilities.get(domain, True):  # 默认True，向后兼容
+            if capabilities.get(domain, True):  # 默认True,向后兼容
                 supported.append(domain)
             else:
                 unsupported.append(domain)
@@ -455,7 +455,7 @@ class TaskQueueService:
         
         Args:
             db: 数据库会话
-            on_task_ready: 任务就绪回调（用于触发执行）
+            on_task_ready: 任务就绪回调(用于触发执行)
         """
         self.task_service = TaskService(db)
         self.on_task_ready = on_task_ready
@@ -464,7 +464,7 @@ class TaskQueueService:
         """
         将任务加入队列
         
-        根据并发限制决定任务状态（queued或running）
+        根据并发限制决定任务状态(queued或running)
         
         Args:
             task: 任务对象

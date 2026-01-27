@@ -5,17 +5,17 @@ Recording Registry
 目的
 - 为各平台/账号的录制脚本提供标准化索引与检索
 - 规范“自动登录 + 自动采集(订单/商品/分析/财务)”的文件命名与目录结构
-- 在不改动历史录制文件的前提下，通过扫描与索引做到向后兼容
+- 在不改动历史录制文件的前提下,通过扫描与索引做到向后兼容
 
 核心能力
 - 约定数据类型 RecordingType: orders, products, analytics, finance
 - 从 temp/recordings/<platform>/ 扫描历史脚本并建立索引
-- 始终返回“该账号的最新可用脚本”（可配“金标/稳定版”）
+- 始终返回“该账号的最新可用脚本”(可配“金标/稳定版”)
 - 将索引持久化到 data/recordings/registry.json
 
 注意
-- 不删除任何历史文件；索引仅做映射
-- 索引更新为幂等操作，可随时 reindex()
+- 不删除任何历史文件;索引仅做映射
+- 索引更新为幂等操作,可随时 reindex()
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ def _load_registry() -> Dict:
         if REGISTRY_FILE.exists():
             return json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))
     except Exception as e:
-        logger.warning(f"加载录制索引失败，将重建: {e}")
+        logger.warning(f"加载录制索引失败,将重建: {e}")
     return {"platforms": {}}
 
 
@@ -113,7 +113,7 @@ COLLECT_PATTERNS = [
     re.compile(
         r"(?P<account>.+?)_complete_(?P<dtype>orders|products|analytics|finance|services)_(?P<ts>\d{8}_\d{6})\.py$"
     ),
-    # e.g. shopee_TestStore_products_complete_20250830_120000.py （新命名规范：{平台}_{账号}_{数据类型}_complete_{时间戳}.py）
+    # e.g. shopee_TestStore_products_complete_20250830_120000.py (新命名规范:{平台}_{账号}_{数据类型}_complete_{时间戳}.py)
     re.compile(
         r"(?P<platform>[a-zA-Z]+)_(?P<account>.+?)_(?P<dtype>orders|products|analytics|finance|services)_complete_(?P<ts>\d{8}_\d{6})\.py$"
     ),
@@ -121,7 +121,7 @@ COLLECT_PATTERNS = [
 
 
 def reindex(platform: str) -> Dict:
-    """从磁盘扫描 platform 录制脚本，更新索引并保存。
+    """从磁盘扫描 platform 录制脚本,更新索引并保存。
 
     返回该平台的索引节点(字典)。
     """
@@ -131,7 +131,7 @@ def reindex(platform: str) -> Dict:
 
     root = _platform_dir(platform)
     if not root.exists():
-        logger.info(f"录制目录不存在，创建: {root}")
+        logger.info(f"录制目录不存在,创建: {root}")
         root.mkdir(parents=True, exist_ok=True)
         _save_registry(registry)
         return pnode
@@ -222,7 +222,7 @@ def get_latest_collection(platform: str, account: str,
 
 def get_stable_collection(platform: str, account: str,
                            dtype: RecordingType) -> Optional[str]:
-    """仅返回稳定版脚本路径（无则返回None）"""
+    """仅返回稳定版脚本路径(无则返回None)"""
     registry = _load_registry()
     pnode = registry.get("platforms", {}).get(platform.lower(), {})
     anode = pnode.get("accounts", {}).get(account)
@@ -278,7 +278,7 @@ def plan_flow(platform: str, account: str,
 
 
 def ensure_index(platform: str) -> None:
-    """对平台录制目录进行索引更新（幂等）。"""
+    """对平台录制目录进行索引更新(幂等)。"""
     reindex(platform)
 
 

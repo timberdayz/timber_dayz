@@ -4,18 +4,18 @@
 """
 Shopee卖家端自动登录模块
 
-专家级全自动登录系统，能够：
+专家级全自动登录系统,能够:
 1. 自动打开对应账号登录网页
 2. 自动填写用户名和密码
 3. 自动处理验证码弹窗
 4. 自动进入卖家端后台
 5. 实现完整的登录流程自动化
 
-技术特性：
+技术特性:
 - 使用Playwright实现反检测
 - 智能等待和重试机制
 - 完善的错误处理和日志
-- 模块化设计，易于维护
+- 模块化设计,易于维护
 """
 
 import time
@@ -62,7 +62,7 @@ class ShopeeSellerAutoLogin:
         
         Args:
             headless: 是否无头模式
-            slow_mo: 操作间隔时间（毫秒）
+            slow_mo: 操作间隔时间(毫秒)
         """
         self.headless = headless
         self.slow_mo = slow_mo
@@ -182,13 +182,13 @@ class ShopeeSellerAutoLogin:
                     error_message="打开登录页面失败"
                 )
 
-            # 步骤3: 优先调用统一登录服务（成功则直接返回）
+            # 步骤3: 优先调用统一登录服务(成功则直接返回)
             try:
                 svc = LoginService()
                 if svc.ensure_logged_in("shopee", page, account_info):
                     final_url = page.url
                     login_time = time.time() - start_time
-                    logger.success(f"[DONE] 账号 {account_id} 登录成功！（LoginService）")
+                    logger.success(f"[DONE] 账号 {account_id} 登录成功！(LoginService)")
                     logger.info(f"[DATA] 登录耗时: {login_time:.2f} 秒")
                     logger.info(f"[LINK] 最终URL: {final_url}")
                     return LoginResult(
@@ -199,9 +199,9 @@ class ShopeeSellerAutoLogin:
                         login_time=login_time,
                     )
                 else:
-                    logger.warning("[WARN] LoginService 未完成登录，回退到 legacy 自动登录")
+                    logger.warning("[WARN] LoginService 未完成登录,回退到 legacy 自动登录")
             except Exception as e:
-                logger.warning(f"[WARN] LoginService 调用失败，回退到 legacy 自动登录: {e}")
+                logger.warning(f"[WARN] LoginService 调用失败,回退到 legacy 自动登录: {e}")
 
             # 步骤3(b): 执行 legacy 自动登录
             login_success = self._perform_auto_login(page, account_info)
@@ -264,7 +264,7 @@ class ShopeeSellerAutoLogin:
                 result = self.login_single_account(account)
                 results.append(result)
                 
-                # 短暂休息，避免请求过快
+                # 短暂休息,避免请求过快
                 if i < len(accounts):
                     logger.info("[WAIT] 账号间隔休息...")
                     time.sleep(3.0)
@@ -487,7 +487,7 @@ class ShopeeSellerAutoLogin:
             
             # 检查是否需要验证码
             if self._detect_verification_needed(page):
-                logger.info("[PHONE] 检测到验证码需求，等待手动处理...")
+                logger.info("[PHONE] 检测到验证码需求,等待手动处理...")
                 return self._handle_verification_manually(page)
             
             # 验证登录成功
@@ -601,7 +601,7 @@ class ShopeeSellerAutoLogin:
         # 显示用户指引
         self._show_verification_guidance()
         
-        # 等待用户处理（最多5分钟）
+        # 等待用户处理(最多5分钟)
         start_time = time.time()
         timeout = 300  # 5分钟
         
@@ -628,11 +628,11 @@ class ShopeeSellerAutoLogin:
         print("="*60)
         print("\n[TARGET] 请按照以下步骤处理验证码:")
         print("   1. 查看弹出的验证码窗口")
-        print("   2. 根据提示获取验证码（邮箱/短信）")
+        print("   2. 根据提示获取验证码(邮箱/短信)")
         print("   3. 在输入框中输入验证码")
         print("   4. 点击确认按钮")
         print("\n[TIME] 系统将自动检测处理结果")
-        print("[TIP] 如有问题，请查看浏览器窗口进行手动操作")
+        print("[TIP] 如有问题,请查看浏览器窗口进行手动操作")
         print("\n" + "="*60)
     
     def _verify_login_success(self, page: Page) -> bool:
@@ -646,7 +646,7 @@ class ShopeeSellerAutoLogin:
             # 检查URL变化
             current_url = page.url
             if any(keyword not in current_url.lower() for keyword in ['signin', 'login']):
-                logger.success("[OK] URL验证：已离开登录页面")
+                logger.success("[OK] URL验证:已离开登录页面")
                 return True
             
             # 检查页面内容
@@ -666,7 +666,7 @@ class ShopeeSellerAutoLogin:
                 try:
                     element = page.query_selector(f'*:has-text("{indicator}")')
                     if element and element.is_visible():
-                        logger.success(f"[OK] 内容验证：找到成功标识 {indicator}")
+                        logger.success(f"[OK] 内容验证:找到成功标识 {indicator}")
                         return True
                 except:
                     continue
@@ -674,7 +674,7 @@ class ShopeeSellerAutoLogin:
             # 检查页面标题
             title = page.title().lower()
             if any(keyword in title for keyword in ['seller', 'dashboard', '卖家', '后台']):
-                logger.success(f"[OK] 标题验证：{title}")
+                logger.success(f"[OK] 标题验证:{title}")
                 return True
             
             logger.warning("[WARN] 登录成功状态验证不确定")
@@ -716,7 +716,7 @@ class ShopeeSellerAutoLogin:
 # 便捷函数
 def auto_login_shopee_accounts(accounts: List[Dict[str, Any]], headless: bool = False) -> List[LoginResult]:
     """
-    便捷函数：自动登录Shopee账号
+    便捷函数:自动登录Shopee账号
     
     Args:
         accounts: 账号信息列表
@@ -731,7 +731,7 @@ def auto_login_shopee_accounts(accounts: List[Dict[str, Any]], headless: bool = 
 
 def auto_login_single_shopee_account(account_info: Dict[str, Any], headless: bool = False) -> LoginResult:
     """
-    便捷函数：自动登录单个Shopee账号
+    便捷函数:自动登录单个Shopee账号
     
     Args:
         account_info: 账号信息

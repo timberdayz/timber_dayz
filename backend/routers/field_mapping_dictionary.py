@@ -30,20 +30,20 @@ async def get_field_dictionary(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    获取字段映射辞典（中文友好）
+    获取字段映射辞典(中文友好)
     
-    缓存策略：1小时（v4.6.3新增）
+    缓存策略:1小时(v4.6.3新增)
     
-    支持：
-    - 全量加载（不传data_domain时返回所有字段）
-    - 按数据域过滤（可选，传data_domain参数）
+    支持:
+    - 全量加载(不传data_domain时返回所有字段)
+    - 按数据域过滤(可选,传data_domain参数)
     - 中文/拼音/缩写搜索
     - 必填字段置顶
     - 字段分组
     
     Query Parameters:
-        data_domain: 数据域过滤（可选，orders/products/traffic/services），不传则返回全量
-        search: 搜索关键词（支持中文/拼音/缩写，如：金额/je/gmv）
+        data_domain: 数据域过滤(可选,orders/products/traffic/services),不传则返回全量
+        search: 搜索关键词(支持中文/拼音/缩写,如:金额/je/gmv)
     
     Returns:
         {
@@ -80,14 +80,14 @@ async def get_field_dictionary(
         groups = {}
         required_fields = []
         
-        # [*] 新增：过滤掉日期范围字段（避免时间索引混乱）
+        # [*] 新增:过滤掉日期范围字段(避免时间索引混乱)
         def is_date_range_field(field_code: str, cn_name: str) -> bool:
             """判断是否为日期范围字段"""
             import re
             field_str = str(field_code).strip()
             cn_str = str(cn_name).strip()
             
-            # 匹配日期范围格式：YYYY_MM_DD_YYYY_MM_DD
+            # 匹配日期范围格式:YYYY_MM_DD_YYYY_MM_DD
             if re.search(r'\d{4}[-_]\d{1,2}[-_]\d{1,2}[-_~]\d{4}[-_]\d{1,2}[-_]\d{1,2}', field_str):
                 return True
             
@@ -124,7 +124,7 @@ async def get_field_dictionary(
             if field.get("is_required"):
                 required_fields.append(field)
         
-        # [*] 修复：使用标准API响应格式
+        # [*] 修复:使用标准API响应格式
         return success_response(
             data={
                 "fields": filtered_fields,  # 返回过滤后的字段
@@ -141,7 +141,7 @@ async def get_field_dictionary(
             message="获取字段辞典失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -155,7 +155,7 @@ async def get_field_detail(
     获取单个字段详情
     
     Args:
-        field_code: 字段代码（如：order_id, total_amount）
+        field_code: 字段代码(如:order_id, total_amount)
     
     Returns:
         {
@@ -177,7 +177,7 @@ async def get_field_detail(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="字段不存在",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请检查字段代码是否正确，或确认该字段已创建",
+                recovery_suggestion="请检查字段代码是否正确,或确认该字段已创建",
                 status_code=404
             )
         
@@ -194,7 +194,7 @@ async def get_field_detail(
             message="获取字段详情失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -205,14 +205,14 @@ async def suggest_field_mappings(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    智能建议字段映射（v4.3.7阶段B - 完整实现）
+    智能建议字段映射(v4.3.7阶段B - 完整实现)
     
     Request Body:
         {
             "columns": ["订单号", "下单时间", "金额", ...],
             "data_domain": "orders",
             "platform": "shopee",
-            "sample_data": [...]  # 可选：样例数据用于值模式检测
+            "sample_data": [...]  # 可选:样例数据用于值模式检测
         }
     
     Returns:
@@ -262,17 +262,17 @@ async def suggest_field_mappings(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message=f"未找到{data_domain}域的字段辞典",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请检查数据域名称是否正确，或确认该数据域的字段辞典已创建",
+                recovery_suggestion="请检查数据域名称是否正确,或确认该数据域的字段辞典已创建",
                 status_code=404
             )
         
-        # [*] v4.6.0: 优先使用PatternMatcher（支持货币字段等Pattern-based映射）
+        # [*] v4.6.0: 优先使用PatternMatcher(支持货币字段等Pattern-based映射)
         from backend.services.pattern_matcher import PatternMatcher
         pattern_matcher = PatternMatcher(db)
         
         mappings = {}
         
-        # 第一阶段：Pattern-based匹配（v4.6.0新增）
+        # 第一阶段:Pattern-based匹配(v4.6.0新增)
         for col in columns:
             pattern_result = pattern_matcher.match_field(col, data_domain=data_domain)
             if pattern_result and pattern_result.get('matched') and pattern_result.get('standard_field'):
@@ -286,7 +286,7 @@ async def suggest_field_mappings(
                     "target_columns": pattern_result.get('target_columns')
                 }
         
-        # 第二阶段：传统匹配器（处理未被Pattern匹配的字段）
+        # 第二阶段:传统匹配器(处理未被Pattern匹配的字段)
         unmatched_cols = [col for col in columns if col not in mappings]
         if unmatched_cols:
             from backend.services.smart_field_matcher import get_smart_matcher
@@ -294,7 +294,7 @@ async def suggest_field_mappings(
             traditional_mappings = matcher.batch_match(unmatched_cols, sample_data)
             mappings.update(traditional_mappings)
         
-        # [*] 新增：自动检测字段类型（date或datetime）
+        # [*] 新增:自动检测字段类型(date或datetime)
         # 根据样本数据自动识别是否需要保留时间信息
         from backend.services.field_mapping.type_detector import enhance_mapping_with_type_detection
         
@@ -309,7 +309,7 @@ async def suggest_field_mappings(
                         if col in row and row[col] is not None:
                             column_samples.append(row[col])
                 
-                # 增强映射建议，添加自动检测的字段类型
+                # 增强映射建议,添加自动检测的字段类型
                 enhanced_mapping = enhance_mapping_with_type_detection(
                     mapping,
                     col,
@@ -324,7 +324,7 @@ async def suggest_field_mappings(
         medium_conf = sum(1 for r in mappings.values() if 0.70 <= r['confidence'] < 0.90)
         low_conf = sum(1 for r in mappings.values() if r['confidence'] < 0.70)
         
-        # 自动映射率（置信度>=0.70视为可自动确认）
+        # 自动映射率(置信度>=0.70视为可自动确认)
         auto_mappable = high_conf + medium_conf
         auto_match_rate = (auto_mappable / len(columns) * 100) if columns else 0
         
@@ -351,7 +351,7 @@ async def suggest_field_mappings(
             message="建议映射失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -359,7 +359,7 @@ async def suggest_field_mappings(
 @router.get("/dictionary/cache/clear")
 async def clear_dictionary_cache(db: AsyncSession = Depends(get_async_db)):
     """
-    清空辞典缓存（管理员操作）
+    清空辞典缓存(管理员操作)
     
     Returns:
         {
@@ -390,23 +390,23 @@ async def add_field_to_dictionary(payload: Dict[str, Any], db: AsyncSession = De
     
     Request Body:
         {
-            "field_code": "field_name" 或 "订单号",  # 字段代码（中文或英文，必填）
-            "cn_name": "字段中文名",      # 中文名称（必填）
-            "data_domain": "orders",      # 数据域（必填）
-            "field_group": "dimension",   # 字段分组（可选）
-            "is_required": false,         # 是否必填（可选）
-            "data_type": "string",        # 数据类型（可选）
-            "description": "字段描述",    # 描述（可选）
-            "synonyms": ["同义词1", "同义词2"]  # 同义词列表（可选）
+            "field_code": "field_name" 或 "订单号",  # 字段代码(中文或英文,必填)
+            "cn_name": "字段中文名",      # 中文名称(必填)
+            "data_domain": "orders",      # 数据域(必填)
+            "field_group": "dimension",   # 字段分组(可选)
+            "is_required": false,         # 是否必填(可选)
+            "data_type": "string",        # 数据类型(可选)
+            "description": "字段描述",    # 描述(可选)
+            "synonyms": ["同义词1", "同义词2"]  # 同义词列表(可选)
         }
     
     Returns:
         {"success": true, "field_code": "field_name", "message": "字段已添加"}
     
     Note:
-        - field_code支持中文，例如："订单号"、"采购金额"等
-        - PostgreSQL完全支持UTF-8，中文field_code可以正常使用
-        - 建议：中文用户可以使用中文field_code，代码中使用字符串字面量即可
+        - field_code支持中文,例如:"订单号"、"采购金额"等
+        - PostgreSQL完全支持UTF-8,中文field_code可以正常使用
+        - 建议:中文用户可以使用中文field_code,代码中使用字符串字面量即可
     """
     try:
         from sqlalchemy import text
@@ -418,9 +418,9 @@ async def add_field_to_dictionary(payload: Dict[str, Any], db: AsyncSession = De
         if not field_code or not cn_name or not data_domain:
             return error_response(
                 code=ErrorCode.DATA_REQUIRED_FIELD_MISSING,
-                message="缺少必填字段：field_code, cn_name, data_domain",
+                message="缺少必填字段:field_code, cn_name, data_domain",
                 error_type=get_error_type(ErrorCode.DATA_REQUIRED_FIELD_MISSING),
-                recovery_suggestion="请提供所有必填字段：field_code, cn_name, data_domain",
+                recovery_suggestion="请提供所有必填字段:field_code, cn_name, data_domain",
                 status_code=400
             )
         
@@ -435,7 +435,7 @@ async def add_field_to_dictionary(payload: Dict[str, Any], db: AsyncSession = De
                 code=ErrorCode.DATA_UNIQUE_CONSTRAINT_VIOLATION,
                 message=f"字段 {field_code} 已存在",
                 error_type=get_error_type(ErrorCode.DATA_UNIQUE_CONSTRAINT_VIOLATION),
-                recovery_suggestion="请使用不同的字段代码，或更新现有字段信息",
+                recovery_suggestion="请使用不同的字段代码,或更新现有字段信息",
                 status_code=400
             )
         
@@ -491,14 +491,14 @@ async def add_field_to_dictionary(payload: Dict[str, Any], db: AsyncSession = De
             message="添加字段失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
 
 @router.get("/dictionary/summary")
 async def dictionary_summary(db: AsyncSession = Depends(get_async_db)):
-    """返回各数据域的字段数量，用于快速发现“0条”异常。"""
+    """返回各数据域的字段数量,用于快速发现“0条”异常。"""
     try:
         domains = ["orders", "products", "analytics", "services", "traffic", "general"]
         summary = {}
@@ -527,7 +527,7 @@ async def dictionary_summary(db: AsyncSession = Depends(get_async_db)):
 
 @router.post("/dictionary/rebuild")
 async def dictionary_rebuild(payload: Dict[str, Any] = None, db: AsyncSession = Depends(get_async_db)):
-    """当辞典为空或条数不足时，灌入“关键字段最小集”。"""
+    """当辞典为空或条数不足时,灌入“关键字段最小集”。"""
     try:
         domain = (payload or {}).get("data_domain")
         seeds = {
@@ -576,7 +576,7 @@ async def dictionary_rebuild(payload: Dict[str, Any] = None, db: AsyncSession = 
 
         targets = [domain] if domain else list(seeds.keys())
         created = 0
-        # 只使用PostgreSQL（按用户要求）
+        # 只使用PostgreSQL(按用户要求)
         for d in targets:
             for code, cn, required, dtype in seeds[d]:
                 field_group = (
@@ -584,8 +584,8 @@ async def dictionary_rebuild(payload: Dict[str, Any] = None, db: AsyncSession = 
                     ("datetime" if ("date" in code or code.endswith("ts")) else
                      ("amount" if ("amount" in code or code=="price") else "metric"))
                 )
-                # PostgreSQL原生SQL插入（ON CONFLICT DO NOTHING）
-                # 注意：数据库表可能没有version和status字段，只插入存在的字段
+                # PostgreSQL原生SQL插入(ON CONFLICT DO NOTHING)
+                # 注意:数据库表可能没有version和status字段,只插入存在的字段
                 sql_str = text(
                     """
                     INSERT INTO field_mapping_dictionary
@@ -603,7 +603,7 @@ async def dictionary_rebuild(payload: Dict[str, Any] = None, db: AsyncSession = 
                     "req": required,
                     "dtype": dtype,
                 })
-                # PostgreSQL rowcount表示实际插入的行数（0表示冲突已存在）
+                # PostgreSQL rowcount表示实际插入的行数(0表示冲突已存在)
                 if result.rowcount > 0:
                     created += 1
         await db.commit()
@@ -612,7 +612,7 @@ async def dictionary_rebuild(payload: Dict[str, Any] = None, db: AsyncSession = 
     except Exception as e:
         logger.error(f"辞典重建失败: {e}")
         await db.rollback()
-        # 返回可诊断信息（200），便于前端/脚本快速定位
+        # 返回可诊断信息(200),便于前端/脚本快速定位
         return {"success": False, "error": str(e)}
 
 
@@ -624,16 +624,16 @@ async def save_mapping_template(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    保存映射模板（v4.5.1增强版 + v4.14.0新增）
+    保存映射模板(v4.5.1增强版 + v4.14.0新增)
     
-    v4.5.1新增字段：
-    - header_row: 表头行索引（解决问题1：模板保存表头行）
-    - sub_domain: 子数据类型（解决问题2：子类型识别）
+    v4.5.1新增字段:
+    - header_row: 表头行索引(解决问题1:模板保存表头行)
+    - sub_domain: 子数据类型(解决问题2:子类型识别)
     - sheet_name: Excel工作表名称
     - encoding: 文件编码
     
-    v4.14.0新增字段：
-    - deduplication_fields: 核心去重字段列表（可选，如果未指定则使用默认配置）
+    v4.14.0新增字段:
+    - deduplication_fields: 核心去重字段列表(可选,如果未指定则使用默认配置)
     """
     try:
         template_service = get_template_service(db)
@@ -644,10 +644,10 @@ async def save_mapping_template(
         if not request.get('data_domain'):
             raise ValueError("data_domain参数必填")
         
-        # [*] v4.6.0 DSS架构：使用header_columns而非mappings
+        # [*] v4.6.0 DSS架构:使用header_columns而非mappings
         header_columns = request.get('header_columns')
         if not header_columns and 'mappings' in request:
-            # 兼容旧格式：从mappings提取header_columns
+            # 兼容旧格式:从mappings提取header_columns
             mappings = request.get('mappings', {})
             if isinstance(mappings, dict):
                 header_columns = list(mappings.keys())
@@ -655,17 +655,17 @@ async def save_mapping_template(
                 header_columns = []
         
         if not header_columns:
-            raise ValueError("header_columns参数必填（DSS架构：保存原始表头字段列表）")
+            raise ValueError("header_columns参数必填(DSS架构:保存原始表头字段列表)")
         
-        # [*] v4.16.0新增：自动归一化header_columns（移除货币代码部分）
-        # 这样保存的模板中，header_columns不包含货币代码，后续同步时表头也不会包含货币代码
+        # [*] v4.16.0新增:自动归一化header_columns(移除货币代码部分)
+        # 这样保存的模板中,header_columns不包含货币代码,后续同步时表头也不会包含货币代码
         from backend.services.currency_extractor import get_currency_extractor
         currency_extractor = get_currency_extractor()
         
-        # 保存原始header_columns（用于日志）
+        # 保存原始header_columns(用于日志)
         original_header_columns = header_columns.copy()
         
-        # 归一化header_columns（移除货币代码）
+        # 归一化header_columns(移除货币代码)
         normalized_header_columns = currency_extractor.normalize_field_list(header_columns)
         
         # 检查是否有变化
@@ -686,33 +686,33 @@ async def save_mapping_template(
         # 验证header_row范围
         header_row = request.get('header_row', 0)
         if not isinstance(header_row, int) or header_row < 0 or header_row > 100:
-            raise ValueError(f"header_row必须在0-100之间，当前值: {header_row}")
+            raise ValueError(f"header_row必须在0-100之间,当前值: {header_row}")
         
-        # v4.14.0新增：验证deduplication_fields格式（必填）
+        # v4.14.0新增:验证deduplication_fields格式(必填)
         deduplication_fields = request.get('deduplication_fields')
         if deduplication_fields is None:
-            # 向后兼容：如果未提供，使用默认配置，但记录警告
+            # 向后兼容:如果未提供,使用默认配置,但记录警告
             from backend.services.deduplication_fields_config import get_default_deduplication_fields
             deduplication_fields = get_default_deduplication_fields(
                 data_domain=request['data_domain'],
                 sub_domain=request.get('sub_domain')
             )
             logger.warning(
-                f"[Template] [WARN] 警告：保存模板时未提供deduplication_fields，"
+                f"[Template] [WARN] 警告:保存模板时未提供deduplication_fields,"
                 f"使用默认配置: {deduplication_fields}。"
                 f"建议用户手动选择核心字段以确保去重正确。"
             )
         elif not isinstance(deduplication_fields, list):
-            raise ValueError(f"deduplication_fields必须是列表，当前值: {deduplication_fields}")
+            raise ValueError(f"deduplication_fields必须是列表,当前值: {deduplication_fields}")
         elif len(deduplication_fields) == 0:
-            raise ValueError("deduplication_fields不能为空列表，至少需要选择1个核心字段")
+            raise ValueError("deduplication_fields不能为空列表,至少需要选择1个核心字段")
         else:
             # 验证列表中的元素都是字符串
             if not all(isinstance(field, str) for field in deduplication_fields):
                 raise ValueError("deduplication_fields列表中的元素必须是字符串")
             
-            # 验证核心字段是否在归一化后的header_columns中（软验证，记录警告但不阻止保存）
-            # [*] v4.16.0修复：使用归一化后的header_columns（已在上面处理）
+            # 验证核心字段是否在归一化后的header_columns中(软验证,记录警告但不阻止保存)
+            # [*] v4.16.0修复:使用归一化后的header_columns(已在上面处理)
             if header_columns:
                 missing_fields = []
                 for field in deduplication_fields:
@@ -727,14 +727,14 @@ async def save_mapping_template(
                 
                 if missing_fields:
                     logger.warning(
-                        f"[Template] [WARN] 警告：以下核心字段不在表头中: {missing_fields}，"
+                        f"[Template] [WARN] 警告:以下核心字段不在表头中: {missing_fields},"
                         f"可能导致去重失败。表头字段: {header_columns[:10]}..."
                     )
         
         template_id = template_service.save_template(
             platform=request['platform'],
             data_domain=request['data_domain'],
-            header_columns=header_columns,  # [*] v4.6.0 DSS架构：使用header_columns
+            header_columns=header_columns,  # [*] v4.6.0 DSS架构:使用header_columns
             granularity=request.get('granularity'),
             account=request.get('account'),
             template_name=request.get('template_name'),
@@ -745,7 +745,7 @@ async def save_mapping_template(
             sheet_name=request.get('sheet_name'),
             encoding=request.get('encoding', 'utf-8'),
             # v4.14.0新增参数
-            deduplication_fields=deduplication_fields  # 如果为None，服务层会使用默认配置
+            deduplication_fields=deduplication_fields  # 如果为None,服务层会使用默认配置
         )
         
         logger.info(f"[Template] 保存成功: platform={request['platform']}, domain={request['data_domain']}, template_id={template_id}")
@@ -758,7 +758,7 @@ async def save_mapping_template(
             "message": "模板保存成功"
         }
     except ValueError as e:
-        logger.error(f"保存模板失败（参数错误）: {e}", exc_info=True)
+        logger.error(f"保存模板失败(参数错误): {e}", exc_info=True)
         return error_response(
             code=ErrorCode.VALIDATION_ERROR,
             message=f"保存模板失败: {str(e)}",
@@ -774,25 +774,25 @@ async def save_mapping_template(
             message=f"保存模板失败: {str(e)}",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
 
 @router.get("/templates/default-deduplication-fields")
 async def get_default_deduplication_fields(
-    data_domain: str = Query(..., description="数据域（如：orders, products, inventory）"),
-    sub_domain: Optional[str] = Query(None, description="子类型（可选，如：ai_assistant）"),
+    data_domain: str = Query(..., description="数据域(如:orders, products, inventory)"),
+    sub_domain: Optional[str] = Query(None, description="子类型(可选,如:ai_assistant)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    获取默认核心字段推荐（v4.14.0新增）
+    获取默认核心字段推荐(v4.14.0新增)
     
-    根据数据域和子类型返回默认核心字段列表，用于前端推荐。
+    根据数据域和子类型返回默认核心字段列表,用于前端推荐。
     
     Query Parameters:
-        data_domain: 数据域（必填）
-        sub_domain: 子类型（可选）
+        data_domain: 数据域(必填)
+        sub_domain: 子类型(可选)
     
     Returns:
         {
@@ -823,12 +823,12 @@ async def get_default_deduplication_fields(
         }
         
         reasons = {
-            'orders': '这些字段能够唯一标识每行订单数据（订单ID + 日期 + 平台 + 店铺）',
-            'products': '这些字段能够唯一标识每个产品（产品SKU + 产品ID + 平台 + 店铺）',
-            'inventory': '这些字段能够唯一标识每个库存记录（产品SKU + 仓库ID + 平台 + 店铺）',
-            'traffic': '这些字段能够唯一标识每条流量数据（日期 + 平台 + 店铺）',
-            'services': '这些字段能够唯一标识每条服务数据（服务ID + 日期 + 平台 + 店铺）',
-            'analytics': '这些字段能够唯一标识每条分析数据（日期 + 平台 + 店铺）',
+            'orders': '这些字段能够唯一标识每行订单数据(订单ID + 日期 + 平台 + 店铺)',
+            'products': '这些字段能够唯一标识每个产品(产品SKU + 产品ID + 平台 + 店铺)',
+            'inventory': '这些字段能够唯一标识每个库存记录(产品SKU + 仓库ID + 平台 + 店铺)',
+            'traffic': '这些字段能够唯一标识每条流量数据(日期 + 平台 + 店铺)',
+            'services': '这些字段能够唯一标识每条服务数据(服务ID + 日期 + 平台 + 店铺)',
+            'analytics': '这些字段能够唯一标识每条分析数据(日期 + 平台 + 店铺)',
         }
         
         description = descriptions.get(data_domain, f'{data_domain}数据的默认核心字段')
@@ -866,7 +866,7 @@ async def list_mapping_templates(
     """列出模板"""
     try:
         template_service = get_template_service(db)
-        # 如果platform或data_domain为空字符串，转换为None
+        # 如果platform或data_domain为空字符串,转换为None
         platform = platform if platform else None
         data_domain = data_domain if data_domain else None
         templates = template_service.list_templates(platform, data_domain)
@@ -885,7 +885,7 @@ async def list_mapping_templates(
             message="列出模板失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -922,7 +922,7 @@ async def delete_mapping_template(
             message="删除模板失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -933,14 +933,14 @@ async def apply_mapping_template(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    应用模板（v4.5.1增强版 + v4.6.0表头变化检测）
+    应用模板(v4.5.1增强版 + v4.6.0表头变化检测)
     
-    返回增强：
-    - config: 模板配置对象（包含header_row、sub_domain等）
-    - match_level: 匹配等级（exact/fuzzy/fallback）
-    - header_changes: 表头变化检测结果（v4.6.0新增）
+    返回增强:
+    - config: 模板配置对象(包含header_row、sub_domain等)
+    - match_level: 匹配等级(exact/fuzzy/fallback)
+    - header_changes: 表头变化检测结果(v4.6.0新增)
     
-    前端使用config.header_row自动设置表头行，解决问题1
+    前端使用config.header_row自动设置表头行,解决问题1
     """
     try:
         template_service = get_template_service(db)
@@ -950,12 +950,12 @@ async def apply_mapping_template(
             current_columns=request['columns']
         )
         
-        # v4.5.1新增：获取模板完整配置
+        # v4.5.1新增:获取模板完整配置
         from backend.services.template_matcher import get_template_matcher
         matcher = get_template_matcher(db)
         config = matcher.get_template_config(request['template_id'])
         
-        # v4.6.0新增：检测表头变化
+        # v4.6.0新增:检测表头变化
         header_changes = matcher.detect_header_changes(
             template_id=request['template_id'],
             current_columns=request['columns']
@@ -968,7 +968,7 @@ async def apply_mapping_template(
             "unmatched": result['unmatched'],
             "unmatched_columns": result['unmatched_columns'],
             "match_rate": result['match_rate'],
-            # v4.5.1新增：返回完整配置
+            # v4.5.1新增:返回完整配置
             "config": {
                 "header_row": config.get('header_row', 0),
                 "sub_domain": config.get('sub_domain'),
@@ -977,7 +977,7 @@ async def apply_mapping_template(
             },
             "template_name": config.get('template_name'),
             "template_version": config.get('version'),
-            # v4.6.0新增：返回表头变化检测结果
+            # v4.6.0新增:返回表头变化检测结果
             "header_columns": config.get('header_columns', []),  # 模板原始表头字段列表
             "header_changes": header_changes  # 表头变化详情
         }
@@ -988,7 +988,7 @@ async def apply_mapping_template(
             message="应用模板失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -999,14 +999,14 @@ async def detect_header_changes(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    检测表头变化（v4.14.0安全版本）
+    检测表头变化(v4.14.0安全版本)
     
-    [WARN] 安全原则：不进行相似度匹配，任何变化都需要用户手动确认
+    [WARN] 安全原则:不进行相似度匹配,任何变化都需要用户手动确认
     
-    比较当前表头与模板表头，检测：
-    - 新增字段（current中有，template中没有）
-    - 删除字段（template中有，current中没有）
-    - 字段顺序变化（通过完全匹配检查）
+    比较当前表头与模板表头,检测:
+    - 新增字段(current中有,template中没有)
+    - 删除字段(template中有,current中没有)
+    - 字段顺序变化(通过完全匹配检查)
     
     Args:
         template_id: 模板ID
@@ -1017,10 +1017,10 @@ async def detect_header_changes(
             'detected': bool,
             'added_fields': List[str],
             'removed_fields': List[str],
-            'match_rate': float,  # 匹配率（0-100）
-            'is_exact_match': bool,  # 是否完全匹配（字段名和顺序都一致）
-            'template_columns': List[str],  # 模板字段列表（供前端对比）
-            'current_columns': List[str]  # 当前字段列表（供前端对比）
+            'match_rate': float,  # 匹配率(0-100)
+            'is_exact_match': bool,  # 是否完全匹配(字段名和顺序都一致)
+            'template_columns': List[str],  # 模板字段列表(供前端对比)
+            'current_columns': List[str]  # 当前字段列表(供前端对比)
         }
     """
     try:
@@ -1067,7 +1067,7 @@ async def detect_header_changes(
             message="检测表头变化失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 

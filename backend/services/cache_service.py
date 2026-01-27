@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-统一 Redis 缓存服务（Phase 3）
+统一 Redis 缓存服务(Phase 3)
 
-功能：
+功能:
 1. 统一的缓存键命名规则
 2. 缓存读写方法
 3. 缓存装饰器
 4. 缓存失效机制
 5. 缓存统计和监控
 
-使用场景：
-- 账号列表（`/api/accounts`）
-- 统计数据（`/api/accounts/stats`）
-- 组件版本列表（`/api/component-versions`）
+使用场景:
+- 账号列表(`/api/accounts`)
+- 统计数据(`/api/accounts/stats`)
+- 组件版本列表(`/api/component-versions`)
 - 其他频繁查询的数据
 """
 
@@ -28,7 +28,7 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 尝试导入Redis（异步版本）
+# 尝试导入Redis(异步版本)
 try:
     from redis import asyncio as aioredis
     REDIS_AVAILABLE = True
@@ -43,7 +43,7 @@ class CacheService:
     # 缓存键前缀
     CACHE_PREFIX = "xihong_erp:"
     
-    # 默认缓存过期时间（秒）
+    # 默认缓存过期时间(秒)
     DEFAULT_TTL = {
         "accounts_list": 300,  # 5分钟
         "accounts_stats": 60,  # 1分钟
@@ -56,8 +56,8 @@ class CacheService:
         初始化缓存服务
         
         Args:
-            redis_client: Redis客户端（可选，如果为None则尝试连接Redis）
-            redis_url: Redis连接URL（可选，如果redis_client为None且redis_url提供，则尝试连接）
+            redis_client: Redis客户端(可选,如果为None则尝试连接Redis)
+            redis_url: Redis连接URL(可选,如果redis_client为None且redis_url提供,则尝试连接)
         """
         self.redis_client = redis_client
         self.cache_stats = {
@@ -68,7 +68,7 @@ class CacheService:
             "errors": 0
         }
         
-        # 如果未提供redis_client但提供了redis_url，尝试连接
+        # 如果未提供redis_client但提供了redis_url,尝试连接
         if self.redis_client is None and redis_url and REDIS_AVAILABLE:
             try:
                 self.redis_client = aioredis.from_url(
@@ -80,7 +80,7 @@ class CacheService:
                 )
                 logger.info(f"[Cache] Redis连接成功: {redis_url}")
             except Exception as e:
-                logger.warning(f"[Cache] Redis连接失败，缓存未启用: {e}")
+                logger.warning(f"[Cache] Redis连接失败,缓存未启用: {e}")
                 self.redis_client = None
         elif self.redis_client is None and REDIS_AVAILABLE:
             # 尝试从环境变量读取Redis配置
@@ -95,7 +95,7 @@ class CacheService:
                 )
                 logger.info(f"[Cache] Redis连接成功: {redis_url}")
             except Exception as e:
-                logger.warning(f"[Cache] Redis连接失败，缓存未启用: {e}")
+                logger.warning(f"[Cache] Redis连接失败,缓存未启用: {e}")
                 self.redis_client = None
     
     def _generate_cache_key(
@@ -106,19 +106,19 @@ class CacheService:
         """
         生成缓存key
         
-        规则：
-        - 使用统一的键前缀：`xihong_erp:{cache_type}:{hash}`
-        - 包含版本号或时间戳（用于缓存失效）
+        规则:
+        - 使用统一的键前缀:`xihong_erp:{cache_type}:{hash}`
+        - 包含版本号或时间戳(用于缓存失效)
         - 支持按用户、平台等维度缓存
         
         Args:
-            cache_type: 缓存类型（accounts_list/accounts_stats/component_versions等）
-            **kwargs: 查询参数（用于生成唯一key）
+            cache_type: 缓存类型(accounts_list/accounts_stats/component_versions等)
+            **kwargs: 查询参数(用于生成唯一key)
             
         Returns:
             缓存key字符串
         """
-        # 将参数排序后序列化，生成唯一key
+        # 将参数排序后序列化,生成唯一key
         if kwargs:
             params_str = json.dumps(kwargs, sort_keys=True, default=str)
             params_hash = hashlib.md5(params_str.encode()).hexdigest()[:16]
@@ -139,7 +139,7 @@ class CacheService:
             **kwargs: 查询参数
             
         Returns:
-            缓存数据或None（未命中）
+            缓存数据或None(未命中)
         """
         if not self.redis_client:
             return None
@@ -173,8 +173,8 @@ class CacheService:
         
         Args:
             cache_type: 缓存类型
-            data: 要缓存的数据（必须是JSON可序列化的）
-            ttl: 过期时间（秒），如果为None则使用默认TTL
+            data: 要缓存的数据(必须是JSON可序列化的)
+            ttl: 过期时间(秒),如果为None则使用默认TTL
             **kwargs: 查询参数
             
         Returns:
@@ -240,7 +240,7 @@ class CacheService:
         按模式删除缓存数据
         
         Args:
-            pattern: 缓存key模式（如 "xihong_erp:accounts:*"）
+            pattern: 缓存key模式(如 "xihong_erp:accounts:*")
             
         Returns:
             删除的缓存数量
@@ -308,16 +308,16 @@ class CacheService:
         }
 
 
-# 全局缓存服务实例（延迟初始化）
+# 全局缓存服务实例(延迟初始化)
 _cache_service: Optional[CacheService] = None
 
 
 def get_cache_service(redis_client: Optional[aioredis.Redis] = None) -> CacheService:
     """
-    获取缓存服务实例（单例模式）
+    获取缓存服务实例(单例模式)
     
     Args:
-        redis_client: Redis客户端（可选，首次调用时初始化）
+        redis_client: Redis客户端(可选,首次调用时初始化)
         
     Returns:
         CacheService实例
@@ -338,7 +338,7 @@ def cache_result(
     """
     缓存装饰器
     
-    使用示例：
+    使用示例:
         @cache_result("accounts_list", ttl=300)
         async def get_accounts(platform: str = None):
             # 函数实现
@@ -346,8 +346,8 @@ def cache_result(
     
     Args:
         cache_type: 缓存类型
-        ttl: 过期时间（秒），如果为None则使用默认TTL
-        key_func: 自定义缓存键生成函数（可选）
+        ttl: 过期时间(秒),如果为None则使用默认TTL
+        key_func: 自定义缓存键生成函数(可选)
         
     Returns:
         装饰器函数
@@ -370,7 +370,7 @@ def cache_result(
             if cached_data is not None:
                 return cached_data
             
-            # 缓存未命中，执行函数
+            # 缓存未命中,执行函数
             result = await func(*args, **kwargs)
             
             # 将结果写入缓存

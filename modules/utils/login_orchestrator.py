@@ -4,7 +4,7 @@
 """
 统一登录编排器
 支持妙手ERP、Shopee卖家、TikTok卖家的智能登录流程
-包含：登录环节 -> 验证码识别 -> 邮箱OTP -> SMS用户输入
+包含:登录环节 -> 验证码识别 -> 邮箱OTP -> SMS用户输入
 """
 
 import time
@@ -30,7 +30,7 @@ class LoginOrchestrator:
 
         Args:
             browser: Playwright浏览器实例
-            playwright: Playwright实例（用于持久化上下文）
+            playwright: Playwright实例(用于持久化上下文)
         """
         self.browser = browser
         self.playwright = playwright
@@ -110,7 +110,7 @@ class LoginOrchestrator:
         执行完整的智能登录流程
         
         Args:
-            account: 账号信息字典，必须包含platform、username、password、login_url
+            account: 账号信息字典,必须包含platform、username、password、login_url
             
         Returns:
             Tuple[bool, str, Optional[Page]]: (成功状态, 错误信息, 页面对象)
@@ -123,7 +123,7 @@ class LoginOrchestrator:
             login_url = account.get('login_url', '')
 
             if not all([platform, username or account.get('phone', ''), password, login_url]):
-                error_msg = "账号信息不完整，缺少platform/username(或phone)/password/login_url"
+                error_msg = "账号信息不完整,缺少platform/username(或phone)/password/login_url"
                 logger.error(f"[FAIL] {error_msg}")
                 return False, error_msg, None
 
@@ -132,11 +132,11 @@ class LoginOrchestrator:
             login_name = account.get('phone') if platform_key == 'tiktok' and account.get('phone') else username
             logger.info(f"[START] 开始{platform}平台登录流程: {login_name}")
 
-            # 2. 创建浏览器上下文和页面（优先使用持久化）
+            # 2. 创建浏览器上下文和页面(优先使用持久化)
             account_id = account.get('account_id', username)
 
             if self.persistent_manager:
-                # 使用持久化上下文（减少验证码）
+                # 使用持久化上下文(减少验证码)
                 logger.info(f"[RETRY] 使用持久化浏览器上下文: {platform}/{account_id}")
                 self.context = self.persistent_manager.get_or_create_persistent_context(
                     platform, account_id, account
@@ -192,12 +192,12 @@ class LoginOrchestrator:
             if not login_result:
                 return False, f"{platform_key}平台基础登录失败"
             
-            # 步骤3: 检测并处理验证码（增强邮箱OTP自动化）
+            # 步骤3: 检测并处理验证码(增强邮箱OTP自动化)
             verification_result = await self._handle_verification_flow(account)
             if not verification_result[0]:
                 return False, f"验证码处理失败: {verification_result[1]}"
 
-            # 步骤4: 保存持久化状态（减少下次验证码）
+            # 步骤4: 保存持久化状态(减少下次验证码)
             if self.persistent_manager:
                 account_id = account.get('account_id', account.get('username', ''))
                 self.persistent_manager.save_context_state(self.context, platform_key, account_id)
@@ -221,7 +221,7 @@ class LoginOrchestrator:
             verification_type = await self._detect_verification_type()
 
             if verification_type == 'none':
-                logger.info("[OK] 无需验证码，登录流程继续")
+                logger.info("[OK] 无需验证码,登录流程继续")
                 return True, "无需验证码"
 
             elif verification_type == 'image_captcha':
@@ -316,7 +316,7 @@ class LoginOrchestrator:
         try:
             logger.info("[PHONE] 检测到SMS验证码需求")
 
-            # 在生产环境（无头模式）下，提示用户输入
+            # 在生产环境(无头模式)下,提示用户输入
             print("\n" + "="*50)
             print("[BELL] 需要SMS验证码")
             print("="*50)
@@ -389,8 +389,8 @@ class LoginOrchestrator:
             email_password = account.get('email_password', '')
 
             if not email or not email_password:
-                logger.warning("[WARN] 账号未配置邮箱信息，跳过邮箱OTP")
-                return True, "跳过邮箱OTP（未配置邮箱）"
+                logger.warning("[WARN] 账号未配置邮箱信息,跳过邮箱OTP")
+                return True, "跳过邮箱OTP(未配置邮箱)"
 
             # 使用现有的邮箱登录处理器
             try:
@@ -422,8 +422,8 @@ class LoginOrchestrator:
                     return False, "未能获取邮箱OTP"
 
             except ImportError:
-                logger.warning("[WARN] 邮箱登录处理器不可用，跳过邮箱OTP")
-                return True, "跳过邮箱OTP（处理器不可用）"
+                logger.warning("[WARN] 邮箱登录处理器不可用,跳过邮箱OTP")
+                return True, "跳过邮箱OTP(处理器不可用)"
 
         except Exception as e:
             logger.error(f"[FAIL] 邮箱OTP处理异常: {e}")
@@ -436,12 +436,12 @@ class LoginOrchestrator:
 
             current_url = self.page.url
 
-            # 通用登录成功判断：URL不再包含login/signin等关键词
+            # 通用登录成功判断:URL不再包含login/signin等关键词
             login_keywords = ['login', 'signin', 'auth', '登录']
             url_indicates_login_page = any(keyword in current_url.lower() for keyword in login_keywords)
 
             if not url_indicates_login_page:
-                logger.info(f"[OK] 登录成功确认：URL已跳转离开登录页 ({current_url})")
+                logger.info(f"[OK] 登录成功确认:URL已跳转离开登录页 ({current_url})")
                 return True
 
             # 平台特定的登录成功判断
@@ -457,7 +457,7 @@ class LoginOrchestrator:
                     logger.info(f"[OK] {platform_key}平台登录成功确认")
                     return True
 
-            logger.warning(f"[WARN] 登录状态不确定，当前URL: {current_url}")
+            logger.warning(f"[WARN] 登录状态不确定,当前URL: {current_url}")
             return False
 
         except Exception as e:
@@ -492,7 +492,7 @@ class BasePlatformLoginHandler:
         self.browser = browser
     
     async def login(self, username: str, password: str, page: Page) -> bool:
-        """执行登录操作，子类需要实现"""
+        """执行登录操作,子类需要实现"""
         raise NotImplementedError("子类必须实现login方法")
 
 
@@ -580,18 +580,18 @@ class MiaoshouLoginHandler(BasePlatformLoginHandler):
 
 
 class TikTokLoginHandler(BasePlatformLoginHandler):
-    """TikTok卖家登录处理器（手机号优先）"""
+    """TikTok卖家登录处理器(手机号优先)"""
 
     async def login(self, username: str, password: str, page: Page) -> bool:
-        """执行TikTok登录（手机号+密码为主）。
-        username: 对于TikTok应为手机号；若为空将回退到邮箱/用户名。
+        """执行TikTok登录(手机号+密码为主)。
+        username: 对于TikTok应为手机号;若为空将回退到邮箱/用户名。
         """
         try:
             # 延迟导入以避免导入阶段副作用
             from modules.components.base import ExecutionContext
             from modules.platforms.tiktok.components.login import TiktokLogin
 
-            # 组装最小执行上下文（platform/account）
+            # 组装最小执行上下文(platform/account)
             account_ctx = {
                 "login_url": page.url,
                 "phone": username or "",
@@ -612,7 +612,7 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
         try:
             logger.info("[BOT] 启动邮箱OTP自动化处理...")
 
-            # 获取邮箱配置（支持多种字段名）
+            # 获取邮箱配置(支持多种字段名)
             email = (account.get('email', '') or
                     account.get('E-mail', '') or
                     account.get('Email account', ''))
@@ -620,7 +620,7 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
                             account.get('Email password', ''))
 
             if not email or not email_password:
-                logger.warning("[WARN] 邮箱配置不完整，回退到手动模式")
+                logger.warning("[WARN] 邮箱配置不完整,回退到手动模式")
                 return await self._handle_email_otp_manual(account)
 
             # 检测邮箱OTP输入框
@@ -680,7 +680,7 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
                         logger.success("[DONE] 邮箱OTP自动验证成功！")
                         return True, "邮箱OTP自动验证成功"
                     else:
-                        logger.warning("[WARN] OTP验证可能失败，请检查")
+                        logger.warning("[WARN] OTP验证可能失败,请检查")
                         return False, "OTP验证失败"
                 else:
                     logger.error("[FAIL] 无法获取邮箱验证码")
@@ -703,7 +703,7 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
             print("\n" + "="*50)
             print("[EMAIL] 邮箱验证码处理")
             print("="*50)
-            print("请按以下步骤操作：")
+            print("请按以下步骤操作:")
             print("1. 打开您的邮箱")
             print("2. 查找最新的验证码邮件")
             print("3. 复制验证码")
@@ -712,7 +712,7 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
             print("="*50)
 
             # 等待用户完成
-            input("完成邮箱验证后，按回车键继续...")
+            input("完成邮箱验证后,按回车键继续...")
 
             # 检查登录状态
             if self._is_login_successful():
@@ -747,14 +747,14 @@ class TikTokLoginHandler(BasePlatformLoginHandler):
             email_page.wait_for_load_state("networkidle")
 
             # 这里可以集成现有的邮箱登录处理器
-            # 简化版：等待用户手动登录邮箱
+            # 简化版:等待用户手动登录邮箱
             logger.info("[WAIT] 请在邮箱页面完成登录...")
             time.sleep(10)  # 给用户时间登录
 
             # 查找最新的验证码邮件
             # 这里需要根据不同邮箱的DOM结构来实现
-            # 简化版：返回None，让用户手动处理
-            logger.info("[TIP] 邮箱OTP自动提取功能开发中，请手动获取验证码")
+            # 简化版:返回None,让用户手动处理
+            logger.info("[TIP] 邮箱OTP自动提取功能开发中,请手动获取验证码")
             return None
 
         except Exception as e:

@@ -1,7 +1,7 @@
 """
 文件注册服务 - File Registration Service
 
-提供文件注册的原子性操作，确保采集文件正确入库
+提供文件注册的原子性操作,确保采集文件正确入库
 支持事务回滚和错误恢复
 """
 
@@ -30,8 +30,8 @@ class FileRegistrationService:
     """
     文件注册服务
     
-    功能：
-    1. 原子性文件注册（数据库+文件系统）
+    功能:
+    1. 原子性文件注册(数据库+文件系统)
     2. 失败时自动回滚
     3. 重复文件检测
     4. 文件哈希校验
@@ -63,13 +63,13 @@ class FileRegistrationService:
         """
         文件事务上下文管理器
         
-        成功时移动文件，失败时保持原状
+        成功时移动文件,失败时保持原状
         
         Args:
             source_path: 源文件路径
             target_path: 目标文件路径
         """
-        # 如果目标文件已存在，先备份
+        # 如果目标文件已存在,先备份
         backup_path = None
         if target_path.exists():
             backup_path = target_path.with_suffix(target_path.suffix + '.bak')
@@ -92,7 +92,7 @@ class FileRegistrationService:
             # 失败时回滚
             logger.error(f"File transaction failed: {e}")
             
-            # 如果目标文件被创建了，删除它
+            # 如果目标文件被创建了,删除它
             if target_path.exists():
                 try:
                     target_path.unlink()
@@ -179,19 +179,19 @@ class FileRegistrationService:
         extra_metadata: Dict[str, Any] = None
     ) -> CatalogFile:
         """
-        注册采集文件（原子性操作）
+        注册采集文件(原子性操作)
         
         Args:
-            source_path: 源文件路径（临时下载目录中）
+            source_path: 源文件路径(临时下载目录中)
             task_id: 关联的任务ID
             platform: 平台代码
             data_domain: 数据域
             account: 账号ID
             date_from: 数据开始日期
-            date_to: 数据结束日期（可选）
+            date_to: 数据结束日期(可选)
             granularity: 粒度
-            sub_domain: 子域（可选）
-            shop_id: 店铺ID（可选）
+            sub_domain: 子域(可选)
+            shop_id: 店铺ID(可选)
             extra_metadata: 额外元数据
             
         Returns:
@@ -211,7 +211,7 @@ class FileRegistrationService:
         file_hash = self._compute_file_hash(source_file)
         filename = source_file.name
         
-        # 检查是否重复（基于哈希）
+        # 检查是否重复(基于哈希)
         existing = self.db.query(CatalogFile).filter(
             CatalogFile.file_hash == file_hash
         ).first()
@@ -253,7 +253,7 @@ class FileRegistrationService:
         try:
             # 开始事务
             with self._file_transaction(source_file, target_path):
-                # 更新文件路径（确保使用最终路径）
+                # 更新文件路径(确保使用最终路径)
                 catalog_file.file_path = str(target_path)
                 
                 # 添加到数据库
@@ -289,9 +289,9 @@ class FileRegistrationService:
         task_id: int
     ) -> List[CatalogFile]:
         """
-        批量注册文件（原子性操作）
+        批量注册文件(原子性操作)
         
-        所有文件要么全部成功，要么全部回滚
+        所有文件要么全部成功,要么全部回滚
         
         Args:
             files: 文件信息列表
@@ -301,7 +301,7 @@ class FileRegistrationService:
             List[CatalogFile]: 注册的文件记录列表
         """
         registered = []
-        moved_files = []  # 记录已移动的文件，用于回滚
+        moved_files = []  # 记录已移动的文件,用于回滚
         
         try:
             for file_info in files:

@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-数据隔离区API（v4.6.0新增）
+数据隔离区API(v4.6.0新增)
 
-功能：
-1. 查询隔离数据列表（分页、筛选）
-2. 查看隔离数据详情（原始数据、错误原因）
-3. 重新处理隔离数据（修正后重新入库）
-4. 批量操作（批量重新处理、批量删除）
+功能:
+1. 查询隔离数据列表(分页、筛选)
+2. 查看隔离数据详情(原始数据、错误原因)
+3. 重新处理隔离数据(修正后重新入库)
+4. 批量操作(批量重新处理、批量删除)
 
-路由：
+路由:
 - GET /api/data-quarantine/list - 查询列表
 - GET /api/data-quarantine/detail/{quarantine_id} - 查看详情
 - POST /api/data-quarantine/reprocess - 重新处理
@@ -102,21 +102,21 @@ async def list_quarantine_data(
     data_domain: Optional[str] = Query(None, description="数据域"),
     error_type: Optional[str] = Query(None, description="错误类型"),
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=200, description="每页数量"),  # [*] v4.6.1修复：增加上限到200
+    page_size: int = Query(20, ge=1, le=200, description="每页数量"),  # [*] v4.6.1修复:增加上限到200
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     查询隔离数据列表
     
-    参数：
-        - file_id: 文件ID（可选）
-        - platform: 平台代码（可选）
-        - data_domain: 数据域（可选）
-        - error_type: 错误类型（可选）
-        - page: 页码（从1开始）
-        - page_size: 每页数量（1-100）
+    参数:
+        - file_id: 文件ID(可选)
+        - platform: 平台代码(可选)
+        - data_domain: 数据域(可选)
+        - error_type: 错误类型(可选)
+        - page: 页码(从1开始)
+        - page_size: 每页数量(1-100)
     
-    返回：
+    返回:
         {
             "success": true,
             "data": [...],
@@ -172,9 +172,9 @@ async def list_quarantine_data(
                 "file_name": file_info.file_name if file_info else "未知文件",
                 "platform_code": q.platform_code,
                 "data_domain": q.data_domain,
-                "row_index": q.row_number,  # 修正：使用row_number而不是row_index
+                "row_index": q.row_number,  # 修正:使用row_number而不是row_index
                 "error_type": q.error_type,
-                "error_message": q.error_msg,  # 修正：使用error_msg而不是error_message
+                "error_message": q.error_msg,  # 修正:使用error_msg而不是error_message
                 "error_type_label": ERROR_TYPES.get(q.error_type, q.error_type),  # 错误类型标签
                 "created_at": q.created_at.isoformat(),
             })
@@ -201,12 +201,12 @@ def _extract_missing_fields(quarantine: DataQuarantine) -> List[str]:
     """
     从隔离数据中提取缺失字段信息
     
-    如果错误类型是missing_c_class_core_field，从error_msg中解析缺失字段列表
+    如果错误类型是missing_c_class_core_field,从error_msg中解析缺失字段列表
     """
     missing_fields = []
     
     if quarantine.error_type == "missing_c_class_core_field":
-        # 从error_msg中解析缺失字段（格式：缺失字段: orders.order_id, products.conversion_rate）
+        # 从error_msg中解析缺失字段(格式:缺失字段: orders.order_id, products.conversion_rate)
         error_msg = quarantine.error_msg or ""
         if "缺失字段:" in error_msg:
             fields_str = error_msg.split("缺失字段:")[-1].strip()
@@ -223,10 +223,10 @@ async def get_quarantine_detail(
     """
     获取隔离数据详情
     
-    参数：
+    参数:
         - quarantine_id: 隔离数据ID
     
-    返回：
+    返回:
         {
             "success": true,
             "data": {
@@ -253,9 +253,9 @@ async def get_quarantine_detail(
         if not quarantine:
             return error_response(
                 code=ErrorCode.DATA_QUARANTINED,
-                message=f"隔离数据不存在：ID={quarantine_id}",
+                message=f"隔离数据不存在:ID={quarantine_id}",
                 error_type=get_error_type(ErrorCode.DATA_QUARANTINED),
-                recovery_suggestion="请检查隔离数据ID是否正确，或确认该数据已被删除",
+                recovery_suggestion="请检查隔离数据ID是否正确,或确认该数据已被删除",
                 status_code=404
             )
         
@@ -265,7 +265,7 @@ async def get_quarantine_detail(
         )
         file_info = result.scalar_one_or_none()
         
-        # 解析row_data（可能是JSON字符串）
+        # 解析row_data(可能是JSON字符串)
         import json
         try:
             raw_data = json.loads(quarantine.row_data) if isinstance(quarantine.row_data, str) else quarantine.row_data
@@ -286,7 +286,7 @@ async def get_quarantine_detail(
                 "error_type": quarantine.error_type,
                 "error_message": quarantine.error_msg,
                 "error_type_label": ERROR_TYPES.get(quarantine.error_type, quarantine.error_type),  # 错误类型标签
-                "validation_errors": {},  # DataQuarantine表没有此字段，返回空对象
+                "validation_errors": {},  # DataQuarantine表没有此字段,返回空对象
                 "missing_fields": _extract_missing_fields(quarantine),  # C类数据字段缺失详情
                 "created_at": quarantine.created_at.isoformat(),
             }
@@ -301,7 +301,7 @@ async def get_quarantine_detail(
             message="获取隔离数据详情失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -314,11 +314,11 @@ async def reprocess_quarantine_data(
     """
     重新处理隔离数据
     
-    参数：
+    参数:
         - quarantine_ids: 隔离数据ID列表
-        - corrections: 可选的数据修正（如{"order_id": "123456"}）
+        - corrections: 可选的数据修正(如{"order_id": "123456"})
     
-    返回：
+    返回:
         {
             "success": true,
             "processed": 10,
@@ -327,9 +327,9 @@ async def reprocess_quarantine_data(
             "errors": [...]
         }
     
-    流程：
+    流程:
     1. 读取隔离数据的raw_data
-    2. 应用corrections（如果有）
+    2. 应用corrections(如果有)
     3. 重新验证
     4. 重新入库或继续隔离
     """
@@ -356,7 +356,7 @@ async def reprocess_quarantine_data(
                 
                 processed += 1
                 
-                # 实现重新处理逻辑（v4.6.3完整实现）
+                # 实现重新处理逻辑(v4.6.3完整实现)
                 try:
                     # 1. 读取原始数据并应用修正
                     import json
@@ -364,7 +364,7 @@ async def reprocess_quarantine_data(
                     corrections = request.corrections or {}
                     corrected_data = {**raw_data_dict, **corrections}
                     
-                    # 2. 如果是C类数据字段缺失错误，检查字段是否已补充
+                    # 2. 如果是C类数据字段缺失错误,检查字段是否已补充
                     if quarantine.error_type == "missing_c_class_core_field":
                         # 使用C类数据验证器检查完整性
                         validator = get_c_class_data_validator(db)
@@ -378,7 +378,7 @@ async def reprocess_quarantine_data(
                         if not check_result.get("orders_complete", True) or \
                            not check_result.get("products_complete", True) or \
                            not check_result.get("inventory_complete", True):
-                            # 仍有字段缺失，提示用户补充
+                            # 仍有字段缺失,提示用户补充
                             missing_fields = check_result.get("missing_fields", [])
                             errors.append({
                                 "quarantine_id": quarantine_id,
@@ -401,7 +401,7 @@ async def reprocess_quarantine_data(
                     elif quarantine.data_domain == "products":
                         validation_result = validate_product_metrics([corrected_data])
                     elif quarantine.data_domain == "inventory":
-                        # v4.10.0新增：inventory域验证
+                        # v4.10.0新增:inventory域验证
                         from backend.services.enhanced_data_validator import validate_inventory
                         validation_result = validate_inventory([corrected_data])
                     elif quarantine.data_domain == "services":
@@ -412,14 +412,14 @@ async def reprocess_quarantine_data(
                     # 4. 检查验证结果
                     if validation_result["valid_count"] > 0:
                         # 5. 重新入库到目标表
-                        # v4.18.1修复：修正导入和参数顺序
+                        # v4.18.1修复:修正导入和参数顺序
                         from backend.services.data_importer import (
                             upsert_orders_v2,
                             upsert_product_metrics
                         )
                         
-                        # 准备文件记录（从catalog_files获取）
-                        # v4.18.1修复：使用 CatalogFile.id 而不是 CatalogFile.file_id
+                        # 准备文件记录(从catalog_files获取)
+                        # v4.18.1修复:使用 CatalogFile.id 而不是 CatalogFile.file_id
                         file_record = None
                         if quarantine.catalog_file_id:
                             result = await db.execute(
@@ -427,23 +427,23 @@ async def reprocess_quarantine_data(
                             ).scalar_one_or_none()
                         
                         # 根据数据域调用入库服务
-                        # v4.18.1修复：修正参数顺序 (db, rows, file_record, data_domain)
+                        # v4.18.1修复:修正参数顺序 (db, rows, file_record, data_domain)
                         ingest_result = None
                         if quarantine.data_domain == "orders":
                             ingest_result = upsert_orders_v2(db, [corrected_data], file_record)
                         elif quarantine.data_domain == "products":
                             ingest_result = upsert_product_metrics(db, [corrected_data], file_record)
                         elif quarantine.data_domain == "inventory":
-                            # v4.10.0新增：inventory域入库
+                            # v4.10.0新增:inventory域入库
                             ingest_result = upsert_product_metrics(db, [corrected_data], file_record, data_domain='inventory')
                         elif quarantine.data_domain == "services":
-                            # v4.18.1修复：使用upsert_product_metrics代替不存在的upsert_services
+                            # v4.18.1修复:使用upsert_product_metrics代替不存在的upsert_services
                             ingest_result = upsert_product_metrics(db, [corrected_data], file_record, data_domain='services')
                         
                         # 6. 更新隔离区状态
                         quarantine.is_resolved = True
                         quarantine.resolved_at = datetime.utcnow()
-                        quarantine.resolution_note = f"手动修正并重新处理：{corrections}"
+                        quarantine.resolution_note = f"手动修正并重新处理:{corrections}"
                         await db.commit()
                         
                         logger.info(f"成功重新处理隔离数据 {quarantine_id}")
@@ -487,7 +487,7 @@ async def reprocess_quarantine_data(
             message="批量重新处理失败",
             error_type=get_error_type(ErrorCode.DATA_ISOLATION_FAILED),
             detail=str(e),
-            recovery_suggestion="请检查隔离数据格式是否正确，或联系系统管理员",
+            recovery_suggestion="请检查隔离数据格式是否正确,或联系系统管理员",
             status_code=500
         )
 
@@ -498,19 +498,19 @@ async def delete_quarantine_data(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    批量删除隔离数据（v4.6.1新增）
+    批量删除隔离数据(v4.6.1新增)
     
-    参数：
-        - request: {quarantine_ids: [1, 2, 3]} 或 {"all": true}（一键全部清理）
+    参数:
+        - request: {quarantine_ids: [1, 2, 3]} 或 {"all": true}(一键全部清理)
     
-    返回：
+    返回:
         {
             "success": true,
             "deleted": 10
         }
     """
     try:
-        # [*] v4.6.1新增：支持一键全部清理
+        # [*] v4.6.1新增:支持一键全部清理
         if request.get("all") == True:
             # 删除所有隔离数据
             result = await db.execute(select(func.count()).select_from(DataQuarantine))
@@ -567,7 +567,7 @@ async def delete_quarantine_data(
             message="删除隔离数据失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -579,9 +579,9 @@ async def list_quarantine_files(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    按文件分组查询隔离数据（v4.6.1新增）
+    按文件分组查询隔离数据(v4.6.1新增)
     
-    返回：
+    返回:
         {
             "success": true,
             "data": [
@@ -642,7 +642,7 @@ async def list_quarantine_files(
             for error_type, count in result.all():
                 error_types[error_type or "unknown"] = count
             
-            # 查询该文件的第一个隔离记录（获取platform和domain）
+            # 查询该文件的第一个隔离记录(获取platform和domain)
             result = await db.execute(
                 select(DataQuarantine).where(DataQuarantine.catalog_file_id == file_id).limit(1)
             ).scalar_one_or_none()
@@ -657,7 +657,7 @@ async def list_quarantine_files(
                 "created_at": first_error_time.isoformat() if first_error_time else None
             })
         
-        # 按错误数量排序（降序）
+        # 按错误数量排序(降序)
         data.sort(key=lambda x: x["error_count"], reverse=True)
         
         return {
@@ -673,7 +673,7 @@ async def list_quarantine_files(
             message="查询隔离文件列表失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -686,14 +686,14 @@ async def list_quarantine_rows_by_file(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    查询指定文件的隔离数据行（v4.6.1新增）
+    查询指定文件的隔离数据行(v4.6.1新增)
     
-    参数：
+    参数:
         - file_id: 文件ID
         - page: 页码
         - page_size: 每页数量
     
-    返回：
+    返回:
         {
             "success": true,
             "data": [...],
@@ -712,9 +712,9 @@ async def list_quarantine_rows_by_file(
         if not file_info:
             return error_response(
                 code=ErrorCode.FILE_NOT_FOUND,
-                message=f"文件不存在：ID={file_id}",
+                message=f"文件不存在:ID={file_id}",
                 error_type=get_error_type(ErrorCode.FILE_NOT_FOUND),
-                recovery_suggestion="请检查文件ID是否正确，或确认该文件已注册",
+                recovery_suggestion="请检查文件ID是否正确,或确认该文件已注册",
                 status_code=404
             )
         
@@ -769,7 +769,7 @@ async def list_quarantine_rows_by_file(
             message="查询文件隔离数据失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -782,7 +782,7 @@ async def get_quarantine_stats(
     """
     获取隔离数据统计
     
-    返回：
+    返回:
         {
             "total": 100,
             "by_platform": {...},
@@ -851,7 +851,7 @@ async def get_quarantine_stats(
             message="获取隔离数据统计失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 

@@ -10,18 +10,18 @@ from enum import Enum
 
 class NotificationType(str, Enum):
     """通知类型枚举"""
-    USER_REGISTERED = "user_registered"  # 新用户注册（通知管理员）
-    USER_APPROVED = "user_approved"  # 用户审批通过（通知用户）
-    USER_REJECTED = "user_rejected"  # 用户审批拒绝（通知用户）
-    USER_SUSPENDED = "user_suspended"  # 用户被暂停（通知用户）
-    PASSWORD_RESET = "password_reset"  # 密码重置（通知用户）
-    ACCOUNT_LOCKED = "account_locked"  # 账户被锁定（通知用户）v4.19.0
-    ACCOUNT_UNLOCKED = "account_unlocked"  # 账户已解锁（通知用户）v4.19.0
+    USER_REGISTERED = "user_registered"  # 新用户注册(通知管理员)
+    USER_APPROVED = "user_approved"  # 用户审批通过(通知用户)
+    USER_REJECTED = "user_rejected"  # 用户审批拒绝(通知用户)
+    USER_SUSPENDED = "user_suspended"  # 用户被暂停(通知用户)
+    PASSWORD_RESET = "password_reset"  # 密码重置(通知用户)
+    ACCOUNT_LOCKED = "account_locked"  # 账户被锁定(通知用户)v4.19.0
+    ACCOUNT_UNLOCKED = "account_unlocked"  # 账户已解锁(通知用户)v4.19.0
     SYSTEM_ALERT = "system_alert"  # 系统告警
 
 
 class NotificationPriority(str, Enum):
-    """通知优先级枚举（v4.19.0）"""
+    """通知优先级枚举(v4.19.0)"""
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
@@ -34,7 +34,7 @@ class NotificationBase(BaseModel):
     content: str
     extra_data: Optional[Dict[str, Any]] = None
     related_user_id: Optional[int] = None
-    priority: str = Field(default="medium", description="优先级：high, medium, low")
+    priority: str = Field(default="medium", description="优先级:high, medium, low")
 
 
 class NotificationCreate(NotificationBase):
@@ -43,18 +43,18 @@ class NotificationCreate(NotificationBase):
 
 
 class NotificationActionType(str, Enum):
-    """通知快速操作类型（v4.19.0）"""
+    """通知快速操作类型(v4.19.0)"""
     APPROVE_USER = "approve_user"  # 批准用户
     REJECT_USER = "reject_user"  # 拒绝用户
     VIEW_DETAILS = "view_details"  # 查看详情
 
 
 class NotificationAction(BaseModel):
-    """通知快速操作配置（v4.19.0）"""
-    action_type: str = Field(..., description="操作类型：approve_user, reject_user, view_details")
+    """通知快速操作配置(v4.19.0)"""
+    action_type: str = Field(..., description="操作类型:approve_user, reject_user, view_details")
     label: str = Field(..., description="按钮显示文本")
     icon: Optional[str] = Field(None, description="图标名称")
-    style: Optional[str] = Field("default", description="按钮样式：primary, success, warning, danger, default")
+    style: Optional[str] = Field("default", description="按钮样式:primary, success, warning, danger, default")
     confirm: Optional[bool] = Field(False, description="是否需要确认")
     confirm_message: Optional[str] = Field(None, description="确认对话框消息")
 
@@ -73,9 +73,9 @@ class NotificationResponse(BaseModel):
     created_at: datetime
     
     # v4.19.0: 优先级
-    priority: str = Field(default="medium", description="优先级：high, medium, low")
+    priority: str = Field(default="medium", description="优先级:high, medium, low")
     
-    # 可选：关联用户信息
+    # 可选:关联用户信息
     related_username: Optional[str] = None
     
     # v4.19.0: 快速操作按钮配置
@@ -101,7 +101,7 @@ class UnreadCountResponse(BaseModel):
 
 class MarkReadRequest(BaseModel):
     """标记已读请求"""
-    notification_ids: List[int] = Field(default_factory=list, description="要标记的通知ID列表，为空则标记全部")
+    notification_ids: List[int] = Field(default_factory=list, description="要标记的通知ID列表,为空则标记全部")
 
 
 class MarkReadResponse(BaseModel):
@@ -116,9 +116,9 @@ class NotificationDeleteResponse(BaseModel):
     message: str
 
 
-# 内部使用：批量创建通知
+# 内部使用:批量创建通知
 class NotificationBatchCreate(BaseModel):
-    """批量创建通知（内部使用）"""
+    """批量创建通知(内部使用)"""
     recipient_ids: List[int]
     notification_type: NotificationType
     title: str
@@ -152,7 +152,7 @@ class NotificationPreferenceUpdate(BaseModel):
 
 class NotificationPreferenceBatchUpdate(BaseModel):
     """批量更新通知偏好请求"""
-    preferences: List[NotificationPreferenceUpdate] = Field(..., max_items=20, description="通知偏好列表（最多20个）")
+    preferences: List[NotificationPreferenceUpdate] = Field(..., max_items=20, description="通知偏好列表(最多20个)")
 
 
 class NotificationPreferenceListResponse(BaseModel):
@@ -164,13 +164,13 @@ class NotificationPreferenceListResponse(BaseModel):
 # v4.19.0: 快速操作
 
 class NotificationActionRequest(BaseModel):
-    """快速操作请求（v4.19.0）"""
-    action_type: str = Field(..., description="操作类型：approve_user, reject_user")
-    reason: Optional[str] = Field(None, max_length=500, description="操作原因（如拒绝原因）")
+    """快速操作请求(v4.19.0)"""
+    action_type: str = Field(..., description="操作类型:approve_user, reject_user")
+    reason: Optional[str] = Field(None, max_length=500, description="操作原因(如拒绝原因)")
 
 
 class NotificationActionResponse(BaseModel):
-    """快速操作响应（v4.19.0）"""
+    """快速操作响应(v4.19.0)"""
     success: bool
     message: str
     notification_id: int
@@ -181,7 +181,7 @@ class NotificationActionResponse(BaseModel):
 # v4.19.0: 通知分组
 
 class NotificationGroupItem(BaseModel):
-    """单个分组项（v4.19.0）"""
+    """单个分组项(v4.19.0)"""
     notification_type: str
     type_label: str  # 类型显示名称
     total_count: int
@@ -190,7 +190,7 @@ class NotificationGroupItem(BaseModel):
 
 
 class NotificationGroupListResponse(BaseModel):
-    """通知分组列表响应（v4.19.0）"""
+    """通知分组列表响应(v4.19.0)"""
     groups: List[NotificationGroupItem]
     total_count: int
     total_unread: int

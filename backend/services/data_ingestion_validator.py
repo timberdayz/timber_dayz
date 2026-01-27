@@ -3,13 +3,13 @@
 """
 数据入库流程验证工具
 
-[*] v4.12.0新增：验证数据入库流程是否符合设计规范
+[*] v4.12.0新增:验证数据入库流程是否符合设计规范
 
-验证规则：
-1. shop_id获取规则（从源数据、文件元数据、默认值等）
+验证规则:
+1. shop_id获取规则(从源数据、文件元数据、默认值等)
 2. platform_code获取规则
-3. 字段映射规则（如何从源数据映射到标准字段）
-4. 数据验证规则（必填字段、数据类型、取值范围等）
+3. 字段映射规则(如何从源数据映射到标准字段)
+4. 数据验证规则(必填字段、数据类型、取值范围等)
 5. AccountAlias映射规则
 """
 
@@ -45,7 +45,7 @@ class DataIngestionValidator:
     """
     数据入库流程验证器
     
-    验证规则：
+    验证规则:
     1. shop_id获取规则
     2. platform_code获取规则
     3. 字段映射规则
@@ -86,10 +86,10 @@ class DataIngestionValidator:
         """验证shop_id获取规则"""
         issues = []
         
-        # 规则1：优先从源数据获取shop_id
-        # 规则2：使用AccountAlias映射非标准店铺名称
-        # 规则3：从文件元数据获取shop_id
-        # 规则4：默认值处理
+        # 规则1:优先从源数据获取shop_id
+        # 规则2:使用AccountAlias映射非标准店铺名称
+        # 规则3:从文件元数据获取shop_id
+        # 规则4:默认值处理
         
         # 检查AccountAlias表是否存在
         try:
@@ -113,7 +113,7 @@ class DataIngestionValidator:
             logger.error(f"验证AccountAlias表失败: {e}")
         
         # 检查数据入库代码是否正确使用AccountAlias
-        # 这个检查需要静态代码分析，暂时跳过
+        # 这个检查需要静态代码分析,暂时跳过
         
         return issues
     
@@ -121,8 +121,8 @@ class DataIngestionValidator:
         """验证platform_code获取规则"""
         issues = []
         
-        # 规则1：从文件元数据获取platform_code
-        # 规则2：验证平台代码有效性
+        # 规则1:从文件元数据获取platform_code
+        # 规则2:验证平台代码有效性
         
         # 检查DimPlatform表是否存在
         try:
@@ -163,7 +163,7 @@ class DataIngestionValidator:
             
             columns = {row[0]: {'type': row[1], 'nullable': row[2]} for row in result.fetchall()}
             
-            # 检查必需字段（根据schema.py中的实际字段）
+            # 检查必需字段(根据schema.py中的实际字段)
             required_fields = ['platform', 'data_domain', 'store_label_raw', 'target_id']
             for field in required_fields:
                 if field not in columns:
@@ -175,7 +175,7 @@ class DataIngestionValidator:
                         code_location='modules/core/db/schema.py'
                     ))
         except Exception as e:
-            # 表不存在，已在_validate_shop_id_rules中处理
+            # 表不存在,已在_validate_shop_id_rules中处理
             pass
         
         return issues

@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-目标管理API（v4.11.0新增）
+目标管理API(v4.11.0新增)
 
-功能：
-1. 目标CRUD（创建、查询、更新、删除）
-2. 目标分解（按店铺/按时间）
-3. 目标达成情况查询（自动计算）
-4. 目标列表查询（分页、筛选）
+功能:
+1. 目标CRUD(创建、查询、更新、删除)
+2. 目标分解(按店铺/按时间)
+3. 目标达成情况查询(自动计算)
+4. 目标列表查询(分页、筛选)
 
-路由：
+路由:
 - GET /api/targets - 查询目标列表
 - GET /api/targets/{target_id} - 查询目标详情
 - POST /api/targets - 创建目标
@@ -35,10 +35,12 @@ from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import (
     SalesTarget,
     TargetBreakdown,
-    FactOrder,
+    # [DELETED] v4.19.0: FactOrder 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
     DimShop,
-    DimUser  # ✅ 2026-01-08: 添加用户模型用于权限检查
+    DimUser,  # ✅ 2026-01-08: 添加用户模型用于权限检查
+    PlatformAccount,  # 目标管理用店铺列表:来自账号管理 core.platform_accounts
 )
+from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
 from modules.core.logger import get_logger
 from backend.routers.auth import get_current_user  # ✅ 2026-01-08: 添加用户认证
 
@@ -52,7 +54,7 @@ async def require_admin(current_user: DimUser = Depends(get_current_user)):
     if current_user.is_superuser:
         return current_user
     
-    # 检查角色（使用 role_code 或 role_name）
+    # 检查角色(使用 role_code 或 role_name)
     is_admin = any(
         (hasattr(role, "role_code") and role.role_code == "admin") or
         (hasattr(role, "role_name") and role.role_name == "admin")
@@ -72,10 +74,10 @@ async def require_admin(current_user: DimUser = Depends(get_current_user)):
 class TargetCreateRequest(BaseModel):
     """创建目标请求"""
     target_name: str = Field(..., description="目标名称")
-    target_type: str = Field(..., description="目标类型：shop/product/campaign")
+    target_type: str = Field(..., description="目标类型:shop/product/campaign")
     period_start: date = Field(..., description="开始时间")
     period_end: date = Field(..., description="结束时间")
-    target_amount: float = Field(0.0, ge=0, description="目标销售额（CNY）")
+    target_amount: float = Field(0.0, ge=0, description="目标销售额(CNY)")
     target_quantity: int = Field(0, ge=0, description="目标订单数/销量")
     description: Optional[str] = Field(None, description="目标描述")
 
@@ -94,7 +96,7 @@ class TargetUpdateRequest(BaseModel):
 
 class BreakdownCreateRequest(BaseModel):
     """创建目标分解请求"""
-    breakdown_type: str = Field(..., description="分解类型：shop/time")
+    breakdown_type: str = Field(..., description="分解类型:shop/time")
     # 店铺分解字段
     platform_code: Optional[str] = None
     shop_id: Optional[str] = None
@@ -154,10 +156,10 @@ class BreakdownResponse(BaseModel):
 
 @router.get("", response_model=Dict[str, Any])
 async def list_targets(
-    target_type: Optional[str] = Query(None, description="目标类型筛选：shop/product/campaign"),
-    status: Optional[str] = Query(None, description="状态筛选：active/completed/cancelled"),
-    period_start: Optional[date] = Query(None, description="开始日期筛选（>=）"),
-    period_end: Optional[date] = Query(None, description="结束日期筛选（<=）"),
+    target_type: Optional[str] = Query(None, description="目标类型筛选:shop/product/campaign"),
+    status: Optional[str] = Query(None, description="状态筛选:active/completed/cancelled"),
+    period_start: Optional[date] = Query(None, description="开始日期筛选(>=)"),
+    period_end: Optional[date] = Query(None, description="结束日期筛选(<=)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db),
@@ -166,13 +168,13 @@ async def list_targets(
     """
     查询目标列表
     
-    支持筛选：类型、状态、日期范围
+    支持筛选:类型、状态、日期范围
     支持分页
     """
     try:
         query = select(SalesTarget)
         
-        # 筛选条件（与下面 count 查询保持一致）
+        # 筛选条件(与下面 count 查询保持一致)
         if target_type:
             query = query.where(SalesTarget.target_type == target_type)
         if status:
@@ -182,7 +184,7 @@ async def list_targets(
         if period_end:
             query = query.where(SalesTarget.period_end <= period_end)
         
-        # 总数查询：使用独立 count 避免子查询在部分驱动下的兼容性问题
+        # 总数查询:使用独立 count 避免子查询在部分驱动下的兼容性问题
         count_query = select(func.count(SalesTarget.id)).select_from(SalesTarget)
         if target_type:
             count_query = count_query.where(SalesTarget.target_type == target_type)
@@ -200,10 +202,10 @@ async def list_targets(
         
         targets = (await db.execute(query)).scalars().all()
         
-        # 使用 mode='json' 确保日期/时间/Decimal 可序列化，避免 500
+        # 使用 mode='json' 确保日期/时间/Decimal 可序列化,避免 500
         items = [TargetResponse.model_validate(t).model_dump(mode="json") for t in targets]
         
-        # 返回 items + total，便于前端在拦截器只返回 data 时仍能拿到分页信息
+        # 返回 items + total,便于前端在拦截器只返回 data 时仍能拿到分页信息
         return {
             "success": True,
             "data": {
@@ -223,6 +225,44 @@ async def list_targets(
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
             status_code=500
+        )
+
+
+@router.get("/shops", response_model=Dict[str, Any])
+async def list_target_shops(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    """
+    获取供目标管理使用的店铺列表(来自账号管理 core.platform_accounts)。
+
+    返回字段与分解接口一致:platform_code、shop_id、shop_name。
+    创建按店铺分解时,若后端校验 DimShop,需保证该店铺已在 dim_shops 中存在或由同步写入。
+    """
+    try:
+        query = (
+            select(PlatformAccount)
+            .where(PlatformAccount.enabled == True)
+            .order_by(PlatformAccount.platform, PlatformAccount.store_name)
+        )
+        rows = (await db.execute(query)).scalars().all()
+        items = [
+            {
+                "platform_code": r.platform.lower() if r.platform else None,  # ✅ 统一转小写,与 dim_shops 一致
+                "shop_id": r.shop_id or r.account_id or str(r.id),
+                "shop_name": r.store_name or (r.account_alias or ""),
+            }
+            for r in rows
+        ]
+        return {"success": True, "data": items}
+    except Exception as e:
+        logger.error(f"查询目标用店铺列表失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="查询店铺列表失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            status_code=500,
         )
 
 
@@ -248,7 +288,7 @@ async def get_target(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="目标不存在",
                 error_type=get_error_type(ErrorCode.TARGET_NOT_FOUND),
-                recovery_suggestion="请检查目标ID是否正确，或确认该目标已创建",
+                recovery_suggestion="请检查目标ID是否正确,或确认该目标已创建",
                 status_code=404
             )
         
@@ -290,7 +330,7 @@ async def get_target(
             message="查询目标详情失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -312,7 +352,7 @@ async def create_target(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="结束日期必须大于等于开始日期",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请调整日期范围，确保结束日期大于等于开始日期",
+                recovery_suggestion="请调整日期范围,确保结束日期大于等于开始日期",
                 status_code=400
             )
         
@@ -333,12 +373,12 @@ async def create_target(
         await db.commit()
         await db.refresh(target)
         
-        # 触发A_CLASS_UPDATED事件（数据流转流程自动化）
+        # 触发A_CLASS_UPDATED事件(数据流转流程自动化)
         try:
             from backend.utils.events import AClassUpdatedEvent
             from backend.services.event_listeners import event_listener
             
-            # 获取受影响的店铺和平台（从分解中获取）
+            # 获取受影响的店铺和平台(从分解中获取)
             breakdowns = (await db.execute(
                 select(TargetBreakdown).where(TargetBreakdown.target_id == target.id)
             )).scalars().all()
@@ -373,7 +413,7 @@ async def create_target(
             message="创建目标失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -400,7 +440,7 @@ async def update_target(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="目标不存在",
                 error_type=get_error_type(ErrorCode.TARGET_NOT_FOUND),
-                recovery_suggestion="请检查目标ID是否正确，或确认该目标已创建",
+                recovery_suggestion="请检查目标ID是否正确,或确认该目标已创建",
                 status_code=404
             )
         
@@ -416,7 +456,7 @@ async def update_target(
                     code=ErrorCode.DATA_VALIDATION_FAILED,
                     message="结束日期必须大于等于开始日期",
                     error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                    recovery_suggestion="请调整日期范围，确保结束日期大于等于开始日期",
+                    recovery_suggestion="请调整日期范围,确保结束日期大于等于开始日期",
                     status_code=400
                 )
         
@@ -428,12 +468,12 @@ async def update_target(
         await db.commit()
         await db.refresh(target)
         
-        # 触发A_CLASS_UPDATED事件（数据流转流程自动化）
+        # 触发A_CLASS_UPDATED事件(数据流转流程自动化)
         try:
             from backend.utils.events import AClassUpdatedEvent
             from backend.services.event_listeners import event_listener
             
-            # 获取受影响的店铺和平台（从分解中获取）
+            # 获取受影响的店铺和平台(从分解中获取)
             breakdowns = (await db.execute(
                 select(TargetBreakdown).where(TargetBreakdown.target_id == target_id)
             )).scalars().all()
@@ -468,7 +508,7 @@ async def update_target(
             message="更新目标失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -482,7 +522,7 @@ async def delete_target(
     """
     删除目标
     
-    同时删除关联的分解记录（CASCADE）
+    同时删除关联的分解记录(CASCADE)
     """
     try:
         target = (await db.execute(
@@ -494,11 +534,11 @@ async def delete_target(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="目标不存在",
                 error_type=get_error_type(ErrorCode.TARGET_NOT_FOUND),
-                recovery_suggestion="请检查目标ID是否正确，或确认该目标已创建",
+                recovery_suggestion="请检查目标ID是否正确,或确认该目标已创建",
                 status_code=404
             )
         
-        # 获取受影响的店铺和平台（删除前）
+        # 获取受影响的店铺和平台(删除前)
         breakdowns = (await db.execute(
             select(TargetBreakdown).where(TargetBreakdown.target_id == target_id)
         )).scalars().all()
@@ -508,7 +548,7 @@ async def delete_target(
         db.delete(target)
         await db.commit()
         
-        # 触发A_CLASS_UPDATED事件（数据流转流程自动化）
+        # 触发A_CLASS_UPDATED事件(数据流转流程自动化)
         try:
             from backend.utils.events import AClassUpdatedEvent
             from backend.services.event_listeners import event_listener
@@ -540,7 +580,7 @@ async def delete_target(
             message="删除目标失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -555,9 +595,9 @@ async def create_breakdown(
     """
     创建目标分解
     
-    支持两种分解类型：
-    1. shop：按店铺分解（需要platform_code和shop_id）
-    2. time：按时间分解（需要period_start和period_end）
+    支持两种分解类型:
+    1. shop:按店铺分解(需要platform_code和shop_id)
+    2. time:按时间分解(需要period_start和period_end)
     """
     try:
         # 验证目标存在
@@ -570,9 +610,12 @@ async def create_breakdown(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="目标不存在",
                 error_type=get_error_type(ErrorCode.TARGET_NOT_FOUND),
-                recovery_suggestion="请检查目标ID是否正确，或确认该目标已创建",
+                recovery_suggestion="请检查目标ID是否正确,或确认该目标已创建",
                 status_code=404
             )
+        
+        # ✅ 统一 platform_code 为小写(与 dim_shops 标准格式一致)
+        normalized_platform_code = request.platform_code.lower() if request.platform_code else None
         
         # 验证分解类型
         if request.breakdown_type == "shop":
@@ -585,29 +628,64 @@ async def create_breakdown(
                     status_code=400
                 )
             
-            # 验证店铺存在
+            # 验证店铺存在:优先 DimShop,其次允许来自账号管理 core.platform_accounts
             shop = (await db.execute(
                 select(DimShop).where(
-                    DimShop.platform_code == request.platform_code,
+                    DimShop.platform_code == normalized_platform_code,
                     DimShop.shop_id == request.shop_id
                 )
             )).scalar_one_or_none()
-            
             if not shop:
-                return error_response(
-                    code=ErrorCode.DATA_VALIDATION_FAILED,
-                    message="店铺不存在",
-                    error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                    recovery_suggestion="请检查店铺ID是否正确，或确认该店铺已创建",
-                    status_code=404
-                )
+                # ✅ 查询 platform_accounts 时也使用小写比较(platform 字段可能大小写不一致)
+                pa = (await db.execute(
+                    select(PlatformAccount).where(
+                        func.lower(PlatformAccount.platform) == normalized_platform_code,
+                        PlatformAccount.enabled == True,
+                        or_(
+                            PlatformAccount.shop_id == request.shop_id,
+                            PlatformAccount.account_id == request.shop_id,
+                        ),
+                    )
+                )).scalar_one_or_none()
+                if not pa:
+                    return error_response(
+                        code=ErrorCode.DATA_VALIDATION_FAILED,
+                        message="店铺不存在",
+                        error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                        recovery_suggestion="请从目标管理使用的店铺列表中选择,或先在账号管理中维护该店铺",
+                        status_code=404
+                    )
+                
+                # ✅ 自动同步店铺到 dim_shops
+                try:
+                    shop = await sync_platform_account_to_dim_shop(db, pa)
+                    if not shop:
+                        return error_response(
+                            code=ErrorCode.DATA_VALIDATION_FAILED,
+                            message="无法确定店铺ID",
+                            error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                            recovery_suggestion="请在账号管理中设置 shop_id 字段",
+                            status_code=400
+                        )
+                    logger.info(f"[TargetManagement] 自动创建店铺记录: {pa.platform}/{shop.shop_id}")
+                except Exception as e:
+                    await db.rollback()
+                    logger.error(f"[TargetManagement] 同步店铺失败: {e}", exc_info=True)
+                    return error_response(
+                        code=ErrorCode.DATABASE_QUERY_ERROR,
+                        message="创建店铺记录失败",
+                        error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+                        detail=str(e),
+                        recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
+                        status_code=500
+                    )
             
-            # 检查是否已存在
+            # 检查是否已存在(使用标准化后的 platform_code)
             existing = (await db.execute(
                 select(TargetBreakdown).where(
                     TargetBreakdown.target_id == target_id,
                     TargetBreakdown.breakdown_type == "shop",
-                    TargetBreakdown.platform_code == request.platform_code,
+                    TargetBreakdown.platform_code == normalized_platform_code,
                     TargetBreakdown.shop_id == request.shop_id
                 )
             )).scalar_one_or_none()
@@ -617,7 +695,7 @@ async def create_breakdown(
                     code=ErrorCode.DATA_UNIQUE_CONSTRAINT_VIOLATION,
                     message="该店铺分解已存在",
                     error_type=get_error_type(ErrorCode.DATA_UNIQUE_CONSTRAINT_VIOLATION),
-                    recovery_suggestion="该店铺分解已存在，无需重复创建",
+                    recovery_suggestion="该店铺分解已存在,无需重复创建",
                     status_code=400
                 )
         
@@ -636,7 +714,7 @@ async def create_breakdown(
                     code=ErrorCode.DATA_VALIDATION_FAILED,
                     message="结束日期必须大于等于开始日期",
                     error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                    recovery_suggestion="请调整日期范围，确保结束日期大于等于开始日期",
+                    recovery_suggestion="请调整日期范围,确保结束日期大于等于开始日期",
                     status_code=400
                 )
             
@@ -646,7 +724,7 @@ async def create_breakdown(
                     code=ErrorCode.DATA_VALIDATION_FAILED,
                     message="分解周期必须在目标周期范围内",
                     error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                    recovery_suggestion="请调整分解周期，确保在目标周期范围内",
+                    recovery_suggestion="请调整分解周期,确保在目标周期范围内",
                     status_code=400
                 )
         
@@ -659,11 +737,11 @@ async def create_breakdown(
                 status_code=400
             )
         
-        # 创建分解
+        # 创建分解(使用标准化后的 platform_code)
         breakdown = TargetBreakdown(
             target_id=target_id,
             breakdown_type=request.breakdown_type,
-            platform_code=request.platform_code,
+            platform_code=normalized_platform_code if request.breakdown_type == "shop" else request.platform_code,
             shop_id=request.shop_id,
             period_start=request.period_start,
             period_end=request.period_end,
@@ -678,9 +756,10 @@ async def create_breakdown(
         
         breakdown_data = BreakdownResponse.model_validate(breakdown).model_dump()
         if request.breakdown_type == "shop":
+            # ✅ 使用标准化后的 platform_code 查询店铺名称
             shop = (await db.execute(
                 select(DimShop).where(
-                    DimShop.platform_code == request.platform_code,
+                    DimShop.platform_code == normalized_platform_code,
                     DimShop.shop_id == request.shop_id
                 )
             )).scalar_one_or_none()
@@ -702,7 +781,7 @@ async def create_breakdown(
             message="创建目标分解失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -710,7 +789,7 @@ async def create_breakdown(
 @router.get("/{target_id}/breakdown", response_model=Dict[str, Any])
 async def list_breakdowns(
     target_id: int,
-    breakdown_type: Optional[str] = Query(None, description="分解类型筛选：shop/time"),
+    breakdown_type: Optional[str] = Query(None, description="分解类型筛选:shop/time"),
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),  # 查询分解仅需登录
 ):
@@ -753,7 +832,7 @@ async def list_breakdowns(
             message="查询目标分解列表失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -765,7 +844,7 @@ async def calculate_target_achievement(
     current_user: DimUser = Depends(require_admin)  # ✅ 2026-01-08: 仅管理员可访问
 ):
     """
-    计算目标达成情况（C类数据：系统自动计算）
+    计算目标达成情况(C类数据:系统自动计算)
     
     从fact_orders表聚合计算实际销售额和订单数
     更新目标和分解的达成数据
@@ -785,7 +864,7 @@ async def calculate_target_achievement(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message=str(e),
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="请检查目标ID是否正确，或确认该目标已创建",
+            recovery_suggestion="请检查目标ID是否正确,或确认该目标已创建",
             status_code=404
         )
     except HTTPException:
@@ -798,7 +877,7 @@ async def calculate_target_achievement(
             message="计算达成情况失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 

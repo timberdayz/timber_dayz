@@ -8,13 +8,13 @@ from modules.components.date_picker.base import DatePickerComponent, DatePickRes
 
 
 class TiktokDatePicker(DatePickerComponent):
-    """TikTok Shop 日期选择组件（EDS 日期控件 + iframe + testId 优先）。
+    """TikTok Shop 日期选择组件(EDS 日期控件 + iframe + testId 优先)。
 
     设计约束:
-    - 仅做 UI 操作（打开面板 -> 选择快捷项/自定义），不做硬编码导航
-    - 优先使用 data-testid（time-selector-last-7-days / -last-28-days）
-    - 面板在 iframe 内，使用 frame_locator("iframe").first 进入
-    - 失败不抛异常，由上层决定是否兜底
+    - 仅做 UI 操作(打开面板 -> 选择快捷项/自定义),不做硬编码导航
+    - 优先使用 data-testid(time-selector-last-7-days / -last-28-days)
+    - 面板在 iframe 内,使用 frame_locator("iframe").first 进入
+    - 失败不抛异常,由上层决定是否兜底
     """
 
     # Component metadata (v4.8.0)
@@ -84,7 +84,7 @@ class TiktokDatePicker(DatePickerComponent):
             return ["今日实时", "今天", "Today"]
         return [option.value]
     async def _all_roots(self, page: Any) -> list[Any]:
-        """返回可交互的根集合：[page] + 所有层级 iframe（递归）。"""
+        """返回可交互的根集合:[page] + 所有层级 iframe(递归)。"""
         roots: list[Any] = []
         stack: list[Any] = [page]
         seen = set()
@@ -111,7 +111,7 @@ class TiktokDatePicker(DatePickerComponent):
         return roots
 
     async def _find_panel_root(self, page: Any) -> Optional[Any]:
-        """在所有根上下文中定位已渲染的日期面板，返回对应 root。"""
+        """在所有根上下文中定位已渲染的日期面板,返回对应 root。"""
         panel_hints = [
             ".theme-arco-picker-dropdown",
             ".arco-picker-dropdown",
@@ -126,7 +126,7 @@ class TiktokDatePicker(DatePickerComponent):
             "div[role='tab']:has-text('\u81ea\u5b9a\u4e49')",
             "button:has-text('\u81ea\u5b9a\u4e49')",
         ]
-        # 服务表现页（service-analytics）为 m4b 定制面板，这里补充其特有容器特征
+        # 服务表现页(service-analytics)为 m4b 定制面板,这里补充其特有容器特征
         try:
             _url = page.url or ""
         except Exception:
@@ -148,7 +148,7 @@ class TiktokDatePicker(DatePickerComponent):
         return None
 
     async def _is_panel_open(self, page: Any) -> bool:
-        """在所有 root 中检查日期面板是否可见（包含 testId/自定义tab/常见面板类名）。"""
+        """在所有 root 中检查日期面板是否可见(包含 testId/自定义tab/常见面板类名)。"""
         tokens = [
             "[data-testid='time-selector-last-7-days']",
             "[data-testid='time-selector-last-28-days']",
@@ -162,7 +162,7 @@ class TiktokDatePicker(DatePickerComponent):
             ".eds-date-selector-panel",
             ".eds-date-picker__dropdown",
         ]
-        # 服务表现页（service-analytics）额外判定：m4b 快捷容器/按钮可视即认为已打开
+        # 服务表现页(service-analytics)额外判定:m4b 快捷容器/按钮可视即认为已打开
         try:
             _url2 = page.url or ""
         except Exception:
@@ -184,13 +184,13 @@ class TiktokDatePicker(DatePickerComponent):
 
 
     async def _fill_range_inputs(self, page: Any, start: date, end: date, root: Any | None = None) -> bool:
-        """直接向范围输入框填充起止日期，并点击应用/确定。
-        仅用于“最近30天”路径，以避免复杂面板点击。
+        """直接向范围输入框填充起止日期,并点击应用/确定。
+        仅用于“最近30天”路径,以避免复杂面板点击。
         """
         try:
             f = root or self._find_panel_root(page) or self._first_frame(page) or page
             try:
-                # 可选：切到“自定义”tab（若存在）
+                # 可选:切到“自定义”tab(若存在)
                 for name in ("自定义", "Custom"):
                     try:
                         f.get_by_role("tab", name=name).click(timeout=600)
@@ -274,7 +274,7 @@ class TiktokDatePicker(DatePickerComponent):
         ]
         while time.time() < ddl:
             try:
-                # 重新获取 frames，兼容 iframe 刷新
+                # 重新获取 frames,兼容 iframe 刷新
                 roots: list[Any] = [page]
                 try:
                     roots += list(getattr(page, "frames", []))
@@ -297,7 +297,7 @@ class TiktokDatePicker(DatePickerComponent):
         return False
 
     async def _try_quick_pick_without_panel(self, page: Any, option: DateOption) -> bool:
-        """在未打开下拉面板的情况下，直接点击页面级快捷项（若存在）。"""
+        """在未打开下拉面板的情况下,直接点击页面级快捷项(若存在)。"""
         targets = []
         if option == DateOption.LAST_7_DAYS:
             targets = [
@@ -363,7 +363,7 @@ class TiktokDatePicker(DatePickerComponent):
         - 优先点击 suffix 日历图标或第二个输入框
         - 在主文档与所有 iframe 中尝试
         - 点击后等待 dropdown/面板元素出现
-        - 轮询重试约 2.5s，避免页面刚导航完尚未渲染
+        - 轮询重试约 2.5s,避免页面刚导航完尚未渲染
         """
         import time
 
@@ -394,7 +394,7 @@ class TiktokDatePicker(DatePickerComponent):
             ".eds-date-selector-panel",
             ".eds-date-picker__dropdown",
         ]
-        # 等待日期控件容器就绪（iframe 刷新时可能需要数秒）
+        # 等待日期控件容器就绪(iframe 刷新时可能需要数秒)
         try:
             self._wait_analytics_ready(page, timeout_ms=6000)
         except Exception:
@@ -406,14 +406,14 @@ class TiktokDatePicker(DatePickerComponent):
             log("panel already open (pre-check)")
             return True
 
-        deadline = time.time() + 9.0  # 轮询 9 秒（首次进入常有 iframe 刷新 + 慢网更稳）
+        deadline = time.time() + 9.0  # 轮询 9 秒(首次进入常有 iframe 刷新 + 慢网更稳)
         attempt = 0
         while time.time() < deadline:
             attempt += 1
             opened = False
             for idx, ctx in enumerate(all_contexts(page)):
                 try:
-                    # 容器限定（兼容 theme-arco 与 arco 两种类名前缀）
+                    # 容器限定(兼容 theme-arco 与 arco 两种类名前缀)
                     container = None
                     for cs in [
                         "div.theme-arco-picker.theme-arco-picker-range",
@@ -434,7 +434,7 @@ class TiktokDatePicker(DatePickerComponent):
                         container.scroll_into_view_if_needed(timeout=800)
                     except Exception:
                         pass
-                    # 1) 优先点击日历图标（含 SVG/path）
+                    # 1) 优先点击日历图标(含 SVG/path)
                     choices = [
                         ".theme-arco-picker-suffix-icon",
                         "span.theme-arco-picker-suffix-icon svg",
@@ -497,7 +497,7 @@ class TiktokDatePicker(DatePickerComponent):
             except Exception:
                 pass
 
-        # 兜底：role=button 名称
+        # 兜底:role=button 名称
         if self._click_role_button_by_names(page, ["最近7天", "最近28天", "昨天", "Today", "自定义", "近7天", "近 7 天", "近28天", "近 28 天"]):
             log("clicked by role=button fallback")
             if self._is_panel_open(page):
@@ -516,14 +516,14 @@ class TiktokDatePicker(DatePickerComponent):
             if self.logger:
                 self.logger.info(f"[TiktokDatePicker] selecting: {option}")
 
-            # 1) 打开日期面板（统一入口）
+            # 1) 打开日期面板(统一入口)
             if not await self._open_panel(page):
-                # 页面或 iframe 刷新时，可能存在页级快捷项可直接生效；尝试一次无面板快捷选择
+                # 页面或 iframe 刷新时,可能存在页级快捷项可直接生效;尝试一次无面板快捷选择
                 if await self._try_quick_pick_without_panel(page, option):
                     return DatePickResult(success=True, option=option, message="ok(no-panel)")
                 return DatePickResult(success=False, option=option, message="open date panel failed")
 
-            # 2) 面板出现，定位面板 root（支持多层 iframe）
+            # 2) 面板出现,定位面板 root(支持多层 iframe)
             panel_hints = [
                 ".theme-arco-picker-dropdown",
                 ".arco-picker-dropdown",
@@ -553,7 +553,7 @@ class TiktokDatePicker(DatePickerComponent):
             panel_root = await self._find_panel_root(page) or page
             all_roots = await self._all_roots(page)
 
-            # 昨天：在服务表现(service-analytics)页使用"自然日"单日选择；其他页面保留自定义同日起止。
+            # 昨天:在服务表现(service-analytics)页使用"自然日"单日选择;其他页面保留自定义同日起止。
             from datetime import date, timedelta
             if option == DateOption.YESTERDAY:
                 y = date.today() - timedelta(days=1)
@@ -571,12 +571,12 @@ class TiktokDatePicker(DatePickerComponent):
             if option == DateOption.LAST_30_DAYS:
                 end = date.today() - timedelta(days=1)
                 start = end - timedelta(days=29)
-                # 仅对"最近30天"使用直接输入框填充，避免复杂面板点击
+                # 仅对"最近30天"使用直接输入框填充,避免复杂面板点击
                 ok = await self._fill_range_inputs(page, start, end, panel_root)
                 return DatePickResult(success=ok, option=option, message=("input-30d" if ok else "input-30d-failed"))
 
 
-            # 3a) 特例：service-analytics 使用 m4b 快捷按钮（更精准）
+            # 3a) 特例:service-analytics 使用 m4b 快捷按钮(更精准)
             try:
                 cur_url = ""
                 try:
@@ -588,11 +588,11 @@ class TiktokDatePicker(DatePickerComponent):
                     selectors = []
                     for t in texts:
                         selectors.extend([
-                            # 精准：按钮 + 内部 typography 文案
+                            # 精准:按钮 + 内部 typography 文案
                             f"button.theme-m4b-date-picker-range-with-mode-shortcut-custom-btn:has(div.theme-arco-typography:has-text('{t}'))",
-                            # 兼容旧类名：theme-arco-btn 容器内含 typography
+                            # 兼容旧类名:theme-arco-btn 容器内含 typography
                             f"button.theme-arco-btn:has(div.theme-arco-typography:has-text('{t}'))",
-                            # 宽松：仅 typography（仅在面板 root 内尝试）
+                            # 宽松:仅 typography(仅在面板 root 内尝试)
                             f"div.theme-arco-typography:has-text('{t}')",
                         ])
                     if await self._click_first(panel_root, selectors, timeout=1800):
@@ -604,7 +604,7 @@ class TiktokDatePicker(DatePickerComponent):
             except Exception:
                 pass
 
-            # 3) testId 优先选择快捷项（在所有 root 中尝试）
+            # 3) testId 优先选择快捷项(在所有 root 中尝试)
             try:
                 if option in (DateOption.LAST_7_DAYS, DateOption.LAST_28_DAYS):
                     testid = "time-selector-last-7-days" if option == DateOption.LAST_7_DAYS else "time-selector-last-28-days"
@@ -623,7 +623,7 @@ class TiktokDatePicker(DatePickerComponent):
             except Exception:
                 pass
 
-            # 4) 回退到文本/role 选择（在面板 root 与所有 root 上尝试）
+            # 4) 回退到文本/role 选择(在面板 root 与所有 root 上尝试)
             picked = False
             for text in self._variants_for(option):
                 selectors_panel = [
@@ -645,11 +645,11 @@ class TiktokDatePicker(DatePickerComponent):
                     f"[role='tab']:has-text('{text}')",
                     f"[role='button']:has-text('{text}')",
                 ]
-                # 先在面板 root 试一次（允许点击 theme-arco-typography 等）
+                # 先在面板 root 试一次(允许点击 theme-arco-typography 等)
                 if await self._click_first(panel_root, selectors_panel, timeout=1500):
                     picked = True
                     break
-                # 再在所有 root 中兜底（避免点到面板外展示性文本）
+                # 再在所有 root 中兜底(避免点到面板外展示性文本)
                 for r in all_roots:
                     if await self._click_first(r, selectors_global, timeout=1200):
                         picked = True
@@ -672,9 +672,9 @@ class TiktokDatePicker(DatePickerComponent):
     # -------- extensions for custom/week index (for future use) --------
     async def select_custom_range(self, page: Any, start: date, end: date) -> bool:
         """
-        切到“自定义”并选择起止日期（best-effort, 更稳健）。
-        步骤：确保面板 -> 切到自定义(可选) -> 锁定左右月份容器 -> 点击起/止日期 -> 点击“确定/应用”。
-        对齐 TikTok Arco 双月面板，优先在对应月份容器内定位日期，避免误点灰色日期。
+        切到“自定义”并选择起止日期(best-effort, 更稳健)。
+        步骤:确保面板 -> 切到自定义(可选) -> 锁定左右月份容器 -> 点击起/止日期 -> 点击“确定/应用”。
+        对齐 TikTok Arco 双月面板,优先在对应月份容器内定位日期,避免误点灰色日期。
         """
         try:
             def log(msg: str) -> None:
@@ -689,7 +689,7 @@ class TiktokDatePicker(DatePickerComponent):
                 return False
             f = self._find_panel_root(page) or self._first_frame(page) or page
 
-            # 1.1 兜底：在服务表现页且是“同一日”时，优先改走“自然日”路径，避免停留在“自定义”模式下点单日
+            # 1.1 兜底:在服务表现页且是“同一日”时,优先改走“自然日”路径,避免停留在“自定义”模式下点单日
             try:
                 cur_url = ""
                 try:
@@ -712,7 +712,7 @@ class TiktokDatePicker(DatePickerComponent):
             except Exception:
                 pass
 
-            # 2) 切到“自定义”tab（若存在）
+            # 2) 切到“自定义”tab(若存在)
             try:
                 f.get_by_role("tab", name="自定义").click(timeout=1200)
                 log("switched to 自定义 tab")
@@ -723,14 +723,14 @@ class TiktokDatePicker(DatePickerComponent):
                 except Exception:
                     pass
 
-            # 统一规范：将 end 归一化为“昨天”（避免选择到未统计的当天导致禁用/空数据）
+            # 统一规范:将 end 归一化为“昨天”(避免选择到未统计的当天导致禁用/空数据)
             try:
                 if end >= date.today():
                     end = date.today() - timedelta(days=1)
             except Exception:
                 pass
 
-            # 统一：优先采用面板对齐+点击；输入框仅作为最后兜底
+            # 统一:优先采用面板对齐+点击;输入框仅作为最后兜底
             try:
                 span = (end - start).days if (end and start) else None
             except Exception:
@@ -746,7 +746,7 @@ class TiktokDatePicker(DatePickerComponent):
 
 
             def month_header_texts(y: int, m2: str) -> list[str]:
-                # 兼容多种标题格式："2025-09"、"2025 - 09"、"2025/09"、"2025.09"
+                # 兼容多种标题格式:"2025-09"、"2025 - 09"、"2025/09"、"2025.09"
                 return [
                     f"{y}-{m2}",
                     f"{y} - {m2}",
@@ -755,7 +755,7 @@ class TiktokDatePicker(DatePickerComponent):
                 ]
 
             def month_container(y: int, m2: str, *, prefer_right: bool = False):
-                # 依据 header 文本锁定该月份的面板容器（多格式容错）
+                # 依据 header 文本锁定该月份的面板容器(多格式容错)
                 try:
                     for hdr in month_header_texts(y, m2):
                         try:
@@ -768,7 +768,7 @@ class TiktokDatePicker(DatePickerComponent):
                             continue
                 except Exception:
                     pass
-                # fallback: 若无法由 header 锁定，则在双面板中优先取左/右
+                # fallback: 若无法由 header 锁定,则在双面板中优先取左/右
                 try:
                     panels = f.locator(".theme-arco-picker-panel")
                     if panels.count() >= 2:
@@ -779,20 +779,20 @@ class TiktokDatePicker(DatePickerComponent):
 
             def click_day(container, day: int, *, require_enabled: bool = False) -> bool:
                 selectors = []
-                # 优先：只点击未禁用的日期单元格（防止点到灰禁用的右侧面板）
+                # 优先:只点击未禁用的日期单元格(防止点到灰禁用的右侧面板)
                 if require_enabled:
                     selectors.append(
                         lambda: container.locator(
                             ".theme-arco-picker-cell:not(.theme-arco-picker-cell-disabled):has-text('{}')".format(day)
                         ).first
                     )
-                    # 更贴近 DOM 的值节点（date-value），不少实现点击该节点也可选中
+                    # 更贴近 DOM 的值节点(date-value),不少实现点击该节点也可选中
                     selectors.append(
                         lambda: container.locator(
                             ".theme-arco-picker-cell:not(.theme-arco-picker-cell-disabled) .theme-arco-picker-date-value:has-text('{}')".format(day)
                         ).first
                     )
-                # 兜底：常规可交互元素（不强制未禁用）
+                # 兜底:常规可交互元素(不强制未禁用)
                 selectors.extend([
                     lambda: container.get_by_role("gridcell", name=str(day)).first,
                     lambda: container.get_by_role("button", name=str(day)).first,
@@ -839,13 +839,13 @@ class TiktokDatePicker(DatePickerComponent):
             def nav_next(count: int = 1) -> None:
                 for _ in range(max(1, count)):
                     clicked = False
-                    # 1) 官方类名（通常为月份箭头）
+                    # 1) 官方类名(通常为月份箭头)
                     try:
                         f.locator(".theme-arco-picker-header-icon-btn-next").first.click(timeout=600)
                         clicked = True
                     except Exception:
                         pass
-                    # 2) 操作区第3个按钮（›，月份右箭头），避免点击年份 »
+                    # 2) 操作区第3个按钮(›,月份右箭头),避免点击年份 »
                     if not clicked:
                         try:
                             ops = f.locator(".theme-arco-picker-header-operations button")
@@ -854,14 +854,14 @@ class TiktokDatePicker(DatePickerComponent):
                                 clicked = True
                         except Exception:
                             pass
-                    # 3) 语义按钮兜底（›）
+                    # 3) 语义按钮兜底(›)
                     if not clicked:
                         try:
                             f.get_by_role("button", name="›").click(timeout=600)
                             clicked = True
                         except Exception:
                             pass
-                    # 4) header 内图标精确索引（第3个 ≈ ›），避免点击年份 »
+                    # 4) header 内图标精确索引(第3个 ≈ ›),避免点击年份 »
                     if not clicked:
                         try:
                             hdr = f.locator(".theme-arco-picker-header, .theme-arco-picker-header-operations").first
@@ -876,13 +876,13 @@ class TiktokDatePicker(DatePickerComponent):
             def nav_prev(count: int = 1) -> None:
                 for _ in range(max(1, count)):
                     clicked = False
-                    # 1) 官方类名（通常为月份箭头）
+                    # 1) 官方类名(通常为月份箭头)
                     try:
                         f.locator(".theme-arco-picker-header-icon-btn-prev").first.click(timeout=600)
                         clicked = True
                     except Exception:
                         pass
-                    # 2) 操作区第2个按钮（‹，月份左箭头），避免点击年份 «
+                    # 2) 操作区第2个按钮(‹,月份左箭头),避免点击年份 «
                     if not clicked:
                         try:
                             ops = f.locator(".theme-arco-picker-header-operations button")
@@ -891,14 +891,14 @@ class TiktokDatePicker(DatePickerComponent):
                                 clicked = True
                         except Exception:
                             pass
-                    # 3) 语义按钮兜底（‹）
+                    # 3) 语义按钮兜底(‹)
                     if not clicked:
                         try:
                             f.get_by_role("button", name="‹").click(timeout=600)
                             clicked = True
                         except Exception:
                             pass
-                    # 4) header 内图标精确索引（第2个 ≈ ‹），避免点击年份 «
+                    # 4) header 内图标精确索引(第2个 ≈ ‹),避免点击年份 «
                     if not clicked:
                         try:
                             hdr = f.locator(".theme-arco-picker-header, .theme-arco-picker-header-operations").first
@@ -911,7 +911,7 @@ class TiktokDatePicker(DatePickerComponent):
                             pass
 
 
-            # 兜底：直接向输入框填充起止日期（保留为最后一层，不影响首选点击流程）
+            # 兜底:直接向输入框填充起止日期(保留为最后一层,不影响首选点击流程)
             def try_fill_inputs() -> bool:
                 try:
                     inputs = f.locator(".theme-arco-picker-input-range input")
@@ -965,12 +965,12 @@ class TiktokDatePicker(DatePickerComponent):
                     pass
                 return False
 
-            # 强制填充（移除 readonly 并触发事件）。优先用于“同日”选择，避免面板频繁重排导致闪烁。
+            # 强制填充(移除 readonly 并触发事件)。优先用于“同日”选择,避免面板频繁重排导致闪烁。
             def force_fill_inputs_single_day() -> bool:
                 try:
                     inputs = f.locator(".theme-arco-picker-input-range input")
                     if inputs.count() >= 2:
-                        # 多种格式尝试，兼容英文/数字化显示
+                        # 多种格式尝试,兼容英文/数字化显示
                         candidates = [
                             start.strftime("%Y-%m-%d"),
                             start.strftime("%Y/%m/%d"),
@@ -981,7 +981,7 @@ class TiktokDatePicker(DatePickerComponent):
                             try:
                                 for i in range(2):
                                     el = inputs.nth(i)
-                                    # 去掉 readonly，直接设置值并派发事件
+                                    # 去掉 readonly,直接设置值并派发事件
                                     el.evaluate(
                                         "(e, v) => { e.removeAttribute('readonly'); e.focus(); e.value = v; e.dispatchEvent(new Event('input', {bubbles:true})); e.dispatchEvent(new Event('change', {bubbles:true})); }",
                                         val,
@@ -997,7 +997,7 @@ class TiktokDatePicker(DatePickerComponent):
                                     page.wait_for_timeout(350)
                                 except Exception:
                                     pass
-                                # 读取一次实际展示值（可能会被本地化为 Sep 16, 2025 等，只要非空即认定成功）
+                                # 读取一次实际展示值(可能会被本地化为 Sep 16, 2025 等,只要非空即认定成功)
                                 cur_s = inputs.nth(0).input_value()
                                 cur_e = inputs.nth(1).input_value()
                                 if cur_s and cur_e:
@@ -1009,7 +1009,7 @@ class TiktokDatePicker(DatePickerComponent):
                     pass
                 return False
 
-            # 新对齐器：根据“当前右侧标题”与目标截止月比较，决定 <- 或 ->，每步后校验
+            # 新对齐器:根据“当前右侧标题”与目标截止月比较,决定 <- 或 ->,每步后校验
             def _parse_header_month(idx: int) -> tuple[int, int] | None:
                 try:
                     import re
@@ -1036,7 +1036,7 @@ class TiktokDatePicker(DatePickerComponent):
                     if cur_left and cur_right and (cur_left == target_left and cur_right == target_right):
                         return True
 
-                    # 决策方向：优先右侧对齐到截止月；无法识别则不点击，等待并重试
+                    # 决策方向:优先右侧对齐到截止月;无法识别则不点击,等待并重试
                     direction = None
                     if cur_right is not None:
                         cmp_r = _cmp(cur_right, target_right)
@@ -1101,25 +1101,25 @@ class TiktokDatePicker(DatePickerComponent):
             tgt_left = (start.year, start.month)
             tgt_right = (end.year, end.month)
 
-            # 优先：同日范围用“强制填充”规避 UI 抽搐
+            # 优先:同日范围用“强制填充”规避 UI 抽搐
             if start == end:
                 if force_fill_inputs_single_day():
                     return True
 
-            # 同月范围（含“昨天”等单日）：跳过强制双面板对齐，直接在可见月份容器内点击
+            # 同月范围(含“昨天”等单日):跳过强制双面板对齐,直接在可见月份容器内点击
             if ym_start != ym_end:
                 if not ensure_alignment(tgt_left, tgt_right):
                     log(f"start month not visible after alignment: {(tgt_left[0], f'{tgt_left[1]:02d}')} | right={(tgt_right[0], f'{tgt_right[1]:02d}')} ")
-                    # 兜底：直接填充输入框（最后一层）
+                    # 兜底:直接填充输入框(最后一层)
                     if try_fill_inputs():
                         return True
                     return False
 
-            # 4) 点击起/止日期（强制跨月时左=起始月，右=截止月）
+            # 4) 点击起/止日期(强制跨月时左=起始月,右=截止月)
             panels = f.locator(".theme-arco-picker-panel")
 
             def header_matches(idx: int, y: int, m2: str) -> bool:
-                """更稳健地匹配面板标题月份，容忍 NBSP/窄空格/中英文格式。
+                """更稳健地匹配面板标题月份,容忍 NBSP/窄空格/中英文格式。
 
                 idx: 0=左面板, 1=右面板
                 y: 年, m2: 'MM'
@@ -1131,7 +1131,7 @@ class TiktokDatePicker(DatePickerComponent):
                     txt = hdr.inner_text(timeout=800)
 
                     def norm(s: str) -> str:
-                        # 统一各种空白与分隔符，转成 y-m 的无空格格式
+                        # 统一各种空白与分隔符,转成 y-m 的无空格格式
                         s = (s or "").replace("\xa0", " ").strip()
                         s = re.sub(r"[\u2000-\u200b\u202f]", "", s)  # 窄空格/零宽空格
                         s = s.replace("年", "-").replace("月", "")
@@ -1141,7 +1141,7 @@ class TiktokDatePicker(DatePickerComponent):
                         return s
 
                     n_txt = norm(txt)
-                    # 同时支持：2025-09 / 2025 - 09 / 2025/09 / 2025.09 / 2025年9月 / 2025年09月
+                    # 同时支持:2025-09 / 2025 - 09 / 2025/09 / 2025.09 / 2025年9月 / 2025年09月
                     patterns = month_header_texts(y, m2) + [f"{y}年{int(m2)}月", f"{y}年{m2}月"]
                     for t in patterns:
                         if norm(t) in n_txt:
@@ -1150,7 +1150,7 @@ class TiktokDatePicker(DatePickerComponent):
                     return False
                 return False
 
-            # 起始日点击前，先显式激活“开始日期”输入框，避免控件仍处于“结束日期/快捷范围”模式
+            # 起始日点击前,先显式激活“开始日期”输入框,避免控件仍处于“结束日期/快捷范围”模式
             try:
                 page.get_by_role("textbox", name="开始日期").click(timeout=800)
             except Exception:
@@ -1161,11 +1161,11 @@ class TiktokDatePicker(DatePickerComponent):
                         f.locator(".theme-arco-picker-input-range input").nth(0).click(timeout=800)
                     except Exception:
                         pass
-            # 起始日点击（优先选中目标月份容器）
+            # 起始日点击(优先选中目标月份容器)
             start_container = month_container(*ym_start)
             ok_start = click_day(start_container, start.day, require_enabled=True)
             if not ok_start:
-                # 放宽限制再试一次（允许点击已选中的单元格 / date-value 节点）
+                # 放宽限制再试一次(允许点击已选中的单元格 / date-value 节点)
                 ok_start = click_day(start_container, start.day, require_enabled=False)
                 if not ok_start:
                     try:
@@ -1188,13 +1188,13 @@ class TiktokDatePicker(DatePickerComponent):
                 return False
 
             if start == end or ym_start == ym_end:
-                # 同日或同月：再次点击同面板/同月
+                # 同日或同月:再次点击同面板/同月
                 try:
                     page.wait_for_timeout(300)
                 except Exception:
                     pass
                 if not click_day(start_container, end.day, require_enabled=True):
-                    # 有些实现需要先激活“结束日期”输入框，再点截止日
+                    # 有些实现需要先激活“结束日期”输入框,再点截止日
                     try:
                         page.get_by_role("textbox", name="结束日期").click(timeout=800)
                     except Exception:
@@ -1212,7 +1212,7 @@ class TiktokDatePicker(DatePickerComponent):
                     # 再次在当前容器尝试
                     ok2 = click_day(start_container, end.day, require_enabled=True)
                     if not ok2:
-                        # 放宽限制再试一次（允许点击已选中的单元格 / 直接点击 date-value）
+                        # 放宽限制再试一次(允许点击已选中的单元格 / 直接点击 date-value)
                         ok2 = click_day(start_container, end.day, require_enabled=False)
                         if not ok2:
                             try:
@@ -1228,7 +1228,7 @@ class TiktokDatePicker(DatePickerComponent):
                             except Exception:
                                 ok2 = False
                     if not ok2:
-                        # 兜底：尝试在另一侧面板点击
+                        # 兜底:尝试在另一侧面板点击
                         try:
                             alt = panels.nth(1) if start_container == panels.nth(0) else panels.nth(0)
                             if not click_day(alt, end.day, require_enabled=True):
@@ -1239,7 +1239,7 @@ class TiktokDatePicker(DatePickerComponent):
                                 return True
                             return False
             else:
-                # 先激活“结束日期”输入框，很多实现会以当前焦点决定右侧面板的可交互状态
+                # 先激活“结束日期”输入框,很多实现会以当前焦点决定右侧面板的可交互状态
                 try:
                     page.get_by_role("textbox", name="End date").click(timeout=800)
                 except Exception:
@@ -1251,7 +1251,7 @@ class TiktokDatePicker(DatePickerComponent):
                         except Exception:
                             pass
 
-                # 再校验对齐（防护：起始点击或聚焦后 UI 可能轻微重排）
+                # 再校验对齐(防护:起始点击或聚焦后 UI 可能轻微重排)
                 tgt_left = (start.year, start.month)
                 tgt_right = (end.year, end.month)
                 if not ensure_alignment(tgt_left, tgt_right):
@@ -1265,19 +1265,19 @@ class TiktokDatePicker(DatePickerComponent):
                         return True
                     return False
 
-                # 明确在右侧“截止月”容器中点击截止日（先按 header 锁定容器，再点击）
+                # 明确在右侧“截止月”容器中点击截止日(先按 header 锁定容器,再点击)
                 try:
                     end_container = month_container(*ym_end, prefer_right=True)
                     if not click_day(end_container, end.day, require_enabled=True):
                         raise Exception("end day click failed in header-locked container")
                 except Exception:
-                    # 兜底1：直接使用右侧面板
+                    # 兜底1:直接使用右侧面板
                     try:
                         end_container = panels.nth(1)
                         if not click_day(end_container, end.day, require_enabled=True):
                             raise Exception("end day click failed in right panel")
                     except Exception:
-                        # 兜底2：全局按文本点击
+                        # 兜底2:全局按文本点击
                         tried = False
                         for scope in (f, page):
                             try:
@@ -1288,12 +1288,12 @@ class TiktokDatePicker(DatePickerComponent):
                                 continue
                         if not tried:
                             log(f"end day click failed: {end}")
-                            # 最终兜底：直接填充输入框
+                            # 最终兜底:直接填充输入框
                             if try_fill_inputs():
                                 return True
                             return False
 
-            # 5) 点击确认按钮（若存在）
+            # 5) 点击确认按钮(若存在)
             for label in ["确定", "应用", "确认", "完成", "Apply", "OK", "Done"]:
                 try:
                     f.get_by_role("button", name=label).click(timeout=500)
@@ -1327,7 +1327,7 @@ class TiktokDatePicker(DatePickerComponent):
 
     async def select_week_index(self, page: Any, year: int, month: int, week_idx: int) -> bool:
         """
-        某月第 N 周（周一~周日），内部转自定义区间。N 从 1 开始。
+        某月第 N 周(周一~周日),内部转自定义区间。N 从 1 开始。
         """
         try:
             first = date(year, month, 1)
@@ -1342,8 +1342,8 @@ class TiktokDatePicker(DatePickerComponent):
 
     async def select_natural_day(self, page: Any, target_day: date) -> bool:
         """服务表现页面的“自然日”单日选择。
-        流程：打开面板 -> 点击“自然日”Tab -> 校验/对齐月份 -> 点击当月日历中的目标日期。
-        只做 UI 操作，不写入输入框。
+        流程:打开面板 -> 点击“自然日”Tab -> 校验/对齐月份 -> 点击当月日历中的目标日期。
+        只做 UI 操作,不写入输入框。
         """
         try:
             # 1) 确保日期面板已打开
@@ -1352,7 +1352,7 @@ class TiktokDatePicker(DatePickerComponent):
 
             f = self._find_panel_root(page) or self._first_frame(page) or page
 
-            # 2) 切换到“自然日”模式（service-analytics 使用 m4b 分段按钮）。若无法成功切换，直接返回失败，避免在“自定义”下继续点击日期。
+            # 2) 切换到“自然日”模式(service-analytics 使用 m4b 分段按钮)。若无法成功切换,直接返回失败,避免在“自定义”下继续点击日期。
             def _log(msg: str) -> None:
                 try:
                     (self.logger.info if self.logger else print)(f"[TiktokDatePicker] natural-day: {msg}")
@@ -1368,7 +1368,7 @@ class TiktokDatePicker(DatePickerComponent):
             except Exception:
                 pass
 
-            # 2.1 精确属性定位（你提供的 DOM）
+            # 2.1 精确属性定位(你提供的 DOM)
             for r in roots:
                 try:
                     nat = r.locator(
@@ -1428,7 +1428,7 @@ class TiktokDatePicker(DatePickerComponent):
                 _log("FAILED to switch to 自然日; abort to avoid using 自定义")
                 return False
 
-            # 3) 读取当前月份标题，并与目标月份对齐
+            # 3) 读取当前月份标题,并与目标月份对齐
             import re
 
             def parse_header_y_m() -> tuple[int, int] | None:
@@ -1503,7 +1503,7 @@ class TiktokDatePicker(DatePickerComponent):
                     page.wait_for_timeout(160)
                 except Exception:
                     pass
-            # 再核验一次；打印更直观的月份确认日志
+            # 再核验一次;打印更直观的月份确认日志
             cur = parse_header_y_m()
             def _ym_str(t: tuple[int,int] | None) -> str:
                 try:
@@ -1515,7 +1515,7 @@ class TiktokDatePicker(DatePickerComponent):
             if not aligned:
                 _log(f"header not matched (cur={cur}, target={target_ym}), fallback to global day search")
 
-            # 4) 点击日期（优先选中未禁用单元格；双面板全量搜索）
+            # 4) 点击日期(优先选中未禁用单元格;双面板全量搜索)
             def click_in_container(container, day_val: int) -> bool:
                 # 优先命中未禁用
                 for sel in (
@@ -1529,7 +1529,7 @@ class TiktokDatePicker(DatePickerComponent):
                             return True
                     except Exception:
                         continue
-                # 兜底：通用 gridcell/button/text
+                # 兜底:通用 gridcell/button/text
                 for q in (
                     container.get_by_role("gridcell", name=str(day_val)).first,
                     container.get_by_role("button", name=str(day_val)).first,
@@ -1556,13 +1556,13 @@ class TiktokDatePicker(DatePickerComponent):
             except Exception:
                 pass
             if not clicked:
-                # 最终兜底：直接在面板根内搜索
+                # 最终兜底:直接在面板根内搜索
                 clicked = click_in_container(f, day)
             if not clicked:
                 _log("FAILED to click target day in natural-day mode")
                 return False
 
-            # 5) 可选：点击“确定/应用/OK”（若存在即点一下）
+            # 5) 可选:点击“确定/应用/OK”(若存在即点一下)
             for label in ("确定", "应用", "确认", "完成", "Apply", "OK", "Done"):
                 try:
                     f.get_by_role("button", name=label).click(timeout=400)

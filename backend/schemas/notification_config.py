@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator, EmailStr
 # ==================== SMTP配置 ====================
 
 class SMTPConfigResponse(BaseModel):
-    """SMTP配置响应模型（密码不返回）"""
+    """SMTP配置响应模型(密码不返回)"""
     id: int
     smtp_server: str
     smtp_port: int
@@ -31,10 +31,10 @@ class SMTPConfigResponse(BaseModel):
 class SMTPConfigUpdate(BaseModel):
     """SMTP配置更新请求"""
     smtp_server: Optional[str] = Field(None, max_length=256, description="SMTP服务器地址")
-    smtp_port: Optional[int] = Field(None, ge=1, le=65535, description="SMTP端口（1-65535）")
+    smtp_port: Optional[int] = Field(None, ge=1, le=65535, description="SMTP端口(1-65535)")
     use_tls: Optional[bool] = Field(None, description="是否使用TLS")
     username: Optional[str] = Field(None, max_length=256, description="SMTP用户名")
-    password: Optional[str] = Field(None, description="SMTP密码（明文，将加密存储）")
+    password: Optional[str] = Field(None, description="SMTP密码(明文,将加密存储)")
     from_email: Optional[EmailStr] = Field(None, description="发件人邮箱")
     from_name: Optional[str] = Field(None, max_length=128, description="发件人名称")
     is_active: Optional[bool] = Field(None, description="是否启用")
@@ -68,11 +68,11 @@ class NotificationTemplateResponse(BaseModel):
 
 class NotificationTemplateCreate(BaseModel):
     """通知模板创建请求"""
-    template_name: str = Field(..., max_length=128, description="模板名称（唯一）")
-    template_type: str = Field(..., description="模板类型（email/sms/push）")
-    subject: Optional[str] = Field(None, max_length=256, description="邮件主题（email类型必填）")
-    content: str = Field(..., description="模板内容（支持变量如 {{user_name}}）")
-    variables: Optional[Dict[str, Any]] = Field(None, description="可用变量说明（JSON格式）")
+    template_name: str = Field(..., max_length=128, description="模板名称(唯一)")
+    template_type: str = Field(..., description="模板类型(email/sms/push)")
+    subject: Optional[str] = Field(None, max_length=256, description="邮件主题(email类型必填)")
+    content: str = Field(..., description="模板内容(支持变量如 {{user_name}})")
+    variables: Optional[Dict[str, Any]] = Field(None, description="可用变量说明(JSON格式)")
     is_active: bool = Field(True, description="是否启用")
     
     @field_validator('template_type')
@@ -86,7 +86,7 @@ class NotificationTemplateCreate(BaseModel):
 class NotificationTemplateUpdate(BaseModel):
     """通知模板更新请求"""
     template_name: Optional[str] = Field(None, max_length=128, description="模板名称")
-    template_type: Optional[str] = Field(None, description="模板类型（email/sms/push）")
+    template_type: Optional[str] = Field(None, description="模板类型(email/sms/push)")
     subject: Optional[str] = Field(None, max_length=256, description="邮件主题")
     content: Optional[str] = Field(None, description="模板内容")
     variables: Optional[Dict[str, Any]] = Field(None, description="可用变量说明")
@@ -101,7 +101,7 @@ class NotificationTemplateUpdate(BaseModel):
 
 
 class NotificationTemplateListResponse(BaseModel):
-    """通知模板列表响应（分页）"""
+    """通知模板列表响应(分页)"""
     data: List[NotificationTemplateResponse]
     page: int
     page_size: int
@@ -131,13 +131,13 @@ class AlertRuleResponse(BaseModel):
 
 class AlertRuleCreate(BaseModel):
     """告警规则创建请求"""
-    rule_name: str = Field(..., max_length=128, description="规则名称（唯一）")
-    rule_type: str = Field(..., description="规则类型（system/performance/security/business）")
-    condition: Dict[str, Any] = Field(..., description="触发条件（JSON格式）")
+    rule_name: str = Field(..., max_length=128, description="规则名称(唯一)")
+    rule_type: str = Field(..., description="规则类型(system/performance/security/business)")
+    condition: Dict[str, Any] = Field(..., description="触发条件(JSON格式)")
     template_id: Optional[int] = Field(None, description="关联的通知模板ID")
-    recipients: Optional[List[Any]] = Field(None, description="收件人列表（JSON格式）")
+    recipients: Optional[List[Any]] = Field(None, description="收件人列表(JSON格式)")
     enabled: bool = Field(True, description="是否启用")
-    priority: str = Field("medium", description="优先级（low/medium/high/critical）")
+    priority: str = Field("medium", description="优先级(low/medium/high/critical)")
     
     @field_validator('rule_type')
     @classmethod
@@ -180,7 +180,7 @@ class AlertRuleUpdate(BaseModel):
 
 
 class AlertRuleListResponse(BaseModel):
-    """告警规则列表响应（分页）"""
+    """告警规则列表响应(分页)"""
     data: List[AlertRuleResponse]
     page: int
     page_size: int

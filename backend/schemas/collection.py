@@ -2,7 +2,7 @@
 数据采集相关的Pydantic Schemas
 用于采集配置、任务管理、账号管理等API
 
-v4.18.0: 从backend/routers/collection.py迁移到schemas（Contract-First架构）
+v4.18.0: 从backend/routers/collection.py迁移到schemas(Contract-First架构)
 """
 
 from datetime import datetime, date
@@ -13,12 +13,12 @@ from pydantic import BaseModel, Field, ConfigDict
 # ==================== 采集配置 ====================
 
 class CollectionConfigCreate(BaseModel):
-    """创建采集配置请求（v4.7.0）"""
-    name: Optional[str] = Field(None, min_length=1, max_length=100, description="配置名称（留空自动生成）")
+    """创建采集配置请求(v4.7.0)"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100, description="配置名称(留空自动生成)")
     platform: str = Field(..., pattern="^(shopee|tiktok|miaoshou)$", description="平台")
-    account_ids: List[str] = Field(..., description="账号ID列表（空数组表示所有活跃账号）")
+    account_ids: List[str] = Field(..., description="账号ID列表(空数组表示所有活跃账号)")
     data_domains: List[str] = Field(..., min_length=1, description="数据域列表")
-    sub_domains: Optional[List[str]] = Field(None, description="子域数组（v4.7.0）")
+    sub_domains: Optional[List[str]] = Field(None, description="子域数组(v4.7.0)")
     granularity: str = Field("daily", pattern="^(daily|weekly|monthly)$", description="粒度")
     date_range_type: str = Field("yesterday", description="日期范围类型")
     custom_date_start: Optional[date] = Field(None, description="自定义开始日期")
@@ -29,11 +29,11 @@ class CollectionConfigCreate(BaseModel):
 
 
 class CollectionConfigUpdate(BaseModel):
-    """更新采集配置请求（v4.7.0）"""
+    """更新采集配置请求(v4.7.0)"""
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     account_ids: Optional[List[str]] = None
     data_domains: Optional[List[str]] = None
-    sub_domains: Optional[List[str]] = Field(None, description="子域数组（v4.7.0）")
+    sub_domains: Optional[List[str]] = Field(None, description="子域数组(v4.7.0)")
     granularity: Optional[str] = None
     date_range_type: Optional[str] = None
     custom_date_start: Optional[date] = None
@@ -45,13 +45,13 @@ class CollectionConfigUpdate(BaseModel):
 
 
 class CollectionConfigResponse(BaseModel):
-    """采集配置响应（v4.7.0）"""
+    """采集配置响应(v4.7.0)"""
     id: int
     name: str
     platform: str
     account_ids: List[str]
     data_domains: List[str]
-    sub_domains: Optional[List[str]] = Field(None, description="子域数组（v4.7.0）")
+    sub_domains: Optional[List[str]] = Field(None, description="子域数组(v4.7.0)")
     granularity: str
     date_range_type: str
     custom_date_start: Optional[date]
@@ -70,21 +70,21 @@ class CollectionConfigResponse(BaseModel):
 # ==================== 采集任务 ====================
 
 class TaskCreateRequest(BaseModel):
-    """创建采集任务请求（v4.7.0 + Phase 9.1）"""
+    """创建采集任务请求(v4.7.0 + Phase 9.1)"""
     platform: str = Field(..., pattern="^(shopee|tiktok|miaoshou)$", description="平台")
     account_id: str = Field(..., description="账号ID")
     data_domains: List[str] = Field(..., min_length=1, description="数据域列表")
-    sub_domains: Optional[List[str]] = Field(None, description="子域数组（v4.7.0）")
+    sub_domains: Optional[List[str]] = Field(None, description="子域数组(v4.7.0)")
     granularity: str = Field("daily", pattern="^(daily|weekly|monthly)$", description="粒度")
     date_range: Dict[str, str] = Field(..., description="日期范围 {'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD'}")
     config_id: Optional[int] = Field(None, description="关联配置ID")
-    debug_mode: bool = Field(False, description="调试模式（临时有头浏览器）")
-    parallel_mode: bool = Field(False, description="[*] Phase 9.1: 并行执行模式（多域并行采集）")
-    max_parallel: int = Field(3, ge=1, le=5, description="[*] Phase 9.1: 最大并发数（1-5）")
+    debug_mode: bool = Field(False, description="调试模式(临时有头浏览器)")
+    parallel_mode: bool = Field(False, description="[*] Phase 9.1: 并行执行模式(多域并行采集)")
+    max_parallel: int = Field(3, ge=1, le=5, description="[*] Phase 9.1: 最大并发数(1-5)")
 
 
 class TaskResponse(BaseModel):
-    """任务响应（v4.7.0）"""
+    """任务响应(v4.7.0)"""
     id: int
     task_id: str
     platform: str
@@ -95,7 +95,7 @@ class TaskResponse(BaseModel):
     files_collected: int
     trigger_type: str
     data_domains: Optional[List[str]]
-    sub_domains: Optional[List[str]] = Field(None, description="子域数组（v4.7.0）")
+    sub_domains: Optional[List[str]] = Field(None, description="子域数组(v4.7.0)")
     granularity: Optional[str]
     date_range: Optional[Dict[str, str]]
     # v4.7.0 任务粒度优化字段
@@ -124,10 +124,10 @@ class TaskLogResponse(BaseModel):
     timestamp: datetime
 
 
-# ==================== 账号管理（采集模块专用）====================
+# ==================== 账号管理(采集模块专用)====================
 
 class CollectionAccountResponse(BaseModel):
-    """账号响应（脱敏，用于采集模块）"""
+    """账号响应(脱敏,用于采集模块)"""
     id: str
     name: str
     platform: str

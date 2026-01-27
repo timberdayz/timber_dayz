@@ -1,13 +1,13 @@
 """
 Python Component Adapter - 异步 Python 组件统一适配层
 
-职责：
+职责:
 - 为 executor_v2 提供统一的 Python 组件执行接口
-- 集中处理账号预处理（密码解密）
+- 集中处理账号预处理(密码解密)
 - 替代 YAML 组件的 component_call 机制
 - 提供组件调用方法供子组件间调用
 
-用法：
+用法:
     adapter = PythonComponentAdapter(platform="shopee", account=account_dict, config=config_dict)
     result = await adapter.login(page)
     result = await adapter.navigate(page, target_page="orders")
@@ -74,7 +74,7 @@ class AdapterResult:
 class PythonComponentAdapter:
     """Python 组件统一适配层
     
-    提供异步的组件执行接口，替代 YAML 组件的执行逻辑。
+    提供异步的组件执行接口,替代 YAML 组件的执行逻辑。
     v4.8.0: 支持步骤回调和步骤ID命名空间
     """
     
@@ -91,13 +91,13 @@ class PythonComponentAdapter:
         """初始化适配器
         
         Args:
-            platform: 平台标识（如 "shopee"、"tiktok"、"miaoshou"）
-            account: 账号信息字典（包含 username、password 等）
-            config: 额外配置（如 granularity、date_range 等）
+            platform: 平台标识(如 "shopee"、"tiktok"、"miaoshou")
+            account: 账号信息字典(包含 username、password 等)
+            config: 额外配置(如 granularity、date_range 等)
             logger: 可选的日志记录器
-            step_callback: 步骤进度回调（v4.8.0）
-            step_prefix: 步骤ID前缀，用于嵌套组件（v4.8.0）
-            is_test_mode: 是否为测试模式（v4.8.0）
+            step_callback: 步骤进度回调(v4.8.0)
+            step_prefix: 步骤ID前缀,用于嵌套组件(v4.8.0)
+            is_test_mode: 是否为测试模式(v4.8.0)
         """
         self.platform = platform
         self.account = self._prepare_account(account)
@@ -122,13 +122,13 @@ class PythonComponentAdapter:
         self._component_cache: Dict[str, Any] = {}
     
     def _prepare_account(self, account: Dict[str, Any]) -> Dict[str, Any]:
-        """准备账号信息（含密码解密）
+        """准备账号信息(含密码解密)
         
         Args:
             account: 原始账号信息
             
         Returns:
-            Dict: 处理后的账号信息（密码已解密）
+            Dict: 处理后的账号信息(密码已解密)
         """
         prepared = account.copy()
         
@@ -141,7 +141,7 @@ class PythonComponentAdapter:
                 prepared["password"] = decrypted
                 logger.info("[Adapter] Password decrypted successfully")
             except Exception as e:
-                # 降级：使用原值（可能是明文或空）
+                # 降级:使用原值(可能是明文或空)
                 logger.warning(f"[Adapter] Password decryption failed, using original: {e}")
                 if "password" not in prepared:
                     prepared["password"] = prepared.get("password_encrypted", "")
@@ -152,10 +152,10 @@ class PythonComponentAdapter:
         """加载组件类
         
         Args:
-            component_name: 组件名（如 "login"、"navigation"、"orders_export"）
+            component_name: 组件名(如 "login"、"navigation"、"orders_export")
             
         Returns:
-            Type: 组件类，或 None（加载失败）
+            Type: 组件类,或 None(加载失败)
         """
         # 检查缓存
         cache_key = f"{self.platform}/{component_name}"
@@ -171,14 +171,14 @@ class PythonComponentAdapter:
         try:
             module = importlib.import_module(f"{base_module}.{component_name}")
             
-            # 查找组件类（优先匹配平台前缀）
+            # 查找组件类(优先匹配平台前缀)
             platform_prefix = self.platform.capitalize()
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 if name.startswith(platform_prefix):
                     self._component_cache[cache_key] = obj
                     return obj
             
-            # 备选：查找任何以 Component 结尾的类
+            # 备选:查找任何以 Component 结尾的类
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 if name.endswith("Component") or name.endswith("Export"):
                     self._component_cache[cache_key] = obj
@@ -222,7 +222,7 @@ class PythonComponentAdapter:
         
         Args:
             page: Playwright Page 对象
-            target_page: 目标页面标识（如 "orders"、"products"）
+            target_page: 目标页面标识(如 "orders"、"products")
             
         Returns:
             AdapterResult: 执行结果
@@ -249,7 +249,7 @@ class PythonComponentAdapter:
         
         Args:
             page: Playwright Page 对象
-            data_domain: 数据域（如 "orders"、"products"、"finance"）
+            data_domain: 数据域(如 "orders"、"products"、"finance")
             
         Returns:
             AdapterResult: 执行结果
@@ -293,7 +293,7 @@ class PythonComponentAdapter:
         
         Args:
             page: Playwright Page 对象
-            option: 日期选项（如 DateOption.YESTERDAY）
+            option: 日期选项(如 DateOption.YESTERDAY)
             
         Returns:
             AdapterResult: 执行结果
@@ -321,12 +321,12 @@ class PythonComponentAdapter:
         *args: Any,
         **kwargs: Any
     ) -> AdapterResult:
-        """通用组件调用方法（替代 YAML 的 component_call）
+        """通用组件调用方法(替代 YAML 的 component_call)
         
-        v4.8.0: 子组件继承步骤回调，并添加步骤ID前缀
+        v4.8.0: 子组件继承步骤回调,并添加步骤ID前缀
         
         Args:
-            component_name: 组件名（如 "date_picker"、"shop_selector"）
+            component_name: 组件名(如 "date_picker"、"shop_selector")
             page: Playwright Page 对象
             *args: 位置参数
             **kwargs: 关键字参数
@@ -342,7 +342,7 @@ class PythonComponentAdapter:
                     message=f"Failed to load component: {component_name}"
                 )
             
-            # v4.8.0: 为子组件创建新的上下文，添加步骤ID前缀
+            # v4.8.0: 为子组件创建新的上下文,添加步骤ID前缀
             child_step_prefix = f"{self._step_prefix}{component_name}."
             child_ctx = ExecutionContext(
                 platform=self.platform,
@@ -373,10 +373,10 @@ class PythonComponentAdapter:
         page: Any,
         params: Optional[Dict[str, Any]] = None,
     ) -> AdapterResult:
-        """执行指定组件（供 executor_v2 调用）
+        """执行指定组件(供 executor_v2 调用)
         
         Args:
-            component_name: 组件名（如 "login"、"navigation"、"orders_export"）
+            component_name: 组件名(如 "login"、"navigation"、"orders_export")
             page: Playwright Page 对象
             params: 组件参数
             
@@ -419,9 +419,9 @@ def create_adapter(
         account: 账号信息
         config: 额外配置
         logger: 日志记录器
-        step_callback: 步骤进度回调（v4.8.0）
-        step_prefix: 步骤ID前缀（v4.8.0）
-        is_test_mode: 是否为测试模式（v4.8.0）
+        step_callback: 步骤进度回调(v4.8.0)
+        step_prefix: 步骤ID前缀(v4.8.0)
+        is_test_mode: 是否为测试模式(v4.8.0)
         
     Returns:
         PythonComponentAdapter: 适配器实例

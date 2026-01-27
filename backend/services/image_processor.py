@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-图片处理服务（v3.0核心模块）
+图片处理服务(v3.0核心模块)
 
-功能：
-- 图片压缩（优化存储）
-- 缩略图生成（列表显示）
-- 格式转换（统一JPEG）
-- 图片存储（本地/OSS）
+功能:
+- 图片压缩(优化存储)
+- 缩略图生成(列表显示)
+- 格式转换(统一JPEG)
+- 图片存储(本地/OSS)
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ class ImageProcessor:
         """初始化图片处理器
         
         Args:
-            storage_root: 图片存储根目录（默认: data/product_images）
+            storage_root: 图片存储根目录(默认: data/product_images)
         """
         if storage_root is None:
             storage_root = Path("data/product_images")
@@ -55,7 +55,7 @@ class ImageProcessor:
         Args:
             image_data: 图片二进制数据
             sku: 产品SKU
-            index: 图片序号（同一SKU可能有多张图片）
+            index: 图片序号(同一SKU可能有多张图片)
             create_thumbnail: 是否生成缩略图
             
         Returns:
@@ -71,7 +71,7 @@ class ImageProcessor:
             
             logger.info(f"处理图片: SKU={sku}, index={index}, size={original_size}, format={original_format}")
             
-            # 转换为RGB（处理RGBA/P模式）
+            # 转换为RGB(处理RGBA/P模式)
             if img.mode in ('RGBA', 'P', 'LA'):
                 # 创建白色背景
                 background = Image.new('RGB', img.size, (255, 255, 255))
@@ -82,11 +82,11 @@ class ImageProcessor:
             elif img.mode != 'RGB':
                 img = img.convert('RGB')
             
-            # 生成文件名（使用hash避免冲突）
+            # 生成文件名(使用hash避免冲突)
             file_hash = hashlib.md5(image_data).hexdigest()[:8]
             filename = f"{sku}_{index}_{file_hash}.jpg"
             
-            # 处理原图（压缩，最大1920x1920）
+            # 处理原图(压缩,最大1920x1920)
             img_original = img.copy()
             if img_original.width > 1920 or img_original.height > 1920:
                 img_original.thumbnail((1920, 1920), Image.LANCZOS)
@@ -154,7 +154,7 @@ class ImageProcessor:
             sku = sku_map.get(row_idx)
             
             if not sku:
-                logger.warning(f"行{row_idx}未找到SKU，跳过图片处理")
+                logger.warning(f"行{row_idx}未找到SKU,跳过图片处理")
                 continue
             
             for img_idx, img_info in enumerate(images):

@@ -4,7 +4,7 @@
 """
 邮箱OTP客户端
 
-通过IMAP连接邮箱，获取并解析验证码邮件。
+通过IMAP连接邮箱,获取并解析验证码邮件。
 支持163邮箱等主流邮箱服务商。
 """
 
@@ -66,7 +66,7 @@ class EmailOTPClient:
                     self.imap_client.noop()
                     return True
                 except:
-                    logger.debug("现有连接已失效，重新连接...")
+                    logger.debug("现有连接已失效,重新连接...")
                     self._connected = False
             
             # 建立新连接
@@ -112,10 +112,10 @@ class EmailOTPClient:
         
         Args:
             since_timestamp: 开始时间戳
-            max_age_seconds: 最大邮件年龄（秒）
+            max_age_seconds: 最大邮件年龄(秒)
             
         Returns:
-            验证码字符串，未找到返回None
+            验证码字符串,未找到返回None
         """
         if not self.connect():
             logger.error("无法连接到邮箱服务器")
@@ -131,7 +131,7 @@ class EmailOTPClient:
             # 构建搜索条件
             search_criteria = ["UNSEEN"]  # 未读邮件
             
-            # 如果指定了开始时间，添加时间条件
+            # 如果指定了开始时间,添加时间条件
             if since_timestamp:
                 since_date = datetime.fromtimestamp(since_timestamp, tz=timezone.utc)
                 date_str = since_date.strftime("%d-%b-%Y")
@@ -207,11 +207,11 @@ class EmailOTPClient:
             # 检查邮件时间是否在有效范围内
             if since_timestamp and email_date:
                 if email_date < since_timestamp:
-                    logger.debug(f"邮件时间太早，跳过: {email_date}")
+                    logger.debug(f"邮件时间太早,跳过: {email_date}")
                     return None
                 
                 if time.time() - email_date > max_age_seconds:
-                    logger.debug(f"邮件太旧，跳过: {email_date}")
+                    logger.debug(f"邮件太旧,跳过: {email_date}")
                     return None
             
             # 获取发件人和主题
@@ -220,9 +220,9 @@ class EmailOTPClient:
             
             logger.debug(f"检查邮件 - 发件人: {sender}, 主题: {subject}")
             
-            # 检查是否是验证码邮件（基于发件人和主题）
+            # 检查是否是验证码邮件(基于发件人和主题)
             if not self._is_otp_email(sender, subject):
-                logger.debug("不是验证码邮件，跳过")
+                logger.debug("不是验证码邮件,跳过")
                 return None
             
             # 提取邮件内容
@@ -234,7 +234,7 @@ class EmailOTPClient:
             if otp_code:
                 logger.info(f"从邮件中提取到验证码: {otp_code} (发件人: {sender})")
                 
-                # 保存邮件内容到临时文件（脱敏处理）
+                # 保存邮件内容到临时文件(脱敏处理)
                 self._save_email_content(
                     mail_id.decode(), 
                     sender, 
@@ -360,9 +360,9 @@ class EmailOTPClient:
         if not content:
             return None
         
-        # 验证码的正则表达式模式（按优先级排序）
+        # 验证码的正则表达式模式(按优先级排序)
         otp_patterns = [
-            # 6位数字验证码（最常见）
+            # 6位数字验证码(最常见)
             r'(?:验证码|verification code|code)[^\d]*(\d{6})',
             r'(\d{6})(?:\s*(?:是您的|is your)?(?:验证码|verification code))',
             
@@ -370,11 +370,11 @@ class EmailOTPClient:
             r'(?:验证码|verification code|code)[^\d]*(\d{4})',
             r'(\d{4})(?:\s*(?:是您的|is your)?(?:验证码|verification code))',
             
-            # 通用数字验证码（4-8位）
+            # 通用数字验证码(4-8位)
             r'(?:验证码|verification code|code)[^\d]*(\d{4,8})',
             r'(\d{4,8})(?:\s*(?:是您的|is your)?(?:验证码|verification code))',
             
-            # 纯数字匹配（作为后备）
+            # 纯数字匹配(作为后备)
             r'\b(\d{6})\b',  # 6位独立数字
             r'\b(\d{4})\b',  # 4位独立数字
         ]
@@ -402,7 +402,7 @@ class EmailOTPClient:
         otp_code: str
     ):
         """
-        保存邮件内容到临时文件（脱敏处理）
+        保存邮件内容到临时文件(脱敏处理)
         
         用于调试和问题排查
         """
@@ -422,7 +422,7 @@ class EmailOTPClient:
             # 脱敏处理内容
             masked_content = content
             if len(content) > 1000:
-                masked_content = content[:500] + "\n... [内容过长，已截断] ...\n" + content[-500:]
+                masked_content = content[:500] + "\n... [内容过长,已截断] ...\n" + content[-500:]
             
             # 写入文件
             with open(filepath, 'w', encoding='utf-8') as f:

@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 
 """
-TikTok 平台契约测试（最小、无外网依赖）
+TikTok 平台契约测试(最小、无外网依赖)
 
-运行方式：
+运行方式:
     python modules/apps/tiktok/contract_tests.py
 
-成功标准：
+成功标准:
 - 全部断言通过且脚本退出码为 0
 """
 

@@ -3,7 +3,7 @@
 """
 数据治理统计服务
 
-v4.5.0新增：
+v4.5.0新增:
 - 提供待入库文件统计
 - 提供模板覆盖度分析
 - 提供缺少模板的域×粒度清单
@@ -32,12 +32,12 @@ class GovernanceStats:
         获取治理概览统计
         
         Args:
-            platform: 平台代码（可选）
+            platform: 平台代码(可选)
         
         Returns:
             {
                 pending_files: 待入库文件数,
-                template_coverage: 模板覆盖度（%）,
+                template_coverage: 模板覆盖度(%),
                 today_auto_ingested: 今日自动入库数,
                 missing_templates_count: 缺少模板的域×粒度数
             }
@@ -48,7 +48,7 @@ class GovernanceStats:
                 CatalogFile.status == 'pending'
             )
             if platform:
-                # [*] v4.10.0修复：同时使用platform_code和source_platform筛选
+                # [*] v4.10.0修复:同时使用platform_code和source_platform筛选
                 stmt = stmt.where(
                     or_(
                         func.lower(CatalogFile.platform_code) == platform.lower(),
@@ -58,22 +58,22 @@ class GovernanceStats:
             
             pending_files = self.db.execute(stmt).scalar() or 0
             
-            # 2. 模板覆盖度（使用template_matcher计算）
+            # 2. 模板覆盖度(使用template_matcher计算)
             from backend.services.template_matcher import get_template_matcher
             matcher = get_template_matcher(self.db)
             coverage_data = matcher.get_template_coverage(platform)
             template_coverage = coverage_data['coverage_percentage']
             
-            # 3. 今日自动入库数（v4.5.1简化：使用last_processed_at）
+            # 3. 今日自动入库数(v4.5.1简化:使用last_processed_at)
             today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             stmt = select(func.count(CatalogFile.id)).where(
                 and_(
                     CatalogFile.status.in_(['ingested', 'partial_success']),
-                    CatalogFile.last_processed_at >= today_start  # CatalogFile没有updated_at，使用last_processed_at
+                    CatalogFile.last_processed_at >= today_start  # CatalogFile没有updated_at,使用last_processed_at
                 )
             )
             if platform:
-                # [*] v4.10.0修复：同时使用platform_code和source_platform筛选
+                # [*] v4.10.0修复:同时使用platform_code和source_platform筛选
                 stmt = stmt.where(
                     or_(
                         func.lower(CatalogFile.platform_code) == platform.lower(),
@@ -110,7 +110,7 @@ class GovernanceStats:
         获取缺少模板的域×粒度清单
         
         Args:
-            platform: 平台代码（可选）
+            platform: 平台代码(可选)
         
         Returns:
             [{domain, granularity, file_count}]
@@ -135,7 +135,7 @@ class GovernanceStats:
                     CatalogFile.status == 'pending'
                 )
                 if platform:
-                    # [*] v4.10.0修复：同时使用platform_code和source_platform筛选
+                    # [*] v4.10.0修复:同时使用platform_code和source_platform筛选
                     stmt = stmt.where(
                         or_(
                             func.lower(CatalogFile.platform_code) == platform.lower(),
@@ -177,7 +177,7 @@ class GovernanceStats:
             platform: 平台代码
             data_domain: 数据域
             granularity: 粒度
-            since_hours: 最近N小时（可选）
+            since_hours: 最近N小时(可选)
             limit: 返回数量限制
         
         Returns:
@@ -190,7 +190,7 @@ class GovernanceStats:
             
             # 筛选条件
             if platform:
-                # [*] v4.10.0修复：同时使用platform_code和source_platform筛选
+                # [*] v4.10.0修复:同时使用platform_code和source_platform筛选
                 stmt = stmt.where(
                     or_(
                         func.lower(CatalogFile.platform_code) == platform.lower(),
@@ -252,7 +252,7 @@ class GovernanceStats:
         try:
             since_time = datetime.now() - timedelta(days=days)
             
-            # v4.5.1简化：使用last_processed_at替代auto_ingest字段
+            # v4.5.1简化:使用last_processed_at替代auto_ingest字段
             stmt = select(CatalogFile).where(
                 and_(
                     CatalogFile.status.in_(['ingested', 'partial_success']),

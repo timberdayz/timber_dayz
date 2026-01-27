@@ -3,16 +3,16 @@
 """
 数据管理中心应用
 
-提供从 run_new.py 进入的一站式后端数据管理：
-- 清单扫描（catalog_scanner）
-- 入库执行（ingestion_worker）
+提供从 run_new.py 进入的一站式后端数据管理:
+- 清单扫描(catalog_scanner)
+- 入库执行(ingestion_worker)
 - 队列统计/失败清单/重试
-- 失败文件列头预览（辅助映射与规则增强）
-- 快速打开新库仪表盘（可选）
+- 失败文件列头预览(辅助映射与规则增强)
+- 快速打开新库仪表盘(可选)
 
-规范：
+规范:
 - 类级元数据 NAME/VERSION/DESCRIPTION
-- 导入阶段零副作用；仅在菜单操作时执行 I/O
+- 导入阶段零副作用;仅在菜单操作时执行 I/O
 """
 
 from typing import Any, Dict, Optional
@@ -54,9 +54,9 @@ class DataManagementCenterApp(BaseApplication):
             print("4. [FAIL] 查看失败详情 Top 20")
             print("5. [LOOP] 将最近 N 条失败重置为 pending (默认20)")
             print("6. [SEARCH] 预览失败文件列头/前5行 (输入 catalog_files.id)")
-            print("7. [WEB] 打开新DB仪表盘（Streamlit，可选）")
-            print("8. [RETRY] 自动循环入库（直到 pending<阈值 或 超时）")
-            print("9. [DOCS] 表统计概览（维度/事实行数）")
+            print("7. [WEB] 打开新DB仪表盘(Streamlit,可选)")
+            print("8. [RETRY] 自动循环入库(直到 pending<阈值 或 超时)")
+            print("9. [DOCS] 表统计概览(维度/事实行数)")
             print("0. [BACK] 返回主菜单")
 
             choice = input("\n请选择操作 (0-9): ").strip()
@@ -82,7 +82,7 @@ class DataManagementCenterApp(BaseApplication):
                 elif choice == "9":
                     self._show_table_overview()
                 else:
-                    print("[FAIL] 无效选择，请重试")
+                    print("[FAIL] 无效选择,请重试")
                 input("\n按回车键继续...")
             except KeyboardInterrupt:
                 print("\n[BACK] 返回上级菜单")
@@ -117,20 +117,20 @@ class DataManagementCenterApp(BaseApplication):
         print("\n[Batch] 执行入库 (一次批处理)...")
         try:
             from modules.services.ingestion_worker import run_once
-            # 步骤1：输入参数
+            # 步骤1:输入参数
             try:
                 limit = int(input("- 步骤1/5: 每批处理条数 limit (默认50): ").strip() or "50")
             except Exception:
                 limit = 50
-            domains = input("- 步骤2/5: 指定数据域(可选, 逗号分隔，如 products,orders): ").strip() or None
+            domains = input("- 步骤2/5: 指定数据域(可选, 逗号分隔,如 products,orders): ").strip() or None
             if domains:
                 domains = ",".join([d.strip().lower() for d in domains.split(',') if d.strip()])
-            recent_hours = input("- 步骤3/5: 仅处理最近 N 小时(可选，回车跳过): ").strip()
+            recent_hours = input("- 步骤3/5: 仅处理最近 N 小时(可选,回车跳过): ").strip()
             recent_hours = int(recent_hours) if recent_hours else None
-            # 步骤4：统计队列
+            # 步骤4:统计队列
             before = self._pending_counts(domains)
             print(f"- 步骤4/5: 当前待处理 pending={before}")
-            # 步骤5：执行（逐文件进度打印）
+            # 步骤5:执行(逐文件进度打印)
             def _cb(cf, stage, msg):
                 try:
                     print(f"  - [{cf.id}] {stage}: {cf.file_name} ({cf.platform_code or '-'} / {cf.data_domain or '-'}) {msg or ''}", flush=True)
@@ -224,10 +224,10 @@ class DataManagementCenterApp(BaseApplication):
                 limit = int(input("- 步骤1/6: limit/批 (默认50): ").strip() or "50")
             except Exception:
                 limit = 50
-            domains = input("- 步骤2/6: 数据域过滤(可选, 逗号分隔，如 products,orders): ").strip() or None
+            domains = input("- 步骤2/6: 数据域过滤(可选, 逗号分隔,如 products,orders): ").strip() or None
             if domains:
                 domains = ",".join([d.strip().lower() for d in domains.split(',') if d.strip()])
-            recent_hours = input("- 步骤3/6: 仅处理最近 N 小时(可选，回车跳过): ").strip()
+            recent_hours = input("- 步骤3/6: 仅处理最近 N 小时(可选,回车跳过): ").strip()
             recent_hours = int(recent_hours) if recent_hours else None
             try:
                 pending_threshold = int(input("- 步骤4/6: 停止阈值 pending< (默认5): ").strip() or "5")
@@ -250,13 +250,13 @@ class DataManagementCenterApp(BaseApplication):
             while True:
                 round_no += 1
                 print(f"\n== 轮次 {round_no} ==")
-                # 步骤1：统计队列
+                # 步骤1:统计队列
                 pending = self._pending_counts(domains)
                 print(f"- 步骤1/4: 当前 pending={pending}")
                 if pending <= pending_threshold:
-                    print(f"\u2705 达到停止阈值，结束 (pending={pending} <= {pending_threshold})")
+                    print(f"\u2705 达到停止阈值,结束 (pending={pending} <= {pending_threshold})")
                     break
-                # 步骤2：执行一轮（逐文件进度打印）
+                # 步骤2:执行一轮(逐文件进度打印)
                 print(f"- 步骤2/4: 执行 run_once(limit={limit}, domains={domains or '-'}, recent_hours={recent_hours or '-'})")
                 def _cb(cf, stage, msg):
                     try:
@@ -268,11 +268,11 @@ class DataManagementCenterApp(BaseApplication):
                 total_picked += stats.picked
                 total_succ += stats.succeeded
                 total_fail += stats.failed
-                # 步骤4：时间与间隔控制
+                # 步骤4:时间与间隔控制
                 elapsed_min = (time() - start_ts) / 60.0
                 print(f"- 步骤4/4: 累计 picked={total_picked}, succeeded={total_succ}, failed={total_fail}, 已运行{elapsed_min:.1f}分钟")
                 if elapsed_min >= max_minutes:
-                    print(f"\u26a0\ufe0f 达到最长运行时间 {max_minutes} 分钟，结束")
+                    print(f"\u26a0\ufe0f 达到最长运行时间 {max_minutes} 分钟,结束")
                     break
                 sleep(max(1, interval_sec))
         except Exception as e:
@@ -324,7 +324,7 @@ class DataManagementCenterApp(BaseApplication):
             port = os.environ.get("STREAMLIT_PORT", "8510")
             cmd = [sys.executable, "-m", "streamlit", "run", str(frontend), "--server.port", str(port), "--server.address", "0.0.0.0", "--server.headless", "true"]
             subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parents[3]))
-            print(f"[OK] 已启动，新DB仪表盘: http://localhost:{port}")
+            print(f"[OK] 已启动,新DB仪表盘: http://localhost:{port}")
         except Exception as e:
             print(f"[FAIL] 启动失败: {e}")
 

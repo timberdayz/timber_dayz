@@ -139,7 +139,7 @@ class WebInterfaceManager:
                 subprocess.run(["node", "-v"], check=True, capture_output=True)
                 subprocess.run(["npm", "-v"], check=True, capture_output=True)
             except (subprocess.CalledProcessError, FileNotFoundError):
-                logger.error("Node.js或npm未安装，无法启动Vue.js应用")
+                logger.error("Node.js或npm未安装,无法启动Vue.js应用")
                 return False
             
             # 检查并安装依赖
@@ -286,7 +286,7 @@ class WebInterfaceManager:
         return status
     
     def start_vue_field_mapping_system(self) -> bool:
-        """启动Vue字段映射系统（前端+后端）"""
+        """启动Vue字段映射系统(前端+后端)"""
         try:
             # 启动后端API
             if not self.start_backend_api("vue_field_mapping", 8000):
@@ -297,7 +297,7 @@ class WebInterfaceManager:
             
             # 启动Vue.js前端
             if not self.start_vue_app("vue_field_mapping", 5173):
-                # 如果前端启动失败，停止后端
+                # 如果前端启动失败,停止后端
                 self.stop_app("vue_field_mapping_backend")
                 return False
             

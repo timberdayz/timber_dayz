@@ -126,7 +126,7 @@ class Email163Strategy(ElementStrategy):
         self._setup_163_selectors()
     
     def _setup_163_selectors(self):
-        """设置163邮箱特定的选择器（用于iframe中的登录）"""
+        """设置163邮箱特定的选择器(用于iframe中的登录)"""
         
         self.add_custom_selector(
             ElementType.USERNAME_INPUT,

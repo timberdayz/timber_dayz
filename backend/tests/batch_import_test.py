@@ -216,7 +216,7 @@ class BatchImportTester:
         )
     
     async def test_individual_imports(self, data: List[Dict], max_concurrent: int = 10) -> ImportTestResult:
-        """测试单个记录导入（并发）"""
+        """测试单个记录导入(并发)"""
         print(f"开始单个记录导入测试: {len(data)} 条记录, 最大并发: {max_concurrent}")
         
         start_time = time.time()
@@ -347,7 +347,7 @@ async def run_batch_import_tests():
             tester.print_test_result(batch_result)
             all_results.append(batch_result)
             
-            # 单个导入测试（使用较小的数据集）
+            # 单个导入测试(使用较小的数据集)
             if config["records"] <= 10000:
                 individual_data = test_data[:1000]  # 限制为1000条记录
                 individual_result = await tester.test_individual_imports(individual_data, max_concurrent=20)

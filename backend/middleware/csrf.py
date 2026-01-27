@@ -9,11 +9,11 @@ CSRF Token 保护中间件
 - 支持 Double Submit Cookie 模式
 
 实现原理:
-1. 登录时生成 CSRF Token，存储在 Cookie 中（非 httpOnly，让前端可以读取）
-2. 前端在每次 POST/PUT/DELETE 请求时，从 Cookie 读取 CSRF Token，并添加到请求头中
+1. 登录时生成 CSRF Token,存储在 Cookie 中(非 httpOnly,让前端可以读取)
+2. 前端在每次 POST/PUT/DELETE 请求时,从 Cookie 读取 CSRF Token,并添加到请求头中
 3. 后端验证请求头中的 CSRF Token 是否与 Cookie 中的一致
 
-v6.0.0 新增：作为 modernize-auth-system Phase 3 的一部分
+v6.0.0 新增:作为 modernize-auth-system Phase 3 的一部分
 """
 
 import secrets
@@ -26,10 +26,10 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 # CSRF Token 配置
-CSRF_TOKEN_LENGTH = 32  # Token 长度（字节）
+CSRF_TOKEN_LENGTH = 32  # Token 长度(字节)
 CSRF_COOKIE_NAME = "csrf_token"  # Cookie 名称
 CSRF_HEADER_NAME = "X-CSRF-Token"  # Header 名称
-CSRF_TOKEN_EXPIRE_SECONDS = 3600  # Token 过期时间（1小时）
+CSRF_TOKEN_EXPIRE_SECONDS = 3600  # Token 过期时间(1小时)
 
 # 不需要 CSRF 验证的路径前缀
 CSRF_EXEMPT_PATHS = [
@@ -71,7 +71,7 @@ def verify_csrf_token(cookie_token: Optional[str], header_token: Optional[str]) 
     if not cookie_token or not header_token:
         return False
     
-    # 使用 hmac.compare_digest 进行时间恒定比较，防止时序攻击
+    # 使用 hmac.compare_digest 进行时间恒定比较,防止时序攻击
     import hmac
     return hmac.compare_digest(cookie_token, header_token)
 
@@ -97,8 +97,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     """
     CSRF 保护中间件
     
-    实现 Double Submit Cookie 模式：
-    1. 在响应中设置 CSRF Token Cookie（非 httpOnly）
+    实现 Double Submit Cookie 模式:
+    1. 在响应中设置 CSRF Token Cookie(非 httpOnly)
     2. 验证 POST/PUT/DELETE 请求的 CSRF Token
     """
     
@@ -109,7 +109,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         Args:
             app: FastAPI 应用
             exempt_paths: 额外的豁免路径列表
-            enabled: 是否启用 CSRF 保护（可通过配置禁用）
+            enabled: 是否启用 CSRF 保护(可通过配置禁用)
         """
         super().__init__(app)
         self.exempt_paths = CSRF_EXEMPT_PATHS.copy()
@@ -127,17 +127,17 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         2. 验证 CSRF Token
         3. 在响应中设置/更新 CSRF Token Cookie
         """
-        # 如果禁用 CSRF 保护，直接放行
+        # 如果禁用 CSRF 保护,直接放行
         if not self.enabled:
             return await call_next(request)
         
         path = request.url.path
         method = request.method.upper()
         
-        # 安全方法（GET, HEAD, OPTIONS, TRACE）不需要 CSRF 验证
+        # 安全方法(GET, HEAD, OPTIONS, TRACE)不需要 CSRF 验证
         if method in CSRF_SAFE_METHODS:
             response = await call_next(request)
-            # 为 GET 请求设置 CSRF Token Cookie（如果不存在）
+            # 为 GET 请求设置 CSRF Token Cookie(如果不存在)
             if method == "GET" and CSRF_COOKIE_NAME not in request.cookies:
                 csrf_token = generate_csrf_token()
                 response.set_cookie(
@@ -155,7 +155,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if is_csrf_exempt(path):
             return await call_next(request)
         
-        # 对于 POST/PUT/DELETE 请求，验证 CSRF Token
+        # 对于 POST/PUT/DELETE 请求,验证 CSRF Token
         cookie_token = request.cookies.get(CSRF_COOKIE_NAME)
         header_token = request.headers.get(CSRF_HEADER_NAME)
         
@@ -169,12 +169,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 detail="CSRF token validation failed"
             )
         
-        # Token 验证通过，继续处理请求
+        # Token 验证通过,继续处理请求
         response = await call_next(request)
         
-        # 更新 CSRF Token（可选：每次请求后刷新 token）
-        # 注意：这里我们不刷新 token，以避免并发请求问题
-        # 如果需要更高安全性，可以在敏感操作后刷新 token
+        # 更新 CSRF Token(可选:每次请求后刷新 token)
+        # 注意:这里我们不刷新 token,以避免并发请求问题
+        # 如果需要更高安全性,可以在敏感操作后刷新 token
         
         return response
 
@@ -198,7 +198,7 @@ def set_csrf_token_cookie(response: Response, request: Request) -> str:
     
     Args:
         response: FastAPI Response 对象
-        request: FastAPI Request 对象（用于判断是否 HTTPS）
+        request: FastAPI Request 对象(用于判断是否 HTTPS)
     
     Returns:
         生成的 CSRF Token

@@ -4,7 +4,7 @@
 """
 智能网页元素查找器
 
-基于Playwright的智能元素定位系统，支持多种查找策略和容错机制
+基于Playwright的智能元素定位系统,支持多种查找策略和容错机制
 """
 
 import asyncio
@@ -29,7 +29,7 @@ class SmartElementFinder:
         
         Args:
             page: Playwright页面对象
-            frame: 可选的iframe对象，如果在iframe中查找元素
+            frame: 可选的iframe对象,如果在iframe中查找元素
         """
         self.page = page
         self.frame = frame or page
@@ -38,7 +38,7 @@ class SmartElementFinder:
     async def find_element(
         self,
         element_type: ElementType,
-        timeout: int = 30000,  # 增加默认超时时间，适应VPN环境
+        timeout: int = 30000,  # 增加默认超时时间,适应VPN环境
         custom_selectors: Optional[List[str]] = None,
         custom_keywords: Optional[List[str]] = None,
         must_be_visible: bool = True,
@@ -49,14 +49,14 @@ class SmartElementFinder:
         
         Args:
             element_type: 元素类型
-            timeout: 超时时间（毫秒）
+            timeout: 超时时间(毫秒)
             custom_selectors: 自定义选择器列表
             custom_keywords: 自定义关键词列表
             must_be_visible: 必须可见
             must_be_enabled: 必须启用
             
         Returns:
-            找到的元素，未找到返回None
+            找到的元素,未找到返回None
         """
         cache_key = f"{element_type.value}_{must_be_visible}_{must_be_enabled}"
         
@@ -68,10 +68,10 @@ class SmartElementFinder:
                     logger.debug(f"使用缓存的{element_type.value}元素")
                     return cached_element
                 else:
-                    # 缓存的元素不再可见，清除缓存
+                    # 缓存的元素不再可见,清除缓存
                     del self.found_elements_cache[cache_key]
             except:
-                # 缓存的元素无效，清除缓存
+                # 缓存的元素无效,清除缓存
                 del self.found_elements_cache[cache_key]
         
         logger.info(f"开始智能查找元素: {element_type.value}")
@@ -107,7 +107,7 @@ class SmartElementFinder:
             self.found_elements_cache[cache_key] = element
             return element
         
-        # 策略4: 智能推断（基于上下文和位置）
+        # 策略4: 智能推断(基于上下文和位置)
         element = await self._find_by_context(element_type, timeout, must_be_visible, must_be_enabled)
         if element:
             logger.success(f"通过上下文推断找到{element_type.value}元素")
@@ -185,10 +185,10 @@ class SmartElementFinder:
                 if element:
                     # 验证可见性和可用性
                     if must_be_visible and not await element.is_visible():
-                        logger.debug(f"元素不可见，跳过: {selector}")
+                        logger.debug(f"元素不可见,跳过: {selector}")
                         continue
                     if must_be_enabled and not await element.is_enabled():
-                        logger.debug(f"元素不可用，跳过: {selector}")
+                        logger.debug(f"元素不可用,跳过: {selector}")
                         continue
                     
                     logger.debug(f"通过选择器找到元素: {selector}")
@@ -379,7 +379,7 @@ class SmartElementFinder:
                     if '登录' in text or '登录' in value:
                         return elem
                 
-                # 如果没有明确的登录按钮，选择第一个候选
+                # 如果没有明确的登录按钮,选择第一个候选
                 if login_candidates:
                     return login_candidates[0][0]
                     
@@ -401,7 +401,7 @@ class SmartElementFinder:
         Args:
             element: 目标元素
             action: 操作类型
-            value: 操作值（如输入的文本）
+            value: 操作值(如输入的文本)
             **kwargs: 其他参数
             
         Returns:
@@ -470,12 +470,12 @@ class SmartElementFinder:
         """
         智能登录功能
         
-        自动查找用户名框、密码框、验证码框和登录按钮，并执行登录操作
+        自动查找用户名框、密码框、验证码框和登录按钮,并执行登录操作
         
         Args:
             username: 用户名
             password: 密码
-            captcha: 验证码（可选）
+            captcha: 验证码(可选)
             timeout: 超时时间
             
         Returns:
@@ -505,14 +505,14 @@ class SmartElementFinder:
             await self.perform_action(password_element, ElementAction.FILL, password)
             logger.success("密码填充成功")
             
-            # 如果提供了验证码，查找并填充验证码
+            # 如果提供了验证码,查找并填充验证码
             if captcha:
                 captcha_element = await self.find_element(ElementType.CAPTCHA_INPUT, timeout=5000)
                 if captcha_element:
                     await self.perform_action(captcha_element, ElementAction.FILL, captcha)
                     logger.success("验证码填充成功")
                 else:
-                    logger.warning("验证码输入框未找到，但已提供验证码")
+                    logger.warning("验证码输入框未找到,但已提供验证码")
             
             # 等待表单完全准备
             await asyncio.sleep(1)

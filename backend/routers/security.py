@@ -31,7 +31,7 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/system/security", tags=["安全设置"])
 
-# 限流配置（如果可用）
+# 限流配置(如果可用)
 try:
     from backend.middleware.rate_limiter import role_based_rate_limit
 except ImportError:
@@ -434,7 +434,7 @@ async def update_session_config(
         )
 
 
-# ==================== 2FA配置 API（可选） ====================
+# ==================== 2FA配置 API(可选) ====================
 
 @router.get("/2fa-config", response_model=TwoFactorConfigResponse)
 async def get_2fa_config(

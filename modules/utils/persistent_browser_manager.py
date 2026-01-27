@@ -4,10 +4,10 @@
 """
 持久化浏览器管理器
 
-提供每账号独立的持久化浏览器Profile和固定指纹功能：
+提供每账号独立的持久化浏览器Profile和固定指纹功能:
 - 每账号一个独立的user_data_dir
-- 固定的设备指纹（UA、viewport、locale、timezone）
-- 自动复用storage_state，减少验证码频率
+- 固定的设备指纹(UA、viewport、locale、timezone)
+- 自动复用storage_state,减少验证码频率
 - 支持Playwright的launch_persistent_context
 """
 
@@ -39,7 +39,7 @@ class PersistentBrowserManager:
 
         # 活跃的持久化上下文缓存
         self.active_contexts: Dict[str, BrowserContext] = {}
-        # 回退模式下创建的 Browser 实例（需要在关闭上下文时一并关闭）
+        # 回退模式下创建的 Browser 实例(需要在关闭上下文时一并关闭)
         self._fallback_browsers: Dict[str, Browser] = {}
 
         logger.info("持久化浏览器管理器初始化完成")
@@ -57,7 +57,7 @@ class PersistentBrowserManager:
         Args:
             platform: 平台名称
             account_id: 账号ID
-            account_config: 账号配置（用于生成指纹）
+            account_config: 账号配置(用于生成指纹)
 
         Returns:
             持久化浏览器上下文
@@ -74,7 +74,7 @@ class PersistentBrowserManager:
                 logger.debug(f"复用现有持久化上下文: {context_key}")
                 return context
             except Exception as e:
-                logger.warning(f"现有上下文已失效，将重新创建: {e}")
+                logger.warning(f"现有上下文已失效,将重新创建: {e}")
                 del self.active_contexts[context_key]
 
         # 创建新的持久化上下文
@@ -111,11 +111,11 @@ class PersistentBrowserManager:
                     '--disable-dev-shm-usage',
                     '--no-first-run',
                     '--disable-default-apps',
-                    # 移除 --disable-extensions-except（需要参数路径，空值会导致崩溃）
-                    # '--disable-plugins-discovery' 保留为可选，通常不需要
+                    # 移除 --disable-extensions-except(需要参数路径,空值会导致崩溃)
+                    # '--disable-plugins-discovery' 保留为可选,通常不需要
                     f'--user-agent={fingerprint["user_agent"]}'
                 ],
-                'slow_mo': 100  # 稍微减慢操作速度，更像真实用户
+                'slow_mo': 100  # 稍微减慢操作速度,更像真实用户
             }
 
             # 构建上下文参数
@@ -152,7 +152,7 @@ class PersistentBrowserManager:
             logger.debug(f"Profile路径: {profile_path}")
             logger.debug(f"设备指纹: UA={fingerprint['user_agent'][:50]}...")
 
-            # 合并外部覆盖参数（例如 downloads_path/accept_downloads 等）
+            # 合并外部覆盖参数(例如 downloads_path/accept_downloads 等)
             if context_overrides:
                 logger.debug(f"持久化上下文外部覆盖参数: {context_overrides}")
                 # 允许覆盖 context_options 与 launch_options
@@ -164,7 +164,7 @@ class PersistentBrowserManager:
                     else:
                         launch_options[k] = v
 
-            # 默认下载目录（未外部覆盖时）：downloads/<platform>
+            # 默认下载目录(未外部覆盖时):downloads/<platform>
             try:
                 if not context_options.get('downloads_path'):
                     droot = Path.cwd() / 'downloads' / str(platform).lower()
@@ -174,11 +174,11 @@ class PersistentBrowserManager:
             except Exception as e:
                 logger.warning(f"设置默认downloads_path失败: {e}")
 
-            # 尝试创建（带小重试，处理偶发的 "Target ... has been closed"）
+            # 尝试创建(带小重试,处理偶发的 "Target ... has been closed")
             last_err = None
             for attempt in range(2):
                 try:
-                    # 第一次使用主Profile；第二次使用旁路Profile，避免主Profile被系统锁定/损坏
+                    # 第一次使用主Profile;第二次使用旁路Profile,避免主Profile被系统锁定/损坏
                     if attempt == 0:
                         user_dir = profile_path
                     else:
@@ -257,7 +257,7 @@ class PersistentBrowserManager:
             logger.warning(f"反检测脚本注入失败: {e}")
 
     def _create_fallback_context(self, fingerprint: Dict[str, Any], context_key: Optional[str] = None) -> BrowserContext:
-        """创建回退上下文（普通模式）"""
+        """创建回退上下文(普通模式)"""
         try:
             logger.warning("使用回退模式创建普通浏览器上下文")
 
@@ -278,7 +278,7 @@ class PersistentBrowserManager:
             )
 
             self._setup_anti_detection(context)
-            # 记录回退浏览器，便于后续关闭释放资源
+            # 记录回退浏览器,便于后续关闭释放资源
             if context_key:
                 try:
                     self._fallback_browsers[context_key] = browser
@@ -297,27 +297,27 @@ class PersistentBrowserManager:
         account_id: str
     ) -> bool:
         """
-        保存上下文状态（稳健版）
+        保存上下文状态(稳健版)
 
-        - 在某些环境下，context.storage_state() 可能触发 Protocol error (Target.createTarget)
+        - 在某些环境下,context.storage_state() 可能触发 Protocol error (Target.createTarget)
           通常发生在所有页面被关闭、或上下文即将关闭时。
-        - 此方法通过“必要时临时打开一页 + 重试”来规避，同时将失败降级为 warning，避免噪音。
+        - 此方法通过“必要时临时打开一页 + 重试”来规避,同时将失败降级为 warning,避免噪音。
         """
         # 1) 快速判定上下文可用
         try:
-            _ = context.pages  # 触发一次访问，若已关闭会抛错
+            _ = context.pages  # 触发一次访问,若已关闭会抛错
         except Exception as e:
-            logger.warning(f"保存上下文状态跳过（上下文可能已关闭）: {platform}/{account_id} - {e}")
+            logger.warning(f"保存上下文状态跳过(上下文可能已关闭): {platform}/{account_id} - {e}")
             return False
 
-        # 2) 尝试直接获取；失败则在短暂重试中创建临时页
+        # 2) 尝试直接获取;失败则在短暂重试中创建临时页
         for attempt in range(2):
             temp_page: Optional[Page] = None
             try:
                 try:
                     storage_state = context.storage_state()
                 except Exception:
-                    # 如果第一页失败且没有可用页面，尝试创建临时页后再试一次
+                    # 如果第一页失败且没有可用页面,尝试创建临时页后再试一次
                     if attempt == 0:
                         try:
                             temp_page = context.new_page()
@@ -340,9 +340,9 @@ class PersistentBrowserManager:
                 return success
             except Exception as e:
                 msg = str(e)
-                # 对已关闭上下文的典型报错不再告警，直接信息级跳过
+                # 对已关闭上下文的典型报错不再告警,直接信息级跳过
                 if "has been closed" in msg or "Target.createTarget" in msg or "Target page, context or browser has been closed" in msg:
-                    logger.info(f"跳过保存（上下文已结束）: {platform}/{account_id}")
+                    logger.info(f"跳过保存(上下文已结束): {platform}/{account_id}")
                     return False
                 logger.warning(f"保存上下文状态失败(第{attempt+1}次): {msg}")
                 time.sleep(0.2)
@@ -374,7 +374,7 @@ class PersistentBrowserManager:
             except Exception as e:
                 logger.error(f"关闭上下文失败: {e}")
 
-        # 如存在回退浏览器，也一并关闭，避免残留进程/窗口
+        # 如存在回退浏览器,也一并关闭,避免残留进程/窗口
         if context_key in self._fallback_browsers:
             try:
                 fb = self._fallback_browsers.pop(context_key, None)

@@ -1,5 +1,5 @@
 """
-字段映射建议与模板应用（v4.6.0+）
+字段映射建议与模板应用(v4.6.0+)
 
 [*] v4.6.0更新: 集成PatternMatcher支持Pattern-based Mapping
 """
@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 import re
 from sqlalchemy.orm import Session
 
-# 完整的中英文映射字典（200+字段）
+# 完整的中英文映射字典(200+字段)
 COMPREHENSIVE_ALIAS_DICTIONARY: Dict[str, str] = {
     # ========== 产品基础信息 ==========
     "商品编号": "product_id",
@@ -253,15 +253,15 @@ ALIAS_DICTIONARY = COMPREHENSIVE_ALIAS_DICTIONARY
 
 def suggest_mappings(columns: List[str], domain: str, db: Optional[Session] = None) -> Dict[str, dict]:
     """
-    智能字段映射（v4.6.0+ Pattern-based Mapping）
+    智能字段映射(v4.6.0+ Pattern-based Mapping)
     
-    策略优先级（v4.6.0新增）：
-    0. [*] Pattern-based匹配（支持货币字段）<- 新增!
-    1. 精确匹配（ALIAS_DICTIONARY）
-    2. 模糊匹配（去除空格、大小写）
-    3. 关键词匹配（包含关系）
-    4. 语义理解（规则引擎）
-    5. 数据域特定匹配（库存/财务）
+    策略优先级(v4.6.0新增):
+    0. [*] Pattern-based匹配(支持货币字段)<- 新增!
+    1. 精确匹配(ALIAS_DICTIONARY)
+    2. 模糊匹配(去除空格、大小写)
+    3. 关键词匹配(包含关系)
+    4. 语义理解(规则引擎)
+    5. 数据域特定匹配(库存/财务)
     
     Args:
         columns: 原始列名列表
@@ -307,7 +307,7 @@ def suggest_mappings(columns: List[str], domain: str, db: Optional[Session] = No
         col_clean = (col or "").strip()
         col_lower = col_clean.lower()
         
-        # 1. 精确匹配（置信度 1.0）
+        # 1. 精确匹配(置信度 1.0)
         if col_lower in COMPREHENSIVE_ALIAS_DICTIONARY:
             std = COMPREHENSIVE_ALIAS_DICTIONARY[col_lower]
             suggestions[col] = {
@@ -317,10 +317,10 @@ def suggest_mappings(columns: List[str], domain: str, db: Optional[Session] = No
             }
             continue
         
-        # 2. 模糊匹配（去除空格、特殊字符）
-        col_normalized = re.sub(r'[\s_\-()（）]', '', col_lower)
+        # 2. 模糊匹配(去除空格、特殊字符)
+        col_normalized = re.sub(r'[\s_\-()()]', '', col_lower)
         for alias, std in COMPREHENSIVE_ALIAS_DICTIONARY.items():
-            alias_normalized = re.sub(r'[\s_\-()（）]', '', alias.lower())
+            alias_normalized = re.sub(r'[\s_\-()()]', '', alias.lower())
             if col_normalized == alias_normalized:
                 suggestions[col] = {
                     "standard": std,
@@ -428,8 +428,8 @@ def suggest_mappings(columns: List[str], domain: str, db: Optional[Session] = No
         if matched:
             continue
         
-        # 4. 通用关键词匹配（按优先级）
-        # 高优先级关键词（流量/转化指标）
+        # 4. 通用关键词匹配(按优先级)
+        # 高优先级关键词(流量/转化指标)
         if any(kw in col_lower for kw in ['访问量', '浏览量', 'page view', 'pv']):
             suggestions[col] = {"standard": "page_views", "confidence": 0.85, "method": "keyword"}
             matched = True
@@ -451,7 +451,7 @@ def suggest_mappings(columns: List[str], domain: str, db: Optional[Session] = No
         if matched:
             continue
         
-        # 5. 低优先级关键词（基础字段）- 避免误匹配
+        # 5. 低优先级关键词(基础字段)- 避免误匹配
         if col_lower in ['商品编号', '商品id', 'product id', 'item id']:
             suggestions[col] = {"standard": "product_id", "confidence": 0.9, "method": "keyword"}
         elif col_lower in ['商品', '商品名称', 'product name', 'title']:

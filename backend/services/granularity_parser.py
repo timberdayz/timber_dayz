@@ -1,7 +1,7 @@
 """
 数据粒度解析器 - 从文件路径和名称中识别时间粒度
 
-功能：
+功能:
 - 从文件路径识别 daily/weekly/monthly
 - 支持多种命名规范
 - 提供默认值回退机制
@@ -142,7 +142,7 @@ class GranularityParser:
         default: GranularityType = "daily"
     ) -> GranularityType:
         """
-        综合解析粒度，优先级：路径 > 文件名 > 日期范围 > 默认值
+        综合解析粒度,优先级:路径 > 文件名 > 日期范围 > 默认值
         
         Args:
             file_path: 文件路径

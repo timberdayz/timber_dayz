@@ -4,16 +4,16 @@
 
 为所有平台采集器提供统一的账号健康检查和异常处理机制
 
-功能特性：
+功能特性:
 - [SEARCH] 统一的健康检查接口
 - [ALERT] 自动异常账号处理
 - [DATA] 健康状态统计和报告
-- [RETRY] 多平台支持（Shopee、Amazon、妙手ERP等）
+- [RETRY] 多平台支持(Shopee、Amazon、妙手ERP等)
 - [SAVE] 健康状态持久化存储
 
-版本：v1.0.0
-作者：跨境电商ERP系统
-更新：2025-08-29
+版本:v1.0.0
+作者:跨境电商ERP系统
+更新:2025-08-29
 """
 
 import json
@@ -59,7 +59,7 @@ class CollectorHealthIntegration:
         Args:
             page: Playwright页面对象
             account: 账号配置信息
-            operation_name: 操作名称（用于日志记录）
+            operation_name: 操作名称(用于日志记录)
             
         Returns:
             bool: 是否可以继续操作
@@ -69,7 +69,7 @@ class CollectorHealthIntegration:
         try:
             # 1. 检查账号是否已被标记为禁用
             if self._is_account_disabled(account_id):
-                logger.warning(f"[NO] 账号 {account_id} 已被标记为禁用，跳过操作")
+                logger.warning(f"[NO] 账号 {account_id} 已被标记为禁用,跳过操作")
                 return False
             
             # 2. 执行健康检查
@@ -82,7 +82,7 @@ class CollectorHealthIntegration:
             # 4. 处理检查结果
             should_continue = self.health_checker.handle_unhealthy_account(status, message, account, page)
             
-            # 5. 如果账号异常，更新禁用列表
+            # 5. 如果账号异常,更新禁用列表
             if not should_continue and status in [
                 AccountStatus.ACCOUNT_SUSPENDED, 
                 AccountStatus.ACCOUNT_LOCKED,
@@ -117,7 +117,7 @@ class CollectorHealthIntegration:
             account_id = account.get('username', f'Account_{i}')
             
             try:
-                # 这里需要实际的页面对象，在实际使用中需要传入
+                # 这里需要实际的页面对象,在实际使用中需要传入
                 # 暂时返回基于禁用列表的检查结果
                 is_healthy = not self._is_account_disabled(account_id)
                 results[account_id] = is_healthy
@@ -302,7 +302,7 @@ def create_health_integration(platform: str) -> CollectorHealthIntegration:
 
 def quick_health_check(page: Page, account: Dict, platform: str, operation: str = "数据采集") -> bool:
     """
-    快速健康检查（便捷函数）
+    快速健康检查(便捷函数)
     
     Args:
         page: 页面对象

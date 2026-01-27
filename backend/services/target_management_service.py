@@ -3,8 +3,8 @@
 """
 目标管理服务
 
-负责目标管理的达成率计算逻辑（C类数据）
-从路由层提取业务逻辑，符合分层架构规范
+负责目标管理的达成率计算逻辑(C类数据)
+从路由层提取业务逻辑,符合分层架构规范
 """
 
 from sqlalchemy.orm import Session
@@ -14,8 +14,8 @@ from typing import Dict, Any, Optional
 
 from modules.core.db import (
     SalesTarget,
-    TargetBreakdown,
-    FactOrder
+    TargetBreakdown
+    # [DELETED] v4.19.0: FactOrder 已删除,使用 CClassDataService 查询订单数据
 )
 from backend.services.c_class_data_service import CClassDataService
 from modules.core.logger import get_logger
@@ -31,7 +31,7 @@ class TargetManagementService:
     
     def calculate_target_achievement(self, target_id: int) -> Dict[str, Any]:
         """
-        计算目标达成情况（C类数据：系统自动计算）
+        计算目标达成情况(C类数据:系统自动计算)
         
         从fact_orders表聚合计算实际销售额和订单数
         更新目标和分解的达成数据
@@ -40,7 +40,7 @@ class TargetManagementService:
             target_id: 目标ID
             
         Returns:
-            计算结果的字典，包含目标信息和分解信息
+            计算结果的字典,包含目标信息和分解信息
         """
         # 查询目标
         target = self.db.execute(
@@ -60,13 +60,13 @@ class TargetManagementService:
         total_achieved_amount = 0.0
         total_achieved_quantity = 0
         
-        # 使用C类数据查询服务优化数据查询（保留业务逻辑）
+        # 使用C类数据查询服务优化数据查询(保留业务逻辑)
         c_class_service = CClassDataService(self.db)
         
         # 计算每个分解的达成情况
         for breakdown in breakdowns:
             if breakdown.breakdown_type == "shop":
-                # 店铺分解：使用CClassDataService查询销售数据
+                # 店铺分解:使用CClassDataService查询销售数据
                 if breakdown.platform_code and breakdown.shop_id:
                     sales_data = c_class_service.query_shop_sales_by_period(
                         start_date=target.period_start,
@@ -92,7 +92,7 @@ class TargetManagementService:
                     total_achieved_quantity += breakdown.achieved_quantity
             
             elif breakdown.breakdown_type == "time":
-                # 时间分解：使用CClassDataService查询销售数据（所有店铺）
+                # 时间分解:使用CClassDataService查询销售数据(所有店铺)
                 if breakdown.period_start and breakdown.period_end:
                     sales_data = c_class_service.query_shop_sales_by_period(
                         start_date=breakdown.period_start,
@@ -110,7 +110,7 @@ class TargetManagementService:
                     total_achieved_amount += breakdown.achieved_amount
                     total_achieved_quantity += breakdown.achieved_quantity
         
-        # 如果没有分解，直接计算目标总体达成情况（使用CClassDataService）
+        # 如果没有分解,直接计算目标总体达成情况(使用CClassDataService)
         if not breakdowns:
             sales_data = c_class_service.query_shop_sales_by_period(
                 start_date=target.period_start,

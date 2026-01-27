@@ -21,11 +21,11 @@ class MiaoshouNavigation(NavigationComponent):
     async def _close_announcements(self, page: Any) -> None:
         """
         关闭 Miaoshou 页面上的公告/通知/抽屉等常见遮挡组件。
-        - 选择器与轮询策略来源于 *_config.py，可随配置调整
+        - 选择器与轮询策略来源于 *_config.py,可随配置调整
         - 顶层与所有 frame 并行尝试 + ESC 兜底
         """
         try:
-            # 读取配置（优先 Warehouse，其次 Products 补充）
+            # 读取配置(优先 Warehouse,其次 Products 补充)
             ws = WarehouseSelectors()
             from modules.platforms.miaoshou.components.products_config import ProductsSelectors as _PS
             try:

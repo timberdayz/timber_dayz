@@ -1,6 +1,6 @@
 """
-组件测试服务（SSOT）
-统一处理所有组件测试逻辑，避免双维护
+组件测试服务(SSOT)
+统一处理所有组件测试逻辑,避免双维护
 
 Phase: Refactor Phase - 消除 component_recorder.py 和 component_versions.py 之间的重复代码
 Created: 2025-12-21
@@ -22,18 +22,18 @@ logger = get_logger(__name__)
 
 
 class ComponentTestService:
-    """组件测试服务（唯一实现）- 消除双维护"""
+    """组件测试服务(唯一实现)- 消除双维护"""
     
     @staticmethod
     def prepare_account_info(account: PlatformAccount) -> Dict[str, Any]:
         """
-        准备账号信息（统一）
+        准备账号信息(统一)
         
         Args:
             account: 数据库账号对象
             
         Returns:
-            Dict: 账号信息字典（包含明文密码）
+            Dict: 账号信息字典(包含明文密码)
             
         Raises:
             ValueError: 密码解密失败
@@ -46,7 +46,7 @@ class ComponentTestService:
             )
         except Exception as e:
             logger.error(f"Failed to decrypt password for account {account.account_id}: {e}")
-            raise ValueError("密码解密失败，请检查账号配置")
+            raise ValueError("密码解密失败,请检查账号配置")
         
         account_info = {
             'account_id': account.account_id,
@@ -60,7 +60,7 @@ class ComponentTestService:
         }
         
         logger.debug(f"Account info prepared for {account.account_id}")
-        return account_info  # [*] 修复：必须返回account_info！
+        return account_info  # [*] 修复:必须返回account_info！
     
     @staticmethod
     def run_component_test_subprocess(
@@ -74,16 +74,16 @@ class ComponentTestService:
         output_dir: Optional[str] = None
     ) -> 'ComponentTestResult':
         """
-        在独立进程中运行组件测试（统一实现）
+        在独立进程中运行组件测试(统一实现)
         
-        使用subprocess隔离Playwright事件循环，避免Windows兼容性问题
+        使用subprocess隔离Playwright事件循环,避免Windows兼容性问题
         
         Args:
             platform: 平台代码
             component_name: 组件名称
             account_id: 账号ID
             account_info: 账号信息字典
-            component_path: 组件YAML文件路径（可选）
+            component_path: 组件YAML文件路径(可选)
             headless: 无头模式
             screenshot_on_error: 错误时截图
             output_dir: 输出目录
@@ -152,7 +152,7 @@ class ComponentTestService:
                 logger.error(f"STDERR: {proc.stderr}")
                 subprocess_error = f"测试进程失败 (返回码 {proc.returncode}): {proc.stderr[:300] if proc.stderr else 'No stderr'}"
             
-            # 读取结果文件（即使 subprocess 失败也尝试读取，可能有部分结果）
+            # 读取结果文件(即使 subprocess 失败也尝试读取,可能有部分结果)
             result_data = None
             if Path(result_path).exists():
                 try:
@@ -162,10 +162,10 @@ class ComponentTestService:
                 except Exception as e:
                     logger.warning(f"Failed to read result file: {e}")
             
-            # 如果没有结果数据，创建一个失败结果
+            # 如果没有结果数据,创建一个失败结果
             if result_data is None:
                 logger.warning("No result file found, creating error result")
-                error_msg = subprocess_error or "测试结果文件未生成，请检查日志"
+                error_msg = subprocess_error or "测试结果文件未生成,请检查日志"
                 result_data = {
                     'component_name': component_name,
                     'platform': platform,
@@ -237,14 +237,14 @@ class ComponentTestService:
         additional_info: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        格式化测试响应（统一格式）
+        格式化测试响应(统一格式)
         
         Args:
             result: 测试结果对象
-            additional_info: 额外信息（如版本信息）
+            additional_info: 额外信息(如版本信息)
             
         Returns:
-            Dict: 统一的响应格式，符合前端期望
+            Dict: 统一的响应格式,符合前端期望
         """
         import base64
         
@@ -262,7 +262,7 @@ class ComponentTestService:
         # 格式化步骤结果
         step_results = []
         for step_result in result.step_results:
-            # 处理status（可能是字符串或枚举）
+            # 处理status(可能是字符串或枚举)
             step_status = (
                 step_result.status 
                 if isinstance(step_result.status, str) 
@@ -286,7 +286,7 @@ class ComponentTestService:
             else 0
         )
         
-        # 处理result.status（可能是字符串或枚举）
+        # 处理result.status(可能是字符串或枚举)
         result_status = (
             result.status 
             if isinstance(result.status, str) 
@@ -294,7 +294,7 @@ class ComponentTestService:
         )
         
         # v4.8.0: 综合判断测试是否成功
-        # 如果有 error，即使 status 是 passed，也应该标记为失败
+        # 如果有 error,即使 status 是 passed,也应该标记为失败
         has_error = bool(result.error)
         is_success = result_status == 'passed' and not has_error
         
@@ -322,7 +322,7 @@ class ComponentTestService:
             }
         }
         
-        # 添加额外信息（如版本信息）
+        # 添加额外信息(如版本信息)
         if additional_info:
             response.update(additional_info)
         
@@ -341,18 +341,18 @@ class ComponentTestService:
         tested_by: str = "api"
     ) -> None:
         """
-        保存测试历史记录（统一实现，异步版本）
+        保存测试历史记录(统一实现,异步版本)
         
-        [*] v4.18.2修复：改为异步方法，支持 AsyncSession
+        [*] v4.18.2修复:改为异步方法,支持 AsyncSession
         
         Args:
-            db: 数据库会话（Session 或 AsyncSession）
+            db: 数据库会话(Session 或 AsyncSession)
             component_name: 组件名称
             platform: 平台代码
             account_id: 账号ID
             test_result: 测试结果对象
-            version_id: 版本ID（可选）
-            tested_by: 测试来源（recorder/version_manager/api）
+            version_id: 版本ID(可选)
+            tested_by: 测试来源(recorder/version_manager/api)
         """
         from sqlalchemy.ext.asyncio import AsyncSession
         from sqlalchemy.orm import Session
@@ -404,11 +404,11 @@ class ComponentTestService:
             )
             
             db.add(history)
-            # [*] v4.18.2修复：统一使用异步操作
+            # [*] v4.18.2修复:统一使用异步操作
             if isinstance(db, AsyncSession):
                 await db.commit()
             else:
-                # 同步 Session（不应该发生，但保留兼容性）
+                # 同步 Session(不应该发生,但保留兼容性)
                 db.commit()
             
             logger.info(
@@ -422,5 +422,5 @@ class ComponentTestService:
                 await db.rollback()
             else:
                 db.rollback()
-            # 不抛出异常，测试历史保存失败不应影响主流程
+            # 不抛出异常,测试历史保存失败不应影响主流程
 

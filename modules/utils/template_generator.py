@@ -1,7 +1,7 @@
 """
 录制模板生成器
 
-为不同平台生成Playwright录制模板，支持：
+为不同平台生成Playwright录制模板,支持:
 - 妙手ERP登录模板
 - Shopee登录模板  
 - Amazon登录模板
@@ -17,11 +17,11 @@ logger = get_logger(__name__)
 
 
 def _auto_format_script(script_path: Path):
-    """自动格式化生成的脚本，修复常见的缩进和语法问题"""
+    """自动格式化生成的脚本,修复常见的缩进和语法问题"""
     try:
         content = script_path.read_text(encoding='utf-8')
 
-        # 1. 统一缩进：将Tab转为4个空格
+        # 1. 统一缩进:将Tab转为4个空格
         content = content.expandtabs(4)
 
         # 2. 修复常见的缩进问题
@@ -48,7 +48,7 @@ def _auto_format_script(script_path: Path):
             if (line.strip().startswith("'''") or line.strip().startswith('"""')) and i > 0:
                 prev_line = lines[i - 1].strip()
                 if prev_line.startswith('# def '):
-                    # 这是注释函数的文档字符串，应该被注释
+                    # 这是注释函数的文档字符串,应该被注释
                     line = '    #     ' + line.strip()
 
             # 修复孤立的pass语句缩进
@@ -56,7 +56,7 @@ def _auto_format_script(script_path: Path):
                 # 检查前面几行是否有注释函数定义
                 for j in range(max(0, i-3), i):
                     if lines[j].strip().startswith('# def '):
-                        # 这是注释函数的pass，应该被注释
+                        # 这是注释函数的pass,应该被注释
                         line = '    #     pass'
                         break
 
@@ -68,11 +68,11 @@ def _auto_format_script(script_path: Path):
         # 4. 语法检查
         try:
             compile(formatted_content, str(script_path), 'exec')
-            # 语法正确，保存格式化后的内容
+            # 语法正确,保存格式化后的内容
             script_path.write_text(formatted_content, encoding='utf-8')
             logger.debug(f"[OK] 脚本自动格式化完成: {script_path}")
         except SyntaxError as se:
-            logger.warning(f"[WARN] 脚本语法检查失败，保持原内容: {se}")
+            logger.warning(f"[WARN] 脚本语法检查失败,保持原内容: {se}")
             # 语法错误时不覆盖原文件
 
     except Exception as e:
@@ -90,13 +90,13 @@ def create_platform_recording_template(account: Dict, platform: str,
         
         # 生成文件名 - 使用安全的ASCII字符
         account_name = account.get('store_name', account.get('username', 'unknown'))
-        # 更严格的文件名安全处理，只保留ASCII字母数字和基本符号
+        # 更严格的文件名安全处理,只保留ASCII字母数字和基本符号
         safe_name = "".join(c if c.isascii() and (c.isalnum() or c in '._-') else '_' for c in account_name)
-        # 如果处理后为空或太短，使用默认名称
+        # 如果处理后为空或太短,使用默认名称
         if not safe_name or len(safe_name.strip('_')) < 2:
             safe_name = f"account_{hash(account_name) % 10000}"
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # 新命名规范：{平台}_{账号}_{数据类型}_complete_{时间戳}.py（当录制类型为complete时）
+        # 新命名规范:{平台}_{账号}_{数据类型}_complete_{时间戳}.py(当录制类型为complete时)
         if recording_type == "complete" and data_type_key:
             filename = f"{platform_dir}_{safe_name}_{data_type_key}_complete_{timestamp}.py"
         else:
@@ -109,7 +109,7 @@ def create_platform_recording_template(account: Dict, platform: str,
 
         template_path.write_text(content, encoding='utf-8')
 
-        # 自动格式化生成的脚本（防止缩进错误）
+        # 自动格式化生成的脚本(防止缩进错误)
         _auto_format_script(template_path)
 
         return template_path
@@ -235,9 +235,9 @@ def _get_login_logic(platform: str) -> str:
     return '''            # 登录流程录制
             logger.info("等待用户录制登录流程...")
             
-            # 用户手动操作：
+            # 用户手动操作:
             # 1. 填写用户名和密码
-            # 2. 处理验证码（如有）
+            # 2. 处理验证码(如有)
             # 3. 点击登录按钮
             # 4. 等待登录成功
             
@@ -331,10 +331,10 @@ def _get_auto_login_logic(platform: str) -> str:
                         continue
                 
                 if has_verification:
-                    logger.info("[PHONE] 检测到验证码，启动智能处理...")
+                    logger.info("[PHONE] 检测到验证码,启动智能处理...")
                     # 这里可以添加智能验证码处理逻辑
-                    print("[TIP] 验证码处理演示：")
-                    print("  1. 检测验证码类型（邮箱/短信）")
+                    print("[TIP] 验证码处理演示:")
+                    print("  1. 检测验证码类型(邮箱/短信)")
                     print("  2. 自动获取验证码")
                     print("  3. 自动填写验证码")
                     print("  4. 自动提交")
@@ -347,7 +347,7 @@ def _get_auto_login_logic(platform: str) -> str:
                 # 检查登录结果
                 current_url = page.url
                 if "seller.shopee" in current_url:
-                    logger.info("[OK] 登录成功，已进入Shopee卖家后台")
+                    logger.info("[OK] 登录成功,已进入Shopee卖家后台")
                 else:
                     logger.warning("[WARN] 登录状态待确认")
                     
@@ -445,8 +445,8 @@ def _get_auto_login_logic(platform: str) -> str:
                         continue
                 
                 if need_captcha:
-                    logger.info("[PHONE] 检测到验证码，启动智能处理...")
-                    print("[TIP] 验证码处理演示：")
+                    logger.info("[PHONE] 检测到验证码,启动智能处理...")
+                    print("[TIP] 验证码处理演示:")
                     print("  1. 自动请求邮箱验证码")
                     print("  2. 从邮箱获取验证码")
                     print("  3. 自动填写验证码")
@@ -489,7 +489,7 @@ def _get_collection_logic(platform: str, data_type_key: Optional[str]) -> str:
     return f'''            # {data_type_desc}采集录制
             logger.info("开始{data_type_desc}采集录制...")
             
-            # 自动登录（跳过录制）
+            # 自动登录(跳过录制)
             logger.info("执行自动登录...")
             # 这里应该有自动登录逻辑
             
@@ -497,10 +497,10 @@ def _get_collection_logic(platform: str, data_type_key: Optional[str]) -> str:
             time.sleep(5)
             
             # 进入数据采集录制阶段
-            logger.info("[OK] 登录完成，开始录制数据采集操作")
-            print("[DATA] 请在浏览器中录制以下操作：")
+            logger.info("[OK] 登录完成,开始录制数据采集操作")
+            print("[DATA] 请在浏览器中录制以下操作:")
             print("  1. 导航到{data_type_desc}页面")
-            print("  2. 设置筛选条件（日期范围等）")
+            print("  2. 设置筛选条件(日期范围等)")
             print("  3. 执行数据查询/导出操作")
             print("  4. 完成后点击Resume继续")
             
@@ -512,13 +512,13 @@ def _get_complete_logic(platform: str, data_type_key: Optional[str]) -> str:
     """获取完整流程录制逻辑"""
     data_type_desc = data_type_key or "数据"
     
-    return f'''            # 完整流程录制（登录 + {data_type_desc}采集）
+    return f'''            # 完整流程录制(登录 + {data_type_desc}采集)
             logger.info("开始完整流程录制...")
             
-            print("[RETRY] 请在浏览器中录制完整流程：")
+            print("[RETRY] 请在浏览器中录制完整流程:")
             print("  第一阶段: 登录流程")
             print("    1. 填写用户名和密码")
-            print("    2. 处理验证码（如有）")
+            print("    2. 处理验证码(如有)")
             print("    3. 点击登录按钮")
             print("    4. 等待登录成功")
             print("  第二阶段: {data_type_desc}采集")
@@ -555,7 +555,7 @@ def create_miaoshou_account_override_template(account: Dict) -> Path:
 账号: {account.get('store_name', 'unknown')}
 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
-用途: 为该账号创建专用的采集逻辑，覆盖默认行为
+用途: 为该账号创建专用的采集逻辑,覆盖默认行为
 """
 
 def get_account_override():
@@ -589,7 +589,7 @@ def get_account_override():
             'batch_size': 1000
         }},
         
-        # 元素选择器（如需自定义）
+        # 元素选择器(如需自定义)
         'selectors': {{
             'username_input': 'input[name="username"]',
             'password_input': 'input[name="password"]',
@@ -615,9 +615,9 @@ def get_account_override():
 
 def get_custom_login_logic():
     """
-    自定义登录逻辑（可选）
+    自定义登录逻辑(可选)
     
-    如果该账号需要特殊的登录处理，可以在这里定义
+    如果该账号需要特殊的登录处理,可以在这里定义
     """
     
     return {{
@@ -630,9 +630,9 @@ def get_custom_login_logic():
 
 def get_custom_collection_logic():
     """
-    自定义采集逻辑（可选）
+    自定义采集逻辑(可选)
     
-    如果该账号需要特殊的采集处理，可以在这里定义
+    如果该账号需要特殊的采集处理,可以在这里定义
     """
     
     return {{
@@ -699,7 +699,7 @@ def generate_script_from_events(account: Dict, platform: str, recording_type: st
     """根据事件文件生成可回放的Playwright脚本
 
     Args:
-        account: 账号信息，需包含login_url/username/password
+        account: 账号信息,需包含login_url/username/password
         platform: 平台名
         recording_type: 录制类型
         events_file: 事件JSONL文件路径
@@ -762,10 +762,10 @@ TRACE_PATH = Path('temp/media/{timestamp}_{safe_name}_{platform.lower()}_trace.z
 
 '''
 
-    # 可选：网络拦截占位
+    # 可选:网络拦截占位
     network_helpers = '''def setup_network_interception(page):
-    """可选：设置网络拦截规则（按需手动补充）"""
-    # 示例：
+    """可选:设置网络拦截规则(按需手动补充)"""
+    # 示例:
     # page.route("**/*", lambda route: route.continue_())
     pass
 
@@ -790,7 +790,7 @@ TRACE_PATH = Path('temp/media/{timestamp}_{safe_name}_{platform.lower()}_trace.z
         if t == 'click' and sel:
             return f"    page.click({sel!r})\n"
         if t == 'fill' and sel is not None:
-            # 屏蔽敏感字段的直接明文：若包含password等，优先使用账号配置
+            # 屏蔽敏感字段的直接明文:若包含password等,优先使用账号配置
             if 'password' in (ev.get('name') or '').lower() or 'password' in sel.lower():
                 return f"    page.fill({sel!r}, ACCOUNT['password'])\n"
             if 'username' in (ev.get('name') or '').lower() or 'login' in sel.lower():
@@ -808,12 +808,12 @@ TRACE_PATH = Path('temp/media/{timestamp}_{safe_name}_{platform.lower()}_trace.z
         if t == 'sleep' and isinstance(val, (int, float)):
             return f"    time.sleep({float(val)})\n"
         if t == 'new_page':
-            return "    # 新页面打开事件（请按需补充处理逻辑，如使用 context.on('page') 监听）\n"
+            return "    # 新页面打开事件(请按需补充处理逻辑,如使用 context.on('page') 监听)\n"
         if t == 'download':
-            return "    # 下载事件占位：可在此添加下载监听与保存逻辑\n"
+            return "    # 下载事件占位:可在此添加下载监听与保存逻辑\n"
         if t == 'request' or t == 'response':
-            return "    # 网络事件占位：如需断言/过滤，请在setup_network_interception中实现\n"
-        return "    # 未识别事件，已忽略\n"
+            return "    # 网络事件占位:如需断言/过滤,请在setup_network_interception中实现\n"
+        return "    # 未识别事件,已忽略\n"
 
     body_actions = []
     # 基本起始导航
@@ -844,7 +844,7 @@ if __name__ == '__main__':
     content = header + network_helpers + body_prefix + "".join(body_actions) + body_suffix + "\n" + main_block
     script_path.write_text(content, encoding='utf-8')
 
-    # 自动格式化生成的脚本（防止缩进错误）
+    # 自动格式化生成的脚本(防止缩进错误)
     _auto_format_script(script_path)
 
     return script_path

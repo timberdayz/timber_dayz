@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-平台表管理服务（Platform Table Manager）
+平台表管理服务(Platform Table Manager)
 
-v4.17.0新增：
-- 根据文件元数据（platform + data_domain + sub_domain + granularity）动态创建表
-- 表名格式：fact_{platform}_{data_domain}_{sub_domain}_{granularity}
-- 表先于模板存在，模板只用于字段映射和动态列添加
+v4.17.0新增:
+- 根据文件元数据(platform + data_domain + sub_domain + granularity)动态创建表
+- 表名格式:fact_{platform}_{data_domain}_{sub_domain}_{granularity}
+- 表先于模板存在,模板只用于字段映射和动态列添加
 
-职责：
-- 表名生成（基于文件元数据）
-- 表创建（基础结构）
+职责:
+- 表名生成(基于文件元数据)
+- 表创建(基础结构)
 - 表存在性检查
-- 集成动态列管理（根据模板字段添加列）
+- 集成动态列管理(根据模板字段添加列)
 """
 
 from typing import Optional, Set
-from sqlalchemy.ext.asyncio import AsyncSession  # [*] v4.18.2新增：异步支持
+from sqlalchemy.ext.asyncio import AsyncSession  # [*] v4.18.2新增:异步支持
 from sqlalchemy import text, inspect
 from sqlalchemy.exc import ProgrammingError
-import asyncio  # [*] v4.18.2新增：用于run_in_executor
+import asyncio  # [*] v4.18.2新增:用于run_in_executor
 
 from modules.core.logger import get_logger
 from backend.services.dynamic_column_manager import get_dynamic_column_manager, SYSTEM_FIELDS
@@ -31,13 +31,13 @@ class PlatformTableManager:
     """
     平台表管理服务
     
-    职责：
-    - 根据文件元数据创建表（如果不存在）
-    - 表名格式：fact_{platform}_{data_domain}_{sub_domain}_{granularity}
-    - 集成动态列管理（根据模板字段添加列）
+    职责:
+    - 根据文件元数据创建表(如果不存在)
+    - 表名格式:fact_{platform}_{data_domain}_{sub_domain}_{granularity}
+    - 集成动态列管理(根据模板字段添加列)
     
     v4.18.2: 支持异步会话
-    v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
+    v4.19.0更新:移除同步/异步双模式支持,统一为异步架构
     - DDL操作通过run_in_executor在线程池中执行
     """
     
@@ -46,11 +46,11 @@ class PlatformTableManager:
         初始化平台表管理器
         
         Args:
-            db: 异步数据库会话（AsyncSession）
+            db: 异步数据库会话(AsyncSession)
         """
         self.db = db
         self.dynamic_column_manager = get_dynamic_column_manager(db)
-        # [*] v4.19.0更新：异步模式下不在构造函数中执行DDL，由调用者显式调用
+        # [*] v4.19.0更新:异步模式下不在构造函数中执行DDL,由调用者显式调用
     
     def _ensure_b_class_schema(self):
         """确保b_class schema存在"""
@@ -59,7 +59,7 @@ class PlatformTableManager:
             self.db.commit()
             logger.debug("[PlatformTableManager] b_class schema已确保存在")
         except Exception as e:
-            logger.warning(f"[PlatformTableManager] 确保b_class schema存在失败（可能已存在）: {e}")
+            logger.warning(f"[PlatformTableManager] 确保b_class schema存在失败(可能已存在): {e}")
             self.db.rollback()
     
     def get_table_name(
@@ -70,28 +70,28 @@ class PlatformTableManager:
         granularity: str
     ) -> str:
         """
-        生成表名：fact_{platform}_{data_domain}_{sub_domain}_{granularity}
+        生成表名:fact_{platform}_{data_domain}_{sub_domain}_{granularity}
         
-        规则：
-        - sub_domain为空时，不包含sub_domain部分
-        - 例如：fact_shopee_orders_daily（无sub_domain）
-        - 例如：fact_shopee_services_ai_assistant_monthly（有sub_domain）
+        规则:
+        - sub_domain为空时,不包含sub_domain部分
+        - 例如:fact_shopee_orders_daily(无sub_domain)
+        - 例如:fact_shopee_services_ai_assistant_monthly(有sub_domain)
         
         Args:
-            platform: 平台代码（shopee/tiktok/miaoshou）
-            data_domain: 数据域（orders/products/services/analytics/inventory）
-            sub_domain: 子类型（可选，services域有ai_assistant/agent）
-            granularity: 粒度（daily/weekly/monthly/snapshot）
+            platform: 平台代码(shopee/tiktok/miaoshou)
+            data_domain: 数据域(orders/products/services/analytics/inventory)
+            sub_domain: 子类型(可选,services域有ai_assistant/agent)
+            granularity: 粒度(daily/weekly/monthly/snapshot)
         
         Returns:
             表名
         """
-        # [*] v4.17.0修复：验证platform不为空，避免表名错误（如fact__inventory_snapshot）
+        # [*] v4.17.0修复:验证platform不为空,避免表名错误(如fact__inventory_snapshot)
         platform = platform.lower().strip() if platform else "unknown"
         if not platform or platform == '':
             platform = "unknown"
             logger.warning(
-                f"[PlatformTableManager] [WARN] platform为空，使用默认值: unknown "
+                f"[PlatformTableManager] [WARN] platform为空,使用默认值: unknown "
                 f"(data_domain={data_domain}, granularity={granularity})"
             )
         
@@ -112,16 +112,16 @@ class PlatformTableManager:
         granularity: str
     ) -> str:
         """
-        确保表存在，如果不存在则创建（基础结构）
+        确保表存在,如果不存在则创建(基础结构)
         
-        调用时机：
+        调用时机:
         - 文件扫描注册时
-        - 数据入库时（如果表不存在）
+        - 数据入库时(如果表不存在)
         
         Args:
             platform: 平台代码
             data_domain: 数据域
-            sub_domain: 子类型（可选）
+            sub_domain: 子类型(可选)
             granularity: 粒度
         
         Returns:
@@ -137,7 +137,7 @@ class PlatformTableManager:
             )
             self._create_base_table(table_name, platform, data_domain, sub_domain, granularity)
         else:
-            # [*] v4.18.1新增：表存在时，检查并补齐缺失的period列（兼容旧表）
+            # [*] v4.18.1新增:表存在时,检查并补齐缺失的period列(兼容旧表)
             self._ensure_period_columns_exist(table_name)
             logger.debug(f"[PlatformTableManager] 表已存在: {table_name}")
         
@@ -150,14 +150,14 @@ class PlatformTableManager:
         template_id: Optional[int] = None
     ) -> list:
         """
-        同步表列（根据模板header_columns添加列）
+        同步表列(根据模板header_columns添加列)
         
-        这是对DynamicColumnManager的封装，用于按平台分表场景
+        这是对DynamicColumnManager的封装,用于按平台分表场景
         
         Args:
             table_name: 表名
-            header_columns: 表头字段列表（归一化后的，不含货币代码）
-            template_id: 模板ID（可选，用于日志）
+            header_columns: 表头字段列表(归一化后的,不含货币代码)
+            template_id: 模板ID(可选,用于日志)
         
         Returns:
             新增的列列表
@@ -181,11 +181,11 @@ class PlatformTableManager:
                 f"[PlatformTableManager] 同步表列失败 (表={table_name}): {e}",
                 exc_info=True
             )
-            # 失败不影响主流程（数据已通过raw_data JSONB存储）
+            # 失败不影响主流程(数据已通过raw_data JSONB存储)
             return []
     
     def _table_exists(self, table_name: str) -> bool:
-        """检查表是否存在（在b_class schema中）"""
+        """检查表是否存在(在b_class schema中)"""
         try:
             inspector = inspect(self.db.bind)
             return table_name in inspector.get_table_names(schema='b_class')
@@ -195,9 +195,9 @@ class PlatformTableManager:
     
     def _ensure_period_columns_exist(self, table_name: str):
         """
-        v4.18.1修复：确保period相关的系统列存在
+        v4.18.1修复:确保period相关的系统列存在
         
-        对于在v4.18.0之前创建的表，需要补齐以下列：
+        对于在v4.18.0之前创建的表,需要补齐以下列:
         - period_start_date DATE NOT NULL (默认CURRENT_DATE)
         - period_end_date DATE NOT NULL (默认CURRENT_DATE)
         - period_start_time TIMESTAMP (可选)
@@ -237,7 +237,7 @@ class PlatformTableManager:
             for col_name, col_type, default_value in columns_to_add:
                 try:
                     if default_value:
-                        # DATE类型需要默认值（用于已有数据）
+                        # DATE类型需要默认值(用于已有数据)
                         alter_sql = text(f'''
                             ALTER TABLE b_class."{table_name}" 
                             ADD COLUMN IF NOT EXISTS {col_name} {col_type} DEFAULT {default_value}
@@ -250,9 +250,9 @@ class PlatformTableManager:
                     self.db.execute(alter_sql)
                     logger.info(f"[PlatformTableManager] [v4.18.1] 添加列 {col_name} 到表 {table_name}")
                 except Exception as e:
-                    logger.warning(f"[PlatformTableManager] [v4.18.1] 添加列 {col_name} 失败（可能已存在）: {e}")
+                    logger.warning(f"[PlatformTableManager] [v4.18.1] 添加列 {col_name} 失败(可能已存在): {e}")
             
-            # 创建索引（如果不存在）
+            # 创建索引(如果不存在)
             try:
                 index_sql = text(f'''
                     CREATE INDEX IF NOT EXISTS "ix_{table_name}_period_date" 
@@ -260,7 +260,7 @@ class PlatformTableManager:
                 ''')
                 self.db.execute(index_sql)
             except Exception as e:
-                logger.warning(f"[PlatformTableManager] [v4.18.1] 创建period索引失败（可能已存在）: {e}")
+                logger.warning(f"[PlatformTableManager] [v4.18.1] 创建period索引失败(可能已存在): {e}")
             
             self.db.commit()
             logger.info(f"[PlatformTableManager] [v4.18.1] 表 {table_name} period列补齐完成")
@@ -278,17 +278,17 @@ class PlatformTableManager:
         granularity: str
     ):
         """
-        创建基础表结构（系统字段）
+        创建基础表结构(系统字段)
         
-        表结构：
-        - 系统字段：id, platform_code, shop_id, data_domain, granularity, sub_domain,
+        表结构:
+        - 系统字段:id, platform_code, shop_id, data_domain, granularity, sub_domain,
                     metric_date, file_id, template_id, raw_data, header_columns,
                     data_hash, ingest_timestamp, currency_code
-        - 动态列：根据模板字段动态添加（通过sync_table_columns方法）
+        - 动态列:根据模板字段动态添加(通过sync_table_columns方法)
         """
         try:
             # 构建CREATE TABLE SQL
-            # [*] 注意：services域的表需要sub_domain字段，其他域sub_domain可为NULL
+            # [*] 注意:services域的表需要sub_domain字段,其他域sub_domain可为NULL
             sub_domain_column = ""
             if data_domain.lower() == 'services':
                 # services域必须提供sub_domain
@@ -298,7 +298,7 @@ class PlatformTableManager:
                 sub_domain_column = "sub_domain VARCHAR(64),"
             
             # v4.18.0: 添加period_start_date, period_end_date, period_start_time, period_end_time字段
-            # 用于支持日期范围数据（如周度/月度数据）和精确时间查询
+            # 用于支持日期范围数据(如周度/月度数据)和精确时间查询
             create_table_sql = text(f"""
                 CREATE TABLE IF NOT EXISTS b_class."{table_name}" (
                     id BIGSERIAL PRIMARY KEY,
@@ -324,8 +324,8 @@ class PlatformTableManager:
             
             self.db.execute(create_table_sql)
             
-            # 创建唯一索引（使用COALESCE处理NULL值）
-            # [WARN] PostgreSQL的UNIQUE约束不支持表达式，需要使用唯一索引
+            # 创建唯一索引(使用COALESCE处理NULL值)
+            # [WARN] PostgreSQL的UNIQUE约束不支持表达式,需要使用唯一索引
             if data_domain.lower() == 'services':
                 unique_index_sql = text(f"""
                     CREATE UNIQUE INDEX IF NOT EXISTS "uq_{table_name}_hash" 
@@ -339,7 +339,7 @@ class PlatformTableManager:
             
             self.db.execute(unique_index_sql)
             
-            # 创建其他索引（在b_class schema中）
+            # 创建其他索引(在b_class schema中)
             indexes_sql = [
                 text(f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_platform" ON b_class."{table_name}" (platform_code)'),
                 text(f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_shop" ON b_class."{table_name}" (shop_id)'),
@@ -350,9 +350,9 @@ class PlatformTableManager:
                 text(f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_hash" ON b_class."{table_name}" (data_hash)'),
                 text(f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_currency" ON b_class."{table_name}" (currency_code)'),
                 text(f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_gin" ON b_class."{table_name}" USING GIN (raw_data)'),
-                # v4.18.0: 日期范围索引（所有记录）
+                # v4.18.0: 日期范围索引(所有记录)
                 text(f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_period_date" ON b_class."{table_name}" (period_start_date, period_end_date)'),
-                # v4.18.0: 时间范围索引（部分索引，仅索引有时间信息的记录）
+                # v4.18.0: 时间范围索引(部分索引,仅索引有时间信息的记录)
                 text(f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_period_time" ON b_class."{table_name}" (period_start_time, period_end_time) WHERE period_start_time IS NOT NULL'),
             ]
             
@@ -366,12 +366,12 @@ class PlatformTableManager:
                 try:
                     self.db.execute(index_sql)
                 except Exception as e:
-                    logger.warning(f"[PlatformTableManager] 创建索引失败（继续）: {e}")
+                    logger.warning(f"[PlatformTableManager] 创建索引失败(继续): {e}")
             
             self.db.commit()
             
-            # [*] v4.17.0修复：索引创建后，显式刷新统计信息，确保索引立即可用
-            # 这对于表达式索引特别重要，确保ON CONFLICT能正确匹配
+            # [*] v4.17.0修复:索引创建后,显式刷新统计信息,确保索引立即可用
+            # 这对于表达式索引特别重要,确保ON CONFLICT能正确匹配
             try:
                 refresh_stats_sql = text(f'ANALYZE b_class."{table_name}"')
                 self.db.execute(refresh_stats_sql)
@@ -381,13 +381,13 @@ class PlatformTableManager:
                 )
             except Exception as e:
                 logger.warning(
-                    f"[PlatformTableManager] [v4.17.0] 刷新统计信息失败（继续）: {e}"
+                    f"[PlatformTableManager] [v4.17.0] 刷新统计信息失败(继续): {e}"
                 )
                 # 刷新统计信息失败不影响主流程
             
             logger.info(
                 f"[PlatformTableManager] 成功创建表: {table_name} "
-                f"（包含基础字段和索引）"
+                f"(包含基础字段和索引)"
             )
             
         except Exception as e:
@@ -403,8 +403,8 @@ def get_platform_table_manager(db: AsyncSession) -> PlatformTableManager:
     """
     获取平台表管理服务实例
     
-    [*] v4.18.2：支持异步会话
-    [*] v4.19.0更新：移除同步/异步双模式支持，统一为异步架构
+    [*] v4.18.2:支持异步会话
+    [*] v4.19.0更新:移除同步/异步双模式支持,统一为异步架构
     """
     return PlatformTableManager(db)
 
@@ -418,12 +418,12 @@ async def async_ensure_table_exists(
     business_fields: Optional[Set[str]] = None
 ) -> str:
     """
-    异步确保表存在（[*] v4.18.2新增，v4.19.0更新）
+    异步确保表存在([*] v4.18.2新增,v4.19.0更新)
     
-    [*] v4.19.0更新：统一为异步架构，使用run_in_executor将DDL操作包装为异步
+    [*] v4.19.0更新:统一为异步架构,使用run_in_executor将DDL操作包装为异步
     
     Args:
-        db: 异步数据库会话（AsyncSession）
+        db: 异步数据库会话(AsyncSession)
         platform: 平台代码
         data_domain: 数据域
         sub_domain: 子类型
@@ -433,7 +433,7 @@ async def async_ensure_table_exists(
     Returns:
         表名
     """
-    # [*] v4.19.0更新：统一使用run_in_executor包装DDL操作
+    # [*] v4.19.0更新:统一使用run_in_executor包装DDL操作
     from backend.models.database import SessionLocal
     
     def _sync_ensure_table():

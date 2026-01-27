@@ -23,7 +23,7 @@ class ShopeeNavigation(NavigationComponent):
         if not page:
             return NavigationResult(success=False, url="", message="page is None")
 
-        # 兼容不同模块的 TargetPage（products_config / analytics_config 等）
+        # 兼容不同模块的 TargetPage(products_config / analytics_config 等)
         def _key(t: Any) -> str:
             try:
                 v = getattr(t, "value", None) or getattr(t, "name", None) or str(t)
@@ -37,7 +37,7 @@ class ShopeeNavigation(NavigationComponent):
         shop_id = account.get("shop_id") or account.get("cnsc_shop_id")
         base = getattr(self.sel, "base_url", "https://seller.shopee.cn")
 
-        # 目标路径解析：支持四个主要子类型
+        # 目标路径解析:支持四个主要子类型
         path = ""
         if "products_performance" in key or "product" in key:
             path = getattr(self.sel, "performance_path", "/datacenter/product/performance")
@@ -55,7 +55,7 @@ class ShopeeNavigation(NavigationComponent):
         try:
             if self.logger:
                 self.logger.info(f"[ShopeeNavigation] goto: {url}")
-            # 先尝试快速加载，失败则降级到更宽松的条件
+            # 先尝试快速加载,失败则降级到更宽松的条件
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             except Exception:

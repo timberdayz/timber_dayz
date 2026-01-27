@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-"""TikTok 服务表现（Service Analytics）配置
+"""TikTok 服务表现(Service Analytics)配置
 
-- 仅在此维护深链接路径（不含域名）与关键选择器
-- 域名统一：seller.tiktokshopglobalselling.com
+- 仅在此维护深链接路径(不含域名)与关键选择器
+- 域名统一:seller.tiktokshopglobalselling.com
 - 模块导入零副作用
 """
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ from typing import Final, List
 
 BASE_URL: Final[str] = "https://seller.tiktokshopglobalselling.com"
 
-# 服务表现 Compass 页（仅路径部分）
+# 服务表现 Compass 页(仅路径部分)
 SERVICE_PATH: Final[str] = "/compass/service-analytics"
 
 EXPORT_BUTTON_SELECTORS: Final[List[str]] = [

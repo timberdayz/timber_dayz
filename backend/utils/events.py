@@ -1,14 +1,14 @@
 """
 事件定义文件 - 数据流转流程自动化
 
-定义系统内部事件类型和事件数据结构，用于实现数据流转流程自动化。
+定义系统内部事件类型和事件数据结构,用于实现数据流转流程自动化。
 
-事件类型：
+事件类型:
 - DATA_INGESTED: B类数据入库完成
 - MV_REFRESHED: 物化视图刷新完成
 - A_CLASS_UPDATED: A类数据更新
 
-事件流程：
+事件流程:
 1. B类数据入库 -> 触发DATA_INGESTED事件 -> 自动刷新物化视图
 2. 物化视图刷新完成 -> 触发MV_REFRESHED事件 -> 自动计算C类数据
 3. A类数据更新 -> 触发A_CLASS_UPDATED事件 -> 自动重新计算C类数据
@@ -23,8 +23,8 @@ from dataclasses import dataclass, asdict
 class EventType(str, Enum):
     """事件类型枚举"""
     DATA_INGESTED = "data_ingested"  # B类数据入库完成
-    # [WARN] v4.6.0 DSS架构重构：MV_REFRESHED已废弃（Metabase直接查询原始表，无需物化视图）
-    # MV_REFRESHED = "mv_refreshed"  # 物化视图刷新完成（已废弃）
+    # [WARN] v4.6.0 DSS架构重构:MV_REFRESHED已废弃(Metabase直接查询原始表,无需物化视图)
+    # MV_REFRESHED = "mv_refreshed"  # 物化视图刷新完成(已废弃)
     A_CLASS_UPDATED = "a_class_updated"  # A类数据更新
 
 
@@ -50,9 +50,9 @@ class DataIngestedEvent:
 
 @dataclass
 class MVRefreshedEvent:
-    """物化视图刷新完成事件（[WARN] v4.6.0已废弃，保留类定义以兼容旧代码）"""
-    # [*] v4.18.2修复：MV_REFRESHED已从EventType枚举中移除，使用字符串常量
-    event_type: str = "mv_refreshed"  # 已废弃，但保留类定义以兼容旧代码
+    """物化视图刷新完成事件([WARN] v4.6.0已废弃,保留类定义以兼容旧代码)"""
+    # [*] v4.18.2修复:MV_REFRESHED已从EventType枚举中移除,使用字符串常量
+    event_type: str = "mv_refreshed"  # 已废弃,但保留类定义以兼容旧代码
     view_name: str = None
     view_type: Optional[str] = None  # sales/inventory/finance/traffic
     row_count: int = 0
@@ -92,7 +92,7 @@ class AClassUpdatedEvent:
 # 事件类型到事件类的映射
 EVENT_CLASS_MAP = {
     EventType.DATA_INGESTED: DataIngestedEvent,
-    # [WARN] v4.6.0 DSS架构重构：MV_REFRESHED已废弃
+    # [WARN] v4.6.0 DSS架构重构:MV_REFRESHED已废弃
     # EventType.MV_REFRESHED: MVRefreshedEvent,  # 已废弃
     EventType.A_CLASS_UPDATED: AClassUpdatedEvent,
 }

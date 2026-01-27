@@ -21,9 +21,9 @@ async def get_permission_tree(
     current_user = Depends(get_current_user)
 ):
     """
-    获取权限树（层级结构）
+    获取权限树(层级结构)
     
-    返回按模块分组的权限树，支持前端权限管理界面展示
+    返回按模块分组的权限树,支持前端权限管理界面展示
     """
     try:
         service = get_permission_service()

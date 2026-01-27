@@ -3,7 +3,7 @@
 """
 用户注册和审批API测试
 
-测试内容：
+测试内容:
 1. 用户注册API (POST /api/auth/register)
 2. 用户审批API (POST /api/users/{user_id}/approve)
 3. 用户拒绝API (POST /api/users/{user_id}/reject)
@@ -28,7 +28,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# 测试数据库URL（使用测试数据库）
+# 测试数据库URL(使用测试数据库)
 TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:15432/xihong_erp_test"
 
 
@@ -111,7 +111,7 @@ async def test_user_registration(client: TestClient, test_db: AsyncSession):
     assert data["data"]["username"] == "testuser1"
     assert data["data"]["status"] == "pending"
     
-    # 验证用户已创建（状态为pending）
+    # 验证用户已创建(状态为pending)
     result = await test_db.execute(select(DimUser).where(DimUser.username == "testuser1"))
     user = result.scalar_one_or_none()
     assert user is not None
@@ -130,7 +130,7 @@ async def test_user_registration_duplicate_username(client: TestClient):
         "full_name": "Duplicate User 1"
     })
     
-    # 第二次注册（相同用户名）
+    # 第二次注册(相同用户名)
     response = client.post("/api/auth/register", json={
         "username": "duplicate_user",
         "email": "duplicate2@test.com",
@@ -156,7 +156,7 @@ async def test_user_login_pending_status(client: TestClient, test_db: AsyncSessi
     })
     assert register_response.status_code == 200
     
-    # 尝试登录（应该失败）
+    # 尝试登录(应该失败)
     login_response = client.post("/api/auth/login", json={
         "username": "pending_user",
         "password": "test123456"

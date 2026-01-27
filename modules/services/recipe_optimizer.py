@@ -1,7 +1,7 @@
 """
 配方优化器
 
-优化录制生成的配方，去除重复步骤，提高执行效率
+优化录制生成的配方,去除重复步骤,提高执行效率
 """
 
 import json
@@ -215,7 +215,7 @@ class RecipeOptimizer:
 
 
 def optimize_latest_recipe():
-    """优化最新的配方文件（便捷函数）"""
+    """优化最新的配方文件(便捷函数)"""
     import glob
     import os
     from modules.utils.logger import logger

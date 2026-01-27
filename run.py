@@ -339,11 +339,87 @@ def show_docker_container_logs(container_name, lines=50):
     except:
         return "无法获取日志"
 
+def _load_env_vars(env_path):
+    """从 .env 文件加载键值对（简单解析，用于启动前检查）"""
+    vars_map = {}
+    if not env_path or not env_path.exists():
+        return vars_map
+    try:
+        for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            key = k.strip()
+            val = v.strip().strip("'\"").split("#")[0].strip()
+            if key:
+                vars_map[key] = val
+    except Exception:
+        pass
+    return vars_map
+
+
+def validate_environment_for_docker(project_root):
+    """
+    启动前环境检查：Docker 模式下校验关键环境变量，避免部署后失败。
+    仅警告不阻断，返回是否通过。
+    """
+    env_file = project_root / ".env"
+    if not env_file.exists():
+        safe_print("  [WARNING] .env 不存在，Docker Compose 将使用各 compose 文件内默认值")
+        safe_print("  建议: cp env.example .env 并修改必要项（如 REDIS_PASSWORD）")
+        return True
+    vars_map = _load_env_vars(env_file)
+    required = ["DATABASE_URL", "SECRET_KEY"]
+    optional_docker = ["REDIS_PASSWORD", "POSTGRES_PASSWORD"]
+    missing = [k for k in required if not (vars_map.get(k) or os.getenv(k))]
+    missing_opt = [k for k in optional_docker if not (vars_map.get(k) or os.getenv(k))]
+    if missing:
+        safe_print(f"  [WARNING] 建议在 .env 中配置: {', '.join(missing)}")
+        safe_print("  否则可能导致容器无法连接数据库或认证失败")
+    if missing_opt and not os.getenv("SKIP_ENV_VALIDATION"):
+        safe_print(f"  [INFO] 可选变量未设置将使用默认值: {', '.join(missing_opt)}")
+    return True
+
+
+def pre_flight_check_docker(project_root):
+    """启动前检查：Docker 是否可用、.env 是否存在。仅提示，不阻断。"""
+    try:
+        r = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            encoding="utf-8",
+            errors="ignore",
+            cwd=project_root,
+        )
+        if r.returncode != 0:
+            safe_print("  [FAIL] Docker 未运行或不可用，请先启动 Docker Desktop / Docker Engine")
+            return False
+        safe_print("  [OK] Docker 运行正常")
+    except FileNotFoundError:
+        safe_print("  [FAIL] 未找到 docker 命令，请安装 Docker 并加入 PATH")
+        return False
+    except Exception as e:
+        safe_print(f"  [FAIL] Docker 检查异常: {e}")
+        return False
+    return True
+
+
 def start_services_with_docker_compose():
     """使用Docker Compose启动服务（v4.19.6新增，生产模式：确保所有服务在容器中运行）"""
     safe_print("\n[启动] 使用Docker Compose启动服务...")
     
     project_root = Path(__file__).parent
+    
+    # [Phase 3.3] 启动前检查：Docker 可用性
+    safe_print("  [检查] 本地开发启动清单...")
+    if not pre_flight_check_docker(project_root):
+        return False
+    
+    # [Phase 2.3] 启动前环境检查（Docker 关键变量）
+    validate_environment_for_docker(project_root)
     
     # [PHASE 1.3] 环境变量验证（开发环境可跳过）
     env_file = project_root / ".env"
@@ -411,6 +487,9 @@ def start_services_with_docker_compose():
     
     if compose_dev.exists():
         compose_files.extend(["-f", str(compose_dev)])
+    
+    # [Phase 3.1] 显示当前使用的 Profile，便于排查本地/云端差异
+    safe_print(f"  [INFO] Docker Compose Profile: {profile_name}")
     
     # [NEW] 添加 Metabase 配置文件（开发环境需要端口映射）
     if compose_metabase.exists():

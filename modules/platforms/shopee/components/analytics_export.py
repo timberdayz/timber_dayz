@@ -11,11 +11,11 @@ from modules.utils.path_sanitizer import safe_slug, build_output_path, build_fil
 
 
 class ShopeeAnalyticsExport(ExportComponent):
-    """Shopee 流量表现（Analytics）导出组件
+    """Shopee 流量表现(Analytics)导出组件
 
     - 只依赖 analytics_config 中的 URL/选择器
     - 统一落盘到 temp/outputs/shopee/<账号>/<店铺>/traffic/<粒度>/
-    - 优先 UI 导出（点击->等待->下载），后续可扩展 API 备选
+    - 优先 UI 导出(点击->等待->下载),后续可扩展 API 备选
     - 架构与 ShopeeProductsExport 保持一致
     """
 
@@ -29,7 +29,7 @@ class ShopeeAnalyticsExport(ExportComponent):
         self.sel = selectors or AnalyticsSelectors()
 
     def _write_manifest(self, target: Path, cfg: dict, account_label: str, shop_name: str) -> None:
-        """在导出文件旁生成元数据清单（.json），与服务表现保持一致字段"""
+        """在导出文件旁生成元数据清单(.json),与服务表现保持一致字段"""
         try:
             from datetime import datetime
             meta = {
@@ -38,7 +38,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                 "shop_name": shop_name,
                 "shop_id": (self.ctx.config or {}).get("shop_id"),
                 "region": (self.ctx.account or {}).get("region"),
-                "data_type": "analytics",  # v4.10.0更新：统一使用analytics域，traffic域已废弃
+                "data_type": "analytics",  # v4.10.0更新:统一使用analytics域,traffic域已废弃
                 "granularity": (cfg or {}).get("granularity"),
                 "start_date": (cfg or {}).get("start_date"),
                 "end_date": (cfg or {}).get("end_date"),
@@ -54,7 +54,7 @@ class ShopeeAnalyticsExport(ExportComponent):
         try:
             account = self.ctx.account
             cfg = self.ctx.config or {}
-            # 店铺命名优先级：菜单显示名 > 账号里显式的display/menu字段 > store_name > 配置里的shop_name
+            # 店铺命名优先级:菜单显示名 > 账号里显式的display/menu字段 > store_name > 配置里的shop_name
             shop_name = (
                 account.get("menu_display_name")
                 or account.get("menu_name")
@@ -65,10 +65,10 @@ class ShopeeAnalyticsExport(ExportComponent):
                 or cfg.get("shop_name")
                 or "unknown_shop"
             )
-            # 账号标签仍保持 label 优先，回退到 store_name/username，避免路径大范围变化
+            # 账号标签仍保持 label 优先,回退到 store_name/username,避免路径大范围变化
             account_label = account.get("label") or account.get("store_name") or account.get("username", "unknown")
 
-            # 0) 轻量弹窗关闭（若存在）
+            # 0) 轻量弹窗关闭(若存在)
             try:
                 for sel in getattr(self.sel, 'popup_close_buttons', []) or []:
                     try:
@@ -83,7 +83,7 @@ class ShopeeAnalyticsExport(ExportComponent):
             except Exception:
                 pass
 
-            # 0.5) 日期选择：与单次/服务表现保持一致（基于 DatePicker 配方）
+            # 0.5) 日期选择:与单次/服务表现保持一致(基于 DatePicker 配方)
             try:
                 gran_for_pick = (cfg.get("granularity") or "").lower()
                 from modules.components.date_picker.base import DateOption
@@ -102,10 +102,10 @@ class ShopeeAnalyticsExport(ExportComponent):
                     _res = _dp.run(page, opt)
                     page.wait_for_timeout(600)
             except Exception:
-                # 日期选择失败不阻断导出，后续依靠文件名区间校验兜底
+                # 日期选择失败不阻断导出,后续依靠文件名区间校验兜底
                 pass
 
-            # 1) 确认页面加载完成（多探针并行检测）
+            # 1) 确认页面加载完成(多探针并行检测)
             data_ready = False
             ready_probe = None
             for probe in self.sel.data_ready_probes:
@@ -114,25 +114,25 @@ class ShopeeAnalyticsExport(ExportComponent):
                         data_ready = True
                         ready_probe = probe
                         if self.logger:
-                            self.logger.info(f"[ShopeeAnalyticsExport] 页面加载完成，探针: {probe}")
+                            self.logger.info(f"[ShopeeAnalyticsExport] 页面加载完成,探针: {probe}")
                         break
                 except Exception:
                     continue
 
             if not data_ready:
                 if self.logger:
-                    self.logger.warning("[ShopeeAnalyticsExport] 未检测到数据就绪探针，继续执行")
-                # 额外等待时间，给页面更多加载时间
+                    self.logger.warning("[ShopeeAnalyticsExport] 未检测到数据就绪探针,继续执行")
+                # 额外等待时间,给页面更多加载时间
                 page.wait_for_timeout(2000)
             else:
                 page.wait_for_timeout(500)
 
-            # 2) 点击导出（增强日志与重试机制）
+            # 2) 点击导出(增强日志与重试机制)
             clicked = False
             export_button_used = None
 
             if self.logger:
-                self.logger.info(f"[ShopeeAnalyticsExport] 开始查找导出按钮，候选器数量: {len(self.sel.export_buttons)}")
+                self.logger.info(f"[ShopeeAnalyticsExport] 开始查找导出按钮,候选器数量: {len(self.sel.export_buttons)}")
 
             for btn in self.sel.export_buttons:
                 try:
@@ -157,7 +157,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                     continue
 
             if not clicked:
-                # 额外兜底：在所有 frame 中再次尝试；以及纯文本匹配
+                # 额外兜底:在所有 frame 中再次尝试;以及纯文本匹配
                 try:
                     frames = getattr(page, 'frames', []) or []
                 except Exception:
@@ -211,12 +211,12 @@ class ShopeeAnalyticsExport(ExportComponent):
                             pass
                     return ExportResult(False, "未找到导出按钮")
 
-            # 等待导出处理，并检测下载完成
+            # 等待导出处理,并检测下载完成
             if self.logger:
-                self.logger.info(f"[ShopeeAnalyticsExport] 导出按钮已点击: {export_button_used}，等待处理...")
+                self.logger.info(f"[ShopeeAnalyticsExport] 导出按钮已点击: {export_button_used},等待处理...")
 
-            # 统一输出目录（使用 build_output_path，支持 include_shop_id）
-            data_type = "analytics"  # v4.10.0更新：统一使用analytics域，traffic域已废弃
+            # 统一输出目录(使用 build_output_path,支持 include_shop_id)
+            data_type = "analytics"  # v4.10.0更新:统一使用analytics域,traffic域已废弃
             gran = cfg.get("granularity") or "manual"
             start_date = cfg.get("start_date")
             end_date = cfg.get("end_date")
@@ -225,7 +225,7 @@ class ShopeeAnalyticsExport(ExportComponent):
             out_root.mkdir(parents=True, exist_ok=True)
 
 
-            # 自适应超时参数与全局下载监听（提升一键/大范围场景稳定性）
+            # 自适应超时参数与全局下载监听(提升一键/大范围场景稳定性)
             def _parse_days(sd, ed) -> int:
                 try:
                     from datetime import datetime as _dt
@@ -257,12 +257,12 @@ class ShopeeAnalyticsExport(ExportComponent):
             except Exception:
                 pass
 
-            # 首选：围绕点击捕获下载事件（支持多次重试机制）
+            # 首选:围绕点击捕获下载事件(支持多次重试机制)
             from datetime import datetime
             import time, glob, os, shutil
             start_ts = time.time()
 
-            # 尝试立即捕获下载（5s 短超时）
+            # 尝试立即捕获下载(5s 短超时)
             download = None
             downloaded_file = None
 
@@ -274,9 +274,9 @@ class ShopeeAnalyticsExport(ExportComponent):
                     self.logger.info(f"[ShopeeAnalyticsExport] 立即下载成功")
             except Exception:
                 if self.logger:
-                    self.logger.info(f"[ShopeeAnalyticsExport] 未检测到立即下载，进入重试机制")
+                    self.logger.info(f"[ShopeeAnalyticsExport] 未检测到立即下载,进入重试机制")
 
-                # 读取重试配置：次数与间隔（默认3次，每次间隔30s）
+                # 读取重试配置:次数与间隔(默认3次,每次间隔30s)
                 try:
                     from modules.core.config import get_config_value
                     max_retries = int(get_config_value('data_collection', 'download.export_retry_count', 3))
@@ -285,14 +285,14 @@ class ShopeeAnalyticsExport(ExportComponent):
                     max_retries = 3
                     backoff_sec = 30
 
-                # 若配置了下载目录，提前取出，供重试轮次之间的快速检测
+                # 若配置了下载目录,提前取出,供重试轮次之间的快速检测
                 try:
                     downloads_path = (self.ctx.config or {}).get("downloads_path")
                 except Exception:
                     downloads_path = None
 
                 for retry_idx in range(1, max_retries + 1):
-                    # 先快速检查是否已有新文件产生（避免已成功还继续重试）
+                    # 先快速检查是否已有新文件产生(避免已成功还继续重试)
                     try:
                         if downloads_path and os.path.isdir(downloads_path):
                             exts = (".xlsx", ".xls", ".csv")
@@ -309,9 +309,9 @@ class ShopeeAnalyticsExport(ExportComponent):
                     except Exception:
                         pass
 
-                    # 等待后重试，并在 expect_download 上下文内完成点击
+                    # 等待后重试,并在 expect_download 上下文内完成点击
                     page.wait_for_timeout(backoff_sec * 1000)
-                    # 若全局监听已捕获下载，提前结束重试
+                    # 若全局监听已捕获下载,提前结束重试
                     if _latest.get("dl") is not None:
                         download = _latest.get("dl")
                         break
@@ -320,13 +320,13 @@ class ShopeeAnalyticsExport(ExportComponent):
                             page.locator(export_button_used or self.sel.export_buttons[0]).first.click()
                         download = dl_info.value
                         if self.logger:
-                            self.logger.info(f"[ShopeeAnalyticsExport] 第{retry_idx}次重试点击导出按钮（间隔{backoff_sec}s）")
+                            self.logger.info(f"[ShopeeAnalyticsExport] 第{retry_idx}次重试点击导出按钮(间隔{backoff_sec}s)")
                         if download:
                             break
                     except Exception:
                         continue
 
-            # 若仍未捕获到下载事件，参考“服务表现”流程：
+            # 若仍未捕获到下载事件,参考“服务表现”流程:
             # 1) 尝试点击“生成/立即生成”
             # 2) 等待“下载”入口出现后优先点击最新一条
             if not download and not downloaded_file:
@@ -356,7 +356,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                                 preferred.click()
                             download = dl_info.value
                     except Exception as e:
-                        # UI监听未命中 -> 进行短时文件系统兜底（最多15秒，每秒检查一次）
+                        # UI监听未命中 -> 进行短时文件系统兜底(最多15秒,每秒检查一次)
                         for _ in range(15):
                             try:
                                 cur = set(out_root.glob("*"))
@@ -395,7 +395,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                         tmp_path.unlink(missing_ok=True)
                     except Exception:
                         pass
-                # 写入导出元数据清单（与服务表现一致）
+                # 写入导出元数据清单(与服务表现一致)
                 try:
                     self._write_manifest(target, cfg, account_label, shop_name)
                 except Exception:
@@ -438,11 +438,11 @@ class ShopeeAnalyticsExport(ExportComponent):
                 except Exception:
                     pass
             else:
-                # 未捕获下载事件，进入目录轮询兜底
+                # 未捕获下载事件,进入目录轮询兜底
                 if self.logger:
-                    self.logger.info(f"[ShopeeAnalyticsExport] 未捕获下载事件，启用文件系统兜底")
+                    self.logger.info(f"[ShopeeAnalyticsExport] 未捕获下载事件,启用文件系统兜底")
 
-            # 兜底：若配置了 downloads_path，则轮询检测是否有新文件产生
+            # 兜底:若配置了 downloads_path,则轮询检测是否有新文件产生
             downloads_path = None
             try:
                 downloads_path = (self.ctx.config or {}).get("downloads_path")
@@ -467,7 +467,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                     time.sleep(1)
                 if newest_file:
                     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    # 使用统一文件命名函数，保留原文件扩展名
+                    # 使用统一文件命名函数,保留原文件扩展名
                     filename = build_filename(
                         ts=ts,
                         account_label=account_label,
@@ -483,7 +483,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                         shutil.move(str(newest_file), str(target))
                     except Exception:
                         shutil.copy2(str(newest_file), str(target))
-                    # 写入导出元数据清单（与服务表现一致）
+                    # 写入导出元数据清单(与服务表现一致)
                     try:
                         self._write_manifest(target, cfg, account_label, shop_name)
                     except Exception:
@@ -492,7 +492,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                         self.logger.info(f"下载完成(目录监测): {target}")
                     return ExportResult(True, "下载完成(目录监测)", None, str(target))
 
-            return ExportResult(False, "未捕获到下载事件，且未检测到新下载文件")
+            return ExportResult(False, "未捕获到下载事件,且未检测到新下载文件")
 
         except Exception as e:
             if self.logger:
@@ -529,8 +529,8 @@ class ShopeeAnalyticsExport(ExportComponent):
         return False
 
     def _wait_for_latest_download_button(self, page, timeout: Optional[int] = None):
-        """等待页面出现可点击的“下载”按钮，返回首选 Locator。
-        逻辑与服务表现相近，但做了通用化精简。
+        """等待页面出现可点击的“下载”按钮,返回首选 Locator。
+        逻辑与服务表现相近,但做了通用化精简。
         """
         try:
             from datetime import datetime
@@ -545,7 +545,7 @@ class ShopeeAnalyticsExport(ExportComponent):
             deadline = start_time.timestamp() + timeout
             last_beat = 0
 
-            # 记录初始“下载”按钮数量，用于增量检测
+            # 记录初始“下载”按钮数量,用于增量检测
             download_buttons_all = page.locator('button:has-text("下载"), a:has-text("下载"), button:has-text("Download")')
             try:
                 base_count = download_buttons_all.count()
@@ -554,7 +554,7 @@ class ShopeeAnalyticsExport(ExportComponent):
 
             while datetime.now().timestamp() < deadline:
                 try:
-                    # 若出现新增“下载”按钮，优先取第一条
+                    # 若出现新增“下载”按钮,优先取第一条
                     try:
                         cur_count = download_buttons_all.count()
                     except Exception:
@@ -564,10 +564,10 @@ class ShopeeAnalyticsExport(ExportComponent):
                         btn_top = download_buttons_all.first
                         if btn_top.is_visible() and btn_top.is_enabled():
                             if self.logger:
-                                self.logger.info("[ShopeeAnalyticsExport] 发现新增下载入口，优先点击最新一条")
+                                self.logger.info("[ShopeeAnalyticsExport] 发现新增下载入口,优先点击最新一条")
                             return btn_top
 
-                    # 心跳探测：每 heartbeat_sec 再尝试一次
+                    # 心跳探测:每 heartbeat_sec 再尝试一次
                     now_ts = datetime.now().timestamp()
                     if now_ts - last_beat >= heartbeat_sec:
                         last_beat = now_ts
@@ -575,7 +575,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                         if btn and btn.is_visible() and btn.is_enabled():
                             return btn
 
-                    # 文本状态检测（处理中 -> 继续等待）
+                    # 文本状态检测(处理中 -> 继续等待)
                     try:
                         status_text = page.text_content('body') or ''
                         indicators = get_config_value('data_collection', 'export_detection.processing_indicators', [

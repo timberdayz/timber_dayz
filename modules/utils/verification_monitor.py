@@ -242,14 +242,14 @@ class VerificationMonitor:
                 if result:
                     st.success("[DONE] 验证码处理成功！")
                 else:
-                    st.error("[FAIL] 验证码处理失败，请查看详细信息")
+                    st.error("[FAIL] 验证码处理失败,请查看详细信息")
             
             # 启动后台处理线程
             processing_thread = threading.Thread(target=process_verification)
             processing_thread.daemon = True
             processing_thread.start()
             
-            st.info("[WAIT] 验证码处理已开始，请关注状态变化...")
+            st.info("[WAIT] 验证码处理已开始,请关注状态变化...")
     
     def _trigger_continue_processing(self):
         """触发继续处理"""
@@ -285,7 +285,7 @@ def create_verification_monitor_app():
     
     monitor = st.session_state.verification_monitor
     
-    # 模拟验证码处理器（在实际使用中会从外部传入）
+    # 模拟验证码处理器(在实际使用中会从外部传入)
     if 'mock_handler' not in st.session_state:
         # 这里应该是真实的验证码处理器实例
         st.session_state.mock_handler = None

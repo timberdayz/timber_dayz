@@ -3,7 +3,7 @@
 
 负责加载、验证、缓存 YAML/Python 组件配置
 
-v4.8.0: 添加 Python 组件加载支持，逐步废弃 YAML 组件
+v4.8.0: 添加 Python 组件加载支持,逐步废弃 YAML 组件
 """
 
 import os
@@ -36,14 +36,14 @@ class ComponentLoader:
     """
     组件加载器
     
-    功能：
+    功能:
     1. 加载YAML组件配置
     2. 验证组件格式和安全性
-    3. 缓存组件配置（生产模式）
+    3. 缓存组件配置(生产模式)
     4. 参数模板替换
     """
     
-    # 危险的selector模式（安全验证）
+    # 危险的selector模式(安全验证)
     DANGEROUS_PATTERNS = [
         r'javascript:',
         r'data:',
@@ -56,10 +56,10 @@ class ComponentLoader:
     # 支持的平台
     SUPPORTED_PLATFORMS = ['shopee', 'tiktok', 'miaoshou']
     
-    # 支持的组件类型（Phase 7.2: 添加shop_switch, Phase 11: 添加filters）
+    # 支持的组件类型(Phase 7.2: 添加shop_switch, Phase 11: 添加filters)
     SUPPORTED_TYPES = ['login', 'shop_switch', 'navigation', 'date_picker', 'filters', 'export', 'verification']
     
-    # Phase 11: 发现模式组件类型（使用 open_action + available_options 而非 steps）
+    # Phase 11: 发现模式组件类型(使用 open_action + available_options 而非 steps)
     DISCOVERY_MODE_TYPES = ['date_picker', 'filters']
     
     # 支持的数据域
@@ -70,8 +70,8 @@ class ComponentLoader:
         初始化组件加载器
         
         Args:
-            components_dir: 组件目录路径（默认：config/collection_components）
-            hot_reload: 是否热重载（默认：从环境变量COMPONENT_HOT_RELOAD读取）
+            components_dir: 组件目录路径(默认:config/collection_components)
+            hot_reload: 是否热重载(默认:从环境变量COMPONENT_HOT_RELOAD读取)
         """
         if components_dir is None:
             components_dir = os.path.join(
@@ -96,8 +96,8 @@ class ComponentLoader:
         加载组件配置
         
         Args:
-            component_path: 组件路径（如 "shopee/login" 或 "shopee/orders_export"）
-            params: 参数字典（用于变量替换）
+            component_path: 组件路径(如 "shopee/login" 或 "shopee/orders_export")
+            params: 参数字典(用于变量替换)
             
         Returns:
             Dict: 组件配置字典
@@ -117,7 +117,7 @@ class ComponentLoader:
             # 验证组件
             self._validate_component(component)
             
-            # 缓存组件（如果不是热重载模式）
+            # 缓存组件(如果不是热重载模式)
             if not self.hot_reload:
                 self._cache[component_path] = component.copy()
             
@@ -134,7 +134,7 @@ class ComponentLoader:
         从文件加载组件
         
         Args:
-            component_path: 组件路径（如 "shopee/login"）
+            component_path: 组件路径(如 "shopee/login")
             
         Returns:
             Dict: 组件配置字典
@@ -167,9 +167,9 @@ class ComponentLoader:
         """
         验证组件配置
         
-        Phase 11: 支持发现模式组件（date_picker, filters）
-        - 发现模式：使用 open_action + available_options
-        - 普通模式：使用 steps
+        Phase 11: 支持发现模式组件(date_picker, filters)
+        - 发现模式:使用 open_action + available_options
+        - 普通模式:使用 steps
         
         Args:
             component: 组件配置字典
@@ -180,7 +180,7 @@ class ComponentLoader:
         component_type = component.get('type', '')
         is_discovery_mode = component_type in self.DISCOVERY_MODE_TYPES and 'open_action' in component
         
-        # 1. 检查必填字段（发现模式和普通模式不同）
+        # 1. 检查必填字段(发现模式和普通模式不同)
         if is_discovery_mode:
             required_fields = ['name', 'platform', 'type', 'open_action', 'available_options']
         else:
@@ -226,7 +226,7 @@ class ComponentLoader:
     
     def _validate_discovery_mode(self, component: Dict[str, Any]) -> None:
         """
-        验证发现模式组件结构（Phase 11）
+        验证发现模式组件结构(Phase 11)
         
         发现模式组件使用 open_action + available_options 结构
         
@@ -268,7 +268,7 @@ class ComponentLoader:
                 if isinstance(value, str):
                     self._validate_string_security(value, f"option {i}.{key}")
         
-        # Phase 12: 验证 test_config（可选但推荐）
+        # Phase 12: 验证 test_config(可选但推荐)
         test_config = component.get('test_config', {})
         if test_config:
             if not isinstance(test_config, dict):
@@ -313,18 +313,18 @@ class ComponentLoader:
             if 'action' not in step:
                 raise ComponentValidationError(f"Step {i} missing 'action' field")
             
-            # 验证所有字符串字段的安全性（防止注入）
+            # 验证所有字符串字段的安全性(防止注入)
             for key, value in step.items():
                 if isinstance(value, str):
                     self._validate_string_security(value, f"step {i}.{key}")
     
     def _validate_string_security(self, value: str, field_path: str) -> None:
         """
-        验证字符串字段安全性（防止注入攻击）
+        验证字符串字段安全性(防止注入攻击)
         
         Args:
             value: 字符串值
-            field_path: 字段路径（用于错误信息）
+            field_path: 字段路径(用于错误信息)
             
         Raises:
             ComponentValidationError: 检测到危险模式
@@ -339,11 +339,11 @@ class ComponentLoader:
         """
         替换组件中的变量
         
-        支持的变量格式：{{xxx.yyy}}
+        支持的变量格式:{{xxx.yyy}}
         
         Args:
             component: 组件配置字典
-            params: 参数字典（包含account, params, task等）
+            params: 参数字典(包含account, params, task等)
             
         Returns:
             Dict: 替换后的组件配置
@@ -364,7 +364,7 @@ class ComponentLoader:
                 if isinstance(value, dict) and part in value:
                     value = value[part]
                 else:
-                    # 变量不存在，保持原样
+                    # 变量不存在,保持原样
                     return match.group(0)
             
             # 转换为字符串
@@ -386,7 +386,7 @@ class ComponentLoader:
     
     def load_all(self) -> Dict[str, List[str]]:
         """
-        加载所有组件（用于预热缓存）
+        加载所有组件(用于预热缓存)
         
         Returns:
             Dict: 按平台分组的组件列表
@@ -416,7 +416,7 @@ class ComponentLoader:
     
     def get_component_info(self, component_path: str) -> Dict[str, Any]:
         """
-        获取组件元信息（不加载完整配置）
+        获取组件元信息(不加载完整配置)
         
         Args:
             component_path: 组件路径
@@ -450,11 +450,11 @@ class ComponentLoader:
         Python 组件位于 modules/platforms/{platform}/components/{name}.py
         
         Args:
-            platform: 平台代码（shopee/tiktok/miaoshou）
-            component_name: 组件名称（login/navigation/orders_export 等）
+            platform: 平台代码(shopee/tiktok/miaoshou)
+            component_name: 组件名称(login/navigation/orders_export 等)
         
         Returns:
-            Type: 组件类，如果不存在则返回 None
+            Type: 组件类,如果不存在则返回 None
         
         Example:
             loader = ComponentLoader()
@@ -493,22 +493,22 @@ class ComponentLoader:
         """
         在模块中查找组件类
         
-        命名约定（按优先级）：
-        1. 平台前缀：login.py -> ShopeeLogin（优先，因为这是实际的命名约定）
-        2. 标准命名：login.py -> LoginComponent（仅在模块中定义的类）
-        3. 后缀匹配：任何以 Component 或 Export 结尾的类（仅在模块中定义的类）
+        命名约定(按优先级):
+        1. 平台前缀:login.py -> ShopeeLogin(优先,因为这是实际的命名约定)
+        2. 标准命名:login.py -> LoginComponent(仅在模块中定义的类)
+        3. 后缀匹配:任何以 Component 或 Export 结尾的类(仅在模块中定义的类)
         
         Args:
             module: 导入的模块
-            component_name: 组件名称（如 "login"）
+            component_name: 组件名称(如 "login")
         
         Returns:
             Type: 组件类
         """
         module_path = module.__name__
         
-        # 1. 平台前缀命名（优先，因为这是当前项目的实际命名约定）
-        # 例如：modules.platforms.shopee.components.login -> ShopeeLogin
+        # 1. 平台前缀命名(优先,因为这是当前项目的实际命名约定)
+        # 例如:modules.platforms.shopee.components.login -> ShopeeLogin
         if 'platforms' in module_path:
             try:
                 parts = module_path.split('.')
@@ -521,7 +521,7 @@ class ComponentLoader:
                     # login -> Login, orders_export -> OrdersExport
                     component_class_name = ''.join(word.capitalize() for word in component_name.split('_'))
                     
-                    # 尝试：ShopeeLogin
+                    # 尝试:ShopeeLogin
                     prefixed_name = f"{platform_prefix}{component_class_name}"
                     if hasattr(module, prefixed_name):
                         cls = getattr(module, prefixed_name)
@@ -529,7 +529,7 @@ class ComponentLoader:
                             logger.debug(f"Found component class by platform prefix: {prefixed_name}")
                             return cls
                     
-                    # 尝试：ShopeeLoginComponent
+                    # 尝试:ShopeeLoginComponent
                     prefixed_name_with_suffix = f"{platform_prefix}{component_class_name}Component"
                     if hasattr(module, prefixed_name_with_suffix):
                         cls = getattr(module, prefixed_name_with_suffix)
@@ -539,7 +539,7 @@ class ComponentLoader:
             except (ValueError, IndexError, AttributeError):
                 pass  # 降级到下一步
         
-        # 2. 标准命名：snake_case -> PascalCase + Component（仅在模块中定义的类）
+        # 2. 标准命名:snake_case -> PascalCase + Component(仅在模块中定义的类)
         class_name = ''.join(word.capitalize() for word in component_name.split('_')) + 'Component'
         if hasattr(module, class_name):
             cls = getattr(module, class_name)
@@ -547,7 +547,7 @@ class ComponentLoader:
                 logger.debug(f"Found component class by standard naming: {class_name}")
                 return cls
         
-        # 3. 降级：查找任何以 Component 或 Export 结尾的类（仅在模块中定义的类）
+        # 3. 降级:查找任何以 Component 或 Export 结尾的类(仅在模块中定义的类)
         for name, obj in inspect.getmembers(module, inspect.isclass):
             if (name.endswith('Component') or name.endswith('Export')) and obj.__module__ == module_path:
                 logger.debug(f"Found component class by suffix: {name}")
@@ -559,7 +559,7 @@ class ComponentLoader:
         """
         v4.8.0: 验证 Python 组件类是否符合规范
         
-        Python 组件必须：
+        Python 组件必须:
         1. 有 run(page, account, params, **kwargs) 异步方法
         2. 有 platform 类属性
         3. 有 component_type 类属性
@@ -571,7 +571,7 @@ class ComponentLoader:
             Dict: {
                 'valid': bool,
                 'errors': List[str],
-                'metadata': Dict  # 如果有效，包含元数据
+                'metadata': Dict  # 如果有效,包含元数据
             }
         """
         errors = []
@@ -620,7 +620,7 @@ class ComponentLoader:
         v4.8.0: 列出所有 Python 组件
         
         Args:
-            platform: 可选，指定平台
+            platform: 可选,指定平台
         
         Returns:
             Dict: 按平台分组的组件列表

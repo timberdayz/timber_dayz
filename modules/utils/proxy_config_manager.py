@@ -1,7 +1,7 @@
 """
 代理配置管理器
 
-自动读取proxy_config.py配置，为不同账号分配合适的代理
+自动读取proxy_config.py配置,为不同账号分配合适的代理
 支持代理轮换、健康检查、使用监控等功能
 """
 
@@ -313,7 +313,7 @@ class ProxyConfigManager:
         region_config = self.proxy_config.get(proxy_region, {})
         providers = region_config.get("providers", [])
         
-        # 按优先级排序，只考虑启用的提供商
+        # 按优先级排序,只考虑启用的提供商
         enabled_providers = [p for p in providers if p.get("enabled", False)]
         enabled_providers.sort(key=lambda x: x.get("priority", 999))
         
@@ -475,7 +475,7 @@ proxy_config_manager = ProxyConfigManager()
 
 def get_account_proxy(account_info: Dict[str, Any]) -> Optional[Dict[str, str]]:
     """
-    为账号获取代理配置（简化接口）
+    为账号获取代理配置(简化接口)
     
     Args:
         account_info: 账号信息

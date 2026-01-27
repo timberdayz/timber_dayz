@@ -97,17 +97,31 @@
         :rules="formRules"
         label-width="120px"
       >
-        <el-form-item label="目标名称" prop="target_name">
+        <el-form-item v-if="form.target_type !== 'shop'" label="目标名称" prop="target_name">
           <el-input v-model="form.target_name" placeholder="请输入目标名称" />
         </el-form-item>
         <el-form-item label="目标类型" prop="target_type">
-          <el-select v-model="form.target_type" placeholder="请选择目标类型" style="width: 100%;" @change="handleTargetTypeChange">
-            <el-option label="店铺目标" value="shop" />
+          <el-select v-model="form.target_type" placeholder="请先选择目标类型" style="width: 100%;" @change="handleTargetTypeChange">
+            <el-option label="店铺目标（常规月度）" value="shop" />
             <el-option label="产品目标" value="product" />
             <el-option label="战役目标" value="campaign" />
           </el-select>
         </el-form-item>
-        <el-form-item label="时间周期" prop="dateRange">
+        <!-- 店铺目标：选月份，名称自动生成 -->
+        <el-form-item v-if="form.target_type === 'shop'" label="目标月份" prop="targetMonth">
+          <el-date-picker
+            v-model="form.targetMonth"
+            type="month"
+            placeholder="选择月份"
+            value-format="YYYY-MM"
+            style="width: 100%;"
+          />
+          <div v-if="form.targetMonth" class="form-hint">
+            目标名称将自动生成：{{ autoTargetName }}
+          </div>
+        </el-form-item>
+        <!-- 产品/战役：自定义日期范围 -->
+        <el-form-item v-else-if="form.target_type" label="时间周期" prop="dateRange">
           <el-date-picker
             v-model="form.dateRange"
             type="daterange"
@@ -130,40 +144,64 @@
         <el-tabs v-model="breakdownTab" type="border-card">
           <el-tab-pane label="按店铺拆分" name="shop">
             <div style="margin-bottom: 10px;">
-              <el-button size="small" type="primary" @click="handleAddShopBreakdown">添加店铺</el-button>
+              <template v-if="form.target_type === 'shop'">
+                <span v-if="availableShops.length" class="breakdown-hint">已按全部店铺初始化，可调整百分比后点击「自动计算」回填金额/数量。</span>
+                <span v-else class="breakdown-hint breakdown-hint--warn">暂无店铺数据，请先在账号管理中维护店铺。</span>
+              </template>
+              <template v-else>
+                <el-button size="small" type="primary" @click="handleAddShopBreakdown">添加店铺</el-button>
+              </template>
               <el-button size="small" @click="handleAutoCalculateShop">自动计算</el-button>
             </div>
             <el-table :data="shopBreakdown" border>
               <el-table-column prop="shop_name" label="店铺名称" width="200">
                 <template #default="{ row, $index }">
-                  <el-select v-model="row.shop_id" placeholder="选择店铺" style="width: 100%;" @change="handleShopChange($index)">
+                  <el-select
+                    v-model="row.shopKey"
+                    placeholder="选择店铺"
+                    style="width: 100%;"
+                    @change="(v) => handleShopChange($index, v)"
+                  >
                     <el-option
-                      v-for="shop in availableShops"
-                      :key="shop.id"
-                      :label="shop.name"
-                      :value="shop.id"
+                      v-for="s in availableShops"
+                      :key="getShopKey(s)"
+                      :label="s.shop_name"
+                      :value="getShopKey(s)"
                     />
                   </el-select>
                 </template>
               </el-table-column>
-              <el-table-column prop="target_amount" label="目标金额" width="150">
-                <template #default="{ row }">
-                  <el-input-number v-model="row.target_amount" :min="0.01" :precision="2" style="width: 100%;" />
+              <el-table-column label="目标百分比(%)" width="120">
+                <template #default="{ row, $index }">
+                  <el-input-number
+                    v-model="row.target_percent"
+                    :min="0"
+                    :max="100"
+                    :precision="2"
+                    :step="1"
+                    style="width: 100%;"
+                    @change="() => applyBalancePercent($index)"
+                  />
                 </template>
               </el-table-column>
-              <el-table-column prop="target_quantity" label="目标数量" width="150">
+              <el-table-column prop="target_amount" label="目标金额" width="140">
                 <template #default="{ row }">
-                  <el-input-number v-model="row.target_quantity" :min="1" :precision="0" style="width: 100%;" />
+                  <el-input-number v-model="row.target_amount" :min="0" :precision="2" style="width: 100%;" />
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="100">
+              <el-table-column prop="target_quantity" label="目标数量" width="120">
+                <template #default="{ row }">
+                  <el-input-number v-model="row.target_quantity" :min="0" :precision="0" style="width: 100%;" />
+                </template>
+              </el-table-column>
+              <el-table-column v-if="form.target_type !== 'shop'" label="操作" width="80">
                 <template #default="{ $index }">
                   <el-button size="small" type="danger" @click="handleRemoveShopBreakdown($index)">删除</el-button>
                 </template>
               </el-table-column>
             </el-table>
             <div style="margin-top: 10px; color: #909399; font-size: 12px;">
-              店铺拆分总和：金额 ¥{{ shopBreakdownTotalAmount.toFixed(2) }}，数量 {{ shopBreakdownTotalQuantity }}
+              店铺拆分总和：金额 ¥{{ shopBreakdownTotalAmount.toFixed(2) }}，数量 {{ shopBreakdownTotalQuantity }}，百分比 {{ shopBreakdownTotalPercent.toFixed(1) }}%
               <el-tag :type="shopBreakdownTotalAmount === form.target_amount && shopBreakdownTotalQuantity === form.target_quantity ? 'success' : 'danger'" size="small" style="margin-left: 10px;">
                 {{ shopBreakdownTotalAmount === form.target_amount && shopBreakdownTotalQuantity === form.target_quantity ? '拆分正确' : '拆分总和必须等于总目标' }}
               </el-tag>
@@ -368,29 +406,32 @@ const form = reactive({
   id: null,
   target_name: '',
   target_type: '',
+  targetMonth: '',       // 店铺目标时用：YYYY-MM
   dateRange: [],
   target_amount: 0,
   target_quantity: 0
 })
 
-// 店铺拆分数据
+// 店铺拆分数据：每行 { shopKey, platform_code, shop_id, shop_name, target_amount, target_quantity, target_percent }
 const shopBreakdown = ref([])
 
 // 时间拆分数据
 const timeBreakdown = ref([])
 
-// Mock店铺列表
-const availableShops = ref([
-  { id: 'shopee_sg_001', name: 'Shopee新加坡旗舰店' },
-  { id: 'lazada_sg_001', name: 'Lazada新加坡店' },
-  { id: 'shopee_my_001', name: 'Shopee马来旗舰店' },
-  { id: 'lazada_my_001', name: 'Lazada马来店' },
-  { id: 'shopee_th_001', name: 'Shopee泰国旗舰店' }
-])
+// 店铺列表（来自 GET /targets/shops，账号管理 platform_accounts）
+const availableShops = ref([])
+const shopsLoading = ref(false)
 
 // 计算属性
 const dialogTitle = computed(() => {
   return form.id ? '编辑目标' : '创建目标'
+})
+
+// 店铺目标时自动生成的名称，如「2026年1月常规月度目标」
+const autoTargetName = computed(() => {
+  if (!form.targetMonth) return ''
+  const [y, m] = form.targetMonth.split('-')
+  return `${y}年${parseInt(m, 10)}月常规月度目标`
 })
 
 const shopBreakdownTotalAmount = computed(() => {
@@ -401,6 +442,14 @@ const shopBreakdownTotalQuantity = computed(() => {
   return shopBreakdown.value.reduce((sum, item) => sum + (item.target_quantity || 0), 0)
 })
 
+const shopBreakdownTotalPercent = computed(() => {
+  return shopBreakdown.value.reduce((sum, item) => sum + (Number(item.target_percent) || 0), 0)
+})
+
+function getShopKey(s) {
+  return `${s.platform_code || ''}|${s.shop_id || ''}`
+}
+
 const timeBreakdownTotalAmount = computed(() => {
   return timeBreakdown.value.reduce((sum, item) => sum + (item.target_amount || 0), 0)
 })
@@ -409,35 +458,55 @@ const timeBreakdownTotalQuantity = computed(() => {
   return timeBreakdown.value.reduce((sum, item) => sum + (item.target_quantity || 0), 0)
 })
 
-// 表单验证规则
-const formRules = {
-  target_name: [
-    { required: true, message: '目标名称不能为空', trigger: 'blur' },
-    { min: 2, max: 100, message: '目标名称长度2-100字符', trigger: 'blur' }
-  ],
-  target_type: [
-    { required: true, message: '请选择目标类型', trigger: 'change' }
-  ],
-  dateRange: [
-    { required: true, message: '请选择时间周期', trigger: 'change' },
-    { validator: (rule, value, callback) => {
-        if (!value || value.length !== 2) {
-          callback(new Error('请选择开始和结束日期'))
-        } else if (value[1] <= value[0]) {
-          callback(new Error('结束时间必须大于开始时间'))
-        } else {
-          callback()
-        }
-      }, trigger: 'change' }
-  ],
-  target_amount: [
-    { required: true, message: '目标金额不能为空', trigger: 'blur' },
-    { type: 'number', min: 0.01, message: '目标金额必须大于0', trigger: 'blur' }
-  ],
-  target_quantity: [
-    { required: true, message: '目标数量不能为空', trigger: 'blur' },
-    { type: 'number', min: 1, message: '目标数量必须大于0', trigger: 'blur' }
-  ]
+// 表单验证规则（按目标类型生效：店铺用 targetMonth，产品/战役用 target_name + dateRange）
+const formRules = computed(() => {
+  const isShop = form.target_type === 'shop'
+  return {
+    target_name: isShop ? [] : [
+      { required: true, message: '目标名称不能为空', trigger: 'blur' },
+      { min: 2, max: 100, message: '目标名称长度2-100字符', trigger: 'blur' }
+    ],
+    target_type: [
+      { required: true, message: '请选择目标类型', trigger: 'change' }
+    ],
+    targetMonth: isShop ? [
+      { required: true, message: '请选择目标月份', trigger: 'change' }
+    ] : [],
+    dateRange: isShop ? [] : [
+      { required: true, message: '请选择时间周期', trigger: 'change' },
+      { validator: (rule, value, callback) => {
+          if (!value || value.length !== 2) {
+            callback(new Error('请选择开始和结束日期'))
+          } else if (new Date(value[1]) <= new Date(value[0])) {
+            callback(new Error('结束时间必须大于开始时间'))
+          } else {
+            callback()
+          }
+        }, trigger: 'change' }
+    ],
+    target_amount: [
+      { required: true, message: '目标金额不能为空', trigger: 'blur' },
+      { type: 'number', min: 0.01, message: '目标金额必须大于0', trigger: 'blur' }
+    ],
+    target_quantity: [
+      { required: true, message: '目标数量不能为空', trigger: 'blur' },
+      { type: 'number', min: 1, message: '目标数量必须大于0', trigger: 'blur' }
+    ]
+  }
+})
+
+// 加载供目标管理使用的店铺列表（来自账号管理）
+const loadTargetShops = async () => {
+  shopsLoading.value = true
+  try {
+    const data = await api.getTargetShops()
+    availableShops.value = Array.isArray(data) ? data : (data?.data ?? data ?? [])
+  } catch (e) {
+    handleApiError(e, { showMessage: true, logError: true })
+    availableShops.value = []
+  } finally {
+    shopsLoading.value = false
+  }
 }
 
 // 加载目标列表
@@ -473,13 +542,20 @@ const loadTargets = async () => {
   }
 }
 
-// 查看详情
+// 查看详情（后端返回 { target, breakdowns }，整理为 targetDetail.data.breakdown / time_breakdown）
 const handleView = async (row) => {
   detailVisible.value = true
   targetDetail.loading = true
   try {
     const response = await api.getTargetDetail(row.id)
-    targetDetail.data = response || {}
+    const res = response || {}
+    const target = res.target || res
+    const breakdowns = res.breakdowns || res.breakdown || []
+    targetDetail.data = {
+      ...target,
+      breakdown: breakdowns.filter(b => b.breakdown_type === 'shop'),
+      time_breakdown: breakdowns.filter(b => b.breakdown_type === 'time')
+    }
   } catch (error) {
     handleApiError(error, { showMessage: true, logError: true })
   } finally {
@@ -488,16 +564,18 @@ const handleView = async (row) => {
 }
 
 // 创建目标
-const handleCreate = () => {
+const handleCreate = async () => {
   form.id = null
   form.target_name = ''
   form.target_type = ''
+  form.targetMonth = ''
   form.dateRange = []
   form.target_amount = 0
   form.target_quantity = 0
   shopBreakdown.value = []
   timeBreakdown.value = []
   breakdownTab.value = 'shop'
+  if (availableShops.value.length === 0) await loadTargetShops()
   dialogVisible.value = true
 }
 
@@ -506,15 +584,36 @@ const handleEdit = async (row) => {
   form.id = row.id
   form.target_name = row.target_name
   form.target_type = row.target_type
-  form.dateRange = [new Date(row.period_start), new Date(row.period_end)]
+  if (row.target_type === 'shop' && row.period_start) {
+    form.targetMonth = row.period_start.slice(0, 7)
+    form.dateRange = []
+  } else {
+    form.targetMonth = ''
+    form.dateRange = [new Date(row.period_start), new Date(row.period_end)]
+  }
   form.target_amount = row.target_amount
   form.target_quantity = row.target_quantity
-  
-  // 加载目标详情以获取拆分数据
+
+  if (availableShops.value.length === 0) await loadTargetShops()
+
   const detailResponse = await api.getTargetDetail(row.id)
-  shopBreakdown.value = detailResponse?.breakdown || []
-  timeBreakdown.value = detailResponse?.time_breakdown || []
-  
+  const breakdowns = detailResponse?.breakdowns || detailResponse?.breakdown || []
+  const shopList = breakdowns.filter(b => b.breakdown_type === 'shop')
+  const total = Number(row.target_amount) || 1
+  shopBreakdown.value = shopList.map(b => {
+    const pct = total > 0 ? ((Number(b.target_amount) || 0) / total * 100) : 0
+    return {
+      shopKey: `${b.platform_code || ''}|${b.shop_id || ''}`,
+      platform_code: b.platform_code,
+      shop_id: b.shop_id,
+      shop_name: b.shop_name || '',
+      target_amount: b.target_amount ?? 0,
+      target_quantity: b.target_quantity ?? 0,
+      target_percent: Math.round(pct * 100) / 100
+    }
+  })
+  timeBreakdown.value = breakdowns.filter(b => b.breakdown_type === 'time') || []
+
   breakdownTab.value = 'shop'
   dialogVisible.value = true
 }
@@ -540,52 +639,102 @@ const handleDelete = async (row) => {
   }
 }
 
-// 目标类型变化
+// 目标类型变化：店铺目标默认带出全部店铺行并均分百分比，产品/战役清空由用户手动添加
 const handleTargetTypeChange = () => {
-  shopBreakdown.value = []
   timeBreakdown.value = []
+  if (form.target_type === 'shop') {
+    const list = availableShops.value || []
+    const n = Math.max(1, list.length)
+    const pct = Math.round((100 / n) * 100) / 100
+    shopBreakdown.value = list.map((s, i) => ({
+      shopKey: getShopKey(s),
+      platform_code: s.platform_code,
+      shop_id: s.shop_id,
+      shop_name: s.shop_name || '',
+      target_amount: 0,
+      target_quantity: 0,
+      target_percent: i === list.length - 1 ? (100 - pct * (n - 1)) : pct
+    }))
+  } else {
+    shopBreakdown.value = []
+  }
 }
 
-// 添加店铺拆分
+// 添加店铺拆分（产品/战役时手动添加）
 const handleAddShopBreakdown = () => {
   shopBreakdown.value.push({
+    shopKey: '',
+    platform_code: '',
     shop_id: '',
     shop_name: '',
     target_amount: 0,
-    target_quantity: 0
+    target_quantity: 0,
+    target_percent: 0
   })
 }
 
 // 删除店铺拆分
 const handleRemoveShopBreakdown = (index) => {
   shopBreakdown.value.splice(index, 1)
+  applyBalancePercent(-1)
 }
 
-// 店铺选择变化
-const handleShopChange = (index) => {
-  const shop = availableShops.value.find(s => s.id === shopBreakdown.value[index].shop_id)
-  if (shop) {
-    shopBreakdown.value[index].shop_name = shop.name
+// 店铺选择变化：根据 shopKey 回填 platform_code / shop_id / shop_name
+const handleShopChange = (index, val) => {
+  const s = availableShops.value.find(x => getShopKey(x) === val)
+  if (s) {
+    const row = shopBreakdown.value[index]
+    row.platform_code = s.platform_code
+    row.shop_id = s.shop_id
+    row.shop_name = s.shop_name || ''
   }
 }
 
-// 自动计算店铺拆分
-const handleAutoCalculateShop = () => {
-  if (shopBreakdown.value.length === 0) {
-    ElMessage.warning('请先添加店铺')
+// 改一补百：editedIndex 为已修改行，其余行均分剩余百分比；-1 表示全部均分
+const applyBalancePercent = (editedIndex) => {
+  const rows = shopBreakdown.value
+  if (rows.length === 0) return
+  if (editedIndex === -1 || rows.length === 1) {
+    const each = Math.round((100 / rows.length) * 100) / 100
+    rows.forEach((r, i) => {
+      r.target_percent = i === rows.length - 1 ? (100 - each * (rows.length - 1)) : each
+    })
     return
   }
-  
-  const avgAmount = form.target_amount / shopBreakdown.value.length
-  const avgQuantity = Math.floor(form.target_quantity / shopBreakdown.value.length)
-  const remainderQuantity = form.target_quantity % shopBreakdown.value.length
-  
-  shopBreakdown.value.forEach((item, index) => {
-    item.target_amount = avgAmount
-    item.target_quantity = avgQuantity + (index < remainderQuantity ? 1 : 0)
+  const rest = rows.filter((_, i) => i !== editedIndex)
+  const edited = rows[editedIndex]
+  const used = Number(edited?.target_percent) || 0
+  const remain = Math.max(0, 100 - used)
+  const each = Math.round((remain / rest.length) * 100) / 100
+  rest.forEach((r, i) => {
+    r.target_percent = i === rest.length - 1 ? (remain - each * (rest.length - 1)) : each
   })
-  
-  ElMessage.success('自动计算完成')
+}
+
+// 自动计算店铺拆分：按目标百分比 × 总目标 回填金额与数量，最后一行用余数保证总和一致
+const handleAutoCalculateShop = () => {
+  const rows = shopBreakdown.value
+  if (rows.length === 0) {
+    ElMessage.warning('请先添加店铺或选择店铺目标以加载全部店铺')
+    return
+  }
+  const totalAmount = Number(form.target_amount) || 0
+  const totalQty = Number(form.target_quantity) || 0
+  let sumAmount = 0
+  let sumQty = 0
+  rows.forEach((item, index) => {
+    const pct = (Number(item.target_percent) || 0) / 100
+    if (index === rows.length - 1) {
+      item.target_amount = Math.round((totalAmount - sumAmount) * 100) / 100
+      item.target_quantity = totalQty - sumQty
+    } else {
+      item.target_amount = Math.round(totalAmount * pct * 100) / 100
+      item.target_quantity = Math.floor(totalQty * pct)
+      sumAmount += item.target_amount
+      sumQty += item.target_quantity
+    }
+  })
+  ElMessage.success('已按目标百分比回填金额与数量')
 }
 
 // 自动计算时间拆分
@@ -630,11 +779,21 @@ const handleAutoCalculateTime = () => {
 // 提交表单
 const handleSubmit = async () => {
   if (!formRef.value) return
-  
+
+  if (form.target_type === 'shop') {
+    form.target_name = autoTargetName.value
+    if (!form.targetMonth) {
+      ElMessage.warning('请选择目标月份')
+      return
+    }
+  }
+
   // 验证拆分总和
   if (breakdownTab.value === 'shop') {
-    if (shopBreakdownTotalAmount.value !== form.target_amount || shopBreakdownTotalQuantity.value !== form.target_quantity) {
-      ElMessage.warning('店铺拆分总和必须等于总目标')
+    const okAmount = Math.abs(shopBreakdownTotalAmount.value - form.target_amount) < 0.02
+    const okQty = shopBreakdownTotalQuantity.value === form.target_quantity
+    if (!okAmount || !okQty) {
+      ElMessage.warning('店铺拆分总和需等于总目标，可使用「自动计算」按百分比回填')
       return
     }
   } else {
@@ -643,43 +802,65 @@ const handleSubmit = async () => {
       return
     }
   }
-  
+
   await formRef.value.validate(async (valid) => {
-    if (valid) {
-      submitting.value = true
-      try {
-        const data = {
-          target_name: form.target_name,
-          target_type: form.target_type,
-          period_start: form.dateRange[0].toISOString().split('T')[0],
-          period_end: form.dateRange[1].toISOString().split('T')[0],
-          target_amount: form.target_amount,
-          target_quantity: form.target_quantity
-        }
-        
-        let response
-        if (form.id) {
-          response = await api.updateTarget(form.id, data)
-        } else {
-          response = await api.createTarget(data)
-        }
-        
-        // 创建目标分解
-        if (breakdownTab.value === 'shop' && shopBreakdown.value.length > 0) {
-          const targetId = response?.id || form.id
-          if (targetId) {
-            await api.createTargetBreakdown(targetId, shopBreakdown.value)
-          }
-        }
-        
-        ElMessage.success(form.id ? '更新成功' : '创建成功')
-        dialogVisible.value = false
-        loadTargets()
-      } catch (error) {
-        handleApiError(error, { showMessage: true, logError: true })
-      } finally {
+    if (!valid) return
+    submitting.value = true
+    try {
+      let periodStart, periodEnd
+      if (form.target_type === 'shop' && form.targetMonth) {
+        const [y, m] = form.targetMonth.split('-')
+        periodStart = `${y}-${m}-01`
+        const lastDay = new Date(parseInt(y, 10), parseInt(m, 10), 0)
+        periodEnd = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
+      } else if (form.dateRange && form.dateRange.length === 2) {
+        const d0 = form.dateRange[0]
+        const d1 = form.dateRange[1]
+        periodStart = typeof d0 === 'string' ? d0.slice(0, 10) : d0.toISOString().slice(0, 10)
+        periodEnd = typeof d1 === 'string' ? d1.slice(0, 10) : d1.toISOString().slice(0, 10)
+      } else {
+        ElMessage.warning('请选择时间周期或目标月份')
         submitting.value = false
+        return
       }
+
+      const data = {
+        target_name: form.target_name,
+        target_type: form.target_type,
+        period_start: periodStart,
+        period_end: periodEnd,
+        target_amount: form.target_amount,
+        target_quantity: form.target_quantity
+      }
+
+      let response
+      if (form.id) {
+        response = await api.updateTarget(form.id, data)
+      } else {
+        response = await api.createTarget(data)
+      }
+
+      const targetId = response?.id ?? form.id
+      if (breakdownTab.value === 'shop' && shopBreakdown.value.length > 0 && targetId) {
+        for (const row of shopBreakdown.value) {
+          if (!row.platform_code || !row.shop_id) continue
+          await api.createTargetBreakdown(targetId, {
+            breakdown_type: 'shop',
+            platform_code: row.platform_code,
+            shop_id: row.shop_id,
+            target_amount: row.target_amount ?? 0,
+            target_quantity: row.target_quantity ?? 0
+          })
+        }
+      }
+
+      ElMessage.success(form.id ? '更新成功' : '创建成功')
+      dialogVisible.value = false
+      loadTargets()
+    } catch (error) {
+      handleApiError(error, { showMessage: true, logError: true })
+    } finally {
+      submitting.value = false
     }
   })
 }
@@ -687,6 +868,7 @@ const handleSubmit = async () => {
 // 关闭对话框
 const handleDialogClose = () => {
   formRef.value?.resetFields()
+  form.targetMonth = ''
   shopBreakdown.value = []
   timeBreakdown.value = []
 }
@@ -736,6 +918,7 @@ const getStatusTagType = (status) => {
 
 onMounted(() => {
   loadTargets()
+  loadTargetShops()
 })
 </script>
 
@@ -762,6 +945,23 @@ onMounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.form-hint {
+  display: block;
+  margin-top: 4px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.breakdown-hint {
+  font-size: 12px;
+  color: #606266;
+  margin-right: 8px;
+}
+
+.breakdown-hint--warn {
+  color: #e6a23c;
 }
 </style>
 

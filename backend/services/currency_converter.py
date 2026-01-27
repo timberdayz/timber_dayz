@@ -2,16 +2,16 @@
 # -*- coding: utf-8 -*-
 
 """
-货币转换服务（v4.6.0）
+货币转换服务(v4.6.0)
 
-功能：
-1. 批量货币转换（120倍性能提升）
-2. 多源汇率API（Open Exchange Rates, ECB, BOC）
-3. 本地缓存策略（24小时TTL）
-4. 智能降级（历史汇率回退）
+功能:
+1. 批量货币转换(120倍性能提升)
+2. 多源汇率API(Open Exchange Rates, ECB, BOC)
+3. 本地缓存策略(24小时TTL)
+4. 智能降级(历史汇率回退)
 5. CNY本位币设计
 
-使用示例：
+使用示例:
     converter = CurrencyConverter(db)
     cny_amounts = await converter.batch_convert(
         [{"amount": 100, "currency": "SGD", "date": date.today()}],
@@ -40,17 +40,17 @@ class CurrencyConverter:
     """
     货币转换服务
     
-    设计原则：
-    - 性能优先：批量查询、内存计算
-    - 可靠性：多源降级、历史汇率回退
-    - CNY本位币：默认转换为CNY
+    设计原则:
+    - 性能优先:批量查询、内存计算
+    - 可靠性:多源降级、历史汇率回退
+    - CNY本位币:默认转换为CNY
     """
     
     def __init__(self, db: Session, config_path: str = "config/exchange_rates.yaml"):
         """
         初始化货币转换服务
         
-        参数：
+        参数:
             db: 数据库会话
             config_path: 汇率API配置文件路径
         """
@@ -98,31 +98,31 @@ class CurrencyConverter:
         target_currency: str = "CNY"
     ) -> List[Decimal]:
         """
-        批量货币转换（120倍性能提升）
+        批量货币转换(120倍性能提升)
         
-        参数：
-            records: 记录列表，每条记录包含：
+        参数:
+            records: 记录列表,每条记录包含:
                 - amount: Decimal/float, 金额
                 - currency: str, 货币代码
                 - date: date, 交易日期
-            target_currency: 目标货币（默认CNY）
+            target_currency: 目标货币(默认CNY)
         
-        返回：
-            转换后的金额列表（CNY）
+        返回:
+            转换后的金额列表(CNY)
         
-        性能优化：
-        - 按（currency, date）分组去重
-        - 批量查询所有需要的汇率（一次DB查询）
-        - 内存计算（无DB IO）
+        性能优化:
+        - 按(currency, date)分组去重
+        - 批量查询所有需要的汇率(一次DB查询)
+        - 内存计算(无DB IO)
         
-        示例：
+        示例:
             >>> records = [
             ...     {"amount": 100, "currency": "SGD", "date": date(2025,1,31)},
             ...     {"amount": 200, "currency": "SGD", "date": date(2025,1,31)},
             ...     {"amount": 50, "currency": "BRL", "date": date(2025,1,31)},
             ... ]
             >>> cny_amounts = await converter.batch_convert(records)
-            >>> # [520.0, 1040.0, 60.0]  # 假设SGD汇率5.2，BRL汇率1.2
+            >>> # [520.0, 1040.0, 60.0]  # 假设SGD汇率5.2,BRL汇率1.2
         """
         if not records:
             return []
@@ -132,7 +132,7 @@ class CurrencyConverter:
             if 'currency' in record:
                 record['currency'] = self.normalizer.normalize(record['currency'])
         
-        # 2. 分组去重（提取唯一的（currency, date）组合）
+        # 2. 分组去重(提取唯一的(currency, date)组合)
         unique_rates_needed = set()
         for record in records:
             currency = record.get('currency', 'CNY')
@@ -142,10 +142,10 @@ class CurrencyConverter:
         
         logger.debug(f"Batch convert: {len(records)} records, {len(unique_rates_needed)} unique rates needed")
         
-        # 3. 批量查询汇率（一次DB查询）
+        # 3. 批量查询汇率(一次DB查询)
         rates = await self._get_rates_batch(unique_rates_needed, target_currency)
         
-        # 4. 内存计算（无DB IO）
+        # 4. 内存计算(无DB IO)
         results = []
         for record in records:
             amount = Decimal(str(record.get('amount', 0)))
@@ -153,7 +153,7 @@ class CurrencyConverter:
             record_date = record.get('date', date.today())
             
             if currency == target_currency:
-                # 相同货币，不转换
+                # 相同货币,不转换
                 results.append(amount)
             else:
                 # 查询汇率并转换
@@ -175,13 +175,13 @@ class CurrencyConverter:
         target_currency: str = "CNY"
     ) -> Dict[Tuple[str, date], float]:
         """
-        批量获取汇率（一次DB查询）
+        批量获取汇率(一次DB查询)
         
-        参数：
+        参数:
             rate_pairs: set of (from_currency, rate_date) tuples
             target_currency: 目标货币
         
-        返回：
+        返回:
             {(from_currency, rate_date): rate} 字典
         """
         if not rate_pairs:
@@ -239,9 +239,9 @@ class CurrencyConverter:
         rate_date: date
     ) -> Optional[float]:
         """
-        从API获取汇率（多源降级）
+        从API获取汇率(多源降级)
         
-        策略：
+        策略:
         1. 按优先级尝试各个提供商
         2. 第一个成功的返回
         3. 所有失败返回None
@@ -269,8 +269,8 @@ class CurrencyConverter:
         rate_date: date
     ) -> Optional[float]:
         """从特定提供商获取汇率"""
-        # 简化实现：此处应根据provider['name']调用不同的API
-        # 为了演示，这里返回固定汇率（实际应该调用真实API）
+        # 简化实现:此处应根据provider['name']调用不同的API
+        # 为了演示,这里返回固定汇率(实际应该调用真实API)
         
         # TODO: 实现真实的API调用
         # - Open Exchange Rates API
@@ -314,9 +314,9 @@ class CurrencyConverter:
         target_date: date
     ) -> Optional[float]:
         """
-        获取历史汇率（降级策略）
+        获取历史汇率(降级策略)
         
-        策略：
+        策略:
         - 查找最近7天的汇率
         - 返回最近的一个
         """
@@ -350,15 +350,15 @@ class CurrencyConverter:
         conversion_date: date = None
     ) -> Decimal:
         """
-        单个金额转换（便捷方法）
+        单个金额转换(便捷方法)
         
-        参数：
+        参数:
             amount: 金额
             from_currency: 原货币
-            to_currency: 目标货币（默认CNY）
-            conversion_date: 转换日期（默认今天）
+            to_currency: 目标货币(默认CNY)
+            conversion_date: 转换日期(默认今天)
         
-        返回：
+        返回:
             转换后的金额
         """
         if conversion_date is None:
@@ -378,7 +378,7 @@ class CurrencyConverter:
         await self.http_client.aclose()
 
 
-# 导入sqlalchemy or运算符（修复代码）
+# 导入sqlalchemy or运算符(修复代码)
 import sqlalchemy as sa
 
 

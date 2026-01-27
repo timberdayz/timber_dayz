@@ -90,7 +90,7 @@ class PlatformAccountsManager:
         # 加载账号数据
         self._load_accounts()
         
-        logger.info(f"[OK] 平台账号管理器初始化完成，已加载 {len(self.accounts)} 个账号")
+        logger.info(f"[OK] 平台账号管理器初始化完成,已加载 {len(self.accounts)} 个账号")
 
     def _load_accounts(self) -> None:
         """加载账号数据"""
@@ -287,7 +287,7 @@ class PlatformAccountsManager:
             if login_success is not None:
                 if login_success:
                     account.last_login = datetime.now()
-                    # 简化的成功率计算，实际应该维护历史记录
+                    # 简化的成功率计算,实际应该维护历史记录
                     account.login_success_rate = min(account.login_success_rate + 0.1, 1.0)
                 else:
                     account.login_success_rate = max(account.login_success_rate - 0.1, 0.0)
@@ -332,7 +332,7 @@ class PlatformAccountsManager:
                 })
             
             df = pd.DataFrame(data)
-            logger.info(f"[OK] 导出账号汇总表成功，共 {len(data)} 个账号")
+            logger.info(f"[OK] 导出账号汇总表成功,共 {len(data)} 个账号")
             return df
             
         except Exception as e:

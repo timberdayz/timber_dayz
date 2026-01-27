@@ -1,7 +1,7 @@
 """
-浏览器配置辅助函数（v4.7.0）
+浏览器配置辅助函数(v4.7.0)
 
-提供环境感知的浏览器配置，用于逐步替换硬编码的headless=False
+提供环境感知的浏览器配置,用于逐步替换硬编码的headless=False
 """
 
 import os
@@ -12,15 +12,15 @@ logger = get_logger(__name__)
 
 def get_browser_launch_args(debug_mode: bool = False) -> dict:
     """
-    获取环境感知的浏览器启动参数（v4.7.0）
+    获取环境感知的浏览器启动参数(v4.7.0)
     
-    自动根据环境返回合适的浏览器配置：
-    - 开发环境：默认有头模式（headless=false, slow_mo=100）便于观察
-    - 生产环境：自动无头模式（headless=true, slow_mo=0）适合Docker
-    - 调试模式：强制有头模式（覆盖生产环境配置）
+    自动根据环境返回合适的浏览器配置:
+    - 开发环境:默认有头模式(headless=false, slow_mo=100)便于观察
+    - 生产环境:自动无头模式(headless=true, slow_mo=0)适合Docker
+    - 调试模式:强制有头模式(覆盖生产环境配置)
     
     Args:
-        debug_mode: 调试模式（临时启用有头浏览器）
+        debug_mode: 调试模式(临时启用有头浏览器)
         
     Returns:
         dict: Playwright browser.launch() 参数
@@ -51,7 +51,7 @@ def get_browser_launch_args(debug_mode: bool = False) -> dict:
         
         if environment == "production":
             return {
-                'headless': headless or True,  # 生产环境强制无头（除非调试）
+                'headless': headless or True,  # 生产环境强制无头(除非调试)
                 'slow_mo': 0,
                 'args': [
                     '--no-sandbox',
@@ -70,7 +70,7 @@ def get_browser_launch_args(debug_mode: bool = False) -> dict:
 
 def get_browser_context_args() -> dict:
     """
-    获取浏览器上下文参数（反检测指纹）
+    获取浏览器上下文参数(反检测指纹)
     
     Returns:
         dict: browser.new_context() 参数

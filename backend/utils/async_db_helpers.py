@@ -32,10 +32,10 @@ async def async_get_one(
     Args:
         session: 异步数据库会话
         model: ORM模型类
-        **filters: 过滤条件（字段名=值）
+        **filters: 过滤条件(字段名=值)
         
     Returns:
-        匹配的记录，如果不存在则返回 None
+        匹配的记录,如果不存在则返回 None
         
     Example:
         user = await async_get_one(db, User, id=1)
@@ -70,7 +70,7 @@ async def async_get_all(
         limit: 限制返回数量
         offset: 跳过记录数
         order_by: 排序字段
-        **filters: 过滤条件（字段名=值）
+        **filters: 过滤条件(字段名=值)
         
     Returns:
         匹配的记录列表
@@ -108,7 +108,7 @@ async def async_count(
     Args:
         session: 异步数据库会话
         model: ORM模型类
-        **filters: 过滤条件（字段名=值）
+        **filters: 过滤条件(字段名=值)
         
     Returns:
         匹配的记录数量
@@ -136,7 +136,7 @@ async def async_commit_safe(session: AsyncSession) -> bool:
         session: 异步数据库会话
         
     Returns:
-        True 如果提交成功，False 如果失败（已回滚）
+        True 如果提交成功,False 如果失败(已回滚)
         
     Note:
         失败时会自动回滚并记录错误
@@ -145,7 +145,7 @@ async def async_commit_safe(session: AsyncSession) -> bool:
         await session.commit()
         return True
     except Exception as e:
-        logger.error(f"[async] 提交事务失败，正在回滚: {e}", exc_info=True)
+        logger.error(f"[async] 提交事务失败,正在回滚: {e}", exc_info=True)
         try:
             await session.rollback()
         except Exception as rollback_error:

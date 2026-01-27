@@ -3,9 +3,9 @@
 
 """
 账号加载服务 (v4.7.0)
-从数据库加载账号信息，用于数据采集模块
+从数据库加载账号信息,用于数据采集模块
 
-替代 local_accounts.py，统一账号数据源（SSOT原则）
+替代 local_accounts.py,统一账号数据源(SSOT原则)
 """
 
 from typing import Dict, List, Optional, Union
@@ -20,21 +20,21 @@ logger = get_logger(__name__)
 
 
 class AccountLoaderService:
-    """账号加载服务（数据库优先，支持同步/异步）"""
+    """账号加载服务(数据库优先,支持同步/异步)"""
     
     def __init__(self):
         self.encryption_service = get_encryption_service()
     
     async def load_account_async(self, account_id: str, db: AsyncSession) -> Optional[Dict]:
         """
-        从数据库加载账号信息（异步版本）
+        从数据库加载账号信息(异步版本)
         
         Args:
             account_id: 账号ID
             db: 异步数据库会话
             
         Returns:
-            账号字典（格式兼容采集模块），如果不存在或未启用返回None
+            账号字典(格式兼容采集模块),如果不存在或未启用返回None
         """
         result = await db.execute(
             select(PlatformAccount).where(
@@ -55,7 +55,7 @@ class AccountLoaderService:
             logger.error(f"解密账号 {account_id} 密码失败: {e}")
             return None
         
-        # 转换为采集模块需要的格式（兼容旧格式）
+        # 转换为采集模块需要的格式(兼容旧格式)
         account_dict = {
             # 核心字段
             'account_id': account.account_id,
@@ -81,14 +81,14 @@ class AccountLoaderService:
             'proxy_required': account.proxy_required,
             'notes': account.notes or '',
             
-            # 能力配置（用于过滤不支持的数据域）
+            # 能力配置(用于过滤不支持的数据域)
             'capabilities': account.capabilities or {},
             
-            # 账号别名（用于账号对齐）
+            # 账号别名(用于账号对齐)
             'another_name': account.account_alias or '',
             'account_alias': account.account_alias or '',
             
-            # 兼容旧字段（某些Handler可能需要）
+            # 兼容旧字段(某些Handler可能需要)
             'E-mail': account.email or '',
             'Email account': account.email or '',
             'Email password': '',  # 数据库中没有存储邮箱密码
@@ -101,17 +101,17 @@ class AccountLoaderService:
     
     def load_account(self, account_id: str, db: Union[Session, AsyncSession]) -> Optional[Dict]:
         """
-        从数据库加载账号信息（同步版本，兼容异步）
+        从数据库加载账号信息(同步版本,兼容异步)
         
         Args:
             account_id: 账号ID
-            db: 数据库会话（同步或异步）
+            db: 数据库会话(同步或异步)
             
         Returns:
-            账号字典（格式兼容采集模块），如果不存在或未启用返回None
+            账号字典(格式兼容采集模块),如果不存在或未启用返回None
         """
         if isinstance(db, AsyncSession):
-            # 异步模式：需要 await，但这是同步方法，应该使用 load_account_async
+            # 异步模式:需要 await,但这是同步方法,应该使用 load_account_async
             raise ValueError("异步 Session 请使用 load_account_async() 方法")
         
         account = db.query(PlatformAccount).filter(
@@ -130,7 +130,7 @@ class AccountLoaderService:
             logger.error(f"解密账号 {account_id} 密码失败: {e}")
             return None
         
-        # 转换为采集模块需要的格式（兼容旧格式）
+        # 转换为采集模块需要的格式(兼容旧格式)
         account_dict = {
             # 核心字段
             'account_id': account.account_id,
@@ -156,14 +156,14 @@ class AccountLoaderService:
             'proxy_required': account.proxy_required,
             'notes': account.notes or '',
             
-            # 能力配置（用于过滤不支持的数据域）
+            # 能力配置(用于过滤不支持的数据域)
             'capabilities': account.capabilities or {},
             
-            # 账号别名（用于账号对齐）
+            # 账号别名(用于账号对齐)
             'another_name': account.account_alias or '',
             'account_alias': account.account_alias or '',
             
-            # 兼容旧字段（某些Handler可能需要）
+            # 兼容旧字段(某些Handler可能需要)
             'E-mail': account.email or '',
             'Email account': account.email or '',
             'Email password': '',  # 数据库中没有存储邮箱密码
@@ -180,7 +180,7 @@ class AccountLoaderService:
         
         Args:
             db: 数据库会话
-            platform: 平台筛选（可选）
+            platform: 平台筛选(可选)
             
         Returns:
             账号列表
@@ -199,7 +199,7 @@ class AccountLoaderService:
             if account_dict:
                 result.append(account_dict)
         
-        logger.info(f"从数据库加载了 {len(result)} 个活跃账号{f'（平台: {platform}）' if platform else ''}")
+        logger.info(f"从数据库加载了 {len(result)} 个活跃账号{f'(平台: {platform})' if platform else ''}")
         return result
     
     def get_accounts_by_capability(
@@ -214,7 +214,7 @@ class AccountLoaderService:
         Args:
             db: 数据库会话
             platform: 平台代码
-            data_domain: 数据域（orders/products/services等）
+            data_domain: 数据域(orders/products/services等)
             
         Returns:
             支持该数据域的账号列表

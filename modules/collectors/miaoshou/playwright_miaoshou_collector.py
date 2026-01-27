@@ -25,7 +25,7 @@ try:
     VPN_ACCELERATOR_AVAILABLE = True
 except ImportError:
     VPN_ACCELERATOR_AVAILABLE = False
-    print("[WARN]  VPN加速器不可用，将使用默认网络配置")
+    print("[WARN]  VPN加速器不可用,将使用默认网络配置")
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
         """
         super().__init__(config)
         
-        # 按项目规范：禁止硬编码URL，所有跳转严格以账号配置的login_url为唯一入口
+        # 按项目规范:禁止硬编码URL,所有跳转严格以账号配置的login_url为唯一入口
         self.login_url = None
         self.dashboard_url = None
         self.order_url = None
@@ -49,7 +49,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
         # VPN加速器集成
         self.vpn_accelerator = vpn_accelerator if VPN_ACCELERATOR_AVAILABLE else None
         
-        # 多地区路由器集成（支持VPN绕过）
+        # 多地区路由器集成(支持VPN绕过)
         try:
             from modules.utils.multi_region_router import MultiRegionRouter
             self.multi_region_router = MultiRegionRouter()
@@ -57,11 +57,11 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
         except ImportError:
             self.multi_region_router = None
             self.MULTI_REGION_AVAILABLE = False
-            print("[WARN]  多地区路由器不可用，将使用默认网络配置")
+            print("[WARN]  多地区路由器不可用,将使用默认网络配置")
         if self.vpn_accelerator and self.vpn_accelerator.is_vpn_environment:
-            print("[WEB] 检测到VPN环境，启用中国网站访问优化")
+            print("[WEB] 检测到VPN环境,启用中国网站访问优化")
         
-                    # 元素选择器（需要根据实际页面结构调整）
+                    # 元素选择器(需要根据实际页面结构调整)
         self.selectors = {
             # 登录页面
             "username_input": "input[name='username'], input[type='text']",
@@ -114,19 +114,19 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
         
     def login(self, username: str, password: str, login_url: str = None) -> bool:
         """
-        登录妙手ERP，自动识别重定向到登录页并自动登录
+        登录妙手ERP,自动识别重定向到登录页并自动登录
         """
         try:
-            # 强制要求login_url由账号配置提供，禁止猜测或硬编码
+            # 强制要求login_url由账号配置提供,禁止猜测或硬编码
             if not login_url:
-                logger.error("[FAIL] 未提供login_url，按照规范禁止硬编码或猜测URL")
+                logger.error("[FAIL] 未提供login_url,按照规范禁止硬编码或猜测URL")
                 self.take_screenshot("missing_login_url")
                 return False
-            # 1. 访问login_url，等待页面主要元素出现
+            # 1. 访问login_url,等待页面主要元素出现
             self.page.goto(login_url, wait_until="domcontentloaded", timeout=30000)
             import time
             time.sleep(2)
-            # 2. 判断是否在登录页（根据输入框或按钮）
+            # 2. 判断是否在登录页(根据输入框或按钮)
             is_login_page = False
             try:
                 if self.page.query_selector("input[placeholder='手机号/子账号/邮箱']") or \
@@ -136,7 +136,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
             except Exception:
                 pass
             if is_login_page:
-                logger.info("[LOCK] 检测到登录页，自动填充账号密码并登录")
+                logger.info("[LOCK] 检测到登录页,自动填充账号密码并登录")
                 try:
                     self.page.fill("input[placeholder='手机号/子账号/邮箱']", username)
                     self.page.fill("input[placeholder='密码']", password)
@@ -154,7 +154,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                 self.take_screenshot("login_success")
                 return True
             else:
-                logger.error("[FAIL] 登录失败，仍在登录页面")
+                logger.error("[FAIL] 登录失败,仍在登录页面")
                 self.take_screenshot("login_failed")
                 return False
         except Exception as e:
@@ -164,13 +164,13 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
     
     def navigate_to_order_page(self, account: dict = None) -> bool:
         """
-        导航到订单页面，基于login_url域名跳转
+        导航到订单页面,基于login_url域名跳转
         """
         try:
             logger.info("[LIST] 导航到订单页面...")
-            # 直接用login_url作为唯一入口（禁止使用冗余order_url字段）
+            # 直接用login_url作为唯一入口(禁止使用冗余order_url字段)
             if not account or not account.get("login_url"):
-                logger.error("[FAIL] 账号未配置login_url，无法导航到业务页面")
+                logger.error("[FAIL] 账号未配置login_url,无法导航到业务页面")
                 self.take_screenshot("missing_login_url_for_order")
                 return False
             order_url = account["login_url"]
@@ -195,7 +195,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
             logger.info(f"[DATE] 弹窗控件-设置日期范围: {start_date} 到 {end_date}")
             self.take_screenshot("before_set_date_range_popup")
 
-            # 1. 点击日期输入框，弹出日历
+            # 1. 点击日期输入框,弹出日历
             if not self.click_element("input[placeholder*='日期'], .ant-picker-input, .el-date-editor"):
                 logger.error("[FAIL] 无法点击日期输入框")
                 self.take_screenshot("click_date_input_failed")
@@ -203,18 +203,18 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
             import time
             time.sleep(1)
 
-            # 2. 直接输入日期（如支持），否则点选日历
+            # 2. 直接输入日期(如支持),否则点选日历
             filled = False
             if self.fill_input("input[placeholder*='开始']", start_date) and self.fill_input("input[placeholder*='结束']", end_date):
                 logger.info("[OK] 直接填充日期成功")
                 filled = True
             else:
-                logger.warning("[WARN] 直接填充失败，尝试点选日历")
+                logger.warning("[WARN] 直接填充失败,尝试点选日历")
                 # 这里可根据实际HTML结构补充点击日历的逻辑
-                # 例如：self.page.click("td[title='2025-08-01']")
+                # 例如:self.page.click("td[title='2025-08-01']")
                 # 可用Inspector录制后补充
 
-            # 3. 如有“确定”按钮，点击
+            # 3. 如有“确定”按钮,点击
             if self.click_element("button:has-text('确定'), .ant-picker-ok button, .el-picker-panel__footer .el-button--default"):
                 logger.info("[MOUSE] 点击日期弹窗的确定按钮")
             time.sleep(1)
@@ -231,7 +231,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
 
     def set_date_range(self, start_date: str, end_date: str) -> bool:
         """
-        设置日期范围，针对妙手ERP的日期时间选择器优化
+        设置日期范围,针对妙手ERP的日期时间选择器优化
         """
         try:
             logger.info(f"[DATE] 设置日期范围: {start_date} 到 {end_date}")
@@ -241,7 +241,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
             import time
             
             # 妙手ERP特定的日期选择器策略
-            # 根据图片分析，页面上有两个日期输入框，显示格式类似 "2025-07-16 00:00:00"
+            # 根据图片分析,页面上有两个日期输入框,显示格式类似 "2025-07-16 00:00:00"
             date_input_selectors = [
                 "input[placeholder*='下单时间']",
                 "input[placeholder*='开始']", 
@@ -267,10 +267,10 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                     continue
             
             if len(date_inputs) < 2:
-                print("[WARN] 未找到足够的日期输入框，尝试通用策略")
+                print("[WARN] 未找到足够的日期输入框,尝试通用策略")
                 return self.set_date_range_fallback(start_date, end_date)
             
-            # 设置开始日期（第一个输入框）
+            # 设置开始日期(第一个输入框)
             start_success = False
             try:
                 start_input = date_inputs[0]
@@ -292,12 +292,12 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                     print(f"[OK] 开始日期设置成功: {new_value}")
                     start_success = True
                 else:
-                    print(f"[WARN] 开始日期设置可能失败，当前值: {new_value}")
+                    print(f"[WARN] 开始日期设置可能失败,当前值: {new_value}")
                     
             except Exception as e:
                 print(f"[FAIL] 设置开始日期失败: {e}")
             
-            # 设置结束日期（第二个输入框）
+            # 设置结束日期(第二个输入框)
             end_success = False
             try:
                 end_input = date_inputs[1]
@@ -319,7 +319,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                     print(f"[OK] 结束日期设置成功: {new_value}")
                     end_success = True
                 else:
-                    print(f"[WARN] 结束日期设置可能失败，当前值: {new_value}")
+                    print(f"[WARN] 结束日期设置可能失败,当前值: {new_value}")
                     
             except Exception as e:
                 print(f"[FAIL] 设置结束日期失败: {e}")
@@ -331,7 +331,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
             except Exception:
                 pass
             
-            # 点击搜索按钮（如果存在）
+            # 点击搜索按钮(如果存在)
             search_clicked = False
             search_selectors = [
                 "button:has-text('搜索')",
@@ -354,7 +354,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                     continue
             
             if not search_clicked:
-                print("[WARN] 未找到搜索按钮，可能需要手动触发查询")
+                print("[WARN] 未找到搜索按钮,可能需要手动触发查询")
             
             self.take_screenshot("after_set_date_range")
             
@@ -391,7 +391,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                 try:
                     elements = self.page.query_selector_all(selector)
                     if len(elements) >= 2:
-                        # 设置第一个为开始日期，第二个为结束日期
+                        # 设置第一个为开始日期,第二个为结束日期
                         elements[0].fill(start_date)
                         elements[1].fill(end_date)
                         print(f"[OK] 备用策略设置日期成功: {selector}")
@@ -407,7 +407,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
 
     def switch_to_tab(self, tab_name: str) -> bool:
         """
-        支持多种Tab/菜单selector，通过Tab名自动切换页面
+        支持多种Tab/菜单selector,通过Tab名自动切换页面
         """
         selectors = [
             f"//span[contains(text(), '{tab_name}')]",  # XPath
@@ -427,13 +427,13 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
 
     def download_data(self, download_dir: str = "downloads/miaoshou") -> Optional[str]:
         """
-        下载数据文件，增强多种按钮识别和日志
+        下载数据文件,增强多种按钮识别和日志
         
         Args:
             download_dir: 下载目录
             
         Returns:
-            str: 下载文件路径，失败返回None
+            str: 下载文件路径,失败返回None
         """
         try:
             logger.info("[RECV] 开始下载数据...")
@@ -444,9 +444,9 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
             
             import time
             
-            # 增强的下载按钮选择器，基于妙手ERP界面分析
+            # 增强的下载按钮选择器,基于妙手ERP界面分析
             download_selectors = [
-                # 根据图片分析，可能的导出按钮位置
+                # 根据图片分析,可能的导出按钮位置
                 "button:has-text('导出数据')",
                 "button:has-text('导出')", 
                 "button:has-text('下载')",
@@ -478,7 +478,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                     continue
             
             if not found_buttons:
-                print("[WARN] 未找到导出按钮，尝试查找页面上所有可点击元素...")
+                print("[WARN] 未找到导出按钮,尝试查找页面上所有可点击元素...")
                 # 查找所有包含"导出"文本的可点击元素
                 try:
                     all_buttons = self.page.query_selector_all('button, a, [role="button"], [onclick], [class*="btn"]')
@@ -514,7 +514,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                 print("[FAIL] 所有导出按钮点击都失败了")
                 self.take_screenshot("download_button_click_failed")
                 return None
-            # 查找并点击导出菜单项（如果有下拉菜单的话）
+            # 查找并点击导出菜单项(如果有下拉菜单的话)
             print("[SEARCH] 查找导出菜单项...")
             export_menu_selectors = [
                 "li[role='menuitem']:has-text('导出全部订单')",
@@ -567,7 +567,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                     continue
             
             if not menu_found:
-                print("[WARN] 未找到导出菜单项，可能导出按钮直接触发下载")
+                print("[WARN] 未找到导出菜单项,可能导出按钮直接触发下载")
                 # 尝试直接监听下载事件
                 try:
                     print("[RETRY] 等待可能的直接下载...")
@@ -599,19 +599,19 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
     
     def collect_data(self, account: Dict[str, Any], start_date: str = None, end_date: str = None, data_type: str = "sales") -> Dict[str, Any]:
         """
-        执行完整的数据采集流程，支持自定义日期范围
+        执行完整的数据采集流程,支持自定义日期范围
         
         Args:
             account: 账号信息
-            start_date: 开始日期 (YYYY-MM-DD)，可选
-            end_date: 结束日期 (YYYY-MM-DD)，可选
+            start_date: 开始日期 (YYYY-MM-DD),可选
+            end_date: 结束日期 (YYYY-MM-DD),可选
             
         Returns:
             Dict: 采集结果
         """
         start_time = time.time()
         
-        # 处理日期范围：如果为空或None，设置默认30天范围
+        # 处理日期范围:如果为空或None,设置默认30天范围
         if not start_date or not end_date:
             end_date = datetime.now().strftime("%Y-%m-%d")
             start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -648,7 +648,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
             print(f"[DIR] 设置下载目录: {base_download_dir}")
             logger.info(f"[DIR] 设置下载目录: {base_download_dir}")
             
-            # 启动浏览器（集成VPN优化）
+            # 启动浏览器(集成VPN优化)
             print("[WEB] 步骤1: 启动浏览器...")
             logger.info("[WEB] 步骤1: 启动浏览器...")
             self.downloads_path = base_download_dir
@@ -660,7 +660,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                 # 获取妙手ERP平台的代理配置
                 proxy_config = self.multi_region_router.get_playwright_proxy_config("miaoshou_erp")
                 if proxy_config:
-                    print("[OK] 已获取妙手ERP专用代理配置（VPN绕过）")
+                    print("[OK] 已获取妙手ERP专用代理配置(VPN绕过)")
                     # 将代理配置合并到浏览器配置中
                     if 'proxy' not in self.browser_config:
                         self.browser_config['proxy'] = {}
@@ -701,7 +701,7 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
             print("[OK] 步骤2成功: 登录完成")
             logger.info("[OK] 步骤2成功: 登录完成")
             
-            # 导航到订单页面（传递account参数）
+            # 导航到订单页面(传递account参数)
             print("[LIST] 步骤3: 导航到订单页面...")
             logger.info("[LIST] 步骤3: 导航到订单页面...")
             if not self.navigate_to_order_page(account=account):
@@ -719,15 +719,15 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
             print("[OK] 步骤4完成: 弹窗处理完成")
             logger.info("[OK] 步骤4完成: 弹窗处理完成")
             
-            # 可选：切换到"利润明细"等必要Tab
+            # 可选:切换到"利润明细"等必要Tab
             print("[DATA] 步骤5: 切换到利润明细标签...")
             logger.info("[DATA] 步骤5: 切换到利润明细标签...")
             if self.switch_to_tab("利润明细"):
                 print("[OK] 步骤5成功: 已切换到利润明细标签")
                 logger.info("[OK] 步骤5成功: 已切换到利润明细标签")
             else:
-                print("[WARN] 步骤5警告: 未找到利润明细标签，可能页面结构不同")
-                logger.warning("[WARN] 步骤5警告: 未找到利润明细标签，可能页面结构不同")
+                print("[WARN] 步骤5警告: 未找到利润明细标签,可能页面结构不同")
+                logger.warning("[WARN] 步骤5警告: 未找到利润明细标签,可能页面结构不同")
             
             # 设置日期范围
             print(f"[DATE] 步骤6: 设置日期范围 ({start_date} 到 {end_date})...")
@@ -736,16 +736,16 @@ class MiaoshouPlaywrightCollector(PlaywrightCollector):
                 print("[OK] 步骤6成功: 日期范围设置完成")
                 logger.info("[OK] 步骤6成功: 日期范围设置完成")
             else:
-                print("[WARN] 步骤6警告: 日期范围设置可能失败，继续尝试下载")
-                logger.warning("[WARN] 步骤6警告: 日期范围设置可能失败，继续尝试下载")
+                print("[WARN] 步骤6警告: 日期范围设置可能失败,继续尝试下载")
+                logger.warning("[WARN] 步骤6警告: 日期范围设置可能失败,继续尝试下载")
             
             # 下载数据
             print("[RECV] 步骤7: 下载数据...")
             logger.info("[RECV] 步骤7: 下载数据...")
             downloaded_file = self.download_data(download_dir=str(base_download_dir))
             if downloaded_file:
-                print(f"[OK] 步骤7成功: 数据下载完成，文件: {downloaded_file}")
-                logger.info(f"[OK] 步骤7成功: 数据下载完成，文件: {downloaded_file}")
+                print(f"[OK] 步骤7成功: 数据下载完成,文件: {downloaded_file}")
+                logger.info(f"[OK] 步骤7成功: 数据下载完成,文件: {downloaded_file}")
                 result["downloaded_files"].append(downloaded_file)
                 result["success"] = True
                 print("[DONE] 数据采集完成")

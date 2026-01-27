@@ -96,7 +96,14 @@ docker-compose*.yml
 .dockerignore
 
 # ==================== 脚本 ====================
-docker/scripts/
+# ⭐ backend-entrypoint.sh 是容器启动必需脚本，必须包含（不排除 docker/scripts/backend-entrypoint.sh）
+docker/scripts/*.bat
+docker/scripts/check-requirements.*
+docker/scripts/health-check.sh
+docker/scripts/start-*.sh
+docker/scripts/start-*.bat
+docker/scripts/stop.*
+# 排除根目录下的脚本（开发/部署脚本）
 *.sh
 *.bat
 

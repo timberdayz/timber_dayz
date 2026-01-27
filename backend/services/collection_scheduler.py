@@ -42,14 +42,14 @@ class CollectionScheduler:
     """
     采集调度器
     
-    功能：
+    功能:
     1. 根据配置的 Cron 表达式创建定时任务
-    2. 管理定时任务（暂停/恢复/删除）
+    2. 管理定时任务(暂停/恢复/删除)
     3. 应用启动时自动加载启用的配置
     4. 支持任务冲突检测
     """
     
-    # 调度器实例（单例）
+    # 调度器实例(单例)
     _instance: Optional['CollectionScheduler'] = None
     _scheduler: Optional[AsyncIOScheduler] = None
     
@@ -82,7 +82,7 @@ class CollectionScheduler:
         获取调度器单例
         
         Args:
-            db_session_factory: 数据库会话工厂（首次调用时必须提供）
+            db_session_factory: 数据库会话工厂(首次调用时必须提供)
             task_executor: 任务执行回调
             
         Returns:
@@ -122,7 +122,7 @@ class CollectionScheduler:
             # 获取数据库URL用于作业存储
             database_url = os.getenv('DATABASE_URL', 'sqlite:///scheduler_jobs.db')
             
-            # 配置作业存储（使用数据库持久化）
+            # 配置作业存储(使用数据库持久化)
             jobstores = {
                 'default': SQLAlchemyJobStore(url=database_url, tablename='apscheduler_jobs')
             }
@@ -187,7 +187,7 @@ class CollectionScheduler:
         
         loaded_count = 0
         
-        # [*] v4.18.2修复：使用异步数据库操作
+        # [*] v4.18.2修复:使用异步数据库操作
         from backend.models.database import AsyncSessionLocal
         async with AsyncSessionLocal() as db:
             # 查询所有启用定时的配置
@@ -371,14 +371,14 @@ class CollectionScheduler:
     
     async def _execute_scheduled_task(self, config_id: int) -> None:
         """
-        执行定时任务（v4.7.0更新）
+        执行定时任务(v4.7.0更新)
         
         Args:
             config_id: 配置ID
         """
         logger.info(f"Executing scheduled task for config {config_id}")
         
-        # [*] v4.18.2修复：使用异步数据库操作
+        # [*] v4.18.2修复:使用异步数据库操作
         from backend.models.database import AsyncSessionLocal
         async with AsyncSessionLocal() as db:
             # 获取配置
@@ -394,7 +394,7 @@ class CollectionScheduler:
                 logger.error(f"Config {config_id} not found or inactive")
                 return
             
-            # 检查是否已有正在运行的任务（同一配置）
+            # 检查是否已有正在运行的任务(同一配置)
             result = await db.execute(
                 select(CollectionTask).where(
                     CollectionTask.config_id == config_id,
@@ -410,16 +410,16 @@ class CollectionScheduler:
             # 为每个账号创建任务
             account_ids = config.account_ids or []
             
-            # v4.7.0: 如果account_ids为空，从数据库加载所有活跃账号
+            # v4.7.0: 如果account_ids为空,从数据库加载所有活跃账号
             if not account_ids:
                 try:
                     from backend.services.account_loader_service import get_account_loader_service
                     from backend.models.database import SessionLocal
                     import asyncio
                     
-                    # [*] v4.18.2修复：使用run_in_executor包装同步账号加载操作
+                    # [*] v4.18.2修复:使用run_in_executor包装同步账号加载操作
                     def _sync_load_accounts():
-                        """同步加载账号（在executor中执行）"""
+                        """同步加载账号(在executor中执行)"""
                         temp_db = SessionLocal()
                         try:
                             account_loader = get_account_loader_service()
@@ -430,7 +430,7 @@ class CollectionScheduler:
                     
                     loop = asyncio.get_running_loop()
                     account_ids = await loop.run_in_executor(None, _sync_load_accounts)
-                    logger.info(f"从数据库加载了 {len(account_ids)} 个活跃账号（平台: {config.platform}）")
+                    logger.info(f"从数据库加载了 {len(account_ids)} 个活跃账号(平台: {config.platform})")
                 except Exception as e:
                     logger.error(f"从数据库加载账号失败: {e}")
                     return
@@ -463,7 +463,7 @@ class CollectionScheduler:
                         'end_date': config.custom_date_end.isoformat()
                     }
                 else:
-                    # 使用date_range_type（today/yesterday/last_7_days等）
+                    # 使用date_range_type(today/yesterday/last_7_days等)
                     from datetime import date, timedelta
                     today = date.today()
                     if config.date_range_type == 'today':
@@ -478,7 +478,7 @@ class CollectionScheduler:
                         start = today - timedelta(days=30)
                         date_range = {'start_date': start.isoformat(), 'end_date': today.isoformat()}
                 
-                # v4.7.0: 创建任务（新字段）
+                # v4.7.0: 创建任务(新字段)
                 task_uuid = str(uuid.uuid4())
                 task = CollectionTask(
                     task_id=task_uuid,
@@ -489,7 +489,7 @@ class CollectionScheduler:
                     sub_domains=config.sub_domains,  # v4.7.0: 数组
                     granularity=config.granularity,
                     date_range=date_range,  # v4.7.0: JSON对象
-                    status='pending',  # v4.7.0: 先pending，后台任务启动时改为running
+                    status='pending',  # v4.7.0: 先pending,后台任务启动时改为running
                     progress=0,
                     trigger_type='scheduled',
                     # v4.7.0: 任务粒度优化字段
@@ -596,10 +596,10 @@ class CollectionScheduler:
 
 # 常用 Cron 表达式预设
 CRON_PRESETS = {
-    # [*] v4.7.0标准预设（Phase 4.1.6）[*]
-    'daily_realtime': '0 6,12,18,22 * * *',    # 日度实时（每天4次：6点/12点/18点/22点）
-    'weekly_summary': '0 5 * * 1',              # 周度汇总（每周一 05:00）
-    'monthly_summary': '0 5 1 * *',             # 月度汇总（每月1号 05:00）
+    # [*] v4.7.0标准预设(Phase 4.1.6)[*]
+    'daily_realtime': '0 6,12,18,22 * * *',    # 日度实时(每天4次:6点/12点/18点/22点)
+    'weekly_summary': '0 5 * * 1',              # 周度汇总(每周一 05:00)
+    'monthly_summary': '0 5 1 * *',             # 月度汇总(每月1号 05:00)
     
     # 其他常用预设
     'every_day_8am': '0 8 * * *',              # 每天早上8点

@@ -2,7 +2,7 @@
 通用弹窗处理器 - Universal Popup Handler
 
 负责检测和关闭各平台的弹窗、通知、对话框等
-支持三层处理机制：通用 + 平台特定 + 组件级
+支持三层处理机制:通用 + 平台特定 + 组件级
 """
 
 import asyncio
@@ -19,13 +19,13 @@ class UniversalPopupHandler:
     """
     通用弹窗处理器
     
-    三层处理机制：
-    1. 通用选择器 - 处理常见弹窗（30+选择器）
+    三层处理机制:
+    1. 通用选择器 - 处理常见弹窗(30+选择器)
     2. 平台特定配置 - popup_config.yaml定义的平台选择器
     3. 组件级配置 - 组件YAML中的popup_handling配置
     """
     
-    # 通用关闭按钮选择器（30+种常见模式）
+    # 通用关闭按钮选择器(30+种常见模式)
     UNIVERSAL_CLOSE_SELECTORS = [
         # aria标签
         '[aria-label="Close"]',
@@ -63,7 +63,7 @@ class UniversalPopupHandler:
         'button:has-text("确定")',
         'button:has-text("OK")',
         'button:has-text("No thanks")',
-        'button:has-text("不，谢谢")',
+        'button:has-text("不,谢谢")',
         'button:has-text("跳过")',
         'button:has-text("Skip")',
         
@@ -87,7 +87,7 @@ class UniversalPopupHandler:
         初始化弹窗处理器
         
         Args:
-            platform_config_dir: 平台配置目录（默认：config/collection_components）
+            platform_config_dir: 平台配置目录(默认:config/collection_components)
         """
         if platform_config_dir is None:
             platform_config_dir = Path(__file__).parent.parent.parent.parent / 'config' / 'collection_components'
@@ -102,7 +102,7 @@ class UniversalPopupHandler:
         加载平台弹窗配置
         
         Args:
-            platform: 平台代码（shopee/tiktok/miaoshou）
+            platform: 平台代码(shopee/tiktok/miaoshou)
             
         Returns:
             Dict: 平台配置字典
@@ -132,10 +132,10 @@ class UniversalPopupHandler:
     
     def get_close_selectors(self, platform: str = None) -> List[str]:
         """
-        获取关闭选择器列表（通用 + 平台特定）
+        获取关闭选择器列表(通用 + 平台特定)
         
         Args:
-            platform: 平台代码（可选）
+            platform: 平台代码(可选)
             
         Returns:
             List[str]: 选择器列表
@@ -145,7 +145,7 @@ class UniversalPopupHandler:
         if platform:
             platform_config = self._load_platform_config(platform)
             platform_selectors = platform_config.get('close_selectors', [])
-            # 平台特定选择器优先（插入到列表前面）
+            # 平台特定选择器优先(插入到列表前面)
             selectors = platform_selectors + selectors
         
         return selectors
@@ -155,7 +155,7 @@ class UniversalPopupHandler:
         获取遮罩层选择器列表
         
         Args:
-            platform: 平台代码（可选）
+            platform: 平台代码(可选)
             
         Returns:
             List[str]: 选择器列表
@@ -174,7 +174,7 @@ class UniversalPopupHandler:
         获取轮询策略
         
         Args:
-            platform: 平台代码（可选）
+            platform: 平台代码(可选)
             
         Returns:
             Dict: 轮询策略配置
@@ -201,14 +201,14 @@ class UniversalPopupHandler:
         watch_ms: int = None
     ) -> int:
         """
-        关闭所有弹窗（主方法）
+        关闭所有弹窗(主方法)
         
         Args:
             page: Playwright Page对象
-            platform: 平台代码（用于加载平台特定配置）
-            max_rounds: 最大轮询次数（覆盖默认值）
-            interval_ms: 轮询间隔毫秒（覆盖默认值）
-            watch_ms: 总观察时间毫秒（覆盖默认值）
+            platform: 平台代码(用于加载平台特定配置)
+            max_rounds: 最大轮询次数(覆盖默认值)
+            interval_ms: 轮询间隔毫秒(覆盖默认值)
+            watch_ms: 总观察时间毫秒(覆盖默认值)
             
         Returns:
             int: 关闭的弹窗数量
@@ -238,7 +238,7 @@ class UniversalPopupHandler:
                 closed_count += closed_this_round
                 logger.debug(f"Round {round_num + 1}: closed {closed_this_round} popup(s)")
             else:
-                # 没有找到弹窗，尝试ESC键
+                # 没有找到弹窗,尝试ESC键
                 await self._try_esc_key(page)
             
             # 等待下一轮
@@ -251,7 +251,7 @@ class UniversalPopupHandler:
     
     async def _try_close_popups(self, page, selectors: List[str]) -> int:
         """
-        尝试关闭弹窗（遍历选择器）
+        尝试关闭弹窗(遍历选择器)
         
         Args:
             page: Playwright Page对象
@@ -262,7 +262,7 @@ class UniversalPopupHandler:
         """
         closed = 0
         
-        # 获取所有frame（主页面 + iframe）
+        # 获取所有frame(主页面 + iframe)
         frames = [page] + list(page.frames)
         
         for frame in frames:
@@ -279,11 +279,11 @@ class UniversalPopupHandler:
                         closed += 1
                         logger.debug(f"Closed popup with selector: {selector}")
                         
-                        # 关闭一个后等待一下，让页面更新
+                        # 关闭一个后等待一下,让页面更新
                         await asyncio.sleep(0.1)
                 
                 except Exception:
-                    # 元素不存在或不可点击，继续下一个
+                    # 元素不存在或不可点击,继续下一个
                     pass
         
         return closed
@@ -299,7 +299,7 @@ class UniversalPopupHandler:
             bool: 是否按下ESC键
         """
         try:
-            # 检查是否有遮罩层（表示有弹窗）
+            # 检查是否有遮罩层(表示有弹窗)
             overlay_selectors = self.get_overlay_selectors()
             
             for selector in overlay_selectors:
@@ -328,14 +328,14 @@ class UniversalPopupHandler:
         component_config: Dict[str, Any] = None
     ) -> int:
         """
-        检查并关闭弹窗（便捷方法）
+        检查并关闭弹窗(便捷方法)
         
         根据组件配置决定是否执行弹窗处理
         
         Args:
             page: Playwright Page对象
             platform: 平台代码
-            component_config: 组件配置（包含popup_handling字段）
+            component_config: 组件配置(包含popup_handling字段)
             
         Returns:
             int: 关闭的弹窗数量
@@ -344,11 +344,11 @@ class UniversalPopupHandler:
         if component_config:
             popup_handling = component_config.get('popup_handling', {})
             
-            # 如果明确禁用，直接返回
+            # 如果明确禁用,直接返回
             if popup_handling.get('enabled') is False:
                 return 0
             
-            # 如果没有明确禁用，默认启用
+            # 如果没有明确禁用,默认启用
             if not popup_handling.get('auto_close', True):
                 return 0
         
@@ -359,7 +359,7 @@ class StepPopupHandler:
     """
     步骤级弹窗处理器
     
-    在执行引擎中使用，处理步骤前后的弹窗
+    在执行引擎中使用,处理步骤前后的弹窗
     """
     
     def __init__(self, popup_handler: UniversalPopupHandler, platform: str = None):
@@ -421,12 +421,12 @@ class StepPopupHandler:
     
     async def on_error(self, page, step: Dict[str, Any], component_config: Dict[str, Any] = None) -> None:
         """
-        步骤执行失败时的弹窗处理（v4.7.2增强）
+        步骤执行失败时的弹窗处理(v4.7.2增强)
         
-        [*] 改进：
+        [*] 改进:
         1. 关闭弹窗
-        2. 等待页面稳定（Playwright官方推荐）
-        3. 短暂延迟，确保DOM更新完成
+        2. 等待页面稳定(Playwright官方推荐)
+        3. 短暂延迟,确保DOM更新完成
         
         Args:
             page: Playwright Page对象
@@ -444,17 +444,17 @@ class StepPopupHandler:
             if closed_count > 0:
                 logger.info(f"Closed {closed_count} popup(s) after step failure")
                 
-                # 2⃣ [*] 官方推荐：等待页面网络空闲（确保弹窗关闭完成）
+                # 2⃣ [*] 官方推荐:等待页面网络空闲(确保弹窗关闭完成)
                 try:
                     await page.wait_for_load_state('networkidle', timeout=5000)
                 except Exception as e:
                     logger.debug(f"Network idle wait timed out (may be normal): {e}")
                 
-                # 3⃣ [*] 短暂延迟，确保DOM更新和动画完成
+                # 3⃣ [*] 短暂延迟,确保DOM更新和动画完成
                 await asyncio.sleep(0.5)
                 
                 logger.debug("Page stabilized after popup closure, ready to retry")
             else:
-                # 没有弹窗，可能是其他原因导致失败
+                # 没有弹窗,可能是其他原因导致失败
                 logger.debug("No popups found, step may have failed for other reasons")
 

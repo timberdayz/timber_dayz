@@ -1,6 +1,6 @@
 """
 物化视图管理API - 西虹ERP系统
-v4.12.0修复：添加物化视图刷新API端点
+v4.12.0修复:添加物化视图刷新API端点
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,8 +25,8 @@ async def refresh_all_materialized_views(db: AsyncSession = Depends(get_async_db
     """
     刷新所有物化视图
     
-    v4.12.0修复：添加物化视图刷新API端点
-    前端调用：POST /api/mv/refresh-all
+    v4.12.0修复:添加物化视图刷新API端点
+    前端调用:POST /api/mv/refresh-all
     
     Returns:
         {
@@ -76,8 +76,8 @@ async def refresh_all_materialized_views(db: AsyncSession = Depends(get_async_db
                 message="没有找到物化视图"
             )
         
-        # 2. 定义刷新顺序（主视图优先，辅助视图后刷新）
-        # 主视图（Hub视图）- 直接从事实表查询
+        # 2. 定义刷新顺序(主视图优先,辅助视图后刷新)
+        # 主视图(Hub视图)- 直接从事实表查询
         main_views = [
             "mv_product_management",
             "mv_order_summary",
@@ -86,10 +86,10 @@ async def refresh_all_materialized_views(db: AsyncSession = Depends(get_async_db
             "mv_financial_overview"
         ]
         
-        # 辅助视图（Spoke视图）- 依赖主视图
+        # 辅助视图(Spoke视图)- 依赖主视图
         other_views = [v for v in view_names if v not in main_views]
         
-        # 按顺序刷新：先主视图，后辅助视图
+        # 按顺序刷新:先主视图,后辅助视图
         refresh_order = main_views + sorted(other_views)
         
         # 3. 逐个刷新物化视图
@@ -102,8 +102,8 @@ async def refresh_all_materialized_views(db: AsyncSession = Depends(get_async_db
             try:
                 logger.info(f"[物化视图刷新] 正在刷新: {view_name}...")
                 
-                # 尝试使用 CONCURRENTLY（需要唯一索引）
-                # [*] 修复：CONCURRENTLY需要唯一索引，如果失败则使用普通刷新
+                # 尝试使用 CONCURRENTLY(需要唯一索引)
+                # [*] 修复:CONCURRENTLY需要唯一索引,如果失败则使用普通刷新
                 refresh_method = None
                 try:
                     refresh_sql = text(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view_name}")
@@ -111,8 +111,8 @@ async def refresh_all_materialized_views(db: AsyncSession = Depends(get_async_db
                     await db.commit()
                     refresh_method = "CONCURRENTLY"
                 except Exception as concurrent_error:
-                    # 如果CONCURRENTLY失败（可能没有唯一索引），使用普通刷新
-                    logger.warning(f"[物化视图刷新] {view_name} CONCURRENTLY失败，使用普通刷新: {concurrent_error}")
+                    # 如果CONCURRENTLY失败(可能没有唯一索引),使用普通刷新
+                    logger.warning(f"[物化视图刷新] {view_name} CONCURRENTLY失败,使用普通刷新: {concurrent_error}")
                     try:
                         await db.rollback()
                         refresh_sql = text(f"REFRESH MATERIALIZED VIEW {view_name}")
@@ -120,7 +120,7 @@ async def refresh_all_materialized_views(db: AsyncSession = Depends(get_async_db
                         await db.commit()
                         refresh_method = "NORMAL"
                     except Exception as normal_error:
-                        # 普通刷新也失败，抛出异常
+                        # 普通刷新也失败,抛出异常
                         raise normal_error
                 
                 # 获取行数
@@ -162,7 +162,7 @@ async def refresh_all_materialized_views(db: AsyncSession = Depends(get_async_db
         success_count = sum(1 for r in results if r["success"])
         failed_count = len(results) - success_count
         
-        logger.info(f"[物化视图刷新] 刷新完成: 成功 {success_count}/{len(results)} 个视图，耗时 {total_duration:.2f}秒")
+        logger.info(f"[物化视图刷新] 刷新完成: 成功 {success_count}/{len(results)} 个视图,耗时 {total_duration:.2f}秒")
         
         return success_response(
             data={
@@ -172,7 +172,7 @@ async def refresh_all_materialized_views(db: AsyncSession = Depends(get_async_db
                 "success_count": success_count,
                 "failed_count": failed_count
             },
-            message=f"物化视图刷新完成：成功 {success_count}/{len(results)} 个视图"
+            message=f"物化视图刷新完成:成功 {success_count}/{len(results)} 个视图"
         )
         
     except Exception as e:
@@ -182,7 +182,7 @@ async def refresh_all_materialized_views(db: AsyncSession = Depends(get_async_db
             message="物化视图刷新失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和物化视图定义，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和物化视图定义,或联系系统管理员",
             status_code=500
         )
 
@@ -233,7 +233,7 @@ async def get_all_mv_status(db: AsyncSession = Depends(get_async_db)):
             except:
                 row_count = 0
             
-            # 获取最后刷新时间（从刷新日志表）
+            # 获取最后刷新时间(从刷新日志表)
             try:
                 from modules.core.db import MaterializedViewRefreshLog
                 result = await db.execute(
@@ -278,7 +278,7 @@ async def get_all_mv_status(db: AsyncSession = Depends(get_async_db)):
             message="获取物化视图状态失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接,或联系系统管理员",
             status_code=500
         )
 

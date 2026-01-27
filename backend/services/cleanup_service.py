@@ -20,7 +20,7 @@ class CleanupService:
     """
     清理服务
     
-    功能：
+    功能:
     1. 清理过期的下载文件
     2. 清理过期的截图文件
     3. 清理孤儿浏览器进程
@@ -43,7 +43,7 @@ class CleanupService:
         初始化清理服务
         
         Args:
-            temp_dir: 临时文件目录（默认: temp/）
+            temp_dir: 临时文件目录(默认: temp/)
         """
         if temp_dir is None:
             temp_dir = os.getenv('TEMP_DIR', 'temp')
@@ -59,7 +59,7 @@ class CleanupService:
         清理过期的下载文件
         
         Args:
-            retention_days: 保留天数（默认从环境变量读取）
+            retention_days: 保留天数(默认从环境变量读取)
             
         Returns:
             Dict: 清理结果统计
@@ -83,7 +83,7 @@ class CleanupService:
         cutoff_time = datetime.now() - timedelta(days=retention_days)
         
         try:
-            # 遍历下载目录（每个任务一个子目录）
+            # 遍历下载目录(每个任务一个子目录)
             for task_dir in self.downloads_dir.iterdir():
                 if not task_dir.is_dir():
                     continue
@@ -122,7 +122,7 @@ class CleanupService:
         清理过期的截图文件
         
         Args:
-            retention_days: 保留天数（默认从环境变量读取）
+            retention_days: 保留天数(默认从环境变量读取)
             
         Returns:
             Dict: 清理结果统计
@@ -234,10 +234,10 @@ class CleanupService:
                     if ppid and ppid != current_pid:
                         try:
                             parent = psutil.Process(ppid)
-                            # 父进程存在，不是孤儿进程
+                            # 父进程存在,不是孤儿进程
                             continue
                         except psutil.NoSuchProcess:
-                            # 父进程不存在，是孤儿进程
+                            # 父进程不存在,是孤儿进程
                             pass
                     
                     # 终止孤儿进程
@@ -268,7 +268,7 @@ class CleanupService:
     
     def run_full_cleanup(self) -> Dict[str, Any]:
         """
-        执行完整清理（下载文件 + 截图 + 孤儿进程）
+        执行完整清理(下载文件 + 截图 + 孤儿进程)
         
         Returns:
             Dict: 完整清理结果

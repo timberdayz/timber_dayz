@@ -2,14 +2,14 @@ from __future__ import annotations
 
 """录制与诊断文件维护工具
 
-策略：
-- 绝不删除，仅归档到 backups/ 目录
-- 按平台/数据类型/时间排序，保留每类最近 N 个，其余归档
+策略:
+- 绝不删除,仅归档到 backups/ 目录
+- 按平台/数据类型/时间排序,保留每类最近 N 个,其余归档
 - 支持 dry_run 显示计划
 
-目录：
-- 录制脚本：.diag/recipes/*.json 或 temp/development/recordings/*.py（可扩展）
-- 诊断快照：输出目录下的 .diag/*
+目录:
+- 录制脚本:.diag/recipes/*.json 或 temp/development/recordings/*.py(可扩展)
+- 诊断快照:输出目录下的 .diag/*
 """
 from pathlib import Path
 from dataclasses import dataclass
@@ -22,7 +22,7 @@ import zipfile
 
 @dataclass
 class RetentionPolicy:
-    per_category_keep: int = 10  # 每类（平台/数据类型）保留最近N个
+    per_category_keep: int = 10  # 每类(平台/数据类型)保留最近N个
     dry_run: bool = False
 
 
@@ -51,7 +51,7 @@ class RecordingMaintenance:
         # 配方目录
         for p in self.root.rglob(".diag/recipes/*.json"):
             candidates.append(p)
-        # 录制脚本（可选目录，若不存在忽略）
+        # 录制脚本(可选目录,若不存在忽略)
         rec_dir = self.root / "temp" / "development" / "recordings"
         if rec_dir.exists():
             for p in rec_dir.rglob("*.py"):
@@ -66,7 +66,7 @@ class RecordingMaintenance:
         return dirs
 
     def _list_media_dirs(self) -> List[Path]:
-        """列出媒体文件目录（截图/录屏）"""
+        """列出媒体文件目录(截图/录屏)"""
         dirs = []
         for sub in ["temp/media", "temp/outputs", "temp/logs"]:
             base = self.root / sub
@@ -88,14 +88,14 @@ class RecordingMaintenance:
         return py_list, pyc_list
 
     def _category_key(self, p: Path) -> Tuple[str, str]:
-        # 平台过滤（若设置）
+        # 平台过滤(若设置)
         if self.platform_filter:
             try:
                 if self.platform_filter not in [s.lower() for s in p.parts]:
                     return ("__skip__", "__skip__")
             except Exception:
                 pass
-        # 简化分类：平台 + 数据类型（从路径中提取）
+        # 简化分类:平台 + 数据类型(从路径中提取)
         path_str = str(p.as_posix())
         platform = "unknown"
         data_type = "unknown"
@@ -155,9 +155,9 @@ class RecordingMaintenance:
                         shutil.move(str(f), str(target_dir / f.name))
                         self.actions.append(plan)
 
-        # 处理诊断目录（.diag）
+        # 处理诊断目录(.diag)
         diag_dirs = self._list_diag_dirs()
-        # 同平台/数据类型下，按父目录时间排序归档多余
+        # 同平台/数据类型下,按父目录时间排序归档多余
         grouped_dirs: dict[Tuple[str, str], List[Path]] = {}
         for d in diag_dirs:
             key = self._category_key(d)
@@ -180,7 +180,7 @@ class RecordingMaintenance:
                     shutil.move(str(parent), str(target_dir))
                     self.actions.append(plan)
 
-        # 处理录制脚本（temp/recordings）：按类别（平台/类型）保留 N 个，其余归档
+        # 处理录制脚本(temp/recordings):按类别(平台/类型)保留 N 个,其余归档
         py_list, pyc_list = self._list_recording_files()
         def _rec_key(p: Path) -> Tuple[str, str, str]:
             # 平台/账号或店铺/类型(login|complete|collection_*|other)
@@ -197,7 +197,7 @@ class RecordingMaintenance:
                 kind = f'collection_{kind}'
             else:
                 kind = 'other'
-            # 账号/店铺提取（尽力从前缀取一段）
+            # 账号/店铺提取(尽力从前缀取一段)
             account = name.split('_')[0]
             return platform, kind, account
         grouped_rec: dict[Tuple[str, str, str], List[Path]] = {}
@@ -231,7 +231,7 @@ class RecordingMaintenance:
                 shutil.move(str(f), str(target_dir / f.name))
                 self.actions.append(plan)
 
-        # 处理媒体/日志类大文件目录（按天数阈值归档）
+        # 处理媒体/日志类大文件目录(按天数阈值归档)
         for base in self._list_media_dirs():
             for p in base.rglob("*"):
                 try:
@@ -258,7 +258,7 @@ class RecordingMaintenance:
                 except Exception:
                     continue
 
-        # 备份轮转：压缩旧的 backups/* 子目录（按配置）
+        # 备份轮转:压缩旧的 backups/* 子目录(按配置)
         try:
             from modules.core.config import get_config_value
             backup_cfg = get_config_value('simple_config', 'collection.maintenance.backups', {}) or {}
@@ -268,7 +268,7 @@ class RecordingMaintenance:
         except Exception:
             rotate_days, enable_zip, purge_after_zip = 90, True, False
 
-        # 允许 CLI 覆盖（仅当前运行生效）
+        # 允许 CLI 覆盖(仅当前运行生效)
         override_purge = getattr(self, "_override_purge", None)
         if override_purge is True:
             purge_after_zip = True
@@ -348,7 +348,7 @@ if __name__ == "__main__":
     after_size = _dir_size(outputs_dir)
     saved = before_size - after_size if before_size >= after_size else 0
     mode = "APPLY" if not tool.policy.dry_run else "DRY-RUN"
-    print(f"[OK] 维护完成 [{mode}]：归档前 {before_size/1024/1024:.2f} MB，归档后 {after_size/1024/1024:.2f} MB，表观释放 {saved/1024/1024:.2f} MB（移动至 backups）")
+    print(f"[OK] 维护完成 [{mode}]:归档前 {before_size/1024/1024:.2f} MB,归档后 {after_size/1024/1024:.2f} MB,表观释放 {saved/1024/1024:.2f} MB(移动至 backups)")
 
     # 写出报告
     try:

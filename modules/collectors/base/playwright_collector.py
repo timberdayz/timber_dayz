@@ -23,7 +23,7 @@ class PlaywrightCollector:
         初始化Playwright采集器
         
         Args:
-            config: 配置信息，包含浏览器设置、代理设置等
+            config: 配置信息,包含浏览器设置、代理设置等
         """
         self.config = config
         self.browser: Optional[Browser] = None
@@ -41,7 +41,7 @@ class PlaywrightCollector:
         
         # 代理配置
         self.proxy_config = config.get("proxy", {})
-        # 下载目录（可选，由上层按账号/数据类型传入）。注意：Python不支持在new_context传downloads_path
+        # 下载目录(可选,由上层按账号/数据类型传入)。注意:Python不支持在new_context传downloads_path
         self.downloads_path = config.get("downloads_path")
         
     def start_browser(self) -> bool:
@@ -119,7 +119,7 @@ class PlaywrightCollector:
             name: 截图名称
             
         Returns:
-            str: 截图文件路径，失败返回None
+            str: 截图文件路径,失败返回None
         """
         try:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -141,7 +141,7 @@ class PlaywrightCollector:
         
         Args:
             selector: 元素选择器
-            timeout: 超时时间（毫秒）
+            timeout: 超时时间(毫秒)
             
         Returns:
             bool: 是否找到元素
@@ -204,7 +204,7 @@ class PlaywrightCollector:
             selector: 元素选择器
             
         Returns:
-            str: 元素文本，失败返回None
+            str: 元素文本,失败返回None
         """
         try:
             if self.page and self.wait_for_element(selector):
@@ -241,10 +241,10 @@ class PlaywrightCollector:
         等待文件下载
         
         Args:
-            timeout: 超时时间（毫秒）
+            timeout: 超时时间(毫秒)
             
         Returns:
-            Download: 下载对象，失败返回None
+            Download: 下载对象,失败返回None
         """
         try:
             if self.page:

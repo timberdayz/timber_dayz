@@ -3,7 +3,7 @@
 
 提供采集配置、任务管理、账号管理等API端点
 
-v4.18.0: Pydantic模型已迁移到backend/schemas/collection.py（Contract-First架构）
+v4.18.0: Pydantic模型已迁移到backend/schemas/collection.py(Contract-First架构)
 """
 
 import uuid
@@ -19,9 +19,9 @@ from sqlalchemy import desc, select
 from backend.models.database import get_db, get_async_db
 from modules.core.db import CollectionConfig, CollectionTask, CollectionTaskLog
 from modules.core.logger import get_logger
-# v4.7.4: 移除 WebSocket，统一使用 HTTP 轮询
+# v4.7.4: 移除 WebSocket,统一使用 HTTP 轮询
 
-# v4.18.0: 导入schemas（Contract-First架构）
+# v4.18.0: 导入schemas(Contract-First架构)
 from backend.schemas.collection import (
     CollectionConfigCreate,
     CollectionConfigUpdate,
@@ -79,8 +79,8 @@ async def create_config(
     config: CollectionConfigCreate,
     db: AsyncSession = Depends(get_async_db)
 ):
-    """创建采集配置（v4.7.0 - 支持自动生成配置名）"""
-    # v4.7.0: 自动生成配置名（如果未提供）
+    """创建采集配置(v4.7.0 - 支持自动生成配置名)"""
+    # v4.7.0: 自动生成配置名(如果未提供)
     config_name = config.name
     if not config_name:
         # 格式: {platform}-{domains}-v{n}
@@ -128,7 +128,7 @@ async def create_config(
         if domain not in valid_domains:
             raise HTTPException(status_code=400, detail=f"无效的数据域: {domain}")
     
-    # v4.7.0: 验证 account_ids（空数组表示所有活跃账号）
+    # v4.7.0: 验证 account_ids(空数组表示所有活跃账号)
     if len(config.account_ids) == 0:
         logger.info(f"Config uses all active accounts for platform: {config.platform}")
     
@@ -226,10 +226,10 @@ async def list_accounts(
     request: Request = None  # [*] Phase 3: 用于获取缓存服务
 ):
     """
-    获取账号列表（脱敏）
+    获取账号列表(脱敏)
     
-    v4.7.0: 从数据库读取账号信息，返回脱敏后的数据
-    [*] Phase 3: 添加缓存支持（5分钟TTL）
+    v4.7.0: 从数据库读取账号信息,返回脱敏后的数据
+    [*] Phase 3: 添加缓存支持(5分钟TTL)
     """
     # [*] Phase 3: 尝试从缓存获取
     if request and hasattr(request.app.state, 'cache_service'):
@@ -298,13 +298,13 @@ async def create_task(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    创建采集任务（v4.7.0）
+    创建采集任务(v4.7.0)
     
-    v4.7.0 更新：
-    - 支持子域数组（sub_domains）
-    - 支持调试模式（debug_mode）
-    - 支持任务粒度优化（一账号一任务，循环采集所有域）
-    - 支持账号能力过滤（capabilities）
+    v4.7.0 更新:
+    - 支持子域数组(sub_domains)
+    - 支持调试模式(debug_mode)
+    - 支持任务粒度优化(一账号一任务,循环采集所有域)
+    - 支持账号能力过滤(capabilities)
     """
     # 生成任务ID
     task_uuid = str(uuid.uuid4())
@@ -332,7 +332,7 @@ async def create_task(
         account_info, request.data_domains
     )
     
-    # 如果所有数据域都不支持，返回错误
+    # 如果所有数据域都不支持,返回错误
     if not filtered_domains:
         raise HTTPException(
             status_code=400,
@@ -345,13 +345,13 @@ async def create_task(
             f"Filtered out unsupported domains for {request.account_id}: {unsupported_domains}"
         )
     
-    # v4.7.0: 计算总数据域数量（含子域，仅计算支持的数据域）
+    # v4.7.0: 计算总数据域数量(含子域,仅计算支持的数据域)
     total_domains_count = len(filtered_domains)
     if request.sub_domains:
-        # 如果有子域，每个数据域 × 子域数量
+        # 如果有子域,每个数据域 × 子域数量
         total_domains_count = len(filtered_domains) * len(request.sub_domains)
     
-    # 创建任务记录（使用过滤后的数据域）
+    # 创建任务记录(使用过滤后的数据域)
     task = CollectionTask(
         task_id=task_uuid,
         platform=request.platform,
@@ -392,7 +392,7 @@ async def create_task(
     
     logger.info(f"Created collection task: {task_uuid} ({request.platform}/{request.account_id}) - {total_domains_count} domains, debug_mode={request.debug_mode}")
     
-    # v4.7.0 + Phase 9.1: 启动后台采集任务（使用过滤后的数据域）
+    # v4.7.0 + Phase 9.1: 启动后台采集任务(使用过滤后的数据域)
     asyncio.create_task(
         _execute_collection_task_background(
             task_id=task_uuid,
@@ -491,7 +491,7 @@ async def retry_task(
     """
     重试任务
     
-    创建新任务，重新开始整个流程
+    创建新任务,重新开始整个流程
     """
     result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
     original_task = result.scalar_one_or_none()
@@ -545,7 +545,7 @@ async def resume_task(
     """
     继续任务
     
-    从暂停点继续执行（适用于验证码暂停后的恢复）
+    从暂停点继续执行(适用于验证码暂停后的恢复)
     """
     result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
     task = result.scalar_one_or_none()
@@ -609,9 +609,9 @@ async def get_task_screenshot(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    获取任务截图（验证码截图）
+    获取任务截图(验证码截图)
     
-    返回任务的验证码截图文件（如果存在）
+    返回任务的验证码截图文件(如果存在)
     
     Phase 1.5.6新增功能
     """
@@ -633,7 +633,7 @@ async def get_task_screenshot(
     
     # 转换为绝对路径
     if not PathLib(screenshot_path).is_absolute():
-        # 如果是相对路径，相对于项目根目录
+        # 如果是相对路径,相对于项目根目录
         project_root = PathLib(__file__).parent.parent.parent
         screenshot_path = str(project_root / screenshot_path)
     
@@ -663,7 +663,7 @@ async def get_history(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取采集历史记录（分页）"""
+    """获取采集历史记录(分页)"""
     from sqlalchemy import func
     
     # 构建查询条件
@@ -744,7 +744,7 @@ async def get_history_stats(
     queued_count = status_dict.get("queued", 0)
     success_rate = round(completed_count / total * 100, 2)
     
-    # 按日统计（简化版，实际可以更详细）
+    # 按日统计(简化版,实际可以更详细)
     daily_stats = []
     for i in range(days):
         day = (datetime.now() - timedelta(days=i)).date()
@@ -795,7 +795,7 @@ async def update_config_schedule(
     """
     更新配置的定时设置
     
-    启用/禁用定时采集，设置Cron表达式
+    启用/禁用定时采集,设置Cron表达式
     """
     from backend.services.collection_scheduler import CollectionScheduler, APSCHEDULER_AVAILABLE
     
@@ -991,7 +991,7 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
     """
     采集模块健康检查
     
-    返回：
+    返回:
     - 运行中任务数
     - 排队任务数
     - 浏览器池状态
@@ -1001,12 +1001,12 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
     from backend.services.collection_scheduler import APSCHEDULER_AVAILABLE
     from backend.schemas.collection import BrowserPoolStatus
     
-    # 尝试查询任务统计（如果表结构不存在则返回0）
+    # 尝试查询任务统计(如果表结构不存在则返回0)
     running_count = 0
     queued_count = 0
     try:
         from sqlalchemy import text
-        # 使用原生SQL查询，避免ORM模型与数据库不同步的问题
+        # 使用原生SQL查询,避免ORM模型与数据库不同步的问题
         result = await db.execute(text("""
             SELECT status, COUNT(*) as count 
             FROM collection_tasks 
@@ -1019,10 +1019,10 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
             elif row[0] == "queued":
                 queued_count = row[1]
     except Exception as e:
-        # 表不存在或结构不对，返回默认值
+        # 表不存在或结构不对,返回默认值
         logger.warning(f"Health check task query failed (migration pending?): {e}")
     
-    # 浏览器池状态（简化版）
+    # 浏览器池状态(简化版)
     from backend.services.task_service import TaskService
     max_concurrent = TaskService.MAX_CONCURRENT_TASKS
     
@@ -1058,7 +1058,7 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
 
 
 # ============================================================
-# 后台任务执行（v4.7.0）
+# 后台任务执行(v4.7.0)
 # ============================================================
 
 async def _execute_collection_task_background(
@@ -1075,7 +1075,7 @@ async def _execute_collection_task_background(
     db_session_maker
 ):
     """
-    后台执行采集任务（v4.7.0 + Phase 9.1）
+    后台执行采集任务(v4.7.0 + Phase 9.1)
     
     Args:
         task_id: 任务ID
@@ -1086,15 +1086,15 @@ async def _execute_collection_task_background(
         date_range: 日期范围
         granularity: 粒度
         debug_mode: 调试模式
-        parallel_mode: [*] 并行执行模式（Phase 9.1）
-        max_parallel: [*] 最大并发数（Phase 9.1）
-        db_session_maker: 数据库引擎（用于创建新session）
+        parallel_mode: [*] 并行执行模式(Phase 9.1)
+        max_parallel: [*] 最大并发数(Phase 9.1)
+        db_session_maker: 数据库引擎(用于创建新session)
     """
     from backend.models.database import AsyncSessionLocal
     from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
     import importlib.util
     
-    # 创建新的异步数据库session（后台任务需要独立session）
+    # 创建新的异步数据库session(后台任务需要独立session)
     async with AsyncSessionLocal() as db:
         try:
             # 更新任务状态为running
@@ -1108,12 +1108,12 @@ async def _execute_collection_task_background(
             task.started_at = datetime.utcnow()
             await db.commit()
             
-            # 加载账号信息（v4.7.0: 从数据库加载）
+            # 加载账号信息(v4.7.0: 从数据库加载)
             try:
                 from backend.services.account_loader_service import get_account_loader_service
                 
                 account_loader = get_account_loader_service()
-                # [*] v4.18.2修复：使用异步方法加载账号
+                # [*] v4.18.2修复:使用异步方法加载账号
                 account = await account_loader.load_account_async(account_id, db)
                 
                 if not account:
@@ -1145,7 +1145,7 @@ async def _execute_collection_task_background(
                 try:
                     # [*] Phase 9.1: 根据parallel_mode选择执行方式
                     if parallel_mode:
-                        # 并行执行模式（每个域独立浏览器上下文）
+                        # 并行执行模式(每个域独立浏览器上下文)
                         logger.info(f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})")
                         result = await executor.execute_parallel_domains(
                             task_id=task_id,
@@ -1160,7 +1160,7 @@ async def _execute_collection_task_background(
                             debug_mode=debug_mode,
                         )
                     else:
-                        # 顺序执行模式（传统方式）
+                        # 顺序执行模式(传统方式)
                         result = await executor.execute(
                             task_id=task_id,
                             platform=platform,

@@ -2,15 +2,15 @@
 Collection Template Generator - 采集模板生成器
 =============================================
 
-为不同数据类型生成标准化的采集脚本模板，支持：
+为不同数据类型生成标准化的采集脚本模板,支持:
 - 深链接直达模式
-- API导出优先，点击导出兜底
+- API导出优先,点击导出兜底
 - 统一的run(page, account)入口
-- 参数化配置（shop_id, 日期范围等）
+- 参数化配置(shop_id, 日期范围等)
 
-版本：v1.0.0
-作者：跨境电商ERP系统
-更新：2025-08-29
+版本:v1.0.0
+作者:跨境电商ERP系统
+更新:2025-08-29
 """
 
 from pathlib import Path
@@ -37,7 +37,7 @@ class CollectionTemplateGenerator:
         Args:
             data_type: 数据类型
             account_name: 账号名称
-            shop_id: 店铺ID（可选）
+            shop_id: 店铺ID(可选)
             
         Returns:
             str: 生成的脚本路径
@@ -107,10 +107,10 @@ class CollectionTemplateGenerator:
 Shopee {data_type.value.title()} 数据采集脚本
 自动生成于: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
-功能：
+功能:
 - 深链接直达 {data_type.value} 页面
-- API导出优先，点击导出兜底
-- 支持参数化配置（shop_id, 日期范围等）
+- API导出优先,点击导出兜底
+- 支持参数化配置(shop_id, 日期范围等)
 """
 
 import time
@@ -125,13 +125,13 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
     Args:
         page: Playwright页面对象
         account: 账号配置
-        shop_id: 店铺ID（可选）
-        **kwargs: 额外参数（如日期范围等）
+        shop_id: 店铺ID(可选)
+        **kwargs: 额外参数(如日期范围等)
     """
     try:
         print(f"[START] 开始采集 {{data_type.value}} 数据...")
         
-        # 1. 构造深链接（如果提供了shop_id）
+        # 1. 构造深链接(如果提供了shop_id)
         if shop_id:
             base_url = "https://seller.shopee.cn"
             deep_link = f"{{base_url}}{route}?cnsc_shop_id={{shop_id}}"
@@ -153,7 +153,7 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
             
             # 验证页面加载
             if "cnsc_shop_id={{shop_id}}" not in page.url:
-                raise Exception(f"页面导航失败，当前URL: {{page.url}}")
+                raise Exception(f"页面导航失败,当前URL: {{page.url}}")
         
         # 2. 等待关键元素加载
         data_table_selector = "{selectors.get('data_table', '.data-content')}"
@@ -161,9 +161,9 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
             page.wait_for_selector(data_table_selector, timeout=20000)
             print("[OK] 数据表格已加载")
         except:
-            print("[WARN] 数据表格加载超时，但继续执行")
+            print("[WARN] 数据表格加载超时,但继续执行")
         
-        # 3. 尝试API导出（优先方案）
+        # 3. 尝试API导出(优先方案)
         try:
             print("[START] 尝试API导出...")
             
@@ -190,12 +190,12 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
                 print(f"[OK] API导出成功: {{output_path}}")
                 return
             else:
-                print(f"[WARN] API导出失败 (状态码: {{response.status}})，尝试点击导出")
+                print(f"[WARN] API导出失败 (状态码: {{response.status}}),尝试点击导出")
                 
         except Exception as api_error:
-            print(f"[WARN] API导出异常: {{api_error}}，尝试点击导出")
+            print(f"[WARN] API导出异常: {{api_error}},尝试点击导出")
         
-        # 4. 点击导出按钮（兜底方案）
+        # 4. 点击导出按钮(兜底方案)
         export_button_selector = "{selectors.get('export_button', 'text=导出')}"
         
         try:
@@ -206,7 +206,7 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
         # 监听下载事件
         with page.expect_download(timeout=60000) as download_info:
             page.click(export_button_selector)
-            print("[MOUSE] 已点击导出按钮，等待下载...")
+            print("[MOUSE] 已点击导出按钮,等待下载...")
         
         download = download_info.value
         
@@ -229,7 +229,7 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
 
 if __name__ == "__main__":
     # 测试用例
-    print("这是一个采集脚本模板，需要在Playwright环境中运行")
+    print("这是一个采集脚本模板,需要在Playwright环境中运行")
     print("使用方法: run(page, account, shop_id='1234567890')")
 '''
         
@@ -245,7 +245,7 @@ if __name__ == "__main__":
 {self.platform.title()} {data_type.value.title()} 数据采集脚本
 自动生成于: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
-注意：这是通用模板，需要根据具体平台进行调整
+注意:这是通用模板,需要根据具体平台进行调整
 """
 
 import time
@@ -260,7 +260,7 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
     Args:
         page: Playwright页面对象
         account: 账号配置
-        shop_id: 店铺ID（可选）
+        shop_id: 店铺ID(可选)
         **kwargs: 额外参数
     """
     try:
@@ -280,7 +280,7 @@ def run(page, account: Dict, shop_id: Optional[str] = None, **kwargs):
 
 
 if __name__ == "__main__":
-    print("这是一个采集脚本模板，需要在Playwright环境中运行")
+    print("这是一个采集脚本模板,需要在Playwright环境中运行")
 '''
         
         return template
@@ -289,13 +289,13 @@ if __name__ == "__main__":
 def generate_collection_template(platform: str, data_type: RecordingType, 
                                account_name: str, shop_id: Optional[str] = None) -> str:
     """
-    便捷函数：生成采集模板
+    便捷函数:生成采集模板
     
     Args:
         platform: 平台名称
         data_type: 数据类型
         account_name: 账号名称
-        shop_id: 店铺ID（可选）
+        shop_id: 店铺ID(可选)
         
     Returns:
         str: 生成的脚本路径

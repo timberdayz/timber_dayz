@@ -209,13 +209,13 @@ def validate_core_data(data: Dict[str, Any]) -> Dict[str, List[str]]:
 # 数据采集策略配置
 COLLECTION_STRATEGY = {
     "phase_1_core": {
-        "description": "第一阶段：核心必采集字段",
+        "description": "第一阶段:核心必采集字段",
         "fields": list(CORE_FIELDS.keys()),
         "priority": 1,
         "required_success_rate": 0.95
     },
     "phase_2_extended": {
-        "description": "第二阶段：扩展有用字段",
+        "description": "第二阶段:扩展有用字段",
         "fields": [
             "payment_time", "product_link", "platform_sku", "merchant_sku",
             "purchase_cost", "purchase_cost_rmb", "advertising_cost", "advertising_cost_rmb",
@@ -225,7 +225,7 @@ COLLECTION_STRATEGY = {
         "required_success_rate": 0.80
     },
     "phase_3_complete": {
-        "description": "第三阶段：完整118字段",
+        "description": "第三阶段:完整118字段",
         "fields": "all_118_fields",
         "priority": 3,
         "required_success_rate": 0.60

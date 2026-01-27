@@ -3,11 +3,11 @@
 """
 用户注册和审批流程 - 单元测试
 
-测试内容：
+测试内容:
 1. 用户注册API测试
    - 正常注册流程
-   - 用户名重复测试（统一错误消息）
-   - 邮箱重复测试（统一错误消息）
+   - 用户名重复测试(统一错误消息)
+   - 邮箱重复测试(统一错误消息)
    - 密码强度验证测试
 2. 用户审批API测试
    - 批准用户测试
@@ -67,7 +67,7 @@ def print_result(test_name: str, success: bool, message: str = ""):
 
 
 def login_as_admin() -> str:
-    """登录管理员账号，返回token"""
+    """登录管理员账号,返回token"""
     global admin_token
     
     if admin_token:
@@ -124,7 +124,7 @@ def test_register_normal():
 
 
 def test_register_duplicate_username():
-    """测试用户名重复（统一错误消息）"""
+    """测试用户名重复(统一错误消息)"""
     print_header("1.2 用户名重复测试")
     
     url = f"{BASE_URL}{API_PREFIX}/auth/register"
@@ -141,7 +141,7 @@ def test_register_duplicate_username():
         # 第一次注册
         response1 = requests.post(url, json=test_data, timeout=5)
         
-        # 第二次注册（相同用户名，不同邮箱）
+        # 第二次注册(相同用户名,不同邮箱)
         test_data["email"] = f"dup_user_{test_timestamp}_2@test.com"
         response2 = requests.post(url, json=test_data, timeout=5)
         data2 = response2.json()
@@ -151,7 +151,7 @@ def test_register_duplicate_username():
             print_result(
                 "用户名重复测试",
                 True,
-                "正确返回错误消息（统一消息，不泄露具体字段）"
+                "正确返回错误消息(统一消息,不泄露具体字段)"
             )
         else:
             print_result(
@@ -164,7 +164,7 @@ def test_register_duplicate_username():
 
 
 def test_register_duplicate_email():
-    """测试邮箱重复（统一错误消息）"""
+    """测试邮箱重复(统一错误消息)"""
     print_header("1.3 邮箱重复测试")
     
     url = f"{BASE_URL}{API_PREFIX}/auth/register"
@@ -181,7 +181,7 @@ def test_register_duplicate_email():
         # 第一次注册
         response1 = requests.post(url, json=test_data, timeout=5)
         
-        # 第二次注册（相同邮箱，不同用户名）
+        # 第二次注册(相同邮箱,不同用户名)
         test_data["username"] = f"dup_email_{test_timestamp}_2"
         response2 = requests.post(url, json=test_data, timeout=5)
         data2 = response2.json()
@@ -191,7 +191,7 @@ def test_register_duplicate_email():
             print_result(
                 "邮箱重复测试",
                 True,
-                "正确返回错误消息（统一消息，不泄露具体字段）"
+                "正确返回错误消息(统一消息,不泄露具体字段)"
             )
         else:
             print_result(
@@ -346,7 +346,7 @@ def test_login_pending_user():
     """测试pending状态用户登录"""
     print_header("3.1 Pending状态用户登录测试")
     
-    # 先注册一个用户（状态为pending）
+    # 先注册一个用户(状态为pending)
     register_url = f"{BASE_URL}{API_PREFIX}/auth/register"
     test_data = {
         "username": f"pending_login_{test_timestamp}",
@@ -374,7 +374,7 @@ def test_login_pending_user():
         login_response = requests.post(login_url, json=login_data, timeout=5)
         login_result = login_response.json()
         
-        # 应该被拒绝，返回pending状态错误
+        # 应该被拒绝,返回pending状态错误
         if login_response.status_code in [403, 401]:
             error_code = login_result.get("error", {}).get("code")
             if error_code == 4005:  # AUTH_ACCOUNT_PENDING
@@ -432,7 +432,7 @@ def test_login_rejected_user():
         login_response = requests.post(login_url, json=login_data, timeout=5)
         login_result = login_response.json()
         
-        # 应该被拒绝，返回rejected状态错误
+        # 应该被拒绝,返回rejected状态错误
         if login_response.status_code in [403, 401]:
             error_code = login_result.get("error", {}).get("code")
             if error_code == 4006:  # AUTH_ACCOUNT_REJECTED
@@ -543,7 +543,7 @@ def main():
         # 检查服务是否可用
         response = requests.get(f"{BASE_URL}/docs", timeout=5)
         if response.status_code != 200:
-            print("\n[WARN] 后端服务可能未启动，部分测试可能失败")
+            print("\n[WARN] 后端服务可能未启动,部分测试可能失败")
     except Exception as e:
         print(f"\n[WARN] 无法连接到后端服务: {e}")
         print(f"[WARN] 请确保后端服务已启动在 {BASE_URL}")

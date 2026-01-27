@@ -4,8 +4,8 @@
 """
 配置Schema验证
 
-使用Pydantic定义和验证YAML配置文件的结构，确保配置的正确性和一致性。
-支持的配置文件：
+使用Pydantic定义和验证YAML配置文件的结构,确保配置的正确性和一致性。
+支持的配置文件:
 - accounts_config.yaml
 - proxy_config.yaml
 - collection_config.yaml
@@ -137,7 +137,7 @@ class BrowserConfig(BaseModel):
             if width < 800 or height < 600:
                 raise ValueError('窗口尺寸过小')
         except ValueError:
-            raise ValueError('窗口大小格式错误，应为"宽度,高度"')
+            raise ValueError('窗口大小格式错误,应为"宽度,高度"')
         return v
 
 

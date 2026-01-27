@@ -4,7 +4,7 @@
 HAR Capture Utilities
 =====================
 
-提供独立的 HAR 录制工具函数，便于在录制向导中调用，避免复杂缩进与 try/except 嵌套问题。
+提供独立的 HAR 录制工具函数,便于在录制向导中调用,避免复杂缩进与 try/except 嵌套问题。
 """
 from __future__ import annotations
 
@@ -15,14 +15,14 @@ from typing import Optional
 
 def run_har_capture(playwright, current_page, *, platform_key: str, account_id: str,
                     account_label: str, platform_display: str, data_type_key: str) -> Path:
-    """在新窗口中开启 HAR 抓取，按 Enter 结束，返回 HAR 路径。
+    """在新窗口中开启 HAR 抓取,按 Enter 结束,返回 HAR 路径。
 
-    说明：
-    - 复用 current_page 所在上下文的 storage_state，实现免登
-    - 新建非持久化上下文 record_har_path + embed，确保只捕获确认后的操作
+    说明:
+    - 复用 current_page 所在上下文的 storage_state,实现免登
+    - 新建非持久化上下文 record_har_path + embed,确保只捕获确认后的操作
     - 用户按 Enter 结束后关闭上下文并写出 HAR 文件
     """
-    # 延迟 import，规避全局依赖
+    # 延迟 import,规避全局依赖
     from playwright.sync_api import Playwright  # noqa: F401
 
     try:
@@ -41,7 +41,7 @@ def run_har_capture(playwright, current_page, *, platform_key: str, account_id: 
     har_path = out_dir / f"{ts}_{platform_key}_{safe_account}_{data_type_key}.har"
     meta_path = out_dir / f"{ts}_{platform_key}_{safe_account}_{data_type_key}.metadata.json"
 
-    print("\n[TOOLKIT] 正在创建录制专用窗口（开启 HAR 捕获）...")
+    print("\n[TOOLKIT] 正在创建录制专用窗口(开启 HAR 捕获)...")
     browser = playwright.chromium.launch(headless=False)
     context = browser.new_context(
         storage_state=storage_state,
@@ -70,19 +70,19 @@ def run_har_capture(playwright, current_page, *, platform_key: str, account_id: 
 
     page.on("response", _on_response)
 
-    # 自动打开 Playwright Inspector（可视化录制面板）
+    # 自动打开 Playwright Inspector(可视化录制面板)
     try:
-        print("\n[TOOLS] 正在启动Playwright Inspector（可视化录制面板）...")
-        page.pause()  # 将弹出 Inspector，用户点击“Resume”后继续
+        print("\n[TOOLS] 正在启动Playwright Inspector(可视化录制面板)...")
+        page.pause()  # 将弹出 Inspector,用户点击“Resume”后继续
     except Exception as e:
         print(f"[WARN] 无法自动打开Inspector: {e}")
 
-    print("\n[LIST] 说明：")
-    print("- 请在【录制专用窗口】中进行以下操作：")
-    print("  1) 切换 统计时间 -> 按周，选择目标周度")
+    print("\n[LIST] 说明:")
+    print("- 请在【录制专用窗口】中进行以下操作:")
+    print("  1) 切换 统计时间 -> 按周,选择目标周度")
     print("  2) 勾选需要的指标")
     print("  3) 点击 导出")
-    print("- 操作完成后，回到终端按 Enter 结束 HAR 捕获...")
+    print("- 操作完成后,回到终端按 Enter 结束 HAR 捕获...")
 
     input("\n[STOP]  按 Enter 结束捕获并保存 HAR... ")
 
@@ -109,12 +109,12 @@ def run_har_capture(playwright, current_page, *, platform_key: str, account_id: 
         print(f"[WARN] 关闭录制窗口失败: {e}")
 
     print(f"\n[OK] HAR 捕获完成: {har_path}")
-    print("   请把该文件或路径发我，我将解析参数并生成参数化导出配置。")
+    print("   请把该文件或路径发我,我将解析参数并生成参数化导出配置。")
     return har_path
 
 
 def import_json_dumps(obj) -> str:
-    """延迟导入 json.dumps，避免顶层导入副作用。"""
+    """延迟导入 json.dumps,避免顶层导入副作用。"""
     import json
 
     return json.dumps(obj, ensure_ascii=False, indent=2)

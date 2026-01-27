@@ -3,16 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Set
 
-# 配置来源：优先使用 *_config.py 中的列表与策略，以便后续只改配置即可生效
+# 配置来源:优先使用 *_config.py 中的列表与策略,以便后续只改配置即可生效
 from .warehouse_config import WarehouseSelectors
 from .products_config import ProductsSelectors
 
 
 @dataclass
 class OverlayGuard:
-    """Miaoshou 专用：观察-关闭弹窗 的轻量守护组件。
+    """Miaoshou 专用:观察-关闭弹窗 的轻量守护组件。
 
-    - 选择器、轮询轮次/间隔均来自 *_config.py，可热更新
+    - 选择器、轮询轮次/间隔均来自 *_config.py,可热更新
     - 顶层 + 所有 frame 并行尝试
     - 支持 ESC 兜底
     """
@@ -35,7 +35,7 @@ class OverlayGuard:
         return rounds, interval
 
     async def run(self, page: Any, *, label: Optional[str] = None) -> int:
-        """执行一次观察-关闭流程，返回估计关闭的次数。
+        """执行一次观察-关闭流程,返回估计关闭的次数。
 
         Args:
             page: Playwright Page 实例

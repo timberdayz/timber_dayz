@@ -3,15 +3,15 @@
 """
 数据质量评分器 - 方案B+数据治理组件
 
-功能：
-1. 评估DataFrame的数据质量（0-100分）
-2. 检测数据问题（空值、重复、异常值等）
+功能:
+1. 评估DataFrame的数据质量(0-100分)
+2. 检测数据问题(空值、重复、异常值等)
 3. 生成质量报告
 
-质量评分规则：
+质量评分规则:
 - 基础分100分
-- 空值比例 > 10% -> 扣分（每1%扣0.5分）
-- 重复行 > 1% -> 扣分（最多20分）
+- 空值比例 > 10% -> 扣分(每1%扣0.5分)
+- 重复行 > 1% -> 扣分(最多20分)
 - 列名异常 -> 扣分
 """
 
@@ -28,7 +28,7 @@ class DataQualityScorer:
     @staticmethod
     def score_dataframe(df: pd.DataFrame) -> Dict:
         """
-        评估DataFrame的数据质量（0-100分）
+        评估DataFrame的数据质量(0-100分)
         
         Args:
             df: 待评估的DataFrame
@@ -76,28 +76,28 @@ class DataQualityScorer:
         # 质量问题列表
         issues = []
         
-        # 计算质量分数（基础100分）
+        # 计算质量分数(基础100分)
         score = 100.0
         
-        # 扣分规则1：空值扣分
+        # 扣分规则1:空值扣分
         if null_percentage > 10:
             penalty = (null_percentage - 10) * 0.5
             score -= penalty
             issues.append(f"空值比例过高: {null_percentage:.1f}%")
         
-        # 扣分规则2：重复行扣分（最多20分）
+        # 扣分规则2:重复行扣分(最多20分)
         if duplicate_percentage > 1:
             penalty = min(duplicate_percentage * 2, 20)
             score -= penalty
             issues.append(f"重复行过多: {duplicate_rows}行 ({duplicate_percentage:.1f}%)")
         
-        # 扣分规则3：列名异常扣分
+        # 扣分规则3:列名异常扣分
         unnamed_cols = [col for col in df.columns if 'Unnamed' in str(col)]
         if unnamed_cols:
             score -= len(unnamed_cols) * 2
             issues.append(f"发现{len(unnamed_cols)}个未命名列")
         
-        # 扣分规则4：数据行数过少
+        # 扣分规则4:数据行数过少
         if row_count < 10:
             score -= 10
             issues.append(f"数据行数过少: {row_count}行")
@@ -118,7 +118,7 @@ class DataQualityScorer:
     @staticmethod
     def validate_schema(df: pd.DataFrame, required_columns: List[str]) -> Dict:
         """
-        验证DataFrame的schema（必须包含的列）
+        验证DataFrame的schema(必须包含的列)
         
         Args:
             df: DataFrame
@@ -147,7 +147,7 @@ class DataQualityScorer:
     @staticmethod
     def detect_anomalies(df: pd.DataFrame, column: str) -> Dict:
         """
-        检测数值列的异常值（使用IQR方法）
+        检测数值列的异常值(使用IQR方法)
         
         Args:
             df: DataFrame
@@ -190,10 +190,10 @@ class DataQualityScorer:
 
 # 便捷函数
 def score_dataframe(df: pd.DataFrame) -> Dict:
-    """便捷函数：评估DataFrame质量"""
+    """便捷函数:评估DataFrame质量"""
     return DataQualityScorer.score_dataframe(df)
 
 
 def validate_schema(df: pd.DataFrame, required_columns: List[str]) -> Dict:
-    """便捷函数：验证schema"""
+    """便捷函数:验证schema"""
     return DataQualityScorer.validate_schema(df, required_columns)

@@ -20,14 +20,14 @@ router = APIRouter(prefix="/api/system/permissions", tags=["权限管理"])
 
 @router.get("", response_model=PermissionListResponse)
 async def get_permissions(
-    category: Optional[str] = Query(None, description="权限分类（模块分组）"),
+    category: Optional[str] = Query(None, description="权限分类(模块分组)"),
     current_user = Depends(get_current_user)
 ):
     """
-    获取权限列表（系统预定义权限列表）
+    获取权限列表(系统预定义权限列表)
     
-    返回所有系统预定义权限，支持按分类筛选
-    注意：权限分配由角色管理 API 完成（通过 `/api/roles` 更新 `DimRole.permissions` 字段）
+    返回所有系统预定义权限,支持按分类筛选
+    注意:权限分配由角色管理 API 完成(通过 `/api/roles` 更新 `DimRole.permissions` 字段)
     """
     try:
         service = get_permission_service()
@@ -67,9 +67,9 @@ async def get_permission_tree(
     current_user = Depends(get_current_user)
 ):
     """
-    获取权限树（层级结构）
+    获取权限树(层级结构)
     
-    返回按模块分组的权限树，支持前端权限管理界面展示
+    返回按模块分组的权限树,支持前端权限管理界面展示
     """
     try:
         service = get_permission_service()

@@ -6,14 +6,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 """
 JWT认证和授权系统 - 阶段2核心组件
 
-功能：
+功能:
 1. JWT Token生成和验证
-2. 密码哈希和验证（bcrypt）
-3. 用户认证（登录/注册）
-4. RBAC权限控制（admin/manager/user）
+2. 密码哈希和验证(bcrypt)
+3. 用户认证(登录/注册)
+4. RBAC权限控制(admin/manager/user)
 
-企业级安全标准：
-- [OK] 密码bcrypt加密（不可逆）
+企业级安全标准:
+- [OK] 密码bcrypt加密(不可逆)
 - [OK] JWT Token过期控制
 - [OK] 角色权限隔离
 - [OK] 操作审计日志
@@ -32,19 +32,19 @@ logger = get_logger(__name__)
 
 # ============== 配置 ==============
 
-# 从环境变量读取（生产环境必须设置）
+# 从环境变量读取(生产环境必须设置)
 import os
 
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "xihong-erp-secret-key-2025-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))  # 默认24小时
 
-# 安全警告：检查是否使用默认密钥
+# 安全警告:检查是否使用默认密钥
 if SECRET_KEY == "xihong-erp-secret-key-2025-change-in-production":
     logger.warning("[WARN]  使用默认JWT密钥！生产环境必须设置JWT_SECRET_KEY环境变量！")
     logger.warning("    设置方法: export JWT_SECRET_KEY='your-secure-random-key'")
 
-# 密码加密配置（使用scrypt替代bcrypt，避免版本兼容问题）
+# 密码加密配置(使用scrypt替代bcrypt,避免版本兼容问题)
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 # HTTP Bearer认证
@@ -94,8 +94,8 @@ def create_access_token(
     创建JWT访问令牌
     
     Args:
-        data: 要编码的数据（通常包含user_id, username, role等）
-        expires_delta: 过期时间增量（默认24小时）
+        data: 要编码的数据(通常包含user_id, username, role等)
+        expires_delta: 过期时间增量(默认24小时)
     
     Returns:
         JWT token字符串
@@ -130,7 +130,7 @@ def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
         token: JWT token字符串
     
     Returns:
-        解码后的数据字典，失败返回None
+        解码后的数据字典,失败返回None
     """
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -147,14 +147,14 @@ def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db = None  # 可选数据库会话（AsyncSession）
+    db = None  # 可选数据库会话(AsyncSession)
 ) -> Dict[str, Any]:
     """
-    获取当前用户（从JWT Token，异步模式）
+    获取当前用户(从JWT Token,异步模式)
     
     Args:
         credentials: HTTP Bearer凭证
-        db: 数据库会话（可选，用于查询用户完整信息，必须是AsyncSession）
+        db: 数据库会话(可选,用于查询用户完整信息,必须是AsyncSession)
     
     Returns:
         用户信息字典
@@ -188,7 +188,7 @@ async def get_current_user(
         "is_active": payload.get("is_active", True),
     }
     
-    # 如果提供了db，可以查询用户完整信息（必须是AsyncSession）
+    # 如果提供了db,可以查询用户完整信息(必须是AsyncSession)
     if db and user_info["user_id"]:
         try:
             from modules.core.db import User
@@ -244,7 +244,7 @@ def has_permission(user: Dict[str, Any], permission: str) -> bool:
     
     Args:
         user: 用户信息字典
-        permission: 权限字符串（如 "file.delete"）
+        permission: 权限字符串(如 "file.delete")
     
     Returns:
         有权限返回True

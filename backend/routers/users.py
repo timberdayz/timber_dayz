@@ -30,8 +30,8 @@ from datetime import datetime
 from functools import wraps
 from modules.core.logger import get_logger
 
-# v4.19.0新增：导入限流器
-# [*] v4.19.4更新：使用基于角色的动态限流
+# v4.19.0新增:导入限流器
+# [*] v4.19.4更新:使用基于角色的动态限流
 try:
     from backend.middleware.rate_limiter import limiter, role_based_rate_limit
 except ImportError:
@@ -47,7 +47,7 @@ async def require_admin(current_user: DimUser = Depends(get_current_user)):
     if current_user.is_superuser:
         return current_user
     
-    # 检查角色（使用 role_code 或 role_name）
+    # 检查角色(使用 role_code 或 role_name)
     is_admin = any(
         (hasattr(role, "role_code") and role.role_code == "admin") or
         (hasattr(role, "role_name") and role.role_name == "admin")
@@ -113,29 +113,29 @@ async def create_user(
             user.roles.append(role)
     
     await db.commit()
-    # [FIX] AsyncSession 下访问 user.roles 可能触发懒加载（MissingGreenlet），这里显式加载关系
+    # [FIX] AsyncSession 下访问 user.roles 可能触发懒加载(MissingGreenlet),这里显式加载关系
     await db.refresh(user, ["roles"])
     
     # 记录操作
     await audit_service.log_action(
-        user_id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        user_id=current_user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         action="create_user",
         resource="user",
-        resource_id=str(user.user_id),  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        resource_id=str(user.user_id),  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         ip_address="127.0.0.1",
         user_agent="Unknown",
         details={"username": user.username, "email": user.email}
     )
     
     return UserResponse(
-        id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        id=user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         username=user.username,
         email=user.email,
         full_name=user.full_name,
         roles=[role.role_name for role in user.roles],
         is_active=user.is_active,
         created_at=user.created_at,
-        last_login_at=user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+        last_login_at=user.last_login  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
     )
 
 @router.get("/")
@@ -145,20 +145,20 @@ async def get_users(
     current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取用户列表（分页）"""
+    """获取用户列表(分页)"""
     from sqlalchemy import func
     
     offset = (page - 1) * page_size
     
-    # 查询总数（排除已删除用户）
+    # 查询总数(排除已删除用户)
     count_result = await db.execute(
         select(func.count(DimUser.user_id))
         .where(DimUser.status != "deleted")
     )
     total = count_result.scalar() or 0
     
-    # [FIX] 预加载 roles，避免返回时访问 user.roles 触发懒加载（MissingGreenlet）
-    # [*] 软删除：过滤已删除用户
+    # [FIX] 预加载 roles,避免返回时访问 user.roles 触发懒加载(MissingGreenlet)
+    # [*] 软删除:过滤已删除用户
     result = await db.execute(
         select(DimUser)
         .options(selectinload(DimUser.roles))
@@ -172,14 +172,14 @@ async def get_users(
     # 转换为响应模型
     user_responses = [
         UserResponse(
-            id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+            id=user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
             username=user.username,
             email=user.email,
             full_name=user.full_name,
             roles=[role.role_name for role in user.roles],
             is_active=user.is_active,
             created_at=user.created_at,
-            last_login_at=user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+            last_login_at=user.last_login  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
         )
         for user in users
     ]
@@ -199,12 +199,12 @@ async def get_deleted_users(
     current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取已删除用户列表（软删除）"""
+    """获取已删除用户列表(软删除)"""
     from sqlalchemy import func
     
     offset = (page - 1) * page_size
     
-    # 查询总数（仅已删除用户）
+    # 查询总数(仅已删除用户)
     count_result = await db.execute(
         select(func.count(DimUser.user_id))
         .where(DimUser.status == "deleted")
@@ -252,11 +252,11 @@ async def get_user(
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取用户详情"""
-    # [FIX] 预加载 roles，避免返回时访问 user.roles 触发懒加载（MissingGreenlet）
+    # [FIX] 预加载 roles,避免返回时访问 user.roles 触发懒加载(MissingGreenlet)
     result = await db.execute(
         select(DimUser)
         .options(selectinload(DimUser.roles))
-        .where(DimUser.user_id == user_id)  # v4.12.0修复：使用user_id字段
+        .where(DimUser.user_id == user_id)  # v4.12.0修复:使用user_id字段
     )
     user = result.scalar_one_or_none()
     if not user:
@@ -264,19 +264,19 @@ async def get_user(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message="User not found",
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="请检查用户ID是否正确，或确认该用户已创建",
+            recovery_suggestion="请检查用户ID是否正确,或确认该用户已创建",
             status_code=404
         )
     
     return UserResponse(
-        id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        id=user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         username=user.username,
         email=user.email,
         full_name=user.full_name,
         roles=[role.role_name for role in user.roles],
         is_active=user.is_active,
         created_at=user.created_at,
-        last_login_at=user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+        last_login_at=user.last_login  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
     )
 
 @router.put("/{user_id}", response_model=UserResponse)
@@ -287,11 +287,11 @@ async def update_user(
     db: AsyncSession = Depends(get_async_db)
 ):
     """更新用户信息"""
-    # [FIX] 预加载 roles 关系，避免更新角色时触发懒加载（MissingGreenlet）
+    # [FIX] 预加载 roles 关系,避免更新角色时触发懒加载(MissingGreenlet)
     result = await db.execute(
         select(DimUser)
         .options(selectinload(DimUser.roles))
-        .where(DimUser.user_id == user_id)  # v4.12.0修复：使用user_id字段
+        .where(DimUser.user_id == user_id)  # v4.12.0修复:使用user_id字段
     )
     user = result.scalar_one_or_none()
     if not user:
@@ -299,7 +299,7 @@ async def update_user(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message="User not found",
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="请检查用户ID是否正确，或确认该用户已创建",
+            recovery_suggestion="请检查用户ID是否正确,或确认该用户已创建",
             status_code=404
         )
     
@@ -309,7 +309,7 @@ async def update_user(
         result = await db.execute(
             select(DimUser).where(
                 DimUser.email == user_update.email,
-                DimUser.user_id != user_id  # v4.12.0修复：使用user_id字段
+                DimUser.user_id != user_id  # v4.12.0修复:使用user_id字段
             )
         )
         existing_email = result.scalar_one_or_none()
@@ -326,17 +326,17 @@ async def update_user(
     if user_update.full_name is not None:
         user.full_name = user_update.full_name
     
-    # v4.19.0 P0/P1安全要求：用户暂停处理
+    # v4.19.0 P0/P1安全要求:用户暂停处理
     was_active = user.is_active
     if user_update.is_active is not None:
         user.is_active = user_update.is_active
         
-        # v4.19.0 P1：同步设置 status 字段（数据一致性）
+        # v4.19.0 P1:同步设置 status 字段(数据一致性)
         if user_update.is_active is False and was_active:
-            # 用户被暂停：同步设置 status="suspended"
+            # 用户被暂停:同步设置 status="suspended"
             user.status = "suspended"
             
-            # v4.19.0 P0安全要求：强制撤销用户所有活跃会话
+            # v4.19.0 P0安全要求:强制撤销用户所有活跃会话
             from backend.routers.notifications import revoke_all_user_sessions, notify_user_suspended
             revoked_count = await revoke_all_user_sessions(
                 db=db,
@@ -344,7 +344,7 @@ async def update_user(
                 reason="Account suspended by administrator, forced logout"
             )
             
-            # v4.19.0 P1：发送用户暂停通知
+            # v4.19.0 P1:发送用户暂停通知
             await notify_user_suspended(
                 db=db,
                 user_id=user.user_id,
@@ -352,9 +352,9 @@ async def update_user(
                 reason="Account suspended by administrator"
             )
         elif user_update.is_active is True and not was_active:
-            # [*] 修复：用户被恢复时，同步设置 status="active"
-            # 处理所有非 deleted 状态（suspended、pending、rejected）
-            # 注意：deleted 状态应该通过 restore_user 接口恢复，这里不处理
+            # [*] 修复:用户被恢复时,同步设置 status="active"
+            # 处理所有非 deleted 状态(suspended、pending、rejected)
+            # 注意:deleted 状态应该通过 restore_user 接口恢复,这里不处理
             if user.status != "deleted":
                 user.status = "active"
     
@@ -368,29 +368,29 @@ async def update_user(
                 user.roles.append(role)
     
     await db.commit()
-    # [FIX] AsyncSession 下访问 user.roles 可能触发懒加载（MissingGreenlet），这里显式加载关系
+    # [FIX] AsyncSession 下访问 user.roles 可能触发懒加载(MissingGreenlet),这里显式加载关系
     await db.refresh(user, ["roles"])
     
     # 记录操作
     await audit_service.log_action(
-        user_id=current_user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        user_id=current_user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         action="update_user",
         resource="user",
-        resource_id=str(user.user_id),  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        resource_id=str(user.user_id),  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         ip_address="127.0.0.1",
         user_agent="Unknown",
         details=user_update.dict(exclude_unset=True)
     )
     
     return UserResponse(
-        id=user.user_id,  # [*] v6.0.0修复：使用 user.user_id 而不是 user.id（Vulnerability 28）
+        id=user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         username=user.username,
         email=user.email,
         full_name=user.full_name,
         roles=[role.role_name for role in user.roles],
         is_active=user.is_active,
         created_at=user.created_at,
-        last_login_at=user.last_login  # [*] v6.0.0修复：使用正确的字段名 last_login（Vulnerability 29）
+        last_login_at=user.last_login  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
     )
 
 @router.delete("/{user_id}")
@@ -401,13 +401,13 @@ async def delete_user(
     reason: Optional[str] = None
 ):
     """
-    删除用户（软删除 - 业界标准）
+    删除用户(软删除 - 业界标准)
     
-    流程：
+    流程:
     1. 验证用户存在且未删除
-    2. 撤销所有活跃会话（安全要求）
-    3. 软删除用户（status="deleted", is_active=False）
-    4. 记录删除操作（审计）
+    2. 撤销所有活跃会话(安全要求)
+    3. 软删除用户(status="deleted", is_active=False)
+    4. 记录删除操作(审计)
     5. 保留数据用于合规和追溯
     """
     try:
@@ -422,7 +422,7 @@ async def delete_user(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="用户不存在",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请检查用户ID是否正确，或确认该用户已创建",
+                recovery_suggestion="请检查用户ID是否正确,或确认该用户已创建",
                 status_code=404
             )
         
@@ -432,7 +432,7 @@ async def delete_user(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="用户已被删除",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="该用户已被删除，如需恢复请使用恢复接口",
+                recovery_suggestion="该用户已被删除,如需恢复请使用恢复接口",
                 status_code=400
             )
         
@@ -446,7 +446,7 @@ async def delete_user(
                 status_code=400
             )
         
-        # 3. 撤销所有活跃会话（安全要求）
+        # 3. 撤销所有活跃会话(安全要求)
         await db.execute(
             update(UserSession)
             .where(
@@ -463,9 +463,9 @@ async def delete_user(
         # 4. 软删除用户
         user.is_active = False
         user.status = "deleted"
-        # 注意：如果需要 deleted_at 和 deleted_by 字段，需要先添加数据库迁移
+        # 注意:如果需要 deleted_at 和 deleted_by 字段,需要先添加数据库迁移
         
-        # 5. 记录审计日志（在删除前记录）
+        # 5. 记录审计日志(在删除前记录)
         await audit_service.log_action(
             user_id=current_user.user_id,
             action="delete_user",
@@ -486,7 +486,7 @@ async def delete_user(
         
         return success_response(
             data={"user_id": user_id},
-            message="用户已删除（软删除，数据已保留用于审计）"
+            message="用户已删除(软删除,数据已保留用于审计)"
         )
     
     except Exception as e:
@@ -497,7 +497,7 @@ async def delete_user(
             message="删除用户失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -508,9 +508,9 @@ async def restore_user(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    恢复已删除的用户（软删除恢复）
+    恢复已删除的用户(软删除恢复)
     
-    注意：建议设置恢复期限（如30天），超过期限的用户需要管理员特殊权限才能恢复
+    注意:建议设置恢复期限(如30天),超过期限的用户需要管理员特殊权限才能恢复
     """
     try:
         result = await db.execute(
@@ -532,7 +532,7 @@ async def restore_user(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message="用户未被删除",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="该用户未被删除，无需恢复",
+                recovery_suggestion="该用户未被删除,无需恢复",
                 status_code=400
             )
         
@@ -571,7 +571,7 @@ async def restore_user(
             message="恢复用户失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和权限，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
 
@@ -584,9 +584,9 @@ async def reset_user_password(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    重置用户密码（管理员）
+    重置用户密码(管理员)
     
-    v4.19.0新增：支持生成临时密码或指定新密码
+    v4.19.0新增:支持生成临时密码或指定新密码
     """
     result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))
     user = result.scalar_one_or_none()
@@ -605,7 +605,7 @@ async def reset_user_password(
     
     # 生成新密码或临时密码
     if request_body.generate_temp_password or not request_body.new_password:
-        # 生成临时密码（12位，包含大小写字母、数字和特殊字符）
+        # 生成临时密码(12位,包含大小写字母、数字和特殊字符)
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
         temp_password = ''.join(secrets.choice(alphabet) for i in range(12))
         new_password = temp_password
@@ -629,7 +629,7 @@ async def reset_user_password(
     user.failed_login_attempts = 0
     user.locked_until = None
     
-    # v4.19.0 P0安全要求：强制撤销用户所有活跃会话
+    # v4.19.0 P0安全要求:强制撤销用户所有活跃会话
     from backend.routers.notifications import revoke_all_user_sessions, notify_password_reset
     revoked_count = await revoke_all_user_sessions(
         db=db,
@@ -661,7 +661,7 @@ async def reset_user_password(
         }
     )
     
-    # v4.19.0 P1：发送密码重置通知
+    # v4.19.0 P1:发送密码重置通知
     await notify_password_reset(
         db=db,
         user_id=user.user_id,
@@ -673,7 +673,7 @@ async def reset_user_password(
         user_id=user.user_id,
         username=user.username,
         temp_password=temp_password,
-        message="密码重置成功" + ("，临时密码已生成" if temp_password else "")
+        message="密码重置成功" + (",临时密码已生成" if temp_password else "")
     )
     
     return success_response(
@@ -690,9 +690,9 @@ async def unlock_user_account(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    解锁用户账户（管理员）
+    解锁用户账户(管理员)
     
-    v4.19.0新增：账户锁定机制
+    v4.19.0新增:账户锁定机制
     """
     result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))
     user = result.scalar_one_or_none()
@@ -712,7 +712,7 @@ async def unlock_user_account(
             code=ErrorCode.DATA_VALIDATION_FAILED,
             message="账户未被锁定",
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-            recovery_suggestion="该账户当前未被锁定，无需解锁",
+            recovery_suggestion="该账户当前未被锁定,无需解锁",
             status_code=400
         )
     
@@ -742,7 +742,7 @@ async def unlock_user_account(
         }
     )
     
-    # v4.19.0 P1：发送账户解锁通知
+    # v4.19.0 P1:发送账户解锁通知
     from backend.routers.notifications import notify_account_unlocked
     await notify_account_unlocked(
         db=db,
@@ -756,22 +756,22 @@ async def unlock_user_account(
         message="账户解锁成功"
     )
 
-# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# [*] v4.19.4更新:使用基于角色的动态限流(替换硬编码限流)
 @router.post("/{user_id}/approve")
 @role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def approve_user(
     user_id: int,
     request_body: ApproveUserRequest,
-    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增:添加 request 参数用于限流
     current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    审批用户（将pending状态改为active）
+    审批用户(将pending状态改为active)
     
-    v4.19.0新增：用户审批流程
+    v4.19.0新增:用户审批流程
     """
-    # 查找用户（预加载 roles 关系，避免访问时触发懒加载）
+    # 查找用户(预加载 roles 关系,避免访问时触发懒加载)
     result = await db.execute(
         select(DimUser)
         .where(DimUser.user_id == user_id)
@@ -787,11 +787,11 @@ async def approve_user(
             status_code=404
         )
     
-    # 检查用户状态（必须是pending）
+    # 检查用户状态(必须是pending)
     if user.status != "pending":
         return error_response(
             code=ErrorCode.DATA_VALIDATION_FAILED,
-            message=f"只能审批pending状态的用户，当前状态：{user.status}",
+            message=f"只能审批pending状态的用户,当前状态:{user.status}",
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
             recovery_suggestion="只能审批待审批状态的用户",
             status_code=400
@@ -806,7 +806,7 @@ async def approve_user(
     
     # 分配角色
     if request_body.role_ids:
-        # v4.19.0 P1安全要求：验证所有role_ids是否都存在（不能静默忽略）
+        # v4.19.0 P1安全要求:验证所有role_ids是否都存在(不能静默忽略)
         result = await db.execute(select(DimRole).where(DimRole.role_id.in_(request_body.role_ids)))
         roles = result.scalars().all()
         found_role_ids = {role.role_id for role in roles}
@@ -840,10 +840,10 @@ async def approve_user(
         user.roles.append(operator_role)
     
     await db.flush()
-    # [FIX] AsyncSession 下修改关系后，刷新以确保关系已加载
+    # [FIX] AsyncSession 下修改关系后,刷新以确保关系已加载
     await db.refresh(user, ["roles"])
     
-    # 记录审批日志（UserApprovalLog）
+    # 记录审批日志(UserApprovalLog)
     approval_log = UserApprovalLog(
         user_id=user.user_id,
         action="approve",
@@ -890,20 +890,20 @@ async def approve_user(
         message="用户审批成功"
     )
 
-# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# [*] v4.19.4更新:使用基于角色的动态限流(替换硬编码限流)
 @router.post("/{user_id}/reject")
 @role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def reject_user(
     user_id: int,
     request_body: RejectUserRequest,
-    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增:添加 request 参数用于限流
     current_user: DimUser = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    拒绝用户（将pending状态改为rejected）
+    拒绝用户(将pending状态改为rejected)
     
-    v4.19.0新增：用户审批流程
+    v4.19.0新增:用户审批流程
     """
     # 查找用户
     result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))
@@ -917,11 +917,11 @@ async def reject_user(
             status_code=404
         )
     
-    # 检查用户状态（必须是pending）
+    # 检查用户状态(必须是pending)
     if user.status != "pending":
         return error_response(
             code=ErrorCode.DATA_VALIDATION_FAILED,
-            message=f"只能拒绝pending状态的用户，当前状态：{user.status}",
+            message=f"只能拒绝pending状态的用户,当前状态:{user.status}",
             error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
             recovery_suggestion="只能拒绝待审批状态的用户",
             status_code=400
@@ -935,7 +935,7 @@ async def reject_user(
     
     await db.flush()
     
-    # 记录审批日志（UserApprovalLog）
+    # 记录审批日志(UserApprovalLog)
     approval_log = UserApprovalLog(
         user_id=user.user_id,
         action="reject",
@@ -981,12 +981,12 @@ async def reject_user(
         message="用户已拒绝"
     )
 
-# v4.19.0 P1安全要求：待审批用户列表API限流装饰器（条件应用）
-# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# v4.19.0 P1安全要求:待审批用户列表API限流装饰器(条件应用)
+# [*] v4.19.4更新:使用基于角色的动态限流(替换硬编码限流)
 @router.get("/pending", response_model=List[PendingUserResponse])
 @role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def get_pending_users(
-    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流（必须放在有默认值参数之前）
+    request: Request,  # [*] v4.19.4新增:添加 request 参数用于限流(必须放在有默认值参数之前)
     page: int = 1,
     page_size: int = 20,
     current_user: DimUser = Depends(require_admin),
@@ -995,7 +995,7 @@ async def get_pending_users(
     """
     获取待审批用户列表
     
-    v4.19.0新增：用户审批流程
+    v4.19.0新增:用户审批流程
     """
     from sqlalchemy import func
     
@@ -1017,7 +1017,7 @@ async def get_pending_users(
             email=user.email,
             full_name=user.full_name,
             department=user.department,
-            status=user.status,  # v4.19.0 P2隐私要求：添加status字段
+            status=user.status,  # v4.19.0 P2隐私要求:添加status字段
             created_at=user.created_at
         )
         for user in users
@@ -1034,12 +1034,12 @@ async def get_my_sessions(
     """
     获取当前用户的所有活跃会话
     
-    v4.19.0新增：会话管理功能
+    v4.19.0新增:会话管理功能
     """
     from datetime import datetime
     import hashlib
     
-    # 获取当前会话ID（从token计算）
+    # 获取当前会话ID(从token计算)
     token = None
     if "access_token" in request.cookies:
         token = request.cookies.get("access_token")
@@ -1050,7 +1050,7 @@ async def get_my_sessions(
     if token:
         current_session_id = hashlib.sha256(token.encode()).hexdigest()
     
-    # 查询所有活跃会话（未过期且未撤销）
+    # 查询所有活跃会话(未过期且未撤销)
     result = await db.execute(
         select(UserSession)
         .where(
@@ -1090,9 +1090,9 @@ async def revoke_session(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    撤销指定会话（强制登出其他设备）
+    撤销指定会话(强制登出其他设备)
     
-    v4.19.0新增：会话管理功能
+    v4.19.0新增:会话管理功能
     """
     from datetime import datetime
     
@@ -1162,7 +1162,7 @@ async def revoke_other_sessions(
     """
     撤销除当前会话外的所有会话
     
-    v4.19.0新增：会话管理功能
+    v4.19.0新增:会话管理功能
     """
     from datetime import datetime
     import hashlib
@@ -1231,18 +1231,18 @@ async def revoke_other_sessions(
 
 # v4.19.0: 用户通知偏好 API
 
-# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# [*] v4.19.4更新:使用基于角色的动态限流(替换硬编码限流)
 @router.get("/me/notification-preferences", response_model=NotificationPreferenceListResponse)
 @role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def get_notification_preferences(
-    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增:添加 request 参数用于限流
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     获取当前用户所有通知偏好
     
-    v4.19.0 P1安全要求：仅允许用户访问自己的偏好（自动通过 current_user 验证）
+    v4.19.0 P1安全要求:仅允许用户访问自己的偏好(自动通过 current_user 验证)
     """
     result = await db.execute(
         select(UserNotificationPreference)
@@ -1263,16 +1263,16 @@ async def get_notification_preferences(
 @role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def update_notification_preferences(
     batch_update: NotificationPreferenceBatchUpdate,
-    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增:添加 request 参数用于限流
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     批量更新通知偏好
     
-    v4.19.0 P1安全要求：
+    v4.19.0 P1安全要求:
     - 验证所有偏好记录的 user_id 必须等于 current_user.user_id
-    - 禁止从请求中获取 user_id，必须使用 current_user.user_id
+    - 禁止从请求中获取 user_id,必须使用 current_user.user_id
     """
     updated_preferences = []
     
@@ -1296,7 +1296,7 @@ async def update_notification_preferences(
         else:
             # 创建新记录
             preference = UserNotificationPreference(
-                user_id=current_user.user_id,  # v4.19.0 P1安全要求：使用 current_user.user_id
+                user_id=current_user.user_id,  # v4.19.0 P1安全要求:使用 current_user.user_id
                 notification_type=update_data.notification_type,
                 enabled=update_data.enabled if update_data.enabled is not None else True,
                 desktop_enabled=update_data.desktop_enabled if update_data.desktop_enabled is not None else False
@@ -1323,14 +1323,14 @@ async def update_notification_preferences(
 @role_based_rate_limit(endpoint_type="default")  # [*] v4.19.4: 基于角色的动态限流
 async def get_notification_preference(
     notification_type: str,
-    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增:添加 request 参数用于限流
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     获取特定类型通知偏好
     
-    v4.19.0 P1安全要求：查询时验证 user_id == current_user.user_id
+    v4.19.0 P1安全要求:查询时验证 user_id == current_user.user_id
     """
     result = await db.execute(
         select(UserNotificationPreference)
@@ -1361,16 +1361,16 @@ async def get_notification_preference(
 async def update_notification_preference(
     notification_type: str,
     update_data: NotificationPreferenceUpdate,
-    request: Request,  # [*] v4.19.4新增：添加 request 参数用于限流
+    request: Request,  # [*] v4.19.4新增:添加 request 参数用于限流
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     更新特定类型通知偏好
     
-    v4.19.0 P1安全要求：
+    v4.19.0 P1安全要求:
     - 查询偏好时验证 user_id == current_user.user_id
-    - 创建新偏好时使用 current_user.user_id，不能从请求中获取
+    - 创建新偏好时使用 current_user.user_id,不能从请求中获取
     """
     result = await db.execute(
         select(UserNotificationPreference)
@@ -1392,7 +1392,7 @@ async def update_notification_preference(
     else:
         # 创建新记录
         preference = UserNotificationPreference(
-            user_id=current_user.user_id,  # v4.19.0 P1安全要求：使用 current_user.user_id
+            user_id=current_user.user_id,  # v4.19.0 P1安全要求:使用 current_user.user_id
             notification_type=notification_type,
             enabled=update_data.enabled if update_data.enabled is not None else True,
             desktop_enabled=update_data.desktop_enabled if update_data.desktop_enabled is not None else False

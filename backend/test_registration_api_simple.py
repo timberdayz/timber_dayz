@@ -30,7 +30,7 @@ def test_register():
         
         if response.status_code == 200 and result.get("success"):
             user_id = result["data"]["user_id"]
-            print(f"  [SUCCESS] 用户注册成功，ID: {user_id}")
+            print(f"  [SUCCESS] 用户注册成功,ID: {user_id}")
             return user_id
         else:
             print(f"  [FAIL] 注册失败")
@@ -40,8 +40,8 @@ def test_register():
         return None
 
 def test_login_pending():
-    """测试pending用户登录（应该失败）"""
-    print("\n[TEST 2] Pending用户登录（预期失败）")
+    """测试pending用户登录(应该失败)"""
+    print("\n[TEST 2] Pending用户登录(预期失败)")
     url = f"{BASE_URL}/auth/login"
     data = {
         "username": "test_user_simple_001",
@@ -55,7 +55,7 @@ def test_login_pending():
         print(f"  响应: {json.dumps(result, indent=2, ensure_ascii=False)}")
         
         if response.status_code == 403 and result.get("code") == 4005:
-            print(f"  [SUCCESS] Pending用户无法登录（符合预期）")
+            print(f"  [SUCCESS] Pending用户无法登录(符合预期)")
             return True
         else:
             print(f"  [WARN] 状态不符合预期")
@@ -80,12 +80,12 @@ def main():
         print("\n" + "="*60)
         print("测试完成")
         print("="*60)
-        print("\n如需测试审批功能，请：")
+        print("\n如需测试审批功能,请:")
         print("1. 使用管理员账号登录获取token")
         print("2. 调用 POST /api/users/{user_id}/approve")
         print(f"3. 用户ID: {user_id}")
     else:
-        print("\n[ERROR] 用户注册失败，无法继续测试")
+        print("\n[ERROR] 用户注册失败,无法继续测试")
 
 if __name__ == "__main__":
     main()

@@ -32,7 +32,7 @@ class SecureAccountManagerEnhanced:
         self.key_file = self.config_dir / "account_key.key"
         self.hash_file = self.config_dir / "account_hash.dat"
         
-        # 运行时密钥（内存中）
+        # 运行时密钥(内存中)
         self._runtime_key = None
         self._cached_accounts = None
         
@@ -88,8 +88,8 @@ class SecureAccountManagerEnhanced:
                 return None
         else:
             # 创建新的主密钥
-            logger.info("首次使用，创建新的主密钥...")
-            password = getpass.getpass("请设置主密码（用于保护账号信息）: ")
+            logger.info("首次使用,创建新的主密钥...")
+            password = getpass.getpass("请设置主密码(用于保护账号信息): ")
             confirm_password = getpass.getpass("请确认主密码: ")
             
             if password != confirm_password:
@@ -218,7 +218,7 @@ class SecureAccountManagerEnhanced:
             if self._encrypt_accounts(accounts_data):
                 logger.success(f"[OK] 成功导入并加密 {len(all_accounts)} 个账号")
                 
-                # 清空运行时缓存，强制重新加载
+                # 清空运行时缓存,强制重新加载
                 self._cached_accounts = None
                 
                 return True
@@ -276,13 +276,13 @@ class SecureAccountManagerEnhanced:
                             # 密码完全隐藏
                             masked_account[field] = "******"
                         elif field == "phone":
-                            # 手机号脱敏：138****5678
+                            # 手机号脱敏:138****5678
                             if len(value) >= 8:
                                 masked_account[field] = value[:3] + "****" + value[-4:]
                             else:
                                 masked_account[field] = "****"
                         elif "@" in value:
-                            # 邮箱脱敏：tes***@example.com
+                            # 邮箱脱敏:tes***@example.com
                             parts = value.split("@")
                             if len(parts) == 2:
                                 username = parts[0]
@@ -487,7 +487,7 @@ class SecureAccountManagerEnhanced:
 secure_account_manager = SecureAccountManagerEnhanced()
 
 def get_secure_accounts(platform: str = None, enabled_only: bool = True, decrypt_sensitive: bool = True) -> List[Dict]:
-    """便捷函数：获取安全账号信息"""
+    """便捷函数:获取安全账号信息"""
     if platform:
         accounts = secure_account_manager.get_accounts_by_platform(platform, decrypt_sensitive)
     else:

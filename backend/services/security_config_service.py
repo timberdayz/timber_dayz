@@ -18,7 +18,7 @@ class SecurityConfigService:
     """安全配置服务类"""
     
     def __init__(self, db: AsyncSession):
-        """初始化服务（仅支持异步）"""
+        """初始化服务(仅支持异步)"""
         self.db = db
     
     async def get_config(self, config_key: str) -> Optional[SecurityConfig]:
@@ -39,7 +39,7 @@ class SecurityConfigService:
         description: Optional[str] = None,
         updated_by: Optional[int] = None
     ) -> SecurityConfig:
-        """设置配置（如果不存在则创建，存在则更新）"""
+        """设置配置(如果不存在则创建,存在则更新)"""
         config = await self.get_config(config_key)
         
         if config:
@@ -67,9 +67,9 @@ class SecurityConfigService:
     
     async def get_password_policy(self) -> Dict[str, Any]:
         """
-        获取密码策略（带默认值回退）
+        获取密码策略(带默认值回退)
         
-        默认值：
+        默认值:
         - min_length: 8
         - require_uppercase: True
         - require_lowercase: True
@@ -115,7 +115,7 @@ class SecurityConfigService:
             (is_valid, error_message)
         """
         if policy is None:
-            # 同步调用需要传入policy，异步调用应该先获取policy
+            # 同步调用需要传入policy,异步调用应该先获取policy
             return False, "密码策略未提供"
         
         min_length = policy.get("min_length", 8)
@@ -145,9 +145,9 @@ class SecurityConfigService:
     
     async def get_login_restrictions(self) -> Dict[str, Any]:
         """
-        获取登录限制配置（带默认值回退）
+        获取登录限制配置(带默认值回退)
         
-        默认值：
+        默认值:
         - max_failed_attempts: 5
         - lockout_duration_minutes: 30
         - enable_ip_whitelist: False
@@ -179,9 +179,9 @@ class SecurityConfigService:
     
     async def get_ip_whitelist(self) -> List[str]:
         """
-        获取IP白名单（带默认值回退）
+        获取IP白名单(带默认值回退)
         
-        默认值：空列表
+        默认值:空列表
         """
         config = await self.get_config("ip_whitelist")
         
@@ -207,9 +207,9 @@ class SecurityConfigService:
     
     async def get_session_config(self) -> Dict[str, Any]:
         """
-        获取会话配置（带默认值回退）
+        获取会话配置(带默认值回退)
         
-        默认值：
+        默认值:
         - timeout_minutes: 15
         - max_concurrent_sessions: 5
         - enable_session_limit: True

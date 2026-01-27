@@ -1,7 +1,7 @@
 """
 数据库设计规范验证API路由
 
-[*] v4.12.0新增：提供数据库设计规范验证API
+[*] v4.12.0新增:提供数据库设计规范验证API
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,9 +25,9 @@ async def validate_design(db: AsyncSession = Depends(get_async_db)):
     """
     验证数据库设计是否符合规范
     
-    [*] v4.12.0新增：验证数据库模型、索引、外键、物化视图是否符合设计规范
+    [*] v4.12.0新增:验证数据库模型、索引、外键、物化视图是否符合设计规范
     
-    返回：
+    返回:
     {
         "success": True,
         "is_valid": bool,
@@ -143,7 +143,7 @@ async def validate_materialized_views(db: AsyncSession = Depends(get_async_db)):
             message="验证物化视图失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -153,9 +153,9 @@ async def validate_field_mapping_endpoint(db: AsyncSession = Depends(get_async_d
     """
     验证字段映射
     
-    [*] v4.12.0新增：验证字段映射是否符合设计规范
+    [*] v4.12.0新增:验证字段映射是否符合设计规范
     
-    返回：
+    返回:
     {
         "success": True,
         "is_valid": bool,
@@ -216,9 +216,9 @@ async def validate_data_ingestion(db: AsyncSession = Depends(get_async_db)):
     """
     验证数据入库流程
     
-    [*] v4.12.0新增：验证数据入库流程是否符合设计规范
+    [*] v4.12.0新增:验证数据入库流程是否符合设计规范
     
-    返回：
+    返回:
     {
         "success": True,
         "is_valid": bool,
@@ -267,7 +267,7 @@ async def validate_data_ingestion(db: AsyncSession = Depends(get_async_db)):
             message="验证数据入库流程失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 

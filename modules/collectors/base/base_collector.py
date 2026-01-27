@@ -195,7 +195,7 @@ class BaseCollector(ABC):
             raise
     
     def _custom_initialization(self):
-        """子类特定的初始化（可选实现）"""
+        """子类特定的初始化(可选实现)"""
         pass
     
     @abstractmethod
@@ -271,7 +271,7 @@ class BaseCollector(ABC):
             return False
     
     def _custom_logout(self) -> bool:
-        """子类特定的登出逻辑（可选实现）"""
+        """子类特定的登出逻辑(可选实现)"""
         return True
     
     def collect_all_data(self, data_types: Optional[List[str]] = None) -> List[CollectionResult]:
@@ -279,7 +279,7 @@ class BaseCollector(ABC):
         采集所有支持的数据类型
         
         Args:
-            data_types: 指定要采集的数据类型，如果为None则采集所有支持的类型
+            data_types: 指定要采集的数据类型,如果为None则采集所有支持的类型
             
         Returns:
             List[CollectionResult]: 采集结果列表
@@ -300,7 +300,7 @@ class BaseCollector(ABC):
                 self._update_stats(result)
                 
                 if result.success:
-                    self.logger.info(f"数据类型 {data_type} 采集成功，共 {result.data_count} 条数据")
+                    self.logger.info(f"数据类型 {data_type} 采集成功,共 {result.data_count} 条数据")
                 else:
                     self.logger.error(f"数据类型 {data_type} 采集失败: {result.error_message}")
                 
@@ -363,7 +363,7 @@ class BaseCollector(ABC):
     
     def _take_screenshot_impl(self, file_path: Path) -> bool:
         """
-        实现截图逻辑（子类必须实现）
+        实现截图逻辑(子类必须实现)
         
         Args:
             file_path: 截图文件路径

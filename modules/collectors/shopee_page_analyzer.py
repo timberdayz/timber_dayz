@@ -174,8 +174,8 @@ class ShopeePageAnalyzer:
             # 检查当前是否在登录页面
             current_url = self.page.url
             if any(keyword in current_url.lower() for keyword in ['login', 'signin', 'auth']):
-                logger.warning(f"[WARN] 当前在登录页面，跳过页面跳转分析: {current_url}")
-                # 如果在登录页面，先跳转到仪表板
+                logger.warning(f"[WARN] 当前在登录页面,跳过页面跳转分析: {current_url}")
+                # 如果在登录页面,先跳转到仪表板
                 try:
                     dashboard_url = "https://seller.shopee.cn/"
                     self.page.goto(dashboard_url, timeout=30000)
@@ -187,10 +187,10 @@ class ShopeePageAnalyzer:
             # 分析当前页面
             current_page_analysis = self.analysis_tool.analyze_current_page()
             
-            # 仅分析当前页面的菜单结构，不跳转到其他页面
+            # 仅分析当前页面的菜单结构,不跳转到其他页面
             menu_structure = self._analyze_current_page_menu()
             
-            # 基于菜单结构推断可用区域，而不是实际访问
+            # 基于菜单结构推断可用区域,而不是实际访问
             available_sections = self._infer_available_sections_from_menu(menu_structure)
             
             # 分析当前页面的下载能力
@@ -247,7 +247,7 @@ class ShopeePageAnalyzer:
                     self.page.goto(page_info["url"], timeout=10000)
                     time.sleep(2)
                     
-                    # 检查页面是否可访问（不是错误页面）
+                    # 检查页面是否可访问(不是错误页面)
                     if self._is_page_accessible():
                         section = ShopeeDataSection(
                             name=page_info["name"],
@@ -400,7 +400,7 @@ class ShopeePageAnalyzer:
         
         try:
             # 这里需要根据实际页面结构来实现
-            # 暂时返回空列表，后续可以根据具体页面结构完善
+            # 暂时返回空列表,后续可以根据具体页面结构完善
             return sub_menus
             
         except Exception:
@@ -697,7 +697,7 @@ class ShopeePageAnalyzer:
 
 
     def _analyze_current_page_menu(self) -> List[ShopeeMenuStructure]:
-        """分析当前页面的菜单结构，不跳转到其他页面"""
+        """分析当前页面的菜单结构,不跳转到其他页面"""
         menu_structures = []
         
         try:
@@ -716,7 +716,7 @@ class ShopeePageAnalyzer:
                     for i in range(min(count, 3)):  # 限制检查数量
                         menu_element = menu_elements.nth(i)
                         if menu_element.is_visible():
-                            # 提取菜单项文本，不点击
+                            # 提取菜单项文本,不点击
                             menu_items = self._extract_menu_items_safe(menu_element)
                             
                             for item in menu_items:
@@ -746,7 +746,7 @@ class ShopeePageAnalyzer:
             return []
     
     def _extract_menu_items_safe(self, menu_element: Locator) -> List[Dict[str, Any]]:
-        """安全提取菜单项，不触发点击"""
+        """安全提取菜单项,不触发点击"""
         items = []
         
         try:
@@ -792,7 +792,7 @@ class ShopeePageAnalyzer:
             return []
     
     def _infer_available_sections_from_menu(self, menu_structure: List[ShopeeMenuStructure]) -> List[ShopeeDataSection]:
-        """基于菜单结构推断可用的数据区域，不实际访问"""
+        """基于菜单结构推断可用的数据区域,不实际访问"""
         sections = []
         
         try:
@@ -806,7 +806,7 @@ class ShopeePageAnalyzer:
                 "marketing": ["营销", "推广", "广告", "活动"]
             }
             
-            # 遍历菜单结构，匹配已知的数据区域
+            # 遍历菜单结构,匹配已知的数据区域
             for menu_item in menu_structure:
                 menu_text = menu_item.main_menu.lower()
                 
@@ -817,7 +817,7 @@ class ShopeePageAnalyzer:
                             section = ShopeeDataSection(
                                 name=page_info.get("name", section_key),
                                 url=page_info.get("url", menu_item.url_pattern),
-                                description=f"Shopee {page_info.get('name', section_key)}页面（推断）",
+                                description=f"Shopee {page_info.get('name', section_key)}页面(推断)",
                                 data_types=page_info.get("data_types", ["基础数据"]),
                                 export_options=page_info.get("export_options", ["截图"]),
                                 access_level="basic"
@@ -825,7 +825,7 @@ class ShopeePageAnalyzer:
                             sections.append(section)
                             logger.info(f"[OK] 推断可用区域: {section.name}")
             
-            # 如果没有找到匹配的菜单，添加基础区域
+            # 如果没有找到匹配的菜单,添加基础区域
             if not sections:
                 basic_section = ShopeeDataSection(
                     name="当前页面",
@@ -880,7 +880,7 @@ class ShopeePageAnalyzer:
                 except Exception:
                     continue
             
-            # 如果没有找到下载选项，添加默认选项
+            # 如果没有找到下载选项,添加默认选项
             if not downloads:
                 downloads.append({
                     "type": "screenshot",

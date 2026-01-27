@@ -4,7 +4,7 @@
 """
 数据采集中心应用
 
-集成所有数据采集功能，包括：
+集成所有数据采集功能,包括:
 - Playwright录制/调试模式
 - 数据采集运行
 - Shopee多账号专属采集
@@ -27,10 +27,10 @@ logger = get_logger(__name__)
 class CollectionCenterApp(BaseApplication):
     """数据采集中心应用"""
 
-    # 类级元数据 - 供注册器读取，避免实例化副作用
+    # 类级元数据 - 供注册器读取,避免实例化副作用
     NAME = "数据采集中心"
     VERSION = "1.0.0"
-    DESCRIPTION = "多平台数据采集，支持Shopee、Amazon、妙手ERP等平台"
+    DESCRIPTION = "多平台数据采集,支持Shopee、Amazon、妙手ERP等平台"
 
     def __init__(self):
         """初始化数据采集中心应用"""
@@ -38,7 +38,7 @@ class CollectionCenterApp(BaseApplication):
 
         self.name = "数据采集中心"
         self.version = "1.0.0"
-        self.description = "多平台数据采集，支持Shopee、Amazon、妙手ERP等平台"
+        self.description = "多平台数据采集,支持Shopee、Amazon、妙手ERP等平台"
         self.author = "跨境电商ERP团队"
 
         # 统计数据
@@ -55,7 +55,7 @@ class CollectionCenterApp(BaseApplication):
         self.config_handler = None
 
     def _ensure_handlers_initialized(self):
-        """确保处理器已初始化（惰性初始化）"""
+        """确保处理器已初始化(惰性初始化)"""
         if not self._handlers_initialized:
             self._init_handlers()
             self._handlers_initialized = True
@@ -89,7 +89,7 @@ class CollectionCenterApp(BaseApplication):
 
     def _persist_shops_and_prepare_dirs(self, platform: str, account_label: str, shops: list) -> None:
         """
-        将发现到的店铺实时写入数据库，并为每个店铺创建规范化输出目录。
+        将发现到的店铺实时写入数据库,并为每个店铺创建规范化输出目录。
         """
         from pathlib import Path
         from models.database import DatabaseManager
@@ -99,7 +99,7 @@ class CollectionCenterApp(BaseApplication):
             s = re.sub(r"[\\/:*?\"<>|]+", "_", str(name).strip())
             return s[:120]
 
-        # 1) 入库（去重更新）
+        # 1) 入库(去重更新)
         db = DatabaseManager()
         payload = [{"id": getattr(s, 'id', None), "name": getattr(s, 'name', None), "region": getattr(s, 'region', '')} for s in shops]
         try:
@@ -107,8 +107,8 @@ class CollectionCenterApp(BaseApplication):
         except Exception as e:
             logger.warning(f"写入店铺到数据库失败: {e}")
 
-        # 2) 目录初始化：新架构下不在“发现店铺”阶段创建任何输出目录，避免产生非规范旧路径。
-        #    目录由各导出组件在落盘时使用 build_output_path 统一创建（含 include_shop_id 策略）。
+        # 2) 目录初始化:新架构下不在“发现店铺”阶段创建任何输出目录,避免产生非规范旧路径。
+        #    目录由各导出组件在落盘时使用 build_output_path 统一创建(含 include_shop_id 策略)。
         return
 
     def run(self) -> bool:
@@ -172,7 +172,7 @@ class CollectionCenterApp(BaseApplication):
             elif choice == "0":
                 return False
             else:
-                print("[FAIL] 无效选择，请重新输入")
+                print("[FAIL] 无效选择,请重新输入")
                 input("按回车键继续...")
 
             return True
@@ -184,14 +184,14 @@ class CollectionCenterApp(BaseApplication):
             return True
 
     def _run_recording_maintenance(self):
-        """执行录制与诊断文件归档（DRY-RUN）"""
+        """执行录制与诊断文件归档(DRY-RUN)"""
         print("\n[CLEAN] 录制/诊断归档维护 (DRY-RUN)")
         print("=" * 40)
         try:
             from modules.utils.recording_maintenance import RecordingMaintenance
             tool = RecordingMaintenance()
             tool.enforce()
-            print("\n[OK] 维护计划已输出到终端日志。默认 DRY-RUN，不会移动文件。\n- 支持 CLI: python modules/utils/recording_maintenance.py --platform shopee --keep 15 --apply\n- 配置项: collection.maintenance.* 可控制默认行为")
+            print("\n[OK] 维护计划已输出到终端日志。默认 DRY-RUN,不会移动文件。\n- 支持 CLI: python modules/utils/recording_maintenance.py --platform shopee --keep 15 --apply\n- 配置项: collection.maintenance.* 可控制默认行为")
         except Exception as e:
             print(f"[FAIL] 归档维护执行失败: {e}")
         input("按回车键返回...")
@@ -220,7 +220,7 @@ class CollectionCenterApp(BaseApplication):
         """运行录制向导"""
         print("\n[TOOLS]  Playwright录制/调试模式")
         print("=" * 40)
-        print("[LIST] 功能说明: 使用Playwright录制用户操作，生成采集脚本")
+        print("[LIST] 功能说明: 使用Playwright录制用户操作,生成采集脚本")
         print("[TIP] 提示: 这将打开浏览器供您录制操作")
 
         try:
@@ -230,7 +230,7 @@ class CollectionCenterApp(BaseApplication):
                 self.recording_handler.run_recording_wizard()
             else:
                 print("[FAIL] 录制处理器未初始化")
-                print("[TIP] 录制功能开发中，将从原系统迁移")
+                print("[TIP] 录制功能开发中,将从原系统迁移")
             input("按回车键返回...")
         except Exception as e:
             logger.error(f"录制模式启动失败: {e}")
@@ -239,7 +239,7 @@ class CollectionCenterApp(BaseApplication):
 
 
     def _run_collection_recording_menu(self):
-        """数据采集录制（回滚至旧版四项菜单：登录录制/自动登录修正/数据采集录制/完整流程）。"""
+        """数据采集录制(回滚至旧版四项菜单:登录录制/自动登录修正/数据采集录制/完整流程)。"""
         print("\n[DATA] 数据采集录制")
         print("=" * 40)
         try:
@@ -247,22 +247,22 @@ class CollectionCenterApp(BaseApplication):
             RecordingWizardHandler().run_recording_wizard()
             return
         except Exception as e:
-            logger.error(f"旧版录制向导启动失败：{e}")
-            print("[WARN] 旧版录制向导异常，尝试备用增强向导...")
-            # 备用：增强向导（仅当旧版异常时兜底）
+            logger.error(f"旧版录制向导启动失败:{e}")
+            print("[WARN] 旧版录制向导异常,尝试备用增强向导...")
+            # 备用:增强向导(仅当旧版异常时兜底)
             try:
                 from modules.utils.enhanced_recording_wizard import EnhancedRecordingWizard
                 EnhancedRecordingWizard().run_wizard()
                 return
             except Exception as e2:
-                logger.error(f"备用增强向导也失败：{e2}")
-                print("[FAIL] 录制功能暂不可用，请稍后再试。")
-            print("请选择要录制的数据类型：")
+                logger.error(f"备用增强向导也失败:{e2}")
+                print("[FAIL] 录制功能暂不可用,请稍后再试。")
+            print("请选择要录制的数据类型:")
             print("  1. 订单数据采集")
             print("  2. 商品数据采集")
             print("  3. 客流数据采集")
             print("  4. 财务数据采集")
-            print("  5. 服务数据采集（AI助手/人工聊天）")
+            print("  5. 服务数据采集(AI助手/人工聊天)")
             print("  0. 返回上级菜单")
             dtype_choice = input("\n请选择 (0-5): ").strip()
             if dtype_choice == "0":
@@ -271,7 +271,7 @@ class CollectionCenterApp(BaseApplication):
             dtype_key = dtype_map.get(dtype_choice)
             if not dtype_key:
                 print("[FAIL] 无效选择"); input("按回车键返回..."); return
-            print("\n[TARGET] 选择录制方式：")
+            print("\n[TARGET] 选择录制方式:")
             print("  1. [LOCK] 登录流程录制")
             print("  2. [BOT] 自动登录流程修正")
             print("  3. [DATA] 数据采集录制")
@@ -310,7 +310,7 @@ class CollectionCenterApp(BaseApplication):
             elif choice == "0":
                 break
             else:
-                print("[FAIL] 无效选择，请重新输入")
+                print("[FAIL] 无效选择,请重新输入")
                 input("按回车键继续...")
 
     def _run_shopee_weekly_export(self):
@@ -328,11 +328,11 @@ class CollectionCenterApp(BaseApplication):
                 input("按回车键返回...")
                 return
 
-            # 选择时间范围（适配Shopee控件实际能力）
+            # 选择时间范围(适配Shopee控件实际能力)
             print("\n[DATE] 选择时间范围:")
             print("1. 今日实时")
             print("2. 昨天")
-            print("3. 过去7天（推荐）")
+            print("3. 过去7天(推荐)")
             print("4. 过去30天")
 
             time_choice = input("请选择 (1-4): ").strip()
@@ -359,7 +359,7 @@ class CollectionCenterApp(BaseApplication):
                 end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")  # 昨天作为结束
                 start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
             else:
-                print("[FAIL] 无效选择，使用默认：过去7天")
+                print("[FAIL] 无效选择,使用默认:过去7天")
                 end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
                 start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
 
@@ -395,15 +395,15 @@ class CollectionCenterApp(BaseApplication):
         input("\n按回车键返回...")
 
     def _run_recorded_scripts(self):
-        """运行录制脚本（选择数据类型后执行）"""
+        """运行录制脚本(选择数据类型后执行)"""
         print("\n[DATA] 运行录制脚本")
         print("=" * 40)
-        print("[TIP] 请选择数据类型以运行相应的录制脚本：")
+        print("[TIP] 请选择数据类型以运行相应的录制脚本:")
         print("  1. 订单数据采集")
         print("  2. 商品数据采集")
         print("  3. 客流数据采集")
         print("  4. 财务数据采集")
-        print("  5. 服务数据采集（AI助手/人工聊天）")
+        print("  5. 服务数据采集(AI助手/人工聊天)")
         print("  0. 返回上级菜单")
 
         choice = input("\n请选择 (0-5): ").strip()
@@ -428,10 +428,10 @@ class CollectionCenterApp(BaseApplication):
             print("\n[RECEIPT] 订单数据采集 - 录制脚本")
             print("=" * 40)
             print("  1. 运行最新订单采集脚本")
-            print("  2. [BRAIN] 妙手ERP 订单表现数据导出（组件化）")
+            print("  2. [BRAIN] 妙手ERP 订单表现数据导出(组件化)")
 
-            print("  c. [EDIT]  快速修改组件配置（orders_config.py）")
-            print("  m. 管理稳定版脚本（查看/设置/取消）")
+            print("  c. [EDIT]  快速修改组件配置(orders_config.py)")
+            print("  m. 管理稳定版脚本(查看/设置/取消)")
             print("  0. 返回上级菜单")
             choice = input("\n请选择 (0-2/c/m): ").strip()
             if choice == "0":
@@ -453,10 +453,10 @@ class CollectionCenterApp(BaseApplication):
             print("\n[MONEY] 财务数据采集 - 录制脚本")
             print("=" * 40)
             print("  1. 运行最新财务采集脚本")
-            print("  2. [BRAIN] 妙手ERP 财务表现数据导出（组件化）")
+            print("  2. [BRAIN] 妙手ERP 财务表现数据导出(组件化)")
 
-            print("  c. [EDIT]  快速修改组件配置（finance_config.py）")
-            print("  m. 管理稳定版脚本（查看/设置/取消）")
+            print("  c. [EDIT]  快速修改组件配置(finance_config.py)")
+            print("  m. 管理稳定版脚本(查看/设置/取消)")
             print("  0. 返回上级菜单")
             choice = input("\n请选择 (0-2/c/m): ").strip()
             if choice == "0":
@@ -477,13 +477,13 @@ class CollectionCenterApp(BaseApplication):
         while True:
             print("\n[BELL] 服务数据采集 - 录制脚本")
             print("=" * 40)
-            print("  1. 运行最新服务采集脚本（AI助手/人工聊天）")
-            print("  2. [BELL] Shopee 服务表现数据导出（组件化优先 - 已增强）")
-            print("  3. [MUSIC] TikTok 服务表现数据导出（组件化 - 深链接->时间->导出）")
-            print("  4. [BRAIN] 妙手ERP 服务表现数据导出（组件化）")
+            print("  1. 运行最新服务采集脚本(AI助手/人工聊天)")
+            print("  2. [BELL] Shopee 服务表现数据导出(组件化优先 - 已增强)")
+            print("  3. [MUSIC] TikTok 服务表现数据导出(组件化 - 深链接->时间->导出)")
+            print("  4. [BRAIN] 妙手ERP 服务表现数据导出(组件化)")
 
-            print("  c. [EDIT]  快速修改组件配置（services_config.py）")
-            print("  m. 管理稳定版脚本（查看/设置/取消）")
+            print("  c. [EDIT]  快速修改组件配置(services_config.py)")
+            print("  m. 管理稳定版脚本(查看/设置/取消)")
             print("  0. 返回上级菜单")
             choice = input("\n请选择 (0-4/c/m): ").strip()
             if choice == "0":
@@ -510,23 +510,23 @@ class CollectionCenterApp(BaseApplication):
             print("\n[PKG] 商品数据采集 - 录制脚本")
             print("=" * 40)
             print("  1. [SHOP]  Shopee 商品表现数据导出 (录制脚本)")
-            print("  2. [START] 运行最新商品采集脚本（选择平台：Shopee/TikTok）")
-            print("  3. [MUSIC] TikTok 商品表现数据导出（组件化 - 深链接->时间->导出）")
-            print("  4. [TOOLKIT] 妙手ERP 商品表现数据导出（组件化）")
-            print("  c. [EDIT]  快速修改组件配置（products_config.py）")
-            print("  m. 管理稳定版脚本（查看/设置/取消）")
+            print("  2. [START] 运行最新商品采集脚本(选择平台:Shopee/TikTok)")
+            print("  3. [MUSIC] TikTok 商品表现数据导出(组件化 - 深链接->时间->导出)")
+            print("  4. [TOOLKIT] 妙手ERP 商品表现数据导出(组件化)")
+            print("  c. [EDIT]  快速修改组件配置(products_config.py)")
+            print("  m. 管理稳定版脚本(查看/设置/取消)")
             print("  0. 返回上级菜单")
             choice = input("\n请选择 (0-4/c/m): ").strip()
             if choice == "0":
                 break
             elif choice == "1":
-                # Shopee 专用组件化导出（稳定可靠）
+                # Shopee 专用组件化导出(稳定可靠)
                 self._run_shopee_product_performance_export()
             elif choice == "2":
-                # 统一回放入口（已支持跨平台与持久化会话）
+                # 统一回放入口(已支持跨平台与持久化会话)
                 self._run_recorded_scripts_by_type("products")
             elif choice == "3":
-                # 新增：TikTok 组件化导出（对齐 Shopee 深链接->时间->导出 流程）
+                # 新增:TikTok 组件化导出(对齐 Shopee 深链接->时间->导出 流程)
                 self._run_tiktok_products_componentized()
             elif choice == "4":
                 self._run_miaoshou_products_componentized()
@@ -540,25 +540,25 @@ class CollectionCenterApp(BaseApplication):
 
 
     def _run_tiktok_products_componentized(self):
-        """TikTok 商品表现数据导出（组件化）
+        """TikTok 商品表现数据导出(组件化)
 
-        对齐 Shopee 的流程：选账号 -> 选择店铺/区域 -> 选择时间 -> 深链接导航 -> 导出下载。
-        使用平台适配器 + 组件：Navigation + DatePicker + Exporter。
+        对齐 Shopee 的流程:选账号 -> 选择店铺/区域 -> 选择时间 -> 深链接导航 -> 导出下载。
+        使用平台适配器 + 组件:Navigation + DatePicker + Exporter。
         """
         try:
-            print("\n[MUSIC] TikTok 商品表现数据导出（组件化）")
+            print("\n[MUSIC] TikTok 商品表现数据导出(组件化)")
             print("=" * 40)
-            print("[LIST] 流程：选账号 -> 选择店铺/区域 -> 选择时间 -> 深链接导航 -> 导出下载")
+            print("[LIST] 流程:选账号 -> 选择店铺/区域 -> 选择时间 -> 深链接导航 -> 导出下载")
 
-            # 步骤0：选择账号
+            # 步骤0:选择账号
             sel = self._select_account_unified("tiktok")
             if not sel:
                 return
             account, account_label = sel
 
-            # 步骤1：选择时间范围（与 DateOption/TimePolicy 对齐）
+            # 步骤1:选择时间范围(与 DateOption/TimePolicy 对齐)
             print("\n[DATE] 选择时间范围:")
-            print("  1. 最近7天（默认）    2. 最近28天    3. 昨天")
+            print("  1. 最近7天(默认)    2. 最近28天    3. 昨天")
             tch = input("请选择 (1-3): ").strip() or "1"
 
             from modules.components.date_picker.base import DateOption
@@ -582,7 +582,7 @@ class CollectionCenterApp(BaseApplication):
                 days = 7
                 time_policy = RollingDaysPolicy(7)
 
-            # 步骤2：执行组件化流程
+            # 步骤2:执行组件化流程
             from playwright.sync_api import sync_playwright
             from modules.utils.persistent_browser_manager import PersistentBrowserManager
             from modules.components.base import ExecutionContext
@@ -606,7 +606,7 @@ class CollectionCenterApp(BaseApplication):
                         account=account,
                         config={
                             "granularity": granularity,
-                            # 区域/店铺在登录后由 URL 识别，随后覆盖
+                            # 区域/店铺在登录后由 URL 识别,随后覆盖
                         },
                         logger=get_logger(__name__),
                     )
@@ -619,7 +619,7 @@ class CollectionCenterApp(BaseApplication):
                     except Exception:
                         pass
 
-                    # 步骤3：发现店铺/区域并选择（优先自动发现，其次人工回退）
+                    # 步骤3:发现店铺/区域并选择(优先自动发现,其次人工回退)
                     region_to_use = None
                     try:
                         sel_comp = adapter.shop_selector()
@@ -643,13 +643,13 @@ class CollectionCenterApp(BaseApplication):
                         except Exception:
                             pass
                         default_region = detected_region or account.get("shop_region") or account.get("region") or "SG"
-                        hint = input(f"[SHOP] 步骤3: 选择店铺/区域（检测到: {default_region}，回车确认或输入区域代码覆盖）: ").strip().upper()
+                        hint = input(f"[SHOP] 步骤3: 选择店铺/区域(检测到: {default_region},回车确认或输入区域代码覆盖): ").strip().upper()
                         region_to_use = hint or default_region
 
                     exec_ctx.config["shop_region"] = region_to_use
                     exec_ctx.config["days"] = days
 
-                    # 同步计算展示日期（与文件命名/manifest 对齐）
+                    # 同步计算展示日期(与文件命名/manifest 对齐)
                     try:
                         from datetime import datetime, timedelta
                         end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -668,7 +668,7 @@ class CollectionCenterApp(BaseApplication):
                         nav_res = nav.run(page, TargetPage.PRODUCTS_PERFORMANCE)
                         print(f"[LOC] 导航结果: success={nav_res.success}, url={nav_res.url}, message={nav_res.message}")
                     except Exception as _ne:
-                        print(f"[WARN] 导航组件异常: {_ne}，尝试兜底深链接...")
+                        print(f"[WARN] 导航组件异常: {_ne},尝试兜底深链接...")
                         try:
                             from modules.platforms.tiktok.components.products_config import ProductsSelectors
                             sel_cfg = ProductsSelectors()
@@ -680,12 +680,12 @@ class CollectionCenterApp(BaseApplication):
                         except Exception:
                             pass
 
-                    # 步骤5: 如果 URL 已包含时间参数，则跳过 DatePicker 点击
+                    # 步骤5: 如果 URL 已包含时间参数,则跳过 DatePicker 点击
                     try:
                         cur_url = str(page.url)
                         ok = True
                         if ("timeRange=" in cur_url) or ("shortcut=" in cur_url):
-                            print("[LOC] 步骤5: 已包含时间参数，跳过日期选择组件")
+                            print("[LOC] 步骤5: 已包含时间参数,跳过日期选择组件")
                         else:
                             print("[LOC] 步骤5: 执行统一时间策略 (TikTok)...")
                             from modules.services.time_policy import apply_time_policy_tiktok
@@ -693,14 +693,14 @@ class CollectionCenterApp(BaseApplication):
                             print(f"[LOC] 时间策略结果: success={ok}, message={msg}")
                             page.wait_for_timeout(600)
                         if not ok:
-                            print("[FAIL] 日期选择失败，已取消导出。")
+                            print("[FAIL] 日期选择失败,已取消导出。")
                             return
                     except Exception as _de:
                         print(f"[WARN] 日期选择组件异常: {_de}")
-                        print("[FAIL] 日期选择异常，已取消导出。")
+                        print("[FAIL] 日期选择异常,已取消导出。")
                         return
 
-                    print("[TARGET] 组件化路径完成，开始纯导出...")
+                    print("[TARGET] 组件化路径完成,开始纯导出...")
                     exporter = adapter.exporter()
                     res = exporter.run(page)
                     if res.success:
@@ -722,33 +722,33 @@ class CollectionCenterApp(BaseApplication):
                     except Exception:
                         pass
 
-            input("\n[OK] 执行完成，按回车键返回...")
+            input("\n[OK] 执行完成,按回车键返回...")
         except Exception as e:
             logger.error(f"TikTok 组件化导出失败: {e}")
             print(f"[FAIL] 执行异常: {e}")
             input("按回车键返回...")
 
     def _run_tiktok_traffic_componentized(self):
-        """TikTok 流量表现数据导出（组件化）
+        """TikTok 流量表现数据导出(组件化)
 
-        设计对齐 TikTok 商品表现与 Shopee 流量表现组件化流程：
+        设计对齐 TikTok 商品表现与 Shopee 流量表现组件化流程:
         选账号 -> 选择店铺/区域 -> 选择时间 -> 深链接导航 -> 导出下载。
-        使用统一组件链：Navigation + DatePicker + Exporter。
+        使用统一组件链:Navigation + DatePicker + Exporter。
         """
         try:
-            print("\n[MUSIC] TikTok 流量表现数据导出（组件化）")
+            print("\n[MUSIC] TikTok 流量表现数据导出(组件化)")
             print("=" * 40)
-            print("[LIST] 流程：选账号 -> 选择店铺/区域 -> 选择时间 -> 深链接导航 -> 导出下载")
+            print("[LIST] 流程:选账号 -> 选择店铺/区域 -> 选择时间 -> 深链接导航 -> 导出下载")
 
-            # 步骤0：选择账号
+            # 步骤0:选择账号
             sel = self._select_account_unified("tiktok")
             if not sel:
                 return
             account, account_label = sel
 
-            # 步骤1：选择时间范围（与 DateOption/TimePolicy 对齐）
+            # 步骤1:选择时间范围(与 DateOption/TimePolicy 对齐)
             print("\n[DATE] 选择时间范围:")
-            print("  1. 最近7天（默认）    2. 最近28天    3. 昨天")
+            print("  1. 最近7天(默认)    2. 最近28天    3. 昨天")
             tch = input("请选择 (1-3): ").strip() or "1"
 
             from modules.components.date_picker.base import DateOption
@@ -772,7 +772,7 @@ class CollectionCenterApp(BaseApplication):
                 days = 7
                 time_policy = RollingDaysPolicy(7)
 
-            # 步骤2：执行组件化流程
+            # 步骤2:执行组件化流程
             from playwright.sync_api import sync_playwright
             from modules.utils.persistent_browser_manager import PersistentBrowserManager
             from modules.components.base import ExecutionContext
@@ -796,7 +796,7 @@ class CollectionCenterApp(BaseApplication):
                         account=account,
                         config={
                             "granularity": granularity,
-                            # 重要：流量表现页不允许在深链中携带时间，否则导出按钮可能不出现
+                            # 重要:流量表现页不允许在深链中携带时间,否则导出按钮可能不出现
                             "nav_with_timerange": False,
                         },
                         logger=get_logger(__name__),
@@ -809,7 +809,7 @@ class CollectionCenterApp(BaseApplication):
                     except Exception:
                         pass
 
-                    # 步骤3：发现店铺/区域并选择
+                    # 步骤3:发现店铺/区域并选择
                     region_to_use = None
                     try:
                         sel_comp = adapter.shop_selector()
@@ -833,13 +833,13 @@ class CollectionCenterApp(BaseApplication):
                         except Exception:
                             pass
                         default_region = detected_region or account.get("shop_region") or account.get("region") or "SG"
-                        hint = input(f"[SHOP] 步骤3: 选择店铺/区域（检测到: {default_region}，回车确认或输入区域代码覆盖）: ").strip().upper()
+                        hint = input(f"[SHOP] 步骤3: 选择店铺/区域(检测到: {default_region},回车确认或输入区域代码覆盖): ").strip().upper()
                         region_to_use = hint or default_region
 
                     exec_ctx.config["shop_region"] = region_to_use
                     exec_ctx.config["days"] = days
 
-                    # 同步计算展示日期（与文件命名/manifest 对齐）
+                    # 同步计算展示日期(与文件命名/manifest 对齐)
                     try:
                         from datetime import datetime, timedelta
                         end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -858,7 +858,7 @@ class CollectionCenterApp(BaseApplication):
                         nav_res = nav.run(page, TargetPage.TRAFFIC_OVERVIEW)
                         print(f"[LOC] 导航结果: success={nav_res.success}, url={nav_res.url}, message={nav_res.message}")
                     except Exception as _ne:
-                        print(f"[WARN] 导航组件异常: {_ne}，尝试兜底深链接...")
+                        print(f"[WARN] 导航组件异常: {_ne},尝试兜底深链接...")
                         try:
                             from modules.platforms.tiktok.components.analytics_config import AnalyticsSelectors
                             sel_cfg = AnalyticsSelectors()
@@ -870,12 +870,12 @@ class CollectionCenterApp(BaseApplication):
                         except Exception:
                             pass
 
-                    # 步骤5: 如果 URL 已包含时间参数，则跳过 DatePicker
+                    # 步骤5: 如果 URL 已包含时间参数,则跳过 DatePicker
                     try:
                         cur_url = str(page.url)
                         ok = True
                         if ("timeRange=" in cur_url) or ("shortcut=" in cur_url):
-                            print("[LOC] 步骤5: 已包含时间参数，跳过日期选择组件")
+                            print("[LOC] 步骤5: 已包含时间参数,跳过日期选择组件")
                         else:
                             print("[LOC] 步骤5: 执行日期选择组件...")
                             from modules.services.time_policy import apply_time_policy_tiktok
@@ -883,14 +883,14 @@ class CollectionCenterApp(BaseApplication):
                             print(f"[LOC] 时间策略结果: success={ok}, message={msg}")
                             page.wait_for_timeout(600)
                         if not ok:
-                            print("[FAIL] 日期选择失败，已取消导出。")
+                            print("[FAIL] 日期选择失败,已取消导出。")
                             return
                     except Exception as _de:
                         print(f"[WARN] 日期选择组件异常: {_de}")
-                        print("[FAIL] 日期选择异常，已取消导出。")
+                        print("[FAIL] 日期选择异常,已取消导出。")
                         return
 
-                    print("[TARGET] 组件化路径完成，开始纯导出...")
+                    print("[TARGET] 组件化路径完成,开始纯导出...")
                     res = adapter.exporter().run(page)
                     if res.success:
                         pass  # 导出组件已打印标准化落盘路径
@@ -910,7 +910,7 @@ class CollectionCenterApp(BaseApplication):
                     except Exception:
                         pass
 
-            input("\n[OK] 执行完成，按回车键返回...")
+            input("\n[OK] 执行完成,按回车键返回...")
         except Exception as e:
             logger.error(f"TikTok 流量表现组件化导出失败: {e}")
             print(f"[FAIL] 执行异常: {e}")
@@ -918,27 +918,27 @@ class CollectionCenterApp(BaseApplication):
 
 
     def _run_tiktok_services_componentized(self):
-        """TikTok 服务表现数据导出（组件化）
+        """TikTok 服务表现数据导出(组件化)
 
-        流程与 TikTok 流量表现一致：
-        选账号 -> 选择店铺/区域 -> 选择时间（昨天/近7天/近28天）-> 深链接导航 -> 导出下载。
-        使用统一组件链：Navigation + DatePicker + Exporter。
-        注意：TikTok 的 iframe 日期控件不允许输入填充，必须走面板对齐+点击。
+        流程与 TikTok 流量表现一致:
+        选账号 -> 选择店铺/区域 -> 选择时间(昨天/近7天/近28天)-> 深链接导航 -> 导出下载。
+        使用统一组件链:Navigation + DatePicker + Exporter。
+        注意:TikTok 的 iframe 日期控件不允许输入填充,必须走面板对齐+点击。
         """
         try:
-            print("\n[MUSIC] TikTok 服务表现数据导出（组件化）")
+            print("\n[MUSIC] TikTok 服务表现数据导出(组件化)")
             print("=" * 40)
-            print("[LIST] 流程：选账号 -> 选择店铺/区域 -> 选择时间 -> 深链接导航 -> 导出下载")
+            print("[LIST] 流程:选账号 -> 选择店铺/区域 -> 选择时间 -> 深链接导航 -> 导出下载")
 
-            # 步骤0：选择账号
+            # 步骤0:选择账号
             sel = self._select_account_unified("tiktok")
             if not sel:
                 return
             account, account_label = sel
 
-            # 步骤1：选择时间范围
+            # 步骤1:选择时间范围
             print("\n[DATE] 选择时间范围:")
-            print("  1. 最近7天（默认）    2. 最近28天    3. 昨天")
+            print("  1. 最近7天(默认)    2. 最近28天    3. 昨天")
             tch = input("请选择 (1-3): ").strip() or "1"
 
             from modules.components.date_picker.base import DateOption
@@ -962,7 +962,7 @@ class CollectionCenterApp(BaseApplication):
                 days = 7
                 time_policy = RollingDaysPolicy(7)
 
-            # 步骤2：执行组件化流程
+            # 步骤2:执行组件化流程
             from playwright.sync_api import sync_playwright
             from modules.utils.persistent_browser_manager import PersistentBrowserManager
             from modules.components.base import ExecutionContext
@@ -989,7 +989,7 @@ class CollectionCenterApp(BaseApplication):
                             account=account,
                             config={
                                 "granularity": granularity,
-                                # 与流量表现一致：深链不带时间，统一用 DatePicker 选择
+                                # 与流量表现一致:深链不带时间,统一用 DatePicker 选择
                                 "nav_with_timerange": False,
                             },
                             logger=_get_logger(__name__),
@@ -1002,7 +1002,7 @@ class CollectionCenterApp(BaseApplication):
                         except Exception:
                             pass
 
-                        # 步骤3：发现店铺/区域并选择（与流量一致）
+                        # 步骤3:发现店铺/区域并选择(与流量一致)
                         region_to_use = None
                         try:
                             sel_comp = adapter.shop_selector()
@@ -1027,7 +1027,7 @@ class CollectionCenterApp(BaseApplication):
 
                         exec_ctx.config["shop_region"] = region_to_use
 
-                        # 同步计算展示日期（与文件命名/manifest 对齐）
+                        # 同步计算展示日期(与文件命名/manifest 对齐)
                         try:
                             from datetime import datetime, timedelta
                             end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -1056,14 +1056,14 @@ class CollectionCenterApp(BaseApplication):
                             print(f"[LOC] 时间策略结果: success={ok}, message={msg}")
                             page.wait_for_timeout(600)
                             if not ok:
-                                print("[FAIL] 日期选择失败，已取消导出。")
+                                print("[FAIL] 日期选择失败,已取消导出。")
                                 return
                         except Exception as _de:
                             print(f"[WARN] 日期选择组件异常: {_de}")
-                            print("[FAIL] 日期选择异常，已取消导出。")
+                            print("[FAIL] 日期选择异常,已取消导出。")
                             return
 
-                        print("[TARGET] 组件化路径完成，开始纯导出...")
+                        print("[TARGET] 组件化路径完成,开始纯导出...")
                         res = adapter.exporter().run(page)
                         if res.success:
                             pass
@@ -1072,7 +1072,7 @@ class CollectionCenterApp(BaseApplication):
                             if getattr(res, "message", None):
                                 print(f"信息: {res.message}")
 
-                        input("\n[OK] 执行完成，按回车键返回...")
+                        input("\n[OK] 执行完成,按回车键返回...")
                     except Exception as _e:
                         print(f"[FAIL] 执行异常: {_e}")
                         input("按回车键返回...")
@@ -1085,7 +1085,7 @@ class CollectionCenterApp(BaseApplication):
             input("按回车键返回...")
 
     def _miaoshou_time_prompt(self):
-        """妙手ERP时间选择：支持一键预设覆盖，默认提供三档选择。
+        """妙手ERP时间选择:支持一键预设覆盖,默认提供三档选择。
         返回 (DateOption, granularity)
         """
         from modules.components.date_picker.base import DateOption
@@ -1106,7 +1106,7 @@ class CollectionCenterApp(BaseApplication):
         except Exception:
             pass
         print("\n[DATE] 选择时间范围:")
-        print("  1. 最近7天（默认）    2. 最近30天    3. 昨天")
+        print("  1. 最近7天(默认)    2. 最近30天    3. 昨天")
         tch = input("请选择 (1-3): ").strip() or "1"
         if tch == "2":
             return DateOption.LAST_28_DAYS, "monthly"
@@ -1117,7 +1117,7 @@ class CollectionCenterApp(BaseApplication):
 
     def _run_miaoshou_products_componentized(self):
         try:
-            print("\n[BRAIN] 妙手ERP 商品表现数据导出（组件化）"); print("=" * 40)
+            print("\n[BRAIN] 妙手ERP 商品表现数据导出(组件化)"); print("=" * 40)
             sel = self._select_account_unified("miaoshou")
             if not sel: return
             account, account_label = sel
@@ -1139,32 +1139,32 @@ class CollectionCenterApp(BaseApplication):
                 except Exception:
                     pass
 
-                print("[LOC] 步骤1: 导航到商品表现页面（深链接优先）...")
+                print("[LOC] 步骤1: 导航到商品表现页面(深链接优先)...")
                 nav = adapter.navigation().run(page, TargetPage.PRODUCTS_PERFORMANCE)
                 try:
                     print(f"[LOC] 导航结果: success={getattr(nav,'success',None)}, url={getattr(nav,'url',None)}, message={getattr(nav,'message',None)}")
                 except Exception:
                     pass
                 if not getattr(nav, 'success', False):
-                    print(f"[WARN] 导航提示: {getattr(nav,'message','')}，尝试继续")
+                    print(f"[WARN] 导航提示: {getattr(nav,'message','')},尝试继续")
 
-                # [LOC] 步骤1.5: 观察并关闭通知弹窗（6s），避免遮挡日期/导出按钮
+                # [LOC] 步骤1.5: 观察并关闭通知弹窗(6s),避免遮挡日期/导出按钮
                 try:
                     from modules.platforms.miaoshou.components.overlay_guard import OverlayGuard
-                    OverlayGuard().run(page, label="[LOC] 步骤1.5: 观察并关闭通知弹窗（6s）...")
+                    OverlayGuard().run(page, label="[LOC] 步骤1.5: 观察并关闭通知弹窗(6s)...")
                 except Exception:
                     pass
 
-                # [LOC] 步骤2: 选择时间范围...（仓库清单无时间维度，本步骤暂时跳过，但保留选项用于命名/粒度配置）
-                print("[LOC] 步骤2: 选择时间范围...（跳过：商品表现=仓库清单无时间维度）")
-                # 保留 date_opt/granularity 用于文件命名与后续配置，但不在页面上执行日期选择
+                # [LOC] 步骤2: 选择时间范围...(仓库清单无时间维度,本步骤暂时跳过,但保留选项用于命名/粒度配置)
+                print("[LOC] 步骤2: 选择时间范围...(跳过:商品表现=仓库清单无时间维度)")
+                # 保留 date_opt/granularity 用于文件命名与后续配置,但不在页面上执行日期选择
                 # try:
                 #     adapter.date_picker().run(page, date_opt)
                 # except Exception as _e:
                 #     print(f"[WARN] 日期策略异常: {_e}")
 
                 print("[LOC] 步骤3: 开始执行导出组件...")
-                # 步骤3/4 在导出组件中输出（点击导出 -> 等待下载并保存）
+                # 步骤3/4 在导出组件中输出(点击导出 -> 等待下载并保存)
                 res = adapter.exporter().run(page)
                 if not res.success: print(f"[FAIL] 导出失败: {res.message}")
             input("\n按回车键返回...")
@@ -1174,7 +1174,7 @@ class CollectionCenterApp(BaseApplication):
 
     def _run_miaoshou_traffic_componentized(self):
         try:
-            print("\n[BRAIN] 妙手ERP 流量表现数据导出（组件化）"); print("=" * 40)
+            print("\n[BRAIN] 妙手ERP 流量表现数据导出(组件化)"); print("=" * 40)
             sel = self._select_account_unified("miaoshou")
             if not sel: return
             account, account_label = sel
@@ -1194,11 +1194,11 @@ class CollectionCenterApp(BaseApplication):
                 try: adapter.login().run(page)
                 except Exception: pass
                 nav = adapter.navigation().run(page, TargetPage.TRAFFIC_OVERVIEW)
-                if not getattr(nav, 'success', False): print(f"[WARN] 导航提示: {getattr(nav,'message','')}，尝试继续")
-                # 步骤1.5：关闭导航后的公告弹窗
+                if not getattr(nav, 'success', False): print(f"[WARN] 导航提示: {getattr(nav,'message','')},尝试继续")
+                # 步骤1.5:关闭导航后的公告弹窗
                 try:
                     from modules.platforms.miaoshou.components.overlay_guard import OverlayGuard
-                    OverlayGuard().run(page, label="[LOC] 步骤1.5: 观察并关闭通知弹窗（6s）...")
+                    OverlayGuard().run(page, label="[LOC] 步骤1.5: 观察并关闭通知弹窗(6s)...")
                 except Exception:
                     pass
                 try: adapter.date_picker().run(page, date_opt)
@@ -1212,7 +1212,7 @@ class CollectionCenterApp(BaseApplication):
 
     def _run_miaoshou_services_componentized(self):
         try:
-            print("\n[BRAIN] 妙手ERP 服务表现数据导出（组件化）"); print("=" * 40)
+            print("\n[BRAIN] 妙手ERP 服务表现数据导出(组件化)"); print("=" * 40)
             sel = self._select_account_unified("miaoshou")
             if not sel: return
             account, account_label = sel
@@ -1232,10 +1232,10 @@ class CollectionCenterApp(BaseApplication):
                 try: adapter.login().run(page)
                 except Exception: pass
                 nav = adapter.navigation().run(page, TargetPage.SERVICE_ANALYTICS)
-                if not getattr(nav, 'success', False): print(f"[WARN] 导航提示: {getattr(nav,'message','')}，尝试继续")
+                if not getattr(nav, 'success', False): print(f"[WARN] 导航提示: {getattr(nav,'message','')},尝试继续")
                 try:
                     from modules.platforms.miaoshou.components.overlay_guard import OverlayGuard
-                    OverlayGuard().run(page, label="[LOC] 步骤1.5: 观察并关闭通知弹窗（6s）...")
+                    OverlayGuard().run(page, label="[LOC] 步骤1.5: 观察并关闭通知弹窗(6s)...")
                 except Exception:
                     pass
                 try: adapter.date_picker().run(page, date_opt)
@@ -1249,14 +1249,14 @@ class CollectionCenterApp(BaseApplication):
 
     def _run_miaoshou_orders_componentized(self):
         try:
-            print("\n[BRAIN] 妙手ERP 订单表现数据导出（组件化）"); print("=" * 40)
+            print("\n[BRAIN] 妙手ERP 订单表现数据导出(组件化)"); print("=" * 40)
             sel = self._select_account_unified("miaoshou")
             if not sel: return
             account, account_label = sel
             date_opt, granularity = self._miaoshou_time_prompt()
-            # 子类型选择（默认：同时导出 Shopee + TikTok）
-            print("\n请选择子类型：1) shopee  2) tiktok  3) 两者（默认）")
-            sub_in = input("请输入 1/2/3（回车=3）: ").strip()
+            # 子类型选择(默认:同时导出 Shopee + TikTok)
+            print("\n请选择子类型:1) shopee  2) tiktok  3) 两者(默认)")
+            sub_in = input("请输入 1/2/3(回车=3): ").strip()
             if sub_in == "1":
                 subtypes = ["shopee"]
             elif sub_in == "2":
@@ -1274,7 +1274,7 @@ class CollectionCenterApp(BaseApplication):
                 acct_id = account.get("store_name") or account.get("username") or str(account.get("account_id") or "account")
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
-                # 先登录一次（若已登录会自动跳过），避免在每个子类型循环中重复尝试登录导致卡顿/识别异常
+                # 先登录一次(若已登录会自动跳过),避免在每个子类型循环中重复尝试登录导致卡顿/识别异常
                 try:
                     _exec0 = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity}, logger=get_logger(__name__))
                     _adapter0 = get_adapter("miaoshou", _exec0)
@@ -1282,7 +1282,7 @@ class CollectionCenterApp(BaseApplication):
                 except Exception:
                     pass
                 for sub in subtypes:
-                    # 为规整落盘命名显式注入 shop_name（避免出现 unknown_shop）
+                    # 为规整落盘命名显式注入 shop_name(避免出现 unknown_shop)
                     _shop_name = account.get("store_name") or account.get("menu_display_name") or account.get("display_name") or account.get("username") or str(account.get("account_id") or "unknown_shop")
                     exec_ctx = ExecutionContext(
                         platform="miaoshou",
@@ -1297,20 +1297,20 @@ class CollectionCenterApp(BaseApplication):
                     )
                     adapter = get_adapter("miaoshou", exec_ctx)
                     nav = adapter.navigation().run(page, TargetPage.ORDERS)
-                    if not getattr(nav, 'success', False): print(f"[WARN] 导航提示: {getattr(nav,'message','')}，尝试继续")
+                    if not getattr(nav, 'success', False): print(f"[WARN] 导航提示: {getattr(nav,'message','')},尝试继续")
                     try:
                         from modules.platforms.miaoshou.components.overlay_guard import OverlayGuard
-                        OverlayGuard().run(page, label="[LOC] 步骤1.5: 观察并关闭通知弹窗（6s）...")
+                        OverlayGuard().run(page, label="[LOC] 步骤1.5: 观察并关闭通知弹窗(6s)...")
                     except Exception:
                         pass
-                    # 订单表现：此处仅写入配置，不在此时操作页面；具体输入由导出器按顺序执行（状态->时间->搜索）
+                    # 订单表现:此处仅写入配置,不在此时操作页面;具体输入由导出器按顺序执行(状态->时间->搜索)
                     try: adapter.date_picker().run(page, date_opt, apply_to_page=False)
                     except Exception: pass
                     print(f"\n[START] 开始导出子类型: {sub}")
 
                     res = adapter.exporter().run(page)
                     if res.success:
-                        # 统一规范输出：导出成功 + 文件地址
+                        # 统一规范输出:导出成功 + 文件地址
                         print(f"\n[OK] 导出成功: {res.file_path or ''}")
                         try:
                             from pathlib import Path as _P
@@ -1333,11 +1333,11 @@ class CollectionCenterApp(BaseApplication):
 
     def _run_miaoshou_finance_componentized(self):
         try:
-            print("\n[BRAIN] 妙手ERP 财务表现数据导出（组件化）"); print("=" * 40)
+            print("\n[BRAIN] 妙手ERP 财务表现数据导出(组件化)"); print("=" * 40)
             sel = self._select_account_unified("miaoshou")
             if not sel: return
             account, account_label = sel
-            # 财务一般按月/最近30天；仍提供三档
+            # 财务一般按月/最近30天;仍提供三档
             date_opt, granularity = self._miaoshou_time_prompt()
             from playwright.sync_api import sync_playwright
             from modules.utils.persistent_browser_manager import PersistentBrowserManager
@@ -1354,10 +1354,10 @@ class CollectionCenterApp(BaseApplication):
                 try: adapter.login().run(page)
                 except Exception: pass
                 nav = adapter.navigation().run(page, TargetPage.FINANCE)
-                if not getattr(nav, 'success', False): print(f"[WARN] 导航提示: {getattr(nav,'message','')}，尝试继续")
+                if not getattr(nav, 'success', False): print(f"[WARN] 导航提示: {getattr(nav,'message','')},尝试继续")
                 try:
                     from modules.platforms.miaoshou.components.overlay_guard import OverlayGuard
-                    OverlayGuard().run(page, label="[LOC] 步骤1.5: 观察并关闭通知弹窗（6s）...")
+                    OverlayGuard().run(page, label="[LOC] 步骤1.5: 观察并关闭通知弹窗(6s)...")
                 except Exception:
                     pass
                 try: adapter.date_picker().run(page, date_opt)
@@ -1370,26 +1370,26 @@ class CollectionCenterApp(BaseApplication):
             input("按回车键返回...")
 
     def _run_miaoshou_platform_wide_batch(self):
-        """妙手ERP 平台批量采集（五大数据类型：products/traffic/services/orders/finance）。"""
+        """妙手ERP 平台批量采集(五大数据类型:products/traffic/services/orders/finance)。"""
         try:
             print("\n[BRAIN] 妙手ERP 批量采集"); print("=" * 40)
-            # 选择数据域（默认仅商品表现+订单表现）；支持一键预设覆盖
+            # 选择数据域(默认仅商品表现+订单表现);支持一键预设覆盖
             preset_domains = getattr(self, "_one_click_domains", None)
             if preset_domains:
                 domains = list(preset_domains)
             else:
-                print("\n[DATA] 选择数据域（可多选）：")
+                print("\n[DATA] 选择数据域(可多选):")
                 print("1. 商品表现  2. 流量表现  3. 服务表现  4. 订单表现  5. 财务表现")
-                dom_in = input("请输入选择的数字，用逗号分隔 (默认: 1,4): ").strip()
+                dom_in = input("请输入选择的数字,用逗号分隔 (默认: 1,4): ").strip()
                 # 兼容中文逗号/空格
-                dom_in = dom_in.replace('，', ',').replace(' ', '')
+                dom_in = dom_in.replace(',', ',').replace(' ', '')
                 idx_map = {"1":"products","2":"traffic","3":"services","4":"orders","5":"finance"}
                 default_keys = ["1","4"]
                 keys = dom_in.split(',') if dom_in else default_keys
                 domains = [idx_map[k] for k in keys if k in idx_map]
             # 时间范围
             date_opt, granularity = self._miaoshou_time_prompt()
-            # 账户清单（与单次入口一致的模糊匹配：platform包含任一同义词 即视为妙手ERP）
+            # 账户清单(与单次入口一致的模糊匹配:platform包含任一同义词 即视为妙手ERP)
             from modules.utils.account_manager import AccountManager
             am = AccountManager()
             all_accounts = am.load_accounts().get('accounts', [])
@@ -1419,10 +1419,10 @@ class CollectionCenterApp(BaseApplication):
                 'orders': TargetPage.ORDERS,
                 'finance': TargetPage.FINANCE,
             }
-            # 平台内聚的域执行助手（仅供妙手ERP批量使用，不影响其他平台）
+            # 平台内聚的域执行助手(仅供妙手ERP批量使用,不影响其他平台)
             def _run_domain(page, adapter, domain_key: str, date_opt):
                 try:
-                    # 将当前域写入执行上下文，便于组件读取（确保config存在）
+                    # 将当前域写入执行上下文,便于组件读取(确保config存在)
                     try:
                         if getattr(adapter, 'exec_ctx', None) is not None:
                             if getattr(adapter.exec_ctx, 'config', None) is None:
@@ -1431,7 +1431,7 @@ class CollectionCenterApp(BaseApplication):
                     except Exception:
                         pass
 
-                    # 订单表现：按平台子类型循环（Shopee + TikTok），Lazada 暂不处理
+                    # 订单表现:按平台子类型循环(Shopee + TikTok),Lazada 暂不处理
                     if str(domain_key) == "orders":
                         try:
                             from modules.components.export.base import ExportResult  # 仅用于封装汇总结果
@@ -1457,7 +1457,7 @@ class CollectionCenterApp(BaseApplication):
                                 except Exception:
                                     pass
 
-                            # 平台切换确认与重试日志：最多2轮（点击标签->深链），放在导航之后、日期选择之前
+                            # 平台切换确认与重试日志:最多2轮(点击标签->深链),放在导航之后、日期选择之前
                             try:
                                 from urllib.parse import urlparse, parse_qs
                                 expect = str(sub).lower()
@@ -1477,7 +1477,7 @@ class CollectionCenterApp(BaseApplication):
                                         print(f"    [SwitchPlatform] 点击平台标签: {label}")
                                     except Exception:
                                         pass
-                                    # 若点击无效或仍不一致，则显式深链
+                                    # 若点击无效或仍不一致,则显式深链
                                     cur_url = str(getattr(page, "url", ""))
                                     cur_pf = (parse_qs(urlparse(cur_url).query).get("platform") or [None])[0]
                                     cur_pf_norm = str(cur_pf or "").lower()
@@ -1495,7 +1495,7 @@ class CollectionCenterApp(BaseApplication):
                             except Exception:
                                 pass
 
-                            # 日期选择（每个子类型均应用同一时间范围）
+                            # 日期选择(每个子类型均应用同一时间范围)
                             try:
                                 adapter.date_picker().run(page, date_opt)
                             except Exception:
@@ -1503,7 +1503,7 @@ class CollectionCenterApp(BaseApplication):
                             # 执行导出
                             res = adapter.exporter().run(page)
                             if getattr(res, 'success', False):
-                                # 一键/批量：收集文件路径
+                                # 一键/批量:收集文件路径
                                 try:
                                     fp = getattr(res, 'file_path', None)
                                     files = getattr(self, "_one_click_files", None)
@@ -1526,7 +1526,7 @@ class CollectionCenterApp(BaseApplication):
                                     self.success = ok; self.message = msg
                             return _R(all_ok, "; ".join(err_msgs) if err_msgs else "ok")
 
-                    # 非订单域：单次导航->导出
+                    # 非订单域:单次导航->导出
                     # 导航至目标页
                     nav = adapter.navigation().run(page, tgt_map[domain_key])
                     if not getattr(nav, 'success', False):
@@ -1534,9 +1534,9 @@ class CollectionCenterApp(BaseApplication):
                             print(f"    [WARN] 导航提示: {getattr(nav,'message','')}")
                         except Exception:
                             pass
-                    # 日期选择（若组件自行处理或URL含参会自动忽略）
+                    # 日期选择(若组件自行处理或URL含参会自动忽略)
                     try:
-                        # 妙手ERP的“商品表现”= 仓库清单，无时间维度；一律不改页面时间
+                        # 妙手ERP的“商品表现”= 仓库清单,无时间维度;一律不改页面时间
                         if str(domain_key) != "products":
                             adapter.date_picker().run(page, date_opt)
                     except Exception:
@@ -1583,7 +1583,7 @@ class CollectionCenterApp(BaseApplication):
                                             self._one_click_collector.append({
                                                 "platform": "miaoshou",
                                                 "account": account_label,
-                                                "shop": account_label,  # 妙手无店铺粒度，使用账号作区分
+                                                "shop": account_label,  # 妙手无店铺粒度,使用账号作区分
                                                 "domain": d,
                                                 "status": "skip",
                                                 "message": msg,
@@ -1592,7 +1592,7 @@ class CollectionCenterApp(BaseApplication):
                                             pass
                                 elif res.success:
                                     ok += 1; print("    [OK] 成功")
-                                    # 收集成功文件路径（如有）
+                                    # 收集成功文件路径(如有)
                                     try:
                                         fp = getattr(res, 'file_path', None)
                                         files = getattr(self, "_one_click_files", None)
@@ -1654,13 +1654,13 @@ class CollectionCenterApp(BaseApplication):
                                     })
                                 except Exception:
                                     pass
-                    # 关闭上下文（防泄露）
+                    # 关闭上下文(防泄露)
                     try: pb.close_context("miaoshou", str(account_label))
                     except Exception: pass
-            print("\n[DATA] 批量结果汇总：")
+            print("\n[DATA] 批量结果汇总:")
             print(f"   总任务: {total} | [OK] 成功: {ok} | [NEXT] 跳过: {skip} | [FAIL] 失败: {fail}")
             if skip:
-                print("\n[NOTE] 跳过原因统计：")
+                print("\n[NOTE] 跳过原因统计:")
                 for r, c in skip_reasons.items():
                     print(f"   • {r}: {c}")
             try:
@@ -1682,19 +1682,19 @@ class CollectionCenterApp(BaseApplication):
 
 
     def _run_tiktok_platform_wide_batch(self):
-        """TikTok 平台批量采集（当前实现：商品/流量/服务表现）。
+        """TikTok 平台批量采集(当前实现:商品/流量/服务表现)。
 
-        流程：
-        - 选择时间范围（昨天/近7天/近30天）
+        流程:
+        - 选择时间范围(昨天/近7天/近30天)
         - 遍历 TikTok 平台所有启用账号
-        - 每账号登录一次，按 allowed_regions 迭代区域执行：导航->（可选）日期->导出
-        - 导出命名与目录结构与单次流程一致（account_label_region[__shop_id]）
+        - 每账号登录一次,按 allowed_regions 迭代区域执行:导航->(可选)日期->导出
+        - 导出命名与目录结构与单次流程一致(account_label_region[__shop_id])
         """
         try:
             print("\n[MUSIC] TikTok 批量采集")
             print("=" * 40)
 
-            # 选择数据域（可多选），与 Shopee 一致；支持一键预设覆盖
+            # 选择数据域(可多选),与 Shopee 一致;支持一键预设覆盖
             from modules.components.navigation.base import TargetPage
             preset_domains = getattr(self, "_one_click_domains", None)
             if preset_domains:
@@ -1711,18 +1711,18 @@ class CollectionCenterApp(BaseApplication):
                     if k in dm:
                         exec_domains.append(dm[k])
             else:
-                print("\n[DATA] 选择数据域（可多选）：")
+                print("\n[DATA] 选择数据域(可多选):")
                 print("1. 服务表现 (services)")
                 print("2. 商品表现 (products)")
                 print("3. 流量表现 (traffic)")
                 print("4. 订单表现 (orders)")
                 print("5. 财务表现 (finance)")
-                dom_in = input("请输入选择的数字，用逗号分隔 (如: 1,2,3 或 回车=默认商品+流量+服务): ").strip()
+                dom_in = input("请输入选择的数字,用逗号分隔 (如: 1,2,3 或 回车=默认商品+流量+服务): ").strip()
                 if not dom_in:
                     dom_sel = {"1","2","3"}
                 else:
                     dom_sel = {s.strip() for s in dom_in.split(',') if s.strip() in {"1","2","3","4","5"}}
-                # 已实现：products/traffic/services；其余先跳过
+                # 已实现:products/traffic/services;其余先跳过
                 exec_domains = []  # (key, name, target)
                 if "2" in dom_sel:
                     exec_domains.append(("products", "商品表现", TargetPage.PRODUCTS_PERFORMANCE))
@@ -1735,7 +1735,7 @@ class CollectionCenterApp(BaseApplication):
                 if "5" in dom_sel:
                     exec_domains.append(("finance", "财务表现(未实现)", TargetPage.FINANCE))
 
-            # 选择时间范围（含自定义映射）；支持一键预设覆盖
+            # 选择时间范围(含自定义映射);支持一键预设覆盖
             from modules.components.date_picker.base import DateOption
             from modules.services.time_policy import RollingDaysPolicy, CustomRangePolicy
             from datetime import datetime, timedelta
@@ -1752,14 +1752,14 @@ class CollectionCenterApp(BaseApplication):
                         date_opt, granularity = DateOption.LAST_7_DAYS, "weekly"
                         time_policy = RollingDaysPolicy(7)
                     else:
-                        # TikTok 最大28天，超出按28天处理
+                        # TikTok 最大28天,超出按28天处理
                         date_opt, granularity = DateOption.LAST_28_DAYS, "monthly"
                         time_policy = RollingDaysPolicy(28)
                 except Exception:
                     date_opt = None  # 回退到交互式选择
             if not locals().get("date_opt"):
                 print("\n[DATE] 选择时间范围:")
-                print("  1. 最近7天（默认）    2. 最近28天    3. 昨天")
+                print("  1. 最近7天(默认)    2. 最近28天    3. 昨天")
                 tch = input("请选择 (1-3): ").strip() or "1"
                 if tch == "2":
                     date_opt, granularity, days = DateOption.LAST_28_DAYS, "monthly", 28
@@ -1821,7 +1821,7 @@ class CollectionCenterApp(BaseApplication):
                             },
                             logger=get_logger(__name__),
                         )
-                        # 将时间选择注入上下文（用于导航深链与文件命名）
+                        # 将时间选择注入上下文(用于导航深链与文件命名)
                         from datetime import date, timedelta
                         _end = date.today()
                         _start = _end - timedelta(days=days)
@@ -1833,9 +1833,9 @@ class CollectionCenterApp(BaseApplication):
                             "days": days,
                             "start_date": _start.strftime("%Y-%m-%d"),
                             "end_date": _end.strftime("%Y-%m-%d"),
-                            # 与单次采集完全一致：所有范围均使用深链 timeRange（yesterday=last1days），随后若URL含时间直接跳过 DatePicker
+                            # 与单次采集完全一致:所有范围均使用深链 timeRange(yesterday=last1days),随后若URL含时间直接跳过 DatePicker
                             "nav_with_timerange": True,
-                            # 一键模式标记与导出等待超时（TikTok 导出组件使用）
+                            # 一键模式标记与导出等待超时(TikTok 导出组件使用)
                             "one_click": _one_click,
                             "export_timeout_ms": _export_timeout_ms,
                         })
@@ -1846,7 +1846,7 @@ class CollectionCenterApp(BaseApplication):
                             adapter.login().run(page)
                         except Exception:
                             pass
-                        # 清理可能出现的空白/多余标签页，仅保留最后一个活动页
+                        # 清理可能出现的空白/多余标签页,仅保留最后一个活动页
                         try:
                             pages = page.context.pages
                             if len(pages) > 1:
@@ -1860,14 +1860,14 @@ class CollectionCenterApp(BaseApplication):
                         except Exception:
                             pass
 
-                        # 区域列表：优先账号配置，其次默认
+                        # 区域列表:优先账号配置,其次默认
                         regions = account.get("allowed_regions") or ["MY", "PH", "SG"]
                         for region in regions:
                             # 逐数据域执行
                             for dom_key, dom_name, target in exec_domains:
-                                # 暂未实现的数据域直接跳过（已实现：products/traffic/services）
+                                # 暂未实现的数据域直接跳过(已实现:products/traffic/services)
                                 if dom_key not in {"products", "traffic", "services"}:
-                                    print(f"  [NEXT] 区域: {region} · {dom_name} 暂未实现，跳过")
+                                    print(f"  [NEXT] 区域: {region} · {dom_name} 暂未实现,跳过")
                                     continue
                                 total += 1
                                 print(f"  [SHOP] 区域: {region} · {dom_name} -> 导航与导出")
@@ -1878,7 +1878,7 @@ class CollectionCenterApp(BaseApplication):
                                         account_label_norm = account_label
                                     except Exception:
                                         account_label_norm = str(account_label)
-                                    # 流量/服务 表现禁止在导航深链中携带时间参数，会导致导出按钮不出现
+                                    # 流量/服务 表现禁止在导航深链中携带时间参数,会导致导出按钮不出现
                                     exec_ctx.config["nav_with_timerange"] = (dom_key not in {"traffic", "services"})
 
                                     exec_ctx.config["shop_name"] = f"{account_label_norm}_{region.lower()}"
@@ -1888,15 +1888,15 @@ class CollectionCenterApp(BaseApplication):
                                     nav = adapter.navigation()
                                     nav_res = nav.run(page, target)
                                     if not getattr(nav_res, 'success', False):
-                                        print(f"    [WARN] 导航失败: {getattr(nav_res, 'message', 'unknown')}，尝试继续")
+                                        print(f"    [WARN] 导航失败: {getattr(nav_res, 'message', 'unknown')},尝试继续")
 
-                                    # 日期：如 URL 已含 timeRange/shortcut 则跳过
+                                    # 日期:如 URL 已含 timeRange/shortcut 则跳过
                                     try:
                                         cur_url = str(page.url)
                                     except Exception:
                                         cur_url = ""
                                     if ("timeRange=" in cur_url) or ("shortcut=" in cur_url):
-                                        print("    [CAL] 当前URL已包含时间参数，跳过日期选择组件")
+                                        print("    [CAL] 当前URL已包含时间参数,跳过日期选择组件")
                                     else:
                                         from modules.services.time_policy import apply_time_policy_tiktok
                                         ok, msg = apply_time_policy_tiktok(page, adapter, time_policy)
@@ -1927,7 +1927,7 @@ class CollectionCenterApp(BaseApplication):
                                                 except Exception:
                                                     pass
                                         elif getattr(res, 'success', False):
-                                            ok += 1  # 出口组件已打印成功信息，这里不重复输出
+                                            ok += 1  # 出口组件已打印成功信息,这里不重复输出
                                             if getattr(self, "_one_click_collector", None) is not None:
                                                 try:
                                                     self._one_click_collector.append({
@@ -1986,7 +1986,7 @@ class CollectionCenterApp(BaseApplication):
                                         except Exception:
                                             pass
                                 finally:
-                                    # 轻微冷却，避免频繁切区域/页面
+                                    # 轻微冷却,避免频繁切区域/页面
                                     try:
                                         page.wait_for_timeout(500)
                                     except Exception:
@@ -2002,10 +2002,10 @@ class CollectionCenterApp(BaseApplication):
                             pass
 
             # 汇总
-            print("\n[DATA] 批量结果汇总：")
+            print("\n[DATA] 批量结果汇总:")
             print(f"   总任务: {total} | [OK] 成功: {ok} | [NEXT] 跳过: {skip} | [FAIL] 失败: {fail}")
             if skip:
-                print("\n[NOTE] 跳过原因统计：")
+                print("\n[NOTE] 跳过原因统计:")
                 for r, c in skip_reasons.items():
                     print(f"   • {r}: {c}")
             try:
@@ -2023,7 +2023,7 @@ class CollectionCenterApp(BaseApplication):
                 input("按回车键返回...")
 
     def _manage_stable_scripts_menu(self, dtype_key: str = "products"):
-        """管理稳定版脚本（查看/设置/取消）"""
+        """管理稳定版脚本(查看/设置/取消)"""
         from modules.utils.account_manager import AccountManager
         from modules.utils.recording_registry import (
             ensure_index, RecordingType, get_latest_login, get_latest_collection,
@@ -2040,10 +2040,10 @@ class CollectionCenterApp(BaseApplication):
         while True:
             print("\n[SHIELD] 稳定版脚本管理")
             print("=" * 30)
-            print(f"  1. 查看稳定版（{dtype_key}）")
-            print(f"  2. 设置当前最新为稳定版（{dtype_key}）")
-            print(f"  3. 取消稳定版（{dtype_key}）")
-            print("  4. [LOCK] 管理登录脚本（查看/设置/取消）")
+            print(f"  1. 查看稳定版({dtype_key})")
+            print(f"  2. 设置当前最新为稳定版({dtype_key})")
+            print(f"  3. 取消稳定版({dtype_key})")
+            print("  4. [LOCK] 管理登录脚本(查看/设置/取消)")
             print("  0. 返回上一级")
             ch = input("请选择 (0-4): ").strip()
             if ch == '0':
@@ -2071,7 +2071,7 @@ class CollectionCenterApp(BaseApplication):
 
 
     def _run_product_performance_recorded(self):
-        """运行‘Shopee 商品表现数据导出’录制脚本（优先选择 complete_products）"""
+        """运行‘Shopee 商品表现数据导出’录制脚本(优先选择 complete_products)"""
         from modules.utils.account_manager import AccountManager
         from modules.utils.recording_registry import ensure_index, plan_flow, RecordingType
         import re
@@ -2105,24 +2105,24 @@ class CollectionCenterApp(BaseApplication):
             collect_path = latest_complete[0]
 
         if not collect_path:
-            print("[FAIL] 未找到‘商品表现数据导出’录制脚本，请先在‘数据采集录制 -> 商品数据采集’中录制。")
+            print("[FAIL] 未找到‘商品表现数据导出’录制脚本,请先在‘数据采集录制 -> 商品数据采集’中录制。")
             input("按回车键返回..."); return
 
-        print(f"\n[FILE] 将执行的脚本：\n  登录: {login_path or '（可选，未找到）'}\n  采集: {collect_path}")
+        print(f"\n[FILE] 将执行的脚本:\n  登录: {login_path or '(可选,未找到)'}\n  采集: {collect_path}")
         if input("\n确认开始执行? (y/n): ").strip().lower() not in ['y','yes','是']:
             return
         if login_path:
             self._exec_python_script(login_path)
         self._exec_python_script(collect_path)
-        input("\n[OK] 执行完成，按回车键返回...")
+        input("\n[OK] 执行完成,按回车键返回...")
 
 
     def _run_recorded_scripts_by_type(self, dtype: str):
-        """按数据类型运行录制脚本（五类：orders/products/analytics/finance/services），支持多平台。"""
+        """按数据类型运行录制脚本(五类:orders/products/analytics/finance/services),支持多平台。"""
         from modules.utils.recording_registry import ensure_index, plan_flow, RecordingType
 
-        # 选择平台（默认 Shopee，可切换 TikTok）
-        print("\n[WEB] 选择平台：")
+        # 选择平台(默认 Shopee,可切换 TikTok)
+        print("\n[WEB] 选择平台:")
         print("  1. Shopee    2. TikTok    0. 返回")
         pch = input("请选择 (1-2/0): ").strip() or "1"
         if pch == "0":
@@ -2131,28 +2131,28 @@ class CollectionCenterApp(BaseApplication):
 
         ensure_index(platform)
 
-        # 选择账号（通用入口）
+        # 选择账号(通用入口)
         sel = self._select_account_unified(platform)
         if not sel:
             return
         account, account_label = sel
 
-        # 获取脚本路径（旧版回放策略：先执行登录脚本，再执行采集脚本）
+        # 获取脚本路径(旧版回放策略:先执行登录脚本,再执行采集脚本)
         rt = RecordingType(dtype)
         login_path, collect_path = plan_flow(platform, account_label, rt)
         if not collect_path:
-            print("[FAIL] 未找到对应的数据采集录制脚本，请先在‘数据采集录制’中录制。")
+            print("[FAIL] 未找到对应的数据采集录制脚本,请先在‘数据采集录制’中录制。")
             input("按回车键返回..."); return
 
-        print(f"\n[FILE] 将执行的脚本：\n  平台: {platform}\n  登录: {login_path or '（可选，未找到）'}\n  采集: {collect_path}")
+        print(f"\n[FILE] 将执行的脚本:\n  平台: {platform}\n  登录: {login_path or '(可选,未找到)'}\n  采集: {collect_path}")
         if input("\n确认开始执行? (y/n): ").strip().lower() not in ['y','yes','是']:
             return
 
-        # 旧版行为：独立执行脚本模块，不干预脚本内部浏览器/会话逻辑
+        # 旧版行为:独立执行脚本模块,不干预脚本内部浏览器/会话逻辑
         if login_path:
             self._exec_python_script(login_path)
         self._exec_python_script(collect_path)
-        input("\n[OK] 执行完成，按回车键返回...")
+        input("\n[OK] 执行完成,按回车键返回...")
 
     def _exec_python_script(self, path: str) -> None:
         """以独立模块方式加载并执行录制脚本的 main() 或 run()"""
@@ -2173,7 +2173,7 @@ class CollectionCenterApp(BaseApplication):
                 print(f"[ACTION] 执行 test_recording() 函数: {path}")
                 mod.test_recording()
             else:
-                print(f"[WARN] 脚本未定义 main()/run()/test_recording()，已完成加载: {path}")
+                print(f"[WARN] 脚本未定义 main()/run()/test_recording(),已完成加载: {path}")
         except Exception as e:
             logger.error(f"执行脚本失败 {path}: {e}")
             print(f"[FAIL] 执行脚本失败: {e}")
@@ -2192,7 +2192,7 @@ class CollectionCenterApp(BaseApplication):
             config = get_config_manager().get_config('simple_config')
             recording_config = config.get('recording', {})
 
-            # 如果配置强制登录，直接返回不健康
+            # 如果配置强制登录,直接返回不健康
             if recording_config.get('force_login_before_collection', False):
                 return "unhealthy"
 
@@ -2200,7 +2200,7 @@ class CollectionCenterApp(BaseApplication):
             session_manager = PersistentBrowserManager()
             session_key = f"{platform.lower()}/{account_label}"
 
-            # 简单检查：会话目录是否存在且不为空
+            # 简单检查:会话目录是否存在且不为空
             session_dir = Path("data/sessions") / session_key
             if session_dir.exists() and any(session_dir.iterdir()):
                 return "healthy"
@@ -2215,7 +2215,7 @@ class CollectionCenterApp(BaseApplication):
         """快速录制登录脚本"""
         try:
             print("\n[START] 启动快速登录录制...")
-            print("[TIP] 这将打开录制向导，选择'登录流程录制'即可")
+            print("[TIP] 这将打开录制向导,选择'登录流程录制'即可")
 
             from modules.utils.enhanced_recording_wizard import EnhancedRecordingWizard
             wizard = EnhancedRecordingWizard()
@@ -2234,10 +2234,10 @@ class CollectionCenterApp(BaseApplication):
             print("[TIP] 请手动进入'数据采集录制'录制登录流程")
 
     def _exec_recording_with_persistent_page(self, path: str, account: Dict[str, Any], platform: str = "shopee") -> bool:
-        """在持久化上下文中执行录制脚本的 run(page)（优先）。
+        """在持久化上下文中执行录制脚本的 run(page)(优先)。
 
-        - 优先查找脚本中的 run(page) 并在同一持久化上下文中回放，避免脚本自行 new browser 导致会话割裂
-        - 如无 run(page)，返回 False 让上层回退到 _exec_python_script()
+        - 优先查找脚本中的 run(page) 并在同一持久化上下文中回放,避免脚本自行 new browser 导致会话割裂
+        - 如无 run(page),返回 False 让上层回退到 _exec_python_script()
         - 非 Shopee 平台走通用的 PersistentBrowserManager 路径
         """
         try:
@@ -2248,12 +2248,12 @@ class CollectionCenterApp(BaseApplication):
             spec.loader.exec_module(mod)  # type: ignore
 
             if not hasattr(mod, "run"):
-                # 无 run(page) 接口，交由上层回退
+                # 无 run(page) 接口,交由上层回退
                 return False
 
             from playwright.sync_api import sync_playwright
             if platform.lower() == "shopee":
-                # Shopee 走现有导出器（集成更完善）
+                # Shopee 走现有导出器(集成更完善)
                 from modules.services.shopee_playwright_exporter import ShopeePlaywrightExporter
                 with sync_playwright() as p:
                     exp = ShopeePlaywrightExporter(p)
@@ -2272,7 +2272,7 @@ class CollectionCenterApp(BaseApplication):
                             pass
                 return True
             else:
-                # 通用路径（例如 TikTok）：直接使用持久化上下文并打开 login_url
+                # 通用路径(例如 TikTok):直接使用持久化上下文并打开 login_url
                 from modules.utils.persistent_browser_manager import PersistentBrowserManager
                 with sync_playwright() as p:
                     pb = PersistentBrowserManager(p)
@@ -2286,7 +2286,7 @@ class CollectionCenterApp(BaseApplication):
                                 page.goto(login_url, wait_until="domcontentloaded", timeout=45000)
                             except Exception:
                                 page.goto(login_url, wait_until="load", timeout=60000)
-                        # 统一登录策略：优先调用“[BOT] 自动登录流程修正”，失败则回退 LoginService
+                        # 统一登录策略:优先调用“[BOT] 自动登录流程修正”,失败则回退 LoginService
                         try:
                             flags = (account.get('login_flags') or {}) if isinstance(account, dict) else {}
                         except Exception:
@@ -2303,7 +2303,7 @@ class CollectionCenterApp(BaseApplication):
                         except Exception as _le:
                             try:
                                 from modules.services.platform_login_service import LoginService
-                                print(f"[WARN] 增强登录失败，回退 LoginService: {_le}")
+                                print(f"[WARN] 增强登录失败,回退 LoginService: {_le}")
                                 LoginService().ensure_logged_in(platform, page, account)
                             except Exception:
                                 pass
@@ -2324,7 +2324,7 @@ class CollectionCenterApp(BaseApplication):
             return False
 
     def _manage_login_scripts(self, platform: str, account_label: str):
-        """管理登录脚本（查看/设置/取消）"""
+        """管理登录脚本(查看/设置/取消)"""
         from modules.utils.recording_registry import (
             get_latest_login, mark_stable, clear_stable, reindex
         )
@@ -2392,7 +2392,7 @@ class CollectionCenterApp(BaseApplication):
             print("1. [TOOLKIT] Shopee 批量采集")
             print("2. [MUSIC] TikTok 批量采集")
             print("3. [BRAIN] 妙手ERP 批量采集")
-            print("4. [STORE] Amazon 批量采集（占位）")
+            print("4. [STORE] Amazon 批量采集(占位)")
             print("5. [COMPASS] 一键所有平台批量采集")
             print("0. [BACK] 返回上级菜单")
             choice = input("\n请选择 (0-5/0): ").strip()
@@ -2415,15 +2415,15 @@ class CollectionCenterApp(BaseApplication):
 
     def _run_generic_batch_flow(self):
         """
-        通用批量流程（所有平台）- 骨架：
-        选择或全平台 -> 选择或全数据类型 -> 选择或全账号，生成任务计划。
-        当前为规划/预演模式，不执行实际采集，确保流程与统一规则正确。
+        通用批量流程(所有平台)- 骨架:
+        选择或全平台 -> 选择或全数据类型 -> 选择或全账号,生成任务计划。
+        当前为规划/预演模式,不执行实际采集,确保流程与统一规则正确。
         """
         try:
             print("\n[COMPASS] 一键所有平台批量采集")
             print("=" * 40)
             # 1) 选择平台或全平台
-            print("\n[WEB] 选择平台：")
+            print("\n[WEB] 选择平台:")
             print("  1. 全平台 (默认)")
             print("  2. shopee    3. amazon    4. tiktok    5. miaoshou")
             pch = input("请选择 (1-5): ").strip() or "1"
@@ -2435,10 +2435,10 @@ class CollectionCenterApp(BaseApplication):
             else:
                 platforms = all_map.get(pch, ["shopee", "amazon", "tiktok", "miaoshou"])
 
-            # 2) 选择数据类型（域）
-            print("\n[PUZZLE] 选择数据类型：")
+            # 2) 选择数据类型(域)
+            print("\n[PUZZLE] 选择数据类型:")
             print("  1. 全部    2. products  3. analytics  4. services  5. orders  6. finance")
-            dch = input("请选择 (1-6，回车=已打通三类): ").strip()
+            dch = input("请选择 (1-6,回车=已打通三类): ").strip()
             ready_domains = ["products", "analytics", "services"]
             all_domains = ["products", "analytics", "services", "orders", "finance"]
             if not dch:
@@ -2450,7 +2450,7 @@ class CollectionCenterApp(BaseApplication):
                 domains = [idx_map.get(dch)] if idx_map.get(dch) else ready_domains
 
             # 3) 选择账号范围
-            print("\n[USERS] 账号范围：")
+            print("\n[USERS] 账号范围:")
             print("  a. 全账号 (默认)    s. 选择单个账号")
             sch = (input("请选择 (a/s): ").strip() or "a").lower()
 
@@ -2475,10 +2475,10 @@ class CollectionCenterApp(BaseApplication):
                     for d in domains:
                         planned.append((pf, label, d))
 
-            # 4) 选择时间范围（与平台批量一致）
+            # 4) 选择时间范围(与平台批量一致)
             from datetime import datetime, timedelta
             print("\n[DATE] 选择时间范围:")
-            print("1. 昨天（默认）  2. 过去7天  3. 过去30天  4. 过去28天")
+            print("1. 昨天(默认)  2. 过去7天  3. 过去30天  4. 过去28天")
             w = input("请选择 (1-4): ").strip() or "1"
             if w == '1':
                 end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -2501,7 +2501,7 @@ class CollectionCenterApp(BaseApplication):
                 start_date = end_date
                 granularity = "day"
 
-            # 5) 构建账号清单（依选择模式）
+            # 5) 构建账号清单(依选择模式)
             from modules.utils.account_manager import AccountManager
             am = AccountManager()
             selected_accounts_by_pf = {}
@@ -2518,7 +2518,7 @@ class CollectionCenterApp(BaseApplication):
                         selected_accounts_by_pf[pf] = [sel[0]]
 
             if not selected_accounts_by_pf:
-                print("[FAIL] 未选择到任何有效账号（需启用且配置 login_url）")
+                print("[FAIL] 未选择到任何有效账号(需启用且配置 login_url)")
                 input("按回车键返回...")
                 return
 
@@ -2528,13 +2528,13 @@ class CollectionCenterApp(BaseApplication):
             if input("确认开始? (y/n): ").strip().lower() not in ['y','yes','是']:
                 return
 
-            # 规范化域名，analytics -> traffic（与组件注册保持一致）
+            # 规范化域名,analytics -> traffic(与组件注册保持一致)
             norm_domains = ["traffic" if d == "analytics" else d for d in domains]
 
             total_tasks = 0; ok_count = 0; fail_count = 0
             results_by_domain = {d: {"ok": 0, "fail": 0} for d in norm_domains}
 
-            # 限流与抖动配置（云端可调）
+            # 限流与抖动配置(云端可调)
             from modules.core.config import get_config_value as _get
             jitter_range = _get('data_collection', 'execution.jitter_ms_range', [300, 1200])
             account_cooldown_ms = _get('data_collection', 'execution.account_cooldown_ms', 1500)
@@ -2550,7 +2550,7 @@ class CollectionCenterApp(BaseApplication):
                     j = 0
                 time.sleep(max(0, (int(base_ms) + int(j))) / 1000.0)
 
-            # 仅 Shopee 现已接通；其他平台占位提示
+            # 仅 Shopee 现已接通;其他平台占位提示
             from playwright.sync_api import sync_playwright
             from modules.services.shopee_playwright_exporter import ShopeePlaywrightExporter
             try:
@@ -2563,14 +2563,14 @@ class CollectionCenterApp(BaseApplication):
                             exp = ShopeePlaywrightExporter(p)
                             shops = exp.list_shops(account)
                             if not shops:
-                                print("  [WARN] 未拉取到店铺，跳过该账号")
+                                print("  [WARN] 未拉取到店铺,跳过该账号")
                                 continue
-                            # Shopee 中仅执行已打通三类（products/traffic/services）
+                            # Shopee 中仅执行已打通三类(products/traffic/services)
                             ready_norm = ["products", "traffic", "services"]
                             exec_norm = [d for d in norm_domains if d in ready_norm]
                             skipped_norm = [d for d in norm_domains if d not in ready_norm]
                             if skipped_norm:
-                                print(f"  [NEXT] Shopee 未实现/占位，已跳过: {', '.join(skipped_norm)}")
+                                print(f"  [NEXT] Shopee 未实现/占位,已跳过: {', '.join(skipped_norm)}")
                             for shop in shops:
                                 print(f"  [SHOP] 店铺: {getattr(shop,'name','shop')} (id={getattr(shop,'id','')}, region={getattr(shop,'region','')})")
                                 for d in exec_norm:
@@ -2592,7 +2592,7 @@ class CollectionCenterApp(BaseApplication):
                                         fail_count += 1; results_by_domain[d]["fail"] += 1
                                         print(f"    [FAIL] 异常: {e}")
                                 _delay(shop_cooldown_ms)
-                            # 账户级：统一通过PB关闭持久化上下文，避免后续复用到已关闭的上下文
+                            # 账户级:统一通过PB关闭持久化上下文,避免后续复用到已关闭的上下文
                             try:
                                 acct_key = str(account.get('store_name') or account.get('username') or account.get('account_id') or '')
                                 if getattr(exp, 'pb', None) and acct_key:
@@ -2620,7 +2620,7 @@ class CollectionCenterApp(BaseApplication):
                                 pass
                             _delay(account_cooldown_ms)
 
-                    # 其他平台：使用最小骨架“真实执行”——为每个账号/域生成占位导出文件与 manifest
+                    # 其他平台:使用最小骨架“真实执行”——为每个账号/域生成占位导出文件与 manifest
                     from modules.core.config import get_config_value as _get
                     from modules.utils.path_sanitizer import build_output_path, build_filename
                     from datetime import datetime as _dt
@@ -2681,13 +2681,13 @@ class CollectionCenterApp(BaseApplication):
                                     print(f"    [FAIL] {account_label} [{pf}] -> {d} 失败: {_ex}")
 
                 # 结果汇总
-                print("\n[DATA] 批量结果汇总：")
+                print("\n[DATA] 批量结果汇总:")
                 print(f"   总任务: {total_tasks} | [OK] 成功: {ok_count} | [FAIL] 失败: {fail_count}")
-                print("\n[CHART] 按数据域统计：")
+                print("\n[CHART] 按数据域统计:")
                 for d in norm_domains:
                     stats = results_by_domain[d]
                     print(f"   {d}: [OK] {stats['ok']} | [FAIL] {stats['fail']}")
-                # 全局兜底关闭所有浏览器上下文，避免账号采集结束后残留
+                # 全局兜底关闭所有浏览器上下文,避免账号采集结束后残留
                 try:
                     from modules.utils.persistent_browser_manager import PersistentBrowserManager
                     PersistentBrowserManager().close_all_contexts()
@@ -2704,27 +2704,27 @@ class CollectionCenterApp(BaseApplication):
             get_logger(__name__).error(f"通用批量流程异常: {e}")
 
     def _run_amazon_batch_placeholder(self):
-        """Amazon 批量采集占位入口（使用通用批量流程或等待适配器接入）。"""
+        """Amazon 批量采集占位入口(使用通用批量流程或等待适配器接入)。"""
         print("\n[i] Amazon 批量采集暂未接入平台适配器。")
-        print("请使用 '一键所有平台批量采集' 并选择 Amazon，以便预演/计划任务；后续接入后将自动执行。")
+        print("请使用 '一键所有平台批量采集' 并选择 Amazon,以便预演/计划任务;后续接入后将自动执行。")
         input("按回车键返回...")
 
     def _run_tiktok_batch_placeholder(self):
-        """TikTok 批量采集占位入口（使用通用批量流程或等待适配器接入）。"""
+        """TikTok 批量采集占位入口(使用通用批量流程或等待适配器接入)。"""
         print("\n[i] TikTok 批量采集暂未接入平台适配器。")
-        print("请使用 '一键所有平台批量采集' 并选择 TikTok，以便预演/计划任务；后续接入后将自动执行。")
+        print("请使用 '一键所有平台批量采集' 并选择 TikTok,以便预演/计划任务;后续接入后将自动执行。")
         input("按回车键返回...")
 
     def _run_componentized_one_click_export(self):
-        """通用的‘组件化一键导出’入口（平台无关设计，当前支持 Shopee）。
+        """通用的‘组件化一键导出’入口(平台无关设计,当前支持 Shopee)。
 
-        流程：选择平台 -> 选择账号 -> 实时拉店铺 -> 选择店铺 -> 选择时间范围 -> 执行对应数据域的导出组件
-        默认数据域为 services（服务表现，AI 助手 + 人工聊天，支持 UI->API 兜底）。
+        流程:选择平台 -> 选择账号 -> 实时拉店铺 -> 选择店铺 -> 选择时间范围 -> 执行对应数据域的导出组件
+        默认数据域为 services(服务表现,AI 助手 + 人工聊天,支持 UI->API 兜底)。
         """
         try:
-            # 1) 平台选择（当前提供 Shopee，后续平台按配置自动出现）
+            # 1) 平台选择(当前提供 Shopee,后续平台按配置自动出现)
             platforms = ["shopee"]
-            print("\n[WEB] 可用平台：")
+            print("\n[WEB] 可用平台:")
             for i, pf in enumerate(platforms, 1):
                 print(f"  {i}. {pf}")
             ch = input("请选择平台 (默认1): ").strip() or "1"
@@ -2734,7 +2734,7 @@ class CollectionCenterApp(BaseApplication):
             except Exception:
                 print("[FAIL] 选择无效"); input("按回车键返回..."); return
 
-            # 2) 选择账号（统一入口）
+            # 2) 选择账号(统一入口)
             if platform != "shopee":
                 print("[WARN] 暂不支持该平台的一键导出"); input("按回车键返回..."); return
             sel = self._select_shopee_account_unified()
@@ -2753,8 +2753,8 @@ class CollectionCenterApp(BaseApplication):
                 exp = ShopeePlaywrightExporter(p)
                 shops = exp.list_shops(account)
                 if not shops:
-                    print("[FAIL] 未拉取到店铺，请确认账号登录状态"); input("按回车键返回..."); return
-                print("\n[SHOP] 选择店铺：")
+                    print("[FAIL] 未拉取到店铺,请确认账号登录状态"); input("按回车键返回..."); return
+                print("\n[SHOP] 选择店铺:")
                 for i, s in enumerate(shops, 1):
                     print(f"  {i}. {getattr(s,'name', 'shop')} (id={getattr(s,'id', '')}, region={getattr(s,'region','')})")
                 sidx = input("请选择店铺序号: ").strip()
@@ -2763,10 +2763,10 @@ class CollectionCenterApp(BaseApplication):
                 except Exception:
                     print("[FAIL] 选择无效"); input("按回车键返回..."); return
 
-                # 4) 选择时间范围（标准候选：昨天/过去7天/过去30天）
+                # 4) 选择时间范围(标准候选:昨天/过去7天/过去30天)
                 from datetime import datetime, timedelta
                 print("\n[DATE] 选择时间范围:")
-                print("1. 昨天（默认）  2. 过去7天  3. 过去30天")
+                print("1. 昨天(默认)  2. 过去7天  3. 过去30天")
                 w = input("请选择 (1-3): ").strip() or "1"
                 if w == '1':
                     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -2781,7 +2781,7 @@ class CollectionCenterApp(BaseApplication):
                     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
                     start_date = yesterday; end_date = yesterday; granularity = "day"
 
-                # 子类型选择（默认：全部）
+                # 子类型选择(默认:全部)
                 print("\n子类型选择:")
                 print("1. 全部 (默认)  2. AI助手  3. 人工聊天")
                 st = input("请选择 (1-3): ").strip() or "1"
@@ -2791,7 +2791,7 @@ class CollectionCenterApp(BaseApplication):
                 elif st == "3":
                     services_subtype = "agent"
 
-                # 5) 打开已登录页面（持久化会话），构造 adapter + 执行导出组件
+                # 5) 打开已登录页面(持久化会话),构造 adapter + 执行导出组件
                 try:
                     ctx_exp, page_exp, platform_exp, account_id_exp = exp._open_account_page(account)
                 except Exception as e:
@@ -2803,7 +2803,7 @@ class CollectionCenterApp(BaseApplication):
                     from modules.platforms.shopee.components.config_registry import ConfigRegistry, DataDomain
                     from modules.core.logger import get_logger as _get_logger
 
-                    # 默认数据域：services（服务表现，AI助手+人工聊天）；后续可扩展为可选
+                    # 默认数据域:services(服务表现,AI助手+人工聊天);后续可扩展为可选
                     domain = DataDomain.SERVICES
                     # 构造执行上下文
                     account_ctx = dict(account)
@@ -2822,7 +2822,7 @@ class CollectionCenterApp(BaseApplication):
                             "end_date": end_date,
                             "shop_name": getattr(shop, 'name', None),
                             "services_subtype": services_subtype,
-                            # 默认导出全部子类型；如需仅导出某一子类型，可设置 "services_subtype": "ai_assistant"/"agent"
+                            # 默认导出全部子类型;如需仅导出某一子类型,可设置 "services_subtype": "ai_assistant"/"agent"
                         },
                     )
 
@@ -2831,11 +2831,11 @@ class CollectionCenterApp(BaseApplication):
                     # 动态获取导出组件类并执行
                     ExportCls = ConfigRegistry.get_export_component_class(domain)
                     exporter = ExportCls(exec_ctx)
-                    print("\n[START] 开始执行：Shopee 服务表现（AI助手/人工聊天）")
+                    print("\n[START] 开始执行:Shopee 服务表现(AI助手/人工聊天)")
                     result = exporter.run(page_exp)
                     if result.success:
                         print(f"\n[OK] 导出成功: {result.file_path or ''}")
-                        print("[FOLDER] 输出目录已按规范生成（含统一文件命名）")
+                        print("[FOLDER] 输出目录已按规范生成(含统一文件命名)")
                     else:
                         print(f"\n[FAIL] 导出失败: {result.message}")
                 finally:
@@ -2850,15 +2850,15 @@ class CollectionCenterApp(BaseApplication):
             get_logger(__name__).error(f"一键导出流程异常: {e}")
 
     def _run_multi_domain_platform_wide_batch(self):
-        """多数据域平台全量批量采集：一个平台的所有账号->所有店铺->多种数据类型。"""
+        """多数据域平台全量批量采集:一个平台的所有账号->所有店铺->多种数据类型。"""
         try:
-            # 1) 平台选择（当前仅支持 Shopee）；支持一键预设直达
+            # 1) 平台选择(当前仅支持 Shopee);支持一键预设直达
             preset = getattr(self, "_one_click_preset", None)
             if preset:
                 platform = "shopee"
             else:
                 platforms = ["shopee"]
-                print("\n[WEB] 可用平台：")
+                print("\n[WEB] 可用平台:")
                 for i, pf in enumerate(platforms, 1):
                     print(f"  {i}. {pf}")
                 ch = input("请选择平台 (默认1): ").strip() or "1"
@@ -2867,7 +2867,7 @@ class CollectionCenterApp(BaseApplication):
                 except Exception:
                     print("[FAIL] 选择无效"); input("按回车键返回..."); return
 
-            # 2) 数据域选择（多选）；支持一键预设覆盖
+            # 2) 数据域选择(多选);支持一键预设覆盖
             preset_domains = getattr(self, "_one_click_domains", None)
             if preset_domains:
                 domain_map = {
@@ -2879,13 +2879,13 @@ class CollectionCenterApp(BaseApplication):
                 }
                 selected_domains = [domain_map[k] for k in preset_domains if k in domain_map]
             else:
-                print("\n[DATA] 选择数据域（可多选）：")
+                print("\n[DATA] 选择数据域(可多选):")
                 print("1. 服务表现 (services)")
                 print("2. 商品表现 (products)")
                 print("3. 流量表现 (traffic)")
                 print("4. 订单表现 (orders)")
                 print("5. 财务表现 (finance)")
-                print("请输入选择的数字，用逗号分隔 (如: 1,2,3 或 回车=已打通的三类): ", end="")
+                print("请输入选择的数字,用逗号分隔 (如: 1,2,3 或 回车=已打通的三类): ", end="")
                 domain_input = input().strip() or "1,2,3"
 
                 domain_map_num = {
@@ -2909,11 +2909,11 @@ class CollectionCenterApp(BaseApplication):
             exec_domains = [d for d in selected_domains if d[0] in READY_KEYS]
             skipped = [d[1] for d in selected_domains if d[0] not in READY_KEYS]
             if skipped:
-                print(f"[NEXT] 未实现/占位，已自动跳过: {', '.join(skipped)}")
+                print(f"[NEXT] 未实现/占位,已自动跳过: {', '.join(skipped)}")
             if not exec_domains:
                 print("[FAIL] 未选择到任何已打通的数据域"); input("按回车返回..."); return
 
-            # 3) 时间范围选择；支持一键预设覆盖
+            # 3) 时间范围选择;支持一键预设覆盖
             from datetime import datetime, timedelta
             preset = getattr(self, "_one_click_preset", None)
             if isinstance(preset, dict) and preset.get("start_date") and preset.get("end_date"):
@@ -2922,7 +2922,7 @@ class CollectionCenterApp(BaseApplication):
                 granularity = str(preset.get("granularity", "daily"))
             else:
                 print("\n[DATE] 选择时间范围:")
-                print("1. 昨天（默认）  2. 过去7天  3. 过去30天")
+                print("1. 昨天(默认)  2. 过去7天  3. 过去30天")
                 w = input("请选择 (1-3): ").strip() or "1"
                 if w == '1':
                     end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -2975,7 +2975,7 @@ class CollectionCenterApp(BaseApplication):
                     exp = ShopeePlaywrightExporter(p)
                     shops = exp.list_shops(account) if platform == "shopee" else []
                     if not shops:
-                        print("  [WARN] 未拉取到店铺，跳过该账号")
+                        print("  [WARN] 未拉取到店铺,跳过该账号")
                         continue
 
                     for shop in shops:
@@ -3046,7 +3046,7 @@ class CollectionCenterApp(BaseApplication):
                                     except Exception:
                                         pass
 
-                        # 账号级收尾：关闭当前账号的所有上下文与回退浏览器，避免并窗
+                        # 账号级收尾:关闭当前账号的所有上下文与回退浏览器,避免并窗
                         try:
                             if 'exp' in locals() and getattr(exp, 'pb', None):
                                 aid = (
@@ -3089,7 +3089,7 @@ class CollectionCenterApp(BaseApplication):
                                     if not any_open:
                                         break
                                     time.sleep(0.25)
-                            #  清理无效注释：账号后台资源统计（确认后台也同步关闭）
+                            #  清理无效注释:账号后台资源统计(确认后台也同步关闭)
                             try:
                                 c_cnt = len(getattr(exp.pb, 'active_contexts', []) or [])
                                 f_cnt = len(getattr(exp.pb, '_fallback_browsers', {}) or {})
@@ -3105,7 +3105,7 @@ class CollectionCenterApp(BaseApplication):
                         except Exception:
                             pass
 
-            # 全局兜底关闭所有浏览器上下文，避免账号采集结束后残留
+            # 全局兜底关闭所有浏览器上下文,避免账号采集结束后残留
             try:
                 from modules.utils.persistent_browser_manager import PersistentBrowserManager
                 PersistentBrowserManager().close_all_contexts()
@@ -3121,7 +3121,7 @@ class CollectionCenterApp(BaseApplication):
 
 
             if fail_records:
-                print("\n[RECEIPT] 按账号/店铺/数据域失败清单：")
+                print("\n[RECEIPT] 按账号/店铺/数据域失败清单:")
                 for acct, shop_name, dkey in fail_records:
                     try:
                         dname = domain_name_map.get(dkey, dkey)
@@ -3131,9 +3131,9 @@ class CollectionCenterApp(BaseApplication):
 
 
             # 6) 结果汇总
-            print("\n[DATA] 批量结果汇总：")
+            print("\n[DATA] 批量结果汇总:")
             print(f"   总任务: {total_tasks} | [OK] 成功: {ok_count} | [FAIL] 失败: {fail_count}")
-            print("\n[CHART] 按数据域统计：")
+            print("\n[CHART] 按数据域统计:")
             for domain_key, domain_name in exec_domains:
                 stats = results_by_domain[domain_key]
                 print(f"   {domain_name}: [OK] {stats['ok']} | [FAIL] {stats['fail']}")
@@ -3158,7 +3158,7 @@ class CollectionCenterApp(BaseApplication):
             domain_map = {
                 "services": DataDomain.SERVICES,
                 "products": DataDomain.PRODUCTS,
-                "analytics": DataDomain.ANALYTICS,  # v4.10.0更新：统一使用analytics域，traffic域已废弃
+                "analytics": DataDomain.ANALYTICS,  # v4.10.0更新:统一使用analytics域,traffic域已废弃
                 "orders": DataDomain.ORDERS,
                 "finance": DataDomain.FINANCE
             }
@@ -3195,7 +3195,7 @@ class CollectionCenterApp(BaseApplication):
                 if domain_key == "services":
                     config["services_subtype"] = "all"  # 默认全部子类型
 
-                # 注入选中店铺名，供组件统一使用
+                # 注入选中店铺名,供组件统一使用
                 account_ctx['selected_shop_name'] = getattr(shop, 'name', None)
 
                 exec_ctx = ExecutionContext(
@@ -3208,11 +3208,11 @@ class CollectionCenterApp(BaseApplication):
                 # 执行导出
                 exporter = ExportCls(exec_ctx)
 
-                # Shopee: 组件化域（products/traffic/...）先导航到目标页面；services 由组件内部处理
+                # Shopee: 组件化域(products/traffic/...)先导航到目标页面;services 由组件内部处理
                 try:
                     if platform.lower() == 'shopee' and data_domain in (DataDomain.ANALYTICS, DataDomain.PRODUCTS, DataDomain.ORDERS, DataDomain.FINANCE):
                         from modules.platforms.shopee.components.navigation import ShopeeNavigation
-                        # 选择器按域选择（缺省回退到 AnalyticsSelectors）
+                        # 选择器按域选择(缺省回退到 AnalyticsSelectors)
                         sel = None
                         if data_domain == DataDomain.PRODUCTS:
                             from modules.platforms.shopee.components.products_config import ProductsSelectors as _Sel
@@ -3229,7 +3229,7 @@ class CollectionCenterApp(BaseApplication):
                 except Exception as _ne:
                     print(f"    [WARN] 导航步骤异常(继续尝试导出): {_ne}")
 
-                # 统一域级限流：执行前冷却+抖动（由 config/data_collection.yaml 配置）
+                # 统一域级限流:执行前冷却+抖动(由 config/data_collection.yaml 配置)
                 try:
                     from modules.core.config import get_config_value as _get
                     import time, random
@@ -3240,7 +3240,7 @@ class CollectionCenterApp(BaseApplication):
                 except Exception:
                     pass
 
-                    # 商品表现：采用组件化 DatePicker 并做可见校验，确保不是“今日实时”
+                    # 商品表现:采用组件化 DatePicker 并做可见校验,确保不是“今日实时”
                     if data_domain == DataDomain.PRODUCTS:
                         try:
                             from modules.components.date_picker.base import DateOption
@@ -3276,7 +3276,7 @@ class CollectionCenterApp(BaseApplication):
                             except Exception:
                                 cur_url = ""
                             if ("timeRange=" in cur_url) or ("shortcut=" in cur_url):
-                                print("    [CAL] 当前URL已包含时间参数，跳过日期选择组件")
+                                print("    [CAL] 当前URL已包含时间参数,跳过日期选择组件")
                             else:
                                 date_res = adapter.date_picker().run(page_exp, opt)
                                 if not date_res.success:
@@ -3288,7 +3288,7 @@ class CollectionCenterApp(BaseApplication):
 
                 result = exporter.run(page_exp)
 
-                # 商品表现：下载后校验文件名中的日期范围是否与预期一致，不一致则重试一次日期选择+导出
+                # 商品表现:下载后校验文件名中的日期范围是否与预期一致,不一致则重试一次日期选择+导出
                 if data_domain == DataDomain.PRODUCTS and result and getattr(result, 'success', False):
                     try:
                         expected_start = str(start_date)
@@ -3312,7 +3312,7 @@ class CollectionCenterApp(BaseApplication):
                             except Exception:
                                 ok_dates = False
                         if not ok_dates:
-                            print(f"    [WARN] 日期校验不一致：期望 {expected_start}~{expected_end}，实际文件: {fpath}，将重选日期并重试导出")
+                            print(f"    [WARN] 日期校验不一致:期望 {expected_start}~{expected_end},实际文件: {fpath},将重选日期并重试导出")
                             try:
                                 from modules.components.date_picker.base import DateOption
                                 from modules.services.platform_adapter import get_adapter as _get_adapter
@@ -3330,7 +3330,7 @@ class CollectionCenterApp(BaseApplication):
                                 except Exception:
                                     cur_url = ""
                                 if ("timeRange=" in cur_url) or ("shortcut=" in cur_url):
-                                    print("    [CAL] URL已含时间参数，跳过日期选择组件(重试)")
+                                    print("    [CAL] URL已含时间参数,跳过日期选择组件(重试)")
                                 else:
                                     _res2 = adapter.date_picker().run(page_exp, opt)
                                     page_exp.wait_for_timeout(600)
@@ -3348,7 +3348,7 @@ class CollectionCenterApp(BaseApplication):
                 return result.success if result else False
 
             finally:
-                # 不在域级关闭持久化上下文，避免下一域/下一店铺复用时出现“context has been closed”
+                # 不在域级关闭持久化上下文,避免下一域/下一店铺复用时出现“context has been closed”
                 # 上下文在账号级循环结束后统一通过 PersistentBrowserManager 关闭
                 pass
 
@@ -3356,11 +3356,11 @@ class CollectionCenterApp(BaseApplication):
             print(f"    [FAIL] 执行{domain_key}导出异常: {e}")
             return False
     def _run_services_platform_wide_batch(self):
-        """平台全量批量采集：一个平台的所有账号->所有店铺->服务表现（全部/指定子类型）。"""
+        """平台全量批量采集:一个平台的所有账号->所有店铺->服务表现(全部/指定子类型)。"""
         try:
-            # 1) 平台选择（当前仅支持 Shopee）
+            # 1) 平台选择(当前仅支持 Shopee)
             platforms = ["shopee"]
-            print("\n[WEB] 可用平台：")
+            print("\n[WEB] 可用平台:")
             for i, pf in enumerate(platforms, 1):
                 print(f"  {i}. {pf}")
             ch = input("请选择平台 (默认1): ").strip() or "1"
@@ -3369,10 +3369,10 @@ class CollectionCenterApp(BaseApplication):
             except Exception:
                 print("[FAIL] 选择无效"); input("按回车键返回..."); return
 
-            # 2) 时间范围选择（统一与组件化单店一致）
+            # 2) 时间范围选择(统一与组件化单店一致)
             from datetime import datetime, timedelta
             print("\n[DATE] 选择时间范围:")
-            print("1. 昨天（默认）  2. 过去7天  3. 过去30天")
+            print("1. 昨天(默认)  2. 过去7天  3. 过去30天")
             w = input("请选择 (1-3): ").strip() or "1"
             if w == '1':
                 end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -3424,7 +3424,7 @@ class CollectionCenterApp(BaseApplication):
                     exp = ShopeePlaywrightExporter(p)
                     shops = exp.list_shops(account) if platform == "shopee" else []
                     if not shops:
-                        print("  [WARN] 未拉取到店铺，跳过该账号")
+                        print("  [WARN] 未拉取到店铺,跳过该账号")
                         continue
 
                     for shop in shops:
@@ -3453,7 +3453,7 @@ class CollectionCenterApp(BaseApplication):
                                 adapter = get_adapter(platform, exec_ctx)
                                 ExportCls = ConfigRegistry.get_export_component_class(DataDomain.SERVICES)
                                 exporter = ExportCls(exec_ctx)
-                                print("    [START] 导出：Shopee 服务表现（AI助手/人工聊天）")
+                                print("    [START] 导出:Shopee 服务表现(AI助手/人工聊天)")
                                 result = exporter.run(page_exp)
                                 if result.success:
                                     ok_count += 1
@@ -3470,7 +3470,7 @@ class CollectionCenterApp(BaseApplication):
                             fail_count += 1
                             print(f"    [FAIL] 异常: {e}")
 
-            print("\n[DATA] 批量结果汇总：")
+            print("\n[DATA] 批量结果汇总:")
             print(f"   总任务: {total} | [OK] 成功: {ok_count} | [FAIL] 失败: {fail_count}")
             input("\n按回车键返回...")
         except Exception as e:
@@ -3485,15 +3485,15 @@ class CollectionCenterApp(BaseApplication):
 
 
     def _select_shopee_account_unified(self):
-        """统一的 Shopee 账号选择（代理到通用入口）"""
+        """统一的 Shopee 账号选择(代理到通用入口)"""
         return self._select_account_unified("shopee")
 
     def _select_account_unified(self, platform: str):
         """
-        通用账号选择：
-        - 统一来源与过滤：platform 匹配（含回退同义关键词），enabled=true，必须配置 login_url
-        - 统一展示：显示名 + 登录URL + 备注
-        - 返回 (account, account_label)；选择无效返回 None
+        通用账号选择:
+        - 统一来源与过滤:platform 匹配(含回退同义关键词),enabled=true,必须配置 login_url
+        - 统一展示:显示名 + 登录URL + 备注
+        - 返回 (account, account_label);选择无效返回 None
         """
         try:
             from modules.utils.account_manager import AccountManager
@@ -3511,7 +3511,7 @@ class CollectionCenterApp(BaseApplication):
             # 尝试平台精确过滤
             accounts = am.get_accounts_by_platform(platform) or am.get_accounts_by_platform(platform.capitalize())
             if not accounts:
-                # 回退：在所有账号中做关键字模糊匹配
+                # 回退:在所有账号中做关键字模糊匹配
                 all_accounts = am.load_accounts().get('accounts', [])
                 accounts = [
                     acc for acc in all_accounts
@@ -3520,7 +3520,7 @@ class CollectionCenterApp(BaseApplication):
                     or any(k in (acc.get('username', '') or '').lower() for k in keys)
                 ]
 
-            # 过滤启用且配置了 login_url 的账号（遵循登录网址规范）
+            # 过滤启用且配置了 login_url 的账号(遵循登录网址规范)
             accounts = [a for a in accounts if a.get('enabled', True) and a.get('login_url')]
 
             if not accounts:
@@ -3533,7 +3533,7 @@ class CollectionCenterApp(BaseApplication):
                 input("按回车键返回...")
                 return None
 
-            print(f"\n[USER] 选择 {platform.capitalize()} 账号：")
+            print(f"\n[USER] 选择 {platform.capitalize()} 账号:")
             for i, acc in enumerate(accounts, 1):
                 display_name = (
                     acc.get('store_name') or
@@ -3568,11 +3568,11 @@ class CollectionCenterApp(BaseApplication):
 
 
     def _run_shopee_product_performance_export(self):
-        """运行 Shopee 商品表现数据导出（Playwright 自动化）"""
+        """运行 Shopee 商品表现数据导出(Playwright 自动化)"""
         try:
             print("\n[SHOP]  Shopee 商品表现数据导出")
             print("=" * 50)
-            print("[LIST] 流程：选账号 -> 实时拉取店铺 -> (必要时) 选择日期 -> 导出")
+            print("[LIST] 流程:选账号 -> 实时拉取店铺 -> (必要时) 选择日期 -> 导出")
 
             # 选择账号
             sel = self._select_shopee_account_unified()
@@ -3587,8 +3587,8 @@ class CollectionCenterApp(BaseApplication):
                 exp = ShopeePlaywrightExporter(p)
                 shops = exp.list_shops(account)
                 if not shops:
-                    print("[FAIL] 未拉取到店铺，请确认账号登录状态"); input("按回车键返回..."); return
-                print("\n[SHOP] 选择店铺：")
+                    print("[FAIL] 未拉取到店铺,请确认账号登录状态"); input("按回车键返回..."); return
+                print("\n[SHOP] 选择店铺:")
                 for i, s in enumerate(shops, 1):
                     print(f"  {i}. {s.name} (id={s.id}, region={s.region})")
                 sidx = input("请选择店铺序号: ").strip()
@@ -3597,10 +3597,10 @@ class CollectionCenterApp(BaseApplication):
                 except Exception:
                     print("[FAIL] 选择无效"); input("按回车键返回..."); return
 
-                # 选择时间范围（适配Shopee控件实际能力）
+                # 选择时间范围(适配Shopee控件实际能力)
                 from datetime import datetime, timedelta
                 print("\n[DATE] 选择时间范围:")
-                print("1. 今日实时  2. 昨天  3. 过去7天（推荐）  4. 过去30天")
+                print("1. 今日实时  2. 昨天  3. 过去7天(推荐)  4. 过去30天")
                 w = input("请选择 (1-4): ").strip()
                 if w == '1':
                     # 今日实时
@@ -3625,11 +3625,11 @@ class CollectionCenterApp(BaseApplication):
                     print("[FAIL] 选择无效"); input("按回车键返回..."); return
 
                 # 导出选项
-                print(f"\n参数确认：账号={account_label} 店铺={shop.name} 时间范围={start_date}~{end_date}")
+                print(f"\n参数确认:账号={account_label} 店铺={shop.name} 时间范围={start_date}~{end_date}")
                 print("\n[TOOL] 导出选项:")
                 print("1. 标准导出")
-                print("2. 录制模式（Inspector+事件监听）")
-                print("3. 对比诊断（手动前后快照）")
+                print("2. 录制模式(Inspector+事件监听)")
+                print("3. 对比诊断(手动前后快照)")
                 mode = input("请选择模式 (1-3, 默认1): ").strip() or "1"
                 enable_recording = (mode == "2")
                 enable_compare = (mode == "3")
@@ -3637,14 +3637,14 @@ class CollectionCenterApp(BaseApplication):
                 if input("\n确认开始导出? (y/n): ").strip().lower() not in ['y','yes','是']:
                     return
 
-                # 决策：组件化优先（可通过 simple_config.collection.component_first 开关）
+                # 决策:组件化优先(可通过 simple_config.collection.component_first 开关)
                 from modules.core.config import get_config_value
                 component_first = get_config_value('simple_config', 'collection.component_first', True)
 
                 if component_first:
                     print("[TOOL] 执行策略: 组件化优先路径")
                     try:
-                        # 组件化路径：使用组件完成完整流程，跳过导出器的重复步骤
+                        # 组件化路径:使用组件完成完整流程,跳过导出器的重复步骤
                         from modules.components.base import ExecutionContext
                         from modules.services.platform_adapter import get_adapter
                         from modules.components.navigation.base import TargetPage
@@ -3652,18 +3652,18 @@ class CollectionCenterApp(BaseApplication):
                         from modules.core.logger import get_logger as _get_logger
 
                         print("[LOC] 步骤1: 获取页面对象...")
-                        # 先获取 page 对象（从 exporter 的上下文中）
+                        # 先获取 page 对象(从 exporter 的上下文中)
                         ctx_exp, page_exp, platform_exp, account_id_exp = exp._open_account_page(account)
 
                         print("[LOC] 步骤2: 构造执行上下文...")
-                        # 构造执行上下文（为导航提供shop_id）
+                        # 构造执行上下文(为导航提供shop_id)
                         account_ctx = dict(account)
                         account_ctx['shop_id'] = shop.id
                         ctx = ExecutionContext(platform='shopee', account=account_ctx, logger=_get_logger(__name__))
                         adapter = get_adapter('shopee', ctx)
 
                         print("[LOC] 步骤3: 执行导航组件...")
-                        # 组件化执行：navigate -> date（已通过 _open_account_page 完成入口，不再重复 login）
+                        # 组件化执行:navigate -> date(已通过 _open_account_page 完成入口,不再重复 login)
                         nav_result = adapter.navigation().run(page_exp, TargetPage.PRODUCTS_PERFORMANCE)
                         print(f"[LOC] 导航结果: success={nav_result.success}, url={nav_result.url}, message={nav_result.message}")
 
@@ -3677,7 +3677,7 @@ class CollectionCenterApp(BaseApplication):
                             return
 
 
-                        # [LOC] 步骤3.5: 在执行日期选择之前，先检查是否存在弹窗/iframe 干扰并关闭
+                        # [LOC] 步骤3.5: 在执行日期选择之前,先检查是否存在弹窗/iframe 干扰并关闭
                         try:
                             print("[LOC] 步骤3.5: 检查并关闭弹窗(含 iframe)...")
 
@@ -3710,12 +3710,12 @@ class CollectionCenterApp(BaseApplication):
                                         loc = target.locator(sel)
                                         if loc.count() > 0 and loc.first.is_visible():
                                             loc.first.click(timeout=800)
-                                            # 使用页面等待，避免 Frame 无该方法
+                                            # 使用页面等待,避免 Frame 无该方法
                                             page_exp.wait_for_timeout(300)
                                             return True
                                     except Exception:
                                         pass
-                                # 兜底：若看到遮罩层，发一个 ESC
+                                # 兜底:若看到遮罩层,发一个 ESC
                                 try:
                                     for ov in overlay_selectors:
                                         ov_loc = target.locator(ov)
@@ -3745,9 +3745,9 @@ class CollectionCenterApp(BaseApplication):
 
                             closed = _scan_all_roots_once()
 
-                            # 为应对“页面加载后延迟2s才出现”的弹窗，进行短暂观察重试
+                            # 为应对“页面加载后延迟2s才出现”的弹窗,进行短暂观察重试
                             if not closed:
-                                watch_ms, step_ms = 6000, 300  # 共观察 ~6s，覆盖更晚出现的弹窗
+                                watch_ms, step_ms = 6000, 300  # 共观察 ~6s,覆盖更晚出现的弹窗
                                 waited = 0
                                 while waited < watch_ms and not closed:
                                     try:
@@ -3788,8 +3788,8 @@ class CollectionCenterApp(BaseApplication):
                         print("[RETRY] 回退到传统路径...")
                         component_first = False  # 回退到传统路径
 
-                    # 使用纯导出方法（跳过导出器内部的登录/导航/日期设置）
-                    print("[TARGET] 组件化路径完成，开始纯导出...")
+                    # 使用纯导出方法(跳过导出器内部的登录/导航/日期设置)
+                    print("[TARGET] 组件化路径完成,开始纯导出...")
                     try:
                         # 从配置读取导出行为设置
                         from modules.core.config import get_export_settings
@@ -3818,7 +3818,7 @@ class CollectionCenterApp(BaseApplication):
                 else:
                     print("[TOOL] 执行策略: 传统完整路径")
                     print("[TOOL] 执行策略: 旧版程序化导出 (ShopeeExporter)")
-                    # 传统路径：使用完整导出方法
+                    # 传统路径:使用完整导出方法
                     # 从配置读取导出行为设置
                     from modules.core.config import get_export_settings
                     granularity = exp._calculate_granularity(start_date, end_date)
@@ -3918,7 +3918,7 @@ class CollectionCenterApp(BaseApplication):
 
 
     def _run_tiktok_collection(self):
-        """运行TikTok数据采集（骨架）"""
+        """运行TikTok数据采集(骨架)"""
         print("\n[MUSIC] TikTok数据采集")
         print("=" * 40)
         print("[LIST] 功能说明: TikTok/抖音跨境店铺数据采集")
@@ -3937,11 +3937,11 @@ class CollectionCenterApp(BaseApplication):
                 return
             account, account_label = sel
             print(f"[OK] 已选择账号: {account_label}")
-            # 店铺选择（占位：手动输入模拟）
+            # 店铺选择(占位:手动输入模拟)
             shop_name = input("\n请输入店铺名称(示例: MainShop): ").strip() or "MainShop"
             shop_id = input("请输入店铺ID(示例: 1234567890): ").strip() or "1234567890"
 
-            # 数据类型与粒度选择（占位）
+            # 数据类型与粒度选择(占位)
             print("\n请选择数据类型: 1) traffic  2) product  3) order  4) finance  (默认1)")
             dt_choice = (input("输入编号: ").strip() or "1")
             data_type = {"1": "traffic", "2": "product", "3": "order", "4": "finance"}.get(dt_choice, "traffic")
@@ -3950,7 +3950,7 @@ class CollectionCenterApp(BaseApplication):
             gr_choice = (input("输入编号: ").strip() or "1")
             granularity = {"1": "daily", "2": "weekly", "3": "monthly"}.get(gr_choice, "daily")
 
-            # 时间范围（简单输入占位）
+            # 时间范围(简单输入占位)
             start_date = input("\n开始日期(YYYY-MM-DD, 默认过去7天起): ").strip()
             end_date = input("结束日期(YYYY-MM-DD, 默认昨天): ").strip()
             if not start_date or not end_date:
@@ -3958,7 +3958,7 @@ class CollectionCenterApp(BaseApplication):
                 end_date = (date.today() - timedelta(days=1)).isoformat()
                 start_date = (date.today() - timedelta(days=7)).isoformat()
 
-            # 计划落盘路径（与 Shopee 规格一致）
+            # 计划落盘路径(与 Shopee 规格一致)
             from pathlib import Path
             safe_shop = f"{shop_name}__{shop_id}"
             base_dir = Path("temp/outputs") / "tiktok" / account_label / safe_shop / data_type / granularity
@@ -3972,7 +3972,7 @@ class CollectionCenterApp(BaseApplication):
             print(f"  清单: {manifest.name}")
 
 
-            # TikTok采集功能（占位）
+            # TikTok采集功能(占位)
             print("[TIP] TikTok采集功能开发中")
             print("[LIST] 计划功能:")
             print("  • 店铺指标采集")
@@ -4169,17 +4169,17 @@ class CollectionCenterApp(BaseApplication):
             }
 
     def _run_analytics_collection_menu(self):
-        """客流数据采集子菜单（组件化优先）"""
+        """客流数据采集子菜单(组件化优先)"""
         while True:
             print("\n[DATA] 客流数据采集")
             print("=" * 40)
-            print("请选择具体的客流数据类型：")
-            print("  1. [SHOP]  Shopee 流量表现数据导出（组件化优先 - 已增强）")
-            print("  2. [MUSIC] TikTok 流量表现数据导出（组件化 - 深链接->时间->导出）")
-            print("  3. [TOOLKIT] 妙手ERP 流量表现数据导出（组件化）")
-            print("  4. [DATA] 运行客流数据录制脚本（事件回放）")
-            print("  c. [EDIT]  快速修改组件配置（analytics_config.py）")
-            print("  m. 管理稳定版脚本（查看/设置/取消）")
+            print("请选择具体的客流数据类型:")
+            print("  1. [SHOP]  Shopee 流量表现数据导出(组件化优先 - 已增强)")
+            print("  2. [MUSIC] TikTok 流量表现数据导出(组件化 - 深链接->时间->导出)")
+            print("  3. [TOOLKIT] 妙手ERP 流量表现数据导出(组件化)")
+            print("  4. [DATA] 运行客流数据录制脚本(事件回放)")
+            print("  c. [EDIT]  快速修改组件配置(analytics_config.py)")
+            print("  m. 管理稳定版脚本(查看/设置/取消)")
             print("  0. [BACK] 返回上级菜单")
 
             choice = input("\n请选择 (0-4/c/m): ").strip()
@@ -4206,7 +4206,7 @@ class CollectionCenterApp(BaseApplication):
         try:
             print("\n[SHOP]  Shopee 流量表现数据导出")
             print("=" * 50)
-            print("[LIST] 流程：选账号 -> 实时拉取店铺 -> 选择时间范围 -> 导出")
+            print("[LIST] 流程:选账号 -> 实时拉取店铺 -> 选择时间范围 -> 导出")
 
             sel = self._select_shopee_account_unified()
             if not sel:
@@ -4220,8 +4220,8 @@ class CollectionCenterApp(BaseApplication):
                 exp = ShopeePlaywrightExporter(p)
                 shops = exp.list_shops(account)
                 if not shops:
-                    print("[FAIL] 未拉取到店铺，请确认账号登录状态"); input("按回车键返回..."); return
-                print("\n[SHOP] 选择店铺：")
+                    print("[FAIL] 未拉取到店铺,请确认账号登录状态"); input("按回车键返回..."); return
+                print("\n[SHOP] 选择店铺:")
                 for i, s in enumerate(shops, 1):
                     print(f"  {i}. {s.name} (id={s.id}, region={s.region})")
                 sidx = input("请选择店铺序号: ").strip()
@@ -4230,10 +4230,10 @@ class CollectionCenterApp(BaseApplication):
                 except Exception:
                     print("[FAIL] 选择无效"); input("按回车键返回..."); return
 
-                # 选择时间范围（流量表现特有：昨天、过去7天、过去30天）
+                # 选择时间范围(流量表现特有:昨天、过去7天、过去30天)
                 from datetime import datetime, timedelta
                 print("\n[DATE] 选择时间范围:")
-                print("1. 昨天（默认）  2. 过去7天  3. 过去30天")
+                print("1. 昨天(默认)  2. 过去7天  3. 过去30天")
                 w = input("请选择 (1-3): ").strip()
                 if w == '1' or w == '':
                     # 昨天
@@ -4249,7 +4249,7 @@ class CollectionCenterApp(BaseApplication):
                     end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")  # 昨天作为结束
                     start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
                 else:
-                    print("[FAIL] 选择无效，使用默认：昨天")
+                    print("[FAIL] 选择无效,使用默认:昨天")
                     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
                     start_date = yesterday
                     end_date = yesterday
@@ -4285,7 +4285,7 @@ class CollectionCenterApp(BaseApplication):
             input("按回车键返回...")
 
     def _run_shopee_analytics_export_component_first(self, analytics_type: str = "traffic"):
-        """运行 Shopee 数据分析导出（组件化优先 - 支持多子类型）"""
+        """运行 Shopee 数据分析导出(组件化优先 - 支持多子类型)"""
         try:
             type_names = {
                 "traffic": "流量表现",
@@ -4295,10 +4295,10 @@ class CollectionCenterApp(BaseApplication):
             }
             type_name = type_names.get(analytics_type, analytics_type)
 
-            print(f"\n[SHOP]  Shopee {type_name}数据导出（组件化优先 - 已增强）")
+            print(f"\n[SHOP]  Shopee {type_name}数据导出(组件化优先 - 已增强)")
             print("=" * 60)
-            print("[LIST] 流程：选账号 -> 实时拉取店铺 -> 选择时间范围 -> 增强组件化导出")
-            print("[NEW] 新特性：多探针检测、跨地区选择器、最新报告面板支持、自动重试")
+            print("[LIST] 流程:选账号 -> 实时拉取店铺 -> 选择时间范围 -> 增强组件化导出")
+            print("[NEW] 新特性:多探针检测、跨地区选择器、最新报告面板支持、自动重试")
 
             # 选择账号
             from modules.utils.account_manager import AccountManager
@@ -4334,7 +4334,7 @@ class CollectionCenterApp(BaseApplication):
                 return
             account, account_label = sel
 
-            # 店铺列表优先使用缓存，支持即时刷新（更快进入选择）
+            # 店铺列表优先使用缓存,支持即时刷新(更快进入选择)
             from pathlib import Path
             import json
             from modules.services.shopee_playwright_exporter import ShopeePlaywrightExporter, Shop
@@ -4356,10 +4356,10 @@ class CollectionCenterApp(BaseApplication):
             shops = []
             used_cache = False
             if cache_file.exists():
-                # 按你的建议，默认实时发现店铺；缓存仅作为网络失败时的兜底
+                # 按你的建议,默认实时发现店铺;缓存仅作为网络失败时的兜底
                 pass
 
-            # 默认实时发现店铺（按你的建议）
+            # 默认实时发现店铺(按你的建议)
             with sync_playwright() as playwright:
                 exp = ShopeePlaywrightExporter(playwright)
                 shops = exp.list_shops(account)
@@ -4380,7 +4380,7 @@ class CollectionCenterApp(BaseApplication):
                 except Exception:
                     pass
 
-                print(f"\n[SHOP] 选择店铺：")
+                print(f"\n[SHOP] 选择店铺:")
                 for i, shop in enumerate(shops, 1):
                     print(f"  {i}. {shop.name} (id={shop.id}, region={shop.region})")
                 try:
@@ -4391,10 +4391,10 @@ class CollectionCenterApp(BaseApplication):
                     input("按回车键返回...")
                     return
 
-                # 选择时间范围（无论是否使用缓存都执行）
+                # 选择时间范围(无论是否使用缓存都执行)
                 from datetime import datetime, timedelta
                 print("\n[DATE] 选择时间范围:")
-                print("1. 昨天（默认）  2. 过去7天  3. 过去30天")
+                print("1. 昨天(默认)  2. 过去7天  3. 过去30天")
                 w = input("请选择 (1-3): ").strip()
                 if w == '1' or w == '':
                     end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -4413,7 +4413,7 @@ class CollectionCenterApp(BaseApplication):
                     input("按回车键返回...")
                     return
 
-                print(f"\n[LIST] 参数确认：")
+                print(f"\n[LIST] 参数确认:")
                 print(f"   账号: {account_label}")
                 print(f"   店铺: {shop.name}")
                 print(f"   时间范围: {start_date} ~ {end_date}")
@@ -4422,12 +4422,12 @@ class CollectionCenterApp(BaseApplication):
                 if input("\n确认开始导出? (y/n): ").strip().lower() not in ['y','yes','是']:
                     return
 
-                # 组件化导出（优先）
+                # 组件化导出(优先)
                 print("\n[START] 启动组件化导出...")
                 success = self._try_component_export(account, shop, start_date, end_date, account_label, granularity, exporter=exp, analytics_type=analytics_type)
 
                 if not success:
-                    print("\n[WARN] 组件化导出失败，回退到服务层导出...")
+                    print("\n[WARN] 组件化导出失败,回退到服务层导出...")
                     # 回退到现有的服务层导出
                     ok, msg, path = exp.export_traffic_overview(
                         account=account,
@@ -4447,13 +4447,13 @@ class CollectionCenterApp(BaseApplication):
             from modules.core.logger import get_logger
             get_logger(__name__).error(f"组件化流量表现导出异常: {e}")
             print(f"[FAIL] 异常: {e}")
-            # 如果上层已有 Playwright + 持久化上下文（exporter.pb），为避免跨线程错误，直接在当前线程复用
-            # 出错时直接返回，交由服务层回退，不在此处引用上层 exporter 变量
+            # 如果上层已有 Playwright + 持久化上下文(exporter.pb),为避免跨线程错误,直接在当前线程复用
+            # 出错时直接返回,交由服务层回退,不在此处引用上层 exporter 变量
             return False
 
     def _try_component_export(self, account, shop, start_date, end_date, account_label, granularity, exporter=None, analytics_type: str = "traffic"):
         """尝试组件化导出
-        优先复用调用方已有的 Playwright/持久化上下文，避免重复启动造成 user_data_dir 冲突。
+        优先复用调用方已有的 Playwright/持久化上下文,避免重复启动造成 user_data_dir 冲突。
         """
         try:
             from modules.components.base import ExecutionContext
@@ -4462,13 +4462,13 @@ class CollectionCenterApp(BaseApplication):
             from modules.platforms.shopee.components.analytics_config import AnalyticsSelectors, TargetPage
             from modules.utils.persistent_browser_manager import PersistentBrowserManager
 
-            # 创建执行上下文（带平台与选中店铺）
+            # 创建执行上下文(带平台与选中店铺)
             from copy import deepcopy
             account_ctx = deepcopy(account)
-            account_ctx["label"] = account_label  # 统一注入账号标签，供组件读取
+            account_ctx["label"] = account_label  # 统一注入账号标签,供组件读取
             account_ctx["shop_id"] = str(shop.id)
             account_ctx["cnsc_shop_id"] = str(shop.id)
-            # 覆盖为当前选择的店铺名称，避免账号名与店铺名相同导致目录重复
+            # 覆盖为当前选择的店铺名称,避免账号名与店铺名相同导致目录重复
             account_ctx["store_name"] = shop.name
             #   date_preset
             try:
@@ -4496,7 +4496,7 @@ class CollectionCenterApp(BaseApplication):
             cfg = {"downloads_path": str(downloads_dir), "granularity": granularity, "start_date": str(start_date), "end_date": str(end_date), "shop_name": getattr(shop, 'name', None), "one_click": bool(getattr(self, "_one_click_mode", False))}
             if date_preset:
                 cfg["date_preset"] = date_preset
-            # 注入选中店铺名，供组件统一使用
+            # 注入选中店铺名,供组件统一使用
             account_ctx['selected_shop_name'] = getattr(shop, 'name', None)
             ctx = ExecutionContext(
                 platform="shopee",
@@ -4510,11 +4510,11 @@ class CollectionCenterApp(BaseApplication):
             navigation = ShopeeNavigation(ctx, selectors)
             analytics_exporter = ShopeeAnalyticsExport(ctx, selectors)
 
-            # 子类型中文名映射（用于日志显示）
+            # 子类型中文名映射(用于日志显示)
             type_names = {"traffic": "流量表现", "order": "订单表现", "finance": "财务表现", "product": "商品表现"}
             type_name = type_names.get(analytics_type, analytics_type)
 
-            # 优先复用上层 exporter 的持久化上下文，避免再次初始化
+            # 优先复用上层 exporter 的持久化上下文,避免再次初始化
             if exporter is not None and hasattr(exporter, 'pb'):
 
                 try:
@@ -4551,7 +4551,7 @@ class CollectionCenterApp(BaseApplication):
                     print("[WAIT] 等待页面加载...")
                     page.wait_for_timeout(1500)
 
-                    # 统一时间设置：使用 DateSelectionManager（配方优先 -> 快捷项回退 -> 严格校验）
+                    # 统一时间设置:使用 DateSelectionManager(配方优先 -> 快捷项回退 -> 严格校验)
                     try:
                         from modules.services.date_selection_manager import DateSelectionManager
                         preset = (ctx.config or {}).get("date_preset")
@@ -4564,7 +4564,7 @@ class CollectionCenterApp(BaseApplication):
                             context=analytics_type,
                         )
                         if not ok:
-                            print("[FAIL] 时间选择未生效，请稍后重试或检查页面结构")
+                            print("[FAIL] 时间选择未生效,请稍后重试或检查页面结构")
                             return False
                     except Exception as e:
                         print(f"[WARN] 时间设置流程异常: {e}")
@@ -4591,10 +4591,10 @@ class CollectionCenterApp(BaseApplication):
                         print(f"[FAIL] 组件化导出失败: {error_msg}")
                         return False
                 except Exception as reuse_e:
-                    print(f"[WARN] 复用上层上下文失败，将采用隔离线程方案: {reuse_e}")
+                    print(f"[WARN] 复用上层上下文失败,将采用隔离线程方案: {reuse_e}")
 
 
-            # 在独立线程中使用 Playwright Sync API，避免在已有 asyncio loop 中报错
+            # 在独立线程中使用 Playwright Sync API,避免在已有 asyncio loop 中报错
             def _component_worker() -> bool:
                 from playwright.sync_api import sync_playwright
                 try:
@@ -4617,14 +4617,14 @@ class CollectionCenterApp(BaseApplication):
                                 downloads_path=str(downloads_dir),
                             )
                         except Exception as e:
-                            print(f"[WARN] 持久化上下文创建失败，使用普通浏览器: {e}")
+                            print(f"[WARN] 持久化上下文创建失败,使用普通浏览器: {e}")
                             browser = pw.chromium.launch(headless=False)
                             context = browser.new_context(accept_downloads=True, downloads_path=str(downloads_dir))
 
                         page = None
                         try:
                             page = context.pages[0] if context.pages else context.new_page()
-                            # 根据类型选择导航目标（隔离线程分支）
+                            # 根据类型选择导航目标(隔离线程分支)
                             target_map = {
                                 "traffic": TargetPage.TRAFFIC_OVERVIEW,
                                 "order": TargetPage.ORDER_PERFORMANCE,
@@ -4641,7 +4641,7 @@ class CollectionCenterApp(BaseApplication):
                             print("[WAIT] 等待页面加载...")
                             page.wait_for_timeout(1500)
 
-                            # 统一时间设置：使用 DateSelectionManager（配方优先 -> 快捷项回退 -> 严格校验）
+                            # 统一时间设置:使用 DateSelectionManager(配方优先 -> 快捷项回退 -> 严格校验)
                             try:
                                 from modules.services.date_selection_manager import DateSelectionManager
                                 preset = (ctx.config or {}).get("date_preset")
@@ -4654,7 +4654,7 @@ class CollectionCenterApp(BaseApplication):
                                     context=analytics_type,
                                 )
                                 if not ok:
-                                    print("[FAIL] 时间选择未生效，请稍后重试或检查页面结构")
+                                    print("[FAIL] 时间选择未生效,请稍后重试或检查页面结构")
                                     return False
                             except Exception as e:
                                 print(f"[WARN] 时间设置流程异常: {e}")
@@ -4700,7 +4700,7 @@ class CollectionCenterApp(BaseApplication):
             return False
 
     def _quick_edit_analytics_config(self):
-        """快速编辑 analytics 组件配置（使用智能配置注册中心）"""
+        """快速编辑 analytics 组件配置(使用智能配置注册中心)"""
         from modules.platforms.shopee.components.config_registry import open_config_file
         open_config_file("analytics")
         input("\n按回车键返回...")
@@ -4714,23 +4714,23 @@ class CollectionCenterApp(BaseApplication):
 
 
     def _run_all_platforms_one_click_batch(self):
-        """一键所有平台批量采集：统一选择 -> 逐平台批量执行（Shopee/TikTok/妙手ERP）。
-        - 仅调用各平台既有“平台级批量”实现；通过临时预设(_one_click_*)传参以免重复交互；
-        - 统一时间范围选择：昨天/近7天/最近28/30天（TikTok/Miaoshou=28天；Shopee=30天）。
-        - 统一数据域：优先执行已打通的三类（products/traffic/services）。
+        """一键所有平台批量采集:统一选择 -> 逐平台批量执行(Shopee/TikTok/妙手ERP)。
+        - 仅调用各平台既有“平台级批量”实现;通过临时预设(_one_click_*)传参以免重复交互;
+        - 统一时间范围选择:昨天/近7天/最近28/30天(TikTok/Miaoshou=28天;Shopee=30天)。
+        - 统一数据域:优先执行已打通的三类(products/traffic/services)。
         """
         try:
             print("\n[COMPASS] 一键所有平台批量采集")
             print("=" * 40)
 
-            # 标记一键模式（用于抑制子流程中的“按回车返回”提示，并开启明细收集）
+            # 标记一键模式(用于抑制子流程中的“按回车返回”提示,并开启明细收集)
             setattr(self, "_one_click_mode", True)
             setattr(self, "_one_click_collector", [])
 
-            # 1) 平台选择（支持多选）
-            print("\n[WEB] 选择平台（可多选，用逗号分隔）：")
+            # 1) 平台选择(支持多选)
+            print("\n[WEB] 选择平台(可多选,用逗号分隔):")
             print("  1. 全平台 (默认)    2. shopee    3. tiktok    4. miaoshou    5. amazon(占位跳过)")
-            pch = (input("请选择 (如: 1 或 2,3): ").strip() or "1").replace("，", ",").replace(" ", "")
+            pch = (input("请选择 (如: 1 或 2,3): ").strip() or "1").replace(",", ",").replace(" ", "")
             idx_map = {"2": "shopee", "3": "tiktok", "4": "miaoshou", "5": "amazon"}
             if "1" in pch.split(","):
                 platforms = ["shopee", "tiktok", "miaoshou"]
@@ -4738,10 +4738,10 @@ class CollectionCenterApp(BaseApplication):
                 choices = [idx_map.get(x) for x in pch.split(",") if idx_map.get(x)]
                 platforms = choices or ["shopee", "tiktok", "miaoshou"]
 
-            # 2) 时间范围选择（统一）
+            # 2) 时间范围选择(统一)
             from datetime import datetime, timedelta
             print("\n[DATE] 选择时间范围:")
-            print("1. 昨天（默认）  2. 过去7天  3. 最近28/30天")
+            print("1. 昨天(默认)  2. 过去7天  3. 最近28/30天")
             w = input("请选择 (1-3): ").strip() or "1"
             now = datetime.now()
             y_end = (now - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -4768,45 +4768,45 @@ class CollectionCenterApp(BaseApplication):
                     "granularity": gran,
                 }
 
-            # 3) 统一数据域（按现状：Shopee/TikTok 执行三类；妙手ERP执行 商品+订单）
+            # 3) 统一数据域(按现状:Shopee/TikTok 执行三类;妙手ERP执行 商品+订单)
             default_domains = {
                 "shopee": ["products", "traffic", "services"],
                 "tiktok": ["products", "traffic", "services"],
                 "miaoshou": ["products", "orders"],
             }
 
-            # 3.1）打印计划
-            print("\n[PUZZLE] 计划执行清单：")
+            # 3.1)打印计划
+            print("\n[PUZZLE] 计划执行清单:")
             for pf in platforms:
                 if pf == "amazon":
-                    print("  - amazon: 占位（跳过）")
+                    print("  - amazon: 占位(跳过)")
                     continue
                 preset_preview = _make_preset(pf)
                 doms = ", ".join(default_domains.get(pf, ["products","traffic","services"]))
                 print(f"  - {pf}: {preset_preview['start_date']} ~ {preset_preview['end_date']} · 域: {doms}")
 
-            # 3.2）执行模式选择：顺序 或 并行（Beta 占位，当前回退为顺序）
-            print("\n[GEAR] 执行模式：")
-            print("  1. 顺序执行（默认，稳定）")
-            print("  2. 并行执行（Beta）")
+            # 3.2)执行模式选择:顺序 或 并行(Beta 占位,当前回退为顺序)
+            print("\n[GEAR] 执行模式:")
+            print("  1. 顺序执行(默认,稳定)")
+            print("  2. 并行执行(Beta)")
             exec_mode = (input("请选择 (1-2): ").strip() or "1")
             if exec_mode == "2":
-                print("\n[START] 并行执行（Beta）：将为每个平台启动独立子进程（Playwright实例隔离）")
+                print("\n[START] 并行执行(Beta):将为每个平台启动独立子进程(Playwright实例隔离)")
 
             # 4) 执行
             if exec_mode == "2":
-                # 并行执行（多进程隔离）：每个平台一个子进程，独立 Playwright 实例
+                # 并行执行(多进程隔离):每个平台一个子进程,独立 Playwright 实例
                 import sys, os, json, subprocess
-                print("\n[START] 并行执行模式：为每个平台启动独立子进程...")
-                # 统一验证码等待超时（秒）——用于整体子进程超时控制（默认600）
+                print("\n[START] 并行执行模式:为每个平台启动独立子进程...")
+                # 统一验证码等待超时(秒)——用于整体子进程超时控制(默认600)
                 try:
-                    cap_to = int(input("请输入验证码等待超时(秒，默认600): ").strip() or "600")
+                    cap_to = int(input("请输入验证码等待超时(秒,默认600): ").strip() or "600")
                 except Exception:
                     cap_to = 600
                 procs = []
                 for pf in platforms:
                     if pf == "amazon":
-                        print("\n[STORE] Amazon 暂为占位，已跳过。")
+                        print("\n[STORE] Amazon 暂为占位,已跳过。")
                         continue
                     preset = _make_preset(pf)
                     domains = default_domains.get(pf, ["products", "traffic", "services"])
@@ -4817,21 +4817,21 @@ class CollectionCenterApp(BaseApplication):
                     except Exception:
                         # 回退_ascii
                         env["ONE_CLICK_WORKER_PAYLOAD"] = json.dumps(payload)
-                    # 强制子进程以 UTF-8 输出，避免 Windows GBK 编码问题
+                    # 强制子进程以 UTF-8 输出,避免 Windows GBK 编码问题
                     env["PYTHONIOENCODING"] = "utf-8"
                     env["PYTHONUTF8"] = "1"
                     cmd = [sys.executable, "-c", "from modules.apps.collection_center.app import _one_click_worker_entry; _one_click_worker_entry()"]
                     print(f"  [START] 启动平台进程: {pf}")
                     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
                     procs.append((pf, p))
-                # 实时输出与结果收集（流式读取子进程 stdout/stderr）
+                # 实时输出与结果收集(流式读取子进程 stdout/stderr)
                 coll = getattr(self, "_one_click_collector", []) or []
                 import time, threading
                 marker = "ONE_CLICK_RESULT_JSON:"
                 results: dict[str, str] = {}
                 timeouts: set[str] = set()
                 threads = []
-                # 以“无输出时长”为超时依据，避免长导出过程中被误杀
+                # 以“无输出时长”为超时依据,避免长导出过程中被误杀
                 last_output: dict[str, float] = {pf: time.time() for pf, _ in procs}
                 files_all: list[str] = []
                 uris_all: list[str] = []
@@ -4880,7 +4880,7 @@ class CollectionCenterApp(BaseApplication):
                             del alive[pf]
                     time.sleep(0.2)
 
-                # 解析各子进程的结果标记，并汇总文件清单
+                # 解析各子进程的结果标记,并汇总文件清单
                 for pf, _p in procs:
                     result_line = results.get(pf)
                     if result_line:
@@ -4906,27 +4906,27 @@ class CollectionCenterApp(BaseApplication):
                             coll.append({"platform": pf, "account": "-", "shop": "-", "domain": "-", "status": "error", "message": "result parse error"})
                     else:
                         if pf in timeouts:
-                            print(f"  [NEXT] 超时跳过: {pf}（可能等待验证码超时）")
+                            print(f"  [NEXT] 超时跳过: {pf}(可能等待验证码超时)")
                             coll.append({"platform": pf, "account": "-", "shop": "-", "domain": "-", "status": "fail", "message": "captcha timeout or worker timeout"})
                         else:
                             print(f"  [FAIL] 未获取到结果标记: {pf}")
                             coll.append({"platform": pf, "account": "-", "shop": "-", "domain": "-", "status": "error", "message": "no result marker"})
 
-                # 写回收集器供后续汇总打印，并附带文件清单
+                # 写回收集器供后续汇总打印,并附带文件清单
                 setattr(self, "_one_click_collector", coll)
                 setattr(self, "_one_click_files_all", files_all)
                 setattr(self, "_one_click_file_uris_all", uris_all)
             else:
-                # 顺序执行（单平台进程串行）
+                # 顺序执行(单平台进程串行)
                 import sys, os, json, subprocess
                 try:
-                    cap_to = int(input("请输入验证码等待超时(秒，默认600): ").strip() or "600")
+                    cap_to = int(input("请输入验证码等待超时(秒,默认600): ").strip() or "600")
                 except Exception:
                     cap_to = 600
                 coll = getattr(self, "_one_click_collector", []) or []
                 for pf in platforms:
                     if pf == "amazon":
-                        print("\n[STORE] Amazon 暂为占位，已跳过。")
+                        print("\n[STORE] Amazon 暂为占位,已跳过。")
                         continue
                     preset = _make_preset(pf)
                     domains = default_domains.get(pf, ["products", "traffic", "services"])
@@ -4969,29 +4969,29 @@ class CollectionCenterApp(BaseApplication):
                             p.kill()
                         except Exception:
                             pass
-                        print(f"  [NEXT] 超时跳过: {pf}（可能等待验证码超时）")
+                        print(f"  [NEXT] 超时跳过: {pf}(可能等待验证码超时)")
                         coll.append({"platform": pf, "account": "-", "shop": "-", "domain": "-", "status": "fail", "message": "captcha timeout or worker timeout"})
                 setattr(self, "_one_click_collector", coll)
 
-            # 5) 汇总：按平台/账号/店铺/数据域输出失败清单
+            # 5) 汇总:按平台/账号/店铺/数据域输出失败清单
             coll = getattr(self, "_one_click_collector", []) or []
             total = len(coll)
             succ = sum(1 for r in coll if r.get("status") == "success")
             fail = sum(1 for r in coll if r.get("status") in {"fail","error"})
-            print("\n[DATA] 一键采集汇总：")
+            print("\n[DATA] 一键采集汇总:")
             print(f"   总任务: {total} | [OK] 成功: {succ} | [FAIL] 失败: {fail}")
             if fail:
-                print("\n[RECEIPT] 失败明细（平台 / 账号 / 店铺 / 数据域 / 信息）：")
+                print("\n[RECEIPT] 失败明细(平台 / 账号 / 店铺 / 数据域 / 信息):")
                 for r in coll:
                     if r.get("status") in {"fail","error"}:
                         print(f"   - {r.get('platform')} / {r.get('account')} / {r.get('shop')} / {r.get('domain')} / {r.get('message','')}")
 
 
-            # 打印所有成功导出的文件清单（来自各子进程聚合）
+            # 打印所有成功导出的文件清单(来自各子进程聚合)
             try:
                 files_all = getattr(self, "_one_click_files_all", []) or []
                 if files_all:
-                    print("\n[FILES] 导出文件清单（全部平台）：")
+                    print("\n[FILES] 导出文件清单(全部平台):")
                     for ap in files_all:
                         print(f"  - {ap}")
                         print(f"EXPORTED_FILE:{ap}")
@@ -5019,7 +5019,7 @@ class CollectionCenterApp(BaseApplication):
                     pass
 
 
-# —— 并行子进程入口：读取环境变量中的JSON负载，执行单平台批量并输出结果 ——
+# —— 并行子进程入口:读取环境变量中的JSON负载,执行单平台批量并输出结果 ——
 def _one_click_worker_entry():
     """Subprocess entry for one-click platform worker.
     Reads ONE_CLICK_WORKER_PAYLOAD from environment, runs the specified platform
@@ -5044,7 +5044,7 @@ def _one_click_worker_entry():
     from modules.apps.collection_center.app import CollectionCenterApp  # type: ignore
 
     app = CollectionCenterApp()
-    # 一键模式下抑制所有交互暂停，并收集明细
+    # 一键模式下抑制所有交互暂停,并收集明细
     setattr(app, "_one_click_mode", True)
     setattr(app, "_one_click_preset", preset)
     setattr(app, "_one_click_domains", domains)
@@ -5054,7 +5054,7 @@ def _one_click_worker_entry():
 
     ok = True
     err = ""
-    # 子进程起始提示（便于父进程实时观察）
+    # 子进程起始提示(便于父进程实时观察)
     try:
         print(f"[{pf}] worker start · domains={domains}", flush=True)
     except Exception:
@@ -5072,7 +5072,7 @@ def _one_click_worker_entry():
     except Exception as e:
         ok = False
         err = str(e)
-    # 子进程结束总结（成功/失败数）
+    # 子进程结束总结(成功/失败数)
     try:
         _coll = getattr(app, "_one_click_collector", []) or []
         _succ = sum(1 for r in _coll if r.get("status") == "success")
@@ -5081,7 +5081,7 @@ def _one_click_worker_entry():
     except Exception:
         pass
 
-    # 汇总导出文件并打印清单（便于测试快速验证）
+    # 汇总导出文件并打印清单(便于测试快速验证)
     try:
         import os
         files = getattr(app, "_one_click_files", []) or []
@@ -5096,10 +5096,10 @@ def _one_click_worker_entry():
             except Exception:
                 pass
         if abs_files:
-            print("\n[FILES] 导出文件清单：", flush=True)
+            print("\n[FILES] 导出文件清单:", flush=True)
             for ap in abs_files:
                 print(f"  - {ap}", flush=True)
-                # 解析友好标记，便于父进程或人工快速定位
+                # 解析友好标记,便于父进程或人工快速定位
                 print(f"EXPORTED_FILE:{ap}", flush=True)
     except Exception:
         abs_files = []

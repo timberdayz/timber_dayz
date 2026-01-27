@@ -3,12 +3,12 @@
 """
 数据质量监控API
 
-功能：
+功能:
 1. 检查C类数据计算就绪状态
 2. 检查B类数据完整性
 3. 查询核心字段状态
 
-用于C类数据核心字段优化计划（Phase 2）
+用于C类数据核心字段优化计划(Phase 2)
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -58,18 +58,18 @@ class CoreFieldsStatusResponse(BaseModel):
 async def check_c_class_readiness(
     platform_code: Optional[str] = Query(None, description="平台代码"),
     shop_id: Optional[str] = Query(None, description="店铺ID"),
-    metric_date: Optional[str] = Query(None, description="指标日期（YYYY-MM-DD）"),
+    metric_date: Optional[str] = Query(None, description="指标日期(YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     检查C类数据计算就绪状态
     
-    参数：
-        - platform_code: 平台代码（可选）
-        - shop_id: 店铺ID（可选）
-        - metric_date: 指标日期（可选，默认今天）
+    参数:
+        - platform_code: 平台代码(可选)
+        - shop_id: 店铺ID(可选)
+        - metric_date: 指标日期(可选,默认今天)
     
-    返回：
+    返回:
         {
             "c_class_ready": true,
             "b_class_completeness": {
@@ -93,7 +93,7 @@ async def check_c_class_readiness(
         # 获取验证器
         validator = get_c_class_data_validator(db)
         
-        # 如果指定了平台和店铺，检查特定店铺的数据完整性
+        # 如果指定了平台和店铺,检查特定店铺的数据完整性
         if platform_code and shop_id:
             check_result = validator.check_b_class_completeness(
                 platform_code=platform_code,
@@ -116,8 +116,8 @@ async def check_c_class_readiness(
                 "timestamp": datetime.now().isoformat()
             })
         
-        # 否则，返回整体统计
-        # 查询所有店铺的数据完整性（简化版：只检查字段映射辞典中的字段存在性）
+        # 否则,返回整体统计
+        # 查询所有店铺的数据完整性(简化版:只检查字段映射辞典中的字段存在性)
         from scripts.verify_c_class_core_fields import C_CLASS_CORE_FIELDS
         
         all_fields = []
@@ -145,14 +145,14 @@ async def check_c_class_readiness(
         return success_response(data={
             "c_class_ready": len(missing_fields) == 0,
             "b_class_completeness": {
-                "orders": 100.0,  # 简化版，实际应查询数据库
+                "orders": 100.0,  # 简化版,实际应查询数据库
                 "products": 100.0,
                 "inventory": 100.0
             },
             "missing_core_fields": missing_fields,
             "data_quality_score": data_quality_score,
             "warnings": [] if len(missing_fields) == 0 else [
-                f"缺失 {len(missing_fields)} 个核心字段，请运行 scripts/add_c_class_missing_fields.py 补充"
+                f"缺失 {len(missing_fields)} 个核心字段,请运行 scripts/add_c_class_missing_fields.py 补充"
             ],
             "timestamp": datetime.now().isoformat()
         })
@@ -164,7 +164,7 @@ async def check_c_class_readiness(
             message="检查C类数据计算就绪状态失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
@@ -173,20 +173,20 @@ async def check_c_class_readiness(
 async def check_b_class_completeness(
     platform_code: str = Query(..., description="平台代码"),
     shop_id: str = Query(..., description="店铺ID"),
-    start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD）"),
-    end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
+    start_date: Optional[str] = Query(None, description="开始日期(YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="结束日期(YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     检查B类数据完整性
     
-    参数：
-        - platform_code: 平台代码（必填）
-        - shop_id: 店铺ID（必填）
-        - start_date: 开始日期（可选，默认30天前）
-        - end_date: 结束日期（可选，默认今天）
+    参数:
+        - platform_code: 平台代码(必填)
+        - shop_id: 店铺ID(必填)
+        - start_date: 开始日期(可选,默认30天前)
+        - end_date: 结束日期(可选,默认今天)
     
-    返回：
+    返回:
         {
             "platform_code": "shopee",
             "shop_id": "shop001",
@@ -233,23 +233,23 @@ async def check_b_class_completeness(
             message="检查B类数据完整性失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 
 
 @router.get("/core-fields-status")
 async def get_core_fields_status(
-    data_domain: Optional[str] = Query(None, description="数据域（可选）"),
+    data_domain: Optional[str] = Query(None, description="数据域(可选)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     查询核心字段状态
     
-    参数：
-        - data_domain: 数据域（可选，如orders/products/inventory）
+    参数:
+        - data_domain: 数据域(可选,如orders/products/inventory)
     
-    返回：
+    返回:
         {
             "total_fields": 17,
             "present_fields": 15,
@@ -323,7 +323,7 @@ async def get_core_fields_status(
             message="查询核心字段状态失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查数据库连接和查询参数，或联系系统管理员",
+            recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
 

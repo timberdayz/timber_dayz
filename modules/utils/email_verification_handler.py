@@ -4,7 +4,7 @@
 """
 邮箱验证码处理器
 
-实现双网页协同验证码处理：
+实现双网页协同验证码处理:
 1. A网页点击"发送至邮箱"
 2. B网页自动登录邮箱获取验证码
 3. 将验证码输入到A网页完成验证
@@ -23,7 +23,7 @@ class EmailVerificationHandler:
     
     def __init__(self, account_config: Dict[str, Any]):
         self.account_config = account_config
-        # 支持两种配置格式：新的email_config和旧的分散字段格式
+        # 支持两种配置格式:新的email_config和旧的分散字段格式
         if 'email_config' in account_config:
             self.email_config = account_config.get('email_config', {})
         else:
@@ -137,7 +137,7 @@ class EmailVerificationHandler:
         try:
             logger.info("[WEB] 启动邮箱浏览器...")
             
-            # 启动新的浏览器实例（用于邮箱）
+            # 启动新的浏览器实例(用于邮箱)
             self.email_browser = playwright_instance.chromium.launch(
                 headless=False,  # 显示浏览器以便用户观察
                 args=['--no-sandbox', '--disable-web-security']
@@ -161,14 +161,14 @@ class EmailVerificationHandler:
             password = self.email_config.get('password')
             
             logger.info(f"[LINK] 访问邮箱: {email_url}")
-            # VPN环境下增加超时时间到120秒，并添加重试机制
+            # VPN环境下增加超时时间到120秒,并添加重试机制
             max_retries = 3
             for attempt in range(max_retries):
                 try:
                     logger.info(f"[RETRY] 第 {attempt + 1}/{max_retries} 次尝试访问邮箱...")
                     self.email_page.goto(email_url, timeout=120000)  # 2分钟超时
                     # VPN环境下等待网络稳定
-                    logger.info("[WAIT] 等待页面完全加载（VPN环境适配）...")
+                    logger.info("[WAIT] 等待页面完全加载(VPN环境适配)...")
                     self.email_page.wait_for_load_state("domcontentloaded", timeout=60000)
                     time.sleep(5)  # 额外等待动态内容加载
                     logger.info("[OK] 邮箱页面加载成功")
@@ -183,10 +183,10 @@ class EmailVerificationHandler:
             # 获取邮箱类型对应的选择器
             selectors = self._get_email_selectors(username)
             
-            # 调试页面结构（开发环境）
+            # 调试页面结构(开发环境)
             # self._debug_page_structure()  # 暂时禁用以简化输出
             
-            # 处理动态登录框（如163邮箱的扫码/密码切换）
+            # 处理动态登录框(如163邮箱的扫码/密码切换)
             if not self._handle_dynamic_login_form(selectors):
                 logger.error("[FAIL] 动态登录框处理失败")
                 return False
@@ -224,22 +224,22 @@ class EmailVerificationHandler:
                 login_button.click()
                 logger.info("[OK] 登录按钮已点击")
             else:
-                # 如果没有找到登录按钮，尝试其他提交方式
-                logger.info("[RETRY] 未找到登录按钮，尝试其他提交方式...")
+                # 如果没有找到登录按钮,尝试其他提交方式
+                logger.info("[RETRY] 未找到登录按钮,尝试其他提交方式...")
                 
-                # 方法1：在密码框中按回车键
+                # 方法1:在密码框中按回车键
                 if password_input:
                     logger.info("[KB] 在密码框中按回车键提交...")
                     password_input.press('Enter')
                     logger.info("[OK] 已按回车键提交")
                 else:
-                    # 方法2：查找并提交表单
+                    # 方法2:查找并提交表单
                     logger.info("[NOTE] 尝试查找并提交表单...")
                     forms = self.email_page.query_selector_all('form')
                     if forms:
                         for form in forms:
                             if form.is_visible():
-                                logger.info("[OK] 找到可见表单，尝试提交...")
+                                logger.info("[OK] 找到可见表单,尝试提交...")
                                 try:
                                     # 使用JavaScript提交表单
                                     self.email_page.evaluate('(form) => form.submit()', form)
@@ -252,7 +252,7 @@ class EmailVerificationHandler:
                         return False
             
             # VPN环境下需要更长的等待时间
-            logger.info("[WAIT] 等待登录响应（VPN环境适配）...")
+            logger.info("[WAIT] 等待登录响应(VPN环境适配)...")
             time.sleep(8)
             
             # 检查是否需要验证码
@@ -281,18 +281,18 @@ class EmailVerificationHandler:
                 return self.email_login_selectors['default']
                 
         except Exception as e:
-            logger.warning(f"[WARN] 获取邮箱选择器失败，使用默认配置: {e}")
+            logger.warning(f"[WARN] 获取邮箱选择器失败,使用默认配置: {e}")
             return self.email_login_selectors['default']
     
     def _handle_dynamic_login_form(self, selectors: Dict[str, str]) -> bool:
-        """处理动态登录框（如163邮箱的扫码/密码切换）"""
+        """处理动态登录框(如163邮箱的扫码/密码切换)"""
         try:
             logger.info("[RETRY] 检测动态登录框...")
             
             # VPN环境下需要更长的等待时间
             time.sleep(5)
             
-            # 检查是否有登录框切换按钮（如163邮箱的密码登录）
+            # 检查是否有登录框切换按钮(如163邮箱的密码登录)
             if 'switch_to_password' in selectors:
                 switch_selectors = selectors['switch_to_password'].split(', ')
                 for selector in switch_selectors:
@@ -308,10 +308,10 @@ class EmailVerificationHandler:
                         logger.debug(f"切换按钮检测失败 {selector}: {e}")
                         continue
             
-            # 检查是否有iframe登录框（如163邮箱）
+            # 检查是否有iframe登录框(如163邮箱)
             iframe_found = False
             
-            # 先尝试查找URS登录iframe（163邮箱特有）
+            # 先尝试查找URS登录iframe(163邮箱特有)
             urs_iframes = self.email_page.query_selector_all('iframe[id*="URS-iframe"]')
             if urs_iframes:
                 for iframe in urs_iframes:
@@ -325,7 +325,7 @@ class EmailVerificationHandler:
                     except Exception as e:
                         logger.debug(f"URS iframe切换失败: {e}")
             
-            # 如果没找到URS iframe，尝试其他iframe
+            # 如果没找到URS iframe,尝试其他iframe
             if not iframe_found and 'login_frame' in selectors:
                 frame_selectors = selectors['login_frame'].split(', ')
                 for selector in frame_selectors:
@@ -333,7 +333,7 @@ class EmailVerificationHandler:
                         frame = self.email_page.query_selector(selector)
                         if frame and frame.is_visible():
                             logger.info(f"[OK] 检测到登录iframe: {selector}")
-                            # 如果是iframe，需要切换到iframe内部
+                            # 如果是iframe,需要切换到iframe内部
                             if 'iframe' in selector:
                                 self.email_page = frame.content_frame()
                                 logger.info("[RETRY] 已切换到iframe内部")
@@ -343,7 +343,7 @@ class EmailVerificationHandler:
                         logger.debug(f"iframe检测失败 {selector}: {e}")
                         continue
             
-            # 如果切换到了iframe，等待iframe内容加载
+            # 如果切换到了iframe,等待iframe内容加载
             if iframe_found:
                 time.sleep(3)
                 logger.info("[WAIT] 等待iframe内容加载...")
@@ -358,7 +358,7 @@ class EmailVerificationHandler:
             return False
     
     def _find_input_element(self, selectors: str):
-        """查找输入元素，支持多选择器"""
+        """查找输入元素,支持多选择器"""
         try:
             selector_list = selectors.split(', ')
             for selector in selector_list:
@@ -434,7 +434,7 @@ class EmailVerificationHandler:
                 except Exception as e:
                     logger.debug(f"调试iframe元素失败: {e}")
             
-            # 查找所有可点击的元素（a标签）
+            # 查找所有可点击的元素(a标签)
             links = self.email_page.query_selector_all('a')
             logger.info(f"[LINK] 找到 {len(links)} 个链接元素:")
             
@@ -474,7 +474,7 @@ class EmailVerificationHandler:
                 except Exception as e:
                     logger.debug(f"调试iframe input元素失败: {e}")
             
-            # 查找iframe内的button元素（包括所有可能的登录按钮）
+            # 查找iframe内的button元素(包括所有可能的登录按钮)
             buttons = self.email_page.query_selector_all('button, input[type="submit"], a[role="button"], div[role="button"], span[role="button"], .btn, .button, [onclick*="login"]')
             logger.info(f"[o] iframe内找到 {len(buttons)} 个按钮元素:")
             
@@ -490,7 +490,7 @@ class EmailVerificationHandler:
                 except Exception as e:
                     logger.debug(f"调试iframe button元素失败: {e}")
             
-            # 查找所有可点击的div元素（可能是登录按钮）
+            # 查找所有可点击的div元素(可能是登录按钮)
             clickable_divs = self.email_page.query_selector_all('div[tabindex], div[onclick], span[onclick]')
             logger.info(f"[MOUSE] iframe内找到 {len(clickable_divs)} 个可点击元素:")
             
@@ -512,7 +512,7 @@ class EmailVerificationHandler:
     def _check_email_verification_needed(self, selectors: Dict[str, str]) -> str:
         """
         检查是否需要验证以及验证类型
-        返回值：
+        返回值:
         - "login_success": 已经登录成功
         - "password_error": 密码错误
         - "slide_captcha": 图形滑动验证码
@@ -535,7 +535,7 @@ class EmailVerificationHandler:
             except:
                 page_content = ""
             
-            # 0. 检查验证码错误（新增）
+            # 0. 检查验证码错误(新增)
             verification_error_keywords = [
                 '验证码错误', '验证码不正确', '验证码填错', '验证码输入错误',
                 'captcha error', 'verification code error', 'captcha incorrect',
@@ -662,10 +662,10 @@ class EmailVerificationHandler:
                 print("[FAIL] 邮箱密码错误")
                 print("="*60)
                 print("[SEARCH] 系统检测到您的邮箱密码不正确")
-                print("[NOTE] 请检查以下配置文件中的密码设置：")
+                print("[NOTE] 请检查以下配置文件中的密码设置:")
                 print("   - local_accounts.py (主要账号配置文件)")
-                print("   - account_key.key (加密账号配置文件，通过local_accounts.py同步生成)")
-                print("\n[TIP] 解决方法：")
+                print("   - account_key.key (加密账号配置文件,通过local_accounts.py同步生成)")
+                print("\n[TIP] 解决方法:")
                 print("   1. 确认邮箱密码是否正确")
                 print("   2. 检查是否需要使用授权码而非密码")
                 print("   3. 确认邮箱是否已开启IMAP/POP3服务")
@@ -675,7 +675,7 @@ class EmailVerificationHandler:
                 # 询问用户是否要更新密码
                 user_input = input("\n[TOOL] 是否现在修改邮箱密码？(y/n): ").strip().lower()
                 if user_input in ['y', 'yes', '是']:
-                    new_password = input("请输入新的邮箱密码（或授权码）: ").strip()
+                    new_password = input("请输入新的邮箱密码(或授权码): ").strip()
                     if new_password:
                         # 更新内存中的配置
                         self.email_config['password'] = new_password
@@ -683,9 +683,9 @@ class EmailVerificationHandler:
                         # 尝试更新local_accounts.py文件
                         success = self._update_local_accounts_password(new_password)
                         if success:
-                            print("[OK] 密码已更新到local_accounts.py，重新尝试登录...")
+                            print("[OK] 密码已更新到local_accounts.py,重新尝试登录...")
                         else:
-                            print("[WARN] 内存中的密码已更新，但未能自动更新local_accounts.py")
+                            print("[WARN] 内存中的密码已更新,但未能自动更新local_accounts.py")
                             print("[TIP] 请手动更新local_accounts.py文件中的相应邮箱密码")
                         
                         return self._login_to_email()
@@ -767,7 +767,7 @@ class EmailVerificationHandler:
                     updated = True
                     logger.info("使用模式2更新密码")
             
-            # 模式3: 简单的Email License匹配（可能是授权码字段）
+            # 模式3: 简单的Email License匹配(可能是授权码字段)
             if not updated:
                 pattern3 = r'("Email account":\\s*"' + re.escape(current_email) + '".*?"Email License":\\s*")[^"]*(")'
                 if re.search(pattern3, content, re.DOTALL):
@@ -787,13 +787,13 @@ class EmailVerificationHandler:
             return True
             
         except Exception as e:
-            logger.error(f"更新local_accounts.py失败：{e}")
+            logger.error(f"更新local_accounts.py失败:{e}")
             return False
     
     def _handle_verification_code_error(self) -> bool:
-        """处理验证码错误，要求重新输入"""
+        """处理验证码错误,要求重新输入"""
         try:
-            logger.info("[RETRY] 处理验证码错误，准备重新输入...")
+            logger.info("[RETRY] 处理验证码错误,准备重新输入...")
             
             print("\n" + "="*60)
             print("[FAIL] 验证码输入错误")
@@ -841,18 +841,18 @@ class EmailVerificationHandler:
                 print("[RETRY] 准备重新输入文本验证码...")
                 return self._handle_text_verification(selectors)
             elif verification_type == "verification_code_error":
-                # 如果仍然是错误状态，给用户手动机会
+                # 如果仍然是错误状态,给用户手动机会
                 print("[WARN] 系统检测仍有验证码错误")
                 print("[TIP] 请手动清除错误提示并重新输入验证码")
                 user_input = input("是否重试？(y/n): ").strip().lower()
                 if user_input in ['y', 'yes', '是']:
-                    # 递归重试，但限制次数
+                    # 递归重试,但限制次数
                     return self._handle_verification_code_error()
                 else:
                     input("请手动完成验证后按回车继续...")
                     return True
             elif verification_type == "login_success":
-                logger.info("[DONE] 验证码错误已解决，登录成功")
+                logger.info("[DONE] 验证码错误已解决,登录成功")
                 return True
             else:
                 print("[TIP] 请重新输入正确的验证码")
@@ -905,12 +905,12 @@ class EmailVerificationHandler:
                     
                     logger.info(f"[MOUSE] 执行滑动操作: ({start_x}, {start_y}) -> ({end_x}, {end_y})")
                     
-                    # 模拟人工滑动（使用页面对象而不是iframe对象）
+                    # 模拟人工滑动(使用页面对象而不是iframe对象)
                     main_page = self.email_page.page if hasattr(self.email_page, 'page') else self.email_browser.pages[0]
                     main_page.mouse.move(start_x, start_y)
                     main_page.mouse.down()
                     
-                    # 分步滑动，模拟人工操作
+                    # 分步滑动,模拟人工操作
                     steps = 10
                     for i in range(steps):
                         progress = (i + 1) / steps
@@ -928,7 +928,7 @@ class EmailVerificationHandler:
                         logger.info("[OK] 滑动验证成功")
                         return True
                     else:
-                        logger.warning("[WARN] 滑动验证可能失败，尝试手动处理")
+                        logger.warning("[WARN] 滑动验证可能失败,尝试手动处理")
                         return self._manual_verification_fallback("滑动验证码")
                         
             except Exception as e:
@@ -1034,24 +1034,24 @@ class EmailVerificationHandler:
                     except:
                         continue
                 
-                # 2. 如果没找到按钮，尝试按回车
+                # 2. 如果没找到按钮,尝试按回车
                 if not submit_success:
                     verification_input.press('Enter')
                     logger.info("[OK] 在验证码输入框按回车提交")
                     submit_success = True
                 
                 if submit_success:
-                    print("[OK] 验证码已提交，等待验证结果...")
+                    print("[OK] 验证码已提交,等待验证结果...")
                     time.sleep(3)
                     return True
                 else:
-                    logger.warning("[WARN] 未能自动提交，请手动点击登录按钮")
+                    logger.warning("[WARN] 未能自动提交,请手动点击登录按钮")
                     input("请手动点击登录按钮后按回车继续...")
                     return True
                     
             except Exception as e:
                 logger.error(f"填写验证码失败: {e}")
-                print("[WARN] 自动填写失败，请手动操作")
+                print("[WARN] 自动填写失败,请手动操作")
                 input("请手动填写验证码并提交后按回车继续...")
                 return True
             
@@ -1114,7 +1114,7 @@ class EmailVerificationHandler:
                         element.style.boxShadow = '0 0 10px red';
                         element.scrollIntoView({behavior: 'smooth', block: 'center'});
                     }""", captcha_image)
-                    print("[TARGET] 已高亮显示验证码图片（红色边框）")
+                    print("[TARGET] 已高亮显示验证码图片(红色边框)")
                     
                     # 尝试获取图片信息
                     try:
@@ -1129,14 +1129,14 @@ class EmailVerificationHandler:
                     print("[SEARCH] 请查看邮箱登录页面的验证码图片")
             else:
                 print("[SEARCH] 请查看邮箱登录页面的验证码图片")
-                print("[WARN] 系统未能自动定位验证码图片，请手动查找")
+                print("[WARN] 系统未能自动定位验证码图片,请手动查找")
             
             if screenshot_path:
                 print(f"[CAM] 页面截图已保存至: {screenshot_path}")
             
             print("\n[LOOK] 请仔细查看验证码图片")
             print("[NOTE] 验证码通常是4-6位数字或字母")
-            print("[TIP] 如果看不清楚，可以尝试点击图片刷新")
+            print("[TIP] 如果看不清楚,可以尝试点击图片刷新")
             
             # 获取用户输入的验证码
             user_code = input("\n请输入图片验证码: ").strip()
@@ -1205,14 +1205,14 @@ class EmailVerificationHandler:
                     except:
                         continue
                 
-                # 2. 如果没找到按钮，尝试按回车
+                # 2. 如果没找到按钮,尝试按回车
                 if not submit_success:
                     verification_input.press('Enter')
                     logger.info("[OK] 在验证码输入框按回车提交")
                     submit_success = True
                 
                 if submit_success:
-                    print("[OK] 验证码已提交，等待验证结果...")
+                    print("[OK] 验证码已提交,等待验证结果...")
                     time.sleep(3)
                     
                     # 检查验证结果
@@ -1231,27 +1231,27 @@ class EmailVerificationHandler:
                     
                     # 根据验证结果决定下一步
                     if verification_result == "verification_code_error":
-                        logger.error("[FAIL] 图片验证码错误，需要重新输入")
+                        logger.error("[FAIL] 图片验证码错误,需要重新输入")
                         return self._handle_verification_code_error()
                     elif verification_result == "login_success":
-                        logger.info("[DONE] 图片验证码验证成功，登录成功")
+                        logger.info("[DONE] 图片验证码验证成功,登录成功")
                         return True
                     elif verification_result in ["image_captcha", "text_verification"]:
-                        logger.warning("[WARN] 验证码可能错误，页面仍显示验证码输入")
-                        print("[WARN] 验证码可能输入错误，请重新输入")
+                        logger.warning("[WARN] 验证码可能错误,页面仍显示验证码输入")
+                        print("[WARN] 验证码可能输入错误,请重新输入")
                         return self._handle_verification_code_error()
                     else:
                         # 假设成功
                         logger.info("[OK] 图片验证码处理完成")
                         return True
                 else:
-                    logger.warning("[WARN] 未能自动提交，请手动点击登录按钮")
+                    logger.warning("[WARN] 未能自动提交,请手动点击登录按钮")
                     input("请手动点击登录按钮后按回车继续...")
                     return True
                     
             except Exception as e:
                 logger.error(f"填写验证码失败: {e}")
-                print("[WARN] 自动填写失败，请手动操作")
+                print("[WARN] 自动填写失败,请手动操作")
                 input("请手动填写验证码并提交后按回车继续...")
                 return True
             
@@ -1301,14 +1301,14 @@ class EmailVerificationHandler:
                 
                 # 根据验证结果决定下一步
                 if verification_result == "verification_code_error":
-                    logger.error("[FAIL] 文本验证码错误，需要重新输入")
+                    logger.error("[FAIL] 文本验证码错误,需要重新输入")
                     return self._handle_verification_code_error()
                 elif verification_result == "login_success":
-                    logger.info("[DONE] 文本验证码验证成功，登录成功")
+                    logger.info("[DONE] 文本验证码验证成功,登录成功")
                     return True
                 elif verification_result in ["image_captcha", "text_verification"]:
-                    logger.warning("[WARN] 验证码可能错误，页面仍显示验证码输入")
-                    print("[WARN] 验证码可能输入错误，请重新输入")
+                    logger.warning("[WARN] 验证码可能错误,页面仍显示验证码输入")
+                    print("[WARN] 验证码可能输入错误,请重新输入")
                     return self._handle_verification_code_error()
                 else:
                     # 假设成功
@@ -1373,7 +1373,7 @@ class EmailVerificationHandler:
                 logger.info("[OK] 邮箱登录成功 (URL检查)")
                 return True
             
-            logger.error(f"[FAIL] 邮箱登录失败，当前页面: {page_title}")
+            logger.error(f"[FAIL] 邮箱登录失败,当前页面: {page_title}")
             return False
             
         except Exception as e:
@@ -1395,7 +1395,7 @@ class EmailVerificationHandler:
                     if hasattr(self.email_page, 'reload'):
                         self.email_page.reload()
                     else:
-                        # 如果是iframe，需要重新加载主页面
+                        # 如果是iframe,需要重新加载主页面
                         main_page = self.email_browser.pages[0]
                         main_page.reload()
                     time.sleep(2)
@@ -1462,9 +1462,9 @@ class EmailVerificationHandler:
             
             # 验证码正则模式
             code_patterns = [
-                r'验证码[：:\s]*(\d{6})',  # 验证码: 123456
-                r'OTP[：:\s]*(\d{6})',     # OTP: 123456
-                r'code[：:\s]*(\d{6})',    # code: 123456
+                r'验证码[::\s]*(\d{6})',  # 验证码: 123456
+                r'OTP[::\s]*(\d{6})',     # OTP: 123456
+                r'code[::\s]*(\d{6})',    # code: 123456
                 r'(\d{6})',                # 直接匹配6位数字
             ]
             

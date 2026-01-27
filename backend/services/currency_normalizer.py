@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-货币符号标准化服务（v4.6.0）
+货币符号标准化服务(v4.6.0)
 
-功能：
-1. 货币符号->ISO 4217代码标准化（S$ -> SGD）
+功能:
+1. 货币符号->ISO 4217代码标准化(S$ -> SGD)
 2. 支持全球180+货币
-3. 中文货币名称识别（人民币 -> CNY）
-4. 自动识别和纠错（容错性）
+3. 中文货币名称识别(人民币 -> CNY)
+4. 自动识别和纠错(容错性)
 
-使用示例：
+使用示例:
     normalizer = CurrencyNormalizer()
     code = normalizer.normalize("S$")  # 返回 "SGD"
     code = normalizer.normalize("人民币")  # 返回 "CNY"
@@ -26,15 +26,15 @@ class CurrencyNormalizer:
     """
     货币符号标准化服务
     
-    设计原则：
-    - 完整性：支持全球180+货币
-    - 容错性：支持多种符号变体
-    - 可扩展：易于添加新货币
+    设计原则:
+    - 完整性:支持全球180+货币
+    - 容错性:支持多种符号变体
+    - 可扩展:易于添加新货币
     """
     
-    # 货币符号 -> ISO 4217代码映射（50+种常用符号）
+    # 货币符号 -> ISO 4217代码映射(50+种常用符号)
     SYMBOL_TO_CODE: Dict[str, str] = {
-        # 东南亚（10种）
+        # 东南亚(10种)
         "S$": "SGD",
         "RM": "MYR",
         "Rp": "IDR",
@@ -46,7 +46,7 @@ class CurrencyNormalizer:
         "៛": "KHR",
         "₭": "LAK",
         
-        # 南美（7种）
+        # 南美(7种)
         "R$": "BRL",
         "COP$": "COP",
         "AR$": "ARS",
@@ -55,23 +55,23 @@ class CurrencyNormalizer:
         "$U": "UYU",
         "Bs.": "VES",
         
-        # 北美（3种）
+        # 北美(3种)
         "$": "USD",  # 默认美元
         "C$": "CAD",
         "MX$": "MXN",
         
-        # 欧洲（9种）
+        # 欧洲(9种)
         "€": "EUR",
         "£": "GBP",
         "CHF": "CHF",
-        "kr": "SEK",  # 瑞典克朗（默认）
+        "kr": "SEK",  # 瑞典克朗(默认)
         "₽": "RUB",
         "₺": "TRY",
         "zł": "PLN",
         "Kč": "CZK",
         "Ft": "HUF",
         
-        # 亚太（10种）
+        # 亚太(10种)
         "¥": "CNY",  # 默认人民币
         "HK$": "HKD",
         "NT$": "TWD",
@@ -83,10 +83,10 @@ class CurrencyNormalizer:
         "A$": "AUD",
         "NZ$": "NZD",
         
-        # 中东非洲（6种）
+        # 中东非洲(6种)
         "د.إ": "AED",
         "﷼": "SAR",
-        "R": "ZAR",  # 南非兰特（默认）
+        "R": "ZAR",  # 南非兰特(默认)
         "₦": "NGN",
         "KSh": "KES",
         "£E": "EGP",
@@ -96,7 +96,7 @@ class CurrencyNormalizer:
         "₮": "USDT",  # 泰达币
     }
     
-    # 货币代码 -> 标准名称映射（180+种货币）
+    # 货币代码 -> 标准名称映射(180+种货币)
     CODE_TO_NAME: Dict[str, str] = {
         # 东南亚
         "SGD": "新加坡元", "MYR": "马来西亚令吉", "IDR": "印尼盾",
@@ -151,13 +151,13 @@ class CurrencyNormalizer:
         """
         标准化货币符号/代码
         
-        参数：
-            currency_str: 货币符号/代码/名称（如"S$", "SGD", "新加坡元"）
+        参数:
+            currency_str: 货币符号/代码/名称(如"S$", "SGD", "新加坡元")
         
-        返回：
-            ISO 4217标准货币代码（如"SGD"）
+        返回:
+            ISO 4217标准货币代码(如"SGD")
         
-        示例：
+        示例:
             >>> normalizer = CurrencyNormalizer()
             >>> normalizer.normalize("S$")
             'SGD'
@@ -172,7 +172,7 @@ class CurrencyNormalizer:
         
         currency_str = currency_str.strip()
         
-        # 1. 如果已经是ISO代码（3位大写字母），直接返回
+        # 1. 如果已经是ISO代码(3位大写字母),直接返回
         if len(currency_str) == 3 and currency_str.isupper() and currency_str.isalpha():
             if currency_str in self.CODE_TO_NAME:
                 return currency_str
@@ -192,13 +192,13 @@ class CurrencyNormalizer:
             logger.debug(f"Normalized name '{currency_str}' to '{code}'")
             return code
         
-        # 4. 容错处理：尝试去除空格和特殊字符
+        # 4. 容错处理:尝试去除空格和特殊字符
         cleaned = currency_str.replace(" ", "").upper()
         if len(cleaned) == 3 and cleaned in self.CODE_TO_NAME:
             logger.debug(f"Normalized cleaned '{currency_str}' to '{cleaned}'")
             return cleaned
         
-        # 5. 未知货币，返回原值并记录警告
+        # 5. 未知货币,返回原值并记录警告
         logger.warning(f"Unknown currency string: '{currency_str}', returning as-is")
         return currency_str
     
@@ -206,11 +206,11 @@ class CurrencyNormalizer:
         """
         获取货币中文名称
         
-        参数：
-            currency_code: ISO 4217货币代码（如"SGD"）
+        参数:
+            currency_code: ISO 4217货币代码(如"SGD")
         
-        返回：
-            货币中文名称（如"新加坡元"）或None
+        返回:
+            货币中文名称(如"新加坡元")或None
         """
         return self.CODE_TO_NAME.get(currency_code)
     
@@ -218,10 +218,10 @@ class CurrencyNormalizer:
         """
         检查是否支持该货币
         
-        参数：
+        参数:
             currency_code: ISO 4217货币代码
         
-        返回：
+        返回:
             是否支持
         """
         return currency_code in self.CODE_TO_NAME
@@ -230,8 +230,8 @@ class CurrencyNormalizer:
         """
         获取所有支持的货币代码列表
         
-        返回：
-            货币代码列表（如["CNY", "USD", "SGD", ...]）
+        返回:
+            货币代码列表(如["CNY", "USD", "SGD", ...])
         """
         return sorted(self.CODE_TO_NAME.keys())
     
@@ -239,10 +239,10 @@ class CurrencyNormalizer:
         """
         获取货币完整信息
         
-        参数：
+        参数:
             currency_str: 货币符号/代码/名称
         
-        返回：
+        返回:
             货币信息字典
         """
         code = self.normalize(currency_str)
@@ -254,7 +254,7 @@ class CurrencyNormalizer:
         }
 
 
-# 全局单例（推荐用法）
+# 全局单例(推荐用法)
 _normalizer_instance = None
 
 def get_currency_normalizer() -> CurrencyNormalizer:

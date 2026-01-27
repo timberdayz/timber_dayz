@@ -3,7 +3,7 @@
 
 """
 安全账号管理器
-读取本地账号配置文件并加密存储，确保账号信息安全
+读取本地账号配置文件并加密存储,确保账号信息安全
 """
 
 import json
@@ -25,7 +25,7 @@ class SecureAccountManager:
         初始化安全账号管理器
         
         Args:
-            config_path: 配置文件路径，默认为项目根目录下的secure_accounts.enc
+            config_path: 配置文件路径,默认为项目根目录下的secure_accounts.enc
         """
         self.config_path = config_path or "secure_accounts.enc"
         self.key_path = "secure_account_key.key"
@@ -94,7 +94,7 @@ class SecureAccountManager:
             return config
             
         except ImportError:
-            self.logger.warning("本地账号配置文件不存在，使用默认配置")
+            self.logger.warning("本地账号配置文件不存在,使用默认配置")
             return self._create_default_config()
         except Exception as e:
             self.logger.error(f"加载本地账号配置失败: {e}")
@@ -118,7 +118,7 @@ class SecureAccountManager:
         return datetime.now().isoformat()
     
     def load_accounts(self) -> Dict[str, Any]:
-        """加载账号配置（从本地配置文件）"""
+        """加载账号配置(从本地配置文件)"""
         try:
             # 优先尝试加载加密文件
             if os.path.exists(self.config_path):
@@ -129,7 +129,7 @@ class SecureAccountManager:
                 self.logger.info(f"成功加载加密账号配置: {len(accounts.get('accounts', []))} 个账号")
                 return accounts
             
-            # 如果没有加密文件，从本地配置文件加载
+            # 如果没有加密文件,从本地配置文件加载
             else:
                 return self.load_local_accounts()
                 

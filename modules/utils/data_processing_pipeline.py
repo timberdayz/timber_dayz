@@ -3,7 +3,7 @@
 
 """
 智能数据处理管道
-负责：文件重命名 -> 目录组织 -> 数据清洗 -> 数据库记录
+负责:文件重命名 -> 目录组织 -> 数据清洗 -> 数据库记录
 按data_organizer规范实现细粒度账号级别分离
 """
 
@@ -68,7 +68,7 @@ class DataProcessingPipeline:
                     if renamed_result["success"]:
                         processing_result["processed_files"].append(renamed_result)
             
-            # 2. 数据清洗（如果有处理的文件）
+            # 2. 数据清洗(如果有处理的文件)
             for file_info in processing_result["processed_files"]:
                 if file_info["success"]:
                     cleaned_result = self._clean_data_file(file_info["new_path"], account)
@@ -83,7 +83,7 @@ class DataProcessingPipeline:
             successful_files = [f for f in processing_result["processed_files"] if f["success"]]
             if successful_files or db_record:
                 processing_result["success"] = True
-                logger.info(f"[OK] 数据处理完成，处理{len(successful_files)}个文件")
+                logger.info(f"[OK] 数据处理完成,处理{len(successful_files)}个文件")
             else:
                 processing_result["error"] = "没有成功处理的文件"
                 
@@ -131,7 +131,7 @@ class DataProcessingPipeline:
             except:
                 date_obj = datetime.now()
             
-            # 构建目录结构：downloads/{platform}/{account_key}/{data_type}/{YYYY}/{YYYYMM}/{YYYYMMDD}/raw
+            # 构建目录结构:downloads/{platform}/{account_key}/{data_type}/{YYYY}/{YYYYMM}/{YYYYMMDD}/raw
             target_dir = (self.base_downloads_dir / platform / account_key / data_type / 
                          f"{date_obj.year}" / f"{date_obj.year:04d}{date_obj.month:02d}" / 
                          f"{date_obj.year:04d}{date_obj.month:02d}{date_obj.day:02d}" / "raw")
@@ -164,7 +164,7 @@ class DataProcessingPipeline:
         store_name = account.get("store_name", "")
         username = account.get("username", "")
         
-        # 优先使用store_name，其次username
+        # 优先使用store_name,其次username
         identifier = store_name or username or "unknown"
         
         # 清理特殊字符
@@ -187,10 +187,10 @@ class DataProcessingPipeline:
                 end_str = end_date.replace("-", "")
                 date_range_str = f"{start_str}_{end_str}"
             
-            # 生成文件内容哈希（用于去重）
+            # 生成文件内容哈希(用于去重)
             content_hash = hashlib.md5(f"{platform}_{account_key}_{data_type}_{timestamp}".encode()).hexdigest()[:8]
             
-            # 文件名格式：YYYYMMDD_HHMMSS_{platform}_{account_key}_{data_type}_{daterange}_{hash}.xlsx
+            # 文件名格式:YYYYMMDD_HHMMSS_{platform}_{account_key}_{data_type}_{daterange}_{hash}.xlsx
             filename = f"{timestamp}_{platform}_{account_key}_{data_type}_{date_range_str}_{content_hash}{file_extension}"
             
             return filename
@@ -254,7 +254,7 @@ class DataProcessingPipeline:
             # 1. 删除完全空白的行和列
             df_cleaned = df_cleaned.dropna(how='all').dropna(axis=1, how='all')
             
-            # 2. 标准化日期列（常见的日期列名）
+            # 2. 标准化日期列(常见的日期列名)
             date_columns = ['日期', '时间', 'date', 'time', '下单时间', '创建时间', '更新时间']
             for col in df_cleaned.columns:
                 if any(date_keyword in str(col).lower() for date_keyword in date_columns):
@@ -263,7 +263,7 @@ class DataProcessingPipeline:
                     except:
                         pass
             
-            # 3. 标准化金额列（移除货币符号，转换为数值）
+            # 3. 标准化金额列(移除货币符号,转换为数值)
             amount_columns = ['金额', '价格', '费用', 'amount', 'price', 'cost', '销售额', '利润']
             for col in df_cleaned.columns:
                 if any(amount_keyword in str(col).lower() for amount_keyword in amount_columns):
@@ -319,7 +319,7 @@ class DataProcessingPipeline:
             
             processed_file = processed_dir / processed_filename
             
-            # 保存为Parquet格式（更高效）
+            # 保存为Parquet格式(更高效)
             df.to_parquet(processed_file, index=False)
             
             logger.info(f"[OK] 清洗数据已保存: {processed_filename}")

@@ -3,10 +3,10 @@
 """
 智能字段映射引擎
 
-提供多层次的字段映射策略：
+提供多层次的字段映射策略:
 1. 精确匹配
-2. 模糊匹配（字符串相似度）
-3. 语义匹配（同义词库）
+2. 模糊匹配(字符串相似度)
+3. 语义匹配(同义词库)
 4. 历史学习
 5. 数据内容分析
 6. 外键识别
@@ -104,7 +104,7 @@ class SmartMappingEngine:
         }
     
     def _load_mapping_history(self) -> Dict[str, List[MappingResult]]:
-        """加载映射历史（简化版，实际应从数据库加载）"""
+        """加载映射历史(简化版,实际应从数据库加载)"""
         return {}
     
     def generate_mappings(self, source_columns: List[str], target_fields: List[str], 
@@ -115,7 +115,7 @@ class SmartMappingEngine:
         Args:
             source_columns: 源文件列名列表
             target_fields: 目标数据库字段列表
-            data_domain: 数据域（products, orders, traffic等）
+            data_domain: 数据域(products, orders, traffic等)
             
         Returns:
             映射结果列表
@@ -161,7 +161,7 @@ class SmartMappingEngine:
         if foreign_key_match:
             return foreign_key_match
         
-        return fuzzy_match  # 返回模糊匹配结果（即使置信度较低）
+        return fuzzy_match  # 返回模糊匹配结果(即使置信度较低)
     
     def _exact_match(self, source_col: str, target_fields: List[str]) -> Optional[MappingResult]:
         """精确匹配"""
@@ -241,7 +241,7 @@ class SmartMappingEngine:
     
     def _learned_match(self, source_col: str, data_domain: str) -> Optional[MappingResult]:
         """历史学习匹配"""
-        # 简化版历史学习，实际应从数据库查询
+        # 简化版历史学习,实际应从数据库查询
         history_key = f"{data_domain}_{source_col}"
         
         if history_key in self.mapping_history:
@@ -311,7 +311,7 @@ class SmartMappingEngine:
     
     def analyze_data_content(self, column_name: str, sample_data: List[Any]) -> Dict[str, Any]:
         """
-        分析数据内容，推断字段类型和可能的映射
+        分析数据内容,推断字段类型和可能的映射
         
         Args:
             column_name: 列名
@@ -365,7 +365,7 @@ class SmartMappingEngine:
         if date_count / len(sample_data) > 0.8:
             return 'date'
         
-        # 检查ID类型（数字字符串）
+        # 检查ID类型(数字字符串)
         id_count = 0
         for value in sample_data:
             if str(value).isdigit() and len(str(value)) > 3:
@@ -446,7 +446,7 @@ class SmartMappingEngine:
     
     def save_mapping_history(self, mapping: MappingResult, user_id: str = None):
         """保存映射历史"""
-        # 简化版，实际应保存到数据库
+        # 简化版,实际应保存到数据库
         key = f"{mapping.source_column}_{mapping.target_field}"
         if key not in self.mapping_history:
             self.mapping_history[key] = []

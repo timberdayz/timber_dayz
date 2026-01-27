@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-数据一致性验证API（v4.11.5新增）
+数据一致性验证API(v4.11.5新增)
 
-功能：
+功能:
 1. 跨平台数据一致性检查
-2. 计算数据一致性验证（C类 vs B类）
+2. 计算数据一致性验证(C类 vs B类)
 3. 时间序列数据一致性检查
 4. 异常数据检测
 """
@@ -22,8 +22,7 @@ from backend.models.database import get_db, get_async_db
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import (
-    FactOrder, 
-    FactOrderItem, 
+    # [DELETED] v4.19.0: FactOrder, FactOrderItem 已删除
     FactProductMetric,
     DimShop,
     DataQuarantine
@@ -36,21 +35,21 @@ router = APIRouter(prefix="/api/data-consistency", tags=["数据一致性验证"
 
 @router.get("/cross-platform")
 async def check_cross_platform_consistency(
-    shop_id: Optional[str] = Query(None, description="店铺ID（可选，不指定则检查所有店铺）"),
-    platforms: Optional[str] = Query(None, description="平台代码列表（逗号分隔，可选）"),
-    start_date: date = Query(..., description="开始日期（YYYY-MM-DD）"),
-    end_date: date = Query(..., description="结束日期（YYYY-MM-DD）"),
+    shop_id: Optional[str] = Query(None, description="店铺ID(可选,不指定则检查所有店铺)"),
+    platforms: Optional[str] = Query(None, description="平台代码列表(逗号分隔,可选)"),
+    start_date: date = Query(..., description="开始日期(YYYY-MM-DD)"),
+    end_date: date = Query(..., description="结束日期(YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     跨平台数据一致性检查
     
-    功能：
+    功能:
     - 检查同一店铺在不同平台的数据一致性
     - 识别数据差异和异常
     - 生成一致性报告
     
-    返回：
+    返回:
     {
         success: bool,
         shop_id: str,
@@ -88,72 +87,10 @@ async def check_cross_platform_consistency(
             platform_list = [p.strip() for p in platforms.split(",")]
         
         # 构建查询条件
-        conditions = [
-            FactOrder.order_date_local >= start_date,
-            FactOrder.order_date_local <= end_date,
-            FactOrder.order_status.in_(['completed', 'paid'])
-        ]
-        
-        if shop_id:
-            conditions.append(FactOrder.shop_id == shop_id)
-        
-        if platform_list:
-            conditions.append(FactOrder.platform_code.in_(platform_list))
-        
-        # 查询各平台的GMV和订单数
-        result = await db.execute(
-            select(
-                FactOrder.platform_code,
-                func.sum(FactOrder.total_amount_rmb).label("gmv"),
-                func.count(func.distinct(FactOrder.order_id)).label("order_count"),
-                func.count(func.distinct(FactOrder.buyer_id)).label("buyer_count")
-            ).where(
-                and_(*conditions)
-            ).group_by(
-                FactOrder.platform_code
-            )
-        )
-        platform_stats = result.all()
-        
-        if not platform_stats:
-            return {
-                "success": True,
-                "shop_id": shop_id,
-                "platforms": platform_list or [],
-                "date_range": {
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat()
-                },
-                "consistency_checks": [],
-                "summary": {
-                    "total_checks": 0,
-                    "passed_checks": 0,
-                    "failed_checks": 0,
-                    "consistency_score": 100.0
-                }
-            }
-        
-        # 查询各平台的订单项数（用于计算连带率）
-        item_stats_result = await db.execute(
-            select(
-                FactOrderItem.platform_code,
-                func.count().label("item_count")
-            ).join(
-                FactOrder,
-                and_(
-                    FactOrderItem.platform_code == FactOrder.platform_code,
-                    FactOrderItem.shop_id == FactOrder.shop_id,
-                    FactOrderItem.order_id == FactOrder.order_id
-                )
-            ).where(
-                and_(*conditions)
-            ).group_by(
-                FactOrderItem.platform_code
-            )
-        )
-        item_stats = item_stats_result.all()
-        
-        item_dict = {row.platform_code: row.item_count for row in item_stats}
+        # [DELETED] v4.19.0: FactOrder, FactOrderItem 已删除
+        # [TODO] 实现查询 b_class.fact_{platform}_orders_{granularity} 的逻辑
+        platform_stats = []  # 暂时返回空列表
+        item_dict = {}  # 暂时返回空字典
         
         # 构建平台数据字典
         platform_data = {}
@@ -189,7 +126,7 @@ async def check_cross_platform_consistency(
                 "max_deviation": round(max_deviation, 2),
                 "max_deviation_pct": round(max_deviation_pct, 2),
                 "is_consistent": max_deviation_pct < 50,  # 偏差小于50%认为一致
-                "warnings": [] if max_deviation_pct < 50 else [f"GMV最大偏差{max_deviation_pct:.2f}%，可能存在数据不一致"]
+                "warnings": [] if max_deviation_pct < 50 else [f"GMV最大偏差{max_deviation_pct:.2f}%,可能存在数据不一致"]
             })
         
         # 2. 订单数一致性检查
@@ -207,7 +144,7 @@ async def check_cross_platform_consistency(
                 "max_deviation": round(max_deviation, 2),
                 "max_deviation_pct": round(max_deviation_pct, 2),
                 "is_consistent": max_deviation_pct < 50,
-                "warnings": [] if max_deviation_pct < 50 else [f"订单数最大偏差{max_deviation_pct:.2f}%，可能存在数据不一致"]
+                "warnings": [] if max_deviation_pct < 50 else [f"订单数最大偏差{max_deviation_pct:.2f}%,可能存在数据不一致"]
             })
         
         # 3. 连带率一致性检查
@@ -225,7 +162,7 @@ async def check_cross_platform_consistency(
                 "max_deviation": round(max_deviation, 2),
                 "max_deviation_pct": round(max_deviation_pct, 2),
                 "is_consistent": max_deviation_pct < 30,  # 连带率偏差小于30%认为一致
-                "warnings": [] if max_deviation_pct < 30 else [f"连带率最大偏差{max_deviation_pct:.2f}%，可能存在数据不一致"]
+                "warnings": [] if max_deviation_pct < 30 else [f"连带率最大偏差{max_deviation_pct:.2f}%,可能存在数据不一致"]
             })
         
         # 计算汇总统计
@@ -266,20 +203,20 @@ async def check_cross_platform_consistency(
 
 @router.get("/calculated-vs-source")
 async def check_calculated_vs_source_consistency(
-    platform_code: Optional[str] = Query(None, description="平台代码（可选）"),
-    shop_id: Optional[str] = Query(None, description="店铺ID（可选）"),
-    metric_date: date = Query(..., description="指标日期（YYYY-MM-DD）"),
+    platform_code: Optional[str] = Query(None, description="平台代码(可选)"),
+    shop_id: Optional[str] = Query(None, description="店铺ID(可选)"),
+    metric_date: date = Query(..., description="指标日期(YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    计算数据与源数据一致性验证（C类 vs B类）
+    计算数据与源数据一致性验证(C类 vs B类)
     
-    功能：
+    功能:
     - 验证C类计算数据与B类源数据的一致性
     - 检查计算逻辑是否正确
     - 识别数据计算错误
     
-    返回：
+    返回:
     {
         success: bool,
         platform_code: str,
@@ -307,53 +244,15 @@ async def check_calculated_vs_source_consistency(
     try:
         logger.info(f"[DataConsistency] 计算数据一致性验证: platform={platform_code}, shop={shop_id}, date={metric_date}")
         
-        # 构建查询条件
-        order_conditions = [
-            FactOrder.order_date_local == metric_date,
-            FactOrder.order_status.in_(['completed', 'paid'])
-        ]
+        # [DELETED] v4.19.0: FactOrder, FactOrderItem 已删除
+        # [TODO] 实现查询 b_class.fact_{platform}_orders_{granularity} 的逻辑
+        # 目前使用占位符返回0值
+        source_gmv = 0.0
+        source_orders = 0
+        source_aov = 0.0
+        source_attach_rate = 0.0
         
-        if platform_code:
-            order_conditions.append(FactOrder.platform_code == platform_code)
-        if shop_id:
-            order_conditions.append(FactOrder.shop_id == shop_id)
-        
-        # 查询B类源数据（订单数据）
-        order_stats_result = await db.execute(
-            select(
-                func.sum(FactOrder.total_amount_rmb).label("gmv"),
-                func.count(func.distinct(FactOrder.order_id)).label("order_count"),
-                func.avg(FactOrder.total_amount_rmb).label("avg_order_value")
-            ).where(
-                and_(*order_conditions)
-            )
-        )
-        order_stats = order_stats_result.first()
-        
-        source_gmv = float(order_stats.gmv or 0)
-        source_orders = int(order_stats.order_count or 0)
-        source_aov = float(order_stats.avg_order_value or 0)
-        
-        # 查询订单项数据（用于计算连带率）
-        item_count_result = await db.execute(
-            select(func.count()).select_from(
-                FactOrderItem.join(
-                    FactOrder,
-                    and_(
-                        FactOrderItem.platform_code == FactOrder.platform_code,
-                        FactOrderItem.shop_id == FactOrder.shop_id,
-                        FactOrderItem.order_id == FactOrder.order_id
-                    )
-                )
-            ).where(
-                and_(*order_conditions)
-            )
-        )
-        item_count = item_count_result.scalar() or 0
-        
-        source_attach_rate = (item_count / source_orders) if source_orders > 0 else 0
-        
-        # 查询流量数据（用于计算转化率）
+        # 查询流量数据(用于计算转化率)
         traffic_conditions = [
             FactProductMetric.metric_date == metric_date,
             FactProductMetric.data_domain == 'products'
@@ -376,13 +275,13 @@ async def check_calculated_vs_source_consistency(
         source_uv = float(traffic_stats.uv or 0)
         source_conversion_rate = (source_orders / source_uv * 100) if source_uv > 0 else 0
         
-        # 查询C类计算数据（从物化视图或C类表）
-        # 注意：这里假设有C类数据表，如果没有则跳过C类数据查询
+        # 查询C类计算数据(从物化视图或C类表)
+        # 注意:这里假设有C类数据表,如果没有则跳过C类数据查询
         # 实际实现中需要根据C类数据存储位置调整
         
         consistency_checks = []
         
-        # 由于C类数据可能存储在物化视图中，这里先返回B类源数据
+        # 由于C类数据可能存储在物化视图中,这里先返回B类源数据
         # 实际使用时需要根据C类数据存储位置进行对比
         
         consistency_checks.append({
@@ -460,23 +359,23 @@ async def check_calculated_vs_source_consistency(
 
 @router.get("/anomaly-detection")
 async def detect_data_anomalies(
-    platform_code: Optional[str] = Query(None, description="平台代码（可选）"),
-    shop_id: Optional[str] = Query(None, description="店铺ID（可选）"),
-    start_date: date = Query(..., description="开始日期（YYYY-MM-DD）"),
-    end_date: date = Query(..., description="结束日期（YYYY-MM-DD）"),
-    metric: str = Query("gmv", description="检测指标：gmv/orders/attach_rate/conversion_rate"),
-    threshold: float = Query(3.0, description="异常检测阈值（标准差倍数）"),
+    platform_code: Optional[str] = Query(None, description="平台代码(可选)"),
+    shop_id: Optional[str] = Query(None, description="店铺ID(可选)"),
+    start_date: date = Query(..., description="开始日期(YYYY-MM-DD)"),
+    end_date: date = Query(..., description="结束日期(YYYY-MM-DD)"),
+    metric: str = Query("gmv", description="检测指标:gmv/orders/attach_rate/conversion_rate"),
+    threshold: float = Query(3.0, description="异常检测阈值(标准差倍数)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     异常数据检测
     
-    功能：
-    - 使用统计方法检测异常数据（Z-score方法）
+    功能:
+    - 使用统计方法检测异常数据(Z-score方法)
     - 识别数据异常值
     - 生成异常报告
     
-    返回：
+    返回:
     {
         success: bool,
         platform_code: str,
@@ -549,7 +448,7 @@ async def detect_data_anomalies(
             )
             daily_data = daily_data_result.all()
         else:
-            # 其他指标需要更复杂的查询，暂时返回空
+            # 其他指标需要更复杂的查询,暂时返回空
             daily_data = []
         
         if not daily_data:
@@ -573,23 +472,30 @@ async def detect_data_anomalies(
             
             return success_response(data=data)
         
+        # [DELETED] v4.19.0: 暂时返回空列表,避免报错
+        values = []
+        dates = []
+        
+        # [DEPRECATED] 以下代码已注释
+        """
         # 提取数值
         values = [float(row.value or 0) for row in daily_data]
         dates = [row.order_date_local for row in daily_data]
+        """
         
         # 计算统计量
         mean = sum(values) / len(values) if values else 0
         variance = sum((x - mean) ** 2 for x in values) / len(values) if values else 0
         std_dev = variance ** 0.5
         
-        # 检测异常值（Z-score方法）
+        # 检测异常值(Z-score方法)
         anomalies = []
         for date_val, value in zip(dates, values):
             z_score = abs((value - mean) / std_dev) if std_dev > 0 else 0
             is_anomaly = z_score > threshold
             
             if is_anomaly:
-                reason = f"Z-score {z_score:.2f} 超过阈值 {threshold}（均值{mean:.2f}，标准差{std_dev:.2f}）"
+                reason = f"Z-score {z_score:.2f} 超过阈值 {threshold}(均值{mean:.2f},标准差{std_dev:.2f})"
             else:
                 reason = ""
             

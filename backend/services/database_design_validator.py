@@ -3,20 +3,20 @@
 """
 数据库设计规范验证工具
 
-[*] v4.12.0新增：验证数据库模型是否符合设计规范
+[*] v4.12.0新增:验证数据库模型是否符合设计规范
 
-功能：
+功能:
 1. 验证数据库模型是否符合主键设计规则
 2. 验证字段是否符合必填规则
 3. 验证索引设计是否符合规范
 4. 验证物化视图是否符合规范
 5. 生成验证报告
 
-设计标准：
-- 经营数据：自增ID主键 + SKU为核心的唯一索引
-- 运营数据：自增ID主键 + shop_id为核心的唯一索引
-- 主视图：包含数据域所有核心字段
-- 辅助视图：依赖主视图或基础数据
+设计标准:
+- 经营数据:自增ID主键 + SKU为核心的唯一索引
+- 运营数据:自增ID主键 + shop_id为核心的唯一索引
+- 主视图:包含数据域所有核心字段
+- 辅助视图:依赖主视图或基础数据
 """
 
 from typing import Dict, List, Any, Optional, Tuple
@@ -54,7 +54,7 @@ class DatabaseDesignValidator:
     """
     数据库设计规范验证器
     
-    验证规则：
+    验证规则:
     1. 主键设计规则
     2. 字段必填规则
     3. 索引设计规则
@@ -62,16 +62,16 @@ class DatabaseDesignValidator:
     5. 物化视图设计规则
     """
     
-    # 经营数据表（以SKU为核心）
+    # 经营数据表(以SKU为核心)
     OPERATIONAL_DATA_TABLES = {
         'fact_product_metrics',
         'fact_order_items',
-        'fact_orders',  # 订单数据属于经营数据，但主键包含order_id
+        'fact_orders',  # 订单数据属于经营数据,但主键包含order_id
     }
     
-    # 运营数据表（以shop_id为核心）
+    # 运营数据表(以shop_id为核心)
     BUSINESS_DATA_TABLES = {
-        # 待创建：fact_traffic, fact_service, fact_analytics
+        # 待创建:fact_traffic, fact_service, fact_analytics
     }
     
     # 主视图列表
@@ -161,7 +161,7 @@ class DatabaseDesignValidator:
             
             # 检查主键是否包含业务标识字段
             if is_operational:
-                # 经营数据：主键应包含platform_code, shop_id, 业务标识（如platform_sku或order_id）
+                # 经营数据:主键应包含platform_code, shop_id, 业务标识(如platform_sku或order_id)
                 has_platform_code = 'platform_code' in pk_columns
                 has_shop_id = 'shop_id' in pk_columns
                 has_business_id = any(col in pk_columns for col in ['platform_sku', 'order_id', 'product_id'])
@@ -171,11 +171,11 @@ class DatabaseDesignValidator:
                         severity='warning',
                         category='primary_key',
                         table_name=table_name,
-                        issue=f'经营数据表主键设计：当前主键={pk_columns}',
-                        suggestion='经营数据表主键应包含platform_code, shop_id, 业务标识（如platform_sku或order_id）'
+                        issue=f'经营数据表主键设计:当前主键={pk_columns}',
+                        suggestion='经营数据表主键应包含platform_code, shop_id, 业务标识(如platform_sku或order_id)'
                     ))
             
-            # 检查是否有自增ID（推荐但不强制）
+            # 检查是否有自增ID(推荐但不强制)
             columns = self.inspector.get_columns(table_name)
             has_auto_increment_id = any(
                 col.get('autoincrement', False) and col['name'] == 'id'
@@ -188,7 +188,7 @@ class DatabaseDesignValidator:
                     category='primary_key',
                     table_name=table_name,
                     issue='表没有自增ID字段',
-                    suggestion='推荐使用自增ID作为主键，业务唯一性通过唯一索引保证'
+                    suggestion='推荐使用自增ID作为主键,业务唯一性通过唯一索引保证'
                 ))
         
         except Exception as e:
@@ -230,7 +230,7 @@ class DatabaseDesignValidator:
                         suggestion='主键字段必须NOT NULL'
                     ))
                 
-                # 业务标识字段应该NOT NULL（除非明确允许NULL）
+                # 业务标识字段应该NOT NULL(除非明确允许NULL)
                 if col_name in business_id_fields and is_nullable and col_name not in pk_columns:
                     issues.append(ValidationIssue(
                         severity='warning',
@@ -238,10 +238,10 @@ class DatabaseDesignValidator:
                         table_name=table_name,
                         field_name=col_name,
                         issue=f'业务标识字段{col_name}允许NULL',
-                        suggestion='业务标识字段通常应该NOT NULL，除非业务明确需要支持NULL'
+                        suggestion='业务标识字段通常应该NOT NULL,除非业务明确需要支持NULL'
                     ))
                 
-                # 金额字段应该NOT NULL（避免NULL计算问题）
+                # 金额字段应该NOT NULL(避免NULL计算问题)
                 amount_fields = ['total_amount', 'subtotal', 'quantity', 'price', 'sales_amount']
                 if any(field in col_name.lower() for field in amount_fields) and is_nullable:
                     issues.append(ValidationIssue(
@@ -250,7 +250,7 @@ class DatabaseDesignValidator:
                         table_name=table_name,
                         field_name=col_name,
                         issue=f'金额字段{col_name}允许NULL',
-                        suggestion='金额字段应该NOT NULL，默认值为0.0，避免NULL计算问题'
+                        suggestion='金额字段应该NOT NULL,默认值为0.0,避免NULL计算问题'
                     ))
         
         except Exception as e:
@@ -338,7 +338,7 @@ class DatabaseDesignValidator:
                         category='materialized_view',
                         table_name=view_name,
                         issue=f'{data_domain}域主视图不存在',
-                        suggestion=f'应创建{view_name}主视图，包含{data_domain}域的所有核心字段'
+                        suggestion=f'应创建{view_name}主视图,包含{data_domain}域的所有核心字段'
                     ))
                 else:
                     # 验证主视图是否有唯一索引
@@ -393,6 +393,6 @@ def validate_database_design(db: Session) -> ValidationResult:
     return validator.validate_all()
 
 
-# [*] v4.12.0新增：导入数据入库流程验证器
+# [*] v4.12.0新增:导入数据入库流程验证器
 from backend.services.data_ingestion_validator import validate_data_ingestion_process
 

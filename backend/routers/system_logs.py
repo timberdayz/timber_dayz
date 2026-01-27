@@ -31,7 +31,7 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/system/logs", tags=["系统日志"])
 
-# 限流配置（如果可用）
+# 限流配置(如果可用)
 try:
     from backend.middleware.rate_limiter import role_based_rate_limit
 except ImportError:
@@ -40,18 +40,18 @@ except ImportError:
 
 @router.get("", response_model=SystemLogListResponse)
 async def get_system_logs(
-    level: Optional[str] = Query(None, description="日志级别（ERROR, WARN, INFO, DEBUG）"),
-    module: Optional[str] = Query(None, description="模块名称（支持模糊匹配）"),
+    level: Optional[str] = Query(None, description="日志级别(ERROR, WARN, INFO, DEBUG)"),
+    module: Optional[str] = Query(None, description="模块名称(支持模糊匹配)"),
     user_id: Optional[int] = Query(None, description="用户ID"),
     start_time: Optional[datetime] = Query(None, description="开始时间"),
     end_time: Optional[datetime] = Query(None, description="结束时间"),
-    page: int = Query(1, ge=1, description="页码（1-based）"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数（最大100）"),
+    page: int = Query(1, ge=1, description="页码(1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数(最大100)"),
     db: AsyncSession = Depends(get_async_db),
     current_user = Depends(require_admin)
 ):
     """
-    获取系统日志列表（分页、筛选）
+    获取系统日志列表(分页、筛选)
     
     需要管理员权限
     """
@@ -173,10 +173,10 @@ async def export_system_logs(
     current_user = Depends(require_admin)
 ):
     """
-    导出系统日志（Excel/CSV格式）
+    导出系统日志(Excel/CSV格式)
     
     需要管理员权限
-    限流：防止大量导出导致性能问题
+    限流:防止大量导出导致性能问题
     """
     # 限流配置
     if role_based_rate_limit:
@@ -204,7 +204,7 @@ async def export_system_logs(
         if request.end_time:
             conditions.append(SystemLog.created_at <= request.end_time)
         
-        # 查询数据（限制最大记录数）
+        # 查询数据(限制最大记录数)
         query = select(SystemLog).order_by(SystemLog.created_at.desc())
         if conditions:
             query = query.where(and_(*conditions))
@@ -254,7 +254,7 @@ async def export_system_logs(
                 }
             )
         else:
-            # Excel导出（需要openpyxl）
+            # Excel导出(需要openpyxl)
             try:
                 from openpyxl import Workbook
                 from openpyxl.styles import Font, Alignment
@@ -299,8 +299,8 @@ async def export_system_logs(
                     }
                 )
             except ImportError:
-                # 如果没有openpyxl，降级为CSV
-                logger.warning("openpyxl未安装，降级为CSV格式导出")
+                # 如果没有openpyxl,降级为CSV
+                logger.warning("openpyxl未安装,降级为CSV格式导出")
                 return await export_system_logs(
                     SystemLogExportRequest(
                         **request.model_dump(),
@@ -323,14 +323,14 @@ async def export_system_logs(
 
 @router.delete("")
 async def clear_system_logs(
-    days: int = Query(30, ge=1, le=365, description="保留最近N天的日志（默认30天）"),
+    days: int = Query(30, ge=1, le=365, description="保留最近N天的日志(默认30天)"),
     db: AsyncSession = Depends(get_async_db),
     current_user = Depends(require_admin)
 ):
     """
-    清空系统日志（可选，谨慎使用）
+    清空系统日志(可选,谨慎使用)
     
-    只删除指定天数之前的日志，保留最近的日志
+    只删除指定天数之前的日志,保留最近的日志
     需要管理员权限
     """
     try:
@@ -349,21 +349,21 @@ async def clear_system_logs(
         if deleted_count == 0:
             return success_response(
                 data={"deleted_count": 0},
-                message=f"没有需要删除的日志（保留最近{days}天）"
+                message=f"没有需要删除的日志(保留最近{days}天)"
             )
         
-        # 删除日志（使用delete语句）
+        # 删除日志(使用delete语句)
         delete_stmt = delete(SystemLog).where(
             SystemLog.created_at < cutoff_time
         )
         result = await db.execute(delete_stmt)
         await db.commit()
         
-        logger.warning(f"管理员 {current_user.user_id} 清空了 {deleted_count} 条系统日志（保留最近{days}天）")
+        logger.warning(f"管理员 {current_user.user_id} 清空了 {deleted_count} 条系统日志(保留最近{days}天)")
         
         return success_response(
             data={"deleted_count": deleted_count},
-            message=f"已删除 {deleted_count} 条日志（保留最近{days}天）"
+            message=f"已删除 {deleted_count} 条日志(保留最近{days}天)"
         )
         
     except Exception as e:

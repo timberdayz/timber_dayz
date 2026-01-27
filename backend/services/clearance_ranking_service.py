@@ -2,19 +2,19 @@
 # -*- coding: utf-8 -*-
 
 """
-滞销清理排名服务（v4.11.0新增）
+滞销清理排名服务(v4.11.0新增)
 
-功能：
+功能:
 1. 计算店铺滞销清理排名
 2. 计算清理金额和数量
 3. 计算激励金额
 
-滞销定义：
+滞销定义:
 - 库存周转率低于8次/年
 - 或库存天数超过45天
 - 或产品状态为"滞销"
 
-清理定义：
+清理定义:
 - 通过促销、清仓等方式销售滞销产品
 - 记录清理金额和数量
 """
@@ -26,7 +26,7 @@ from datetime import date, datetime, timedelta
 
 from modules.core.db import (
     ClearanceRanking,
-    FactOrder,
+    # [DELETED] v4.19.0: FactOrder 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
     FactProductMetric,
     DimShop
 )
@@ -49,11 +49,11 @@ class ClearanceRankingService:
         """
         计算滞销清理排名
         
-        参数：
+        参数:
             metric_date: 指标日期
-            granularity: 粒度（monthly/weekly）
+            granularity: 粒度(monthly/weekly)
         
-        返回：
+        返回:
             {
                 "rankings": [
                     {
@@ -101,7 +101,7 @@ class ClearanceRankingService:
                 )
                 
                 if clearance_data["clearance_amount"] > 0:
-                    # 计算激励金额（清理金额的1%）
+                    # 计算激励金额(清理金额的1%)
                     incentive_amount = clearance_data["clearance_amount"] * 0.01
                     
                     # 保存或更新排名记录
@@ -180,47 +180,23 @@ class ClearanceRankingService:
         """
         计算店铺的清理数据
         
-        清理定义：
-        - 销售价格低于成本价的产品（清仓）
-        - 或通过促销活动销售的产品（促销）
-        - 或库存天数超过45天的产品（滞销清理）
+        清理定义:
+        - 销售价格低于成本价的产品(清仓)
+        - 或通过促销活动销售的产品(促销)
+        - 或库存天数超过45天的产品(滞销清理)
         """
         # TODO: 需要根据实际业务逻辑实现
-        # 临时实现：从fact_orders查询低价订单（假设低于平均订单金额50%的为清理订单）
+        # 临时实现:从fact_orders查询低价订单(假设低于平均订单金额50%的为清理订单)
         
-        # 计算平均订单金额
-        avg_order_result = self.db.execute(
-            select(
-                func.avg(FactOrder.total_amount_rmb).label("avg_amount")
-            ).where(
-                FactOrder.platform_code == platform_code,
-                FactOrder.shop_id == shop_id,
-                FactOrder.order_date_local >= start_date,
-                FactOrder.order_date_local <= end_date,
-                FactOrder.order_status.in_(["completed", "paid"])
-            )
-        ).first()
+        # [DELETED] v4.19.0: FactOrder 已删除,订单数据现在在 b_class.fact_{platform}_orders_{granularity}
+        # [TODO] 需要查询 b_class schema 下的分表来获取订单数据
+        # 暂时返回默认值,待实现新的查询逻辑
+        avg_order_amount = 0.0
+        clearance_threshold = 0.0
         
-        avg_order_amount = float(avg_order_result.avg_amount or 0)
-        clearance_threshold = avg_order_amount * 0.5  # 低于平均订单金额50%的视为清理订单
-        
-        # 查询清理订单
-        clearance_result = self.db.execute(
-            select(
-                func.coalesce(func.sum(FactOrder.total_amount_rmb), 0).label("amount"),
-                func.count(FactOrder.order_id).label("quantity")
-            ).where(
-                FactOrder.platform_code == platform_code,
-                FactOrder.shop_id == shop_id,
-                FactOrder.order_date_local >= start_date,
-                FactOrder.order_date_local <= end_date,
-                FactOrder.order_status.in_(["completed", "paid"]),
-                FactOrder.total_amount_rmb <= clearance_threshold
-            )
-        ).first()
-        
-        clearance_amount = float(clearance_result.amount or 0)
-        clearance_quantity = int(clearance_result.quantity or 0)
+        # 查询清理订单(暂时返回0)
+        clearance_amount = 0.0
+        clearance_quantity = 0
         
         return {
             "clearance_amount": clearance_amount,

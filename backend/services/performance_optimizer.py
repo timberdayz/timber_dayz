@@ -47,7 +47,7 @@ class PerformanceOptimizer:
                     category="CPU",
                     priority="high",
                     title="优化CPU使用率",
-                    description=f"当前CPU使用率为{cpu_percent:.1f}%，建议优化代码逻辑或增加CPU资源",
+                    description=f"当前CPU使用率为{cpu_percent:.1f}%,建议优化代码逻辑或增加CPU资源",
                     impact="高",
                     effort="中等",
                     implementation="1. 优化数据库查询\n2. 使用缓存机制\n3. 异步处理耗时操作\n4. 升级硬件配置"
@@ -58,7 +58,7 @@ class PerformanceOptimizer:
                     category="CPU",
                     priority="medium",
                     title="监控CPU使用率",
-                    description=f"当前CPU使用率为{cpu_percent:.1f}%，建议持续监控",
+                    description=f"当前CPU使用率为{cpu_percent:.1f}%,建议持续监控",
                     impact="中等",
                     effort="低",
                     implementation="1. 设置CPU使用率告警\n2. 定期检查性能指标\n3. 优化热点代码"
@@ -71,7 +71,7 @@ class PerformanceOptimizer:
                     category="Memory",
                     priority="high",
                     title="优化内存使用",
-                    description=f"当前内存使用率为{memory.percent:.1f}%，建议优化内存使用",
+                    description=f"当前内存使用率为{memory.percent:.1f}%,建议优化内存使用",
                     impact="高",
                     effort="高",
                     implementation="1. 检查内存泄漏\n2. 优化数据结构\n3. 使用内存池\n4. 增加内存容量"
@@ -82,7 +82,7 @@ class PerformanceOptimizer:
                     category="Memory",
                     priority="medium",
                     title="监控内存使用",
-                    description=f"当前内存使用率为{memory.percent:.1f}%，建议监控内存使用情况",
+                    description=f"当前内存使用率为{memory.percent:.1f}%,建议监控内存使用情况",
                     impact="中等",
                     effort="低",
                     implementation="1. 设置内存使用率告警\n2. 定期检查内存使用\n3. 优化大数据处理"
@@ -95,7 +95,7 @@ class PerformanceOptimizer:
                     category="Disk",
                     priority="high",
                     title="清理磁盘空间",
-                    description=f"当前磁盘使用率为{disk.percent:.1f}%，建议清理磁盘空间",
+                    description=f"当前磁盘使用率为{disk.percent:.1f}%,建议清理磁盘空间",
                     impact="高",
                     effort="低",
                     implementation="1. 清理临时文件\n2. 删除过期日志\n3. 压缩历史数据\n4. 增加磁盘容量"
@@ -106,7 +106,7 @@ class PerformanceOptimizer:
                     category="Disk",
                     priority="medium",
                     title="监控磁盘使用",
-                    description=f"当前磁盘使用率为{disk.percent:.1f}%，建议监控磁盘使用情况",
+                    description=f"当前磁盘使用率为{disk.percent:.1f}%,建议监控磁盘使用情况",
                     impact="中等",
                     effort="低",
                     implementation="1. 设置磁盘使用率告警\n2. 定期清理临时文件\n3. 优化日志轮转"
@@ -119,7 +119,7 @@ class PerformanceOptimizer:
                     category="Network",
                     priority="medium",
                     title="优化网络使用",
-                    description="网络流量较高，建议优化网络使用",
+                    description="网络流量较高,建议优化网络使用",
                     impact="中等",
                     effort="中等",
                     implementation="1. 使用连接池\n2. 压缩数据传输\n3. 优化API调用\n4. 使用CDN"

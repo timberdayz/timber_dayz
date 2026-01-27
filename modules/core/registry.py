@@ -1,7 +1,7 @@
 """
 应用注册器
 
-提供应用模块的注册、发现和管理功能，实现插件化架构。
+提供应用模块的注册、发现和管理功能,实现插件化架构。
 """
 
 from typing import Dict, List, Type, Optional, Any
@@ -34,7 +34,7 @@ class ApplicationRegistry:
         
         Args:
             app_class: 应用类
-            app_id: 应用ID，如果为None则使用类名
+            app_id: 应用ID,如果为None则使用类名
             
         Returns:
             str: 应用ID
@@ -49,11 +49,11 @@ class ApplicationRegistry:
             app_id = app_class.__name__
         
         if app_id in self._applications:
-            logger.warning(f"应用 {app_id} 已存在，将被覆盖")
+            logger.warning(f"应用 {app_id} 已存在,将被覆盖")
         
         self._applications[app_id] = app_class
         
-        # 获取应用元数据 - 优先读取类级元数据，避免实例化副作用
+        # 获取应用元数据 - 优先读取类级元数据,避免实例化副作用
         try:
             # 方法1: 尝试读取类级 METADATA 字典
             if hasattr(app_class, 'METADATA') and isinstance(app_class.METADATA, dict):
@@ -79,14 +79,14 @@ class ApplicationRegistry:
 
             # 方法3: 降级 - 仅在前两种方法都不可用时才实例化
             else:
-                logger.warning(f"应用 {app_id} 缺少类级元数据，降级为实例化获取")
+                logger.warning(f"应用 {app_id} 缺少类级元数据,降级为实例化获取")
                 temp_instance = app_class()
                 self._metadata[app_id] = temp_instance.get_info()
                 del temp_instance
 
         except Exception as e:
             logger.warning(f"获取应用 {app_id} 元数据失败: {e}")
-            # 安全降级：使用占位元数据，不影响其他模块加载
+            # 安全降级:使用占位元数据,不影响其他模块加载
             self._metadata[app_id] = {
                 "name": app_id,
                 "version": "unknown",
@@ -137,13 +137,13 @@ class ApplicationRegistry:
             app_id: 应用ID
             
         Returns:
-            Optional[BaseApplication]: 应用实例，不存在返回None
+            Optional[BaseApplication]: 应用实例,不存在返回None
         """
         if app_id not in self._applications:
             logger.error(f"应用 {app_id} 未注册")
             return None
         
-        # 如果实例不存在，创建新实例
+        # 如果实例不存在,创建新实例
         if app_id not in self._instances:
             try:
                 app_class = self._applications[app_id]
@@ -172,7 +172,7 @@ class ApplicationRegistry:
             app_id: 应用ID
             
         Returns:
-            Optional[Dict[str, Any]]: 应用信息，不存在返回None
+            Optional[Dict[str, Any]]: 应用信息,不存在返回None
         """
         return self._metadata.get(app_id)
     

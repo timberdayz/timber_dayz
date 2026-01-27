@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 字段映射辞典服务 - v4.3.7
-DB+缓存架构，提供中文友好的字段映射辞典查询
+DB+缓存架构,提供中文友好的字段映射辞典查询
 """
 
 from typing import List, Dict, Optional, Set
@@ -15,7 +15,7 @@ import time
 logger = get_logger(__name__)
 
 
-# 跨域通用字段（当某域字段过少时进行补充）
+# 跨域通用字段(当某域字段过少时进行补充)
 COMMON_FIELDS_BY_DOMAIN: Dict[str, List[str]] = {
     "traffic": [
         "unique_visitors",
@@ -29,7 +29,7 @@ COMMON_FIELDS_BY_DOMAIN: Dict[str, List[str]] = {
 
 
 class FieldMappingDictionaryService:
-    """字段映射辞典服务（DB+缓存）"""
+    """字段映射辞典服务(DB+缓存)"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -44,10 +44,10 @@ class FieldMappingDictionaryService:
         force_refresh: bool = False
     ) -> List[Dict]:
         """
-        获取字段辞典（带缓存）
+        获取字段辞典(带缓存)
         
         Args:
-            data_domain: 数据域过滤（orders/products/traffic/services）
+            data_domain: 数据域过滤(orders/products/traffic/services)
             active_only: 仅返回活跃字段
             force_refresh: 强制刷新缓存
             
@@ -64,11 +64,11 @@ class FieldMappingDictionaryService:
             logger.debug(f"[Dictionary] 缓存命中: {cache_key}")
             return self._cache[cache_key]
         
-        # 从数据库查询（使用原生SQL避免ORM schema不匹配问题）
+        # 从数据库查询(使用原生SQL避免ORM schema不匹配问题)
         try:
             from sqlalchemy import text
             
-            # 构建SQL查询（只查询必需字段，避免version/status导致的schema不匹配）
+            # 构建SQL查询(只查询必需字段,避免version/status导致的schema不匹配)
             sql = """
                 SELECT 
                     id, field_code, cn_name, en_name, description,
@@ -117,9 +117,9 @@ class FieldMappingDictionaryService:
             
             entries = [DictEntry(row) for row in rows]
 
-            # 如果指定数据域仍然为空，最后兜底返回全部活跃字段，避免前端下拉为空
+            # 如果指定数据域仍然为空,最后兜底返回全部活跃字段,避免前端下拉为空
             if data_domain and not entries:
-                logger.warning(f"[Dictionary] {data_domain} 为空，使用全量兜底")
+                logger.warning(f"[Dictionary] {data_domain} 为空,使用全量兜底")
                 # 使用原生SQL查询全部字段
                 fallback_sql = """
                     SELECT 
@@ -136,7 +136,7 @@ class FieldMappingDictionaryService:
                 fallback_rows = fallback_result.fetchall()
                 entries = [DictEntry(row) for row in fallback_rows]
             
-            # 如果字段过少，按域补充通用字段（按field_code跨域合并）
+            # 如果字段过少,按域补充通用字段(按field_code跨域合并)
             need_codes: List[str] = COMMON_FIELDS_BY_DOMAIN.get(data_domain or "", [])
             if need_codes:
                 existing_codes: Set[str] = {e.field_code for e in entries}
@@ -159,7 +159,7 @@ class FieldMappingDictionaryService:
                     extras = [DictEntry(row) for row in extra_rows]
                     entries.extend(extras)
 
-            # 转换为字典格式（按field_code去重）
+            # 转换为字典格式(按field_code去重)
             seen: Set[str] = set()
             result: List[Dict] = []
             for entry in entries:
@@ -188,7 +188,7 @@ class FieldMappingDictionaryService:
             self._cache[cache_key] = result
             self._cache_time = current_time
             
-            logger.info(f"[Dictionary] 加载{len(result)}条字段（{cache_key}）")
+            logger.info(f"[Dictionary] 加载{len(result)}条字段({cache_key})")
             return result
             
         except Exception as e:
@@ -234,7 +234,7 @@ class FieldMappingDictionaryService:
         search_in: List[str] = None
     ) -> List[Dict]:
         """
-        搜索字段（支持中文/拼音/缩写）
+        搜索字段(支持中文/拼音/缩写)
         
         Args:
             query: 搜索关键词
@@ -275,7 +275,7 @@ class FieldMappingDictionaryService:
                     matched_fields.append(field)
                     continue
         
-        logger.info(f"[Dictionary] 搜索'{query}'：找到{len(matched_fields)}个字段")
+        logger.info(f"[Dictionary] 搜索'{query}':找到{len(matched_fields)}个字段")
         return matched_fields
     
     def get_required_fields(self, data_domain: str) -> List[Dict]:

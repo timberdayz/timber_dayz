@@ -1,7 +1,7 @@
 """
 通知 WebSocket 路由 (v4.19.0)
 
-提供实时通知推送功能，支持JWT认证、连接管理、心跳机制等
+提供实时通知推送功能,支持JWT认证、连接管理、心跳机制等
 """
 
 import os
@@ -27,22 +27,22 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/notifications", tags=["通知WebSocket"])
 
-# WebSocket Close Codes（注意：与 HTTP 错误码不同）
+# WebSocket Close Codes(注意:与 HTTP 错误码不同)
 WS_CLOSE_TOKEN_EXPIRED = 4005  # Token 过期
 WS_CLOSE_CONNECTION_LIMIT = 4006  # 连接数超限
 WS_CLOSE_RATE_LIMIT = 4007  # 速率限制
 WS_CLOSE_INVALID_ORIGIN = 4008  # Origin 验证失败
 
-# WebSocket 错误码（用于消息格式）
+# WebSocket 错误码(用于消息格式)
 WS_ERROR_INVALID_TOKEN = 4001
 WS_ERROR_TOKEN_EXPIRED = 4002
 WS_ERROR_INVALID_MESSAGE = 4003
 WS_ERROR_RATE_LIMIT = 4004
 
 # 配置常量
-HEARTBEAT_INTERVAL = 30  # 心跳间隔（秒）
-HEARTBEAT_TIMEOUT = 120  # 心跳超时（秒）
-CONNECTION_TIMEOUT = 3600  # 连接超时（1小时）
+HEARTBEAT_INTERVAL = 30  # 心跳间隔(秒)
+HEARTBEAT_TIMEOUT = 120  # 心跳超时(秒)
+CONNECTION_TIMEOUT = 3600  # 连接超时(1小时)
 MAX_CONNECTIONS_PER_USER = 3  # 每个用户最多连接数
 MAX_TOTAL_CONNECTIONS = 1000  # 系统最多总连接数
 RATE_LIMIT_CONNECTIONS_PER_MINUTE = 10  # 每个IP每分钟最多连接数
@@ -88,7 +88,7 @@ class NotificationConnectionManager:
     """
     通知 WebSocket 连接管理器
     
-    管理所有活跃的 WebSocket 连接（基于 user_id）
+    管理所有活跃的 WebSocket 连接(基于 user_id)
     """
     
     def __init__(self):
@@ -96,12 +96,12 @@ class NotificationConnectionManager:
         self.active_connections: Dict[int, Set[ConnectionInfo]] = defaultdict(set)
         # IP -> List[datetime] (用于速率限制)
         self.connection_attempts: Dict[str, List[datetime]] = defaultdict(list)
-        # LRU 缓存（用于内存存储速率限制记录）
+        # LRU 缓存(用于内存存储速率限制记录)
         self._lru_cache: OrderedDict = OrderedDict()
         self._max_cache_size = 10000
     
     def _cleanup_expired_attempts(self):
-        """清理过期的连接频率记录（1小时）"""
+        """清理过期的连接频率记录(1小时)"""
         now = datetime.utcnow()
         cutoff = now - timedelta(hours=1)
         
@@ -215,7 +215,7 @@ class NotificationConnectionManager:
             for conn in conns_to_remove:
                 self.active_connections[user_id].discard(conn)
             
-            # 如果没有连接了，删除用户条目
+            # 如果没有连接了,删除用户条目
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
         
@@ -232,7 +232,7 @@ class NotificationConnectionManager:
         Returns:
             bool: 是否成功发送
         """
-        # v4.19.0 P0安全要求：验证 recipient_id 与连接用户 ID 匹配
+        # v4.19.0 P0安全要求:验证 recipient_id 与连接用户 ID 匹配
         if notification.recipient_id != user_id:
             logger.error(f"[WS] Security violation: notification recipient_id={notification.recipient_id} != user_id={user_id}")
             return False
@@ -278,7 +278,7 @@ class NotificationConnectionManager:
         success_count = 0
         failed_count = 0
         
-        # v4.19.0 P1性能要求：批量数量限制策略
+        # v4.19.0 P1性能要求:批量数量限制策略
         if len(admin_ids) <= 50:
             # 直接批量推送
             tasks = [
@@ -289,7 +289,7 @@ class NotificationConnectionManager:
             success_count = sum(1 for r in results if r is True)
             failed_count = len(admin_ids) - success_count
         else:
-            # 分批推送（每批50个）
+            # 分批推送(每批50个)
             batch_size = 50
             for i in range(0, len(admin_ids), batch_size):
                 batch = admin_ids[i:i + batch_size]
@@ -381,7 +381,7 @@ def validate_origin(origin: Optional[str]) -> bool:
     allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
     allowed_origins = [o.strip() for o in allowed_origins if o.strip()]
     
-    # 如果没有配置，允许所有（仅开发环境）
+    # 如果没有配置,允许所有(仅开发环境)
     if not allowed_origins:
         is_production = os.getenv("ENVIRONMENT", "development") == "production"
         if is_production:
@@ -394,7 +394,7 @@ def validate_origin(origin: Optional[str]) -> bool:
 
 def require_wss(websocket: WebSocket) -> bool:
     """
-    检查是否要求 WSS（生产环境）
+    检查是否要求 WSS(生产环境)
     
     Args:
         websocket: WebSocket 连接
@@ -453,27 +453,27 @@ async def websocket_notifications(
     """
     通知 WebSocket 端点
     
-    连接时需要通过query参数传递JWT token进行认证：
+    连接时需要通过query参数传递JWT token进行认证:
     ws://host/api/notifications/ws?token=xxx
     
-    消息格式：
+    消息格式:
     - 心跳: "ping" (文本)
     - 心跳响应: "pong" (文本)
     - 通知推送: {"type": "notification", "data": {...}} (JSON)
     """
-    # v4.19.0 P0安全要求：Origin 验证
+    # v4.19.0 P0安全要求:Origin 验证
     origin = websocket.headers.get("origin")
     if not validate_origin(origin):
         logger.warning(f"[WS] Invalid origin rejected: {origin}")
         await websocket.close(code=WS_CLOSE_INVALID_ORIGIN, reason="Invalid origin")
         return
     
-    # v4.19.0 P0安全要求：WSS 强制要求（生产环境）
+    # v4.19.0 P0安全要求:WSS 强制要求(生产环境)
     if not require_wss(websocket):
         await websocket.close(code=1008, reason="WSS required in production")
         return
     
-    # v4.19.0 P0安全要求：JWT 认证
+    # v4.19.0 P0安全要求:JWT 认证
     user_id, error_msg = await verify_websocket_token(websocket, token)
     if not user_id:
         close_code = WS_CLOSE_TOKEN_EXPIRED if "expired" in error_msg.lower() else WS_ERROR_INVALID_TOKEN
@@ -499,13 +499,13 @@ async def websocket_notifications(
             "timestamp": datetime.utcnow().isoformat()
         })
         
-        # v4.19.0 P0安全要求：心跳机制
+        # v4.19.0 P0安全要求:心跳机制
         last_heartbeat = datetime.utcnow()
         
-        # 保持连接，等待客户端断开
+        # 保持连接,等待客户端断开
         while True:
             try:
-                # 接收客户端消息（心跳等）
+                # 接收客户端消息(心跳等)
                 data = await asyncio.wait_for(
                     websocket.receive_text(),
                     timeout=HEARTBEAT_INTERVAL
@@ -547,7 +547,7 @@ async def websocket_notifications(
         connection_manager.disconnect(websocket, user_id)
 
 
-# [*] v4.19.4更新：使用基于角色的动态限流（替换硬编码限流）
+# [*] v4.19.4更新:使用基于角色的动态限流(替换硬编码限流)
 try:
     from backend.middleware.rate_limiter import role_based_rate_limit
 except ImportError:
@@ -562,11 +562,11 @@ async def websocket_stats(
     """
     获取 WebSocket 连接统计
     
-    v4.19.0 P1运维要求：仅管理员可访问
+    v4.19.0 P1运维要求:仅管理员可访问
     """
     stats = connection_manager.get_stats()
     
-    # v4.19.0 P2性能要求：限制返回的连接数（最多100个用户）
+    # v4.19.0 P2性能要求:限制返回的连接数(最多100个用户)
     if "connections_per_user" in stats:
         connections_per_user = stats["connections_per_user"]
         if len(connections_per_user) > 100:
@@ -594,7 +594,7 @@ async def start_cleanup_task():
     启动清理任务
     
     Returns:
-        asyncio.Task: 清理任务（用于在应用关闭时取消）
+        asyncio.Task: 清理任务(用于在应用关闭时取消)
     """
     global _cleanup_task
     if _cleanup_task is not None and not _cleanup_task.done():
@@ -622,8 +622,8 @@ def init_websocket_cleanup():
     """
     初始化 WebSocket 清理任务
     
-    注意：应该在 FastAPI lifespan startup 中调用，而不是在模块导入时
+    注意:应该在 FastAPI lifespan startup 中调用,而不是在模块导入时
     """
-    # 这个函数保留用于向后兼容，但实际启动应该在 lifespan 中
+    # 这个函数保留用于向后兼容,但实际启动应该在 lifespan 中
     logger.debug("[WS] init_websocket_cleanup called (should be called from lifespan)")
 

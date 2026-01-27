@@ -9,7 +9,7 @@ import json
 
 
 class ProgressTracker:
-    """进度跟踪器（内存存储，支持并发）"""
+    """进度跟踪器(内存存储,支持并发)"""
     
     def __init__(self):
         self._progress_store: Dict[str, Dict[str, Any]] = {}
@@ -104,7 +104,7 @@ class ProgressTracker:
                 })
     
     async def delete_task(self, task_id: str) -> bool:
-        """删除任务（清理内存）"""
+        """删除任务(清理内存)"""
         async with self._lock:
             if task_id in self._progress_store:
                 del self._progress_store[task_id]

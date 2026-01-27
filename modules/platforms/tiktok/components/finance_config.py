@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-"""TikTok 财务数据（Finance）组件配置
+"""TikTok 财务数据(Finance)组件配置
 
-- 深链接路径、关键选择器集中维护；业务层禁止硬编码 URL
-- 仅常量与类定义；导入零副作用
-- 路径为占位默认值，录制验证后再精准化
+- 深链接路径、关键选择器集中维护;业务层禁止硬编码 URL
+- 仅常量与类定义;导入零副作用
+- 路径为占位默认值,录制验证后再精准化
 """
 from dataclasses import dataclass
 from typing import Final, List
 
 BASE_URL: Final[str] = "https://seller.tiktokshopglobalselling.com"
 
-# 财务中心/账单等（仅路径部分；后续按录制结果细化）
+# 财务中心/账单等(仅路径部分;后续按录制结果细化)
 FINANCE_PATH: Final[str] = "/finance/overview"
 
 DATA_READY_PROBES: Final[List[str]] = [

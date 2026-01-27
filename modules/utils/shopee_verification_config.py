@@ -4,8 +4,8 @@
 """
 Shopee验证码处理统一配置管理
 
-模块化设计：
-- 统一配置管理，避免硬编码
+模块化设计:
+- 统一配置管理,避免硬编码
 - 支持多邮箱类型的配置
 - 便于扩展和维护
 """
@@ -19,10 +19,10 @@ from typing import Dict, List, Any
 class VerificationConfig:
     """验证码处理配置"""
     
-    # 全局等待时间配置（解决时机问题）
+    # 全局等待时间配置(解决时机问题)
     button_click_wait: float = 5.0  # 点击"发送至邮箱"按钮后等待时间
     page_load_wait: float = 3.0     # 页面加载等待时间
-    element_find_timeout: int = 10000  # 元素查找超时时间（毫秒）
+    element_find_timeout: int = 10000  # 元素查找超时时间(毫秒)
     
     # 重试配置
     max_retries: int = 3            # 最大重试次数
@@ -30,8 +30,8 @@ class VerificationConfig:
     
     # 验证码获取配置
     email_check_interval: float = 5.0    # 邮件检查间隔
-    email_max_wait_time: int = 120       # 邮件等待最大时间（秒）
-    verification_code_timeout: int = 300  # 验证码总超时时间（秒）
+    email_max_wait_time: int = 120       # 邮件等待最大时间(秒)
+    verification_code_timeout: int = 300  # 验证码总超时时间(秒)
     
     # 调试配置
     enable_debug_screenshots: bool = True  # 启用调试截图
@@ -44,10 +44,10 @@ class ShopeeVerificationConfig:
     def __init__(self):
         self.config = VerificationConfig()
         
-        # QQ邮箱密码登录选择器（修复：使用用户提供的精确选择器）
+        # QQ邮箱密码登录选择器(修复:使用用户提供的精确选择器)
         self.qq_password_login_selectors = [
-            # 用户提供的精确选择器（优先级最高）
-            'a#switcher_plogin',  # ID选择器，最精确
+            # 用户提供的精确选择器(优先级最高)
+            'a#switcher_plogin',  # ID选择器,最精确
             'a.link#switcher_plogin',  # 类+ID选择器
             'a[id="switcher_plogin"]',  # 属性选择器
             'a:has-text("密码登录")#switcher_plogin',  # 组合选择器
@@ -63,7 +63,7 @@ class ShopeeVerificationConfig:
             '.login-type-switch:has-text("密码")',
             '.account-login:has-text("密码")', 
             
-            # 新版QQ邮箱选择器（2024年更新）
+            # 新版QQ邮箱选择器(2024年更新)
             '.login-mode-switcher:has-text("密码")',
             '.auth-method-tab[data-method="password"]',
             '.login-way-switch:has-text("密码")',
@@ -90,7 +90,7 @@ class ShopeeVerificationConfig:
             'input[value*="邮箱"]',
             'button[title*="邮箱"]',
             
-            # 通用按钮选择器（包含邮箱关键词）
+            # 通用按钮选择器(包含邮箱关键词)
             'button:contains("邮箱")',
             'span:contains("邮箱")',
             'div:contains("邮箱")'
@@ -110,7 +110,7 @@ class ShopeeVerificationConfig:
             '[class*="otp"]'
         ]
 
-        # 手机验证码相关：切换/发送到电话按钮选择器（优先）
+        # 手机验证码相关:切换/发送到电话按钮选择器(优先)
         self.phone_button_selectors = [
             'button:has-text("发送至电话")',
             'button:has-text("发送至手机")',

@@ -13,8 +13,8 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 class BackupCreateRequest(BaseModel):
     """创建备份请求"""
-    backup_type: str = Field("full", description="备份类型（full 或 incremental）")
-    description: Optional[str] = Field(None, max_length=500, description="备份描述（最多500字符）")
+    backup_type: str = Field("full", description="备份类型(full 或 incremental)")
+    description: Optional[str] = Field(None, max_length=500, description="备份描述(最多500字符)")
     
     @field_validator('backup_type')
     @classmethod
@@ -41,7 +41,7 @@ class BackupResponse(BaseModel):
 
 
 class BackupListResponse(BaseModel):
-    """备份列表响应（分页）"""
+    """备份列表响应(分页)"""
     data: List[BackupResponse]
     page: int
     page_size: int
@@ -51,28 +51,28 @@ class BackupListResponse(BaseModel):
 
 class BackupFilterRequest(BaseModel):
     """备份筛选请求"""
-    backup_type: Optional[str] = Field(None, description="备份类型（full 或 incremental）")
-    status: Optional[str] = Field(None, description="备份状态（pending/completed/failed）")
+    backup_type: Optional[str] = Field(None, description="备份类型(full 或 incremental)")
+    status: Optional[str] = Field(None, description="备份状态(pending/completed/failed)")
     start_time: Optional[datetime] = Field(None, description="开始时间")
     end_time: Optional[datetime] = Field(None, description="结束时间")
-    page: int = Field(1, ge=1, description="页码（1-based）")
-    page_size: int = Field(20, ge=1, le=100, description="每页条数（最大100）")
+    page: int = Field(1, ge=1, description="页码(1-based)")
+    page_size: int = Field(20, ge=1, le=100, description="每页条数(最大100)")
 
 
 # ==================== 恢复相关 ====================
 
 class RestoreRequest(BaseModel):
     """恢复请求"""
-    confirmed: bool = Field(True, description="二次确认标志（必须为 True）")
-    confirmed_by: List[int] = Field(..., min_length=2, description="确认的管理员 ID 列表（至少 2 个不同的管理员 ID）")
-    force_outside_window: bool = Field(False, description="是否在维护窗口外强制执行（默认 False）")
-    reason: Optional[str] = Field(None, max_length=500, description="恢复原因说明（可选，最多 500 字符）")
+    confirmed: bool = Field(True, description="二次确认标志(必须为 True)")
+    confirmed_by: List[int] = Field(..., min_length=2, description="确认的管理员 ID 列表(至少 2 个不同的管理员 ID)")
+    force_outside_window: bool = Field(False, description="是否在维护窗口外强制执行(默认 False)")
+    reason: Optional[str] = Field(None, max_length=500, description="恢复原因说明(可选,最多 500 字符)")
     
     @field_validator('confirmed')
     @classmethod
     def validate_confirmed(cls, v):
         if not v:
-            raise ValueError('恢复操作必须明确确认（confirmed 必须为 True）')
+            raise ValueError('恢复操作必须明确确认(confirmed 必须为 True)')
         return v
     
     @field_validator('confirmed_by')
@@ -100,8 +100,8 @@ class RestoreResponse(BaseModel):
 class AutoBackupConfigResponse(BaseModel):
     """自动备份配置响应模型"""
     enabled: bool = Field(description="是否启用自动备份")
-    schedule: str = Field(description="备份计划（cron 表达式）")
-    backup_type: str = Field(description="备份类型（full 或 incremental）")
+    schedule: str = Field(description="备份计划(cron 表达式)")
+    backup_type: str = Field(description="备份类型(full 或 incremental)")
     retention_days: int = Field(description="保留天数")
     updated_at: Optional[datetime] = Field(None, description="更新时间")
     updated_by: Optional[int] = Field(None, description="更新人ID")
@@ -110,9 +110,9 @@ class AutoBackupConfigResponse(BaseModel):
 class AutoBackupConfigUpdate(BaseModel):
     """自动备份配置更新请求"""
     enabled: bool = Field(False, description="是否启用自动备份")
-    schedule: str = Field("0 2 * * *", description="备份计划（cron 表达式，默认每天凌晨2点）")
-    backup_type: str = Field("full", description="备份类型（full 或 incremental）")
-    retention_days: int = Field(30, ge=1, le=365, description="保留天数（1-365）")
+    schedule: str = Field("0 2 * * *", description="备份计划(cron 表达式,默认每天凌晨2点)")
+    backup_type: str = Field("full", description="备份类型(full 或 incremental)")
+    retention_days: int = Field(30, ge=1, le=365, description="保留天数(1-365)")
     
     @field_validator('backup_type')
     @classmethod

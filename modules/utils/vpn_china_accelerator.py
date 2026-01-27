@@ -37,7 +37,7 @@ class VpnChinaAccelerator:
             "tmall.com",
             "jd.com"
         ]
-        self.added_routes = []  # 记录添加的路由，便于清理
+        self.added_routes = []  # 记录添加的路由,便于清理
         self._check_environment()
     
     def _check_environment(self):
@@ -50,9 +50,9 @@ class VpnChinaAccelerator:
             self.is_vpn_environment = self._detect_vpn()
             
             if self.is_vpn_environment:
-                logger.warning("[WEB] 检测到VPN环境，启动中国网站加速优化")
+                logger.warning("[WEB] 检测到VPN环境,启动中国网站加速优化")
             else:
-                logger.info("[LINK] 本地网络环境，无需特殊优化")
+                logger.info("[LINK] 本地网络环境,无需特殊优化")
                 
         except Exception as e:
             logger.error(f"环境检测失败: {e}")
@@ -107,7 +107,7 @@ class VpnChinaAccelerator:
                     logger.info(f"检测到新加坡VPN IP: {ip}")
                     return True
             
-            # 通过traceroute检测（备用方法）
+            # 通过traceroute检测(备用方法)
             if self._check_vpn_by_traceroute():
                 return True
                 
@@ -127,11 +127,11 @@ class VpnChinaAccelerator:
     
     def _get_subnet_from_range(self, start_ip: str, end_ip: str) -> int:
         """从IP范围计算子网掩码"""
-        # 简化实现，返回常见的子网掩码
+        # 简化实现,返回常见的子网掩码
         return 16
     
     def _check_vpn_by_traceroute(self) -> bool:
-        """通过traceroute检测VPN（备用方法）"""
+        """通过traceroute检测VPN(备用方法)"""
         try:
             if self.system == "windows":
                 result = subprocess.run(
@@ -144,7 +144,7 @@ class VpnChinaAccelerator:
                     capture_output=True, text=True, timeout=10
                 )
             
-            # 如果traceroute显示国外节点，可能在使用VPN
+            # 如果traceroute显示国外节点,可能在使用VPN
             output = result.stdout.lower()
             vpn_indicators = ["singapore", "sg", "overseas", "international"]
             return any(indicator in output for indicator in vpn_indicators)
@@ -155,7 +155,7 @@ class VpnChinaAccelerator:
     def optimize_china_access(self) -> bool:
         """优化中国网站访问"""
         if not self.is_vpn_environment:
-            logger.info("非VPN环境，无需优化")
+            logger.info("非VPN环境,无需优化")
             return True
         
         try:
@@ -164,7 +164,7 @@ class VpnChinaAccelerator:
             # 方法1: 配置DNS
             self._configure_china_dns()
             
-            # 方法2: 添加路由规则（仅Windows/Linux）
+            # 方法2: 添加路由规则(仅Windows/Linux)
             if self.system in ["windows", "linux"]:
                 self._add_china_routes()
             
@@ -191,7 +191,7 @@ class VpnChinaAccelerator:
             fastest_dns = self._find_fastest_dns(china_dns_servers)
             if fastest_dns:
                 logger.info(f"使用最快的中国DNS: {fastest_dns}")
-                # 这里可以配置系统DNS，但需要管理员权限
+                # 这里可以配置系统DNS,但需要管理员权限
                 # 暂时记录最佳DNS供后续使用
                 self.best_china_dns = fastest_dns
             
@@ -227,7 +227,7 @@ class VpnChinaAccelerator:
             # 获取本地网关
             gateway = self._get_local_gateway()
             if not gateway:
-                logger.warning("无法获取本地网关，跳过路由配置")
+                logger.warning("无法获取本地网关,跳过路由配置")
                 return
             
             # 中国主要网站IP段
@@ -348,7 +348,7 @@ class VpnChinaAccelerator:
             }
     
     def test_ip_location(self) -> Dict:
-        """测试IP地址位置（验收标准：显示中国成都IP）"""
+        """测试IP地址位置(验收标准:显示中国成都IP)"""
         try:
             logger.info("[SEARCH] 测试IP地址位置...")
             
@@ -357,7 +357,7 @@ class VpnChinaAccelerator:
             response = requests.get(search_url, timeout=15)
             
             if response.status_code == 200:
-                # 解析搜索结果页面，查找IP信息
+                # 解析搜索结果页面,查找IP信息
                 content = response.text
                 
                 # 简单的IP地址模式匹配
@@ -378,7 +378,7 @@ class VpnChinaAccelerator:
                     "location_test": "百度搜索IP地址结果"
                 }
                 
-                logger.success(f"[OK] IP测试完成，当前IP: {current_ip}")
+                logger.success(f"[OK] IP测试完成,当前IP: {current_ip}")
                 return result
             else:
                 raise Exception(f"百度访问失败: HTTP {response.status_code}")
@@ -427,7 +427,7 @@ class VpnChinaAccelerator:
                 "java_script_enabled": True
             }
             
-            # 如果是中国域名且在VPN环境，添加特殊配置
+            # 如果是中国域名且在VPN环境,添加特殊配置
             if any(china_domain in domain for china_domain in self.china_domains) and self.is_vpn_environment:
                 config.update({
                     "extra_http_headers": {
@@ -445,7 +445,7 @@ class VpnChinaAccelerator:
             return {}
     
     def __del__(self):
-        """析构函数，清理资源"""
+        """析构函数,清理资源"""
         try:
             self.cleanup_routes()
         except:
@@ -456,9 +456,9 @@ class VpnChinaAccelerator:
 vpn_accelerator = VpnChinaAccelerator()
 
 def get_china_website_config(url: str) -> Dict:
-    """获取中国网站访问配置（便捷函数）"""
+    """获取中国网站访问配置(便捷函数)"""
     return vpn_accelerator.get_playwright_config(url)
 
 def test_china_website_access() -> Dict:
-    """测试中国网站访问（便捷函数）"""
+    """测试中国网站访问(便捷函数)"""
     return vpn_accelerator.test_china_website_speed() 

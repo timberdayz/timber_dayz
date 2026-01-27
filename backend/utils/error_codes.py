@@ -1,6 +1,6 @@
 """
 统一错误码定义
-企业级ERP标准：4位数字错误码，按模块细分
+企业级ERP标准:4位数字错误码,按模块细分
 """
 
 from enum import IntEnum
@@ -146,7 +146,7 @@ def get_error_type(code: int) -> str:
         code: 错误码
     
     Returns:
-        str: 错误类型（SystemError、BusinessError、DataError、UserError）
+        str: 错误类型(SystemError、BusinessError、DataError、UserError)
     """
     if 1000 <= code < 2000:
         return "SystemError"
@@ -201,7 +201,7 @@ def get_error_message(code: int, default_message: str = "操作失败") -> str:
         ErrorCode.PERMISSION_DENIED: "权限不足",
         ErrorCode.PARAMETER_INVALID: "参数无效",
         ErrorCode.RATE_LIMIT_EXCEEDED: "请求频率过高",
-        ErrorCode.API_DEPRECATED: "API已废弃，请使用新API",
+        ErrorCode.API_DEPRECATED: "API已废弃,请使用新API",
     }
     
     return error_messages.get(code, default_message)

@@ -4,10 +4,10 @@
 """
 账号管理API (v4.7.0)
 
-功能：
+功能:
 - 平台账号的CRUD操作
 - 从local_accounts.py批量导入
-- 导出账号配置（备份）
+- 导出账号配置(备份)
 - 账号统计信息
 """
 
@@ -22,9 +22,10 @@ from pydantic import BaseModel, Field
 from backend.models.database import get_db, get_async_db
 from modules.core.db import PlatformAccount
 from backend.services.encryption_service import get_encryption_service
+from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
 from modules.core.logger import get_logger
 
-# v4.18.0: 使用集中的schemas（Contract-First架构）
+# v4.18.0: 使用集中的schemas(Contract-First架构)
 from backend.schemas.account import (
     CapabilitiesModel,
     AccountCreate,
@@ -48,7 +49,7 @@ class BatchCreateRequest(BaseModel):
     shops: List[dict] = Field(..., description="店铺列表")
 
 
-# ImportResponse已移动到backend/schemas/account.py（重命名为AccountImportResponse）
+# ImportResponse已移动到backend/schemas/account.py(重命名为AccountImportResponse)
 
 
 # ==================== API Endpoints ====================
@@ -105,6 +106,14 @@ async def create_account(
     await db.commit()
     await db.refresh(db_account)
     
+    # ✅ 自动同步到 dim_shops
+    try:
+        await sync_platform_account_to_dim_shop(db, db_account)
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"[AccountManagement] 同步店铺到 dim_shops 失败: {e}", exc_info=True)
+        # 不影响账号创建流程
+    
     logger.info(f"账号创建成功: {account.account_id}")
     
     return db_account
@@ -115,13 +124,13 @@ async def list_accounts(
     platform: Optional[str] = Query(None, description="平台筛选"),
     enabled: Optional[bool] = Query(None, description="启用状态筛选"),
     shop_type: Optional[str] = Query(None, description="店铺类型筛选"),
-    search: Optional[str] = Query(None, description="搜索（店铺名或账号ID）"),
+    search: Optional[str] = Query(None, description="搜索(店铺名或账号ID)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     账号列表
     
-    支持筛选：
+    支持筛选:
     - platform: 平台代码
     - enabled: 启用状态
     - shop_type: 店铺类型
@@ -199,14 +208,14 @@ async def update_account(
     
     # 特殊处理capabilities
     if "capabilities" in update_data:
-        # 如果capabilities是Pydantic模型，转换为字典；如果已经是字典，直接使用
+        # 如果capabilities是Pydantic模型,转换为字典;如果已经是字典,直接使用
         capabilities_value = update_data["capabilities"]
         if not isinstance(capabilities_value, dict):
-            # 不是字典，可能是Pydantic模型，尝试转换为字典
+            # 不是字典,可能是Pydantic模型,尝试转换为字典
             if hasattr(capabilities_value, "dict"):
                 update_data["capabilities"] = capabilities_value.dict()
             else:
-                # 其他情况，尝试转换为字典
+                # 其他情况,尝试转换为字典
                 update_data["capabilities"] = dict(capabilities_value) if capabilities_value else {}
     
     # 更新其他字段
@@ -219,6 +228,14 @@ async def update_account(
     
     await db.commit()
     await db.refresh(db_account)
+    
+    # ✅ 自动同步到 dim_shops
+    try:
+        await sync_platform_account_to_dim_shop(db, db_account)
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"[AccountManagement] 同步店铺到 dim_shops 失败: {e}", exc_info=True)
+        # 不影响账号更新流程
     
     logger.info(f"账号更新成功: {account_id}")
     
@@ -233,7 +250,7 @@ async def delete_account(
     """
     删除账号
     
-    硬删除（不可恢复）
+    硬删除(不可恢复)
     """
     result = await db.execute(select(PlatformAccount).where(PlatformAccount.account_id == account_id))
     db_account = result.scalar_one_or_none()
@@ -255,9 +272,9 @@ async def batch_create_accounts(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    批量创建账号（多店铺）
+    批量创建账号(多店铺)
     
-    用于一次性添加多个店铺（共用同一主账号）
+    用于一次性添加多个店铺(共用同一主账号)
     """
     created_accounts = []
     encryption_service = get_encryption_service()
@@ -271,7 +288,7 @@ async def batch_create_accounts(
         existing = result.scalar_one_or_none()
         
         if existing:
-            logger.warning(f"账号 {account_id} 已存在，跳过")
+            logger.warning(f"账号 {account_id} 已存在,跳过")
             continue
         
         # 创建账号
@@ -303,6 +320,15 @@ async def batch_create_accounts(
         
         db.add(db_account)
         created_accounts.append(db_account)
+    
+    await db.commit()
+    
+    # ✅ 批量同步到 dim_shops
+    for db_account in created_accounts:
+        try:
+            await sync_platform_account_to_dim_shop(db, db_account)
+        except Exception as e:
+            logger.warning(f"[AccountManagement] 同步店铺失败 {db_account.account_id}: {e}", exc_info=True)
     
     await db.commit()
     
@@ -392,10 +418,22 @@ async def import_from_local_accounts(
     
     await db.commit()
     
+    # ✅ 同步所有导入的账号到 dim_shops
+    result = await db.execute(select(PlatformAccount).where(PlatformAccount.created_by == "import"))
+    imported_accounts = result.scalars().all()
+    
+    for db_account in imported_accounts:
+        try:
+            await sync_platform_account_to_dim_shop(db, db_account)
+        except Exception as e:
+            logger.warning(f"[AccountManagement] 同步店铺失败 {db_account.account_id}: {e}", exc_info=True)
+    
+    await db.commit()
+    
     logger.info(f"导入完成: 成功{imported_count}, 跳过{skipped_count}, 失败{failed_count}")
     
     return AccountImportResponse(
-        message=f"导入完成：成功 {imported_count} 个，跳过 {skipped_count} 个，失败 {failed_count} 个",
+        message=f"导入完成:成功 {imported_count} 个,跳过 {skipped_count} 个,失败 {failed_count} 个",
         imported_count=imported_count,
         skipped_count=skipped_count,
         failed_count=failed_count,

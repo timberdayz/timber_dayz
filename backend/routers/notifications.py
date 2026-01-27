@@ -45,7 +45,7 @@ def generate_notification_actions(notification_type: str, related_user_id: Optio
     """
     根据通知类型生成快速操作按钮配置
     
-    v4.19.0 P0安全要求：只有管理员才能看到审批操作
+    v4.19.0 P0安全要求:只有管理员才能看到审批操作
     """
     # 检查用户是否是管理员
     is_admin = current_user.is_superuser or any(
@@ -85,8 +85,8 @@ async def get_notifications(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     is_read: Optional[bool] = Query(None, description="过滤已读/未读"),
     notification_type: Optional[str] = Query(None, description="过滤通知类型"),
-    priority: Optional[str] = Query(None, description="过滤优先级：high, medium, low"),
-    sort_by: Optional[str] = Query("created_at", description="排序字段：created_at, priority"),
+    priority: Optional[str] = Query(None, description="过滤优先级:high, medium, low"),
+    sort_by: Optional[str] = Query("created_at", description="排序字段:created_at, priority"),
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -108,12 +108,12 @@ async def get_notifications(
     if notification_type:
         query = query.where(Notification.notification_type == notification_type)
     
-    # v4.19.0: 优先级过滤（带验证）
+    # v4.19.0: 优先级过滤(带验证)
     if priority:
         valid_priorities = ["high", "medium", "low"]
         if priority.lower() in valid_priorities:
             query = query.where(Notification.priority == priority.lower())
-        # 无效优先级值静默忽略（不报错）
+        # 无效优先级值静默忽略(不报错)
     
     # 计算总数
     count_query = select(func.count()).select_from(query.subquery())
@@ -131,7 +131,7 @@ async def get_notifications(
     unread_count = result.scalar() or 0
     
     # v4.19.0: 排序逻辑
-    # 优先级排序：high > medium > low
+    # 优先级排序:high > medium > low
     from sqlalchemy import case
     priority_order = case(
         (Notification.priority == "high", 1),
@@ -143,7 +143,7 @@ async def get_notifications(
     if sort_by == "priority":
         query = query.order_by(priority_order, Notification.created_at.desc())
     else:
-        # 默认按时间排序，但高优先级置顶
+        # 默认按时间排序,但高优先级置顶
         query = query.order_by(priority_order, Notification.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
     
@@ -153,7 +153,7 @@ async def get_notifications(
     # 转换为响应模型
     items = []
     for n in notifications:
-        # 获取关联用户名（如果有）
+        # 获取关联用户名(如果有)
         related_username = None
         if n.related_user_id:
             user_result = await db.execute(
@@ -401,8 +401,8 @@ async def mark_all_read(
     """
     标记通知为已读
     
-    - 如果提供 notification_ids，则标记指定通知
-    - 如果不提供或为空，则标记所有未读通知
+    - 如果提供 notification_ids,则标记指定通知
+    - 如果不提供或为空,则标记所有未读通知
     """
     now = datetime.utcnow()
     
@@ -506,7 +506,7 @@ async def execute_notification_action(
     """
     执行通知快速操作
     
-    v4.19.0 P0安全要求：
+    v4.19.0 P0安全要求:
     - 验证用户权限
     - 验证目标资源状态
     - 记录审计日志
@@ -559,7 +559,7 @@ async def execute_notification_action(
             detail=f"User status is '{target_user.status}', can only operate on 'pending' users"
         )
     
-    # 6. 获取请求信息（用于审计日志）
+    # 6. 获取请求信息(用于审计日志)
     ip_address = request.client.host if request.client else "127.0.0.1"
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
@@ -665,7 +665,7 @@ async def execute_notification_action(
         )
 
 
-# ==================== 通知服务函数（内部使用）====================
+# ==================== 通知服务函数(内部使用)====================
 
 async def create_notification(
     db: AsyncSession,
@@ -678,7 +678,7 @@ async def create_notification(
     priority: str = "medium"
 ) -> Notification:
     """
-    创建单个通知（内部使用）
+    创建单个通知(内部使用)
     
     Args:
         db: 数据库会话
@@ -688,7 +688,7 @@ async def create_notification(
         content: 通知内容
         extra_data: 扩展数据
         related_user_id: 关联用户ID
-        priority: 优先级（high, medium, low），v4.19.0新增
+        priority: 优先级(high, medium, low),v4.19.0新增
     
     Returns:
         创建的通知对象
@@ -722,7 +722,7 @@ async def create_notifications_for_admins(
     priority: str = "medium"
 ) -> List[Notification]:
     """
-    为所有管理员创建通知（内部使用）
+    为所有管理员创建通知(内部使用)
     
     Args:
         db: 数据库会话
@@ -731,20 +731,20 @@ async def create_notifications_for_admins(
         content: 通知内容
         extra_data: 扩展数据
         related_user_id: 关联用户ID
-        priority: 优先级（high, medium, low），v4.19.0新增
+        priority: 优先级(high, medium, low),v4.19.0新增
     
     Returns:
         创建的通知列表
     """
-    # 查询所有管理员（is_superuser=True 或角色为 admin）
+    # 查询所有管理员(is_superuser=True 或角色为 admin)
     from modules.core.db import DimRole, user_roles
     
-    # 方法1：查询 is_superuser=True 的用户
+    # 方法1:查询 is_superuser=True 的用户
     superuser_query = select(DimUser.user_id).where(DimUser.is_superuser == True)
     result = await db.execute(superuser_query)
     admin_ids = set(result.scalars().all())
     
-    # 方法2：查询角色为 admin 的用户
+    # 方法2:查询角色为 admin 的用户
     admin_role_query = (
         select(user_roles.c.user_id)
         .join(DimRole, user_roles.c.role_id == DimRole.role_id)
@@ -883,7 +883,7 @@ async def notify_user_approved(
     try:
         from backend.routers.notification_websocket import connection_manager, NotificationMessage
         
-        # v4.19.0 P0安全要求：推送前验证 recipient_id 与连接用户 ID 匹配
+        # v4.19.0 P0安全要求:推送前验证 recipient_id 与连接用户 ID 匹配
         notification_msg = NotificationMessage(
             notification_id=notification.notification_id,
             recipient_id=notification.recipient_id,
@@ -940,7 +940,7 @@ async def notify_user_rejected(
     try:
         from backend.routers.notification_websocket import connection_manager, NotificationMessage
         
-        # v4.19.0 P0安全要求：推送前验证 recipient_id 与连接用户 ID 匹配
+        # v4.19.0 P0安全要求:推送前验证 recipient_id 与连接用户 ID 匹配
         notification_msg = NotificationMessage(
             notification_id=notification.notification_id,
             recipient_id=notification.recipient_id,
@@ -1019,7 +1019,7 @@ async def notify_account_locked(
     Args:
         db: 数据库会话
         user_id: 用户ID
-        locked_minutes: 锁定时长（分钟）
+        locked_minutes: 锁定时长(分钟)
         failed_attempts: 失败登录次数
     
     Returns:
@@ -1071,8 +1071,8 @@ async def notify_account_unlocked(
     Args:
         db: 数据库会话
         user_id: 用户ID
-        unlocked_by: 解锁者用户名（管理员解锁时）
-        auto_unlock: 是否为自动解锁（锁定期满）
+        unlocked_by: 解锁者用户名(管理员解锁时)
+        auto_unlock: 是否为自动解锁(锁定期满)
     
     Returns:
         创建的通知
@@ -1173,7 +1173,7 @@ async def notify_user_suspended(
     return notification
 
 
-# ==================== 会话撤销服务函数（内部使用）====================
+# ==================== 会话撤销服务函数(内部使用)====================
 
 async def revoke_all_user_sessions(
     db: AsyncSession,

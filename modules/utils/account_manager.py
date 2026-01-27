@@ -23,7 +23,7 @@ class AccountManager:
         初始化账户管理器
         
         Args:
-            config_path: 配置文件路径，默认为项目根目录下的accounts.json
+            config_path: 配置文件路径,默认为项目根目录下的accounts.json
         """
         self.config_path = config_path or "accounts.json"
         self.encrypted_path = self.config_path.replace('.json', '.enc')
@@ -54,7 +54,7 @@ class AccountManager:
         return f.decrypt(encrypted_data).decode()
     
     def load_accounts(self) -> Dict[str, Any]:
-        """加载账户配置，自动同步local_accounts.py到加密/JSON账号配置"""
+        """加载账户配置,自动同步local_accounts.py到加密/JSON账号配置"""
         try:
             # 1. 检查local_accounts.py是否存在
             import importlib.util
@@ -84,7 +84,7 @@ class AccountManager:
                     accounts = json.load(f)
             else:
                 accounts = {"accounts": [], "settings": {}}
-            # 3. 合并local_accounts.py账号到加密/JSON账号（以local_accounts.py为准，去重，保留所有字段）
+            # 3. 合并local_accounts.py账号到加密/JSON账号(以local_accounts.py为准,去重,保留所有字段)
             if local_accounts:
                 # 以username+platform为唯一键
                 def acc_key(acc):
@@ -204,7 +204,7 @@ class AccountManager:
             return False
     
     def get_accounts_by_platform(self, platform: str) -> List[Dict[str, Any]]:
-        """根据平台获取账户列表（大小写不敏感，兼容常见别名）"""
+        """根据平台获取账户列表(大小写不敏感,兼容常见别名)"""
         try:
             accounts = self.load_accounts()
             norm = (platform or "").strip().lower()
@@ -229,7 +229,7 @@ class AccountManager:
                 if acc_plat == norm or acc_plat in aliases:
                     platform_accounts.append(acc)
 
-            # 回退：尝试子串匹配（以防平台名写法不一致）
+            # 回退:尝试子串匹配(以防平台名写法不一致)
             if not platform_accounts and norm:
                 for acc in accounts.get("accounts", []):
                     acc_plat = str(acc.get("platform", "")).strip().lower()
@@ -265,7 +265,7 @@ class AccountManager:
         return datetime.now().isoformat()
     
     def run(self) -> bool:
-        """运行账户管理（兼容旧接口）"""
+        """运行账户管理(兼容旧接口)"""
         try:
             # 检查是否存在旧的配置文件需要迁移
             old_configs = [
@@ -299,11 +299,11 @@ class AccountManager:
 
 
 class LocalAccountLoader:
-    """本地账户加载器（兼容旧接口）"""
+    """本地账户加载器(兼容旧接口)"""
     
     def __init__(self):
         self.account_manager = AccountManager()
     
     def run(self) -> bool:
-        """运行账户加载（兼容旧接口）"""
+        """运行账户加载(兼容旧接口)"""
         return self.account_manager.run()

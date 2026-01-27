@@ -4,7 +4,7 @@
 """
 配置验证器
 
-提供YAML配置文件的验证功能，支持：
+提供YAML配置文件的验证功能,支持:
 - Schema验证
 - 业务逻辑验证
 - 配置文件完整性检查
@@ -181,7 +181,7 @@ class ConfigValidator:
                     enabled_accounts.append(account['account_id'])
         
         if not enabled_accounts:
-            warnings.append("没有启用的账号，系统可能无法正常工作")
+            warnings.append("没有启用的账号,系统可能无法正常工作")
         
         # 检查代理配置一致性
         proxy_required_accounts = []
@@ -332,7 +332,7 @@ def validate_configs(config_dir: str = "config") -> Dict[str, Any]:
 
 def validate_configs_strict(config_dir: str = "config") -> Dict[str, Any]:
     """
-    严格验证配置文件，失败时抛出异常
+    严格验证配置文件,失败时抛出异常
     
     Args:
         config_dir: 配置目录

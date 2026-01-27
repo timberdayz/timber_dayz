@@ -3,7 +3,7 @@
 """
 C类数据计算完整流程集成测试
 
-测试场景：
+测试场景:
 1. B类数据入库 -> C类数据计算完整流程
 2. 数据质量检查 -> 数据隔离区 -> 重新处理流程
 3. 物化视图刷新 -> C类数据查询流程
@@ -19,7 +19,8 @@ from unittest.mock import Mock, patch, MagicMock
 from backend.services.c_class_data_validator import CClassDataValidator
 from backend.services.currency_validator import CurrencyValidator
 from backend.services.shop_health_service import ShopHealthService
-from modules.core.db import FactOrder, FactProductMetric, DataQuarantine
+# [DELETED] v4.19.0: FactOrder 已删除
+from modules.core.db import FactProductMetric, DataQuarantine
 
 
 class TestBClassToCClassDataFlow:
@@ -30,7 +31,7 @@ class TestBClassToCClassDataFlow:
         # 模拟数据库会话
         db = Mock(spec=Session)
         
-        # 1. 模拟B类数据入库（订单数据）
+        # 1. 模拟B类数据入库(订单数据)
         mock_order = Mock()
         mock_order.order_id = "ORD001"
         mock_order.order_date_local = date(2025, 1, 31)
@@ -53,7 +54,7 @@ class TestBClassToCClassDataFlow:
         # 验证B类数据完整性
         assert check_result["orders_complete"] is True
         
-        # 3. 模拟C类数据计算（健康度评分）
+        # 3. 模拟C类数据计算(健康度评分)
         health_service = ShopHealthService(db)
         
         # 模拟健康度评分计算所需的数据查询
@@ -67,10 +68,10 @@ class TestBClassToCClassDataFlow:
         # 模拟数据库会话
         db = Mock(spec=Session)
         
-        # 1. 模拟B类数据完整性检查（发现字段缺失）
+        # 1. 模拟B类数据完整性检查(发现字段缺失)
         validator = CClassDataValidator(db)
         
-        # 模拟订单数据（缺失total_amount_rmb）
+        # 模拟订单数据(缺失total_amount_rmb)
         mock_order = Mock()
         mock_order.order_id = "ORD001"
         mock_order.total_amount_rmb = None  # 缺失字段
@@ -124,7 +125,7 @@ class TestBClassToCClassDataFlow:
         )
         
         # 3. 验证重新处理流程
-        # 如果字段已补充，应该可以通过检查
+        # 如果字段已补充,应该可以通过检查
         assert isinstance(check_result, dict)
         assert "orders_complete" in check_result
 
@@ -156,30 +157,30 @@ class TestMaterializedViewRefreshFlow:
         b_class_indices = [refresh_order.index(v) for v in b_class_views if v in refresh_order]
         c_class_indices = [refresh_order.index(v) for v in c_class_views if v in refresh_order]
         
-        # 验证C类视图在B类视图之后（如果都存在）
+        # 验证C类视图在B类视图之后(如果都存在)
         if b_class_indices and c_class_indices:
             assert max(b_class_indices) < min(c_class_indices), \
                 "C类数据物化视图应该在B类数据视图之后刷新"
     
     def test_mv_refresh_with_quality_check(self):
-        """测试物化视图刷新时的数据质量检查（不阻止刷新）"""
+        """测试物化视图刷新时的数据质量检查(不阻止刷新)"""
         # 模拟数据库会话
         db = Mock(spec=Session)
         
         # 模拟C类数据物化视图刷新
         view_name = "mv_shop_daily_performance"
         
-        # 模拟数据质量检查（可选，不阻止刷新）
+        # 模拟数据质量检查(可选,不阻止刷新)
         validator = CClassDataValidator(db)
         
-        # 即使检查失败，也不应该阻止刷新
+        # 即使检查失败,也不应该阻止刷新
         try:
             check_result = validator.check_b_class_completeness(
                 platform_code="shopee",
                 shop_id="shop001",
                 metric_date=date.today()
             )
-            # 检查结果只用于记录，不阻止刷新
+            # 检查结果只用于记录,不阻止刷新
             assert isinstance(check_result, dict)
         except Exception:
             # 检查失败不应该影响刷新
@@ -196,14 +197,14 @@ class TestCurrencyPolicyEnforcement:
         """测试订单域货币策略执行"""
         validator = CurrencyValidator()
         
-        # 测试CNY字段（通过）
+        # 测试CNY字段(通过)
         result1 = validator.validate_currency_policy(
             field_code="total_amount_rmb",
             data_domain="orders"
         )
         assert result1.valid is True
         
-        # 测试非CNY字段（失败）
+        # 测试非CNY字段(失败)
         result2 = validator.validate_currency_policy(
             field_code="total_amount_sgd",
             data_domain="orders"
@@ -214,14 +215,14 @@ class TestCurrencyPolicyEnforcement:
         """测试产品域货币策略执行"""
         validator = CurrencyValidator()
         
-        # 测试非货币字段（通过）
+        # 测试非货币字段(通过)
         result1 = validator.validate_currency_policy(
             field_code="sales_volume",
             data_domain="products"
         )
         assert result1.valid is True
         
-        # 测试货币字段（失败）
+        # 测试货币字段(失败)
         result2 = validator.validate_currency_policy(
             field_code="sales_amount_sgd",
             data_domain="products"

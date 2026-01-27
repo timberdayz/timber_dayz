@@ -1,9 +1,9 @@
 """
 Shopee 组件配置注册中心
 
-统一管理各数据域的配置文件与组件映射，实现智能配置编辑。
+统一管理各数据域的配置文件与组件映射,实现智能配置编辑。
 
-使用方式：
+使用方式:
 - get_config_path("analytics") -> analytics_config.py 路径
 - get_export_component("orders") -> OrdersExport 组件类
 - get_navigation_target("products") -> TargetPage.PRODUCTS_PERFORMANCE
@@ -20,7 +20,7 @@ class DataDomain(Enum):
     """数据域枚举"""
     ANALYTICS = "analytics"      # 客流/流量表现
     PRODUCTS = "products"        # 商品表现
-    ORDERS = "orders"           # 订单表现（兼容保留，将迁移至 services）
+    ORDERS = "orders"           # 订单表现(兼容保留,将迁移至 services)
     FINANCE = "finance"         # 财务表现/结算
     SERVICES = "services"       # 服务表现/客服
 
@@ -44,7 +44,7 @@ DOMAIN_CONFIGS: Dict[DataDomain, DomainConfig] = {
         export_component="ShopeeAnalyticsExport",
         navigation_target="TRAFFIC_OVERVIEW",
         menu_display_name="流量表现数据导出",
-        data_type_dir="analytics"  # v4.10.0更新：统一使用analytics域，traffic域已废弃
+        data_type_dir="analytics"  # v4.10.0更新:统一使用analytics域,traffic域已废弃
     ),
     DataDomain.PRODUCTS: DomainConfig(
         domain=DataDomain.PRODUCTS,
@@ -183,7 +183,7 @@ class ConfigRegistry:
             print(f"[DIR] 配置文件: {config_path}")
             print(f"[DOMAIN] 数据域: {config.domain.value}")
             print(f"[DATA] 输出目录: temp/outputs/shopee/<账号>/<店铺>/{config.data_type_dir}/")
-            print("\n[TIP] 提示：修改以下配置项即可适配不同页面：")
+            print("\n[TIP] 提示:修改以下配置项即可适配不同页面:")
             print("   - BASE_URL: 基础域名")
             print("   - *_PATH: 目标页面路径")
             print("   - EXPORT_BUTTON_SELECTORS: 导出按钮选择器")
@@ -197,7 +197,7 @@ class ConfigRegistry:
                     os.startfile(str(config_path))
                 else:  # Unix/Linux/Mac
                     subprocess.run(['open', str(config_path)], check=True)
-                print("[OK] 已打开配置文件，请在编辑器中修改后保存")
+                print("[OK] 已打开配置文件,请在编辑器中修改后保存")
                 return True
             return False
             
@@ -210,15 +210,15 @@ class ConfigRegistry:
 
 # 便捷函数
 def get_config_path(domain: str | DataDomain) -> Path:
-    """便捷函数：获取配置文件路径"""
+    """便捷函数:获取配置文件路径"""
     return ConfigRegistry.get_config_path(domain)
 
 
 def open_config_file(domain: str | DataDomain) -> bool:
-    """便捷函数：打开配置文件"""
+    """便捷函数:打开配置文件"""
     return ConfigRegistry.open_config_file(domain)
 
 
 def get_domain_config(domain: str | DataDomain) -> DomainConfig:
-    """便捷函数：获取数据域配置"""
+    """便捷函数:获取数据域配置"""
     return ConfigRegistry.get_domain_config(domain)

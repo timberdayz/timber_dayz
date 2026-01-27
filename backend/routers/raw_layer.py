@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-原始数据层查看API（v4.11.5新增）
+原始数据层查看API(v4.11.5新增)
 
-功能：
+功能:
 1. 查看原始Excel数据
 2. 查看staging数据
 3. 对比原始数据与staging数据
@@ -37,7 +37,7 @@ from pathlib import Path as _SafePath
 
 
 def _is_subpath(child: _SafePath, parent: _SafePath) -> bool:
-    """判断 child 是否位于 parent 之下（兼容Python 3.9）。"""
+    """判断 child 是否位于 parent 之下(兼容Python 3.9)。"""
     try:
         child_r = child.resolve()
         parent_r = parent.resolve()
@@ -47,7 +47,7 @@ def _is_subpath(child: _SafePath, parent: _SafePath) -> bool:
 
 
 def _safe_resolve_path(file_path: str) -> str:
-    """限制文件访问在允许的根目录：<project>/data/raw 与 <project>/downloads。"""
+    """限制文件访问在允许的根目录:<project>/data/raw 与 <project>/downloads。"""
     from modules.core.path_manager import get_project_root, get_data_raw_dir, get_downloads_dir
     
     project_root = _SafePath(get_project_root())
@@ -67,7 +67,7 @@ def _safe_resolve_path(file_path: str) -> str:
         code=ErrorCode.PERMISSION_DENIED,
         message="文件路径不在允许的根目录内",
         error_type=get_error_type(ErrorCode.PERMISSION_DENIED),
-        recovery_suggestion="请检查文件路径是否在允许的根目录内，或联系系统管理员",
+        recovery_suggestion="请检查文件路径是否在允许的根目录内,或联系系统管理员",
         status_code=403
     )
 
@@ -75,17 +75,17 @@ def _safe_resolve_path(file_path: str) -> str:
 @router.get("/view/{file_id}")
 async def view_raw_excel(
     file_id: int,
-    header_row: int = Query(0, description="表头行（0-based）"),
+    header_row: int = Query(0, description="表头行(0-based)"),
     limit: int = Query(100, ge=1, le=1000, description="预览行数限制"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     查看原始Excel数据
     
-    功能：
+    功能:
     - 读取原始Excel文件
-    - 返回数据预览（前N行）
-    - 复用ExcelParser服务，保证一致性
+    - 返回数据预览(前N行)
+    - 复用ExcelParser服务,保证一致性
     """
     try:
         logger.info(f"[RawLayer] 查看原始Excel: file_id={file_id}, header_row={header_row}, limit={limit}")
@@ -101,7 +101,7 @@ async def view_raw_excel(
                 code=ErrorCode.FILE_NOT_FOUND,
                 message=f"文件未注册: id={file_id}",
                 error_type=get_error_type(ErrorCode.FILE_NOT_FOUND),
-                recovery_suggestion="请检查文件ID是否正确，或确认该文件已注册",
+                recovery_suggestion="请检查文件ID是否正确,或确认该文件已注册",
                 status_code=404
             )
         
@@ -115,27 +115,27 @@ async def view_raw_excel(
                 code=ErrorCode.FILE_NOT_FOUND,
                 message=f"文件不存在: {file_path}",
                 error_type=get_error_type(ErrorCode.FILE_NOT_FOUND),
-                recovery_suggestion="请检查文件路径是否正确，或确认该文件已存在",
+                recovery_suggestion="请检查文件路径是否正确,或确认该文件已存在",
                 status_code=404
             )
         
-        # Step 3: 读取Excel（使用智能解析器）
-        # [*] v4.12.1修复：如果用户设置了表头行，跳过表头行之前的数据
+        # Step 3: 读取Excel(使用智能解析器)
+        # [*] v4.12.1修复:如果用户设置了表头行,跳过表头行之前的数据
         if header_row < 0:
             header_param = None
             skiprows_param = None
         else:
             header_param = header_row
-            # 跳过表头行之前的所有行（如果header_row > 0）
+            # 跳过表头行之前的所有行(如果header_row > 0)
             skiprows_param = list(range(header_row)) if header_row > 0 else None
         
-        # 大文件保护：>10MB 的文件只读50行
+        # 大文件保护:>10MB 的文件只读50行
         file_size_mb = Path(safe_path).stat().st_size / (1024 * 1024)
         preview_rows = min(limit, (50 if file_size_mb > 10 else 100))
         
         logger.info(f"[RawLayer] 文件大小: {file_size_mb:.2f}MB, 预览行数: {preview_rows}, 表头行: {header_row}, 跳过行: {skiprows_param}")
         
-        # [*] v4.12.1修复：使用skiprows跳过表头行之前的数据
+        # [*] v4.12.1修复:使用skiprows跳过表头行之前的数据
         read_kwargs = {}
         if skiprows_param:
             read_kwargs['skiprows'] = skiprows_param
@@ -147,18 +147,18 @@ async def view_raw_excel(
             **read_kwargs
         )
         
-        # 规范化（通用合并单元格还原，v4.6.0增强版）
+        # 规范化(通用合并单元格还原,v4.6.0增强版)
         normalization_report = {}
         try:
             df, normalization_report = ExcelParser.normalize_table(
                 df,
                 data_domain=catalog_record.data_domain or "products",
-                file_size_mb=file_size_mb  # v4.6.0新增：传入文件大小，大文件只处理关键列
+                file_size_mb=file_size_mb  # v4.6.0新增:传入文件大小,大文件只处理关键列
             )
             if file_size_mb > 10:
-                logger.info(f"[RawLayer] 大文件规范化完成（只处理关键列）: {file_size_mb:.2f}MB")
+                logger.info(f"[RawLayer] 大文件规范化完成(只处理关键列): {file_size_mb:.2f}MB")
         except Exception as norm_error:
-            logger.warning(f"[RawLayer] 规范化失败（使用原始数据）: {norm_error}", exc_info=True)
+            logger.warning(f"[RawLayer] 规范化失败(使用原始数据): {norm_error}", exc_info=True)
             normalization_report = {"filled_columns": [], "filled_rows": 0, "strategy": "none", "error": str(norm_error)}
         
         # Step 4: 数据清洗
@@ -195,7 +195,7 @@ async def view_raw_excel(
             message="查看原始Excel失败",
             error_type=get_error_type(ErrorCode.FILE_READ_ERROR),
             detail=str(e),
-            recovery_suggestion="请检查文件格式和内容，或联系系统管理员",
+            recovery_suggestion="请检查文件格式和内容,或联系系统管理员",
             status_code=500
         )
 
@@ -210,8 +210,8 @@ async def view_staging_data(
     """
     查看staging数据
     
-    功能：
-    - 查询staging表（orders/product_metrics/inventory）
+    功能:
+    - 查询staging表(orders/product_metrics/inventory)
     - 返回JSON数据
     - 支持按file_id查询
     """
@@ -229,7 +229,7 @@ async def view_staging_data(
                 code=ErrorCode.FILE_NOT_FOUND,
                 message=f"文件未注册: id={file_id}",
                 error_type=get_error_type(ErrorCode.FILE_NOT_FOUND),
-                recovery_suggestion="请检查文件ID是否正确，或确认该文件已注册",
+                recovery_suggestion="请检查文件ID是否正确,或确认该文件已注册",
                 status_code=404
             )
         
@@ -317,7 +317,7 @@ async def view_staging_data(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
                 message=f"不支持的数据域: {data_domain}",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="支持的数据域：products、orders、traffic、services",
+                recovery_suggestion="支持的数据域:products、orders、traffic、services",
                 status_code=400
             )
         
@@ -349,13 +349,13 @@ async def view_staging_data(
 @router.get("/compare/{file_id}")
 async def compare_raw_and_staging(
     file_id: int,
-    header_row: int = Query(0, description="表头行（0-based）"),
+    header_row: int = Query(0, description="表头行(0-based)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     对比原始数据与staging数据
     
-    功能：
+    功能:
     - 对比原始Excel行数与staging表行数
     - 识别数据丢失
     - 返回对比报告
@@ -374,32 +374,32 @@ async def compare_raw_and_staging(
                 code=ErrorCode.FILE_NOT_FOUND,
                 message=f"文件未注册: id={file_id}",
                 error_type=get_error_type(ErrorCode.FILE_NOT_FOUND),
-                recovery_suggestion="请检查文件ID是否正确，或确认该文件已注册",
+                recovery_suggestion="请检查文件ID是否正确,或确认该文件已注册",
                 status_code=404
             )
         
         file_path = catalog_record.file_path
         data_domain = catalog_record.data_domain or "products"
         
-        # Step 2: 读取原始Excel文件，统计总行数
+        # Step 2: 读取原始Excel文件,统计总行数
         safe_path = _safe_resolve_path(file_path)
         if not Path(safe_path).exists():
             return error_response(
                 code=ErrorCode.FILE_NOT_FOUND,
                 message=f"文件不存在: {file_path}",
                 error_type=get_error_type(ErrorCode.FILE_NOT_FOUND),
-                recovery_suggestion="请检查文件路径是否正确，或确认该文件已存在",
+                recovery_suggestion="请检查文件路径是否正确,或确认该文件已存在",
                 status_code=404
             )
         
-        # 读取完整文件（不限制行数）
-        # [*] v4.12.1修复：如果用户设置了表头行，跳过表头行之前的数据
+        # 读取完整文件(不限制行数)
+        # [*] v4.12.1修复:如果用户设置了表头行,跳过表头行之前的数据
         if header_row < 0:
             header_param = None
             skiprows_param = None
         else:
             header_param = header_row
-            # 跳过表头行之前的所有行（如果header_row > 0）
+            # 跳过表头行之前的所有行(如果header_row > 0)
             skiprows_param = list(range(header_row)) if header_row > 0 else None
         
         read_kwargs = {}
@@ -408,22 +408,22 @@ async def compare_raw_and_staging(
         
         df = ExcelParser.read_excel(safe_path, header=header_param, **read_kwargs)
         
-        # 规范化（如果需要）
+        # 规范化(如果需要)
         try:
             file_size_mb = Path(safe_path).stat().st_size / (1024 * 1024) if Path(safe_path).exists() else 0.0
             df, _ = ExcelParser.normalize_table(
                 df, 
                 data_domain=data_domain,
-                file_size_mb=file_size_mb  # v4.6.0新增：传入文件大小
+                file_size_mb=file_size_mb  # v4.6.0新增:传入文件大小
             )
         except Exception:
             pass  # 规范化失败不影响行数统计
         
-        # 统计有效数据行数（排除空行）
+        # 统计有效数据行数(排除空行)
         df = df.dropna(how='all')
         raw_row_count = len(df)
         
-        # Step 3: 查询staging表，统计行数
+        # Step 3: 查询staging表,统计行数
         staging_row_count = 0
         
         if data_domain == "orders":
@@ -448,22 +448,20 @@ async def compare_raw_and_staging(
         lost_rows = max(0, raw_row_count - staging_row_count)
         success_rate = (staging_row_count / raw_row_count * 100) if raw_row_count > 0 else 0
         
-        # Step 5: 查询fact表，统计已入库行数
+        # Step 5: 查询fact表,统计已入库行数
         fact_row_count = 0
         fact_table_name = None
         
         if data_domain == "orders":
-            from modules.core.db import FactOrder
-            # [*] v4.12.1修复：FactOrder使用file_id字段（数据血缘）
-            count_result = await db.execute(
-                select(func.count(FactOrder.order_id)).where(FactOrder.file_id == file_id)
-            )
-            fact_row_count = count_result.scalar() or 0
-            fact_table_name = "fact_orders"
+            # [DELETED] v4.19.0: FactOrder 已删除,订单数据现在在 b_class.fact_{platform}_orders_{granularity}
+            # from modules.core.db import FactOrder
+            # [TODO] 查询 b_class.fact_{platform}_orders_{granularity} 表获取订单数量
+            fact_row_count = 0  # 暂时返回0
+            fact_table_name = "b_class.fact_*_orders_*"  # 新表结构
         
         elif data_domain in ["products", "traffic", "analytics"]:
             from modules.core.db import FactProductMetric
-            # [*] v4.12.1修复：FactProductMetric使用source_catalog_id字段，不是file_id
+            # [*] v4.12.1修复:FactProductMetric使用source_catalog_id字段,不是file_id
             count_result = await db.execute(
                 select(func.count(FactProductMetric.id)).where(FactProductMetric.source_catalog_id == file_id)
             )
@@ -471,9 +469,9 @@ async def compare_raw_and_staging(
             fact_table_name = "fact_product_metrics"
         
         elif data_domain == "inventory":
-            # inventory域可能没有独立的fact表，使用fact_product_metrics
+            # inventory域可能没有独立的fact表,使用fact_product_metrics
             from modules.core.db import FactProductMetric
-            # [*] v4.12.1修复：FactProductMetric使用source_catalog_id字段，不是file_id
+            # [*] v4.12.1修复:FactProductMetric使用source_catalog_id字段,不是file_id
             count_result = await db.execute(
                 select(func.count(FactProductMetric.id)).where(
                     FactProductMetric.source_catalog_id == file_id,
@@ -483,31 +481,33 @@ async def compare_raw_and_staging(
             fact_row_count = count_result.scalar() or 0
             fact_table_name = "fact_product_metrics"
         
-        # Step 6: 查询隔离区，统计隔离行数（[*] v4.12.1修复：使用catalog_file_id字段）
+        # Step 6: 查询隔离区,统计隔离行数([*] v4.12.1修复:使用catalog_file_id字段)
         from modules.core.db import DataQuarantine
         count_result = await db.execute(
             select(func.count(DataQuarantine.id)).where(DataQuarantine.catalog_file_id == file_id)
         )
         quarantined_count = count_result.scalar() or 0
         
-        # Step 7: [*] v4.12.1新增：查询丢失的数据详情
+        # Step 7: [*] v4.12.1新增:查询丢失的数据详情
         lost_in_staging_details = []
         lost_in_fact_details = []
         
-        # 7.1: 查询Raw->Staging丢失的数据（如果有）
+        # 7.1: 查询Raw->Staging丢失的数据(如果有)
         if lost_rows > 0 and data_domain == "orders":
-            # 对于订单数据，尝试从原始Excel中找出丢失的行
-            # 由于无法精确匹配，这里只返回统计信息
+            # 对于订单数据,尝试从原始Excel中找出丢失的行
+            # 由于无法精确匹配,这里只返回统计信息
             pass
         
-        # 7.2: 查询Staging->Fact丢失的数据（[*] 重点）
+        # 7.2: 查询Staging->Fact丢失的数据([*] 重点)
         lost_in_fact_count = max(0, staging_row_count - fact_row_count)
         logger.info(f"[RawLayer] Staging->Fact丢失数据统计: staging={staging_row_count}, fact={fact_row_count}, lost={lost_in_fact_count}")
         
         if lost_in_fact_count > 0 and data_domain == "orders":
-            from modules.core.db import FactOrder
+            # [DELETED] v4.19.0: FactOrder 已删除
+            # from modules.core.db import FactOrder
             import json
             
+            # [TODO] 查询 b_class.fact_{platform}_orders_{granularity} 表获取订单数据
             try:
                 # 查询Staging中所有的订单ID
                 staging_result = await db.execute(
@@ -528,13 +528,15 @@ async def compare_raw_and_staging(
                 
                 logger.info(f"[RawLayer] Staging中有 {len(staging_order_ids)} 个唯一订单ID")
                 
-                # 查询Fact中已存在的订单ID（[*] v4.12.1修复：使用file_id字段）
+                # 查询Fact中已存在的订单ID([*] v4.12.1修复:使用file_id字段)
                 fact_result = await db.execute(
-                    select(FactOrder).where(FactOrder.file_id == file_id)
+                    # [DELETED] v4.19.0: FactOrder 已删除
+                    # select(FactOrder).where(FactOrder.file_id == file_id)
+                    text("SELECT 1 WHERE 1=0")  # 返回空结果
                 )
-                fact_orders = fact_result.scalars().all()
+                fact_orders = []  # [TODO] 查询 b_class.fact_{platform}_orders_{granularity} 表
                 
-                logger.info(f"[RawLayer] Fact中有 {len(fact_orders)} 条订单记录（file_id={file_id}）")
+                logger.info(f"[RawLayer] Fact中有 {len(fact_orders)} 条订单记录(file_id={file_id})")
                 
                 fact_order_ids = set()
                 for fact_order in fact_orders:
@@ -548,9 +550,9 @@ async def compare_raw_and_staging(
                 
                 # 找出在Staging中存在但在Fact中不存在的订单
                 lost_order_ids = staging_order_ids - fact_order_ids
-                logger.info(f"[RawLayer] 找到 {len(lost_order_ids)} 个丢失的订单（Staging中有但Fact中没有）")
+                logger.info(f"[RawLayer] 找到 {len(lost_order_ids)} 个丢失的订单(Staging中有但Fact中没有)")
                 
-                # 构建丢失数据详情（最多返回100条，避免数据过大）
+                # 构建丢失数据详情(最多返回100条,避免数据过大)
                 for platform_code, shop_id, order_id in list(lost_order_ids)[:100]:
                     # 从Staging中获取订单详情
                     staging_order = next(
@@ -581,16 +583,16 @@ async def compare_raw_and_staging(
                             "staging_created_at": staging_order.created_at.isoformat() if staging_order.created_at else None
                         })
                 
-                # 如果丢失数据超过100条，添加提示
+                # 如果丢失数据超过100条,添加提示
                 if len(lost_order_ids) > 100:
                     lost_in_fact_details.append({
-                        "_info": f"还有 {len(lost_order_ids) - 100} 条丢失数据未显示（仅显示前100条）"
+                        "_info": f"还有 {len(lost_order_ids) - 100} 条丢失数据未显示(仅显示前100条)"
                     })
                 
                 logger.info(f"[RawLayer] 返回 {len(lost_in_fact_details)} 条丢失数据详情")
             except Exception as detail_error:
                 logger.error(f"[RawLayer] 查询丢失数据详情失败: {detail_error}", exc_info=True)
-                # 即使查询失败，也返回一个提示信息
+                # 即使查询失败,也返回一个提示信息
                 lost_in_fact_details.append({
                     "_info": f"查询丢失数据详情失败: {str(detail_error)}"
                 })
@@ -613,7 +615,7 @@ async def compare_raw_and_staging(
                         staging_metric.platform_sku
                     ))
             
-            # [*] v4.12.1修复：FactProductMetric使用source_catalog_id字段，不是file_id
+            # [*] v4.12.1修复:FactProductMetric使用source_catalog_id字段,不是file_id
             fact_result = await db.execute(
                 select(FactProductMetric).where(FactProductMetric.source_catalog_id == file_id)
             )
@@ -657,7 +659,7 @@ async def compare_raw_and_staging(
             
             if len(lost_metric_keys) > 100:
                 lost_in_fact_details.append({
-                    "_info": f"还有 {len(lost_metric_keys) - 100} 条丢失数据未显示（仅显示前100条）"
+                    "_info": f"还有 {len(lost_metric_keys) - 100} 条丢失数据未显示(仅显示前100条)"
                 })
         
         # Step 8: 构建对比报告
@@ -703,7 +705,7 @@ async def compare_raw_and_staging(
                     "message": f"原始数据 -> Fact: {fact_row_count}/{raw_row_count} ({round((fact_row_count / raw_row_count * 100) if raw_row_count > 0 else 0, 2)}%)"
                 }
             },
-            # [*] v4.12.1新增：丢失数据详情
+            # [*] v4.12.1新增:丢失数据详情
             "lost_data_details": {
                 "lost_in_staging": lost_in_staging_details,
                 "lost_in_fact": lost_in_fact_details

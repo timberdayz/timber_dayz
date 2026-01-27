@@ -1,10 +1,10 @@
 """
 ExecutorManager 单元测试
 
-测试 ExecutorManager 的核心功能：
+测试 ExecutorManager 的核心功能:
 - 单例模式
-- 进程池执行（CPU 密集型）
-- 线程池执行（I/O 密集型）
+- 进程池执行(CPU 密集型)
+- 线程池执行(I/O 密集型)
 - 优雅关闭
 """
 
@@ -19,14 +19,14 @@ class TestExecutorManagerSingleton:
     """测试 ExecutorManager 单例模式"""
 
     def test_singleton_instance(self):
-        """测试单例模式：多次调用返回同一实例"""
+        """测试单例模式:多次调用返回同一实例"""
         instance1 = get_executor_manager()
         instance2 = get_executor_manager()
         assert instance1 is instance2
         assert isinstance(instance1, ExecutorManager)
 
     def test_singleton_thread_safe(self):
-        """测试单例模式线程安全（简单测试）"""
+        """测试单例模式线程安全(简单测试)"""
         import threading
         
         instances = []
@@ -45,7 +45,7 @@ class TestExecutorManagerSingleton:
 
 
 class TestExecutorManagerCPUIntensive:
-    """测试进程池执行（CPU 密集型操作）"""
+    """测试进程池执行(CPU 密集型操作)"""
 
     @pytest.mark.asyncio
     async def test_run_cpu_intensive_basic(self):
@@ -53,7 +53,7 @@ class TestExecutorManagerCPUIntensive:
         executor_manager = get_executor_manager()
         
         def cpu_task(n):
-            """CPU 密集型任务：计算斐波那契数列"""
+            """CPU 密集型任务:计算斐波那契数列"""
             if n <= 1:
                 return n
             a, b = 0, 1
@@ -96,7 +96,7 @@ class TestExecutorManagerCPUIntensive:
         """测试序列化错误处理"""
         executor_manager = get_executor_manager()
         
-        # 创建一个无法序列化的函数（使用闭包）
+        # 创建一个无法序列化的函数(使用闭包)
         def create_unpicklable():
             local_var = "test"
             def inner():
@@ -110,7 +110,7 @@ class TestExecutorManagerCPUIntensive:
 
 
 class TestExecutorManagerIOIntensive:
-    """测试线程池执行（I/O 密集型操作）"""
+    """测试线程池执行(I/O 密集型操作)"""
 
     @pytest.mark.asyncio
     async def test_run_io_intensive_basic(self):
@@ -118,16 +118,16 @@ class TestExecutorManagerIOIntensive:
         executor_manager = get_executor_manager()
         
         def io_task(duration):
-            """I/O 密集型任务：模拟 I/O 等待"""
+            """I/O 密集型任务:模拟 I/O 等待"""
             time.sleep(duration)
-            return f"完成，等待了 {duration} 秒"
+            return f"完成,等待了 {duration} 秒"
         
         result = await executor_manager.run_io_intensive(io_task, 0.1)
         assert "完成" in result
 
     @pytest.mark.asyncio
     async def test_run_io_intensive_file_operation(self):
-        """测试文件系统操作（I/O 密集型）"""
+        """测试文件系统操作(I/O 密集型)"""
         executor_manager = get_executor_manager()
         from pathlib import Path
         
@@ -168,10 +168,10 @@ class TestExecutorManagerShutdown:
         # 关闭执行器
         await executor_manager.shutdown(timeout=5)
         
-        # 验证：关闭后应该可以重新初始化（通过新的单例）
-        # 注意：由于是单例，实际测试中可能需要重置单例状态
+        # 验证:关闭后应该可以重新初始化(通过新的单例)
+        # 注意:由于是单例,实际测试中可能需要重置单例状态
         # 这里只测试关闭不会抛出异常
-        assert True  # 如果关闭成功，不会抛出异常
+        assert True  # 如果关闭成功,不会抛出异常
 
     @pytest.mark.asyncio
     async def test_shutdown_with_running_tasks(self):
@@ -187,16 +187,16 @@ class TestExecutorManagerShutdown:
             executor_manager.run_io_intensive(lambda: time.sleep(0.3))
         )
         
-        # 等待一小段时间，确保任务已开始
+        # 等待一小段时间,确保任务已开始
         await asyncio.sleep(0.1)
         
-        # 关闭执行器（应该等待任务完成）
+        # 关闭执行器(应该等待任务完成)
         await executor_manager.shutdown(timeout=5)
         
         # 等待任务完成
         await task
         
-        assert True  # 如果关闭成功等待任务完成，不会抛出异常
+        assert True  # 如果关闭成功等待任务完成,不会抛出异常
 
 
 class TestExecutorManagerConfiguration:
@@ -210,7 +210,7 @@ class TestExecutorManagerConfiguration:
         assert executor_manager.cpu_executor is not None
         assert hasattr(executor_manager.cpu_executor, '_max_workers')
         
-        # 验证配置合理（至少1个，不超过CPU核心数）
+        # 验证配置合理(至少1个,不超过CPU核心数)
         cpu_cores = os.cpu_count() or 4
         max_workers = executor_manager.cpu_executor._max_workers
         assert 1 <= max_workers <= cpu_cores
@@ -223,7 +223,7 @@ class TestExecutorManagerConfiguration:
         assert executor_manager.io_executor is not None
         assert hasattr(executor_manager.io_executor, '_max_workers')
         
-        # 验证配置合理（至少1个，不超过合理上限）
+        # 验证配置合理(至少1个,不超过合理上限)
         max_workers = executor_manager.io_executor._max_workers
         assert max_workers >= 1
         assert max_workers <= 50  # 合理上限

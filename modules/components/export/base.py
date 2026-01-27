@@ -44,7 +44,7 @@ def build_standard_output_root(
         or account.get("username")
         or "unknown"
     )
-    # 优先使用运行上下文的 shop_name（来自店铺选择器），其后才回退到账号级别名称
+    # 优先使用运行上下文的 shop_name(来自店铺选择器),其后才回退到账号级别名称
     shop_name = (
         cfg.get("shop_name")
         or account.get("menu_display_name")
@@ -60,7 +60,7 @@ def build_standard_output_root(
         or account.get("shop_id")
         or account.get("cnsc_shop_id")
     )
-    # 平台特例：TikTok 仅在明确识别到店铺代码时才追加 shop_id；不要回退到 account_id，避免出现“__账号标签”
+    # 平台特例:TikTok 仅在明确识别到店铺代码时才追加 shop_id;不要回退到 account_id,避免出现“__账号标签”
     platform_name = str(getattr(ctx, "platform", "")).lower()
     if not shop_id and platform_name != "tiktok":
         shop_id = account.get("account_id")

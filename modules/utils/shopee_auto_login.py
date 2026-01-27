@@ -2,16 +2,16 @@
 Shopee自动登录模块 - 完整封装版本
 =================================
 
-功能特性：
+功能特性:
 - [TARGET] 智能登录状态检测
 - [NOTE] 自动表单填写
 - [PHONE] 手机验证码自动处理
 - [SHIELD] 持久化浏览器Profile
 - [RETRY] 错误恢复机制
 
-版本：v2.0.0
-作者：跨境电商ERP系统
-更新：2025-08-29
+版本:v2.0.0
+作者:跨境电商ERP系统
+更新:2025-08-29
 """
 
 import time
@@ -48,7 +48,7 @@ class ShopeeAutoLogin:
             
             # 1. 检查是否已经登录
             if self._check_already_logged_in():
-                logger.success("[DONE] 检测到已经登录，跳过登录流程")
+                logger.success("[DONE] 检测到已经登录,跳过登录流程")
                 return True
             
             # 2. 执行登录表单填写
@@ -56,7 +56,7 @@ class ShopeeAutoLogin:
                 logger.error("[FAIL] 登录表单填写失败")
                 return False
             
-            # 3. 处理验证码（如需要）
+            # 3. 处理验证码(如需要)
             if self._check_verification_needed():
                 if not self._handle_verification():
                     logger.error("[FAIL] 验证码处理失败")
@@ -82,7 +82,7 @@ class ShopeeAutoLogin:
             
             # URL检测 - 排除登录页面
             if 'signin' in current_url or 'login' in current_url:
-                logger.info("[SEARCH] 当前在登录页面，需要进行登录")
+                logger.info("[SEARCH] 当前在登录页面,需要进行登录")
                 return False
             
             # 检查是否在后台页面
@@ -116,7 +116,7 @@ class ShopeeAutoLogin:
             )
             
             if len(login_inputs) > 0 or len(login_buttons) > 0:
-                logger.info("[SEARCH] 检测到登录表单元素，确认在登录页面")
+                logger.info("[SEARCH] 检测到登录表单元素,确认在登录页面")
                 return False
             
             # 检查后台内容
@@ -196,7 +196,7 @@ class ShopeeAutoLogin:
             password_input.fill(self.password)
             logger.success("[OK] 已填写密码")
             
-            # 尝试勾选记住我（可选）
+            # 尝试勾选记住我(可选)
             self._try_check_remember_me()
             
             # 点击登录按钮
@@ -207,7 +207,7 @@ class ShopeeAutoLogin:
             return False
     
     def _try_check_remember_me(self):
-        """尝试勾选记住我复选框（可选功能）"""
+        """尝试勾选记住我复选框(可选功能)"""
         try:
             logger.info("[SEARCH] 尝试查找'记住我'复选框...")
             
@@ -226,7 +226,7 @@ class ShopeeAutoLogin:
                     except:
                         continue
             
-            logger.warning("[WARN] 未找到'记住我'复选框，继续登录流程")
+            logger.warning("[WARN] 未找到'记住我'复选框,继续登录流程")
             
         except Exception as e:
             logger.warning(f"[WARN] '记住我'处理失败: {e}")
@@ -301,9 +301,9 @@ class ShopeeAutoLogin:
             print("\n" + "[FIRE]"*60)
             print("[PHONE] Shopee 手机验证码输入")
             print("[FIRE]"*60)
-            print("[BELL] 请查看您的手机短信，获取 Shopee 发送的验证码")
-            print("[CALL] 验证码格式：4-6位数字（例如：123456）")
-            print("[TIME] 验证码有效期：5-10分钟")
+            print("[BELL] 请查看您的手机短信,获取 Shopee 发送的验证码")
+            print("[CALL] 验证码格式:4-6位数字(例如:123456)")
+            print("[TIME] 验证码有效期:5-10分钟")
             print("[START] 输入验证码后将自动完成登录并保存登录状态")
             print("[FIRE]"*60)
             
@@ -314,7 +314,7 @@ class ShopeeAutoLogin:
                 logger.error("[FAIL] 验证码不能为空")
                 return False
             
-            logger.info(f"[OK] 收到验证码: {verification_code}，准备自动填写...")
+            logger.info(f"[OK] 收到验证码: {verification_code},准备自动填写...")
             
             # 查找验证码输入框
             otp_input = self._find_verification_input()
@@ -424,13 +424,13 @@ class ShopeeAutoLogin:
             if is_success_url:
                 logger.success("[DONE] 登录成功！已进入卖家后台")
                 if 'no-permission' in current_url:
-                    logger.info("[LIST] 当前显示权限页面，这是正常的卖家后台页面")
+                    logger.info("[LIST] 当前显示权限页面,这是正常的卖家后台页面")
                 return True
             elif is_failure_url:
-                logger.warning("[WARN] 仍在登录页面，登录可能未完成")
+                logger.warning("[WARN] 仍在登录页面,登录可能未完成")
                 return False
             else:
-                logger.info("[?] 页面状态不明确，但可能已登录")
+                logger.info("[?] 页面状态不明确,但可能已登录")
                 return True
                 
         except Exception as e:

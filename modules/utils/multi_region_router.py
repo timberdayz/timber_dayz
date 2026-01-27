@@ -5,7 +5,7 @@
 多国IP路由管理器
 解决跨境电商多国同步采集的IP路由挑战
 
-核心功能：
+核心功能:
 1. 按平台自动分配国家IP
 2. 支持代理池管理
 3. 智能路由切换
@@ -30,7 +30,7 @@ class RegionConfig:
     country_name: str  # 新加坡, 印尼, 越南, 中国
     proxy_config: Optional[Dict[str, Any]] = None
     test_url: str = "https://httpbin.org/ip"
-    priority: int = 1  # 优先级，1最高
+    priority: int = 1  # 优先级,1最高
 
 
 @dataclass
@@ -151,7 +151,7 @@ class MultiRegionRouter:
                 }
             }
             
-            # 如果有代理配置，添加代理
+            # 如果有代理配置,添加代理
             if region.proxy_config:
                 proxy_url = f"{region.proxy_config['type']}://"
                 if region.proxy_config.get('username'):
@@ -348,7 +348,7 @@ class MultiRegionRouter:
     def _load_config(self):
         """从文件加载配置"""
         if not self.config_path.exists():
-            logger.info("配置文件不存在，使用默认配置")
+            logger.info("配置文件不存在,使用默认配置")
             return
         
         try:
@@ -403,12 +403,12 @@ class MultiRegionRouter:
         proxy_config = region.proxy_config
         proxy_type = proxy_config.get("type")
         
-        # 处理中国代理模式（新策略：使用代理而非VPN绕过）
+        # 处理中国代理模式(新策略:使用代理而非VPN绕过)
         if region_code == "CN":
             logger.info(f"[CN] 使用中国代理模式访问 {platform}")
             # 中国地区也使用标准的HTTP/SOCKS5代理处理逻辑
         
-        # 处理HTTP/SOCKS5代理（包括中国地区）
+        # 处理HTTP/SOCKS5代理(包括中国地区)
         if proxy_type in ["http", "socks5"]:
             host = proxy_config.get("host")
             port = proxy_config.get("port")
@@ -447,7 +447,7 @@ def demo_multi_region_setup():
     print("[WEB] 多国IP路由管理器演示")
     print("=" * 50)
     
-    # 示例：配置新加坡代理
+    # 示例:配置新加坡代理
     sg_proxy = {
         "type": "http",
         "host": "sg-proxy.example.com", 
@@ -457,7 +457,7 @@ def demo_multi_region_setup():
     }
     router.configure_region_proxy("SG", sg_proxy)
     
-    # 示例：配置印尼代理
+    # 示例:配置印尼代理
     id_proxy = {
         "type": "socks5",
         "host": "id-proxy.example.com",

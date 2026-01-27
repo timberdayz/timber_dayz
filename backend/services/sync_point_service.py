@@ -61,7 +61,7 @@ class SyncPointService:
             platform: 平台代码
             account_id: 账号ID
             data_domain: 数据域
-            default_days_ago: 如果不存在，默认回溯天数
+            default_days_ago: 如果不存在,默认回溯天数
             
         Returns:
             (sync_point, is_new) 元组
@@ -116,7 +116,7 @@ class SyncPointService:
             account_id: 账号ID
             data_domain: 数据域
             new_sync_at: 新的同步时间
-            new_sync_value: 新的同步值（可选）
+            new_sync_value: 新的同步值(可选)
             batch_count: 本次同步记录数
             
         Returns:
@@ -125,7 +125,7 @@ class SyncPointService:
         sync_point = self.get_sync_point(platform, account_id, data_domain)
         
         if not sync_point:
-            # 如果不存在，创建
+            # 如果不存在,创建
             sync_point, _ = self.get_or_create_sync_point(
                 platform, account_id, data_domain
             )
@@ -155,7 +155,7 @@ class SyncPointService:
         default_days_ago: int = 7
     ) -> datetime:
         """
-        获取最后同步时间（便捷方法）
+        获取最后同步时间(便捷方法)
         
         Args:
             platform: 平台代码
@@ -180,7 +180,7 @@ class SyncPointService:
         days_ago: int = 30
     ) -> CollectionSyncPoint:
         """
-        重置同步点（强制全量采集）
+        重置同步点(强制全量采集)
         
         Args:
             platform: 平台代码
@@ -210,7 +210,7 @@ class SyncPointService:
         default_days_ago: int = 7
     ) -> Dict:
         """
-        获取增量采集参数（供组件使用）
+        获取增量采集参数(供组件使用)
         
         Args:
             platform: 平台代码
@@ -219,7 +219,7 @@ class SyncPointService:
             default_days_ago: 默认回溯天数
             
         Returns:
-            参数字典，可直接用于组件执行
+            参数字典,可直接用于组件执行
         """
         last_sync_time = self.get_last_sync_time(
             platform, account_id, data_domain, default_days_ago

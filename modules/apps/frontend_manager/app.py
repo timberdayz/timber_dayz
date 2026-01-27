@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 class FrontendManagerApp(BaseApplication):
     """前端页面管理应用"""
     
-    # 类级元数据（避免实例化副作用）
+    # 类级元数据(避免实例化副作用)
     APP_ID = "frontend_manager"
     NAME = "前端页面管理"
     VERSION = "1.0.0"
-    DESCRIPTION = "管理Vue.js前端服务，支持启动、停止、重启前端开发服务器"
+    DESCRIPTION = "管理Vue.js前端服务,支持启动、停止、重启前端开发服务器"
     
     def __init__(self):
         """初始化前端管理应用"""
@@ -63,12 +63,12 @@ class FrontendManagerApp(BaseApplication):
                 self._open_browser()
             elif choice == "0":
                 if self.process:
-                    print("\n[WARN]  前端服务正在运行，是否停止? (y/n): ", end="")
+                    print("\n[WARN]  前端服务正在运行,是否停止? (y/n): ", end="")
                     if input().strip().lower() == 'y':
                         self._stop_frontend()
                 break
             else:
-                print("[FAIL] 无效选择，请重试")
+                print("[FAIL] 无效选择,请重试")
             
             if choice != "0":
                 input("\n按回车键继续...")
@@ -95,7 +95,7 @@ class FrontendManagerApp(BaseApplication):
         print("0. [BACK] 返回主菜单")
     
     def _check_npm(self) -> tuple:
-        """检查npm是否可用，返回(是否可用, npm命令)"""
+        """检查npm是否可用,返回(是否可用, npm命令)"""
         try:
             # Windows系统下尝试多个npm路径
             npm_commands = ["npm.cmd", "npm"]
@@ -118,7 +118,7 @@ class FrontendManagerApp(BaseApplication):
             
             print("[FAIL] npm未找到")
             print("\n[TIP] 解决方案:")
-            print("1. 确认已安装Node.js（包含npm）")
+            print("1. 确认已安装Node.js(包含npm)")
             print("2. 将npm添加到系统PATH环境变量")
             print("3. 重启终端/命令行窗口")
             return (False, None)
@@ -153,11 +153,11 @@ class FrontendManagerApp(BaseApplication):
         if not node_modules.exists() or not vite_path.exists():
             print("\n[WARN]  检测到依赖缺失!")
             print("=" * 60)
-            print("前端服务需要安装npm依赖包（Vite、Vue.js等）")
+            print("前端服务需要安装npm依赖包(Vite、Vue.js等)")
             print("这可能需要几分钟时间...")
             print("\n选项:")
-            print("1. 现在安装依赖（推荐）")
-            print("2. 手动安装（在新终端运行: cd frontend && npm install）")
+            print("1. 现在安装依赖(推荐)")
+            print("2. 手动安装(在新终端运行: cd frontend && npm install)")
             print("0. 取消")
             
             choice = input("\n请选择 (0-2): ").strip()
@@ -166,7 +166,7 @@ class FrontendManagerApp(BaseApplication):
                 print("\n[PKG] 正在安装依赖...")
                 print("[WAIT] 请耐心等待...")
                 try:
-                    # 不捕获输出，让用户看到安装进度
+                    # 不捕获输出,让用户看到安装进度
                     result = subprocess.run(
                         f"{npm_cmd} install",
                         cwd=self.frontend_dir,
@@ -176,7 +176,7 @@ class FrontendManagerApp(BaseApplication):
                     if result.returncode == 0:
                         print("\n[OK] 依赖安装完成")
                     else:
-                        print(f"\n[FAIL] 依赖安装失败（退出码: {result.returncode}）")
+                        print(f"\n[FAIL] 依赖安装失败(退出码: {result.returncode})")
                         return
                 except subprocess.TimeoutExpired:
                     print("\n[FAIL] 依赖安装超时")
@@ -306,7 +306,7 @@ class FrontendManagerApp(BaseApplication):
     def _open_browser(self):
         """在浏览器中打开"""
         if not self._is_frontend_running():
-            print("[WARN]  前端服务未运行，请先启动服务")
+            print("[WARN]  前端服务未运行,请先启动服务")
             return
         
         print(f"\n[WEB] 在浏览器中打开: {self.url}")

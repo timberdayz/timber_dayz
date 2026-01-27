@@ -3,10 +3,10 @@
 """
 验证用户注册和审批API是否正确注册
 
-使用方法：
+使用方法:
     python backend/verify_registration_api.py
 
-此脚本会检查：
+此脚本会检查:
 1. API路由是否正确注册
 2. Schemas是否正确导入
 3. 错误码是否正确定义
@@ -209,7 +209,7 @@ def verify_models():
             print("\n[SUCCESS] 所有数据库模型字段正确")
             return True
         else:
-            print("\n[WARN] 部分数据库模型字段缺失（可能需要运行迁移）")
+            print("\n[WARN] 部分数据库模型字段缺失(可能需要运行迁移)")
             return False
     
     except Exception as e:
@@ -225,7 +225,7 @@ def main():
     print("用户注册和审批API验证")
     print("=" * 60)
     print("\n此脚本验证API路由、Schemas、错误码和数据库模型的正确性")
-    print("注意：此脚本不测试实际API调用，只验证代码结构\n")
+    print("注意:此脚本不测试实际API调用,只验证代码结构\n")
     
     results = []
     
@@ -257,11 +257,11 @@ def main():
     
     if passed == total:
         print("\n[SUCCESS] 所有验证通过！")
-        print("\n下一步：")
+        print("\n下一步:")
         print("1. 启动后端服务: python run.py 或 python run_new.py")
         print("2. 运行API测试: python backend/test_registration_api_manual.py")
     else:
-        print("\n[WARN] 部分验证失败，请检查上述错误信息")
+        print("\n[WARN] 部分验证失败,请检查上述错误信息")
     
     print("=" * 60 + "\n")
     

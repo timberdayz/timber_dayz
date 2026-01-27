@@ -1,6 +1,6 @@
 """
-修改 fact_sales_orders 表，添加新字段
-包含：财务字段、库存字段、成本利润字段
+修改 fact_sales_orders 表,添加新字段
+包含:财务字段、库存字段、成本利润字段
 """
 
 import sys

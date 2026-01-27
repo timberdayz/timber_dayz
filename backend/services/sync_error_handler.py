@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-数据同步错误处理服务（Sync Error Handler）
+数据同步错误处理服务(Sync Error Handler)
 
-v4.12.0新增：
+v4.12.0新增:
 - 统一的错误处理机制
 - 定义错误类型枚举
-- 统一错误格式（错误码、错误信息、恢复建议）
+- 统一错误格式(错误码、错误信息、恢复建议)
 
-职责：
+职责:
 - 统一错误格式和处理机制
 - 提供错误恢复建议
 - 记录错误日志
@@ -23,25 +23,25 @@ logger = get_logger(__name__)
 
 class SyncErrorType(Enum):
     """数据同步错误类型枚举"""
-    FILE_ERROR = "file_error"  # 文件相关错误（文件不存在、读取失败等）
-    VALIDATION_ERROR = "validation_error"  # 数据验证错误（字段缺失、格式错误等）
-    INGESTION_ERROR = "ingestion_error"  # 数据入库错误（数据库错误、约束冲突等）
-    TEMPLATE_ERROR = "template_error"  # 模板相关错误（模板不存在、映射失败等）
-    NETWORK_ERROR = "network_error"  # 网络错误（HTTP请求失败等）
-    SYSTEM_ERROR = "system_error"  # 系统错误（内存不足、超时等）
+    FILE_ERROR = "file_error"  # 文件相关错误(文件不存在、读取失败等)
+    VALIDATION_ERROR = "validation_error"  # 数据验证错误(字段缺失、格式错误等)
+    INGESTION_ERROR = "ingestion_error"  # 数据入库错误(数据库错误、约束冲突等)
+    TEMPLATE_ERROR = "template_error"  # 模板相关错误(模板不存在、映射失败等)
+    NETWORK_ERROR = "network_error"  # 网络错误(HTTP请求失败等)
+    SYSTEM_ERROR = "system_error"  # 系统错误(内存不足、超时等)
 
 
 class SyncErrorHandler:
     """
     数据同步错误处理类
     
-    职责：
+    职责:
     - 统一错误格式和处理机制
     - 提供错误恢复建议
     - 记录错误日志
     """
     
-    # 错误码定义（2xxx系列：业务错误）
+    # 错误码定义(2xxx系列:业务错误)
     ERROR_CODES = {
         SyncErrorType.FILE_ERROR: {
             "FILE_NOT_FOUND": 2001,
@@ -80,27 +80,27 @@ class SyncErrorHandler:
     
     # 错误恢复建议
     RECOVERY_SUGGESTIONS = {
-        2001: "请检查文件是否存在，确认文件路径正确",
-        2002: "请检查文件权限，确认文件未被其他程序占用",
-        2003: "请检查文件格式，确认文件为有效的Excel文件",
-        2004: "请检查文件路径，确认路径在允许的目录中",
-        2101: "请检查数据文件，补充缺失的必填字段",
-        2102: "请检查数据格式，确保数据符合字段要求",
-        2103: "请检查数据类型，确保数据与字段类型匹配",
-        2104: "请检查数据范围，确保数据在有效范围内",
-        2201: "请检查数据库连接，确认数据库服务正常",
-        2202: "请检查数据约束，确保数据符合数据库约束",
-        2203: "请检查数据唯一性，避免重复数据",
-        2204: "请检查事务状态，确认事务未超时",
+        2001: "请检查文件是否存在,确认文件路径正确",
+        2002: "请检查文件权限,确认文件未被其他程序占用",
+        2003: "请检查文件格式,确认文件为有效的Excel文件",
+        2004: "请检查文件路径,确认路径在允许的目录中",
+        2101: "请检查数据文件,补充缺失的必填字段",
+        2102: "请检查数据格式,确保数据符合字段要求",
+        2103: "请检查数据类型,确保数据与字段类型匹配",
+        2104: "请检查数据范围,确保数据在有效范围内",
+        2201: "请检查数据库连接,确认数据库服务正常",
+        2202: "请检查数据约束,确保数据符合数据库约束",
+        2203: "请检查数据唯一性,避免重复数据",
+        2204: "请检查事务状态,确认事务未超时",
         2301: "请创建或选择正确的字段映射模板",
-        2302: "请检查字段映射配置，确认映射规则正确",
-        2303: "请检查表头行设置，确认表头行位置正确",
-        2401: "请检查网络连接，确认服务可用",
-        2402: "请增加超时时间，或检查服务响应速度",
-        2403: "请稍后重试，或联系系统管理员",
-        2501: "请减少批量处理数量，或增加系统内存",
-        2502: "请增加超时时间，或优化数据处理逻辑",
-        2599: "请联系系统管理员，查看详细错误日志",
+        2302: "请检查字段映射配置,确认映射规则正确",
+        2303: "请检查表头行设置,确认表头行位置正确",
+        2401: "请检查网络连接,确认服务可用",
+        2402: "请增加超时时间,或检查服务响应速度",
+        2403: "请稍后重试,或联系系统管理员",
+        2501: "请减少批量处理数量,或增加系统内存",
+        2502: "请增加超时时间,或优化数据处理逻辑",
+        2599: "请联系系统管理员,查看详细错误日志",
     }
     
     @classmethod
@@ -117,10 +117,10 @@ class SyncErrorHandler:
         
         Args:
             error_type: 错误类型
-            error_code: 错误码（如FILE_NOT_FOUND）
+            error_code: 错误码(如FILE_NOT_FOUND)
             message: 错误信息
-            details: 错误详情（可选）
-            original_error: 原始异常（可选）
+            details: 错误详情(可选)
+            original_error: 原始异常(可选)
             
         Returns:
             统一格式的错误字典
@@ -143,7 +143,7 @@ class SyncErrorHandler:
             "details": details or {},
         }
         
-        # 如果有原始异常，记录详细信息
+        # 如果有原始异常,记录详细信息
         if original_error:
             error_response["details"]["original_error"] = str(original_error)
             error_response["details"]["error_type"] = type(original_error).__name__
@@ -170,12 +170,12 @@ class SyncErrorHandler:
         context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        处理异常，转换为统一格式的错误响应
+        处理异常,转换为统一格式的错误响应
         
         Args:
             exception: 异常对象
-            error_type: 错误类型（如果为None，则自动推断）
-            context: 上下文信息（可选）
+            error_type: 错误类型(如果为None,则自动推断)
+            context: 上下文信息(可选)
             
         Returns:
             统一格式的错误字典

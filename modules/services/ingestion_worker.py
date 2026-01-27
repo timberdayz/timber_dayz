@@ -33,13 +33,16 @@ from modules.core.db.schema import (
     CatalogFile,
     DimProduct,
     FactProductMetric,
-    FactOrder,
+    # [DELETED] v4.19.0: FactOrder 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
     DataQuarantine,
 )
 from modules.core.secrets_manager import get_secrets_manager
+from modules.core.logger import get_logger
 from modules.services.currency_service import normalize_amount_to_rmb
 from modules.services.platform_code_service import canonicalize_platform
 from modules.services.smart_date_parser import parse_date, detect_dayfirst
+
+logger = get_logger(__name__)
 
 CONFIG_PATH = Path("config/field_mappings.yaml")
 
@@ -281,10 +284,10 @@ def _read_excel_with_header_inference(file_path: Path) -> pd.DataFrame:
     """
     读取Excel文件并智能推断表头位置
 
-    性能优化：
-    - 优先扫描第一个Sheet（快速路径）
+    性能优化:
+    - 优先扫描第一个Sheet(快速路径)
     - 只有在第一个Sheet无效时才扫描其他Sheet
-    - 减少不必要的Sheet读取，提升性能70%+
+    - 减少不必要的Sheet读取,提升性能70%+
     """
     # Try all sheets and pick the best header row by token matches
     tokens = [
@@ -324,20 +327,20 @@ def _read_excel_with_header_inference(file_path: Path) -> pd.DataFrame:
     try:
         xls = pd.ExcelFile(file_path, engine=engine) if engine else pd.ExcelFile(file_path)
 
-        # [START] 性能优化：优先扫描第一个Sheet（快速路径）
+        # [START] 性能优化:优先扫描第一个Sheet(快速路径)
         if len(xls.sheet_names) > 0:
             first_sheet = xls.sheet_names[0]
             try:
                 raw = pd.read_excel(xls, sheet_name=first_sheet, header=None)
                 first_df = parse_sheet(raw)
 
-                # 如果第一个Sheet有效且数据量足够，直接返回（避免扫描其他Sheet）
+                # 如果第一个Sheet有效且数据量足够,直接返回(避免扫描其他Sheet)
                 if first_df is not None and not first_df.empty and first_df.shape[0] > 5:
                     return first_df
             except Exception:
                 pass
 
-        # 如果第一个Sheet无效，才扫描所有Sheet
+        # 如果第一个Sheet无效,才扫描所有Sheet
         best_df: Optional[pd.DataFrame] = None
         best_score = -1
         for sheet in xls.sheet_names:
@@ -435,7 +438,7 @@ def _try_set_domain_from_name(cf: 'CatalogFile') -> None:
         path = (cf.file_path or '').lower()
         text = f"{name} {path}"
         if '__analytics__' in name or ' analytics ' in text or name.endswith('_analytics.xlsx') or '__traffic__' in name or ' traffic ' in text or name.endswith('_traffic.xlsx'):
-            # v4.10.0更新：traffic域统一映射到analytics域
+            # v4.10.0更新:traffic域统一映射到analytics域
             cf.data_domain = 'analytics'
             return
         if '__services__' in name or '__service__' in name or ' service ' in text:
@@ -457,7 +460,7 @@ def _try_set_domain_from_df(cf: 'CatalogFile', df: pd.DataFrame) -> None:
                 'product': 'products',
                 'orders': 'orders',
                 'order': 'orders',
-                'traffic': 'analytics',  # v4.10.0更新：traffic域统一映射到analytics域
+                'traffic': 'analytics',  # v4.10.0更新:traffic域统一映射到analytics域
                 'analytics': 'analytics',
                 'service': 'service',
                 'services': 'service',
@@ -466,7 +469,7 @@ def _try_set_domain_from_df(cf: 'CatalogFile', df: pd.DataFrame) -> None:
             if not cf.data_domain:
                 if v.startswith('services'):
                     cf.data_domain = 'service'
-                elif v.startswith('analytics') or v.startswith('traffic'):  # v4.10.0更新：traffic统一映射到analytics
+                elif v.startswith('analytics') or v.startswith('traffic'):  # v4.10.0更新:traffic统一映射到analytics
                     cf.data_domain = 'analytics'
     except Exception:
         pass
@@ -499,7 +502,7 @@ def _ingest_unknown_or_manifest(session: Session, cf: 'CatalogFile') -> Tuple[bo
         return True, 'manifest skipped'
 
     # clarify message for recognized-but-unimplemented domains
-    if cf.data_domain in {'analytics', 'service', 'orders'}:  # v4.10.0更新：traffic统一为analytics
+    if cf.data_domain in {'analytics', 'service', 'orders'}:  # v4.10.0更新:traffic统一为analytics
         return False, f"recognized domain '{cf.data_domain}' but not implemented yet"
 
     return False, f"unsupported domain: {cf.data_domain}"
@@ -609,7 +612,7 @@ def _merge_product_metric_row(
 def _ingest_products_file(session: Session, cf: CatalogFile, mappings: Dict) -> Tuple[bool, str]:
     """Ingest products file with hierarchy support (product-level + variant-level)."""
     
-    # 强校验：必须有shop_id
+    # 强校验:必须有shop_id
     if not cf.shop_id:
         return False, "missing shop_id (needs assignment)"
     
@@ -701,7 +704,7 @@ def _ingest_products_file(session: Session, cf: CatalogFile, mappings: Dict) -> 
                 cf.data_domain = 'service'
                 return False, "looks like service metrics; not implemented yet"
             if any(any(k in c for k in traf_keys) for c in lowcols):
-                cf.data_domain = 'analytics'  # v4.10.0更新：traffic统一映射到analytics
+                cf.data_domain = 'analytics'  # v4.10.0更新:traffic统一映射到analytics
                 return False, "looks like traffic/analytics metrics; not implemented yet"
         except Exception:
             pass
@@ -854,7 +857,7 @@ def _ingest_products_file(session: Session, cf: CatalogFile, mappings: Dict) -> 
             prefer_summary = any(checks)
 
         product_updates = summary_m if (prefer_summary and summary_m) else agg_variants
-        # 提取currency（字符串类型，不是float）
+        # 提取currency(字符串类型,不是float)
         product_currency = product_updates.pop("currency", None) if product_updates else None
         
         # Merge product-level
@@ -909,9 +912,9 @@ def _ingest_traffic_store_file(
 ) -> Tuple[bool, str]:
     """Ingest store-level daily traffic metrics as a pseudo SKU '__STORE__'.
     Expected columns (any subset): 日期/Date, 页面浏览次数(Page Views), 访客/客户数(Visitors), 订单数(Orders), 转化率(%),
-    金额类（如: 商品交易总额(₱), 退款金额(₱) 等）。
+    金额类(如: 商品交易总额(₱), 退款金额(₱) 等)。
     """
-    # 强校验：必须有shop_id
+    # 强校验:必须有shop_id
     if not cf.shop_id:
         return False, "missing shop_id (needs assignment)"
     
@@ -968,7 +971,7 @@ def _ingest_traffic_store_file(
     if not date_col:
         metric_date_from_name = _infer_metric_date_from_filename(Path(cf.file_name).name)
     
-    # 检测日期格式偏好（抽样前10行）
+    # 检测日期格式偏好(抽样前10行)
     prefer_dayfirst = None
     if date_col:
         try:
@@ -1137,6 +1140,8 @@ def _ingest_traffic_store_file(
     return (succeeded_rows > 0), f"rows_ingested={succeeded_rows}"
 
 
+# [DELETED] v4.19.0: FactOrder 已删除,此函数已废弃
+# [TODO] 订单数据现在应导入到 b_class.fact_{platform}_orders_{granularity} 表
 def _upsert_order(session: Session,
                    platform_code: str,
                    shop_id: str,
@@ -1148,6 +1153,18 @@ def _upsert_order(session: Session,
                    tax_amount: Optional[float] = None,
                    discount_amount: Optional[float] = None,
                    total_amount: Optional[float] = None) -> None:
+    """
+    [DEPRECATED] v4.19.0: 此函数已废弃,FactOrder 表已删除
+    订单数据现在应导入到 b_class.fact_{platform}_orders_{granularity} 表
+    """
+    logger.warning(
+        f"[IngestionWorker] _upsert_order 函数已废弃,FactOrder 表已删除。"
+        f"订单 {platform_code}/{shop_id}/{order_id} 应导入到 b_class.fact_{platform_code}_orders_daily"
+    )
+    return  # 直接返回,不执行任何操作
+    
+    # [DEPRECATED] 以下代码已注释
+    """
     existing = session.execute(
         select(FactOrder).where(
             FactOrder.platform_code == platform_code,
@@ -1195,7 +1212,7 @@ def _ingest_orders_file(session: Session, cf: CatalogFile, mappings: Dict,
     """Minimal orders ingestion (schema-first, tolerant mapping).
     Targets fact_orders; items omitted for first cut.
     """
-    # 强校验：必须有shop_id
+    # 强校验:必须有shop_id
     if not cf.shop_id:
         return False, "missing shop_id (needs assignment)"
     
@@ -1290,14 +1307,14 @@ def _ingest_orders_file(session: Session, cf: CatalogFile, mappings: Dict,
     if not order_id_col:
         return False, "missing order_id column"
 
-    # Default currency: Miaoshou 报表默认视为 CNY；其余平台沿用平台默认或值内探测
+    # Default currency: Miaoshou 报表默认视为 CNY;其余平台沿用平台默认或值内探测
     default_currency = (mappings.get("platform_configs", {}).get(platform_code, {}) or {}).get("currency")
     if platform_code == 'miaoshou':
         default_currency = default_currency or 'CNY'
 
     metric_date_from_name = _infer_metric_date_from_filename(Path(cf.file_name).name)
     
-    # 检测日期格式偏好（抽样前10行）
+    # 检测日期格式偏好(抽样前10行)
     prefer_dayfirst = None
     if date_col and date_col in df.columns:
         try:
@@ -1364,10 +1381,10 @@ def _ingest_services_file(
     Ingest services domain files (agent/ai_assistant sub-types).
     
     Sub-types:
-    - ai_assistant: daily rows (逐日一行，店铺级)
-    - agent: single row with date range (单行区间，如"26-08-2025 - 24-09-2025")
+    - ai_assistant: daily rows (逐日一行,店铺级)
+    - agent: single row with date range (单行区间,如"26-08-2025 - 24-09-2025")
     """
-    # 强校验：必须有shop_id
+    # 强校验:必须有shop_id
     if not cf.shop_id:
         return False, "missing shop_id (needs assignment)"
     
@@ -1409,7 +1426,7 @@ def _ingest_services_ai_assistant(
     mappings: Dict,
     progress_cb: Optional[Callable],
 ) -> Tuple[bool, str]:
-    """AI Assistant逐日数据入库（每行一天，店铺级）"""
+    """AI Assistant逐日数据入库(每行一天,店铺级)"""
     
     # 识别列
     date_col = _find_column_by_keywords(df, ["日期", "date", "日期期间"])
@@ -1478,7 +1495,7 @@ def _ingest_services_agent(
     mappings: Dict,
     progress_cb: Optional[Callable],
 ) -> Tuple[bool, str]:
-    """Agent单行区间数据入库（如"26-08-2025 - 24-09-2025"）"""
+    """Agent单行区间数据入库(如"26-08-2025 - 24-09-2025")"""
     
     if len(df) == 0:
         return True, "empty skipped"
@@ -1507,11 +1524,11 @@ def _ingest_services_agent(
             period_end = parse_date(m.group(2), prefer_dayfirst=True)
             logger.info(f"[Services/Agent] 解析日期区间: {period_start} - {period_end}")
     
-    # 兜底：使用文件名日期
+    # 兜底:使用文件名日期
     if not period_end:
         period_end = _infer_metric_date_from_filename(Path(cf.file_name).name)
     if not period_start and period_end:
-        # 假设是月度数据，起始为月初
+        # 假设是月度数据,起始为月初
         period_start = period_end.replace(day=1)
     
     sku = "__SERVICES_AGENT__"
@@ -1611,7 +1628,7 @@ def run_once(limit: int = 20,
                 with session.no_autoflush:
                     if domain == "products":
                         ok, msg = _ingest_products_file(session, cf, mappings)
-                    elif domain == "analytics":  # v4.10.0更新：traffic统一为analytics
+                    elif domain == "analytics":  # v4.10.0更新:traffic统一为analytics
                         ok, msg = _ingest_traffic_store_file(session, cf, mappings, progress_cb=progress_cb)
                     elif domain == "orders":
                         ok, msg = _ingest_orders_file(session, cf, mappings, progress_cb=progress_cb)

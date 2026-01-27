@@ -2,7 +2,7 @@
 HR管理API路由
 Description: 员工管理、员工目标、考勤记录、绩效查询的CRUD操作
 Created: 2025-01-31
-v4.6.0 DSS架构重构：HR管理模块API
+v4.6.0 DSS架构重构:HR管理模块API
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -41,7 +41,7 @@ class EmployeeCreate(BaseModel):
     department: Optional[str] = Field(None, description="部门", max_length=128)
     position: Optional[str] = Field(None, description="职位", max_length=128)
     hire_date: Optional[date] = Field(None, description="入职日期")
-    status: str = Field("active", description="状态（active/inactive）")
+    status: str = Field("active", description="状态(active/inactive)")
 
 
 class EmployeeUpdate(BaseModel):
@@ -70,8 +70,8 @@ class EmployeeResponse(BaseModel):
 # 员工目标
 class EmployeeTargetCreate(BaseModel):
     employee_code: str = Field(..., description="员工编号", min_length=1, max_length=64)
-    year_month: str = Field(..., description="目标月份（YYYY-MM）", pattern=r"^\d{4}-\d{2}$")
-    target_type: str = Field(..., description="目标类型（sales/orders/customers）", max_length=32)
+    year_month: str = Field(..., description="目标月份(YYYY-MM)", pattern=r"^\d{4}-\d{2}$")
+    target_type: str = Field(..., description="目标类型(sales/orders/customers)", max_length=32)
     target_value: Decimal = Field(..., ge=0, description="目标值")
 
 
@@ -98,8 +98,8 @@ class AttendanceRecordCreate(BaseModel):
     attendance_date: date = Field(..., description="考勤日期")
     clock_in_time: Optional[datetime] = Field(None, description="上班时间")
     clock_out_time: Optional[datetime] = Field(None, description="下班时间")
-    work_hours: Optional[float] = Field(None, ge=0, le=24, description="工作时长（小时）")
-    status: str = Field("normal", description="考勤状态（normal/late/early_leave/absent）")
+    work_hours: Optional[float] = Field(None, ge=0, le=24, description="工作时长(小时)")
+    status: str = Field("normal", description="考勤状态(normal/late/early_leave/absent)")
 
 
 class AttendanceRecordUpdate(BaseModel):
@@ -172,12 +172,12 @@ class ShopCommissionResponse(BaseModel):
 @router.get("/employees", response_model=List[EmployeeResponse])
 async def list_employees(
     department: Optional[str] = Query(None, description="部门筛选"),
-    status: Optional[str] = Query(None, description="状态筛选（active/inactive）"),
+    status: Optional[str] = Query(None, description="状态筛选(active/inactive)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取员工列表（分页、筛选）"""
+    """获取员工列表(分页、筛选)"""
     try:
         query = select(Employee)
         
@@ -306,7 +306,7 @@ async def delete_employee(
     employee_code: str,
     db: AsyncSession = Depends(get_async_db)
 ):
-    """删除员工（软删除：设置status为inactive）"""
+    """删除员工(软删除:设置status为inactive)"""
     try:
         result = await db.execute(
             select(Employee).where(Employee.employee_code == employee_code)
@@ -316,12 +316,12 @@ async def delete_employee(
         if not employee:
             raise HTTPException(status_code=404, detail=f"员工不存在: {employee_code}")
         
-        # 软删除：设置status为inactive
+        # 软删除:设置status为inactive
         employee.status = "inactive"
         employee.updated_at = datetime.utcnow()
         await db.commit()
         
-        logger.info(f"删除员工成功（软删除）: {employee_code}")
+        logger.info(f"删除员工成功(软删除): {employee_code}")
         return None
     except HTTPException:
         raise
@@ -338,13 +338,13 @@ async def delete_employee(
 @router.get("/employee-targets", response_model=List[EmployeeTargetResponse])
 async def list_employee_targets(
     employee_code: Optional[str] = Query(None, description="员工编号筛选"),
-    year_month: Optional[str] = Query(None, description="目标月份筛选（YYYY-MM）"),
+    year_month: Optional[str] = Query(None, description="目标月份筛选(YYYY-MM)"),
     target_type: Optional[str] = Query(None, description="目标类型筛选"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取员工目标列表（分页、筛选）"""
+    """获取员工目标列表(分页、筛选)"""
     try:
         query = select(EmployeeTarget)
         
@@ -503,7 +503,7 @@ async def list_attendance_records(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取考勤记录列表（分页、筛选）"""
+    """获取考勤记录列表(分页、筛选)"""
     try:
         query = select(AttendanceRecord)
         
@@ -565,7 +565,7 @@ async def create_attendance_record(
                 detail=f"考勤记录已存在: {record.employee_code} - {record.attendance_date}"
             )
         
-        # 自动计算工作时长（如果提供了上下班时间）
+        # 自动计算工作时长(如果提供了上下班时间)
         work_hours = record.work_hours
         if record.clock_in_time and record.clock_out_time and work_hours is None:
             delta = record.clock_out_time - record.clock_in_time
@@ -614,7 +614,7 @@ async def update_attendance_record(
         # 更新字段
         update_data = record_update.dict(exclude_unset=True)
         
-        # 如果更新了上下班时间，重新计算工作时长
+        # 如果更新了上下班时间,重新计算工作时长
         if (record_update.clock_in_time is not None or record_update.clock_out_time is not None) and record_update.work_hours is None:
             clock_in = record_update.clock_in_time if record_update.clock_in_time is not None else record.clock_in_time
             clock_out = record_update.clock_out_time if record_update.clock_out_time is not None else record.clock_out_time
@@ -675,12 +675,12 @@ async def delete_attendance_record(
 @router.get("/performance", response_model=List[EmployeePerformanceResponse])
 async def list_employee_performance(
     employee_code: Optional[str] = Query(None, description="员工编号筛选"),
-    year_month: Optional[str] = Query(None, description="目标月份筛选（YYYY-MM）"),
+    year_month: Optional[str] = Query(None, description="目标月份筛选(YYYY-MM)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取员工绩效列表（从employee_performance表读取，由Metabase定时计算）"""
+    """获取员工绩效列表(从employee_performance表读取,由Metabase定时计算)"""
     try:
         query = select(EmployeePerformance)
         
@@ -714,12 +714,12 @@ async def list_employee_performance(
 @router.get("/commissions/employee", response_model=List[EmployeeCommissionResponse])
 async def list_employee_commissions(
     employee_code: Optional[str] = Query(None, description="员工编号筛选"),
-    year_month: Optional[str] = Query(None, description="目标月份筛选（YYYY-MM）"),
+    year_month: Optional[str] = Query(None, description="目标月份筛选(YYYY-MM)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取员工提成列表（从employee_commissions表读取，由Metabase定时计算）"""
+    """获取员工提成列表(从employee_commissions表读取,由Metabase定时计算)"""
     try:
         query = select(EmployeeCommission)
         
@@ -749,12 +749,12 @@ async def list_employee_commissions(
 @router.get("/commissions/shop", response_model=List[ShopCommissionResponse])
 async def list_shop_commissions(
     shop_id: Optional[str] = Query(None, description="店铺ID筛选"),
-    year_month: Optional[str] = Query(None, description="目标月份筛选（YYYY-MM）"),
+    year_month: Optional[str] = Query(None, description="目标月份筛选(YYYY-MM)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取店铺提成列表（从shop_commissions表读取，由Metabase定时计算）"""
+    """获取店铺提成列表(从shop_commissions表读取,由Metabase定时计算)"""
     try:
         query = select(ShopCommission)
         

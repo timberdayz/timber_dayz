@@ -78,7 +78,7 @@ class AccountValidator:
             accounts: 账号列表
             
         Returns:
-            List[Dict[str, Any]]: 验证结果列表，包含错误信息
+            List[Dict[str, Any]]: 验证结果列表,包含错误信息
         """
         results = []
         
@@ -122,7 +122,7 @@ class AccountValidator:
         
         if platform not in self.supported_platforms:
             logger.warning(f"不支持的平台: {platform}")
-            # 这里只警告，不阻止添加新平台
+            # 这里只警告,不阻止添加新平台
     
     def _validate_username(self, username: str):
         """验证用户名"""
@@ -138,7 +138,7 @@ class AccountValidator:
         if len(username) > 100:
             raise ValidationError("用户名长度不能超过100个字符")
         
-        # 如果是邮箱格式，验证邮箱
+        # 如果是邮箱格式,验证邮箱
         if '@' in username:
             if not self.email_pattern.match(username):
                 raise ValidationError("邮箱格式不正确")
@@ -157,7 +157,7 @@ class AccountValidator:
         if len(password) > 100:
             raise ValidationError("密码长度不能超过100个字符")
         
-        # 密码强度检查（可选）
+        # 密码强度检查(可选)
         # self._validate_password_strength(password)
     
     def _validate_status(self, status: str):
@@ -165,10 +165,10 @@ class AccountValidator:
         valid_statuses = ['active', 'inactive', 'pending', 'error', 'suspended']
         
         if status and status not in valid_statuses:
-            raise ValidationError(f"无效的状态值: {status}，有效值: {', '.join(valid_statuses)}")
+            raise ValidationError(f"无效的状态值: {status},有效值: {', '.join(valid_statuses)}")
     
     def _validate_password_strength(self, password: str):
-        """验证密码强度（可选）"""
+        """验证密码强度(可选)"""
         # 检查是否包含数字
         if not re.search(r'\d', password):
             raise ValidationError("密码必须包含至少一个数字")
@@ -177,7 +177,7 @@ class AccountValidator:
         if not re.search(r'[a-zA-Z]', password):
             raise ValidationError("密码必须包含至少一个字母")
         
-        # 检查特殊字符（可选）
+        # 检查特殊字符(可选)
         # if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
         #     raise ValidationError("密码建议包含特殊字符")
     

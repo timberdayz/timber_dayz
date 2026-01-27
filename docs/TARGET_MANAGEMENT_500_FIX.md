@@ -74,11 +74,21 @@ column sales_targets.target_name does not exist
   脚本会读取与后端相同的 `DATABASE_URL`，对每个存在 `sales_targets` 的 schema 检查并执行等价的 `ALTER TABLE ... ADD COLUMN ...`，使表与 `SalesTarget` 一致。执行完成后重启后端即可。
 - 也可在**备份库后**在目标库中手工执行迁移文件里与 `sales_targets` 相关的 `ALTER TABLE ... ADD COLUMN ...` 语句（或运行上述脚本），使表具备 `target_name`、`target_type`、`period_start`、`period_end`、`target_amount`、`target_quantity`、`achieved_amount`、`achieved_quantity`、`achievement_rate`、`status`、`description`、`created_by`、`created_at`、`updated_at` 等列，类型与 `schema.py` 中 `SalesTarget` 一致。
 
+## A 类表结构审查
+
+目标管理所用表（`sales_targets`、`target_breakdown`）属于 A 类数据表。可与其它 A 类表（`sales_campaigns`、`sales_campaign_shops`、`performance_config`）一并做结构审查，避免类似「表存在但缺列」问题：
+
+- **审查脚本**：`python scripts/check_a_class_tables_schema.py --report`
+- **报告输出**：`docs/A_CLASS_TABLES_AUDIT_REPORT.md`（对比库中列与 schema.py，列出缺失列/多余列）
+
+表结构有变更或新环境上线前建议复跑一次。
+
 ## 相关文件
 
 - `backend/routers/target_management.py`：列表接口与计数逻辑
 - `modules/core/db/schema.py`：`SalesTarget` 表定义
 - `migrations/versions/20260125_fix_sales_targets_columns.py`：表结构修复迁移
 - `scripts/fix_sales_targets_columns_standalone.py`：方案二独立脚本（不依赖 Alembic 直接改表）
+- `scripts/check_a_class_tables_schema.py`：A 类表结构审查脚本
 - `scripts/check_targets_api.py`：诊断脚本
 - `tests/test_target_management_api.py`：目标管理接口测试（含 500 详情抓取）

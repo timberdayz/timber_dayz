@@ -5,7 +5,7 @@
 浏览器邮箱OTP客户端
 
 使用Playwright模拟真实浏览器登录邮箱获取验证码
-绕过IMAP安全限制，支持163、QQ等各种邮箱
+绕过IMAP安全限制,支持163、QQ等各种邮箱
 """
 
 import time
@@ -27,8 +27,8 @@ class BrowserEmailOTPClient:
         Args:
             config: 邮箱配置
                 - email_address: 邮箱地址
-                - email_password: 邮箱密码（网页登录密码，不是授权码）
-                - email_url: 邮箱网址（如 https://mail.163.com）
+                - email_password: 邮箱密码(网页登录密码,不是授权码)
+                - email_url: 邮箱网址(如 https://mail.163.com)
                 - platform: 平台名称
                 - account_id: 账号ID
         """
@@ -58,9 +58,9 @@ class BrowserEmailOTPClient:
             
             self.playwright = await async_playwright().start()
             
-            # 启动浏览器（使用Chrome，模拟真实用户）
+            # 启动浏览器(使用Chrome,模拟真实用户)
             self.browser = await self.playwright.chromium.launch(
-                headless=False,  # 显示浏览器窗口，方便调试
+                headless=False,  # 显示浏览器窗口,方便调试
                 args=[
                     '--no-sandbox',
                     '--disable-blink-features=AutomationControlled',
@@ -123,13 +123,13 @@ class BrowserEmailOTPClient:
             # 等待页面加载
             await self.page.wait_for_timeout(5000)
             
-            # 163邮箱使用iframe，需要先找到登录iframe
+            # 163邮箱使用iframe,需要先找到登录iframe
             login_frame = await self._find_login_iframe()
             if not login_frame:
                 logger.error("未找到163邮箱登录iframe")
                 return False
             
-            logger.info("找到登录iframe，开始在iframe中查找登录元素...")
+            logger.info("找到登录iframe,开始在iframe中查找登录元素...")
             
             # 在iframe中查找用户名输入框
             username_selectors = [
@@ -167,7 +167,7 @@ class BrowserEmailOTPClient:
             
             # 在iframe中查找密码输入框
             password_selectors = [
-                'input[type="password"][name="password"]',  # 163特有：name="password"
+                'input[type="password"][name="password"]',  # 163特有:name="password"
                 'input[type="password"]',
                 'input[name="password"]',
                 '.loginform input[type="password"]',
@@ -187,7 +187,7 @@ class BrowserEmailOTPClient:
                             logger.debug(f"在iframe中找到可见密码输入框: {selector}")
                             break
                         else:
-                            logger.debug(f"密码输入框不可见，跳过: {selector}")
+                            logger.debug(f"密码输入框不可见,跳过: {selector}")
                 except:
                     continue
             
@@ -200,11 +200,11 @@ class BrowserEmailOTPClient:
             logger.debug("已输入密码")
             
             # 在iframe中查找登录按钮
-            # 163邮箱的登录按钮是<a>标签，文本为"登  录"（中间有空格）
+            # 163邮箱的登录按钮是<a>标签,文本为"登  录"(中间有空格)
             login_selectors = [
                 'a:has-text("登录")',
                 'a:has-text("登 录")',
-                'a:has-text("登  录")',  # 163特有：两个空格
+                'a:has-text("登  录")',  # 163特有:两个空格
                 'input[type="submit"]',
                 'button[type="submit"]',
                 'button:has-text("登录")',
@@ -228,14 +228,14 @@ class BrowserEmailOTPClient:
                             logger.debug(f"在iframe中找到可用登录按钮: {selector}, 文本: '{button_text.strip()}'")
                             break
                         else:
-                            logger.debug(f"登录按钮不可用，跳过: {selector} (可见:{is_visible}, 启用:{is_enabled})")
+                            logger.debug(f"登录按钮不可用,跳过: {selector} (可见:{is_visible}, 启用:{is_enabled})")
                 except Exception as e:
                     logger.debug(f"尝试登录按钮选择器失败: {selector} - {e}")
                     continue
             
-            # 如果没找到，尝试更通用的方式
+            # 如果没找到,尝试更通用的方式
             if not login_button:
-                logger.warning("未找到预定义的登录按钮，尝试查找包含'登录'文本的所有元素...")
+                logger.warning("未找到预定义的登录按钮,尝试查找包含'登录'文本的所有元素...")
                 try:
                     # 查找所有包含登录文本的可点击元素
                     all_clickable = await login_frame.query_selector_all('a, button, input[type="button"], input[type="submit"], [role="button"], [onclick]')
@@ -280,14 +280,14 @@ class BrowserEmailOTPClient:
                 logger.success("163邮箱登录成功")
                 return True
             else:
-                logger.warning("163邮箱登录状态未确定，可能需要额外验证")
+                logger.warning("163邮箱登录状态未确定,可能需要额外验证")
                 
                 # 检查是否有短信验证码输入框
                 sms_handled = await self._handle_sms_verification()
                 if sms_handled:
                     return True
                 
-                logger.info("等待用户手动处理其他验证步骤（如滑块验证等）...")
+                logger.info("等待用户手动处理其他验证步骤(如滑块验证等)...")
                 await self.page.wait_for_timeout(15000)  # 给用户足够时间处理验证
                 
                 # 再次检查URL
@@ -295,11 +295,11 @@ class BrowserEmailOTPClient:
                 logger.info(f"验证后URL: {current_url}")
                 
                 if "mail.163.com" in current_url and ("/js6/" in current_url or "/m/" in current_url or "/home/" in current_url):
-                    logger.success("163邮箱验证完成，登录成功")
+                    logger.success("163邮箱验证完成,登录成功")
                     return True
                 else:
-                    logger.warning("请确保已完成登录验证，继续执行...")
-                    return True  # 暂时返回True，继续后续操作
+                    logger.warning("请确保已完成登录验证,继续执行...")
+                    return True  # 暂时返回True,继续后续操作
                 
         except Exception as e:
             logger.error(f"163邮箱登录失败: {e}")
@@ -337,7 +337,7 @@ class BrowserEmailOTPClient:
                 except:
                     continue
             
-            # 如果主页面没找到，检查iframe
+            # 如果主页面没找到,检查iframe
             if not sms_input:
                 login_frame = await self._find_login_iframe()
                 if login_frame:
@@ -354,9 +354,9 @@ class BrowserEmailOTPClient:
                 logger.debug("未找到短信验证码输入框")
                 return False
             
-            # 找到了验证码输入框，提示用户输入
+            # 找到了验证码输入框,提示用户输入
             logger.warning("[LOCK] 检测到需要短信验证码！")
-            logger.info("[PHONE] 请查看您的手机短信，获取验证码")
+            logger.info("[PHONE] 请查看您的手机短信,获取验证码")
             
             # 在控制台请求用户输入验证码
             print("\n" + "="*50)
@@ -394,7 +394,7 @@ class BrowserEmailOTPClient:
                     if confirm_button and await confirm_button.is_visible():
                         break
                     
-                    # 如果主页面没找到，在iframe中查找
+                    # 如果主页面没找到,在iframe中查找
                     login_frame = await self._find_login_iframe()
                     if login_frame:
                         confirm_button = await login_frame.wait_for_selector(selector, timeout=2000)
@@ -417,10 +417,10 @@ class BrowserEmailOTPClient:
             # 检查是否成功登录
             current_url = self.page.url
             if "mail.163.com" in current_url and ("/js6/" in current_url or "/m/" in current_url or "/home/" in current_url):
-                logger.success("[OK] 短信验证码验证成功，邮箱登录完成！")
+                logger.success("[OK] 短信验证码验证成功,邮箱登录完成！")
                 return True
             else:
-                logger.warning("短信验证码提交后状态未确定，继续等待...")
+                logger.warning("短信验证码提交后状态未确定,继续等待...")
                 return False
                 
         except Exception as e:
@@ -456,7 +456,7 @@ class BrowserEmailOTPClient:
                     logger.debug(f"尝试iframe选择器 {selector} 失败: {e}")
                     continue
             
-            # 如果都没找到，尝试获取所有iframe
+            # 如果都没找到,尝试获取所有iframe
             logger.debug("尝试查找所有iframe...")
             all_iframes = await self.page.query_selector_all('iframe')
             logger.debug(f"页面中共有 {len(all_iframes)} 个iframe")
@@ -472,7 +472,7 @@ class BrowserEmailOTPClient:
                         try:
                             inputs = await login_frame.query_selector_all('input')
                             if len(inputs) >= 2:  # 至少有用户名和密码两个输入框
-                                logger.debug(f"iframe {i+1} 包含 {len(inputs)} 个输入框，可能是登录iframe")
+                                logger.debug(f"iframe {i+1} 包含 {len(inputs)} 个输入框,可能是登录iframe")
                                 await login_frame.wait_for_load_state('networkidle', timeout=5000)
                                 return login_frame
                         except:
@@ -509,7 +509,7 @@ class BrowserEmailOTPClient:
             logger.debug(f"调试iframe输入框失败: {e}")
     
     async def _login_qq(self) -> bool:
-        """QQ邮箱登录（预留）"""
+        """QQ邮箱登录(预留)"""
         logger.info("QQ邮箱登录功能待实现")
         return False
     
@@ -523,10 +523,10 @@ class BrowserEmailOTPClient:
         
         Args:
             since_timestamp: 开始时间戳
-            max_age_seconds: 最大邮件年龄（秒）
+            max_age_seconds: 最大邮件年龄(秒)
             
         Returns:
-            验证码字符串，未找到返回None
+            验证码字符串,未找到返回None
         """
         try:
             logger.info("开始在网页邮箱中查找验证码...")
@@ -688,7 +688,7 @@ class BrowserEmailOTPClient:
         
         import re
         
-        # 验证码的正则表达式模式（复用之前的逻辑）
+        # 验证码的正则表达式模式(复用之前的逻辑)
         otp_patterns = [
             r'(?:验证码|verification code|code)[^\d]*(\d{6})',
             r'(\d{6})(?:\s*(?:是您的|is your)?(?:验证码|verification code))',
@@ -733,7 +733,7 @@ class BrowserEmailOTPClient:
 
 def run_browser_email_otp(config: Dict[str, Any], timeout_seconds: int = 120) -> Optional[str]:
     """
-    运行浏览器邮箱OTP获取（同步接口）
+    运行浏览器邮箱OTP获取(同步接口)
     
     Args:
         config: 邮箱配置

@@ -39,7 +39,7 @@ class MiaoshouLogin(LoginComponent):
         super().__init__(ctx)
 
     async def run(self, page: Any) -> LoginResult:  # type: ignore[override]
-        """执行妙手ERP登录（带详细步骤提示与诊断）。"""
+        """执行妙手ERP登录(带详细步骤提示与诊断)。"""
         acc = self.ctx.account or {}
         login_url = acc.get("login_url", "https://erp.91miaoshou.com/?redirect=%2Fwelcome")
         username = acc.get("username") or acc.get("phone") or acc.get("email")
@@ -63,7 +63,7 @@ class MiaoshouLogin(LoginComponent):
             except Exception:
                 return LoginResult(success=False, message="无法打开登录页")
 
-        # 若打开后立即处于已登录状态（例如已有会话），直接返回成功
+        # 若打开后立即处于已登录状态(例如已有会话),直接返回成功
         try:
             cur = str(getattr(page, "url", ""))
             login_btn_missing = (
@@ -71,12 +71,12 @@ class MiaoshouLogin(LoginComponent):
                 and await page.locator("text=立即登录").count() == 0
             )
             if ("/welcome" in cur and "redirect=" not in cur) or login_btn_missing:
-                _log("[MiaoshouLogin] 已处于登录状态，跳过登录步骤")
+                _log("[MiaoshouLogin] 已处于登录状态,跳过登录步骤")
                 return LoginResult(success=True, message="already logged in")
         except Exception:
             pass
 
-        # 步骤2：填写用户名
+        # 步骤2:填写用户名
         try:
             _log("[MiaoshouLogin] 步骤2: 填写用户名...")
             try:
@@ -88,7 +88,7 @@ class MiaoshouLogin(LoginComponent):
             _log(f"[FAIL] 无法填写用户名: {e}")
             return LoginResult(success=False, message="fill username failed")
 
-        # 步骤3：填写密码
+        # 步骤3:填写密码
         try:
             _log("[MiaoshouLogin] 步骤3: 填写密码...")
             try:
@@ -100,10 +100,10 @@ class MiaoshouLogin(LoginComponent):
             _log(f"[FAIL] 无法填写密码: {e}")
             return LoginResult(success=False, message="fill password failed")
 
-        # 步骤4：确保"记住账号"为勾选状态（尽力而为）
+        # 步骤4:确保"记住账号"为勾选状态(尽力而为)
         try:
             _log("[MiaoshouLogin] 步骤4: 确保'记住账号'为勾选状态...")
-            # 优先：直接定位 checkbox 元素
+            # 优先:直接定位 checkbox 元素
             cb = None
             for s in [
                 ".remember-check-box input[type='checkbox']",
@@ -120,7 +120,7 @@ class MiaoshouLogin(LoginComponent):
                 except Exception:
                     checked = None
                 if checked:
-                    _log("[OK] 已是勾选状态（checkbox）")
+                    _log("[OK] 已是勾选状态(checkbox)")
                 else:
                     try:
                         await cb.check(timeout=1500)
@@ -131,7 +131,7 @@ class MiaoshouLogin(LoginComponent):
                     except Exception:
                         pass
             else:
-                # 退化：根据容器 class/aria 判断
+                # 退化:根据容器 class/aria 判断
                 cont = page.locator(".remember-check-box")
                 if await cont.count() > 0:
                     c = cont.first
@@ -141,16 +141,16 @@ class MiaoshouLogin(LoginComponent):
                     except Exception:
                         cls, aria = "", ""
                     if ("checked" in cls) or (aria in ("true", "1")):
-                        _log("[OK] 已是勾选状态（容器）")
+                        _log("[OK] 已是勾选状态(容器)")
                     else:
                         await c.click(timeout=1500)
                         _log("[OK] 已点击记住账号")
                 else:
-                    _log("[WARN] 未找到记住账号复选框（忽略）")
+                    _log("[WARN] 未找到记住账号复选框(忽略)")
         except Exception:
-            _log("[WARN] 处理记住账号状态时出现异常（忽略）")
+            _log("[WARN] 处理记住账号状态时出现异常(忽略)")
 
-        # 步骤5：定位并点击"立即登录"按钮
+        # 步骤5:定位并点击"立即登录"按钮
         submitted = False
         _log("[MiaoshouLogin] 步骤5: 定位并点击'立即登录'按钮...")
         candidates = [
@@ -187,7 +187,7 @@ class MiaoshouLogin(LoginComponent):
                         _log("[OK] 已点击登录按钮")
                         break
                     except Exception as c1:
-                        _log(f"[WARN] 点击失败，尝试强制点击: {c1}")
+                        _log(f"[WARN] 点击失败,尝试强制点击: {c1}")
                         try:
                             await btn.click(timeout=2000, force=True)
                             submitted = True
@@ -198,7 +198,7 @@ class MiaoshouLogin(LoginComponent):
                 except Exception:
                     continue
             if not submitted:
-                # 额外回退：使用role定位或键盘回车
+                # 额外回退:使用role定位或键盘回车
                 try:
                     await page.get_by_role("button", name="立即登录").click(timeout=2000)
                     submitted = True
@@ -215,15 +215,15 @@ class MiaoshouLogin(LoginComponent):
         except Exception as e:
             _log(f"[FAIL] 点击登录按钮过程异常: {e}")
 
-        # 步骤6：等待登录结果
+        # 步骤6:等待登录结果
         _log("[MiaoshouLogin] 步骤6: 等待登录结果...")
         async def _is_logged_in() -> bool:
             try:
                 url = str(getattr(page, "url", ""))
-                # 登录成功通常跳转到 /welcome（且不再带 redirect 参数）
+                # 登录成功通常跳转到 /welcome(且不再带 redirect 参数)
                 if ("/welcome" in url) and ("redirect=" not in url):
                     return True
-                # 若已在站内其他业务页（非登录页重定向），且页面无登录表单，也视为成功
+                # 若已在站内其他业务页(非登录页重定向),且页面无登录表单,也视为成功
                 in_site = "erp.91miaoshou.com" in url
                 redirected = "redirect=" in url
                 no_login_form = (

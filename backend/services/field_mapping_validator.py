@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-字段映射验证和质量评分服务（v4.13.0新增）
+字段映射验证和质量评分服务(v4.13.0新增)
 
-功能：
+功能:
 1. 验证字段映射的完整性
 2. 评估字段映射质量
 3. 识别映射问题
@@ -30,7 +30,7 @@ def validate_field_mapping(
     Args:
         mapped_rows: 映射后的数据行列表
         data_domain: 数据域
-        required_fields: 必填字段列表（可选）
+        required_fields: 必填字段列表(可选)
     
     Returns:
         验证结果
@@ -54,7 +54,7 @@ def validate_field_mapping(
         for row in mapped_rows:
             for field_name, value in row.items():
                 all_fields.add(field_name)
-                # 判断字段是否已映射（简单判断：如果字段名包含中文或特殊字符，可能是未映射）
+                # 判断字段是否已映射(简单判断:如果字段名包含中文或特殊字符,可能是未映射)
                 if _is_mapped_field(field_name):
                     mapped_fields.add(field_name)
                 else:
@@ -108,7 +108,7 @@ def calculate_mapping_quality_score(
         mapped_rows: 映射后的数据行列表
         data_domain: 数据域
         mappings: 字段映射配置
-        required_fields: 必填字段列表（可选）
+        required_fields: 必填字段列表(可选)
     
     Returns:
         质量评分结果
@@ -130,7 +130,7 @@ def calculate_mapping_quality_score(
         missing_fields = validation_result.get("missing_fields", [])
         unmapped_fields = validation_result.get("unmapped_fields", [])
         
-        # 3. 计算置信度（基于mappings中的confidence）
+        # 3. 计算置信度(基于mappings中的confidence)
         confidence_scores = []
         for orig_col, mapping_info in mappings.items():
             if isinstance(mapping_info, dict):
@@ -139,11 +139,11 @@ def calculate_mapping_quality_score(
         
         avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.5
         
-        # 4. 计算质量评分（加权平均）
-        # 覆盖率权重：40%
-        # 置信度权重：30%
-        # 必填字段完整性权重：20%
-        # 未映射字段惩罚：10%
+        # 4. 计算质量评分(加权平均)
+        # 覆盖率权重:40%
+        # 置信度权重:30%
+        # 必填字段完整性权重:20%
+        # 未映射字段惩罚:10%
         
         coverage_score = coverage / 100.0  # 转换为0-1范围
         confidence_score = avg_confidence  # 已经是0-1范围
@@ -171,7 +171,7 @@ def calculate_mapping_quality_score(
             issues.append({
                 "type": "low_coverage",
                 "severity": "high",
-                "message": f"字段映射覆盖率较低（{coverage:.1f}%），建议检查未映射字段"
+                "message": f"字段映射覆盖率较低({coverage:.1f}%),建议检查未映射字段"
             })
         
         if missing_fields:
@@ -186,7 +186,7 @@ def calculate_mapping_quality_score(
             issues.append({
                 "type": "too_many_unmapped_fields",
                 "severity": "medium",
-                "message": f"未映射字段过多（{len(unmapped_fields)}个），可能影响数据质量",
+                "message": f"未映射字段过多({len(unmapped_fields)}个),可能影响数据质量",
                 "fields": list(unmapped_fields)[:10]  # 只显示前10个
             })
         
@@ -194,7 +194,7 @@ def calculate_mapping_quality_score(
             issues.append({
                 "type": "low_confidence",
                 "severity": "medium",
-                "message": f"字段映射置信度较低（{avg_confidence:.2f}），建议人工审核"
+                "message": f"字段映射置信度较低({avg_confidence:.2f}),建议人工审核"
             })
         
         return {
@@ -222,9 +222,9 @@ def _is_mapped_field(field_name: str) -> bool:
     """
     判断字段是否已映射
     
-    简单判断规则：
-    - 如果字段名包含中文字符，可能是未映射
-    - 如果字段名包含特殊字符（如括号、空格），可能是未映射
+    简单判断规则:
+    - 如果字段名包含中文字符,可能是未映射
+    - 如果字段名包含特殊字符(如括号、空格),可能是未映射
     - 标准字段名通常是英文小写加下划线
     """
     import re
@@ -233,8 +233,8 @@ def _is_mapped_field(field_name: str) -> bool:
     if re.search(r'[\u4e00-\u9fff]', field_name):
         return False
     
-    # 检查是否包含特殊字符（括号、空格等）
-    if re.search(r'[()（）\s]', field_name):
+    # 检查是否包含特殊字符(括号、空格等)
+    if re.search(r'[()()\s]', field_name):
         return False
     
     # 标准字段名通常是英文小写加下划线

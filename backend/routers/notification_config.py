@@ -32,7 +32,7 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/system/notification", tags=["通知配置"])
 
-# 限流配置（如果可用）
+# 限流配置(如果可用)
 try:
     from backend.middleware.rate_limiter import role_based_rate_limit
 except ImportError:
@@ -109,23 +109,23 @@ async def update_smtp_config(
     try:
         service = get_notification_config_service(db)
         
-        # 转换为字典（排除None值）
+        # 转换为字典(排除None值)
         update_data = config_update.model_dump(exclude_unset=True, exclude_none=True)
         
-        # 测试连接（如果提供了密码或服务器配置）
+        # 测试连接(如果提供了密码或服务器配置)
         if "password" in update_data or "smtp_server" in update_data or "smtp_port" in update_data:
             # 先创建临时配置对象用于测试
             existing_config = await service.get_smtp_config()
             test_config = existing_config if existing_config else None
             
-            # 如果更新了配置，需要先更新再测试
+            # 如果更新了配置,需要先更新再测试
             if test_config:
                 for key, value in update_data.items():
                     if key != "password" and value is not None:
                         setattr(test_config, key, value)
             
-            # 这里暂时跳过连接测试，因为需要先保存配置才能测试
-            # 实际应该在保存后测试，如果失败则回滚
+            # 这里暂时跳过连接测试,因为需要先保存配置才能测试
+            # 实际应该在保存后测试,如果失败则回滚
         
         # 更新配置
         updated_config = await service.update_smtp_config(
@@ -228,15 +228,15 @@ async def send_test_email(
 
 @router.get("/templates", response_model=NotificationTemplateListResponse)
 async def list_templates(
-    template_type: Optional[str] = Query(None, description="模板类型（email/sms/push）"),
+    template_type: Optional[str] = Query(None, description="模板类型(email/sms/push)"),
     is_active: Optional[bool] = Query(None, description="是否启用"),
-    page: int = Query(1, ge=1, description="页码（1-based）"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数（最大100）"),
+    page: int = Query(1, ge=1, description="页码(1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数(最大100)"),
     db: AsyncSession = Depends(get_async_db),
     current_user = Depends(require_admin)
 ):
     """
-    获取通知模板列表（支持筛选、分页）
+    获取通知模板列表(支持筛选、分页)
     
     需要管理员权限
     """
@@ -491,15 +491,15 @@ async def delete_template(
 
 @router.get("/alert-rules", response_model=AlertRuleListResponse)
 async def list_alert_rules(
-    rule_type: Optional[str] = Query(None, description="规则类型（system/performance/security/business）"),
+    rule_type: Optional[str] = Query(None, description="规则类型(system/performance/security/business)"),
     enabled: Optional[bool] = Query(None, description="是否启用"),
-    page: int = Query(1, ge=1, description="页码（1-based）"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数（最大100）"),
+    page: int = Query(1, ge=1, description="页码(1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数(最大100)"),
     db: AsyncSession = Depends(get_async_db),
     current_user = Depends(require_admin)
 ):
     """
-    获取告警规则列表（支持筛选、分页）
+    获取告警规则列表(支持筛选、分页)
     
     需要管理员权限
     """

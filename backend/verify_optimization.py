@@ -152,7 +152,7 @@ def test_key_endpoints():
         try:
             response = requests.get(f"http://localhost:8001{endpoint}", timeout=10)
             
-            if response.status_code in [200, 404]:  # 404也算正常（可能没有数据）
+            if response.status_code in [200, 404]:  # 404也算正常(可能没有数据)
                 print_status(f"{name} API可用", True)
                 results.append(True)
             else:
@@ -198,7 +198,7 @@ def main():
         print("     2. 启动前端: python run.py --frontend-only")
         print("     3. 访问 http://localhost:5173 使用系统")
     else:
-        print(f"\n  [WARN]  {total - passed} 项测试失败，请检查配置")
+        print(f"\n  [WARN]  {total - passed} 项测试失败,请检查配置")
         print("\n  [TIP] 常见问题:")
         print("     - PostgreSQL服务未运行")
         print("     - 端口8001被占用")

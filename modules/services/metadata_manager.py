@@ -3,19 +3,19 @@
 """
 元数据文件管理器 - 方案B+数据治理组件
 
-功能：
+功能:
 1. 创建.meta.json伴生文件
 2. 读取和更新元数据文件
-3. 记录数据处理历史（数据血缘）
-4. 支持多阶段数据流转（raw->staging->curated）
+3. 记录数据处理历史(数据血缘)
+4. 支持多阶段数据流转(raw->staging->curated)
 
-元数据文件格式：
+元数据文件格式:
 {
     "file_info": {...},           # 文件基础信息
     "business_metadata": {...},   # 业务元数据
     "collection_info": {...},     # 采集信息
     "data_quality": {...},        # 数据质量
-    "processing_history": [...]   # 处理历史（数据血缘）
+    "processing_history": [...]   # 处理历史(数据血缘)
 }
 """
 
@@ -43,9 +43,9 @@ class MetadataManager:
         
         Args:
             file_path: 数据文件路径
-            business_metadata: 业务元数据（platform, domain, granularity等）
-            collection_info: 采集信息（method, account, shop_id等）
-            data_quality: 数据质量评分（可选）
+            business_metadata: 业务元数据(platform, domain, granularity等)
+            collection_info: 采集信息(method, account, shop_id等)
+            data_quality: 数据质量评分(可选)
             
         Returns:
             元数据文件路径
@@ -133,13 +133,13 @@ class MetadataManager:
         **kwargs
     ) -> None:
         """
-        更新处理阶段（追加到processing_history）
+        更新处理阶段(追加到processing_history)
         
         Args:
             meta_path: 元数据文件路径
-            stage: 处理阶段（raw/staging/curated/quarantine）
-            status: 状态（received/validated/ingested/failed）
-            **kwargs: 额外信息（如rows_imported, table等）
+            stage: 处理阶段(raw/staging/curated/quarantine)
+            status: 状态(received/validated/ingested/failed)
+            **kwargs: 额外信息(如rows_imported, table等)
             
         Examples:
             >>> MetadataManager.update_processing_stage(
@@ -219,7 +219,7 @@ class MetadataManager:
             meta_path: 元数据文件路径
             
         Returns:
-            当前阶段（raw/staging/curated/quarantine）
+            当前阶段(raw/staging/curated/quarantine)
         """
         try:
             metadata = MetadataManager.read_meta_file(meta_path)
@@ -244,7 +244,7 @@ class MetadataManager:
             meta_path: 元数据文件路径
             
         Returns:
-            质量分数（0-100），如果不存在返回None
+            质量分数(0-100),如果不存在返回None
         """
         try:
             metadata = MetadataManager.read_meta_file(meta_path)
@@ -266,7 +266,7 @@ class MetadataManager:
             file_paths: 文件路径列表
             business_metadata_fn: 业务元数据生成函数
             collection_info_fn: 采集信息生成函数
-            data_quality_fn: 数据质量评估函数（可选）
+            data_quality_fn: 数据质量评估函数(可选)
             
         Returns:
             元数据文件路径列表
@@ -295,16 +295,16 @@ class MetadataManager:
 
 # 便捷函数
 def create_meta_file(file_path: Path, **kwargs) -> Path:
-    """便捷函数：创建元数据文件"""
+    """便捷函数:创建元数据文件"""
     return MetadataManager.create_meta_file(file_path, **kwargs)
 
 
 def read_meta_file(meta_path: Path) -> Dict:
-    """便捷函数：读取元数据文件"""
+    """便捷函数:读取元数据文件"""
     return MetadataManager.read_meta_file(meta_path)
 
 
 def update_processing_stage(meta_path: Path, stage: str, status: str, **kwargs) -> None:
-    """便捷函数：更新处理阶段"""
+    """便捷函数:更新处理阶段"""
     return MetadataManager.update_processing_stage(meta_path, stage, status, **kwargs)
 

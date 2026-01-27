@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-01 补充：表位于 core schema
+
+若库中实际表为 **`core.platform_accounts`**（如对象浏览器中所见），而 `search_path` 为 `public,...` 时，未显式指定 schema 的 ORM 会优先查 `public.platform_accounts`，可能导致账号列表为空或「加载账号列表失败」。已在 `modules/core/db/schema.py` 的 `PlatformAccount` 上设置 `__table_args__ = ({"schema": "core"}, ...)`，使所有账号相关查询统一走 `core.platform_accounts`。无需修改 `account_management`、`account_loader_service` 等调用方。
+
+---
+
 ## 🔍 问题诊断
 
 ### 发现的根本原因

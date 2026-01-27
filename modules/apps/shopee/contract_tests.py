@@ -2,16 +2,16 @@
 # -*- coding: utf-8 -*-
 
 """
-Shopee 平台契约测试（最小、无外网依赖）
+Shopee 平台契约测试(最小、无外网依赖)
 
-目标：
+目标:
 - 导入统一登录服务与验证码处理器不产生导入期副作用
 - 使用 FakePage 验证 LoginService.ensure_logged_in("shopee", ...) 的最小行为
 
-运行方式：
+运行方式:
     python modules/apps/shopee/contract_tests.py
 
-成功标准：
+成功标准:
 - 全部断言通过且脚本退出码为 0
 """
 

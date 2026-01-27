@@ -15,7 +15,7 @@ class WebSocketService:
     """
     WebSocket服务
     
-    封装WebSocket连接管理器，提供采集任务状态推送功能
+    封装WebSocket连接管理器,提供采集任务状态推送功能
     """
     
     def __init__(self):
@@ -36,7 +36,7 @@ class WebSocketService:
             task_id: 任务ID
             progress: 进度百分比 (0-100)
             message: 进度消息
-            current_domain: 当前采集的数据域（v4.7.0）
+            current_domain: 当前采集的数据域(v4.7.0)
             status: 任务状态
         """
         try:
@@ -47,7 +47,7 @@ class WebSocketService:
                 status=status
             )
             
-            # v4.7.0: 如果提供了current_domain，发送额外的域级别更新
+            # v4.7.0: 如果提供了current_domain,发送额外的域级别更新
             if current_domain:
                 await self.manager.broadcast_to_task(task_id, {
                     "type": "domain_progress",
@@ -99,9 +99,9 @@ class WebSocketService:
             task_id: 任务ID
             status: 最终状态 (completed/partial_success/failed/cancelled)
             files_collected: 采集文件数
-            error_message: 错误信息（如果有）
-            completed_domains: 成功的数据域列表（v4.7.0）
-            failed_domains: 失败的数据域列表（v4.7.0）
+            error_message: 错误信息(如果有)
+            completed_domains: 成功的数据域列表(v4.7.0)
+            failed_domains: 失败的数据域列表(v4.7.0)
         """
         try:
             # 发送基础完成消息
@@ -153,7 +153,7 @@ class WebSocketService:
         获取WebSocket连接数
         
         Args:
-            task_id: 任务ID（可选）
+            task_id: 任务ID(可选)
         
         Returns:
             int: 连接数

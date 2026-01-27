@@ -100,7 +100,7 @@ class PerformanceMonitor:
             except Exception:
                 active_connections = 0
             
-            # 系统负载（Linux/Unix）
+            # 系统负载(Linux/Unix)
             try:
                 load_avg = psutil.getloadavg()[0] if hasattr(psutil, 'getloadavg') else 0.0
             except Exception:
@@ -147,7 +147,7 @@ class PerformanceMonitor:
             daemon=True
         )
         self.monitor_thread.start()
-        print(f"性能监控已启动，监控间隔: {interval}秒")
+        print(f"性能监控已启动,监控间隔: {interval}秒")
     
     def stop_monitoring(self):
         """停止性能监控"""

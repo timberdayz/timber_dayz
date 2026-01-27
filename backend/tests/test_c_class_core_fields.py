@@ -3,7 +3,7 @@
 """
 C类数据核心字段验证和数据质量检查单元测试
 
-测试内容：
+测试内容:
 1. 核心字段验证逻辑
 2. 数据质量检查服务
 3. 货币策略验证
@@ -19,14 +19,15 @@ from unittest.mock import Mock, patch
 
 from backend.services.c_class_data_validator import CClassDataValidator, get_c_class_data_validator
 from backend.services.currency_validator import CurrencyValidator, get_currency_validator
-from modules.core.db import FactOrder, FactProductMetric, FieldMappingDictionary
+# [DELETED] v4.19.0: FactOrder 已删除
+from modules.core.db import FactProductMetric, FieldMappingDictionary
 
 
 class TestCClassDataValidator:
     """C类数据完整性检查服务测试"""
     
     def test_check_b_class_completeness_orders_complete(self):
-        """测试订单数据完整性检查（完整数据）"""
+        """测试订单数据完整性检查(完整数据)"""
         # 模拟数据库会话
         db = Mock(spec=Session)
         
@@ -62,11 +63,11 @@ class TestCClassDataValidator:
         assert result["data_quality_score"] > 0
     
     def test_check_b_class_completeness_orders_missing_fields(self):
-        """测试订单数据完整性检查（缺失字段）"""
+        """测试订单数据完整性检查(缺失字段)"""
         # 模拟数据库会话
         db = Mock(spec=Session)
         
-        # 模拟订单数据（缺失total_amount_rmb字段）
+        # 模拟订单数据(缺失total_amount_rmb字段)
         mock_order = Mock()
         mock_order.order_id = "ORD001"
         mock_order.order_date_local = date(2025, 1, 31)
@@ -97,7 +98,7 @@ class TestCClassDataValidator:
         assert len(result["warnings"]) > 0
     
     def test_check_b_class_completeness_products_complete(self):
-        """测试产品数据完整性检查（完整数据）"""
+        """测试产品数据完整性检查(完整数据)"""
         # 模拟数据库会话
         db = Mock(spec=Session)
         
@@ -133,11 +134,11 @@ class TestCClassDataValidator:
         assert len(result["missing_fields"]) == 0
     
     def test_check_b_class_completeness_products_missing_visitors(self):
-        """测试产品数据完整性检查（缺失访客数）"""
+        """测试产品数据完整性检查(缺失访客数)"""
         # 模拟数据库会话
         db = Mock(spec=Session)
         
-        # 模拟产品数据（缺失unique_visitors字段）
+        # 模拟产品数据(缺失unique_visitors字段)
         mock_product = Mock()
         mock_product.unique_visitors = None  # 缺失字段
         mock_product.order_count = 50
@@ -169,7 +170,7 @@ class TestCClassDataValidator:
         # 模拟数据库会话
         db = Mock(spec=Session)
         
-        # 模拟数据查询（简化版）
+        # 模拟数据查询(简化版)
         db.execute.return_value.scalars.return_value.all.return_value = []
         
         # 创建验证器
@@ -196,7 +197,7 @@ class TestCurrencyValidator:
     """货币字段验证服务测试"""
     
     def test_validate_currency_policy_orders_cny(self):
-        """测试订单域CNY货币策略验证（通过）"""
+        """测试订单域CNY货币策略验证(通过)"""
         validator = CurrencyValidator()
         
         result = validator.validate_currency_policy(
@@ -209,7 +210,7 @@ class TestCurrencyValidator:
         assert result.error is None
     
     def test_validate_currency_policy_orders_non_cny(self):
-        """测试订单域非CNY货币策略验证（失败）"""
+        """测试订单域非CNY货币策略验证(失败)"""
         validator = CurrencyValidator()
         
         # 模拟检测到SGD货币符号
@@ -224,7 +225,7 @@ class TestCurrencyValidator:
         assert "非CNY货币" in result.error or "SGD" in result.error
     
     def test_validate_currency_policy_products_no_currency(self):
-        """测试产品域无货币策略验证（通过）"""
+        """测试产品域无货币策略验证(通过)"""
         validator = CurrencyValidator()
         
         result = validator.validate_currency_policy(
@@ -236,7 +237,7 @@ class TestCurrencyValidator:
         assert result.valid is True
     
     def test_validate_currency_policy_products_currency_field(self):
-        """测试产品域货币字段验证（失败）"""
+        """测试产品域货币字段验证(失败)"""
         validator = CurrencyValidator()
         
         result = validator.validate_currency_policy(

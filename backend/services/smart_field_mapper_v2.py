@@ -2,9 +2,9 @@
 """
 智能字段映射器 v2.0 - 阶段1优化版本
 
-改进点：
-1. 避免列名重复映射（冲突检测）
-2. 增强智能匹配算法（中英文同义词）
+改进点:
+1. 避免列名重复映射(冲突检测)
+2. 增强智能匹配算法(中英文同义词)
 3. 优化置信度计算
 4. 支持拼音匹配
 """
@@ -18,7 +18,7 @@ class SmartFieldMapperV2:
     """智能字段映射器 v2.0"""
     
     def __init__(self):
-        # 中英文同义词词典（扩展版）
+        # 中英文同义词词典(扩展版)
         self.synonyms = {
             # 商品相关
             "product_id": ["商品id", "产品id", "商品编号", "product_id", "item_id", "sku", "编号"],
@@ -59,7 +59,7 @@ class SmartFieldMapperV2:
             "order_status": ["订单状态", "order_status"],
         }
         
-        # 拼音映射（常用字段）
+        # 拼音映射(常用字段)
         self.pinyin_map = {
             "shangpin": "product",
             "jiage": "price",
@@ -75,12 +75,12 @@ class SmartFieldMapperV2:
         source_platform: str = "shopee"
     ) -> Dict[str, Dict[str, any]]:
         """
-        智能字段映射（v2.0 - 无冲突版本）
+        智能字段映射(v2.0 - 无冲突版本)
         
         Args:
             columns: Excel列名列表
-            data_domain: 数据域（products/orders/analytics等）
-            source_platform: 数据源平台（shopee/tiktok等）
+            data_domain: 数据域(products/orders/analytics等)
+            source_platform: 数据源平台(shopee/tiktok等)
         
         Returns:
             映射结果字典
@@ -174,12 +174,12 @@ class SmartFieldMapperV2:
         column_clean = re.sub(r'[^\w\u4e00-\u9fff]', '', column)  # 移除特殊字符
         
         for std_field in standard_fields.keys():
-            # 方法1: 精确匹配（100%）
+            # 方法1: 精确匹配(100%)
             if column_lower == std_field.lower():
                 candidates.append((std_field, 1.0, "exact_match"))
                 continue
             
-            # 方法2: 同义词匹配（95%）
+            # 方法2: 同义词匹配(95%)
             if std_field in self.synonyms:
                 for synonym in self.synonyms[std_field]:
                     synonym_clean = synonym.lower().strip()
@@ -187,7 +187,7 @@ class SmartFieldMapperV2:
                         candidates.append((std_field, 0.95, "synonym_match"))
                         break
             
-            # 方法3: 包含匹配（80-90%）
+            # 方法3: 包含匹配(80-90%)
             if std_field.lower() in column_lower:
                 confidence = 0.9 if len(std_field) > 3 else 0.8
                 candidates.append((std_field, confidence, "contains_match"))
@@ -195,13 +195,13 @@ class SmartFieldMapperV2:
                 confidence = 0.85
                 candidates.append((std_field, confidence, "contained_match"))
             
-            # 方法4: 模糊相似度匹配（70-85%）
+            # 方法4: 模糊相似度匹配(70-85%)
             similarity = SequenceMatcher(None, column_lower, std_field.lower()).ratio()
             if similarity > 0.7:
                 confidence = min(0.85, similarity)
                 candidates.append((std_field, confidence, "fuzzy_match"))
         
-        # 排序：置信度从高到低
+        # 排序:置信度从高到低
         candidates.sort(key=lambda x: x[1], reverse=True)
         
         return candidates
@@ -213,15 +213,15 @@ class SmartFieldMapperV2:
         """
         解决映射冲突
         
-        策略：
+        策略:
         1. 每个标准字段只能被映射一次
-        2. 当多个原始列映射到同一标准字段时，选择置信度最高的
+        2. 当多个原始列映射到同一标准字段时,选择置信度最高的
         3. 其他列映射为"未映射"或次优选择
         """
-        # 反向映射：标准字段 -> (原始列, 置信度, 方法)
+        # 反向映射:标准字段 -> (原始列, 置信度, 方法)
         reverse_map = {}
         
-        # 第一轮：收集所有映射并找出冲突
+        # 第一轮:收集所有映射并找出冲突
         for orig_col, cands in candidates.items():
             if not cands:
                 continue
@@ -234,10 +234,10 @@ class SmartFieldMapperV2:
                 # 冲突！比较置信度
                 existing_col, existing_conf, existing_method = reverse_map[best_std]
                 if best_conf > existing_conf:
-                    # 新的更好，替换
+                    # 新的更好,替换
                     reverse_map[best_std] = (orig_col, best_conf, best_method)
         
-        # 第二轮：构建最终映射
+        # 第二轮:构建最终映射
         final_mappings = {}
         mapped_standards = set(reverse_map.keys())
         
@@ -320,7 +320,7 @@ class SmartFieldMapperV2:
 
 # 向后兼容的导出
 def smart_map_fields(columns: List[str], data_domain: str = "products", source_platform: str = "shopee") -> Dict:
-    """便捷函数：智能字段映射"""
+    """便捷函数:智能字段映射"""
     mapper = SmartFieldMapperV2()
     return mapper.map_fields(columns, data_domain, source_platform)
 
@@ -330,14 +330,14 @@ if __name__ == "__main__":
     # 测试用例
     mapper = SmartFieldMapperV2()
     
-    # 场景1：shopee商品数据
+    # 场景1:shopee商品数据
     columns = [
         "商品名称", "商品", "SKU", "库存数", "价格", 
         "销量", "浏览量", "评分", "状态", "商品ID"
     ]
     
     print("="*60)
-    print("测试场景1：Shopee商品数据")
+    print("测试场景1:Shopee商品数据")
     print("="*60)
     mappings = mapper.map_fields(columns, "products", "shopee")
     

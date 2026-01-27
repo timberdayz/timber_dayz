@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
-限流配置管理 API（Phase 3）
+限流配置管理 API(Phase 3)
 
-用途：
+用途:
 - 查询限流配置
 - 更新限流配置
 - 配置变更审计
 
-v4.19.4 新增：Phase 3 数据库配置支持
+v4.19.4 新增:Phase 3 数据库配置支持
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -51,16 +51,16 @@ class RateLimitConfigResponse(BaseModel):
 
 class RateLimitConfigCreate(BaseModel):
     """创建限流配置请求模型"""
-    role_code: str = Field(..., description="角色代码（admin/manager/finance/operator/normal/anonymous）")
-    endpoint_type: str = Field(..., description="端点类型（default/data_sync/auth）")
-    limit_value: str = Field(..., description="限流值（如 '200/minute'）")
+    role_code: str = Field(..., description="角色代码(admin/manager/finance/operator/normal/anonymous)")
+    endpoint_type: str = Field(..., description="端点类型(default/data_sync/auth)")
+    limit_value: str = Field(..., description="限流值(如 '200/minute')")
     description: Optional[str] = Field(None, description="配置说明")
     is_active: bool = Field(True, description="是否启用")
 
 
 class RateLimitConfigUpdate(BaseModel):
     """更新限流配置请求模型"""
-    limit_value: Optional[str] = Field(None, description="限流值（如 '200/minute'）")
+    limit_value: Optional[str] = Field(None, description="限流值(如 '200/minute')")
     is_active: Optional[bool] = Field(None, description="是否启用")
     description: Optional[str] = Field(None, description="配置说明")
 
@@ -84,7 +84,7 @@ async def list_rate_limit_configs(
     """
     查询限流配置列表
     
-    权限：仅管理员
+    权限:仅管理员
     """
     try:
         # 构建查询条件
@@ -125,7 +125,7 @@ async def get_rate_limit_config_by_role(
     """
     查询指定角色的限流配置
     
-    权限：仅管理员
+    权限:仅管理员
     """
     try:
         stmt = select(DimRateLimitConfig).where(
@@ -156,7 +156,7 @@ async def create_rate_limit_config(
     """
     创建限流配置
     
-    权限：仅管理员
+    权限:仅管理员
     """
     try:
         # 检查是否已存在
@@ -232,7 +232,7 @@ async def update_rate_limit_config(
     """
     更新限流配置
     
-    权限：仅管理员
+    权限:仅管理员
     """
     try:
         # 查询配置
@@ -249,7 +249,7 @@ async def update_rate_limit_config(
                 detail=f"角色 {role_code} 的 {endpoint_type} 端点配置不存在"
             )
         
-        # 保存旧值（用于审计）
+        # 保存旧值(用于审计)
         old_limit_value = config.limit_value
         old_is_active = config.is_active
         
@@ -310,7 +310,7 @@ async def delete_rate_limit_config(
     """
     删除限流配置
     
-    权限：仅管理员
+    权限:仅管理员
     """
     try:
         # 查询配置
@@ -375,7 +375,7 @@ async def refresh_config_cache(
     """
     刷新限流配置缓存
     
-    权限：仅管理员
+    权限:仅管理员
     """
     try:
         await refresh_rate_limit_config_cache(db)
@@ -409,10 +409,10 @@ async def _create_audit_log(
     
     Args:
         db: 数据库会话
-        config_id: 配置ID（删除时为None）
+        config_id: 配置ID(删除时为None)
         role_code: 角色代码
         endpoint_type: 端点类型
-        action_type: 操作类型（create/update/delete）
+        action_type: 操作类型(create/update/delete)
         old_limit_value: 旧限流值
         new_limit_value: 新限流值
         old_is_active: 旧启用状态
@@ -447,5 +447,5 @@ async def _create_audit_log(
         
     except Exception as e:
         logger.error(f"[RateLimitConfig] 创建审计日志失败: {e}")
-        # 审计日志失败不影响主操作，只记录错误
+        # 审计日志失败不影响主操作,只记录错误
 

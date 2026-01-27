@@ -3,7 +3,7 @@
 """
 系统配置API - v4.3.5 + v4.20.0
 提供系统级配置和常量
-v4.20.0新增：系统基础配置、数据库配置API
+v4.20.0新增:系统基础配置、数据库配置API
 """
 
 from fastapi import APIRouter, Depends
@@ -27,7 +27,7 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/system", tags=["系统配置"])
 
-# 限流配置（如果可用）
+# 限流配置(如果可用)
 try:
     from backend.middleware.rate_limiter import role_based_rate_limit
 except ImportError:
@@ -37,7 +37,7 @@ except ImportError:
 @router.get("/platforms")
 async def get_platforms():
     """
-    获取支持的平台列表（白名单）
+    获取支持的平台列表(白名单)
     
     Returns:
         list: 平台列表
@@ -48,7 +48,7 @@ async def get_platforms():
 @router.get("/data-domains")
 async def get_data_domains():
     """
-    获取支持的数据域列表（白名单）
+    获取支持的数据域列表(白名单)
     
     Returns:
         list: 数据域列表
@@ -59,7 +59,7 @@ async def get_data_domains():
 @router.get("/granularities")
 async def get_granularities():
     """
-    获取支持的粒度列表（白名单）
+    获取支持的粒度列表(白名单)
     
     Returns:
         list: 粒度列表
@@ -70,7 +70,7 @@ async def get_granularities():
 @router.get("/constants")
 async def get_all_constants():
     """
-    获取所有系统常量（一次性获取）
+    获取所有系统常量(一次性获取)
     
     Returns:
         dict: 所有常量
@@ -180,7 +180,7 @@ async def get_database_config(
             database=config.get("database", ""),
             username=config.get("username", ""),
             password=config.get("password", "***"),  # 密码已隐藏
-            connection_url=config.get("connection_url", ""),  # 修复：添加缺失的 connection_url 字段
+            connection_url=config.get("connection_url", ""),  # 修复:添加缺失的 connection_url 字段
             updated_at=config.get("updated_at"),
             updated_by=config.get("updated_by")
         )
@@ -202,7 +202,7 @@ async def update_database_config(
     current_user = Depends(require_admin)
 ):
     """
-    更新数据库配置（保存为pending状态，需要手动应用）
+    更新数据库配置(保存为pending状态,需要手动应用)
     
     需要管理员权限
     """
@@ -219,7 +219,7 @@ async def update_database_config(
             database=updated_config.get("database", ""),
             username=updated_config.get("username", ""),
             password="***",  # 密码已隐藏
-            connection_url=updated_config.get("connection_url", ""),  # 修复：添加缺失的 connection_url 字段
+            connection_url=updated_config.get("connection_url", ""),  # 修复:添加缺失的 connection_url 字段
             updated_at=updated_config.get("updated_at"),
             updated_by=updated_config.get("updated_by")
         )

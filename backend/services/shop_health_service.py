@@ -2,19 +2,19 @@
 # -*- coding: utf-8 -*-
 
 """
-店铺健康度评分服务（v4.11.0新增）
+店铺健康度评分服务(v4.11.0新增)
 
-功能：
-1. 计算店铺健康度评分（0-100分）
-2. 计算各项得分（GMV、转化、库存、服务）
+功能:
+1. 计算店铺健康度评分(0-100分)
+2. 计算各项得分(GMV、转化、库存、服务)
 3. 评估风险等级
 4. 生成店铺预警
 
-评分规则：
-- GMV得分（0-30分）：基于GMV排名和增长率
-- 转化得分（0-25分）：基于转化率排名
-- 库存得分（0-25分）：基于库存周转率
-- 服务得分（0-20分）：基于客户满意度
+评分规则:
+- GMV得分(0-30分):基于GMV排名和增长率
+- 转化得分(0-25分):基于转化率排名
+- 库存得分(0-25分):基于库存周转率
+- 服务得分(0-20分):基于客户满意度
 
 总分 = GMV得分 + 转化得分 + 库存得分 + 服务得分
 """
@@ -28,7 +28,7 @@ import math
 from modules.core.db import (
     ShopHealthScore,
     ShopAlert,
-    FactOrder,
+    # [DELETED] v4.19.0: FactOrder 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
     FactProductMetric,
     DimShop
 )
@@ -53,13 +53,13 @@ class ShopHealthService:
         """
         计算店铺健康度评分
         
-        参数：
+        参数:
             platform_code: 平台代码
             shop_id: 店铺ID
             metric_date: 指标日期
-            granularity: 粒度（daily/weekly/monthly）
+            granularity: 粒度(daily/weekly/monthly)
         
-        返回：
+        返回:
             {
                 "health_score": 85.5,
                 "gmv_score": 28.0,
@@ -94,7 +94,7 @@ class ShopHealthService:
             # 1. 获取店铺基础指标
             shop_metrics = self._get_shop_metrics(platform_code, shop_id, start_date, end_date)
             
-            # 2. 获取所有店铺的指标（用于排名）
+            # 2. 获取所有店铺的指标(用于排名)
             all_shops_metrics = self._get_all_shops_metrics(start_date, end_date)
             
             # 3. 计算各项得分
@@ -183,22 +183,11 @@ class ShopHealthService:
         end_date: date
     ) -> Dict[str, Any]:
         """获取店铺基础指标"""
-        # 从fact_orders计算GMV和订单数
-        order_result = self.db.execute(
-            select(
-                func.coalesce(func.sum(FactOrder.total_amount_rmb), 0).label("gmv"),
-                func.count(FactOrder.order_id).label("order_count")
-            ).where(
-                FactOrder.platform_code == platform_code,
-                FactOrder.shop_id == shop_id,
-                FactOrder.order_date_local >= start_date,
-                FactOrder.order_date_local <= end_date,
-                FactOrder.order_status.in_(["completed", "paid"])
-            )
-        ).first()
-        
-        gmv = float(order_result.gmv or 0)
-        order_count = int(order_result.order_count or 0)
+        # [DELETED] v4.19.0: FactOrder 已删除,订单数据现在在 b_class.fact_{platform}_orders_{granularity}
+        # [TODO] 需要查询 b_class schema 下的分表来获取订单数据
+        # 暂时返回0,待实现新的查询逻辑
+        gmv = 0.0
+        order_count = 0
         
         # 从fact_product_metrics计算转化率和访客数
         metric_result = self.db.execute(
@@ -220,7 +209,7 @@ class ShopHealthService:
         # 计算转化率
         conversion_rate = (order_count / uv * 100) if uv > 0 else 0.0
         
-        # 计算库存周转率（年化）
+        # 计算库存周转率(年化)
         # 库存周转率 = 365 / 库存周转天数
         # 库存周转天数 = 可用库存 / (近30天日均销量)
         # 近30天日均销量 = sales_volume_30d / 30
@@ -244,12 +233,12 @@ class ShopHealthService:
             # 库存周转天数 = 可用库存 / (近30天日均销量)
             daily_avg_sales = sales_volume_30d / 30.0
             inventory_turnover_days = total_available_stock / daily_avg_sales if daily_avg_sales > 0 else 999.0
-            # 库存周转率（年化）= 365 / 库存周转天数
+            # 库存周转率(年化)= 365 / 库存周转天数
             inventory_turnover = 365.0 / inventory_turnover_days if inventory_turnover_days > 0 else 0.0
         else:
             inventory_turnover = 0.0
         
-        # 计算客户满意度（从fact_product_metrics的rating字段计算平均值）
+        # 计算客户满意度(从fact_product_metrics的rating字段计算平均值)
         rating_result = self.db.execute(
             select(
                 func.coalesce(func.avg(FactProductMetric.rating), 0).label("avg_rating"),
@@ -282,20 +271,11 @@ class ShopHealthService:
         start_date: date,
         end_date: date
     ) -> List[Dict[str, Any]]:
-        """获取所有店铺的指标（用于排名）"""
-        # 从fact_orders聚合所有店铺的GMV
-        shops_gmv = self.db.execute(
-            select(
-                FactOrder.platform_code,
-                FactOrder.shop_id,
-                func.coalesce(func.sum(FactOrder.total_amount_rmb), 0).label("gmv"),
-                func.count(FactOrder.order_id).label("order_count")
-            ).where(
-                FactOrder.order_date_local >= start_date,
-                FactOrder.order_date_local <= end_date,
-                FactOrder.order_status.in_(["completed", "paid"])
-            ).group_by(FactOrder.platform_code, FactOrder.shop_id)
-        ).all()
+        """获取所有店铺的指标(用于排名)"""
+        # [DELETED] v4.19.0: FactOrder 已删除,订单数据现在在 b_class.fact_{platform}_orders_{granularity}
+        # [TODO] 需要查询 b_class schema 下的分表来获取所有店铺的订单数据
+        # 暂时返回空列表,待实现新的查询逻辑
+        shops_gmv = []
         
         # 从fact_product_metrics聚合所有店铺的UV
         shops_uv = self.db.execute(
@@ -342,7 +322,7 @@ class ShopHealthService:
         shop_metrics: Dict[str, Any],
         all_shops_metrics: List[Dict[str, Any]]
     ) -> float:
-        """计算GMV得分（0-30分）"""
+        """计算GMV得分(0-30分)"""
         if not all_shops_metrics:
             return 0.0
         
@@ -358,8 +338,8 @@ class ShopHealthService:
                 rank = i + 1
                 break
         
-        # 计算得分：排名越靠前得分越高
-        # 前10%：30分，前30%：25分，前50%：20分，前70%：15分，其他：10分
+        # 计算得分:排名越靠前得分越高
+        # 前10%:30分,前30%:25分,前50%:20分,前70%:15分,其他:10分
         percentile = (rank / total_shops) * 100
         
         if percentile <= 10:
@@ -378,7 +358,7 @@ class ShopHealthService:
         shop_metrics: Dict[str, Any],
         all_shops_metrics: List[Dict[str, Any]]
     ) -> float:
-        """计算转化得分（0-25分）"""
+        """计算转化得分(0-25分)"""
         if not all_shops_metrics:
             return 0.0
         
@@ -394,7 +374,7 @@ class ShopHealthService:
                 rank = i + 1
                 break
         
-        # 计算得分：排名越靠前得分越高
+        # 计算得分:排名越靠前得分越高
         percentile = (rank / total_shops) * 100
         
         if percentile <= 10:
@@ -413,9 +393,9 @@ class ShopHealthService:
         shop_metrics: Dict[str, Any],
         all_shops_metrics: List[Dict[str, Any]]
     ) -> float:
-        """计算库存得分（0-25分）"""
+        """计算库存得分(0-25分)"""
         # TODO: 需要根据实际库存周转率数据计算
-        # 临时实现：基于库存周转率阈值
+        # 临时实现:基于库存周转率阈值
         inventory_turnover = shop_metrics.get("inventory_turnover", 0.0)
         
         if inventory_turnover >= 15:
@@ -434,8 +414,8 @@ class ShopHealthService:
         shop_metrics: Dict[str, Any],
         all_shops_metrics: List[Dict[str, Any]]
     ) -> float:
-        """计算服务得分（0-20分）"""
-        # 基于客户满意度（0-5分）
+        """计算服务得分(0-20分)"""
+        # 基于客户满意度(0-5分)
         customer_satisfaction = shop_metrics.get("customer_satisfaction", 0.0)
         
         # 转换为0-20分
@@ -524,7 +504,7 @@ class ShopHealthService:
                     "alert_type": "health_score_critical",
                     "alert_level": "critical",
                     "title": "店铺健康度严重不足",
-                    "message": f"店铺健康度评分仅为{health_score.health_score:.1f}分，需要立即关注",
+                    "message": f"店铺健康度评分仅为{health_score.health_score:.1f}分,需要立即关注",
                     "metric_value": health_score.health_score,
                     "threshold": 60.0,
                     "metric_unit": "分"
@@ -534,7 +514,7 @@ class ShopHealthService:
                     "alert_type": "health_score_warning",
                     "alert_level": "warning",
                     "title": "店铺健康度偏低",
-                    "message": f"店铺健康度评分为{health_score.health_score:.1f}分，建议关注",
+                    "message": f"店铺健康度评分为{health_score.health_score:.1f}分,建议关注",
                     "metric_value": health_score.health_score,
                     "threshold": 70.0,
                     "metric_unit": "分"
@@ -546,7 +526,7 @@ class ShopHealthService:
                     "alert_type": "conversion_rate_critical",
                     "alert_level": "critical",
                     "title": "转化率严重不足",
-                    "message": f"店铺转化率仅为{health_score.conversion_rate:.2f}%，远低于行业平均水平",
+                    "message": f"店铺转化率仅为{health_score.conversion_rate:.2f}%,远低于行业平均水平",
                     "metric_value": health_score.conversion_rate,
                     "threshold": 2.0,
                     "metric_unit": "%"
@@ -556,7 +536,7 @@ class ShopHealthService:
                     "alert_type": "conversion_rate_warning",
                     "alert_level": "warning",
                     "title": "转化率偏低",
-                    "message": f"店铺转化率为{health_score.conversion_rate:.2f}%，建议优化",
+                    "message": f"店铺转化率为{health_score.conversion_rate:.2f}%,建议优化",
                     "metric_value": health_score.conversion_rate,
                     "threshold": 3.0,
                     "metric_unit": "%"
@@ -568,7 +548,7 @@ class ShopHealthService:
                     "alert_type": "inventory_turnover_warning",
                     "alert_level": "warning",
                     "title": "库存周转率偏低",
-                    "message": f"店铺库存周转率为{health_score.inventory_turnover:.1f}次，可能存在滞销风险",
+                    "message": f"店铺库存周转率为{health_score.inventory_turnover:.1f}次,可能存在滞销风险",
                     "metric_value": health_score.inventory_turnover,
                     "threshold": 8.0,
                     "metric_unit": "次"

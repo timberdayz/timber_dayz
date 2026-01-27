@@ -23,11 +23,11 @@ class MaintenanceService:
     """系统维护服务类"""
     
     def __init__(self, db: AsyncSession):
-        """初始化服务（仅支持异步）"""
+        """初始化服务(仅支持异步)"""
         self.db = db
         self.settings = get_settings()
         
-        # Docker环境路径配置（容器内路径）
+        # Docker环境路径配置(容器内路径)
         self.temp_dir = Path("/app/temp")
         self.data_dir = Path("/app/data")
         self.logs_dir = Path("/app/logs")
@@ -48,7 +48,7 @@ class MaintenanceService:
             import redis
             
             redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
-            # 如果REDIS_URL中没有密码，尝试从REDIS_PASSWORD读取
+            # 如果REDIS_URL中没有密码,尝试从REDIS_PASSWORD读取
             if "@" not in redis_url.split("://")[1] and os.getenv("REDIS_PASSWORD"):
                 from urllib.parse import urlparse
                 parsed = urlparse(redis_url)
@@ -58,7 +58,7 @@ class MaintenanceService:
                 else:
                     redis_url = f"redis://:{password}@{parsed.hostname}:6379{parsed.path}"
             
-            # Docker环境：使用redis服务名连接
+            # Docker环境:使用redis服务名连接
             r = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
             r.ping()
             
@@ -74,11 +74,11 @@ class MaintenanceService:
             r.close()
             
         except ImportError:
-            logger.warning("redis库未安装，无法获取Redis状态")
+            logger.warning("redis库未安装,无法获取Redis状态")
         except Exception as e:
             logger.warning(f"获取Redis状态失败: {e}")
         
-        # 应用缓存大小（简化实现，实际可以统计应用内缓存对象）
+        # 应用缓存大小(简化实现,实际可以统计应用内缓存对象)
         status["app_cache_size"] = 0  # TODO: 实现应用缓存统计
         
         return status
@@ -101,7 +101,7 @@ class MaintenanceService:
             import redis
             
             redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
-            # 如果REDIS_URL中没有密码，尝试从REDIS_PASSWORD读取
+            # 如果REDIS_URL中没有密码,尝试从REDIS_PASSWORD读取
             if "@" not in redis_url.split("://")[1] and os.getenv("REDIS_PASSWORD"):
                 from urllib.parse import urlparse
                 parsed = urlparse(redis_url)
@@ -127,7 +127,7 @@ class MaintenanceService:
             
             r.close()
             
-            # 应用缓存清理（TODO: 实现应用内缓存清理）
+            # 应用缓存清理(TODO: 实现应用内缓存清理)
             if cache_type in ["all", "app"]:
                 # 这里可以清理应用内的缓存对象
                 pass
@@ -135,7 +135,7 @@ class MaintenanceService:
             return cleared_keys, freed_memory
             
         except ImportError:
-            logger.warning("redis库未安装，无法清理Redis缓存")
+            logger.warning("redis库未安装,无法清理Redis缓存")
             return 0, None
         except Exception as e:
             logger.error(f"清理缓存失败: {e}", exc_info=True)
@@ -161,7 +161,7 @@ class MaintenanceService:
             result = await self.db.execute(select(func.count(SystemLog.id)))
             status["system_logs_count"] = result.scalar() or 0
             
-            # 任务日志统计（TODO: 如果有任务日志表）
+            # 任务日志统计(TODO: 如果有任务日志表)
             # result = await self.db.execute(select(func.count(CollectionTaskLog.id)))
             # status["task_logs_count"] = result.scalar() or 0
             
@@ -171,7 +171,7 @@ class MaintenanceService:
                 status["temp_files_count"] = len([f for f in temp_files if f.is_file()])
                 status["temp_files_size"] = sum(f.stat().st_size for f in temp_files if f.is_file())
             
-            # 临时表数据统计（TODO: 如果有staging表）
+            # 临时表数据统计(TODO: 如果有staging表)
             # status["staging_data_count"] = ...
             
         except Exception as e:
@@ -196,7 +196,7 @@ class MaintenanceService:
         
         try:
             if clean_type == "system_logs":
-                # 清理系统日志（保留最近N天）
+                # 清理系统日志(保留最近N天)
                 cutoff_time = datetime.utcnow() - timedelta(days=retention_days)
                 
                 # 查询要删除的记录数
@@ -215,10 +215,10 @@ class MaintenanceService:
                     await self.db.execute(delete_stmt)
                     await self.db.commit()
                 
-                logger.info(f"清理系统日志: 删除 {deleted_count} 条记录（保留最近{retention_days}天）")
+                logger.info(f"清理系统日志: 删除 {deleted_count} 条记录(保留最近{retention_days}天)")
                 
             elif clean_type == "temp_files":
-                # 清理临时文件（保留最近N天）
+                # 清理临时文件(保留最近N天)
                 cutoff_time = datetime.utcnow() - timedelta(days=retention_days)
                 
                 if self.temp_dir.exists():
@@ -231,14 +231,14 @@ class MaintenanceService:
                                 deleted_count += 1
                                 freed_space += file_size
                 
-                logger.info(f"清理临时文件: 删除 {deleted_count} 个文件，释放 {freed_space} 字节")
+                logger.info(f"清理临时文件: 删除 {deleted_count} 个文件,释放 {freed_space} 字节")
                 
             elif clean_type == "task_logs":
-                # 清理任务日志（TODO: 如果有任务日志表）
+                # 清理任务日志(TODO: 如果有任务日志表)
                 logger.warning("任务日志清理功能待实现")
                 
             elif clean_type == "staging_data":
-                # 清理临时表数据（TODO: 如果有staging表）
+                # 清理临时表数据(TODO: 如果有staging表)
                 logger.warning("临时表数据清理功能待实现")
             
             # 记录审计日志
@@ -264,7 +264,7 @@ class MaintenanceService:
             logger.error(f"清理数据失败: {e}", exc_info=True)
             raise
     
-    # ==================== 系统升级（P3 - 可选） ====================
+    # ==================== 系统升级(P3 - 可选) ====================
     
     async def check_upgrade(self) -> Dict[str, Any]:
         """
@@ -272,7 +272,7 @@ class MaintenanceService:
         
         返回当前版本和最新版本信息
         """
-        # 获取当前版本（从环境变量或配置文件）
+        # 获取当前版本(从环境变量或配置文件)
         current_version = os.getenv("APP_VERSION", "v4.20.0")
         
         # TODO: 从GitHub/GitLab API获取最新版本

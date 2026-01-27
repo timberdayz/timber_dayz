@@ -3,14 +3,14 @@
 """
 用户注册和审批流程 - 安全测试
 
-测试内容：
-1. 注册API限流测试（5次/分钟）
-2. 用户名枚举攻击测试（统一错误消息）
-3. 邮箱枚举攻击测试（统一错误消息）
-4. 权限绕过测试（require_admin + is_superuser）
-5. 状态不一致测试（status vs is_active）
-6. Open Redirect漏洞测试（redirect参数验证）
-7. CSRF保护测试（如果启用）
+测试内容:
+1. 注册API限流测试(5次/分钟)
+2. 用户名枚举攻击测试(统一错误消息)
+3. 邮箱枚举攻击测试(统一错误消息)
+4. 权限绕过测试(require_admin + is_superuser)
+5. 状态不一致测试(status vs is_active)
+6. Open Redirect漏洞测试(redirect参数验证)
+7. CSRF保护测试(如果启用)
 """
 
 import sys
@@ -53,12 +53,12 @@ def print_result(test_name: str, success: bool, message: str = ""):
 
 
 def test_registration_rate_limit():
-    """测试注册API限流（5次/分钟）"""
+    """测试注册API限流(5次/分钟)"""
     print_header("1. 注册API限流测试")
     
     url = f"{BASE_URL}{API_PREFIX}/auth/register"
     
-    # 尝试快速发送6个请求（应该在第6个被限流）
+    # 尝试快速发送6个请求(应该在第6个被限流)
     success_count = 0
     rate_limited = False
     
@@ -100,17 +100,17 @@ def test_registration_rate_limit():
                 f"错误: {e}"
             )
         
-        # 短暂延迟，避免过快
+        # 短暂延迟,避免过快
         time.sleep(0.1)
     
     if rate_limited:
         print_result("注册API限流测试", True, f"成功发送 {success_count} 个请求后被限流")
     else:
-        print_result("注册API限流测试", False, "未检测到限流，可能配置未生效")
+        print_result("注册API限流测试", False, "未检测到限流,可能配置未生效")
 
 
 def test_username_enumeration():
-    """测试用户名枚举攻击（统一错误消息）"""
+    """测试用户名枚举攻击(统一错误消息)"""
     print_header("2. 用户名枚举攻击测试")
     
     url = f"{BASE_URL}{API_PREFIX}/auth/register"
@@ -128,13 +128,13 @@ def test_username_enumeration():
         response = requests.post(url, json=test_data, timeout=5)
         data = response.json()
         
-        # 检查错误消息是否统一（不泄露是用户名还是邮箱冲突）
+        # 检查错误消息是否统一(不泄露是用户名还是邮箱冲突)
         error_message = data.get("message", "")
         if "用户名或邮箱已被使用" in error_message or "已被使用" in error_message:
             print_result(
                 "用户名枚举测试",
                 True,
-                "错误消息统一，未泄露具体是用户名还是邮箱冲突"
+                "错误消息统一,未泄露具体是用户名还是邮箱冲突"
             )
         else:
             print_result(
@@ -147,7 +147,7 @@ def test_username_enumeration():
 
 
 def test_email_enumeration():
-    """测试邮箱枚举攻击（统一错误消息）"""
+    """测试邮箱枚举攻击(统一错误消息)"""
     print_header("3. 邮箱枚举攻击测试")
     
     url = f"{BASE_URL}{API_PREFIX}/auth/register"
@@ -171,7 +171,7 @@ def test_email_enumeration():
             print_result(
                 "邮箱枚举测试",
                 True,
-                "错误消息统一，未泄露具体是用户名还是邮箱冲突"
+                "错误消息统一,未泄露具体是用户名还是邮箱冲突"
             )
         else:
             print_result(
@@ -184,23 +184,23 @@ def test_email_enumeration():
 
 
 def test_permission_bypass():
-    """测试权限绕过（require_admin + is_superuser）"""
+    """测试权限绕过(require_admin + is_superuser)"""
     print_header("4. 权限绕过测试")
     
-    # 需要先登录获取token，然后测试审批API
+    # 需要先登录获取token,然后测试审批API
     # 这里只测试API是否存在权限检查
     print_result(
         "权限绕过测试",
         True,
-        "需要手动测试：使用非管理员账号尝试访问审批API"
+        "需要手动测试:使用非管理员账号尝试访问审批API"
     )
 
 
 def test_status_consistency():
-    """测试状态不一致（status vs is_active）"""
+    """测试状态不一致(status vs is_active)"""
     print_header("5. 状态不一致测试")
     
-    # 这个测试需要直接查询数据库，检查status和is_active是否一致
+    # 这个测试需要直接查询数据库,检查status和is_active是否一致
     print_result(
         "状态不一致测试",
         True,
@@ -209,7 +209,7 @@ def test_status_consistency():
 
 
 def test_open_redirect():
-    """测试Open Redirect漏洞（redirect参数验证）"""
+    """测试Open Redirect漏洞(redirect参数验证)"""
     print_header("6. Open Redirect漏洞测试")
     
     # 测试登录API的redirect参数
@@ -217,8 +217,8 @@ def test_open_redirect():
     
     test_cases = [
         ("合法内部路径", "/business-overview", True),
-        ("外部URL（http）", "http://evil.com", False),
-        ("外部URL（https）", "https://evil.com", False),
+        ("外部URL(http)", "http://evil.com", False),
+        ("外部URL(https)", "https://evil.com", False),
         ("协议相对URL", "//evil.com", False),
         ("JavaScript协议", "javascript:alert(1)", False),
         ("反斜杠", "/\\evil.com", False),
@@ -226,7 +226,7 @@ def test_open_redirect():
     ]
     
     for test_name, redirect_url, should_accept in test_cases:
-        # 注意：这里只是测试前端验证逻辑，实际需要测试登录后的重定向行为
+        # 注意:这里只是测试前端验证逻辑,实际需要测试登录后的重定向行为
         print_result(
             f"Open Redirect测试 - {test_name}",
             True,
@@ -235,7 +235,7 @@ def test_open_redirect():
 
 
 def test_csrf_protection():
-    """测试CSRF保护（如果启用）"""
+    """测试CSRF保护(如果启用)"""
     print_header("7. CSRF保护测试")
     
     # 检查CSRF保护是否启用
@@ -246,13 +246,13 @@ def test_csrf_protection():
         print_result(
             "CSRF保护测试",
             True,
-            "CSRF保护已启用，需要手动测试CSRF Token验证"
+            "CSRF保护已启用,需要手动测试CSRF Token验证"
         )
     else:
         print_result(
             "CSRF保护测试",
             True,
-            "CSRF保护未启用（当前配置）"
+            "CSRF保护未启用(当前配置)"
         )
 
 
@@ -290,7 +290,7 @@ def main():
         # 检查服务是否可用
         response = requests.get(f"{BASE_URL}/docs", timeout=5)
         if response.status_code != 200:
-            print("\n[WARN] 后端服务可能未启动，部分测试可能失败")
+            print("\n[WARN] 后端服务可能未启动,部分测试可能失败")
     except Exception as e:
         print(f"\n[WARN] 无法连接到后端服务: {e}")
         print("[WARN] 请确保后端服务已启动在 {BASE_URL}")

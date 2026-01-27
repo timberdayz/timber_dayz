@@ -4,7 +4,7 @@
 """
 数据采集中心应用契约测试
 
-验证应用的基本契约：
+验证应用的基本契约:
 - 能被注册器发现
 - 能正常注册
 - 健康检查通过
@@ -147,10 +147,10 @@ def test_handlers_integration():
 
 
 def test_date_picker_api_contracts():
-    """最小日期组件契约测试：
+    """最小日期组件契约测试:
     - DateOption 包含 LAST_28_DAYS
     - TikTok DatePicker 提供选择快捷范围与自定义/周索引的方法
-    （不做真实 UI 操作）
+    (不做真实 UI 操作)
     """
     from modules.components.date_picker.base import DateOption
     from modules.platforms.tiktok.components.date_picker import TiktokDatePicker
@@ -169,7 +169,7 @@ def test_date_picker_api_contracts():
 
 
 def test_time_policy_resolution_and_routing():
-    """不依赖 UI 的策略路由契约：
+    """不依赖 UI 的策略路由契约:
     - rolling_days=7/28 解析为 quick 且能调用 dp.run
     - week_index、自定义区间分流至对应方法
     """

@@ -117,8 +117,8 @@ class VersionListResponse(BaseModel):
 
 class VersionRegisterRequest(BaseModel):
     """注册版本请求"""
-    component_name: str = Field(..., description="组件名称（如shopee/login）")
-    version: str = Field(..., description="版本号（如1.0.0）")
+    component_name: str = Field(..., description="组件名称(如shopee/login)")
+    version: str = Field(..., description="版本号(如1.0.0)")
     file_path: str = Field(..., description="文件路径")
     description: Optional[str] = Field(None, description="版本说明")
     is_stable: bool = Field(False, description="是否标记为稳定版本")
@@ -127,8 +127,8 @@ class VersionRegisterRequest(BaseModel):
 
 class ABTestRequest(BaseModel):
     """启动A/B测试请求"""
-    test_ratio: float = Field(..., ge=0.05, le=0.5, description="测试流量比例（0.05-0.5）")
-    duration_days: int = Field(..., ge=1, le=30, description="测试持续天数（1-30）")
+    test_ratio: float = Field(..., ge=0.05, le=0.5, description="测试流量比例(0.05-0.5)")
+    duration_days: int = Field(..., ge=1, le=30, description="测试持续天数(1-30)")
 
 
 class VersionUpdateRequest(BaseModel):
@@ -139,7 +139,7 @@ class VersionUpdateRequest(BaseModel):
 
 class BatchRegisterRequest(BaseModel):
     """批量注册请求"""
-    platform: Optional[str] = Field(None, description="指定平台（可选）")
+    platform: Optional[str] = Field(None, description="指定平台(可选)")
 
 
 class BatchRegisterResult(BaseModel):
@@ -175,8 +175,8 @@ async def list_versions(
     """
     查询组件版本列表
     
-    支持按平台、组件类型、状态筛选，分页查询
-    [*] Phase 3: 添加缓存支持（5分钟TTL）
+    支持按平台、组件类型、状态筛选,分页查询
+    [*] Phase 3: 添加缓存支持(5分钟TTL)
     """
     # [*] Phase 3: 尝试从缓存获取
     if request and hasattr(request.app.state, 'cache_service'):
@@ -216,7 +216,7 @@ async def list_versions(
         elif status == "inactive":
             conditions.append(ComponentVersion.is_active == False)
         
-        # v4.8.0: 排除非组件文件（config 文件、工具文件等）
+        # v4.8.0: 排除非组件文件(config 文件、工具文件等)
         conditions.extend([
             not_(ComponentVersion.file_path.like('%_config.py')),
             not_(ComponentVersion.file_path.like('%overlay_guard.py')),
@@ -533,11 +533,11 @@ async def delete_version(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    删除组件版本（v4.8.0 新增）
+    删除组件版本(v4.8.0 新增)
     
-    注意：
-    - 仅删除 ComponentVersion 记录，不删除实际文件
-    - 如果版本正在使用中（is_stable=True 或 is_testing=True），需要先取消稳定/测试状态
+    注意:
+    - 仅删除 ComponentVersion 记录,不删除实际文件
+    - 如果版本正在使用中(is_stable=True 或 is_testing=True),需要先取消稳定/测试状态
     """
     try:
         # 获取版本
@@ -551,13 +551,13 @@ async def delete_version(
         if version.is_stable:
             raise HTTPException(
                 status_code=400, 
-                detail="无法删除稳定版本，请先取消稳定状态或提升其他版本为稳定版本"
+                detail="无法删除稳定版本,请先取消稳定状态或提升其他版本为稳定版本"
             )
         
         if version.is_testing:
             raise HTTPException(
                 status_code=400,
-                detail="无法删除正在测试的版本，请先停止A/B测试"
+                detail="无法删除正在测试的版本,请先停止A/B测试"
             )
         
         # 记录删除信息
@@ -617,13 +617,13 @@ async def batch_register_python_components(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    批量注册 Python 组件（v4.8.0 新增）
+    批量注册 Python 组件(v4.8.0 新增)
     
-    扫描 modules/platforms/ 下所有 Python 组件，注册到 ComponentVersion 表。
-    已存在的组件会跳过（基于 component_name + file_path）。
+    扫描 modules/platforms/ 下所有 Python 组件,注册到 ComponentVersion 表。
+    已存在的组件会跳过(基于 component_name + file_path)。
     
     Args:
-        platform: 可选，指定平台（shopee, tiktok, miaoshou）
+        platform: 可选,指定平台(shopee, tiktok, miaoshou)
     
     Returns:
         BatchRegisterResponse: 注册统计和详细信息
@@ -665,7 +665,7 @@ async def batch_register_python_components(
                 default_version = "1.0.0"
                 
                 try:
-                    # 先提取组件类型（用于后续更新描述）
+                    # 先提取组件类型(用于后续更新描述)
                     component_type = "unknown"
                     try:
                         spec = importlib.util.spec_from_file_location("component", py_file)
@@ -698,7 +698,7 @@ async def batch_register_python_components(
                         else:
                             component_type = "other"
                     
-                    # 检查是否已存在（基于 component_name + version，这是唯一约束）
+                    # 检查是否已存在(基于 component_name + version,这是唯一约束)
                     existing_result = await db.execute(select(ComponentVersion).where(
                         ComponentVersion.component_name == component_name,
                         ComponentVersion.version == default_version
@@ -706,7 +706,7 @@ async def batch_register_python_components(
                     existing = existing_result.scalar_one_or_none()
                     
                     if existing:
-                        # 如果 file_path 相同，跳过
+                        # 如果 file_path 相同,跳过
                         if existing.file_path == relative_path:
                             results.append(BatchRegisterResult(
                                 component_name=component_name,
@@ -718,10 +718,10 @@ async def batch_register_python_components(
                             skipped_count += 1
                             continue
                         else:
-                            # file_path 不同，更新 file_path（从YAML迁移到Python的情况）
+                            # file_path 不同,更新 file_path(从YAML迁移到Python的情况)
                             existing.file_path = relative_path
                             existing.updated_at = datetime.utcnow()
-                            # 如果描述还是旧的，更新描述
+                            # 如果描述还是旧的,更新描述
                             if "YAML" in existing.description or "DEPRECATED" in existing.description:
                                 existing.description = f"Python component: {component_type}"
                             
@@ -831,10 +831,10 @@ async def test_component_version(
     """
     测试组件版本 - v4.7.4: HTTP 轮询进度
     
-    从版本管理页调用，测试已注册的组件版本
+    从版本管理页调用,测试已注册的组件版本
     进度通过 GET /component-versions/{version_id}/test/{test_id}/status 接口查询
     
-    重构说明：移除 WebSocket，统一使用 HTTP 轮询
+    重构说明:移除 WebSocket,统一使用 HTTP 轮询
     """
     import yaml
     import asyncio
@@ -863,7 +863,7 @@ async def test_component_version(
             raise HTTPException(status_code=404, detail="版本不存在")
         
         if not version.is_active:
-            raise HTTPException(status_code=400, detail="该版本已禁用，无法测试")
+            raise HTTPException(status_code=400, detail="该版本已禁用,无法测试")
         
         # 2. 验证账号
         from modules.core.db import PlatformAccount
@@ -885,7 +885,7 @@ async def test_component_version(
             f"with account: {request.account_id}"
         )
         
-        # 3. 读取组件文件（支持 YAML 和 Python 组件）
+        # 3. 读取组件文件(支持 YAML 和 Python 组件)
         project_root = Path(__file__).parent.parent.parent
         component_path = project_root / version.file_path
         
@@ -896,7 +896,7 @@ async def test_component_version(
         is_python_component = version.file_path.endswith('.py')
         
         if is_python_component:
-            # Python 组件：从文件路径提取平台和组件名
+            # Python 组件:从文件路径提取平台和组件名
             # 例如: modules/platforms/shopee/components/login.py
             path_parts = version.file_path.replace('\\', '/').split('/')
             if 'platforms' in path_parts:
@@ -923,7 +923,7 @@ async def test_component_version(
             f.write(json.dumps({"location":"component_versions.py:573","message":"Account info prepared","data":{"has_username":bool(account_info.get('username')),"has_password":bool(account_info.get('password')),"platform":account_info.get('platform')},"timestamp":__import__('datetime').datetime.now().isoformat(),"sessionId":"debug-session","hypothesisId":"H3"})+"\n")
         # #endregion
         
-        # 5. 生成测试ID（用于 HTTP 轮询状态查询）
+        # 5. 生成测试ID(用于 HTTP 轮询状态查询)
         test_id = f"test_{uuid.uuid4().hex[:12]}"
         logger.info(f"Starting test with ID: {test_id}")
         
@@ -932,9 +932,9 @@ async def test_component_version(
             f.write(json.dumps({"location":"component_versions.py:600","message":"Starting background test","data":{"test_id":test_id,"platform":platform,"component_name":component_name},"timestamp":__import__('datetime').datetime.now().isoformat(),"sessionId":"debug-session","hypothesisId":"H2"})+"\n")
         # #endregion
         
-        # 6. 使用独立进程运行测试（subprocess 方案）
-        # [*] v4.7.4: 移除 WebSocket，使用 HTTP 轮询获取进度
-        # 进度和结果保存在 temp/ 目录下，通过状态查询接口获取
+        # 6. 使用独立进程运行测试(subprocess 方案)
+        # [*] v4.7.4: 移除 WebSocket,使用 HTTP 轮询获取进度
+        # 进度和结果保存在 temp/ 目录下,通过状态查询接口获取
         
         # 创建进度/结果目录
         import tempfile
@@ -992,7 +992,7 @@ async def test_component_version(
                     errors='replace'
                 )
                 
-                # 等待子进程完成（子进程会写入进度文件）
+                # 等待子进程完成(子进程会写入进度文件)
                 stdout, stderr = proc.communicate()
                 
                 if proc.returncode != 0:
@@ -1040,12 +1040,12 @@ async def test_component_version(
                             progress_data['error'] = final_error
                         json_lib.dump(progress_data, f, ensure_ascii=False)
                     
-                    # 更新版本统计（使用异步操作）
+                    # 更新版本统计(使用异步操作)
                     if os.path.exists(result_path):
                         with open(result_path, 'r', encoding='utf-8') as f:
                             result_dict = json_lib.load(f)
                         
-                        # [*] v4.18.2修复：使用异步数据库操作，避免阻塞
+                        # [*] v4.18.2修复:使用异步数据库操作,避免阻塞
                         async def update_version_stats_async():
                             from backend.models.database import AsyncSessionLocal
                             from sqlalchemy import select
@@ -1096,7 +1096,7 @@ async def test_component_version(
                                     )
                                     result.step_results.append(step_result)
                                 
-                                # [*] v4.18.2修复：使用本文件中的异步 save_test_history 函数
+                                # [*] v4.18.2修复:使用本文件中的异步 save_test_history 函数
                                 await save_test_history(
                                     db=test_db,
                                     component_name=version.component_name,
@@ -1112,7 +1112,7 @@ async def test_component_version(
                         # 在独立线程中运行异步代码
                         try:
                             import asyncio
-                            # 创建新的事件循环（因为这是在独立线程中）
+                            # 创建新的事件循环(因为这是在独立线程中)
                             loop = asyncio.new_event_loop()
                             asyncio.set_event_loop(loop)
                             loop.run_until_complete(update_version_stats_async())
@@ -1138,7 +1138,7 @@ async def test_component_version(
         executor = ThreadPoolExecutor(max_workers=1)
         executor.submit(run_test_in_subprocess)
         
-        # 10. 立即返回test_id给前端（用于 HTTP 轮询）
+        # 10. 立即返回test_id给前端(用于 HTTP 轮询)
         logger.info(f"Test {test_id} started in background task")
         
         # #region agent log
@@ -1149,7 +1149,7 @@ async def test_component_version(
         return {
             "success": True,
             "test_id": test_id,
-            "message": "测试已在后台启动，请轮询状态接口获取进度",
+            "message": "测试已在后台启动,请轮询状态接口获取进度",
             "version_info": {
                 "component_name": version.component_name,
                 "version": version.version
@@ -1188,9 +1188,9 @@ async def get_test_status(
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    获取测试进度状态（v4.7.4 新增）
+    获取测试进度状态(v4.7.4 新增)
     
-    用于前端轮询，替代 WebSocket 实时推送
+    用于前端轮询,替代 WebSocket 实时推送
     
     Returns:
         {
@@ -1227,14 +1227,14 @@ async def get_test_status(
         except Exception as e:
             logger.warning(f"Failed to read progress file: {e}")
     
-    # 如果测试完成，读取结果文件
+    # 如果测试完成,读取结果文件
     test_result = None
     if progress_data.get('status') in ['completed', 'failed'] and result_path.exists():
         try:
             with open(result_path, 'r', encoding='utf-8') as f:
                 test_result = json.load(f)
             
-            # [*] v4.7.4: 如果缺少 success_rate，计算它（兼容旧数据）
+            # [*] v4.7.4: 如果缺少 success_rate,计算它(兼容旧数据)
             if 'success_rate' not in test_result or test_result.get('success_rate') is None:
                 steps_total = test_result.get('steps_total', 0)
                 steps_passed = test_result.get('steps_passed', 0)
@@ -1258,7 +1258,7 @@ async def get_test_status(
 
 @router.get("/test-history", response_model=TestHistoryListResponse)
 async def get_test_history(
-    component_name: Optional[str] = Query(None, description="组件名称（可选筛选）"),
+    component_name: Optional[str] = Query(None, description="组件名称(可选筛选)"),
     limit: int = Query(5, ge=1, le=50, description="返回数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -1266,8 +1266,8 @@ async def get_test_history(
     获取组件测试历史记录
     
     参数:
-    - component_name: 组件名称（可选），如 "shopee/login"
-    - limit: 返回数量（默认5条）
+    - component_name: 组件名称(可选),如 "shopee/login"
+    - limit: 返回数量(默认5条)
     
     返回最近的测试历史记录
     """
@@ -1277,7 +1277,7 @@ async def get_test_history(
         # 构建查询
         stmt = select(ComponentTestHistory)
         
-        # 如果指定了组件名称，筛选
+        # 如果指定了组件名称,筛选
         if component_name:
             stmt = stmt.where(ComponentTestHistory.component_name == component_name)
         

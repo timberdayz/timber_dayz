@@ -3,7 +3,7 @@
 """
 数据验证引擎
 
-提供多层次的数据验证功能：
+提供多层次的数据验证功能:
 1. 数据类型验证
 2. 必填字段验证
 3. 外键存在性验证
@@ -329,7 +329,7 @@ class DataValidator:
         
         except Exception as e:
             print(f"外键验证查询失败: {e}")
-            return []  # 查询失败时返回空列表，避免阻塞验证
+            return []  # 查询失败时返回空列表,避免阻塞验证
     
     def _validate_business_rules(self, df: pd.DataFrame, mappings: List[Dict[str, Any]]) -> List[ValidationError]:
         """验证业务规则"""
@@ -341,7 +341,7 @@ class DataValidator:
             condition = rule_config['condition']
             message = rule_config['message']
             
-            # 简化的条件解析（实际应该使用更复杂的表达式解析器）
+            # 简化的条件解析(实际应该使用更复杂的表达式解析器)
             if condition == 'order_amount > 0':
                 # 查找订单金额字段
                 amount_col = None
@@ -512,26 +512,26 @@ class DataValidator:
         recommendations = []
         
         if not result.errors:
-            recommendations.append("数据验证通过，可以安全入库")
+            recommendations.append("数据验证通过,可以安全入库")
             return recommendations
         
         # 分析错误类型给出建议
         error_types = set(e.error_type for e in result.errors)
         
         if 'data_type' in error_types:
-            recommendations.append("发现数据类型错误，请检查数据格式或字段映射")
+            recommendations.append("发现数据类型错误,请检查数据格式或字段映射")
         
         if 'required_field' in error_types:
-            recommendations.append("发现必填字段为空，请补充缺失数据")
+            recommendations.append("发现必填字段为空,请补充缺失数据")
         
         if 'foreign_key' in error_types:
-            recommendations.append("发现外键引用错误，请检查关联表数据或调整映射")
+            recommendations.append("发现外键引用错误,请检查关联表数据或调整映射")
         
         if 'business_rule' in error_types:
-            recommendations.append("发现业务规则违规，请检查数据逻辑")
+            recommendations.append("发现业务规则违规,请检查数据逻辑")
         
         if 'consistency' in result.statistics.get('error_types', {}):
-            recommendations.append("发现重复数据，建议去重后重新验证")
+            recommendations.append("发现重复数据,建议去重后重新验证")
         
         return recommendations
 

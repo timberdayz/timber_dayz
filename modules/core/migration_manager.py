@@ -4,7 +4,7 @@
 """
 数据库迁移管理器
 
-提供数据库版本管理和迁移功能：
+提供数据库版本管理和迁移功能:
 - Alembic集成
 - 自动迁移检查
 - 安全的升级/降级
@@ -58,7 +58,7 @@ class MigrationManager:
         self.alembic_cfg.set_main_option("sqlalchemy.url", db_url)
         
     def _get_database_url(self) -> str:
-        """获取数据库URL。优先使用环境变量 DATABASE_URL；否则回退到统一的SQLite路径"""
+        """获取数据库URL。优先使用环境变量 DATABASE_URL;否则回退到统一的SQLite路径"""
         url = os.getenv("DATABASE_URL")
         if url:
             return url
@@ -70,7 +70,7 @@ class MigrationManager:
         获取当前数据库版本
         
         Returns:
-            Optional[str]: 当前版本ID，如果数据库未初始化则返回None
+            Optional[str]: 当前版本ID,如果数据库未初始化则返回None
         """
         try:
             engine = create_engine(self._get_database_url())
@@ -161,7 +161,7 @@ class MigrationManager:
         升级数据库
         
         Args:
-            revision: 目标版本，默认为最新版本
+            revision: 目标版本,默认为最新版本
             
         Returns:
             bool: 升级是否成功
@@ -298,7 +298,7 @@ class MigrationManager:
         status = self.get_migration_status()
         
         if not status['database_exists']:
-            logger.info("数据库未初始化，执行初始化迁移")
+            logger.info("数据库未初始化,执行初始化迁移")
             self.upgrade_database()
             return True
         elif status['needs_migration']:

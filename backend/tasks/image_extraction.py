@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Celery异步图片提取任务（v3.0）
+Celery异步图片提取任务(v3.0)
 
-功能：
+功能:
 - 从Excel文件提取嵌入的产品图片
-- 处理图片（压缩、缩略图）
+- 处理图片(压缩、缩略图)
 - 保存到product_images表
 """
 
@@ -50,10 +50,10 @@ def extract_product_images_task(
     db = SessionLocal()
     
     try:
-        # 1. 读取Excel（获取SKU列表）
+        # 1. 读取Excel(获取SKU列表)
         df = ExcelParser.read_excel(file_path, nrows=None)  # 读取全部数据
         
-        # 查找SKU列（多种可能的列名）
+        # 查找SKU列(多种可能的列名)
         sku_candidates = ['*商品SKU', '商品SKU', 'SKU', 'platform_sku', 'sku', 'product_sku']
         sku_column = None
         
@@ -63,7 +63,7 @@ def extract_product_images_task(
                 break
         
         if not sku_column:
-            logger.warning(f"[ImageTask] 未找到SKU列，跳过图片提取: file_id={file_id}")
+            logger.warning(f"[ImageTask] 未找到SKU列,跳过图片提取: file_id={file_id}")
             return {'success': False, 'reason': 'no_sku_column'}
         
         logger.info(f"[ImageTask] 找到SKU列: {sku_column}")
@@ -77,7 +77,7 @@ def extract_product_images_task(
         )
         
         if not sku_images:
-            logger.info(f"[ImageTask] 文件中无图片，跳过: file_id={file_id}")
+            logger.info(f"[ImageTask] 文件中无图片,跳过: file_id={file_id}")
             return {'success': True, 'extracted': 0}
         
         logger.info(f"[ImageTask] 提取到{len(sku_images)}个SKU的图片")
@@ -89,7 +89,7 @@ def extract_product_images_task(
         for sku, images in sku_images.items():
             for img_idx, img_info in enumerate(images):
                 try:
-                    # 处理图片（压缩+缩略图）
+                    # 处理图片(压缩+缩略图)
                     result = processor.process_product_image(
                         img_info['data'],
                         sku,

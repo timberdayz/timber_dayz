@@ -12,7 +12,7 @@ Vue.js字段映射审核应用模块
 APP_ID = "vue_field_mapping"
 NAME = "Vue字段映射审核"
 VERSION = "1.0.0"
-DESCRIPTION = "基于Vue.js的现代化字段映射审核系统，解决Streamlit死循环问题"
+DESCRIPTION = "基于Vue.js的现代化字段映射审核系统,解决Streamlit死循环问题"
 
 # 应用类
 from .app import VueFieldMappingApp

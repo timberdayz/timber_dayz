@@ -81,8 +81,8 @@ class TiktokNavigation(NavigationComponent):
             except Exception:
                 await page.goto(url, wait_until="load", timeout=60000)
 
-            # Watchdog: 某些情况下（ServiceWorker/缓存损坏、会话切域），页面会白屏或无限旋转
-            # 若 10s 仍未渲染出主容器内容，则清理 SW/Cache 并强制刷新一次
+            # Watchdog: 某些情况下(ServiceWorker/缓存损坏、会话切域),页面会白屏或无限旋转
+            # 若 10s 仍未渲染出主容器内容,则清理 SW/Cache 并强制刷新一次
             try:
                 await page.wait_for_timeout(1000)
                 async def _is_blank() -> bool:
@@ -97,7 +97,7 @@ class TiktokNavigation(NavigationComponent):
                         )
                     except Exception:
                         return False
-                # 等待最多 10s（20 * 500ms）；若始终 blank，执行自愈
+                # 等待最多 10s(20 * 500ms);若始终 blank,执行自愈
                 blank_ticks = 0
                 for _ in range(20):
                     if not await _is_blank():

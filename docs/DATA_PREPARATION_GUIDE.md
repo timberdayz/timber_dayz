@@ -66,39 +66,27 @@ LEFT JOIN dim_shops s ON p.shop_id = s.shop_id
 
 **目的**: 填充`dim_platforms`和`dim_shops`
 
-**方法1: 从已有数据自动提取**（推荐）
+**v4.19.0 方案A更新**：
+- ✅ **平台（dim_platforms）**：从 `catalog_files` 提取（保留，平台信息相对稳定）
+- ✅ **店铺（dim_shops）**：从 `platform_accounts` 同步（方案A：废弃从 `catalog_files` 提取）
+- ✅ 数据来源单一，避免混乱，数据质量高（用户手动配置）
 
-```sql
--- 1. 填充dim_platforms
-INSERT INTO dim_platforms (platform_code, name, platform_type, is_active)
-SELECT DISTINCT 
-    platform_code,
-    platform_code as name,  -- 暂时用platform_code作为name
-    'ecommerce' as platform_type,
-    true as is_active
-FROM catalog_files
-WHERE platform_code IS NOT NULL
-ON CONFLICT (platform_code) DO NOTHING;
+**推荐方法：使用初始化脚本**（v4.19.0 方案A）
 
--- 2. 填充dim_shops
-INSERT INTO dim_shops (platform_code, shop_id, shop_slug, shop_name, is_active)
-SELECT DISTINCT 
-    platform_code,
-    shop_id,
-    shop_id as shop_slug,
-    shop_id as shop_name,  -- 暂时用shop_id作为名称
-    true as is_active
-FROM catalog_files
-WHERE platform_code IS NOT NULL AND shop_id IS NOT NULL
-ON CONFLICT (platform_code, shop_id) DO NOTHING;
+执行脚本自动初始化：
+```bash
+python scripts/init_dimension_tables.py
 ```
 
-**方法2: 手动录入**（精确控制）
+脚本会自动：
+1. 从 `catalog_files` 提取平台信息到 `dim_platforms`
+2. 从 `platform_accounts` 同步店铺信息到 `dim_shops`（只同步启用的账号）
 
-访问系统管理页面，手动添加：
-- 妙手平台：`miaoshou` / "妙手ERP"
-- Shopee平台：`shopee` / "Shopee"
-- Amazon平台：`amazon` / "Amazon"
+**手动录入方法**（精确控制）
+
+访问账号管理页面，手动添加账号和店铺：
+- 账号管理页面会自动同步到 `dim_shops`
+- 确保账号设置了 `shop_id` 字段（用于关联数据同步）
 
 ### Step 2: 采集并入库产品数据
 
@@ -131,91 +119,27 @@ ON CONFLICT (platform_code, shop_id) DO NOTHING;
 
 **文件**: `scripts/init_dimension_tables.py`
 
-```python
-"""
-初始化维度表 - 从catalog_files自动提取
-执行：python scripts/init_dimension_tables.py
-"""
-import sys
-from pathlib import Path
+**v4.19.0 方案A更新**：
+- 平台：从 `catalog_files` 提取
+- 店铺：从 `platform_accounts` 同步（✅ 方案A：废弃从 `catalog_files` 提取）
 
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+**执行方式**：
+```bash
+python scripts/init_dimension_tables.py
+```
 
-from backend.models.database import SessionLocal
-from modules.core.db import DimPlatform, DimShop
-from sqlalchemy import text
+**脚本功能**：
+1. ✅ 从 `catalog_files` 提取平台信息到 `dim_platforms`
+2. ✅ 从 `platform_accounts` 同步店铺信息到 `dim_shops`（只同步启用的账号）
+3. ✅ 自动创建/更新平台和店铺记录
+4. ✅ 验证维度表数据完整性
+5. ✅ 刷新物化视图（如果数据完整）
 
-db = SessionLocal()
-
-try:
-    # 1. 从catalog_files提取平台
-    result = db.execute(text("""
-        SELECT DISTINCT platform_code
-        FROM catalog_files
-        WHERE platform_code IS NOT NULL
-    """))
-    
-    platforms = []
-    for row in result:
-        platform_code = row[0]
-        platform_name_map = {
-            'miaoshou': '妙手ERP',
-            'shopee': 'Shopee',
-            'amazon': 'Amazon',
-            'tiktok': 'TikTok'
-        }
-        
-        platform = DimPlatform(
-            platform_code=platform_code,
-            name=platform_name_map.get(platform_code, platform_code),
-            platform_type='ecommerce',
-            is_active=True
-        )
-        platforms.append(platform)
-    
-    # 批量插入（忽略冲突）
-    for plat in platforms:
-        db.merge(plat)
-    
-    print(f"[OK] Inserted {len(platforms)} platforms")
-    
-    # 2. 从catalog_files提取店铺
-    result = db.execute(text("""
-        SELECT DISTINCT platform_code, shop_id
-        FROM catalog_files
-        WHERE platform_code IS NOT NULL AND shop_id IS NOT NULL
-    """))
-    
-    shops = []
-    for row in result:
-        platform_code, shop_id = row[0], row[1]
-        
-        shop = DimShop(
-            platform_code=platform_code,
-            shop_id=shop_id,
-            shop_slug=shop_id,
-            shop_name=shop_id,  # 暂时用shop_id作为名称
-            is_active=True
-        )
-        shops.append(shop)
-    
-    for shop in shops:
-        db.merge(shop)
-    
-    print(f"[OK] Inserted {len(shops)} shops")
-    
-    db.commit()
-    
-    print("\n[SUCCESS] Dimension tables initialized!")
-    print("Next: Refresh materialized views")
-    
-except Exception as e:
-    db.rollback()
-    print(f"[ERROR] {e}")
-    raise
-finally:
-    db.close()
+**注意事项**：
+- 确保 `platform_accounts` 表中有账号数据
+- 账号必须设置了 `shop_id` 字段（用于关联数据同步）
+- 只同步 `enabled = true` 的账号
+- 如果账号没有 `shop_id`，会使用 `account_id` 作为店铺ID
 ```
 
 ---

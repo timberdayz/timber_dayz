@@ -9,13 +9,13 @@ from modules.components.login.base import LoginComponent, LoginResult
 
 
 class TiktokLogin(LoginComponent):
-    """TikTok Shop 登录组件（手机号登录 + 2FA 处理）。
+    """TikTok Shop 登录组件(手机号登录 + 2FA 处理)。
 
-    设计要点：
-    - 仅使用 account.login_url 作为唯一入口（如：https://seller.tiktokglobalshop.com）
-    - 首选"使用手机号登录"，填写手机号与密码
-    - 出现双重验证页面时：勾选"在这台设备上不再询问"，然后输入验证码
-    - 验证码来源顺序：ctx.config['otp'] > 环境变量 TIKTOK_OTP > 交互式 input()
+    设计要点:
+    - 仅使用 account.login_url 作为唯一入口(如:https://seller.tiktokglobalshop.com)
+    - 首选"使用手机号登录",填写手机号与密码
+    - 出现双重验证页面时:勾选"在这台设备上不再询问",然后输入验证码
+    - 验证码来源顺序:ctx.config['otp'] > 环境变量 TIKTOK_OTP > 交互式 input()
     """
 
     # Component metadata (v4.8.0)
@@ -91,17 +91,17 @@ class TiktokLogin(LoginComponent):
         return False
     def _ensure_trust_device_checked(self, page: Any) -> bool:
         """
-        确保“在这台设备上不再询问”被勾选；优先使用原生 checkbox 的 check()，
-        若为自定义组件（role=checkbox），则依据 aria-checked 状态点击一次以置为 true。
+        确保“在这台设备上不再询问”被勾选;优先使用原生 checkbox 的 check(),
+        若为自定义组件(role=checkbox),则依据 aria-checked 状态点击一次以置为 true。
         """
-        # 0) TikTok 自定义 div 复选框（class 切换 checked）
+        # 0) TikTok 自定义 div 复选框(class 切换 checked)
         try:
             box = page.locator("#TT4B_TSV_Verify_Check")
             if box.count() > 0 and box.first.is_visible():
                 cls = (box.first.get_attribute("class") or "")
                 if "checked" in cls:
                     return True
-                # 优先点击内部的 .check-box-inner，若不存在则点击容器本身
+                # 优先点击内部的 .check-box-inner,若不存在则点击容器本身
                 try:
                     inner = box.first.locator(".check-box-inner")
                     if inner.count() > 0 and inner.first.is_visible():
@@ -143,7 +143,7 @@ class TiktokLogin(LoginComponent):
                         loc.first.check()
                         return True
                     except Exception:
-                        # Fallback：点击关联文本后再次确认
+                        # Fallback:点击关联文本后再次确认
                         self._click_text_if_present(page, "在这台设备上不再询问", timeout=1000)
                         try:
                             if loc.first.is_checked():
@@ -173,7 +173,7 @@ class TiktokLogin(LoginComponent):
 
     def _ensure_trust_device_checked_any(self, roots: Sequence[Any]) -> bool:
         """
-        在所有可见 roots 中尝试确保“在这台设备上不再询问”被勾选；
+        在所有可见 roots 中尝试确保“在这台设备上不再询问”被勾选;
         命中任意一个 root 即返回 True。
         """
         for r in roots:
@@ -214,8 +214,8 @@ class TiktokLogin(LoginComponent):
 
 
     def _maybe_handle_2fa(self, page: Any) -> None:
-        """处理TikTok二次验证（遍历所有 iframe）。"""
-        # 若当前并不在登录页（account/login），直接跳过 2FA 处理，避免误触
+        """处理TikTok二次验证(遍历所有 iframe)。"""
+        # 若当前并不在登录页(account/login),直接跳过 2FA 处理,避免误触
         try:
             cur = str(page.url or "")
             if "account/login" not in cur:
@@ -231,15 +231,15 @@ class TiktokLogin(LoginComponent):
             frames = []
         roots = [page] + frames
 
-        # “在这台设备上不再询问”复选框改为在识别出目标 root 后精确处理，避免误触导致取消勾选
+        # “在这台设备上不再询问”复选框改为在识别出目标 root 后精确处理,避免误触导致取消勾选
 
-        # 提前在所有 roots 中尝试勾选“在这台设备上不再询问”，确保不会遗漏
+        # 提前在所有 roots 中尝试勾选“在这台设备上不再询问”,确保不会遗漏
         try:
             self._ensure_trust_device_checked_any(roots)
         except Exception:
             pass
 
-        # 检测验证码输入框（更鲁棒）
+        # 检测验证码输入框(更鲁棒)
         code_inputs = [
             "#TT4B_TSV_Verify_Code_Input",
             "input[name='code']",
@@ -302,7 +302,7 @@ class TiktokLogin(LoginComponent):
         max_attempts = int((cfg.get("otp_max_attempts") or os.getenv("TIKTOK_OTP_MAX_ATTEMPTS") or 3))
         preset_otp = cfg.get("otp") or os.getenv("TIKTOK_OTP")
 
-        # 精确处理“在这台设备上不再询问”：等待至元素出现并确保勾选
+        # 精确处理“在这台设备上不再询问”:等待至元素出现并确保勾选
         try:
             self._wait_and_check_trust(target_root, timeout_ms=3000)
         except Exception:
@@ -328,7 +328,7 @@ class TiktokLogin(LoginComponent):
                         return True
                 except Exception:
                     continue
-            # 兜底：输入框标红 aria-invalid
+            # 兜底:输入框标红 aria-invalid
             try:
                 if root.locator("input[name*='code'][aria-invalid='true']").count() > 0:
                     return True
@@ -339,23 +339,23 @@ class TiktokLogin(LoginComponent):
         last_error = False
         otp = None
 
-        # 验证码输入循环（错误时继续重试，不跳回自动登录流程）
+        # 验证码输入循环(错误时继续重试,不跳回自动登录流程)
         for attempt in range(max_attempts):
-            # 第一次可使用预设 OTP，其余次数提示用户再次输入
+            # 第一次可使用预设 OTP,其余次数提示用户再次输入
             if attempt == 0 and preset_otp:
                 otp = str(preset_otp).strip()
             else:
                 try:
-                    tip = "之前验证码错误，请重新输入" if last_error else "需要输入TikTok双重验证验证码"
-                    print(f"[LOCK] {tip}（留空直接取消并返回）")
+                    tip = "之前验证码错误,请重新输入" if last_error else "需要输入TikTok双重验证验证码"
+                    print(f"[LOCK] {tip}(留空直接取消并返回)")
                     otp = input("请输入TikTok二次验证码: ").strip()
                 except Exception:
                     otp = ""
             if not otp:
                 if self.logger:
-                    self.logger.warning("用户取消输入OTP，跳过2FA输入")
+                    self.logger.warning("用户取消输入OTP,跳过2FA输入")
                 else:
-                    print("[TiktokLogin] 用户取消输入OTP，跳过2FA输入")
+                    print("[TiktokLogin] 用户取消输入OTP,跳过2FA输入")
                 return
 
             # 清空并填写
@@ -365,7 +365,7 @@ class TiktokLogin(LoginComponent):
                 pass
             self._fill_first(target_root, code_inputs, otp)
 
-            # 再次确保勾选（元素可能晚于输入框出现）
+            # 再次确保勾选(元素可能晚于输入框出现)
             try:
                 self._wait_and_check_trust(target_root, timeout_ms=1200)
             except Exception:
@@ -384,7 +384,7 @@ class TiktokLogin(LoginComponent):
                     except Exception:
                         pass
 
-            # 提交后轮询 3.5 秒：优先检测跳转与错误提示
+            # 提交后轮询 3.5 秒:优先检测跳转与错误提示
             navigated = False
             saw_error = False
             deadline = time.time() + 3.5
@@ -407,7 +407,7 @@ class TiktokLogin(LoginComponent):
             if saw_error:
                 last_error = True
                 remaining = max_attempts - attempt - 1
-                msg = f"[FAIL] 验证码错误，请重新输入（剩余{remaining}次）"
+                msg = f"[FAIL] 验证码错误,请重新输入(剩余{remaining}次)"
                 if self.logger:
                     self.logger.warning(msg)
                 else:
@@ -416,7 +416,7 @@ class TiktokLogin(LoginComponent):
                     continue
 
             if not navigated:
-                # 仍停留在 2FA 页面且未捕获到明确错误文案，视为失败重试（兼容无错误提示版本）
+                # 仍停留在 2FA 页面且未捕获到明确错误文案,视为失败重试(兼容无错误提示版本)
                 try:
                     still_has_input = target_root.locator(
                         ", ".join(code_inputs)
@@ -426,7 +426,7 @@ class TiktokLogin(LoginComponent):
                 if still_has_input:
                     last_error = True
                     remaining = max_attempts - attempt - 1
-                    msg = f"[FAIL] 验证码可能不正确（页面未跳转），请重试（剩余{remaining}次）"
+                    msg = f"[FAIL] 验证码可能不正确(页面未跳转),请重试(剩余{remaining}次)"
                     if self.logger:
                         self.logger.warning(msg)
                     else:
@@ -434,16 +434,16 @@ class TiktokLogin(LoginComponent):
                     if remaining > 0:
                         continue
 
-            # 正常：已跳转或未检测到错误，结束循环，由上层判断是否成功
+            # 正常:已跳转或未检测到错误,结束循环,由上层判断是否成功
             break
 
     def _detect_login_mode(self, page: Any) -> str:
         """返回当前登录模式: 'phone' 或 'email'.
-        检测优先级：输入框占位符/类型 > 顶部切换文案 > 默认手机号。
-        注意：不要用通配“text=邮箱”以免误命中“使用邮箱登录”链接。
+        检测优先级:输入框占位符/类型 > 顶部切换文案 > 默认手机号。
+        注意:不要用通配“text=邮箱”以免误命中“使用邮箱登录”链接。
         """
         try:
-            # 1) 通过输入框占位符/类型判断（更可靠）
+            # 1) 通过输入框占位符/类型判断(更可靠)
             if (
                 page.locator("input[placeholder*='邮箱']").count() > 0
                 or page.locator("input[type='email']").count() > 0
@@ -465,7 +465,7 @@ class TiktokLogin(LoginComponent):
                 return "email"
         except Exception:
             pass
-        return "phone"  # 安全默认：手机号优先
+        return "phone"  # 安全默认:手机号优先
 
     def run(self, page: Any) -> LoginResult:  # type: ignore[override]
         login_url = self.ctx.account.get("login_url", "https://seller.tiktokglobalshop.com")
@@ -484,7 +484,7 @@ class TiktokLogin(LoginComponent):
             if self.logger:
                 self.logger.info(f"[TiktokLogin] loaded url: {page.url}")
 
-            # 如果已处于卖家后台域且不在登录页，视为已登录，直接短路返回（兼容两个域名）
+            # 如果已处于卖家后台域且不在登录页,视为已登录,直接短路返回(兼容两个域名)
             try:
                 cur = str(page.url or "")
                 if (
@@ -505,23 +505,23 @@ class TiktokLogin(LoginComponent):
             except Exception:
                 pass
 
-            # 决定当前模式并切换到“手机号登录”（如需）
+            # 决定当前模式并切换到“手机号登录”(如需)
             mode = self._detect_login_mode(page)
             if self.logger:
                 self.logger.info(f"[TiktokLogin] detected mode: {mode}")
 
             if mode == "email":
-                # 当前在邮箱登录页，需要切换到手机号登录
+                # 当前在邮箱登录页,需要切换到手机号登录
                 switched = self._click_if_present(page, "text=使用手机号登录", timeout=4000)
                 page.wait_for_timeout(400)
-                # 再次确认是否已切换成功；若仍是邮箱页，再尝试一次
+                # 再次确认是否已切换成功;若仍是邮箱页,再尝试一次
                 if self._detect_login_mode(page) == "email":
                     if not self._click_if_present(page, "text=使用手机号登录", timeout=3000):
-                        # 兜底：部分版本为“使用手机号码登录”或相近文案
+                        # 兜底:部分版本为“使用手机号码登录”或相近文案
                         self._click_if_present(page, "text=使用手机", timeout=2000)
                     page.wait_for_timeout(300)
 
-            # 在主页面与所有 iframe 上尝试（避免元素在 iframe 内导致未命中）
+            # 在主页面与所有 iframe 上尝试(避免元素在 iframe 内导致未命中)
             try:
                 frames = list(getattr(page, 'frames', []))
             except Exception:
@@ -530,7 +530,7 @@ class TiktokLogin(LoginComponent):
                 self.logger.info(f"[TiktokLogin] frames detected: {len(frames)}")
             roots = [page] + frames
 
-            # 等待登录表单关键元素出现，避免过早操作
+            # 等待登录表单关键元素出现,避免过早操作
             wait_targets = [
                 "input[type='password']",
                 "button:has-text('登录')",
@@ -542,7 +542,7 @@ class TiktokLogin(LoginComponent):
                 if self._wait_any(root, wait_targets, timeout_ms=8000):
                     break
 
-            # 填写手机号/密码（手机号优先）
+            # 填写手机号/密码(手机号优先)
             if username:
                 phone_selectors = [
                     "input[placeholder*='请输入你的手机号']",
@@ -566,7 +566,7 @@ class TiktokLogin(LoginComponent):
                 for root in roots:
                     filled_user = self._fill_first(root, phone_selectors, username)
                     if not filled_user:
-                        # 兜底：登录表单中的第一个可见文本框
+                        # 兜底:登录表单中的第一个可见文本框
                         try:
                             loc = root.locator("form:has-text('登录') input[type='text']").first
                             if loc and loc.is_visible():
@@ -603,7 +603,7 @@ class TiktokLogin(LoginComponent):
                 else:
                     print(f"[TiktokLogin] password filled: {filled_pwd}")
 
-            # 点击登录（主页面与 iframe 内的按钮都尝试）+ 网络抖动重试
+            # 点击登录(主页面与 iframe 内的按钮都尝试)+ 网络抖动重试
             def click_login_once() -> bool:
                 ok = False
                 for r in ([page] + (list(getattr(page, 'frames', [])) if hasattr(page, 'frames') else [])):
@@ -628,13 +628,13 @@ class TiktokLogin(LoginComponent):
             else:
                 print(f"[TiktokLogin] clicked login button: {clicked}")
 
-            # 点击后进行 5s 观察窗口；若仍在登录页且未出现 2FA，则再次点击，最多重试 3 次
+            # 点击后进行 5s 观察窗口;若仍在登录页且未出现 2FA,则再次点击,最多重试 3 次
             max_retries = 3
             attempt = 0
             while attempt <= max_retries:
                 twofa_found = False
                 left_login = False
-                # 观察窗口：5s（10 * 500ms）
+                # 观察窗口:5s(10 * 500ms)
                 for _ in range(10):
                     try:
                         frames = list(getattr(page, 'frames', []))
@@ -667,7 +667,7 @@ class TiktokLogin(LoginComponent):
                     clicked = click_login_once()
                     page.wait_for_timeout(500)
 
-            # 处理双重验证（iframe 兼容）
+            # 处理双重验证(iframe 兼容)
             had_2fa = False
             try:
                 frames = list(getattr(page, 'frames', []))
@@ -689,14 +689,14 @@ class TiktokLogin(LoginComponent):
             else:
                 print(f"[TiktokLogin] 2FA detected: {had_2fa} | url: {page.url}")
 
-            # 仅当仍在登录页且检测到 2FA 时才进入 2FA 处理，避免已在首页却误触发输入
+            # 仅当仍在登录页且检测到 2FA 时才进入 2FA 处理,避免已在首页却误触发输入
             if had_2fa and ("account/login" in str(page.url or "")):
                 self._maybe_handle_2fa(page)
                 page.wait_for_timeout(1200)
 
-            # 成功条件：
-            # 1) URL 已跳转离开登录页；或
-            # 2) 刚才存在 2FA，现在 2FA 元素已消失（视为已通过）
+            # 成功条件:
+            # 1) URL 已跳转离开登录页;或
+            # 2) 刚才存在 2FA,现在 2FA 元素已消失(视为已通过)
             frames = list(getattr(page, 'frames', [])) if hasattr(page, 'frames') else []
             roots = [page] + list(frames)
             twofa_elements_present = False

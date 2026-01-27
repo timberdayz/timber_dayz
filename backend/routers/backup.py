@@ -32,7 +32,7 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/system/backup", tags=["数据备份"])
 
-# 限流配置（如果可用）
+# 限流配置(如果可用)
 try:
     from backend.middleware.rate_limiter import role_based_rate_limit
 except ImportError:
@@ -51,7 +51,7 @@ async def create_backup(
     创建备份
     
     需要管理员权限
-    Docker环境：在容器内执行备份操作
+    Docker环境:在容器内执行备份操作
     """
     # 限流配置
     if role_based_rate_limit:
@@ -94,17 +94,17 @@ async def create_backup(
 
 @router.get("/backups", response_model=BackupListResponse)
 async def list_backups(
-    backup_type: Optional[str] = Query(None, description="备份类型（full 或 incremental）"),
-    status: Optional[str] = Query(None, description="备份状态（pending/completed/failed）"),
+    backup_type: Optional[str] = Query(None, description="备份类型(full 或 incremental)"),
+    status: Optional[str] = Query(None, description="备份状态(pending/completed/failed)"),
     start_time: Optional[datetime] = Query(None, description="开始时间"),
     end_time: Optional[datetime] = Query(None, description="结束时间"),
-    page: int = Query(1, ge=1, description="页码（1-based）"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数（最大100）"),
+    page: int = Query(1, ge=1, description="页码(1-based)"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数(最大100)"),
     db: AsyncSession = Depends(get_async_db),
     current_user = Depends(require_admin)
 ):
     """
-    获取备份列表（支持筛选、分页）
+    获取备份列表(支持筛选、分页)
     
     需要管理员权限
     """
@@ -277,9 +277,9 @@ async def restore_backup(
     恢复备份
     
     需要管理员权限
-    多重安全防护：维护窗口检查、多重确认、备份文件验证、恢复前自动备份等
+    多重安全防护:维护窗口检查、多重确认、备份文件验证、恢复前自动备份等
     """
-    # 限流配置（恢复操作更严格）
+    # 限流配置(恢复操作更严格)
     if role_based_rate_limit:
         @role_based_rate_limit(requests_per_minute=1, requests_per_hour=3)
         async def _restore():
@@ -311,7 +311,7 @@ async def restore_backup(
                 status_code=400
             )
         
-        # 2. 验证多重确认（至少2名不同的管理员）
+        # 2. 验证多重确认(至少2名不同的管理员)
         from modules.core.db import DimUser
         from sqlalchemy import select
         
@@ -347,7 +347,7 @@ async def restore_backup(
             
             confirmed_users.append(user)
         
-        # 3. 维护窗口检查（默认凌晨2-4点）
+        # 3. 维护窗口检查(默认凌晨2-4点)
         from datetime import datetime, time
         current_time = datetime.utcnow().time()
         maintenance_start = time(2, 0)  # 凌晨2点
@@ -360,7 +360,7 @@ async def restore_backup(
                 code=ErrorCode.OPERATION_NOT_ALLOWED,
                 message="当前不在维护窗口内",
                 error_type=get_error_type(ErrorCode.OPERATION_NOT_ALLOWED),
-                detail="数据恢复操作只能在维护窗口（凌晨2-4点）内执行，或设置 force_outside_window=True 强制执行",
+                detail="数据恢复操作只能在维护窗口(凌晨2-4点)内执行,或设置 force_outside_window=True 强制执行",
                 status_code=403
             )
         
@@ -369,7 +369,7 @@ async def restore_backup(
         try:
             emergency_backup = await service.create_backup(
                 backup_type="full",
-                description=f"恢复前紧急备份（恢复备份ID: {backup_id}）",
+                description=f"恢复前紧急备份(恢复备份ID: {backup_id})",
                 created_by=current_user.user_id
             )
             logger.warning(f"恢复前已创建紧急备份: ID={emergency_backup.id}")
@@ -379,17 +379,17 @@ async def restore_backup(
                 code=ErrorCode.INTERNAL_SERVER_ERROR,
                 message="创建紧急备份失败",
                 error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
-                detail="恢复操作前必须创建紧急备份，但创建失败",
+                detail="恢复操作前必须创建紧急备份,但创建失败",
                 status_code=500
             )
         
-        # 5. 执行恢复操作（简化实现，实际应该使用Celery异步任务）
-        # 注意：这里只是占位实现，实际恢复操作应该使用Celery异步任务，避免阻塞API
+        # 5. 执行恢复操作(简化实现,实际应该使用Celery异步任务)
+        # 注意:这里只是占位实现,实际恢复操作应该使用Celery异步任务,避免阻塞API
         started_at = datetime.utcnow()
         
         try:
-            # TODO: 实现实际的恢复逻辑（使用Celery异步任务）
-            # 这里只是返回成功响应，实际恢复应该在后台执行
+            # TODO: 实现实际的恢复逻辑(使用Celery异步任务)
+            # 这里只是返回成功响应,实际恢复应该在后台执行
             logger.warning(f"恢复操作已启动: 备份ID={backup_id}, 紧急备份ID={emergency_backup.id}")
             
             # 记录审计日志
@@ -416,7 +416,7 @@ async def restore_backup(
                 emergency_backup_id=emergency_backup.id,
                 started_at=started_at,
                 completed_at=None,
-                message="恢复操作已启动，正在后台执行"
+                message="恢复操作已启动,正在后台执行"
             )
             
         except Exception as e:

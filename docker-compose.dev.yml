@@ -1,6 +1,9 @@
 # 西虹ERP系统 - 开发环境Docker Compose配置
 # 用于本地开发，启用热重载和调试功能
 # 使用方式: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# 环境变量优先级: .env < .env.development（后者覆盖前者，若存在）
+# 建议复制 env.example 为 .env，env.development.example 为 .env.development
 
 services:
   # 开发环境数据库配置覆盖
@@ -29,12 +32,17 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
-      REDIS_URL: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
+      # ⭐ 与生产统一默认密码，避免本地/云端行为差异
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
       DATABASE_ECHO: "true"
       DEBUG: "true"
       APP_ENV: development
+      # ⭐ 开发环境延长 Token 有效期，减少 "Token refresh failed"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+      # ⭐ CORS：开发时前端在 5173，必须允许该来源，否则浏览器会拦截跨域请求
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:8001,http://127.0.0.1:8001}
       # ⭐ 路径配置（修复容器内路径检测问题）
       PROJECT_ROOT: /app
       DATA_DIR: /app/data
@@ -69,13 +77,16 @@ services:
       - dev-full
 
   # 前端开发配置（可选，通常本地运行）
+  # ⭐ 生产构建必须在 CI 中设置 VITE_API_URL（GitHub Secrets），否则会指向 localhost
   frontend:
     build:
       context: ./frontend
       dockerfile: ../Dockerfile.frontend
       target: development
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8001}
     environment:
-      VITE_API_URL: http://localhost:8001
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8001}
     volumes:
       # 挂载源代码，支持热重载
       - ./frontend/src:/app/src
@@ -86,12 +97,12 @@ services:
     profiles:
       - dev-full
 
-  # Redis缓存（开发环境）
+  # Redis缓存（开发环境，与生产统一默认密码 redis_pass_2025）
   redis:
     image: redis:7-alpine
     container_name: xihong_erp_redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-~!Qq11}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_pass_2025}
     volumes:
       - redis_data_dev:/data
     ports:
@@ -99,7 +110,7 @@ services:
     networks:
       - erp_network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-~!Qq11}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_pass_2025}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -120,9 +131,9 @@ services:
     command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=4
     environment:
       DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
-      REDIS_URL: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-~!Qq11}@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
       APP_ENV: development
       DEBUG: "true"
       # ⭐ 路径配置（修复容器内路径检测问题）

@@ -29,7 +29,7 @@ class VueFieldMappingApp(BaseApplication):
         self.app_id = "vue_field_mapping"
         self.name = "Vue字段映射审核"
         self.version = "1.0.0"
-        self.description = "基于Vue.js的现代化字段映射审核系统，解决Streamlit死循环问题"
+        self.description = "基于Vue.js的现代化字段映射审核系统,解决Streamlit死循环问题"
         
         # 服务状态
         self.backend_process = None
@@ -155,18 +155,18 @@ class VueFieldMappingApp(BaseApplication):
         
         # 检查关键依赖
         if not dependencies.get("fastapi") or not dependencies.get("uvicorn"):
-            logger.error("[FAIL] 缺少Python依赖，请运行: pip install fastapi uvicorn")
+            logger.error("[FAIL] 缺少Python依赖,请运行: pip install fastapi uvicorn")
             return
         
         if not dependencies.get("nodejs") or not dependencies.get("npm"):
             logger.error("[FAIL] 无法检测到Node.js依赖")
             logger.info("请尝试以下解决方案:")
-            logger.info("  1. 如果刚安装Node.js，请重启VSCode/终端")
+            logger.info("  1. 如果刚安装Node.js,请重启VSCode/终端")
             logger.info("  2. 在新的PowerShell窗口中运行: node --version")
-            logger.info("  3. 如果命令有效，请关闭VSCode并重新打开")
+            logger.info("  3. 如果命令有效,请关闭VSCode并重新打开")
             logger.info("  4. 或者使用独立终端运行此程序")
             logger.info("")
-            logger.info("[TIP] 快速验证: 打开新的PowerShell窗口，运行:")
+            logger.info("[TIP] 快速验证: 打开新的PowerShell窗口,运行:")
             logger.info("   node --version")
             logger.info("   npm --version")
             return
@@ -194,10 +194,10 @@ class VueFieldMappingApp(BaseApplication):
                 elif choice == "5":
                     self._show_menu()
                 else:
-                    logger.warning("[FAIL] 无效选择，请重新输入")
+                    logger.warning("[FAIL] 无效选择,请重新输入")
                     
             except KeyboardInterrupt:
-                logger.info("\n[STOP] 用户中断，正在停止服务...")
+                logger.info("\n[STOP] 用户中断,正在停止服务...")
                 self._stop_services()
                 break
             except Exception as e:
@@ -209,7 +209,7 @@ class VueFieldMappingApp(BaseApplication):
         print(f"[TARGET] {self.name} v{self.version}")
         print("="*60)
         print("[LIST] 功能:")
-        print("   [OK] Vue.js现代化界面（无死循环问题）")
+        print("   [OK] Vue.js现代化界面(无死循环问题)")
         print("   [OK] FastAPI高性能后端")
         print("   [OK] 智能字段映射")
         print("   [OK] 数据预览和入库")
@@ -257,9 +257,9 @@ class VueFieldMappingApp(BaseApplication):
     def _start_frontend(self) -> None:
         """启动前端服务"""
         try:
-            # 统一入口：不再启动模块内置前端，直接跳转到主前端的字段映射页面
+            # 统一入口:不再启动模块内置前端,直接跳转到主前端的字段映射页面
             target_url = 'http://localhost:5173/#/field-mapping'
-            logger.info("[LINK] 统一入口已启用：优先检测并打开主前端的字段映射页面")
+            logger.info("[LINK] 统一入口已启用:优先检测并打开主前端的字段映射页面")
 
             # 检测5173端口是否有服务在跑
             import socket
@@ -278,7 +278,7 @@ class VueFieldMappingApp(BaseApplication):
                     pass
 
             if not running:
-                logger.info("[GEAR] 检测到主前端未运行，尝试在 frontend/ 下启动 npm run dev ...")
+                logger.info("[GEAR] 检测到主前端未运行,尝试在 frontend/ 下启动 npm run dev ...")
                 try:
                     subprocess.Popen('npm run dev', cwd=Path('frontend'), shell=True)
                     time.sleep(3)
@@ -287,13 +287,13 @@ class VueFieldMappingApp(BaseApplication):
 
             webbrowser.open(target_url)
             logger.info(f"[WEB] 已打开: {target_url}")
-            logger.info("[i] 如需独立调试模块前端，可手动进入 modules/apps/vue_field_mapping/frontend 运行 npm run dev")
+            logger.info("[i] 如需独立调试模块前端,可手动进入 modules/apps/vue_field_mapping/frontend 运行 npm run dev")
         except Exception as e:
             logger.warning(f"[WARN] 无法打开主前端: {e}")
-            # 兜底：如果主前端未运行，仍尝试启动模块内置前端
+            # 兜底:如果主前端未运行,仍尝试启动模块内置前端
             try:
                 if not self.frontend_dir.exists():
-                    logger.error("[FAIL] 前端目录不存在，请先初始化前端")
+                    logger.error("[FAIL] 前端目录不存在,请先初始化前端")
                     return
                 node_modules = self.frontend_dir / "node_modules"
                 if not node_modules.exists():

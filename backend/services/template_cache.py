@@ -146,7 +146,7 @@ class TemplateCache:
     
     def find_similar_templates(self, platform: str, domain: str, 
                               columns: List[str]) -> List[Dict[str, Any]]:
-        """查找相似模板（基于列名匹配）"""
+        """查找相似模板(基于列名匹配)"""
         conn = sqlite3.connect(str(self.cache_file))
         cursor = conn.cursor()
         

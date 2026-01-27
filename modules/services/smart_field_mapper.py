@@ -5,7 +5,7 @@
 
 功能:
 1. 粒度感知的映射键生成
-2. 多策略字段匹配（精确/模糊/语义/历史）
+2. 多策略字段匹配(精确/模糊/语义/历史)
 3. 返回带置信度的映射结果
 
 作者: AI 专家级数据工程师
@@ -52,13 +52,13 @@ class SmartFieldMapper:
         
         Args:
             config_path: 字段映射配置文件路径
-            history_manager: 映射历史管理器（可选）
+            history_manager: 映射历史管理器(可选)
         """
         self.config_path = Path(config_path)
         self.history_manager = history_manager
         self.config = self._load_config()
         
-        # 同义词字典（用于语义匹配）
+        # 同义词字典(用于语义匹配)
         self.synonyms = {
             "gmv": ["revenue", "sales", "销售额", "营收", "成交额"],
             "quantity": ["qty", "count", "数量", "件数"],
@@ -89,7 +89,7 @@ class SmartFieldMapper:
         
         Args:
             columns: Excel文件的列名列表
-            metadata: 文件元数据（包含platform, data_type, granularity等）
+            metadata: 文件元数据(包含platform, data_type, granularity等)
         
         Returns:
             MappingResult: 映射结果
@@ -104,7 +104,7 @@ class SmartFieldMapper:
             logger.warning(f"未找到映射规则: {mapping_key}")
             return self._create_empty_result(mapping_key, columns, metadata)
         
-        # 3. 对每个标准字段，尝试多策略匹配
+        # 3. 对每个标准字段,尝试多策略匹配
         mappings = {}
         mapped_columns = set()
         
@@ -151,11 +151,11 @@ class SmartFieldMapper:
         data_type = metadata.get("data_type", "unknown")
         granularity = metadata.get("granularity", "")
         
-        # 对于traffic/services等时序数据，必须包含粒度
+        # 对于traffic/services等时序数据,必须包含粒度
         if data_type in ["traffic", "services", "analytics"] and granularity:
             return f"{platform}:{data_type}_{granularity}"
         else:
-            # 对于products/orders等非时序数据，粒度不影响字段结构
+            # 对于products/orders等非时序数据,粒度不影响字段结构
             return f"{platform}:{data_type}"
     
     def _load_field_rules(self, mapping_key: str) -> Dict[str, List[str]]:
@@ -330,7 +330,7 @@ if __name__ == "__main__":
     logger.info(f"  映射字段数: {len([m for m in result_1.mappings.values() if m.source_column])}/{len(result_1.mappings)}")
     logger.info(f"  未映射列: {result_1.unmapped_columns}")
     
-    # 测试案例2: TikTok客流数据（日粒度）
+    # 测试案例2: TikTok客流数据(日粒度)
     test_columns_2 = [
         "小时", "页面浏览次数", "去重页面浏览次数", "点击率", "转化率"
     ]

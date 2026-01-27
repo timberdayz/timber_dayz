@@ -3,7 +3,7 @@
 """
 数据质量监控服务
 
-功能：
+功能:
 - 检测orders与products的GMV差异
 - 生成质量告警
 - 写入quality_reports表
@@ -33,9 +33,9 @@ def detect_gmv_conflicts(
     
     Args:
         engine: 数据库引擎
-        start_date: 开始日期（默认最近30天）
-        end_date: 结束日期（默认今天）
-        threshold: 偏差阈值（默认5%）
+        start_date: 开始日期(默认最近30天)
+        end_date: 结束日期(默认今天)
+        threshold: 偏差阈值(默认5%)
     
     Returns:
         List[Dict]: 冲突列表
@@ -143,7 +143,7 @@ def detect_gmv_conflicts(
             )
         
         conflicts = df.to_dict('records')
-        logger.info(f"[QualityMonitor] 发现{len(conflicts)}个GMV冲突（偏差>{threshold*100}%）")
+        logger.info(f"[QualityMonitor] 发现{len(conflicts)}个GMV冲突(偏差>{threshold*100}%)")
         return conflicts
         
     except Exception as e:

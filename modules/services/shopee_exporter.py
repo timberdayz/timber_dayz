@@ -4,10 +4,10 @@
 Shopee 商品数据导出服务
 ======================
 
-基于 HAR 解析结果，实现参数化的 Shopee 商品表现数据导出：
+基于 HAR 解析结果,实现参数化的 Shopee 商品表现数据导出:
 - 支持按周导出
 - 自动处理 export -> report_id -> download 流程
-- 复用持久化登录态，直连 API
+- 复用持久化登录态,直连 API
 """
 
 import json
@@ -28,7 +28,7 @@ class ShopeeExporter:
         初始化导出器
         
         Args:
-            session_cookies: 可选的会话 cookies，如果不提供将尝试从持久化会话加载
+            session_cookies: 可选的会话 cookies,如果不提供将尝试从持久化会话加载
         """
         self.session = requests.Session()
         self.base_url = "https://seller.shopee.cn"
@@ -52,13 +52,13 @@ class ShopeeExporter:
         output_dir: Path = None
     ) -> Tuple[bool, str, Optional[Path]]:
         """
-        导出商品表现数据（按周）
+        导出商品表现数据(按周)
         
         Args:
             shop_id: 店铺ID (cnsc_shop_id)
             start_date: 开始日期 YYYY-MM-DD
             end_date: 结束日期 YYYY-MM-DD  
-            output_dir: 输出目录，默认 temp/outputs
+            output_dir: 输出目录,默认 temp/outputs
             
         Returns:
             (成功标志, 消息, 文件路径)
@@ -84,7 +84,7 @@ class ShopeeExporter:
                 'SPC_CDS': self._get_spc_cds(),
                 'SPC_CDS_VER': '2',
                 'cnsc_shop_id': shop_id,
-                'cbsc_shop_region': 'sg'  # 默认新加坡，可根据需要调整
+                'cbsc_shop_region': 'sg'  # 默认新加坡,可根据需要调整
             }
             
             logger.info(f"调用导出接口: {export_url}")
@@ -99,7 +99,7 @@ class ShopeeExporter:
             if not report_id:
                 return False, "未获取到 report_id", None
                 
-            logger.info(f"导出请求成功，report_id: {report_id}")
+            logger.info(f"导出请求成功,report_id: {report_id}")
             
             # 2. 轮询下载接口
             download_url = f"{self.base_url}/api/v3/settings/download_report/"
@@ -129,7 +129,7 @@ class ShopeeExporter:
                 download_link = report_info.get('download_link')
                 
                 if status == 2 and download_link:  # 状态2表示完成
-                    logger.info(f"报告生成完成，开始下载: {download_link}")
+                    logger.info(f"报告生成完成,开始下载: {download_link}")
                     
                     # 3. 下载文件
                     file_resp = self.session.get(download_link, timeout=60)
@@ -161,16 +161,16 @@ class ShopeeExporter:
                     meta_path.write_text(json.dumps(meta_data, ensure_ascii=False, indent=2), encoding='utf-8')
                     
                     logger.success(f"导出完成: {file_path} ({file_size:,} bytes)")
-                    return True, f"导出成功，文件大小: {file_size:,} bytes", file_path
+                    return True, f"导出成功,文件大小: {file_size:,} bytes", file_path
                     
                 elif status == 3:  # 状态3表示失败
                     return False, f"报告生成失败: {report_info.get('message', '未知错误')}", None
                     
                 else:
-                    logger.info(f"报告生成中，状态: {status}")
+                    logger.info(f"报告生成中,状态: {status}")
                     time.sleep(10)
                     
-            return False, "报告生成超时，请稍后重试", None
+            return False, "报告生成超时,请稍后重试", None
             
         except requests.RequestException as e:
             logger.error(f"网络请求失败: {e}")
@@ -180,7 +180,7 @@ class ShopeeExporter:
             return False, f"导出异常: {e}", None
 
     def _get_spc_cds(self) -> str:
-        """获取 SPC_CDS 参数，这里使用固定值，实际可能需要从页面动态获取"""
+        """获取 SPC_CDS 参数,这里使用固定值,实际可能需要从页面动态获取"""
         return "84cc39dc-9437-4f51-908d-1a1104b84c9f"
 
     @classmethod
@@ -209,7 +209,7 @@ def get_week_range(week_offset: int = 0) -> Tuple[str, str]:
     获取周范围
     
     Args:
-        week_offset: 周偏移，0=本周，-1=上周，-2=上上周
+        week_offset: 周偏移,0=本周,-1=上周,-2=上上周
         
     Returns:
         (start_date, end_date) 格式: YYYY-MM-DD

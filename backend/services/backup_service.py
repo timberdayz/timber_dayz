@@ -26,7 +26,7 @@ class BackupService:
     """数据备份服务类"""
     
     def __init__(self, db: AsyncSession):
-        """初始化服务（仅支持异步）"""
+        """初始化服务(仅支持异步)"""
         self.db = db
         self.settings = get_settings()
         
@@ -43,7 +43,7 @@ class BackupService:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
     
     def _get_database_url(self) -> str:
-        """获取数据库连接URL（Docker网络内）"""
+        """获取数据库连接URL(Docker网络内)"""
         # 从环境变量或settings获取数据库配置
         db_user = os.getenv("POSTGRES_USER", getattr(self.settings, "POSTGRES_USER", "erp_user"))
         db_password = os.getenv("POSTGRES_PASSWORD", getattr(self.settings, "POSTGRES_PASSWORD", ""))
@@ -69,15 +69,15 @@ class BackupService:
         """
         创建备份
         
-        Docker环境实现：
-        - 数据库备份：使用pg_dump连接postgres:5432
-        - 文件备份：备份挂载的volume
-        - 备份存储：保存到/app/backups
+        Docker环境实现:
+        - 数据库备份:使用pg_dump连接postgres:5432
+        - 文件备份:备份挂载的volume
+        - 备份存储:保存到/app/backups
         """
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         
         try:
-            # 创建备份记录（pending状态）
+            # 创建备份记录(pending状态)
             backup_record = BackupRecord(
                 backup_type=backup_type,
                 backup_path="",  # 稍后更新
@@ -191,7 +191,7 @@ class BackupService:
         page: int = 1,
         page_size: int = 20
     ) -> tuple[list[BackupRecord], int]:
-        """获取备份列表（分页、筛选）"""
+        """获取备份列表(分页、筛选)"""
         try:
             conditions = []
             
@@ -249,13 +249,13 @@ class BackupService:
         # 验证文件大小
         actual_size = backup_path.stat().st_size
         if actual_size != backup_record.backup_size:
-            return False, f"备份文件大小不匹配: 期望{backup_record.backup_size}字节，实际{actual_size}字节"
+            return False, f"备份文件大小不匹配: 期望{backup_record.backup_size}字节,实际{actual_size}字节"
         
         # 验证校验和
         if backup_record.checksum:
             actual_checksum = self._calculate_checksum(backup_path)
             if actual_checksum != backup_record.checksum:
-                return False, f"备份文件校验和不匹配: 期望{backup_record.checksum}，实际{actual_checksum}"
+                return False, f"备份文件校验和不匹配: 期望{backup_record.checksum},实际{actual_checksum}"
         
         return True, None
 

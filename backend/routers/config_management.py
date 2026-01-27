@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api/config", tags=["配置管理"])
 # 销售目标
 class SalesTargetCreate(BaseModel):
     shop_id: str = Field(..., description="店铺ID")
-    year_month: str = Field(..., description="目标月份（YYYY-MM）", pattern=r"^\d{4}-\d{2}$")
+    year_month: str = Field(..., description="目标月份(YYYY-MM)", pattern=r"^\d{4}-\d{2}$")
     target_sales_amount: float = Field(..., ge=0, description="目标销售额")
     target_order_count: int = Field(..., ge=0, description="目标订单数")
 
@@ -94,7 +94,7 @@ class CampaignTargetResponse(BaseModel):
 # 经营成本
 class OperatingCostCreate(BaseModel):
     shop_id: str = Field(..., description="店铺ID")
-    year_month: str = Field(..., description="成本月份（YYYY-MM）", pattern=r"^\d{4}-\d{2}$")
+    year_month: str = Field(..., description="成本月份(YYYY-MM)", pattern=r"^\d{4}-\d{2}$")
     rent: float = Field(0, ge=0, description="租金")
     salary: float = Field(0, ge=0, description="工资")
     marketing: float = Field(0, ge=0, description="营销费用")
@@ -137,7 +137,7 @@ class OperatingCostResponse(BaseModel):
 @router.get("/sales-targets", response_model=List[SalesTargetResponse])
 async def list_sales_targets(
     shop_id: Optional[str] = Query(None, description="店铺ID筛选"),
-    year_month: Optional[str] = Query(None, description="月份筛选（YYYY-MM）"),
+    year_month: Optional[str] = Query(None, description="月份筛选(YYYY-MM)"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取销售目标列表"""
@@ -338,13 +338,13 @@ async def delete_sales_target(
 
 @router.post("/sales-targets/copy-last-month")
 async def copy_last_month_targets(
-    target_month: str = Query(..., description="目标月份（YYYY-MM）", pattern=r"^\d{4}-\d{2}$"),
+    target_month: str = Query(..., description="目标月份(YYYY-MM)", pattern=r"^\d{4}-\d{2}$"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     复制上月目标到指定月份
     
-    从上一个月的目标复制到目标月份，如果目标月份已存在目标则跳过
+    从上一个月的目标复制到目标月份,如果目标月份已存在目标则跳过
     """
     try:
         # 解析目标月份
@@ -367,7 +367,7 @@ async def copy_last_month_targets(
         if not last_month_targets:
             return {
                 "success": True,
-                "message": f"上个月（{last_month}）没有目标数据，无需复制",
+                "message": f"上个月({last_month})没有目标数据,无需复制",
                 "copied_count": 0,
                 "skipped_count": 0
             }
@@ -426,14 +426,14 @@ async def copy_last_month_targets(
 
 @router.post("/sales-targets/batch-calculate")
 async def batch_calculate_achievement_rate(
-    year_month: Optional[str] = Query(None, description="月份筛选（YYYY-MM），为空则计算所有月份"),
+    year_month: Optional[str] = Query(None, description="月份筛选(YYYY-MM),为空则计算所有月份"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     批量计算达成率
     
     根据实际销售数据计算每个店铺的达成率
-    实际数据从B类数据表（fact_raw_data_orders_daily）中查询
+    实际数据从B类数据表(fact_raw_data_orders_daily)中查询
     """
     try:
         # 构建查询条件
@@ -445,8 +445,8 @@ async def batch_calculate_achievement_rate(
             params.append(year_month)
         
         # 查询所有销售目标
-        # [WARN] 注意：sales_targets表没有shop_id字段，需要通过target_breakdown表关联店铺
-        # 但根据提案，用户确认sales_targets表需要platform_code
+        # [WARN] 注意:sales_targets表没有shop_id字段,需要通过target_breakdown表关联店铺
+        # 但根据提案,用户确认sales_targets表需要platform_code
         # 这里先查询target_breakdown表获取店铺信息
         result = await db.execute(
             text(f"""
@@ -465,11 +465,11 @@ async def batch_calculate_achievement_rate(
             """)
         ).fetchall()
         
-        # 如果没有target_breakdown数据，返回空结果
+        # 如果没有target_breakdown数据,返回空结果
         if not targets:
             return {
                 "success": True,
-                "message": "没有找到需要计算的目标（或目标未关联店铺）",
+                "message": "没有找到需要计算的目标(或目标未关联店铺)",
                 "calculated_count": 0
             }
         
@@ -503,7 +503,7 @@ async def batch_calculate_achievement_rate(
                     granularity='daily'
                 )
                 
-                # 从B类数据表查询实际销售数据（使用动态表名）
+                # 从B类数据表查询实际销售数据(使用动态表名)
                 result = await db.execute(
                     text(f"""
                     SELECT 
@@ -528,8 +528,8 @@ async def batch_calculate_achievement_rate(
                     sales_achievement_rate = (actual_sales / target_sales_amount * 100) if target_sales_amount > 0 else 0.0
                     order_achievement_rate = (actual_orders / target_order_count * 100) if target_order_count > 0 else 0.0
                     
-                    # 更新目标记录（如果表中有达成率字段）
-                    # 注意：这里假设表中有achievement_rate字段，如果没有需要先添加
+                    # 更新目标记录(如果表中有达成率字段)
+                    # 注意:这里假设表中有achievement_rate字段,如果没有需要先添加
                     try:
                         await db.execute(
                             text("""
@@ -552,12 +552,12 @@ async def batch_calculate_achievement_rate(
                         )
                         calculated_count += 1
                     except Exception as e:
-                        # 如果表结构中没有这些字段，记录错误但不中断
-                        logger.warning(f"更新目标{target_id}失败（可能表结构不匹配）: {e}")
+                        # 如果表结构中没有这些字段,记录错误但不中断
+                        logger.warning(f"更新目标{target_id}失败(可能表结构不匹配): {e}")
                         errors.append(f"目标{target_id}: {str(e)}")
                 else:
                     # 没有实际数据
-                    logger.info(f"目标{target_id}（{shop_id}，{target_month}）没有实际销售数据")
+                    logger.info(f"目标{target_id}({shop_id},{target_month})没有实际销售数据")
                     
             except Exception as e:
                 logger.error(f"计算目标{target_id}达成率失败: {e}")
@@ -579,7 +579,7 @@ async def batch_calculate_achievement_rate(
 
 
 # ============================================================================
-# 战役目标API（Campaign Targets）
+# 战役目标API(Campaign Targets)
 # ============================================================================
 
 @router.get("/campaign-targets", response_model=List[CampaignTargetResponse])
@@ -708,7 +708,7 @@ async def create_campaign_target(
 
 
 # ============================================================================
-# 经营成本API（Operating Costs）
+# 经营成本API(Operating Costs)
 # ============================================================================
 
 @router.get("/operating-costs", response_model=List[OperatingCostResponse])
@@ -717,7 +717,7 @@ async def list_operating_costs(
     year_month: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取经营成本列表（使用原始SQL，因为表可能不存在）"""
+    """获取经营成本列表(使用原始SQL,因为表可能不存在)"""
     try:
         # 检查表是否存在
         result = await db.execute(
@@ -731,7 +731,7 @@ async def list_operating_costs(
         table_exists = result.scalar()
         
         if not table_exists:
-            logger.warning("operating_costs表不存在，返回空列表")
+            logger.warning("operating_costs表不存在,返回空列表")
             return []
         
         # 查询数据
@@ -778,7 +778,7 @@ async def create_operating_cost(
     cost: OperatingCostCreate,
     db: AsyncSession = Depends(get_async_db)
 ):
-    """创建经营成本（如果表不存在会先创建）"""
+    """创建经营成本(如果表不存在会先创建)"""
     try:
         # 确保表存在
         await db.execute(

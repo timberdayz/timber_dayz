@@ -3,21 +3,21 @@
 """
 登录状态检测器 (v4.8.0)
 
-功能：
+功能:
 1. 检测当前浏览器会话是否已登录
 2. 支持平台特定的检测规则
-3. 提供综合判断逻辑（URL + 元素 + Cookie）
+3. 提供综合判断逻辑(URL + 元素 + Cookie)
 4. 支持等待自动跳转检测
 5. 详细日志记录和调试模式
 
-使用场景：
+使用场景:
 - Inspector 录制时判断是否需要自动登录
 - 数据采集前验证登录状态
 
 v4.8.0 更新 (2025-12-25):
 - 增加Cookie检测方法
 - 增加等待自动跳转逻辑
-- 优化元素检测（超时、重试）
+- 优化元素检测(超时、重试)
 - 完善各平台检测规则
 - 增强综合判断逻辑
 - 增加调试模式和详细日志
@@ -55,8 +55,8 @@ class LoginDetectionResult:
     detected_by: str  # url, element, cookie, combined, redirect, fallback
     current_url: Optional[str] = None
     matched_pattern: Optional[str] = None
-    detection_time_ms: int = 0  # 检测耗时（毫秒）
-    details: Optional[Dict[str, Any]] = None  # 详细检测信息（调试用）
+    detection_time_ms: int = 0  # 检测耗时(毫秒)
+    details: Optional[Dict[str, Any]] = None  # 详细检测信息(调试用)
 
 
 # 平台特定的登录检测配置
@@ -74,7 +74,7 @@ LOGIN_DETECTION_CONFIG: Dict[str, Dict[str, Any]] = {
             "/product/list",
             "/order/list",
         ],
-        # 登录URL中的重定向参数（检测自动跳转用）
+        # 登录URL中的重定向参数(检测自动跳转用)
         "redirect_param_patterns": [
             "redirect=",
             "return_url=",
@@ -98,7 +98,7 @@ LOGIN_DETECTION_CONFIG: Dict[str, Dict[str, Any]] = {
             ".navbar-user",
         ],
         "auth_cookies": ["SPC_EC", "SPC_U", "SPC_SI"],
-        # 元素检测超时（毫秒）
+        # 元素检测超时(毫秒)
         "element_check_timeout": 5000,
     },
     "tiktok": {
@@ -145,7 +145,7 @@ LOGIN_DETECTION_CONFIG: Dict[str, Dict[str, Any]] = {
         "login_page_url_keywords": [
             "/login",
             "/signin",
-            "redirect=",  # 妙手ERP特殊：URL包含redirect=表示未登录
+            "redirect=",  # 妙手ERP特殊:URL包含redirect=表示未登录
         ],
         "logged_in_page_url_keywords": [
             "/welcome",
@@ -160,7 +160,7 @@ LOGIN_DETECTION_CONFIG: Dict[str, Dict[str, Any]] = {
             "redirect=",
             "?redirect=",
         ],
-        # 妙手ERP特殊规则：URL包含redirect=但跳转到/welcome表示已登录
+        # 妙手ERP特殊规则:URL包含redirect=但跳转到/welcome表示已登录
         "redirect_to_logged_in_check": {
             "from_pattern": "redirect=",
             "to_pattern": "/welcome",
@@ -184,7 +184,7 @@ LOGIN_DETECTION_CONFIG: Dict[str, Dict[str, Any]] = {
             "[class*='welcome']",
             "[class*='navbar']",
             ".ant-layout-header",
-            # 妙手ERP特殊：登录页特有元素不存在
+            # 妙手ERP特殊:登录页特有元素不存在
         ],
         "auth_cookies": ["JSESSIONID", "token", "SESSION"],
         "element_check_timeout": 8000,  # 妙手ERP加载较慢
@@ -228,7 +228,7 @@ LOGIN_DETECTION_CONFIG: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# 默认配置（用于未知平台）
+# 默认配置(用于未知平台)
 DEFAULT_DETECTION_CONFIG: Dict[str, Any] = {
     "login_page_url_keywords": [
         "/login",
@@ -277,10 +277,10 @@ class LoginStatusDetector:
             pass
     
     增强功能:
-        - Cookie检测：检查认证Cookie是否存在
-        - 等待自动跳转：检测URL自动跳转
-        - 综合判断：URL + 元素 + Cookie
-        - 调试模式：详细日志和截图
+        - Cookie检测:检查认证Cookie是否存在
+        - 等待自动跳转:检测URL自动跳转
+        - 综合判断:URL + 元素 + Cookie
+        - 调试模式:详细日志和截图
     """
     
     def __init__(self, platform: str, debug: bool = None):
@@ -289,7 +289,7 @@ class LoginStatusDetector:
         
         Args:
             platform: 平台名称 (shopee, tiktok, miaoshou, amazon)
-            debug: 是否启用调试模式（None表示使用环境变量）
+            debug: 是否启用调试模式(None表示使用环境变量)
         """
         self.platform = platform.lower()
         self.config = LOGIN_DETECTION_CONFIG.get(
@@ -301,17 +301,17 @@ class LoginStatusDetector:
         self._cache: Optional[LoginDetectionResult] = None
         self._cache_url: Optional[str] = None
         self._cache_time: float = 0
-        self._cache_ttl: float = 30.0  # 缓存有效期（秒）
+        self._cache_ttl: float = 30.0  # 缓存有效期(秒)
         
         logger.info(f"[LoginDetector] Initialized for platform: {self.platform}, debug={self.debug}")
     
     async def detect(self, page, wait_for_redirect: bool = True) -> LoginDetectionResult:
         """
-        检测登录状态（综合判断）
+        检测登录状态(综合判断)
         
         Args:
             page: Playwright Page 对象
-            wait_for_redirect: 是否等待自动跳转（默认True）
+            wait_for_redirect: 是否等待自动跳转(默认True)
             
         Returns:
             LoginDetectionResult: 检测结果
@@ -324,11 +324,11 @@ class LoginStatusDetector:
             logger.info(f"[LoginDetector] Using cached result: {self._cache.status.value}")
             return self._cache
         
-        # 收集检测详情（调试用）
+        # 收集检测详情(调试用)
         details = {} if self.debug else None
         
         try:
-            # 1. 等待自动跳转检测（如果URL包含重定向参数）
+            # 1. 等待自动跳转检测(如果URL包含重定向参数)
             if wait_for_redirect:
                 redirect_result = await self._check_redirect(page)
                 if redirect_result and redirect_result.confidence >= 0.8:
@@ -338,7 +338,7 @@ class LoginStatusDetector:
                 if details is not None:
                     details["redirect_check"] = redirect_result.__dict__ if redirect_result else None
             
-            # 更新当前URL（可能已跳转）
+            # 更新当前URL(可能已跳转)
             current_url = page.url
             
             # 2. URL 检测
@@ -346,7 +346,7 @@ class LoginStatusDetector:
             if details is not None:
                 details["url_check"] = url_result.__dict__
             
-            # 如果URL明确表示已登录，快速返回
+            # 如果URL明确表示已登录,快速返回
             if url_result.status == LoginStatus.LOGGED_IN and url_result.confidence >= 0.85:
                 self._log_result("url", url_result, start_time)
                 self._update_cache(current_url, url_result)
@@ -375,7 +375,7 @@ class LoginStatusDetector:
             self._log_result("combined", combined_result, start_time)
             self._update_cache(current_url, combined_result)
             
-            # 调试模式：检测失败时截图
+            # 调试模式:检测失败时截图
             if self.debug and combined_result.status == LoginStatus.UNKNOWN:
                 await self._save_debug_screenshot(page, "unknown_status")
             
@@ -383,7 +383,7 @@ class LoginStatusDetector:
             
         except Exception as e:
             logger.error(f"[LoginDetector] Detection failed with error: {e}")
-            # 检测失败，返回保守结果
+            # 检测失败,返回保守结果
             fallback_result = LoginDetectionResult(
                 status=LoginStatus.NOT_LOGGED_IN,
                 confidence=0.3,
@@ -400,12 +400,12 @@ class LoginStatusDetector:
     
     async def _check_redirect(self, page) -> Optional[LoginDetectionResult]:
         """
-        检测URL是否自动跳转（用于持久化会话已登录的情况）
+        检测URL是否自动跳转(用于持久化会话已登录的情况)
         
-        流程：
+        流程:
         1. 检查当前URL是否包含重定向参数
-        2. 等待最多5秒，检测URL是否变化
-        3. 如果跳转到已登录页面，返回已登录结果
+        2. 等待最多5秒,检测URL是否变化
+        3. 如果跳转到已登录页面,返回已登录结果
         """
         initial_url = page.url
         redirect_patterns = self.config.get("redirect_param_patterns", [])
@@ -421,7 +421,7 @@ class LoginStatusDetector:
         
         logger.info(f"[LoginDetector] URL contains redirect param, waiting for auto-redirect...")
         
-        # 等待自动跳转（最多5秒）
+        # 等待自动跳转(最多5秒)
         max_wait_time = 5.0
         check_interval = 0.5
         waited = 0.0
@@ -440,7 +440,7 @@ class LoginStatusDetector:
                 logged_in_keywords = self.config.get("logged_in_page_url_keywords", [])
                 for keyword in logged_in_keywords:
                     if keyword.lower() in current_url.lower():
-                        # 妙手ERP特殊处理：确保跳转后不再包含redirect参数
+                        # 妙手ERP特殊处理:确保跳转后不再包含redirect参数
                         redirect_check = self.config.get("redirect_to_logged_in_check", {})
                         exclude_pattern = redirect_check.get("exclude_pattern", "")
                         
@@ -466,7 +466,7 @@ class LoginStatusDetector:
         """
         url_lower = url.lower()
         
-        # 妙手ERP特殊处理：/welcome 且不包含 redirect= 表示已登录
+        # 妙手ERP特殊处理:/welcome 且不包含 redirect= 表示已登录
         if self.platform == "miaoshou":
             if "/welcome" in url_lower and "redirect=" not in url_lower:
                 return LoginDetectionResult(
@@ -478,7 +478,7 @@ class LoginStatusDetector:
                     matched_pattern="/welcome"
                 )
         
-        # 检查已登录页 URL（优先级更高，因为更可靠）
+        # 检查已登录页 URL(优先级更高,因为更可靠)
         for keyword in self.config.get("logged_in_page_url_keywords", []):
             if keyword.lower() in url_lower:
                 # 排除包含重定向参数的情况
@@ -543,7 +543,7 @@ class LoginStatusDetector:
                     found_cookies.append(auth_cookie)
             
             if found_cookies:
-                # 计算置信度（找到的Cookie数量 / 配置的Cookie数量）
+                # 计算置信度(找到的Cookie数量 / 配置的Cookie数量)
                 confidence = min(0.85, 0.5 + len(found_cookies) * 0.15)
                 return LoginDetectionResult(
                     status=LoginStatus.LOGGED_IN,
@@ -574,13 +574,13 @@ class LoginStatusDetector:
     
     async def _check_elements(self, page) -> LoginDetectionResult:
         """
-        通过页面元素检测登录状态（带重试机制）
+        通过页面元素检测登录状态(带重试机制)
         """
         timeout = self.config.get("element_check_timeout", 5000)
         max_retries = 2
         
         for retry in range(max_retries):
-            # 1. 检查登录表单元素（未登录标识）
+            # 1. 检查登录表单元素(未登录标识)
             login_form_result = await self._check_login_form_elements(page, timeout)
             if login_form_result.status == LoginStatus.NOT_LOGGED_IN:
                 return login_form_result
@@ -590,7 +590,7 @@ class LoginStatusDetector:
             if logged_in_result.status == LoginStatus.LOGGED_IN:
                 return logged_in_result
             
-            # 如果第一次检测不确定，等待后重试
+            # 如果第一次检测不确定,等待后重试
             if retry < max_retries - 1:
                 logger.info(f"[LoginDetector] Element check inconclusive, retrying ({retry + 1}/{max_retries})...")
                 await page.wait_for_timeout(1000)
@@ -673,7 +673,7 @@ class LoginStatusDetector:
     
     def _get_locator(self, page, selector: str):
         """
-        根据选择器获取定位器（使用官方 API）
+        根据选择器获取定位器(使用官方 API)
         """
         # 处理 text= 前缀
         if selector.startswith("text="):
@@ -718,7 +718,7 @@ class LoginStatusDetector:
         details: Optional[Dict] = None
     ) -> LoginDetectionResult:
         """
-        综合多个检测结果（URL + 元素 + Cookie）
+        综合多个检测结果(URL + 元素 + Cookie)
         """
         results = [
             ("url", url_result),
@@ -761,7 +761,7 @@ class LoginStatusDetector:
                 current_url=current_url
             )
         
-        # 3. 如果Cookie存在，倾向于认为已登录
+        # 3. 如果Cookie存在,倾向于认为已登录
         if cookie_result.status == LoginStatus.LOGGED_IN and cookie_result.confidence >= 0.6:
             return LoginDetectionResult(
                 status=LoginStatus.LOGGED_IN,
@@ -780,7 +780,7 @@ class LoginStatusDetector:
         if url_result.status != LoginStatus.UNKNOWN and url_result.confidence >= 0.7:
             return url_result
         
-        # 6. 无法确定，返回保守结果（假设未登录）
+        # 6. 无法确定,返回保守结果(假设未登录)
         return LoginDetectionResult(
             status=LoginStatus.NOT_LOGGED_IN,
             confidence=0.4,
@@ -863,11 +863,11 @@ class LoginStatusDetector:
         Returns:
             bool: 是否需要登录
         """
-        # 已登录且置信度高，不需要登录
+        # 已登录且置信度高,不需要登录
         if result.status == LoginStatus.LOGGED_IN and result.confidence >= 0.7:
             return False
         
-        # 未登录或置信度低，需要登录
+        # 未登录或置信度低,需要登录
         return True
 
 

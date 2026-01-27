@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
-限流配置服务（Phase 3）
+限流配置服务(Phase 3)
 
-用途：
+用途:
 - 从数据库读取限流配置
 - 实现配置缓存机制
 - 支持配置热更新
 
-v4.19.4 新增：Phase 3 数据库配置支持
+v4.19.4 新增:Phase 3 数据库配置支持
 """
 
 from typing import Dict, Optional
@@ -26,9 +26,9 @@ class RateLimitConfigService:
     """
     限流配置服务
     
-    功能：
+    功能:
     - 从数据库读取限流配置
-    - 配置缓存（减少数据库查询）
+    - 配置缓存(减少数据库查询)
     - 配置热更新支持
     """
     
@@ -37,7 +37,7 @@ class RateLimitConfigService:
         初始化服务
         
         Args:
-            db: 数据库会话（异步）
+            db: 数据库会话(异步)
         """
         self.db = db
         self._cache: Optional[Dict[str, Dict[str, str]]] = None
@@ -46,7 +46,7 @@ class RateLimitConfigService:
     
     async def get_rate_limit_tiers(self, force_refresh: bool = False) -> Dict[str, Dict[str, str]]:
         """
-        获取限流配置（带缓存）
+        获取限流配置(带缓存)
         
         Args:
             force_refresh: 是否强制刷新缓存
@@ -110,7 +110,7 @@ class RateLimitConfigService:
             
         except Exception as e:
             logger.error(f"[RateLimitConfig] 从数据库加载配置失败: {e}")
-            # 返回空字典，让系统使用默认配置
+            # 返回空字典,让系统使用默认配置
             return {}
     
     async def get_rate_limit_for_role(
@@ -124,11 +124,11 @@ class RateLimitConfigService:
         
         Args:
             role_code: 角色代码
-            endpoint_type: 端点类型（default/data_sync/auth）
+            endpoint_type: 端点类型(default/data_sync/auth)
             force_refresh: 是否强制刷新缓存
             
         Returns:
-            Optional[str]: 限流值（如 "200/minute"），如果不存在则返回 None
+            Optional[str]: 限流值(如 "200/minute"),如果不存在则返回 None
         """
         tiers = await self.get_rate_limit_tiers(force_refresh=force_refresh)
         
@@ -150,7 +150,7 @@ class RateLimitConfigService:
         await self.get_rate_limit_tiers(force_refresh=True)
 
 
-# 全局配置服务实例（单例模式）
+# 全局配置服务实例(单例模式)
 _config_service: Optional[RateLimitConfigService] = None
 
 
@@ -159,7 +159,7 @@ def get_config_service(db: AsyncSession) -> RateLimitConfigService:
     获取配置服务实例
     
     Args:
-        db: 数据库会话（异步）
+        db: 数据库会话(异步)
         
     Returns:
         RateLimitConfigService: 配置服务实例

@@ -18,7 +18,7 @@ import shutil
 try:
     from local_accounts import get_all_local_accounts, get_accounts_by_platform
 except ImportError:
-    print("[WARN] 警告：未找到local_accounts.py，使用默认配置")
+    print("[WARN] 警告:未找到local_accounts.py,使用默认配置")
     def get_all_local_accounts():
         return []
     def get_accounts_by_platform(platform):
@@ -72,7 +72,7 @@ class DataOrganizer:
             if not account_id or not platform:
                 return None
             
-            # 标准化路径名称（移除特殊字符）
+            # 标准化路径名称(移除特殊字符)
             safe_account_id = self._sanitize_name(account_id)
             safe_store_name = self._sanitize_name(store_name)
             safe_region = self._sanitize_name(region)
@@ -409,13 +409,13 @@ if __name__ == "__main__":
     # 测试数据组织器
     organizer = initialize_data_organizer()
     
-    # 示例：存储Shopee数据
+    # 示例:存储Shopee数据
     shopee_accounts = get_accounts_by_platform("Shopee")
     if shopee_accounts:
         account_id = shopee_accounts[0].get("account_id")
         if account_id:
             # 存储手动下载的Excel文件
-            source_file = "downloads/miaoshou/妙手erp_18876067809/sales/妙手1月~6月销售数据（SP）.xlsx"
+            source_file = "downloads/miaoshou/妙手erp_18876067809/sales/妙手1月~6月销售数据(SP).xlsx"
             if Path(source_file).exists():
                 organizer.store_data_file(
                     account_id=account_id,

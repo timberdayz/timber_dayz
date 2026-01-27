@@ -57,7 +57,7 @@ class MiaoshouDatePicker(DatePickerComponent):
         elif option == DateOption.LAST_7_DAYS:
             start = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
         elif option in (DateOption.LAST_28_DAYS, DateOption.LAST_30_DAYS):
-            # 后端通常按30天聚合，保持与现有映射一致
+            # 后端通常按30天聚合,保持与现有映射一致
             start = (now - timedelta(days=29)).replace(hour=0, minute=0, second=0, microsecond=0)
         else:
             # 默认近7天
@@ -67,7 +67,7 @@ class MiaoshouDatePicker(DatePickerComponent):
     async def _type_range_inputs(self, page: Any, start_str: str, end_str: str) -> bool:
         """Type into Miaoshou jx-date datetimerange inputs directly."""
         try:
-            # 通用选择：范围输入框两个
+            # 通用选择:范围输入框两个
             inputs = page.locator(".jx-date-editor--datetimerange input.jx-range-input")
             if await inputs.count() < 2:
                 inputs = page.locator("input.jx-range-input")
@@ -110,7 +110,7 @@ class MiaoshouDatePicker(DatePickerComponent):
 
     async def run(self, page: Any, option: DateOption, apply_to_page: bool = True) -> DatePickResult:  # type: ignore[override]
         try:
-            # 仅配置模式：不触碰页面控件，只写入 ctx.config 供后续导出流程使用
+            # 仅配置模式:不触碰页面控件,只写入 ctx.config 供后续导出流程使用
             if not apply_to_page:
                 try:
                     cfg = self.ctx.config or {}
@@ -119,7 +119,7 @@ class MiaoshouDatePicker(DatePickerComponent):
                     self.ctx.config = cfg
                 except Exception:
                     pass
-                # config-only 模式不打印"selecting"，避免造成步骤错序的观感
+                # config-only 模式不打印"selecting",避免造成步骤错序的观感
                 return DatePickResult(success=True, option=option, message="config-only")
 
             if self.logger:
@@ -131,7 +131,7 @@ class MiaoshouDatePicker(DatePickerComponent):
                 DateOption.LAST_28_DAYS: ["过去30天", "最近30天", "近30天", "近一个月"],
             }
             ok = await self._click_option_texts(page, mapping.get(option, []))
-            # 若无快捷选项可点，直接输入设置
+            # 若无快捷选项可点,直接输入设置
             if not ok:
                 start_str, end_str = self._calc_range(option)
                 typed = await self._type_range_inputs(page, start_str, end_str)

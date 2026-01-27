@@ -1,7 +1,7 @@
 """
 组件版本管理服务 (Phase 9.4)
 
-负责：
+负责:
 1. 组件版本注册和管理
 2. A/B测试流量分配
 3. 自动统计成功率
@@ -39,9 +39,9 @@ class ComponentVersionService:
         注册新版本组件
         
         Args:
-            component_name: 组件名称（如shopee/login）
-            version: 版本号（如1.0.0）
-            file_path: 文件路径（如shopee/components/login.py 或旧版 shopee/login_v1.0.yaml）
+            component_name: 组件名称(如shopee/login)
+            version: 版本号(如1.0.0)
+            file_path: 文件路径(如shopee/components/login.py 或旧版 shopee/login_v1.0.yaml)
             description: 版本说明
             is_stable: 是否标记为稳定版本
             created_by: 创建人
@@ -50,8 +50,8 @@ class ComponentVersionService:
             ComponentVersion对象
             
         Note:
-            v4.8.0起，file_path 应使用 Python 组件路径（.py），
-            旧版 YAML 组件路径（.yaml）已废弃。
+            v4.8.0起,file_path 应使用 Python 组件路径(.py),
+            旧版 YAML 组件路径(.yaml)已废弃。
         """
         # 检查是否已存在
         existing = self.db.execute(
@@ -95,7 +95,7 @@ class ComponentVersionService:
             component_name: 组件名称
             
         Returns:
-            稳定版本，如果没有则返回None
+            稳定版本,如果没有则返回None
         """
         return self.db.execute(
             select(ComponentVersion)
@@ -117,7 +117,7 @@ class ComponentVersionService:
             component_name: 组件名称
             
         Returns:
-            测试版本，如果没有则返回None
+            测试版本,如果没有则返回None
         """
         now = datetime.utcnow()
         
@@ -147,7 +147,7 @@ class ComponentVersionService:
         enable_ab_test: bool = True
     ) -> Optional[ComponentVersion]:
         """
-        选择要使用的版本（A/B测试逻辑）
+        选择要使用的版本(A/B测试逻辑)
         
         Args:
             component_name: 组件名称
@@ -155,7 +155,7 @@ class ComponentVersionService:
             enable_ab_test: 是否启用A/B测试
             
         Returns:
-            选中的版本，如果没有则返回None
+            选中的版本,如果没有则返回None
         """
         # 强制版本
         if force_version:
@@ -189,7 +189,7 @@ class ComponentVersionService:
         if stable_version:
             return stable_version
         
-        # 如果没有稳定版本，使用最新的活跃版本
+        # 如果没有稳定版本,使用最新的活跃版本
         return self.db.execute(
             select(ComponentVersion)
             .where(
@@ -259,7 +259,7 @@ class ComponentVersionService:
         Args:
             component_name: 组件名称
             test_version: 测试版本号
-            test_ratio: 测试流量比例（0.0-1.0）
+            test_ratio: 测试流量比例(0.0-1.0)
             duration_days: 测试持续天数
             
         Returns:
@@ -319,7 +319,7 @@ class ComponentVersionService:
     
     def promote_to_stable(self, component_name: str, version: str) -> ComponentVersion:
         """
-        提升版本为稳定版本（v4.8.0 增强：确保稳定版本唯一性）
+        提升版本为稳定版本(v4.8.0 增强:确保稳定版本唯一性)
         
         Args:
             component_name: 组件名称
@@ -329,9 +329,9 @@ class ComponentVersionService:
             提升后的版本对象
             
         Note:
-            v4.8.0 增强：
+            v4.8.0 增强:
             1. 取消该组件所有其他稳定版本的 is_stable 标志
-            2. 特别处理相同 file_path 的版本，确保唯一性
+            2. 特别处理相同 file_path 的版本,确保唯一性
         """
         # 获取版本
         version_obj = self.db.execute(
@@ -361,7 +361,7 @@ class ComponentVersionService:
             cancelled_count += 1
             logger.info(f"Cancelled stable status: {other_stable.component_name} v{other_stable.version}")
         
-        # v4.8.0: 如果有相同 file_path 的其他稳定版本，也取消它们
+        # v4.8.0: 如果有相同 file_path 的其他稳定版本,也取消它们
         if version_obj.file_path:
             for same_path_stable in self.db.execute(
                 select(ComponentVersion).where(

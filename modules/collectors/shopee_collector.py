@@ -3,9 +3,9 @@
 
 """
 Shopee商家端数据采集器
-基于Playwright技术栈，支持邮箱OTP验证和会话持久化
+基于Playwright技术栈,支持邮箱OTP验证和会话持久化
 支持多账号数据隔离和店铺维度管理
-集成智能代理管理器，自动优化网络策略
+集成智能代理管理器,自动优化网络策略
 """
 
 import time
@@ -23,7 +23,7 @@ try:
     PROXY_MANAGER_AVAILABLE = True
 except ImportError:
     PROXY_MANAGER_AVAILABLE = False
-    logging.warning("[WARN] 智能代理管理器不可用，将使用静态代理配置")
+    logging.warning("[WARN] 智能代理管理器不可用,将使用静态代理配置")
 
 
 logger = logging.getLogger(__name__)
@@ -169,7 +169,7 @@ class ShopeeCollector:
                 context_options['proxy'] = proxy_config
                 logger.info(f"[WEB] 使用智能代理: {proxy_config['server']}")
             else:
-                logger.info("[WEB] 使用直连模式（智能策略推荐）")
+                logger.info("[WEB] 使用直连模式(智能策略推荐)")
             
             self.context = self.browser.new_context(**context_options)
             
@@ -274,7 +274,7 @@ class ShopeeCollector:
                         logger.info(f"[OK] 智能代理管理器获取到代理: {proxy_info.ip}:{proxy_info.port} ({proxy_info.location})")
                         return proxy_config
                     else:
-                        logger.warning("[WARN] 无法获取代理，回退到直连模式")
+                        logger.warning("[WARN] 无法获取代理,回退到直连模式")
                         return None
                 else:
                     logger.info(f"[TARGET] 智能策略: {strategy['reason']}")
@@ -289,7 +289,7 @@ class ShopeeCollector:
             return self._get_static_proxy_config()
     
     def _get_static_proxy_config(self) -> Optional[Dict[str, str]]:
-        """获取静态代理配置（回退方案）"""
+        """获取静态代理配置(回退方案)"""
         try:
             proxy_info = self.account_config.get('proxy', {})
             if not proxy_info:
@@ -312,13 +312,13 @@ class ShopeeCollector:
         """保存会话状态"""
         try:
             if not self.context:
-                logger.warning("[WARN] 没有活跃的浏览器上下文，无法保存会话")
+                logger.warning("[WARN] 没有活跃的浏览器上下文,无法保存会话")
                 return False
             
             # 获取所有cookies
             cookies = self.context.cookies()
             
-            # 获取localStorage（如果可能）
+            # 获取localStorage(如果可能)
             local_storage = {}
             try:
                 local_storage = self.page.evaluate("() => Object.assign({}, window.localStorage)")
@@ -349,16 +349,16 @@ class ShopeeCollector:
         """加载会话状态"""
         try:
             if not self.session_file.exists():
-                logger.info("[NOTE] 没有找到会话文件，将进行新的登录")
+                logger.info("[NOTE] 没有找到会话文件,将进行新的登录")
                 return False
             
             with open(self.session_file, 'r', encoding='utf-8') as f:
                 session_data = json.load(f)
             
-            # 检查会话是否过期（24小时）
+            # 检查会话是否过期(24小时)
             timestamp = datetime.fromisoformat(session_data.get('timestamp', ''))
             if datetime.now() - timestamp > timedelta(hours=24):
-                logger.info("[TIME] 会话已过期，将进行新的登录")
+                logger.info("[TIME] 会话已过期,将进行新的登录")
                 return False
             
             # 恢复cookies
@@ -366,7 +366,7 @@ class ShopeeCollector:
                 self.context.add_cookies(session_data['cookies'])
                 logger.info("[OK] Cookies已恢复")
             
-            # 恢复localStorage（如果可能）
+            # 恢复localStorage(如果可能)
             if session_data.get('local_storage'):
                 try:
                     for key, value in session_data['local_storage'].items():
@@ -411,12 +411,12 @@ class ShopeeCollector:
                     
                     # 等待JavaScript渲染完成 - Shopee需要5-10秒
                     logger.info("[WAIT] 等待JavaScript渲染登录表单...")
-                    time.sleep(8)  # 基于分析结果，需要等待8秒确保表单完全加载
+                    time.sleep(8)  # 基于分析结果,需要等待8秒确保表单完全加载
                     
                     # 检查页面是否有基本元素
                     input_elements = self.page.query_selector_all('input')
                     if len(input_elements) >= 2:  # 至少需要用户名和密码输入框
-                        logger.info(f"[OK] 页面加载成功，找到 {len(input_elements)} 个输入元素")
+                        logger.info(f"[OK] 页面加载成功,找到 {len(input_elements)} 个输入元素")
                         
                         # 截图记录
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -426,7 +426,7 @@ class ShopeeCollector:
                         
                         return True
                     else:
-                        logger.warning(f"[WARN] 页面加载不完整，未找到输入元素")
+                        logger.warning(f"[WARN] 页面加载不完整,未找到输入元素")
                         continue
                         
                 except Exception as e:
@@ -476,7 +476,7 @@ class ShopeeCollector:
                 '#password'
             ]
             
-            # 如果找到登录相关元素，说明未登录
+            # 如果找到登录相关元素,说明未登录
             for selector in login_indicators:
                 try:
                     element = self.page.query_selector(selector)
@@ -504,7 +504,7 @@ class ShopeeCollector:
                 except:
                     continue
             
-            logger.info("[WARN] 无法确定登录状态，默认为未登录")
+            logger.info("[WARN] 无法确定登录状态,默认为未登录")
             return False
             
         except Exception as e:
@@ -518,9 +518,9 @@ class ShopeeCollector:
             
             # 等待JavaScript渲染完成 - 确保登录表单可用
             logger.info("[WAIT] 等待登录表单完全渲染...")
-            time.sleep(8)  # 基于分析结果，Shopee需要8秒渲染登录表单
+            time.sleep(8)  # 基于分析结果,Shopee需要8秒渲染登录表单
             
-            # 查找用户名输入框 - 优化：基于调试结果
+            # 查找用户名输入框 - 优化:基于调试结果
             username_selectors = [
                 'input[type="text"]',  # Shopee专用 - 优先级最高
                 'input[placeholder*="账号"]',  # Shopee的placeholder包含"账号"
@@ -591,7 +591,7 @@ class ShopeeCollector:
             screenshot_path = self.screenshot_dir / f"before_login_{timestamp}.png"
             self.page.screenshot(path=str(screenshot_path), full_page=True)
             
-            # 查找登录按钮 - 修复：Shopee使用"登入"而不是"登录"
+            # 查找登录按钮 - 修复:Shopee使用"登入"而不是"登录"
             login_selectors = [
                 'button:has-text("登入")',  # Shopee专用 - 优先级最高
                 '.submit-btn',  # Shopee的submit按钮class
@@ -676,7 +676,7 @@ class ShopeeCollector:
                 logger.error(f"[FAIL] 登录失败: {error_message}")
                 return False
             
-            logger.warning("[WARN] 登录状态不明确，可能需要手动处理")
+            logger.warning("[WARN] 登录状态不明确,可能需要手动处理")
             return False
             
         except Exception as e:
@@ -765,8 +765,8 @@ class ShopeeCollector:
             logger.info("[EMAIL] 开始处理邮箱验证...")
             
             # 这里应该集成邮箱OTP获取功能
-            # 目前返回False，表示需要手动处理
-            logger.warning("[WARN] 邮箱验证需要手动处理，请检查邮箱并输入验证码")
+            # 目前返回False,表示需要手动处理
+            logger.warning("[WARN] 邮箱验证需要手动处理,请检查邮箱并输入验证码")
             
             # 等待用户手动输入验证码
             time.sleep(30)
@@ -788,7 +788,7 @@ class ShopeeCollector:
             logger.info("[PHONE] 开始处理手机验证...")
             
             # 手机验证通常需要手动处理
-            logger.warning("[WARN] 手机验证需要手动处理，请输入短信验证码")
+            logger.warning("[WARN] 手机验证需要手动处理,请输入短信验证码")
             
             # 等待用户手动输入验证码
             time.sleep(30)
@@ -810,7 +810,7 @@ class ShopeeCollector:
             logger.info("[abc] 开始处理验证码...")
             
             # 验证码通常需要手动处理
-            logger.warning("[WARN] 验证码需要手动处理，请输入图片验证码")
+            logger.warning("[WARN] 验证码需要手动处理,请输入图片验证码")
             
             # 等待用户手动输入验证码
             time.sleep(30)
@@ -875,10 +875,10 @@ class ShopeeCollector:
                 # 导航到主页检查会话是否有效
                 if self.navigate_to_login():
                     if self.check_login_status():
-                        logger.info("[OK] 会话有效，无需重新登录")
+                        logger.info("[OK] 会话有效,无需重新登录")
                         return True
                     else:
-                        logger.info("[WARN] 会话无效，需要重新登录")
+                        logger.info("[WARN] 会话无效,需要重新登录")
             
             # 3. 导航到登录页面
             if not self.navigate_to_login():
@@ -898,7 +898,7 @@ class ShopeeCollector:
             logger.error(f"[FAIL] 登录流程失败: {e}")
             return False
         finally:
-            # 登录完成后不关闭浏览器，保持会话
+            # 登录完成后不关闭浏览器,保持会话
             pass
     
     def collect_order_data(self, date_range: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
@@ -906,7 +906,7 @@ class ShopeeCollector:
         采集订单数据
         
         Args:
-            date_range: 日期范围，格式如 {'start': '2024-01-01', 'end': '2024-01-31'}
+            date_range: 日期范围,格式如 {'start': '2024-01-01', 'end': '2024-01-31'}
             
         Returns:
             采集结果
@@ -946,7 +946,7 @@ class ShopeeCollector:
             # 设置日期范围
             if date_range:
                 if not self._set_date_range(date_range):
-                    logger.warning("[WARN] 设置日期范围失败，使用默认范围")
+                    logger.warning("[WARN] 设置日期范围失败,使用默认范围")
             
             # 采集订单数据
             orders = self._extract_order_data()
@@ -967,7 +967,7 @@ class ShopeeCollector:
             with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"[OK] 订单数据采集完成，共 {len(orders)} 条记录")
+            logger.info(f"[OK] 订单数据采集完成,共 {len(orders)} 条记录")
             logger.info(f"[DIR] 数据已保存到: {output_file}")
             
             return result
@@ -1194,7 +1194,7 @@ class ShopeeCollector:
             return self._create_failure_result(str(e), collection_start_time)
         
         finally:
-            # 采集完成后保持浏览器会话，用于后续操作
+            # 采集完成后保持浏览器会话,用于后续操作
             self.save_session()
     
     def _create_failure_result(self, error_msg: str, start_time: datetime) -> Dict[str, Any]:
@@ -1281,7 +1281,7 @@ class ShopeeCollector:
             logger.info("[RECV] 开始下载数据报告...")
             
             # 这里可以实现具体的下载逻辑
-            # 目前返回True表示下载成功（占位实现）
+            # 目前返回True表示下载成功(占位实现)
             logger.info("[OK] 数据报告下载完成")
             return True
             

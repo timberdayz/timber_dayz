@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-高性能批量导入服务（第二阶段优化）
+高性能批量导入服务(第二阶段优化)
 
-使用 PostgreSQL COPY 命令实现高性能批量导入：
-- 性能：10000行从100秒优化到10-20秒（5-10倍提升）
-- 流程：DataFrame -> CSV -> COPY to staging -> UPSERT to fact
-- 安全：会话级优化，不影响全局
+使用 PostgreSQL COPY 命令实现高性能批量导入:
+- 性能:10000行从100秒优化到10-20秒(5-10倍提升)
+- 流程:DataFrame -> CSV -> COPY to staging -> UPSERT to fact
+- 安全:会话级优化,不影响全局
 """
 
 from __future__ import annotations
@@ -43,13 +43,13 @@ class BulkImporter:
         """批量导入订单数据
         
         Args:
-            df: 订单数据（已映射为标准字段）
+            df: 订单数据(已映射为标准字段)
             
         Returns:
-            导入统计：{"staged": 数量, "imported": 数量, "duration_seconds": 耗时}
+            导入统计:{"staged": 数量, "imported": 数量, "duration_seconds": 耗时}
         """
         if not self.is_postgresql:
-            logger.warning("非 PostgreSQL 数据库，降级到 ORM 导入")
+            logger.warning("非 PostgreSQL 数据库,降级到 ORM 导入")
             return self._fallback_import_orders(df)
         
         start_time = datetime.now()
@@ -69,7 +69,7 @@ class BulkImporter:
             self.db.execute(text("TRUNCATE staging_orders"))
             self.db.commit()
             
-            # 5. 后台 ANALYZE（异步优化）
+            # 5. 后台 ANALYZE(异步优化)
             self.db.execute(text("ANALYZE fact_sales_orders"))
             
             duration = (datetime.now() - start_time).total_seconds()
@@ -95,7 +95,7 @@ class BulkImporter:
         Returns:
             导入行数
         """
-        # 准备 CSV 数据（使用 StringIO 避免磁盘 I/O）
+        # 准备 CSV 数据(使用 StringIO 避免磁盘 I/O)
         required_columns = [
             'platform_code', 'shop_id', 'order_id', 'product_id',
             'platform_sku', 'sku', 'status', 'qty', 'unit_price',
@@ -110,7 +110,7 @@ class BulkImporter:
         # 选择并排序列
         df_copy = df[required_columns].copy()
         
-        # 转换为 CSV（不含表头）
+        # 转换为 CSV(不含表头)
         csv_buffer = StringIO()
         df_copy.to_csv(csv_buffer, index=False, header=False, na_rep='\\N')
         csv_buffer.seek(0)
@@ -194,13 +194,13 @@ class BulkImporter:
         """批量导入产品指标数据
         
         Args:
-            df: 产品指标数据（已映射为标准字段）
+            df: 产品指标数据(已映射为标准字段)
             
         Returns:
             导入统计
         """
         if not self.is_postgresql:
-            logger.warning("非 PostgreSQL 数据库，降级到 ORM 导入")
+            logger.warning("非 PostgreSQL 数据库,降级到 ORM 导入")
             return self._fallback_import_product_metrics(df)
         
         start_time = datetime.now()
@@ -238,13 +238,13 @@ class BulkImporter:
             raise
     
     def _copy_to_staging_product_metrics(self, df: pd.DataFrame) -> int:
-        """COPY 数据到暂存表（产品指标）
+        """COPY 数据到暂存表(产品指标)
         
-        [WARN] v4.6.0修复：更新为JSON格式存储（匹配StagingProductMetrics实际schema）
+        [WARN] v4.6.0修复:更新为JSON格式存储(匹配StagingProductMetrics实际schema)
         """
         import json
         
-        # 准备数据：将DataFrame转换为JSON格式
+        # 准备数据:将DataFrame转换为JSON格式
         staging_rows = []
         for _, row in df.iterrows():
             # 构建metric_data JSON对象
@@ -272,7 +272,7 @@ class BulkImporter:
         if not staging_rows:
             return 0
         
-        # 使用批量INSERT替代COPY（因为JSON字段）
+        # 使用批量INSERT替代COPY(因为JSON字段)
         connection = self.db.connection().connection
         cursor = connection.cursor()
         
@@ -287,11 +287,11 @@ class BulkImporter:
         return cursor.rowcount
     
     def _upsert_from_staging_product_metrics(self) -> int:
-        """从暂存表 UPSERT 到事实表（产品指标）
+        """从暂存表 UPSERT 到事实表(产品指标)
         
-        [WARN] v4.6.0修复：更新为扁平化schema（platform_sku + sku_scope）
-        [WARN] v4.10.0修复：更新唯一索引，添加data_domain字段
-        匹配新的唯一索引：ix_product_unique_with_scope（包含data_domain）
+        [WARN] v4.6.0修复:更新为扁平化schema(platform_sku + sku_scope)
+        [WARN] v4.10.0修复:更新唯一索引,添加data_domain字段
+        匹配新的唯一索引:ix_product_unique_with_scope(包含data_domain)
         """
         result = self.db.execute(text("""
             INSERT INTO fact_product_metrics (
@@ -307,7 +307,7 @@ class BulkImporter:
                 CAST((s.metric_data->>'metric_date') AS DATE) AS metric_date,
                 COALESCE(s.metric_data->>'granularity', 'daily') AS granularity,
                 COALESCE(s.metric_data->>'sku_scope', 'product') AS sku_scope,
-                COALESCE(s.metric_data->>'data_domain', 'products') AS data_domain,  -- v4.10.0新增：默认products
+                COALESCE(s.metric_data->>'data_domain', 'products') AS data_domain,  -- v4.10.0新增:默认products
                 CAST(NULLIF(s.metric_data->>'pv', '') AS INTEGER) AS page_views,
                 CAST(NULLIF(s.metric_data->>'uv', '') AS INTEGER) AS unique_visitors,
                 CAST(NULLIF(s.metric_data->>'ctr', '') AS NUMERIC(5,4)) AS click_through_rate,
@@ -322,7 +322,7 @@ class BulkImporter:
             WHERE s.platform_code IS NOT NULL 
               AND s.platform_sku IS NOT NULL
               AND s.metric_data IS NOT NULL
-            ON CONFLICT (platform_code, shop_id, platform_sku, metric_date, granularity, sku_scope, data_domain)  -- v4.10.0新增：添加data_domain
+            ON CONFLICT (platform_code, shop_id, platform_sku, metric_date, granularity, sku_scope, data_domain)  -- v4.10.0新增:添加data_domain
             DO UPDATE SET
                 page_views = EXCLUDED.page_views,
                 unique_visitors = EXCLUDED.unique_visitors,
@@ -338,7 +338,7 @@ class BulkImporter:
         return result.rowcount
     
     def _fallback_import_orders(self, df: pd.DataFrame) -> Dict[str, int]:
-        """回退到 ORM 导入（SQLite）"""
+        """回退到 ORM 导入(SQLite)"""
         from backend.services.data_importer import stage_orders, upsert_orders
         
         rows = df.to_dict('records')
@@ -348,7 +348,7 @@ class BulkImporter:
         return {"staged": staged, "imported": imported, "duration_seconds": 0}
     
     def _fallback_import_product_metrics(self, df: pd.DataFrame) -> Dict[str, int]:
-        """回退到 ORM 导入（SQLite）"""
+        """回退到 ORM 导入(SQLite)"""
         from backend.services.data_importer import stage_product_metrics, upsert_product_metrics
         
         rows = df.to_dict('records')

@@ -8,9 +8,9 @@
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
-# 白名单定义（Single Source of Truth）
+# 白名单定义(Single Source of Truth)
 VALID_PLATFORMS = {'shopee', 'tiktok', 'miaoshou', 'amazon'}
-VALID_DATA_DOMAINS = {'orders', 'products', 'services', 'traffic', 'finance', 'analytics', 'inventory'}  # v4.10.0更新：traffic域已废弃（兼容性保留），统一使用analytics域
+VALID_DATA_DOMAINS = {'orders', 'products', 'services', 'traffic', 'finance', 'analytics', 'inventory'}  # v4.10.0更新:traffic域已废弃(兼容性保留),统一使用analytics域
 VALID_GRANULARITIES = {'daily', 'weekly', 'monthly', 'snapshot', 'hourly'}
 VALID_SUB_DOMAINS = {'agent', 'ai_assistant', 'ai', ''}  # 空字符串表示无子域
 
@@ -24,7 +24,7 @@ class ValidationResult:
 
 
 class DataValidator:
-    """数据验证器（现代化ERP标准）"""
+    """数据验证器(现代化ERP标准)"""
     
     @staticmethod
     def validate_platform(platform: str) -> ValidationResult:
@@ -154,7 +154,7 @@ class DataValidator:
             platform: 平台名称
             data_domain: 数据域
             granularity: 时间粒度
-            sub_domain: 子数据域（可选）
+            sub_domain: 子数据域(可选)
             
         Returns:
             dict: {
@@ -187,7 +187,7 @@ class DataValidator:
         else:
             normalized['granularity'] = g_result.normalized_value
         
-        # 验证子域（可选）
+        # 验证子域(可选)
         if sub_domain:
             s_result = DataValidator.validate_sub_domain(sub_domain)
             if not s_result.valid:
@@ -206,17 +206,17 @@ class DataValidator:
 
 # 便捷函数
 def normalize_platform(platform: str) -> str:
-    """标准化平台名称（小写）"""
+    """标准化平台名称(小写)"""
     return platform.lower().strip() if platform else ''
 
 
 def normalize_data_domain(domain: str) -> str:
-    """标准化数据域（小写）"""
+    """标准化数据域(小写)"""
     return domain.lower().strip() if domain else ''
 
 
 def normalize_granularity(granularity: str) -> str:
-    """标准化粒度（小写）"""
+    """标准化粒度(小写)"""
     return granularity.lower().strip() if granularity else ''
 
 

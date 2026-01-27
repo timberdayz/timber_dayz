@@ -4,9 +4,9 @@
 """
 邮箱登录处理模块
 
-模块化设计：
+模块化设计:
 - 独立的邮箱登录处理器
-- 支持多种邮箱类型（QQ、163、Gmail等）
+- 支持多种邮箱类型(QQ、163、Gmail等)
 - 统一的登录接口
 - 智能密码登录切换
 """
@@ -21,7 +21,7 @@ from .shopee_verification_config import get_verification_config, get_email_login
 
 
 class EmailLoginHandler:
-    """邮箱登录处理器（模块化设计）"""
+    """邮箱登录处理器(模块化设计)"""
     
     def __init__(self, browser: Browser):
         self.browser = browser
@@ -29,14 +29,14 @@ class EmailLoginHandler:
         
     def login_to_email(self, email: str, password: str) -> Optional[Page]:
         """
-        登录到邮箱（统一接口）
+        登录到邮箱(统一接口)
         
         Args:
             email: 邮箱地址
             password: 邮箱密码
             
         Returns:
-            Page: 登录成功的页面对象，失败返回None
+            Page: 登录成功的页面对象,失败返回None
         """
         logger.info(f"[EMAIL] 开始邮箱登录: {email}")
         
@@ -55,11 +55,11 @@ class EmailLoginHandler:
             # 等待页面加载
             email_page.wait_for_timeout(3000)
             
-            # 如果需要密码登录切换（主要针对QQ邮箱）
+            # 如果需要密码登录切换(主要针对QQ邮箱)
             if email_config.get('needs_password_switch', False):
                 success = self._switch_to_password_login(email_page, email_config)
                 if not success:
-                    logger.warning("[WARN] 密码登录切换失败，尝试继续登录")
+                    logger.warning("[WARN] 密码登录切换失败,尝试继续登录")
             
             # 执行登录操作
             success = self._perform_login(email_page, email, password, email_config)
@@ -83,7 +83,7 @@ class EmailLoginHandler:
     
     def _switch_to_password_login(self, page: Page, email_config: Dict[str, Any]) -> bool:
         """
-        切换到密码登录模式（主要针对QQ邮箱）
+        切换到密码登录模式(主要针对QQ邮箱)
         
         Args:
             page: 页面对象
@@ -280,10 +280,10 @@ class EmailLoginHandler:
                 logger.debug(f"登录验证失败 {indicator}: {e}")
                 continue
         
-        # 检查URL是否变化（也是成功的标识）
+        # 检查URL是否变化(也是成功的标识)
         current_url = page.url
         if 'login' not in current_url and 'signin' not in current_url:
-            logger.success("[OK] 邮箱登录成功（URL验证）")
+            logger.success("[OK] 邮箱登录成功(URL验证)")
             return True
         
         logger.warning("[WARN] 邮箱登录状态不确定")
@@ -298,7 +298,7 @@ class EmailLoginHandler:
             sender_keywords: 发件人关键词列表
             
         Returns:
-            str: 验证码，失败返回None
+            str: 验证码,失败返回None
         """
         if sender_keywords is None:
             sender_keywords = ['shopee', 'Shopee', 'SHOPEE', '虾皮']
@@ -366,9 +366,9 @@ class EmailLoginHandler:
         """从邮件内容中提取验证码"""
         # 验证码匹配模式
         patterns = [
-            r'验证码[：:\s]*(\d{6})',
-            r'verification code[：:\s]*(\d{6})',
-            r'code[：:\s]*(\d{6})',
+            r'验证码[::\s]*(\d{6})',
+            r'verification code[::\s]*(\d{6})',
+            r'code[::\s]*(\d{6})',
             r'(\d{6})',  # 6位数字
             r'验证码.*?(\d{4,8})',  # 4-8位数字
             r'code.*?(\d{4,8})'

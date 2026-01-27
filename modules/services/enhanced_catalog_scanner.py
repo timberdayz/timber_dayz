@@ -4,15 +4,15 @@
 增强的文件扫描器 - 深度集成采集模块
 
 功能:
-1. 识别有效的采集文件（遵循OUTPUTS_NAMING规范）
-2. 读取旁文件清单（.xlsx.json）
-3. 提取完整的元数据（支持有旁文件和无旁文件两种情况）
+1. 识别有效的采集文件(遵循OUTPUTS_NAMING规范)
+2. 读取旁文件清单(.xlsx.json)
+3. 提取完整的元数据(支持有旁文件和无旁文件两种情况)
 4. 注册到catalog_files表
 
 性能优化:
-- 快速模式：跳过哈希计算，提升扫描速度70%+
-- 增量扫描：使用生成器模式，边扫描边返回结果
-- 进度回调：支持实时进度反馈
+- 快速模式:跳过哈希计算,提升扫描速度70%+
+- 增量扫描:使用生成器模式,边扫描边返回结果
+- 进度回调:支持实时进度反馈
 
 作者: AI 专家级数据工程师
 创建日期: 2025-01-26
@@ -37,7 +37,7 @@ class EnhancedCatalogScanner:
 
         Args:
             base_path: 扫描的基础路径
-            fast_mode: 快速模式（跳过哈希计算，提升性能）
+            fast_mode: 快速模式(跳过哈希计算,提升性能)
             progress_callback: 进度回调函数 callback(current, total, file_path)
         """
         self.base_path = Path(base_path)
@@ -57,7 +57,7 @@ class EnhancedCatalogScanner:
     
     def scan_and_analyze(self) -> Dict:
         """
-        扫描并分析文件（不入库，仅分析）
+        扫描并分析文件(不入库,仅分析)
 
         Returns:
             {
@@ -85,13 +85,13 @@ class EnhancedCatalogScanner:
         all_files = list(self._gather_files())
         total_files = len(all_files)
 
-        logger.info(f"发现 {total_files} 个文件，开始分析...")
+        logger.info(f"发现 {total_files} 个文件,开始分析...")
 
         # 遍历所有文件
         for idx, file_path in enumerate(all_files, 1):
             self.stats["total"] += 1
 
-            # 调用进度回调（每个文件都更新）
+            # 调用进度回调(每个文件都更新)
             if self.progress_callback:
                 try:
                     self.progress_callback(idx, total_files, str(file_path))
@@ -122,7 +122,7 @@ class EnhancedCatalogScanner:
             else:
                 self.stats["without_manifest"] += 1
 
-            # 计算文件hash（快速模式下跳过，提升性能）
+            # 计算文件hash(快速模式下跳过,提升性能)
             if self.fast_mode:
                 file_hash = "skipped_in_fast_mode"
             else:
@@ -136,7 +136,7 @@ class EnhancedCatalogScanner:
                 "file_size": file_path.stat().st_size
             })
 
-            # 每100个文件输出一次进度（减少日志量）
+            # 每100个文件输出一次进度(减少日志量)
             if self.stats["valid"] % 100 == 0:
                 logger.info(f"扫描进度: {self.stats['valid']} 个有效文件")
         
@@ -147,9 +147,9 @@ class EnhancedCatalogScanner:
 
     def _gather_files(self) -> Generator[Path, None, None]:
         """
-        收集所有待扫描的文件（生成器模式，提升性能）
+        收集所有待扫描的文件(生成器模式,提升性能)
 
-        使用生成器模式边扫描边返回，避免一次性加载所有文件到内存
+        使用生成器模式边扫描边返回,避免一次性加载所有文件到内存
         """
         for ext in self.supported_exts:
             yield from self.base_path.rglob(f"*{ext}")
@@ -186,7 +186,7 @@ class EnhancedCatalogScanner:
             except Exception as e:
                 logger.warning(f"旁文件读取失败: {manifest_path.name} - {e}")
         
-        # 5. 兜底：检查路径结构
+        # 5. 兜底:检查路径结构
         # temp/outputs/<platform>/<account>/<shop>/<data_type>/...
         parts = file_path.parts
         try:
@@ -240,7 +240,7 @@ class EnhancedCatalogScanner:
                 logger.debug(f"从旁文件读取元数据: {file_path.name}")
                 return metadata
             except Exception as e:
-                logger.warning(f"旁文件读取失败，使用兜底策略: {manifest_path.name} - {e}")
+                logger.warning(f"旁文件读取失败,使用兜底策略: {manifest_path.name} - {e}")
         
         # 2. 从路径结构推断
         # temp/outputs/<platform>/<account>/<shop>/<data_type>/<granularity>/
@@ -306,7 +306,7 @@ class EnhancedCatalogScanner:
         """计算文件SHA256哈希值"""
         sha256_hash = hashlib.sha256()
         with open(file_path, "rb") as f:
-            # 分块读取，避免大文件内存溢出
+            # 分块读取,避免大文件内存溢出
             for byte_block in iter(lambda: f.read(4096), b""):
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()

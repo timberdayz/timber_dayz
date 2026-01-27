@@ -5,7 +5,7 @@
 支持多种代理服务商的集成
 
 使用示例:
-    # 使用空代理（开发环境）
+    # 使用空代理(开发环境)
     provider = NoProxyProvider()
     proxy = await provider.get_proxy()
     
@@ -38,12 +38,12 @@ class ProxyInfo:
     Attributes:
         host: 代理主机地址
         port: 代理端口
-        username: 认证用户名（可选）
-        password: 认证密码（可选）
-        protocol: 协议类型（http/https/socks5）
-        country: 国家代码（可选）
-        city: 城市（可选）
-        expires_at: 过期时间（可选）
+        username: 认证用户名(可选)
+        password: 认证密码(可选)
+        protocol: 协议类型(http/https/socks5)
+        country: 国家代码(可选)
+        city: 城市(可选)
+        expires_at: 过期时间(可选)
     """
     host: str
     port: int
@@ -98,12 +98,12 @@ class ProxyProvider(ABC):
         获取代理
         
         Args:
-            country: 目标国家代码（如 SG, MY, TH）
+            country: 目标国家代码(如 SG, MY, TH)
             city: 目标城市
             **kwargs: 其他参数
             
         Returns:
-            ProxyInfo: 代理信息，如果无可用代理返回 None
+            ProxyInfo: 代理信息,如果无可用代理返回 None
         """
         pass
     
@@ -130,7 +130,7 @@ class ProxyProvider(ABC):
         **kwargs
     ) -> None:
         """
-        报告代理成功（可选实现）
+        报告代理成功(可选实现)
         
         Args:
             proxy: 成功的代理
@@ -143,7 +143,7 @@ class NoProxyProvider(ProxyProvider):
     """
     空代理提供者
     
-    不使用代理的默认实现，用于本地开发环境
+    不使用代理的默认实现,用于本地开发环境
     """
     
     async def get_proxy(
@@ -153,7 +153,7 @@ class NoProxyProvider(ProxyProvider):
         **kwargs
     ) -> Optional[ProxyInfo]:
         """
-        获取代理（始终返回 None）
+        获取代理(始终返回 None)
         """
         logger.debug("NoProxyProvider: No proxy configured")
         return None
@@ -165,7 +165,7 @@ class NoProxyProvider(ProxyProvider):
         **kwargs
     ) -> None:
         """
-        报告代理失败（空实现）
+        报告代理失败(空实现)
         """
         pass
 
@@ -174,7 +174,7 @@ class StaticProxyProvider(ProxyProvider):
     """
     静态代理提供者
     
-    使用固定的代理地址，适合自建代理服务器
+    使用固定的代理地址,适合自建代理服务器
     """
     
     def __init__(
@@ -190,7 +190,7 @@ class StaticProxyProvider(ProxyProvider):
         初始化静态代理
         
         Args:
-            proxy_url: 完整代理URL（如 http://user:pass@host:port）
+            proxy_url: 完整代理URL(如 http://user:pass@host:port)
             host: 代理主机
             port: 代理端口
             username: 认证用户名
@@ -246,7 +246,7 @@ class StaticProxyProvider(ProxyProvider):
         **kwargs
     ) -> None:
         """
-        报告代理失败（记录日志）
+        报告代理失败(记录日志)
         """
         logger.warning(f"Static proxy failed: {proxy.host}:{proxy.port} - {error}")
 
@@ -255,8 +255,8 @@ class PoolProxyProvider(ProxyProvider):
     """
     代理池提供者
     
-    从代理池API获取代理，支持代理轮换
-    适用于：快代理、芝麻代理、讯代理等服务商
+    从代理池API获取代理,支持代理轮换
+    适用于:快代理、芝麻代理、讯代理等服务商
     """
     
     def __init__(
@@ -304,7 +304,7 @@ class PoolProxyProvider(ProxyProvider):
                 if country is None or proxy.country == country:
                     return proxy
         
-        # 本地池无可用代理，从API获取
+        # 本地池无可用代理,从API获取
         if self.api_url:
             for _ in range(self.retry_count):
                 proxy = await self._fetch_from_api(country, city)
@@ -323,7 +323,7 @@ class PoolProxyProvider(ProxyProvider):
         """
         从API获取代理
         
-        注意：这是示例实现，实际使用需根据代理服务商API调整
+        注意:这是示例实现,实际使用需根据代理服务商API调整
         """
         try:
             import aiohttp
@@ -340,7 +340,7 @@ class PoolProxyProvider(ProxyProvider):
                 async with session.get(self.api_url, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
-                        # 示例响应格式，需根据实际API调整
+                        # 示例响应格式,需根据实际API调整
                         return ProxyInfo(
                             host=data.get("ip"),
                             port=int(data.get("port", 8080)),
@@ -361,7 +361,7 @@ class PoolProxyProvider(ProxyProvider):
         **kwargs
     ) -> None:
         """
-        报告代理失败（加入黑名单）
+        报告代理失败(加入黑名单)
         """
         proxy_key = f"{proxy.host}:{proxy.port}"
         self._blacklist[proxy_key] = datetime.utcnow()
@@ -385,7 +385,7 @@ class RotatingProxyProvider(ProxyProvider):
     """
     轮换代理提供者
     
-    从多个静态代理中随机选择，适合有多个代理服务器的场景
+    从多个静态代理中随机选择,适合有多个代理服务器的场景
     """
     
     def __init__(self, proxies: List[str] = None):
@@ -464,7 +464,7 @@ def get_proxy_provider() -> ProxyProvider:
         PROXY_HOST: 静态代理主机
         PROXY_PORT: 静态代理端口
         PROXY_POOL_API: 代理池API
-        PROXY_LIST: 轮换代理列表（逗号分隔）
+        PROXY_LIST: 轮换代理列表(逗号分隔)
     
     Returns:
         ProxyProvider: 代理提供者实例

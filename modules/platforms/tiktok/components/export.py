@@ -101,8 +101,8 @@ class TiktokExporterComponent(ExportComponent):
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         """Click "导出数据/Export" and capture download on current TikTok Compass page.
 
-        - 支持商品/流量/服务页面（合并按钮选择器）
-        - 输出与命名遵循 Shopee 规则（统一目录结构 + 规范文件名 + manifest）
+        - 支持商品/流量/服务页面(合并按钮选择器)
+        - 输出与命名遵循 Shopee 规则(统一目录结构 + 规范文件名 + manifest)
         """
         try:
             # Load selectors from all tiktok configs
@@ -259,7 +259,7 @@ class TiktokExporterComponent(ExportComponent):
                     if self.logger:
                         self.logger.info(f"[TiktokExporter] {msg}")
                     return ExportResult(success=True, message=msg)
-                # 对于其他页面（如商品表现/流量），不做早退，继续尝试点击触发下载
+                # 对于其他页面(如商品表现/流量),不做早退,继续尝试点击触发下载
 
             # Expect download after attempting export click (some pages open a dropdown/modal)
             # 1) Build adaptive timeout
@@ -359,7 +359,7 @@ class TiktokExporterComponent(ExportComponent):
             from datetime import datetime as _dt
             account = self.ctx.account or {}
             account_label = account.get("label") or account.get("store_name") or account.get("username") or "unknown"
-            # 优先使用上下文中的规范化店铺名（店铺名__区域/代码）
+            # 优先使用上下文中的规范化店铺名(店铺名__区域/代码)
             shop_name = (
                 (self.ctx.config or {}).get("shop_name")
                 or account.get("menu_display_name")

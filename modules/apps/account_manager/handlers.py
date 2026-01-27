@@ -25,7 +25,7 @@ class AccountHandler:
         logger.debug("账号处理器初始化完成")
 
     def _ensure_initialized(self):
-        """确保处理器已初始化（惰性初始化）"""
+        """确保处理器已初始化(惰性初始化)"""
         if not self._initialized:
             # 创建必要的目录
             self.backup_dir.mkdir(parents=True, exist_ok=True)
@@ -71,7 +71,7 @@ class AccountHandler:
             self._ensure_initialized()
 
             if not self.config_file.exists():
-                logger.info("配置文件不存在，返回空列表")
+                logger.info("配置文件不存在,返回空列表")
                 return []
             
             with open(self.config_file, 'r', encoding='utf-8') as f:

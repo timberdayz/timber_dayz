@@ -134,7 +134,7 @@ class PageAnalysisTool:
             )
             
             self.analysis_results.append(result)
-            logger.info(f"[OK] 页面分析完成，发现 {len(elements)} 个元素，{len(download_options)} 个下载选项")
+            logger.info(f"[OK] 页面分析完成,发现 {len(elements)} 个元素,{len(download_options)} 个下载选项")
             
             return result
             

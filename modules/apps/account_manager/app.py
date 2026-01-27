@@ -15,17 +15,17 @@ logger = get_logger(__name__)
 class AccountManagerApp(BaseApplication):
     """账号管理应用"""
 
-    # 类级元数据 - 供注册器读取，避免实例化副作用
+    # 类级元数据 - 供注册器读取,避免实例化副作用
     NAME = "账号管理"
     VERSION = "1.0.0"
-    DESCRIPTION = "多平台账号统一管理，支持添加、编辑、验证账号"
+    DESCRIPTION = "多平台账号统一管理,支持添加、编辑、验证账号"
 
     def __init__(self):
         """初始化账号管理应用"""
         super().__init__()
         self.name = "账号管理"
         self.version = "1.0.0"
-        self.description = "多平台账号统一管理，支持添加、编辑、验证账号"
+        self.description = "多平台账号统一管理,支持添加、编辑、验证账号"
         
         # 初始化处理器和验证器
         self.handler = AccountHandler()
@@ -101,7 +101,7 @@ class AccountManagerApp(BaseApplication):
                 elif choice == "0":
                     break
                 else:
-                    print("[FAIL] 无效选择，请重新输入")
+                    print("[FAIL] 无效选择,请重新输入")
                 
                 if choice != "0":
                     input("\n按回车键继续...")

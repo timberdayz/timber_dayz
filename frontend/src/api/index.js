@@ -1,13 +1,12 @@
 import axios from "axios";
 
 // ⭐ v6.0.0新增：现代化认证系统改进
-// 导入 authStore（延迟导入避免循环依赖）
+// 延迟导入 authStore（使用 ESM import() 避免循环依赖，Vite 浏览器环境无 require）
 let authStore = null;
-const getAuthStore = () => {
+const getAuthStore = async () => {
   if (!authStore) {
-    // 动态导入避免循环依赖
-    const { useAuthStore } = require("@/stores/auth");
-    authStore = useAuthStore();
+    const m = await import("@/stores/auth");
+    authStore = m.useAuthStore();
   }
   return authStore;
 };
@@ -125,8 +124,8 @@ try {
   // 使用 BroadcastChannel API 在标签页之间同步刷新状态
   refreshChannel = new BroadcastChannel('token_refresh_channel');
   
-  // 监听其他标签页的刷新状态
-  refreshChannel.onmessage = (event) => {
+  // 监听其他标签页的刷新状态（async 以支持 await getAuthStore）
+  refreshChannel.onmessage = async (event) => {
     // ⭐ v6.0.0修复：清除超时定时器（收到消息）
     if (refreshTimeout) {
       clearTimeout(refreshTimeout);
@@ -151,7 +150,7 @@ try {
       if (newToken) {
         // ⭐ v6.0.0修复：更新本地 token 和 refreshToken（确保状态一致性）
         try {
-          const store = getAuthStore();
+          const store = await getAuthStore();
           store.token = newToken;
           localStorage.setItem('access_token', newToken);
           
@@ -202,9 +201,9 @@ const api = axios.create({
   },
 });
 
-// 请求拦截器
+// 请求拦截器（async 以支持 await getAuthStore，Vite/ESM 无 require）
 api.interceptors.request.use(
-  (config) => {
+  async (config) => {
     // 记录请求开始时间（用于计算响应时间）
     config.metadata = {
       startTime: Date.now(),
@@ -216,7 +215,7 @@ api.interceptors.request.use(
     if (needsAuth) {
       let token = null;
       try {
-        const store = getAuthStore();
+        const store = await getAuthStore();
         token = store.token || localStorage.getItem('access_token');
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
@@ -247,7 +246,7 @@ api.interceptors.request.use(
               }
             }
             
-            const store = getAuthStore();
+            const store = await getAuthStore();
             const success = await store.refreshAccessToken();
             
             if (success) {
@@ -430,7 +429,7 @@ api.interceptors.response.use(
       if (originalRequest._retry) {
         // 刷新失败，清除 token 并跳转登录页
         try {
-          const store = getAuthStore();
+          const store = await getAuthStore();
           await store.logout();
         } catch (err) {
           console.error("登出失败:", err);
@@ -474,7 +473,7 @@ api.interceptors.response.use(
       }
       
       try {
-        const store = getAuthStore();
+        const store = await getAuthStore();
         const refreshed = await store.refreshAccessToken();
         
         if (refreshed) {
@@ -529,7 +528,7 @@ api.interceptors.response.use(
           
           // 清除 token 并跳转登录页
           try {
-            const store = getAuthStore();
+            const store = await getAuthStore();
             await store.logout();
           } catch (err) {
             console.error("登出失败:", err);
@@ -561,7 +560,7 @@ api.interceptors.response.use(
         
         // 清除 token 并跳转登录页
         try {
-          const store = getAuthStore();
+          const store = await getAuthStore();
           await store.logout();
         } catch (err) {
           console.error("登出失败:", err);
@@ -1810,6 +1809,11 @@ export default {
   // 获取目标列表
   async getTargets(params = {}) {
     return await this._get("/targets", { params });
+  },
+
+  // 获取供目标管理使用的店铺列表（来自账号管理 platform_accounts）
+  async getTargetShops() {
+    return await this._get("/targets/shops");
   },
   
   // 获取目标详情

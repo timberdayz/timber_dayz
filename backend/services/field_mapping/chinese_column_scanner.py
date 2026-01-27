@@ -3,10 +3,10 @@
 """
 中文名词扫描与翻译工具
 
-功能：
+功能:
 1. 扫描所有数据域文件中的中文字段名
 2. 翻译中文名词为英文标准字段
-3. 确保一对一映射（每个中文名称只对应一个英文标准字段）
+3. 确保一对一映射(每个中文名称只对应一个英文标准字段)
 """
 
 import re
@@ -20,37 +20,37 @@ from sqlalchemy.orm import Session
 from backend.models.database import get_db
 from modules.core.logger import get_logger
 
-# 尝试导入pypinyin，如果失败则使用简化版
+# 尝试导入pypinyin,如果失败则使用简化版
 try:
     from pypinyin import lazy_pinyin, Style
     HAS_PYPINYIN = True
 except ImportError:
     HAS_PYPINYIN = False
     logger = get_logger(__name__)
-    logger.warning("pypinyin未安装，将使用简化版拼音转换。建议安装: pip install pypinyin")
+    logger.warning("pypinyin未安装,将使用简化版拼音转换。建议安装: pip install pypinyin")
 
 logger = get_logger(__name__)
 
 
 def is_date_range_column(column_name: str) -> bool:
     """
-    判断字段名是否为日期范围格式（如：2025_09_25_2025_09_25 或 2025-09-25 ~ 2025-09-25）
+    判断字段名是否为日期范围格式(如:2025_09_25_2025_09_25 或 2025-09-25 ~ 2025-09-25)
     
-    [*] 重要：日期范围字段不应该进入辞典，因为会带来时间索引混乱
+    [*] 重要:日期范围字段不应该进入辞典,因为会带来时间索引混乱
     所有时间字段应该统一为date或datetime两种格式
     
     Args:
         column_name: 字段名
     
     Returns:
-        如果是日期范围格式，返回True
+        如果是日期范围格式,返回True
     """
     if not column_name:
         return False
     
     col_str = str(column_name).strip()
     
-    # 匹配日期范围格式：YYYY_MM_DD_YYYY_MM_DD 或 YYYY-MM-DD ~ YYYY-MM-DD
+    # 匹配日期范围格式:YYYY_MM_DD_YYYY_MM_DD 或 YYYY-MM-DD ~ YYYY-MM-DD
     date_range_patterns = [
         r'^\d{4}[-_]\d{1,2}[-_]\d{1,2}[-_~]\d{4}[-_]\d{1,2}[-_]\d{1,2}',  # 2025_09_25_2025_09_25 或 2025-09-25~2025-09-25
         r'^\d{4}[-_]\d{1,2}[-_]\d{1,2}.*\d{4}[-_]\d{1,2}[-_]\d{1,2}',  # 包含两个日期
@@ -62,15 +62,15 @@ def is_date_range_column(column_name: str) -> bool:
         if re.search(pattern, col_str):
             return True
     
-    # [*] 新增：匹配包含"日期范围"、"fan_wei"、"范围"等关键词的字段
+    # [*] 新增:匹配包含"日期范围"、"fan_wei"、"范围"等关键词的字段
     if 'fan_wei' in col_str.lower() or '日期范围' in col_str or '[日期范围]' in col_str:
         return True
     
-    # [*] 新增：匹配包含两个日期格式的字段（如：2025_09_25_2025_09_25）
+    # [*] 新增:匹配包含两个日期格式的字段(如:2025_09_25_2025_09_25)
     date_pattern = r'\d{4}[-_]\d{1,2}[-_]\d{1,2}'
     matches = re.findall(date_pattern, col_str)
     if len(matches) >= 2:
-        # 检查是否是日期范围格式（两个日期之间用下划线、横线或空格分隔）
+        # 检查是否是日期范围格式(两个日期之间用下划线、横线或空格分隔)
         return True
     
     return False
@@ -78,18 +78,18 @@ def is_date_range_column(column_name: str) -> bool:
 
 def should_filter_column(column_name: str) -> bool:
     """
-    判断字段是否应该被过滤掉（不进入辞典）
+    判断字段是否应该被过滤掉(不进入辞典)
     
-    过滤规则：
-    1. 日期范围格式字段（如：2025_09_25_2025_09_25）
+    过滤规则:
+    1. 日期范围格式字段(如:2025_09_25_2025_09_25)
     2. 空字段或只有特殊字符
-    3. 明显是文件元数据字段（如：Unnamed、Sheet等）
+    3. 明显是文件元数据字段(如:Unnamed、Sheet等)
     
     Args:
         column_name: 字段名
         
     Returns:
-        如果应该过滤，返回True
+        如果应该过滤,返回True
     """
     if not column_name or not str(column_name).strip():
         return True
@@ -120,9 +120,9 @@ def contains_chinese(text: str) -> bool:
 
 
 def extract_chinese_columns(file_path: str, header_row: int = 0) -> List[str]:
-    """从Excel文件中提取中文字段名（过滤掉日期范围和不合理的字段）"""
+    """从Excel文件中提取中文字段名(过滤掉日期范围和不合理的字段)"""
     try:
-        # 尝试多个表头行，找到包含中文最多的那一行
+        # 尝试多个表头行,找到包含中文最多的那一行
         best_columns = []
         best_count = 0
         
@@ -153,11 +153,11 @@ def extract_chinese_columns(file_path: str, header_row: int = 0) -> List[str]:
 
 def scan_all_chinese_columns(db: Session, max_files: int = None, include_english: bool = True) -> Dict[str, int]:
     """
-    扫描所有已注册文件中的字段名（默认包含中英文）
+    扫描所有已注册文件中的字段名(默认包含中英文)
     
     Args:
-        max_files: 最大扫描文件数（None表示全部）
-        include_english: 是否包含英文字段名（默认True）
+        max_files: 最大扫描文件数(None表示全部)
+        include_english: 是否包含英文字段名(默认True)
     
     Returns:
         Dict[字段名, 出现次数]
@@ -178,10 +178,10 @@ def scan_all_chinese_columns(db: Session, max_files: int = None, include_english
             if not file_path.exists():
                 continue
             
-            # 提取字段名（内部已处理多个表头行）
+            # 提取字段名(内部已处理多个表头行)
             columns = extract_chinese_columns(str(file_path))
             
-            # 如果需要包含英文，也提取英文字段
+            # 如果需要包含英文,也提取英文字段
             if include_english:
                 # 尝试读取所有列名
                 for hr in [0, 1, 2]:
@@ -210,7 +210,7 @@ def scan_all_chinese_columns(db: Session, max_files: int = None, include_english
             logger.warning(f"处理文件失败 {file_record.file_name}: {e}")
             continue
     
-    logger.info(f"扫描完成，发现 {len(columns_counter)} 个不同的字段名")
+    logger.info(f"扫描完成,发现 {len(columns_counter)} 个不同的字段名")
     return dict(columns_counter)
 
 
@@ -218,18 +218,18 @@ def translate_chinese_to_english(chinese_name: str) -> str:
     """
     将中文名词翻译为英文标准字段名
     
-    策略：
+    策略:
     1. 使用常见的中英文映射词典
     2. 分词后翻译
-    3. 使用拼音库进行拼音转换（替代Unicode编码）
+    3. 使用拼音库进行拼音转换(替代Unicode编码)
     4. 转换为snake_case格式
     
     Returns:
-        英文标准字段名（如：order_id, metric_date）
+        英文标准字段名(如:order_id, metric_date)
     """
-    # 扩展的中英文映射词典（包含更多业务术语）
+    # 扩展的中英文映射词典(包含更多业务术语)
     translation_dict = {
-        # 时间相关（使用数据库列名）
+        # 时间相关(使用数据库列名)
         "日期": "metric_date",
         "订单日期": "order_date_local",
         "统计日期": "metric_date",
@@ -268,7 +268,7 @@ def translate_chinese_to_english(chinese_name: str) -> str:
         "规格编号": "spec_code",
         "规格货号": "spec_sku",
         
-        # 金额相关（扩展）
+        # 金额相关(扩展)
         "金额": "amount",
         "总金额": "total_amount",
         "实付金额": "paid_amount",
@@ -294,7 +294,7 @@ def translate_chinese_to_english(chinese_name: str) -> str:
         "运费折扣": "shipping_discount",
         "运费补贴": "shipping_subsidy",
         
-        # 数量相关（扩展）
+        # 数量相关(扩展)
         "数量": "quantity",
         "总数": "total",
         "成交件数": "transaction_count",
@@ -302,7 +302,7 @@ def translate_chinese_to_english(chinese_name: str) -> str:
         "出库数量": "outbound_quantity",
         "件数": "piece_count",
         
-        # 流量相关（扩展）
+        # 流量相关(扩展)
         "浏览量": "page_views",
         "访问次数": "page_views",
         "访客数": "visitors",
@@ -318,7 +318,7 @@ def translate_chinese_to_english(chinese_name: str) -> str:
         "点击率": "click_rate",
         "曝光次数": "impressions",
         
-        # 平台相关（使用数据库列名）
+        # 平台相关(使用数据库列名)
         "平台": "platform_code",
         "店铺": "shop_id",
         "账号": "account",
@@ -348,7 +348,7 @@ def translate_chinese_to_english(chinese_name: str) -> str:
     if chinese_name in translation_dict:
         return translation_dict[chinese_name]
     
-    # 尝试部分匹配（优先匹配较长的关键词）
+    # 尝试部分匹配(优先匹配较长的关键词)
     sorted_keys = sorted(translation_dict.keys(), key=len, reverse=True)
     for key in sorted_keys:
         if key in chinese_name:
@@ -365,28 +365,28 @@ def translate_chinese_to_english(chinese_name: str) -> str:
             else:
                 return translation_dict[key]
     
-    # 如果无法翻译，使用拼音库（pypinyin）进行转换
+    # 如果无法翻译,使用拼音库(pypinyin)进行转换
     if HAS_PYPINYIN:
         # 使用pypinyin生成拼音
         pinyin_list = lazy_pinyin(chinese_name, style=Style.NORMAL)
         # 转换为snake_case
         base_str = "_".join(pinyin_list).lower()
     else:
-        # 简化版：使用Unicode编码（向后兼容，但不可读）
+        # 简化版:使用Unicode编码(向后兼容,但不可读)
         pinyin_chars = []
         for char in chinese_name:
             if '\u4e00' <= char <= '\u9fff':
-                # 使用Unicode编码（这是临时方案，应该安装pypinyin）
+                # 使用Unicode编码(这是临时方案,应该安装pypinyin)
                 pinyin_chars.append(f"c{ord(char) % 100:02d}")
             else:
                 pinyin_chars.append(char.lower())
         base_str = "_".join(pinyin_chars)
     
-    # 清理非ASCII字符，确保只返回英文和数字
+    # 清理非ASCII字符,确保只返回英文和数字
     base_str = re.sub(r'[^\w]', '_', base_str)
     base_str = re.sub(r'_+', '_', base_str).strip('_')
     
-    # 如果清理后为空，使用默认值
+    # 如果清理后为空,使用默认值
     if not base_str or re.search(r'[\u4e00-\u9fff]', base_str):
         return f"field_{abs(hash(chinese_name)) % 10000}"
     
@@ -395,7 +395,7 @@ def translate_chinese_to_english(chinese_name: str) -> str:
 
 def generate_english_field_code(chinese_name: str, existing_fields: Set[str] = None) -> str:
     """
-    生成英文标准字段代码，确保唯一性
+    生成英文标准字段代码,确保唯一性
     
     Args:
         chinese_name: 中文名称
@@ -429,8 +429,8 @@ def scan_and_translate(db: Session, max_files: int = None, include_english: bool
     扫描所有文件中的字段名并翻译为英文标准字段
     
     Args:
-        max_files: 最大扫描文件数（None表示全部）
-        include_english: 是否包含英文字段名（默认True）
+        max_files: 最大扫描文件数(None表示全部)
+        include_english: 是否包含英文字段名(默认True)
     
     Returns:
         List[{
@@ -441,7 +441,7 @@ def scan_and_translate(db: Session, max_files: int = None, include_english: bool
             ...
         }]
     """
-    # 1. 扫描所有字段名（中英文）
+    # 1. 扫描所有字段名(中英文)
     all_columns = scan_all_chinese_columns(db, max_files, include_english=include_english)
     
     # 2. 按数据域分类
@@ -455,7 +455,7 @@ def scan_and_translate(db: Session, max_files: int = None, include_english: bool
             file_path = Path(file_record.file_path)
             if file_path.exists():
                 columns = extract_chinese_columns(str(file_path))
-                # 如果需要包含英文，也提取英文字段
+                # 如果需要包含英文,也提取英文字段
                 if include_english:
                     for hr in [0, 1, 2]:
                         try:
@@ -476,29 +476,29 @@ def scan_and_translate(db: Session, max_files: int = None, include_english: bool
                         if col in all_columns:
                             domain_mapping[col].add(file_record.data_domain)
     
-    # 3. 生成英文标准字段（确保一对一映射）
+    # 3. 生成英文标准字段(确保一对一映射)
     existing_fields = set()
     result = []
     
-    # 按出现频率排序，优先处理高频字段
+    # 按出现频率排序,优先处理高频字段
     sorted_columns = sorted(all_columns.items(), key=lambda x: x[1], reverse=True)
     
     for column_name, frequency in sorted_columns:
-        # 再次过滤：跳过日期范围格式字段
+        # 再次过滤:跳过日期范围格式字段
         if should_filter_column(column_name):
             logger.debug(f"跳过不合理字段: {column_name}")
             continue
         
         # 生成唯一的英文字段代码
-        # 如果字段名已经是英文且符合标准格式，直接使用；否则翻译
+        # 如果字段名已经是英文且符合标准格式,直接使用;否则翻译
         if not contains_chinese(column_name):
-            # 英文字段名，清理后作为基础代码
+            # 英文字段名,清理后作为基础代码
             base_code = column_name.lower().replace(' ', '_').replace('-', '_')
             base_code = re.sub(r'[^\w]', '_', base_code)
             base_code = re.sub(r'_+', '_', base_code).strip('_')
             field_code = base_code if base_code else f"field_{len(result)+1}"
         else:
-            # 中文字段名，使用翻译逻辑
+            # 中文字段名,使用翻译逻辑
             field_code = generate_english_field_code(column_name, existing_fields)
         
         # 确保唯一性
@@ -507,21 +507,21 @@ def scan_and_translate(db: Session, max_files: int = None, include_english: bool
         
         existing_fields.add(field_code)
         
-        # 确定数据域（取最常见的）
+        # 确定数据域(取最常见的)
         domains = list(domain_mapping.get(column_name, {"general"}))
         primary_domain = domains[0] if domains else "general"
         
         result.append({
-            "cn_name": column_name,  # 原始字段名（可能是中文或英文）
+            "cn_name": column_name,  # 原始字段名(可能是中文或英文)
             "field_code": field_code,
             "en_name": field_code if not contains_chinese(column_name) else translate_chinese_to_english(column_name),
             "frequency": frequency,
             "data_domains": domains,
             "primary_domain": primary_domain,
-            "description": f"从{len(domains)}个数据域扫描发现，出现{frequency}次",
+            "description": f"从{len(domains)}个数据域扫描发现,出现{frequency}次",
         })
     
-    logger.info(f"扫描翻译完成，生成 {len(result)} 个标准字段映射")
+    logger.info(f"扫描翻译完成,生成 {len(result)} 个标准字段映射")
     return result
 
 
@@ -530,7 +530,7 @@ if __name__ == "__main__":
     db = next(get_db())
     try:
         results = scan_and_translate(db, max_files=100)
-        print(f"\n扫描结果（前10个）：")
+        print(f"\n扫描结果(前10个):")
         for r in results[:10]:
             print(f"  {r['cn_name']} -> {r['field_code']} (出现{r['frequency']}次)")
     finally:
