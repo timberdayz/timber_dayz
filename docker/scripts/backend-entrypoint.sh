@@ -1,6 +1,6 @@
 #!/bin/bash
-# 西虹ERP系统 - 后端容器入口脚本
-# 启动前自动执行数据库迁移，再执行传入的命令（gunicorn/uvicorn 等）
+# Backend container entrypoint script
+# Run database migrations before starting the service
 set -e
 
 echo "[INFO] Running database migrations..."
