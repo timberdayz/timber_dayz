@@ -22,7 +22,7 @@
    - ✅ **Orders Model**：整合订单数据域（日度+周度+月度），统一字段名，CTE分层架构，优化日期/时间字段处理
    - ✅ **Inventory Model**：库存快照数据，CTE分层架构，仅snapshot粒度
    - ✅ **Services Model**：整合服务数据域（日度+周度+月度），统一字段名，区分子类型（ai_assistant/agent），CTE分层架构，直接使用数据库已清洗的日期字段
-   
+
    **技术特点**：
    - 使用CTE分层架构（字段映射 → 数据清洗 → 去重 → 最终输出）
    - 统一数值清洗函数（处理破折号、逗号、空格等特殊字符）
@@ -35,28 +35,28 @@
    - ✅ **原因**：表结构简单，字段已标准化，无需字段映射和数据清洗，性能更好
    - ✅ **使用方式**：在Metabase Question中直接引用 `a_class.sales_targets_a` 等表
 
-2. **字段标准化策略**
+3. **字段标准化策略**
    - 在Model SQL中使用 `COALESCE` 或 `CASE WHEN` 统一不同平台的字段名
    - 示例：`COALESCE(raw_data->>'销售额', raw_data->>'销售金额') AS sales_amount`
    - 创建标准字段映射表（在Model注释中记录）
    - 支持多平台字段名映射（shopee, tiktok, miaoshou等）
 
-3. **创建Metabase Questions（C类数据实时计算）** ⏳ **进行中**
-   - ⏳ **business_overview_kpi**：核心KPI指标（GMV、订单数、买家数、转化率等）
+4. **创建Metabase Questions（C类数据实时计算）** ⏳ **进行中**
+   - ✅ **business_overview_kpi**：核心KPI指标（GMV、订单数、买家数、转化率等）— **已可用**
    - ⏳ **business_overview_comparison**：数据对比（支持日/周/月度切换，同比、环比对比）
    - ⏳ **business_overview_shop_racing**：店铺赛马（店铺排名，支持店铺级/账号级切换）
    - ⏳ **business_overview_traffic_ranking**：流量排名（流量指标排名）
    - ⏳ **business_overview_inventory_backlog**：库存积压（库存预警数据）
-   - ⏳ **business_overview_operational_metrics**：经营指标（门店经营表格数据，需要JOIN A类数据计算达成率）
+   - ✅ **business_overview_operational_metrics**：经营指标（月目标、达成率、今日销售、今日销售单数、经营结果等，JOIN A类数据）— **已可用**
    - ⏳ **clearance_ranking**：清仓排名（清仓商品排名）
-   
+
    **设计原则**：
    - 使用Native SQL模式
    - 参数化查询（`{{variable}}`语法）
    - JOIN A类表（目标）和B类模型（实际）计算C类数据（达成率、对比等）
    - 返回格式标准化（表格格式，中文列名）
 
-4. **Question参数设计**
+5. **Question参数设计**
    - 所有Question支持动态筛选参数：
      - `{{platform}}` - 平台筛选（可选，默认全部）
      - `{{shop_id}}` - 店铺筛选（可选，默认全部）
@@ -65,7 +65,7 @@
      - `{{end_date}}` - 结束日期（必填）
      - `{{granularity}}` - 粒度筛选（daily/weekly/monthly，可选，默认全部）
 
-4. **三类数据处理方式总结**
+6. **三类数据处理方式总结**
    - **A类数据**：直接使用表（`a_class.sales_targets_a`等），无需模型
    - **B类数据**：使用Metabase模型（`Orders Model`等），已创建5个模型
    - **C类数据**：通过Metabase Question实时计算（达成率、对比、排名等），需要创建7个Question
@@ -75,8 +75,9 @@
 #### Model设计原则
 
 1. **使用UNION ALL整合不同粒度**
+
    ```sql
-   SELECT 
+   SELECT
        platform_code, shop_id, data_domain, 'daily' as granularity,
        period_start_date, period_end_date, period_start_time, period_end_time,
        COALESCE(raw_data->>'销售额', raw_data->>'销售金额') AS sales_amount,
@@ -84,7 +85,7 @@
        ...
    FROM b_class.fact_shopee_orders_daily
    UNION ALL
-   SELECT 
+   SELECT
        platform_code, shop_id, data_domain, 'weekly' as granularity,
        period_start_date, period_end_date, period_start_time, period_end_time,
        COALESCE(raw_data->>'销售额', raw_data->>'销售金额') AS sales_amount,
@@ -92,7 +93,7 @@
        ...
    FROM b_class.fact_shopee_orders_weekly
    UNION ALL
-   SELECT 
+   SELECT
        platform_code, shop_id, data_domain, 'monthly' as granularity,
        period_start_date, period_end_date, period_start_time, period_end_time,
        COALESCE(raw_data->>'销售额', raw_data->>'销售金额') AS sales_amount,
@@ -108,9 +109,10 @@
    - 订单状态：`COALESCE(raw_data->>'订单状态', raw_data->>'状态', raw_data->>'order_status')`
 
 3. **关联账号管理表**
+
    ```sql
-   LEFT JOIN   core.platform_accounts pa 
-       ON orders.shop_id = pa.shop_id 
+   LEFT JOIN   core.platform_accounts pa
+       ON orders.shop_id = pa.shop_id
        AND orders.platform_code = pa.platform
    ```
 
@@ -147,6 +149,7 @@
 **选择方案**：通过名称动态查询 + **PostgreSQL 应用数据库**
 
 **选择理由**：
+
 1. **最小化用户工作量**：无需手动维护 Question ID 环境变量
 2. **本地和云端代码一致**：通过名称查询，无需关心 ID 差异
 3. **生产环境可靠性**：PostgreSQL 支持高并发（50-100用户同时操作）
@@ -155,15 +158,16 @@
 
 ### 为什么不使用 H2？
 
-| 问题 | H2 的限制 | PostgreSQL 的优势 |
-|------|----------|------------------|
-| **并发** | 不支持高并发写入 | 支持 50-100+ 并发 |
-| **可靠性** | 文件损坏 = 配置全丢 | 事务保护，数据安全 |
-| **备份** | 需停止服务才能安全备份 | 支持热备份 (pg_dump) |
-| **扩展** | 不支持多实例/负载均衡 | 支持高可用部署 |
-| **升级** | 升级时文件可能损坏 | 升级风险低 |
+| 问题       | H2 的限制              | PostgreSQL 的优势    |
+| ---------- | ---------------------- | -------------------- |
+| **并发**   | 不支持高并发写入       | 支持 50-100+ 并发    |
+| **可靠性** | 文件损坏 = 配置全丢    | 事务保护，数据安全   |
+| **备份**   | 需停止服务才能安全备份 | 支持热备份 (pg_dump) |
+| **扩展**   | 不支持多实例/负载均衡  | 支持高可用部署       |
+| **升级**   | 升级时文件可能损坏     | 升级风险低           |
 
 **Metabase 官方警告**：
+
 > "The embedded H2 database is for development and evaluation purposes only. For production deployments, use PostgreSQL or MySQL."
 
 ### Metabase 数据架构
@@ -196,8 +200,8 @@
 
 **本地开发和云端生产使用完全相同的配置**：
 
-| 环境 | Metabase 应用数据库 | 业务数据源 |
-|------|---------------------|-----------|
+| 环境 | Metabase 应用数据库         | 业务数据源                |
+| ---- | --------------------------- | ------------------------- |
 | 本地 | PostgreSQL (`metabase_app`) | PostgreSQL (`xihong_erp`) |
 | 云端 | PostgreSQL (`metabase_app`) | PostgreSQL (`xihong_erp`) |
 
@@ -214,18 +218,18 @@ database:
   engine: postgres
 
 models:
-  - name: "Analytics Model"          # 唯一标识（用于名称查询）
+  - name: "Analytics Model" # 唯一标识（用于名称查询）
     sql_file: "sql/metabase_models/analytics_model.sql"
     description: "分析数据域模型"
-    
+
   - name: "Orders Model"
     sql_file: "sql/metabase_models/orders_model.sql"
     description: "订单数据域模型"
-    
+
   # ... 其他 Models
 
 questions:
-  - name: "business_overview_kpi"    # 唯一标识（用于名称查询）
+  - name: "business_overview_kpi" # 唯一标识（用于名称查询）
     display_name: "业务概览-核心KPI"
     sql_file: "sql/metabase_questions/business_overview_kpi.sql"
     parameters:
@@ -235,7 +239,7 @@ questions:
       - name: end_date
         type: date
         required: true
-    
+
   # ... 其他 Questions
 ```
 
@@ -244,20 +248,20 @@ questions:
 ```python
 class MetabaseInitializer:
     """Metabase 配置初始化器（幂等操作）"""
-    
+
     def ensure_model_exists(self, model_config: dict) -> int:
         """确保 Model 存在，返回 Model ID"""
         existing = self.find_card_by_name(model_config['name'])
-        
+
         if existing:
             # 存在 → 检查是否需要更新 SQL
             if self.should_update_sql(existing, model_config):
                 self.update_card_sql(existing['id'], model_config)
             return existing['id']
-        
+
         # 不存在 → 创建新 Model
         return self.create_model(model_config)
-    
+
     def ensure_question_exists(self, question_config: dict) -> int:
         """确保 Question 存在，返回 Question ID"""
         # 类似逻辑
@@ -269,23 +273,23 @@ class MetabaseInitializer:
 ```python
 class MetabaseQuestionService:
     """通过名称动态查询 Question"""
-    
+
     def __init__(self):
         self._question_cache: dict[str, int] = {}  # 名称 → ID 缓存
         self._cache_loaded = False
-    
+
     def get_question_id(self, question_name: str) -> int | None:
         """通过名称获取 Question ID（带缓存）"""
         if not self._cache_loaded:
             self._load_question_cache()
         return self._question_cache.get(question_name)
-    
+
     async def execute_question(self, question_name: str, parameters: dict = None):
         """执行 Question 并返回结果"""
         question_id = self.get_question_id(question_name)
         if not question_id:
             raise ValueError(f"Question '{question_name}' 未找到")
-        
+
         return await self._api_post(f"/api/card/{question_id}/query", ...)
 ```
 
@@ -349,6 +353,7 @@ Phase 3.5: init_metabase.py 检测变更
 ### 环境变量简化
 
 **改进前（需维护多个 ID）**：
+
 ```bash
 METABASE_QUESTION_BUSINESS_OVERVIEW_KPI=12
 METABASE_QUESTION_BUSINESS_OVERVIEW_COMPARISON=13
@@ -356,6 +361,7 @@ METABASE_QUESTION_BUSINESS_OVERVIEW_COMPARISON=13
 ```
 
 **改进后（只需基础配置）**：
+
 ```bash
 METABASE_URL=http://metabase:3000
 METABASE_API_KEY=mb_xxxxxxxxxxxxx=
@@ -363,12 +369,12 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 
 ### 新增文件清单
 
-| 文件 | 用途 |
-|------|------|
-| `config/metabase_config.yaml` | 配置清单（Models/Questions 定义） |
-| `scripts/init_metabase.py` | 初始化脚本（自动创建/更新配置） |
-| `sql/metabase_questions/*.sql` | Question SQL 文件 |
-| `sql/metabase_models/FIELD_STANDARDS.md` | 字段标准文档（已创建） |
+| 文件                                     | 用途                              |
+| ---------------------------------------- | --------------------------------- |
+| `config/metabase_config.yaml`            | 配置清单（Models/Questions 定义） |
+| `scripts/init_metabase.py`               | 初始化脚本（自动创建/更新配置）   |
+| `sql/metabase_questions/*.sql`           | Question SQL 文件                 |
+| `sql/metabase_models/FIELD_STANDARDS.md` | 字段标准文档（已创建）            |
 
 ## Impact
 
@@ -381,7 +387,6 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
   - `scripts/deploy_remote_production.sh` - 添加 Phase 3.5
   - `env.example` - 简化，移除 Question ID，保留 API Key
   - `frontend/src/api/dashboard.js` - 可能需要调整数据格式
-  
 - **Metabase 生产环境优化（紧急）**:
   - `docker-compose.metabase.yml` - Metabase 应用数据库改为 PostgreSQL
   - `docker-compose.prod.yml` - 生产环境 Metabase PostgreSQL 配置
@@ -399,6 +404,7 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 ### ✅ 已完成（2025-01-26）
 
 #### B类数据模型（Metabase Models）
+
 - ✅ **Analytics Model** - 分析数据域模型（CTE分层架构，统一数值清洗）
 - ✅ **Products Model** - 产品数据域模型（CTE分层架构，统一数值清洗）
 - ✅ **Orders Model** - 订单数据域模型（CTE分层架构，统一数值清洗，优化日期/时间字段处理）
@@ -406,6 +412,7 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 - ✅ **Services Model** - 服务数据域模型（CTE分层架构，统一数值清洗，直接使用数据库已清洗的日期字段）
 
 **技术特点**：
+
 - 使用CTE分层架构（字段映射 → 数据清洗 → 去重 → 最终输出）
 - 统一数值清洗函数（处理破折号、逗号、空格等特殊字符）
 - 百分比字段自动除以100.0
@@ -413,6 +420,7 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 - 基于data_hash去重，优先级 daily > weekly > monthly
 
 #### A类数据处理决策
+
 - ✅ **决策**：A类数据直接使用表，不创建Metabase模型
 - ✅ **原因**：
   - A类数据表结构简单，字段已标准化
@@ -424,6 +432,7 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 - ✅ **使用方式**：在Metabase Question中直接引用 `a_class.sales_targets_a` 等表
 
 #### C类数据处理方式
+
 - ✅ **决策**：C类数据通过Metabase Question实时计算
 - ✅ **原因**：
   - C类数据是衍生数据（达成率、对比、排名等）
@@ -431,21 +440,49 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
   - 需要JOIN A类数据（目标）和B类数据（实际）
 - ✅ **使用方式**：创建Metabase Question，在Question中JOIN A类表和B类模型
 
-### 🔄 进行中
+#### 数据链路优化（2025-01-27新增）
+
+- ✅ **Schema配置修复** - 修复A类/C类表的ORM Schema配置
+  - A类表添加 `{"schema": "a_class"}`（7张表）
+  - C类表添加 `{"schema": "c_class"}`（4张表）
+  - 修复索引/约束名称避免冲突
+- ✅ **数据迁移脚本** - 创建 `migrate_a_c_class_to_schema` 迁移
+  - 将 public schema 中的A类表迁移到 a_class
+  - 将 public schema 中的C类表迁移到 c_class
+  - 支持数据合并和清理重复表
+- ✅ **目标管理数据同步** - 实现 `TargetSyncService`
+  - 创建分解时自动同步到 `a_class.sales_targets_a`
+  - 删除目标时自动清理 `a_class.sales_targets_a`
+  - 确保前端目标管理和经营指标SQL使用同一数据源
+
+### ✅ 已可用（核心KPI + 经营指标）
+
+#### 业务概览 - 核心KPI指标（business_overview_kpi）
+
+- ✅ 前端按月筛选、平台筛选，展示 GMV、订单数、客单价、转化率、客流量、销售单数
+- ✅ 后端通过 Metabase Question API 查询，Question ID 已配置于 `.env`
+- ✅ 环比数据由后端转换后返回
+
+#### 业务概览 - 经营指标（business_overview_operational_metrics）
+
+- ✅ 前端独立日期选择器（具体日期），两行布局：月目标/当月总达成/今日销售额/月达成率；时间GAP/预估毛利/预估费用/今日销售单数；经营结果竖状置于最右侧
+- ✅ SQL 支持具体日期参数，today_sales / today_order_count 按所选日期查询
+- ✅ 月目标、预估费用来自 A 类表，达成与订单来自 Orders Model
+- ✅ Question ID 已配置，`init_metabase.py` 可同步 SQL 更新
+
+### 🔄 进行中（其他 Questions）
 
 #### Metabase Questions（C类数据实时计算）
-- ⏳ **business_overview_kpi** - 核心KPI指标（待创建）
-- ⏳ **business_overview_comparison** - 数据对比（待创建）
-- ⏳ **business_overview_shop_racing** - 店铺赛马（待创建）
-- ⏳ **business_overview_traffic_ranking** - 流量排名（待创建）
-- ⏳ **business_overview_inventory_backlog** - 库存积压（待创建）
-- ⏳ **business_overview_operational_metrics** - 经营指标（待创建，需要JOIN A类数据计算达成率）
-- ⏳ **clearance_ranking** - 清仓排名（待创建）
+
+- ⏳ **business_overview_comparison** - 数据对比（待优化）
+- ⏳ **business_overview_shop_racing** - 店铺赛马（待优化）
+- ⏳ **business_overview_traffic_ranking** - 流量排名（待优化）
+- ⏳ **business_overview_inventory_backlog** - 库存积压（待优化）
+- ⏳ **clearance_ranking** - 清仓排名（待优化）
 
 ### 📋 待完成
 
-- [ ] 创建所有Metabase Questions（7个）
-- [ ] 配置Question ID到环境变量
-- [ ] 测试Question查询性能
-- [ ] 验证业务概览页面数据呈现
-
+- [ ] 优化其余 5 个 Question（数据对比、店铺赛马、流量排名、库存积压、清仓排名）
+- [ ] 测试各 Question 查询性能与数据正确性
+- [ ] 执行迁移脚本 `alembic upgrade head`（如未执行）
+- [ ] 验证 A类/C类表已迁移到正确 schema

@@ -3172,9 +3172,10 @@ class SalesTargetA(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)  # 迁移时将重命名为"更新时间"
     
     __table_args__ = (
-        UniqueConstraint("shop_id", "year_month", name="uq_sales_targets_shop_month"),
-        Index("ix_sales_targets_shop", "shop_id"),
-        Index("ix_sales_targets_month", "year_month"),
+        UniqueConstraint("shop_id", "year_month", name="uq_sales_targets_a_shop_month"),
+        Index("ix_sales_targets_a_shop", "shop_id"),
+        Index("ix_sales_targets_a_month", "year_month"),
+        {"schema": "a_class"},
     )
 
 
@@ -3200,9 +3201,10 @@ class SalesCampaignA(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     __table_args__ = (
-        CheckConstraint("end_date >= start_date", name="chk_campaign_dates"),
+        CheckConstraint("end_date >= start_date", name="chk_sales_campaigns_a_dates"),
         Index("ix_sales_campaigns_a_type", "campaign_type"),
         Index("ix_sales_campaigns_a_status", "status"),
+        {"schema": "a_class"},
     )
 
 
@@ -3221,9 +3223,10 @@ class OperatingCost(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     __table_args__ = (
-        UniqueConstraint("shop_id", "year_month", name="uq_operating_costs_shop_month"),
-        Index("ix_operating_costs_shop", "shop_id"),
-        Index("ix_operating_costs_month", "year_month"),
+        UniqueConstraint("shop_id", "year_month", name="uq_operating_costs_a_shop_month"),
+        Index("ix_operating_costs_a_shop", "shop_id"),
+        Index("ix_operating_costs_a_month", "year_month"),
+        {"schema": "a_class"},
     )
 
 
@@ -3242,8 +3245,9 @@ class Employee(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     __table_args__ = (
-        Index("ix_employees_code", "employee_code"),
-        Index("ix_employees_department", "department"),
+        Index("ix_employees_a_code", "employee_code"),
+        Index("ix_employees_a_department", "department"),
+        {"schema": "a_class"},
     )
 
 
@@ -3260,9 +3264,10 @@ class EmployeeTarget(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     __table_args__ = (
-        UniqueConstraint("employee_code", "year_month", "target_type", name="uq_employee_targets"),
-        Index("ix_employee_targets_employee", "employee_code"),
-        Index("ix_employee_targets_month", "year_month"),
+        UniqueConstraint("employee_code", "year_month", "target_type", name="uq_employee_targets_a"),
+        Index("ix_employee_targets_a_employee", "employee_code"),
+        Index("ix_employee_targets_a_month", "year_month"),
+        {"schema": "a_class"},
     )
 
 
@@ -3281,9 +3286,10 @@ class AttendanceRecord(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     __table_args__ = (
-        UniqueConstraint("employee_code", "attendance_date", name="uq_attendance_records"),
-        Index("ix_attendance_records_employee", "employee_code"),
-        Index("ix_attendance_records_date", "attendance_date"),
+        UniqueConstraint("employee_code", "attendance_date", name="uq_attendance_records_a"),
+        Index("ix_attendance_records_a_employee", "employee_code"),
+        Index("ix_attendance_records_a_date", "attendance_date"),
+        {"schema": "a_class"},
     )
 
 
@@ -3305,8 +3311,9 @@ class PerformanceConfigA(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     __table_args__ = (
-        UniqueConstraint("config_name", name="uq_performance_config_name"),
+        UniqueConstraint("config_name", name="uq_performance_config_a_name"),
         Index("ix_performance_config_a_active", "active"),
+        {"schema": "a_class"},
     )
 
 
@@ -3325,9 +3332,10 @@ class EmployeePerformance(Base):
     calculated_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 迁移时将重命名为"计算时间"
     
     __table_args__ = (
-        UniqueConstraint("employee_code", "year_month", name="uq_employee_performance"),
-        Index("ix_employee_performance_employee", "employee_code"),
-        Index("ix_employee_performance_month", "year_month"),
+        UniqueConstraint("employee_code", "year_month", name="uq_employee_performance_c"),
+        Index("ix_employee_performance_c_employee", "employee_code"),
+        Index("ix_employee_performance_c_month", "year_month"),
+        {"schema": "c_class"},
     )
 
 
@@ -3344,9 +3352,10 @@ class EmployeeCommission(Base):
     calculated_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 迁移时将重命名为"计算时间"
     
     __table_args__ = (
-        UniqueConstraint("employee_code", "year_month", name="uq_employee_commissions"),
-        Index("ix_employee_commissions_employee", "employee_code"),
-        Index("ix_employee_commissions_month", "year_month"),
+        UniqueConstraint("employee_code", "year_month", name="uq_employee_commissions_c"),
+        Index("ix_employee_commissions_c_employee", "employee_code"),
+        Index("ix_employee_commissions_c_month", "year_month"),
+        {"schema": "c_class"},
     )
 
 
@@ -3363,9 +3372,10 @@ class ShopCommission(Base):
     calculated_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 迁移时将重命名为"计算时间"
     
     __table_args__ = (
-        UniqueConstraint("shop_id", "year_month", name="uq_shop_commissions"),
-        Index("ix_shop_commissions_shop", "shop_id"),
-        Index("ix_shop_commissions_month", "year_month"),
+        UniqueConstraint("shop_id", "year_month", name="uq_shop_commissions_c"),
+        Index("ix_shop_commissions_c_shop", "shop_id"),
+        Index("ix_shop_commissions_c_month", "year_month"),
+        {"schema": "c_class"},
     )
 
 
@@ -3386,9 +3396,10 @@ class PerformanceScoreC(Base):
     calculated_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 迁移时将重命名为"计算时间"
     
     __table_args__ = (
-        UniqueConstraint("shop_id", "period", name="uq_performance_scores"),
-        Index("ix_performance_scores_shop", "shop_id"),
-        Index("ix_performance_scores_period", "period"),
+        UniqueConstraint("shop_id", "period", name="uq_performance_scores_c"),
+        Index("ix_performance_scores_c_shop", "shop_id"),
+        Index("ix_performance_scores_c_period", "period"),
+        {"schema": "c_class"},
     )
 
 

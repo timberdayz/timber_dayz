@@ -1,0 +1,43 @@
+# Git attributes for consistent line endings across platforms
+# This ensures shell scripts work correctly in both Windows and Linux environments
+
+# Force LF line endings for shell scripts (required for Docker containers)
+*.sh text eol=lf
+docker/scripts/* text eol=lf
+
+# Force LF for Docker-related files
+Dockerfile* text eol=lf
+*.dockerfile text eol=lf
+docker-compose*.yml text eol=lf
+
+# Python files should use LF (Unix standard)
+*.py text eol=lf
+
+# Configuration files
+*.ini text eol=lf
+*.conf text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Text files
+*.txt text eol=lf
+*.md text eol=lf
+
+# JSON files
+*.json text eol=lf
+
+# Windows batch files should use CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.enc binary

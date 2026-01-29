@@ -1,7 +1,7 @@
 # Metabase Models 和 Questions 实施状态
 
-**最后更新**: 2026-01-24 21:22  
-**当前阶段**: **✅ 方案一实施完成** - Models 和 Questions 已通过 API 自动创建
+**最后更新**: 2026-01-30  
+**当前阶段**: **✅ 核心KPI与经营指标已可用** - 前端可正常使用；其余 Question 待继续优化
 
 ---
 
@@ -12,20 +12,21 @@
 **关键决策**: Metabase 应用数据库从 H2 迁移到 PostgreSQL
 
 **Metabase 官方警告**：
+
 > "The embedded H2 database is for development and evaluation purposes only. For production deployments, use PostgreSQL or MySQL."
 
 ---
 
 ## 📊 总体进度
 
-| 类别 | 状态 | 进度 | 说明 |
-|------|------|------|------|
-| **🚨 生产环境优化** | ✅ 配置完成 | 80% | H2 → PostgreSQL 配置已完成，待测试 |
-| **B类数据模型** | ✅ **已创建** | 5/5 (100%) | 所有 Model 已通过 API 创建（ID: 38-42） |
-| **A类数据处理** | ✅ 已确定 | 100% | 直接使用表，不创建模型 |
-| **部署架构设计** | ✅ 已更新 | 100% | 通过名称动态查询 + **PostgreSQL** |
+| 类别                | 状态          | 进度       | 说明                                       |
+| ------------------- | ------------- | ---------- | ------------------------------------------ |
+| **🚨 生产环境优化** | ✅ 配置完成   | 80%        | H2 → PostgreSQL 配置已完成，待测试         |
+| **B类数据模型**     | ✅ **已创建** | 5/5 (100%) | 所有 Model 已通过 API 创建（ID: 38-42）    |
+| **A类数据处理**     | ✅ 已确定     | 100%       | 直接使用表，不创建模型                     |
+| **部署架构设计**    | ✅ 已更新     | 100%       | 通过名称动态查询 + **PostgreSQL**          |
 | **C类数据Question** | ✅ **已创建** | 7/7 (100%) | 所有 Question 已通过 API 创建（ID: 43-49） |
-| **部署架构实现** | ✅ **已完成** | 100% | 配置清单、初始化脚本、SQL模板、API 创建 |
+| **部署架构实现**    | ✅ **已完成** | 100%       | 配置清单、初始化脚本、SQL模板、API 创建    |
 
 ### 🎉 方案一实施结果
 
@@ -69,17 +70,19 @@
 所有模型已创建，使用CTE分层架构，统一数值清洗函数。
 
 #### ✅ Analytics Model
+
 - **文件**: `sql/metabase_models/analytics_model.sql`
 - **数据域**: analytics
 - **粒度**: daily, weekly, monthly
 - **平台**: shopee, tiktok, miaoshou
-- **特点**: 
+- **特点**:
   - CTE分层架构
   - 统一数值清洗（破折号、逗号、空格）
   - 百分比字段自动除以100.0
   - 时间格式转换为秒数
 
 #### ✅ Products Model
+
 - **文件**: `sql/metabase_models/products_model.sql`
 - **数据域**: products
 - **粒度**: daily, weekly, monthly
@@ -87,15 +90,17 @@
 - **特点**: 同上
 
 #### ✅ Orders Model
+
 - **文件**: `sql/metabase_models/orders_model.sql`
 - **数据域**: orders
 - **粒度**: daily, weekly, monthly
 - **平台**: shopee, tiktok, miaoshou
-- **特点**: 
+- **特点**:
   - 优化日期/时间字段处理
   - 优先使用数据库已清洗字段（period_start_time, period_start_date）
 
 #### ✅ Inventory Model
+
 - **文件**: `sql/metabase_models/inventory_model.sql`
 - **数据域**: inventory
 - **粒度**: snapshot（仅快照）
@@ -103,12 +108,13 @@
 - **特点**: 去重逻辑基于ingest_timestamp DESC
 
 #### ✅ Services Model
+
 - **文件**: `sql/metabase_models/services_model.sql`
 - **数据域**: services
 - **子类型**: ai_assistant, agent
 - **粒度**: daily, weekly, monthly
 - **平台**: shopee, tiktok
-- **特点**: 
+- **特点**:
   - 直接使用数据库已清洗的日期字段
   - 统一锚点日期（period_end_date）
   - 支持日期范围查询
@@ -116,7 +122,7 @@
 ### 2. A类数据处理决策
 
 - ✅ **决策**: A类数据直接使用表，不创建Metabase模型
-- ✅ **原因**: 
+- ✅ **原因**:
   - 表结构简单，字段已标准化
   - 无需字段映射和数据清洗
   - 性能更好（少一层CTE）
@@ -126,7 +132,7 @@
 ### 3. C类数据处理方式
 
 - ✅ **决策**: C类数据通过Metabase Question实时计算
-- ✅ **原因**: 
+- ✅ **原因**:
   - C类数据是衍生数据（达成率、对比、排名等）
   - 需要实时计算，不存储结果
   - 需要JOIN A类数据（目标）和B类数据（实际）
@@ -143,12 +149,12 @@
 
 #### 为什么从 H2 迁移到 PostgreSQL？
 
-| H2 的问题 | PostgreSQL 的优势 |
-|----------|------------------|
-| 不支持高并发写入 | 支持 50-100+ 并发 |
-| 文件损坏 = 配置全丢 | 事务保护，数据安全 |
-| 需停止服务才能备份 | 支持热备份 (pg_dump) |
-| 不支持多实例/负载均衡 | 支持高可用部署 |
+| H2 的问题             | PostgreSQL 的优势    |
+| --------------------- | -------------------- |
+| 不支持高并发写入      | 支持 50-100+ 并发    |
+| 文件损坏 = 配置全丢   | 事务保护，数据安全   |
+| 需停止服务才能备份    | 支持热备份 (pg_dump) |
+| 不支持多实例/负载均衡 | 支持高可用部署       |
 
 #### Metabase 数据架构说明（更新）
 
@@ -178,11 +184,11 @@
 
 #### 核心设计
 
-| 组件 | 说明 |
-|------|------|
-| `config/metabase_config.yaml` | 配置清单（Models/Questions 定义） |
-| `scripts/init_metabase.py` | 初始化脚本（幂等创建/更新） |
-| `MetabaseQuestionService` | 通过名称动态查询 Question ID（带缓存） |
+| 组件                          | 说明                                   |
+| ----------------------------- | -------------------------------------- |
+| `config/metabase_config.yaml` | 配置清单（Models/Questions 定义）      |
+| `scripts/init_metabase.py`    | 初始化脚本（幂等创建/更新）            |
+| `MetabaseQuestionService`     | 通过名称动态查询 Question ID（带缓存） |
 
 #### 部署流程
 
@@ -223,6 +229,7 @@ Phase 4: Backend 启动
 #### 环境变量简化
 
 **改进前**:
+
 ```bash
 METABASE_QUESTION_BUSINESS_OVERVIEW_KPI=12
 METABASE_QUESTION_BUSINESS_OVERVIEW_COMPARISON=13
@@ -230,6 +237,7 @@ METABASE_QUESTION_BUSINESS_OVERVIEW_COMPARISON=13
 ```
 
 **改进后**:
+
 ```bash
 METABASE_URL=http://metabase:3000
 METABASE_API_KEY=mb_xxxxxxxxxxxxx=
@@ -278,8 +286,8 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 6. ✅ **business_overview_operational_metrics** (ID: 48) - 经营指标
    - 显示名称: 业务概览 - 经营指标
    - 数据源: A类表 + Orders Model（JOIN）
-   - 计算指标: 月目标、达成率、时间GAP、预估费用
-   - 参数: `date`, `platforms`, `shops`
+   - 计算指标: 月目标、达成率、时间GAP、预估费用、今日销售、今日销售单数、经营结果
+   - 参数: `month`（具体日期 YYYY-MM-DD）, `platform`
 
 #### P1 - 其他功能（1个）- ✅ 已创建
 
@@ -291,6 +299,18 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 
 ---
 
+### 前端业务概览 - 核心KPI与经营指标已可用（2026-01-30）
+
+| 模块            | 状态      | 说明                                                                                                                                        |
+| --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **核心KPI指标** | ✅ 已可用 | 按月、平台筛选；展示 GMV、订单数、客单价、转化率、客流量、销售单数；Question ID 已配置于 `.env`                                             |
+| **经营指标**    | ✅ 已可用 | 独立日期选择器（具体日期）；两行布局：月目标/当月总达成/今日销售额/月达成率；时间GAP/预估毛利/预估费用/今日销售单数；经营结果竖状置于最右侧 |
+| **SQL 同步**    | ✅ 支持   | 修改 `sql/metabase_questions/*.sql` 后运行 `python scripts/init_metabase.py` 可同步到 Metabase                                              |
+
+**后续计划**：继续优化其余 Question（数据对比、店铺赛马、流量排名、库存积压、清仓排名）。
+
+---
+
 ## 📋 待完成工作
 
 ### 0. 🚨 生产环境优化（紧急 - 一周内必须完成）
@@ -298,39 +318,40 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 **优先级**: P0 - 阻塞上线  
 **原因**: H2 不支持 50-100 并发，官方明确警告生产环境必须使用 PostgreSQL/MySQL
 
-| 任务 | 文件 | 状态 |
-|------|------|------|
-| 创建 metabase_app 数据库 | `docker/postgres/init.sql` | ✅ 已完成 |
-| 修改 Metabase Docker 配置 | `docker-compose.metabase.yml` | ✅ 已完成 |
-| 更新生产环境配置 | `docker-compose.prod.yml` | ⏳ 待检查 |
-| 添加环境变量 | `env.example`, `env.production.example` | ✅ 已完成 |
-| 本地测试验证 | - | ✅ 已完成 |
-| 并发性能验证 | - | ⏳ 待执行 |
+| 任务                      | 文件                                    | 状态      |
+| ------------------------- | --------------------------------------- | --------- |
+| 创建 metabase_app 数据库  | `docker/postgres/init.sql`              | ✅ 已完成 |
+| 修改 Metabase Docker 配置 | `docker-compose.metabase.yml`           | ✅ 已完成 |
+| 更新生产环境配置          | `docker-compose.prod.yml`               | ⏳ 待检查 |
+| 添加环境变量              | `env.example`, `env.production.example` | ✅ 已完成 |
+| 本地测试验证              | -                                       | ✅ 已完成 |
+| 并发性能验证              | -                                       | ⏳ 待执行 |
 
 ### 1. 部署架构实现 ✅ 已完成
 
-| 任务 | 文件 | 状态 |
-|------|------|------|
-| 创建配置清单 | `config/metabase_config.yaml` | ✅ 已完成 |
-| 创建初始化脚本 | `scripts/init_metabase.py` | ✅ 已完成（已修复 API 格式兼容性） |
-| 修改 MetabaseQuestionService | `backend/services/metabase_question_service.py` | ⏳ 待开始（需添加名称查询功能） |
-| 更新部署脚本 | `scripts/deploy_remote_production.sh` | ⏳ 待开始 |
-| 简化环境变量 | `env.example` | ✅ 已完成 |
-| 创建 Question SQL 目录 | `sql/metabase_questions/` | ✅ 已完成 |
+| 任务                         | 文件                                            | 状态                               |
+| ---------------------------- | ----------------------------------------------- | ---------------------------------- |
+| 创建配置清单                 | `config/metabase_config.yaml`                   | ✅ 已完成                          |
+| 创建初始化脚本               | `scripts/init_metabase.py`                      | ✅ 已完成（已修复 API 格式兼容性） |
+| 修改 MetabaseQuestionService | `backend/services/metabase_question_service.py` | ⏳ 待开始（需添加名称查询功能）    |
+| 更新部署脚本                 | `scripts/deploy_remote_production.sh`           | ⏳ 待开始                          |
+| 简化环境变量                 | `env.example`                                   | ✅ 已完成                          |
+| 创建 Question SQL 目录       | `sql/metabase_questions/`                       | ✅ 已完成                          |
 
 ### 2. 创建所有 Metabase Questions ✅ 已全部创建
 
-| Question | SQL文件 | Metabase ID | 状态 |
-|----------|---------|-------------|------|
-| business_overview_kpi | `sql/metabase_questions/business_overview_kpi.sql` | 43 | ✅ 已创建 |
-| business_overview_comparison | `sql/metabase_questions/business_overview_comparison.sql` | 44 | ✅ 已创建 |
-| business_overview_shop_racing | `sql/metabase_questions/business_overview_shop_racing.sql` | 45 | ✅ 已创建 |
-| business_overview_traffic_ranking | `sql/metabase_questions/business_overview_traffic_ranking.sql` | 46 | ✅ 已创建 |
-| business_overview_inventory_backlog | `sql/metabase_questions/business_overview_inventory_backlog.sql` | 47 | ✅ 已创建 |
-| business_overview_operational_metrics | `sql/metabase_questions/business_overview_operational_metrics.sql` | 48 | ✅ 已创建 |
-| clearance_ranking | `sql/metabase_questions/clearance_ranking.sql` | 49 | ✅ 已创建 |
+| Question                              | SQL文件                                                            | Metabase ID | 状态      |
+| ------------------------------------- | ------------------------------------------------------------------ | ----------- | --------- |
+| business_overview_kpi                 | `sql/metabase_questions/business_overview_kpi.sql`                 | 43          | ✅ 已创建 |
+| business_overview_comparison          | `sql/metabase_questions/business_overview_comparison.sql`          | 44          | ✅ 已创建 |
+| business_overview_shop_racing         | `sql/metabase_questions/business_overview_shop_racing.sql`         | 45          | ✅ 已创建 |
+| business_overview_traffic_ranking     | `sql/metabase_questions/business_overview_traffic_ranking.sql`     | 46          | ✅ 已创建 |
+| business_overview_inventory_backlog   | `sql/metabase_questions/business_overview_inventory_backlog.sql`   | 47          | ✅ 已创建 |
+| business_overview_operational_metrics | `sql/metabase_questions/business_overview_operational_metrics.sql` | 48          | ✅ 已创建 |
+| clearance_ranking                     | `sql/metabase_questions/clearance_ranking.sql`                     | 49          | ✅ 已创建 |
 
 ### 3. 测试和验证
+
 - [x] 本地测试初始化脚本
 - [x] 测试名称动态查询功能
 - [ ] 测试所有 Question 能正常查询（需要测试数据）
@@ -342,17 +363,18 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 
 ## 🎯 三类数据处理方式总结
 
-| 数据类型 | 处理方式 | 说明 | 状态 |
-|---------|---------|------|------|
-| **A类数据** | 直接使用表 | `a_class.sales_targets_a` 等，无需模型 | ✅ 已确定 |
-| **B类数据** | Metabase模型 | `Orders Model`, `Analytics Model` 等 | ✅ 已完成（5个） |
-| **C类数据** | Metabase Question | 实时计算（达成率、对比、排名等） | ✅ SQL已创建（7/7） |
+| 数据类型    | 处理方式          | 说明                                   | 状态                |
+| ----------- | ----------------- | -------------------------------------- | ------------------- |
+| **A类数据** | 直接使用表        | `a_class.sales_targets_a` 等，无需模型 | ✅ 已确定           |
+| **B类数据** | Metabase模型      | `Orders Model`, `Analytics Model` 等   | ✅ 已完成（5个）    |
+| **C类数据** | Metabase Question | 实时计算（达成率、对比、排名等）       | ✅ SQL已创建（7/7） |
 
 ---
 
 ## 📝 技术要点
 
 ### B类数据模型技术特点
+
 - ✅ CTE分层架构（字段映射 → 数据清洗 → 去重 → 最终输出）
 - ✅ 统一数值清洗函数（处理破折号、逗号、空格等特殊字符）
 - ✅ 百分比字段自动除以100.0
@@ -360,6 +382,7 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 - ✅ 基于data_hash去重，优先级 daily > weekly > monthly
 
 ### 部署架构技术要点
+
 - ✅ **配置存储**: Metabase 应用数据库改为 **PostgreSQL**（`metabase_app` 数据库）
 - ✅ **名称查询**: 通过 Question/Model 名称动态查询 ID，无需硬编码
 - ✅ **缓存机制**: MetabaseQuestionService 缓存 名称→ID 映射，避免频繁 API 调用
@@ -383,11 +406,13 @@ FROM {{#38}} AS analytics_model
 ```
 
 **优势**：
+
 - 本地/云端自动适配正确的 Model ID
 - SQL 文件可读性好，直接看到引用的 Model 名称
 - Model 重建后 ID 变化，只需重新运行初始化脚本
 
 ### C类数据Question设计原则
+
 - ✅ 使用Native SQL模式
 - ✅ 参数化查询（`{{variable}}`语法 + `[[可选条件]]`语法）
 - ✅ Model 引用使用 `{{MODEL:xxx}}` 占位符
@@ -396,13 +421,13 @@ FROM {{#38}} AS analytics_model
 
 ### 核心KPI指标计算逻辑（2026-01-24 确认）
 
-| 指标 | 计算公式 | 数据来源 |
-|------|----------|----------|
-| GMV | `SUM(sales_amount)` | Orders Model |
-| 订单数 | `COUNT(DISTINCT order_id)` | Orders Model（订单号去重） |
-| 访客数 | `SUM(visitor_count)` WHERE granularity='daily' | Analytics Model |
-| 转化率 | `订单数 / 访客数 × 100%` | 计算 |
-| 客单价 | `GMV / 订单数` | 计算 |
+| 指标   | 计算公式                                       | 数据来源                   |
+| ------ | ---------------------------------------------- | -------------------------- |
+| GMV    | `SUM(sales_amount)`                            | Orders Model               |
+| 订单数 | `COUNT(DISTINCT order_id)`                     | Orders Model（订单号去重） |
+| 访客数 | `SUM(visitor_count)` WHERE granularity='daily' | Analytics Model            |
+| 转化率 | `订单数 / 访客数 × 100%`                       | 计算                       |
+| 客单价 | `GMV / 订单数`                                 | 计算                       |
 
 ---
 

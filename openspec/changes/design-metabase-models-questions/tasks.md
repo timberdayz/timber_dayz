@@ -5,6 +5,7 @@
 **背景**：一周后系统正式上线，预期 50-100 并发用户。H2 不支持高并发，必须迁移到 PostgreSQL。
 
 **Metabase 官方警告**：
+
 > "The embedded H2 database is for development and evaluation purposes only. For production deployments, use PostgreSQL or MySQL."
 
 ### 0.1 创建 Metabase 应用数据库 ✅ 已完成
@@ -49,6 +50,58 @@
 - [ ] 0.4.2 性能验证
   - 模拟多用户并发操作
   - 验证无写入冲突
+
+---
+
+## 0.5 数据链路优化 ✅ 已完成（2025-01-27）
+
+**背景**：发现A类/C类数据表的ORM定义未指定schema，导致表被创建在public而非a_class/c_class，造成经营指标SQL读取空表。
+
+### 0.5.1 修复 Schema 配置 ✅
+
+- [x] 修改 `modules/core/db/schema.py`
+  - ✅ `SalesTargetA` 添加 `{"schema": "a_class"}`
+  - ✅ `SalesCampaignA` 添加 `{"schema": "a_class"}`
+  - ✅ `OperatingCost` 添加 `{"schema": "a_class"}`
+  - ✅ `Employee` 添加 `{"schema": "a_class"}`
+  - ✅ `EmployeeTarget` 添加 `{"schema": "a_class"}`
+  - ✅ `AttendanceRecord` 添加 `{"schema": "a_class"}`
+  - ✅ `PerformanceConfigA` 添加 `{"schema": "a_class"}`
+  - ✅ `EmployeePerformance` 添加 `{"schema": "c_class"}`
+  - ✅ `EmployeeCommission` 添加 `{"schema": "c_class"}`
+  - ✅ `ShopCommission` 添加 `{"schema": "c_class"}`
+  - ✅ `PerformanceScoreC` 添加 `{"schema": "c_class"}`
+  - ✅ 重命名索引/约束名称避免冲突（添加 `_a` 或 `_c` 后缀）
+
+### 0.5.2 创建迁移脚本 ✅
+
+- [x] 创建 `migrations/versions/20260127_migrate_a_c_class_tables_to_schema.py`
+  - ✅ 将 public 中的 A 类表迁移到 a_class schema
+  - ✅ 将 public 中的 C 类表迁移到 c_class schema
+  - ✅ 支持数据合并（如果目标 schema 已有表）
+  - ✅ 自动清理 public 中的重复表
+  - ✅ 幂等设计，可重复执行
+
+### 0.5.3 实现目标管理数据同步 ✅
+
+- [x] 创建 `backend/services/target_sync_service.py`
+  - ✅ `TargetSyncService` 类实现同步逻辑
+  - ✅ `sync_target_to_a_class()` - 同步单个目标到 a_class.sales_targets_a
+  - ✅ `sync_all_active_targets()` - 批量同步所有活跃目标
+  - ✅ `delete_target_from_a_class()` - 删除目标时清理 a_class
+  - ✅ 使用原生SQL执行upsert（支持跨schema）
+
+- [x] 修改 `backend/routers/target_management.py`
+  - ✅ 创建分解时自动调用 `sync_target_after_create()`
+  - ✅ 删除目标时自动调用 `sync_target_after_delete()`
+  - ✅ 同步失败不影响主流程（仅记录警告日志）
+
+### 0.5.4 待执行
+
+- [ ] 执行迁移脚本：`alembic upgrade head`
+- [ ] 验证 a_class/c_class schema 中的表已正确创建
+- [ ] 验证 public schema 中的重复表已清理
+- [ ] 测试目标管理同步功能
 
 ---
 
@@ -179,13 +232,14 @@
 
 ### 3.1 业务概览页面Question（P0 - 必须）
 
-- [ ] 3.1.1 business_overview_kpi - 核心KPI指标
+- [x] 3.1.1 business_overview_kpi - 核心KPI指标 ✅ **已可用**
   - **用途**：提供业务概览页面的6个核心KPI指标
   - **数据源**：Orders Model
-  - **计算指标**：GMV、订单数、买家数、转化率、平均订单价值等
-  - **参数**：`{{start_date}}`, `{{end_date}}`, `{{platforms}}`, `{{shops}}`
+  - **计算指标**：GMV、订单数、买家数、转化率、平均订单价值、销售单数等
+  - **参数**：`{{month}}`（月初 YYYY-MM-01）, `{{platform}}`
   - **返回格式**：单行数据，包含所有KPI指标
   - **后端API**：`GET /api/dashboard/business-overview/kpi`
+  - **前端**：按月、平台筛选，Question ID 已配置于 `.env`
 
 - [ ] 3.1.2 business_overview_comparison - 数据对比
   - **用途**：提供日/周/月度数据对比
@@ -219,22 +273,25 @@
   - **返回格式**：多行数据，每行一个SKU，包含积压信息
   - **后端API**：`GET /api/dashboard/business-overview/inventory-backlog`
 
-- [ ] 3.1.6 business_overview_operational_metrics - 经营指标 ⭐ **需要JOIN A类数据**
-  - **用途**：门店经营表格数据（包含达成率）
+- [x] 3.1.6 business_overview_operational_metrics - 经营指标 ✅ **已可用** ⭐ **需要JOIN A类数据**
+  - **用途**：门店经营表格数据（包含达成率、今日销售、今日销售单数、经营结果）
   - **数据源**：
     - A类数据：`a_class.sales_targets_a`（目标）
     - B类数据：Orders Model（实际）
     - A类数据：`a_class.operating_costs`（运营成本）
   - **计算指标**：
-    - `monthly_target` - 月目标（来自A类 `sales_targets_a.target_sales_amount`）
-    - `monthly_total_achieved` - 当月总达成（来自B类 Orders Model聚合）
-    - `monthly_achievement_rate` - 月达成率 = (实际 / 目标) × 100
+    - `monthly_target` - 月目标（来自A类 `sales_targets_a`）
+    - `monthly_total_achieved` - 当月总达成（来自B类 Orders Model 聚合到所选日期）
+    - `today_sales` / `today_order_count` - 所选日期的销售额与销售单数
+    - `monthly_achievement_rate` - 月达成率
     - `time_gap` - 时间GAP
     - `estimated_expenses` - 预估费用（来自A类 `operating_costs`）
-  - **参数**：`{{date}}`, `{{platforms}}`, `{{shops}}`
-  - **返回格式**：多行数据，每行一个店铺，包含多个经营指标
+    - `operating_result` / `operating_result_text` - 经营结果（盈利/亏损）
+  - **参数**：`{{month}}`（具体日期 YYYY-MM-DD）, `{{platform}}`
+  - **返回格式**：单行数据，包含所有经营指标
   - **后端API**：`GET /api/dashboard/business-overview/operational-metrics`
-  - **关键SQL**：需要JOIN `a_class.sales_targets_a` 和 `"Orders Model"` 计算达成率
+  - **前端**：独立日期选择器、两行布局（今日销售单数、经营结果竖状最右侧），Question ID 已配置
+  - **关键SQL**：JOIN `a_class.sales_targets_a` 和 Orders Model 计算达成率；SQL 更新后运行 `init_metabase.py` 同步
 
 ### 3.2 其他功能Question（P1 - 重要）
 
@@ -324,4 +381,3 @@
   - 验证前端能正确调用Question API
   - 验证数据格式与前端期望一致
   - 验证错误处理正确
-

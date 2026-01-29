@@ -80,6 +80,7 @@ from backend.routers import (
     # data_browser,  # v4.7.0: 数据库浏览器API
     sales_campaign,  # v4.11.0: 销售战役管理API
     target_management,  # v4.11.0: 目标管理API
+    expense_management,  # v4.21.0: 费用管理API
     performance_management,  # v4.11.0: 绩效管理API
     raw_layer,  # v4.11.5: 原始数据层查看API
     raw_layer_export,  # v4.13.1: 丢失数据导出API
@@ -932,6 +933,13 @@ app.include_router(
     target_management.router,
     prefix="/api",
     tags=["目标管理"]
+)
+
+# v4.21.0 费用管理API
+app.include_router(
+    expense_management.router,
+    prefix="/api",
+    tags=["费用管理"]
 )
 
 # v4.11.0 绩效管理API

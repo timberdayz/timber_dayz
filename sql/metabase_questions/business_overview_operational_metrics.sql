@@ -18,72 +18,84 @@ scope AS (
     SELECT
         DATE_TRUNC('month', {{month}}::date)::date AS month_start,
         (DATE_TRUNC('month', {{month}}::date) + INTERVAL '1 month' - INTERVAL '1 day')::date AS month_end,
-        LEAST(
-            (DATE_TRUNC('month', {{month}}::date) + INTERVAL '1 month' - INTERVAL '1 day')::date,
-            CURRENT_DATE
-        ) AS target_date
+        -- 查看日期（累计达成的截止日期）：使用传入日期与今天的较小值
+        -- 确保不会查询未来的数据
+        LEAST({{month}}::date, CURRENT_DATE) AS target_date,
+        -- 今日查询日期：直接使用传入的日期（前端传递的是用户选择的具体日期）
+        -- 如果日期超过今天，则使用今天（因为未来的数据还没有）
+        LEAST({{month}}::date, CURRENT_DATE) AS today_query_date
 ),
 
+-- B类数据：当月总达成（使用 paid_amount，因为 sales_amount 没有数据）
 b_monthly AS (
     SELECT
-        COALESCE(SUM(o.sales_amount), 0) AS total_sales,
+        COALESCE(SUM(o.paid_amount), 0) AS total_sales,
         COALESCE(SUM(o.profit), 0) AS total_profit,
-        COALESCE(SUM(o.order_count), 0) AS total_orders
-    FROM {{MODEL:Orders Model}} o
+        COUNT(DISTINCT o.order_id) AS total_orders
+    FROM {{MODEL:Orders Model}} AS o
     CROSS JOIN scope s
-    WHERE o.granularity = 'daily'
-      AND o.metric_date >= s.month_start
+    WHERE o.metric_date >= s.month_start
       AND o.metric_date <= s.target_date
       [[AND o.platform_code = {{platform}}]]
 ),
 
+-- B类数据：指定日期销售
+-- today_query_date = 用户选择的日期（如果超过今天则使用今天）
+-- today_sales 显示该具体日期的销售额
 b_today AS (
     SELECT
-        COALESCE(SUM(o.sales_amount), 0) AS today_sales,
-        COALESCE(SUM(o.order_count), 0) AS today_orders
-    FROM {{MODEL:Orders Model}} o
+        COALESCE(SUM(o.paid_amount), 0) AS today_sales,
+        COUNT(DISTINCT o.order_id) AS today_orders
+    FROM {{MODEL:Orders Model}} AS o
     CROSS JOIN scope s
-    WHERE o.granularity = 'daily'
-      AND o.metric_date = s.target_date
+    WHERE o.metric_date = s.today_query_date
       [[AND o.platform_code = {{platform}}]]
 ),
 
-shops_in_scope AS (
-    SELECT DISTINCT o.shop_id
-    FROM {{MODEL:Orders Model}} o
-    CROSS JOIN scope s
-    WHERE o.granularity = 'daily'
-      AND o.metric_date >= s.month_start
-      AND o.metric_date <= s.target_date
-      [[AND o.platform_code = {{platform}}]]
-),
-
+-- A类数据：月目标（使用中文字段名）
+-- 注意：目标应该独立于订单数据存在，直接按年月汇总所有目标
+-- 如果提供了平台参数，通过 dim_shops 表关联平台筛选
 a_targets AS (
-    SELECT COALESCE(SUM(t.target_sales_amount), 0) AS monthly_target
+    SELECT COALESCE(SUM(t."目标销售额"), 0) AS monthly_target
     FROM a_class.sales_targets_a t
     CROSS JOIN scope s
-    WHERE t.year_month = to_char(s.month_start, 'YYYY-MM')
-      AND EXISTS (SELECT 1 FROM shops_in_scope sh WHERE sh.shop_id = t.shop_id)
+    WHERE t."年月" = to_char(s.month_start, 'YYYY-MM')
+      -- 如果提供了平台参数，通过 dim_shops 关联筛选
+      [[AND EXISTS (
+          SELECT 1 FROM dim_shops ds 
+          WHERE ds.shop_id = t."店铺ID" 
+            AND LOWER(ds.platform_code) = LOWER({{platform}})
+      )]]
 ),
 
+-- A类数据：预估费用（使用中文字段名）
 a_costs AS (
-    SELECT COALESCE(SUM(c.rent + c.salary + c.utilities + c.other_costs), 0) AS estimated_expenses
+    SELECT COALESCE(SUM(c."租金" + c."工资" + c."水电费" + c."其他成本"), 0) AS estimated_expenses
     FROM a_class.operating_costs c
     CROSS JOIN scope s
-    WHERE c.year_month = to_char(s.month_start, 'YYYY-MM')
-      AND EXISTS (SELECT 1 FROM shops_in_scope sh WHERE sh.shop_id = c.shop_id)
+    WHERE c."年月" = to_char(s.month_start, 'YYYY-MM')
+      -- 如果提供了平台参数，通过 dim_shops 关联筛选
+      [[AND EXISTS (
+          SELECT 1 FROM dim_shops ds 
+          WHERE ds.shop_id = c."店铺ID" 
+            AND LOWER(ds.platform_code) = LOWER({{platform}})
+      )]]
 ),
 
+-- 时间进度计算
+-- 使用日期差计算：已过天数 / 总天数 * 100
+-- 公式：(target_date - month_start + 1) / (month_end - month_start + 1) * 100
 time_metrics AS (
     SELECT
         ROUND(
-            EXTRACT(DAY FROM (SELECT target_date FROM scope)) * 100.0
-            / NULLIF(EXTRACT(DAY FROM (SELECT month_end FROM scope)), 0),
+            ((SELECT target_date FROM scope) - (SELECT month_start FROM scope) + 1)::numeric * 100.0
+            / NULLIF(((SELECT month_end FROM scope) - (SELECT month_start FROM scope) + 1)::numeric, 0),
             2
         ) AS time_progress_pct
     FROM scope
 )
 
+-- 最终输出
 SELECT
     (SELECT monthly_target FROM a_targets) AS monthly_target,
     (SELECT total_sales FROM b_monthly) AS monthly_total_achieved,

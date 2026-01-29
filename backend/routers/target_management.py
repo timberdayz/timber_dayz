@@ -468,6 +468,20 @@ async def update_target(
         await db.commit()
         await db.refresh(target)
         
+        # [*] v4.21.0: 更新目标后，重新同步到 a_class.sales_targets_a（如果有店铺分解）
+        try:
+            from backend.services.target_sync_service import sync_target_after_create
+            sync_result = await sync_target_after_create(db, target_id)
+            if sync_result.get("synced", 0) > 0:
+                logger.info(f"[TargetManagement] 更新后已同步到a_class: {sync_result['synced']}条记录")
+            elif sync_result.get("skipped", 0) > 0:
+                logger.debug(f"[TargetManagement] 目标无店铺分解，跳过同步")
+            if sync_result.get("errors"):
+                logger.warning(f"[TargetManagement] 同步部分失败: {sync_result['errors']}")
+        except Exception as sync_err:
+            # 同步失败不影响主流程
+            logger.warning(f"[TargetManagement] 更新后同步到a_class失败: {sync_err}")
+        
         # 触发A_CLASS_UPDATED事件(数据流转流程自动化)
         try:
             from backend.utils.events import AClassUpdatedEvent
@@ -545,7 +559,17 @@ async def delete_target(
         affected_shops = [bd.shop_id for bd in breakdowns if bd.shop_id]
         affected_platforms = list(set([bd.platform_code for bd in breakdowns if bd.platform_code]))
         
-        db.delete(target)
+        # [*] v4.21.0: 删除前清理 a_class.sales_targets_a 中的数据
+        try:
+            from backend.services.target_sync_service import sync_target_after_delete
+            delete_result = await sync_target_after_delete(db, target_id)
+            if delete_result.get("deleted", 0) > 0:
+                logger.info(f"[TargetManagement] 已从a_class清理: {delete_result['deleted']}条记录")
+        except Exception as sync_err:
+            # 清理失败不影响主流程
+            logger.warning(f"[TargetManagement] 清理a_class失败: {sync_err}")
+        
+        await db.delete(target)
         await db.commit()
         
         # 触发A_CLASS_UPDATED事件(数据流转流程自动化)
@@ -691,13 +715,39 @@ async def create_breakdown(
             )).scalar_one_or_none()
             
             if existing:
-                return error_response(
-                    code=ErrorCode.DATA_UNIQUE_CONSTRAINT_VIOLATION,
-                    message="该店铺分解已存在",
-                    error_type=get_error_type(ErrorCode.DATA_UNIQUE_CONSTRAINT_VIOLATION),
-                    recovery_suggestion="该店铺分解已存在,无需重复创建",
-                    status_code=400
-                )
+                # [*] v4.21.0: Upsert 逻辑 - 如果分解已存在，则更新而非报错
+                existing.target_amount = request.target_amount
+                existing.target_quantity = request.target_quantity
+                existing.updated_at = datetime.utcnow()
+                
+                await db.commit()
+                await db.refresh(existing)
+                
+                # 同步到 a_class.sales_targets_a
+                try:
+                    from backend.services.target_sync_service import sync_target_after_create
+                    sync_result = await sync_target_after_create(db, target_id)
+                    if sync_result.get("synced", 0) > 0:
+                        logger.info(f"[TargetManagement] 更新分解后已同步到a_class: {sync_result['synced']}条记录")
+                except Exception as sync_err:
+                    logger.warning(f"[TargetManagement] 更新分解后同步到a_class失败: {sync_err}")
+                
+                breakdown_data = BreakdownResponse.model_validate(existing).model_dump()
+                # 查询店铺名称
+                shop = (await db.execute(
+                    select(DimShop).where(
+                        DimShop.platform_code == normalized_platform_code,
+                        DimShop.shop_id == request.shop_id
+                    )
+                )).scalar_one_or_none()
+                if shop:
+                    breakdown_data["shop_name"] = shop.shop_name
+                
+                return {
+                    "success": True,
+                    "data": breakdown_data,
+                    "message": "店铺分解更新成功"
+                }
         
         elif request.breakdown_type == "time":
             if not request.period_start or not request.period_end:
@@ -753,6 +803,19 @@ async def create_breakdown(
         db.add(breakdown)
         await db.commit()
         await db.refresh(breakdown)
+        
+        # [*] v4.21.0: 同步到 a_class.sales_targets_a（店铺分解时触发）
+        if request.breakdown_type == "shop":
+            try:
+                from backend.services.target_sync_service import sync_target_after_create
+                sync_result = await sync_target_after_create(db, target_id)
+                if sync_result.get("synced", 0) > 0:
+                    logger.info(f"[TargetManagement] 已同步到a_class: {sync_result['synced']}条记录")
+                if sync_result.get("errors"):
+                    logger.warning(f"[TargetManagement] 同步部分失败: {sync_result['errors']}")
+            except Exception as sync_err:
+                # 同步失败不影响主流程
+                logger.warning(f"[TargetManagement] 同步到a_class失败: {sync_err}")
         
         breakdown_data = BreakdownResponse.model_validate(breakdown).model_dump()
         if request.breakdown_type == "shop":
