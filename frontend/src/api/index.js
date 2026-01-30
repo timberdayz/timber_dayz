@@ -1767,8 +1767,144 @@ export default {
     return await this._post(`/sales-campaigns/${id}/calculate`);
   },
 
-  // ========== 人力资源API ==========
+  // ========== 人力资源API（v4.21.0 业界标准优化）==========
 
+  // === 部门管理 ===
+  async getHrDepartments(params = {}) {
+    return await this._get("/hr/departments", { params });
+  },
+  async getHrDepartment(departmentId) {
+    return await this._get(`/hr/departments/${departmentId}`);
+  },
+  async createHrDepartment(data) {
+    return await this._post("/hr/departments", data);
+  },
+  async updateHrDepartment(departmentId, data) {
+    return await this._put(`/hr/departments/${departmentId}`, data);
+  },
+  async deleteHrDepartment(departmentId) {
+    return await this._delete(`/hr/departments/${departmentId}`);
+  },
+
+  // === 职位管理 ===
+  async getHrPositions(params = {}) {
+    return await this._get("/hr/positions", { params });
+  },
+  async createHrPosition(data) {
+    return await this._post("/hr/positions", data);
+  },
+  async updateHrPosition(positionId, data) {
+    return await this._put(`/hr/positions/${positionId}`, data);
+  },
+  async deleteHrPosition(positionId) {
+    return await this._delete(`/hr/positions/${positionId}`);
+  },
+
+  // === 员工管理 ===
+  async getHrEmployees(params = {}) {
+    return await this._get("/hr/employees", { params });
+  },
+  async getHrEmployeeCount(status = null) {
+    const params = status ? { status } : {};
+    return await this._get("/hr/employees/count", { params });
+  },
+  async getHrEmployee(employeeCode) {
+    return await this._get(`/hr/employees/${employeeCode}`);
+  },
+  async createHrEmployee(data) {
+    return await this._post("/hr/employees", data);
+  },
+  async updateHrEmployee(employeeCode, data) {
+    return await this._put(`/hr/employees/${employeeCode}`, data);
+  },
+  async deleteHrEmployee(employeeCode) {
+    return await this._delete(`/hr/employees/${employeeCode}`);
+  },
+
+  // === 排班班次 ===
+  async getHrWorkShifts(params = {}) {
+    return await this._get("/hr/work-shifts", { params });
+  },
+  async createHrWorkShift(data) {
+    return await this._post("/hr/work-shifts", data);
+  },
+
+  // === 考勤管理 ===
+  async getHrAttendance(params = {}) {
+    return await this._get("/hr/attendance", { params });
+  },
+  async createHrAttendance(data) {
+    return await this._post("/hr/attendance", data);
+  },
+  async updateHrAttendance(recordId, data) {
+    return await this._put(`/hr/attendance/${recordId}`, data);
+  },
+
+  // === 假期类型 ===
+  async getHrLeaveTypes(params = {}) {
+    return await this._get("/hr/leave-types", { params });
+  },
+  async createHrLeaveType(data) {
+    return await this._post("/hr/leave-types", data);
+  },
+
+  // === 请假记录 ===
+  async getHrLeaveRecords(params = {}) {
+    return await this._get("/hr/leave-records", { params });
+  },
+  async createHrLeaveRecord(data) {
+    return await this._post("/hr/leave-records", data);
+  },
+  async approveHrLeaveRecord(recordId, data) {
+    return await this._put(`/hr/leave-records/${recordId}/approve`, data);
+  },
+
+  // === 加班记录 ===
+  async getHrOvertimeRecords(params = {}) {
+    return await this._get("/hr/overtime-records", { params });
+  },
+  async createHrOvertimeRecord(data) {
+    return await this._post("/hr/overtime-records", data);
+  },
+
+  // === 薪资结构 ===
+  async getHrSalaryStructures(params = {}) {
+    return await this._get("/hr/salary-structures", { params });
+  },
+  async getHrSalaryStructure(employeeCode) {
+    return await this._get(`/hr/salary-structures/${employeeCode}`);
+  },
+  async createHrSalaryStructure(data) {
+    return await this._post("/hr/salary-structures", data);
+  },
+
+  // === 工资单 ===
+  async getHrPayrollRecords(params = {}) {
+    return await this._get("/hr/payroll-records", { params });
+  },
+
+  // === 员工目标 ===
+  async getHrEmployeeTargets(params = {}) {
+    return await this._get("/hr/employee-targets", { params });
+  },
+  async createHrEmployeeTarget(data) {
+    return await this._post("/hr/employee-targets", data);
+  },
+
+  // === 绩效查询（只读，由Metabase计算） ===
+  async getHrPerformance(params = {}) {
+    return await this._get("/hr/performance", { params });
+  },
+
+  // === 提成查询（只读，由Metabase计算） ===
+  async getHrEmployeeCommissions(params = {}) {
+    return await this._get("/hr/commissions/employee", { params });
+  },
+  async getHrShopCommissions(params = {}) {
+    return await this._get("/hr/commissions/shop", { params });
+  },
+
+  // === 旧版绩效API（保留兼容性） ===
   // 获取绩效评分列表
   async getPerformanceScores(params = {}) {
     return await this._get("/performance/scores", { params });
@@ -1815,6 +1951,11 @@ export default {
     return await this._get("/targets/shops");
   },
 
+  // 按月份获取目标（常规月度目标页用）
+  async getTargetByMonth(month, targetType = "shop") {
+    return await this._get("/targets/by-month", { params: { month, target_type: targetType } });
+  },
+
   // 获取目标详情
   async getTargetDetail(id) {
     return await this._get(`/targets/${id}`);
@@ -1838,6 +1979,11 @@ export default {
   // 创建目标分解
   async createTargetBreakdown(targetId, breakdown) {
     return await this._post(`/targets/${targetId}/breakdown`, breakdown);
+  },
+
+  // 一键生成日度分解（月度目标按天均分）
+  async generateDailyBreakdown(targetId, options = {}) {
+    return await this._post(`/targets/${targetId}/breakdown/generate-daily`, options);
   },
 
   // ========== 库存API ==========

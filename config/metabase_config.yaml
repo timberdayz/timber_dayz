@@ -100,7 +100,7 @@ questions:
   # 数据对比
   - name: "business_overview_comparison"
     display_name: "业务概览 - 数据对比"
-    description: "提供日/周/月度数据对比（同比、环比）"
+    description: "提供日/周/月度数据对比（当期/上期/平均/环比），单行多列"
     sql_file: "sql/metabase_questions/business_overview_comparison.sql"
     collection: "C类数据报表/业务概览"
     parameters:
@@ -113,12 +113,8 @@ questions:
         display_name: "日期"
         type: date
         required: true
-      - name: platforms
+      - name: platform
         display_name: "平台"
-        type: text
-        required: false
-      - name: shops
-        display_name: "店铺"
         type: text
         required: false
     tags:

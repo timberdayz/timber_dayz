@@ -51,9 +51,9 @@
         </el-button>
       </div>
 
-      <!-- KPI 卡片 -->
+      <!-- KPI 卡片（7 张等分一行：转化率、客流量、客单价、GMV、订单数、连带率、人效） -->
       <div class="kpi-cards" v-loading="loadingKPI">
-        <el-row :gutter="20">
+        <el-row :gutter="20" class="kpi-cards-row">
           <el-col
             :xs="24"
             :sm="12"
@@ -225,6 +225,7 @@
                     v-model="comparisonDate"
                     :type="datePickerType"
                     :format="datePickerFormat"
+                    :value-format="datePickerValueFormat"
                     :placeholder="datePickerPlaceholder"
                     size="small"
                     style="margin-left: 12px; width: 150px"
@@ -243,9 +244,9 @@
                   <div class="target-label">{{ targetProgressLabel }}</div>
                   <el-progress
                     :percentage="targetAchievementRate"
-                    :color="getTargetProgressColor(targetAchievementRate)"
+                    :color="getTargetProgressColor(targetAchievementRate ?? 0)"
                     :stroke-width="20"
-                    :format="(percentage) => `${percentage.toFixed(1)}%`"
+                    :format="(percentage) => (percentage != null && !Number.isNaN(Number(percentage))) ? `${Number(percentage).toFixed(1)}%` : '0.0%'"
                   />
                   <div class="target-details">
                     <span
@@ -958,7 +959,7 @@ const loadingInventory = ref(false);
 const kpiMonth = ref(new Date()); // 默认当前月份
 const kpiPlatform = ref(""); // 默认全部平台
 
-// KPI数据
+// KPI数据（7 张卡片：转化率、客流量、客单价、GMV、订单数、连带率、人效）
 const kpiData = ref([
   {
     key: "conversion_rate",
@@ -991,6 +992,26 @@ const kpiData = ref([
     iconClass: "kpi-aov",
   },
   {
+    key: "gmv",
+    title: "GMV",
+    value: "--",
+    change: "--",
+    changeType: "neutral",
+    changeIcon: "TrendCharts",
+    icon: "Wallet",
+    iconClass: "kpi-gmv",
+  },
+  {
+    key: "order_count",
+    title: "订单数",
+    value: "--",
+    change: "--",
+    changeType: "neutral",
+    changeIcon: "TrendCharts",
+    icon: "Document",
+    iconClass: "kpi-orders",
+  },
+  {
     key: "attach_rate",
     title: "连带率",
     value: "--",
@@ -1010,22 +1031,17 @@ const kpiData = ref([
     icon: "UserFilled",
     iconClass: "kpi-labor",
   },
-  {
-    key: "order_count",
-    title: "销售单数",
-    value: "--",
-    change: "--",
-    changeType: "neutral",
-    changeIcon: "TrendCharts",
-    icon: "Document",
-    iconClass: "kpi-orders",
-  },
 ]);
 
-// 数据对比
+// 数据对比（日期使用 YYYY-MM-DD 字符串，避免 toISOString 的 UTC 偏差）
 const comparisonChart = ref(null);
 const comparisonGranularity = ref("daily");
-const comparisonDate = ref(new Date());
+const comparisonDate = ref(
+  (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })(),
+);
 const comparisonData = ref({
   metrics: {},
   today: {},
@@ -1145,6 +1161,19 @@ const datePickerPlaceholder = computed(() => {
   }
 });
 
+// 数据对比日期 value-format：避免 toISOString() 的 UTC 偏差，传参使用本地 YYYY-MM-DD
+// 注意：Element Plus 周选择器 (type="week") 不支持 YYYY-MM-DD 格式，需要特殊处理
+const datePickerValueFormat = computed(() => {
+  if (comparisonGranularity.value === "monthly") {
+    return "YYYY-MM";
+  }
+  // 周选择器：不设置 value-format，让它返回 Date 对象，在 loadComparisonData 中处理
+  if (comparisonGranularity.value === "weekly") {
+    return undefined;
+  }
+  return "YYYY-MM-DD";
+});
+
 // 流量排名日期选择器类型和格式
 const trafficRankingDatePickerType = computed(() => {
   if (trafficRankingGranularity.value === "monthly") {
@@ -1176,22 +1205,24 @@ const trafficRankingDatePickerPlaceholder = computed(() => {
   }
 });
 
-// 处理粒度变化
+// 处理粒度变化（日/月为字符串，周为 Date 对象，与选择器返回类型一致）
 const handleGranularityChange = () => {
-  // 根据新的粒度调整日期
   const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, "0");
+  const d = String(today.getDate()).padStart(2, "0");
   if (comparisonGranularity.value === "monthly") {
-    // 设置为当前月份的第一天
-    comparisonDate.value = new Date(today.getFullYear(), today.getMonth(), 1);
+    comparisonDate.value = `${y}-${m}`;
   } else if (comparisonGranularity.value === "weekly") {
-    // 设置为当前周的第一天（周一）
+    // 周粒度：设置为 Date 对象（当前周的周一），与 Element Plus 周选择器返回类型一致
     const dayOfWeek = today.getDay();
     const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    comparisonDate.value = new Date(today);
-    comparisonDate.value.setDate(today.getDate() + diff);
+    const mon = new Date(today);
+    mon.setDate(today.getDate() + diff);
+    mon.setHours(0, 0, 0, 0);
+    comparisonDate.value = mon;
   } else {
-    // 设置为今天
-    comparisonDate.value = today;
+    comparisonDate.value = `${y}-${m}-${d}`;
   }
   loadComparisonData();
 };
@@ -1323,6 +1354,7 @@ const getTimeGapTagType = (gap) => {
 // 核心KPI 筛选变化时同时刷新 KPI 与经营指标
 const onKpiFilterChange = () => {
   loadKPIData();
+  loadComparisonData();
   loadOperationalMetrics();
 };
 
@@ -1387,25 +1419,46 @@ const loadKPIData = async () => {
 
       // GMV（索引3）
       const gmv = data.gmv;
-      kpiData.value[3].title = "GMV";
       kpiData.value[3].value = showValue(gmv, (n) => formatCurrency(n));
       kpiData.value[3].change = formatChange(data.gmv_change);
       kpiData.value[3].changeType = getChangeType(data.gmv_change);
       kpiData.value[3].changeIcon = getChangeIcon(data.gmv_change);
-      kpiData.value[3].icon = "Wallet";
-      kpiData.value[3].iconClass = "kpi-gmv";
 
       // 订单数（索引4）
       const orderCount = data.order_count;
-      kpiData.value[4].title = "订单数";
       kpiData.value[4].value = showValue(orderCount, (n) => formatInteger(n));
       kpiData.value[4].change = formatChange(data.order_count_change);
       kpiData.value[4].changeType = getChangeType(data.order_count_change);
       kpiData.value[4].changeIcon = getChangeIcon(data.order_count_change);
-      kpiData.value[4].icon = "Document";
-      kpiData.value[4].iconClass = "kpi-orders";
 
-      // 索引5：销售单数（由经营指标或其它接口更新）
+      // 连带率（索引5）
+      const attachRate = data.attach_rate ?? data.attach_rate_obj?.current;
+      kpiData.value[5].value = showValue(attachRate, (n) => n.toFixed(2));
+      kpiData.value[5].change = formatChange(
+        data.attach_rate_change ?? data.attach_rate_obj?.change,
+      );
+      kpiData.value[5].changeType = getChangeType(
+        data.attach_rate_change ?? data.attach_rate_obj?.change,
+      );
+      kpiData.value[5].changeIcon = getChangeIcon(
+        data.attach_rate_change ?? data.attach_rate_obj?.change,
+      );
+
+      // 人效（索引6）
+      const laborEfficiency =
+        data.labor_efficiency ?? data.labor_efficiency_obj?.current;
+      kpiData.value[6].value = showValue(laborEfficiency, (n) =>
+        formatCurrency(n),
+      );
+      kpiData.value[6].change = formatChange(
+        data.labor_efficiency_change ?? data.labor_efficiency_obj?.change,
+      );
+      kpiData.value[6].changeType = getChangeType(
+        data.labor_efficiency_change ?? data.labor_efficiency_obj?.change,
+      );
+      kpiData.value[6].changeIcon = getChangeIcon(
+        data.labor_efficiency_change ?? data.labor_efficiency_obj?.change,
+      );
     }
   } catch (error) {
     console.error("加载KPI数据失败:", error);
@@ -1415,43 +1468,50 @@ const loadKPIData = async () => {
   }
 };
 
-// 更新销售单数KPI（从经营指标数据更新）
-const updateOrderCountKPI = () => {
-  if (operationalMetrics.value.monthly_order_count > 0) {
-    kpiData.value[5].value = formatInteger(
-      operationalMetrics.value.monthly_order_count,
-    );
-    // 可以计算变化率，这里简化处理
-    kpiData.value[5].change = "--";
-  }
-};
-
 // 加载数据对比
 const loadComparisonData = async () => {
   loadingComparison.value = true;
   try {
-    // 根据粒度格式化日期
+    // 将 comparisonDate 转换为 YYYY-MM-DD 格式的字符串（与 SQL {{date}} 要求一致）
     let dateStr = "";
-    if (comparisonGranularity.value === "monthly") {
-      // 月份格式：YYYY-MM
-      const year = comparisonDate.value.getFullYear();
-      const month = String(comparisonDate.value.getMonth() + 1).padStart(
-        2,
-        "0",
-      );
-      dateStr = `${year}-${month}-01`; // 使用月份第一天
-    } else if (comparisonGranularity.value === "weekly") {
-      // 周格式：使用周的第一天
-      dateStr = comparisonDate.value.toISOString().split("T")[0];
+    const val = comparisonDate.value;
+
+    if (typeof val === "string") {
+      dateStr = val.trim();
+    } else if (val instanceof Date && !isNaN(val.getTime())) {
+      // 周度时统一传该周周一（周一～周日），避免同周不同日期导致数据跳变
+      let dateToUse = val;
+      if (comparisonGranularity.value === "weekly") {
+        const dayOfWeek = val.getDay(); // 0=周日, 1=周一, ...
+        const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        dateToUse = new Date(val);
+        dateToUse.setDate(val.getDate() + diff);
+      }
+      const y = dateToUse.getFullYear();
+      const m = String(dateToUse.getMonth() + 1).padStart(2, "0");
+      const d = String(dateToUse.getDate()).padStart(2, "0");
+      dateStr = `${y}-${m}-${d}`;
     } else {
-      // 日期格式：YYYY-MM-DD
-      dateStr = comparisonDate.value.toISOString().split("T")[0];
+      const today = new Date();
+      dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      console.warn("comparisonDate 格式异常，使用今天:", val);
     }
 
-    const response = await api.getBusinessOverviewComparison({
+    // 月粒度：若为 YYYY-MM 需补成 YYYY-MM-01
+    if (comparisonGranularity.value === "monthly" && dateStr.length === 7) {
+      dateStr = `${dateStr}-01`;
+    }
+
+    const params = {
       granularity: comparisonGranularity.value,
       date: dateStr,
-    });
+    };
+    if (kpiPlatform.value) {
+      params.platforms = kpiPlatform.value;
+    }
+    console.log(`[loadComparisonData] granularity=${params.granularity}, date=${params.date}${params.platforms ? `, platform=${params.platforms}` : ""}`);
+
+    const response = await api.getBusinessOverviewComparison(params);
 
     // 响应拦截器已处理success字段，直接使用data
     if (response) {
@@ -1462,24 +1522,43 @@ const loadComparisonData = async () => {
       // 更新目标达成率（使用销售额作为主要指标）
       // 注意：response已经是data字段（拦截器已处理）
       const metrics = response.metrics || {};
-      const salesAmount = metrics.sales_amount || {};
-      achievedValue.value = salesAmount.today || 0;
+      const salesAmount = getMetric(metrics, "sales_amount");
+      achievedValue.value = salesAmount.today ?? 0;
 
-      // 计算目标值（简化：基于平均值或历史数据）
-      // 实际应该从配置表读取，这里使用简化逻辑
-      const avgSales = salesAmount.average || 0;
-      if (comparisonGranularity.value === "monthly") {
-        targetValue.value = avgSales * 1.2; // 月度目标 = 平均值的120%
-      } else if (comparisonGranularity.value === "weekly") {
-        targetValue.value = avgSales * 1.1; // 周度目标 = 平均值的110%
+      // v4.21.0: 优先使用后端返回的用户设定目标，回退到占位符计算
+      const targetData = response.target || {};
+      const userTargetAmount = targetData.sales_amount || 0;
+      const userAchievementRate = targetData.achievement_rate || 0;
+      
+      if (userTargetAmount > 0) {
+        // 使用用户在目标管理中设定的真实目标
+        targetValue.value = userTargetAmount;
+        targetAchievementRate.value = userAchievementRate;
+        console.log("[目标达成率] 使用用户设定目标:", {
+          target: userTargetAmount,
+          achieved: achievedValue.value,
+          rate: userAchievementRate
+        });
       } else {
-        targetValue.value = avgSales * 1.05; // 日度目标 = 平均值的105%
+        // 回退：基于平均值的占位符计算（用户未设定目标时）
+        const avgSales = salesAmount.average || 0;
+        if (comparisonGranularity.value === "monthly") {
+          targetValue.value = avgSales * 1.2; // 月度目标 = 平均值的120%
+        } else if (comparisonGranularity.value === "weekly") {
+          targetValue.value = avgSales * 1.1; // 周度目标 = 平均值的110%
+        } else {
+          targetValue.value = avgSales * 1.05; // 日度目标 = 平均值的105%
+        }
+        targetAchievementRate.value =
+          targetValue.value > 0
+            ? (achievedValue.value / targetValue.value) * 100
+            : 0;
+        console.log("[目标达成率] 使用占位符计算（用户未设定目标）:", {
+          target: targetValue.value,
+          achieved: achievedValue.value,
+          rate: targetAchievementRate.value
+        });
       }
-
-      targetAchievementRate.value =
-        targetValue.value > 0
-          ? (achievedValue.value / targetValue.value) * 100
-          : 0;
 
       updateComparisonTable();
     } else {
@@ -1497,12 +1576,21 @@ const loadComparisonData = async () => {
   }
 };
 
+// 按小写键读取指标，与后端 / SQL 列名（如 sales_amount_today）解析结果一致，避免大小写导致取不到
+function getMetric(metricsObj, key) {
+  if (!metricsObj || typeof metricsObj !== "object") return {};
+  if (Object.prototype.hasOwnProperty.call(metricsObj, key)) return metricsObj[key] || {};
+  const lower = key.toLowerCase();
+  for (const [k, v] of Object.entries(metricsObj)) {
+    if (k != null && String(k).toLowerCase() === lower) return v || {};
+  }
+  return {};
+}
+
 // 更新对比表格
 const updateComparisonTable = () => {
   const data = comparisonData.value || {};
   const tableData = [];
-
-  console.log("updateComparisonTable - comparisonData:", data); // 调试信息
 
   // 即使数据为空，也显示所有指标行（前端设计优先）
   const metrics =
@@ -1510,146 +1598,117 @@ const updateComparisonTable = () => {
       ? data.metrics
       : {};
 
-  console.log("metrics:", metrics); // 调试信息
+  // 环比百分比安全格式化（null/NaN 显示 --，避免 .toFixed 报错）
+  const safeChangePct = (v) => {
+    if (v == null || Number.isNaN(Number(v))) return "--";
+    const n = Number(v);
+    return `${n > 0 ? "+" : ""}${n.toFixed(2)}%`;
+  };
+  // 数值安全格式化后 toFixed（null/NaN 显示 --）
+  const safeToFixed = (v, decimals = 2) =>
+    v != null && !Number.isNaN(Number(v)) ? Number(v).toFixed(decimals) : "--";
 
   // 销售额
-  const salesAmount = metrics.sales_amount || {};
+  const salesAmount = getMetric(metrics, "sales_amount");
   tableData.push({
     metric: "销售额(w)",
     today:
-      salesAmount.today !== undefined ? formatNumber(salesAmount.today) : "--",
+      salesAmount.today !== undefined && salesAmount.today !== null ? formatNumber(salesAmount.today) : "--",
     yesterday:
-      salesAmount.yesterday !== undefined
+      salesAmount.yesterday !== undefined && salesAmount.yesterday !== null
         ? formatNumber(salesAmount.yesterday)
         : "--",
     average:
-      salesAmount.average !== undefined
+      salesAmount.average !== undefined && salesAmount.average !== null
         ? formatNumber(salesAmount.average)
         : "--",
-    change:
-      salesAmount.change !== undefined
-        ? `${salesAmount.change > 0 ? "+" : ""}${salesAmount.change.toFixed(2)}%`
-        : "--",
+    change: safeChangePct(salesAmount.change),
     changeType: salesAmount.change_type || "neutral",
     changeClass: salesAmount.change_type || "neutral",
     todayClass: "",
   });
 
   // 销售数量
-  const salesQty = metrics.sales_quantity || {};
+  const salesQty = getMetric(metrics, "sales_quantity");
   tableData.push({
     metric: "销售数量",
-    today: salesQty.today !== undefined ? formatInteger(salesQty.today) : "--",
+    today: salesQty.today != null ? formatInteger(salesQty.today) : "--",
     yesterday:
-      salesQty.yesterday !== undefined
-        ? formatInteger(salesQty.yesterday)
-        : "--",
-    average:
-      salesQty.average !== undefined ? formatInteger(salesQty.average) : "--",
-    change:
-      salesQty.change !== undefined
-        ? `${salesQty.change > 0 ? "+" : ""}${salesQty.change.toFixed(2)}%`
-        : "--",
+      salesQty.yesterday != null ? formatInteger(salesQty.yesterday) : "--",
+    average: salesQty.average != null ? formatInteger(salesQty.average) : "--",
+    change: safeChangePct(salesQty.change),
     changeType: salesQty.change_type || "neutral",
     changeClass: salesQty.change_type || "neutral",
     todayClass: "",
   });
 
   // 客流量
-  const traffic = metrics.traffic || {};
+  const traffic = getMetric(metrics, "traffic");
   tableData.push({
     metric: "客流量",
-    today: traffic.today !== undefined ? formatInteger(traffic.today) : "--",
-    yesterday:
-      traffic.yesterday !== undefined ? formatInteger(traffic.yesterday) : "--",
-    average:
-      traffic.average !== undefined ? formatInteger(traffic.average) : "--",
-    change:
-      traffic.change !== undefined
-        ? `${traffic.change > 0 ? "+" : ""}${traffic.change.toFixed(2)}%`
-        : "--",
+    today: traffic.today != null ? formatInteger(traffic.today) : "--",
+    yesterday: traffic.yesterday != null ? formatInteger(traffic.yesterday) : "--",
+    average: traffic.average != null ? formatInteger(traffic.average) : "--",
+    change: safeChangePct(traffic.change),
     changeType: traffic.change_type || "neutral",
     changeClass: traffic.change_type || "neutral",
     todayClass: "",
   });
 
-  // 转化率
-  const conversion = metrics.conversion_rate || {};
+  // 转化率（百分比需带 %）
+  const conversion = getMetric(metrics, "conversion_rate");
   const conversionToday = conversion.today;
   const conversionAvg = conversion.average;
+  const pct = (v) => (v != null && !Number.isNaN(Number(v))) ? `${Number(v).toFixed(2)}%` : "--";
   tableData.push({
     metric: "转化率",
-    today:
-      conversionToday !== undefined && conversionToday !== null
-        ? `${conversionToday.toFixed(2)}%`
-        : "--",
-    yesterday:
-      conversion.yesterday !== undefined && conversion.yesterday !== null
-        ? `${conversion.yesterday.toFixed(2)}%`
-        : "--",
-    average:
-      conversionAvg !== undefined && conversionAvg !== null
-        ? `${conversionAvg.toFixed(2)}%`
-        : "--",
-    change:
-      conversion.change !== undefined
-        ? `${conversion.change > 0 ? "+" : ""}${conversion.change.toFixed(2)}%`
-        : "--",
+    today: pct(conversionToday),
+    yesterday: pct(conversion.yesterday),
+    average: pct(conversionAvg),
+    change: safeChangePct(conversion.change),
     changeType: conversion.change_type || "neutral",
     changeClass: conversion.change_type || "neutral",
     todayClass: conversionToday > conversionAvg ? "highlight-positive" : "",
   });
 
   // 客单价
-  const aov = metrics.avg_order_value || {};
+  const aov = getMetric(metrics, "avg_order_value");
   const aovToday = aov.today;
   const aovAvg = aov.average;
   tableData.push({
     metric: "客单价",
-    today: aovToday !== undefined ? formatInteger(aovToday) : "--",
-    yesterday:
-      aov.yesterday !== undefined ? formatInteger(aov.yesterday) : "--",
-    average: aovAvg !== undefined ? formatInteger(aovAvg) : "--",
-    change:
-      aov.change !== undefined
-        ? `${aov.change > 0 ? "+" : ""}${aov.change.toFixed(2)}%`
-        : "--",
+    today: aovToday != null ? formatInteger(aovToday) : "--",
+    yesterday: aov.yesterday != null ? formatInteger(aov.yesterday) : "--",
+    average: aovAvg != null ? formatInteger(aovAvg) : "--",
+    change: safeChangePct(aov.change),
     changeType: aov.change_type || "neutral",
     changeClass: aov.change_type || "neutral",
     todayClass: aovToday > aovAvg ? "highlight-positive" : "",
   });
 
   // 连带率
-  const attach = metrics.attach_rate || {};
+  const attach = getMetric(metrics, "attach_rate");
   const attachToday = attach.today;
   const attachAvg = attach.average;
   tableData.push({
     metric: "连带率",
-    today: attachToday !== undefined ? attachToday.toFixed(2) : "--",
-    yesterday:
-      attach.yesterday !== undefined ? attach.yesterday.toFixed(2) : "--",
-    average: attachAvg !== undefined ? attachAvg.toFixed(2) : "--",
-    change:
-      attach.change !== undefined
-        ? `${attach.change > 0 ? "+" : ""}${attach.change.toFixed(2)}%`
-        : "--",
+    today: safeToFixed(attachToday),
+    yesterday: safeToFixed(attach.yesterday),
+    average: safeToFixed(attachAvg),
+    change: safeChangePct(attach.change),
     changeType: attach.change_type || "neutral",
     changeClass: attach.change_type || "neutral",
     todayClass: attachToday > attachAvg ? "highlight-positive" : "",
   });
 
   // 利润
-  const profit = metrics.profit || {};
+  const profit = getMetric(metrics, "profit");
   tableData.push({
     metric: "利润(w)",
-    today: profit.today !== undefined ? formatNumber(profit.today) : "--",
-    yesterday:
-      profit.yesterday !== undefined ? formatNumber(profit.yesterday) : "--",
-    average: profit.average !== undefined ? formatNumber(profit.average) : "--",
-    change:
-      profit.change !== undefined
-        ? `${profit.change > 0 ? "+" : ""}${profit.change.toFixed(2)}%`
-        : "--",
+    today: profit.today != null ? formatNumber(profit.today) : "--",
+    yesterday: profit.yesterday != null ? formatNumber(profit.yesterday) : "--",
+    average: profit.average != null ? formatNumber(profit.average) : "--",
+    change: safeChangePct(profit.change),
     changeType: profit.change_type || "neutral",
     changeClass: profit.change_type || "neutral",
     todayClass: "",
@@ -1674,7 +1733,12 @@ const updateComparisonChart = () => {
 // 加载店铺赛马数据
 const loadShopRacingData = async () => {
   try {
-    const dateStr = comparisonDate.value.toISOString().split("T")[0];
+    const dateStr =
+      typeof comparisonDate.value === "string"
+        ? comparisonDate.value.length === 7
+          ? `${comparisonDate.value}-01`
+          : comparisonDate.value
+        : comparisonDate.value.toISOString().split("T")[0];
     const response = await api.getBusinessOverviewShopRacing({
       granularity: comparisonGranularity.value,
       date: dateStr,
@@ -1726,8 +1790,6 @@ const loadOperationalMetrics = async () => {
         monthly_order_count: response.monthly_order_count || 0,
         today_order_count: response.today_order_count || 0,
       };
-      // 更新销售单数KPI卡片
-      updateOrderCountKPI();
     }
   } catch (error) {
     console.error("加载经营指标数据失败:", error);
@@ -1921,6 +1983,19 @@ onMounted(() => {
 
 .kpi-cards {
   /* margin-bottom: 24px; */
+}
+
+/* 大屏下 5 张 KPI 卡片等分一行，避免右侧留空（与 el-col :lg 断点一致） */
+@media (min-width: 1200px) {
+  .kpi-cards-row.el-row {
+    display: flex;
+    flex-wrap: nowrap;
+  }
+  .kpi-cards-row .el-col {
+    flex: 1 1 0%;
+    min-width: 0;
+    max-width: none;
+  }
 }
 
 .kpi-card {

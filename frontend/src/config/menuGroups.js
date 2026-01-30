@@ -136,9 +136,8 @@ export const menuGroups = [
     order: 9,
     defaultExpanded: false,
     items: [
-      '/human-resources',            // 人力管理
+      '/human-resources',            // 人力管理（含员工/部门/职位/考勤/薪资 Tab）
       '/employee-management',        // 员工档案
-      '/attendance-management',      // 考勤管理
       '/hr-performance-management'  // 绩效管理
     ]
   },

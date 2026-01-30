@@ -131,7 +131,21 @@
 
       <!-- 月度费用表格 -->
       <el-card>
+        <!-- 错误状态显示 -->
+        <div v-if="monthlyError && !loading" class="error-state">
+          <el-result icon="error" :title="monthlyError.message">
+            <template #sub-title>
+              <span>{{ monthlyError.recovery }}</span>
+            </template>
+            <template #extra>
+              <el-button type="primary" @click="loadMonthlyExpenses">重新加载</el-button>
+            </template>
+          </el-result>
+        </div>
+
+        <!-- 正常表格（无错误时显示） -->
         <el-table
+          v-if="!monthlyError"
           :data="monthlyTableData"
           stripe
           v-loading="loading"
@@ -536,6 +550,8 @@ import api from "@/api";
 const viewMode = ref("monthly"); // monthly | shop
 const availableShops = ref([]);
 const loading = ref(false);
+const monthlyError = ref(null); // 月度数据加载错误状态
+const shopError = ref(null); // 店铺数据加载错误状态
 
 // ==================== 按月份查看模式 ====================
 const selectedMonth = ref(null);
@@ -614,6 +630,7 @@ const loadMonthlyExpenses = async () => {
   }
 
   loading.value = true;
+  monthlyError.value = null; // 重置错误状态
   try {
     // 并行加载月度数据和年度汇总
     const [monthlyRes, yearlyRes] = await Promise.all([
@@ -672,7 +689,13 @@ const loadMonthlyExpenses = async () => {
     }
   } catch (error) {
     console.error("加载费用数据失败:", error);
-    ElMessage.error(error.message || "加载费用数据失败");
+    // 设置错误状态，区分"无数据"和"加载失败"
+    monthlyError.value = {
+      message: error.message || "加载费用数据失败",
+      recovery: error.recovery_suggestion || "请检查网络连接或联系管理员",
+    };
+    monthlyTableData.value = [];
+    ElMessage.error(monthlyError.value.message);
   } finally {
     loading.value = false;
   }
@@ -1101,5 +1124,21 @@ onMounted(() => {
 
 :deep(.el-tabs__item .el-icon) {
   margin-right: 5px;
+}
+
+/* 错误状态样式 */
+.error-state {
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.error-state :deep(.el-result__title) {
+  font-size: 16px;
+  color: #303133;
+}
+
+.error-state :deep(.el-result__subtitle) {
+  font-size: 14px;
+  color: #909399;
 }
 </style>

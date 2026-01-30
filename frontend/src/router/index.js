@@ -766,14 +766,7 @@ const routes = [
   },
   {
     path: '/attendance-management',
-    name: 'AttendanceManagement',
-    component: () => import('../views/hr/AttendanceManagement.vue'),
-    meta: {
-      title: '考勤管理',
-      icon: 'Clock',
-      permission: 'attendance-management',
-      roles: ['admin', 'manager']
-    }
+    redirect: () => ({ path: '/human-resources', query: { tab: 'attendance' } })
   },
   {
     path: '/hr-performance-management',

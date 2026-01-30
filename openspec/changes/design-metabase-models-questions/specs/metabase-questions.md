@@ -58,25 +58,37 @@ WHERE period_start_date >= {{start_date}}
   AND ({{shop_id}} IS NULL OR shop_id = {{shop_id}})
 ```
 
-### 2. 业务概览数据对比 Question
+### 2. 业务概览数据对比 Question（business_overview_comparison）✅ 已优化 v4.21.0
 
-**用途**：提供日/周/月度数据对比
+**用途**：提供日/周/月度数据对比（当期 / 上期 / 平均 / 环比），单行多列供前端表格展示。
 
 **参数**：
+- `{{granularity}}` - 粒度（daily / weekly / monthly，必填）
+- `{{date}}` - 对比日期（必填，YYYY-MM-DD；月度时可为 YYYY-MM，后端规范为 YYYY-MM-01）
 - `{{platform}}` - 平台筛选（可选）
-- `{{shop_id}}` - 店铺筛选（可选）
-- `{{granularity}}` - 粒度筛选（daily/weekly/monthly，可选，默认全部）
-- `{{start_date}}` - 开始日期（必填）
-- `{{end_date}}` - 结束日期（必填）
 
-**返回字段**：
-- `period` - 期间（日期或日期范围）
-- `granularity` - 粒度（daily/weekly/monthly）
-- `gmv` - GMV
-- `order_count` - 订单数
-- `buyer_count` - 买家数
-- `gmv_yoy` - 同比GMV
-- `gmv_mom` - 环比GMV
+**时间定义（避免其他 Question 出现类似问题）**：
+- **日度**：单日日期，`target_date` 即所选日期。
+- **周度**：周一～周日；周期由 `date_trunc('week', target_date)` 得到当周周一，当周周日 = 周一 + 6；前端传参须为该周**周一**的 YYYY-MM-DD，同一周只传同一日期，避免数据跳变。
+- **月度**：整月 1 日～当月最后一天；`current_period_start` = 当月 1 日，`current_period_end` = 当月最后一天。
+
+**平均定义**：
+- **日度筛选时**：平均 = **本月平均** = 本月数据 / 本月天数（本月日度汇总 / 本月天数）。
+- **周度**：本周平均 = 本周数据 / 7。
+- **月度**：本月平均 = 本月数据 / 本月天数。
+- **转化率 / 连带率**：本期只算一个比率（本期订单/本期流量），不做「平均转化率」的额外定义；日度时「平均转化率」= 本月订单/本月流量。
+
+**环比**：当日 vs 昨天、本周 vs 上周、本月 vs 上月，(当期−上期)/上期×100%。
+
+**引用的字段约定（Orders Model / Analytics Model）**：
+- **`metric_date`**：在 B 类模型中无论粒度为 daily/weekly/monthly，存储的均为**单日日期**（订单/事件日期），**不是**周期起止。按周期汇总时须用「`metric_date` 落在计算出的周期范围内」匹配，例如 `metric_date >= current_period_start AND metric_date <= current_period_end`。
+- **`period_start_date` / `period_end_date`**：在模型中可能同样存单日，**勿**用其等于周期起止做过滤；周期边界由 SQL 内根据 `target_date` 与 `granularity` 计算。
+- **销售额**：若订单模型中 `sales_amount` 常为 0，汇总时使用 **`paid_amount`**（实付金额）作为销售额指标。
+
+**返回字段**（单行，列名 xxx_today / xxx_yesterday / xxx_average / xxx_change / target_xxx）：
+- `sales_amount_today` / `sales_amount_yesterday` / `sales_amount_average` / `sales_amount_change`
+- `sales_quantity_*`、`traffic_*`、`conversion_rate_*`、`avg_order_value_*`、`attach_rate_*`、`profit_*`
+- `target_sales_amount`、`target_sales_quantity`、`target_achievement_rate`
 
 ### 3. 店铺赛马 Question
 

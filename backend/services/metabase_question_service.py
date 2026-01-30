@@ -159,33 +159,48 @@ class MetabaseQuestionService:
                 "value": params["end_date"]
             })
         
-        # 日期参数(单日期)
+        # 日期参数(单日期)：规范化为 YYYY-MM-DD，避免带时间或时区导致 Metabase 报错
+        def _normalize_date(v: Any) -> Optional[str]:
+            if v is None:
+                return None
+            if isinstance(v, str):
+                s = v.strip()
+                if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+                    return s[:10]
+                return s if s else None
+            return str(v)[:10] if v else None
+
         if params.get("date"):
-            metabase_params.append({
-                "type": "date",
-                "target": ["variable", ["template-tag", "date"]],
-                "value": params["date"]
-            })
-        if params.get("date_value"):
-            metabase_params.append({
-                "type": "date",
-                "target": ["variable", ["template-tag", "date"]],
-                "value": params["date_value"]
-            })
+            date_val = _normalize_date(params["date"])
+            if date_val:
+                metabase_params.append({
+                    "type": "date",
+                    "target": ["variable", ["template-tag", "date"]],
+                    "value": date_val
+                })
+        elif params.get("date_value"):
+            date_val = _normalize_date(params["date_value"])
+            if date_val:
+                metabase_params.append({
+                    "type": "date",
+                    "target": ["variable", ["template-tag", "date"]],
+                    "value": date_val
+                })
         
-        # 平台参数
+        # 平台参数（SQL 中 [[and o.platform_code = {{platform}}]] 为单值，统一传第一个平台）
         if params.get("platforms"):
             platforms = params["platforms"]
             if isinstance(platforms, str):
                 platforms = [p.strip() for p in platforms.split(",") if p.strip()]
             elif not isinstance(platforms, list):
                 platforms = [platforms]
-            
-            metabase_params.append({
-                "type": "string",
-                "target": ["variable", ["template-tag", "platform"]],
-                "value": platforms if len(platforms) > 1 else (platforms[0] if platforms else None)
-            })
+            platform_value = platforms[0] if platforms else None
+            if platform_value is not None:
+                metabase_params.append({
+                    "type": "text",
+                    "target": ["variable", ["template-tag", "platform"]],
+                    "value": platform_value
+                })
         
         # 店铺参数
         if params.get("shops"):
@@ -196,15 +211,15 @@ class MetabaseQuestionService:
                 shops = [shops]
             
             metabase_params.append({
-                "type": "string",
+                "type": "text",
                 "target": ["variable", ["template-tag", "shop_id"]],
                 "value": shops if len(shops) > 1 else (shops[0] if shops else None)
             })
         
-        # 粒度参数
+        # 粒度参数（Metabase 要求 text 类型参数用 type: "text"，不能用 "string"）
         if params.get("granularity"):
             metabase_params.append({
-                "type": "string",
+                "type": "text",
                 "target": ["variable", ["template-tag", "granularity"]],
                 "value": params["granularity"]
             })
@@ -212,7 +227,7 @@ class MetabaseQuestionService:
         # 分组参数
         if params.get("group_by"):
             metabase_params.append({
-                "type": "string",
+                "type": "text",
                 "target": ["variable", ["template-tag", "group_by"]],
                 "value": params["group_by"]
             })
@@ -220,7 +235,7 @@ class MetabaseQuestionService:
         # 维度参数
         if params.get("dimension"):
             metabase_params.append({
-                "type": "string",
+                "type": "text",
                 "target": ["variable", ["template-tag", "dimension"]],
                 "value": params["dimension"]
             })
@@ -296,7 +311,7 @@ class MetabaseQuestionService:
         # ⭐ 根据question_key进行特定格式转换
         if question_key == "business_overview_kpi":
             # KPI数据:转换为单个对象
-            # Metabase SQL 返回:GMV(元), 订单数, 访客数, 转化率(%), 客单价(元) + 5 个环比列
+            # Metabase SQL 返回:GMV(元), 订单数, 访客数, 转化率(%), 客单价(元), 连带率, 人效(元/人) + 7 个环比列
             if result_list and len(result_list) > 0:
                 first_row = result_list[0]
                 
@@ -306,6 +321,8 @@ class MetabaseQuestionService:
                 visitor_count = first_row.get("访客数") or first_row.get("visitor_count") or first_row.get("total_visitors") or 0
                 conversion_rate = first_row.get("转化率(%)") or first_row.get("conversion_rate") or 0
                 avg_order_value = first_row.get("客单价(元)") or first_row.get("avg_order_value") or first_row.get("average_order_value") or 0
+                attach_rate = first_row.get("连带率") or first_row.get("attach_rate") or 0
+                labor_efficiency = first_row.get("人效(元/人)") or first_row.get("labor_efficiency") or 0
                 
                 # 提取环比(SQL 返回 "GMV环比(%)" 等,上月为 0 时为 None)
                 def _num_or_none(v):
@@ -320,6 +337,8 @@ class MetabaseQuestionService:
                 visitor_count_change = _num_or_none(first_row.get("访客数环比(%)"))
                 conversion_rate_change = _num_or_none(first_row.get("转化率环比(%)"))
                 avg_order_value_change = _num_or_none(first_row.get("客单价环比(%)"))
+                attach_rate_change = _num_or_none(first_row.get("连带率环比(%)"))
+                labor_efficiency_change = _num_or_none(first_row.get("人效环比(%)"))
                 
                 return {
                     # 核心 KPI 指标(直接返回数值)
@@ -328,18 +347,22 @@ class MetabaseQuestionService:
                     "visitor_count": visitor_count,
                     "conversion_rate": conversion_rate,
                     "avg_order_value": avg_order_value,
+                    "attach_rate": attach_rate,
+                    "labor_efficiency": labor_efficiency,
                     # 环比(百分比数值,可为 None)
                     "gmv_change": gmv_change,
                     "order_count_change": order_count_change,
                     "visitor_count_change": visitor_count_change,
                     "conversion_rate_change": conversion_rate_change,
                     "avg_order_value_change": avg_order_value_change,
+                    "attach_rate_change": attach_rate_change,
+                    "labor_efficiency_change": labor_efficiency_change,
                     # 兼容旧格式(current/change)
                     "traffic": {"current": visitor_count, "change": visitor_count_change},
                     "average_order_value": {"current": avg_order_value, "change": avg_order_value_change},
                     "conversion_rate_obj": {"current": conversion_rate, "change": conversion_rate_change},
-                    "attach_rate": {"current": None, "change": None},
-                    "labor_efficiency": {"current": None, "change": None},
+                    "attach_rate_obj": {"current": attach_rate, "change": attach_rate_change},
+                    "labor_efficiency_obj": {"current": labor_efficiency, "change": labor_efficiency_change},
                 }
             logger.warning(f"[{question_key}] 返回数据为空,返回空对象")
             return {
@@ -348,68 +371,107 @@ class MetabaseQuestionService:
                 "visitor_count": 0,
                 "conversion_rate": 0,
                 "avg_order_value": 0,
+                "attach_rate": 0,
+                "labor_efficiency": 0,
                 "gmv_change": None,
                 "order_count_change": None,
                 "visitor_count_change": None,
                 "conversion_rate_change": None,
                 "avg_order_value_change": None,
+                "attach_rate_change": None,
+                "labor_efficiency_change": None,
                 "traffic": {"current": 0, "change": None},
                 "average_order_value": {"current": 0, "change": None},
                 "conversion_rate_obj": {"current": 0, "change": None},
-                "attach_rate": {"current": None, "change": None},
-                "labor_efficiency": {"current": None, "change": None},
+                "attach_rate_obj": {"current": 0, "change": None},
+                "labor_efficiency_obj": {"current": 0, "change": None},
             }
         
         elif question_key == "business_overview_comparison":
-            # 对比数据:返回metrics对象(包含today/yesterday/average/change)
+            # 对比数据:返回metrics对象(包含today/yesterday/average/change)，对齐经营指标用显式列名兜底
             if result_list and len(result_list) > 0:
                 first_row = result_list[0]
+                # 兼容 Metabase 返回列名大小写或格式差异：优先用精确 key，再试小写匹配
+                def _row_val(row: dict, *keys: str):
+                    for k in keys:
+                        if k in row and row[k] is not None:
+                            return row[k]
+                    for k in keys:
+                        for rk in row:
+                            if rk is not None and str(rk).lower() == k.lower():
+                                return row[rk]
+                    return None
+
                 metrics = {}
-                
-                # 动态提取所有指标(以_today, _yesterday, _average, _change结尾的字段)
+                # 统一用小写指标名，与前端 metrics.sales_amount 等一致（避免 API 返回列名大小写导致取不到）
+                def _norm_metric_name(name: str) -> str:
+                    return (name or "").lower().rstrip("_")
+
+                # 1) 动态提取(以_today/_yesterday/_average/_change 结尾的字段)
                 for key, value in first_row.items():
-                    if key.endswith("_today"):
-                        metric_name = key[:-6]  # 移除"_today"后缀
+                    k = str(key) if key is not None else ""
+                    if k.endswith("_today"):
+                        metric_name = _norm_metric_name(k[:-6])
                         if metric_name not in metrics:
                             metrics[metric_name] = {}
                         metrics[metric_name]["today"] = value
-                    elif key.endswith("_yesterday"):
-                        metric_name = key[:-10]  # 移除"_yesterday"后缀
+                    elif k.endswith("_yesterday"):
+                        metric_name = _norm_metric_name(k[:-10])
                         if metric_name not in metrics:
                             metrics[metric_name] = {}
                         metrics[metric_name]["yesterday"] = value
-                    elif key.endswith("_average"):
-                        metric_name = key[:-8]  # 移除"_average"后缀
+                    elif k.endswith("_average"):
+                        metric_name = _norm_metric_name(k[:-8])
                         if metric_name not in metrics:
                             metrics[metric_name] = {}
                         metrics[metric_name]["average"] = value
-                    elif key.endswith("_change"):
-                        metric_name = key[:-7]  # 移除"_change"后缀
+                    elif k.endswith("_change"):
+                        metric_name = _norm_metric_name(k[:-7])
                         if metric_name not in metrics:
                             metrics[metric_name] = {}
                         metrics[metric_name]["change"] = value
-                
-                # 如果没有找到结构化字段,尝试常见字段名
-                if not metrics:
-                    metrics = {
-                        "sales_amount": {
-                            "today": first_row.get("sales_today") or first_row.get("sales_amount_today"),
-                            "yesterday": first_row.get("sales_yesterday") or first_row.get("sales_amount_yesterday"),
-                            "average": first_row.get("sales_average") or first_row.get("sales_amount_average"),
-                            "change": first_row.get("sales_change") or first_row.get("sales_amount_change")
-                        },
-                        "order_count": {
-                            "today": first_row.get("orders_today") or first_row.get("order_count_today"),
-                            "yesterday": first_row.get("orders_yesterday") or first_row.get("order_count_yesterday"),
-                            "average": first_row.get("orders_average") or first_row.get("order_count_average"),
-                            "change": first_row.get("orders_change") or first_row.get("order_count_change")
-                        },
-                        # ... 其他指标可以继续添加
-                    }
-                
-                return {"metrics": metrics}
+
+                # 2) 显式列名兜底（与 business_overview_comparison.sql 输出列一致，参考经营指标）
+                metric_cols = (
+                    "sales_amount", "sales_quantity", "traffic", "conversion_rate",
+                    "avg_order_value", "attach_rate", "profit"
+                )
+                for name in metric_cols:
+                    if name not in metrics:
+                        metrics[name] = {}
+                    m = metrics[name]
+                    if m.get("today") is None:
+                        m["today"] = _row_val(first_row, f"{name}_today")
+                    if m.get("yesterday") is None:
+                        m["yesterday"] = _row_val(first_row, f"{name}_yesterday")
+                    if m.get("average") is None:
+                        m["average"] = _row_val(first_row, f"{name}_average")
+                    if m.get("change") is None:
+                        m["change"] = _row_val(first_row, f"{name}_change")
+
+                # 根据 change 推导 change_type
+                for _name, _m in metrics.items():
+                    if "change" in _m and _m["change"] is not None:
+                        try:
+                            v = float(_m["change"])
+                            _m["change_type"] = "increase" if v > 0 else ("decrease" if v < 0 else "neutral")
+                        except (TypeError, ValueError):
+                            _m["change_type"] = "neutral"
+                    else:
+                        _m["change_type"] = "neutral"
+
+                # 3) 目标数据：先动态 target_ 前缀，再显式兜底
+                target_data = {}
+                for key, value in first_row.items():
+                    if key.startswith("target_"):
+                        target_data[key[7:]] = value
+                target_data.setdefault("sales_amount", _row_val(first_row, "target_sales_amount"))
+                target_data.setdefault("sales_quantity", _row_val(first_row, "target_sales_quantity"))
+                target_data.setdefault("achievement_rate", _row_val(first_row, "target_achievement_rate"))
+
+                return {"metrics": metrics, "target": target_data}
             logger.warning(f"[{question_key}] 返回数据为空,返回空metrics对象")
-            return {"metrics": {}}
+            return {"metrics": {}, "target": {}}
         
         elif question_key == "business_overview_operational_metrics":
             # 经营指标:单行汇总,映射为 API 对象(金额字段转为万元)
@@ -567,8 +629,17 @@ class MetabaseQuestionService:
             return result
             
         except httpx.HTTPStatusError as e:
-            logger.error(f"Metabase Question查询失败: HTTP {e.response.status_code}, {e.response.text}")
-            raise ValueError(f"Metabase查询失败: HTTP {e.response.status_code}")
+            body = e.response.text
+            logger.error(
+                f"Metabase Question查询失败: HTTP {e.response.status_code}\n"
+                f"  请求: POST {url}\n"
+                f"  参数: {metabase_params if metabase_params else '无'}\n"
+                f"  响应体: {body[:2000] if body else '(空)'}"
+            )
+            raise ValueError(
+                f"Metabase查询失败: HTTP {e.response.status_code} 请检查输入参数是否正确。"
+                + (f" 详情: {body[:500]}" if body and len(body) < 500 else " 详情请查看后端日志。")
+            )
         except ValueError as e:
             # 重新抛出ValueError(配置错误)
             raise

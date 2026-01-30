@@ -89,28 +89,40 @@ async def get_business_overview_kpi(
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
+def _normalize_comparison_date(date_str: str) -> str:
+    """规范化对比日期为 YYYY-MM-DD，支持 YYYY-MM 自动补 01。"""
+    if not date_str or not isinstance(date_str, str):
+        raise ValueError("日期不能为空")
+    s = date_str.strip()
+    if len(s) == 7 and s[4] == "-":
+        return f"{s}-01"
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    raise ValueError("日期格式应为 YYYY-MM-DD 或 YYYY-MM")
+
+
 @router.get("/business-overview/comparison")
 async def get_business_overview_comparison(
     granularity: str = Query(..., description="时间粒度(daily/weekly/monthly)"),
-    date: str = Query(..., description="日期"),
-    platforms: Optional[str] = Query(None, description="平台代码(逗号分隔)"),
+    date: str = Query(..., description="日期(YYYY-MM-DD 或 YYYY-MM)"),
+    platforms: Optional[str] = Query(None, description="平台代码(逗号分隔，传第一个)"),
     shops: Optional[str] = Query(None, description="店铺ID(逗号分隔)")
 ):
     """
     获取业务概览数据对比(日/周/月度)
     """
     try:
+        if granularity not in ("daily", "weekly", "monthly"):
+            raise ValueError("粒度必须为 daily、weekly 或 monthly")
+        date_normalized = _normalize_comparison_date(date)
         service = get_metabase_service()
-        
         params = {
             "granularity": granularity,
-            "date": date,
+            "date": date_normalized,
             "platforms": platforms,
             "shops": shops
         }
-        
         params = {k: v for k, v in params.items() if v is not None}
-        
         result = await service.query_question("business_overview_comparison", params)
         return success_response(data=result)
         

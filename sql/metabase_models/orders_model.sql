@@ -37,6 +37,7 @@ field_mapping AS (
     COALESCE(raw_data->>'出库仓库', raw_data->>'chu_ku_cang_ku', raw_data->>'outbound_warehouse', raw_data->>'仓库') AS outbound_warehouse_raw,
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
+    COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_shopee_orders_daily
   
@@ -65,6 +66,7 @@ field_mapping AS (
     COALESCE(raw_data->>'出库仓库', raw_data->>'chu_ku_cang_ku', raw_data->>'outbound_warehouse', raw_data->>'仓库') AS outbound_warehouse_raw,
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
+    COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_shopee_orders_weekly
   
@@ -93,6 +95,7 @@ field_mapping AS (
     COALESCE(raw_data->>'出库仓库', raw_data->>'chu_ku_cang_ku', raw_data->>'outbound_warehouse', raw_data->>'仓库') AS outbound_warehouse_raw,
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
+    COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_shopee_orders_monthly
   
@@ -121,6 +124,7 @@ field_mapping AS (
     COALESCE(raw_data->>'出库仓库', raw_data->>'chu_ku_cang_ku', raw_data->>'outbound_warehouse', raw_data->>'仓库') AS outbound_warehouse_raw,
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
+    COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_tiktok_orders_daily
   
@@ -149,6 +153,7 @@ field_mapping AS (
     COALESCE(raw_data->>'出库仓库', raw_data->>'chu_ku_cang_ku', raw_data->>'outbound_warehouse', raw_data->>'仓库') AS outbound_warehouse_raw,
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
+    COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_tiktok_orders_weekly
   
@@ -177,6 +182,7 @@ field_mapping AS (
     COALESCE(raw_data->>'出库仓库', raw_data->>'chu_ku_cang_ku', raw_data->>'outbound_warehouse', raw_data->>'仓库') AS outbound_warehouse_raw,
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
+    COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_tiktok_orders_monthly
   
@@ -205,6 +211,7 @@ field_mapping AS (
     COALESCE(raw_data->>'出库仓库', raw_data->>'chu_ku_cang_ku', raw_data->>'outbound_warehouse', raw_data->>'仓库') AS outbound_warehouse_raw,
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
+    COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_miaoshou_orders_daily
   
@@ -233,6 +240,7 @@ field_mapping AS (
     COALESCE(raw_data->>'出库仓库', raw_data->>'chu_ku_cang_ku', raw_data->>'outbound_warehouse', raw_data->>'仓库') AS outbound_warehouse_raw,
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
+    COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_miaoshou_orders_weekly
   
@@ -261,6 +269,7 @@ field_mapping AS (
     COALESCE(raw_data->>'出库仓库', raw_data->>'chu_ku_cang_ku', raw_data->>'outbound_warehouse', raw_data->>'仓库') AS outbound_warehouse_raw,
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
+    COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_miaoshou_orders_monthly
 ),
@@ -361,6 +370,15 @@ cleaned AS (
       ),
       ''
     )::NUMERIC AS order_count,
+    NULLIF(
+      REGEXP_REPLACE(
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(product_quantity_raw, ''), ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
+        '[^0-9.]',
+        '',
+        'g'
+      ),
+      ''
+    )::NUMERIC AS product_quantity,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM field_mapping
 ),
@@ -400,6 +418,7 @@ SELECT
   product_name, product_id, platform_sku, sku_id, product_sku, product_type, outbound_warehouse,
   COALESCE(buyer_count, 0) AS buyer_count,
   COALESCE(order_count, 0) AS order_count,
+  COALESCE(product_quantity, 0) AS product_quantity,
   raw_data, header_columns, data_hash, ingest_timestamp, currency_code
 FROM deduplicated
 WHERE rn = 1

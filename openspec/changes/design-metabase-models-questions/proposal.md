@@ -43,7 +43,7 @@
 
 4. **创建Metabase Questions（C类数据实时计算）** ⏳ **进行中**
    - ✅ **business_overview_kpi**：核心KPI指标（GMV、订单数、买家数、转化率等）— **已可用**
-   - ⏳ **business_overview_comparison**：数据对比（支持日/周/月度切换，同比、环比对比）
+   - ✅ **business_overview_comparison**：数据对比（支持日/周/月度切换，当期/上期/平均/环比）— **已优化完成 v4.21.0**
    - ⏳ **business_overview_shop_racing**：店铺赛马（店铺排名，支持店铺级/账号级切换）
    - ⏳ **business_overview_traffic_ranking**：流量排名（流量指标排名）
    - ⏳ **business_overview_inventory_backlog**：库存积压（库存预警数据）
@@ -474,15 +474,38 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 
 #### Metabase Questions（C类数据实时计算）
 
-- ⏳ **business_overview_comparison** - 数据对比（待优化）
+- ✅ **business_overview_comparison** - 数据对比（已优化完成 v4.21.0，见下方「数据对比 Question 约定」）
 - ⏳ **business_overview_shop_racing** - 店铺赛马（待优化）
 - ⏳ **business_overview_traffic_ranking** - 流量排名（待优化）
 - ⏳ **business_overview_inventory_backlog** - 库存积压（待优化）
 - ⏳ **clearance_ranking** - 清仓排名（待优化）
 
+### ✅ 数据对比 Question 优化完成（v4.21.0，2025-01-30）
+
+**约定（避免其他 Question 出现类似问题）：**
+
+1. **时间定义**
+   - **日度**：单日日期（`target_date` 即所选日期）。
+   - **周度**：周一～周日；周期由 `date_trunc('week', target_date)` 得到当周周一，当周周日 = 周一 + 6；前端传参须为该周**周一**的 YYYY-MM-DD，避免同周不同日期导致数据跳变。
+   - **月度**：整月 1 日～当月最后一天；参数可为 YYYY-MM 或 YYYY-MM-DD，后端规范为 YYYY-MM-01。
+
+2. **平均定义**
+   - **日度筛选时**：平均 = **本月平均** = 本月数据 / 本月天数（本月日度汇总 / 本月天数）。
+   - **周度**：本周平均 = 本周数据 / 7。
+   - **月度**：本月平均 = 本月数据 / 本月天数。
+   - **转化率 / 连带率**：本期只算一个比率（本期订单/本期流量），不做「平均转化率」的额外定义；日度时「平均转化率」= 本月订单/本月流量。
+
+3. **环比**
+   - 当日 vs 昨天、本周 vs 上周、本月 vs 上月，直接计算（当期−上期）/上期×100%。
+
+4. **引用的字段（Orders / Analytics Model）**
+   - **`metric_date`**：在订单/分析模型中，无论粒度为 daily/weekly/monthly，存储的均为**单日日期**（订单日期或事件日期），**不是**周期起止。按周期汇总时须用「`metric_date` 落在计算出的周期范围内」匹配，例如 `metric_date >= current_period_start AND metric_date <= current_period_end`。
+   - **`period_start_date` / `period_end_date`**：在 B 类模型中可能同样存单日，**勿**用其等于周期起止做过滤；周期边界由 SQL 内根据 `target_date` 与 `granularity` 计算。
+   - **销售额**：订单模型若 `sales_amount` 常为 0，汇总时使用 **`paid_amount`**（实付金额）作为销售额指标。
+
 ### 📋 待完成
 
-- [ ] 优化其余 5 个 Question（数据对比、店铺赛马、流量排名、库存积压、清仓排名）
+- [ ] 优化其余 4 个 Question（店铺赛马、流量排名、库存积压、清仓排名）
 - [ ] 测试各 Question 查询性能与数据正确性
 - [ ] 执行迁移脚本 `alembic upgrade head`（如未执行）
 - [ ] 验证 A类/C类表已迁移到正确 schema

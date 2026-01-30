@@ -523,11 +523,13 @@ const logout = () => {
     cancelButtonText: '取消',
     type: 'warning'
   }).then(async () => {
-    // 同时清除两个store
-    await authStore.logout()
+    try {
+      await authStore.logout()
+    } catch (_) {
+      // 即使登出接口 401 也视为已登出，继续清状态并跳转
+    }
     userStore.logout()
     localStorage.removeItem('activeRole')
-    ElMessage.success('已退出登录')
     router.push('/login')
   }).catch(() => {
     // 用户取消

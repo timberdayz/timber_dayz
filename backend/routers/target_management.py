@@ -18,6 +18,7 @@
 - DELETE /api/targets/{target_id} - 删除目标
 - POST /api/targets/{target_id}/breakdown - 创建目标分解
 - GET /api/targets/{target_id}/breakdown - 查询目标分解列表
+- POST /api/targets/{target_id}/breakdown/generate-daily - 一键生成日度分解
 - POST /api/targets/{target_id}/calculate - 计算达成情况
 """
 
@@ -27,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from backend.models.database import get_db, get_async_db
 from backend.utils.api_response import success_response, error_response
@@ -92,6 +93,7 @@ class TargetUpdateRequest(BaseModel):
     target_quantity: Optional[int] = Field(None, ge=0)
     status: Optional[str] = None
     description: Optional[str] = None
+    weekday_ratios: Optional[Dict[str, float]] = Field(None, description="周一到周日拆分比例 {\"1\":0.14,...,\"7\":0.14} 和为1")
 
 
 class BreakdownCreateRequest(BaseModel):
@@ -109,6 +111,12 @@ class BreakdownCreateRequest(BaseModel):
     target_quantity: int = Field(0, ge=0)
 
 
+class GenerateDailyBreakdownRequest(BaseModel):
+    """一键生成日度分解请求"""
+    overwrite: bool = Field(False, description="是否覆盖已存在的日度分解")
+    weekday_ratios: Optional[Dict[str, float]] = Field(None, description="周一到周日拆分比例 1=周一…7=周日，和为1；不传则用目标已保存的")
+
+
 class TargetResponse(BaseModel):
     """目标响应"""
     id: int
@@ -123,10 +131,11 @@ class TargetResponse(BaseModel):
     achievement_rate: float
     status: str
     description: Optional[str]
+    weekday_ratios: Optional[Dict[str, float]] = None
     created_by: Optional[str]
     created_at: datetime
     updated_at: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -202,10 +211,15 @@ async def list_targets(
         
         targets = (await db.execute(query)).scalars().all()
         
-        # 使用 mode='json' 确保日期/时间/Decimal 可序列化,避免 500
-        items = [TargetResponse.model_validate(t).model_dump(mode="json") for t in targets]
+        # 逐条序列化，单条失败不影响整页（避免 500 导致目标管理页一直转圈）
+        items = []
+        for t in targets:
+            try:
+                items.append(TargetResponse.model_validate(t).model_dump(mode="json"))
+            except Exception as item_err:
+                logger.warning(f"目标列表序列化跳过一条 id={getattr(t, 'id', None)}: {item_err}")
+                continue
         
-        # 返回 items + total,便于前端在拦截器只返回 data 时仍能拿到分页信息
         return {
             "success": True,
             "data": {
@@ -218,12 +232,35 @@ async def list_targets(
     except HTTPException:
         raise
     except Exception as e:
+        error_str = str(e)
         logger.error(f"查询目标列表失败: {e}", exc_info=True)
+        
+        # 检测常见的数据库结构问题，返回更有意义的错误信息
+        if "does not exist" in error_str and "column" in error_str.lower():
+            return error_response(
+                code=ErrorCode.DATABASE_QUERY_ERROR,
+                message="数据库表结构不完整",
+                error_type="DatabaseSchemaError",
+                detail=f"数据库表缺少必要的列，请执行迁移: alembic upgrade head",
+                recovery_suggestion="请运行诊断脚本: python scripts/diagnose_targets_db.py",
+                status_code=500
+            )
+        elif "relation" in error_str.lower() and "does not exist" in error_str:
+            return error_response(
+                code=ErrorCode.DATABASE_QUERY_ERROR,
+                message="数据库表不存在",
+                error_type="DatabaseSchemaError",
+                detail=f"sales_targets 表不存在，请执行迁移: alembic upgrade head",
+                recovery_suggestion="请运行诊断脚本: python scripts/diagnose_targets_db.py",
+                status_code=500
+            )
+        
         return error_response(
             code=ErrorCode.DATABASE_QUERY_ERROR,
             message="查询失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
-            detail=str(e),
+            detail=error_str,
+            recovery_suggestion="请检查数据库连接或联系管理员",
             status_code=500
         )
 
@@ -256,11 +293,104 @@ async def list_target_shops(
         ]
         return {"success": True, "data": items}
     except Exception as e:
+        error_str = str(e)
         logger.error(f"查询目标用店铺列表失败: {e}", exc_info=True)
+        
+        # 检测常见的数据库结构问题
+        if "does not exist" in error_str and ("column" in error_str.lower() or "relation" in error_str.lower()):
+            return error_response(
+                code=ErrorCode.DATABASE_QUERY_ERROR,
+                message="店铺数据表不完整",
+                error_type="DatabaseSchemaError",
+                detail="platform_accounts 表可能不存在或缺少必要字段",
+                recovery_suggestion="请运行诊断脚本: python scripts/diagnose_targets_db.py",
+                status_code=500,
+            )
+        
         return error_response(
             code=ErrorCode.DATABASE_QUERY_ERROR,
             message="查询店铺列表失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=error_str,
+            recovery_suggestion="请检查数据库连接或联系管理员",
+            status_code=500,
+        )
+
+
+@router.get("/by-month", response_model=Dict[str, Any])
+async def get_target_by_month(
+    month: str = Query(..., description="月份 YYYY-MM"),
+    target_type: str = Query("shop", description="目标类型"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    """
+    按月份获取目标（常规月度目标页用）。返回该月内 period 覆盖该月的第一个目标及全部分解。
+    """
+    try:
+        parts = month.split("-")
+        if len(parts) != 2:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="月份格式须为 YYYY-MM",
+                status_code=400,
+            )
+        y, m = int(parts[0]), int(parts[1])
+        month_start = date(y, m, 1)
+        if m == 12:
+            month_end = date(y, 12, 31)
+        else:
+            month_end = date(y, m + 1, 1) - timedelta(days=1)
+        query = (
+            select(SalesTarget)
+            .where(SalesTarget.target_type == target_type)
+            .where(SalesTarget.period_start <= month_end)
+            .where(SalesTarget.period_end >= month_start)
+            .order_by(SalesTarget.created_at.desc())
+            .limit(1)
+        )
+        target = (await db.execute(query)).scalar_one_or_none()
+        if not target:
+            return {
+                "success": True,
+                "data": {"target": None, "breakdowns": []},
+                "message": "该月暂无目标",
+            }
+        breakdowns_query = select(TargetBreakdown).where(TargetBreakdown.target_id == target.id)
+        breakdowns = (await db.execute(breakdowns_query)).scalars().all()
+        breakdown_responses = []
+        for b in breakdowns:
+            bd = BreakdownResponse.model_validate(b).model_dump()
+            if b.platform_code and b.shop_id and b.breakdown_type in ("shop", "shop_time"):
+                dim_shop = (await db.execute(
+                    select(DimShop).where(
+                        DimShop.platform_code == b.platform_code,
+                        DimShop.shop_id == b.shop_id,
+                    )
+                )).scalar_one_or_none()
+                if dim_shop:
+                    bd["shop_name"] = dim_shop.shop_name
+            breakdown_responses.append(bd)
+        return {
+            "success": True,
+            "data": {
+                "target": TargetResponse.model_validate(target).model_dump(),
+                "breakdowns": breakdown_responses,
+            },
+        }
+    except (ValueError, TypeError) as e:
+        return error_response(
+            code=ErrorCode.DATA_VALIDATION_FAILED,
+            message="月份格式须为 YYYY-MM",
+            status_code=400,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"按月份获取目标失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="按月份获取目标失败",
             detail=str(e),
             status_code=500,
         )
@@ -303,7 +433,7 @@ async def get_target(
         breakdown_responses = []
         for breakdown in breakdowns:
             breakdown_data = BreakdownResponse.model_validate(breakdown).model_dump()
-            if breakdown.breakdown_type == "shop" and breakdown.platform_code and breakdown.shop_id:
+            if breakdown.platform_code and breakdown.shop_id and breakdown.breakdown_type in ("shop", "shop_time"):
                 dim_shop = (await db.execute(
                     select(DimShop).where(
                         DimShop.platform_code == breakdown.platform_code,
@@ -619,9 +749,10 @@ async def create_breakdown(
     """
     创建目标分解
     
-    支持两种分解类型:
+    支持三种分解类型:
     1. shop:按店铺分解(需要platform_code和shop_id)
     2. time:按时间分解(需要period_start和period_end)
+    3. shop_time:日度按店铺(需要platform_code、shop_id、period_start=period_end 单日)
     """
     try:
         # 验证目标存在
@@ -777,13 +908,112 @@ async def create_breakdown(
                     recovery_suggestion="请调整分解周期,确保在目标周期范围内",
                     status_code=400
                 )
+            
+            # 时间分解 Upsert：同一天已存在则更新（用于日历编辑单日）
+            existing_time = (await db.execute(
+                select(TargetBreakdown).where(
+                    TargetBreakdown.target_id == target_id,
+                    TargetBreakdown.breakdown_type == "time",
+                    TargetBreakdown.period_start == request.period_start,
+                    TargetBreakdown.period_end == request.period_end,
+                )
+            )).scalar_one_or_none()
+            if existing_time:
+                existing_time.target_amount = request.target_amount
+                existing_time.target_quantity = request.target_quantity
+                existing_time.period_label = request.period_label or request.period_start.isoformat()
+                existing_time.updated_at = datetime.utcnow()
+                if request.period_start == request.period_end:
+                    await _rebalance_daily_breakdown(
+                        db, target_id, request.period_start,
+                        request.target_amount, request.target_quantity,
+                    )
+                await db.commit()
+                await db.refresh(existing_time)
+                return {
+                    "success": True,
+                    "data": BreakdownResponse.model_validate(existing_time).model_dump(),
+                    "message": "日度分解更新成功"
+                }
+        
+        elif request.breakdown_type == "shop_time":
+            if not request.platform_code or not request.shop_id or not request.period_start or not request.period_end:
+                return error_response(
+                    code=ErrorCode.DATA_REQUIRED_FIELD_MISSING,
+                    message="日度按店铺分解需要platform_code、shop_id、period_start、period_end",
+                    status_code=400,
+                )
+            if request.period_start != request.period_end:
+                return error_response(
+                    code=ErrorCode.DATA_VALIDATION_FAILED,
+                    message="日度按店铺分解的period_start须等于period_end（单日）",
+                    status_code=400,
+                )
+            if request.period_start < target.period_start or request.period_end > target.period_end:
+                return error_response(
+                    code=ErrorCode.DATA_VALIDATION_FAILED,
+                    message="分解日期须在目标周期内",
+                    status_code=400,
+                )
+            normalized_platform_code = request.platform_code.lower() if request.platform_code else None
+            existing_st = (await db.execute(
+                select(TargetBreakdown).where(
+                    TargetBreakdown.target_id == target_id,
+                    TargetBreakdown.breakdown_type == "shop_time",
+                    TargetBreakdown.platform_code == normalized_platform_code,
+                    TargetBreakdown.shop_id == request.shop_id,
+                    TargetBreakdown.period_start == request.period_start,
+                    TargetBreakdown.period_end == request.period_end,
+                )
+            )).scalar_one_or_none()
+            if existing_st:
+                existing_st.target_amount = request.target_amount
+                existing_st.target_quantity = request.target_quantity
+                existing_st.period_label = request.period_label or request.period_start.isoformat()
+                existing_st.updated_at = datetime.utcnow()
+                await db.commit()
+                await db.refresh(existing_st)
+                bd_data = BreakdownResponse.model_validate(existing_st).model_dump()
+                dim_shop = (await db.execute(
+                    select(DimShop).where(
+                        DimShop.platform_code == normalized_platform_code,
+                        DimShop.shop_id == request.shop_id,
+                    )
+                )).scalar_one_or_none()
+                if dim_shop:
+                    bd_data["shop_name"] = dim_shop.shop_name
+                return {"success": True, "data": bd_data, "message": "日度按店铺更新成功"}
+            new_st = TargetBreakdown(
+                target_id=target_id,
+                breakdown_type="shop_time",
+                platform_code=normalized_platform_code,
+                shop_id=request.shop_id,
+                period_start=request.period_start,
+                period_end=request.period_end,
+                period_label=request.period_label or request.period_start.isoformat(),
+                target_amount=request.target_amount,
+                target_quantity=request.target_quantity,
+            )
+            db.add(new_st)
+            await db.commit()
+            await db.refresh(new_st)
+            bd_data = BreakdownResponse.model_validate(new_st).model_dump()
+            dim_shop = (await db.execute(
+                select(DimShop).where(
+                    DimShop.platform_code == normalized_platform_code,
+                    DimShop.shop_id == request.shop_id,
+                )
+            )).scalar_one_or_none()
+            if dim_shop:
+                bd_data["shop_name"] = dim_shop.shop_name
+            return {"success": True, "data": bd_data, "message": "日度按店铺创建成功"}
         
         else:
             return error_response(
                 code=ErrorCode.DATA_VALIDATION_FAILED,
-                message="分解类型必须是shop或time",
+                message="分解类型须为shop、time或shop_time",
                 error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请选择shop或time作为分解类型",
+                recovery_suggestion="请选择shop、time或shop_time",
                 status_code=400
             )
         
@@ -801,6 +1031,11 @@ async def create_breakdown(
         )
         
         db.add(breakdown)
+        if request.breakdown_type == "time" and request.period_start == request.period_end:
+            await _rebalance_daily_breakdown(
+                db, target_id, request.period_start,
+                request.target_amount, request.target_quantity,
+            )
         await db.commit()
         await db.refresh(breakdown)
         
@@ -873,7 +1108,7 @@ async def list_breakdowns(
         breakdown_responses = []
         for breakdown in breakdowns:
             breakdown_data = BreakdownResponse.model_validate(breakdown).model_dump()
-            if breakdown.breakdown_type == "shop" and breakdown.platform_code and breakdown.shop_id:
+            if breakdown.platform_code and breakdown.shop_id and breakdown.breakdown_type in ("shop", "shop_time"):
                 shop = (await db.execute(
                     select(DimShop).where(
                         DimShop.platform_code == breakdown.platform_code,
@@ -897,6 +1132,244 @@ async def list_breakdowns(
             detail=str(e),
             recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
+        )
+
+
+def _normalize_weekday_ratios(ratios: Optional[Dict[str, float]]) -> Dict[str, float]:
+    """周一到周日 1-7，缺省均分，归一化使和为 1。"""
+    if not ratios:
+        return {str(i): round(1.0 / 7, 4) for i in range(1, 8)}
+    out = {}
+    for i in range(1, 8):
+        out[str(i)] = float(ratios.get(str(i), 1.0 / 7))
+    s = sum(out.values()) or 1.0
+    return {k: round(v / s, 4) for k, v in out.items()}
+
+
+async def _rebalance_daily_breakdown(
+    db: AsyncSession,
+    target_id: int,
+    edited_date: date,
+    new_amount: float,
+    new_quantity: int,
+) -> None:
+    """
+    单日编辑后智能调整其余日度目标，使月度目标总额不变。
+    按比例缩放其余日的 target_amount / target_quantity。
+    """
+    target = (await db.execute(
+        select(SalesTarget).where(SalesTarget.id == target_id)
+    )).scalar_one_or_none()
+    if not target:
+        return
+    monthly_amount = float(target.target_amount or 0)
+    monthly_quantity = int(target.target_quantity or 0)
+    rows = (await db.execute(
+        select(TargetBreakdown).where(
+            TargetBreakdown.target_id == target_id,
+            TargetBreakdown.breakdown_type == "time",
+            TargetBreakdown.period_start == TargetBreakdown.period_end,
+        )
+    )).scalars().all()
+    others = [r for r in rows if r.period_start != edited_date]
+    if not others:
+        return
+    others_amount_sum = sum(float(r.target_amount or 0) for r in others)
+    others_quantity_sum = sum(int(r.target_quantity or 0) for r in others)
+    if others_amount_sum > 0:
+        factor_a = (monthly_amount - new_amount) / others_amount_sum
+        for r in others:
+            r.target_amount = round(float(r.target_amount or 0) * factor_a, 2)
+            r.updated_at = datetime.utcnow()
+    if others_quantity_sum > 0:
+        rest_qty = max(0, monthly_quantity - new_quantity)
+        factor_q = rest_qty / others_quantity_sum
+        new_qtys = [max(0, round(int(r.target_quantity or 0) * factor_q)) for r in others]
+        diff = rest_qty - sum(new_qtys)
+        for i, r in enumerate(others):
+            adj = 1 if diff > 0 and i < diff else (-1 if diff < 0 and i < -diff else 0)
+            r.target_quantity = max(0, new_qtys[i] + adj)
+            r.updated_at = datetime.utcnow()
+
+
+@router.post("/{target_id}/breakdown/generate-daily", response_model=Dict[str, Any])
+async def generate_daily_breakdown(
+    target_id: int,
+    request: Optional[GenerateDailyBreakdownRequest] = None,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(require_admin),
+):
+    """
+    一键生成日度分解：按周一到周日拆分比例（或均分）为每一天创建 breakdown_type=time 的分解记录。
+    用于业务概览日度对比与日历查看/编辑。
+    """
+    req = request or GenerateDailyBreakdownRequest()
+    try:
+        target = (await db.execute(
+            select(SalesTarget).where(SalesTarget.id == target_id)
+        )).scalar_one_or_none()
+        if not target:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="目标不存在",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请检查目标ID",
+                status_code=404,
+            )
+        start = target.period_start
+        end = target.period_end
+        if end < start:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="目标结束日期早于开始日期",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                status_code=400,
+            )
+        days_count = (end - start).days + 1
+        if days_count <= 0:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="目标周期无效",
+                status_code=400,
+            )
+        total_amount = float(target.target_amount or 0)
+        total_quantity = int(target.target_quantity or 0)
+        ratios = _normalize_weekday_ratios(req.weekday_ratios or getattr(target, "weekday_ratios", None))
+        if req.weekday_ratios is not None:
+            target.weekday_ratios = ratios
+        current = start
+        day_weights = []
+        while current <= end:
+            w = current.isoweekday()
+            day_weights.append((current, float(ratios.get(str(w), 1.0 / 7))))
+            current += timedelta(days=1)
+        total_weight = sum(w for _, w in day_weights)
+        if total_weight <= 0:
+            total_weight = 1.0
+        daily_plans = []
+        for d, w in day_weights:
+            amt = round(total_amount * w / total_weight, 2)
+            qty_float = total_quantity * w / total_weight
+            daily_plans.append((d, amt, qty_float))
+        qty_floors = [int(p[2]) for p in daily_plans]
+        remainder_qty = total_quantity - sum(qty_floors)
+        for i in range(min(remainder_qty, len(daily_plans))):
+            qty_floors[i] += 1
+
+        created = 0
+        updated = 0
+        for idx, (d, amt, _) in enumerate(daily_plans):
+            day_label = d.isoformat()
+            qty_this_day = qty_floors[idx] if idx < len(qty_floors) else 0
+            existing = (await db.execute(
+                select(TargetBreakdown).where(
+                    TargetBreakdown.target_id == target_id,
+                    TargetBreakdown.breakdown_type == "time",
+                    TargetBreakdown.period_start == d,
+                    TargetBreakdown.period_end == d,
+                )
+            )).scalar_one_or_none()
+            if existing:
+                if req.overwrite:
+                    existing.target_amount = amt
+                    existing.target_quantity = qty_this_day
+                    existing.period_label = day_label
+                    existing.updated_at = datetime.utcnow()
+                    updated += 1
+            else:
+                db.add(TargetBreakdown(
+                    target_id=target_id,
+                    breakdown_type="time",
+                    period_start=d,
+                    period_end=d,
+                    period_label=day_label,
+                    target_amount=amt,
+                    target_quantity=qty_this_day,
+                ))
+                created += 1
+
+        # 日度按店铺：若有按店铺分解，为每店×每日生成 shop_time
+        shop_breakdowns = (await db.execute(
+            select(TargetBreakdown).where(
+                TargetBreakdown.target_id == target_id,
+                TargetBreakdown.breakdown_type == "shop",
+            )
+        )).scalars().all()
+        created_st = 0
+        updated_st = 0
+        for shop_bd in shop_breakdowns:
+            if not shop_bd.platform_code or not shop_bd.shop_id:
+                continue
+            shop_amount = float(shop_bd.target_amount or 0)
+            shop_qty = int(shop_bd.target_quantity or 0)
+            shop_daily_amts = [round(shop_amount * day_weights[i][1] / total_weight, 2) for i in range(len(day_weights))]
+            shop_qty_floors = [max(0, round(shop_qty * day_weights[i][1] / total_weight)) for i in range(len(day_weights))]
+            rem = shop_qty - sum(shop_qty_floors)
+            for i in range(min(max(0, rem), len(shop_qty_floors))):
+                shop_qty_floors[i] += 1
+            for idx, (d, _, _) in enumerate(daily_plans):
+                day_label = d.isoformat()
+                amt_st = shop_daily_amts[idx] if idx < len(shop_daily_amts) else 0
+                qty_st = shop_qty_floors[idx] if idx < len(shop_qty_floors) else 0
+                existing_st = (await db.execute(
+                    select(TargetBreakdown).where(
+                        TargetBreakdown.target_id == target_id,
+                        TargetBreakdown.breakdown_type == "shop_time",
+                        TargetBreakdown.platform_code == shop_bd.platform_code,
+                        TargetBreakdown.shop_id == shop_bd.shop_id,
+                        TargetBreakdown.period_start == d,
+                        TargetBreakdown.period_end == d,
+                    )
+                )).scalar_one_or_none()
+                if existing_st:
+                    if req.overwrite:
+                        existing_st.target_amount = amt_st
+                        existing_st.target_quantity = qty_st
+                        existing_st.period_label = day_label
+                        existing_st.updated_at = datetime.utcnow()
+                        updated_st += 1
+                else:
+                    db.add(TargetBreakdown(
+                        target_id=target_id,
+                        breakdown_type="shop_time",
+                        platform_code=shop_bd.platform_code,
+                        shop_id=shop_bd.shop_id,
+                        period_start=d,
+                        period_end=d,
+                        period_label=day_label,
+                        target_amount=amt_st,
+                        target_quantity=qty_st,
+                    ))
+                    created_st += 1
+
+        await db.commit()
+        msg = f"日度分解已生成：汇总新增 {created} 条、更新 {updated} 条"
+        if created_st or updated_st:
+            msg += f"；按店铺日度新增 {created_st} 条、更新 {updated_st} 条"
+        return {
+            "success": True,
+            "data": {
+                "target_id": target_id,
+                "days_count": days_count,
+                "created": created,
+                "updated": updated,
+                "shop_time_created": created_st,
+                "shop_time_updated": updated_st,
+            },
+            "message": msg,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"生成日度分解失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="生成日度分解失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查目标周期与数据库权限",
+            status_code=500,
         )
 
 

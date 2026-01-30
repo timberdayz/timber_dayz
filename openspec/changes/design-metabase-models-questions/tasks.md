@@ -241,13 +241,17 @@
   - **后端API**：`GET /api/dashboard/business-overview/kpi`
   - **前端**：按月、平台筛选，Question ID 已配置于 `.env`
 
-- [ ] 3.1.2 business_overview_comparison - 数据对比
-  - **用途**：提供日/周/月度数据对比
-  - **数据源**：Orders Model / Analytics Model
-  - **计算指标**：同比、环比对比
-  - **参数**：`{{granularity}}`, `{{date}}`, `{{platforms}}`, `{{shops}}`
-  - **返回格式**：多行数据，每行一个时间粒度
+- [x] 3.1.2 business_overview_comparison - 数据对比 ✅ **已优化完成 v4.21.0**
+  - **用途**：提供日/周/月度数据对比（当期/上期/平均/环比）
+  - **数据源**：Orders Model、Analytics Model、public.sales_targets、a_class.target_breakdown
+  - **计算指标**：本期/上期/平均/环比；目标达成率
+  - **参数**：`{{granularity}}`（daily/weekly/monthly）、`{{date}}`（YYYY-MM-DD，周度须传该周周一）、`{{platform}}`
+  - **时间定义**：日度=单日；周度=周一～周日；月度=当月1～月末。详见 proposal 与 specs/metabase-questions.md
+  - **平均定义**：日度=本月平均（本月数据/本月天数）；周度=本周数据/7；月度=本月数据/本月天数；转化率本期只算一个比率
+  - **引用的字段**：按周期汇总时用 `metric_date` 落在周期范围内匹配，勿用 period_start_date/period_end_date 等于周期起止；销售额用 paid_amount
+  - **返回格式**：单行多列（xxx_today/xxx_yesterday/xxx_average/xxx_change、target_xxx）
   - **后端API**：`GET /api/dashboard/business-overview/comparison`
+  - **前端**：周度时传参规范为该周周一，避免同周跳变
 
 - [ ] 3.1.3 business_overview_shop_racing - 店铺赛马
   - **用途**：店铺/平台排名对比

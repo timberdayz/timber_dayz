@@ -2355,6 +2355,9 @@ class SalesTarget(Base):
     status = Column(String(32), nullable=False, default="active", comment="状态:active/completed/cancelled")
     description = Column(Text, nullable=True, comment="目标描述")
     
+    # 日度分解：周一到周日拆分比例（1=周一…7=周日，和为1），用于一键生成日度时按比例分配
+    weekday_ratios = Column(JSON, nullable=True, comment="周一到周日拆分比例 {\"1\":0.14,...,\"7\":0.14} 和为1")
+    
     # 审计字段
     created_by = Column(String(64), nullable=True, comment="创建人")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -2413,16 +2416,12 @@ class TargetBreakdown(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     __table_args__ = (
-        CheckConstraint("breakdown_type IN ('shop', 'time')", name="chk_breakdown_type"),
-        # 注意:PostgreSQL的CHECK约束不支持复杂的条件逻辑,这里用Python代码验证
-        ForeignKeyConstraint(
-            ["platform_code", "shop_id"],
-            ["dim_shops.platform_code", "dim_shops.shop_id"],
-            name="fk_breakdown_shop"
-        ),
+        CheckConstraint("breakdown_type IN ('shop', 'time', 'shop_time')", name="chk_breakdown_type"),
         Index("ix_target_breakdown_target", "target_id"),
         Index("ix_target_breakdown_shop", "platform_code", "shop_id"),
         Index("ix_target_breakdown_period", "period_start", "period_end"),
+        # A类数据表,放在 a_class schema 中
+        {"schema": "a_class"},
     )
 
 
@@ -3209,44 +3208,163 @@ class SalesCampaignA(Base):
 
 
 class OperatingCost(Base):
-    """A类数据表:运营成本(中文字段名)"""
+    """
+    A类数据表:运营成本
+    
+    注意:数据库表使用中文字段名,ORM 通过 name 参数映射
+    表结构(a_class.operating_costs):
+    - id: bigint (PK)
+    - 店铺ID: character varying(256)
+    - 年月: character varying(7)
+    - 租金: numeric(15,2)
+    - 工资: numeric(15,2)
+    - 水电费: numeric(15,2)
+    - 其他成本: numeric(15,2)
+    - 创建时间: timestamp
+    - 更新时间: timestamp
+    """
     __tablename__ = "operating_costs"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    shop_id = Column(String(256), nullable=False)  # 迁移时将重命名为"店铺ID"
-    year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月"
-    rent = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"租金"
-    salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"工资"
-    utilities = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"水电费"
-    other_costs = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"其他成本"
+    # 使用 name 参数映射到数据库中的中文列名
+    shop_id = Column("店铺ID", String(256), nullable=False)
+    year_month = Column("年月", String(7), nullable=False)
+    rent = Column("租金", Numeric(15, 2), nullable=False, default=0.0)
+    salary = Column("工资", Numeric(15, 2), nullable=False, default=0.0)
+    utilities = Column("水电费", Numeric(15, 2), nullable=False, default=0.0)
+    other_costs = Column("其他成本", Numeric(15, 2), nullable=False, default=0.0)
+    created_at = Column("创建时间", DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column("更新时间", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("店铺ID", "年月", name="uq_operating_costs_a_shop_month"),
+        Index("ix_operating_costs_a_shop", "店铺ID"),
+        Index("ix_operating_costs_a_month", "年月"),
+        {"schema": "a_class"},
+    )
+
+
+# ============================================================================
+# A类数据表:HR人力资源模块(业界标准设计)
+# ============================================================================
+
+class Department(Base):
+    """
+    A类数据表:部门表(树形结构)
+    
+    支持多级部门架构，通过 parent_id 实现层级关系
+    """
+    __tablename__ = "departments"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    department_code = Column(String(64), nullable=False, unique=True)  # 部门编码
+    department_name = Column(String(128), nullable=False)  # 部门名称
+    parent_id = Column(BigInteger, nullable=True)  # 上级部门ID(NULL表示顶级部门)
+    level = Column(Integer, nullable=False, default=1)  # 部门层级(1=顶级)
+    sort_order = Column(Integer, nullable=False, default=0)  # 排序序号
+    manager_id = Column(BigInteger, nullable=True)  # 部门负责人ID
+    description = Column(Text, nullable=True)  # 部门描述
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     __table_args__ = (
-        UniqueConstraint("shop_id", "year_month", name="uq_operating_costs_a_shop_month"),
-        Index("ix_operating_costs_a_shop", "shop_id"),
-        Index("ix_operating_costs_a_month", "year_month"),
+        Index("ix_departments_a_code", "department_code"),
+        Index("ix_departments_a_parent", "parent_id"),
+        Index("ix_departments_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class Position(Base):
+    """
+    A类数据表:职位表(职级体系)
+    
+    定义公司职位/职级体系，支持职级薪资范围配置
+    """
+    __tablename__ = "positions"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    position_code = Column(String(64), nullable=False, unique=True)  # 职位编码
+    position_name = Column(String(128), nullable=False)  # 职位名称
+    position_level = Column(Integer, nullable=False, default=1)  # 职级(1-10)
+    department_id = Column(BigInteger, nullable=True)  # 所属部门ID(可选)
+    min_salary = Column(Numeric(15, 2), nullable=True)  # 薪资下限
+    max_salary = Column(Numeric(15, 2), nullable=True)  # 薪资上限
+    description = Column(Text, nullable=True)  # 职位描述/职责
+    requirements = Column(Text, nullable=True)  # 任职要求
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        Index("ix_positions_a_code", "position_code"),
+        Index("ix_positions_a_level", "position_level"),
+        Index("ix_positions_a_department", "department_id"),
         {"schema": "a_class"},
     )
 
 
 class Employee(Base):
-    """A类数据表:员工档案(中文字段名)"""
+    """
+    A类数据表:员工档案(业界标准设计)
+    
+    包含员工基本信息、联系方式、合同信息、银行账户等完整字段
+    """
     __tablename__ = "employees"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    employee_code = Column(String(64), nullable=False, unique=True)  # 迁移时将重命名为"员工编号"
-    name = Column(String(128), nullable=False)  # 迁移时将重命名为"姓名"
-    department = Column(String(128), nullable=True)  # 迁移时将重命名为"部门"
-    position = Column(String(128), nullable=True)  # 迁移时将重命名为"职位"
-    hire_date = Column(Date, nullable=True)  # 迁移时将重命名为"入职日期"
-    status = Column(String(32), nullable=False, default="active")  # 迁移时将重命名为"状态"
+    
+    # === 基本信息 ===
+    employee_code = Column(String(64), nullable=False, unique=True)  # 员工编号
+    name = Column(String(128), nullable=False)  # 姓名
+    gender = Column(String(16), nullable=True)  # 性别:male/female/other
+    birth_date = Column(Date, nullable=True)  # 出生日期
+    id_type = Column(String(32), nullable=True, default="id_card")  # 证件类型:id_card/passport/other
+    id_number = Column(String(64), nullable=True)  # 证件号码
+    avatar_url = Column(String(512), nullable=True)  # 头像URL
+    
+    # === 联系方式 ===
+    phone = Column(String(32), nullable=True)  # 手机号码
+    email = Column(String(128), nullable=True)  # 邮箱
+    address = Column(String(512), nullable=True)  # 现居地址
+    emergency_contact = Column(String(128), nullable=True)  # 紧急联系人
+    emergency_phone = Column(String(32), nullable=True)  # 紧急联系人电话
+    
+    # === 组织架构 ===
+    department_id = Column(BigInteger, nullable=True)  # 所属部门ID(关联departments表)
+    position_id = Column(BigInteger, nullable=True)  # 职位ID(关联positions表)
+    manager_id = Column(BigInteger, nullable=True)  # 直属上级ID(关联employees表)
+    
+    # === 入职信息 ===
+    hire_date = Column(Date, nullable=True)  # 入职日期
+    probation_end_date = Column(Date, nullable=True)  # 试用期结束日期
+    regularization_date = Column(Date, nullable=True)  # 转正日期
+    leave_date = Column(Date, nullable=True)  # 离职日期
+    
+    # === 合同信息 ===
+    contract_type = Column(String(32), nullable=True)  # 合同类型:fixed_term/indefinite/internship/part_time
+    contract_start_date = Column(Date, nullable=True)  # 合同开始日期
+    contract_end_date = Column(Date, nullable=True)  # 合同结束日期
+    
+    # === 薪资账户 ===
+    bank_name = Column(String(128), nullable=True)  # 开户银行
+    bank_account = Column(String(64), nullable=True)  # 银行账号
+    
+    # === 状态 ===
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive/probation/leave
+    
+    # === 元数据 ===
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     __table_args__ = (
         Index("ix_employees_a_code", "employee_code"),
-        Index("ix_employees_a_department", "department"),
+        Index("ix_employees_a_department", "department_id"),
+        Index("ix_employees_a_position", "position_id"),
+        Index("ix_employees_a_manager", "manager_id"),
+        Index("ix_employees_a_status", "status"),
+        Index("ix_employees_a_hire_date", "hire_date"),
         {"schema": "a_class"},
     )
 
@@ -3271,17 +3389,64 @@ class EmployeeTarget(Base):
     )
 
 
+class WorkShift(Base):
+    """
+    A类数据表:排班班次配置
+    
+    定义不同的工作班次（如早班、晚班、弹性工时等）
+    """
+    __tablename__ = "work_shifts"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    shift_code = Column(String(64), nullable=False, unique=True)  # 班次编码
+    shift_name = Column(String(128), nullable=False)  # 班次名称(如:早班/晚班/弹性)
+    start_time = Column(String(8), nullable=False)  # 上班时间(HH:MM格式)
+    end_time = Column(String(8), nullable=False)  # 下班时间(HH:MM格式)
+    work_hours = Column(Float, nullable=False, default=8.0)  # 标准工作时长
+    break_hours = Column(Float, nullable=False, default=1.0)  # 休息时长
+    late_tolerance = Column(Integer, nullable=False, default=15)  # 迟到容忍时间(分钟)
+    early_leave_tolerance = Column(Integer, nullable=False, default=15)  # 早退容忍时间(分钟)
+    is_flexible = Column(Boolean, nullable=False, default=False)  # 是否弹性工时
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        Index("ix_work_shifts_a_code", "shift_code"),
+        Index("ix_work_shifts_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
 class AttendanceRecord(Base):
-    """A类数据表:考勤记录(中文字段名)"""
+    """
+    A类数据表:考勤记录(业界标准设计)
+    
+    支持排班、外勤打卡、加班记录等完整考勤功能
+    """
     __tablename__ = "attendance_records"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    employee_code = Column(String(64), nullable=False)  # 迁移时将重命名为"员工编号"
-    attendance_date = Column(Date, nullable=False)  # 迁移时将重命名为"考勤日期"
-    clock_in_time = Column(DateTime, nullable=True)  # 迁移时将重命名为"上班时间"
-    clock_out_time = Column(DateTime, nullable=True)  # 迁移时将重命名为"下班时间"
-    work_hours = Column(Float, nullable=True)  # 迁移时将重命名为"工作时长"
-    status = Column(String(32), nullable=False, default="normal")  # 迁移时将重命名为"状态"
+    employee_code = Column(String(64), nullable=False)  # 员工编号
+    attendance_date = Column(Date, nullable=False)  # 考勤日期
+    
+    # === 打卡信息 ===
+    clock_in_time = Column(DateTime, nullable=True)  # 上班打卡时间
+    clock_out_time = Column(DateTime, nullable=True)  # 下班打卡时间
+    clock_in_location = Column(String(256), nullable=True)  # 上班打卡位置
+    clock_out_location = Column(String(256), nullable=True)  # 下班打卡位置
+    clock_in_type = Column(String(32), nullable=True, default="normal")  # 打卡类型:normal/field/supplement
+    clock_out_type = Column(String(32), nullable=True, default="normal")  # 打卡类型:normal/field/supplement
+    
+    # === 工时信息 ===
+    shift_id = Column(BigInteger, nullable=True)  # 排班班次ID
+    work_hours = Column(Float, nullable=True)  # 实际工作时长
+    overtime_hours = Column(Float, nullable=True, default=0.0)  # 加班时长
+    
+    # === 状态 ===
+    status = Column(String(32), nullable=False, default="normal")  # 状态:normal/late/early_leave/absent/leave
+    remark = Column(String(512), nullable=True)  # 备注
+    
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
@@ -3289,6 +3454,251 @@ class AttendanceRecord(Base):
         UniqueConstraint("employee_code", "attendance_date", name="uq_attendance_records_a"),
         Index("ix_attendance_records_a_employee", "employee_code"),
         Index("ix_attendance_records_a_date", "attendance_date"),
+        Index("ix_attendance_records_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class LeaveType(Base):
+    """
+    A类数据表:假期类型配置
+    
+    定义公司支持的假期类型（年假、病假、事假等）
+    """
+    __tablename__ = "leave_types"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    leave_code = Column(String(64), nullable=False, unique=True)  # 假期编码
+    leave_name = Column(String(128), nullable=False)  # 假期名称
+    is_paid = Column(Boolean, nullable=False, default=True)  # 是否带薪
+    max_days_per_year = Column(Float, nullable=True)  # 年度最大天数(NULL表示无限制)
+    requires_approval = Column(Boolean, nullable=False, default=True)  # 是否需要审批
+    description = Column(Text, nullable=True)  # 假期说明
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        Index("ix_leave_types_a_code", "leave_code"),
+        Index("ix_leave_types_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class LeaveRecord(Base):
+    """
+    A类数据表:请假记录
+    
+    记录员工请假申请和审批信息
+    """
+    __tablename__ = "leave_records"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)  # 员工编号
+    leave_type_id = Column(BigInteger, nullable=False)  # 假期类型ID
+    start_date = Column(Date, nullable=False)  # 开始日期
+    end_date = Column(Date, nullable=False)  # 结束日期
+    days = Column(Float, nullable=False)  # 请假天数
+    reason = Column(Text, nullable=True)  # 请假原因
+    
+    # === 审批信息 ===
+    approver_id = Column(BigInteger, nullable=True)  # 审批人ID
+    approval_status = Column(String(32), nullable=False, default="pending")  # 审批状态:pending/approved/rejected
+    approval_time = Column(DateTime, nullable=True)  # 审批时间
+    approval_remark = Column(String(512), nullable=True)  # 审批备注
+    
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        Index("ix_leave_records_a_employee", "employee_code"),
+        Index("ix_leave_records_a_date", "start_date", "end_date"),
+        Index("ix_leave_records_a_status", "approval_status"),
+        {"schema": "a_class"},
+    )
+
+
+class OvertimeRecord(Base):
+    """
+    A类数据表:加班记录
+    
+    记录员工加班申请和审批信息
+    """
+    __tablename__ = "overtime_records"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)  # 员工编号
+    overtime_date = Column(Date, nullable=False)  # 加班日期
+    start_time = Column(DateTime, nullable=False)  # 开始时间
+    end_time = Column(DateTime, nullable=False)  # 结束时间
+    hours = Column(Float, nullable=False)  # 加班时长
+    overtime_type = Column(String(32), nullable=False, default="workday")  # 类型:workday/weekend/holiday
+    reason = Column(Text, nullable=True)  # 加班原因
+    
+    # === 审批信息 ===
+    approver_id = Column(BigInteger, nullable=True)  # 审批人ID
+    approval_status = Column(String(32), nullable=False, default="pending")  # 审批状态:pending/approved/rejected
+    approval_time = Column(DateTime, nullable=True)  # 审批时间
+    
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        Index("ix_overtime_records_a_employee", "employee_code"),
+        Index("ix_overtime_records_a_date", "overtime_date"),
+        Index("ix_overtime_records_a_status", "approval_status"),
+        {"schema": "a_class"},
+    )
+
+
+# ============================================================================
+# A类数据表:薪酬管理模块
+# ============================================================================
+
+class SalaryStructure(Base):
+    """
+    A类数据表:薪资结构配置
+    
+    定义员工薪资组成结构（基本工资、绩效工资、津贴等）
+    """
+    __tablename__ = "salary_structures"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False, unique=True)  # 员工编号
+    
+    # === 固定薪资 ===
+    base_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 基本工资
+    position_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 岗位工资
+    
+    # === 津贴 ===
+    housing_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 住房补贴
+    transport_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 交通补贴
+    meal_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 餐饮补贴
+    communication_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 通讯补贴
+    other_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 其他补贴
+    
+    # === 绩效相关 ===
+    performance_ratio = Column(Float, nullable=False, default=0.0)  # 绩效工资比例(0-1)
+    commission_ratio = Column(Float, nullable=False, default=0.0)  # 提成比例(0-1)
+    
+    # === 社保公积金 ===
+    social_insurance_base = Column(Numeric(15, 2), nullable=True)  # 社保基数
+    housing_fund_base = Column(Numeric(15, 2), nullable=True)  # 公积金基数
+    
+    effective_date = Column(Date, nullable=False)  # 生效日期
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        Index("ix_salary_structures_a_employee", "employee_code"),
+        Index("ix_salary_structures_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class PayrollRecord(Base):
+    """
+    A类数据表:工资单记录
+    
+    记录每月工资计算结果
+    """
+    __tablename__ = "payroll_records"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)  # 员工编号
+    year_month = Column(String(7), nullable=False)  # 工资月份(YYYY-MM)
+    
+    # === 应发项 ===
+    base_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 基本工资
+    position_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 岗位工资
+    performance_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 绩效工资
+    overtime_pay = Column(Numeric(15, 2), nullable=False, default=0.0)  # 加班费
+    commission = Column(Numeric(15, 2), nullable=False, default=0.0)  # 提成
+    allowances = Column(Numeric(15, 2), nullable=False, default=0.0)  # 津贴合计
+    bonus = Column(Numeric(15, 2), nullable=False, default=0.0)  # 奖金
+    gross_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 应发合计
+    
+    # === 扣除项 ===
+    social_insurance_personal = Column(Numeric(15, 2), nullable=False, default=0.0)  # 社保个人部分
+    housing_fund_personal = Column(Numeric(15, 2), nullable=False, default=0.0)  # 公积金个人部分
+    income_tax = Column(Numeric(15, 2), nullable=False, default=0.0)  # 个人所得税
+    other_deductions = Column(Numeric(15, 2), nullable=False, default=0.0)  # 其他扣款
+    total_deductions = Column(Numeric(15, 2), nullable=False, default=0.0)  # 扣款合计
+    
+    # === 实发工资 ===
+    net_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 实发工资
+    
+    # === 公司成本 ===
+    social_insurance_company = Column(Numeric(15, 2), nullable=False, default=0.0)  # 社保公司部分
+    housing_fund_company = Column(Numeric(15, 2), nullable=False, default=0.0)  # 公积金公司部分
+    total_cost = Column(Numeric(15, 2), nullable=False, default=0.0)  # 公司总成本
+    
+    # === 状态 ===
+    status = Column(String(32), nullable=False, default="draft")  # 状态:draft/confirmed/paid
+    pay_date = Column(Date, nullable=True)  # 发薪日期
+    remark = Column(Text, nullable=True)  # 备注
+    
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("employee_code", "year_month", name="uq_payroll_records_a"),
+        Index("ix_payroll_records_a_employee", "employee_code"),
+        Index("ix_payroll_records_a_month", "year_month"),
+        Index("ix_payroll_records_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class SocialInsuranceConfig(Base):
+    """
+    A类数据表:社保公积金配置
+    
+    配置社保和公积金的缴纳比例
+    """
+    __tablename__ = "social_insurance_config"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    config_name = Column(String(128), nullable=False, unique=True)  # 配置名称(如:北京2024)
+    city = Column(String(64), nullable=True)  # 所属城市
+    
+    # === 养老保险 ===
+    pension_company_ratio = Column(Float, nullable=False, default=0.16)  # 单位缴纳比例
+    pension_personal_ratio = Column(Float, nullable=False, default=0.08)  # 个人缴纳比例
+    
+    # === 医疗保险 ===
+    medical_company_ratio = Column(Float, nullable=False, default=0.10)  # 单位缴纳比例
+    medical_personal_ratio = Column(Float, nullable=False, default=0.02)  # 个人缴纳比例
+    
+    # === 失业保险 ===
+    unemployment_company_ratio = Column(Float, nullable=False, default=0.008)  # 单位缴纳比例
+    unemployment_personal_ratio = Column(Float, nullable=False, default=0.002)  # 个人缴纳比例
+    
+    # === 工伤保险 ===
+    injury_company_ratio = Column(Float, nullable=False, default=0.002)  # 单位缴纳比例(个人不缴)
+    
+    # === 生育保险 ===
+    maternity_company_ratio = Column(Float, nullable=False, default=0.008)  # 单位缴纳比例(个人不缴)
+    
+    # === 住房公积金 ===
+    housing_fund_company_ratio = Column(Float, nullable=False, default=0.12)  # 单位缴纳比例
+    housing_fund_personal_ratio = Column(Float, nullable=False, default=0.12)  # 个人缴纳比例
+    
+    # === 基数范围 ===
+    min_base = Column(Numeric(15, 2), nullable=True)  # 最低基数
+    max_base = Column(Numeric(15, 2), nullable=True)  # 最高基数
+    
+    effective_date = Column(Date, nullable=False)  # 生效日期
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    __table_args__ = (
+        Index("ix_social_insurance_config_a_name", "config_name"),
+        Index("ix_social_insurance_config_a_city", "city"),
         {"schema": "a_class"},
     )
 

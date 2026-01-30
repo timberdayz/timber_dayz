@@ -123,9 +123,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   User, ArrowDown, Setting, Switch, Check, Plus, SwitchButton 
 } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const userStore = useUserStore()
 const accountFormRef = ref(null)
 
@@ -356,9 +358,13 @@ const logout = () => {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
     type: 'warning'
-  }).then(() => {
+  }).then(async () => {
+    try {
+      await authStore.logout()
+    } catch (_) {
+      // 即使登出接口 401 也视为已登出，继续清状态并跳转
+    }
     userStore.logout()
-    ElMessage.success('已退出登录')
     router.push('/login')
   })
 }

@@ -22,13 +22,21 @@ month_scope AS (
         DATE_TRUNC('month', {{month}}::date) AS prev_end
 ),
 
+-- 在职员工数（a_class.employees，用于人效计算）
+employee_count AS (
+    SELECT COUNT(*)::numeric AS active_employee_count
+    FROM a_class.employees
+    WHERE status = 'active'
+),
+
 -- 订单数据聚合（从 Orders Model）- 本月
 -- 注意：Orders Model 是订单明细数据，granularity 表示数据采集来源，不需要过滤
--- GMV 使用 paid_amount（实付金额）计算
+-- GMV 使用 paid_amount（实付金额）计算；product_quantity 用于连带率（商品件数/订单数）
 order_metrics AS (
     SELECT
         COALESCE(SUM(paid_amount), 0) AS total_gmv,
-        COUNT(DISTINCT order_id) AS total_orders
+        COUNT(DISTINCT order_id) AS total_orders,
+        COALESCE(SUM(product_quantity), 0) AS total_items
     FROM {{MODEL:Orders Model}} AS orders_model
     CROSS JOIN month_scope m
     WHERE metric_date >= m.period_start AND metric_date < m.period_end
@@ -39,7 +47,8 @@ order_metrics AS (
 order_metrics_prev AS (
     SELECT
         COALESCE(SUM(paid_amount), 0) AS total_gmv_prev,
-        COUNT(DISTINCT order_id) AS total_orders_prev
+        COUNT(DISTINCT order_id) AS total_orders_prev,
+        COALESCE(SUM(product_quantity), 0) AS total_items_prev
     FROM {{MODEL:Orders Model}} AS orders_model
     CROSS JOIN month_scope m
     WHERE metric_date >= m.prev_start AND metric_date < m.prev_end
@@ -68,23 +77,33 @@ traffic_metrics_prev AS (
         [[AND platform_code = {{platform}}]]
 ),
 
--- 本月与上月汇总（单行）
+-- 本月与上月汇总（单行），含连带率、人效
 combo AS (
     SELECT
         o.total_gmv,
         o.total_orders,
+        o.total_items,
         t.total_visitors,
         op.total_gmv_prev,
         op.total_orders_prev,
+        op.total_items_prev,
         tp.total_visitors_prev,
+        e.active_employee_count,
         CASE WHEN t.total_visitors > 0 THEN ROUND(o.total_orders::numeric / t.total_visitors * 100, 2) ELSE 0 END AS conversion_rate,
         CASE WHEN tp.total_visitors_prev > 0 THEN ROUND(op.total_orders_prev::numeric / tp.total_visitors_prev * 100, 2) ELSE 0 END AS conversion_rate_prev,
         CASE WHEN o.total_orders > 0 THEN ROUND(o.total_gmv / o.total_orders, 2) ELSE 0 END AS aov,
-        CASE WHEN op.total_orders_prev > 0 THEN ROUND(op.total_gmv_prev / op.total_orders_prev, 2) ELSE 0 END AS aov_prev
+        CASE WHEN op.total_orders_prev > 0 THEN ROUND(op.total_gmv_prev / op.total_orders_prev, 2) ELSE 0 END AS aov_prev,
+        -- 连带率 = 商品总件数 / 订单数（无订单时为 0）
+        CASE WHEN o.total_orders > 0 THEN ROUND(o.total_items::numeric / o.total_orders, 2) ELSE 0 END AS attach_rate,
+        CASE WHEN op.total_orders_prev > 0 THEN ROUND(op.total_items_prev::numeric / op.total_orders_prev, 2) ELSE 0 END AS attach_rate_prev,
+        -- 人效 = GMV / 在职员工数（无员工时为 0）
+        CASE WHEN e.active_employee_count > 0 THEN ROUND(o.total_gmv / e.active_employee_count, 2) ELSE 0 END AS labor_efficiency,
+        CASE WHEN e.active_employee_count > 0 THEN ROUND(op.total_gmv_prev / e.active_employee_count, 2) ELSE 0 END AS labor_efficiency_prev
     FROM order_metrics o
     CROSS JOIN traffic_metrics t
     CROSS JOIN order_metrics_prev op
     CROSS JOIN traffic_metrics_prev tp
+    CROSS JOIN employee_count e
 )
 
 -- 最终输出：本月指标 + 环比（环比 = (本月-上月)/上月*100，上月为0时为 NULL）
@@ -94,9 +113,13 @@ SELECT
     c.total_visitors AS "访客数",
     c.conversion_rate AS "转化率(%)",
     c.aov AS "客单价(元)",
+    c.attach_rate AS "连带率",
+    c.labor_efficiency AS "人效(元/人)",
     ROUND((c.total_gmv - c.total_gmv_prev) * 100.0 / NULLIF(c.total_gmv_prev, 0), 2) AS "GMV环比(%)",
     ROUND((c.total_orders - c.total_orders_prev) * 100.0 / NULLIF(c.total_orders_prev, 0), 2) AS "订单数环比(%)",
     ROUND((c.total_visitors - c.total_visitors_prev) * 100.0 / NULLIF(c.total_visitors_prev, 0), 2) AS "访客数环比(%)",
     ROUND((c.conversion_rate - c.conversion_rate_prev) * 100.0 / NULLIF(c.conversion_rate_prev, 0), 2) AS "转化率环比(%)",
-    ROUND((c.aov - c.aov_prev) * 100.0 / NULLIF(c.aov_prev, 0), 2) AS "客单价环比(%)"
+    ROUND((c.aov - c.aov_prev) * 100.0 / NULLIF(c.aov_prev, 0), 2) AS "客单价环比(%)",
+    ROUND((c.attach_rate - c.attach_rate_prev) * 100.0 / NULLIF(c.attach_rate_prev, 0), 2) AS "连带率环比(%)",
+    ROUND((c.labor_efficiency - c.labor_efficiency_prev) * 100.0 / NULLIF(c.labor_efficiency_prev, 0), 2) AS "人效环比(%)"
 FROM combo c

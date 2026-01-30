@@ -81,27 +81,24 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // 登出
+  // 登出：先清除本地状态并跳转，再尝试通知后端（Token 失效时后端会 401，不阻塞、不抛错）
   const logout = async () => {
+    // 1. 先清除本地状态，确保点击退出后立即视为已登出，避免 401 阻塞跳转
+    token.value = ''
+    refreshToken.value = ''
+    user.value = null
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    localStorage.removeItem('user_info')
+
+    // 2. 再尝试通知后端登出（401 等失败静默忽略，不抛错、不阻塞）
     try {
-      if (token.value) {
-        await authApi.logout()
-      }
-    } catch (error) {
-      console.error('登出请求失败:', error)
-    } finally {
-      // 清除本地状态
-      token.value = ''
-      refreshToken.value = ''
-      user.value = null
-      
-      // 清除本地存储
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-      localStorage.removeItem('user_info')
-      
-      ElMessage.success('已登出')
+      await authApi.logout()
+    } catch (_) {
+      // Token 已失效时后端返回 401，忽略即可
     }
+
+    ElMessage.success('已登出')
   }
 
   // 刷新令牌
