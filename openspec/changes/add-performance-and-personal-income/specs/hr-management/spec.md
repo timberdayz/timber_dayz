@@ -51,7 +51,7 @@
 
 #### Scenario: 已关联员工查看收入
 - **WHEN** 已关联员工的用户访问「我的收入」页面
-- **THEN** 系统根据当前用户的 Employee.user_id 定位员工
+- **THEN** 系统根据当前用户的 Employee.user_id 定位员工（依赖 add-link-user-employee-management，已闭环）
 - **AND** 优先从 `a_class.payroll_records` 查询（若有完整工资单）
 - **AND** 否则从 `a_class.salary_structures`、`c_class.employee_commissions`、`c_class.employee_performance` 组合展示
 - **AND** 展示当月实发、收入明细（底薪、提成、绩效奖金等）、绩效依据（得分、系数、达成率）
