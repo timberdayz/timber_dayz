@@ -4,51 +4,74 @@
 
 ---
 
-## Phase 0: Public 表迁移至 A/C 类 Schema（优先执行）
+## Phase 0: Public 表完全迁移至 A/C 类 Schema（优先执行）
 
 ### 0.1 迁移设计与准备
 
-- [ ] 0.1.1 确认迁移清单：`performance_scores` → `c_class`，`shop_health_scores` → `c_class`，`shop_alerts` → `c_class`，`sales_targets` → `a_class`
-- [ ] 0.1.2 处理 `performance_scores` 与 `c_class.performance_scores_c` 的关系：合并或迁移至统一表，统一字段（platform_code, shop_id, period, total_score, sales_score, profit_score, key_product_score, operation_score, rank, performance_coefficient）
-- [ ] 0.1.3 确认 `target_breakdown.target_id` 外键：迁移后指向 `a_class.sales_targets.id`
+- [ ] 0.1.1 确认迁移清单：
+  - `public.sales_targets` → `a_class.sales_targets`（新建，与原表同结构）
+  - `public.performance_scores` → `c_class.performance_scores`（合并或替换 performance_scores_c）
+  - `public.shop_health_scores` → `c_class.shop_health_scores`
+  - `public.shop_alerts` → `c_class.shop_alerts`
+- [ ] 0.1.2 确认 `a_class.sales_targets`（新建）与 `a_class.sales_targets_a`（现有聚合表）是两张不同的表，不合并
+- [ ] 0.1.3 确认 `target_breakdown.target_id` 外键迁移后指向 `a_class.sales_targets.id`
+- [ ] 0.1.4 处理 `performance_scores` 与 `c_class.performance_scores_c` 的关系：合并字段后统一为 `c_class.performance_scores`
 
-### 0.2 Alembic 迁移脚本
+### 0.2 Alembic 迁移脚本 - sales_targets
 
-- [ ] 0.2.1 创建 `a_class.sales_targets`（结构与 public.sales_targets 一致），迁移数据，更新 target_breakdown 外键，删除 public.sales_targets
-- [ ] 0.2.2 创建/合并 `c_class.performance_scores`（若与 performance_scores_c 合并，需统一字段），迁移 public.performance_scores 数据，删除 public.performance_scores
-- [ ] 0.2.3 创建 `c_class.shop_health_scores`，迁移 public.shop_health_scores 数据，删除 public.shop_health_scores
-- [ ] 0.2.4 创建 `c_class.shop_alerts`，迁移 public.shop_alerts 数据，删除 public.shop_alerts
-- [ ] 0.2.5 迁移脚本幂等性：创建前检查表是否存在，迁移后可重复执行不报错
+- [ ] 0.2.1 创建 `a_class.sales_targets`（结构与 public.sales_targets 完全一致）
+- [ ] 0.2.2 迁移数据：`INSERT INTO a_class.sales_targets SELECT * FROM public.sales_targets`
+- [ ] 0.2.3 删除 `a_class.target_breakdown.target_id` 外键约束
+- [ ] 0.2.4 添加新外键：`target_breakdown.target_id` → `a_class.sales_targets.id`
+- [ ] 0.2.5 删除 `public.sales_targets` 表
 - [ ] 0.2.6 使用 `safe_print()` 替代 `print()`（Windows 兼容）
 
-### 0.3 Schema.py 更新
+### 0.3 Alembic 迁移脚本 - C 类表
 
-- [ ] 0.3.1 `SalesTarget` 添加 `{"schema": "a_class"}`，更新 target_breakdown FK 引用
-- [ ] 0.3.2 `PerformanceScore` 添加 `{"schema": "c_class"}`，或合并到 `PerformanceScoreC` 后统一使用 c_class
-- [ ] 0.3.3 `ShopHealthScore` 添加 `{"schema": "c_class"}`
-- [ ] 0.3.4 `ShopAlert` 添加 `{"schema": "c_class"}`
-- [ ] 0.3.5 更新 `TargetBreakdown` 的 `ForeignKey("sales_targets.id")` 为指向 `a_class.sales_targets`
+- [ ] 0.3.1 创建 `c_class.performance_scores`（合并 public.performance_scores 和 performance_scores_c 字段）
+- [ ] 0.3.2 迁移 public.performance_scores 数据到 c_class.performance_scores
+- [ ] 0.3.3 删除 public.performance_scores 表
+- [ ] 0.3.4 若 c_class.performance_scores_c 存在，迁移其数据后删除
+- [ ] 0.3.5 创建 `c_class.shop_health_scores`，迁移 public.shop_health_scores 数据，删除原表
+- [ ] 0.3.6 创建 `c_class.shop_alerts`，迁移 public.shop_alerts 数据，删除原表
+- [ ] 0.3.7 迁移脚本幂等性：创建前检查表是否存在
 
-### 0.4 后端引用更新
+### 0.4 Schema.py 更新
 
-- [ ] 0.4.1 `backend/routers/target_management.py`：SalesTarget 引用确保使用 a_class
-- [ ] 0.4.2 `backend/services/target_sync_service.py`：sales_targets、target_breakdown 引用更新为 a_class
-- [ ] 0.4.3 `backend/routers/config_management.py`：若有 sales_targets 相关 SQL，更新为 a_class.sales_targets
-- [ ] 0.4.4 `backend/routers/performance_management.py`：PerformanceScore 引用更新为 c_class
-- [ ] 0.4.5 所有引用 ShopHealthScore、ShopAlert 的代码更新 schema
+- [ ] 0.4.1 `SalesTarget` 添加 `{"schema": "a_class"}`
+- [ ] 0.4.2 `TargetBreakdown` 外键更新为 `ForeignKey("a_class.sales_targets.id", ondelete="CASCADE")`
+- [ ] 0.4.3 `PerformanceScore` 添加 `{"schema": "c_class"}`，或合并到 `PerformanceScoreC` 后删除一个
+- [ ] 0.4.4 `ShopHealthScore` 添加 `{"schema": "c_class"}`
+- [ ] 0.4.5 `ShopAlert` 添加 `{"schema": "c_class"}`
+- [ ] 0.4.6 更新 `modules/core/db/__init__.py` 导出
 
-### 0.5 Metabase Question SQL 更新
+### 0.5 后端引用更新
 
-- [ ] 0.5.1 `sql/metabase_questions/business_overview_comparison.sql`：`public.sales_targets` → `a_class.sales_targets`
-- [ ] 0.5.2 `sql/metabase_questions/business_overview_shop_racing.sql`：`public.sales_targets` → `a_class.sales_targets`
-- [ ] 0.5.3 其他引用 public.sales_targets、public.performance_scores、public.shop_health_scores、public.shop_alerts 的 SQL 全部更新
-- [ ] 0.5.4 执行 `python scripts/init_metabase.py` 同步 SQL 到 Metabase
+- [ ] 0.5.1 `backend/routers/target_management.py`：确保 SalesTarget 使用 a_class（ORM 自动处理，验证即可）
+- [ ] 0.5.2 `backend/services/target_sync_service.py`：检查是否有硬编码 schema，更新为 a_class.sales_targets
+- [ ] 0.5.3 `backend/routers/config_management.py`：若有 `FROM sales_targets` 或 `FROM public.sales_targets` SQL，更新为 `a_class.sales_targets`
+- [ ] 0.5.4 `backend/routers/performance_management.py`：PerformanceScore 使用 c_class（ORM 自动处理，验证即可）
+- [ ] 0.5.5 所有引用 ShopHealthScore、ShopAlert 的代码验证 schema
 
-### 0.6 验证
+### 0.6 Metabase Question SQL 更新
 
-- [ ] 0.6.1 目标管理：创建、编辑、删除目标，目标分解，同步至 sales_targets_a 正常
-- [ ] 0.6.2 Metabase Question：business_overview_comparison、business_overview_shop_racing、business_overview_operational_metrics 可正常查询
-- [ ] 0.6.3 运行 `python scripts/verify_architecture_ssot.py` 期望 100%
+- [ ] 0.6.1 `sql/metabase_questions/business_overview_comparison.sql`：
+  - `public.sales_targets` → `a_class.sales_targets`
+  - `FROM public.sales_targets t` → `FROM a_class.sales_targets t`
+  - `inner join public.sales_targets st` → `inner join a_class.sales_targets st`
+- [ ] 0.6.2 `sql/metabase_questions/business_overview_shop_racing.sql`：
+  - `inner join public.sales_targets st` → `inner join a_class.sales_targets st`
+- [ ] 0.6.3 全局搜索其他引用 `public.sales_targets`、`public.performance_scores`、`public.shop_health_scores`、`public.shop_alerts` 的 SQL，全部更新
+- [ ] 0.6.4 执行 `python scripts/init_metabase.py` 同步 SQL 到 Metabase
+
+### 0.7 验证
+
+- [ ] 0.7.1 运行 `alembic upgrade head`，迁移成功
+- [ ] 0.7.2 目标管理：创建、编辑、删除目标，目标分解正常
+- [ ] 0.7.3 TargetSyncService：同步至 `a_class.sales_targets_a` 正常
+- [ ] 0.7.4 Metabase Question：business_overview_comparison、business_overview_shop_racing 可正常查询
+- [ ] 0.7.5 运行 `python scripts/verify_architecture_ssot.py` 期望 100%
+- [ ] 0.7.6 确认 `public.sales_targets`、`public.performance_scores`、`public.shop_health_scores`、`public.shop_alerts` 已删除
 
 ---
 
@@ -85,12 +108,12 @@
 - [ ] 2.2 未关联员工时返回 404 或 `{ linked: false }`
 - [ ] 2.3 查询 `c_class.employee_commissions`（按 employee_code、year_month）
 - [ ] 2.4 查询 `c_class.employee_performance`（按 employee_code、year_month）
-- [ ] 2.5 优先查询 `a_class.payroll_records`（若有完整工资单），否则组合 `a_class.salary_structures` + employee_commissions + employee_performance
+- [ ] 2.5 优先查询 `a_class.payroll_records`（若有完整工资单），否则组合 salary_structures + employee_commissions + employee_performance
 - [ ] 2.6 响应格式：`{ period, base_salary?, commission_amount, commission_rate, performance_score, achievement_rate, total_income?, breakdown? }`
 - [ ] 2.7 支持 `?year_month=YYYY-MM` 查询历史月份
-- [ ] 2.8 路由定义在 `/employees/{employee_code}` 等动态路由之前
+- [ ] 2.8 路由定义在动态路由之前
 
-### 2.9 员工 C 类表数据写入（若当前无写入逻辑）
+### 2.9 员工 C 类表数据写入
 
 - [ ] 2.9.1 明确 `employee_commissions`、`employee_performance` 的写入来源
 - [ ] 2.9.2 若无写入逻辑，新增后端服务或定时任务：从 b_class 订单、员工-店铺关联（若有）计算提成与绩效，写入 c_class
@@ -101,7 +124,7 @@
 
 - [ ] 3.1 新建 `frontend/src/views/hr/MyIncome.vue`
 - [ ] 3.2 汇总卡片：当月实发、同比/环比（若有历史数据）
-- [ ] 3.3 收入明细：底薪、绩效奖金、提成、津贴、扣项等（按实际数据源展示）
+- [ ] 3.3 收入明细：底薪、绩效奖金、提成、津贴、扣项等
 - [ ] 3.4 绩效依据：绩效得分、绩效系数、达成率，可链接到绩效公示
 - [ ] 3.5 月份选择器：支持切换查看历史月份
 - [ ] 3.6 未关联员工时显示「您尚未关联员工档案，请联系管理员」
@@ -127,9 +150,10 @@
 
 ## Phase 6: 验证
 
-- [ ] 6.1 Phase 0 迁移后：目标管理、各 Question、绩效公示引用正确
-- [ ] 6.2 绩效公示：选择月份后可正常加载，有数据时展示排名与得分
-- [ ] 6.3 绩效计算：调用 calculate 后，c_class.performance_scores 有新记录
-- [ ] 6.4 我的收入：已关联员工用户可查看本人收入
-- [ ] 6.5 我的收入：未关联员工用户看到引导文案
-- [ ] 6.6 我的收入：切换月份可查询历史（若有数据）
+- [ ] 6.1 Phase 0 迁移后：public 中的 sales_targets、performance_scores、shop_health_scores、shop_alerts 已删除
+- [ ] 6.2 目标管理、各 Question、绩效公示引用正确
+- [ ] 6.3 绩效公示：选择月份后可正常加载，有数据时展示排名与得分
+- [ ] 6.4 绩效计算：调用 calculate 后，c_class.performance_scores 有新记录
+- [ ] 6.5 我的收入：已关联员工用户可查看本人收入
+- [ ] 6.6 我的收入：未关联员工用户看到引导文案
+- [ ] 6.7 我的收入：切换月份可查询历史（若有数据）

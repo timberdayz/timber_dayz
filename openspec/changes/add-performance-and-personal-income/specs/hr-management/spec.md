@@ -1,24 +1,32 @@
 ## ADDED Requirements
 
-### Requirement: Public 表 Schema 迁移
-系统 SHALL 将 public 中具备计算功能的表迁移至 a_class 或 c_class schema，迁移后目标管理、各 Metabase Question、绩效公示等功能 SHALL 正常运行。
+### Requirement: Public 表完全迁移至 A/C 类 Schema
+系统 SHALL 将 public 中相关表完全迁移至 a_class 或 c_class schema，迁移后删除原表，确保目标管理、各 Metabase Question、绩效公示等功能正常运行。
 
 #### Scenario: sales_targets 迁移至 a_class
 - **WHEN** 执行迁移脚本
-- **THEN** `public.sales_targets` 数据迁移至 `a_class.sales_targets`
-- **AND** `a_class.target_breakdown.target_id` 外键指向 `a_class.sales_targets.id`
-- **AND** 目标管理 CRUD、目标分解、TargetSyncService 同步至 `a_class.sales_targets_a` 正常
+- **THEN** 创建 `a_class.sales_targets`（与 public.sales_targets 结构一致）
+- **AND** 迁移 `public.sales_targets` 数据至 `a_class.sales_targets`
+- **AND** 更新 `a_class.target_breakdown.target_id` 外键指向 `a_class.sales_targets.id`
+- **AND** 删除 `public.sales_targets` 表
+- **AND** 目标管理 CRUD、目标分解正常
+- **AND** TargetSyncService 同步至 `a_class.sales_targets_a` 正常
 
-#### Scenario: performance_scores 迁移至 c_class
+#### Scenario: C 类表迁移
 - **WHEN** 执行迁移脚本
-- **THEN** `public.performance_scores` 迁移至 `c_class.performance_scores`（或合并至 performance_scores_c）
-- **AND** 绩效公示页面可读取 c_class.performance_scores
-- **AND** 绩效计算逻辑写入 c_class.performance_scores
+- **THEN** 创建 `c_class.performance_scores`、`c_class.shop_health_scores`、`c_class.shop_alerts`
+- **AND** 迁移对应 public 表数据
+- **AND** 删除 `public.performance_scores`、`public.shop_health_scores`、`public.shop_alerts` 表
 
 #### Scenario: Metabase Question 引用更新
-- **WHEN** business_overview_comparison、business_overview_shop_racing、business_overview_operational_metrics 等 Question 执行
+- **WHEN** business_overview_comparison、business_overview_shop_racing 等 Question 执行
 - **THEN** 引用 `a_class.sales_targets`（而非 public.sales_targets）
 - **AND** 查询结果与迁移前一致
+
+#### Scenario: 迁移后 public 表已删除
+- **WHEN** 迁移完成后
+- **THEN** `public.sales_targets`、`public.performance_scores`、`public.shop_health_scores`、`public.shop_alerts` 不存在
+- **AND** 查询 public schema 无上述表
 
 ### Requirement: 绩效公示可用性
 系统 SHALL 确保绩效公示页面可正常加载，查询绩效评分列表时无异常报错，无数据时友好展示「暂无数据」。
@@ -33,9 +41,9 @@
 #### Scenario: 绩效计算触发
 - **WHEN** 管理员选择考核周期并点击「重新计算」（或系统自动计算）
 - **THEN** 系统调用 `POST /api/performance/scores/calculate`
-- **AND** 基于 a_class.target_breakdown、a_class.sales_targets、Orders Model（或 b_class 订单表）、fact_product_metrics、c_class.shop_health_scores 计算各项得分
+- **AND** 基于 `a_class.target_breakdown`、`a_class.sales_targets`、Orders Model（或 b_class 订单表）、fact_product_metrics、`c_class.shop_health_scores` 计算各项得分
 - **AND** 禁止引用已删除的 fact_orders
-- **AND** 将结果写入 c_class.performance_scores
+- **AND** 将结果写入 `c_class.performance_scores`
 - **AND** 绩效公示页面刷新后可展示新数据
 
 ### Requirement: 我的收入（员工自助）
@@ -44,8 +52,8 @@
 #### Scenario: 已关联员工查看收入
 - **WHEN** 已关联员工的用户访问「我的收入」页面
 - **THEN** 系统根据当前用户的 Employee.user_id 定位员工
-- **AND** 优先从 a_class.payroll_records 查询（若有完整工资单）
-- **AND** 否则从 a_class.salary_structures、c_class.employee_commissions、c_class.employee_performance 组合展示
+- **AND** 优先从 `a_class.payroll_records` 查询（若有完整工资单）
+- **AND** 否则从 `a_class.salary_structures`、`c_class.employee_commissions`、`c_class.employee_performance` 组合展示
 - **AND** 展示当月实发、收入明细（底薪、提成、绩效奖金等）、绩效依据（得分、系数、达成率）
 - **AND** 支持切换月份查看历史收入
 
