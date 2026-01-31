@@ -253,13 +253,14 @@
   - **后端API**：`GET /api/dashboard/business-overview/comparison`
   - **前端**：周度时传参规范为该周周一，避免同周跳变
 
-- [ ] 3.1.3 business_overview_shop_racing - 店铺赛马
-  - **用途**：店铺/平台排名对比
-  - **数据源**：Orders Model
-  - **计算指标**：按店铺/平台分组，GMV排序
+- [x] 3.1.3 business_overview_shop_racing - 店铺赛马 ✅ **已可用**
+  - **用途**：店铺/平台排名对比，含目标、完成率
+  - **数据源**：Orders Model、a_class.target_breakdown、public.sales_targets
+  - **计算指标**：按店铺/平台分组，GMV 排序；目标来自 target_breakdown，完成率=GMV×100/目标
   - **参数**：`{{granularity}}`, `{{date}}`, `{{group_by}}`, `{{platforms}}`
-  - **返回格式**：多行数据，每行一个店铺/平台，包含排名
+  - **返回格式**：多行数据，每行含名称、目标、完成(GMV)、完成率、排名
   - **后端API**：`GET /api/dashboard/business-overview/shop-racing`
+  - **前端**：独立日/周/月+日期选择器（value-format 避免 UTC 偏差）、店铺/账号维度切换；列：名称、目标、完成、完成率、排名
 
 - [x] 3.1.4 business_overview_traffic_ranking - 流量排名 ✅ **已可用**
   - **用途**：流量相关指标排名（访客数、浏览量）

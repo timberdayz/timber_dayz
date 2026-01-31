@@ -1,7 +1,7 @@
 # Metabase Models 和 Questions 实施状态
 
-**最后更新**: 2026-01-30  
-**当前阶段**: **✅ 核心KPI与经营指标已可用** - 前端可正常使用；其余 Question 待继续优化
+**最后更新**: 2026-01-31  
+**当前阶段**: **✅ 核心KPI、数据对比、店铺赛马、流量排名、经营指标已可用** - 前端可正常使用；库存积压、清仓排名待继续优化
 
 ---
 
@@ -259,16 +259,16 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
    - 指标: GMV、订单数、买家数、转化率、平均订单价值
    - 参数: `start_date`, `end_date`, `platforms`, `shops`
 
-2. ✅ **business_overview_comparison** (ID: 44) - 数据对比
+2. ✅ **business_overview_comparison** (ID: 44) - 数据对比 **已可用**
    - 显示名称: 业务概览 - 数据对比
-   - 数据源: Orders Model / Analytics Model
-   - 指标: 同比、环比对比
-   - 参数: `granularity`, `date`, `platforms`, `shops`
+   - 数据源: Orders Model、Analytics Model、public.sales_targets、a_class.target_breakdown
+   - 指标: 当期/上期/平均/环比；销售额、销售数量、客流量、转化率、客单价、连带率、利润；目标达成率
+   - 参数: `granularity`, `date`, `platform`；周度须传该周周一
 
-3. ✅ **business_overview_shop_racing** (ID: 45) - 店铺赛马
+3. ✅ **business_overview_shop_racing** (ID: 45) - 店铺赛马 **已可用**
    - 显示名称: 业务概览 - 店铺赛马
-   - 数据源: Orders Model
-   - 指标: 按店铺/平台分组，GMV排序
+   - 数据源: Orders Model、a_class.target_breakdown、public.sales_targets
+   - 指标: 按店铺/平台分组 GMV 排序；名称、目标、完成、完成率、排名；目标来自 target_breakdown
    - 参数: `granularity`, `date`, `group_by`, `platforms`
 
 4. ✅ **business_overview_traffic_ranking** (ID: 46) - 流量排名
@@ -304,12 +304,13 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 | 模块            | 状态      | 说明                                                                                                                                        |
 | --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | **核心KPI指标** | ✅ 已可用 | 按月、平台筛选；展示 GMV、订单数、客单价、转化率、客流量、销售单数；Question ID 已配置于 `.env`                                             |
-| **数据对比**    | ✅ 已可用 | 日/周/月切换、当期/上期/平均/环比；周度传周一；目标达成率（用户目标 + 占位符回退）                                                             |
+| **数据对比**    | ✅ 已可用 | 日/周/月切换、当期/上期/平均/环比；周度传周一；目标达成率；连带率（商品件数/订单数）；时间定义与平均定义已约定；详见 proposal「数据对比 Question 约定」 |
+| **店铺赛马**    | ✅ 已可用 | 日/周/月、店铺/账号维度；名称、目标、完成、完成率、排名；目标来自 target_breakdown；前端 value-format 避免 UTC 偏差                          |
 | **经营指标**    | ✅ 已可用 | 独立日期选择器（具体日期）；两行布局：月目标/当月总达成/今日销售额/月达成率；时间GAP/预估毛利/预估费用/今日销售单数；经营结果竖状置于最右侧 |
 | **流量排名**    | ✅ 已可用 | 日/周/月、按店铺/账号排序（visitor/pv）；Analytics Model shop_id 兜底；未关联店铺时显示平台汇总与提示                                       |
 | **SQL 同步**    | ✅ 支持   | 修改 `sql/metabase_questions/*.sql` 后运行 `python scripts/init_metabase.py` 可同步到 Metabase                                              |
 
-**后续计划**：继续优化其余 Question（店铺赛马、库存积压、清仓排名）。
+**后续计划**：继续优化其余 Question（库存积压、清仓排名）；**GMV/月度销售额口径**统一为仅日度粒度汇总（避免跨粒度重复，见 proposal「后续调整」）。
 
 ---
 

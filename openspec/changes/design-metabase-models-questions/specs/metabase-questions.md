@@ -90,23 +90,21 @@ WHERE period_start_date >= {{start_date}}
 - `sales_quantity_*`、`traffic_*`、`conversion_rate_*`、`avg_order_value_*`、`attach_rate_*`、`profit_*`
 - `target_sales_amount`、`target_sales_quantity`、`target_achievement_rate`
 
-### 3. 店铺赛马 Question
+### 3. 店铺赛马 Question ✅ 已可用
 
-**用途**：提供店铺排名数据
+**用途**：店铺/平台排名对比，含目标、完成率；日期约定与数据对比一致
+
+**数据源**：Orders Model、a_class.target_breakdown、public.sales_targets
 
 **参数**：
-- `{{platform}}` - 平台筛选（可选）
-- `{{level}}` - 级别筛选（shop/account，可选，默认shop）
-- `{{start_date}}` - 开始日期（必填）
-- `{{end_date}}` - 结束日期（必填）
+- `{{granularity}}` - 粒度（daily/weekly/monthly）
+- `{{date}}` - 日期（必填，YYYY-MM-DD）
+- `{{group_by}}` - 分组维度（shop=店铺 / platform 或 account=账号，默认 shop）
+- `{{platforms}}` - 平台筛选（可选）
 
 **返回字段**：
-- `shop_id` - 店铺ID
-- `store_name` - 店铺名称
-- `platform_code` - 平台代码
-- `gmv` - GMV
-- `order_count` - 订单数
-- `rank` - 排名
+- `平台`、`名称`、`店铺ID`、`GMV`、`订单数`、`客单价`、`目标`、`完成率`、`排名`
+- 目标来自 target_breakdown（查不到则为 0）；完成率=GMV×100/目标；shop_id 为 null/none 时名称显示 unknown店铺
 
 ### 4. 流量排名 Question
 

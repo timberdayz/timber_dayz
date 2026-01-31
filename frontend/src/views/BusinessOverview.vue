@@ -363,6 +363,7 @@
                     v-model="shopRacingDate"
                     :type="shopRacingDatePickerType"
                     :format="shopRacingDatePickerFormat"
+                    :value-format="shopRacingDatePickerValueFormat"
                     :placeholder="shopRacingDatePickerPlaceholder"
                     size="small"
                     style="margin-left: 12px; width: 150px"
@@ -1269,7 +1270,14 @@ const handleGranularityChange = () => {
 
 // 店铺赛马（独立日/周/月 + 日期，与数据对比约定一致）
 const shopRacingGranularity = ref("monthly");
-const shopRacingDate = ref(new Date());
+const shopRacingDate = ref(
+  (() => {
+    const t = new Date();
+    const y = t.getFullYear();
+    const m = String(t.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}`;
+  })(),
+);
 const shopRacingDatePickerType = computed(() => {
   if (shopRacingGranularity.value === "monthly") return "month";
   if (shopRacingGranularity.value === "weekly") return "week";
@@ -1284,6 +1292,12 @@ const shopRacingDatePickerPlaceholder = computed(() => {
   if (shopRacingGranularity.value === "monthly") return "选择月份";
   if (shopRacingGranularity.value === "weekly") return "选择周";
   return "选择日期";
+});
+// 店铺赛马 value-format：避免 toISOString() 的 UTC 偏差，传参使用本地日期
+const shopRacingDatePickerValueFormat = computed(() => {
+  if (shopRacingGranularity.value === "monthly") return "YYYY-MM";
+  if (shopRacingGranularity.value === "weekly") return undefined; // 周选择器返回 Date，在 loadShopRacingData 中处理
+  return "YYYY-MM-DD";
 });
 const handleShopRacingGranularityChange = () => {
   const today = new Date();
@@ -1808,6 +1822,7 @@ const updateComparisonChart = () => {
 };
 
 // 加载店铺赛马数据（使用独立粒度+日期，与数据对比约定一致）
+// 使用本地日期拼接，避免 toISOString() 的 UTC 偏差
 const loadShopRacingData = async () => {
   loadingShopRacing.value = true;
   try {
@@ -1816,16 +1831,18 @@ const loadShopRacingData = async () => {
     if (typeof val === "string") {
       dateStr = val.length === 7 ? `${val}-01` : val;
     } else if (val instanceof Date && !Number.isNaN(val.getTime())) {
+      // 周选择器返回 Date（无 value-format），用本地日期拼接避免 UTC 偏差
       let d = val;
-      if (shopRacingGranularity.value === "monthly") {
-        d = new Date(d.getFullYear(), d.getMonth(), 1);
-      } else if (shopRacingGranularity.value === "weekly") {
+      if (shopRacingGranularity.value === "weekly") {
         const dayOfWeek = d.getDay();
         const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
         d = new Date(d);
         d.setDate(d.getDate() + diff);
       }
-      dateStr = d.toISOString().split("T")[0];
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      dateStr = `${y}-${m}-${day}`;
     }
     if (!dateStr) {
       shopRacingData.value = [];

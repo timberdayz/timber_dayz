@@ -2,8 +2,8 @@
 -- Question: business_overview_shop_racing
 -- 业务概览 - 店铺赛马
 -- =====================================================
--- 用途：店铺/账号排名对比（按GMV排序）
--- 数据源：{{MODEL:Orders Model}}（由 init_metabase 解析为实际 ID）
+-- 用途：店铺/账号排名对比（按GMV排序），含目标、完成率
+-- 数据源：{{MODEL:Orders Model}}、a_class.target_breakdown、public.sales_targets
 -- 参数（仅日期、粒度、分组维度，无平台筛选）：
 --   {{granularity}} - 粒度（daily/weekly/monthly），与数据对比约定一致
 --   {{date}} - 日期（必填，YYYY-MM-DD）
@@ -55,48 +55,93 @@ filtered_data as (
     )
 ),
 
--- 按店铺分组（与数据对比一致：GMV=sum(paid_amount)，订单数=count(distinct order_id)，无买家数）
-shop_ranking as (
+-- 店铺/账号目标：a_class.target_breakdown（shop/shop_time 含店铺维度），查不到则为 0
+shop_targets as (
   select
-    o.platform_code as "平台",
-    case
-      when coalesce(nullif(trim(o.shop_id::text), ''), 'unknown') = 'unknown' then 'unknown店铺'
-      else coalesce(max(o.shop_id)::text, 'unknown店铺')
-    end as "名称",
-    coalesce(nullif(trim(max(o.shop_id)::text), ''), 'unknown') as "店铺ID",
-    coalesce(sum(o.paid_amount), 0) as "GMV",
-    count(distinct o.order_id) as "订单数",
-    case
-      when count(distinct o.order_id) > 0 then round(sum(o.paid_amount)::numeric / count(distinct o.order_id), 2)
-      else 0
-    end as "客单价",
-    row_number() over (order by sum(o.paid_amount) desc) as "排名"
-  from filtered_data o
-  group by o.platform_code, coalesce(nullif(trim(o.shop_id::text), ''), 'unknown')
+    tb.platform_code,
+    lower(coalesce(nullif(trim(tb.shop_id::text), ''), 'unknown')) as shop_id_key,
+    coalesce(sum(tb.target_amount), 0) as target_amount
+  from a_class.target_breakdown tb
+  inner join public.sales_targets st on st.id = tb.target_id and st.status = 'active'
+  cross join period_scope s
+  where tb.breakdown_type in ('shop', 'shop_time')
+    and tb.platform_code is not null
+    and (
+      (s.gran = 'daily' and tb.period_start = s.current_period_start and tb.period_end = s.current_period_end)
+      or (s.gran = 'weekly' and tb.period_start >= s.current_period_start and tb.period_end <= s.current_period_end)
+      or (s.gran = 'monthly' and tb.period_start <= s.current_period_end and tb.period_end >= s.current_period_start)
+    )
+  group by tb.platform_code, lower(coalesce(nullif(trim(tb.shop_id::text), ''), 'unknown'))
+),
+platform_targets as (
+  select
+    tb.platform_code,
+    coalesce(sum(tb.target_amount), 0) as target_amount
+  from a_class.target_breakdown tb
+  inner join public.sales_targets st on st.id = tb.target_id and st.status = 'active'
+  cross join period_scope s
+  where tb.breakdown_type in ('shop', 'shop_time')
+    and tb.platform_code is not null
+    and (
+      (s.gran = 'daily' and tb.period_start = s.current_period_start and tb.period_end = s.current_period_end)
+      or (s.gran = 'weekly' and tb.period_start >= s.current_period_start and tb.period_end <= s.current_period_end)
+      or (s.gran = 'monthly' and tb.period_start <= s.current_period_end and tb.period_end >= s.current_period_start)
+    )
+  group by tb.platform_code
 ),
 
--- 按账号/平台分组（GMV/订单数/客单价同上，无买家数）
+-- 店铺聚合（先聚合再关联目标）
+shop_agg as (
+  select
+    o.platform_code,
+    coalesce(nullif(lower(trim(o.shop_id::text)), ''), 'unknown') as shop_id_key,
+    coalesce(sum(o.paid_amount), 0) as gmv,
+    count(distinct o.order_id) as order_cnt,
+    max(o.shop_id)::text as shop_id_display
+  from filtered_data o
+  group by o.platform_code, coalesce(nullif(lower(trim(o.shop_id::text)), ''), 'unknown')
+),
+-- 按店铺分组（目标、完成率由 SQL 计算；shop_id 为 null/none/空 时名称显示 unknown店铺）
+shop_ranking as (
+  select
+    a.platform_code as "平台",
+    case
+      when a.shop_id_key in ('unknown', 'none') then 'unknown店铺'
+      else coalesce(a.shop_id_display, 'unknown店铺')
+    end as "名称",
+    a.shop_id_key as "店铺ID",
+    a.gmv as "GMV",
+    a.order_cnt as "订单数",
+    case when a.order_cnt > 0 then round(a.gmv::numeric / a.order_cnt, 2) else 0 end as "客单价",
+    coalesce(t.target_amount, 0) as "目标",
+    case when coalesce(t.target_amount, 0) > 0 then round((a.gmv::numeric * 100 / t.target_amount)::numeric, 2) else 0 end as "完成率",
+    row_number() over (order by a.gmv desc) as "排名"
+  from shop_agg a
+  left join shop_targets t on t.platform_code = a.platform_code and t.shop_id_key = a.shop_id_key
+),
+
+-- 按账号/平台分组
 platform_ranking as (
   select
-    platform_code as "平台",
-    platform_code as "名称",
+    fd.platform_code as "平台",
+    fd.platform_code as "名称",
     'ALL' as "店铺ID",
-    coalesce(sum(paid_amount), 0) as "GMV",
-    count(distinct order_id) as "订单数",
-    case
-      when count(distinct order_id) > 0 then round(sum(paid_amount)::numeric / count(distinct order_id), 2)
-      else 0
-    end as "客单价",
-    row_number() over (order by sum(paid_amount) desc) as "排名"
-  from filtered_data
-  group by platform_code
+    coalesce(sum(fd.paid_amount), 0) as "GMV",
+    count(distinct fd.order_id) as "订单数",
+    case when count(distinct fd.order_id) > 0 then round(sum(fd.paid_amount)::numeric / count(distinct fd.order_id), 2) else 0 end as "客单价",
+    coalesce(pt.target_amount, 0) as "目标",
+    case when coalesce(pt.target_amount, 0) > 0 then round((sum(fd.paid_amount)::numeric * 100 / pt.target_amount)::numeric, 2) else 0 end as "完成率",
+    row_number() over (order by sum(fd.paid_amount) desc) as "排名"
+  from filtered_data fd
+  left join platform_targets pt on pt.platform_code = fd.platform_code
+  group by fd.platform_code, pt.target_amount
 )
 
--- 根据 group_by 输出：shop=店铺，platform/account=账号
-select * from shop_ranking
+-- 根据 group_by 输出：shop=店铺，platform/account=账号（含目标、完成率）
+select "平台","名称","店铺ID","GMV","订单数","客单价","目标","完成率","排名" from shop_ranking
 where {{group_by}} = 'shop' or {{group_by}} is null
 union all
-select * from platform_ranking
+select "平台","名称","店铺ID","GMV","订单数","客单价","目标","完成率","排名" from platform_ranking
 where {{group_by}} in ('platform', 'account')
 order by "排名"
 limit 50;

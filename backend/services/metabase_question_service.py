@@ -552,7 +552,7 @@ class MetabaseQuestionService:
         
         elif question_key == "business_overview_shop_racing":
             # 店铺赛马：转为前端表格所需格式（名称、目标、完成、完成率、排名）
-            # SQL 返回：平台、名称、店铺ID、GMV、订单数、客单价、排名；无 A 类目标时 target/achievement_rate 为 0（无买家数统计）
+            # SQL 返回：平台、名称、店铺ID、GMV、订单数、客单价、目标、完成率、排名
             def _row_val(row: dict, *keys: str):
                 for k in keys:
                     if k in row and row[k] is not None:
@@ -570,6 +570,17 @@ class MetabaseQuestionService:
                     achieved = float(gmv) if gmv is not None else 0
                 except (TypeError, ValueError):
                     achieved = 0
+                target_val = _row_val(r, "目标", "target")
+                try:
+                    target = float(target_val) if target_val is not None else 0
+                except (TypeError, ValueError):
+                    target = 0
+                rate_val = _row_val(r, "完成率", "achievement_rate")
+                try:
+                    # SQL 返回百分比（如 85.5），前端需 0～1（如 0.855）
+                    achievement_rate = float(rate_val) / 100.0 if rate_val is not None else 0
+                except (TypeError, ValueError):
+                    achievement_rate = 0
                 rank_val = _row_val(r, "排名", "rank")
                 try:
                     rank = int(rank_val) if rank_val is not None else 0
@@ -577,9 +588,9 @@ class MetabaseQuestionService:
                     rank = 0
                 out.append({
                     "name": name,
-                    "target": 0,
+                    "target": target,
                     "achieved": achieved,
-                    "achievement_rate": 0,
+                    "achievement_rate": achievement_rate,
                     "rank": rank,
                 })
             return out

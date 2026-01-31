@@ -44,8 +44,8 @@
 4. **创建Metabase Questions（C类数据实时计算）** ⏳ **进行中**
    - ✅ **business_overview_kpi**：核心KPI指标（GMV、订单数、买家数、转化率等）— **已可用**
    - ✅ **business_overview_comparison**：数据对比（支持日/周/月度切换，当期/上期/平均/环比）— **已优化完成 v4.21.0**
-   - ⏳ **business_overview_shop_racing**：店铺赛马（店铺排名，支持店铺级/账号级切换）
-   - ⏳ **business_overview_traffic_ranking**：流量排名（流量指标排名）
+   - ✅ **business_overview_shop_racing**：店铺赛马（店铺排名，支持店铺级/账号级切换，含目标、完成率）— **已可用**
+   - ✅ **business_overview_traffic_ranking**：流量排名（访客数/浏览量排名，日/周/月，按店铺/账号维度，含本期/上期与环比）— **已可用**
    - ⏳ **business_overview_inventory_backlog**：库存积压（库存预警数据）
    - ✅ **business_overview_operational_metrics**：经营指标（月目标、达成率、今日销售、今日销售单数、经营结果等，JOIN A类数据）— **已可用**
    - ⏳ **clearance_ranking**：清仓排名（清仓商品排名）
@@ -470,13 +470,13 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
 - ✅ 月目标、预估费用来自 A 类表，达成与订单来自 Orders Model
 - ✅ Question ID 已配置，`init_metabase.py` 可同步 SQL 更新
 
-### 🔄 进行中（其他 Questions）
+### ✅ 数据对比模块已可用（v4.21.0，2025-01-30）
 
 #### Metabase Questions（C类数据实时计算）
 
-- ✅ **business_overview_comparison** - 数据对比（已优化完成 v4.21.0，见下方「数据对比 Question 约定」）
-- ⏳ **business_overview_shop_racing** - 店铺赛马（待优化）
-- ⏳ **business_overview_traffic_ranking** - 流量排名（待优化）
+- ✅ **business_overview_comparison** - 数据对比（**已可用**，见下方「数据对比 Question 约定」）
+- ✅ **business_overview_shop_racing** - 店铺赛马（已可用，2026-01-31：含目标、完成率，JOIN target_breakdown；前端 value-format 修复 UTC 偏差）
+- ✅ **business_overview_traffic_ranking** - 流量排名（已可用：Analytics Model shop_id 兜底、本期/上期与环比、后端转英文 key、前端列映射与未关联店铺提示）
 - ⏳ **business_overview_inventory_backlog** - 库存积压（待优化）
 - ⏳ **clearance_ranking** - 清仓排名（待优化）
 
@@ -502,10 +502,19 @@ METABASE_API_KEY=mb_xxxxxxxxxxxxx=
    - **`metric_date`**：在订单/分析模型中，无论粒度为 daily/weekly/monthly，存储的均为**单日日期**（订单日期或事件日期），**不是**周期起止。按周期汇总时须用「`metric_date` 落在计算出的周期范围内」匹配，例如 `metric_date >= current_period_start AND metric_date <= current_period_end`。
    - **`period_start_date` / `period_end_date`**：在 B 类模型中可能同样存单日，**勿**用其等于周期起止做过滤；周期边界由 SQL 内根据 `target_date` 与 `granularity` 计算。
    - **销售额**：订单模型若 `sales_amount` 常为 0，汇总时使用 **`paid_amount`**（实付金额）作为销售额指标。
+   - **连带率**：= 商品件数 / 订单数；订单数 = `COUNT(DISTINCT order_id)`（与核心KPI、经营指标一致）。
+
+5. **已实现功能**
+   - 日/周/月切换、当期/上期/平均/环比、目标达成率、连带率（含 order_count 计算）。
+
+### ⚠️ 后续调整（GMV/粒度口径）
+
+- **GMV/月度销售额应只按日度粒度汇总**：Orders Model 中同一订单可能因 data_hash 不同而同时存在于 daily/weekly/monthly 表，若按全粒度汇总会重复计算。正确口径为**仅日度粒度的 paid_amount 总和**。核心 KPI、经营指标、数据对比的月度 GMV/销售额口径待统一调整（后续实施）。
 
 ### 📋 待完成
 
-- [ ] 优化其余 4 个 Question（店铺赛马、流量排名、库存积压、清仓排名）
+- [ ] 优化其余 2 个 Question（库存积压、清仓排名）
+- [ ] GMV/月度销售额口径调整：核心 KPI、经营指标、数据对比统一为**仅日度粒度**汇总（避免跨粒度重复计算）
 - [ ] 测试各 Question 查询性能与数据正确性
 - [ ] 执行迁移脚本 `alembic upgrade head`（如未执行）
 - [ ] 验证 A类/C类表已迁移到正确 schema
