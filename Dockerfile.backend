@@ -42,6 +42,7 @@ RUN mkdir -p /app/scripts /app/sql
 COPY scripts/create_admin_user.py /app/scripts/create_admin_user.py
 COPY scripts/bootstrap_production.py /app/scripts/bootstrap_production.py
 COPY scripts/init_metabase.py /app/scripts/init_metabase.py
+COPY scripts/verify_schema_consistency.py /app/scripts/verify_schema_consistency.py
 COPY sql/metabase_models /app/sql/metabase_models
 COPY sql/metabase_questions /app/sql/metabase_questions
 

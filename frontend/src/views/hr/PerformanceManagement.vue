@@ -1,25 +1,30 @@
 <template>
   <div class="performance-management erp-page-container">
     <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">绩效管理</h1>
+    <p style="color: #909399; margin-bottom: 20px;">绩效公示面向全员，数据来源于人员店铺归属和绩效配置计算。可按店铺或人员维度查看。</p>
     
-    <!-- 操作栏 -->
-    <div class="action-bar" style="margin-bottom: 20px;">
+    <!-- 操作栏：左上角月度+维度切换，右侧操作按钮 -->
+    <div class="action-bar" style="margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+      <el-date-picker
+        v-model="filters.period"
+        type="month"
+        format="YYYY-MM"
+        value-format="YYYY-MM"
+        placeholder="选择月份"
+        size="default"
+        style="width: 180px;"
+        @change="loadPerformanceList"
+      />
+      <el-radio-group v-model="filters.groupBy" size="default" @change="loadPerformanceList">
+        <el-radio-button value="shop">按店铺</el-radio-button>
+        <el-radio-button value="person">按人员</el-radio-button>
+      </el-radio-group>
       <el-button :icon="Refresh" @click="loadPerformanceList">刷新</el-button>
       <el-button type="primary" :icon="Setting" @click="handleConfig" v-if="hasPermission('performance:config')">
         配置权重
       </el-button>
       <el-button :icon="Download" @click="handleExport" v-if="hasPermission('performance:export')">导出报表</el-button>
-      <div style="flex: 1;"></div>
-      <el-date-picker
-        v-model="filters.period"
-        type="month"
-        format="YYYY-MM"
-        placeholder="选择月份"
-        size="small"
-        style="width: 150px;"
-        @change="loadPerformanceList"
-      />
-      <el-select v-model="filters.platform" placeholder="选择平台" clearable size="small" style="width: 150px; margin-left: 10px;" @change="loadPerformanceList">
+      <el-select v-model="filters.platform" placeholder="选择平台" clearable size="default" style="width: 140px; margin-left: auto;" @change="loadPerformanceList">
         <el-option label="全部平台" value="" />
         <el-option label="Shopee" value="Shopee" />
         <el-option label="Lazada" value="Lazada" />
@@ -37,64 +42,62 @@
         </div>
       </template>
       
-      <el-table :data="performanceList.data" stripe v-loading="performanceList.loading" class="erp-table">
-        <el-table-column prop="shop_name" label="店铺名称" width="200" fixed="left" show-overflow-tooltip />
-        <el-table-column prop="sales_score" label="销售额得分(30%)" width="150" align="right" sortable>
+      <el-table :data="performanceList.data" stripe v-loading="performanceList.loading" class="erp-table" border>
+        <el-table-column :prop="filters.groupBy === 'person' ? 'employee_name' : 'shop_name'" :label="filters.groupBy === 'person' ? '人员' : '店铺'" width="180" fixed="left" show-overflow-tooltip>
+          <template #default="{ row }">{{ filters.groupBy === 'person' ? (row.employee_name || row.employee_code || '—') : (row.shop_name || row.shop_id || '—') }}</template>
+        </el-table-column>
+        <el-table-column label="销售额目标" width="110" align="right">
+          <template #default="{ row }">{{ formatCell(row.sales_target) }}</template>
+        </el-table-column>
+        <el-table-column label="销售额达成" width="110" align="right">
+          <template #default="{ row }">{{ formatCell(row.sales_achieved) }}</template>
+        </el-table-column>
+        <el-table-column label="销售额达成率" width="120" align="right">
+          <template #default="{ row }">{{ formatPercent(row.sales_rate) }}</template>
+        </el-table-column>
+        <el-table-column label="毛利目标" width="100" align="right">
+          <template #default="{ row }">{{ formatCell(row.profit_target) }}</template>
+        </el-table-column>
+        <el-table-column label="毛利达成" width="100" align="right">
+          <template #default="{ row }">{{ formatCell(row.profit_achieved) }}</template>
+        </el-table-column>
+        <el-table-column label="毛利达成率" width="110" align="right">
+          <template #default="{ row }">{{ formatPercent(row.profit_rate) }}</template>
+        </el-table-column>
+        <el-table-column label="重点产品目标" width="120" align="right">
+          <template #default="{ row }">{{ formatCell(row.key_product_target) }}</template>
+        </el-table-column>
+        <el-table-column label="重点产品达成" width="120" align="right">
+          <template #default="{ row }">{{ formatCell(row.key_product_achieved) }}</template>
+        </el-table-column>
+        <el-table-column label="重点产品达成率" width="130" align="right">
+          <template #default="{ row }">{{ formatPercent(row.key_product_rate) }}</template>
+        </el-table-column>
+        <el-table-column prop="operation_score" label="运营得分" width="100" align="right" sortable>
+          <template #default="{ row }">{{ row.operation_score != null ? Number(row.operation_score).toFixed(1) : '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="total_score" label="总分" width="90" align="right" sortable>
           <template #default="{ row }">
-            <el-tag :type="row.sales_score >= 27 ? 'success' : row.sales_score >= 24 ? 'warning' : 'danger'" size="small">
-              {{ row.sales_score.toFixed(1) }}
-            </el-tag>
+            <el-tag v-if="row.total_score != null" :type="row.total_score >= 90 ? 'success' : row.total_score >= 80 ? 'warning' : 'danger'" size="small">{{ Number(row.total_score).toFixed(1) }}</el-tag>
+            <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="profit_score" label="毛利得分(25%)" width="150" align="right" sortable>
-          <template #default="{ row }">
-            <el-tag :type="row.profit_score >= 22.5 ? 'success' : row.profit_score >= 20 ? 'warning' : 'danger'" size="small">
-              {{ row.profit_score.toFixed(1) }}
-            </el-tag>
-          </template>
+        <el-table-column prop="rank" label="排名" width="80" align="center" sortable>
+          <template #default="{ row }">{{ row.rank != null ? `第${row.rank}名` : '—' }}</template>
         </el-table-column>
-        <el-table-column prop="key_product_score" label="重点产品得分(25%)" width="160" align="right" sortable>
-          <template #default="{ row }">
-            <el-tag :type="row.key_product_score >= 22.5 ? 'success' : row.key_product_score >= 20 ? 'warning' : 'danger'" size="small">
-              {{ row.key_product_score.toFixed(1) }}
-            </el-tag>
-          </template>
+        <el-table-column prop="performance_coefficient" label="绩效系数" width="100" align="right" sortable>
+          <template #default="{ row }">{{ row.performance_coefficient != null ? Number(row.performance_coefficient).toFixed(2) : '—' }}</template>
         </el-table-column>
-        <el-table-column prop="operation_score" label="运营得分(20%)" width="150" align="right" sortable>
+        <el-table-column label="操作" width="90" fixed="right">
           <template #default="{ row }">
-            <el-tag :type="row.operation_score >= 18 ? 'success' : row.operation_score >= 16 ? 'warning' : 'danger'" size="small">
-              {{ row.operation_score.toFixed(1) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="total_score" label="总分" width="120" align="right" sortable>
-          <template #default="{ row }">
-            <el-tag :type="row.total_score >= 90 ? 'success' : row.total_score >= 80 ? 'warning' : 'danger'" size="large">
-              {{ row.total_score.toFixed(1) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="rank" label="排名" width="100" align="center" sortable>
-          <template #default="{ row }">
-            <el-tag :type="row.rank === 1 ? 'success' : row.rank === 2 ? 'warning' : row.rank === 3 ? 'info' : ''" size="small">
-              第{{ row.rank }}名
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="performance_coefficient" label="绩效系数" width="120" align="right" sortable>
-          <template #default="{ row }">
-            <el-tag :type="row.performance_coefficient >= 1.2 ? 'success' : row.performance_coefficient >= 1.0 ? 'warning' : 'danger'" size="small">
-              {{ row.performance_coefficient.toFixed(2) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" @click="handleViewDetail(row)">详情</el-button>
+            <el-button size="small" @click="handleViewDetail(row)" v-if="row.platform_code && row.shop_id">详情</el-button>
           </template>
         </el-table-column>
       </el-table>
       
+      <div v-if="performanceList.data.length === 0 && !performanceList.loading" style="padding: 40px; text-align: center; color: #909399;">
+        暂无绩效数据，请选择月份并确保已执行绩效计算
+      </div>
       <el-pagination
         v-model:current-page="performanceList.page"
         v-model:page-size="performanceList.pageSize"
@@ -301,9 +304,10 @@ const performanceList = reactive({
 })
 
 const filters = reactive({
-  period: new Date(),
+  period: new Date().toISOString().slice(0, 7),
   platform: '',
-  shopId: null
+  shopId: null,
+  groupBy: 'shop'
 })
 
 // 绩效详情
@@ -351,18 +355,24 @@ const configRules = {
   ]
 }
 
+function formatCell(v) {
+  if (v == null || v === '') return '—'
+  if (typeof v === 'number') return v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return String(v)
+}
+
 // 加载绩效列表
 const loadPerformanceList = async () => {
   performanceList.loading = true
   try {
-    const period = filters.period ? 
-      `${filters.period.getFullYear()}-${String(filters.period.getMonth() + 1).padStart(2, '0')}` : 
-      undefined
+    const period = typeof filters.period === 'string' ? filters.period : 
+      (filters.period ? `${filters.period.getFullYear()}-${String(filters.period.getMonth() + 1).padStart(2, '0')}` : undefined)
     
     const response = await api.getPerformanceScores({
-      period: period,
+      period,
       platform: filters.platform || undefined,
       shop_id: filters.shopId || undefined,
+      group_by: filters.groupBy,
       page: performanceList.page,
       page_size: performanceList.pageSize
     })
@@ -387,7 +397,9 @@ const handleViewDetail = async (row) => {
   detailVisible.value = true
   performanceDetail.loading = true
   try {
-    const response = await api.getShopPerformanceDetail(row.platform_code, row.shop_id, filters.period)
+    const period = typeof filters.period === 'string' ? filters.period : 
+      (filters.period ? `${filters.period.getFullYear()}-${String(filters.period.getMonth() + 1).padStart(2, '0')}` : undefined)
+    const response = await api.getShopPerformanceDetail(row.platform_code, row.shop_id, period)
     performanceDetail.data = response || {}
   } catch (error) {
     handleApiError(error, { showMessage: true, logError: true })

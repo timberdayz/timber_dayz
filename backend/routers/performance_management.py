@@ -35,6 +35,8 @@ from modules.core.db import (
     PerformanceConfig,
     PerformanceScore,
     SalesTarget,
+    Employee,
+    EmployeePerformance,
     # [DELETED] v4.19.0: FactOrder 已删除
     FactProductMetric,
     DimShop
@@ -404,11 +406,23 @@ async def delete_performance_config(
         )
 
 
+def _score_details_field(details: Optional[dict], *keys) -> Optional[Any]:
+    """从 score_details JSON 取嵌套字段，如 sales.target, profit.achieved"""
+    if not details or not isinstance(details, dict):
+        return None
+    for key in keys:
+        details = details.get(key) if isinstance(details, dict) else None
+        if details is None:
+            return None
+    return details
+
+
 @router.get("/scores", response_model=Dict[str, Any])
 async def list_performance_scores(
     period: Optional[str] = Query(None, description="考核周期,如'2025-01'"),
     platform_code: Optional[str] = Query(None, description="平台筛选"),
     shop_id: Optional[str] = Query(None, description="店铺筛选"),
+    group_by: Optional[str] = Query("shop", description="维度: shop 按店铺 | person 按人员"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
@@ -416,31 +430,91 @@ async def list_performance_scores(
     """
     查询绩效评分列表
     
-    按总分降序排列
+    group_by=shop: 按店铺展示，数据来自 performance_scores
+    group_by=person: 按人员展示，数据来自 employee_performance
     """
     try:
+        if group_by == "person":
+            # 按人员：从 employee_performance 取数据
+            query = select(EmployeePerformance)
+            if period:
+                query = query.where(EmployeePerformance.year_month == period)
+            total_query = select(func.count()).select_from(query.subquery())
+            total = (await db.execute(total_query)).scalar() or 0
+            query = query.order_by(EmployeePerformance.performance_score.desc())
+            query = query.offset((page - 1) * page_size).limit(page_size)
+            rows = (await db.execute(query)).scalars().all()
+            # 兼容 Row
+            ep_list = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in rows]
+            # 取员工姓名
+            codes = list({getattr(e, "employee_code", None) for e in ep_list if e})
+            name_map = {}
+            if codes:
+                emp_query = select(Employee.employee_code, Employee.name).where(Employee.employee_code.in_(codes))
+                emp_rows = (await db.execute(emp_query)).all()
+                for r in emp_rows:
+                    ec = r[0] if hasattr(r, "__getitem__") else getattr(r, "employee_code", "")
+                    nm = r[1] if hasattr(r, "__getitem__") and len(r) > 1 else getattr(r, "name", "")
+                    name_map[ec] = nm or ec
+            # 计算排名
+            all_query = select(EmployeePerformance)
+            if period:
+                all_query = all_query.where(EmployeePerformance.year_month == period)
+            all_rows = (await db.execute(all_query)).scalars().all()
+            all_ep = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in all_rows]
+            sorted_ep = sorted(all_ep, key=lambda x: float(getattr(x, "performance_score", 0) or 0), reverse=True)
+            rank_by_code = {}
+            for i, e in enumerate(sorted_ep, 1):
+                ec = getattr(e, "employee_code", None)
+                if ec:
+                    rank_by_code[ec] = i
+            score_responses = []
+            for ep in ep_list:
+                ec = getattr(ep, "employee_code", "")
+                scr = float(getattr(ep, "performance_score", 0) or 0)
+                ach = float(getattr(ep, "achievement_rate", 0) or 0) * 100
+                score_responses.append({
+                    "employee_code": ec,
+                    "employee_name": name_map.get(ec, ec),
+                    "sales_target": None,
+                    "sales_achieved": getattr(ep, "actual_sales", None),
+                    "sales_rate": ach if ach else None,
+                    "profit_target": None,
+                    "profit_achieved": None,
+                    "profit_rate": None,
+                    "key_product_target": None,
+                    "key_product_achieved": None,
+                    "key_product_rate": None,
+                    "operation_score": None,
+                    "total_score": scr,
+                    "rank": rank_by_code.get(ec),
+                    "performance_coefficient": 1.0 + (scr - 80) / 100 if scr else 1.0,
+                })
+            return {
+                "success": True,
+                "data": score_responses,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "has_more": (page * page_size) < total,
+            }
+
+        # 按店铺
         query = select(PerformanceScore)
-        
         if period:
             query = query.where(PerformanceScore.period == period)
         if platform_code:
             query = query.where(PerformanceScore.platform_code == platform_code)
         if shop_id:
             query = query.where(PerformanceScore.shop_id == shop_id)
-        
-        # 总数查询
         total_query = select(func.count()).select_from(query.subquery())
         total = (await db.execute(total_query)).scalar() or 0
-        
-        # 分页查询(按总分降序)
         query = query.order_by(PerformanceScore.total_score.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)
-        
         scores = (await db.execute(query)).scalars().all()
-        
-        # 获取店铺名称
+        score_rows = [s[0] if hasattr(s, "__getitem__") and len(s) == 1 else s for s in scores]
         score_responses = []
-        for score in scores:
+        for score in score_rows:
             score_data = PerformanceScoreResponse.from_orm(score).dict()
             shop = (await db.execute(
                 select(DimShop).where(
@@ -450,6 +524,16 @@ async def list_performance_scores(
             )).scalar_one_or_none()
             if shop:
                 score_data["shop_name"] = shop.shop_name
+            details = getattr(score, "score_details", None) or {}
+            score_data["sales_target"] = _score_details_field(details, "sales", "target")
+            score_data["sales_achieved"] = _score_details_field(details, "sales", "achieved")
+            score_data["sales_rate"] = _score_details_field(details, "sales", "rate")
+            score_data["profit_target"] = _score_details_field(details, "profit", "target")
+            score_data["profit_achieved"] = _score_details_field(details, "profit", "achieved")
+            score_data["profit_rate"] = _score_details_field(details, "profit", "rate")
+            score_data["key_product_target"] = _score_details_field(details, "key_product", "target")
+            score_data["key_product_achieved"] = _score_details_field(details, "key_product", "achieved")
+            score_data["key_product_rate"] = _score_details_field(details, "key_product", "rate")
             score_responses.append(score_data)
         
         return {

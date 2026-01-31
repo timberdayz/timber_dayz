@@ -554,7 +554,7 @@ except Exception as e:
         # [FIX] 使用 tables 参数指定要创建的表，SQLAlchemy 会自动处理依赖顺序
         "${compose_cmd_base[@]}" run --rm --no-deps backend python3 -c "
 from backend.models.database import Base, engine
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 import sys
 
 inspector = inspect(engine)
@@ -564,21 +564,27 @@ missing_tables = expected_tables - existing_tables
 
 if missing_tables:
     print(f'[INFO] 创建缺失的表: {missing_tables}')
-    # [FIX] 使用 Base.metadata.create_all() 一次性创建所有缺失的表
-    # SQLAlchemy 会自动处理外键依赖顺序
-    # [FIX] 过滤掉不在 metadata 中的表名（防止 KeyError）
     missing_table_objects = [Base.metadata.tables[t] for t in missing_tables if t in Base.metadata.tables]
     if len(missing_table_objects) < len(missing_tables):
         skipped = set(missing_tables) - set(Base.metadata.tables.keys())
         print(f'[WARN] 跳过不在 metadata 中的表: {skipped}', file=sys.stderr)
     if missing_table_objects:
+        # [FIX] 补表前先创建缺失表所在的 schema，避免 schema \"core\" does not exist
+        schemas_to_create = set()
+        for t in missing_table_objects:
+            s = getattr(t, 'schema', None)
+            if s and s != 'public':
+                schemas_to_create.add(s)
+        for schema_name in sorted(schemas_to_create):
+            with engine.connect() as conn:
+                conn.execute(text('CREATE SCHEMA IF NOT EXISTS \"' + schema_name + '\"'))
+                conn.commit()
         Base.metadata.create_all(bind=engine, tables=missing_table_objects, checkfirst=True)
     else:
         print('[WARN] 没有可创建的表（所有缺失的表都不在 metadata 中）', file=sys.stderr)
         sys.exit(1)
     print('[OK] 缺失表已创建')
 
-    # 验证表是否真的创建了
     inspector_after = inspect(engine)
     existing_after = set(inspector_after.get_table_names())
     still_missing = expected_tables - existing_after

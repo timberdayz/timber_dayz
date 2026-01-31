@@ -1,6 +1,7 @@
 <template>
   <div class="my-income erp-page-container">
     <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">我的收入</h1>
+    <p style="color: #909399; margin-bottom: 20px;">数据来源于人员店铺归属和提成比配置及绩效管理计算，仅展示当前登录账号对应员工的收入。</p>
 
     <template v-if="!income.linked">
       <el-alert type="warning" show-icon :closable="false">
@@ -25,12 +26,6 @@
 
       <template v-if="income.loading">
         <el-skeleton :rows="5" animated />
-      </template>
-
-      <template v-else-if="!income.period && !income.loading">
-        <el-empty description="暂无收入数据">
-          <template #description>当前月份暂无收入数据，请稍后查看或联系人事部门。</template>
-        </el-empty>
       </template>
 
       <template v-else>
@@ -111,7 +106,13 @@ async function loadIncome() {
   income.value.loading = true
   try {
     const res = await api.getMyIncome(selectedMonth.value)
-    income.value = { ...income.value, ...res, loading: false }
+    const data = res?.data ?? res ?? {}
+    income.value = {
+      ...income.value,
+      ...data,
+      period: data.period ?? selectedMonth.value,
+      loading: false,
+    }
   } catch (e) {
     income.value.loading = false
     if (e?.response?.status === 404 || (e?.response?.data?.detail && String(e.response.data.detail).includes('关联'))) {

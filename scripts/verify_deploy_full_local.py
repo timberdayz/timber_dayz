@@ -150,6 +150,18 @@ def main():
         return 1
     print("[OK] Phase 2 完成")
 
+    # 结构一致性检查（表名存在即可；严格 schema 一致请单独运行 verify_schema_consistency.py 不加 --ignore-schema）
+    print("[INFO] 结构一致性检查 (表名存在，--ignore-schema)...")
+    code, out = compose_run(
+        ["run", "--rm", "--no-deps", "backend", "python3", "/app/scripts/verify_schema_consistency.py", "--ignore-schema"],
+        timeout=60,
+    )
+    if code != 0:
+        print("[FAIL] 结构一致性检查未通过")
+        print(out[-1500:] if len(out) > 1500 else out)
+        return 1
+    print("[OK] 结构一致性检查通过")
+
     # Phase 2.5: Bootstrap
     print("[INFO] Phase 2.5: Bootstrap...")
     code, out = compose_run(["run", "--rm", "--no-deps", "backend", "python3", "/app/scripts/bootstrap_production.py"], timeout=60)

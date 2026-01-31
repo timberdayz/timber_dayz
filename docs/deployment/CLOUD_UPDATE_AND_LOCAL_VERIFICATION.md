@@ -73,6 +73,7 @@ git push origin v4.x.x
 - **本地 Docker Postgres** 与 **云端 Postgres** **无数据同步**，仅靠**同一套迁移文件**在各自环境执行以保持结构一致。
 - **CI 与云端首次部署**：使用全新库，在临时/新库上执行 `alembic upgrade heads`。
 - **本地方式 B**：默认使用持久化卷的 Postgres，库中可能已有历史数据与 schema；若要从零复现 CI 门禁，请先运行**临时库迁移门禁**（见下）再运行方式 B。
+- **补表兜底**：当迁移失败且检测到缺失表时，部署脚本会先创建缺失表所在的 schema（如 `core`、`a_class`、`c_class`），再执行 `Base.metadata.create_all` 补表，避免 `schema "core" does not exist` 等错误；表/字段的增删改仍应通过迁移完成，补表只建缺失表、不改已有表结构。
 
 ---
 
@@ -126,9 +127,10 @@ python scripts/verify_deploy_full_local.py --no-build
 5. Phase 3：启动 Metabase，等待健康  
 6. Phase 3.5：`init_metabase.py`（需 backend 镜像内含该脚本，否则请去掉 `--no-build` 重新构建）  
 7. Phase 4：启动 Backend，等待健康  
-8. 集成检查：`/health`、`/api/metabase/health`、`/api/dashboard/business-overview/kpi`  
+8. **结构一致性检查**：`scripts/verify_schema_consistency.py`（默认 `--ignore-schema`，只校验表名存在；严格校验 schema 一致请单独运行不加 `--ignore-schema`）  
+9. 集成检查：`/health`、`/api/metabase/health`、`/api/dashboard/business-overview/kpi`  
 
-**说明**：若出现 `Can't locate revision identified by 'xxx'`，表示当前库的迁移链与代码中 `migrations/versions` 不一致，需在本地执行 `alembic history` 与 `alembic current` 排查；Phase 2 迁移失败时脚本会退出，不再继续后续阶段。
+**说明**：若出现 `Can't locate revision identified by 'xxx'`，表示当前库的迁移链与代码中 `migrations/versions` 不一致，需在本地执行 `alembic history` 与 `alembic current` 排查；Phase 2 迁移失败时脚本会退出，不再继续后续阶段。结构一致性检查若失败（表缺失或 schema 与 schema.py 不一致），可先以 `--ignore-schema` 仅校验表名存在，或更新 schema.py 与迁移结果一致后重跑严格检查。
 
 ### 2.3 本地验证清单（手动或半自动）
 

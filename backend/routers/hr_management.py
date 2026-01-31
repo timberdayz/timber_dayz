@@ -1023,12 +1023,12 @@ async def get_my_income(
     return MyIncomeResponse(
         linked=True,
         period=period,
-        base_salary=base_salary,
+        base_salary=base_salary if base_salary is not None else 0.0,
         commission_amount=commission_amount,
-        performance_score=performance_score,
-        achievement_rate=achievement_rate,
-        total_income=total if (base_salary is not None or commission_amount) else None,
-        breakdown=breakdown if breakdown else None
+        performance_score=performance_score if performance_score is not None else 0.0,
+        achievement_rate=achievement_rate if achievement_rate is not None else 0.0,
+        total_income=total,
+        breakdown=breakdown if breakdown else {}
     )
 
 
