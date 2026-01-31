@@ -48,6 +48,14 @@ class CacheService:
         "accounts_list": 300,  # 5分钟
         "accounts_stats": 60,  # 1分钟
         "component_versions": 300,  # 5分钟
+        # Dashboard 业务概览（add-dashboard-redis-cache-performance）
+        "dashboard_kpi": 180,
+        "dashboard_comparison": 180,
+        "dashboard_shop_racing": 180,
+        "dashboard_traffic_ranking": 180,
+        "dashboard_operational_metrics": 180,
+        "dashboard_clearance_ranking": 300,
+        "dashboard_inventory_backlog": 300,
         "default": 300,  # 5分钟
     }
     

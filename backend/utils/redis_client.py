@@ -19,12 +19,18 @@ import os
 from typing import Optional
 from redis import asyncio as aioredis
 from fastapi import FastAPI
-from fastapi_cache import FastAPICache
-from fastapi_cache.backends.redis import RedisBackend
 
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+# FastAPICache 为可选依赖，Docker 镜像可能未安装
+try:
+    from fastapi_cache import FastAPICache
+    from fastapi_cache.backends.redis import RedisBackend
+    FASTAPI_CACHE_AVAILABLE = True
+except ImportError:
+    FASTAPI_CACHE_AVAILABLE = False
 
 
 async def init_redis(app: Optional[FastAPI] = None) -> Optional[aioredis.Redis]:
@@ -55,13 +61,14 @@ async def init_redis(app: Optional[FastAPI] = None) -> Optional[aioredis.Redis]:
         
         # 测试连接
         await redis.ping()
-        
-        # 初始化FastAPI缓存
-        FastAPICache.init(
-            RedisBackend(redis),
-            prefix="xihong-erp:"
-        )
-        
+
+        # 初始化 FastAPI 缓存（可选，Docker 镜像可能未安装 fastapi-cache）
+        if FASTAPI_CACHE_AVAILABLE:
+            FastAPICache.init(
+                RedisBackend(redis),
+                prefix="xihong-erp:"
+            )
+
         logger.info(f"[OK] Redis缓存已启用: {redis_url}")
         
         # 如果提供了app,将redis实例保存到app.state

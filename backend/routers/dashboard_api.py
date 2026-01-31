@@ -1,9 +1,11 @@
 """
 Dashboard API路由
 通过Metabase Question查询提供业务概览数据
+[add-dashboard-redis-cache-performance] Redis 缓存支持
 """
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
+from fastapi.responses import JSONResponse
 from typing import Optional, Dict, Any
 from modules.core.logger import get_logger
 from backend.services.metabase_question_service import get_metabase_service
@@ -11,6 +13,11 @@ from backend.services.metabase_question_service import get_metabase_service
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+
+def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
+    """规范化缓存 Key 参数，确保相同语义生成相同 Key（None→空字符串）"""
+    return {k: "" if v is None else str(v) for k, v in params.items()}
 
 
 def success_response(data: Any = None, message: str = "操作成功") -> Dict[str, Any]:
@@ -34,6 +41,7 @@ def error_response(message: str, error_code: str = None) -> Dict[str, Any]:
 
 @router.get("/business-overview/kpi")
 async def get_business_overview_kpi(
+    request: Request,
     month: Optional[str] = Query(None, description="月份(格式:YYYY-MM-DD,传入月初日期)"),
     platform: Optional[str] = Query(None, description="平台代码(可选,为空则选择全部平台)"),
     # 保留旧参数用于兼容
@@ -61,25 +69,35 @@ async def get_business_overview_kpi(
     from datetime import datetime
     
     try:
-        service = get_metabase_service()
-        
         # 如果没有传入 month,使用当前月份
         if not month:
             today = datetime.now()
             month = f"{today.year}-{today.month:02d}-01"
         
-        params = {
-            "month": month,
-            "platform": platform,  # 可选参数,为空时 Metabase 会选择全部
-        }
+        params = {"month": month, "platform": platform}
+        cache_params = _normalize_cache_params(params)
         
-        # 移除None值(platform 为空时不传递,Metabase 的可选参数会自动处理)
-        params = {k: v for k, v in params.items() if v is not None}
-        
+        # 尝试从缓存获取
+        cache_status = "BYPASS"  # Redis 不可用
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("dashboard_kpi", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
+
+        service = get_metabase_service()
+        metabase_params = {k: v for k, v in params.items() if v is not None}
         logger.info(f"[KPI查询] 参数: month={month}, platform={platform}")
-        
-        result = await service.query_question("business_overview_kpi", params)
-        return success_response(data=result)
+
+        result = await service.query_question("business_overview_kpi", metabase_params)
+        response = success_response(data=result)
+
+        # 仅成功时写入缓存
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("dashboard_kpi", response, **cache_params)
+
+        return JSONResponse(content=response, headers={"X-Cache": cache_status})
         
     except ValueError as e:
         logger.error(f"业务概览KPI查询失败: {e}")
@@ -103,6 +121,7 @@ def _normalize_comparison_date(date_str: str) -> str:
 
 @router.get("/business-overview/comparison")
 async def get_business_overview_comparison(
+    request: Request,
     granularity: str = Query(..., description="时间粒度(daily/weekly/monthly)"),
     date: str = Query(..., description="日期(YYYY-MM-DD 或 YYYY-MM)"),
     platforms: Optional[str] = Query(None, description="平台代码(逗号分隔，传第一个)"),
@@ -115,17 +134,23 @@ async def get_business_overview_comparison(
         if granularity not in ("daily", "weekly", "monthly"):
             raise ValueError("粒度必须为 daily、weekly 或 monthly")
         date_normalized = _normalize_comparison_date(date)
+        params = {"granularity": granularity, "date": date_normalized, "platforms": platforms, "shops": shops}
+        cache_params = _normalize_cache_params(params)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            cached = await request.app.state.cache_service.get("dashboard_comparison", **cache_params)
+            if cached is not None:
+                return cached
+
         service = get_metabase_service()
-        params = {
-            "granularity": granularity,
-            "date": date_normalized,
-            "platforms": platforms,
-            "shops": shops
-        }
-        params = {k: v for k, v in params.items() if v is not None}
-        result = await service.query_question("business_overview_comparison", params)
-        return success_response(data=result)
-        
+        metabase_params = {k: v for k, v in params.items() if v is not None}
+        result = await service.query_question("business_overview_comparison", metabase_params)
+        response = success_response(data=result)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("dashboard_comparison", response, **cache_params)
+        return response
+
     except ValueError as e:
         logger.error(f"业务概览对比查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -136,6 +161,7 @@ async def get_business_overview_comparison(
 
 @router.get("/business-overview/shop-racing")
 async def get_business_overview_shop_racing(
+    request: Request,
     granularity: str = Query(..., description="时间粒度"),
     date: str = Query(..., description="日期"),
     group_by: str = Query("shop", description="分组维度"),
@@ -145,20 +171,23 @@ async def get_business_overview_shop_racing(
     获取店铺赛马数据
     """
     try:
+        params = {"granularity": granularity, "date": date, "group_by": group_by, "platforms": platforms}
+        cache_params = _normalize_cache_params(params)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            cached = await request.app.state.cache_service.get("dashboard_shop_racing", **cache_params)
+            if cached is not None:
+                return cached
+
         service = get_metabase_service()
-        
-        params = {
-            "granularity": granularity,
-            "date": date,
-            "group_by": group_by,
-            "platforms": platforms
-        }
-        
-        params = {k: v for k, v in params.items() if v is not None}
-        
-        result = await service.query_question("business_overview_shop_racing", params)
-        return success_response(data=result)
-        
+        metabase_params = {k: v for k, v in params.items() if v is not None}
+        result = await service.query_question("business_overview_shop_racing", metabase_params)
+        response = success_response(data=result)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("dashboard_shop_racing", response, **cache_params)
+        return response
+
     except ValueError as e:
         logger.error(f"店铺赛马数据查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -169,6 +198,7 @@ async def get_business_overview_shop_racing(
 
 @router.get("/business-overview/traffic-ranking")
 async def get_business_overview_traffic_ranking(
+    request: Request,
     granularity: Optional[str] = Query(None, description="时间粒度"),
     dimension: Optional[str] = Query(None, description="维度"),
     date_value: Optional[str] = Query(None, description="日期值"),
@@ -179,20 +209,25 @@ async def get_business_overview_traffic_ranking(
     获取流量排名数据
     """
     try:
-        service = get_metabase_service()
         # 前端 dimension：shop/account → Question 排序维度：visitor/pv
         question_dimension = "pv" if dimension == "account" else "visitor"
-        params = {
-            "granularity": granularity,
-            "dimension": question_dimension,
-            "date": date_value,  # 前端传 date_value，后端转为 date
-            "platforms": platforms,
-            "shops": shops
-        }
-        params = {k: v for k, v in params.items() if v is not None}
-        result = await service.query_question("business_overview_traffic_ranking", params)
-        return success_response(data=result)
-        
+        params = {"granularity": granularity, "dimension": question_dimension, "date": date_value, "platforms": platforms, "shops": shops}
+        cache_params = _normalize_cache_params(params)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            cached = await request.app.state.cache_service.get("dashboard_traffic_ranking", **cache_params)
+            if cached is not None:
+                return cached
+
+        service = get_metabase_service()
+        metabase_params = {k: v for k, v in params.items() if v is not None}
+        result = await service.query_question("business_overview_traffic_ranking", metabase_params)
+        response = success_response(data=result)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("dashboard_traffic_ranking", response, **cache_params)
+        return response
+
     except ValueError as e:
         logger.error(f"流量排名数据查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -203,6 +238,7 @@ async def get_business_overview_traffic_ranking(
 
 @router.get("/business-overview/inventory-backlog")
 async def get_business_overview_inventory_backlog(
+    request: Request,
     days: Optional[int] = Query(None, description="天数"),
     platforms: Optional[str] = Query(None, description="平台代码(逗号分隔)"),
     shops: Optional[str] = Query(None, description="店铺ID(逗号分隔)")
@@ -211,19 +247,24 @@ async def get_business_overview_inventory_backlog(
     获取库存积压数据
     """
     try:
+        params = {"days": str(days) if days is not None else "", "platforms": platforms, "shops": shops}
+        cache_params = _normalize_cache_params(params)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            cached = await request.app.state.cache_service.get("dashboard_inventory_backlog", **cache_params)
+            if cached is not None:
+                return cached
+
         service = get_metabase_service()
-        
-        params = {
-            "days": str(days) if days else None,
-            "platforms": platforms,
-            "shops": shops
-        }
-        
-        params = {k: v for k, v in params.items() if v is not None}
-        
-        result = await service.query_question("business_overview_inventory_backlog", params)
-        return success_response(data=result)
-        
+        metabase_params = {"days": str(days) if days else None, "platforms": platforms, "shops": shops}
+        metabase_params = {k: v for k, v in metabase_params.items() if v is not None}
+        result = await service.query_question("business_overview_inventory_backlog", metabase_params)
+        response = success_response(data=result)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("dashboard_inventory_backlog", response, **cache_params)
+        return response
+
     except ValueError as e:
         logger.error(f"库存积压数据查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -234,6 +275,7 @@ async def get_business_overview_inventory_backlog(
 
 @router.get("/business-overview/operational-metrics")
 async def get_business_overview_operational_metrics(
+    request: Request,
     month: Optional[str] = Query(None, description="月份,格式 YYYY-MM-DD 月初,默认当月"),
     platform: Optional[str] = Query(None, description="平台代码,与核心KPI一致")
 ):
@@ -241,17 +283,27 @@ async def get_business_overview_operational_metrics(
     获取经营指标数据(与核心KPI同参数:月份、平台)
     """
     try:
-        service = get_metabase_service()
-        # 默认当月月初
+        from datetime import date
         if not month:
-            from datetime import date
             today = date.today()
             month = today.replace(day=1).isoformat()
-        params = {"month": month, "platform": platform or None}
-        params = {k: v for k, v in params.items() if v is not None}
-        result = await service.query_question("business_overview_operational_metrics", params)
-        return success_response(data=result)
-        
+        params = {"month": month, "platform": platform}
+        cache_params = _normalize_cache_params(params)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            cached = await request.app.state.cache_service.get("dashboard_operational_metrics", **cache_params)
+            if cached is not None:
+                return cached
+
+        service = get_metabase_service()
+        metabase_params = {k: v for k, v in params.items() if v is not None}
+        result = await service.query_question("business_overview_operational_metrics", metabase_params)
+        response = success_response(data=result)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("dashboard_operational_metrics", response, **cache_params)
+        return response
+
     except ValueError as e:
         logger.error(f"经营指标数据查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -262,6 +314,7 @@ async def get_business_overview_operational_metrics(
 
 @router.get("/clearance-ranking")
 async def get_clearance_ranking(
+    request: Request,
     start_date: Optional[str] = Query(None, description="开始日期"),
     end_date: Optional[str] = Query(None, description="结束日期"),
     platforms: Optional[str] = Query(None, description="平台代码(逗号分隔)"),
@@ -272,21 +325,36 @@ async def get_clearance_ranking(
     获取清仓排名数据
     """
     try:
-        service = get_metabase_service()
-        
         params = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "platforms": platforms,
+            "shops": shops,
+            "limit": str(limit) if limit is not None else ""
+        }
+        cache_params = _normalize_cache_params(params)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            cached = await request.app.state.cache_service.get("dashboard_clearance_ranking", **cache_params)
+            if cached is not None:
+                return cached
+
+        service = get_metabase_service()
+        metabase_params = {
             "start_date": start_date,
             "end_date": end_date,
             "platforms": platforms,
             "shops": shops,
             "limit": str(limit) if limit else None
         }
-        
-        params = {k: v for k, v in params.items() if v is not None}
-        
-        result = await service.query_question("clearance_ranking", params)
-        return success_response(data=result)
-        
+        metabase_params = {k: v for k, v in metabase_params.items() if v is not None}
+        result = await service.query_question("clearance_ranking", metabase_params)
+        response = success_response(data=result)
+
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("dashboard_clearance_ranking", response, **cache_params)
+        return response
+
     except ValueError as e:
         logger.error(f"清仓排名数据查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))

@@ -49,6 +49,7 @@
 - **决策**：在每个路由内显式调用 `cache_service.get/set`，不引入装饰器
 - **理由**：dashboard 参数多样，装饰器需处理参数序列化，显式调用更清晰；后续可抽象为装饰器
 - **实现**：路由需注入 `Request` 以访问 `request.app.state.cache_service`（与 `collection.py` 一致）
+- **缓存值**：缓存 `success_response(data=result)` 的完整 dict，命中时直接 `return cached_data`
 
 ### 7. Gunicorn Workers（资源分级）
 
