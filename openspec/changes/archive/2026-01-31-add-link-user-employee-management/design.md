@@ -49,7 +49,7 @@
 | 用户编辑时选员工 | 复用 `GET /api/hr/employees` | 响应增加 user_id、username，前端过滤可关联员工 |
 | 用户关联员工 | `PUT /api/users/{id}` | body 含 employee_id（Employee.id）；后端校验 employee 存在（a_class.employees）后更新 Employee.user_id |
 | 员工关联用户 | `POST/PUT /api/hr/employees` | body 含 user_id |
-| 员工自助档案 | `GET /api/hr/me/profile` | 当前用户关联的员工档案（仅本人）；需 `get_current_user`，未关联返回 404；路由须在 `/employees/{employee_code}` 之前定义 |
+| 员工自助档案 | `GET /api/hr/me/profile` | 当前用户关联的员工档案（仅本人）；需 `get_current_user`；**未关联时**：首次访问自动创建最小员工记录并关联当前用户后返回档案（系统主要面向内部员工，保证「注册并登录即可用」）；仅当自动创建失败时返回 404；路由须在 `/employees/{employee_code}` 之前定义 |
 | 员工自助更新 | `PUT /api/hr/me/profile` | 仅允许更新自助可编辑字段；需 `get_current_user`，校验当前用户为该档案关联用户；请求体仅接受白名单字段（phone、email、address、emergency_contact、emergency_phone），忽略其它字段 |
 
 ### 5. 员工自助可编辑字段
@@ -72,8 +72,15 @@
 ### 7. 我的档案菜单可见性
 
 - **决策**：对可能有员工档案的角色（operator、manager、admin 等）在菜单中展示「我的档案」
-- **未关联时**：页面调用 GET /api/hr/me/profile 返回 404 时，展示「您尚未关联员工档案，请联系管理员」
-- **理由**：菜单基于静态 role/permission，无法按关联状态动态隐藏；由页面根据 API 结果决定展示内容
+- **未关联时**：GET /api/hr/me/profile 在未关联员工时**自动创建**最小员工并关联当前用户，再返回档案；仅当自动创建失败时返回 404，页面展示「您尚未关联员工档案，请联系管理员」
+- **理由**：系统主要面向内部员工，业界常见做法为「注册/登录即可用」；首次访问自动建员工，避免人工先建员工再关联
+
+### 8. 我的档案：首次访问自动创建员工
+
+- **决策**：在 `GET /api/hr/me/profile` 中，若当前用户无关联员工，则自动创建一条最小员工记录并关联
+- **触发时机**：首次打开「我的档案」时（即首次调用 GET /api/hr/me/profile 且未关联时）
+- **最小员工字段**：employee_code（`_generate_employee_code` 生成）、name（`dim_users.full_name` 或 `username`）、user_id（当前用户）、status=active；其余字段可为 null
+- **幂等**：先查 `Employee.user_id == current_user.user_id`，已存在则直接返回，不重复创建
 
 ## Risks / Trade-offs
 

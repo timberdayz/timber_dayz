@@ -137,7 +137,7 @@ export const menuGroups = [
     defaultExpanded: false,
     items: [
       '/human-resources',            // 人力管理（含员工/部门/职位/考勤/薪资 Tab）
-      '/employee-management',        // 员工档案
+      '/employee-management',        // 我的档案
       '/hr-performance-management'  // 绩效管理
     ]
   },

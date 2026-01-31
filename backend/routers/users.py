@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from backend.models.database import get_db, get_async_db
-from modules.core.db import DimUser, DimRole, UserApprovalLog, UserSession, UserNotificationPreference  # v4.12.0 SSOT迁移, v4.19.0用户审批和会话管理, v4.19.0通知偏好
+from modules.core.db import DimUser, DimRole, UserApprovalLog, UserSession, UserNotificationPreference, Employee  # v4.12.0 SSOT; v4.19.0; add-link-user-employee Employee
 from backend.schemas.auth import (
     UserCreate, UserUpdate, UserResponse, RoleCreate, RoleUpdate, RoleResponse,
     ApproveUserRequest, RejectUserRequest, PendingUserResponse,  # v4.19.0: 用户审批
@@ -127,6 +127,7 @@ async def create_user(
         details={"username": user.username, "email": user.email}
     )
     
+    emp_id, emp_code, emp_name = await _get_employee_for_user(db, user.user_id)
     return UserResponse(
         id=user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         username=user.username,
@@ -136,6 +137,7 @@ async def create_user(
         is_active=user.is_active,
         created_at=user.created_at,
         last_login_at=user.last_login  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
+        , employee_id=emp_id, employee_code=emp_code, employee_name=emp_name
     )
 
 @router.get("/")
@@ -168,7 +170,11 @@ async def get_users(
         .order_by(DimUser.created_at.desc())
     )
     users = result.scalars().all()
-    
+    user_ids = [u.user_id for u in users]
+    # 批量查询关联员工 (a_class.employees)
+    emp_result = await db.execute(select(Employee).where(Employee.user_id.in_(user_ids)))
+    employees = emp_result.scalars().all()
+    emp_by_user = {e.user_id: (e.id, e.employee_code, e.name) for e in employees}
     # 转换为响应模型
     user_responses = [
         UserResponse(
@@ -180,6 +186,7 @@ async def get_users(
             is_active=user.is_active,
             created_at=user.created_at,
             last_login_at=user.last_login  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
+            , employee_id=emp_by_user.get(user.user_id, (None, None, None))[0], employee_code=emp_by_user.get(user.user_id, (None, None, None))[1], employee_name=emp_by_user.get(user.user_id, (None, None, None))[2]
         )
         for user in users
     ]
@@ -191,6 +198,45 @@ async def get_users(
         page_size=page_size,
         total=total
     )
+
+
+async def _get_employee_for_user(db: AsyncSession, user_id: int):
+    """查询与 user_id 关联的员工（a_class.employees），返回 (employee_id, employee_code, employee_name) 或 (None, None, None)。"""
+    result = await db.execute(select(Employee).where(Employee.user_id == user_id))
+    emp = result.scalar_one_or_none()
+    if not emp:
+        return None, None, None
+    return emp.id, emp.employee_code, emp.name
+
+
+async def _clear_employee_user_id(db: AsyncSession, user_id: int) -> None:
+    """将 a_class.employees 中 user_id=user_id 的记录的 user_id 置空。"""
+    await db.execute(update(Employee).where(Employee.user_id == user_id).values(user_id=None))
+
+
+@router.get("/unlinked")
+async def get_unlinked_users(
+    current_user: DimUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    获取尚未关联员工的用户列表（is_active=true）。
+    返回 id=user_id, username, email，供员工编辑时作为 user_id 传入。
+    """
+    from sqlalchemy import and_
+    result = await db.execute(
+        select(DimUser)
+        .where(and_(DimUser.is_active == True, DimUser.status != "deleted"))
+    )
+    users = result.scalars().all()
+    # 过滤：仅保留未关联员工的用户（employees 中无此 user_id）
+    unlinked = []
+    for u in users:
+        r = await db.execute(select(Employee).where(Employee.user_id == u.user_id))
+        if r.scalar_one_or_none() is None:
+            unlinked.append({"id": u.user_id, "username": u.username, "email": u.email or ""})
+    return success_response(data=unlinked)
+
 
 @router.get("/deleted")
 async def get_deleted_users(
@@ -268,6 +314,7 @@ async def get_user(
             status_code=404
         )
     
+    emp_id, emp_code, emp_name = await _get_employee_for_user(db, user.user_id)
     return UserResponse(
         id=user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         username=user.username,
@@ -277,6 +324,7 @@ async def get_user(
         is_active=user.is_active,
         created_at=user.created_at,
         last_login_at=user.last_login  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
+        , employee_id=emp_id, employee_code=emp_code, employee_name=emp_name
     )
 
 @router.put("/{user_id}", response_model=UserResponse)
@@ -367,6 +415,26 @@ async def update_user(
             if role:
                 user.roles.append(role)
     
+    # 关联/解除关联员工（add-link-user-employee-management）
+    if user_update.employee_id is not None:
+        result = await db.execute(select(Employee).where(Employee.id == user_update.employee_id))
+        emp = result.scalar_one_or_none()
+        if not emp:
+            return error_response(
+                code=ErrorCode.DATA_VALIDATION_FAILED,
+                message="Employee not found",
+                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+                recovery_suggestion="请选择有效的员工",
+                status_code=404
+            )
+        await _clear_employee_user_id(db, user.user_id)
+        emp.user_id = user.user_id
+    elif "employee_id" in user_update.model_fields_set:
+        await _clear_employee_user_id(db, user.user_id)
+    
+    if user_update.is_active is False and was_active:
+        await _clear_employee_user_id(db, user.user_id)
+    
     await db.commit()
     # [FIX] AsyncSession 下访问 user.roles 可能触发懒加载(MissingGreenlet),这里显式加载关系
     await db.refresh(user, ["roles"])
@@ -379,9 +447,10 @@ async def update_user(
         resource_id=str(user.user_id),  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         ip_address="127.0.0.1",
         user_agent="Unknown",
-        details=user_update.dict(exclude_unset=True)
+        details=user_update.model_dump(exclude_unset=True)
     )
     
+    emp_id, emp_code, emp_name = await _get_employee_for_user(db, user.user_id)
     return UserResponse(
         id=user.user_id,  # [*] v6.0.0修复:使用 user.user_id 而不是 user.id(Vulnerability 28)
         username=user.username,
@@ -391,6 +460,7 @@ async def update_user(
         is_active=user.is_active,
         created_at=user.created_at,
         last_login_at=user.last_login  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
+        , employee_id=emp_id, employee_code=emp_code, employee_name=emp_name
     )
 
 @router.delete("/{user_id}")
@@ -464,6 +534,8 @@ async def delete_user(
         user.is_active = False
         user.status = "deleted"
         # 注意:如果需要 deleted_at 和 deleted_by 字段,需要先添加数据库迁移
+        # add-link-user-employee: 解除关联员工
+        await _clear_employee_user_id(db, user_id)
         
         # 5. 记录审计日志(在删除前记录)
         await audit_service.log_action(
@@ -932,6 +1004,8 @@ async def reject_user(
     user.is_active = False
     user.rejection_reason = request_body.reason
     user.approved_by = current_user.user_id
+    # add-link-user-employee: 解除关联员工
+    await _clear_employee_user_id(db, user_id)
     
     await db.flush()
     

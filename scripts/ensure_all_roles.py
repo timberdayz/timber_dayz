@@ -51,6 +51,12 @@ REQUIRED_ROLES = [
         'role_name': '财务',
         'description': '财务人员，拥有财务和销售数据查看权限，可进行财务管理和报表查看',
         'is_system': False
+    },
+    {
+        'role_code': 'tourist',
+        'role_name': '游客',
+        'description': '访客，仅可访问业务概览',
+        'is_system': False
     }
 ]
 

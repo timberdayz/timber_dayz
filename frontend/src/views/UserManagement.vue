@@ -57,6 +57,11 @@
         <el-table-column prop="username" label="用户名" width="150" />
         <el-table-column prop="email" label="邮箱" width="200" />
         <el-table-column prop="full_name" label="姓名" width="150" />
+        <el-table-column label="关联员工" width="160">
+          <template #default="{ row }">
+            {{ row.employee_code && row.employee_name ? `${row.employee_name} (${row.employee_code})` : '—' }}
+          </template>
+        </el-table-column>
         <el-table-column label="角色" width="200">
           <template #default="{ row }">
             <el-tag 
@@ -255,6 +260,22 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="关联员工">
+          <el-select
+            v-model="editForm.employee_id"
+            placeholder="请选择关联员工（可清空解除关联）"
+            clearable
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="emp in employeeOptions"
+              :key="emp.id"
+              :label="`${emp.name} (${emp.employee_code})`"
+              :value="emp.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="editForm.is_active" />
           <span style="margin-left: 10px;">{{ editForm.is_active ? '启用' : '禁用' }}</span>
@@ -296,6 +317,9 @@
           <el-descriptions-item label="最后登录">
             {{ selectedUser.last_login_at ? formatDateTime(selectedUser.last_login_at) : '从未登录' }}
           </el-descriptions-item>
+          <el-descriptions-item label="关联员工">
+            {{ selectedUser.employee_code && selectedUser.employee_name ? `${selectedUser.employee_name} (${selectedUser.employee_code})` : '—' }}
+          </el-descriptions-item>
         </el-descriptions>
       </div>
     </el-dialog>
@@ -329,6 +353,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useUsersStore } from '@/stores/users'
 import { useRolesStore } from '@/stores/roles'
 import { useAuthStore } from '@/stores/auth'
+import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus,
@@ -405,8 +430,12 @@ const editForm = ref({
   email: '',
   full_name: '',
   roles: [],
-  is_active: true
+  is_active: true,
+  employee_id: null
 })
+
+// 员工列表（供编辑用户时选择关联员工）
+const employeeOptions = ref([])
 
 const editRules = {
   email: [
@@ -536,14 +565,21 @@ const viewUser = async (user) => {
 }
 
 // 编辑用户
-const editUser = (user) => {
+const editUser = async (user) => {
   editForm.value = {
     id: user.id,
     username: user.username,
     email: user.email,
     full_name: user.full_name,
-    roles: [...user.roles],
-    is_active: user.is_active
+    roles: [...(user.roles || [])],
+    is_active: user.is_active,
+    employee_id: user.employee_id ?? null
+  }
+  try {
+    const res = await api.getEmployees({ page: 1, page_size: 500 })
+    employeeOptions.value = res?.data ?? res ?? []
+  } catch (e) {
+    employeeOptions.value = []
   }
   showEditDialog.value = true
 }
@@ -645,6 +681,7 @@ const submitEdit = async () => {
     await usersStore.updateUser(editForm.value.id, {
       email: editForm.value.email,
       full_name: editForm.value.full_name,
+      employee_id: editForm.value.employee_id ?? undefined,
       roles: editForm.value.roles,
       is_active: editForm.value.is_active
     })

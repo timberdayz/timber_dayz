@@ -41,6 +41,15 @@ export default {
   },
 
   /**
+   * 获取尚未关联员工的用户列表（is_active=true），供员工编辑时关联登录账号
+   * @returns {Promise<{data: Array<{id: number, username: string, email: string}>}>}
+   */
+  async getUnlinkedUsers() {
+    const res = await api._get('/users/unlinked')
+    return res?.data ?? res ?? []
+  },
+
+  /**
    * 获取用户详情
    * @param {number} userId - 用户ID
    * @returns {Promise} 用户详情

@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 from decimal import Decimal
 
 from backend.models.database import get_async_db
+from backend.routers.auth import get_current_user
 from modules.core.db import (
     Department,
     Position,
@@ -37,6 +38,7 @@ from modules.core.db import (
     EmployeePerformance,
     EmployeeCommission,
     ShopCommission,
+    DimUser,
 )
 from modules.core.logger import get_logger
 
@@ -161,6 +163,7 @@ class EmployeeCreate(BaseModel):
     bank_name: Optional[str] = Field(None, description="开户银行")
     bank_account: Optional[str] = Field(None, description="银行账号")
     status: str = Field("active", description="状态")
+    user_id: Optional[int] = Field(None, description="关联登录账号 dim_users.user_id")
 
     @field_validator("birth_date", "hire_date", "probation_end_date", "contract_start_date", "contract_end_date", mode="before")
     @classmethod
@@ -223,6 +226,7 @@ class EmployeeUpdate(BaseModel):
     bank_name: Optional[str] = None
     bank_account: Optional[str] = None
     status: Optional[str] = None
+    user_id: Optional[int] = Field(None, description="关联登录账号 dim_users.user_id")
 
 
 class EmployeeResponse(BaseModel):
@@ -252,6 +256,7 @@ class EmployeeResponse(BaseModel):
     bank_name: Optional[str]
     bank_account: Optional[str]
     status: str
+    username: Optional[str] = None  # 关联登录账号时展示
     created_at: datetime
     updated_at: datetime
 
@@ -891,6 +896,77 @@ async def delete_position(
 # 员工管理API
 # ============================================================================
 
+async def _username_for_user_id(db: AsyncSession, user_id: Optional[int]) -> Optional[str]:
+    """根据 dim_users.user_id 查询 username，用于 EmployeeResponse.username"""
+    if not user_id:
+        return None
+    result = await db.execute(select(DimUser).where(DimUser.user_id == user_id))
+    user = result.scalar_one_or_none()
+    return user.username if user else None
+
+
+class MeProfileUpdate(BaseModel):
+    """我的档案：仅允许自助修改的字段"""
+    phone: Optional[str] = Field(None, max_length=32)
+    email: Optional[str] = Field(None, max_length=128)
+    address: Optional[str] = Field(None, max_length=512)
+    emergency_contact: Optional[str] = Field(None, max_length=128)
+    emergency_phone: Optional[str] = Field(None, max_length=32)
+
+
+@router.get("/me/profile", response_model=EmployeeResponse)
+async def get_me_profile(
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """我的档案：当前登录用户关联的员工档案；未关联时首次访问自动创建最小员工并关联（系统主要面向内部员工，注册并登录即可用）。路由须在 /employees/{employee_code} 之前。"""
+    result = await db.execute(select(Employee).where(Employee.user_id == current_user.user_id))
+    employee = result.scalar_one_or_none()
+    if not employee:
+        # 首次访问自动创建最小员工并关联
+        employee_code = await _generate_employee_code(db)
+        name = (current_user.full_name or current_user.username or "员工").strip()
+        if len(name) > 128:
+            name = name[:128]
+        employee = Employee(
+            employee_code=employee_code,
+            name=name,
+            user_id=current_user.user_id,
+            status="active",
+            email=current_user.email,
+        )
+        db.add(employee)
+        await db.commit()
+        await db.refresh(employee)
+        logger.info(f"我的档案自动创建员工: {employee_code} (user_id={current_user.user_id})")
+    username = await _username_for_user_id(db, employee.user_id)
+    resp = EmployeeResponse.model_validate(employee)
+    return resp.model_copy(update={"username": username})
+
+
+@router.put("/me/profile", response_model=EmployeeResponse)
+async def put_me_profile(
+    body: MeProfileUpdate,
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """我的档案：仅接受白名单字段 phone/email/address/emergency_contact/emergency_phone。"""
+    result = await db.execute(select(Employee).where(Employee.user_id == current_user.user_id))
+    employee = result.scalar_one_or_none()
+    if not employee:
+        raise HTTPException(status_code=404, detail="您尚未关联员工档案，请联系管理员")
+    update_data = body.model_dump(exclude_unset=True)
+    for key in ("phone", "email", "address", "emergency_contact", "emergency_phone"):
+        if key in update_data:
+            setattr(employee, key, update_data[key])
+    employee.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(employee)
+    username = await _username_for_user_id(db, employee.user_id)
+    resp = EmployeeResponse.model_validate(employee)
+    return resp.model_copy(update={"username": username})
+
+
 @router.get("/employees", response_model=List[EmployeeResponse])
 async def list_employees(
     department_id: Optional[int] = Query(None, description="部门ID筛选"),
@@ -928,8 +1004,12 @@ async def list_employees(
         
         result = await db.execute(query)
         employees = result.scalars().all()
-        
-        return [EmployeeResponse.model_validate(emp) for emp in employees]
+        out = []
+        for emp in employees:
+            resp = EmployeeResponse.model_validate(emp)
+            resp = resp.model_copy(update={"username": await _username_for_user_id(db, emp.user_id)})
+            out.append(resp)
+        return out
     except Exception as e:
         logger.error(f"获取员工列表失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取员工列表失败: {str(e)}")
@@ -970,8 +1050,9 @@ async def get_employee(
         
         if not employee:
             raise HTTPException(status_code=404, detail=f"员工不存在: {employee_code}")
-        
-        return EmployeeResponse.model_validate(employee)
+        username = await _username_for_user_id(db, employee.user_id)
+        resp = EmployeeResponse.model_validate(employee)
+        return resp.model_copy(update={"username": username})
     except HTTPException:
         raise
     except Exception as e:
@@ -1017,13 +1098,21 @@ async def create_employee(
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=400, detail=f"员工编号已存在: {employee_code}")
 
+        user_id = data.get("user_id")
+        if user_id is not None:
+            other = await db.execute(select(Employee).where(Employee.user_id == user_id))
+            if other.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="该登录账号已关联其他员工")
+
         new_employee = Employee(**data)
         db.add(new_employee)
         await db.commit()
         await db.refresh(new_employee)
 
         logger.info(f"创建员工成功: {new_employee.employee_code} - {new_employee.name}")
-        return EmployeeResponse.model_validate(new_employee)
+        username = await _username_for_user_id(db, new_employee.user_id)
+        resp = EmployeeResponse.model_validate(new_employee)
+        return resp.model_copy(update={"username": username})
     except HTTPException:
         raise
     except Exception as e:
@@ -1049,6 +1138,15 @@ async def update_employee(
             raise HTTPException(status_code=404, detail=f"员工不存在: {employee_code}")
         
         update_data = employee_update.model_dump(exclude_unset=True)
+        if "user_id" in update_data and update_data["user_id"] is not None:
+            other = await db.execute(
+                select(Employee).where(
+                    Employee.user_id == update_data["user_id"],
+                    Employee.id != employee.id
+                )
+            )
+            if other.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="该登录账号已关联其他员工")
         for key, value in update_data.items():
             setattr(employee, key, value)
         
@@ -1057,7 +1155,9 @@ async def update_employee(
         await db.refresh(employee)
         
         logger.info(f"更新员工成功: {employee_code}")
-        return EmployeeResponse.model_validate(employee)
+        username = await _username_for_user_id(db, employee.user_id)
+        resp = EmployeeResponse.model_validate(employee)
+        return resp.model_copy(update={"username": username})
     except HTTPException:
         raise
     except Exception as e:

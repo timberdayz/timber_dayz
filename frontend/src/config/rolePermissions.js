@@ -40,14 +40,13 @@ export const ROLE_CONFIG = {
     permissions: [
       'business-overview',
       'sales-dashboard-v3', 'sales-analysis', 'customer-management', 'order-management',
-      'sales-campaign-management',
-      'inventory-dashboard-v3',
+      'inventory-management', 'inventory-dashboard-v3',
       'store-management', 'store-analytics',
-      'account-management', 'account-alignment',
       'purchase-orders', 'grn-management', 'vendor-management',
       'financial-management', 'expense-management', 'finance-reports',
+      'fx-management', 'fiscal-periods',
       'sales-reports', 'inventory-reports', 'vendor-reports',
-      'human-resources', 'employee-management', 'attendance-management', 'performance:read',
+      'employee-management', 'attendance-management', 'performance:read',
       'my-tasks', 'my-requests', 'approval-history',
       'system-notifications', 'alerts', 'message-settings',
       'personal-settings',
@@ -61,10 +60,8 @@ export const ROLE_CONFIG = {
     permissions: [
       'business-overview',
       'sales-dashboard-v3', 'customer-management', 'order-management',
-      'sales-campaign-management',
-      'inventory-dashboard-v3',
-      'store-management',
-      'human-resources', 'performance:read',
+      'store-management', 'store-analytics',
+      'employee-management', 'performance:read',
       'system-notifications', 'alerts', 'message-settings',
       'personal-settings',
       'sales-dashboard', 'message-center', 'notifications'
@@ -74,13 +71,21 @@ export const ROLE_CONFIG = {
     name: '财务',
     icon: 'Money',
     permissions: [
+      'business-overview',
       'sales-analysis', 'sales-dashboard-v3', 'order-management',
+      'purchase-orders', 'grn-management', 'vendor-management', 'invoice-management',
       'financial-management', 'expense-management', 'finance-reports', 'finance-reports-detail',
-      'invoice-management', 'fiscal-periods',
+      'fx-management', 'fiscal-periods',
+      'employee-management',
       'system-notifications', 'alerts', 'message-settings',
       'personal-settings',
       'sales-dashboard', 'report-center', 'message-center', 'notifications'
     ]
+  },
+  tourist: {
+    name: '游客',
+    icon: 'View',
+    permissions: ['business-overview']
   }
 }
 
@@ -95,7 +100,8 @@ export function normalizeRoleCode(roleCode) {
     '经理': 'manager',
     '操作员': 'operator',
     '运营': 'operator',
-    '财务': 'finance'
+    '财务': 'finance',
+    '游客': 'tourist'
   }
   if (map[v]) return map[v]
   const lower = v.toLowerCase()

@@ -47,8 +47,8 @@ const routes = [
     meta: {
       title: '超简化页面',
       icon: 'Setting',
-      permission: null,
-      roles: []
+      permission: 'system-settings',
+      roles: ['admin']
     }
   },
   {
@@ -58,8 +58,8 @@ const routes = [
     meta: {
       title: '测试页面',
       icon: 'Setting',
-      permission: null,
-      roles: []
+      permission: 'system-settings',
+      roles: ['admin']
     }
   },
   {
@@ -70,7 +70,7 @@ const routes = [
       title: '业务概览',
       icon: 'DataBoard',
       permission: 'business-overview',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
     }
   },
   {
@@ -125,7 +125,7 @@ const routes = [
       title: '库存管理',
       icon: 'Box',
       permission: 'inventory-management',
-      roles: ['admin', 'manager', 'operator', 'inventory']
+      roles: ['admin', 'manager']
     }
   },
   {
@@ -136,7 +136,7 @@ const routes = [
       title: '人力管理',
       icon: 'User',
       permission: 'human-resources',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin']
     }
   },
   {
@@ -202,7 +202,7 @@ const routes = [
       title: '账号管理',
       icon: 'UserFilled',
       permission: 'account-management',
-      roles: ['admin', 'manager']
+      roles: ['admin']
     }
   },
   {
@@ -223,8 +223,8 @@ const routes = [
     meta: {
       title: '通知偏好设置',
       icon: 'Bell',
-      permission: null,
-      roles: []
+      permission: 'personal-settings',
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -321,12 +321,12 @@ const routes = [
   {
     path: '/top-products',
     name: 'TopProducts',
-    component: () => import('../views/TopProducts.vue'),  // v4.9.0: TopN产品排行
+    component: () => import('../views/TopProducts.vue'),  // 已废弃，不在菜单显示
     meta: {
       title: 'TopN产品排行',
       icon: 'TrendCharts',
-      permission: null,  // v4.9.0: 暂时开放访问以便演示
-      roles: []
+      permission: 'system-settings',
+      roles: ['admin']
     }
   },
   {
@@ -336,8 +336,8 @@ const routes = [
     meta: {
       title: '库存健康仪表盘',
       icon: 'Box',
-      permission: null,  // v4.9.0: 暂时开放访问以便演示
-      roles: []
+      permission: 'inventory-dashboard-v3',
+      roles: ['admin', 'manager']
     }
   },
   {
@@ -347,19 +347,19 @@ const routes = [
     meta: {
       title: '产品质量仪表盘',
       icon: 'Medal',
-      permission: null,
-      roles: []
+      permission: 'inventory-dashboard-v3',
+      roles: ['admin', 'manager']
     }
   },
   {
     path: '/sales-trend',
     name: 'SalesTrend',
-    component: () => import('../views/SalesTrendChart.vue'),  // v4.9.1: 销售趋势
+    component: () => import('../views/SalesTrendChart.vue'),  // 已废弃，不在菜单显示
     meta: {
       title: '销售趋势分析',
       icon: 'TrendCharts',
-      permission: null,
-      roles: []
+      permission: 'system-settings',
+      roles: ['admin']
     }
   },
   {
@@ -369,8 +369,8 @@ const routes = [
     meta: {
       title: '财务总览',
       icon: 'Money',
-      permission: null,
-      roles: []
+      permission: 'financial-management',
+      roles: ['admin', 'manager', 'finance']
     }
   },
   {
@@ -392,7 +392,7 @@ const routes = [
       title: '账号对齐',
       icon: 'Shop',
       permission: 'account-alignment',
-      roles: ['admin', 'manager']
+      roles: ['admin']
     }
   },
   {
@@ -413,8 +413,8 @@ const routes = [
     meta: {
       title: '库存看板v3',
       icon: 'DataLine',
-      permission: 'inventory-management',
-      roles: ['admin', 'manager', 'operator']
+      permission: 'inventory-dashboard-v3',
+      roles: ['admin', 'manager']
     }
   },
   {
@@ -482,8 +482,8 @@ const routes = [
     meta: {
       title: '调试信息',
       icon: 'Setting',
-      permission: null,
-      roles: []
+      permission: 'system-settings',
+      roles: ['admin']
     }
   },
   {
@@ -564,7 +564,7 @@ const routes = [
       title: '采购订单',
       icon: 'Document',
       permission: 'purchase-orders',
-      roles: ['admin', 'manager']
+      roles: ['admin', 'manager', 'finance']
     }
   },
   {
@@ -575,7 +575,7 @@ const routes = [
       title: '入库单',
       icon: 'Box',
       permission: 'grn-management',
-      roles: ['admin', 'manager']
+      roles: ['admin', 'manager', 'finance']
     }
   },
   {
@@ -586,7 +586,7 @@ const routes = [
       title: '供应商管理',
       icon: 'OfficeBuilding',
       permission: 'vendor-management',
-      roles: ['admin', 'manager']
+      roles: ['admin', 'manager', 'finance']
     }
   },
   {
@@ -632,7 +632,7 @@ const routes = [
       title: '销售战役管理',
       icon: 'Trophy',
       permission: 'campaign:read',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin']
     }
   },
   
@@ -667,7 +667,7 @@ const routes = [
       title: '汇率管理',
       icon: 'Money',
       permission: 'fx-management',
-      roles: ['admin']
+      roles: ['admin', 'manager', 'finance']
     }
   },
   {
@@ -678,7 +678,7 @@ const routes = [
       title: '会计期间',
       icon: 'Calendar',
       permission: 'fiscal-periods',
-      roles: ['admin', 'finance']
+      roles: ['admin', 'manager', 'finance']
     }
   },
   
@@ -691,7 +691,7 @@ const routes = [
       title: '店铺分析',
       icon: 'DataAnalysis',
       permission: 'store-analytics',
-      roles: ['admin', 'manager']
+      roles: ['admin', 'manager', 'operator']
     }
   },
   
@@ -758,10 +758,10 @@ const routes = [
     name: 'EmployeeManagement',
     component: () => import('../views/hr/EmployeeManagement.vue'),
     meta: {
-      title: '员工档案',
+      title: '我的档案',
       icon: 'UserFilled',
-      permission: 'employee-management',
-      roles: ['admin', 'manager']
+      permission: null,
+      roles: []
     }
   },
   {
@@ -915,8 +915,8 @@ const routes = [
     meta: {
       title: '操作指南',
       icon: 'Reading',
-      permission: 'help-center',
-      roles: []  // 所有人可见
+      permission: null,
+      roles: []
     }
   },
   {
@@ -926,8 +926,8 @@ const routes = [
     meta: {
       title: '视频教程',
       icon: 'VideoPlay',
-      permission: 'help-center',
-      roles: []  // 所有人可见
+      permission: null,
+      roles: []
     }
   },
   {
@@ -937,8 +937,8 @@ const routes = [
     meta: {
       title: '常见问题',
       icon: 'QuestionFilled',
-      permission: 'help-center',
-      roles: []  // 所有人可见
+      permission: null,
+      roles: []
     }
   },
   
@@ -950,8 +950,8 @@ const routes = [
     meta: {
       title: 'API文档',
       icon: 'Document',
-      permission: null,
-      roles: []
+      permission: 'system-settings',
+      roles: ['admin']
     }
   },
   

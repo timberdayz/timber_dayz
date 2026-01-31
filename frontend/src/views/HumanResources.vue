@@ -171,6 +171,11 @@
                     label="姓名"
                     width="100"
                   ></el-table-column>
+                  <el-table-column label="登录账号" width="120">
+                    <template #default="scope">
+                      {{ scope.row.username || '—' }}
+                    </template>
+                  </el-table-column>
                   <el-table-column label="部门" width="120">
                     <template #default="scope">
                       {{ getDepartmentName(scope.row.department_id) }}
@@ -733,6 +738,22 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <el-form-item label="关联登录账号">
+          <el-select
+            v-model="employeeForm.user_id"
+            placeholder="请选择关联登录账号（可清空解除关联）"
+            clearable
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="u in linkedUserOptions"
+              :key="u.id"
+              :label="`${u.username}${u.email ? ' (' + u.email + ')' : ''}`"
+              :value="u.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="证件号码" prop="id_number">
@@ -1093,12 +1114,16 @@ const employeeForm = reactive({
   position_id: null,
   hire_date: "",
   status: "active",
+  user_id: null,
   id_number: "",
   contract_type: "",
   address: "",
   emergency_contact: "",
   emergency_phone: "",
 });
+
+// 关联登录账号下拉选项（未关联用户 + 当前已关联用户）
+const linkedUserOptions = ref([]);
 
 const departmentForm = reactive({
   department_code: "",
@@ -1316,7 +1341,7 @@ const loadPayroll = async () => {
 // 员工操作方法
 // ============================================================================
 
-const showEmployeeDialog = (employee = null) => {
+const showEmployeeDialog = async (employee = null) => {
   editingEmployee.value = employee;
   if (employee) {
     Object.assign(employeeForm, {
@@ -1330,6 +1355,7 @@ const showEmployeeDialog = (employee = null) => {
       position_id: employee.position_id,
       hire_date: employee.hire_date || "",
       status: employee.status,
+      user_id: employee.user_id ?? null,
       id_number: employee.id_number || "",
       contract_type: employee.contract_type || "",
       address: employee.address || "",
@@ -1348,12 +1374,30 @@ const showEmployeeDialog = (employee = null) => {
       position_id: null,
       hire_date: "",
       status: "active",
+      user_id: null,
       id_number: "",
       contract_type: "",
       address: "",
       emergency_contact: "",
       emergency_phone: "",
     });
+  }
+  try {
+    const res = await usersApi.getUnlinkedUsers();
+    const list = res?.data ?? res;
+    const arr = Array.isArray(list) ? list : (list ?? []);
+    linkedUserOptions.value = [...arr];
+    if (employee?.user_id && employee?.username) {
+      const has = linkedUserOptions.value.some((u) => u.id === employee.user_id);
+      if (!has) {
+        linkedUserOptions.value = [{ id: employee.user_id, username: employee.username, email: '' }, ...linkedUserOptions.value];
+      }
+    }
+  } catch (e) {
+    linkedUserOptions.value = [];
+    if (employee?.user_id && employee?.username) {
+      linkedUserOptions.value = [{ id: employee.user_id, username: employee.username, email: '' }];
+    }
   }
   employeeDialogVisible.value = true;
 };

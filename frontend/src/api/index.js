@@ -1811,6 +1811,12 @@ export default {
   async getHrEmployee(employeeCode) {
     return await this._get(`/hr/employees/${employeeCode}`);
   },
+  async getHrMeProfile() {
+    return await this._get("/hr/me/profile");
+  },
+  async putHrMeProfile(data) {
+    return await this._put("/hr/me/profile", data);
+  },
   async createHrEmployee(data) {
     return await this._post("/hr/employees", data);
   },

@@ -47,6 +47,8 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     roles: Optional[List[str]] = None
     is_active: Optional[bool] = None
+    employee_id: Optional[int] = None  # 关联 a_class.employees.id；传 null 或省略表示解除关联
+
 
 class UserResponse(BaseModel):
     """用户响应"""
@@ -60,6 +62,9 @@ class UserResponse(BaseModel):
     created_at: datetime
     last_login_at: Optional[datetime] = None  # [*] v6.0.0修复:映射到数据库字段 last_login(Vulnerability 29)
     # 注意:数据库字段名是 last_login,但 API 响应使用 last_login_at 保持一致性
+    employee_id: Optional[int] = None  # 关联员工 a_class.employees.id（有则展示，供编辑回显）
+    employee_code: Optional[str] = None  # 关联员工编号（有则展示）
+    employee_name: Optional[str] = None  # 关联员工姓名（有则展示）
 
 class RoleCreate(BaseModel):
     """创建角色请求"""
