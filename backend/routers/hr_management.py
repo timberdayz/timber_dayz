@@ -27,6 +27,7 @@ from modules.core.db import (
     Position,
     Employee,
     EmployeeTarget,
+    EmployeeShopAssignment,
     WorkShift,
     AttendanceRecord,
     LeaveType,
@@ -38,6 +39,7 @@ from modules.core.db import (
     EmployeePerformance,
     EmployeeCommission,
     ShopCommission,
+    DimShop,
     DimUser,
 )
 from modules.core.logger import get_logger
@@ -1269,6 +1271,18 @@ async def delete_employee(
         
         if not employee:
             raise HTTPException(status_code=404, detail=f"员工不存在: {employee_code}")
+
+        # 检查是否有未解除的店铺归属
+        assign_result = await db.execute(
+            select(EmployeeShopAssignment).where(
+                EmployeeShopAssignment.employee_code == employee_code
+            )
+        )
+        if assign_result.scalars().first():
+            raise HTTPException(
+                status_code=400,
+                detail="请先解除该员工的店铺归属",
+            )
         
         employee.status = "inactive"
         employee.updated_at = datetime.utcnow()
@@ -2031,3 +2045,250 @@ async def list_shop_commissions(
     except Exception as e:
         logger.error(f"获取店铺提成列表失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取店铺提成列表失败: {str(e)}")
+
+
+# ============================================================================
+# 员工店铺归属与提成比API（add-employee-shop-assignment-page）
+# ============================================================================
+
+class EmployeeShopAssignmentCreate(BaseModel):
+    """新增归属"""
+    employee_code: str = Field(..., min_length=1, max_length=64)
+    platform_code: str = Field(..., min_length=1, max_length=32)
+    shop_id: str = Field(..., min_length=1, max_length=256)
+    commission_ratio: Optional[float] = Field(None, ge=0, le=1)
+    role: Optional[str] = Field(None, max_length=32)
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+
+    @field_validator("effective_to")
+    @classmethod
+    def effective_to_ge_from(cls, v, info):
+        if v is not None and info.data.get("effective_from") is not None:
+            if v < info.data["effective_from"]:
+                raise ValueError("effective_to 须 >= effective_from")
+        return v
+
+
+class EmployeeShopAssignmentUpdate(BaseModel):
+    """更新归属"""
+    commission_ratio: Optional[float] = Field(None, ge=0, le=1)
+    role: Optional[str] = Field(None, max_length=32)
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    status: Optional[str] = Field(None, pattern="^(active|inactive)$")
+
+    @field_validator("effective_to")
+    @classmethod
+    def effective_to_ge_from(cls, v, info):
+        if v is not None and info.data.get("effective_from") is not None:
+            if v < info.data["effective_from"]:
+                raise ValueError("effective_to 须 >= effective_from")
+        return v
+
+
+class EmployeeShopAssignmentResponse(BaseModel):
+    """归属响应"""
+    id: int
+    employee_code: str
+    employee_name: Optional[str] = None
+    platform_code: str
+    shop_id: str
+    shop_name: Optional[str] = None
+    commission_ratio: Optional[float] = None
+    role: Optional[str] = None
+    effective_from: Optional[date] = None
+    effective_to: Optional[date] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/employee-shop-assignments")
+async def list_employee_shop_assignments(
+    employee_code: Optional[str] = Query(None),
+    shop_id: Optional[str] = Query(None),
+    platform_code: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """获取归属列表（分页、筛选），LEFT JOIN 补全姓名和店铺名"""
+    try:
+        base_query = select(EmployeeShopAssignment)
+        conditions = []
+        if employee_code:
+            conditions.append(EmployeeShopAssignment.employee_code == employee_code)
+        if shop_id:
+            conditions.append(EmployeeShopAssignment.shop_id == shop_id)
+        if platform_code:
+            conditions.append(EmployeeShopAssignment.platform_code == platform_code)
+        if status:
+            conditions.append(EmployeeShopAssignment.status == status)
+        if conditions:
+            base_query = base_query.where(and_(*conditions))
+
+        count_query = select(func.count(EmployeeShopAssignment.id)).select_from(
+            base_query.subquery()
+        )
+        total_result = await db.execute(count_query)
+        total = total_result.scalar() or 0
+
+        offset = (page - 1) * page_size
+        query = base_query.order_by(
+            EmployeeShopAssignment.employee_code,
+            EmployeeShopAssignment.platform_code,
+            EmployeeShopAssignment.shop_id,
+        ).offset(offset).limit(page_size)
+        result = await db.execute(query)
+        rows = result.scalars().all()
+
+        items = []
+        for r in rows:
+            emp_name = None
+            shop_name = None
+            emp_res = await db.execute(select(Employee.name).where(Employee.employee_code == r.employee_code))
+            if emp_row := emp_res.scalar_one_or_none():
+                emp_name = emp_row
+            shop_res = await db.execute(
+                select(DimShop.shop_name).where(
+                    DimShop.platform_code == r.platform_code,
+                    DimShop.shop_id == r.shop_id,
+                )
+            )
+            if shop_row := shop_res.scalar_one_or_none():
+                shop_name = shop_row
+            items.append(EmployeeShopAssignmentResponse(
+                id=r.id,
+                employee_code=r.employee_code,
+                employee_name=emp_name,
+                platform_code=r.platform_code,
+                shop_id=r.shop_id,
+                shop_name=shop_name,
+                commission_ratio=r.commission_ratio,
+                role=r.role,
+                effective_from=r.effective_from,
+                effective_to=r.effective_to,
+                status=r.status,
+                created_at=r.created_at,
+                updated_at=r.updated_at,
+            ))
+        return {"success": True, "data": {"items": items, "total": total}}
+    except Exception as e:
+        logger.error(f"获取归属列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取归属列表失败: {str(e)}")
+
+
+@router.post("/employee-shop-assignments", status_code=201)
+async def create_employee_shop_assignment(
+    body: EmployeeShopAssignmentCreate,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """新增归属"""
+    try:
+        emp_res = await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
+        if not emp_res.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail=f"员工不存在: {body.employee_code}")
+
+        shop_res = await db.execute(
+            select(DimShop).where(
+                DimShop.platform_code == body.platform_code,
+                DimShop.shop_id == body.shop_id,
+            )
+        )
+        if not shop_res.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="该店铺尚未同步至系统，请先在账号管理中同步",
+            )
+
+        dup = await db.execute(
+            select(EmployeeShopAssignment).where(
+                EmployeeShopAssignment.employee_code == body.employee_code,
+                EmployeeShopAssignment.platform_code == body.platform_code,
+                EmployeeShopAssignment.shop_id == body.shop_id,
+            )
+        )
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="该员工已关联该店铺")
+
+        rec = EmployeeShopAssignment(
+            employee_code=body.employee_code,
+            platform_code=body.platform_code.lower(),
+            shop_id=body.shop_id,
+            commission_ratio=body.commission_ratio,
+            role=body.role,
+            effective_from=body.effective_from,
+            effective_to=body.effective_to,
+        )
+        db.add(rec)
+        await db.commit()
+        await db.refresh(rec)
+        emp = (await db.execute(select(Employee.name).where(Employee.employee_code == rec.employee_code))).scalar_one_or_none()
+        shop = (await db.execute(select(DimShop.shop_name).where(DimShop.platform_code == rec.platform_code, DimShop.shop_id == rec.shop_id))).scalar_one_or_none()
+        resp = EmployeeShopAssignmentResponse.model_validate(rec)
+        resp.employee_name = emp
+        resp.shop_name = shop
+        return {"success": True, "data": resp}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"新增归属失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"新增归属失败: {str(e)}")
+
+
+@router.put("/employee-shop-assignments/{id}")
+async def update_employee_shop_assignment(
+    id: int,
+    body: EmployeeShopAssignmentUpdate,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """更新归属"""
+    try:
+        result = await db.execute(select(EmployeeShopAssignment).where(EmployeeShopAssignment.id == id))
+        rec = result.scalar_one_or_none()
+        if not rec:
+            raise HTTPException(status_code=404, detail="归属记录不存在")
+        for k, v in body.model_dump(exclude_unset=True).items():
+            setattr(rec, k, v)
+        await db.commit()
+        await db.refresh(rec)
+        emp = (await db.execute(select(Employee.name).where(Employee.employee_code == rec.employee_code))).scalar_one_or_none()
+        shop = (await db.execute(select(DimShop.shop_name).where(DimShop.platform_code == rec.platform_code, DimShop.shop_id == rec.shop_id))).scalar_one_or_none()
+        resp = EmployeeShopAssignmentResponse.model_validate(rec)
+        resp.employee_name = emp
+        resp.shop_name = shop
+        return {"success": True, "data": resp}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"更新归属失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"更新归属失败: {str(e)}")
+
+
+@router.delete("/employee-shop-assignments/{id}", status_code=204)
+async def delete_employee_shop_assignment(
+    id: int,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """删除归属"""
+    try:
+        result = await db.execute(select(EmployeeShopAssignment).where(EmployeeShopAssignment.id == id))
+        rec = result.scalar_one_or_none()
+        if not rec:
+            raise HTTPException(status_code=404, detail="归属记录不存在")
+        await db.delete(rec)
+        await db.commit()
+        return None
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"删除归属失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除归属失败: {str(e)}")

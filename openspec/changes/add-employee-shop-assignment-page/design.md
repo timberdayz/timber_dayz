@@ -2,24 +2,26 @@
 
 ## Context
 
-- **背景**：员工提成计算需明确「员工负责哪些店铺」「各店铺提成比例多少」
-- **现状**：无员工-店铺关联表，SalaryStructure 仅有全局 commission_ratio
-- **约束**：遵循三层数据分类（A类=用户配置），与 add-performance-and-personal-income 解耦
+- **背景**：员工提成计算需明确「员工负责哪些店铺」「各店铺可分配利润率、每人提成比例」
+- **现状**：已有 employee_shop_assignments，需扩展为店铺为中心、表格化平铺、双子页结构
+- **约束**：参考费用管理页面设计；整个模块仅管理员可见
 
 ## Goals / Non-Goals
 
 - **Goals**：
-  - 提供 A 类配置表存储员工-店铺归属及提成比
-  - 提供前端页面支持 CRUD 配置
-  - 为后续 employee_commissions 写入逻辑提供数据基础
+  - 提供配置子页：以店铺为行，表格化平铺，行内编辑（可分配利润率、主管/操作员多选、每人提成比）
+  - 提供统计子页：按月份展示当月销售额、利润、目标达成率、人员利润收入
+  - 支持一人多店、一店多人，每人每店提成比独立配置
+  - 一店多人：店铺可分配利润率固定，多人手动分配（不自动均分）
 
 - **Non-Goals**：
-  - 不实现 employee_commissions 的自动计算与写入
-  - 不在本提案内实现 Metabase 或 Celery 定时任务
+  - 不实现 employee_commissions 的自动写入（配置与统计展示先行）
 
 ## Decisions
 
 ### 1. 表结构设计
+
+#### 1.1 员工店铺归属（已有）
 
 **表名**：`a_class.employee_shop_assignments`
 
@@ -30,7 +32,7 @@
 | platform_code | VARCHAR(32) NOT NULL | 平台编码，外键 dim_shops.platform_code |
 | shop_id | VARCHAR(256) NOT NULL | 店铺ID，外键 dim_shops.shop_id |
 | commission_ratio | FLOAT NULL | 提成比例(0-1)，NULL 时使用 salary_structures.commission_ratio |
-| role | VARCHAR(32) NULL | 角色（可选，如 primary/secondary） |
+| role | VARCHAR(32) NULL | 角色：supervisor（主管）/ operator（操作员） |
 | effective_from | DATE NULL | 生效起始日，NULL=立即生效 |
 | effective_to | DATE NULL | 生效截止日，NULL=无截止 |
 | status | VARCHAR(32) NOT NULL DEFAULT 'active' | active/inactive |
@@ -48,6 +50,22 @@
 - `ix_employee_shop_assignments_a_shop` (platform_code, shop_id)
 - `ix_employee_shop_assignments_a_status` (status)
 
+#### 1.2 店铺可分配利润率配置（新增）
+
+**表名**：`a_class.shop_commission_config`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | BIGSERIAL | 主键 |
+| platform_code | VARCHAR(32) NOT NULL | 平台编码 |
+| shop_id | VARCHAR(256) NOT NULL | 店铺ID |
+| allocatable_profit_rate | FLOAT NOT NULL DEFAULT 0 | 可分配利润率(0-1)，利润的百分之多少用于主管+操作员 |
+| created_at | TIMESTAMP | 创建时间 |
+| updated_at | TIMESTAMP | 更新时间 |
+
+**唯一约束**：`(platform_code, shop_id)`  
+**外键**：`(platform_code, shop_id)` → dim_shops，ON DELETE RESTRICT
+
 ### 2. 提成比优先级
 
 1. `employee_shop_assignments.commission_ratio` 若不为 NULL，使用该值
@@ -56,9 +74,13 @@
 
 ### 2.1 多人同店提成计算语义
 
-同一店铺可归属多人，**各自按全店销售额 × 各自 commission_ratio 独立计算**（不拆分销售额）。例如：店铺 A 月销 10 万，员工甲 5%、员工乙 3%，则甲提成 5000、乙提成 3000，公司总提成支出 8000。
+**店铺级可分配利润率**：店铺利润的百分之多少用于主管+操作员分配（新增 `shop_commission_config.allocatable_profit_rate`）。
 
-**提成计算时**：仅考虑 `status='active'` 的归属记录；`effective_from` 为 NULL 视为立即生效（无起始限制），`effective_to` 为 NULL 视为无截止；某月归属是否生效：该月须落在 `[effective_from, effective_to]` 区间内。
+**一店多人**：总比例固定（可分配利润率），多人手动分配各自 commission_ratio；不自动均分。校验：同一店铺所有归属记录的 commission_ratio 之和 ≤ 可分配利润率。
+
+**计算链**：可分配利润 = 店铺当月利润 × 可分配利润率；每人利润收入 = 可分配利润 × 该人 commission_ratio。
+
+**时间维度**：所有经营数据与提成统计按所选月份（YYYY-MM）执行；配置为当前生效规则。
 
 ### 3. API 设计
 
@@ -81,21 +103,22 @@
 - **后端写入**：`(platform_code, shop_id)` 必须存在于 `dim_shops`，否则 400，提示「该店铺尚未同步至系统，请先在账号管理中同步」
 - **一致性**：`platform_accounts` 经 `shop_sync_service` 同步至 `dim_shops`，正常情况下两者一致；若店铺仅存在于 platform_accounts 尚未同步，需先完成同步或由管理员在账号管理中触发同步
 
-### 4. 前端页面设计
+### 4. 前端页面设计（参考费用管理）
 
-**页面**：`ShopAssignment.vue`（人员店铺归属和提成比）
+**主页面**：`ShopAssignment.vue`，Tab 切换两个子页
 
-**布局**：
-- 顶部：筛选（员工、店铺、平台、状态）、新增按钮
-- 表格：员工姓名、员工编号、平台、店铺名称、提成比例、角色、生效区间、状态、操作
-- 操作：编辑、删除
+#### 4.1 配置子页（人员店铺归属和提成比配置）
 
-**表单（新增/编辑）**：
-- 员工：下拉选择（从 employees 列表，**仅展示 status='active' 的在职员工**，便于日常配置；历史归属仍可在列表中查看）
-- 店铺：下拉选择（复用 `api.getTargetShops()`，按 platform 过滤；后端写入前校验 dim_shops）
-- 提成比例：数字输入 0-1，可空（使用薪资结构默认）
-- 角色：可选
-- 生效起始/截止：日期选择，可选
+- **以店铺为行**：表格化平铺，参考费用管理；左列固定（平台、店铺），右列可编辑
+- **列**：平台、店铺、可分配利润率、店铺主管（多选）、主管提成比（每人独立，可展开明细或子表）、店铺操作员（多选）、操作员提成比（同上）、操作（行内保存、删除）
+- **行内编辑**：不弹窗，直接在表格中编辑；支持「+ 为所有店铺添加」快速初始化
+- **校验**：同一店铺主管+操作员提成比之和 ≤ 可分配利润率
+
+#### 4.2 统计子页（店铺利润和人员利润统计）
+
+- **月份选择器**：YYYY-MM，与费用管理一致
+- **列**：平台、店铺、当月销售额、当月利润、当月目标达成率、主管利润收入、操作员利润收入（只读）
+- **数据来源**：销售额/利润来自 B 类订单；达成率来自 sales_targets_a；人员利润收入由后端按所选月份计算
 
 ### 5. 替代方案
 

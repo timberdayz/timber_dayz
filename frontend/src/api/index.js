@@ -1914,6 +1914,20 @@ export default {
     return await this._get("/hr/commissions/shop", { params });
   },
 
+  // === 员工店铺归属与提成比（add-employee-shop-assignment-page）===
+  async getHrEmployeeShopAssignments(params = {}) {
+    return await this._get("/hr/employee-shop-assignments", { params });
+  },
+  async createHrEmployeeShopAssignment(data) {
+    return await this._post("/hr/employee-shop-assignments", data);
+  },
+  async updateHrEmployeeShopAssignment(id, data) {
+    return await this._put(`/hr/employee-shop-assignments/${id}`, data);
+  },
+  async deleteHrEmployeeShopAssignment(id) {
+    return await this._delete(`/hr/employee-shop-assignments/${id}`);
+  },
+
   // === 旧版绩效API（保留兼容性） ===
   // 获取绩效评分列表
   async getPerformanceScores(params = {}) {

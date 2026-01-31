@@ -1,0 +1,18 @@
+# =====================================================
+# 本地「生产流程」验证用 Compose 覆盖
+# =====================================================
+# 用途：与 deploy_remote_production.sh 相同的阶段顺序在本地跑一遍，
+#       仅增加宿主机端口映射以便健康检查与接口验证。
+# 使用：scripts/verify_deploy_full_local.py 会自动加载此文件。
+# 注意：强制 DATABASE_URL 为容器内 postgres:5432，避免 .env 中 localhost:15432 被带入容器。
+# =====================================================
+
+services:
+  backend:
+    environment:
+      DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
+    ports:
+      - "8001:8000"
+  metabase:
+    ports:
+      - "8080:3000"

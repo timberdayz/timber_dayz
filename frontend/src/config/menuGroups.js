@@ -139,7 +139,8 @@ export const menuGroups = [
       '/human-resources',            // 人力管理（含员工/部门/职位/考勤/薪资 Tab）
       '/employee-management',        // 我的档案
       '/my-income',              // 我的收入
-      '/hr-performance-management'  // 绩效管理
+      '/hr-performance-management',  // 绩效管理
+      '/hr-shop-assignment'          // 人员店铺归属和提成比
     ]
   },
   {
@@ -226,6 +227,7 @@ export const routeDisplayNames = {
   '/sales-campaign-management': '销售战役管理',
   '/my-income': '我的收入',
   '/hr-performance-management': '绩效管理',
+  '/hr-shop-assignment': '人员店铺归属和提成比',
   '/target-management': '目标管理',
   '/inventory-dashboard-v3': '库存看板',
   // ⚠️ v4.12.0移除：数据浏览器功能已移除，使用Metabase替代

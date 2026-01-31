@@ -375,6 +375,9 @@
   - 已新增 `tests/test_metabase_question_service.py`：config 加载、按名称缓存、env 兜底、未找到抛错、query_question 结构
   - 运行：`pytest tests/test_metabase_question_service.py -v`
   - 可选集成：后端+Metabase 启动后运行 `python scripts/test_metabase_question_integration.py`
+- [x] 5.0.1 本地部署等效验证（2026-01-31） ✅
+  - 在 `python run.py --use-docker --with-metabase` 启动后，运行 `python scripts/verify_deploy_phase35_local.py` 可验证与 deploy_remote_production.sh 中 Phase 3.5 等效的流程（Metabase 健康 -> init_metabase.py -> 后端按名称查 Question -> Dashboard KPI 返回数据）
+  - 参数：`--metabase-url http://localhost:8080 --backend-url http://localhost:8001`（dev 下后端 8001，Metabase 8080）
 
 - [ ] 5.1 测试Model数据完整性
   - 验证所有平台的数据都能正确整合

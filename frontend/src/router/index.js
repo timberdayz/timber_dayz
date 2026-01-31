@@ -790,6 +790,17 @@ const routes = [
       roles: ['admin', 'manager', 'operator']
     }
   },
+  {
+    path: '/hr-shop-assignment',
+    name: 'ShopAssignment',
+    component: () => import('../views/hr/ShopAssignment.vue'),
+    meta: {
+      title: '人员店铺归属和提成比',
+      icon: 'Connection',
+      permission: 'human-resources',
+      roles: ['admin']  // 仅管理员可见
+    }
+  },
   
   // ==================== 审批中心 ====================
   {

@@ -127,7 +127,7 @@ secure_accounts.enc
 *.tar.gz
 *.rar
 reports/
-sql/
+# sql/ 不整体排除：Dockerfile.backend 需 COPY sql/metabase_models、sql/metabase_questions（Phase 3.5）
 security/
 collectors/
 legacy_core/

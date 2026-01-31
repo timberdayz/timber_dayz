@@ -191,6 +191,17 @@ docker-compose -f docker-compose.metabase.yml --profile production up -d metabas
 # 等待健康检查通过（最多60秒）
 ```
 
+**阶段 3.5：Metabase 配置初始化**（v4.7+，数据表/Metabase 变更后必跑）
+
+```bash
+# 等待 Metabase 健康后执行 init_metabase.py（创建/更新 Models 和 Questions）
+# 后端镜像内已包含 scripts/init_metabase.py 与 sql/metabase_*
+docker-compose ... run --rm --no-deps -e METABASE_URL=http://xihong_erp_metabase:3000 backend python3 /app/scripts/init_metabase.py
+# 失败仅 WARN，不阻断部署（后端可回退到 env Question ID）
+```
+
+详见：[云端部署更新与本地验证](deployment/CLOUD_UPDATE_AND_LOCAL_VERIFICATION.md)。
+
 **阶段 4：应用层**
 
 ```bash
