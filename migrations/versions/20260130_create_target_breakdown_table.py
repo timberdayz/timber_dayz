@@ -41,17 +41,20 @@ def table_exists(conn, table_name: str, schema: str = "public") -> bool:
 
 
 def upgrade():
-    """创建 target_breakdown 表"""
+    """创建 target_breakdown 表（a_class schema，与 ORM 及后续迁移一致）"""
     conn = op.get_bind()
-    
-    # 检查表是否已存在
-    if table_exists(conn, "target_breakdown"):
-        safe_print("[INFO] target_breakdown 表已存在，跳过创建")
+
+    # 确保 a_class schema 存在（自包含，不依赖迁移顺序）
+    conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS a_class"))
+
+    # 检查表是否已存在（a_class）
+    if table_exists(conn, "target_breakdown", "a_class"):
+        safe_print("[INFO] a_class.target_breakdown 表已存在，跳过创建")
         return
-    
-    safe_print("[INFO] 创建 target_breakdown 表...")
-    
-    # 创建表
+
+    safe_print("[INFO] 创建 a_class.target_breakdown 表...")
+
+    # 创建表于 a_class（此时 sales_targets 仍在 public，由 20260131 迁至 a_class）
     op.create_table(
         'target_breakdown',
         sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
@@ -70,31 +73,32 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
         sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
         sa.PrimaryKeyConstraint('id'),
-        sa.ForeignKeyConstraint(['target_id'], ['sales_targets.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['target_id'], ['public.sales_targets.id'], ondelete='CASCADE'),
         sa.CheckConstraint("breakdown_type IN ('shop', 'time')", name='chk_breakdown_type'),
+        schema='a_class',
     )
-    
-    # 创建索引
-    op.create_index('ix_target_breakdown_target', 'target_breakdown', ['target_id'])
-    op.create_index('ix_target_breakdown_type', 'target_breakdown', ['breakdown_type'])
-    op.create_index('ix_target_breakdown_shop', 'target_breakdown', ['platform_code', 'shop_id'])
-    
-    safe_print("[OK] target_breakdown 表创建成功")
+
+    # 创建索引（a_class）
+    op.create_index('ix_target_breakdown_target', 'target_breakdown', ['target_id'], schema='a_class')
+    op.create_index('ix_target_breakdown_type', 'target_breakdown', ['breakdown_type'], schema='a_class')
+    op.create_index('ix_target_breakdown_shop', 'target_breakdown', ['platform_code', 'shop_id'], schema='a_class')
+
+    safe_print("[OK] a_class.target_breakdown 表创建成功")
 
 
 def downgrade():
-    """删除 target_breakdown 表"""
+    """删除 a_class.target_breakdown 表"""
     conn = op.get_bind()
-    
-    if not table_exists(conn, "target_breakdown"):
-        safe_print("[INFO] target_breakdown 表不存在，跳过删除")
+
+    if not table_exists(conn, "target_breakdown", "a_class"):
+        safe_print("[INFO] a_class.target_breakdown 表不存在，跳过删除")
         return
-    
-    # 删除索引
-    op.drop_index('ix_target_breakdown_shop', table_name='target_breakdown')
-    op.drop_index('ix_target_breakdown_type', table_name='target_breakdown')
-    op.drop_index('ix_target_breakdown_target', table_name='target_breakdown')
-    
+
+    # 删除索引（a_class）
+    op.drop_index('ix_target_breakdown_shop', table_name='target_breakdown', schema='a_class')
+    op.drop_index('ix_target_breakdown_type', table_name='target_breakdown', schema='a_class')
+    op.drop_index('ix_target_breakdown_target', table_name='target_breakdown', schema='a_class')
+
     # 删除表
-    op.drop_table('target_breakdown')
-    safe_print("[OK] target_breakdown 表已删除")
+    op.drop_table('target_breakdown', schema='a_class')
+    safe_print("[OK] a_class.target_breakdown 表已删除")

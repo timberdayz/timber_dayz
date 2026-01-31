@@ -3401,26 +3401,28 @@ class EmployeeShopAssignment(Base):
     A类数据表:员工店铺归属与提成比
     
     配置员工负责的店铺及该店铺对应的提成比例，供提成计算使用。
+    按月份配置：year_month 表示该条配置适用的月份(YYYY-MM)，每月可不同比例。
     add-employee-shop-assignment-page 提案
     """
     __tablename__ = "employee_shop_assignments"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year_month = Column(String(7), nullable=False)  # 适用月份 YYYY-MM
     employee_code = Column(String(64), nullable=False)  # 员工编号，逻辑引用 a_class.employees
     platform_code = Column(String(32), nullable=False)  # 平台编码
     shop_id = Column(String(256), nullable=False)  # 店铺ID
     
     commission_ratio = Column(Float, nullable=True)  # 提成比例(0-1)，NULL时使用薪资结构默认
-    role = Column(String(32), nullable=True)  # 角色(可选，如 primary/secondary)
-    effective_from = Column(Date, nullable=True)  # 生效起始日，NULL=立即生效
-    effective_to = Column(Date, nullable=True)  # 生效截止日，NULL=无截止
+    role = Column(String(32), nullable=True)  # 角色：supervisor/operator
+    effective_from = Column(Date, nullable=True)  # 保留，可选
+    effective_to = Column(Date, nullable=True)  # 保留，可选
     status = Column(String(32), nullable=False, default="active")  # active/inactive
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     __table_args__ = (
-        UniqueConstraint("employee_code", "platform_code", "shop_id", name="uq_employee_shop_assignments_a"),
+        UniqueConstraint("employee_code", "platform_code", "shop_id", "year_month", name="uq_employee_shop_assignments_a"),
         ForeignKeyConstraint(
             ["platform_code", "shop_id"],
             ["dim_shops.platform_code", "dim_shops.shop_id"],
@@ -3429,6 +3431,7 @@ class EmployeeShopAssignment(Base):
         ),
         Index("ix_employee_shop_assignments_a_employee", "employee_code"),
         Index("ix_employee_shop_assignments_a_shop", "platform_code", "shop_id"),
+        Index("ix_employee_shop_assignments_a_year_month", "year_month"),
         Index("ix_employee_shop_assignments_a_status", "status"),
         {"schema": "a_class"},
     )

@@ -240,7 +240,7 @@ class MetabaseInitializer:
         # 创建 Collection
         data = {
             "name": name,
-            "description": description or "",
+            "description": description or name,  # Metabase 要求 description 非空
         }
         if parent_id:
             data["parent_id"] = parent_id
@@ -406,7 +406,7 @@ class MetabaseInitializer:
         name = question_config["name"]
         display_name = question_config.get("display_name", name)
         sql_file = question_config["sql_file"]
-        description = question_config.get("description", "")
+        description = question_config.get("description", "") or display_name  # Metabase 要求 description 非空
         collection_name = question_config.get("collection")
         parameters = question_config.get("parameters", [])
         

@@ -72,6 +72,7 @@ class MetabaseQuestionService:
             "business_overview_inventory_backlog": int(os.getenv("METABASE_QUESTION_BUSINESS_OVERVIEW_INVENTORY_BACKLOG", "0")),
             "business_overview_operational_metrics": int(os.getenv("METABASE_QUESTION_BUSINESS_OVERVIEW_OPERATIONAL_METRICS", "0")),
             "clearance_ranking": int(os.getenv("METABASE_QUESTION_CLEARANCE_RANKING", "0")),
+            "hr_shop_monthly_metrics": int(os.getenv("METABASE_QUESTION_HR_SHOP_MONTHLY_METRICS", "0")),
         }
         
         # HTTP客户端(支持异步)

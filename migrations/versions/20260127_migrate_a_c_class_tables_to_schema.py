@@ -148,7 +148,11 @@ def migrate_table(conn, table_name, source_schema, target_schema):
 def upgrade():
     """Migrate A-class and C-class tables to their proper schemas"""
     conn = op.get_bind()
-    
+
+    # Ensure schemas exist before moving tables (self-contained; no dependency on migration order)
+    conn.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
+    conn.execute(text("CREATE SCHEMA IF NOT EXISTS c_class"))
+
     safe_print("="*60)
     safe_print("Migrating A-class tables to a_class schema")
     safe_print("="*60)

@@ -569,7 +569,7 @@ async def login(
     response.set_cookie(
         key="access_token",
         value=tokens["access_token"],
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # 30 分钟
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # 1 小时
         httponly=True,  # 防止 XSS 攻击
         secure=secure_cookie,  # [*] v6.0.0修复:使用更准确的 secure 判断
         samesite="lax",  # 防止 CSRF 攻击

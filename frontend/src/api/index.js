@@ -1,4 +1,5 @@
 import axios from "axios";
+import { ElMessage } from "element-plus";
 
 // ⭐ v6.0.0新增：现代化认证系统改进
 // 延迟导入 authStore（使用 ESM import() 避免循环依赖，Vite 浏览器环境无 require）
@@ -28,6 +29,14 @@ const TIMEOUTS = {
 
 // ⭐ v6.0.0新增：不需要认证的接口列表
 const NO_AUTH_PATHS = ["/auth/login", "/auth/refresh", "/health"];
+
+/** 跳转登录页（兼容 Hash 路由：使用 #/login 而非 /login） */
+function redirectToLogin() {
+  const hash = window.location.hash;
+  if (hash === "#/login" || hash.startsWith("#/login?")) return;
+  ElMessage.warning("登录已过期，请重新登录");
+  window.location.href = `${window.location.origin}${window.location.pathname || "/"}#/login`;
+}
 
 // ⭐ v6.0.0新增：CSRF Token 名称（Phase 3: CSRF 保护）
 const CSRF_COOKIE_NAME = "csrf_token";
@@ -436,10 +445,7 @@ api.interceptors.response.use(
           localStorage.removeItem("refresh_token");
           localStorage.removeItem("user_info");
         }
-        // 跳转登录页（如果使用 Vue Router）
-        if (window.location.pathname !== "/login") {
-          window.location.href = "/login";
-        }
+        redirectToLogin();
         return Promise.reject(error);
       }
 
@@ -535,9 +541,7 @@ api.interceptors.response.use(
             localStorage.removeItem("refresh_token");
             localStorage.removeItem("user_info");
           }
-          if (window.location.pathname !== "/login") {
-            window.location.href = "/login";
-          }
+          redirectToLogin();
           return Promise.reject(refreshError);
         }
       } catch (refreshError) {
@@ -567,9 +571,7 @@ api.interceptors.response.use(
           localStorage.removeItem("refresh_token");
           localStorage.removeItem("user_info");
         }
-        if (window.location.pathname !== "/login") {
-          window.location.href = "/login";
-        }
+        redirectToLogin();
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
@@ -1926,6 +1928,15 @@ export default {
   },
   async deleteHrEmployeeShopAssignment(id) {
     return await this._delete(`/hr/employee-shop-assignments/${id}`);
+  },
+  async getHrShopProfitStatistics(params = {}) {
+    return await this._get("/hr/shop-profit-statistics", { params });
+  },
+  async getHrAnnualProfitStatistics(params = {}) {
+    return await this._get("/hr/annual-profit-statistics", { params });
+  },
+  async copyHrEmployeeShopAssignmentsFromPrevMonth(data) {
+    return await this._post("/hr/employee-shop-assignments/copy-from-prev-month", data);
   },
 
   // === 旧版绩效API（保留兼容性） ===

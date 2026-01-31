@@ -145,10 +145,10 @@ def main():
     print("[INFO] Phase 2: 数据库迁移 (alembic upgrade heads)...")
     code, out = compose_run(["run", "--rm", "--no-deps", "backend", "alembic", "upgrade", "heads"], timeout=120)
     if code != 0:
-        print("[WARN] 迁移返回非零（可能已有库且无新迁移）:")
+        print("[FAIL] Phase 2 迁移失败，终止验证")
         print(out[-1500:] if len(out) > 1500 else out)
-    else:
-        print("[OK] Phase 2 完成")
+        return 1
+    print("[OK] Phase 2 完成")
 
     # Phase 2.5: Bootstrap
     print("[INFO] Phase 2.5: Bootstrap...")

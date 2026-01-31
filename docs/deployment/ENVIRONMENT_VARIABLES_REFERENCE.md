@@ -89,7 +89,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 | 变量名 | 说明 | 默认值 | 推荐值（生产） |
 |--------|------|--------|--------------|
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access Token 过期时间（分钟） | `15` | `15-30` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access Token 过期时间（分钟） | `60` | `60`（1小时，减少工作被打断） |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh Token 过期时间（天） | `7` | `7-30` |
 
 #### 日志配置

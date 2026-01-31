@@ -45,6 +45,10 @@ def table_exists(conn, table_name: str, schema: str = 'public') -> bool:
 def upgrade():
     conn = op.get_bind()
 
+    # Ensure schemas exist (self-contained; no dependency on migration order)
+    conn.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
+    conn.execute(text("CREATE SCHEMA IF NOT EXISTS c_class"))
+
     # ========== Part 1: sales_targets (public -> a_class) ==========
     safe_print("[1/4] Migrating sales_targets to a_class...")
 

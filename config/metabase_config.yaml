@@ -122,6 +122,22 @@ questions:
       - business_overview
       - c_class
 
+  # 人员店铺归属 - 店铺月度销售额与利润统计
+  - name: "hr_shop_monthly_metrics"
+    display_name: "人员店铺归属 - 店铺月度销售额与利润统计"
+    description: "按店铺汇总当月销售额、利润、目标达成率（筛选粒度为月度）"
+    sql_file: "sql/metabase_questions/hr_shop_monthly_metrics.sql"
+    collection: "C类数据报表/人力资源"
+    parameters:
+      - name: month
+        display_name: "月份"
+        type: date
+        required: true
+    tags:
+      - hr
+      - shop_profit
+      - c_class
+
   # 店铺赛马
   - name: "business_overview_shop_racing"
     display_name: "业务概览 - 店铺赛马"
@@ -239,7 +255,7 @@ questions:
     display_name: "清仓排名"
     description: "清仓商品排名（滞销商品分析）"
     sql_file: "sql/metabase_questions/clearance_ranking.sql"
-    collection: "C类数据报表/清仓管理"
+    collection: "C类数据报表/业务概览"
     parameters:
       - name: start_date
         display_name: "开始日期"

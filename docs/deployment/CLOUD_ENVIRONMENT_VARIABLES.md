@@ -130,7 +130,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 | 变量名 | 说明 | 默认值 | 推荐值 |
 |--------|------|--------|--------|
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access Token过期时间（分钟） | `30` | `15-30` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access Token过期时间（分钟） | `60` | `60`（1小时） |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh Token过期时间（天） | `7` | `7-30` |
 
 ---
@@ -423,7 +423,7 @@ SECRET_KEY=${SECRET_KEY}
 JWT_SECRET_KEY=${JWT_SECRET_KEY}
 ACCOUNT_ENCRYPTION_KEY=${ACCOUNT_ENCRYPTION_KEY}
 JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+ACCESS_TOKEN_EXPIRE_MINUTES=60
 REFRESH_TOKEN_EXPIRE_DAYS=7
 
 # Playwright配置
