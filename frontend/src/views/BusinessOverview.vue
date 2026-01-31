@@ -13,11 +13,51 @@
       </div>
     </div>
 
+    <!-- 全局日期（页面级主控，各模块可跟随或手动覆盖） -->
+    <div class="global-date-bar">
+      <span class="global-date-label">全局日期</span>
+      <el-radio-group v-model="globalGranularity" size="small" @change="onGlobalGranularityChange">
+        <el-radio-button label="daily">日</el-radio-button>
+        <el-radio-button label="weekly">周</el-radio-button>
+        <el-radio-button label="monthly">月</el-radio-button>
+      </el-radio-group>
+      <el-date-picker
+        v-model="globalDate"
+        :type="globalDatePickerType"
+        :format="globalDatePickerFormat"
+        :value-format="globalDatePickerValueFormat"
+        :placeholder="globalDatePickerPlaceholder"
+        size="small"
+        class="global-date-picker"
+        @change="onGlobalDateChange"
+      />
+    </div>
+
     <!-- 核心KPI指标卡片 -->
     <div class="kpi-section">
       <!-- KPI 筛选器 -->
       <div class="kpi-filters">
         <span class="filter-label">核心KPI指标</span>
+        <el-tooltip
+          :content="
+            globalGranularity === 'monthly'
+              ? useGlobalDate.kpi
+                ? '已跟随全局日期（仅月粒度）'
+                : '点击恢复跟随全局'
+              : '仅月粒度时跟随，当前全局为' + (globalGranularity === 'weekly' ? '周' : '日')
+          "
+        >
+          <el-button
+            :type="useGlobalDate.kpi && globalGranularity === 'monthly' ? 'primary' : 'default'"
+            link
+            size="small"
+            :disabled="globalGranularity !== 'monthly'"
+            @click="syncModuleToGlobal('kpi')"
+          >
+            <el-icon><Link /></el-icon>
+            {{ useGlobalDate.kpi ? '跟随' : '恢复' }}
+          </el-button>
+        </el-tooltip>
         <el-date-picker
           v-model="kpiMonth"
           type="month"
@@ -26,7 +66,7 @@
           placeholder="选择月份"
           size="small"
           style="width: 140px"
-          @change="onKpiFilterChange"
+          @change="onKpiMonthChange"
         />
         <el-select
           v-model="kpiPlatform"
@@ -85,10 +125,21 @@
     <!-- 经营指标表格（门店经营） -->
     <div class="operational-metrics-section">
       <el-card class="chart-card" shadow="hover">
-        <template #header>
+            <template #header>
           <div class="card-header">
             <span>经营指标</span>
             <div class="header-controls">
+              <el-tooltip :content="useGlobalDate.operational ? '已跟随全局日期' : '点击恢复跟随全局'">
+                <el-button
+                  :type="useGlobalDate.operational ? 'primary' : 'default'"
+                  link
+                  size="small"
+                  @click="syncModuleToGlobal('operational')"
+                >
+                  <el-icon><Link /></el-icon>
+                  {{ useGlobalDate.operational ? '跟随' : '恢复' }}
+                </el-button>
+              </el-tooltip>
               <el-date-picker
                 v-model="operationalDate"
                 type="date"
@@ -97,7 +148,7 @@
                 placeholder="选择日期"
                 size="small"
                 style="width: 140px"
-                @change="loadOperationalMetrics"
+                @change="onOperationalDateChange"
               />
               <el-button
                 size="small"
@@ -209,13 +260,24 @@
         <el-col :xs="24" :lg="14">
           <el-card class="chart-card" shadow="hover">
             <template #header>
-              <div class="card-header">
+                <div class="card-header">
                 <span>数据对比分析</span>
                 <div class="header-controls">
+                  <el-tooltip :content="useGlobalDate.comparison ? '已跟随全局日期' : '点击恢复跟随全局'">
+                    <el-button
+                      :type="useGlobalDate.comparison ? 'primary' : 'default'"
+                      link
+                      size="small"
+                      @click="syncModuleToGlobal('comparison')"
+                    >
+                      <el-icon><Link /></el-icon>
+                      {{ useGlobalDate.comparison ? '跟随' : '恢复' }}
+                    </el-button>
+                  </el-tooltip>
                   <el-radio-group
                     v-model="comparisonGranularity"
                     size="small"
-                    @change="handleGranularityChange"
+                    @change="onComparisonGranularityChange"
                   >
                     <el-radio-button label="daily">日</el-radio-button>
                     <el-radio-button label="weekly">周</el-radio-button>
@@ -229,7 +291,7 @@
                     :placeholder="datePickerPlaceholder"
                     size="small"
                     style="margin-left: 12px; width: 150px"
-                    @change="loadComparisonData"
+                    @change="onComparisonDateChange"
                   />
                 </div>
               </div>
@@ -341,10 +403,21 @@
               <div class="card-header">
                 <span>店铺赛马</span>
                 <div class="header-controls">
+                  <el-tooltip :content="useGlobalDate.shopRacing ? '已跟随全局日期' : '点击恢复跟随全局'">
+                    <el-button
+                      :type="useGlobalDate.shopRacing ? 'primary' : 'default'"
+                      link
+                      size="small"
+                      @click="syncModuleToGlobal('shopRacing')"
+                    >
+                      <el-icon><Link /></el-icon>
+                      {{ useGlobalDate.shopRacing ? '跟随' : '恢复' }}
+                    </el-button>
+                  </el-tooltip>
                   <el-radio-group
                     v-model="shopRacingGranularity"
                     size="small"
-                    @change="handleShopRacingGranularityChange"
+                    @change="onShopRacingGranularityChange"
                   >
                     <el-radio-button label="daily">日</el-radio-button>
                     <el-radio-button label="weekly">周</el-radio-button>
@@ -367,7 +440,7 @@
                     :placeholder="shopRacingDatePickerPlaceholder"
                     size="small"
                     style="margin-left: 12px; width: 150px"
-                    @change="loadShopRacingData"
+                    @change="onShopRacingDateChange"
                   />
                   <el-button
                     size="small"
@@ -437,14 +510,25 @@
     <!-- 流量排名模块 -->
     <div class="traffic-ranking-section">
       <el-card class="chart-card" shadow="hover">
-        <template #header>
+            <template #header>
           <div class="card-header">
             <span>流量排名</span>
             <div class="header-controls">
+              <el-tooltip :content="useGlobalDate.trafficRanking ? '已跟随全局日期' : '点击恢复跟随全局'">
+                <el-button
+                  :type="useGlobalDate.trafficRanking ? 'primary' : 'default'"
+                  link
+                  size="small"
+                  @click="syncModuleToGlobal('trafficRanking')"
+                >
+                  <el-icon><Link /></el-icon>
+                  {{ useGlobalDate.trafficRanking ? '跟随' : '恢复' }}
+                </el-button>
+              </el-tooltip>
               <el-radio-group
                 v-model="trafficRankingGranularity"
                 size="small"
-                @change="loadTrafficRanking"
+                @change="onTrafficRankingGranularityChange"
               >
                 <el-radio-button label="daily">日</el-radio-button>
                 <el-radio-button label="weekly">周</el-radio-button>
@@ -463,10 +547,11 @@
                 v-model="trafficRankingDate"
                 :type="trafficRankingDatePickerType"
                 :format="trafficRankingDatePickerFormat"
+                :value-format="trafficRankingDatePickerValueFormat"
                 :placeholder="trafficRankingDatePickerPlaceholder"
                 size="small"
                 style="margin-left: 12px; width: 150px"
-                @change="loadTrafficRanking"
+                @change="onTrafficRankingDateChange"
               />
               <el-button
                 size="small"
@@ -756,17 +841,38 @@
         <el-col :span="12">
           <el-card class="chart-card" shadow="hover">
             <template #header>
-              <div class="card-header">
+                <div class="card-header">
                 <span>滞销清理排名（月度）</span>
                 <div class="header-controls">
+                  <el-tooltip
+                    :content="
+                      globalGranularity === 'monthly' || globalGranularity === 'weekly'
+                        ? useGlobalDate.clearance
+                          ? '已跟随全局日期（月/周粒度）'
+                          : '点击恢复跟随全局'
+                        : '仅月/周粒度时跟随，当前全局为日'
+                    "
+                  >
+                    <el-button
+                      :type="useGlobalDate.clearance && (globalGranularity === 'monthly' || globalGranularity === 'weekly') ? 'primary' : 'default'"
+                      link
+                      size="small"
+                      :disabled="globalGranularity === 'daily'"
+                      @click="syncModuleToGlobal('clearance')"
+                    >
+                      <el-icon><Link /></el-icon>
+                      {{ useGlobalDate.clearance ? '跟随' : '恢复' }}
+                    </el-button>
+                  </el-tooltip>
                   <el-date-picker
                     v-model="clearanceMonth"
                     type="month"
                     format="YYYY-MM"
+                    value-format="YYYY-MM"
                     placeholder="选择月份"
                     size="small"
                     style="width: 150px"
-                    @change="loadClearanceRanking('monthly')"
+                    @change="onClearanceMonthChange"
                   />
                   <el-button
                     size="small"
@@ -865,17 +971,37 @@
         <el-col :span="12">
           <el-card class="chart-card" shadow="hover">
             <template #header>
-              <div class="card-header">
+                <div class="card-header">
                 <span>滞销清理排名（周度）</span>
                 <div class="header-controls">
+                  <el-tooltip
+                    :content="
+                      globalGranularity === 'monthly' || globalGranularity === 'weekly'
+                        ? useGlobalDate.clearance
+                          ? '已跟随全局日期（月/周粒度）'
+                          : '点击恢复跟随全局'
+                        : '仅月/周粒度时跟随，当前全局为日'
+                    "
+                  >
+                    <el-button
+                      :type="useGlobalDate.clearance && (globalGranularity === 'monthly' || globalGranularity === 'weekly') ? 'primary' : 'default'"
+                      link
+                      size="small"
+                      :disabled="globalGranularity === 'daily'"
+                      @click="syncModuleToGlobal('clearance')"
+                    >
+                      <el-icon><Link /></el-icon>
+                      {{ useGlobalDate.clearance ? '跟随' : '恢复' }}
+                    </el-button>
+                  </el-tooltip>
                   <el-date-picker
                     v-model="clearanceWeek"
                     type="week"
-                    format="YYYY-WW"
+                    format="YYYY 第 ww 周"
                     placeholder="选择周"
                     size="small"
-                    style="width: 150px"
-                    @change="loadClearanceRanking('weekly')"
+                    style="width: 160px"
+                    @change="onClearanceWeekChange"
                   />
                   <el-button
                     size="small"
@@ -975,7 +1101,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick, computed } from "vue";
+import { ref, onMounted, nextTick, computed } from "vue";
 import { ElMessage } from "element-plus";
 import * as echarts from "echarts";
 import api from "@/api";
@@ -996,8 +1122,236 @@ const loadingKPI = ref(false);
 const loadingComparison = ref(false);
 const loadingInventory = ref(false);
 
-// KPI 筛选参数
-const kpiMonth = ref(new Date()); // 默认当前月份
+// 全局日期（页面级主控）
+const globalGranularity = ref("monthly");
+const globalDate = ref(
+  (() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+  })(),
+);
+const useGlobalDate = ref({
+  comparison: true,
+  shopRacing: true,
+  trafficRanking: true,
+  operational: true,
+  kpi: true, // 仅当全局为月时同步
+  clearance: true, // 月/周分别对齐
+});
+const _syncingFromGlobal = ref(false);
+
+// 全局日期选择器类型与格式
+const globalDatePickerType = computed(() => {
+  if (globalGranularity.value === "monthly") return "month";
+  if (globalGranularity.value === "weekly") return "week";
+  return "date";
+});
+const globalDatePickerFormat = computed(() => {
+  if (globalGranularity.value === "monthly") return "YYYY-MM";
+  if (globalGranularity.value === "weekly") return "YYYY 第 ww 周";
+  return "YYYY-MM-DD";
+});
+const globalDatePickerValueFormat = computed(() => {
+  if (globalGranularity.value === "monthly") return "YYYY-MM";
+  if (globalGranularity.value === "weekly") return undefined;
+  return "YYYY-MM-DD";
+});
+const globalDatePickerPlaceholder = computed(() => {
+  if (globalGranularity.value === "monthly") return "选择月份";
+  if (globalGranularity.value === "weekly") return "选择周";
+  return "选择日期";
+});
+
+// 将全局日期转为 YYYY-MM-DD（用于数据对比、店铺赛马、流量排名）
+function globalToDateStr() {
+  const val = globalDate.value;
+  if (globalGranularity.value === "monthly") {
+    const s = typeof val === "string" ? val : "";
+    return s.length >= 7 ? `${s}-01` : "";
+  }
+  if (globalGranularity.value === "weekly") {
+    if (val instanceof Date && !Number.isNaN(val.getTime())) {
+      const d = val;
+      const dayOfWeek = d.getDay();
+      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      const mon = new Date(d);
+      mon.setDate(d.getDate() + diff);
+      const y = mon.getFullYear();
+      const m = String(mon.getMonth() + 1).padStart(2, "0");
+      const day = String(mon.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+    return "";
+  }
+  if (typeof val === "string" && val.length >= 10) return val.substring(0, 10);
+  if (val instanceof Date && !Number.isNaN(val.getTime())) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, "0");
+    const d = String(val.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  return "";
+}
+
+// 经营指标映射：日→所选日；周→周一；月→1日
+function globalToOperationalDateStr() {
+  const val = globalDate.value;
+  if (globalGranularity.value === "monthly") {
+    const s = typeof val === "string" ? val : "";
+    return s.length >= 7 ? `${s}-01` : "";
+  }
+  if (globalGranularity.value === "weekly") {
+    if (val instanceof Date && !Number.isNaN(val.getTime())) {
+      const d = val;
+      const dayOfWeek = d.getDay();
+      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      const mon = new Date(d);
+      mon.setDate(d.getDate() + diff);
+      const y = mon.getFullYear();
+      const m = String(mon.getMonth() + 1).padStart(2, "0");
+      const day = String(mon.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+    return "";
+  }
+  return globalToDateStr();
+}
+
+// 应用全局日期到各跟随模块
+function applyGlobalToModules() {
+  _syncingFromGlobal.value = true;
+  const dateStr = globalToDateStr();
+  const opDateStr = globalToOperationalDateStr();
+  const gr = globalGranularity.value;
+
+  if (useGlobalDate.value.comparison && dateStr) {
+    comparisonGranularity.value = gr;
+    if (gr === "monthly") {
+      comparisonDate.value = globalDate.value;
+    } else if (gr === "weekly") {
+      const [y, m, d] = dateStr.split("-").map(Number);
+      comparisonDate.value = new Date(y, m - 1, d);
+    } else {
+      comparisonDate.value = dateStr;
+    }
+  }
+  if (useGlobalDate.value.shopRacing && dateStr) {
+    shopRacingGranularity.value = gr;
+    if (gr === "monthly") {
+      shopRacingDate.value = globalDate.value;
+    } else if (gr === "weekly") {
+      const [y, m, d] = dateStr.split("-").map(Number);
+      shopRacingDate.value = new Date(y, m - 1, d);
+    } else {
+      shopRacingDate.value = dateStr;
+    }
+  }
+  if (useGlobalDate.value.trafficRanking && dateStr) {
+    trafficRankingGranularity.value = gr;
+    if (gr === "monthly") {
+      trafficRankingDate.value = globalDate.value;
+    } else if (gr === "weekly") {
+      const [y, m, d] = dateStr.split("-").map(Number);
+      trafficRankingDate.value = new Date(y, m - 1, d);
+    } else {
+      trafficRankingDate.value = dateStr;
+    }
+  }
+  if (useGlobalDate.value.operational && opDateStr) {
+    operationalDate.value = opDateStr;
+  }
+  // KPI 仅当全局为月时同步
+  if (gr === "monthly" && useGlobalDate.value.kpi) {
+    const monthVal = globalDate.value;
+    if (typeof monthVal === "string" && monthVal.length >= 7) {
+      kpiMonth.value = `${monthVal}-01`;
+    }
+  }
+  // 清仓排名：仅当全局为月或周时同步（与 KPI 类似）
+  if (useGlobalDate.value.clearance && (gr === "monthly" || gr === "weekly")) {
+    if (gr === "monthly" && dateStr) {
+      const [y, m] = dateStr.split("-").map(Number);
+      clearanceMonth.value = `${y}-${String(m).padStart(2, "0")}`;
+      clearanceWeek.value = new Date(y, m - 1, 1); // 月初 = 该月第一周
+    } else if (gr === "weekly" && dateStr) {
+      const [y, m, d] = dateStr.split("-").map(Number);
+      clearanceWeek.value = new Date(y, m - 1, d);
+      clearanceMonth.value = `${y}-${String(m).padStart(2, "0")}`;
+    }
+  }
+
+  nextTick(() => {
+    _syncingFromGlobal.value = false;
+  });
+}
+
+// 加载跟随全局的模块数据（防抖后调用）
+let _globalDebounceTimer = null;
+function loadModulesAfterGlobalChange() {
+  if (_globalDebounceTimer) clearTimeout(_globalDebounceTimer);
+  _globalDebounceTimer = setTimeout(() => {
+    _globalDebounceTimer = null;
+    const tasks = [];
+    if (useGlobalDate.value.comparison) tasks.push(loadComparisonData());
+    if (useGlobalDate.value.shopRacing) tasks.push(loadShopRacingData());
+    if (useGlobalDate.value.trafficRanking) tasks.push(loadTrafficRanking());
+    if (useGlobalDate.value.operational) tasks.push(loadOperationalMetrics());
+    if (useGlobalDate.value.kpi && globalGranularity.value === "monthly") tasks.push(loadKPIData());
+    if (useGlobalDate.value.clearance && (globalGranularity.value === "monthly" || globalGranularity.value === "weekly")) {
+      tasks.push(loadClearanceRanking("monthly"));
+      tasks.push(loadClearanceRanking("weekly"));
+    }
+    if (tasks.length) Promise.all(tasks).catch(() => {});
+  }, 250);
+}
+
+function onGlobalGranularityChange() {
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, "0");
+  const d = String(today.getDate()).padStart(2, "0");
+  if (globalGranularity.value === "monthly") {
+    globalDate.value = `${y}-${m}`;
+  } else if (globalGranularity.value === "weekly") {
+    const dayOfWeek = today.getDay();
+    const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const mon = new Date(today);
+    mon.setDate(today.getDate() + diff);
+    mon.setHours(0, 0, 0, 0);
+    globalDate.value = mon;
+  } else {
+    globalDate.value = `${y}-${m}-${d}`;
+  }
+  applyGlobalToModules();
+  loadModulesAfterGlobalChange();
+}
+
+function onGlobalDateChange() {
+  applyGlobalToModules();
+  loadModulesAfterGlobalChange();
+}
+
+function syncModuleToGlobal(module) {
+  useGlobalDate.value[module] = true;
+  applyGlobalToModules();
+  if (module === "comparison") loadComparisonData();
+  else if (module === "shopRacing") loadShopRacingData();
+  else if (module === "trafficRanking") loadTrafficRanking();
+  else if (module === "operational") loadOperationalMetrics();
+  else if (module === "kpi" && globalGranularity.value === "monthly") loadKPIData();
+  else if (module === "clearance" && (globalGranularity.value === "monthly" || globalGranularity.value === "weekly")) {
+    loadClearanceRanking("monthly");
+    loadClearanceRanking("weekly");
+  }
+}
+
+// KPI 筛选参数（默认与全局一致：当前月 YYYY-MM-01）
+const kpiMonth = ref(
+  (() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-01`;
+  })(),
+);
 const kpiPlatform = ref(""); // 默认全部平台
 
 // KPI数据（7 张卡片：转化率、客流量、客单价、GMV、订单数、连带率、人效）
@@ -1074,13 +1428,13 @@ const kpiData = ref([
   },
 ]);
 
-// 数据对比（日期使用 YYYY-MM-DD 字符串，避免 toISOString 的 UTC 偏差）
+// 数据对比（默认跟随全局：月）
 const comparisonChart = ref(null);
-const comparisonGranularity = ref("daily");
+const comparisonGranularity = ref("monthly");
 const comparisonDate = ref(
   (() => {
     const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   })(),
 );
 const comparisonData = ref({
@@ -1245,9 +1599,16 @@ const trafficRankingDatePickerPlaceholder = computed(() => {
     return "选择日期";
   }
 });
+// 流量排名 value-format：避免 toISOString UTC 偏差
+const trafficRankingDatePickerValueFormat = computed(() => {
+  if (trafficRankingGranularity.value === "monthly") return "YYYY-MM";
+  if (trafficRankingGranularity.value === "weekly") return undefined;
+  return "YYYY-MM-DD";
+});
 
-// 处理粒度变化（日/月为字符串，周为 Date 对象，与选择器返回类型一致）
-const handleGranularityChange = () => {
+// 数据对比：粒度/日期变更（用户手动修改时取消跟随全局）
+const onComparisonGranularityChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.comparison = false;
   const today = new Date();
   const y = today.getFullYear();
   const m = String(today.getMonth() + 1).padStart(2, "0");
@@ -1255,7 +1616,6 @@ const handleGranularityChange = () => {
   if (comparisonGranularity.value === "monthly") {
     comparisonDate.value = `${y}-${m}`;
   } else if (comparisonGranularity.value === "weekly") {
-    // 周粒度：设置为 Date 对象（当前周的周一），与 Element Plus 周选择器返回类型一致
     const dayOfWeek = today.getDay();
     const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
     const mon = new Date(today);
@@ -1265,6 +1625,10 @@ const handleGranularityChange = () => {
   } else {
     comparisonDate.value = `${y}-${m}-${d}`;
   }
+  loadComparisonData();
+};
+const onComparisonDateChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.comparison = false;
   loadComparisonData();
 };
 
@@ -1299,7 +1663,8 @@ const shopRacingDatePickerValueFormat = computed(() => {
   if (shopRacingGranularity.value === "weekly") return undefined; // 周选择器返回 Date，在 loadShopRacingData 中处理
   return "YYYY-MM-DD";
 });
-const handleShopRacingGranularityChange = () => {
+const onShopRacingGranularityChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.shopRacing = false;
   const today = new Date();
   const y = today.getFullYear();
   const m = String(today.getMonth() + 1).padStart(2, "0");
@@ -1316,6 +1681,10 @@ const handleShopRacingGranularityChange = () => {
   } else {
     shopRacingDate.value = `${y}-${m}-${d}`;
   }
+  loadShopRacingData();
+};
+const onShopRacingDateChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.shopRacing = false;
   loadShopRacingData();
 };
 const racingGroupBy = ref("shop");
@@ -1338,19 +1707,73 @@ const inventorySummary = ref({
 });
 const inventoryBacklogProducts = ref([]);
 
-// 流量排名数据
+// 流量排名数据（默认跟随全局：月）
 const trafficRankingGranularity = ref("monthly");
 const trafficRankingDimension = ref("shop");
-const trafficRankingDate = ref(new Date());
+const trafficRankingDate = ref(
+  (() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+  })(),
+);
 const trafficRankingData = ref([]);
 const loadingTrafficRanking = ref(false);
 
-// 滞销清理排名数据
+const onTrafficRankingGranularityChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.trafficRanking = false;
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, "0");
+  const d = String(today.getDate()).padStart(2, "0");
+  if (trafficRankingGranularity.value === "monthly") {
+    trafficRankingDate.value = `${y}-${m}`;
+  } else if (trafficRankingGranularity.value === "weekly") {
+    const dayOfWeek = today.getDay();
+    const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const mon = new Date(today);
+    mon.setDate(today.getDate() + diff);
+    mon.setHours(0, 0, 0, 0);
+    trafficRankingDate.value = mon;
+  } else {
+    trafficRankingDate.value = `${y}-${m}-${d}`;
+  }
+  loadTrafficRanking();
+};
+const onTrafficRankingDateChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.trafficRanking = false;
+  loadTrafficRanking();
+};
+
+// 滞销清理排名数据（默认与全局一致）
 const loadingClearanceRanking = ref(false);
 const monthlyClearanceRanking = ref([]);
 const weeklyClearanceRanking = ref([]);
-const clearanceMonth = ref(new Date());
-const clearanceWeek = ref(new Date());
+const clearanceMonth = ref(
+  (() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+  })(),
+);
+const clearanceWeek = ref(
+  (() => {
+    const t = new Date();
+    const dayOfWeek = t.getDay();
+    const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const mon = new Date(t);
+    mon.setDate(t.getDate() + diff);
+    mon.setHours(0, 0, 0, 0);
+    return mon;
+  })(),
+);
+
+const onClearanceMonthChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.clearance = false;
+  loadClearanceRanking("monthly");
+};
+const onClearanceWeekChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.clearance = false;
+  loadClearanceRanking("weekly");
+};
 
 // 经营指标
 const loadingOperational = ref(false);
@@ -1443,6 +1866,13 @@ const getTimeGapTagType = (gap) => {
 };
 
 // 核心KPI 筛选变化时同时刷新 KPI 与经营指标
+const onKpiMonthChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.kpi = false;
+  loadKPIData();
+  loadComparisonData();
+  loadOperationalMetrics();
+};
+
 const onKpiFilterChange = () => {
   loadKPIData();
   loadComparisonData();
@@ -1870,6 +2300,11 @@ const loadShopRacingData = async () => {
   }
 };
 
+const onOperationalDateChange = () => {
+  if (!_syncingFromGlobal.value) useGlobalDate.value.operational = false;
+  loadOperationalMetrics();
+};
+
 // 加载经营指标数据（使用独立的日期选择器）
 const loadOperationalMetrics = async () => {
   loadingOperational.value = true;
@@ -1904,27 +2339,37 @@ const loadOperationalMetrics = async () => {
   }
 };
 
-// 加载流量排名
+// 加载流量排名（使用本地日期拼接，避免 toISOString UTC 偏差）
 const loadTrafficRanking = async () => {
   loadingTrafficRanking.value = true;
   try {
-    // 根据粒度确定日期值
-    let dateValue = trafficRankingDate.value;
-    if (trafficRankingGranularity.value === "monthly") {
-      // 月份选择器返回的是月份第一天
-      dateValue = new Date(dateValue.getFullYear(), dateValue.getMonth(), 1);
-    } else if (trafficRankingGranularity.value === "weekly") {
-      // 周选择器需要转换为周的第一天（周一）
-      const dayOfWeek = dateValue.getDay();
-      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-      dateValue = new Date(dateValue);
-      dateValue.setDate(dateValue.getDate() + diff);
+    let dateStr = "";
+    const val = trafficRankingDate.value;
+    const gr = trafficRankingGranularity.value;
+    if (typeof val === "string") {
+      dateStr = val.length === 7 ? `${val}-01` : val.substring(0, 10);
+    } else if (val instanceof Date && !Number.isNaN(val.getTime())) {
+      let d = val;
+      if (gr === "weekly") {
+        const dayOfWeek = d.getDay();
+        const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        d = new Date(d);
+        d.setDate(d.getDate() + diff);
+      }
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      dateStr = `${y}-${m}-${day}`;
+    }
+    if (!dateStr) {
+      trafficRankingData.value = [];
+      return;
     }
 
     const params = {
-      granularity: trafficRankingGranularity.value,
+      granularity: gr,
       dimension: trafficRankingDimension.value,
-      date: dateValue.toISOString().split("T")[0], // 后端API使用date_value，但前端统一使用date
+      date: dateStr,
     };
 
     const response = await api.getBusinessOverviewTrafficRanking(params);
@@ -1970,22 +2415,26 @@ const loadInventoryBacklog = async () => {
   }
 };
 
-// 刷新所有数据
-// 加载滞销清理排名
+// 加载滞销清理排名（clearanceMonth 支持 YYYY-MM 字符串，clearanceWeek 支持 YYYY-MM-DD 字符串或 Date）
 const loadClearanceRanking = async (granularity) => {
   loadingClearanceRanking.value = true;
   try {
     const params = {};
     if (granularity === "monthly" && clearanceMonth.value) {
-      const month = clearanceMonth.value.getMonth() + 1;
-      const year = clearanceMonth.value.getFullYear();
-      params.month = `${year}-${String(month).padStart(2, "0")}`;
+      const val = clearanceMonth.value;
+      if (typeof val === "string" && val.length >= 7) {
+        params.month = val.substring(0, 7);
+      } else if (val instanceof Date) {
+        params.month = `${val.getFullYear()}-${String(val.getMonth() + 1).padStart(2, "0")}`;
+      }
     }
     if (granularity === "weekly" && clearanceWeek.value) {
-      // 计算周数
-      const week = getWeekNumber(clearanceWeek.value);
-      const year = clearanceWeek.value.getFullYear();
-      params.week = `${year}W${String(week).padStart(2, "0")}`;
+      const val = clearanceWeek.value;
+      const d = typeof val === "string" ? new Date(val) : val;
+      if (d instanceof Date && !Number.isNaN(d.getTime())) {
+        const week = getWeekNumber(d);
+        params.week = `${d.getFullYear()}W${String(week).padStart(2, "0")}`;
+      }
     }
 
     params.granularity = granularity;
@@ -2038,11 +2487,10 @@ const refreshData = async () => {
   }
 };
 
-// 生命周期
+// 生命周期：先应用全局日期到各模块，再加载数据（避免默认值加载后又被全局覆盖导致重复请求）
 onMounted(() => {
-  // 立即初始化表格结构（即使没有数据也要显示7个指标行）
   updateComparisonTable();
-  // 然后加载真实数据
+  applyGlobalToModules();
   refreshData();
 });
 </script>
@@ -2058,11 +2506,33 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   padding: 24px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 12px;
   color: white;
+}
+
+.global-date-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 12px 16px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.global-date-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-right: 4px;
+}
+
+.global-date-picker {
+  width: 150px;
 }
 
 .header-content .page-subtitle {

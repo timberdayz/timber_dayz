@@ -63,6 +63,7 @@ import { User, ArrowDown, Setting, SwitchButton, UserFilled, Briefcase, Money, C
 import { useUserStore } from '@/stores/user'
 import { useAuthStore } from '@/stores/auth'
 import authApi from '@/api/auth'
+import { ROLE_CONFIG, normalizeRoleCode, applyRolePermissions as applyRolePermissionsFromConfig } from '@/config/rolePermissions'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -70,190 +71,6 @@ const authStore = useAuthStore()
 
 // 当前激活的角色（从localStorage读取，默认为用户的第一个角色）
 const currentActiveRole = ref(localStorage.getItem('activeRole') || '')
-
-// 角色配置（根据2026-01-08讨论的权限矩阵）
-// 必须在 normalizeRoleCode 之前定义，避免初始化顺序错误
-const ROLE_CONFIG = {
-  admin: {
-    name: '管理员',
-    icon: 'UserFilled',
-    // ✅ 管理员拥有所有权限
-    permissions: [
-      // 工作台
-      'business-overview',
-      
-      // 数据采集与管理（仅管理员）
-      'collection-config', 'collection-tasks', 'collection-history',
-      'component-recorder', 'component-versions',
-      'data-sync', 'data-quarantine', 'field-mapping',
-      
-      // 产品与库存
-      'product-management', 'inventory-management', 'inventory-dashboard-v3',
-      
-      // 采购管理
-      'purchase-orders', 'grn-management', 'vendor-management', 'invoice-management',
-      
-      // 销售与分析
-      'sales-dashboard-v3', 'sales-analysis', 'customer-management', 'order-management',
-      'target:read', 'config:sales-targets',  // ✅ 目标管理（仅管理员）
-      
-      // 财务管理
-      'financial-management', 'expense-management', 'finance-reports', 
-      'fx-management', 'fiscal-periods',
-      
-      // 店铺运营
-      'store-management', 'store-analytics', 'account-management', 'account-alignment',
-      
-      // 报表中心
-      'sales-reports', 'inventory-reports', 'finance-reports-detail', 
-      'vendor-reports', 'custom-reports',
-      
-      // 人力资源
-      'human-resources', 'employee-management', 'attendance-management', 'performance:read',
-      
-      // 审批中心
-      'my-tasks', 'my-requests', 'approval-history', 'workflow-config',
-      
-      // 消息中心
-      'system-notifications', 'alerts', 'message-settings',
-      
-      // 系统管理（仅管理员）
-      'user-management', 'role-management', 'permission-management',
-      'system-settings', 'system-logs', 'data-backup', 'system-maintenance', 'notification-config',
-      
-      // 个人设置
-      'personal-settings',
-      
-      // 帮助中心
-      'user-guide', 'video-tutorials', 'faq',
-      
-      // 兼容旧权限标识
-      'data-governance', 'sales-dashboard', 'data-collection', 'procurement',
-      'report-center', 'approval-center', 'message-center', 'help-center',
-      'notifications', 'product-category', 'inventory-alert'
-    ]
-  },
-  manager: {
-    name: '主管',
-    icon: 'Briefcase',
-    // ✅ 主管：业务管理、审批、配置权限（不包括系统管理、数据采集、目标管理）
-    permissions: [
-      // 工作台
-      'business-overview',
-      
-      // 销售与分析
-      'sales-dashboard-v3', 'sales-analysis', 'customer-management', 'order-management',
-      'sales-campaign-management',
-      
-      // 库存管理
-      'inventory-dashboard-v3',
-      
-      // 店铺管理
-      'store-management', 'store-analytics',
-      
-      // 账号管理（主管可访问）
-      'account-management', 'account-alignment',
-      
-      // 采购管理
-      'purchase-orders', 'grn-management', 'vendor-management',
-      
-      // 财务管理
-      'financial-management', 'expense-management', 'finance-reports',
-      
-      // 报表中心
-      'sales-reports', 'inventory-reports', 'vendor-reports',
-      
-      // 人力资源
-      'human-resources', 'employee-management', 'attendance-management', 'performance:read',
-      
-      // 审批中心
-      'my-tasks', 'my-requests', 'approval-history',
-      
-      // 消息中心
-      'system-notifications', 'alerts', 'message-settings',
-      
-      // 个人设置
-      'personal-settings',
-      
-      // 兼容旧权限标识
-      'sales-dashboard', 'procurement', 'report-center', 'approval-center',
-      'message-center', 'notifications'
-    ]
-  },
-  operator: {
-    name: '操作员',
-    icon: 'User',
-    // ✅ 操作员：基础业务操作权限（不包括账号管理、目标管理、财务管理、数据同步）
-    permissions: [
-      // 工作台
-      'business-overview',
-      
-      // 销售与分析
-      'sales-dashboard-v3', 'customer-management', 'order-management',
-      'sales-campaign-management',
-      
-      // 库存管理
-      'inventory-dashboard-v3',
-      
-      // 店铺管理
-      'store-management',
-      
-      // 人力资源（查看）
-      'human-resources', 'performance:read',
-      
-      // 消息中心
-      'system-notifications', 'alerts', 'message-settings',
-      
-      // 个人设置
-      'personal-settings',
-      
-      // 兼容旧权限标识
-      'sales-dashboard', 'message-center', 'notifications'
-    ]
-  },
-  finance: {
-    name: '财务',
-    icon: 'Money',
-    // ✅ 财务：财务和销售数据查看权限（不包括库存管理、店铺管理、账号管理）
-    permissions: [
-      // 销售数据查看
-      'sales-analysis', 'sales-dashboard-v3', 'order-management',
-      
-      // 财务管理
-      'financial-management', 'expense-management', 'finance-reports', 'finance-reports-detail',
-      'invoice-management', 'fiscal-periods',
-      
-      // 消息中心
-      'system-notifications', 'alerts', 'message-settings',
-      
-      // 个人设置
-      'personal-settings',
-      
-      // 兼容旧权限标识
-      'sales-dashboard', 'report-center', 'message-center', 'notifications'
-    ]
-  }
-}
-
-// 兼容：角色可能来自后端 role_name（如中文）或 role_code（如 admin/operator）
-const normalizeRoleCode = (roleCode) => {
-  if (!roleCode) return ''
-  const v = String(roleCode).trim()
-  if (ROLE_CONFIG[v]) return v
-  const map = {
-    '管理员': 'admin',
-    '主管': 'manager',
-    '经理': 'manager',
-    '操作员': 'operator',
-    '运营': 'operator',
-    '财务': 'finance'
-  }
-  if (map[v]) return map[v]
-  // 常见变体处理
-  const lower = v.toLowerCase()
-  if (ROLE_CONFIG[lower]) return lower
-  return v
-}
 
 // 统一 currentActiveRole（避免保存了不可识别的角色导致菜单权限为空）
 if (currentActiveRole.value) {
@@ -447,24 +264,10 @@ const loadUserInfo = async () => {
   }
 }
 
-// 应用角色权限
+// 应用角色权限（使用共享配置，并更新显示名称）
 const applyRolePermissions = (roleCode) => {
-  const roleConfig = ROLE_CONFIG[roleCode]
-  if (!roleConfig) {
-    console.warn(`角色配置不存在: ${roleCode}`)
-    return
-  }
-  
-  // 更新权限
-  userStore.permissions = roleConfig.permissions
-  
-  // 保存到localStorage
-  localStorage.setItem('permissions', JSON.stringify(roleConfig.permissions))
-  
-  // 更新用户显示名称（不修改数据库，只修改前端显示）
-  userStore.updateUserInfo({
-    activeRole: roleCode
-  })
+  if (!applyRolePermissionsFromConfig(userStore, roleCode)) return
+  userStore.updateUserInfo({ activeRole: roleCode })
 }
 
 // 切换角色

@@ -44,8 +44,11 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('user_info', JSON.stringify(user.value))
       
       // ✅ 2026-01-08: 同步用户信息到userStore（用于权限管理）
+      // ⭐ 2026-01-30修复：登录时立即应用角色权限，避免操作员等非管理员跳转失败
+      // 原因：登录页未挂载 SimpleAccountSwitcher，路由守卫检查 hasPermission 时 permissions 为空
       if (userInfo && userInfo.roles) {
         const { useUserStore } = await import('@/stores/user')
+        const { normalizeRoleCode, applyRolePermissions } = await import('@/config/rolePermissions')
         const userStore = useUserStore()
         userStore.updateUserInfo({
           id: userInfo.id,
@@ -56,19 +59,14 @@ export const useAuthStore = defineStore('auth', () => {
         })
         userStore.roles = userInfo.roles
         userStore.token = accessToken
-        
-      // 设置默认激活角色：优先 admin，其次第一个角色
-      // ✅ 2026-01-24修复：规范化角色代码（后端可能返回中文角色名）
-      if (userInfo.roles.length > 0) {
-        const normalizeRole = (role) => {
-          if (!role) return ''
-          const map = { '管理员': 'admin', '主管': 'manager', '经理': 'manager', '操作员': 'operator', '运营': 'operator', '财务': 'finance' }
-          return map[role] || role
-        }
-        const normalizedRoles = userInfo.roles.map(normalizeRole)
-        const preferredRole = normalizedRoles.includes('admin') ? 'admin' : normalizedRoles[0]
+
+        // 设置默认激活角色：优先 admin，其次第一个角色
+        const normalizedRoles = userInfo.roles.map(normalizeRoleCode).filter(Boolean)
+        const preferredRole = normalizedRoles.includes('admin') ? 'admin' : (normalizedRoles[0] || 'operator')
         localStorage.setItem('activeRole', preferredRole)
-      }
+
+        // 立即应用该角色的权限，确保路由守卫 hasPermission 通过
+        applyRolePermissions(userStore, preferredRole)
       }
       
       ElMessage.success('登录成功')
