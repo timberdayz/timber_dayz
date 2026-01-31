@@ -125,7 +125,7 @@ questions:
   # 店铺赛马
   - name: "business_overview_shop_racing"
     display_name: "业务概览 - 店铺赛马"
-    description: "店铺/平台排名对比（GMV排序）"
+    description: "店铺/账号排名对比（GMV排序）；日期约定与数据对比一致（日/周/月）；shop_id 为空显示 unknown店铺"
     sql_file: "sql/metabase_questions/business_overview_shop_racing.sql"
     collection: "C类数据报表/业务概览"
     parameters:
@@ -143,10 +143,6 @@ questions:
         type: text
         required: false
         default: "shop"
-      - name: platforms
-        display_name: "平台"
-        type: text
-        required: false
     tags:
       - shop_racing
       - ranking

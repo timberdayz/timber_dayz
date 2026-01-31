@@ -334,7 +334,7 @@
           </el-card>
         </el-col>
 
-        <!-- 右侧：店铺赛马 -->
+        <!-- 右侧：店铺赛马（日/周/月 + 日期 + 筛选维度：店铺或账号） -->
         <el-col :xs="24" :lg="10">
           <el-card class="chart-card" shadow="hover">
             <template #header>
@@ -342,17 +342,45 @@
                 <span>店铺赛马</span>
                 <div class="header-controls">
                   <el-radio-group
+                    v-model="shopRacingGranularity"
+                    size="small"
+                    @change="handleShopRacingGranularityChange"
+                  >
+                    <el-radio-button label="daily">日</el-radio-button>
+                    <el-radio-button label="weekly">周</el-radio-button>
+                    <el-radio-button label="monthly">月</el-radio-button>
+                  </el-radio-group>
+                  <el-radio-group
                     v-model="racingGroupBy"
                     size="small"
+                    style="margin-left: 12px"
                     @change="loadShopRacingData"
                   >
                     <el-radio-button label="shop">店铺</el-radio-button>
-                    <el-radio-button label="platform">平台</el-radio-button>
+                    <el-radio-button label="platform">账号</el-radio-button>
                   </el-radio-group>
+                  <el-date-picker
+                    v-model="shopRacingDate"
+                    :type="shopRacingDatePickerType"
+                    :format="shopRacingDatePickerFormat"
+                    :placeholder="shopRacingDatePickerPlaceholder"
+                    size="small"
+                    style="margin-left: 12px; width: 150px"
+                    @change="loadShopRacingData"
+                  />
+                  <el-button
+                    size="small"
+                    @click="loadShopRacingData"
+                    :loading="loadingShopRacing"
+                    style="margin-left: 12px"
+                  >
+                    <el-icon><Refresh /></el-icon>
+                    刷新
+                  </el-button>
                 </div>
               </div>
             </template>
-            <div class="racing-container">
+            <div class="racing-container" v-loading="loadingShopRacing">
               <el-table
                 :data="shopRacingData"
                 stripe
@@ -450,6 +478,12 @@
             </div>
           </div>
         </template>
+        <div
+          v-if="trafficRankingData.length && trafficRankingData.every((r) => (r.name === r.platform_code) || r.name === '平台汇总')"
+          class="traffic-ranking-hint"
+        >
+          当前数据未关联店铺，显示为平台汇总；关联店铺后可按店铺查看排名。
+        </div>
         <el-table
           :data="trafficRankingData"
           stripe
@@ -527,11 +561,14 @@
             <template #default="{ row }">
               <span
                 :class="
-                  row.uv_change_rate >= 0 ? 'text-success' : 'text-danger'
+                  (row.uv_change_rate ?? 0) >= 0 ? 'text-success' : 'text-danger'
                 "
               >
-                {{ row.uv_change_rate >= 0 ? "+" : ""
-                }}{{ row.uv_change_rate.toFixed(2) }}%
+                {{
+                  row.uv_change_rate != null && !Number.isNaN(Number(row.uv_change_rate))
+                    ? (row.uv_change_rate >= 0 ? '+' : '') + Number(row.uv_change_rate).toFixed(2) + '%'
+                    : '--'
+                }}
               </span>
             </template>
           </el-table-column>
@@ -545,11 +582,14 @@
             <template #default="{ row }">
               <span
                 :class="
-                  row.pv_change_rate >= 0 ? 'text-success' : 'text-danger'
+                  (row.pv_change_rate ?? 0) >= 0 ? 'text-success' : 'text-danger'
                 "
               >
-                {{ row.pv_change_rate >= 0 ? "+" : ""
-                }}{{ row.pv_change_rate.toFixed(2) }}%
+                {{
+                  row.pv_change_rate != null && !Number.isNaN(Number(row.pv_change_rate))
+                    ? (row.pv_change_rate >= 0 ? '+' : '') + Number(row.pv_change_rate).toFixed(2) + '%'
+                    : '--'
+                }}
               </span>
             </template>
           </el-table-column>
@@ -560,7 +600,7 @@
             align="right"
           >
             <template #default="{ row }">
-              {{ formatNumber(row.compare_unique_visitors) }}
+              {{ row.compare_unique_visitors != null ? formatNumber(row.compare_unique_visitors) : '--' }}
             </template>
           </el-table-column>
           <el-table-column
@@ -570,7 +610,7 @@
             align="right"
           >
             <template #default="{ row }">
-              {{ formatNumber(row.compare_page_views) }}
+              {{ row.compare_page_views != null ? formatNumber(row.compare_page_views) : '--' }}
             </template>
           </el-table-column>
         </el-table>
@@ -1227,9 +1267,46 @@ const handleGranularityChange = () => {
   loadComparisonData();
 };
 
-// 店铺赛马
+// 店铺赛马（独立日/周/月 + 日期，与数据对比约定一致）
+const shopRacingGranularity = ref("monthly");
+const shopRacingDate = ref(new Date());
+const shopRacingDatePickerType = computed(() => {
+  if (shopRacingGranularity.value === "monthly") return "month";
+  if (shopRacingGranularity.value === "weekly") return "week";
+  return "date";
+});
+const shopRacingDatePickerFormat = computed(() => {
+  if (shopRacingGranularity.value === "monthly") return "YYYY-MM";
+  if (shopRacingGranularity.value === "weekly") return "YYYY-WW";
+  return "YYYY-MM-DD";
+});
+const shopRacingDatePickerPlaceholder = computed(() => {
+  if (shopRacingGranularity.value === "monthly") return "选择月份";
+  if (shopRacingGranularity.value === "weekly") return "选择周";
+  return "选择日期";
+});
+const handleShopRacingGranularityChange = () => {
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, "0");
+  const d = String(today.getDate()).padStart(2, "0");
+  if (shopRacingGranularity.value === "monthly") {
+    shopRacingDate.value = `${y}-${m}`;
+  } else if (shopRacingGranularity.value === "weekly") {
+    const dayOfWeek = today.getDay();
+    const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const mon = new Date(today);
+    mon.setDate(today.getDate() + diff);
+    mon.setHours(0, 0, 0, 0);
+    shopRacingDate.value = mon;
+  } else {
+    shopRacingDate.value = `${y}-${m}-${d}`;
+  }
+  loadShopRacingData();
+};
 const racingGroupBy = ref("shop");
 const shopRacingData = ref([]);
+const loadingShopRacing = ref(false);
 
 // 库存滞销
 const inventorySummary = ref({
@@ -1730,31 +1807,39 @@ const updateComparisonChart = () => {
   updateComparisonTable();
 };
 
-// 加载店铺赛马数据
+// 加载店铺赛马数据（使用独立粒度+日期，与数据对比约定一致）
 const loadShopRacingData = async () => {
+  loadingShopRacing.value = true;
   try {
-    const dateStr =
-      typeof comparisonDate.value === "string"
-        ? comparisonDate.value.length === 7
-          ? `${comparisonDate.value}-01`
-          : comparisonDate.value
-        : comparisonDate.value.toISOString().split("T")[0];
+    let dateStr = "";
+    const val = shopRacingDate.value;
+    if (typeof val === "string") {
+      dateStr = val.length === 7 ? `${val}-01` : val;
+    } else if (val instanceof Date && !Number.isNaN(val.getTime())) {
+      let d = val;
+      if (shopRacingGranularity.value === "monthly") {
+        d = new Date(d.getFullYear(), d.getMonth(), 1);
+      } else if (shopRacingGranularity.value === "weekly") {
+        const dayOfWeek = d.getDay();
+        const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        d = new Date(d);
+        d.setDate(d.getDate() + diff);
+      }
+      dateStr = d.toISOString().split("T")[0];
+    }
+    if (!dateStr) {
+      shopRacingData.value = [];
+      return;
+    }
+
     const response = await api.getBusinessOverviewShopRacing({
-      granularity: comparisonGranularity.value,
+      granularity: shopRacingGranularity.value,
       date: dateStr,
       group_by: racingGroupBy.value,
     });
 
-    // 响应拦截器已处理success字段，直接使用data
-    if (response && response.groups) {
-      // shop-racing API返回的是groups数组，需要展平
-      shopRacingData.value = [];
-      response.groups.forEach((group) => {
-        if (group.shops && Array.isArray(group.shops)) {
-          shopRacingData.value.push(...group.shops);
-        }
-      });
-    } else if (response && Array.isArray(response)) {
+    // 后端已转为 { name, target, achieved, achievement_rate, rank } 数组
+    if (response && Array.isArray(response)) {
       shopRacingData.value = response;
     } else {
       shopRacingData.value = [];
@@ -1762,6 +1847,9 @@ const loadShopRacingData = async () => {
   } catch (error) {
     console.error("加载店铺赛马数据失败:", error);
     handleApiError(error, { showMessage: true, logError: true });
+    shopRacingData.value = [];
+  } finally {
+    loadingShopRacing.value = false;
   }
 };
 
@@ -1824,8 +1912,20 @@ const loadTrafficRanking = async () => {
 
     const response = await api.getBusinessOverviewTrafficRanking(params);
 
-    // 响应拦截器已处理success字段，直接使用data
-    trafficRankingData.value = response || [];
+    // 响应拦截器已处理 success 字段，后端已转英文 key；兜底映射兼容中文列名
+    const raw = response || [];
+    const rows = Array.isArray(raw) ? raw : (raw.data || []);
+    trafficRankingData.value = rows.map((row, index) => ({
+      rank: row.rank ?? row['排名'] ?? index + 1,
+      name: row.name ?? row['名称'] ?? row.platform_code ?? row['平台'] ?? '平台汇总',
+      platform_code: row.platform_code ?? row['平台'],
+      unique_visitors: row.unique_visitors ?? row['访客数'] ?? 0,
+      page_views: row.page_views ?? row['浏览量'] ?? 0,
+      uv_change_rate: row.uv_change_rate ?? null,
+      pv_change_rate: row.pv_change_rate ?? null,
+      compare_unique_visitors: row.compare_unique_visitors ?? null,
+      compare_page_views: row.compare_page_views ?? null,
+    }));
   } catch (error) {
     console.error("加载流量排名失败:", error);
     handleApiError(error, { showMessage: true, logError: true });
@@ -2099,6 +2199,12 @@ onMounted(() => {
   border: none;
   border-radius: 12px;
   overflow: hidden;
+}
+
+.traffic-ranking-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 8px;
 }
 
 .card-header {

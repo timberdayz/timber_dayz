@@ -61,7 +61,8 @@ current_orders as (
   select
     coalesce(sum(o.paid_amount), 0) as sales,
     coalesce(sum(o.product_quantity), 0) as orders_cnt,
-    coalesce(sum(o.profit), 0) as profit_val
+    coalesce(sum(o.profit), 0) as profit_val,
+    count(distinct o.order_id) as order_count
   from {{MODEL:Orders Model}} o
   cross join period_scope s
   where (
@@ -88,7 +89,8 @@ prev_orders as (
   select
     coalesce(sum(o.paid_amount), 0) as sales,
     coalesce(sum(o.product_quantity), 0) as orders_cnt,
-    coalesce(sum(o.profit), 0) as profit_val
+    coalesce(sum(o.profit), 0) as profit_val,
+    count(distinct o.order_id) as order_count
   from {{MODEL:Orders Model}} o
   cross join period_scope s
   where (
@@ -174,7 +176,8 @@ month_daily_orders as (
   select
     coalesce(sum(o.paid_amount), 0) as sales,
     coalesce(sum(o.product_quantity), 0) as orders_cnt,
-    coalesce(sum(o.profit), 0) as profit_val
+    coalesce(sum(o.profit), 0) as profit_val,
+    count(distinct o.order_id) as order_count
   from {{MODEL:Orders Model}} o
   cross join period_scope s
   where o.granularity = 'daily'
@@ -195,6 +198,7 @@ month_daily_traffic as (
 
 avg_orders as (
   -- 日度=本月日度汇总，周度/月度=本期汇总（本期/7 或 本期/本月天数 在最终 select 中除）
+  -- order_count 用于连带率：日度=本月订单数，周/月=本期订单数
   select
     case s.gran
       when 'daily' then md.sales
@@ -207,7 +211,11 @@ avg_orders as (
     case s.gran
       when 'daily' then md.profit_val
       else co.profit_val
-    end as profit_val
+    end as profit_val,
+    case s.gran
+      when 'daily' then md.order_count
+      else co.order_count
+    end as order_count
   from period_scope s
   cross join current_orders co
   cross join month_daily_orders md
@@ -281,6 +289,8 @@ combo as (
     po.sales as prev_sales,
     co.orders_cnt as cur_orders,
     po.orders_cnt as prev_orders,
+    co.order_count as cur_order_count,
+    po.order_count as prev_order_count,
     co.profit_val as cur_profit,
     po.profit_val as prev_profit,
     ct.visitors as cur_visitors,
@@ -288,6 +298,7 @@ combo as (
     (select days from days_elapsed) as days_cnt,
     ao.sales as avg_sales,
     ao.orders_cnt as avg_orders,
+    ao.order_count as avg_order_count,
     ao.profit_val as avg_profit,
     avt.visitors as avg_visitors,
     ut.target_amount as user_target_amount,
@@ -341,10 +352,11 @@ select
     else 0
   end as avg_order_value_change,
 
-  0::numeric as attach_rate_today,
-  0::numeric as attach_rate_yesterday,
-  0::numeric as attach_rate_average,
-  0::numeric as attach_rate_change,
+  -- 连带率 = 商品件数/订单数（与核心KPI/经营指标一致，order_count=count(distinct order_id)）
+  case when c.cur_order_count > 0 then round((c.cur_orders::numeric / c.cur_order_count)::numeric, 2) else 0 end as attach_rate_today,
+  case when c.prev_order_count > 0 then round((c.prev_orders::numeric / c.prev_order_count)::numeric, 2) else 0 end as attach_rate_yesterday,
+  case when c.avg_order_count > 0 then round((c.avg_orders::numeric / c.avg_order_count)::numeric, 2) else 0 end as attach_rate_average,
+  coalesce(round(((case when c.cur_order_count > 0 then c.cur_orders::numeric / c.cur_order_count else 0 end - case when c.prev_order_count > 0 then c.prev_orders::numeric / c.prev_order_count else 0 end) * 100.0 / nullif(case when c.prev_order_count > 0 then c.prev_orders::numeric / c.prev_order_count else 0 end, 0))::numeric, 2), 0) as attach_rate_change,
 
   round(c.cur_profit::numeric, 2) as profit_today,
   round(c.prev_profit::numeric, 2) as profit_yesterday,

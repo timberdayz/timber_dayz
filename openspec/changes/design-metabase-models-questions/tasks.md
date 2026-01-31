@@ -261,13 +261,14 @@
   - **返回格式**：多行数据，每行一个店铺/平台，包含排名
   - **后端API**：`GET /api/dashboard/business-overview/shop-racing`
 
-- [ ] 3.1.4 business_overview_traffic_ranking - 流量排名
-  - **用途**：流量相关指标排名
-  - **数据源**：Analytics Model
-  - **计算指标**：访客数、浏览量排名
-  - **参数**：`{{granularity}}`, `{{dimension}}`, `{{date}}`, `{{platforms}}`, `{{shops}}`
-  - **返回格式**：多行数据，每行一个店铺，包含排名
+- [x] 3.1.4 business_overview_traffic_ranking - 流量排名 ✅ **已可用**
+  - **用途**：流量相关指标排名（访客数、浏览量）
+  - **数据源**：Analytics Model（shop_id 为空时按平台汇总）
+  - **计算指标**：访客数、浏览量、转化率、人均浏览量、排名
+  - **参数**：`{{granularity}}`, `{{dimension}}`（visitor/pv，前端 shop→visitor/account→pv）, `{{date}}`, `{{platforms}}`, `{{shops}}`
+  - **返回格式**：多行数据，每行含「名称」列（未关联店铺时显示平台名），后端转英文 key
   - **后端API**：`GET /api/dashboard/business-overview/traffic-ranking`
+  - **前端**：列映射兜底、环比 null 安全、未关联店铺时显示「平台汇总」提示
 
 - [ ] 3.1.5 business_overview_inventory_backlog - 库存积压
   - **用途**：库存积压分析

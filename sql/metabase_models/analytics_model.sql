@@ -345,7 +345,9 @@ deduplicated AS (
 -- 第4层：最终输出（只保留去重后的数据，设置默认值）
 -- ====================================================
 SELECT 
-  platform_code, shop_id, data_domain, granularity,
+  platform_code,
+  COALESCE(NULLIF(TRIM(shop_id::text), ''), 'unknown') AS shop_id,
+  data_domain, granularity,
   metric_date, period_start_date, period_end_date, period_start_time, period_end_time,
   COALESCE(visitor_count, 0) AS visitor_count,
   COALESCE(page_views, 0) AS page_views,

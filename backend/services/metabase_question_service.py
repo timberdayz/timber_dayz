@@ -473,6 +473,34 @@ class MetabaseQuestionService:
             logger.warning(f"[{question_key}] 返回数据为空,返回空metrics对象")
             return {"metrics": {}, "target": {}}
         
+        elif question_key == "business_overview_traffic_ranking":
+            # 流量排名：多行转英文 key，兼容中文列名，补 name 兜底
+            if not result_list:
+                return []
+            out = []
+            for row in result_list:
+                def _v(keys):
+                    for k in keys:
+                        if k in row and row[k] is not None:
+                            return row[k]
+                        for rk in row:
+                            if rk is not None and str(rk).lower() == k.lower():
+                                return row[rk]
+                    return None
+                name = _v(["名称", "name"]) or _v(["平台", "platform_code"]) or "平台汇总"
+                out.append({
+                    "rank": _v(["排名", "rank"]),
+                    "name": name,
+                    "platform_code": _v(["平台", "platform_code"]),
+                    "unique_visitors": _v(["访客数", "unique_visitors"]) or 0,
+                    "page_views": _v(["浏览量", "page_views"]) or 0,
+                    "uv_change_rate": _v(["uv_change_rate"]),
+                    "pv_change_rate": _v(["pv_change_rate"]),
+                    "compare_unique_visitors": _v(["compare_unique_visitors"]),
+                    "compare_page_views": _v(["compare_page_views"]),
+                })
+            return out
+        
         elif question_key == "business_overview_operational_metrics":
             # 经营指标:单行汇总,映射为 API 对象(金额字段转为万元)
             if result_list and len(result_list) > 0:
@@ -521,6 +549,40 @@ class MetabaseQuestionService:
                 "monthly_order_count": 0,
                 "today_order_count": 0,
             }
+        
+        elif question_key == "business_overview_shop_racing":
+            # 店铺赛马：转为前端表格所需格式（名称、目标、完成、完成率、排名）
+            # SQL 返回：平台、名称、店铺ID、GMV、订单数、客单价、排名；无 A 类目标时 target/achievement_rate 为 0（无买家数统计）
+            def _row_val(row: dict, *keys: str):
+                for k in keys:
+                    if k in row and row[k] is not None:
+                        return row[k]
+                for k in keys:
+                    for rk in row:
+                        if rk is not None and str(rk).lower() == k.lower():
+                            return row[rk]
+                return None
+            out = []
+            for r in result_list:
+                name = _row_val(r, "名称", "name") or _row_val(r, "店铺ID", "平台") or "unknown店铺"
+                gmv = _row_val(r, "GMV", "gmv")
+                try:
+                    achieved = float(gmv) if gmv is not None else 0
+                except (TypeError, ValueError):
+                    achieved = 0
+                rank_val = _row_val(r, "排名", "rank")
+                try:
+                    rank = int(rank_val) if rank_val is not None else 0
+                except (TypeError, ValueError):
+                    rank = 0
+                out.append({
+                    "name": name,
+                    "target": 0,
+                    "achieved": achieved,
+                    "achievement_rate": 0,
+                    "rank": rank,
+                })
+            return out
         
         # 默认返回字典列表格式(适用于表格数据)
         return {
@@ -622,9 +684,11 @@ class MetabaseQuestionService:
             
             # 6. 转换响应格式
             result = self._convert_response(question_key, metabase_data)
-            
-            # 对于 KPI 类型返回,没有 row_count 字段,使用 .get() 安全获取
-            row_count = result.get('row_count', '1行' if question_key.endswith('kpi') else '未知')
+            # 流量排名等返回 list，其他返回 dict；仅对 dict 使用 .get，避免 'list' object has no attribute 'get'
+            if isinstance(result, list):
+                row_count = len(result)
+            else:
+                row_count = result.get('row_count', '1行' if question_key.endswith('kpi') else '未知')
             logger.debug(f"Question查询成功: {question_key} (ID: {question_id}), 返回 {row_count}")
             return result
             

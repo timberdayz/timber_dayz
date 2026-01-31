@@ -180,17 +180,16 @@ async def get_business_overview_traffic_ranking(
     """
     try:
         service = get_metabase_service()
-        
+        # 前端 dimension：shop/account → Question 排序维度：visitor/pv
+        question_dimension = "pv" if dimension == "account" else "visitor"
         params = {
             "granularity": granularity,
-            "dimension": dimension,
-            "date": date_value,  # 前端传date_value,转换为date
+            "dimension": question_dimension,
+            "date": date_value,  # 前端传 date_value，后端转为 date
             "platforms": platforms,
             "shops": shops
         }
-        
         params = {k: v for k, v in params.items() if v is not None}
-        
         result = await service.query_question("business_overview_traffic_ranking", params)
         return success_response(data=result)
         
