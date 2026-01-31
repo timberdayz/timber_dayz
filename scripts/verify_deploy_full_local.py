@@ -189,12 +189,12 @@ def main():
         print("[WARN] Metabase 健康等待超时，继续执行 Phase 3.5")
     print("[OK] Metabase 就绪")
 
-    # Phase 3.5: init_metabase.py
+    # Phase 3.5: init_metabase.py（与 deploy_remote_production.sh 一致：显式指定 --config）
     print("[INFO] Phase 3.5: init_metabase.py...")
     env = os.environ.copy()
     env["METABASE_URL"] = "http://xihong_erp_metabase:3000"
     code, out = run(
-        compose_cmd + ["run", "--rm", "--no-deps", "-e", "METABASE_URL=http://xihong_erp_metabase:3000", "backend", "python3", "/app/scripts/init_metabase.py"],
+        compose_cmd + ["run", "--rm", "--no-deps", "-e", "METABASE_URL=http://xihong_erp_metabase:3000", "backend", "python3", "/app/scripts/init_metabase.py", "--config", "/app/config/metabase_config.yaml"],
         env=env,
         timeout=120,
     )

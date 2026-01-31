@@ -716,9 +716,10 @@ done
 
 # 使用 backend 镜像运行 init_metabase.py（需能访问 Metabase；同网络下使用容器名）
 # METABASE_URL 使用容器名，因 Phase 3.5 时 metabase 由独立 compose 启动，run 容器通过网络访问
+# [FIX] 显式指定配置文件路径，确保容器内 /app/config/metabase_config.yaml 被使用（与 Dockerfile COPY config 一致）
 if "${compose_cmd_base[@]}" run --rm --no-deps \
   -e METABASE_URL="${METABASE_URL:-http://xihong_erp_metabase:3000}" \
-  backend python3 /app/scripts/init_metabase.py 2>&1; then
+  backend python3 /app/scripts/init_metabase.py --config /app/config/metabase_config.yaml 2>&1; then
   echo "[OK] init_metabase.py completed successfully"
 else
   echo "[WARN] init_metabase.py failed or returned non-zero; deployment continues (backend will fall back to env Question IDs)"

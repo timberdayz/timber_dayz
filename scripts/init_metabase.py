@@ -508,7 +508,11 @@ class MetabaseInitializer:
         config_file = Path(config_path)
         if not config_file.is_absolute():
             config_file = PROJECT_ROOT / config_path
-        
+        # [FIX] Docker 容器内：若相对路径解析后不存在，尝试 /app/config/metabase_config.yaml
+        if not config_file.exists() and "/app/config" not in str(config_file):
+            docker_path = Path("/app/config/metabase_config.yaml")
+            if docker_path.exists():
+                config_file = docker_path
         if not config_file.exists():
             raise FileNotFoundError(f"配置文件不存在: {config_file}")
         

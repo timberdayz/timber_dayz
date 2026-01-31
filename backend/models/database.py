@@ -313,7 +313,7 @@ def verify_schema_completeness():
     验证数据库表结构完整性(生产环境必须)
     
     检查:
-    1. schema.py 中定义的所有表是否都存在
+    1. schema.py 中定义的所有表是否都存在（含 public / a_class / c_class 等多 schema）
     2.  Alembic 迁移状态是否与代码一致
     
     Returns:
@@ -330,7 +330,22 @@ def verify_schema_completeness():
     from sqlalchemy import inspect
     
     inspector = inspect(engine)
-    existing_tables = set(inspector.get_table_names())
+    # 多 schema 支持：Base.metadata.tables 的 key 为 "schema.tablename" 或 "tablename"(public)
+    # get_table_names() 无 schema 时只返回 default schema(通常 public)，需按 schema 汇总
+    existing_tables = set()
+    skip_schemas = {"pg_catalog", "information_schema", "pg_toast"}
+    try:
+        for s in inspector.get_schema_names():
+            if s in skip_schemas:
+                continue
+            for name in inspector.get_table_names(schema=s):
+                if s == "public" or s is None:
+                    existing_tables.add(name)
+                else:
+                    existing_tables.add(f"{s}.{name}")
+    except Exception:
+        # 降级：仅 default schema（兼容旧行为）
+        existing_tables = set(inspector.get_table_names())
     
     # 获取 schema.py 中定义的所有表
     expected_tables = set(Base.metadata.tables.keys())

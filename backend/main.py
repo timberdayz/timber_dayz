@@ -175,7 +175,7 @@ async def lifespan(app: FastAPI):
                     )
                     if len(result["missing_tables"]) > 10:
                         logger.error(f"[ERROR] ... 还有 {len(result['missing_tables']) - 10} 张表缺失")
-                    logger.error("[ERROR] 请运行: alembic upgrade head")
+                    logger.error("[ERROR] 请运行: alembic upgrade heads")
                     raise RuntimeError(f"Schema incompleteness: {len(result['missing_tables'])} tables missing")
                 
                 if result["migration_status"] not in ["up_to_date", "not_initialized"]:
@@ -184,7 +184,7 @@ async def lifespan(app: FastAPI):
                     )
                     logger.error(f"[ERROR] 当前版本: {result.get('current_revision', 'N/A')}")
                     logger.error(f"[ERROR] 最新版本: {result.get('head_revision', 'N/A')}")
-                    logger.error("[ERROR] 请运行: alembic upgrade head")
+                    logger.error("[ERROR] 请运行: alembic upgrade heads")
                     raise RuntimeError(f"Migration status invalid: {result['migration_status']}")
                 
                 startup_metrics["table_init"] = time.time() - step_start
