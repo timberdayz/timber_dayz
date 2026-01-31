@@ -12,7 +12,7 @@ Created: 2025-01-31
 Updated: 2025-01-30 (v4.21.0 业界标准优化)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from typing import List, Optional, Dict, Any
@@ -22,6 +22,8 @@ from decimal import Decimal
 
 from backend.models.database import get_async_db
 from backend.routers.auth import get_current_user
+from backend.utils.api_response import error_response
+from backend.utils.error_codes import ErrorCode
 from modules.core.db import (
     PlatformAccount,
     Department,
@@ -649,7 +651,7 @@ async def list_departments(
         return [DepartmentResponse.model_validate(dept) for dept in departments]
     except Exception as e:
         logger.error(f"获取部门列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取部门列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取部门列表失败: {str(e)}", status_code=500)
 
 
 @router.get("/departments/{department_id}", response_model=DepartmentResponse)
@@ -665,14 +667,11 @@ async def get_department(
         department = result.scalar_one_or_none()
         
         if not department:
-            raise HTTPException(status_code=404, detail=f"部门不存在: {department_id}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"部门不存在: {department_id}", status_code=404)
         return DepartmentResponse.model_validate(department)
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"获取部门详情失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取部门详情失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取部门详情失败: {str(e)}", status_code=500)
 
 
 @router.post("/departments", response_model=DepartmentResponse, status_code=201)
@@ -687,21 +686,17 @@ async def create_department(
             select(Department).where(Department.department_code == department.department_code)
         )
         if existing.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"部门编码已存在: {department.department_code}")
-        
+            return error_response(ErrorCode.DATA_ALREADY_EXISTS, f"部门编码已存在: {department.department_code}", status_code=400)
         new_department = Department(**department.model_dump())
         db.add(new_department)
         await db.commit()
         await db.refresh(new_department)
-        
         logger.info(f"创建部门成功: {department.department_code} - {department.department_name}")
         return DepartmentResponse.model_validate(new_department)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建部门失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建部门失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建部门失败: {str(e)}", status_code=500)
 
 
 @router.put("/departments/{department_id}", response_model=DepartmentResponse)
@@ -718,24 +713,19 @@ async def update_department(
         department = result.scalar_one_or_none()
         
         if not department:
-            raise HTTPException(status_code=404, detail=f"部门不存在: {department_id}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"部门不存在: {department_id}", status_code=404)
         update_data = department_update.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(department, key, value)
-        
         department.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(department)
-        
         logger.info(f"更新部门成功: {department_id}")
         return DepartmentResponse.model_validate(department)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"更新部门失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"更新部门失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新部门失败: {str(e)}", status_code=500)
 
 
 @router.delete("/departments/{department_id}", status_code=204)
@@ -751,20 +741,16 @@ async def delete_department(
         department = result.scalar_one_or_none()
         
         if not department:
-            raise HTTPException(status_code=404, detail=f"部门不存在: {department_id}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"部门不存在: {department_id}", status_code=404)
         department.status = "inactive"
         department.updated_at = datetime.utcnow()
         await db.commit()
-        
         logger.info(f"删除部门成功(软删除): {department_id}")
         return None
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"删除部门失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"删除部门失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"删除部门失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -801,7 +787,7 @@ async def list_positions(
         return [PositionResponse.model_validate(pos) for pos in positions]
     except Exception as e:
         logger.error(f"获取职位列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取职位列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取职位列表失败: {str(e)}", status_code=500)
 
 
 @router.post("/positions", response_model=PositionResponse, status_code=201)
@@ -815,21 +801,17 @@ async def create_position(
             select(Position).where(Position.position_code == position.position_code)
         )
         if existing.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"职位编码已存在: {position.position_code}")
-        
+            return error_response(ErrorCode.DATA_ALREADY_EXISTS, f"职位编码已存在: {position.position_code}", status_code=400)
         new_position = Position(**position.model_dump())
         db.add(new_position)
         await db.commit()
         await db.refresh(new_position)
-        
         logger.info(f"创建职位成功: {position.position_code} - {position.position_name}")
         return PositionResponse.model_validate(new_position)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建职位失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建职位失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建职位失败: {str(e)}", status_code=500)
 
 
 @router.put("/positions/{position_id}", response_model=PositionResponse)
@@ -846,24 +828,19 @@ async def update_position(
         position = result.scalar_one_or_none()
         
         if not position:
-            raise HTTPException(status_code=404, detail=f"职位不存在: {position_id}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"职位不存在: {position_id}", status_code=404)
         update_data = position_update.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(position, key, value)
-        
         position.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(position)
-        
         logger.info(f"更新职位成功: {position_id}")
         return PositionResponse.model_validate(position)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"更新职位失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"更新职位失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新职位失败: {str(e)}", status_code=500)
 
 
 @router.delete("/positions/{position_id}", status_code=204)
@@ -879,20 +856,16 @@ async def delete_position(
         position = result.scalar_one_or_none()
         
         if not position:
-            raise HTTPException(status_code=404, detail=f"职位不存在: {position_id}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"职位不存在: {position_id}", status_code=404)
         position.status = "inactive"
         position.updated_at = datetime.utcnow()
         await db.commit()
-        
         logger.info(f"删除职位成功(软删除): {position_id}")
         return None
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"删除职位失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"删除职位失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"删除职位失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -957,7 +930,7 @@ async def put_me_profile(
     result = await db.execute(select(Employee).where(Employee.user_id == current_user.user_id))
     employee = result.scalar_one_or_none()
     if not employee:
-        raise HTTPException(status_code=404, detail="您尚未关联员工档案，请联系管理员")
+        return error_response(ErrorCode.DATA_NOT_FOUND, "您尚未关联员工档案，请联系管理员", status_code=404)
     update_data = body.model_dump(exclude_unset=True)
     for key in ("phone", "email", "address", "emergency_contact", "emergency_phone"):
         if key in update_data:
@@ -1104,7 +1077,7 @@ async def list_employees(
         return out
     except Exception as e:
         logger.error(f"获取员工列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取员工列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工列表失败: {str(e)}", status_code=500)
 
 
 @router.get("/employees/count")
@@ -1125,7 +1098,7 @@ async def count_employees(
         return {"count": count, "status": status or "all"}
     except Exception as e:
         logger.error(f"获取员工总数失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取员工总数失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工总数失败: {str(e)}", status_code=500)
 
 
 @router.get("/employees/{employee_code}", response_model=EmployeeResponse)
@@ -1141,15 +1114,13 @@ async def get_employee(
         employee = result.scalar_one_or_none()
         
         if not employee:
-            raise HTTPException(status_code=404, detail=f"员工不存在: {employee_code}")
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404)
         username = await _username_for_user_id(db, employee.user_id)
         resp = EmployeeResponse.model_validate(employee)
         return resp.model_copy(update={"username": username})
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"获取员工详情失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取员工详情失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工详情失败: {str(e)}", status_code=500)
 
 
 async def _generate_employee_code(db: AsyncSession) -> str:
@@ -1188,29 +1159,24 @@ async def create_employee(
             select(Employee).where(Employee.employee_code == employee_code)
         )
         if existing.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"员工编号已存在: {employee_code}")
-
+            return error_response(ErrorCode.DATA_ALREADY_EXISTS, f"员工编号已存在: {employee_code}", status_code=400)
         user_id = data.get("user_id")
         if user_id is not None:
             other = await db.execute(select(Employee).where(Employee.user_id == user_id))
             if other.scalar_one_or_none():
-                raise HTTPException(status_code=400, detail="该登录账号已关联其他员工")
-
+                return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该登录账号已关联其他员工", status_code=400)
         new_employee = Employee(**data)
         db.add(new_employee)
         await db.commit()
         await db.refresh(new_employee)
-
         logger.info(f"创建员工成功: {new_employee.employee_code} - {new_employee.name}")
         username = await _username_for_user_id(db, new_employee.user_id)
         resp = EmployeeResponse.model_validate(new_employee)
         return resp.model_copy(update={"username": username})
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建员工失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建员工失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建员工失败: {str(e)}", status_code=500)
 
 
 @router.put("/employees/{employee_code}", response_model=EmployeeResponse)
@@ -1227,8 +1193,7 @@ async def update_employee(
         employee = result.scalar_one_or_none()
         
         if not employee:
-            raise HTTPException(status_code=404, detail=f"员工不存在: {employee_code}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404)
         update_data = employee_update.model_dump(exclude_unset=True)
         if "user_id" in update_data and update_data["user_id"] is not None:
             other = await db.execute(
@@ -1238,24 +1203,20 @@ async def update_employee(
                 )
             )
             if other.scalar_one_or_none():
-                raise HTTPException(status_code=400, detail="该登录账号已关联其他员工")
+                return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该登录账号已关联其他员工", status_code=400)
         for key, value in update_data.items():
             setattr(employee, key, value)
-        
         employee.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(employee)
-        
         logger.info(f"更新员工成功: {employee_code}")
         username = await _username_for_user_id(db, employee.user_id)
         resp = EmployeeResponse.model_validate(employee)
         return resp.model_copy(update={"username": username})
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"更新员工失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"更新员工失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新员工失败: {str(e)}", status_code=500)
 
 
 @router.delete("/employees/{employee_code}", status_code=204)
@@ -1271,32 +1232,23 @@ async def delete_employee(
         employee = result.scalar_one_or_none()
         
         if not employee:
-            raise HTTPException(status_code=404, detail=f"员工不存在: {employee_code}")
-
-        # 检查是否有未解除的店铺归属
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {employee_code}", status_code=404)
         assign_result = await db.execute(
             select(EmployeeShopAssignment).where(
                 EmployeeShopAssignment.employee_code == employee_code
             )
         )
         if assign_result.scalars().first():
-            raise HTTPException(
-                status_code=400,
-                detail="请先解除该员工的店铺归属",
-            )
-        
+            return error_response(ErrorCode.DATA_INTEGRITY_VIOLATION, "请先解除该员工的店铺归属", status_code=400)
         employee.status = "inactive"
         employee.updated_at = datetime.utcnow()
         await db.commit()
-        
         logger.info(f"删除员工成功(软删除): {employee_code}")
         return None
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"删除员工失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"删除员工失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"删除员工失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -1322,7 +1274,7 @@ async def list_work_shifts(
         return [WorkShiftResponse.model_validate(shift) for shift in shifts]
     except Exception as e:
         logger.error(f"获取班次列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取班次列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取班次列表失败: {str(e)}", status_code=500)
 
 
 @router.post("/work-shifts", response_model=WorkShiftResponse, status_code=201)
@@ -1336,21 +1288,17 @@ async def create_work_shift(
             select(WorkShift).where(WorkShift.shift_code == shift.shift_code)
         )
         if existing.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"班次编码已存在: {shift.shift_code}")
-        
+            return error_response(ErrorCode.DATA_ALREADY_EXISTS, f"班次编码已存在: {shift.shift_code}", status_code=400)
         new_shift = WorkShift(**shift.model_dump())
         db.add(new_shift)
         await db.commit()
         await db.refresh(new_shift)
-        
         logger.info(f"创建班次成功: {shift.shift_code} - {shift.shift_name}")
         return WorkShiftResponse.model_validate(new_shift)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建班次失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建班次失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建班次失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -1393,7 +1341,7 @@ async def list_attendance_records(
         return [AttendanceRecordResponse.model_validate(record) for record in records]
     except Exception as e:
         logger.error(f"获取考勤记录列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取考勤记录列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取考勤记录列表失败: {str(e)}", status_code=500)
 
 
 @router.post("/attendance", response_model=AttendanceRecordResponse, status_code=201)
@@ -1408,8 +1356,7 @@ async def create_attendance_record(
             select(Employee).where(Employee.employee_code == record.employee_code)
         )
         if not employee.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"员工不存在: {record.employee_code}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {record.employee_code}", status_code=400)
         # 检查考勤记录是否已存在
         existing = await db.execute(
             select(AttendanceRecord).where(
@@ -1420,9 +1367,10 @@ async def create_attendance_record(
             )
         )
         if existing.scalar_one_or_none():
-            raise HTTPException(
+            return error_response(
+                ErrorCode.DATA_ALREADY_EXISTS,
+                f"考勤记录已存在: {record.employee_code} - {record.attendance_date}",
                 status_code=400,
-                detail=f"考勤记录已存在: {record.employee_code} - {record.attendance_date}"
             )
         
         # 自动计算工作时长
@@ -1441,12 +1389,10 @@ async def create_attendance_record(
         
         logger.info(f"创建考勤记录成功: {record.employee_code} - {record.attendance_date}")
         return AttendanceRecordResponse.model_validate(new_record)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建考勤记录失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建考勤记录失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建考勤记录失败: {str(e)}", status_code=500)
 
 
 @router.put("/attendance/{record_id}", response_model=AttendanceRecordResponse)
@@ -1463,8 +1409,7 @@ async def update_attendance_record(
         record = result.scalar_one_or_none()
         
         if not record:
-            raise HTTPException(status_code=404, detail=f"考勤记录不存在: {record_id}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"考勤记录不存在: {record_id}", status_code=404)
         update_data = record_update.model_dump(exclude_unset=True)
         
         # 如果更新了上下班时间，重新计算工作时长
@@ -1485,12 +1430,10 @@ async def update_attendance_record(
         
         logger.info(f"更新考勤记录成功: {record_id}")
         return AttendanceRecordResponse.model_validate(record)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"更新考勤记录失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"更新考勤记录失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新考勤记录失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -1516,7 +1459,7 @@ async def list_leave_types(
         return [LeaveTypeResponse.model_validate(lt) for lt in leave_types]
     except Exception as e:
         logger.error(f"获取假期类型列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取假期类型列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取假期类型列表失败: {str(e)}", status_code=500)
 
 
 @router.post("/leave-types", response_model=LeaveTypeResponse, status_code=201)
@@ -1530,8 +1473,7 @@ async def create_leave_type(
             select(LeaveType).where(LeaveType.leave_code == leave_type.leave_code)
         )
         if existing.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"假期编码已存在: {leave_type.leave_code}")
-        
+            return error_response(ErrorCode.DATA_ALREADY_EXISTS, f"假期编码已存在: {leave_type.leave_code}", status_code=400)
         new_leave_type = LeaveType(**leave_type.model_dump())
         db.add(new_leave_type)
         await db.commit()
@@ -1539,12 +1481,10 @@ async def create_leave_type(
         
         logger.info(f"创建假期类型成功: {leave_type.leave_code} - {leave_type.leave_name}")
         return LeaveTypeResponse.model_validate(new_leave_type)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建假期类型失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建假期类型失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建假期类型失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -1587,7 +1527,7 @@ async def list_leave_records(
         return [LeaveRecordResponse.model_validate(record) for record in records]
     except Exception as e:
         logger.error(f"获取请假记录列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取请假记录列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取请假记录列表失败: {str(e)}", status_code=500)
 
 
 @router.post("/leave-records", response_model=LeaveRecordResponse, status_code=201)
@@ -1602,8 +1542,7 @@ async def create_leave_record(
             select(Employee).where(Employee.employee_code == record.employee_code)
         )
         if not employee.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"员工不存在: {record.employee_code}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {record.employee_code}", status_code=400)
         new_record = LeaveRecord(**record.model_dump())
         db.add(new_record)
         await db.commit()
@@ -1611,12 +1550,10 @@ async def create_leave_record(
         
         logger.info(f"创建请假记录成功: {record.employee_code}")
         return LeaveRecordResponse.model_validate(new_record)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建请假记录失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建请假记录失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建请假记录失败: {str(e)}", status_code=500)
 
 
 @router.put("/leave-records/{record_id}/approve", response_model=LeaveRecordResponse)
@@ -1633,8 +1570,7 @@ async def approve_leave_record(
         record = result.scalar_one_or_none()
         
         if not record:
-            raise HTTPException(status_code=404, detail=f"请假记录不存在: {record_id}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"请假记录不存在: {record_id}", status_code=404)
         update_data = record_update.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(record, key, value)
@@ -1648,12 +1584,10 @@ async def approve_leave_record(
         
         logger.info(f"审批请假记录成功: {record_id}")
         return LeaveRecordResponse.model_validate(record)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"审批请假记录失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"审批请假记录失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"审批请假记录失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -1696,7 +1630,7 @@ async def list_overtime_records(
         return [OvertimeRecordResponse.model_validate(record) for record in records]
     except Exception as e:
         logger.error(f"获取加班记录列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取加班记录列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取加班记录列表失败: {str(e)}", status_code=500)
 
 
 @router.post("/overtime-records", response_model=OvertimeRecordResponse, status_code=201)
@@ -1710,8 +1644,7 @@ async def create_overtime_record(
             select(Employee).where(Employee.employee_code == record.employee_code)
         )
         if not employee.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"员工不存在: {record.employee_code}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {record.employee_code}", status_code=400)
         new_record = OvertimeRecord(**record.model_dump())
         db.add(new_record)
         await db.commit()
@@ -1719,12 +1652,10 @@ async def create_overtime_record(
         
         logger.info(f"创建加班记录成功: {record.employee_code}")
         return OvertimeRecordResponse.model_validate(new_record)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建加班记录失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建加班记录失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建加班记录失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -1754,7 +1685,7 @@ async def list_salary_structures(
         return [SalaryStructureResponse.model_validate(s) for s in structures]
     except Exception as e:
         logger.error(f"获取薪资结构列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取薪资结构列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取薪资结构列表失败: {str(e)}", status_code=500)
 
 
 @router.get("/salary-structures/{employee_code}", response_model=SalaryStructureResponse)
@@ -1770,14 +1701,11 @@ async def get_salary_structure(
         structure = result.scalar_one_or_none()
         
         if not structure:
-            raise HTTPException(status_code=404, detail=f"薪资结构不存在: {employee_code}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"薪资结构不存在: {employee_code}", status_code=404)
         return SalaryStructureResponse.model_validate(structure)
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"获取薪资结构失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取薪资结构失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取薪资结构失败: {str(e)}", status_code=500)
 
 
 @router.post("/salary-structures", response_model=SalaryStructureResponse, status_code=201)
@@ -1792,28 +1720,23 @@ async def create_salary_structure(
             select(Employee).where(Employee.employee_code == structure.employee_code)
         )
         if not employee.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"员工不存在: {structure.employee_code}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {structure.employee_code}", status_code=400)
         # 检查是否已存在
         existing = await db.execute(
             select(SalaryStructure).where(SalaryStructure.employee_code == structure.employee_code)
         )
         if existing.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"薪资结构已存在: {structure.employee_code}")
-        
+            return error_response(ErrorCode.DATA_ALREADY_EXISTS, f"薪资结构已存在: {structure.employee_code}", status_code=400)
         new_structure = SalaryStructure(**structure.model_dump())
         db.add(new_structure)
         await db.commit()
         await db.refresh(new_structure)
-        
         logger.info(f"创建薪资结构成功: {structure.employee_code}")
         return SalaryStructureResponse.model_validate(new_structure)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建薪资结构失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建薪资结构失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建薪资结构失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -1853,7 +1776,7 @@ async def list_payroll_records(
         return [PayrollRecordResponse.model_validate(record) for record in records]
     except Exception as e:
         logger.error(f"获取工资单列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取工资单列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取工资单列表失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -1893,7 +1816,7 @@ async def list_employee_targets(
         return [EmployeeTargetResponse.model_validate(target) for target in targets]
     except Exception as e:
         logger.error(f"获取员工目标列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取员工目标列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工目标列表失败: {str(e)}", status_code=500)
 
 
 @router.post("/employee-targets", response_model=EmployeeTargetResponse, status_code=201)
@@ -1908,8 +1831,7 @@ async def create_employee_target(
             select(Employee).where(Employee.employee_code == target.employee_code)
         )
         if not employee.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"员工不存在: {target.employee_code}")
-        
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {target.employee_code}", status_code=400)
         # 检查目标是否已存在
         existing = await db.execute(
             select(EmployeeTarget).where(
@@ -1921,24 +1843,21 @@ async def create_employee_target(
             )
         )
         if existing.scalar_one_or_none():
-            raise HTTPException(
+            return error_response(
+                ErrorCode.DATA_ALREADY_EXISTS,
+                f"员工目标已存在: {target.employee_code} - {target.year_month} - {target.target_type}",
                 status_code=400,
-                detail=f"员工目标已存在: {target.employee_code} - {target.year_month} - {target.target_type}"
             )
-        
         new_target = EmployeeTarget(**target.model_dump())
         db.add(new_target)
         await db.commit()
         await db.refresh(new_target)
-        
         logger.info(f"创建员工目标成功: {target.employee_code} - {target.year_month} - {target.target_type}")
         return EmployeeTargetResponse.model_validate(new_target)
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建员工目标失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"创建员工目标失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建员工目标失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -1975,7 +1894,7 @@ async def list_employee_performance(
         return [EmployeePerformanceResponse.model_validate(perf) for perf in performances]
     except Exception as e:
         logger.error(f"获取员工绩效列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取员工绩效列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工绩效列表失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -2012,7 +1931,7 @@ async def list_employee_commissions(
         return [EmployeeCommissionResponse.model_validate(comm) for comm in commissions]
     except Exception as e:
         logger.error(f"获取员工提成列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取员工提成列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取员工提成列表失败: {str(e)}", status_code=500)
 
 
 @router.get("/commissions/shop", response_model=List[ShopCommissionResponse])
@@ -2045,7 +1964,7 @@ async def list_shop_commissions(
         return [ShopCommissionResponse.model_validate(comm) for comm in commissions]
     except Exception as e:
         logger.error(f"获取店铺提成列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取店铺提成列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取店铺提成列表失败: {str(e)}", status_code=500)
 
 
 # ============================================================================
@@ -2187,7 +2106,7 @@ async def list_employee_shop_assignments(
         return {"success": True, "data": {"items": items, "total": total}}
     except Exception as e:
         logger.error(f"获取归属列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取归属列表失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取归属列表失败: {str(e)}", status_code=500)
 
 
 @router.post("/employee-shop-assignments", status_code=201)
@@ -2199,8 +2118,7 @@ async def create_employee_shop_assignment(
     try:
         emp_res = await db.execute(select(Employee).where(Employee.employee_code == body.employee_code))
         if not emp_res.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"员工不存在: {body.employee_code}")
-
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {body.employee_code}", status_code=400)
         shop_res = await db.execute(
             select(DimShop).where(
                 DimShop.platform_code == body.platform_code,
@@ -2208,9 +2126,10 @@ async def create_employee_shop_assignment(
             )
         )
         if not shop_res.scalar_one_or_none():
-            raise HTTPException(
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                "该店铺尚未同步至系统，请先在账号管理中同步",
                 status_code=400,
-                detail="该店铺尚未同步至系统，请先在账号管理中同步",
             )
 
         dup = await db.execute(
@@ -2222,7 +2141,7 @@ async def create_employee_shop_assignment(
             )
         )
         if dup.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="该员工在该月已关联该店铺")
+            return error_response(ErrorCode.DATA_ALREADY_EXISTS, "该员工在该月已关联该店铺", status_code=409)
 
         rec = EmployeeShopAssignment(
             year_month=body.year_month,
@@ -2243,12 +2162,10 @@ async def create_employee_shop_assignment(
         resp.employee_name = emp
         resp.shop_name = shop
         return {"success": True, "data": resp}
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"新增归属失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"新增归属失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"新增归属失败: {str(e)}", status_code=500)
 
 
 @router.put("/employee-shop-assignments/{id}")
@@ -2262,7 +2179,7 @@ async def update_employee_shop_assignment(
         result = await db.execute(select(EmployeeShopAssignment).where(EmployeeShopAssignment.id == id))
         rec = result.scalar_one_or_none()
         if not rec:
-            raise HTTPException(status_code=404, detail="归属记录不存在")
+            return error_response(ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404)
         for k, v in body.model_dump(exclude_unset=True).items():
             setattr(rec, k, v)
         await db.commit()
@@ -2273,12 +2190,10 @@ async def update_employee_shop_assignment(
         resp.employee_name = emp
         resp.shop_name = shop
         return {"success": True, "data": resp}
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"更新归属失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"更新归属失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"更新归属失败: {str(e)}", status_code=500)
 
 
 @router.delete("/employee-shop-assignments/{id}", status_code=204)
@@ -2291,16 +2206,14 @@ async def delete_employee_shop_assignment(
         result = await db.execute(select(EmployeeShopAssignment).where(EmployeeShopAssignment.id == id))
         rec = result.scalar_one_or_none()
         if not rec:
-            raise HTTPException(status_code=404, detail="归属记录不存在")
+            return error_response(ErrorCode.DATA_NOT_FOUND, "归属记录不存在", status_code=404)
         await db.delete(rec)
         await db.commit()
         return None
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"删除归属失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"删除归属失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"删除归属失败: {str(e)}", status_code=500)
 
 
 class CopyFromPrevMonthBody(BaseModel):
@@ -2357,12 +2270,10 @@ async def copy_employee_shop_assignments_from_prev_month(
             copied += 1
         await db.commit()
         return {"success": True, "data": {"copied": copied, "from_month": prev_month, "to_month": body.year_month}}
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"复制上月配置失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"复制上月配置失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"复制上月配置失败: {str(e)}", status_code=500)
 
 
 @router.get("/shop-profit-statistics")
@@ -2380,7 +2291,7 @@ async def get_shop_profit_statistics(
                 raise ValueError("月份格式应为 YYYY-MM")
             month_date = date(int(parts[0]), int(parts[1]), 1)
         except (ValueError, IndexError):
-            raise HTTPException(status_code=400, detail="月份格式应为 YYYY-MM")
+            return error_response(ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400)
 
         # 1. 获取店铺列表（platform_accounts）
         shop_query = (
@@ -2466,11 +2377,9 @@ async def get_shop_profit_statistics(
                 "operator_profit": operator_profit,
             })
         return {"success": True, "data": items}
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"获取店铺利润统计失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取店铺利润统计失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取店铺利润统计失败: {str(e)}", status_code=500)
 
 
 @router.get("/annual-profit-statistics")
@@ -2668,8 +2577,6 @@ async def get_annual_profit_statistics(
                 "by_shop": by_shop_list,
             },
         }
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"获取年度利润统计失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取年度利润统计失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取年度利润统计失败: {str(e)}", status_code=500)

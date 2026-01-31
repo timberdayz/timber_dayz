@@ -56,16 +56,30 @@
           border
           :span-method="configSpanMethod"
         >
-          <el-table-column prop="platform_code" label="平台" width="100" fixed="left" show-overflow-tooltip />
-          <el-table-column prop="shop_name" label="店铺" width="180" fixed="left" show-overflow-tooltip />
+          <el-table-column label="平台" width="100" fixed="left" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row._isFirst">{{ row.platform_code }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="店铺" width="180" fixed="left" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row._isFirst">{{ row.shop_name }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="当月销售额" width="120" align="right">
-            <template #default="{ row }">¥{{ formatNumber(row.monthly_sales) }}</template>
+            <template #default="{ row }">
+              <span v-if="row._isFirst">¥{{ formatNumber(row.monthly_sales) }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="当月利润" width="120" align="right">
-            <template #default="{ row }">¥{{ formatNumber(row.monthly_profit) }}</template>
+            <template #default="{ row }">
+              <span v-if="row._isFirst">¥{{ formatNumber(row.monthly_profit) }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="当月目标达成率" width="130" align="right">
-            <template #default="{ row }">{{ row.achievement_rate != null ? Number(row.achievement_rate).toFixed(1) + '%' : '—' }}</template>
+            <template #default="{ row }">
+              <span v-if="row._isFirst">{{ row.achievement_rate != null ? Number(row.achievement_rate).toFixed(1) + '%' : '—' }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="可分配利润率" width="140" align="right">
             <template #default="{ row }">
@@ -125,6 +139,7 @@
             <template #default="{ row }">
               <el-tag v-if="row._isFirst && hasConfig(row)" type="success" size="small">已配置</el-tag>
               <el-tag v-else-if="row._isFirst" type="info" size="small">未配置</el-tag>
+              <span v-else></span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
@@ -137,6 +152,7 @@
                   删除
                 </el-button>
               </template>
+              <span v-else></span>
             </template>
           </el-table-column>
         </el-table>
@@ -381,19 +397,9 @@ const configTableRows = computed(() => {
   return rows
 })
 
-// 固定列会导致 span-method 按分片调用，columnIndex 每片从 0 开始，故用 label 识别列
-function configSpanMethod({ row, column, rowIndex }) {
-  const label = (column && column.label) || ''
-  if (label === '人员' || label === '提成比例') return { rowspan: 1, colspan: 1 }
-  if (row._isAddRow && !row._isFirst) return { rowspan: 0, colspan: 0 }
-  const rows = configTableRows.value
-  const shopKey = row._shopKey
-  let rowspan = 1
-  for (let i = rowIndex + 1; i < rows.length; i++) {
-    if (rows[i]._shopKey === shopKey) rowspan++
-    else break
-  }
-  return { rowspan, colspan: 1 }
+// 不再使用 rowspan:0 隐藏单元格，避免固定列 + 部分隐藏导致的错位。每行各占一单元格，非首行用 v-if 显示空。
+function configSpanMethod() {
+  return { rowspan: 1, colspan: 1 }
 }
 
 function formatNumber(v) {
