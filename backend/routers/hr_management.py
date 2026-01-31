@@ -967,6 +967,95 @@ async def put_me_profile(
     return resp.model_copy(update={"username": username})
 
 
+class MyIncomeResponse(BaseModel):
+    """我的收入响应"""
+    linked: bool = True
+    period: Optional[str] = None
+    base_salary: Optional[float] = None
+    commission_amount: Optional[float] = None
+    commission_rate: Optional[float] = None
+    performance_score: Optional[float] = None
+    achievement_rate: Optional[float] = None
+    total_income: Optional[float] = None
+    breakdown: Optional[dict] = None
+
+
+@router.get("/me/income", response_model=MyIncomeResponse)
+async def get_my_income(
+    year_month: Optional[str] = Query(None, description="月份(YYYY-MM)，不填则当月"),
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """我的收入：根据当前用户关联的员工返回收入数据；未关联时返回 linked: false。"""
+    result = await db.execute(select(Employee).where(Employee.user_id == current_user.user_id))
+    employee = result.scalar_one_or_none()
+    if not employee:
+        return MyIncomeResponse(linked=False)
+    period = year_month or datetime.utcnow().strftime("%Y-%m")
+    employee_code = employee.employee_code
+    base_salary = None
+    commission_amount = 0.0
+    performance_score = None
+    achievement_rate = None
+    breakdown = {}
+    # 查询 payroll_records
+    pr_result = await db.execute(
+        select(PayrollRecord).where(
+            PayrollRecord.employee_code == employee_code,
+            PayrollRecord.year_month == period
+        )
+    )
+    pr = pr_result.scalar_one_or_none()
+    if pr:
+        base_salary = float(pr.base_salary) if pr.base_salary else None
+        commission_amount = float(pr.commission or 0)
+        breakdown["payroll"] = {"base_salary": base_salary, "commission": commission_amount, "net_salary": float(pr.net_salary or 0)}
+    # 若无工资单，组合 salary_structures + employee_commissions + employee_performance
+    if base_salary is None:
+        ss_result = await db.execute(
+            select(SalaryStructure).where(
+                SalaryStructure.employee_code == employee_code,
+                SalaryStructure.status == "active"
+            ).order_by(SalaryStructure.effective_date.desc()).limit(1)
+        )
+        ss = ss_result.scalar_one_or_none()
+        if ss:
+            base_salary = float(ss.base_salary or 0) + float(ss.position_salary or 0)
+            breakdown["salary_structure"] = {"base_salary": base_salary}
+    ec_result = await db.execute(
+        select(EmployeeCommission).where(
+            EmployeeCommission.employee_code == employee_code,
+            EmployeeCommission.year_month == period
+        )
+    )
+    ec = ec_result.scalar_one_or_none()
+    if ec:
+        commission_amount = float(ec.commission_amount or 0)
+        breakdown["commission"] = {"amount": commission_amount}
+    ep_result = await db.execute(
+        select(EmployeePerformance).where(
+            EmployeePerformance.employee_code == employee_code,
+            EmployeePerformance.year_month == period
+        )
+    )
+    ep = ep_result.scalar_one_or_none()
+    if ep:
+        performance_score = float(ep.performance_score or 0)
+        achievement_rate = float(ep.achievement_rate or 0)
+        breakdown["performance"] = {"score": performance_score, "achievement_rate": achievement_rate}
+    total = (base_salary or 0) + commission_amount
+    return MyIncomeResponse(
+        linked=True,
+        period=period,
+        base_salary=base_salary,
+        commission_amount=commission_amount,
+        performance_score=performance_score,
+        achievement_rate=achievement_rate,
+        total_income=total if (base_salary is not None or commission_amount) else None,
+        breakdown=breakdown if breakdown else None
+    )
+
+
 @router.get("/employees", response_model=List[EmployeeResponse])
 async def list_employees(
     department_id: Optional[int] = Query(None, description="部门ID筛选"),

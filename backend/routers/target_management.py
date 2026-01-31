@@ -250,7 +250,7 @@ async def list_targets(
                 code=ErrorCode.DATABASE_QUERY_ERROR,
                 message="数据库表不存在",
                 error_type="DatabaseSchemaError",
-                detail=f"sales_targets 表不存在，请执行迁移: alembic upgrade head",
+                detail=f"a_class.sales_targets 表不存在，请执行迁移: alembic upgrade head",
                 recovery_suggestion="请运行诊断脚本: python scripts/diagnose_targets_db.py",
                 status_code=500
             )

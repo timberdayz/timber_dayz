@@ -6,7 +6,7 @@
 -- 数据源：
 --   - {{MODEL:Orders Model}}：销售额、订单数、利润、客单价等
 --   - {{MODEL:Analytics Model}}：访客数（客流量）、转化率
---   - public.sales_targets：用户设定的销售目标（显式 schema 确保 Metabase 解析正确）
+--   - a_class.sales_targets：用户设定的销售目标（显式 schema 确保 Metabase 解析正确）
 -- 参数：
 --   {{granularity}} - 粒度（daily/weekly/monthly）
 --   {{date}} - 对比日期（必填，YYYY-MM-DD）
@@ -244,7 +244,7 @@ days_elapsed as (
 
 -- =====================================================
 -- 用户设定的销售目标查询（按粒度分源）
--- 月度：public.sales_targets（仅存月度目标）
+-- 月度：a_class.sales_targets（仅存月度目标）
 -- 日度/周度：a_class.target_breakdown（从日度分解表提取，周度=当周日度汇总）
 -- =====================================================
 user_target as (
@@ -252,9 +252,9 @@ user_target as (
     coalesce(sum(u.target_amount), 0) as target_amount,
     coalesce(sum(u.target_quantity), 0) as target_quantity
   from (
-    -- 月度：public.sales_targets 覆盖当月
+    -- 月度：a_class.sales_targets 覆盖当月
     select t.target_amount, t.target_quantity
-    from public.sales_targets t
+    from a_class.sales_targets t
     cross join period_scope s
     where s.gran = 'monthly'
       and t.status = 'active'
@@ -264,7 +264,7 @@ user_target as (
     -- 日度：a_class.target_breakdown 单日（time/shop_time 均含时间维度）
     select tb.target_amount, tb.target_quantity
     from a_class.target_breakdown tb
-    inner join public.sales_targets st on st.id = tb.target_id and st.status = 'active'
+    inner join a_class.sales_targets st on st.id = tb.target_id and st.status = 'active'
     cross join period_scope s
     where s.gran = 'daily'
       and tb.breakdown_type in ('time', 'shop_time')
@@ -274,7 +274,7 @@ user_target as (
     -- 周度：a_class.target_breakdown 当周日度汇总（time/shop_time 均含时间维度）
     select tb.target_amount, tb.target_quantity
     from a_class.target_breakdown tb
-    inner join public.sales_targets st on st.id = tb.target_id and st.status = 'active'
+    inner join a_class.sales_targets st on st.id = tb.target_id and st.status = 'active'
     cross join period_scope s
     where s.gran = 'weekly'
       and tb.breakdown_type in ('time', 'shop_time')

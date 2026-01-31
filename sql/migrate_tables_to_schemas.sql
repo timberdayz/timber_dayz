@@ -55,7 +55,8 @@ ALTER TABLE IF EXISTS mapping_sessions SET SCHEMA core;
 ALTER TABLE IF EXISTS staging_orders SET SCHEMA core;
 ALTER TABLE IF EXISTS staging_product_metrics SET SCHEMA core;
 ALTER TABLE IF EXISTS dim_metric_formulas SET SCHEMA core;
-ALTER TABLE IF EXISTS sales_targets SET SCHEMA core;
+-- [DEPRECATED] sales_targets 已由 Alembic 迁移至 a_class，不再使用此脚本
+-- ALTER TABLE IF EXISTS sales_targets SET SCHEMA core;
 ALTER TABLE IF EXISTS alembic_version SET SCHEMA core;
 
 -- 注意：如果表不存在，ALTER TABLE IF EXISTS会静默跳过，不会报错

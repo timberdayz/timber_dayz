@@ -3,7 +3,7 @@
 -- 业务概览 - 店铺赛马
 -- =====================================================
 -- 用途：店铺/账号排名对比（按GMV排序），含目标、完成率
--- 数据源：{{MODEL:Orders Model}}、a_class.target_breakdown、public.sales_targets
+-- 数据源：{{MODEL:Orders Model}}、a_class.target_breakdown、a_class.sales_targets
 -- 参数（仅日期、粒度、分组维度，无平台筛选）：
 --   {{granularity}} - 粒度（daily/weekly/monthly），与数据对比约定一致
 --   {{date}} - 日期（必填，YYYY-MM-DD）
@@ -62,7 +62,7 @@ shop_targets as (
     lower(coalesce(nullif(trim(tb.shop_id::text), ''), 'unknown')) as shop_id_key,
     coalesce(sum(tb.target_amount), 0) as target_amount
   from a_class.target_breakdown tb
-  inner join public.sales_targets st on st.id = tb.target_id and st.status = 'active'
+  inner join a_class.sales_targets st on st.id = tb.target_id and st.status = 'active'
   cross join period_scope s
   where tb.breakdown_type in ('shop', 'shop_time')
     and tb.platform_code is not null
@@ -78,7 +78,7 @@ platform_targets as (
     tb.platform_code,
     coalesce(sum(tb.target_amount), 0) as target_amount
   from a_class.target_breakdown tb
-  inner join public.sales_targets st on st.id = tb.target_id and st.status = 'active'
+  inner join a_class.sales_targets st on st.id = tb.target_id and st.status = 'active'
   cross join period_scope s
   where tb.breakdown_type in ('shop', 'shop_time')
     and tb.platform_code is not null

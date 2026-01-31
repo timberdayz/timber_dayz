@@ -138,6 +138,7 @@ export const menuGroups = [
     items: [
       '/human-resources',            // 人力管理（含员工/部门/职位/考勤/薪资 Tab）
       '/employee-management',        // 我的档案
+      '/my-income',              // 我的收入
       '/hr-performance-management'  // 绩效管理
     ]
   },
@@ -223,6 +224,7 @@ export const routeDisplayNames = {
   '/sales-dashboard': '销售看板',
   '/sales-dashboard-v3': '销售看板',
   '/sales-campaign-management': '销售战役管理',
+  '/my-income': '我的收入',
   '/hr-performance-management': '绩效管理',
   '/target-management': '目标管理',
   '/inventory-dashboard-v3': '库存看板',

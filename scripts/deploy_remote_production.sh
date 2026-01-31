@@ -693,6 +693,31 @@ else
   exit 1
 fi
 
+# [METABASE] Phase 3.5: 等待 Metabase 健康后执行 init_metabase.py（创建/更新 Models 和 Questions）
+echo "[INFO] Phase 3.5: Waiting for Metabase to be ready, then running init_metabase.py..."
+METABASE_READY=0
+for i in $(seq 1 60); do
+  if docker exec xihong_erp_metabase curl -fsS http://localhost:3000/api/health 2>/dev/null | grep -q '"status":"ok"'; then
+    METABASE_READY=1
+    echo "[OK] Metabase is healthy"
+    break
+  fi
+  if [ "${i}" = "60" ]; then
+    echo "[WARN] Metabase health check timeout; will still attempt init_metabase.py (script has its own wait)"
+  fi
+  sleep 2
+done
+
+# 使用 backend 镜像运行 init_metabase.py（需能访问 Metabase；同网络下使用容器名）
+# METABASE_URL 使用容器名，因 Phase 3.5 时 metabase 由独立 compose 启动，run 容器通过网络访问
+if "${compose_cmd_base[@]}" run --rm --no-deps \
+  -e METABASE_URL="${METABASE_URL:-http://xihong_erp_metabase:3000}" \
+  backend python3 /app/scripts/init_metabase.py 2>&1; then
+  echo "[OK] init_metabase.py completed successfully"
+else
+  echo "[WARN] init_metabase.py failed or returned non-zero; deployment continues (backend will fall back to env Question IDs)"
+fi
+
 echo "[INFO] Phase 4: starting application layer (backend, celery)..."
 "${compose_cmd_base[@]}" up -d backend celery-worker celery-beat celery-exporter
 

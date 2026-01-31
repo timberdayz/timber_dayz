@@ -430,24 +430,24 @@ async def list_performance_scores(
         
         # 总数查询
         total_query = select(func.count()).select_from(query.subquery())
-        total = db.execute(total_query).scalar() or 0
+        total = (await db.execute(total_query)).scalar() or 0
         
         # 分页查询(按总分降序)
         query = query.order_by(PerformanceScore.total_score.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)
         
-        scores = db.execute(query).scalars().all()
+        scores = (await db.execute(query)).scalars().all()
         
         # 获取店铺名称
         score_responses = []
         for score in scores:
             score_data = PerformanceScoreResponse.from_orm(score).dict()
-            shop = db.execute(
+            shop = (await db.execute(
                 select(DimShop).where(
                     DimShop.platform_code == score.platform_code,
                     DimShop.shop_id == score.shop_id
                 )
-            ).scalar_one_or_none()
+            )).scalar_one_or_none()
             if shop:
                 score_data["shop_name"] = shop.shop_name
             score_responses.append(score_data)
@@ -496,7 +496,7 @@ async def get_shop_performance(
             # 获取最新周期
             query = query.order_by(PerformanceScore.period.desc()).limit(1)
         
-        score = db.execute(query).scalar_one_or_none()
+        score = (await db.execute(query)).scalar_one_or_none()
         
         if not score:
             return error_response(
@@ -508,12 +508,12 @@ async def get_shop_performance(
             )
         
         # 获取店铺名称
-        shop = db.execute(
+        shop = (await db.execute(
             select(DimShop).where(
                 DimShop.platform_code == platform_code,
                 DimShop.shop_id == shop_id
             )
-        ).scalar_one_or_none()
+        )).scalar_one_or_none()
         
         score_data = PerformanceScoreResponse.from_orm(score).dict()
         if shop:

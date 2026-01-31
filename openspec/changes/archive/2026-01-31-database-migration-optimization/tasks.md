@@ -1,5 +1,7 @@
 # Tasks: 数据库迁移优化与幂等性保障
 
+**实施状态**：Phase 1–4 实施已完成（2026-01-12）；剩余为测试环境验证与可选文档更新。详见 `proposal.md` 的 Outcome 节与 `IMPLEMENTATION_SUMMARY.md`。
+
 ## Phase 1: 立即修复（P0）
 
 ### 1.1 禁用分区表迁移

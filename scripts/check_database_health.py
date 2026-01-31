@@ -140,7 +140,7 @@ def check_critical_tables(conn) -> tuple:
     critical_tables = [
         # (表名, 期望 schema, 期望字段列表)
         ("operating_costs", "a_class", ["id", "店铺ID", "年月", "租金", "工资", "水电费", "其他成本", "创建时间", "更新时间"]),
-        ("sales_targets", "public", ["id", "target_name", "target_type", "period_start", "period_end"]),
+        ("sales_targets", "a_class", ["id", "target_name", "target_type", "period_start", "period_end"]),
         ("sales_targets_a", "a_class", []),  # A 类数据表
         ("target_breakdown", "a_class", ["id", "target_id", "breakdown_type"]),
         ("platform_accounts", "core", ["id", "platform", "account_alias"]),

@@ -145,8 +145,8 @@ def test_query_apis():
                     st.period_start::text as year_month,
                     st.target_amount as target_sales_amount,
                     st.target_quantity as target_order_count
-                FROM sales_targets st
-                INNER JOIN target_breakdown tb ON st.id = tb.target_id
+                FROM a_class.sales_targets st
+                INNER JOIN a_class.target_breakdown tb ON st.id = tb.target_id
                 WHERE tb.breakdown_type = 'shop'
                 ORDER BY tb.target_id, tb.platform_code, tb.shop_id
                 LIMIT 1

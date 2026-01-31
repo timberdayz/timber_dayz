@@ -1,5 +1,7 @@
 # Tasks: 设计 Metabase 模型和 Question
 
+**核对说明（2026-01-31）**：以下原标为未完成项经代码库核对**已就绪**：0.2.2（N/A）、3.1.5/3.2.1 库存积压与清仓排名、4.5.1 env.example。**已实现（2026-01-31 续）**：4.3.1/4.3.2 按名称查 Question ID + 缓存（保留 env 兜底）、4.4.1 Phase 3.5 部署时执行 init_metabase.py。
+
 ## 0. Metabase 生产环境优化 [紧急 - 上线前必须完成] 🚨
 
 **背景**：一周后系统正式上线，预期 50-100 并发用户。H2 不支持高并发，必须迁移到 PostgreSQL。
@@ -23,8 +25,8 @@
   - ✅ 移除 `MB_DB_FILE` 配置
   - ✅ 添加详细的配置说明和架构图
 
-- [ ] 0.2.2 修改 `docker-compose.prod.yml`（如有单独 Metabase 配置）
-  - 确保生产环境使用 PostgreSQL 配置（需检查是否有单独配置）
+- [x] 0.2.2 修改 `docker-compose.prod.yml`（如有单独 Metabase 配置）✅ **N/A**
+  - Metabase 在 `docker-compose.metabase.yml` 中定义，已配置 PostgreSQL（MB_DB_TYPE=postgres）；prod.yml 不包含 Metabase 服务，仅 Nginx 依赖说明中引用
 
 ### 0.3 更新环境变量 ✅ 已完成
 
@@ -271,13 +273,14 @@
   - **后端API**：`GET /api/dashboard/business-overview/traffic-ranking`
   - **前端**：列映射兜底、环比 null 安全、未关联店铺时显示「平台汇总」提示
 
-- [ ] 3.1.5 business_overview_inventory_backlog - 库存积压
+- [x] 3.1.5 business_overview_inventory_backlog - 库存积压 ✅ **已就绪**
   - **用途**：库存积压分析
   - **数据源**：Inventory Model
   - **计算指标**：库存积压商品、积压天数
   - **参数**：`{{days}}`, `{{platforms}}`, `{{shops}}`
   - **返回格式**：多行数据，每行一个SKU，包含积压信息
   - **后端API**：`GET /api/dashboard/business-overview/inventory-backlog`
+  - **实现状态**：SQL 文件、后端路由、Question（ID 47）已创建；前端 `dashboard.js` 已封装 `queryBusinessOverviewInventoryBacklog`；仅业务逻辑/指标可后续优化
 
 - [x] 3.1.6 business_overview_operational_metrics - 经营指标 ✅ **已可用** ⭐ **需要JOIN A类数据**
   - **用途**：门店经营表格数据（包含达成率、今日销售、今日销售单数、经营结果）
@@ -301,13 +304,14 @@
 
 ### 3.2 其他功能Question（P1 - 重要）
 
-- [ ] 3.2.1 clearance_ranking - 清仓排名
+- [x] 3.2.1 clearance_ranking - 清仓排名 ✅ **已就绪**
   - **用途**：清仓商品排名
-  - **数据源**：Products Model
+  - **数据源**：Products Model + Inventory Model
   - **计算指标**：滞销商品排名
   - **参数**：`{{start_date}}`, `{{end_date}}`, `{{platforms}}`, `{{shops}}`, `{{limit}}`
   - **返回格式**：多行数据，每行一个商品，包含排名
   - **后端API**：`GET /api/dashboard/clearance-ranking`
+  - **实现状态**：SQL 文件、后端路由、Question（ID 49）已创建；前端 `dashboard.js`、`BusinessOverview.vue` 已接入；仅业务逻辑可后续优化
 
 ## 4. 部署架构实现 ✅ 部分完成
 
@@ -331,28 +335,27 @@
 
 ### 4.3 修改 MetabaseQuestionService
 
-- [ ] 4.3.1 实现通过名称动态查询
-  - 添加 `_question_cache: dict[str, int]` 缓存
-  - 实现 `_load_question_cache()` 方法
-  - 实现 `get_question_id(question_name: str)` 方法
-  - 修改 `execute_question()` 接受名称参数
+- [x] 4.3.1 实现通过名称动态查询 ✅
+  - 已添加 `_question_cache` + `_load_question_cache()`（config + GET /api/card）
+  - 已实现 `_get_question_id(question_key)`（优先缓存，兜底 env）
+  - `query_question()` 已接受名称参数并调用 `_get_question_id`
 
-- [ ] 4.3.2 移除环境变量 ID 依赖
-  - 移除 `METABASE_QUESTION_XXX` 环境变量
-  - 改为通过名称调用
+- [x] 4.3.2 移除环境变量 ID 依赖 ✅ **部分完成（保留兜底）**
+  - 保留 `METABASE_QUESTION_XXX` 作为名称查询失败时的兜底
+  - 已改为优先通过名称调用（config + API 缓存）
 
 ### 4.4 更新部署脚本
 
-- [ ] 4.4.1 修改 `scripts/deploy_remote_production.sh`
-  - 添加 Phase 3.5: Metabase 配置初始化
-  - 等待 Metabase 健康检查通过后执行 init_metabase.py
+- [x] 4.4.1 修改 `scripts/deploy_remote_production.sh` ✅
+  - 已添加 Phase 3.5: Metabase 健康等待后执行 init_metabase.py
+  - Dockerfile.backend 已加入 init_metabase.py 与 sql/metabase_*
 
 ### 4.5 更新环境变量配置
 
-- [ ] 4.5.1 更新 `env.example`
-  - 简化 Metabase 配置（只需 URL 和 API Key）
-  - 移除 Question ID 环境变量
-  - 添加注释说明
+- [x] 4.5.1 更新 `env.example` ✅ **部分完成**
+  - ✅ 已添加 `METABASE_DB_*`（PostgreSQL 应用数据库）及官方警告说明
+  - ✅ 已标注 Question ID 为「已废弃，保留用于向后兼容」
+  - ⚠️ 当前运行时仍从 env 读取 Question ID（待 4.3 名称查询实现后可移除变量）
 
 ### 4.6 创建 Question SQL 文件目录 ✅ 已完成
 
@@ -366,7 +369,12 @@
   - ✅ business_overview_operational_metrics.sql
   - ✅ clearance_ranking.sql
 
-## 5. 测试和验证 [TODO]
+## 5. 测试和验证
+
+- [x] 5.0 单元测试（2026-01-31） ✅
+  - 已新增 `tests/test_metabase_question_service.py`：config 加载、按名称缓存、env 兜底、未找到抛错、query_question 结构
+  - 运行：`pytest tests/test_metabase_question_service.py -v`
+  - 可选集成：后端+Metabase 启动后运行 `python scripts/test_metabase_question_integration.py`
 
 - [ ] 5.1 测试Model数据完整性
   - 验证所有平台的数据都能正确整合

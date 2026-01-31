@@ -1,10 +1,14 @@
 """
 Metabase Question查询服务
 用于通过Metabase REST API查询Question并返回数据
+支持通过名称动态查询 Question ID（优先），环境变量 ID 为向后兼容兜底。
 """
 
+import asyncio
 import os
 import httpx
+import yaml
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 from modules.core.logger import get_logger
 
@@ -16,8 +20,32 @@ os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,0.0.0.0")
 os.environ.setdefault("no_proxy", "localhost,127.0.0.1,0.0.0.0")
 
 
+def _get_project_root() -> Path:
+    """项目根目录（backend/services -> backend -> 根）"""
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _load_question_key_to_display_name() -> Dict[str, str]:
+    """从 config/metabase_config.yaml 加载 question_key -> display_name 映射"""
+    config_path = _get_project_root() / "config" / "metabase_config.yaml"
+    if not config_path.exists():
+        return {}
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        questions = config.get("questions") or []
+        return {
+            str(q.get("name", "")): str(q.get("display_name") or q.get("name", ""))
+            for q in questions
+            if q.get("name")
+        }
+    except Exception as e:
+        logger.warning(f"加载 metabase_config.yaml 失败: {e}")
+        return {}
+
+
 class MetabaseQuestionService:
-    """Metabase Question查询服务"""
+    """Metabase Question查询服务（支持按名称动态查询 Question ID）"""
     
     def __init__(self):
         """初始化Metabase服务"""
@@ -30,7 +58,12 @@ class MetabaseQuestionService:
         # Session Token缓存
         self.session_token: Optional[str] = None
         
-        # Question ID映射(从环境变量读取)
+        # 按名称查到的 Question ID 缓存（name -> id）
+        self._question_cache: Dict[str, int] = {}
+        self._cache_loaded: bool = False
+        self._cache_lock: asyncio.Lock = asyncio.Lock()
+        
+        # 环境变量 Question ID（向后兼容，名称查询失败时使用）
         self.question_ids = {
             "business_overview_kpi": int(os.getenv("METABASE_QUESTION_BUSINESS_OVERVIEW_KPI", "0")),
             "business_overview_comparison": int(os.getenv("METABASE_QUESTION_BUSINESS_OVERVIEW_COMPARISON", "0")),
@@ -84,29 +117,76 @@ class MetabaseQuestionService:
             logger.error(f"Metabase登录异常: {e}")
             raise ValueError(f"Metabase认证异常: {str(e)}")
     
-    def _get_question_id(self, question_key: str) -> int:
+    async def _load_question_cache(self) -> None:
         """
-        获取Question ID(增强错误提示)
+        通过 Metabase API 按名称加载 Question ID 缓存。
+        使用 config/metabase_config.yaml 中的 question_key -> display_name，
+        再通过 GET /api/card 匹配 Metabase 中的 card name（即 display_name）得到 ID。
+        """
+        async with self._cache_lock:
+            if self._cache_loaded:
+                return
+            await self._ensure_session_token()
+            headers: Dict[str, str] = {}
+            if self.api_key:
+                headers["X-API-Key"] = self.session_token or self.api_key
+            else:
+                headers["X-Metabase-Session"] = self.session_token or ""
+            key_to_display = _load_question_key_to_display_name()
+            if not key_to_display:
+                logger.warning("metabase_config.yaml 中无 questions，将仅使用环境变量 Question ID")
+                self._cache_loaded = True
+                return
+            try:
+                # GET /api/card 可返回列表或 {"data": [...], "total": N}
+                response = await self.client.get(
+                    f"{self.base_url}/api/card",
+                    headers=headers,
+                    params={"type": "question"},
+                )
+                response.raise_for_status()
+                data = response.json()
+                cards = data.get("data", data) if isinstance(data, dict) else data
+                if not isinstance(cards, list):
+                    cards = []
+                display_name_to_id: Dict[str, int] = {}
+                for card in cards:
+                    name = card.get("name")
+                    cid = card.get("id")
+                    if name and cid is not None and card.get("type") == "question":
+                        display_name_to_id[name] = int(cid)
+                for question_key, display_name in key_to_display.items():
+                    if display_name in display_name_to_id:
+                        self._question_cache[question_key] = display_name_to_id[display_name]
+                        logger.debug(f"Question 名称解析: {question_key} -> {display_name} (ID: {display_name_to_id[display_name]})")
+                self._cache_loaded = True
+                if self._question_cache:
+                    logger.info(f"Metabase Question 缓存已加载: {len(self._question_cache)} 个")
+            except Exception as e:
+                logger.warning(f"按名称加载 Question 缓存失败，将使用环境变量: {e}")
+                self._cache_loaded = True
+    
+    async def _get_question_id(self, question_key: str) -> int:
+        """
+        获取 Question ID：优先从名称缓存，其次从环境变量。
         
         Args:
-            question_key: Question键名
+            question_key: Question 键名（如 business_overview_kpi）
             
         Returns:
             Question ID
             
         Raises:
-            ValueError: Question ID未配置时抛出,包含详细的配置说明
+            ValueError: 未找到 Question ID 时抛出
         """
-        question_id = self.question_ids.get(question_key)
-        if not question_id or question_id == 0:
+        await self._load_question_cache()
+        question_id = self._question_cache.get(question_key) or self.question_ids.get(question_key) or 0
+        if not question_id:
             env_var_name = f"METABASE_QUESTION_{question_key.upper()}"
             error_msg = (
-                f"Question ID未配置: {question_key}\n"
-                f"请在环境变量中设置 {env_var_name}\n"
-                f"获取方式:\n"
-                f"  1. 在Metabase UI中创建Question\n"
-                f"  2. 记录Question ID(在Question URL或详情中)\n"
-                f"  3. 配置到.env文件: {env_var_name}=<question_id>"
+                f"Question ID 未找到: {question_key}\n"
+                f"请确保已运行 init_metabase.py 创建 Question，或设置环境变量 {env_var_name}\n"
+                f"获取方式: 运行 python scripts/init_metabase.py 后，在 Metabase 中查看 Question ID"
             )
             logger.error(error_msg)
             raise ValueError(error_msg)
@@ -620,15 +700,18 @@ class MetabaseQuestionService:
         if params is None:
             params = {}
         
+        url = ""
+        metabase_params_list: List[Dict[str, Any]] = []
         try:
-            # 1. 获取Question ID
-            question_id = self._get_question_id(question_key)
+            # 1. 获取 Question ID（按名称或环境变量）
+            question_id = await self._get_question_id(question_key)
             
-            # 2. 确保有Session Token
+            # 2. 确保有 Session Token
             token = await self._ensure_session_token()
             
             # 3. 转换参数
-            metabase_params = self._convert_params(params)
+            metabase_params_list = self._convert_params(params)
+            metabase_params = metabase_params_list
             
             # 4. 调用Metabase Question API
             headers = {}
@@ -705,10 +788,12 @@ class MetabaseQuestionService:
             
         except httpx.HTTPStatusError as e:
             body = e.response.text
+            if not url:
+                url = f"{self.base_url}/api/card/<id>/query/json"
             logger.error(
                 f"Metabase Question查询失败: HTTP {e.response.status_code}\n"
                 f"  请求: POST {url}\n"
-                f"  参数: {metabase_params if metabase_params else '无'}\n"
+                f"  参数: {metabase_params_list if metabase_params_list else '无'}\n"
                 f"  响应体: {body[:2000] if body else '(空)'}"
             )
             raise ValueError(

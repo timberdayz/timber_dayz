@@ -2370,6 +2370,7 @@ class SalesTarget(Base):
         Index("ix_sales_targets_type", "target_type"),
         Index("ix_sales_targets_status", "status"),
         Index("ix_sales_targets_period", "period_start", "period_end"),
+        {"schema": "a_class"},
     )
 
 
@@ -2387,8 +2388,8 @@ class TargetBreakdown(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     
-    # 关联字段
-    target_id = Column(Integer, ForeignKey("sales_targets.id", ondelete="CASCADE"), nullable=False)
+    # 关联字段 (sales_targets 在 a_class schema)
+    target_id = Column(Integer, ForeignKey("a_class.sales_targets.id", ondelete="CASCADE"), nullable=False)
     
     # 分解类型
     breakdown_type = Column(String(32), nullable=False, comment="分解类型:shop/time")
@@ -2478,6 +2479,7 @@ class ShopHealthScore(Base):
         Index("ix_shop_health_date", "metric_date"),
         Index("ix_shop_health_score", "health_score"),
         Index("ix_shop_health_risk", "risk_level"),
+        {"schema": "c_class"},
     )
 
 
@@ -2527,6 +2529,7 @@ class ShopAlert(Base):
         Index("ix_shop_alerts_level", "alert_level"),
         Index("ix_shop_alerts_resolved", "is_resolved"),
         Index("ix_shop_alerts_created", "created_at"),
+        {"schema": "c_class"},
     )
 
 
@@ -2578,6 +2581,7 @@ class PerformanceScore(Base):
         Index("ix_performance_period", "period"),
         Index("ix_performance_score", "total_score"),
         Index("ix_performance_rank", "rank"),
+        {"schema": "c_class"},
     )
 
 

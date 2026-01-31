@@ -217,3 +217,22 @@
 
 - `add-production-day1-bootstrap`：Day-1 Bootstrap 包含数据库初始化
 - `migrate-to-async-sqlalchemy`：异步架构迁移（已完成）
+
+---
+
+## Outcome / 实施结果（2026-01-12）
+
+**状态**：Phase 1–4 实施已完成；剩余为测试环境验证与可选文档更新。
+
+### 已完成
+
+- **Phase 1（立即修复）**：分区表迁移已改为跳过模式；`scripts/deploy_remote_production.sh` 已实现智能迁移（检测 `alembic_version`、新库用快照、已有库增量 + 缺失表补充、head/heads 安全标记）。
+- **Phase 2（Schema 快照）**：`scripts/generate_schema_snapshot.py` 已创建；`migrations/versions/20260112_v5_0_0_schema_snapshot.py` 已生成（幂等、106 张表）；旧迁移已归档至 `migrations/versions_archived/`，索引见 `INDEX.md`。
+- **Phase 3（幂等模板与规范）**：`migrations/templates/idempotent_migration.py.template` 已创建；`.cursorrules` 与 `docs/DEVELOPMENT_RULES/DATABASE_MIGRATION.md` 已更新（幂等要求、禁止 INCLUDING ALL/INDEXES、禁止生产 init_db、autogenerate 指南）。
+- **Phase 4（数据迁移工具）**：`scripts/migrate_data.sh`、`scripts/migrate_selective_tables.py` 已创建；`backend/routers/data_migration.py` 已实现 `/api/data/export`、`/api/data/import`（白名单、分页、冲突策略）；`docs/guides/DATA_MIGRATION_GUIDE.md` 已创建。
+
+### 延后 / 可选
+
+- **测试环境验证**：新数据库部署、已有数据库迁移、部署脚本回退等场景待实际环境验证。
+- **数据迁移工具测试**：完整迁移、选择性表迁移、增量同步、API 导出/导入的端到端测试待执行。
+- **文档更新**：`CHANGELOG.md`、`docs/CI_CD_DEPLOYMENT_GUIDE.md` 中迁移策略说明可后续补充。

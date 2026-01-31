@@ -1,5 +1,7 @@
 # 实施任务清单：前端 Dashboard 迁移到 Metabase API
 
+**归档说明**：Phase 0–1 已完成；数据提供已由他案完成；Phase 2–4（Metabase 服务封装、Dashboard.vue/store 接入真实 API、降级策略）延后，由后续变更承接。详见 proposal.md 的 Outcome 节。
+
 ## Phase 0: 清理旧 API 依赖（最高优先级 - Agent 友好性）⭐⭐⭐
 
 ### 0.1 识别无效的旧 API 调用

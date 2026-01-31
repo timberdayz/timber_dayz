@@ -769,6 +769,17 @@ const routes = [
     redirect: () => ({ path: '/human-resources', query: { tab: 'attendance' } })
   },
   {
+    path: '/my-income',
+    name: 'MyIncome',
+    component: () => import('../views/hr/MyIncome.vue'),
+    meta: {
+      title: '我的收入',
+      icon: 'Money',
+      permission: null,
+      roles: ['admin', 'manager', 'operator']
+    }
+  },
+  {
     path: '/hr-performance-management',
     name: 'HRPerformanceManagement',
     component: () => import('../views/hr/PerformanceManagement.vue'),

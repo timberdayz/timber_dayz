@@ -101,15 +101,15 @@ def diagnose_sales_targets(conn) -> tuple:
         "updated_at": "timestamp without time zone",
     }
     
-    if not check_table_exists(conn, "sales_targets"):
-        issues.append("[FAIL] sales_targets 表不存在")
+    if not check_table_exists(conn, "sales_targets", "a_class"):
+        issues.append("[FAIL] a_class.sales_targets 表不存在")
         recommendations.append("执行 Alembic 迁移: python -m alembic upgrade head")
         return issues, recommendations
     
-    safe_print("[OK] sales_targets 表存在")
+    safe_print("[OK] a_class.sales_targets 表存在")
     
     # 检查列
-    actual_columns = get_table_columns(conn, "sales_targets")
+    actual_columns = get_table_columns(conn, "sales_targets", "a_class")
     
     missing_columns = []
     for col_name, expected_type in expected_columns.items():
@@ -127,7 +127,7 @@ def diagnose_sales_targets(conn) -> tuple:
     # 检查数据
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT COUNT(*) FROM sales_targets")
+        cursor.execute("SELECT COUNT(*) FROM a_class.sales_targets")
         count = cursor.fetchone()[0]
         safe_print(f"[INFO] sales_targets 表当前有 {count} 条记录")
     except Exception as e:
@@ -145,7 +145,7 @@ def diagnose_target_breakdown(conn) -> tuple:
     
     # 检查多个可能的 schema
     found_schema = None
-    for schema in ["public", "core"]:
+    for schema in ["a_class", "public", "core"]:
         if check_table_exists(conn, "target_breakdown", schema):
             found_schema = schema
             break

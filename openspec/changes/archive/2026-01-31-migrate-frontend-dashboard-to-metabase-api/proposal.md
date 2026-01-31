@@ -138,3 +138,25 @@
 4. **可维护性提升**：统一的 Metabase API 调用方式，便于后续维护和扩展
 5. **代码清晰性**：删除无效代码，保持代码库清晰，减少维护成本
 
+---
+
+## Outcome / 实施结果（归档前更新）
+
+**状态**：Phase 0–1 已完成；数据提供已由其他提案完成；Phase 2–4 延后，可归档。
+
+### 已完成
+
+- **Phase 0（清理旧 API）**：已删除所有无效的旧 Dashboard API 调用（`dashboard.js` 15 个方法、store 与 `Dashboard.vue` 中的旧调用）；前端 API 层已改为 7 个 Metabase 业务概览方法（`queryBusinessOverviewKpi`、`queryBusinessOverviewComparison` 等），调用 `/dashboard/business-overview/*`。
+- **Phase 1（现状梳理）**：组件与 Question 映射、数据结构与格式差异已梳理；`frontend/src/api/dashboard.js` 已提供业务概览所需接口。
+
+### 数据提供（由其他提案完成）
+
+- 后端 Metabase Question 代理、Redis 缓存、全局日期同步等已由 `add-dashboard-redis-cache-performance`、`add-business-overview-global-date-sync` 等提案完成。
+- 前端 API 层（`dashboard.js`）已具备业务概览所需方法，数据提供链路已就绪。
+
+### 延后 / 后续迭代
+
+- **Phase 2（Metabase 前端服务封装）**：`frontend/src/services/metabase.js` 的 `getQuestionData` 及业务概览封装可后续补充。
+- **Phase 3（业务概览页面迁移）**：`Dashboard.vue` 与 `stores/dashboard.js` 尚未接入真实 API（当前为占位/空数据）；需改为调用 `dashboardApi.queryBusinessOverviewKpi()` 等，由后续变更承接。
+- **Phase 4（降级策略与验证）**：延后实施。
+

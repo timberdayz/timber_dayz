@@ -278,8 +278,8 @@ class TargetSyncService:
         result = await self.db.execute(
             text("""
                 SELECT COUNT(DISTINCT t.id)
-                FROM sales_targets t
-                JOIN target_breakdown tb ON tb.target_id = t.id
+                FROM a_class.sales_targets t
+                JOIN a_class.target_breakdown tb ON tb.target_id = t.id
                 WHERE t.id != :target_id
                   AND t.status = 'active'
                   AND tb.breakdown_type = 'shop'

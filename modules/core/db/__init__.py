@@ -164,7 +164,6 @@ from .schema import (
     EmployeePerformance,
     EmployeeCommission,
     ShopCommission,
-    PerformanceScoreC,
 )
 
 __all__ = [
@@ -300,6 +299,5 @@ __all__ = [
     "EmployeePerformance",
     "EmployeeCommission",
     "ShopCommission",
-    "PerformanceScoreC",
 ]
 

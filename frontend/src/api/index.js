@@ -1814,6 +1814,10 @@ export default {
   async getHrMeProfile() {
     return await this._get("/hr/me/profile");
   },
+  async getMyIncome(yearMonth = null) {
+    const params = yearMonth ? { year_month: yearMonth } : {};
+    return await this._get("/hr/me/income", { params });
+  },
   async putHrMeProfile(data) {
     return await this._put("/hr/me/profile", data);
   },
