@@ -160,6 +160,52 @@ cleanup_old_images() {
     echo "[INFO] No frontend version images found to clean"
   fi
   
+  # [方案 A] 同时清理 CNB 镜像（若配置了 CNB），避免 docker.cnb.cool 侧旧版本堆积导致系统盘占满
+  if [ -n "${CNB_REGISTRY:-}" ] && [ -n "${CNB_IMAGE_NAME_BACKEND:-}" ] && [ -n "${CNB_IMAGE_NAME_FRONTEND:-}" ]; then
+    echo "[INFO] Cleaning up old CNB images (keeping latest ${keep_count} versions)..."
+    local cnb_backend_images
+    cnb_backend_images=$(docker images --format "{{.Repository}}:{{.Tag}}" | \
+      grep "^${CNB_REGISTRY}/${CNB_IMAGE_NAME_BACKEND}:" | \
+      grep -E "${version_pattern}" | \
+      sort -V -r 2>/dev/null || echo "")
+    if [ -n "${cnb_backend_images}" ]; then
+      local cnb_backend_count
+      cnb_backend_count=$(echo "${cnb_backend_images}" | wc -l | tr -d ' \n\r')
+      if [ "${cnb_backend_count}" -gt "${keep_count}" ]; then
+        local to_remove=$((cnb_backend_count - keep_count))
+        echo "[INFO] Removing ${to_remove} old CNB backend image(s)..."
+        echo "${cnb_backend_images}" | tail -n +$((keep_count + 1)) | \
+          while read -r img; do
+            [ -n "${img}" ] && { echo "  [INFO] Removing: ${img}"; docker rmi "${img}" 2>/dev/null || echo "  [WARN] Failed to remove ${img} (may be in use)"; }
+          done
+      else
+        echo "[INFO] CNB backend images count (${cnb_backend_count}) <= keep count (${keep_count}), skipping"
+      fi
+    fi
+    local cnb_frontend_images
+    cnb_frontend_images=$(docker images --format "{{.Repository}}:{{.Tag}}" | \
+      grep "^${CNB_REGISTRY}/${CNB_IMAGE_NAME_FRONTEND}:" | \
+      grep -E "${version_pattern}" | \
+      sort -V -r 2>/dev/null || echo "")
+    if [ -n "${cnb_frontend_images}" ]; then
+      local cnb_frontend_count
+      cnb_frontend_count=$(echo "${cnb_frontend_images}" | wc -l | tr -d ' \n\r')
+      if [ "${cnb_frontend_count}" -gt "${keep_count}" ]; then
+        local to_remove=$((cnb_frontend_count - keep_count))
+        echo "[INFO] Removing ${to_remove} old CNB frontend image(s)..."
+        echo "${cnb_frontend_images}" | tail -n +$((keep_count + 1)) | \
+          while read -r img; do
+            [ -n "${img}" ] && { echo "  [INFO] Removing: ${img}"; docker rmi "${img}" 2>/dev/null || echo "  [WARN] Failed to remove ${img} (may be in use)"; }
+          done
+      else
+        echo "[INFO] CNB frontend images count (${cnb_frontend_count}) <= keep count (${keep_count}), skipping"
+      fi
+    fi
+    echo "[OK] CNB image cleanup completed"
+  else
+    echo "[INFO] CNB not configured, skipping CNB image cleanup"
+  fi
+  
   # 清理 dangling 镜像（未标记的中间层，这些通常是构建过程中的临时层）
   echo "[INFO] Cleaning up dangling images..."
   local pruned_size
