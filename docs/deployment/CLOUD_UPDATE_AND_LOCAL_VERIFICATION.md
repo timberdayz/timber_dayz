@@ -167,7 +167,45 @@ python scripts/verify_deploy_full_local.py --no-build
 
 ---
 
-## 三、常见问题
+## 三、云上迁移失败处理流程
+
+当部署 Phase 2 报错「迁移失败且无法自动修复（所有表都存在）」时，说明云上数据库为**旧版本表结构**（表在但缺列，或与当前迁移不兼容）。按以下顺序处理，避免逐个表排查。
+
+### 3.1 部署脚本已自动做的
+
+1. **打印迁移原始错误**：日志中会输出「迁移命令原始错误」，便于定位具体 SQL 或约束问题。
+2. **尝试补列后重试**：脚本会执行 `sync_schema_columns.py`，按 `schema.py` 对已存在的表执行 `ADD COLUMN IF NOT EXISTS`（只补缺失列），然后再次执行 `alembic upgrade heads`。若补列后迁移成功，部署会继续。
+
+### 3.2 若补列后仍失败
+
+1. **看「迁移命令原始错误」**：确定是缺列、约束冲突、重复键，还是 `alembic_version` 与代码不一致。
+2. **在类生产环境复现**：用生产库备份或同结构库，本地或 CI 执行 `alembic upgrade heads`，复现同一错误。
+3. **修迁移或修数据**：
+   - 缺列且补列未覆盖：检查 `sync_schema_columns.py` 是否支持该列类型，或为该表写一条修复迁移（`ADD COLUMN IF NOT EXISTS`）。
+   - 约束/唯一键冲突：在迁移中加条件或先修数据再跑迁移。
+   - `alembic_version` 与代码不一致：按 [Alembic 文档](https://alembic.sqlalchemy.org/en/latest/cookbook.html#building-an-up-to-date-database-from-scratch) 处理多头或历史 revision，必要时在服务器执行 `alembic stamp head(s)`（确认库结构已与代码一致后再 stamp）。
+4. **重新部署**：修好后打新 tag 或重新触发部署。
+
+### 3.3 可选：部署前对云上做只读检查
+
+若已配置到云上 DB 的连接（如 SSH 隧道），可在部署前执行：
+
+- `python scripts/verify_schema_consistency.py --columns`（连云上 DB）：查看缺表、缺列报告。
+- `python scripts/sync_schema_columns.py --dry-run`（连云上 DB）：预览将执行的补列 SQL，不执行。
+
+便于提前判断本次发布是否可能触发「所有表都存在」的迁移失败。
+
+### 3.4 新迁移编写建议（可重入、前向兼容）
+
+- **加表**：使用 `CREATE TABLE IF NOT EXISTS`，避免重复执行报错。
+- **加列**：先查 `information_schema.columns` 再执行 `ADD COLUMN`，或使用数据库的 `ADD COLUMN IF NOT EXISTS`（如 PostgreSQL 9.5+），使同一条迁移在旧库上多跑几次也不报错。
+- **删列/改类型**：单独迁移，并考虑数据迁移与回滚；生产上慎用。
+
+这样云上旧 schema 时只需「再跑一次迁移」即可追上，减少对补列兜底的依赖。
+
+---
+
+## 四、常见问题
 
 **Q：云端已有库，这次发布新增了迁移，会重复执行吗？**  
 A：不会。部署脚本检测到 `alembic_version` 存在后，只执行 `alembic upgrade heads`，只会跑尚未应用的迁移。
@@ -186,7 +224,7 @@ A：在服务器 `.env`（或部署所用环境变量）中设置 **`KEEP_IMAGES
 
 ---
 
-## 四、相关文件与命令速查
+## 五、相关文件与命令速查
 
 | 用途 | 文件/命令 |
 |------|-----------|
@@ -196,6 +234,7 @@ A：在服务器 `.env`（或部署所用环境变量）中设置 **`KEEP_IMAGES
 | 方式 B 使用的 Compose 覆盖 | `docker-compose.verify-local.yml`（端口 8001/8080 + DATABASE_URL 覆盖） |
 | 本地 Phase 3.5 + 集成验证（方式 A） | `python scripts/verify_deploy_phase35_local.py` |
 | **临时库迁移门禁**（与 CI Validate Database Migrations 等价） | `python scripts/validate_migrations_fresh_db.py`（可选 `--port 5433`） |
+| 云上旧 schema 补列（部署失败时自动调用） | `scripts/sync_schema_columns.py`（可选 `--dry-run` 预览） |
 | 仅集成测试（后端已起） | `python scripts/test_metabase_question_integration.py --base-url http://localhost:8001` |
 | Metabase 服务按名称查 Question 单元测试 | `pytest tests/test_metabase_question_service.py -v` |
 | CI/CD 流程说明 | `docs/CI_CD_DEPLOYMENT_GUIDE.md` |

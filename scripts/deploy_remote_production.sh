@@ -204,6 +204,11 @@ pull_image_with_fallback() {
         timeout 300 docker pull "${cnb_image}" >&2 || true
         if docker image inspect "${cnb_image}" >/dev/null 2>&1; then
           echo "[OK] Image pulled from CNB successfully with tag ${primary_tag}" >&2
+          # [国内优先] 打上 GHCR 名，使 docker-compose.deploy.yml 中的 ghcr.io 镜像名指向本地镜像，避免再向 ghcr.io 拉取
+          ghcr_image="${GHCR_REGISTRY}/${image_name}:${primary_tag}"
+          if docker tag "${cnb_image}" "${ghcr_image}" 2>/dev/null; then
+            echo "[INFO] Tagged CNB image as ${ghcr_image} (compose will use local image)" >&2
+          fi
           echo "${primary_tag}"  # stdout: only tag
           return 0
         fi
@@ -223,6 +228,11 @@ pull_image_with_fallback() {
           timeout 300 docker pull "${cnb_image_fallback}" >&2 || true
           if docker image inspect "${cnb_image_fallback}" >/dev/null 2>&1; then
             echo "[OK] Image pulled from CNB successfully with fallback tag ${fallback_tag}" >&2
+            # [国内优先] 打上 GHCR 名，使 compose 使用本地镜像
+            ghcr_image_fb="${GHCR_REGISTRY}/${image_name}:${fallback_tag}"
+            if docker tag "${cnb_image_fallback}" "${ghcr_image_fb}" 2>/dev/null; then
+              echo "[INFO] Tagged CNB image as ${ghcr_image_fb} (compose will use local image)" >&2
+            fi
             echo "${fallback_tag}"  # stdout: only tag
             return 0
           fi
@@ -535,9 +545,13 @@ smart_database_migrate() {
   else
     # 已有数据库：尝试增量迁移
     echo "[INFO] 检测到已有数据库（alembic_version 表存在），尝试增量迁移..."
-    # [FIX] 使用 heads（复数）以支持多头迁移分支
-    "${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads || {
-      # [FIX] 失败时直接检查表是否存在（不依赖 verify_schema_completeness()）
+    MIGRATE_LOG=$(mktemp)
+    # [FIX] 使用 heads（复数）以支持多头迁移分支；捕获完整输出便于排查（如云服务器为旧版本表结构）
+    "${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads 2> "${MIGRATE_LOG}"
+    MIGRATE_EXIT=$?
+    if [ ${MIGRATE_EXIT} -ne 0 ]; then
+      echo "[WARN] 迁移命令返回非零 (exit ${MIGRATE_EXIT})，完整输出如下:"
+      cat "${MIGRATE_LOG}"
       echo "[WARN] 迁移失败，检测缺失的表..."
       MISSING_TABLES=$("${compose_cmd_base[@]}" run --rm --no-deps backend python3 -c "
 from backend.models.database import Base, engine
@@ -612,6 +626,7 @@ else:
     print('[INFO] 所有表都已存在')
 " || {
           echo "[ERROR] 创建缺失表失败"
+          rm -f "${MIGRATE_LOG}"
           return 1
         }
 
@@ -661,19 +676,39 @@ except Exception as e:
         else
           echo "[ERROR] 表结构验证失败，不标记迁移"
           echo "[INFO] 请手动检查并修复表结构"
+          rm -f "${MIGRATE_LOG}"
           return 1
         fi
       elif [ $DETECT_EXIT_CODE -eq 2 ]; then
         echo "[ERROR] 检测缺失表时出错"
         echo "[INFO] 请检查数据库连接和 Python 环境"
+        rm -f "${MIGRATE_LOG}"
         return 1
       else
-        echo "[ERROR] 迁移失败且无法自动修复（所有表都存在）"
-        echo "[INFO] 迁移失败可能是其他原因（如字段缺失、索引问题等）"
-        echo "[INFO] 请检查迁移日志并手动修复"
-        return 1
+        # [P0] 所有表都存在：尝试补列后重试迁移（云上旧 schema 缺列时一次补齐）
+        echo "[INFO] 所有表都存在，尝试补列后重试迁移..."
+        if ! "${compose_cmd_base[@]}" run --rm --no-deps backend python3 /app/scripts/sync_schema_columns.py 2>/dev/null; then
+          echo "[WARN] sync_schema_columns.py 执行失败或未找到，继续重试迁移"
+        fi
+        echo "[INFO] 重试 alembic upgrade heads..."
+        "${compose_cmd_base[@]}" run --rm --no-deps backend alembic upgrade heads 2> "${MIGRATE_LOG}"
+        RETRY_EXIT=$?
+        if [ ${RETRY_EXIT} -eq 0 ]; then
+          echo "[OK] 补列后迁移成功"
+        else
+          echo "[ERROR] 迁移失败且无法自动修复（所有表都存在）"
+          echo "[INFO] 云服务器可能是旧版本表结构，与当前迁移不兼容；或存在字段/约束冲突、alembic_version 与代码不一致等。"
+          echo "[INFO] 请根据下方「迁移命令原始错误」手动修复（如调整迁移脚本、在服务器执行 alembic 命令或联系运维）。"
+          echo "[INFO] --- 迁移命令原始错误 ---"
+          cat "${MIGRATE_LOG}"
+          echo "[INFO] --- 结束 ---"
+          rm -f "${MIGRATE_LOG}"
+          return 1
+        fi
       fi
-    }
+      rm -f "${MIGRATE_LOG}"
+    fi
+    rm -f "${MIGRATE_LOG}"
   fi
 }
 
