@@ -27,12 +27,19 @@ require_env() {
   fi
 }
 
+# GHCR 为 compose 镜像名与回退拉取所必需；GHCR_USER/TOKEN 回退时登录用（方案 A 下 CNB 全配置时可不先登录）
 require_env "GHCR_REGISTRY"
 require_env "GHCR_USER"
 require_env "GHCR_TOKEN"
 require_env "IMAGE_NAME_BACKEND"
 require_env "IMAGE_NAME_FRONTEND"
 require_env "IMAGE_TAG"
+
+# CNB 全配置：优先仅用 CNB 拉取，不先连 GHCR，避免国内服务器访问 ghcr.io 超时（方案 A）
+CNB_FULLY_CONFIGURED=0
+if [ -n "${CNB_REGISTRY:-}" ] && [ -n "${CNB_TOKEN:-}" ] && [ -n "${CNB_IMAGE_NAME_BACKEND:-}" ] && [ -n "${CNB_IMAGE_NAME_FRONTEND:-}" ]; then
+  CNB_FULLY_CONFIGURED=1
+fi
 
 echo "[INFO] Working directory: $(pwd)"
 echo "[INFO] Requested image tag: ${IMAGE_TAG}"
@@ -59,9 +66,15 @@ POSTGRES_USER_VAL="$(echo "${POSTGRES_USER_VAL}" | tr -d '\r' | tr -d '\n' | xar
 POSTGRES_DB_VAL="$(echo "${POSTGRES_DB_VAL}" | tr -d '\r' | tr -d '\n' | xargs)"
 REDIS_PASSWORD_VAL="$(echo "${REDIS_PASSWORD_VAL}" | tr -d '\r' | tr -d '\n')"
 
-echo "[INFO] Logging in to ${GHCR_REGISTRY}..."
-docker login "${GHCR_REGISTRY}" -u "${GHCR_USER}" --password-stdin <<<"${GHCR_TOKEN}"
-echo "[OK] Logged in to ${GHCR_REGISTRY}"
+# [方案 A] CNB 全配置时跳过 GHCR 登录，避免国内访问 ghcr.io 超时；仅在回退到 GHCR 拉取时再登录
+if [ "${CNB_FULLY_CONFIGURED}" -eq 1 ]; then
+  echo "[INFO] CNB fully configured: skipping GHCR login (will login to GHCR only if CNB pull fails)"
+  echo "[INFO] CNB_REGISTRY=${CNB_REGISTRY}, CNB_IMAGE_NAME_BACKEND=${CNB_IMAGE_NAME_BACKEND}, CNB_IMAGE_NAME_FRONTEND=${CNB_IMAGE_NAME_FRONTEND}"
+else
+  echo "[INFO] Logging in to ${GHCR_REGISTRY}..."
+  docker login "${GHCR_REGISTRY}" -u "${GHCR_USER}" --password-stdin <<<"${GHCR_TOKEN}"
+  echo "[OK] Logged in to ${GHCR_REGISTRY}"
+fi
 
 # [NEW] CNB 配置状态显示（混合模式：优先使用 CNB，失败时回退到 GHCR）
 echo "[INFO] CNB configuration (optional, for faster image pull in China):"
@@ -224,7 +237,11 @@ pull_image_with_fallback() {
     fi
   fi
   
-  # 方案2：从 GHCR 拉取（原有逻辑，作为备选）
+  # 方案2：从 GHCR 拉取（原有逻辑，作为备选）。方案 A：回退到 GHCR 时再登录，避免国内先连 ghcr.io 超时
+  if [ -n "${GHCR_REGISTRY:-}" ] && [ -n "${GHCR_USER:-}" ] && [ -n "${GHCR_TOKEN:-}" ]; then
+    echo "[INFO] Logging in to ${GHCR_REGISTRY} for GHCR pull..." >&2
+    echo "${GHCR_TOKEN}" | docker login "${GHCR_REGISTRY}" -u "${GHCR_USER}" --password-stdin >&2 || true
+  fi
   local full_image="${GHCR_REGISTRY}/${image_name}:${primary_tag}"
   echo "[INFO] Attempting to pull ${full_image} from GHCR..." >&2
   for retry in 1 2 3; do
