@@ -3837,28 +3837,7 @@ class ShopCommission(Base):
     )
 
 
-class PerformanceScoreC(Base):
-    """
-    C类数据表:店铺绩效(中文字段名,Metabase每20分钟更新)
-    
-    注意:此表将替代旧的PerformanceScore表(v4.11.0),使用中文字段名
-    """
-    __tablename__ = "performance_scores_c"
-    
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    shop_id = Column(String(256), nullable=False)  # 迁移时将重命名为"店铺ID"
-    period = Column(String(32), nullable=False)  # 迁移时将重命名为"考核周期"
-    total_score = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"总分"
-    sales_score = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"销售得分"
-    quality_score = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"质量得分"
-    calculated_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 迁移时将重命名为"计算时间"
-    
-    __table_args__ = (
-        UniqueConstraint("shop_id", "period", name="uq_performance_scores_c"),
-        Index("ix_performance_scores_c_shop", "shop_id"),
-        Index("ix_performance_scores_c_period", "period"),
-        {"schema": "c_class"},
-    )
+# [REMOVED] PerformanceScoreC: 表已由迁移 20260131 合并入 c_class.performance_scores 并删除，不再定义 ORM
 
 
 # v4.19.0: 系统通知表

@@ -468,6 +468,36 @@ jobs:
             exit 1
           fi
 
+          # 5b. 上传 config 目录（保证 metabase_config.yaml 等被 init_metabase.py 使用；卷挂载 ./config:/app/config 会覆盖镜像内目录）
+          if [ -d "config" ]; then
+            echo "[INFO] Syncing config directory to server..."
+            if ! ssh -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                -o ConnectTimeout=30 \
+                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+                "mkdir -p ${PRODUCTION_PATH}/config"; then
+              echo "[WARN] Failed to create config directory on server, continuing..."
+            else
+              if [ -f "config/metabase_config.yaml" ]; then
+                if ! scp_with_retry config/metabase_config.yaml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/config/metabase_config.yaml; then
+                  echo "[WARN] Failed to upload config/metabase_config.yaml (init_metabase.py may fail)"
+                else
+                  echo "[OK] config/metabase_config.yaml uploaded"
+                fi
+              fi
+              for f in config/*.yaml config/*.py; do
+                [ -e "$f" ] || continue
+                bn=$(basename "$f")
+                if [ "$bn" != "metabase_config.yaml" ]; then
+                  scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/config/"$bn" || true
+                fi
+              done
+            fi
+          else
+            echo "[WARN] config directory not found, skipping config sync"
+          fi
+
           # 6. 上传 Nginx 配置文件（生产必需组件）
           if [ -d "nginx" ]; then
             # 确保服务器上 nginx 目录存在
@@ -664,6 +694,36 @@ jobs:
           # 同步远程部署脚本（方案A：deploy-tag 与 deploy-manual 共用同一套部署逻辑）
           if ! scp_with_retry scripts/deploy_remote_production.sh ${PRODUCTION_PATH}/deploy_remote_production.sh; then
             exit 1
+          fi
+
+          # 5b. 上传 config 目录（保证 metabase_config.yaml 等被 init_metabase.py 使用；卷挂载 ./config:/app/config 会覆盖镜像内目录）
+          if [ -d "config" ]; then
+            echo "[INFO] Syncing config directory to server..."
+            if ! ssh -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                -o ConnectTimeout=30 \
+                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+                "mkdir -p ${PRODUCTION_PATH}/config"; then
+              echo "[WARN] Failed to create config directory on server, continuing..."
+            else
+              if [ -f "config/metabase_config.yaml" ]; then
+                if ! scp_with_retry config/metabase_config.yaml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/config/metabase_config.yaml; then
+                  echo "[WARN] Failed to upload config/metabase_config.yaml (init_metabase.py may fail)"
+                else
+                  echo "[OK] config/metabase_config.yaml uploaded"
+                fi
+              fi
+              for f in config/*.yaml config/*.py; do
+                [ -e "$f" ] || continue
+                bn=$(basename "$f")
+                if [ "$bn" != "metabase_config.yaml" ]; then
+                  scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/config/"$bn" || true
+                fi
+              done
+            fi
+          else
+            echo "[WARN] config directory not found, skipping config sync"
           fi
 
           # 上传 Nginx 配置文件（生产必需组件）
