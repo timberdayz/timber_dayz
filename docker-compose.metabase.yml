@@ -111,14 +111,9 @@ services:
       - full
 
 # ==================== 网络配置 ====================
-# 使用主docker-compose.yml的网络（如果存在）
-# 如果主docker-compose.yml未运行，可以独立运行：
-# docker-compose -f docker-compose.metabase.yml up -d
-# 但需要确保PostgreSQL服务可访问（通过host网络或外部连接）
-networks:
-  erp_network:
-    external: true
-    name: xihong_erp_erp_network
+# 不在此处定义 erp_network，以便与主 compose 合并时使用主栈的网络定义，避免 orphan 与 external 冲突。
+# 独立运行本文件时：docker-compose -f docker-compose.metabase.yml up -d 会创建默认网络 <project>_erp_network，
+# 需先启动主栈或确保 postgres 可访问。
 
 # ==================== 数据卷配置 ====================
 volumes:

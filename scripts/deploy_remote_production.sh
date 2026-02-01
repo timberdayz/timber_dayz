@@ -425,10 +425,14 @@ else
 fi
 
 # [FIX] 立即验证 YAML 语法（更稳的防护，提前发现问题）
+# [PROD] 生产需要 Metabase：将 docker-compose.metabase.yml 纳入同一 project，避免 "Found orphan containers (xihong_erp_metabase)" 警告
 echo "[INFO] Validating docker-compose config..."
 compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production)
 if [ -f docker-compose.cloud.yml ]; then
   compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production)
+fi
+if [ -f docker-compose.metabase.yml ]; then
+  compose_cmd_base=("${compose_cmd_base[@]}" "-f" "docker-compose.metabase.yml")
 fi
 
 # [BOOTSTRAP] Add --env-file to all docker-compose commands (use cleaned .env file)
@@ -737,8 +741,7 @@ echo "[OK] Bootstrap completed successfully"
 
 echo "[INFO] Phase 3: starting Metabase (required before Nginx)..."
 if [ -f docker-compose.metabase.yml ]; then
-  docker-compose -f docker-compose.metabase.yml --env-file "${PRODUCTION_PATH}/.env.cleaned" --profile production up -d metabase
-  # Do not require curl inside container; just ensure it's running.
+  "${compose_cmd_base[@]}" up -d metabase
   sleep 5
   if docker ps --format "{{.Names}}" | grep -q "^xihong_erp_metabase$"; then
     echo "[OK] Metabase container started"
