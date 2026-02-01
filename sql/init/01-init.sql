@@ -9,10 +9,25 @@
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 
--- 连接到目标数据库（如果不在目标数据库中）
--- 注意：PostgreSQL容器启动时会自动连接到POSTGRES_DB指定的数据库
+-- 注意：本脚本在容器首次启动时执行，已连接到 POSTGRES_DB（xihong_erp）
 
--- ==================== 创建Schema ====================
+-- ==================== 创建 Metabase 应用数据库 ====================
+-- Metabase 官方建议：生产环境必须使用 PostgreSQL/MySQL，不要使用 H2
+-- metabase_app 用于存储 Metabase 自己的配置（Models、Questions、Dashboards、用户设置等）
+-- 与业务数据库 xihong_erp 完全独立；CREATE DATABASE 可在当前连接下执行
+CREATE DATABASE metabase_app
+    WITH
+    OWNER = erp_user
+    ENCODING = 'UTF8'
+    LC_COLLATE = 'en_US.utf8'
+    LC_CTYPE = 'en_US.utf8'
+    TEMPLATE = template0;
+
+COMMENT ON DATABASE metabase_app IS 'Metabase 应用数据库：存储 Metabase 自己的配置（Models、Questions、Dashboards、用户设置等）';
+
+GRANT ALL PRIVILEGES ON DATABASE metabase_app TO erp_user;
+
+-- ==================== 创建Schema（业务库 xihong_erp）====================
 -- 创建数据分类Schema（必须在创建表之前）
 -- 注意：使用 IF NOT EXISTS 确保幂等性，可重复执行
 CREATE SCHEMA IF NOT EXISTS a_class;  -- A类数据（用户配置数据）

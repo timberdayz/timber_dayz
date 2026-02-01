@@ -498,6 +498,32 @@ jobs:
             echo "[WARN] config directory not found, skipping config sync"
           fi
 
+          # 5c. 上传 sql/init 目录（Postgres 首次启动时执行，含 metabase_app 创建）
+          if [ -d "sql/init" ]; then
+            echo "[INFO] Syncing sql/init directory to server..."
+            if ! ssh -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                -o ConnectTimeout=30 \
+                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+                "mkdir -p ${PRODUCTION_PATH}/sql/init"; then
+              echo "[WARN] Failed to create sql/init directory on server, continuing..."
+            else
+              for f in sql/init/*.sql; do
+                [ -e "$f" ] || continue
+                bn=$(basename "$f")
+                if scp_with_retry "$f" ${PRODUCTION_PATH}/sql/init/"$bn"; then
+                  echo "[OK] sql/init/$bn uploaded"
+                else
+                  echo "[WARN] Failed to upload sql/init/$bn (continuing...)"
+                fi
+              done
+              echo "[OK] sql/init sync completed"
+            fi
+          else
+            echo "[WARN] sql/init directory not found, skipping (Postgres init scripts; metabase_app may need manual CREATE DATABASE)"
+          fi
+
           # 6. 上传 Nginx 配置文件（生产必需组件）
           if [ -d "nginx" ]; then
             # 确保服务器上 nginx 目录存在
@@ -724,6 +750,32 @@ jobs:
             fi
           else
             echo "[WARN] config directory not found, skipping config sync"
+          fi
+
+          # 5c. 上传 sql/init 目录（Postgres 首次启动时执行，含 metabase_app 创建）
+          if [ -d "sql/init" ]; then
+            echo "[INFO] Syncing sql/init directory to server..."
+            if ! ssh -o StrictHostKeyChecking=no \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                -o ConnectTimeout=30 \
+                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+                "mkdir -p ${PRODUCTION_PATH}/sql/init"; then
+              echo "[WARN] Failed to create sql/init directory on server, continuing..."
+            else
+              for f in sql/init/*.sql; do
+                [ -e "$f" ] || continue
+                bn=$(basename "$f")
+                if scp_with_retry "$f" ${PRODUCTION_PATH}/sql/init/"$bn"; then
+                  echo "[OK] sql/init/$bn uploaded"
+                else
+                  echo "[WARN] Failed to upload sql/init/$bn (continuing...)"
+                fi
+              done
+              echo "[OK] sql/init sync completed"
+            fi
+          else
+            echo "[WARN] sql/init directory not found, skipping (Postgres init scripts; metabase_app may need manual CREATE DATABASE)"
           fi
 
           # 上传 Nginx 配置文件（生产必需组件）
