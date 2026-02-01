@@ -201,6 +201,7 @@ services:
         condition: service_healthy
     networks:
       - erp_network
+    # 健康检查改为 / 避免因 /health 代理 502 导致 Nginx 反复重启；/ 代理到 frontend 通常已就绪
     healthcheck:
       test:
         [
@@ -209,7 +210,7 @@ services:
           "--quiet",
           "--tries=1",
           "--output-document=/dev/null",
-          "http://127.0.0.1/health",
+          "http://127.0.0.1/",
         ]
       interval: 30s
       timeout: 10s
@@ -318,8 +319,7 @@ services:
         condition: service_healthy
     networks:
       - erp_network
-    # ⚠️ 重要：添加健康检查，确保 Beat 正常运行
-    # 使用 Redis 连接检查（更可靠），验证 Celery Beat 能否连接到 broker
+    # ⚠️ 重要：添加健康检查，确保 Beat 正常运行；放宽间隔与 start_period 减少误判重启
     healthcheck:
       test:
         [
@@ -328,15 +328,15 @@ services:
           "-c",
           "import os, redis; r=redis.from_url(os.environ['CELERY_BROKER_URL']); r.ping(); print('ok')",
         ]
-      interval: 30s
-      timeout: 10s
+      interval: 60s
+      timeout: 15s
       retries: 5
-      start_period: 60s
+      start_period: 120s
     deploy:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M
+          memory: 512M
         reservations:
           cpus: "0.25"
           memory: 128M

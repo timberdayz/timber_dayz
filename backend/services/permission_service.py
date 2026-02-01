@@ -68,6 +68,7 @@ SYSTEM_PERMISSIONS = [
     {"id": "employee-management", "name": "员工管理", "description": "管理员工信息", "resource": "hr", "action": "all", "category": "人力资源"},
     {"id": "attendance-management", "name": "考勤管理", "description": "管理考勤信息", "resource": "hr", "action": "all", "category": "人力资源"},
     {"id": "performance:read", "name": "绩效查看", "description": "查看绩效信息", "resource": "hr", "action": "read", "category": "人力资源"},
+    {"id": "performance:config", "name": "绩效配置", "description": "配置绩效权重和参数", "resource": "hr", "action": "config", "category": "人力资源"},
     
     # 审批中心
     {"id": "my-tasks", "name": "我的任务", "description": "查看我的审批任务", "resource": "approval", "action": "read", "category": "审批中心"},

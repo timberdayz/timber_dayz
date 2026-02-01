@@ -2603,6 +2603,11 @@ class PerformanceConfig(Base):
     profit_weight = Column(Integer, nullable=False, default=25, comment="毛利权重(%)")
     key_product_weight = Column(Integer, nullable=False, default=25, comment="重点产品权重(%)")
     operation_weight = Column(Integer, nullable=False, default=20, comment="运营权重(%)")
+    # 得分比例配置(达成率>100%得满分,<=100%得达成率*满分)
+    sales_max_score = Column(Integer, nullable=False, default=30, comment="销售额满分")
+    profit_max_score = Column(Integer, nullable=False, default=25, comment="毛利满分")
+    key_product_max_score = Column(Integer, nullable=False, default=25, comment="重点产品满分")
+    operation_max_score = Column(Integer, nullable=False, default=20, comment="运营满分")
     
     # 生效时间
     is_active = Column(Boolean, nullable=False, default=True, comment="是否启用")

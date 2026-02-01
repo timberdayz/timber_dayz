@@ -22,7 +22,7 @@ export const ROLE_CONFIG = {
       'store-management', 'store-analytics', 'account-management', 'account-alignment',
       'sales-reports', 'inventory-reports', 'finance-reports-detail',
       'vendor-reports', 'custom-reports',
-      'human-resources', 'employee-management', 'attendance-management', 'performance:read',
+      'human-resources', 'employee-management', 'attendance-management', 'performance:read', 'performance:config',
       'my-tasks', 'my-requests', 'approval-history', 'workflow-config',
       'system-notifications', 'alerts', 'message-settings',
       'user-management', 'role-management', 'permission-management',
@@ -76,7 +76,7 @@ export const ROLE_CONFIG = {
       'purchase-orders', 'grn-management', 'vendor-management', 'invoice-management',
       'financial-management', 'expense-management', 'finance-reports', 'finance-reports-detail',
       'fx-management', 'fiscal-periods',
-      'employee-management',
+      'employee-management', 'performance:read',
       'system-notifications', 'alerts', 'message-settings',
       'personal-settings',
       'sales-dashboard', 'report-center', 'message-center', 'notifications'
@@ -85,7 +85,7 @@ export const ROLE_CONFIG = {
   tourist: {
     name: '游客',
     icon: 'View',
-    permissions: ['business-overview']
+    permissions: ['business-overview', 'performance:read']
   }
 }
 

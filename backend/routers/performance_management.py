@@ -39,7 +39,8 @@ from modules.core.db import (
     EmployeePerformance,
     # [DELETED] v4.19.0: FactOrder 已删除
     FactProductMetric,
-    DimShop
+    DimShop,
+    PlatformAccount,
 )
 from modules.core.logger import get_logger
 
@@ -56,6 +57,10 @@ class PerformanceConfigCreateRequest(BaseModel):
     profit_weight: int = Field(25, ge=0, le=100, description="毛利权重(%)")
     key_product_weight: int = Field(25, ge=0, le=100, description="重点产品权重(%)")
     operation_weight: int = Field(20, ge=0, le=100, description="运营权重(%)")
+    sales_max_score: int = Field(30, ge=0, le=100, description="销售额满分(达成率>100%得满分)")
+    profit_max_score: int = Field(25, ge=0, le=100, description="毛利满分")
+    key_product_max_score: int = Field(25, ge=0, le=100, description="重点产品满分")
+    operation_max_score: int = Field(20, ge=0, le=100, description="运营满分")
     effective_from: date = Field(..., description="生效开始日期")
     effective_to: Optional[date] = Field(None, description="生效结束日期")
 
@@ -67,6 +72,10 @@ class PerformanceConfigUpdateRequest(BaseModel):
     profit_weight: Optional[int] = Field(None, ge=0, le=100)
     key_product_weight: Optional[int] = Field(None, ge=0, le=100)
     operation_weight: Optional[int] = Field(None, ge=0, le=100)
+    sales_max_score: Optional[int] = Field(None, ge=0, le=100)
+    profit_max_score: Optional[int] = Field(None, ge=0, le=100)
+    key_product_max_score: Optional[int] = Field(None, ge=0, le=100)
+    operation_max_score: Optional[int] = Field(None, ge=0, le=100)
     is_active: Optional[bool] = None
     effective_from: Optional[date] = None
     effective_to: Optional[date] = None
@@ -80,6 +89,10 @@ class PerformanceConfigResponse(BaseModel):
     profit_weight: int
     key_product_weight: int
     operation_weight: int
+    sales_max_score: int = 30
+    profit_max_score: int = 25
+    key_product_max_score: int = 25
+    operation_max_score: int = 20
     is_active: bool
     effective_from: date
     effective_to: Optional[date]
@@ -225,6 +238,10 @@ async def create_performance_config(
             profit_weight=request.profit_weight,
             key_product_weight=request.key_product_weight,
             operation_weight=request.operation_weight,
+            sales_max_score=request.sales_max_score,
+            profit_max_score=request.profit_max_score,
+            key_product_max_score=request.key_product_max_score,
+            operation_max_score=request.operation_max_score,
             effective_from=request.effective_from,
             effective_to=request.effective_to,
             created_by=created_by,
@@ -499,42 +516,87 @@ async def list_performance_scores(
                 "has_more": (page * page_size) < total,
             }
 
-        # 按店铺
-        query = select(PerformanceScore)
-        if period:
-            query = query.where(PerformanceScore.period == period)
+        # 按店铺：以 platform_accounts（正在经营店铺）为主，合并 performance_scores
+        shop_query = (
+            select(PlatformAccount)
+            .where(PlatformAccount.enabled == True)
+            .order_by(PlatformAccount.platform, PlatformAccount.store_name)
+        )
+        shop_rows = (await db.execute(shop_query)).scalars().all()
+        all_shops = [
+            {
+                "platform_code": (r.platform or "").lower() if r.platform else "",
+                "shop_id": r.shop_id or r.account_id or str(r.id),
+                "shop_name": r.store_name or (r.account_alias or "") or r.account_id or "",
+            }
+            for r in shop_rows
+        ]
         if platform_code:
-            query = query.where(PerformanceScore.platform_code == platform_code)
+            pc_lower = (platform_code or "").lower()
+            all_shops = [s for s in all_shops if (s["platform_code"] or "").lower() == pc_lower]
         if shop_id:
-            query = query.where(PerformanceScore.shop_id == shop_id)
-        total_query = select(func.count()).select_from(query.subquery())
-        total = (await db.execute(total_query)).scalar() or 0
-        query = query.order_by(PerformanceScore.total_score.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
-        scores = (await db.execute(query)).scalars().all()
-        score_rows = [s[0] if hasattr(s, "__getitem__") and len(s) == 1 else s for s in scores]
+            all_shops = [s for s in all_shops if s["shop_id"] == shop_id]
+        total = len(all_shops)
+        start = (page - 1) * page_size
+        paged_shops = all_shops[start : start + page_size]
+        perf_map = {}
+        if period and paged_shops:
+            platform_codes = list({s["platform_code"] for s in paged_shops})
+            shop_ids = list({s["shop_id"] for s in paged_shops})
+            perf_query = select(PerformanceScore).where(
+                PerformanceScore.period == period,
+                PerformanceScore.platform_code.in_(platform_codes),
+                PerformanceScore.shop_id.in_(shop_ids),
+            )
+            perf_rows = (await db.execute(perf_query)).all()
+            for pr in perf_rows:
+                s = pr[0] if hasattr(pr, "__getitem__") and len(pr) == 1 else pr
+                key = f"{(getattr(s, 'platform_code') or '').lower()}|{getattr(s, 'shop_id') or ''}"
+                details = getattr(s, "score_details", None) or {}
+                perf_map[key] = {
+                    "sales_target": _score_details_field(details, "sales", "target"),
+                    "sales_achieved": _score_details_field(details, "sales", "achieved"),
+                    "sales_rate": _score_details_field(details, "sales", "rate"),
+                    "sales_score": getattr(s, "sales_score", None),
+                    "profit_target": _score_details_field(details, "profit", "target"),
+                    "profit_achieved": _score_details_field(details, "profit", "achieved"),
+                    "profit_rate": _score_details_field(details, "profit", "rate"),
+                    "profit_score": getattr(s, "profit_score", None),
+                    "key_product_target": _score_details_field(details, "key_product", "target"),
+                    "key_product_achieved": _score_details_field(details, "key_product", "achieved"),
+                    "key_product_rate": _score_details_field(details, "key_product", "rate"),
+                    "key_product_score": getattr(s, "key_product_score", None),
+                    "operation_score": getattr(s, "operation_score", None),
+                    "total_score": getattr(s, "total_score", None),
+                    "rank": getattr(s, "rank", None),
+                    "performance_coefficient": getattr(s, "performance_coefficient", None),
+                }
         score_responses = []
-        for score in score_rows:
-            score_data = PerformanceScoreResponse.from_orm(score).dict()
-            shop = (await db.execute(
-                select(DimShop).where(
-                    DimShop.platform_code == score.platform_code,
-                    DimShop.shop_id == score.shop_id
-                )
-            )).scalar_one_or_none()
-            if shop:
-                score_data["shop_name"] = shop.shop_name
-            details = getattr(score, "score_details", None) or {}
-            score_data["sales_target"] = _score_details_field(details, "sales", "target")
-            score_data["sales_achieved"] = _score_details_field(details, "sales", "achieved")
-            score_data["sales_rate"] = _score_details_field(details, "sales", "rate")
-            score_data["profit_target"] = _score_details_field(details, "profit", "target")
-            score_data["profit_achieved"] = _score_details_field(details, "profit", "achieved")
-            score_data["profit_rate"] = _score_details_field(details, "profit", "rate")
-            score_data["key_product_target"] = _score_details_field(details, "key_product", "target")
-            score_data["key_product_achieved"] = _score_details_field(details, "key_product", "achieved")
-            score_data["key_product_rate"] = _score_details_field(details, "key_product", "rate")
-            score_responses.append(score_data)
+        for s in paged_shops:
+            key = f"{s['platform_code']}|{s['shop_id']}"
+            p = perf_map.get(key)
+            row = {
+                "platform_code": s["platform_code"],
+                "shop_id": s["shop_id"],
+                "shop_name": s["shop_name"],
+                "sales_target": p["sales_target"] if p else None,
+                "sales_achieved": p["sales_achieved"] if p else None,
+                "sales_rate": p["sales_rate"] if p else None,
+                "sales_score": p["sales_score"] if p else None,
+                "profit_target": p["profit_target"] if p else None,
+                "profit_achieved": p["profit_achieved"] if p else None,
+                "profit_rate": p["profit_rate"] if p else None,
+                "profit_score": p["profit_score"] if p else None,
+                "key_product_target": p["key_product_target"] if p else None,
+                "key_product_achieved": p["key_product_achieved"] if p else None,
+                "key_product_rate": p["key_product_rate"] if p else None,
+                "key_product_score": p["key_product_score"] if p else None,
+                "operation_score": p["operation_score"] if p else None,
+                "total_score": p["total_score"] if p else None,
+                "rank": p["rank"] if p else None,
+                "performance_coefficient": p["performance_coefficient"] if p else None,
+            }
+            score_responses.append(row)
         
         return {
             "success": True,

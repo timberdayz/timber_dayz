@@ -786,8 +786,19 @@ const routes = [
     meta: {
       title: '绩效管理',
       icon: 'Medal',
+      permission: 'performance:config',
+      roles: ['admin']  // 仅管理员可见，用于配置权重和参数
+    }
+  },
+  {
+    path: '/hr-performance-display',
+    name: 'HRPerformanceDisplay',
+    component: () => import('../views/hr/PerformanceDisplay.vue'),
+    meta: {
+      title: '绩效公示',
+      icon: 'View',
       permission: 'performance:read',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']  // 全员可见
     }
   },
   {

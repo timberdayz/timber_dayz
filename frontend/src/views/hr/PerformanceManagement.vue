@@ -1,7 +1,7 @@
 <template>
   <div class="performance-management erp-page-container">
     <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">绩效管理</h1>
-    <p style="color: #909399; margin-bottom: 20px;">绩效公示面向全员，数据来源于人员店铺归属和绩效配置计算。可按店铺或人员维度查看。</p>
+    <p style="color: #909399; margin-bottom: 20px;">绩效管理仅管理员可见，用于配置权重、执行计算。可按店铺或人员维度查看。公示数据请前往「绩效公示」页面。</p>
     
     <!-- 操作栏：左上角月度+维度切换，右侧操作按钮 -->
     <div class="action-bar" style="margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
@@ -55,6 +55,9 @@
         <el-table-column label="销售额达成率" width="120" align="right">
           <template #default="{ row }">{{ formatPercent(row.sales_rate) }}</template>
         </el-table-column>
+        <el-table-column label="销售额得分" width="100" align="right">
+          <template #default="{ row }">{{ row.sales_score != null ? Number(row.sales_score).toFixed(1) : '—' }}</template>
+        </el-table-column>
         <el-table-column label="毛利目标" width="100" align="right">
           <template #default="{ row }">{{ formatCell(row.profit_target) }}</template>
         </el-table-column>
@@ -64,6 +67,9 @@
         <el-table-column label="毛利达成率" width="110" align="right">
           <template #default="{ row }">{{ formatPercent(row.profit_rate) }}</template>
         </el-table-column>
+        <el-table-column label="毛利得分" width="90" align="right">
+          <template #default="{ row }">{{ row.profit_score != null ? Number(row.profit_score).toFixed(1) : '—' }}</template>
+        </el-table-column>
         <el-table-column label="重点产品目标" width="120" align="right">
           <template #default="{ row }">{{ formatCell(row.key_product_target) }}</template>
         </el-table-column>
@@ -72,6 +78,9 @@
         </el-table-column>
         <el-table-column label="重点产品达成率" width="130" align="right">
           <template #default="{ row }">{{ formatPercent(row.key_product_rate) }}</template>
+        </el-table-column>
+        <el-table-column label="重点产品得分" width="110" align="right">
+          <template #default="{ row }">{{ row.key_product_score != null ? Number(row.key_product_score).toFixed(1) : '—' }}</template>
         </el-table-column>
         <el-table-column prop="operation_score" label="运营得分" width="100" align="right" sortable>
           <template #default="{ row }">{{ row.operation_score != null ? Number(row.operation_score).toFixed(1) : '—' }}</template>
@@ -238,6 +247,19 @@
         <el-form-item label="运营权重(%)" prop="operation_weight">
           <el-input-number v-model="configForm.operation_weight" :min="0" :max="100" :precision="0" style="width: 100%;" />
         </el-form-item>
+        <el-divider content-position="left">得分比例（达成率&gt;100%得满分，≤100%得达成率×满分）</el-divider>
+        <el-form-item label="销售额满分" prop="sales_max_score">
+          <el-input-number v-model="configForm.sales_max_score" :min="0" :max="100" :precision="0" style="width: 100%;" />
+        </el-form-item>
+        <el-form-item label="毛利满分" prop="profit_max_score">
+          <el-input-number v-model="configForm.profit_max_score" :min="0" :max="100" :precision="0" style="width: 100%;" />
+        </el-form-item>
+        <el-form-item label="重点产品满分" prop="key_product_max_score">
+          <el-input-number v-model="configForm.key_product_max_score" :min="0" :max="100" :precision="0" style="width: 100%;" />
+        </el-form-item>
+        <el-form-item label="运营满分" prop="operation_max_score">
+          <el-input-number v-model="configForm.operation_max_score" :min="0" :max="100" :precision="0" style="width: 100%;" />
+        </el-form-item>
         <el-form-item label="总权重">
           <el-tag :type="totalWeight === 100 ? 'success' : 'danger'" size="large">
             {{ totalWeight }}%
@@ -326,7 +348,11 @@ const configForm = reactive({
   sales_weight: 30,
   profit_weight: 25,
   key_product_weight: 25,
-  operation_weight: 20
+  operation_weight: 20,
+  sales_max_score: 30,
+  profit_max_score: 25,
+  key_product_max_score: 25,
+  operation_max_score: 20
 })
 
 // 总权重计算
@@ -412,18 +438,20 @@ const handleViewDetail = async (row) => {
 const handleConfig = async () => {
   const response = await api.getPerformanceConfigs({})
   // 处理配置列表响应（取第一个配置或使用默认值）
+  const setForm = (config) => {
+    configForm.sales_weight = config.sales_weight ?? 30
+    configForm.profit_weight = config.profit_weight ?? 25
+    configForm.key_product_weight = config.key_product_weight ?? 25
+    configForm.operation_weight = config.operation_weight ?? 20
+    configForm.sales_max_score = config.sales_max_score ?? 30
+    configForm.profit_max_score = config.profit_max_score ?? 25
+    configForm.key_product_max_score = config.key_product_max_score ?? 25
+    configForm.operation_max_score = config.operation_max_score ?? 20
+  }
   if (response && Array.isArray(response) && response.length > 0) {
-    const config = response[0]
-    configForm.sales_weight = config.sales_weight || 30
-    configForm.profit_weight = config.profit_weight || 25
-    configForm.key_product_weight = config.key_product_weight || 25
-    configForm.operation_weight = config.operation_weight || 20
+    setForm(response[0])
   } else if (response && response.pagination && response.data && response.data.length > 0) {
-    const config = response.data[0]
-    configForm.sales_weight = config.sales_weight || 30
-    configForm.profit_weight = config.profit_weight || 25
-    configForm.key_product_weight = config.key_product_weight || 25
-    configForm.operation_weight = config.operation_weight || 20
+    setForm(response.data[0])
   }
   configVisible.value = true
 }
@@ -443,7 +471,12 @@ const handleConfigSubmit = async () => {
       sales_weight: configForm.sales_weight,
       profit_weight: configForm.profit_weight,
       key_product_weight: configForm.key_product_weight,
-      operation_weight: configForm.operation_weight
+      operation_weight: configForm.operation_weight,
+      sales_max_score: configForm.sales_max_score,
+      profit_max_score: configForm.profit_max_score,
+      key_product_max_score: configForm.key_product_max_score,
+      operation_max_score: configForm.operation_max_score,
+      effective_from: new Date().toISOString().slice(0, 10)
     })
     
     ElMessage.success('配置更新成功')
