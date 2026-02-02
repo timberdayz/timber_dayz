@@ -1932,6 +1932,12 @@ export default {
   async getHrShopProfitStatistics(params = {}) {
     return await this._get("/hr/shop-profit-statistics", { params });
   },
+  async getHrShopCommissionConfig() {
+    return await this._get("/hr/shop-commission-config");
+  },
+  async putHrShopCommissionConfig(platformCode, shopId, data) {
+    return await this._put(`/hr/shop-commission-config/${platformCode}/${shopId}`, data);
+  },
   async getHrAnnualProfitStatistics(params = {}) {
     return await this._get("/hr/annual-profit-statistics", { params });
   },

@@ -485,6 +485,11 @@ async function handleSaveRow(row) {
         await api.createHrEmployeeShopAssignment({ year_month: configMonth.value, employee_code: p.employee_code, platform_code: shop.platform_code, shop_id: shop.shop_id, commission_ratio: p.commission_ratio, role: p.role })
       }
     }
+    // 保存可分配利润率
+    const rate = Number(shop.allocatable_profit_rate)
+    if (!Number.isNaN(rate) && rate >= 0 && rate <= 1) {
+      await api.putHrShopCommissionConfig(shop.platform_code, shop.shop_id, { allocatable_profit_rate: rate })
+    }
     ElMessage.success('已保存')
     await loadConfigData()
   } catch (e) {
@@ -508,6 +513,7 @@ async function handleDeleteRow(row) {
     for (const a of items) await api.deleteHrEmployeeShopAssignment(a.id)
     shop.assignments = []
     shop.allocatable_profit_rate = 0
+    await api.putHrShopCommissionConfig(shop.platform_code, shop.shop_id, { allocatable_profit_rate: 0 })
     ElMessage.success('已删除，可重新编辑')
     await loadConfigData()
   } catch (e) {
@@ -560,10 +566,11 @@ async function loadConfigData() {
   if (!configMonth.value) return
   configLoading.value = true
   try {
-    const [assignmentsRes, shopsRes, statsRes] = await Promise.all([
+    const [assignmentsRes, shopsRes, statsRes, configRes] = await Promise.all([
       api.getHrEmployeeShopAssignments({ year_month: configMonth.value, page: 1, page_size: 1000 }),
       api.getTargetShops(),
       api.getHrShopProfitStatistics({ month: configMonth.value }).catch(() => ({ data: [] })),
+      api.getHrShopCommissionConfig().catch(() => ({ data: [] })),
     ])
     const shopData = shopsRes?.data ?? shopsRes ?? []
     const shopList = Array.isArray(shopData) ? shopData : (shopData?.data ?? shopData ?? [])
@@ -571,6 +578,8 @@ async function loadConfigData() {
     const items = (assData?.items ?? (Array.isArray(assData) ? assData : [])).filter(Boolean)
     const statsData = statsRes?.data ?? statsRes ?? []
     const statsList = Array.isArray(statsData) ? statsData : (statsData?.data ?? statsData ?? [])
+    const configData = configRes?.data ?? configRes ?? []
+    const configList = Array.isArray(configData) ? configData : (configData?.data ?? configData ?? [])
 
     const byShop = {}
     for (const s of shopList) {
@@ -593,6 +602,12 @@ async function loadConfigData() {
         byShop[key].monthly_sales = st.monthly_sales ?? 0
         byShop[key].monthly_profit = st.monthly_profit ?? 0
         byShop[key].achievement_rate = st.achievement_rate
+      }
+    }
+    for (const c of configList) {
+      const key = `${(c.platform_code || '').toLowerCase()}|${c.shop_id}`
+      if (byShop[key]) {
+        byShop[key].allocatable_profit_rate = Number(c.allocatable_profit_rate) ?? 0
       }
     }
     for (const a of items) {

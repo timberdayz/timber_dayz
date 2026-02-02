@@ -31,6 +31,7 @@ from modules.core.db import (
     Employee,
     EmployeeTarget,
     EmployeeShopAssignment,
+    ShopCommissionConfig,
     WorkShift,
     AttendanceRecord,
     LeaveType,
@@ -2221,6 +2222,93 @@ class CopyFromPrevMonthBody(BaseModel):
     year_month: str = Field(..., pattern=r"^\d{4}-\d{2}$", description="目标月份 YYYY-MM（将上月配置复制到该月）")
 
 
+class ShopCommissionConfigUpdate(BaseModel):
+    """店铺可分配利润率更新"""
+    allocatable_profit_rate: float = Field(..., ge=0, le=1, description="可分配利润率 0-1，如 0.8 表示 80%")
+
+
+@router.get("/shop-commission-config")
+async def get_shop_commission_config(
+    year_month: str = Query(..., pattern=r"^\d{4}-\d{2}$", description="月份 YYYY-MM"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    """获取店铺可分配利润率配置（按月份+店铺维度，用于配置页加载）"""
+    try:
+        shop_query = (
+            select(PlatformAccount)
+            .where(PlatformAccount.enabled == True)
+            .order_by(PlatformAccount.platform, PlatformAccount.store_name)
+        )
+        shop_rows = (await db.execute(shop_query)).scalars().all()
+        config_query = (
+            select(ShopCommissionConfig)
+            .where(ShopCommissionConfig.year_month == year_month)
+        )
+        config_rows = (await db.execute(config_query)).scalars().all()
+        config_by_key = {
+            f"{(c.platform_code or '').lower()}|{c.shop_id}": float(c.allocatable_profit_rate or 0)
+            for c in config_rows
+        }
+        items = []
+        for r in shop_rows:
+            pc = (r.platform or "").lower()
+            sid = r.shop_id or r.account_id or str(r.id)
+            key = f"{pc}|{sid}"
+            items.append({
+                "platform_code": pc,
+                "shop_id": sid,
+                "allocatable_profit_rate": config_by_key.get(key, 0),
+            })
+        return {"success": True, "data": items}
+    except Exception as e:
+        logger.error(f"获取店铺可分配利润率配置失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取配置失败: {str(e)}", status_code=500)
+
+
+@router.put("/shop-commission-config/{platform_code}/{shop_id}")
+async def put_shop_commission_config(
+    platform_code: str,
+    shop_id: str,
+    body: ShopCommissionConfigUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    """保存店铺可分配利润率（行内保存）"""
+    try:
+        pc = (platform_code or "").lower()
+        sid = str(shop_id or "")
+        shop_res = await db.execute(
+            select(DimShop).where(DimShop.platform_code == pc, DimShop.shop_id == sid)
+        )
+        if not shop_res.scalar_one_or_none():
+            return error_response(ErrorCode.DATA_NOT_FOUND, "该店铺尚未同步至系统，请先在账号管理中同步", status_code=400)
+        existing = await db.execute(
+            select(ShopCommissionConfig).where(
+                ShopCommissionConfig.platform_code == pc,
+                ShopCommissionConfig.shop_id == sid,
+            )
+        )
+        rec = existing.scalar_one_or_none()
+        rate = float(body.allocatable_profit_rate)
+        if rec:
+            rec.allocatable_profit_rate = rate
+            rec.updated_at = datetime.utcnow()
+        else:
+            rec = ShopCommissionConfig(
+                platform_code=pc,
+                shop_id=sid,
+                allocatable_profit_rate=rate,
+            )
+            db.add(rec)
+        await db.commit()
+        return {"success": True, "data": {"platform_code": pc, "shop_id": sid, "allocatable_profit_rate": rate}}
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"保存店铺可分配利润率失败: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"保存失败: {str(e)}", status_code=500)
+
+
 @router.post("/employee-shop-assignments/copy-from-prev-month")
 async def copy_employee_shop_assignments_from_prev_month(
     body: CopyFromPrevMonthBody,
@@ -2331,7 +2419,15 @@ async def get_shop_profit_statistics(
         except Exception as e:
             logger.warning(f"Metabase 店铺月度统计查询失败，将返回空数据: {e}")
 
-        # 3. 获取归属配置（用于计算主管/操作员利润）：仅取该月的配置
+        # 3. 获取店铺可分配利润率配置
+        config_query = select(ShopCommissionConfig)
+        config_rows = (await db.execute(config_query)).scalars().all()
+        allocatable_by_shop: Dict[str, float] = {
+            f"{(c.platform_code or '').lower()}|{c.shop_id}": float(c.allocatable_profit_rate or 0)
+            for c in config_rows
+        }
+
+        # 4. 获取归属配置（用于计算主管/操作员利润）：仅取该月的配置
         assign_query = (
             select(EmployeeShopAssignment)
             .where(EmployeeShopAssignment.status == "active")
@@ -2351,8 +2447,7 @@ async def get_shop_profit_statistics(
             else:
                 assign_by_shop[key]["operators"].append(cr)
 
-        # 4. 合并：店铺列表 + 销售/利润 + 主管/操作员利润
-        allocatable_rate = 1.0  # 默认 100% 可分配（后续可从 shop_commission_config 读取）
+        # 5. 合并：店铺列表 + 销售/利润 + 主管/操作员利润
         items = []
         for s in shop_list:
             key = f"{s['platform_code']}|{str(s['shop_id']).lower()}"
@@ -2360,6 +2455,7 @@ async def get_shop_profit_statistics(
             monthly_sales = float(m.get("monthly_sales", 0))
             monthly_profit = float(m.get("monthly_profit", 0))
             achievement_rate = m.get("achievement_rate")
+            allocatable_rate = allocatable_by_shop.get(key, 1.0)  # 无配置时默认 100% 可分配
             allocatable_profit = monthly_profit * allocatable_rate
             ass = assign_by_shop.get(key, {})
             sup_ratios = ass.get("supervisors", [])
@@ -2418,6 +2514,14 @@ async def get_annual_profit_statistics(
                 "year_total_sales": 0.0,
                 "year_total_profit": 0.0,
             }
+
+        # 加载店铺可分配利润率配置（年度统计共用）
+        config_query = select(ShopCommissionConfig)
+        config_rows = (await db.execute(config_query)).scalars().all()
+        allocatable_by_shop: Dict[str, float] = {
+            f"{(c.platform_code or '').lower()}|{c.shop_id}": float(c.allocatable_profit_rate or 0)
+            for c in config_rows
+        }
 
         metabase_svc = None
         try:
@@ -2483,7 +2587,6 @@ async def get_annual_profit_statistics(
                 else:
                     assign_by_shop[key]["operators"].append((_emp_code, _cr))
 
-            allocatable_rate = 1.0
             month_key = f"{month_num:02d}"
 
             for s in shop_list:
@@ -2492,6 +2595,7 @@ async def get_annual_profit_statistics(
                 monthly_sales = float(m.get("monthly_sales", 0))
                 monthly_profit = float(m.get("monthly_profit", 0))
                 achievement_rate = m.get("achievement_rate")
+                allocatable_rate = allocatable_by_shop.get(key, 1.0)
                 allocatable_profit = monthly_profit * allocatable_rate
                 ass = assign_by_shop.get(key, {})
                 sup_list = ass.get("supervisors", [])

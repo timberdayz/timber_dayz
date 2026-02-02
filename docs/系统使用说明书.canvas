@@ -1,0 +1,104 @@
+{
+  "nodes": [
+    {
+      "id": "formula",
+      "type": "text",
+      "x": 340,
+      "y": 20,
+      "width": 520,
+      "height": 72,
+      "text": "## 数据分析维度 · 零售核心公式\n**营业额** = (客流量 × 转化率) × 连带率 × 件单价 × 复购率\n\n西虹ERP 看板指标对应上述维度，用于提升经营与运营效率。",
+      "color": "5"
+    },
+    {
+      "id": "ops",
+      "type": "text",
+      "x": 30,
+      "y": 130,
+      "width": 200,
+      "height": 100,
+      "text": "## 操作人员\n- **主管**：看目标、达成、排名，做决策\n- **操作员**：做采集、同步、日常运营",
+      "color": "1"
+    },
+    {
+      "id": "erp-center",
+      "type": "text",
+      "x": 270,
+      "y": 130,
+      "width": 260,
+      "height": 100,
+      "text": "## 管理 ERP\n- **妙手 ERP**（平台侧）\n- **公司操作系统：西虹 ERP**（看板、目标、绩效）",
+      "color": "4"
+    },
+    {
+      "id": "platforms",
+      "type": "text",
+      "x": 570,
+      "y": 130,
+      "width": 220,
+      "height": 100,
+      "text": "## 电商平台\n- Shopee\n- TikTok\n- Lazada\n\n↓ 订单 API / 运营数据",
+      "color": "1"
+    },
+    {
+      "id": "four-func",
+      "type": "text",
+      "x": 250,
+      "y": 270,
+      "width": 460,
+      "height": 118,
+      "text": "## 西虹 ERP 四大功能\n1. **自动数据采集**：从平台/Excel 采集订单、产品、流量、库存\n2. **数据库自动清洗校对**：字段映射、数据同步、隔离区、一致性验证\n3. **数据看板生成**：业务概览（KPI、对比、店铺赛马、经营指标）、Metabase 报表\n4. **自动产品上架**：（若已启用）",
+      "color": "4"
+    },
+    {
+      "id": "db-design",
+      "type": "text",
+      "x": 380,
+      "y": 420,
+      "width": 200,
+      "height": 56,
+      "text": "## 数据库设计\nA 类配置 → B 类入库 → C 类计算 → 看板展示",
+      "color": "2"
+    },
+    {
+      "id": "db-advantages",
+      "type": "text",
+      "x": 20,
+      "y": 510,
+      "width": 320,
+      "height": 260,
+      "text": "## 符合要求的后端数据库应具备的优点\n1. **正确存储数据**：所有业务数据都能准确存入\n2. **高效查询数据**：常用查询在可接受时间内返回结果\n3. **保证数据质量**：脏数据、重复数据能被有效防止\n4. **支持业务需求**：能够满足前端看板的所有数据需求\n5. **易于维护扩展**：新的业务需求能够相对容易地实现",
+      "color": "1"
+    },
+    {
+      "id": "business-use",
+      "type": "text",
+      "x": 370,
+      "y": 510,
+      "width": 420,
+      "height": 260,
+      "text": "## 经营与运营应用（指标 → 需求 → 入口）\n\n**经营**：目标、达成率、时间GAP、今日销售 → 工作台→业务概览（经营指标、核心KPI、数据对比、店铺赛马）；目标设定 → 销售与分析→目标管理。\n\n**运营**：流量排名、转化率、库存积压、清仓排名 → 工作台→业务概览（流量排名、核心KPI、库存积压、清仓排名）；店铺表现 → 店铺运营→店铺分析。\n\n**人力**：绩效公示、我的收入、店铺归属与提成比 → 人力资源→绩效公示/我的收入/人员店铺归属和提成比。\n\n详见：[[系统使用说明书]] 与 [[系统使用说明书_一页速查]]",
+      "color": "4"
+    },
+    {
+      "id": "smart",
+      "type": "text",
+      "x": 20,
+      "y": 310,
+      "width": 200,
+      "height": 180,
+      "text": "## SMART 原则\n- **S (Specific) 明确性**\n- **M (Measurable) 衡量性**\n- **A (Attainable) 可实现性**\n- **R (Relevant) 相关性**\n- **T (Time-based) 时限性**\n\n目标管理、绩效与看板指标均遵循可衡量、可达成、有时限。",
+      "color": "6"
+    }
+  ],
+  "edges": [
+    { "id": "e1", "fromNode": "ops", "fromSide": "right", "toNode": "erp-center", "toSide": "left", "toEnd": "arrow" },
+    { "id": "e2", "fromNode": "platforms", "fromSide": "left", "toNode": "erp-center", "toSide": "right", "toEnd": "arrow", "label": "订单API / 运营数据" },
+    { "id": "e3", "fromNode": "erp-center", "fromSide": "bottom", "toNode": "four-func", "toSide": "top", "toEnd": "arrow" },
+    { "id": "e4", "fromNode": "four-func", "fromSide": "bottom", "toNode": "db-design", "toSide": "top", "toEnd": "arrow" },
+    { "id": "e5", "fromNode": "db-design", "fromSide": "bottom", "toNode": "business-use", "toSide": "top", "toEnd": "arrow" },
+    { "id": "e6", "fromNode": "db-design", "fromSide": "left", "toNode": "db-advantages", "toSide": "top", "toEnd": "arrow" },
+    { "id": "e7", "fromNode": "formula", "fromSide": "bottom", "toNode": "four-func", "toSide": "top", "toEnd": "arrow", "label": "指标维度" },
+    { "id": "e8", "fromNode": "smart", "fromSide": "right", "toNode": "erp-center", "toSide": "left", "toEnd": "arrow" }
+  ]
+}

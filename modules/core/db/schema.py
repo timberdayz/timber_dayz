@@ -3442,6 +3442,37 @@ class EmployeeShopAssignment(Base):
     )
 
 
+class ShopCommissionConfig(Base):
+    """
+    A类数据表:店铺可分配利润率配置（按月）
+
+    店铺利润的百分之多少用于主管+操作员分配。按 year_month 月度更新，与 employee_shop_assignments 一致。
+    add-employee-shop-assignment-page Phase 2, 方案B 按月维度
+    """
+    __tablename__ = "shop_commission_config"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year_month = Column(String(7), nullable=False)  # YYYY-MM，与 employee_shop_assignments 一致
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(256), nullable=False)
+    allocatable_profit_rate = Column(Float, nullable=False, default=0)  # 0-1，如 0.8 表示 80%
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("year_month", "platform_code", "shop_id", name="uq_shop_commission_config_a"),
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id"],
+            ["dim_shops.platform_code", "dim_shops.shop_id"],
+            ondelete="RESTRICT",
+            name="fk_shop_commission_config_shop_a",
+        ),
+        Index("ix_shop_commission_config_a_shop_month", "year_month", "platform_code", "shop_id"),
+        {"schema": "a_class"},
+    )
+
+
 class WorkShift(Base):
     """
     A类数据表:排班班次配置

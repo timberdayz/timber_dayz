@@ -880,6 +880,15 @@ else
   echo "[INFO] Host has no curl; skipping Nginx /health check"
 fi
 
+# [NGINX] 重载配置以使本次部署上传的 nginx.prod.conf 生效（容器未重启时需 reload）
+if docker ps --format '{{.Names}}' | grep -q 'xihong_erp_nginx'; then
+  if docker exec xihong_erp_nginx nginx -t 2>/dev/null; then
+    docker exec xihong_erp_nginx nginx -s reload && echo "[OK] Nginx config reloaded"
+  else
+    echo "[WARN] Nginx config test failed; skip reload"
+  fi
+fi
+
 # [IMAGE_CLEANUP] Clean up old Docker images (keep latest N versions)
 # 在部署成功后执行清理，释放磁盘空间
 cleanup_old_images

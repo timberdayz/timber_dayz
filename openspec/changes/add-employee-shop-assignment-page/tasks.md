@@ -4,8 +4,8 @@
 
 ### 2.1 店铺可分配利润率表
 
-- [ ] 2.1.1 在 `schema.py` 中新增 `ShopCommissionConfig` 模型（platform_code, shop_id, allocatable_profit_rate）
-- [ ] 2.1.2 创建迁移 `shop_commission_config`
+- [x] 2.1.1 在 `schema.py` 中新增 `ShopCommissionConfig` 模型（platform_code, shop_id, allocatable_profit_rate）
+- [x] 2.1.2 创建迁移 `shop_commission_config`
 
 ### 2.2 前端页面拆分
 
@@ -16,9 +16,9 @@
 
 ### 2.3 后端 API 扩展
 
-- [ ] 2.3.1 新增 `GET /api/hr/shop-commission-config` 按店铺维度聚合（含可分配利润率、主管/操作员列表）
-- [ ] 2.3.2 新增 `PUT /api/hr/shop-commission-config/{platform_code}/{shop_id}` 行内保存
-- [ ] 2.3.3 新增 `GET /api/hr/shop-profit-statistics?month=YYYY-MM` 统计子页数据
+- [x] 2.3.1 新增 `GET /api/hr/shop-commission-config` 按店铺维度聚合（含可分配利润率、主管/操作员列表）
+- [x] 2.3.2 新增 `PUT /api/hr/shop-commission-config/{platform_code}/{shop_id}` 行内保存
+- [x] 2.3.3 新增 `GET /api/hr/shop-profit-statistics?month=YYYY-MM` 统计子页数据
 
 ---
 
