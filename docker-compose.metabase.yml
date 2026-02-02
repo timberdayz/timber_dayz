@@ -54,8 +54,9 @@ services:
       MB_SITE_LOCALE: zh
       MB_SITE_NAME: 西虹ERP数据看板
       # 站点 URL（通过 Nginx 子路径访问时必填，否则 Metabase 前端空白）
-      # 未配置 HTTPS 时用 http；配置 HTTPS 后改为 https://www.xihong.site/metabase
-      MB_SITE_URL: ${MB_SITE_URL:-http://www.xihong.site/metabase}
+      # 必须带尾部斜杠，与官方文档一致，否则 base-href 解析错误导致 app/dist 资源 404、白屏
+      # 未配置 HTTPS 时用 http；配置 HTTPS 后改为 https://www.xihong.site/metabase/
+      MB_SITE_URL: ${MB_SITE_URL:-http://www.xihong.site/metabase/}
 
       # 邮件配置（可选，用于告警）
       # MB_EMAIL_SMTP_HOST: smtp.example.com
