@@ -112,9 +112,12 @@ services:
       - full
 
 # ==================== 网络配置 ====================
-# 不在此处定义 erp_network，以便与主 compose 合并时使用主栈的网络定义，避免 orphan 与 external 冲突。
-# 独立运行本文件时：docker-compose -f docker-compose.metabase.yml up -d 会创建默认网络 <project>_erp_network，
-# 需先启动主栈或确保 postgres 可访问。
+# 使用与主栈相同的 external 网络，确保 Nginx 容器能解析 metabase 主机名（避免 502 / metabase could not be resolved）
+# 主栈（docker-compose.prod.yml）定义 networks.erp_network.name: xihong_erp_erp_network，须先启动主栈再 up metabase
+networks:
+  erp_network:
+    external: true
+    name: xihong_erp_erp_network
 
 # ==================== 数据卷配置 ====================
 volumes:

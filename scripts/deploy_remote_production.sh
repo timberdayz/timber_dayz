@@ -785,6 +785,8 @@ if [ $? -ne 0 ]; then
 fi
 echo "[OK] Bootstrap completed successfully"
 
+# [ORDER] Phase 3 必须在 Nginx 之前：Metabase 使用 external 网络 xihong_erp_erp_network（Phase 1 已创建），
+# 且 Nginx 需在 Metabase 就绪后启动以便 /metabase/ 代理可达
 echo "[INFO] Phase 3: starting Metabase (required before Nginx)..."
 if [ -f docker-compose.metabase.yml ]; then
   "${compose_cmd_base[@]}" up -d metabase
@@ -864,6 +866,7 @@ else
   echo "[INFO] Frontend container not found; skipping"
 fi
 
+# [ORDER] Phase 5 最后启动 Nginx：网关依赖 backend/frontend/metabase 均已就绪，且部署后需 reload 使 nginx.prod.conf 生效
 echo "[INFO] Phase 5: starting gateway (Nginx, last)..."
 "${compose_cmd_base[@]}" up -d nginx
 
