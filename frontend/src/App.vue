@@ -18,6 +18,8 @@
           <router-view />
         </div>
       </div>
+      <!-- ICP 备案号：底部左侧悬挂，满足合规要求 -->
+      <IcpFooter />
     </div>
   </div>
 </template>
@@ -30,6 +32,7 @@ import { useAuthStore } from '@/stores/auth'
 // import Sidebar from '@/components/common/Sidebar.vue'  // 旧版本（保留备份）
 import GroupedSidebar from '@/components/common/GroupedSidebar.vue'  // ✅ 新版分组菜单
 import Header from '@/components/common/Header.vue'  // ⭐ v4.19.0: 使用 Header 组件（包含通知图标）
+import IcpFooter from '@/components/common/IcpFooter.vue'  // ICP 备案号页脚
 
 const route = useRoute()
 const userStore = useUserStore()

@@ -1,19 +1,20 @@
 # Metabase Models 和 Questions 实施状态
 
-**最后更新**: 2026-01-31  
-**当前阶段**: **✅ 核心KPI、数据对比、店铺赛马、流量排名、经营指标已可用** - 前端可正常使用；库存积压、清仓排名待继续优化
+**变更 ID**: design-metabase-models-questions  
+**创建日期**: 2025-01-26  
+**归档日期**: 2026-02-17  
+**当前状态**: **已完成并归档**
+
+**最后更新**: 2026-02-17  
+**实施阶段**: **✅ 5 个 B 类 Model、7 个 C 类 Question 已全部就绪** - 配置清单、init_metabase.py、名称动态查询、Phase 3.5 均已完成
 
 ---
 
-## 🚨 紧急事项
+## 归档摘要
 
-**上线倒计时**: 一周后正式上线  
-**并发需求**: 50-100 用户同时操作（查询、上传、下载）  
-**关键决策**: Metabase 应用数据库从 H2 迁移到 PostgreSQL
-
-**Metabase 官方警告**：
-
-> "The embedded H2 database is for development and evaluation purposes only. For production deployments, use PostgreSQL or MySQL."
+- **目标**：设计 Metabase B 类数据模型和 C 类 Question，支持业务概览、数据对比、店铺赛马、流量排名、经营指标等
+- **结果**：5 个 Model（Analytics/Orders/Products/Inventory/Services）、7 个 Question（KPI/对比/赛马/流量/库存积压/经营指标/清仓）已创建
+- **后续**：GMV 口径调整、库存积压/清仓排名业务逻辑优化可单独建提案跟踪
 
 ---
 

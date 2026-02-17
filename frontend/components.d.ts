@@ -76,6 +76,7 @@ declare module 'vue' {
     ElUpload: typeof import('element-plus/es')['ElUpload']
     GroupedSidebar: typeof import('./src/components/common/GroupedSidebar.vue')['default']
     Header: typeof import('./src/components/common/Header.vue')['default']
+    IcpFooter: typeof import('./src/components/common/IcpFooter.vue')['default']
     JsonViewer: typeof import('./src/components/common/JsonViewer.vue')['default']
     MetabaseChart: typeof import('./src/components/charts/MetabaseChart.vue')['default']
     NotificationBell: typeof import('./src/components/common/NotificationBell.vue')['default']

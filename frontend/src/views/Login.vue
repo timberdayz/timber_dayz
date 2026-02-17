@@ -63,11 +63,13 @@
         </el-form-item>
       </el-form>
     </div>
+    <IcpFooter />
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, nextTick } from 'vue'
+import IcpFooter from '@/components/common/IcpFooter.vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
