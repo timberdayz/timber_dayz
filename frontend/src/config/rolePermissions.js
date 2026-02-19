@@ -10,6 +10,7 @@ export const ROLE_CONFIG = {
     icon: 'UserFilled',
     permissions: [
       'business-overview',
+      'annual-summary',
       'collection-config', 'collection-tasks', 'collection-history',
       'component-recorder', 'component-versions',
       'data-sync', 'data-quarantine', 'field-mapping',

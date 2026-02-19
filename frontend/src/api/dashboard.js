@@ -103,5 +103,41 @@ export default {
    */
   async queryClearanceRanking(params = {}) {
     return await api._get('/dashboard/clearance-ranking', { params })
+  },
+
+  /**
+   * 年度数据总结 - 核心KPI（仅月度粒度）
+   * @param {Object} params - granularity(monthly|yearly), period(YYYY-MM 或 YYYY)
+   */
+  async queryAnnualSummaryKpi(params = {}) {
+    return await api._get('/dashboard/annual-summary/kpi', { params })
+  },
+
+  /**
+   * 年度数据总结 - 按店铺下钻
+   */
+  async queryAnnualSummaryByShop(params = {}) {
+    return await api._get('/dashboard/annual-summary/by-shop', { params })
+  },
+
+  /**
+   * 年度数据总结 - 月度/年度趋势
+   */
+  async queryAnnualSummaryTrend(params = {}) {
+    return await api._get('/dashboard/annual-summary/trend', { params })
+  },
+
+  /**
+   * 年度数据总结 - 平台 GMV 占比
+   */
+  async queryAnnualSummaryPlatformShare(params = {}) {
+    return await api._get('/dashboard/annual-summary/platform-share', { params })
+  },
+
+  /**
+   * 年度数据总结 - 目标完成率
+   */
+  async queryAnnualSummaryTargetCompletion(params = {}) {
+    return await api._get('/dashboard/annual-summary/target-completion', { params })
   }
 }

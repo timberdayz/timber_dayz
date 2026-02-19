@@ -18,7 +18,8 @@ export const menuGroups = [
     order: 1,
     defaultExpanded: true,
     items: [
-      '/business-overview'
+      '/business-overview',
+      '/annual-summary'
     ]
   },
   {
@@ -243,7 +244,8 @@ export const routeDisplayNames = {
   // ⭐ Phase 8.1新增：组件录制工具
   '/component-recorder': '组件录制工具',
   // ⭐ Phase 9.4新增：组件版本管理
-  '/component-versions': '组件版本管理'
+  '/component-versions': '组件版本管理',
+  '/annual-summary': '年度数据总结'
 }
 
 /**

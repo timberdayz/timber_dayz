@@ -284,6 +284,90 @@ questions:
       - products
       - c_class
 
+  # 年度数据总结 - 核心KPI（仅月度粒度）
+  - name: "annual_summary_kpi"
+    display_name: "年度数据总结 - 核心KPI"
+    description: "工作台年度数据总结，仅用monthly粒度，支持月度/年度汇总与环比/同比"
+    sql_file: "sql/metabase_questions/annual_summary_kpi.sql"
+    collection: "C类数据报表/业务概览"
+    parameters:
+      - name: granularity
+        display_name: "粒度"
+        type: text
+        required: true
+        default: "monthly"
+      - name: period
+        display_name: "周期"
+        type: date
+        required: true
+    tags:
+      - annual_summary
+      - kpi
+      - c_class
+
+  # 年度数据总结 - 月度/年度趋势
+  - name: "annual_summary_trend"
+    display_name: "年度数据总结 - 趋势"
+    description: "按月份返回 GMV、总成本、利润，供趋势折线图使用"
+    sql_file: "sql/metabase_questions/annual_summary_trend.sql"
+    collection: "C类数据报表/业务概览"
+    parameters:
+      - name: granularity
+        display_name: "粒度"
+        type: text
+        required: true
+        default: "monthly"
+      - name: period
+        display_name: "周期"
+        type: date
+        required: true
+    tags:
+      - annual_summary
+      - trend
+      - c_class
+
+  # 年度数据总结 - 平台 GMV 占比
+  - name: "annual_summary_platform_share"
+    display_name: "年度数据总结 - 平台占比"
+    description: "按平台汇总 GMV，供饼图使用"
+    sql_file: "sql/metabase_questions/annual_summary_platform_share.sql"
+    collection: "C类数据报表/业务概览"
+    parameters:
+      - name: granularity
+        display_name: "粒度"
+        type: text
+        required: true
+        default: "monthly"
+      - name: period
+        display_name: "周期"
+        type: date
+        required: true
+    tags:
+      - annual_summary
+      - platform_share
+      - c_class
+
+  # 年度数据总结 - 按店铺下钻
+  - name: "annual_summary_by_shop"
+    display_name: "年度数据总结 - 按店铺"
+    description: "按店铺/平台返回 GMV、总成本、成本产出比、毛利率、净利率、ROI"
+    sql_file: "sql/metabase_questions/annual_summary_by_shop.sql"
+    collection: "C类数据报表/业务概览"
+    parameters:
+      - name: granularity
+        display_name: "粒度"
+        type: text
+        required: true
+        default: "monthly"
+      - name: period
+        display_name: "周期"
+        type: date
+        required: true
+    tags:
+      - annual_summary
+      - by_shop
+      - c_class
+
 # ==================== Collection 配置 ====================
 # Metabase Collection 用于组织 Models 和 Questions
 collections:

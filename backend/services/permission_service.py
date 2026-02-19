@@ -15,6 +15,7 @@ logger = get_logger(__name__)
 SYSTEM_PERMISSIONS = [
     # 工作台
     {"id": "business-overview", "name": "业务概览", "description": "查看业务概览数据", "resource": "dashboard", "action": "read", "category": "工作台"},
+    {"id": "annual-summary", "name": "年度数据总结", "description": "查看年度数据总结", "resource": "dashboard", "action": "read", "category": "工作台"},
     
     # 数据采集与管理
     {"id": "collection-config", "name": "采集配置", "description": "管理数据采集配置", "resource": "collection", "action": "all", "category": "数据采集与管理"},

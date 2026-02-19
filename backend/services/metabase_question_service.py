@@ -73,6 +73,10 @@ class MetabaseQuestionService:
             "business_overview_operational_metrics": int(os.getenv("METABASE_QUESTION_BUSINESS_OVERVIEW_OPERATIONAL_METRICS", "0")),
             "clearance_ranking": int(os.getenv("METABASE_QUESTION_CLEARANCE_RANKING", "0")),
             "hr_shop_monthly_metrics": int(os.getenv("METABASE_QUESTION_HR_SHOP_MONTHLY_METRICS", "0")),
+            "annual_summary_kpi": int(os.getenv("METABASE_QUESTION_ANNUAL_SUMMARY_KPI", "0")),
+            "annual_summary_trend": int(os.getenv("METABASE_QUESTION_ANNUAL_SUMMARY_TREND", "0")),
+            "annual_summary_platform_share": int(os.getenv("METABASE_QUESTION_ANNUAL_SUMMARY_PLATFORM_SHARE", "0")),
+            "annual_summary_by_shop": int(os.getenv("METABASE_QUESTION_ANNUAL_SUMMARY_BY_SHOP", "0")),
         }
         
         # HTTP客户端(支持异步)
@@ -305,6 +309,21 @@ class MetabaseQuestionService:
                 "value": params["granularity"]
             })
         
+        # 周期参数（年度数据总结：Metabase 为 date 类型日期选择器，API 仍支持 YYYY-MM/YYYY）
+        if params.get("period"):
+            p = str(params["period"]).strip()
+            if len(p) == 4:
+                period_date_val = f"{p}-01-01"
+            elif len(p) >= 7:
+                period_date_val = f"{p[:7]}-01"
+            else:
+                period_date_val = p
+            metabase_params.append({
+                "type": "date",
+                "target": ["variable", ["template-tag", "period"]],
+                "value": period_date_val
+            })
+        
         # 分组参数
         if params.get("group_by"):
             metabase_params.append({
@@ -446,6 +465,74 @@ class MetabaseQuestionService:
                     "labor_efficiency_obj": {"current": labor_efficiency, "change": labor_efficiency_change},
                 }
             logger.warning(f"[{question_key}] 返回数据为空,返回空对象")
+            return {
+                "gmv": 0,
+                "order_count": 0,
+                "visitor_count": 0,
+                "conversion_rate": 0,
+                "avg_order_value": 0,
+                "attach_rate": 0,
+                "labor_efficiency": 0,
+                "gmv_change": None,
+                "order_count_change": None,
+                "visitor_count_change": None,
+                "conversion_rate_change": None,
+                "avg_order_value_change": None,
+                "attach_rate_change": None,
+                "labor_efficiency_change": None,
+                "traffic": {"current": 0, "change": None},
+                "average_order_value": {"current": 0, "change": None},
+                "conversion_rate_obj": {"current": 0, "change": None},
+                "attach_rate_obj": {"current": 0, "change": None},
+                "labor_efficiency_obj": {"current": 0, "change": None},
+            }
+
+        if question_key == "annual_summary_kpi":
+            # 年度数据总结 KPI：与 business_overview_kpi 相同列名，同一套映射
+            if result_list and len(result_list) > 0:
+                first_row = result_list[0]
+                gmv = first_row.get("GMV(元)") or first_row.get("gmv") or first_row.get("total_gmv") or 0
+                order_count = first_row.get("订单数") or first_row.get("order_count") or first_row.get("total_orders") or 0
+                visitor_count = first_row.get("访客数") or first_row.get("visitor_count") or first_row.get("total_visitors") or 0
+                conversion_rate = first_row.get("转化率(%)") or first_row.get("conversion_rate") or 0
+                avg_order_value = first_row.get("客单价(元)") or first_row.get("avg_order_value") or first_row.get("average_order_value") or 0
+                attach_rate = first_row.get("连带率") or first_row.get("attach_rate") or 0
+                labor_efficiency = first_row.get("人效(元/人)") or first_row.get("labor_efficiency") or 0
+                def _num_or_none(v):
+                    if v is None:
+                        return None
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return None
+                gmv_change = _num_or_none(first_row.get("GMV环比(%)"))
+                order_count_change = _num_or_none(first_row.get("订单数环比(%)"))
+                visitor_count_change = _num_or_none(first_row.get("访客数环比(%)"))
+                conversion_rate_change = _num_or_none(first_row.get("转化率环比(%)"))
+                avg_order_value_change = _num_or_none(first_row.get("客单价环比(%)"))
+                attach_rate_change = _num_or_none(first_row.get("连带率环比(%)"))
+                labor_efficiency_change = _num_or_none(first_row.get("人效环比(%)"))
+                return {
+                    "gmv": gmv,
+                    "order_count": order_count,
+                    "visitor_count": visitor_count,
+                    "conversion_rate": conversion_rate,
+                    "avg_order_value": avg_order_value,
+                    "attach_rate": attach_rate,
+                    "labor_efficiency": labor_efficiency,
+                    "gmv_change": gmv_change,
+                    "order_count_change": order_count_change,
+                    "visitor_count_change": visitor_count_change,
+                    "conversion_rate_change": conversion_rate_change,
+                    "avg_order_value_change": avg_order_value_change,
+                    "attach_rate_change": attach_rate_change,
+                    "labor_efficiency_change": labor_efficiency_change,
+                    "traffic": {"current": visitor_count, "change": visitor_count_change},
+                    "average_order_value": {"current": avg_order_value, "change": avg_order_value_change},
+                    "conversion_rate_obj": {"current": conversion_rate, "change": conversion_rate_change},
+                    "attach_rate_obj": {"current": attach_rate, "change": attach_rate_change},
+                    "labor_efficiency_obj": {"current": labor_efficiency, "change": labor_efficiency_change},
+                }
             return {
                 "gmv": 0,
                 "order_count": 0,
@@ -675,6 +762,15 @@ class MetabaseQuestionService:
                     "rank": rank,
                 })
             return out
+
+        if question_key == "annual_summary_trend":
+            return result_list
+
+        if question_key == "annual_summary_platform_share":
+            return result_list
+
+        if question_key == "annual_summary_by_shop":
+            return result_list
         
         # 默认返回字典列表格式(适用于表格数据)
         return {

@@ -74,6 +74,17 @@ const routes = [
     }
   },
   {
+    path: '/annual-summary',
+    name: 'AnnualSummary',
+    component: () => import('../views/AnnualSummary.vue'),
+    meta: {
+      title: '年度数据总结',
+      icon: 'DataBoard',
+      permission: 'annual-summary',
+      roles: ['admin']  // 仅管理员可访问（与销售目标管理一致）
+    }
+  },
+  {
     path: '/sales-analysis',
     name: 'SalesAnalysis',
     component: () => import('../views/SalesAnalysis.vue'),

@@ -6,9 +6,12 @@ Dashboard API路由
 
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from fastapi.responses import JSONResponse
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from modules.core.logger import get_logger
 from backend.services.metabase_question_service import get_metabase_service
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from backend.models.database import get_async_db
 
 logger = get_logger(__name__)
 
@@ -361,4 +364,210 @@ async def get_clearance_ranking(
     except Exception as e:
         logger.error(f"清仓排名数据查询异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@router.get("/annual-summary/kpi")
+async def get_annual_summary_kpi(
+    request: Request,
+    granularity: str = Query(..., description="粒度(monthly|yearly)"),
+    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+):
+    """
+    年度数据总结 - 核心KPI（仅月度粒度数据）
+    返回核心 KPI + 成本与产出（成本可由后端聚合，缺失时为 null）
+    """
+    try:
+        if granularity not in ("monthly", "yearly"):
+            raise ValueError("granularity 必须为 monthly 或 yearly")
+        params = {"granularity": granularity, "period": period}
+        cache_params = _normalize_cache_params(params)
+
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("annual_summary_kpi", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
+
+        service = get_metabase_service()
+        metabase_params = {k: v for k, v in params.items() if v}
+        logger.info(f"[年度总结KPI] granularity={granularity}, period={period}")
+
+        result = await service.query_question("annual_summary_kpi", metabase_params)
+        if not isinstance(result, dict):
+            result = result or {}
+        # 成本与产出由后端聚合时合并；暂无聚合时补充 null，前端展示「暂无数据」
+        result.setdefault("total_cost", None)
+        result.setdefault("gmv", result.get("gmv"))  # 已有
+        result.setdefault("cost_to_revenue_ratio", None)
+        result.setdefault("roi", None)
+        result.setdefault("gross_margin", None)
+        result.setdefault("net_margin", None)
+
+        response = success_response(data=result)
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("annual_summary_kpi", response, **cache_params)
+        return JSONResponse(content=response, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        logger.error(f"年度总结KPI查询失败: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"年度总结KPI查询异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@router.get("/annual-summary/by-shop")
+async def get_annual_summary_by_shop(
+    granularity: str = Query(..., description="粒度(monthly|yearly)"),
+    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+):
+    """
+    年度数据总结 - 按店铺/平台下钻
+    返回各店铺 GMV、总成本、成本产出比、毛利率、净利率、ROI。数据来自 Metabase annual_summary_by_shop。
+    """
+    try:
+        if granularity not in ("monthly", "yearly"):
+            raise ValueError("granularity 必须为 monthly 或 yearly")
+        service = get_metabase_service()
+        result = await service.query_question("annual_summary_by_shop", {"granularity": granularity, "period": period})
+        data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
+        return JSONResponse(content=success_response(data=data))
+    except ValueError as e:
+        if "Question ID 未找到" in str(e) or "METABASE" in str(e):
+            logger.warning(f"年度总结按店铺 Metabase 未配置: {e}")
+            return JSONResponse(content=success_response(data=[]))
+        logger.error(f"年度总结按店铺查询失败: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"年度总结按店铺查询异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/annual-summary/trend")
+async def get_annual_summary_trend(
+    granularity: str = Query(..., description="粒度(monthly|yearly)"),
+    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+):
+    """
+    年度数据总结 - 月度/年度趋势
+    返回按月的 GMV、总成本、利润时间序列，供折线图使用。数据来自 Metabase annual_summary_trend。
+    """
+    try:
+        if granularity not in ("monthly", "yearly"):
+            raise ValueError("granularity 必须为 monthly 或 yearly")
+        service = get_metabase_service()
+        result = await service.query_question("annual_summary_trend", {"granularity": granularity, "period": period})
+        data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
+        return JSONResponse(content=success_response(data=data))
+    except ValueError as e:
+        if "Question ID 未找到" in str(e) or "METABASE" in str(e):
+            logger.warning(f"年度总结趋势 Metabase 未配置: {e}")
+            return JSONResponse(content=success_response(data=[]))
+        logger.error(f"年度总结趋势查询失败: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"年度总结趋势查询异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/annual-summary/platform-share")
+async def get_annual_summary_platform_share(
+    granularity: str = Query(..., description="粒度(monthly|yearly)"),
+    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+):
+    """
+    年度数据总结 - 平台 GMV 占比
+    返回各平台（Shopee、TikTok 等）GMV 及占比，供饼图使用。数据来自 Metabase annual_summary_platform_share。
+    """
+    try:
+        if granularity not in ("monthly", "yearly"):
+            raise ValueError("granularity 必须为 monthly 或 yearly")
+        service = get_metabase_service()
+        result = await service.query_question("annual_summary_platform_share", {"granularity": granularity, "period": period})
+        data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
+        return JSONResponse(content=success_response(data=data))
+    except ValueError as e:
+        if "Question ID 未找到" in str(e) or "METABASE" in str(e):
+            logger.warning(f"年度总结平台占比 Metabase 未配置: {e}")
+            return JSONResponse(content=success_response(data=[]))
+        logger.error(f"年度总结平台占比查询失败: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"年度总结平台占比查询异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/annual-summary/target-completion")
+async def get_annual_summary_target_completion(
+    granularity: str = Query(..., description="粒度(monthly|yearly)"),
+    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    年度数据总结 - 目标完成率
+    对接 a_class.sales_targets_a：按 period 汇总目标销售额，与 KPI 实际 GMV 对比得到完成率。
+    利润目标暂无独立配置时，利润完成率可为 null。
+    """
+    try:
+        if granularity not in ("monthly", "yearly"):
+            raise ValueError("granularity 必须为 monthly 或 yearly")
+
+        # 1) 汇总目标：月度用单月，年度用当年所有月
+        if len(period) == 4:  # YYYY
+            year_month_filter = f"year_month LIKE :period_prefix"
+            params = {"period_prefix": f"{period}-%"}
+        else:  # YYYY-MM
+            year_month_filter = "year_month = :period"
+            params = {"period": period}
+
+        try:
+            result = await db.execute(text(f"""
+                SELECT COALESCE(SUM(target_sales_amount), 0) AS target_gmv,
+                       COALESCE(SUM(target_quantity), 0) AS target_orders
+                FROM a_class.sales_targets_a
+                WHERE {year_month_filter}
+            """), params)
+        except Exception:
+            ym_filter_cn = '"年月" LIKE :period_prefix' if len(period) == 4 else '"年月" = :period'
+            result = await db.execute(text(f"""
+                SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
+                       COALESCE(SUM("目标订单数"), 0) AS target_orders
+                FROM a_class.sales_targets_a
+                WHERE {ym_filter_cn}
+            """), params)
+        row = result.fetchone()
+        target_gmv = float(row[0]) if row and row[0] is not None else 0.0
+        target_orders = int(row[1]) if row and row[1] is not None else 0
+
+        # 2) 实际 GMV：调用 KPI 接口同周期数据
+        achieved_gmv = None
+        try:
+            service = get_metabase_service()
+            kpi_result = await service.query_question("annual_summary_kpi", {"granularity": granularity, "period": period})
+            if isinstance(kpi_result, dict) and kpi_result.get("gmv") is not None:
+                achieved_gmv = float(kpi_result["gmv"])
+        except Exception as e:
+            logger.warning(f"目标完成率获取实际GMV失败: {e}")
+
+        achievement_rate_gmv = None
+        if target_gmv and achieved_gmv is not None:
+            achievement_rate_gmv = round(achieved_gmv / target_gmv * 100, 2)
+
+        data = {
+            "target_gmv": target_gmv,
+            "achieved_gmv": achieved_gmv,
+            "achievement_rate_gmv": achievement_rate_gmv,
+            "target_orders": target_orders,
+            "target_profit": None,
+            "achieved_profit": None,
+            "achievement_rate_profit": None,
+        }
+        return JSONResponse(content=success_response(data=data))
+    except ValueError as e:
+        logger.error(f"年度总结目标完成率查询失败: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"年度总结目标完成率查询异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 

@@ -56,6 +56,7 @@ class CacheService:
         "dashboard_operational_metrics": 180,
         "dashboard_clearance_ranking": 300,
         "dashboard_inventory_backlog": 300,
+        "annual_summary_kpi": 180,  # 年度数据总结 KPI（add-annual-data-summary）
         "default": 300,  # 5分钟
     }
     
