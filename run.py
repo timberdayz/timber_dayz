@@ -2,16 +2,19 @@
 # -*- coding: utf-8 -*-
 
 """
-西虹ERP系统 - 统一启动脚本 (v4.19.7)
+西虹ERP系统 - 统一启动脚本 (v4.24.1)
 
 版本历史:
+- v4.24.1: 版本号同步；修复 Windows 下 Start-Process -Command 中 $env:PYTHONPATH 被父进程展开导致子窗口报错
+- v4.19.8: 新增 --local 一键本地开发（Docker 起 Postgres/Redis，本机起后端/Celery/前端）
 - v4.19.7: 改进Docker健康检查等待逻辑，添加数据库连接预检查，主动检测启动错误
 - v4.19.6: 添加Celery worker自动启动功能 + Docker Compose模式支持
 - v4.18.0: 统一使用相对路径，提升云端迁移兼容性
 - v4.1.1: 改进Windows下的进程启动方式
 
 使用方法:
-    python run.py                      # 传统模式（本地启动）
+    python run.py                      # 传统模式（需先启动 Postgres/Redis）
+    python run.py --local              # 一键本地：Docker 起 Postgres/Redis，本机起后端+Celery+前端
     python run.py --use-docker         # Docker Compose模式（推荐，统一管理）
     python run.py --backend-only       # 仅启动后端
     python run.py --frontend-only      # 仅启动前端
@@ -55,7 +58,7 @@ def safe_print(text):
 def print_banner():
     """打印系统横幅"""
     safe_print("\n" + "="*80)
-    safe_print("西虹ERP系统 v4.19.7")
+    safe_print("西虹ERP系统 v4.24.1")
     safe_print("="*80)
     safe_print("现代化跨境电商管理平台")
     safe_print("FastAPI + Vue.js 3 + PostgreSQL + Celery")
@@ -205,11 +208,11 @@ def start_backend():
     backend_dir = project_root / "backend"
     
     if sys_platform.system() == "Windows":
-        # Windows: 设置 PYTHONPATH 使 uvicorn 主进程与 --reload 子进程都能 import backend
+        # Windows: 设置 PYTHONPATH；反引号转义 $ 避免父 PowerShell 展开导致子窗口 CommandNotFoundException
+        # 不使用 --reload：Windows + Python 3.13 下 uvicorn reload 子进程会崩溃；--loop asyncio 避免 config.load() 与默认事件循环冲突
         work_dir = str(project_root.resolve())
-        # PowerShell: 单引号内路径中的单引号需写成 ''
         work_dir_ps = work_dir.replace("'", "''")
-        inner_cmd = "$env:PYTHONPATH='{}'; python -m uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload".format(work_dir_ps)
+        inner_cmd = "`$env:PYTHONPATH='{}'; python -m uvicorn backend.main:app --host 0.0.0.0 --port 8001 --loop asyncio".format(work_dir_ps)
         cmd = (
             'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" -WorkingDirectory "{}"'
         ).format(inner_cmd.replace('"', '`"'), work_dir.replace('"', '`"'))
@@ -290,9 +293,10 @@ def start_celery_worker():
     
     if sys_platform.system() == "Windows":
         # Windows: 设置 PYTHONPATH 并指定 -WorkingDirectory，保证子进程能 import backend
+        # 反引号转义 $ 避免父 PowerShell 展开 $env:PYTHONPATH 导致子窗口收到 "=路径" 报 CommandNotFoundException
         work_dir = str(project_root.resolve())
         work_dir_ps = work_dir.replace("'", "''")
-        celery_cmd = "$env:PYTHONPATH='{}'; python -m celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --pool=solo --concurrency=4".format(work_dir_ps)
+        celery_cmd = "`$env:PYTHONPATH='{}'; python -m celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --pool=solo --concurrency=4".format(work_dir_ps)
         cmd = (
             'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" -WorkingDirectory "{}"'
         ).format(celery_cmd.replace('"', '`"'), work_dir.replace('"', '`"'))
@@ -427,6 +431,64 @@ def pre_flight_check_docker(project_root):
         safe_print(f"  [FAIL] Docker 检查异常: {e}")
         return False
     return True
+
+
+def ensure_postgres_redis_docker(project_root, with_celery=True):
+    """本地模式：用 Docker 启动 Postgres、Redis，可选 Celery Worker，供本机后端连接。
+    用于 python run.py --local 一键本地开发。with_celery=True 时同时启动 Docker Celery，避免本机 Celery 与容器时钟漂移。
+    返回 True 表示成功，False 表示失败。"""
+    safe_print("\n[本地模式] 使用 Docker 启动 Postgres、Redis" + (" 与 Celery Worker" if with_celery else "") + "...")
+    if not pre_flight_check_docker(project_root):
+        return False
+    compose_base = project_root / "docker-compose.yml"
+    compose_dev = project_root / "docker-compose.dev.yml"
+    if not compose_base.exists():
+        safe_print("  [ERROR] docker-compose.yml 不存在")
+        return False
+    compose_files = ["-f", str(compose_base)]
+    if compose_dev.exists():
+        compose_files.extend(["-f", str(compose_dev)])
+    # dev 含 redis/postgres；dev-full 含 celery-worker（见 docker-compose.dev.yml）
+    profiles = ["--profile", "dev"]
+    if with_celery:
+        profiles.extend(["--profile", "dev-full"])
+    services = ["redis", "postgres"]
+    if with_celery:
+        services.append("celery-worker")
+    try:
+        safe_print("  [启动] " + ", ".join(services) + "...")
+        cmd = ["docker-compose"] + compose_files + profiles + ["up", "-d"] + services
+        result = subprocess.run(
+            cmd, cwd=project_root, capture_output=True, text=True, timeout=180, encoding="utf-8", errors="ignore"
+        )
+        if result.returncode != 0:
+            error_msg = (result.stderr or result.stdout or "未知错误")[:300]
+            safe_print(f"  [ERROR] 启动失败: {error_msg}")
+            return False
+        safe_print("  [OK] " + ", ".join(services) + " 已启动")
+        safe_print("  [等待] 服务就绪...")
+        time.sleep(8)
+        safe_print("  [检查] PostgreSQL 连接...")
+        try:
+            r = subprocess.run(
+                [
+                    "docker", "exec", "xihong_erp_postgres",
+                    "psql", "-U", "erp_user", "-d", "xihong_erp", "-c", "SELECT 1",
+                ],
+                capture_output=True, text=True, timeout=10, encoding="utf-8", errors="ignore",
+            )
+            if r.returncode == 0:
+                safe_print("  [OK] PostgreSQL 连接正常")
+            else:
+                safe_print("  [WARNING] PostgreSQL 连接测试失败，本机后端可能无法连库")
+        except Exception as e:
+            safe_print(f"  [WARNING] 无法检查数据库连接: {e}")
+        if with_celery:
+            safe_print("  [OK] Celery Worker 使用 Docker 容器，与本机无时钟漂移")
+        return True
+    except Exception as e:
+        safe_print(f"  [ERROR] 异常: {e}")
+        return False
 
 
 def start_services_with_docker_compose(use_collection=False):
@@ -878,9 +940,22 @@ def main():
     parser.add_argument("--no-celery", action="store_true", help="不启动Celery worker（v4.19.6新增）")
     parser.add_argument("--use-docker", action="store_true", help="使用Docker Compose启动服务（推荐，统一管理）")
     parser.add_argument("--collection", action="store_true", help="采集模式：与 --use-docker 同时使用时，backend 使用带 Playwright 的镜像（Dockerfile.collection），用于采集环境测试")
+    parser.add_argument("--local", action="store_true", help="一键本地开发：Docker 启动 Postgres/Redis/Celery，本机启动后端与前端（无时钟漂移、免切换容器）")
     args = parser.parse_args()
     
     print_banner()
+    
+    project_root = Path(__file__).resolve().parent
+    
+    # [v4.24.1] 本地一键模式：Docker 起 Postgres/Redis/Celery，本机起后端+前端（避免本机 Celery 与容器时钟漂移）
+    if args.local and not args.use_docker and not args.frontend_only:
+        safe_print("\n[模式] 一键本地开发（Docker Postgres/Redis/Celery + 本机后端/前端）")
+        if not ensure_postgres_redis_docker(project_root, with_celery=True):
+            safe_print("\n[ERROR] Docker 服务启动失败，请检查 Docker 与 compose 配置")
+            input("\n按回车键退出...")
+            sys.exit(1)
+        args.no_celery = True  # Celery 已由 Docker 启动，本机不再启动 Celery Worker
+        safe_print("  [OK] 数据库、Redis 与 Celery 已就绪，接下来启动本机后端与前端...\n")
     
     # [v4.19.6] 新增：Docker Compose模式
     if args.use_docker:
@@ -999,7 +1074,7 @@ def main():
             safe_print("[后端] API文档:  http://localhost:8001/api/docs")
             safe_print("[后端] 健康检查: http://localhost:8001/health")
         
-        if args.use_docker:
+        if args.use_docker or args.local:
             safe_print("[任务] Celery Worker已启动（Docker容器，处理数据同步任务）")
             safe_print("       查看日志: docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f celery-worker")
         elif celery_process:

@@ -1,6 +1,7 @@
 # FastAPI后端依赖
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+# Python 3.13 需 uvicorn>=0.38.0，否则 run(app,...) 报 TypeError（见 run.py --local 后端窗口）
+uvicorn[standard]>=0.38.0
 sqlalchemy==2.0.23
 alembic==1.12.1
 pydantic==2.5.0
