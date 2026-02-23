@@ -1318,7 +1318,7 @@ class CollectionCenterApp(BaseApplication):
                             if _p:
                                 print(f"[FOLDER] 输出目录: {_p.parent}")
                                 try:
-                                    _url = f"file:///{str(_p).replace('\\', '/')}"
+                                    _url = "file:///" + str(_p).replace("\\", "/")
                                     print(f"[LINK] 文件链接: {_url}")
                                 except Exception:
                                     pass

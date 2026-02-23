@@ -5,23 +5,23 @@
       <h2>采集历史</h2>
       <div class="stats-row">
         <div class="stat-item">
-          <span class="stat-value">{{ stats?.total_tasks || 0 }}</span>
+          <span class="stat-value">{{ stats?.total_tasks ?? 0 }}</span>
           <span class="stat-label">总任务数</span>
         </div>
         <div class="stat-item success">
-          <span class="stat-value">{{ stats?.by_status?.completed || 0 }}</span>
-          <span class="stat-label">完全成功</span>
+          <span class="stat-value">{{ stats?.completed ?? 0 }}</span>
+          <span class="stat-label">已完成</span>
         </div>
         <div class="stat-item warning">
-          <span class="stat-value">{{ stats?.by_status?.partial_success || 0 }}</span>
-          <span class="stat-label">部分成功</span>
+          <span class="stat-value">{{ stats?.running ?? 0 }}</span>
+          <span class="stat-label">运行中</span>
         </div>
         <div class="stat-item danger">
-          <span class="stat-value">{{ stats?.by_status?.failed || 0 }}</span>
+          <span class="stat-value">{{ stats?.failed ?? 0 }}</span>
           <span class="stat-label">失败</span>
         </div>
         <div class="stat-item info">
-          <span class="stat-value">{{ stats?.success_rate || 0 }}%</span>
+          <span class="stat-value">{{ (stats?.success_rate ?? 0) }}%</span>
           <span class="stat-label">成功率</span>
         </div>
       </div>
@@ -302,20 +302,20 @@ const loadHistory = async () => {
   loading.value = true
   try {
     const params = {
-      limit: pagination.pageSize,
-      offset: (pagination.page - 1) * pagination.pageSize
+      page: pagination.page,
+      page_size: pagination.pageSize
     }
-    
     if (filters.platform) params.platform = filters.platform
     if (filters.status) params.status = filters.status
     if (filters.date_range?.length === 2) {
       params.start_date = filters.date_range[0]
       params.end_date = filters.date_range[1]
     }
-    
+
     const result = await collectionApi.getHistory(params)
-    history.value = result.items || result
-    pagination.total = result.total || result.length
+    // 后端返回 { data, total, page, page_size, pages }
+    history.value = result.data ?? result.items ?? []
+    pagination.total = result.total ?? 0
   } catch (error) {
     ElMessage.error('加载历史失败: ' + error.message)
   } finally {

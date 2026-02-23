@@ -79,8 +79,8 @@ class MetabaseQuestionService:
             "annual_summary_by_shop": int(os.getenv("METABASE_QUESTION_ANNUAL_SUMMARY_BY_SHOP", "0")),
         }
         
-        # HTTP客户端(支持异步)
-        self.client = httpx.AsyncClient(timeout=30.0)
+        # HTTP客户端(支持异步)；Metabase 首次查询或复杂 Question 可能较慢，超时设为 60 秒
+        self.client = httpx.AsyncClient(timeout=60.0)
     
     async def _ensure_session_token(self) -> str:
         """确保有有效的Session Token"""
@@ -215,10 +215,13 @@ class MetabaseQuestionService:
         # 月份参数(用于核心KPI等月度筛选)
         # 格式:YYYY-MM-DD(月初日期)
         if params.get("month"):
+            month_val = params["month"]
+            if isinstance(month_val, str) and len(month_val) == 7 and month_val[4] == "-":
+                month_val = f"{month_val}-01"
             metabase_params.append({
                 "type": "date",
                 "target": ["variable", ["template-tag", "month"]],
-                "value": params["month"]
+                "value": month_val
             })
         
         # 单平台参数(用于核心KPI的平台筛选,可选)

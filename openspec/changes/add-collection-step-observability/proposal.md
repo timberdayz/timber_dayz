@@ -68,3 +68,10 @@
 
 - **add-hybrid-collection-api-playwright**：新增「按店铺选 API 或 Playwright」、实现 Shopee/TikTok API 采集器、落盘与登记契约；不改现有可观测性与组件 run() 契约。
 - **本变更（add-collection-step-observability）**：不新增 API 采集；专注「步骤级日志、进度持久化、任务详情步骤时间线、组件 run() 统一为 async」，使脚本出问题时能在界面上看到「哪一步失败」。两者可独立排期与交付。
+
+## 实施状态（更新）
+
+- **1.x 步骤级日志与进度**：已完成（回调扩展、顺序/并行打点、started_at/completed_at、details 约定）。
+- **2.x 任务详情与步骤时间线**：已完成。采集任务列表页增加「详情」按钮，打开抽屉展示任务元信息（平台、账号、状态、创建/开始/结束时间、总耗时、error_message、completed_domains、failed_domains）及按 timestamp 排序的步骤时间线（getTaskLogs）；步骤名由 details.step_id/component 展示，失败步骤高亮，details.error 可展开；保留原有「日志」弹窗。
+- **3.x 组件 run() 统一为 async**：已完成（TikTok/Amazon/Shopee/Miaoshou 相关组件及 Miaoshou export 全量 await）。
+- **4.x 验收与文档**：待执行。

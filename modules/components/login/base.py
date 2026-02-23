@@ -15,8 +15,9 @@ class LoginComponent(ComponentBase):
     """Abstract login component.
 
     Implementations should take account.login_url as the only entry URL.
+    实现必须为 async，即 async def run(self, page) -> LoginResult。
     """
 
-    def run(self, page: Any) -> LoginResult:  # type: ignore[override]
-        raise NotImplementedError
+    async def run(self, page: Any) -> LoginResult:  # type: ignore[override]
+        raise NotImplementedError("Implementations must be async: async def run(self, page) -> LoginResult")
 

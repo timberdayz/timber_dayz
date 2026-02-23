@@ -50,7 +50,7 @@ class ShopeeAnalyticsExport(ExportComponent):
         except Exception:
             pass
 
-    def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
+    async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
             account = self.ctx.account
             cfg = self.ctx.config or {}
@@ -73,11 +73,11 @@ class ShopeeAnalyticsExport(ExportComponent):
                 for sel in getattr(self.sel, 'popup_close_buttons', []) or []:
                     try:
                         loc = page.locator(sel)
-                        if loc.count() > 0 and loc.first.is_visible():
+                        if loc.count() > 0 and await loc.first.is_visible():
                             if self.logger:
                                 self.logger.info(f"[ShopeeAnalyticsExport] 关闭弹窗: {sel}")
-                            loc.first.click()
-                            page.wait_for_timeout(200)
+                            await loc.first.click()
+                            await page.wait_for_timeout(200)
                     except Exception:
                         continue
             except Exception:
@@ -99,8 +99,8 @@ class ShopeeAnalyticsExport(ExportComponent):
                     if self.logger:
                         self.logger.info(f"[ShopeeAnalyticsExport] 选择时间范围: {opt.value}")
                     _dp = ShopeeDatePicker(self.ctx)
-                    _res = _dp.run(page, opt)
-                    page.wait_for_timeout(600)
+                    _res = await _dp.run(page, opt)
+                    await page.wait_for_timeout(600)
             except Exception:
                 # 日期选择失败不阻断导出,后续依靠文件名区间校验兜底
                 pass
@@ -110,7 +110,7 @@ class ShopeeAnalyticsExport(ExportComponent):
             ready_probe = None
             for probe in self.sel.data_ready_probes:
                 try:
-                    if page.locator(probe).first.is_visible():
+                    if await page.locator(probe).first.is_visible():
                         data_ready = True
                         ready_probe = probe
                         if self.logger:
@@ -123,9 +123,9 @@ class ShopeeAnalyticsExport(ExportComponent):
                 if self.logger:
                     self.logger.warning("[ShopeeAnalyticsExport] 未检测到数据就绪探针,继续执行")
                 # 额外等待时间,给页面更多加载时间
-                page.wait_for_timeout(2000)
+                await page.wait_for_timeout(2000)
             else:
-                page.wait_for_timeout(500)
+                await page.wait_for_timeout(500)
 
             # 2) 点击导出(增强日志与重试机制)
             clicked = False
@@ -141,10 +141,10 @@ class ShopeeAnalyticsExport(ExportComponent):
                     if count > 0:
                         if self.logger:
                             self.logger.info(f"[ShopeeAnalyticsExport] 找到 {count} 个匹配元素: {btn}")
-                        if loc.first.is_visible():
+                        if await loc.first.is_visible():
                             if self.logger:
                                 self.logger.info(f"[ShopeeAnalyticsExport] 点击导出按钮: {btn}")
-                            loc.first.click()
+                            await loc.first.click()
                             clicked = True
                             export_button_used = btn
                             break
@@ -168,10 +168,10 @@ class ShopeeAnalyticsExport(ExportComponent):
                         for btn in self.sel.export_buttons:
                             try:
                                 loc = fr.locator(btn)
-                                if loc.count() > 0 and loc.first.is_visible():
+                                if loc.count() > 0 and await loc.first.is_visible():
                                     if self.logger:
                                         self.logger.info(f"[ShopeeAnalyticsExport] 在frame中点击导出按钮: {btn}")
-                                    loc.first.click()
+                                    await loc.first.click()
                                     clicked = True
                                     export_button_used = btn
                                     break
@@ -188,10 +188,10 @@ class ShopeeAnalyticsExport(ExportComponent):
                         txt_loc = page.locator('text=导出数据')
                         if txt_loc.count() == 0:
                             txt_loc = page.locator('text=导出')
-                        if txt_loc.count() > 0 and txt_loc.first.is_visible():
+                        if txt_loc.count() > 0 and await txt_loc.first.is_visible():
                             if self.logger:
                                 self.logger.info("[ShopeeAnalyticsExport] 使用文本兜底点击导出")
-                            txt_loc.first.click()
+                            await txt_loc.first.click()
                             clicked = True
                             export_button_used = 'text=导出*'
                     except Exception:
@@ -205,7 +205,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                             from datetime import datetime
                             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                             screenshot_path = f"temp/development/debug_export_page_{ts}_{account_label}_{shop_name}.png"
-                            page.screenshot(path=screenshot_path)
+                            await page.screenshot(path=screenshot_path)
                             self.logger.info(f"[ShopeeAnalyticsExport] 已保存调试截图: {screenshot_path}")
                         except Exception:
                             pass
@@ -268,7 +268,7 @@ class ShopeeAnalyticsExport(ExportComponent):
 
             try:
                 with page.expect_download(timeout=5000) as dl_info:
-                    page.locator(export_button_used or self.sel.export_buttons[0]).first.click()
+                    await page.locator(export_button_used or self.sel.export_buttons[0]).first.click()
                 download = dl_info.value
                 if self.logger:
                     self.logger.info(f"[ShopeeAnalyticsExport] 立即下载成功")
@@ -310,14 +310,14 @@ class ShopeeAnalyticsExport(ExportComponent):
                         pass
 
                     # 等待后重试,并在 expect_download 上下文内完成点击
-                    page.wait_for_timeout(backoff_sec * 1000)
+                    await page.wait_for_timeout(backoff_sec * 1000)
                     # 若全局监听已捕获下载,提前结束重试
                     if _latest.get("dl") is not None:
                         download = _latest.get("dl")
                         break
                     try:
                         with page.expect_download(timeout=retry_expect_ms) as dl_info:
-                            page.locator(export_button_used or self.sel.export_buttons[0]).first.click()
+                            await page.locator(export_button_used or self.sel.export_buttons[0]).first.click()
                         download = dl_info.value
                         if self.logger:
                             self.logger.info(f"[ShopeeAnalyticsExport] 第{retry_idx}次重试点击导出按钮(间隔{backoff_sec}s)")
@@ -331,7 +331,7 @@ class ShopeeAnalyticsExport(ExportComponent):
             # 2) 等待“下载”入口出现后优先点击最新一条
             if not download and not downloaded_file:
                 try:
-                    self._maybe_generate_report(page)
+                    await self._maybe_generate_report(page)
                 except Exception:
                     pass
                 try:
@@ -340,7 +340,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                 except Exception:
                     base_wait = 30
                 wait_timeout = max(base_wait, wait_button_sec)
-                preferred = self._wait_for_latest_download_button(page, timeout=wait_timeout)
+                preferred = await self._wait_for_latest_download_button(page, timeout=wait_timeout)
                 if preferred:
                     try:
                         from datetime import datetime as _dt
@@ -353,7 +353,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                             download = _latest.get("dl")
                         else:
                             with page.expect_download(timeout=final_expect_ms) as dl_info:
-                                preferred.click()
+                                await preferred.click()
                             download = dl_info.value
                     except Exception as e:
                         # UI监听未命中 -> 进行短时文件系统兜底(最多15秒,每秒检查一次)
@@ -367,7 +367,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                                     break
                             except Exception:
                                 pass
-                            page.wait_for_timeout(1000)
+                            await page.wait_for_timeout(1000)
 
             if download:
                 tmp_name = download.suggested_filename or f"{data_type}.xlsx"
@@ -500,7 +500,7 @@ class ShopeeAnalyticsExport(ExportComponent):
             return ExportResult(False, str(e))
 
 
-    def _maybe_generate_report(self, page) -> bool:
+    async def _maybe_generate_report(self, page) -> bool:
         """在导出记录抽屉/弹窗中自动点击“生成/立即生成/重新生成”。
         返回是否有点击动作。
         """
@@ -517,10 +517,10 @@ class ShopeeAnalyticsExport(ExportComponent):
             for sel in candidates:
                 try:
                     loc = page.locator(sel)
-                    if loc.count() > 0 and loc.first.is_enabled() and loc.first.is_visible():
+                    if loc.count() > 0 and await loc.first.is_enabled() and await loc.first.is_visible():
                         if self.logger:
                             self.logger.info(f"[ShopeeAnalyticsExport] 点击生成按钮: {sel}")
-                        loc.first.click()
+                        await loc.first.click()
                         return True
                 except Exception:
                     continue
@@ -528,7 +528,7 @@ class ShopeeAnalyticsExport(ExportComponent):
             pass
         return False
 
-    def _wait_for_latest_download_button(self, page, timeout: Optional[int] = None):
+    async def _wait_for_latest_download_button(self, page, timeout: Optional[int] = None):
         """等待页面出现可点击的“下载”按钮,返回首选 Locator。
         逻辑与服务表现相近,但做了通用化精简。
         """
@@ -562,7 +562,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                     if cur_count > base_count:
                         base_count = cur_count
                         btn_top = download_buttons_all.first
-                        if btn_top.is_visible() and btn_top.is_enabled():
+                        if await btn_top.is_visible() and await btn_top.is_enabled():
                             if self.logger:
                                 self.logger.info("[ShopeeAnalyticsExport] 发现新增下载入口,优先点击最新一条")
                             return btn_top
@@ -572,24 +572,24 @@ class ShopeeAnalyticsExport(ExportComponent):
                     if now_ts - last_beat >= heartbeat_sec:
                         last_beat = now_ts
                         btn = download_buttons_all.first
-                        if btn and btn.is_visible() and btn.is_enabled():
+                        if btn and await btn.is_visible() and await btn.is_enabled():
                             return btn
 
                     # 文本状态检测(处理中 -> 继续等待)
                     try:
-                        status_text = page.text_content('body') or ''
+                        status_text = await page.text_content('body') or ''
                         indicators = get_config_value('data_collection', 'export_detection.processing_indicators', [
                             '执行中', '生成中', '队列中', '处理中', '导出中', '进行中',
                             'processing', 'generating', 'queued', 'exporting', 'in progress',
                         ])
                         if any(ind.lower() in status_text.lower() for ind in indicators):
-                            page.wait_for_timeout(int(min(400, max(200, retry_interval * 1000))))
+                            await page.wait_for_timeout(int(min(400, max(200, retry_interval * 1000))))
                             continue
                     except Exception:
                         pass
 
                 except Exception:
-                    page.wait_for_timeout(250)
+                    await page.wait_for_timeout(250)
 
             if self.logger:
                 self.logger.warning(f"[ShopeeAnalyticsExport] 等待下载入口超时({timeout}s)")

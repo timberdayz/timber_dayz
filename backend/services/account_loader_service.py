@@ -98,7 +98,73 @@ class AccountLoaderService:
         
         logger.debug(f"从数据库加载账号: {account_id} ({account.store_name})")
         return account_dict
-    
+
+    def _orm_to_account_dict(self, account: PlatformAccount) -> Optional[Dict]:
+        """将 PlatformAccount ORM 转为采集模块所需字典（含解密），失败返回 None。"""
+        try:
+            password = self.encryption_service.decrypt_password(account.password_encrypted)
+        except Exception as e:
+            logger.error(f"解密账号 {account.account_id} 密码失败: {e}")
+            return None
+        return {
+            "account_id": account.account_id,
+            "platform": account.platform.lower() if account.platform else "unknown",
+            "store_name": account.store_name,
+            "username": account.username,
+            "password": password,
+            "login_url": account.login_url or "",
+            "email": account.email or "",
+            "phone": account.phone or "",
+            "region": account.region or "CN",
+            "currency": account.currency or "CNY",
+            "shop_type": account.shop_type or "",
+            "shop_region": account.shop_region or "",
+            "parent_account": account.parent_account or "",
+            "enabled": account.enabled,
+            "proxy_required": account.proxy_required,
+            "notes": account.notes or "",
+            "capabilities": account.capabilities or {},
+            "another_name": account.account_alias or "",
+            "account_alias": account.account_alias or "",
+            "E-mail": account.email or "",
+            "Email account": account.email or "",
+            "Email password": "",
+            "Email address": "",
+            "login_flags": (account.extra_config or {}).get("login_flags", {}),
+        }
+
+    async def load_all_accounts_async(
+        self, db: AsyncSession, platform: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        从数据库异步加载所有账号（供 AsyncSession 使用）。
+
+        Args:
+            db: 异步数据库会话
+            platform: 平台筛选(可选)
+
+        Returns:
+            账号列表（与 load_all_accounts 格式一致）
+        """
+        stmt = (
+            select(PlatformAccount)
+            .where(PlatformAccount.enabled == True)
+            .order_by(PlatformAccount.platform, PlatformAccount.store_name)
+        )
+        if platform:
+            stmt = stmt.where(PlatformAccount.platform.ilike(platform))
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+        out = []
+        for account in rows:
+            d = self._orm_to_account_dict(account)
+            if d:
+                out.append(d)
+        logger.info(
+            f"从数据库加载了 {len(out)} 个活跃账号{f'(平台: {platform})' if platform else ''}"
+        )
+        return out
+
     def load_account(self, account_id: str, db: Union[Session, AsyncSession]) -> Optional[Dict]:
         """
         从数据库加载账号信息(同步版本,兼容异步)

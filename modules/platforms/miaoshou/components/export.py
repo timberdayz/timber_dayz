@@ -17,7 +17,7 @@ class MiaoshouExporterComponent(ExportComponent):
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
 
-    def _first_click(self, page: Any, selectors: list[str], *, timeout: int = 5000) -> bool:
+    async def _first_click(self, page: Any, selectors: list[str], *, timeout: int = 5000) -> bool:
         """Try multiple resilient click strategies for a list of selectors.
 
         - scroll into view then click
@@ -26,7 +26,7 @@ class MiaoshouExporterComponent(ExportComponent):
         """
         # Quick ESC to dismiss transient overlays
         try:
-            page.keyboard.press("Escape")
+            await page.keyboard.press("Escape")
         except Exception:
             pass
         for sel in selectors:
@@ -34,11 +34,11 @@ class MiaoshouExporterComponent(ExportComponent):
                 loc = page.locator(sel).first
                 # scroll + visibility best-effort
                 try:
-                    loc.scroll_into_view_if_needed(timeout=1200)
+                    await loc.scroll_into_view_if_needed(timeout=1200)
                 except Exception:
                     pass
                 try:
-                    loc.click(timeout=timeout)
+                    await loc.click(timeout=timeout)
                     return True
                 except Exception:
                     pass
@@ -47,18 +47,18 @@ class MiaoshouExporterComponent(ExportComponent):
                     btn = page.get_by_role("button", name=sel.split("has-text(")[-1].rstrip(")"))
                     if btn and btn.first.count() >= 0:
                         try:
-                            btn.first.scroll_into_view_if_needed(timeout=800)
+                            await btn.first.scroll_into_view_if_needed(timeout=800)
                         except Exception:
                             pass
-                        btn.first.click(timeout=timeout)
+                        await btn.first.click(timeout=timeout)
                         return True
                 except Exception:
                     pass
                 # JS fallback
                 try:
-                    handle = loc.element_handle(timeout=800)
+                    handle = await loc.element_handle(timeout=800)
                     if handle:
-                        page.evaluate("el => el.click()", handle)
+                        await page.evaluate("el => el.click()", handle)
                         return True
                 except Exception:
                     pass
@@ -86,7 +86,7 @@ class MiaoshouExporterComponent(ExportComponent):
             return "finance"
         return "unknown"
 
-    def _close_popups(self, page: Any) -> None:
+    async def _close_popups(self, page: Any) -> None:
         """统一的“观察-关闭弹窗”守护:从配置读取选择器与轮询策略,遍历顶层与所有 frame,并包含 ESC 兜底。"""
         try:
             if self.logger:
@@ -108,7 +108,7 @@ class MiaoshouExporterComponent(ExportComponent):
             interval = int(getattr(ws, "close_poll_interval_ms", 300))
             # ESC 兜底
             try:
-                page.keyboard.press("Escape")
+                await page.keyboard.press("Escape")
             except Exception:
                 pass
             sels = list(sels)
@@ -117,8 +117,8 @@ class MiaoshouExporterComponent(ExportComponent):
                 for s in sels:
                     try:
                         el = page.locator(s).first
-                        if el.count() > 0 and el.is_visible():
-                            el.click(timeout=800)
+                        if el.count() > 0 and await el.is_visible():
+                            await el.click(timeout=800)
                             closed = True
                     except Exception:
                         pass
@@ -127,15 +127,15 @@ class MiaoshouExporterComponent(ExportComponent):
                         for s in sels:
                             try:
                                 el2 = fr.locator(s).first
-                                if el2.count() > 0 and el2.is_visible():
-                                    el2.click(timeout=800)
+                                if el2.count() > 0 and await el2.is_visible():
+                                    await el2.click(timeout=800)
                                     closed = True
                             except Exception:
                                 pass
                 except Exception:
                     pass
                 try:
-                    page.wait_for_timeout(interval)
+                    await page.wait_for_timeout(interval)
                 except Exception:
                     pass
             return
@@ -143,7 +143,7 @@ class MiaoshouExporterComponent(ExportComponent):
             # 忽略弹窗处理异常
             pass
 
-    def _wait_download_with_progress(self, page: Any, texts: list[str], *, total_ms: int = 900000, interval_ms: int = 3000):
+    async def _wait_download_with_progress(self, page: Any, texts: list[str], *, total_ms: int = 900000, interval_ms: int = 3000):
         """Wait for a browser download, logging lightweight progress hints.
 
         Improvements:
@@ -177,12 +177,12 @@ class MiaoshouExporterComponent(ExportComponent):
             # Prefer context-level download event
             try:
                 if ctx is not None:
-                    return ctx.wait_for_event("download", timeout=interval_ms)
+                    return await ctx.wait_for_event("download", timeout=interval_ms)
             except Exception:
                 pass
             # Fallback to page-level
             try:
-                return page.wait_for_event("download", timeout=200)
+                return await page.wait_for_event("download", timeout=200)
             except Exception:
                 pass
             # Lightweight progress logging, throttled
@@ -191,7 +191,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 for t in texts or []:
                     try:
                         el = page.get_by_text(t, exact=False).first
-                        if el and el.is_visible():
+                        if el and await el.is_visible():
                             visible_any = True
                             ever_seen = True
                             last_seen_ms = waited
@@ -212,7 +212,7 @@ class MiaoshouExporterComponent(ExportComponent):
             if ever_seen and (waited - last_seen_ms) >= 8000:
                 raise RuntimeError("progress disappeared; trigger scan")
             try:
-                page.wait_for_timeout(min(interval_ms, 3000))
+                await page.wait_for_timeout(min(interval_ms, 3000))
             except Exception:
                 pass
             waited += interval_ms
@@ -347,7 +347,7 @@ class MiaoshouExporterComponent(ExportComponent):
             return None
 
 
-    def _ensure_order_status_all(self, page: Any) -> None:
+    async def _ensure_order_status_all(self, page: Any) -> None:
         """Ensure '订单状态' filter has all options checked.
         Strategy:
         1) Open the dropdown of data-field=appOrderStatus
@@ -365,14 +365,14 @@ class MiaoshouExporterComponent(ExportComponent):
             except Exception:
                 pass
             try:
-                root.locator(".jx-select__wrapper").first.click(timeout=1500)
+                await root.locator(".jx-select__wrapper").first.click(timeout=1500)
             except Exception:
                 try:
-                    root.click(timeout=1500)
+                    await root.click(timeout=1500)
                 except Exception:
                     pass
             try:
-                page.wait_for_timeout(150)
+                await page.wait_for_timeout(150)
             except Exception:
                 pass
             try:
@@ -430,7 +430,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 # 多次尝试点击,直到 .is-checked 出现
                 for i in range(6):
                     try:
-                        cls = (inpt.get_attribute("class") or "") if inpt else ""
+                        cls = ((await inpt.get_attribute("class")) or "") if inpt else ""
                     except Exception:
                         cls = ""
                     if "is-checked" in cls:
@@ -442,17 +442,17 @@ class MiaoshouExporterComponent(ExportComponent):
                     try:
                         # 优先点击专用 inner;退化为点击文本或 checkbox 本体
                         if toggler and toggler.count() >= 1:
-                            toggler.click(timeout=1200)
+                            await toggler.click(timeout=1200)
                         elif header and header.count() >= 1:
-                            header.click(timeout=1200)
+                            await header.click(timeout=1200)
                         else:
-                            page.get_by_text("全选", exact=False).first.click(timeout=1200)
-                        page.wait_for_timeout(100)
+                            await page.get_by_text("全选", exact=False).first.click(timeout=1200)
+                        await page.wait_for_timeout(100)
                         print(f"[MiaoshouExporter] 正在尝试勾选‘全选’,第{i+1}次...")
                     except Exception:
                         try:
-                            page.get_by_text("全选", exact=False).first.click(timeout=1200)
-                            page.wait_for_timeout(100)
+                            await page.get_by_text("全选", exact=False).first.click(timeout=1200)
+                            await page.wait_for_timeout(100)
                         except Exception:
                             pass
             except Exception:
@@ -478,24 +478,24 @@ class MiaoshouExporterComponent(ExportComponent):
                     el = items[i]
                     # skip the '全选' option
                     try:
-                        if "全选" in (el.inner_text() or ""):
+                        if "全选" in ((await el.inner_text()) or ""):
                             continue
                     except Exception:
                         pass
                     # check wrapper or child input class
-                    wcls = (el.get_attribute("class") or "")
+                    wcls = (await el.get_attribute("class")) or ""
                     is_checked = "is-checked" in wcls
                     if not is_checked:
                         try:
                             inp = el.locator(".jx-checkbox__input").first
-                            icls = (inp.get_attribute("class") or "")
+                            icls = (await inp.get_attribute("class")) or ""
                             is_checked = "is-checked" in icls
                         except Exception:
                             is_checked = False
                     if not is_checked:
-                        el.locator(".jx-checkbox__inner").first.click(timeout=1000)
+                        await el.locator(".jx-checkbox__inner").first.click(timeout=1000)
                         try:
-                            page.wait_for_timeout(60)
+                            await page.wait_for_timeout(60)
                         except Exception:
                             pass
                 except Exception:
@@ -513,45 +513,45 @@ class MiaoshouExporterComponent(ExportComponent):
                 pass
             # Close dropdown
             try:
-                page.keyboard.press("Escape")
+                await page.keyboard.press("Escape")
             except Exception:
                 pass
             try:
-                page.wait_for_timeout(120)
+                await page.wait_for_timeout(120)
             except Exception:
                 pass
         except Exception:
             pass
 
-    def _trigger_search(self, page: Any) -> None:
+    async def _trigger_search(self, page: Any) -> None:
         """Click '搜索' to apply filters if present."""
         try:
             # Prefer class hook used by Miaoshou page
             btn = page.locator("button.J_queryFormSearch").first
             if btn and btn.count() >= 0:
-                btn.click(timeout=1500)
+                await btn.click(timeout=1500)
                 return
         except Exception:
             pass
         try:
-            page.get_by_role('button', name='搜索').first.click(timeout=2000)
+            await page.get_by_role('button', name='搜索').first.click(timeout=2000)
         except Exception:
             pass
 
-    def _get_range_values(self, page: Any) -> tuple[str | None, str | None]:
+    async def _get_range_values(self, page: Any) -> tuple[str | None, str | None]:
         try:
             inputs = page.locator(".jx-date-editor--datetimerange input.jx-range-input")
             if inputs.count() < 2:
                 inputs = page.locator("input.jx-range-input")
             if inputs.count() < 2:
                 return (None, None)
-            s = inputs.nth(0).input_value(timeout=800)
-            e = inputs.nth(1).input_value(timeout=800)
+            s = await inputs.nth(0).input_value(timeout=800)
+            e = await inputs.nth(1).input_value(timeout=800)
             return (s, e)
         except Exception:
             return (None, None)
 
-    def _ensure_date_range_from_config(self, page: Any) -> None:
+    async def _ensure_date_range_from_config(self, page: Any) -> None:
         """If ctx.config has start_date/end_date, type them into the range inputs.
         Only type when current inputs differ, to avoid重复设置时间。
         """
@@ -561,7 +561,7 @@ class MiaoshouExporterComponent(ExportComponent):
             e = str(cfg.get("end_date") or "").strip()
             if not (s and e):
                 return
-            cur_s, cur_e = self._get_range_values(page)
+            cur_s, cur_e = await self._get_range_values(page)
             if cur_s == s and cur_e == e:
                 try:
                     print("[MiaoshouExporter] 检测到时间区间已正确,跳过重复设置")
@@ -575,30 +575,30 @@ class MiaoshouExporterComponent(ExportComponent):
                 return
             # start
             st = inputs.nth(0)
-            st.click(timeout=1500)
-            try: st.press("Control+A")
+            await st.click(timeout=1500)
+            try: await st.press("Control+A")
             except Exception: pass
-            st.fill(s, timeout=1500)
-            try: st.press("Enter")
+            await st.fill(s, timeout=1500)
+            try: await st.press("Enter")
             except Exception: pass
-            try: page.wait_for_timeout(100)
+            try: await page.wait_for_timeout(100)
             except Exception: pass
             # end
             ed = inputs.nth(1)
-            ed.click(timeout=1500)
-            try: ed.press("Control+A")
+            await ed.click(timeout=1500)
+            try: await ed.press("Control+A")
             except Exception: pass
-            ed.fill(e, timeout=1500)
-            try: ed.press("Enter")
+            await ed.fill(e, timeout=1500)
+            try: await ed.press("Enter")
             except Exception: pass
             try:
-                page.keyboard.press("Escape")
+                await page.keyboard.press("Escape")
             except Exception:
                 pass
         except Exception:
             pass
 
-    def _export_via_dropdown(self, page: Any) -> Any | None:
+    async def _export_via_dropdown(self, page: Any) -> Any | None:
         """Open '导出数据' dropdown and click '导出全部订单'. Return Download or None.
         Handles both hover-to-open and click-to-open behaviors.
         """
@@ -622,7 +622,7 @@ class MiaoshouExporterComponent(ExportComponent):
             if not btn:
                 return None
             try:
-                btn.hover(timeout=1200)
+                await btn.hover(timeout=1200)
                 try:
                     print("[MiaoshouExporter] 已悬停‘导出数据’,等待下拉菜单...")
                 except Exception:
@@ -631,12 +631,12 @@ class MiaoshouExporterComponent(ExportComponent):
                 pass
             # Use aria-expanded/aria-controls to detect menu open state and scope
             try:
-                ctrl_id = (btn.get_attribute("aria-controls") or "").strip()
+                ctrl_id = ((await btn.get_attribute("aria-controls")) or "").strip()
             except Exception:
                 ctrl_id = ""
             expanded = None
             try:
-                expanded = (btn.get_attribute("aria-expanded") or "").strip().lower()
+                expanded = ((await btn.get_attribute("aria-expanded")) or "").strip().lower()
             except Exception:
                 expanded = None
             # Ensure dropdown is opened
@@ -644,19 +644,19 @@ class MiaoshouExporterComponent(ExportComponent):
                 if expanded == "true":
                     break
                 try:
-                    btn.hover(timeout=800)
+                    await btn.hover(timeout=800)
                 except Exception:
                     pass
                 try:
-                    btn.click(timeout=1500)
+                    await btn.click(timeout=1500)
                 except Exception:
                     pass
                 try:
-                    page.wait_for_timeout(120)
+                    await page.wait_for_timeout(120)
                 except Exception:
                     pass
                 try:
-                    expanded = (btn.get_attribute("aria-expanded") or "").strip().lower()
+                    expanded = ((await btn.get_attribute("aria-expanded")) or "").strip().lower()
                 except Exception:
                     expanded = None
             # Build scopes, prioritizing aria-controls target if present
@@ -686,63 +686,67 @@ class MiaoshouExporterComponent(ExportComponent):
                                     pass
                                 # 保持菜单容器处于 hover,防止项被收起
                                 try:
-                                    sc.hover(timeout=800)
+                                    await sc.hover(timeout=800)
                                 except Exception:
                                     pass
                                 try:
-                                   item_by_class.scroll_into_view_if_needed(timeout=1200)
+                                   await item_by_class.scroll_into_view_if_needed(timeout=1200)
                                 except Exception:
                                    pass
                                 try:
-                                   item_by_class.hover(timeout=1200)
+                                   await item_by_class.hover(timeout=1200)
                                 except Exception:
                                    pass
                                 try:
-                                   item_by_class.wait_for(state="visible", timeout=2000)
+                                   await item_by_class.wait_for(state="visible", timeout=2000)
                                 except Exception:
                                    pass
                                 try:
-                                   item_by_class.focus()
+                                   await item_by_class.focus()
                                 except Exception:
                                    pass
                                 # Early monitor to avoid missing instant downloads
                                 try:
                                     with page.context.expect_download(timeout=12000) as dl_early:
-                                        item_by_class.click(timeout=2500, force=True)
+                                        await item_by_class.click(timeout=2500, force=True)
                                     return dl_early.value
                                 except Exception:
                                     pass
                                 # 多策略点击(用于弹出确认框的场景)
                                 tried = False
                                 try:
-                                    item_by_class.click(timeout=2500, force=True)
+                                    await item_by_class.click(timeout=2500, force=True)
                                     tried = True
                                 except Exception:
                                     pass
                                 if not tried:
                                     try:
-                                        item_by_class.focus(); page.keyboard.press("Enter")
+                                        await item_by_class.focus()
+                                        await page.keyboard.press("Enter")
                                         tried = True
                                     except Exception:
                                         pass
                                 if not tried:
                                     try:
-                                        item_by_class.dispatch_event("click")
+                                        await item_by_class.dispatch_event("click")
                                         tried = True
                                     except Exception:
                                         pass
                                 if not tried:
                                     try:
-                                        page.evaluate("el => el.click()", item_by_class)
+                                        h = await item_by_class.element_handle()
+                                        if h:
+                                            await page.evaluate("el => el.click()", h)
                                         tried = True
                                     except Exception:
                                         pass
                                 if not tried:
                                     try:
-                                        box = item_by_class.bounding_box()
+                                        box = await item_by_class.bounding_box()
                                         if box:
-                                            page.mouse.move(box["x"] + box["width"]/2, box["y"] + box["height"]/2)
-                                            page.mouse.down(); page.mouse.up()
+                                            await page.mouse.move(box["x"] + box["width"]/2, box["y"] + box["height"]/2)
+                                            await page.mouse.down()
+                                            await page.mouse.up()
                                             tried = True
                                     except Exception:
                                         pass
@@ -753,7 +757,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                         for _name in ['导出', '确定', '开始导出']:
                                             try:
                                                 with page.context.expect_download(timeout=120000) as dl2:
-                                                    footer.get_by_role('button', name=_name).first.click(timeout=1800)
+                                                    await footer.get_by_role('button', name=_name).first.click(timeout=1800)
                                                 return dl2.value
                                             except Exception:
                                                 continue
@@ -761,7 +765,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                     pass
                                 # Or direct download without dialog (short wait)
                                 try:
-                                    return page.context.wait_for_event('download', timeout=5000)
+                                    return await page.context.wait_for_event('download', timeout=5000)
                                 except Exception:
                                     pass
                                 return None
@@ -777,62 +781,66 @@ class MiaoshouExporterComponent(ExportComponent):
                                     pass
                                 #  hover 
                                 try:
-                                    sc.hover(timeout=800)
+                                    await sc.hover(timeout=800)
                                 except Exception:
                                     pass
                                 try:
-                                    item_by_role.scroll_into_view_if_needed(timeout=1200)
+                                    await item_by_role.scroll_into_view_if_needed(timeout=1200)
                                 except Exception:
                                     pass
                                 try:
-                                    item_by_role.hover(timeout=1200)
+                                    await item_by_role.hover(timeout=1200)
                                 except Exception:
                                     pass
                                 try:
-                                    item_by_role.wait_for(state='visible', timeout=2000)
+                                    await item_by_role.wait_for(state='visible', timeout=2000)
                                 except Exception:
                                     pass
                                 try:
-                                    item_by_role.focus()
+                                    await item_by_role.focus()
                                 except Exception:
                                     pass
                                 # Early monitor to avoid missing instant downloads
                                 try:
                                     with page.context.expect_download(timeout=12000) as dl_early:
-                                        item_by_role.click(timeout=2500, force=True)
+                                        await item_by_role.click(timeout=2500, force=True)
                                     return dl_early.value
                                 except Exception:
                                     pass
                                 tried = False
                                 try:
-                                    item_by_role.click(timeout=2500, force=True)
+                                    await item_by_role.click(timeout=2500, force=True)
                                     tried = True
                                 except Exception:
                                     pass
                                 if not tried:
                                     try:
-                                        item_by_role.focus(); page.keyboard.press("Enter")
+                                        await item_by_role.focus()
+                                        await page.keyboard.press("Enter")
                                         tried = True
                                     except Exception:
                                         pass
                                 if not tried:
                                     try:
-                                        item_by_role.dispatch_event("click")
+                                        await item_by_role.dispatch_event("click")
                                         tried = True
                                     except Exception:
                                         pass
                                 if not tried:
                                     try:
-                                        page.evaluate("el => el.click()", item_by_role)
+                                        h = await item_by_role.element_handle()
+                                        if h:
+                                            await page.evaluate("el => el.click()", h)
                                         tried = True
                                     except Exception:
                                         pass
                                 if not tried:
                                     try:
-                                        box = item_by_role.bounding_box()
+                                        box = await item_by_role.bounding_box()
                                         if box:
-                                            page.mouse.move(box["x"] + box["width"]/2, box["y"] + box["height"]/2)
-                                            page.mouse.down(); page.mouse.up()
+                                            await page.mouse.move(box["x"] + box["width"]/2, box["y"] + box["height"]/2)
+                                            await page.mouse.down()
+                                            await page.mouse.up()
                                             tried = True
                                     except Exception:
                                         pass
@@ -843,7 +851,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                         for btn_name in ['导出', '确定', '开始导出']:
                                             try:
                                                 with page.context.expect_download(timeout=120000) as dl2:
-                                                    footer.get_by_role('button', name=btn_name).first.click(timeout=1800)
+                                                    await footer.get_by_role('button', name=btn_name).first.click(timeout=1800)
                                                 return dl2.value
                                             except Exception:
                                                 continue
@@ -851,7 +859,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                     pass
                                 # Fallback: short wait for direct download
                                 try:
-                                    return page.context.wait_for_event('download', timeout=5000)
+                                    return await page.context.wait_for_event('download', timeout=5000)
                                 except Exception:
                                     pass
                                 return None
@@ -861,68 +869,72 @@ class MiaoshouExporterComponent(ExportComponent):
                         for text in ["导出全部订单", "导出全部数据", "导出全部"]:
                             try:
                                 dd_item = sc.get_by_text(text, exact=False).first
-                                if dd_item and dd_item.is_visible():
+                                if dd_item and await dd_item.is_visible():
                                     try:
                                         print("[MiaoshouExporter] 点击‘导出全部订单/数据’...")
                                     except Exception:
                                         pass
                                     try:
-                                        sc.hover(timeout=800)
+                                        await sc.hover(timeout=800)
                                     except Exception:
                                         pass
                                     try:
-                                        dd_item.scroll_into_view_if_needed(timeout=1200)
+                                        await dd_item.scroll_into_view_if_needed(timeout=1200)
                                     except Exception:
                                         pass
                                     try:
-                                        dd_item.hover(timeout=1200)
+                                        await dd_item.hover(timeout=1200)
                                     except Exception:
                                         pass
                                     try:
-                                        dd_item.wait_for(state="visible", timeout=2000)
+                                        await dd_item.wait_for(state="visible", timeout=2000)
                                     except Exception:
                                         pass
                                     try:
-                                        dd_item.focus()
+                                        await dd_item.focus()
                                     except Exception:
                                         pass
                                     # Early monitor to catch immediate download
                                     try:
                                         with page.context.expect_download(timeout=12000) as dl_early:
-                                            dd_item.click(timeout=2500, force=True)
+                                            await dd_item.click(timeout=2500, force=True)
                                         return dl_early.value
                                     except Exception:
                                         pass
                                     tried = False
                                     try:
-                                        dd_item.click(timeout=2500, force=True)
+                                        await dd_item.click(timeout=2500, force=True)
                                         tried = True
                                     except Exception:
                                         pass
                                     if not tried:
                                         try:
-                                            dd_item.focus(); page.keyboard.press("Enter")
+                                            await dd_item.focus()
+                                            await page.keyboard.press("Enter")
                                             tried = True
                                         except Exception:
                                             pass
                                     if not tried:
                                         try:
-                                            dd_item.dispatch_event("click")
+                                            await dd_item.dispatch_event("click")
                                             tried = True
                                         except Exception:
                                             pass
                                     if not tried:
                                         try:
-                                            page.evaluate("el => el.click()", dd_item)
+                                            h = await dd_item.element_handle()
+                                            if h:
+                                                await page.evaluate("el => el.click()", h)
                                             tried = True
                                         except Exception:
                                             pass
                                     if not tried:
                                         try:
-                                            box = dd_item.bounding_box()
+                                            box = await dd_item.bounding_box()
                                             if box:
-                                                page.mouse.move(box["x"] + box["width"]/2, box["y"] + box["height"]/2)
-                                                page.mouse.down(); page.mouse.up()
+                                                await page.mouse.move(box["x"] + box["width"]/2, box["y"] + box["height"]/2)
+                                                await page.mouse.down()
+                                                await page.mouse.up()
                                                 tried = True
                                         except Exception:
                                             pass
@@ -933,7 +945,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                             for btn_name in ['导出', '确定', '开始导出']:
                                                 try:
                                                     with page.context.expect_download(timeout=120000) as dl2:
-                                                        footer.get_by_role('button', name=btn_name).first.click(timeout=1800)
+                                                        await footer.get_by_role('button', name=btn_name).first.click(timeout=1800)
                                                     return dl2.value
                                                 except Exception:
                                                     continue
@@ -941,7 +953,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                         pass
                                     # Or direct download without dialog (short wait)
                                     try:
-                                        return page.context.wait_for_event('download', timeout=5000)
+                                        return await page.context.wait_for_event('download', timeout=5000)
                                     except Exception:
                                         pass
                                     return None
@@ -965,28 +977,30 @@ class MiaoshouExporterComponent(ExportComponent):
                     menu = page.locator("ul.jx-dropdown-menu[role='menu']").last
                 if menu and menu.count() >= 1:
                     try:
-                        menu.scroll_into_view_if_needed(timeout=800)
+                        await menu.scroll_into_view_if_needed(timeout=800)
                     except Exception:
                         pass
                     try:
-                        menu.hover(timeout=800)
+                        await menu.hover(timeout=800)
                     except Exception:
                         pass
                     try:
-                        menu.focus()
+                        await menu.focus()
                     except Exception:
                         try:
-                            page.evaluate("el => el.focus()", menu)
+                            mh = await menu.element_handle()
+                            if mh:
+                                await page.evaluate("el => el.focus()", mh)
                         except Exception:
                             pass
                     try:
-                        page.keyboard.press("ArrowDown")
-                        page.keyboard.press("ArrowDown")
-                        page.keyboard.press("Enter")
+                        await page.keyboard.press("ArrowDown")
+                        await page.keyboard.press("ArrowDown")
+                        await page.keyboard.press("Enter")
                     except Exception:
                         pass
                     try:
-                        dl_kb = page.wait_for_event("download", timeout=8000)
+                        dl_kb = await page.wait_for_event("download", timeout=8000)
                         return dl_kb
                     except Exception:
                         pass
@@ -995,7 +1009,7 @@ class MiaoshouExporterComponent(ExportComponent):
             # Fallback: click to open then click the item
             with page.context.expect_download(timeout=60000) as dl_info2:
                 try:
-                    btn.click(timeout=1500)
+                    await btn.click(timeout=1500)
                     try:
                         print("[MiaoshouExporter] 已点击‘导出数据’,展开下拉...")
                     except Exception:
@@ -1003,7 +1017,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 except Exception:
                     pass
                 try:
-                    page.wait_for_timeout(150)
+                    await page.wait_for_timeout(150)
                 except Exception:
                     pass
                 # Try by text in visible menus/scopes
@@ -1024,36 +1038,39 @@ class MiaoshouExporterComponent(ExportComponent):
                         # 优先按 class 精确命中(你提供的 DOM)
                         item_by_class = sc.locator("li.J_purchaseBillExportAllOrderBill.jx-dropdown-menu__item[role='menuitem'][aria-disabled='false']").first
                         if item_by_class and item_by_class.count() >= 1:
-                            try: item_by_class.scroll_into_view_if_needed(timeout=1200)
+                            try: await item_by_class.scroll_into_view_if_needed(timeout=1200)
                             except Exception: pass
-                            try: item_by_class.hover(timeout=1200)
+                            try: await item_by_class.hover(timeout=1200)
                             except Exception: pass
-                            try: item_by_class.wait_for(state="visible", timeout=2000)
+                            try: await item_by_class.wait_for(state="visible", timeout=2000)
                             except Exception: pass
                             tried=False
                             try:
-                                item_by_class.click(timeout=2500, force=True)
+                                await item_by_class.click(timeout=2500, force=True)
                                 tried=True
                             except Exception:
                                 pass
                             if not tried:
                                 try:
-                                    item_by_class.dispatch_event("click")
+                                    await item_by_class.dispatch_event("click")
                                     tried=True
                                 except Exception:
                                     pass
                             if not tried:
                                 try:
-                                    page.evaluate("el => el.click()", item_by_class)
+                                    h = await item_by_class.element_handle()
+                                    if h:
+                                        await page.evaluate("el => el.click()", h)
                                     tried=True
                                 except Exception:
                                     pass
                             if not tried:
                                 try:
-                                    box=item_by_class.bounding_box()
+                                    box = await item_by_class.bounding_box()
                                     if box:
-                                        page.mouse.move(box["x"]+box["width"]/2, box["y"]+box["height"]/2)
-                                        page.mouse.down(); page.mouse.up()
+                                        await page.mouse.move(box["x"]+box["width"]/2, box["y"]+box["height"]/2)
+                                        await page.mouse.down()
+                                        await page.mouse.up()
                                         tried=True
                                 except Exception:
                                     pass
@@ -1062,41 +1079,44 @@ class MiaoshouExporterComponent(ExportComponent):
                         # 文本匹配兜底
                         item = sc.get_by_text("导出全部订单", exact=False).first
                         try:
-                            item.scroll_into_view_if_needed(timeout=1200)
+                            await item.scroll_into_view_if_needed(timeout=1200)
                         except Exception:
                             pass
                         try:
-                            item.hover(timeout=1200)
+                            await item.hover(timeout=1200)
                         except Exception:
                             pass
                         try:
-                            item.wait_for(state="visible", timeout=2000)
+                            await item.wait_for(state="visible", timeout=2000)
                         except Exception:
                             pass
                         tried=False
                         try:
-                            item.click(timeout=2500, force=True)
+                            await item.click(timeout=2500, force=True)
                             tried=True
                         except Exception:
                             pass
                         if not tried:
                             try:
-                                item.dispatch_event("click")
+                                await item.dispatch_event("click")
                                 tried=True
                             except Exception:
                                 pass
                         if not tried:
                             try:
-                                page.evaluate("el => el.click()", item)
+                                h = await item.element_handle()
+                                if h:
+                                    await page.evaluate("el => el.click()", h)
                                 tried=True
                             except Exception:
                                 pass
                         if not tried:
                             try:
-                                box=item.bounding_box()
+                                box = await item.bounding_box()
                                 if box:
-                                    page.mouse.move(box["x"]+box["width"]/2, box["y"]+box["height"]/2)
-                                    page.mouse.down(); page.mouse.up()
+                                    await page.mouse.move(box["x"]+box["width"]/2, box["y"]+box["height"]/2)
+                                    await page.mouse.down()
+                                    await page.mouse.up()
                                     tried=True
                             except Exception:
                                 pass
@@ -1106,14 +1126,14 @@ class MiaoshouExporterComponent(ExportComponent):
                         try:
                             item2 = sc.get_by_text("导出全部", exact=False).first
                             try:
-                                item2.scroll_into_view_if_needed(timeout=1200)
+                                await item2.scroll_into_view_if_needed(timeout=1200)
                             except Exception:
                                 pass
                             try:
-                                item2.wait_for(state="visible", timeout=2000)
+                                await item2.wait_for(state="visible", timeout=2000)
                             except Exception:
                                 pass
-                            item2.click(timeout=2500, force=True)
+                            await item2.click(timeout=2500, force=True)
                             clicked = True
                             break
                         except Exception:
@@ -1124,7 +1144,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         try:
                             items = sc.locator("li, .jx-dropdown-item, .menu-item, .arco-dropdown-item").all()
                             if len(items) >= 2:
-                                items[1].click(timeout=2500)
+                                await items[1].click(timeout=2500)
                                 clicked = True
                                 break
                         except Exception:
@@ -1135,7 +1155,7 @@ class MiaoshouExporterComponent(ExportComponent):
 
 
 
-    def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
+    async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
             selectors = WarehouseSelectors()
             current_url = str(getattr(page, "url", ""))
@@ -1170,7 +1190,7 @@ class MiaoshouExporterComponent(ExportComponent):
                     self.logger.info("[MiaoshouExporter] 步骤1: 观察并关闭通知弹窗...")
             except Exception:
                 pass
-            self._close_popups(page)
+            await self._close_popups(page)
             try:
                 print("[MiaoshouExporter] 步骤1完成")
             except Exception:
@@ -1191,9 +1211,9 @@ class MiaoshouExporterComponent(ExportComponent):
                     cfg = self.ctx.config or {}
                     if str(cfg.get("data_domain") or "").lower() == "products":
                         try:
-                            page.get_by_role('button', name='重置').first.click(timeout=1000)
+                            await page.get_by_role('button', name='重置').first.click(timeout=1000)
                             try:
-                                page.wait_for_timeout(120)
+                                await page.wait_for_timeout(120)
                             except Exception:
                                 pass
                         except Exception:
@@ -1205,18 +1225,18 @@ class MiaoshouExporterComponent(ExportComponent):
                                     for i in (0, 1):
                                         box = inputs.nth(i)
                                         try:
-                                            box.click(timeout=800)
+                                            await box.click(timeout=800)
                                             try:
-                                                box.press("Control+A")
+                                                await box.press("Control+A")
                                             except Exception:
                                                 pass
-                                            box.fill("", timeout=800)
+                                            await box.fill("", timeout=800)
                                             try:
-                                                box.press("Enter")
+                                                await box.press("Enter")
                                             except Exception:
                                                 pass
                                             try:
-                                                page.wait_for_timeout(60)
+                                                await page.wait_for_timeout(60)
                                             except Exception:
                                                 pass
                                         except Exception:
@@ -1227,13 +1247,13 @@ class MiaoshouExporterComponent(ExportComponent):
                     pass
 
                 # Open export menu then choose "导出搜索的商品"
-                if not self._first_click(page, list(selectors.open_export_menu), timeout=7000):
+                if not await self._first_click(page, list(selectors.open_export_menu), timeout=7000):
                     return ExportResult(success=False, message="open export menu failed")
                 try:
                     print("[MiaoshouExporter] 已点击‘导入/导出商品’,准备选择‘导出搜索的商品’...")
                 except Exception:
                     pass
-                ok_menu = self._first_click(page, list(selectors.menu_export_searched), timeout=6000)
+                ok_menu = await self._first_click(page, list(selectors.menu_export_searched), timeout=6000)
                 if not ok_menu:
                     return ExportResult(success=False, message="menu item '导出搜索的商品' not found")
                 try:
@@ -1245,7 +1265,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 dlg = None
                 try:
                     dlg = page.locator('.jx-dialog__body').last
-                    dlg.wait_for(timeout=4000)
+                    await dlg.wait_for(timeout=4000)
                 except Exception:
                     dlg = None
                 fr = None
@@ -1253,7 +1273,7 @@ class MiaoshouExporterComponent(ExportComponent):
                     for css in list(selectors.iframe_locators):
                         try:
                             fr = page.frame_locator(css).first
-                            fr.locator('body').first.wait_for(timeout=2500)
+                            await fr.locator('body').first.wait_for(timeout=2500)
                             break
                         except Exception:
                             fr = None
@@ -1269,14 +1289,14 @@ class MiaoshouExporterComponent(ExportComponent):
                         # A. 就近checkbox by class
                         toggle = scope.locator('.jx-checkbox__input').first
                         if toggle.count() > 0:
-                            cls = (toggle.get_attribute('class') or '')
+                            cls = (await toggle.get_attribute('class')) or ''
                             if 'is-checked' not in cls:
-                                scope.locator('.jx-checkbox__inner').first.click(timeout=3000)
+                                await scope.locator('.jx-checkbox__inner').first.click(timeout=3000)
                                 try:
-                                    page.wait_for_timeout(120)
+                                    await page.wait_for_timeout(120)
                                 except Exception:
                                     pass
-                                cls = (toggle.get_attribute('class') or '')
+                                cls = (await toggle.get_attribute('class')) or ''
                             if 'is-checked' in cls:
                                 group_marked += 1
                                 continue
@@ -1284,14 +1304,14 @@ class MiaoshouExporterComponent(ExportComponent):
                         container = header.locator('..').locator('..')
                         label = container.locator('label.pro-checkbox-group-all-select').first
                         if label.count() > 0:
-                            lcls = (label.get_attribute('class') or '')
+                            lcls = (await label.get_attribute('class')) or ''
                             if 'is-checked' not in lcls:
-                                label.locator('.jx-checkbox__inner').first.click(timeout=3000)
+                                await label.locator('.jx-checkbox__inner').first.click(timeout=3000)
                                 try:
-                                    page.wait_for_timeout(120)
+                                    await page.wait_for_timeout(120)
                                 except Exception:
                                     pass
-                                lcls = (label.get_attribute('class') or '')
+                                lcls = (await label.get_attribute('class')) or ''
                             if 'is-checked' in lcls:
                                 group_marked += 1
                                 continue
@@ -1301,17 +1321,17 @@ class MiaoshouExporterComponent(ExportComponent):
                             box = el.locator('..').locator('.jx-checkbox__input').first
                             ok = False
                             if box.count() > 0:
-                                bcls = (box.get_attribute('class') or '')
+                                bcls = (await box.get_attribute('class')) or ''
                                 if 'is-checked' not in bcls:
-                                    el.click(timeout=2000)
+                                    await el.click(timeout=2000)
                                     try:
-                                        page.wait_for_timeout(80)
+                                        await page.wait_for_timeout(80)
                                     except Exception:
                                         pass
-                                    bcls = (box.get_attribute('class') or '')
+                                    bcls = (await box.get_attribute('class')) or ''
                                 ok = ('is-checked' in bcls)
                             else:
-                                el.click(timeout=2000)
+                                await el.click(timeout=2000)
                                 ok = True
                             if ok:
                                 group_marked += 1
@@ -1322,13 +1342,13 @@ class MiaoshouExporterComponent(ExportComponent):
                 # CSS fallbacks (dialog-first)
                 if group_marked < 2:
                     try:
-                        (query_root or page).locator('.jx-checkbox__input.is-indeterminate > .jx-checkbox__inner').first.click(timeout=1500)
+                        await (query_root or page).locator('.jx-checkbox__input.is-indeterminate > .jx-checkbox__inner').first.click(timeout=1500)
                         group_marked += 1
                     except Exception:
                         pass
                 if group_marked < 2:
                     try:
-                        (query_root or page).locator('div:nth-child(2) > .pro-checkbox-group > .pro-checkbox-group-header > .jx-checkbox > .jx-checkbox__input > .jx-checkbox__inner').first.click(timeout=1500)
+                        await (query_root or page).locator('div:nth-child(2) > .pro-checkbox-group > .pro-checkbox-group-header > .jx-checkbox > .jx-checkbox__input > .jx-checkbox__inner').first.click(timeout=1500)
                         group_marked += 1
                     except Exception:
                         pass
@@ -1351,7 +1371,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         try:
                             footer = page.locator('.jx-dialog__footer').last
                             if footer and footer.count() >= 0:
-                                footer.get_by_role('button', name='导出').first.click(timeout=1500)
+                                await footer.get_by_role('button', name='导出').first.click(timeout=1500)
                         except Exception:
                             pass
                     download = dl_early.value
@@ -1370,7 +1390,7 @@ class MiaoshouExporterComponent(ExportComponent):
                     footer = page.locator('.jx-dialog__footer').last
                     if footer and footer.count() > 0:
                         try:
-                            footer.wait_for(timeout=2000)
+                            await footer.wait_for(timeout=2000)
                         except Exception:
                             pass
                         # a) role-based within footer
@@ -1378,10 +1398,10 @@ class MiaoshouExporterComponent(ExportComponent):
                             fbtn = footer.get_by_role('button', name='导出').first
                             if fbtn and fbtn.count() >= 0:
                                 try:
-                                    fbtn.scroll_into_view_if_needed(timeout=800)
+                                    await fbtn.scroll_into_view_if_needed(timeout=800)
                                 except Exception:
                                     pass
-                                fbtn.click(timeout=4000)
+                                await fbtn.click(timeout=4000)
                                 clicked = True
                                 print("[MiaoshouExporter] 已点击导出按钮(footer role=button)")
                         except Exception:
@@ -1392,10 +1412,10 @@ class MiaoshouExporterComponent(ExportComponent):
                                 fbtn2 = footer.locator('button.jx-button--primary').filter(has_text='导出').first
                                 if fbtn2 and fbtn2.count() >= 0:
                                     try:
-                                        fbtn2.scroll_into_view_if_needed(timeout=800)
+                                        await fbtn2.scroll_into_view_if_needed(timeout=800)
                                     except Exception:
                                         pass
-                                    fbtn2.click(timeout=4000)
+                                    await fbtn2.click(timeout=4000)
                                     clicked = True
                                     print("[MiaoshouExporter] 已点击导出按钮(footer .jx-button--primary)")
                             except Exception:
@@ -1405,7 +1425,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             try:
                                 fspan = footer.locator('button:has-text(导出) span').first
                                 if fspan and fspan.count() >= 0:
-                                    fspan.click(timeout=4000)
+                                    await fspan.click(timeout=4000)
                                     clicked = True
                                     print("[MiaoshouExporter] 已点击导出按钮(footer span)")
                             except Exception:
@@ -1426,10 +1446,10 @@ class MiaoshouExporterComponent(ExportComponent):
                             loc = root.locator(btn).first
                             if loc.count() >= 0:
                                 try:
-                                    loc.scroll_into_view_if_needed(timeout=800)
+                                    await loc.scroll_into_view_if_needed(timeout=800)
                                 except Exception:
                                     pass
-                            loc.click(timeout=4000)
+                            await loc.click(timeout=4000)
                             clicked = True
                             try:
                                 print(f"[MiaoshouExporter] 已点击导出按钮(selector={btn})")
@@ -1442,7 +1462,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         break
                 if not clicked:
                     try:
-                        page.get_by_role('button', name='导出').first.click(timeout=4000)
+                        await page.get_by_role('button', name='导出').first.click(timeout=4000)
                         clicked = True
                         print("[MiaoshouExporter] 已点击导出按钮(role=button, name=导出)")
                     except Exception:
@@ -1467,7 +1487,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         try:
                             candidate_url = net_candidates[-1]
                             with page.context.expect_download(timeout=60000) as dl_info2:
-                                page.evaluate(
+                                await page.evaluate(
                                     "(url)=>{ fetch(url, {credentials:'include'})"
                                     ".then(r=>r.blob()).then(b=>{ const u=URL.createObjectURL(b);"
                                     " const a=document.createElement('a'); a.href=u; a.download='export.xlsx';"
@@ -1484,7 +1504,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             try:
                                 footer = page.locator('.jx-dialog__footer').last
                                 if footer and footer.count() >= 0:
-                                    footer.get_by_role('button', name='导出').first.click(timeout=1000)
+                                    await footer.get_by_role('button', name='导出').first.click(timeout=1000)
                             except Exception:
                                 pass
                         download = dl_info.value
@@ -1495,32 +1515,32 @@ class MiaoshouExporterComponent(ExportComponent):
                         except Exception:
                             texts = ['正在导出', '生成中', 'Processing', 'Generating']
                         try:
-                            dl = self._wait_download_with_progress(page, texts, total_ms=600000, interval_ms=3000)
+                            dl = await self._wait_download_with_progress(page, texts, total_ms=600000, interval_ms=3000)
                             download = dl
                         except Exception:
                             downloaded_file = self._scan_latest_download(start_ts, max_age_sec=900, suffixes=None)
             else:
                 # Generic export flow (non-warehouse pages)
                 # 再次尝试关闭弹窗,确保按钮可点击
-                self._close_popups(page)
+                await self._close_popups(page)
                 # Ensure '订单状态' is set to 全选, and apply filters
                 try:
-                    self._ensure_order_status_all(page)
+                    await self._ensure_order_status_all(page)
                     try:
                         print("[MiaoshouExporter] 步骤2: 设置筛选-订单状态=全选")
                     except Exception:
                         pass
                     # 再设置时间区间(使用先前写入 ctx.config 的 start/end)
-                    self._ensure_date_range_from_config(page)
+                    await self._ensure_date_range_from_config(page)
                     try:
                         print("[MiaoshouExporter] 步骤3: 点击‘搜索’应用筛选(已设置时间区间)...")
                     except Exception:
                         pass
-                    self._trigger_search(page)
+                    await self._trigger_search(page)
                 except Exception:
                     pass
                 try:
-                    page.wait_for_timeout(400)
+                    await page.wait_for_timeout(400)
                 except Exception:
                     pass
 
@@ -1609,7 +1629,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 print(f"[MiaoshouExporter] 导出下拉点击重试,第{attempt}次...")
                             except Exception:
                                 pass
-                        dl0 = self._export_via_dropdown(page)
+                        dl0 = await self._export_via_dropdown(page)
                         # 再次检查:如果函数未返回但全局监听已捕获,仍然视为成功并停止
                         try:
                             if dl0 is None and _latest_download.get("dl") is not None:
@@ -1633,7 +1653,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 try:
                                     for _t in _texts:
                                         el = page.get_by_text(_t, exact=False).first
-                                        if el and el.is_visible():
+                                        if el and await el.is_visible():
                                             found_progress = True
                                             triggered_processing = True
                                             try:
@@ -1646,7 +1666,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 if found_progress:
                                     break
                                 try:
-                                    page.wait_for_timeout(500)
+                                    await page.wait_for_timeout(500)
                                 except Exception:
                                     pass
                         except Exception:
@@ -1660,7 +1680,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             ]
                             for sel in overlay_selectors:
                                 loc = page.locator(sel)
-                                if loc and loc.count() >= 1 and loc.first.is_visible():
+                                if loc and loc.count() >= 1 and await loc.first.is_visible():
                                     triggered_processing = True
                                     break
                         except Exception:
@@ -1675,8 +1695,8 @@ class MiaoshouExporterComponent(ExportComponent):
                     # 仅在未检测到进度的情况下,关闭可能残留的下拉/遮挡后再试
                     if not triggered_processing:
                         try:
-                            page.keyboard.press("Escape")
-                            page.wait_for_timeout(150)
+                            await page.keyboard.press("Escape")
+                            await page.wait_for_timeout(150)
                         except Exception:
                             pass
 
@@ -1696,7 +1716,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             texts = list(getattr(_OS(), "progress_texts", []))
                         except Exception:
                             texts = ["导出成功,正在下载", "导出成功", "正在下载", "正在导出", "生成中", "处理中", "排队中", "Processing", "Generating"]
-                        dl_info = self._wait_download_with_progress(page, texts, total_ms=240000, interval_ms=3000)
+                        dl_info = await self._wait_download_with_progress(page, texts, total_ms=240000, interval_ms=3000)
                         download = dl_info
                     except Exception:
                         try:
@@ -1711,7 +1731,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             for btn_name in ['导出', '确定', '开始导出']:
                                 try:
                                     with page.context.expect_download(timeout=120000) as dl_conf:
-                                        footer.get_by_role('button', name=btn_name).first.click(timeout=1800)
+                                        await footer.get_by_role('button', name=btn_name).first.click(timeout=1800)
                                     download = dl_conf.value
                                     break
                                 except Exception:
@@ -1722,16 +1742,16 @@ class MiaoshouExporterComponent(ExportComponent):
                 if download is None:
                     try:
                         with page.context.expect_download(timeout=60000) as dl_info:
-                            if not self._first_click(page, export_buttons, timeout=7000):
+                            if not await self._first_click(page, export_buttons, timeout=7000):
                                 raise RuntimeError("export button not found")
 
                             try:
-                                page.wait_for_timeout(600)
+                                await page.wait_for_timeout(600)
                             except Exception:
                                 pass
                             # 可能弹出确认框,再次兜底关闭遮挡
-                            self._close_popups(page)
-                            self._first_click(page, confirm_buttons, timeout=3000)
+                            await self._close_popups(page)
+                            await self._first_click(page, confirm_buttons, timeout=3000)
                         download = dl_info.value
                     except Exception:
                         try:
@@ -1740,7 +1760,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         except Exception:
                             texts = ["导出成功,正在下载", "导出成功", "正在下载", "正在导出", "生成中", "处理中", "排队中", "Processing", "Generating"]
                         try:
-                            dl_info = self._wait_download_with_progress(page, texts, total_ms=600000, interval_ms=3000)
+                            dl_info = await self._wait_download_with_progress(page, texts, total_ms=600000, interval_ms=3000)
                             download = dl_info
                         except Exception:
                             downloaded_file = self._scan_latest_download(start_ts, max_age_sec=900, suffixes=None)
@@ -1749,7 +1769,7 @@ class MiaoshouExporterComponent(ExportComponent):
                     try:
                         candidate_url = net_candidates[-1]
                         with page.context.expect_download(timeout=60000) as dl_info2:
-                            page.evaluate(
+                            await page.evaluate(
                                 "(url)=>{ fetch(url, {credentials:'include'})"
                                 ".then(r=>r.blob()).then(b=>{ const u=URL.createObjectURL(b);"
                                 " const a=document.createElement('a'); a.href=u; a.download='export.xlsx';"
@@ -1838,7 +1858,7 @@ class MiaoshouExporterComponent(ExportComponent):
             else:
                 # Final grace wait for late download event before failing
                 try:
-                    dl_late = page.wait_for_event('download', timeout=45000)
+                    dl_late = await page.wait_for_event('download', timeout=45000)
                     download = dl_late
                     # Save as with regular download path
                     raw_name = (getattr(download, 'suggested_filename', None) or f"{data_type}.xlsx")

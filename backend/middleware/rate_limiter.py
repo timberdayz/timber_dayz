@@ -29,10 +29,16 @@ from functools import wraps
 from typing import Callable, Optional, Dict
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
+from pathlib import Path
+
 from modules.core.logger import get_logger
 from backend.utils.config import get_settings
 import os
 import time
+
+# 项目根目录 .env（backend/middleware -> backend -> 项目根）
+_project_root = Path(__file__).resolve().parent.parent.parent
+_default_env = _project_root / ".env"
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -80,16 +86,13 @@ def get_rate_limit_key(request: Request) -> str:
 
 
 # [*] v4.19.5 重构:使用 Redis 作为存储后端(生产环境标准做法)
-# 创建限流器
-# 注意:使用一个不存在的文件名避免自动读取.env文件(Windows GBK编码问题)
-# 配置通过环境变量或os.getenv()读取
-# 警告信息是正常的,不影响功能
+# 创建限流器；config_filename 指向项目根 .env，避免 Starlette 报 "file not found" 警告
 limiter = Limiter(
     key_func=get_rate_limit_key,  # [*] v4.19.2: 使用用户级限流键
     default_limits=["100/minute"],  # 默认限制:每分钟100次
     enabled=os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true",  # 可通过环境变量禁用
     storage_uri=settings.rate_limit_storage_uri,  # [*] v4.19.5: 使用环境感知的存储URI(Redis/内存)
-    config_filename="__nonexistent_config__.env"  # 使用不存在的文件名
+    config_filename=str(_default_env) if _default_env.exists() else ".env",
 )
 
 

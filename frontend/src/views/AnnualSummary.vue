@@ -323,38 +323,50 @@ async function loadData() {
   }
 }
 
+function unwrapList(res) {
+  if (Array.isArray(res)) return res
+  if (res && Array.isArray(res.data)) return res.data
+  return []
+}
+
+function unwrapTarget(res) {
+  const o = res?.data ?? res
+  return o && typeof o === 'object' ? o : {}
+}
+
 async function loadExtensionData() {
   if (!period.value) return
   loadingExtension.value = true
+  const params = { granularity: granularity.value, period: period.value }
+  const [byShopResult, trendResult, shareResult, targetResult] = await Promise.allSettled([
+    dashboardApi.queryAnnualSummaryByShop(params),
+    dashboardApi.queryAnnualSummaryTrend(params),
+    dashboardApi.queryAnnualSummaryPlatformShare(params),
+    dashboardApi.queryAnnualSummaryTargetCompletion(params),
+  ])
+  byShopList.value = byShopResult.status === 'fulfilled' ? unwrapList(byShopResult.value) : []
+  trendData.value = trendResult.status === 'fulfilled' ? unwrapList(trendResult.value) : []
+  platformShareData.value = shareResult.status === 'fulfilled' ? unwrapList(shareResult.value) : []
+  const tc = targetResult.status === 'fulfilled' ? unwrapTarget(targetResult.value) : {}
+  targetCompletion.value = {
+    target_gmv: tc.target_gmv ?? 0,
+    achieved_gmv: tc.achieved_gmv ?? null,
+    achievement_rate_gmv: tc.achievement_rate_gmv ?? null,
+    target_orders: tc.target_orders ?? 0,
+    target_profit: tc.target_profit ?? null,
+    achieved_profit: tc.achieved_profit ?? null,
+    achievement_rate_profit: tc.achievement_rate_profit ?? null,
+  }
+  if (trendResult.status === 'rejected') {
+    handleApiError(trendResult.reason, { showMessage: false, logError: true })
+  }
+  if (shareResult.status === 'rejected') {
+    handleApiError(shareResult.reason, { showMessage: false, logError: true })
+  }
   try {
-    const [byShopRes, trendRes, shareRes, targetRes] = await Promise.all([
-      dashboardApi.queryAnnualSummaryByShop({ granularity: granularity.value, period: period.value }),
-      dashboardApi.queryAnnualSummaryTrend({ granularity: granularity.value, period: period.value }),
-      dashboardApi.queryAnnualSummaryPlatformShare({ granularity: granularity.value, period: period.value }),
-      dashboardApi.queryAnnualSummaryTargetCompletion({ granularity: granularity.value, period: period.value }),
-    ])
-    // API 拦截器已返回 data 字段内容，直接为数组/对象
-    byShopList.value = Array.isArray(byShopRes) ? byShopRes : (Array.isArray(byShopRes?.data) ? byShopRes.data : [])
-    trendData.value = Array.isArray(trendRes) ? trendRes : (Array.isArray(trendRes?.data) ? trendRes.data : [])
-    platformShareData.value = Array.isArray(shareRes) ? shareRes : (Array.isArray(shareRes?.data) ? shareRes.data : [])
-    const tc = targetRes?.data ?? targetRes
-    targetCompletion.value = {
-      target_gmv: tc?.target_gmv ?? 0,
-      achieved_gmv: tc?.achieved_gmv ?? null,
-      achievement_rate_gmv: tc?.achievement_rate_gmv ?? null,
-      target_orders: tc?.target_orders ?? 0,
-      target_profit: tc?.target_profit ?? null,
-      achieved_profit: tc?.achieved_profit ?? null,
-      achievement_rate_profit: tc?.achievement_rate_profit ?? null,
-    }
     await nextTick()
     renderTrendChart()
     renderPlatformShareChart()
-  } catch (err) {
-    handleApiError(err, { showMessage: false, logError: true })
-    byShopList.value = []
-    trendData.value = []
-    platformShareData.value = []
   } finally {
     loadingExtension.value = false
   }

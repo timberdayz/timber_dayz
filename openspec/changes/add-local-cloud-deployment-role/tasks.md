@@ -2,19 +2,19 @@
 
 ## 1. 后端：按环境变量决定是否启动采集调度器
 
-- [ ] 1.1 在 `backend/main.py`（或采集调度器挂载处）读取 `ENABLE_COLLECTION` 或 `DEPLOYMENT_ROLE`；若为 false 或 cloud，则不创建、不启动 CollectionScheduler
-- [ ] 1.2 在 .env.example 或部署文档中说明 ENABLE_COLLECTION / DEPLOYMENT_ROLE 的取值与含义（本地=true/local，云端=false/cloud）
+- [x] 1.1 在 `backend/main.py`（或采集调度器挂载处）读取 `ENABLE_COLLECTION` 或 `DEPLOYMENT_ROLE`；若为 false 或 cloud，则不创建、不启动 CollectionScheduler
+- [x] 1.2 在 .env.example 或部署文档中说明 ENABLE_COLLECTION / DEPLOYMENT_ROLE 的取值与含义（本地=true/local，云端=false/cloud）
 
-## 2. Docker：构建参数控制 Playwright
+## 2. Docker：方案 A（沿用 Dockerfile.collection）
 
-- [ ] 2.1 在用于生产后端（及采集）的 Dockerfile 中增加 `ARG INSTALL_PLAYWRIGHT=false`
-- [ ] 2.2 仅在 INSTALL_PLAYWRIGHT=true 时执行 Playwright 及浏览器依赖安装（如 `pip install playwright`、`playwright install chromium`），否则跳过
-- [ ] 2.3 确认该 Dockerfile 为 CI 与本地构建实际使用的文件（Dockerfile.backend 或根 Dockerfile 的 target），并在文档中注明
+- [x] 2.1 确认现有 `Dockerfile.collection` 可用于作为「带 Playwright 的后端」镜像（与当前采集服务一致），无需修改 Dockerfile.backend 增加构建参数
+- [x] 2.2 新增 `docker-compose.collection-dev.yml`：覆盖 **backend** 服务，`build.dockerfile: Dockerfile.collection`，保持端口 8001；可选增加 `environment.ENABLE_COLLECTION: "true"`、`shm_size: "2gb"`
+- [x] 2.3 在文档中注明：本机采集开发使用 Dockerfile.collection 通过 collection-dev 覆盖接入，CI 双镜像时 full 镜像由 Dockerfile.collection 构建
 
-## 3. CI：双镜像构建与推送
+## 3. CI：双镜像构建与推送（方案 A）
 
-- [ ] 3.1 云端用镜像构建命令中显式传入 `--build-arg INSTALL_PLAYWRIGHT=false`（或确认默认即为 false），打主 tag（如 xihong-erp:${TAG}）并推送
-- [ ] 3.2 增加一次构建：`--build-arg INSTALL_PLAYWRIGHT=true`，打 -full tag（如 xihong-erp:${TAG}-full）并推送到同一镜像仓库
+- [ ] 3.1 默认镜像由 Dockerfile.backend 构建，打主 tag（如 xihong-erp:${TAG}）并推送，供云端使用
+- [ ] 3.2 增加一次构建：使用 **Dockerfile.collection** 构建，打 -full tag（如 xihong-erp:${TAG}-full）并推送到同一镜像仓库，供本地/服务器采集环境使用
 - [ ] 3.3 在 CI 或部署文档中说明：云端拉主 tag，本地采集环境拉 -full tag
 
 ## 4. 文档：部署与日常运作流程
@@ -28,3 +28,9 @@
 - [ ] 5.1 验收：云端使用默认镜像且 ENABLE_COLLECTION=false 时，采集调度器不启动，应用正常提供 API 与看板
 - [ ] 5.2 验收：本地使用 -full 镜像且 ENABLE_COLLECTION=true 时，采集调度器可正常启动并执行任务
 - [ ] 5.3 验收：CI 对同一 tag 产出两个镜像并推送，文档与流程可被他人按步骤执行
+
+## 6. 本机开发/测试：采集模式一键启动
+
+- [x] 6.1 在 run.py 中增加参数 `--collection`；当与 `--use-docker` 同时使用时，将 `docker-compose.collection-dev.yml` 加入 compose 文件列表（与 base、dev、metabase 等一并使用），使 backend 使用 Dockerfile.collection，保持单后端、端口 8001
+- [x] 6.2 提供 `docker-compose.collection-dev.yml`（见 2.2），在文档中说明「采集测试」时使用 `python run.py --use-docker --with-metabase --collection` 或等价 compose 组合启动
+- [x] 6.3 在 docs/deployment/ 及 run.py 帮助中说明：开发环境下采集测试使用 **`python run.py --use-docker --with-metabase --collection`** 启动项目，与正式采集环境一致、仅一个后端

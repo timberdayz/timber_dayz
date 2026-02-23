@@ -1,5 +1,6 @@
 -- ====================================================
 -- Orders Model - 订单数据域模型（CTE分层架构）
+-- 版本: 20260221-cost-columns-replace-fix (成本列 REPLACE 括号嵌套修复)
 -- ====================================================
 -- 用途：整合所有平台的订单数据，统一字段名，为前端提供完整数据支持
 -- 数据源：b_class schema 下的所有 orders 相关表
@@ -38,6 +39,15 @@ field_mapping AS (
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
     COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
+    COALESCE(raw_data->>'采购金额', raw_data->>'采购价', raw_data->>'purchase_amount', raw_data->>'cogs', raw_data->>'产品成本') AS purchase_amount_raw,
+    COALESCE(raw_data->>'订单原始金额', raw_data->>'产品折后价格', raw_data->>'产品折后金额', raw_data->>'order_original_amount', raw_data->>'产品原价') AS order_original_amount_raw,
+    COALESCE(raw_data->>'仓库操作费', raw_data->>'warehouse_operation_fee', raw_data->>'贴单费') AS warehouse_operation_fee_raw,
+    COALESCE(raw_data->>'运费', raw_data->>'商家运费', raw_data->>'shipping_fee') AS shipping_fee_raw,
+    COALESCE(raw_data->>'推广费', raw_data->>'平台推广费', raw_data->>'平台收取推广费', raw_data->>'promotion_fee', raw_data->>'营销推广费') AS promotion_fee_raw,
+    COALESCE(raw_data->>'平台佣金', raw_data->>'佣金', raw_data->>'总佣金', raw_data->>'platform_commission', raw_data->>'TikTok Shop平台佣金') AS platform_commission_raw,
+    COALESCE(raw_data->>'平台扣费', raw_data->>'TikTok Shop平台扣费', raw_data->>'platform_deduction_fee', raw_data->>'平台扣款') AS platform_deduction_fee_raw,
+    COALESCE(raw_data->>'代金券', raw_data->>'平台代金券', raw_data->>'platform_voucher', raw_data->>'平台优惠券') AS platform_voucher_raw,
+    COALESCE(raw_data->>'服务费', raw_data->>'平台服务费', raw_data->>'平台收取服务费', raw_data->>'platform_service_fee', raw_data->>'TikTok Shop平台服务费') AS platform_service_fee_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_shopee_orders_daily
   
@@ -67,6 +77,15 @@ field_mapping AS (
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
     COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
+    COALESCE(raw_data->>'采购金额', raw_data->>'采购价', raw_data->>'purchase_amount', raw_data->>'cogs', raw_data->>'产品成本') AS purchase_amount_raw,
+    COALESCE(raw_data->>'订单原始金额', raw_data->>'产品折后价格', raw_data->>'产品折后金额', raw_data->>'order_original_amount', raw_data->>'产品原价') AS order_original_amount_raw,
+    COALESCE(raw_data->>'仓库操作费', raw_data->>'warehouse_operation_fee', raw_data->>'贴单费') AS warehouse_operation_fee_raw,
+    COALESCE(raw_data->>'运费', raw_data->>'商家运费', raw_data->>'shipping_fee') AS shipping_fee_raw,
+    COALESCE(raw_data->>'推广费', raw_data->>'平台推广费', raw_data->>'平台收取推广费', raw_data->>'promotion_fee', raw_data->>'营销推广费') AS promotion_fee_raw,
+    COALESCE(raw_data->>'平台佣金', raw_data->>'佣金', raw_data->>'总佣金', raw_data->>'platform_commission', raw_data->>'TikTok Shop平台佣金') AS platform_commission_raw,
+    COALESCE(raw_data->>'平台扣费', raw_data->>'TikTok Shop平台扣费', raw_data->>'platform_deduction_fee', raw_data->>'平台扣款') AS platform_deduction_fee_raw,
+    COALESCE(raw_data->>'代金券', raw_data->>'平台代金券', raw_data->>'platform_voucher', raw_data->>'平台优惠券') AS platform_voucher_raw,
+    COALESCE(raw_data->>'服务费', raw_data->>'平台服务费', raw_data->>'平台收取服务费', raw_data->>'platform_service_fee', raw_data->>'TikTok Shop平台服务费') AS platform_service_fee_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_shopee_orders_weekly
   
@@ -96,6 +115,15 @@ field_mapping AS (
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
     COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
+    COALESCE(raw_data->>'采购金额', raw_data->>'采购价', raw_data->>'purchase_amount', raw_data->>'cogs', raw_data->>'产品成本') AS purchase_amount_raw,
+    COALESCE(raw_data->>'订单原始金额', raw_data->>'产品折后价格', raw_data->>'产品折后金额', raw_data->>'order_original_amount', raw_data->>'产品原价') AS order_original_amount_raw,
+    COALESCE(raw_data->>'仓库操作费', raw_data->>'warehouse_operation_fee', raw_data->>'贴单费') AS warehouse_operation_fee_raw,
+    COALESCE(raw_data->>'运费', raw_data->>'商家运费', raw_data->>'shipping_fee') AS shipping_fee_raw,
+    COALESCE(raw_data->>'推广费', raw_data->>'平台推广费', raw_data->>'平台收取推广费', raw_data->>'promotion_fee', raw_data->>'营销推广费') AS promotion_fee_raw,
+    COALESCE(raw_data->>'平台佣金', raw_data->>'佣金', raw_data->>'总佣金', raw_data->>'platform_commission', raw_data->>'TikTok Shop平台佣金') AS platform_commission_raw,
+    COALESCE(raw_data->>'平台扣费', raw_data->>'TikTok Shop平台扣费', raw_data->>'platform_deduction_fee', raw_data->>'平台扣款') AS platform_deduction_fee_raw,
+    COALESCE(raw_data->>'代金券', raw_data->>'平台代金券', raw_data->>'platform_voucher', raw_data->>'平台优惠券') AS platform_voucher_raw,
+    COALESCE(raw_data->>'服务费', raw_data->>'平台服务费', raw_data->>'平台收取服务费', raw_data->>'platform_service_fee', raw_data->>'TikTok Shop平台服务费') AS platform_service_fee_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_shopee_orders_monthly
   
@@ -125,6 +153,15 @@ field_mapping AS (
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
     COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
+    COALESCE(raw_data->>'采购金额', raw_data->>'采购价', raw_data->>'purchase_amount', raw_data->>'cogs', raw_data->>'产品成本') AS purchase_amount_raw,
+    COALESCE(raw_data->>'订单原始金额', raw_data->>'产品折后价格', raw_data->>'产品折后金额', raw_data->>'order_original_amount', raw_data->>'产品原价') AS order_original_amount_raw,
+    COALESCE(raw_data->>'仓库操作费', raw_data->>'warehouse_operation_fee', raw_data->>'贴单费') AS warehouse_operation_fee_raw,
+    COALESCE(raw_data->>'运费', raw_data->>'商家运费', raw_data->>'shipping_fee') AS shipping_fee_raw,
+    COALESCE(raw_data->>'推广费', raw_data->>'平台推广费', raw_data->>'平台收取推广费', raw_data->>'promotion_fee', raw_data->>'营销推广费') AS promotion_fee_raw,
+    COALESCE(raw_data->>'平台佣金', raw_data->>'佣金', raw_data->>'总佣金', raw_data->>'platform_commission', raw_data->>'TikTok Shop平台佣金') AS platform_commission_raw,
+    COALESCE(raw_data->>'平台扣费', raw_data->>'TikTok Shop平台扣费', raw_data->>'platform_deduction_fee', raw_data->>'平台扣款') AS platform_deduction_fee_raw,
+    COALESCE(raw_data->>'代金券', raw_data->>'平台代金券', raw_data->>'platform_voucher', raw_data->>'平台优惠券') AS platform_voucher_raw,
+    COALESCE(raw_data->>'服务费', raw_data->>'平台服务费', raw_data->>'平台收取服务费', raw_data->>'platform_service_fee', raw_data->>'TikTok Shop平台服务费') AS platform_service_fee_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_tiktok_orders_daily
   
@@ -154,6 +191,15 @@ field_mapping AS (
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
     COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
+    COALESCE(raw_data->>'采购金额', raw_data->>'采购价', raw_data->>'purchase_amount', raw_data->>'cogs', raw_data->>'产品成本') AS purchase_amount_raw,
+    COALESCE(raw_data->>'订单原始金额', raw_data->>'产品折后价格', raw_data->>'产品折后金额', raw_data->>'order_original_amount', raw_data->>'产品原价') AS order_original_amount_raw,
+    COALESCE(raw_data->>'仓库操作费', raw_data->>'warehouse_operation_fee', raw_data->>'贴单费') AS warehouse_operation_fee_raw,
+    COALESCE(raw_data->>'运费', raw_data->>'商家运费', raw_data->>'shipping_fee') AS shipping_fee_raw,
+    COALESCE(raw_data->>'推广费', raw_data->>'平台推广费', raw_data->>'平台收取推广费', raw_data->>'promotion_fee', raw_data->>'营销推广费') AS promotion_fee_raw,
+    COALESCE(raw_data->>'平台佣金', raw_data->>'佣金', raw_data->>'总佣金', raw_data->>'platform_commission', raw_data->>'TikTok Shop平台佣金') AS platform_commission_raw,
+    COALESCE(raw_data->>'平台扣费', raw_data->>'TikTok Shop平台扣费', raw_data->>'platform_deduction_fee', raw_data->>'平台扣款') AS platform_deduction_fee_raw,
+    COALESCE(raw_data->>'代金券', raw_data->>'平台代金券', raw_data->>'platform_voucher', raw_data->>'平台优惠券') AS platform_voucher_raw,
+    COALESCE(raw_data->>'服务费', raw_data->>'平台服务费', raw_data->>'平台收取服务费', raw_data->>'platform_service_fee', raw_data->>'TikTok Shop平台服务费') AS platform_service_fee_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_tiktok_orders_weekly
   
@@ -183,6 +229,15 @@ field_mapping AS (
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
     COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
+    COALESCE(raw_data->>'采购金额', raw_data->>'采购价', raw_data->>'purchase_amount', raw_data->>'cogs', raw_data->>'产品成本') AS purchase_amount_raw,
+    COALESCE(raw_data->>'订单原始金额', raw_data->>'产品折后价格', raw_data->>'产品折后金额', raw_data->>'order_original_amount', raw_data->>'产品原价') AS order_original_amount_raw,
+    COALESCE(raw_data->>'仓库操作费', raw_data->>'warehouse_operation_fee', raw_data->>'贴单费') AS warehouse_operation_fee_raw,
+    COALESCE(raw_data->>'运费', raw_data->>'商家运费', raw_data->>'shipping_fee') AS shipping_fee_raw,
+    COALESCE(raw_data->>'推广费', raw_data->>'平台推广费', raw_data->>'平台收取推广费', raw_data->>'promotion_fee', raw_data->>'营销推广费') AS promotion_fee_raw,
+    COALESCE(raw_data->>'平台佣金', raw_data->>'佣金', raw_data->>'总佣金', raw_data->>'platform_commission', raw_data->>'TikTok Shop平台佣金') AS platform_commission_raw,
+    COALESCE(raw_data->>'平台扣费', raw_data->>'TikTok Shop平台扣费', raw_data->>'platform_deduction_fee', raw_data->>'平台扣款') AS platform_deduction_fee_raw,
+    COALESCE(raw_data->>'代金券', raw_data->>'平台代金券', raw_data->>'platform_voucher', raw_data->>'平台优惠券') AS platform_voucher_raw,
+    COALESCE(raw_data->>'服务费', raw_data->>'平台服务费', raw_data->>'平台收取服务费', raw_data->>'platform_service_fee', raw_data->>'TikTok Shop平台服务费') AS platform_service_fee_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_tiktok_orders_monthly
   
@@ -212,6 +267,15 @@ field_mapping AS (
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
     COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
+    COALESCE(raw_data->>'采购金额', raw_data->>'采购价', raw_data->>'purchase_amount', raw_data->>'cogs', raw_data->>'产品成本') AS purchase_amount_raw,
+    COALESCE(raw_data->>'订单原始金额', raw_data->>'产品折后价格', raw_data->>'产品折后金额', raw_data->>'order_original_amount', raw_data->>'产品原价') AS order_original_amount_raw,
+    COALESCE(raw_data->>'仓库操作费', raw_data->>'warehouse_operation_fee', raw_data->>'贴单费') AS warehouse_operation_fee_raw,
+    COALESCE(raw_data->>'运费', raw_data->>'商家运费', raw_data->>'shipping_fee') AS shipping_fee_raw,
+    COALESCE(raw_data->>'推广费', raw_data->>'平台推广费', raw_data->>'平台收取推广费', raw_data->>'promotion_fee', raw_data->>'营销推广费') AS promotion_fee_raw,
+    COALESCE(raw_data->>'平台佣金', raw_data->>'佣金', raw_data->>'总佣金', raw_data->>'platform_commission', raw_data->>'TikTok Shop平台佣金') AS platform_commission_raw,
+    COALESCE(raw_data->>'平台扣费', raw_data->>'TikTok Shop平台扣费', raw_data->>'platform_deduction_fee', raw_data->>'平台扣款') AS platform_deduction_fee_raw,
+    COALESCE(raw_data->>'代金券', raw_data->>'平台代金券', raw_data->>'platform_voucher', raw_data->>'平台优惠券') AS platform_voucher_raw,
+    COALESCE(raw_data->>'服务费', raw_data->>'平台服务费', raw_data->>'平台收取服务费', raw_data->>'platform_service_fee', raw_data->>'TikTok Shop平台服务费') AS platform_service_fee_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_miaoshou_orders_daily
   
@@ -241,6 +305,15 @@ field_mapping AS (
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
     COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
+    COALESCE(raw_data->>'采购金额', raw_data->>'采购价', raw_data->>'purchase_amount', raw_data->>'cogs', raw_data->>'产品成本') AS purchase_amount_raw,
+    COALESCE(raw_data->>'订单原始金额', raw_data->>'产品折后价格', raw_data->>'产品折后金额', raw_data->>'order_original_amount', raw_data->>'产品原价') AS order_original_amount_raw,
+    COALESCE(raw_data->>'仓库操作费', raw_data->>'warehouse_operation_fee', raw_data->>'贴单费') AS warehouse_operation_fee_raw,
+    COALESCE(raw_data->>'运费', raw_data->>'商家运费', raw_data->>'shipping_fee') AS shipping_fee_raw,
+    COALESCE(raw_data->>'推广费', raw_data->>'平台推广费', raw_data->>'平台收取推广费', raw_data->>'promotion_fee', raw_data->>'营销推广费') AS promotion_fee_raw,
+    COALESCE(raw_data->>'平台佣金', raw_data->>'佣金', raw_data->>'总佣金', raw_data->>'platform_commission', raw_data->>'TikTok Shop平台佣金') AS platform_commission_raw,
+    COALESCE(raw_data->>'平台扣费', raw_data->>'TikTok Shop平台扣费', raw_data->>'platform_deduction_fee', raw_data->>'平台扣款') AS platform_deduction_fee_raw,
+    COALESCE(raw_data->>'代金券', raw_data->>'平台代金券', raw_data->>'platform_voucher', raw_data->>'平台优惠券') AS platform_voucher_raw,
+    COALESCE(raw_data->>'服务费', raw_data->>'平台服务费', raw_data->>'平台收取服务费', raw_data->>'platform_service_fee', raw_data->>'TikTok Shop平台服务费') AS platform_service_fee_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_miaoshou_orders_weekly
   
@@ -270,6 +343,15 @@ field_mapping AS (
     COALESCE(raw_data->>'买家数', raw_data->>'买家', raw_data->>'buyer_count', raw_data->>'Buyer Count') AS buyer_count_raw,
     COALESCE(raw_data->>'订单数', raw_data->>'订单数量', raw_data->>'order_count', raw_data->>'Order Count') AS order_count_raw,
     COALESCE(raw_data->>'产品数量', raw_data->>'商品数量', raw_data->>'数量', raw_data->>'件数', raw_data->>'销售数量', raw_data->>'出库数量', raw_data->>'product_quantity', raw_data->>'quantity', raw_data->>'qty', raw_data->>'item_quantity') AS product_quantity_raw,
+    COALESCE(raw_data->>'采购金额', raw_data->>'采购价', raw_data->>'purchase_amount', raw_data->>'cogs', raw_data->>'产品成本') AS purchase_amount_raw,
+    COALESCE(raw_data->>'订单原始金额', raw_data->>'产品折后价格', raw_data->>'产品折后金额', raw_data->>'order_original_amount', raw_data->>'产品原价') AS order_original_amount_raw,
+    COALESCE(raw_data->>'仓库操作费', raw_data->>'warehouse_operation_fee', raw_data->>'贴单费') AS warehouse_operation_fee_raw,
+    COALESCE(raw_data->>'运费', raw_data->>'商家运费', raw_data->>'shipping_fee') AS shipping_fee_raw,
+    COALESCE(raw_data->>'推广费', raw_data->>'平台推广费', raw_data->>'平台收取推广费', raw_data->>'promotion_fee', raw_data->>'营销推广费') AS promotion_fee_raw,
+    COALESCE(raw_data->>'平台佣金', raw_data->>'佣金', raw_data->>'总佣金', raw_data->>'platform_commission', raw_data->>'TikTok Shop平台佣金') AS platform_commission_raw,
+    COALESCE(raw_data->>'平台扣费', raw_data->>'TikTok Shop平台扣费', raw_data->>'platform_deduction_fee', raw_data->>'平台扣款') AS platform_deduction_fee_raw,
+    COALESCE(raw_data->>'代金券', raw_data->>'平台代金券', raw_data->>'platform_voucher', raw_data->>'平台优惠券') AS platform_voucher_raw,
+    COALESCE(raw_data->>'服务费', raw_data->>'平台服务费', raw_data->>'平台收取服务费', raw_data->>'platform_service_fee', raw_data->>'TikTok Shop平台服务费') AS platform_service_fee_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM b_class.fact_miaoshou_orders_monthly
 ),
@@ -285,8 +367,8 @@ cleaned AS (
     order_status_raw AS order_status,
     NULLIF(
       REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sales_amount_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sales_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
+        $$[^0-9.]$$,
         '',
         'g'
       ),
@@ -294,8 +376,8 @@ cleaned AS (
     )::NUMERIC AS sales_amount,
     NULLIF(
       REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(paid_amount_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(paid_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
+        $$[^0-9.]$$,
         '',
         'g'
       ),
@@ -303,8 +385,8 @@ cleaned AS (
     )::NUMERIC AS paid_amount,
     NULLIF(
       REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(product_original_price_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(product_original_price_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
+        $$[^0-9.]$$,
         '',
         'g'
       ),
@@ -312,8 +394,8 @@ cleaned AS (
     )::NUMERIC AS product_original_price,
     NULLIF(
       REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(estimated_settlement_amount_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(estimated_settlement_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
+        $$[^0-9.]$$,
         '',
         'g'
       ),
@@ -321,8 +403,8 @@ cleaned AS (
     )::NUMERIC AS estimated_settlement_amount,
     NULLIF(
       REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(profit_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(profit_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
+        $$[^0-9.]$$,
         '',
         'g'
       ),
@@ -332,14 +414,14 @@ cleaned AS (
     COALESCE(
       period_start_time,
       CASE 
-        WHEN order_time_raw IS NOT NULL AND order_time_raw != '' AND order_time_raw != '—' AND order_time_raw != '–' AND order_time_raw != '-' THEN
+        WHEN order_time_raw IS NOT NULL AND order_time_raw != '' AND order_time_raw != CHR(8212) AND order_time_raw != CHR(8211) AND order_time_raw != '-' THEN
           order_time_raw::TIMESTAMP
         ELSE NULL
       END,
       metric_date::TIMESTAMP
     ) AS order_time,
     CASE 
-      WHEN payment_time_raw IS NOT NULL AND payment_time_raw != '' AND payment_time_raw != '—' AND payment_time_raw != '–' AND payment_time_raw != '-' THEN
+      WHEN payment_time_raw IS NOT NULL AND payment_time_raw != '' AND payment_time_raw != CHR(8212) AND payment_time_raw != CHR(8211) AND payment_time_raw != '-' THEN
         payment_time_raw::TIMESTAMP
       ELSE NULL
     END AS payment_time,
@@ -354,8 +436,8 @@ cleaned AS (
     outbound_warehouse_raw AS outbound_warehouse,
     NULLIF(
       REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(buyer_count_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(buyer_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
+        $$[^0-9.]$$,
         '',
         'g'
       ),
@@ -363,8 +445,8 @@ cleaned AS (
     )::NUMERIC AS buyer_count,
     NULLIF(
       REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_count_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
+        $$[^0-9.]$$,
         '',
         'g'
       ),
@@ -372,13 +454,25 @@ cleaned AS (
     )::NUMERIC AS order_count,
     NULLIF(
       REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(product_quantity_raw, ''), ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(product_quantity_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
+        $$[^0-9.]$$,
         '',
         'g'
       ),
       ''
     )::NUMERIC AS product_quantity,
+    -- 成本列（B 类，与 docs/COST_DATA_SOURCES_AND_DEFINITIONS.md 一致）
+    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(purchase_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC AS purchase_amount,
+    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(order_original_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC AS order_original_amount,
+    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(warehouse_operation_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC AS warehouse_operation_fee,
+    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(shipping_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS shipping_fee,
+    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(promotion_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS promotion_fee,
+    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_commission_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS platform_commission,
+    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_deduction_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS platform_deduction_fee,
+    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_voucher_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS platform_voucher,
+    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_service_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS platform_service_fee,
+    (COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(order_original_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC, 0) - COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(purchase_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC, 0) - COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(profit_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC, 0) - COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(warehouse_operation_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC, 0)) AS platform_total_cost_derived,
+    (COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(shipping_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0) + COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(promotion_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0) + COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_commission_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0) + COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_deduction_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0) + COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_voucher_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0) + COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_service_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0)) AS platform_total_cost_itemized,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM field_mapping
 ),
@@ -414,6 +508,17 @@ SELECT
   COALESCE(product_original_price, 0) AS product_original_price,
   COALESCE(estimated_settlement_amount, 0) AS estimated_settlement_amount,
   COALESCE(profit, 0) AS profit,
+  COALESCE(purchase_amount, 0) AS purchase_amount,
+  COALESCE(order_original_amount, 0) AS order_original_amount,
+  COALESCE(warehouse_operation_fee, 0) AS warehouse_operation_fee,
+  COALESCE(shipping_fee, 0) AS shipping_fee,
+  COALESCE(promotion_fee, 0) AS promotion_fee,
+  COALESCE(platform_commission, 0) AS platform_commission,
+  COALESCE(platform_deduction_fee, 0) AS platform_deduction_fee,
+  COALESCE(platform_voucher, 0) AS platform_voucher,
+  COALESCE(platform_service_fee, 0) AS platform_service_fee,
+  COALESCE(platform_total_cost_derived, 0) AS platform_total_cost_derived,
+  COALESCE(platform_total_cost_itemized, 0) AS platform_total_cost_itemized,
   order_time, payment_time, order_date,
   product_name, product_id, platform_sku, sku_id, product_sku, product_type, outbound_warehouse,
   COALESCE(buyer_count, 0) AS buyer_count,

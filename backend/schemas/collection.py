@@ -109,7 +109,9 @@ class TaskResponse(BaseModel):
     duration_seconds: Optional[int]
     created_at: datetime
     updated_at: datetime
-    
+    started_at: Optional[datetime] = Field(None, description="任务实际开始执行时间")
+    completed_at: Optional[datetime] = Field(None, description="任务结束时间")
+
     model_config = ConfigDict(from_attributes=True)
 
 

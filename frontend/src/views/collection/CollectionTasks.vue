@@ -31,13 +31,28 @@
           <el-checkbox label="orders">订单</el-checkbox>
           <el-checkbox label="products">产品</el-checkbox>
           <el-checkbox label="analytics">流量</el-checkbox>
+          <el-checkbox label="inventory">库存</el-checkbox>
+          <el-checkbox label="finance">财务</el-checkbox>
+          <el-checkbox label="services">服务</el-checkbox>
         </el-checkbox-group>
 
-        <el-select v-model="quickForm.date_preset" placeholder="日期范围">
+        <el-select v-model="quickForm.date_preset" placeholder="日期范围" style="width: 120px">
           <el-option label="今天" value="today" />
           <el-option label="昨天" value="yesterday" />
           <el-option label="最近7天" value="last_7_days" />
+          <el-option label="最近30天" value="last_30_days" />
+          <el-option label="自定义" value="custom" />
         </el-select>
+        <el-date-picker
+          v-if="quickForm.date_preset === 'custom'"
+          v-model="quickForm.customDateRange"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          value-format="YYYY-MM-DD"
+          style="width: 240px"
+        />
 
         <div class="debug-mode-switch">
           <el-switch 
@@ -47,7 +62,8 @@
           />
           <el-tooltip placement="top">
             <template #content>
-              调试模式将使用有头浏览器<br/>便于观察采集过程（生产环境可用）
+              有头浏览器会在<strong>运行后端的电脑</strong>上打开，便于观察采集过程。<br/>
+              若任务一直处于「等待」，请确认后端是否单进程或任务队列是否正常。
             </template>
             <el-icon><QuestionFilled /></el-icon>
           </el-tooltip>
@@ -64,6 +80,26 @@
         </el-button>
       </div>
     </div>
+
+    <!-- 采集执行说明：任务为何一直「等待」、如何真正执行 -->
+    <el-alert
+      type="info"
+      :closable="false"
+      show-icon
+      class="collect-tip"
+    >
+      <template #title>
+        <span>如何真正执行采集？</span>
+      </template>
+      <div class="collect-tip-body">
+        点击「开始采集」会创建任务，执行由<strong>后端同一进程</strong>在后台启动。若任务一直处于「等待」、进度 0%，请检查：
+        <ul>
+          <li><strong>单进程启动</strong>：使用 <code>python run.py</code> 或 <code>uvicorn ... --workers 1</code> 启动后端；多 worker 时后台任务可能未在收到请求的进程内执行。</li>
+          <li><strong>后端日志</strong>：查看运行后端的终端是否有异常（账号加载失败、Playwright 未安装等）。</li>
+          <li><strong>Playwright</strong>：本机已执行 <code>playwright install chromium</code>，且后端运行环境可启动浏览器。</li>
+        </ul>
+      </div>
+    </el-alert>
 
     <!-- 任务列表 -->
     <div class="tasks-section">
@@ -147,10 +183,10 @@
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button 
-              v-if="row.status === 'running' || row.status === 'queued'"
+              v-if="['pending', 'queued', 'running'].includes(row.status)"
               size="small" 
               type="warning"
               @click="cancelTask(row)"
@@ -174,6 +210,23 @@
               重试
             </el-button>
             <el-button 
+              v-if="isTerminalStatus(row.status)"
+              size="small" 
+              type="danger"
+              link
+              @click="deleteTask(row)"
+            >
+              删除
+            </el-button>
+            <el-button 
+              size="small"
+              type="primary"
+              link
+              @click="showDetailDrawer(row)"
+            >
+              详情
+            </el-button>
+            <el-button 
               size="small"
               @click="showLogsDialog(row)"
             >
@@ -183,6 +236,74 @@
         </el-table-column>
       </el-table>
     </div>
+
+    <!-- 任务详情抽屉：元信息 + 步骤时间线 -->
+    <el-drawer
+      v-model="detailDrawerVisible"
+      title="任务详情"
+      size="520px"
+      direction="rtl"
+    >
+      <template v-if="detailTask">
+        <div class="task-detail-meta">
+          <el-descriptions :column="1" border size="small">
+            <el-descriptions-item label="平台">
+              <el-tag :type="getPlatformTagType(detailTask.platform)" size="small">{{ detailTask.platform }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="账号">{{ detailTask.account }}</el-descriptions-item>
+            <el-descriptions-item label="状态">
+              <el-tag :type="getStatusTagType(detailTask.status)">{{ getStatusLabel(detailTask.status) }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ formatTime(detailTask.created_at) }}</el-descriptions-item>
+            <el-descriptions-item label="开始时间">{{ formatTime(detailTask.started_at) }}</el-descriptions-item>
+            <el-descriptions-item label="结束时间">{{ formatTime(detailTask.completed_at) }}</el-descriptions-item>
+            <el-descriptions-item label="总耗时">{{ formatDuration(detailTask) }}</el-descriptions-item>
+            <el-descriptions-item label="数据域">
+              <el-tag v-for="d in (detailTask.data_domains || [])" :key="d" size="small" style="margin-right:4px">{{ getDomainLabel(d) }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.completed_domains?.length" label="已完成域">
+              {{ (detailTask.completed_domains || []).join(', ') }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.failed_domains?.length" label="失败域">
+              <span class="text-danger">{{ (detailTask.failed_domains || []).map(d => typeof d === 'object' ? d.domain || d.name : d).join(', ') }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailTask.error_message" label="错误信息">
+              <span class="text-danger">{{ detailTask.error_message }}</span>
+            </el-descriptions-item>
+          </el-descriptions>
+        </div>
+        <div class="task-detail-timeline">
+          <h4>步骤时间线</h4>
+          <div v-loading="detailLogsLoading" class="timeline-list">
+            <div
+              v-for="log in sortedDetailLogs"
+              :key="log.id"
+              :class="['timeline-item', `timeline-${log.level}`]"
+            >
+              <div class="timeline-item-head">
+                <span class="timeline-time">{{ formatTime(log.timestamp) }}</span>
+                <el-tag :type="getLogTagType(log.level)" size="small">{{ log.level }}</el-tag>
+                <span v-if="getStepLabel(log)" class="timeline-step">{{ getStepLabel(log) }}</span>
+              </div>
+              <div class="timeline-message">{{ log.message }}</div>
+              <el-collapse v-if="log.details && (log.details.error || log.level === 'error')">
+                <el-collapse-item v-if="log.details?.error" name="error">
+                  <template #title>
+                    <span class="text-danger">错误详情</span>
+                  </template>
+                  <pre class="detail-error">{{ log.details.error }}</pre>
+                </el-collapse-item>
+                <el-collapse-item v-else-if="log.details && Object.keys(log.details).length" name="details">
+                  <template #title>details</template>
+                  <pre class="detail-json">{{ JSON.stringify(log.details, null, 2) }}</pre>
+                </el-collapse-item>
+              </el-collapse>
+            </div>
+            <el-empty v-if="!detailLogsLoading && sortedDetailLogs.length === 0" description="暂无步骤日志" />
+          </div>
+        </div>
+      </template>
+    </el-drawer>
 
     <!-- 日志对话框 -->
     <el-dialog 
@@ -261,6 +382,10 @@ const accounts = ref([])
 const taskLogs = ref([])
 const statusFilter = ref('')
 const logsDialogVisible = ref(false)
+const detailDrawerVisible = ref(false)
+const detailTask = ref(null)
+const detailLogs = ref([])
+const detailLogsLoading = ref(false)
 const verificationDialogVisible = ref(false)
 const verificationScreenshot = ref('')
 const verificationCode = ref('')
@@ -269,12 +394,13 @@ const currentTask = ref(null)
 // WebSocket连接
 const wsConnections = ref({})
 
-// 快速采集表单（v4.7.0）
+// 快速采集表单（v4.7.0 + 扩展：日期自定义）
 const quickForm = reactive({
   platform: '',
   account_id: '',
   data_domains: [],
   date_preset: 'yesterday',
+  customDateRange: [],  // [start, end] 仅当 date_preset === 'custom' 时使用
   debugMode: false  // v4.7.0: 调试模式
 })
 
@@ -287,9 +413,18 @@ const filteredAccounts = computed(() => {
 })
 
 const canCreateTask = computed(() => {
-  return quickForm.platform && 
-         quickForm.account_id && 
-         quickForm.data_domains.length > 0
+  if (!quickForm.platform || !quickForm.account_id || quickForm.data_domains.length === 0) return false
+  if (quickForm.date_preset === 'custom') {
+    return Array.isArray(quickForm.customDateRange) && quickForm.customDateRange.length === 2
+  }
+  return true
+})
+
+// 任务详情抽屉：步骤日志按时间排序
+const sortedDetailLogs = computed(() => {
+  const list = [...(detailLogs.value || [])]
+  list.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+  return list
 })
 
 // 方法
@@ -326,8 +461,12 @@ const loadAccounts = async () => {
 const createQuickTask = async () => {
   creating.value = true
   try {
-    const dateRange = getDateRange(quickForm.date_preset)
-    
+    const dateRange = getDateRange(quickForm.date_preset, quickForm.customDateRange)
+    if (!dateRange || !dateRange.start_date || !dateRange.end_date) {
+      ElMessage.warning('请选择有效的日期范围')
+      creating.value = false
+      return
+    }
     // v4.7.0: 添加debugMode参数
     const task = await collectionApi.createTask({
       platform: quickForm.platform,
@@ -360,6 +499,23 @@ const cancelTask = async (row) => {
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('取消失败: ' + error.message)
+    }
+  }
+}
+
+// 终态状态（可删除记录）
+const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'partial_success']
+const isTerminalStatus = (status) => TERMINAL_STATUSES.includes(status)
+
+const deleteTask = async (row) => {
+  try {
+    await ElMessageBox.confirm('确定要删除此任务记录吗？删除后不可恢复。', '确认删除')
+    await collectionApi.deleteTask(row.task_id)
+    ElMessage.success('任务已删除')
+    loadTasks()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败: ' + error.message)
     }
   }
 }
@@ -404,6 +560,26 @@ const skipVerification = async () => {
     loadTasks()
   } catch (error) {
     ElMessage.error('操作失败: ' + error.message)
+  }
+}
+
+const showDetailDrawer = async (row) => {
+  detailTask.value = null
+  detailLogs.value = []
+  detailDrawerVisible.value = true
+  try {
+    detailTask.value = await collectionApi.getTask(row.task_id)
+  } catch (e) {
+    detailTask.value = row
+  }
+  detailLogsLoading.value = true
+  try {
+    detailLogs.value = await collectionApi.getTaskLogs(row.task_id) || []
+  } catch (error) {
+    detailLogs.value = []
+    ElMessage.error('加载步骤日志失败: ' + error.message)
+  } finally {
+    detailLogsLoading.value = false
   }
 }
 
@@ -480,21 +656,30 @@ const onPlatformChange = () => {
   quickForm.account_id = ''
 }
 
-const getDateRange = (preset) => {
+const getDateRange = (preset, customRange = null) => {
   const today = new Date()
   const formatDate = (d) => d.toISOString().split('T')[0]
-  
+  if (preset === 'custom' && Array.isArray(customRange) && customRange.length === 2) {
+    return { start_date: customRange[0], end_date: customRange[1] }
+  }
   switch (preset) {
     case 'today':
       return { start_date: formatDate(today), end_date: formatDate(today) }
-    case 'yesterday':
+    case 'yesterday': {
       const yesterday = new Date(today)
       yesterday.setDate(yesterday.getDate() - 1)
       return { start_date: formatDate(yesterday), end_date: formatDate(yesterday) }
-    case 'last_7_days':
+    }
+    case 'last_7_days': {
       const last7 = new Date(today)
       last7.setDate(last7.getDate() - 7)
       return { start_date: formatDate(last7), end_date: formatDate(today) }
+    }
+    case 'last_30_days': {
+      const last30 = new Date(today)
+      last30.setDate(last30.getDate() - 30)
+      return { start_date: formatDate(last30), end_date: formatDate(today) }
+    }
     default:
       return {}
   }
@@ -575,6 +760,24 @@ const formatTime = (time) => {
   return new Date(time).toLocaleString('zh-CN')
 }
 
+const formatDuration = (task) => {
+  if (task.duration_seconds != null) return `${task.duration_seconds} 秒`
+  if (task.started_at && task.completed_at) {
+    const s = Math.round((new Date(task.completed_at) - new Date(task.started_at)) / 1000)
+    return `${s} 秒`
+  }
+  return '-'
+}
+
+const getStepLabel = (log) => {
+  const d = log.details
+  if (!d) return ''
+  if (d.step_id) return d.step_id
+  if (d.component) return d.component
+  if (d.data_domain) return `域: ${d.data_domain}`
+  return ''
+}
+
 // 生命周期
 onMounted(() => {
   loadTasks()
@@ -641,6 +844,23 @@ onMounted(() => {
 
 .domain-checkboxes :deep(.el-checkbox__label) {
   color: white;
+}
+
+.collect-tip {
+  margin-bottom: 16px;
+}
+.collect-tip-body {
+  margin-top: 6px;
+}
+.collect-tip-body ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.collect-tip-body code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
 }
 
 .tasks-section {
@@ -741,6 +961,71 @@ onMounted(() => {
   max-width: 100%;
   border-radius: 8px;
   border: 1px solid #eee;
+}
+
+/* 任务详情抽屉 */
+.task-detail-meta {
+  margin-bottom: 20px;
+}
+
+.task-detail-timeline h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #303133;
+}
+
+.timeline-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.timeline-item {
+  padding: 10px 12px;
+  border-left: 3px solid #dcdfe6;
+  margin-bottom: 8px;
+  background: #fafafa;
+  border-radius: 0 8px 8px 0;
+}
+
+.timeline-item.timeline-error {
+  border-left-color: #f56c6c;
+  background: #fef0f0;
+}
+
+.timeline-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.timeline-time {
+  font-size: 12px;
+  color: #909399;
+}
+
+.timeline-step {
+  font-size: 12px;
+  font-weight: 500;
+  color: #606266;
+}
+
+.timeline-message {
+  font-size: 13px;
+  color: #303133;
+}
+
+.detail-error,
+.detail-json {
+  margin: 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.text-danger {
+  color: #f56c6c;
 }
 </style>
 

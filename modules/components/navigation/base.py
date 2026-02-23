@@ -22,6 +22,8 @@ class NavigationResult(ResultBase):
 
 
 class NavigationComponent(ComponentBase):
-    def run(self, page: Any, target: TargetPage) -> NavigationResult:  # type: ignore[override]
-        raise NotImplementedError
+    """实现必须为 async，即 async def run(self, page, target) -> NavigationResult。"""
+
+    async def run(self, page: Any, target: TargetPage) -> NavigationResult:  # type: ignore[override]
+        raise NotImplementedError("Implementations must be async: async def run(self, page, target) -> NavigationResult")
 

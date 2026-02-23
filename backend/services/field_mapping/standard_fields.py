@@ -64,6 +64,22 @@ ORDER_FIELDS = [
     'total_amount',         # 总金额
 ]
 
+# 订单成本与费用字段（B 类成本，与成本梳理文档及 Orders 模型列名一致）
+# 详见 docs/COST_DATA_SOURCES_AND_DEFINITIONS.md 或 openspec/changes/clarify-cost-data-sources
+# 注：shipping_fee 已在 ORDER_FIELDS 中，此处仅列成本专用及平台费用分项
+ORDER_COST_FIELDS = [
+    'purchase_amount',              # 采购金额/COGS
+    'order_original_amount',        # 订单原始金额/产品折后价格
+    'warehouse_operation_fee',      # 仓库操作费（第三方）
+    'promotion_fee',                # 推广费
+    'platform_commission',          # 平台佣金
+    'platform_deduction_fee',       # 平台扣费
+    'platform_voucher',             # 代金券
+    'platform_service_fee',         # 服务费
+    'platform_total_cost_derived',  # 平台总费用_倒推（订单原始金额−采购金额−利润−仓库操作费）
+    'platform_total_cost_itemized', # 平台总费用_分项合计（六项之和，用于校验）
+]
+
 # 时间字段
 TIME_FIELDS = [
     'metric_date',          # 指标日期
@@ -81,6 +97,7 @@ ALL_STANDARD_FIELDS = (
     BEHAVIOR_METRIC_FIELDS + 
     REVIEW_FIELDS + 
     ORDER_FIELDS + 
+    ORDER_COST_FIELDS + 
     TIME_FIELDS
 )
 
@@ -92,6 +109,7 @@ FIELD_CATEGORIES = {
     'behavior_metrics': BEHAVIOR_METRIC_FIELDS,
     'review_fields': REVIEW_FIELDS,
     'order_fields': ORDER_FIELDS,
+    'order_cost_fields': ORDER_COST_FIELDS,
     'time_fields': TIME_FIELDS,
 }
 

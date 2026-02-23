@@ -749,6 +749,8 @@ class CollectionTask(Base):
     
     # 执行统计
     duration_seconds = Column(Integer, nullable=True)
+    started_at = Column(DateTime, nullable=True)  # 任务实际开始执行时间(v4.7+ 步骤可观测)
+    completed_at = Column(DateTime, nullable=True)  # 任务结束时间(终态时写入)
     retry_count = Column(Integer, default=0, nullable=False)
     parent_task_id = Column(Integer, ForeignKey("collection_tasks.id", ondelete="SET NULL"), nullable=True)
     
@@ -783,7 +785,10 @@ class CollectionTaskLog(Base):
     """
     采集任务日志表
     
-    记录任务执行过程中的详细日志,便于排查问题
+    记录任务执行过程中的详细日志,便于排查问题。
+    步骤可观测(v4.7+): details 约定结构为
+    { step_id, component?, data_domain?, success?, duration_ms?, error? }，
+    供前端步骤时间线解析。step_id 如 login/export_orders/file_process。
     """
     __tablename__ = "collection_task_logs"
     
@@ -791,7 +796,7 @@ class CollectionTaskLog(Base):
     task_id = Column(Integer, ForeignKey("collection_tasks.id", ondelete="CASCADE"), nullable=False)
     level = Column(String(10), nullable=False)  # info/warning/error
     message = Column(Text, nullable=False)
-    details = Column(JSON, nullable=True)  # 额外详情
+    details = Column(JSON, nullable=True)  # 步骤可观测: step_id/component/data_domain/success/duration_ms/error
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # 关系

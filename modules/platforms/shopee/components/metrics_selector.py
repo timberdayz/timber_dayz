@@ -15,7 +15,7 @@ class ShopeeMetricsSelector(MetricsSelectorComponent):
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
 
-    def run(self, page: Any, metrics: Sequence[str]) -> MetricsSelectResult:  # type: ignore[override]
+    async def run(self, page: Any, metrics: Sequence[str]) -> MetricsSelectResult:  # type: ignore[override]
         # Skeleton only: will implement multi-selector interaction
         return MetricsSelectResult(success=True, selected=tuple(metrics), message="skeleton")
 

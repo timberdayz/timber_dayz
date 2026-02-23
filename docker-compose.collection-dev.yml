@@ -1,0 +1,18 @@
+# 西虹ERP系统 - 本机采集开发 Docker Compose 覆盖
+# 与 docker-compose.yml + docker-compose.dev.yml 组合使用，使 backend 使用带 Playwright 的镜像
+#
+# 使用方式:
+#   python run.py --use-docker --with-metabase --collection
+# 或等价:
+#   docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml -f docker-compose.metabase.yml -f docker-compose.metabase.dev.yml --profile dev-full up -d
+#
+# 效果: 单后端、端口 8001，具备采集能力（Playwright），与正式采集环境一致
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.collection
+    environment:
+      ENABLE_COLLECTION: "true"
+    shm_size: "2gb"

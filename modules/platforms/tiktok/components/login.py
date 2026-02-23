@@ -26,31 +26,31 @@ class TiktokLogin(LoginComponent):
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
 
-    def _click_if_present(self, page: Any, selector: str, timeout: int = 3000) -> bool:
+    async def _click_if_present(self, page: Any, selector: str, timeout: int = 3000) -> bool:
         try:
             loc = page.locator(selector)
             if loc.count() > 0:
                 if self.logger:
                     self.logger.info(f"[TiktokLogin] click: {selector}")
-                loc.first.click(timeout=timeout)
+                await loc.first.click(timeout=timeout)
                 return True
         except Exception as e:
             if self.logger:
                 self.logger.warning(f"[TiktokLogin] click failed: {selector} ({e})")
         return False
 
-    def _fill_first(self, page: Any, selectors: Sequence[str], value: str) -> bool:
+    async def _fill_first(self, page: Any, selectors: Sequence[str], value: str) -> bool:
         for sel in selectors:
             try:
                 loc = page.locator(sel)
                 if loc.count() > 0:
                     el = loc.first
-                    if el.is_visible():
+                    if await el.is_visible():
                         try:
-                            el.click(timeout=1000)
+                            await el.click(timeout=1000)
                         except Exception:
                             pass
-                        el.fill(value)
+                        await el.fill(value)
                         if self.logger:
                             self.logger.info(f"[TiktokLogin] filled with selector: {sel}")
                         return True
@@ -60,28 +60,30 @@ class TiktokLogin(LoginComponent):
                 continue
         if self.logger:
             self.logger.warning("[TiktokLogin] no selector matched for fill")
-    def _wait_any(self, page: Any, selectors: Sequence[str], timeout_ms: int = 10000) -> bool:
+        return False
+
+    async def _wait_any(self, page: Any, selectors: Sequence[str], timeout_ms: int = 10000) -> bool:
         """等待任一选择器出现并可见。"""
         deadline = time.time() + timeout_ms / 1000.0
         while time.time() < deadline:
             for sel in selectors:
                 try:
                     loc = page.locator(sel)
-                    if loc.count() > 0 and loc.first.is_visible():
+                    if loc.count() > 0 and await loc.first.is_visible():
                         return True
                 except Exception:
                     pass
             try:
-                page.wait_for_timeout(200)
+                await page.wait_for_timeout(200)
             except Exception:
                 time.sleep(0.2)
         return False
 
-    def _click_text_if_present(self, page: Any, text: str, timeout: int = 2000) -> bool:
+    async def _click_text_if_present(self, page: Any, text: str, timeout: int = 2000) -> bool:
         try:
             loc = page.locator(f"text={text}")
             if loc.count() > 0:
-                loc.first.click(timeout=timeout)
+                await loc.first.click(timeout=timeout)
                 if self.logger:
                     self.logger.info(f"[TiktokLogin] click text: {text}")
                 return True
@@ -89,7 +91,7 @@ class TiktokLogin(LoginComponent):
             if self.logger:
                 self.logger.warning(f"[TiktokLogin] click text failed: {text} ({e})")
         return False
-    def _ensure_trust_device_checked(self, page: Any) -> bool:
+    async def _ensure_trust_device_checked(self, page: Any) -> bool:
         """
         确保“在这台设备上不再询问”被勾选;优先使用原生 checkbox 的 check(),
         若为自定义组件(role=checkbox),则依据 aria-checked 状态点击一次以置为 true。
@@ -97,27 +99,26 @@ class TiktokLogin(LoginComponent):
         # 0) TikTok 自定义 div 复选框(class 切换 checked)
         try:
             box = page.locator("#TT4B_TSV_Verify_Check")
-            if box.count() > 0 and box.first.is_visible():
-                cls = (box.first.get_attribute("class") or "")
+            if box.count() > 0 and await box.first.is_visible():
+                cls = (await box.first.get_attribute("class")) or ""
                 if "checked" in cls:
                     return True
-                # 优先点击内部的 .check-box-inner,若不存在则点击容器本身
                 try:
                     inner = box.first.locator(".check-box-inner")
-                    if inner.count() > 0 and inner.first.is_visible():
-                        inner.first.click()
+                    if inner.count() > 0 and await inner.first.is_visible():
+                        await inner.first.click()
                     else:
-                        box.first.click()
+                        await box.first.click()
                 except Exception:
                     try:
-                        box.first.click()
+                        await box.first.click()
                     except Exception:
                         pass
                 try:
-                    page.wait_for_timeout(100)
+                    await page.wait_for_timeout(100)
                 except Exception:
                     time.sleep(0.1)
-                cls2 = (box.first.get_attribute("class") or "")
+                cls2 = (await box.first.get_attribute("class")) or ""
                 if "checked" in cls2:
                     return True
         except Exception:
@@ -133,20 +134,19 @@ class TiktokLogin(LoginComponent):
         for sel in selectors:
             try:
                 loc = page.locator(sel)
-                if loc.count() > 0 and loc.first.is_visible():
+                if loc.count() > 0 and await loc.first.is_visible():
                     try:
-                        if loc.first.is_checked():
+                        if await loc.first.is_checked():
                             return True
                     except Exception:
                         pass
                     try:
-                        loc.first.check()
+                        await loc.first.check()
                         return True
                     except Exception:
-                        # Fallback:点击关联文本后再次确认
-                        self._click_text_if_present(page, "在这台设备上不再询问", timeout=1000)
+                        await self._click_text_if_present(page, "在这台设备上不再询问", timeout=1000)
                         try:
-                            if loc.first.is_checked():
+                            if await loc.first.is_checked():
                                 return True
                         except Exception:
                             pass
@@ -156,35 +156,35 @@ class TiktokLogin(LoginComponent):
         # 2) 自定义 role=checkbox 组件
         try:
             role = page.locator("[role='checkbox'][aria-checked]")
-            if role.count() > 0 and role.first.is_visible():
-                state = (role.first.get_attribute("aria-checked") or "").lower()
+            if role.count() > 0 and await role.first.is_visible():
+                state = ((await role.first.get_attribute("aria-checked")) or "").lower()
                 if state != "true":
-                    role.first.click()
+                    await role.first.click()
                     try:
-                        page.wait_for_timeout(200)
+                        await page.wait_for_timeout(200)
                     except Exception:
                         time.sleep(0.2)
-                state2 = (role.first.get_attribute("aria-checked") or "").lower()
+                state2 = ((await role.first.get_attribute("aria-checked")) or "").lower()
                 return state2 == "true"
         except Exception:
             pass
 
         return False
 
-    def _ensure_trust_device_checked_any(self, roots: Sequence[Any]) -> bool:
+    async def _ensure_trust_device_checked_any(self, roots: Sequence[Any]) -> bool:
         """
         在所有可见 roots 中尝试确保“在这台设备上不再询问”被勾选;
         命中任意一个 root 即返回 True。
         """
         for r in roots:
             try:
-                if self._ensure_trust_device_checked(r):
+                if await self._ensure_trust_device_checked(r):
                     return True
             except Exception:
                 continue
         return False
 
-    def _wait_and_check_trust(self, root: Any, timeout_ms: int = 3000) -> bool:
+    async def _wait_and_check_trust(self, root: Any, timeout_ms: int = 3000) -> bool:
         """在给定 root 内等待复选框/文案出现并确保已勾选。"""
         deadline = time.time() + max(0, timeout_ms) / 1000.0
         ok = False
@@ -192,17 +192,17 @@ class TiktokLogin(LoginComponent):
             try:
                 # 优先 ID
                 box = root.locator("#TT4B_TSV_Verify_Check")
-                if box.count() > 0 and box.first.is_visible():
-                    ok = self._ensure_trust_device_checked(root)
+                if box.count() > 0 and await box.first.is_visible():
+                    ok = await self._ensure_trust_device_checked(root)
                     if ok:
                         break
                 # 文案兜底
-                self._click_text_if_present(root, "在这台设备上不再询问", timeout=500)
-                ok = self._ensure_trust_device_checked(root)
+                await self._click_text_if_present(root, "在这台设备上不再询问", timeout=500)
+                ok = await self._ensure_trust_device_checked(root)
             except Exception:
                 pass
             try:
-                root.wait_for_timeout(150)
+                await root.wait_for_timeout(150)
             except Exception:
                 time.sleep(0.15)
         if self.logger:
@@ -213,7 +213,7 @@ class TiktokLogin(LoginComponent):
 
 
 
-    def _maybe_handle_2fa(self, page: Any) -> None:
+    async def _maybe_handle_2fa(self, page: Any) -> None:
         """处理TikTok二次验证(遍历所有 iframe)。"""
         # 若当前并不在登录页(account/login),直接跳过 2FA 处理,避免误触
         try:
@@ -235,7 +235,7 @@ class TiktokLogin(LoginComponent):
 
         # 提前在所有 roots 中尝试勾选“在这台设备上不再询问”,确保不会遗漏
         try:
-            self._ensure_trust_device_checked_any(roots)
+            await self._ensure_trust_device_checked_any(roots)
         except Exception:
             pass
 
@@ -263,7 +263,7 @@ class TiktokLogin(LoginComponent):
             for sel in code_inputs:
                 try:
                     loc = root.locator(sel)
-                    if loc.count() > 0 and loc.first.is_visible():
+                    if loc.count() > 0 and await loc.first.is_visible():
                         target_root = root
                         break
                 except Exception:
@@ -271,8 +271,7 @@ class TiktokLogin(LoginComponent):
             if target_root:
                 break
         if not target_root:
-            # ffffffffffffffffffffffffffff
-            def has_2fa_ui(root: Any) -> bool:
+            async def has_2fa_ui(root: Any) -> bool:
                 try:
                     if root.locator("button:has-text('\u786e\u8ba4')").count() > 0:
                         return True
@@ -280,13 +279,14 @@ class TiktokLogin(LoginComponent):
                     pass
                 for t in ["text=\u9a8c\u8bc1\u7801", "text=\u65e0\u6cd5\u83b7\u53d6\u9a8c\u8bc1\u7801", "text=\u53cc\u91cd\u9a8c\u8bc1"]:
                     try:
-                        if root.locator(t).count() > 0 and root.locator(t).first.is_visible():
+                        loc = root.locator(t)
+                        if loc.count() > 0 and await loc.first.is_visible():
                             return True
                     except Exception:
                         continue
                 return False
             for root in roots:
-                if has_2fa_ui(root):
+                if await has_2fa_ui(root):
                     target_root = root
                     if self.logger:
                         self.logger.info("[TiktokLogin] 2FA UI detected without input-match; using UI root")
@@ -304,11 +304,11 @@ class TiktokLogin(LoginComponent):
 
         # 精确处理“在这台设备上不再询问”:等待至元素出现并确保勾选
         try:
-            self._wait_and_check_trust(target_root, timeout_ms=3000)
+            await self._wait_and_check_trust(target_root, timeout_ms=3000)
         except Exception:
             pass
 
-        def has_2fa_error(root: Any) -> bool:
+        async def has_2fa_error(root: Any) -> bool:
             error_texts = [
                 "text=请输入6位数字验证码",
                 "text=验证码错误",
@@ -324,11 +324,11 @@ class TiktokLogin(LoginComponent):
             ]
             for es in error_texts:
                 try:
-                    if root.locator(es).count() > 0 and root.locator(es).first.is_visible():
+                    loc = root.locator(es)
+                    if loc.count() > 0 and await loc.first.is_visible():
                         return True
                 except Exception:
                     continue
-            # 兜底:输入框标红 aria-invalid
             try:
                 if root.locator("input[name*='code'][aria-invalid='true']").count() > 0:
                     return True
@@ -360,27 +360,27 @@ class TiktokLogin(LoginComponent):
 
             # 清空并填写
             try:
-                target_root.locator("input[name*='code'], #TT4B_TSV_Verify_Code_Input, input[type='text']").first.fill("")
+                await target_root.locator("input[name*='code'], #TT4B_TSV_Verify_Code_Input, input[type='text']").first.fill("")
             except Exception:
                 pass
-            self._fill_first(target_root, code_inputs, otp)
+            await self._fill_first(target_root, code_inputs, otp)
 
             # 再次确保勾选(元素可能晚于输入框出现)
             try:
-                self._wait_and_check_trust(target_root, timeout_ms=1200)
+                await self._wait_and_check_trust(target_root, timeout_ms=1200)
             except Exception:
                 pass
 
             # 点击确认
-            clicked = self._click_if_present(target_root, "button:has-text('确认')", timeout=3000)
+            clicked = await self._click_if_present(target_root, "button:has-text('确认')", timeout=3000)
             if not clicked:
                 for root in roots:
-                    if self._click_if_present(root, "button:has-text('确认')", timeout=2000) or self._click_text_if_present(root, "确认", timeout=1500):
+                    if await self._click_if_present(root, "button:has-text('确认')", timeout=2000) or await self._click_text_if_present(root, "确认", timeout=1500):
                         clicked = True
                         break
                 if not clicked:
                     try:
-                        target_root.keyboard.press("Enter")
+                        await target_root.keyboard.press("Enter")
                     except Exception:
                         pass
 
@@ -396,11 +396,11 @@ class TiktokLogin(LoginComponent):
                         break
                 except Exception:
                     pass
-                if has_2fa_error(target_root):
+                if await has_2fa_error(target_root):
                     saw_error = True
                     break
                 try:
-                    target_root.wait_for_timeout(300)
+                    await target_root.wait_for_timeout(300)
                 except Exception:
                     time.sleep(0.3)
 
@@ -437,7 +437,7 @@ class TiktokLogin(LoginComponent):
             # 正常:已跳转或未检测到错误,结束循环,由上层判断是否成功
             break
 
-    def _detect_login_mode(self, page: Any) -> str:
+    async def _detect_login_mode(self, page: Any) -> str:
         """返回当前登录模式: 'phone' 或 'email'.
         检测优先级:输入框占位符/类型 > 顶部切换文案 > 默认手机号。
         注意:不要用通配“text=邮箱”以免误命中“使用邮箱登录”链接。
@@ -467,7 +467,7 @@ class TiktokLogin(LoginComponent):
             pass
         return "phone"  # 安全默认:手机号优先
 
-    def run(self, page: Any) -> LoginResult:  # type: ignore[override]
+    async def run(self, page: Any) -> LoginResult:  # type: ignore[override]
         login_url = self.ctx.account.get("login_url", "https://seller.tiktokglobalshop.com")
         username = (
             self.ctx.account.get("phone")
@@ -479,8 +479,8 @@ class TiktokLogin(LoginComponent):
         if self.logger:
             self.logger.info(f"[TiktokLogin] goto: {login_url}")
         try:
-            page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(800)
+            await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(800)
             if self.logger:
                 self.logger.info(f"[TiktokLogin] loaded url: {page.url}")
 
@@ -512,14 +512,14 @@ class TiktokLogin(LoginComponent):
 
             if mode == "email":
                 # 当前在邮箱登录页,需要切换到手机号登录
-                switched = self._click_if_present(page, "text=使用手机号登录", timeout=4000)
-                page.wait_for_timeout(400)
+                switched = await self._click_if_present(page, "text=使用手机号登录", timeout=4000)
+                await page.wait_for_timeout(400)
                 # 再次确认是否已切换成功;若仍是邮箱页,再尝试一次
-                if self._detect_login_mode(page) == "email":
-                    if not self._click_if_present(page, "text=使用手机号登录", timeout=3000):
+                if await self._detect_login_mode(page) == "email":
+                    if not await self._click_if_present(page, "text=使用手机号登录", timeout=3000):
                         # 兜底:部分版本为“使用手机号码登录”或相近文案
-                        self._click_if_present(page, "text=使用手机", timeout=2000)
-                    page.wait_for_timeout(300)
+                        await self._click_if_present(page, "text=使用手机", timeout=2000)
+                    await page.wait_for_timeout(300)
 
             # 在主页面与所有 iframe 上尝试(避免元素在 iframe 内导致未命中)
             try:
@@ -539,7 +539,7 @@ class TiktokLogin(LoginComponent):
                 "input[placeholder*='手机号']",
             ]
             for root in roots:
-                if self._wait_any(root, wait_targets, timeout_ms=8000):
+                if await self._wait_any(root, wait_targets, timeout_ms=8000):
                     break
 
             # 填写手机号/密码(手机号优先)
@@ -564,14 +564,14 @@ class TiktokLogin(LoginComponent):
                 ]
                 filled_user = False
                 for root in roots:
-                    filled_user = self._fill_first(root, phone_selectors, username)
+                    filled_user = await self._fill_first(root, phone_selectors, username)
                     if not filled_user:
                         # 兜底:登录表单中的第一个可见文本框
                         try:
                             loc = root.locator("form:has-text('登录') input[type='text']").first
-                            if loc and loc.is_visible():
-                                loc.click(timeout=1000)
-                                loc.fill(username)
+                            if loc and await loc.is_visible():
+                                await loc.click(timeout=1000)
+                                await loc.fill(username)
                                 filled_user = True
                         except Exception:
                             pass
@@ -595,7 +595,7 @@ class TiktokLogin(LoginComponent):
                 ]
                 filled_pwd = False
                 for root in roots:
-                    filled_pwd = self._fill_first(root, pwd_selectors, password)
+                    filled_pwd = await self._fill_first(root, pwd_selectors, password)
                     if filled_pwd:
                         break
                 if self.logger:
@@ -604,25 +604,25 @@ class TiktokLogin(LoginComponent):
                     print(f"[TiktokLogin] password filled: {filled_pwd}")
 
             # 点击登录(主页面与 iframe 内的按钮都尝试)+ 网络抖动重试
-            def click_login_once() -> bool:
+            async def click_login_once() -> bool:
                 ok = False
                 for r in ([page] + (list(getattr(page, 'frames', [])) if hasattr(page, 'frames') else [])):
                     ok = (
-                        self._click_if_present(r, "button:has-text('登录')", timeout=2500)
-                        or self._click_if_present(r, "button[type='submit']", timeout=2500)
-                        or self._click_text_if_present(r, "登录", timeout=2000)
+                        await self._click_if_present(r, "button:has-text('登录')", timeout=2500)
+                        or await self._click_if_present(r, "button[type='submit']", timeout=2500)
+                        or await self._click_text_if_present(r, "登录", timeout=2000)
                     )
                     if ok:
                         break
                 if not ok:
                     try:
-                        page.keyboard.press("Enter")
+                        await page.keyboard.press("Enter")
                         ok = True
                     except Exception:
                         pass
                 return ok
 
-            clicked = click_login_once()
+            clicked = await click_login_once()
             if self.logger:
                 self.logger.info(f"[TiktokLogin] clicked login button: {clicked}")
             else:
@@ -655,7 +655,7 @@ class TiktokLogin(LoginComponent):
                     if "account/login" not in str(page.url):
                         left_login = True
                         break
-                    page.wait_for_timeout(500)
+                    await page.wait_for_timeout(500)
 
                 if twofa_found or left_login:
                     break
@@ -664,8 +664,8 @@ class TiktokLogin(LoginComponent):
                 if attempt <= max_retries:
                     if self.logger:
                         self.logger.info(f"[TiktokLogin] still on login without 2FA, retry click ({attempt}/{max_retries})")
-                    clicked = click_login_once()
-                    page.wait_for_timeout(500)
+                    clicked = await click_login_once()
+                    await page.wait_for_timeout(500)
 
             # 处理双重验证(iframe 兼容)
             had_2fa = False
@@ -691,8 +691,8 @@ class TiktokLogin(LoginComponent):
 
             # 仅当仍在登录页且检测到 2FA 时才进入 2FA 处理,避免已在首页却误触发输入
             if had_2fa and ("account/login" in str(page.url or "")):
-                self._maybe_handle_2fa(page)
-                page.wait_for_timeout(1200)
+                await self._maybe_handle_2fa(page)
+                await page.wait_for_timeout(1200)
 
             # 成功条件:
             # 1) URL 已跳转离开登录页;或

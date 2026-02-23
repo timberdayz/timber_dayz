@@ -158,16 +158,25 @@ async def create_config(
 @router.get("/configs/{config_id}", response_model=CollectionConfigResponse)
 async def get_config(
     config_id: int = Path(..., description="配置ID"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """获取采集配置详情"""
-    result = await db.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
-    config = result.scalar_one_or_none()
-    
-    if not config:
-        raise HTTPException(status_code=404, detail="配置不存在")
-    
-    return config
+    try:
+        result = await db.execute(
+            select(CollectionConfig).where(CollectionConfig.id == config_id)
+        )
+        config = result.scalar_one_or_none()
+
+        if not config:
+            raise HTTPException(status_code=404, detail="配置不存在")
+
+        # 显式转为响应模型，避免惰性加载或 JSON 列序列化问题
+        return CollectionConfigResponse.model_validate(config)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("获取采集配置详情失败: config_id=%s", config_id)
+        raise HTTPException(status_code=500, detail="获取配置详情失败")
 
 
 @router.put("/configs/{config_id}", response_model=CollectionConfigResponse)
@@ -199,20 +208,30 @@ async def update_config(
 @router.delete("/configs/{config_id}", response_model=SuccessResponse[None])
 async def delete_config(
     config_id: int,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
     """删除采集配置"""
-    result = await db.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
-    config = result.scalar_one_or_none()
-    
-    if not config:
-        raise HTTPException(status_code=404, detail="配置不存在")
-    
-    await db.delete(config)
-    await db.commit()
-    
-    logger.info(f"Deleted collection config: {config.name}")
-    return SuccessResponse(success=True, message="配置已删除")
+    try:
+        result = await db.execute(
+            select(CollectionConfig).where(CollectionConfig.id == config_id)
+        )
+        config = result.scalar_one_or_none()
+
+        if not config:
+            raise HTTPException(status_code=404, detail="配置不存在")
+
+        name = config.name
+        await db.delete(config)
+        await db.commit()
+
+        logger.info("Deleted collection config: %s (id=%s)", name, config_id)
+        # SuccessResponse[None] 必须显式传 data=None，否则 Pydantic 校验必填字段失败导致 500
+        return SuccessResponse(success=True, message="配置已删除", data=None)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("删除采集配置失败: config_id=%s", config_id)
+        raise HTTPException(status_code=500, detail="删除配置失败")
 
 
 # ============================================================
@@ -231,60 +250,53 @@ async def list_accounts(
     v4.7.0: 从数据库读取账号信息,返回脱敏后的数据
     [*] Phase 3: 添加缓存支持(5分钟TTL)
     """
-    # [*] Phase 3: 尝试从缓存获取
-    if request and hasattr(request.app.state, 'cache_service'):
-        cache_service = request.app.state.cache_service
-        cached_data = await cache_service.get("accounts_list", platform=platform)
-        if cached_data is not None:
-            logger.debug(f"[Cache] 账号列表缓存命中: platform={platform}")
-            return cached_data
-    
+    # [*] Phase 3: 尝试从缓存获取（缓存存的是可 JSON 序列化的 dict 列表）
+    if request and hasattr(request.app.state, "cache_service"):
+        try:
+            cache_service = request.app.state.cache_service
+            cached_data = await cache_service.get("accounts_list", platform=platform or "")
+            if cached_data is not None and isinstance(cached_data, list):
+                logger.debug(f"[Cache] 账号列表缓存命中: platform={platform}")
+                return [CollectionAccountResponse(**item) for item in cached_data]
+        except Exception as e:
+            logger.warning(f"[Cache] 读取账号列表缓存失败，回退到数据库: {e}")
+
     try:
-        # #region agent log
-        import json
-        from modules.core.path_manager import get_project_root
-        debug_log_path = get_project_root() / ".cursor" / "debug.log"
-        with open(debug_log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({'location':'collection.py:list_accounts:start','message':'List accounts API called','data':{'platform':platform},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H2'})+'\n')
-        # #endregion
-        
         from backend.services.account_loader_service import get_account_loader_service
-        
+
         account_loader = get_account_loader_service()
-        accounts = account_loader.load_all_accounts(db, platform=platform)
-        
-        # #region agent log
-        with open(debug_log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({'location':'collection.py:list_accounts:loaded','message':'Accounts loaded from service','data':{'count':len(accounts),'firstAccount':accounts[0] if accounts else None},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H2'})+'\n')
-        # #endregion
-        
-        # 转换为API响应格式
+        accounts = await account_loader.load_all_accounts_async(db, platform=platform)
+
+        # 转换为 API 响应格式
         result = []
         for account in accounts:
-            result.append(CollectionAccountResponse(
-                id=account.get("account_id", "unknown"),
-                name=account.get("store_name", account.get("account_id", "unknown")),
-                platform=account.get("platform", "unknown"),
-                shop_id=account.get("shop_region"),
-                status="active" if account.get("enabled", False) else "inactive"
-            ))
-        
-        # #region agent log
-        with open(debug_log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps({'location':'collection.py:list_accounts:result','message':'Result prepared','data':{'count':len(result),'firstResult':{'id':result[0].id,'name':result[0].name,'platform':result[0].platform,'shop_id':result[0].shop_id} if result else None},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H2,H3'})+'\n')
-        # #endregion
-        
+            result.append(
+                CollectionAccountResponse(
+                    id=account.get("account_id", "unknown"),
+                    name=account.get("store_name", account.get("account_id", "unknown")),
+                    platform=account.get("platform", "unknown"),
+                    shop_id=account.get("shop_region"),
+                    status="active" if account.get("enabled", False) else "inactive",
+                )
+            )
+
         logger.info(f"返回账号列表: {len(result)} 条记录")
-        
-        # [*] Phase 3: 写入缓存
-        if request and hasattr(request.app.state, 'cache_service'):
-            cache_service = request.app.state.cache_service
-            await cache_service.set("accounts_list", result, ttl=300, platform=platform)  # 5分钟TTL
-        
+
+        # [*] Phase 3: 写入缓存（只缓存可 JSON 序列化的 dict，避免 Pydantic 无法序列化导致异常）
+        if request and hasattr(request.app.state, "cache_service"):
+            try:
+                cache_service = request.app.state.cache_service
+                to_cache = [r.model_dump() for r in result]
+                await cache_service.set(
+                    "accounts_list", to_cache, ttl=300, platform=platform or ""
+                )
+            except Exception as e:
+                logger.warning(f"[Cache] 写入账号列表缓存失败: {e}")
+
         return result
-    
+
     except Exception as e:
-        logger.error(f"加载账号列表失败: {e}")
+        logger.exception("加载账号列表失败")
         raise HTTPException(status_code=500, detail="加载账号列表失败")
 
 
@@ -309,22 +321,16 @@ async def create_task(
     # 生成任务ID
     task_uuid = str(uuid.uuid4())
     
-    # v4.7.0: 获取账号信息并过滤数据域
+    # 新采集系统：账号统一从数据库加载（与 GET /collection/accounts 一致）
+    # 旧采集系统使用 local_accounts.py，已废弃；此处不再使用 LOCAL_ACCOUNTS
     from backend.services.task_service import TaskService
-    from local_accounts import LOCAL_ACCOUNTS
-    
-    # 查找账号信息
-    account_info = None
-    for platform_group, accounts in LOCAL_ACCOUNTS.items():
-        for acc in accounts:
-            if acc.get('account_id') == request.account_id:
-                account_info = acc
-                break
-        if account_info:
-            break
-    
+    from backend.services.account_loader_service import get_account_loader_service
+
+    account_loader = get_account_loader_service()
+    account_info = await account_loader.load_account_async(request.account_id, db)
+
     if not account_info:
-        raise HTTPException(status_code=404, detail=f"账号 {request.account_id} 不存在")
+        raise HTTPException(status_code=404, detail=f"账号 {request.account_id} 不存在或未启用，请先在账号管理中维护")
     
     # 过滤数据域
     task_service = TaskService(db)
@@ -450,37 +456,48 @@ async def get_task(
     return task
 
 
+TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled", "partial_success"})
+
+
 @router.delete("/tasks/{task_id}", response_model=SuccessResponse[None])
-async def cancel_task(
+async def cancel_or_delete_task(
     task_id: str = Path(..., description="任务ID"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
-    """取消任务"""
+    """
+    取消或删除任务：
+    - 终态任务(已完成/失败/已取消/部分成功)：物理删除记录
+    - 非终态任务(pending/queued/running/paused)：仅取消(置为 cancelled)，保留记录
+    """
     result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
     task = result.scalar_one_or_none()
-    
+
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
-    # 只能取消pending或running状态的任务
-    if task.status not in ["pending", "queued", "running", "paused"]:
-        raise HTTPException(status_code=400, detail=f"无法取消{task.status}状态的任务")
-    
-    task.status = "cancelled"
-    task.error_message = "用户取消"
-    
-    # 记录日志
-    log = CollectionTaskLog(
-        task_id=task.id,
-        level="info",
-        message="任务已取消",
-        details={"previous_status": task.status}
-    )
-    db.add(log)
-    await db.commit()
-    
-    logger.info(f"Cancelled task: {task_id}")
-    return {"message": "任务已取消"}
+
+    if task.status in TERMINAL_TASK_STATUSES:
+        # 终态：删除记录（关联的 CollectionTaskLog 由 CASCADE 或需显式删除）
+        await db.delete(task)
+        await db.commit()
+        logger.info("Deleted terminal task: %s (status=%s)", task_id, task.status)
+        return SuccessResponse(success=True, message="任务已删除", data=None)
+    else:
+        # 非终态：取消
+        if task.status not in ["pending", "queued", "running", "paused"]:
+            raise HTTPException(status_code=400, detail=f"无法取消{task.status}状态的任务")
+        prev_status = task.status
+        task.status = "cancelled"
+        task.error_message = "用户取消"
+        log = CollectionTaskLog(
+            task_id=task.id,
+            level="info",
+            message="任务已取消",
+            details={"previous_status": prev_status},
+        )
+        db.add(log)
+        await db.commit()
+        logger.info("Cancelled task: %s", task_id)
+        return SuccessResponse(success=True, message="任务已取消", data=None)
 
 
 @router.post("/tasks/{task_id}/retry", response_model=TaskResponse)
@@ -1058,6 +1075,55 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
 
 
 # ============================================================
+# 步骤可观测：状态回调(独立 session 写库，不阻塞执行器)
+# ============================================================
+
+async def _collection_step_status_callback(
+    task_id: str,
+    progress: int,
+    message: str,
+    current_domain: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    """
+    采集步骤状态回调：更新任务进度并可选写入步骤日志。
+    使用独立 AsyncSession 每次写后 commit，不与后台任务 session 混用。
+    异常仅打日志不 re-raise，避免回调失败中断采集。
+    """
+    from backend.models.database import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+            task = result.scalar_one_or_none()
+            if not task:
+                return
+            task.progress = progress
+            task.current_step = message
+            if current_domain is not None:
+                task.current_domain = current_domain
+            if details is not None:
+                log_level = "error" if details.get("error") else "info"
+                log = CollectionTaskLog(task_id=task.id, level=log_level, message=message, details=details)
+                session.add(log)
+            await session.commit()
+    except Exception as e:
+        logger.error(f"Step status callback failed for task {task_id}: {e}")
+
+
+async def _is_collection_task_cancelled(task_id: str) -> bool:
+    """检测任务是否已被用户取消(供 executor is_cancelled_callback)."""
+    from backend.models.database import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+            task = result.scalar_one_or_none()
+            return task is not None and task.status == "cancelled"
+    except Exception as e:
+        logger.error(f"Cancel check failed for task {task_id}: {e}")
+        return False
+
+
+# ============================================================
 # 后台任务执行(v4.7.0)
 # ============================================================
 
@@ -1128,8 +1194,11 @@ async def _execute_collection_task_background(
                 # v4.7.4: 失败状态通过 HTTP 轮询获取
                 return
             
-            # 创建执行器
-            executor = CollectionExecutorV2()
+            # 创建执行器(注入步骤回调与取消检测)
+            executor = CollectionExecutorV2(
+                status_callback=_collection_step_status_callback,
+                is_cancelled_callback=_is_collection_task_cancelled,
+            )
             
             # 执行采集
             from playwright.async_api import async_playwright

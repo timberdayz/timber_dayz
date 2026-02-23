@@ -47,6 +47,11 @@
 2. 错峰（如 6:30、12:30、18:30、22:30）：本地执行本地→云端同步脚本。
 3. 云端：应用只读云端库，不跑采集、不跑同步脚本。
 
+### 5. 开发态采集模式（单后端、一键启动）
+
+- **决策**：本机开发/测试采集时，通过 run.py 的 `--collection` 或 compose 覆盖（如 docker-compose.collection-dev.yml）使用带 Playwright 的后端构建，一键启动完整栈（Postgres、Redis、该后端、Celery、Metabase、前端），保持**单后端**、端口与日常一致；与正式采集环境一致，无需「起两后端再停一个」。
+- **理由**：与「单后端、按角色选镜像」原则一致，便于开发验证采集与数据同步。
+
 ## Open Questions
 
 - ENABLE_COLLECTION 与 DEPLOYMENT_ROLE 二选一或两者并存（一个为主、一个兼容）由实现时确定。

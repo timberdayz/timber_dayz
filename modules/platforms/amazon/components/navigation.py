@@ -9,7 +9,7 @@ class AmazonNavigation(NavigationComponent):
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
 
-    def run(self, page: Any, target: str | None = None) -> NavResult:  # type: ignore[override]
+    async def run(self, page: Any, target: str | None = None) -> NavResult:  # type: ignore[override]
         if self.logger:
             self.logger.info(f"[AmazonNavigation] skeleton navigate to: {target}")
         return NavResult(success=True, url=page.url if hasattr(page, 'url') else '', message="skeleton")

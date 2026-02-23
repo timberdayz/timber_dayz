@@ -326,8 +326,13 @@ async def lifespan(app: FastAPI):
             if interrupted_count > 0:
                 logger.warning(f"[恢复] 标记 {interrupted_count} 个中断任务")
             
+            # 按部署角色决定是否启动采集调度器（v4.19.x 本地与云端部署角色区分）
+            enable_collection = os.getenv("ENABLE_COLLECTION", "true").lower() in ("true", "1")
+            deployment_role = os.getenv("DEPLOYMENT_ROLE", "").lower()
+            if not enable_collection or deployment_role == "cloud":
+                logger.info("[调度器] 未启用采集调度器 (ENABLE_COLLECTION=false 或 DEPLOYMENT_ROLE=cloud)")
             # 初始化采集调度器
-            if APSCHEDULER_AVAILABLE:
+            elif APSCHEDULER_AVAILABLE:
                 scheduler = CollectionScheduler.get_instance(
                     db_session_factory=SessionLocal
                 )

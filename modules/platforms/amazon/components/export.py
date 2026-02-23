@@ -19,7 +19,7 @@ class AmazonExporterComponent(ExportComponent):
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
 
-    def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
+    async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
             account = self.ctx.account or {}
             cfg = self.ctx.config or {}

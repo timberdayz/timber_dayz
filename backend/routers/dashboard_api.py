@@ -369,12 +369,13 @@ async def get_clearance_ranking(
 @router.get("/annual-summary/kpi")
 async def get_annual_summary_kpi(
     request: Request,
+    db: AsyncSession = Depends(get_async_db),
     granularity: str = Query(..., description="粒度(monthly|yearly)"),
     period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
 ):
     """
     年度数据总结 - 核心KPI（仅月度粒度数据）
-    返回核心 KPI + 成本与产出（成本可由后端聚合，缺失时为 null）
+    返回核心 KPI + 成本与产出（总成本 = A 类 operating_costs + B 类订单成本，口径见 docs/COST_DATA_SOURCES_AND_DEFINITIONS.md）
     """
     try:
         if granularity not in ("monthly", "yearly"):
@@ -397,13 +398,16 @@ async def get_annual_summary_kpi(
         result = await service.query_question("annual_summary_kpi", metabase_params)
         if not isinstance(result, dict):
             result = result or {}
-        # 成本与产出由后端聚合时合并；暂无聚合时补充 null，前端展示「暂无数据」
-        result.setdefault("total_cost", None)
-        result.setdefault("gmv", result.get("gmv"))  # 已有
-        result.setdefault("cost_to_revenue_ratio", None)
-        result.setdefault("roi", None)
-        result.setdefault("gross_margin", None)
-        result.setdefault("net_margin", None)
+
+        # 成本与产出：后端聚合 A 类 + B 类，与成本文档一致
+        from backend.services.annual_cost_aggregate import get_annual_cost_aggregate
+        cost_agg = await get_annual_cost_aggregate(db, granularity, period)
+        result["total_cost"] = cost_agg["total_cost"]
+        result["gmv"] = result.get("gmv") if result.get("gmv") is not None else cost_agg["gmv"]
+        result["cost_to_revenue_ratio"] = cost_agg["cost_to_revenue_ratio"]
+        result["roi"] = cost_agg["roi"]
+        result["gross_margin"] = cost_agg["gross_margin"]
+        result["net_margin"] = cost_agg["net_margin"]
 
         response = success_response(data=result)
         if request and hasattr(request.app.state, "cache_service"):
@@ -419,24 +423,22 @@ async def get_annual_summary_kpi(
 
 @router.get("/annual-summary/by-shop")
 async def get_annual_summary_by_shop(
+    db: AsyncSession = Depends(get_async_db),
     granularity: str = Query(..., description="粒度(monthly|yearly)"),
     period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
 ):
     """
-    年度数据总结 - 按店铺/平台下钻
-    返回各店铺 GMV、总成本、成本产出比、毛利率、净利率、ROI。数据来自 Metabase annual_summary_by_shop。
+    年度数据总结 - 按店铺下钻（2.3）
+    返回各店铺总成本(A+B)、GMV、成本产出比、ROI、毛利率、净利率。口径见 docs/COST_DATA_SOURCES_AND_DEFINITIONS.md；
+    店铺键约定：operating_costs.店铺ID = 'platform_code|shop_id' 时与订单侧一致。
     """
     try:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity 必须为 monthly 或 yearly")
-        service = get_metabase_service()
-        result = await service.query_question("annual_summary_by_shop", {"granularity": granularity, "period": period})
-        data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
+        from backend.services.annual_cost_aggregate import get_annual_cost_aggregate_by_shop
+        data = await get_annual_cost_aggregate_by_shop(db, granularity, period)
         return JSONResponse(content=success_response(data=data))
     except ValueError as e:
-        if "Question ID 未找到" in str(e) or "METABASE" in str(e):
-            logger.warning(f"年度总结按店铺 Metabase 未配置: {e}")
-            return JSONResponse(content=success_response(data=[]))
         logger.error(f"年度总结按店铺查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

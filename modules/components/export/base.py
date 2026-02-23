@@ -82,6 +82,8 @@ def build_standard_output_root(
 
 
 class ExportComponent(ComponentBase):
-    def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
-        raise NotImplementedError
+    """实现必须为 async，即 async def run(self, page, mode=...) -> ExportResult。"""
+
+    async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
+        raise NotImplementedError("Implementations must be async: async def run(self, page, mode=...) -> ExportResult")
 

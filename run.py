@@ -16,6 +16,7 @@
     python run.py --backend-only       # 仅启动后端
     python run.py --frontend-only      # 仅启动前端
     python run.py --no-celery          # 不启动Celery worker
+    python run.py --use-docker --with-metabase --collection  # 采集环境（单后端带Playwright）
 """
 
 import subprocess
@@ -26,6 +27,16 @@ import argparse
 from pathlib import Path
 import platform as sys_platform
 import os
+
+# 本地启动时加载项目根目录 .env，使 check_redis/check_postgresql 及后端能读取 REDIS_URL、DATABASE_URL 等
+_project_root = Path(__file__).resolve().parent
+_env_file = _project_root / ".env"
+if _env_file.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env_file)
+    except ImportError:
+        pass
 
 def safe_print(text):
     """安全打印（处理Windows GBK编码）"""
@@ -190,27 +201,33 @@ def start_backend():
     safe_print("  地址: http://localhost:8001")
     safe_print("  文档: http://localhost:8001/api/docs")
     
-    backend_dir = Path(__file__).parent / "backend"
+    project_root = Path(__file__).parent
+    backend_dir = project_root / "backend"
     
     if sys_platform.system() == "Windows":
-        # Windows: 使用Start-Process在新窗口启动
-        # 先构建路径字符串，避免f-string转义问题
-        backend_path = str(backend_dir)
-        cmd = f'Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd {backend_path}; python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload"'
+        # Windows: 设置 PYTHONPATH 使 uvicorn 主进程与 --reload 子进程都能 import backend
+        work_dir = str(project_root.resolve())
+        # PowerShell: 单引号内路径中的单引号需写成 ''
+        work_dir_ps = work_dir.replace("'", "''")
+        inner_cmd = "$env:PYTHONPATH='{}'; python -m uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload".format(work_dir_ps)
+        cmd = (
+            'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" -WorkingDirectory "{}"'
+        ).format(inner_cmd.replace('"', '`"'), work_dir.replace('"', '`"'))
         
         process = subprocess.Popen(
             ["powershell", "-Command", cmd],
-            shell=True
+            shell=True,
+            cwd=project_root
         )
         
         safe_print("  [OK] 后端服务已在新窗口启动")
         safe_print("  提示: 查看新打开的PowerShell窗口获取详细日志")
     else:
-        # Unix: 直接启动
+        # Unix: 直接启动（项目根下运行以便 import backend）
         process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "main:app",
+            [sys.executable, "-m", "uvicorn", "backend.main:app",
              "--host", "0.0.0.0", "--port", "8001", "--reload"],
-            cwd=backend_dir
+            cwd=project_root
         )
         safe_print("  [OK] 后端服务已启动")
     
@@ -239,14 +256,16 @@ def start_frontend():
             pass
     
     if sys_platform.system() == "Windows":
-        # Windows: 使用Start-Process在新窗口启动
-        # 先构建路径字符串，避免f-string转义问题
-        frontend_path = str(frontend_dir)
-        cmd = f'Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd {frontend_path}; npm run dev"'
+        # Windows: 用 -WorkingDirectory 指定前端目录，避免 -Command 内 path 引号问题
+        frontend_path = str(frontend_dir.resolve())
+        cmd = (
+            'Start-Process powershell -ArgumentList "-NoExit", "-Command", "npm run dev" -WorkingDirectory "{}"'
+        ).format(frontend_path.replace('"', '`"'))
         
         process = subprocess.Popen(
             ["powershell", "-Command", cmd],
-            shell=True
+            shell=True,
+            cwd=Path(__file__).parent
         )
         
         safe_print("  [OK] 前端服务已在新窗口启动")
@@ -270,10 +289,13 @@ def start_celery_worker():
     project_root = Path(__file__).parent
     
     if sys_platform.system() == "Windows":
-        # Windows: 使用Start-Process在新窗口启动
-        backend_path = str(backend_dir)
-        # Windows必须使用--pool=solo
-        cmd = f'Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd {backend_path}; python -m celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --pool=solo --concurrency=4"'
+        # Windows: 设置 PYTHONPATH 并指定 -WorkingDirectory，保证子进程能 import backend
+        work_dir = str(project_root.resolve())
+        work_dir_ps = work_dir.replace("'", "''")
+        celery_cmd = "$env:PYTHONPATH='{}'; python -m celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --pool=solo --concurrency=4".format(work_dir_ps)
+        cmd = (
+            'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" -WorkingDirectory "{}"'
+        ).format(celery_cmd.replace('"', '`"'), work_dir.replace('"', '`"'))
         
         process = subprocess.Popen(
             ["powershell", "-Command", cmd],
@@ -407,8 +429,10 @@ def pre_flight_check_docker(project_root):
     return True
 
 
-def start_services_with_docker_compose():
-    """使用Docker Compose启动服务（v4.19.6新增，生产模式：确保所有服务在容器中运行）"""
+def start_services_with_docker_compose(use_collection=False):
+    """使用Docker Compose启动服务（v4.19.6新增，生产模式：确保所有服务在容器中运行）
+    use_collection: 若为 True，加载 docker-compose.collection-dev.yml，使 backend 使用 Dockerfile.collection（带 Playwright）
+    """
     safe_print("\n[启动] 使用Docker Compose启动服务...")
     
     project_root = Path(__file__).parent
@@ -497,6 +521,12 @@ def start_services_with_docker_compose():
     if compose_metabase_dev.exists():
         compose_files.extend(["-f", str(compose_metabase_dev)])
         safe_print("  [INFO] 已加载 Metabase 开发配置（端口映射: 8080:3000）")
+    
+    # [v4.19.x] 采集模式：使 backend 使用 Dockerfile.collection（带 Playwright）
+    compose_collection_dev = project_root / "docker-compose.collection-dev.yml"
+    if use_collection and compose_collection_dev.exists():
+        compose_files.extend(["-f", str(compose_collection_dev)])
+        safe_print("  [INFO] 已加载采集开发配置（backend 使用 Dockerfile.collection，端口 8001）")
     
     try:
         # 启动Redis和PostgreSQL
@@ -847,6 +877,7 @@ def main():
     parser.add_argument("--with-metabase", action="store_true", help="同时启动Metabase（如果未运行）")
     parser.add_argument("--no-celery", action="store_true", help="不启动Celery worker（v4.19.6新增）")
     parser.add_argument("--use-docker", action="store_true", help="使用Docker Compose启动服务（推荐，统一管理）")
+    parser.add_argument("--collection", action="store_true", help="采集模式：与 --use-docker 同时使用时，backend 使用带 Playwright 的镜像（Dockerfile.collection），用于采集环境测试")
     args = parser.parse_args()
     
     print_banner()
@@ -855,8 +886,8 @@ def main():
     if args.use_docker:
         safe_print("\n[模式] Docker Compose模式（统一管理服务）")
         if not args.frontend_only:
-            # 启动Docker服务（Redis、PostgreSQL、Celery Worker）
-            docker_success = start_services_with_docker_compose()
+            # 启动Docker服务（Redis、PostgreSQL、Celery Worker）；--collection 时使用带 Playwright 的 backend
+            docker_success = start_services_with_docker_compose(use_collection=args.collection)
             if not docker_success:
                 safe_print("\n[ERROR] Docker Compose启动失败")
                 safe_print("  提示: 可以尝试手动运行: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d")
@@ -922,7 +953,8 @@ def main():
         if not args.frontend_only and not args.use_docker:
             backend_process = start_backend()
             processes.append(("backend", backend_process))
-            
+            # 短暂等待，避免误判为就绪（uvicorn --reload 子进程需时间加载）
+            time.sleep(2)
             # 等待后端就绪
             if wait_for_service(8001, "后端API", 20):
                 safe_print("  [OK] 后端API就绪")
@@ -944,6 +976,7 @@ def main():
                 processes.append(("celery", celery_process))
                 # 给Celery一些启动时间
                 time.sleep(3)
+                safe_print("  提示: 若出现时钟漂移(28800秒)警告，多为Docker内Celery与本机时区不同，可停止Docker Celery: docker-compose ... down 或 --remove-orphans")
             else:
                 safe_print("\n[SKIP] 跳过Celery Worker（Redis不可用）")
                 safe_print("  提示: 数据同步将使用降级模式（asyncio.create_task）")
@@ -989,8 +1022,13 @@ def main():
         safe_print("="*80)
         if args.use_docker:
             safe_print("\n[提示] Docker Compose模式：服务在容器中运行")
-            safe_print("[提示] 停止服务: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full down")
-            safe_print("[提示] 查看日志: docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f")
+            if args.collection:
+                safe_print("[提示] 当前为采集模式（backend 使用 Dockerfile.collection，带 Playwright）")
+                safe_print("[提示] 停止服务: docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml -f docker-compose.metabase.yml -f docker-compose.metabase.dev.yml --profile dev-full down")
+                safe_print("[提示] 查看日志: docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml logs -f backend")
+            else:
+                safe_print("[提示] 停止服务: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full down")
+                safe_print("[提示] 查看日志: docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f")
         else:
             safe_print("\n[提示] 服务已在独立窗口运行，关闭窗口即可停止服务")
             safe_print("[提示] 按 Ctrl+C 退出此脚本（服务继续运行）")

@@ -505,22 +505,37 @@ class CollectionExecutorV2:
             
             # 检查是否需要跳过登录(恢复任务)
             if context.current_component_index == 0:
-                # 1. 执行登录组件([*] Phase 9.4: 使用版本选择)
+                # 1. 执行登录组件([*] Phase 9.4: 使用版本选择) + 步骤可观测成对打点
                 await self._update_status(task_id, 5, "正在加载登录组件...")
                 await self._check_cancelled(task_id)
-                
+                login_start_time = datetime.now()
+                await self._update_status(
+                    task_id, 5, "登录开始",
+                    details={"step_id": "login", "component": "login", "data_domain": None}
+                )
                 login_component = self._load_component_with_version(
                     f"{platform}/login",
                     params,
                     enable_ab_test=True  # 启用A/B测试
                 )
-                
                 await self._update_status(task_id, 10, "正在登录...")
-                login_success = await self._execute_component(page, login_component, step_popup_handler)
-                
+                login_success = False
+                try:
+                    login_success = await self._execute_component(page, login_component, step_popup_handler)
+                    duration_ms = int((datetime.now() - login_start_time).total_seconds() * 1000)
+                    await self._update_status(
+                        task_id, 10, "登录结束",
+                        details={"step_id": "login", "component": "login", "success": login_success, "duration_ms": duration_ms}
+                    )
+                except Exception as e:
+                    duration_ms = int((datetime.now() - login_start_time).total_seconds() * 1000)
+                    await self._update_status(
+                        task_id, 10, "登录失败",
+                        details={"step_id": "login", "component": "login", "success": False, "duration_ms": duration_ms, "error": str(e)}
+                    )
+                    raise
                 if not login_success:
                     raise StepExecutionError("登录组件执行失败,成功标准验证未通过")
-                
                 logger.info(f"Task {task_id}: Login component completed successfully")
                 context.current_component_index = 1
             
@@ -563,22 +578,18 @@ class CollectionExecutorV2:
                     progress = 20 + int(70 * domain_index / total_domains_count)
                     await self._update_status(task_id, progress, f"正在采集 {full_domain}...")
                     await self._check_cancelled(task_id)
-                    
+                    domain_export_start = datetime.now()
+                    await self._update_status(
+                        task_id, progress, f"采集 {full_domain} 开始",
+                        current_domain=full_domain,
+                        details={"step_id": f"export_{full_domain.replace(':', '_')}", "component": f"{domain}_export", "data_domain": full_domain}
+                    )
                     # 更新参数中的数据域
                     params['params']['data_domain'] = domain
                     if sub_domain:
                         params['params']['sub_domain'] = sub_domain
                     
                     try:
-                        # v4.7.0: 回调更新 current_domain
-                        if self.status_callback:
-                            try:
-                                # 尝试调用扩展版本的回调(带current_domain参数)
-                                await self.status_callback(task_id, progress, f"正在采集 {full_domain}...", full_domain)
-                            except TypeError:
-                                # 降级到旧版本回调
-                                await self.status_callback(task_id, progress, f"正在采集 {full_domain}...")
-                        
                         # 加载并执行导出组件
                         component_name = f"{platform}/{domain}_export"
                         if sub_domain:
@@ -602,14 +613,25 @@ class CollectionExecutorV2:
                         
                         if file_path:
                             context.collected_files.append(file_path)
-                        
-                        # v4.7.0: 标记为成功
+                        # v4.7.0: 标记为成功 + 步骤结束打点
                         context.completed_domains.append(full_domain)
+                        duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
+                        await self._update_status(
+                            task_id, progress, f"采集 {full_domain} 成功",
+                            current_domain=full_domain,
+                            details={"step_id": f"export_{full_domain.replace(':', '_')}", "component": f"{domain}_export", "data_domain": full_domain, "success": True, "duration_ms": duration_ms}
+                        )
                         logger.info(f"Task {task_id}: Successfully collected {full_domain}")
                     
                     except FileNotFoundError as e:
-                        # 组件不存在,标记为失败但继续
+                        # 组件不存在,标记为失败但继续 + 步骤结束打点
                         error_msg = f"Export component not found: {component_name}"
+                        duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
+                        await self._update_status(
+                            task_id, progress, f"采集 {full_domain} 失败",
+                            current_domain=full_domain,
+                            details={"step_id": f"export_{full_domain.replace(':', '_')}", "component": f"{domain}_export", "data_domain": full_domain, "success": False, "duration_ms": duration_ms, "error": error_msg}
+                        )
                         logger.warning(f"Task {task_id}: {error_msg}")
                         context.failed_domains.append({
                             "domain": full_domain,
@@ -618,13 +640,17 @@ class CollectionExecutorV2:
                         continue
                     
                     except VerificationRequiredError as e:
-                        # 验证码暂停,不更新completed/failed,等待恢复
+                        # 验证码暂停,不更新completed/failed,等待恢复 + 步骤结束打点
+                        duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
+                        await self._update_status(
+                            task_id, progress, f"采集 {full_domain} 暂停(验证码)",
+                            current_domain=full_domain,
+                            details={"step_id": f"export_{full_domain.replace(':', '_')}", "component": f"{domain}_export", "data_domain": full_domain, "success": False, "duration_ms": duration_ms, "error": f"需要验证码: {e.verification_type}"}
+                        )
                         context.verification_required = True
                         context.verification_type = e.verification_type
                         context.screenshot_path = e.screenshot_path
-                        
                         # v4.7.4: 验证码状态通过 HTTP 轮询获取,不再使用 WebSocket
-                        
                         return CollectionResult(
                             task_id=task_id,
                             status="paused",
@@ -638,18 +664,27 @@ class CollectionExecutorV2:
                         )
                     
                     except Exception as e:
-                        # v4.7.0: 部分成功机制 - 单域失败不影响其他域
+                        # v4.7.0: 部分成功机制 - 单域失败不影响其他域 + 步骤结束打点
                         error_msg = f"{type(e).__name__}: {str(e)}"
+                        duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
+                        await self._update_status(
+                            task_id, progress, f"采集 {full_domain} 失败",
+                            current_domain=full_domain,
+                            details={"step_id": f"export_{full_domain.replace(':', '_')}", "component": f"{domain}_export", "data_domain": full_domain, "success": False, "duration_ms": duration_ms, "error": error_msg}
+                        )
                         logger.error(f"Task {task_id}: Failed to collect {full_domain} - {error_msg}")
                         context.failed_domains.append({
                             "domain": full_domain,
                             "error": error_msg
                         })
-                        # 继续执行其他域
                         continue
             
-            # 4. 处理采集到的文件
-            await self._update_status(task_id, 95, "正在处理文件...")
+            # 4. 处理采集到的文件 + 步骤可观测成对打点
+            file_process_start = datetime.now()
+            await self._update_status(
+                task_id, 95, "文件处理开始",
+                details={"step_id": "file_process", "component": "file_process", "data_domain": None}
+            )
             processed_files = await self._process_files(
                 context.collected_files, 
                 platform, 
@@ -657,6 +692,11 @@ class CollectionExecutorV2:
                 granularity,
                 account=account,
                 date_range=date_range
+            )
+            duration_ms = int((datetime.now() - file_process_start).total_seconds() * 1000)
+            await self._update_status(
+                task_id, 95, "文件处理结束",
+                details={"step_id": "file_process", "component": "file_process", "success": True, "duration_ms": duration_ms}
             )
             
             # 5. v4.7.0: 根据成功/失败情况决定最终状态
@@ -2431,27 +2471,30 @@ class CollectionExecutorV2:
         
         return ""
     
-    async def _update_status(self, task_id: str, progress: int, message: str, current_domain: str = None) -> None:
+    async def _update_status(
+        self,
+        task_id: str,
+        progress: int,
+        message: str,
+        current_domain: str = None,
+        details: Dict[str, Any] = None,
+    ) -> None:
         """
-        更新任务状态
-        
-        Args:
-            task_id: 任务ID
-            progress: 进度百分比(0-100)
-            message: 状态消息
-            current_domain: 当前采集域(v4.7.0)
+        更新任务状态；可选传入 details 写入步骤日志(step_id/component/data_domain/success/duration_ms/error)。
         """
         logger.debug(f"Task {task_id}: {progress}% - {message}")
-        
-        # 现有回调
         if self.status_callback:
             try:
-                # 尝试调用扩展版本的回调(带current_domain参数)
-                try:
-                    await self.status_callback(task_id, progress, message, current_domain)
-                except TypeError:
-                    # 降级到旧版本回调
-                    await self.status_callback(task_id, progress, message)
+                if details is not None:
+                    try:
+                        await self.status_callback(task_id, progress, message, current_domain, details)
+                    except TypeError:
+                        await self.status_callback(task_id, progress, message, current_domain)
+                else:
+                    try:
+                        await self.status_callback(task_id, progress, message, current_domain)
+                    except TypeError:
+                        await self.status_callback(task_id, progress, message)
             except Exception as e:
                 logger.error(f"Status callback failed: {e}")
         
@@ -2579,9 +2622,13 @@ class CollectionExecutorV2:
         task_download_dir = self.downloads_dir / task_id
         task_download_dir.mkdir(parents=True, exist_ok=True)
         
-        # 1. 第一步:登录(使用主上下文)
+        # 1. 第一步:登录(使用主上下文) + 步骤可观测成对打点
         await self._update_status(task_id, 5, "正在登录...")
-        
+        login_start_time = datetime.now()
+        await self._update_status(
+            task_id, 5, "登录开始",
+            details={"step_id": "login", "component": "login", "data_domain": None}
+        )
         login_context = await browser.new_context(
             accept_downloads=True,
             downloads_path=str(task_download_dir),
@@ -2598,16 +2645,24 @@ class CollectionExecutorV2:
             
             step_popup_handler = StepPopupHandler(self.popup_handler, platform)
             login_success = await self._execute_component(login_page, login_component, step_popup_handler)
-            
+            duration_ms = int((datetime.now() - login_start_time).total_seconds() * 1000)
+            await self._update_status(
+                task_id, 10, "登录结束",
+                details={"step_id": "login", "component": "login", "success": login_success, "duration_ms": duration_ms}
+            )
             if not login_success:
                 raise StepExecutionError("登录组件执行失败")
-            
             # 获取登录后的Cookie和Storage
             cookies = await login_context.cookies()
             storage_state = await login_context.storage_state()
-            
             logger.info(f"Task {task_id}: Login completed, extracted {len(cookies)} cookies")
-            
+        except Exception as e:
+            duration_ms = int((datetime.now() - login_start_time).total_seconds() * 1000)
+            await self._update_status(
+                task_id, 10, "登录失败",
+                details={"step_id": "login", "component": "login", "success": False, "duration_ms": duration_ms, "error": str(e)}
+            )
+            raise
         finally:
             await login_page.close()
             await login_context.close()
@@ -2666,8 +2721,12 @@ class CollectionExecutorV2:
                     else:
                         context.failed_domains.append({"domain": domain, "error": "Execution failed"})
         
-        # 3. 处理采集到的文件
-        await self._update_status(task_id, 95, "正在处理文件...")
+        # 3. 处理采集到的文件 + 步骤可观测成对打点
+        file_process_start = datetime.now()
+        await self._update_status(
+            task_id, 95, "文件处理开始",
+            details={"step_id": "file_process", "component": "file_process", "data_domain": None}
+        )
         processed_files = await self._process_files(
             context.collected_files,
             platform,
@@ -2676,7 +2735,11 @@ class CollectionExecutorV2:
             account=account,
             date_range=date_range
         )
-        
+        duration_ms_fp = int((datetime.now() - file_process_start).total_seconds() * 1000)
+        await self._update_status(
+            task_id, 95, "文件处理结束",
+            details={"step_id": "file_process", "component": "file_process", "success": True, "duration_ms": duration_ms_fp}
+        )
         # 4. 生成最终结果
         duration = (datetime.now() - start_time).total_seconds()
         completed_count = len(context.completed_domains)
@@ -2732,6 +2795,8 @@ class CollectionExecutorV2:
         domain_context = None
         domain_page = None
         
+        domain_export_start = datetime.now()
+        progress = 20 + int(70 * domain_index / total_domains)
         try:
             # 使用共享的storage_state创建新上下文(包含登录Cookie)
             domain_context = await browser.new_context(
@@ -2740,12 +2805,12 @@ class CollectionExecutorV2:
                 downloads_path=str(task_download_dir),
             )
             domain_page = await domain_context.new_page()
-            
             logger.info(f"Task {task_id}: [{domain_index+1}/{total_domains}] Starting {data_domain} in parallel context")
-            
-            # 更新进度(每个域独立报告)
-            progress = 20 + int(70 * domain_index / total_domains)
-            await self._update_status(task_id, progress, f"[并行] 正在采集 {data_domain}...", data_domain)
+            await self._update_status(
+                task_id, progress, f"[并行] 采集 {data_domain} 开始",
+                current_domain=data_domain,
+                details={"step_id": f"export_{data_domain}", "component": f"{data_domain}_export", "data_domain": data_domain}
+            )
             
             # 准备参数
             params = {
@@ -2780,11 +2845,21 @@ class CollectionExecutorV2:
                 step_popup_handler,
                 task_download_dir
             )
-            
+            duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
+            await self._update_status(
+                task_id, progress, f"[并行] 采集 {data_domain} 成功",
+                current_domain=data_domain,
+                details={"step_id": f"export_{data_domain}", "component": f"{data_domain}_export", "data_domain": data_domain, "success": True, "duration_ms": duration_ms}
+            )
             logger.info(f"Task {task_id}: [{domain_index+1}/{total_domains}] {data_domain} completed successfully")
             return (file_path, True)
-        
         except Exception as e:
+            duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
+            await self._update_status(
+                task_id, progress, f"[并行] 采集 {data_domain} 失败",
+                current_domain=data_domain,
+                details={"step_id": f"export_{data_domain}", "component": f"{data_domain}_export", "data_domain": data_domain, "success": False, "duration_ms": duration_ms, "error": str(e)}
+            )
             logger.error(f"Task {task_id}: [{domain_index+1}/{total_domains}] {data_domain} failed - {e}")
             return (None, False)
         

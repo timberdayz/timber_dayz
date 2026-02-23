@@ -144,11 +144,20 @@ export const getTask = async (taskId) => {
 }
 
 /**
- * 取消任务
+ * 取消任务（非终态）或删除任务记录（终态）
  * @param {string} taskId - 任务UUID
  * @returns {Promise<void>}
  */
 export const cancelTask = async (taskId) => {
+  await api.delete(`/collection/tasks/${taskId}`)
+}
+
+/**
+ * 删除任务记录（仅终态任务可删除，与 cancelTask 共用同一 DELETE 接口，后端根据状态决定取消或删除）
+ * @param {string} taskId - 任务UUID
+ * @returns {Promise<void>}
+ */
+export const deleteTask = async (taskId) => {
   await api.delete(`/collection/tasks/${taskId}`)
 }
 
@@ -380,6 +389,7 @@ export default {
   getTasks,
   getTask,
   cancelTask,
+  deleteTask,
   retryTask,
   resumeTask,
   getTaskLogs,
