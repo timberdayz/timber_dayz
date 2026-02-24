@@ -985,6 +985,8 @@ class PlatformAccount(Base):
         Index("ix_platform_accounts_enabled", "enabled"),
         Index("ix_platform_accounts_shop_type", "shop_type"),
         Index("ix_platform_accounts_shop_id", "shop_id"),  # [*] v4.18.1新增
+        Index("ix_platform_accounts_platform_store_name", "platform", "store_name"),  # Orders 模型店铺别称→shop_id JOIN
+        Index("ix_platform_accounts_platform_account_alias", "platform", "account_alias"),  # Orders 模型店铺别称→shop_id JOIN
         {"schema": "core"},
     )
     

@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-西虹ERP系统 - 统一启动脚本 (v4.24.1)
+西虹ERP系统 - 统一启动脚本 (v4.24.2)
 
 版本历史:
+- v4.24.2: --local 时强制 ENVIRONMENT=development，保证本地采集默认有头（fix-local-collection-headed-mode）
 - v4.24.1: 版本号同步；修复 Windows 下 Start-Process -Command 中 $env:PYTHONPATH 被父进程展开导致子窗口报错
 - v4.19.8: 新增 --local 一键本地开发（Docker 起 Postgres/Redis，本机起后端/Celery/前端）
 - v4.19.7: 改进Docker健康检查等待逻辑，添加数据库连接预检查，主动检测启动错误
@@ -1022,6 +1023,10 @@ def main():
             safe_print(f"  [WARNING] Metabase启动失败: {e}")
     
     processes = []
+    
+    # v4.24.2: --local 时强制 ENVIRONMENT=development，使后端/Celery 子进程继承，保证本地采集默认有头
+    if args.local:
+        os.environ["ENVIRONMENT"] = "development"
     
     try:
         # 启动后端（非Docker模式下）

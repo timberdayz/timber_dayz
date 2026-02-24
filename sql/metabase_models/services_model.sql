@@ -210,57 +210,28 @@ cleaned AS (
     COALESCE(period_end_date, metric_date) AS service_end_date,
     period_start_time, period_end_time,
     
-    -- 数值字段清洗（处理破折号、逗号、空格等特殊字符）
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(visitor_count_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS visitor_count,
-    
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(chat_count_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS chat_count,
-    
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_count_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS order_count,
-    
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(gmv_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS gmv,
-    
-    -- 百分比字段清洗（满意度）
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(satisfaction_raw, '%', ''), ',', '.'), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC / 100.0 AS satisfaction,
+    -- 数值字段清洗（先清洗再校验，仅合法数值才 ::NUMERIC，畸形数据兜底为 NULL）
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.'
+          THEN c::NUMERIC ELSE NULL END
+     FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(visitor_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s
+    ) AS visitor_count,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.'
+          THEN c::NUMERIC ELSE NULL END
+     FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(chat_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s
+    ) AS chat_count,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.'
+          THEN c::NUMERIC ELSE NULL END
+     FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s
+    ) AS order_count,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.'
+          THEN c::NUMERIC ELSE NULL END
+     FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s
+    ) AS gmv,
+    -- 百分比字段（满意度）
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.'
+          THEN (c::NUMERIC / 100.0) ELSE NULL END
+     FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(satisfaction_raw, '%', ''), ',', '.'), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s
+    ) AS satisfaction,
     
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM field_mapping

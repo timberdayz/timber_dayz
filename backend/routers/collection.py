@@ -520,7 +520,7 @@ async def retry_task(
     if original_task.status not in ["failed", "cancelled"]:
         raise HTTPException(status_code=400, detail=f"无法重试{original_task.status}状态的任务")
     
-    # 创建新任务
+    # 创建新任务（v4.7.0: CollectionTask 使用 sub_domains 而非 sub_domain）
     new_task = CollectionTask(
         task_id=str(uuid.uuid4()),
         platform=original_task.platform,
@@ -529,7 +529,7 @@ async def retry_task(
         config_id=original_task.config_id,
         trigger_type="retry",
         data_domains=original_task.data_domains,
-        sub_domain=original_task.sub_domain,
+        sub_domains=original_task.sub_domains,
         granularity=original_task.granularity,
         date_range=original_task.date_range,
         retry_count=original_task.retry_count + 1,

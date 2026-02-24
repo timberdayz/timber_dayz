@@ -27,12 +27,13 @@ months AS (
         '1 month'
     ) AS d
 ),
--- 各月 GMV、利润（仅 monthly 粒度）
+-- 各月 GMV、利润、B 类成本（仅 monthly 粒度）
 order_by_month AS (
     SELECT
         to_char(o.metric_date, 'YYYY-MM') AS month_label,
         COALESCE(SUM(o.paid_amount), 0) AS gmv,
-        COALESCE(SUM(o.profit), 0) AS profit
+        COALESCE(SUM(o.profit), 0) AS profit,
+        COALESCE(SUM(o.purchase_amount), 0) + COALESCE(SUM(o.warehouse_operation_fee), 0) + COALESCE(SUM(o.platform_total_cost_derived), 0) AS total_cost_b
     FROM {{MODEL:Orders Model}} o
     CROSS JOIN period_scope s
     WHERE o.granularity = 'monthly'
@@ -40,11 +41,11 @@ order_by_month AS (
       AND o.metric_date < s.period_end_ts
     GROUP BY to_char(o.metric_date, 'YYYY-MM')
 ),
--- 各月运营成本汇总（a_class.operating_costs 按年月汇总）
+-- 各月 A 类运营成本汇总（a_class.operating_costs 按年月汇总）
 cost_agg AS (
     SELECT
         oc."年月" AS month_label,
-        SUM(COALESCE(oc.租金, 0) + COALESCE(oc.工资, 0) + COALESCE(oc.水电费, 0) + COALESCE(oc.其他成本, 0)) AS total_cost
+        SUM(COALESCE(oc.租金, 0) + COALESCE(oc.工资, 0) + COALESCE(oc.水电费, 0) + COALESCE(oc.其他成本, 0)) AS total_cost_a
     FROM a_class.operating_costs oc
     CROSS JOIN period_scope s
     WHERE oc."年月" >= to_char(s.period_start, 'YYYY-MM')
@@ -54,7 +55,7 @@ cost_agg AS (
 SELECT
     m.month_label AS month,
     ROUND(COALESCE(obm.gmv, 0)::numeric, 2) AS gmv,
-    ROUND(COALESCE(c.total_cost, 0)::numeric, 2) AS total_cost,
+    ROUND((COALESCE(c.total_cost_a, 0) + COALESCE(obm.total_cost_b, 0))::numeric, 2) AS total_cost,
     ROUND(COALESCE(obm.profit, 0)::numeric, 2) AS profit
 FROM months m
 LEFT JOIN order_by_month obm ON obm.month_label = m.month_label

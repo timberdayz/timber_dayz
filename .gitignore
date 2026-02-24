@@ -31,6 +31,10 @@ security/
 .env.local
 .env.production
 
+# 数据库全量导出（大文件，含数据）
+docker_pg_full.dump
+*.dump
+
 # 日志文件和压缩日志
 *.log
 *.log.*

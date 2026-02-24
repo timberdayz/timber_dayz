@@ -332,169 +332,26 @@ cleaned AS (
     category_raw AS category,
     item_status_raw AS item_status,
     variation_status_raw AS variation_status,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(price_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS price,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(stock_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS stock,
+    -- 安全数值转换：仅合法数值才 ::NUMERIC，畸形数据兜底为 NULL
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(price_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS price,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(stock_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS stock,
     currency_raw AS currency,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(page_views_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS page_views,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(unique_visitors_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS unique_visitors,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(impressions_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS impressions,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(clicks_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS clicks,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(click_rate_raw, '%', ''), ',', '.'), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC / 100.0 AS click_rate,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(conversion_rate_raw, '%', ''), ',', '.'), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC / 100.0 AS conversion_rate,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(positive_rate_raw, '%', ''), ',', '.'), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC / 100.0 AS positive_rate,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(cart_add_count_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS cart_add_count,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(cart_add_visitors_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS cart_add_visitors,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_count_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS order_count,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sold_count_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS sold_count,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(gmv_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS gmv,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sales_amount_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS sales_amount,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sales_volume_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS sales_volume,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(rating_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS rating,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(review_count_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS review_count,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(page_views_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS page_views,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(unique_visitors_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS unique_visitors,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(impressions_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS impressions,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(clicks_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS clicks,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN (c::NUMERIC / 100.0) ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(click_rate_raw, '%', ''), ',', '.'), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS click_rate,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN (c::NUMERIC / 100.0) ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(conversion_rate_raw, '%', ''), ',', '.'), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS conversion_rate,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN (c::NUMERIC / 100.0) ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(positive_rate_raw, '%', ''), ',', '.'), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS positive_rate,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(cart_add_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS cart_add_count,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(cart_add_visitors_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS cart_add_visitors,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS order_count,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sold_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS sold_count,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(gmv_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS gmv,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sales_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS sales_amount,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sales_volume_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS sales_volume,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(rating_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS rating,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(review_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS review_count,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM field_mapping
 ),

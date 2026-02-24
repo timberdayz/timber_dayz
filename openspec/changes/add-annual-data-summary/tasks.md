@@ -36,12 +36,14 @@
 
 ## 4. 验收
 
-- [ ] 4.1 选择粒度=月度、某月：底部/卡片显示当月核心 KPI 与较上月环比
-- [ ] 4.2 选择粒度=年度、某年：显示当年核心 KPI 与较去年同比
-- [ ] 4.3 确认年度总结所用数据仅来自 B 类模型 monthly 粒度（SQL 中无 daily）
-- [ ] 4.4 成本与产出区块展示总成本、GMV、成本产出比、ROI、毛利率、净利率；成本数据缺失时展示「暂无数据」不阻塞页面；比率分母为 0 时展示 N/A 或「-」
-- [ ] 4.5 权限：仅管理员角色可见工作台下「年度数据总结」菜单并可访问该页；非管理员访问 `/annual-summary` 被路由守卫拦截并重定向（与销售目标管理行为一致）
-- [ ] 4.6 缓存：同一 granularity+period 再次请求时，接口返回带 X-Cache: HIT（或 Redis 不可用时无 HIT），行为与业务概览 KPI 一致
+（以下仅 4.3、4.5、4.6 已完成代码/配置核对；4.1、4.2、4.4 需人工在浏览器实际打开页面验证。）
+
+- [ ] 4.1 选择粒度=月度、某月：底部/卡片显示当月核心 KPI 与较上月环比（**需人工验收**：登录后打开年度数据总结，选月度+某月，确认展示正确）
+- [ ] 4.2 选择粒度=年度、某年：显示当年核心 KPI 与较去年同比（**需人工验收**：选年度+某年，确认展示正确）
+- [x] 4.3 确认年度总结所用数据仅来自 B 类模型 monthly 粒度（SQL 中无 daily）。→ 已核对：annual_summary_*.sql 均仅 WHERE granularity = 'monthly'，无 daily
+- [ ] 4.4 成本与产出区块展示总成本、GMV、成本产出比、ROI、毛利率、净利率；成本数据缺失时展示「暂无数据」不阻塞页面；比率分母为 0 时展示 N/A 或「-」（**需人工验收**：在页面上确认上述六项及缺数/分母为 0 时的展示）。→ **代码已核对**：KPI 接口合并 get_annual_cost_aggregate，返回 total_cost/gmv/四比率；前端 costData 绑定、ratioDisplayStrict 在 null 时成本产出比/ROI 展示 N/A，符合验收标准。
+- [x] 4.5 权限：仅管理员可见菜单并可访问该页；非管理员访问被拦截。→ 已核对：rolePermissions.js 仅 admin 含 annual-summary；router meta 正确
+- [x] 4.6 缓存：同一 granularity+period 再次请求时接口返回 X-Cache: HIT。→ 已核对：dashboard_api.py 中 annual_summary_kpi 缓存逻辑正确
 
 ## 5. 扩展功能（已纳入实现范围）
 
@@ -64,7 +66,9 @@
 
 ## 6. 验收（扩展）
 
-- [ ] 6.1 按店铺下钻表格展示各店铺/平台 GMV、总成本及四比率，数据随 granularity/period 切换
-- [ ] 6.2 趋势折线图展示 GMV、总成本、利润随月份变化；年度时展示当年 12 个月
-- [ ] 6.3 平台占比饼图展示各平台 GMV 占比（如 Shopee/TikTok/其他）
-- [ ] 6.4 目标完成率展示 GMV 目标与利润目标进度条；无目标时友好展示
+（以下均需人工在浏览器打开年度数据总结页面验证。**店铺/趋势/平台占比依赖 B 类月度数据，数据采集未完成前无法做有数据验收；代码已按验收标准核对，数据就绪后可直接使用，无需改代码。**）
+
+- [ ] 6.1 按店铺下钻表格展示各店铺/平台 GMV、总成本及四比率，数据随 granularity/period 切换（**需人工验收**，依赖采集/同步写入 fact_*_orders_monthly 与 operating_costs）。→ **代码已核对**：后端 GET /annual-summary/by-shop 调用 get_annual_cost_aggregate_by_shop(db)，前端 byShopList 绑定表格列 shop_name/platform、gmv、total_cost、四比率；空数据时表格空态，有数据后直接展示。
+- [ ] 6.2 趋势折线图展示 GMV、总成本、利润随月份变化；年度时展示当年 12 个月（**需人工验收**，依赖 Metabase annual_summary_trend 有月度数据）。→ **代码已核对**：后端查 Metabase trend Question，前端用 month/gmv/total_cost/profit 渲染折线图；无数据时占位，有数据后直接展示。
+- [ ] 6.3 平台占比饼图展示各平台 GMV 占比（如 Shopee/TikTok/其他）（**需人工验收**，依赖 Metabase annual_summary_platform_share 有数据）。→ **代码已核对**：后端查 Metabase platform_share Question，前端用 platform/name、gmv/value 渲染饼图；无数据时「暂无数据」。
+- [ ] 6.4 目标完成率展示 GMV 目标与利润目标进度条；无目标时友好展示（**需人工验收**）。→ 后端已对接 a_class.sales_targets_a 与 KPI 实际值，前端已展示进度条与 N/A。

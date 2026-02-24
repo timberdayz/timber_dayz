@@ -1,6 +1,6 @@
 -- ====================================================
 -- Orders Model - 订单数据域模型（CTE分层架构）
--- 版本: 20260221-cost-columns-replace-fix (成本列 REPLACE 括号嵌套修复)
+-- 版本: add-metabase-sql-retain-amount-sign (保留符号、shop_id 映射、畸形数据约定)
 -- ====================================================
 -- 用途：整合所有平台的订单数据，统一字段名，为前端提供完整数据支持
 -- 数据源：b_class schema 下的所有 orders 相关表
@@ -365,51 +365,11 @@ cleaned AS (
     metric_date, period_start_date, period_end_date, period_start_time, period_end_time,
     order_id_raw AS order_id,
     order_status_raw AS order_status,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sales_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
-        $$[^0-9.]$$,
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS sales_amount,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(paid_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
-        $$[^0-9.]$$,
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS paid_amount,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(product_original_price_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
-        $$[^0-9.]$$,
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS product_original_price,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(estimated_settlement_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
-        $$[^0-9.]$$,
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS estimated_settlement_amount,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(profit_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
-        $$[^0-9.]$$,
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS profit,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sales_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS sales_amount,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(paid_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS paid_amount,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(product_original_price_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS product_original_price,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(estimated_settlement_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS estimated_settlement_amount,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(profit_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS profit,
     -- 日期/时间字段：优先使用数据库已清洗的字段，其次从 raw_data 提取（假设数据同步已清洗）
     COALESCE(
       period_start_time,
@@ -434,45 +394,22 @@ cleaned AS (
     product_sku_raw AS product_sku,
     product_type_raw AS product_type,
     outbound_warehouse_raw AS outbound_warehouse,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(buyer_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
-        $$[^0-9.]$$,
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS buyer_count,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
-        $$[^0-9.]$$,
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS order_count,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(product_quantity_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''),
-        $$[^0-9.]$$,
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS product_quantity,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(buyer_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS buyer_count,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_count_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS order_count,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(product_quantity_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS product_quantity,
     -- 成本列（B 类，与 docs/COST_DATA_SOURCES_AND_DEFINITIONS.md 一致）
-    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(purchase_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC AS purchase_amount,
-    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(order_original_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC AS order_original_amount,
-    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(warehouse_operation_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC AS warehouse_operation_fee,
-    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(shipping_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS shipping_fee,
-    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(promotion_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS promotion_fee,
-    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_commission_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS platform_commission,
-    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_deduction_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS platform_deduction_fee,
-    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_voucher_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS platform_voucher,
-    NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_service_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC AS platform_service_fee,
-    (COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(order_original_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC, 0) - COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(purchase_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC, 0) - COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(profit_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC, 0) - COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(warehouse_operation_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '-', ''), $$[^0-9.]$$, '', 'g'), '')::NUMERIC, 0)) AS platform_total_cost_derived,
-    (COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(shipping_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0) + COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(promotion_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0) + COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_commission_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0) + COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_deduction_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0) + COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_voucher_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0) + COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_service_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g'), '')::NUMERIC, 0)) AS platform_total_cost_itemized,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(purchase_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS purchase_amount,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(order_original_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS order_original_amount,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(warehouse_operation_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS warehouse_operation_fee,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(shipping_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS shipping_fee,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(promotion_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS promotion_fee,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_commission_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS platform_commission,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_deduction_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS platform_deduction_fee,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_voucher_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS platform_voucher,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_service_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS platform_service_fee,
+    (COALESCE((SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(order_original_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s), 0) - COALESCE((SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(purchase_amount_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s), 0) - COALESCE((SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(profit_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s), 0) - COALESCE((SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(warehouse_operation_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s), 0)) AS platform_total_cost_derived,
+    (COALESCE((SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(shipping_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s), 0) + COALESCE((SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(promotion_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s), 0) + COALESCE((SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_commission_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s), 0) + COALESCE((SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_deduction_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s), 0) + COALESCE((SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_voucher_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s), 0) + COALESCE((SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(platform_service_fee_raw, ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s), 0)) AS platform_total_cost_itemized,
+    TRIM(COALESCE(raw_data->>'店铺', raw_data->>'店铺名称', '')) AS store_alias_raw,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM field_mapping
 ),
@@ -494,6 +431,36 @@ deduplicated AS (
         ingest_timestamp DESC
     ) AS rn
   FROM cleaned
+),
+
+-- ====================================================
+-- 第3.5层：shop_id 映射（店铺别称 -> core.platform_accounts，未匹配保留原 shop_id）
+-- ====================================================
+with_shop_resolved AS (
+  SELECT
+    d.platform_code,
+    COALESCE(pa.mapped_shop_id, d.shop_id) AS shop_id,
+    d.data_domain, d.granularity,
+    d.metric_date, d.period_start_date, d.period_end_date, d.period_start_time, d.period_end_time,
+    d.order_id, d.order_status,
+    d.sales_amount, d.paid_amount, d.product_original_price, d.estimated_settlement_amount, d.profit,
+    d.purchase_amount, d.order_original_amount, d.warehouse_operation_fee,
+    d.shipping_fee, d.promotion_fee, d.platform_commission, d.platform_deduction_fee, d.platform_voucher, d.platform_service_fee,
+    d.platform_total_cost_derived, d.platform_total_cost_itemized,
+    d.order_time, d.payment_time, d.order_date,
+    d.product_name, d.product_id, d.platform_sku, d.sku_id, d.product_sku, d.product_type, d.outbound_warehouse,
+    d.buyer_count, d.order_count, d.product_quantity,
+    d.raw_data, d.header_columns, d.data_hash, d.ingest_timestamp, d.currency_code
+  FROM deduplicated d
+  LEFT JOIN LATERAL (
+    SELECT pa_inner.shop_id AS mapped_shop_id
+    FROM core.platform_accounts pa_inner
+    WHERE pa_inner.platform = d.platform_code
+      AND (TRIM(COALESCE(d.store_alias_raw, '')) <> '' AND (TRIM(COALESCE(d.store_alias_raw, '')) = pa_inner.store_name OR TRIM(COALESCE(d.store_alias_raw, '')) = pa_inner.account_alias))
+    ORDER BY pa_inner.id
+    LIMIT 1
+  ) pa ON true
+  WHERE d.rn = 1
 )
 
 -- ====================================================
@@ -525,5 +492,4 @@ SELECT
   COALESCE(order_count, 0) AS order_count,
   COALESCE(product_quantity, 0) AS product_quantity,
   raw_data, header_columns, data_hash, ingest_timestamp, currency_code
-FROM deduplicated
-WHERE rn = 1
+FROM with_shop_resolved

@@ -7,6 +7,9 @@
 - 总成本 = A + B；GMV = paid_amount 汇总
 - 比率：成本产出比、ROI、毛利率、净利率；分母为 0 时返回 None（前端展示 N/A）
 - 按店铺下钻：A 类按「店铺ID」、B 类按 (platform_code, shop_id) 聚合；约定 店铺ID = 'platform_code|shop_id' 时与订单侧一致。
+
+B 类解析规则与 docs/AMOUNT_QUANTITY_PARSING_CONVENTION.md 及 Orders 模型一致（保留符号，正则 [^0-9.-]），
+待改为通过 Metabase Question（annual_summary_kpi / annual_summary_by_shop / annual_summary_trend）获取后删除此处对 raw_data 的解析。
 """
 
 from typing import Optional, Dict, Any, List
@@ -81,8 +84,7 @@ async def get_annual_cost_aggregate(
         logger.warning(f"年度成本聚合 A 类查询失败: {e}")
         total_a = 0.0
 
-    # B 类：三张月度订单表 raw_data 抽取并汇总（键名与成本文档/Orders 模型一致）
-    # 使用与 orders_model 一致的 COALESCE 键名，并安全转 numeric
+    # B 类：三张月度订单表 raw_data 抽取并汇总（与 Orders 模型约定一致：保留符号，[^0-9.-]）
     b_sql = text(
         """
         WITH u AS (
@@ -93,16 +95,16 @@ async def get_annual_cost_aggregate(
             SELECT raw_data, period_start_date FROM b_class.fact_miaoshou_orders_monthly
         )
         SELECT
-            SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'采购金额', raw_data->>'采购价', ''), '[^0-9.]', '', 'g'), '')::numeric, 0)) AS purchase_amount,
-            SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'仓库操作费', ''), '[^0-9.]', '', 'g'), '')::numeric, 0)) AS warehouse_operation_fee,
-            (SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'运费', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
-             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'推广费', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
-             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'平台佣金', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
-             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'平台扣费', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
-             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'代金券', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
-             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'服务费', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+            SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'采购金额', raw_data->>'采购价', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0)) AS purchase_amount,
+            SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'仓库操作费', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0)) AS warehouse_operation_fee,
+            (SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'运费', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'推广费', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'平台佣金', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'平台扣费', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'代金券', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'服务费', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
             ) AS platform_fees,
-            SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'实付金额', raw_data->>'买家实付金额', ''), '[^0-9.]', '', 'g'), '')::numeric, 0)) AS paid_amount
+            SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'实付金额', raw_data->>'买家实付金额', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0)) AS paid_amount
         FROM u
         WHERE period_start_date >= :period_start AND period_start_date < :period_end
         """
@@ -205,7 +207,7 @@ async def get_annual_cost_aggregate_by_shop(
     except Exception as e:
         logger.warning(f"年度成本按店铺聚合 A 类查询失败: {e}")
 
-    # B 类按 (platform_code, shop_id) 汇总，CTE 中显式带出 platform_code/shop_id
+    # B 类按 (platform_code, shop_id) 汇总（解析与 Orders 模型约定一致：保留符号，[^0-9.-]）
     b_sql = text(
         """
         WITH u AS (
@@ -219,16 +221,16 @@ async def get_annual_cost_aggregate_by_shop(
         SELECT
             platform_code,
             COALESCE(shop_id, '') AS shop_id,
-            SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'采购金额', raw_data->>'采购价', ''), '[^0-9.]', '', 'g'), '')::numeric, 0)) AS purchase_amount,
-            SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'仓库操作费', ''), '[^0-9.]', '', 'g'), '')::numeric, 0)) AS warehouse_operation_fee,
-            (SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'运费', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
-             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'推广费', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
-             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'平台佣金', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
-             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'平台扣费', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
-             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'代金券', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
-             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'服务费', ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+            SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'采购金额', raw_data->>'采购价', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0)) AS purchase_amount,
+            SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'仓库操作费', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0)) AS warehouse_operation_fee,
+            (SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'运费', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'推广费', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'平台佣金', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'平台扣费', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'代金券', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
+             + SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'服务费', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0))
             ) AS platform_fees,
-            SUM(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(raw_data->>'实付金额', raw_data->>'买家实付金额', ''), '[^0-9.]', '', 'g'), '')::numeric, 0)) AS paid_amount
+            SUM(COALESCE(NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(raw_data->>'实付金额', raw_data->>'买家实付金额', ''), ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric, 0)) AS paid_amount
         FROM u
         WHERE period_start_date >= :period_start AND period_start_date < :period_end
         GROUP BY platform_code, shop_id

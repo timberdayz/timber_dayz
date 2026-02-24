@@ -267,35 +267,50 @@ def init_db():
     
     missing_tables = []
     created_tables = []
-    
+    skip_schemas = {"pg_catalog", "information_schema", "pg_toast"}
+
+    def _collect_existing_tables(conn_inspector):
+        """收集所有 schema 下的表名，格式与 Base.metadata.tables 一致（schema.tablename 或 tablename）"""
+        out = set()
+        for s in conn_inspector.get_schema_names():
+            if s in skip_schemas:
+                continue
+            for name in conn_inspector.get_table_names(schema=s):
+                if s == "public" or s is None:
+                    out.add(name)
+                else:
+                    out.add(f"{s}.{name}")
+        return out
+
     try:
-        # 执行前检查
+        # 执行前检查（多 schema：与 verify_schema_completeness 一致）
         from sqlalchemy import inspect
         inspector = inspect(engine)
-        existing_before = set(inspector.get_table_names())
-        
+        existing_before = _collect_existing_tables(inspector)
+
         # 创建表
         Base.metadata.create_all(bind=engine)
-        
-        # 执行后验证
-        existing_after = set(inspector.get_table_names())
+
+        # 执行后验证：用新连接做反射，避免 inspector 缓存导致误报 "Missing tables"
+        with engine.connect() as conn:
+            inspector_after = inspect(conn)
+            existing_after = _collect_existing_tables(inspector_after)
         expected_tables = set(Base.metadata.tables.keys())
-        
+
         created_tables = existing_after - existing_before
         missing_tables = expected_tables - existing_after
-        
+
         if missing_tables:
             logger.error(
                 f"[ERROR] 以下表创建失败: {', '.join(sorted(missing_tables))}"
             )
-            # 开发环境也抛出错误,让开发者知道问题
             raise RuntimeError(f"Missing tables: {', '.join(sorted(missing_tables))}")
-        
+
         logger.info(
-            f"[OK] 数据库表初始化完成(开发模式): 创建 {len(created_tables)} 张表, "
+            f"[OK] 数据库表初始化完成(开发模式): 新建 {len(created_tables)} 张表, "
             f"总计 {len(existing_after)} 张表"
         )
-            
+
     except Exception as e:
         error_str = str(e)
         # 区分真正的错误和可以忽略的重复错误

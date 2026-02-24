@@ -57,13 +57,13 @@
         <div class="debug-mode-switch">
           <el-switch 
             v-model="quickForm.debugMode" 
-            active-text="调试模式"
+            active-text="有头模式"
             inactive-text=""
           />
           <el-tooltip placement="top">
             <template #content>
-              有头浏览器会在<strong>运行后端的电脑</strong>上打开，便于观察采集过程。<br/>
-              若任务一直处于「等待」，请确认后端是否单进程或任务队列是否正常。
+              开启后会在<strong>运行后端的电脑</strong>上打开浏览器窗口，便于观察采集过程。<br/>
+              若看不到窗口，请确认已执行 <code>playwright install chromium</code> 且后端单进程；任务一直「等待」时请检查任务队列是否正常。
             </template>
             <el-icon><QuestionFilled /></el-icon>
           </el-tooltip>
@@ -94,9 +94,9 @@
       <div class="collect-tip-body">
         点击「开始采集」会创建任务，执行由<strong>后端同一进程</strong>在后台启动。若任务一直处于「等待」、进度 0%，请检查：
         <ul>
-          <li><strong>单进程启动</strong>：使用 <code>python run.py</code> 或 <code>uvicorn ... --workers 1</code> 启动后端；多 worker 时后台任务可能未在收到请求的进程内执行。</li>
+          <li><strong>单进程启动</strong>：使用 <code>python run.py</code> 或 <code>python run.py --local</code> 或 <code>uvicorn ... --workers 1</code> 启动后端；多 worker 时后台任务可能未在收到请求的进程内执行。</li>
           <li><strong>后端日志</strong>：查看运行后端的终端是否有异常（账号加载失败、Playwright 未安装等）。</li>
-          <li><strong>Playwright</strong>：本机已执行 <code>playwright install chromium</code>，且后端运行环境可启动浏览器。</li>
+          <li><strong>Playwright</strong>：有头模式需本机执行 <code>playwright install</code> 或 <code>playwright install chromium</code>（勿仅安装 <code>--only-shell</code>）；本地观察采集请开启「有头模式」。</li>
         </ul>
       </div>
     </el-alert>

@@ -36,9 +36,9 @@ from backend.utils.config import get_settings
 import os
 import time
 
-# 项目根目录 .env（backend/middleware -> backend -> 项目根）
+# 项目根目录；Limiter 使用仅 ASCII 的 .env.limiter，避免 starlette 在 Windows 下用 gbk 解码 UTF-8 的 .env 导致 UnicodeDecodeError
 _project_root = Path(__file__).resolve().parent.parent.parent
-_default_env = _project_root / ".env"
+_env_limiter = _project_root / ".env.limiter"
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -86,13 +86,13 @@ def get_rate_limit_key(request: Request) -> str:
 
 
 # [*] v4.19.5 重构:使用 Redis 作为存储后端(生产环境标准做法)
-# 创建限流器；config_filename 指向项目根 .env，避免 Starlette 报 "file not found" 警告
+# config_filename 指向仅 ASCII 的 .env.limiter，避免 starlette 在 Windows 下用 gbk 读 UTF-8 .env 报 UnicodeDecodeError
 limiter = Limiter(
     key_func=get_rate_limit_key,  # [*] v4.19.2: 使用用户级限流键
     default_limits=["100/minute"],  # 默认限制:每分钟100次
     enabled=os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true",  # 可通过环境变量禁用
     storage_uri=settings.rate_limit_storage_uri,  # [*] v4.19.5: 使用环境感知的存储URI(Redis/内存)
-    config_filename=str(_default_env) if _default_env.exists() else ".env",
+    config_filename=str(_env_limiter) if _env_limiter.exists() else ".env.limiter",
 )
 
 

@@ -20,13 +20,15 @@ period_scope AS (
 period_dates AS (
     SELECT period_start, (period_end_ts)::date AS end_dt FROM period_scope
 ),
--- 按店铺 GMV、利润（仅 monthly）
+-- 按店铺 GMV、利润、B 类成本（仅 monthly，店铺键 platform_code|shop_id 与成本文档一致）
 shop_orders AS (
     SELECT
         o.platform_code,
         COALESCE(NULLIF(TRIM(o.shop_id), ''), 'unknown') AS shop_id,
+        (o.platform_code || '|' || COALESCE(NULLIF(TRIM(o.shop_id), ''), 'unknown')) AS shop_key,
         COALESCE(SUM(o.paid_amount), 0) AS gmv,
-        COALESCE(SUM(o.profit), 0) AS profit
+        COALESCE(SUM(o.profit), 0) AS profit,
+        COALESCE(SUM(o.purchase_amount), 0) + COALESCE(SUM(o.warehouse_operation_fee), 0) + COALESCE(SUM(o.platform_total_cost_derived), 0) AS total_cost_b
     FROM {{MODEL:Orders Model}} o
     CROSS JOIN period_dates p
     WHERE o.granularity = 'monthly'
@@ -34,11 +36,11 @@ shop_orders AS (
       AND o.metric_date < p.end_dt
     GROUP BY o.platform_code, COALESCE(NULLIF(TRIM(o.shop_id), ''), 'unknown')
 ),
--- 按店铺运营成本（a_class.operating_costs 店铺ID + 年月）
+-- 按店铺 A 类运营成本（a_class.operating_costs 店铺ID = platform_code|shop_id）
 shop_costs AS (
     SELECT
-        oc."店铺ID" AS shop_id,
-        SUM(COALESCE(oc.租金, 0) + COALESCE(oc.工资, 0) + COALESCE(oc.水电费, 0) + COALESCE(oc.其他成本, 0)) AS total_cost
+        oc."店铺ID" AS shop_key,
+        SUM(COALESCE(oc.租金, 0) + COALESCE(oc.工资, 0) + COALESCE(oc.水电费, 0) + COALESCE(oc.其他成本, 0)) AS total_cost_a
     FROM a_class.operating_costs oc
     CROSS JOIN period_scope s
     WHERE oc."年月" >= to_char(s.period_start, 'YYYY-MM')
@@ -49,12 +51,12 @@ combined AS (
     SELECT
         so.platform_code,
         so.shop_id,
-        (so.platform_code || '-' || so.shop_id) AS shop_name,
+        (so.platform_code || '|' || so.shop_id) AS shop_name,
         so.gmv,
-        COALESCE(sc.total_cost, 0) AS total_cost,
+        COALESCE(sc.total_cost_a, 0) + so.total_cost_b AS total_cost,
         so.profit
     FROM shop_orders so
-    LEFT JOIN shop_costs sc ON sc.shop_id = so.shop_id
+    LEFT JOIN shop_costs sc ON sc.shop_key = so.shop_key
 )
 SELECT
     shop_name,

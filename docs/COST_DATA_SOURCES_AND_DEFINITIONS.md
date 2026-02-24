@@ -171,5 +171,7 @@ B 类数据为「业务发生数据」，成本侧即**与订单/商品直接相
 
 ---
 
+**相关约定**：模型与 Question 中金额保留符号、解析约定、店铺别称与 shop_id 映射见 **`docs/AMOUNT_QUANTITY_PARSING_CONVENTION.md`**（变更 add-metabase-sql-retain-amount-sign）。
+
 **文档版本**：与变更 `clarify-cost-data-sources` 一致。  
 **字段映射**：B 类订单成本英文 field_code 已同步至 `scripts/init_field_mapping_dictionary.py` 与 `backend/services/field_mapping/standard_fields.py`（ORDER_COST_FIELDS），本文档列名与之一致。

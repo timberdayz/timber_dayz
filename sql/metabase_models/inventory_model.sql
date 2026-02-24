@@ -105,88 +105,17 @@ cleaned AS (
     product_sku_raw AS product_sku,
     warehouse_name_raw AS warehouse_name,
     warehouse_code_raw AS warehouse_code,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(available_stock_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS available_stock,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(on_hand_stock_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS on_hand_stock,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(reserved_stock_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS reserved_stock,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(in_transit_stock_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS in_transit_stock,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(stockout_qty_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS stockout_qty,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(reorder_point_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS reorder_point,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(safety_stock_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS safety_stock,
+    -- 安全数值转换：仅合法数值才 ::NUMERIC，畸形数据兜底为 NULL
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(available_stock_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS available_stock,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(on_hand_stock_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS on_hand_stock,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(reserved_stock_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS reserved_stock,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(in_transit_stock_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS in_transit_stock,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(stockout_qty_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS stockout_qty,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(reorder_point_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS reorder_point,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(safety_stock_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS safety_stock,
     currency_raw AS currency,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(unit_cost_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS unit_cost,
-    NULLIF(
-      REGEXP_REPLACE(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(inventory_value_raw, ',', ''), ' ', ''), '—', ''), '–', ''), '-', ''),
-        '[^0-9.]',
-        '',
-        'g'
-      ),
-      ''
-    )::NUMERIC AS inventory_value,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(unit_cost_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS unit_cost,
+    (SELECT CASE WHEN c ~ '^-?([0-9]+\.[0-9]*|[0-9]*\.[0-9]+|[0-9]+)$' AND c IS NOT NULL AND c != '' AND c != '-' AND c != '.' THEN c::NUMERIC ELSE NULL END FROM (SELECT REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(inventory_value_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), $$[^0-9.-]$$, '', 'g') AS c) s) AS inventory_value,
     raw_data, header_columns, data_hash, ingest_timestamp, currency_code
   FROM field_mapping
 ),

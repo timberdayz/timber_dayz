@@ -33,19 +33,34 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 ## Common Development Commands
 
 ### System Startup
-```bash
-# Unified startup (recommended)
-python run.py
 
-# Backend only
-python run.py --backend-only
+**启动方式选择指南**
 
-# Frontend only
-python run.py --frontend-only
+- **调试/优化采集脚本（有头浏览器，推荐）**：Docker 起 DB/Redis/Celery，本机起后端+前端——浏览器窗口出现在桌面上：
+  ```bash
+  python run.py --local
+  ```
+  前提：Docker Desktop 已启动。DB/Redis 全在 Docker 里，无需配本机数据库。`run.py --local` 会强制 `ENVIRONMENT=development`，本地采集默认有头；有头模式需本机已执行 `playwright install`（或 `playwright install chromium`），勿仅安装 `--only-shell`。
 
-# CLI menu mode
-python run_new.py
-```
+- **全 Docker 模式（后端也在容器，看不到浏览器）**：
+  ```bash
+  python run.py --use-docker --with-metabase
+  ```
+  可选 `--collection`（backend 使用带 Playwright 的镜像）。
+
+- **纯本机模式（已配好本机 Postgres 时可用）**：
+  ```bash
+  python local_run.py
+  ```
+  需本机 Postgres 已就绪（可用 `python scripts/check_local_run_env.py` 检查）。
+
+- **run.py 其他用法**：
+  ```bash
+  python run.py                    # 传统模式（需先启 Postgres/Redis）
+  python run.py --backend-only     # 仅后端
+  python run.py --frontend-only    # 仅前端
+  python run_new.py                # CLI 菜单模式
+  ```
 
 ### Database Operations
 ```bash

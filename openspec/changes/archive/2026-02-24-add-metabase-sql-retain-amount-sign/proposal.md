@@ -1,5 +1,11 @@
 # Change: Metabase SQL 编写优化（保留符号、单一数据源、畸形数据处理）
 
+## 当前状态（实施进展）
+
+- **Models**：5 个模型（Orders、Analytics、Products、Inventory、Services）已全部完成保留符号、Unicode→CHR、**安全数值转换**（先校验再 ::numeric，畸形数据兜底为 NULL）、Orders 内 shop_id 映射；正则统一为 `$$[^0-9.-]$$`；**模型均可正常使用**，已通过 `scripts/init_metabase.py` 同步。
+- **Questions**：12 个 Question 已同步且无报错；年度 KPI、by_shop、trend 等成本 Question 已确认 total_cost = A + B、店铺键与文档一致。
+- **验收**：7.2、8.1–8.8、9.1–9.13 已全部勾选完成（含用户确认负号展示正确、Orders 利润负值及年度总结 ROI 等正常）。**8.8** 已新增 `tests/test_amount_parsing_convention.py` 回归测试；**5.5** 已在约定文档 2.1 节补充迁移计划。
+
 ## Why
 
 1. **源表带负号**：订单事实表等源数据中，金额与数量存在负值（退款、退货、亏损、费用冲回等）。若在模型层去除负号，则无法从数值上区分「成交单」与「退货/退款单」，易被误认为均为成交单，影响分析与决策。
@@ -92,9 +98,11 @@
 
 ## 验收标准
 
+- **Models 可用**：5 个模型在 Metabase 中可正常打开并运行，无语法错误；畸形数据经「先校验再 ::numeric」兜底为 NULL，不抛错（已达成）。
 - **保留符号**：涉及金额/数量的清洗无 `REPLACE(..., '-', '')` 且正则允许负号（或注释例外）；订单类模型退款/退货体现为负数。
 - **单一数据源**：后端不再对 `raw_data` 重复实现金额解析；通过 **Metabase Question 查模型**（API 执行 Question）获取 KPI 等数据，或解析与模型约定完全一致且在文档中引用；无双重维护点。
 - **畸形数据**：约定文档已写明「无法解析→NULL、不中断整行、支持尾随负号、多负号/非法→NULL」；各模型清洗逻辑按该策略实现（含 NULL 兜底）。
 - **shop_id 映射**：约定文档已写明 raw_data 店铺键名、映射表与列、多匹配规则、**未匹配时保留原 shop_id（不默认为 'none'），展示层按需 COALESCE**；Orders 模型输出 `shop_id = COALESCE(映射结果, 原 shop_id)`；platform_accounts 已增加 (platform, store_name)/(platform, account_alias) 索引；按店铺下钻与店铺键 `platform_code|shop_id` 一致。
 - **成本 Question**：annual_summary_by_shop、annual_summary_trend 或专用成本 Question 已从 Orders Model 聚合 B 类成本（采购金额+仓库操作费+平台费用），总成本 = A 类 + B 类，后端可通过 Question 获取总成本/KPI，无对 raw_data 的重复解析。
 - **同步与结果**：执行 `scripts/init_metabase.py` 后，订单模型与相关 Question 汇总结果与有符号、净额语义一致；年度 KPI 等与模型口径一致。
+- **Questions 无问题**：12 个 Question 在 Metabase 中可正常执行，无语法或口径错误；依赖模型、无重复解析；成本类 Question（by_shop、trend）总成本 = A + B，店铺键与文档一致（**下一步重点验收**）。
