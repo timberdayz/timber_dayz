@@ -411,7 +411,6 @@ async def create_task(
             debug_mode=request.debug_mode,
             parallel_mode=request.parallel_mode,  # [*] Phase 9.1: 并行执行模式
             max_parallel=request.max_parallel,  # [*] Phase 9.1: 最大并发数
-            db_session_maker=db.get_bind()  # 传递数据库引擎
         )
     )
     
@@ -1138,7 +1137,6 @@ async def _execute_collection_task_background(
     debug_mode: bool,
     parallel_mode: bool,  # [*] Phase 9.1
     max_parallel: int,  # [*] Phase 9.1
-    db_session_maker
 ):
     """
     后台执行采集任务(v4.7.0 + Phase 9.1)
@@ -1154,7 +1152,6 @@ async def _execute_collection_task_background(
         debug_mode: 调试模式
         parallel_mode: [*] 并行执行模式(Phase 9.1)
         max_parallel: [*] 最大并发数(Phase 9.1)
-        db_session_maker: 数据库引擎(用于创建新session)
     """
     from backend.models.database import AsyncSessionLocal
     from modules.apps.collection_center.executor_v2 import CollectionExecutorV2

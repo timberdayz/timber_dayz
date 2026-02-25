@@ -900,12 +900,11 @@ class CollectionExecutorV2:
         Returns:
             CollectionResult: 采集结果
         """
-        # 创建 Python 组件适配器
+        # 创建 Python 组件适配器（config 即 params，含 task/params/account/platform，组件从 config['task']['download_dir'] 读取）
         adapter = create_adapter(
             platform=platform,
             account=account,
-            params=params.get('params', {}),
-            download_dir=str(task_download_dir),
+            config=params,
         )
         
         # 1. 执行登录组件
@@ -949,7 +948,7 @@ class CollectionExecutorV2:
                 await self._update_status(task_id, progress, f"正在采集 {full_domain}...")
                 await self._check_cancelled(task_id)
                 
-                # 更新参数
+                # 更新参数（域级参数通过 config 传入，组件从 self.config 读取）
                 export_params = params.copy()
                 export_params['params'] = {
                     **export_params.get('params', {}),
@@ -969,16 +968,11 @@ class CollectionExecutorV2:
                     # 检查弹窗
                     await self.popup_handler.close_popups(page, platform=platform)
                     
-                    # 确定导出组件名称
-                    component_name = f"{domain}_export"
-                    if sub_domain:
-                        component_name = f"{domain}_{sub_domain}_export"
-                    
-                    # 执行导出组件
-                    export_result = await adapter.export(
-                        data_domain=domain,
+                    # 每域用含该域参数的 config 创建 adapter，以便组件从 config 读取 data_domain/sub_domain
+                    domain_adapter = create_adapter(platform=platform, account=account, config=export_params)
+                    export_result = await domain_adapter.export(
                         page=page,
-                        params=export_params.get('params', {}),
+                        data_domain=domain,
                     )
                     
                     if export_result.success:
@@ -2635,16 +2629,30 @@ class CollectionExecutorV2:
         )
         login_page = await login_context.new_page()
         
+        params = {
+            'account': account,
+            'params': {
+                'date_from': date_range.get('start', ''),
+                'date_to': date_range.get('end', ''),
+                'granularity': granularity,
+            },
+            'task': {
+                'id': task_id,
+                'download_dir': str(task_download_dir),
+                'screenshot_dir': str(self.screenshots_dir / task_id),
+            },
+            'platform': platform,
+        }
         try:
-            # 执行登录组件
-            login_component = self.component_loader.load(f"{platform}/login", {
-                'account': account,
-                'params': {'date_from': date_range.get('start', ''), 'date_to': date_range.get('end', ''), 'granularity': granularity},
-                'platform': platform,
-            })
-            
+            # 执行登录组件（与顺序路径一致：create_adapter + adapter.login）
+            adapter = create_adapter(platform=platform, account=account, config=params)
             step_popup_handler = StepPopupHandler(self.popup_handler, platform)
-            login_success = await self._execute_component(login_page, login_component, step_popup_handler)
+            login_success = await self._execute_python_component(
+                page=login_page,
+                adapter=adapter,
+                component_type="login",
+                params=params,
+            )
             duration_ms = int((datetime.now() - login_start_time).total_seconds() * 1000)
             await self._update_status(
                 task_id, 10, "登录结束",
@@ -2812,7 +2820,7 @@ class CollectionExecutorV2:
                 details={"step_id": f"export_{data_domain}", "component": f"{data_domain}_export", "data_domain": data_domain}
             )
             
-            # 准备参数
+            # 准备参数（与顺序路径一致的 config 结构）
             params = {
                 'account': account,
                 'params': {
@@ -2829,30 +2837,21 @@ class CollectionExecutorV2:
                 'platform': platform,
             }
             
-            # 加载并执行导出组件
-            component_name = f"{platform}/{data_domain}_export"
-            export_component = self.component_loader.load(component_name, params)
-            
-            # 检查组件是否标记为parallel_safe
-            if not export_component.get('parallel_safe', False):
-                logger.warning(f"Task {task_id}: {component_name} is not marked as parallel_safe, executing anyway")
-            
-            step_popup_handler = StepPopupHandler(self.popup_handler, platform)
-            
-            file_path = await self._execute_export_component(
-                domain_page,
-                export_component,
-                step_popup_handler,
-                task_download_dir
+            # 使用 create_adapter + adapter.export（与顺序路径同一套组件执行模型）
+            domain_adapter = create_adapter(platform=platform, account=account, config=params)
+            export_result = await domain_adapter.export(
+                page=domain_page,
+                data_domain=data_domain,
             )
+            file_path = export_result.file_path if export_result.success else None
             duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
             await self._update_status(
-                task_id, progress, f"[并行] 采集 {data_domain} 成功",
+                task_id, progress, f"[并行] 采集 {data_domain} " + ("成功" if export_result.success else "失败"),
                 current_domain=data_domain,
-                details={"step_id": f"export_{data_domain}", "component": f"{data_domain}_export", "data_domain": data_domain, "success": True, "duration_ms": duration_ms}
+                details={"step_id": f"export_{data_domain}", "component": f"{data_domain}_export", "data_domain": data_domain, "success": export_result.success, "duration_ms": duration_ms}
             )
-            logger.info(f"Task {task_id}: [{domain_index+1}/{total_domains}] {data_domain} completed successfully")
-            return (file_path, True)
+            logger.info(f"Task {task_id}: [{domain_index+1}/{total_domains}] {data_domain} completed (success={export_result.success})")
+            return (file_path, export_result.success)
         except Exception as e:
             duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
             await self._update_status(

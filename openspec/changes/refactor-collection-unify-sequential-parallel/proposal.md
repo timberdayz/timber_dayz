@@ -1,5 +1,15 @@
 # Change: 采集执行器修复与采集架构简化
 
+## 当前实现状态（避免重复工作）
+
+- **Phase 1（止血 + 双轨统一）**：**已完成**。
+  - P0 认证：`backend/routers/auth.py` 的 `get_current_user` 已改为在所有失败分支 `raise HTTPException(401/403)`，不再返回 `error_response`。
+  - P0 顺序路径：`executor_v2._execute_with_python_components` 已使用 `create_adapter(platform=..., account=..., config=params)`，`adapter.export(page=page, data_domain=domain)`，download_dir 从 `config['task']['download_dir']` 读取。
+  - P0 并行路径：`execute_parallel_domains` 已改为使用 `create_adapter` + `adapter.login` / `adapter.export`，与顺序路径同一套组件执行模型；`_execute_single_domain_parallel` 使用 `create_adapter` + `adapter.export`。
+  - P1：`_execute_collection_task_background` 已移除 `db_session_maker` 参数，路由调用处未再传入。
+  - **未做**：并行模式尚未支持 `sub_domains` 参数（顺序模式已支持）；若需并行子域，需为 `execute_parallel_domains` 增加 `sub_domains` 并在路由传入。
+- **Phase 2（CollectionRunner + 脚本约定发现）**：**未实施**。当前路由仍调用 `CollectionExecutorV2.execute` / `execute_parallel_domains`，未引入 `CollectionRunner`，未切换至约定目录脚本发现，`PythonComponentAdapter` / YAML 引擎仍在使用中。
+
 ## Why
 
 1. **顺序路径当前不可用**：`_execute_with_python_components` 中调用 `create_adapter(..., params=..., download_dir=...)`，而 `create_adapter` 与 `PythonComponentAdapter` 的签名仅有 `platform, account, config, ...`，导致 `TypeError: create_adapter() got an unexpected keyword argument 'params'`，有头/无头采集均无法执行。

@@ -64,11 +64,9 @@ async def get_current_user(
         token = credentials.credentials
     
     if not token:
-        return error_response(
-            ErrorCode.AUTH_REQUIRED,
-            "Missing authentication token",
-            error_type="UserError",
+        raise HTTPException(
             status_code=401,
+            detail="Missing authentication token",
         )
 
     try:
@@ -76,11 +74,9 @@ async def get_current_user(
         user_id = payload.get("user_id")
 
         if not user_id:
-            return error_response(
-                ErrorCode.AUTH_TOKEN_INVALID,
-                "Invalid token",
-                error_type="UserError",
+            raise HTTPException(
                 status_code=401,
+                detail="Invalid token",
             )
 
         # 从数据库获取用户信息(预加载 roles 关系)
@@ -91,31 +87,25 @@ async def get_current_user(
         )
         user = result.scalar_one_or_none()
         if not user or not user.is_active:
-            return error_response(
-                ErrorCode.AUTH_TOKEN_INVALID,
-                "User not found or inactive",
-                error_type="UserError",
+            raise HTTPException(
                 status_code=401,
+                detail="User not found or inactive",
             )
 
         # [*] v4.19.0 P1安全要求:检查用户 status 字段
         # 防止被暂停的用户使用现有 token 访问系统
         if user.status != "active":
-            return error_response(
-                ErrorCode.AUTH_ACCOUNT_SUSPENDED,
-                f"Account is {user.status}, access denied",
-                error_type="UserError",
+            raise HTTPException(
                 status_code=403,
+                detail=f"Account is {user.status}, access denied",
             )
 
         return user
     except Exception as e:
         logger.error(f"Token verification failed: {e}", exc_info=True)
-        return error_response(
-            ErrorCode.AUTH_TOKEN_INVALID,
-            "Invalid token",
-            error_type="UserError",
+        raise HTTPException(
             status_code=401,
+            detail="Invalid token",
         )
 
 # [*] v4.19.4更新:使用基于角色的动态限流(替换硬编码限流)
