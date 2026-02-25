@@ -7,14 +7,14 @@
 #### Scenario: 短信/电话验证码（OTP）由用户提供后填入
 
 - **WHEN** 登录过程中平台要求短信或电话验证码
-- **THEN** 执行器或登录组件检测到需验证码时，通过 VerificationRequired 将任务置为 paused，并向前端提供 verification_type（如 otp）及必要提示
+- **THEN** 执行器或登录组件检测到需验证码时，通过 VerificationRequiredError 将任务置为 paused，并向前端提供 verification_type（如 otp）及必要提示
 - **AND** 用户在前端输入验证码并提交后，后端将验证码写入任务/会话上下文（如 config['otp']），恢复任务并将该值传入登录组件
 - **AND** 登录组件从 config 读取验证码并填入页面，继续完成登录
 
 #### Scenario: 图形验证码出现时暂停并等待人工输入
 
 - **WHEN** 登录页出现图形验证码（如「请输入验证码」及验证码输入框/图片）
-- **THEN** 登录组件在点击登录后短时内（如 2–3 秒）检测到仍停留在登录页且存在验证码区域时，抛出 VerificationRequired(verification_type="graphical_captcha", screenshot_path=...)
+- **THEN** 登录组件在点击登录后短时内（如 2–3 秒）检测到仍停留在登录页且存在验证码区域时，抛出 VerificationRequiredError(verification_type="graphical_captcha", screenshot_path=...)
 - **AND** 执行器将任务置为 paused，前端展示截图与验证码输入框
 - **AND** 用户输入验证码并提交后，后端将验证码写入任务上下文（如 config['captcha_code']），恢复任务并重试登录步骤；登录组件从 config 读取并填入后再次点击登录
 

@@ -15,8 +15,9 @@ import uuid
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Callable, Awaitable
+from typing import Dict, Any, Optional, List, Callable, Awaitable, Tuple
 from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
 
 from modules.core.logger import get_logger
 from modules.apps.collection_center.component_loader import ComponentLoader
@@ -24,6 +25,94 @@ from modules.apps.collection_center.popup_handler import UniversalPopupHandler, 
 from modules.apps.collection_center.python_component_adapter import PythonComponentAdapter, create_adapter
 
 logger = get_logger(__name__)
+
+# 用于 SessionManager/DeviceFingerprintManager 同步 IO 的线程池(避免阻塞事件循环)
+_executor_pool: Optional[ThreadPoolExecutor] = None
+
+
+def _get_executor_pool() -> ThreadPoolExecutor:
+    global _executor_pool
+    if _executor_pool is None:
+        _executor_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="collection_io")
+    return _executor_pool
+
+
+def _normalize_account_id(account_id: Any, account: Dict[str, Any]) -> Tuple[str, bool]:
+    """
+    规范化 account_id 并判断是否使用按账号会话/指纹。
+    以执行器入参 account_id 为事实标准，与 account 中的 account_id 保持一致。
+    若缺失或无法安全转为字符串则回退到完整登录+全局指纹。
+    """
+    try:
+        sid = str(account_id).strip() if account_id is not None else ""
+        if not sid:
+            logger.warning("account_id is missing or empty, disabling account session and fingerprint")
+            return "", False
+        acc_id = (account or {}).get("account_id")
+        if acc_id is not None and str(acc_id).strip() != sid:
+            logger.warning(
+                "account_id from param (%s) differs from account.account_id (%s), using param",
+                sid, acc_id,
+            )
+        return sid, True
+    except Exception as e:
+        logger.warning("Failed to normalize account_id: %s, disabling account session and fingerprint", e)
+        return "", False
+
+
+async def _load_session_async(platform: str, account_id: str, max_age_days: int = 30) -> Optional[Dict[str, Any]]:
+    """在线程池中加载会话，避免阻塞事件循环。返回 session_data 或 None。"""
+    from modules.utils.sessions.session_manager import SessionManager
+    loop = asyncio.get_event_loop()
+    def _load() -> Optional[Dict[str, Any]]:
+        sm = SessionManager()
+        return sm.load_session(platform, account_id, max_age_days=max_age_days)
+    return await loop.run_in_executor(_get_executor_pool(), _load)
+
+
+async def _save_session_async(platform: str, account_id: str, storage_state: Dict[str, Any]) -> bool:
+    """在线程池中保存会话。"""
+    from modules.utils.sessions.session_manager import SessionManager
+    loop = asyncio.get_event_loop()
+    def _save() -> bool:
+        sm = SessionManager()
+        return sm.save_session(platform, account_id, storage_state)
+    return await loop.run_in_executor(_get_executor_pool(), _save)
+
+
+async def _get_fingerprint_context_options_async(
+    platform: str, account_id: str, account: Optional[Dict[str, Any]] = None, proxy: Optional[Dict] = None
+) -> Dict[str, Any]:
+    """在线程池中获取按账号的 Playwright context 选项。"""
+    from modules.utils.sessions.device_fingerprint import DeviceFingerprintManager
+    loop = asyncio.get_event_loop()
+    def _get() -> Dict[str, Any]:
+        fm = DeviceFingerprintManager()
+        return fm.get_playwright_context_options(platform, account_id, account, proxy=proxy)
+    return await loop.run_in_executor(_get_executor_pool(), _get)
+
+
+def _build_playwright_context_options_from_fingerprint(fp_options: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    将 DeviceFingerprintManager 返回的选项转为 Playwright new_context 可用的参数。
+    过滤不兼容项(如 permissions 以 list 形式表示授予，此处不授予权限以保持与指纹一致)。
+    """
+    # Playwright new_context 常用参数
+    allowed = {
+        "user_agent", "viewport", "locale", "timezone_id", "device_scale_factor",
+        "is_mobile", "has_touch", "color_scheme", "reduced_motion", "forced_colors",
+        "extra_http_headers", "ignore_https_errors", "java_script_enabled",
+        "accept_downloads", "downloads_path",
+    }
+    out = {}
+    for k, v in fp_options.items():
+        if k in allowed and v is not None:
+            out[k] = v
+    # permissions: 指纹中为 denied，不传给 new_context 即不授予，符合预期
+    if "permissions" in fp_options and isinstance(fp_options["permissions"], list) and not fp_options["permissions"]:
+        pass  # 不授予任何权限
+    return out
+
 
 # Phase 9.4: 版本管理支持(懒加载,避免循环依赖)
 _version_service = None
@@ -393,20 +482,23 @@ class CollectionExecutorV2:
         data_domains: List[str],
         date_range: Dict[str, str],
         granularity: str,
-        page = None,  # Playwright Page对象
+        page = None,  # Playwright Page对象(兼容旧调用; 推荐传 browser 由执行器自建 context)
         context: TaskContext = None,  # 用于恢复任务
         sub_domains: Optional[List[str]] = None,  # v4.7.0: 子域数组
         debug_mode: bool = False,  # v4.7.0: 调试模式
+        browser = None,  # 推荐: Playwright Browser 对象, 执行器自建带指纹与会话的 context
+        proxy: Optional[Dict[str, str]] = None,  # 代理预留, 当前不注入
     ) -> CollectionResult:
         """
         执行采集任务(v4.7.0 - 任务粒度优化)
-        
+
         v4.7.0 更新:
         - 支持子域数组循环(sub_domains)
         - 支持部分成功机制(单域失败不影响其他域)
         - 实时更新进度字段(completed_domains, failed_domains)
         - 一次登录后循环采集所有域(浏览器复用)
-        
+        - 会话与指纹: 按 account_id 持久化/复用会话、按账号固定指纹(DeviceFingerprintManager)
+
         Args:
             task_id: 任务ID
             platform: 平台代码(shopee/tiktok/miaoshou)
@@ -415,46 +507,49 @@ class CollectionExecutorV2:
             data_domains: 数据域列表
             date_range: 日期范围 {"start": "2025-01-01", "end": "2025-01-31"}
             granularity: 粒度(daily/weekly/monthly)
-            page: Playwright Page对象
+            page: Playwright Page对象(若传 browser 则忽略; 否则从 page 取 browser 后自建 context)
             context: 任务上下文(用于恢复任务)
             sub_domains: 子域数组(v4.7.0)
             debug_mode: 调试模式(v4.7.0,仅用于日志记录)
-            
+            browser: 推荐传入, 执行器自建带指纹与可选会话的 context
+            proxy: 代理预留, 当前不向 context 注入
+
         Returns:
             CollectionResult: 采集结果
         """
         start_time = datetime.now()
-        
+
+        # 1.0 统一约定: 规范化 account_id, 决定是否使用按账号会话/指纹
+        account_id_norm, use_account_session_fingerprint = _normalize_account_id(account_id, account)
+
         # v4.7.0: 计算总数据域数量(含子域)
         total_domains_count = len(data_domains)
         if sub_domains:
-            # 如果有子域,每个数据域 × 子域数量
             total_domains_count = len(data_domains) * len(sub_domains)
-        
-        logger.info(f"Task {task_id}: Starting collection for {total_domains_count} domains (debug_mode={debug_mode})")
-        
-        # 创建或恢复任务上下文
+
+        logger.info(f"Task {task_id}: Starting collection for {total_domains_count} domains (debug_mode={debug_mode}, use_account_session_fingerprint={use_account_session_fingerprint})")
+
+        # 创建或恢复任务上下文(使用规范化后的 account_id)
         if context is None:
             context = TaskContext(
                 task_id=task_id,
                 platform=platform,
-                account_id=account_id,
+                account_id=account_id_norm or account_id,
                 data_domains=data_domains,
                 date_range=date_range,
                 granularity=granularity,
-                sub_domains=sub_domains,  # v4.7.0
+                sub_domains=sub_domains,
             )
-        
+        else:
+            context.account_id = account_id_norm or context.account_id
+
         self._task_contexts[task_id] = context
-        
-        # 创建任务下载目录
+
         task_download_dir = self.downloads_dir / task_id
         task_download_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 创建步骤弹窗处理器
+
         step_popup_handler = StepPopupHandler(self.popup_handler, platform)
-        
-        # 准备参数(用于变量替换)
+
         params = {
             'account': account,
             'params': {
@@ -469,22 +564,66 @@ class CollectionExecutorV2:
             },
             'platform': platform,
         }
-        
-        # Phase 9 架构简化(方案B):导出组件自包含
-        # 
-        # 执行顺序简化为: Login -> Export(循环各数据域)
-        # 
-        # 导出组件职责(自包含):
-        # 1. 导航到目标页面(URL 或点击菜单)
-        # 2. 切换店铺(如需要,可调用 shop_switch 子组件)
-        # 3. 选择日期范围(可调用 date_picker 子组件)
-        # 4. 设置筛选条件(可调用 filters 子组件)
-        # 5. 触发导出并下载文件
-        # 
-        # 执行器只关心 step 的 action 字段,不理解业务含义
-        
+
+        # 获取 browser: 优先使用入参 browser, 否则从 page 取(后关闭传入的 page/context)
+        browser_instance = browser
+        page_context_to_close = None
+        if browser_instance is None and page is not None:
+            try:
+                browser_instance = page.context.browser
+                page_context_to_close = page.context
+            except Exception as e:
+                logger.warning("Could not get browser from page: %s", e)
+        if browser_instance is None:
+            raise ValueError("execute() requires either browser= or page= to be provided")
+
+        # 加载会话与指纹(仅当 use_account_session_fingerprint 时)
+        storage_state: Optional[Dict[str, Any]] = None
+        reused_session = False
+        if use_account_session_fingerprint and account_id_norm:
+            try:
+                session_data = await _load_session_async(platform, account_id_norm)
+                if session_data and isinstance(session_data.get("storage_state"), dict):
+                    storage_state = session_data["storage_state"]
+                    reused_session = True
+                    logger.info("Task %s: session loaded for %s/%s (reused_session=True)", task_id, platform, account_id_norm)
+                else:
+                    if session_data is None:
+                        logger.debug("Task %s: no valid session for %s/%s, will full login", task_id, platform, account_id_norm)
+                    else:
+                        logger.warning("Task %s: session_data missing storage_state, will full login", task_id)
+            except Exception as e:
+                logger.warning("Task %s: load_session failed: %s, will full login", task_id, e)
+
+        if use_account_session_fingerprint and account_id_norm:
+            try:
+                fp_options = await _get_fingerprint_context_options_async(platform, account_id_norm, account, proxy=proxy)
+                context_options = _build_playwright_context_options_from_fingerprint(fp_options)
+            except Exception as e:
+                logger.warning("Task %s: get fingerprint failed: %s, fallback to global context args", task_id, e)
+                from modules.apps.collection_center.browser_config_helper import get_browser_context_args
+                context_options = get_browser_context_args()
+        else:
+            from modules.apps.collection_center.browser_config_helper import get_browser_context_args
+            context_options = get_browser_context_args()
+
+        context_options.setdefault("accept_downloads", True)
+        context_options["downloads_path"] = str(task_download_dir)
+        if storage_state:
+            context_options["storage_state"] = storage_state
+
+        # 执行器统一建 context: 由执行器创建带指纹与可选会话的 context
+        play_context = await browser_instance.new_context(**context_options)
+        page = await play_context.new_page()
+        params["reused_session"] = reused_session
+
+        if page_context_to_close is not None:
+            try:
+                await page_context_to_close.close()
+            except Exception as e:
+                logger.debug("Close passed-in context: %s", e)
+
         try:
-            # v4.8.0: Python 组件模式
             if self.use_python_components:
                 return await self._execute_with_python_components(
                     task_id=task_id,
@@ -499,8 +638,11 @@ class CollectionExecutorV2:
                     sub_domains=sub_domains,
                     total_domains_count=total_domains_count,
                     start_time=start_time,
+                    save_session_after_login=use_account_session_fingerprint and bool(account_id_norm),
+                    session_platform=platform,
+                    session_account_id=account_id_norm,
                 )
-            
+
             # ===== 以下为旧的 YAML 组件执行流程(将被废弃) =====
             
             # 检查是否需要跳过登录(恢复任务)
@@ -737,7 +879,7 @@ class CollectionExecutorV2:
                 failed_domains=context.failed_domains,
                 total_domains=total_domains_count,
             )
-        
+
         except TaskCancelledError:
             logger.info(f"Task {task_id} was cancelled")
             
@@ -780,7 +922,13 @@ class CollectionExecutorV2:
                 failed_domains=context.failed_domains,
                 total_domains=total_domains_count,
             )
-    
+        finally:
+            try:
+                if play_context is not None:
+                    await play_context.close()
+            except Exception as _e:
+                logger.debug("Close play_context: %s", _e)
+
     def _record_version_usage(self, component: Dict[str, Any], success: bool) -> None:
         """
         记录版本使用情况(Phase 9.4)
@@ -873,59 +1021,50 @@ class CollectionExecutorV2:
         sub_domains: Optional[List[str]],
         total_domains_count: int,
         start_time: datetime,
+        save_session_after_login: bool = False,
+        session_platform: str = "",
+        session_account_id: str = "",
     ) -> CollectionResult:
         """
         v4.8.0: 使用 Python 组件执行采集流程
-        
-        完全替代 YAML 组件的执行流程,直接调用异步 Python 组件。
-        
+
         执行顺序:
-        1. Login(登录组件)
+        1. Login(登录组件); 若 save_session_after_login 则在成功后保存会话
         2. Loop: Export(循环执行各数据域的导出组件)
-        
-        Args:
-            task_id: 任务ID
-            platform: 平台代码
-            account: 账号信息
-            params: 采集参数
-            context: 任务上下文
-            page: Playwright Page 对象
-            step_popup_handler: 步骤弹窗处理器
-            task_download_dir: 下载目录
-            data_domains: 数据域列表
-            sub_domains: 子域列表
-            total_domains_count: 总域数量
-            start_time: 开始时间
-        
-        Returns:
-            CollectionResult: 采集结果
         """
-        # 创建 Python 组件适配器（config 即 params，含 task/params/account/platform，组件从 config['task']['download_dir'] 读取）
         adapter = create_adapter(
             platform=platform,
             account=account,
             config=params,
         )
-        
-        # 1. 执行登录组件
+
+        # 1. 执行登录组件( params 中已含 reused_session 标记)
         if context.current_component_index == 0:
             await self._update_status(task_id, 5, "正在登录...")
             await self._check_cancelled(task_id)
-            
-            # 检查弹窗
             await self.popup_handler.close_popups(page, platform=platform)
-            
+
             login_success = await self._execute_python_component(
                 page=page,
                 adapter=adapter,
                 component_type="login",
                 params=params,
             )
-            
+
             if not login_success:
                 raise StepExecutionError("登录组件执行失败")
-            
-            logger.info(f"Task {task_id}: [Python] Login completed successfully")
+
+            logger.info(f"Task {task_id}: [Python] Login completed successfully (reused_session=%s)", params.get("reused_session", False))
+            if save_session_after_login and session_platform and session_account_id:
+                try:
+                    storage_state = await page.context.storage_state()
+                    ok = await _save_session_async(session_platform, session_account_id, storage_state)
+                    if ok:
+                        logger.info("Task %s: session saved for %s/%s", task_id, session_platform, session_account_id)
+                    else:
+                        logger.warning("Task %s: session save returned False for %s/%s", task_id, session_platform, session_account_id)
+                except Exception as e:
+                    logger.warning("Task %s: save_session failed: %s", task_id, e)
             context.current_component_index = 1
         
         # 2. 循环执行各数据域导出
@@ -2599,36 +2738,60 @@ class CollectionExecutorV2:
             CollectionResult: 采集结果
         """
         start_time = datetime.now()
-        logger.info(f"Task {task_id}: Starting PARALLEL collection for {len(data_domains)} domains (max_parallel={max_parallel})")
-        
-        # 创建任务上下文
+        account_id_norm, use_account_session_fingerprint = _normalize_account_id(account_id, account)
+        logger.info(f"Task {task_id}: Starting PARALLEL collection for {len(data_domains)} domains (max_parallel={max_parallel}, use_account_session_fingerprint={use_account_session_fingerprint})")
+
         context = TaskContext(
             task_id=task_id,
             platform=platform,
-            account_id=account_id,
+            account_id=account_id_norm or account_id,
             data_domains=data_domains,
             date_range=date_range,
             granularity=granularity,
         )
         self._task_contexts[task_id] = context
-        
-        # 创建任务下载目录
+
         task_download_dir = self.downloads_dir / task_id
         task_download_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 1. 第一步:登录(使用主上下文) + 步骤可观测成对打点
+
+        storage_state: Optional[Dict[str, Any]] = None
+        reused_session = False
+        if use_account_session_fingerprint and account_id_norm:
+            try:
+                session_data = await _load_session_async(platform, account_id_norm)
+                if session_data and isinstance(session_data.get("storage_state"), dict):
+                    storage_state = session_data["storage_state"]
+                    reused_session = True
+                    logger.info("Task %s: [parallel] session loaded for %s/%s", task_id, platform, account_id_norm)
+            except Exception as e:
+                logger.warning("Task %s: [parallel] load_session failed: %s", task_id, e)
+
+        if use_account_session_fingerprint and account_id_norm:
+            try:
+                fp_options = await _get_fingerprint_context_options_async(platform, account_id_norm, account, proxy=None)
+                login_context_options = _build_playwright_context_options_from_fingerprint(fp_options)
+            except Exception as e:
+                logger.warning("Task %s: [parallel] get fingerprint failed: %s, fallback to default", task_id, e)
+                from modules.apps.collection_center.browser_config_helper import get_browser_context_args
+                login_context_options = get_browser_context_args()
+        else:
+            from modules.apps.collection_center.browser_config_helper import get_browser_context_args
+            login_context_options = get_browser_context_args()
+
+        login_context_options.setdefault("accept_downloads", True)
+        login_context_options["downloads_path"] = str(task_download_dir)
+        if storage_state:
+            login_context_options["storage_state"] = storage_state
+
         await self._update_status(task_id, 5, "正在登录...")
         login_start_time = datetime.now()
         await self._update_status(
             task_id, 5, "登录开始",
             details={"step_id": "login", "component": "login", "data_domain": None}
         )
-        login_context = await browser.new_context(
-            accept_downloads=True,
-            downloads_path=str(task_download_dir),
-        )
+        login_context = await browser.new_context(**login_context_options)
         login_page = await login_context.new_page()
-        
+
         params = {
             'account': account,
             'params': {
@@ -2642,9 +2805,9 @@ class CollectionExecutorV2:
                 'screenshot_dir': str(self.screenshots_dir / task_id),
             },
             'platform': platform,
+            'reused_session': reused_session,
         }
         try:
-            # 执行登录组件（与顺序路径一致：create_adapter + adapter.login）
             adapter = create_adapter(platform=platform, account=account, config=params)
             step_popup_handler = StepPopupHandler(self.popup_handler, platform)
             login_success = await self._execute_python_component(
@@ -2660,10 +2823,16 @@ class CollectionExecutorV2:
             )
             if not login_success:
                 raise StepExecutionError("登录组件执行失败")
-            # 获取登录后的Cookie和Storage
             cookies = await login_context.cookies()
             storage_state = await login_context.storage_state()
-            logger.info(f"Task {task_id}: Login completed, extracted {len(cookies)} cookies")
+            logger.info(f"Task {task_id}: Login completed, extracted {len(cookies)} cookies (reused_session=%s)", reused_session)
+            if use_account_session_fingerprint and account_id_norm:
+                try:
+                    ok = await _save_session_async(platform, account_id_norm, storage_state)
+                    if ok:
+                        logger.info("Task %s: [parallel] session saved for %s/%s", task_id, platform, account_id_norm)
+                except Exception as e:
+                    logger.warning("Task %s: [parallel] save_session failed: %s", task_id, e)
         except Exception as e:
             duration_ms = int((datetime.now() - login_start_time).total_seconds() * 1000)
             await self._update_status(
@@ -2686,11 +2855,22 @@ class CollectionExecutorV2:
         
         logger.info(f"Task {task_id}: Split into {len(domain_batches)} batches (max_parallel={max_parallel})")
         
-        # 批次执行
+        domain_context_options: Optional[Dict[str, Any]] = None
+        if use_account_session_fingerprint and account_id_norm:
+            try:
+                fp_opts = await _get_fingerprint_context_options_async(platform, account_id_norm, account, proxy=None)
+                domain_context_options = _build_playwright_context_options_from_fingerprint(fp_opts)
+            except Exception:
+                domain_context_options = None
+        if domain_context_options is None:
+            from modules.apps.collection_center.browser_config_helper import get_browser_context_args
+            domain_context_options = get_browser_context_args()
+        domain_context_options = dict(domain_context_options)
+        domain_context_options.setdefault("accept_downloads", True)
+        domain_context_options["downloads_path"] = str(task_download_dir)
+
         for batch_index, batch in enumerate(domain_batches):
             logger.info(f"Task {task_id}: Processing batch {batch_index+1}/{len(domain_batches)} with {len(batch)} domains")
-            
-            # 为每个域创建异步任务
             tasks = []
             for domain in batch:
                 task = self._execute_single_domain_parallel(
@@ -2705,6 +2885,7 @@ class CollectionExecutorV2:
                     task_download_dir=task_download_dir,
                     domain_index=data_domains.index(domain),
                     total_domains=len(data_domains),
+                    context_options=domain_context_options,
                 )
                 tasks.append(task)
             
@@ -2793,25 +2974,22 @@ class CollectionExecutorV2:
         task_download_dir: Path,
         domain_index: int,
         total_domains: int,
+        context_options: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """
-        [*] Phase 9.1: 在独立浏览器上下文中执行单个数据域采集
-        
-        Returns:
-            tuple: (file_path, success)
+        [*] Phase 9.1: 在独立浏览器上下文中执行单个数据域采集(带指纹与会话)
         """
         domain_context = None
         domain_page = None
-        
+        opts = dict(context_options or {})
+        opts["storage_state"] = storage_state
+        opts.setdefault("accept_downloads", True)
+        opts["downloads_path"] = str(task_download_dir)
+
         domain_export_start = datetime.now()
         progress = 20 + int(70 * domain_index / total_domains)
         try:
-            # 使用共享的storage_state创建新上下文(包含登录Cookie)
-            domain_context = await browser.new_context(
-                storage_state=storage_state,
-                accept_downloads=True,
-                downloads_path=str(task_download_dir),
-            )
+            domain_context = await browser.new_context(**opts)
             domain_page = await domain_context.new_page()
             logger.info(f"Task {task_id}: [{domain_index+1}/{total_domains}] Starting {data_domain} in parallel context")
             await self._update_status(

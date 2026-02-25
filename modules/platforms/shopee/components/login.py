@@ -50,6 +50,17 @@ class ShopeeLogin(LoginComponent):
             await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(800)
 
+            # 复用会话时先做已登录检测(契约: reused_session 时先判已登录再决定是否完整登录)
+            if self.ctx.config.get("reused_session"):
+                try:
+                    cur = str(page.url or "")
+                    if "seller.shopee" in cur and "/login" not in cur:
+                        if self.logger:
+                            self.logger.info("[ShopeeLogin] reused_session: already on seller platform, skip login")
+                        return LoginResult(success=True, message="already logged in")
+                except Exception:
+                    pass
+
             # Unified auto-login
             svc = LoginService()
             ok = await svc.ensure_logged_in("shopee", page, self.ctx.account)

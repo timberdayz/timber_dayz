@@ -1197,21 +1197,15 @@ async def _execute_collection_task_background(
                 is_cancelled_callback=_is_collection_task_cancelled,
             )
             
-            # 执行采集
+            # 执行采集: 仅 launch browser，执行器内部统一创建带指纹与可选会话的 context
             from playwright.async_api import async_playwright
-            
+
             async with async_playwright() as p:
-                # 根据debug_mode和环境配置启动浏览器
-                from modules.apps.collection_center.browser_config_helper import get_browser_launch_args, get_browser_context_args
-                
+                from modules.apps.collection_center.browser_config_helper import get_browser_launch_args
+
                 browser = await p.chromium.launch(**get_browser_launch_args(debug_mode=debug_mode))
-                context = await browser.new_context(**get_browser_context_args())
-                page = await context.new_page()
-                
                 try:
-                    # [*] Phase 9.1: 根据parallel_mode选择执行方式
                     if parallel_mode:
-                        # 并行执行模式(每个域独立浏览器上下文)
                         logger.info(f"Task {task_id}: Using PARALLEL execution mode (max_parallel={max_parallel})")
                         result = await executor.execute_parallel_domains(
                             task_id=task_id,
@@ -1226,7 +1220,7 @@ async def _execute_collection_task_background(
                             debug_mode=debug_mode,
                         )
                     else:
-                        # 顺序执行模式(传统方式)
+                        # 顺序模式: 传 browser，由执行器自建 context(带指纹与可选会话)
                         result = await executor.execute(
                             task_id=task_id,
                             platform=platform,
@@ -1236,29 +1230,21 @@ async def _execute_collection_task_background(
                             sub_domains=sub_domains,
                             date_range=date_range,
                             granularity=granularity,
-                            page=page,
+                            browser=browser,
                             debug_mode=debug_mode,
                         )
-                    
-                    # 更新任务状态
+
                     task.status = result.status
                     task.progress = 100 if result.status in ["completed", "partial_success"] else 0
                     task.files_collected = result.files_collected
                     task.error_message = result.error_message
                     task.completed_at = datetime.utcnow()
                     task.duration_seconds = result.duration_seconds
-                    
-                    # v4.7.0: 更新域级别字段
                     task.completed_domains = result.completed_domains
                     task.failed_domains = result.failed_domains
-                    
                     await db.commit()
-                    
                     logger.info(f"Task {task_id} completed: {result.status}, files={result.files_collected}")
-                    
                 finally:
-                    await page.close()
-                    await context.close()
                     await browser.close()
         
         except Exception as e:

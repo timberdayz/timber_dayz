@@ -70,10 +70,11 @@ def get_browser_launch_args(debug_mode: bool = False) -> dict:
 
 def get_browser_context_args() -> dict:
     """
-    获取浏览器上下文参数(反检测指纹)
-    
-    Returns:
-        dict: browser.new_context() 参数
+    获取浏览器上下文参数(全局默认反检测指纹)。
+    主采集执行器已按账号使用 DeviceFingerprintManager 生成指纹，此处仅作回退/兼容。
+
+    代理为预留能力：当前采集在住宅 IP 下无需启用；若未来需要多 IP/代理，
+    可在执行器创建 context 时从 account 读取 proxy_required/proxy 并注入 context 的 proxy。
     """
     return {
         'viewport': {'width': 1920, 'height': 1080},
