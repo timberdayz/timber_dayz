@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import os
+from pathlib import Path
 from typing import Any
 
 from modules.components.base import ExecutionContext
 from modules.components.login.base import LoginComponent, LoginResult
+from modules.apps.collection_center.executor_v2 import VerificationRequiredError
 
 
 class MiaoshouLogin(LoginComponent):
@@ -75,6 +79,30 @@ class MiaoshouLogin(LoginComponent):
                 return LoginResult(success=True, message="already logged in")
         except Exception:
             pass
+
+        # 若有回传的验证码/OTP(恢复任务),先填入并点击登录
+        params = (self.ctx.config or {}).get("params") or {}
+        captcha_code = params.get("captcha_code") or params.get("captcha")
+        otp = params.get("otp")
+        if captcha_code or otp:
+            value = (captcha_code or otp or "").strip()
+            if value:
+                _log("[MiaoshouLogin] 使用回传的验证码/OTP 填入并提交...")
+                try:
+                    inp = page.locator("input[placeholder*='验证码'], input[name*='captcha' i], input[name*='code' i]").first
+                    if await inp.count() > 0:
+                        await inp.fill(value, timeout=5000)
+                    await page.locator("button.login.login-button").first.click(timeout=3000)
+                    await asyncio.sleep(2.0)
+                    try:
+                        cur = str(getattr(page, "url", ""))
+                        if ("/welcome" in cur and "redirect=" not in cur) or await page.locator("button.login.login-button").count() == 0:
+                            _log("[MiaoshouLogin] 验证码提交后登录成功")
+                            return LoginResult(success=True, message="ok")
+                    except Exception:
+                        pass
+                except Exception as e:
+                    _log(f"[WARN] 回传验证码填入/提交异常: {e}")
 
         # 步骤2:填写用户名
         try:
@@ -215,15 +243,13 @@ class MiaoshouLogin(LoginComponent):
         except Exception as e:
             _log(f"[FAIL] 点击登录按钮过程异常: {e}")
 
-        # 步骤6:等待登录结果
-        _log("[MiaoshouLogin] 步骤6: 等待登录结果...")
+        # 步骤6: 短时等待后判定登录结果或图形验证码(2-3 秒内检测,避免 15 秒傻等)
+        _log("[MiaoshouLogin] 步骤6: 等待登录结果(2-3s 内检测验证码)...")
         async def _is_logged_in() -> bool:
             try:
                 url = str(getattr(page, "url", ""))
-                # 登录成功通常跳转到 /welcome(且不再带 redirect 参数)
                 if ("/welcome" in url) and ("redirect=" not in url):
                     return True
-                # 若已在站内其他业务页(非登录页重定向),且页面无登录表单,也视为成功
                 in_site = "erp.91miaoshou.com" in url
                 redirected = "redirect=" in url
                 no_login_form = (
@@ -233,20 +259,48 @@ class MiaoshouLogin(LoginComponent):
                 if in_site and (not redirected) and no_login_form:
                     return True
             except Exception:
-                return False
+                pass
             return False
 
+        await asyncio.sleep(2.5)
+        if await _is_logged_in():
+            _log("[OK] 登录成功")
+            return LoginResult(success=True, message="ok")
+
+        # 仍停留登录页: 检测是否出现图形验证码 DOM
+        captcha_visible = False
         try:
-            import asyncio
-            import time as _t
-            deadline = _t.time() + 15.0
-            while _t.time() < deadline:
-                if await _is_logged_in():
-                    break
-                await asyncio.sleep(0.5)
+            has_text = await page.locator("text=请输入验证码").count() > 0
+            has_input = await page.locator("input[placeholder*='验证码'], input[name*='captcha' i]").count() > 0
+            captcha_visible = has_text or has_input
         except Exception:
             pass
+        if captcha_visible:
+            screenshot_path = None
+            try:
+                screenshot_dir = (self.ctx.config or {}).get("task", {}).get("screenshot_dir")
+                if screenshot_dir:
+                    Path(screenshot_dir).mkdir(parents=True, exist_ok=True)
+                    screenshot_path = os.path.join(screenshot_dir, "miaoshou_captcha.png")
+                else:
+                    import tempfile
+                    fd, screenshot_path = tempfile.mkstemp(suffix=".png", prefix="miaoshou_captcha_")
+                    os.close(fd)
+                await page.screenshot(path=screenshot_path, timeout=5000)
+                _log(f"[MiaoshouLogin] 检测到图形验证码,已截图: {screenshot_path}")
+            except Exception as e:
+                _log(f"[WARN] 验证码截图失败: {e}")
+            raise VerificationRequiredError("graphical_captcha", screenshot_path)
 
+        # 无验证码时再等待至多约 12 秒看是否登录成功
+        try:
+            for _ in range(24):
+                await asyncio.sleep(0.5)
+                if await _is_logged_in():
+                    _log("[OK] 登录成功")
+                    return LoginResult(success=True, message="ok")
+        except Exception:
+            pass
         ok = await _is_logged_in()
         _log("[OK] 登录成功" if ok else "[FAIL] 登录仍停留在登录页")
         return LoginResult(success=ok, message="ok" if ok else "stay on login")

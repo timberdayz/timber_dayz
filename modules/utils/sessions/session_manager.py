@@ -163,7 +163,7 @@ class SessionManager:
             session_file = self.get_session_path(platform, account_id)
             
             if not session_file.exists():
-                logger.debug(f"会话文件不存在: {platform}/{account_id}")
+                logger.debug(f"未找到已保存会话 {platform}/{account_id}，将执行完整登录（首次采集或未保存过会话时属正常）")
                 return None
             
             # 读取会话数据

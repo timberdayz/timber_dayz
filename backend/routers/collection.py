@@ -6,10 +6,11 @@
 v4.18.0: Pydantic模型已迁移到backend/schemas/collection.py(Contract-First架构)
 """
 
+import os
 import uuid
 import asyncio
 from datetime import datetime, date, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Awaitable
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Path
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -27,6 +28,7 @@ from backend.schemas.collection import (
     CollectionConfigUpdate,
     CollectionConfigResponse,
     TaskCreateRequest,
+    ResumeTaskRequest,
     TaskResponse,
     TaskLogResponse,
     CollectionAccountResponse,
@@ -307,7 +309,8 @@ async def list_accounts(
 @router.post("/tasks", response_model=TaskResponse)
 async def create_task(
     request: TaskCreateRequest,
-    db: AsyncSession = Depends(get_async_db)
+    fastapi_request: Request,
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
     创建采集任务(v4.7.0)
@@ -398,7 +401,8 @@ async def create_task(
     
     logger.info(f"Created collection task: {task_uuid} ({request.platform}/{request.account_id}) - {total_domains_count} domains, debug_mode={request.debug_mode}")
     
-    # v4.7.0 + Phase 9.1: 启动后台采集任务(使用过滤后的数据域)
+    # v4.7.0 + Phase 9.1: 启动后台采集任务(使用过滤后的数据域)；验证码恢复需传入 app 以轮询 Redis
+    app = getattr(fastapi_request, "app", None)
     asyncio.create_task(
         _execute_collection_task_background(
             task_id=task_uuid,
@@ -411,6 +415,7 @@ async def create_task(
             debug_mode=request.debug_mode,
             parallel_mode=request.parallel_mode,  # [*] Phase 9.1: 并行执行模式
             max_parallel=request.max_parallel,  # [*] Phase 9.1: 最大并发数
+            app=app,
         )
     )
     
@@ -553,44 +558,65 @@ async def retry_task(
     return new_task
 
 
+# Redis key 约定: 验证码回传(执行器轮询此 key, TTL 10 分钟)
+CAPTCHA_REDIS_KEY_PREFIX = "collection:captcha:"
+
+
 @router.post("/tasks/{task_id}/resume", response_model=TaskResponse)
 async def resume_task(
     task_id: str = Path(..., description="任务ID"),
-    db: AsyncSession = Depends(get_async_db)
+    body: Optional[ResumeTaskRequest] = None,
+    request: Request = None,
+    db: AsyncSession = Depends(get_async_db),
 ):
     """
-    继续任务
-    
-    从暂停点继续执行(适用于验证码暂停后的恢复)
+    继续任务(验证码恢复)。
+    仅当任务处于 paused 且为「等待验证」时接受请求体中的 captcha_code 或 otp，
+    写入 Redis 供执行器在同一 page 内填入后继续；否则返回 4xx。
     """
     result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
     task = result.scalar_one_or_none()
-    
+
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
-    # 只能继续paused状态的任务
+
     if task.status != "paused":
-        raise HTTPException(status_code=400, detail=f"无法继续{task.status}状态的任务")
-    
-    # 更新状态为running
-    task.status = "running"
-    task.verification_type = None  # 清除验证码状态
-    
-    # 记录日志
+        raise HTTPException(
+            status_code=400,
+            detail="验证已超时或任务已结束，请重新发起采集",
+        )
+
+    payload = body or ResumeTaskRequest()
+    value = payload.captcha_code or payload.otp
+    if not value or not (value := value.strip()):
+        raise HTTPException(status_code=400, detail="请提供 captcha_code 或 otp")
+
+    redis_client = None
+    if request and getattr(request, "app", None):
+        redis_client = getattr(request.app.state, "redis", None)
+    if not redis_client:
+        raise HTTPException(
+            status_code=503,
+            detail="验证码恢复需要 Redis，当前未配置或不可用",
+        )
+
+    key = f"{CAPTCHA_REDIS_KEY_PREFIX}{task_id}"
+    try:
+        await redis_client.set(key, value, ex=600)
+    except Exception as e:
+        logger.error(f"Resume task {task_id}: Redis set failed: {e}")
+        raise HTTPException(status_code=503, detail="写入验证码失败，请稍后重试")
+
     log = CollectionTaskLog(
         task_id=task.id,
         level="info",
-        message="任务已恢复",
-        details={"previous_status": "paused"}
+        message="用户已提交验证码，等待执行器继续",
+        details={"previous_status": "paused"},
     )
     db.add(log)
     await db.commit()
-    
-    logger.info(f"Resumed task: {task_id}")
-    
-    # TODO: 触发任务执行器继续执行
-    
+
+    logger.info(f"Resumed task: {task_id} (verification submitted)")
     return task
 
 
@@ -641,9 +667,9 @@ async def get_task_screenshot(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     
-    # 检查任务是否有screenshot_path
-    screenshot_path = task.screenshot_path
-    
+    # 检查任务是否有验证码截图(使用 verification_screenshot 与 schema 一致)
+    screenshot_path = task.verification_screenshot
+
     if not screenshot_path:
         raise HTTPException(status_code=404, detail="任务没有截图")
     
@@ -1126,6 +1152,57 @@ async def _is_collection_task_cancelled(task_id: str) -> bool:
 # 后台任务执行(v4.7.0)
 # ============================================================
 
+VERIFICATION_WAIT_TIMEOUT = int(os.getenv("VERIFICATION_TIMEOUT", "300"))  # 5 分钟
+VERIFICATION_POLL_INTERVAL = 1.5
+
+
+async def _on_verification_required(
+    task_id: str,
+    verification_type: str,
+    screenshot_path: Optional[str],
+    app: Any,
+) -> Optional[str]:
+    """
+    验证码需要时的回调：持久化到任务表并置 paused，然后轮询 Redis 等待用户回传，超时返回 None。
+    返回用户提交的 captcha_code/otp 或 None(超时)。
+    """
+    from backend.models.database import AsyncSessionLocal
+    import time
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
+            task = result.scalar_one_or_none()
+            if task:
+                task.verification_type = verification_type
+                task.verification_screenshot = screenshot_path
+                task.status = "paused"
+                await session.commit()
+    except Exception as e:
+        logger.error(f"Verification persist failed for task {task_id}: {e}")
+    redis_client = getattr(app, "state", None) and getattr(app.state, "redis", None) if app else None
+    if not redis_client:
+        logger.warning(f"Task {task_id}: Redis not available, verification wait will timeout immediately")
+        await asyncio.sleep(min(5, VERIFICATION_WAIT_TIMEOUT))
+        return None
+    key = f"{CAPTCHA_REDIS_KEY_PREFIX}{task_id}"
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + VERIFICATION_WAIT_TIMEOUT
+    while loop.time() < deadline:
+        try:
+            val = await redis_client.get(key)
+            if val is not None:
+                try:
+                    await redis_client.delete(key)
+                except Exception:
+                    pass
+                return val
+        except Exception as e:
+            logger.debug(f"Redis get during verification wait: {e}")
+        await asyncio.sleep(VERIFICATION_POLL_INTERVAL)
+    logger.info(f"Task {task_id}: verification wait timed out after {VERIFICATION_WAIT_TIMEOUT}s")
+    return None
+
+
 async def _execute_collection_task_background(
     task_id: str,
     platform: str,
@@ -1137,6 +1214,7 @@ async def _execute_collection_task_background(
     debug_mode: bool,
     parallel_mode: bool,  # [*] Phase 9.1
     max_parallel: int,  # [*] Phase 9.1
+    app: Any = None,  # 验证码恢复时轮询 Redis 用
 ):
     """
     后台执行采集任务(v4.7.0 + Phase 9.1)
@@ -1152,10 +1230,14 @@ async def _execute_collection_task_background(
         debug_mode: 调试模式
         parallel_mode: [*] 并行执行模式(Phase 9.1)
         max_parallel: [*] 最大并发数(Phase 9.1)
+        app: FastAPI app(用于验证码回调轮询 Redis)
     """
     from backend.models.database import AsyncSessionLocal
     from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
     import importlib.util
+
+    async def _verification_callback(t_id: str, v_type: str, s_path: Optional[str]) -> Optional[str]:
+        return await _on_verification_required(t_id, v_type, s_path, app)
     
     # 创建新的异步数据库session(后台任务需要独立session)
     async with AsyncSessionLocal() as db:
@@ -1191,10 +1273,11 @@ async def _execute_collection_task_background(
                 # v4.7.4: 失败状态通过 HTTP 轮询获取
                 return
             
-            # 创建执行器(注入步骤回调与取消检测)
+            # 创建执行器(注入步骤回调、取消检测与验证码回调)
             executor = CollectionExecutorV2(
                 status_callback=_collection_step_status_callback,
                 is_cancelled_callback=_is_collection_task_cancelled,
+                verification_required_callback=_verification_callback,
             )
             
             # 执行采集: 仅 launch browser，执行器内部统一创建带指纹与可选会话的 context

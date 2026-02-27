@@ -158,6 +158,20 @@ from modules.core.db import CatalogFile, FactOrder, Account
 from backend.models.database import CatalogFile  # NEVER!
 ```
 
+### CRITICAL: 采集脚本编写规范（Collection Script Writing）
+
+**适用**：编写或修改采集用 Python 组件时（如 `modules/platforms/*/components/*.py` 中的登录、导航、导出组件）。
+
+**必须**：遵循项目《采集脚本编写规范》文档 **`docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`**，不得遗漏以下约定：
+
+- **元素定位**：优先 `get_by_role` / `get_by_label` / `get_by_text`；选择器集中至 `*_config.py`；iframe 内先选定 frame 再定位。
+- **元素检测**：禁止单次 `count() + is_visible()` 后即操作；使用 `expect(locator).to_be_visible()` 或 `locator.wait_for(state="visible")` 或直接对 locator 执行 click/hover/fill。
+- **等待**：优先条件等待，慎用固定 `wait_for_timeout`；复杂交互（悬停→菜单出现→点击）按规范流程。
+- **契约**：与 `ExecutionContext`、`LoginComponent.run(page)`、`ExportComponent.run(page, mode)` 一致；假定 context 已设置 `accept_downloads` 与 `downloads_path`。
+- **场景**：临时验证码、弹窗、遮罩、Toast、会话过期、加载、下载、新标签页、iframe、平台限流、页面崩溃/超时、现代化网页（SPA、虚拟列表、文件上传、分页等）的检测与应对须按规范文档执行。
+
+**参考**：规范全文见 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`；openspec 需求见 `openspec/specs/data-collection/spec.md`（ADDED 采集脚本编写规范）。
+
 ### Contract-First Development (v4.7.0)
 
 **Development order (MANDATORY):**
@@ -406,6 +420,7 @@ Use OpenSpec workflow for features, breaking changes, architecture changes:
 7. **Modifying core without checking impact** - affects all apps
 8. **Installing dependencies without authorization** - must update requirements.txt only when approved
 9. **Deleting files from `docs/DEVELOPMENT_RULES/`** - this directory is protected
+10. **Writing or modifying collection components without following the script guide** - MUST follow `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` (locators, wait, contract, all scenarios) to avoid regression and inconsistency
 
 ## References to Other Documentation
 
@@ -414,6 +429,7 @@ For comprehensive development standards, see:
 - `openspec/project.md` - Project conventions and tech stack details
 - `openspec/AGENTS.md` - OpenSpec workflow for spec-driven development
 - `docs/DEVELOPMENT_RULES/` - Detailed enterprise development standards (protected directory)
+- `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` - **采集脚本编写规范**（编写/修改采集用 Python 组件时必读；定位、等待、契约、各场景与业界设计）
 - `docs/V4_6_0_ARCHITECTURE_GUIDE.md` - Dimensional table design (v4.6.0)
 - `docs/FINAL_ARCHITECTURE_STATUS.md` - 2025-01-30 architecture audit
 - `CHANGELOG.md` - Version history and archived file tracking

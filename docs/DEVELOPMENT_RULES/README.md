@@ -92,6 +92,7 @@
 - `docs/DEVELOPMENT_RULES/ERROR_HANDLING_AND_LOGGING.md` - 错误处理规范
 - `docs/DEVELOPMENT_RULES/CODE_QUALITY.md` - 代码质量规范
 - `docs/DEVELOPMENT_RULES/SECURITY.md` - 安全规范
+- `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` - **采集脚本编写规范**（编写/修改采集用 Python 组件时必读）
 
 ### 部署运维参考
 - `docs/DEVELOPMENT_RULES/DEPLOYMENT.md` - 部署和运维规范

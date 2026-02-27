@@ -172,15 +172,29 @@ export const retryTask = async (taskId) => {
 }
 
 /**
- * 恢复暂停的任务
+ * 恢复暂停的任务（验证码回传）
  * @param {string} taskId - 任务UUID
- * @param {string} [verificationCode] - 验证码（如果需要）
+ * @param {Object} payload - 验证码内容，与后端 ResumeTaskRequest 一致
+ * @param {string} [payload.captcha_code] - 图形验证码
+ * @param {string} [payload.otp] - 短信/邮箱验证码
  * @returns {Promise<Object>} 恢复的任务
  */
-export const resumeTask = async (taskId, verificationCode = null) => {
-  const params = verificationCode ? { verification_code: verificationCode } : {}
-  const response = await api.post(`/collection/tasks/${taskId}/resume`, null, { params })
+export const resumeTask = async (taskId, payload = {}) => {
+  const body = {}
+  if (payload?.captcha_code != null && String(payload.captcha_code).trim()) {
+    body.captcha_code = String(payload.captcha_code).trim()
+  }
+  if (payload?.otp != null && String(payload.otp).trim()) {
+    body.otp = String(payload.otp).trim()
+  }
+  const response = await api.post(`/collection/tasks/${taskId}/resume`, body)
   return response
+}
+
+/** 获取任务验证码截图 URL（用于 <img> 展示） */
+export const getTaskScreenshotUrl = (taskId) => {
+  const base = import.meta.env.VITE_API_BASE_URL || '/api'
+  return `${base.replace(/\/$/, '')}/collection/tasks/${taskId}/screenshot`
 }
 
 /**

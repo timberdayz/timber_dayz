@@ -327,10 +327,10 @@
       </div>
     </el-dialog>
 
-    <!-- 验证码对话框 -->
+    <!-- 验证码/OTP 对话框：与后端 verification_type、verification_screenshot 对接 -->
     <el-dialog 
       v-model="verificationDialogVisible" 
-      title="需要验证"
+      :title="verificationType === 'otp' ? '需要短信/邮箱验证码' : '需要验证码'"
       width="500px"
       :close-on-click-modal="false"
     >
@@ -338,29 +338,26 @@
         <el-alert 
           type="warning" 
           :closable="false"
-          title="任务需要验证码才能继续"
+          :title="verificationType === 'otp' ? '任务需要输入短信或邮箱验证码(OTP)才能继续' : '任务需要验证码才能继续'"
         />
-        
         <img 
-          v-if="verificationScreenshot" 
-          :src="verificationScreenshot" 
+          v-if="verificationScreenshotUrl" 
+          :src="verificationScreenshotUrl" 
           class="verification-screenshot"
         />
-        
         <el-form>
-          <el-form-item label="验证码">
+          <el-form-item :label="verificationType === 'otp' ? '验证码(OTP)' : '验证码'">
             <el-input 
               v-model="verificationCode" 
-              placeholder="请输入验证码"
+              :placeholder="verificationType === 'otp' ? '请输入短信/邮箱验证码' : '请输入验证码'"
             />
           </el-form-item>
         </el-form>
       </div>
-      
       <template #footer>
-        <el-button @click="skipVerification">跳过</el-button>
+        <el-button @click="skipVerification">取消</el-button>
         <el-button type="primary" @click="submitVerification">
-          提交验证码
+          提交
         </el-button>
       </template>
     </el-dialog>
@@ -388,6 +385,8 @@ const detailLogs = ref([])
 const detailLogsLoading = ref(false)
 const verificationDialogVisible = ref(false)
 const verificationScreenshot = ref('')
+const verificationScreenshotUrl = ref('')
+const verificationType = ref('')
 const verificationCode = ref('')
 const currentTask = ref(null)
 
@@ -533,20 +532,28 @@ const retryTask = async (row) => {
 const showResumeDialog = (row) => {
   currentTask.value = row
   verificationCode.value = ''
-  verificationScreenshot.value = row.error_screenshot_path || ''
+  verificationType.value = row.verification_type || ''
+  verificationScreenshot.value = row.verification_screenshot || row.error_screenshot_path || ''
+  verificationScreenshotUrl.value = row.task_id ? collectionApi.getTaskScreenshotUrl(row.task_id) : ''
   verificationDialogVisible.value = true
 }
 
 const submitVerification = async () => {
   if (!currentTask.value) return
-  
+  const code = (verificationCode.value || '').trim()
+  if (!code) {
+    ElMessage.warning('请输入验证码')
+    return
+  }
+  const isOtp = (verificationType.value || '').toLowerCase() === 'otp' || /^(sms|email_code)$/i.test(verificationType.value)
+  const payload = isOtp ? { otp: code } : { captcha_code: code }
   try {
-    await collectionApi.resumeTask(currentTask.value.task_id, verificationCode.value)
-    ElMessage.success('任务已恢复')
+    await collectionApi.resumeTask(currentTask.value.task_id, payload)
+    ElMessage.success('已提交，任务将自动继续')
     verificationDialogVisible.value = false
     loadTasks()
   } catch (error) {
-    ElMessage.error('恢复失败: ' + error.message)
+    ElMessage.error('提交失败: ' + (error.response?.data?.detail || error.message))
   }
 }
 
@@ -631,8 +638,11 @@ const connectTaskWebSocket = (taskId) => {
       const task = tasks.value.find(t => t.task_id === taskId)
       if (task) {
         task.status = 'paused'
+        task.verification_type = message.verification_type || ''
+        task.verification_screenshot = message.screenshot_path || ''
         currentTask.value = task
-        verificationScreenshot.value = message.screenshot_path || ''
+        verificationType.value = task.verification_type || ''
+        verificationScreenshotUrl.value = collectionApi.getTaskScreenshotUrl(taskId)
         verificationDialogVisible.value = true
       }
     },

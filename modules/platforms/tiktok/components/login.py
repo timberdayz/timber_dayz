@@ -300,7 +300,8 @@ class TiktokLogin(LoginComponent):
         # OTP 处理与重试
         cfg = self.ctx.config or {}
         max_attempts = int((cfg.get("otp_max_attempts") or os.getenv("TIKTOK_OTP_MAX_ATTEMPTS") or 3))
-        preset_otp = cfg.get("otp") or os.getenv("TIKTOK_OTP")
+        # 与执行器注入一致：优先从 config.params.otp 读取（任务恢复时写入），再兼容 config.otp / 环境变量
+        preset_otp = (cfg.get("params") or {}).get("otp") or cfg.get("otp") or os.getenv("TIKTOK_OTP")
 
         # 精确处理“在这台设备上不再询问”:等待至元素出现并确保勾选
         try:

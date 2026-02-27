@@ -83,6 +83,12 @@ class TaskCreateRequest(BaseModel):
     max_parallel: int = Field(3, ge=1, le=5, description="[*] Phase 9.1: 最大并发数(1-5)")
 
 
+class ResumeTaskRequest(BaseModel):
+    """继续任务请求(验证码恢复: 提交验证码或OTP)"""
+    captcha_code: Optional[str] = Field(None, description="图形验证码(人工输入)")
+    otp: Optional[str] = Field(None, description="短信/邮箱验证码(OTP)")
+
+
 class TaskResponse(BaseModel):
     """任务响应(v4.7.0)"""
     id: int
@@ -111,6 +117,9 @@ class TaskResponse(BaseModel):
     updated_at: datetime
     started_at: Optional[datetime] = Field(None, description="任务实际开始执行时间")
     completed_at: Optional[datetime] = Field(None, description="任务结束时间")
+    # 验证码暂停(v4.7.x 验证码优化)
+    verification_type: Optional[str] = Field(None, description="验证码类型(如 graphical_captcha/otp)")
+    verification_screenshot: Optional[str] = Field(None, description="验证码截图路径或URL")
 
     model_config = ConfigDict(from_attributes=True)
 

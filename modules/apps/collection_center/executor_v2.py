@@ -15,7 +15,7 @@ import uuid
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Callable, Awaitable, Tuple
+from typing import Dict, Any, Optional, List, Callable, Awaitable, Tuple, Union
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 
@@ -97,12 +97,12 @@ def _build_playwright_context_options_from_fingerprint(fp_options: Dict[str, Any
     将 DeviceFingerprintManager 返回的选项转为 Playwright new_context 可用的参数。
     过滤不兼容项(如 permissions 以 list 形式表示授予，此处不授予权限以保持与指纹一致)。
     """
-    # Playwright new_context 常用参数
+    # Playwright new_context 常用参数（不含 downloads_path：当前 Playwright API 不在 new_context 接受该参数，下载路径由组件通过 save_as 指定）
     allowed = {
         "user_agent", "viewport", "locale", "timezone_id", "device_scale_factor",
         "is_mobile", "has_touch", "color_scheme", "reduced_motion", "forced_colors",
         "extra_http_headers", "ignore_https_errors", "java_script_enabled",
-        "accept_downloads", "downloads_path",
+        "accept_downloads",
     }
     out = {}
     for k, v in fp_options.items():
@@ -221,8 +221,9 @@ class CollectionExecutorV2:
         self,
         component_loader: ComponentLoader = None,
         popup_handler: UniversalPopupHandler = None,
-        status_callback: Callable[[str, int, str], Awaitable[None]] = None,
+        status_callback: Callable[..., Awaitable[None]] = None,
         is_cancelled_callback: Callable[[str], Awaitable[bool]] = None,
+        verification_required_callback: Callable[[str, str, Optional[str]], Awaitable[Optional[str]]] = None,
     ):
         """
         初始化执行引擎
@@ -232,13 +233,13 @@ class CollectionExecutorV2:
             popup_handler: 弹窗处理器
             status_callback: 状态回调函数 (task_id, progress, message) -> None
             is_cancelled_callback: 取消检测函数 (task_id) -> bool
-        
-        Note: v4.7.4 移除 WebSocket,统一使用 HTTP 轮询
+            verification_required_callback: 验证码需要时回调 (task_id, verification_type, screenshot_path) -> 回传值或 None(超时)
         """
         self.component_loader = component_loader or ComponentLoader()
         self.popup_handler = popup_handler or UniversalPopupHandler()
         self.status_callback = status_callback
         self.is_cancelled_callback = is_cancelled_callback
+        self.verification_required_callback = verification_required_callback
         
         # 任务上下文缓存(用于暂停/恢复)
         self._task_contexts: Dict[str, TaskContext] = {}
@@ -461,14 +462,13 @@ class CollectionExecutorV2:
         playwright = await async_playwright().start()
         browser = await playwright.chromium.launch(**browser_config)
         
-        # 创建浏览器上下文(反检测指纹)
+        # 创建浏览器上下文(反检测指纹)；下载路径由组件通过 download.save_as() 指定，不传 downloads_path
         context = await browser.new_context(
             viewport={'width': 1920, 'height': 1080},
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             locale='zh-CN',
             timezone_id='Asia/Shanghai',
             accept_downloads=True,
-            downloads_path=str(self.downloads_dir),
         )
         
         return playwright, browser, context
@@ -563,6 +563,7 @@ class CollectionExecutorV2:
                 'screenshot_dir': str(self.screenshots_dir / task_id),
             },
             'platform': platform,
+            'downloads_path': str(task_download_dir),  # 供组件 ctx.config.get("downloads_path") 使用，与 task.download_dir 一致
         }
 
         # 获取 browser: 优先使用入参 browser, 否则从 page 取(后关闭传入的 page/context)
@@ -608,7 +609,6 @@ class CollectionExecutorV2:
             context_options = get_browser_context_args()
 
         context_options.setdefault("accept_downloads", True)
-        context_options["downloads_path"] = str(task_download_dir)
         if storage_state:
             context_options["storage_state"] = storage_state
 
@@ -782,29 +782,41 @@ class CollectionExecutorV2:
                         continue
                     
                     except VerificationRequiredError as e:
-                        # 验证码暂停,不更新completed/failed,等待恢复 + 步骤结束打点
                         duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
                         await self._update_status(
                             task_id, progress, f"采集 {full_domain} 暂停(验证码)",
                             current_domain=full_domain,
                             details={"step_id": f"export_{full_domain.replace(':', '_')}", "component": f"{domain}_export", "data_domain": full_domain, "success": False, "duration_ms": duration_ms, "error": f"需要验证码: {e.verification_type}"}
                         )
-                        context.verification_required = True
-                        context.verification_type = e.verification_type
-                        context.screenshot_path = e.screenshot_path
-                        # v4.7.4: 验证码状态通过 HTTP 轮询获取,不再使用 WebSocket
-                        return CollectionResult(
-                            task_id=task_id,
-                            status="paused",
-                            files_collected=len(context.collected_files),
-                            collected_files=context.collected_files,
-                            error_message=f"需要验证码: {e.verification_type}",
-                            duration_seconds=(datetime.now() - start_time).total_seconds(),
-                            completed_domains=context.completed_domains,
-                            failed_domains=context.failed_domains,
-                            total_domains=total_domains_count,
+                        value = await self._wait_verification_and_continue(
+                            task_id, e.verification_type, e.screenshot_path, page, params, None, is_login=False, domain_info=full_domain
                         )
-                    
+                        if value is None:
+                            context.failed_domains.append({"domain": full_domain, "error": "验证码等待超时"})
+                            return CollectionResult(
+                                task_id=task_id,
+                                status="failed",
+                                files_collected=len(context.collected_files),
+                                collected_files=context.collected_files,
+                                error_message="验证码等待超时",
+                                duration_seconds=(datetime.now() - start_time).total_seconds(),
+                                completed_domains=context.completed_domains,
+                                failed_domains=context.failed_domains,
+                                total_domains=total_domains_count,
+                            )
+                        if (e.verification_type or "").lower() in ("otp", "sms", "email_code"):
+                            params.setdefault("params", {})["otp"] = value
+                        else:
+                            params.setdefault("params", {})["captcha_code"] = value
+                        try:
+                            file_path = await self._execute_export_component(page, export_component, step_popup_handler, task_download_dir)
+                            if file_path:
+                                context.collected_files.append(file_path)
+                            context.completed_domains.append(full_domain)
+                        except Exception as retry_e:
+                            context.failed_domains.append({"domain": full_domain, "error": str(retry_e)})
+                        continue
+
                     except Exception as e:
                         # v4.7.0: 部分成功机制 - 单域失败不影响其他域 + 步骤结束打点
                         error_msg = f"{type(e).__name__}: {str(e)}"
@@ -1003,10 +1015,36 @@ class CollectionExecutorV2:
                 logger.error(f"[PythonComponent] {component_type} failed: {result.message}")
                 return False
                 
+        except VerificationRequiredError:
+            raise  # 不吞掉，由上层统一处理：持久化并阻塞等待回传
         except Exception as e:
             logger.error(f"[PythonComponent] {component_type} exception: {e}")
             return False
-    
+
+    async def _wait_verification_and_continue(
+        self,
+        task_id: str,
+        verification_type: str,
+        screenshot_path: Optional[str],
+        page,
+        params: Dict[str, Any],
+        adapter,
+        is_login: bool,
+        domain_info: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        验证码分支：调用回调持久化并阻塞等待；返回用户回传的值或 None(超时)。
+        不负责填入页面，由调用方根据返回值决定是填入后重试组件还是置失败。
+        """
+        if not self.verification_required_callback:
+            return None
+        try:
+            value = await self.verification_required_callback(task_id, verification_type, screenshot_path)
+            return value
+        except Exception as e:
+            logger.error(f"Verification callback failed for task {task_id}: {e}")
+            return None
+
     async def _execute_with_python_components(
         self,
         task_id: str,
@@ -1038,18 +1076,34 @@ class CollectionExecutorV2:
             config=params,
         )
 
-        # 1. 执行登录组件( params 中已含 reused_session 标记)
+        # 1. 执行登录组件( params 中已含 reused_session 标记)；支持验证码暂停→回传→同一 page 继续
         if context.current_component_index == 0:
             await self._update_status(task_id, 5, "正在登录...")
             await self._check_cancelled(task_id)
             await self.popup_handler.close_popups(page, platform=platform)
 
-            login_success = await self._execute_python_component(
-                page=page,
-                adapter=adapter,
-                component_type="login",
-                params=params,
-            )
+            login_success = False
+            while True:
+                try:
+                    login_success = await self._execute_python_component(
+                        page=page,
+                        adapter=adapter,
+                        component_type="login",
+                        params=params,
+                    )
+                    break
+                except VerificationRequiredError as e:
+                    value = await self._wait_verification_and_continue(
+                        task_id, e.verification_type, e.screenshot_path, page, params, adapter, is_login=True
+                    )
+                    if value is None:
+                        raise StepExecutionError("验证码等待超时")
+                    if (e.verification_type or "").lower() in ("otp", "sms", "email_code"):
+                        params.setdefault("params", {})["otp"] = value
+                    else:
+                        params.setdefault("params", {})["captcha_code"] = value
+                    # 同一 page 继续：再次执行登录组件(组件内根据 params 中的 captcha_code/otp 填入并提交)
+                    continue
 
             if not login_success:
                 raise StepExecutionError("登录组件执行失败")
@@ -1132,22 +1186,39 @@ class CollectionExecutorV2:
                     continue
                 
                 except VerificationRequiredError as e:
-                    context.verification_required = True
-                    context.verification_type = e.verification_type
-                    context.screenshot_path = e.screenshot_path
-                    
-                    return CollectionResult(
-                        task_id=task_id,
-                        status="paused",
-                        files_collected=len(context.collected_files),
-                        collected_files=context.collected_files,
-                        error_message=f"Need verification: {e.verification_type}",
-                        duration_seconds=(datetime.now() - start_time).total_seconds(),
-                        completed_domains=context.completed_domains,
-                        failed_domains=context.failed_domains,
-                        total_domains=total_domains_count,
+                    value = await self._wait_verification_and_continue(
+                        task_id, e.verification_type, e.screenshot_path, page, export_params, domain_adapter, is_login=False, domain_info=full_domain
                     )
-                
+                    if value is None:
+                        context.failed_domains.append({"domain": full_domain, "error": "验证码等待超时"})
+                        return CollectionResult(
+                            task_id=task_id,
+                            status="failed",
+                            files_collected=len(context.collected_files),
+                            collected_files=context.collected_files,
+                            error_message="验证码等待超时",
+                            duration_seconds=(datetime.now() - start_time).total_seconds(),
+                            completed_domains=context.completed_domains,
+                            failed_domains=context.failed_domains,
+                            total_domains=total_domains_count,
+                        )
+                    if (e.verification_type or "").lower() in ("otp", "sms", "email_code"):
+                        export_params.setdefault("params", {})["otp"] = value
+                    else:
+                        export_params.setdefault("params", {})["captcha_code"] = value
+                    try:
+                        export_result = await domain_adapter.export(page=page, data_domain=domain)
+                        if export_result.success:
+                            if export_result.file_path:
+                                context.collected_files.append(export_result.file_path)
+                            context.completed_domains.append(full_domain)
+                            logger.info(f"Task {task_id}: [Python] Successfully collected {full_domain} (after verification)")
+                        else:
+                            raise StepExecutionError(export_result.message or "Export failed")
+                    except Exception as retry_e:
+                        context.failed_domains.append({"domain": full_domain, "error": str(retry_e)})
+                    continue
+
                 except Exception as e:
                     error_msg = f"{type(e).__name__}: {str(e)}"
                     logger.error(f"Task {task_id}: Failed to collect {full_domain} - {error_msg}")
@@ -1156,7 +1227,7 @@ class CollectionExecutorV2:
                         "error": error_msg
                     })
                     continue
-        
+
         # 3. 处理采集到的文件
         await self._update_status(task_id, 95, "Processing files...")
         processed_files = await self._process_files(
@@ -2779,7 +2850,6 @@ class CollectionExecutorV2:
             login_context_options = get_browser_context_args()
 
         login_context_options.setdefault("accept_downloads", True)
-        login_context_options["downloads_path"] = str(task_download_dir)
         if storage_state:
             login_context_options["storage_state"] = storage_state
 
@@ -2806,6 +2876,7 @@ class CollectionExecutorV2:
             },
             'platform': platform,
             'reused_session': reused_session,
+            'downloads_path': str(task_download_dir),
         }
         try:
             adapter = create_adapter(platform=platform, account=account, config=params)
@@ -2867,7 +2938,6 @@ class CollectionExecutorV2:
             domain_context_options = get_browser_context_args()
         domain_context_options = dict(domain_context_options)
         domain_context_options.setdefault("accept_downloads", True)
-        domain_context_options["downloads_path"] = str(task_download_dir)
 
         for batch_index, batch in enumerate(domain_batches):
             logger.info(f"Task {task_id}: Processing batch {batch_index+1}/{len(domain_batches)} with {len(batch)} domains")
@@ -2984,7 +3054,6 @@ class CollectionExecutorV2:
         opts = dict(context_options or {})
         opts["storage_state"] = storage_state
         opts.setdefault("accept_downloads", True)
-        opts["downloads_path"] = str(task_download_dir)
 
         domain_export_start = datetime.now()
         progress = 20 + int(70 * domain_index / total_domains)
@@ -3013,6 +3082,7 @@ class CollectionExecutorV2:
                     'screenshot_dir': str(self.screenshots_dir / task_id),
                 },
                 'platform': platform,
+                'downloads_path': str(task_download_dir),
             }
             
             # 使用 create_adapter + adapter.export（与顺序路径同一套组件执行模型）

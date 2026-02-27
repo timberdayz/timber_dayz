@@ -64,7 +64,9 @@
 
 ### 登录阶段验证码暂停契约
 
-- **不吞掉 VerificationRequiredError**：执行器中调用登录组件的入口（如 `_execute_python_component`）在捕获异常时，**不得**将 `VerificationRequiredError` 当作普通 `Exception` 吞掉并仅返回失败；须** re-raise**，由上层统一处理。
+- **不吞掉 VerificationRequiredError（执行器 + 适配层，共性问题）**：此为**框架级约定**，与具体平台/采集脚本无关。  
+  - **执行器**：调用登录/导出组件的入口（如 `_execute_python_component`）在捕获异常时，**不得**将 `VerificationRequiredError` 当作普通 `Exception` 吞掉并仅返回失败；须 **re-raise**，由上层统一处理。  
+  - **适配层**：`PythonComponentAdapter` 的 `login()` 与 `export()` 是**所有** Python 组件（妙手/Shopee/TikTok 等）的统一入口；若在此处用 `except Exception` 将 `VerificationRequiredError` 捕掉并转为 `AdapterResult(success=False)`，执行器只会收到「失败」返回值，无法进入「验证码暂停 → 阻塞等待 → 同一 page 继续」分支。因此适配层在 `login()` 与 `export()` 中须在通用 `except Exception` **之前**显式 **re-raise** `VerificationRequiredError`，使异常原样传递至执行器。修改针对**工具（适配器）**，无需改任何平台脚本。
 - **捕获后持久化并阻塞等待**：在执行「登录组件」的代码块外，须有单独的 `except VerificationRequiredError`：捕获后通过回调将 `verification_type`、`screenshot_path` 持久化到任务表并将任务状态置为 paused（供前端轮询展示），**执行器不 return**，而是在**同一进程内阻塞等待**（如轮询 Redis keyed by task_id）直至用户提交验证码/OTP 或超时；收到后在**当前同一 page** 上 fill + click 并继续，最后再按正常流程 return 最终结果。从而登录阶段出现验证码时前端可展示截图与输入框，用户提交后同一 page 继续，无需重开页面。**双路径**：若仍保留 YAML/Playwright 登录路径，该路径同样需在捕获后持久化并阻塞等待，与 Python 路径一致。
 - **导出阶段验证码**：在域循环内（导出某域时）若导出组件抛出 `VerificationRequiredError`，执行器同样**不得 return**；须在循环内捕获后通过回调持久化并阻塞等待，收到回传后在**同一 page** 上填入并继续该域导出，再继续后续域或结束，与登录阶段行为一致。
 
@@ -78,6 +80,7 @@
 - **Affected code**:
   - `modules/platforms/miaoshou/components/login.py`：增加图形验证码检测与处理分支（2–3 秒内检测、避免 15 秒傻等）
   - `modules/apps/collection_center/executor_v2.py`：复用 VerificationRequiredError/verification_required/verification_type/screenshot_path，支持 graphical_captcha 类型；检测到验证码时**不退出进程**，而是将任务置为 paused、持久化截图/类型后**阻塞等待**（轮询 Redis 等）直至用户提交或**超时**，超时后结束等待、置任务失败或 verification_timeout 并 return 释放浏览器；收到回传后在**同一 page** 上 fill + click 并继续。**登录阶段**与**导出阶段（域循环内）**捕获 VerificationRequiredError 后均持久化并阻塞等待，不 return；且 `_execute_python_component` 不吞掉该异常
+  - **`modules/apps/collection_center/python_component_adapter.py`**：**适配层为所有平台共用**。`login()` 与 `export()` 中须在通用 `except Exception` 之前对 `VerificationRequiredError` 做 **re-raise**，否则执行器只会收到「失败」返回值、无法进入验证码暂停与等待回传流程；此为共性问题修复，不针对单一采集脚本
   - `backend/routers/collection.py`：Resume 接口在任务仍为「等待验证」状态时接收验证码请求体并写入约定存储（如 Redis keyed by task_id）；若任务已非等待验证（已超时/失败/完成）则返回 4xx 并提示重新发起；GET screenshot 使用 task.verification_screenshot；多实例时截图须来自共享存储或约定部署约束。执行器在验证码暂停时须保持进程与 page 存活并阻塞等待，而非退出进程
   - 任务详情/列表接口：返回 verification_type、verification_screenshot，供前端轮询展示。若采用专用状态 **verification_timeout**，须在任务状态枚举或 schema 中支持；否则可复用 `failed` 并通过 error_message 区分「验证超时」
   - 各平台登录组件（TikTok/Shopee 等）：统一从 `ctx.config` 或任务上下文读取 OTP/图形验证码，与现有 OTP 逻辑对齐

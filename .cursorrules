@@ -36,6 +36,7 @@
 □ 创建文件？ → 确认正确目录，避免重复
 □ 使用Playwright？ → 优先使用get_by_role/label/text官方API
 □ 在FastAPI中使用Playwright？ → 必须使用async_playwright（禁止sync_playwright）⭐⭐⭐
+□ 编写/修改采集组件（login/navigation/export）？ → **必须**遵循 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`（定位/等待/契约/各场景）⭐⭐⭐
 □ CPU密集型操作？ → 使用ExecutorManager.run_cpu_intensive()（进程池）⭐⭐⭐
 □ I/O密集型操作？ → 使用ExecutorManager.run_io_intensive()（线程池）⭐⭐⭐
 □ 前端刷新？ → 局部刷新优先，支持后台刷新（showLoading参数）⭐⭐⭐
@@ -51,6 +52,7 @@
 - ❌ 新API缺少response_model参数（100%强制）⭐⭐⭐
 - ❌ 自定义Playwright选择器修复逻辑（用官方API）
 - ❌ 跳过等待机制直接操作元素（必须wait_for）
+- ❌ 编写/修改采集组件时不遵循《采集脚本编写规范》（须按 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`：定位 get_by_*、可重试等待、条件等待、契约、各场景检测与应对）⭐⭐⭐
 - ❌ 使用emoji字符（会导致Windows UnicodeEncodeError）⭐⭐⭐
 - ❌ 全屏loading阻塞整个页面（应使用局部loading）⭐⭐⭐
 - ❌ 一个模块的工作导致全局刷新（应使用局部刷新）⭐⭐⭐
@@ -447,6 +449,16 @@ async def create_task(request: TaskCreate, db: AsyncSession = Depends(get_async_
 - ⚠️ **避免过度设计**：简单的异步方案往往比复杂的线程/进程方案更好
 
 **详细规范**：参见 `openspec/changes/verify-collection-and-sync-e2e/proposal.md` 中的 "Playwright 使用规范" 章节
+
+### **采集脚本编写规范（强制）⭐⭐⭐**
+编写或修改 `modules/platforms/*/components/*.py`（登录、导航、导出等）时，**必须**遵循 **`docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`**：
+- 元素定位：优先 get_by_role / get_by_label / get_by_text，选择器集中至 *_config
+- 元素检测：禁止单次 count()+is_visible() 后即操作；用 expect(locator).to_be_visible() 或 wait_for(state="visible") 或直接对 locator 操作
+- 等待：优先条件等待；复杂交互（悬停→菜单出现→点击）按规范流程
+- 契约：ExecutionContext、ResultBase、accept_downloads/downloads_path 假定
+- 场景：验证码、弹窗、遮罩、Toast、会话过期、加载、下载、新标签页、iframe、限流、崩溃/超时、SPA/虚拟列表/分页等按规范检测与应对
+
+完整约定（含 iframe 与交互框类型、现代化网页补充场景、现状与业界对照）见该文档，避免后续接手 Agent 遗漏标准。
 
 ### **元素定位规范（强制）**
 优先级顺序：

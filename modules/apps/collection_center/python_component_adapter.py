@@ -214,6 +214,10 @@ class PythonComponentAdapter:
                 data={"details": getattr(result, "details", None)},
             )
         except Exception as e:
+            # 验证码/OTP 需由执行器统一处理：暂停、持久化、阻塞等待回传、同一 page 继续
+            from modules.apps.collection_center.executor_v2 import VerificationRequiredError
+            if isinstance(e, VerificationRequiredError):
+                raise
             logger.error(f"[Adapter] Login failed: {e}")
             return AdapterResult(success=False, message=str(e))
     
@@ -285,6 +289,10 @@ class PythonComponentAdapter:
                 file_path=getattr(result, "file_path", None),
             )
         except Exception as e:
+            # 导出阶段验证码同样由执行器统一处理：暂停、持久化、阻塞等待回传、同一 page 继续
+            from modules.apps.collection_center.executor_v2 import VerificationRequiredError
+            if isinstance(e, VerificationRequiredError):
+                raise
             logger.error(f"[Adapter] Export failed: {e}")
             return AdapterResult(success=False, message=str(e))
     
