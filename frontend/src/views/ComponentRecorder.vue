@@ -112,12 +112,12 @@
           <el-form-item label="组件名称">
             <el-input
               v-model="recorderForm.componentName"
-              placeholder="将根据平台和类型自动生成"
-              :disabled="true"
+              placeholder="将根据平台和类型自动生成，保存前可修改（如 export 建议填 orders_export）"
+              :disabled="!hasRecordedData"
             >
               <template #append>
                 <el-tooltip
-                  content="组件名称由平台和类型自动生成"
+                  content="录制后可编辑；export 建议填写如 orders_export 以匹配执行器"
                   placement="top"
                 >
                   <el-icon><InfoFilled /></el-icon>
@@ -687,9 +687,41 @@
         <el-input
           v-model="yamlContent"
           type="textarea"
-          :rows="25"
+          :rows="12"
           readonly
           class="yaml-textarea"
+        />
+      </el-card>
+
+      <!-- Python 代码（主路径保存 .py） -->
+      <el-card class="python-panel" shadow="hover" v-show="hasRecordedData && !isDiscoveryMode">
+        <template #header>
+          <div class="card-header">
+            <span class="card-title">Python 代码</span>
+            <el-button
+              size="small"
+              :disabled="!hasSteps"
+              @click="regeneratePython"
+            >
+              重新生成
+            </el-button>
+          </div>
+        </template>
+        <el-alert
+          v-if="hasSteps && !pythonCode"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 12px"
+        >
+          未生成代码，请点击「重新生成」或检查步骤后重试。
+        </el-alert>
+        <el-input
+          v-model="pythonCode"
+          type="textarea"
+          :rows="18"
+          placeholder="停止录制后将在此显示生成的 Python 代码，可编辑后保存为 .py"
+          class="python-textarea"
         />
       </el-card>
     </div>
@@ -1012,6 +1044,9 @@ const isRecording = ref(false);
 const recordedSteps = ref([]);
 const accounts = ref([]);
 const accountsLoading = ref(false); // ⭐ Phase 9完善：账号加载状态
+
+// 步骤→Python：生成的 Python 代码（主路径保存 .py）
+const pythonCode = ref("");
 
 // Phase 11: 发现模式数据
 const recordingMode = ref("steps"); // 'steps' 或 'discovery'
@@ -1536,6 +1571,7 @@ const stopRecording = async () => {
         availableOptions.value = response.available_options || [];
         defaultOption.value = response.default_option || "";
         recordedSteps.value = []; // 清空步骤
+        pythonCode.value = "";
 
         // Phase 12.2: 自动填充测试配置（从录制结果中获取）
         if (response.test_config && response.test_config.test_url) {
@@ -1569,10 +1605,23 @@ const stopRecording = async () => {
         openAction.value = null;
         availableOptions.value = [];
 
+        if (response.platform) recorderForm.value.platform = response.platform;
+        if (response.component_type)
+          recorderForm.value.componentType = response.component_type;
+
         if (response.steps && response.steps.length > 0) {
           recordedSteps.value = response.steps;
-          ElMessage.success(`录制完成，共记录 ${response.steps.length} 个步骤`);
+          pythonCode.value = response.python_code || "";
+          if (!pythonCode.value) {
+            ElMessage.warning(
+              "未生成代码，请检查步骤或使用「重新生成」按钮"
+            );
+          } else {
+            ElMessage.success(`录制完成，共记录 ${response.steps.length} 个步骤`);
+          }
         } else {
+          recordedSteps.value = [];
+          pythonCode.value = "";
           ElMessage.warning(
             "录制完成，但未记录到任何步骤。请确保在Inspector中进行了操作。"
           );
@@ -1820,6 +1869,30 @@ const getFixSuggestion = (step) => {
   }
 };
 
+const regeneratePython = async () => {
+  if (!recordedSteps.value.length) {
+    ElMessage.warning("暂无步骤，无法重新生成");
+    return;
+  }
+  try {
+    const res = await api.post("/collection/recorder/generate-python", {
+      platform: recorderForm.value.platform,
+      component_type: recorderForm.value.componentType,
+      component_name: recorderForm.value.componentName,
+      steps: recordedSteps.value,
+    });
+    if (res.success && res.python_code) {
+      pythonCode.value = res.python_code;
+      ElMessage.success("已重新生成 Python 代码");
+    } else {
+      ElMessage.warning("重新生成失败");
+    }
+  } catch (e) {
+    console.error("重新生成 Python 失败:", e);
+    ElMessage.error("重新生成失败: " + (e.message || "未知错误"));
+  }
+};
+
 const saveComponent = async () => {
   try {
     if (!recorderForm.value.componentName) {
@@ -1827,12 +1900,18 @@ const saveComponent = async () => {
       return;
     }
 
-    const response = await api.post("/collection/recorder/save", {
+    const payload = {
       platform: recorderForm.value.platform,
       component_type: recorderForm.value.componentType,
       component_name: recorderForm.value.componentName,
-      yaml_content: yamlContent.value,
-    });
+    };
+    if (pythonCode.value && pythonCode.value.trim()) {
+      payload.python_code = pythonCode.value.trim();
+    } else {
+      payload.yaml_content = yamlContent.value;
+    }
+
+    const response = await api.post("/collection/recorder/save", payload);
 
     if (response.success) {
       const versionInfo = response.version_info;
@@ -2017,6 +2096,16 @@ onMounted(() => {
 }
 
 .yaml-textarea {
+  font-family: "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.python-panel {
+  margin-top: 16px;
+}
+
+.python-textarea {
   font-family: "Courier New", monospace;
   font-size: 13px;
   line-height: 1.6;

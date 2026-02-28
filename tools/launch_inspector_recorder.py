@@ -1012,18 +1012,26 @@ class InspectorRecorder:
     
     def _handle_normal_event(self, action: str, selectors: list, description: str, value: str, step_counter: list):
         """处理普通模式的事件（顺序步骤）"""
-        # 去重：检查最近的步骤是否相同
+        primary = self._get_primary_selector(selectors)
+        # 去重：与最近一步相同 action+description 则合并/跳过
         if self.recorded_steps:
             last_step = self.recorded_steps[-1]
-            if (last_step.get('action') == action and 
-                last_step.get('description') == description):
-                # 如果是 fill 动作，更新值而不是添加新步骤
+            if (last_step.get('action') == action and
+                    last_step.get('description') == description):
                 if action == 'fill' and value:
                     last_step['value'] = value
                     return
-                # 对于相同的 click，跳过
                 return
-        
+        # 加固去重：最近 2～3 步内相同 action + 主 selector 则合并/跳过
+        recent = self.recorded_steps[-3:] if len(self.recorded_steps) >= 3 else self.recorded_steps
+        for s in recent:
+            if s.get('action') != action:
+                continue
+            s_primary = self._get_primary_selector(s.get('selectors') or [])
+            if s_primary and primary and s_primary == primary:
+                if action == 'fill' and value:
+                    s['value'] = value
+                return
         step_counter[0] += 1
         
         # 构建步骤

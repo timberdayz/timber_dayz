@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.models.database import get_db, get_async_db
+from backend.services.steps_to_python import generate_python_code
 from modules.core.logger import get_logger
 from modules.core.db import PlatformAccount, ComponentVersion, ComponentTestHistory
 
@@ -78,6 +79,14 @@ class RecorderSaveRequest(BaseModel):
     data_domain: Optional[str] = None  # 数据域(export 组件必填)
     # 向后兼容:保留 YAML 支持
     yaml_content: Optional[str] = None  # 已废弃,保留兼容
+
+
+class GeneratePythonRequest(BaseModel):
+    """生成 Python 代码请求（供前端「重新生成」使用）"""
+    platform: str
+    component_type: str
+    component_name: str
+    steps: List[Dict[str, Any]]
 
 
 class RecorderTestRequest(BaseModel):
@@ -508,7 +517,6 @@ async def stop_recording():
         
         if mode == 'discovery':
             logger.info(f"Recording stopped: {steps_count} options discovered")
-            
             response = {
                 "success": True,
                 "message": f"录制已停止,共发现 {steps_count} 个选项",
@@ -521,24 +529,56 @@ async def stop_recording():
             }
         else:
             logger.info(f"Recording stopped: {steps_count} steps recorded")
-            
-            # 不清空steps,让前端可以获取
             steps = recorder_session.steps.copy()
-            
+            # 在 clear() 之前从会话取元数据并生成 Python 代码（仅 mode=steps 且存在 steps 时）
+            platform = getattr(recorder_session, 'platform', None) or ''
+            component_type = getattr(recorder_session, 'component_type', None) or ''
+            python_code = ''
+            if platform and component_type and steps:
+                try:
+                    default_component_name = component_type
+                    python_code = generate_python_code(
+                        platform=platform,
+                        component_type=component_type,
+                        component_name=default_component_name,
+                        steps=steps,
+                    )
+                except Exception as e:
+                    logger.warning(f"Steps to Python generator failed: {e}", exc_info=True)
             response = {
                 "success": True,
                 "message": f"录制已停止,共记录 {steps_count} 个步骤",
                 "mode": "steps",
                 "steps_count": steps_count,
                 "steps": steps,
+                "platform": platform,
+                "component_type": component_type,
+                "python_code": python_code if python_code else None,
             }
-        
         recorder_session.clear()
         return response
     
     except Exception as e:
         logger.error(f"Failed to stop recording: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"停止录制失败: {str(e)}")
+
+
+@router.post("/recorder/generate-python")
+async def generate_python_from_steps(request: GeneratePythonRequest):
+    """
+    根据步骤重新生成 Python 代码（供前端「重新生成」按钮调用）。
+    """
+    try:
+        code = generate_python_code(
+            platform=request.platform,
+            component_type=request.component_type,
+            component_name=request.component_name,
+            steps=request.steps,
+        )
+        return {"success": True, "python_code": code}
+    except Exception as e:
+        logger.warning(f"Generate Python failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"生成 Python 失败: {str(e)}")
 
 
 @router.get("/recorder/steps")

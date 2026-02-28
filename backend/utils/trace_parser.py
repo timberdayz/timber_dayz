@@ -273,17 +273,35 @@ class TraceParser:
                 if action:
                     actions.append(action)
             
-            # 处理 before/after 类型事件(Playwright 新版格式)
-            elif event_type in ('before', 'after') and 'apiName' in event:
-                action = self._parse_api_event(event)
-                if action:
-                    actions.append(action)
-        
-        # 按时间戳排序
+            # 方案 A：不处理 before/after，避免同一操作被记两次（仅认 action 事件）
+            # elif event_type in ('before', 'after') and 'apiName' in event: ...
+
         actions.sort(key=lambda a: a.timestamp or 0)
-        
-        logger.debug(f"Extracted {len(actions)} user actions")
+        actions = self._deduplicate_actions(actions)
+        logger.debug(f"Extracted {len(actions)} user actions (after dedup)")
         return actions
+
+    DEDUP_TIME_WINDOW_MS = 500
+
+    def _deduplicate_actions(self, actions: List[ParsedAction]) -> List[ParsedAction]:
+        """方案 C：时间窗内相同 (action_type, selector, value) 只保留第一条。"""
+        if not actions:
+            return actions
+        window_ms = self.DEDUP_TIME_WINDOW_MS
+        kept: List[ParsedAction] = []
+        for a in actions:
+            ts_ms = (a.timestamp or 0) * 1000
+            key_sel = (a.selector or "").strip()
+            key_val = (a.value or "").strip() if a.action_type == "fill" else ""
+            key = (a.action_type, key_sel, key_val)
+            is_dup = any(
+                abs(ts_ms - (k.timestamp or 0) * 1000) <= window_ms
+                and (k.action_type, (k.selector or "").strip(), (k.value or "").strip() if k.action_type == "fill" else "") == key
+                for k in kept
+            )
+            if not is_dup:
+                kept.append(a)
+        return kept
     
     def _parse_action_event(self, action_data: Dict[str, Any]) -> Optional[ParsedAction]:
         """
