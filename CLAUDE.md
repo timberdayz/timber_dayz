@@ -23,12 +23,14 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 ## Project Overview
 
-西虹ERP系统 (XiHong ERP) is a **modern enterprise-grade cross-border e-commerce ERP system** following SAP/Oracle ERP standards. It provides complete data collection, field mapping, product management, financial management, and data dashboards for multi-platform e-commerce operations.
+西虹ERP系统 (XiHong ERP) — 现代企业级跨境电商ERP系统，遵循 SAP/Oracle ERP 标准。
 
-**Current Version**: v4.7.0 (Contract-First Development + Data Collection Refactor)
-**Architecture**: Single Source of Truth (SSOT) + Enterprise ERP Standards
-**Database**: PostgreSQL 15+ (55 tables, Docker containerized)
-**Status**: Production ready
+- **当前版本**: v4.20.0
+- **架构**: SSOT + Contract-First + 三层架构
+- **数据库**: PostgreSQL 15+（55 张表，Docker 容器化）
+- **状态**: 生产就绪
+
+> **权威开发规则**: `.cursorrules`（完整开发规范，所有 Agent 必读）
 
 ## Common Development Commands
 
@@ -64,385 +66,75 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 ### Database Operations
 ```bash
-# Create new migration
-alembic revision --autogenerate -m "description"
-
-# Apply migrations
-alembic upgrade head
-
-# Rollback one version
-alembic downgrade -1
+alembic revision --autogenerate -m "description"   # 创建迁移
+alembic upgrade head                                # 应用迁移
+alembic downgrade -1                                # 回滚一版
 ```
 
 ### Architecture Validation
 ```bash
-# CRITICAL: Run after any schema.py changes (expect 100% compliance)
-python scripts/verify_architecture_ssot.py
-
-# Check for historical omissions
-python scripts/check_historical_omissions.py
-
-# Verify root directory file whitelist
-python scripts/verify_root_md_whitelist.py
+python scripts/verify_architecture_ssot.py    # schema.py 变更后必须运行（期望 100%）
+python scripts/check_historical_omissions.py  # 检查历史遗漏
+python scripts/verify_root_md_whitelist.py    # 根目录文件白名单
 ```
 
-### Testing
+### Testing & Code Quality
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=backend --cov=modules --cov-report=html
-
-# Run specific test file
-pytest tests/test_specific.py -v
-
-# Run tests matching pattern
-pytest -k "test_pattern"
+pytest                                              # 运行全部测试
+pytest --cov=backend --cov=modules --cov-report=html # 覆盖率报告
+black . --line-length 88 && isort .                 # 格式化
+ruff check .                                        # Lint
+mypy backend/                                       # 类型检查
 ```
 
-### Code Quality
-```bash
-# Format code (Black + isort)
-black . --line-length 88
-isort .
+## High-Level Architecture (Quick Reference)
 
-# Lint code
-ruff check .
+| 层 | 位置 | 职责 |
+|---|---|---|
+| Core | `modules/core/` | SSOT：ORM 模型（`schema.py`）、配置、日志、密钥 |
+| Backend | `backend/` | FastAPI API、Pydantic Schemas、业务服务 |
+| Frontend | `frontend/` | Vue 3 + Element Plus + Pinia + Vite |
 
-# Type checking
-mypy backend/
-```
+**SSOT 零容忍规则**（详见 `.cursorrules`）：
+- ORM 模型只能定义在 `modules/core/db/schema.py`
+- 禁止在 core 之外创建 `Base = declarative_base()`
+- 禁止 Pinyin 字段名
 
-## High-Level Architecture
+## Key Files
 
-### Three-Layer Architecture
-
-**Layer 1: Core Infrastructure** (`modules/core/`)
-- **Single Source of Truth** for all shared infrastructure
-- Database models: `modules/core/db/schema.py` (55 tables, ONLY place to define ORM models)
-- Configuration: `modules/core/config.py` (ConfigManager)
-- Secrets: `modules/core/secrets_manager.py`
-- Logger: `modules/core/logger.py` (get_logger factory)
-- Base class: **ONLY** defined in `schema.py`
-
-**Layer 2: Backend API** (`backend/`)
-- Unified FastAPI application: `backend/main.py` (ONLY FastAPI entry point)
-- API routes: `backend/routers/` (all API endpoints)
-- Business services: `backend/services/`
-- Backend-specific config: `backend/utils/config.py` (Settings class)
-
-**Layer 3: Frontend** (`frontend/`)
-- Vue.js 3 + Composition API + TypeScript
-- UI Framework: Element Plus
-- State Management: Pinia
-- Build Tool: Vite
-- API Client: `frontend/src/api/index.js`
-
-### CRITICAL: SSOT Enforcement (Zero Tolerance)
-
-**NEVER do these things:**
-1. Define ORM models outside `modules/core/db/schema.py` ❌
-2. Create new `Base = declarative_base()` anywhere ❌
-3. Create duplicate config/logger classes ❌
-4. Create `*_backup.py` or `legacy_*` directories ❌
-5. Delete/move files in `docs/DEVELOPMENT_RULES/` ❌
-6. Use Pinyin field names (must use English: `sales_amount` not `xiao_shou`) ❌
-
-**Always do this:**
-```python
-# ✅ CORRECT: Import models from core
-from modules.core.db import CatalogFile, FactOrder, Account
-
-# ❌ WRONG: Define models elsewhere
-from backend.models.database import CatalogFile  # NEVER!
-```
-
-### CRITICAL: 采集脚本编写规范（Collection Script Writing）
-
-**适用**：编写或修改采集用 Python 组件时（如 `modules/platforms/*/components/*.py` 中的登录、导航、导出组件）。
-
-**必须**：遵循项目《采集脚本编写规范》文档 **`docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`**，不得遗漏以下约定：
-
-- **元素定位**：优先 `get_by_role` / `get_by_label` / `get_by_text`；选择器集中至 `*_config.py`；iframe 内先选定 frame 再定位。
-- **元素检测**：禁止单次 `count() + is_visible()` 后即操作；使用 `expect(locator).to_be_visible()` 或 `locator.wait_for(state="visible")` 或直接对 locator 执行 click/hover/fill。
-- **等待**：优先条件等待，慎用固定 `wait_for_timeout`；复杂交互（悬停→菜单出现→点击）按规范流程。
-- **契约**：与 `ExecutionContext`、`LoginComponent.run(page)`、`ExportComponent.run(page, mode)` 一致；假定 context 已设置 `accept_downloads` 与 `downloads_path`。
-- **场景**：临时验证码、弹窗、遮罩、Toast、会话过期、加载、下载、新标签页、iframe、平台限流、页面崩溃/超时、现代化网页（SPA、虚拟列表、文件上传、分页等）的检测与应对须按规范文档执行。
-
-**参考**：规范全文见 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`；openspec 需求见 `openspec/specs/data-collection/spec.md`（ADDED 采集脚本编写规范）。
-
-### Contract-First Development (v4.7.0)
-
-**Development order (MANDATORY):**
-1. Define ORM models in `modules/core/db/schema.py`
-2. Create Alembic migration: `alembic revision --autogenerate`
-3. Define Pydantic request/response models (API contract)
-4. Define API endpoint signatures with `response_model`
-5. Define frontend API service functions
-6. Implement business logic last
-
-**Example:**
-```python
-# 1. ORM Model (schema.py)
-class CollectionTask(Base):
-    __tablename__ = 'collection_tasks'
-    id = Column(Integer, primary_key=True)
-    platform = Column(String(50), nullable=False)
-
-# 2. Alembic migration
-alembic revision --autogenerate -m "add_collection_tasks"
-
-# 3. Pydantic models (API contract)
-class TaskCreate(BaseModel):
-    platform: str
-    account_id: str
-
-class TaskResponse(BaseModel):
-    task_id: str
-    status: str
-
-    class Config:
-        from_attributes = True  # Support ORM conversion
-
-# 4. API endpoint
-@router.post("/tasks", response_model=TaskResponse)
-async def create_task(request: TaskCreate, db: Session = Depends(get_db)):
-    # 5. Implement last
-    task = CollectionTask(**request.dict())
-    db.add(task)
-    db.commit()
-    return task
-```
-
-### Business Module System (`modules/apps/`)
-
-Pluggable application architecture with zero coupling:
-
-- `collection_center/` - Data collection orchestration
-- `vue_field_mapping/` - Field mapping system with AI-driven suggestions
-- `data_management_center/` - Data management operations
-- `account_manager/` - Platform account management
-- `shopee/`, `tiktok/`, `amazon/` - Platform-specific adapters
-
-**Module rules:**
-- Apps MUST NOT import from each other (only from `modules.core`)
-- Apps MUST provide class-level metadata (NAME, VERSION, DESCRIPTION)
-- `__init__` MUST NOT have side effects (no I/O, no DB connections, no browser launches)
-- Import-time side effects are FORBIDDEN
-
-### Data Architecture
-
-**Three-tier data classification:**
-- **A-tier**: User configuration (campaigns, goals, weights)
-- **B-tier**: Business data (orders, products, inventory, traffic - Excel collection + field mapping)
-- **C-tier**: Calculated data (completion rates, health scores, rankings - system computed)
-
-**Three-layer data storage:**
-- **Raw layer**: Original files (`catalog_files` table)
-- **Fact layer**: Fact tables (fact_orders, fact_order_items, etc.)
-- **MV layer**: 18 materialized views (OLAP optimized)
-
-**v4.6.0 Dimensional design (zero field explosion):**
-- Dimensional tables instead of wide tables (e.g., `fact_order_amounts` with metric_type/metric_subtype/currency dimensions)
-- Pattern-based field mapping: ONE regex rule handles infinite combinations
-- Global currency support: 180+ currencies with CNY base currency
-
-### PostgreSQL-First Performance Rule
-
-**CRITICAL: Use PostgreSQL indexes, NOT filesystem recursion**
-
-```python
-# ❌ WRONG: Filesystem recursion (30,000x slower!)
-for file_path in base_dir.rglob(filename):
-    if file_path.is_file():
-        return str(file_path)
-
-# ✅ CORRECT: PostgreSQL index query (2ms)
-catalog_record = db.execute(
-    select(CatalogFile).where(CatalogFile.file_name == filename)
-).scalar_one_or_none()
-return catalog_record.file_path
-```
-
-**Performance comparison:**
-- File path lookup: 60s → 2ms (30,000x faster)
-- File filtering: Requires iteration → SQL WHERE (1,000x faster)
-
-### Field Mapping System (v4.6.0)
-
-**Four-layer mapping architecture:**
-1. Raw field names (from Excel)
-2. Chinese column layer
-3. Standard field names
-4. Database column names
-
-**Key features:**
-- Pattern-based mapping (one regex for infinite combinations)
-- AI-driven suggestions with confidence scores
-- 180+ currency support with auto-normalization
-- Time field auto-detection and range splitting
-- Template system with granularity matching
-
-### Windows Platform Specifics
-
-**Primary development environment: Windows 10/11**
-
-**CRITICAL encoding rules:**
-- ❌ **NEVER use Emoji in terminal output** (causes UnicodeEncodeError)
-- ✅ Use ASCII symbols: `[OK]`, `[ERROR]`, `*`, `+`, `-`
-- ✅ Use `safe_print()` function for all terminal output
-- ✅ Markdown docs CAN use Emoji (files only, not code output)
-
-**Path handling:**
-```python
-# ✅ CORRECT: Use pathlib
-from pathlib import Path
-backend_path = str(Path(__file__).parent / 'backend')
-cmd = f"cd {backend_path}"
-
-# ❌ WRONG: Direct Path concatenation in f-string
-cmd = f"cd {Path(__file__).parent / 'backend'}"  # SyntaxError!
-```
-
-**Process management:**
-- Use `shell=True` for npm commands on Windows
-- Graceful shutdown: terminate() → wait 3s → kill()
-- Use `taskkill` for cleanup
-
-## Key Files and Their Purposes
-
-### Core Infrastructure
-- `modules/core/db/schema.py` - **ONLY place** to define all 55 database tables
-- `modules/core/db/__init__.py` - Exports all models (must update when adding tables)
-- `modules/core/config.py` - Module configuration management
-- `modules/core/logger.py` - Unified logging factory
-- `modules/core/secrets_manager.py` - Environment variables and secrets
-
-### Backend API
-- `backend/main.py` - Unified FastAPI application entry point
-- `backend/routers/` - All API route definitions
-- `backend/services/excel_parser.py` - Smart Excel parser (auto-detects xlsx/xls/html)
-- `backend/utils/config.py` - Backend-specific Settings
-- `backend/models/database.py` - ONLY contains: engine, SessionLocal, get_db, init_db (NO model definitions!)
-
-### Frontend
-- `frontend/src/api/index.js` - Unified API client
-- `frontend/src/stores/` - Pinia state management
-- `frontend/src/views/` - Page components
-- `frontend/src/components/` - Reusable components
-
-### Configuration & Docs
-- `local_accounts.py` - Platform account configuration (NEVER commit!)
-- `.env` - Environment variables (root directory, unified)
-- `.cursorrules` - Complete development guidelines (1700+ lines)
-- `openspec/project.md` - Project context and conventions
-- `docs/DEVELOPMENT_RULES/` - **PROTECTED** detailed development standards
-
-## Important Constraints
-
-### Architecture Compliance
-- Run `python scripts/verify_architecture_ssot.py` after ANY schema.py changes
-- Expected result: **Compliance Rate: 100.0%**
-- Any deviation from SSOT is a critical architecture regression
-
-### Database Design
-- All tables MUST have primary key
-- Foreign keys MUST be explicitly declared
-- Add `created_at`/`updated_at` timestamp fields (audit)
-- Use DECIMAL(15,2) for currency amounts
-- Use JSONB for structured attributes
-- Index design: unique constraints, composite indexes, partial indexes
-
-### API Design
-- RESTful design with standard HTTP methods
-- Unified response format with success/data/message/error_code
-- Pydantic validation for all requests/responses
-- OpenAPI 3.0 documentation (auto-generated at `/api/docs`)
-- Rate limiting: 100 req/min/user (default)
-- Pagination: `page`, `page_size` parameters (max 100)
-
-### Security
-- JWT authentication (Access: 15min, Refresh: 7 days)
-- RBAC permissions (Admin/Manager/Operator/Viewer)
-- OWASP Top 10 protection
-- Sensitive data encryption (bcrypt for passwords)
-- SQL injection prevention (SQLAlchemy ORM only)
-- Complete audit logging
-
-### Code Quality
-- Test coverage: Core ≥80%, Auxiliary ≥50%, Critical 100%
-- Function complexity ≤10 (cyclomatic)
-- Function length ≤50 lines
-- Class length ≤500 lines
-- All public functions MUST have docstrings (Google style)
-- All functions MUST have type annotations
-
-### File Management
-- Temporary files → `temp/` subdirectories (development/outputs/media/logs)
-- Archived files → `backups/YYYYMMDD_description/`
-- NEVER delete files directly, always move to backups
-- Protected directory: `docs/DEVELOPMENT_RULES/` (NO auto-cleanup)
-
-## Development Workflow
-
-### Before Starting Any Task
-1. Read relevant specs in `specs/[capability]/spec.md`
-2. Check pending changes in `changes/` for conflicts
-3. Read `openspec/project.md` for conventions
-4. Run `openspec list` to see active changes
-5. Run `openspec list --specs` to see existing capabilities
-
-### For Planning Major Changes
-Use OpenSpec workflow for features, breaking changes, architecture changes:
-1. Create change proposal: `openspec/changes/[change-id]/proposal.md`
-2. Define spec deltas with ADDED/MODIFIED/REMOVED requirements
-3. Create tasks.md checklist
-4. Validate: `openspec validate [change-id] --strict`
-5. Get approval BEFORE implementing
-6. After deployment: `openspec archive [change-id]`
-
-### Module Boundary Rules
-- `__init__` must be lightweight (no I/O, no side effects)
-- Import-time side effects are FORBIDDEN
-- Apps depend on: services → core (NOT other apps)
-- Provide health_check() for all apps
-- Use class-level metadata (avoid instantiation for discovery)
+| 文件/目录 | 用途 |
+|---|---|
+| `modules/core/db/schema.py` | 唯一 ORM 定义（55 张表） |
+| `modules/core/db/__init__.py` | 模型导出（新增表时必须更新） |
+| `backend/main.py` | FastAPI 唯一入口 |
+| `backend/schemas/` | Pydantic 契约模型 |
+| `backend/routers/` | API 路由 |
+| `backend/services/` | 业务逻辑 |
+| `backend/models/database.py` | 只含 engine/SessionLocal/get_db/init_db |
+| `frontend/src/api/index.js` | 统一 API 客户端 |
 
 ## Common Pitfalls
 
-1. **Defining models outside schema.py** - This is the #1 cause of metadata inconsistency
-2. **Using filesystem recursion instead of DB queries** - 30,000x slower
-3. **Forgetting to update `__init__.py` exports** when adding new tables
-4. **Missing Alembic migrations** after schema.py changes
-5. **Using Emoji in terminal output** on Windows (UnicodeEncodeError)
-6. **Creating duplicate functionality** instead of consolidating
-7. **Modifying core without checking impact** - affects all apps
-8. **Installing dependencies without authorization** - must update requirements.txt only when approved
-9. **Deleting files from `docs/DEVELOPMENT_RULES/`** - this directory is protected
-10. **Writing or modifying collection components without following the script guide** - MUST follow `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` (locators, wait, contract, all scenarios) to avoid regression and inconsistency
+1. **在 schema.py 之外定义模型** → 元数据不一致
+2. **文件系统递归代替 DB 查询** → 慢 30,000 倍
+3. **新增表忘记更新 `__init__.py` 导出**
+4. **schema.py 变更后遗漏 Alembic 迁移**
+5. **终端输出使用 Emoji**（Windows UnicodeEncodeError）
+6. **修改采集组件不遵循规范** → 必读 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
 
-## References to Other Documentation
+## Documentation Map
 
-For comprehensive development standards, see:
-- `.cursorrules` - Complete 1700-line development guide (master reference)
-- `openspec/project.md` - Project conventions and tech stack details
-- `openspec/AGENTS.md` - OpenSpec workflow for spec-driven development
-- `docs/DEVELOPMENT_RULES/` - Detailed enterprise development standards (protected directory)
-- `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` - **采集脚本编写规范**（编写/修改采集用 Python 组件时必读；定位、等待、契约、各场景与业界设计）
-- `docs/V4_6_0_ARCHITECTURE_GUIDE.md` - Dimensional table design (v4.6.0)
-- `docs/FINAL_ARCHITECTURE_STATUS.md` - 2025-01-30 architecture audit
-- `CHANGELOG.md` - Version history and archived file tracking
-
-## Key Technologies
-
-- **Backend**: Python 3.9+, FastAPI, SQLAlchemy 2.0+, Alembic, Celery, Playwright
-- **Frontend**: Vue.js 3, Element Plus, Pinia, Vite, ECharts, Axios
-- **Database**: PostgreSQL 15+ (Docker), 55 tables, 18 materialized views
-- **Data Collection**: Playwright (replaces Selenium for anti-detection)
-- **Infrastructure**: Docker, Redis, Nginx
+| 文档 | 内容 |
+|---|---|
+| `.cursorrules` | **完整开发规范**（架构规则、Contract-First、API、采集、SQL、安全、测试等） |
+| `openspec/AGENTS.md` | OpenSpec 工作流（提案 → 审核 → 执行 → 归档） |
+| `openspec/project.md` | 项目上下文与约定 |
+| `docs/DEVELOPMENT_RULES/` | 企业级详细规范（受保护目录） |
+| `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` | 采集脚本编写规范 |
+| `docs/architecture/V4_6_0_ARCHITECTURE_GUIDE.md` | 维度表设计 |
+| `CHANGELOG.md` | 版本历史 |
 
 ---
 
-**Remember**: When in doubt, check `.cursorrules` for the complete 1700-line development guide. It is the authoritative source for all development standards.
+**Remember**: `.cursorrules` 是本项目的权威开发规范。遇到不确定的情况，优先查阅 `.cursorrules`。
 - 永远使用中文回复

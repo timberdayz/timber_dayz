@@ -80,6 +80,37 @@ python scripts/identify_dead_code.py
 # 检查: 未使用路由、独立ORM模型、废弃API调用
 ```
 
+### Agent 工作模式：Superpowers + OpenSpec 协同
+
+**何时使用 OpenSpec（能力级 / 规格级变更）**：
+- 新增或修改**对外 API 契约**、数据库表结构、架构模式、性能 SLA、安全策略等；
+- 有跨版本或跨团队影响的变更；
+- 按 `openspec/AGENTS.md` 流程创建 proposal + spec deltas，通过 `openspec validate` 校验后再实现。
+
+**何时只用 Superpowers（迭代级变更）**：
+- Bugfix、小功能、内部重构、UI 调整、不改变对外契约的优化；
+- 在对话中声明"使用 Superpowers 工作流"，Agent 按以下四阶段执行。
+
+**Superpowers 四阶段工作流（非 trivial 改动默认使用）**：
+1. **Brainstorming**：澄清需求与边界、列方案与取舍，**不直接写代码**。
+2. **Planning**：拆成 2–5 分钟粒度的小任务，标明文件路径和验证方式，让用户确认。
+3. **Execution**：严格遵守本项目的 Contract-First + TDD 原则：
+   - 每个任务：先补/改测试 → 再实现 → 再确认通过；
+   - 控制单次改动半径（≤150 行），逐步推进；
+   - 每完成一条任务，汇报：改动点 + 测试/检查方式与结果。
+4. **Finishing**：整体回顾：
+   - 总结本轮影响的 API / DB / 前端 / 采集组件；
+   - 给出代码审查建议（重点关注 .cursorrules 中的架构规则）；
+   - **判断是否需要回写 OpenSpec**：若对外行为发生变化，必须提醒用户同步更新。
+
+**判断 Superpowers 是否在工作的标志**：
+- Agent 在执行前先做需求澄清和方案对比（而非直接写代码）；
+- Agent 给出了结构化的任务清单（而非"我来改吧"）；
+- Agent 在每个任务结束后有小结 + 自检；
+- Agent 在收尾阶段主动做总结和 review 建议。
+
+---
+
 ### CI/CD 自动发布规则（v4.20.0）⭐⭐⭐
 **发布流程**：
 - ✅ **开发/测试**：`git push` 到 `main/develop` → 仅构建镜像（不自动部署）
@@ -94,28 +125,10 @@ python scripts/identify_dead_code.py
 - ⭐ **Metabase 必需**：生产必需组件，必须在 Nginx 之前启动（避免 Nginx 启动失败）
 
 **GitHub Actions Workflow 语法规范（v4.20.0）**：⭐⭐⭐
-- ✅ **SSH远程命令**：必须使用 `bash -c '...'` 替代 heredoc（`<< ENDSSH`）
-- ✅ **变量展开控制**：外层双引号展开 GitHub Actions 变量（`${PRODUCTION_PATH}`），内层单引号展开远程变量（`\$retry`）
-- ✅ **转义规则**：远程变量需转义（`\$`、`\"`），本地变量不转义（`${IMAGE_TAG}`）
-- ❌ **禁止heredoc**：`ssh user@host << ENDSSH` 会导致变量展开冲突和语法错误
-- ⭐ **原因**：GitHub Actions 的 YAML 解析和 Shell 的 heredoc 解析冲突，变量展开时机不确定
-
-**正确示例**：
-```yaml
-# ✅ 正确：使用 bash -c，变量作用域清晰
-ssh user@host \
-  "bash -c '
-  cd \"${PRODUCTION_PATH}\"  # GitHub Actions 展开
-  IMAGE_TAG_VAL=\"${IMAGE_TAG}\"  # GitHub Actions 展开
-  docker pull image:\${IMAGE_TAG_VAL}  # 远程展开（需转义 $）
-  '"
-
-# ❌ 错误：使用 heredoc，变量展开冲突
-ssh user@host << 'ENDSSH'
-  cd ${STAGING_PATH}  # 不会展开（单引号阻止）
-  docker pull image:${IMAGE_TAG}  # 不会展开
-ENDSSH
-```
+- ✅ SSH 远程命令必须使用 `bash -c '...'`，禁止 heredoc
+- ✅ 外层双引号展开 GitHub Actions 变量，内层单引号 + `\$` 展开远程变量
+- ❌ 禁止 `ssh user@host << ENDSSH`（YAML 解析与 heredoc 冲突）
+- 完整示例、变量展开顺序、转义规则、故障排查 → **`docs/DEVELOPMENT_RULES/DEPLOYMENT.md`**
 
 **用户操作变化**：
 - 日常开发：`git push`（不自动部署）
@@ -126,7 +139,7 @@ ENDSSH
 ## 🆕 当前系统状态
 
 ### **版本信息**
-- **版本**: v4.19.0（执行器统一管理和资源优化）
+- **版本**: v4.20.0（系统管理模块 API 完整实现）
 - **状态**: ✅ 生产就绪
 - **架构合规**: ✅ 100% SSOT + Contract-First
 - **数据库**: PostgreSQL 15+，55张表
@@ -390,7 +403,8 @@ async def create_task(request: TaskCreate, db: AsyncSession = Depends(get_async_
 
 ---
 
-## 🛠️ Playwright使用规范（v4.8.0）⭐⭐⭐
+## Playwright使用规范（v4.8.0）⭐⭐⭐
+<!-- CONDITIONAL: 仅在涉及采集脚本、Playwright、浏览器自动化时需要阅读本段及子段落。详细指南 → docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md -->
 
 ### **核心原则：优先使用官方API和官方工具**
 - ✅ **官方API优先**: 使用Playwright官方API，不自己实现
@@ -451,6 +465,7 @@ async def create_task(request: TaskCreate, db: AsyncSession = Depends(get_async_
 **详细规范**：参见 `openspec/changes/verify-collection-and-sync-e2e/proposal.md` 中的 "Playwright 使用规范" 章节
 
 ### **采集脚本编写规范（强制）⭐⭐⭐**
+<!-- CONDITIONAL: 仅在编写/修改 modules/platforms/*/components/*.py 采集组件时需要阅读。完整规范 → docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md -->
 编写或修改 `modules/platforms/*/components/*.py`（登录、导航、导出等）时，**必须**遵循 **`docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`**：
 - 元素定位：优先 get_by_role / get_by_label / get_by_text，选择器集中至 *_config
 - 元素检测：禁止单次 count()+is_visible() 后即操作；用 expect(locator).to_be_visible() 或 wait_for(state="visible") 或直接对 locator 操作
@@ -871,6 +886,7 @@ async def ensure_table_exists():
 ## 🗄️ 数据库和性能规范
 
 ### 数据库迁移规范（v5.0.0新增）⭐⭐⭐
+<!-- CONDITIONAL: 仅在涉及数据库表结构变更、Alembic 迁移时需要阅读。详细规范 → docs/DEVELOPMENT_RULES/DATABASE_MIGRATION.md -->
 
 #### **核心原则**
 - ✅ **幂等性强制**：所有迁移必须可重复执行，不报错
@@ -951,6 +967,7 @@ async def ensure_table_exists():
 - ❌ **禁止**: 直接使用`pd.read_excel()`
 
 ### SQL编写规范（Metabase Model SQL）⭐⭐⭐
+<!-- CONDITIONAL: 仅在编写 SQL 查询、Metabase Model、物化视图时需要阅读。详细规范 → docs/DEVELOPMENT_RULES/DATABASE_DESIGN.md -->
 - ✅ **关键字**: 统一使用小写（`select`、`from`、`where`）
 - ✅ **缩进**: 使用2个空格（不使用Tab）
 - ✅ **字段列表**: 每个字段一行，逗号在行尾
@@ -1074,7 +1091,8 @@ python scripts/verify_root_md_whitelist.py
 完整的详细规范见 `docs/DEVELOPMENT_RULES/` 目录：
 
 ### P0级别（必须遵循）
-- **[DATABASE.md](docs/DEVELOPMENT_RULES/DATABASE.md)** - 数据库设计详细规范
+- **[DATABASE_DESIGN.md](docs/DEVELOPMENT_RULES/DATABASE_DESIGN.md)** - 数据库设计详细规范（含 SQL 编写规范）
+- **[DATABASE_MIGRATION.md](docs/DEVELOPMENT_RULES/DATABASE_MIGRATION.md)** - 数据库迁移规范（Alembic 操作规范）
 - **[ERROR_HANDLING_AND_LOGGING.md](docs/DEVELOPMENT_RULES/ERROR_HANDLING_AND_LOGGING.md)** - 错误处理和日志规范
 - **[MONITORING_AND_OBSERVABILITY.md](docs/DEVELOPMENT_RULES/MONITORING_AND_OBSERVABILITY.md)** - 监控和可观测性规范
 
@@ -1082,14 +1100,19 @@ python scripts/verify_root_md_whitelist.py
 - **[API_DESIGN.md](docs/DEVELOPMENT_RULES/API_DESIGN.md)** - API设计详细规范
 - **[SECURITY.md](docs/DEVELOPMENT_RULES/SECURITY.md)** - 安全规范详细文档
 - **[CODE_QUALITY.md](docs/DEVELOPMENT_RULES/CODE_QUALITY.md)** - 代码质量保证规范
+- **[CODE_REVIEW_CHECKLIST.md](docs/DEVELOPMENT_RULES/CODE_REVIEW_CHECKLIST.md)** - 代码审查清单
+- **[REVIEW_PROCESS.md](docs/DEVELOPMENT_RULES/REVIEW_PROCESS.md)** - 审查流程规范
 
 ### P2级别（建议）
 - **[TESTING.md](docs/DEVELOPMENT_RULES/TESTING.md)** - 测试策略详细文档
-- **[DEPLOYMENT.md](docs/DEVELOPMENT_RULES/DEPLOYMENT.md)** - 部署和运维规范
+- **[DEPLOYMENT.md](docs/DEVELOPMENT_RULES/DEPLOYMENT.md)** - 部署和运维规范（含 GitHub Actions 语法规范）
 - **[UI_DESIGN.md](docs/DEVELOPMENT_RULES/UI_DESIGN.md)** - UI设计规范
 
-### 其他重要文档
+### 辅助文档
 - **[DUPLICATE_AND_HISTORICAL_PROTECTION.md](docs/DEVELOPMENT_RULES/DUPLICATE_AND_HISTORICAL_PROTECTION.md)** - 双维护和历史遗漏防护
+- **[DATABASE_DESIGN_CHECKLIST.md](docs/DEVELOPMENT_RULES/DATABASE_DESIGN_CHECKLIST.md)** - 数据库设计检查清单
+- **[DATABASE_DESIGN_EXAMPLES.md](docs/DEVELOPMENT_RULES/DATABASE_DESIGN_EXAMPLES.md)** - 数据库设计示例
+- **[DATABASE_CHANGE_CHECKLIST.md](docs/DEVELOPMENT_RULES/DATABASE_CHANGE_CHECKLIST.md)** - 数据库变更检查清单
 
 > ⚠️ **注意**: `.cursorrules` 只保留核心规则和快速参考，详细规范请查阅上述文档。  
 > 📖 **完整索引**: 参见 [docs/DEVELOPMENT_RULES/README.md](docs/DEVELOPMENT_RULES/README.md)

@@ -647,6 +647,57 @@ async def test_component(
         component_name = f"{request.component_type}_test_{timestamp}"
         temp_yaml_path = config_dir / f"{component_name}.yaml"
         
+        # 构建步骤(对登录组件做标准化: 账号/密码占位符 + 验证码步可选)
+        normalized_steps = []
+        is_login = request.component_type == 'login'
+        for step in request.steps:
+            action = step.get('action')
+            selector = step.get('selector') or ''
+            raw_value = step.get('value')
+            comment = (step.get('comment') or '')
+            step_group = (step.get('step_group') or '')
+
+            value = raw_value
+            # 登录组件: 将账号/密码字段标准化为占位符, 便于使用账号信息测试
+            if is_login and isinstance(raw_value, str) and raw_value and '{{' not in raw_value:
+                lower_comment = comment.lower()
+                sel_lower = selector.lower()
+                # 账号/用户名字段
+                if (
+                    any(k in comment for k in ['手机号', '子账号', '邮箱'])
+                    or 'account' in sel_lower
+                    or 'username' in sel_lower
+                ):
+                    value = '{{account.username}}'
+                # 密码字段
+                elif (
+                    '密码' in comment
+                    or 'password' in lower_comment
+                    or 'password' in sel_lower
+                ):
+                    value = '{{account.password}}'
+
+            # 基础步骤结构
+            normalized_step = {
+                'action': action,
+                'selector': selector or None,
+                'url': step.get('url'),
+                'value': value,
+                'comment': comment or None,
+                'optional': step.get('optional', False),
+                'timeout': step.get('timeout', 30000),
+            }
+
+            # 验证码相关步骤: 标记为可选, 避免因验证码问题导致整体测试失败
+            if is_login and (
+                step_group == 'captcha'
+                or '验证码' in comment
+                or 'captcha' in selector.lower()
+            ):
+                normalized_step['optional'] = True
+
+            normalized_steps.append(normalized_step)
+
         # 构建YAML内容
         component_config = {
             'name': component_name,
@@ -654,18 +705,7 @@ async def test_component(
             'type': request.component_type,
             'version': '1.0.0',
             'description': f'临时测试组件 - {datetime.now().isoformat()}',
-            'steps': [
-                {
-                    'action': step.get('action'),
-                    'selector': step.get('selector'),
-                    'url': step.get('url'),
-                    'value': step.get('value'),
-                    'comment': step.get('comment'),
-                    'optional': step.get('optional', False),
-                    'timeout': step.get('timeout', 30000),
-                }
-                for step in request.steps
-            ],
+            'steps': normalized_steps,
             'success_criteria': [
                 {
                     'type': 'url_contains',

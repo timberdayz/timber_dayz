@@ -438,7 +438,7 @@
         <div v-else-if="hasSteps" class="steps-list">
           <!-- Phase 12.3: 批量标记工具栏 -->
           <div
-            class="batch-actions"
+            class="batch-actions steps-toolbar"
             style="
               margin-bottom: 12px;
               padding: 10px;
@@ -467,6 +467,13 @@
               @click="batchMarkAs('filters')"
             >
               标记为筛选器
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="selectedStepIndices.length === 0"
+              @click="batchMarkAs('captcha')"
+            >
+              标记为验证码
             </el-button>
             <el-button
               size="small"
@@ -644,6 +651,7 @@
                         <el-option label="普通步骤" value="normal" />
                         <el-option label="日期组件" value="date_picker" />
                         <el-option label="筛选器" value="filters" />
+                        <el-option label="验证码" value="captcha" />
                       </el-select>
                       <div
                         v-if="element.step_group === 'date_picker'"
@@ -656,6 +664,12 @@
                         style="font-size: 12px; color: #67c23a; margin-top: 4px"
                       >
                         此步骤将转换为调用筛选器组件
+                      </div>
+                      <div
+                        v-if="element.step_group === 'captcha'"
+                        style="font-size: 12px; color: #909399; margin-top: 4px"
+                      >
+                        此步骤属于验证码流程，测试时将视为可选步骤，不影响整体结果
                       </div>
                     </el-form-item>
                   </el-form>
@@ -1432,21 +1446,29 @@ const yamlContent = computed(() => {
   let groupSteps = [];
 
   const flushGroup = () => {
-    if (currentGroup && groupSteps.length > 0) {
+    if (currentGroup && groupSteps.length > 0 && currentGroup !== "captcha") {
       // 输出 component_call
       yaml += `  # 以下步骤已标记为 ${
-        currentGroup === "date_picker" ? "日期组件" : "筛选器"
+        currentGroup === "date_picker"
+          ? "日期组件"
+          : currentGroup === "filters"
+          ? "筛选器"
+          : currentGroup
       }，建议替换为 component_call\n`;
       yaml += `  - action: component_call\n`;
       yaml += `    component: '${platform}/${currentGroup}'\n`;
       yaml += `    params:\n`;
       if (currentGroup === "date_picker") {
         yaml += `      date_range: '{{params.date_range}}'\n`;
-      } else {
+      } else if (currentGroup === "filters") {
         yaml += `      filter_value: '{{params.filter_value}}'\n`;
       }
       yaml += `    comment: '调用${
-        currentGroup === "date_picker" ? "日期选择器" : "筛选器"
+        currentGroup === "date_picker"
+          ? "日期选择器"
+          : currentGroup === "filters"
+          ? "筛选器"
+          : currentGroup
       }组件'\n`;
       yaml += `    # 原始录制步骤（供参考）:\n`;
       groupSteps.forEach((step, i) => {
@@ -1462,7 +1484,7 @@ const yamlContent = computed(() => {
   recordedSteps.value.forEach((step) => {
     const stepGroup = step.step_group || "normal";
 
-    if (stepGroup !== "normal") {
+    if (stepGroup !== "normal" && stepGroup !== "captcha") {
       // 标记的步骤
       if (currentGroup !== stepGroup) {
         flushGroup();
@@ -2051,6 +2073,12 @@ onMounted(() => {
   flex: 1;
   overflow-y: auto;
   padding-right: 8px;
+}
+
+.steps-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .step-item {
