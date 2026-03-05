@@ -2,25 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-<!-- OPENSPEC:START -->
-# OpenSpec Instructions
-
-These instructions are for AI assistants working in this project.
-
-Always open `@/openspec/AGENTS.md` when the request:
-- Mentions planning or proposals (words like proposal, spec, change, plan)
-- Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
-- Sounds ambiguous and you need the authoritative spec before coding
-
-Use `@/openspec/AGENTS.md` to learn:
-- How to create and apply change proposals
-- Spec format and conventions
-- Project structure and guidelines
-
-Keep this managed block so 'openspec update' can refresh the instructions.
-
-<!-- OPENSPEC:END -->
-
 ## Project Overview
 
 西虹ERP系统 (XiHong ERP) — 现代企业级跨境电商ERP系统，遵循 SAP/Oracle ERP 标准。
@@ -76,6 +57,16 @@ alembic downgrade -1                                # 回滚一版
 python scripts/verify_architecture_ssot.py    # schema.py 变更后必须运行（期望 100%）
 python scripts/check_historical_omissions.py  # 检查历史遗漏
 python scripts/verify_root_md_whitelist.py    # 根目录文件白名单
+```
+
+### OpenSpec CLI（规格与变更）
+项目通过 `package.json` 安装 `@fission-ai/openspec`，使用 `npx openspec` 或 `npm run openspec` 调用：
+```bash
+npx openspec list              # 列出进行中的变更
+npx openspec list --specs      # 列出规格
+npx openspec validate --strict # 严格验证
+npx openspec update            # 更新指令文件到最新
+# 或: npm run os:list / npm run os:update / npm run os:validate
 ```
 
 ### Testing & Code Quality

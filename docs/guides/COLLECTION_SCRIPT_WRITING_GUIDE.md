@@ -67,7 +67,7 @@
 
 ## 7. 临时弹窗与遮挡层
 
-- **执行器**：在**登录前、每个数据域导出前**会调用通用弹窗处理（`close_popups`），使用通用 + 平台配置（如 `config/collection_components/<platform>/popup_config.yaml`）的选择器与 ESC 关闭常见弹窗。
+- **执行器**：在**登录前、每个数据域导出前**会调用通用弹窗处理（`close_popups`），使用通用 + 平台配置（`modules/platforms/<platform>/popup_config.py` 的 `get_close_selectors()` / `get_overlay_selectors()`）与 ESC 关闭常见弹窗。
 - **组件内已知弹窗**：若某步会弹出对话框（如「确定」「导出」），应在流程中**显式** wait 到该对话框可见再点击关闭/确认。
 - **不可预期弹窗**：可依赖执行器在步骤边界的关闭，或选用 `page.add_locator_handler`（会改变 focus/mouse 状态，须在文档中注明）。
 - **Cookie 合规选择**：需主动点「全部接受」或「全部拒绝」时，显式 wait 到对应按钮再点击，选择器可放平台 popup_config。
@@ -241,4 +241,4 @@
 ## 12. 参考
 
 - Playwright Python： [Best Practices](https://playwright.dev/python/docs/best-practices)、[Actionability](https://playwright.dev/python/docs/actionability)、[Locators](https://playwright.dev/python/docs/locators)
-- 项目内：验证码提案（add-web-captcha-optimization）、`modules/apps/collection_center/popup_handler.py` 及平台 `popup_config.yaml`；可引用已使用 `get_by_role` 的登录组件、妙手导出中的 menuitem 等作为示例。
+- 项目内：验证码提案（add-web-captcha-optimization）、`modules/apps/collection_center/popup_handler.py` 及平台 `popup_config.py`；可引用已使用 `get_by_role` 的登录组件、妙手导出中的 menuitem 等作为示例。

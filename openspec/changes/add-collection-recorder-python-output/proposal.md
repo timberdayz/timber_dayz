@@ -18,10 +18,14 @@
   - **组件契约**：`async def run(page, account, config)`（或当前项目约定的 LoginComponent/ExportComponent 签名），返回 ResultBase 子类；从 `ctx.config` 或 `*_config` 读取配置，不写死选择器。
   - **元素定位**：在步骤解析时若能从 selector 或 Trace 元数据推断出 role/label/text，优先生成 `page.get_by_role()` / `get_by_label()` / `get_by_text()`；否则生成 `page.locator(selector)` 并加注释「建议迁移到 get_by_*」。
   - **等待**：在 click/fill 前生成 `expect(locator).to_be_visible()` 或 `locator.wait_for(state="visible")`，避免裸的 `time.sleep`；navigate 后可按需生成等目标页特征的注释或占位。
-  - **可选步骤**：对 `optional=true` 的步骤，生成 try/except 或「先判断可见再操作」等与规范一致的可选执行逻辑，或至少生成注释「可选步骤，执行失败可跳过」，使执行器行为与 YAML 的 optional 一致。
+  - **可选步骤**：对 `optional=true` 的步骤，生成 try/except 或「先判断可见再操作」等与规范一致的可选执行逻辑，或至少生成注释「可选步骤，执行失败可跳过」，使执行器行为与 YAML 的 optional 一致；同时无论是否包含可选步骤，生成的 Python 源码必须始终保持语法合法（例如避免空的 `try:` 块，对仅有注释占位的分支补充 `pass` 或 `raise NotImplementedError`），防止加载阶段因语法错误中断后续调试与测试。
   - **结构**：按《采集脚本编写规范》的复杂交互、临时弹窗等留注释占位（如「若有弹窗在此 wait 再点击关闭」），便于用户录制后补全。
 - **实现位置**：可在 `backend/services/` 或 `backend/utils/` 下新增模块（如 `steps_to_python.py` 或 `collection_recorder_codegen.py`），由录制相关 router 调用；或放在 `tools/` 下供后端与 CLI 共用。
-- **可选增强**：若 Trace 解析或 steps_file 中能提供 role/label/text（如从 DOM 快照或录制脚本内记录），生成器优先使用以产出更多 get_by_*。
+- **可选增强**：
+  - 若 Trace 解析或 steps_file 中能提供 role/label/text（如从 DOM 快照或录制脚本内记录），生成器优先使用以产出更多 get_by_*。
+  - 在 steps 结构中支持 `step_type` / `scene_tags` 等高层语义（如 login_form、cookie_consent、export_wizard_step、otp_dialog、iframe_step），生成器可按类型选择对应「场景模板」（例如登录表单填写、业务 Modal 关闭、导出向导步骤等），而不是逐行机械拼接 click/fill。
+  - 对 login / export 等组件类型，生成器基于预置「组件模板」（class + run 方法骨架 + 常用私有 helper），将录制到的步骤映射为模板中的实现细节，使生成的代码结构清晰、贴近人工维护风格。
+  - 生成完成后可选调用 Python 语法检查与轻量 Lint（如 `python -m py_compile` 或 ruff 规则子集），在 `/recorder/stop` 或 `/recorder/generate-python` 响应中返回结构化的错误/警告信息（如语法错误位置、使用了不推荐的 `wait_for_timeout` 等），前端可展示为「质量提示」，辅助用户快速修正生成结果。
 
 ### 2. 录制停止后返回或提供「生成 Python」接口
 
@@ -45,6 +49,12 @@
 | **UI** | 在录制结果区（与步骤列表、YAML 并列或 Tab）增加「Python 代码」区域；绑定上述 state，支持可编辑（textarea 或带高亮的编辑器）。停止后用户可输入或确认**组件名**（component_name），保存时以该名称写入 `{component_name}.py`。 |
 | **接口** | 停止录制后读取 `response.python_code` 并写入 state；保存时请求体携带 `python_code`（及 platform、component_name 等），主路径为保存 .py。可选：调用 `POST /recorder/generate-python` 实现「重新生成」按钮。 |
 | **兼容** | 保留步骤列表、YAML 预览、复制 YAML；YAML 保存可作为次要路径保留，不删除现有 YAML 相关 UI。 |
+
+**可选增强：登录场景自动变量化与智能建议（详见 design.md）**：
+
+- 后端在处理 login 组件的录制结果时，基于 comment/selector 与 `step_type` / `scene_tags` 识别用户名/密码输入步骤，优先将其 `value` 规范化为 `{{account.username}}` / `{{account.password}}`，保证生成的 Python 组件始终通过账号变量取值，而不会将录制时输入的明文账号/密码写入仓库。
+- `/recorder/stop` 响应中可选返回 `login_field_suggestions` 之类的结构化提示（包含 step 索引、字段类型、原始/建议值、是否已自动应用等），前端在录制结果页以「智能建议」的形式展示：例如顶部提示「检测到 X 处登录字段，已建议替换为账号变量」，并在对应步骤旁显示可点击的建议标签，允许用户一键应用或忽略。
+- 若用户未显式采纳建议，生成器在 login 场景下对被识别为账号/密码字段的步骤仍应按账号变量生成代码（忽略明文 value，仅用 `account.username/password`），智能建议仅作为可视化与可解释性增强，不影响「不落明文密钥」这一硬性约束。
 
 ### 4. 不修改
 
@@ -111,7 +121,11 @@
 - **组件内**：可预期弹窗在流程中显式 wait 再点击关闭/确认；可能不出现的弹窗关闭步骤可标为 **optional**，执行时失败则跳过。
 - **是否需要单独录「关闭弹窗」组件**：通常不需要。通用与平台配置已覆盖大部分常见弹窗；若某平台有固定弹窗，可在该组件内加一步「点击关闭」并视情况标 optional，或将选择器放入平台 `popup_config.yaml`。仅极少数需固定顺序关闭的定制弹窗才考虑单独关弹窗组件，非默认推荐。
 
-生成器在生成 Python 时对「临时弹窗/遮挡」留注释占位（见第 1 节），与上述执行器与规范行为一致；用户录制后可按规范补全或依赖执行器步骤边界关闭。
+生成器在生成 Python 时对「临时弹窗/遮挡」：
+
+- 至少留注释占位（见第 1 节），与上述执行器与规范行为一致；用户录制后可按规范补全或依赖执行器步骤边界关闭。
+- 对于在 Trace/steps 中已识别到的「可预期弹窗」或「业务 Modal」，优先生成显式的 wait+关闭/确认逻辑（如等待 `.ant-modal, [role="dialog"]` 可见后点击确定按钮），或调用平台封装的弹窗 helper，而不完全依赖全局 close_popups。
+- 对登录、导出等关键节点，生成器在合适的位置自动插入 `await self.guard_overlays(page, label="...")` 等抗干扰钩子调用，使由录制生成的组件在**不额外手写代码**的前提下具备基础的弹窗/遮挡抗干扰能力。
 
 ### 8. 组件保存、版本、更新与淘汰（与业界对齐说明）
 
@@ -169,3 +183,29 @@
 
 - **《采集脚本编写规范》**：`docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`（已归档变更 add-collection-script-writing-guide）；生成器输出须与该规范对齐（定位、等待、契约、场景注释）。
 - **现有录制 API**：`backend/routers/component_recorder.py` 的 /recorder/start、/recorder/stop、/recorder/save（已支持 python_code）；本变更扩展 stop 或新增 generate-python，并让前端主路径使用 python_code 保存。
+
+---
+
+## 9. 已实施优化与后续可做（2026-02 补充）
+
+本节记录本变更实施过程中完成的优化及新开对话可继续推进的项，便于后续迭代。
+
+### 9.1 已实施优化
+
+| 类别 | 内容 | 位置 |
+|------|------|------|
+| **步骤重复** | Trace 解析仅认 `action` 事件（方案 A），不处理 before/after；500ms 时间窗内 (action_type, selector, value) 去重（方案 C）。 | `backend/utils/trace_parser.py` |
+| **可执行代码** | 生成器从 step 的 `selectors` 推导 `selector`（Inspector 仅写 selectors 时也能生成 locator/expect/click/fill）。 | `backend/services/steps_to_python.py`（`_selector_from_selectors`） |
+| **步骤衔接** | navigate/goto 后插入 `await page.wait_for_load_state("domcontentloaded", timeout=10000)`。 | `backend/services/steps_to_python.py` |
+| **Inspector 去重** | 最近 2～3 步内相同 action + 主 selector 则合并/跳过，避免同一操作多次记录。 | `tools/launch_inspector_recorder.py`（`_handle_normal_event`） |
+| **测试组件** | 登录组件测试时：账号/密码字段自动替换为 `{{account.username}}`/`{{account.password}}`；验证码相关步骤（step_group=captcha 或 comment/selector 含验证码）自动设为 optional。 | `backend/routers/component_recorder.py`（`/recorder/test`） |
+| **步骤标记** | 新增「标记为验证码」；captcha 在 YAML 导出中按普通步骤输出，不生成 component_call（暂无 captcha 组件）。 | `frontend/src/views/ComponentRecorder.vue` |
+| **步骤编辑 UI** | 「全选、标记为日期组件、标记为筛选器、标记为验证码…」工具条使用 `position: sticky; top: 0`，仅下方步骤列表滚动。 | `frontend/src/views/ComponentRecorder.vue`（`.steps-toolbar`） |
+
+### 9.2 后续可优化（新开对话可继续）
+
+- **测试路径收敛（删除录制页“测试组件”）**：仅保留组件版本管理中的测试能力，作为唯一的组件执行入口；录制页不再提供基于临时 YAML 或临时 Python 的「测试组件」按钮，`/recorder/test` 及相关临时执行逻辑将被移除或收敛到统一的组件测试服务中。录制页的职责限定为「录制 → 生成/编辑 Python → 保存组件」，测试流程改为：保存组件后，在版本管理页选择对应版本执行测试。
+- **success_criteria**：登录组件测试通过除步骤执行外还依赖 success_criteria 校验；临时 YAML 中 success_criteria 为空且 optional。可考虑：保存时由用户或默认写入 url_contains 等条件，或在前端提供「编辑成功条件」入口。
+- **标记扩展**：按需增加「标记为导航」「标记为弹窗/通知栏」等；需同步约定 YAML/执行器语义（如 navigation 转为 component_call、弹窗仍以 optional 步骤或 popup_config 为主）。
+- **验证码组件**：若引入 `platform/captcha_solver` 等组件，可将 step_group=captcha 在 YAML 中转为 component_call，并在执行器中实现对应加载与调用。
+- **文档**：在 `docs/guides/RECORDER_PYTHON_OUTPUT.md` 中补充录制页与组件版本管理的分工（录制页仅负责生成/编辑/保存 Python 组件；测试统一在版本管理中完成）、步骤标记（含验证码）含义及后续优化方向。

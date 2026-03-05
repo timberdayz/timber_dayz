@@ -299,13 +299,19 @@ class ComponentFallbackStrategy:
         Returns:
             执行结果
         """
+        def _load_component(comp_path: str, p: dict):
+            parts = comp_path.split("/", 1)
+            if len(parts) >= 2:
+                plat, name = parts[0], parts[1]
+                built = self.component_loader.build_component_dict_from_python(plat, name, p)
+                if built is not None:
+                    return built
+            return self.component_loader.load(comp_path, p)
+
         all_components = [
-            {'component': main_component, 'reason': 'Primary component'}
+            {"component": main_component, "reason": "Primary component"}
         ] + [
-            {
-                'component': self.component_loader.load(fc['component'], params),
-                'reason': fc.get('reason', 'Fallback component')
-            }
+            {"component": _load_component(fc["component"], params), "reason": fc.get("reason", "Fallback component")}
             for fc in fallback_components
         ]
         

@@ -37,23 +37,22 @@ class TestShopeeComponentLoading:
         return ComponentLoader()
     
     def test_load_login_component(self, loader):
-        """测试加载登录组件"""
+        """测试加载登录组件（仅 Python 组件）"""
         component = loader.load("shopee/login")
         
         assert component is not None
-        assert component["name"] == "shopee_login"
         assert component["platform"] == "shopee"
         assert component["type"] == "login"
-        assert "steps" in component
-        assert len(component["steps"]) > 0
+        assert "_python_component_class" in component
     
     def test_load_navigation_component(self, loader):
-        """测试加载导航组件"""
+        """测试加载导航组件（仅 Python 组件）"""
         component = loader.load("shopee/navigation")
         
         assert component is not None
-        assert component["name"] == "shopee_navigation"
-        assert "data_domain_urls" in component
+        assert component["platform"] == "shopee"
+        assert component["type"] == "navigation"
+        assert "_python_component_class" in component
     
     def test_load_date_picker_component(self, loader):
         """测试加载日期选择组件"""
@@ -63,12 +62,13 @@ class TestShopeeComponentLoading:
         assert component["type"] == "date_picker"
     
     def test_load_orders_export_component(self, loader):
-        """测试加载订单导出组件"""
+        """测试加载订单导出组件（仅 Python 组件）"""
         component = loader.load("shopee/orders_export")
         
         assert component is not None
         assert component["data_domain"] == "orders"
-        assert "dependencies" in component
+        assert component["type"] == "export"
+        assert "_python_component_class" in component
     
     def test_load_all_export_components(self, loader):
         """测试加载所有导出组件"""
@@ -84,24 +84,13 @@ class TestShopeeComponentLoading:
             assert component["type"] == "export"
     
     def test_component_variable_rendering(self, loader):
-        """测试组件变量渲染"""
-        component = loader.load("shopee/login")
+        """测试组件参数传递（Python 组件使用 _params）"""
+        params = {"account": {"username": "u", "password": "p"}}
+        component = loader.load("shopee/login", params=params)
         
-        # 验证组件已加载
         assert component is not None
-        assert "steps" in component
-        
-        # 验证步骤中包含变量模板
-        steps = component.get("steps", [])
-        has_variable = False
-        for step in steps:
-            value = step.get("value", "")
-            url = step.get("url", "")
-            if "{{" in str(value) or "{{" in str(url):
-                has_variable = True
-                break
-        
-        assert has_variable, "组件应包含变量模板"
+        assert "_python_component_class" in component
+        assert component.get("_params") == params
 
 
 class TestShopeePopupConfig:
@@ -112,19 +101,20 @@ class TestShopeePopupConfig:
         return ComponentLoader()
     
     def test_load_popup_config(self, loader):
-        """测试加载弹窗配置"""
-        # popup_config不是标准组件，直接读取yaml
-        import yaml
+        """测试加载弹窗配置（Python 模块，不再读 YAML）"""
+        from modules.platforms.shopee.popup_config import (
+            get_close_selectors,
+            get_overlay_selectors,
+            get_poll_strategy,
+        )
         
-        config_path = Path(__file__).parent.parent.parent / "config" / "collection_components" / "shopee" / "popup_config.yaml"
+        close = get_close_selectors()
+        overlay = get_overlay_selectors()
+        poll = get_poll_strategy()
         
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-        
-        assert config is not None
-        assert config["platform"] == "shopee"
-        assert "close_selectors" in config
-        assert "poll_strategy" in config
+        assert isinstance(close, list)
+        assert isinstance(overlay, list)
+        assert isinstance(poll, dict)
     
     def test_popup_handler_initialization(self):
         """测试弹窗处理器初始化"""

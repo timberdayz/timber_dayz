@@ -57,6 +57,19 @@ class CacheService:
         "dashboard_clearance_ranking": 300,
         "dashboard_inventory_backlog": 300,
         "annual_summary_kpi": 180,  # 年度数据总结 KPI（add-annual-data-summary）
+        # add-redis-cache-uncached-endpoints
+        "performance_scores": 180,
+        "performance_scores_shop": 180,
+        "hr_shop_profit_statistics": 300,
+        "hr_annual_profit_statistics": 300,
+        "annual_summary_by_shop": 180,
+        "annual_summary_trend": 180,
+        "annual_summary_platform_share": 180,
+        "annual_summary_target_completion": 180,
+        "expense_summary_monthly": 300,
+        "expense_summary_yearly": 300,
+        "target_by_month": 180,
+        "target_breakdown": 180,
         "default": 300,  # 5分钟
     }
     

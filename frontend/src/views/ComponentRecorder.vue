@@ -237,7 +237,8 @@
         </el-alert>
       </el-card>
 
-      <!-- 右侧：步骤/选项编辑器 -->
+      <!-- 右侧：步骤编辑与 Python 代码左右分栏 -->
+      <div class="steps-and-python-row">
       <el-card class="editor-panel" shadow="hover">
         <template #header>
           <div class="card-header">
@@ -602,7 +603,8 @@
                         v-model="element.selector"
                         placeholder="CSS选择器（wait步骤可留空）"
                         type="textarea"
-                        :rows="2"
+                        :rows="1"
+                        class="step-selector-input"
                       />
                     </el-form-item>
 
@@ -687,27 +689,7 @@
         </el-empty>
       </el-card>
 
-      <!-- YAML预览 -->
-      <el-card class="yaml-panel" shadow="hover">
-        <template #header>
-          <div class="card-header">
-            <span class="card-title">YAML预览</span>
-            <el-button size="small" :icon="CopyIcon" @click="copyYaml">
-              复制
-            </el-button>
-          </div>
-        </template>
-
-        <el-input
-          v-model="yamlContent"
-          type="textarea"
-          :rows="12"
-          readonly
-          class="yaml-textarea"
-        />
-      </el-card>
-
-      <!-- Python 代码（主路径保存 .py） -->
+      <!-- Python 代码（主路径保存 .py）- 与步骤编辑左右并排 -->
       <el-card class="python-panel" shadow="hover" v-show="hasRecordedData && !isDiscoveryMode">
         <template #header>
           <div class="card-header">
@@ -733,11 +715,12 @@
         <el-input
           v-model="pythonCode"
           type="textarea"
-          :rows="18"
+          :autosize="{ minRows: 12, maxRows: 40 }"
           placeholder="停止录制后将在此显示生成的 Python 代码，可编辑后保存为 .py"
           class="python-textarea"
         />
       </el-card>
+      </div>
     </div>
 
     <!-- 测试对话框 -->
@@ -866,6 +849,15 @@
             </p>
             <p style="margin: 0; font-size: 13px">
               3. 测试完成后会显示详细结果和失败截图
+            </p>
+            <p style="margin: 0; font-size: 13px">
+              4. 对于标记为<span style="font-weight: 600">验证码</span>或<span style="font-weight: 600">可选</span>的步骤，测试时会自动视为可选步骤，失败不会导致整次测试失败。
+            </p>
+            <p
+              v-if="recorderForm.componentType === 'login'"
+              style="margin: 0; font-size: 13px"
+            >
+              5. 登录组件测试会在关键导航后自动尝试关闭常见弹窗/通知，以减少页面遮挡对结果的影响。
             </p>
           </div>
         </template>
@@ -1029,7 +1021,6 @@ import {
   Delete as DeleteIcon,
   Document,
   Rank,
-  DocumentCopy as CopyIcon,
   FolderOpened as SaveIcon,
   InfoFilled,
   Loading,
@@ -1278,278 +1269,7 @@ watch(
   }
 );
 
-// YAML字符串转义函数（Phase 12.4: 修复注释字段的特殊字符问题）
-const escapeYamlString = (str) => {
-  if (!str) return "''";
-
-  // 转义特殊字符
-  const escaped = String(str)
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n");
-
-  // 如果包含特殊字符，使用引号包裹
-  if (/[:#@`|>'"\[\]{},%&*?!<>]/.test(str) || str.includes("'")) {
-    return `"${escaped}"`;
-  }
-
-  // 如果是纯数字或布尔值，也用引号包裹避免类型解析问题
-  if (/^(true|false|null|[0-9]+\.?[0-9]*)$/i.test(str.trim())) {
-    return `'${str}'`;
-  }
-
-  return `'${str}'`;
-};
-
-// 生成YAML内容
-const yamlContent = computed(() => {
-  // Phase 11: 根据模式判断是否有数据
-  if (!hasRecordedData.value) {
-    return isDiscoveryMode.value
-      ? "# 还没有录制任何选项"
-      : "# 还没有录制任何步骤";
-  }
-
-  const componentName = recorderForm.value.componentName || "unnamed_component";
-  const platform = recorderForm.value.platform;
-  const componentType = recorderForm.value.componentType;
-  const dataDomain = recorderForm.value.dataDomain;
-  const subDomain = recorderForm.value.subDomain;
-  const exampleDataDomain = recorderForm.value.exampleDataDomain;
-
-  let yaml = `# ${platform.toUpperCase()} ${componentType} 组件\n`;
-  yaml += `# 生成时间: ${new Date().toLocaleString("zh-CN")}\n`;
-  yaml += `# Phase 11: UI化组件录制工具生成（支持发现模式）\n\n`;
-  yaml += `name: ${componentName}\n`;
-  yaml += `platform: ${platform}\n`;
-  yaml += `type: ${componentType}\n`;
-  yaml += `version: 1.0.0\n`;
-
-  // 导出组件添加数据域和子域字段
-  if (componentType === "export" && dataDomain) {
-    yaml += `data_domain: ${dataDomain}\n`;
-    if (subDomain) {
-      yaml += `sub_domain: ${subDomain}\n`;
-    }
-  }
-
-  // 根据组件类型生成不同的描述
-  if (componentType === "export" && dataDomain) {
-    const domainLabel = subDomain ? `${dataDomain}/${subDomain}` : dataDomain;
-    yaml += `description: "${platform} ${domainLabel} 导出组件（UI录制工具生成）"\n\n`;
-  } else {
-    yaml += `description: "${platform} ${componentType} 组件（UI录制工具生成）"\n\n`;
-  }
-
-  // Phase 11: 发现模式（date_picker, filters）
-  if (isDiscoveryMode.value) {
-    // Phase 12: 测试配置
-    yaml += `# 测试配置（用于组件测试时导航到目标页面）\n`;
-    yaml += `test_config:\n`;
-    if (testConfig.value.type === "url" && testConfig.value.testUrl) {
-      yaml += `  test_url: '${testConfig.value.testUrl}'\n`;
-    } else if (
-      testConfig.value.type === "data_domain" &&
-      testConfig.value.testDataDomain
-    ) {
-      yaml += `  test_data_domain: '${testConfig.value.testDataDomain}'\n`;
-    } else {
-      yaml += `  test_url: '{{account.login_url}}/TODO_填写测试页面路径'\n`;
-    }
-    yaml += `\n`;
-
-    // 打开动作
-    if (openAction.value) {
-      yaml += `# 打开选择器的动作\n`;
-      yaml += `open_action:\n`;
-      yaml += `  action: click\n`;
-      if (openAction.value.selectors && openAction.value.selectors.length > 0) {
-        yaml += `  selectors:\n`;
-        openAction.value.selectors.forEach((sel) => {
-          yaml += `    - type: ${sel.type}\n`;
-          yaml += `      value: '${sel.value}'\n`;
-          if (sel.priority) yaml += `      priority: ${sel.priority}\n`;
-        });
-      }
-      yaml += `  comment: '${
-        openAction.value.description || "打开选择器"
-      }'\n\n`;
-    }
-
-    // 可用选项
-    yaml += `# 可用选项列表\n`;
-    yaml += `available_options:\n`;
-    availableOptions.value.forEach((opt) => {
-      yaml += `  - key: ${opt.key}\n`;
-      yaml += `    text: '${opt.text}'\n`;
-      if (opt.selectors && opt.selectors.length > 0) {
-        yaml += `    selectors:\n`;
-        opt.selectors.forEach((sel) => {
-          yaml += `      - type: ${sel.type}\n`;
-          yaml += `        value: '${sel.value}'\n`;
-          if (sel.priority) yaml += `        priority: ${sel.priority}\n`;
-        });
-      }
-      yaml += `\n`;
-    });
-
-    // 默认选项
-    if (defaultOption.value) {
-      yaml += `default_option: ${defaultOption.value}\n\n`;
-    }
-
-    // 参数定义
-    yaml += `# 运行时参数\n`;
-    yaml += `params:\n`;
-    if (componentType === "date_picker") {
-      yaml += `  date_range:\n`;
-      yaml += `    type: enum\n`;
-      yaml += `    values: [${availableOptions.value
-        .map((o) => o.key)
-        .join(", ")}]\n`;
-      yaml += `    default: ${defaultOption.value || "last_7_days"}\n`;
-    } else {
-      yaml += `  filter_value:\n`;
-      yaml += `    type: enum\n`;
-      yaml += `    values: [${availableOptions.value
-        .map((o) => o.key)
-        .join(", ")}]\n`;
-      yaml += `    default: ${
-        defaultOption.value || availableOptions.value[0]?.key || "all"
-      }\n`;
-    }
-
-    return yaml;
-  }
-
-  // Navigation 组件添加数据域URL映射注释
-  if (componentType === "navigation") {
-    yaml += `# 数据域URL映射（运行时根据 params.data_domain 参数动态选择）\n`;
-    yaml += `data_domain_urls:\n`;
-    yaml += `  orders: '/portal/sale/order'\n`;
-    yaml += `  products: '/portal/product/list'\n`;
-    yaml += `  analytics: '/portal/datacenter/traffic'\n`;
-    yaml += `  finance: '/portal/income/bill'\n`;
-    yaml += `  services: '/portal/chat'\n`;
-    yaml += `  inventory: '/portal/stock'\n`;
-    yaml += `\n`;
-    if (exampleDataDomain) {
-      yaml += `# 录制时使用的示例数据域: ${exampleDataDomain}\n`;
-    }
-    yaml += `\n`;
-  }
-
-  yaml += `steps:\n`;
-
-  // Phase 12.3: 处理步骤标记，将标记的步骤转换为 component_call
-  let currentGroup = null;
-  let groupSteps = [];
-
-  const flushGroup = () => {
-    if (currentGroup && groupSteps.length > 0 && currentGroup !== "captcha") {
-      // 输出 component_call
-      yaml += `  # 以下步骤已标记为 ${
-        currentGroup === "date_picker"
-          ? "日期组件"
-          : currentGroup === "filters"
-          ? "筛选器"
-          : currentGroup
-      }，建议替换为 component_call\n`;
-      yaml += `  - action: component_call\n`;
-      yaml += `    component: '${platform}/${currentGroup}'\n`;
-      yaml += `    params:\n`;
-      if (currentGroup === "date_picker") {
-        yaml += `      date_range: '{{params.date_range}}'\n`;
-      } else if (currentGroup === "filters") {
-        yaml += `      filter_value: '{{params.filter_value}}'\n`;
-      }
-      yaml += `    comment: '调用${
-        currentGroup === "date_picker"
-          ? "日期选择器"
-          : currentGroup === "filters"
-          ? "筛选器"
-          : currentGroup
-      }组件'\n`;
-      yaml += `    # 原始录制步骤（供参考）:\n`;
-      groupSteps.forEach((step, i) => {
-        yaml += `    #   步骤${i + 1}: ${step.action} - ${
-          step.selector || step.url || ""
-        }\n`;
-      });
-      yaml += `\n`;
-      groupSteps = [];
-    }
-  };
-
-  recordedSteps.value.forEach((step) => {
-    const stepGroup = step.step_group || "normal";
-
-    if (stepGroup !== "normal" && stepGroup !== "captcha") {
-      // 标记的步骤
-      if (currentGroup !== stepGroup) {
-        flushGroup();
-        currentGroup = stepGroup;
-      }
-      groupSteps.push(step);
-    } else {
-      // 普通步骤
-      flushGroup();
-      currentGroup = null;
-
-      yaml += `  - action: ${step.action}\n`;
-      if (step.url) yaml += `    url: ${escapeYamlString(step.url)}\n`;
-      if (step.selector)
-        yaml += `    selector: ${escapeYamlString(step.selector)}\n`;
-      if (step.value) yaml += `    value: ${escapeYamlString(step.value)}\n`;
-      if (step.duration !== undefined && step.duration !== null)
-        yaml += `    duration: ${step.duration}\n`;
-      if (step.comment)
-        yaml += `    comment: ${escapeYamlString(step.comment)}\n`;
-      if (step.optional) yaml += `    optional: true\n`;
-      yaml += `\n`;
-
-      // Phase 12.4: 自动检测导出按钮点击，添加 wait_for_download 步骤
-      const isExportClick =
-        step.action === "click" &&
-        ((step.comment &&
-          (step.comment.toLowerCase().includes("导出") ||
-            step.comment.toLowerCase().includes("export"))) ||
-          (step.selector &&
-            (step.selector.toLowerCase().includes("export") ||
-              step.selector.includes("导出"))));
-
-      if (isExportClick) {
-        // 检查下一步是否已经是 wait_for_download
-        const currentIndex = recordedSteps.value.indexOf(step);
-        const nextStep = recordedSteps.value[currentIndex + 1];
-
-        if (!nextStep || nextStep.action !== "wait_for_download") {
-          yaml += `  # Phase 12.4: 自动添加的下载等待步骤（可删除或调整超时时间）\n`;
-          yaml += `  - action: wait_for_download\n`;
-          yaml += `    timeout: 180000\n`;
-          yaml += `    comment: '等待文件下载（自动添加）'\n`;
-          yaml += `\n`;
-        }
-      }
-    }
-  });
-
-  // 处理最后一组
-  flushGroup();
-
-  yaml += `success_criteria:\n`;
-  yaml += `  - type: url_contains\n`;
-  yaml += `    value: 'TODO: 填写成功URL特征'\n`;
-  yaml += `    optional: false\n`;
-  yaml += `    comment: '请填写成功判定条件'\n\n`;
-
-  yaml += `error_handlers:\n`;
-  yaml += `  - selector: '.error-message'\n`;
-  yaml += `    action: fail_task\n`;
-  yaml += `    message: 'TODO: 填写错误处理'\n`;
-
-  return yaml;
-});
+// YAML 相关逻辑已废弃，采集组件统一使用 Python 代码作为主输出
 
 // 方法
 const startRecording = async () => {
@@ -1922,16 +1642,17 @@ const saveComponent = async () => {
       return;
     }
 
+    if (!pythonCode.value || !pythonCode.value.trim()) {
+      ElMessage.warning("当前只支持保存 Python 组件，请先生成或编辑 Python 代码");
+      return;
+    }
+
     const payload = {
       platform: recorderForm.value.platform,
       component_type: recorderForm.value.componentType,
       component_name: recorderForm.value.componentName,
     };
-    if (pythonCode.value && pythonCode.value.trim()) {
-      payload.python_code = pythonCode.value.trim();
-    } else {
-      payload.yaml_content = yamlContent.value;
-    }
+    payload.python_code = pythonCode.value.trim();
 
     const response = await api.post("/collection/recorder/save", payload);
 
@@ -1964,13 +1685,8 @@ const saveComponent = async () => {
     }
   } catch (error) {
     console.error("保存组件失败:", error);
-    ElMessage.error("保存组件失败: " + error.message);
+  ElMessage.error("保存组件失败: " + error.message);
   }
-};
-
-const copyYaml = () => {
-  navigator.clipboard.writeText(yamlContent.value);
-  ElMessage.success("YAML内容已复制到剪贴板");
 };
 
 const loadAccounts = async () => {
@@ -2037,17 +1753,38 @@ onMounted(() => {
 
 .recorder-content {
   display: grid;
-  grid-template-columns: 350px 1fr 400px;
+  grid-template-columns: 350px 1fr;
   gap: 20px;
+}
+
+/* 步骤编辑与 Python 代码左右分栏，合理分配宽度 */
+.steps-and-python-row {
+  display: flex;
+  gap: 16px;
+  min-width: 0;
+  flex: 1;
+  height: calc(100vh - 180px);
 }
 
 .recorder-panel,
 .editor-panel,
-.yaml-panel {
+.python-panel {
   height: calc(100vh - 180px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.editor-panel {
+  flex: 1 1 42%;
+  min-width: 280px;
+  max-width: 100%;
+}
+
+.python-panel {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
 }
 
 .card-header {
@@ -2084,9 +1821,9 @@ onMounted(() => {
 .step-item {
   background: #f5f7fa;
   border: 1px solid #e4e7ed;
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 12px;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
   transition: all 0.3s;
 }
 
@@ -2098,9 +1835,9 @@ onMounted(() => {
 .step-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-  padding-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
   border-bottom: 1px solid #e4e7ed;
 }
 
@@ -2115,22 +1852,22 @@ onMounted(() => {
 }
 
 .step-number {
+  font-size: 13px;
   font-weight: 600;
   color: #606266;
+}
+
+.step-selector-input :deep(textarea) {
+  min-height: 32px;
 }
 
 .step-content {
   padding-top: 8px;
 }
 
-.yaml-textarea {
-  font-family: "Courier New", monospace;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.python-panel {
-  margin-top: 16px;
+.python-panel :deep(.el-card__body) {
+  min-height: 0;
+  overflow: auto;
 }
 
 .python-textarea {

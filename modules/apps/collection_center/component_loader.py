@@ -93,40 +93,31 @@ class ComponentLoader:
     
     def load(self, component_path: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        加载组件配置
-        
-        Args:
-            component_path: 组件路径(如 "shopee/login" 或 "shopee/orders_export")
-            params: 参数字典(用于变量替换)
-            
-        Returns:
-            Dict: 组件配置字典
-            
-        Raises:
-            ComponentValidationError: 组件验证失败
-            FileNotFoundError: 组件文件不存在
+        加载组件配置。迁离 YAML：仅从 Python 组件构建兼容 dict，不再读取 .yaml 文件。
         """
+        # 规范化路径（去掉 .yaml 后缀若传入）
+        path = component_path.replace(".yaml", "").replace(".yml", "").strip()
+        parts = path.split("/", 1)
+        platform = parts[0] if len(parts) >= 2 else ""
+        comp_name = parts[1] if len(parts) >= 2 else path
+
         # 检查缓存
-        if not self.hot_reload and component_path in self._cache:
-            component = self._cache[component_path].copy()
-            logger.debug(f"Component loaded from cache: {component_path}")
+        if not self.hot_reload and path in self._cache:
+            component = self._cache[path].copy()
+            logger.debug(f"Component loaded from cache: {path}")
         else:
-            # 从文件加载
-            component = self._load_from_file(component_path)
-            
-            # 验证组件
-            self._validate_component(component)
-            
-            # 缓存组件(如果不是热重载模式)
+            component = self.build_component_dict_from_python(platform, comp_name, params or {})
+            if component is None:
+                raise FileNotFoundError(
+                    f"Python component not found: {path} "
+                    f"(expected modules/platforms/{platform}/components/{comp_name}.py)"
+                )
             if not self.hot_reload:
-                self._cache[component_path] = component.copy()
-            
-            logger.info(f"Component loaded: {component_path}")
-        
-        # 参数替换
-        if params:
+                self._cache[path] = component.copy()
+            logger.info(f"Component loaded: {path}")
+
+        if params and "_python_component_class" not in component:
             component = self._replace_variables(component, params)
-        
         return component
     
     def _load_from_file(self, component_path: str) -> Dict[str, Any]:
@@ -386,55 +377,48 @@ class ComponentLoader:
     
     def load_all(self) -> Dict[str, List[str]]:
         """
-        加载所有组件(用于预热缓存)
-        
-        Returns:
-            Dict: 按平台分组的组件列表
+        加载所有组件(用于预热缓存)。迁离 YAML：仅扫描 modules/platforms/*/components/*.py。
         """
         components = {}
-        
         for platform in self.SUPPORTED_PLATFORMS:
-            platform_dir = self.components_dir / platform
-            if not platform_dir.exists():
+            if platform not in PYTHON_COMPONENT_PLATFORMS:
                 continue
-            
+            module_path = PYTHON_COMPONENT_PLATFORMS[platform]
+            try:
+                base_module = importlib.import_module(module_path)
+                comp_dir = Path(base_module.__path__[0])
+            except Exception as e:
+                logger.debug(f"Skip platform {platform}: {e}")
+                continue
             platform_components = []
-            for yaml_file in platform_dir.glob('*.yaml'):
-                component_name = yaml_file.stem
-                component_path = f"{platform}/{component_name}"
-                
+            for py_file in comp_dir.glob("*.py"):
+                if py_file.name.startswith("_"):
+                    continue
+                component_name = py_file.stem
                 try:
-                    self.load(component_path)
+                    self.load(f"{platform}/{component_name}")
                     platform_components.append(component_name)
                 except Exception as e:
-                    logger.error(f"Failed to load component {component_path}: {e}")
-            
+                    logger.error(f"Failed to load component {platform}/{component_name}: {e}")
             components[platform] = platform_components
-        
         logger.info(f"Loaded {sum(len(v) for v in components.values())} components")
         return components
     
     def get_component_info(self, component_path: str) -> Dict[str, Any]:
         """
-        获取组件元信息(不加载完整配置)
-        
-        Args:
-            component_path: 组件路径
-            
-        Returns:
-            Dict: 组件元信息
+        获取组件元信息。迁离 YAML：基于 Python 组件类元数据。
         """
         component = self.load(component_path)
-        
+        steps = component.get("steps", [])
         return {
-            'name': component.get('name'),
-            'platform': component.get('platform'),
-            'type': component.get('type'),
-            'version': component.get('version', '1.0.0'),
-            'description': component.get('description', ''),
-            'author': component.get('author', ''),
-            'data_domain': component.get('data_domain'),
-            'step_count': len(component.get('steps', [])),
+            "name": component.get("name"),
+            "platform": component.get("platform"),
+            "type": component.get("type"),
+            "version": component.get("version", "1.0.0"),
+            "description": component.get("description", ""),
+            "author": component.get("author", ""),
+            "data_domain": component.get("data_domain"),
+            "step_count": len(steps) if isinstance(steps, list) else 0,
         }
     
     # ========== v4.8.0: Python 组件加载支持 ==========
@@ -488,7 +472,30 @@ class ComponentLoader:
         except Exception as e:
             logger.error(f"Failed to load Python component {platform}/{component_name}: {e}")
             return None
-    
+
+    def build_component_dict_from_python(
+        self, platform: str, component_name: str, params: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        为执行器构建兼容的组件字典：从 Python 类加载并返回含 _python_component_class 的 dict。
+        供 executor_v2 在仅使用 Python 组件时使用，不再依赖 YAML 步骤。
+        """
+        Klass = self.load_python_component(platform, component_name)
+        if not Klass:
+            return None
+        comp_type = getattr(
+            Klass, "component_type", "export" if "export" in component_name else "login"
+        )
+        plat = getattr(Klass, "platform", platform)
+        return {
+            "name": component_name,
+            "platform": plat,
+            "type": comp_type,
+            "data_domain": getattr(Klass, "data_domain", None),
+            "_params": params or {},
+            "_python_component_class": Klass,
+        }
+
     def _find_component_class(self, module, component_name: str) -> Optional[Type]:
         """
         在模块中查找组件类

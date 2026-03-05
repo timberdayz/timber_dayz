@@ -75,35 +75,31 @@ class TestCompleteCollectionToSync:
         print("\n✅ platform_accounts表存在")
     
     def test_05_check_miaoshou_components(self):
-        """测试5: 验证妙手ERP组件文件存在"""
-        components_dir = Path("config/collection_components/miaoshou")
+        """测试5: 验证妙手ERP Python 组件与弹窗配置存在"""
+        base = Path(__file__).parent.parent.parent
+        components_dir = base / "modules" / "platforms" / "miaoshou" / "components"
+        platform_dir = base / "modules" / "platforms" / "miaoshou"
         
-        required_components = [
-            "login.yaml",
-            "navigation.yaml",
-            "orders_export.yaml",
-            "popup_config.yaml"
+        required = [
+            components_dir / "login.py",
+            components_dir / "navigation.py",
+            components_dir / "orders_config.py",
+            platform_dir / "popup_config.py",
         ]
         
-        for component in required_components:
-            component_path = components_dir / component
-            assert component_path.exists(), f"组件文件不存在: {component}"
-            print(f"\n✅ 组件文件存在: {component}")
+        for path in required:
+            assert path.exists(), f"组件/配置不存在: {path}"
+            print(f"\n✅ 存在: {path.name}")
     
     def test_06_check_component_loader(self):
-        """测试6: 验证ComponentLoader可加载组件"""
+        """测试6: 验证 ComponentLoader 可加载 Python 组件"""
         from modules.apps.collection_center.component_loader import ComponentLoader
         
         loader = ComponentLoader()
-        
-        # 尝试加载登录组件
-        try:
-            config = loader.load("miaoshou/login")
-            assert config is not None, "加载登录组件失败"
-            assert "steps" in config, "组件配置缺少steps"
-            print(f"\n✅ ComponentLoader加载成功，steps数量: {len(config.get('steps', []))}")
-        except Exception as e:
-            pytest.skip(f"ComponentLoader加载失败（可能是YAML格式问题）: {e}")
+        config = loader.load("miaoshou/login")
+        assert config is not None, "加载登录组件失败"
+        assert "_python_component_class" in config, "应为 Python 组件（含 _python_component_class）"
+        print(f"\n✅ ComponentLoader 加载成功（Python 组件: {config.get('type')}）")
     
     def test_07_check_executor_v2_exists(self):
         """测试7: 验证CollectionExecutorV2存在"""

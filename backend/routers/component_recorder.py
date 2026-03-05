@@ -623,6 +623,7 @@ async def test_component(
     from pathlib import Path
     from datetime import datetime
     from backend.services.component_test_service import ComponentTestService
+    from backend.services.steps_to_python import generate_python_code
     
     try:
         # 1. 验证账号
@@ -639,15 +640,9 @@ async def test_component(
             f"with {len(request.steps)} steps, account: {request.account_id}"
         )
         
-        # 2. 创建临时YAML组件文件
-        config_dir = Path(__file__).parent.parent.parent / 'config' / 'collection_components' / request.platform
-        config_dir.mkdir(parents=True, exist_ok=True)
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        component_name = f"{request.component_type}_test_{timestamp}"
-        temp_yaml_path = config_dir / f"{component_name}.yaml"
-        
-        # 构建步骤(对登录组件做标准化: 账号/密码占位符 + 验证码步可选)
+        # 2. 构建规范化步骤列表（仅用于测试）
+        #    - 登录组件: 将账号/密码字段标准化为占位符{{account.username}}/{{account.password}}
+        #    - 验证码相关步骤: 标记为可选, 避免因验证码问题导致整体测试失败
         normalized_steps = []
         is_login = request.component_type == 'login'
         for step in request.steps:
@@ -698,68 +693,71 @@ async def test_component(
 
             normalized_steps.append(normalized_step)
 
-        # 构建YAML内容
-        component_config = {
-            'name': component_name,
-            'platform': request.platform,
-            'type': request.component_type,
-            'version': '1.0.0',
-            'description': f'临时测试组件 - {datetime.now().isoformat()}',
-            'steps': normalized_steps,
-            'success_criteria': [
-                {
-                    'type': 'url_contains',
-                    'value': '',  # [*] 空字符串,表示需要填写
-                    'optional': True,  # [*] 标记为可选,避免测试失败
-                    'comment': '临时测试:建议保存后补充验证条件(使用 Playwright Inspector 提取)'
-                }
-            ]
-        }
+        # 3. 基于规范化步骤生成临时 Python 组件代码
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        component_name = f"{request.component_type}_test_{timestamp}"
+        try:
+            python_code = generate_python_code(
+                platform=request.platform,
+                component_type=request.component_type,
+                component_name=component_name,
+                steps=normalized_steps,
+            )
+        except Exception as e:
+            logger.error(f"Generate Python code for test component failed: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="生成测试组件 Python 代码失败")
+
+        # 4. 将临时 Python 组件写入平台组件目录
+        project_root = Path(__file__).parent.parent.parent
+        temp_component_dir = project_root / "modules" / "platforms" / request.platform / "components"
+        temp_component_dir.mkdir(parents=True, exist_ok=True)
+        temp_py_path = temp_component_dir / f"{component_name}.py"
+
+        try:
+            temp_py_path.write_text(python_code, encoding="utf-8")
+            logger.info(f"Temporary Python component created for test: {temp_py_path}")
+        except Exception as e:
+            logger.error(f"Failed to write temporary Python component: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="写入测试组件 Python 文件失败")
         
-        # 保存YAML文件
-        with open(temp_yaml_path, 'w', encoding='utf-8') as f:
-            yaml.dump(component_config, f, allow_unicode=True, default_flow_style=False)
-        
-        logger.info(f"Temporary component file created: {temp_yaml_path}")
-        
-        # 3. 使用统一服务准备账号信息 [*]
+        # 5. 使用统一服务准备账号信息 [*]
         account_info = ComponentTestService.prepare_account_info(account)
         
-        # 4. 使用统一服务执行测试 [*]
-        result = ComponentTestService.run_component_test_subprocess(
-            platform=request.platform,
-            component_name=component_name,
-            account_id=request.account_id,
-            account_info=account_info,
-            component_path=str(temp_yaml_path),
-            headless=False,  # 有头模式
-            screenshot_on_error=True
-        )
-        
-        # 5. 使用统一服务格式化响应 [*]
-        response = ComponentTestService.format_test_response(result)
-        
-        # 6. 使用统一服务保存测试历史 [*]
-        # [*] v4.18.2修复:使用异步方法保存测试历史
-        await ComponentTestService.save_test_history(
-            db=db,
-            component_name=component_name,
-            platform=request.platform,
-            account_id=request.account_id,
-            test_result=result,
-            version_id=None,  # 临时组件无版本ID
-            tested_by="recorder"
-        )
-        
-        # 7. 清理临时YAML文件
         try:
-            if temp_yaml_path.exists():
-                temp_yaml_path.unlink()
-                logger.info(f"Cleaned up temporary component file: {temp_yaml_path}")
-        except Exception as e:
-            logger.warning(f"Failed to cleanup temporary file: {e}")
-        
-        return response
+            # 6. 使用统一服务执行测试（Python 组件）
+            result = ComponentTestService.run_component_test_subprocess(
+                platform=request.platform,
+                component_name=component_name,
+                account_id=request.account_id,
+                account_info=account_info,
+                component_path=str(temp_py_path),
+                headless=False,  # 有头模式
+                screenshot_on_error=True
+            )
+            
+            # 7. 使用统一服务格式化响应 [*]
+            response = ComponentTestService.format_test_response(result)
+            
+            # 8. 使用统一服务保存测试历史 [*]
+            # [*] v4.18.2修复:使用异步方法保存测试历史
+            await ComponentTestService.save_test_history(
+                db=db,
+                component_name=component_name,
+                platform=request.platform,
+                account_id=request.account_id,
+                test_result=result,
+                version_id=None,  # 临时组件无版本ID
+                tested_by="recorder"
+            )
+            return response
+        finally:
+            # 9. 清理临时 Python 文件
+            try:
+                if temp_py_path.exists():
+                    temp_py_path.unlink()
+                    logger.info(f"Cleaned up temporary Python component file: {temp_py_path}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temporary Python file: {e}")
     
     except HTTPException:
         raise
@@ -777,97 +775,53 @@ async def test_component(
 @router.post("/recorder/save")
 async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depends(get_async_db)):
     """
-    保存组件到文件并自动注册到版本管理系统(v4.8.0 支持 Python 组件)
-    
-    功能:
-    1. 优先保存 Python 组件(推荐)
-    2. 向后兼容 YAML 组件
-    3. 验证代码/配置格式
-    4. 保存到正确目录
-    5. 自动注册到 component_versions 表
-    6. 同名组件更新现有版本(不创建新版本)
+    保存组件到文件并自动注册到版本管理系统。
+    仅支持 Python 组件：请求体必须提供 python_code，不再接受 yaml_content。
     """
     import ast
     from pathlib import Path
-    import yaml
     from modules.core.db import ComponentVersion
     from datetime import datetime
-    
+
+    if not request.python_code:
+        raise HTTPException(
+            status_code=400,
+            detail="仅支持保存 Python 组件，请提供 python_code。yaml_content 已废弃。",
+        )
+
     try:
         project_root = Path(__file__).parent.parent.parent
-        
-        # v4.8.0: 优先使用 Python 组件
-        is_python_component = bool(request.python_code)
-        
-        if is_python_component:
-            # ==================== Python 组件保存逻辑 ====================
-            
-            # 1. 验证 Python 代码语法
-            try:
-                ast.parse(request.python_code)
-            except SyntaxError as e:
-                raise HTTPException(status_code=400, detail=f"Python 代码语法错误: {str(e)}")
-            
-            # 2. 确定保存路径
-            component_dir = project_root / "modules" / "platforms" / request.platform / "components"
-            component_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 3. 文件名
-            filename = f"{request.component_name}.py"
-            file_path = component_dir / filename
-            
-            # 4. 检查文件是否已存在
-            file_exists = file_path.exists()
-            
-            # 5. 保存文件
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(request.python_code)
-            
-            logger.info(
-                f"Python component saved: {request.platform}/{filename} "
-                f"({'updated' if file_exists else 'created'})"
-            )
-            
-            # 6. 自动注册到 component_versions 表
-            component_name = f"{request.platform}/{request.component_name}"
-            relative_file_path = f"modules/platforms/{request.platform}/components/{filename}"
-            
-        else:
-            # ==================== YAML 组件保存逻辑(向后兼容) ====================
-            
-            if not request.yaml_content:
-                raise HTTPException(status_code=400, detail="必须提供 python_code 或 yaml_content")
-            
-            # 1. 验证 YAML 格式
-            try:
-                yaml.safe_load(request.yaml_content)
-            except yaml.YAMLError as e:
-                raise HTTPException(status_code=400, detail=f"YAML 格式错误: {str(e)}")
-            
-            # 2. 确定保存路径
-            component_dir = project_root / "config" / "collection_components" / request.platform
-            component_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 3. 文件名
-            filename = f"{request.component_name}.yaml"
-            file_path = component_dir / filename
-            
-            # 4. 检查文件是否已存在
-            file_exists = file_path.exists()
-            
-            # 5. 保存文件
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(request.yaml_content)
-            
-            logger.info(
-                f"YAML component saved: {request.platform}/{filename} "
-                f"({'updated' if file_exists else 'created'})"
-            )
-            
-            # 6. 自动注册到 component_versions 表
-            component_name = f"{request.platform}/{request.component_type}"
-            relative_file_path = f"config/collection_components/{request.platform}/{filename}"
-        
+
+        # 1. 验证 Python 代码语法
+        try:
+            ast.parse(request.python_code)
+        except SyntaxError as e:
+            raise HTTPException(status_code=400, detail=f"Python 代码语法错误: {str(e)}")
+
+        # 2. 确定保存路径
+        component_dir = project_root / "modules" / "platforms" / request.platform / "components"
+        component_dir.mkdir(parents=True, exist_ok=True)
+
+        # 3. 文件名
+        filename = f"{request.component_name}.py"
+        file_path = component_dir / filename
+
+        # 4. 检查文件是否已存在
+        file_exists = file_path.exists()
+
+        # 5. 保存文件
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(request.python_code)
+
+        logger.info(
+            f"Python component saved: {request.platform}/{filename} "
+            f"({'updated' if file_exists else 'created'})"
+        )
+
+        # 6. 自动注册到 component_versions 表（仅记录 .py 路径）
+        component_name = f"{request.platform}/{request.component_name}"
+        relative_file_path = f"modules/platforms/{request.platform}/components/{filename}"
+
         # ==================== 版本管理逻辑(通用) ====================
         
         # 查询现有版本(按 file_path 查询,确保更新正确的版本)

@@ -20,7 +20,8 @@
 - POST /api/performance/scores/calculate - 计算绩效评分
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
@@ -434,8 +435,14 @@ def _score_details_field(details: Optional[dict], *keys) -> Optional[Any]:
     return details
 
 
+def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, Any]:
+    """规范化缓存 key 参数（None→空字符串），与 dashboard_api 一致"""
+    return {k: ("" if v is None else str(v)) for k, v in params.items()}
+
+
 @router.get("/scores", response_model=Dict[str, Any])
 async def list_performance_scores(
+    request: Request,
     period: Optional[str] = Query(None, description="考核周期,如'2025-01'"),
     platform_code: Optional[str] = Query(None, description="平台筛选"),
     shop_id: Optional[str] = Query(None, description="店铺筛选"),
@@ -451,6 +458,23 @@ async def list_performance_scores(
     group_by=person: 按人员展示，数据来自 employee_performance
     """
     try:
+        params = {
+            "period": period,
+            "platform_code": platform_code,
+            "shop_id": shop_id,
+            "group_by": group_by or "shop",
+            "page": page,
+            "page_size": page_size,
+        }
+        cache_params = _normalize_cache_params(params)
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("performance_scores", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
+
         if group_by == "person":
             # 按人员：从 employee_performance 取数据
             query = select(EmployeePerformance)
@@ -507,7 +531,7 @@ async def list_performance_scores(
                     "rank": rank_by_code.get(ec),
                     "performance_coefficient": 1.0 + (scr - 80) / 100 if scr else 1.0,
                 })
-            return {
+            result = {
                 "success": True,
                 "data": score_responses,
                 "total": total,
@@ -515,6 +539,9 @@ async def list_performance_scores(
                 "page_size": page_size,
                 "has_more": (page * page_size) < total,
             }
+            if request and hasattr(request.app.state, "cache_service"):
+                await request.app.state.cache_service.set("performance_scores", result, **cache_params)
+            return JSONResponse(content=result, headers={"X-Cache": cache_status})
 
         # 按店铺：以 platform_accounts（正在经营店铺）为主，合并 performance_scores
         shop_query = (
@@ -597,8 +624,8 @@ async def list_performance_scores(
                 "performance_coefficient": p["performance_coefficient"] if p else None,
             }
             score_responses.append(row)
-        
-        return {
+
+        result = {
             "success": True,
             "data": score_responses,
             "total": total,
@@ -606,6 +633,9 @@ async def list_performance_scores(
             "page_size": page_size,
             "has_more": (page * page_size) < total
         }
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("performance_scores", result, **cache_params)
+        return JSONResponse(content=result, headers={"X-Cache": cache_status})
     except Exception as e:
         logger.error(f"查询绩效评分列表失败: {e}", exc_info=True)
         return error_response(
@@ -620,6 +650,7 @@ async def list_performance_scores(
 
 @router.get("/scores/{shop_id}", response_model=Dict[str, Any])
 async def get_shop_performance(
+    request: Request,
     shop_id: str,
     platform_code: str = Query(..., description="平台代码"),
     period: Optional[str] = Query(None, description="考核周期,如'2025-01'"),
@@ -631,6 +662,16 @@ async def get_shop_performance(
     如果未指定period,返回最新周期的绩效
     """
     try:
+        params = {"shop_id": shop_id, "platform_code": platform_code, "period": period or ""}
+        cache_params = _normalize_cache_params(params)
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("performance_scores_shop", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
+
         query = select(PerformanceScore).where(
             PerformanceScore.platform_code == platform_code,
             PerformanceScore.shop_id == shop_id
@@ -664,11 +705,11 @@ async def get_shop_performance(
         score_data = PerformanceScoreResponse.from_orm(score).dict()
         if shop:
             score_data["shop_name"] = shop.shop_name
-        
-        return {
-            "success": True,
-            "data": score_data
-        }
+
+        result = {"success": True, "data": score_data}
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("performance_scores_shop", result, **cache_params)
+        return JSONResponse(content=result, headers={"X-Cache": cache_status})
     except HTTPException:
         raise
     except Exception as e:

@@ -23,7 +23,8 @@
 - 字段: 店铺ID, 年月, 租金, 工资, 水电费, 其他成本
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
 from typing import Optional, Dict, Any
@@ -145,8 +146,14 @@ async def list_expense_shops(
         )
 
 
+def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
+    """规范化缓存 key 参数（None→空字符串）"""
+    return {k: "" if v is None else str(v) for k, v in params.items()}
+
+
 @router.get("/summary/monthly", response_model=Dict[str, Any])
 async def get_expense_summary(
+    request: Request,
     year_month: Optional[str] = Query(None, description="年月筛选(YYYY-MM)"),
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
@@ -155,6 +162,14 @@ async def get_expense_summary(
     按月汇总统计费用
     """
     try:
+        cache_params = _normalize_cache_params({"year_month": year_month})
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("expense_summary_monthly", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
         # 使用原始SQL查询(因为需要聚合计算)
         if year_month:
             query = text("""
@@ -201,11 +216,10 @@ async def get_expense_summary(
             }
             for row in rows
         ]
-        
-        return {
-            "success": True,
-            "data": items
-        }
+        result = {"success": True, "data": items}
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("expense_summary_monthly", result, **cache_params)
+        return JSONResponse(content=result, headers={"X-Cache": cache_status})
     except Exception as e:
         logger.error(f"查询费用汇总失败: {e}", exc_info=True)
         return error_response(
@@ -219,6 +233,7 @@ async def get_expense_summary(
 
 @router.get("/summary/yearly", response_model=Dict[str, Any])
 async def get_yearly_expense_summary(
+    request: Request,
     year: str = Query(..., description="年份(YYYY)"),
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
@@ -231,6 +246,14 @@ async def get_yearly_expense_summary(
     - 各类费用汇总（租金、工资、水电费、其他成本）
     """
     try:
+        cache_params = {"year": year}
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("expense_summary_yearly", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
         query = text("""
             SELECT 
                 COALESCE(SUM("租金"), 0) as total_rent,
@@ -243,12 +266,10 @@ async def get_yearly_expense_summary(
             FROM a_class.operating_costs
             WHERE "年月" LIKE :year_pattern
         """)
-        
-        result = await db.execute(query, {"year_pattern": f"{year}-%"})
-        row = result.fetchone()
-        
+        db_result = await db.execute(query, {"year_pattern": f"{year}-%"})
+        row = db_result.fetchone()
         if row:
-            return {
+            result = {
                 "success": True,
                 "data": {
                     "year": year,
@@ -262,7 +283,7 @@ async def get_yearly_expense_summary(
                 }
             }
         else:
-            return {
+            result = {
                 "success": True,
                 "data": {
                     "year": year,
@@ -275,6 +296,9 @@ async def get_yearly_expense_summary(
                     "month_count": 0,
                 }
             }
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("expense_summary_yearly", result, **cache_params)
+        return JSONResponse(content=result, headers={"X-Cache": cache_status})
     except Exception as e:
         logger.error(f"查询年度费用汇总失败: {e}", exc_info=True)
         return error_response(

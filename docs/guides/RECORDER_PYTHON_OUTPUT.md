@@ -9,7 +9,7 @@
 ## 1. 查看与编辑生成的 Python 代码
 
 1. **开始录制**：在「组件录制」页选择平台与组件类型（登录/导出等），点击「开始录制」；在 Inspector 中完成操作后点击「停止录制」。
-2. **步骤模式**：若为步骤模式且录到步骤，停止后会在「YAML 预览」下方出现 **「Python 代码」** 区域，展示后端根据步骤生成的 Python 源码。
+2. **步骤模式**：若为步骤模式且录到步骤，停止后会在右侧看到 **「Python 代码」** 区域，展示后端根据步骤生成的 Python 源码（不再提供 YAML 预览）。
 3. **未生成时**：若区域为空或提示「未生成代码」，可点击 **「重新生成」** 按钮（会调用 `POST /recorder/generate-python`）；若仍无代码，请检查步骤是否有效（如至少包含 navigate/click/fill 等）。
 4. **编辑**：文本框支持直接编辑。可按《采集脚本编写规范》微调：
    - 将 `page.locator(selector)` 改为 `get_by_role` / `get_by_label` / `get_by_text` 等更稳定的定位；
@@ -21,8 +21,8 @@
 ## 2. 保存为 .py（主路径）
 
 1. **组件名称**：停止录制后「组件名称」可编辑；导出类建议填写如 `orders_export` 等，以便与执行器约定一致。
-2. **保存**：点击「保存」时，若 **Python 代码** 区域有内容，会以 **主路径** 将当前内容作为 `python_code` 提交到 `POST /recorder/save`，后端会写入 `modules/platforms/{platform}/components/{component_name}.py`。
-3. **无 Python 时**：若未编辑生成代码或未生成，保存会回退为提交 YAML（`yaml_content`），写入 `config/collection_components/{platform}/{component_name}.yaml`，此为兼容路径。
+2. **保存**：点击「保存」时，**必须**保证「Python 代码」区域有内容；当前内容会作为 `python_code` 提交到 `POST /recorder/save`，后端会写入 `modules/platforms/{platform}/components/{component_name}.py`。
+3. **无 Python 时**：如果未生成或删除了 Python 代码，保存会被前端阻止，并提示“当前只支持保存 Python 组件，请先生成或编辑 Python 代码”；录制工具不再使用 YAML 作为组件保存格式。
 
 ---
 
@@ -41,3 +41,12 @@
 - 从前端：开始录制 → 停止 → 在「Python 代码」区域看到并可编辑生成的代码 → 保存。
 - 确认磁盘上存在 `modules/platforms/{platform}/components/{component_name}.py`，且可被执行器加载（无语法错误、符合组件契约）。
 - 生成代码具备：组件契约（`async def run(...)`、返回 ResultBase 子类）、get_by_* 优先、click/fill 前 `expect(...).to_be_visible()` 等（可人工抽查或小脚本检查）。
+
+---
+
+## 5. 配置迁离 YAML（与录制器一致）
+
+- **弹窗配置**：平台特定关闭/遮罩选择器由 Python 模块提供，不再读取 `popup_config.yaml`。路径：`modules/platforms/{platform}/popup_config.py`，导出 `get_close_selectors()`、`get_overlay_selectors()`、`get_poll_strategy()`。
+- **执行顺序**：组件执行顺序由 `modules/apps/collection_center/execution_order.py` 提供（`get_default_execution_order()`、`get_execution_order(platform)`），不再读取 `execution_order.yaml` / `default_execution_order.yaml`。
+- **存量迁移**：若数据库中 component_versions 的 `file_path` 仍为 `.yaml`，可执行 `scripts/migrate_component_versions_to_python.py` 将路径迁为 `.py`。
+- **部署必须步骤**：在代码切换为仅 Python 组件后，**部署前必须执行一次** `scripts/migrate_component_versions_to_python.py`，将存量 `component_versions.file_path` 从 .yaml 迁为 .py，否则版本选择与执行器可能找不到组件。清理残留 YAML 文件可使用 `scripts/cleanup_yaml_components.py`（一次性脚本）。

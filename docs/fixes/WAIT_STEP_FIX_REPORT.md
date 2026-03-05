@@ -215,7 +215,7 @@ if action == 'wait':
 
 1. ✅ `tools/test_component.py` - 统一wait实现和验证逻辑
 2. ✅ `tools/record_component.py` - 修复生成的模板
-3. ✅ `config/collection_components/miaoshou/login.yaml` - 修复现有配置
+3. ✅ `config/collection_components/miaoshou/login.yaml` - 修复现有配置（注：现组件已迁至 `modules/platforms/*/components/*.py`）
 
 ### 受益的场景
 

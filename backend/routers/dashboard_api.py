@@ -423,6 +423,7 @@ async def get_annual_summary_kpi(
 
 @router.get("/annual-summary/by-shop")
 async def get_annual_summary_by_shop(
+    request: Request,
     db: AsyncSession = Depends(get_async_db),
     granularity: str = Query(..., description="粒度(monthly|yearly)"),
     period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
@@ -435,9 +436,21 @@ async def get_annual_summary_by_shop(
     try:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity 必须为 monthly 或 yearly")
+        params = {"granularity": granularity, "period": period}
+        cache_params = _normalize_cache_params(params)
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("annual_summary_by_shop", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
         from backend.services.annual_cost_aggregate import get_annual_cost_aggregate_by_shop
         data = await get_annual_cost_aggregate_by_shop(db, granularity, period)
-        return JSONResponse(content=success_response(data=data))
+        response = success_response(data=data)
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("annual_summary_by_shop", response, **cache_params)
+        return JSONResponse(content=response, headers={"X-Cache": cache_status})
     except ValueError as e:
         logger.error(f"年度总结按店铺查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -448,6 +461,7 @@ async def get_annual_summary_by_shop(
 
 @router.get("/annual-summary/trend")
 async def get_annual_summary_trend(
+    request: Request,
     granularity: str = Query(..., description="粒度(monthly|yearly)"),
     period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
 ):
@@ -458,10 +472,22 @@ async def get_annual_summary_trend(
     try:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity 必须为 monthly 或 yearly")
+        params = {"granularity": granularity, "period": period}
+        cache_params = _normalize_cache_params(params)
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("annual_summary_trend", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
         service = get_metabase_service()
         result = await service.query_question("annual_summary_trend", {"granularity": granularity, "period": period})
         data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
-        return JSONResponse(content=success_response(data=data))
+        response = success_response(data=data)
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("annual_summary_trend", response, **cache_params)
+        return JSONResponse(content=response, headers={"X-Cache": cache_status})
     except ValueError as e:
         if "Question ID 未找到" in str(e) or "METABASE" in str(e):
             logger.warning(f"年度总结趋势 Metabase 未配置: {e}")
@@ -475,6 +501,7 @@ async def get_annual_summary_trend(
 
 @router.get("/annual-summary/platform-share")
 async def get_annual_summary_platform_share(
+    request: Request,
     granularity: str = Query(..., description="粒度(monthly|yearly)"),
     period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
 ):
@@ -485,10 +512,22 @@ async def get_annual_summary_platform_share(
     try:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity 必须为 monthly 或 yearly")
+        params = {"granularity": granularity, "period": period}
+        cache_params = _normalize_cache_params(params)
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("annual_summary_platform_share", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
         service = get_metabase_service()
         result = await service.query_question("annual_summary_platform_share", {"granularity": granularity, "period": period})
         data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
-        return JSONResponse(content=success_response(data=data))
+        response = success_response(data=data)
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("annual_summary_platform_share", response, **cache_params)
+        return JSONResponse(content=response, headers={"X-Cache": cache_status})
     except ValueError as e:
         if "Question ID 未找到" in str(e) or "METABASE" in str(e):
             logger.warning(f"年度总结平台占比 Metabase 未配置: {e}")
@@ -502,6 +541,7 @@ async def get_annual_summary_platform_share(
 
 @router.get("/annual-summary/target-completion")
 async def get_annual_summary_target_completion(
+    request: Request,
     granularity: str = Query(..., description="粒度(monthly|yearly)"),
     period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
     db: AsyncSession = Depends(get_async_db),
@@ -514,6 +554,15 @@ async def get_annual_summary_target_completion(
     try:
         if granularity not in ("monthly", "yearly"):
             raise ValueError("granularity 必须为 monthly 或 yearly")
+        params = {"granularity": granularity, "period": period}
+        cache_params = _normalize_cache_params(params)
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("annual_summary_target_completion", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
 
         # 1) 汇总目标：月度用单月，年度用当年所有月
         if len(period) == 4:  # YYYY
@@ -565,7 +614,10 @@ async def get_annual_summary_target_completion(
             "achieved_profit": None,
             "achievement_rate_profit": None,
         }
-        return JSONResponse(content=success_response(data=data))
+        response = success_response(data=data)
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("annual_summary_target_completion", response, **cache_params)
+        return JSONResponse(content=response, headers={"X-Cache": cache_status})
     except ValueError as e:
         logger.error(f"年度总结目标完成率查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))

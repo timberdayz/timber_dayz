@@ -25,3 +25,23 @@
 
 - [x] 4.1 在 `docs/guides/` 或录制相关文档中补充：录制完成后如何查看/编辑生成的 Python 代码、如何按《采集脚本编写规范》微调、保存后组件位置与版本注册说明。
 - [x] 4.2 验收：从前端开始录制 → 停止 → 看到生成的 Python 代码 → 编辑后保存 → 确认 `modules/platforms/{platform}/components/{component_name}.py` 存在且可被执行器加载；生成的代码符合规范中的契约与定位/等待约定（可人工抽查）。
+
+## 5. 录制与解析优化（已实施）
+
+- [x] 5.1 Trace 解析：仅处理 action 事件（方案 A），不处理 before/after；新增 500ms 时间窗 (action_type, selector, value) 去重（方案 C）。`backend/utils/trace_parser.py`
+- [x] 5.2 生成器：从 step.selectors 推导 selector，使 Inspector 步骤能生成可执行 locator/click/fill。`backend/services/steps_to_python.py`
+- [x] 5.3 生成器：navigate/goto 后插入 wait_for_load_state。`backend/services/steps_to_python.py`
+- [x] 5.4 Inspector：最近 2～3 步同 action+主 selector 去重。`tools/launch_inspector_recorder.py`
+- [x] 5.5 测试组件：登录步骤 value 自动替换为 {{account.username}}/{{account.password}}；验证码相关步骤自动 optional。`backend/routers/component_recorder.py`
+- [x] 5.6 前端：新增「标记为验证码」；步骤工具条 sticky 固定，仅步骤列表滚动。`frontend/src/views/ComponentRecorder.vue`
+
+## 6. 后续可做（新开对话继续）
+
+- [ ] 6.1 测试路径收敛：删除录制页基于临时 YAML/Python 的「测试组件」按钮及 `/recorder/test` 接口，仅保留组件版本管理中的测试能力作为唯一组件执行入口；如有需要，可在录制页保存成功后提供「前往组件版本管理并测试」的引导（可选，偏 UX）。
+- [ ] 6.2 登录成功条件：保存/测试时支持配置 success_criteria（如 url_contains）（可选）。
+- [ ] 6.3 步骤标记扩展：导航、弹窗/通知栏等，并约定 YAML/执行器语义（可选）。
+- [ ] 6.4 验证码组件：实现 captcha_solver，YAML 中 captcha 标记转为 component_call（可选）。
+- [ ] 6.5 文档：RECORDER_PYTHON_OUTPUT.md 补充录制页与组件版本管理的职责边界（仅后者提供测试）、步骤标记与后续优化说明（可选）。
+- [ ] 6.6 步骤语义字段：在录制/解析链路中为 steps 增加 `step_type` 与 `scene_tags` 等高层语义字段（如 login_form、cookie_consent、export_wizard_step、otp_dialog、iframe_step），并在 Trace 解析与 Recorder API 中根据 DOM/文案/上下文填充基础场景，供生成器选择场景模板使用（可选，偏后端）。
+- [ ] 6.7 生成器场景模板与抗干扰集成：基于 `step_type` / `scene_tags` 实现登录表单、业务 Modal 关闭、导出向导步骤等「场景模板」，并在登录/导出等关键节点自动插入 `await self.guard_overlays(page, label="...")`；对已识别的可预期弹窗/遮挡，优先生成显式 wait+关闭/确认逻辑或调用平台弹窗 helper，而非仅依赖全局 close_popups（可选，偏后端）。
+- [ ] 6.8 生成后质量检查与前端提示：在 `/recorder/stop` 或 `/recorder/generate-python` 中对生成的 `python_code` 执行语法检查（如 `py_compile`）及轻量 Lint 子集，将语法错误与不推荐模式（如裸 `wait_for_timeout`）汇总为结构化的错误/警告列表返回；前端在录制结果页展示「质量提示」（数量 + 列表），辅助脚本作者快速修正生成结果（可选，后端+前端联动）。

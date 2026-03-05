@@ -3,12 +3,14 @@
 
 负责检测和关闭各平台的弹窗、通知、对话框等
 支持三层处理机制:通用 + 平台特定 + 组件级
+
+迁离 YAML：平台特定配置从 Python 模块 modules.platforms.{platform}.popup_config 读取，
+不再读取 popup_config.yaml。
 """
 
 import asyncio
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-import yaml
 
 from modules.core.logger import get_logger
 
@@ -18,11 +20,11 @@ logger = get_logger(__name__)
 class UniversalPopupHandler:
     """
     通用弹窗处理器
-    
+
     三层处理机制:
     1. 通用选择器 - 处理常见弹窗(30+选择器)
-    2. 平台特定配置 - popup_config.yaml定义的平台选择器
-    3. 组件级配置 - 组件YAML中的popup_handling配置
+    2. 平台特定配置 - 从 modules.platforms.{platform}.popup_config Python 模块读取
+    3. 组件级配置 - 组件中的 popup_handling 配置
     """
     
     # 通用关闭按钮选择器(30+种常见模式)
@@ -99,34 +101,27 @@ class UniversalPopupHandler:
     
     def _load_platform_config(self, platform: str) -> Dict[str, Any]:
         """
-        加载平台弹窗配置
-        
-        Args:
-            platform: 平台代码(shopee/tiktok/miaoshou)
-            
-        Returns:
-            Dict: 平台配置字典
+        加载平台弹窗配置。从 Python 模块 modules.platforms.{platform}.popup_config 读取，
+        不再读取 popup_config.yaml。
         """
         if platform in self._platform_configs:
             return self._platform_configs[platform]
-        
-        config_path = self.platform_config_dir / platform / 'popup_config.yaml'
-        
-        if not config_path.exists():
-            logger.debug(f"Platform popup config not found: {config_path}")
-            self._platform_configs[platform] = {}
-            return {}
-        
+
         try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f) or {}
-            
+            mod = __import__(f"modules.platforms.{platform}.popup_config", fromlist=["get_close_selectors", "get_overlay_selectors", "get_poll_strategy"])
+            close = getattr(mod, "get_close_selectors", lambda: [])()
+            overlay = getattr(mod, "get_overlay_selectors", lambda: [])()
+            poll = getattr(mod, "get_poll_strategy", lambda: {})()
+            config = {
+                "close_selectors": close,
+                "overlay_selectors": overlay,
+                "poll_strategy": poll,
+            }
             self._platform_configs[platform] = config
             logger.info(f"Loaded platform popup config: {platform}")
             return config
-        
         except Exception as e:
-            logger.error(f"Failed to load popup config for {platform}: {e}")
+            logger.debug(f"Platform popup config not found for {platform}: {e}")
             self._platform_configs[platform] = {}
             return {}
     

@@ -1,7 +1,7 @@
 """
-ComponentLoader 演示脚本
+ComponentLoader 演示脚本（仅支持 Python 组件，YAML 已迁离）
 
-展示如何使用ComponentLoader加载和验证组件
+展示如何使用 ComponentLoader 加载 Python 组件（modules/platforms/*/components/*.py）。
 """
 
 import sys
@@ -31,15 +31,18 @@ def demo_basic_loading():
     print(f"  Components directory: {loader.components_dir}")
     print(f"  Hot reload: {loader.hot_reload}")
     
-    # 加载登录模板
+    # 加载 Python 组件（仅支持 .py，不再读 YAML）
     try:
-        component = loader.load('_templates/login')
+        component = loader.load('shopee/login')
         print(f"\n[OK] Loaded component: {component['name']}")
         print(f"  Platform: {component['platform']}")
         print(f"  Type: {component['type']}")
-        print(f"  Steps: {len(component['steps'])}")
+        if component.get('_python_component_class'):
+            print("  Source: Python component (.py)")
+        else:
+            print(f"  Steps: {len(component.get('steps', []))}")
     except FileNotFoundError:
-        print("\n[FAIL] Template not found (this is expected if no templates exist yet)")
+        print("\n[FAIL] Component not found (expected modules/platforms/shopee/components/login.py)")
     except Exception as e:
         print(f"\n[FAIL] Error loading component: {e}")
 
@@ -71,17 +74,12 @@ def demo_variable_replacement():
             }
         }
         
-        # 加载组件并替换变量
-        component = loader.load('_templates/login', params=params)
-        
-        print("[OK] Variables replaced successfully")
-        print(f"\nOriginal: {{{{account.username}}}}")
-        print(f"Replaced: {params['account']['username']}")
-        
-        # 显示替换后的步骤
-        for i, step in enumerate(component['steps'][:3], 1):
-            if 'value' in step:
-                print(f"\nStep {i} ({step['action']}): {step.get('value', 'N/A')}")
+        # 加载 Python 组件（变量替换仅对非 Python 组件 dict 生效，Python 组件用 _params）
+        component = loader.load('shopee/login', params=params)
+        print("[OK] Loaded component with params")
+        print(f"  Params attached: {bool(component.get('_params'))}")
+        if component.get('_params'):
+            print(f"  account.username: {component['_params'].get('account', {}).get('username', 'N/A')}")
     
     except Exception as e:
         print(f"[FAIL] Error: {e}")

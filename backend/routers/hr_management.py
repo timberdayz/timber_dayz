@@ -12,7 +12,8 @@ Created: 2025-01-31
 Updated: 2025-01-30 (v4.21.0 业界标准优化)
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from typing import List, Optional, Dict, Any
@@ -2366,6 +2367,7 @@ async def copy_employee_shop_assignments_from_prev_month(
 
 @router.get("/shop-profit-statistics")
 async def get_shop_profit_statistics(
+    request: Request,
     month: str = Query(..., description="月份 YYYY-MM"),
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
@@ -2380,6 +2382,15 @@ async def get_shop_profit_statistics(
             month_date = date(int(parts[0]), int(parts[1]), 1)
         except (ValueError, IndexError):
             return error_response(ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400)
+
+        cache_params = {"month": month}
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("hr_shop_profit_statistics", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
 
         # 1. 获取店铺列表（platform_accounts）
         shop_query = (
@@ -2472,7 +2483,10 @@ async def get_shop_profit_statistics(
                 "supervisor_profit": supervisor_profit,
                 "operator_profit": operator_profit,
             })
-        return {"success": True, "data": items}
+        result = {"success": True, "data": items}
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("hr_shop_profit_statistics", result, **cache_params)
+        return JSONResponse(content=result, headers={"X-Cache": cache_status})
     except Exception as e:
         logger.error(f"获取店铺利润统计失败: {e}", exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取店铺利润统计失败: {str(e)}", status_code=500)
@@ -2480,12 +2494,22 @@ async def get_shop_profit_statistics(
 
 @router.get("/annual-profit-statistics")
 async def get_annual_profit_statistics(
+    request: Request,
     year: int = Query(..., ge=2000, le=2100, description="年份，如 2025"),
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(get_current_user),
 ):
     """获取年度店铺/人员利润统计：按人员展示各月利润收入，按店铺展示各月销售额/利润/达成率。"""
     try:
+        cache_params = {"year": str(year)}
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("hr_annual_profit_statistics", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
+
         # 1. 店铺列表（全年共用）
         shop_query = (
             select(PlatformAccount)
@@ -2673,7 +2697,7 @@ async def get_annual_profit_statistics(
             for row in sorted(by_shop.values(), key=lambda x: (x["platform_code"], x["shop_id"]))
         ]
 
-        return {
+        result = {
             "success": True,
             "data": {
                 "year": year,
@@ -2681,6 +2705,9 @@ async def get_annual_profit_statistics(
                 "by_shop": by_shop_list,
             },
         }
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("hr_annual_profit_statistics", result, **cache_params)
+        return JSONResponse(content=result, headers={"X-Cache": cache_status})
     except Exception as e:
         logger.error(f"获取年度利润统计失败: {e}", exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取年度利润统计失败: {str(e)}", status_code=500)

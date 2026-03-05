@@ -155,6 +155,12 @@ def generate_python_code(
         # 上一步为 navigate/goto 时，下一步前等待页面稳定
         if action in ("navigate", "goto"):
             lines.append(body_indent + 'await page.wait_for_load_state("domcontentloaded", timeout=10000)')
+            # 测试模式下的统一弹窗/通知抗干扰钩子
+            if component_type in ("login", "export"):
+                lines.append(
+                    body_indent
+                    + f'await self.guard_overlays(page, label="after navigation step {i + 1}")'
+                )
             lines.append("")
 
     # 返回语句

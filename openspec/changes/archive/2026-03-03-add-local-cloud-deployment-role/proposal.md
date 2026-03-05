@@ -1,6 +1,6 @@
 # Change: 本地与云端部署角色区分（同一代码库、双镜像）
 
-**实现状态**：§1 部署角色、§2 Docker 方案 A、§5 本机采集模式已落地。开发环境下可使用 `python run.py --use-docker --with-metabase --collection` 启动采集环境。CI 双镜像（§3）、部署文档（§4）待实施。
+**实现状态**：§1 部署角色、§2 Docker 方案 A、§3 CI 双镜像、§4 部署与日常运作文档、§5 本机采集模式均已落地。开发环境下可使用 `python run.py --use-docker --with-metabase --collection` 启动采集环境；CI 对同一 tag 构建默认 + full 两镜像，详见 `docs/deployment/LOCAL_AND_CLOUD_DEPLOYMENT_ROLES.md`。
 
 ## Why
 

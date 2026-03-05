@@ -36,3 +36,5 @@ python run.py --use-docker --with-metabase --collection
 
 - 本机采集开发使用 **Dockerfile.collection** 通过 **docker-compose.collection-dev.yml** 覆盖 backend 服务；CI 双镜像时 full 镜像由 Dockerfile.collection 构建。
 - 环境变量 `ENABLE_COLLECTION=true` 由 collection-dev 覆盖注入，采集调度器会启动；云端部署时使用 `ENABLE_COLLECTION=false` 或 `DEPLOYMENT_ROLE=cloud` 则不启动调度器。
+
+**参见**：生产侧「本地与云端部署角色」、双镜像拉取策略、部署与日常运作流程及核对清单，见 [LOCAL_AND_CLOUD_DEPLOYMENT_ROLES.md](./LOCAL_AND_CLOUD_DEPLOYMENT_ROLES.md)。

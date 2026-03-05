@@ -156,21 +156,22 @@ class ComponentTester:
     
     def list_components(self) -> List[str]:
         """
-        列出平台的所有组件
-        
-        Returns:
-            List[str]: 组件名称列表
+        列出平台的所有组件。仅扫描 modules/platforms/{platform}/components/*.py，不再扫描 YAML。
         """
-        components_dir = Path(__file__).parent.parent / 'config' / 'collection_components' / self.platform
-        
-        if not components_dir.exists():
+        try:
+            import importlib
+            from modules.apps.collection_center.component_loader import PYTHON_COMPONENT_PLATFORMS
+            if self.platform not in PYTHON_COMPONENT_PLATFORMS:
+                return []
+            base_module = importlib.import_module(PYTHON_COMPONENT_PLATFORMS[self.platform])
+            comp_dir = Path(base_module.__path__[0])
+        except Exception:
             return []
-        
         components = []
-        for f in components_dir.glob('*.yaml'):
-            if not f.name.startswith('popup_'):
-                components.append(f.stem)
-        
+        for f in comp_dir.glob("*.py"):
+            if f.name.startswith("_"):
+                continue
+            components.append(f.stem)
         return sorted(components)
     
     async def test_component(self, component_name: str) -> ComponentTestResult:
@@ -194,24 +195,24 @@ class ComponentTester:
             # 加载组件
             component = self.component_loader.load(f"{self.platform}/{component_name}")
             
-            # Phase 12: 判断是否为发现模式
-            component_type = component.get('type', '')
-            is_discovery_mode = component_type in ['date_picker', 'filters'] and 'open_action' in component
-            
-            if is_discovery_mode:
-                available_options = component.get('available_options', [])
-                result.steps_total = len(available_options) + 1  # open_action + options
+            # Phase 12: 判断是否为发现模式；Python 组件无 steps
+            component_type = component.get("type", "")
+            is_discovery_mode = component_type in ["date_picker", "filters"] and "open_action" in component
+            is_python = bool(component.get("_python_component_class"))
+
+            if is_python:
+                result.steps_total = 1
+                steps = []
+            elif is_discovery_mode:
+                available_options = component.get("available_options", [])
+                result.steps_total = len(available_options) + 1
+                steps = []
             else:
-                steps = component.get('steps', [])
+                steps = component.get("steps", [])
                 result.steps_total = len(steps)
-            
-            # #region agent log
-            import json
-            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({'location':'test_component.py:180','message':'test_component: component loaded','data':{'steps_count':len(steps),'has_steps':len(steps)>0},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'F_I'})+'\n')
-            # #endregion
-            
-            print(f"\n[TEST] {self.platform}/{component_name} ({len(steps)} steps)")
+
+            step_label = "Python" if is_python else f"{len(steps)} steps"
+            print(f"\n[TEST] {self.platform}/{component_name} ({step_label})")
             
             # 验证组件结构
             validation_passed = self._validate_component_structure(component)
@@ -262,7 +263,7 @@ class ComponentTester:
         测试 Python 组件（v4.8.0新增）
         
         Args:
-            component_path: Python 组件文件路径
+            component_path: Python 组件文件路径（可选；录制器临时组件必须传此路径按文件加载）
             component_name: 组件名称
             
         Returns:
@@ -276,19 +277,37 @@ class ComponentTester:
         )
         
         try:
+            import importlib.util
             from modules.apps.collection_center.component_loader import ComponentLoader
             from modules.apps.collection_center.python_component_adapter import PythonComponentAdapter, create_adapter
             
-            # 1. 加载 Python 组件类
             loader = ComponentLoader()
-            component_class = loader.load_python_component(self.platform, component_name)
+            component_class = None
+
+            # 1. 若提供 .py 文件路径且文件存在，从路径加载（录制器临时组件走此路径，避免按模块名加载失败）
+            path_obj = Path(component_path) if component_path else None
+            if path_obj and path_obj.suffix == ".py" and path_obj.exists():
+                module_name = f"modules.platforms.{self.platform}.components.{component_name}"
+                spec = importlib.util.spec_from_file_location(module_name, path_obj)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = mod
+                    try:
+                        spec.loader.exec_module(mod)
+                        component_class = loader._find_component_class(mod, component_name)
+                    finally:
+                        sys.modules.pop(module_name, None)
+
+            # 2. 否则按模块名从 ComponentLoader 加载（已保存的组件）
+            if not component_class:
+                component_class = loader.load_python_component(self.platform, component_name)
             
             if not component_class:
                 result.status = TestStatus.FAILED
                 result.error = f"Failed to load Python component: {component_name}"
                 return result
             
-            # 2. 验证组件元数据（v4.8.0: 修复方法名和返回值处理）
+            # 3. 验证组件元数据（v4.8.0: 修复方法名和返回值处理）
             validation_result = loader.validate_python_component(component_class)
             if not validation_result.get('valid', False):
                 result.status = TestStatus.FAILED
@@ -296,14 +315,14 @@ class ComponentTester:
                 result.error = f"Python component validation failed: {', '.join(errors)}"
                 return result
             
-            # 3. 获取账号信息
+            # 4. 获取账号信息
             account_info = self.get_account_info()
             if not account_info:
                 result.status = TestStatus.FAILED
                 result.error = "Account info not available"
                 return result
             
-            # 4. 执行 Python 组件测试
+            # 5. 执行 Python 组件测试
             result.steps_total = 1  # Python 组件作为一个整体步骤
             
             test_passed = await self._test_python_component_with_browser(
@@ -505,23 +524,20 @@ class ComponentTester:
     
     def _validate_component_structure(self, component: Dict[str, Any]) -> bool:
         """
-        验证组件结构
-        
-        Phase 12: 支持发现模式组件（date_picker, filters）
-        
-        Args:
-            component: 组件配置
-            
-        Returns:
-            bool: 是否有效
+        验证组件结构。
+        支持 Python 组件（_python_component_class）、发现模式、普通 YAML 步骤组件。
         """
+        # Python 组件：由 adapter 执行，仅需 name/platform/type
+        if component.get("_python_component_class"):
+            return bool(component.get("name") and component.get("platform") and component.get("type"))
+
         # 检查必填字段
-        if 'name' not in component:
-            logger.error(f"Missing required field: name")
+        if "name" not in component:
+            logger.error("Missing required field: name")
             return False
-        
+
         # Phase 12: 判断是否为发现模式组件
-        component_type = component.get('type', '')
+        component_type = component.get("type", "")
         is_discovery_mode = component_type in ['date_picker', 'filters'] and 'open_action' in component
         
         if is_discovery_mode:

@@ -1,14 +1,18 @@
-# 组件录制指南
+# 组件录制指南（历史文档，YAML 已废弃）
 
-本文档介绍如何使用组件录制工具录制浏览器操作并生成YAML组件配置。
+自 v4.20 起，组件录制与保存已统一为**前端录制器 + 后端 /recorder API**，仅支持 **Python 组件**（`modules/platforms/<platform>/components/*.py`）。本页描述的命令行工具 `tools/record_component.py` 已废弃，仅作参考。
 
-## 概述
+**当前推荐**：使用前端「组件录制」页完成录制与保存，详见 `docs/guides/RECORDER_PYTHON_OUTPUT.md`。
 
-组件录制工具 (`tools/record_component.py`) 是一个基于 Playwright 的录制工具，可以：
+---
+
+## 概述（历史）
+
+组件录制工具 (`tools/record_component.py`) 曾用于：
 
 1. 启动浏览器并自动导航到目标页面
 2. 记录用户的浏览器操作
-3. 将录制结果转换为 YAML 组件格式
+3. 将录制结果转换为 YAML 组件格式（现已不再使用 YAML）
 
 ## 快速开始
 
@@ -80,7 +84,7 @@ python tools/record_component.py -p shopee -c login -a MyStore_SG
 平台: shopee
 组件: login
 账号: MyStore_SG
-输出目录: config/collection_components/shopee
+输出目录: （历史为 config/collection_components/shopee，现请使用前端录制器）
 
 ------------------------------------------------------------
  录制说明:
@@ -112,7 +116,7 @@ python tools/record_component.py -p shopee -c login -a MyStore_SG
  录制完成!
 ============================================================
 
-生成文件: config/collection_components/shopee/login.yaml
+生成文件: （历史为 YAML，现请使用前端录制器保存为 Python 组件）
 录制步骤数: 5
 
 请检查并手动完善生成的YAML文件。

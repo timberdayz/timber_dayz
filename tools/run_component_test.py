@@ -95,67 +95,17 @@ async def main():
             progress_callback=progress_callback  # [*] v4.7.4: 传递进度回调
         )
         
-        # [*] 支持 component_path：如果提供了路径，直接读取文件
-        component_path = config.get('component_path')
-        if component_path:
-            from datetime import datetime
-            from tools.test_component import ComponentTestResult, TestStatus
-            
-            # v4.8.0: 判断是 Python 组件还是 YAML 组件
-            if component_path.endswith('.py'):
-                # [*] Python 组件测试（v4.8.0新增）
-                result = await tester.test_python_component(
-                    component_path=component_path,
-                    component_name=config['component_name']
-                )
-            else:
-                # YAML 组件测试（保留兼容性）
-                import yaml
-                
-                # 读取组件配置
-                with open(component_path, 'r', encoding='utf-8') as f:
-                    component = yaml.safe_load(f)
-                
-                component_name = config['component_name']
-                
-                # 创建测试结果对象
-                result = ComponentTestResult(
-                    component_name=component_name,
-                    platform=config['platform'],
-                    status=TestStatus.PENDING,
-                    start_time=datetime.now().isoformat()
-                )
-                
-                # 获取步骤
-                steps = component.get('steps', [])
-                result.steps_total = len(steps)
-                
-                # 验证组件结构
-                validation_passed = tester._validate_component_structure(component)
-                if not validation_passed:
-                    result.status = TestStatus.FAILED
-                    result.error = "Component structure validation failed"
-                else:
-                    # 执行浏览器测试（异步，内部已包含成功条件验证）
-                    browser_test_passed = await tester._test_with_browser(component, result)
-                    
-                    # [*] _test_with_browser 已经验证了成功条件，返回值已包含结果
-                    if browser_test_passed:
-                        result.status = TestStatus.PASSED
-                    else:
-                        result.status = TestStatus.FAILED
-                        if not result.error:
-                            result.error = "Browser test or success criteria verification failed"
-                
-                # 设置结束时间
-                result.end_time = datetime.now().isoformat()
-                if result.start_time:
-                    start_dt = datetime.fromisoformat(result.start_time)
-                    end_dt = datetime.fromisoformat(result.end_time)
-                    result.duration_ms = (end_dt - start_dt).total_seconds() * 1000
+        # 仅支持 .py 组件路径；无路径时按组件名加载（Python 组件）
+        component_path = config.get("component_path")
+        if component_path and component_path.endswith(".py"):
+            result = await tester.test_python_component(
+                component_path=component_path,
+                component_name=config["component_name"],
+            )
         else:
-            # 使用 component_loader 加载组件（原有方式，异步）
-            result = await tester.test_component(config['component_name'])
+            if component_path and not component_path.endswith(".py"):
+                print(f"[WARN] Only .py component path is supported, ignoring: {component_path}", file=sys.stderr)
+            result = await tester.test_component(config["component_name"])
         
         # 将结果转换为字典并保存
         result_dict = asdict(result)

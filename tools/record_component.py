@@ -1,7 +1,9 @@
 """
-组件录制工具 V2 - Component Recorder (v4.8.0)
+组件录制工具 V2 - Component Recorder (v4.8.0，已废弃)
 
-使用 Playwright Inspector 录制浏览器操作，自动转换为 YAML 组件格式
+历史脚本：使用 Playwright Inspector 录制浏览器操作并生成 YAML 组件。
+自 v4.20 起录制与保存已统一为前端录制器 + /recorder API，仅支持 Python 组件。
+本脚本仅作历史参考，请使用前端「组件录制」页完成录制与保存。
 
 v4.8.0 更新 (2025-12-25):
 - [OK] 智能登录状态检测（URL + 元素 + Cookie）
@@ -1016,7 +1018,10 @@ async def main():
     """主函数"""
     parser = create_parser()
     args = parser.parse_args()
-    
+
+    # 废弃提示：录制与保存已统一为前端 + /recorder API，仅支持 Python 组件
+    print("[DEPRECATED] 本脚本已废弃，请使用前端「组件录制」页 + 后端 /recorder API 保存 Python 组件。详见 docs/guides/RECORDER_PYTHON_OUTPUT.md")
+
     # 转换模式
     if args.convert:
         converter = RecordingConverter()

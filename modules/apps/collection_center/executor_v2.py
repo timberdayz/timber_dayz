@@ -280,81 +280,88 @@ class CollectionExecutorV2:
         """
         version_service = _get_version_service()
         
-        # 如果版本服务不可用,直接加载默认组件
+        # 解析 platform / 组件名（如 "shopee/login" -> shopee, login）
+        parts = component_name.split("/", 1)
+        platform = parts[0] if len(parts) >= 2 else ""
+        comp_name = parts[1] if len(parts) >= 2 else component_name
+
+        # 如果版本服务不可用，优先 Python 组件
         if version_service is None:
             logger.debug(f"Version service not available, loading default component: {component_name}")
+            component = self.component_loader.build_component_dict_from_python(platform, comp_name, params)
+            if component:
+                return component
             return self.component_loader.load(component_name, params)
-        
+
         try:
             # 使用版本服务选择版本
             selected_version = version_service.select_version_for_use(
                 component_name=component_name,
                 force_version=force_version,
-                enable_ab_test=enable_ab_test
+                enable_ab_test=enable_ab_test,
             )
-            
-            if selected_version:
-                logger.info(
-                    f"Loading component {component_name} v{selected_version.version} "
-                    f"(stable={selected_version.is_stable}, testing={selected_version.is_testing})"
+
+            if selected_version and getattr(selected_version, "file_path", "").endswith(".py"):
+                # 仅支持 .py：从 Python 组件构建兼容 dict
+                component = self.component_loader.build_component_dict_from_python(
+                    platform, comp_name, params
                 )
-                
-                # 加载选定的版本
-                component = self.component_loader.load(
-                    selected_version.file_path.replace('.yaml', ''),  # 移除.yaml扩展名
-                    params
+                if component:
+                    component["_version_id"] = selected_version.id
+                    component["_version_number"] = selected_version.version
+                    return component
+                logger.warning(f"Python component not found for {component_name}, falling back")
+
+            if selected_version and getattr(selected_version, "file_path", "").strip().endswith(".yaml"):
+                # 版本表仍存 .yaml 路径时，按组件名尝试 Python 组件（YAML 已迁离）
+                logger.debug(f"Version file_path is .yaml, loading Python component: {platform}/{comp_name}")
+                component = self.component_loader.build_component_dict_from_python(
+                    platform, comp_name, params
                 )
-                
-                # 记录版本ID用于后续统计
-                component['_version_id'] = selected_version.id
-                component['_version_number'] = selected_version.version
-                
+                if component:
+                    component["_version_id"] = selected_version.id
+                    component["_version_number"] = selected_version.version
+                    return component
+
+            # 无版本或默认：仅 Python 组件
+            component = self.component_loader.build_component_dict_from_python(
+                platform, comp_name, params
+            )
+            if component:
+                if selected_version:
+                    component["_version_id"] = selected_version.id
+                    component["_version_number"] = selected_version.version
                 return component
-            else:
-                # 没有找到版本记录,加载默认组件
-                logger.debug(f"No version record found, loading default component: {component_name}")
-                return self.component_loader.load(component_name, params)
-                
+            raise FileNotFoundError(
+                f"Python component not found: {component_name} "
+                f"(expected modules/platforms/{platform}/components/{comp_name}.py)"
+            )
+
         except Exception as e:
             logger.warning(f"Failed to use version service for {component_name}: {e}, falling back to default")
-            return self.component_loader.load(component_name, params)
+            component = self.component_loader.build_component_dict_from_python(
+                platform, comp_name, params
+            )
+            if component:
+                return component
+            raise FileNotFoundError(
+                f"Python component not found: {component_name} "
+                f"(expected modules/platforms/{platform}/components/{comp_name}.py)"
+            )
     
     def _load_execution_order(self, platform: str) -> Optional[List[Dict]]:
         """
-        加载平台执行顺序配置(Phase 7.2优化)
-        
-        Args:
-            platform: 平台名称(shopee, tiktok等)
-        
-        Returns:
-            执行顺序列表,如果没有配置则返回None
+        加载平台执行顺序配置(Phase 7.2优化)。
+        迁离 YAML：从 Python 模块 execution_order 读取，不再读 execution_order.yaml。
         """
         try:
-            import yaml
-            
-            # 尝试加载平台特定配置
-            platform_order_file = self.component_loader.components_dir / platform / "execution_order.yaml"
-            
-            if platform_order_file.exists():
-                with open(platform_order_file, 'r', encoding='utf-8') as f:
-                    config = yaml.safe_load(f)
-                    execution_seq = config.get('execution_sequence', [])
-                    logger.info(f"Loaded execution order for {platform}: {len(execution_seq)} components")
-                    return execution_seq
-            
-            # 尝试加载默认配置
-            default_order_file = self.component_loader.components_dir.parent / "collection_components" / "default_execution_order.yaml"
-            
-            if default_order_file.exists():
-                with open(default_order_file, 'r', encoding='utf-8') as f:
-                    config = yaml.safe_load(f)
-                    execution_seq = config.get('execution_sequence', [])
-                    logger.info(f"Loaded default execution order for {platform}: {len(execution_seq)} components")
-                    return execution_seq
-        
+            from modules.apps.collection_center.execution_order import get_execution_order
+            execution_seq = get_execution_order(platform)
+            if execution_seq:
+                logger.info(f"Loaded execution order for {platform}: {len(execution_seq)} components")
+            return execution_seq
         except Exception as e:
             logger.warning(f"Failed to load execution order for {platform}: {e}")
-        
         return None
     
     def _get_default_execution_order(self) -> List[Dict]:
@@ -1271,29 +1278,37 @@ class CollectionExecutorV2:
         )
     
     async def _execute_component(
-        self, 
-        page, 
-        component: Dict[str, Any], 
-        step_popup_handler: StepPopupHandler
+        self,
+        page,
+        component: Dict[str, Any],
+        step_popup_handler: StepPopupHandler,
     ) -> bool:
         """
         执行组件中的所有步骤并验证成功标准(v4.7.0+: Phase 7.1)
-        
-        Phase 11: 支持发现模式组件(date_picker, filters)
-        
-        Args:
-            page: Playwright Page对象
-            component: 组件配置
-            step_popup_handler: 步骤弹窗处理器
-        
-        Returns:
-            bool: True表示组件执行成功并通过验证,False表示失败
+        迁离 YAML：若组件含 _python_component_class 则通过 adapter 执行 Python 组件。
         """
-        component_name = component.get('name', 'unknown')
-        component_type = component.get('type', '')
-        
+        component_name = component.get("name", "unknown")
+        component_type = component.get("type", "")
+
+        # Python 组件：通过 adapter 执行，不再走 steps
+        if component.get("_python_component_class"):
+            params = component.get("_params", {})
+            account = params.get("account", params)
+            config = params.get("params", params) if isinstance(params.get("params"), dict) else params
+            adapter = create_adapter(
+                platform=component["platform"],
+                account=account,
+                config=config,
+            )
+            return await self._execute_python_component(
+                page=page,
+                adapter=adapter,
+                component_type=component_type,
+                params=params,
+            )
+
         # Phase 11: 检测发现模式组件
-        if component_type in ['date_picker', 'filters']:
+        if component_type in ["date_picker", "filters"]:
             return await self._execute_discovery_component(page, component, step_popup_handler)
         
         # v4.7.0: 执行预检测
@@ -2294,25 +2309,43 @@ class CollectionExecutorV2:
             raise last_error
     
     async def _execute_export_component(
-        self, 
-        page, 
-        component: Dict[str, Any], 
+        self,
+        page,
+        component: Dict[str, Any],
         step_popup_handler: StepPopupHandler,
-        download_dir: Path
+        download_dir: Path,
     ) -> Optional[str]:
         """
-        执行导出组件并等待文件下载
-        
-        Args:
-            page: Playwright Page对象
-            component: 导出组件配置
-            step_popup_handler: 步骤弹窗处理器
-            download_dir: 下载目录
-            
-        Returns:
-            Optional[str]: 下载的文件路径
+        执行导出组件并等待文件下载。
+        迁离 YAML：若组件含 _python_component_class 则通过 adapter.export 执行。
         """
-        steps = component.get('steps', [])
+        # Python 组件：通过 adapter.export 执行
+        if component.get("_python_component_class"):
+            params = component.get("_params", {})
+            account = params.get("account", params)
+            config = params.get("params", params) if isinstance(params.get("params"), dict) else params
+            if not isinstance(config, dict):
+                config = params
+            config = dict(config) if config else {}
+            config.setdefault("task", {})["download_dir"] = str(download_dir)
+            config.setdefault("downloads_path", str(download_dir))
+            adapter = create_adapter(
+                platform=component["platform"],
+                account=account,
+                config=config,
+            )
+            data_domain = (config.get("data_domain") or (params.get("params") or {}).get("data_domain"))
+            if not data_domain and component.get("name"):
+                # 从组件名推断，如 orders_export -> orders
+                name = component["name"]
+                if name.endswith("_export"):
+                    data_domain = name[:-7]
+            result = await adapter.export(page=page, data_domain=data_domain or "orders")
+            if result and getattr(result, "file_path", None):
+                return result.file_path
+            return None
+
+        steps = component.get("steps", [])
         download_path = None
         
         # 组件执行前检查弹窗

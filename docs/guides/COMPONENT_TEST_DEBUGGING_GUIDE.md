@@ -159,13 +159,7 @@ playwright codegen https://erp.91miaoshou.com/login
 **解决方法**:
 
 1. **检查登录组件的 success_criteria**
-   ```yaml
-   # config/collection_components/miaoshou/miaoshou_login.yaml
-   success_criteria:
-     - type: url_contains
-       value: '/welcome'  # ⭐ 确保这个值正确
-       optional: false
-   ```
+   - 组件为 Python 时：在 `modules/platforms/miaoshou/components/` 下对应类的 `success_criteria` 或登录完成判断逻辑中，确保 URL 包含值正确（如 `/welcome`）。
 
 2. **确认登录后的实际 URL**
    - 手动登录一次

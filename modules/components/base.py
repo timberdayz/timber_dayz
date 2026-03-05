@@ -113,6 +113,32 @@ class ComponentBase(ABC):
     def logger(self) -> Optional[SupportsLogger]:
         return self.ctx.logger
     
+    async def guard_overlays(self, page: Any, label: Optional[str] = None) -> None:
+        """Best-effort hook to close popups/notifications during tests.
+        
+        默认仅在测试模式下执行（ctx.is_test_mode 为 True），以避免在生产采集路径上增加额外开销。
+        平台无对应实现或发生错误时会静默忽略。
+        """
+        # 快速退出：仅在测试模式下生效
+        try:
+            if not getattr(self.ctx, "is_test_mode", False):
+                return
+        except Exception:
+            return
+
+        platform = str(getattr(self.ctx, "platform", "")).lower()
+
+        try:
+            if platform == "miaoshou":
+                # 妙手 ERP 专用弹窗守护组件
+                from modules.platforms.miaoshou.components.overlay_guard import OverlayGuard
+
+                await OverlayGuard().run(page, label=label)
+        except Exception as e:
+            # 抗干扰逻辑失败不应影响主流程
+            if self.logger:
+                self.logger.warning(f"Overlay guard failed (ignored): {e}")
+    
     async def report_step(
         self,
         event_type: str,

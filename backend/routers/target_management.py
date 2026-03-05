@@ -22,7 +22,8 @@
 - POST /api/targets/{target_id}/calculate - 计算达成情况
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
@@ -317,8 +318,14 @@ async def list_target_shops(
         )
 
 
+def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
+    """规范化缓存 key 参数（None→空字符串）"""
+    return {k: "" if v is None else str(v) for k, v in params.items()}
+
+
 @router.get("/by-month", response_model=Dict[str, Any])
 async def get_target_by_month(
+    request: Request,
     month: str = Query(..., description="月份 YYYY-MM"),
     target_type: str = Query("shop", description="目标类型"),
     db: AsyncSession = Depends(get_async_db),
@@ -335,6 +342,14 @@ async def get_target_by_month(
                 message="月份格式须为 YYYY-MM",
                 status_code=400,
             )
+        cache_params = _normalize_cache_params({"month": month, "target_type": target_type})
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("target_by_month", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
         y, m = int(parts[0]), int(parts[1])
         month_start = date(y, m, 1)
         if m == 12:
@@ -351,33 +366,37 @@ async def get_target_by_month(
         )
         target = (await db.execute(query)).scalar_one_or_none()
         if not target:
-            return {
+            result = {
                 "success": True,
                 "data": {"target": None, "breakdowns": []},
                 "message": "该月暂无目标",
             }
-        breakdowns_query = select(TargetBreakdown).where(TargetBreakdown.target_id == target.id)
-        breakdowns = (await db.execute(breakdowns_query)).scalars().all()
-        breakdown_responses = []
-        for b in breakdowns:
-            bd = BreakdownResponse.model_validate(b).model_dump()
-            if b.platform_code and b.shop_id and b.breakdown_type in ("shop", "shop_time"):
-                dim_shop = (await db.execute(
-                    select(DimShop).where(
-                        DimShop.platform_code == b.platform_code,
-                        DimShop.shop_id == b.shop_id,
-                    )
-                )).scalar_one_or_none()
-                if dim_shop:
-                    bd["shop_name"] = dim_shop.shop_name
-            breakdown_responses.append(bd)
-        return {
-            "success": True,
-            "data": {
-                "target": TargetResponse.model_validate(target).model_dump(),
-                "breakdowns": breakdown_responses,
-            },
-        }
+        else:
+            breakdowns_query = select(TargetBreakdown).where(TargetBreakdown.target_id == target.id)
+            breakdowns = (await db.execute(breakdowns_query)).scalars().all()
+            breakdown_responses = []
+            for b in breakdowns:
+                bd = BreakdownResponse.model_validate(b).model_dump()
+                if b.platform_code and b.shop_id and b.breakdown_type in ("shop", "shop_time"):
+                    dim_shop = (await db.execute(
+                        select(DimShop).where(
+                            DimShop.platform_code == b.platform_code,
+                            DimShop.shop_id == b.shop_id,
+                        )
+                    )).scalar_one_or_none()
+                    if dim_shop:
+                        bd["shop_name"] = dim_shop.shop_name
+                breakdown_responses.append(bd)
+            result = {
+                "success": True,
+                "data": {
+                    "target": TargetResponse.model_validate(target).model_dump(),
+                    "breakdowns": breakdown_responses,
+                },
+            }
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("target_by_month", result, **cache_params)
+        return JSONResponse(content=result, headers={"X-Cache": cache_status})
     except (ValueError, TypeError) as e:
         return error_response(
             code=ErrorCode.DATA_VALIDATION_FAILED,
@@ -1086,6 +1105,7 @@ async def create_breakdown(
 
 @router.get("/{target_id}/breakdown", response_model=Dict[str, Any])
 async def list_breakdowns(
+    request: Request,
     target_id: int,
     breakdown_type: Optional[str] = Query(None, description="分解类型筛选:shop/time"),
     db: AsyncSession = Depends(get_async_db),
@@ -1095,15 +1115,20 @@ async def list_breakdowns(
     查询目标分解列表
     """
     try:
+        cache_params = _normalize_cache_params({"target_id": target_id, "breakdown_type": breakdown_type})
+        cache_status = "BYPASS"
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("target_breakdown", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            cache_status = "MISS"
         query = select(TargetBreakdown).where(
             TargetBreakdown.target_id == target_id
         )
-        
         if breakdown_type:
             query = query.where(TargetBreakdown.breakdown_type == breakdown_type)
-        
         breakdowns = (await db.execute(query)).scalars().all()
-        
         # 获取店铺名称
         breakdown_responses = []
         for breakdown in breakdowns:
@@ -1118,11 +1143,10 @@ async def list_breakdowns(
                 if shop:
                     breakdown_data["shop_name"] = shop.shop_name
             breakdown_responses.append(breakdown_data)
-        
-        return {
-            "success": True,
-            "data": breakdown_responses
-        }
+        result = {"success": True, "data": breakdown_responses}
+        if request and hasattr(request.app.state, "cache_service"):
+            await request.app.state.cache_service.set("target_breakdown", result, **cache_params)
+        return JSONResponse(content=result, headers={"X-Cache": cache_status})
     except Exception as e:
         logger.error(f"查询目标分解列表失败: {e}", exc_info=True)
         return error_response(

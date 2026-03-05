@@ -21,7 +21,7 @@
 **目标**: 验证optional步骤在元素不存在时正确跳过
 
 **步骤**:
-1. 创建测试组件YAML（`config/collection_components/test/optional_test.yaml`）:
+1. 创建测试组件（Python：`modules/platforms/test/components/optional_test.py`，或若项目仍支持 YAML 则 `config/collection_components/test/optional_test.yaml`）:
 ```yaml
 name: test_optional
 platform: test

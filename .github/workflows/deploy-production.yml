@@ -261,6 +261,19 @@ jobs:
             # [FIX] 固定 sha tag 规则，避免生成非法 tag
             type=sha,format=short,prefix=sha-
 
+      - name: Extract metadata (tags, labels) for backend-full (collection)
+        id: meta-backend-full
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}
+          tags: |
+            # full 镜像仅随 tag 发布（v4.22.4-full / 4.22.4-full）
+            type=semver,pattern={{version}}-full
+            type=semver,pattern={{major}}.{{minor}}-full
+            type=semver,pattern=v{{version}}-full
+            type=semver,pattern=v{{major}}.{{minor}}-full
+            type=sha,format=short,prefix=sha-,suffix=-full
+
       - name: Extract metadata (tags, labels) for frontend
         id: meta-frontend
         uses: docker/metadata-action@v5
@@ -287,6 +300,17 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             PYTHON_VERSION=3.11
+
+      - name: Build and push backend-full image (collection, Dockerfile.collection)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.collection
+          push: true
+          tags: ${{ steps.meta-backend-full.outputs.tags }}
+          labels: ${{ steps.meta-backend-full.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build and push frontend image
         uses: docker/build-push-action@v5
