@@ -96,8 +96,9 @@ services:
     env_file:
       - .env
     environment:
-      # 数据库配置
-      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}
+      # 数据库配置：优先使用 .env 中的 DATABASE_URL（密码含 @/% 时需 URL 编码：%→%25 @→%40）
+      # 未设置时回退到简单密码，供本地开发使用
+      DATABASE_URL: ${DATABASE_URL:-postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp}
       DATABASE_ECHO: ${DATABASE_ECHO:-false}
 
       # 应用配置
