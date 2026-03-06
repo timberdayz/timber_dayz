@@ -125,6 +125,19 @@
               </template>
             </el-input>
           </el-form-item>
+          <el-form-item
+            v-if="recorderForm.componentType === 'login' && hasRecordedData"
+            label="登录成功条件"
+          >
+            <el-input
+              v-model="successCriteriaUrlContains"
+              placeholder="URL 包含（如 /dashboard 或 home），保存时写入组件内校验"
+              clearable
+            />
+            <div style="font-size: 12px; color: #909399; margin-top: 4px">
+              可选。填写后保存时会在组件内加入「登录后 URL 须包含该片段」的校验
+            </div>
+          </el-form-item>
 
           <el-form-item label="测试账号">
             <el-select
@@ -199,14 +212,6 @@
             停止录制
           </el-button>
 
-          <el-button
-            v-if="hasSteps"
-            size="large"
-            :icon="PlayIcon"
-            @click="testComponent"
-          >
-            测试组件
-          </el-button>
         </div>
 
         <!-- 录制说明 -->
@@ -472,9 +477,37 @@
             <el-button
               size="small"
               :disabled="selectedStepIndices.length === 0"
+              @click="batchMarkAs('captcha_graphical')"
+            >
+              图形验证码
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="selectedStepIndices.length === 0"
+              @click="batchMarkAs('captcha_otp')"
+            >
+              短信/OTP验证码
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="selectedStepIndices.length === 0"
               @click="batchMarkAs('captcha')"
             >
-              标记为验证码
+              验证码（兼容）
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="selectedStepIndices.length === 0"
+              @click="batchMarkAs('navigation')"
+            >
+              标记为导航
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="selectedStepIndices.length === 0"
+              @click="batchMarkAs('popup')"
+            >
+              标记为弹窗/通知栏
             </el-button>
             <el-button
               size="small"
@@ -526,6 +559,11 @@
                 :class="{
                   'step-date-picker': element.step_group === 'date_picker',
                   'step-filters': element.step_group === 'filters',
+                  'step-captcha-graphical': element.step_group === 'captcha_graphical',
+                  'step-captcha-otp': element.step_group === 'captcha_otp',
+                  'step-captcha': element.step_group === 'captcha',
+                  'step-navigation': element.step_group === 'navigation',
+                  'step-popup': element.step_group === 'popup',
                 }"
               >
                 <div class="step-header">
@@ -552,6 +590,46 @@
                     style="margin-left: 4px"
                   >
                     筛选
+                  </el-tag>
+                  <el-tag
+                    v-if="element.step_group === 'captcha_graphical'"
+                    size="small"
+                    type="warning"
+                    style="margin-left: 4px"
+                  >
+                    图形验证码
+                  </el-tag>
+                  <el-tag
+                    v-if="element.step_group === 'captcha_otp'"
+                    size="small"
+                    type="warning"
+                    style="margin-left: 4px"
+                  >
+                    短信/OTP
+                  </el-tag>
+                  <el-tag
+                    v-if="element.step_group === 'captcha'"
+                    size="small"
+                    type="info"
+                    style="margin-left: 4px"
+                  >
+                    验证码
+                  </el-tag>
+                  <el-tag
+                    v-if="element.step_group === 'navigation'"
+                    size="small"
+                    type="primary"
+                    style="margin-left: 4px"
+                  >
+                    导航
+                  </el-tag>
+                  <el-tag
+                    v-if="element.step_group === 'popup'"
+                    size="small"
+                    type="info"
+                    style="margin-left: 4px"
+                  >
+                    弹窗
                   </el-tag>
                   <el-button
                     size="small"
@@ -653,7 +731,11 @@
                         <el-option label="普通步骤" value="normal" />
                         <el-option label="日期组件" value="date_picker" />
                         <el-option label="筛选器" value="filters" />
-                        <el-option label="验证码" value="captcha" />
+                        <el-option label="图形验证码" value="captcha_graphical" />
+                        <el-option label="短信/OTP验证码" value="captcha_otp" />
+                        <el-option label="验证码（兼容）" value="captcha" />
+                        <el-option label="导航" value="navigation" />
+                        <el-option label="弹窗/通知栏" value="popup" />
                       </el-select>
                       <div
                         v-if="element.step_group === 'date_picker'"
@@ -668,10 +750,34 @@
                         此步骤将转换为调用筛选器组件
                       </div>
                       <div
+                        v-if="element.step_group === 'captcha_graphical'"
+                        style="font-size: 12px; color: #909399; margin-top: 4px"
+                      >
+                        图形验证码：需截图给用户看后输入；与采集验证码类型 graphical_captcha 一致
+                      </div>
+                      <div
+                        v-if="element.step_group === 'captcha_otp'"
+                        style="font-size: 12px; color: #909399; margin-top: 4px"
+                      >
+                        短信/OTP验证码：用户查收短信或邮件后输入，无需截图；与 verification_type=otp 一致
+                      </div>
+                      <div
                         v-if="element.step_group === 'captcha'"
                         style="font-size: 12px; color: #909399; margin-top: 4px"
                       >
-                        此步骤属于验证码流程，测试时将视为可选步骤，不影响整体结果
+                        验证码（兼容）：未区分子类型时按图形验证码处理；建议改用「图形验证码」或「短信/OTP验证码」
+                      </div>
+                      <div
+                        v-if="element.step_group === 'navigation'"
+                        style="font-size: 12px; color: #409eff; margin-top: 4px"
+                      >
+                        此步骤为导航/页面跳转，生成器会补充等待与抗干扰钩子
+                      </div>
+                      <div
+                        v-if="element.step_group === 'popup'"
+                        style="font-size: 12px; color: #909399; margin-top: 4px"
+                      >
+                        此步骤为弹窗/通知栏关闭，将生成可选关闭逻辑
                       </div>
                     </el-form-item>
                   </el-form>
@@ -723,289 +829,7 @@
       </div>
     </div>
 
-    <!-- 测试对话框 -->
-    <el-dialog
-      v-model="testDialogVisible"
-      title="组件测试"
-      width="900px"
-      :close-on-click-modal="false"
-    >
-      <!-- 测试配置 -->
-      <div
-        class="test-header"
-        style="
-          margin-bottom: 20px;
-          padding: 15px;
-          background: #f5f7fa;
-          border-radius: 4px;
-        "
-      >
-        <div
-          style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-          "
-        >
-          <div>
-            <span style="font-weight: 600; margin-right: 10px">组件:</span>
-            <el-tag>{{ recorderForm.platform }}</el-tag>
-            <el-tag type="warning" style="margin-left: 8px">{{
-              recorderForm.componentType
-            }}</el-tag>
-          </div>
-          <div>
-            <el-tag type="info">{{ recordedSteps.length }} 个步骤</el-tag>
-          </div>
-        </div>
-
-        <div style="display: flex; align-items: center; gap: 10px">
-          <span style="font-weight: 600">测试账号:</span>
-          <el-select
-            v-model="testAccountId"
-            size="small"
-            style="width: 300px"
-            :disabled="testing"
-          >
-            <el-option
-              v-for="account in filteredAccounts"
-              :key="account.account_id"
-              :label="`${account.name || account.account_id} (${
-                account.shop_name || ''
-              })`"
-              :value="account.account_id"
-            />
-          </el-select>
-
-          <el-button
-            type="primary"
-            size="small"
-            :loading="testing"
-            :disabled="!testAccountId"
-            @click="startTest"
-          >
-            {{ testing ? "测试中..." : "开始测试" }}
-          </el-button>
-        </div>
-
-        <!-- Phase 12.3: 组件调用参数选择 -->
-        <div
-          v-if="hasDatePickerSteps || hasFiltersSteps"
-          style="
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px dashed #dcdfe6;
-          "
-        >
-          <span style="font-weight: 600; color: #606266">组件参数设置:</span>
-          <div
-            style="margin-top: 10px; display: flex; gap: 20px; flex-wrap: wrap"
-          >
-            <div v-if="hasDatePickerSteps" style="flex: 1; min-width: 200px">
-              <span style="color: #e6a23c; margin-right: 8px">[日期组件]</span>
-              <el-select
-                v-model="testParams.date_range"
-                size="small"
-                placeholder="选择日期范围"
-                style="width: 180px"
-              >
-                <el-option label="今天" value="today" />
-                <el-option label="昨天" value="yesterday" />
-                <el-option label="最近7天" value="last_7_days" />
-                <el-option label="最近30天" value="last_30_days" />
-                <el-option label="本月" value="this_month" />
-                <el-option label="上月" value="last_month" />
-              </el-select>
-            </div>
-            <div v-if="hasFiltersSteps" style="flex: 1; min-width: 200px">
-              <span style="color: #67c23a; margin-right: 8px">[筛选器]</span>
-              <el-input
-                v-model="testParams.filter_value"
-                size="small"
-                placeholder="筛选值（如: completed）"
-                style="width: 180px"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 测试提示 -->
-      <el-alert
-        v-if="!testResult && !testing"
-        type="info"
-        :closable="false"
-        style="margin-bottom: 20px"
-      >
-        <template #title>
-          <div>
-            <p style="margin: 0 0 8px 0">📌 测试说明：</p>
-            <p style="margin: 0; font-size: 13px">
-              1. 点击"开始测试"将打开浏览器窗口（有头模式）
-            </p>
-            <p style="margin: 0; font-size: 13px">
-              2. 您可以观察每个步骤的执行过程
-            </p>
-            <p style="margin: 0; font-size: 13px">
-              3. 测试完成后会显示详细结果和失败截图
-            </p>
-            <p style="margin: 0; font-size: 13px">
-              4. 对于标记为<span style="font-weight: 600">验证码</span>或<span style="font-weight: 600">可选</span>的步骤，测试时会自动视为可选步骤，失败不会导致整次测试失败。
-            </p>
-            <p
-              v-if="recorderForm.componentType === 'login'"
-              style="margin: 0; font-size: 13px"
-            >
-              5. 登录组件测试会在关键导航后自动尝试关闭常见弹窗/通知，以减少页面遮挡对结果的影响。
-            </p>
-          </div>
-        </template>
-      </el-alert>
-
-      <el-alert
-        v-if="testing"
-        type="warning"
-        :closable="false"
-        style="margin-bottom: 20px"
-      >
-        <template #title>
-          <div style="display: flex; align-items: center; gap: 8px">
-            <el-icon class="is-loading"><Loading /></el-icon>
-            <span>浏览器窗口已打开，正在执行测试...</span>
-          </div>
-        </template>
-      </el-alert>
-
-      <!-- 测试结果 -->
-      <div v-if="testResult" class="test-results">
-        <!-- 总体结果 -->
-        <div style="display: flex; gap: 20px; margin-bottom: 20px">
-          <el-statistic
-            title="总耗时"
-            :value="testResult.duration_ms"
-            suffix="ms"
-          />
-          <el-statistic
-            title="成功率"
-            :value="testResult.success_rate"
-            suffix="%"
-            :value-style="{
-              color: testResult.success_rate >= 90 ? '#67c23a' : '#f56c6c',
-            }"
-          />
-          <el-statistic
-            title="成功步骤"
-            :value="testResult.steps_passed"
-            :suffix="`/ ${testResult.steps_total}`"
-          />
-        </div>
-
-        <!-- 步骤执行列表 -->
-        <el-timeline>
-          <el-timeline-item
-            v-for="(step, index) in testStepResults"
-            :key="index"
-            :type="getStepStatusType(step.status)"
-            :icon="getStepStatusIcon(step.status)"
-          >
-            <div class="step-result">
-              <div
-                class="step-header"
-                style="
-                  display: flex;
-                  justify-content: space-between;
-                  align-items: center;
-                  margin-bottom: 8px;
-                "
-              >
-                <div>
-                  <el-tag :type="getStepStatusType(step.status)" size="small">
-                    步骤 {{ index + 1 }}: {{ step.action }}
-                  </el-tag>
-                </div>
-                <span style="color: #909399; font-size: 12px"
-                  >{{ step.duration_ms }}ms</span
-                >
-              </div>
-
-              <!-- 失败详情 -->
-              <div v-if="step.status === 'failed'" class="step-error">
-                <el-alert
-                  type="error"
-                  :closable="false"
-                  style="margin-bottom: 10px"
-                >
-                  <template #title>
-                    <div>
-                      <p style="margin: 0 0 5px 0; font-weight: 600">
-                        错误信息:
-                      </p>
-                      <p style="margin: 0; font-size: 13px">{{ step.error }}</p>
-                      <p
-                        style="
-                          margin: 8px 0 0 0;
-                          font-size: 12px;
-                          color: #e6a23c;
-                        "
-                      >
-                        💡 {{ getFixSuggestion(step) }}
-                      </p>
-                    </div>
-                  </template>
-                </el-alert>
-
-                <!-- 失败截图 -->
-                <el-image
-                  v-if="step.screenshot_base64"
-                  :src="`data:image/png;base64,${step.screenshot_base64}`"
-                  :preview-src-list="[
-                    `data:image/png;base64,${step.screenshot_base64}`,
-                  ]"
-                  fit="contain"
-                  style="
-                    max-width: 400px;
-                    cursor: pointer;
-                    border: 1px solid #dcdfe6;
-                    border-radius: 4px;
-                  "
-                  :preview-teleported="true"
-                >
-                  <template #error>
-                    <div
-                      style="padding: 20px; text-align: center; color: #909399"
-                    >
-                      截图加载失败
-                    </div>
-                  </template>
-                </el-image>
-
-                <!-- 操作按钮 -->
-                <div style="margin-top: 10px">
-                  <el-button size="small" @click="editStep(index)">
-                    🔧 修改此步骤
-                  </el-button>
-                </div>
-              </div>
-            </div>
-          </el-timeline-item>
-        </el-timeline>
-      </div>
-
-      <template #footer>
-        <div style="display: flex; justify-content: space-between">
-          <el-button @click="testDialogVisible = false">关闭</el-button>
-          <el-button
-            v-if="testResult"
-            type="primary"
-            @click="retryTest"
-            :loading="testing"
-          >
-            🔄 重新测试
-          </el-button>
-        </div>
-      </template>
-    </el-dialog>
+    <!-- 测试对话框已迁移至组件版本管理页，此处不再提供「测试组件」入口 -->
   </div>
 </template>
 
@@ -1052,6 +876,13 @@ const accountsLoading = ref(false); // ⭐ Phase 9完善：账号加载状态
 
 // 步骤→Python：生成的 Python 代码（主路径保存 .py）
 const pythonCode = ref("");
+
+// 登录字段与代码质量提示
+const loginFieldSuggestions = ref([]);
+const lintErrors = ref([]);
+const lintWarnings = ref([]);
+// 登录成功条件（保存时写入组件）
+const successCriteriaUrlContains = ref("");
 
 // Phase 11: 发现模式数据
 const recordingMode = ref("steps"); // 'steps' 或 'discovery'
@@ -1354,12 +1185,37 @@ const stopRecording = async () => {
         if (response.steps && response.steps.length > 0) {
           recordedSteps.value = response.steps;
           pythonCode.value = response.python_code || "";
-          if (!pythonCode.value) {
+
+          // 登录字段建议与代码质量提示
+          loginFieldSuggestions.value =
+            response.login_field_suggestions || [];
+          lintErrors.value = response.lint_errors || [];
+          lintWarnings.value = response.lint_warnings || [];
+
+          if (lintErrors.value.length > 0) {
+            ElMessage.error(
+              "生成的 Python 代码存在语法错误，请先根据提示修复后再保存。"
+            );
+          } else if (!pythonCode.value) {
             ElMessage.warning(
               "未生成代码，请检查步骤或使用「重新生成」按钮"
             );
           } else {
-            ElMessage.success(`录制完成，共记录 ${response.steps.length} 个步骤`);
+            ElMessage.success(
+              `录制完成，共记录 ${response.steps.length} 个步骤`
+            );
+            if (loginFieldSuggestions.value?.length) {
+              ElMessage.info(
+                `已根据录制内容为登录字段应用账号变量（共 ${
+                  loginFieldSuggestions.value.length
+                } 处），可在下方代码中查看。`
+              );
+            }
+            if (lintWarnings.value?.length) {
+              ElMessage.warning(
+                `生成的代码存在 ${lintWarnings.value.length} 条规范建议，可根据提示逐步优化。`
+              );
+            }
           }
         } else {
           recordedSteps.value = [];
@@ -1451,128 +1307,6 @@ const setDefaultOption = (key) => {
   defaultOption.value = key;
 };
 
-// 测试相关状态
-const testDialogVisible = ref(false);
-const testing = ref(false);
-const testAccountId = ref("");
-const testResult = ref(null);
-const testStepResults = ref([]);
-
-// Phase 12.3: 测试参数
-const testParams = ref({
-  date_range: "last_7_days",
-  filter_value: "",
-});
-
-// 检查是否有标记的步骤
-const hasDatePickerSteps = computed(() => {
-  return recordedSteps.value.some((step) => step.step_group === "date_picker");
-});
-
-const hasFiltersSteps = computed(() => {
-  return recordedSteps.value.some((step) => step.step_group === "filters");
-});
-
-const testComponent = async () => {
-  // 显示测试对话框
-  testDialogVisible.value = true;
-  testAccountId.value = recorderForm.value.accountId; // 默认使用录制账号
-  testResult.value = null;
-  testStepResults.value = [];
-  testing.value = false;
-};
-
-const startTest = async () => {
-  try {
-    testing.value = true;
-    testStepResults.value = [];
-
-    ElMessage.info({
-      message: "正在打开浏览器窗口，请稍候...",
-      duration: 3000,
-    });
-
-    const response = await api.post("/collection/recorder/test", {
-      platform: recorderForm.value.platform,
-      component_type: recorderForm.value.componentType,
-      account_id: testAccountId.value,
-      steps: recordedSteps.value,
-    });
-
-    // Phase 12.5: 无论成功失败都显示测试结果和步骤
-    testResult.value = response.test_result;
-    testStepResults.value = response.test_result?.step_results || [];
-
-    // Phase 12.5: 如果步骤结果为空但测试失败，创建一个错误步骤用于显示
-    if (testStepResults.value.length === 0 && !response.success) {
-      console.warn("Test failed but no step results returned");
-      testStepResults.value = [
-        {
-          step_id: "error",
-          action: "error",
-          status: "failed",
-          duration_ms: 0,
-          error:
-            response.test_result?.error ||
-            response.message ||
-            "测试失败，未返回详细步骤信息。请查看后端日志。",
-          screenshot_base64: null,
-        },
-      ];
-      // 更新统计
-      if (testResult.value) {
-        testResult.value.steps_total = 1;
-        testResult.value.steps_failed = 1;
-      }
-    }
-
-    if (response.success) {
-      ElMessage.success({
-        message: `测试通过！成功率：${response.test_result.success_rate}%`,
-        duration: 3000,
-      });
-    } else {
-      // 测试失败时也要显示详细步骤
-      // Phase 12.5: 增强错误提示信息
-      if (response.test_result?.steps_failed > 0) {
-        ElMessage.error({
-          message: `测试失败：${response.test_result.steps_failed} 个步骤执行失败。请查看下方详情`,
-          duration: 5000,
-        });
-      } else if (response.test_result?.error) {
-        ElMessage.warning({
-          message: `测试未通过：${response.test_result.error}`,
-          duration: 5000,
-        });
-      } else {
-        ElMessage.warning({
-          message: `测试失败。请查看下方步骤详情`,
-          duration: 5000,
-        });
-      }
-    }
-  } catch (error) {
-    console.error("组件测试失败:", error);
-    ElMessage.error("组件测试失败: " + error.message);
-  } finally {
-    testing.value = false;
-  }
-};
-
-const retryTest = () => {
-  startTest();
-};
-
-const editStep = (stepIndex) => {
-  // 关闭测试对话框
-  testDialogVisible.value = false;
-
-  // 定位到失败的步骤（高亮显示）
-  ElMessage.info(`请修改步骤 ${stepIndex + 1}`);
-
-  // TODO: 可以添加滚动到对应步骤的功能
-};
-
 const getStepStatusType = (status) => {
   const types = {
     passed: "success",
@@ -1625,7 +1359,22 @@ const regeneratePython = async () => {
     });
     if (res.success && res.python_code) {
       pythonCode.value = res.python_code;
-      ElMessage.success("已重新生成 Python 代码");
+      loginFieldSuggestions.value = res.login_field_suggestions || [];
+      lintErrors.value = res.lint_errors || [];
+      lintWarnings.value = res.lint_warnings || [];
+
+      if (lintErrors.value.length > 0) {
+        ElMessage.error(
+          "重新生成的 Python 代码存在语法错误，请根据提示修复后再保存。"
+        );
+      } else {
+        ElMessage.success("已重新生成 Python 代码");
+        if (lintWarnings.value?.length) {
+          ElMessage.warning(
+            `生成的代码存在 ${lintWarnings.value.length} 条规范建议，可根据提示逐步优化。`
+          );
+        }
+      }
     } else {
       ElMessage.warning("重新生成失败");
     }
@@ -1653,6 +1402,15 @@ const saveComponent = async () => {
       component_name: recorderForm.value.componentName,
     };
     payload.python_code = pythonCode.value.trim();
+    if (
+      recorderForm.value.componentType === "login" &&
+      successCriteriaUrlContains.value &&
+      successCriteriaUrlContains.value.trim()
+    ) {
+      payload.success_criteria = {
+        url_contains: successCriteriaUrlContains.value.trim(),
+      };
+    }
 
     const response = await api.post("/collection/recorder/save", payload);
 
@@ -1665,18 +1423,17 @@ const saveComponent = async () => {
         duration: 3000,
       });
 
-      // 询问是否跳转到版本管理页
+      // 询问是否前往组件版本管理并测试
       ElMessageBox.confirm(
-        `组件已成功保存并注册为版本 v${versionInfo.version}，是否前往版本管理页查看？`,
+        `组件已成功保存并注册为版本 v${versionInfo.version}。是否前往组件版本管理页并执行测试？`,
         "保存成功",
         {
-          confirmButtonText: "前往查看",
+          confirmButtonText: "前往版本管理并测试",
           cancelButtonText: "继续录制",
           type: "success",
         }
       )
         .then(() => {
-          // 跳转到版本管理页
           window.open("/component-versions", "_blank");
         })
         .catch(() => {
@@ -1968,6 +1725,16 @@ onMounted(() => {
 .step-filters {
   border-left: 4px solid #67c23a !important;
   background: #f0f9eb !important;
+}
+
+.step-navigation {
+  border-left: 4px solid #409eff !important;
+  background: #ecf5ff !important;
+}
+
+.step-popup {
+  border-left: 4px solid #909399 !important;
+  background: #f4f4f5 !important;
 }
 
 .batch-actions {

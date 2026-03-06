@@ -164,9 +164,12 @@
 | 类型 | 位置 | 修改内容 |
 |------|------|----------|
 | 后端 | 新建 `backend/services/steps_to_python.py` 或 `backend/utils/collection_recorder_codegen.py` | 步骤→Python 代码生成器：输入 steps + 元数据，输出符合《采集脚本编写规范》的 .py 字符串 |
-| 后端 | `backend/routers/component_recorder.py` | 在 stop 响应中增加 python_code 和/或新增 POST /recorder/generate-python |
-| 前端 | `frontend/src/views/ComponentRecorder.vue`（或等价录制页） | 增加 Python 代码展示与编辑区域；保存时传 python_code 到 /recorder/save，主路径保存为 .py |
-| 文档 | `docs/guides/` 或录制相关文档 | 说明录制后如何得到 .py、如何按规范微调生成结果；组件保存路径、覆盖即更新（历史依赖 Git）、淘汰与 is_active 的约定（见第 8 节） |
+| 后端 | `backend/routers/component_recorder.py` | 在 stop 响应中增加 python_code 和/或新增 POST /recorder/generate-python；步骤语义 enrich（含验证码类型扩展见 §10.1） |
+| 后端 | `backend/routers/component_versions.py` | 版本统计与测试历史改为同步 Session（§9.2/§10.3）；待实施：完整路径含 version_id，status 返回 verification_screenshot_url，GET verification-screenshot 返回截图流，POST resume 校验权限与状态并写 verification_response.json，超时/结束后 4xx（§10.2） |
+| 前端 | `frontend/src/views/ComponentRecorder.vue`（或等价录制页） | 增加 Python 代码展示与编辑区域；保存时传 python_code；步骤标记扩展（含验证码子类型见 §10.1） |
+| 前端 | `frontend/src/views/ComponentVersions.vue` | 测试弹窗轮询 status；待实施：verification_required 时展示截图/输入框并提交 resume（§10.2） |
+| 工具 | `tools/test_component.py`、`tools/run_component_test.py` | 有头模式 viewport 与最大化（§10.3）；待实施：捕获 VerificationRequiredError、写 progress、轮询 verification_response.json、同 page 填入继续（§10.2） |
+| 文档 | `docs/guides/` 或录制相关文档 | 说明录制后如何得到 .py、如何按规范微调；RECORDER_PYTHON_OUTPUT.md 职责边界与步骤标记；验证码类型与测试/采集回传设计（§10.1、§10.2） |
 
 ### 不修改
 
@@ -198,14 +201,104 @@
 | **可执行代码** | 生成器从 step 的 `selectors` 推导 `selector`（Inspector 仅写 selectors 时也能生成 locator/expect/click/fill）。 | `backend/services/steps_to_python.py`（`_selector_from_selectors`） |
 | **步骤衔接** | navigate/goto 后插入 `await page.wait_for_load_state("domcontentloaded", timeout=10000)`。 | `backend/services/steps_to_python.py` |
 | **Inspector 去重** | 最近 2～3 步内相同 action + 主 selector 则合并/跳过，避免同一操作多次记录。 | `tools/launch_inspector_recorder.py`（`_handle_normal_event`） |
-| **测试组件** | 登录组件测试时：账号/密码字段自动替换为 `{{account.username}}`/`{{account.password}}`；验证码相关步骤（step_group=captcha 或 comment/selector 含验证码）自动设为 optional。 | `backend/routers/component_recorder.py`（`/recorder/test`） |
+| **测试组件（录制页临时测试，已移除）** | 历史上，录制页曾提供基于 `/recorder/test` 的临时组件测试能力（登录组件测试时账号/密码字段自动替换为 `{{account.username}}`/`{{account.password}}`，验证码相关步骤自动设为 optional）。该能力已按本提案 9.2 的「测试路径收敛」收束至组件版本管理测试入口，录制页不再直接触发测试。 | `backend/routers/component_recorder.py`（历史 `/recorder/test`，现已移除） |
 | **步骤标记** | 新增「标记为验证码」；captcha 在 YAML 导出中按普通步骤输出，不生成 component_call（暂无 captcha 组件）。 | `frontend/src/views/ComponentRecorder.vue` |
 | **步骤编辑 UI** | 「全选、标记为日期组件、标记为筛选器、标记为验证码…」工具条使用 `position: sticky; top: 0`，仅下方步骤列表滚动。 | `frontend/src/views/ComponentRecorder.vue`（`.steps-toolbar`） |
 
-### 9.2 后续可优化（新开对话可继续）
+### 9.2 后续可优化与本轮实现结论
 
-- **测试路径收敛（删除录制页“测试组件”）**：仅保留组件版本管理中的测试能力，作为唯一的组件执行入口；录制页不再提供基于临时 YAML 或临时 Python 的「测试组件」按钮，`/recorder/test` 及相关临时执行逻辑将被移除或收敛到统一的组件测试服务中。录制页的职责限定为「录制 → 生成/编辑 Python → 保存组件」，测试流程改为：保存组件后，在版本管理页选择对应版本执行测试。
-- **success_criteria**：登录组件测试通过除步骤执行外还依赖 success_criteria 校验；临时 YAML 中 success_criteria 为空且 optional。可考虑：保存时由用户或默认写入 url_contains 等条件，或在前端提供「编辑成功条件」入口。
-- **标记扩展**：按需增加「标记为导航」「标记为弹窗/通知栏」等；需同步约定 YAML/执行器语义（如 navigation 转为 component_call、弹窗仍以 optional 步骤或 popup_config 为主）。
-- **验证码组件**：若引入 `platform/captcha_solver` 等组件，可将 step_group=captcha 在 YAML 中转为 component_call，并在执行器中实现对应加载与调用。
-- **文档**：在 `docs/guides/RECORDER_PYTHON_OUTPUT.md` 中补充录制页与组件版本管理的分工（录制页仅负责生成/编辑/保存 Python 组件；测试统一在版本管理中完成）、步骤标记（含验证码）含义及后续优化方向。
+- **测试路径收敛（录制页不再直接测试组件）**：本轮实现已删除录制页「测试组件」按钮与 `/recorder/test` 接口，仅保留组件版本管理页作为唯一组件执行入口。录制页职责限定为「录制 → 步骤编辑 → 生成/编辑 Python → 保存组件」，保存成功后通过弹窗引导「前往组件版本管理并测试」完成测试闭环。
+- **success_criteria**：登录组件在保存时可配置 success_criteria（目前支持 url_contains），`/recorder/save` 会在写入组件前将生成器默认的 TODO + `LoginResult(success=True)` 替换为基于 URL 片段的成功校验逻辑；未配置时保持原有 TODO 模板。后续可在文档中补充 element_visible、title_contains 等扩展类型及前端配置入口。
+- **标记扩展（导航 / 弹窗/通知栏）**：前端已在步骤工具条与编辑表单中增加「标记为导航」「标记为弹窗/通知栏」，对应 step_group = navigation/popup；后端在 `_enrich_steps_semantics` 中为其补充 scene_tags，生成器对 popup 步骤统一视为可选（try/except 包裹 + 通用 dialog 关闭模板），navigation 步骤在 navigate 后自动插入 wait_for_load_state 与 guard_overlays 钩子。
+- **验证码组件与步骤语义**：当前 step_group=captcha 仅用于在 steps/scene_tags 上打语义标记，生成器仍按普通步骤生成代码，不自动将其设为可选；是否必选由 `optional` 字段决定。本轮已统一前端提示与文档文案：验证码标记仅做语义标注，执行/测试仍按普通步骤处理，如需可选需手动勾选。若未来引入 `platform/captcha_solver` 等组件，可将 captcha 标记转为 component_call，并在执行器中实现相应求解逻辑。
+- **文档与组件并存策略**：`docs/guides/RECORDER_PYTHON_OUTPUT.md` 已补充录制页与组件版本管理的分工、步骤标记含义（含验证码/导航/弹窗）及后续优化方向。本轮实现中，录制器生成的新 Python 组件按 `modules/platforms/{platform}/components/{component_name}.py` 存放，可与既有手写组件（如 `miaoshou/login`）并存使用；默认执行顺序仍指向既有组件名，新录制组件通过组件版本管理页单独测试或灰度，不强制替换旧组件，以避免误用。
+- **组件测试流程（版本统计、浏览器、失败提示）**：版本统计与测试历史改为同步 Session、有头模式全屏、统计失败时写 `stats_update_error` 并由前端提示等实现细节见本变更目录下的 `OPTIMIZATION_IMPLEMENTATION.md` §5、§6；待实施的验证码暂停与回传见 §10.2 与 tasks §7。
+
+---
+
+## 10. 综合优化规划：验证码类型与测试阶段回传（待实施）
+
+本节汇总多轮对话中达成一致的优化项，作为提案的完整扩展，便于后续按序实施。
+
+### 10.1 验证码类型区分（与规范对齐）
+
+**现状**：录制器步骤标记仅有单一「验证码」选项（step_group=captcha），未区分图形验证码与短信/OTP；《COLLECTION_LOGIN_VERIFICATION》与执行器已区分 `verification_type`：`graphical_captcha`（需截图给用户看后输入）与 `otp`（用户查收短信/邮件后输入，无需截图）。
+
+**优化目标**：
+
+- **录制器步骤标记**：将「验证码」拆分为两种可选标记（或保留「验证码」并增加子类型）：
+  - **图形验证码**：step_group = `captcha_graphical`（或等价 scene_tags）。含义：该步骤需要**截图给用户看**，用户**看后**输入；与 `verification_type=graphical_captcha` 一致。
+  - **短信/OTP 验证码**：step_group = `captcha_otp`。含义：用户**查收短信/邮件**后输入，**不需要截图**；与 `verification_type=otp` 一致。
+- **语义与生成器**：在 `_enrich_steps_semantics` 中为上述 step_group 补充 scene_tags（如 `graphical_captcha` / `otp`），供生成器或后续验证码处理逻辑区分「需截图」与「仅输入框」。
+- **文档**：在《采集脚本编写规范》或 RECORDER 相关文档中明确：录制时验证码步骤需区分「图形验证码（用户查看截图后输入）」与「短信/OTP（用户查收后输入）」；与执行器、前端的 `verification_type` 一致。
+- **向后兼容**：保留对既有 `step_group=captcha` 的识别；未区分子类型时视为默认「图形验证码」（或 scene_tags 保留 `captcha`），生成器/执行器按「需截图」的保守方式处理，直至用户重新标记为图形/OTP。
+
+### 10.2 测试阶段验证码暂停与回传（设计）
+
+**适用范围**：本设计适用于**组件版本管理**中的 **Python 组件测试**（`adapter.login(page)` 及手写/录制生成的 .py 组件）。YAML/步骤组件的验证码回传若有需求留作后续扩展。
+
+**问题**：手写登录组件（如妙手 login.py）在检测到图形验证码时抛出 `VerificationRequiredError("graphical_captcha", screenshot_path)`，由**采集任务**执行器捕获后暂停、持久化截图、阻塞等待用户回传、同一 page 填入继续。**组件测试**在独立子进程中运行，无 task_id、无 Redis 回传通道，目前将上述异常当作普通失败处理，导致测试直接报错「Verification required: graphical_captcha」。录制生成的登录组件（如 miaoshou_login.py）则把验证码写死为录制时的值，测试时页面验证码每次不同，同样导致失败。
+
+**设计目标**：测试阶段与采集环境**语义一致**——需要验证码时暂停、用户回传、系统在同一 page 上填入并继续；差异仅在于**回传介质**与**用户入口**。
+
+**采集环境（已有）**：
+
+- 执行器带 task_id；验证码时通过回调持久化 `verification_type`、`verification_screenshot`，任务置为 paused；回传介质为 **Redis**（key = task_id）；用户在**采集任务列表/详情**看到 paused 任务，打开验证码弹窗（图形则展示截图，OTP 则仅输入框），输入后提交 `POST /collection/tasks/{task_id}/resume`（body：`captcha_code` 或 `otp`）；执行器轮询 Redis 后在**同一 page** 填入并继续。
+
+**测试环境（待实现）**：
+
+- 执行主体为**独立子进程**（run_component_test.py），仅有 test_id；无 Redis。回传介质采用**测试目录下文件**：`temp/component_tests/{test_id}/verification_response.json`（内容如 `{"captcha_code": "3g7"}` 或 `{"otp": "123456"}`）。
+- **API 路径（与现有 status 一致）**：上述接口均在同一 router 下，**完整路径**为 `GET/POST /component-versions/{version_id}/test/{test_id}/status`、`GET /component-versions/{version_id}/test/{test_id}/verification-screenshot`、`POST /component-versions/{version_id}/test/{test_id}/resume`；`version_id` 为必选路径参数。
+- **子进程**：在执行 `adapter.login(page)` 时单独捕获 `VerificationRequiredError`；不关浏览器、不立即失败；将 **verification 相关字段合并写入**现有 `progress.json`（读→改→写，保留 progress、current_step、step_index 等），写入 `status: "verification_required"`、`verification_type`、`verification_screenshot`（test_dir 内截图相对路径或绝对路径）；然后**轮询** `verification_response.json`（建议超时约 5 分钟）；**超时**则关闭浏览器、将 status 置为 failed，并在 progress/result 中写入 `verification_timeout: true` 或 error 含「验证码输入超时」，便于前端区分；若在超时内读到回传值，则在**当前 page** 上填入验证码并继续（手写组件可带 `params.captcha_code` 再执行一次 login；录制生成的组件由测试工具代为 fill + click 登录按钮），最后写 `result.json` / `progress.json`。
+- **后端**：`GET /component-versions/{version_id}/test/{test_id}/status` 在 progress 为 `verification_required` 时返回 `verification_type`、**`verification_screenshot_url`**（指向 `GET .../verification-screenshot` 的 URL，供前端直接展示截图）；`GET /component-versions/{version_id}/test/{test_id}/verification-screenshot` 读取 test_dir 内截图文件并返回图片流。`POST /component-versions/{version_id}/test/{test_id}/resume`：请求体 `{ "captcha_code": "..." }` 或 `{ "otp": "..." }`，后端**校验**测试存在且当前 status 为 `verification_required`、且当前用户对该 version/test 有权限（如测试发起者或同项目权限），否则返回 4xx；**超时或测试已结束（completed/failed）后**再次调用 resume 返回 4xx，提示「验证已超时或测试已结束」；通过校验后将内容写入 `temp/component_tests/{test_id}/verification_response.json`。
+- **前端**：轮询 status 时若发现 `verification_required`，根据 `verification_type` 展示「图形验证码」则用 **verification_screenshot_url** 请求并显示截图 + 输入框，「短信/OTP」则仅输入框；用户输入后提交 `POST .../resume`；继续轮询直至测试完成。
+
+**用户如何传验证码（测试环节）**：在**组件版本管理页**的测试弹窗内，当测试进入「需要验证码」状态时，弹窗展示验证码输入区域（图形验证码时先通过 verification_screenshot_url 展示截图）；用户**查看截图或查收短信/邮件**后，在输入框输入验证码并点击「提交」；前端调用 resume 接口，后端写入 `verification_response.json`，子进程轮询到后代为填入页面并继续执行。与采集环境一致，仅入口为「测试弹窗」而非「采集任务列表」。
+
+**多实例与存储**：组件测试验证码截图当前假定**单实例**或「测试与实例绑定」；多实例部署时需共享存储（如 NFS/对象存储）或保证同一 test 的 status/resume/verification-screenshot 请求路由到同一实例，否则 GET verification-screenshot 可能读不到子进程写入的本地文件。
+
+### 10.3 组件测试流程已实施优化（已完成）
+
+- **版本统计更新**：子进程结束后在回调线程内使用**同步** `SessionLocal` 更新 ComponentVersion 与测试历史，不再在线程内新建事件循环使用 AsyncSession，避免 asyncpg 跨 loop 报错；若更新失败则写入 `stats_update_error`，状态接口返回该字段，前端可提示「测试已执行完成，但版本统计更新失败」。
+- **测试浏览器窗口**：有头模式下 `viewport=None` 且 `args=['--start-maximized']`，页面随窗口全屏显示，便于观察自动化效果；无头模式保持固定 viewport。
+- **录制生成组件的验证码问题**：录制生成的登录组件（如 miaoshou_login.py）将验证码写死为录制时值，测试时必然失败；待 10.2 的「测试阶段验证码回传」实现后，用户可在测试弹窗中看到截图并输入当前验证码，由系统填入后继续，即可通过验证码环节。
+
+### 10.4 登录与步骤完成度检测（本次补充）
+
+**问题**：录制生成的登录组件在点击「登录」后，仅做一次性 URL 字符串判断（例如 `if "/welcome" in cur or "login" not in cur`），未按真实站点「短暂等待 → 跳转首页/仪表盘」的行为设计完整检测逻辑；当网络慢或页面存在中间过渡状态时，生成代码可能错误地认为登录失败并重新执行整段登录步骤，导致再次触发验证码或表现为「似乎没有用用户输入的验证码」。
+
+**设计原则（与《采集脚本编写规范》及业界最佳实践对齐）**：
+
+- **三层检测**：
+  - **动作级（micro-level）**：每个 `click`/`fill` 前使用 `expect(locator).to_be_visible()` 或 `locator.wait_for(state="visible")`，避免一次性 `count()>0` 判断。
+  - **步骤级（step-level）**：对「会改变页面状态」的关键步骤（登录、导航、导出、关闭业务弹窗等），在动作之后等待**目标状态特征**（URL 变化 + 目标元素出现 / loading 消失），而不是固定 `sleep` 或单次 URL 判断。
+  - **流程级（flow-level）**：通过 `success_criteria` 描述组件完成业务目标后的条件（如 URL/元素/标题），由生成器统一生成结尾的成功判定逻辑。
+- **条件等待优先**：对于登录/导航/导出等长耗时动作，使用「多次短轮询 + 条件判断」的模式（例如 10×1s），优先检测成功特征，同时可选检测失败特征（错误提示、仍在登录页），而非长时间固定 `sleep`。
+- **不在组件内部做隐式重试**：登录组件内部只执行一次完整流程（含验证码恢复后的一次提交）；若登录后检测失败，组件应返回 `LoginResult(success=False, message=...)`，由上层 RetryStrategy 或执行器决定是否整体重试，而不是在组件内部静默重放步骤。
+
+**登录场景的检测规范**：
+
+- **成功特征（至少配置一项，推荐组合）**：
+  - `url_not_contains: '/login'` 或 `url_contains: '/welcome'` / 实际后台首页 URL 片段；
+  - 一个或多个后台仪表盘/导航栏的稳定元素存在，例如 `role=navigation`、`.sidebar-nav` 等。
+- **失败特征（可选，用于给出更明确错误）**：
+  - 登录错误提示元素出现，如「账号或密码错误」「验证码错误」等；
+  - 登录表单的核心输入框（用户名/密码）在超时时间后仍然可见。
+- **生成器职责**：
+  - 当登录组件保存时配置了 `success_criteria`（目前支持 `url_contains` 等），生成器应在组件末尾插入统一的「登录结果检测块」，按 `success_criteria` 依次验证；失败时返回 `LoginResult(success=False, message=...)`，成功时返回 `LoginResult(success=True, message="ok")`。
+  - 登录组件的**验证码恢复路径**必须在填入验证码并点击登录后，**无论成功还是失败都立即 return**，不得继续执行下方的主登录步骤，避免再次触发验证码；恢复路径的成功/失败判断也应复用同一套 `success_criteria`（或至少遵循同样的 URL + 元素组合规则）。
+
+**其他关键步骤的完成度检测（导航 / 导出 / 弹窗）**：
+
+- **导航组件**：
+  - 点击菜单/链接后，等待 `page.wait_for_load_state("domcontentloaded")` 或 `networkidle`；
+  - 再根据导航组件的 `success_criteria`（目标 URL 片段 + 目标页面特征元素）判断是否到达目标页。
+- **导出组件**：
+  - 点击「导出」按钮时，应使用 Playwright 的 `expect_download` 或等价机制等待下载开始；若平台通过「生成中…/导出中…」文案提示，则以该文案消失或「下载」按钮出现作为完成条件。
+- **业务弹窗 / Modal**：
+  - 触发行为后，明确等待弹窗容器可见（如 `.ant-modal, .jx-dialog__body, [role="dialog"]`），再在其作用域内点击「确定/关闭」按钮；步骤结束时可以通过弹窗容器隐藏来确认步骤完成。
+
+本小节不要求在本次变更中一次性实现所有检测模式，但要求：
+
+- 录制生成的 **登录组件** 在验证码恢复路径与主流程结束处，必须具备**明确的成功/失败返回**，不得因为检测不严谨而在单次执行中重复整段登录步骤。
+- 录制器与生成器后续扩展 `success_criteria`（如 `element_visible`、`title_contains`）时，需遵循上述三层检测原则，并在文档中为常见场景（登录、导航、导出）提供推荐模板，便于录制时按真实站点行为配置检测条件。

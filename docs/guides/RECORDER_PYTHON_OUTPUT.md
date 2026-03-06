@@ -31,7 +31,16 @@
 - **Python 组件**：保存至 `modules/platforms/{platform}/components/{component_name}.py`，按平台与组件名分层；代码进入仓库。
 - **版本注册**：保存时同时写入 **component_versions** 表（版本号、file_path、is_stable、is_active 等），用于版本选择与统计。
 - **调用方式**：主执行路径通过 Python 适配器按 `platform` + `component_name` 动态 import 对应 `.py` 模块。
-- **覆盖更新**：同一 `component_name` 再次保存会覆盖同路径文件；若 component_versions 中已有该 file_path，则只更新同一条版本记录的 description/updated_at，不新建版本行。若需历史与回滚，请依赖 Git 对 `modules/platforms/.../components/*.py` 的版本管理。
+
+### 3.1 保存逻辑：UPSERT（按路径更新，不删除）
+
+| 场景 | 磁盘文件 | component_versions 表 |
+|------|----------|------------------------|
+| **首次保存**（该 file_path 无记录） | 新建 `.py` 文件 | INSERT 新版本记录（version 1.0.0 或递增） |
+| **再次保存**（该 file_path 已有记录） | **覆盖**同路径 `.py` 文件 | **UPDATE** 同一条记录（description、updated_at），**不**新建版本行，**不**删除旧记录 |
+| **删除组件** | 需手动删除 `.py` 或在版本管理页删除版本（若为最后一条则同时删文件） | 删除版本记录；非最后一条时仅删记录不删文件 |
+
+**结论**：录制保存是 **UPSERT**（按 `file_path` 匹配，存在则更新、不存在则插入）。**不会**删除旧组件——直接覆盖文件内容并更新版本记录的 description/updated_at。版本号在「更新」场景下保持不变。
 - **淘汰**：在 component_versions 中将某版本设为 `is_active=False` 可从版本池淘汰；若需彻底不再执行某 Python 组件，需移走或删除对应 `modules/platforms/{platform}/components/{component_name}.py`。
 
 ---
@@ -50,3 +59,55 @@
 - **执行顺序**：组件执行顺序由 `modules/apps/collection_center/execution_order.py` 提供（`get_default_execution_order()`、`get_execution_order(platform)`），不再读取 `execution_order.yaml` / `default_execution_order.yaml`。
 - **存量迁移**：若数据库中 component_versions 的 `file_path` 仍为 `.yaml`，可执行 `scripts/migrate_component_versions_to_python.py` 将路径迁为 `.py`。
 - **部署必须步骤**：在代码切换为仅 Python 组件后，**部署前必须执行一次** `scripts/migrate_component_versions_to_python.py`，将存量 `component_versions.file_path` 从 .yaml 迁为 .py，否则版本选择与执行器可能找不到组件。清理残留 YAML 文件可使用 `scripts/cleanup_yaml_components.py`（一次性脚本）。
+
+---
+
+## 6. 录制页与组件版本管理的职责边界
+
+- **录制页（组件录制工具）**：仅负责「录制 → 步骤编辑 → 生成/编辑 Python 代码 → 保存为 .py」。录制页**不提供**在页内直接「测试组件」的入口；保存成功后可通过提示「前往组件版本管理并测试」跳转到版本管理页。
+- **组件版本管理页**：提供组件的版本列表、A/B 测试、**测试组件**（选择账号后执行有头/无头测试）、提升稳定版、启用/停用等。**所有组件执行与测试统一在组件版本管理页完成**，保证测试使用的是已保存的 .py 文件，避免临时 YAML/Python 与正式组件行为不一致。
+
+---
+
+## 7. 步骤标记含义与生成器行为
+
+录制结果页可为每个步骤设置「步骤标记」，后端会据此补充 `scene_tags` 并影响生成代码：
+
+| 标记         | 含义                     | 生成/执行器行为 |
+|--------------|--------------------------|-----------------|
+| 普通步骤     | 无特殊语义               | 按 action 生成 click/fill/navigate 等 |
+| 日期组件     | 该步骤属于日期选择流程   | 可转为 component_call（date_picker） |
+| 筛选器       | 该步骤属于筛选器流程     | 可转为 component_call（filters） |
+| 图形验证码   | 需截图给用户看后输入     | scene_tags 含 graphical_captcha；**登录组件**时生成器生成恢复路径 + 检测 + VerificationRequiredError |
+| 短信/OTP验证码 | 用户查收短信/邮件后输入，无需截图 | scene_tags 含 otp；**登录组件**时生成器同上 |
+| 验证码（兼容） | 未区分子类型，按图形验证码处理 | 向后兼容旧数据；建议新录制选用「图形验证码」或「短信/OTP验证码」 |
+| 导航         | 该步骤为导航/页面跳转    | 生成器会补充 wait_for_load_state 与 guard_overlays |
+| 弹窗/通知栏  | 该步骤为关闭弹窗或通知   | 生成可选「等待 dialog 可见 + 点击确定/关闭」逻辑 |
+
+- **验证码类型**：录制时验证码步骤需区分「图形验证码」（用户查看截图后输入）与「短信/OTP」（用户查收后输入），与执行器、前端的 `verification_type` 一致。
+- **生成器验证码感知**：当登录组件含「图形验证码」或「短信/OTP验证码」步骤时，生成器会输出「验证码感知」结构：在 `run()` 开头插入**恢复路径**（若 `params` 有 `captcha_code`/`otp`，则同页填入并点击登录，不执行 `page.goto`）；验证码步骤不生成 `fill(录制值)`，改为检测 DOM → 截图 → `raise VerificationRequiredError`，由执行器/测试工具暂停并等待用户回传后再次执行。
+- **手写组件约定**：手写登录组件若支持验证码回传，**验证码恢复块必须放在 `page.goto` 之前**，否则重试时会刷新页面导致需重新输入账号密码。参见 `modules/platforms/miaoshou/components/login.py`。
+- **登录成功条件**：保存登录组件时，可在「登录成功条件」中配置 `success_criteria`，目前支持：
+  - `url_contains`: 字符串或字符串数组，表示登录后 URL 必须包含的片段（如 `"/welcome"`）；
+  - `url_not_contains`: 字符串或字符串数组，表示登录后 URL 不应再包含的片段（如 `"/login"`）；
+  - `element_visible_selector`: 登录成功后应可见的关键元素选择器（如侧边栏导航的 role 选择器）。
+  后端在保存时会将这些条件注入组件末尾的统一登录检测代码中，按顺序校验，通过后才返回 `LoginResult(success=True)`。
+
+示例（前端传给 `/recorder/save` 的 `success_criteria`）：
+
+```json
+{
+  "url_contains": ["/welcome"],
+  "url_not_contains": "/login",
+  "element_visible_selector": "role=navigation"
+}
+```
+
+---
+
+## 8. 后续优化方向
+
+- **success_criteria 扩展**：除 url_contains 外，可支持 element_visible、title_contains 等，并在前端提供更多配置项。
+- **步骤标记扩展**：如「店铺切换」「导出主流程」等，与执行器顺序及 component_call 进一步对齐。
+- **生成后质量检查**：`/recorder/stop` 与 `/recorder/generate-python` 已返回 `lint_errors` / `lint_warnings`，前端可展示为「质量提示」列表，辅助快速修正。
+- **场景模板与抗干扰**：生成器已对登录/导出在关键节点插入 `guard_overlays`；对标记为「弹窗/通知栏」的步骤生成可选关闭逻辑。可继续扩充「业务 Modal」「Cookie 同意」等场景模板。

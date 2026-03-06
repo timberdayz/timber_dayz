@@ -2362,6 +2362,30 @@ export default {
   },
 
   /**
+   * 获取测试验证码截图 URL（当 status 为 verification_required 时）
+   * @param {number} versionId
+   * @param {string} testId
+   * @returns {string} 截图 URL（用于 img src）
+   */
+  getTestVerificationScreenshotUrl(versionId, testId) {
+    const base = this.defaults?.baseURL || '';
+    return `${base}/component-versions/${versionId}/test/${testId}/verification-screenshot`;
+  },
+
+  /**
+   * 提交验证码并恢复测试（验证码回传）
+   * @param {number} versionId
+   * @param {string} testId
+   * @param {Object} data - { captcha_code?: string, otp?: string }
+   */
+  async resumeTest(versionId, testId, data) {
+    return await this._post(
+      `/component-versions/${versionId}/test/${testId}/resume`,
+      data,
+    );
+  },
+
+  /**
    * 获取组件统计信息
    * @param {string} componentName - 组件名称
    * @returns {Promise} {success, component_name, versions}

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 import uuid
 import sys
 
-from backend.models.database import get_db, get_async_db
+from backend.models.database import get_db, get_async_db, SessionLocal
 from backend.services.component_version_service import ComponentVersionService
 from modules.core.db import ComponentVersion, ComponentTestHistory
 from modules.core.logger import get_logger
@@ -21,6 +21,49 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/component-versions", tags=["组件版本管理"])
+
+
+def save_test_history_sync(
+    db: Session,
+    component_name: str,
+    platform: str,
+    account_id: str,
+    test_result: Any,
+    version_id: Optional[int] = None,
+    component_version: Optional[str] = None,
+) -> None:
+    """同步保存测试历史（供子进程回调线程使用，避免跨事件循环使用 AsyncSession）。"""
+    import uuid
+    try:
+        success_rate = (test_result.steps_passed / test_result.steps_total) if test_result.steps_total > 0 else 0.0
+        step_results_json = [
+            {"step_id": s.step_id, "action": s.action, "status": s.status.value, "duration_ms": s.duration_ms, "error": s.error}
+            for s in test_result.step_results
+        ]
+        history = ComponentTestHistory(
+            test_id=str(uuid.uuid4()),
+            component_name=component_name,
+            component_version=component_version,
+            version_id=version_id,
+            platform=platform,
+            account_id=account_id,
+            headless=False,
+            status=test_result.status.value,
+            duration_ms=test_result.duration_ms,
+            steps_total=test_result.steps_total,
+            steps_passed=test_result.steps_passed,
+            steps_failed=test_result.steps_failed,
+            success_rate=success_rate,
+            step_results=step_results_json,
+            error_message=test_result.error,
+            tested_by="version_manager",
+        )
+        db.add(history)
+        db.commit()
+        logger.info(f"Test history saved (sync): {history.test_id}")
+    except Exception as e:
+        logger.warning(f"Failed to save test history (sync): {e}")
+        db.rollback()
 
 
 async def save_test_history(
@@ -534,42 +577,68 @@ async def delete_version(
 ):
     """
     删除组件版本(v4.8.0 新增)
-    
-    注意:
-    - 仅删除 ComponentVersion 记录,不删除实际文件
-    - 如果版本正在使用中(is_stable=True 或 is_testing=True),需要先取消稳定/测试状态
+
+    行为:
+    - 删除 ComponentVersion 记录
+    - 若该 file_path 无其他版本引用，则同时删除磁盘上的 .py 文件
+    - 若版本正在使用中(is_stable=True 或 is_testing=True)，需先取消稳定/测试状态
     """
+    from pathlib import Path
+
     try:
         # 获取版本
         result = await db.execute(select(ComponentVersion).where(ComponentVersion.id == version_id))
         version = result.scalar_one_or_none()
-        
+
         if not version:
             raise HTTPException(status_code=404, detail="版本不存在")
-        
+
         # 检查是否可以删除
         if version.is_stable:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail="无法删除稳定版本,请先取消稳定状态或提升其他版本为稳定版本"
             )
-        
+
         if version.is_testing:
             raise HTTPException(
                 status_code=400,
                 detail="无法删除正在测试的版本,请先停止A/B测试"
             )
-        
+
         # 记录删除信息
         component_name = version.component_name
         version_str = version.version
         file_path = version.file_path
-        
+
+        # 删除前检查：是否还有其他版本引用同一 file_path
+        other_result = await db.execute(
+            select(ComponentVersion).where(
+                ComponentVersion.file_path == file_path,
+                ComponentVersion.id != version_id
+            )
+        )
+        other_versions = other_result.scalars().all()
+        should_delete_file = len(other_versions) == 0 and file_path and file_path.endswith(".py")
+
         # 删除记录
         await db.delete(version)
         await db.commit()
-        
-        logger.info(f"Deleted version: {component_name} v{version_str} (file: {file_path})")
+
+        # 若无其他版本引用，删除磁盘上的 .py 文件
+        file_deleted = False
+        if should_delete_file:
+            try:
+                project_root = Path(__file__).parent.parent.parent
+                full_path = project_root / file_path
+                if full_path.exists() and full_path.is_file():
+                    full_path.unlink()
+                    file_deleted = True
+                    logger.info(f"Deleted file: {full_path}")
+            except Exception as e:
+                logger.warning(f"Failed to delete file {file_path}: {e}")
+
+        logger.info(f"Deleted version: {component_name} v{version_str} (file: {file_path}, file_deleted={file_deleted})")
         
         return {
             "success": True,
@@ -957,6 +1026,7 @@ async def test_component_version(
             'screenshot_on_error': True,
             'account_info': account_info,
             'version_id': version_id,  # 用于更新统计
+            'test_dir': str(test_dir),  # 验证码回传：子进程轮询 verification_response.json 的目录
         }
         with open(config_path, 'w', encoding='utf-8') as f:
             json_lib.dump(test_config, f, ensure_ascii=False)
@@ -1040,40 +1110,33 @@ async def test_component_version(
                             progress_data['error'] = final_error
                         json_lib.dump(progress_data, f, ensure_ascii=False)
                     
-                    # 更新版本统计(使用异步操作)
+                    # 更新版本统计与测试历史（使用同步 Session，避免线程内新建事件循环导致 asyncpg 跨 loop 报错）
                     if os.path.exists(result_path):
                         with open(result_path, 'r', encoding='utf-8') as f:
                             result_dict = json_lib.load(f)
                         
-                        # [*] v4.18.2修复:使用异步数据库操作,避免阻塞
-                        async def update_version_stats_async():
-                            from backend.models.database import AsyncSessionLocal
+                        stats_update_error = None
+                        try:
+                            from backend.models.database import SessionLocal
                             from sqlalchemy import select
-                            from tools.test_component import TestStatus
-                            
-                            test_db = AsyncSessionLocal()
+                            from tools.test_component import TestStatus, ComponentTestResult, StepResult
+
+                            db = SessionLocal()
                             try:
-                                result = await test_db.execute(
-                                    select(ComponentVersion).where(ComponentVersion.id == version_id)
-                                )
-                                test_version = result.scalar_one_or_none()
-                                
+                                res = db.execute(select(ComponentVersion).where(ComponentVersion.id == version_id))
+                                test_version = res.scalar_one_or_none()
                                 if test_version:
                                     test_version.usage_count += 1
                                     if result_dict.get('status') == 'passed':
                                         test_version.success_count += 1
                                     else:
                                         test_version.failure_count += 1
-                                    
                                     if test_version.usage_count > 0:
                                         test_version.success_rate = test_version.success_count / test_version.usage_count
-                                    
-                                    await test_db.commit()
+                                    db.commit()
                                     logger.info(f"Updated version stats: usage={test_version.usage_count}")
-                                
-                                # 保存测试历史
-                                from tools.test_component import ComponentTestResult, StepResult
-                                result = ComponentTestResult(
+
+                                test_result_obj = ComponentTestResult(
                                     component_name=result_dict.get('component_name', component_name),
                                     platform=result_dict.get('platform', platform),
                                     status=TestStatus(result_dict.get('status', 'failed')),
@@ -1083,42 +1146,40 @@ async def test_component_version(
                                     steps_total=result_dict.get('steps_total', 0),
                                     steps_passed=result_dict.get('steps_passed', 0),
                                     steps_failed=result_dict.get('steps_failed', 0),
-                                    error=result_dict.get('error')
+                                    error=result_dict.get('error'),
                                 )
                                 for sr_dict in result_dict.get('step_results', []):
-                                    step_result = StepResult(
+                                    test_result_obj.step_results.append(StepResult(
                                         step_id=sr_dict.get('step_id', ''),
                                         action=sr_dict.get('action', ''),
                                         status=TestStatus(sr_dict.get('status', 'failed')),
                                         duration_ms=sr_dict.get('duration_ms', 0),
                                         error=sr_dict.get('error'),
-                                        screenshot=sr_dict.get('screenshot')
-                                    )
-                                    result.step_results.append(step_result)
-                                
-                                # [*] v4.18.2修复:使用本文件中的异步 save_test_history 函数
-                                await save_test_history(
-                                    db=test_db,
+                                        screenshot=sr_dict.get('screenshot'),
+                                    ))
+                                save_test_history_sync(
+                                    db=db,
                                     component_name=version.component_name,
                                     platform=platform,
                                     account_id=request.account_id,
-                                    test_result=result,
+                                    test_result=test_result_obj,
                                     version_id=version_id,
-                                    component_version=version.version
+                                    component_version=version.version,
                                 )
                             finally:
-                                await test_db.close()
-                        
-                        # 在独立线程中运行异步代码
-                        try:
-                            import asyncio
-                            # 创建新的事件循环(因为这是在独立线程中)
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                            loop.run_until_complete(update_version_stats_async())
-                            loop.close()
+                                db.close()
                         except Exception as e:
                             logger.error(f"Failed to update version stats: {e}", exc_info=True)
+                            stats_update_error = str(e)
+                            if progress_path and os.path.exists(progress_path):
+                                try:
+                                    with open(progress_path, 'r', encoding='utf-8') as f:
+                                        progress_data = json_lib.load(f)
+                                    progress_data['stats_update_error'] = stats_update_error
+                                    with open(progress_path, 'w', encoding='utf-8') as f:
+                                        json_lib.dump(progress_data, f, ensure_ascii=False)
+                                except Exception:
+                                    pass
                     
                     logger.info(f"Test {test_id} completed")
                 
@@ -1245,15 +1306,105 @@ async def get_test_status(
         except Exception as e:
             logger.warning(f"Failed to read result file: {e}")
     
-    return {
+    resp = {
         "status": progress_data.get('status', 'running'),
         "progress": progress_data.get('progress', 0),
         "current_step": progress_data.get('current_step') or progress_data.get('message', ''),
         "step_index": progress_data.get('step_index', 0),
         "step_total": progress_data.get('step_total', 0),
         "test_result": test_result,
-        "error": progress_data.get('error')
+        "error": progress_data.get('error'),
+        "stats_update_error": progress_data.get('stats_update_error'),
     }
+    if progress_data.get('status') == 'verification_required':
+        resp["verification_type"] = progress_data.get('verification_type', 'graphical_captcha')
+        resp["verification_screenshot"] = progress_data.get('verification_screenshot', '')
+        resp["verification_screenshot_url"] = f"/component-versions/{version_id}/test/{test_id}/verification-screenshot"
+    if progress_data.get('verification_timeout'):
+        resp["verification_timeout"] = True
+    return resp
+
+
+@router.get("/{version_id}/test/{test_id}/verification-screenshot")
+async def get_test_verification_screenshot(
+    version_id: int,
+    test_id: str,
+):
+    """返回测试验证码截图（当测试处于 verification_required 时供前端展示）。"""
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+
+    project_root = Path(__file__).parent.parent.parent
+    test_dir = project_root / "temp" / "component_tests" / test_id
+    if not test_dir.exists():
+        raise HTTPException(status_code=404, detail=f"测试 {test_id} 不存在")
+    progress_path = test_dir / "progress.json"
+    if not progress_path.exists():
+        raise HTTPException(status_code=404, detail="进度文件不存在")
+    import json
+    try:
+        with open(progress_path, "r", encoding="utf-8") as f:
+            progress_data = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="读取进度失败")
+    if progress_data.get("status") != "verification_required":
+        raise HTTPException(status_code=400, detail="当前测试不需要验证码截图")
+    filename = progress_data.get("verification_screenshot") or "verification_screenshot.png"
+    file_path = test_dir / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="验证码截图文件不存在")
+    return FileResponse(path=str(file_path), media_type="image/png", filename=filename)
+
+
+class TestResumeRequest(BaseModel):
+    """测试验证码回传请求体"""
+    captcha_code: Optional[str] = Field(None, description="图形验证码")
+    otp: Optional[str] = Field(None, description="短信/OTP 验证码")
+
+
+@router.post("/{version_id}/test/{test_id}/resume")
+async def post_test_resume(
+    version_id: int,
+    test_id: str,
+    body: TestResumeRequest,
+):
+    """提交验证码并恢复测试（仅当测试 status 为 verification_required 时有效）。"""
+    from pathlib import Path
+    import json
+
+    project_root = Path(__file__).parent.parent.parent
+    test_dir = project_root / "temp" / "component_tests" / test_id
+    if not test_dir.exists():
+        raise HTTPException(status_code=404, detail=f"测试 {test_id} 不存在")
+    progress_path = test_dir / "progress.json"
+    if not progress_path.exists():
+        raise HTTPException(status_code=400, detail="进度文件不存在")
+    try:
+        with open(progress_path, "r", encoding="utf-8") as f:
+            progress_data = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="读取进度失败")
+    if progress_data.get("status") != "verification_required":
+        raise HTTPException(
+            status_code=400,
+            detail="验证已超时或测试已结束，请重新发起测试",
+        )
+    value = body.captcha_code or body.otp
+    if not value or not value.strip():
+        raise HTTPException(status_code=400, detail="请提供 captcha_code 或 otp")
+    response_data = {}
+    if body.captcha_code:
+        response_data["captcha_code"] = body.captcha_code.strip()
+    if body.otp:
+        response_data["otp"] = body.otp.strip()
+    response_path = test_dir / "verification_response.json"
+    try:
+        with open(response_path, "w", encoding="utf-8") as f:
+            json.dump(response_data, f, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"Write verification_response.json failed: {e}")
+        raise HTTPException(status_code=500, detail="写入回传文件失败")
+    return {"success": True, "message": "验证码已提交，测试将继续执行"}
 
 
 @router.get("/test-history", response_model=TestHistoryListResponse)

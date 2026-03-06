@@ -327,6 +327,34 @@
         </el-card>
       </div>
 
+      <!-- 验证码回传：需要验证码时展示截图与输入框 -->
+      <div v-if="verificationRequired" class="verification-required-card" style="margin-bottom: 20px;">
+        <el-card>
+          <template #header>
+            <span>需要验证码</span>
+          </template>
+          <p v-if="verificationRequired.verificationType !== 'otp' && verificationRequired.verificationType !== 'sms' && verificationRequired.verificationType !== 'email_code'" style="margin-bottom: 12px; color: #606266;">
+            请根据下方截图输入图形验证码
+          </p>
+          <p v-else style="margin-bottom: 12px; color: #606266;">
+            请输入收到的短信/邮件验证码
+          </p>
+          <div v-if="verificationRequired.verificationType !== 'otp' && verificationRequired.verificationType !== 'sms' && verificationRequired.verificationType !== 'email_code'" style="margin-bottom: 16px;">
+            <img :src="verificationRequired.screenshotUrl" alt="验证码截图" style="max-width: 100%; max-height: 200px; border: 1px solid #dcdfe6; border-radius: 4px;" @error="($event.target).style.display='none'" />
+          </div>
+          <el-input
+            v-model="verificationInput"
+            :placeholder="verificationRequired.verificationType === 'otp' || verificationRequired.verificationType === 'sms' || verificationRequired.verificationType === 'email_code' ? '请输入短信/邮件验证码' : '请输入验证码'"
+            style="max-width: 280px; margin-right: 12px;"
+            clearable
+            @keyup.enter="submitVerification"
+          />
+          <el-button type="primary" :loading="verificationSubmitting" @click="submitVerification">
+            提交
+          </el-button>
+        </el-card>
+      </div>
+
       <!-- 测试结果（复用测试结果组件样式） -->
       <div v-if="testResult" class="test-results">
         <!-- ⭐ 验证标准失败警告 -->
@@ -495,10 +523,16 @@ const currentTestComponent = ref({
 // ⭐ v4.7.3: 实时进度状态
 const testStatus = ref({
   testId: null,
+  versionId: null,
   currentStep: '准备测试环境...',
   progress: 0,
   logs: []
 })
+
+// 验证码回传：当 status 为 verification_required 时展示
+const verificationRequired = ref(null) // { versionId, testId, verificationType, screenshotUrl }
+const verificationInput = ref('')
+const verificationSubmitting = ref(false)
 
 // 方法
 // ⭐ v4.19.0修复：添加超时机制和后台刷新支持，避免数据同步期间阻塞
@@ -636,7 +670,7 @@ const toggleActive = async (row) => {
 const deleteVersion = async (row) => {
   try {
     await ElMessageBox.confirm(
-      `确定删除 ${row.component_name} v${row.version} 吗？\n\n注意：此操作仅删除版本记录，不会删除实际文件。`,
+      `确定删除 ${row.component_name} v${row.version} 吗？\n\n若为该组件的最后一条版本记录，将同时删除磁盘上的组件文件。`,
       '确认删除',
       {
         type: 'warning',
@@ -647,9 +681,11 @@ const deleteVersion = async (row) => {
     )
     
     await api.deleteComponentVersion(row.id)
-    
+    // 乐观更新：立即从列表移除，避免删除后仍显示
+    versions.value = versions.value.filter((v) => v.id !== row.id)
+    total.value = Math.max(0, (total.value || 0) - 1)
     ElMessage.success('版本已删除')
-    loadVersions(false) // ⭐ v4.19.0修复：后台刷新，不显示loading
+    loadVersions(false) // 后台刷新以同步服务端状态
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除失败: ' + (error.message || error))
@@ -811,10 +847,13 @@ const startComponentTest = async () => {
     // ⭐ v4.7.3: 重置实时进度状态
     testStatus.value = {
       testId: null,
+      versionId: currentTestComponent.value.id,
       currentStep: '正在启动测试...',
       progress: 0,
       logs: []
     }
+    verificationRequired.value = null
+    verificationInput.value = ''
     
     ElMessage.info({
       message: '正在打开浏览器窗口，请稍候...',
@@ -829,6 +868,7 @@ const startComponentTest = async () => {
     if (response.test_id) {
       // 测试在后台运行，通过 HTTP 轮询接收进度
       testStatus.value.testId = response.test_id
+      testStatus.value.versionId = currentTestComponent.value.id
       startPollingTestStatus(response.test_id, currentTestComponent.value.id)
       
       // 显示启动成功消息
@@ -927,11 +967,25 @@ const startPollingTestStatus = (testId, versionId) => {
         }
       }
       
+      // 验证码暂停：展示输入区域，继续轮询
+      if (response.status === 'verification_required') {
+        verificationRequired.value = {
+          versionId,
+          testId,
+          verificationType: response.verification_type || 'graphical_captcha',
+          screenshotUrl: api.getTestVerificationScreenshotUrl(versionId, testId)
+        }
+      }
+
       // 检查是否完成
       if (response.status === 'completed' || response.status === 'failed') {
+        verificationRequired.value = null
+        if (response.verification_timeout) {
+          ElMessage.warning({ message: '验证码输入超时', duration: 5000 })
+        }
         clearInterval(pollingInterval)
         pollingInterval = null
-        
+
         testing.value = false
         testStatus.value.progress = 100
         testStatus.value.currentStep = response.status === 'completed' ? '测试完成' : '测试失败'
@@ -982,12 +1036,40 @@ const startPollingTestStatus = (testId, versionId) => {
             duration: 5000
           })
         }
+        // 统计更新失败时提示（测试已执行完成，仅统计未写入）
+        if (response.stats_update_error) {
+          ElMessage.warning({
+            message: '测试已执行完成，但版本统计更新失败，请稍后刷新列表',
+            duration: 5000
+          })
+        }
       }
     } catch (error) {
       console.error('轮询测试状态失败:', error)
       // 继续轮询，不中断
     }
   }, 1000)  // 每秒轮询一次
+}
+
+// 验证码回传：用户输入后提交
+const submitVerification = async () => {
+  const v = verificationRequired.value
+  if (!v || !verificationInput.value.trim()) return
+  verificationSubmitting.value = true
+  try {
+    const isOtp = ['otp', 'sms', 'email_code'].includes((v.verificationType || '').toLowerCase())
+    await api.resumeTest(v.versionId, v.testId, isOtp
+      ? { otp: verificationInput.value.trim() }
+      : { captcha_code: verificationInput.value.trim() }
+    )
+    ElMessage.success('验证码已提交，测试将继续执行')
+    verificationRequired.value = null
+    verificationInput.value = ''
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || err.message || '提交失败')
+  } finally {
+    verificationSubmitting.value = false
+  }
 }
 
 // 组件卸载时清理轮询

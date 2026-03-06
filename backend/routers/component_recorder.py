@@ -7,7 +7,6 @@ v4.8.0: 仅支持 Inspector API 模式
 1. 启动Playwright Inspector录制会话(支持持久化上下文和固定指纹)
 2. 实时返回录制步骤(支持 Trace 解析)
 3. 保存组件配置(支持 Python 组件代码生成)
-4. 测试组件有效性
 
 录制模式:
 - Inspector 模式(唯一):使用 page.pause() + Trace 录制,支持持久化会话
@@ -19,10 +18,11 @@ import threading
 import subprocess
 import sys
 import json
+import ast
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,11 +40,6 @@ logger = get_logger(__name__)
 RECORDING_MODE = "inspector"
 
 router = APIRouter()
-
-# ==================== 测试会话管理 ====================
-# 跟踪正在运行的测试任务
-active_test_tasks: Dict[str, Any] = {}
-
 
 # [*] v4.18.2修复:移除本地 save_test_history 函数,统一使用 ComponentTestService.save_test_history
 
@@ -77,6 +72,8 @@ class RecorderSaveRequest(BaseModel):
     # v4.8.0: 支持 Python 组件
     python_code: Optional[str] = None  # Python 组件代码
     data_domain: Optional[str] = None  # 数据域(export 组件必填)
+    # 登录成功条件（可选），如 {"url_contains": "/dashboard"}，保存时写入组件内校验逻辑
+    success_criteria: Optional[Dict[str, Any]] = None
     # 向后兼容:保留 YAML 支持
     yaml_content: Optional[str] = None  # 已废弃,保留兼容
 
@@ -89,12 +86,70 @@ class GeneratePythonRequest(BaseModel):
     steps: List[Dict[str, Any]]
 
 
-class RecorderTestRequest(BaseModel):
-    """测试组件请求"""
-    platform: str
-    component_type: str
-    account_id: str
-    steps: List[Dict[str, Any]]
+def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any]) -> str:
+    """
+    根据 success_criteria 注入统一的登录成功检测代码块，替换生成器默认的 TODO 占位。
+    支持的字段：
+    - url_contains: 字符串或字符串列表，表示登录后 URL 必须包含的片段
+    - url_not_contains: 字符串或字符串列表，表示登录后 URL 不应包含的片段
+    - element_visible_selector: 登录成功后应可见的关键元素选择器
+    """
+    old_block = (
+        "        # TODO: 根据实际成功条件校验 (e.g. URL / element)\n"
+        "        return LoginResult(success=True, message=\"ok\")"
+    )
+
+    if old_block not in python_code:
+        return python_code
+
+    lines: list[str] = []
+    lines.append("        # 登录成功条件：由 success_criteria 注入")
+    lines.append("        current_url = page.url")
+
+    # url_contains: 字符串或字符串列表
+    url_contains = crit.get("url_contains")
+    if url_contains:
+        if isinstance(url_contains, str):
+            url_contains_values = [url_contains]
+        else:
+            try:
+                url_contains_values = list(url_contains)
+            except TypeError:
+                url_contains_values = [str(url_contains)]
+        for val in url_contains_values:
+            msg = f\"登录后 URL 未包含预期片段: {val}\"
+            lines.append(f\"        if {val!r} not in current_url:\")
+            lines.append(f\"            return LoginResult(success=False, message={msg!r})\")
+
+    # url_not_contains: 字符串或字符串列表
+    url_not_contains = crit.get("url_not_contains")
+    if url_not_contains:
+        if isinstance(url_not_contains, str):
+            url_not_values = [url_not_contains]
+        else:
+            try:
+                url_not_values = list(url_not_contains)
+            except TypeError:
+                url_not_values = [str(url_not_contains)]
+        for val in url_not_values:
+            msg = f\"登录后 URL 仍包含禁止片段: {val}\"
+            lines.append(f\"        if {val!r} in current_url:\")
+            lines.append(f\"            return LoginResult(success=False, message={msg!r})\")
+
+    # element_visible_selector: 登录成功后应可见的关键元素
+    elem_sel = crit.get("element_visible_selector")
+    if elem_sel:
+        msg = f\"登录后未找到预期元素: {elem_sel}\"
+        lines.append(f\"        _succ_elem = page.locator({elem_sel!r}).first\")
+        lines.append("        if await _succ_elem.count() == 0:")
+        lines.append(f\"            return LoginResult(success=False, message={msg!r})\")
+        lines.append("        await _succ_elem.wait_for(state=\"visible\", timeout=10000)")
+
+    # 若未配置任何字段，保持默认行为（视为成功）
+    lines.append("        return LoginResult(success=True, message=\"ok\")")
+
+    new_block = "\n".join(lines)
+    return python_code.replace(old_block, new_block, 1)
 
 
 # ==================== 全局录制会话管理 ====================
@@ -195,6 +250,199 @@ class RecorderSession:
 
 # 全局录制会话实例
 recorder_session = RecorderSession()
+
+
+def _normalize_login_steps_and_suggestions(
+    steps: List[Dict[str, Any]],
+    component_type: str,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    针对 login 组件，对录制步骤中的账号/密码字段执行自动变量化，并生成前端可展示的建议列表。
+    - 被识别为用户名/密码输入的步骤，其 value 将规范化为 {{account.username}} / {{account.password}}。
+    - 同时在 scene_tags 中打上 login_form/login_username_field/login_password_field 等标签。
+    """
+    if component_type != "login" or not steps:
+        return steps, []
+
+    normalized: List[Dict[str, Any]] = []
+    suggestions: List[Dict[str, Any]] = []
+
+    for idx, raw_step in enumerate(steps):
+        step = dict(raw_step) if isinstance(raw_step, dict) else {"action": raw_step}
+        action = str(step.get("action") or "").strip().lower()
+        if action != "fill":
+            normalized.append(step)
+            continue
+
+        selector = str(step.get("selector") or "")
+        comment = str(step.get("comment") or "")
+        value = step.get("value")
+        scene_tags = list(step.get("scene_tags") or [])
+
+        lower_comment = comment.lower()
+        sel_lower = selector.lower()
+
+        is_username_field = any(k in comment for k in ["账号", "用户名", "子账号", "邮箱", "手机号"]) or any(
+            k in sel_lower for k in ["account", "username", "user", "email", "phone"]
+        )
+        is_password_field = ("密码" in comment) or ("password" in lower_comment) or ("password" in sel_lower)
+
+        # 默认不改动
+        applied = False
+        original_value = value
+
+        if is_username_field:
+            # 若已有模板变量，则视为已应用，仅补充标签
+            if isinstance(value, str) and "{{account.username}}" in value:
+                applied = True
+                suggested_value = value
+            else:
+                suggested_value = "{{account.username}}"
+                step["value"] = suggested_value
+                applied = True
+
+            if "login_form" not in scene_tags:
+                scene_tags.append("login_form")
+            if "login_username_field" not in scene_tags:
+                scene_tags.append("login_username_field")
+
+            suggestions.append(
+                {
+                    "step_index": idx,
+                    "kind": "username",
+                    "original_value": original_value,
+                    "suggested_value": suggested_value,
+                    "confidence": 0.9,
+                    "applied": applied,
+                }
+            )
+
+        elif is_password_field:
+            if isinstance(value, str) and "{{account.password}}" in value:
+                applied = True
+                suggested_value = value
+            else:
+                suggested_value = "{{account.password}}"
+                step["value"] = suggested_value
+                applied = True
+
+            if "login_form" not in scene_tags:
+                scene_tags.append("login_form")
+            if "login_password_field" not in scene_tags:
+                scene_tags.append("login_password_field")
+
+            suggestions.append(
+                {
+                    "step_index": idx,
+                    "kind": "password",
+                    "original_value": original_value,
+                    "suggested_value": suggested_value,
+                    "confidence": 0.9,
+                    "applied": applied,
+                }
+            )
+
+        if scene_tags:
+            step["scene_tags"] = scene_tags
+
+        normalized.append(step)
+
+    return normalized, suggestions
+
+
+def _analyze_python_code_for_lints(python_code: str) -> Dict[str, List[Dict[str, str]]]:
+    """
+    对生成的 Python 代码做基础质量检查：
+    - 语法检查（ast.parse）
+    - 明显不推荐模式提示（例如 wait_for_timeout）
+    返回 errors / warnings 列表，供前端展示。
+    """
+    errors: List[Dict[str, str]] = []
+    warnings: List[Dict[str, str]] = []
+
+    if not python_code:
+        return {"errors": errors, "warnings": warnings}
+
+    # 语法检查
+    try:
+        ast.parse(python_code)
+    except SyntaxError as e:
+        errors.append(
+            {
+                "type": "syntax_error",
+                "message": str(e),
+            }
+        )
+        # 语法错误时无需继续做其他检查
+        return {"errors": errors, "warnings": warnings}
+
+    # 简单规则：检测 wait_for_timeout 使用，建议改用条件等待
+    if "wait_for_timeout(" in python_code:
+        warnings.append(
+            {
+                "type": "wait_for_timeout_usage",
+                "message": "检测到 wait_for_timeout 调用，建议优先使用条件等待或 expect(locator).to_be_visible() 以符合《采集脚本编写规范》。",
+            }
+        )
+
+    return {"errors": errors, "warnings": warnings}
+
+
+def _enrich_steps_semantics(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    根据 step_group 为步骤补充 step_type / scene_tags，供生成器选择场景模板。
+    兼容无 step_group 的旧数据；有 step_group 时写入 scene_tags（及可选 step_type）。
+    """
+    if not steps:
+        return steps
+    enriched = []
+    for s in steps:
+        step = dict(s) if isinstance(s, dict) else {"action": s.get("action")}
+        group = (step.get("step_group") or "").strip().lower()
+        tags = list(step.get("scene_tags") or [])
+        if group == "navigation":
+            if "navigation" not in tags:
+                tags.append("navigation")
+            step["step_type"] = step.get("step_type") or "navigation"
+        elif group == "popup":
+            if "popup" not in tags:
+                tags.append("popup")
+            if "notification_bar" not in tags:
+                tags.append("notification_bar")
+            step["step_type"] = step.get("step_type") or "popup"
+        elif group == "date_picker":
+            if "date_picker" not in tags:
+                tags.append("date_picker")
+        elif group == "filters":
+            if "filters" not in tags:
+                tags.append("filters")
+        elif group == "captcha_graphical":
+            if "captcha" not in tags:
+                tags.append("captcha")
+            if "graphical_captcha" not in tags:
+                tags.append("graphical_captcha")
+            step["step_type"] = step.get("step_type") or "captcha_graphical"
+        elif group == "captcha_otp":
+            if "captcha" not in tags:
+                tags.append("captcha")
+            if "otp" not in tags:
+                tags.append("otp")
+            if "otp_dialog" not in tags:
+                tags.append("otp_dialog")
+            step["step_type"] = step.get("step_type") or "captcha_otp"
+        elif group == "captcha":
+            # 向后兼容：未区分子类型时视为图形验证码（需截图）
+            if "captcha" not in tags:
+                tags.append("captcha")
+            if "graphical_captcha" not in tags:
+                tags.append("graphical_captcha")
+            if "otp_dialog" not in tags:
+                tags.append("otp_dialog")
+            step["step_type"] = step.get("step_type") or "captcha"
+        if tags:
+            step["scene_tags"] = tags
+        enriched.append(step)
+    return enriched
 
 
 # ==================== API Endpoints ====================
@@ -533,7 +781,22 @@ async def stop_recording():
             # 在 clear() 之前从会话取元数据并生成 Python 代码（仅 mode=steps 且存在 steps 时）
             platform = getattr(recorder_session, 'platform', None) or ''
             component_type = getattr(recorder_session, 'component_type', None) or ''
+
+            # 根据 step_group 补充 step_type / scene_tags（6.6 步骤语义）
+            steps = _enrich_steps_semantics(steps)
+
+            login_field_suggestions: List[Dict[str, Any]] = []
+            if component_type:
+                # 针对 login 组件进行账号/密码字段自动变量化与语义标记
+                steps, login_field_suggestions = _normalize_login_steps_and_suggestions(
+                    steps=steps,
+                    component_type=component_type,
+                )
+
             python_code = ''
+            lint_errors: List[Dict[str, Any]] = []
+            lint_warnings: List[Dict[str, Any]] = []
+
             if platform and component_type and steps:
                 try:
                     default_component_name = component_type
@@ -543,8 +806,12 @@ async def stop_recording():
                         component_name=default_component_name,
                         steps=steps,
                     )
+                    lint_result = _analyze_python_code_for_lints(python_code)
+                    lint_errors = lint_result.get("errors", [])
+                    lint_warnings = lint_result.get("warnings", [])
                 except Exception as e:
                     logger.warning(f"Steps to Python generator failed: {e}", exc_info=True)
+
             response = {
                 "success": True,
                 "message": f"录制已停止,共记录 {steps_count} 个步骤",
@@ -554,6 +821,9 @@ async def stop_recording():
                 "platform": platform,
                 "component_type": component_type,
                 "python_code": python_code if python_code else None,
+                "login_field_suggestions": login_field_suggestions or None,
+                "lint_errors": lint_errors or [],
+                "lint_warnings": lint_warnings or [],
             }
         recorder_session.clear()
         return response
@@ -569,13 +839,29 @@ async def generate_python_from_steps(request: GeneratePythonRequest):
     根据步骤重新生成 Python 代码（供前端「重新生成」按钮调用）。
     """
     try:
+        steps = list(request.steps or [])
+        steps = _enrich_steps_semantics(steps)
+        login_field_suggestions: List[Dict[str, Any]] = []
+        if request.component_type:
+            steps, login_field_suggestions = _normalize_login_steps_and_suggestions(
+                steps=steps,
+                component_type=request.component_type,
+            )
+
         code = generate_python_code(
             platform=request.platform,
             component_type=request.component_type,
             component_name=request.component_name,
-            steps=request.steps,
+            steps=steps,
         )
-        return {"success": True, "python_code": code}
+        lint_result = _analyze_python_code_for_lints(code)
+        return {
+            "success": True,
+            "python_code": code,
+            "login_field_suggestions": login_field_suggestions or None,
+            "lint_errors": lint_result.get("errors", []) or [],
+            "lint_warnings": lint_result.get("warnings", []) or [],
+        }
     except Exception as e:
         logger.warning(f"Generate Python failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"生成 Python 失败: {str(e)}")
@@ -604,174 +890,6 @@ async def get_recording_steps():
         raise HTTPException(status_code=500, detail=f"获取步骤失败: {str(e)}")
 
 
-@router.post("/recorder/test")
-async def test_component(
-    request: RecorderTestRequest,
-    db: AsyncSession = Depends(get_async_db)
-):
-    """
-    测试组件(录制器)- 使用统一服务层
-    
-    功能:
-    1. 使用录制的步骤创建临时组件
-    2. 使用指定账号执行组件(有头模式)
-    3. 返回详细执行结果(每步状态/耗时/截图)
-    
-    重构说明:使用 ComponentTestService 统一服务,消除与 component_versions.py 的重复代码
-    """
-    import yaml
-    from pathlib import Path
-    from datetime import datetime
-    from backend.services.component_test_service import ComponentTestService
-    from backend.services.steps_to_python import generate_python_code
-    
-    try:
-        # 1. 验证账号
-        result = await db.execute(
-            select(PlatformAccount).where(PlatformAccount.account_id == request.account_id)
-        )
-        account = result.scalar_one_or_none()
-        
-        if not account:
-            raise HTTPException(status_code=404, detail="账号不存在")
-        
-        logger.info(
-            f"Testing component: {request.platform}/{request.component_type} "
-            f"with {len(request.steps)} steps, account: {request.account_id}"
-        )
-        
-        # 2. 构建规范化步骤列表（仅用于测试）
-        #    - 登录组件: 将账号/密码字段标准化为占位符{{account.username}}/{{account.password}}
-        #    - 验证码相关步骤: 标记为可选, 避免因验证码问题导致整体测试失败
-        normalized_steps = []
-        is_login = request.component_type == 'login'
-        for step in request.steps:
-            action = step.get('action')
-            selector = step.get('selector') or ''
-            raw_value = step.get('value')
-            comment = (step.get('comment') or '')
-            step_group = (step.get('step_group') or '')
-
-            value = raw_value
-            # 登录组件: 将账号/密码字段标准化为占位符, 便于使用账号信息测试
-            if is_login and isinstance(raw_value, str) and raw_value and '{{' not in raw_value:
-                lower_comment = comment.lower()
-                sel_lower = selector.lower()
-                # 账号/用户名字段
-                if (
-                    any(k in comment for k in ['手机号', '子账号', '邮箱'])
-                    or 'account' in sel_lower
-                    or 'username' in sel_lower
-                ):
-                    value = '{{account.username}}'
-                # 密码字段
-                elif (
-                    '密码' in comment
-                    or 'password' in lower_comment
-                    or 'password' in sel_lower
-                ):
-                    value = '{{account.password}}'
-
-            # 基础步骤结构
-            normalized_step = {
-                'action': action,
-                'selector': selector or None,
-                'url': step.get('url'),
-                'value': value,
-                'comment': comment or None,
-                'optional': step.get('optional', False),
-                'timeout': step.get('timeout', 30000),
-            }
-
-            # 验证码相关步骤: 标记为可选, 避免因验证码问题导致整体测试失败
-            if is_login and (
-                step_group == 'captcha'
-                or '验证码' in comment
-                or 'captcha' in selector.lower()
-            ):
-                normalized_step['optional'] = True
-
-            normalized_steps.append(normalized_step)
-
-        # 3. 基于规范化步骤生成临时 Python 组件代码
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        component_name = f"{request.component_type}_test_{timestamp}"
-        try:
-            python_code = generate_python_code(
-                platform=request.platform,
-                component_type=request.component_type,
-                component_name=component_name,
-                steps=normalized_steps,
-            )
-        except Exception as e:
-            logger.error(f"Generate Python code for test component failed: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail="生成测试组件 Python 代码失败")
-
-        # 4. 将临时 Python 组件写入平台组件目录
-        project_root = Path(__file__).parent.parent.parent
-        temp_component_dir = project_root / "modules" / "platforms" / request.platform / "components"
-        temp_component_dir.mkdir(parents=True, exist_ok=True)
-        temp_py_path = temp_component_dir / f"{component_name}.py"
-
-        try:
-            temp_py_path.write_text(python_code, encoding="utf-8")
-            logger.info(f"Temporary Python component created for test: {temp_py_path}")
-        except Exception as e:
-            logger.error(f"Failed to write temporary Python component: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail="写入测试组件 Python 文件失败")
-        
-        # 5. 使用统一服务准备账号信息 [*]
-        account_info = ComponentTestService.prepare_account_info(account)
-        
-        try:
-            # 6. 使用统一服务执行测试（Python 组件）
-            result = ComponentTestService.run_component_test_subprocess(
-                platform=request.platform,
-                component_name=component_name,
-                account_id=request.account_id,
-                account_info=account_info,
-                component_path=str(temp_py_path),
-                headless=False,  # 有头模式
-                screenshot_on_error=True
-            )
-            
-            # 7. 使用统一服务格式化响应 [*]
-            response = ComponentTestService.format_test_response(result)
-            
-            # 8. 使用统一服务保存测试历史 [*]
-            # [*] v4.18.2修复:使用异步方法保存测试历史
-            await ComponentTestService.save_test_history(
-                db=db,
-                component_name=component_name,
-                platform=request.platform,
-                account_id=request.account_id,
-                test_result=result,
-                version_id=None,  # 临时组件无版本ID
-                tested_by="recorder"
-            )
-            return response
-        finally:
-            # 9. 清理临时 Python 文件
-            try:
-                if temp_py_path.exists():
-                    temp_py_path.unlink()
-                    logger.info(f"Cleaned up temporary Python component file: {temp_py_path}")
-            except Exception as e:
-                logger.warning(f"Failed to cleanup temporary Python file: {e}")
-    
-    except HTTPException:
-        raise
-    except ValueError as ve:
-        # 密码解密失败等业务异常
-        raise HTTPException(status_code=500, detail=str(ve))
-    except RuntimeError as re:
-        # 测试进程失败等运行时异常
-        raise HTTPException(status_code=500, detail=str(re))
-    except Exception as e:
-        logger.error(f"Failed to test component: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"测试组件失败: {str(e)}")
-
-
 @router.post("/recorder/save")
 async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depends(get_async_db)):
     """
@@ -789,6 +907,7 @@ async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depend
             detail="仅支持保存 Python 组件，请提供 python_code。yaml_content 已废弃。",
         )
 
+    is_python_component = True  # 本接口仅保存 Python 组件
     try:
         project_root = Path(__file__).parent.parent.parent
 
@@ -809,9 +928,18 @@ async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depend
         # 4. 检查文件是否已存在
         file_exists = file_path.exists()
 
+        # 4.5 登录组件且提供 success_criteria 时，在写入前注入成功条件校验
+        code_to_write = request.python_code
+        if (
+            request.component_type == "login"
+            and request.success_criteria
+            and isinstance(request.success_criteria, dict)
+        ):
+            code_to_write = _inject_login_success_criteria_block(code_to_write, request.success_criteria)
+
         # 5. 保存文件
         with open(file_path, "w", encoding="utf-8") as f:
-            f.write(request.python_code)
+            f.write(code_to_write)
 
         logger.info(
             f"Python component saved: {request.platform}/{filename} "

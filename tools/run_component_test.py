@@ -43,17 +43,58 @@ async def main():
         # 用于存储步骤总数（step_start 时设置，step_success 时复用）
         progress_state = {'step_total': 0}
         
+        def _read_progress():
+            """读取当前 progress 并合并（用于 verification_required 等）"""
+            out = {'step_index': 0, 'step_total': 0, 'action': '', 'message': '', 'status': 'running'}
+            try:
+                if Path(progress_path).exists():
+                    with open(progress_path, 'r', encoding='utf-8') as f:
+                        out.update(json.load(f))
+            except Exception:
+                pass
+            return out
+
         async def progress_callback(event_type: str, data: dict):
             """写入进度文件供主进程轮询"""
             try:
                 # 更新步骤总数（从 step_start 获取）
                 if data.get('step_total', 0) > 0:
                     progress_state['step_total'] = data.get('step_total')
-                
+
                 step_index = data.get('step_index', 0)
                 step_total = progress_state['step_total'] or data.get('step_total', 0)
                 action = data.get('action', '')
-                
+
+                # 验证码暂停：合并写入，保留已有 progress/current_step 等
+                if event_type == 'verification_required':
+                    progress_data = _read_progress()
+                    progress_data.update({
+                        'status': 'verification_required',
+                        'verification_type': data.get('verification_type', 'graphical_captcha'),
+                        'verification_screenshot': data.get('verification_screenshot') or '',
+                        'message': '需要验证码，请在测试弹窗中输入并提交',
+                        'step_index': step_index,
+                        'step_total': step_total,
+                        'action': action,
+                    })
+                    print(f"[PROGRESS] verification_required: {progress_data.get('verification_type')}", file=sys.stderr)
+                    with open(progress_path, 'w', encoding='utf-8') as f:
+                        json.dump(progress_data, f, ensure_ascii=False)
+                    return
+                # 验证码超时：合并写入 status=failed, verification_timeout=true
+                if event_type == 'verification_timeout':
+                    progress_data = _read_progress()
+                    progress_data.update({
+                        'status': 'failed',
+                        'verification_timeout': True,
+                        'error': data.get('error', '验证码输入超时'),
+                        'message': data.get('error', '验证码输入超时'),
+                    })
+                    print(f"[PROGRESS] verification_timeout", file=sys.stderr)
+                    with open(progress_path, 'w', encoding='utf-8') as f:
+                        json.dump(progress_data, f, ensure_ascii=False)
+                    return
+
                 # 构建状态消息
                 if event_type == 'step_start':
                     message = f"正在执行步骤 {step_index}/{step_total}: {action}"
@@ -67,7 +108,7 @@ async def main():
                 else:
                     message = f"步骤 {step_index}/{step_total}: {action}"
                     status = 'running'
-                
+
                 progress_data = {
                     'event_type': event_type,
                     'step_index': step_index,
@@ -76,15 +117,15 @@ async def main():
                     'message': message,
                     'status': status
                 }
-                
+
                 print(f"[PROGRESS] {event_type}: step {step_index}/{step_total} - {action}", file=sys.stderr)
-                
+
                 with open(progress_path, 'w', encoding='utf-8') as f:
                     json.dump(progress_data, f, ensure_ascii=False)
             except Exception as e:
                 print(f"[WARN] Failed to write progress file: {e}", file=sys.stderr)
         
-        # 创建测试器（带进度回调）
+        # 创建测试器（带进度回调；test_dir 用于验证码回传轮询）
         tester = ComponentTester(
             platform=config['platform'],
             account_id=config['account_id'],
@@ -92,7 +133,8 @@ async def main():
             screenshot_on_error=config.get('screenshot_on_error', True),
             output_dir=config.get('output_dir'),
             account_info=config.get('account_info'),
-            progress_callback=progress_callback  # [*] v4.7.4: 传递进度回调
+            progress_callback=progress_callback,  # [*] v4.7.4: 传递进度回调
+            test_dir=config.get('test_dir'),  # 验证码回传：轮询 verification_response.json 的目录
         )
         
         # 仅支持 .py 组件路径；无路径时按组件名加载（Python 组件）

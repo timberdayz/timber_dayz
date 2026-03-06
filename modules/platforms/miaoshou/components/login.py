@@ -57,6 +57,30 @@ class MiaoshouLogin(LoginComponent):
                 except Exception:
                     pass
 
+        # 【恢复路径】若有回传的验证码/OTP，说明是「同页继续」，跳过 goto，直接填入并提交
+        # 必须放在 page.goto 之前，否则重试时会刷新页面导致账号密码和验证码状态丢失
+        params = (self.ctx.config or {}).get("params") or {}
+        captcha_code = params.get("captcha_code") or params.get("captcha")
+        otp = params.get("otp")
+        if captcha_code or otp:
+            value = (captcha_code or otp or "").strip()
+            if value:
+                _log("[MiaoshouLogin] 使用回传的验证码/OTP 填入并提交(同页继续)...")
+                try:
+                    inp = page.locator("input[placeholder*='验证码'], input[name*='captcha' i], input[name*='code' i]").first
+                    if await inp.count() > 0:
+                        await inp.fill(value, timeout=5000)
+                    await page.locator("button.login.login-button").first.click(timeout=3000)
+                    await asyncio.sleep(2.0)
+                    try:
+                        cur = str(getattr(page, "url", ""))
+                        if ("/welcome" in cur and "redirect=" not in cur) or await page.locator("button.login.login-button").count() == 0:
+                            _log("[MiaoshouLogin] 验证码提交后登录成功")
+                            return LoginResult(success=True, message="ok")
+                    except Exception:
+                        pass
+                except Exception as e:
+                    _log(f"[WARN] 回传验证码填入/提交异常: {e}")
 
         _log(f"[MiaoshouLogin] 步骤1: 打开登录页 -> {login_url}")
         try:
@@ -79,30 +103,6 @@ class MiaoshouLogin(LoginComponent):
                 return LoginResult(success=True, message="already logged in")
         except Exception:
             pass
-
-        # 若有回传的验证码/OTP(恢复任务),先填入并点击登录
-        params = (self.ctx.config or {}).get("params") or {}
-        captcha_code = params.get("captcha_code") or params.get("captcha")
-        otp = params.get("otp")
-        if captcha_code or otp:
-            value = (captcha_code or otp or "").strip()
-            if value:
-                _log("[MiaoshouLogin] 使用回传的验证码/OTP 填入并提交...")
-                try:
-                    inp = page.locator("input[placeholder*='验证码'], input[name*='captcha' i], input[name*='code' i]").first
-                    if await inp.count() > 0:
-                        await inp.fill(value, timeout=5000)
-                    await page.locator("button.login.login-button").first.click(timeout=3000)
-                    await asyncio.sleep(2.0)
-                    try:
-                        cur = str(getattr(page, "url", ""))
-                        if ("/welcome" in cur and "redirect=" not in cur) or await page.locator("button.login.login-button").count() == 0:
-                            _log("[MiaoshouLogin] 验证码提交后登录成功")
-                            return LoginResult(success=True, message="ok")
-                    except Exception:
-                        pass
-                except Exception as e:
-                    _log(f"[WARN] 回传验证码填入/提交异常: {e}")
 
         # 步骤2:填写用户名
         try:

@@ -92,6 +92,7 @@ class ComponentTester:
         output_dir: str = None,
         account_info: Dict[str, Any] = None,  # 新增：直接传入账号信息
         progress_callback: Callable[[str, dict], None] = None,  # [*] v4.7.3: 进度回调
+        test_dir: str = None,  # 验证码回传：轮询 verification_response.json 的目录
     ):
         """
         初始化测试器（v4.7.3增强：支持实时进度回调）
@@ -105,6 +106,7 @@ class ComponentTester:
             output_dir: 输出目录
             account_info: 账号信息字典（优先使用，避免从文件加载）
             progress_callback: 进度回调函数 (event_type: str, data: dict) -> None
+            test_dir: 测试目录（用于验证码回传时轮询 verification_response.json）
         """
         self.platform = platform
         self.account_id = account_id
@@ -113,10 +115,11 @@ class ComponentTester:
         self.screenshot_on_error = screenshot_on_error
         self._account_info = account_info  # 缓存传入的账号信息
         self.progress_callback = progress_callback  # [*] v4.7.3: 进度回调
-        
+        self.test_dir = Path(test_dir) if test_dir else None  # 验证码回传轮询目录
+
         # 组件加载器
         self.component_loader = ComponentLoader()
-        
+
         # 输出目录
         if output_dir is None:
             output_dir = Path(__file__).parent.parent / 'temp' / 'test_results'
@@ -355,6 +358,106 @@ class ComponentTester:
                 result.duration_ms = (end - start).total_seconds() * 1000
         
         return result
+
+    async def _run_login_with_verification_support(
+        self,
+        adapter,
+        page,
+        component_name: str,
+        result: ComponentTestResult,
+    ):
+        """执行登录并支持验证码暂停与回传：捕获 VerificationRequiredError 后写 progress、轮询 verification_response.json、同 page 填入继续。"""
+        from modules.apps.collection_center.executor_v2 import VerificationRequiredError
+
+        verification_timeout_seconds = 300  # 5 分钟
+        poll_interval_seconds = 2
+
+        try:
+            return await adapter.login(page)
+        except VerificationRequiredError as e:
+            verification_type = (e.verification_type or "graphical_captcha").strip().lower()
+            screenshot_path = e.screenshot_path
+
+            # 确保截图在 test_dir 内，便于后端 GET verification-screenshot 读取
+            verification_screenshot = "verification_screenshot.png"
+            if self.test_dir:
+                import shutil
+                dest = self.test_dir / verification_screenshot
+                if screenshot_path and Path(screenshot_path).exists():
+                    try:
+                        shutil.copy2(screenshot_path, dest)
+                        screenshot_path = str(dest)
+                    except Exception as ex:
+                        logger.warning(f"Copy verification screenshot to test_dir failed: {ex}")
+                else:
+                    # 组件可能未写截图，用当前页截图
+                    try:
+                        await page.screenshot(path=str(dest), timeout=5000)
+                        screenshot_path = str(dest)
+                    except Exception as ex:
+                        logger.warning(f"Page screenshot for verification failed: {ex}")
+            else:
+                verification_screenshot = Path(screenshot_path).name if screenshot_path else ""
+
+            if self.progress_callback:
+                try:
+                    import asyncio
+                    data = {
+                        "verification_type": verification_type,
+                        "verification_screenshot": verification_screenshot,
+                        "step_index": 1,
+                        "step_total": 1,
+                        "action": f"Execute Python component: {component_name}",
+                    }
+                    if asyncio.iscoroutinefunction(self.progress_callback):
+                        await self.progress_callback("verification_required", data)
+                    else:
+                        self.progress_callback("verification_required", data)
+                except Exception as cb_err:
+                    logger.warning(f"Progress callback error (ignored): {cb_err}")
+
+            # 轮询 verification_response.json
+            from modules.apps.collection_center.python_component_adapter import AdapterResult
+            response_file = self.test_dir / "verification_response.json" if self.test_dir else None
+            if not response_file:
+                result.error = "验证码需要回传，但 test_dir 未配置"
+                return AdapterResult(success=False, message=result.error)
+            value = None
+            for _ in range(verification_timeout_seconds // poll_interval_seconds):
+                await asyncio.sleep(poll_interval_seconds)
+                if response_file.exists():
+                    try:
+                        with open(response_file, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        value = data.get("captcha_code") or data.get("otp")
+                        if value:
+                            break
+                    except Exception:
+                        pass
+
+            if not value:
+                result.error = "验证码输入超时"
+                if self.progress_callback:
+                    try:
+                        merge_data = {"verification_timeout": True, "error": result.error}
+                        if asyncio.iscoroutinefunction(self.progress_callback):
+                            await self.progress_callback("verification_timeout", merge_data)
+                        else:
+                            self.progress_callback("verification_timeout", merge_data)
+                    except Exception:
+                        pass
+                return AdapterResult(success=False, message=result.error)
+
+            # 同一 page 继续：将回传值写入 adapter 的 ctx.config.params，再次执行 login
+            if adapter.ctx.config is None:
+                adapter.ctx.config = {}
+            params = adapter.ctx.config.setdefault("params", {})
+            if (verification_type or "").lower() in ("otp", "sms", "email_code"):
+                params["otp"] = value
+            else:
+                params["captcha_code"] = value
+
+            return await adapter.login(page)
     
     async def _test_python_component_with_browser(
         self,
@@ -386,24 +489,26 @@ class ComponentTester:
         
         try:
             async with async_playwright() as p:
-                # 启动浏览器
+                # 启动浏览器（有头模式加 --start-maximized 便于观察）
                 browser = await p.chromium.launch(
                     headless=self.headless,
-                    args=['--start-maximized']
+                    args=['--start-maximized'] if not self.headless else []
                 )
-                
+                # 有头模式：不固定 viewport，页面随窗口全屏；无头模式：固定 1920x1080 便于 CI
                 context = await browser.new_context(
-                    viewport={'width': 1920, 'height': 1080},
+                    viewport=None if not self.headless else {'width': 1920, 'height': 1080},
                     locale='zh-CN'
                 )
-                
                 page = await context.new_page()
                 
-                # v4.8.0: 创建适配器时传递步骤回调
+                # v4.8.0: 创建适配器时传递步骤回调；验证码回传时截图保存到 test_dir
+                adapter_config = {'output_dir': str(self.output_dir)}
+                if self.test_dir:
+                    adapter_config.setdefault('task', {})['screenshot_dir'] = str(self.test_dir)
                 adapter = create_adapter(
                     platform=self.platform,
                     account=account_info,
-                    config={'output_dir': str(self.output_dir)},
+                    config=adapter_config,
                     step_callback=self.progress_callback,  # v4.8.0: 传递回调
                     is_test_mode=True,  # v4.8.0: 标记为测试模式
                 )
@@ -431,10 +536,15 @@ class ComponentTester:
                         logger.warning(f"Progress callback error (ignored): {cb_err}")
                 
                 start_time = datetime.now()
-                
-                # 根据组件类型执行
+
+                # 根据组件类型执行（登录时支持验证码暂停与回传）
                 if component_type == 'login':
-                    exec_result = await adapter.login(page)
+                    exec_result = await self._run_login_with_verification_support(
+                        adapter=adapter,
+                        page=page,
+                        component_name=component_name,
+                        result=result,
+                    )
                 elif component_type == 'navigation':
                     exec_result = await adapter.navigate(page, target_page=component_name)
                 elif component_type == 'export':
@@ -743,20 +853,20 @@ class ComponentTester:
                         # 降级到普通上下文
                         browser = await p.chromium.launch(
                             headless=self.headless,
-                            args=['--disable-blink-features=AutomationControlled']
+                            args=(['--start-maximized'] if not self.headless else []) + ['--disable-blink-features=AutomationControlled']
                         )
                         context = await browser.new_context(
-                            viewport={'width': 1920, 'height': 1080}
+                            viewport=None if not self.headless else {'width': 1920, 'height': 1080}
                         )
                         page = await context.new_page()
                 else:
-                    # 普通模式：创建新的浏览器上下文
+                    # 普通模式：创建新的浏览器上下文（有头时最大化便于观察）
                     browser = await p.chromium.launch(
                         headless=self.headless,
-                        args=['--disable-blink-features=AutomationControlled']
+                        args=(['--start-maximized'] if not self.headless else []) + ['--disable-blink-features=AutomationControlled']
                     )
                     context = await browser.new_context(
-                        viewport={'width': 1920, 'height': 1080}
+                        viewport=None if not self.headless else {'width': 1920, 'height': 1080}
                     )
                     page = await context.new_page()
                 
