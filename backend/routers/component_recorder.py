@@ -117,9 +117,9 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
             except TypeError:
                 url_contains_values = [str(url_contains)]
         for val in url_contains_values:
-            msg = f\"登录后 URL 未包含预期片段: {val}\"
-            lines.append(f\"        if {val!r} not in current_url:\")
-            lines.append(f\"            return LoginResult(success=False, message={msg!r})\")
+            msg = f"登录后 URL 未包含预期片段: {val}"
+            lines.append(f"        if {val!r} not in current_url:")
+            lines.append(f"            return LoginResult(success=False, message={msg!r})")
 
     # url_not_contains: 字符串或字符串列表
     url_not_contains = crit.get("url_not_contains")
@@ -132,17 +132,17 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
             except TypeError:
                 url_not_values = [str(url_not_contains)]
         for val in url_not_values:
-            msg = f\"登录后 URL 仍包含禁止片段: {val}\"
-            lines.append(f\"        if {val!r} in current_url:\")
-            lines.append(f\"            return LoginResult(success=False, message={msg!r})\")
+            msg = f"登录后 URL 仍包含禁止片段: {val}"
+            lines.append(f"        if {val!r} in current_url:")
+            lines.append(f"            return LoginResult(success=False, message={msg!r})")
 
     # element_visible_selector: 登录成功后应可见的关键元素
     elem_sel = crit.get("element_visible_selector")
     if elem_sel:
-        msg = f\"登录后未找到预期元素: {elem_sel}\"
-        lines.append(f\"        _succ_elem = page.locator({elem_sel!r}).first\")
+        msg = f"登录后未找到预期元素: {elem_sel}"
+        lines.append(f"        _succ_elem = page.locator({elem_sel!r}).first")
         lines.append("        if await _succ_elem.count() == 0:")
-        lines.append(f\"            return LoginResult(success=False, message={msg!r})\")
+        lines.append(f"            return LoginResult(success=False, message={msg!r})")
         lines.append("        await _succ_elem.wait_for(state=\"visible\", timeout=10000)")
 
     # 若未配置任何字段，保持默认行为（视为成功）
