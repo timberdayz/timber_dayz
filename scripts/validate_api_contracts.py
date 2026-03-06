@@ -123,7 +123,8 @@ class APIContractValidator:
                     except_end = try_start + except_match.end()
                     
                     # 检查except块中是否有错误日志
-                    except_block_end = content.find('\n    ', except_end)
+                    # 从 except_end+1 开始查找，避免匹配到 except 行尾的 \n 导致 block 为空
+                    except_block_end = content.find('\n    ', except_end + 1)
                     if except_block_end == -1:
                         except_block_end = len(content)
                     

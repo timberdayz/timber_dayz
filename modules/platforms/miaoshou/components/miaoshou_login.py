@@ -38,9 +38,8 @@ class MiaoshouMiaoshouLogin(LoginComponent):
             value = (captcha_code or "").strip()
             if value:
                 try:
-                    _cap_inp = page.locator("input.captcha-text, input[placeholder*='验证码'], input[name*='captcha' i], input[name*='code' i]")
-                    if await _cap_inp.count() > 0:
-                        await _cap_inp.first.fill(value, timeout=5000)
+                    _cap_inp = page.locator("input.captcha-text, input[placeholder*='验证码'], input[name*='captcha' i], input[name*='code' i]").first
+                    await _cap_inp.fill(value, timeout=5000)
                     await page.locator("button.login, button.login.login-button, button:has-text('立即登录'), button.login").first.click(timeout=3000)
                     await asyncio.sleep(2.0)
                     cur = str(getattr(page, "url", ""))

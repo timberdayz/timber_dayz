@@ -30,6 +30,8 @@ from sqlalchemy import select
 
 from backend.models.database import get_db, get_async_db
 from backend.services.steps_to_python import generate_python_code
+from backend.utils.api_response import error_response
+from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
 from modules.core.db import PlatformAccount, ComponentVersion, ComponentTestHistory
 
@@ -114,7 +116,8 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
         else:
             try:
                 url_contains_values = list(url_contains)
-            except TypeError:
+            except TypeError as e:
+                logger.error(f"url_contains type conversion failed: {e}")
                 url_contains_values = [str(url_contains)]
         for val in url_contains_values:
             msg = f"登录后 URL 未包含预期片段: {val}"
@@ -129,7 +132,8 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
         else:
             try:
                 url_not_values = list(url_not_contains)
-            except TypeError:
+            except TypeError as e:
+                logger.error(f"url_not_contains type conversion failed: {e}")
                 url_not_values = [str(url_not_contains)]
         for val in url_not_values:
             msg = f"登录后 URL 仍包含禁止片段: {val}"
@@ -205,28 +209,28 @@ class RecorderSession:
                 try:
                     self.playwright_task.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    logger.warning("Subprocess didn't terminate, killing...")
+                    logger.error("Subprocess didn't terminate, killing...")
                     self.playwright_task.kill()
         except Exception as e:
-            logger.warning(f"Failed to cleanup subprocess: {e}")
+            logger.error(f"Failed to cleanup subprocess: {e}", exc_info=True)
         
         try:
             if self.page:
                 self.page.close()
         except Exception as e:
-            logger.warning(f"Failed to close page: {e}")
+            logger.error(f"Failed to close page: {e}", exc_info=True)
         
         try:
             if self.browser_context:
                 self.browser_context.close()
         except Exception as e:
-            logger.warning(f"Failed to close context: {e}")
+            logger.error(f"Failed to close context: {e}", exc_info=True)
         
         try:
             if self.browser:
                 self.browser.close()
         except Exception as e:
-            logger.warning(f"Failed to close browser: {e}")
+            logger.error(f"Failed to close browser: {e}", exc_info=True)
     
     def clear(self):
         """清空会话"""
@@ -367,6 +371,7 @@ def _analyze_python_code_for_lints(python_code: str) -> Dict[str, List[Dict[str,
     try:
         ast.parse(python_code)
     except SyntaxError as e:
+        logger.error("Python syntax error in lint check: %s", e)
         errors.append(
             {
                 "type": "syntax_error",
@@ -590,7 +595,12 @@ async def start_recording(
         account = result.scalar_one_or_none()
         
         if not account:
-            raise HTTPException(status_code=404, detail="账号不存在")
+            return error_response(
+                code=ErrorCode.DATA_NOT_FOUND,
+                message="账号不存在",
+                status_code=404,
+                recovery_suggestion="请检查账号ID是否正确，或在平台管理中先添加账号",
+            )
         
         # 启动录制会话
         recorder_session.start(
@@ -624,11 +634,17 @@ async def start_recording(
             }
         }
     
-    except HTTPException:
-        raise
+    except HTTPException as he:
+        logger.error(f"HTTPException in start_recording: {he.detail}", exc_info=True)
+        raise he
     except Exception as e:
         logger.error(f"Failed to start recording: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"启动录制失败: {str(e)}")
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message=f"启动录制失败: {str(e)}",
+            status_code=500,
+            recovery_suggestion="请确认 Playwright 已安装且账号配置正确，稍后重试",
+        )
 
 
 def _parse_inspector_output() -> Dict[str, Any]:
@@ -732,7 +748,7 @@ async def stop_recording():
                 recorder_session.playwright_task.wait(timeout=120)
                 logger.info("Playwright subprocess finished")
             except subprocess.TimeoutExpired:
-                logger.warning("Subprocess timeout, terminating...")
+                logger.error("Subprocess timeout, terminating...")
                 recorder_session.playwright_task.terminate()
                 recorder_session.playwright_task.wait(timeout=5)
         
@@ -753,7 +769,7 @@ async def stop_recording():
             try:
                 recorder_session.cleanup_sync()
             except Exception as e:
-                logger.warning(f"Error during browser cleanup: {e}")
+                logger.error(f"Error during browser cleanup: {e}", exc_info=True)
         
         threading.Thread(target=cleanup_thread, daemon=True).start()
         
@@ -810,7 +826,7 @@ async def stop_recording():
                     lint_errors = lint_result.get("errors", [])
                     lint_warnings = lint_result.get("warnings", [])
                 except Exception as e:
-                    logger.warning(f"Steps to Python generator failed: {e}", exc_info=True)
+                    logger.error(f"Steps to Python generator failed: {e}", exc_info=True)
 
             response = {
                 "success": True,
@@ -830,7 +846,12 @@ async def stop_recording():
     
     except Exception as e:
         logger.error(f"Failed to stop recording: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"停止录制失败: {str(e)}")
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message=f"停止录制失败: {str(e)}",
+            status_code=500,
+            recovery_suggestion="请稍后重试或检查录制会话状态",
+        )
 
 
 @router.post("/recorder/generate-python")
@@ -863,8 +884,13 @@ async def generate_python_from_steps(request: GeneratePythonRequest):
             "lint_warnings": lint_result.get("warnings", []) or [],
         }
     except Exception as e:
-        logger.warning(f"Generate Python failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"生成 Python 失败: {str(e)}")
+        logger.error(f"Generate Python failed: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message=f"生成 Python 失败: {str(e)}",
+            status_code=500,
+            recovery_suggestion="请检查步骤数据格式是否正确，或联系管理员",
+        )
 
 
 @router.get("/recorder/steps")
@@ -887,7 +913,12 @@ async def get_recording_steps():
     
     except Exception as e:
         logger.error(f"Failed to get recording steps: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取步骤失败: {str(e)}")
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message=f"获取步骤失败: {str(e)}",
+            status_code=500,
+            recovery_suggestion="请确认录制会话已启动，稍后重试",
+        )
 
 
 @router.post("/recorder/save")
@@ -902,9 +933,11 @@ async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depend
     from datetime import datetime
 
     if not request.python_code:
-        raise HTTPException(
+        return error_response(
+            code=ErrorCode.PARAMETER_INVALID,
+            message="仅支持保存 Python 组件，请提供 python_code。yaml_content 已废弃。",
             status_code=400,
-            detail="仅支持保存 Python 组件，请提供 python_code。yaml_content 已废弃。",
+            recovery_suggestion="请使用录制工具生成 Python 代码后保存",
         )
 
     is_python_component = True  # 本接口仅保存 Python 组件
@@ -915,7 +948,13 @@ async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depend
         try:
             ast.parse(request.python_code)
         except SyntaxError as e:
-            raise HTTPException(status_code=400, detail=f"Python 代码语法错误: {str(e)}")
+            logger.error(f"Python syntax error in save: {e}", exc_info=True)
+            return error_response(
+                code=ErrorCode.DATA_FORMAT_INVALID,
+                message=f"Python 代码语法错误: {str(e)}",
+                status_code=400,
+                recovery_suggestion="请检查 Python 代码语法，或使用「重新生成」按钮",
+            )
 
         # 2. 确定保存路径
         component_dir = project_root / "modules" / "platforms" / request.platform / "components"
@@ -1018,11 +1057,17 @@ async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depend
             }
         }
     
-    except HTTPException:
-        raise
+    except HTTPException as he:
+        logger.error("Re-raising HTTPException from save_component: %s", he)
+        raise he
     except Exception as e:
         logger.error(f"Failed to save component: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"保存组件失败: {str(e)}")
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message=f"保存组件失败: {str(e)}",
+            status_code=500,
+            recovery_suggestion="请检查文件权限和平台/组件名称，稍后重试",
+        )
 
 
 @router.post("/recorder/add-step")
@@ -1049,7 +1094,12 @@ async def add_recording_step(step: Dict[str, Any]):
     
     except Exception as e:
         logger.error(f"Failed to add recording step: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"添加步骤失败: {str(e)}")
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message=f"添加步骤失败: {str(e)}",
+            status_code=500,
+            recovery_suggestion="请确认录制会话处于活跃状态，稍后重试",
+        )
 
 
 @router.get("/recorder/status")
