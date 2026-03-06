@@ -457,12 +457,16 @@ echo "[DEBUG] End of docker-compose.deploy.yml"
 
 echo "[OK] Temporary compose file created"
 
-# [BOOTSTRAP] Phase 0.5: Clean .env file (remove CRLF and trailing whitespace)
+# [BOOTSTRAP] Phase 0.5: Clean .env file (remove CRLF, trailing whitespace, and strip outer double quotes)
 # Note: PRODUCTION_PATH is the working directory (set by caller or defaults to current directory)
+# .env.production 中含 |、%、@ 等字符的值用双引号包裹，便于 source 时不被 bash 误解析；
+# 此处去掉 .env.cleaned 中值两侧的双引号，使 docker-compose --env-file 得到裸值
 PRODUCTION_PATH="${PRODUCTION_PATH:-$(pwd)}"
-echo "[INFO] Phase 0.5: Cleaning .env file (removing CRLF and trailing whitespace)..."
+echo "[INFO] Phase 0.5: Cleaning .env file (removing CRLF, trailing whitespace, stripping outer double quotes)..."
 if [ -f "${PRODUCTION_PATH}/.env" ]; then
   sed -e 's/\r$//' -e 's/[ \t]*$//' "${PRODUCTION_PATH}/.env" > "${PRODUCTION_PATH}/.env.cleaned"
+  # Strip one level of double quotes: KEY="value" -> KEY=value (so docker-compose gets unquoted value)
+  sed -i 's/^\([A-Za-z_][A-Za-z0-9_]*\)="\(.*\)"$/\1=\2/' "${PRODUCTION_PATH}/.env.cleaned" 2>/dev/null || true
   echo "[OK] .env file cleaned: ${PRODUCTION_PATH}/.env.cleaned"
 else
   echo "[WARN] .env file not found at ${PRODUCTION_PATH}/.env, skipping cleaning"

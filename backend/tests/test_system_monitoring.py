@@ -10,7 +10,7 @@
 import pytest
 from httpx import AsyncClient
 from backend.main import app
-from backend.routers.auth import create_access_token
+from backend.utils.auth import create_access_token
 from modules.core.db import DimUser
 
 
