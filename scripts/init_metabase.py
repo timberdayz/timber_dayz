@@ -191,17 +191,28 @@ class MetabaseInitializer:
         return False
 
     def get_database_id(self, database_name: str) -> int | None:
-        """通过名称获取数据库 ID"""
+        """通过名称获取数据库 ID。若精确匹配失败，尝试常用别名（兼容云端 Metabase 中文显示名）"""
         if database_name in self._database_id_cache:
             return self._database_id_cache[database_name]
         
         response = self._api_request("GET", "/api/database")
         # 处理新版 Metabase API 返回格式: {"data": [...], "total": N}
         databases = response.get("data", response) if isinstance(response, dict) else response
-        for db in databases:
-            if db.get("name") == database_name:
-                self._database_id_cache[database_name] = db["id"]
-                return db["id"]
+        
+        # 尝试名称列表：配置名 + 常用别名（云端 Metabase 可能使用中文显示名）
+        names_to_try = [database_name]
+        if database_name == "xihong_erp":
+            names_to_try.extend(["我的Xihong ERP数据库", "西虹ERP数据库", "xihong_erp数据库"])
+        elif database_name not in ("我的Xihong ERP数据库", "西虹ERP数据库"):
+            names_to_try.extend(["我的Xihong ERP数据库", "西虹ERP数据库", "xihong_erp"])
+        
+        for name in names_to_try:
+            for db in databases:
+                if db.get("name") == name:
+                    self._database_id_cache[database_name] = db["id"]
+                    if name != database_name:
+                        self._log(f"使用别名 '{name}' 匹配到数据库 (ID: {db['id']})")
+                    return db["id"]
         
         return None
 
@@ -527,12 +538,17 @@ class MetabaseInitializer:
         if not self.authenticate():
             raise MetabaseAPIError("Metabase 认证失败")
         
-        # 获取数据库 ID
-        database_name = config.get("database", {}).get("name", "西虹ERP数据库")
+        # 获取数据库 ID（支持配置中的 name 及常用别名）
+        db_config = config.get("database", {})
+        database_name = db_config.get("name", "西虹ERP数据库")
         database_id = self.get_database_id(database_name)
         if not database_id:
-            self._log(f"数据库 '{database_name}' 不存在，请先在 Metabase 中添加数据源", "error")
-            raise MetabaseAPIError(f"数据库 '{database_name}' 不存在")
+            self._log(
+                f"数据库 '{database_name}' 及常用别名均未在 Metabase 中找到。"
+                "请在 Metabase 中添加数据源，或修改 config 中 database.name 与 Metabase 显示名完全一致。",
+                "error",
+            )
+            raise MetabaseAPIError(f"Metabase 配置文件错误：数据库 '{database_name}' 不存在")
         
         self._log(f"使用数据库: {database_name} (ID: {database_id})")
         
