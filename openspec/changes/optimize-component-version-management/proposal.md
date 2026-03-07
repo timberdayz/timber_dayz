@@ -1,28 +1,67 @@
-# Change: 组件版本管理优化（测试一致性、删除规则、验证码必选）
+# Change: 采集组件版本管理模块重构
 
 ## Why
 
-1. **测试 A 组件却执行 B 组件**：用户在组件版本管理页对某版本（如 `miaoshou_login` v1.0.0）点击「测试」时，后端按 `version.file_path` 正确加载了 `miaoshou_login.py` 的组件类，但测试分支中 `component_type == 'login'` 时调用的是 `adapter.login(page)`；适配器内部固定 `_load_component_class("login")`，实际执行的是 `login.py` 中的 `MiaoshouLogin`，导致测试结果与用户选中的版本完全不符，测试不可信。
-2. **禁用的组件无法删除**：删除按钮的显示条件为 `!row.is_stable && !row.is_testing`，而批量注册的组件默认 `is_stable=True`，因此即使用户禁用了组件，仍无法删除，无法清理废弃或重复的组件。
-3. **验证码步骤应为必选暂停**：当前生成的登录组件在验证码步骤使用「检测 DOM 存在且可见再截图并 raise」的逻辑；若 `is_visible()` 超时或异常会被 `except Exception: pass` 吞掉，脚本继续执行「点击登录」，导致流程跑完才报错。业务上图形验证码环节是必现的，应到达该步骤即截图并暂停，无需条件检测。
-4. **同平台多组件易混淆**：存在 `miaoshou login` 与 `miaoshou miaoshou_login` 等相似名称，缺少「实际执行文件」的可视化与冲突提示，容易造成「测 A 执行 B」的误判。
+录制相关能力已优化完毕，组件版本管理模块需基于需求重新设计，避免沿用旧设计带来的问题。业界主流实践（Polyaxon Component Hub、Mendix Marketplace、n8n Node Versioning、ScriptRunner Registry 等）均强调：**版本与执行明确绑定**、**实际执行文件可见**、**删除/启用规则清晰**。
+
+### 当前问题
+
+1. **测试 A 组件却执行 B 组件**：用户对 `miaoshou_login` v1.0.0 点击「测试」时，后端按 `version.file_path` 加载了 `miaoshou_login.py` 的组件类，但测试分支调用 `adapter.login(page)`，适配器内部固定 `_load_component_class("login")`，实际执行的是 `login.py`，导致测试不可信。
+2. **禁用的组件无法删除**：删除条件为 `!is_stable && !row.is_testing`，批量注册默认 `is_stable=True`，禁用后仍无法删除。
+3. **验证码步骤静默穿透**：图形验证码步骤使用 `count()>0` / `is_visible()` 检测，被 `except Exception: pass` 吞掉后继续点登录，与「到达即暂停」业务预期不符。
+4. **同平台多组件易混淆**：缺少「实际执行文件」的可视化与冲突提示，易造成「测 A 执行 B」误判。
+5. **以版本列表为主，缺少按能力组织**：无法快速看出「某平台某类型当前生产用哪个组件」。
+6. **组件唯一性缺失**：同一 (platform, component_type) 可存在多个 component_name（如 miaoshou/login 与 miaoshou/miaoshou_login），易导致生产执行到错误组件。
 
 ## What Changes
 
-- **测试执行必须使用选中版本对应的组件**：在组件版本测试路径中，当从 `file_path` 加载到具体组件类后，执行时必须使用该类（或通过适配器注入该类），不得再按 `component_type` 调用 `adapter.login()` / `adapter.navigate()` 等内部重新按模块名加载的接口，避免执行到其他文件中的实现。
-- **删除规则放宽**：允许在「非 A/B 测试中」且「已禁用」的版本上显示删除并执行删除；或明确「可删除 = 非测试中 && (已禁用 || 非稳定版)」，使批量注册的稳定版在禁用后可被清理。
-- **验证码步骤改为无条件暂停**：对录制/生成器中标记为图形验证码的步骤，生成的代码在该步骤**不**做 `count() > 0` / `is_visible()` 等条件判断，到达即截图并抛出 `VerificationRequiredError`，等待用户回传后再继续。
-- **组件版本管理体验增强**（可选）：列表或测试结果中展示「实际执行文件」、同平台同类型多稳定版时给出冲突提示、组件类型标签可视化，降低误操作与混淆。
+### 0. 组件唯一性与更新工作流（P0）
 
-**无破坏性变更**：API 路径与请求/响应结构保持不变；仅后端执行逻辑、删除校验条件与生成器输出内容变更。
+- **方案 A**：组件唯一性按 (platform, component_type) 约束，同一平台同一类型只允许一个逻辑组件；component_name 标准化为 `{platform}/{component_type}`（login/navigation）或 `{platform}/{domain}_export`（导出类）。
+- **方案 C**：录制保存时「更新该组件」而非新建组件；保存行为 = 为该组件创建**新版本**，不创建新的 component_name。
+- **版本工作流**：新版本默认非稳定；用户测试通过后「提升为稳定版」；生产仅使用稳定版。
+- **文件策略**：每个版本对应独立 file_path（如 `login_v1.1.0.py`），或采用主文件 + 草稿文件（`login.py` + `login_draft.py`）；提升稳定时草稿覆盖主文件。优先采用版本化文件名，便于回滚与并行测试。
+
+### 1. 测试执行与选中版本一致（P0）
+
+- 测试路径必须使用从 `version.file_path` 加载到的组件类执行，不得再按 component_type 调用 `adapter.login()` 等内部按模块名加载的接口。
+- 验证码回传后二次执行也须使用同一注入的组件类。
+- 所有 component_type（login、navigation、export、date_picker）均须支持注入。
+
+### 2. 验证码步骤 unconditional 暂停（P0）
+
+- 对图形验证码步骤，生成「到达即等待 1s → 截图 → raise VerificationRequiredError」，移除 `count()>0` / `is_visible()` 及 `except Exception: pass`。
+
+### 3. 删除规则放宽（P1）
+
+- 可删除条件：`!is_testing && !is_active`。批量注册的稳定版在禁用后也可删除。
+
+### 4. 组件版本管理体验增强（P1）
+
+- 列表与测试弹窗显式展示「实际执行文件」（file_path）。
+- 同平台同类型多稳定版时给出冲突提示。
+- 组件类型标签可视化。
+
+### 5. 前端页面结构重构（P2）
+
+- **Tab 1 概览**：统计卡片、最近活动、冲突告警、快速入口。
+- **Tab 2 按平台**：树形/分组浏览，按 platform → component_type → 组件，一眼看出当前生产用哪一版。
+- **Tab 3 全部版本**：表格视图，列包含「实际执行文件」，状态、成功率、操作。
+
+**无破坏性变更**：API 路径与请求/响应结构保持不变；仅后端执行逻辑、删除校验条件、生成器输出及前端展示结构变更。
 
 ## Impact
 
-- **受影响规范**：`data-collection`（组件测试执行、验证码步骤语义）、新增能力 `component-version-management`（版本管理删除规则与测试一致性）。
+- **受影响规范**：`data-collection`（组件测试执行、验证码步骤语义）、`component-version-management`（删除规则、测试一致性、UI 结构）。
 - **受影响代码**：
-  - `modules/apps/collection_center/python_component_adapter.py`（适配器支持注入/使用指定组件类）
-  - `tools/test_component.py`（测试时使用从 file_path 加载的组件类；验证码回传后二次执行也须使用注入类）
-  - `backend/services/steps_to_python.py`（验证码步骤生成无条件截图与 raise）
-  - `backend/routers/component_versions.py`（删除条件与可选冲突检测）
-  - `frontend/src/views/ComponentVersions.vue`（删除按钮显示条件、可选展示「实际执行文件」与冲突提示）
-- **已知局限（本变更不解决）**：生产采集执行器（executor_v2）仍通过 `adapter.login()` / `adapter.navigate()` 等按模块名加载组件，**不使用** ComponentVersion 的 file_path。版本管理中的「稳定版」「使用统计」「成功率」与实际生产执行可能不一致；用户测试通过的 `miaoshou_login` 与生产实际使用的 `login.py` 可能不同。此问题需后续变更（执行器按 ComponentVersionService 选版并加载 file_path）单独解决。
+  - `modules/core/db/schema.py`（可选：ComponentVersion 约束或校验逻辑）
+  - `backend/services/component_version_service.py`（component_name 标准化、唯一性校验）
+  - `backend/routers/component_recorder.py`（保存时更新已有组件、创建新版本，不新建 component_name）
+  - `backend/routers/component_versions.py`（删除条件、可选冲突检测、component_name 标准化）
+  - `modules/apps/collection_center/python_component_adapter.py`（适配器支持注入指定组件类）
+  - `modules/apps/collection_center/executor_v2.py`（按 component_type 构造 component_name 与版本服务一致）
+  - `tools/test_component.py`（测试时注入 component_class；验证码回传使用同一注入类）
+  - `backend/services/steps_to_python.py`（验证码步骤 unconditional）
+  - `frontend/src/views/ComponentVersions.vue`（删除按钮条件、实际执行文件展示、冲突提示、Tab 结构）
+  - `frontend/src/views/ComponentRecorder.vue`（保存时选择「更新现有组件」或由平台+类型推导目标组件）
+- **已知局限（本变更不解决）**：生产执行器仍按 ComponentVersionService 选版；若执行器未按 file_path 加载，版本管理的「稳定版」「使用统计」可能与生产实际不一致，需后续变更单独打通。
