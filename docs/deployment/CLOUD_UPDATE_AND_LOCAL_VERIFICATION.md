@@ -1,6 +1,6 @@
 # 云端部署更新与本地 Docker 验证指南
 
-本文档说明：**在数据表与 Metabase 模型/Question 发生较大变更后**，如何安全地更新云端部署，以及如何在本地用 Docker 做与生产一致的验证，**避免问题只在 CI/CD 阶段才暴露**。
+本文档说明：**在数据表与 Metabase 模型/Question 发生较大变更后**，如何安全地更新云端部署。云端 Metabase 访问与首次初始化见 [CLOUD_METABASE_ACCESS.md](./CLOUD_METABASE_ACCESS.md)。，以及如何在本地用 Docker 做与生产一致的验证，**避免问题只在 CI/CD 阶段才暴露**。
 
 ---
 

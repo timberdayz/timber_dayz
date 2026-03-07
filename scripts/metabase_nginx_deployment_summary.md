@@ -244,3 +244,13 @@ Metabase ↔ PostgreSQL (容器网络)
 - ⚠️ Metabase 端口映射问题（需要重新部署以应用锁定配置）
 
 **部署就绪**: ✅ **是** - 可以安全部署到生产环境
+
+---
+
+## 📋 部署检查清单（add-cloud-metabase-day1-access）
+
+部署前请确认：
+
+- [ ] **Metabase 访问方式**：运维已知云端 Metabase 仅通过 `/metabase/` 访问（不暴露 3000/8080 端口）。
+- [ ] **首次初始化**：首次部署后需在浏览器完成 Metabase 设置向导、管理员账号、PostgreSQL 数据源、API Key 创建，并将 `METABASE_API_KEY` 写入服务器 `.env` 后重新部署或单独执行 Phase 3.5。
+- [ ] **Nginx 变量 proxy_pass**：确认 Nginx 中所有使用变量的 `proxy_pass`（如 `proxy_pass http://$metabase_upstream`）都搭配了正确的 `rewrite` 规则，否则会导致 Metabase 白屏或 MIME type 错误。
