@@ -5,7 +5,7 @@
 """
 
 from typing import List, Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import not_, or_, select
@@ -14,6 +14,8 @@ import uuid
 import sys
 
 from backend.models.database import get_db, get_async_db, SessionLocal
+from backend.utils.api_response import error_response
+from backend.utils.error_codes import ErrorCode
 from backend.services.component_version_service import ComponentVersionService
 from modules.core.db import ComponentVersion, ComponentTestHistory
 from modules.core.logger import get_logger
@@ -331,7 +333,13 @@ async def list_versions(
         
     except Exception as e:
         logger.error(f"Failed to list versions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            str(e),
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/{version_id}", response_model=ComponentVersionResponse)
@@ -345,8 +353,13 @@ async def get_version(
         version = result.scalar_one_or_none()
         
         if not version:
-            raise HTTPException(status_code=404, detail="Version not found")
-        
+            return error_response(
+                ErrorCode.DATA_NOT_FOUND,
+                "Version not found",
+                status_code=404,
+                recovery_suggestion="请检查版本ID",
+            )
+
         return ComponentVersionResponse(
             id=version.id,
             component_name=version.component_name,
@@ -368,11 +381,15 @@ async def get_version(
             updated_at=version.updated_at.isoformat()
         )
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Failed to get version {version_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            str(e),
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.post("", response_model=ComponentVersionResponse)
@@ -416,7 +433,13 @@ async def register_version(
         
     except Exception as e:
         logger.error(f"Failed to register version: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            str(e),
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.post("/{version_id}/ab-test")
@@ -433,7 +456,7 @@ async def start_ab_test(
         result = await db.execute(select(ComponentVersion).where(ComponentVersion.id == version_id))
         version = result.scalar_one_or_none()
         if not version:
-            raise HTTPException(status_code=404, detail="Version not found")
+            return error_response(ErrorCode.DATA_NOT_FOUND, "Version not found", status_code=404, recovery_suggestion="请检查版本ID")
         
         # 启动A/B测试
         updated_version = service.start_ab_test(
@@ -457,11 +480,9 @@ async def start_ab_test(
             "test_end_at": updated_version.test_end_at.isoformat()
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Failed to start A/B test for version {version_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, str(e), status_code=500, detail=str(e), recovery_suggestion="请稍后重试")
 
 
 @router.post("/{version_id}/stop-ab-test")
@@ -475,10 +496,10 @@ async def stop_ab_test(
         result = await db.execute(select(ComponentVersion).where(ComponentVersion.id == version_id))
         version = result.scalar_one_or_none()
         if not version:
-            raise HTTPException(status_code=404, detail="Version not found")
+            return error_response(ErrorCode.DATA_NOT_FOUND, "Version not found", status_code=404, recovery_suggestion="请检查版本ID")
         
         if not version.is_testing:
-            raise HTTPException(status_code=400, detail="Version is not in A/B testing")
+            return error_response(ErrorCode.DATA_VALIDATION_FAILED, "Version is not in A/B testing", status_code=400, recovery_suggestion="请先加入A/B测试")
         
         # 停止测试
         version.is_testing = False
@@ -492,11 +513,9 @@ async def stop_ab_test(
             "message": "A/B测试已停止"
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Failed to stop A/B test for version {version_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, str(e), status_code=500, detail=str(e), recovery_suggestion="请稍后重试")
 
 
 @router.post("/{version_id}/promote")
@@ -512,7 +531,7 @@ async def promote_to_stable(
         result = await db.execute(select(ComponentVersion).where(ComponentVersion.id == version_id))
         version = result.scalar_one_or_none()
         if not version:
-            raise HTTPException(status_code=404, detail="Version not found")
+            return error_response(ErrorCode.DATA_NOT_FOUND, "Version not found", status_code=404, recovery_suggestion="请检查版本ID")
         
         # 提升为稳定版本
         updated_version = service.promote_to_stable(
@@ -527,11 +546,9 @@ async def promote_to_stable(
             "message": "已提升为稳定版本"
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Failed to promote version {version_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, str(e), status_code=500, detail=str(e), recovery_suggestion="请稍后重试")
 
 
 @router.patch("/{version_id}")
@@ -546,7 +563,7 @@ async def update_version(
         result = await db.execute(select(ComponentVersion).where(ComponentVersion.id == version_id))
         version = result.scalar_one_or_none()
         if not version:
-            raise HTTPException(status_code=404, detail="Version not found")
+            return error_response(ErrorCode.DATA_NOT_FOUND, "Version not found", status_code=404, recovery_suggestion="请检查版本ID")
         
         # 更新字段
         if request.is_active is not None:
@@ -563,11 +580,9 @@ async def update_version(
             "message": "版本已更新"
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Failed to update version {version_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, str(e), status_code=500, detail=str(e), recovery_suggestion="请稍后重试")
 
 
 @router.delete("/{version_id}")
@@ -587,12 +602,12 @@ async def delete_version(
         version = result.scalar_one_or_none()
 
         if not version:
-            raise HTTPException(status_code=404, detail="版本不存在")
+            return error_response(ErrorCode.DATA_NOT_FOUND, "版本不存在", status_code=404, recovery_suggestion="请检查版本ID")
 
         if version.is_testing:
-            raise HTTPException(status_code=400, detail="无法删除正在测试的版本,请先停止A/B测试")
+            return error_response(ErrorCode.DATA_VALIDATION_FAILED, "无法删除正在测试的版本,请先停止A/B测试", status_code=400, recovery_suggestion="请先停止A/B测试")
         if version.is_active:
-            raise HTTPException(status_code=400, detail="无法删除启用中的版本,请先禁用")
+            return error_response(ErrorCode.DATA_VALIDATION_FAILED, "无法删除启用中的版本,请先禁用", status_code=400, recovery_suggestion="请先禁用版本")
 
         # 记录删除信息
         component_name = version.component_name
@@ -648,12 +663,10 @@ async def delete_version(
             }
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"Failed to delete version {version_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"删除版本失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"删除版本失败: {str(e)}", status_code=500, detail=str(e), recovery_suggestion="请稍后重试")
 
 
 @router.get("/{component_name}/statistics")
@@ -674,7 +687,7 @@ async def get_component_statistics(
         
     except Exception as e:
         logger.error(f"Failed to get statistics for {component_name}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, str(e), status_code=500, detail=str(e), recovery_suggestion="请稍后重试")
 
 
 @router.post("/batch-register-python", response_model=BatchRegisterResponse)
@@ -864,7 +877,7 @@ async def batch_register_python_components(
     except Exception as e:
         await db.rollback()
         logger.error(f"Batch registration failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, str(e), status_code=500, detail=str(e), recovery_suggestion="请稍后重试")
 
 
 class ComponentTestRequest(BaseModel):
@@ -936,10 +949,10 @@ async def test_component_version(
         version = result.scalar_one_or_none()
         
         if not version:
-            raise HTTPException(status_code=404, detail="版本不存在")
+            return error_response(ErrorCode.DATA_NOT_FOUND, "版本不存在", status_code=404, recovery_suggestion="请检查版本ID")
         
         if not version.is_active:
-            raise HTTPException(status_code=400, detail="该版本已禁用,无法测试")
+            return error_response(ErrorCode.DATA_VALIDATION_FAILED, "该版本已禁用,无法测试", status_code=400, recovery_suggestion="请先启用版本")
         
         # 2. 验证账号
         from modules.core.db import PlatformAccount
@@ -949,7 +962,7 @@ async def test_component_version(
         account = account_result.scalar_one_or_none()
         
         if not account:
-            raise HTTPException(status_code=404, detail="账号不存在")
+            return error_response(ErrorCode.DATA_NOT_FOUND, "账号不存在", status_code=404, recovery_suggestion="请检查账号ID")
         
         # #region agent log
         with open(log_file, 'a', encoding='utf-8') as f:
@@ -966,7 +979,7 @@ async def test_component_version(
         component_path = project_root / version.file_path
         
         if not component_path.exists():
-            raise HTTPException(status_code=404, detail=f"组件文件不存在: {version.file_path}")
+            return error_response(ErrorCode.FILE_NOT_FOUND, f"组件文件不存在: {version.file_path}", status_code=404, recovery_suggestion="请检查组件路径或重新上传")
         
         # v4.8.0: 判断是 Python 组件还是 YAML 组件
         is_python_component = version.file_path.endswith('.py')
@@ -1227,29 +1240,27 @@ async def test_component_version(
             }
         }
     
-    except HTTPException:
-        raise
     except ValueError as ve:
         # #region agent log
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps({"location":"component_versions.py:660","message":"ValueError caught","data":{"error":str(ve)},"timestamp":__import__('datetime').datetime.now().isoformat(),"sessionId":"debug-session","hypothesisId":"H3"})+"\n")
         # #endregion
         # 密码解密失败等业务异常
-        raise HTTPException(status_code=500, detail=str(ve))
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, str(ve), status_code=500, detail=str(ve), recovery_suggestion="请稍后重试")
     except RuntimeError as re:
         # #region agent log
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps({"location":"component_versions.py:668","message":"RuntimeError caught","data":{"error":str(re)},"timestamp":__import__('datetime').datetime.now().isoformat(),"sessionId":"debug-session","hypothesisId":"H2"})+"\n")
         # #endregion
         # 测试进程失败等运行时异常
-        raise HTTPException(status_code=500, detail=str(re))
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, str(re), status_code=500, detail=str(re), recovery_suggestion="请稍后重试")
     except Exception as e:
         # #region agent log
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(json.dumps({"location":"component_versions.py:676","message":"General exception caught","data":{"error":str(e),"type":type(e).__name__},"timestamp":__import__('datetime').datetime.now().isoformat(),"sessionId":"debug-session","hypothesisId":"H1"})+"\n")
         # #endregion
         logger.error(f"Failed to test component version: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"测试组件失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"测试组件失败: {str(e)}", status_code=500, detail=str(e), recovery_suggestion="请稍后重试")
 
 
 @router.get("/{version_id}/test/{test_id}/status")
@@ -1282,7 +1293,7 @@ async def get_test_status(
     
     # 检查测试目录是否存在
     if not test_dir.exists():
-        raise HTTPException(status_code=404, detail=f"测试 {test_id} 不存在")
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"测试 {test_id} 不存在", status_code=404, recovery_suggestion="请检查测试ID")
     
     # 读取进度文件
     progress_data = {
@@ -1347,22 +1358,23 @@ async def get_test_verification_screenshot(
     project_root = Path(__file__).parent.parent.parent
     test_dir = project_root / "temp" / "component_tests" / test_id
     if not test_dir.exists():
-        raise HTTPException(status_code=404, detail=f"测试 {test_id} 不存在")
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"测试 {test_id} 不存在", status_code=404, recovery_suggestion="请检查测试ID")
     progress_path = test_dir / "progress.json"
     if not progress_path.exists():
-        raise HTTPException(status_code=404, detail="进度文件不存在")
+        return error_response(ErrorCode.FILE_NOT_FOUND, "进度文件不存在", status_code=404, recovery_suggestion="请重新发起测试")
     import json
     try:
         with open(progress_path, "r", encoding="utf-8") as f:
             progress_data = json.load(f)
-    except Exception:
-        raise HTTPException(status_code=500, detail="读取进度失败")
+    except Exception as ex:
+        logger.error(f"读取进度失败: {ex}")
+        return error_response(ErrorCode.FILE_READ_ERROR, "读取进度失败", status_code=500, detail=str(ex), recovery_suggestion="请重新发起测试")
     if progress_data.get("status") != "verification_required":
-        raise HTTPException(status_code=400, detail="当前测试不需要验证码截图")
+        return error_response(ErrorCode.PARAMETER_INVALID, "当前测试不需要验证码截图", status_code=400, recovery_suggestion="请确认测试状态")
     filename = progress_data.get("verification_screenshot") or "verification_screenshot.png"
     file_path = test_dir / filename
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="验证码截图文件不存在")
+        return error_response(ErrorCode.FILE_NOT_FOUND, "验证码截图文件不存在", status_code=404, recovery_suggestion="请上传验证码截图")
     return FileResponse(path=str(file_path), media_type="image/png", filename=filename)
 
 
@@ -1385,23 +1397,26 @@ async def post_test_resume(
     project_root = Path(__file__).parent.parent.parent
     test_dir = project_root / "temp" / "component_tests" / test_id
     if not test_dir.exists():
-        raise HTTPException(status_code=404, detail=f"测试 {test_id} 不存在")
+        return error_response(ErrorCode.DATA_NOT_FOUND, f"测试 {test_id} 不存在", status_code=404, recovery_suggestion="请检查测试ID")
     progress_path = test_dir / "progress.json"
     if not progress_path.exists():
-        raise HTTPException(status_code=400, detail="进度文件不存在")
+        return error_response(ErrorCode.FILE_NOT_FOUND, "进度文件不存在", status_code=400, recovery_suggestion="请重新发起测试")
     try:
         with open(progress_path, "r", encoding="utf-8") as f:
             progress_data = json.load(f)
-    except Exception:
-        raise HTTPException(status_code=500, detail="读取进度失败")
+    except Exception as ex:
+        logger.error(f"读取进度失败: {ex}")
+        return error_response(ErrorCode.FILE_READ_ERROR, "读取进度失败", status_code=500, detail=str(ex), recovery_suggestion="请重新发起测试")
     if progress_data.get("status") != "verification_required":
-        raise HTTPException(
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            "验证已超时或测试已结束，请重新发起测试",
             status_code=400,
-            detail="验证已超时或测试已结束，请重新发起测试",
+            recovery_suggestion="请重新发起测试",
         )
     value = body.captcha_code or body.otp
     if not value or not value.strip():
-        raise HTTPException(status_code=400, detail="请提供 captcha_code 或 otp")
+        return error_response(ErrorCode.PARAMETER_INVALID, "请提供 captcha_code 或 otp", status_code=400, recovery_suggestion="请填写验证码或OTP")
     response_data = {}
     if body.captcha_code:
         response_data["captcha_code"] = body.captcha_code.strip()
@@ -1413,7 +1428,7 @@ async def post_test_resume(
             json.dump(response_data, f, ensure_ascii=False)
     except Exception as e:
         logger.warning(f"Write verification_response.json failed: {e}")
-        raise HTTPException(status_code=500, detail="写入回传文件失败")
+        return error_response(ErrorCode.FILE_WRITE_ERROR, "写入回传文件失败", status_code=500, detail=str(e), recovery_suggestion="请稍后重试")
     return {"success": True, "message": "验证码已提交，测试将继续执行"}
 
 
@@ -1480,4 +1495,4 @@ async def get_test_history(
     
     except Exception as e:
         logger.error(f"Failed to get test history: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取测试历史失败: {str(e)}")
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取测试历史失败: {str(e)}", status_code=500, detail=str(e), recovery_suggestion="请稍后重试")

@@ -4,10 +4,13 @@ Dashboard API路由
 [add-dashboard-redis-cache-performance] Redis 缓存支持
 """
 
-from fastapi import APIRouter, HTTPException, Query, Depends, Request
+import json
+from fastapi import APIRouter, Query, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import Optional, Dict, Any, List
 from modules.core.logger import get_logger
+from backend.utils.api_response import success_response, error_response
+from backend.utils.error_codes import ErrorCode
 from backend.services.metabase_question_service import (
     get_metabase_service,
     MetabaseUnavailableError,
@@ -26,35 +29,20 @@ def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
     return {k: "" if v is None else str(v) for k, v in params.items()}
 
 
-def success_response(data: Any = None, message: str = "操作成功") -> Dict[str, Any]:
-    """统一成功响应格式"""
-    return {
-        "success": True,
-        "data": data,
-        "message": message
-    }
-
-
-def error_response(message: str, error_code: str = None) -> Dict[str, Any]:
-    """统一错误响应格式"""
-    return {
-        "success": False,
-        "data": None,
-        "message": message,
-        # 统一放在 error.code，方便前端拦截器读取；同时保留顶层 error_code 以兼容旧逻辑
-        "error": {"code": error_code} if error_code else None,
-        "error_code": error_code,
-    }
-
-
 METABASE_UNAVAILABLE_ERROR_CODE = "METABASE_UNAVAILABLE"
 
 
 def metabase_unavailable_response(message: str = "Metabase服务暂时不可用，请稍后重试") -> JSONResponse:
-    """Metabase 不可用时的统一响应"""
+    """Metabase 不可用时的统一响应（保留 error_code 字符串供前端区分）"""
     return JSONResponse(
         status_code=503,
-        content=error_response(message=message, error_code=METABASE_UNAVAILABLE_ERROR_CODE),
+        content={
+            "success": False,
+            "data": None,
+            "message": message,
+            "error": {"code": METABASE_UNAVAILABLE_ERROR_CODE},
+            "error_code": METABASE_UNAVAILABLE_ERROR_CODE,
+        },
     )
 
 
@@ -110,22 +98,33 @@ async def get_business_overview_kpi(
         logger.info(f"[KPI查询] 参数: month={month}, platform={platform}")
 
         result = await service.query_question("business_overview_kpi", metabase_params)
-        response = success_response(data=result)
-
-        # 仅成功时写入缓存
+        resp = success_response(data=result)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("dashboard_kpi", response, **cache_params)
-
-        return JSONResponse(content=response, headers={"X-Cache": cache_status})
+            await request.app.state.cache_service.set(
+                "dashboard_kpi", json.loads(resp.body.decode()), **cache_params
+            )
+        resp.headers["X-Cache"] = cache_status
+        return resp
     except MetabaseUnavailableError as e:
         logger.warning(f"业务概览KPI查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"业务概览KPI查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"业务概览KPI查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 def _normalize_comparison_date(date_str: str) -> str:
@@ -161,25 +160,37 @@ async def get_business_overview_comparison(
         if request and hasattr(request.app.state, "cache_service"):
             cached = await request.app.state.cache_service.get("dashboard_comparison", **cache_params)
             if cached is not None:
-                return cached
+                return JSONResponse(content=cached)
 
         service = get_metabase_service()
         metabase_params = {k: v for k, v in params.items() if v is not None}
         result = await service.query_question("business_overview_comparison", metabase_params)
-        response = success_response(data=result)
-
+        resp = success_response(data=result)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("dashboard_comparison", response, **cache_params)
-        return response
+            await request.app.state.cache_service.set(
+                "dashboard_comparison", json.loads(resp.body.decode()), **cache_params
+            )
+        return resp
     except MetabaseUnavailableError as e:
         logger.warning(f"业务概览对比查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"业务概览对比查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"业务概览对比查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/business-overview/shop-racing")
@@ -200,25 +211,37 @@ async def get_business_overview_shop_racing(
         if request and hasattr(request.app.state, "cache_service"):
             cached = await request.app.state.cache_service.get("dashboard_shop_racing", **cache_params)
             if cached is not None:
-                return cached
+                return JSONResponse(content=cached)
 
         service = get_metabase_service()
         metabase_params = {k: v for k, v in params.items() if v is not None}
         result = await service.query_question("business_overview_shop_racing", metabase_params)
-        response = success_response(data=result)
-
+        resp = success_response(data=result)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("dashboard_shop_racing", response, **cache_params)
-        return response
+            await request.app.state.cache_service.set(
+                "dashboard_shop_racing", json.loads(resp.body.decode()), **cache_params
+            )
+        return resp
     except MetabaseUnavailableError as e:
         logger.warning(f"店铺赛马数据查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"店铺赛马数据查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"店铺赛马数据查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/business-overview/traffic-ranking")
@@ -242,25 +265,37 @@ async def get_business_overview_traffic_ranking(
         if request and hasattr(request.app.state, "cache_service"):
             cached = await request.app.state.cache_service.get("dashboard_traffic_ranking", **cache_params)
             if cached is not None:
-                return cached
+                return JSONResponse(content=cached)
 
         service = get_metabase_service()
         metabase_params = {k: v for k, v in params.items() if v is not None}
         result = await service.query_question("business_overview_traffic_ranking", metabase_params)
-        response = success_response(data=result)
-
+        resp = success_response(data=result)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("dashboard_traffic_ranking", response, **cache_params)
-        return response
+            await request.app.state.cache_service.set(
+                "dashboard_traffic_ranking", json.loads(resp.body.decode()), **cache_params
+            )
+        return resp
     except MetabaseUnavailableError as e:
         logger.warning(f"流量排名数据查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"流量排名数据查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"流量排名数据查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/business-overview/inventory-backlog")
@@ -280,26 +315,38 @@ async def get_business_overview_inventory_backlog(
         if request and hasattr(request.app.state, "cache_service"):
             cached = await request.app.state.cache_service.get("dashboard_inventory_backlog", **cache_params)
             if cached is not None:
-                return cached
+                return JSONResponse(content=cached)
 
         service = get_metabase_service()
         metabase_params = {"days": str(days) if days else None, "platforms": platforms, "shops": shops}
         metabase_params = {k: v for k, v in metabase_params.items() if v is not None}
         result = await service.query_question("business_overview_inventory_backlog", metabase_params)
-        response = success_response(data=result)
-
+        resp = success_response(data=result)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("dashboard_inventory_backlog", response, **cache_params)
-        return response
+            await request.app.state.cache_service.set(
+                "dashboard_inventory_backlog", json.loads(resp.body.decode()), **cache_params
+            )
+        return resp
     except MetabaseUnavailableError as e:
         logger.warning(f"库存积压数据查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"库存积压数据查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"库存积压数据查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/business-overview/operational-metrics")
@@ -322,25 +369,37 @@ async def get_business_overview_operational_metrics(
         if request and hasattr(request.app.state, "cache_service"):
             cached = await request.app.state.cache_service.get("dashboard_operational_metrics", **cache_params)
             if cached is not None:
-                return cached
+                return JSONResponse(content=cached)
 
         service = get_metabase_service()
         metabase_params = {k: v for k, v in params.items() if v is not None}
         result = await service.query_question("business_overview_operational_metrics", metabase_params)
-        response = success_response(data=result)
-
+        resp = success_response(data=result)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("dashboard_operational_metrics", response, **cache_params)
-        return response
+            await request.app.state.cache_service.set(
+                "dashboard_operational_metrics", json.loads(resp.body.decode()), **cache_params
+            )
+        return resp
     except MetabaseUnavailableError as e:
         logger.warning(f"经营指标数据查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"经营指标数据查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"经营指标数据查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/clearance-ranking")
@@ -368,7 +427,7 @@ async def get_clearance_ranking(
         if request and hasattr(request.app.state, "cache_service"):
             cached = await request.app.state.cache_service.get("dashboard_clearance_ranking", **cache_params)
             if cached is not None:
-                return cached
+                return JSONResponse(content=cached)
 
         service = get_metabase_service()
         metabase_params = {
@@ -380,20 +439,32 @@ async def get_clearance_ranking(
         }
         metabase_params = {k: v for k, v in metabase_params.items() if v is not None}
         result = await service.query_question("clearance_ranking", metabase_params)
-        response = success_response(data=result)
-
+        resp = success_response(data=result)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("dashboard_clearance_ranking", response, **cache_params)
-        return response
+            await request.app.state.cache_service.set(
+                "dashboard_clearance_ranking", json.loads(resp.body.decode()), **cache_params
+            )
+        return resp
     except MetabaseUnavailableError as e:
         logger.warning(f"清仓排名数据查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"清仓排名数据查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"清仓排名数据查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/annual-summary/kpi")
@@ -439,19 +510,33 @@ async def get_annual_summary_kpi(
         result["gross_margin"] = cost_agg["gross_margin"]
         result["net_margin"] = cost_agg["net_margin"]
 
-        response = success_response(data=result)
+        resp = success_response(data=result)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("annual_summary_kpi", response, **cache_params)
-        return JSONResponse(content=response, headers={"X-Cache": cache_status})
+            await request.app.state.cache_service.set(
+                "annual_summary_kpi", json.loads(resp.body.decode()), **cache_params
+            )
+        resp.headers["X-Cache"] = cache_status
+        return resp
     except MetabaseUnavailableError as e:
         logger.warning(f"年度总结KPI查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"年度总结KPI查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"年度总结KPI查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/annual-summary/by-shop")
@@ -480,16 +565,30 @@ async def get_annual_summary_by_shop(
             cache_status = "MISS"
         from backend.services.annual_cost_aggregate import get_annual_cost_aggregate_by_shop
         data = await get_annual_cost_aggregate_by_shop(db, granularity, period)
-        response = success_response(data=data)
+        resp = success_response(data=data)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("annual_summary_by_shop", response, **cache_params)
-        return JSONResponse(content=response, headers={"X-Cache": cache_status})
+            await request.app.state.cache_service.set(
+                "annual_summary_by_shop", json.loads(resp.body.decode()), **cache_params
+            )
+        resp.headers["X-Cache"] = cache_status
+        return resp
     except ValueError as e:
         logger.error(f"年度总结按店铺查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"年度总结按店铺查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/annual-summary/trend")
@@ -517,19 +616,33 @@ async def get_annual_summary_trend(
         service = get_metabase_service()
         result = await service.query_question("annual_summary_trend", {"granularity": granularity, "period": period})
         data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
-        response = success_response(data=data)
+        resp = success_response(data=data)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("annual_summary_trend", response, **cache_params)
-        return JSONResponse(content=response, headers={"X-Cache": cache_status})
+            await request.app.state.cache_service.set(
+                "annual_summary_trend", json.loads(resp.body.decode()), **cache_params
+            )
+        resp.headers["X-Cache"] = cache_status
+        return resp
     except ValueError as e:
         if "Question ID 未找到" in str(e) or "METABASE" in str(e):
             logger.warning(f"年度总结趋势 Metabase 未配置: {e}")
-            return JSONResponse(content=success_response(data=[]))
+            return success_response(data=[])
         logger.error(f"年度总结趋势查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"年度总结趋势查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/annual-summary/platform-share")
@@ -557,19 +670,33 @@ async def get_annual_summary_platform_share(
         service = get_metabase_service()
         result = await service.query_question("annual_summary_platform_share", {"granularity": granularity, "period": period})
         data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
-        response = success_response(data=data)
+        resp = success_response(data=data)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("annual_summary_platform_share", response, **cache_params)
-        return JSONResponse(content=response, headers={"X-Cache": cache_status})
+            await request.app.state.cache_service.set(
+                "annual_summary_platform_share", json.loads(resp.body.decode()), **cache_params
+            )
+        resp.headers["X-Cache"] = cache_status
+        return resp
     except ValueError as e:
         if "Question ID 未找到" in str(e) or "METABASE" in str(e):
             logger.warning(f"年度总结平台占比 Metabase 未配置: {e}")
-            return JSONResponse(content=success_response(data=[]))
+            return success_response(data=[])
         logger.error(f"年度总结平台占比查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"年度总结平台占比查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 
 
 @router.get("/annual-summary/target-completion")
@@ -647,14 +774,28 @@ async def get_annual_summary_target_completion(
             "achieved_profit": None,
             "achievement_rate_profit": None,
         }
-        response = success_response(data=data)
+        resp = success_response(data=data)
         if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set("annual_summary_target_completion", response, **cache_params)
-        return JSONResponse(content=response, headers={"X-Cache": cache_status})
+            await request.app.state.cache_service.set(
+                "annual_summary_target_completion", json.loads(resp.body.decode()), **cache_params
+            )
+        resp.headers["X-Cache"] = cache_status
+        return resp
     except ValueError as e:
         logger.error(f"年度总结目标完成率查询失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            str(e),
+            status_code=400,
+            recovery_suggestion="请检查请求参数",
+        )
     except Exception as e:
         logger.error(f"年度总结目标完成率查询异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return error_response(
+            ErrorCode.DATABASE_QUERY_ERROR,
+            f"查询失败: {str(e)}",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
 

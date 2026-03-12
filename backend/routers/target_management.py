@@ -64,9 +64,11 @@ async def require_admin(current_user: DimUser = Depends(get_current_user)):
     )
     
     if not is_admin:
-        raise HTTPException(
+        return error_response(
+            ErrorCode.PERMISSION_DENIED,
+            "Insufficient permissions: Admin access required",
             status_code=403,
-            detail="Insufficient permissions: Admin access required"
+            recovery_suggestion="请联系管理员获取权限",
         )
     return current_user
 
