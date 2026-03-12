@@ -1386,21 +1386,25 @@ const regeneratePython = async () => {
 
 const saveComponent = async () => {
   try {
-    if (!recorderForm.value.componentName) {
-      ElMessage.warning("请输入组件名称");
-      return;
-    }
-
     if (!pythonCode.value || !pythonCode.value.trim()) {
       ElMessage.warning("当前只支持保存 Python 组件，请先生成或编辑 Python 代码");
+      return;
+    }
+    if (recorderForm.value.componentType === "export" && !recorderForm.value.dataDomain) {
+      ElMessage.warning("导出组件必须选择数据域");
       return;
     }
 
     const payload = {
       platform: recorderForm.value.platform,
       component_type: recorderForm.value.componentType,
-      component_name: recorderForm.value.componentName,
     };
+    if (recorderForm.value.componentType === "export") {
+      payload.data_domain = recorderForm.value.dataDomain;
+      if (recorderForm.value.dataDomain === "services" && recorderForm.value.subDomain) {
+        payload.sub_domain = recorderForm.value.subDomain;
+      }
+    }
     payload.python_code = pythonCode.value.trim();
     if (
       recorderForm.value.componentType === "login" &&

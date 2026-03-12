@@ -573,38 +573,26 @@ async def update_version(
 @router.delete("/{version_id}")
 async def delete_version(
     version_id: int,
+    request: Request = None,
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    删除组件版本(v4.8.0 新增)
-
-    行为:
-    - 删除 ComponentVersion 记录
-    - 若该 file_path 无其他版本引用，则同时删除磁盘上的 .py 文件
-    - 若版本正在使用中(is_stable=True 或 is_testing=True)，需先取消稳定/测试状态
+    删除组件版本。可删除条件: !is_testing && !is_active (非测试中且已禁用)。
+    稳定版在禁用后也可删除。
     """
     from pathlib import Path
 
     try:
-        # 获取版本
         result = await db.execute(select(ComponentVersion).where(ComponentVersion.id == version_id))
         version = result.scalar_one_or_none()
 
         if not version:
             raise HTTPException(status_code=404, detail="版本不存在")
 
-        # 检查是否可以删除
-        if version.is_stable:
-            raise HTTPException(
-                status_code=400,
-                detail="无法删除稳定版本,请先取消稳定状态或提升其他版本为稳定版本"
-            )
-
         if version.is_testing:
-            raise HTTPException(
-                status_code=400,
-                detail="无法删除正在测试的版本,请先停止A/B测试"
-            )
+            raise HTTPException(status_code=400, detail="无法删除正在测试的版本,请先停止A/B测试")
+        if version.is_active:
+            raise HTTPException(status_code=400, detail="无法删除启用中的版本,请先禁用")
 
         # 记录删除信息
         component_name = version.component_name
@@ -639,7 +627,16 @@ async def delete_version(
                 logger.warning(f"Failed to delete file {file_path}: {e}")
 
         logger.info(f"Deleted version: {component_name} v{version_str} (file: {file_path}, file_deleted={file_deleted})")
-        
+
+        # 失效组件版本列表缓存，避免列表显示已删除的版本
+        if request and hasattr(request.app.state, "cache_service"):
+            try:
+                cache_service = request.app.state.cache_service
+                await cache_service.invalidate("component_versions")
+                logger.debug("[Cache] component_versions invalidated after delete")
+            except Exception as ce:
+                logger.warning(f"[Cache] Failed to invalidate component_versions: {ce}")
+
         return {
             "success": True,
             "message": f"已删除版本 {component_name} v{version_str}",
@@ -700,7 +697,11 @@ async def batch_register_python_components(
     import importlib.util
     from pathlib import Path
     from datetime import datetime
-    
+    from backend.services.component_name_utils import (
+        parse_filename_to_component_and_version,
+        is_standard_component_name,
+    )
+
     SUPPORTED_PLATFORMS = ["shopee", "tiktok", "miaoshou"]
     project_root = Path(__file__).parent.parent.parent
     platforms_dir = project_root / "modules" / "platforms"
@@ -729,9 +730,15 @@ async def batch_register_python_components(
                 if py_file.name.startswith("__"):
                     continue
                 
-                component_name = f"{platform}/{py_file.stem}"
+                comp_name, default_version = parse_filename_to_component_and_version(
+                    py_file.name, platform
+                )
+                if not comp_name:
+                    continue
+                component_name = comp_name
                 relative_path = str(py_file.relative_to(project_root)).replace("\\", "/")
-                default_version = "1.0.0"
+                if not is_standard_component_name(component_name):
+                    logger.warning(f"Non-standard component_name (will register): {component_name}")
                 
                 try:
                     # 先提取组件类型(用于后续更新描述)
@@ -805,13 +812,13 @@ async def batch_register_python_components(
                             logger.info(f"Updated Python component file_path: {component_name} -> {relative_path}")
                             continue
                     
-                    # 注册新版本
+                    # 注册新版本，默认非稳定（与录制保存一致）
                     new_version = ComponentVersion(
                         component_name=component_name,
-                        version="1.0.0",
+                        version=default_version,
                         file_path=relative_path,
                         description=f"Python component: {component_type}",
-                        is_stable=True,
+                        is_stable=False,
                         is_active=True,
                         created_at=datetime.utcnow(),
                         updated_at=datetime.utcnow()
@@ -821,7 +828,7 @@ async def batch_register_python_components(
                     results.append(BatchRegisterResult(
                         component_name=component_name,
                         file_path=relative_path,
-                        version="1.0.0",
+                        version=default_version,
                         status="registered",
                         error=None
                     ))
@@ -974,15 +981,18 @@ async def test_component_version(
                     platform = path_parts[platform_idx]
                 else:
                     platform = version.component_name.split('/')[0]
-            else:
-                platform = version.component_name.split('/')[0]
             component_config = {}  # Python 组件不需要 YAML 配置
         else:
             # YAML 组件
             with open(component_path, 'r', encoding='utf-8') as f:
                 component_config = yaml.safe_load(f)
             platform = component_config.get('platform', version.component_name.split('/')[0])
-        component_name = component_path.stem
+        # 使用逻辑组件名（如 login、orders_export），供 component_loader 按类名约定查找；不用 file_path.stem（如 login_v1_0_0）否则找不到类
+        component_name = (
+            version.component_name.split("/")[-1]
+            if "/" in version.component_name
+            else component_path.stem
+        )
         
         # 4. 使用统一服务准备账号信息 [*]
         account_info = ComponentTestService.prepare_account_info(account)

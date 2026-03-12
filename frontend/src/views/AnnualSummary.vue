@@ -256,6 +256,7 @@ function onGranularityChange() {
   loadData()
 }
 
+const loadDataRetried = ref(false)
 async function loadData() {
   if (!period.value) return
   loading.value = true
@@ -315,9 +316,24 @@ async function loadData() {
     costData.value[4].sub = '(GMV-COGS)/GMV'
     costData.value[5].value = data.net_margin != null ? ratioDisplayStrict(data.net_margin) : '0.00%'
     costData.value[5].sub = '(GMV-总成本)/GMV'
+    loadDataRetried.value = false
     loadExtensionData()
   } catch (err) {
-    handleApiError(err, { showMessage: true, logError: true })
+    const isUnavailable = err && (err.code === 'METABASE_UNAVAILABLE' || err.error_code === 'METABASE_UNAVAILABLE')
+    const isTimeout = err && (err.code === 'ECONNABORTED' || (err.message && String(err.message).toLowerCase().includes('timeout')))
+    if (isUnavailable || isTimeout) {
+      if (!loadDataRetried.value) {
+        loadDataRetried.value = true
+        loading.value = false
+        return loadData()
+      }
+      const msg = isUnavailable
+        ? 'Metabase 服务暂时不可用，请稍后点击「刷新数据」重试'
+        : '请求超时，请稍后点击「刷新数据」重试'
+      ElMessage.warning(msg)
+    } else {
+      handleApiError(err, { showMessage: true, logError: true })
+    }
   } finally {
     loading.value = false
   }
@@ -358,10 +374,16 @@ async function loadExtensionData() {
     achievement_rate_profit: tc.achievement_rate_profit ?? null,
   }
   if (trendResult.status === 'rejected') {
-    handleApiError(trendResult.reason, { showMessage: false, logError: true })
+    const err = trendResult.reason
+    if (!(err && (err.code === 'METABASE_UNAVAILABLE' || err.error_code === 'METABASE_UNAVAILABLE'))) {
+      handleApiError(err, { showMessage: false, logError: true })
+    }
   }
   if (shareResult.status === 'rejected') {
-    handleApiError(shareResult.reason, { showMessage: false, logError: true })
+    const err = shareResult.reason
+    if (!(err && (err.code === 'METABASE_UNAVAILABLE' || err.error_code === 'METABASE_UNAVAILABLE'))) {
+      handleApiError(err, { showMessage: false, logError: true })
+    }
   }
   try {
     await nextTick()

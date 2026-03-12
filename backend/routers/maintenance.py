@@ -5,6 +5,8 @@
 提供缓存清理、数据清理、系统升级等功能
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -57,7 +59,10 @@ async def get_cache_status(
             redis_connected=status.get("redis_connected", False),
             redis_memory_used=status.get("redis_memory_used"),
             redis_keys_count=status.get("redis_keys_count"),
-            app_cache_size=status.get("app_cache_size")
+            app_cache_size=status.get("app_cache_size"),
+            hits=status.get("cache_hits"),
+            misses=status.get("cache_misses"),
+            hit_rate=status.get("cache_hit_rate")
         )
     except Exception as e:
         logger.error(f"获取缓存状态失败: {e}", exc_info=True)

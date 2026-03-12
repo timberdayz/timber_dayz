@@ -6,6 +6,7 @@ Metabase Question查询服务
 
 import asyncio
 import os
+import time
 import httpx
 import yaml
 from pathlib import Path
@@ -13,6 +14,10 @@ from typing import Dict, Any, Optional, List
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class MetabaseUnavailableError(Exception):
+    """Metabase 当前不可用或熔断打开"""
 
 # 禁用代理,避免通过代理连接 localhost
 # 设置环境变量,让 httpx 不使用代理
@@ -81,6 +86,66 @@ class MetabaseQuestionService:
         
         # HTTP客户端(支持异步)；Metabase 首次查询或复杂 Question 可能较慢，超时设为 60 秒
         self.client = httpx.AsyncClient(timeout=60.0)
+
+        # 集中维护的健康状态与熔断配置
+        self._health_lock: asyncio.Lock = asyncio.Lock()
+        self._health_state: Dict[str, Any] = {
+            "consecutive_failures": 0,
+            "circuit_open_until": 0.0,  # epoch seconds，0 表示未打开
+        }
+        self._failure_threshold: int = int(
+            os.getenv("METABASE_CIRCUIT_FAILURE_THRESHOLD", "3")
+        )
+        self._circuit_open_seconds: int = int(
+            os.getenv("METABASE_CIRCUIT_OPEN_SECONDS", "60")
+        )
+
+    async def _check_circuit(self) -> None:
+        """在发起 Metabase 请求前检查熔断状态，必要时快速失败"""
+        async with self._health_lock:
+            now = time.time()
+            circuit_open_until = float(self._health_state.get("circuit_open_until") or 0.0)
+            if circuit_open_until and circuit_open_until > now:
+                logger.warning(
+                    "[Metabase] 熔断已打开，拒绝本次请求 "
+                    f"(剩余 {int(circuit_open_until - now)} 秒)"
+                )
+                raise MetabaseUnavailableError("Metabase 服务暂时不可用，请稍后重试。")
+
+            # 熔断窗口已过期，进入半开状态，允许本次请求探测
+            if circuit_open_until and circuit_open_until <= now:
+                self._health_state["circuit_open_until"] = 0.0
+                # 不清零 consecutive_failures，方便后续快速再次打开
+                logger.info("[Metabase] 熔断窗口结束，进入半开状态，允许探测请求。")
+
+    async def _record_success(self) -> None:
+        """请求成功后重置失败计数并关闭熔断"""
+        async with self._health_lock:
+            if self._health_state.get("consecutive_failures", 0) > 0:
+                logger.info(
+                    "[Metabase] 请求成功，重置失败计数并关闭熔断 "
+                    f"(此前连续失败 {self._health_state['consecutive_failures']} 次)"
+                )
+            self._health_state["consecutive_failures"] = 0
+            self._health_state["circuit_open_until"] = 0.0
+
+    async def _record_failure(self) -> None:
+        """记录一次失败，并在超过阈值时打开熔断"""
+        async with self._health_lock:
+            self._health_state["consecutive_failures"] = (
+                int(self._health_state.get("consecutive_failures", 0)) + 1
+            )
+            failures = self._health_state["consecutive_failures"]
+            if (
+                failures >= self._failure_threshold
+                and not self._health_state.get("circuit_open_until")
+            ):
+                open_until = time.time() + self._circuit_open_seconds
+                self._health_state["circuit_open_until"] = open_until
+                logger.error(
+                    "[Metabase] 连续请求失败次数过多，打开熔断："
+                    f"failures={failures}, open_seconds={self._circuit_open_seconds}"
+                )
     
     async def _ensure_session_token(self) -> str:
         """确保有有效的Session Token"""
@@ -803,6 +868,9 @@ class MetabaseQuestionService:
         url = ""
         metabase_params_list: List[Dict[str, Any]] = []
         try:
+            # 0. 检查熔断状态，必要时快速失败
+            await self._check_circuit()
+
             # 1. 获取 Question ID（按名称或环境变量）
             question_id = await self._get_question_id(question_key)
             
@@ -884,6 +952,9 @@ class MetabaseQuestionService:
             else:
                 row_count = result.get('row_count', '1行' if question_key.endswith('kpi') else '未知')
             logger.debug(f"Question查询成功: {question_key} (ID: {question_id}), 返回 {row_count}")
+
+            # 记录成功以重置熔断状态
+            await self._record_success()
             return result
             
         except httpx.HTTPStatusError as e:
@@ -896,6 +967,11 @@ class MetabaseQuestionService:
                 f"  参数: {metabase_params_list if metabase_params_list else '无'}\n"
                 f"  响应体: {body[:2000] if body else '(空)'}"
             )
+            # 5xx 视为 Metabase 不可用，触发熔断
+            if e.response.status_code >= 500:
+                await self._record_failure()
+                raise MetabaseUnavailableError("Metabase 服务暂时不可用，请稍后重试。")
+
             raise ValueError(
                 f"Metabase查询失败: HTTP {e.response.status_code} 请检查输入参数是否正确。"
                 + (f" 详情: {body[:500]}" if body and len(body) < 500 else " 详情请查看后端日志。")
@@ -905,6 +981,10 @@ class MetabaseQuestionService:
             raise
         except Exception as e:
             logger.error(f"Metabase Question查询异常: {e}", exc_info=True)
+            # 网络错误等 RequestError 视为 Metabase 不可用，触发熔断
+            if isinstance(e, httpx.RequestError):
+                await self._record_failure()
+                raise MetabaseUnavailableError("Metabase 服务暂时不可用，请稍后重试。")
             raise ValueError(f"Metabase查询异常: {str(e)}")
     
     async def close(self):

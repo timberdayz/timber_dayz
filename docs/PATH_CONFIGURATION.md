@@ -274,6 +274,15 @@ raw_dir2 = get_data_raw_dir()  # 第二次调用：直接返回缓存
 
 ---
 
+## 采集组件版本管理部署检查
+
+使用组件版本管理及 `load_python_component_from_path` 时，所有采集执行环境（主栈 backend 容器、独立 collection 容器、本地 `run.py --local`）需满足：
+
+- **PROJECT_ROOT**：必须设置。Docker 内通常为 `/app`，本地为仓库根路径。供 `load_python_component_from_path` 将 DB 中相对 file_path 转为绝对路径。
+- **DATA_DIR**（或等效）：采集需持久会话与指纹时，需正确配置以支持 SessionManager、DeviceFingerprintManager；`docker-compose.collection.yml` 已通过 volumes 配置 `collection_browser_data`、`collection_fingerprints`。
+
+---
+
 ## 🐛 故障排查
 
 ### 问题1: 找不到项目根目录

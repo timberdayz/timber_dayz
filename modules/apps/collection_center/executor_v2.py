@@ -301,16 +301,28 @@ class CollectionExecutorV2:
                 enable_ab_test=enable_ab_test,
             )
 
-            if selected_version and getattr(selected_version, "file_path", "").endswith(".py"):
-                # 仅支持 .py：从 Python 组件构建兼容 dict
-                component = self.component_loader.build_component_dict_from_python(
-                    platform, comp_name, params
-                )
-                if component:
-                    component["_version_id"] = selected_version.id
-                    component["_version_number"] = selected_version.version
+            if selected_version and getattr(selected_version, "file_path", "").strip().endswith(".py"):
+                # 按 file_path 加载，不得再按 comp_name
+                try:
+                    Klass = self.component_loader.load_python_component_from_path(
+                        selected_version.file_path,
+                        version_id=selected_version.id,
+                    )
+                    comp_type = getattr(Klass, "component_type", "export" if "_export" in comp_name else "login")
+                    plat = getattr(Klass, "platform", platform)
+                    component = {
+                        "name": comp_name,
+                        "platform": plat,
+                        "type": comp_type,
+                        "data_domain": getattr(Klass, "data_domain", None),
+                        "_params": params or {},
+                        "_python_component_class": Klass,
+                        "_version_id": selected_version.id,
+                        "_version_number": selected_version.version,
+                    }
                     return component
-                logger.warning(f"Python component not found for {component_name}, falling back")
+                except Exception as e:
+                    logger.warning(f"Failed to load from file_path {getattr(selected_version, 'file_path')}: {e}, falling back")
 
             if selected_version and getattr(selected_version, "file_path", "").strip().endswith(".yaml"):
                 # 版本表仍存 .yaml 路径时，按组件名尝试 Python 组件（YAML 已迁离）
@@ -988,31 +1000,51 @@ class CollectionExecutorV2:
     async def _execute_python_component(
         self,
         page,
-        adapter: PythonComponentAdapter,
+        adapter: Optional[PythonComponentAdapter],
         component_type: str,
         params: Dict[str, Any] = None,
+        component: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
-        使用 Python 组件适配层执行组件(v4.8.0)
-        
-        替代 YAML 组件的执行逻辑,直接调用异步 Python 组件。
-        
-        Args:
-            page: Playwright Page 对象
-            adapter: Python 组件适配器
-            component_type: 组件类型(login/navigation/orders_export 等)
-            params: 组件参数
-        
-        Returns:
-            bool: True 表示执行成功
+        使用 Python 组件执行。当 component 含 _python_component_class 时直接使用该类，
+        否则通过 adapter 按 component_type 加载。
         """
         params = params or {}
-        
+        Klass = (component or {}).get("_python_component_class")
+
+        if Klass:
+            try:
+                logger.info(f"[PythonComponent] Executing: {component_type} (from file_path)")
+                from modules.components.base import ExecutionContext
+                account = params.get("account", params)
+                config = params.get("params", params) if isinstance(params.get("params"), dict) else params
+                ctx = ExecutionContext(
+                    platform=(component or {}).get("platform", ""),
+                    account=account,
+                    config=config,
+                )
+                instance = Klass(ctx)
+                result = await instance.run(page)
+                if result.success:
+                    logger.info(f"[PythonComponent] {component_type} completed successfully")
+                    if getattr(result, "file_path", None):
+                        logger.info(f"[PythonComponent] File saved: {result.file_path}")
+                    return True
+                else:
+                    logger.error(f"[PythonComponent] {component_type} failed: {result.message}")
+                    return False
+            except VerificationRequiredError:
+                raise
+            except Exception as e:
+                logger.error(f"[PythonComponent] {component_type} exception: {e}")
+                return False
+
+        if not adapter:
+            logger.error("[PythonComponent] No _python_component_class and no adapter")
+            return False
         try:
-            logger.info(f"[PythonComponent] Executing: {component_type}")
-            
+            logger.info(f"[PythonComponent] Executing: {component_type} (via adapter)")
             result = await adapter.execute_component(component_type, page, params)
-            
             if result.success:
                 logger.info(f"[PythonComponent] {component_type} completed successfully")
                 if result.file_path:
@@ -1021,9 +1053,8 @@ class CollectionExecutorV2:
             else:
                 logger.error(f"[PythonComponent] {component_type} failed: {result.message}")
                 return False
-                
         except VerificationRequiredError:
-            raise  # 不吞掉，由上层统一处理：持久化并阻塞等待回传
+            raise
         except Exception as e:
             logger.error(f"[PythonComponent] {component_type} exception: {e}")
             return False
@@ -1290,21 +1321,15 @@ class CollectionExecutorV2:
         component_name = component.get("name", "unknown")
         component_type = component.get("type", "")
 
-        # Python 组件：通过 adapter 执行，不再走 steps
+        # Python 组件：含 _python_component_class 时直接使用该类，不得再通过 adapter 按 comp_name 加载
         if component.get("_python_component_class"):
             params = component.get("_params", {})
-            account = params.get("account", params)
-            config = params.get("params", params) if isinstance(params.get("params"), dict) else params
-            adapter = create_adapter(
-                platform=component["platform"],
-                account=account,
-                config=config,
-            )
             return await self._execute_python_component(
                 page=page,
-                adapter=adapter,
+                adapter=None,
                 component_type=component_type,
                 params=params,
+                component=component,
             )
 
         # Phase 11: 检测发现模式组件

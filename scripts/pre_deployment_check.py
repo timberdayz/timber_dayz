@@ -124,6 +124,10 @@ def check_docker_compose_files():
         ('docker-compose.prod.yml', '生产环境配置'),
         ('docker-compose.cloud.yml', '云服务器优化配置'),
     ]
+    optional_4c8g_files = [
+        ('docker-compose.cloud-4c8g.yml', '4核8G overlay'),
+        ('docker-compose.metabase.4c8g.yml', 'Metabase 4核8G overlay'),
+    ]
     
     all_ok = True
     for filename, description in required_files:
@@ -133,6 +137,13 @@ def check_docker_compose_files():
         else:
             safe_print(f"  [FAIL] {description}: {filename} (文件不存在)")
             all_ok = False
+
+    for filename, description in optional_4c8g_files:
+        file_path = project_root / filename
+        if file_path.exists():
+            safe_print(f"  [OK] {description}: {filename} (4c8g可选)")
+        else:
+            safe_print(f"  [INFO] {description}: {filename} 不存在 (4核8G用户需此文件)")
     
     # 验证Docker Compose配置语法（使用profile）
     if all_ok:
@@ -350,7 +361,8 @@ def check_resources():
     safe_print("8. 资源限制检查")
     safe_print("="*60)
     
-    cloud_file = Path(__file__).parent.parent / "docker-compose.cloud.yml"
+    project_root = Path(__file__).parent.parent
+    cloud_file = project_root / "docker-compose.cloud.yml"
     if cloud_file.exists():
         safe_print("  [OK] docker-compose.cloud.yml 存在（2核4G优化配置）")
         
@@ -361,6 +373,21 @@ def check_resources():
             safe_print("  [WARN] 资源限制可能未优化")
     else:
         safe_print("  [WARN] docker-compose.cloud.yml 不存在（建议使用）")
+
+    cloud_4c8g = project_root / "docker-compose.cloud-4c8g.yml"
+    metabase_4c8g = project_root / "docker-compose.metabase.4c8g.yml"
+    if cloud_4c8g.exists() and metabase_4c8g.exists():
+        safe_print("  [OK] 4核8G overlay 文件存在（4c8g用户需手动追加或 CLOUD_PROFILE=4c8g）")
+    elif cloud_4c8g.exists() or metabase_4c8g.exists():
+        safe_print("  [WARN] 4核8G overlay 不完整（需 cloud-4c8g 和 metabase.4c8g 两者）")
+
+    env_file = project_root / ".env.production"
+    if env_file.exists():
+        content = env_file.read_text(encoding='utf-8')
+        if 'RESOURCE_MONITOR_ENABLED=true' in content:
+            safe_print("  [OK] RESOURCE_MONITOR_ENABLED 已配置")
+        else:
+            safe_print("  [WARN] 4c8g建议 RESOURCE_MONITOR_ENABLED=true")
     
     return True
 

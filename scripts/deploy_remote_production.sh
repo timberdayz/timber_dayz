@@ -476,13 +476,22 @@ fi
 
 # [FIX] 立即验证 YAML 语法（更稳的防护，提前发现问题）
 # [PROD] 生产需要 Metabase：将 docker-compose.metabase.yml 纳入同一 project，避免 "Found orphan containers (xihong_erp_metabase)" 警告
+# [4c8g] CLOUD_PROFILE=4c8g 时加载 cloud-4c8g、metabase.4c8g overlay
 echo "[INFO] Validating docker-compose config..."
 compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.deploy.yml --profile production)
 if [ -f docker-compose.cloud.yml ]; then
   compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.deploy.yml --profile production)
+  if [ "${CLOUD_PROFILE:-}" = "4c8g" ] && [ -f docker-compose.cloud-4c8g.yml ]; then
+    compose_cmd_base=(docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.cloud-4c8g.yml -f docker-compose.deploy.yml --profile production)
+    echo "[INFO] CLOUD_PROFILE=4c8g: loading cloud-4c8g overlay"
+  fi
 fi
 if [ -f docker-compose.metabase.yml ]; then
   compose_cmd_base=("${compose_cmd_base[@]}" "-f" "docker-compose.metabase.yml")
+  if [ "${CLOUD_PROFILE:-}" = "4c8g" ] && [ -f docker-compose.metabase.4c8g.yml ]; then
+    compose_cmd_base=("${compose_cmd_base[@]}" "-f" "docker-compose.metabase.4c8g.yml")
+    echo "[INFO] CLOUD_PROFILE=4c8g: loading metabase.4c8g overlay"
+  fi
 fi
 
 # [BOOTSTRAP] Add --env-file to all docker-compose commands (use cleaned .env file)

@@ -1,0 +1,63 @@
+# =====================================================
+# 4核8G 云服务器 Overlay
+# =====================================================
+# 在 docker-compose.cloud.yml 之后加载，与 cloud.yml 叠加使用
+# 生产环境 celery-worker 主要用于定时任务（备份、告警等），非 Playwright 采集
+# 使用方式: docker-compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.cloud.yml -f docker-compose.cloud-4c8g.yml ...
+# =====================================================
+
+services:
+  backend:
+    environment:
+      DB_POOL_SIZE: "30"
+      DB_MAX_OVERFLOW: "30"
+    command:
+      - gunicorn
+      - backend.main:app
+      - "--workers"
+      - "3"
+      - "--worker-class"
+      - uvicorn.workers.UvicornWorker
+      - "--bind"
+      - "0.0.0.0:8000"
+      - "--timeout"
+      - "120"
+      - "--keep-alive"
+      - "5"
+      - "--access-logfile"
+      - /app/logs/access.log
+      - "--error-logfile"
+      - /app/logs/error.log
+      - "--log-level"
+      - info
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "1"
+          memory: 1G
+
+  celery-worker:
+    command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=2
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  redis:
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:-redis_pass_2025}
+      - --maxmemory
+      - 220mb
+      - --maxmemory-policy
+      - volatile-lru

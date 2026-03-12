@@ -89,15 +89,10 @@ class ComponentVersionService:
     
     def get_stable_version(self, component_name: str) -> Optional[ComponentVersion]:
         """
-        获取稳定版本
-        
-        Args:
-            component_name: 组件名称
-            
-        Returns:
-            稳定版本,如果没有则返回None
+        获取稳定版本。
+        若历史数据存在多 is_stable，按 updated_at DESC 取最新版本。
         """
-        return self.db.execute(
+        rows = self.db.execute(
             select(ComponentVersion)
             .where(
                 and_(
@@ -106,8 +101,9 @@ class ComponentVersionService:
                     ComponentVersion.is_active == True
                 )
             )
-            .order_by(ComponentVersion.success_rate.desc())
-        ).scalar_one_or_none()
+            .order_by(ComponentVersion.updated_at.desc())
+        ).scalars().all()
+        return rows[0] if rows else None
     
     def get_test_version(self, component_name: str) -> Optional[ComponentVersion]:
         """
@@ -333,16 +329,18 @@ class ComponentVersionService:
             1. 取消该组件所有其他稳定版本的 is_stable 标志
             2. 特别处理相同 file_path 的版本,确保唯一性
         """
-        # 获取版本
+        # 获取版本并加行级锁，避免并发提升导致多稳定版
         version_obj = self.db.execute(
-            select(ComponentVersion).where(
+            select(ComponentVersion)
+            .where(
                 and_(
                     ComponentVersion.component_name == component_name,
                     ComponentVersion.version == version
                 )
             )
+            .with_for_update()
         ).scalar_one_or_none()
-        
+
         if not version_obj:
             raise ValueError(f"Version not found: {component_name} v{version}")
         

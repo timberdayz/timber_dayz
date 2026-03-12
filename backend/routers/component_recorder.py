@@ -67,13 +67,13 @@ class RecorderStepResponse(BaseModel):
 
 
 class RecorderSaveRequest(BaseModel):
-    """保存组件请求(v4.8.0 支持 Python 组件)"""
+    """保存组件请求。component_name 由后端从 platform+component_type+data_domain+sub_domain 推导。"""
     platform: str
     component_type: str
-    component_name: str
-    # v4.8.0: 支持 Python 组件
-    python_code: Optional[str] = None  # Python 组件代码
-    data_domain: Optional[str] = None  # 数据域(export 组件必填)
+    component_name: Optional[str] = None  # 可选，后端推导
+    python_code: Optional[str] = None
+    data_domain: Optional[str] = None  # export 必填
+    sub_domain: Optional[str] = None   # 子域 export 如 services:agent 必填
     # 登录成功条件（可选），如 {"url_contains": "/dashboard"}，保存时写入组件内校验逻辑
     success_criteria: Optional[Dict[str, Any]] = None
     # 向后兼容:保留 YAML 支持
@@ -81,10 +81,12 @@ class RecorderSaveRequest(BaseModel):
 
 
 class GeneratePythonRequest(BaseModel):
-    """生成 Python 代码请求（供前端「重新生成」使用）"""
+    """生成 Python 代码请求。component_name 可选，由后端推导。"""
     platform: str
     component_type: str
-    component_name: str
+    component_name: Optional[str] = None
+    data_domain: Optional[str] = None
+    sub_domain: Optional[str] = None
     steps: List[Dict[str, Any]]
 
 
@@ -857,9 +859,20 @@ async def stop_recording():
 @router.post("/recorder/generate-python")
 async def generate_python_from_steps(request: GeneratePythonRequest):
     """
-    根据步骤重新生成 Python 代码（供前端「重新生成」按钮调用）。
+    根据步骤重新生成 Python 代码。component_name 可选，由 platform+component_type+data_domain+sub_domain 推导。
     """
+    from backend.services.component_name_utils import build_component_name
+
     try:
+        comp_name = request.component_name
+        if not comp_name:
+            comp_name = build_component_name(
+                platform=request.platform,
+                component_type=request.component_type,
+                data_domain=request.data_domain,
+                sub_domain=request.sub_domain,
+            ).split("/")[-1]
+
         steps = list(request.steps or [])
         steps = _enrich_steps_semantics(steps)
         login_field_suggestions: List[Dict[str, Any]] = []
@@ -872,7 +885,7 @@ async def generate_python_from_steps(request: GeneratePythonRequest):
         code = generate_python_code(
             platform=request.platform,
             component_type=request.component_type,
-            component_name=request.component_name,
+            component_name=comp_name,
             steps=steps,
         )
         lint_result = _analyze_python_code_for_lints(code)
@@ -924,50 +937,64 @@ async def get_recording_steps():
 @router.post("/recorder/save")
 async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depends(get_async_db)):
     """
-    保存组件到文件并自动注册到版本管理系统。
-    仅支持 Python 组件：请求体必须提供 python_code，不再接受 yaml_content。
+    保存组件：创建新版本 + 版本化 file_path。component_name 由 platform+component_type+data_domain+sub_domain 推导。
     """
     import ast
     from pathlib import Path
     from modules.core.db import ComponentVersion
     from datetime import datetime
+    from backend.services.component_name_utils import (
+        build_component_name,
+        next_patch_version,
+        version_to_filename_suffix,
+        DATA_DOMAIN_SUB_TYPES,
+    )
 
     if not request.python_code:
         return error_response(
             code=ErrorCode.PARAMETER_INVALID,
-            message="仅支持保存 Python 组件，请提供 python_code。yaml_content 已废弃。",
+            message="仅支持保存 Python 组件，请提供 python_code。",
             status_code=400,
             recovery_suggestion="请使用录制工具生成 Python 代码后保存",
         )
 
-    is_python_component = True  # 本接口仅保存 Python 组件
+    if request.component_type == "export" and not request.data_domain:
+        return error_response(
+            code=ErrorCode.PARAMETER_INVALID,
+            message="export 组件必须提供 data_domain。",
+            status_code=400,
+        )
+    if request.data_domain and request.data_domain in DATA_DOMAIN_SUB_TYPES and not request.sub_domain:
+        return error_response(
+            code=ErrorCode.PARAMETER_INVALID,
+            message=f"data_domain={request.data_domain} 有子类型，必须提供 sub_domain。",
+            status_code=400,
+        )
+
     try:
+        component_name = build_component_name(
+            platform=request.platform,
+            component_type=request.component_type,
+            data_domain=request.data_domain,
+            sub_domain=request.sub_domain,
+        )
+        base_name = component_name.split("/")[-1]
+
         project_root = Path(__file__).parent.parent.parent
-
-        # 1. 验证 Python 代码语法
-        try:
-            ast.parse(request.python_code)
-        except SyntaxError as e:
-            logger.error(f"Python syntax error in save: {e}", exc_info=True)
-            return error_response(
-                code=ErrorCode.DATA_FORMAT_INVALID,
-                message=f"Python 代码语法错误: {str(e)}",
-                status_code=400,
-                recovery_suggestion="请检查 Python 代码语法，或使用「重新生成」按钮",
-            )
-
-        # 2. 确定保存路径
         component_dir = project_root / "modules" / "platforms" / request.platform / "components"
         component_dir.mkdir(parents=True, exist_ok=True)
 
-        # 3. 文件名
-        filename = f"{request.component_name}.py"
+        result = await db.execute(
+            select(ComponentVersion).where(ComponentVersion.component_name == component_name)
+        )
+        existing_versions = result.scalars().all()
+        versions = [v.version for v in existing_versions]
+        next_ver = next_patch_version(versions)
+        suffix = version_to_filename_suffix(next_ver)
+        filename = f"{base_name}_{suffix}.py"
         file_path = component_dir / filename
+        relative_file_path = f"modules/platforms/{request.platform}/components/{filename}"
 
-        # 4. 检查文件是否已存在
-        file_exists = file_path.exists()
-
-        # 4.5 登录组件且提供 success_criteria 时，在写入前注入成功条件校验
         code_to_write = request.python_code
         if (
             request.component_type == "login"
@@ -976,85 +1003,36 @@ async def save_component(request: RecorderSaveRequest, db: AsyncSession = Depend
         ):
             code_to_write = _inject_login_success_criteria_block(code_to_write, request.success_criteria)
 
-        # 5. 保存文件
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(code_to_write)
 
-        logger.info(
-            f"Python component saved: {request.platform}/{filename} "
-            f"({'updated' if file_exists else 'created'})"
-        )
+        logger.info(f"Python component saved: {component_name} v{next_ver} -> {filename}")
 
-        # 6. 自动注册到 component_versions 表（仅记录 .py 路径）
-        component_name = f"{request.platform}/{request.component_name}"
-        relative_file_path = f"modules/platforms/{request.platform}/components/{filename}"
-
-        # ==================== 版本管理逻辑(通用) ====================
-        
-        # 查询现有版本(按 file_path 查询,确保更新正确的版本)
-        result = await db.execute(
-            select(ComponentVersion).where(ComponentVersion.file_path == relative_file_path)
+        new_version = ComponentVersion(
+            component_name=component_name,
+            version=next_ver,
+            file_path=relative_file_path,
+            is_stable=False,
+            is_active=True,
+            description=f"录制工具创建 - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            created_by="recorder",
         )
-        existing_version = result.scalar_one_or_none()
-        
-        if existing_version:
-            # 更新现有版本(不创建新版本)
-            existing_version.description = f"录制工具更新 - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            existing_version.updated_at = datetime.utcnow()
-            await db.commit()
-            
-            version = existing_version.version
-            is_new_version = False
-            version_action = "更新"
-            logger.info(f"Updated existing version: {component_name} v{version}")
-        else:
-            # 检查是否有同名组件的其他版本
-            result = await db.execute(
-                select(ComponentVersion).where(
-                    ComponentVersion.component_name == component_name
-                ).order_by(ComponentVersion.version.desc())
-            )
-            existing_name_versions = result.scalars().all()
-            
-            if existing_name_versions:
-                # 自动递增版本号
-                latest_version = existing_name_versions[0].version
-                major, minor, patch = map(int, latest_version.split('.'))
-                version = f"{major}.{minor}.{patch + 1}"
-            else:
-                # 首次创建
-                version = "1.0.0"
-            
-            # 创建新版本记录
-            new_version = ComponentVersion(
-                component_name=component_name,
-                version=version,
-                file_path=relative_file_path,
-                is_stable=True if is_python_component else False,  # Python 组件默认稳定
-                is_active=True,
-                description=f"录制工具创建 - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-                created_by="recorder"
-            )
-            db.add(new_version)
-            await db.commit()
-            await db.refresh(new_version)
-            
-            is_new_version = True
-            version_action = "创建"
-            logger.info(f"Created new version: {component_name} v{version}")
-        
+        db.add(new_version)
+        await db.commit()
+        await db.refresh(new_version)
+
         return {
             "success": True,
-            "message": f"组件已保存并{version_action}",
+            "message": "组件已保存并创建新版本",
             "file_path": str(file_path),
-            "file_exists_before": file_exists,
-            "component_type": "python" if is_python_component else "yaml",
+            "component_type": "python",
             "version_info": {
-                "version": version,
-                "is_new_version": is_new_version,
-                "action": version_action,
-                "component_name": component_name
-            }
+                "version": next_ver,
+                "is_new_version": True,
+                "action": "创建",
+                "component_name": component_name,
+                "file_path": relative_file_path,
+            },
         }
     
     except HTTPException as he:

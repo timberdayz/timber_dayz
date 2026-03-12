@@ -45,7 +45,7 @@ celery_app.conf.update(
     task_serializer='json',
     accept_content=['json'],
     result_serializer='json',
-    result_expires=3600,  # 结果过期时间(1小时)
+    result_expires=86400,  # 结果过期时间(24小时)，控制 Redis result 占用
     
     # 性能配置
     worker_prefetch_multiplier=4,  # 预取任务数

@@ -21,7 +21,7 @@
 - **方案 C**：录制保存时「更新该组件」而非新建组件；保存行为 = 为该组件创建**新版本**，不创建新的 component_name。
 - **版本工作流**：新版本默认非稳定；用户测试通过后「提升为稳定版」；生产仅使用稳定版。
 - **版本号 patch 递增**：在应用层解析语义版本（major.minor.patch），取当前最大版本后 +1，不得依赖 SQL `MAX(version)` 字典序（否则 `1.0.9` > `1.0.10`）。
-- **文件策略**：每个版本对应独立 file_path（如 `login_v1.1.0.py`），或采用主文件 + 草稿文件（`login.py` + `login_draft.py`）；提升稳定时草稿覆盖主文件。优先采用版本化文件名，便于回滚与并行测试。
+- **文件策略**：每个版本对应**独立版本化 file_path**（如 `login_v1_1_0.py`，点号转下划线），DB 中仅保存相对于 PROJECT_ROOT 的相对路径；不再引入主文件 + 草稿文件双轨模式，避免与版本表语义冲突。版本回滚与并行测试一律通过版本化文件名与 ComponentVersion 记录管理。
 
 ### 1. 测试执行与选中版本一致（P0）
 
@@ -49,14 +49,26 @@
 
 ### 6. 前端页面结构重构（P2）
 
-- **Tab 1 概览**：统计卡片、最近活动、冲突告警、快速入口。
-- **Tab 2 按平台**：树形/分组浏览，按 platform → component_type → 组件，一眼看出当前生产用哪一版。
-- **Tab 3 全部版本**：表格视图，列包含「实际执行文件」，状态、成功率、操作。
+- **单 Tab 结构**：版本管理页仅保留「全部版本」一个 Tab，以列表为中心展示所有组件版本信息，列包含「组件名称」「实际执行文件」「状态」「成功率」「使用统计」「操作」等。
+- **概览与按平台信息下沉**：原「概览」「按平台」中的统计与冲突告警信息（如版本总数、稳定版数、多稳定版冲突提示）下沉为列表上方的统计卡片与提醒区域，避免多层 Tab 增加操作复杂度。
 
 ### 7. 组件测试环境与生产对齐（P0）
 
-- **非登录组件测试前登录**：测试 export、navigation、date_picker、filters 等非登录组件时，必须先完成自动登录或复用该账号持久会话；若未提供 skip_login 且登录/会话不可用，则不得执行该组件测试，直接报错。**登录版本选择**：自动登录应使用该平台 login 的当前稳定版（is_stable=True），按 file_path 加载，与生产一致。
-- **一账号一指纹与持久会话**：组件测试应与生产采集一致，使用「按 account_id 的 SessionManager.load_session 得到 storage_state + DeviceFingerprintManager 指纹」建 context（`new_context(storage_state=..., **fp_options)`，与 executor_v2 相同，不使用 launch_persistent_context）；account_id 缺失时测试失败并明确报错，强制用户选择账号。
+- **非登录组件测试前登录/复用会话**：测试 export、navigation、date_picker、filters 等非登录组件时：
+  - 若未显式 `skip_login`，首先尝试通过 `SessionManager` 按 (platform, account_id) 加载已存在的 `storage_state`，若有效则用其创建 context，在该 context 中直接执行当前组件；
+  - 若无有效会话，则自动选择该平台 login 的当前稳定版（`is_stable=True`），按 `version.file_path` 加载登录组件，并在同一 browser/context 中通过 `_run_login_with_verification_support` 完成登录（支持验证码暂停与回传），登录成功后继续执行当前非登录组件；
+  - 登录/会话不可用或登录失败时，测试直接失败并在结果中标记为「login/session 阶段错误」，避免将登录问题误判为导出/导航组件问题。
+- **一账号一指纹与持久会话**：组件测试应与生产采集一致，使用「按 account_id 的 `SessionManager.load_session` 得到 `storage_state` + `DeviceFingerprintManager` 指纹」创建 context（`browser.new_context(storage_state=..., **fp_options)`，与 `CollectionExecutorV2.execute` 相同，不使用 `launch_persistent_context`）；account_id 缺失时测试失败并明确报错，强制用户选择账号。
+- **阶段可观测性**：单组件测试的进度与结果结构中需区分「login 阶段」与「业务阶段」（如 `phase: "login"`、`phase: "export"`、`phase: "navigation"`），并包含具体组件版本信息（如 `miaoshou/login v1.0.0`、`miaoshou/orders_export v1.0.0`）；前端测试弹窗在失败时展示失败阶段与组件，便于快速定位问题，而不仅是一句通用错误文案。
+- **发现模式组件（date_picker / filters）测试策略**：
+  - 组件按两类管理：**可独立测试组件**（login/navigation/export 等，或显式声明完整测试场景的 date_picker/filters）与 **仅在完整采集链路中验证的组件**（多数通过发现模式得到的控件）。
+  - 为组件增加可选元数据（如 `test_mode`、`test_config`）：  
+    - `test_mode="flow_only"`：仅通过 `CollectionExecutorV2.execute` 的完整「登录→导航→日期/筛选→导出」任务进行验证，版本管理页不暴露单独「测试组件」按钮；  
+    - `test_mode="standalone"` + 有效 `test_config` 时，允许在版本管理页进行单组件测试，其中 `test_config` 至少包含：
+      - `url`：测试时应导航到的页面 URL；
+      - `pre_steps`：在执行组件前需要完成的页面准备步骤（如打开筛选面板、切换 Tab）；
+      - `assertions`：执行后需要满足的断言（如表格存在、结果条数或日期范围合理）。
+  - 单组件测试工具在检测到 `standalone + test_config` 时，先按 `url + pre_steps` 构造上下文，再执行 date_picker/filters 组件；未声明或 `flow_only` 的组件则仅在完整采集任务中通过集成级测试进行验证。
 
 **API 影响**：`POST /recorder/save` 与 `POST /recorder/generate-python` 的 component_name 由 platform+component_type 推导（export 需 data_domain，子域 export 如 services:agent 需 sub_domain）；**校验**：export 时 data_domain 缺失返回 400；当 data_domain 有子类型且前端选择子域导出时，sub_domain 必填，否则 400。**sub_domain 子类型判定**：后端维护「有子类型的数据域」配置（如 `services` → `["agent","ai_assistant"]`），可硬编码或配置化；仅当 data_domain 在此列表中且前端传 sub_domain 时才校验 sub_domain 必填。保存行为从「同 file_path 则 UPSERT」改为「创建新版本 + 版本化 file_path」。**GeneratePythonRequest**：请求体与 RecorderSaveRequest 对齐，增加 data_domain（export 必填）、sub_domain（子域 export 必填）；component_name 由 platform+component_type+data_domain+sub_domain 推导，不再必填或废弃。**兼容策略**：为兼容旧客户端，可保留 component_name 字段但由后端忽略；过渡期后可选废弃。路径与请求结构可保持兼容，但语义变更，调用方需知悉。
 

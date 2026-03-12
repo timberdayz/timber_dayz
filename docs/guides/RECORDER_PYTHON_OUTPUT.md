@@ -45,7 +45,14 @@
 
 ---
 
-## 4. 验收要点
+## 4. 图形验证码步骤语义
+
+- **必选暂停**：图形验证码步骤生成「到达即等待 1s → 截图 → raise VerificationRequiredError」，不做 `count() > 0` / `is_visible()` 条件检测。
+- **不做条件检测**：避免 `except Exception: pass` 吞掉异常导致静默穿透，确保用户到达验证码步骤时必然暂停并等待回传。
+
+---
+
+## 5. 验收要点
 
 - 从前端：开始录制 → 停止 → 在「Python 代码」区域看到并可编辑生成的代码 → 保存。
 - 确认磁盘上存在 `modules/platforms/{platform}/components/{component_name}.py`，且可被执行器加载（无语法错误、符合组件契约）。
@@ -53,7 +60,7 @@
 
 ---
 
-## 5. 配置迁离 YAML（与录制器一致）
+## 6. 配置迁离 YAML（与录制器一致）
 
 - **弹窗配置**：平台特定关闭/遮罩选择器由 Python 模块提供，不再读取 `popup_config.yaml`。路径：`modules/platforms/{platform}/popup_config.py`，导出 `get_close_selectors()`、`get_overlay_selectors()`、`get_poll_strategy()`。
 - **执行顺序**：组件执行顺序由 `modules/apps/collection_center/execution_order.py` 提供（`get_default_execution_order()`、`get_execution_order(platform)`），不再读取 `execution_order.yaml` / `default_execution_order.yaml`。
@@ -62,14 +69,14 @@
 
 ---
 
-## 6. 录制页与组件版本管理的职责边界
+## 7. 录制页与组件版本管理的职责边界
 
 - **录制页（组件录制工具）**：仅负责「录制 → 步骤编辑 → 生成/编辑 Python 代码 → 保存为 .py」。录制页**不提供**在页内直接「测试组件」的入口；保存成功后可通过提示「前往组件版本管理并测试」跳转到版本管理页。
 - **组件版本管理页**：提供组件的版本列表、A/B 测试、**测试组件**（选择账号后执行有头/无头测试）、提升稳定版、启用/停用等。**所有组件执行与测试统一在组件版本管理页完成**，保证测试使用的是已保存的 .py 文件，避免临时 YAML/Python 与正式组件行为不一致。
 
 ---
 
-## 7. 步骤标记含义与生成器行为
+## 8. 步骤标记含义与生成器行为
 
 录制结果页可为每个步骤设置「步骤标记」，后端会据此补充 `scene_tags` 并影响生成代码：
 
@@ -105,7 +112,7 @@
 
 ---
 
-## 8. 后续优化方向
+## 9. 后续优化方向
 
 - **success_criteria 扩展**：除 url_contains 外，可支持 element_visible、title_contains 等，并在前端提供更多配置项。
 - **步骤标记扩展**：如「店铺切换」「导出主流程」等，与执行器顺序及 component_call 进一步对齐。

@@ -97,6 +97,11 @@ def sync_single_file_task(
                 })
                 await progress_tracker.complete_task(task_id, success=True)
                 logger.info(f"[CeleryTask] 单文件同步成功 file_id={file_id}, task_id={task_id}")
+                try:
+                    from backend.services.cache_service import get_cache_service
+                    await get_cache_service().invalidate_dashboard_business_overview()
+                except Exception as inv_err:
+                    logger.warning(f"[CeleryTask] 写时失效 Dashboard 缓存失败: {inv_err}")
             else:
                 error_msg = result.get('message', '同步失败')
                 await progress_tracker.update_task(task_id, {
@@ -438,6 +443,12 @@ def sync_batch_task(
                     error=None if failed_files == 0 else completion_message
                 )
                 logger.info(f"[CeleryTask] 批量同步完成: {completion_message}(耗时{task_elapsed:.1f}秒)")
+                if success_files > 0:
+                    try:
+                        from backend.services.cache_service import get_cache_service
+                        await get_cache_service().invalidate_dashboard_business_overview()
+                    except Exception as inv_err:
+                        logger.warning(f"[CeleryTask] 写时失效 Dashboard 缓存失败: {inv_err}")
             
             return {
                 'success': failed_files == 0,

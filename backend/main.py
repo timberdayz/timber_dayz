@@ -255,6 +255,22 @@ async def lifespan(app: FastAPI):
                 cache_service = get_cache_service(redis_client=redis_client)
                 app.state.cache_service = cache_service
                 logger.info("[OK] 统一缓存服务已启用")
+                # [*] 4c8g 单机优化: 可选启动后缓存预热（不阻塞启动）
+                if os.getenv("METABASE_CACHE_WARMUP_ENABLED", "").lower() in ("true", "1", "yes"):
+                    delay_sec = int(os.getenv("METABASE_CACHE_WARMUP_DELAY_SECONDS", "10"))
+                    async def _warmup_after_startup():
+                        await asyncio.sleep(delay_sec)
+                        try:
+                            from backend.services.cache_warmup_service import run_dashboard_cache_warmup
+                            result = await run_dashboard_cache_warmup()
+                            logger.info(f"[CacheWarmup] 启动预热结果: {result}")
+                        except Exception as warmup_err:
+                            logger.warning(
+                                f"[CacheWarmup] 启动预热异常(不阻塞): {warmup_err}",
+                                exc_info=True,
+                            )
+                    asyncio.create_task(_warmup_after_startup())
+                    logger.info(f"[CacheWarmup] 已调度启动后预热(延迟 {delay_sec}s)")
         except Exception as redis_err:
             logger.debug(f"[SKIP] Redis缓存未启用: {redis_err}")
         

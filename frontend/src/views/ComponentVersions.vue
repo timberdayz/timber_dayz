@@ -1,22 +1,34 @@
 <template>
   <div class="component-versions">
     <div class="page-header">
-      <h2>组件版本管理</h2>
+      <h2>采集组件库</h2>
       <p class="subtitle">管理采集组件版本，A/B测试，快速回滚</p>
     </div>
 
-    <!-- 筛选栏 -->
+    <!-- 筛选栏：筛选为空时后端按全选处理 -->
     <el-card shadow="never" class="filter-card">
       <el-form inline>
         <el-form-item label="平台">
-          <el-select v-model="filterForm.platform" placeholder="全部平台" clearable @change="loadVersions">
+          <el-select
+            v-model="filterForm.platform"
+            placeholder="全部平台"
+            clearable
+            class="filter-select"
+            @change="loadVersions"
+          >
             <el-option label="Shopee" value="shopee" />
             <el-option label="TikTok" value="tiktok" />
             <el-option label="妙手ERP" value="miaoshou" />
           </el-select>
         </el-form-item>
         <el-form-item label="组件类型">
-          <el-select v-model="filterForm.type" placeholder="全部类型" clearable @change="loadVersions">
+          <el-select
+            v-model="filterForm.type"
+            placeholder="全部类型"
+            clearable
+            class="filter-select"
+            @change="loadVersions"
+          >
             <el-option label="登录" value="login" />
             <el-option label="导航" value="navigation" />
             <el-option label="导出" value="export" />
@@ -24,7 +36,13 @@
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="filterForm.status" placeholder="全部状态" clearable @change="loadVersions">
+          <el-select
+            v-model="filterForm.status"
+            placeholder="全部状态"
+            clearable
+            class="filter-select"
+            @change="loadVersions"
+          >
             <el-option label="稳定版本" value="stable" />
             <el-option label="测试中" value="testing" />
             <el-option label="已禁用" value="inactive" />
@@ -67,14 +85,20 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="类型" width="80">
+        <el-table-column prop="file_path" label="实际执行文件" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="file-path">{{ row.file_path || '-' }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="类型" width="100">
           <template #default="{ row }">
             <el-tag 
-              :type="getComponentTypeTag(row.file_path)" 
+              :type="getLogicalTypeTag(getComponentTypeFromName(row.component_name))" 
               size="small"
               effect="plain"
             >
-              {{ getComponentType(row.file_path) }}
+              {{ getLogicalTypeLabel(getComponentTypeFromName(row.component_name)) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -187,7 +211,7 @@
                 {{ row.is_active ? '禁用' : '启用' }}
               </el-button>
               <el-button 
-                v-if="!row.is_stable && !row.is_testing"
+                v-if="!row.is_testing && !row.is_active"
                 type="danger" 
                 size="small"
                 plain
@@ -227,6 +251,9 @@
             <span style="font-weight: 600; margin-right: 10px;">组件:</span>
             <el-tag>{{ currentTestComponent.component_name }}</el-tag>
             <el-tag type="success" style="margin-left: 8px;">v{{ currentTestComponent.version }}</el-tag>
+            <span v-if="currentTestComponent.file_path" style="margin-left: 12px; font-size: 12px; color: #909399;">
+              执行文件: {{ currentTestComponent.file_path }}
+            </span>
           </div>
         </div>
         
@@ -478,7 +505,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Loading } from '@element-plus/icons-vue'
 import api from '@/api'
@@ -669,16 +696,22 @@ const toggleActive = async (row) => {
 
 const deleteVersion = async (row) => {
   try {
-    await ElMessageBox.confirm(
-      `确定删除 ${row.component_name} v${row.version} 吗？\n\n若为该组件的最后一条版本记录，将同时删除磁盘上的组件文件。`,
-      '确认删除',
-      {
-        type: 'warning',
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        confirmButtonClass: 'el-button--danger'
+    let message = `确定删除 ${row.component_name} v${row.version} 吗？`
+    if (row.is_stable) {
+      const others = versions.value.filter(
+        (v) => v.component_name === row.component_name && v.id !== row.id
+      )
+      if (others.length > 0) {
+        message += `\n\n此为稳定版，删除后建议将其他版本提升为稳定版。`
       }
-    )
+    }
+    message += `\n\n若为该组件的最后一条版本记录，将同时删除磁盘上的组件文件。`
+    await ElMessageBox.confirm(message, '确认删除', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      confirmButtonClass: 'el-button--danger'
+    })
     
     await api.deleteComponentVersion(row.id)
     // 乐观更新：立即从列表移除，避免删除后仍显示
@@ -720,19 +753,20 @@ const formatDateTime = (date) => {
   return new Date(date).toLocaleString('zh-CN')
 }
 
-// 获取组件类型（Python/YAML）
-const getComponentType = (filePath) => {
-  if (!filePath) return 'Unknown'
-  if (filePath.endsWith('.py')) return 'Python'
-  if (filePath.endsWith('.yaml') || filePath.endsWith('.yml')) return 'YAML'
-  return 'Unknown'
+const getLogicalTypeLabel = (compPart) => {
+  if (!compPart) return '未知'
+  if (compPart === 'login') return '登录'
+  if (compPart === 'navigation') return '导航'
+  if (compPart.endsWith('_export')) return '导出'
+  if (compPart === 'date_picker') return '日期'
+  if (compPart === 'shop_switch') return '店铺'
+  if (compPart === 'filters') return '筛选'
+  return compPart
 }
-
-// 获取组件类型标签样式
-const getComponentTypeTag = (filePath) => {
-  const type = getComponentType(filePath)
-  if (type === 'Python') return 'success'
-  if (type === 'YAML') return 'warning'
+const getLogicalTypeTag = (compPart) => {
+  if (compPart === 'login') return 'danger'
+  if (compPart === 'navigation') return 'primary'
+  if (compPart && compPart.endsWith('_export')) return 'success'
   return 'info'
 }
 
@@ -776,7 +810,8 @@ const showTestDialog = async (row) => {
   currentTestComponent.value = {
     id: row.id,
     component_name: row.component_name,
-    version: row.version
+    version: row.version,
+    file_path: row.file_path
   }
   
   testDialogVisible.value = true
@@ -1122,6 +1157,11 @@ onMounted(() => {
   margin-bottom: 20px;
 }
 
+/* 筛选框最小宽度，便于看清已选内容；空选时后端按全选处理 */
+.filter-card .filter-select {
+  min-width: 160px;
+}
+
 .component-name {
   display: flex;
   align-items: center;
@@ -1170,6 +1210,29 @@ onMounted(() => {
 .stat-item.failed .value {
   color: #f56c6c;
   font-weight: 600;
+}
+
+.overview-cards {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.stat-card {
+  min-width: 140px;
+  text-align: center;
+}
+
+.stat-card .stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.stat-card .stat-label {
+  font-size: 13px;
+  color: #909399;
+  margin-top: 4px;
 }
 
 .ab-test-info {

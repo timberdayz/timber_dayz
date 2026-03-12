@@ -21,7 +21,9 @@ const TIMEOUTS = {
   scan: 120000, // 扫描文件120秒
   preview: 60000, // 预览文件60秒
   ingest: 180000, // 数据入库180秒
-  dashboard: 45000, // Dashboard查询45秒
+  // Dashboard 查询：略大于后端对 Metabase 的 60s 超时，满足
+  // DB statement_timeout < Backend→Metabase < Frontend→Backend 的约束
+  dashboard: 70000, // Dashboard 查询70秒
   collection: 300000, // 数据采集300秒（5分钟）
   mapping: 90000, // 字段映射90秒
   sync: 120000, // ⭐ v4.19.5 新增：数据同步120秒（2分钟）

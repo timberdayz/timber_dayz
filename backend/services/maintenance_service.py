@@ -80,7 +80,21 @@ class MaintenanceService:
         
         # 应用缓存大小(简化实现,实际可以统计应用内缓存对象)
         status["app_cache_size"] = 0  # TODO: 实现应用缓存统计
-        
+
+        # CacheService 命中率（多 worker 下为单 worker 采样）
+        try:
+            from backend.services.cache_service import get_cache_service
+            cache_svc = get_cache_service()
+            stats = cache_svc.get_stats()
+            status["cache_hits"] = stats.get("hits", 0)
+            status["cache_misses"] = stats.get("misses", 0)
+            status["cache_hit_rate"] = stats.get("hit_rate")
+        except Exception as e:
+            logger.debug(f"获取 CacheService 统计失败: {e}")
+            status["cache_hits"] = None
+            status["cache_misses"] = None
+            status["cache_hit_rate"] = None
+
         return status
     
     async def clear_cache(
@@ -115,10 +129,15 @@ class MaintenanceService:
             
             if cache_type in ["all", "redis"]:
                 if pattern:
-                    # 按模式清理
-                    keys = r.keys(pattern)
-                    if keys:
-                        cleared_keys = r.delete(*keys)
+                    # 按模式清理（使用 SCAN 替代 KEYS，避免 O(N) 阻塞）
+                    keys_batch = []
+                    for key in r.scan_iter(match=pattern, count=100):
+                        keys_batch.append(key)
+                        if len(keys_batch) >= 100:
+                            cleared_keys += r.delete(*keys_batch)
+                            keys_batch = []
+                    if keys_batch:
+                        cleared_keys += r.delete(*keys_batch)
                 else:
                     # 清理所有缓存
                     cleared_keys = r.dbsize()

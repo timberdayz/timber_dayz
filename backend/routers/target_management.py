@@ -546,7 +546,11 @@ async def create_target(
         except Exception as event_err:
             # 事件触发失败不影响主流程
             logger.warning(f"[TargetManagement] 触发A_CLASS_UPDATED事件失败: {event_err}")
-        
+        try:
+            from backend.services.cache_service import get_cache_service
+            await get_cache_service().invalidate_dashboard_business_overview()
+        except Exception as inv_err:
+            logger.warning(f"[TargetManagement] 写时失效 Dashboard 缓存失败: {inv_err}")
         return {
             "success": True,
             "data": TargetResponse.model_validate(target).model_dump(),
@@ -655,7 +659,11 @@ async def update_target(
         except Exception as event_err:
             # 事件触发失败不影响主流程
             logger.warning(f"[TargetManagement] 触发A_CLASS_UPDATED事件失败: {event_err}")
-        
+        try:
+            from backend.services.cache_service import get_cache_service
+            await get_cache_service().invalidate_dashboard_business_overview()
+        except Exception as inv_err:
+            logger.warning(f"[TargetManagement] 写时失效 Dashboard 缓存失败: {inv_err}")
         return {
             "success": True,
             "data": TargetResponse.model_validate(target).model_dump(),
@@ -738,7 +746,11 @@ async def delete_target(
         except Exception as event_err:
             # 事件触发失败不影响主流程
             logger.warning(f"[TargetManagement] 触发A_CLASS_UPDATED事件失败: {event_err}")
-        
+        try:
+            from backend.services.cache_service import get_cache_service
+            await get_cache_service().invalidate_dashboard_business_overview()
+        except Exception as inv_err:
+            logger.warning(f"[TargetManagement] 写时失效 Dashboard 缓存失败: {inv_err}")
         return {
             "success": True,
             "message": "目标删除成功"

@@ -292,8 +292,22 @@ A: 设置环境变量：
 export RESOURCE_MONITOR_ENABLED=false
 ```
 
+## 4 核 8G 生产环境配置
+
+参见 [CLOUD_4C8G_REFERENCE.md](CLOUD_4C8G_REFERENCE.md)。
+
+| 配置项 | 4c8g 推荐值 |
+|--------|-------------|
+| DB_POOL_SIZE | 30 |
+| DB_MAX_OVERFLOW | 30 |
+| RESOURCE_MONITOR_ENABLED | true |
+| RESOURCE_MONITOR_MEMORY_THRESHOLD | 85 |
+| RESOURCE_MONITOR_CPU_THRESHOLD | 80 |
+| Compose overlay | docker-compose.cloud-4c8g.yml + docker-compose.metabase.4c8g.yml |
+
 ## 相关文档
 
+- [4 核 8G 生产环境配置参考](CLOUD_4C8G_REFERENCE.md)
 - [ExecutorManager 使用指南](../guides/EXECUTOR_MANAGER_GUIDE.md)
 - [执行器统一管理和资源优化提案](../../openspec/changes/optimize-executor-resource-management/proposal.md)
 

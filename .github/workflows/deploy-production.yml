@@ -487,6 +487,18 @@ jobs:
             echo "[WARN] docker-compose.metabase.yml not found (required for production, deployment may fail if Metabase is not configured)"
           fi
 
+          # 4b. 上传 4c8g overlay（4 核 8G 用户需手动追加到 compose 命令）
+          if [ -f "docker-compose.cloud-4c8g.yml" ]; then
+            if ! scp_with_retry docker-compose.cloud-4c8g.yml ${PRODUCTION_PATH}/docker-compose.cloud-4c8g.yml; then
+              echo "[WARN] Failed to upload docker-compose.cloud-4c8g.yml (optional for 4c8g)"
+            fi
+          fi
+          if [ -f "docker-compose.metabase.4c8g.yml" ]; then
+            if ! scp_with_retry docker-compose.metabase.4c8g.yml ${PRODUCTION_PATH}/docker-compose.metabase.4c8g.yml; then
+              echo "[WARN] Failed to upload docker-compose.metabase.4c8g.yml (optional for 4c8g)"
+            fi
+          fi
+
           # 5. 上传远程部署脚本（方案A：避免在 workflow 中维护超长 bash -c 片段）
           if ! scp_with_retry scripts/deploy_remote_production.sh ${PRODUCTION_PATH}/deploy_remote_production.sh; then
             exit 1
@@ -739,6 +751,12 @@ jobs:
               echo "[FAIL] Failed to upload docker-compose.metabase.yml (required for production)"
               exit 1
             fi
+          fi
+          if [ -f "docker-compose.cloud-4c8g.yml" ]; then
+            scp_with_retry docker-compose.cloud-4c8g.yml ${PRODUCTION_PATH}/docker-compose.cloud-4c8g.yml || true
+          fi
+          if [ -f "docker-compose.metabase.4c8g.yml" ]; then
+            scp_with_retry docker-compose.metabase.4c8g.yml ${PRODUCTION_PATH}/docker-compose.metabase.4c8g.yml || true
           fi
 
           # 同步远程部署脚本（方案A：deploy-tag 与 deploy-manual 共用同一套部署逻辑）

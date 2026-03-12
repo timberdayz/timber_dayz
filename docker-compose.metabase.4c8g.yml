@@ -1,0 +1,20 @@
+# =====================================================
+# Metabase 4核8G 服务器 Overlay
+# =====================================================
+# 在 docker-compose.metabase.yml 之后加载
+# 使用方式: docker-compose -f ... -f docker-compose.metabase.yml -f docker-compose.metabase.4c8g.yml ...
+# 将 Metabase 内存限制为 2G，JVM -Xmx1g，避免 8G 机器 OOM
+# =====================================================
+
+services:
+  metabase:
+    environment:
+      JAVA_OPTS: "-Xmx1g -Xms512m"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M

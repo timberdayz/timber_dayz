@@ -8,7 +8,10 @@ from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import Optional, Dict, Any, List
 from modules.core.logger import get_logger
-from backend.services.metabase_question_service import get_metabase_service
+from backend.services.metabase_question_service import (
+    get_metabase_service,
+    MetabaseUnavailableError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from backend.models.database import get_async_db
@@ -38,8 +41,21 @@ def error_response(message: str, error_code: str = None) -> Dict[str, Any]:
         "success": False,
         "data": None,
         "message": message,
-        "error_code": error_code
+        # 统一放在 error.code，方便前端拦截器读取；同时保留顶层 error_code 以兼容旧逻辑
+        "error": {"code": error_code} if error_code else None,
+        "error_code": error_code,
     }
+
+
+METABASE_UNAVAILABLE_ERROR_CODE = "METABASE_UNAVAILABLE"
+
+
+def metabase_unavailable_response(message: str = "Metabase服务暂时不可用，请稍后重试") -> JSONResponse:
+    """Metabase 不可用时的统一响应"""
+    return JSONResponse(
+        status_code=503,
+        content=error_response(message=message, error_code=METABASE_UNAVAILABLE_ERROR_CODE),
+    )
 
 
 @router.get("/business-overview/kpi")
@@ -101,7 +117,9 @@ async def get_business_overview_kpi(
             await request.app.state.cache_service.set("dashboard_kpi", response, **cache_params)
 
         return JSONResponse(content=response, headers={"X-Cache": cache_status})
-        
+    except MetabaseUnavailableError as e:
+        logger.warning(f"业务概览KPI查询失败（Metabase不可用）: {e}")
+        return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"业务概览KPI查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -153,7 +171,9 @@ async def get_business_overview_comparison(
         if request and hasattr(request.app.state, "cache_service"):
             await request.app.state.cache_service.set("dashboard_comparison", response, **cache_params)
         return response
-
+    except MetabaseUnavailableError as e:
+        logger.warning(f"业务概览对比查询失败（Metabase不可用）: {e}")
+        return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"业务概览对比查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -190,7 +210,9 @@ async def get_business_overview_shop_racing(
         if request and hasattr(request.app.state, "cache_service"):
             await request.app.state.cache_service.set("dashboard_shop_racing", response, **cache_params)
         return response
-
+    except MetabaseUnavailableError as e:
+        logger.warning(f"店铺赛马数据查询失败（Metabase不可用）: {e}")
+        return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"店铺赛马数据查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -230,7 +252,9 @@ async def get_business_overview_traffic_ranking(
         if request and hasattr(request.app.state, "cache_service"):
             await request.app.state.cache_service.set("dashboard_traffic_ranking", response, **cache_params)
         return response
-
+    except MetabaseUnavailableError as e:
+        logger.warning(f"流量排名数据查询失败（Metabase不可用）: {e}")
+        return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"流量排名数据查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -267,7 +291,9 @@ async def get_business_overview_inventory_backlog(
         if request and hasattr(request.app.state, "cache_service"):
             await request.app.state.cache_service.set("dashboard_inventory_backlog", response, **cache_params)
         return response
-
+    except MetabaseUnavailableError as e:
+        logger.warning(f"库存积压数据查询失败（Metabase不可用）: {e}")
+        return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"库存积压数据查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -306,7 +332,9 @@ async def get_business_overview_operational_metrics(
         if request and hasattr(request.app.state, "cache_service"):
             await request.app.state.cache_service.set("dashboard_operational_metrics", response, **cache_params)
         return response
-
+    except MetabaseUnavailableError as e:
+        logger.warning(f"经营指标数据查询失败（Metabase不可用）: {e}")
+        return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"经营指标数据查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -357,7 +385,9 @@ async def get_clearance_ranking(
         if request and hasattr(request.app.state, "cache_service"):
             await request.app.state.cache_service.set("dashboard_clearance_ranking", response, **cache_params)
         return response
-
+    except MetabaseUnavailableError as e:
+        logger.warning(f"清仓排名数据查询失败（Metabase不可用）: {e}")
+        return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"清仓排名数据查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -413,6 +443,9 @@ async def get_annual_summary_kpi(
         if request and hasattr(request.app.state, "cache_service"):
             await request.app.state.cache_service.set("annual_summary_kpi", response, **cache_params)
         return JSONResponse(content=response, headers={"X-Cache": cache_status})
+    except MetabaseUnavailableError as e:
+        logger.warning(f"年度总结KPI查询失败（Metabase不可用）: {e}")
+        return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
     except ValueError as e:
         logger.error(f"年度总结KPI查询失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))

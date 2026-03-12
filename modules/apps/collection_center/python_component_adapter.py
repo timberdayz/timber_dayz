@@ -87,18 +87,14 @@ class PythonComponentAdapter:
         step_callback: Optional[Any] = None,  # v4.8.0: 步骤回调
         step_prefix: str = "",  # v4.8.0: 步骤ID前缀
         is_test_mode: bool = False,  # v4.8.0: 测试模式
+        override_login_class: Optional[Type] = None,
+        override_navigation_class: Optional[Type] = None,
+        override_export_class: Optional[Type] = None,
+        override_date_picker_class: Optional[Type] = None,
+        override_shop_switch_class: Optional[Type] = None,
+        override_filters_class: Optional[Type] = None,
     ):
-        """初始化适配器
-        
-        Args:
-            platform: 平台标识(如 "shopee"、"tiktok"、"miaoshou")
-            account: 账号信息字典(包含 username、password 等)
-            config: 额外配置(如 granularity、date_range 等)
-            logger: 可选的日志记录器
-            step_callback: 步骤进度回调(v4.8.0)
-            step_prefix: 步骤ID前缀,用于嵌套组件(v4.8.0)
-            is_test_mode: 是否为测试模式(v4.8.0)
-        """
+        """初始化适配器"""
         self.platform = platform
         self.account = self._prepare_account(account)
         self.config = config or {}
@@ -106,6 +102,12 @@ class PythonComponentAdapter:
         self._step_callback = step_callback
         self._step_prefix = step_prefix
         self._is_test_mode = is_test_mode
+        self._override_login_class = override_login_class
+        self._override_navigation_class = override_navigation_class
+        self._override_export_class = override_export_class
+        self._override_date_picker_class = override_date_picker_class
+        self._override_shop_switch_class = override_shop_switch_class
+        self._override_filters_class = override_filters_class
         
         # 创建执行上下文
         self.ctx = ExecutionContext(
@@ -192,16 +194,9 @@ class PythonComponentAdapter:
             return None
     
     async def login(self, page: Any) -> AdapterResult:
-        """执行登录组件
-        
-        Args:
-            page: Playwright Page 对象
-            
-        Returns:
-            AdapterResult: 执行结果
-        """
+        """执行登录组件。override 存在时使用注入类，不得再按模块名加载。"""
         try:
-            component_class = self._load_component_class("login")
+            component_class = self._override_login_class or self._load_component_class("login")
             if not component_class:
                 return AdapterResult(success=False, message="Failed to load login component")
             
@@ -222,17 +217,9 @@ class PythonComponentAdapter:
             return AdapterResult(success=False, message=str(e))
     
     async def navigate(self, page: Any, target_page: str) -> AdapterResult:
-        """执行导航组件
-        
-        Args:
-            page: Playwright Page 对象
-            target_page: 目标页面标识(如 "orders"、"products")
-            
-        Returns:
-            AdapterResult: 执行结果
-        """
+        """执行导航组件。override 存在时使用注入类。"""
         try:
-            component_class = self._load_component_class("navigation")
+            component_class = self._override_navigation_class or self._load_component_class("navigation")
             if not component_class:
                 return AdapterResult(success=False, message="Failed to load navigation component")
             
@@ -269,12 +256,12 @@ class PythonComponentAdapter:
                     message=f"Unknown data domain: {data_domain} for platform {self.platform}"
                 )
             
-            # 确定导出组件模块名
             module_name = f"{data_domain}_export"
-            component_class = self._load_component_class(module_name)
-            
+            component_class = (
+                self._override_export_class
+                or self._load_component_class(module_name)
+            )
             if not component_class:
-                # 尝试通用 export 模块
                 component_class = self._load_component_class("export")
             
             if not component_class:
@@ -297,17 +284,9 @@ class PythonComponentAdapter:
             return AdapterResult(success=False, message=str(e))
     
     async def date_picker(self, page: Any, option: Any) -> AdapterResult:
-        """执行日期选择组件
-        
-        Args:
-            page: Playwright Page 对象
-            option: 日期选项(如 DateOption.YESTERDAY)
-            
-        Returns:
-            AdapterResult: 执行结果
-        """
+        """执行日期选择组件。override 存在时使用注入类。"""
         try:
-            component_class = self._load_component_class("date_picker")
+            component_class = self._override_date_picker_class or self._load_component_class("date_picker")
             if not component_class:
                 return AdapterResult(success=False, message="Failed to load date_picker component")
             
@@ -343,7 +322,12 @@ class PythonComponentAdapter:
             AdapterResult: 执行结果
         """
         try:
-            component_class = self._load_component_class(component_name)
+            override_map = {
+                "date_picker": self._override_date_picker_class,
+                "shop_switch": self._override_shop_switch_class,
+                "filters": self._override_filters_class,
+            }
+            component_class = override_map.get(component_name) or self._load_component_class(component_name)
             if not component_class:
                 return AdapterResult(
                     success=False,
@@ -417,23 +401,14 @@ def create_adapter(
     step_callback: Optional[Any] = None,
     step_prefix: str = "",
     is_test_mode: bool = False,
+    override_login_class: Optional[Type] = None,
+    override_navigation_class: Optional[Type] = None,
+    override_export_class: Optional[Type] = None,
+    override_date_picker_class: Optional[Type] = None,
+    override_shop_switch_class: Optional[Type] = None,
+    override_filters_class: Optional[Type] = None,
 ) -> PythonComponentAdapter:
-    """创建 Python 组件适配器的工厂函数
-    
-    v4.8.0: 支持步骤回调和测试模式
-    
-    Args:
-        platform: 平台标识
-        account: 账号信息
-        config: 额外配置
-        logger: 日志记录器
-        step_callback: 步骤进度回调(v4.8.0)
-        step_prefix: 步骤ID前缀(v4.8.0)
-        is_test_mode: 是否为测试模式(v4.8.0)
-        
-    Returns:
-        PythonComponentAdapter: 适配器实例
-    """
+    """创建 Python 组件适配器的工厂函数。支持 override 注入指定组件类。"""
     return PythonComponentAdapter(
         platform=platform,
         account=account,
@@ -442,5 +417,11 @@ def create_adapter(
         step_callback=step_callback,
         step_prefix=step_prefix,
         is_test_mode=is_test_mode,
+        override_login_class=override_login_class,
+        override_navigation_class=override_navigation_class,
+        override_export_class=override_export_class,
+        override_date_picker_class=override_date_picker_class,
+        override_shop_switch_class=override_shop_switch_class,
+        override_filters_class=override_filters_class,
     )
 

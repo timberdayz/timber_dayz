@@ -1,5 +1,24 @@
 # Changelog - 西虹 ERP 系统
 
+## [Unreleased] - 组件版本管理模块重构 (optimize-component-version-management)
+
+### 组件版本管理
+
+- 组件版本测试执行一致性：测试时执行 `version.file_path` 对应实现，adapter 支持 override 注入
+- 生产执行器按 file_path 加载：`_load_component_with_version` 使用 `load_python_component_from_path`，`_execute_python_component` 当 component dict 含 `_python_component_class` 时直接使用该类
+- 删除规则放宽：可删除条件调整为 `!is_testing && !is_active`，稳定版禁用后也可删除
+- 验证码步骤 unconditional 暂停：图形验证码步骤到达即等待 1s → 截图 → raise VerificationRequiredError
+- 实际执行文件展示：版本列表增加 file_path 列
+- 录制保存创建新版本：component_name 由 platform+component_type+data_domain+sub_domain 推导；版本号应用层语义解析递增；新版本默认非稳定
+- 前端 export 保存传 data_domain/sub_domain
+
+### 新增
+
+- `backend/services/component_name_utils.py`：component_name 标准化、版本号解析
+- `ComponentLoader.load_python_component_from_path`：按 file_path 加载，模块名唯一避免 sys.modules 污染
+
+---
+
 ## [v4.20.0] - 2026-01-08 - 系统管理模块 API 完整实现
 
 ### 核心功能

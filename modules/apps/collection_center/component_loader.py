@@ -4,11 +4,14 @@
 负责加载、验证、缓存 YAML/Python 组件配置
 
 v4.8.0: 添加 Python 组件加载支持,逐步废弃 YAML 组件
+optimize-component-version-management: 添加 load_python_component_from_path
 """
 
+import hashlib
 import os
 import re
 import importlib
+import importlib.util
 import inspect
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Type
@@ -88,6 +91,8 @@ class ComponentLoader:
         
         # 组件缓存
         self._cache: Dict[str, Dict[str, Any]] = {}
+        # load_python_component_from_path 缓存，key 为 file_path
+        self._path_load_cache: Dict[str, Type] = {}
         
         logger.info(f"ComponentLoader initialized: dir={self.components_dir}, hot_reload={self.hot_reload}")
     
@@ -472,6 +477,76 @@ class ComponentLoader:
         except Exception as e:
             logger.error(f"Failed to load Python component {platform}/{component_name}: {e}")
             return None
+
+    def load_python_component_from_path(
+        self,
+        file_path: str,
+        version_id: Any = None,
+        project_root: Optional[str] = None,
+    ) -> Type:
+        """
+        从 file_path 加载 Python 组件类。
+
+        Args:
+            file_path: 相对路径(相对于 PROJECT_ROOT)或绝对路径
+            version_id: 可选，用于唯一模块名，避免 sys.modules 缓存污染
+            project_root: 项目根目录，若 file_path 为相对路径则拼接
+
+        Returns:
+            组件类
+
+        Raises:
+            FileNotFoundError: 文件不存在
+            ValueError: 加载失败
+        """
+        project_root = project_root or os.getenv("PROJECT_ROOT", "")
+        if project_root and not os.path.isabs(file_path):
+            abs_path = os.path.normpath(os.path.join(project_root, file_path))
+        else:
+            abs_path = os.path.normpath(file_path)
+
+        if not os.path.exists(abs_path):
+            raise FileNotFoundError(
+                f"Component file not found: {file_path} (version_id={version_id}, "
+                f"abs={abs_path})"
+            )
+
+        cache_key = file_path
+        if not self.hot_reload and cache_key in self._path_load_cache:
+            return self._path_load_cache[cache_key]
+
+        # 模块名须唯一，避免不同 file_path 使用相同模块名导致 sys.modules 污染
+        unique_name = f"comp_{hashlib.sha256(abs_path.encode()).hexdigest()[:16]}"
+        if version_id is not None:
+            unique_name = f"{unique_name}_v{version_id}"
+
+        spec = importlib.util.spec_from_file_location(unique_name, abs_path)
+        if not spec or not spec.loader:
+            raise ValueError(
+                f"Failed to create spec for {file_path} (version_id={version_id})"
+            )
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to load component from {file_path}: {e} "
+                f"(version_id={version_id})"
+            ) from e
+
+        component_class = self._find_component_class_from_module(module, Path(abs_path).stem)
+        if not component_class:
+            raise ValueError(
+                f"No component class found in {file_path} (version_id={version_id})"
+            )
+
+        if not self.hot_reload:
+            self._path_load_cache[cache_key] = component_class
+        return component_class
+
+    def _find_component_class_from_module(self, module, stem: str) -> Optional[Type]:
+        """在模块中查找组件类（基于 stem 推断）"""
+        return self._find_component_class(module, stem.replace("-", "_"))
 
     def build_component_dict_from_python(
         self, platform: str, component_name: str, params: Dict[str, Any]

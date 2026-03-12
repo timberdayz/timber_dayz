@@ -119,25 +119,51 @@ class ResourceMonitor:
         )
         memory_usage = memory_info.percent
         
-        # 检查阈值
-        if cpu_usage >= self.cpu_threshold:
+        # 检查阈值并记录日志
+        cpu_alert = cpu_usage >= self.cpu_threshold
+        memory_alert = memory_usage >= self.memory_threshold
+        if cpu_alert:
             logger.warning(
                 f"[ResourceMonitor] [WARN] CPU使用率过高: {cpu_usage:.1f}% "
                 f"(阈值: {self.cpu_threshold}%)"
             )
-        
-        if memory_usage >= self.memory_threshold:
+        if memory_alert:
             logger.warning(
                 f"[ResourceMonitor] [WARN] 内存使用率过高: {memory_usage:.1f}% "
                 f"(阈值: {self.memory_threshold}%)"
             )
-        
-        # 可选:同时触发告警时记录更详细的日志
-        if cpu_usage >= self.cpu_threshold and memory_usage >= self.memory_threshold:
+        if cpu_alert and memory_alert:
             logger.error(
                 f"[ResourceMonitor] [ALERT] 资源使用率严重超标 - "
                 f"CPU: {cpu_usage:.1f}%, 内存: {memory_usage:.1f}%"
             )
+
+        # 告警对接（Webhook/钉钉/邮件），带冷却与重试
+        try:
+            from backend.services.alert_service import send_resource_alert
+            if cpu_alert and memory_alert:
+                await send_resource_alert(
+                    "resource_both",
+                    f"CPU {cpu_usage:.1f}% 内存 {memory_usage:.1f}% 超阈值",
+                    cpu_usage=cpu_usage,
+                    memory_usage=memory_usage,
+                )
+            elif cpu_alert:
+                await send_resource_alert(
+                    "resource_cpu",
+                    f"CPU使用率过高: {cpu_usage:.1f}% (阈值 {self.cpu_threshold}%)",
+                    cpu_usage=cpu_usage,
+                    memory_usage=memory_usage,
+                )
+            elif memory_alert:
+                await send_resource_alert(
+                    "resource_memory",
+                    f"内存使用率过高: {memory_usage:.1f}% (阈值 {self.memory_threshold}%)",
+                    cpu_usage=cpu_usage,
+                    memory_usage=memory_usage,
+                )
+        except Exception as e:
+            logger.warning(f"[ResourceMonitor] 告警发送异常: {e}")
 
 
 # 全局资源监控服务实例

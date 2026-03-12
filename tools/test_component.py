@@ -324,6 +324,13 @@ class ComponentTester:
                 result.status = TestStatus.FAILED
                 result.error = "Account info not available"
                 return result
+
+            comp_type = getattr(component_class, 'component_type', 'export')
+            non_login_types = ('export', 'navigation', 'date_picker', 'filters')
+            if comp_type in non_login_types and not self.skip_login and not self.account_id:
+                result.status = TestStatus.FAILED
+                result.error = "非登录组件测试需要 account_id，请选择测试账号"
+                return result
             
             # 5. 执行 Python 组件测试
             result.steps_total = 1  # Python 组件作为一个整体步骤
@@ -501,20 +508,27 @@ class ComponentTester:
                 )
                 page = await context.new_page()
                 
-                # v4.8.0: 创建适配器时传递步骤回调；验证码回传时截图保存到 test_dir
+                # 创建适配器，注入 component_class 确保执行 version.file_path 对应实现
                 adapter_config = {'output_dir': str(self.output_dir)}
                 if self.test_dir:
                     adapter_config.setdefault('task', {})['screenshot_dir'] = str(self.test_dir)
+                component_type = getattr(component_class, 'component_type', 'export')
+                override_map = {
+                    'login': {'override_login_class': component_class},
+                    'navigation': {'override_navigation_class': component_class},
+                    'export': {'override_export_class': component_class},
+                    'date_picker': {'override_date_picker_class': component_class},
+                    'shop_switch': {'override_shop_switch_class': component_class},
+                    'filters': {'override_filters_class': component_class},
+                }
                 adapter = create_adapter(
                     platform=self.platform,
                     account=account_info,
                     config=adapter_config,
-                    step_callback=self.progress_callback,  # v4.8.0: 传递回调
-                    is_test_mode=True,  # v4.8.0: 标记为测试模式
+                    step_callback=self.progress_callback,
+                    is_test_mode=True,
+                    **(override_map.get(component_type) or {}),
                 )
-                
-                # 获取组件类型
-                component_type = getattr(component_class, 'component_type', 'export')
                 
                 # 发送进度回调
                 if self.progress_callback:

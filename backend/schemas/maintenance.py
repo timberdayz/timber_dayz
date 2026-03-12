@@ -39,6 +39,10 @@ class CacheStatusResponse(BaseModel):
     redis_memory_used: Optional[int] = Field(None, description="Redis内存使用(字节)")
     redis_keys_count: Optional[int] = Field(None, description="Redis键数量")
     app_cache_size: Optional[int] = Field(None, description="应用缓存大小(键数量)")
+    # CacheService 命中率（多 worker 下为单 worker 采样）
+    hits: Optional[int] = Field(None, description="缓存命中次数")
+    misses: Optional[int] = Field(None, description="缓存未命中次数")
+    hit_rate: Optional[float] = Field(None, description="缓存命中率(%)")
 
 
 # ==================== 数据清理 ====================

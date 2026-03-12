@@ -259,7 +259,7 @@ class CacheService:
         pattern: str
     ) -> int:
         """
-        按模式删除缓存数据
+        按模式删除缓存数据（使用 SCAN 游标迭代，避免 KEYS O(N) 阻塞）
         
         Args:
             pattern: 缓存key模式(如 "xihong_erp:accounts:*")
@@ -271,13 +271,23 @@ class CacheService:
             return 0
         
         try:
-            keys = await self.redis_client.keys(pattern)
-            if keys:
-                count = await self.redis_client.delete(*keys)
+            total_deleted = 0
+            batch_size = 100
+            keys_batch: List[str] = []
+            async for key in self.redis_client.scan_iter(match=pattern, count=100):
+                keys_batch.append(key)
+                if len(keys_batch) >= batch_size:
+                    count = await self.redis_client.delete(*keys_batch)
+                    total_deleted += count
+                    self.cache_stats["deletes"] += count
+                    keys_batch = []
+            if keys_batch:
+                count = await self.redis_client.delete(*keys_batch)
+                total_deleted += count
                 self.cache_stats["deletes"] += count
-                logger.info(f"[Cache] 删除 {count} 个缓存: {pattern}")
-                return count
-            return 0
+            if total_deleted > 0:
+                logger.info(f"[Cache] 删除 {total_deleted} 个缓存: {pattern}")
+            return total_deleted
         except Exception as e:
             self.cache_stats["errors"] += 1
             logger.warning(f"[Cache] 按模式删除缓存失败: {e}")
@@ -298,6 +308,19 @@ class CacheService:
         """
         pattern = f"{self.CACHE_PREFIX}{cache_type}:*"
         return await self.delete_pattern(pattern)
+
+    async def invalidate_dashboard_business_overview(self) -> int:
+        """
+        写时失效：业务概览与年度总结相关 Dashboard 缓存（proposal 约定集中在此执行）。
+        在数据同步完成、经营目标/配置更新等事件后调用，确保后续请求命中 DB/Metabase 取得新数据。
+        Key 约定：xihong_erp:dashboard_*、xihong_erp:annual_summary_*
+        """
+        n1 = await self.delete_pattern(f"{self.CACHE_PREFIX}dashboard_*")
+        n2 = await self.delete_pattern(f"{self.CACHE_PREFIX}annual_summary_*")
+        total = n1 + n2
+        if total > 0:
+            logger.info(f"[Cache] 写时失效 Dashboard 相关缓存: 共 {total} 个 key")
+        return total
     
     def get_stats(self) -> Dict[str, Any]:
         """
@@ -402,4 +425,13 @@ def cache_result(
         
         return wrapper
     return decorator
+
+
+def invalidate_dashboard_cache_sync() -> int:
+    """
+    写时失效 Dashboard 缓存的同步入口（供 Celery 等同步上下文调用）。
+    仅在无事件循环的线程中调用；异步上下文中请直接 await cache.invalidate_dashboard_business_overview()。
+    """
+    import asyncio
+    return asyncio.run(get_cache_service().invalidate_dashboard_business_overview())
 
