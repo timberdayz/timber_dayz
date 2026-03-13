@@ -1,12 +1,14 @@
 # 📦 Node.js 安装指南（Windows）
 
+**项目要求**：本仓库与 GitHub Actions 要求 **Node.js >= 24**。根目录有 `.nvmrc`，使用 nvm 时可执行 `nvm use` 自动切换版本。
+
 ## 🎯 快速安装（推荐）
 
 ### 方法1: 使用官方安装包（最简单）
 
 1. **下载Node.js**
    - 访问官网: https://nodejs.org/zh-cn/
-   - 选择"长期支持版（LTS）"，目前推荐版本 18.x 或 20.x
+   - 选择 **Node 24** 或更高版本（本项目与 GitHub 要求最低 Node 24）
    - 下载Windows安装包（.msi文件）
 
 2. **安装Node.js**
@@ -24,8 +26,8 @@
    
    应该看到类似输出:
    ```
-   v20.10.0
-   10.2.3
+   v24.x.x
+   10.x.x
    ```
 
 ### 方法2: 使用Chocolatey包管理器（开发者推荐）
@@ -173,7 +175,7 @@ pydantic>=2.4.0
 ```powershell
 # 1. Node.js验证
 node --version
-# 输出: v20.x.x
+# 输出: v24.x.x 或更高
 
 # 2. npm验证
 npm --version
@@ -219,7 +221,7 @@ python run_new.py
 ## 📞 需要帮助？
 
 如果遇到问题，请检查：
-1. Node.js版本 >= 16.x
+1. Node.js版本 >= 24（项目与 GitHub 要求）
 2. npm版本 >= 8.x
 3. Python版本 >= 3.9
 4. 网络连接正常

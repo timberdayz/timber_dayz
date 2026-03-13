@@ -22,7 +22,7 @@
 - ✅ Docker Desktop 已安装并运行
 - ✅ Git 已安装
 - ✅ Python 3.11+ 已安装
-- ✅ Node.js 18+ 已安装
+- ✅ Node.js 24+ 已安装
 
 ### 一键启动（推荐）
 

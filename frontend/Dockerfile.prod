@@ -1,7 +1,7 @@
 # 西虹ERP系统 - 前端生产环境Dockerfile
 
 # 构建阶段
-FROM node:18-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 

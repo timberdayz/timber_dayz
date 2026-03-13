@@ -253,7 +253,7 @@ tests/
 ### 容器化
 ```dockerfile
 # 多阶段构建
-FROM node:18-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci --only=production

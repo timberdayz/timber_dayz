@@ -26,6 +26,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
   IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   # 检查是否配置了必要的 secrets
@@ -324,7 +325,7 @@ jobs:
           cache-to: type=gha,mode=max
           target: production
           build-args: |
-            NODE_VERSION=18
+            NODE_VERSION=24
             VITE_API_URL=${{ secrets.VITE_API_URL || 'http://localhost:8001' }}
 
       # [NEW] 混合模式：同时推送到 CNB.cool（国内镜像仓库，加速部署）

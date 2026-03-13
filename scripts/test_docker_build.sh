@@ -63,7 +63,7 @@ echo ""
 print_message "测试前端镜像构建..."
 if docker build -f Dockerfile.frontend -t xihong_erp_frontend:test \
     --target production \
-    --build-arg NODE_VERSION=18 \
+    --build-arg NODE_VERSION=24 \
     --build-arg VITE_API_URL=http://localhost:8001 \
     . > /tmp/docker_build_frontend.log 2>&1; then
     print_message "前端镜像构建成功"

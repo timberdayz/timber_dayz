@@ -144,7 +144,7 @@ LOGS_DIR=/app/logs
 
 # ==================== 其他配置 ====================
 PYTHON_VERSION=3.11
-NODE_VERSION=18
+NODE_VERSION=24
 """
     
     # 保存配置文件

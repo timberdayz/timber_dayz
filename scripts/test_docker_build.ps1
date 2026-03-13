@@ -67,7 +67,7 @@ $frontendLog = Join-Path $env:TEMP "docker_build_frontend.log"
 try {
     docker build -f Dockerfile.frontend -t xihong_erp_frontend:test `
         --target production `
-        --build-arg NODE_VERSION=18 `
+        --build-arg NODE_VERSION=24 `
         --build-arg VITE_API_URL=http://localhost:8001 `
         . 2>&1 | Tee-Object -FilePath $frontendLog | Out-Null
     

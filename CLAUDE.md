@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **当前版本**: v4.20.0
 - **架构**: SSOT + Contract-First + 三层架构
 - **数据库**: PostgreSQL 15+（55 张表，Docker 容器化）
+- **Node.js**: 24+（项目与 GitHub 要求，见根目录 `.nvmrc`；禁止使用 18）
 - **状态**: 生产就绪
 
 > **权威开发规则**: `.cursorrules`（完整开发规范，所有 Agent 必读）
@@ -112,6 +113,7 @@ mypy backend/                                       # 类型检查
 4. **schema.py 变更后遗漏 Alembic 迁移**
 5. **终端输出使用 Emoji**（Windows UnicodeEncodeError）
 6. **修改采集组件不遵循规范** → 必读 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
+7. **Node 版本使用 18 或低于 24** → 项目与 GitHub 要求 Node 24+，见 `.nvmrc` 与 `frontend/package.json` engines
 
 ## Documentation Map
 

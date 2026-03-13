@@ -8,7 +8,9 @@
 # ===================================================
 
 # ==================== 构建阶段 ====================
-FROM node:18-alpine as build
+# 与 GitHub 要求一致：Node 24+（可通过 build-arg 覆盖）
+ARG NODE_VERSION=24
+FROM node:${NODE_VERSION}-alpine as build
 
 LABEL maintainer="西虹ERP团队"
 LABEL description="西虹ERP系统前端构建阶段"
@@ -81,7 +83,8 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 CMD ["nginx", "-g", "daemon off;"]
 
 # ==================== 开发阶段 ====================
-FROM node:18-alpine as development
+ARG NODE_VERSION=24
+FROM node:${NODE_VERSION}-alpine as development
 
 LABEL maintainer="西虹ERP团队"
 LABEL description="西虹ERP系统前端开发环境"

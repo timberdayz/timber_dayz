@@ -152,7 +152,7 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        NODE_VERSION: ${NODE_VERSION:-18}
+        NODE_VERSION: ${NODE_VERSION:-24}
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8001}
     container_name: xihong_erp_frontend
     # 生产最小端口暴露：frontend 不映射宿主机端口（通过 nginx 反向代理访问 /）

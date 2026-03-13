@@ -60,10 +60,10 @@ def check_nodejs():
         node_version = stdout.strip()
         print_success(f"Node.js已安装: {node_version}")
         
-        # 检查版本
+        # 检查版本（GitHub 与 CI 要求最低 Node 24）
         version_num = node_version.replace('v', '').split('.')[0]
-        if int(version_num) < 16:
-            print_warning(f"Node.js版本过低（{node_version}），建议升级到 >= 16.x")
+        if int(version_num) < 24:
+            print_warning(f"Node.js版本过低（{node_version}），建议升级到 >= 24.x（项目与 GitHub 要求）")
     else:
         print_error("Node.js未安装")
         return False

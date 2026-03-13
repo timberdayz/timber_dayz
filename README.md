@@ -39,7 +39,7 @@ python run.py --with-superset
 
 - **操作系统**: Windows 10/11, macOS, Linux
 - **Python**: 3.9+ (推荐3.11或3.13)
-- **Node.js**: 16+ (推荐18或20)
+- **Node.js**: 24+（项目与 GitHub 要求）
 - **数据库**: PostgreSQL 15+ (Docker容器)
 - **Docker**: Docker Desktop
 - **BI平台**: Apache Superset 3.0+ (可选，Docker容器)
