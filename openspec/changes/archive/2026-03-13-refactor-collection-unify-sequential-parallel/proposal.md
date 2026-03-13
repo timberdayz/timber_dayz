@@ -1,5 +1,10 @@
 # Change: 采集执行器修复与采集架构简化
 
+## 与当前设计的关系（2026-03-13 更新）
+
+- **Phase 1（止血 + 双轨统一）**：**已完成**，且与当前采集模块设计一致。顺序/并行已统一为同一套组件执行模型（create_adapter + adapter + Python 组件）。
+- **Phase 2（CollectionRunner + 脚本约定发现）**：**已作废，不再实施**。Phase 2 原方案与后续落地的「组件版本管理」（optimize-component-version-management）冲突：当前架构要求执行器通过 **ComponentVersionService** 选版、按 **selected_version.file_path** 用 **load_python_component_from_path** 加载，并保留 **PythonComponentAdapter** 作为执行入口；Phase 2 的「约定目录发现、废弃适配层」会绕过版本管理，故不予实施。若未来做薄调度层抽象，须在**保留版本管理与 file_path 加载**的前提下重设计。详见本目录下 `DESIGN_ALIGNMENT_ASSESSMENT.md`。
+
 ## 当前实现状态（避免重复工作）
 
 - **Phase 1（止血 + 双轨统一）**：**已完成**。
@@ -7,8 +12,8 @@
   - P0 顺序路径：`executor_v2._execute_with_python_components` 已使用 `create_adapter(platform=..., account=..., config=params)`，`adapter.export(page=page, data_domain=domain)`，download_dir 从 `config['task']['download_dir']` 读取。
   - P0 并行路径：`execute_parallel_domains` 已改为使用 `create_adapter` + `adapter.login` / `adapter.export`，与顺序路径同一套组件执行模型；`_execute_single_domain_parallel` 使用 `create_adapter` + `adapter.export`。
   - P1：`_execute_collection_task_background` 已移除 `db_session_maker` 参数，路由调用处未再传入。
-  - **未做**：并行模式尚未支持 `sub_domains` 参数（顺序模式已支持）；若需并行子域，需为 `execute_parallel_domains` 增加 `sub_domains` 并在路由传入。
-- **Phase 2（CollectionRunner + 脚本约定发现）**：**未实施**。当前路由仍调用 `CollectionExecutorV2.execute` / `execute_parallel_domains`，未引入 `CollectionRunner`，未切换至约定目录脚本发现，`PythonComponentAdapter` / YAML 引擎仍在使用中。
+  - **未做（可选）**：并行模式尚未支持 `sub_domains` 参数（顺序模式已支持）；若需并行子域，可为 `execute_parallel_domains` 增加 `sub_domains` 并在路由传入。
+- **Phase 2**：已作废，见上文。
 
 ## Why
 
@@ -20,7 +25,7 @@
 
 ## What Changes
 
-**推进策略**：分两阶段。**Phase 1** 先止血（P0 认证 + create_adapter/export 参数修复 + P1 db_session_maker），使顺序/并行在现有架构下可跑通；**Phase 2** 引入薄调度层与单一组件入口，简化架构并废弃冗余代码。
+**推进策略**：分两阶段。**Phase 1** 先止血（P0 认证 + create_adapter/export 参数修复 + P1 db_session_maker），使顺序/并行在现有架构下可跑通；**Phase 2** 原计划引入薄调度层与单一组件入口，**已作废**（与后续落地的组件版本管理设计冲突，见上文「与当前设计的关系」及 DESIGN_ALIGNMENT_ASSESSMENT.md）。
 
 ### 1. P0：认证依赖改为抛出 HTTPException（Phase 1）
 

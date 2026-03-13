@@ -1,5 +1,13 @@
 # Change: 混合采集（API + Playwright）按店铺分流
 
+## 搁置说明（On Hold）— 已归档
+
+**状态**：本提案已搁置并归档，暂不排期实施。  
+**原因**：近期暂无混合采集（API + Playwright 按店铺分流）需求，优先保障现有 Playwright 采集与版本管理能力。  
+**后续**：若需启用混合采集，可将本目录复制回 `openspec/changes/add-hybrid-collection-api-playwright` 恢复为进行中提案并排期；设计已与当前架构对齐（见本目录下 `ALIGNMENT_ASSESSMENT.md`）。
+
+---
+
 ## Why
 
 1. **API 授权覆盖不足**：大量 TikTok Shop / Shopee 店铺尚未完成平台 Open API 授权，仅靠 Playwright 才能采集这些店铺数据；已授权 API 的店铺若改用官方 API 可避免弹窗、验证码与反爬干扰，提高稳定性与数据准确性。

@@ -28,6 +28,7 @@ import sys
 import time
 import webbrowser
 import argparse
+import shutil
 from pathlib import Path
 import platform as sys_platform
 import os
@@ -237,12 +238,25 @@ def start_backend():
     
     return process
 
+def _resolve_npm_path():
+    """解析 npm 可执行文件完整路径，供子进程使用（避免新开 PowerShell 时 PATH 无 Node）。"""
+    npm_exe = shutil.which("npm")
+    if sys_platform.system() == "Windows" and not npm_exe:
+        npm_exe = shutil.which("npm.cmd")
+    return npm_exe
+
+
 def start_frontend():
     """启动前端服务（改进版，含端口检查）"""
     safe_print("\n[启动] 前端服务...")
     safe_print("  地址: http://localhost:5173")
     
     frontend_dir = Path(__file__).parent / "frontend"
+    npm_exe = _resolve_npm_path()
+    if not npm_exe:
+        safe_print("  [ERROR] 未找到 npm。请确保已安装 Node.js 并加入 PATH，或在已加载 nvm/fnm 的终端中运行: python run.py --local")
+        safe_print("  提示: 可从 https://nodejs.org/ 安装 Node.js，或在本终端先执行 nvm use / fnm use 后再运行本脚本。")
+        return None
     
     # Windows: 尝试清理可能残留的Node.js进程（仅提示，不强制）
     if sys_platform.system() == "Windows":
@@ -260,11 +274,13 @@ def start_frontend():
             pass
     
     if sys_platform.system() == "Windows":
-        # Windows: 用 -WorkingDirectory 指定前端目录，避免 -Command 内 path 引号问题
+        # Windows: 使用 npm 完整路径，避免新开 PowerShell 窗口内 PATH 无 Node/npm
         frontend_path = str(frontend_dir.resolve())
+        npm_path_ps = npm_exe.replace("'", "''")
+        inner_cmd = "& '{}' run dev".format(npm_path_ps)
         cmd = (
-            'Start-Process powershell -ArgumentList "-NoExit", "-Command", "npm run dev" -WorkingDirectory "{}"'
-        ).format(frontend_path.replace('"', '`"'))
+            'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" -WorkingDirectory "{}"'
+        ).format(inner_cmd.replace('"', '`"'), frontend_path.replace('"', '`"'))
         
         process = subprocess.Popen(
             ["powershell", "-Command", cmd],
@@ -275,9 +291,9 @@ def start_frontend():
         safe_print("  [OK] 前端服务已在新窗口启动")
         safe_print("  [INFO] 如果端口被占用，Vite会自动使用下一个端口（5174/5175...）")
     else:
-        # Unix: 直接启动
+        # Unix: 使用解析到的 npm 路径，保证与当前环境一致
         process = subprocess.Popen(
-            ["npm", "run", "dev"],
+            [npm_exe, "run", "dev"],
             cwd=frontend_dir
         )
         safe_print("  [OK] 前端服务已启动")
@@ -1064,11 +1080,13 @@ def main():
         # 启动前端
         if not args.backend_only:
             frontend_process = start_frontend()
-            processes.append(("frontend", frontend_process))
-            
-            # 等待前端就绪
-            if wait_for_service(5173, "前端界面", 15):
-                safe_print("  [OK] 前端界面就绪")
+            if frontend_process is not None:
+                processes.append(("frontend", frontend_process))
+                # 等待前端就绪
+                if wait_for_service(5173, "前端界面", 15):
+                    safe_print("  [OK] 前端界面就绪")
+            else:
+                safe_print("  [SKIP] 前端未启动（npm 未找到），请按上方提示配置 Node.js 后重试")
         
         # 打印访问信息
         safe_print("\n" + "="*80)

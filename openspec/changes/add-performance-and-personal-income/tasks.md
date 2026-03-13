@@ -19,11 +19,9 @@
 - [ ] 0.1.3 确认 `target_breakdown.target_id` 外键迁移后指向 `a_class.sales_targets.id`
 - [ ] 0.1.4 PerformanceScore 合并策略：以 public.performance_scores 完整字段为准，合并/替换 performance_scores_c 后删除 PerformanceScoreC 类
 
-### 0.2 config_management.py 调查（优先）
+### 0.2 config_management.py 确认（优先）
 
-- [ ] 0.2.1 调查 `backend/routers/config_management.py` 的 `/api/config/sales-targets` 实际操作的逻辑表：
-  - 若为店铺月度目标（与 sales_targets_a 一致），改为 `a_class.sales_targets_a` 并适配中文字段名
-  - 若为独立配置表或与 public.sales_targets 对应，迁移后改为 `a_class.sales_targets`
+- [ ] 0.2.1 确认 `backend/routers/config_management.py` 销售目标 API 已使用 `a_class.sales_targets_a`（店铺月度聚合表），与 `public.sales_targets` 目标主表无关；**本迁移无需修改** config_management
 
 ### 0.3 Alembic 迁移脚本 - sales_targets
 
@@ -59,7 +57,7 @@
 
 - [ ] 0.6.1 `backend/routers/target_management.py`：确保 SalesTarget 使用 a_class（ORM 自动处理，验证即可）
 - [ ] 0.6.2 `backend/services/target_sync_service.py`：原始 SQL 中 `FROM sales_targets`、`JOIN target_breakdown` 更新为 `a_class.sales_targets`、`a_class.target_breakdown`
-- [ ] 0.6.3 `backend/routers/config_management.py`：根据 0.2.1 调查结果，更新为 `a_class.sales_targets` 或 `a_class.sales_targets_a`
+- [ ] 0.6.3 `backend/routers/config_management.py`：已使用 a_class.sales_targets_a，无需修改
 - [ ] 0.6.4 `backend/routers/performance_management.py`：PerformanceScore 使用 c_class（ORM 自动处理，验证即可）
 - [ ] 0.6.5 所有引用 ShopHealthScore、ShopAlert 的代码验证 schema（如 shop_health_service.py）
 - [ ] 0.6.6 `backend/routers/target_management.py`：错误提示「sales_targets 表不存在」更新为「a_class.sales_targets 表不存在」
@@ -84,7 +82,7 @@
   - `inner join public.sales_targets st` → `inner join a_class.sales_targets st`
 - [ ] 0.8.3 全局搜索其他引用 `public.sales_targets`、`public.performance_scores`、`public.shop_health_scores`、`public.shop_alerts` 的 SQL，全部更新
 - [ ] 0.8.4 执行 `python scripts/init_metabase.py` 同步 SQL 到 Metabase
-- [ ] 0.8.5 检查 `sql/migrate_tables_to_schemas.sql`：该脚本将 sales_targets 置入 core，与本提案 a_class 冲突；需更新为 a_class 或标注已废弃（以 Alembic 迁移为准）
+- [ ] 0.8.5 确认 `sql/migrate_tables_to_schemas.sql` 已标注 DEPRECATED（sales_targets 由 Alembic 迁至 a_class）或已无 sales_targets 的 ALTER；以 Alembic 迁移为准
 
 ### 0.9 验证
 
@@ -106,22 +104,18 @@
 
 ## Phase 1: 绩效公示修复与优化
 
-### 1.1 后端 - 查询修复
+### 1.1 后端 - 查询修复（所有 async 路由内 db.execute 须 await）
 
 - [ ] 1.1.1 修正 `list_performance_scores`：`db.execute` 改为 `await db.execute`（总数、分页、店铺名称查询均需 await）
 - [ ] 1.1.2 修正 `get_shop_performance`：同上
-- [ ] 1.1.3 无数据时返回空列表，前端友好展示「暂无数据」
+- [ ] 1.1.3 修正 `list_performance_configs`、`get_performance_config`、`update_performance_config`、`delete_performance_config`：上述接口内所有 `db.execute` 改为 `await db.execute`
+- [ ] 1.1.4 无数据时返回空列表，前端友好展示「暂无数据」
 
-### 1.2 后端 - 计算逻辑完善
+### 1.2 后端 - calculate 接口（与 add-performance-calculation-via-metabase 分工）
 
-- [ ] 1.2.1 实现 `POST /api/performance/scores/calculate` 中的 TODO 逻辑
-- [ ] 1.2.2 销售额得分：从 `a_class.target_breakdown`、`a_class.sales_targets` 与 **Orders Model**（或 b_class 订单表）计算达成率 × 权重
-- [ ] 1.2.3 毛利得分：从 Orders Model 或 b_class 订单表计算毛利达成率 × 权重
-- [ ] 1.2.4 重点产品得分：从 `fact_product_metrics` 或 **Products Model** 计算重点产品达成率 × 权重
-- [ ] 1.2.5 运营得分：从 `c_class.shop_health_scores` 计算运营指标 × 权重
-- [ ] 1.2.6 计算完成后写入 `c_class.performance_scores`，更新 `rank`、`performance_coefficient`
-- [ ] 1.2.7 禁止引用已删除的 `fact_orders`；使用 Orders Model 或 b_class.fact_{platform}_orders_{granularity}
-- [ ] 1.2.8 若数据源不足，可采用占位值（如 0）保证流程可跑通
+- [ ] 1.2.1 **分工说明**：calculate 的**完整计算逻辑**由 **add-performance-calculation-via-metabase** 实现（Metabase SQL + 后端调用）。本提案仅确保：接口可调用、使用 await、能写入 `c_class.performance_scores`；若 Metabase 方案未实施，可保留占位实现（如写入 0 或占位值）以保证流程可跑通
+- [ ] 1.2.2 禁止在 calculate 中引用已删除的 `fact_orders`；数据源应为 a_class/c_class 及 Orders Model（或 b_class）
+- [ ] 1.2.3 计算完成后写入 `c_class.performance_scores`（rank、performance_coefficient 可由 Metabase 方案或占位逻辑更新）
 
 ### 1.3 前端 - 绩效公示优化
 
@@ -133,8 +127,9 @@
 
 ## Phase 2: 我的收入 - 后端 API
 
+- [ ] 2.0 Contract-First：在 `backend/schemas/` 中定义我的收入响应模型（如 `MyIncomeResponse`）；若已在 router 中定义则迁移至 schemas 并更新引用；路由使用 `response_model` 引用
 - [ ] 2.1 新增 `GET /api/hr/me/income`：需登录，根据当前用户关联的员工返回收入数据（依赖 Employee.user_id）
-- [ ] 2.2 未关联员工时返回 404 或 `{ linked: false }`
+- [ ] 2.2 未关联员工时返回 404 或 `{ linked: false }`（当前实现为 200 + `linked: false`，均可接受）
 - [ ] 2.3 查询 `c_class.employee_commissions`（按 employee_code、year_month）
 - [ ] 2.4 查询 `c_class.employee_performance`（按 employee_code、year_month）
 - [ ] 2.5 优先查询 `a_class.payroll_records`（若有完整工资单），否则组合 salary_structures + employee_commissions + employee_performance

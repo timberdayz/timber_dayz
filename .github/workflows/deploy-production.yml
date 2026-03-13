@@ -506,6 +506,7 @@ jobs:
           fi
 
           # 5b. 上传 config 目录（保证 metabase_config.yaml 等被 init_metabase.py 使用；卷挂载 ./config:/app/config 会覆盖镜像内目录）
+          # [FIX] SCP 要求目标父目录存在；先创建并验证，路径加引号以支持含空格的 PRODUCTION_PATH
           if [ -d "config" ]; then
             echo "[INFO] Syncing config directory to server..."
             if ! ssh -o StrictHostKeyChecking=no \
@@ -513,11 +514,11 @@ jobs:
                 -o ServerAliveCountMax=10 \
                 -o ConnectTimeout=30 \
                 ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "mkdir -p ${PRODUCTION_PATH}/config"; then
-              echo "[WARN] Failed to create config directory on server, continuing..."
+                "mkdir -p \"${PRODUCTION_PATH}/config\" && test -d \"${PRODUCTION_PATH}/config\""; then
+              echo "[WARN] Failed to create or verify config directory on server (path: ${PRODUCTION_PATH}/config), skipping config upload"
             else
               if [ -f "config/metabase_config.yaml" ]; then
-                if ! scp_with_retry config/metabase_config.yaml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/config/metabase_config.yaml; then
+                if ! scp_with_retry config/metabase_config.yaml ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/metabase_config.yaml"; then
                   echo "[WARN] Failed to upload config/metabase_config.yaml (init_metabase.py may fail)"
                 else
                   echo "[OK] config/metabase_config.yaml uploaded"
@@ -527,7 +528,7 @@ jobs:
                 [ -e "$f" ] || continue
                 bn=$(basename "$f")
                 if [ "$bn" != "metabase_config.yaml" ]; then
-                  scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/config/"$bn" || true
+                  scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/${bn}" || true
                 fi
               done
             fi
@@ -766,6 +767,7 @@ jobs:
           fi
 
           # 5b. 上传 config 目录（保证 metabase_config.yaml 等被 init_metabase.py 使用；卷挂载 ./config:/app/config 会覆盖镜像内目录）
+          # [FIX] SCP 要求目标父目录存在；先创建并验证，路径加引号以支持含空格的 PRODUCTION_PATH
           if [ -d "config" ]; then
             echo "[INFO] Syncing config directory to server..."
             if ! ssh -o StrictHostKeyChecking=no \
@@ -773,11 +775,11 @@ jobs:
                 -o ServerAliveCountMax=10 \
                 -o ConnectTimeout=30 \
                 ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "mkdir -p ${PRODUCTION_PATH}/config"; then
-              echo "[WARN] Failed to create config directory on server, continuing..."
+                "mkdir -p \"${PRODUCTION_PATH}/config\" && test -d \"${PRODUCTION_PATH}/config\""; then
+              echo "[WARN] Failed to create or verify config directory on server (path: ${PRODUCTION_PATH}/config), skipping config upload"
             else
               if [ -f "config/metabase_config.yaml" ]; then
-                if ! scp_with_retry config/metabase_config.yaml ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/config/metabase_config.yaml; then
+                if ! scp_with_retry config/metabase_config.yaml ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/metabase_config.yaml"; then
                   echo "[WARN] Failed to upload config/metabase_config.yaml (init_metabase.py may fail)"
                 else
                   echo "[OK] config/metabase_config.yaml uploaded"
@@ -787,7 +789,7 @@ jobs:
                 [ -e "$f" ] || continue
                 bn=$(basename "$f")
                 if [ "$bn" != "metabase_config.yaml" ]; then
-                  scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:${PRODUCTION_PATH}/config/"$bn" || true
+                  scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/${bn}" || true
                 fi
               done
             fi

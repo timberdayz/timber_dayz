@@ -28,26 +28,29 @@
 - **THEN** `public.sales_targets`、`public.performance_scores`、`public.shop_health_scores`、`public.shop_alerts` 不存在
 - **AND** 查询 public schema 无上述表
 
-### Requirement: 绩效公示可用性
-系统 SHALL 确保绩效公示页面可正常加载，查询绩效评分列表时无异常报错，无数据时友好展示「暂无数据」。
+### Requirement: 绩效公示与绩效配置可用性
+系统 SHALL 确保绩效公示与绩效配置相关接口在异步环境下正确执行，查询无异常报错，无数据时友好展示「暂无数据」。
 
 #### Scenario: 绩效公示加载成功
 - **WHEN** 管理员或 HR 访问「绩效公示」页面
 - **THEN** 系统调用 `GET /api/performance/scores` 获取数据
-- **AND** 异步查询使用 `await db.execute(...)`（禁止缺少 await）
+- **AND** 所有异步数据库查询使用 `await db.execute(...)`（禁止在 async 路由内使用未 await 的 db.execute）
 - **AND** 若有数据，展示店铺名称、销售额得分、毛利得分、重点产品得分、运营得分、总分、排名、绩效系数
 - **AND** 若无数据，展示「暂无数据」而非报错
+
+#### Scenario: 绩效配置接口异步正确
+- **WHEN** 调用绩效配置相关接口（列表/详情/创建/更新/删除）
+- **THEN** 路由内所有数据库操作均使用 `await db.execute(...)` 或等效异步调用
+- **AND** 无同步 `db.execute(...)` 导致的事件循环冲突或查询失败
 
 #### Scenario: 绩效计算触发
 - **WHEN** 管理员选择考核周期并点击「重新计算」（或系统自动计算）
 - **THEN** 系统调用 `POST /api/performance/scores/calculate`
-- **AND** 基于 `a_class.target_breakdown`、`a_class.sales_targets`、Orders Model（或 b_class 订单表）、fact_product_metrics、`c_class.shop_health_scores` 计算各项得分
-- **AND** 禁止引用已删除的 fact_orders
-- **AND** 将结果写入 `c_class.performance_scores`
+- **AND** 计算逻辑由 add-performance-calculation-via-metabase 负责（Metabase SQL + 后端写入）；本规格仅要求接口可调用、禁止引用 fact_orders、结果写入 `c_class.performance_scores`
 - **AND** 绩效公示页面刷新后可展示新数据
 
 ### Requirement: 我的收入（员工自助）
-系统 SHALL 提供「我的收入」能力，使已关联员工的用户可查看本人收入明细，支撑数据公开透明。
+系统 SHALL 提供「我的收入」能力，使已关联员工的用户可查看本人收入明细，支撑数据公开透明。API 契约（请求/响应 Pydantic 模型）须定义在 `backend/schemas/`，路由使用 `response_model` 引用（Contract-First）。
 
 #### Scenario: 已关联员工查看收入
 - **WHEN** 已关联员工的用户访问「我的收入」页面

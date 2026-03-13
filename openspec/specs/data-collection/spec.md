@@ -375,6 +375,31 @@
 | `tools/launch_inspector_recorder.py`    | Inspector 录制脚本（唯一录制方式） |
 | `backend/routers/component_recorder.py` | 录制 API（仅支持 Inspector 模式）  |
 
+### Requirement: 采集组件录制工具 SHALL 产出符合《采集脚本编写规范》的 Python 组件（.py）
+
+系统 SHALL 在用户通过前端完成采集组件录制（Inspector + Trace）后，能够生成符合项目《采集脚本编写规范》的 Python 源码，并支持在前端预览、编辑后保存为 `modules/platforms/{platform}/components/{component_name}.py`，供执行器直接加载运行。录制工具的主产出为 .py 文件，与现有 Python 组件契约一致。
+
+#### Scenario: 录制停止后返回生成的 Python 代码
+
+- **WHEN** 用户在前端点击「停止录制」且录制会话已产生步骤（steps）
+- **THEN** 后端 SHALL 使用「步骤→Python 代码生成器」将 steps 转换为 Python 源码字符串
+- **AND** 后端 SHALL 在停止录制的响应中返回 `python_code` 字段（或通过单独的「生成 Python」接口返回），供前端展示与编辑
+- **AND** 生成的代码 SHALL 符合《采集脚本编写规范》中的组件契约（如 async def run(page, account, config)、ResultBase 子类）、定位优先 get_by_*、显式条件等待（expect/wait_for），并包含规范相关注释占位
+
+#### Scenario: 前端可预览并编辑生成的 Python 后保存为 .py
+
+- **WHEN** 用户在前端录制结果页查看生成的 Python 代码
+- **THEN** 前端 SHALL 提供 Python 代码的展示与可编辑区域（文本框或代码高亮组件）
+- **AND** 用户点击保存时，前端 SHALL 将当前 Python 代码（默认生成或用户编辑后）作为 `python_code` 与 platform、component_name 等一并提交到 `POST /recorder/save`
+- **AND** 后端 SHALL 将 python_code 写入 `modules/platforms/{platform}/components/{component_name}.py` 并完成版本注册，使该组件可被执行器加载
+
+#### Scenario: 步骤→Python 生成器输出符合规范
+
+- **WHEN** 步骤→Python 代码生成器根据 platform、component_type、component_name 与 steps 列表生成 Python 源码
+- **THEN** 生成器 SHALL 在可推断 role/label/text 时优先生成 `page.get_by_role()`、`get_by_label()`、`get_by_text()`，否则生成 `page.locator(selector)` 并加注释建议迁移到 get_by_*
+- **AND** 生成器 SHALL 在 click/fill 等操作前生成 `expect(locator).to_be_visible()` 或 `locator.wait_for(state="visible")`，避免裸的 time.sleep
+- **AND** 生成器 SHALL 在脚本中按《采集脚本编写规范》留注释占位（如复杂交互、临时弹窗、下载等），并在文件头注明以 COLLECTION_SCRIPT_WRITING_GUIDE.md 为准
+
 ### Requirement: Python 组件异步执行
 
 系统 SHALL 仅支持使用异步 Python 组件执行数据采集任务，提供强大的复杂操作支持（悬停、动态下拉框、iframe 遍历、2FA 验证等）。
@@ -401,6 +426,25 @@
 - **THEN** 系统使用 `await page.wait_for_timeout()` 进行异步等待
 - **AND** 系统使用 `await page.wait_for_selector()` 等待元素出现
 - **AND** 等待超时时系统执行降级策略（如文件系统兜底）
+
+### Requirement: 顺序与并行采集使用同一套组件执行模型
+
+系统 SHALL 使顺序采集与并行采集使用同一套组件执行模型（create_adapter + adapter.login / adapter.export），仅并发策略与 browser context 分配不同；顺序模式单 page 循环各域，并行模式多 context 共享 storage_state。执行器 SHALL 不在顺序或并行路径中使用 component_loader.load 加载 login/export，避免双轨维护。
+
+#### Scenario: 顺序模式使用适配器执行
+
+- **WHEN** 采集任务以顺序模式运行（单 page、单 context）
+- **THEN** 执行器 SHALL 通过 create_adapter(platform, account, config) 创建 PythonComponentAdapter，并 SHALL 通过 adapter.login(page) 与 adapter.export(page, data_domain) 执行登录与导出
+- **AND** config SHALL 至少包含 task（含 task.download_dir）、params、account、platform，供组件读取域级参数
+- **AND** 执行器 SHALL NOT 在顺序路径中使用 component_loader.load 加载 login 或 export
+
+#### Scenario: 并行模式使用同一适配器模型
+
+- **WHEN** 采集任务以并行模式运行（多域并行、共享登录状态）
+- **THEN** 执行器 SHALL 使用同一 PythonComponentAdapter 与 Python 组件执行登录及各域导出（adapter.login(page)、adapter.export(page, data_domain)）
+- **AND** 各域导出时 SHALL 为含该域参数的 config 创建 adapter，或保证 config 对组件可用
+- **AND** 执行器 SHALL NOT 在并行路径中使用 component_loader.load 加载 login 或 export
+- **AND** 仅并发方式（如 asyncio.gather）与 context 分配（每域一 context 且注入 storage_state）与顺序模式不同
 
 ### Requirement: Python 组件适配层
 
@@ -610,6 +654,42 @@
 - **THEN** 系统根据 `file_path` 字段加载 `.py` 文件
 - **AND** 系统验证 Python 文件存在
 - **AND** 系统执行组件并返回测试结果
+
+### Requirement: 登录验证码检测与处理
+
+系统 SHALL 在采集登录流程中统一支持三类验证码场景的检测与处理，且不尝试本地破解验证码；答案仅来自人工回填或（可选）合规的第三方打码服务。
+
+#### Scenario: 短信/电话验证码（OTP）由用户提供后填入
+
+- **WHEN** 登录过程中平台要求短信或电话验证码
+- **THEN** 执行器或登录组件检测到需验证码时，通过 VerificationRequiredError 将任务置为 paused，并向前端提供 verification_type（如 otp）及必要提示
+- **AND** 用户在前端输入验证码并提交后，后端将验证码写入任务/会话上下文（如 config['otp']），恢复任务并将该值传入登录组件
+- **AND** 登录组件从 config 读取验证码并填入页面，继续完成登录
+
+#### Scenario: 图形验证码出现时暂停并等待人工输入
+
+- **WHEN** 登录页出现图形验证码（如「请输入验证码」及验证码输入框/图片）
+- **THEN** 登录组件在点击登录后短时内（如 2–3 秒）检测到仍停留在登录页且存在验证码区域时，抛出 VerificationRequiredError(verification_type="graphical_captcha", screenshot_path=...)
+- **AND** 执行器将任务置为 paused，前端展示截图与验证码输入框
+- **AND** 用户输入验证码并提交后，后端将验证码写入任务上下文（如 config['captcha_code']），恢复任务并重试登录步骤；登录组件从 config 读取并填入后再次点击登录
+
+#### Scenario: 可选第三方打码服务填入图形验证码
+
+- **WHEN** 系统已配置合规的第三方打码服务（如 2Captcha）且登录页出现图形验证码
+- **THEN** 登录组件或适配模块可截取验证码图片并调用打码 API，将返回结果填入验证码输入框并继续登录
+- **AND** 人工回填仍作为默认或必选能力；打码服务为可选增强，且需在配置与文档中说明使用场景与合规
+
+#### Scenario: 无验证码时不做额外等待
+
+- **WHEN** 点击登录后未检测到验证码区域且页面已跳转或即将跳转
+- **THEN** 登录流程按现有逻辑判断成功/失败，不在「点击登录」后长时间傻等（如 15 秒）才报错
+- **AND** 仅在检测到验证码元素存在时进入「验证码处理」分支
+
+#### Scenario: 有头与无头共用同一套检测与回填
+
+- **WHEN** 采集以有头或无头模式运行
+- **THEN** 验证码检测逻辑一致（短等待后检查登录页是否仍停留、是否存在验证码相关 DOM/文案），不因浏览器是否可见而改变
+- **AND** 应对流程按无头生产设计：检测到验证码即暂停、前端回传、脚本从 config 填入并继续；有头测试可走同一套流程，保证与生产行为一致
 
 ### Requirement: Windows 日志兼容性
 

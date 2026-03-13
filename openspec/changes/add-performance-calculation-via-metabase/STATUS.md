@@ -1,7 +1,14 @@
 # 绩效计算 Metabase 方案 - 实施状态
 
 **创建日期**: 2026-01-31  
+**更新日期**: 2026-03-13（补充前置依赖：须先完成 add-performance-and-personal-income Phase 0）  
 **状态**: 待审批 - 提案已创建，等待批准后实施
+
+---
+
+## 实现顺序
+
+- **前置**：须先完成 **add-performance-and-personal-income** 的 **Phase 0**（public 表迁移至 a_class/c_class），确保 `a_class.sales_targets`、`c_class.performance_scores`、`c_class.shop_health_scores` 等表已存在，再实施本提案。
 
 ---
 

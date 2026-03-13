@@ -10,6 +10,11 @@
 
 采用**方案 A**：在 Metabase 中编写 SQL Question 执行绩效计算，后端调用 Metabase 获取结果并写入 `c_class.performance_scores`，与现有 `hr_shop_monthly_metrics`、`business_overview_comparison` 的架构一致。
 
+## 前置依赖（实现顺序）
+
+- **须先完成 add-performance-and-personal-income 的 Phase 0（Public 表迁移至 A/C 类）**：本方案 SQL 与后端依赖 `a_class.sales_targets`、`a_class.target_breakdown`、`c_class.performance_scores`、`c_class.shop_health_scores` 已存在；若上述表仍在 `public`，则 Metabase Question 与 calculate 接口会因表不存在而失败。
+- **推荐顺序**：先完成 add-performance-and-personal-income Phase 0（迁移 + 引用更新 + 验证），再实施本提案。
+
 ## What Changes
 
 ### 1. 新增 Metabase Question：performance_scores_calculation

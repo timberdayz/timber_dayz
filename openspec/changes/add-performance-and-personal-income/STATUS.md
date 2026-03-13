@@ -1,8 +1,14 @@
 # 绩效公示优化、我的收入与 Public 表 Schema 迁移 - 实施状态
 
 **创建日期**: 2026-01-31  
-**更新日期**: 2026-01-31（前置依赖已闭环，漏洞修复已纳入）  
+**更新日期**: 2026-03-13（提案与任务清单已优化；补充与 add-performance-calculation-via-metabase 的实现顺序）  
 **状态**: 实施中 - 迁移已完成，绩效公示修复已应用，我的收入已实现
+
+---
+
+## 实现顺序（与 Metabase 绩效计算提案）
+
+- 本提案 **Phase 0 须先于 add-performance-calculation-via-metabase** 完成；Metabase 方案依赖 a_class/c_class 表已存在。推荐：Phase 0 → add-performance-calculation-via-metabase → 本提案 Phase 1–6。
 
 ---
 

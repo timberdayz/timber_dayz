@@ -2,6 +2,8 @@
 
 **目标**：组件唯一性（方案 A+C）、修复「测试 A 执行 B」、放宽删除规则、验证码必选暂停，并增强体验（实际执行文件、冲突提示、可选 Tab 结构）。
 
+**验收进度（2026-03-13）**：0.x～5.x、6.2～6.3 已实现并通过代码/单测验收；1.5（多版本回归）、1.6（非登录组件测试前登录）、1.7（测试环境与生产对齐）、1.8（发现模式组件 test_mode）、6.1（综合验收）仍待办。详见本目录下 `ACCEPTANCE_REPORT.md`。
+
 ## 0. 组件唯一性与录制保存（P0）
 
 - [x] 0.1 component_name 标准化：定义 `{platform}/{component_type}` 与 `{platform}/{domain}_export`（含 `{platform}/{domain}_{sub}_export`）规则；executor_v2 与 ComponentVersionService 统一按此构造 component_name。**date_picker、shop_switch、filters** 采用 `{platform}/{component_type}`，有独立槽位，可单独录制与版本管理。**子域导出**：有子类型的数据域按子类型分别录制/保存（如 services_agent_export、services_ai_assistant_export），不是一个大组件串联多种子类型。

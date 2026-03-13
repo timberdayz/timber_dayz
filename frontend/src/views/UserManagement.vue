@@ -576,7 +576,7 @@ const editUser = async (user) => {
     employee_id: user.employee_id ?? null
   }
   try {
-    const res = await api.getEmployees({ page: 1, page_size: 500 })
+    const res = await api.getHrEmployees({ page: 1, page_size: 500 })
     employeeOptions.value = res?.data ?? res ?? []
   } catch (e) {
     employeeOptions.value = []

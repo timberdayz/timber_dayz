@@ -5,6 +5,7 @@
 1. **混合部署**：本地环境负责数据采集（Playwright/API），采集结果写入本地 PostgreSQL 的 `b_class` schema；云端环境需要基于这些数据做看板、报表与多端协同，需定期将本地 B 类数据同步到云端，减少云端直连本地或人工导库。
 2. **与采集错峰**：采集已在 4 个时段执行（6:00、12:00、18:00、22:00，见 `collection_scheduler` 的 `daily_realtime`）；同步应在采集完成后执行，避免与采集争抢资源，并保证同步的是「本时段采集完成后的数据」。
 3. **可维护性**：B 类表由 `PlatformTableManager` 按 `fact_{platform}_{data_domain}_{granularity}` 等规则动态创建，不宜维护固定表名单；需用「运行时从 information_schema 枚举 b_class 下所有表」的方式，保证新增平台/数据域/粒度时无需改同步配置。
+4. **表头一致性**：B 类表表头会随用户更新模板/核心字段而在本地通过 `sync_table_columns` 增加动态列；同步前需先对齐云端表结构（仅追加缺失列），再同步数据，避免 INSERT 失败并保证本地与云端列一致、看板/报表可用。
 
 ## What Changes
 
@@ -23,8 +24,8 @@
 ### 3. 同步脚本/工具行为
 
 - **输入**：本地 DB URL（默认当前环境）、云端 DB URL（如 `CLOUD_DATABASE_URL` 环境变量）。
-- **逻辑**：连接本地 → 枚举 b_class 表 → 对每表增量读取（时间范围或游标）→ 导出/压缩或直连写入云端 → 云端幂等 upsert。
-- **断点**：每表记录 last_sync 或按时间字段过滤，避免全量重传。
+- **逻辑**：连接本地 → 枚举 b_class 表 → **对每表先做「结构对齐」**（以本地 information_schema 为来源，确保云端表存在且列与本地一致，缺列则 `ADD COLUMN IF NOT EXISTS`）→ 再对每表增量读取（时间范围或游标）→ 直连写入云端 → 云端幂等 upsert。
+- **断点**：每表记录 last_sync 或按时间字段（如 `ingest_timestamp`）过滤，避免全量重传。
 - **错误**：单表失败记日志并继续其他表；退出码区分「全部成功 / 部分失败 / 全部失败」便于 Cron 告警。
 - **配置**：支持通过环境变量配置（如 `CLOUD_DATABASE_URL`），敏感信息不入库、不写死。
 
@@ -36,13 +37,13 @@
 
 ### 受影响的规格
 
-- **deployment-ops**：ADDED 本地→云端 B 类表定时同步（4 时段、动态 b_class 表枚举、增量、断点、单表失败不阻塞、Cron 与配置约定）。
+- **deployment-ops**：ADDED 本地→云端 B 类表定时同步（4 时段、动态 b_class 表枚举、**结构对齐优先**、增量、断点、单表失败不阻塞、Cron 与配置约定）。
 
 ### 受影响的代码与文档
 
 | 类型     | 位置/模块                          | 修改内容 |
 |----------|-------------------------------------|----------|
-| 脚本/工具 | `scripts/migrate_selective_tables.py` 或新建 `scripts/sync_local_to_cloud.py` | 支持「无 --tables 时枚举 b_class」、增量、断点、错误策略 |
+| 脚本/工具 | `scripts/migrate_selective_tables.py` 或新建 `scripts/sync_local_to_cloud.py` | 支持「无 --tables 时枚举 b_class」、**先结构对齐再数据同步**、增量、断点、错误策略 |
 | 配置     | 环境变量 / .env.example（不提交敏感值） | `CLOUD_DATABASE_URL` 等说明 |
 | 文档     | `docs/deployment/` 或 `docs/guides/` | 本地→云端同步方案、Cron 示例（如 `30 6,12,18,22 * * *`）、表枚举策略 |
 
@@ -54,7 +55,7 @@
 ### 依赖关系
 
 - 依赖现有：PostgreSQL、information_schema、现有迁移/同步脚本（若复用）。
-- 无前置变更阻塞；实现时需确认 b_class 下表的统一时间字段或约定 last_sync 存储位置（如本地配置表或脚本状态文件）。
+- 无前置变更阻塞；实现时需确认 b_class 下表的统一时间字段或约定 last_sync 存储位置（如本地配置表或脚本状态文件）。审阅与漏洞分析见同目录 `PROPOSAL_GAP_ANALYSIS.md`，实现前建议逐项闭环。
 
 ## 部署与日常运作流程（概要）
 
