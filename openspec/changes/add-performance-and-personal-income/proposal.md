@@ -84,7 +84,7 @@
 - `c_class.performance_scores`、`c_class.shop_health_scores` 有外键指向 `public.dim_shops`，PostgreSQL 支持跨 schema 外键，迁移后需验证
 
 **回滚与数据安全**：
-- 迁移脚本应在删除原表前完成数据迁移与校验；sales_targets 影响面大，建议迁移前备份
+- 迁移脚本应在删除原表前完成数据迁移与校验；sales_targets 影响面大，迁移前必须备份
 - 建议在 downgrade 中实现反向迁移（从 a_class/c_class 回迁至 public）
 
 **备份要求（强制）**：
@@ -169,7 +169,7 @@
 - [ ] `public.performance_scores`、`public.shop_health_scores`、`public.shop_alerts` 已迁移至 c_class，原表已删除
 - [ ] 目标管理 CRUD、目标分解、TargetSyncService 同步正常
 - [ ] Metabase Question（business_overview_comparison、business_overview_shop_racing 等）使用 `a_class.sales_targets` 后正常
-- [ ] config_management 的 sales-targets API（若有）迁移后可用
+- [ ] config_management 的 sales-targets API（当前基于 `a_class.sales_targets_a`）迁移后可用
 - [ ] 绩效公示与绩效配置相关接口在异步环境下均使用 `await db.execute`，无同步 `db.execute`；绩效公示页面可正常加载，无「查询绩效评分列表失败」报错
 - [ ] 绩效计算能力未就绪时返回 `HTTP 503 + error_code=PERF_CALC_NOT_READY`，不写入占位数据；能力就绪后可产出 `c_class.performance_scores` 记录（完整计算依赖 add-performance-calculation-via-metabase）
 - [ ] 「我的收入」页面可用，已关联员工可查看本人收入

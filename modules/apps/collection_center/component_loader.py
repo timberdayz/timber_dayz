@@ -478,26 +478,61 @@ class ComponentLoader:
             logger.error(f"Failed to load Python component {platform}/{component_name}: {e}")
             return None
 
+    def _validate_component_file_path(
+        self,
+        abs_path: str,
+        project_root: str,
+        file_path: str,
+        version_id: Any,
+    ) -> None:
+        """
+        校验 file_path 解析后的绝对路径位于允许的组件目录内，拒绝路径穿越与越界。
+        允许目录：modules/platforms/*/components/（相对于 PROJECT_ROOT）。
+        """
+        resolved = os.path.realpath(abs_path)
+        root = (project_root or os.getenv("PROJECT_ROOT", "")).strip()
+        if not root:
+            raise ValueError(
+                f"Component path security check failed: PROJECT_ROOT not set "
+                f"(version_id={version_id}, file_path={file_path}). Set PROJECT_ROOT to allow loading."
+            )
+        allowed_base = os.path.realpath(os.path.join(root, "modules", "platforms"))
+        if not resolved.startswith(allowed_base):
+            raise ValueError(
+                f"Component path outside allowed dir (version_id={version_id}, file_path={file_path}, "
+                f"resolved={resolved}, allowed_base={allowed_base})"
+            )
+        if "components" not in resolved:
+            raise ValueError(
+                f"Component path must be under modules/platforms/*/components "
+                f"(version_id={version_id}, file_path={file_path}, resolved={resolved})"
+            )
+
     def load_python_component_from_path(
         self,
         file_path: str,
         version_id: Any = None,
         project_root: Optional[str] = None,
+        platform: Optional[str] = None,
+        component_type: Optional[str] = None,
     ) -> Type:
         """
         从 file_path 加载 Python 组件类。
+        类发现：元数据优先（platform + component_type），再按 stem 命名兜底，兼容历史类名。
 
         Args:
             file_path: 相对路径(相对于 PROJECT_ROOT)或绝对路径
             version_id: 可选，用于唯一模块名，避免 sys.modules 缓存污染
             project_root: 项目根目录，若 file_path 为相对路径则拼接
+            platform: 可选，用于元数据优先匹配（与 component_type 同时提供时生效）
+            component_type: 可选，用于元数据优先匹配
 
         Returns:
             组件类
 
         Raises:
             FileNotFoundError: 文件不存在
-            ValueError: 加载失败
+            ValueError: 加载失败或安全校验失败
         """
         project_root = project_root or os.getenv("PROJECT_ROOT", "")
         if project_root and not os.path.isabs(file_path):
@@ -510,6 +545,9 @@ class ComponentLoader:
                 f"Component file not found: {file_path} (version_id={version_id}, "
                 f"abs={abs_path})"
             )
+
+        # P0: file_path 安全边界校验，拒绝路径穿越与越界
+        self._validate_component_file_path(abs_path, project_root or "", file_path, version_id)
 
         cache_key = file_path
         if not self.hot_reload and cache_key in self._path_load_cache:
@@ -534,19 +572,66 @@ class ComponentLoader:
                 f"(version_id={version_id})"
             ) from e
 
-        component_class = self._find_component_class_from_module(module, Path(abs_path).stem)
+        stem = Path(abs_path).stem
+        component_name_from_stem = self._stem_to_component_name(stem)
+        component_class = None
+        if platform is not None and component_type is not None:
+            component_class = self._find_component_class_by_metadata(
+                module, platform, component_type
+            )
+        if component_class is None:
+            component_class = self._find_component_class(
+                module, component_name_from_stem
+            )
         if not component_class:
+            candidates = [
+                name
+                for name, obj in inspect.getmembers(module, inspect.isclass)
+                if obj.__module__ == module.__name__
+            ]
             raise ValueError(
-                f"No component class found in {file_path} (version_id={version_id})"
+                f"No component class found in {file_path} (version_id={version_id}). "
+                f"Match rule: metadata (platform={platform!r}, component_type={component_type!r}) first, "
+                f"then naming fallback (stem={stem!r} -> component_name={component_name_from_stem!r}). "
+                f"Candidate classes in module: {candidates!r}"
             )
 
         if not self.hot_reload:
             self._path_load_cache[cache_key] = component_class
         return component_class
 
+    def _stem_to_component_name(self, stem: str) -> str:
+        """从文件名 stem 推导 component_name，兼容 versioned 命名如 login_v1_0_0 -> login."""
+        base = stem.replace("-", "_")
+        match = re.match(r"^(.+)_v\d+_\d+_\d+$", base)
+        if match:
+            return match.group(1)
+        return base
+
+    def _find_component_class_by_metadata(
+        self, module: Any, platform: str, component_type: str
+    ) -> Optional[Type]:
+        """在模块中按 platform + component_type 查找组件类（元数据优先）。"""
+        module_path = getattr(module, "__name__", "")
+        for name, obj in inspect.getmembers(module, inspect.isclass):
+            if obj.__module__ != module_path:
+                continue
+            if getattr(obj, "platform", None) == platform and getattr(
+                obj, "component_type", None
+            ) == component_type:
+                logger.debug(
+                    "Found component class by metadata: %s (platform=%s, component_type=%s)",
+                    name,
+                    platform,
+                    component_type,
+                )
+                return obj
+        return None
+
     def _find_component_class_from_module(self, module, stem: str) -> Optional[Type]:
         """在模块中查找组件类（基于 stem 推断）"""
-        return self._find_component_class(module, stem.replace("-", "_"))
+        component_name = self._stem_to_component_name(stem.replace("-", "_"))
+        return self._find_component_class(module, component_name)
 
     def build_component_dict_from_python(
         self, platform: str, component_name: str, params: Dict[str, Any]

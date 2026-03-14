@@ -1131,8 +1131,14 @@ async def test_component_version(
                         }
                         if final_error:
                             progress_data['error'] = final_error
+                        if temp_result.get('phase') is not None:
+                            progress_data['phase'] = temp_result['phase']
+                        if temp_result.get('phase_component_name') is not None:
+                            progress_data['phase_component_name'] = temp_result['phase_component_name']
+                        if temp_result.get('phase_component_version') is not None:
+                            progress_data['phase_component_version'] = temp_result['phase_component_version']
                         json_lib.dump(progress_data, f, ensure_ascii=False)
-                    
+
                     # 更新版本统计与测试历史（使用同步 Session，避免线程内新建事件循环导致 asyncpg 跨 loop 报错）
                     if os.path.exists(result_path):
                         with open(result_path, 'r', encoding='utf-8') as f:
@@ -1336,6 +1342,9 @@ async def get_test_status(
         "test_result": test_result,
         "error": progress_data.get('error'),
         "stats_update_error": progress_data.get('stats_update_error'),
+        "phase": progress_data.get('phase'),
+        "phase_component_name": progress_data.get('phase_component_name'),
+        "phase_component_version": progress_data.get('phase_component_version'),
     }
     if progress_data.get('status') == 'verification_required':
         resp["verification_type"] = progress_data.get('verification_type', 'graphical_captcha')

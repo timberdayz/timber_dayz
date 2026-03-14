@@ -57,7 +57,7 @@ class StepResult:
 
 @dataclass
 class ComponentTestResult:
-    """组件测试结果"""
+    """组件测试结果（含阶段可观测性 phase/phase_component_name/phase_component_version）"""
     component_name: str
     platform: str
     status: TestStatus
@@ -69,6 +69,9 @@ class ComponentTestResult:
     steps_failed: int = 0
     step_results: List[StepResult] = field(default_factory=list)
     error: str = None
+    phase: str = None  # 失败阶段: login | session | export | navigation | date_picker | filters
+    phase_component_name: str = None  # 如 miaoshou/login
+    phase_component_version: str = None  # 如 1.0.0
 
 
 class ComponentTester:
@@ -280,31 +283,36 @@ class ComponentTester:
         )
         
         try:
-            import importlib.util
             from modules.apps.collection_center.component_loader import ComponentLoader
             from modules.apps.collection_center.python_component_adapter import PythonComponentAdapter, create_adapter
-            
+
             loader = ComponentLoader()
             component_class = None
+            # component_type 用于元数据优先类发现（兼容历史类名如 MiaoshouMiaoshouLogin）
+            comp_type_for_load = (
+                "export" if component_name.endswith("_export") else component_name
+            )
 
-            # 1. 若提供 .py 文件路径且文件存在，从路径加载（录制器临时组件走此路径，避免按模块名加载失败）
+            # 1. 若提供 .py 文件路径且文件存在，从路径加载（元数据优先 + 命名兜底）
             path_obj = Path(component_path) if component_path else None
             if path_obj and path_obj.suffix == ".py" and path_obj.exists():
-                module_name = f"modules.platforms.{self.platform}.components.{component_name}"
-                spec = importlib.util.spec_from_file_location(module_name, path_obj)
-                if spec and spec.loader:
-                    mod = importlib.util.module_from_spec(spec)
-                    sys.modules[module_name] = mod
-                    try:
-                        spec.loader.exec_module(mod)
-                        component_class = loader._find_component_class(mod, component_name)
-                    finally:
-                        sys.modules.pop(module_name, None)
+                try:
+                    component_class = loader.load_python_component_from_path(
+                        str(path_obj),
+                        version_id=None,
+                        project_root=os.getenv("PROJECT_ROOT"),
+                        platform=self.platform,
+                        component_type=comp_type_for_load,
+                    )
+                except (ValueError, FileNotFoundError) as e:
+                    result.status = TestStatus.FAILED
+                    result.error = str(e)
+                    return result
 
             # 2. 否则按模块名从 ComponentLoader 加载（已保存的组件）
             if not component_class:
                 component_class = loader.load_python_component(self.platform, component_name)
-            
+
             if not component_class:
                 result.status = TestStatus.FAILED
                 result.error = f"Failed to load Python component: {component_name}"
@@ -465,7 +473,88 @@ class ComponentTester:
                 params["captcha_code"] = value
 
             return await adapter.login(page)
-    
+
+    async def _run_login_before_non_login(
+        self,
+        browser,
+        context,
+        page,
+        account_info: Dict[str, Any],
+        result: ComponentTestResult,
+    ) -> bool:
+        """
+        1.6: 非登录组件测试前先登录或复用会话。若无会话则选平台稳定版 login 按 file_path 加载并执行，
+        支持验证码暂停与回传；同一 context 内执行，失败时设置 result.phase=login 并返回 False。
+        """
+        import asyncio
+        from modules.apps.collection_center.component_loader import ComponentLoader
+        from modules.apps.collection_center.python_component_adapter import create_adapter
+
+        def _get_stable_login_version():
+            from backend.models.database import SessionLocal
+            from backend.services.component_version_service import ComponentVersionService
+
+            db = SessionLocal()
+            try:
+                svc = ComponentVersionService(db)
+                return svc.get_stable_version(f"{self.platform}/login")
+            finally:
+                db.close()
+
+        try:
+            stable_login = await asyncio.get_event_loop().run_in_executor(None, _get_stable_login_version)
+        except Exception as e:
+            logger.warning("Get stable login version failed: %s", e)
+            stable_login = None
+
+        if not stable_login or not getattr(stable_login, 'file_path', '').strip().endswith('.py'):
+            result.phase = 'login'
+            result.phase_component_name = f"{self.platform}/login"
+            result.error = "无稳定版登录组件或 file_path 无效，无法先登录"
+            return False
+
+        loader = ComponentLoader()
+        try:
+            login_class = loader.load_python_component_from_path(
+                stable_login.file_path,
+                version_id=stable_login.id,
+                platform=self.platform,
+                component_type='login',
+            )
+        except Exception as e:
+            result.phase = 'login'
+            result.phase_component_name = f"{self.platform}/login"
+            result.phase_component_version = getattr(stable_login, 'version', '') or ''
+            result.error = f"加载登录组件失败: {e}"
+            return False
+
+        adapter_config = {'output_dir': str(self.output_dir)}
+        if self.test_dir:
+            adapter_config.setdefault('task', {})['screenshot_dir'] = str(self.test_dir)
+        adapter = create_adapter(
+            platform=self.platform,
+            account=account_info,
+            config=adapter_config,
+            step_callback=self.progress_callback,
+            is_test_mode=True,
+            override_login_class=login_class,
+        )
+
+        login_display_name = f"{self.platform}/login"
+        exec_result = await self._run_login_with_verification_support(
+            adapter=adapter,
+            page=page,
+            component_name=login_display_name,
+            result=result,
+        )
+        if not exec_result.success:
+            result.phase = 'login'
+            result.phase_component_name = login_display_name
+            result.phase_component_version = getattr(stable_login, 'version', '') or ''
+            result.error = result.error or getattr(exec_result, 'message', '登录失败')
+            return False
+        return True
+
     async def _test_python_component_with_browser(
         self,
         component_class,
@@ -491,28 +580,74 @@ class ComponentTester:
         """
         from playwright.async_api import async_playwright
         from modules.apps.collection_center.python_component_adapter import create_adapter
-        
+
         browser = None
-        
+        component_type = getattr(component_class, 'component_type', 'export')
+        non_login_types = ('export', 'navigation', 'date_picker', 'filters')
+        account_id = (self.account_id or (account_info.get('account_id') if account_info else None)) or ''
+
+        # 1.7: 非登录组件且未 skip_login 时必须提供 account_id
+        if component_type in non_login_types and not self.skip_login and not account_id:
+            result.phase = 'session'
+            result.phase_component_name = f"{self.platform}/{component_name}"
+            result.error = "非登录组件测试需要选择测试账号（account_id 必填）"
+            return False
+
         try:
             async with async_playwright() as p:
-                # 启动浏览器（有头模式加 --start-maximized 便于观察）
                 browser = await p.chromium.launch(
                     headless=self.headless,
                     args=['--start-maximized'] if not self.headless else []
                 )
-                # 有头模式：不固定 viewport，页面随窗口全屏；无头模式：固定 1920x1080 便于 CI
-                context = await browser.new_context(
-                    viewport=None if not self.headless else {'width': 1920, 'height': 1080},
-                    locale='zh-CN'
-                )
+                # 1.7: 与生产对齐——会话 + 指纹，使用 new_context(storage_state=..., **fp_options)
+                context_options = {}
+                storage_state = None
+                if account_id:
+                    try:
+                        from modules.apps.collection_center.executor_v2 import (
+                            _load_session_async,
+                            _get_fingerprint_context_options_async,
+                            _build_playwright_context_options_from_fingerprint,
+                        )
+                        session_data = await _load_session_async(self.platform, account_id, max_age_days=30)
+                        if session_data and isinstance(session_data.get('storage_state'), dict):
+                            storage_state = session_data['storage_state']
+                        fp_options = await _get_fingerprint_context_options_async(
+                            self.platform, account_id, account_info
+                        )
+                        context_options = _build_playwright_context_options_from_fingerprint(fp_options)
+                    except Exception as e:
+                        logger.warning("Session/fingerprint load failed, using default context: %s", e)
+                context_options.setdefault('accept_downloads', True)
+                if storage_state:
+                    context_options['storage_state'] = storage_state
+                if not context_options.get('viewport'):
+                    context_options['viewport'] = (
+                        None if not self.headless else {'width': 1920, 'height': 1080}
+                    )
+                if 'locale' not in context_options:
+                    context_options['locale'] = 'zh-CN'
+
+                context = await browser.new_context(**context_options)
                 page = await context.new_page()
-                
-                # 创建适配器，注入 component_class 确保执行 version.file_path 对应实现
+
+                # 1.6: 非登录组件且未复用会话时先执行登录（同一 browser/context）
+                if component_type in non_login_types and not self.skip_login and not storage_state:
+                    login_ok = await self._run_login_before_non_login(
+                        browser=None,
+                        context=context,
+                        page=page,
+                        account_info=account_info,
+                        result=result,
+                    )
+                    if not login_ok:
+                        await context.close()
+                        await browser.close()
+                        return False
+
                 adapter_config = {'output_dir': str(self.output_dir)}
                 if self.test_dir:
                     adapter_config.setdefault('task', {})['screenshot_dir'] = str(self.test_dir)
-                component_type = getattr(component_class, 'component_type', 'export')
                 override_map = {
                     'login': {'override_login_class': component_class},
                     'navigation': {'override_navigation_class': component_class},
@@ -529,8 +664,7 @@ class ComponentTester:
                     is_test_mode=True,
                     **(override_map.get(component_type) or {}),
                 )
-                
-                # 发送进度回调
+
                 if self.progress_callback:
                     try:
                         import asyncio
@@ -548,10 +682,9 @@ class ComponentTester:
                             })
                     except Exception as cb_err:
                         logger.warning(f"Progress callback error (ignored): {cb_err}")
-                
+
                 start_time = datetime.now()
 
-                # 根据组件类型执行（登录时支持验证码暂停与回传）
                 if component_type == 'login':
                     exec_result = await self._run_login_with_verification_support(
                         adapter=adapter,
@@ -567,31 +700,33 @@ class ComponentTester:
                 elif component_type == 'date_picker':
                     exec_result = await adapter.date_picker(page, None)
                 else:
-                    # 直接执行组件
                     exec_result = await adapter.execute_component(
                         component_name=component_name,
                         page=page,
                         params={}
                     )
-                
+
                 duration_ms = (datetime.now() - start_time).total_seconds() * 1000
-                
-                # v4.8.0: 验证 success_criteria（如果组件定义了）
+
+                if not exec_result.success:
+                    result.phase = component_type
+                    result.phase_component_name = f"{self.platform}/{component_name}"
+                    result.error = result.error or getattr(exec_result, "message", None) or "执行失败"
+
                 success_criteria_passed = True
                 if exec_result.success:
                     success_criteria = getattr(component_class, 'success_criteria', [])
                     if success_criteria:
-                        logger.info(f"Verifying {len(success_criteria)} success criteria for Python component...")
+                        logger.info("Verifying %s success criteria for Python component...", len(success_criteria))
                         success_criteria_passed = await self._verify_success_criteria(page, success_criteria)
-                        
                         if not success_criteria_passed:
                             logger.warning("Python component success criteria verification failed")
-                            result.error = "Success criteria verification failed"
-                
-                # 综合判断：步骤成功 + success_criteria 通过
+                            result.error = result.error or "Success criteria verification failed"
+                            result.phase = result.phase or component_type
+                            result.phase_component_name = result.phase_component_name or f"{self.platform}/{component_name}"
+
                 test_passed = exec_result.success and success_criteria_passed
-                
-                # 记录步骤结果
+
                 step_result = StepResult(
                     step_id='python_component_1',
                     action=f'Execute {component_name}',
@@ -600,50 +735,50 @@ class ComponentTester:
                     error=result.error if not test_passed else None
                 )
                 result.step_results.append(step_result)
-                
-                # 发送进度回调
+
                 if self.progress_callback:
                     try:
                         event_type = 'step_success' if test_passed else 'step_failed'
                         import asyncio
+                        step_data = {
+                            'step_index': 1,
+                            'step_total': 1,
+                            'action': f'Execute Python component: {component_name}',
+                            'duration_ms': duration_ms,
+                            'phase': result.phase,
+                            'phase_component_name': result.phase_component_name,
+                            'phase_component_version': result.phase_component_version,
+                        }
                         if asyncio.iscoroutinefunction(self.progress_callback):
-                            await self.progress_callback(event_type, {
-                                'step_index': 1,
-                                'step_total': 1,
-                                'action': f'Execute Python component: {component_name}',
-                                'duration_ms': duration_ms
-                            })
+                            await self.progress_callback(event_type, step_data)
                         else:
-                            self.progress_callback(event_type, {
-                                'step_index': 1,
-                                'step_total': 1,
-                                'action': f'Execute Python component: {component_name}',
-                                'duration_ms': duration_ms
-                            })
+                            self.progress_callback(event_type, step_data)
                     except Exception as cb_err:
                         logger.warning(f"Progress callback error (ignored): {cb_err}")
-                
-                # 截图保存
+
                 if self.screenshot_on_error and not test_passed:
                     screenshot_path = self.output_dir / f"{component_name}_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                     await page.screenshot(path=str(screenshot_path))
                     step_result.screenshot = str(screenshot_path)
-                
+
                 await context.close()
                 await browser.close()
-                
+
                 return test_passed
-        
+
         except Exception as e:
-            logger.error(f"Python component browser test failed: {e}")
+            logger.error("Python component browser test failed: %s", e)
             result.error = str(e)
-            
+            if not result.phase:
+                result.phase = component_type
+                result.phase_component_name = f"{self.platform}/{component_name}"
+
             if browser:
                 try:
                     await browser.close()
                 except Exception:
                     pass
-            
+
             return False
     
     def _validate_component_structure(self, component: Dict[str, Any]) -> bool:

@@ -2370,7 +2370,7 @@ export default {
    * @returns {string} 截图 URL（用于 img src）
    */
   getTestVerificationScreenshotUrl(versionId, testId) {
-    const base = this.defaults?.baseURL || '';
+    const base = (apiBaseURL || '').replace(/\/$/, '');
     return `${base}/component-versions/${versionId}/test/${testId}/verification-screenshot`;
   },
 

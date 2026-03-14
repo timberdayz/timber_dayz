@@ -117,6 +117,12 @@ async def main():
                     'message': message,
                     'status': status
                 }
+                if data.get('phase') is not None:
+                    progress_data['phase'] = data['phase']
+                if data.get('phase_component_name') is not None:
+                    progress_data['phase_component_name'] = data['phase_component_name']
+                if data.get('phase_component_version') is not None:
+                    progress_data['phase_component_version'] = data['phase_component_version']
 
                 print(f"[PROGRESS] {event_type}: step {step_index}/{step_total} - {action}", file=sys.stderr)
 

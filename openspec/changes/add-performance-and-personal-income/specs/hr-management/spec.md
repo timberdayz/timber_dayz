@@ -84,3 +84,5 @@
 - **WHEN** 用户访问「我的收入」接口
 - **THEN** 系统记录访问审计日志（用户、时间、结果状态）
 - **AND** 日志与错误信息中不输出 base_salary、net_salary、commission_amount 等敏感明文字段
+- **AND** 审计日志最小字段至少包含 `user_id`、`endpoint`、`request_time`、`result_status`
+- **AND** 审计日志支持按 `user_id + 时间区间` 检索

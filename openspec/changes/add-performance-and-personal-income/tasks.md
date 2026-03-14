@@ -33,6 +33,7 @@
 - [ ] 0.3.5 删除 `public.sales_targets` 表
 - [ ] 0.3.6 迁移脚本使用 `safe_print()` 替代 `print()`（Windows 兼容）
 - [ ] 0.3.7 迁移前备份关键数据（强制），并验证备份可恢复
+- [ ] 0.3.8 `sales_targets` 恢复演练通过标准：恢复后行数一致、关键字段空值率一致、抽样 20 条业务记录一致
 
 ### 0.4 Alembic 迁移脚本 - C 类表
 
@@ -45,6 +46,7 @@
 - [ ] 0.4.7 迁移脚本幂等性：创建前检查表是否存在
 - [ ] 0.4.8 验证跨 schema 外键（c_class.performance_scores、c_class.shop_health_scores → public.dim_shops）正常
 - [ ] 0.4.9 C 类三张表迁移前完成备份并验证可恢复（`performance_scores`、`shop_health_scores`、`shop_alerts`）
+- [ ] 0.4.10 C 类恢复演练通过标准：三张表恢复后行数一致、关键字段空值率一致、每表抽样 20 条记录一致
 
 ### 0.5 Schema.py 更新
 
@@ -101,7 +103,7 @@
 - [ ] 0.9.3 Metabase Question：business_overview_comparison、business_overview_shop_racing 可正常查询
 - [ ] 0.9.4 运行 `python scripts/verify_architecture_ssot.py` 期望 100%
 - [ ] 0.9.5 确认 `public.sales_targets`、`public.performance_scores`、`public.shop_health_scores`、`public.shop_alerts` 已删除
-- [ ] 0.9.6 config_management 的 sales-targets API（若有使用）可正常调用
+- [ ] 0.9.6 config_management 的 sales-targets API（基于 `a_class.sales_targets_a`）可正常调用
 
 ---
 
@@ -184,17 +186,22 @@
 - [ ] 6.1 Phase 0 迁移后：public 中的 sales_targets、performance_scores、shop_health_scores、shop_alerts 已删除
 - [ ] 6.2 目标管理、各 Question、绩效公示、config_management sales-targets API 引用正确
 - [ ] 6.3 绩效公示：选择月份后可正常加载，有数据时展示排名与得分
-- [ ] 6.4 绩效计算：调用 calculate 后，c_class.performance_scores 有新记录
+- [ ] 6.4a （依赖未就绪场景）calculate 返回 `HTTP 503 + error_code=PERF_CALC_NOT_READY`，且 `c_class.performance_scores` 无新增占位数据
+- [ ] 6.4b （依赖已就绪场景）调用 calculate 后，`c_class.performance_scores` 有新记录
 - [ ] 6.5 我的收入：已关联员工用户可查看本人收入
 - [ ] 6.6 我的收入：未关联员工用户看到引导文案
 - [ ] 6.7 我的收入：切换月份可查询历史（若有数据）
 - [ ] 6.8 安全验证：非本人用户无法读取他人收入，审计日志可追溯
 - [ ] 6.8a 数据验证：员工收入链路至少一个自然月可查询到非空示例数据（含提成或绩效字段）
+- [ ] 6.8b 审计日志最小字段校验：至少包含 user_id、endpoint、request_time、result_status
+- [ ] 6.8c 审计日志留存与检索校验：留存策略已配置且可按 user_id + 时间区间检索
 - [ ] 6.9 OpenSpec 验证：`npx openspec validate add-performance-and-personal-income --strict` 通过
 
 ---
 
 ## Phase 7: 规格与依赖一致性治理
+
+> 说明：Phase 7 为已完成治理项，仅用于追溯与审计，不作为本轮实施阻塞项。
 
 - [x] 7.1 已增加 `specs/database-design/spec.md` 的 MODIFIED delta，明确 public→a_class/c_class 迁移规范与回滚要求
 - [x] 7.2 已与 `add-performance-calculation-via-metabase` 对齐 `performance_config` schema 口径（统一为 `public.performance_config`）

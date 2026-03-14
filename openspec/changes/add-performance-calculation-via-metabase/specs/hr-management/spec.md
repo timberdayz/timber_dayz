@@ -26,13 +26,19 @@
 
 #### Scenario: Metabase 不可用时明确报错
 - **WHEN** Metabase 服务不可用或 Question 查询失败
-- **THEN** `POST /api/performance/scores/calculate` 返回 5xx 或明确错误信息
+- **THEN** `POST /api/performance/scores/calculate` 返回 `HTTP 503` 且 `error_code=PERF_CALC_NOT_READY`
 - **AND** 不写入错误数据至 `c_class.performance_scores`
 
 #### Scenario: 历史月份使用该月生效的配置
 - **WHEN** 管理员执行 `POST /api/performance/scores/calculate?period=2024-06`
 - **THEN** 系统按考核周期筛选 performance_config（effective_from <= 2024-06-30 AND (effective_to IS NULL OR effective_to >= 2024-06-01)）
 - **AND** 使用该筛选结果中的配置（而非今日生效的配置）计算绩效
+
+#### Scenario: 考核周期无可用配置
+- **WHEN** 管理员执行 `POST /api/performance/scores/calculate?period=YYYY-MM`
+- **AND** 系统按考核周期筛选后未找到可用 `public.performance_config`
+- **THEN** 接口返回 `HTTP 404` 且 `error_code=PERF_CONFIG_NOT_FOUND`
+- **AND** 不写入错误数据至 `c_class.performance_scores`
 
 #### Scenario: 仅写入 dim_shops 中存在的店铺
 - **WHEN** Metabase SQL 执行绩效计算

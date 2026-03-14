@@ -31,7 +31,7 @@
 ## 3. 后端 calculate 接口
 
 - [ ] 3.1 修改 `backend/routers/performance_management.py` 的 `calculate_performance_scores`
-  - [ ] 3.1.1 获取配置：若传入 config_id 则用指定配置；否则按**考核周期**筛选 `public.performance_config`（effective_from <= period_end AND (effective_to IS NULL OR effective_to >= period_start)），取最新一条；校验存在，返回 404 若不存在
+  - [ ] 3.1.1 获取配置：若传入 config_id 则用指定配置；否则按**考核周期**筛选 `public.performance_config`（effective_from <= period_end AND (effective_to IS NULL OR effective_to >= period_start)），取最新一条；校验存在，返回 `HTTP 404 + error_code=PERF_CONFIG_NOT_FOUND` 若不存在
   - [ ] 3.1.2 调用 `get_metabase_service().query_question("performance_scores_calculation", {"month": period + "-01"})`
   - [ ] 3.1.3 遍历返回结果（list of dict），对每行**兼容英文/中文列名**（platform_code 或 平台、shop_id 或 店铺ID 等）
   - [ ] 3.1.4 解析 platform_code、shop_id、period、sales_target、sales_achieved、sales_rate、sales_score、profit_*、key_product_*、operation_score、total_score

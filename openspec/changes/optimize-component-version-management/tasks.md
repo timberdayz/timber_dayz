@@ -2,7 +2,7 @@
 
 **目标**：组件唯一性（方案 A+C）、修复「测试 A 执行 B」、放宽删除规则、验证码必选暂停，并增强体验（实际执行文件、冲突提示、可选 Tab 结构）。
 
-**验收进度（2026-03-14）**：0.x～5.x、6.2～6.3 已实现并通过代码/单测验收；1.5（多版本回归）、1.6（非登录组件测试前登录）、1.7（测试环境与生产对齐）、1.8（发现模式组件 test_mode）、1.9（file_path 导入后类发现稳定性）、6.1（综合验收）仍待办。详见本目录下 `ACCEPTANCE_REPORT.md`。
+**验收进度（2026-03-14）**：0.x～5.x、1.6、1.7、1.9、1.10、4.2、4.4、4.5、4.6、6.2～6.3 已实现并通过代码/单测及专项验收脚本；1.5（多版本回归）、1.8（发现模式 test_mode）、6.1（综合验收人工部分）待办。实际验收见 `ACCEPTANCE_REPORT.md` 第五节。
 
 ## 0. 组件唯一性与录制保存（P0）
 
@@ -21,11 +21,11 @@
 - [x] 1.4 生产执行器按 file_path 加载：ComponentLoader 新增 `load_python_component_from_path(file_path)`；**file_path 存相对路径**，加载时基于 PROJECT_ROOT 转为绝对路径（若已为绝对路径则直接使用）；**模块名唯一**：传给 `spec_from_file_location` 的 name 须唯一（如 file_path 哈希或 version_id），避免 sys.modules 缓存污染；加载失败时抛出明确异常（含 version_id、file_path）；缓存 key 使用 file_path（或 version_id），与 `load(component_path)` 的缓存隔离。executor_v2 的 `_load_component_with_version`：**主组件**当 selected_version 非空且 file_path 以 .py 结尾时，调用 `load_python_component_from_path` 构建 component dict（不得调用 `build_component_dict_from_python`）；selected_version 为空时保留 comp_name 回退。`_execute_python_component`：当 component dict 含 `_python_component_class` 时，直接使用该类实例化执行 `run(page)`，不得再调用 adapter 按 comp_name 重新加载。**export 内 component_call 子组件**暂按 adapter 默认加载，不纳入版本管理。
 - [x] 1.4.1 **测试接口传逻辑组件名**：版本管理页「开始测试」调用子进程时，test config 的 `component_name` 使用 `version.component_name` 的逻辑部分（如 `miaoshou/login` → `login`），不得使用 `component_path.stem`（如 `login_v1_0_0`），否则 component_loader 按类名约定找不到类，导致「Failed to load Python component」且浏览器未打开。
 - [ ] 1.5 回归：对同一 component_name 的多个版本（如 miaoshou/login v1.0.0 与 v1.1.0），分别测试（含验证码回传），验证首次与回传后二次执行均使用对应 version.file_path；生产采集验证稳定版按 file_path 执行。
-- [ ] 1.6 **非登录组件测试前登录/复用会话（单组件测试模拟完整链路）**：在 `tools/test_component.py` 的 `_test_python_component_with_browser` 中，对 component_type 为 export、navigation、date_picker、filters 且未 `skip_login` 时：
+- [x] 1.6 **非登录组件测试前登录/复用会话（单组件测试模拟完整链路）**：在 `tools/test_component.py` 的 `_test_python_component_with_browser` 中，对 component_type 为 export、navigation、date_picker、filters 且未 `skip_login` 时：
   - 先尝试通过 `SessionManager` 按 (platform, account_id) 加载已存在的 `storage_state`，若有效则用其创建 context，在该 context 中直接测试当前组件；
   - 若无有效会话，则先执行登录组件——通过 `ComponentVersionService` 选该平台 login 的当前稳定版（`is_stable=True`），按 file_path 加载并通过 `_run_login_with_verification_support` 执行（支持验证码暂停与回传），登录成功后在**同一 browser/context** 中继续执行当前非登录组件；
   - 登录/会话不可用或登录失败时，测试直接失败并给出明确错误（阶段=login 或 session），避免把登录问题误报成导出/导航组件问题。
-- [ ] 1.7 **测试环境与生产对齐（会话 + 指纹 + 阶段可观测性）**：在 `_test_python_component_with_browser` 建浏览器 context 时，与 `CollectionExecutorV2.execute` 完全对齐：
+- [x] 1.7 **测试环境与生产对齐（会话 + 指纹 + 阶段可观测性）**：在 `_test_python_component_with_browser` 建浏览器 context 时，与 `CollectionExecutorV2.execute` 完全对齐：
   - 使用 `SessionManager.load_session` 得到 `storage_state` + `DeviceFingerprintManager` 得到指纹，`browser.new_context(storage_state=..., **fp_options)`，不使用 `launch_persistent_context`；
   - account_id 缺失时测试失败并明确报错，强制用户选择账号；一账号一指纹、持久会话策略与生产一致；
   - 在进度 / 结果结构中区分「login 阶段」与「export/navigation 等业务阶段」，例如 `phase: "login"` / `phase: "export"`，失败时在前端弹窗中显示是哪一阶段、哪个组件（如 `miaoshou/login v1.0.0` 或 `miaoshou/orders_export v1.0.0`）导致测试失败，便于快速定位问题。
@@ -36,11 +36,11 @@
      - `test_config.pre_steps`：在执行组件前需要完成的页面准备步骤（如打开筛选抽屉、切换 Tab）；
      - `test_config.assertions`：执行后需要满足的断言（如表格存在、结果条数/日期范围合理）。
    - 单组件测试工具在检测到 `test_mode=standalone` + 有效 `test_config` 时，先按 `url + pre_steps` 构造上下文，再执行 date_picker/filters 组件；否则仅在完整采集任务中对这些组件做集成级验证。
-- [ ] 1.9 **file_path 导入后类发现稳定性（阻断问题修复）**：
+- [x] 1.9 **file_path 导入后类发现稳定性（阻断问题修复）**：
   - 在 `tools/test_component.py`（以及必要时 `component_loader.py`）中，按 `version.file_path` 导入模块后，类发现改为「元数据优先（platform + component_type）+ 命名兜底」；
   - 兼容历史类命名（如 `MiaoshouMiaoshouLogin`），不得仅依赖 `component_name` 推断；
   - 失败时返回可观测错误：包含 `version_id`、`file_path`、候选类列表、匹配规则说明，便于验收阶段快速定位。
-- [ ] 1.10 **file_path 安全边界校验（P0）**：
+- [x] 1.10 **file_path 安全边界校验（P0）**：
   - 在 `component_loader.py` 的 `load_python_component_from_path` 中增加路径安全校验：`realpath(abs_path)` 必须位于允许组件目录（如 `modules/platforms/*/components/`）；
   - 拒绝 `..` 路径穿越、符号链接逃逸与越界路径，不得宽松回退；
   - 失败时错误包含 `version_id`、`file_path`、安全校验失败原因。
@@ -61,11 +61,11 @@
 ## 4. 组件版本管理体验（P1）
 
 - [x] 4.1 实际执行文件展示：在版本列表增加「实际执行文件」列（file_path）；测试弹窗顶部显式展示 file_path。
-- [ ] 4.2 同平台同类型多稳定版冲突提示：当同一 platform 下同一 component_type 存在多个 is_stable=True 时，在 UI 标出冲突或警告。
+- [x] 4.2 同平台同类型多稳定版冲突提示：当同一 platform 下同一 component_type 存在多个 is_stable=True 时，在 UI 标出冲突或警告。
 - [x] 4.3 组件类型标签：在列表中用标签/颜色区分 login / navigation / export 等类型。
-- [ ] 4.4 验证码截图 URL 契约：前端 `getTestVerificationScreenshotUrl` 使用稳定 API base 生成 URL（禁止依赖业务 API 对象上的非标准属性）；`verification_required` 时截图可稳定展示。
-- [ ] 4.5 测试轮询生命周期治理：测试完成/失败、关闭弹窗、组件卸载时停止轮询；增加连续异常重试上限与整体超时，超过阈值后停止轮询并提示。
-- [ ] 4.6 组件类型筛选对齐：筛选项与标准化 component_name 规则一致，覆盖 login/navigation/export/date_picker/shop_switch/filters，避免筛选语义偏差。
+- [x] 4.4 验证码截图 URL 契约：前端 `getTestVerificationScreenshotUrl` 使用稳定 API base 生成 URL（禁止依赖业务 API 对象上的非标准属性）；`verification_required` 时截图可稳定展示。
+- [x] 4.5 测试轮询生命周期治理：测试完成/失败、关闭弹窗、组件卸载时停止轮询；增加连续异常重试上限与整体超时，超过阈值后停止轮询并提示。
+- [x] 4.6 组件类型筛选对齐：筛选项与标准化 component_name 规则一致，覆盖 login/navigation/export/date_picker/shop_switch/filters，避免筛选语义偏差。
 
 ## 5. 前端页面结构（P2，可选）
 

@@ -32,7 +32,9 @@
             <el-option label="登录" value="login" />
             <el-option label="导航" value="navigation" />
             <el-option label="导出" value="export" />
+            <el-option label="日期选择" value="date_picker" />
             <el-option label="店铺切换" value="shop_switch" />
+            <el-option label="筛选" value="filters" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -62,6 +64,15 @@
 
     <!-- 版本列表 -->
     <el-card shadow="never" class="versions-card">
+      <!-- 4.2: 同平台同类型多稳定版冲突提示 -->
+      <el-alert
+        v-if="multiStableConflicts.length > 0"
+        type="warning"
+        :title="`存在 ${multiStableConflicts.length} 组多稳定版冲突`"
+        :description="multiStableConflictDescription"
+        show-icon
+        class="multi-stable-alert"
+      />
       <el-table 
         v-loading="loading" 
         :data="versions" 
@@ -103,12 +114,15 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="状态" width="120">
+        <el-table-column label="状态" width="140">
           <template #default="{ row }">
             <div class="status-badges">
               <el-tag v-if="row.is_stable" type="success" size="small">稳定</el-tag>
               <el-tag v-if="row.is_testing" type="warning" size="small">测试中</el-tag>
               <el-tag v-if="!row.is_active" type="info" size="small">已禁用</el-tag>
+              <el-tooltip v-if="hasMultiStableConflict(row)" content="该组件类型存在多个稳定版，生产将按 updated_at 取最新" placement="top">
+                <el-icon class="conflict-warning"><WarningFilled /></el-icon>
+              </el-tooltip>
             </div>
           </template>
         </el-table-column>
@@ -395,6 +409,9 @@
             <div>
               <p style="margin: 0 0 8px 0; font-weight: bold;">⚠️ 所有步骤执行成功，但验证标准未通过</p>
               <p style="margin: 0; font-size: 13px;">错误信息：{{ testResult.error }}</p>
+              <p v-if="testResult.phase" style="margin: 4px 0 0 0; font-size: 12px;">
+                失败阶段：{{ testResult.phase }}{{ testResult.phase_component_name ? ' / ' + testResult.phase_component_name : '' }}{{ testResult.phase_component_version ? ' v' + testResult.phase_component_version : '' }}
+              </p>
               <p style="margin: 8px 0 0 0; font-size: 12px; color: #909399;">
                 提示：可能是URL不匹配或必需元素未找到。请检查组件的 success_criteria 配置。
               </p>
@@ -505,9 +522,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Loading } from '@element-plus/icons-vue'
+import { Search, Loading, WarningFilled } from '@element-plus/icons-vue'
 import api from '@/api'
 // v4.7.4: 移除 WebSocket，改用 HTTP 轮询
 
@@ -560,6 +577,37 @@ const testStatus = ref({
 const verificationRequired = ref(null) // { versionId, testId, verificationType, screenshotUrl }
 const verificationInput = ref('')
 const verificationSubmitting = ref(false)
+
+// 4.2: 同平台同类型多稳定版冲突（基于当前列表计算）
+const multiStableConflicts = computed(() => {
+  const map = new Map()
+  for (const row of versions.value) {
+    const platform = getPlatformFromName(row.component_name)
+    const compType = getComponentTypeFromName(row.component_name)
+    const key = `${platform}/${compType}`
+    if (row.is_stable) {
+      map.set(key, (map.get(key) || 0) + 1)
+    }
+  }
+  return Array.from(map.entries())
+    .filter(([, count]) => count > 1)
+    .map(([key]) => {
+      const [p, t] = key.split('/')
+      return { platform: p, componentType: t }
+    })
+})
+const multiStableConflictDescription = computed(() => {
+  if (multiStableConflicts.value.length === 0) return ''
+  return '以下组件类型存在多个稳定版，生产将按 updated_at 取最新：' +
+    multiStableConflicts.value.map(({ platform, componentType }) => `${platform}/${componentType}`).join('、')
+})
+const hasMultiStableConflict = (row) => {
+  const platform = getPlatformFromName(row.component_name)
+  const compType = getComponentTypeFromName(row.component_name)
+  return multiStableConflicts.value.some(
+    (c) => c.platform === platform && c.componentType === compType
+  )
+}
 
 // 方法
 // ⭐ v4.19.0修复：添加超时机制和后台刷新支持，避免数据同步期间阻塞
@@ -972,24 +1020,38 @@ const startComponentTest = async () => {
 }
 
 // ⭐ v4.7.4: HTTP 轮询获取测试进度（替代 WebSocket）
+// 4.5: 轮询生命周期治理（完成/失败/关弹窗/卸载时停止；连续异常与整体超时）
 let pollingInterval = null
+const POLL_INTERVAL_MS = 1000
+const POLL_MAX_CONSECUTIVE_ERRORS = 5
+const POLL_OVERALL_TIMEOUT_MS = 10 * 60 * 1000 // 10 分钟
 
-const startPollingTestStatus = (testId, versionId) => {
-  // 清除之前的轮询
+const stopPollingTestStatus = () => {
   if (pollingInterval) {
     clearInterval(pollingInterval)
+    pollingInterval = null
   }
-  
-  // 每秒轮询一次
+}
+
+const startPollingTestStatus = (testId, versionId) => {
+  stopPollingTestStatus()
+  const startedAt = Date.now()
+  let consecutiveErrors = 0
+
   pollingInterval = setInterval(async () => {
     try {
+      if (Date.now() - startedAt > POLL_OVERALL_TIMEOUT_MS) {
+        stopPollingTestStatus()
+        testing.value = false
+        ElMessage.warning({ message: '测试状态轮询超时，请关闭弹窗后重试', duration: 5000 })
+        return
+      }
       const response = await api.getTestStatus(versionId, testId)
-      
-      // 更新进度
+      consecutiveErrors = 0
+
       testStatus.value.progress = response.progress || 0
       testStatus.value.currentStep = response.current_step || '执行中...'
-      
-      // 添加日志（如果有新的步骤信息）
+
       if (response.step_index > 0) {
         const logMessage = `步骤 ${response.step_index}/${response.step_total}: ${response.current_step}`
         const lastLog = testStatus.value.logs[testStatus.value.logs.length - 1]
@@ -1001,8 +1063,7 @@ const startPollingTestStatus = (testId, versionId) => {
           })
         }
       }
-      
-      // 验证码暂停：展示输入区域，继续轮询
+
       if (response.status === 'verification_required') {
         verificationRequired.value = {
           versionId,
@@ -1012,20 +1073,16 @@ const startPollingTestStatus = (testId, versionId) => {
         }
       }
 
-      // 检查是否完成
       if (response.status === 'completed' || response.status === 'failed') {
         verificationRequired.value = null
         if (response.verification_timeout) {
           ElMessage.warning({ message: '验证码输入超时', duration: 5000 })
         }
-        clearInterval(pollingInterval)
-        pollingInterval = null
-
+        stopPollingTestStatus()
         testing.value = false
         testStatus.value.progress = 100
         testStatus.value.currentStep = response.status === 'completed' ? '测试完成' : '测试失败'
-        
-        // 处理测试结果
+
         if (response.test_result) {
           testResult.value = {
             status: response.test_result.status,
@@ -1033,23 +1090,22 @@ const startPollingTestStatus = (testId, versionId) => {
             steps_passed: response.test_result.steps_passed,
             steps_failed: response.test_result.steps_failed,
             duration_ms: response.test_result.duration_ms,
-            success_rate: response.test_result.success_rate || 0,  // ⭐ v4.7.4: 包含成功率
+            success_rate: response.test_result.success_rate || 0,
             error: response.test_result.error,
-            step_results: response.test_result.step_results || []
+            step_results: response.test_result.step_results || [],
+            phase: response.phase,
+            phase_component_name: response.phase_component_name,
+            phase_component_version: response.phase_component_version
           }
         }
-        
-        // 重新加载版本列表以更新统计
-        await loadVersions(false) // ⭐ v4.19.0修复：后台刷新，不显示loading
-        
-        // v4.8.0: 综合判断测试结果
-        // 同时检查 response.status 和 test_result.status
-        const testPassed = response.status === 'completed' && 
-                          response.test_result && 
+
+        await loadVersions(false)
+
+        const testPassed = response.status === 'completed' &&
+                          response.test_result &&
                           response.test_result.status === 'passed' &&
                           !response.test_result.error
-        
-        // 显示完成消息
+
         if (testPassed) {
           const successRate = response.test_result.success_rate || 100
           ElMessage.success({
@@ -1057,7 +1113,6 @@ const startPollingTestStatus = (testId, versionId) => {
             duration: 3000
           })
         } else {
-          // 获取详细错误信息
           let errorMsg = '测试失败'
           if (response.test_result && response.test_result.error) {
             errorMsg = `测试失败: ${response.test_result.error}`
@@ -1066,12 +1121,14 @@ const startPollingTestStatus = (testId, versionId) => {
           } else if (response.test_result && response.test_result.steps_failed > 0) {
             errorMsg = `测试失败: ${response.test_result.steps_failed} 个步骤失败`
           }
+          if (response.phase) {
+            errorMsg += ` [阶段: ${response.phase}${response.phase_component_name ? ' / ' + response.phase_component_name : ''}${response.phase_component_version ? ' v' + response.phase_component_version : ''}]`
+          }
           ElMessage.error({
             message: errorMsg,
             duration: 5000
           })
         }
-        // 统计更新失败时提示（测试已执行完成，仅统计未写入）
         if (response.stats_update_error) {
           ElMessage.warning({
             message: '测试已执行完成，但版本统计更新失败，请稍后刷新列表',
@@ -1081,9 +1138,17 @@ const startPollingTestStatus = (testId, versionId) => {
       }
     } catch (error) {
       console.error('轮询测试状态失败:', error)
-      // 继续轮询，不中断
+      consecutiveErrors += 1
+      if (consecutiveErrors >= POLL_MAX_CONSECUTIVE_ERRORS) {
+        stopPollingTestStatus()
+        testing.value = false
+        ElMessage.warning({
+          message: `连续 ${POLL_MAX_CONSECUTIVE_ERRORS} 次轮询失败，已停止。请检查网络后关闭弹窗重试。`,
+          duration: 5000
+        })
+      }
     }
-  }, 1000)  // 每秒轮询一次
+  }, POLL_INTERVAL_MS)
 }
 
 // 验证码回传：用户输入后提交
@@ -1107,12 +1172,13 @@ const submitVerification = async () => {
   }
 }
 
+// 4.5: 关弹窗时停止轮询
+watch(testDialogVisible, (visible) => {
+  if (!visible) stopPollingTestStatus()
+})
 // 组件卸载时清理轮询
 onBeforeUnmount(() => {
-  if (pollingInterval) {
-    clearInterval(pollingInterval)
-    pollingInterval = null
-  }
+  stopPollingTestStatus()
 })
 
 const getStepStatusType = (status) => {
@@ -1155,6 +1221,16 @@ onMounted(() => {
 
 .filter-card {
   margin-bottom: 20px;
+}
+
+.multi-stable-alert {
+  margin-bottom: 12px;
+}
+
+.conflict-warning {
+  margin-left: 4px;
+  color: var(--el-color-warning);
+  vertical-align: middle;
 }
 
 /* 筛选框最小宽度，便于看清已选内容；空选时后端按全选处理 */

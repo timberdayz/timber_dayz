@@ -302,11 +302,16 @@ class CollectionExecutorV2:
             )
 
             if selected_version and getattr(selected_version, "file_path", "").strip().endswith(".py"):
-                # 按 file_path 加载，不得再按 comp_name
+                # 按 file_path 加载，元数据优先类发现（兼容历史类名）
+                comp_type_derived = (
+                    "export" if comp_name.endswith("_export") else comp_name
+                )
                 try:
                     Klass = self.component_loader.load_python_component_from_path(
                         selected_version.file_path,
                         version_id=selected_version.id,
+                        platform=platform,
+                        component_type=comp_type_derived,
                     )
                     comp_type = getattr(Klass, "component_type", "export" if "_export" in comp_name else "login")
                     plat = getattr(Klass, "platform", platform)

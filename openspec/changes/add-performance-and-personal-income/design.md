@@ -70,8 +70,8 @@
 
 ## Risks / Trade-offs
 
-- 风险: 同批次部署失败导致核心报表不可用  
-  Mitigation: 明确发布顺序、灰度窗口与回滚脚本演练
+- 风险: 同一发布窗口内分阶段迁移执行失败导致核心报表不可用  
+  Mitigation: 明确 Expand/Verify/Contract 顺序、灰度窗口与回滚脚本演练
 
 - 风险: 跨 schema 外键在迁移后出现约束异常  
   Mitigation: 在迁移验证中加入 FK 完整性检查和插入 smoke 测试
