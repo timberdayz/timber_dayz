@@ -47,6 +47,7 @@
 - **WHEN** 管理员选择考核周期并点击「重新计算」（或系统自动计算）
 - **THEN** 系统调用 `POST /api/performance/scores/calculate`
 - **AND** 计算逻辑由 add-performance-calculation-via-metabase 负责（Metabase SQL + 后端写入）；本规格仅要求接口可调用、禁止引用 fact_orders、结果写入 `c_class.performance_scores`
+- **AND** 若计算能力未就绪，接口返回 `HTTP 503` 且 `error_code=PERF_CALC_NOT_READY`，禁止写入占位数据到正式绩效表
 - **AND** 绩效公示页面刷新后可展示新数据
 
 ### Requirement: 我的收入（员工自助）
@@ -62,7 +63,7 @@
 
 #### Scenario: 未关联员工访问
 - **WHEN** 未关联员工的用户访问「我的收入」页面
-- **THEN** 系统 `GET /api/hr/me/income` 返回 404 或 `{ linked: false }`
+- **THEN** 系统 `GET /api/hr/me/income` 返回 `200` 且 `linked=false`
 - **AND** 页面显示「您尚未关联员工档案，请联系管理员」
 - **AND** 不展示收入明细表单
 
@@ -70,3 +71,16 @@
 - **WHEN** 员工在「我的收入」中查看绩效依据
 - **THEN** 可下钻或链接到「绩效公示」页面
 - **AND** 绩效公示中的绩效系数、得分等与收入计算依据一致
+
+### Requirement: 我的收入数据安全与审计
+系统 SHALL 对「我的收入」能力实施最小权限控制与访问审计，防止越权访问和敏感信息泄露。
+
+#### Scenario: 仅允许本人访问
+- **WHEN** 任意用户调用 `GET /api/hr/me/income`
+- **THEN** 系统仅根据当前登录用户上下文定位关联员工
+- **AND** 不接受可用于查询他人收入的 employee_code/user_id 输入参数
+
+#### Scenario: 访问审计与日志脱敏
+- **WHEN** 用户访问「我的收入」接口
+- **THEN** 系统记录访问审计日志（用户、时间、结果状态）
+- **AND** 日志与错误信息中不输出 base_salary、net_salary、commission_amount 等敏感明文字段

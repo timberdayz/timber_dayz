@@ -27,6 +27,12 @@
 - **AND** 系统验证 Python 文件存在
 - **AND** 系统使用该组件类执行并返回测试结果，确保「测试的版本」与「执行的实现」一致
 
+#### Scenario: file_path 导入后按元数据优先匹配组件类
+
+- **WHEN** 系统已从 `file_path` 导入模块，且类名不一定符合当前命名约定
+- **THEN** 系统优先按 `platform + component_type` 元数据匹配组件类，再回退命名规则
+- **AND** 对历史命名类保持兼容，避免 `Failed to load Python component` 阻断测试
+
 ## ADDED Requirements
 
 ### Requirement: 登录图形验证码步骤必选暂停

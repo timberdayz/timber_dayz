@@ -1,8 +1,8 @@
 # 绩效公示优化、我的收入与 Public 表 Schema 迁移 - 实施状态
 
 **创建日期**: 2026-01-31  
-**更新日期**: 2026-03-13（提案与任务清单已优化；补充与 add-performance-calculation-via-metabase 的实现顺序）  
-**状态**: 实施中 - 迁移已完成，绩效公示修复已应用，我的收入已实现
+**更新日期**: 2026-03-14（提案、设计与任务清单完成一致性与风险修订）  
+**状态**: 规划完成，待按任务分阶段实施
 
 ---
 
@@ -35,15 +35,15 @@
 ### sales_targets 专项（高优先级）
 
 - **依赖链**：目标管理、TargetSyncService、Metabase Question（comparison、shop_racing）、operational_metrics（间接）
-- **原子性部署**：迁移 + schema + 后端 + SQL + init_metabase 须同批次
+- **发布策略**：同一发布窗口内按 Expand -> Verify -> Contract 分阶段执行
 - **验证清单**：0.9.2 sales_targets 专项验证（创建目标、分解、业务概览三模块）
 
-### 漏洞修复已纳入
+### 已纳入的结论与修复项
 
-- **config_management.py**：需调查 `/api/config/sales-targets` 实际操作的逻辑表
+- **config_management.py**：已明确使用 `a_class.sales_targets_a`，本迁移无需修改
 - **target_management.py**：错误提示「sales_targets 表不存在」→「a_class.sales_targets 表不存在」
 - **scripts/**：diagnose_targets_db、diagnose_target_sync、check_database_health、verify_migration_status、init_v4_11_0_tables、smart_table_cleanup 等需更新 schema/表名
-- **sql/migrate_tables_to_schemas.sql**：与本提案冲突（sales_targets 置 core），需更新为 a_class 或标注已废弃
+- **sql/migrate_tables_to_schemas.sql**：已标注 DEPRECATED（sales_targets 由 Alembic 迁至 a_class），实施时确认即可
 - **PerformanceScore 合并**：quality_score→operation_score，platform_code 从 dim_shops 关联
 - **跨 schema 外键**：迁移后验证 c_class.performance_scores、c_class.shop_health_scores → public.dim_shops
 - **回滚/备份**：迁移前备份 sales_targets，downgrade 实现反向迁移
@@ -72,5 +72,7 @@ npx openspec validate add-performance-and-personal-income --strict
 ## 相关文档
 
 - [proposal.md](./proposal.md) - 变更说明
+- [design.md](./design.md) - 技术设计（迁移策略/回滚/验收）
 - [tasks.md](./tasks.md) - 实施任务清单
 - [specs/hr-management/spec.md](./specs/hr-management/spec.md) - 规格增量
+- [specs/database-design/spec.md](./specs/database-design/spec.md) - 数据库设计规格增量

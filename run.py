@@ -238,11 +238,86 @@ def start_backend():
     
     return process
 
+def _read_nvmrc_version(project_root):
+    """读取 .nvmrc 中的 Node 主版本号（如 24），用于优先选择对应版本。"""
+    nvmrc = project_root / ".nvmrc"
+    if not nvmrc.exists():
+        return None
+    try:
+        ver = nvmrc.read_text(encoding="utf-8", errors="ignore").strip().strip("v")
+        if ver:
+            return ver.split(".")[0]
+    except Exception:
+        pass
+    return None
+
+
 def _resolve_npm_path():
-    """解析 npm 可执行文件完整路径，供子进程使用（避免新开 PowerShell 时 PATH 无 Node）。"""
+    """解析 npm 可执行文件完整路径，供子进程使用（避免新开 PowerShell 时 PATH 无 Node）。
+    支持：当前 PATH、nvm-windows（NVM_HOME/NVM_SYMLINK 或默认 %APPDATA%\\nvm）、系统 Node 安装。"""
     npm_exe = shutil.which("npm")
     if sys_platform.system() == "Windows" and not npm_exe:
         npm_exe = shutil.which("npm.cmd")
+    project_root = Path(__file__).resolve().parent
+    preferred_major = _read_nvmrc_version(project_root)
+
+    # Windows 回退：当前进程 PATH 无 npm 时，尝试常见安装路径与 nvm
+    if not npm_exe and sys_platform.system() == "Windows":
+        # 1) NVM_SYMLINK（nvm 当前激活的 Node 目录）
+        if os.environ.get("NVM_SYMLINK"):
+            symlink = os.environ.get("NVM_SYMLINK", "").rstrip("\\")
+            p = os.path.join(symlink, "npm.cmd")
+            if os.path.isfile(p):
+                npm_exe = os.path.normpath(p)
+        # 2) 默认 nvm-windows 符号链接目录（未设置 NVM_SYMLINK 时）
+        if not npm_exe:
+            for symlink_candidate in [
+                os.path.expandvars(r"%ProgramFiles%\nodejs"),
+                os.path.expandvars(r"%ProgramFiles(x86)%\nodejs"),
+            ]:
+                if symlink_candidate:
+                    p = os.path.join(symlink_candidate, "npm.cmd")
+                    if os.path.isfile(p):
+                        npm_exe = os.path.normpath(p)
+                        break
+        # 3) NVM_HOME 下按版本选择（优先 .nvmrc 指定主版本）
+        if not npm_exe and os.environ.get("NVM_HOME"):
+            nvm_home = os.environ.get("NVM_HOME", "").rstrip("\\")
+            if os.path.isdir(nvm_home):
+                versions = [d for d in os.listdir(nvm_home) if d.startswith("v") and os.path.isdir(os.path.join(nvm_home, d))]
+                # 优先匹配 .nvmrc 主版本（如 24）
+                if preferred_major:
+                    matching = [v for v in versions if v.lstrip("v").split(".")[0] == preferred_major]
+                    if matching:
+                        versions = sorted(matching, reverse=True) + [v for v in versions if v not in matching]
+                for name in sorted(versions, reverse=True):
+                    p = os.path.join(nvm_home, name, "npm.cmd")
+                    if os.path.isfile(p):
+                        npm_exe = os.path.normpath(p)
+                        break
+        # 4) nvm-windows 默认安装路径（无 NVM_HOME 时）
+        if not npm_exe:
+            nvm_default = os.path.join(os.path.expandvars(r"%APPDATA%"), "nvm")
+            if os.path.isdir(nvm_default):
+                versions = [d for d in os.listdir(nvm_default) if d.startswith("v") and os.path.isdir(os.path.join(nvm_default, d))]
+                if preferred_major:
+                    matching = [v for v in versions if v.lstrip("v").split(".")[0] == preferred_major]
+                    if matching:
+                        versions = sorted(matching, reverse=True) + [v for v in versions if v not in matching]
+                for name in sorted(versions, reverse=True):
+                    p = os.path.join(nvm_default, name, "npm.cmd")
+                    if os.path.isfile(p):
+                        npm_exe = os.path.normpath(p)
+                        break
+        # 5) 其他常见 Node 安装路径
+        if not npm_exe:
+            for candidate in [
+                os.path.expandvars(r"%APPDATA%\npm\npm.cmd"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\node\npm.cmd"),
+            ]:
+                if candidate and os.path.isfile(candidate):
+                    npm_exe = os.path.normpath(candidate)
+                    break
     return npm_exe
 
 
@@ -252,12 +327,22 @@ def start_frontend():
     safe_print("  地址: http://localhost:5173")
     
     frontend_dir = Path(__file__).parent / "frontend"
+    if not (frontend_dir / "package.json").exists():
+        safe_print("  [ERROR] 未找到 frontend/package.json，请确认项目结构完整。")
+        return None
+    if not (frontend_dir / "node_modules").is_dir():
+        safe_print("  [ERROR] frontend/node_modules 不存在，请先在 frontend 目录执行: npm install")
+        return None
+    
     npm_exe = _resolve_npm_path()
     if not npm_exe:
         safe_print("  [ERROR] 未找到 npm。请确保已安装 Node.js 并加入 PATH，或在已加载 nvm/fnm 的终端中运行: python run.py --local")
         safe_print("  提示: 可从 https://nodejs.org/ 安装 Node.js，或在本终端先执行 nvm use / fnm use 后再运行本脚本。")
+        safe_print("  提示: 若使用 nvm-windows，请确认 NVM_HOME/NVM_SYMLINK 已加入系统环境变量，或从已执行 nvm use 的终端运行本脚本。")
         return None
-    
+
+    safe_print("  [INFO] 使用 npm: " + npm_exe)
+
     # Windows: 尝试清理可能残留的Node.js进程（仅提示，不强制）
     if sys_platform.system() == "Windows":
         try:
@@ -272,22 +357,22 @@ def start_frontend():
                 # 用户可以通过任务管理器手动关闭node.exe
         except:
             pass
-    
+
     if sys_platform.system() == "Windows":
-        # Windows: 使用 npm 完整路径，避免新开 PowerShell 窗口内 PATH 无 Node/npm
+        # Windows: 使用参数化 Popen + 显式 env，避免 PowerShell -Command 字符串解析导致「字符串缺少终止符」
+        # 子进程 PATH = Node 目录前置，新控制台由 CREATE_NEW_CONSOLE 打开
         frontend_path = str(frontend_dir.resolve())
-        npm_path_ps = npm_exe.replace("'", "''")
-        inner_cmd = "& '{}' run dev".format(npm_path_ps)
-        cmd = (
-            'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" -WorkingDirectory "{}"'
-        ).format(inner_cmd.replace('"', '`"'), frontend_path.replace('"', '`"'))
-        
+        node_bin_dir = os.path.dirname(npm_exe)
+        env = os.environ.copy()
+        env["Path"] = node_bin_dir + os.pathsep + env.get("Path", env.get("PATH", ""))
+        create_new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
         process = subprocess.Popen(
-            ["powershell", "-Command", cmd],
-            shell=True,
-            cwd=Path(__file__).parent
+            [npm_exe, "run", "dev"],
+            cwd=frontend_path,
+            env=env,
+            shell=False,
+            creationflags=create_new_console,
         )
-        
         safe_print("  [OK] 前端服务已在新窗口启动")
         safe_print("  [INFO] 如果端口被占用，Vite会自动使用下一个端口（5174/5175...）")
     else:
@@ -926,9 +1011,9 @@ def start_services_with_docker_compose(use_collection=False):
 def wait_for_service(port, name, max_wait=30):
     """等待服务启动"""
     import socket
-    
+
     safe_print(f"\n[等待] {name}服务启动中...")
-    
+
     for i in range(max_wait):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
@@ -938,14 +1023,35 @@ def wait_for_service(port, name, max_wait=30):
                 return True
         finally:
             sock.close()
-        
+
         if (i + 1) % 5 == 0:
             safe_print(f"  等待中... {i+1}/{max_wait}秒")
-        
+
         time.sleep(1)
-    
+
     safe_print(f"  [WARNING] {name}启动超时")
     return False
+
+
+def wait_for_frontend_port(ports=(5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180), max_wait=15):
+    """等待前端（Vite）在任一常用端口就绪，返回就绪端口号或 None。"""
+    import socket
+
+    safe_print("\n[等待] 前端界面服务启动中...")
+    for i in range(max_wait):
+        for port in ports:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                if sock.connect_ex(('127.0.0.1', port)) == 0:
+                    safe_print(f"  [OK] 前端界面已就绪 (端口 {port}, {i+1}秒)")
+                    return port
+            finally:
+                sock.close()
+        if (i + 1) % 5 == 0:
+            safe_print(f"  等待中... {i+1}/{max_wait}秒")
+        time.sleep(1)
+    safe_print("  [WARNING] 前端界面启动超时")
+    return None
 
 def main():
     """主函数"""
@@ -1078,13 +1184,12 @@ def main():
                 safe_print("  提示: 数据同步将使用降级模式（asyncio.create_task）")
         
         # 启动前端
+        frontend_port = None
         if not args.backend_only:
             frontend_process = start_frontend()
             if frontend_process is not None:
                 processes.append(("frontend", frontend_process))
-                # 等待前端就绪
-                if wait_for_service(5173, "前端界面", 15):
-                    safe_print("  [OK] 前端界面就绪")
+                frontend_port = wait_for_frontend_port()
             else:
                 safe_print("  [SKIP] 前端未启动（npm 未找到），请按上方提示配置 Node.js 后重试")
         
@@ -1104,7 +1209,8 @@ def main():
             safe_print("[任务] Celery Worker已启动（处理数据同步任务）")
         
         if not args.backend_only:
-            safe_print("[前端] 主界面:   http://localhost:5173")
+            port = frontend_port if frontend_port is not None else 5173
+            safe_print("[前端] 主界面:   http://localhost:{}".format(port))
         
         # [IMPROVE] 改进：在 Docker 模式下也检查 Metabase 状态
         if args.use_docker:
@@ -1139,7 +1245,8 @@ def main():
             safe_print("\n[浏览器] 5秒后自动打开...")
             time.sleep(5)
             try:
-                webbrowser.open("http://localhost:5173")
+                port = frontend_port if frontend_port is not None else 5173
+                webbrowser.open("http://localhost:{}".format(port))
                 safe_print("[OK] 浏览器已打开")
             except Exception as e:
                 safe_print(f"[WARNING] 无法自动打开浏览器: {e}")

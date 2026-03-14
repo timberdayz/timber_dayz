@@ -6,7 +6,7 @@
 #### Scenario: Metabase 绩效计算 Question 可用
 - **WHEN** 系统执行 `POST /api/performance/scores/calculate?period=YYYY-MM`
 - **THEN** 后端调用 Metabase Question `performance_scores_calculation`，传入 `month=YYYY-MM-01`
-- **AND** Metabase 执行 SQL，从 `{{MODEL:Orders Model}}`、`a_class.target_breakdown`、`a_class.sales_targets`、`a_class.performance_config` 读取数据
+- **AND** Metabase 执行 SQL，从 `{{MODEL:Orders Model}}`、`a_class.target_breakdown`、`a_class.sales_targets`、`public.performance_config` 读取数据
 - **AND** Metabase 返回按店铺聚合的绩效得分（sales_target、sales_achieved、sales_rate、sales_score、profit_*、key_product_*、operation_score、total_score）
 - **AND** 后端将结果 INSERT 或 UPDATE 至 `c_class.performance_scores`
 - **AND** 后端计算 rank、performance_coefficient 并写入

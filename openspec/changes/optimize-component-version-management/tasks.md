@@ -2,7 +2,7 @@
 
 **目标**：组件唯一性（方案 A+C）、修复「测试 A 执行 B」、放宽删除规则、验证码必选暂停，并增强体验（实际执行文件、冲突提示、可选 Tab 结构）。
 
-**验收进度（2026-03-13）**：0.x～5.x、6.2～6.3 已实现并通过代码/单测验收；1.5（多版本回归）、1.6（非登录组件测试前登录）、1.7（测试环境与生产对齐）、1.8（发现模式组件 test_mode）、6.1（综合验收）仍待办。详见本目录下 `ACCEPTANCE_REPORT.md`。
+**验收进度（2026-03-14）**：0.x～5.x、6.2～6.3 已实现并通过代码/单测验收；1.5（多版本回归）、1.6（非登录组件测试前登录）、1.7（测试环境与生产对齐）、1.8（发现模式组件 test_mode）、1.9（file_path 导入后类发现稳定性）、6.1（综合验收）仍待办。详见本目录下 `ACCEPTANCE_REPORT.md`。
 
 ## 0. 组件唯一性与录制保存（P0）
 
@@ -36,6 +36,14 @@
      - `test_config.pre_steps`：在执行组件前需要完成的页面准备步骤（如打开筛选抽屉、切换 Tab）；
      - `test_config.assertions`：执行后需要满足的断言（如表格存在、结果条数/日期范围合理）。
    - 单组件测试工具在检测到 `test_mode=standalone` + 有效 `test_config` 时，先按 `url + pre_steps` 构造上下文，再执行 date_picker/filters 组件；否则仅在完整采集任务中对这些组件做集成级验证。
+- [ ] 1.9 **file_path 导入后类发现稳定性（阻断问题修复）**：
+  - 在 `tools/test_component.py`（以及必要时 `component_loader.py`）中，按 `version.file_path` 导入模块后，类发现改为「元数据优先（platform + component_type）+ 命名兜底」；
+  - 兼容历史类命名（如 `MiaoshouMiaoshouLogin`），不得仅依赖 `component_name` 推断；
+  - 失败时返回可观测错误：包含 `version_id`、`file_path`、候选类列表、匹配规则说明，便于验收阶段快速定位。
+- [ ] 1.10 **file_path 安全边界校验（P0）**：
+  - 在 `component_loader.py` 的 `load_python_component_from_path` 中增加路径安全校验：`realpath(abs_path)` 必须位于允许组件目录（如 `modules/platforms/*/components/`）；
+  - 拒绝 `..` 路径穿越、符号链接逃逸与越界路径，不得宽松回退；
+  - 失败时错误包含 `version_id`、`file_path`、安全校验失败原因。
 
 ## 2. 验证码步骤 unconditional 暂停（P0）
 
@@ -53,18 +61,21 @@
 ## 4. 组件版本管理体验（P1）
 
 - [x] 4.1 实际执行文件展示：在版本列表增加「实际执行文件」列（file_path）；测试弹窗顶部显式展示 file_path。
-- [x] 4.2 同平台同类型多稳定版冲突提示：当同一 platform 下同一 component_type 存在多个 is_stable=True 时，在 UI 标出冲突或警告。
+- [ ] 4.2 同平台同类型多稳定版冲突提示：当同一 platform 下同一 component_type 存在多个 is_stable=True 时，在 UI 标出冲突或警告。
 - [x] 4.3 组件类型标签：在列表中用标签/颜色区分 login / navigation / export 等类型。
+- [ ] 4.4 验证码截图 URL 契约：前端 `getTestVerificationScreenshotUrl` 使用稳定 API base 生成 URL（禁止依赖业务 API 对象上的非标准属性）；`verification_required` 时截图可稳定展示。
+- [ ] 4.5 测试轮询生命周期治理：测试完成/失败、关闭弹窗、组件卸载时停止轮询；增加连续异常重试上限与整体超时，超过阈值后停止轮询并提示。
+- [ ] 4.6 组件类型筛选对齐：筛选项与标准化 component_name 规则一致，覆盖 login/navigation/export/date_picker/shop_switch/filters，避免筛选语义偏差。
 
 ## 5. 前端页面结构（P2，可选）
 
-- [x] 5.1 Tab 概览：统计卡片、最近活动、冲突告警、快速入口（去录制、批量注册）。
-- [x] 5.2 Tab 按平台：树形/分组浏览 platform → component_type → 组件，展示当前生产版本。
-- [x] 5.3 Tab 全部版本：保留现有表格为「全部版本」Tab，确保列含「实际执行文件」。
-- [x] 5.4 **优化**：移除「概览」「按平台」两个 Tab，仅保留「全部版本」列表；筛选框增加 min-width 便于看清已选；筛选为空时与后端一致（全选）。
+- [x] 5.1 Tab 概览：统计卡片、最近活动、冲突告警、快速入口（去录制、批量注册）。（历史方案，已被 5.4 取代）
+- [x] 5.2 Tab 按平台：树形/分组浏览 platform → component_type → 组件，展示当前生产版本。（历史方案，已被 5.4 取代）
+- [x] 5.3 Tab 全部版本：保留现有表格为「全部版本」Tab，确保列含「实际执行文件」。（作为 5.4 的基础）
+- [x] 5.4 **优化（当前生效）**：移除「概览」「按平台」两个 Tab，仅保留「全部版本」列表；筛选框增加 min-width 便于看清已选；筛选为空时与后端一致（全选）。
 
 ## 6. 验收与文档
 
-- [ ] 6.1 验收：选择某组件版本测试，确认执行的是该 version.file_path 对应文件且验证码会暂停；禁用后确认可删除；验证码回传后流程正确继续；录制保存创建新版本而非新 component_name；测试 export 等非登录组件时先自动登录或复用会话，且测试使用与生产一致的会话与指纹策略。
+- [ ] 6.1 验收：选择某组件版本测试，确认执行的是该 version.file_path 对应文件且验证码会暂停；禁用后确认可删除；验证码回传后流程正确继续；录制保存创建新版本而非新 component_name；测试 export 等非登录组件时先自动登录或复用会话，且测试使用与生产一致的会话与指纹策略；历史类命名版本（如 `MiaoshouMiaoshouLogin`）可被正确识别执行；失败结果可展示 `phase + component + version`；多稳定版冲突可见且可定位；关闭弹窗或超时后轮询可正确停止；非法 `file_path` 会被安全拒绝且错误可定位。
 - [x] 6.2 更新 CHANGELOG 或相关文档，记录「组件版本测试执行一致性」「删除规则」「验证码必选暂停」「实际执行文件展示」等变更。
 - [x] 6.3 部署检查：确认采集环境（backend、collection 容器、本地）均已配置 PROJECT_ROOT；持久会话/指纹使用处已配置 DATA_DIR（或等效）；design 中「采集环境部署检查清单」已纳入运维文档。

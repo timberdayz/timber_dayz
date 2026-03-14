@@ -54,7 +54,7 @@ end as sales_score
 ### 4. 后端 calculate 流程
 
 **决策**：
-1. 查询 `a_class.performance_config` 校验存在
+1. 查询 `public.performance_config` 校验存在
 2. 调用 `metabase_service.query_question("performance_scores_calculation", {"month": period + "-01"})`
 3. 遍历返回结果，对每行 UPSERT `c_class.performance_scores`（INSERT 或 UPDATE）
 4. 计算 rank、performance_coefficient 并写入

@@ -6,10 +6,11 @@
 
 ## Phase 0: Public 表完全迁移至 A/C 类 Schema（优先执行）
 
-**原子性部署**：迁移脚本、schema.py、target_sync_service、target_management、Metabase SQL、init_metabase 须**同批次**部署，不可分批。
+**发布策略**：在同一发布窗口按 Expand/Contract 分阶段执行（Expand -> Verify -> Contract），避免跨版本长时间混跑。
 
 ### 0.1 迁移设计与准备
 
+- [ ] 0.1.0 补齐并评审 `design.md`（迁移阶段、切换策略、回滚方案、验收口径）
 - [ ] 0.1.1 确认迁移清单：
   - `public.sales_targets` → `a_class.sales_targets`（新建，与原表同结构）
   - `public.performance_scores` → `c_class.performance_scores`（以 PerformanceScore 完整字段为准）
@@ -26,12 +27,12 @@
 ### 0.3 Alembic 迁移脚本 - sales_targets
 
 - [ ] 0.3.1 创建 `a_class.sales_targets`（结构与 public.sales_targets 完全一致）
-- [ ] 0.3.2 迁移数据：`INSERT INTO a_class.sales_targets SELECT * FROM public.sales_targets`
+- [ ] 0.3.2 迁移数据使用显式列清单（禁止 `SELECT *`），并记录迁移前后行数校验
 - [ ] 0.3.3 删除 `a_class.target_breakdown.target_id` 外键约束
 - [ ] 0.3.4 添加新外键：`target_breakdown.target_id` → `a_class.sales_targets.id`
 - [ ] 0.3.5 删除 `public.sales_targets` 表
 - [ ] 0.3.6 迁移脚本使用 `safe_print()` 替代 `print()`（Windows 兼容）
-- [ ] 0.3.7 迁移前备份关键数据（可选，用于回滚）
+- [ ] 0.3.7 迁移前备份关键数据（强制），并验证备份可恢复
 
 ### 0.4 Alembic 迁移脚本 - C 类表
 
@@ -43,6 +44,7 @@
 - [ ] 0.4.6 创建 `c_class.shop_alerts`，迁移 public.shop_alerts 数据，删除原表
 - [ ] 0.4.7 迁移脚本幂等性：创建前检查表是否存在
 - [ ] 0.4.8 验证跨 schema 外键（c_class.performance_scores、c_class.shop_health_scores → public.dim_shops）正常
+- [ ] 0.4.9 C 类三张表迁移前完成备份并验证可恢复（`performance_scores`、`shop_health_scores`、`shop_alerts`）
 
 ### 0.5 Schema.py 更新
 
@@ -86,7 +88,8 @@
 
 ### 0.9 验证
 
-- [ ] 0.9.1 运行 `alembic upgrade head`，迁移成功
+- [ ] 0.9.1 运行 `alembic upgrade head`（若项目支持多头迁移则用 `alembic upgrade heads`），迁移成功
+- [ ] 0.9.1a 执行迁移前后对账（行数、关键字段空值率、抽样业务口径）并归档结果
 - [ ] 0.9.2 **sales_targets 专项验证**（按顺序）：
   - [ ] 0.9.2a 目标管理：创建月度目标 → 成功
   - [ ] 0.9.2b 目标管理：添加店铺分解 → 成功，TargetSyncService 同步
@@ -113,9 +116,10 @@
 
 ### 1.2 后端 - calculate 接口（与 add-performance-calculation-via-metabase 分工）
 
-- [ ] 1.2.1 **分工说明**：calculate 的**完整计算逻辑**由 **add-performance-calculation-via-metabase** 实现（Metabase SQL + 后端调用）。本提案仅确保：接口可调用、使用 await、能写入 `c_class.performance_scores`；若 Metabase 方案未实施，可保留占位实现（如写入 0 或占位值）以保证流程可跑通
+- [ ] 1.2.1 **分工说明**：calculate 的**完整计算逻辑**由 **add-performance-calculation-via-metabase** 实现（Metabase SQL + 后端调用）。本提案仅确保：接口可调用、使用 await、链路依赖已就绪
+- [ ] 1.2.1a 若 Metabase 方案未实施，calculate 固定返回 `HTTP 503 + error_code=PERF_CALC_NOT_READY`，禁止向 `c_class.performance_scores` 写入占位数据
 - [ ] 1.2.2 禁止在 calculate 中引用已删除的 `fact_orders`；数据源应为 a_class/c_class 及 Orders Model（或 b_class）
-- [ ] 1.2.3 计算完成后写入 `c_class.performance_scores`（rank、performance_coefficient 可由 Metabase 方案或占位逻辑更新）
+- [ ] 1.2.3 计算完成后写入 `c_class.performance_scores`（rank、performance_coefficient 由正式计算结果更新）
 
 ### 1.3 前端 - 绩效公示优化
 
@@ -129,18 +133,21 @@
 
 - [ ] 2.0 Contract-First：在 `backend/schemas/` 中定义我的收入响应模型（如 `MyIncomeResponse`）；若已在 router 中定义则迁移至 schemas 并更新引用；路由使用 `response_model` 引用
 - [ ] 2.1 新增 `GET /api/hr/me/income`：需登录，根据当前用户关联的员工返回收入数据（依赖 Employee.user_id）
-- [ ] 2.2 未关联员工时返回 404 或 `{ linked: false }`（当前实现为 200 + `linked: false`，均可接受）
+- [ ] 2.2 未关联员工时统一返回 `200 + { linked: false }`（固定契约，不再提供 404 分支）
 - [ ] 2.3 查询 `c_class.employee_commissions`（按 employee_code、year_month）
 - [ ] 2.4 查询 `c_class.employee_performance`（按 employee_code、year_month）
 - [ ] 2.5 优先查询 `a_class.payroll_records`（若有完整工资单），否则组合 salary_structures + employee_commissions + employee_performance
 - [ ] 2.6 响应格式：`{ period, base_salary?, commission_amount, commission_rate, performance_score, achievement_rate, total_income?, breakdown? }`
 - [ ] 2.7 支持 `?year_month=YYYY-MM` 查询历史月份
 - [ ] 2.8 路由定义在 `/employees/{employee_code}` 等动态路由之前
+- [ ] 2.8a 增加越权访问防护：仅允许查询当前用户关联员工，不允许通过任何参数查询他人收入
+- [ ] 2.8b 增加审计日志：记录谁在何时访问了「我的收入」（日志禁止输出敏感薪资字段明文）
 
 ### 2.9 员工 C 类表数据写入
 
 - [ ] 2.9.1 明确 `employee_commissions`、`employee_performance` 的写入来源
-- [ ] 2.9.2 若无写入逻辑，新增后端服务或定时任务：从 b_class 订单、员工-店铺关联（若有）计算提成与绩效，写入 c_class
+- [ ] 2.9.2 若无写入逻辑，新增后端服务或定时任务：从 b_class 订单、员工-店铺关联等员工级数据计算提成与绩效，写入 c_class
+- [ ] 2.9.3 明确约束：店铺级 `POST /api/performance/scores/calculate` 不承担员工级收入表写入职责
 
 ---
 
@@ -158,9 +165,9 @@
 
 ## Phase 4: 菜单与路由
 
-- [ ] 4.1 `menuGroups.js`：人力资源分组下新增「我的收入」菜单项（/my-income）
-- [ ] 4.2 `router/index.js`：新增 `/my-income` 路由，组件 `MyIncome.vue`
-- [ ] 4.3 `rolePermissions.js`：为 operator、manager、admin 等角色增加 `my-income` 权限
+- [ ] 4.1 `frontend/src/config/menuGroups.js`：人力资源分组下新增「我的收入」菜单项（/my-income）
+- [ ] 4.2 `frontend/src/router/index.js`：新增 `/my-income` 路由，组件 `MyIncome.vue`
+- [ ] 4.3 `frontend/src/config/rolePermissions.js`：为 operator、manager、admin 等角色增加 `my-income` 权限
 - [ ] 4.4 菜单可见性：已关联员工展示「我的收入」；未关联时可展示但页面内提示
 
 ---
@@ -181,3 +188,13 @@
 - [ ] 6.5 我的收入：已关联员工用户可查看本人收入
 - [ ] 6.6 我的收入：未关联员工用户看到引导文案
 - [ ] 6.7 我的收入：切换月份可查询历史（若有数据）
+- [ ] 6.8 安全验证：非本人用户无法读取他人收入，审计日志可追溯
+- [ ] 6.8a 数据验证：员工收入链路至少一个自然月可查询到非空示例数据（含提成或绩效字段）
+- [ ] 6.9 OpenSpec 验证：`npx openspec validate add-performance-and-personal-income --strict` 通过
+
+---
+
+## Phase 7: 规格与依赖一致性治理
+
+- [x] 7.1 已增加 `specs/database-design/spec.md` 的 MODIFIED delta，明确 public→a_class/c_class 迁移规范与回滚要求
+- [x] 7.2 已与 `add-performance-calculation-via-metabase` 对齐 `performance_config` schema 口径（统一为 `public.performance_config`）

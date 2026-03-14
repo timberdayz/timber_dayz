@@ -81,6 +81,37 @@
 - **WHEN** 测试完成或进行中
 - **THEN** 系统在进度或结果中可展示或返回实际执行的组件文件路径或类名，便于用户确认
 
+### Requirement: file_path 导入后的类入口稳定发现
+
+系统 SHALL 在按 `version.file_path` 导入 Python 模块后，使用稳定的组件类发现策略，优先基于类元数据（platform、component_type）匹配，再回退命名约定，兼容历史类命名，避免因类名风格差异导致测试阻断。
+
+#### Scenario: 历史类命名可被正确识别
+
+- **WHEN** 版本文件已按 `file_path` 导入，但模块内类名不符合当前命名约定（如 `MiaoshouMiaoshouLogin`）
+- **THEN** 系统仍能通过元数据匹配到目标组件类并执行测试
+- **AND** 不得仅依赖 `component_name -> 类名` 的字符串推断
+
+#### Scenario: 类发现失败时错误可观测
+
+- **WHEN** 导入模块后仍无法匹配到目标组件类
+- **THEN** 错误信息包含 `version_id`、`file_path`、模块候选类列表与匹配规则说明
+- **AND** 前端可展示明确可定位的失败原因，而非仅显示通用失败文案
+
+### Requirement: file_path 加载安全边界
+
+系统 SHALL 对 `version.file_path` 的加载路径进行安全边界控制：归一化后的绝对路径必须位于允许的组件目录内，禁止路径穿越与越界加载，防止加载任意非组件文件。
+
+#### Scenario: 合法组件路径可加载
+
+- **WHEN** `file_path` 归一化后位于允许目录（如 `modules/platforms/*/components/`）
+- **THEN** 系统允许继续加载并执行组件
+
+#### Scenario: 非法路径被拒绝
+
+- **WHEN** `file_path` 含 `..`、符号链接逃逸或归一化后越界到允许目录之外
+- **THEN** 系统拒绝加载并返回明确错误
+- **AND** 错误信息包含 `version_id`、`file_path` 与安全校验失败原因
+
 ### Requirement: 组件测试环境与生产对齐
 
 系统 SHALL 使组件测试环境与生产采集一致：一账号对应一个浏览器指纹与持久会话；测试非登录组件（export、navigation、date_picker、filters）前必须先完成自动登录或复用该账号持久会话，未提供 skip_login 且登录/会话不可用时不得执行该组件测试。
@@ -103,3 +134,31 @@
 - **WHEN** 用户发起组件测试且 account_id 缺失或未选择账号
 - **THEN** 系统拒绝执行测试并返回明确错误，强制用户选择账号
 - **AND** 非登录组件测试依赖 account_id 加载会话/指纹，缺失则无法与生产对齐
+
+### Requirement: 前端冲突提示与测试可观测性
+
+系统 SHALL 在组件版本管理前端提供与版本治理一致的可观测性能力，包括多稳定版冲突提示、阶段化失败信息展示、验证码截图可访问与轮询生命周期治理，避免出现“状态不明”或“无限轮询”等历史问题。
+
+#### Scenario: 多稳定版冲突可见
+
+- **WHEN** 同一平台同一逻辑类型存在多个稳定版
+- **THEN** 前端在列表页显式显示冲突提示
+- **AND** 提示中包含平台、逻辑类型与冲突版本标识，便于用户处理
+
+#### Scenario: 失败阶段与组件版本可定位
+
+- **WHEN** 组件测试失败（包括 session/login/业务阶段）
+- **THEN** 状态接口或结果对象包含 `phase`、`phase_component_name`、`phase_component_version`
+- **AND** 前端在失败文案或详情区展示上述字段，不得仅显示通用错误文案
+
+#### Scenario: 验证码截图 URL 可稳定访问
+
+- **WHEN** 测试状态为 `verification_required`
+- **THEN** 前端使用统一 API base 规则构造验证码截图 URL
+- **AND** 验证码截图可在测试弹窗中稳定展示，不依赖不确定对象属性拼接路径
+
+#### Scenario: 轮询具备终止与保护机制
+
+- **WHEN** 测试轮询进行中
+- **THEN** 在 `completed`、`failed`、关闭测试弹窗、组件卸载时停止轮询
+- **AND** 连续异常达到阈值或超过总超时后停止轮询并提示用户

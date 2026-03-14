@@ -51,7 +51,7 @@
 - **版本化文件名**：使用 Python 模块名安全格式，如 `login_v1_1_0.py`（版本号中的 `.` 替换为 `_`），避免 `importlib` 加载时报错。
 - **file_path 存储规范**：DB 中 ComponentVersion.file_path 统一存**相对路径**（相对于 PROJECT_ROOT），如 `miaoshou/components/login_v1_1_0.py`；加载时通过 PROJECT_ROOT + file_path 转为绝对路径再传给 `importlib.util.spec_from_file_location`。不同部署环境 PROJECT_ROOT 可不同（Docker 内 `/app`，本地为仓库根），保证跨环境一致。
 - **加载方式**：通过 `importlib.util.spec_from_file_location` 从绝对路径加载，不依赖 `import_module(module_path)`。
-- **备选**：主文件 + 草稿（`login.py` + `login_draft.py`），提升稳定时草稿覆盖主文件；回滚依赖 Git。
+- **明确拒绝双轨模式**：不采用主文件 + 草稿双轨（如 `login.py` + `login_draft.py`）；版本生命周期统一由 ComponentVersion + 版本化 file_path 管理，避免语义分裂。
 
 ### component_type 从 component_name 推导
 
@@ -150,12 +150,51 @@
 - **非登录组件测试前的登录版本**：自动登录应使用该平台 login 的**当前稳定版**（is_stable=True），按 file_path 加载，与生产执行一致。
 - **实现**：在 `tools/test_component.py` 的 **Python 组件测试路径**（`_test_python_component_with_browser`）中：（1）account_id 缺失时测试失败并明确报错，强制用户选择账号；（2）对 export、navigation、date_picker、filters，在执行该组件前先执行自动登录或按 account_id 加载 SessionManager 会话；若无有效 storage_state 则先执行登录组件——**通过 ComponentVersionService 选该平台 login 的稳定版，按 file_path 加载**，再继续；（3）建 context 时与 executor_v2 完全相同：使用 `SessionManager.load_session` 得到 storage_state + `DeviceFingerprintManager` 得到指纹选项，`new_context(storage_state=..., **fp_options)`，不使用 launch_persistent_context，保证与真实采集环境一致。
 
+### 7. file_path 加载后的组件类发现策略（新增 P0 决策）
+
+- **问题背景**：当前测试链路在已按 `version.file_path` 导入模块后，仍以 `component_name` 推断类名；历史版本文件可能使用旧命名（如 `MiaoshouMiaoshouLogin`），导致 `Failed to load Python component: login`。
+- **决策**：采用「元数据优先 + 命名兜底」的双层策略：
+  1. **元数据优先**：优先匹配模块内满足 `platform == 当前平台` 且 `component_type == 当前组件类型` 的类；
+  2. **命名兜底**：若元数据未命中，再按现有命名约定（平台前缀、`*Component`、`*Export`）匹配；
+  3. **显式可观测**：仍失败时，错误需包含 `version_id`、`file_path`、候选类列表与匹配规则说明。
+- **业界对齐**：主流 registry/runner 通常使用显式入口（entrypoint）或元数据定位执行实体，不依赖脆弱的类名猜测；本决策与该实践一致。
+
+### 8. 前端冲突提示与类型筛选一致性（新增 P1 决策）
+
+- **决策**：版本管理页必须可见「多稳定版冲突」。前端可采用两种方式之一：
+  1. 后端返回冲突摘要（推荐，减少前端重复规则）；
+  2. 前端基于 `component_name + logical_type + is_stable` 本地聚合计算并提示。
+- **最低要求**：无论采用哪种方式，冲突提示需包含平台、逻辑类型、冲突版本集合；筛选项需覆盖可独立管理类型（login/navigation/export/date_picker/shop_switch/filters），并与 `component_name` 解析规则一致。
+
+### 9. 测试阶段可观测性（新增 P1 决策）
+
+- **决策**：测试状态与最终结果统一暴露阶段信息：
+  - `phase`: `session|login|navigation|date_picker|filters|export|finalize`
+  - `phase_component_name`: 当前阶段组件（如 `miaoshou/login`）
+  - `phase_component_version`: 当前阶段版本（如 `1.0.0`）
+- **前端展示要求**：失败提示和结果详情必须展示 `phase + phase_component_name + phase_component_version`，禁止仅显示通用错误字符串。
+
+### 10. 验证码截图 URL 与轮询生命周期（新增 P1 决策）
+
+- **URL 决策**：验证码截图 URL 必须基于统一 API base 生成（例如 `import.meta.env.VITE_API_BASE_URL` 或 axios 实例 `baseURL` 的稳定来源），禁止使用业务 API 对象上不保证存在的属性构造路径。
+- **轮询决策**：轮询采用明确终止条件与保护阈值：
+  - 终止：`completed/failed`、用户关闭测试弹窗、组件卸载；
+  - 保护：连续异常重试上限、整体超时时间；
+  - 兜底：达到上限后停止轮询并提示可重试，避免无限轮询与资源泄漏。
+
+### 11. file_path 安全边界（新增 P0 决策）
+
+- **决策**：`load_python_component_from_path` 在从相对路径转换为绝对路径后，必须进行安全边界校验：目标路径必须位于允许组件目录（如 `modules/platforms/*/components/`）内。
+- **拒绝策略**：若出现 `..`、符号链接逃逸或跨目录越界，直接拒绝加载并返回结构化错误（含 version_id、file_path、安全校验失败原因）；不得静默降级或放宽。
+- **业界对齐**：主流插件执行框架会限制可执行工件来源目录并做 realpath 校验，本决策与该实践一致。
+
 ## Risks / Trade-offs
 
 - **适配器注入**：增加可选参数后，生产路径不传入 override，默认行为不变。
 - **删除稳定版**：放宽后用户可能误删唯一稳定版；通过「可删 = 已禁用」降低风险（禁用即「不用」，删除前需先禁用）。
 - **验证码「有时无验证码」**：本变更将图形验证码步骤统一为必选暂停，不处理「有时出现、有时不出现」验证码的登录页；该场景列为后续迭代（如 optional 验证码步骤或条件分支）。
 - **file_path 文件不存在**：DB 中 file_path 指向已删除/回滚的文件时，加载会失败；需抛出明确异常（含 version_id、file_path），便于运维排查；部署时需保证代码与 DB 版本表一致。
+- **前端本地冲突计算偏差**：若前端本地计算规则与后端选版规则不一致，可能出现误报/漏报；建议后端提供冲突摘要并复用同一判定逻辑。
 
 ## Migration Plan
 

@@ -12,6 +12,7 @@
 4. **同平台多组件易混淆**：缺少「实际执行文件」的可视化与冲突提示，易造成「测 A 执行 B」误判。
 5. **以版本列表为主，缺少按能力组织**：无法快速看出「某平台某类型当前生产用哪个组件」。
 6. **组件唯一性缺失**：同一 (platform, component_type) 可存在多个 component_name（如 miaoshou/login 与 miaoshou/miaoshou_login），易导致生产执行到错误组件。
+7. **file_path 已命中但类解析失败**：测试链路在 `tools/test_component.py` 中按 `component_name` 推断类名（如 `login -> MiaoshouLogin`），而历史版本文件可能是 `MiaoshouMiaoshouLogin` 等旧命名，导致 `Failed to load Python component: login`。该问题会阻断「选择版本后开始测试」主流程，属于 P0。
 
 ## What Changes
 
@@ -45,7 +46,7 @@
 
 ### 5. 生产执行器按 file_path 加载（P0）
 
-- 当前 executor_v2 选出版本后仍按 comp_name 调用 `build_component_dict_from_python`，未使用 `selected_version.file_path`，导致生产执行到错误文件。需改造为：（1）`_load_component_with_version` 在 selected_version 非空且 file_path 以 .py 结尾时，调用 `load_python_component_from_path(selected_version.file_path)` 构建 component dict，不得再调用 `build_component_dict_from_python`；（2）`_execute_python_component` 当 component dict 含 `_python_component_class`（由 file_path 加载）时，直接使用该类实例化执行 `run(page)`，不得再调用 adapter 按 comp_name 重新加载；（3）从 file_path 通过 `importlib.util.spec_from_file_location` 加载时，模块名须唯一（如 file_path 哈希或 version_id），避免 sys.modules 缓存导致多版本加载错误。**主组件与子组件范围**：本变更主组件（login、navigation、export）按 `selected_version.file_path` 加载；export 内 `component_call` 调用的 date_picker、filters、shop_switch 暂按 adapter 默认加载（comp_name），不纳入本变更版本管理；后续迭代可扩展子组件版本化。
+- 当前 executor_v2 选出版本后仍按 comp_name 调用 `build_component_dict_from_python`，未使用 `selected_version.file_path`，导致生产执行到错误文件。需改造为：（1）`_load_component_with_version` 在 selected_version 非空且 file_path 以 .py 结尾时，调用 `load_python_component_from_path(selected_version.file_path)` 构建 component dict，不得再调用 `build_component_dict_from_python`；（2）`_execute_python_component` 当 component dict 含 `_python_component_class`（由 file_path 加载）时，直接使用该类实例化执行 `run(page)`，不得再调用 adapter 按 comp_name 重新加载；（3）从 file_path 通过 `importlib.util.spec_from_file_location` 加载时，模块名须唯一（如 file_path 哈希或 version_id），避免 sys.modules 缓存导致多版本加载错误。**主组件与子组件范围（统一口径）**：本变更主组件为 execution_order 中独立槽位组件（login、navigation、export、date_picker、shop_switch、filters），均按 `selected_version.file_path` 加载；仅 export 内部 `component_call` 调用链中的子调用仍可暂按 adapter 默认加载（comp_name），后续迭代再扩展子调用链的版本化。
 
 ### 6. 前端页面结构重构（P2）
 
@@ -70,6 +71,28 @@
       - `assertions`：执行后需要满足的断言（如表格存在、结果条数或日期范围合理）。
   - 单组件测试工具在检测到 `standalone + test_config` 时，先按 `url + pre_steps` 构造上下文，再执行 date_picker/filters 组件；未声明或 `flow_only` 的组件则仅在完整采集任务中通过集成级测试进行验证。
 
+### 8. file_path 加载的类入口稳定性（P0）
+
+- 测试链路在按 `version.file_path` 导入模块后，**不得只依赖 component_name 推断类名**；应优先按类元数据匹配（`platform`、`component_type`），再回退命名约定，兼容历史生成类名（如 `MiaoshouMiaoshouLogin`）。
+- 若仍无法定位组件类，错误信息必须包含 `version_id`、`file_path`、模块内候选类列表与匹配规则说明，便于验收与运维定位。
+- 生成器与保存链路应保持「可稳定发现入口类」的一致约定（可选：显式入口类名/模块导出），避免未来再次依赖脆弱命名猜测。
+
+### 9. 前端测试链路契约收敛（P1）
+
+- **验证码截图 URL 契约**：前端 `getTestVerificationScreenshotUrl` 必须基于统一 API Base URL 生成可访问路径，禁止依赖不稳定对象属性（如业务 API 对象上的 `defaults`）拼接，确保 `verification_required` 时截图可稳定展示。
+- **测试状态轮询生命周期**：前端轮询必须具备可控终止策略：测试完成/失败自动停止、关闭测试弹窗停止、异常达到重试上限或超时停止并提示，避免后台无限轮询。
+- **筛选与类型映射一致性**：组件类型筛选项与标准化 component_name 解析规则保持一致，覆盖版本管理中可独立管理的类型（至少 login/navigation/export/date_picker/shop_switch/filters），避免筛选结果与后端语义偏差。
+
+### 10. 测试结果可观测性增强（P1）
+
+- 测试结果与状态查询接口需返回失败阶段信息（如 `phase=login|navigation|export|date_picker|filters|session`）及对应组件版本标识（如 `phase_component_name`、`phase_component_version`），前端在失败提示与结果区域显式展示。
+- 当发生组件加载失败、会话失败、登录失败等前置阶段错误时，前端不得仅显示通用失败文案，应展示阶段、组件、关键错误详情，降低排障成本。
+
+### 11. file_path 安全边界（P0）
+
+- `ComponentVersion.file_path` 虽存相对路径，但加载前必须做安全校验：归一化后的绝对路径必须位于允许目录（如 `modules/platforms/**/components/`）内，禁止路径穿越（`..`、跨目录逃逸）与任意文件加载。
+- 当 file_path 不满足安全边界时，加载应失败并返回明确错误（包含 version_id、file_path 与安全校验失败原因），不得回退为宽松加载。
+
 **API 影响**：`POST /recorder/save` 与 `POST /recorder/generate-python` 的 component_name 由 platform+component_type 推导（export 需 data_domain，子域 export 如 services:agent 需 sub_domain）；**校验**：export 时 data_domain 缺失返回 400；当 data_domain 有子类型且前端选择子域导出时，sub_domain 必填，否则 400。**sub_domain 子类型判定**：后端维护「有子类型的数据域」配置（如 `services` → `["agent","ai_assistant"]`），可硬编码或配置化；仅当 data_domain 在此列表中且前端传 sub_domain 时才校验 sub_domain 必填。保存行为从「同 file_path 则 UPSERT」改为「创建新版本 + 版本化 file_path」。**GeneratePythonRequest**：请求体与 RecorderSaveRequest 对齐，增加 data_domain（export 必填）、sub_domain（子域 export 必填）；component_name 由 platform+component_type+data_domain+sub_domain 推导，不再必填或废弃。**兼容策略**：为兼容旧客户端，可保留 component_name 字段但由后端忽略；过渡期后可选废弃。路径与请求结构可保持兼容，但语义变更，调用方需知悉。
 
 ## Impact
@@ -84,6 +107,7 @@
   - `modules/apps/collection_center/python_component_adapter.py`（适配器支持注入指定组件类）
   - `modules/apps/collection_center/executor_v2.py`（按 component_type 构造 component_name；按 selected_version.file_path 加载组件）
   - `modules/apps/collection_center/component_loader.py`（新增从 file_path 加载的方法，供执行器与测试使用）
+  - `tools/test_component.py`（按 file_path 导入后的类发现策略：元数据优先、命名兜底、错误可观测性）
   - `tools/test_component.py`（测试时注入 component_class；验证码回传使用同一注入类；非登录组件前自动登录/复用会话；测试环境与生产对齐：一账号一指纹与持久会话）
   - `backend/services/steps_to_python.py`（验证码步骤 unconditional）
   - `frontend/src/views/ComponentVersions.vue`（删除按钮条件、实际执行文件展示、冲突提示、Tab 结构）

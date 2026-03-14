@@ -27,9 +27,11 @@
 
 ## What Changes
 
+为降低跨模块迁移风险，本变更新增 `design.md`，明确迁移策略（Expand/Contract）、切换与回滚方案、校验口径与发布顺序。
+
 ### Phase 0: Public 表完全迁移至 A/C 类 Schema（优先执行）
 
-**实施注意**：若仓库中已存在迁移脚本（如 `20260131_migrate_public_tables_to_a_c_class.py`），则以执行 `alembic upgrade head`、验证结果、以及更新后端/脚本/SQL 引用为主，无需重复编写迁移；若为新环境则按 tasks 0.3–0.4 编写并执行迁移。
+**实施注意**：若仓库中已存在迁移脚本（如 `20260131_migrate_public_tables_to_a_c_class.py`），则以执行 `alembic upgrade head`（或项目约定的 `alembic upgrade heads`，见 `docs/DEVELOPMENT_RULES/DATABASE_MIGRATION.md`）、验证结果、以及更新后端/脚本/SQL 引用为主，无需重复编写迁移；若为新环境则按 tasks 0.3–0.4 编写并执行迁移。
 
 **迁移清单**：
 
@@ -49,7 +51,7 @@
 **sales_targets 专项（高优先级）**：
 - **依赖链**：目标管理前端 → target_management API → SalesTarget ORM；TargetSyncService 读取 sales_targets + target_breakdown → 写入 sales_targets_a；Metabase Question（comparison、shop_racing）直接引用 sales_targets；operational_metrics 引用 sales_targets_a（间接依赖）
 - **迁移顺序**：Phase 0 中 sales_targets 应**最先**迁移（target_breakdown 外键依赖它，TargetSyncService、多个 Question 依赖它）
-- **原子性部署**：迁移脚本 + schema.py + target_sync_service + target_management + Metabase SQL + init_metabase 必须**同批次**部署，不可分批
+- **发布策略**：在**同一发布窗口**内按 Expand/Contract 分阶段执行（Expand → 校验 → Contract）；避免跨版本长时间混跑
 - **验证清单**：目标管理 CRUD → TargetSyncService 同步 → 业务概览（数据对比、店铺赛马、经营指标）→ 确认 sales_targets_a 有数据
 
 **PerformanceScore 合并策略**：
@@ -85,6 +87,9 @@
 - 迁移脚本应在删除原表前完成数据迁移与校验；sales_targets 影响面大，建议迁移前备份
 - 建议在 downgrade 中实现反向迁移（从 a_class/c_class 回迁至 public）
 
+**备份要求（强制）**：
+- 执行 `sales_targets`、`performance_scores`、`shop_health_scores`、`shop_alerts` 迁移前，必须完成迁移对象备份并验证可恢复性
+
 **其他说明**：
 - `backend/routers/dashboard_api.py` 仅引用 `a_class.sales_targets_a`，不引用 `sales_targets`，迁移无需修改该文件。
 
@@ -95,7 +100,7 @@
 ### Phase 1: 绩效公示与绩效配置优化
 
 - 修复 **所有** `backend/routers/performance_management.py` 中 async 路由内 `db.execute` 缺少 `await` 的问题（含：`list_performance_scores`、`get_shop_performance`、`list_performance_configs`、`get_performance_config`、`update_performance_config`、`delete_performance_config`）
-- **`POST /api/performance/scores/calculate` 计算逻辑**：**具体实现**由 **add-performance-calculation-via-metabase** 负责（Metabase SQL + 后端调用并写入 `c_class.performance_scores`）。本提案仅确保：接口可调用、无 await 问题、数据源表（a_class/c_class）已就绪；若先于 Metabase 方案实施，可采用占位实现（如返回成功或写入占位值）以保证流程可跑通。
+- **`POST /api/performance/scores/calculate` 计算逻辑**：**具体实现**由 **add-performance-calculation-via-metabase** 负责（Metabase SQL + 后端调用并写入 `c_class.performance_scores`）。本提案仅确保：接口可调用、无 await 问题、数据源表（a_class/c_class）已就绪。若 Metabase 方案尚未就绪，接口必须返回 **`HTTP 503` + `error_code=PERF_CALC_NOT_READY`**，**禁止向正式绩效表写入占位数据**。
 - 无数据时返回空列表而非抛错
 
 ### Phase 2: 我的收入（员工自助）
@@ -105,9 +110,11 @@
 - **数据源优先级**：
   1. `a_class.payroll_records`（若有完整工资单，优先展示）
   2. `a_class.salary_structures`（底薪、岗位工资、津贴）+ `c_class.employee_commissions`（提成）+ `c_class.employee_performance`（绩效得分、达成率）
-- **员工 C 类表数据来源**：需由后端定时任务或 `POST /api/performance/scores/calculate` 写入
+- **员工 C 类表数据来源**：由员工级计算链路写入（后端定时任务/独立服务），不依赖店铺级 `POST /api/performance/scores/calculate`
 - 未关联员工时显示「您尚未关联员工档案，请联系管理员」
 - 可下钻到「绩效公示」查看绩效依据
+- **未关联员工接口契约固定**：`GET /api/hr/me/income` 统一返回 `200`，响应中 `linked=false`（不再使用 404 分支），以降低前端分支复杂度并保持契约稳定
+- **安全要求（必须）**：仅允许查询当前登录用户本人收入；记录访问审计日志；日志与错误信息不得输出敏感薪资字段明文
 
 ### Phase 3: 菜单与入口
 
@@ -119,7 +126,7 @@
 ### 受影响的规格
 
 - **hr-management**：ADDED - 绩效公示修复与优化、我的收入员工自助能力（本 change 含 `specs/hr-management/spec.md` 增量）
-- **database-design**：MODIFIED - public 表完全迁移至 a_class/c_class，迁移后删除原表；变更以本提案与 Alembic 迁移脚本为准（若项目无独立 database-design spec，可不新增 delta 文件）
+- **database-design**：MODIFIED - public 表完全迁移至 a_class/c_class，迁移后删除原表（本 change 新增 `specs/database-design/spec.md` delta）
 
 ### 受影响的代码与数据
 
@@ -164,7 +171,9 @@
 - [ ] Metabase Question（business_overview_comparison、business_overview_shop_racing 等）使用 `a_class.sales_targets` 后正常
 - [ ] config_management 的 sales-targets API（若有）迁移后可用
 - [ ] 绩效公示与绩效配置相关接口在异步环境下均使用 `await db.execute`，无同步 `db.execute`；绩效公示页面可正常加载，无「查询绩效评分列表失败」报错
-- [ ] 绩效计算可产出 `c_class.performance_scores` 记录（完整计算依赖 add-performance-calculation-via-metabase；本提案可先以占位写入验证链路）
+- [ ] 绩效计算能力未就绪时返回 `HTTP 503 + error_code=PERF_CALC_NOT_READY`，不写入占位数据；能力就绪后可产出 `c_class.performance_scores` 记录（完整计算依赖 add-performance-calculation-via-metabase）
 - [ ] 「我的收入」页面可用，已关联员工可查看本人收入
 - [ ] 未关联员工访问「我的收入」时显示引导文案
+- [ ] `GET /api/hr/me/income` 在未关联员工时返回 `200 + linked=false`（契约固定）
 - [ ] 菜单中人力资源下可见「绩效公示」「我的收入」
+- [ ] 员工 C 类表（employee_commissions、employee_performance）写入来源已明确并落地，至少一个自然月可查询到非空示例数据（无数据月份仍需友好展示）
