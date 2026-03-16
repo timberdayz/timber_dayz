@@ -15,7 +15,7 @@ Updated: 2025-01-30 (v4.21.0 业界标准优化)
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, text
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date
 from pydantic import BaseModel, Field, field_validator
@@ -23,8 +23,11 @@ from decimal import Decimal
 
 from backend.models.database import get_async_db
 from backend.routers.auth import get_current_user
+from backend.schemas import MyIncomeResponse, IncomeCalculationResponse
+from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
+from backend.utils.year_month_utils import year_month_to_first_day
 from modules.core.db import (
     PlatformAccount,
     Department,
@@ -945,29 +948,41 @@ async def put_me_profile(
     return resp.model_copy(update={"username": username})
 
 
-class MyIncomeResponse(BaseModel):
-    """我的收入响应"""
-    linked: bool = True
-    period: Optional[str] = None
-    base_salary: Optional[float] = None
-    commission_amount: Optional[float] = None
-    commission_rate: Optional[float] = None
-    performance_score: Optional[float] = None
-    achievement_rate: Optional[float] = None
-    total_income: Optional[float] = None
-    breakdown: Optional[dict] = None
+async def _log_me_income_access(
+    request: Request, user_id: int, period: Optional[str], result_status: str, db: AsyncSession
+) -> None:
+    """记录「我的收入」访问审计（仅 endpoint/user_id/request_time/result_status，不记录敏感字段）。"""
+    try:
+        from backend.services.audit_service import audit_service
+        client_host = request.client.host if request.client else ""
+        user_agent = (request.headers.get("user-agent") or "")[:500]
+        await audit_service.log_action(
+            user_id=user_id,
+            action="view",
+            resource="me/income",
+            ip_address=client_host,
+            user_agent=user_agent,
+            resource_id=period,
+            details={"result_status": result_status},
+            db=db
+        )
+    except Exception as e:
+        logger.warning("me/income audit log write failed: %s", e)
 
 
 @router.get("/me/income", response_model=MyIncomeResponse)
 async def get_my_income(
+    request: Request,
     year_month: Optional[str] = Query(None, description="月份(YYYY-MM)，不填则当月"),
     current_user: DimUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """我的收入：根据当前用户关联的员工返回收入数据；未关联时返回 linked: false。"""
-    result = await db.execute(select(Employee).where(Employee.user_id == current_user.user_id))
+    """我的收入：根据当前用户关联的员工返回收入数据；未关联时返回 200 + linked: false。仅允许本人访问，记录访问审计（不记录敏感薪资字段）。"""
+    current_user_id = current_user.user_id
+    result = await db.execute(select(Employee).where(Employee.user_id == current_user_id))
     employee = result.scalar_one_or_none()
     if not employee:
+        await _log_me_income_access(request, current_user_id, year_month, "linked_false", db)
         return MyIncomeResponse(linked=False)
     period = year_month or datetime.utcnow().strftime("%Y-%m")
     employee_code = employee.employee_code
@@ -1000,28 +1015,79 @@ async def get_my_income(
         if ss:
             base_salary = float(ss.base_salary or 0) + float(ss.position_salary or 0)
             breakdown["salary_structure"] = {"base_salary": base_salary}
-    ec_result = await db.execute(
-        select(EmployeeCommission).where(
-            EmployeeCommission.employee_code == employee_code,
-            EmployeeCommission.year_month == period
+    try:
+        ec_result = await db.execute(
+            select(EmployeeCommission).where(
+                EmployeeCommission.employee_code == employee_code,
+                EmployeeCommission.year_month == period
+            )
         )
-    )
-    ec = ec_result.scalar_one_or_none()
-    if ec:
-        commission_amount = float(ec.commission_amount or 0)
-        breakdown["commission"] = {"amount": commission_amount}
-    ep_result = await db.execute(
-        select(EmployeePerformance).where(
-            EmployeePerformance.employee_code == employee_code,
-            EmployeePerformance.year_month == period
+        ec = ec_result.scalar_one_or_none()
+        if ec:
+            commission_amount = float(ec.commission_amount or 0)
+            breakdown["commission"] = {"amount": commission_amount}
+    except Exception:
+        # 兼容历史中文列名表结构（当前环境仍存在），确保 /me/income 可用。
+        await db.rollback()
+        logger.warning("employee_commissions ORM query failed, fallback to CN column SQL")
+        ec_raw = await db.execute(
+            text(
+                """
+                select
+                  "提成金额" as commission_amount
+                from c_class.employee_commissions
+                where "员工编号" = :employee_code
+                  and "年月" = :year_month
+                limit 1
+                """
+            ),
+            {"employee_code": employee_code, "year_month": period},
         )
-    )
-    ep = ep_result.scalar_one_or_none()
-    if ep:
-        performance_score = float(ep.performance_score or 0)
-        achievement_rate = float(ep.achievement_rate or 0)
-        breakdown["performance"] = {"score": performance_score, "achievement_rate": achievement_rate}
+        ec_row = ec_raw.mappings().first()
+        if ec_row:
+            commission_amount = float(ec_row.get("commission_amount") or 0)
+            breakdown["commission"] = {"amount": commission_amount}
+
+    try:
+        ep_result = await db.execute(
+            select(EmployeePerformance).where(
+                EmployeePerformance.employee_code == employee_code,
+                EmployeePerformance.year_month == period
+            )
+        )
+        ep = ep_result.scalar_one_or_none()
+        if ep:
+            performance_score = float(ep.performance_score or 0)
+            achievement_rate = float(ep.achievement_rate or 0)
+            breakdown["performance"] = {"score": performance_score, "achievement_rate": achievement_rate}
+    except Exception:
+        # 兼容历史中文列名表结构（当前环境仍存在），确保 /me/income 可用。
+        await db.rollback()
+        logger.warning("employee_performance ORM query failed, fallback to CN column SQL")
+        ep_raw = await db.execute(
+            text(
+                """
+                select
+                  "绩效得分" as performance_score,
+                  "达成率" as achievement_rate
+                from c_class.employee_performance
+                where "员工编号" = :employee_code
+                  and "年月" = :year_month
+                limit 1
+                """
+            ),
+            {"employee_code": employee_code, "year_month": period},
+        )
+        ep_row = ep_raw.mappings().first()
+        if ep_row:
+            performance_score = float(ep_row.get("performance_score") or 0)
+            achievement_rate = float(ep_row.get("achievement_rate") or 0)
+            breakdown["performance"] = {
+                "score": performance_score,
+                "achievement_rate": achievement_rate,
+            }
     total = (base_salary or 0) + commission_amount
+    await _log_me_income_access(request, current_user_id, period, "success", db)
     return MyIncomeResponse(
         linked=True,
         period=period,
@@ -1032,6 +1098,33 @@ async def get_my_income(
         total_income=total,
         breakdown=breakdown if breakdown else {}
     )
+
+
+@router.post("/income/calculate", response_model=IncomeCalculationResponse)
+async def calculate_income_c_class(
+    year_month: str = Query(..., description="月份(YYYY-MM)"),
+    current_user: DimUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """重算员工收入 C 类表（employee_commissions / employee_performance）。"""
+    try:
+        service = HRIncomeCalculationService(db)
+        result = await service.calculate_month(year_month)
+        return IncomeCalculationResponse(**result)
+    except ValueError as e:
+        return error_response(
+            ErrorCode.PARAMETER_INVALID,
+            f"参数错误: {str(e)}",
+            status_code=400,
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"重算员工收入C类数据失败: {e}", exc_info=True)
+        return error_response(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"重算员工收入C类数据失败: {str(e)}",
+            status_code=500,
+        )
 
 
 @router.get("/employees", response_model=List[EmployeeResponse])
@@ -2376,10 +2469,7 @@ async def get_shop_profit_statistics(
     try:
         # 解析月份为月初日期
         try:
-            parts = month.split("-")
-            if len(parts) != 2:
-                raise ValueError("月份格式应为 YYYY-MM")
-            month_date = date(int(parts[0]), int(parts[1]), 1)
+            month_date = year_month_to_first_day(month)
         except (ValueError, IndexError):
             return error_response(ErrorCode.PARAMETER_INVALID, "月份格式应为 YYYY-MM", status_code=400)
 

@@ -34,6 +34,7 @@ from datetime import date, datetime, timedelta
 from backend.models.database import get_db, get_async_db
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
+from backend.utils.year_month_utils import normalize_year_month
 from modules.core.db import (
     SalesTarget,
     TargetBreakdown,
@@ -337,14 +338,17 @@ async def get_target_by_month(
     按月份获取目标（常规月度目标页用）。返回该月内 period 覆盖该月的第一个目标及全部分解。
     """
     try:
-        parts = month.split("-")
-        if len(parts) != 2:
-            return error_response(
-                code=ErrorCode.DATA_VALIDATION_FAILED,
-                message="月份格式须为 YYYY-MM",
-                status_code=400,
-            )
-        cache_params = _normalize_cache_params({"month": month, "target_type": target_type})
+        normalized_month = normalize_year_month(month)
+    except (ValueError, TypeError):
+        return error_response(
+            code=ErrorCode.DATA_VALIDATION_FAILED,
+            message="月份格式须为 YYYY-MM",
+            status_code=400,
+        )
+
+    try:
+        parts = normalized_month.split("-")
+        cache_params = _normalize_cache_params({"month": normalized_month, "target_type": target_type})
         cache_status = "BYPASS"
         if request and hasattr(request.app.state, "cache_service"):
             cache_service = request.app.state.cache_service
@@ -378,7 +382,7 @@ async def get_target_by_month(
             breakdowns = (await db.execute(breakdowns_query)).scalars().all()
             breakdown_responses = []
             for b in breakdowns:
-                bd = BreakdownResponse.model_validate(b).model_dump()
+                bd = BreakdownResponse.model_validate(b).model_dump(mode="json")
                 if b.platform_code and b.shop_id and b.breakdown_type in ("shop", "shop_time"):
                     dim_shop = (await db.execute(
                         select(DimShop).where(
@@ -392,19 +396,13 @@ async def get_target_by_month(
             result = {
                 "success": True,
                 "data": {
-                    "target": TargetResponse.model_validate(target).model_dump(),
+                    "target": TargetResponse.model_validate(target).model_dump(mode="json"),
                     "breakdowns": breakdown_responses,
                 },
             }
         if request and hasattr(request.app.state, "cache_service"):
             await request.app.state.cache_service.set("target_by_month", result, **cache_params)
         return JSONResponse(content=result, headers={"X-Cache": cache_status})
-    except (ValueError, TypeError) as e:
-        return error_response(
-            code=ErrorCode.DATA_VALIDATION_FAILED,
-            message="月份格式须为 YYYY-MM",
-            status_code=400,
-        )
     except HTTPException:
         raise
     except Exception as e:

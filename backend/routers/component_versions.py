@@ -395,7 +395,8 @@ async def get_version(
 @router.post("", response_model=ComponentVersionResponse)
 async def register_version(
     request: VersionRegisterRequest,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    http_request: Request = None,
 ):
     """注册新版本"""
     try:
@@ -409,6 +410,15 @@ async def register_version(
             is_stable=request.is_stable,
             created_by=request.created_by
         )
+        
+        # 失效组件版本列表缓存，使新注册版本立即出现在列表中
+        if http_request and hasattr(http_request.app.state, "cache_service"):
+            try:
+                cache_service = http_request.app.state.cache_service
+                await cache_service.invalidate("component_versions")
+                logger.debug("[Cache] component_versions invalidated after register")
+            except Exception as ce:
+                logger.warning(f"[Cache] Failed to invalidate component_versions: {ce}")
         
         return ComponentVersionResponse(
             id=version.id,
@@ -555,7 +565,8 @@ async def promote_to_stable(
 async def update_version(
     version_id: int,
     request: VersionUpdateRequest,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    http_request: Request = None,
 ):
     """更新版本"""
     try:
@@ -572,6 +583,15 @@ async def update_version(
             version.description = request.description
         
         await db.commit()
+        
+        # 失效组件版本列表缓存，使前端禁用/启用后立即看到最新状态与操作按钮
+        if http_request and hasattr(http_request.app.state, "cache_service"):
+            try:
+                cache_service = http_request.app.state.cache_service
+                await cache_service.invalidate("component_versions")
+                logger.debug("[Cache] component_versions invalidated after update")
+            except Exception as ce:
+                logger.warning(f"[Cache] Failed to invalidate component_versions: {ce}")
         
         logger.info(f"Version updated: {version.component_name} v{version.version}")
         
@@ -693,7 +713,8 @@ async def get_component_statistics(
 @router.post("/batch-register-python", response_model=BatchRegisterResponse)
 async def batch_register_python_components(
     request: BatchRegisterRequest = None,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
+    http_request: Request = None,
 ):
     """
     批量注册 Python 组件(v4.8.0 新增)
@@ -861,6 +882,15 @@ async def batch_register_python_components(
         
         await db.commit()
         
+        # 失效组件版本列表缓存，使批量注册后列表立即更新
+        if http_request and hasattr(http_request.app.state, "cache_service"):
+            try:
+                cache_service = http_request.app.state.cache_service
+                await cache_service.invalidate("component_versions")
+                logger.debug("[Cache] component_versions invalidated after batch-register")
+            except Exception as ce:
+                logger.warning(f"[Cache] Failed to invalidate component_versions: {ce}")
+        
         logger.info(
             f"Batch registration completed: {registered_count} registered, "
             f"{skipped_count} skipped, {error_count} errors"
@@ -981,8 +1011,16 @@ async def test_component_version(
         if not component_path.exists():
             return error_response(ErrorCode.FILE_NOT_FOUND, f"组件文件不存在: {version.file_path}", status_code=404, recovery_suggestion="请检查组件路径或重新上传")
         
-        # v4.8.0: 判断是 Python 组件还是 YAML 组件
+        # v4.8.0: 判断是 Python 组件还是 YAML 组件；用 parse_component_name 取标准化 comp_type 保证类发现一致
         is_python_component = version.file_path.endswith('.py')
+        from backend.services.component_name_utils import parse_component_name
+        _platform_parsed, comp_type, _domain, _sub = parse_component_name(version.component_name)
+        rest = version.component_name.split("/")[-1] if "/" in version.component_name else version.component_name
+        logical_component = comp_type if comp_type in ("login", "navigation", "export", "date_picker", "shop_switch", "filters") else rest
+        # 兼容历史 component_name 如 miaoshou_login -> login
+        if logical_component.endswith("_login"):
+            logical_component = "login"
+        is_discovery_component = logical_component in ("date_picker", "filters")
         
         if is_python_component:
             # Python 组件:从文件路径提取平台和组件名
@@ -995,17 +1033,71 @@ async def test_component_version(
                 else:
                     platform = version.component_name.split('/')[0]
             component_config = {}  # Python 组件不需要 YAML 配置
+
+            # 1.8: 发现模式组件测试策略门禁（flow_only 不允许单组件测试）
+            if is_discovery_component:
+                try:
+                    from modules.apps.collection_center.component_loader import ComponentLoader
+                    loader = ComponentLoader()
+                    comp_cls = loader.load_python_component_from_path(
+                        version.file_path,
+                        version_id=version.id,
+                        platform=platform,
+                        component_type=logical_component,
+                    )
+                    test_mode = str(getattr(comp_cls, "test_mode", "") or "").strip().lower()
+                    test_config = getattr(comp_cls, "test_config", {}) or {}
+                    if test_mode in ("", "flow_only"):
+                        return error_response(
+                            ErrorCode.DATA_VALIDATION_FAILED,
+                            f"{logical_component} 组件当前 test_mode={test_mode or 'flow_only'}，仅支持完整链路验证（flow_only）",
+                            status_code=400,
+                            recovery_suggestion="请在组件中设置 test_mode='standalone' 并提供 test_config 后再单组件测试",
+                        )
+                    if test_mode != "standalone":
+                        return error_response(
+                            ErrorCode.DATA_VALIDATION_FAILED,
+                            f"{logical_component} 组件 test_mode={test_mode} 非法",
+                            status_code=400,
+                            recovery_suggestion="允许值仅 flow_only / standalone",
+                        )
+                    if not isinstance(test_config, dict):
+                        return error_response(
+                            ErrorCode.DATA_VALIDATION_FAILED,
+                            f"{logical_component} 组件 test_config 必须是字典",
+                            status_code=400,
+                            recovery_suggestion="请提供 test_config.test_url 或 test_config.test_data_domain",
+                        )
+                    has_url = bool(test_config.get("test_url") or test_config.get("url"))
+                    has_domain = bool(test_config.get("test_data_domain") or test_config.get("data_domain"))
+                    if not has_url and not has_domain:
+                        return error_response(
+                            ErrorCode.DATA_VALIDATION_FAILED,
+                            f"{logical_component} standalone 测试缺少 test_config",
+                            status_code=400,
+                            recovery_suggestion="请提供 test_config.test_url 或 test_config.test_data_domain",
+                        )
+                except Exception as e:
+                    return error_response(
+                        ErrorCode.INTERNAL_SERVER_ERROR,
+                        f"读取发现模式组件测试策略失败: {e}",
+                        status_code=500,
+                        recovery_suggestion="请检查组件元数据（test_mode/test_config）并重试",
+                    )
         else:
             # YAML 组件
             with open(component_path, 'r', encoding='utf-8') as f:
                 component_config = yaml.safe_load(f)
             platform = component_config.get('platform', version.component_name.split('/')[0])
-        # 使用逻辑组件名（如 login、orders_export），供 component_loader 按类名约定查找；不用 file_path.stem（如 login_v1_0_0）否则找不到类
-        component_name = (
-            version.component_name.split("/")[-1]
-            if "/" in version.component_name
-            else component_path.stem
-        )
+        # 使用逻辑组件名（如 login、orders_export），供 component_loader 按类名约定查找；Python 已用 parse_component_name 得到 logical_component
+        if is_python_component:
+            component_name = logical_component
+        else:
+            component_name = (
+                version.component_name.split("/")[-1]
+                if "/" in version.component_name
+                else component_path.stem
+            )
         
         # 4. 使用统一服务准备账号信息 [*]
         account_info = ComponentTestService.prepare_account_info(account)

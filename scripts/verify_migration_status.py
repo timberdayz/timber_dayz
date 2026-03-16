@@ -92,6 +92,7 @@ def check_a_class_tables():
     safe_print("="*60)
     
     a_class_tables = [
+        'sales_targets',   # add-performance-and-personal-income: public -> a_class
         'sales_targets_a',
         'sales_campaigns_a',
         'operating_costs',
@@ -147,7 +148,9 @@ def check_c_class_tables():
         'employee_performance',
         'employee_commissions',
         'shop_commissions',
-        'performance_scores_c',
+        'performance_scores',   # add-performance-and-personal-income: public -> c_class（performance_scores_c 已合并删除）
+        'shop_health_scores',
+        'shop_alerts',
     ]
     
     inspector = inspect(engine)

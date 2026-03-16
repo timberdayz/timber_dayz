@@ -93,6 +93,72 @@
 - `ComponentVersion.file_path` 虽存相对路径，但加载前必须做安全校验：归一化后的绝对路径必须位于允许目录（如 `modules/platforms/**/components/`）内，禁止路径穿越（`..`、跨目录逃逸）与任意文件加载。
 - 当 file_path 不满足安全边界时，加载应失败并返回明确错误（包含 version_id、file_path 与安全校验失败原因），不得回退为宽松加载。
 
+### 12. 采集脚本现实 Web 稳健性补强（P0）
+
+- **定位器唯一性契约**：对将被 `click/fill/expect(...).to_be_visible` 使用的目标 locator，必须满足当前作用域唯一命中；出现多匹配时先收敛到稳定容器（form/dialog/frame/row）再定位，禁止默认用 `.first/.nth()` 掩盖歧义。
+- **反模式禁用**：禁止 `count()+is_visible()` 单次判断后操作、`except Exception: pass` 吞错继续、以固定 sleep 代替条件等待。
+- **失败可观测性**：关键失败结果需包含 `phase + component + version + url + selector_context`，验证码与关键失败路径必须可留存截图。
+- **导航完成双信号**：页面就绪采用“URL/路由特征 + 关键元素可见”联合判断，不以单一 `networkidle` 作为稳定性依据。
+- **文档治理**：`COLLECTION_SCRIPT_WRITING_GUIDE` 作为采集脚本规范基线；录制/模板文档与其冲突时需在本变更中同步收敛，避免新组件继续复制过时模式（如 sync API、YAML 流程、UPSERT 旧语义）。
+
+### 13. 组件录制生成器合规修复（P0）
+
+- **现状问题（本次审查）**：生成器当前仍包含与新规范冲突的输出模式，如可选步骤统一 `except Exception: pass`、`wait` 步骤直出 `wait_for_timeout`、多个分支默认 `.first` 与 `count()+is_visible()` 判定，且缺少“先容器后元素”的作用域收敛策略。
+- **修复目标**：
+  1. 生成代码默认不产生 `except Exception: pass`（改为可观测可诊断的受控错误处理）；
+  2. `wait` 步骤优先生成条件等待（目标元素/状态），固定 sleep 仅在显式理由下生成；
+  3. locator 生成遵循“先容器后元素 + 唯一性约束”，减少 page 根作用域宽匹配；
+  4. 验证码恢复与关键点击路径不再默认 `.first`，改为可诊断的唯一性策略；
+  5. lint 从“提示级”升级为“质量门禁”：关键反模式升级为 `error` 且默认阻断保存（保留可配置开关）。
+- **前端提示增强**：录制页 lint 提示需区分严重级别（error/warning），并给出可操作修复建议，避免“看到告警但不知道怎么改”。
+- **补充修复（本轮复核新增）**：
+  6. 可选步骤异常处理代码必须可执行，禁止在生成代码里引用生成器侧变量（如 `i/action`）导致运行期 NameError；
+  7. lint 门禁与 wait 策略需一致：仅“无理由固定等待”阻断保存；有显式固定等待理由时允许保存（可降为 warning）；
+  8. `.first/.nth` 应实现“有注释依据可放行、无注释阻断”的受控策略，避免与规范口径冲突；
+  9. 作用域收敛需覆盖 iframe/row/dialog 等，不应仅覆盖 login form；
+  10. lint 阻断必须作用于“最终落盘代码”（含 success_criteria 注入后），避免“先 lint 再注入”导致门禁绕过；
+  11. login 组件作用域收敛不得写死 `get_by_role("form")` 单一路径，应支持“语义容器优先 + 业务容器兜底”的多候选容器策略，避免真实页面 `form=0` 直接失败；
+  12. URL 导航契约需显式化：login 组件测试与执行应具备“URL 来源优先级 + 导航前状态判定 + 导航后双信号确认（URL/路由特征 + 关键元素可见）”，禁止依赖“碰巧已在目标页”。
+
+### 14. fallback 一致性保护（P0）
+
+- **问题**：当 `selected_version is None` 走 comp_name 回退时，存在“预期版本信息缺失、实际执行文件退化”的一致性风险。
+- **要求**：
+  1. fallback 执行必须输出强告警（结构化字段至少含 platform/component_type/component_name/reason）；
+  2. 提供可配置 `fail_fast_on_missing_selected_version`，在关键环境可直接失败而非静默回退；
+  3. 前端与日志可见该次执行是否发生 fallback，避免“以为按版本执行，实际走回退”。
+
+### 15. 提案关闭门槛（P0）
+
+- 以下条件未满足时，变更不得归档：`1.5`（多版本回归）、`6.1`（综合人工验收）、`7.4`（现实 Web 四类补充用例）。
+- 以下能力必须落地后方可视为“质量闭环”：`7.3.2`（关键反模式阻断保存）与 `8.7`（generate-python 参数对齐）。
+- 口径一致性要求：`8.2`（wait 策略）、`8.4`（.first/.nth 约束）、`8.8`（回归覆盖）必须与 lint 实际门禁规则一致；若存在“提案允许但门禁阻断”的冲突，不得归档。
+- 本轮新增口径一致性要求：login 容器收敛策略与 URL 导航契约（对应 tasks `8.14`、`8.15`）未落地前，不得宣告“现实 Web 稳健性闭环完成”。
+
+### 16. 生成器输出与 URL 导航优化范围（P0）
+
+- **当前生成器输出类型（现状）**：
+  1. `login`：生成 `LoginComponent`，含验证码暂停与回传恢复路径；
+  2. `export`：生成 `ExportComponent`，支持导出模式骨架；
+  3. `navigation/date_picker/filters/others`：生成通用 `ResultBase` 组件骨架。
+- **当前已覆盖场景（现状）**：
+  1. 反模式门禁（吞错、无理由固定等待、无依据 `.first/.nth`、`count()+is_visible()`）；
+  2. 链式作用域收敛（iframe/dialog/row）；
+  3. 验证码暂停与回传后的同页恢复路径。
+- **当前已识别缺口（本轮新增）**：
+  1. login 容器收敛默认写死 `get_by_role("form")`，在无语义 form 的真实页面会 `count=0` 直接失败；
+  2. login URL 导航依赖录制步骤“是否碰巧包含 navigate”，缺少统一导航契约。
+- **URL 导航目标设计（本变更必须落地）**：
+  1. URL 来源优先级：`login_url_override > account.login_url > 平台默认登录 URL`；
+  2. 导航前状态判定：若已处于目标登录页且关键元素可见，可跳过 goto；
+  3. 导航后成功判定：必须满足“URL/路由特征 + 关键元素可见”双信号；
+  4. 失败可观测性：返回 `current_url`、`target_url`、`phase`、`component`、`version`、`selector_context`；
+  5. 禁止仅用 `networkidle`/`domcontentloaded` 单信号判定登录页就绪。
+- **最小上线顺序（执行编排）**：
+  - **S1（止血）**：先落地 `8.14`，修复 login 容器写死 `role=form` 的首步失败问题，确保人工验收可继续；
+  - **S2（契约）**：再落地 `8.15.1~8.15.4`，完成 URL 来源优先级、导航前后判定与可观测性；
+  - **S3（质量）**：最后落地 `8.15.5` 回归与真实页面验收，补齐归档门槛证据。
+
 **API 影响**：`POST /recorder/save` 与 `POST /recorder/generate-python` 的 component_name 由 platform+component_type 推导（export 需 data_domain，子域 export 如 services:agent 需 sub_domain）；**校验**：export 时 data_domain 缺失返回 400；当 data_domain 有子类型且前端选择子域导出时，sub_domain 必填，否则 400。**sub_domain 子类型判定**：后端维护「有子类型的数据域」配置（如 `services` → `["agent","ai_assistant"]`），可硬编码或配置化；仅当 data_domain 在此列表中且前端传 sub_domain 时才校验 sub_domain 必填。保存行为从「同 file_path 则 UPSERT」改为「创建新版本 + 版本化 file_path」。**GeneratePythonRequest**：请求体与 RecorderSaveRequest 对齐，增加 data_domain（export 必填）、sub_domain（子域 export 必填）；component_name 由 platform+component_type+data_domain+sub_domain 推导，不再必填或废弃。**兼容策略**：为兼容旧客户端，可保留 component_name 字段但由后端忽略；过渡期后可选废弃。路径与请求结构可保持兼容，但语义变更，调用方需知悉。
 
 ## Impact
@@ -112,5 +178,10 @@
   - `backend/services/steps_to_python.py`（验证码步骤 unconditional）
   - `frontend/src/views/ComponentVersions.vue`（删除按钮条件、实际执行文件展示、冲突提示、Tab 结构）
   - `frontend/src/views/ComponentRecorder.vue`（保存时由平台+类型推导目标组件；export 时 payload 必须传 data_domain；`POST /recorder/generate-python` 与 save 的 component_name 推导规则一致）
+- **受影响文档**：
+  - `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`（新增现实 Web 强约束：唯一性契约、反模式禁用、可观测性契约）
+  - `docs/guides/RECORDER_PYTHON_OUTPUT.md`（与版本化保存语义、验证码语义保持一致）
+  - `docs/guides/PYTHON_COMPONENT_TEMPLATE.md`、`docs/guides/COMPONENT_RECORDING_GUIDE.md`、`docs/guides/recording_rules.md`（历史示例收敛，避免反向引导）
 - **已知局限**：生产执行器按 file_path 加载需本变更完成；完成后版本管理的「稳定版」与生产执行将一致。
 - **采集环境部署**：所有采集执行环境（backend、collection 容器、本地）需正确配置 `PROJECT_ROOT`；持久会话与指纹需 `DATA_DIR`（或等效）。**file_path 存储规范**：DB 中 ComponentVersion.file_path 统一存**相对路径**（相对于 PROJECT_ROOT），部署时 PROJECT_ROOT 在不同环境可不同（Docker 内 `/app`，本地为仓库根），保证跨环境一致。
+- **关联提案**：验收过程中发现的生成器架构问题（门卫检测和容器发现注入导致真实页面首步失败）已拆分到独立提案 `refactor-generator-runtime-separation` 跟踪。该提案移除了生成器中的框架逻辑，将页面就绪检测移至运行时/测试框架层。

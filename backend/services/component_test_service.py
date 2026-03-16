@@ -48,13 +48,23 @@ class ComponentTestService:
             logger.error(f"Failed to decrypt password for account {account.account_id}: {e}")
             raise ValueError("密码解密失败,请检查账号配置")
         
+        # 规范化 login_url：仅保留 origin（去掉 path/query），避免 ?redirect= 导致 goto 超时
+        login_url = account.login_url or ""
+        if login_url and "?" in login_url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(login_url)
+                if parsed.netloc:
+                    login_url = f"{parsed.scheme or 'https'}://{parsed.netloc}"
+            except Exception as e:
+                logger.warning(f"Normalize login_url failed, use raw: {e}")
         account_info = {
             'account_id': account.account_id,
             'platform': account.platform,
             'username': account.username,
             'password': plaintext_password,  # 使用明文密码
             'store_name': account.store_name,
-            'login_url': account.login_url,
+            'login_url': login_url or account.login_url,
             'cookies_file': getattr(account, 'cookies_file', None),
             'capabilities': account.capabilities or {},
         }

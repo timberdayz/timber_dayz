@@ -13,12 +13,20 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
+# 平台默认登录页 URL（_target_url 第四级 fallback，避免空 URL 或 redirect 超时）
+PLATFORM_DEFAULT_LOGIN_URLS: Dict[str, str] = {
+    "miaoshou": "https://erp.91miaoshou.com",
+    "shopee": "https://seller.shopee.cn",
+    "tiktok": "https://seller-us.tiktok.com",
+}
+
 
 def generate_python_code(
     platform: str,
     component_type: str,
     component_name: str,
     steps: List[Dict[str, Any]],
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     根据 platform、component_type、component_name 与 steps 生成 Python 源码。
@@ -28,6 +36,7 @@ def generate_python_code(
         component_type: 组件类型，如 login、export、navigation
         component_name: 组件名称，用于类名与文件名，如 login、orders_export
         steps: 步骤列表，每项含 action、selector、value、url、optional、comment 等
+        metadata: 可选元数据，如 container_selector（录制时的容器上下文）
 
     Returns:
         符合《采集脚本编写规范》的 Python 源码字符串
@@ -35,11 +44,13 @@ def generate_python_code(
     lines: List[str] = []
     captcha_info: Optional[Dict[str, Any]] = None
     cap_platform = (platform or "platform").capitalize()
-    cap_name = _to_class_name(component_name or component_type)
+    # 登录组件类名用 component_type 避免重复前缀（如 MiaoshouLogin 而非 MiaoshouMiaoshouLogin）
+    cap_name = _to_class_name(component_type if component_type == "login" else (component_name or component_type))
 
-    # 文件头
+    # 文件头（标准化 component 显示名：login 用 platform/type，与 build_component_name 一致）
+    display_name = f"{platform}/{component_type}" if component_type == "login" else f"{platform}/{component_name}"
     lines.append('"""')
-    lines.append(f"Generated component: {platform}/{component_name}")
+    lines.append(f"Generated component: {display_name}")
     lines.append("Please align with docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md")
     lines.append("Complex interactions, popups, download handling: add explicit wait/comment as needed.")
     lines.append('"""')
@@ -112,8 +123,38 @@ def generate_python_code(
     if component_type != "login":
         captcha_info = None
     lines.append("")
+    # URL 导航：来源优先级 + 平台默认 fallback（组件业务逻辑，保留在组件中）
+    if component_type == "login":
+        lines.append(body_indent + "params = config.get(\"params\") or {}")
+        _defaults_repr = ", ".join(f"{repr(k)}: {repr(v)}" for k, v in PLATFORM_DEFAULT_LOGIN_URLS.items())
+        lines.append(body_indent + f"_platform_defaults = {{{_defaults_repr}}}")
+        lines.append(body_indent + "_target_url = (")
+        lines.append(body_indent + "    str(params.get(\"login_url_override\") or \"\").strip()")
+        lines.append(body_indent + "    or str(acc.get(\"login_url\") or \"\").strip()")
+        lines.append(body_indent + "    or str(config.get(\"default_login_url\") or \"\").strip()")
+        lines.append(body_indent + "    or _platform_defaults.get(self.platform, \"\").strip()")
+        lines.append(body_indent + ")")
+        lines.append(body_indent + "if _target_url:")
+        lines.append(
+            body_indent
+            + "    await page.goto(_target_url, wait_until=\"domcontentloaded\", timeout=60000)"
+        )
+        lines.append(body_indent + "    await page.wait_for_load_state(\"domcontentloaded\", timeout=10000)")
+        lines.append(body_indent + "    await self.guard_overlays(page, label=\"after login navigation\")")
+        _container_sel = metadata.get("container_selector", "").strip() if metadata else ""
+        if _container_sel:
+            lines.append(body_indent + f"# Container scope: from recording context")
+            lines.append(body_indent + f"_form = page.locator({repr(_container_sel)})")
+        else:
+            lines.append(body_indent + "# Container scope: defaults to page; narrow down if needed")
+            lines.append(body_indent + "_form = page")
+        lines.append("")
 
+    had_captcha_raise = False
+    _skip_indices: set = set()
     for i, step in enumerate(steps):
+        if had_captcha_raise or i in _skip_indices:
+            continue
         action = (step.get("action") or "unknown").strip().lower()
         optional = step.get("optional", False)
         comment = step.get("comment") or ""
@@ -126,7 +167,17 @@ def generate_python_code(
         scene_tags = step.get("scene_tags") or []
         is_popup_step = step_group == "popup" or "popup" in scene_tags
         if is_popup_step and not optional:
-            optional = True  # 弹窗/通知栏关闭步骤视为可选，避免遮挡导致失败
+            optional = True
+
+        if action == "click" and selector.strip() and i + 1 < len(steps):
+            next_step = steps[i + 1]
+            next_action = (next_step.get("action") or "").strip().lower()
+            next_sel = (next_step.get("selector") or "").strip()
+            if not next_sel and next_step.get("selectors"):
+                next_sel = _selector_from_selectors(next_step["selectors"]).strip()
+            if next_action == "fill" and next_sel == selector.strip():
+                _skip_indices.add(i)
+                continue
 
         if comment:
             lines.append(body_indent + f"# {comment}")
@@ -144,8 +195,9 @@ def generate_python_code(
                 lines.append(step_indent + "# TODO: set target url from config or account")
         elif action == "click":
             if is_popup_step and not selector.strip():
-                # 弹窗步骤且无具体 selector 时，生成通用 wait dialog + 点击确定/关闭
-                lines.append(step_indent + 'dialog = page.locator(".ant-modal, .jx-dialog__body, [role=\'dialog\']").first')
+                # 弹窗步骤且无具体 selector 时，生成通用 wait dialog + 点击确定/关闭；8.4 不用 .first，用 expect 唯一性
+                lines.append(step_indent + 'dialog = page.locator(".ant-modal, .jx-dialog__body, [role=\'dialog\']")')
+                lines.append(step_indent + 'await expect(dialog).to_have_count(1)')
                 lines.append(step_indent + 'await dialog.wait_for(state="visible", timeout=5000)')
                 lines.append(step_indent + 'await dialog.get_by_role("button", name="确定").click(timeout=3000)')
             else:
@@ -157,13 +209,14 @@ def generate_python_code(
                         is_captcha_click = True
                 if is_captcha_click:
                     cap_sel = _build_robust_captcha_selector(captcha_info)
-                    lines.append(step_indent + "# 验证码输入框聚焦（录制选择器为空，使用兜底）")
+                    lines.append(step_indent + "# 验证码输入框聚焦（录制选择器为空，使用兜底）；8.4 唯一性检查，不用 .first")
                     lines.append(step_indent + f"_cap_focus = page.locator({repr(cap_sel)})")
-                    lines.append(step_indent + "if await _cap_focus.count() > 0:")
-                    lines.append(step_indent + "    await _cap_focus.first.click(timeout=5000)")
+                    lines.append(step_indent + "await expect(_cap_focus).to_have_count(1)")
+                    lines.append(step_indent + "await _cap_focus.click(timeout=5000)")
                 else:
                     loc_var = f"_el_{i}"
-                    loc_code = _selector_to_locator("page", selector, step_indent, loc_var)
+                    scope = "_form" if component_type == "login" and not is_popup_step and not is_captcha_click else "page"
+                    loc_code = _selector_to_locator_scoped(scope, selector, step_indent, loc_var, use_first=False)
                     if loc_code:
                         lines.extend(loc_code)
                         lines.append(step_indent + f"await expect({loc_var}).to_be_visible()")
@@ -192,9 +245,11 @@ def generate_python_code(
                 lines.append(step_indent + "    os.close(fd)")
                 lines.append(step_indent + "await page.screenshot(path=screenshot_path, timeout=5000)")
                 lines.append(step_indent + "raise VerificationRequiredError(\"graphical_captcha\", screenshot_path)")
+                had_captcha_raise = True
             else:
                 loc_var = f"_el_{i}"
-                loc_code = _selector_to_locator("page", selector, step_indent, loc_var)
+                scope = "_form" if component_type == "login" and not is_captcha_step else "page"
+                loc_code = _selector_to_locator_scoped(scope, selector, step_indent, loc_var, use_first=False)
                 if loc_code:
                     lines.extend(loc_code)
                     lines.append(step_indent + f"await expect({loc_var}).to_be_visible()")
@@ -205,13 +260,27 @@ def generate_python_code(
                     else:
                         lines.append(step_indent + f"await {loc_var}.fill({repr(value)}, timeout=10000)")
         elif action == "wait":
+            # 8.2 优先生成条件等待；仅当步骤带显式固定等待原因时生成 wait_for_timeout
             timeout_ms = step.get("timeout", 1000)
-            lines.append(step_indent + f"await page.wait_for_timeout({timeout_ms})")
+            comment_text = (step.get("comment") or "").strip()
+            fixed_reason = step.get("fixed_wait_reason") or ""
+            if fixed_reason or any(k in comment_text for k in ("固定", "延时", "sleep", "等待")):
+                reason = fixed_reason or comment_text or "固定等待"
+                lines.append(step_indent + f"# 固定等待: {reason}")
+                lines.append(step_indent + f"await page.wait_for_timeout({timeout_ms})")
+            else:
+                lines.append(step_indent + "# 页面稳定；可改为 expect(locator).to_be_visible() 等条件等待")
+                lines.append(step_indent + f'await page.wait_for_load_state("domcontentloaded", timeout={timeout_ms})')
         else:
             lines.append(step_indent + f"# TODO: action {action!r} - implement per COLLECTION_SCRIPT_WRITING_GUIDE.md")
         if optional:
-            lines.append(body_indent + "except Exception:")
-            lines.append(body_indent + "    pass")
+            # 8.1 可观测处理：记录步骤上下文，避免静默吞错
+            lines.append(body_indent + "except Exception as e:")
+            lines.append(body_indent + "    if getattr(self.ctx, \"logger\", None):")
+            lines.append(
+                body_indent
+                + f"        self.ctx.logger.warning(\"Optional step {i + 1} skipped (action={action}): %s\", e)"
+            )
         lines.append("")
         # 上一步为 navigate/goto 时，下一步前等待页面稳定
         if action in ("navigate", "goto"):
@@ -224,10 +293,15 @@ def generate_python_code(
                 )
             lines.append("")
 
-    # 返回语句
+    # 返回语句（验证码步骤 raise 后由 run() 开头 captcha_code 分支处理，此处不生成 return 避免不可达代码）
     if component_type == "login":
-        lines.append(body_indent + "# TODO: 根据实际成功条件校验 (e.g. URL / element)")
-        lines.append(body_indent + "return LoginResult(success=True, message=\"ok\")")
+        if had_captcha_raise:
+            lines.append(body_indent + "# 验证码回传后由上方的 captcha_code 分支处理登录与返回")
+        else:
+            lines.append(body_indent + "# TODO: edit success condition - check URL change or dashboard element")
+            lines.append(body_indent + "# Example: await page.wait_for_url(\"**/dashboard**\", timeout=15000)")
+            lines.append(body_indent + "# Example: await expect(page.get_by_text(\"Welcome\")).to_be_visible(timeout=10000)")
+            lines.append(body_indent + "return LoginResult(success=True, message=\"ok\")")
     elif component_type == "export":
         lines.append(body_indent + "# TODO: 等待下载或确认文件路径")
         lines.append(body_indent + "return ExportResult(success=True, message=\"ok\", file_path=None)")
@@ -286,44 +360,117 @@ def _selector_to_locator(
     selector: str,
     indent: str,
     var_name: str,
+    use_first: bool = False,
 ) -> Optional[List[str]]:
     """
     将 selector 转为 locator 代码行。
     优先 get_by_role / get_by_text / get_by_label / get_by_placeholder，否则 locator(selector) 并注释。
+    use_first: 为 True 时在赋值后加 .first，避免 _form=page 时多元素 strict mode。
     """
     if not selector or not selector.strip():
         return None
     sel = selector.strip()
+    suffix = ".first" if use_first else ""
     out: List[str] = []
     # role=button[name=登录]
     m = re.match(r"role=(\w+)\s*\[\s*name\s*=\s*([^\]]+)\]\s*$", sel, re.I)
     if m:
         role, name = m.group(1), m.group(2).strip().strip('"\'')
-        out.append(indent + f"{var_name} = {page_var}.get_by_role({repr(role)}, name={repr(name)})")
+        out.append(indent + f"{var_name} = {page_var}.get_by_role({repr(role)}, name={repr(name)}){suffix}")
         return out
     if sel.startswith("text="):
         text = sel[5:].strip().strip('"\'')
-        out.append(indent + f"{var_name} = {page_var}.get_by_text({repr(text)})")
+        out.append(indent + f"{var_name} = {page_var}.get_by_text({repr(text)}){suffix}")
         return out
     if sel.startswith("label="):
         label = sel[6:].strip().strip('"\'')
-        out.append(indent + f"{var_name} = {page_var}.get_by_label({repr(label)})")
+        out.append(indent + f"{var_name} = {page_var}.get_by_label({repr(label)}){suffix}")
         return out
     if sel.startswith("placeholder="):
         ph = sel[12:].strip().strip('"\'')
-        out.append(indent + f"{var_name} = {page_var}.get_by_placeholder({repr(ph)})")
+        out.append(indent + f"{var_name} = {page_var}.get_by_placeholder({repr(ph)}){suffix}")
         return out
     out.append(indent + f"# 建议迁移到 get_by_*")
-    out.append(indent + f"{var_name} = {page_var}.locator({repr(sel)})")
+    out.append(indent + f"{var_name} = {page_var}.locator({repr(sel)}){suffix}")
     return out
 
 
+def _selector_to_locator_scoped(
+    page_var: str,
+    selector: str,
+    indent: str,
+    var_name: str,
+    use_first: bool = False,
+) -> Optional[List[str]]:
+    """
+    支持容器收敛链式选择器（container >> target）：
+    - iframe 作用域：iframe_selector >> target_selector
+    - dialog 作用域：dialog_selector >> target_selector
+    - row 作用域：row_selector >> target_selector
+    其它场景回退到 _selector_to_locator。
+    use_first: 透传给 _selector_to_locator，用于 _form=page 时防 strict mode。
+    """
+    if not selector or ">>" not in selector:
+        return _selector_to_locator(page_var, selector, indent, var_name, use_first=use_first)
+
+    parts = [p.strip() for p in selector.split(">>") if p.strip()]
+    if len(parts) < 2:
+        return _selector_to_locator(page_var, selector, indent, var_name)
+
+    container = parts[0]
+    target = " >> ".join(parts[1:]).strip()
+    c_low = container.lower()
+
+    out: List[str] = []
+    if "iframe" in c_low:
+        frame_var = f"_frame_scope_{var_name}"
+        out.append(indent + f"{frame_var} = {page_var}.frame_locator({repr(container)})")
+        out.append(indent + "# 作用域收敛：iframe 内定位")
+        inner = _selector_to_locator(frame_var, target, indent, var_name, use_first=use_first)
+        if inner:
+            out.extend(inner)
+            return out
+        return _selector_to_locator(page_var, selector, indent, var_name, use_first=use_first)
+
+    if any(k in c_low for k in ("dialog", "modal")):
+        dialog_var = f"_dialog_scope_{var_name}"
+        out.append(indent + f"{dialog_var} = {page_var}.locator({repr(container)})")
+        out.append(indent + f"await expect({dialog_var}).to_have_count(1)")
+        out.append(indent + "# 作用域收敛：dialog 内定位")
+        inner = _selector_to_locator(dialog_var, target, indent, var_name, use_first=use_first)
+        if inner:
+            out.extend(inner)
+            return out
+        return _selector_to_locator(page_var, selector, indent, var_name, use_first=use_first)
+
+    if any(k in c_low for k in (" tr", "tr[", "tbody", "row")):
+        row_var = f"_row_scope_{var_name}"
+        out.append(indent + f"{row_var} = {page_var}.locator({repr(container)})")
+        out.append(indent + f"await expect({row_var}).to_have_count(1)")
+        out.append(indent + "# 作用域收敛：表格行内定位")
+        inner = _selector_to_locator(row_var, target, indent, var_name, use_first=use_first)
+        if inner:
+            out.extend(inner)
+            return out
+        return _selector_to_locator(page_var, selector, indent, var_name, use_first=use_first)
+
+    container_var = f"_scope_{var_name}"
+    out.append(indent + f"{container_var} = {page_var}.locator({repr(container)})")
+    out.append(indent + f"await expect({container_var}).to_have_count(1)")
+    out.append(indent + "# 作用域收敛：容器内定位")
+    inner = _selector_to_locator(container_var, target, indent, var_name, use_first=use_first)
+    if inner:
+        out.extend(inner)
+        return out
+    return _selector_to_locator(page_var, selector, indent, var_name, use_first=use_first)
+
+
 def _build_captcha_locator_expr(selector: str) -> str:
-    """将 selector 转为 page.locator(...) 表达式字符串。"""
+    """将 selector 转为 page.locator(...) 表达式；8.4/8.5 不追加 .first，由调用处做唯一性检查。"""
     if not selector or not selector.strip():
-        return "page.locator(\"input[placeholder*='验证码'], input[name*='captcha' i], input[name*='code' i]\").first"
+        return "page.locator(\"input[placeholder*='验证码'], input[name*='captcha' i], input[name*='code' i]\")"
     sel = selector.strip()
-    return f"page.locator({repr(sel)}).first"
+    return f"page.locator({repr(sel)})"
 
 
 def _build_robust_captcha_selector(captcha_info: Optional[Dict[str, Any]]) -> str:
@@ -356,6 +503,7 @@ def _generate_login_captcha_resume_block(body_indent: str, captcha_info: Dict[st
     if login_sel != fallback_login:
         login_sel = f"{login_sel}, {fallback_login}"
     cap_loc = _build_captcha_locator_expr(cap_sel)
+    # 8.5 移除 .first，改为唯一性检查 + 失败可诊断（含 URL/selector 上下文）
     out = [
         body_indent + "# 恢复路径：若有回传的验证码/OTP，同页继续，不 goto",
         body_indent + "params = config.get(\"params\") or {}",
@@ -365,8 +513,12 @@ def _generate_login_captcha_resume_block(body_indent: str, captcha_info: Dict[st
         body_indent + "    if value:",
         body_indent + "        try:",
         body_indent + f"            _cap_inp = {cap_loc}",
+        body_indent + "            await expect(_cap_inp).to_have_count(1)",
         body_indent + "            await _cap_inp.fill(value, timeout=5000)",
-        body_indent + f"            await page.locator({repr(login_sel)}).first.click(timeout=3000)",
+        body_indent + f"            _login_btn = page.locator({repr(login_sel)})",
+        body_indent + "            await expect(_login_btn).to_have_count(1)",
+        body_indent + "            await _login_btn.click(timeout=3000)",
+        body_indent + "            # 固定等待: 验证码回传后等待登录态回写/跳转",
         body_indent + "            await asyncio.sleep(2.0)",
         body_indent + "            cur = str(getattr(page, \"url\", \"\"))",
         body_indent + "            if \"/welcome\" in cur or \"/dashboard\" in cur or \"login\" not in cur.lower():",
@@ -374,7 +526,12 @@ def _generate_login_captcha_resume_block(body_indent: str, captcha_info: Dict[st
         body_indent + "            # 若验证码提交后仍停留在登录页，则视为失败，避免继续执行主流程再次触发验证码",
         body_indent + "            return LoginResult(success=False, message=\"验证码提交后登录未跳转或仍在登录页\")",
         body_indent + "        except Exception as e:",
-        body_indent + "            return LoginResult(success=False, message=f\"验证码填入失败: {e}\")",
+        body_indent
+        + "            _ctx = \"url=\" + str(getattr(page, \"url\", \"\")) + \" cap_sel=\" + "
+        + repr(cap_sel)
+        + " + \" login_sel=\" + "
+        + repr(login_sel),
+        body_indent + "            return LoginResult(success=False, message=\"验证码恢复失败: \" + str(e) + \" (\" + _ctx + \")\")",
         body_indent + "",
     ]
     return out
@@ -383,30 +540,32 @@ def _generate_login_captcha_resume_block(body_indent: str, captcha_info: Dict[st
 def _generate_captcha_detection_block(
     body_indent: str, step_indent: str, selector: str, verification_type: str = "graphical_captcha"
 ) -> List[str]:
-    """生成验证码检测与 VerificationRequiredError 抛出逻辑（替代 fill）。"""
+    """生成验证码检测与 VerificationRequiredError 抛出逻辑；8.5 使用 expect 唯一性检查，避免 count()+is_visible()。"""
     cap_loc = _build_captcha_locator_expr(selector)
     out = [
-        step_indent + "# 检测验证码 DOM，若出现则截图并暂停等待用户回传",
+        step_indent + "# 检测验证码 DOM，若唯一且可见则截图并暂停等待用户回传",
         step_indent + "await asyncio.sleep(2.5)",
         step_indent + f"_cap_loc = {cap_loc}",
-        step_indent + "if await _cap_loc.count() > 0:",
-        step_indent + "    try:",
-        step_indent + "        if await _cap_loc.is_visible(timeout=3000):",
-        step_indent + "            screenshot_path = None",
-        step_indent + "            screenshot_dir = config.get(\"task\", {}).get(\"screenshot_dir\")",
-        step_indent + "            if screenshot_dir:",
-        step_indent + "                os.makedirs(screenshot_dir, exist_ok=True)",
-        step_indent + "                screenshot_path = os.path.join(screenshot_dir, \"captcha.png\")",
-        step_indent + "            else:",
-        step_indent + "                import tempfile",
-        step_indent + "                fd, screenshot_path = tempfile.mkstemp(suffix=\".png\", prefix=\"captcha_\")",
-        step_indent + "                os.close(fd)",
-        step_indent + "            await page.screenshot(path=screenshot_path, timeout=5000)",
-        step_indent + f"            raise VerificationRequiredError({repr(verification_type)}, screenshot_path)",
-        step_indent + "    except VerificationRequiredError:",
-        step_indent + "        raise",
-        step_indent + "    except Exception:",
-        step_indent + "        pass",
+        step_indent + "try:",
+        step_indent + "    await expect(_cap_loc).to_have_count(1)",
+        step_indent + "    await expect(_cap_loc).to_be_visible(timeout=3000)",
+        step_indent + "    screenshot_path = None",
+        step_indent + "    screenshot_dir = config.get(\"task\", {}).get(\"screenshot_dir\")",
+        step_indent + "    if screenshot_dir:",
+        step_indent + "        os.makedirs(screenshot_dir, exist_ok=True)",
+        step_indent + "        screenshot_path = os.path.join(screenshot_dir, \"captcha.png\")",
+        step_indent + "    else:",
+        step_indent + "        import tempfile",
+        step_indent + "        fd, screenshot_path = tempfile.mkstemp(suffix=\".png\", prefix=\"captcha_\")",
+        step_indent + "        os.close(fd)",
+        step_indent + "    await page.screenshot(path=screenshot_path, timeout=5000)",
+        step_indent + f"    raise VerificationRequiredError({repr(verification_type)}, screenshot_path)",
+        step_indent + "except VerificationRequiredError:",
+        step_indent + "    raise",
+        step_indent + "except Exception as e:",
+        step_indent + "    if getattr(self.ctx, \"logger\", None):",
+        step_indent + "        self.ctx.logger.warning(\"Captcha detection/screenshot failed: %s\", e)",
+        step_indent + "    raise",
     ]
     return out
 

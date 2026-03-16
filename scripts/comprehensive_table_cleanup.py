@@ -214,7 +214,7 @@ def main():
     for table, schemas in duplicate_tables.items():
         if 'public' in schemas:
             # 检查哪个 schema 是正确的
-            if 'a_class' in schemas and table.startswith(('sales_targets_a', 'sales_campaigns_a', 'operating_costs', 'employees', 'employee_targets', 'attendance_records', 'performance_config_a')):
+            if 'a_class' in schemas and table.startswith(('sales_targets', 'sales_targets_a', 'sales_campaigns_a', 'operating_costs', 'employees', 'employee_targets', 'attendance_records', 'performance_config_a')):
                 cleanup_candidates.append({
                     'table': table,
                     'schema': 'public',
@@ -222,7 +222,7 @@ def main():
                     'count': get_table_row_count('public', table) or 0,
                     'action': 'delete'
                 })
-            elif 'c_class' in schemas and table.startswith(('employee_performance', 'employee_commissions', 'shop_commissions', 'performance_scores_c')):
+            elif 'c_class' in schemas and table.startswith(('employee_performance', 'employee_commissions', 'shop_commissions', 'performance_scores', 'shop_health_scores', 'shop_alerts')):
                 cleanup_candidates.append({
                     'table': table,
                     'schema': 'public',

@@ -1,408 +1,373 @@
 # Python 组件编写模板
 
-> v4.8.0: 数据采集模块异步化改造
+> 更新于 v4.21.0 -- 对齐 `modules/components/` 基类层次结构
 
-本文档提供 Python 组件的编写模板和规范。
+本文档提供 Python 采集组件的编写模板。所有模板均基于 `modules/components/` 中的实际基类，
+与执行器（`executor_v2.py`）和测试框架（`test_component.py`）完全兼容。
 
-## 组件模板
+**权威编写规范**：`docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
 
-### 基础组件模板
+---
 
-```python
-"""
-{Platform} {ComponentType} Component
+## 基类层次结构
 
-Platform: {platform}
-Type: {component_type}
-Data Domain: {data_domain} (if export component)
-"""
+```
+ComponentBase (modules/components/base.py)
+  ctx: ExecutionContext     -- 统一执行上下文
+  logger                   -- 属性，从 ctx.logger 获取
+  guard_overlays(page)     -- 测试模式下自动关闭弹窗
+  report_step(...)         -- 步骤进度上报
 
-from typing import Dict, Any, Optional
-from modules.core.logger import get_logger
-
-logger = get_logger(__name__)
-
-
-class {ClassName}Component:
-    """
-    {Platform} {ComponentType} 组件
-    
-    功能描述：
-    - 功能点 1
-    - 功能点 2
-    """
-    
-    # 组件元数据（必需）
-    platform = "{platform}"
-    component_type = "{component_type}"
-    data_domain = "{data_domain}"  # 仅 export 组件需要
-    
-    # 可选元数据
-    description = "{Platform} {component_type} component"
-    version = "1.0.0"
-    
-    def __init__(self, ctx=None):
-        """
-        初始化组件
-        
-        Args:
-            ctx: 执行上下文（可选）
-        """
-        self.ctx = ctx
-        self.logger = ctx.logger if ctx else logger
-    
-    async def run(
-        self, 
-        page, 
-        account: Dict[str, Any], 
-        params: Dict[str, Any], 
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        执行组件逻辑
-        
-        Args:
-            page: Playwright Page 对象
-            account: 账号信息 {
-                'username': str,
-                'password': str,  # 已解密
-                'store_name': str,
-                ...
-            }
-            params: 执行参数 {
-                'date_from': str,
-                'date_to': str,
-                'granularity': str,
-                'data_domain': str,
-                ...
-            }
-            **kwargs: 额外参数
-        
-        Returns:
-            Dict: 执行结果 {
-                'success': bool,
-                'file_path': str (可选),
-                'error': str (可选),
-                'data': Any (可选)
-            }
-        """
-        self.logger.info(f"[{self.__class__.__name__}] Starting execution...")
-        
-        try:
-            # 1. 执行业务逻辑
-            # await page.goto("https://example.com")
-            # await page.get_by_role("button", name="Submit").click()
-            
-            # 2. 返回成功结果
-            self.logger.info(f"[{self.__class__.__name__}] Execution completed")
-            return {"success": True}
-            
-        except Exception as e:
-            self.logger.error(f"[{self.__class__.__name__}] Execution failed: {e}")
-            return {"success": False, "error": str(e)}
+  +-- LoginComponent (modules/components/login/base.py)
+  |     run(self, page) -> LoginResult
+  |
+  +-- ExportComponent (modules/components/export/base.py)
+  |     run(self, page, mode=ExportMode.STANDARD) -> ExportResult
+  |
+  +-- NavigationComponent (modules/components/navigation/base.py)
+  |     run(self, page, target) -> NavigationResult
+  |
+  +-- DatePickerComponent (modules/components/date_picker/base.py)
+        run(self, page, option) -> DatePickResult
 ```
 
-### 登录组件模板
+**关键约定**：
+- 所有 `run` 方法必须 `async`
+- 账号/配置信息从 `self.ctx.account` / `self.ctx.config` 获取，**不通过参数传递**
+- 返回对应的 `ResultBase` 子类，禁止返回裸 `dict`
+
+---
+
+## ExecutionContext 字段
 
 ```python
-"""
-{Platform} Login Component
+@dataclass
+class ExecutionContext:
+    platform: str                    # 平台标识（如 "miaoshou"）
+    account: dict[str, Any]          # 账号信息（username, password 已解密, login_url, ...）
+    logger: Optional[SupportsLogger] # 结构化日志
+    config: Optional[dict[str, Any]] # 任务配置（params, task, default_login_url, ...）
+    step_callback: Optional[...]     # 步骤进度回调（v4.8.0）
+    step_prefix: str                 # 嵌套组件步骤 ID 前缀
+    is_test_mode: bool               # 是否测试模式
+```
 
-Platform: {platform}
-Type: login
-"""
+---
 
-from typing import Dict, Any
-from modules.core.logger import get_logger
+## 登录组件模板
 
-logger = get_logger(__name__)
+```python
+from __future__ import annotations
+
+from typing import Any
+
+from playwright.async_api import expect
+
+from modules.components.base import ExecutionContext
+from modules.components.login.base import LoginComponent, LoginResult
+from modules.apps.collection_center.executor_v2 import VerificationRequiredError
 
 
-class LoginComponent:
-    """
-    {Platform} 登录组件
-    """
-    
-    platform = "{platform}"
+class PlatformLogin(LoginComponent):
+    """Platform login component."""
+
+    platform = "platform_name"
     component_type = "login"
-    description = "{Platform} login component"
-    version = "1.0.0"
-    
-    def __init__(self, ctx=None):
-        self.ctx = ctx
-        self.logger = ctx.logger if ctx else logger
-    
-    async def run(
-        self, 
-        page, 
-        account: Dict[str, Any], 
-        params: Dict[str, Any], 
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        执行登录逻辑
-        """
-        self.logger.info(f"[LoginComponent] Starting login for {account.get('username')}")
-        
-        try:
-            username = account.get('username', '')
-            password = account.get('password', '')  # 已由适配层解密
-            login_url = account.get('login_url', '')
-            
-            # 1. 导航到登录页
-            await page.goto(login_url, wait_until='domcontentloaded')
-            await page.wait_for_timeout(2000)
-            
-            # 2. 填写用户名
-            await page.get_by_role("textbox", name="用户名").fill(username)
-            
-            # 3. 填写密码
-            await page.get_by_role("textbox", name="密码").fill(password)
-            
-            # 4. 点击登录按钮
-            await page.get_by_role("button", name="登录").click()
-            
-            # 5. 等待登录完成
-            await page.wait_for_load_state('networkidle')
-            await page.wait_for_timeout(2000)
-            
-            # 6. 验证登录成功
-            # 可以检查 URL、元素存在等
-            
-            self.logger.info("[LoginComponent] Login completed successfully")
-            return {"success": True}
-            
-        except Exception as e:
-            self.logger.error(f"[LoginComponent] Login failed: {e}")
-            return {"success": False, "error": str(e)}
+    data_domain = None
+
+    def __init__(self, ctx: ExecutionContext) -> None:
+        super().__init__(ctx)
+
+    async def run(self, page: Any) -> LoginResult:
+        acc = self.ctx.account or {}
+        config = self.ctx.config or {}
+
+        # -- 验证码恢复路径（必须在 page.goto 之前）--
+        # 若有回传的验证码/OTP，同页继续，不重新导航
+        params = config.get("params") or {}
+        captcha_code = params.get("captcha_code") or params.get("otp")
+        if captcha_code:
+            value = (captcha_code or "").strip()
+            if value:
+                try:
+                    cap_input = page.locator("input[placeholder*='验证码']")
+                    await expect(cap_input).to_have_count(1)
+                    await cap_input.fill(value, timeout=5000)
+                    login_btn = page.get_by_role("button", name="登录")
+                    await expect(login_btn).to_have_count(1)
+                    await login_btn.click(timeout=3000)
+                    await page.wait_for_url("**/welcome**", timeout=15000)
+                    return LoginResult(success=True, message="ok")
+                except Exception as e:
+                    ctx_info = f"url={getattr(page, 'url', '')}"
+                    return LoginResult(success=False, message=f"captcha resume failed: {e} ({ctx_info})")
+
+        # -- URL 导航 --
+        login_url = (
+            str(params.get("login_url_override") or "").strip()
+            or str(acc.get("login_url") or "").strip()
+            or "https://platform.example.com/login"
+        )
+        if login_url:
+            await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            await self.guard_overlays(page, label="after login navigation")
+
+        # -- 收敛作用域 --
+        # 有明确容器时用具体 locator；无容器时用 page
+        form = page.locator("#login-form")  # 按实际页面修改
+        # form = page  # 无明确容器时
+
+        # -- 填写表单 --
+        username_input = form.get_by_role("textbox", name="用户名")
+        await expect(username_input).to_be_visible()
+        await username_input.fill(acc.get("username", ""), timeout=10000)
+
+        password_input = form.get_by_role("textbox", name="密码")
+        await expect(password_input).to_be_visible()
+        await password_input.fill(acc.get("password", ""), timeout=10000)
+
+        # -- 提交登录 --
+        login_btn = form.get_by_role("button", name="登录")
+        await expect(login_btn).to_be_visible()
+        await login_btn.click(timeout=10000)
+
+        # -- 登录成功条件（必须编辑） --
+        await page.wait_for_url("**/welcome**", timeout=15000)
+        return LoginResult(success=True, message="ok")
 ```
 
-### 导出组件模板
+---
+
+## 导出组件模板
 
 ```python
-"""
-{Platform} {DataDomain} Export Component
+from __future__ import annotations
 
-Platform: {platform}
-Type: export
-Data Domain: {data_domain}
-"""
-
-from typing import Dict, Any, Optional
+from typing import Any
 from pathlib import Path
-from modules.core.logger import get_logger
 
-logger = get_logger(__name__)
+from playwright.async_api import expect
+
+from modules.components.base import ExecutionContext
+from modules.components.export.base import (
+    ExportComponent,
+    ExportMode,
+    ExportResult,
+    build_standard_output_root,
+)
 
 
-class {DataDomain}ExportComponent:
-    """
-    {Platform} {DataDomain} 数据导出组件
-    """
-    
-    platform = "{platform}"
+class PlatformOrdersExport(ExportComponent):
+    """Platform orders export component."""
+
+    platform = "platform_name"
     component_type = "export"
-    data_domain = "{data_domain}"
-    description = "{Platform} {data_domain} data export"
-    version = "1.0.0"
-    
-    def __init__(self, ctx=None):
-        self.ctx = ctx
-        self.logger = ctx.logger if ctx else logger
-    
-    async def run(
-        self, 
-        page, 
-        account: Dict[str, Any], 
-        params: Dict[str, Any], 
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        执行数据导出逻辑
-        """
-        self.logger.info(f"[{self.__class__.__name__}] Starting export...")
-        
-        try:
-            date_from = params.get('date_from', '')
-            date_to = params.get('date_to', '')
-            download_dir = params.get('download_dir', 'temp/downloads')
-            
-            # 1. 导航到数据页面
-            # await page.goto("https://platform.com/data", wait_until='networkidle')
-            
-            # 2. 设置日期范围（可调用子组件）
-            # date_picker = self.ctx.adapter.date_picker() if self.ctx else None
-            # if date_picker:
-            #     await date_picker.run(page, params)
-            
-            # 3. 点击导出按钮
-            # await page.get_by_role("button", name="导出").click()
-            
-            # 4. 等待下载完成
-            # async with page.expect_download() as download_info:
-            #     await page.get_by_role("button", name="确认导出").click()
-            # download = await download_info.value
-            # file_path = Path(download_dir) / download.suggested_filename
-            # await download.save_as(str(file_path))
-            
-            self.logger.info(f"[{self.__class__.__name__}] Export completed")
-            return {
-                "success": True,
-                # "file_path": str(file_path)
-            }
-            
-        except Exception as e:
-            self.logger.error(f"[{self.__class__.__name__}] Export failed: {e}")
-            return {"success": False, "error": str(e)}
+    data_domain = "orders"
+
+    def __init__(self, ctx: ExecutionContext) -> None:
+        super().__init__(ctx)
+
+    async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:
+        config = self.ctx.config or {}
+        date_from = config.get("date_from", "")
+        date_to = config.get("date_to", "")
+
+        # -- 导航到数据页面 --
+        await page.goto("https://platform.example.com/orders", wait_until="domcontentloaded")
+        await self.guard_overlays(page, label="after navigation")
+
+        # -- 设置日期范围（可调用子组件） --
+        # date_picker = ...
+
+        # -- 点击导出 --
+        export_btn = page.get_by_role("button", name="导出")
+        await expect(export_btn).to_be_visible()
+
+        # -- 等待下载 --
+        async with page.expect_download() as download_info:
+            await export_btn.click(timeout=10000)
+        download = await download_info.value
+
+        # -- 保存文件 --
+        output_dir = build_standard_output_root(self.ctx, "orders", "daily")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_path = output_dir / download.suggested_filename
+        await download.save_as(str(file_path))
+
+        if self.logger:
+            self.logger.info(f"[OK] Export saved: {file_path}")
+        return ExportResult(success=True, file_path=str(file_path))
 ```
+
+---
+
+## 导航组件模板
+
+```python
+from __future__ import annotations
+
+from typing import Any
+
+from playwright.async_api import expect
+
+from modules.components.base import ExecutionContext
+from modules.components.navigation.base import (
+    NavigationComponent,
+    NavigationResult,
+    TargetPage,
+)
+
+
+class PlatformNavigation(NavigationComponent):
+    """Platform navigation component."""
+
+    platform = "platform_name"
+    component_type = "navigation"
+    data_domain = None
+
+    def __init__(self, ctx: ExecutionContext) -> None:
+        super().__init__(ctx)
+
+    async def run(self, page: Any, target: TargetPage) -> NavigationResult:
+        # 根据目标页面执行导航
+        target_url = self._get_url(target)
+        await page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+        await self.guard_overlays(page, label=f"after nav to {target.value}")
+
+        # 等待目标页特征元素可见（SPA/MPA 通用）
+        # await expect(page.get_by_role("heading", name="订单列表")).to_be_visible(timeout=10000)
+
+        return NavigationResult(success=True, url=page.url)
+
+    def _get_url(self, target: TargetPage) -> str:
+        urls = {
+            TargetPage.ORDERS: "https://platform.example.com/orders",
+        }
+        return urls.get(target, "")
+```
+
+---
 
 ## 组件开发规范
 
 ### 1. 异步方法（必须）
 
-所有组件的 `run` 方法必须是异步的：
+所有组件的 `run` 方法必须是异步的，Playwright 操作必须 `await`：
 
 ```python
 # 正确
-async def run(self, page, account, params, **kwargs):
+async def run(self, page: Any) -> LoginResult:
     await page.goto(url)
-    await page.click(selector)
+    await page.get_by_role("button", name="登录").click()
 
-# 错误
-def run(self, page, account, params, **kwargs):  # 缺少 async
-    page.goto(url)  # 缺少 await
+# 错误：缺少 async / await
+def run(self, page):
+    page.goto(url)
 ```
 
 ### 2. 使用 Playwright 官方 API
 
-优先使用 `get_by_role`、`get_by_text` 等官方推荐的定位器：
+优先使用 `get_by_role`、`get_by_text` 等官方推荐的定位器，先收敛作用域再定位元素：
 
 ```python
-# 推荐
-await page.get_by_role("button", name="登录").click()
-await page.get_by_text("确认").click()
-await page.get_by_placeholder("请输入用户名").fill(username)
+# 推荐：先容器后元素
+form = page.locator("#login-form")
+username = form.get_by_role("textbox", name="用户名")
+await expect(username).to_be_visible()
+await username.fill(value)
 
-# 不推荐
-await page.locator("button.login-btn").click()
-await page.click("button.login-btn")
+# 不推荐：用 .first 掩盖多匹配
+await page.locator("input.username").first.click()
 ```
 
 ### 3. 日志输出（禁止 Emoji）
 
-使用 ASCII 符号代替 Emoji：
+使用 ASCII 符号代替 Emoji（Windows 编码兼容性）：
 
 ```python
 # 正确
-self.logger.info("[OK] Login successful")
-self.logger.error("[FAIL] Login failed")
-self.logger.warning("[WARN] Password expired")
+if self.logger:
+    self.logger.info("[OK] Login successful")
+    self.logger.error("[FAIL] Login failed")
+    self.logger.warning("[WARN] Password expired")
 
-# 错误
-self.logger.info("✅ Login successful")  # 会导致 Windows 编码错误
-self.logger.error("❌ Login failed")
+# 错误：emoji 字符会导致 Windows UnicodeEncodeError
+# self.logger.info("\u2705 Login successful")  # 禁止使用 emoji
 ```
 
 ### 4. 错误处理
 
-使用 try-except 包装，返回标准结果：
+返回 `ResultBase` 子类，关键失败需包含可诊断信息：
 
 ```python
-try:
-    # 业务逻辑
-    return {"success": True, "file_path": str(file_path)}
-except Exception as e:
-    self.logger.error(f"[{self.__class__.__name__}] Error: {e}")
-    return {"success": False, "error": str(e)}
+async def run(self, page: Any) -> LoginResult:
+    try:
+        # 业务逻辑
+        return LoginResult(success=True, message="ok")
+    except Exception as e:
+        if self.logger:
+            self.logger.error(f"[FAIL] Login failed: {e}")
+        return LoginResult(
+            success=False,
+            message=str(e),
+            details={"url": getattr(page, "url", ""), "phase": "form_submit"},
+        )
 ```
 
 ### 5. 组件元数据（必须）
 
-每个组件类必须定义元数据属性：
-
 ```python
-class MyComponent:
-    # 必需
-    platform = "shopee"         # 平台代码
-    component_type = "export"   # 组件类型
-    
-    # 如果是 export 组件
-    data_domain = "orders"      # 数据域
-    
-    # 可选
-    description = "Description"
-    version = "1.0.0"
+class MyComponent(ExportComponent):
+    platform = "shopee"           # 平台代码（必需）
+    component_type = "export"     # 组件类型（必需）
+    data_domain = "orders"        # 数据域（export 组件必需）
 ```
 
-### 6. 调用子组件
-
-通过适配器调用子组件（如日期选择器）：
+### 6. 等待策略
 
 ```python
-async def run(self, page, account, params, **kwargs):
-    # 如果有执行上下文，可以调用子组件
-    if self.ctx and self.ctx.adapter:
-        date_picker = self.ctx.adapter.date_picker()
-        await date_picker.run(page, params)
+# 推荐：条件等待
+await expect(page.get_by_role("button", name="导出")).to_be_visible(timeout=10000)
+
+# 推荐：等待 URL 变化
+await page.wait_for_url("**/dashboard**", timeout=15000)
+
+# 推荐：等待加载消失
+await page.locator(".loading-spinner").wait_for(state="hidden", timeout=10000)
+
+# 仅在确需人为节奏时使用，并注明原因
+await page.wait_for_timeout(1000)  # 固定等待: 动画结束
 ```
+
+---
 
 ## 组件目录结构
 
 ```
 modules/platforms/
-├── shopee/
-│   └── components/
-│       ├── __init__.py
-│       ├── login.py
-│       ├── navigation.py
-│       ├── date_picker.py
-│       ├── orders_export.py
-│       ├── products_export.py
-│       └── ...
-├── tiktok/
-│   └── components/
-│       ├── login.py
-│       └── ...
-└── miaoshou/
-    └── components/
-        ├── login.py
-        └── ...
+  {platform}/
+    components/
+      login.py                    # 手写稳定版
+      login_v1_0_0.py             # 录制生成版本
+      login_v1_0_1.py             # 迭代版本
+      orders_export.py
+      navigation.py
+      date_picker.py
 ```
 
-## 从 Trace 生成组件
-
-使用 TraceParser 从录制文件生成组件骨架：
-
-```python
-from backend.utils.trace_parser import generate_component_from_trace
-
-code = generate_component_from_trace(
-    trace_path="temp/recordings/trace.zip",
-    platform="shopee",
-    component_type="orders_export",
-    data_domain="orders",
-    output_path="modules/platforms/shopee/components/orders_export.py"
-)
-```
+---
 
 ## 验证组件
-
-使用 ComponentLoader 验证组件是否符合规范：
 
 ```python
 from modules.apps.collection_center.component_loader import ComponentLoader
 
 loader = ComponentLoader()
-
-# 加载组件类
 component_class = loader.load_python_component("shopee", "login")
-
-# 验证组件
 result = loader.validate_python_component(component_class)
 if result['valid']:
-    print("Component is valid")
-    print(f"Metadata: {result['metadata']}")
+    print(f"[OK] Metadata: {result['metadata']}")
 else:
-    print(f"Errors: {result['errors']}")
+    print(f"[FAIL] Errors: {result['errors']}")
 ```
-

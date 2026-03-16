@@ -2,7 +2,7 @@
 
 **目标**：组件唯一性（方案 A+C）、修复「测试 A 执行 B」、放宽删除规则、验证码必选暂停，并增强体验（实际执行文件、冲突提示、可选 Tab 结构）。
 
-**验收进度（2026-03-14）**：0.x～5.x、1.6、1.7、1.9、1.10、4.2、4.4、4.5、4.6、6.2～6.3 已实现并通过代码/单测及专项验收脚本；1.5（多版本回归）、1.8（发现模式 test_mode）、6.1（综合验收人工部分）待办。实际验收见 `ACCEPTANCE_REPORT.md` 第五节。
+**验收进度（2026-03-15）**：0.x～5.x、1.6～1.10、4.2、4.4、4.5、4.6、6.2～6.3 已实现并通过代码/单测及专项验收脚本；1.5（多版本回归）与 6.1（综合验收人工部分）待办。实际验收见 `ACCEPTANCE_REPORT.md` 第五节。
 
 ## 0. 组件唯一性与录制保存（P0）
 
@@ -29,7 +29,7 @@
   - 使用 `SessionManager.load_session` 得到 `storage_state` + `DeviceFingerprintManager` 得到指纹，`browser.new_context(storage_state=..., **fp_options)`，不使用 `launch_persistent_context`；
   - account_id 缺失时测试失败并明确报错，强制用户选择账号；一账号一指纹、持久会话策略与生产一致；
   - 在进度 / 结果结构中区分「login 阶段」与「export/navigation 等业务阶段」，例如 `phase: "login"` / `phase: "export"`，失败时在前端弹窗中显示是哪一阶段、哪个组件（如 `miaoshou/login v1.0.0` 或 `miaoshou/orders_export v1.0.0`）导致测试失败，便于快速定位问题。
- - [ ] 1.8 **发现模式组件（date_picker / filters）的测试策略**：
+- [x] 1.8 **发现模式组件（date_picker / filters）的测试策略**：
    - 组件按两类区分：**可独立测试组件**（login/navigation/export 等，或带完整测试场景描述的组件）与 **仅在完整采集链路中验证的组件**（多数发现模式的日期/筛选控件）。
    - 为发现模式组件新增可选元数据（如 `test_mode`、`test_config`）：`test_mode=flow_only` 表示仅通过 `CollectionExecutorV2.execute` 的完整「登录→导航→日期/筛选→导出」任务进行验证，版本管理页不提供单独「测试组件」按钮；`test_mode=standalone` 且提供 `test_config` 时，允许单组件测试：
      - `test_config.url`：测试时应导航到的页面 URL；
@@ -79,3 +79,47 @@
 - [ ] 6.1 验收：选择某组件版本测试，确认执行的是该 version.file_path 对应文件且验证码会暂停；禁用后确认可删除；验证码回传后流程正确继续；录制保存创建新版本而非新 component_name；测试 export 等非登录组件时先自动登录或复用会话，且测试使用与生产一致的会话与指纹策略；历史类命名版本（如 `MiaoshouMiaoshouLogin`）可被正确识别执行；失败结果可展示 `phase + component + version`；多稳定版冲突可见且可定位；关闭弹窗或超时后轮询可正确停止；非法 `file_path` 会被安全拒绝且错误可定位。
 - [x] 6.2 更新 CHANGELOG 或相关文档，记录「组件版本测试执行一致性」「删除规则」「验证码必选暂停」「实际执行文件展示」等变更。
 - [x] 6.3 部署检查：确认采集环境（backend、collection 容器、本地）均已配置 PROJECT_ROOT；持久会话/指纹使用处已配置 DATA_DIR（或等效）；design 中「采集环境部署检查清单」已纳入运维文档。
+
+## 7. 采集脚本现实 Web 稳健性与文档治理（P0/P1）
+
+- [x] 7.1 更新 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`：新增“定位器唯一性契约（strict mode）”“先容器后元素”“禁用 `.first/.nth()` 兜底歧义”“反模式禁用（`count()+is_visible()`、`except Exception: pass`、固定 sleep）”“失败可观测性契约（phase/component/version/url/selector_context）”。
+- [x] 7.2 收敛录制与模板文档口径：`RECORDER_PYTHON_OUTPUT.md`、`PYTHON_COMPONENT_TEMPLATE.md`、`COMPONENT_RECORDING_GUIDE.md`、`recording_rules.md` 与新规范一致；历史流程（YAML/Codegen/sync API/UPSERT 旧语义）明确标注为历史或移除。
+- [x] 7.3 生成器与静态检查治理（闭环项）：为录制生成代码增加“唯一性与反模式”检查（至少覆盖无注释 `.first/.nth()`、`count()+is_visible()`、`except Exception: pass`、固定 sleep），并完成“提示 + 阻断”的双层治理。
+- [x] 7.3.1 提示层：已在生成与停止录制接口返回 lint 提示（warning）用于前端展示与修复引导。
+- [x] 7.3.2 阻断层：关键反模式升级为 `error` 且默认阻断保存（可配置白名单/开关），避免高风险代码进入版本库。
+- [ ] 7.4 验收补充：新增“重复元素 strict mode”“iframe 重挂载”“SPA 路由局部刷新”“虚拟列表 DOM 复用”四类场景用例，验证脚本在现实 Web 下可稳定执行或可诊断失败。（自动化子集已补，真实页面人工/E2E仍待完成）
+
+## 8. 组件录制生成器合规修复（P0/P1）
+
+- [x] 8.1 去除可选步骤默认吞错：`steps_to_python.py` 生成逻辑中，替换 `except Exception: pass` 为可观测处理（记录步骤上下文并返回结构化错误/可选跳过原因），避免静默继续。
+- [x] 8.2 `wait` 动作策略升级：`action=wait` 优先生成条件等待（如 `wait_for(state=...)` / `expect(...).to_be_visible()`）；仅在步骤带显式“固定等待原因”时生成 `wait_for_timeout`，并在注释中保留原因。
+- [x] 8.3 作用域收敛生成：为登录表单、对话框、iframe、表格行等常见场景生成“容器 locator + 子元素定位”代码，减少 `page` 根作用域宽匹配。
+- [x] 8.4 `.first/.nth` 约束：生成器默认不输出 `.first/.nth`；若必须使用（业务语义确凿），生成注释说明依据并在 lint 中校验“有注释才允许”。
+- [x] 8.5 验证码恢复路径治理：`_generate_login_captcha_resume_block` 与 captcha 点击路径移除默认 `.first`，改为唯一性检查 + 失败诊断（phase/component/version/url/selector candidates）。
+- [x] 8.6 录制前端 lint 严重级别：`ComponentRecorder.vue` 将 lint 分为 `error`（阻断保存）与 `warning`（可继续），并展示针对性修复建议；关键反模式（吞错、宽泛 `.first`、未说明固定 sleep）默认升为 error（可配置）。
+- [x] 8.7（P0）生成接口参数对齐：`/recorder/generate-python` 前端调用补齐 `data_domain` 与 `sub_domain`，与 save 请求体一致，避免 export 子域场景语义漂移。
+- [x] 8.8 自动化回归用例：新增生成器回归测试，覆盖四类反模式（`except Exception: pass`、`count()+is_visible()`、无理由固定 sleep、无注释 `.first/.nth`）与四类现实场景（strict mode、iframe 重挂载、SPA 局部刷新、虚拟列表复用）。
+- [x] 8.9 可选步骤可观测处理修复：生成器 `optional` 异常块不得引用生成器侧变量（如 `i/action`）导致运行期 NameError；需输出可执行且可诊断的上下文（step_index/action 文本常量）。
+- [x] 8.10 lint 与 wait 策略对齐：`wait_for_timeout` 在“显式固定等待原因”存在时不应按 error 阻断保存；无理由固定等待仍保持 error 阻断。
+- [x] 8.11 `.first/.nth` 受控放行：实现“有注释说明依据才允许，否则 error 阻断”的 lint 规则，避免一刀切与提案口径不一致。
+- [x] 8.12 作用域收敛扩展：在生成器中补齐 iframe、表格行（row）、对话框等场景的容器收敛模板，不仅限登录 form。
+- [x] 8.13 lint 门禁一致性补强：`/recorder/save` 必须对“最终写盘代码（含 success_criteria 注入）”执行 lint；注入逻辑不得再引入 `.first/.nth` 或 `count()==0` 绕过阻断层。
+- [x] 8.14 login 容器收敛策略修复：生成器不得写死 `get_by_role("form")`；实现“语义容器优先 + 业务容器兜底 + page 根作用域告警兜底”的多候选收敛策略，并在失败时输出容器候选诊断信息。
+- [x] 8.15 URL 导航契约落地：为 login 组件生成/模板补齐导航策略（`login_url_override > account.login_url > 平台默认 URL`），并实现导航后双信号确认（URL/路由特征 + 关键元素可见）；新增回归覆盖“未显式 navigate 也能稳定进入登录页或给出可诊断失败”场景。
+  - [x] 8.15.1 URL 来源优先级实现：`params.login_url_override > account.login_url > 平台默认 URL`。
+  - [x] 8.15.2 导航前判定实现：当前页已满足“目标路由特征 + 关键登录元素可见”时跳过 goto。
+  - [x] 8.15.3 导航后双信号判定实现：URL/路由特征 + 关键元素可见，禁止单信号判定。
+  - [x] 8.15.4 可观测性补齐：失败返回 `current_url/target_url/phase/component/version/selector_context`。
+  - [x] 8.15.5 回归测试补齐：覆盖“缺失 navigate 步骤、容器无 role=form、URL 错配”三类场景。
+
+## 9. 提案关闭门槛（P0）
+
+- [ ] 9.1 不允许归档条件：`1.5`、`6.1`、`7.4` 任一未完成时，变更不得归档（仅可保持进行中）。
+- [ ] 9.2 归档前必须通过：关键反模式阻断保存（7.3.2）+ 生成接口参数对齐（8.7）+ 现实 Web 四类补充验收（7.4）。
+- [x] 9.3 归档前必须通过：`8.14`（login 容器收敛）与 `8.15`（URL 导航契约）自动化回归与至少 1 组真实页面验收通过。
+
+## 10. 最小上线顺序（执行编排）
+
+- [x] 10.1 S1 止血阶段：优先完成 `8.14`，确保 login 组件在无 `role=form` 页面不再首步失败。
+- [x] 10.2 S2 契约阶段：完成 `8.15.1~8.15.4`，使 URL 导航具备来源优先级、导航前判定、导航后双信号与失败可观测性。
+- [x] 10.3 S3 质量阶段：完成 `8.15.5` 回归 + 至少 1 组真实页面验收，并同步更新验收报告。

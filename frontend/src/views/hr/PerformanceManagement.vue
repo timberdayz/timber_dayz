@@ -20,6 +20,14 @@
         <el-radio-button value="person">按人员</el-radio-button>
       </el-radio-group>
       <el-button :icon="Refresh" @click="loadPerformanceList">刷新</el-button>
+      <el-button
+        type="warning"
+        :loading="calculating"
+        @click="handleRecalculate"
+        v-if="hasPermission('performance:config')"
+      >
+        重新计算
+      </el-button>
       <el-button type="primary" :icon="Setting" @click="handleConfig" v-if="hasPermission('performance:config')">
         配置权重
       </el-button>
@@ -37,7 +45,7 @@
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <span>绩效公示</span>
           <div style="font-size: 12px; color: #909399;">
-            绩效构成：销售额(30%) + 毛利(25%) + 重点产品(25%) + 运营得分(20%)
+            绩效构成：{{ formulaText }}
           </div>
         </div>
       </template>
@@ -105,7 +113,13 @@
       </el-table>
       
       <div v-if="performanceList.data.length === 0 && !performanceList.loading" style="padding: 40px; text-align: center; color: #909399;">
-        暂无绩效数据，请选择月份并确保已执行绩效计算
+        <template v-if="loadError">查询失败，请稍后重试或联系管理员。</template>
+        <template v-else>
+          <div style="margin-bottom: 12px;">暂无绩效数据，请选择月份并确保已执行绩效计算</div>
+          <el-button type="warning" :loading="calculating" @click="handleRecalculate" v-if="hasPermission('performance:config')">
+            重新计算当月绩效
+          </el-button>
+        </template>
       </div>
       <el-pagination
         v-model:current-page="performanceList.page"
@@ -155,7 +169,7 @@
           <!-- 销售额得分 -->
           <el-card shadow="never" style="margin-bottom: 15px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-weight: bold;">销售额得分（权重30%）</span>
+              <span style="font-weight: bold;">销售额得分（权重{{ weightConfig.sales_weight }}%）</span>
               <el-tag :type="performanceDetail.data.sales_score.score >= 27 ? 'success' : performanceDetail.data.sales_score.score >= 24 ? 'warning' : 'danger'" size="small">
                 {{ performanceDetail.data.sales_score.score.toFixed(1) }}分
               </el-tag>
@@ -171,7 +185,7 @@
           <!-- 毛利得分 -->
           <el-card shadow="never" style="margin-bottom: 15px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-weight: bold;">毛利得分（权重25%）</span>
+              <span style="font-weight: bold;">毛利得分（权重{{ weightConfig.profit_weight }}%）</span>
               <el-tag :type="performanceDetail.data.profit_score.score >= 22.5 ? 'success' : performanceDetail.data.profit_score.score >= 20 ? 'warning' : 'danger'" size="small">
                 {{ performanceDetail.data.profit_score.score.toFixed(1) }}分
               </el-tag>
@@ -187,7 +201,7 @@
           <!-- 重点产品得分 -->
           <el-card shadow="never" style="margin-bottom: 15px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-weight: bold;">重点产品得分（权重25%）</span>
+              <span style="font-weight: bold;">重点产品得分（权重{{ weightConfig.key_product_weight }}%）</span>
               <el-tag :type="performanceDetail.data.key_product_score.score >= 22.5 ? 'success' : performanceDetail.data.key_product_score.score >= 20 ? 'warning' : 'danger'" size="small">
                 {{ performanceDetail.data.key_product_score.score.toFixed(1) }}分
               </el-tag>
@@ -205,7 +219,7 @@
           <!-- 运营得分 -->
           <el-card shadow="never">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-weight: bold;">运营得分（权重20%）</span>
+              <span style="font-weight: bold;">运营得分（权重{{ weightConfig.operation_weight }}%）</span>
               <el-tag :type="performanceDetail.data.operation_score.score >= 18 ? 'success' : performanceDetail.data.operation_score.score >= 16 ? 'warning' : 'danger'" size="small">
                 {{ performanceDetail.data.operation_score.score.toFixed(1) }}分
               </el-tag>
@@ -339,6 +353,8 @@ const performanceDetail = reactive({
 })
 
 const detailVisible = ref(false)
+const loadError = ref(false)
+const calculating = ref(false)
 const configVisible = ref(false)
 const configSubmitting = ref(false)
 const configFormRef = ref(null)
@@ -354,11 +370,20 @@ const configForm = reactive({
   key_product_max_score: 25,
   operation_max_score: 20
 })
+const weightConfig = reactive({
+  sales_weight: 30,
+  profit_weight: 25,
+  key_product_weight: 25,
+  operation_weight: 20
+})
 
 // 总权重计算
 const totalWeight = computed(() => {
   return configForm.sales_weight + configForm.profit_weight + 
          configForm.key_product_weight + configForm.operation_weight
+})
+const formulaText = computed(() => {
+  return `销售额(${weightConfig.sales_weight}%) + 毛利(${weightConfig.profit_weight}%) + 重点产品(${weightConfig.key_product_weight}%) + 运营得分(${weightConfig.operation_weight}%)`
 })
 
 // 表单验证规则
@@ -390,6 +415,7 @@ function formatCell(v) {
 // 加载绩效列表
 const loadPerformanceList = async () => {
   performanceList.loading = true
+  loadError.value = false
   try {
     const period = typeof filters.period === 'string' ? filters.period : 
       (filters.period ? `${filters.period.getFullYear()}-${String(filters.period.getMonth() + 1).padStart(2, '0')}` : undefined)
@@ -412,9 +438,53 @@ const loadPerformanceList = async () => {
       performanceList.total = response?.total || 0
     }
   } catch (error) {
+    loadError.value = true
     handleApiError(error, { showMessage: true, logError: true })
   } finally {
     performanceList.loading = false
+  }
+}
+
+const loadWeightConfig = async () => {
+  try {
+    const response = await api.getPerformanceConfigs({ is_active: true, page: 1, page_size: 1 })
+    const row = Array.isArray(response)
+      ? response[0]
+      : (response?.data?.[0] || response?.data || response)
+    if (!row) return
+    weightConfig.sales_weight = row.sales_weight ?? weightConfig.sales_weight
+    weightConfig.profit_weight = row.profit_weight ?? weightConfig.profit_weight
+    weightConfig.key_product_weight = row.key_product_weight ?? weightConfig.key_product_weight
+    weightConfig.operation_weight = row.operation_weight ?? weightConfig.operation_weight
+  } catch (error) {
+    // 配置读取失败不阻塞列表加载
+  }
+}
+
+const handleRecalculate = async () => {
+  const period = typeof filters.period === 'string'
+    ? filters.period
+    : (filters.period ? `${filters.period.getFullYear()}-${String(filters.period.getMonth() + 1).padStart(2, '0')}` : '')
+  if (!period) {
+    ElMessage.warning('请选择考核月份')
+    return
+  }
+  calculating.value = true
+  try {
+    await api.calculatePerformanceScores(period)
+    ElMessage.success('已触发绩效计算，请稍后刷新查看结果')
+    await loadPerformanceList()
+  } catch (error) {
+    const code = error?.response?.data?.data?.error_code
+    if (code === 'PERF_CALC_NOT_READY') {
+      ElMessage.warning('绩效计算能力未就绪，请先完成 Metabase 计算方案部署')
+    } else if (code === 'PERF_CONFIG_NOT_FOUND') {
+      ElMessage.warning('当前考核周期无可用绩效配置，请先配置权重和生效周期')
+    } else {
+      handleApiError(error, { showMessage: true, logError: true })
+    }
+  } finally {
+    calculating.value = false
   }
 }
 
@@ -481,7 +551,8 @@ const handleConfigSubmit = async () => {
     
     ElMessage.success('配置更新成功')
     configVisible.value = false
-    loadPerformanceList()
+    await loadWeightConfig()
+    await loadPerformanceList()
   } catch (error) {
     handleApiError(error, { showMessage: true, logError: true })
   } finally {
@@ -503,6 +574,7 @@ const handleExport = () => {
 // formatCurrency 已从 @/utils/dataFormatter 导入，无需重复声明
 
 onMounted(() => {
+  loadWeightConfig()
   loadPerformanceList()
 })
 </script>

@@ -77,6 +77,12 @@ from backend.schemas.rate_limit import (
     RateLimitInfoResponse,
 )
 
+# ==================== HR 人力/我的收入 (add-performance-and-personal-income) ====================
+from backend.schemas.hr import (
+    MyIncomeResponse,
+    IncomeCalculationResponse,
+)
+
 # ==================== 通知管理 (v4.19.0) ====================
 from backend.schemas.notification import (
     NotificationType,
@@ -148,5 +154,8 @@ __all__ = [
     "MarkReadResponse",
     "NotificationDeleteResponse",
     "NotificationBatchCreate",
+    # HR (add-performance-and-personal-income)
+    "MyIncomeResponse",
+    "IncomeCalculationResponse",
 ]
 

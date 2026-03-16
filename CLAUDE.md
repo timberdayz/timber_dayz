@@ -81,39 +81,35 @@ mypy backend/                                       # 类型检查
 
 ## High-Level Architecture (Quick Reference)
 
+> 架构与零容忍规则的**权威描述**请以 `.cursorrules` 为准，这里只做一屏内的快速提示。
+
 | 层 | 位置 | 职责 |
 |---|---|---|
-| Core | `modules/core/` | SSOT：ORM 模型（`schema.py`）、配置、日志、密钥 |
+| Core | `modules/core/` | 统一 ORM / 配置 / 日志 / 密钥（SSOT） |
 | Backend | `backend/` | FastAPI API、Pydantic Schemas、业务服务 |
 | Frontend | `frontend/` | Vue 3 + Element Plus + Pinia + Vite |
 
-**SSOT 零容忍规则**（详见 `.cursorrules`）：
-- ORM 模型只能定义在 `modules/core/db/schema.py`
-- 禁止在 core 之外创建 `Base = declarative_base()`
-- 禁止 Pinyin 字段名
-
-## Key Files
+常用入口文件（详情和完整清单见 `.cursorrules`）：
 
 | 文件/目录 | 用途 |
 |---|---|
-| `modules/core/db/schema.py` | 唯一 ORM 定义（55 张表） |
-| `modules/core/db/__init__.py` | 模型导出（新增表时必须更新） |
-| `backend/main.py` | FastAPI 唯一入口 |
+| `modules/core/db/schema.py` | 唯一 ORM 定义 |
+| `backend/main.py` | FastAPI 入口 |
 | `backend/schemas/` | Pydantic 契约模型 |
 | `backend/routers/` | API 路由 |
 | `backend/services/` | 业务逻辑 |
-| `backend/models/database.py` | 只含 engine/SessionLocal/get_db/init_db |
 | `frontend/src/api/index.js` | 统一 API 客户端 |
 
-## Common Pitfalls
+## Common Pitfalls（摘要版）
 
-1. **在 schema.py 之外定义模型** → 元数据不一致
-2. **文件系统递归代替 DB 查询** → 慢 30,000 倍
-3. **新增表忘记更新 `__init__.py` 导出**
-4. **schema.py 变更后遗漏 Alembic 迁移**
-5. **终端输出使用 Emoji**（Windows UnicodeEncodeError）
-6. **修改采集组件不遵循规范** → 必读 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
-7. **Node 版本使用 18 或低于 24** → 项目与 GitHub 要求 Node 24+，见 `.nvmrc` 与 `frontend/package.json` engines
+> 完整零容忍清单见 `.cursorrules`，这里只列 Agent 最容易踩的坑。
+
+1. 在 `schema.py` 之外定义 ORM 模型
+2. 递归扫描文件系统代替使用 `catalog_files` 表
+3. 新增表后忘记维护 Alembic 迁移和 `modules/core/db/__init__.py`
+4. 终端/日志中输出 Emoji（Windows 会触发 UnicodeEncodeError）
+5. 编写采集组件未遵守 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
+6. Node 版本低于 24（项目与 CI 都要求 24+）
 
 ## Documentation Map
 

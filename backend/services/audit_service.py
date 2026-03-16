@@ -4,6 +4,8 @@
 v4.12.0 SSOT迁移:从modules.core.db导入FactAuditLog
 """
 
+import json
+
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -41,13 +43,27 @@ class AuditService:
             username = user.username if user else "unknown"
             
             # 创建审计日志记录
+            changes_json = None
+            if details:
+                try:
+                    changes_json = json.dumps(details, ensure_ascii=False)
+                except Exception:
+                    changes_json = str(details)
+            result_status = None
+            if isinstance(details, dict):
+                result_status = details.get("result_status")
+            action_desc = f"{action} {resource} {resource_id or ''}".strip()
+            if result_status:
+                action_desc = f"{action_desc} result_status={result_status}"
+
             audit_log = FactAuditLog(
                 user_id=user_id,
                 username=username,
                 action_type=action,  # v4.12.0修复:使用action_type字段
                 resource_type=resource,  # v4.12.0修复:使用resource_type字段
                 resource_id=resource_id,
-                action_description=f"{action} {resource} {resource_id or ''}",
+                action_description=action_desc,
+                changes_json=changes_json,
                 ip_address=ip_address,
                 user_agent=user_agent,
                 is_success=True,

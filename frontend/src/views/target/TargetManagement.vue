@@ -1105,9 +1105,9 @@ const filters = reactive({
 
 // 按月份加载常规月度目标（常规月度 Tab）
 const loadMonthlyTarget = async () => {
+  monthlyTarget.error = null;
   if (activeTab.value !== "shop" || !monthStr.value) return;
   monthlyTarget.loading = true;
-  monthlyTarget.error = null;
   try {
     const response = await api.getTargetByMonth(monthStr.value, "shop");
     const data = response?.data ?? response;

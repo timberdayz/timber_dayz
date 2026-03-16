@@ -825,6 +825,27 @@
           placeholder="停止录制后将在此显示生成的 Python 代码，可编辑后保存为 .py"
           class="python-textarea"
         />
+        <!-- 8.6 lint 分 error/warning 展示，带修复建议 -->
+        <div v-if="lintErrors.length > 0 || lintWarnings.length > 0" class="lint-panel" style="margin-top: 12px">
+          <div v-if="lintErrors.length > 0" class="lint-errors">
+            <div class="lint-title">规范错误（需修复后才能保存）</div>
+            <ul>
+              <li v-for="(item, idx) in lintErrors" :key="'e-' + idx" class="lint-item lint-error">
+                <span class="lint-type">{{ lintErrorLabel(item.type) }}</span>
+                {{ item.message }}
+              </li>
+            </ul>
+          </div>
+          <div v-if="lintWarnings.length > 0" class="lint-warnings">
+            <div class="lint-title">规范建议（可继续保存）</div>
+            <ul>
+              <li v-for="(item, idx) in lintWarnings" :key="'w-' + idx" class="lint-item lint-warning">
+                <span class="lint-type">{{ lintWarningLabel(item.type) }}</span>
+                {{ item.message }}
+              </li>
+            </ul>
+          </div>
+        </div>
       </el-card>
       </div>
     </div>
@@ -881,6 +902,20 @@ const pythonCode = ref("");
 const loginFieldSuggestions = ref([]);
 const lintErrors = ref([]);
 const lintWarnings = ref([]);
+// 8.6 lint 类型到简短标签（错误）
+const lintErrorLabel = (type) => {
+  const map = {
+    syntax_error: "[语法]",
+    wait_for_timeout_usage: "[固定等待]",
+    fixed_sleep_usage: "[固定sleep]",
+    count_is_visible_pattern: "[单次检测]",
+    swallow_exception_pattern: "[吞错]",
+    first_nth_usage: "[.first/.nth]",
+  };
+  return map[type] || `[${type}]`;
+};
+// 8.6 lint 类型到简短标签（警告，当前后端已无 warning 项，预留）
+const lintWarningLabel = (type) => (type ? `[${type}]` : "");
 // 登录成功条件（保存时写入组件）
 const successCriteriaUrlContains = ref("");
 
@@ -1194,7 +1229,7 @@ const stopRecording = async () => {
 
           if (lintErrors.value.length > 0) {
             ElMessage.error(
-              "生成的 Python 代码存在语法错误，请先根据提示修复后再保存。"
+              "生成的代码存在规范错误，请根据下方提示修复后再保存。"
             );
           } else if (!pythonCode.value) {
             ElMessage.warning(
@@ -1351,12 +1386,20 @@ const regeneratePython = async () => {
     return;
   }
   try {
-    const res = await api.post("/collection/recorder/generate-python", {
+    const genPayload = {
       platform: recorderForm.value.platform,
       component_type: recorderForm.value.componentType,
       component_name: recorderForm.value.componentName,
       steps: recordedSteps.value,
-    });
+    };
+    // 8.7 与 save 请求体一致：export 时传 data_domain/sub_domain，避免子域语义漂移
+    if (recorderForm.value.componentType === "export") {
+      if (recorderForm.value.dataDomain) genPayload.data_domain = recorderForm.value.dataDomain;
+      if (recorderForm.value.dataDomain === "services" && recorderForm.value.subDomain) {
+        genPayload.sub_domain = recorderForm.value.subDomain;
+      }
+    }
+    const res = await api.post("/collection/recorder/generate-python", genPayload);
     if (res.success && res.python_code) {
       pythonCode.value = res.python_code;
       loginFieldSuggestions.value = res.login_field_suggestions || [];
@@ -1365,7 +1408,7 @@ const regeneratePython = async () => {
 
       if (lintErrors.value.length > 0) {
         ElMessage.error(
-          "重新生成的 Python 代码存在语法错误，请根据提示修复后再保存。"
+          "生成的代码存在规范错误，请根据下方提示修复后再保存。"
         );
       } else {
         ElMessage.success("已重新生成 Python 代码");
@@ -1446,7 +1489,14 @@ const saveComponent = async () => {
     }
   } catch (error) {
     console.error("保存组件失败:", error);
-  ElMessage.error("保存组件失败: " + error.message);
+    const msg = error?.response?.data?.message || error?.message || "保存失败";
+    ElMessage.error("保存组件失败: " + msg);
+    // 7.3.2：服务端因 lint 阻断时，展示错误详情以便用户修复
+    const payload = error?.response?.data?.data;
+    if (payload?.lint_errors?.length) {
+      lintErrors.value = payload.lint_errors;
+      lintWarnings.value = payload.lint_warnings || [];
+    }
   }
 };
 
@@ -1746,5 +1796,50 @@ onMounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* 8.6 lint 错误/建议面板 */
+.lint-panel {
+  font-size: 13px;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #fdf6ec;
+  border: 1px solid #faecd8;
+}
+.lint-panel .lint-errors {
+  margin-bottom: 8px;
+}
+.lint-panel .lint-errors:last-child,
+.lint-panel .lint-warnings:last-child {
+  margin-bottom: 0;
+}
+.lint-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #303133;
+}
+.lint-errors .lint-title {
+  color: #f56c6c;
+}
+.lint-warnings .lint-title {
+  color: #e6a23c;
+}
+.lint-panel ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.lint-item {
+  margin-bottom: 4px;
+  line-height: 1.5;
+}
+.lint-item.lint-error {
+  color: #c45656;
+}
+.lint-item.lint-warning {
+  color: #b88230;
+}
+.lint-type {
+  font-weight: 600;
+  margin-right: 6px;
 }
 </style>

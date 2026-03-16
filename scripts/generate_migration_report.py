@@ -84,7 +84,7 @@ def main():
     safe_print("-" * 80)
     
     a_class_tables = [
-        'sales_targets_a', 'sales_campaigns_a', 'operating_costs',
+        'sales_targets', 'sales_targets_a', 'sales_campaigns_a', 'operating_costs',
         'employees', 'employee_targets', 'attendance_records', 'performance_config_a'
     ]
     
@@ -126,7 +126,7 @@ def main():
     
     c_class_tables = [
         'employee_performance', 'employee_commissions',
-        'shop_commissions', 'performance_scores_c'
+        'shop_commissions', 'performance_scores', 'shop_health_scores', 'shop_alerts'
     ]
     
     c_class_ok = 0

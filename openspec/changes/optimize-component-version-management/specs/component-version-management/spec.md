@@ -47,6 +47,13 @@
 - **AND** `_execute_python_component` 当 component dict 含 `_python_component_class` 时直接使用该类实例化执行 run(page)，不得再调用 adapter 按 comp_name 重新加载
 - **AND** `load_python_component_from_path` 传给 `spec_from_file_location` 的模块名须唯一（如 file_path 哈希或 version_id），避免 sys.modules 缓存污染
 
+#### Scenario: selected_version 缺失时回退可观测且可配置 fail-fast
+
+- **WHEN** 执行器在生产采集中未获取到 `selected_version`（如版本服务不可用、无稳定版、无活跃版本）
+- **THEN** 若系统配置 `fail_fast_on_missing_selected_version=true`，执行应直接失败并返回明确错误
+- **AND** 若允许回退到 comp_name 加载，系统必须输出结构化告警（至少包含 platform、component_type、component_name、missing_reason）
+- **AND** 执行结果或日志需可区分“按 version.file_path 执行”与“回退执行”，避免版本一致性误判
+
 ### Requirement: 组件版本删除规则
 
 系统 SHALL 允许用户在组件版本管理界面删除满足条件的组件版本记录，且删除按钮的显示条件与后端校验一致。

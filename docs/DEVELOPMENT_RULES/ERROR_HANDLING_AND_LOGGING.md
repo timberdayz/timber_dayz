@@ -142,15 +142,61 @@ except Exception as e:
 - ✅ **具体异常**: 捕获具体异常类型，而非通用Exception
 - ✅ **异常链**: 保留异常链（使用`raise ... from e`）
 
-**示例**:
+**示例**（异步架构，一律使用 `AsyncSession` + `select()`）:
+```python
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from modules.core.db import FactOrder
+
+
+async def get_order_or_fail(db: AsyncSession, order_id: int) -> FactOrder:
+    try:
+        result = await db.execute(
+            select(FactOrder).where(FactOrder.id == order_id)
+        )
+        order = result.scalar_one_or_none()
+        if not order:
+            raise NotFoundError(f"订单不存在: {order_id}")
+        return order
+    except SQLAlchemyError as e:
+        logger.error(f"数据库查询失败: {e}", exc_info=True)
+        raise SystemError("数据库错误") from e
+```
+
+### 1.1 异常捕获范围与错误文案对应关系（必守）
+
+为避免「张冠李戴」——把序列化、数据库等异常误报成参数格式错误，导致用户与排查方向错误，必须遵守：
+
+- **异常捕获范围要窄**：只在对「该错误文案」负责的代码外包裹 try/except；不要用一个大 try 包住「参数校验 + 业务逻辑 + 序列化」等多步，再用一个 except 统一返回同一条消息（如「参数格式错误」）。否则后续步骤抛出的 ValueError/TypeError 会被误当成参数错误返回。
+- **一条错误文案只对应一种失败原因**：返回给用户的 message（及错误码）必须与真实失败原因一致（参数校验失败 → 参数错误；Pydantic/序列化失败 → 数据验证或处理失败；数据库失败 → 系统/查询错误）。禁止用同一条「参数格式错误」类文案覆盖多种不同异常。
+
+**反例**（禁止）：
 ```python
 try:
-    order = db.query(FactOrder).filter(FactOrder.id == order_id).first()
-    if not order:
-        raise NotFoundError(f"订单不存在: {order_id}")
-except SQLAlchemyError as e:
-    logger.error(f"数据库查询失败: {e}", exc_info=True)
-    raise SystemError("数据库错误") from e
+    normalized = validate_param(raw)   # 仅此处是「参数格式错误」
+    result = do_query(normalized)
+    data = serialize(result)           # 此处可能抛序列化/校验异常
+    return JSONResponse(data)
+except (ValueError, TypeError):
+    return error_response(message="参数格式错误")  # 序列化异常被误报为参数错误
+```
+
+**正例**（推荐）：
+```python
+try:
+    normalized = validate_param(raw)
+except (ValueError, TypeError):
+    return error_response(message="参数格式错误")
+
+try:
+    result = do_query(normalized)
+    data = serialize(result)  # 建议 model_dump(mode="json") 等可序列化输出
+    return JSONResponse(data)
+except Exception as e:
+    logger.error("查询/序列化失败", exc_info=True)
+    return error_response(message="处理失败", detail=str(e))
 ```
 
 ### 2. 错误日志

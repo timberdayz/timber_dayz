@@ -112,17 +112,18 @@ async def list_sales_targets(
             SELECT id, shop_id, year_month, target_sales_amount, target_quantity,
                    created_at
             FROM a_class.sales_targets_a
-            WHERE (:shop_id::text IS NULL OR shop_id = :shop_id)
-              AND (:year_month::text IS NULL OR year_month = :year_month)
+            WHERE (CAST(:shop_id AS text) IS NULL OR shop_id = :shop_id)
+              AND (CAST(:year_month AS text) IS NULL OR year_month = :year_month)
             ORDER BY year_month DESC, shop_id
         """), {"shop_id": shop_id, "year_month": year_month})
     except Exception:
+        await db.rollback()
         try:
             result = await db.execute(text("""
                 SELECT id, "店铺ID", "年月", "目标销售额", "目标订单数", "创建时间"
                 FROM a_class.sales_targets_a
-                WHERE (:shop_id::text IS NULL OR "店铺ID" = :shop_id)
-                  AND (:year_month::text IS NULL OR "年月" = :year_month)
+                WHERE (CAST(:shop_id AS text) IS NULL OR "店铺ID" = :shop_id)
+                  AND (CAST(:year_month AS text) IS NULL OR "年月" = :year_month)
                 ORDER BY "年月" DESC, "店铺ID"
             """), {"shop_id": shop_id, "year_month": year_month})
         except Exception as e:
@@ -167,6 +168,7 @@ async def create_sales_target(
                 "target_order_count": target.target_order_count,
             })
         except Exception:
+            await db.rollback()
             # 中文字段
             await db.execute(text("""
                 INSERT INTO a_class.sales_targets_a
@@ -183,11 +185,15 @@ async def create_sales_target(
                 "target_order_count": target.target_order_count,
             })
         await db.commit()
-        r = await db.execute(text("""
-            SELECT id, shop_id, year_month, target_sales_amount, target_quantity, created_at
-            FROM a_class.sales_targets_a WHERE shop_id = :shop_id AND year_month = :year_month
-        """), {"shop_id": target.shop_id, "year_month": target.year_month})
-        row = r.fetchone()
+        try:
+            r = await db.execute(text("""
+                SELECT id, shop_id, year_month, target_sales_amount, target_quantity, created_at
+                FROM a_class.sales_targets_a WHERE shop_id = :shop_id AND year_month = :year_month
+            """), {"shop_id": target.shop_id, "year_month": target.year_month})
+            row = r.fetchone()
+        except Exception:
+            await db.rollback()
+            row = None
         if not row:
             r = await db.execute(text("""
                 SELECT id, "店铺ID", "年月", "目标销售额", "目标订单数", "创建时间"
@@ -238,6 +244,7 @@ async def update_sales_target(
                 WHERE id = :target_id
             """), params)
         except Exception:
+            await db.rollback()
             u2 = []
             p2 = {"target_id": target_id}
             if target.target_sales_amount is not None:
@@ -252,8 +259,18 @@ async def update_sales_target(
                 WHERE id = :target_id
             """), p2)
         await db.commit()
-        r = await db.execute(text("SELECT id, shop_id, year_month, target_sales_amount, target_quantity, created_at FROM a_class.sales_targets_a WHERE id = :tid"), {"tid": target_id})
-        row = r.fetchone()
+        try:
+            r = await db.execute(
+                text(
+                    "SELECT id, shop_id, year_month, target_sales_amount, target_quantity, created_at "
+                    "FROM a_class.sales_targets_a WHERE id = :tid"
+                ),
+                {"tid": target_id},
+            )
+            row = r.fetchone()
+        except Exception:
+            await db.rollback()
+            row = None
         if not row:
             r = await db.execute(text('SELECT id, "店铺ID", "年月", "目标销售额", "目标订单数", "创建时间" FROM a_class.sales_targets_a WHERE id = :tid'), {"tid": target_id})
             row = r.fetchone()
@@ -304,6 +321,7 @@ async def copy_last_month_targets(
         """), {"lm": last_month})
         rows = result.fetchall()
     except Exception:
+        await db.rollback()
         result = await db.execute(text('SELECT "店铺ID", "目标销售额", "目标订单数" FROM a_class.sales_targets_a WHERE "年月" = :lm'), {"lm": last_month})
         rows = result.fetchall()
     if not rows:
@@ -318,6 +336,7 @@ async def copy_last_month_targets(
             """), {"shop_id": r[0], "target_month": target_month, "amt": r[1], "qty": r[2]})
             copied += 1
         except Exception:
+            await db.rollback()
             try:
                 await db.execute(text("""
                     INSERT INTO a_class.sales_targets_a ("店铺ID", "年月", "目标销售额", "目标订单数", "创建时间", "更新时间")
@@ -326,6 +345,7 @@ async def copy_last_month_targets(
                 """), {"shop_id": r[0], "target_month": target_month, "amt": r[1], "qty": r[2]})
                 copied += 1
             except Exception:
+                await db.rollback()
                 skipped += 1
     await db.commit()
     return {"success": True, "message": f"已从{last_month}复制到{target_month}", "copied_count": copied, "skipped_count": skipped, "total_count": len(rows)}

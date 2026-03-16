@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, text
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import date, datetime, timedelta
@@ -36,6 +36,7 @@ from modules.core.db import (
     PerformanceConfig,
     PerformanceScore,
     SalesTarget,
+    TargetBreakdown,
     Employee,
     EmployeePerformance,
     # [DELETED] v4.19.0: FactOrder 已删除
@@ -144,16 +145,16 @@ async def list_performance_configs(
         
         # 总数查询
         total_query = select(func.count()).select_from(query.subquery())
-        total = db.execute(total_query).scalar() or 0
+        total = (await db.execute(total_query)).scalar() or 0
         
         # 分页查询
         query = query.order_by(PerformanceConfig.effective_from.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)
         
-        configs = db.execute(query).scalars().all()
+        configs = (await db.execute(query)).scalars().all()
         
         return pagination_response(
-            data=[PerformanceConfigResponse.from_orm(c).dict() for c in configs],
+            data=[PerformanceConfigResponse.model_validate(c).model_dump() for c in configs],
             page=page,
             page_size=page_size,
             total=total
@@ -178,9 +179,10 @@ async def get_performance_config(
     查询绩效配置详情
     """
     try:
-        config = db.execute(
+        result = await db.execute(
             select(PerformanceConfig).where(PerformanceConfig.id == config_id)
-        ).scalar_one_or_none()
+        )
+        config = result.scalar_one_or_none()
         
         if not config:
             return error_response(
@@ -193,7 +195,7 @@ async def get_performance_config(
         
         return {
             "success": True,
-            "data": PerformanceConfigResponse.from_orm(config).dict()
+            "data": PerformanceConfigResponse.model_validate(config).model_dump()
         }
     except HTTPException:
         raise
@@ -273,7 +275,7 @@ async def create_performance_config(
             logger.warning(f"[PerformanceManagement] 触发A_CLASS_UPDATED事件失败: {event_err}")
         
         return success_response(
-            data=PerformanceConfigResponse.from_orm(config).dict(),
+            data=PerformanceConfigResponse.model_validate(config).model_dump(),
             message="绩效配置创建成功"
         )
     except HTTPException:
@@ -302,9 +304,10 @@ async def update_performance_config(
     如果更新权重,需要验证总和为100
     """
     try:
-        config = db.execute(
+        result = await db.execute(
             select(PerformanceConfig).where(PerformanceConfig.id == config_id)
-        ).scalar_one_or_none()
+        )
+        config = result.scalar_one_or_none()
         
         if not config:
             return error_response(
@@ -363,7 +366,7 @@ async def update_performance_config(
             logger.warning(f"[PerformanceManagement] 触发A_CLASS_UPDATED事件失败: {event_err}")
         
         return success_response(
-            data=PerformanceConfigResponse.from_orm(config).dict(),
+            data=PerformanceConfigResponse.model_validate(config).model_dump(),
             message="绩效配置更新成功"
         )
     except HTTPException:
@@ -389,9 +392,10 @@ async def delete_performance_config(
     删除绩效配置
     """
     try:
-        config = db.execute(
+        result = await db.execute(
             select(PerformanceConfig).where(PerformanceConfig.id == config_id)
-        ).scalar_one_or_none()
+        )
+        config = result.scalar_one_or_none()
         
         if not config:
             return error_response(
@@ -476,19 +480,119 @@ async def list_performance_scores(
             cache_status = "MISS"
 
         if group_by == "person":
-            # 按人员：从 employee_performance 取数据
-            query = select(EmployeePerformance)
-            if period:
-                query = query.where(EmployeePerformance.year_month == period)
-            total_query = select(func.count()).select_from(query.subquery())
-            total = (await db.execute(total_query)).scalar() or 0
-            query = query.order_by(EmployeePerformance.performance_score.desc())
-            query = query.offset((page - 1) * page_size).limit(page_size)
-            rows = (await db.execute(query)).scalars().all()
-            # 兼容 Row
-            ep_list = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in rows]
+            # 按人员：从 employee_performance 取数据（兼容英/中文列）
+            use_cn_fallback = False
+            ep_list = []
+            all_ep = []
+            total = 0
+            try:
+                query = select(EmployeePerformance)
+                if period:
+                    query = query.where(EmployeePerformance.year_month == period)
+                total_query = select(func.count()).select_from(query.subquery())
+                total = (await db.execute(total_query)).scalar() or 0
+                query = query.order_by(EmployeePerformance.performance_score.desc())
+                query = query.offset((page - 1) * page_size).limit(page_size)
+                rows = (await db.execute(query)).scalars().all()
+                ep_list = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in rows]
+
+                all_query = select(EmployeePerformance)
+                if period:
+                    all_query = all_query.where(EmployeePerformance.year_month == period)
+                all_rows = (await db.execute(all_query)).scalars().all()
+                all_ep = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in all_rows]
+            except Exception:
+                await db.rollback()
+                use_cn_fallback = True
+                logger.warning("employee_performance ORM query failed, fallback to CN column SQL")
+
+                if period:
+                    total_sql = text(
+                        """
+                        select count(1)
+                        from c_class.employee_performance
+                        where "年月" = :period
+                        """
+                    )
+                    total = int((await db.execute(total_sql, {"period": period})).scalar() or 0)
+                    page_sql = text(
+                        """
+                        select
+                          "员工编号" as employee_code,
+                          "实际销售额" as actual_sales,
+                          "达成率" as achievement_rate,
+                          "绩效得分" as performance_score
+                        from c_class.employee_performance
+                        where "年月" = :period
+                        order by "绩效得分" desc
+                        limit :limit offset :offset
+                        """
+                    )
+                    page_rows = (
+                        await db.execute(
+                            page_sql,
+                            {"period": period, "limit": page_size, "offset": (page - 1) * page_size},
+                        )
+                    ).mappings().all()
+                    all_sql = text(
+                        """
+                        select
+                          "员工编号" as employee_code,
+                          "绩效得分" as performance_score
+                        from c_class.employee_performance
+                        where "年月" = :period
+                        """
+                    )
+                    all_rows = (await db.execute(all_sql, {"period": period})).mappings().all()
+                else:
+                    total_sql = text(
+                        """
+                        select count(1)
+                        from c_class.employee_performance
+                        """
+                    )
+                    total = int((await db.execute(total_sql)).scalar() or 0)
+                    page_sql = text(
+                        """
+                        select
+                          "员工编号" as employee_code,
+                          "实际销售额" as actual_sales,
+                          "达成率" as achievement_rate,
+                          "绩效得分" as performance_score
+                        from c_class.employee_performance
+                        order by "绩效得分" desc
+                        limit :limit offset :offset
+                        """
+                    )
+                    page_rows = (
+                        await db.execute(
+                            page_sql,
+                            {"limit": page_size, "offset": (page - 1) * page_size},
+                        )
+                    ).mappings().all()
+                    all_sql = text(
+                        """
+                        select
+                          "员工编号" as employee_code,
+                          "绩效得分" as performance_score
+                        from c_class.employee_performance
+                        """
+                    )
+                    all_rows = (await db.execute(all_sql)).mappings().all()
+                ep_list = [dict(r) for r in page_rows]
+                all_ep = [dict(r) for r in all_rows]
+
             # 取员工姓名
-            codes = list({getattr(e, "employee_code", None) for e in ep_list if e})
+            codes = []
+            for e in ep_list:
+                if use_cn_fallback:
+                    ec = e.get("employee_code")
+                else:
+                    ec = getattr(e, "employee_code", None)
+                if ec:
+                    codes.append(ec)
+            codes = list(set(codes))
+
             name_map = {}
             if codes:
                 emp_query = select(Employee.employee_code, Employee.name).where(Employee.employee_code.in_(codes))
@@ -497,28 +601,42 @@ async def list_performance_scores(
                     ec = r[0] if hasattr(r, "__getitem__") else getattr(r, "employee_code", "")
                     nm = r[1] if hasattr(r, "__getitem__") and len(r) > 1 else getattr(r, "name", "")
                     name_map[ec] = nm or ec
+
             # 计算排名
-            all_query = select(EmployeePerformance)
-            if period:
-                all_query = all_query.where(EmployeePerformance.year_month == period)
-            all_rows = (await db.execute(all_query)).scalars().all()
-            all_ep = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in all_rows]
-            sorted_ep = sorted(all_ep, key=lambda x: float(getattr(x, "performance_score", 0) or 0), reverse=True)
+            sorted_ep = sorted(
+                all_ep,
+                key=lambda x: float(
+                    (x.get("performance_score") if use_cn_fallback else getattr(x, "performance_score", 0))
+                    or 0
+                ),
+                reverse=True,
+            )
             rank_by_code = {}
             for i, e in enumerate(sorted_ep, 1):
-                ec = getattr(e, "employee_code", None)
+                ec = e.get("employee_code") if use_cn_fallback else getattr(e, "employee_code", None)
                 if ec:
                     rank_by_code[ec] = i
+
             score_responses = []
             for ep in ep_list:
-                ec = getattr(ep, "employee_code", "")
-                scr = float(getattr(ep, "performance_score", 0) or 0)
-                ach = float(getattr(ep, "achievement_rate", 0) or 0) * 100
+                if use_cn_fallback:
+                    ec = ep.get("employee_code", "")
+                    scr = float(ep.get("performance_score", 0) or 0)
+                    ach = float(ep.get("achievement_rate", 0) or 0) * 100
+                    sales_achieved_raw = ep.get("actual_sales")
+                    sales_achieved = (
+                        float(sales_achieved_raw) if sales_achieved_raw is not None else None
+                    )
+                else:
+                    ec = getattr(ep, "employee_code", "")
+                    scr = float(getattr(ep, "performance_score", 0) or 0)
+                    ach = float(getattr(ep, "achievement_rate", 0) or 0) * 100
+                    sales_achieved = getattr(ep, "actual_sales", None)
                 score_responses.append({
                     "employee_code": ec,
                     "employee_name": name_map.get(ec, ec),
                     "sales_target": None,
-                    "sales_achieved": getattr(ep, "actual_sales", None),
+                    "sales_achieved": sales_achieved,
                     "sales_rate": ach if ach else None,
                     "profit_target": None,
                     "profit_achieved": None,
@@ -702,7 +820,7 @@ async def get_shop_performance(
             )
         )).scalar_one_or_none()
         
-        score_data = PerformanceScoreResponse.from_orm(score).dict()
+        score_data = PerformanceScoreResponse.model_validate(score).model_dump()
         if shop:
             score_data["shop_name"] = shop.shop_name
 
@@ -732,133 +850,214 @@ async def calculate_performance_scores(
 ):
     """
     计算绩效评分(C类数据:系统自动计算)
-    
-    基于以下数据计算:
-    1. 销售额得分:从sales_targets和fact_orders计算达成率 × 权重
-    2. 毛利得分:从fact_orders计算毛利达成率 × 权重
-    3. 重点产品得分:从fact_product_metrics计算重点产品达成率 × 权重
-    4. 运营得分:从shop_health_scores计算运营指标得分 × 权重
-    
-    注意:这是一个复杂的计算逻辑,需要根据实际业务规则实现
+
+    绩效计算最小闭环：
+    - 优先使用 a_class.target_breakdown（月度店铺目标/达成）聚合
+    - 缺失时回退使用 Metabase 店铺赛马数据估算达成率
+    - 写入 c_class.performance_scores（按 platform_code+shop_id+period upsert）
     """
     try:
-        # 获取绩效配置
+        # 按考核周期校验配置是否存在(契约: 无配置时返回 404 + PERF_CONFIG_NOT_FOUND)
+        period_start = datetime.strptime(period, "%Y-%m").date().replace(day=1)
+        if period_start.month == 12:
+            period_end = period_start.replace(year=period_start.year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            period_end = period_start.replace(month=period_start.month + 1, day=1) - timedelta(days=1)
+
         if config_id:
             result = await db.execute(
                 select(PerformanceConfig).where(PerformanceConfig.id == config_id)
             )
             config = result.scalar_one_or_none()
         else:
-            # 获取当前生效的配置
-            today = date.today()
             result = await db.execute(
                 select(PerformanceConfig).where(
                     PerformanceConfig.is_active == True,
-                    PerformanceConfig.effective_from <= today,
+                    PerformanceConfig.effective_from <= period_end,
                     or_(
                         PerformanceConfig.effective_to.is_(None),
-                        PerformanceConfig.effective_to >= today
+                        PerformanceConfig.effective_to >= period_start
                     )
                 ).order_by(PerformanceConfig.effective_from.desc())
             )
             config = result.scalar_one_or_none()
-        
+
         if not config:
             return error_response(
-                code=ErrorCode.DATA_VALIDATION_FAILED,
-                message="未找到生效的绩效配置",
-                error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
-                recovery_suggestion="请先创建并启用绩效配置",
-                status_code=404
+                code=ErrorCode.PERF_CONFIG_NOT_FOUND,
+                message="考核周期内无可用绩效配置",
+                error_type=get_error_type(ErrorCode.PERF_CONFIG_NOT_FOUND),
+                recovery_suggestion="请先创建并启用该周期内的绩效配置",
+                status_code=404,
+                data={"error_code": "PERF_CONFIG_NOT_FOUND"}
             )
-        
-        # 获取所有店铺
-        result = await db.execute(select(DimShop))
-        shops = result.scalars().all()
-        
-        # 解析周期(如"2025-01")
-        period_start = datetime.strptime(period, "%Y-%m").date().replace(day=1)
-        if period_start.month == 12:
-            period_end = period_start.replace(year=period_start.year + 1, month=1, day=1) - timedelta(days=1)
-        else:
-            period_end = period_start.replace(month=period_start.month + 1, day=1) - timedelta(days=1)
-        
-        calculated_scores = []
-        
-        for shop in shops:
-            # TODO: 实现具体的计算逻辑
-            # 这里需要根据业务规则计算各项得分
-            # 1. 销售额得分:查询sales_targets和fact_orders
-            # 2. 毛利得分:查询fact_orders计算毛利
-            # 3. 重点产品得分:查询fact_product_metrics
-            # 4. 运营得分:查询shop_health_scores
-            
-            # 临时实现:使用默认值
-            sales_score = 0.0
-            profit_score = 0.0
-            key_product_score = 0.0
-            operation_score = 0.0
-            
-            total_score = (
-                sales_score * config.sales_weight / 100 +
-                profit_score * config.profit_weight / 100 +
-                key_product_score * config.key_product_weight / 100 +
-                operation_score * config.operation_weight / 100
+
+        def _score_by_rate(max_score: float, rate: float) -> float:
+            safe_rate = max(0.0, min(1.0, float(rate or 0.0)))
+            return round(float(max_score) * safe_rate, 4)
+
+        # 1) 优先从 target_breakdown 聚合店铺维度达成
+        source_rows = {}
+        tb_query = select(TargetBreakdown).where(
+            TargetBreakdown.breakdown_type.in_(["shop", "shop_time"]),
+            TargetBreakdown.platform_code.is_not(None),
+            TargetBreakdown.shop_id.is_not(None),
+            or_(
+                and_(
+                    TargetBreakdown.period_start.is_not(None),
+                    TargetBreakdown.period_end.is_not(None),
+                    TargetBreakdown.period_start <= period_end,
+                    TargetBreakdown.period_end >= period_start,
+                ),
+                TargetBreakdown.period_label == period,
+            ),
+        )
+        tb_rows = (await db.execute(tb_query)).scalars().all()
+        for row in tb_rows:
+            key = f"{(row.platform_code or '').lower()}|{row.shop_id or ''}"
+            rec = source_rows.setdefault(
+                key,
+                {
+                    "platform_code": (row.platform_code or "").lower(),
+                    "shop_id": row.shop_id,
+                    "target": 0.0,
+                    "achieved": 0.0,
+                },
             )
-            
-            # 创建或更新绩效评分
-            result = await db.execute(
-                select(PerformanceScore).where(
-                    PerformanceScore.platform_code == shop.platform_code,
-                    PerformanceScore.shop_id == shop.shop_id,
-                    PerformanceScore.period == period
+            rec["target"] += float(row.target_amount or 0)
+            rec["achieved"] += float(row.achieved_amount or 0)
+
+        # 2) 若目标分解为空，回退 Metabase 店铺赛马（按名称映射店铺）
+        if not source_rows:
+            try:
+                from backend.services.metabase_question_service import get_metabase_service
+
+                mbs = get_metabase_service()
+                racing = await mbs.query_question(
+                    "business_overview_shop_racing",
+                    {"granularity": "monthly", "date": f"{period}-01"},
                 )
+                if isinstance(racing, list) and racing:
+                    shop_rows = (await db.execute(select(DimShop))).scalars().all()
+                    by_name = {}
+                    for s in shop_rows:
+                        if s.shop_name:
+                            by_name.setdefault(s.shop_name.strip().lower(), s)
+                    for r in racing:
+                        name = str(r.get("name") or "").strip().lower()
+                        shop = by_name.get(name)
+                        if not shop:
+                            continue
+                        key = f"{(shop.platform_code or '').lower()}|{shop.shop_id or ''}"
+                        source_rows[key] = {
+                            "platform_code": (shop.platform_code or "").lower(),
+                            "shop_id": shop.shop_id,
+                            "target": float(r.get("target") or 0),
+                            "achieved": float(r.get("achieved") or 0),
+                        }
+            except Exception as e:
+                logger.warning("绩效计算 Metabase 回退数据加载失败: %s", e)
+
+        if not source_rows:
+            return error_response(
+                code=ErrorCode.PERF_CALC_NOT_READY,
+                message="绩效计算能力未就绪（无可用源数据）",
+                error_type=get_error_type(ErrorCode.PERF_CALC_NOT_READY),
+                recovery_suggestion="请先配置目标分解或确认 Metabase 店铺赛马数据可用",
+                status_code=503,
+                data={"error_code": "PERF_CALC_NOT_READY"},
             )
-            existing_score = result.scalar_one_or_none()
-            
-            if existing_score:
-                existing_score.total_score = total_score
-                existing_score.sales_score = sales_score
-                existing_score.profit_score = profit_score
-                existing_score.key_product_score = key_product_score
-                existing_score.operation_score = operation_score
-                score = existing_score
+
+        # 3) 计算分数并排名
+        calc_list = []
+        for rec in source_rows.values():
+            target = float(rec["target"] or 0)
+            achieved = float(rec["achieved"] or 0)
+            rate = (achieved / target) if target > 0 else 0.0
+            sales_score = _score_by_rate(config.sales_max_score, rate)
+            profit_score = _score_by_rate(config.profit_max_score, rate)
+            key_product_score = _score_by_rate(config.key_product_max_score, rate)
+            operation_score = _score_by_rate(config.operation_max_score, rate)
+            total_score = round(sales_score + profit_score + key_product_score + operation_score, 4)
+            calc_list.append(
+                {
+                    "platform_code": rec["platform_code"],
+                    "shop_id": rec["shop_id"],
+                    "rate": rate,
+                    "sales_score": sales_score,
+                    "profit_score": profit_score,
+                    "key_product_score": key_product_score,
+                    "operation_score": operation_score,
+                    "total_score": total_score,
+                }
+            )
+        calc_list.sort(key=lambda x: x["total_score"], reverse=True)
+        for idx, row in enumerate(calc_list, start=1):
+            row["rank"] = idx
+            row["performance_coefficient"] = round(1.0 + ((row["total_score"] - 80.0) / 100.0), 4)
+
+        # 4) upsert c_class.performance_scores
+        upserts = 0
+        for row in calc_list:
+            existed = (
+                await db.execute(
+                    select(PerformanceScore).where(
+                        PerformanceScore.platform_code == row["platform_code"],
+                        PerformanceScore.shop_id == row["shop_id"],
+                        PerformanceScore.period == period,
+                    )
+                )
+            ).scalar_one_or_none()
+            details = {
+                "sales": {"rate": row["rate"]},
+                "profit": {"rate": row["rate"]},
+                "key_product": {"rate": row["rate"]},
+                "operation": {"rate": row["rate"]},
+            }
+            if existed:
+                existed.total_score = row["total_score"]
+                existed.sales_score = row["sales_score"]
+                existed.profit_score = row["profit_score"]
+                existed.key_product_score = row["key_product_score"]
+                existed.operation_score = row["operation_score"]
+                existed.rank = row["rank"]
+                existed.performance_coefficient = row["performance_coefficient"]
+                existed.score_details = details
+                existed.updated_at = datetime.utcnow()
             else:
-                score = PerformanceScore(
-                    platform_code=shop.platform_code,
-                    shop_id=shop.shop_id,
-                    period=period,
-                    total_score=total_score,
-                    sales_score=sales_score,
-                    profit_score=profit_score,
-                    key_product_score=key_product_score,
-                    operation_score=operation_score,
-                    score_details={}  # TODO: 存储详细计算过程
+                db.add(
+                    PerformanceScore(
+                        platform_code=row["platform_code"],
+                        shop_id=row["shop_id"],
+                        period=period,
+                        total_score=row["total_score"],
+                        sales_score=row["sales_score"],
+                        profit_score=row["profit_score"],
+                        key_product_score=row["key_product_score"],
+                        operation_score=row["operation_score"],
+                        rank=row["rank"],
+                        performance_coefficient=row["performance_coefficient"],
+                        score_details=details,
+                    )
                 )
-                db.add(score)
-            
-            calculated_scores.append(score)
-        
-        # 计算排名
-        calculated_scores.sort(key=lambda x: x.total_score, reverse=True)
-        for rank, score in enumerate(calculated_scores, start=1):
-            score.rank = rank
-        
+            upserts += 1
         await db.commit()
-        
-        return {
-            "success": True,
-            "data": {
-                "period": period,
-                "calculated_count": len(calculated_scores),
-                "config": PerformanceConfigResponse.from_orm(config).dict()
-            },
-            "message": "绩效评分计算完成"
-        }
+        return success_response(
+            data={"period": period, "upserts": upserts},
+            message="绩效计算完成",
+        )
     except HTTPException:
         raise
+    except ValueError as e:
+        logger.warning(f"考核周期格式无效: {e}")
+        return error_response(
+            code=ErrorCode.DATA_FORMAT_INVALID,
+            message="考核周期格式无效，应为 YYYY-MM",
+            error_type=get_error_type(ErrorCode.DATA_FORMAT_INVALID),
+            detail=str(e),
+            status_code=400
+        )
     except Exception as e:
-        await db.rollback()
         logger.error(f"计算绩效评分失败: {e}", exc_info=True)
         return error_response(
             code=ErrorCode.DATABASE_QUERY_ERROR,

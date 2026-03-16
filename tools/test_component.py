@@ -585,6 +585,53 @@ class ComponentTester:
         component_type = getattr(component_class, 'component_type', 'export')
         non_login_types = ('export', 'navigation', 'date_picker', 'filters')
         account_id = (self.account_id or (account_info.get('account_id') if account_info else None)) or ''
+        standalone_test_config: Dict[str, Any] = {}
+
+        # 1.8: 发现模式组件测试策略（date_picker/filters）
+        if component_type in ('date_picker', 'filters'):
+            test_mode = str(getattr(component_class, 'test_mode', '') or '').strip().lower()
+            cls_test_config = getattr(component_class, 'test_config', {}) or {}
+
+            if test_mode in ('', 'flow_only'):
+                result.phase = component_type
+                result.phase_component_name = f"{self.platform}/{component_name}"
+                result.error = (
+                    f"{component_type} 组件当前 test_mode={test_mode or 'flow_only'}，"
+                    "仅支持完整链路验证（CollectionExecutorV2.execute），不支持版本页单组件测试"
+                )
+                return False
+
+            if test_mode != 'standalone':
+                result.phase = component_type
+                result.phase_component_name = f"{self.platform}/{component_name}"
+                result.error = (
+                    f"{component_type} 组件 test_mode={test_mode} 非法；"
+                    "允许值仅 flow_only / standalone"
+                )
+                return False
+
+            if not isinstance(cls_test_config, dict):
+                result.phase = component_type
+                result.phase_component_name = f"{self.platform}/{component_name}"
+                result.error = f"{component_type} 组件 test_mode=standalone 但 test_config 不是字典"
+                return False
+
+            has_url = bool(cls_test_config.get('test_url') or cls_test_config.get('url'))
+            has_domain = bool(cls_test_config.get('test_data_domain') or cls_test_config.get('data_domain'))
+            if not has_url and not has_domain:
+                result.phase = component_type
+                result.phase_component_name = f"{self.platform}/{component_name}"
+                result.error = (
+                    f"{component_type} 组件 test_mode=standalone 缺少 test_config.url 或 "
+                    "test_config.test_data_domain"
+                )
+                return False
+
+            standalone_test_config = dict(cls_test_config)
+            if standalone_test_config.get('url') and not standalone_test_config.get('test_url'):
+                standalone_test_config['test_url'] = standalone_test_config['url']
+            if standalone_test_config.get('data_domain') and not standalone_test_config.get('test_data_domain'):
+                standalone_test_config['test_data_domain'] = standalone_test_config['data_domain']
 
         # 1.7: 非登录组件且未 skip_login 时必须提供 account_id
         if component_type in non_login_types and not self.skip_login and not account_id:
@@ -645,6 +692,22 @@ class ComponentTester:
                         await browser.close()
                         return False
 
+                # 1.8: date_picker/filters standalone 模式先导航并执行 pre_steps
+                if component_type in ('date_picker', 'filters') and standalone_test_config:
+                    nav_ok = await self._navigate_to_test_page(page, standalone_test_config, account_info)
+                    if not nav_ok:
+                        result.phase = component_type
+                        result.phase_component_name = f"{self.platform}/{component_name}"
+                        result.error = f"{component_type} standalone 测试导航失败"
+                        await context.close()
+                        await browser.close()
+                        return False
+                    pre_steps = standalone_test_config.get('pre_steps') or []
+                    if isinstance(pre_steps, list):
+                        for st in pre_steps:
+                            if isinstance(st, dict) and st.get('action'):
+                                await self._execute_step(page, st, account_info)
+
                 adapter_config = {'output_dir': str(self.output_dir)}
                 if self.test_dir:
                     adapter_config.setdefault('task', {})['screenshot_dir'] = str(self.test_dir)
@@ -686,6 +749,39 @@ class ComponentTester:
                 start_time = datetime.now()
 
                 if component_type == 'login':
+                    # Page readiness: wait for at least one login element
+                    # to be visible before executing login component.
+                    # Uses .first.wait_for instead of to_have_count(1)
+                    # to handle pages with multiple password inputs.
+                    _readiness_candidates = [
+                        ("input[type='password']", page.locator("input[type='password']")),
+                        ("input[name*='password' i]", page.locator("input[name*='password' i]")),
+                        ("button:has-text('登录')", page.locator("button:has-text('登录')")),
+                        ("button[type='submit']", page.locator("button[type='submit']")),
+                    ]
+                    _page_ready = False
+                    for _cand_name, _cand_loc in _readiness_candidates:
+                        try:
+                            await _cand_loc.first.wait_for(state="visible", timeout=15000)
+                            _page_ready = True
+                            logger.info("Login page ready: %s visible", _cand_name)
+                            break
+                        except Exception:
+                            pass
+                    if not _page_ready:
+                        _current_url = str(getattr(page, "url", ""))
+                        logger.warning(
+                            "Login page readiness timeout; url=%s; none of %s visible within 15s",
+                            _current_url,
+                            [c[0] for c in _readiness_candidates],
+                        )
+                        result.phase = 'page_readiness'
+                        result.phase_component_name = f"{self.platform}/{component_name}"
+                        result.error = (
+                            f"Login page readiness check failed; current_url={_current_url}; "
+                            f"candidates={[c[0] for c in _readiness_candidates]}; timeout=15000ms"
+                        )
+
                     exec_result = await self._run_login_with_verification_support(
                         adapter=adapter,
                         page=page,

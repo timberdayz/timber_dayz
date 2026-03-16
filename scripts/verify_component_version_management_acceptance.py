@@ -36,22 +36,47 @@ def main():
     # 1.10 路径安全：越界拒绝
     print("[1.10] file_path 安全边界校验...")
     try:
+        import tempfile
         from modules.apps.collection_center.component_loader import ComponentLoader
         loader = ComponentLoader()
-        # 越界路径应拒绝（文件不存在会先 FileNotFoundError；存在则应 ValueError）
+        # 创建一个确实存在但位于允许目录外的临时文件，验证必须被安全拒绝（ValueError）
+        with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as tf:
+            tf.write(b"class Dummy:\n    pass\n")
+            outside_path = tf.name
         try:
-            loader.load_python_component_from_path("/tmp/outside_components.py", version_id=1)
+            loader.load_python_component_from_path(outside_path, version_id=1)
+            print("  [FAIL] 越界路径未被拒绝")
+            failed += 1
         except ValueError as ve:
-            if "outside allowed" in str(ve) or "PROJECT_ROOT" in str(ve) or "security" in str(ve).lower():
-                print("  [PASS] 越界路径被拒绝")
+            ve_text = str(ve).lower()
+            if "outside allowed" in ve_text or "security" in ve_text or "project_root" in ve_text:
+                print("  [PASS] 越界路径被拒绝（安全边界生效）")
                 passed += 1
             else:
                 print(f"  [FAIL] 期望安全相关 ValueError，得到: {ve}")
                 failed += 1
-        except FileNotFoundError:
-            # Windows 下 /tmp 可能解析到其他路径，仍会先触发 exists 检查
-            print("  [PASS] 路径不存在或越界（FileNotFound 或未到达校验）")
-            passed += 1
+        finally:
+            try:
+                Path(outside_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"  [FAIL] {e}")
+        failed += 1
+
+    # 1.8 发现模式组件测试策略：flow_only 禁止单测，standalone 需 test_config
+    print("[1.8] 发现模式组件测试策略门禁...")
+    try:
+        with open(ROOT / "backend" / "routers" / "component_versions.py", "r", encoding="utf-8") as f:
+            cv_content = f.read()
+        with open(ROOT / "tools" / "test_component.py", "r", encoding="utf-8") as f:
+            tc_content = f.read()
+        assert "test_mode" in cv_content and "flow_only" in cv_content and "standalone" in cv_content
+        assert "test_config" in cv_content
+        assert "standalone_test_config" in tc_content
+        assert "_navigate_to_test_page(page, standalone_test_config" in tc_content
+        print("  [PASS] 已实现 flow_only 禁止单测 + standalone/test_config 才允许")
+        passed += 1
     except Exception as e:
         print(f"  [FAIL] {e}")
         failed += 1
@@ -138,6 +163,44 @@ def main():
         assert '"phase"' in content or "'phase'" in content
         assert "phase_component_name" in content and "phase_component_version" in content
         print("  [PASS] get_test_status 与 progress 写入含 phase 字段")
+        passed += 1
+    except Exception as e:
+        print(f"  [FAIL] {e}")
+        failed += 1
+
+    # 7.4 生成器稳健性（反模式与作用域收敛）：回归测试
+    print("[7.4] 生成器回归（反模式/作用域收敛/唯一性）...")
+    try:
+        import subprocess
+        r = subprocess.run(
+            [sys.executable, "-m", "pytest", str(ROOT / "backend" / "tests" / "test_steps_to_python_regression.py"), "-v", "--tb=short"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if r.returncode == 0:
+            print("  [PASS] test_steps_to_python_regression 全部通过")
+            passed += 1
+        else:
+            print(f"  [FAIL] pytest 退出码 %d" % r.returncode)
+            if r.stderr:
+                for line in r.stderr.strip().split("\n")[-15:]:
+                    print("    " + line)
+            failed += 1
+    except Exception as e:
+        print(f"  [FAIL] {e}")
+        failed += 1
+
+    # 8.15.5 URL 导航契约回归：缺失 navigate / 无 role=form / URL 错配
+    print("[8.15.5] login URL 导航契约回归覆盖...")
+    try:
+        with open(ROOT / "backend" / "tests" / "test_steps_to_python_regression.py", "r", encoding="utf-8") as f:
+            content = f.read()
+        assert "test_8_15_5_missing_navigate_step_still_has_navigation_contract" in content
+        assert "test_8_15_5_container_without_role_form_has_fallback" in content
+        assert "test_8_15_5_url_mismatch_has_diagnosable_failure" in content
+        print("  [PASS] 已覆盖三类场景：缺失 navigate、容器无 role=form、URL 错配")
         passed += 1
     except Exception as e:
         print(f"  [FAIL] {e}")

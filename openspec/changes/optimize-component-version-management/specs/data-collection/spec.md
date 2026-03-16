@@ -53,3 +53,70 @@
 - **THEN** 生成的代码不包含「仅当 locator.count() > 0 且 is_visible() 才截图并 raise」的逻辑
 - **AND** 不生成会吞掉异常的 `except Exception: pass` 导致继续执行「点击登录」的分支
 - **AND** 生成逻辑与《RECORDER_PYTHON_OUTPUT》及验证码回传流程一致
+
+### Requirement: 采集脚本现实 Web 稳健性约束
+
+系统 SHALL 在采集脚本编写与录制代码生成过程中，遵循面向现实 Web 场景的稳健性约束：定位器唯一性、作用域收敛、条件等待、反模式禁用与失败可观测性，避免 strict mode 冲突与静默穿透导致的不可预期行为。
+
+#### Scenario: 关键交互前定位器在作用域内唯一
+
+- **WHEN** 脚本对元素执行 click/fill/press 或 expect(...).to_be_visible 等关键交互
+- **THEN** 系统或开发约定要求该目标 locator 在当前作用域唯一命中（通过作用域收敛与唯一性断言保障）
+- **AND** 出现多匹配时，先收敛到稳定容器（如 form/dialog/frame/row）再定位，而不是默认 `.first/.nth()` 掩盖歧义
+
+#### Scenario: 禁止单次检测与静默吞错反模式
+
+- **WHEN** 录制生成器或手写脚本处理元素检测与交互
+- **THEN** 不采用 `count()+is_visible()` 单次检测后立刻操作的模式作为关键路径
+- **AND** 不采用 `except Exception: pass` 吞掉定位/交互异常后继续主流程
+- **AND** 等待策略优先条件等待与 Playwright 自动等待，不以固定 sleep 代替页面状态确认
+
+#### Scenario: 录制生成器输出遵循稳健性约束
+
+- **WHEN** 用户在录制页使用步骤重新生成 Python 代码
+- **THEN** 生成代码不得默认输出吞错继续模式（如 `except Exception: pass`）用于关键交互路径
+- **AND** 生成代码对关键交互目标应优先使用作用域收敛与唯一性策略，而非默认 `.first/.nth` 消歧
+- **AND** 对固定 sleep、宽泛 locator 等风险模式，系统至少输出 lint 提示并给出可操作修复建议
+
+#### Scenario: 关键反模式触发 lint error 时阻断保存
+
+- **WHEN** 录制页代码分析命中关键反模式（如吞错继续、关键路径无依据 `.first/.nth`、无理由固定 sleep）
+- **THEN** 系统将该问题标记为 `error`（而非仅 warning）
+- **AND** 默认阻断组件保存，直到用户修复或在受控配置下显式放行
+
+#### Scenario: 有显式固定等待理由时不应被误阻断
+
+- **WHEN** 生成代码中的固定等待包含显式理由（例如步骤字段或注释已说明“固定等待原因”）
+- **THEN** 系统可给出规范提示（warning）但不应默认以 `error` 阻断保存
+- **AND** “无理由固定等待”仍应保持 `error` 阻断
+
+#### Scenario: `.first/.nth` 受控放行需注释依据
+
+- **WHEN** 生成代码使用 `.first/.nth`
+- **THEN** 系统仅在存在明确业务语义注释时允许保存（可降级为 warning）
+- **AND** 无注释依据时标记为 `error` 并阻断保存
+
+#### Scenario: 可选步骤异常处理代码必须可执行
+
+- **WHEN** 生成器为 optional 步骤输出异常处理分支
+- **THEN** 生成代码不得引用生成器侧临时变量（如循环索引变量）导致运行期 NameError
+- **AND** 异常日志需包含可诊断上下文（step_index、action、error）
+
+#### Scenario: login 容器收敛不得仅依赖 role=form
+
+- **WHEN** 录制生成器输出 login 组件代码，目标页面不存在可用 `role=form` 容器
+- **THEN** 系统采用“语义容器优先 + 业务容器兜底 + page 根作用域告警兜底”的收敛策略，而非直接失败
+- **AND** 若最终仍失败，错误信息包含容器候选与当前 URL，便于定位页面结构差异
+
+#### Scenario: login URL 导航采用显式契约
+
+- **WHEN** login 组件执行前未处于可用登录页面
+- **THEN** 系统按优先级解析目标 URL（`login_url_override > account.login_url > 平台默认 URL`）并执行导航
+- **AND** 导航成功判定采用“URL/路由特征 + 关键登录元素可见”双信号
+- **AND** 不得仅依赖单一 `networkidle`/`domcontentloaded` 作为登录页就绪判定
+
+#### Scenario: 失败结果可定位可诊断
+
+- **WHEN** 组件测试或执行失败
+- **THEN** 返回结果包含至少 `phase`、`component`、`version` 与当前 URL 等上下文
+- **AND** 在验证码或关键失败路径可提供截图等证据，支持快速定位问题

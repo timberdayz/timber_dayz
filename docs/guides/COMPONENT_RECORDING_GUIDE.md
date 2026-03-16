@@ -1,6 +1,11 @@
-# 组件录制指南
+# 组件录制指南（历史参考，非现行规范）
 
-本指南说明如何使用组件录制工具录制和创建数据采集组件。
+本页包含早期录制流程说明，保留用于历史排查。**现行规范请以以下文档为准**：
+
+- `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`（采集脚本编写唯一规范基线）
+- `docs/guides/RECORDER_PYTHON_OUTPUT.md`（录制页 Python 产出与保存语义）
+
+> 注意：本文中出现的 YAML 片段、Codegen 描述、固定等待示例等内容不作为当前实现依据。
 
 ## 目录
 
@@ -48,16 +53,14 @@
 - 登录URL正确
 - 密码已加密存储
 
-### 2. 选择录制模式
+### 2. 选择录制模式（更新）
 
-**Inspector 模式（推荐）**：
+**Inspector 模式（唯一支持）**：
 - 持久化会话，复用登录状态
 - 自动处理弹窗
 - 支持 Trace 录制回放
 
-**Codegen 模式（备选）**：
-- 简单快速
-- 适合一次性录制
+**Codegen 模式**：已废弃，不再作为当前录制路径。
 
 ### 3. 了解目标平台
 
@@ -85,7 +88,7 @@
 5. 等待登录成功
 6. 点击"停止录制"
 
-**示例 YAML**：
+**历史示例（YAML 已废弃，仅用于理解旧数据）**：
 
 ```yaml
 name: miaoshou_login
@@ -139,7 +142,7 @@ success_criteria:
 3. 录制导航到该数据域页面的操作
 4. 完成后，组件会自动生成 `data_domain_urls` 映射表
 
-**示例 YAML**：
+**历史示例 YAML（已废弃）**：
 
 ```yaml
 name: shopee_navigation
@@ -182,7 +185,7 @@ steps:
 2. 录制日期选择操作（建议录制"自定义日期"路径）
 3. 使用变量 `{{params.date_from}}` 和 `{{params.date_to}}`
 
-**示例 YAML**：
+**历史示例 YAML（已废弃）**：
 
 ```yaml
 name: shopee_date_picker
@@ -220,7 +223,7 @@ steps:
 2. 录制筛选操作
 3. 使用变量 `{{params.order_status}}`、`{{params.shop_id}}` 等
 
-**示例 YAML**：
+**历史示例 YAML（已废弃）**：
 
 ```yaml
 name: shopee_filters
@@ -287,7 +290,7 @@ steps:
    - 处理导出配置弹窗（如有）
    - 等待下载完成
 
-**示例 YAML（订单导出 - 自包含流程）**：
+**历史示例 YAML（订单导出 - 自包含流程，已废弃）**：
 
 ```yaml
 name: shopee_orders_export
@@ -337,7 +340,7 @@ steps:
 
 **说明**：导出组件是自包含的完整流程，从导航到下载一气呵成。执行器只需调用登录组件后，直接执行导出组件即可。
 
-**示例 YAML（服务-智能客服导出）**：
+**历史示例 YAML（服务-智能客服导出，已废弃）**：
 
 ```yaml
 name: shopee_services_ai_assistant_export
@@ -495,11 +498,10 @@ A: 建议录制"自定义日期"路径，使用 `{{params.date_from}}` 和 `{{pa
 
 ### Q: 组件录制完成后如何测试？
 
-A: 
-1. 在录制工具中点击"测试组件"
-2. 选择测试账号
-3. 观察浏览器执行过程
-4. 查看测试结果和失败截图
+A:
+1. 在录制页保存 Python 组件版本；
+2. 跳转到组件版本管理页进行“测试组件”；
+3. 选择账号后执行测试，查看阶段化结果（phase/component/version）与失败截图。
 
 ---
 

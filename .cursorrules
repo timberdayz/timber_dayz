@@ -41,6 +41,7 @@
 □ I/O密集型操作？ → 使用ExecutorManager.run_io_intensive()（线程池）⭐⭐⭐
 □ 前端刷新？ → 局部刷新优先，支持后台刷新（showLoading参数）⭐⭐⭐
 □ Node/前端/Docker 前端镜像？ → 使用 Node 24+（.nvmrc；禁止写回 18）⭐⭐⭐
+□ 新增/修改 try-except？ → 异常范围须窄，错误文案与真实原因一致（见 ERROR_HANDLING_AND_LOGGING.md 1.1）⭐⭐⭐
 ```
 
 ### 禁止行为（零容忍）
@@ -59,6 +60,8 @@
 - ❌ 一个模块的工作导致全局刷新（应使用局部刷新）⭐⭐⭐
 - ❌ 在GitHub Actions workflow中使用heredoc（`<< ENDSSH`）（会导致变量展开冲突和语法错误）⭐⭐⭐
 - ❌ 将 Node 版本写回 18 或低于 24（项目与 GitHub 要求 Node 24+，见 .nvmrc）⭐⭐⭐
+- ❌ 用一个大 try 包住多步逻辑后，用同一个 except 返回同一条「参数/格式」类错误消息（异常捕获范围须窄，见 ERROR_HANDLING_AND_LOGGING.md 1.1）⭐⭐⭐
+- ❌ 返回给用户的错误消息与真实失败原因不一致（参数校验/序列化/数据库等须分别对应不同文案与错误码）⭐⭐⭐
 
 ### 验证命令（每次提交前必跑）⭐⭐⭐
 ```bash
@@ -113,28 +116,11 @@ python scripts/identify_dead_code.py
 
 ---
 
-### CI/CD 自动发布规则（v4.20.0）⭐⭐⭐
-**发布流程**：
-- ✅ **开发/测试**：`git push` 到 `main/develop` → 仅构建镜像（不自动部署）
-- ✅ **正式上线**：`git tag vX.Y.Z && git push origin vX.Y.Z` → 自动构建 + 自动部署生产
-- ✅ **手动部署**：GitHub Actions → "Deploy to Production" → 输入 `image_tag` + `confirm=DEPLOY`
-
-**关键规则**：
-- ⭐ **发布入口唯一**：只通过 `push tag (v*)` 自动部署生产（最安全）
-- ⭐ **串行执行**：Deploy 等待 Build 成功后再执行（避免并行竞态）
-- ⭐ **服务启动顺序**：基础设施(PostgreSQL/Redis) → Metabase → 应用层(Backend/Celery) → Frontend → Nginx
-- ⭐ **镜像标签**：生产部署直接使用 `vX.Y.Z` tag（不使用 latest，提升可追溯性）
-- ⭐ **Metabase 必需**：生产必需组件，必须在 Nginx 之前启动（避免 Nginx 启动失败）
-
-**GitHub Actions Workflow 语法规范（v4.20.0）**：⭐⭐⭐
-- ✅ SSH 远程命令必须使用 `bash -c '...'`，禁止 heredoc
-- ✅ 外层双引号展开 GitHub Actions 变量，内层单引号 + `\$` 展开远程变量
-- ❌ 禁止 `ssh user@host << ENDSSH`（YAML 解析与 heredoc 冲突）
-- 完整示例、变量展开顺序、转义规则、故障排查 → **`docs/DEVELOPMENT_RULES/DEPLOYMENT.md`**
-
-**用户操作变化**：
-- 日常开发：`git push`（不自动部署）
-- 正式上线：`git tag vX.Y.Z && git push origin vX.Y.Z`（自动部署）
+### CI/CD 自动发布规则（v4.20.0）⭐⭐⭐（摘要）
+- ✅ **发布入口**：仅通过 `git tag vX.Y.Z && git push origin vX.Y.Z` 触发生产部署
+- ✅ **顺序要求**：先 Build 后 Deploy，部署时基础设施 → 应用 → 前端 → Nginx
+- ✅ **镜像标签**：生产环境一律使用版本号 tag（不使用 `latest`）
+- ⚠️ **详细流程与 GitHub Actions 写法**：见 `docs/DEVELOPMENT_RULES/DEPLOYMENT.md`
 
 ---
 
@@ -542,28 +528,30 @@ locator = page.get_by_role("button", name="登录")
 ### **组件结构（强制）**
 ```python
 # modules/platforms/{platform}/components/{component_name}.py
-class LoginComponent:
+from typing import Any
+
+from modules.components.base import ExecutionContext
+from modules.components.login.base import LoginComponent, LoginResult
+
+
+class PlatformLogin(LoginComponent):
     # 组件元数据（必需）
-    platform = "shopee"           # 平台标识
-    component_type = "login"      # 组件类型
-    data_domain = None            # 数据域（export组件必填）
-    
-    def __init__(self, ctx=None):
-        self.ctx = ctx
-        self.logger = ctx.logger if ctx else get_logger(__name__)
-    
-    async def run(self, page, account: dict, params: dict, **kwargs) -> dict:
+    platform = "platform_name"     # 平台标识
+    component_type = "login"       # 组件类型
+    data_domain = None             # 数据域（export组件必填, login 为 None）
+
+    def __init__(self, ctx: ExecutionContext) -> None:
+        super().__init__(ctx)
+
+    async def run(self, page: Any) -> LoginResult:
         """执行组件逻辑（必须异步）"""
-        # account['password'] 已由适配层解密
-        username = account.get('username')
-        password = account.get('password')
-        
-        # Playwright 操作必须 await
-        await page.goto(...)
-        await page.fill(...)
-        await page.click(...)
-        
-        return {"success": True}
+        acc = self.ctx.account or {}
+        config = self.ctx.config or {}
+
+        # 这里省略具体交互逻辑，完整示例见 PYTHON_COMPONENT_TEMPLATE.md
+        # ...
+
+        return LoginResult(success=True, message="ok")
 ```
 
 ### **组件类型**
@@ -597,6 +585,74 @@ result = await adapter.export(page, account, params, data_domain="orders")
 ### **参考文档**
 - `docs/guides/PYTHON_COMPONENT_TEMPLATE.md` - 组件编写模板
 - `modules/apps/collection_center/python_component_adapter.py` - 适配层实现
+
+---
+
+## 🧩 标准代码模式速查卡（常用模板）
+
+> 只保留最小可用骨架，细节请查看对应规范文档/示例。
+
+### 1. 新增数据库表（Contract-First 第 1 步）
+
+```python
+# modules/core/db/schema.py
+class MyNewTable(Base):
+    __tablename__ = "my_new_table"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+```
+
+> 然后：`alembic revision --autogenerate` → 手工补幂等检查 → `alembic upgrade head`（细节见 DATABASE_MIGRATION.md）。
+
+### 2. 新增后端 API（Contract-First 第 2-4 步）
+
+```python
+# backend/schemas/my_feature.py
+class ItemCreate(BaseModel):
+    name: str
+
+
+class ItemResponse(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+```
+
+```python
+# backend/routers/my_feature.py
+@router.post("/items", response_model=ItemResponse)
+async def create_item(
+    payload: ItemCreate,
+    db: AsyncSession = Depends(get_async_db),
+) -> ItemResponse:
+    obj = MyNewTable(name=payload.name)
+    db.add(obj)
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+```
+
+### 3. 新增异步服务类
+
+```python
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+
+class MyService:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def list_items(self) -> list[MyNewTable]:
+        result = await self.db.execute(select(MyNewTable))
+        return result.scalars().all()
+```
+
+> Router 中注入：`service = MyService(db)`，所有 DB 操作一律使用 `await db.execute(select(...))`。
 
 ---
 
@@ -1051,7 +1107,7 @@ async def ensure_table_exists():
 ## 📋 技术栈总结
 
 - **系统架构**: 模块化 + 插件化 + 零耦合
-- **数据采集**: Playwright (Python) + YAML配置
+- **数据采集**: Playwright (Python) + Python组件（v4.8.0 起废弃 YAML 组件）
 - **前端**: Vue.js 3 + Element Plus + Pinia + Vite
 - **后端**: FastAPI + SQLAlchemy + Pydantic
 - **数据库**: PostgreSQL 15+ (Docker)
@@ -1119,6 +1175,23 @@ python scripts/verify_root_md_whitelist.py
 
 > ⚠️ **注意**: `.cursorrules` 只保留核心规则和快速参考，详细规范请查阅上述文档。  
 > 📖 **完整索引**: 参见 [docs/DEVELOPMENT_RULES/README.md](docs/DEVELOPMENT_RULES/README.md)
+
+---
+
+## 🔗 变更影响矩阵（Agent专用）
+
+> 当你修改下列文件时，必须同步检查右侧项目是否需要一起更新，避免"只改一半"。
+
+| 修改文件/目录 | 必须同步检查 |
+|---------------|-------------|
+| `modules/core/db/schema.py` | Alembic 迁移（`migrations/versions/*`） + `modules/core/db/__init__.py` 导出 |
+| `backend/schemas/*.py` | 对应 `backend/routers/*.py` 的 `response_model` 与请求体类型是否一致 |
+| `backend/routers/*.py` | 是否已在 `backend/schemas/` 定义契约模型；前端 `frontend/src/api/*.js` 是否调用正确路径/参数 |
+| `modules/components/*/base.py` | `.cursorrules` 中对应组件示例 + `docs/guides/PYTHON_COMPONENT_TEMPLATE.md` 是否同步更新 |
+| `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` | 采集生成器（`backend/services/steps_to_python.py`）和真实组件示例是否匹配 |
+| `docs/DEVELOPMENT_RULES/*.md` | `.cursorrules` 中相应摘要/指针是否需要调整 |
+
+> 经验法则：**如果某个文件是"SSOT" 或"模板/规范"，修改它时几乎总是要同步改另一个地方**。
 
 ---
 

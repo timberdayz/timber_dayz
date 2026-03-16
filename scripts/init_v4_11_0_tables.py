@@ -33,14 +33,19 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 
-def check_table_exists(table_name: str) -> bool:
-    """检查表是否存在"""
+def check_table_exists(table_name: str, schema: str = None) -> bool:
+    """检查表是否存在；若指定 schema 则在对应 schema 下检查（add-performance-and-personal-income: 支持 a_class/c_class）。"""
     inspector = inspect(engine)
+    if schema:
+        try:
+            return table_name in inspector.get_table_names(schema=schema)
+        except Exception:
+            return False
     return table_name in inspector.get_table_names()
 
 
 def create_tables():
-    """创建新表"""
+    """创建新表（按 ORM 的 schema 检查存在性：a_class/c_class 表在对应 schema 下检查）。"""
     tables_to_create = [
         ("sales_campaigns", SalesCampaign),
         ("sales_campaign_shops", SalesCampaignShop),
@@ -57,13 +62,14 @@ def create_tables():
     existing_count = 0
     
     for table_name, model_class in tables_to_create:
-        if check_table_exists(table_name):
-            logger.info(f"[SKIP] 表 {table_name} 已存在")
+        schema = getattr(model_class.__table__, "schema", None) or "public"
+        if check_table_exists(table_name, schema):
+            logger.info(f"[SKIP] 表 {schema}.{table_name} 已存在")
             existing_count += 1
         else:
             try:
                 model_class.__table__.create(engine, checkfirst=True)
-                logger.info(f"[OK] 表 {table_name} 创建成功")
+                logger.info(f"[OK] 表 {schema}.{table_name} 创建成功")
                 created_count += 1
             except Exception as e:
                 logger.error(f"[ERROR] 表 {table_name} 创建失败: {e}")
@@ -85,6 +91,6 @@ if __name__ == "__main__":
         
         logger.info("\n数据库表初始化完成！")
     except Exception as e:
-        logger.error(f"\n❌ 数据库表初始化失败: {e}", exc_info=True)
+        logger.error(f"\n[FAIL] 数据库表初始化失败: {e}", exc_info=True)
         sys.exit(1)
 

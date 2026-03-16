@@ -42,7 +42,9 @@ TABLE_SCHEMA_MAP = {
     'staging_orders': 'core',
     'staging_product_metrics': 'core',
     
-    # a_class schema
+    # a_class schema (add-performance-and-personal-income: sales_targets/target_breakdown 已迁至 a_class)
+    'sales_targets': 'a_class',
+    'target_breakdown': 'a_class',
     'sales_targets_a': 'a_class',
     'sales_campaigns_a': 'a_class',
     'operating_costs': 'a_class',
@@ -55,11 +57,14 @@ TABLE_SCHEMA_MAP = {
     'entity_aliases': 'b_class',
     'staging_raw_data': 'b_class',
     
-    # c_class schema
+    # c_class schema (add-performance-and-personal-income: performance_scores/shop_health_scores/shop_alerts 已迁至 c_class)
     'employee_performance': 'c_class',
     'employee_commissions': 'c_class',
     'shop_commissions': 'c_class',
-    'performance_scores_c': 'c_class',
+    'performance_scores': 'c_class',
+    'shop_health_scores': 'c_class',
+    'shop_alerts': 'c_class',
+    'performance_scores_c': 'c_class',  # 已合并入 performance_scores，旧库可能仍存在
 }
 
 # 系统表（保留）

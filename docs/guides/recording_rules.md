@@ -1,6 +1,13 @@
-# 录制规则 v1.0 / Recording Rules v1.0
+# 录制规则 v1.0（历史参考） / Recording Rules v1.0 (Historical)
 
-版本: v1.0 日期: 2025-08-30 适用范围: 新架构 v3.1.x
+版本: v1.0 日期: 2025-08-30 适用范围: 历史流程
+
+> 本文档为历史录制脚本规则，保留用于追溯。当前采集组件开发与录制请遵循：
+>
+> - `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
+> - `docs/guides/RECORDER_PYTHON_OUTPUT.md`
+>
+> 文中 `sync_playwright`、`time.sleep`、旧“稳定版脚本菜单”等示例均不作为现行实现依据。
 
 ## 目标 / Goals
 
@@ -36,7 +43,7 @@
   - 脚本仅保留账号/店铺/时间等参数与少量差异化选择器
 - 优势：UI 变化时主要修组件或配方，脚本层改动最小；跨账号共享。
 
-#### 生产级录制脚本模板示例
+#### 生产级录制脚本模板示例（历史示例，已过时）
 
 ```python
 #!/usr/bin/env python3
@@ -219,9 +226,9 @@ if __name__ == "__main__":
 
 ---
 
-## 八、代码骨架建议 / Script Skeleton (示例)
+## 八、代码骨架建议 / Script Skeleton (历史示例)
 
-> 仅示例结构，录制后请替换为实操步骤与稳定选择器。
+> 仅用于理解历史脚本结构。现行实现请使用异步组件模式，不使用 `sync_playwright` 与 `time.sleep` 轮询。
 
 ```python
 from playwright.sync_api import sync_playwright

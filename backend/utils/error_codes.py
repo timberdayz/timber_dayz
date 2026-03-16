@@ -74,6 +74,10 @@ class ErrorCode(IntEnum):
     TARGET_NOT_FOUND = 2304
     TARGET_ALREADY_EXISTS = 2305
     TARGET_INVALID = 2306
+
+    # 2310-2319: 绩效计算
+    PERF_CALC_NOT_READY = 2310
+    PERF_CONFIG_NOT_FOUND = 2311
     
     # 2400-2499: 数据同步错误
     DATA_SYNC_FAILED = 2401
@@ -183,6 +187,8 @@ def get_error_message(code: int, default_message: str = "操作失败") -> str:
         ErrorCode.INVENTORY_INSUFFICIENT: "库存不足",
         ErrorCode.SALES_CAMPAIGN_NOT_FOUND: "销售战役不存在",
         ErrorCode.TARGET_NOT_FOUND: "目标不存在",
+        ErrorCode.PERF_CALC_NOT_READY: "绩效计算能力未就绪",
+        ErrorCode.PERF_CONFIG_NOT_FOUND: "考核周期内无可用绩效配置",
         
         # 数据错误
         ErrorCode.DATA_VALIDATION_FAILED: "数据验证失败",

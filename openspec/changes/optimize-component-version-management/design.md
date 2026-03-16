@@ -142,6 +142,7 @@
 - **决策**：executor_v2 的 `_load_component_with_version` 在取得 selected_version 后，必须按 `selected_version.file_path` 加载组件类，不得再使用 comp_name 调用 `build_component_dict_from_python`。**执行链路**：当 component dict 含 `_python_component_class`（由 file_path 加载）时，`_execute_python_component` 应直接使用该类实例化执行 `run(page)`，不得再调用 adapter 按 comp_name 重新加载。
 - **主组件与子组件范围**：本变更主组件（login、navigation、export、及 execution_order 中独立槽位的 date_picker、shop_switch、filters）按 `selected_version.file_path` 加载；**export 内 component_call 调用的 date_picker、filters、shop_switch** 暂按 adapter 默认 `_load_component_class(comp_name)` 加载，不纳入本变更版本管理；后续迭代可扩展子组件按版本加载。
 - **Fallback**：当 `selected_version is None`（版本服务不可用、无稳定版、无活跃版本）时，**保留 comp_name 回退**：调用 `build_component_dict_from_python(platform, comp_name, params)`，依赖标准化命名主文件（如 login.py），与现有降级逻辑一致，保证采集在异常情况下仍能执行。
+- **Fallback 可观测与开关**：发生回退时必须输出结构化告警（platform/component_type/component_name/reason）；提供可配置 `fail_fast_on_missing_selected_version`，在关键环境直接失败，避免静默退化。
 - **实现**：ComponentLoader 新增 `load_python_component_from_path(file_path: str) -> Type`；若 file_path 已为绝对路径则直接使用，否则基于 project_root 转为绝对路径再传给 `importlib.util.spec_from_file_location`；**模块名唯一**：传给 `spec_from_file_location` 的 name 须唯一（如使用 file_path 哈希或 version_id），避免不同 file_path 使用相同模块名导致 sys.modules 缓存污染；加载失败时抛出明确异常（含 version_id、file_path 便于排查）。该方法的缓存 key 使用 file_path（或 version_id），与现有 `load(component_path)` 的缓存隔离，避免多版本共用或错误命中。
 
 ### 6. 组件测试环境与生产对齐
@@ -188,6 +189,56 @@
 - **拒绝策略**：若出现 `..`、符号链接逃逸或跨目录越界，直接拒绝加载并返回结构化错误（含 version_id、file_path、安全校验失败原因）；不得静默降级或放宽。
 - **业界对齐**：主流插件执行框架会限制可执行工件来源目录并做 realpath 校验，本决策与该实践一致。
 
+### 12. 采集脚本现实 Web 稳健性约束（新增 P0 决策）
+
+- **定位器唯一性决策**：所有用于关键交互（click/fill/expect visible）的 locator 必须在当前作用域唯一命中。工程上采用“先容器后元素”的定位策略：先锁定稳定容器（form/dialog/frame/row），再在容器内使用 `get_by_*`。
+- **禁止掩盖歧义**：`.first/.nth()` 仅允许在业务语义天然是“第 N 项”时使用，并需注释说明；不得作为 strict mode 冲突的默认修复方式。
+- **反模式禁用决策**：禁止 `count()+is_visible()` 单次检测后直接操作、禁止 `except Exception: pass` 吞掉定位/交互错误继续执行、禁止以固定 sleep 替代条件等待。
+- **导航稳定性决策**：导航完成采用双信号（URL/路由特征 + 页面关键元素可见），避免仅依赖 `networkidle` 在 SPA/长连接页面误判完成。
+- **失败可观测性决策**：关键失败统一返回 `phase + component + version + url + selector_context`；验证码与关键失败路径保留截图，降低线上排障成本。
+
+### 13. 规范文档治理（新增 P1 决策）
+
+- **单一规范基线**：`docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` 为采集脚本编写基线。
+- **冲突文档收敛**：录制/模板类文档若与基线冲突，必须同步改为“历史参考”或更新为一致口径，避免新组件复制过时写法。
+- **一致性检查点**：提案验收需增加文档一致性检查：版本语义、验证码语义、定位器唯一性三项在指南/提案/模板中口径一致。
+
+### 14. 生成器 lint 质量门禁（新增 P0 决策）
+
+- **双层治理**：
+  1. `warning`：规范建议，不阻断保存；
+  2. `error`：高风险反模式（如吞错、关键路径宽泛 `.first/.nth`、无理由固定 sleep）默认阻断保存。
+- **可配置性**：保留项目级开关或白名单，但默认策略为“关键反模式阻断”。
+- **一致性约束（新增）**：
+  - lint 门禁必须与生成策略一致：当步骤含“显式固定等待原因”时，`wait_for_timeout` 不得被默认 error 阻断；
+  - `.first/.nth` 采用“注释依据白名单”策略：有业务语义注释可放行（warning 或通过），无注释则 error 阻断；
+  - 禁止“实现与任务口径相反”的门禁（例如任务允许受控场景，门禁却一刀切阻断）；
+  - lint 必须在最终写盘代码上执行（包括所有保存前注入逻辑），避免注入后引入反模式而绕过门禁。
+
+### 15. 生成代码可执行性约束（新增 P0 决策）
+
+- 生成器输出的异常处理代码必须直接可执行，禁止引用仅存在于生成器循环中的变量名（如 `i`、`action`）导致运行期 NameError。
+- 对可选步骤（optional）的失败记录，应在生成阶段固化为文本常量（如 step_index、action literal），保证日志可诊断且不会引入二次异常。
+
+### 16. 作用域收敛覆盖面（新增 P1 决策）
+
+- 作用域收敛不应只覆盖 login form；应至少覆盖 dialog、iframe、table row 等高频现实场景。
+- 在无法自动识别容器时，生成器应输出明确 TODO 注释与建议收敛路径，避免默认回退到 page 根作用域宽匹配。
+
+### 17. login 容器与 URL 导航契约（新增 P0 决策）
+
+- **问题背景**：当前 login 生成模板将容器收敛默认写为 `page.get_by_role("form") + to_have_count(1)`。在真实站点中登录容器常为自定义 div（无 ARIA form 语义），会出现 `locator resolved to 0`，导致脚本在首步失败。
+- **容器收敛决策**：
+  1. login 容器采用“语义优先 + 业务兜底”多候选策略（如 role=form → 业务已知容器选择器 → 最终 page 根作用域），不得只有单一路径；
+  2. 每一层容器命中都要求唯一性校验，失败需返回容器候选与 URL 诊断信息；
+  3. 兜底到 page 根作用域时必须保留明确告警，避免静默退化。
+- **URL 导航契约决策**：
+  1. **URL 来源优先级**：`params.login_url_override` > `account.login_url` > 平台默认登录 URL；
+  2. **导航前判定**：若当前页已满足“目标路由特征 + 关键登录元素可见”，可跳过 goto；
+  3. **导航后确认**：必须满足“URL/路由特征 + 关键元素可见”双信号，禁止以单一 load_state（如 networkidle）作为成功判定；
+  4. **可观测性**：失败返回 `current_url`、`target_url`、`container_strategy`、`selector_context`。
+- **业界对齐**：主流自动化框架通常将导航与页面就绪判定作为显式契约，而非依赖录制偶然顺序；该决策与 Playwright 官方建议（条件等待 + 显式定位）一致。
+
 ## Risks / Trade-offs
 
 - **适配器注入**：增加可选参数后，生产路径不传入 override，默认行为不变。
@@ -195,6 +246,7 @@
 - **验证码「有时无验证码」**：本变更将图形验证码步骤统一为必选暂停，不处理「有时出现、有时不出现」验证码的登录页；该场景列为后续迭代（如 optional 验证码步骤或条件分支）。
 - **file_path 文件不存在**：DB 中 file_path 指向已删除/回滚的文件时，加载会失败；需抛出明确异常（含 version_id、file_path），便于运维排查；部署时需保证代码与 DB 版本表一致。
 - **前端本地冲突计算偏差**：若前端本地计算规则与后端选版规则不一致，可能出现误报/漏报；建议后端提供冲突摘要并复用同一判定逻辑。
+- **文档漂移风险**：历史文档与模板未同步时，团队可能继续按旧模式实现（如 sync API、固定 sleep、YAML 流程）；需在本变更内完成文档治理。
 
 ## Migration Plan
 
@@ -203,8 +255,12 @@
 3. **验证码**（后）：迁移完成后，若仍有保留的 .py 文件需验证码，按 2.2 改验证码块为 unconditional；否则随旧文件一并删除或归档。
 4. **component_name 校验**：录制保存、批量注册、版本管理新增 component_name 时，校验其符合 `{platform}/{type}` 或 `{platform}/{domain}_export` 规则，禁止再次录入旧格式，从源头避免误用。
 5. **回滚**：若需回滚，需先恢复 ComponentVersion 表备份、恢复 execution_order 配置；若已删除 .py 文件，需从 Git 或归档恢复。
+6. **文档收敛**：更新采集脚本指南并对冲突文档做“历史/废弃”标记或内容替换，确保录制、模板、提案语义一致后再开展后续批量录制。
+7. **执行时机**：迁移脚本（0.5）应在 0.2 录制保存逻辑上线且 component_name 校验生效后执行；或按 tasks 顺序（0 → 1 → 2 → 3...）在 0.4 完成后、用户确认可重新录制前执行。
 
-6. **执行时机**：迁移脚本（0.5）应在 0.2 录制保存逻辑上线且 component_name 校验生效后执行；或按 tasks 顺序（0 → 1 → 2 → 3...）在 0.4 完成后、用户确认可重新录制前执行。
+## Completion Gate
+
+- 归档前必须满足：`1.5`、`6.1`、`7.4`、`7.3.2`、`8.7` 全部完成。
 
 ## 采集环境部署检查清单
 

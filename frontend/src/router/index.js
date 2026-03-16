@@ -786,8 +786,8 @@ const routes = [
     meta: {
       title: '我的收入',
       icon: 'Money',
-      permission: null,
-      roles: ['admin', 'manager', 'operator']
+      permission: 'my-income',
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   {

@@ -11,6 +11,9 @@
     </template>
 
     <template v-else>
+      <el-alert v-if="loadError" type="error" show-icon :closable="true" style="margin-bottom: 16px;" @close="loadError = false">
+        查询失败，请检查网络后重试。
+      </el-alert>
       <div class="action-bar" style="margin-bottom: 20px;">
         <el-date-picker
           v-model="selectedMonth"
@@ -29,6 +32,15 @@
       </template>
 
       <template v-else>
+        <template v-if="hasNoIncomeData">
+          <el-empty>
+            <template #description>
+              <p style="margin: 0 0 8px 0;">暂无收入数据</p>
+              <p style="color: #909399; margin: 0; font-size: 13px;">当前月份暂无工资单或绩效数据，请确认薪资已录入或联系管理员。</p>
+            </template>
+          </el-empty>
+        </template>
+        <template v-else>
         <el-row :gutter="20" style="margin-bottom: 20px;">
           <el-col :span="6">
             <el-card shadow="hover">
@@ -74,6 +86,7 @@
           <p>达成率：{{ income.achievement_rate != null ? (income.achievement_rate * 100).toFixed(1) + '%' : '-' }}</p>
           <el-link type="primary" href="/#/hr-performance-management">查看绩效公示</el-link>
         </el-card>
+        </template>
       </template>
     </template>
   </div>
@@ -84,6 +97,7 @@ import { ref, onMounted, computed } from 'vue'
 import api from '@/api'
 
 const selectedMonth = ref(new Date().toISOString().slice(0, 7))
+const loadError = ref(false)
 const income = ref({
   linked: true,
   period: null,
@@ -97,6 +111,14 @@ const income = ref({
   loading: false
 })
 
+const hasNoIncomeData = computed(() => {
+  const i = income.value
+  if (!i.linked || i.loading) return false
+  const noTotal = (i.total_income == null || i.total_income === 0)
+  const noBreakdown = !i.breakdown || Object.keys(i.breakdown).length === 0
+  return noTotal && noBreakdown
+})
+
 function formatMoney(val) {
   if (val == null || val === undefined) return '-'
   return '¥' + Number(val).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
@@ -104,6 +126,7 @@ function formatMoney(val) {
 
 async function loadIncome() {
   income.value.loading = true
+  loadError.value = false
   try {
     const res = await api.getMyIncome(selectedMonth.value)
     const data = res?.data ?? res ?? {}
@@ -113,11 +136,11 @@ async function loadIncome() {
       period: data.period ?? selectedMonth.value,
       loading: false,
     }
+    loadError.value = false
   } catch (e) {
     income.value.loading = false
-    if (e?.response?.status === 404 || (e?.response?.data?.detail && String(e.response.data.detail).includes('关联'))) {
-      income.value.linked = false
-    }
+    loadError.value = true
+    // 契约：未关联时后端返回 200 + linked: false，此处仅处理网络/服务器异常
   }
 }
 
