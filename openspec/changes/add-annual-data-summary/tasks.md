@@ -41,7 +41,7 @@
 - [ ] 4.1 选择粒度=月度、某月：底部/卡片显示当月核心 KPI 与较上月环比（**需人工验收**：登录后打开年度数据总结，选月度+某月，确认展示正确）
 - [ ] 4.2 选择粒度=年度、某年：显示当年核心 KPI 与较去年同比（**需人工验收**：选年度+某年，确认展示正确）
 - [x] 4.3 确认年度总结所用数据仅来自 B 类模型 monthly 粒度（SQL 中无 daily）。→ 已核对：annual_summary_*.sql 均仅 WHERE granularity = 'monthly'，无 daily
-- [ ] 4.4 成本与产出区块展示总成本、GMV、成本产出比、ROI、毛利率、净利率；成本数据缺失时展示「暂无数据」不阻塞页面；比率分母为 0 时展示 N/A 或「-」（**需人工验收**：在页面上确认上述六项及缺数/分母为 0 时的展示）。→ **代码已核对**：KPI 接口合并 get_annual_cost_aggregate，返回 total_cost/gmv/四比率；前端 costData 绑定、ratioDisplayStrict 在 null 时成本产出比/ROI 展示 N/A，符合验收标准。
+- [ ] 4.4 成本与产出区块展示总成本、GMV、成本产出比、ROI、毛利率、净利率；成本数据缺失时展示「暂无数据」不阻塞页面；比率分母为 0 时展示 N/A 或「-」（**需人工验收**：在页面上确认上述六项及缺数/分母为 0 时的展示）。→ **代码已核对并修复**：KPI 接口合并 get_annual_cost_aggregate，返回 total_cost/gmv/四比率；ratioDisplayStrict 已修复为 null 时统一返回 N/A（含 gross_margin/net_margin），符合验收标准。annual_summary_by_shop.sql gross_margin 口径已修正为 (gmv-purchase_amount)/gmv。
 - [x] 4.5 权限：仅管理员可见菜单并可访问该页；非管理员访问被拦截。→ 已核对：rolePermissions.js 仅 admin 含 annual-summary；router meta 正确
 - [x] 4.6 缓存：同一 granularity+period 再次请求时接口返回 X-Cache: HIT。→ 已核对：dashboard_api.py 中 annual_summary_kpi 缓存逻辑正确
 

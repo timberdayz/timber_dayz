@@ -726,11 +726,13 @@ async def get_annual_summary_target_completion(
 
         # 1) 汇总目标：月度用单月，年度用当年所有月
         if len(period) == 4:  # YYYY
-            year_month_filter = f"year_month LIKE :period_prefix"
-            params = {"period_prefix": f"{period}-%"}
+            year_month_filter = "year_month LIKE :period_prefix"
+            db_params: dict = {"period_prefix": f"{period}-%"}
+            ym_filter_cn = '"年月" LIKE :period_prefix'
         else:  # YYYY-MM
             year_month_filter = "year_month = :period"
-            params = {"period": period}
+            db_params = {"period": period}
+            ym_filter_cn = '"年月" = :period'
 
         try:
             result = await db.execute(text(f"""
@@ -738,15 +740,14 @@ async def get_annual_summary_target_completion(
                        COALESCE(SUM(target_quantity), 0) AS target_orders
                 FROM a_class.sales_targets_a
                 WHERE {year_month_filter}
-            """), params)
+            """), db_params)
         except Exception:
-            ym_filter_cn = '"年月" LIKE :period_prefix' if len(period) == 4 else '"年月" = :period'
             result = await db.execute(text(f"""
                 SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
                        COALESCE(SUM("目标订单数"), 0) AS target_orders
                 FROM a_class.sales_targets_a
                 WHERE {ym_filter_cn}
-            """), params)
+            """), db_params)
         row = result.fetchone()
         target_gmv = float(row[0]) if row and row[0] is not None else 0.0
         target_orders = int(row[1]) if row and row[1] is not None else 0

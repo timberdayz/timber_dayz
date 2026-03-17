@@ -246,9 +246,9 @@ function ratioDisplay(val) {
 }
 
 function ratioDisplayStrict(val) {
-  if (val === null || val === undefined) return '0.00%'
+  if (val === null || val === undefined) return 'N/A'
   const num = Number(val)
-  if (Number.isNaN(num)) return '0.00%'
+  if (Number.isNaN(num)) return 'N/A'
   return (num * 100).toFixed(2) + '%'
 }
 
@@ -308,13 +308,13 @@ async function loadData() {
     costData.value[0].sub = ''
     costData.value[1].value = data.gmv != null ? formatCurrency(data.gmv) : '0.00'
     costData.value[1].sub = ''
-    costData.value[2].value = data.cost_to_revenue_ratio != null ? ratioDisplayStrict(data.cost_to_revenue_ratio) : (data.gmv === 0 || data.gmv == null ? 'N/A' : '0.00%')
+    costData.value[2].value = ratioDisplayStrict(data.cost_to_revenue_ratio)
     costData.value[2].sub = '总成本/GMV'
-    costData.value[3].value = data.roi != null ? ratioDisplayStrict(data.roi) : (data.total_cost === 0 || data.total_cost == null ? 'N/A' : '0.00%')
+    costData.value[3].value = ratioDisplayStrict(data.roi)
     costData.value[3].sub = '(GMV-总成本)/总成本'
-    costData.value[4].value = data.gross_margin != null ? ratioDisplayStrict(data.gross_margin) : '0.00%'
+    costData.value[4].value = ratioDisplayStrict(data.gross_margin)
     costData.value[4].sub = '(GMV-COGS)/GMV'
-    costData.value[5].value = data.net_margin != null ? ratioDisplayStrict(data.net_margin) : '0.00%'
+    costData.value[5].value = ratioDisplayStrict(data.net_margin)
     costData.value[5].sub = '(GMV-总成本)/GMV'
     loadDataRetried.value = false
     loadExtensionData()

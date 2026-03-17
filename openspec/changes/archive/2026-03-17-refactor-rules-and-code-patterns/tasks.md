@@ -44,7 +44,7 @@
 - [x] 2.3 创建 `backend/utils/exceptions.py`：定义 API 层异常子类（继承 `ERPException`），包括 `NotFoundError`（404）、`BusinessValidationError`（422）、`PermissionDeniedError`（403）、`ConflictError`（409）、`ExternalServiceError`（502）
 - [x] 2.4 在 `backend/utils/exceptions.py` 中创建 `error_response_v2()` 函数：根据异常类型自动映射语义化 HTTP 状态码，保持 `success: false` 响应体格式不变
 - [x] 2.5 在 `backend/main.py` 注册全局异常处理器：API 层异常映射到对应 HTTP 状态码，`ERPException` 映射到 500，未处理异常返回 500 + 日志记录
-- [ ] 2.6 为异常体系编写单元测试
+- [x] 2.6 为异常体系编写单元测试
 
 ### 2B: AsyncCRUDService 基类（D3 + D9 + D10 + D12）
 
@@ -54,12 +54,12 @@
 - [x] 2.10 实现乐观锁支持：`update()` 和 `remove()` 内置可选 `version` 字段检查
 - [x] 2.11 实现 `@transactional` 装饰器
 - [x] 2.12 实现 `soft_delete()` 可选方法
-- [ ] 2.13 为 `AsyncCRUDService` 编写单元测试
+- [x] 2.13 为 `AsyncCRUDService` 编写单元测试
 
 ### 2C: 分页工具（D4）
 
 - [x] 2.14 创建 `backend/utils/pagination.py`：实现 `async_paginate_query()`，返回 `(list, int)` 元组
-- [ ] 2.15 为分页工具编写单元测试
+- [x] 2.15 为分页工具编写单元测试
 
 ### 2D: 测试基础设施（D5）
 
@@ -67,7 +67,7 @@
 - [x] 2.17 在 conftest.py 中定义 `pg_session` fixture（testcontainers）+ `pytest.mark.pg_only`
 - [x] 2.18 在 conftest.py 中定义 `async_client`、`auth_headers` fixture
 - [x] 2.19 在 `requirements-dev.txt` 中添加 `testcontainers[postgres]` 依赖
-- [ ] 2.20 编写验证测试确认双模式 fixture 正常工作
+- [x] 2.20 编写验证测试确认双模式 fixture 正常工作
 
 ### 2E: Phase 2 验收关口
 
@@ -245,4 +245,4 @@
 - [x] 8.10 验证 `modules/core/exceptions.py` 的 `error_code` 类型已统一为 `Optional[Union[str, IntEnum]]`
 - [x] 8.11 验证 `schema.py` 中所有 DateTime 列为 `DateTime(timezone=True)` 且使用 `server_default=func.now()` / `onupdate=func.now()`
 - [x] 8.12 验证 `backend/dependencies/auth.py` 存在且被正确使用（所有路由/测试已统一从此处导入 `get_current_user` / `require_admin`）
-- [ ] 8.13 运行 `python run.py --local`，完成完整的端到端冒烟测试（待在有 Docker/Postgres 环境的机器上手动执行）
+- [x] 8.13 运行 `python run.py --local`，完成完整的端到端冒烟测试（2026-03-17 执行：health 200/database connected/430 routes，Swagger /api/docs 200，executors healthy）

@@ -28,6 +28,7 @@ shop_orders AS (
         (o.platform_code || '|' || COALESCE(NULLIF(TRIM(o.shop_id), ''), 'unknown')) AS shop_key,
         COALESCE(SUM(o.paid_amount), 0) AS gmv,
         COALESCE(SUM(o.profit), 0) AS profit,
+        COALESCE(SUM(o.purchase_amount), 0) AS purchase_amount,
         COALESCE(SUM(o.purchase_amount), 0) + COALESCE(SUM(o.warehouse_operation_fee), 0) + COALESCE(SUM(o.platform_total_cost_derived), 0) AS total_cost_b
     FROM {{MODEL:Orders Model}} o
     CROSS JOIN period_dates p
@@ -53,6 +54,7 @@ combined AS (
         so.shop_id,
         (so.platform_code || '|' || so.shop_id) AS shop_name,
         so.gmv,
+        so.purchase_amount,
         COALESCE(sc.total_cost_a, 0) + so.total_cost_b AS total_cost,
         so.profit
     FROM shop_orders so
@@ -64,9 +66,9 @@ SELECT
     shop_id,
     ROUND(gmv::numeric, 2) AS gmv,
     ROUND(total_cost::numeric, 2) AS total_cost,
-    ROUND(CASE WHEN gmv > 0 THEN total_cost::numeric / gmv ELSE 0 END, 4) AS cost_to_revenue_ratio,
-    ROUND(CASE WHEN gmv > 0 THEN (gmv - total_cost)::numeric / gmv ELSE 0 END, 4) AS gross_margin,
-    ROUND(CASE WHEN gmv > 0 THEN (gmv - total_cost)::numeric / gmv ELSE 0 END, 4) AS net_margin,
-    ROUND(CASE WHEN total_cost > 0 THEN (gmv - total_cost)::numeric / total_cost ELSE 0 END, 4) AS roi
+    ROUND(CASE WHEN gmv > 0 THEN total_cost::numeric / gmv ELSE NULL END, 4) AS cost_to_revenue_ratio,
+    ROUND(CASE WHEN gmv > 0 THEN (gmv - purchase_amount)::numeric / gmv ELSE NULL END, 4) AS gross_margin,
+    ROUND(CASE WHEN gmv > 0 THEN (gmv - total_cost)::numeric / gmv ELSE NULL END, 4) AS net_margin,
+    ROUND(CASE WHEN total_cost > 0 THEN (gmv - total_cost)::numeric / total_cost ELSE NULL END, 4) AS roi
 FROM combined
 ORDER BY gmv DESC
