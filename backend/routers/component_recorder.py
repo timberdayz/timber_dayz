@@ -35,6 +35,12 @@ from backend.services.steps_to_python import generate_python_code
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
+from backend.schemas.component_recorder import (
+    RecorderStartRequest,
+    RecorderStepResponse,
+    RecorderSaveRequest,
+    GeneratePythonRequest,
+)
 from modules.core.db import PlatformAccount, ComponentVersion, ComponentTestHistory
 
 logger = get_logger(__name__)
@@ -46,50 +52,6 @@ RECORDING_MODE = "inspector"
 router = APIRouter()
 
 # [*] v4.18.2修复:移除本地 save_test_history 函数,统一使用 ComponentTestService.save_test_history
-
-
-# ==================== Pydantic Models ====================
-
-class RecorderStartRequest(BaseModel):
-    """开始录制请求"""
-    platform: str
-    component_type: str
-    account_id: str
-
-
-class RecorderStepResponse(BaseModel):
-    """录制步骤响应"""
-    id: int
-    action: str
-    selector: Optional[str] = None
-    url: Optional[str] = None
-    value: Optional[str] = None
-    comment: Optional[str] = None
-    optional: bool = False
-
-
-class RecorderSaveRequest(BaseModel):
-    """保存组件请求。component_name 由后端从 platform+component_type+data_domain+sub_domain 推导。"""
-    platform: str
-    component_type: str
-    component_name: Optional[str] = None  # 可选，后端推导
-    python_code: Optional[str] = None
-    data_domain: Optional[str] = None  # export 必填
-    sub_domain: Optional[str] = None   # 子域 export 如 services:agent 必填
-    # 登录成功条件（可选），如 {"url_contains": "/dashboard"}，保存时写入组件内校验逻辑
-    success_criteria: Optional[Dict[str, Any]] = None
-    # 向后兼容:保留 YAML 支持
-    yaml_content: Optional[str] = None  # 已废弃,保留兼容
-
-
-class GeneratePythonRequest(BaseModel):
-    """生成 Python 代码请求。component_name 可选，由后端推导。"""
-    platform: str
-    component_type: str
-    component_name: Optional[str] = None
-    data_domain: Optional[str] = None
-    sub_domain: Optional[str] = None
-    steps: List[Dict[str, Any]]
 
 
 def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any]) -> str:
@@ -917,11 +879,13 @@ async def stop_recording():
             if platform and component_type and steps:
                 try:
                     default_component_name = component_type
+                    _sc = getattr(recorder_session, 'success_criteria', None)
                     python_code = generate_python_code(
                         platform=platform,
                         component_type=component_type,
                         component_name=default_component_name,
                         steps=steps,
+                        success_criteria=_sc if isinstance(_sc, dict) else None,
                     )
                     lint_result = _analyze_python_code_for_lints(python_code)
                     lint_errors = lint_result.get("errors", [])
@@ -986,6 +950,7 @@ async def generate_python_from_steps(request: GeneratePythonRequest):
             component_type=request.component_type,
             component_name=comp_name,
             steps=steps,
+            success_criteria=request.success_criteria if isinstance(request.success_criteria, dict) else None,
         )
         lint_result = _analyze_python_code_for_lints(code)
         return {
@@ -1203,8 +1168,6 @@ async def add_recording_step(step: Dict[str, Any]):
             status_code=500,
             recovery_suggestion="请确认录制会话处于活跃状态，稍后重试",
         )
-
-
 @router.get("/recorder/status")
 async def get_recorder_status():
     """获取录制器状态"""

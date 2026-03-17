@@ -1,7 +1,7 @@
 ## 0. 前置条件
 
-- [ ] 0.1 `refactor-rules-and-code-patterns` 已完成 `docs/DEVELOPMENT_RULES/` 核心结构重构（7 个核心主题文件 + README 索引）
-- [ ] 0.2 确认 `docs/DEVELOPMENT_RULES/README.md` 已成为 L3 文档统一入口，再开始本提案文档落地
+- [x] 0.1 `refactor-rules-and-code-patterns` 已完成 `docs/DEVELOPMENT_RULES/` 核心结构重构（7 个核心主题文件 + README 索引）——V1 Phase 1 已于 2026-03-16 完成
+- [x] 0.2 确认 `docs/DEVELOPMENT_RULES/README.md` 已成为 L3 文档统一入口，再开始本提案文档落地
 
 ## 1. Phase 1: 规则与文档落地（P0 批次）
 

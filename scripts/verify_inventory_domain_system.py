@@ -118,7 +118,7 @@ def main():
         safe_print("\n[6] 数据入库逻辑检查")
         # 检查ingest_file函数是否支持inventory域
         import inspect
-        from backend.routers.field_mapping import ingest_file
+        from backend.routers.field_mapping_ingest import ingest_file
         source = inspect.getsource(ingest_file)
         if 'inventory' in source and 'validate_inventory' in source:
             safe_print("  [OK] ingest_file函数支持inventory域")
@@ -126,7 +126,7 @@ def main():
             safe_print("  [FAIL] ingest_file函数不支持inventory域")
         
         # 检查bulk_ingest函数
-        from backend.routers.field_mapping import bulk_ingest
+        from backend.routers.field_mapping_files import bulk_ingest
         source = inspect.getsource(bulk_ingest)
         if 'inventory' in source and 'validate_inventory' in source:
             safe_print("  [OK] bulk_ingest函数支持inventory域")

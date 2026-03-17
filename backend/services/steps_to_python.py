@@ -27,6 +27,7 @@ def generate_python_code(
     component_name: str,
     steps: List[Dict[str, Any]],
     metadata: Optional[Dict[str, Any]] = None,
+    success_criteria: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     根据 platform、component_type、component_name 与 steps 生成 Python 源码。
@@ -66,9 +67,14 @@ def generate_python_code(
         lines.append("from modules.components.login.base import LoginComponent, LoginResult")
         lines.append("from modules.apps.collection_center.executor_v2 import VerificationRequiredError")
     elif component_type == "export":
-        lines.append("from modules.components.export.base import ExportComponent, ExportResult, ExportMode")
+        lines.append("from pathlib import Path")
+        lines.append("from modules.components.export.base import ExportComponent, ExportResult, ExportMode, build_standard_output_root")
+    elif component_type == "navigation":
+        lines.append("from modules.components.navigation.base import NavigationComponent, NavigationResult, TargetPage")
+    elif component_type == "date_picker":
+        lines.append("from modules.components.date_picker.base import DatePickerComponent, DatePickResult, DateOption")
     else:
-        lines.append("from modules.components.base import ResultBase")
+        lines.append("from modules.components.base import ComponentBase, ResultBase")
     lines.append("")
     lines.append("")
     # 类定义
@@ -91,7 +97,8 @@ def generate_python_code(
         # 登录组件含验证码步骤时：在 page.goto 之前插入恢复路径（同页继续）
         captcha_info = _find_captcha_and_login_steps(steps)
         if captcha_info:
-            lines.extend(_generate_login_captcha_resume_block(body_indent, captcha_info))
+            lines.append(body_indent + "params = config.get(\"params\") or {}")
+            lines.extend(_generate_login_captcha_resume_block(body_indent, captcha_info, success_criteria))
             lines.append("")
     elif component_type == "export":
         lines.append(f"class {cap_platform}{cap_name}(ExportComponent):")
@@ -99,7 +106,7 @@ def generate_python_code(
         lines.append("")
         lines.append("    platform = " + repr(platform))
         lines.append("    component_type = \"export\"")
-        lines.append("    data_domain = None  # set or read from config")
+        lines.append("    data_domain = None  # TODO: set data_domain")
         lines.append("")
         lines.append("    def __init__(self, ctx: ExecutionContext) -> None:")
         lines.append("        super().__init__(ctx)")
@@ -107,14 +114,49 @@ def generate_python_code(
         lines.append("    async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:")
         lines.append("        config = self.ctx.config or {}")
         lines.append("        acc = self.ctx.account or {}")
-        lines.append("        # 若有弹窗在此 wait 再点击关闭")
+        lines.append("        output_root = build_standard_output_root(self.ctx, data_type=self.data_domain or \"unknown\", granularity=\"daily\")")
+        lines.append("        output_root.mkdir(parents=True, exist_ok=True)")
         body_indent = "        "
-    else:
-        lines.append(f"class {cap_platform}{cap_name}Component:")
-        lines.append(f'    """{platform} {component_type} - generated from recorder. Edit as needed."""')
+    elif component_type == "navigation":
+        lines.append(f"class {cap_platform}{cap_name}(NavigationComponent):")
+        lines.append(f'    """{platform} navigation component - generated from recorder. Edit as needed."""')
+        lines.append("")
+        lines.append("    platform = " + repr(platform))
+        lines.append("    component_type = \"navigation\"")
+        lines.append("    data_domain = None")
         lines.append("")
         lines.append("    def __init__(self, ctx: ExecutionContext) -> None:")
-        lines.append("        self.ctx = ctx")
+        lines.append("        super().__init__(ctx)")
+        lines.append("")
+        lines.append("    async def run(self, page: Any, target: TargetPage) -> NavigationResult:")
+        lines.append("        config = self.ctx.config or {}")
+        lines.append("        acc = self.ctx.account or {}")
+        body_indent = "        "
+    elif component_type == "date_picker":
+        lines.append(f"class {cap_platform}{cap_name}(DatePickerComponent):")
+        lines.append(f'    """{platform} date_picker component - generated from recorder. Edit as needed."""')
+        lines.append("")
+        lines.append("    platform = " + repr(platform))
+        lines.append("    component_type = \"date_picker\"")
+        lines.append("    data_domain = None")
+        lines.append("")
+        lines.append("    def __init__(self, ctx: ExecutionContext) -> None:")
+        lines.append("        super().__init__(ctx)")
+        lines.append("")
+        lines.append("    async def run(self, page: Any, option: DateOption) -> DatePickResult:")
+        lines.append("        config = self.ctx.config or {}")
+        lines.append("        acc = self.ctx.account or {}")
+        body_indent = "        "
+    else:
+        lines.append(f"class {cap_platform}{cap_name}Component(ComponentBase):")
+        lines.append(f'    """{platform} {component_type} - generated from recorder. Edit as needed."""')
+        lines.append("")
+        lines.append("    platform = " + repr(platform))
+        lines.append("    component_type = " + repr(component_type))
+        lines.append("    data_domain = None")
+        lines.append("")
+        lines.append("    def __init__(self, ctx: ExecutionContext) -> None:")
+        lines.append("        super().__init__(ctx)")
         lines.append("")
         lines.append("    async def run(self, page: Any) -> ResultBase:")
         lines.append("        config = self.ctx.config or {}")
@@ -125,7 +167,8 @@ def generate_python_code(
     lines.append("")
     # URL 导航：来源优先级 + 平台默认 fallback（组件业务逻辑，保留在组件中）
     if component_type == "login":
-        lines.append(body_indent + "params = config.get(\"params\") or {}")
+        if not captcha_info:
+            lines.append(body_indent + "params = config.get(\"params\") or {}")
         _defaults_repr = ", ".join(f"{repr(k)}: {repr(v)}" for k, v in PLATFORM_DEFAULT_LOGIN_URLS.items())
         lines.append(body_indent + f"_platform_defaults = {{{_defaults_repr}}}")
         lines.append(body_indent + "_target_url = (")
@@ -230,10 +273,36 @@ def generate_python_code(
                 or "otp" in (scene_tags or [])
             )
             if is_captcha_step and captcha_info:
-                # 验证码步骤： unconditional 到达即等待 1s -> 截图 -> raise VerificationRequiredError
+                # 6.1: 先生成 captcha fill 后的非验证码步骤（如勾选框），再 raise
+                post_captcha_steps = []
+                for j in range(i + 1, len(steps)):
+                    if not _is_captcha_step(steps[j]):
+                        post_captcha_steps.append((j, steps[j]))
+                        _skip_indices.add(j)
+                if post_captcha_steps:
+                    lines.append(step_indent + "# [reorder] 以下步骤原在验证码 fill 之后录制，已前置到 raise 之前；可能需人工调整顺序")
+                    for pj, ps in post_captcha_steps:
+                        pa = (ps.get("action") or "").strip().lower()
+                        psel = ps.get("selector") or ""
+                        if not psel and ps.get("selectors"):
+                            psel = _selector_from_selectors(ps["selectors"])
+                        pval = ps.get("value") or ""
+                        if pa == "click" and psel.strip():
+                            plv = f"_el_{pj}"
+                            plc = _selector_to_locator_scoped("page", psel, step_indent, plv, use_first=False)
+                            if plc:
+                                lines.extend(plc)
+                                lines.append(step_indent + f"await {plv}.click(timeout=10000)")
+                        elif pa == "fill" and psel.strip():
+                            plv = f"_el_{pj}"
+                            plc = _selector_to_locator_scoped("page", psel, step_indent, plv, use_first=False)
+                            if plc:
+                                lines.extend(plc)
+                                lines.append(step_indent + f"await {plv}.fill({repr(pval)}, timeout=10000)")
+                        else:
+                            lines.append(step_indent + f"# TODO: post-captcha step {pj} action={pa!r}")
                 lines.append(step_indent + "# 验证码步骤：到达即暂停，等待用户回传后同页继续")
                 lines.append(step_indent + "await asyncio.sleep(1)")
-                lines.append(step_indent + "import os")
                 lines.append(step_indent + "screenshot_path = None")
                 lines.append(step_indent + "screenshot_dir = config.get(\"task\", {}).get(\"screenshot_dir\")")
                 lines.append(step_indent + "if screenshot_dir:")
@@ -259,8 +328,42 @@ def generate_python_code(
                         lines.append(step_indent + f"await {loc_var}.fill({fill_val}, timeout=10000)")
                     else:
                         lines.append(step_indent + f"await {loc_var}.fill({repr(value)}, timeout=10000)")
+        elif action == "select":
+            loc_var = f"_el_{i}"
+            loc_code = _selector_to_locator_scoped("page", selector, step_indent, loc_var, use_first=False)
+            if loc_code:
+                lines.extend(loc_code)
+                lines.append(step_indent + f"await expect({loc_var}).to_be_visible()")
+                lines.append(step_indent + f"await {loc_var}.select_option({repr(value)}, timeout=10000)")
+            else:
+                lines.append(step_indent + f"# TODO: select action - selector empty, add manually")
+        elif action == "press":
+            if selector.strip():
+                loc_var = f"_el_{i}"
+                loc_code = _selector_to_locator_scoped("page", selector, step_indent, loc_var, use_first=False)
+                if loc_code:
+                    lines.extend(loc_code)
+                    lines.append(step_indent + f"await {loc_var}.press({repr(value)}, timeout=5000)")
+                else:
+                    lines.append(step_indent + f"await page.keyboard.press({repr(value)})")
+            else:
+                lines.append(step_indent + f"await page.keyboard.press({repr(value)})")
+        elif action == "download":
+            lines.append(step_indent + "async with page.expect_download(timeout=60000) as download_info:")
+            if selector.strip():
+                loc_var = f"_el_{i}"
+                loc_code = _selector_to_locator_scoped("page", selector, step_indent + "    ", loc_var, use_first=False)
+                if loc_code:
+                    lines.extend(loc_code)
+                    lines.append(step_indent + f"    await {loc_var}.click(timeout=10000)")
+                else:
+                    lines.append(step_indent + f"    pass  # TODO: trigger download click")
+            else:
+                lines.append(step_indent + f"    pass  # TODO: trigger download click")
+            lines.append(step_indent + "_download = await download_info.value")
+            lines.append(step_indent + "_dl_path = config.get(\"download_dir\", \".\") + \"/\" + _download.suggested_filename")
+            lines.append(step_indent + "await _download.save_as(_dl_path)")
         elif action == "wait":
-            # 8.2 优先生成条件等待；仅当步骤带显式固定等待原因时生成 wait_for_timeout
             timeout_ms = step.get("timeout", 1000)
             comment_text = (step.get("comment") or "").strip()
             fixed_reason = step.get("fixed_wait_reason") or ""
@@ -270,7 +373,7 @@ def generate_python_code(
                 lines.append(step_indent + f"await page.wait_for_timeout({timeout_ms})")
             else:
                 lines.append(step_indent + "# 页面稳定；可改为 expect(locator).to_be_visible() 等条件等待")
-                lines.append(step_indent + f'await page.wait_for_load_state("domcontentloaded", timeout={timeout_ms})')
+                lines.append(step_indent + f'await page.wait_for_load_state("networkidle", timeout={timeout_ms})')
         else:
             lines.append(step_indent + f"# TODO: action {action!r} - implement per COLLECTION_SCRIPT_WRITING_GUIDE.md")
         if optional:
@@ -303,8 +406,17 @@ def generate_python_code(
             lines.append(body_indent + "# Example: await expect(page.get_by_text(\"Welcome\")).to_be_visible(timeout=10000)")
             lines.append(body_indent + "return LoginResult(success=True, message=\"ok\")")
     elif component_type == "export":
-        lines.append(body_indent + "# TODO: 等待下载或确认文件路径")
-        lines.append(body_indent + "return ExportResult(success=True, message=\"ok\", file_path=None)")
+        lines.append(body_indent + "# 下载文件")
+        lines.append(body_indent + "async with page.expect_download(timeout=60000) as download_info:")
+        lines.append(body_indent + "    pass  # TODO: click the download/export trigger button above if not already done")
+        lines.append(body_indent + "_download = await download_info.value")
+        lines.append(body_indent + "file_path = output_root / _download.suggested_filename")
+        lines.append(body_indent + "await _download.save_as(str(file_path))")
+        lines.append(body_indent + "return ExportResult(success=True, message=\"ok\", file_path=str(file_path))")
+    elif component_type == "navigation":
+        lines.append(body_indent + "return NavigationResult(success=True, message=\"ok\")")
+    elif component_type == "date_picker":
+        lines.append(body_indent + "return DatePickResult(success=True, message=\"ok\")")
     else:
         lines.append(body_indent + "return ResultBase(success=True, message=\"ok\")")
 
@@ -321,10 +433,19 @@ def generate_python_code(
 def _selector_from_selectors(selectors: List[Dict[str, Any]]) -> str:
     """
     从 Inspector 的 selectors 列表推导出单个 selector 字符串，供 _selector_to_locator 使用。
-    优先级: role > text > label > placeholder > css/other。
+
+    选择器优先级（与 JS 注入 push 顺序一致）:
+        role > placeholder > label > text > css
+
+    unique 降级逻辑:
+        1. 优先返回 unique=True 的最高优先级选择器
+        2. 若最高优先级选择器非唯一，降级到下一个 unique=True 的选择器
+        3. 若全部非唯一，返回最高优先级选择器（代码中会附加建议迁移注释）
     """
     if not selectors:
         return ""
+
+    valid: List[Dict[str, Any]] = []
     for item in selectors:
         if not isinstance(item, dict):
             continue
@@ -335,6 +456,12 @@ def _selector_from_selectors(selectors: List[Dict[str, Any]]) -> str:
         v = str(v).strip()
         if not v:
             continue
+        valid.append({"type": t, "value": v, "unique": item.get("unique", True)})
+
+    if not valid:
+        return ""
+
+    def _format(t: str, v: str) -> str:
         if t == "role":
             return v if v.startswith("role=") else f"role={v}"
         if t == "text":
@@ -343,8 +470,13 @@ def _selector_from_selectors(selectors: List[Dict[str, Any]]) -> str:
             return v if v.startswith("label=") else f"label={v}"
         if t == "placeholder":
             return v if v.startswith("placeholder=") else f"placeholder={v}"
-        return v  # css 或其它
-    return ""
+        return v
+
+    unique_items = [s for s in valid if s["unique"]]
+    if unique_items:
+        return _format(unique_items[0]["type"], unique_items[0]["value"])
+
+    return _format(valid[0]["type"], valid[0]["value"])
 
 
 def _to_class_name(name: str) -> str:
@@ -488,7 +620,9 @@ def _build_robust_captcha_selector(captcha_info: Optional[Dict[str, Any]]) -> st
     return cap_sel
 
 
-def _generate_login_captcha_resume_block(body_indent: str, captcha_info: Dict[str, Any]) -> List[str]:
+def _generate_login_captcha_resume_block(
+    body_indent: str, captcha_info: Dict[str, Any], success_criteria: Optional[Dict[str, Any]] = None
+) -> List[str]:
     """生成登录组件的验证码恢复路径（在 page.goto 之前，同页继续）。"""
     cap_sel = captcha_info.get("captcha_selector") or ""
     fallback_cap = "input[placeholder*='验证码'], input[name*='captcha' i], input[name*='code' i]"
@@ -506,7 +640,6 @@ def _generate_login_captcha_resume_block(body_indent: str, captcha_info: Dict[st
     # 8.5 移除 .first，改为唯一性检查 + 失败可诊断（含 URL/selector 上下文）
     out = [
         body_indent + "# 恢复路径：若有回传的验证码/OTP，同页继续，不 goto",
-        body_indent + "params = config.get(\"params\") or {}",
         body_indent + "captcha_code = params.get(\"captcha_code\") or params.get(\"otp\")",
         body_indent + "if captcha_code:",
         body_indent + "    value = (captcha_code or \"\").strip()",
@@ -521,7 +654,22 @@ def _generate_login_captcha_resume_block(body_indent: str, captcha_info: Dict[st
         body_indent + "            # 固定等待: 验证码回传后等待登录态回写/跳转",
         body_indent + "            await asyncio.sleep(2.0)",
         body_indent + "            cur = str(getattr(page, \"url\", \"\"))",
-        body_indent + "            if \"/welcome\" in cur or \"/dashboard\" in cur or \"login\" not in cur.lower():",
+    ]
+    sc = success_criteria or {}
+    url_contains = sc.get("url_contains")
+    url_not_contains = sc.get("url_not_contains")
+    if url_contains or url_not_contains:
+        conditions = []
+        if url_contains:
+            conditions.append(f"{repr(url_contains)} in cur")
+        if url_not_contains:
+            conditions.append(f"{repr(url_not_contains)} not in cur.lower()")
+        cond_str = " or ".join(conditions)
+        out.append(body_indent + f"            if {cond_str}:")
+    else:
+        out.append(body_indent + "            # TODO: configure success URL condition via success_criteria")
+        out.append(body_indent + "            if \"login\" not in cur.lower():")
+    out += [
         body_indent + "                return LoginResult(success=True, message=\"ok\")",
         body_indent + "            # 若验证码提交后仍停留在登录页，则视为失败，避免继续执行主流程再次触发验证码",
         body_indent + "            return LoginResult(success=False, message=\"验证码提交后登录未跳转或仍在登录页\")",

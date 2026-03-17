@@ -11,7 +11,7 @@
 """
 
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -86,7 +86,7 @@ async def sync_platform_account_to_dim_shop(
         shop.shop_slug = platform_account.shop_id or shop.shop_slug or shop_id
         shop.region = platform_account.shop_region or shop.region
         shop.currency = platform_account.currency or shop.currency
-        shop.updated_at = datetime.utcnow()
+        shop.updated_at = datetime.now(timezone.utc)
         logger.info(f"[ShopSync] 更新店铺记录: {platform_code}/{shop_id} ({shop.shop_name})")
     else:
         # 创建新店铺记录

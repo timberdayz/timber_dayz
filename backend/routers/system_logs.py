@@ -10,13 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, delete
 from sqlalchemy.orm import selectinload
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import io
 import csv
 
 from backend.models.database import get_async_db
-from backend.routers.users import require_admin
+from backend.dependencies.auth import require_admin
 from backend.schemas.system import (
     SystemLogResponse,
     SystemLogListResponse,
@@ -337,7 +337,7 @@ async def clear_system_logs(
         from datetime import timedelta
         
         # 计算截止时间
-        cutoff_time = datetime.utcnow() - timedelta(days=days)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=days)
         
         # 查询要删除的日志数量
         count_query = select(func.count(SystemLog.id)).where(

@@ -9,7 +9,7 @@
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Dict, Any, Optional
 
 from modules.core.db import (
@@ -113,7 +113,7 @@ class SalesCampaignService:
         elif campaign.end_date < date.today():
             campaign.status = "completed"
         
-        campaign.updated_at = datetime.utcnow()
+        campaign.updated_at = datetime.now(timezone.utc)
         
         self.db.commit()
         self.db.refresh(campaign)

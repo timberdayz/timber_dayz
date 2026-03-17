@@ -8,7 +8,7 @@
 """
 
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from backend.main import app
 from backend.utils.auth import create_access_token
 from modules.core.db import DimUser
@@ -24,8 +24,9 @@ async def admin_token():
 
 @pytest.fixture
 async def client():
-    """创建测试客户端"""
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    """创建测试客户端 (基于 ASGITransport，兼容 httpx 新版本)"""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
         yield client
 
 

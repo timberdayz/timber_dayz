@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import insert
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from backend.models.database import (
@@ -1297,7 +1297,7 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                 )
                 
                 # [*] 修复:确保created_at不为null(虽然schema有server_default,但显式设置更安全)
-                current_time = datetime.utcnow()
+                current_time = datetime.now(timezone.utc)
                 
                 data = {
                     "platform_code": platform_code_value,
@@ -1362,7 +1362,7 @@ def upsert_product_metrics(db: Session, rows: List[Dict[str, Any]], file_record:
                     index_elements=['platform_code', 'shop_id', 'platform_sku', 'metric_date', 'granularity', 'sku_scope', 'data_domain'],  # [*] v4.10.0新增:添加data_domain
                     set_={
                         # [*] 修复:更新时也更新updated_at
-                        "updated_at": datetime.utcnow(),
+                        "updated_at": datetime.now(timezone.utc),
                         # 商品基础信息
                         "product_name": stmt.excluded.product_name,
                         "category": stmt.excluded.category,

@@ -5,14 +5,14 @@
 提供缓存清理、数据清理、系统升级等功能
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
 from backend.models.database import get_async_db
-from backend.routers.users import require_admin
+from backend.dependencies.auth import require_admin
 from backend.schemas.maintenance import (
     CacheClearRequest,
     CacheClearResponse,
@@ -239,7 +239,7 @@ async def check_upgrade(
             latest_version=upgrade_info.get("latest_version"),
             upgrade_available=upgrade_info.get("upgrade_available", False),
             release_notes=upgrade_info.get("release_notes"),
-            check_time=upgrade_info.get("check_time", datetime.utcnow())
+            check_time=upgrade_info.get("check_time", datetime.now(timezone.utc))
         )
     except Exception as e:
         logger.error(f"检查系统升级失败: {e}", exc_info=True)
@@ -331,7 +331,7 @@ async def upgrade_system(
         
         # TODO: 实现实际的升级逻辑(Docker环境)
         # 这里只是占位实现,实际升级应该通过CI/CD流程完成
-        started_at = datetime.utcnow()
+        started_at = datetime.now(timezone.utc)
         
         logger.warning(f"系统升级操作已启动: 目标版本={request.target_version}, 备份ID={backup_id}")
         

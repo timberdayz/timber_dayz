@@ -17,63 +17,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.models.database import get_async_db
-from backend.routers.auth import get_current_user
-from backend.routers.users import require_admin
+from backend.dependencies.auth import get_current_user
+from backend.dependencies.auth import require_admin
 from modules.core.db import DimRateLimitConfig, FactRateLimitConfigAudit, DimUser
 from modules.core.logger import get_logger
 from backend.middleware.rate_limiter import refresh_rate_limit_config_cache
+from backend.schemas.rate_limit import (
+    RateLimitRuleResponse,
+    RateLimitRuleCreate,
+    RateLimitRuleUpdate,
+    RateLimitRuleListResponse,
+)
 
 router = APIRouter(prefix="/api/rate-limit/config", tags=["限流配置管理"])
 logger = get_logger(__name__)
 
 
-# ==================== Pydantic 模型 ====================
-
-class RateLimitConfigResponse(BaseModel):
-    """限流配置响应模型"""
-    config_id: int
-    role_code: str
-    endpoint_type: str
-    limit_value: str
-    is_active: bool
-    description: Optional[str] = None
-    created_by: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    updated_by: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
-
-
-class RateLimitConfigCreate(BaseModel):
-    """创建限流配置请求模型"""
-    role_code: str = Field(..., description="角色代码(admin/manager/finance/operator/normal/anonymous)")
-    endpoint_type: str = Field(..., description="端点类型(default/data_sync/auth)")
-    limit_value: str = Field(..., description="限流值(如 '200/minute')")
-    description: Optional[str] = Field(None, description="配置说明")
-    is_active: bool = Field(True, description="是否启用")
-
-
-class RateLimitConfigUpdate(BaseModel):
-    """更新限流配置请求模型"""
-    limit_value: Optional[str] = Field(None, description="限流值(如 '200/minute')")
-    is_active: Optional[bool] = Field(None, description="是否启用")
-    description: Optional[str] = Field(None, description="配置说明")
-
-
-class RateLimitConfigListResponse(BaseModel):
-    """限流配置列表响应模型"""
-    total: int
-    configs: List[RateLimitConfigResponse]
-
-
 # ==================== API 端点 ====================
 
-@router.get("/roles", response_model=RateLimitConfigListResponse)
+@router.get("/roles", response_model=RateLimitRuleListResponse)
 async def list_rate_limit_configs(
     role_code: Optional[str] = None,
     endpoint_type: Optional[str] = None,
@@ -106,9 +71,9 @@ async def list_rate_limit_configs(
         result = await db.execute(stmt)
         configs = result.scalars().all()
         
-        return RateLimitConfigListResponse(
+        return RateLimitRuleListResponse(
             total=len(configs),
-            configs=[RateLimitConfigResponse.model_validate(config) for config in configs]
+            configs=[RateLimitRuleResponse.model_validate(config) for config in configs]
         )
         
     except Exception as e:
@@ -116,7 +81,7 @@ async def list_rate_limit_configs(
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
-@router.get("/roles/{role_code}", response_model=List[RateLimitConfigResponse])
+@router.get("/roles/{role_code}", response_model=List[RateLimitRuleResponse])
 async def get_rate_limit_config_by_role(
     role_code: str,
     db: AsyncSession = Depends(get_async_db),
@@ -137,7 +102,7 @@ async def get_rate_limit_config_by_role(
         if not configs:
             raise HTTPException(status_code=404, detail=f"角色 {role_code} 的限流配置不存在")
         
-        return [RateLimitConfigResponse.model_validate(config) for config in configs]
+        return [RateLimitRuleResponse.model_validate(config) for config in configs]
         
     except HTTPException:
         raise
@@ -146,9 +111,9 @@ async def get_rate_limit_config_by_role(
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
-@router.post("/roles", response_model=RateLimitConfigResponse)
+@router.post("/roles", response_model=RateLimitRuleResponse)
 async def create_rate_limit_config(
-    config: RateLimitConfigCreate,
+    config: RateLimitRuleCreate,
     request: Request,
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(require_admin)
@@ -210,7 +175,7 @@ async def create_rate_limit_config(
         await refresh_rate_limit_config_cache(db)
         
         logger.info(f"[RateLimitConfig] 创建限流配置: {config.role_code}/{config.endpoint_type} = {config.limit_value}")
-        return RateLimitConfigResponse.model_validate(new_config)
+        return RateLimitRuleResponse.model_validate(new_config)
         
     except HTTPException:
         raise
@@ -220,11 +185,11 @@ async def create_rate_limit_config(
         raise HTTPException(status_code=500, detail=f"创建失败: {str(e)}")
 
 
-@router.put("/roles/{role_code}/{endpoint_type}", response_model=RateLimitConfigResponse)
+@router.put("/roles/{role_code}/{endpoint_type}", response_model=RateLimitRuleResponse)
 async def update_rate_limit_config(
     role_code: str,
     endpoint_type: str,
-    config_update: RateLimitConfigUpdate,
+    config_update: RateLimitRuleUpdate,
     request: Request,
     db: AsyncSession = Depends(get_async_db),
     current_user: DimUser = Depends(require_admin)
@@ -262,7 +227,7 @@ async def update_rate_limit_config(
             config.description = config_update.description
         
         config.updated_by = current_user.username
-        config.updated_at = datetime.utcnow()
+        config.updated_at = datetime.now(timezone.utc)
         
         await db.commit()
         await db.refresh(config)
@@ -289,7 +254,7 @@ async def update_rate_limit_config(
         await refresh_rate_limit_config_cache(db)
         
         logger.info(f"[RateLimitConfig] 更新限流配置: {role_code}/{endpoint_type} = {config.limit_value}")
-        return RateLimitConfigResponse.model_validate(config)
+        return RateLimitRuleResponse.model_validate(config)
         
     except HTTPException:
         raise

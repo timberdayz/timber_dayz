@@ -23,13 +23,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, delete
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.models.database import get_db, get_async_db
 from backend.utils.api_response import success_response, error_response, pagination_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import DataQuarantine, CatalogFile
 from modules.core.logger import get_logger
+from backend.schemas.data_quarantine import (
+    QuarantineListRequest,
+    QuarantineDetailResponse,
+    ReprocessRequest,
+    ReprocessResponse,
+)
 from backend.services.c_class_data_validator import get_c_class_data_validator
 
 logger = get_logger(__name__)
@@ -49,49 +55,6 @@ ERROR_TYPES = {
 
 
 # ==================== Request/Response Models ====================
-
-class QuarantineListRequest(BaseModel):
-    """隔离数据列表查询请求"""
-    file_id: Optional[int] = None
-    platform: Optional[str] = None
-    data_domain: Optional[str] = None
-    error_type: Optional[str] = None
-    page: int = 1
-    page_size: int = 20
-
-
-class QuarantineDetailResponse(BaseModel):
-    """隔离数据详情响应"""
-    id: int
-    file_id: int
-    file_name: str
-    platform_code: str
-    data_domain: str
-    row_index: int
-    raw_data: dict
-    error_type: str
-    error_message: str
-    validation_errors: Optional[dict]
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
-
-
-class ReprocessRequest(BaseModel):
-    """重新处理请求"""
-    quarantine_ids: List[int]
-    corrections: Optional[dict] = None  # 可选的数据修正
-
-
-class ReprocessResponse(BaseModel):
-    """重新处理响应"""
-    success: bool
-    processed: int
-    succeeded: int
-    failed: int
-    errors: List[dict]
-
 
 # ==================== API Endpoints ====================
 
@@ -442,7 +405,7 @@ async def reprocess_quarantine_data(
                         
                         # 6. 更新隔离区状态
                         quarantine.is_resolved = True
-                        quarantine.resolved_at = datetime.utcnow()
+                        quarantine.resolved_at = datetime.now(timezone.utc)
                         quarantine.resolution_note = f"手动修正并重新处理:{corrections}"
                         await db.commit()
                         
@@ -854,5 +817,3 @@ async def get_quarantine_stats(
             recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
-
-

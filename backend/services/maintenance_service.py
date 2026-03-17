@@ -9,7 +9,7 @@ import os
 import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, and_
 from modules.core.db import SystemLog, BackupRecord
@@ -216,7 +216,7 @@ class MaintenanceService:
         try:
             if clean_type == "system_logs":
                 # 清理系统日志(保留最近N天)
-                cutoff_time = datetime.utcnow() - timedelta(days=retention_days)
+                cutoff_time = datetime.now(timezone.utc) - timedelta(days=retention_days)
                 
                 # 查询要删除的记录数
                 count_result = await self.db.execute(
@@ -238,7 +238,7 @@ class MaintenanceService:
                 
             elif clean_type == "temp_files":
                 # 清理临时文件(保留最近N天)
-                cutoff_time = datetime.utcnow() - timedelta(days=retention_days)
+                cutoff_time = datetime.now(timezone.utc) - timedelta(days=retention_days)
                 
                 if self.temp_dir.exists():
                     for file_path in self.temp_dir.rglob("*"):
@@ -305,7 +305,7 @@ class MaintenanceService:
             "latest_version": latest_version,
             "upgrade_available": upgrade_available,
             "release_notes": release_notes,
-            "check_time": datetime.utcnow()
+            "check_time": datetime.now(timezone.utc)
         }
 
 

@@ -16,7 +16,7 @@ from typing import Dict, Any
 
 from backend.services.executor_manager import get_executor_manager
 from backend.models.database import engine, async_engine
-from backend.routers.auth import get_current_user
+from backend.dependencies.auth import get_current_user
 
 router = APIRouter(prefix="/system", tags=["系统监控"])
 

@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from starlette.requests import Request
 
-from backend.routers.hr_management import get_my_income
+from backend.routers.hr_employee import get_my_income
 from backend.routers.performance_management import calculate_performance_scores
 
 
@@ -79,7 +79,7 @@ def test_my_income_unlinked_returns_linked_false_and_audit_called(monkeypatch):
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.routers.hr_management._log_me_income_access", _fake_log)
+    monkeypatch.setattr("backend.routers.hr_employee._log_me_income_access", _fake_log)
 
     request = Request(
         {
@@ -156,7 +156,7 @@ def test_my_income_linked_fallback_to_cn_columns_when_orm_columns_missing(monkey
     async def _fake_log(*args, **kwargs):
         called["count"] += 1
 
-    monkeypatch.setattr("backend.routers.hr_management._log_me_income_access", _fake_log)
+    monkeypatch.setattr("backend.routers.hr_employee._log_me_income_access", _fake_log)
 
     request = Request(
         {

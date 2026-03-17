@@ -22,7 +22,7 @@ v4.18.2更新:
 from typing import Dict, Any, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 
 from modules.core.db import SyncProgressTask
@@ -93,7 +93,7 @@ class SyncProgressTracker:
                 quarantined_rows=0,
                 file_progress=0.0,
                 row_progress=0.0,
-                start_time=datetime.utcnow(),
+                start_time=datetime.now(timezone.utc),
                 errors=[],
                 warnings=[],
                 task_details={}
@@ -161,7 +161,7 @@ class SyncProgressTracker:
                 )
             
             # 更新时间戳
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             
             await self.db.commit()
             
@@ -261,13 +261,13 @@ class SyncProgressTracker:
                 raise ValueError(f"Task {task_id} not found")
             
             task.status = "completed" if success else "failed"
-            task.end_time = datetime.utcnow()
-            task.updated_at = datetime.utcnow()
+            task.end_time = datetime.now(timezone.utc)
+            task.updated_at = datetime.now(timezone.utc)
             
             if error:
                 errors = task.errors or []
                 errors.append({
-                    "time": datetime.utcnow().isoformat(),
+                    "time": datetime.now(timezone.utc).isoformat(),
                     "message": error
                 })
                 task.errors = errors
@@ -299,11 +299,11 @@ class SyncProgressTracker:
             if task:
                 errors = task.errors or []
                 errors.append({
-                    "time": datetime.utcnow().isoformat(),
+                    "time": datetime.now(timezone.utc).isoformat(),
                     "message": error
                 })
                 task.errors = errors
-                task.updated_at = datetime.utcnow()
+                task.updated_at = datetime.now(timezone.utc)
                 await self.db.commit()
                 
         except Exception as e:
@@ -327,11 +327,11 @@ class SyncProgressTracker:
             if task:
                 warnings = task.warnings or []
                 warnings.append({
-                    "time": datetime.utcnow().isoformat(),
+                    "time": datetime.now(timezone.utc).isoformat(),
                     "message": warning
                 })
                 task.warnings = warnings
-                task.updated_at = datetime.utcnow()
+                task.updated_at = datetime.now(timezone.utc)
                 await self.db.commit()
                 
         except Exception as e:

@@ -4,18 +4,29 @@
 定义系统中使用的所有自定义异常类,提供统一的错误处理机制。
 """
 
+from enum import IntEnum
+from typing import Optional, Union
+
 
 class ERPException(Exception):
     """ERP系统基础异常"""
-    
-    def __init__(self, message: str, error_code: str = None):
+
+    def __init__(
+        self,
+        message: str,
+        error_code: Optional[Union[str, IntEnum]] = None,
+    ):
         self.message = message
         self.error_code = error_code
         super().__init__(self.message)
-    
-    def __str__(self):
-        if self.error_code:
-            return f"[{self.error_code}] {self.message}"
+
+    def __str__(self) -> str:
+        if self.error_code is not None:
+            if isinstance(self.error_code, IntEnum):
+                code_repr = str(int(self.error_code))
+            else:
+                code_repr = str(self.error_code)
+            return f"[{code_repr}] {self.message}"
         return self.message
 
 

@@ -11,7 +11,7 @@ Create Date: 2026-01-30
 
 from alembic import op
 import sqlalchemy as sa
-from datetime import datetime
+from sqlalchemy.sql import func
 
 
 # revision identifiers, used by Alembic.
@@ -70,8 +70,8 @@ def upgrade():
         sa.Column('achieved_amount', sa.Float(), nullable=False, default=0.0, comment="实际销售额(CNY)"),
         sa.Column('achieved_quantity', sa.Integer(), nullable=False, default=0, comment="实际订单数"),
         sa.Column('achievement_rate', sa.Float(), nullable=False, default=0.0, comment="达成率"),
-        sa.Column('created_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
-        sa.Column('updated_at', sa.DateTime(), nullable=False, default=datetime.utcnow),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=func.now()),
+        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=func.now()),
         sa.PrimaryKeyConstraint('id'),
         sa.ForeignKeyConstraint(['target_id'], ['public.sales_targets.id'], ondelete='CASCADE'),
         sa.CheckConstraint("breakdown_type IN ('shop', 'time')", name='chk_breakdown_type'),

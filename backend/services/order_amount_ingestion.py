@@ -21,7 +21,7 @@
 """
 
 from typing import List, Dict, Optional
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -203,8 +203,8 @@ async def ingest_order_amounts(
                 amount_original=float(amount_original),
                 amount_cny=float(amount_cny),
                 exchange_rate=exchange_rate,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
             )
             db.add(order_amount)
             inserted += 1

@@ -7,7 +7,7 @@
 符合运营数据主键设计规则(自增ID主键 + shop_id为核心的唯一索引)
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
@@ -124,7 +124,7 @@ def upsert_traffic(
                 for key, value in core.items():
                     if key != "id" and hasattr(existing, key):
                         setattr(existing, key, value)
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(timezone.utc)
             else:
                 # 创建新记录
                 traffic = FactTraffic(**core)
@@ -239,7 +239,7 @@ def upsert_service(
                 for key, value in core.items():
                     if key != "id" and hasattr(existing, key):
                         setattr(existing, key, value)
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(timezone.utc)
             else:
                 # 创建新记录
                 service = FactService(**core)
@@ -354,7 +354,7 @@ def upsert_analytics(
                 for key, value in core.items():
                     if key != "id" and hasattr(existing, key):
                         setattr(existing, key, value)
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(timezone.utc)
             else:
                 # 创建新记录
                 analytics = FactAnalytics(**core)

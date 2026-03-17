@@ -13,7 +13,7 @@ from backend.schemas.auth import RoleCreate, RoleUpdate, RoleResponse
 # 但roles.py中使用的是旧版格式(id为int),需要适配
 from backend.schemas.permission import PermissionResponse as NewPermissionResponse
 from typing import List as TypingList
-from backend.routers.auth import get_current_user
+from backend.dependencies.auth import get_current_user
 from backend.services.audit_service import audit_service
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type

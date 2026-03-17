@@ -27,7 +27,7 @@ from fastapi import Request, Response, Depends
 from fastapi.responses import JSONResponse
 from functools import wraps
 from typing import Callable, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
 
@@ -360,7 +360,7 @@ async def refresh_rate_limit_config_cache(db: AsyncSession):
         from backend.services.rate_limit_config_service import RateLimitConfigService
         service = RateLimitConfigService(db)
         _db_config_cache = await service.get_rate_limit_tiers(force_refresh=True)
-        _db_config_cache_timestamp = datetime.utcnow()
+        _db_config_cache_timestamp = datetime.now(timezone.utc)
         logger.info(f"[RateLimit] 已刷新限流配置缓存,加载了 {len(_db_config_cache)} 个角色的配置")
     except Exception as e:
         logger.warning(f"[RateLimit] 刷新限流配置缓存失败: {e},使用默认配置")

@@ -4,7 +4,7 @@
 负责管理每个账号+数据域的最后采集时间点
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -76,7 +76,7 @@ class SyncPointService:
             return sync_point, False
         
         # 创建新同步点
-        default_time = datetime.utcnow() - timedelta(days=default_days_ago)
+        default_time = datetime.now(timezone.utc) - timedelta(days=default_days_ago)
         sync_point = CollectionSyncPoint(
             platform=platform,
             account_id=account_id,
@@ -135,7 +135,7 @@ class SyncPointService:
         sync_point.last_sync_value = new_sync_value or new_sync_at.isoformat()
         sync_point.last_batch_count = batch_count
         sync_point.total_synced_count += batch_count
-        sync_point.updated_at = datetime.utcnow()
+        sync_point.updated_at = datetime.now(timezone.utc)
         
         self.db.commit()
         self.db.refresh(sync_point)
@@ -191,7 +191,7 @@ class SyncPointService:
         Returns:
             重置后的同步点
         """
-        reset_time = datetime.utcnow() - timedelta(days=days_ago)
+        reset_time = datetime.now(timezone.utc) - timedelta(days=days_ago)
         
         return self.update_sync_point(
             platform=platform,

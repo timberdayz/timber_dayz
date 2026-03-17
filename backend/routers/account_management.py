@@ -12,7 +12,7 @@
 """
 
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,9 +23,6 @@ from backend.models.database import get_db, get_async_db
 from modules.core.db import PlatformAccount
 from backend.services.encryption_service import get_encryption_service
 from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
-from modules.core.logger import get_logger
-
-# v4.18.0: 使用集中的schemas(Contract-First架构)
 from backend.schemas.account import (
     CapabilitiesModel,
     AccountCreate,
@@ -33,20 +30,13 @@ from backend.schemas.account import (
     AccountResponse,
     AccountStats,
     AccountImportResponse,
+    BatchCreateRequest,
 )
+from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/accounts", tags=["账号管理"])
-
-
-class BatchCreateRequest(BaseModel):
-    """批量创建请求"""
-    parent_account: str = Field(..., description="主账号")
-    platform: str = Field(..., description="平台代码")
-    username: str = Field(..., description="用户名")
-    password: str = Field(..., description="密码")
-    shops: List[dict] = Field(..., description="店铺列表")
 
 
 # ImportResponse已移动到backend/schemas/account.py(重命名为AccountImportResponse)
@@ -208,10 +198,8 @@ async def update_account(
     
     # 特殊处理capabilities
     if "capabilities" in update_data:
-        # 如果capabilities是Pydantic模型,转换为字典;如果已经是字典,直接使用
         capabilities_value = update_data["capabilities"]
         if not isinstance(capabilities_value, dict):
-            # 不是字典,可能是Pydantic模型,尝试转换为字典
             if hasattr(capabilities_value, "dict"):
                 update_data["capabilities"] = capabilities_value.dict()
             else:
@@ -224,7 +212,7 @@ async def update_account(
     
     # 更新审计字段
     db_account.updated_by = "system"  # TODO: 替换为实际用户
-    db_account.updated_at = datetime.utcnow()
+    db_account.updated_at = datetime.now(timezone.utc)
     
     await db.commit()
     await db.refresh(db_account)
@@ -476,4 +464,3 @@ async def get_account_stats(
         platforms=platforms,
         platform_breakdown=platform_breakdown
     )
-

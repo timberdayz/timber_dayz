@@ -72,3 +72,54 @@ class RateLimitInfoResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+# ================================================================
+# 限流规则 CRUD（rate_limit_config 路由使用）
+# ================================================================
+
+
+class RateLimitRuleResponse(BaseModel):
+    """限流规则响应模型"""
+    config_id: int
+    role_code: str
+    endpoint_type: str
+    limit_value: str
+    is_active: bool
+    description: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    updated_by: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RateLimitRuleCreate(BaseModel):
+    """创建限流规则请求模型"""
+    role_code: str = Field(
+        ...,
+        description="角色代码(admin/manager/finance/operator/normal/anonymous)",
+    )
+    endpoint_type: str = Field(
+        ..., description="端点类型(default/data_sync/auth)"
+    )
+    limit_value: str = Field(..., description="限流值(如 '200/minute')")
+    description: Optional[str] = Field(None, description="配置说明")
+    is_active: bool = Field(True, description="是否启用")
+
+
+class RateLimitRuleUpdate(BaseModel):
+    """更新限流规则请求模型"""
+    limit_value: Optional[str] = Field(
+        None, description="限流值(如 '200/minute')"
+    )
+    is_active: Optional[bool] = Field(None, description="是否启用")
+    description: Optional[str] = Field(None, description="配置说明")
+
+
+class RateLimitRuleListResponse(BaseModel):
+    """限流规则列表响应模型"""
+    total: int
+    configs: List[RateLimitRuleResponse]
+

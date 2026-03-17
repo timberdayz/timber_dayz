@@ -19,7 +19,7 @@
     )
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Dict, Tuple, Optional
 import httpx
@@ -297,8 +297,8 @@ class CurrencyConverter:
                 rate=rate,
                 source=source,
                 priority=1,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
             )
             self.db.add(exchange_rate)
             self.db.commit()

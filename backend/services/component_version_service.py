@@ -9,7 +9,7 @@
 """
 
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, or_
@@ -115,7 +115,7 @@ class ComponentVersionService:
         Returns:
             测试版本,如果没有则返回None
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         return self.db.execute(
             select(ComponentVersion)
@@ -297,7 +297,7 @@ class ComponentVersionService:
             other_test.is_testing = False
         
         # 启动测试
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         version_obj.is_testing = True
         version_obj.test_ratio = test_ratio
         version_obj.test_start_at = now

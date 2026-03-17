@@ -19,7 +19,7 @@ from typing import List, Optional
 from datetime import datetime
 import os
 
-from backend.routers.auth import get_current_user
+from backend.dependencies.auth import get_current_user
 from backend.services.rate_limit_stats import get_rate_limit_stats_service
 from backend.middleware.rate_limiter import (
     RATE_LIMIT_TIERS,

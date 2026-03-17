@@ -12,7 +12,7 @@ import tarfile
 import gzip
 from pathlib import Path
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from modules.core.db import BackupRecord
@@ -74,7 +74,7 @@ class BackupService:
         - 文件备份:备份挂载的volume
         - 备份存储:保存到/app/backups
         """
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         
         try:
             # 创建备份记录(pending状态)
@@ -154,7 +154,7 @@ class BackupService:
             backup_record.backup_size = total_size
             backup_record.checksum = checksum
             backup_record.status = "completed"
-            backup_record.completed_at = datetime.utcnow()
+            backup_record.completed_at = datetime.now(timezone.utc)
             
             await self.db.commit()
             await self.db.refresh(backup_record)

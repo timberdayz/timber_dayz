@@ -13,7 +13,7 @@ Design notes:
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 import os
 
@@ -49,13 +49,13 @@ def _upsert_rate(session: Session, rate_date: date, base: str, quote: str, rate:
             quote_currency=quote,
             rate=rate,
             source=source,
-            fetched_at=datetime.utcnow(),
+            fetched_at=datetime.now(timezone.utc),
         )
         session.add(rec)
     else:
         rec.rate = rate
         rec.source = source
-        rec.fetched_at = datetime.utcnow()
+        rec.fetched_at = datetime.now(timezone.utc)
 
 
 def fetch_rate_from_api(rate_date: date, base: str = DEFAULT_BASE, quote: str = DEFAULT_QUOTE) -> Optional[float]:

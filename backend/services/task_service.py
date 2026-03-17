@@ -5,7 +5,7 @@
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, update
@@ -169,7 +169,7 @@ class TaskService:
         update_values = {
             'status': new_status,
             'version': CollectionTask.version + 1,
-            'updated_at': datetime.utcnow(),
+            'updated_at': datetime.now(timezone.utc),
         }
         
         if progress is not None:
@@ -348,7 +348,7 @@ class TaskService:
             .values(
                 status='interrupted',
                 error_message='服务重启导致任务中断',
-                updated_at=datetime.utcnow()
+                updated_at=datetime.now(timezone.utc)
             )
         )
         

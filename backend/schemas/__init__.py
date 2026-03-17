@@ -18,6 +18,7 @@ from backend.schemas.account import (
     AccountUpdate,
     AccountResponse,
     AccountStats,
+    BatchCreateRequest,
 )
 
 # ==================== 通用响应 ====================
@@ -75,12 +76,69 @@ from backend.schemas.rate_limit import (
     RateLimitAnomalyResponse,
     RateLimitConfigResponse,
     RateLimitInfoResponse,
+    RateLimitRuleResponse,
+    RateLimitRuleCreate,
+    RateLimitRuleUpdate,
+    RateLimitRuleListResponse,
 )
 
-# ==================== HR 人力/我的收入 (add-performance-and-personal-income) ====================
+# ==================== HR 人力/我的收入 ====================
 from backend.schemas.hr import (
     MyIncomeResponse,
     IncomeCalculationResponse,
+    DepartmentCreate,
+    DepartmentUpdate,
+    DepartmentResponse,
+    PositionCreate,
+    PositionUpdate,
+    PositionResponse,
+    EmployeeCreate,
+    EmployeeUpdate,
+    EmployeeResponse,
+    WorkShiftCreate,
+    WorkShiftResponse,
+    AttendanceRecordCreate,
+    AttendanceRecordUpdate,
+    AttendanceRecordResponse,
+    LeaveTypeCreate,
+    LeaveTypeResponse,
+    LeaveRecordCreate,
+    LeaveRecordUpdate,
+    LeaveRecordResponse,
+    OvertimeRecordCreate,
+    OvertimeRecordUpdate,
+    OvertimeRecordResponse,
+    SalaryStructureCreate,
+    SalaryStructureResponse,
+    PayrollRecordResponse,
+    EmployeeTargetCreate,
+    EmployeeTargetUpdate,
+    EmployeeTargetResponse,
+    EmployeePerformanceResponse,
+    EmployeeCommissionResponse,
+    ShopCommissionResponse,
+    EmployeeShopAssignmentCreate,
+    EmployeeShopAssignmentUpdate,
+    EmployeeShopAssignmentResponse,
+    CopyFromPrevMonthBody,
+    ShopCommissionConfigUpdate,
+    MeProfileUpdate,
+)
+
+# ==================== 组件版本管理 ====================
+from backend.schemas.component_version import (
+    ComponentVersionResponse,
+    VersionListResponse,
+    VersionRegisterRequest,
+    ABTestRequest,
+    VersionUpdateRequest,
+    BatchRegisterRequest,
+    BatchRegisterResult,
+    BatchRegisterResponse,
+    ComponentTestRequest,
+    TestHistoryResponse,
+    TestHistoryListResponse,
+    TestResumeRequest,
 )
 
 # ==================== 通知管理 (v4.19.0) ====================
@@ -97,65 +155,89 @@ from backend.schemas.notification import (
     NotificationBatchCreate,
 )
 
-__all__ = [
-    # Account
-    "CapabilitiesModel",
-    "AccountCreate",
-    "AccountUpdate",
-    "AccountResponse",
-    "AccountStats",
-    # Common
-    "SuccessResponse",
-    "ErrorResponse",
-    "PaginationMeta",
-    "PaginatedResponse",
-    # Collection
-    "CollectionConfigCreate",
-    "CollectionConfigUpdate",
-    "CollectionConfigResponse",
-    "TaskCreateRequest",
-    "TaskResponse",
-    "TaskLogResponse",
-    "CollectionAccountResponse",
-    "TaskHistoryResponse",
-    "DailyStats",
-    "TaskStatsResponse",
-    "ScheduleUpdateRequest",
-    "CronValidateRequest",
-    "ScheduleResponse",
-    "ScheduleInfoResponse",
-    "CronValidationResponse",
-    "CronPresetItem",
-    "CronPresetsResponse",
-    "ScheduledJobInfo",
-    "ScheduledJobsResponse",
-    "BrowserPoolStatus",
-    "HealthCheckResponse",
-    # Data Sync
-    "SingleFileSyncRequest",
-    "BatchSyncRequest",
-    "BatchSyncByFileIdsRequest",
-    "DataSyncFilePreviewRequest",
-    "FileListRequest",
-    # Rate Limit
-    "RateLimitEventResponse",
-    "RateLimitStatsResponse",
-    "RateLimitAnomalyResponse",
-    "RateLimitConfigResponse",
-    "RateLimitInfoResponse",
-    # Notification (v4.19.0)
-    "NotificationType",
-    "NotificationBase",
-    "NotificationCreate",
-    "NotificationResponse",
-    "NotificationListResponse",
-    "UnreadCountResponse",
-    "MarkReadRequest",
-    "MarkReadResponse",
-    "NotificationDeleteResponse",
-    "NotificationBatchCreate",
-    # HR (add-performance-and-personal-income)
-    "MyIncomeResponse",
-    "IncomeCalculationResponse",
-]
+# ==================== 配置管理 ====================
+from backend.schemas.config import (
+    SalesTargetCreate,
+    SalesTargetUpdate,
+    SalesTargetResponse,
+    CampaignTargetCreate,
+    CampaignTargetUpdate,
+    CampaignTargetResponse,
+)
 
+# ==================== 目标管理 ====================
+from backend.schemas.target import (
+    TargetCreateRequest,
+    TargetUpdateRequest,
+    BreakdownCreateRequest,
+    GenerateDailyBreakdownRequest,
+    TargetResponse,
+    BreakdownResponse,
+)
+
+# ==================== 销售战役 ====================
+from backend.schemas.sales_campaign import (
+    CampaignCreateRequest,
+    CampaignUpdateRequest,
+    CampaignShopRequest,
+    CampaignResponse,
+    CampaignShopResponse,
+)
+
+# ==================== 绩效管理 ====================
+from backend.schemas.performance import (
+    PerformanceConfigCreateRequest,
+    PerformanceConfigUpdateRequest,
+    PerformanceConfigResponse,
+    PerformanceScoreResponse,
+)
+
+# ==================== 组件录制 ====================
+from backend.schemas.component_recorder import (
+    RecorderStartRequest,
+    RecorderStepResponse,
+    RecorderSaveRequest,
+    GeneratePythonRequest,
+)
+
+# ==================== 费用管理 ====================
+from backend.schemas.expense import (
+    ExpenseCreateRequest,
+    ExpenseUpdateRequest,
+    ExpenseResponse,
+    ExpenseSummaryResponse,
+)
+
+# ==================== 数据隔离 ====================
+from backend.schemas.data_quarantine import (
+    QuarantineListRequest,
+    QuarantineDetailResponse,
+    ReprocessRequest,
+    ReprocessResponse,
+)
+
+# ==================== 自动入库 ====================
+from backend.schemas.auto_ingest import (
+    BatchAutoIngestRequest,
+    SingleAutoIngestRequest,
+    ClearDataRequest,
+)
+
+# ==================== WebSocket ====================
+from backend.schemas.websocket import (
+    CollectionWebSocketMessage,
+    NotificationWebSocketMessage,
+    NotificationMessage,
+)
+
+# ==================== Metabase ====================
+from backend.schemas.metabase import (
+    EmbeddingTokenRequest,
+    DashboardEmbedUrlRequest,
+)
+
+# ==================== 数据质量 ====================
+from backend.schemas.data_quality import (
+    CClassReadinessResponse,
+    CoreFieldsStatusResponse,
+)

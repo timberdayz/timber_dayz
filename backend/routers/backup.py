@@ -9,11 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 from backend.models.database import get_async_db
-from backend.routers.users import require_admin
+from backend.dependencies.auth import require_admin
 from backend.schemas.backup import (
     BackupCreateRequest,
     BackupResponse,
@@ -349,7 +349,7 @@ async def restore_backup(
         
         # 3. 维护窗口检查(默认凌晨2-4点)
         from datetime import datetime, time
-        current_time = datetime.utcnow().time()
+        current_time = datetime.now(timezone.utc).time()
         maintenance_start = time(2, 0)  # 凌晨2点
         maintenance_end = time(4, 0)    # 凌晨4点
         
@@ -385,7 +385,7 @@ async def restore_backup(
         
         # 5. 执行恢复操作(简化实现,实际应该使用Celery异步任务)
         # 注意:这里只是占位实现,实际恢复操作应该使用Celery异步任务,避免阻塞API
-        started_at = datetime.utcnow()
+        started_at = datetime.now(timezone.utc)
         
         try:
             # TODO: 实现实际的恢复逻辑(使用Celery异步任务)

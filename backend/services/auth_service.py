@@ -4,7 +4,7 @@ JWT认证服务
 
 import jwt
 import bcrypt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from fastapi import HTTPException, status
 from backend.utils.config import get_settings
@@ -36,7 +36,7 @@ class AuthService:
     def create_access_token(self, data: Dict[str, Any]) -> str:
         """创建访问令牌"""
         to_encode = data.copy()
-        expire = datetime.utcnow() + timedelta(minutes=self.access_token_expire_minutes)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=self.access_token_expire_minutes)
         to_encode.update({"exp": expire, "type": "access"})
         
         encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
@@ -45,7 +45,7 @@ class AuthService:
     def create_refresh_token(self, data: Dict[str, Any]) -> str:
         """创建刷新令牌"""
         to_encode = data.copy()
-        expire = datetime.utcnow() + timedelta(days=self.refresh_token_expire_days)
+        expire = datetime.now(timezone.utc) + timedelta(days=self.refresh_token_expire_days)
         to_encode.update({"exp": expire, "type": "refresh"})
         
         encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
@@ -65,7 +65,7 @@ class AuthService:
             
             # 检查过期时间
             exp = payload.get("exp")
-            if exp is None or datetime.utcnow().timestamp() > exp:
+            if exp is None or datetime.now(timezone.utc).timestamp() > exp:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Token expired"
@@ -220,7 +220,7 @@ class AuthService:
         # 计算过期时间(refresh token 的剩余过期时间)
         exp = payload.get("exp")
         if exp:
-            current_time = datetime.utcnow().timestamp()
+            current_time = datetime.now(timezone.utc).timestamp()
             expire_seconds = int(exp - current_time)
             
             # [*] v6.0.0修复:确保 expire_seconds 为正数且合理(边界情况处理)

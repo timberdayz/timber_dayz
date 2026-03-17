@@ -19,6 +19,20 @@ from backend.utils.error_codes import ErrorCode
 from backend.services.component_version_service import ComponentVersionService
 from modules.core.db import ComponentVersion, ComponentTestHistory
 from modules.core.logger import get_logger
+from backend.schemas.component_version import (
+    ComponentVersionResponse,
+    VersionListResponse,
+    VersionRegisterRequest,
+    ABTestRequest,
+    VersionUpdateRequest,
+    BatchRegisterRequest,
+    BatchRegisterResult,
+    BatchRegisterResponse,
+    ComponentTestRequest,
+    TestHistoryResponse,
+    TestHistoryListResponse,
+    TestResumeRequest,
+)
 
 logger = get_logger(__name__)
 
@@ -123,86 +137,6 @@ async def save_test_history(
     except Exception as e:
         logger.warning(f"Failed to save test history: {e}")
         await db.rollback()
-
-
-# ==================== Pydantic Models ====================
-
-class ComponentVersionResponse(BaseModel):
-    """组件版本响应模型"""
-    id: int
-    component_name: str
-    version: str
-    file_path: str
-    is_stable: bool
-    is_active: bool
-    is_testing: bool
-    usage_count: int
-    success_count: int
-    failure_count: int
-    success_rate: float
-    test_ratio: float
-    test_start_at: Optional[str] = None
-    test_end_at: Optional[str] = None
-    description: Optional[str] = None
-    created_by: Optional[str] = None
-    created_at: str
-    updated_at: str
-
-    class Config:
-        from_attributes = True
-
-
-class VersionListResponse(BaseModel):
-    """版本列表响应"""
-    data: List[ComponentVersionResponse]
-    total: int
-    page: int
-    page_size: int
-
-
-class VersionRegisterRequest(BaseModel):
-    """注册版本请求"""
-    component_name: str = Field(..., description="组件名称(如shopee/login)")
-    version: str = Field(..., description="版本号(如1.0.0)")
-    file_path: str = Field(..., description="文件路径")
-    description: Optional[str] = Field(None, description="版本说明")
-    is_stable: bool = Field(False, description="是否标记为稳定版本")
-    created_by: Optional[str] = Field(None, description="创建人")
-
-
-class ABTestRequest(BaseModel):
-    """启动A/B测试请求"""
-    test_ratio: float = Field(..., ge=0.05, le=0.5, description="测试流量比例(0.05-0.5)")
-    duration_days: int = Field(..., ge=1, le=30, description="测试持续天数(1-30)")
-
-
-class VersionUpdateRequest(BaseModel):
-    """更新版本请求"""
-    is_active: Optional[bool] = Field(None, description="是否启用")
-    description: Optional[str] = Field(None, description="版本说明")
-
-
-class BatchRegisterRequest(BaseModel):
-    """批量注册请求"""
-    platform: Optional[str] = Field(None, description="指定平台(可选)")
-
-
-class BatchRegisterResult(BaseModel):
-    """批量注册结果"""
-    component_name: str
-    file_path: str
-    version: str
-    status: str  # registered, updated, skipped, error
-    error: Optional[str] = None
-
-
-class BatchRegisterResponse(BaseModel):
-    """批量注册响应"""
-    success: bool
-    registered_count: int
-    skipped_count: int
-    error_count: int
-    details: List[BatchRegisterResult]
 
 
 # ==================== API Endpoints ====================
@@ -730,7 +664,7 @@ async def batch_register_python_components(
     """
     import importlib.util
     from pathlib import Path
-    from datetime import datetime
+    from datetime import datetime, timezone
     from backend.services.component_name_utils import (
         parse_filename_to_component_and_version,
         is_standard_component_name,
@@ -830,7 +764,7 @@ async def batch_register_python_components(
                         else:
                             # file_path 不同,更新 file_path(从YAML迁移到Python的情况)
                             existing.file_path = relative_path
-                            existing.updated_at = datetime.utcnow()
+                            existing.updated_at = datetime.now(timezone.utc)
                             # 如果描述还是旧的,更新描述
                             if "YAML" in existing.description or "DEPRECATED" in existing.description:
                                 existing.description = f"Python component: {component_type}"
@@ -854,8 +788,8 @@ async def batch_register_python_components(
                         description=f"Python component: {component_type}",
                         is_stable=False,
                         is_active=True,
-                        created_at=datetime.utcnow(),
-                        updated_at=datetime.utcnow()
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc)
                     )
                     db.add(new_version)  # AsyncSession.add is sync
                     
@@ -908,37 +842,6 @@ async def batch_register_python_components(
         await db.rollback()
         logger.error(f"Batch registration failed: {e}", exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, str(e), status_code=500, detail=str(e), recovery_suggestion="请稍后重试")
-
-
-class ComponentTestRequest(BaseModel):
-    """测试组件请求"""
-    account_id: str = Field(..., description="测试账号ID")
-
-
-class TestHistoryResponse(BaseModel):
-    """测试历史响应模型"""
-    test_id: str
-    component_name: str
-    component_version: Optional[str] = None
-    platform: str
-    account_id: str
-    status: str
-    duration_ms: int
-    steps_total: int
-    steps_passed: int
-    steps_failed: int
-    success_rate: float
-    tested_at: str
-    tested_by: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
-
-
-class TestHistoryListResponse(BaseModel):
-    """测试历史列表响应"""
-    total: int
-    items: List[TestHistoryResponse]
 
 
 @router.post("/{version_id}/test")
@@ -1477,12 +1380,6 @@ async def get_test_verification_screenshot(
     if not file_path.exists():
         return error_response(ErrorCode.FILE_NOT_FOUND, "验证码截图文件不存在", status_code=404, recovery_suggestion="请上传验证码截图")
     return FileResponse(path=str(file_path), media_type="image/png", filename=filename)
-
-
-class TestResumeRequest(BaseModel):
-    """测试验证码回传请求体"""
-    captcha_code: Optional[str] = Field(None, description="图形验证码")
-    otp: Optional[str] = Field(None, description="短信/OTP 验证码")
 
 
 @router.post("/{version_id}/test/{test_id}/resume")

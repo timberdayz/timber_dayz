@@ -107,3 +107,12 @@ class AccountImportResponse(BaseModel):
     failed_count: int = Field(description="失败数量")
     details: list = Field(default_factory=list, description="详细信息")
 
+
+class BatchCreateRequest(BaseModel):
+    """批量创建请求"""
+    parent_account: str = Field(..., description="主账号")
+    platform: str = Field(..., description="平台代码")
+    username: str = Field(..., description="用户名")
+    password: str = Field(..., description="密码")
+    shops: list = Field(..., description="店铺列表")
+

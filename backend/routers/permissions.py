@@ -6,7 +6,7 @@ v4.20.0: 系统管理模块API实现
 """
 
 from fastapi import APIRouter, Depends
-from backend.routers.auth import get_current_user
+from backend.dependencies.auth import get_current_user
 from backend.schemas.permission import PermissionTreeNode, PermissionTreeResponse
 from backend.services.permission_service import get_permission_service
 from backend.utils.api_response import success_response

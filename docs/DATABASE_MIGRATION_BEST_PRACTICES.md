@@ -42,7 +42,7 @@ class NewTable(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index('ix_new_table_name', 'name'),

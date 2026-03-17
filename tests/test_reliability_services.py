@@ -8,7 +8,7 @@ import pytest
 import tempfile
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch, AsyncMock
 
 # 配置pytest-anyio
@@ -274,7 +274,7 @@ class TestJWTValidation:
         from backend.routers.collection_websocket import validate_jwt_token, JWT_SECRET, JWT_ALGORITHM
         
         # 创建有效token
-        payload = {'user_id': 'test', 'exp': datetime.utcnow() + timedelta(hours=1)}
+        payload = {'user_id': 'test', 'exp': datetime.now(timezone.utc) + timedelta(hours=1)}
         token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
         
         result = validate_jwt_token(token)
@@ -294,7 +294,7 @@ class TestJWTValidation:
         from backend.routers.collection_websocket import validate_jwt_token, JWT_SECRET, JWT_ALGORITHM
         
         # 创建过期token
-        payload = {'user_id': 'test', 'exp': datetime.utcnow() - timedelta(hours=1)}
+        payload = {'user_id': 'test', 'exp': datetime.now(timezone.utc) - timedelta(hours=1)}
         token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
         
         with pytest.raises(ValueError, match="expired"):

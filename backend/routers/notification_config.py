@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
 from backend.models.database import get_async_db
-from backend.routers.users import require_admin
+from backend.dependencies.auth import require_admin
 from backend.schemas.notification_config import (
     SMTPConfigResponse,
     SMTPConfigUpdate,

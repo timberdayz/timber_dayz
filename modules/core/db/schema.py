@@ -64,8 +64,8 @@ class DimPlatform(Base):
     platform_code = Column(String(32), primary_key=True)  # e.g., 'shopee','miaoshou','tiktok'
     name = Column(String(64), nullable=False)             # display name
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("name", name="uq_dim_platforms_name"),
@@ -84,8 +84,8 @@ class DimShop(Base):
     currency = Column(String(8), nullable=True)
     timezone = Column(String(64), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     platform = relationship("DimPlatform", lazy="joined")
 
@@ -109,10 +109,10 @@ class DimProduct(Base):
     # product images
     image_url = Column(String(1024), nullable=True)
     image_path = Column(String(512), nullable=True)
-    image_last_fetched_at = Column(DateTime, nullable=True)
+    image_last_fetched_at = Column(DateTime(timezone=True), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
         Index("ix_dim_products_platform_shop", "platform_code", "shop_id"),
@@ -127,8 +127,8 @@ class DimProductMaster(Base):
     company_sku = Column(String(128), unique=True, nullable=False)
 
     product_title = Column(String(512), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class BridgeProductKeys(Base):
@@ -182,8 +182,8 @@ class DimExchangeRate(Base):
     priority = Column(Integer, default=99)      # 数据源优先级(1-99)
     
     # 审计字段
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint('from_currency', 'to_currency', 'rate_date', name='uq_exchange_rate'),
@@ -224,9 +224,9 @@ class AccountAlias(Base):
     
     # 审计
     created_by = Column(String(64), default='system')
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_by = Column(String(64), nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
         # 唯一约束:同一source组合只能映射到一个target
@@ -250,7 +250,7 @@ class DimCurrencyRate(Base):
 
     rate = Column(Float, nullable=False)
     source = Column(String(64), nullable=True, default="exchangerate.host")
-    fetched_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         Index("ix_currency_base_quote", "base_currency", "quote_currency"),
@@ -300,8 +300,8 @@ class FactOrderAmount(Base):
     exchange_rate = Column(Float, nullable=True)  # 汇率(审计)
     
     # 审计字段
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_order_amounts_order", "order_id"),
@@ -401,8 +401,8 @@ class FactProductMetric(Base):
     metric_value_rmb = Column(Float, nullable=False, server_default='0', comment='指标值(人民币,兼容旧设计)')
     
     # ========== 时间戳字段 ==========
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
-    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     
     # ========== 表约束和索引 ==========
     __table_args__ = (
@@ -454,8 +454,8 @@ class FactTraffic(Base):
     data_domain = Column(String(50), nullable=False, default="traffic")
     attributes = Column(JSONB, nullable=True)
     file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
-    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
         UniqueConstraint(
@@ -488,8 +488,8 @@ class FactService(Base):
     data_domain = Column(String(50), nullable=False, default="services")
     attributes = Column(JSONB, nullable=True)
     file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
-    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
         UniqueConstraint(
@@ -522,8 +522,8 @@ class FactAnalytics(Base):
     data_domain = Column(String(50), nullable=False, default="analytics")
     attributes = Column(JSONB, nullable=True)
     file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
-    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
         UniqueConstraint(
@@ -571,8 +571,8 @@ class CatalogFile(Base):
     status = Column(String(32), nullable=False, default="pending")  # pending/validated/ingested/quarantined/failed
     error_message = Column(Text, nullable=True)
 
-    first_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    last_processed_at = Column(DateTime, nullable=True)
+    first_seen_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_processed_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_catalog_files_status", "status"),
@@ -617,10 +617,10 @@ class DataQuarantine(Base):
     
     # 处理状态
     is_resolved = Column(Boolean, default=False)  # 是否已解决
-    resolved_at = Column(DateTime, nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
     resolution_note = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_quarantine_source_file", "source_file"),
@@ -642,8 +642,8 @@ class Account(Base):
     account_name = Column(String(100), nullable=False)
     account_id = Column(String(100), nullable=False)
     status = Column(String(20), default="active", nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("account_id", name="uq_accounts_account_id"),
@@ -682,8 +682,8 @@ class CollectionConfig(Base):
     schedule_cron = Column(String(50), nullable=True)  # Cron表达式
     retry_count = Column(Integer, default=3, nullable=False)  # 重试次数
     is_active = Column(Boolean, default=True, nullable=False)  # 是否启用
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     created_by = Column(String(100), nullable=True)  # 创建者
     
     # 关系
@@ -749,8 +749,8 @@ class CollectionTask(Base):
     
     # 执行统计
     duration_seconds = Column(Integer, nullable=True)
-    started_at = Column(DateTime, nullable=True)  # 任务实际开始执行时间(v4.7+ 步骤可观测)
-    completed_at = Column(DateTime, nullable=True)  # 任务结束时间(终态时写入)
+    started_at = Column(DateTime(timezone=True), nullable=True)  # 任务实际开始执行时间(v4.7+ 步骤可观测)
+    completed_at = Column(DateTime(timezone=True), nullable=True)  # 任务结束时间(终态时写入)
     retry_count = Column(Integer, default=0, nullable=False)
     parent_task_id = Column(Integer, ForeignKey("collection_tasks.id", ondelete="SET NULL"), nullable=True)
     
@@ -764,8 +764,8 @@ class CollectionTask(Base):
     # 乐观锁版本号
     version = Column(Integer, default=1, nullable=False)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # 关系
     config = relationship("CollectionConfig", back_populates="tasks")
@@ -797,7 +797,7 @@ class CollectionTaskLog(Base):
     level = Column(String(10), nullable=False)  # info/warning/error
     message = Column(Text, nullable=False)
     details = Column(JSON, nullable=True)  # 步骤可观测: step_id/component/data_domain/success/duration_ms/error
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     # 关系
     task = relationship("CollectionTask", back_populates="logs")
@@ -826,7 +826,7 @@ class CollectionSyncPoint(Base):
     data_domain = Column(String(50), nullable=False, comment="数据域: orders/products/inventory/traffic/services")
     
     # 同步点信息
-    last_sync_at = Column(DateTime, nullable=False, comment="最后同步时间(UTC)")
+    last_sync_at = Column(DateTime(timezone=True), nullable=False, comment="最后同步时间(UTC)")
     last_sync_value = Column(String(200), nullable=True, comment="最后同步值(如最大的updated_at时间戳)")
     
     # 统计信息
@@ -835,8 +835,8 @@ class CollectionSyncPoint(Base):
     
     # 元数据
     sync_mode = Column(String(20), default="incremental", comment="同步模式: full/incremental")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         # 唯一约束:一个账号+数据域只有一个同步点
@@ -882,14 +882,14 @@ class ComponentVersion(Base):
     
     # A/B测试配置
     test_ratio = Column(Float, default=0.0, comment="测试流量比例(0.0-1.0)")
-    test_start_at = Column(DateTime, nullable=True, comment="测试开始时间")
-    test_end_at = Column(DateTime, nullable=True, comment="测试结束时间")
+    test_start_at = Column(DateTime(timezone=True), nullable=True, comment="测试开始时间")
+    test_end_at = Column(DateTime(timezone=True), nullable=True, comment="测试结束时间")
     
     # 元数据
     description = Column(Text, nullable=True, comment="版本说明")
     created_by = Column(String(100), nullable=True, comment="创建人")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         # 唯一约束:组件名+版本号唯一
@@ -946,7 +946,7 @@ class ComponentTestHistory(Base):
     
     # 审计字段
     tested_by = Column(String(100), nullable=True, comment="测试人")
-    tested_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="测试时间")
+    tested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="测试时间")
     
     __table_args__ = (
         # 外键约束(可选)
@@ -1037,8 +1037,8 @@ class PlatformAccount(Base):
     notes = Column(Text, nullable=True, comment="备注")
     
     # 审计字段
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, comment="更新时间")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, comment="更新时间")
     created_by = Column(String(100), nullable=True, comment="创建人")
     updated_by = Column(String(100), nullable=True, comment="更新人")
     
@@ -1056,7 +1056,7 @@ class DataFile(Base):
     platform = Column(String(50), nullable=False)
     data_type = Column(String(50), nullable=False)
     status = Column(String(50), default="pending", nullable=False)
-    discovery_time = Column(DateTime, default=datetime.utcnow, nullable=False)
+    discovery_time = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_data_files_platform", "platform"),
@@ -1072,7 +1072,7 @@ class DataRecord(Base):
     platform = Column(String(50), nullable=False)
     record_type = Column(String(50), nullable=False)
     data = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_data_records_platform", "platform"),
@@ -1105,7 +1105,7 @@ class FieldMapping(Base):
     # 方案B+新字段
     sub_domain = Column(String(64), nullable=True, default='')  # 子数据域(agent/ai_assistant等)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_field_mappings_platform", "platform"),
@@ -1125,7 +1125,7 @@ class MappingSession(Base):
     platform = Column(String(50), nullable=True)
     domain = Column(String(50), nullable=True)
     status = Column(String(20), default="active", nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("session_id", name="uq_mapping_sessions_session_id"),
@@ -1151,7 +1151,7 @@ class StagingOrders(Base):
     order_data = Column(JSON, nullable=False)  # 原始数据JSON(兜底)
     ingest_task_id = Column(String(64), nullable=True, index=True, comment="同步任务ID")
     file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True, comment="文件ID")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_staging_orders_platform", "platform_code"),
@@ -1177,7 +1177,7 @@ class StagingProductMetrics(Base):
     metric_data = Column(JSON, nullable=False)  # 原始数据JSON(兜底)
     ingest_task_id = Column(String(64), nullable=True, index=True, comment="同步任务ID")
     file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True, comment="文件ID")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_staging_metrics_platform", "platform_code"),
@@ -1204,7 +1204,7 @@ class StagingInventory(Base):
     inventory_data = Column(JSON, nullable=False)  # 原始数据JSON(兜底)
     ingest_task_id = Column(String(64), nullable=True, index=True, comment="同步任务ID")
     file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True, comment="文件ID")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_staging_inventory_platform", "platform_code"),
@@ -1248,8 +1248,8 @@ class ProductImage(Base):
     is_main_image = Column(Boolean, nullable=False, default=False, comment="是否主图")
     
     # 时间戳
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, comment="创建时间")
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
     
     __table_args__ = (
         Index("idx_product_images_sku", "platform_sku"),
@@ -1309,9 +1309,9 @@ class FieldMappingDictionary(Base):
     version = Column(Integer, default=1, nullable=False)  # 版本号(SCD2支持)
     status = Column(String(32), default="active", nullable=False)  # draft/active/deprecated
     created_by = Column(String(64), default="system")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_by = Column(String(64), nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     notes = Column(Text, nullable=True)
     
     # v4.6.0新增:Pattern-based Mapping(配置驱动)
@@ -1384,9 +1384,9 @@ class FieldMappingTemplate(Base):
 
     # 审计
     created_by = Column(String(64), default="user")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_by = Column(String(64), nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     notes = Column(Text, nullable=True)
 
     __table_args__ = (
@@ -1419,7 +1419,7 @@ class FieldMappingTemplateItem(Base):
     match_method = Column(String(64), nullable=True)
     match_reason = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         Index("ix_template_item_template", "template_id"),
@@ -1444,7 +1444,7 @@ class FieldMappingAudit(Base):
     error_message = Column(Text, nullable=True)
 
     operator = Column(String(64), nullable=False)
-    operated_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    operated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     ip_address = Column(String(64), nullable=True)
     user_agent = Column(String(256), nullable=True)
 
@@ -1491,8 +1491,8 @@ class DimMetricFormula(Base):
     active = Column(Boolean, default=True)
     version = Column(Integer, default=1, nullable=False)
     created_by = Column(String(64), default="system")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
         Index("ix_metric_formula_domain", "data_domain", "active"),
@@ -1508,7 +1508,7 @@ class DimCurrency(Base):
     symbol = Column(String(8), nullable=True)
     is_base = Column(Boolean, default=False)  # CNY为基准货币
     active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class FxRate(Base):
@@ -1523,7 +1523,7 @@ class FxRate(Base):
     source = Column(String(64), nullable=True, default="manual")  # manual/ecb/api
     version = Column(Integer, default=1, nullable=False)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_fx_rates_date_from", "rate_date", "from_currency"),
@@ -1545,9 +1545,9 @@ class DimFiscalCalendar(Base):
     
     status = Column(String(32), default="open", nullable=False)  # open/closed
     closed_by = Column(String(64), nullable=True)
-    closed_at = Column(DateTime, nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_fiscal_calendar_year_month", "period_year", "period_month"),
@@ -1574,8 +1574,8 @@ class DimVendor(Base):
     contact_phone = Column(String(64), nullable=True)
     contact_email = Column(String(128), nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
         Index("ix_vendors_status", "status"),
@@ -1599,11 +1599,11 @@ class POHeader(Base):
     status = Column(String(32), default="draft", nullable=False)  # draft/pending_approval/approved/closed
     approval_threshold = Column(Float, nullable=True)
     approved_by = Column(String(64), nullable=True)
-    approved_at = Column(DateTime, nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
     
     created_by = Column(String(64), default="system")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
         Index("ix_po_headers_vendor_date", "vendor_code", "po_date"),
@@ -1631,7 +1631,7 @@ class POLine(Base):
     line_amt = Column(Float, default=0.0)
     base_amt = Column(Float, default=0.0)  # CNY
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_po_lines_po_id", "po_id"),
@@ -1653,7 +1653,7 @@ class GRNHeader(Base):
     status = Column(String(32), default="pending", nullable=False)  # pending/completed/cancelled
     
     created_by = Column(String(64), default="system")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_grn_headers_po_id", "po_id"),
@@ -1681,7 +1681,7 @@ class GRNLine(Base):
     weight_kg = Column(Float, nullable=True)
     volume_m3 = Column(Float, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_grn_lines_grn_id", "grn_id"),
@@ -1736,7 +1736,7 @@ class InventoryLedger(Base):
     
     # 审计
     created_by = Column(String(64), default="system")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_inventory_ledger_sku_date", "platform_code", "shop_id", "platform_sku", "transaction_date"),
@@ -1769,8 +1769,8 @@ class InvoiceHeader(Base):
     ocr_result = Column(JSON, nullable=True)
     ocr_confidence = Column(Float, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
         Index("ix_invoice_headers_vendor_date", "vendor_code", "invoice_date"),
@@ -1795,7 +1795,7 @@ class InvoiceLine(Base):
     line_amt = Column(Float, default=0.0)
     tax_amt = Column(Float, default=0.0)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_invoice_lines_invoice", "invoice_id"),
@@ -1820,7 +1820,7 @@ class InvoiceAttachment(Base):
     ocr_fields = Column(JSON, nullable=True)  # 提取的结构化字段
     
     uploaded_by = Column(String(64), default="system")
-    uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_invoice_attachments_invoice", "invoice_id"),
@@ -1844,9 +1844,9 @@ class ThreeWayMatchLog(Base):
     variance_reason = Column(Text, nullable=True)
     
     approved_by = Column(String(64), nullable=True)
-    approved_at = Column(DateTime, nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_three_way_match_po", "po_line_id"),
@@ -1878,7 +1878,7 @@ class FactExpensesMonth(Base):
     source_file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True)
     memo = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_expenses_month_period", "period_month"),
@@ -1905,7 +1905,7 @@ class AllocationRule(Base):
     
     active = Column(Boolean, default=True)
     created_by = Column(String(64), default="system")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_allocation_rules_scope", "scope", "active"),
@@ -1929,7 +1929,7 @@ class FactExpensesAllocated(Base):
     allocation_driver = Column(String(64), nullable=True)
     allocation_weight = Column(Float, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_expenses_allocated_date", "allocation_date"),
@@ -1960,7 +1960,7 @@ class LogisticsCost(Base):
     
     invoice_id = Column(Integer, ForeignKey("invoice_headers.invoice_id"), nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_logistics_costs_grn", "grn_id"),
@@ -1983,7 +1983,7 @@ class LogisticsAllocationRule(Base):
     effective_to = Column(Date, nullable=True)
     
     active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_logistics_alloc_rules_scope", "scope", "active"),
@@ -2007,7 +2007,7 @@ class TaxVoucher(Base):
     status = Column(String(32), default="pending", nullable=False)  # pending/filed/rejected
     filing_status = Column(String(64), nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_tax_vouchers_period", "period_month"),
@@ -2028,8 +2028,8 @@ class TaxReport(Base):
     export_file_path = Column(String(1024), nullable=True)
     
     generated_by = Column(String(64), default="system")
-    generated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    submitted_at = Column(DateTime, nullable=True)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
     
     __table_args__ = (
         Index("ix_tax_reports_period", "period_month"),
@@ -2049,7 +2049,7 @@ class GLAccount(Base):
     is_debit_normal = Column(Boolean, default=True)  # 借方为正常余额
     active = Column(Boolean, default=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_gl_accounts_type", "account_type", "active"),
@@ -2072,8 +2072,8 @@ class JournalEntry(Base):
     status = Column(String(32), default="draft", nullable=False)  # draft/posted/reversed
     
     created_by = Column(String(64), default="system")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    posted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    posted_at = Column(DateTime(timezone=True), nullable=True)
     
     __table_args__ = (
         Index("ix_journal_entries_date", "entry_date"),
@@ -2106,7 +2106,7 @@ class JournalEntryLine(Base):
     link_invoice_id = Column(Integer, nullable=True)
     
     description = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_journal_lines_entry", "entry_id"),
@@ -2135,7 +2135,7 @@ class OpeningBalance(Base):
     migration_batch_id = Column(String(64), nullable=True)
     
     created_by = Column(String(64), default="system")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_opening_balances_period", "period"),
@@ -2157,7 +2157,7 @@ class ApprovalLog(Base):
     status = Column(String(32), nullable=False)  # pending/approved/rejected
     comment = Column(Text, nullable=True)
     
-    approved_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    approved_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_approval_logs_entity", "entity_type", "entity_id"),
@@ -2184,7 +2184,7 @@ class ReturnOrder(Base):
     
     reason = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_return_orders_original", "original_order_id"),
@@ -2225,8 +2225,8 @@ class FieldUsageTracking(Base):
     line_number = Column(Integer, nullable=True, comment="行号")
     
     # 审计
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     created_by = Column(String(64), default="scanner", nullable=False)
     
     __table_args__ = (
@@ -2272,8 +2272,8 @@ class SalesCampaign(Base):
     
     # 审计字段
     created_by = Column(String(64), nullable=True, comment="创建人")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         CheckConstraint("end_date >= start_date", name="chk_campaign_dates"),
@@ -2314,8 +2314,8 @@ class SalesCampaignShop(Base):
     rank = Column(Integer, nullable=True, comment="排名")
     
     # 审计字段
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("campaign_id", "platform_code", "shop_id", name="uq_campaign_shop"),
@@ -2367,8 +2367,8 @@ class SalesTarget(Base):
     
     # 审计字段
     created_by = Column(String(64), nullable=True, comment="创建人")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         CheckConstraint("period_end >= period_start", name="chk_target_dates"),
@@ -2420,8 +2420,8 @@ class TargetBreakdown(Base):
     achievement_rate = Column(Float, nullable=False, default=0.0, comment="达成率(百分比)")
     
     # 审计字段
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         CheckConstraint("breakdown_type IN ('shop', 'time', 'shop_time')", name="chk_breakdown_type"),
@@ -2470,8 +2470,8 @@ class ShopHealthScore(Base):
     risk_factors = Column(JSON, nullable=True, comment="风险因素列表")
     
     # 审计字段
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("platform_code", "shop_id", "metric_date", "granularity", name="uq_shop_health"),
@@ -2518,12 +2518,12 @@ class ShopAlert(Base):
     
     # 处理状态
     is_resolved = Column(Boolean, nullable=False, default=False, comment="是否已解决")
-    resolved_at = Column(DateTime, nullable=True, comment="解决时间")
+    resolved_at = Column(DateTime(timezone=True), nullable=True, comment="解决时间")
     resolved_by = Column(String(64), nullable=True, comment="解决人")
     
     # 审计字段
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         ForeignKeyConstraint(
@@ -2573,8 +2573,8 @@ class PerformanceScore(Base):
     performance_coefficient = Column(Float, nullable=False, default=1.0, comment="绩效系数")
     
     # 审计字段
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("platform_code", "shop_id", "period", name="uq_performance_shop_period"),
@@ -2623,8 +2623,8 @@ class PerformanceConfig(Base):
     
     # 审计字段
     created_by = Column(String(64), nullable=True, comment="创建人")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         CheckConstraint(
@@ -2671,8 +2671,8 @@ class ClearanceRanking(Base):
     rank = Column(Integer, nullable=True, comment="排名")
     
     # 审计字段
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("platform_code", "shop_id", "metric_date", "granularity", name="uq_clearance_ranking"),
@@ -2701,8 +2701,8 @@ class MaterializedViewRefreshLog(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     view_name = Column(String(128), nullable=False, index=True, comment="物化视图名称")
-    refresh_started_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="刷新开始时间")
-    refresh_completed_at = Column(DateTime, nullable=True, comment="刷新完成时间")
+    refresh_started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="刷新开始时间")
+    refresh_completed_at = Column(DateTime(timezone=True), nullable=True, comment="刷新完成时间")
     duration_seconds = Column(Float, nullable=True, comment="刷新耗时(秒)")
     row_count = Column(Integer, nullable=True, comment="刷新后行数")
     status = Column(String(20), default="running", nullable=False, comment="状态:running/success/failed")
@@ -2724,7 +2724,7 @@ user_roles = Table(
     Base.metadata,
     Column('user_id', BigInteger, ForeignKey('dim_users.user_id'), primary_key=True),
     Column('role_id', BigInteger, ForeignKey('dim_roles.role_id'), primary_key=True),
-    Column('assigned_at', DateTime, server_default=func.now()),
+    Column('assigned_at', DateTime(timezone=True), server_default=func.now()),
     Column('assigned_by', String(100))
 )
 
@@ -2757,7 +2757,7 @@ class DimUser(Base):
     )
     
     # 审批信息
-    approved_at = Column(DateTime, nullable=True, comment="审批时间")
+    approved_at = Column(DateTime(timezone=True), nullable=True, comment="审批时间")
     approved_by = Column(
         BigInteger,
         ForeignKey('dim_users.user_id'),
@@ -2776,14 +2776,14 @@ class DimUser(Base):
     position = Column(String(100))
     
     # 登录信息
-    last_login = Column(DateTime)
+    last_login = Column(DateTime(timezone=True))
     login_count = Column(Integer, default=0)
     failed_login_attempts = Column(Integer, default=0)
-    locked_until = Column(DateTime, nullable=True, comment="账户锁定到期时间")
+    locked_until = Column(DateTime(timezone=True), nullable=True, comment="账户锁定到期时间")
     
     # 时间戳
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
         Index("idx_users_active", "is_active"),
@@ -2829,8 +2829,8 @@ class DimRole(Base):
     is_system = Column(Boolean, default=False)  # 是否系统角色(不可删除)
     
     # 时间戳
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     __table_args__ = (
         Index("idx_roles_active", "is_active"),
@@ -2888,7 +2888,7 @@ class UserSession(Base):
     
     # 状态
     is_active = Column(Boolean, default=True, nullable=False, comment="是否有效")
-    revoked_at = Column(DateTime, nullable=True, comment="撤销时间")
+    revoked_at = Column(DateTime(timezone=True), nullable=True, comment="撤销时间")
     revoked_reason = Column(String(100), nullable=True, comment="撤销原因")
     
     __table_args__ = (
@@ -2986,7 +2986,7 @@ class FactAuditLog(Base):
     error_message = Column(Text)
     
     # 时间戳
-    created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     
     __table_args__ = (
         Index("idx_audit_user_time", "user_id", "created_at"),
@@ -3038,9 +3038,9 @@ class SyncProgressTask(Base):
     row_progress = Column(Float, default=0.0, nullable=False, comment="行进度百分比")
     
     # 时间戳
-    start_time = Column(DateTime, default=datetime.utcnow, nullable=False, index=True, comment="开始时间")
-    end_time = Column(DateTime, nullable=True, comment="结束时间")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, comment="更新时间")
+    start_time = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True, comment="开始时间")
+    end_time = Column(DateTime(timezone=True), nullable=True, comment="结束时间")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, comment="更新时间")
     
     # 错误和警告(JSON格式)
     errors = Column(JSON, nullable=True, comment="错误列表")
@@ -3115,9 +3115,9 @@ class EntityAlias(Base):
     
     # 审计
     created_by = Column(String(64), default='system')
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_by = Column(String(64), nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("source_platform", "source_type", "source_name", "source_account", "source_site", name="uq_entity_alias_source"),
@@ -3155,7 +3155,7 @@ class StagingRawData(Base):
     raw_data = Column(JSONB, nullable=False)
     header_columns = Column(JSONB, nullable=True)
     status = Column(String(32), default='pending', nullable=False, index=True)  # pending/validated/ingested/failed
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_staging_raw_data_file", "file_id", "status"),
@@ -3183,8 +3183,8 @@ class SalesTargetA(Base):
     year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月",格式:'2025-01'
     target_sales_amount = Column(Numeric(15, 2), nullable=False)  # 迁移时将重命名为"目标销售额"
     target_quantity = Column(Integer, nullable=False)  # 迁移时将重命名为"目标订单数"
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 迁移时将重命名为"创建时间"
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)  # 迁移时将重命名为"更新时间"
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 迁移时将重命名为"创建时间"
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)  # 迁移时将重命名为"更新时间"
     
     __table_args__ = (
         UniqueConstraint("shop_id", "year_month", name="uq_sales_targets_a_shop_month"),
@@ -3212,8 +3212,8 @@ class SalesCampaignA(Base):
     status = Column(String(32), nullable=False, default="pending")  # 迁移时将重命名为"状态"
     description = Column(Text, nullable=True)  # 迁移时将重命名为"描述"
     created_by = Column(String(64), nullable=True)  # 迁移时将重命名为"创建人"
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         CheckConstraint("end_date >= start_date", name="chk_sales_campaigns_a_dates"),
@@ -3249,8 +3249,8 @@ class OperatingCost(Base):
     salary = Column("工资", Numeric(15, 2), nullable=False, default=0.0)
     utilities = Column("水电费", Numeric(15, 2), nullable=False, default=0.0)
     other_costs = Column("其他成本", Numeric(15, 2), nullable=False, default=0.0)
-    created_at = Column("创建时间", DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column("更新时间", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column("创建时间", DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column("更新时间", DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("店铺ID", "年月", name="uq_operating_costs_a_shop_month"),
@@ -3281,8 +3281,8 @@ class Department(Base):
     manager_id = Column(BigInteger, nullable=True)  # 部门负责人ID
     description = Column(Text, nullable=True)  # 部门描述
     status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_departments_a_code", "department_code"),
@@ -3310,8 +3310,8 @@ class Position(Base):
     description = Column(Text, nullable=True)  # 职位描述/职责
     requirements = Column(Text, nullable=True)  # 任职要求
     status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_positions_a_code", "position_code"),
@@ -3374,8 +3374,8 @@ class Employee(Base):
     user_id = Column(BigInteger, nullable=True)  # 关联 dim_users.user_id，应用层唯一性校验
     
     # === 元数据 ===
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_employees_a_code", "employee_code"),
@@ -3397,8 +3397,8 @@ class EmployeeTarget(Base):
     year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月"
     target_type = Column(String(32), nullable=False)  # 迁移时将重命名为"目标类型"
     target_value = Column(Numeric(15, 2), nullable=False)  # 迁移时将重命名为"目标值"
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("employee_code", "year_month", "target_type", name="uq_employee_targets_a"),
@@ -3430,8 +3430,8 @@ class EmployeeShopAssignment(Base):
     effective_to = Column(Date, nullable=True)  # 保留，可选
     status = Column(String(32), nullable=False, default="active")  # active/inactive
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("employee_code", "platform_code", "shop_id", "year_month", name="uq_employee_shop_assignments_a"),
@@ -3464,8 +3464,8 @@ class ShopCommissionConfig(Base):
     shop_id = Column(String(256), nullable=False)
     allocatable_profit_rate = Column(Float, nullable=False, default=0)  # 0-1，如 0.8 表示 80%
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("year_month", "platform_code", "shop_id", name="uq_shop_commission_config_a"),
@@ -3499,8 +3499,8 @@ class WorkShift(Base):
     early_leave_tolerance = Column(Integer, nullable=False, default=15)  # 早退容忍时间(分钟)
     is_flexible = Column(Boolean, nullable=False, default=False)  # 是否弹性工时
     status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_work_shifts_a_code", "shift_code"),
@@ -3522,8 +3522,8 @@ class AttendanceRecord(Base):
     attendance_date = Column(Date, nullable=False)  # 考勤日期
     
     # === 打卡信息 ===
-    clock_in_time = Column(DateTime, nullable=True)  # 上班打卡时间
-    clock_out_time = Column(DateTime, nullable=True)  # 下班打卡时间
+    clock_in_time = Column(DateTime(timezone=True), nullable=True)  # 上班打卡时间
+    clock_out_time = Column(DateTime(timezone=True), nullable=True)  # 下班打卡时间
     clock_in_location = Column(String(256), nullable=True)  # 上班打卡位置
     clock_out_location = Column(String(256), nullable=True)  # 下班打卡位置
     clock_in_type = Column(String(32), nullable=True, default="normal")  # 打卡类型:normal/field/supplement
@@ -3538,8 +3538,8 @@ class AttendanceRecord(Base):
     status = Column(String(32), nullable=False, default="normal")  # 状态:normal/late/early_leave/absent/leave
     remark = Column(String(512), nullable=True)  # 备注
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("employee_code", "attendance_date", name="uq_attendance_records_a"),
@@ -3566,8 +3566,8 @@ class LeaveType(Base):
     requires_approval = Column(Boolean, nullable=False, default=True)  # 是否需要审批
     description = Column(Text, nullable=True)  # 假期说明
     status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_leave_types_a_code", "leave_code"),
@@ -3595,11 +3595,11 @@ class LeaveRecord(Base):
     # === 审批信息 ===
     approver_id = Column(BigInteger, nullable=True)  # 审批人ID
     approval_status = Column(String(32), nullable=False, default="pending")  # 审批状态:pending/approved/rejected
-    approval_time = Column(DateTime, nullable=True)  # 审批时间
+    approval_time = Column(DateTime(timezone=True), nullable=True)  # 审批时间
     approval_remark = Column(String(512), nullable=True)  # 审批备注
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_leave_records_a_employee", "employee_code"),
@@ -3620,8 +3620,8 @@ class OvertimeRecord(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     employee_code = Column(String(64), nullable=False)  # 员工编号
     overtime_date = Column(Date, nullable=False)  # 加班日期
-    start_time = Column(DateTime, nullable=False)  # 开始时间
-    end_time = Column(DateTime, nullable=False)  # 结束时间
+    start_time = Column(DateTime(timezone=True), nullable=False)  # 开始时间
+    end_time = Column(DateTime(timezone=True), nullable=False)  # 结束时间
     hours = Column(Float, nullable=False)  # 加班时长
     overtime_type = Column(String(32), nullable=False, default="workday")  # 类型:workday/weekend/holiday
     reason = Column(Text, nullable=True)  # 加班原因
@@ -3629,10 +3629,10 @@ class OvertimeRecord(Base):
     # === 审批信息 ===
     approver_id = Column(BigInteger, nullable=True)  # 审批人ID
     approval_status = Column(String(32), nullable=False, default="pending")  # 审批状态:pending/approved/rejected
-    approval_time = Column(DateTime, nullable=True)  # 审批时间
+    approval_time = Column(DateTime(timezone=True), nullable=True)  # 审批时间
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_overtime_records_a_employee", "employee_code"),
@@ -3679,8 +3679,8 @@ class SalaryStructure(Base):
     effective_date = Column(Date, nullable=False)  # 生效日期
     status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_salary_structures_a_employee", "employee_code"),
@@ -3731,8 +3731,8 @@ class PayrollRecord(Base):
     pay_date = Column(Date, nullable=True)  # 发薪日期
     remark = Column(Text, nullable=True)  # 备注
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("employee_code", "year_month", name="uq_payroll_records_a"),
@@ -3784,8 +3784,8 @@ class SocialInsuranceConfig(Base):
     effective_date = Column(Date, nullable=False)  # 生效日期
     status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_social_insurance_config_a_name", "config_name"),
@@ -3808,8 +3808,8 @@ class PerformanceConfigA(Base):
     quantity_weight = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"订单数权重"
     quality_weight = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"质量权重"
     active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     __table_args__ = (
         UniqueConstraint("config_name", name="uq_performance_config_a_name"),
@@ -3830,7 +3830,7 @@ class EmployeePerformance(Base):
     actual_sales = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"实际销售额"
     achievement_rate = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"达成率"
     performance_score = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"绩效得分"
-    calculated_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 迁移时将重命名为"计算时间"
+    calculated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 迁移时将重命名为"计算时间"
     
     __table_args__ = (
         UniqueConstraint("employee_code", "year_month", name="uq_employee_performance_c"),
@@ -3850,7 +3850,7 @@ class EmployeeCommission(Base):
     sales_amount = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"销售额"
     commission_amount = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"提成金额"
     commission_rate = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"提成比例"
-    calculated_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 迁移时将重命名为"计算时间"
+    calculated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 迁移时将重命名为"计算时间"
     
     __table_args__ = (
         UniqueConstraint("employee_code", "year_month", name="uq_employee_commissions_c"),
@@ -3870,7 +3870,7 @@ class ShopCommission(Base):
     sales_amount = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"销售额"
     commission_amount = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"提成金额"
     commission_rate = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"提成比例"
-    calculated_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # 迁移时将重命名为"计算时间"
+    calculated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 迁移时将重命名为"计算时间"
     
     __table_args__ = (
         UniqueConstraint("shop_id", "year_month", name="uq_shop_commissions_c"),
@@ -3935,7 +3935,7 @@ class Notification(Base):
     
     # 状态
     is_read = Column(Boolean, default=False, nullable=False, index=True, comment="是否已读")
-    read_at = Column(DateTime, nullable=True, comment="阅读时间")
+    read_at = Column(DateTime(timezone=True), nullable=True, comment="阅读时间")
     
     # 时间戳
     created_at = Column(
@@ -4056,8 +4056,8 @@ class DimRateLimitConfig(Base):
     
     # 审计字段
     created_by = Column(String(100), nullable=True)  # 创建者
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     updated_by = Column(String(100), nullable=True)  # 最后更新者
     
     __table_args__ = (
@@ -4108,7 +4108,7 @@ class FactRateLimitConfigAudit(Base):
     error_message = Column(Text, nullable=True)  # 错误信息(如果操作失败)
     
     # 时间戳
-    created_at = Column(DateTime, server_default=func.now(), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     
     __table_args__ = (
         Index("idx_rate_limit_audit_config", "config_id", "created_at"),
@@ -4141,7 +4141,7 @@ class SystemLog(Base):
     ip_address = Column(String(45), nullable=True)  # IPv4/IPv6
     user_agent = Column(String(512), nullable=True)
     details = Column(JSONB, nullable=True)  # 详细信息(JSON格式)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     __table_args__ = (
         Index("ix_system_logs_level", "level"),
@@ -4164,7 +4164,7 @@ class SecurityConfig(Base):
     config_key = Column(String(64), unique=True, nullable=False)  # password_policy, login_restrictions, session_config, 2fa_config
     config_value = Column(JSONB, nullable=False)  # 配置值(JSON格式)
     description = Column(Text, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
     
     __table_args__ = (
@@ -4190,8 +4190,8 @@ class BackupRecord(Base):
     status = Column(String(32), nullable=False)  # pending, completed, failed
     description = Column(Text, nullable=True)
     created_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     
     __table_args__ = (
         Index("ix_backup_records_status", "status"),
@@ -4217,7 +4217,7 @@ class SMTPConfig(Base):
     from_email = Column(String(256), nullable=False)
     from_name = Column(String(128), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
     
     __table_args__ = (
@@ -4240,8 +4240,8 @@ class NotificationTemplate(Base):
     content = Column(Text, nullable=False)  # 模板内容(支持变量如 {{user_name}})
     variables = Column(JSONB, nullable=True)  # 可用变量说明(JSON格式)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     created_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
     updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
     
@@ -4269,8 +4269,8 @@ class AlertRule(Base):
     recipients = Column(JSONB, nullable=True)  # 收件人列表(JSON格式,支持用户ID、邮箱等)
     enabled = Column(Boolean, default=True, nullable=False)
     priority = Column(String(16), nullable=False, default="medium")  # low/medium/high/critical
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     created_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
     updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
     
@@ -4297,7 +4297,7 @@ class SystemConfig(Base):
     config_key = Column(String(64), unique=True, nullable=False)  # system_name, version, timezone, language, currency
     config_value = Column(String(512), nullable=False)
     description = Column(Text, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
     
     __table_args__ = (

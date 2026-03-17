@@ -33,25 +33,6 @@ router = APIRouter(prefix="/data-quality", tags=["数据质量监控"])
 
 # ==================== Request/Response Models ====================
 
-class CClassReadinessResponse(BaseModel):
-    """C类数据计算就绪状态响应"""
-    c_class_ready: bool
-    b_class_completeness: Dict[str, float]  # {"orders": 100.0, "products": 95.0, "inventory": 100.0}
-    missing_core_fields: List[str]
-    data_quality_score: float
-    warnings: List[str]
-    timestamp: str
-
-
-class CoreFieldsStatusResponse(BaseModel):
-    """核心字段状态响应"""
-    total_fields: int
-    present_fields: int
-    missing_fields: int
-    fields_by_domain: Dict[str, Dict[str, Any]]
-    timestamp: str
-
-
 # ==================== API Endpoints ====================
 
 @router.get("/c-class-readiness")
@@ -326,4 +307,9 @@ async def get_core_fields_status(
             recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
+from backend.schemas.data_quality import (
+    CClassReadinessResponse,
+    CoreFieldsStatusResponse,
+)
+
 

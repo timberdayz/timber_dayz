@@ -13,7 +13,7 @@ v4.19.4 新增:Phase 3 数据库配置支持
 """
 
 from typing import Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from modules.core.db import DimRateLimitConfig
@@ -64,7 +64,7 @@ class RateLimitConfigService:
         """
         # 检查缓存是否有效
         if not force_refresh and self._cache is not None and self._cache_timestamp is not None:
-            if datetime.utcnow() - self._cache_timestamp < self._cache_ttl:
+            if datetime.now(timezone.utc) - self._cache_timestamp < self._cache_ttl:
                 logger.debug("[RateLimitConfig] 使用缓存配置")
                 return self._cache
         
@@ -74,7 +74,7 @@ class RateLimitConfigService:
         
         # 更新缓存
         self._cache = configs
-        self._cache_timestamp = datetime.utcnow()
+        self._cache_timestamp = datetime.now(timezone.utc)
         
         return configs
     

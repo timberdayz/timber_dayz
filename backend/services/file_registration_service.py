@@ -8,7 +8,7 @@
 import os
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
 
@@ -246,7 +246,7 @@ class FileRegistrationService:
             date_from=datetime.strptime(date_from, "%Y-%m-%d").date() if date_from else None,
             date_to=datetime.strptime(date_to, "%Y-%m-%d").date() if date_to else None,
             status='pending',
-            upload_time=datetime.utcnow(),
+            upload_time=datetime.now(timezone.utc),
             metadata=extra_metadata or {}
         )
         
@@ -357,7 +357,7 @@ class FileRegistrationService:
                     date_from=datetime.strptime(file_info['date_from'], "%Y-%m-%d").date() if file_info.get('date_from') else None,
                     date_to=datetime.strptime(file_info['date_to'], "%Y-%m-%d").date() if file_info.get('date_to') else None,
                     status='pending',
-                    upload_time=datetime.utcnow(),
+                    upload_time=datetime.now(timezone.utc),
                     metadata=file_info.get('metadata', {})
                 )
                 
@@ -409,7 +409,7 @@ class FileRegistrationService:
             
             if catalog_file:
                 catalog_file.status = 'ingested'
-                catalog_file.ingest_time = datetime.utcnow()
+                catalog_file.ingest_time = datetime.now(timezone.utc)
                 self.db.commit()
                 return True
             

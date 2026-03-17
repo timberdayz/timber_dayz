@@ -1,0 +1,83 @@
+# Skill Integration Rules for XiHong ERP
+
+This rule defines how user-level Skills integrate with project-level conventions.
+
+## Priority Chain
+
+```
+.cursorrules (zero-tolerance rules)  >  openspec workflow  >  superpowers skills  >  other skills
+```
+
+## Skill-to-Workflow Mapping
+
+### brainstorming (superpowers)
+
+When brainstorming produces a design document:
+- Do NOT save to `docs/superpowers/specs/`. This project uses OpenSpec.
+- Instead: complete brainstorming interactively, then run `openspec new change "<name>"` and write the design into `openspec/changes/<name>/proposal.md` + `design.md` + `tasks.md`.
+- For small changes that skip OpenSpec, save inline or use TodoWrite.
+
+### writing-plans / executing-plans (superpowers)
+
+- When working inside an OpenSpec change: the plan IS `openspec/changes/<name>/tasks.md`. Use executing-plans methodology to work through it, but do not create a separate plan file.
+- When working outside OpenSpec (standalone task): writing-plans can create its own plan in `docs/superpowers/plans/` or use TodoWrite for simple cases.
+
+### planning-with-files
+
+- Use for complex single-person tasks that do NOT need OpenSpec review (research, refactoring, migration scripts, etc.).
+- `task_plan.md`, `findings.md`, `progress.md` go in project root.
+- Add these to `.gitignore` unless the user explicitly wants them committed.
+- Do NOT use planning-with-files AND OpenSpec simultaneously for the same task.
+
+### test-driven-development (superpowers)
+
+- Fits naturally with Contract-First: define schema/contract first, then write failing test, then implement.
+- Execution order: Contract-First (schema -> Pydantic -> router signature) -> TDD (write test -> red -> green -> refactor).
+
+### webapp-testing (anthropics)
+
+- `sync_playwright()` is OK for standalone test scripts under `scripts/` or `tests/`.
+- Inside FastAPI router/service code: MUST use `async_playwright` per `.cursorrules`.
+- Prefer `get_by_role` / `get_by_label` over CSS selectors per project Playwright conventions.
+
+### frontend-design + ui-ux-pro-max
+
+- This project uses **Vue 3 + Element Plus + Pinia + Vite** (NOT React/React Native).
+- When using ui-ux-pro-max:
+  - UX guidelines (accessibility, touch targets, animation, navigation, charts) are universal — apply directly.
+  - Ignore React Native specific advice; adapt component patterns to Element Plus equivalents.
+  - `--stack` parameter: do not use `react-native`; use general domain searches instead.
+- When using frontend-design:
+  - Apply aesthetic principles (typography, color, motion, spatial composition).
+  - Implement with Vue 3 SFC + Element Plus components + Tailwind/CSS variables.
+- Both skills' "no emoji as icons" rule aligns with `.cursorrules` Windows emoji ban.
+
+### systematic-debugging (superpowers)
+
+- Use freely for bug investigation. No project-specific overrides needed.
+
+### code-review skills (superpowers)
+
+- requesting-code-review / receiving-code-review: use freely. Align review checklist with `docs/DEVELOPMENT_RULES/API_AND_CONTRACTS.md` review standards.
+
+## Decision Quick Reference
+
+```
+"I need to build a new module/capability"
+  -> brainstorming -> OpenSpec propose -> OpenSpec apply (with TDD)
+
+"I need to fix a bug"
+  -> systematic-debugging -> TDD (write failing test -> fix -> green)
+
+"I need to design a new page/component"
+  -> ui-ux-pro-max (design system) + frontend-design (aesthetics) -> implement in Vue 3
+
+"I need to do a complex refactoring"
+  -> planning-with-files (task_plan.md) -> execute step by step
+
+"I need to test the web app with a browser"
+  -> webapp-testing (standalone script with sync_playwright OK)
+
+"Simple task, < 5 steps"
+  -> TodoWrite directly, no planning framework needed
+```

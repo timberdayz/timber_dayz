@@ -8,7 +8,7 @@ v4.20.0: 系统管理模块API实现
 from datetime import datetime
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
-from backend.routers.auth import get_current_user
+from backend.dependencies.auth import get_current_user
 from backend.schemas.permission import PermissionResponse, PermissionListResponse, PermissionTreeResponse, PermissionTreeNode
 from backend.services.permission_service import get_permission_service
 from backend.utils.api_response import success_response

@@ -19,7 +19,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, insert, select, func, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 import json
 import asyncio
 from modules.core.db import (
@@ -460,7 +460,7 @@ class RawDataImporter:
                     'raw_data': row,  # JSONB格式,中文字段名作为键(已归一化,不含货币代码)
                     'header_columns': header_columns_for_storage,  # [*] v4.16.0修复:保存原始字段名(含货币代码)用于追溯
                     'data_hash': data_hash,
-                    'ingest_timestamp': datetime.utcnow(),
+                    'ingest_timestamp': datetime.now(timezone.utc),
                     'currency_code': currency_code  # [*] v4.15.0新增:货币代码
                 }
                 

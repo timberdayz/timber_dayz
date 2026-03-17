@@ -169,3 +169,11 @@ ENV/
 # 其他大文件目录
 migration_temp/
 reports/charts/
+
+# planning-with-files skill (session-local, not committed)
+task_plan.md
+findings.md
+progress.md
+
+# ui-ux-pro-max design system output
+design-system/

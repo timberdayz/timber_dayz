@@ -22,7 +22,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, and_, or_, desc
 from typing import List, Optional, Dict, Any
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import math
 
 from modules.core.db import (
@@ -135,7 +135,7 @@ class ShopHealthService:
                 existing_score.customer_satisfaction = shop_metrics.get("customer_satisfaction", 0.0)
                 existing_score.risk_level = risk_level
                 existing_score.risk_factors = risk_factors
-                existing_score.updated_at = datetime.utcnow()
+                existing_score.updated_at = datetime.now(timezone.utc)
                 score = existing_score
             else:
                 score = ShopHealthScore(

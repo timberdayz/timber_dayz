@@ -111,15 +111,64 @@ mypy backend/                                       # 类型检查
 5. 编写采集组件未遵守 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
 6. Node 版本低于 24（项目与 CI 都要求 24+）
 
-## Documentation Map
+## User-Level Skills（用户级 Skill）
+
+以下 Skill 安装在用户目录 `~/.cursor/skills/`，对本机所有项目生效；与本项目规则**叠加使用，不替代**。
+
+> **冲突解决规则**：`.cursorrules` > OpenSpec > Superpowers > 其他 Skill。详细映射见 `.cursor/rules/skill-integration.mdc`。
+
+### 核心 Skill（日常开发高频使用）
+
+| Skill | 来源 | 本项目用法 |
+|-------|------|-----------|
+| **superpowers** | [obra/superpowers](https://github.com/obra/superpowers) | 工作方法论：brainstorming（需求澄清）、writing-plans（实施计划）、TDD（测试驱动）、systematic-debugging（根因定位）、code-review（审查）等 14 个子 skill |
+| **planning-with-files** | [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) | 复杂单人任务（非 OpenSpec 级别）时用 task_plan.md / findings.md / progress.md 做持久化规划 |
+| **frontend-design** | [anthropics/skills](https://github.com/anthropics/skills) | 前端审美方向（排版、色彩、动效、空间构图）；本项目实现用 **Vue 3 + Element Plus** |
+| **webapp-testing** | [anthropics/skills](https://github.com/anthropics/skills) | Playwright 测本地 Web 应用；独立脚本可用 `sync_playwright`，FastAPI 内必须 `async_playwright` |
+| **ui-ux-pro-max** | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) | 设计体系生成器：色板/字体/UX 准则/图表推荐；本项目技术栈为 Vue 3（忽略 React Native 相关建议） |
+
+### 按需 Skill（anthropics 全集附带，特定场景使用）
+
+| Skill | 场景 |
+|-------|------|
+| theme-factory / canvas-design | 主题生成、画布设计 |
+| docx / pdf / pptx / xlsx | 文档/报表生成 |
+| mcp-builder / skill-creator | 构建 MCP 服务器、创建新 Skill |
+| 其余（algorithmic-art、brand-guidelines 等） | 按需查阅 |
+
+### 更新方式
+
+```bash
+cd ~/.cursor/skills/superpowers && git pull                    # superpowers
+git clone --depth 1 https://github.com/anthropics/skills /tmp/s && cp -r /tmp/s/skills/* ~/.cursor/skills/  # anthropics
+```
+
+## Documentation Map (三层规则体系)
+
+| 层级 | 文件 | 用途 |
+|---|---|---|
+| L1 快速入口 | `CLAUDE.md`（本文件） | 命令速查 + 架构概览 + 文档导航 |
+| L2 开发规范 | `.cursorrules` | 零容忍规则 + 架构约束（权威来源） |
+| L3 详细参考 | `docs/DEVELOPMENT_RULES/` | 按主题的深度参考 + 代码模板 |
+
+**L3 核心文件:**
+
+| 文件 | 内容 |
+|---|---|
+| `CODE_PATTERNS.md` | 代码模板（Service/Router/Schema/conftest/事务/缓存） |
+| `API_AND_CONTRACTS.md` | API设计、代码审查、HTTP状态码迁移策略 |
+| `DATABASE.md` | 数据库设计、迁移、SQL编写规范 |
+| `TESTING_AND_QUALITY.md` | 测试策略、覆盖率、代码质量 |
+| `ERROR_AND_LOGGING.md` | 错误处理、日志规范 |
+| `SECURITY_AND_DEPLOYMENT.md` | 安全、部署、CI/CD、监控 |
+| `UI_DESIGN.md` | UI设计、局部loading、后台刷新 |
+
+**其他文档:**
 
 | 文档 | 内容 |
 |---|---|
-| `.cursorrules` | **完整开发规范**（架构规则、Contract-First、API、采集、SQL、安全、测试等） |
-| `openspec/AGENTS.md` | OpenSpec 工作流（提案 → 审核 → 执行 → 归档） |
-| `openspec/project.md` | 项目上下文与约定 |
-| `docs/DEVELOPMENT_RULES/` | 企业级详细规范（受保护目录） |
-| `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` | 采集脚本编写规范 |
+| `openspec/AGENTS.md` | OpenSpec 工作流（提案 -> 审核 -> 执行 -> 归档） |
+| `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` | 采集脚本编写完整规范 |
 | `docs/architecture/V4_6_0_ARCHITECTURE_GUIDE.md` | 维度表设计 |
 | `CHANGELOG.md` | 版本历史 |
 

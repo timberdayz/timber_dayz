@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select, text
 from modules.core.db import FieldMappingTemplate, FieldMappingTemplateItem
 from modules.core.logger import get_logger
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = get_logger(__name__)
 
@@ -96,8 +96,8 @@ async def migrate_templates(
                             success_rate=template.success_rate,
                             created_by=template.created_by,
                             notes=template.notes,
-                            created_at=template.created_at or datetime.utcnow(),
-                            updated_at=template.updated_at or datetime.utcnow()
+                            created_at=template.created_at or datetime.now(timezone.utc),
+                            updated_at=template.updated_at or datetime.now(timezone.utc)
                         )
                         
                         if not dry_run:
@@ -119,8 +119,8 @@ async def migrate_templates(
                                     standard_field=item.standard_field,
                                     confidence=item.confidence,
                                     mapping_rule=item.mapping_rule,
-                                    created_at=item.created_at or datetime.utcnow(),
-                                    updated_at=item.updated_at or datetime.utcnow()
+                                    created_at=item.created_at or datetime.now(timezone.utc),
+                                    updated_at=item.updated_at or datetime.now(timezone.utc)
                                 )
                                 target_db.add(new_item)
                             

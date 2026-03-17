@@ -17,7 +17,7 @@ Python 组件批量注册脚本
 import argparse
 import importlib.util
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # 添加项目根目录到 Python 路径
@@ -252,8 +252,8 @@ def register_components(
                     description=f"Python component: {metadata.get('component_type', 'unknown')}",
                     is_stable=True,  # Python 组件默认为稳定版本
                     is_active=True,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc)
                 )
                 db.add(new_version)
                 logger.info(f"[OK] 已注册: {component_name} v{version}")

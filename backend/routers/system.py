@@ -9,7 +9,7 @@ v4.20.0新增:系统基础配置、数据库配置API
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.database import get_async_db
-from backend.routers.users import require_admin
+from backend.dependencies.auth import require_admin
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from backend.schemas.system import (

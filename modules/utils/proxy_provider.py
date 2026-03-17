@@ -23,7 +23,7 @@ import random
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from modules.core.logger import get_logger
 
@@ -77,7 +77,7 @@ class ProxyInfo:
         """检查代理是否过期"""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
 
 class ProxyProvider(ABC):
@@ -347,7 +347,7 @@ class PoolProxyProvider(ProxyProvider):
                             protocol=data.get("protocol", "http"),
                             country=data.get("country"),
                             city=data.get("city"),
-                            expires_at=datetime.utcnow() + timedelta(minutes=data.get("ttl", 5))
+                            expires_at=datetime.now(timezone.utc) + timedelta(minutes=data.get("ttl", 5))
                         )
         except Exception as e:
             logger.error(f"Failed to fetch proxy from API: {e}")
@@ -364,7 +364,7 @@ class PoolProxyProvider(ProxyProvider):
         报告代理失败(加入黑名单)
         """
         proxy_key = f"{proxy.host}:{proxy.port}"
-        self._blacklist[proxy_key] = datetime.utcnow()
+        self._blacklist[proxy_key] = datetime.now(timezone.utc)
         logger.warning(f"Proxy blacklisted: {proxy_key} - {error}")
         
         # 从本地池移除
@@ -372,7 +372,7 @@ class PoolProxyProvider(ProxyProvider):
     
     def _cleanup_blacklist(self) -> None:
         """清理过期黑名单"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired = [
             key for key, time in self._blacklist.items()
             if now - time > self._blacklist_duration
@@ -420,7 +420,7 @@ class RotatingProxyProvider(ProxyProvider):
             return None
         
         # 清理过期黑名单
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired = [i for i, t in self._blacklist.items() if now - t > self._blacklist_duration]
         for i in expired:
             del self._blacklist[i]
@@ -448,7 +448,7 @@ class RotatingProxyProvider(ProxyProvider):
         # 找到对应的代理索引
         for i, provider in enumerate(self._providers):
             if provider.host == proxy.host and provider.port == proxy.port:
-                self._blacklist[i] = datetime.utcnow()
+                self._blacklist[i] = datetime.now(timezone.utc)
                 logger.warning(f"Rotating proxy {i} blacklisted: {proxy.host}:{proxy.port}")
                 break
 

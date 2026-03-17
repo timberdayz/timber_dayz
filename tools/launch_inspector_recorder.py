@@ -692,169 +692,246 @@ class InspectorRecorder:
         """
         注入 JavaScript 脚本以捕获用户交互事件
         
-        生成多重选择器策略：
-        1. role + name（最稳定）
-        2. text 内容匹配
-        3. CSS 类名选择器
-        4. 属性选择器
-        5. 位置选择器（降级）
+        选择器优先级: role > placeholder > label > text > css
+        支持隐式 ARIA 角色检测、placeholder/label 捕获、唯一性验证
         """
         script = '''
         (function() {
-            // 避免重复注入
             if (window.__recorderInjected) return;
             window.__recorderInjected = true;
-            
-            // 生成多重选择器
+
+            var IMPLICIT_ROLES = {
+                'button': 'button', 'a': 'link', 'select': 'combobox',
+                'textarea': 'textbox', 'nav': 'navigation', 'img': 'img',
+                'h1': 'heading', 'h2': 'heading', 'h3': 'heading',
+                'h4': 'heading', 'h5': 'heading', 'h6': 'heading'
+            };
+            var INPUT_TYPE_ROLES = {
+                'text': 'textbox', 'email': 'textbox', 'search': 'textbox',
+                'tel': 'textbox', 'url': 'textbox', 'password': 'textbox',
+                'number': 'spinbutton',
+                'checkbox': 'checkbox', 'radio': 'radio',
+                'submit': 'button', 'button': 'button', 'reset': 'button'
+            };
+
+            function getImplicitRole(el) {
+                var explicit = el.getAttribute('role');
+                if (explicit) return explicit;
+                var tag = el.tagName.toLowerCase();
+                if (tag === 'input') {
+                    var t = (el.getAttribute('type') || 'text').toLowerCase();
+                    return INPUT_TYPE_ROLES[t] || 'textbox';
+                }
+                if (tag === 'a' && !el.hasAttribute('href')) return null;
+                return IMPLICIT_ROLES[tag] || null;
+            }
+
+            function getAccessibleName(el, role) {
+                var ariaLabel = el.getAttribute('aria-label');
+                if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
+                var tag = el.tagName.toLowerCase();
+                if (tag === 'img') return (el.getAttribute('alt') || '').trim();
+                if (tag === 'input' && (el.type === 'submit' || el.type === 'button' || el.type === 'reset')) {
+                    return (el.value || '').trim();
+                }
+                if (role === 'textbox' || role === 'combobox' || role === 'checkbox' || role === 'radio' || role === 'spinbutton') {
+                    var label = findLabel(el);
+                    if (label) return label;
+                    var ph = el.getAttribute('placeholder');
+                    if (ph && ph.trim()) return ph.trim();
+                    return '';
+                }
+                var text = getDirectText(el);
+                return text;
+            }
+
+            function getDirectText(el) {
+                var t = '';
+                for (var i = 0; i < el.childNodes.length; i++) {
+                    if (el.childNodes[i].nodeType === 3) t += el.childNodes[i].textContent;
+                }
+                t = t.trim();
+                if (!t) t = (el.textContent || '').trim();
+                return t.length <= 80 ? t : t.slice(0, 80);
+            }
+
+            function findLabel(el) {
+                var id = el.id;
+                if (id) {
+                    var lab = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+                    if (lab) return lab.textContent.trim();
+                }
+                var parent = el.closest('label');
+                if (parent) return parent.textContent.trim();
+                return '';
+            }
+
+            function checkUnique(type, el, role, name) {
+                try {
+                    if (type === 'css') return document.querySelectorAll(name).length === 1;
+                    if (type === 'placeholder') {
+                        return document.querySelectorAll('[placeholder="' + CSS.escape(name) + '"]').length === 1;
+                    }
+                    if (type === 'label') {
+                        var labels = document.querySelectorAll('label');
+                        var c = 0;
+                        for (var i = 0; i < labels.length; i++) { if (labels[i].textContent.trim() === name) c++; }
+                        return c === 1;
+                    }
+                    if (type === 'role') {
+                        var tag = el.tagName.toLowerCase();
+                        var cssTag = tag;
+                        if (tag === 'input') cssTag = 'input[type="' + (el.getAttribute('type') || 'text') + '"]';
+                        var explicitRole = '[role="' + role + '"]';
+                        var candidates = document.querySelectorAll(cssTag + ', ' + explicitRole);
+                        var matched = 0;
+                        for (var j = 0; j < candidates.length; j++) {
+                            var cRole = getImplicitRole(candidates[j]);
+                            if (cRole === role) {
+                                var cName = getAccessibleName(candidates[j], cRole);
+                                if (cName === name) matched++;
+                            }
+                        }
+                        return matched === 1;
+                    }
+                    if (type === 'text') {
+                        var xp = document.evaluate(
+                            '//*[normalize-space(text())="' + name.replace(/"/g, '\\\\"') + '"]',
+                            document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
+                        );
+                        return xp.snapshotLength === 1;
+                    }
+                } catch(e) {}
+                return false;
+            }
+
             function generateSelectors(element) {
-                const selectors = [];
-                
-                // 1. Role + Name（最稳定）
-                const role = element.getAttribute('role');
-                const ariaLabel = element.getAttribute('aria-label');
-                if (role && ariaLabel) {
-                    selectors.push({
-                        type: 'role',
-                        value: role + '[name="' + ariaLabel + '"]',
-                        priority: 1
-                    });
+                var selectors = [];
+                var tag = element.tagName.toLowerCase();
+                var role = getImplicitRole(element);
+
+                // 1. Role + accessible name
+                if (role) {
+                    var accName = getAccessibleName(element, role);
+                    if (accName) {
+                        var rv = role + '[name="' + accName.replace(/"/g, '\\\\"') + '"]';
+                        selectors.push({ type: 'role', value: rv, priority: 1,
+                            unique: checkUnique('role', element, role, accName) });
+                    }
                 }
-                
-                // 2. 文本内容（较稳定）
-                const text = element.textContent?.trim();
+
+                // 2. Placeholder (input/textarea)
+                if (tag === 'input' || tag === 'textarea') {
+                    var ph = element.getAttribute('placeholder');
+                    if (ph && ph.trim()) {
+                        selectors.push({ type: 'placeholder', value: ph.trim(), priority: 1.5,
+                            unique: checkUnique('placeholder', element, null, ph.trim()) });
+                    }
+                }
+
+                // 3. Label
+                var labelText = findLabel(element);
+                if (labelText && labelText.length < 60) {
+                    selectors.push({ type: 'label', value: labelText, priority: 1.8,
+                        unique: checkUnique('label', element, null, labelText) });
+                }
+
+                // 4. Text content
+                var text = getDirectText(element);
                 if (text && text.length > 0 && text.length < 50) {
-                    // 检查是否是唯一文本
-                    const matches = document.evaluate(
-                        '//*[normalize-space(text())="' + text.replace(/"/g, '\\"') + '"]',
-                        document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null
-                    );
-                    if (matches.snapshotLength <= 3) {
-                        selectors.push({
-                            type: 'text',
-                            value: text,
-                            priority: 2
-                        });
+                    selectors.push({ type: 'text', value: text, priority: 2,
+                        unique: checkUnique('text', element, null, text) });
+                }
+
+                // 5. CSS class
+                var classes = Array.from(element.classList || []);
+                var meaningful = classes.filter(function(c) {
+                    return !c.match(/^(el-|ant-|van-|arco-)/i) && c.length > 3 && !c.match(/^[a-f0-9]{8,}$/i);
+                });
+                if (meaningful.length > 0) {
+                    var cssSel = tag + '.' + meaningful[0];
+                    selectors.push({ type: 'css', value: cssSel, priority: 3,
+                        unique: checkUnique('css', element, null, cssSel) });
+                }
+
+                // 6. Data/id attribute
+                var dataAttrs = ['data-testid', 'data-id', 'data-key', 'name', 'id'];
+                for (var i = 0; i < dataAttrs.length; i++) {
+                    var av = element.getAttribute(dataAttrs[i]);
+                    if (av && !av.match(/^[a-f0-9]{8,}$/i)) {
+                        var attrSel = '[' + dataAttrs[i] + '="' + av + '"]';
+                        selectors.push({ type: 'css', value: attrSel, priority: 4,
+                            unique: checkUnique('css', element, null, attrSel) });
+                        break;
                     }
                 }
-                
-                // 3. 关键 CSS 类名（较稳定）
-                const classes = Array.from(element.classList);
-                const meaningfulClasses = classes.filter(c => 
-                    !c.match(/^(el-|ant-|van-|arco-)/i) &&  // 排除 UI 框架前缀
-                    c.length > 3 &&
-                    !c.match(/^[a-f0-9]{8,}$/i)  // 排除 hash 类名
-                );
-                if (meaningfulClasses.length > 0) {
-                    const tagName = element.tagName.toLowerCase();
-                    selectors.push({
-                        type: 'css',
-                        value: tagName + '.' + meaningfulClasses[0],
-                        priority: 3
-                    });
-                }
-                
-                // 4. 属性选择器（可能变化）
-                const dataAttrs = ['data-testid', 'data-id', 'data-key', 'name', 'id'];
-                for (const attr of dataAttrs) {
-                    const value = element.getAttribute(attr);
-                    if (value && !value.match(/^[a-f0-9]{8,}$/i)) {  // 排除 hash
-                        selectors.push({
-                            type: 'css',
-                            value: '[' + attr + '="' + value + '"]',
-                            priority: 4
-                        });
-                        break;  // 只取第一个
-                    }
-                }
-                
-                // 5. 位置选择器（降级方案）
-                const parent = element.parentElement;
+
+                // 7. Positional fallback
+                var parent = element.parentElement;
                 if (parent) {
-                    const siblings = Array.from(parent.children);
-                    const index = siblings.indexOf(element) + 1;
-                    const tagName = element.tagName.toLowerCase();
-                    selectors.push({
-                        type: 'css',
-                        value: tagName + ':nth-child(' + index + ')',
-                        priority: 5
-                    });
+                    var idx = Array.from(parent.children).indexOf(element) + 1;
+                    selectors.push({ type: 'css', value: tag + ':nth-child(' + idx + ')', priority: 5, unique: false });
                 }
-                
+
                 return selectors;
             }
-            
-            // 获取元素描述
+
             function getElementDescription(element) {
-                const text = element.textContent?.trim().slice(0, 30) || '';
-                const tag = element.tagName.toLowerCase();
-                const role = element.getAttribute('role') || '';
+                var text = getDirectText(element).slice(0, 30);
+                var tag = element.tagName.toLowerCase();
+                var role = getImplicitRole(element) || '';
                 return text || role || tag;
             }
-            
-            // 点击事件监听
+
             document.addEventListener('click', function(e) {
-                const target = e.target;
+                var target = e.target;
                 if (!target || target === document.body) return;
-                
-                // 忽略 Playwright Inspector 的点击
                 if (target.closest('[class*="playwright"]')) return;
-                
-                const selectors = generateSelectors(target);
-                const description = getElementDescription(target);
-                
                 console.log('[RecorderEvent]', JSON.stringify({
                     action: 'click',
-                    selectors: selectors,
-                    description: description,
+                    selectors: generateSelectors(target),
+                    description: getElementDescription(target),
                     timestamp: Date.now()
                 }));
             }, true);
-            
-            // 输入事件监听
+
             document.addEventListener('input', function(e) {
-                const target = e.target;
-                if (!target) return;
-                
-                // 只监听输入框
-                if (!['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
-                
-                // 忽略密码字段的值
-                const value = target.type === 'password' ? '***' : target.value;
-                const selectors = generateSelectors(target);
-                const description = target.placeholder || target.name || 'input';
-                
-                // 防抖：只记录最终值
+                var target = e.target;
+                if (!target || !['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+                var value = target.type === 'password' ? '***' : target.value;
+                var selectors = generateSelectors(target);
+                var description = target.placeholder || target.name || 'input';
                 clearTimeout(target.__inputTimer);
                 target.__inputTimer = setTimeout(function() {
                     console.log('[RecorderEvent]', JSON.stringify({
-                        action: 'fill',
-                        selectors: selectors,
-                        value: value,
-                        description: description,
-                        timestamp: Date.now()
+                        action: 'fill', selectors: selectors, value: value,
+                        description: description, timestamp: Date.now()
                     }));
                 }, 500);
             }, true);
-            
-            // 选择事件监听（下拉框）
+
             document.addEventListener('change', function(e) {
-                const target = e.target;
+                var target = e.target;
                 if (!target || target.tagName !== 'SELECT') return;
-                
-                const selectors = generateSelectors(target);
-                const selectedOption = target.options[target.selectedIndex];
-                const value = selectedOption ? selectedOption.text : target.value;
-                
+                var opt = target.options[target.selectedIndex];
                 console.log('[RecorderEvent]', JSON.stringify({
-                    action: 'select',
-                    selectors: selectors,
-                    value: value,
-                    description: 'Select option',
-                    timestamp: Date.now()
+                    action: 'select', selectors: generateSelectors(target),
+                    value: opt ? opt.text : target.value,
+                    description: 'Select option', timestamp: Date.now()
                 }));
             }, true);
-            
-            console.log('[Recorder] Event capture script injected');
+
+            document.addEventListener('keydown', function(e) {
+                var key = e.key;
+                if (['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].indexOf(key) === -1) return;
+                var target = e.target;
+                console.log('[RecorderEvent]', JSON.stringify({
+                    action: 'press', selectors: target ? generateSelectors(target) : [],
+                    value: key, description: 'Press ' + key, timestamp: Date.now()
+                }));
+            }, true);
+
+            console.log('[Recorder] Event capture script injected (v2 - implicit roles + placeholder + label + uniqueness)');
         })();
         '''
         

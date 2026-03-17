@@ -7,7 +7,7 @@ v4.20.0: 系统管理模块API实现
 
 import os
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from modules.core.db import SystemConfig
@@ -81,7 +81,7 @@ class SystemConfigService:
                 if config_record:
                     # 更新现有配置
                     config_record.config_value = str(value)
-                    config_record.updated_at = datetime.utcnow()
+                    config_record.updated_at = datetime.now(timezone.utc)
                     config_record.updated_by = updated_by_user_id
                 else:
                     # 创建新配置
@@ -238,7 +238,7 @@ class SystemConfigService:
                 # 更新现有配置
                 import json
                 config_record.config_value = json.dumps(config_json)
-                config_record.updated_at = datetime.utcnow()
+                config_record.updated_at = datetime.now(timezone.utc)
                 config_record.updated_by = updated_by_user_id
             else:
                 # 创建新配置

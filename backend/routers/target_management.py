@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from backend.models.database import get_db, get_async_db
 from backend.utils.api_response import success_response, error_response
@@ -45,7 +45,15 @@ from modules.core.db import (
 )
 from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
 from modules.core.logger import get_logger
-from backend.routers.auth import get_current_user  # ✅ 2026-01-08: 添加用户认证
+from backend.schemas.target import (
+    TargetCreateRequest,
+    TargetUpdateRequest,
+    BreakdownCreateRequest,
+    GenerateDailyBreakdownRequest,
+    TargetResponse,
+    BreakdownResponse,
+)
+from backend.dependencies.auth import get_current_user  # ✅ 2026-01-08: 添加用户认证
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/targets", tags=["目标管理"])
@@ -75,95 +83,6 @@ async def require_admin(current_user: DimUser = Depends(get_current_user)):
 
 
 # ==================== Request/Response Models ====================
-
-class TargetCreateRequest(BaseModel):
-    """创建目标请求"""
-    target_name: str = Field(..., description="目标名称")
-    target_type: str = Field(..., description="目标类型:shop/product/campaign")
-    period_start: date = Field(..., description="开始时间")
-    period_end: date = Field(..., description="结束时间")
-    target_amount: float = Field(0.0, ge=0, description="目标销售额(CNY)")
-    target_quantity: int = Field(0, ge=0, description="目标订单数/销量")
-    description: Optional[str] = Field(None, description="目标描述")
-
-
-class TargetUpdateRequest(BaseModel):
-    """更新目标请求"""
-    target_name: Optional[str] = None
-    target_type: Optional[str] = None
-    period_start: Optional[date] = None
-    period_end: Optional[date] = None
-    target_amount: Optional[float] = Field(None, ge=0)
-    target_quantity: Optional[int] = Field(None, ge=0)
-    status: Optional[str] = None
-    description: Optional[str] = None
-    weekday_ratios: Optional[Dict[str, float]] = Field(None, description="周一到周日拆分比例 {\"1\":0.14,...,\"7\":0.14} 和为1")
-
-
-class BreakdownCreateRequest(BaseModel):
-    """创建目标分解请求"""
-    breakdown_type: str = Field(..., description="分解类型:shop/time")
-    # 店铺分解字段
-    platform_code: Optional[str] = None
-    shop_id: Optional[str] = None
-    # 时间分解字段
-    period_start: Optional[date] = None
-    period_end: Optional[date] = None
-    period_label: Optional[str] = None
-    # 目标值
-    target_amount: float = Field(0.0, ge=0)
-    target_quantity: int = Field(0, ge=0)
-
-
-class GenerateDailyBreakdownRequest(BaseModel):
-    """一键生成日度分解请求"""
-    overwrite: bool = Field(False, description="是否覆盖已存在的日度分解")
-    weekday_ratios: Optional[Dict[str, float]] = Field(None, description="周一到周日拆分比例 1=周一…7=周日，和为1；不传则用目标已保存的")
-
-
-class TargetResponse(BaseModel):
-    """目标响应"""
-    id: int
-    target_name: str
-    target_type: str
-    period_start: date
-    period_end: date
-    target_amount: float
-    target_quantity: int
-    achieved_amount: float
-    achieved_quantity: int
-    achievement_rate: float
-    status: str
-    description: Optional[str]
-    weekday_ratios: Optional[Dict[str, float]] = None
-    created_by: Optional[str]
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class BreakdownResponse(BaseModel):
-    """目标分解响应"""
-    id: int
-    target_id: int
-    breakdown_type: str
-    platform_code: Optional[str]
-    shop_id: Optional[str]
-    shop_name: Optional[str] = None
-    period_start: Optional[date]
-    period_end: Optional[date]
-    period_label: Optional[str]
-    target_amount: float
-    target_quantity: int
-    achieved_amount: float
-    achieved_quantity: int
-    achievement_rate: float
-    
-    class Config:
-        from_attributes = True
-
 
 # ==================== API Endpoints ====================
 
@@ -616,7 +535,7 @@ async def update_target(
         for key, value in update_data.items():
             setattr(target, key, value)
         
-        target.updated_at = datetime.utcnow()
+        target.updated_at = datetime.now(timezone.utc)
         
         await db.commit()
         await db.refresh(target)
@@ -880,7 +799,7 @@ async def create_breakdown(
                 # [*] v4.21.0: Upsert 逻辑 - 如果分解已存在，则更新而非报错
                 existing.target_amount = request.target_amount
                 existing.target_quantity = request.target_quantity
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(timezone.utc)
                 
                 await db.commit()
                 await db.refresh(existing)
@@ -953,7 +872,7 @@ async def create_breakdown(
                 existing_time.target_amount = request.target_amount
                 existing_time.target_quantity = request.target_quantity
                 existing_time.period_label = request.period_label or request.period_start.isoformat()
-                existing_time.updated_at = datetime.utcnow()
+                existing_time.updated_at = datetime.now(timezone.utc)
                 if request.period_start == request.period_end:
                     await _rebalance_daily_breakdown(
                         db, target_id, request.period_start,
@@ -1001,7 +920,7 @@ async def create_breakdown(
                 existing_st.target_amount = request.target_amount
                 existing_st.target_quantity = request.target_quantity
                 existing_st.period_label = request.period_label or request.period_start.isoformat()
-                existing_st.updated_at = datetime.utcnow()
+                existing_st.updated_at = datetime.now(timezone.utc)
                 await db.commit()
                 await db.refresh(existing_st)
                 bd_data = BreakdownResponse.model_validate(existing_st).model_dump()
@@ -1216,7 +1135,7 @@ async def _rebalance_daily_breakdown(
         factor_a = (monthly_amount - new_amount) / others_amount_sum
         for r in others:
             r.target_amount = round(float(r.target_amount or 0) * factor_a, 2)
-            r.updated_at = datetime.utcnow()
+            r.updated_at = datetime.now(timezone.utc)
     if others_quantity_sum > 0:
         rest_qty = max(0, monthly_quantity - new_quantity)
         factor_q = rest_qty / others_quantity_sum
@@ -1225,7 +1144,7 @@ async def _rebalance_daily_breakdown(
         for i, r in enumerate(others):
             adj = 1 if diff > 0 and i < diff else (-1 if diff < 0 and i < -diff else 0)
             r.target_quantity = max(0, new_qtys[i] + adj)
-            r.updated_at = datetime.utcnow()
+            r.updated_at = datetime.now(timezone.utc)
 
 
 @router.post("/{target_id}/breakdown/generate-daily", response_model=Dict[str, Any])
@@ -1310,7 +1229,7 @@ async def generate_daily_breakdown(
                     existing.target_amount = amt
                     existing.target_quantity = qty_this_day
                     existing.period_label = day_label
-                    existing.updated_at = datetime.utcnow()
+                    existing.updated_at = datetime.now(timezone.utc)
                     updated += 1
             else:
                 db.add(TargetBreakdown(
@@ -1362,7 +1281,7 @@ async def generate_daily_breakdown(
                         existing_st.target_amount = amt_st
                         existing_st.target_quantity = qty_st
                         existing_st.period_label = day_label
-                        existing_st.updated_at = datetime.utcnow()
+                        existing_st.updated_at = datetime.now(timezone.utc)
                         updated_st += 1
                 else:
                     db.add(TargetBreakdown(
@@ -1452,4 +1371,3 @@ async def calculate_target_achievement(
             recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
-

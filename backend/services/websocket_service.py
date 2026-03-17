@@ -6,7 +6,7 @@ WebSocket服务 - 采集任务实时状态推送
 
 from typing import Optional
 from modules.core.logger import get_logger
-from backend.routers.collection_websocket import connection_manager
+from backend.services.websocket_manager import connection_manager
 
 logger = get_logger(__name__)
 

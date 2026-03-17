@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, delete, and_, Integer
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.models.database import get_async_db
 from modules.core.db import DimUser, Notification, DimRole, user_roles
@@ -30,7 +30,7 @@ from backend.schemas.notification import (
     NotificationGroupItem,
     NotificationGroupListResponse,
 )
-from backend.routers.auth import get_current_user
+from backend.dependencies.auth import get_current_user
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.logger import get_logger
@@ -383,7 +383,7 @@ async def mark_notification_read(
     
     # 更新为已读
     notification.is_read = True
-    notification.read_at = datetime.utcnow()
+    notification.read_at = datetime.now(timezone.utc)
     await db.commit()
     
     return MarkReadResponse(
@@ -404,7 +404,7 @@ async def mark_all_read(
     - 如果提供 notification_ids,则标记指定通知
     - 如果不提供或为空,则标记所有未读通知
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     if request and request.notification_ids:
         # 标记指定通知
@@ -571,7 +571,7 @@ async def execute_notification_action(
         # 批准用户
         target_user.status = "active"
         target_user.is_active = True
-        target_user.approved_at = datetime.utcnow()
+        target_user.approved_at = datetime.now(timezone.utc)
         target_user.approved_by = current_user.user_id
         
         await db.commit()
@@ -603,7 +603,7 @@ async def execute_notification_action(
         
         # 标记当前通知为已读
         notification.is_read = True
-        notification.read_at = datetime.utcnow()
+        notification.read_at = datetime.now(timezone.utc)
         await db.commit()
         
         return NotificationActionResponse(
@@ -653,7 +653,7 @@ async def execute_notification_action(
         
         # 标记当前通知为已读
         notification.is_read = True
-        notification.read_at = datetime.utcnow()
+        notification.read_at = datetime.now(timezone.utc)
         await db.commit()
         
         return NotificationActionResponse(
@@ -804,7 +804,7 @@ async def notify_user_registered(
             "user_id": user_id,
             "username": username,
             "email": email,
-            "registered_at": datetime.utcnow().isoformat()
+            "registered_at": datetime.now(timezone.utc).isoformat()
         },
         related_user_id=user_id,
         priority="high"
@@ -875,7 +875,7 @@ async def notify_user_approved(
         content="Your account has been approved. You can now log in to the system.",
         extra_data={
             "approved_by": approved_by,
-            "approved_at": datetime.utcnow().isoformat()
+            "approved_at": datetime.now(timezone.utc).isoformat()
         }
     )
     
@@ -931,7 +931,7 @@ async def notify_user_rejected(
         content=content,
         extra_data={
             "rejected_by": rejected_by,
-            "rejected_at": datetime.utcnow().isoformat(),
+            "rejected_at": datetime.now(timezone.utc).isoformat(),
             "reason": reason
         }
     )
@@ -982,7 +982,7 @@ async def notify_password_reset(
         content="Your password has been reset by an administrator. Please change it after logging in.",
         extra_data={
             "reset_by": reset_by,
-            "reset_at": datetime.utcnow().isoformat()
+            "reset_at": datetime.now(timezone.utc).isoformat()
         }
     )
     
@@ -1034,7 +1034,7 @@ async def notify_account_locked(
         extra_data={
             "locked_minutes": locked_minutes,
             "failed_attempts": failed_attempts,
-            "locked_at": datetime.utcnow().isoformat()
+            "locked_at": datetime.now(timezone.utc).isoformat()
         }
     )
     
@@ -1091,7 +1091,7 @@ async def notify_account_unlocked(
         extra_data={
             "unlocked_by": unlocked_by,
             "auto_unlock": auto_unlock,
-            "unlocked_at": datetime.utcnow().isoformat()
+            "unlocked_at": datetime.now(timezone.utc).isoformat()
         }
     )
     
@@ -1148,7 +1148,7 @@ async def notify_user_suspended(
         extra_data={
             "suspended_by": suspended_by,
             "reason": reason,
-            "suspended_at": datetime.utcnow().isoformat()
+            "suspended_at": datetime.now(timezone.utc).isoformat()
         }
     )
     
@@ -1203,7 +1203,7 @@ async def revoke_all_user_sessions(
     sessions = result.scalars().all()
     
     revoked_count = 0
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     for session in sessions:
         session.is_active = False
         session.revoked_at = now

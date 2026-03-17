@@ -7,7 +7,7 @@
 
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 from contextlib import contextmanager
 
@@ -498,7 +498,7 @@ class CollectionScheduler:
                     failed_domains=[],
                     current_domain=None,
                     debug_mode=False,  # 定时任务默认不使用调试模式
-                    created_at=datetime.utcnow()
+                    created_at=datetime.now(timezone.utc)
                 )
                 
                 db.add(task)

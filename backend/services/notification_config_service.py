@@ -9,7 +9,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional, Dict, Any, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, delete
 from modules.core.db import SMTPConfig, NotificationTemplate, AlertRule
@@ -61,7 +61,7 @@ class NotificationConfigService:
                     if value is not None:
                         setattr(existing_config, key, value)
                 existing_config.updated_by = updated_by_user_id
-                existing_config.updated_at = datetime.utcnow()
+                existing_config.updated_at = datetime.now(timezone.utc)
                 await self.db.commit()
                 await self.db.refresh(existing_config)
                 return existing_config
@@ -274,7 +274,7 @@ class NotificationConfigService:
                     setattr(template, key, value)
             
             template.updated_by = updated_by_user_id
-            template.updated_at = datetime.utcnow()
+            template.updated_at = datetime.now(timezone.utc)
             
             await self.db.commit()
             await self.db.refresh(template)
@@ -412,7 +412,7 @@ class NotificationConfigService:
                     setattr(rule, key, value)
             
             rule.updated_by = updated_by_user_id
-            rule.updated_at = datetime.utcnow()
+            rule.updated_at = datetime.now(timezone.utc)
             
             await self.db.commit()
             await self.db.refresh(rule)

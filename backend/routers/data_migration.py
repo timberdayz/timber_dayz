@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text, inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.database import get_async_db, Base
-from backend.routers.users import require_admin
+from backend.dependencies.auth import require_admin
 from modules.core.db import DimUser
 from modules.core.logger import get_logger
 from backend.utils.api_response import error_response

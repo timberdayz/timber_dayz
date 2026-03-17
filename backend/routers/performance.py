@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.models.database import get_db
 from backend.services.performance_monitor import performance_monitor
-from backend.routers.auth import get_current_user
+from backend.dependencies.auth import get_current_user
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import DimUser  # v4.12.0 SSOT迁移

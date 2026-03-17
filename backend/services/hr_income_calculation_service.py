@@ -9,7 +9,7 @@ HR 员工收入 C 类写入服务
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from sqlalchemy import select, text
@@ -183,7 +183,7 @@ class HRIncomeCalculationService:
                     comm.sales_amount = sales_amount
                     comm.commission_amount = commission_amount
                     comm.commission_rate = commission_rate
-                    comm.calculated_at = datetime.utcnow()
+                    comm.calculated_at = datetime.now(timezone.utc)
                 else:
                     self.db.add(
                         EmployeeCommission(
@@ -192,7 +192,7 @@ class HRIncomeCalculationService:
                             sales_amount=sales_amount,
                             commission_amount=commission_amount,
                             commission_rate=commission_rate,
-                            calculated_at=datetime.utcnow(),
+                            calculated_at=datetime.now(timezone.utc),
                         )
                     )
             except Exception:
@@ -217,7 +217,7 @@ class HRIncomeCalculationService:
                         "sales_amount": sales_amount,
                         "commission_amount": commission_amount,
                         "commission_rate": commission_rate,
-                        "calculated_at": datetime.utcnow(),
+                        "calculated_at": datetime.now(timezone.utc),
                         "employee_code": employee_code,
                         "year_month": year_month,
                     },
@@ -238,7 +238,7 @@ class HRIncomeCalculationService:
                             "sales_amount": sales_amount,
                             "commission_amount": commission_amount,
                             "commission_rate": commission_rate,
-                            "calculated_at": datetime.utcnow(),
+                            "calculated_at": datetime.now(timezone.utc),
                         },
                     )
             commission_upserts += 1
@@ -253,7 +253,7 @@ class HRIncomeCalculationService:
                     perf.actual_sales = sales_amount
                     perf.achievement_rate = achievement_rate
                     perf.performance_score = performance_score
-                    perf.calculated_at = datetime.utcnow()
+                    perf.calculated_at = datetime.now(timezone.utc)
                 else:
                     self.db.add(
                         EmployeePerformance(
@@ -262,7 +262,7 @@ class HRIncomeCalculationService:
                             actual_sales=sales_amount,
                             achievement_rate=achievement_rate,
                             performance_score=performance_score,
-                            calculated_at=datetime.utcnow(),
+                            calculated_at=datetime.now(timezone.utc),
                         )
                     )
             except Exception:
@@ -287,7 +287,7 @@ class HRIncomeCalculationService:
                         "actual_sales": sales_amount,
                         "achievement_rate": achievement_rate,
                         "performance_score": performance_score,
-                        "calculated_at": datetime.utcnow(),
+                        "calculated_at": datetime.now(timezone.utc),
                         "employee_code": employee_code,
                         "year_month": year_month,
                     },
@@ -308,7 +308,7 @@ class HRIncomeCalculationService:
                             "actual_sales": sales_amount,
                             "achievement_rate": achievement_rate,
                             "performance_score": performance_score,
-                            "calculated_at": datetime.utcnow(),
+                            "calculated_at": datetime.now(timezone.utc),
                         },
                     )
             performance_upserts += 1

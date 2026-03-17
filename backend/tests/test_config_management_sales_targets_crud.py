@@ -3,7 +3,7 @@ config_management 销售目标 CRUD 回退逻辑测试
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 from backend.routers.config_management import (
@@ -24,7 +24,7 @@ class _MockResult:
 
 def test_create_sales_target_fallback_select_after_commit():
     db = AsyncMock()
-    row = (11, "S1", "2026-03", 1000.0, 10, datetime.utcnow())
+    row = (11, "S1", "2026-03", 1000.0, 10, datetime.now(timezone.utc))
     # 依次: 英文INSERT成功 -> 英文SELECT失败 -> 中文SELECT成功
     db.execute = AsyncMock(side_effect=[None, Exception("no english columns"), _MockResult(row)])
     db.commit = AsyncMock()
@@ -50,7 +50,7 @@ def test_create_sales_target_fallback_select_after_commit():
 
 def test_update_sales_target_fallback_select_after_commit():
     db = AsyncMock()
-    row = (12, "S2", "2026-03", 2000.0, 20, datetime.utcnow())
+    row = (12, "S2", "2026-03", 2000.0, 20, datetime.now(timezone.utc))
     # 依次: UPDATE成功 -> 英文SELECT失败 -> 中文SELECT成功
     db.execute = AsyncMock(side_effect=[None, Exception("no english columns"), _MockResult(row)])
     db.commit = AsyncMock()

@@ -9,7 +9,7 @@ import json
 import sys
 import inspect
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
 from backend.models.database import AsyncSessionLocal  # noqa: E402
-from backend.routers.hr_management import get_my_income  # noqa: E402
+from backend.routers.hr_employee import get_my_income  # noqa: E402
 from modules.core.db import (  # noqa: E402
     DimUser,
     Employee,
@@ -216,7 +216,7 @@ async def main() -> int:
     )
     args = parser.parse_args()
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     lines = [
         "# 我的收入验收自动化报告",
         "",
@@ -281,7 +281,7 @@ async def main() -> int:
 
         # 6.8c：按 user_id + 时间区间检索
         searched = await _search_audit_by_user_and_time(
-            linked.user_id, now - timedelta(days=1), datetime.utcnow() + timedelta(minutes=1)
+            linked.user_id, now - timedelta(days=1), datetime.now(timezone.utc) + timedelta(minutes=1)
         )
         ok_68c = searched > 0
         lines.append(

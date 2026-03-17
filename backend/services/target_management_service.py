@@ -9,7 +9,7 @@
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Dict, Any, Optional
 
 from modules.core.db import (
@@ -129,7 +129,7 @@ class TargetManagementService:
             (total_achieved_amount / target.target_amount * 100) if target.target_amount > 0 else 0.0
         )
         
-        target.updated_at = datetime.utcnow()
+        target.updated_at = datetime.now(timezone.utc)
         
         self.db.commit()
         self.db.refresh(target)

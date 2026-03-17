@@ -16,7 +16,7 @@
 
 from enum import Enum
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 
 
@@ -41,7 +41,7 @@ class DataIngestedEvent:
     
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.utcnow().isoformat() + "Z"
+            self.timestamp = datetime.now(timezone.utc).isoformat() + "Z"
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -62,7 +62,7 @@ class MVRefreshedEvent:
     
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.utcnow().isoformat() + "Z"
+            self.timestamp = datetime.now(timezone.utc).isoformat() + "Z"
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -82,7 +82,7 @@ class AClassUpdatedEvent:
     
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.utcnow().isoformat() + "Z"
+            self.timestamp = datetime.now(timezone.utc).isoformat() + "Z"
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""

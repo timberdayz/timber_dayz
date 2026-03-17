@@ -24,7 +24,7 @@ from backend.utils.error_codes import ErrorCode, get_error_type
 from backend.utils.config import get_settings  # [*] v6.0.0修复:导入 settings(Vulnerability 24)
 from modules.core.logger import get_logger
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import os  # [*] v6.0.0新增:用于检查 CSRF_ENABLED 环境变量
 
 logger = get_logger(__name__)
@@ -42,71 +42,8 @@ except ImportError:
 # [*] v6.0.0修复:获取配置实例(Vulnerability 24)
 settings = get_settings()
 
-async def get_current_user(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_async_db)
-):
-    """
-    获取当前用户
-    
-    [*] v6.0.0新增:支持从 Cookie 和 Header 两种方式读取 token
-    - 优先从 Cookie 读取(httpOnly Cookie,更安全)
-    - 其次从 Header 读取(向后兼容)
-    """
-    token = None
-    
-    # [*] v6.0.0新增:优先从 Cookie 读取 token
-    if "access_token" in request.cookies:
-        token = request.cookies.get("access_token")
-    # 其次从 Header 读取(向后兼容)
-    elif credentials and credentials.credentials:
-        token = credentials.credentials
-    
-    if not token:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing authentication token",
-        )
-
-    try:
-        payload = auth_service.verify_token(token)
-        user_id = payload.get("user_id")
-
-        if not user_id:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid token",
-            )
-
-        # 从数据库获取用户信息(预加载 roles 关系)
-        result = await db.execute(
-            select(DimUser)
-            .where(DimUser.user_id == user_id)  # v4.12.0修复:使用user_id字段
-            .options(selectinload(DimUser.roles))
-        )
-        user = result.scalar_one_or_none()
-        if not user or not user.is_active:
-            raise HTTPException(
-                status_code=401,
-                detail="User not found or inactive",
-            )
-
-        # [*] v4.19.0 P1安全要求:检查用户 status 字段
-        # 防止被暂停的用户使用现有 token 访问系统
-        if user.status != "active":
-            raise HTTPException(
-                status_code=403,
-                detail=f"Account is {user.status}, access denied",
-            )
-
-        return user
-    except Exception as e:
-        logger.error(f"Token verification failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token",
-        )
+# SSOT: 认证依赖已迁移至 backend.dependencies.auth，此处 re-export 保持向后兼容
+from backend.dependencies.auth import get_current_user  # noqa: F401
 
 # [*] v4.19.4更新:使用基于角色的动态限流(替换硬编码限流)
 @router.post("/register")
@@ -338,9 +275,9 @@ async def login(
     
     # [*] v4.19.0: 4. 检查账户是否被锁定(在密码验证之前)
     from datetime import datetime, timedelta
-    if user.locked_until and user.locked_until > datetime.utcnow():
+    if user.locked_until and user.locked_until > datetime.now(timezone.utc):
         # 账户仍被锁定
-        remaining_minutes = int((user.locked_until - datetime.utcnow()).total_seconds() / 60)
+        remaining_minutes = int((user.locked_until - datetime.now(timezone.utc)).total_seconds() / 60)
         return error_response(
             code=ErrorCode.AUTH_ACCOUNT_LOCKED,
             message="账户已被锁定",
@@ -348,7 +285,7 @@ async def login(
             recovery_suggestion=f"账户因多次登录失败已被锁定,请等待 {remaining_minutes} 分钟后重试,或联系管理员解锁",
             status_code=403
         )
-    elif user.locked_until and user.locked_until <= datetime.utcnow():
+    elif user.locked_until and user.locked_until <= datetime.now(timezone.utc):
         # 锁定已过期,自动解锁
         user.locked_until = None
         user.failed_login_attempts = 0
@@ -388,7 +325,7 @@ async def login(
         
         # 如果达到阈值,锁定账户
         if user.failed_login_attempts >= max_failed_attempts:
-            user.locked_until = datetime.utcnow() + timedelta(minutes=lockout_duration_minutes)
+            user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=lockout_duration_minutes)
             
             # v4.19.0 P0安全要求:账户锁定后强制撤销所有活跃会话
             from backend.routers.notifications import revoke_all_user_sessions, notify_account_locked
@@ -477,7 +414,7 @@ async def login(
     
     # 更新最后登录时间和重置失败计数
     from datetime import datetime
-    user.last_login = datetime.utcnow()  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
+    user.last_login = datetime.now(timezone.utc)  # [*] v6.0.0修复:使用正确的字段名 last_login(Vulnerability 29)
     user.failed_login_attempts = 0  # [*] v4.19.0: 登录成功,重置失败计数
     user.locked_until = None  # [*] v4.19.0: 清除锁定状态(如果存在)
     await db.commit()
@@ -506,7 +443,7 @@ async def login(
     import hashlib
     from datetime import datetime, timedelta
     session_id = hashlib.sha256(tokens["access_token"].encode()).hexdigest()
-    expires_at = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
     # 检查会话是否已存在(避免重复创建)
     session_result = await db.execute(
@@ -520,16 +457,16 @@ async def login(
             user_id=user.user_id,
             device_info=user_agent,
             ip_address=ip_address,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             expires_at=expires_at,
-            last_active_at=datetime.utcnow(),
+            last_active_at=datetime.now(timezone.utc),
             is_active=True
         )
         db.add(session)
         await db.commit()
     else:
         # 如果会话已存在,更新最后活跃时间和过期时间
-        existing_session.last_active_at = datetime.utcnow()
+        existing_session.last_active_at = datetime.now(timezone.utc)
         existing_session.is_active = True
         existing_session.expires_at = expires_at
         await db.commit()
@@ -668,7 +605,7 @@ async def refresh_token(
         
         # [*] v4.19.0 P0安全要求:检查账户是否被锁定
         from datetime import datetime
-        if user.locked_until and user.locked_until > datetime.utcnow():
+        if user.locked_until and user.locked_until > datetime.now(timezone.utc):
             return error_response(
                 code=ErrorCode.AUTH_ACCOUNT_LOCKED,
                 message="Account is locked",
@@ -742,8 +679,8 @@ async def refresh_token(
                         if session:
                             # 更新会话信息
                             session.session_id = new_session_id  # 更新为新的session_id(如果token轮换)
-                            session.last_active_at = datetime.utcnow()
-                            session.expires_at = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+                            session.last_active_at = datetime.now(timezone.utc)
+                            session.expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
                             session.is_active = True
                             await temp_db.commit()
                     except Exception as e:

@@ -14,7 +14,7 @@
 import argparse
 import asyncio
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -28,7 +28,7 @@ from backend.services.hr_income_calculation_service import HRIncomeCalculationSe
 
 
 def _default_year_month() -> str:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return f"{now.year:04d}-{now.month:02d}"
 
 

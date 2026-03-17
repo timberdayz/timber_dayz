@@ -17,7 +17,7 @@ v4.19.2 新增:
 """
 
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 import asyncio
 import redis.asyncio as redis
@@ -73,7 +73,7 @@ class RateLimitStatsService:
             user_agent: User-Agent(可选)
         """
         event = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "rate_limit_key": rate_limit_key,
             "path": path,
             "method": method,
@@ -86,7 +86,7 @@ class RateLimitStatsService:
         if redis_client:
             try:
                 # 记录事件到 Redis List
-                event_list_key = f"{self._event_key_prefix}:{datetime.utcnow().strftime('%Y-%m-%d')}"
+                event_list_key = f"{self._event_key_prefix}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
                 await redis_client.lpush(event_list_key, json.dumps(event))
                 
                 # 限制列表长度
@@ -96,7 +96,7 @@ class RateLimitStatsService:
                 await redis_client.expire(event_list_key, self._event_expire_seconds)
                 
                 # 更新统计计数
-                stats_key = f"{self._stats_key_prefix}:counts:{datetime.utcnow().strftime('%Y-%m-%d')}"
+                stats_key = f"{self._stats_key_prefix}:counts:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
                 await redis_client.hincrby(stats_key, f"total", 1)
                 await redis_client.hincrby(stats_key, f"path:{path}", 1)
                 await redis_client.hincrby(stats_key, f"key:{rate_limit_key}", 1)
@@ -112,7 +112,7 @@ class RateLimitStatsService:
     
     def _record_local_event(self, event: Dict[str, Any]) -> None:
         """记录事件到本地内存(降级方案)"""
-        today = datetime.utcnow().strftime('%Y-%m-%d')
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         self._local_stats[today]["total"] += 1
         self._local_stats[today][f"path:{event['path']}"] += 1
         self._local_stats[today][f"key:{event['rate_limit_key']}"] += 1
@@ -128,7 +128,7 @@ class RateLimitStatsService:
             Dict: 统计数据
         """
         if date is None:
-            date = datetime.utcnow().strftime('%Y-%m-%d')
+            date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         
         redis_client = self._get_redis_client()
         if redis_client:
@@ -189,7 +189,7 @@ class RateLimitStatsService:
             List: 限流事件列表
         """
         if date is None:
-            date = datetime.utcnow().strftime('%Y-%m-%d')
+            date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         
         redis_client = self._get_redis_client()
         if redis_client:
@@ -247,7 +247,7 @@ class RateLimitStatsService:
             date: 日期(YYYY-MM-DD 格式),默认为今天
         """
         if date is None:
-            date = datetime.utcnow().strftime('%Y-%m-%d')
+            date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         
         redis_client = self._get_redis_client()
         if redis_client:

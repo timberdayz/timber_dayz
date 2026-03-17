@@ -17,7 +17,7 @@ v4.21.0新增
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional, Dict, Any, List
 
 from modules.core.db import (
@@ -227,7 +227,7 @@ class TargetSyncService:
         """
         if period_start:
             return period_start.strftime('%Y-%m')
-        return datetime.utcnow().strftime('%Y-%m')
+        return datetime.now(timezone.utc).strftime('%Y-%m')
     
     async def _upsert_sales_target_a(
         self,

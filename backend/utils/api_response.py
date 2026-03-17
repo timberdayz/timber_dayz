@@ -3,7 +3,7 @@
 提供统一的成功响应、错误响应、分页响应和列表响应格式
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, Dict, List
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -12,7 +12,7 @@ from backend.utils.data_formatter import format_response_data
 
 def get_timestamp() -> str:
     """获取ISO 8601格式的时间戳(UTC)"""
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat() + "Z"
 
 
 def success_response(

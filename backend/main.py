@@ -1035,6 +1035,8 @@ app.include_router(
 # 全局异常处理(v4.6.0统一响应格式)
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
+from backend.utils.exceptions import APIException, error_response_v2
+from modules.core.exceptions import ERPException
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -1077,13 +1079,36 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         request_id=request_id
     )
 
+@app.exception_handler(ERPException)
+async def erp_exception_handler(request: Request, exc: ERPException):
+    """ERPException 体系异常处理(统一响应格式 + 语义化 HTTP 状态码)。"""
+    request_id = getattr(request.state, "request_id", None)
+
+    logger.error(
+        f"[ERP异常] {request.method} {request.url.path} - "
+        f"错误类型: {type(exc).__name__}, "
+        f"错误消息: {str(exc)}, "
+        f"请求ID: {request_id}",
+        exc_info=True,
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "query_params": str(request.query_params) if request.query_params else None,
+            "client_host": request.client.host if request.client else None,
+        },
+    )
+
+    return error_response_v2(exc, request_id=request_id)
+
+
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    """通用异常处理(统一响应格式)"""
-    # 获取请求ID(从请求状态)
+    """通用异常处理(兜底,避免未捕获异常泄漏)。"""
     request_id = getattr(request.state, "request_id", None)
-    
-    # 记录错误日志(包含请求ID、错误码、错误类型、错误消息、上下文信息)
+
     logger.error(
         f"[未处理异常] {request.method} {request.url.path} - "
         f"错误类型: {type(exc).__name__}, "
@@ -1097,10 +1122,10 @@ async def general_exception_handler(request: Request, exc: Exception):
             "error_type": type(exc).__name__,
             "error_message": str(exc),
             "query_params": str(request.query_params) if request.query_params else None,
-            "client_host": request.client.host if request.client else None
-        }
+            "client_host": request.client.host if request.client else None,
+        },
     )
-    
+
     return error_response(
         code=ErrorCode.DATABASE_QUERY_ERROR,
         message="内部服务器错误",
@@ -1108,7 +1133,7 @@ async def general_exception_handler(request: Request, exc: Exception):
         detail=str(exc) if settings.DEBUG else None,
         recovery_suggestion="请稍后重试,如问题持续存在请联系系统管理员并提供请求ID",
         status_code=500,
-        request_id=request_id
+        request_id=request_id,
     )
 
 if __name__ == "__main__":

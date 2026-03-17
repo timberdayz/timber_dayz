@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Dict, Optional
 import pandas as pd
 from sqlalchemy import create_engine, text
@@ -169,7 +169,7 @@ def generate_quality_report(engine) -> Dict:
         'high_risk': len(high_risk),
         'medium_risk': len(medium_risk),
         'conflicts': conflicts[:20],  # 最严重的20个
-        'generated_at': datetime.utcnow().isoformat()
+        'generated_at': datetime.now(timezone.utc).isoformat()
     }
     
     logger.info(f"[QualityMonitor] 质量报告: {report['total_conflicts']}个冲突, 高风险{report['high_risk']}个")

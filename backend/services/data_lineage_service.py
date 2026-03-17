@@ -364,6 +364,6 @@ class DataLineageService:
     
     def _get_current_timestamp(self) -> str:
         """获取当前时间戳(ISO格式)"""
-        from datetime import datetime
-        return datetime.utcnow().isoformat()
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).isoformat()
 

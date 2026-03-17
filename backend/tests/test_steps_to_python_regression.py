@@ -67,7 +67,7 @@ class TestAntiPatternsAbsent:
             steps=_steps_wait_no_reason(),
         )
         assert "wait_for_load_state" in code
-        assert "domcontentloaded" in code
+        assert "networkidle" in code
         assert "wait_for_timeout" not in code
 
     def test_wait_with_fixed_reason_uses_timeout_and_comment(self):
@@ -425,3 +425,186 @@ class TestRealWorldScenarioPatterns:
         )
         assert "作用域收敛：表格行内定位" in code
         assert "_row_scope_" in code
+
+
+class TestNewActionSupport:
+    """7.1 select/press/download action 生成测试。"""
+
+    def test_select_action_generates_select_option(self):
+        steps = [{"action": "select", "selector": "select#country", "value": "China"}]
+        code = generate_python_code(
+            platform="test", component_type="navigation", component_name="nav", steps=steps,
+        )
+        assert "select_option" in code
+        assert "'China'" in code
+
+    def test_press_action_with_selector(self):
+        steps = [{"action": "press", "selector": "input#search", "value": "Enter"}]
+        code = generate_python_code(
+            platform="test", component_type="navigation", component_name="nav", steps=steps,
+        )
+        assert ".press(" in code
+        assert "'Enter'" in code
+
+    def test_press_action_without_selector(self):
+        steps = [{"action": "press", "selector": "", "value": "Escape"}]
+        code = generate_python_code(
+            platform="test", component_type="navigation", component_name="nav", steps=steps,
+        )
+        assert "page.keyboard.press(" in code
+        assert "'Escape'" in code
+
+    def test_download_action_generates_expect_download(self):
+        steps = [{"action": "download", "selector": "a.download-link", "value": ""}]
+        code = generate_python_code(
+            platform="test", component_type="navigation", component_name="nav", steps=steps,
+        )
+        assert "expect_download" in code
+        assert "save_as" in code
+        assert "suggested_filename" in code
+
+
+class TestExportDownloadTemplate:
+    """7.2 export 组件下载模板测试。"""
+
+    def test_export_has_expect_download(self):
+        steps = [{"action": "click", "selector": "button.export"}]
+        code = generate_python_code(
+            platform="test", component_type="export", component_name="orders_export", steps=steps,
+        )
+        assert "expect_download" in code
+
+    def test_export_has_build_standard_output_root(self):
+        steps = [{"action": "click", "selector": "button.export"}]
+        code = generate_python_code(
+            platform="test", component_type="export", component_name="orders_export", steps=steps,
+        )
+        assert "build_standard_output_root" in code
+
+    def test_export_has_save_as(self):
+        steps = [{"action": "click", "selector": "button.export"}]
+        code = generate_python_code(
+            platform="test", component_type="export", component_name="orders_export", steps=steps,
+        )
+        assert "save_as" in code
+
+    def test_export_returns_file_path(self):
+        steps = [{"action": "click", "selector": "button.export"}]
+        code = generate_python_code(
+            platform="test", component_type="export", component_name="orders_export", steps=steps,
+        )
+        assert "file_path=str(file_path)" in code
+
+
+class TestBaseClassInheritance:
+    """7.3 navigation/date_picker/other 基类继承测试。"""
+
+    def test_navigation_inherits_navigation_component(self):
+        steps = [{"action": "click", "selector": "a.nav-link"}]
+        code = generate_python_code(
+            platform="test", component_type="navigation", component_name="nav", steps=steps,
+        )
+        assert "NavigationComponent" in code
+        assert "NavigationResult" in code
+        assert "TargetPage" in code
+        assert "target: TargetPage" in code
+
+    def test_date_picker_inherits_date_picker_component(self):
+        steps = [{"action": "click", "selector": "input.date-picker"}]
+        code = generate_python_code(
+            platform="test", component_type="date_picker", component_name="date_picker", steps=steps,
+        )
+        assert "DatePickerComponent" in code
+        assert "DatePickResult" in code
+        assert "DateOption" in code
+        assert "option: DateOption" in code
+
+    def test_unknown_type_inherits_component_base(self):
+        steps = [{"action": "click", "selector": "button.do"}]
+        code = generate_python_code(
+            platform="test", component_type="custom_action", component_name="my_action", steps=steps,
+        )
+        assert "ComponentBase" in code
+        assert "ResultBase" in code
+
+
+class TestWaitStepNetworkIdle:
+    """7.4 wait 步骤生成 networkidle 测试。"""
+
+    def test_wait_default_networkidle(self):
+        steps = [{"action": "wait", "timeout": 3000}]
+        code = generate_python_code(
+            platform="test", component_type="navigation", component_name="nav", steps=steps,
+        )
+        assert "networkidle" in code
+        assert "domcontentloaded" not in code or "wait_for_load_state" in code
+
+
+class TestCaptchaPostStepsReorder:
+    """7.5 验证码后非验证码步骤保留测试。"""
+
+    def test_post_captcha_steps_reordered_before_raise(self):
+        steps = [
+            {"action": "fill", "selector": "input[name=username]", "value": "{{account.username}}"},
+            {"action": "fill", "selector": "input.captcha-text", "value": "1234", "step_group": "captcha_graphical"},
+            {"action": "click", "selector": "input.remember-me"},
+        ]
+        code = generate_python_code(
+            platform="test", component_type="login", component_name="login", steps=steps,
+        )
+        assert "VerificationRequiredError" in code
+        assert "[reorder]" in code
+        reorder_idx = code.find("[reorder]")
+        raise_idx = code.find("raise VerificationRequiredError")
+        assert reorder_idx < raise_idx, "Reordered steps should appear before raise"
+
+
+class TestCaptchaResumeUrlConfigurable:
+    """7.6 验证码恢复块 URL 判断可配置测试。"""
+
+    def test_with_success_criteria(self):
+        steps = _steps_login_with_captcha()
+        code = generate_python_code(
+            platform="test", component_type="login", component_name="login",
+            steps=steps, success_criteria={"url_contains": "/dashboard"},
+        )
+        assert "'/dashboard' in cur" in code
+        assert "TODO: configure" not in code
+
+    def test_without_success_criteria(self):
+        steps = _steps_login_with_captcha()
+        code = generate_python_code(
+            platform="test", component_type="login", component_name="login",
+            steps=steps, success_criteria=None,
+        )
+        assert "TODO: configure success URL condition" in code
+
+
+class TestSelectorFromSelectorsUnique:
+    """7.7 _selector_from_selectors unique 降级逻辑测试。"""
+
+    def test_prefers_unique_selector(self):
+        from backend.services.steps_to_python import _selector_from_selectors
+        selectors = [
+            {"type": "role", "value": 'button[name="Login"]', "unique": False},
+            {"type": "placeholder", "value": "username", "unique": True},
+        ]
+        result = _selector_from_selectors(selectors)
+        assert result == "placeholder=username"
+
+    def test_fallback_to_first_when_all_non_unique(self):
+        from backend.services.steps_to_python import _selector_from_selectors
+        selectors = [
+            {"type": "role", "value": 'button[name="Login"]', "unique": False},
+            {"type": "text", "value": "Login", "unique": False},
+        ]
+        result = _selector_from_selectors(selectors)
+        assert result == 'role=button[name="Login"]'
+
+    def test_unique_true_by_default(self):
+        from backend.services.steps_to_python import _selector_from_selectors
+        selectors = [
+            {"type": "text", "value": "Submit"},
+        ]
+        result = _selector_from_selectors(selectors)
+        assert result == "text=Submit"

@@ -12,7 +12,7 @@ from sqlalchemy import select
 from backend.models.database import get_db
 from modules.core.db import FactAuditLog  # v4.12.0 SSOT迁移
 from typing import Optional, Dict, Any, Union
-from datetime import datetime
+from datetime import datetime, timezone
 
 class AuditService:
     """审计服务类"""
@@ -67,7 +67,7 @@ class AuditService:
                 ip_address=ip_address,
                 user_agent=user_agent,
                 is_success=True,
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
             
             db.add(audit_log)
@@ -129,7 +129,7 @@ class AuditService:
             db = next(get_db())
         
         from datetime import datetime, timedelta
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         
         offset = (page - 1) * page_size
         logs = db.query(FactAuditLog).filter(
@@ -195,7 +195,7 @@ class AuditService:
                 user_agent="data_sync_service",
                 is_success=operation not in ("sync_failed", "sync_error"),
                 error_message=details.get("error") if operation in ("sync_failed", "sync_error") else None,
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
             
             db.add(audit_log)
@@ -266,7 +266,7 @@ class AuditService:
                 ip_address="system",
                 user_agent="data_sync_service",
                 is_success=True,
-                created_at=datetime.utcnow()
+                created_at=datetime.now(timezone.utc)
             )
             
             db.add(audit_log)

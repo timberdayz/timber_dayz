@@ -8,6 +8,10 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import requests
 import os
+from backend.schemas.metabase import (
+    EmbeddingTokenRequest,
+    DashboardEmbedUrlRequest,
+)
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -17,19 +21,6 @@ router = APIRouter(prefix="/api/metabase", tags=["metabase"])
 # Metabase配置
 METABASE_URL = os.getenv("METABASE_URL", "http://localhost:8080")
 METABASE_EMBEDDING_SECRET_KEY = os.getenv("METABASE_EMBEDDING_SECRET_KEY", "change-this-embedding-key-in-production")
-
-
-class EmbeddingTokenRequest(BaseModel):
-    """嵌入token请求"""
-    dashboard_id: int
-    filters: Optional[Dict[str, Any]] = None
-
-
-class DashboardEmbedUrlRequest(BaseModel):
-    """Dashboard嵌入URL请求"""
-    dashboard_id: int
-    filters: Optional[Dict[str, Any]] = None
-    granularity: Optional[str] = "daily"
 
 
 @router.get("/health")

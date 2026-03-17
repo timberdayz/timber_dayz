@@ -15,7 +15,7 @@ Design principles:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple, Callable
 import json
@@ -1607,7 +1607,7 @@ def run_once(limit: int = 20,
         if domains:
             q = q.where(CatalogFile.data_domain.in_(domains))
         if recent_hours and recent_hours > 0:
-            cutoff = datetime.utcnow() - timedelta(hours=recent_hours)
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=recent_hours)
             q = q.where(CatalogFile.first_seen_at >= cutoff)
         q = q.order_by(CatalogFile.id.asc()).limit(limit)
         rows = session.execute(q).scalars().all()

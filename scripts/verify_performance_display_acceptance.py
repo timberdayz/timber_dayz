@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional, Tuple
@@ -93,7 +93,7 @@ async def _pick_calculate_period() -> str:
         if row:
             val = str(row)
             return val[:7] if len(val) >= 7 else val
-    return datetime.utcnow().strftime("%Y-%m")
+    return datetime.now(timezone.utc).strftime("%Y-%m")
 
 
 async def _ensure_config_for_period(period: str) -> int:
@@ -150,7 +150,7 @@ async def main() -> int:
     lines: list[str] = [
         "# 绩效公示验收自动化报告",
         "",
-        f"- 生成时间(UTC): {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- 生成时间(UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}",
         "- 覆盖项: 6.3 / 6.4b",
         "",
         "## 验收结果",

@@ -6,7 +6,7 @@
 
 import os
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Set, Optional, List, Tuple
 from collections import defaultdict, OrderedDict
 
@@ -17,10 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.auth_service import auth_service
 from backend.models.database import get_async_db
-from backend.routers.auth import get_current_user
-from backend.routers.users import require_admin
+from backend.dependencies.auth import get_current_user
+from backend.dependencies.auth import require_admin
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
+from backend.schemas.websocket import (
+    NotificationWebSocketMessage as WebSocketMessage,
+    NotificationMessage,
+)
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -48,31 +52,6 @@ MAX_TOTAL_CONNECTIONS = 1000  # 系统最多总连接数
 RATE_LIMIT_CONNECTIONS_PER_MINUTE = 10  # 每个IP每分钟最多连接数
 
 
-class WebSocketMessage(BaseModel):
-    """WebSocket 消息格式"""
-    type: str = Field(..., description="消息类型")
-    data: Optional[Dict] = Field(None, description="消息数据")
-    
-    @validator('type')
-    def validate_type(cls, v):
-        allowed_types = ['ping', 'pong', 'notification']
-        if v not in allowed_types:
-            raise ValueError(f"Invalid message type: {v}. Allowed: {allowed_types}")
-        return v
-
-
-class NotificationMessage(BaseModel):
-    """通知消息格式"""
-    notification_id: int
-    recipient_id: int
-    notification_type: str
-    title: str = Field(..., max_length=200)
-    content: str = Field(..., max_length=1000)
-    extra_data: Optional[Dict] = None
-    related_user_id: Optional[int] = None
-    created_at: str
-
-
 class ConnectionInfo:
     """连接信息"""
     def __init__(self, websocket: WebSocket, user_id: int, ip_address: str, connected_at: datetime):
@@ -80,7 +59,7 @@ class ConnectionInfo:
         self.user_id = user_id
         self.ip_address = ip_address
         self.connected_at = connected_at
-        self.last_heartbeat = datetime.utcnow()
+        self.last_heartbeat = datetime.now(timezone.utc)
         self.expires_at = connected_at + timedelta(seconds=CONNECTION_TIMEOUT)
 
 
@@ -102,7 +81,7 @@ class NotificationConnectionManager:
     
     def _cleanup_expired_attempts(self):
         """清理过期的连接频率记录(1小时)"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=1)
         
         for ip in list(self.connection_attempts.keys()):
@@ -122,7 +101,7 @@ class NotificationConnectionManager:
         Returns:
             bool: 是否超过限制
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=1)
         
         # 清理过期记录
@@ -189,7 +168,7 @@ class NotificationConnectionManager:
             websocket=websocket,
             user_id=user_id,
             ip_address=ip_address,
-            connected_at=datetime.utcnow()
+            connected_at=datetime.now(timezone.utc)
         )
         
         # 添加到活跃连接
@@ -310,12 +289,12 @@ class NotificationConnectionManager:
         if user_id in self.active_connections:
             for conn_info in self.active_connections[user_id]:
                 if conn_info.websocket == websocket:
-                    conn_info.last_heartbeat = datetime.utcnow()
+                    conn_info.last_heartbeat = datetime.now(timezone.utc)
                     break
     
     async def cleanup_dead_connections(self):
         """清理死连接和超时连接"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         dead_connections = []
         
         for user_id, conns in list(self.active_connections.items()):
@@ -356,7 +335,7 @@ class NotificationConnectionManager:
                 user_id: len(conns)
                 for user_id, conns in self.active_connections.items()
             },
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
 
@@ -496,11 +475,11 @@ async def websocket_notifications(
             "type": "connected",
             "user_id": user_id,
             "message": "Successfully connected to notification stream",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
         
         # v4.19.0 P0安全要求:心跳机制
-        last_heartbeat = datetime.utcnow()
+        last_heartbeat = datetime.now(timezone.utc)
         
         # 保持连接,等待客户端断开
         while True:
@@ -515,7 +494,7 @@ async def websocket_notifications(
                 if data == "ping":
                     await websocket.send_text("pong")
                     connection_manager.update_heartbeat(websocket, user_id)
-                    last_heartbeat = datetime.utcnow()
+                    last_heartbeat = datetime.now(timezone.utc)
                 else:
                     # 尝试解析为JSON消息
                     try:
@@ -526,13 +505,13 @@ async def websocket_notifications(
                         if message.type == "ping":
                             await websocket.send_json({"type": "pong"})
                             connection_manager.update_heartbeat(websocket, user_id)
-                            last_heartbeat = datetime.utcnow()
+                            last_heartbeat = datetime.now(timezone.utc)
                     except:
                         logger.warning(f"[WS] Invalid message format from user {user_id}: {data}")
             
             except asyncio.TimeoutError:
                 # 检查心跳超时
-                if (datetime.utcnow() - last_heartbeat).total_seconds() > HEARTBEAT_TIMEOUT:
+                if (datetime.now(timezone.utc) - last_heartbeat).total_seconds() > HEARTBEAT_TIMEOUT:
                     logger.warning(f"[WS] Heartbeat timeout for user {user_id}")
                     await websocket.close(code=1000, reason="Heartbeat timeout")
                     break
@@ -584,6 +563,7 @@ async def websocket_stats(
         data=stats,
         message="WebSocket statistics retrieved"
     )
+
 
 
 # v4.19.0: 定期清理死连接的后台任务
