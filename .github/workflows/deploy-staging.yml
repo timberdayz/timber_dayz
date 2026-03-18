@@ -36,9 +36,9 @@ jobs:
       - name: Check deployment configuration
         id: check
         run: |
-          if [ -z "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" ] || [ -z "${{ secrets.STAGING_HOST }}" ]; then
+          if [ -z "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" ] || [ -z "${{ secrets.STAGING_HOST }}" ] || [ -z "${{ secrets.STAGING_HOST_KEY }}" ]; then
             echo "Deployment secrets not configured. Skipping deployment."
-            echo "Required secrets: STAGING_SSH_PRIVATE_KEY, STAGING_HOST"
+            echo "Required secrets: STAGING_SSH_PRIVATE_KEY, STAGING_HOST, STAGING_HOST_KEY"
             echo "can_deploy=false" >> $GITHUB_OUTPUT
           else
             echo "Deployment secrets configured. Proceeding with deployment."
@@ -61,6 +61,13 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
 
+      - name: Configure SSH known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.STAGING_HOST_KEY }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
       - name: Determine image tag
         id: image-tag
         run: |
@@ -79,7 +86,7 @@ jobs:
           STAGING_PATH: ${{ secrets.STAGING_PATH || '/opt/xihong_erp' }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${STAGING_USER}@${STAGING_HOST} << 'ENDSSH'
+          ssh ${STAGING_USER}@${STAGING_HOST} << 'ENDSSH'
             set -e
             cd ${STAGING_PATH}
             
@@ -184,6 +191,7 @@ jobs:
           echo "Required GitHub Secrets not configured:"
           echo "  - STAGING_SSH_PRIVATE_KEY"
           echo "  - STAGING_HOST"
+          echo "  - STAGING_HOST_KEY"
           echo ""
           echo "To enable deployment, configure these secrets in:"
           echo "  Settings > Secrets and variables > Actions"

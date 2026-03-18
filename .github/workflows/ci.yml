@@ -40,6 +40,10 @@ jobs:
           # 注意: pyproject.toml 只包含工具配置（black/ruff/pytest），不是可安装包
           # 项目依赖通过 requirements.txt 安装，不需要 pip install -e .
 
+      - name: Verify skill-first rule consistency
+        run: |
+          python scripts/verify_rules_completeness.py
+
       - name: Install Playwright browsers
         run: |
           pip install playwright || echo "Playwright installation failed, continuing..."
@@ -67,13 +71,11 @@ jobs:
 
       - name: Code formatting check
         run: |
-          black --check --diff modules/ tests/ scripts/ || echo "Code formatting issues found (non-blocking)"
-        continue-on-error: true
+          black --check --diff backend/ modules/ tests/ scripts/
 
       - name: Linting
         run: |
-          ruff check modules/ tests/ scripts/ || echo "Linting issues found (non-blocking)"
-        continue-on-error: true
+          ruff check backend/ modules/ tests/ scripts/
 
       - name: Type checking (critical modules only)
         run: |
@@ -89,16 +91,6 @@ jobs:
           echo "Validating database design rules..."
           python scripts/validate_code_compliance.py || echo "Validation completed with warnings"
           echo "Database design rules validation completed"
-        continue-on-error: true
-
-      - name: System Health Check
-        run: |
-          # health_check.py 可能不存在，添加检查
-          if [ -f health_check.py ]; then
-            python health_check.py --ci || echo "Health check completed with warnings"
-          else
-            echo "health_check.py not found, skipping system health check"
-          fi
         continue-on-error: true
 
       - name: Run contract tests
@@ -126,12 +118,19 @@ jobs:
 
       - name: Run pytest (if test files exist)
         run: |
+          TEST_PATHS=""
           if [ -d "tests" ] && [ "$(find tests -name 'test_*.py' | wc -l)" -gt 0 ]; then
-            pytest tests/ -v --cov=modules --cov-report=xml || echo "Some tests failed"
+            TEST_PATHS="${TEST_PATHS} tests"
+          fi
+          if [ -d "backend/tests" ] && [ "$(find backend/tests -name 'test_*.py' | wc -l)" -gt 0 ]; then
+            TEST_PATHS="${TEST_PATHS} backend/tests"
+          fi
+
+          if [ -n "${TEST_PATHS}" ]; then
+            pytest ${TEST_PATHS} -v --cov=backend --cov=modules --cov-report=xml
           else
             echo "No pytest test files found, skipping pytest"
           fi
-        continue-on-error: true
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.10'
@@ -156,12 +155,12 @@ jobs:
 
       - name: Run Bandit security scan
         run: |
-          bandit -r modules/ -f json -o bandit-report.json || true
-          bandit -r modules/ || true
+          bandit -r backend/ modules/ scripts/ -x tests,backend/tests -f json -o bandit-report.json
+          bandit -r backend/ modules/ scripts/ -x tests,backend/tests
 
       - name: Check for known vulnerabilities
         run: |
-          safety check --json || true
+          safety check --json
 
       - name: Check for secrets in code
         run: |
@@ -169,9 +168,9 @@ jobs:
           # 仅检查实际赋值的硬编码字符串
           echo "Scanning for potential hardcoded secrets..."
           # 使用更精确的模式，只匹配实际的硬编码值
-          if grep -rE "(password|secret_key|api_key|token)\s*=\s*['\"][^'\"]+['\"]" modules/ --include="*.py" | grep -v "# noqa" | grep -v "test" | grep -v "example" | grep -v "os.getenv" | grep -v "os.environ" | grep -v "settings\." | grep -v "config\."; then
-            echo "Warning: Found potential hardcoded secrets (review required)"
-            # 不直接失败，只是警告
+          if grep -rE "(password|secret_key|api_key|token)\s*=\s*['\"][^'\"]+['\"]" backend/ modules/ scripts/ --include="*.py" | grep -v "# noqa" | grep -v "test" | grep -v "example" | grep -v "os.getenv" | grep -v "os.environ" | grep -v "settings\." | grep -v "config\."; then
+            echo "Found potential hardcoded secrets"
+            exit 1
           fi
           echo "Secret scan completed"
 
@@ -191,8 +190,6 @@ jobs:
           echo "Checking project structure..."
           test -d modules/core || (echo "Missing modules/core directory" && exit 1)
           test -d modules/apps || (echo "Missing modules/apps directory" && exit 1)
-          # health_check.py 是可选的
-          test -f health_check.py || echo "Note: health_check.py not found (optional)"
           # env.template 是标准文件名
           test -f env.template || test -f .env.template || echo "Note: env template file not found (optional)"
           echo "Project structure check passed"

@@ -2,14 +2,5 @@
   "name": "xihong-erp",
   "version": "4.20.0",
   "private": true,
-  "description": "西虹ERP - 使用 OpenSpec 做规格与变更管理",
-  "scripts": {
-    "openspec": "openspec",
-    "os:update": "openspec update",
-    "os:list": "openspec list",
-    "os:validate": "openspec validate --strict"
-  },
-  "devDependencies": {
-    "@fission-ai/openspec": "latest"
-  }
+  "description": "西虹ERP - skill-first 开发工作流（superpowers + planning-with-files）"
 }

@@ -1,30 +1,32 @@
-# Development Rules - L3 Detailed Reference
+# Development Rules Reference
 
-This directory contains the L3 detailed reference documents for the XiHong ERP project.
+This directory is a detailed reference for repository-specific implementation standards.
 
-> **Rule hierarchy**: L1 (`CLAUDE.md`) -> L2 (`.cursorrules`) -> L3 (this directory)
->
-> `.cursorrules` is the authoritative source for zero-tolerance rules.
-> This directory provides deep-dive references and code templates.
+## Current Rule Model
 
-## Core Thematic Files (7)
+- Active workflow: `superpowers` + `planning-with-files`
+- Repository constraints: [`.cursorrules`](F:/Vscode/python_programme/AI_code/xihong_erp/.cursorrules)
+- Entry docs: [`AGENTS.md`](F:/Vscode/python_programme/AI_code/xihong_erp/AGENTS.md) and [`CLAUDE.md`](F:/Vscode/python_programme/AI_code/xihong_erp/CLAUDE.md)
+- Historical archive: [`openspec/`](F:/Vscode/python_programme/AI_code/xihong_erp/openspec)
 
-| File | Description |
-|------|-------------|
-| [CODE_PATTERNS.md](CODE_PATTERNS.md) | Code templates: AsyncCRUDService, Router, Schema, conftest, transaction, cache, optimistic lock, DI |
-| [API_AND_CONTRACTS.md](API_AND_CONTRACTS.md) | API design standards, code review process, review checklist, HTTP status code migration strategy |
-| [DATABASE.md](DATABASE.md) | Database design, migration (Alembic), SQL writing standards, design checklist, examples |
-| [TESTING_AND_QUALITY.md](TESTING_AND_QUALITY.md) | Test pyramid, coverage targets, code quality, static analysis |
-| [ERROR_AND_LOGGING.md](ERROR_AND_LOGGING.md) | Error handling patterns, logging standards (error codes SSOT: `backend/utils/error_codes.py`) |
-| [SECURITY_AND_DEPLOYMENT.md](SECURITY_AND_DEPLOYMENT.md) | Security (JWT/RBAC), deployment (CI/CD), monitoring and observability |
-| [UI_DESIGN.md](UI_DESIGN.md) | UI design patterns, partial loading, background refresh, async UX |
+Use this directory for deep-dive references and templates. Do not treat it as the default workflow engine.
 
-## Extension Files (Production Governance — added by `add-production-readiness-and-operational-governance`)
+## Core Files
 
-| File | Description |
-|------|-------------|
-| [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) | Performance SLOs, capacity baselines, load test gate, release/rollback governance, RPO/RTO, ERP acceptance standards |
-| [DATA_GOVERNANCE.md](DATA_GOVERNANCE.md) | Four-level data classification, restricted data inventory, desensitization rules, audit retention requirements |
-| [FRONTEND_CODE_PATTERNS.md](FRONTEND_CODE_PATTERNS.md) | Frontend Agent templates: API layer, Pinia store, list page, form page, permission button, loading patterns |
+| File | Purpose |
+|---|---|
+| `CODE_PATTERNS.md` | Backend service, router, schema, transaction, and DI patterns |
+| `API_AND_CONTRACTS.md` | API design and review standards |
+| `DATABASE.md` | Database design, migration, and SQL standards |
+| `TESTING_AND_QUALITY.md` | Testing strategy, coverage, and code-quality standards |
+| `ERROR_AND_LOGGING.md` | Error-handling and logging standards |
+| `SECURITY_AND_DEPLOYMENT.md` | Security, deployment, and observability guidance |
+| `UI_DESIGN.md` | Frontend interaction and loading patterns |
+| `PRODUCTION_READINESS.md` | SLOs, release governance, rollback, and recovery |
+| `DATA_GOVERNANCE.md` | Data classification and sensitive-data handling |
+| `FRONTEND_CODE_PATTERNS.md` | Vue 3 + Element Plus frontend patterns |
 
-When adding new extension files, update this index and the `.cursorrules` L3 docs table accordingly.
+## Notes
+
+- When detailed docs conflict with active skills, prefer skills unless the difference is a repository-specific constraint recorded in `.cursorrules`.
+- When detailed docs conflict with `.cursorrules`, update the docs so the repository constraint and the reference stay aligned.

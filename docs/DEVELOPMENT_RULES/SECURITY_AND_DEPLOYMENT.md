@@ -120,15 +120,17 @@ Severity levels: Critical (data breach, intrusion), High (unauthorized access, p
 
 ### 2. GitHub Actions Workflow Rules
 
-#### SSH Remote Commands: Use `bash -c`, NOT heredoc
+#### SSH Remote Commands: Require pinned host keys
 
-Heredoc (`<< ENDSSH`) in GitHub Actions YAML causes variable expansion conflicts and parser confusion. Always use `bash -c '...'`:
+Do not disable host verification with `StrictHostKeyChecking=no`.
+Store the server host key in a GitHub Actions secret such as `PRODUCTION_HOST_KEY` or `STAGING_HOST_KEY`, write it to `~/.ssh/known_hosts`, and keep strict host checking enabled.
+
+For complex remote commands, prefer a checked-in remote script or a carefully quoted `bash -c '...'` block:
 
 ```yaml
 - name: Deploy
   run: |
-    ssh -o StrictHostKeyChecking=no \
-        -o ServerAliveInterval=30 \
+    ssh -o ServerAliveInterval=30 \
         -o ServerAliveCountMax=10 \
         ${PRODUCTION_USER}@${PRODUCTION_HOST} \
       "bash -c '

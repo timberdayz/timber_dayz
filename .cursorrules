@@ -1,236 +1,76 @@
-# Cursor AI 编程规范 - 西虹ERP系统
+# XiHong ERP Repository Constraints
 
-## 核心原则（4条铁律）
+This file contains repository-specific constraints only.
 
-1. **SSOT**: 所有ORM模型只在 `modules/core/db/schema.py` 定义
-2. **Contract-First**: 先在 `backend/schemas/` 定义类型/接口，后实现业务逻辑
-3. **层次依赖**: Frontend -> Backend -> Core（禁止反向依赖）
-4. **官方API优先**: 使用官方API和工具，不自己实现
+Default workflow comes from skills, especially `superpowers` and `planning-with-files`.
+Use this file to adapt those skills to the actual codebase.
 
-## 开发前速查（每次编码前过一遍）
+## Priority
 
-```
-[] 新表？         -> schema.py + Alembic迁移
-[] 新API？        -> 先在 backend/schemas/ 定义Pydantic模型
-[] 新端点？       -> 必须添加 response_model 参数
-[] 新Service？    -> 继承 AsyncCRUDService（见 CODE_PATTERNS.md）
-[] 导入ORM？      -> from modules.core.db import ...
-[] 导入schemas？  -> from backend.schemas import ...
-[] 导入logger？   -> from modules.core.logger import get_logger
-[] Playwright？   -> 必须使用 async_playwright（禁止sync_playwright）
-[] 采集组件？     -> 遵循 docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md
-[] CPU密集？      -> ExecutorManager.run_cpu_intensive()（进程池）
-[] I/O密集？      -> ExecutorManager.run_io_intensive()（线程池）
-[] 前端刷新？     -> 局部刷新优先，支持showLoading参数
-[] 时间操作？     -> datetime.now(timezone.utc)（禁止 datetime.utcnow()）
-[] try-except？   -> 异常范围须窄，错误文案与真实原因一致
-[] 创建文件？     -> 确认正确目录，编写新 Service/Router/Schema 前先查阅 CODE_PATTERNS.md
-```
+1. User instructions
+2. Repository-specific safety and stack constraints in this file
+3. `superpowers` and `planning-with-files`
+4. Other downloaded skills
+5. Historical archive under `openspec/`
 
-> 详细代码模板和标准模式见 `docs/DEVELOPMENT_RULES/CODE_PATTERNS.md`
+## Workflow Scope
 
-## 零容忍规则（违反即阻塞）
+- Use skills as the default process for planning, implementation, debugging, review, and verification.
+- `openspec/` is archive-only. Do not treat it as the active workflow or source of current instructions unless the user explicitly asks about historical OpenSpec artifacts.
+- Root planning files are allowed:
+  - `task_plan.md`
+  - `findings.md`
+  - `progress.md`
 
-### 架构红线
-- 在 schema.py 之外定义ORM模型
-- 创建新的 `Base = declarative_base()`
-- 创建 `*_backup.py`、`legacy_*` 目录
-- 删除 `docs/DEVELOPMENT_RULES/` 下的文件
-- 在 routers/ 中定义Pydantic模型（必须在 schemas/ 中定义）
-- 新API缺少 response_model 参数
-- 先写实现后补类型（违反Contract-First）
+## Core Repository Constraints
 
-### 异步架构红线
-- 路由函数使用 `get_db()` 而不是 `get_async_db()`
-- 在 async def 中使用 `db.query()`、同步 `db.commit()` 等
-- 服务类接受 `Union[Session, AsyncSession]` 双模式
-- 数据库操作缺少 `await`
+### Architecture
 
-### 采集/Playwright红线
-- 在 FastAPI 中使用 sync_playwright（必须 async_playwright）
-- 自定义Playwright选择器修复逻辑（用 get_by_role 等官方API）
-- 跳过等待机制直接操作元素（必须wait_for）
-- 编写采集组件不遵循《采集脚本编写规范》
-- **Skill 例外说明**: webapp-testing skill 中的 `sync_playwright` 示例仅适用于独立测试脚本（如 `scripts/` 下的验收测试）；在 FastAPI 路由/服务代码中仍**必须** `async_playwright`
+- All ORM models are defined in `modules/core/db/schema.py`
+- Do not create a new SQLAlchemy `Base`
+- Pydantic contracts belong in `backend/schemas/`, not `backend/routers/`
+- New backend routes should declare `response_model` when the endpoint returns a typed payload
 
-### 平台/格式红线
-- 使用emoji字符（Windows GBK编码会导致 UnicodeEncodeError）
-- 全屏loading阻塞整个页面（应使用局部loading）
-- 一个模块工作导致全局刷新（应使用局部刷新）
-- 在GitHub Actions workflow中使用heredoc
-- Node版本低于24（项目要求24+，见 .nvmrc）
-- 用宽泛 try-except 包住多步逻辑后返回同一条错误消息
-- 返回的错误消息与真实失败原因不一致
+### Backend Async Rules
 
-### 新增规则（v5.0）
-- 使用 `datetime.utcnow()`（已废弃，用 `datetime.now(timezone.utc)`）
-- 新建Service不继承 `AsyncCRUDService`
-- Router文件超过15个端点不拆分
-- Router中直接实例化Service而不使用 `Depends()` 注入
+- New backend runtime code uses `AsyncSession`
+- FastAPI routes use `get_async_db()`, not `get_db()`
+- Do not use synchronous ORM patterns such as `db.query()` in new async code
+- Await every async database operation
 
-## 架构层次
+### Service Rules
 
-### Core层 `modules/core/`
-- `db/schema.py`: 所有ORM模型唯一定义
-- `config.py`: 模块配置管理
-- `secrets_manager.py`: 密钥管理
-- `logger.py`: 统一Logger工厂
-- `exceptions.py`: 统一异常基类
+- CRUD-style services should reuse `AsyncCRUDService` from `backend/services/base_service.py`
+- Non-CRUD orchestration services may use a different shape when that is the better fit
+- Prefer dependency injection instead of direct service construction inside routers
 
-### Backend层 `backend/`
-- `models/database.py`: engine, SessionLocal, get_async_db, init_db（禁止定义ORM）
-- `schemas/`: Pydantic模型集中管理（Contract-First）
-- `routers/`: API路由（从schemas导入模型，每文件<=15端点）
-- `services/`: 业务逻辑（新Service继承AsyncCRUDService）
-- `utils/exceptions.py`: API层异常子类 + error_response_v2()
-- `dependencies/auth.py`: get_current_user, require_admin 等共享依赖
+### Frontend Stack
 
-### Frontend层 `frontend/`
-- 所有API调用通过 `frontend/src/api/*.js`
-- 禁止直接访问数据库
-- 页面禁止直接写axios请求，必须通过 `api/*.js`
-- store 中禁止在 `actions` 或 `$patch()` 外部直接修改 state
-- 列表页必须使用统一分页查询模式，禁止全屏 loading
-- 新页面强制使用模板，旧页面修改时建议同步迁移，详见 `docs/DEVELOPMENT_RULES/FRONTEND_CODE_PATTERNS.md`
+- Frontend implementation must stay in the Vue 3 ecosystem
+- Use Vue 3 + Element Plus + Pinia + Vite
+- Do not introduce React or React Native code, patterns, or dependencies
+- Frontend API access goes through `frontend/src/api/`
 
-## Contract-First 开发顺序（强制）
+### Playwright Rules
 
-1. 定义数据模型 -> `schema.py` + Alembic迁移
-2. 定义API契约 -> `backend/schemas/` 中的Pydantic模型
-3. 定义路由签名 -> `@router` + `response_model`（占位实现）
-4. 定义前端API -> `frontend/src/api/*.js`
-5. 实现业务逻辑 -> 填充路由和Service
-6. 编写测试 -> 验证契约
+- In backend runtime code such as FastAPI routes and async services, use `async_playwright`
+- In standalone scripts, smoke tests, and local tooling, sync Playwright is allowed when appropriate
+- Prefer Playwright official locators such as `get_by_role`, `get_by_label`, and `get_by_text`
 
-## 异步架构规则
+### Time And Logging
 
-### 路由层
-- 所有路由函数必须使用 `get_async_db()`（禁止 `get_db()`）
-- 所有数据库操作必须使用 `await db.execute(select(...))`（禁止 `db.query()`）
+- Use `datetime.now(timezone.utc)`, not `datetime.utcnow()`
+- Avoid emoji in terminal and log output because of Windows console compatibility
+- Use explicit UTF-8 when file encoding must be stated
 
-### 服务层
-- 服务类构造函数只接受 `AsyncSession`（禁止双模式）
-- 事务管理使用 `@transactional` 装饰器（基于savepoint，与get_async_db协调）
-- Service实例通过 `Depends()` 工厂函数注入
+### File And Rule Hygiene
 
-### DDL操作
-- DDL操作使用 `run_in_executor` 包装同步调用
+- Do not create ad hoc backup source files such as `*_backup.py`
+- Keep new rule changes aligned with `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/skill-integration.mdc`
+- Treat `docs/guides/DEVELOPMENT_RULES.md` as historical only if it remains in the repository
 
-## 数据库规范
+## Detailed References
 
-- 迁移使用Alembic（禁止生产环境 init_db()）
-- 所有迁移必须可重复执行（幂等性检查）
-- DateTime列统一使用 `DateTime(timezone=True)`
-- ORM时间戳使用 `server_default=func.now()`
-- 文件路径从 catalog_files 表查询（禁止 Path.rglob()）
-- Excel解析统一使用 `ExcelParser.read_excel()`（禁止直接 pd.read_excel()）
-- 新表强制添加 `created_at`/`updated_at` 时间戳
-
-## Playwright/采集 规范要点
-
-- 元素定位优先级: get_by_role > get_by_label > get_by_text > locator
-- 异步框架中必须使用 async_playwright
-- 三级等待: domcontentloaded -> networkidle -> wait_for_timeout
-- 元素交互前: wait_for(state='visible') -> scroll_into_view_if_needed -> click
-- 所有Python组件必须使用 `async def run()` 方法
-- 组件只在 `modules/platforms/{platform}/components/` 定义
-- 录制模式: 仅 Inspector 模式（page.pause() + Trace），Codegen已废弃
-- 密码替换使用 `EncryptionService.decrypt_password()`
-
-> 完整规范见 `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
-
-## Windows平台注意事项
-
-- 禁止emoji: 使用 [OK]/[FAIL]/[WARN]/[INFO] 等ASCII替代
-- 路径处理: 使用 `pathlib.Path`
-- subprocess: Windows需要 `shell=True` 执行npm
-- 文件编码: 明确指定 `encoding='utf-8'`
-
-## CI/CD 规则
-
-- 发布入口: 仅通过 `git tag vX.Y.Z && git push origin vX.Y.Z` 触发
-- 顺序: Build -> Deploy（基础设施 -> 应用 -> 前端 -> Nginx）
-- 镜像标签: 生产环境一律使用版本号tag（不用latest）
-- 详细流程见 `docs/DEVELOPMENT_RULES/SECURITY_AND_DEPLOYMENT.md`
-
-## 生产治理规则
-
-- 发布/回滚/压测门禁/RPO-RTO目标见 `docs/DEVELOPMENT_RULES/PRODUCTION_READINESS.md`
-- 数据四级分级/敏感字段清单/脱敏规则见 `docs/DEVELOPMENT_RULES/DATA_GOVERNANCE.md`
-- 新增表包含敏感字段时，必须更新 DATA_GOVERNANCE.md 敏感数据清单
-
-## 异常体系
-
-- 统一基类: `ERPException`（`modules/core/exceptions.py`）
-- API层异常: `backend/utils/exceptions.py`（NotFoundError/BusinessValidationError等）
-- 错误码SSOT: `backend/utils/error_codes.py`（IntEnum）
-- 新端点使用 `error_response_v2()` + 语义HTTP状态码
-- 旧端点保持 `error_response()` + HTTP 200 包裹（渐进迁移）
-
-## 验证命令（提交前必跑）
-
-```bash
-python scripts/verify_architecture_ssot.py       # SSOT验证（期望100%）
-python scripts/verify_rules_completeness.py       # 零容忍规则验证
-python scripts/verify_no_emoji.py                 # Emoji检查
-python scripts/verify_api_contract_consistency.py  # 前后端API一致性
-python scripts/identify_dead_code.py              # 死代码识别
-```
-
-## 详细规范文档（L3，按需查阅）
-
-| 文档 | 内容 |
-|------|------|
-| `docs/DEVELOPMENT_RULES/CODE_PATTERNS.md` | 代码模板: Service/Router/Schema/conftest/事务/缓存/乐观锁 |
-| `docs/DEVELOPMENT_RULES/API_AND_CONTRACTS.md` | API设计、代码审查、HTTP状态码迁移策略 |
-| `docs/DEVELOPMENT_RULES/DATABASE.md` | 数据库设计、迁移、SQL编写规范 |
-| `docs/DEVELOPMENT_RULES/TESTING_AND_QUALITY.md` | 测试策略、覆盖率要求、代码质量 |
-| `docs/DEVELOPMENT_RULES/ERROR_AND_LOGGING.md` | 错误处理、日志规范（错误码SSOT见error_codes.py） |
-| `docs/DEVELOPMENT_RULES/SECURITY_AND_DEPLOYMENT.md` | 安全、部署、监控规范 |
-| `docs/DEVELOPMENT_RULES/UI_DESIGN.md` | UI设计、局部loading、后台刷新规范 |
-| `docs/DEVELOPMENT_RULES/PRODUCTION_READINESS.md` | 性能SLO、容量基线、压测门禁、发布/回滚、RPO/RTO、业务验收标准 |
-| `docs/DEVELOPMENT_RULES/DATA_GOVERNANCE.md` | 数据四级分级、敏感字段清单、脂敏规则、审计保留要求 |
-| `docs/DEVELOPMENT_RULES/FRONTEND_CODE_PATTERNS.md` | 前窯API/Store/列表页/表单页/权限按鈕/loading模板 |
-| `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` | 采集脚本编写完整规范 |
-| `docs/guides/PYTHON_COMPONENT_TEMPLATE.md` | Python组件编写模板 |
-
-## 变更影响矩阵
-
-| 修改文件 | 必须同步检查 |
-|---------|-------------|
-| `modules/core/db/schema.py` | Alembic迁移 + `modules/core/db/__init__.py` 导出 |
-| `backend/schemas/*.py` | 对应 routers/ 的 response_model 和请求体类型 |
-| `backend/routers/*.py` | schemas/ 中是否已定义契约; 前端 api/*.js 路径/参数 |
-| `modules/components/*/base.py` | CODE_PATTERNS.md + PYTHON_COMPONENT_TEMPLATE.md |
-| `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` | steps_to_python.py 和真实组件示例 |
-| `docs/DEVELOPMENT_RULES/*.md` | .cursorrules 中相应摘要/指针 |
-
-## Agent 工作模式
-
-### Skill 体系与项目规则的关系
-
-本项目使用业界主流 Skill（superpowers、planning-with-files、frontend-design、webapp-testing、ui-ux-pro-max）提供开发方法论和设计标准参考。
-
-**优先级链**: `.cursorrules` > OpenSpec > Superpowers > 其他 Skill
-
-详细的 Skill 使用边界和冲突解决规则见 `.cursor/rules/skill-integration.mdc`。
-
-### 开发工作流选择
-
-| 场景 | 工作流 |
-|------|--------|
-| 新模块/架构变更 | brainstorming -> OpenSpec (propose -> apply -> archive)，实施中用 TDD |
-| Bug 修复 | systematic-debugging -> TDD (写失败测试 -> 修复 -> 通过) |
-| 前端页面/组件 | ui-ux-pro-max (设计体系) + frontend-design (审美) -> Vue 3 + Element Plus 实施 |
-| 复杂重构/迁移 | planning-with-files (task_plan.md) -> 逐步执行 |
-| Web 应用测试 | webapp-testing (独立脚本，sync_playwright OK) |
-| 简单任务 (<5步) | 直接 TodoWrite，不需要规划框架 |
-
-### Superpowers 四阶段（非 trivial 改动默认）
-
-1. **Brainstorming**: 澄清需求与边界，不写代码；产出喂入 OpenSpec 而非落盘到 `docs/superpowers/specs/`
-2. **Planning**: 拆任务，标文件路径和验证方式，用户确认
-3. **Execution**: Contract-First + TDD，每任务 <=150 行，逐步推进
-4. **Finishing**: 总结影响、审查建议、判断是否需更新 OpenSpec
-
-能力级/规格级变更使用 OpenSpec 流程（见 `openspec/AGENTS.md`）。
+- `docs/DEVELOPMENT_RULES/README.md`
+- `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
+- `.cursor/rules/skill-integration.mdc`

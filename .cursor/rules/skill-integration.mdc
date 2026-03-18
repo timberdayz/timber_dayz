@@ -1,83 +1,94 @@
 # Skill Integration Rules for XiHong ERP
 
-This rule defines how user-level Skills integrate with project-level conventions.
+This repository is skill-first. Skills define the default workflow. Project rules only add repository-specific constraints.
 
 ## Priority Chain
 
 ```
-.cursorrules (zero-tolerance rules)  >  openspec workflow  >  superpowers skills  >  other skills
+user instructions
+> repository-specific constraints (.cursorrules)
+> superpowers + planning-with-files
+> other skills
+> archived OpenSpec material
 ```
 
-## Skill-to-Workflow Mapping
+## Core Interpretation
+
+- Use `superpowers` as the default workflow engine.
+- Use `planning-with-files` for complex multi-step work.
+- Use `.cursorrules` only for stack-specific and safety-specific exceptions.
+- Treat `openspec/` as archive-only reference material.
+
+## Skill Mapping
 
 ### brainstorming (superpowers)
 
-When brainstorming produces a design document:
-- Do NOT save to `docs/superpowers/specs/`. This project uses OpenSpec.
-- Instead: complete brainstorming interactively, then run `openspec new change "<name>"` and write the design into `openspec/changes/<name>/proposal.md` + `design.md` + `tasks.md`.
-- For small changes that skip OpenSpec, save inline or use TodoWrite.
+- Use it for new features, rule redesigns, behavior changes, and architecture discussions.
+- Default design-doc location in this repository is `docs/superpowers/specs/`.
+- Do not redirect brainstorming output into OpenSpec.
 
 ### writing-plans / executing-plans (superpowers)
 
-- When working inside an OpenSpec change: the plan IS `openspec/changes/<name>/tasks.md`. Use executing-plans methodology to work through it, but do not create a separate plan file.
-- When working outside OpenSpec (standalone task): writing-plans can create its own plan in `docs/superpowers/plans/` or use TodoWrite for simple cases.
+- Default plan-doc location is `docs/superpowers/plans/`.
+- Use `writing-plans` when you want a durable implementation plan document.
+- Use `executing-plans` only when there is already a written plan to execute.
 
 ### planning-with-files
 
-- Use for complex single-person tasks that do NOT need OpenSpec review (research, refactoring, migration scripts, etc.).
-- `task_plan.md`, `findings.md`, `progress.md` go in project root.
-- Add these to `.gitignore` unless the user explicitly wants them committed.
-- Do NOT use planning-with-files AND OpenSpec simultaneously for the same task.
+- Allowed and recommended for complex single-person work.
+- `task_plan.md`, `findings.md`, and `progress.md` intentionally live in project root.
+- These files are gitignored and do not violate repository rules.
+- Do not combine `planning-with-files` with OpenSpec in this repository.
 
 ### test-driven-development (superpowers)
 
-- Fits naturally with Contract-First: define schema/contract first, then write failing test, then implement.
-- Execution order: Contract-First (schema -> Pydantic -> router signature) -> TDD (write test -> red -> green -> refactor).
+- Fits naturally with Contract-First.
+- Preferred order:
+  - define contract
+  - write failing test
+  - implement minimal code
+  - verify
 
-### webapp-testing (anthropics)
+### webapp-testing
 
-- `sync_playwright()` is OK for standalone test scripts under `scripts/` or `tests/`.
-- Inside FastAPI router/service code: MUST use `async_playwright` per `.cursorrules`.
-- Prefer `get_by_role` / `get_by_label` over CSS selectors per project Playwright conventions.
+- Standalone scripts and test utilities may use sync Playwright.
+- Backend runtime code must stay async-first and use `async_playwright`.
 
 ### frontend-design + ui-ux-pro-max
 
-- This project uses **Vue 3 + Element Plus + Pinia + Vite** (NOT React/React Native).
-- When using ui-ux-pro-max:
-  - UX guidelines (accessibility, touch targets, animation, navigation, charts) are universal — apply directly.
-  - Ignore React Native specific advice; adapt component patterns to Element Plus equivalents.
-  - `--stack` parameter: do not use `react-native`; use general domain searches instead.
-- When using frontend-design:
-  - Apply aesthetic principles (typography, color, motion, spatial composition).
-  - Implement with Vue 3 SFC + Element Plus components + Tailwind/CSS variables.
-- Both skills' "no emoji as icons" rule aligns with `.cursorrules` Windows emoji ban.
+- Adapt all design output to Vue 3 + Element Plus + Pinia + Vite.
+- Ignore React and React Native implementation advice.
+- Reuse existing frontend architecture instead of introducing a new component system.
 
-### systematic-debugging (superpowers)
+### systematic-debugging / code-review / verification skills
 
-- Use freely for bug investigation. No project-specific overrides needed.
-
-### code-review skills (superpowers)
-
-- requesting-code-review / receiving-code-review: use freely. Align review checklist with `docs/DEVELOPMENT_RULES/API_AND_CONTRACTS.md` review standards.
+- Use them directly. No extra workflow override is needed.
 
 ## Decision Quick Reference
 
 ```
-"I need to build a new module/capability"
-  -> brainstorming -> OpenSpec propose -> OpenSpec apply (with TDD)
+"I need to build or redesign something"
+  -> brainstorming
+  -> writing-plans or planning-with-files
+  -> test-driven-development
 
 "I need to fix a bug"
-  -> systematic-debugging -> TDD (write failing test -> fix -> green)
+  -> systematic-debugging
+  -> test-driven-development
+  -> verification-before-completion
 
-"I need to design a new page/component"
-  -> ui-ux-pro-max (design system) + frontend-design (aesthetics) -> implement in Vue 3
+"I need to do a complex refactor or research task"
+  -> planning-with-files
 
-"I need to do a complex refactoring"
-  -> planning-with-files (task_plan.md) -> execute step by step
+"I need to design a page or component"
+  -> ui-ux-pro-max + frontend-design
+  -> implement in Vue 3 + Element Plus
 
-"I need to test the web app with a browser"
-  -> webapp-testing (standalone script with sync_playwright OK)
-
-"Simple task, < 5 steps"
-  -> TodoWrite directly, no planning framework needed
+"I need browser automation"
+  -> webapp-testing
 ```
+
+## OpenSpec Status
+
+- Keep `openspec/` in the repository as history.
+- Do not create new OpenSpec proposals or route active work through OpenSpec unless the user explicitly asks for historical lookup or migration work.

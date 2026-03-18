@@ -38,9 +38,9 @@ jobs:
       - name: Check deployment configuration
         id: check
         run: |
-          if [ -z "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" ] || [ -z "${{ secrets.PRODUCTION_HOST }}" ]; then
+          if [ -z "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" ] || [ -z "${{ secrets.PRODUCTION_HOST }}" ] || [ -z "${{ secrets.PRODUCTION_HOST_KEY }}" ]; then
             echo "Production deployment secrets not configured. Skipping deployment."
-            echo "Required secrets: PRODUCTION_SSH_PRIVATE_KEY, PRODUCTION_HOST"
+            echo "Required secrets: PRODUCTION_SSH_PRIVATE_KEY, PRODUCTION_HOST, PRODUCTION_HOST_KEY"
             echo "can_deploy=false" >> $GITHUB_OUTPUT
           else
             echo "Production deployment secrets configured. Proceeding with deployment."
@@ -400,6 +400,13 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
 
+      - name: Configure SSH known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.PRODUCTION_HOST_KEY }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
       - name: Sync compose files to production server
         env:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
@@ -419,7 +426,7 @@ jobs:
             
             for i in $(seq 1 ${max_retries}); do
               echo "[INFO] Upload attempt ${i}/${max_retries} for $(basename ${file})..."
-              if scp -o StrictHostKeyChecking=no \
+              if scp \
                   -o ServerAliveInterval=30 \
                   -o ServerAliveCountMax=10 \
                   -o ConnectTimeout=30 \
@@ -445,7 +452,7 @@ jobs:
 
           # [FIX] 测试 SSH 连接（在上传前验证连接可用性）
           echo "[INFO] Testing SSH connection..."
-          if ssh -o StrictHostKeyChecking=no \
+          if ssh \
               -o ConnectTimeout=10 \
               -o BatchMode=yes \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
@@ -509,7 +516,7 @@ jobs:
           # [FIX] SCP 要求目标父目录存在；先创建并验证，路径加引号以支持含空格的 PRODUCTION_PATH
           if [ -d "config" ]; then
             echo "[INFO] Syncing config directory to server..."
-            if ! ssh -o StrictHostKeyChecking=no \
+            if ! ssh \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
                 -o ConnectTimeout=30 \
@@ -539,7 +546,7 @@ jobs:
           # 5c. 上传 sql/init 目录（Postgres 首次启动时执行，含 metabase_app 创建）
           if [ -d "sql/init" ]; then
             echo "[INFO] Syncing sql/init directory to server..."
-            if ! ssh -o StrictHostKeyChecking=no \
+            if ! ssh \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
                 -o ConnectTimeout=30 \
@@ -565,7 +572,7 @@ jobs:
           # 6. 上传 Nginx 配置文件（生产必需组件）
           if [ -d "nginx" ]; then
             # 确保服务器上 nginx 目录存在
-            if ! ssh -o StrictHostKeyChecking=no \
+            if ! ssh \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
                 -o ConnectTimeout=30 \
@@ -585,7 +592,7 @@ jobs:
             fi
 
             # 确保 SSL 证书目录存在（SSL 证书通常不需要通过 Git 同步，这里只是确保目录存在）
-            if ! ssh -o StrictHostKeyChecking=no \
+            if ! ssh \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
                 -o ConnectTimeout=30 \
@@ -606,7 +613,7 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
           # [FIX] 使用 bash -c 远程执行，避免 heredoc 语法问题
-          ssh -o StrictHostKeyChecking=no \
+          ssh \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
@@ -628,7 +635,7 @@ jobs:
           # [FIX] 方案A：部署逻辑统一封装到脚本，避免超长 bash -c 片段导致引号/换行问题
           # 通过 stdin 传递 token，避免把 token 写进远程命令行参数
           # [NEW] 混合模式：同时传递 GHCR 和 CNB token，优先使用 CNB（国内更快）
-          printf '%s\n%s\n' "${{ secrets.GITHUB_TOKEN }}" "${{ secrets.CNB_TOKEN }}" | ssh -o StrictHostKeyChecking=no \
+          printf '%s\n%s\n' "${{ secrets.GITHUB_TOKEN }}" "${{ secrets.CNB_TOKEN }}" | ssh \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
             ${PRODUCTION_USER}@${PRODUCTION_HOST} \
@@ -681,6 +688,13 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
 
+      - name: Configure SSH known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.PRODUCTION_HOST_KEY }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
       - name: Sync compose files to production server
         env:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
@@ -698,7 +712,7 @@ jobs:
             
             for i in $(seq 1 ${max_retries}); do
               echo "[INFO] Upload attempt ${i}/${max_retries} for $(basename ${file})..."
-              if scp -o StrictHostKeyChecking=no \
+              if scp \
                   -o ServerAliveInterval=30 \
                   -o ServerAliveCountMax=10 \
                   -o ConnectTimeout=30 \
@@ -724,7 +738,7 @@ jobs:
 
           # [FIX] 测试 SSH 连接（在上传前验证连接可用性）
           echo "[INFO] Testing SSH connection..."
-          if ssh -o StrictHostKeyChecking=no \
+          if ssh \
               -o ConnectTimeout=10 \
               -o BatchMode=yes \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
@@ -770,7 +784,7 @@ jobs:
           # [FIX] SCP 要求目标父目录存在；先创建并验证，路径加引号以支持含空格的 PRODUCTION_PATH
           if [ -d "config" ]; then
             echo "[INFO] Syncing config directory to server..."
-            if ! ssh -o StrictHostKeyChecking=no \
+            if ! ssh \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
                 -o ConnectTimeout=30 \
@@ -800,7 +814,7 @@ jobs:
           # 5c. 上传 sql/init 目录（Postgres 首次启动时执行，含 metabase_app 创建）
           if [ -d "sql/init" ]; then
             echo "[INFO] Syncing sql/init directory to server..."
-            if ! ssh -o StrictHostKeyChecking=no \
+            if ! ssh \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
                 -o ConnectTimeout=30 \
@@ -826,7 +840,7 @@ jobs:
           # 上传 Nginx 配置文件（生产必需组件）
           if [ -d "nginx" ]; then
             # 确保服务器上 nginx 目录存在
-            if ! ssh -o StrictHostKeyChecking=no \
+            if ! ssh \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
                 -o ConnectTimeout=30 \
@@ -846,7 +860,7 @@ jobs:
             fi
 
             # 确保 SSL 证书目录存在（SSL 证书通常不需要通过 Git 同步，这里只是确保目录存在）
-            if ! ssh -o StrictHostKeyChecking=no \
+            if ! ssh \
                 -o ServerAliveInterval=30 \
                 -o ServerAliveCountMax=10 \
                 -o ConnectTimeout=30 \
@@ -866,7 +880,7 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          ssh -o StrictHostKeyChecking=no \
+          ssh \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
@@ -887,7 +901,7 @@ jobs:
         run: |
           # [FIX] 方案A：与 deploy-tag 使用同一脚本，确保手动部署/回滚路径与自动发布一致
           # [NEW] 混合模式：同时传递 GHCR 和 CNB token，优先使用 CNB（国内更快）
-          printf '%s\n%s\n' "${{ secrets.GITHUB_TOKEN }}" "${{ secrets.CNB_TOKEN }}" | ssh -o StrictHostKeyChecking=no \
+          printf '%s\n%s\n' "${{ secrets.GITHUB_TOKEN }}" "${{ secrets.CNB_TOKEN }}" | ssh \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
             ${PRODUCTION_USER}@${PRODUCTION_HOST} \
@@ -989,6 +1003,14 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
 
+      - name: Configure SSH known_hosts for rollback
+        if: failure()
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.PRODUCTION_HOST_KEY }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
       - name: Rollback on failure
         if: failure()
         env:
@@ -997,7 +1019,7 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
           # [FIX] 避免 heredoc 语法问题，使用 bash -c 执行远程命令
-          ssh -o StrictHostKeyChecking=no \
+          ssh \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
@@ -1043,6 +1065,7 @@ jobs:
           echo "Required GitHub Secrets not configured:"
           echo "  - PRODUCTION_SSH_PRIVATE_KEY"
           echo "  - PRODUCTION_HOST"
+          echo "  - PRODUCTION_HOST_KEY"
           echo ""
           echo "To enable deployment, configure these secrets in:"
           echo "  Settings > Secrets and variables > Actions"
