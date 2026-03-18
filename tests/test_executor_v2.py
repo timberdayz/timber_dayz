@@ -8,6 +8,7 @@ from unittest.mock import Mock, AsyncMock, patch
 from pathlib import Path
 import tempfile
 
+from backend.services.component_runtime_resolver import RuntimeComponentManifest
 from modules.apps.collection_center.executor_v2 import (
     CollectionExecutorV2,
     CollectionResult,
@@ -165,6 +166,155 @@ class TestCollectionExecutorV2:
         assert result.task_id == "test-task-1"
         assert result.status == "completed"
         assert result.duration_seconds >= 0
+
+    async def test_execute_uses_runtime_manifest_file_paths_for_login_and_export(
+        self, executor, mock_page
+    ):
+        """正式运行应按 stable runtime manifest 的 file_path 加载组件。"""
+
+        class _Result:
+            def __init__(self, success=True, message="ok", file_path=None):
+                self.success = success
+                self.message = message
+                self.file_path = file_path
+
+        class _LoginComponent:
+            platform = "shopee"
+            component_type = "login"
+
+            def __init__(self, ctx):
+                self.ctx = ctx
+
+            async def run(self, page):
+                return _Result(success=True, message="login ok")
+
+        class _OrdersExportComponent:
+            platform = "shopee"
+            component_type = "export"
+            data_domain = "orders"
+
+            def __init__(self, ctx):
+                self.ctx = ctx
+
+            async def run(self, page, *args, **kwargs):
+                return _Result(success=True, message="export ok", file_path="temp/orders.xlsx")
+
+        runtime_manifests = {
+            "login": RuntimeComponentManifest(
+                component_name="shopee/login",
+                version="1.0.0",
+                file_path="modules/platforms/shopee/components/login_v1_0_0.py",
+                platform="shopee",
+                component_type="login",
+            ),
+            "exports_by_domain": {
+                "orders": RuntimeComponentManifest(
+                    component_name="shopee/orders_export",
+                    version="1.0.0",
+                    file_path="modules/platforms/shopee/components/orders_export_v1_0_0.py",
+                    platform="shopee",
+                    component_type="export",
+                    data_domain="orders",
+                )
+            },
+        }
+
+        executor.component_loader.load_python_component_from_path = Mock(
+            side_effect=[_LoginComponent, _OrdersExportComponent]
+        )
+
+        result = await executor.execute(
+            task_id="manifest-task-1",
+            platform="shopee",
+            account_id="account-1",
+            account={"username": "test", "password": "pass"},
+            data_domains=["orders"],
+            date_range={"start": "2025-01-01", "end": "2025-01-31"},
+            granularity="daily",
+            page=mock_page,
+            runtime_manifests=runtime_manifests,
+        )
+
+        assert result.status == "completed"
+        assert executor.component_loader.load_python_component_from_path.call_count == 2
+        login_call = executor.component_loader.load_python_component_from_path.call_args_list[0]
+        export_call = executor.component_loader.load_python_component_from_path.call_args_list[1]
+        assert login_call.args[0] == runtime_manifests["login"].file_path
+        assert export_call.args[0] == runtime_manifests["exports_by_domain"]["orders"].file_path
+
+    async def test_execute_with_runtime_manifests_does_not_use_adapter_loading(
+        self, executor, mock_page
+    ):
+        """正式运行提供 manifest 时，不应再依赖 adapter 的模块名加载路径。"""
+
+        class _Result:
+            def __init__(self, success=True, message="ok", file_path=None):
+                self.success = success
+                self.message = message
+                self.file_path = file_path
+
+        class _LoginComponent:
+            platform = "shopee"
+            component_type = "login"
+
+            def __init__(self, ctx):
+                self.ctx = ctx
+
+            async def run(self, page):
+                return _Result(success=True)
+
+        class _OrdersExportComponent:
+            platform = "shopee"
+            component_type = "export"
+            data_domain = "orders"
+
+            def __init__(self, ctx):
+                self.ctx = ctx
+
+            async def run(self, page, *args, **kwargs):
+                return _Result(success=True, file_path="temp/orders.xlsx")
+
+        runtime_manifests = {
+            "login": RuntimeComponentManifest(
+                component_name="shopee/login",
+                version="1.0.0",
+                file_path="modules/platforms/shopee/components/login_v1_0_0.py",
+                platform="shopee",
+                component_type="login",
+            ),
+            "exports_by_domain": {
+                "orders": RuntimeComponentManifest(
+                    component_name="shopee/orders_export",
+                    version="1.0.0",
+                    file_path="modules/platforms/shopee/components/orders_export_v1_0_0.py",
+                    platform="shopee",
+                    component_type="export",
+                    data_domain="orders",
+                )
+            },
+        }
+
+        executor.component_loader.load_python_component_from_path = Mock(
+            side_effect=[_LoginComponent, _OrdersExportComponent]
+        )
+
+        with patch(
+            "modules.apps.collection_center.executor_v2.create_adapter",
+            side_effect=AssertionError("formal runtime should not call create_adapter"),
+        ):
+            result = await executor.execute(
+                task_id="manifest-task-2",
+                platform="shopee",
+                account_id="account-2",
+                account={"username": "test", "password": "pass"},
+                data_domains=["orders"],
+                date_range={"start": "2025-01-01", "end": "2025-01-31"},
+                granularity="daily",
+                page=mock_page,
+                runtime_manifests=runtime_manifests,
+            )
+
+        assert result.status == "completed"
     
     async def test_status_callback(self, mock_component_loader, mock_popup_handler, mock_page):
         """测试状态回调"""
@@ -368,4 +518,3 @@ class TestTaskContext:
         
         assert context.current_component_index == 2
         assert len(context.collected_files) == 1
-

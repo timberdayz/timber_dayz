@@ -713,6 +713,7 @@ async def _execute_collection_task_background(
                             browser=browser,
                             max_parallel=max_parallel,
                             debug_mode=debug_mode,
+                            runtime_manifests=runtime_manifests,
                         )
                     else:
                         result = await executor.execute(
@@ -726,6 +727,7 @@ async def _execute_collection_task_background(
                             granularity=granularity,
                             browser=browser,
                             debug_mode=debug_mode,
+                            runtime_manifests=runtime_manifests,
                         )
 
                     task.status = result.status

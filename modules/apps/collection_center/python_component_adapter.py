@@ -76,6 +76,11 @@ class PythonComponentAdapter:
     
     提供异步的组件执行接口,替代 YAML 组件的执行逻辑。
     v4.8.0: 支持步骤回调和步骤ID命名空间
+
+    注意:
+    - 正式采集运行路径必须优先使用 stable runtime manifest + file_path 解析组件
+    - 本适配层保留给录制测试、组件测试和调试路径
+    - 不应再作为正式任务的最终组件选择器
     """
     
     def __init__(
@@ -424,4 +429,3 @@ def create_adapter(
         override_shop_switch_class=override_shop_switch_class,
         override_filters_class=override_filters_class,
     )
-

@@ -1113,7 +1113,7 @@ async def save_component(
 
         return {
             "success": True,
-            "message": "组件已保存并创建新版本",
+            "message": "组件已保存为草稿版本，请先测试并提升为稳定版后再用于正式采集",
             "file_path": str(file_path),
             "component_type": "python",
             "version_info": {
@@ -1181,4 +1181,3 @@ async def get_recorder_status():
             "started_at": recorder_session.started_at.isoformat() if recorder_session.started_at else None
         }
     }
-

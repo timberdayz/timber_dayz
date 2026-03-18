@@ -2,7 +2,7 @@
   <div class="component-versions">
     <div class="page-header">
       <h2>采集组件库</h2>
-      <p class="subtitle">管理采集组件版本，A/B测试，快速回滚</p>
+      <p class="subtitle">管理采集组件版本，A/B测试，快速回滚。只有稳定版本可用于正式采集和定时调度。</p>
     </div>
 
     <!-- 筛选栏：筛选为空时后端按全选处理 -->
