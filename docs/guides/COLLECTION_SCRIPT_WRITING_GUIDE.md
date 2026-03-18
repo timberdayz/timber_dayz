@@ -330,6 +330,13 @@ params = config.get("params") or {} # captcha_code, otp, login_url_override, ...
 
 生成器（`steps_to_python.py`）和运行时（`test_component.py`、`executor_v2.py`）各自承担不同职责，不得混淆：
 
+### 正式运行主路径（强约束）
+
+- 正式采集运行只认 `ComponentVersion` 当前 **stable** 版本对应的 `file_path`
+- 手动正式采集、定时调度、并行采集都必须先完成 stable 组件解析，再进入执行器
+- `temp/recordings/`、原始回放脚本、历史模板生成器都不得直接进入正式任务链路
+- 录制保存后的新组件默认是**草稿版本**，必须经过测试/验收并提升为 stable 后，才能用于正式采集
+
 ### 生成器职责（组件代码内）
 
 | 职责 | 说明 |
