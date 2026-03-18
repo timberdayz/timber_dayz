@@ -46,6 +46,28 @@ def metabase_unavailable_response(message: str = "Metabase服务暂时不可用�
     )
 
 
+async def _resolve_cached_payload(
+    request: Request,
+    cache_type: str,
+    cache_params: Dict[str, Any],
+    producer,
+):
+    if request and hasattr(request.app.state, "cache_service"):
+        cache_service = request.app.state.cache_service
+        cached = await cache_service.get(cache_type, **cache_params)
+        if cached is not None:
+            return cached, "HIT"
+        payload = await cache_service.get_or_set_singleflight(
+            cache_type,
+            producer,
+            **cache_params,
+        )
+        return payload, "MISS"
+
+    payload = await producer()
+    return payload, "BYPASS"
+
+
 @router.get("/business-overview/kpi")
 async def get_business_overview_kpi(
     request: Request,
@@ -83,6 +105,28 @@ async def get_business_overview_kpi(
         
         params = {"month": month, "platform": platform}
         cache_params = _normalize_cache_params(params)
+
+        async def _produce_payload():
+            service = get_metabase_service()
+            metabase_params = {k: v for k, v in params.items() if v is not None}
+            logger.info(f"[KPI鏌ヨ] 鍙傛暟: month={month}, platform={platform}")
+            result = await service.query_question("business_overview_kpi", metabase_params)
+            return json.loads(success_response(data=result).body.decode())
+
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("dashboard_kpi", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            payload = await cache_service.get_or_set_singleflight(
+                "dashboard_kpi",
+                _produce_payload,
+                **cache_params,
+            )
+            return JSONResponse(content=payload, headers={"X-Cache": "MISS"})
+
+        payload = await _produce_payload()
+        return JSONResponse(content=payload, headers={"X-Cache": "BYPASS"})
         
         # 尝试从缓存获取
         cache_status = "BYPASS"  # Redis 不可用
@@ -799,4 +843,3 @@ async def get_annual_summary_target_completion(
             detail=str(e),
             recovery_suggestion="请稍后重试",
         )
-

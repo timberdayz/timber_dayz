@@ -245,6 +245,68 @@ def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
     return {k: "" if v is None else str(v) for k, v in params.items()}
 
 
+async def invalidate_target_related_caches(cache_service) -> None:
+    await cache_service.invalidate_dashboard_business_overview()
+    await cache_service.invalidate("target_by_month")
+    await cache_service.invalidate("target_breakdown")
+
+
+async def _build_target_by_month_payload(
+    normalized_month: str,
+    target_type: str,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    parts = normalized_month.split("-")
+    y, m = int(parts[0]), int(parts[1])
+    month_start = date(y, m, 1)
+    if m == 12:
+        month_end = date(y, 12, 31)
+    else:
+        month_end = date(y, m + 1, 1) - timedelta(days=1)
+
+    query = (
+        select(SalesTarget)
+        .where(SalesTarget.target_type == target_type)
+        .where(SalesTarget.period_start <= month_end)
+        .where(SalesTarget.period_end >= month_start)
+        .order_by(SalesTarget.created_at.desc())
+        .limit(1)
+    )
+    target = (await db.execute(query)).scalar_one_or_none()
+    if not target:
+        return {
+            "success": True,
+            "data": {"target": None, "breakdowns": []},
+            "message": "该月暂无目标",
+        }
+
+    breakdowns_query = select(TargetBreakdown).where(TargetBreakdown.target_id == target.id)
+    breakdowns = (await db.execute(breakdowns_query)).scalars().all()
+    breakdown_responses = []
+    for b in breakdowns:
+        bd = BreakdownResponse.model_validate(b).model_dump(mode="json")
+        if b.platform_code and b.shop_id and b.breakdown_type in ("shop", "shop_time"):
+            dim_shop = (
+                await db.execute(
+                    select(DimShop).where(
+                        DimShop.platform_code == b.platform_code,
+                        DimShop.shop_id == b.shop_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if dim_shop:
+                bd["shop_name"] = dim_shop.shop_name
+        breakdown_responses.append(bd)
+
+    return {
+        "success": True,
+        "data": {
+            "target": TargetResponse.model_validate(target).model_dump(mode="json"),
+            "breakdowns": breakdown_responses,
+        },
+    }
+
+
 @router.get("/by-month", response_model=Dict[str, Any])
 async def get_target_by_month(
     request: Request,
@@ -268,6 +330,20 @@ async def get_target_by_month(
     try:
         parts = normalized_month.split("-")
         cache_params = _normalize_cache_params({"month": normalized_month, "target_type": target_type})
+        if request and hasattr(request.app.state, "cache_service"):
+            cache_service = request.app.state.cache_service
+            cached = await cache_service.get("target_by_month", **cache_params)
+            if cached is not None:
+                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
+            payload = await cache_service.get_or_set_singleflight(
+                "target_by_month",
+                lambda: _build_target_by_month_payload(normalized_month, target_type, db),
+                **cache_params,
+            )
+            return JSONResponse(content=payload, headers={"X-Cache": "MISS"})
+
+        payload = await _build_target_by_month_payload(normalized_month, target_type, db)
+        return JSONResponse(content=payload, headers={"X-Cache": "BYPASS"})
         cache_status = "BYPASS"
         if request and hasattr(request.app.state, "cache_service"):
             cache_service = request.app.state.cache_service
@@ -467,7 +543,7 @@ async def create_target(
             logger.warning(f"[TargetManagement] 触发A_CLASS_UPDATED事件失败: {event_err}")
         try:
             from backend.services.cache_service import get_cache_service
-            await get_cache_service().invalidate_dashboard_business_overview()
+            await invalidate_target_related_caches(get_cache_service())
         except Exception as inv_err:
             logger.warning(f"[TargetManagement] 写时失效 Dashboard 缓存失败: {inv_err}")
         return {
@@ -580,7 +656,7 @@ async def update_target(
             logger.warning(f"[TargetManagement] 触发A_CLASS_UPDATED事件失败: {event_err}")
         try:
             from backend.services.cache_service import get_cache_service
-            await get_cache_service().invalidate_dashboard_business_overview()
+            await invalidate_target_related_caches(get_cache_service())
         except Exception as inv_err:
             logger.warning(f"[TargetManagement] 写时失效 Dashboard 缓存失败: {inv_err}")
         return {
@@ -667,7 +743,7 @@ async def delete_target(
             logger.warning(f"[TargetManagement] 触发A_CLASS_UPDATED事件失败: {event_err}")
         try:
             from backend.services.cache_service import get_cache_service
-            await get_cache_service().invalidate_dashboard_business_overview()
+            await invalidate_target_related_caches(get_cache_service())
         except Exception as inv_err:
             logger.warning(f"[TargetManagement] 写时失效 Dashboard 缓存失败: {inv_err}")
         return {
@@ -880,6 +956,11 @@ async def create_breakdown(
                     )
                 await db.commit()
                 await db.refresh(existing_time)
+                try:
+                    from backend.services.cache_service import get_cache_service
+                    await invalidate_target_related_caches(get_cache_service())
+                except Exception as inv_err:
+                    logger.warning(f"[TargetManagement] 写时失效 target 缓存失败: {inv_err}")
                 return {
                     "success": True,
                     "data": BreakdownResponse.model_validate(existing_time).model_dump(),
@@ -923,6 +1004,11 @@ async def create_breakdown(
                 existing_st.updated_at = datetime.now(timezone.utc)
                 await db.commit()
                 await db.refresh(existing_st)
+                try:
+                    from backend.services.cache_service import get_cache_service
+                    await invalidate_target_related_caches(get_cache_service())
+                except Exception as inv_err:
+                    logger.warning(f"[TargetManagement] 写时失效 target 缓存失败: {inv_err}")
                 bd_data = BreakdownResponse.model_validate(existing_st).model_dump()
                 dim_shop = (await db.execute(
                     select(DimShop).where(
@@ -947,6 +1033,11 @@ async def create_breakdown(
             db.add(new_st)
             await db.commit()
             await db.refresh(new_st)
+            try:
+                from backend.services.cache_service import get_cache_service
+                await invalidate_target_related_caches(get_cache_service())
+            except Exception as inv_err:
+                logger.warning(f"[TargetManagement] 写时失效 target 缓存失败: {inv_err}")
             bd_data = BreakdownResponse.model_validate(new_st).model_dump()
             dim_shop = (await db.execute(
                 select(DimShop).where(
@@ -1298,6 +1389,11 @@ async def generate_daily_breakdown(
                     created_st += 1
 
         await db.commit()
+        try:
+            from backend.services.cache_service import get_cache_service
+            await invalidate_target_related_caches(get_cache_service())
+        except Exception as inv_err:
+            logger.warning(f"[TargetManagement] 写时失效 target 缓存失败: {inv_err}")
         msg = f"日度分解已生成：汇总新增 {created} 条、更新 {updated} 条"
         if created_st or updated_st:
             msg += f"；按店铺日度新增 {created_st} 条、更新 {updated_st} 条"

@@ -1,0 +1,259 @@
+<style>
+  .cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .direction-card {
+    position: relative;
+  }
+  .direction-card.recommended {
+    box-shadow: 0 0 0 2px rgba(14, 104, 70, 0.15);
+  }
+  .badge {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: #0e6846;
+    color: #fff;
+  }
+  .mini-shell {
+    display: grid;
+    grid-template-columns: 74px 1fr;
+    height: 100%;
+    width: 100%;
+  }
+  .mini-shell .nav {
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .mini-shell .nav span {
+    height: 10px;
+    border-radius: 999px;
+    display: block;
+    opacity: 0.9;
+  }
+  .mini-shell .main {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .topbar {
+    height: 18px;
+    border-radius: 8px;
+    opacity: 0.95;
+  }
+  .hero {
+    height: 56px;
+    border-radius: 12px;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .stats span {
+    height: 42px;
+    border-radius: 10px;
+    display: block;
+  }
+  .table {
+    display: grid;
+    gap: 6px;
+  }
+  .table span {
+    height: 12px;
+    border-radius: 999px;
+    display: block;
+  }
+  .tone-list {
+    margin-top: 10px;
+    display: grid;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .tone-list strong {
+    color: var(--text-primary);
+  }
+  .next-step {
+    margin-top: 18px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: rgba(0, 113, 227, 0.08);
+    color: var(--text-secondary);
+    font-size: 14px;
+  }
+  .pro-a .nav { background: #203347; }
+  .pro-a .nav span { background: rgba(255,255,255,0.78); }
+  .pro-a .main { background: #f3f5f7; }
+  .pro-a .topbar { background: #ffffff; border: 1px solid #d8dee5; }
+  .pro-a .hero { background: linear-gradient(135deg, #304a61 0%, #56738f 100%); }
+  .pro-a .stats span:nth-child(1) { background: #fff; border: 1px solid #d8dee5; }
+  .pro-a .stats span:nth-child(2) { background: #fff; border: 1px solid #d8dee5; }
+  .pro-a .stats span:nth-child(3) { background: #fff; border: 1px solid #d8dee5; }
+  .pro-a .table span { background: #d7dde4; }
+  .modern-b .nav { background: linear-gradient(180deg, #12263f 0%, #1a4c76 100%); }
+  .modern-b .nav span { background: rgba(201, 232, 255, 0.88); }
+  .modern-b .main { background: linear-gradient(180deg, #eff7ff 0%, #f8fbff 100%); }
+  .modern-b .topbar { background: rgba(255,255,255,0.9); border: 1px solid #d0e3f5; }
+  .modern-b .hero { background: linear-gradient(135deg, #2486e8 0%, #60b9ff 100%); }
+  .modern-b .stats span:nth-child(1) { background: #fff; box-shadow: 0 8px 18px rgba(36,134,232,0.12); }
+  .modern-b .stats span:nth-child(2) { background: #fff; box-shadow: 0 8px 18px rgba(36,134,232,0.12); }
+  .modern-b .stats span:nth-child(3) { background: #fff; box-shadow: 0 8px 18px rgba(36,134,232,0.12); }
+  .modern-b .table span { background: #c4ddf4; }
+  .dense-c .nav { background: #171a1f; }
+  .dense-c .nav span { background: rgba(210, 214, 221, 0.86); }
+  .dense-c .main { background: #f0f2f4; }
+  .dense-c .topbar { background: #dfe4e9; }
+  .dense-c .hero { background: linear-gradient(135deg, #3a3f46 0%, #626973 100%); height: 44px; }
+  .dense-c .stats {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .dense-c .stats span {
+    height: 32px;
+    background: #fff;
+    border: 1px solid #d7dce2;
+    border-radius: 8px;
+  }
+  .dense-c .table span { background: #c6ccd3; height: 10px; }
+  @media (max-width: 980px) {
+    .cards {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<h2>ERP 后台统一优化方向</h2>
+<p class="subtitle">我建议用 A 作为主方向。它最适合你们当前的 ERP 场景，也最容易把分散页面统一起来。</p>
+
+<div class="cards">
+  <div class="card direction-card direction-card recommended" data-choice="a" onclick="toggleSelect(this)">
+    <div class="badge">Recommended</div>
+    <div class="card-image">
+      <div class="mini-shell pro-a">
+        <div class="nav">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="main">
+          <div class="topbar"></div>
+          <div class="hero"></div>
+          <div class="stats">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="table">
+            <span></span>
+            <span></span>
+            <span style="width:88%"></span>
+            <span style="width:94%"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 专业稳重型</h3>
+      <p>企业感最强，视觉克制，适合 ERP、财务、运营后台长期使用。</p>
+      <div class="tone-list">
+        <div><strong>关键词：</strong>稳、清晰、可信、耐用</div>
+        <div><strong>适合：</strong>全系统统一、表格和表单密集场景</div>
+        <div><strong>风险：</strong>如果做得太保守，会显得普通</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card direction-card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mini-shell modern-b">
+        <div class="nav">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="main">
+          <div class="topbar"></div>
+          <div class="hero"></div>
+          <div class="stats">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="table">
+            <span></span>
+            <span></span>
+            <span style="width:92%"></span>
+            <span style="width:80%"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 现代数据中台型</h3>
+      <p>更现代、更亮，卡片感和数据看板气质更强，适合展示性页面。</p>
+      <div class="tone-list">
+        <div><strong>关键词：</strong>现代、轻盈、数据感、蓝白体系</div>
+        <div><strong>适合：</strong>总览页、看板页、分析页</div>
+        <div><strong>风险：</strong>全系统采用时，管理页可能偏“看板化”</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card direction-card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mini-shell dense-c">
+        <div class="nav">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="main">
+          <div class="topbar"></div>
+          <div class="hero"></div>
+          <div class="stats">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="table">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span style="width:90%"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. 高密度控制台型</h3>
+      <p>效率优先，信息密度最高，更像运营中控台和风控后台。</p>
+      <div class="tone-list">
+        <div><strong>关键词：</strong>密度高、硬朗、效率优先</div>
+        <div><strong>适合：</strong>重度操作员、监控和批处理页面</div>
+        <div><strong>风险：</strong>学习成本高，容易显得压迫</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="next-step">
+  建议选择 A，或者告诉我 “以 A 为主，但吸收一点 B 的现代感”。这样我下一步就能把具体优化方案定下来。
+</div>

@@ -32,6 +32,7 @@ RUN pip install --upgrade pip && \
 # 复制应用代码
 COPY backend /app/backend
 COPY modules /app/modules
+COPY tools /app/tools
 COPY config /app/config
 COPY migrations /app/migrations
 COPY alembic.ini /app/alembic.ini

@@ -55,6 +55,7 @@ services:
       - ./modules:/app/modules
       - ./models:/app/models
       - ./migrations:/app/migrations
+      - ./tools:/app/tools
       - ./data:/app/data
       - ./logs:/app/logs
       - ./temp:/app/temp

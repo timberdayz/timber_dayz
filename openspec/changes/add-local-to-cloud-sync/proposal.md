@@ -1,82 +1,77 @@
-# Change: 本地→云端 B 类表定时同步（4 时段）
+# Change: 重构本地到云端的 B 类数据同步设计
 
 ## Why
 
-1. **混合部署**：本地环境负责数据采集（Playwright/API），采集结果写入本地 PostgreSQL 的 `b_class` schema；云端环境需要基于这些数据做看板、报表与多端协同，需定期将本地 B 类数据同步到云端，减少云端直连本地或人工导库。
-2. **与采集错峰**：采集已在 4 个时段执行（6:00、12:00、18:00、22:00，见 `collection_scheduler` 的 `daily_realtime`）；同步应在采集完成后执行，避免与采集争抢资源，并保证同步的是「本时段采集完成后的数据」。
-3. **可维护性**：B 类表由 `PlatformTableManager` 按 `fact_{platform}_{data_domain}_{granularity}` 等规则动态创建，不宜维护固定表名单；需用「运行时从 information_schema 枚举 b_class 下所有表」的方式，保证新增平台/数据域/粒度时无需改同步配置。
-4. **表头一致性**：B 类表表头会随用户更新模板/核心字段而在本地通过 `sync_table_columns` 增加动态列；同步前需先对齐云端表结构（仅追加缺失列），再同步数据，避免 INSERT 失败并保证本地与云端列一致、看板/报表可用。
+现有提案将问题建模为“按表枚举 + 定时脚本 + 运行时补齐动态列”的迁移方案，这已经不适合当前代码库的真实数据模型。
+
+当前 B 类表的真实情况是：
+- 每条记录已经以 `raw_data JSONB` 保存完整业务载荷。
+- `header_columns` 保存原始表头，用于追溯字段来源。
+- 动态列是为了查询便利而追加的镜像列，不是唯一真源。
+- `data_hash` 与现有唯一索引共同承担幂等更新能力。
+
+如果继续沿用旧提案的思路，会有几个问题：
+- 同步过程与动态列强耦合，云端 schema 会被运行时 DDL 推着演化，难以治理。
+- 动态列是 `TEXT` 投影，不适合作为高保真同步主源。
+- 字段名归一化、货币后缀清理、模板更新后，历史数据和新数据的语义对齐缺少清晰边界。
+- 使用通用迁移脚本扫描业务表，不符合“高保真、可追溯、可幂等”的同步目标。
+
+因此需要把本变更重构为：以 B 类记录的固定系统字段 + `raw_data/header_columns` 为权威同步载荷，动态列仅作为派生查询层，数据同步与投影/schema 演化解耦。
 
 ## What Changes
 
-### 1. 同步时段与 Cron
+- 重新定义 B 类同步的权威载荷：
+  - 同步固定系统字段和元数据字段，如 `platform_code`、`shop_id`、`data_domain`、`granularity`、`sub_domain`、`metric_date`、`period_*`、`file_id`、`template_id`、`data_hash`、`ingest_timestamp`、`currency_code`
+  - 同步 `raw_data JSONB`
+  - 同步 `header_columns`
+- 明确动态列不是同步真源：
+  - 同步链路不依赖动态列存在与否
+  - 同步链路不在运行时向云端追加动态列
+  - 动态列或报表投影由独立的投影刷新流程负责
+- 调整本地到云端的实现策略：
+  - 当前阶段推荐“固定字段 canonical micro-batch sync”
+  - 不再把现有 `migrate_selective_tables.py` 视为主实现
+  - 未来如需升级到 CDC / logical replication，应先引入与动态列解耦的 canonical mirror 或 outbox/change-log
+- 强化字段谱系与历史精度：
+  - 历史 `raw_data` 不因字段改名或模板演进而被回写重写
+  - 历史 `header_columns` 必须保留
+  - 新旧字段语义对齐放到显式的字段别名/版本化投影规则中处理，而不是在同步阶段隐式改写历史记录
+- 保留定时同步节奏，但收紧同步边界：
+  - 可以继续采用与采集错峰的四时段运行方式
+  - 但同步任务的职责仅限于可靠搬运 canonical payload，不负责运行时 schema 演化
 
-- **4 时段**：与采集错开约 30 分钟，建议 Cron 为 `30 6,12,18,22 * * *`（6:30、12:30、18:30、22:30）。
-- 采集沿用现有 `0 6,12,18,22 * * *`（`backend/services/collection_scheduler.py` 中 `CRON_PRESETS['daily_realtime']`）。
+## Recommended Direction
 
-### 2. 表列表策略：动态枚举 b_class
+本变更推荐采用：
 
-- **不维护固定 `--tables` 列表**。
-- 运行时用 SQL 枚举 b_class 下所有基表：
-  `SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = 'b_class' AND table_type = 'BASE TABLE'`。
-- 对每张表做**增量同步**（按表的时间字段或 last_sync 断点），单表失败不阻塞其他表，支持重试。
+`本地 b_class 业务表 -> 读取固定 canonical 字段 + raw_data/header_columns -> 云端 canonical mirror 表 -> 独立投影/报表刷新`
 
-### 3. 同步脚本/工具行为
+推荐该方案的原因：
+- 与当前代码库现状最匹配，改造成本最低。
+- 不要求云端实时跟随动态列变更。
+- 能把“数据保真”和“查询便利”分层处理。
+- 对字段改名、模板变更、货币后缀归一化更稳健。
 
-- **输入**：本地 DB URL（默认当前环境）、云端 DB URL（如 `CLOUD_DATABASE_URL` 环境变量）。
-- **逻辑**：连接本地 → 枚举 b_class 表 → **对每表先做「结构对齐」**（以本地 information_schema 为来源，确保云端表存在且列与本地一致，缺列则 `ADD COLUMN IF NOT EXISTS`）→ 再对每表增量读取（时间范围或游标）→ 直连写入云端 → 云端幂等 upsert。
-- **断点**：每表记录 last_sync 或按时间字段（如 `ingest_timestamp`）过滤，避免全量重传。
-- **错误**：单表失败记日志并继续其他表；退出码区分「全部成功 / 部分失败 / 全部失败」便于 Cron 告警。
-- **配置**：支持通过环境变量配置（如 `CLOUD_DATABASE_URL`），敏感信息不入库、不写死。
-
-### 4. 与现有能力的关系
-
-- 可复用或扩展现有 `scripts/migrate_selective_tables.py`（支持 `--source`、`--target`、`--incremental`、`--where`）；若新建脚本，需与 `docs/guides/DATA_MIGRATION_GUIDE.md`、`docs/deployment/CLOUD_UPDATE_AND_LOCAL_VERIFICATION.md` 等文档对齐，并在文档中说明「本地→云端 4 时段」的推荐用法与 Cron 示例。
+本变更不推荐直接使用 PostgreSQL logical replication 同步当前本地 B 类表本体，因为当前本地表仍物理包含动态列，直接复制会把云端重新拖回 schema 强耦合状态。若未来要采用 logical replication，应先引入不含动态列的 canonical mirror 表或独立 change-log。
 
 ## Impact
 
-### 受影响的规格
-
-- **deployment-ops**：ADDED 本地→云端 B 类表定时同步（4 时段、动态 b_class 表枚举、**结构对齐优先**、增量、断点、单表失败不阻塞、Cron 与配置约定）。
-
-### 受影响的代码与文档
-
-| 类型     | 位置/模块                          | 修改内容 |
-|----------|-------------------------------------|----------|
-| 脚本/工具 | `scripts/migrate_selective_tables.py` 或新建 `scripts/sync_local_to_cloud.py` | 支持「无 --tables 时枚举 b_class」、**先结构对齐再数据同步**、增量、断点、错误策略 |
-| 配置     | 环境变量 / .env.example（不提交敏感值） | `CLOUD_DATABASE_URL` 等说明 |
-| 文档     | `docs/deployment/` 或 `docs/guides/` | 本地→云端同步方案、Cron 示例（如 `30 6,12,18,22 * * *`）、表枚举策略 |
-
-### 不修改
-
-- 采集调度与采集逻辑不变；仅在部署/运维侧增加「定时同步」的 Cron 与脚本。
-- `modules/core/db/schema.py` 与 B 类表创建逻辑不变；同步只读 b_class 下已有表。
-
-### 依赖关系
-
-- 依赖现有：PostgreSQL、information_schema、现有迁移/同步脚本（若复用）。
-- 无前置变更阻塞；实现时需确认 b_class 下表的统一时间字段或约定 last_sync 存储位置（如本地配置表或脚本状态文件）。审阅与漏洞分析见同目录 `PROPOSAL_GAP_ANALYSIS.md`，实现前建议逐项闭环。
-
-## 部署与日常运作流程（概要）
-
-本变更与「本地/云端部署角色区分」（变更 `add-local-cloud-deployment-role`）配合使用时，建议流程如下，便于核对避免出错。
-
-### 部署核心流程
-
-1. **发布新版本**：打 tag（如 v4.XX.XX）→ `git push origin v4.XX.XX` → CI 对同一 tag 构建两个镜像（默认 + full）并推送到镜像仓库。
-2. **云端部署**：拉取默认镜像（无 Playwright）→ 配置 `ENABLE_COLLECTION=false`、`DATABASE_URL=` 云端库 → 启动。
-3. **本地采集环境部署**：在那台机器上拉取 -full 镜像（带 Playwright）→ 配置 `ENABLE_COLLECTION=true`、`DATABASE_URL=` 本地库、`CLOUD_DATABASE_URL=` 云端库 → 配置 Cron 执行本地→云端同步脚本（如 `30 6,12,18,22 * * *`）→ 启动。
-
-### 日常运作核心流程
-
-1. **四时段（如 6:00、12:00、18:00、22:00）**：本地执行采集 → 数据同步写入本地 b_class。
-2. **错峰（如 6:30、12:30、18:30、22:30）**：本地执行本地→云端同步脚本，将 b_class 增量推到云端库。
-3. **云端**：应用只读云端库，不跑采集、不跑同步脚本；前端/看板展示最新数据。
-
-详细步骤与核对清单见 `add-local-cloud-deployment-role` 的提案与部署文档。
+- Affected specs:
+  - `deployment-ops`
+- Affected code:
+  - `scripts/` 下新增或重构本地到云端同步入口
+  - `backend/services/` 下新增 canonical sync 相关服务
+  - 云端 canonical mirror 表 bootstrap / migration
+  - 投影刷新或查询适配逻辑
+- Affected docs:
+  - 部署文档
+  - 同步设计文档
+  - 运维手册
 
 ## Non-Goals
 
-- 不在此变更中实现「云端→本地」回写或双向同步。
-- 不修改采集时段或采集模块代码。
-- 不强制要求所有 B 类表必须有同一时间字段；可按表约定或跳过无时间字段的表（仅全量一次或由运维手动触发）。
+- 本变更不实现云端回写本地或双向同步。
+- 本变更不要求历史 B 类记录在同步时被重新语义映射。
+- 本变更不把动态列继续视为云端真源。
+- 本变更不在同步任务中做运行时 `ADD COLUMN TEXT` 之类的 schema 演化。
+- 本变更不强制当前阶段就落地 CDC / Debezium / logical replication。

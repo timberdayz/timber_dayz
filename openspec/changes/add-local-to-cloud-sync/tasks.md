@@ -1,47 +1,41 @@
-# Tasks: 本地→云端 B 类表定时同步（4 时段）
+## 1. Canonical Sync Contract
 
-## 0. 结构对齐（表头一致性）
+- [ ] 1.1 明确本地到云端同步只搬运 B 类表的固定 canonical 字段，不同步动态列。
+- [ ] 1.2 为每类 B 类表定义云端 canonical mirror 表结构，至少包含 `raw_data`、`header_columns`、`data_hash`、时间字段、来源字段和唯一约束。
+- [ ] 1.3 确认云端冲突键与本地现有唯一索引语义一致，覆盖 `services` 与非 `services` 两类场景。
 
-- [ ] 0.1 实现结构对齐步骤：对每张待同步的 b_class 表，在同步行数据之前执行：（1）从本地 `information_schema.columns`（schema='b_class', table_name=当前表）读取列名列表；（2）若云端无该表，则按与 `PlatformTableManager._create_base_table` 一致的基础 DDL 在云端建表（可从表名解析 platform/data_domain/sub_domain/granularity），**建表时省略**对 catalog_files、field_mapping_templates 的外键；（3）若云端有该表，则仅对「本地有而云端无且列名不在 b_class 系统列集合中」的列执行 `ADD COLUMN IF NOT EXISTS "col" TEXT`；所有 DDL/SQL 使用 schema 限定（b_class."table_name"）
-- [ ] 0.2 将结构对齐嵌入同步流程：对每表先执行结构对齐，再执行增量数据同步，保证 INSERT 不因缺列失败；结构对齐与数据同步均支持单表失败不阻塞
+## 2. Sync Engine
 
-## 1. 表枚举与入口
+- [ ] 2.1 新增或重构本地到云端同步入口，不再以 `migrate_selective_tables.py` 作为主实现。
+- [ ] 2.2 运行时枚举本地 `b_class` 表，但每张表只读取固定 canonical 字段。
+- [ ] 2.3 实现 per-table checkpoint，推荐使用 `(ingest_timestamp, id)` 作为高水位。
+- [ ] 2.4 仅在目标端提交成功后推进 checkpoint，避免部分失败导致漏数。
+- [ ] 2.5 写入云端时使用幂等 upsert，更新 `raw_data`、`header_columns`、`ingest_timestamp`、来源元数据等字段。
 
-- [ ] 1.1 实现「无 --tables 时从 information_schema 枚举 b_class 下所有 BASE TABLE」
-  - SQL: `SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = 'b_class' AND table_type = 'BASE TABLE'`
-  - 脚本支持：显式 `--tables`（兼容现有用法）与「不传 --tables 则自动枚举 b_class」两种模式；枚举结果为空时记录日志并 exit 0
-- [ ] 1.2 确定同步脚本入口：扩展现有 `scripts/migrate_selective_tables.py` 或新建 `scripts/sync_local_to_cloud.py`，并在文档中注明推荐入口与参数
+## 3. Dynamic Columns And Projection
 
-## 2. 增量与断点
+- [ ] 3.1 从同步主链路中移除“云端运行时补齐动态列”的职责。
+- [ ] 3.2 明确动态列仅用于查询便利，不作为同步真源。
+- [ ] 3.3 设计独立 projection refresh 流程，由其从云端 `raw_data` 中生成分析/报表所需投影结构。
 
-- [ ] 2.1 为每张 b_class 表确定增量策略：优先按 `ingest_timestamp`（或 `updated_at`/`created_at`）过滤；若无时间字段则采用「首次全量后跳过」或「始终跳过并记日志」之一，在实现时确定并在文档中写明
-- [ ] 2.2 实现断点记录：每表 last_sync 时间或游标存于本地（配置表或脚本可读写的状态文件），下次同步仅同步该时间之后的数据；无 last_sync 时对该表全量同步后写入 last_sync；选定存储方式（DB 表 vs JSON 文件）并在文档中写明
-- [ ] 2.3 云端写入采用幂等 upsert：ON CONFLICT 目标与 raw_data_importer 一致（非 services: (platform_code, COALESCE(shop_id,''), data_domain, granularity, data_hash)；services: (data_domain, sub_domain, granularity, data_hash)）；同步行不包含 id，由云端自增
+## 4. Field Lineage And Precision
 
-## 3. 错误与可观测性
+- [ ] 4.1 保证历史记录中的 `raw_data` 不因字段改名或模板演化而被回写改名。
+- [ ] 4.2 保证 `header_columns` 原样保留，用于追溯原始字段来源。
+- [ ] 4.3 为字段别名/版本化投影规则预留设计接口，明确语义归并不在同步阶段完成。
+- [ ] 4.4 验证货币后缀归一化、模板更新、字段轻微改名等场景下，历史数据仍可通过 `raw_data + header_columns` 正确解释。
 
-- [ ] 3.1 单表同步失败时记录日志并继续其他表；不因单表失败而中断整次运行
-- [ ] 3.2 退出码约定：0=全部成功，非 0=存在失败（可选区分部分失败/全部失败），便于 Cron 告警或监控
-- [ ] 3.3 日志输出到可配置路径（如 `logs/sync_local_to_cloud.log`），避免 Windows 下使用 Emoji，使用 ASCII 符号（如 [OK]、[ERROR]）
+## 5. Scheduling, Observability, Security
 
-## 4. 配置与安全
+- [ ] 5.1 保留与采集错峰的四时段调度建议，并更新部署文档。
+- [ ] 5.2 记录每张表的处理数量、成功/失败状态、checkpoint 推进情况和最终汇总结果。
+- [ ] 5.3 单表失败不阻断其他表，但进程整体应返回非零退出码，便于 Cron 或监控告警。
+- [ ] 5.4 云端连接信息通过环境变量注入，日志不得输出明文密钥或连接串。
 
-- [ ] 4.1 云端库连接使用环境变量（如 `CLOUD_DATABASE_URL`），不硬编码；在 .env.example 或部署文档中说明变量名与示例格式（不含真实密码）
-- [ ] 4.2 确保脚本不打印敏感信息（仅 masked 或「已设置」提示）
+## 6. Validation
 
-## 5. 文档与 Cron 示例
-
-- [ ] 5.1 在 `docs/deployment/` 或 `docs/guides/` 中新增或更新「本地→云端同步」说明，包含：4 时段与采集错峰理由、Cron 示例（`30 6,12,18,22 * * *`）、表枚举策略、环境变量、推荐命令示例
-- [ ] 5.2 Cron 示例命令（供复制）：`30 6,12,18,22 * * * cd /path/to/xihong_erp && python scripts/sync_local_to_cloud.py >> logs/sync_local_to_cloud.log 2>&1`（路径按实际部署替换）
-
-## 6. 验收
-
-- [ ] 6.1 验收：不传 --tables 时脚本能正确枚举 b_class 下所有表并对每表执行同步（或跳过无时间字段的表并记日志）
-- [ ] 6.2 验收：某表故意失败（如权限/网络）时，其他表仍能同步完成，且退出码非 0、日志中有该表错误信息
-- [ ] 6.3 验收：再次运行同一同步，仅增量写入（或 upsert 无重复行），断点/时间过滤生效
-- [ ] 6.4 验收（表头一致性）：本地某 B 类表因模板更新新增列后，下一轮同步后云端该表具有相同列且数据同步成功、无 INSERT 缺列错误
-- [ ] 6.5 验收：云端建表无 catalog_files/field_mapping_templates 外键；UPSERT 冲突键与本地一致；无 last_sync 时全量同步后断点正确
-
-## 参考：漏洞与遗漏分析
-
-实现前或实现中可对照 `PROPOSAL_GAP_ANALYSIS.md` 逐项闭环，避免外键/补列范围/冲突键/id/首次运行/空表等漏洞。
+- [ ] 6.1 验证首次全量同步后，云端 canonical mirror 中记录数与本地一致。
+- [ ] 6.2 验证重复执行同步不会产生重复数据，且更新会覆盖到正确记录。
+- [ ] 6.3 验证同一批次中存在相同 `ingest_timestamp` 的多行时，不会因断点推进漏数。
+- [ ] 6.4 验证动态列不存在或投影刷新失败时，`raw_data` 同步仍成功。
+- [ ] 6.5 验证字段改名/模板变更后，历史记录仍保留旧 `header_columns`，新记录写入新 payload，二者不会在同步阶段被错误混写。

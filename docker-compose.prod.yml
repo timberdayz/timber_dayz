@@ -80,7 +80,7 @@ services:
     restart: always
     environment:
       # 数据库配置
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-erp_user}
@@ -112,10 +112,12 @@ services:
       LOGS_DIR: /app/logs
 
       # 数据库连接池配置
-      DB_POOL_SIZE: 20
-      DB_MAX_OVERFLOW: 40
+      DB_POOL_SIZE: 4
+      DB_MAX_OVERFLOW: 4
       DB_POOL_TIMEOUT: 30
       DB_POOL_RECYCLE: 3600
+      CPU_EXECUTOR_WORKERS: 2
+      IO_EXECUTOR_WORKERS: 8
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -244,11 +246,15 @@ services:
     # - data_processing: 数据处理任务（可选，如果不需要可以移除）
     command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=4
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
       # ⚠️ 重要：Celery 使用 CELERY_BROKER_URL 和 CELERY_RESULT_BACKEND，不是 REDIS_URL
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      DB_POOL_SIZE: 2
+      DB_MAX_OVERFLOW: 2
+      CPU_EXECUTOR_WORKERS: 1
+      IO_EXECUTOR_WORKERS: 4
       # ⭐ 路径配置（与后端服务保持一致）
       PROJECT_ROOT: /app
       DATA_DIR: /app/data

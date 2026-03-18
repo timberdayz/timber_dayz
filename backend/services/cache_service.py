@@ -17,8 +17,10 @@
 - 其他频繁查询的数据
 """
 
-import json
+import asyncio
 import hashlib
+import json
+import uuid
 from typing import Optional, Any, Dict, Callable, List
 from datetime import datetime, timedelta
 from functools import wraps
@@ -89,6 +91,8 @@ class CacheService:
             "deletes": 0,
             "errors": 0
         }
+        self._local_locks: Dict[str, asyncio.Lock] = {}
+        self._local_locks_guard = asyncio.Lock()
         
         # 如果未提供redis_client但提供了redis_url,尝试连接
         if self.redis_client is None and redis_url and REDIS_AVAILABLE:
@@ -254,6 +258,98 @@ class CacheService:
             logger.warning(f"[Cache] 删除缓存失败: {e}")
             return False
     
+    async def _get_local_lock(self, lock_key: str) -> asyncio.Lock:
+        async with self._local_locks_guard:
+            lock = self._local_locks.get(lock_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._local_locks[lock_key] = lock
+            return lock
+
+    async def _release_singleflight_lock(self, lock_key: str, lock_token: str) -> None:
+        if not self.redis_client:
+            return
+        try:
+            current_value = await self.redis_client.get(lock_key)
+            if current_value == lock_token:
+                await self.redis_client.delete(lock_key)
+        except Exception as e:
+            logger.debug(f"[Cache] release singleflight lock failed: {e}")
+
+    async def get_or_set_singleflight(
+        self,
+        cache_type: str,
+        producer: Callable[[], Any],
+        ttl: Optional[int] = None,
+        lock_ttl: int = 15,
+        wait_timeout: float = 5.0,
+        poll_interval: float = 0.05,
+        **kwargs
+    ) -> Any:
+        cache_key = self._generate_cache_key(cache_type, **kwargs)
+
+        cached_data = await self.get(cache_type, **kwargs)
+        if cached_data is not None:
+            return cached_data
+
+        if ttl is None:
+            ttl = self.DEFAULT_TTL.get(cache_type, self.DEFAULT_TTL["default"])
+
+        if not self.redis_client:
+            local_lock = await self._get_local_lock(cache_key)
+            async with local_lock:
+                cached_data = await self.get(cache_type, **kwargs)
+                if cached_data is not None:
+                    return cached_data
+                produced = await producer()
+                await self.set(cache_type, produced, ttl=ttl, **kwargs)
+                return produced
+
+        lock_key = f"{cache_key}:lock"
+        lock_token = uuid.uuid4().hex
+
+        try:
+            lock_acquired = await self.redis_client.set(
+                lock_key,
+                lock_token,
+                ex=lock_ttl,
+                nx=True,
+            )
+        except Exception as e:
+            self.cache_stats["errors"] += 1
+            logger.warning(f"[Cache] singleflight lock failed, fallback to producer: {e}")
+            produced = await producer()
+            await self.set(cache_type, produced, ttl=ttl, **kwargs)
+            return produced
+
+        if lock_acquired:
+            try:
+                cached_data = await self.get(cache_type, **kwargs)
+                if cached_data is not None:
+                    return cached_data
+                produced = await producer()
+                await self.set(cache_type, produced, ttl=ttl, **kwargs)
+                return produced
+            finally:
+                await self._release_singleflight_lock(lock_key, lock_token)
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wait_timeout
+        while loop.time() < deadline:
+            await asyncio.sleep(poll_interval)
+            cached_data = await self.get(cache_type, **kwargs)
+            if cached_data is not None:
+                return cached_data
+            try:
+                if not await self.redis_client.get(lock_key):
+                    break
+            except Exception:
+                break
+
+        produced = await producer()
+        await self.set(cache_type, produced, ttl=ttl, **kwargs)
+        return produced
+
     async def delete_pattern(
         self,
         pattern: str
@@ -434,4 +530,3 @@ def invalidate_dashboard_cache_sync() -> int:
     """
     import asyncio
     return asyncio.run(get_cache_service().invalidate_dashboard_business_overview())
-

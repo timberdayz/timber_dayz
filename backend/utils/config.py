@@ -67,28 +67,30 @@ class Settings:
     if _cpu_workers_env is not None:
         try:
             _cpu_workers = int(_cpu_workers_env)
-            CPU_EXECUTOR_WORKERS = _cpu_workers if _cpu_workers > 0 else max(1, _cpu_cores - 1)
+            CPU_EXECUTOR_WORKERS = _cpu_workers if _cpu_workers > 0 else max(1, min(4, _cpu_cores - 1))
         except ValueError:
-            CPU_EXECUTOR_WORKERS = max(1, _cpu_cores - 1)
+            CPU_EXECUTOR_WORKERS = max(1, min(4, _cpu_cores - 1))
     else:
-        CPU_EXECUTOR_WORKERS = max(1, _cpu_cores - 1)
+        CPU_EXECUTOR_WORKERS = max(1, min(4, _cpu_cores - 1))
     
     # I/O线程池:min(CPU核心数 * 5, 20)
     _io_workers_env = os.getenv("IO_EXECUTOR_WORKERS")
     if _io_workers_env is not None:
         try:
             _io_workers = int(_io_workers_env)
-            IO_EXECUTOR_WORKERS = _io_workers if _io_workers > 0 else min(_cpu_cores * 5, 20)
+            IO_EXECUTOR_WORKERS = _io_workers if _io_workers > 0 else min(max(_cpu_cores * 2, 4), 8)
         except ValueError:
-            IO_EXECUTOR_WORKERS = min(_cpu_cores * 5, 20)
+            IO_EXECUTOR_WORKERS = min(max(_cpu_cores * 2, 4), 8)
     else:
-        IO_EXECUTOR_WORKERS = min(_cpu_cores * 5, 20)
+        IO_EXECUTOR_WORKERS = min(max(_cpu_cores * 2, 4), 8)
     
     # 数据库连接池:根据环境自动调整
     if _env == "production":
         # 生产环境:根据CPU核心数动态计算
         DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", str(min(30, _cpu_cores * 10))))
         DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", str(min(20, _cpu_cores * 5))))
+        DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", str(min(max(_cpu_cores * 2, 4), 8))))
+        DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", str(min(max(_cpu_cores * 2, 2), 8))))
     else:
         # 开发环境:使用较小值(节省数据库资源)
         DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "10"))

@@ -377,6 +377,11 @@ def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, Any]:
     return {k: ("" if v is None else str(v)) for k, v in params.items()}
 
 
+async def invalidate_performance_related_caches(cache_service) -> None:
+    await cache_service.invalidate("performance_scores")
+    await cache_service.invalidate("performance_scores_shop")
+
+
 @router.get("/scores", response_model=Dict[str, Any])
 async def list_performance_scores(
     request: Request,
@@ -975,6 +980,11 @@ async def calculate_performance_scores(
                 )
             upserts += 1
         await db.commit()
+        try:
+            from backend.services.cache_service import get_cache_service
+            await invalidate_performance_related_caches(get_cache_service())
+        except Exception as inv_err:
+            logger.warning(f"[PerformanceManagement] 写时失效绩效缓存失败: {inv_err}")
         return success_response(
             data={"period": period, "upserts": upserts},
             message="绩效计算完成",
