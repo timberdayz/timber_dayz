@@ -16,6 +16,10 @@ from sqlalchemy import select
 
 from modules.core.db import CollectionConfig, CollectionTask
 from modules.core.logger import get_logger
+from backend.services.component_runtime_resolver import (
+    ComponentRuntimeResolver,
+    ComponentRuntimeResolverError,
+)
 
 logger = get_logger(__name__)
 
@@ -36,6 +40,19 @@ except ImportError:
 class SchedulerError(Exception):
     """调度器错误"""
     pass
+
+
+async def resolve_runtime_manifests_for_config(
+    db,
+    config: CollectionConfig,
+) -> Dict[str, Any]:
+    """Resolve stable-only runtime manifests for a scheduled collection config."""
+    resolver = ComponentRuntimeResolver.from_async_session(db)
+    return await resolver.resolve_task_manifests(
+        platform=config.platform,
+        data_domains=config.data_domains or [],
+        sub_domains=config.sub_domains,
+    )
 
 
 class CollectionScheduler:
@@ -439,6 +456,16 @@ class CollectionScheduler:
             total_domains_count = len(config.data_domains)
             if config.sub_domains:
                 total_domains_count = len(config.data_domains) * len(config.sub_domains)
+
+            try:
+                runtime_manifests = await resolve_runtime_manifests_for_config(db, config)
+            except ComponentRuntimeResolverError as e:
+                logger.error(
+                    "Scheduled config %s blocked by stable runtime preflight: %s",
+                    config_id,
+                    e,
+                )
+                return
             
             for account_id in account_ids:
                 # 检查账号冲突
@@ -524,7 +551,10 @@ class CollectionScheduler:
                             date_range=date_range,
                             granularity=config.granularity,
                             debug_mode=False,
-                            db_session_maker=db.get_bind()
+                            parallel_mode=False,
+                            max_parallel=3,
+                            runtime_manifests=runtime_manifests,
+                            app=None,
                         )
                     )
                     logger.info(f"Started background execution for task {task_uuid}")
@@ -611,4 +641,3 @@ CRON_PRESETS = {
     'every_6_hours': '0 */6 * * *',            # 每6小时
     'every_12_hours': '0 */12 * * *',          # 每12小时
 }
-

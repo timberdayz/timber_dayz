@@ -104,6 +104,31 @@ class ComponentVersionService:
             .order_by(ComponentVersion.updated_at.desc())
         ).scalars().all()
         return rows[0] if rows else None
+
+    def get_all_stable_versions(self, component_name: str) -> List[ComponentVersion]:
+        """
+        获取所有 stable 且 active 的版本。
+
+        用于正式运行前的唯一性校验；若返回多条，说明存在稳定版冲突。
+        """
+        return self.db.execute(
+            select(ComponentVersion)
+            .where(
+                and_(
+                    ComponentVersion.component_name == component_name,
+                    ComponentVersion.is_stable == True,
+                    ComponentVersion.is_active == True,
+                )
+            )
+            .order_by(ComponentVersion.updated_at.desc(), ComponentVersion.created_at.desc())
+        ).scalars().all()
+
+    def get_single_stable_version(self, component_name: str) -> Optional[ComponentVersion]:
+        """
+        获取唯一 stable 版本；若存在多条冲突，调用方应优先使用 get_all_stable_versions 校验。
+        """
+        rows = self.get_all_stable_versions(component_name)
+        return rows[0] if len(rows) == 1 else None
     
     def get_test_version(self, component_name: str) -> Optional[ComponentVersion]:
         """
@@ -421,4 +446,3 @@ class ComponentVersionService:
             }
             for v in versions
         ]
-
