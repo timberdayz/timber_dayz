@@ -19,8 +19,12 @@ This directory contains the L3 detailed reference documents for the XiHong ERP p
 | [SECURITY_AND_DEPLOYMENT.md](SECURITY_AND_DEPLOYMENT.md) | Security (JWT/RBAC), deployment (CI/CD), monitoring and observability |
 | [UI_DESIGN.md](UI_DESIGN.md) | UI design patterns, partial loading, background refresh, async UX |
 
-## Extension Files
+## Extension Files (Production Governance — added by `add-production-readiness-and-operational-governance`)
 
-Additional files may be added by approved OpenSpec changes (e.g., production governance, frontend patterns).
+| File | Description |
+|------|-------------|
+| [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) | Performance SLOs, capacity baselines, load test gate, release/rollback governance, RPO/RTO, ERP acceptance standards |
+| [DATA_GOVERNANCE.md](DATA_GOVERNANCE.md) | Four-level data classification, restricted data inventory, desensitization rules, audit retention requirements |
+| [FRONTEND_CODE_PATTERNS.md](FRONTEND_CODE_PATTERNS.md) | Frontend Agent templates: API layer, Pinia store, list page, form page, permission button, loading patterns |
 
-When adding extension files, update this index accordingly.
+When adding new extension files, update this index and the `.cursorrules` L3 docs table accordingly.

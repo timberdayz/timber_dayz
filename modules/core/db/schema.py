@@ -2868,18 +2868,18 @@ class UserSession(Base):
     
     # 时间戳
     created_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
         comment="创建时间(登录时间)"
     )
     expires_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         comment="过期时间"
     )
     last_active_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,

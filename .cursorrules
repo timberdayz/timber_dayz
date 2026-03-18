@@ -88,6 +88,10 @@
 ### Frontend层 `frontend/`
 - 所有API调用通过 `frontend/src/api/*.js`
 - 禁止直接访问数据库
+- 页面禁止直接写axios请求，必须通过 `api/*.js`
+- store 中禁止在 `actions` 或 `$patch()` 外部直接修改 state
+- 列表页必须使用统一分页查询模式，禁止全屏 loading
+- 新页面强制使用模板，旧页面修改时建议同步迁移，详见 `docs/DEVELOPMENT_RULES/FRONTEND_CODE_PATTERNS.md`
 
 ## Contract-First 开发顺序（强制）
 
@@ -149,6 +153,12 @@
 - 镜像标签: 生产环境一律使用版本号tag（不用latest）
 - 详细流程见 `docs/DEVELOPMENT_RULES/SECURITY_AND_DEPLOYMENT.md`
 
+## 生产治理规则
+
+- 发布/回滚/压测门禁/RPO-RTO目标见 `docs/DEVELOPMENT_RULES/PRODUCTION_READINESS.md`
+- 数据四级分级/敏感字段清单/脱敏规则见 `docs/DEVELOPMENT_RULES/DATA_GOVERNANCE.md`
+- 新增表包含敏感字段时，必须更新 DATA_GOVERNANCE.md 敏感数据清单
+
 ## 异常体系
 
 - 统一基类: `ERPException`（`modules/core/exceptions.py`）
@@ -178,6 +188,9 @@ python scripts/identify_dead_code.py              # 死代码识别
 | `docs/DEVELOPMENT_RULES/ERROR_AND_LOGGING.md` | 错误处理、日志规范（错误码SSOT见error_codes.py） |
 | `docs/DEVELOPMENT_RULES/SECURITY_AND_DEPLOYMENT.md` | 安全、部署、监控规范 |
 | `docs/DEVELOPMENT_RULES/UI_DESIGN.md` | UI设计、局部loading、后台刷新规范 |
+| `docs/DEVELOPMENT_RULES/PRODUCTION_READINESS.md` | 性能SLO、容量基线、压测门禁、发布/回滚、RPO/RTO、业务验收标准 |
+| `docs/DEVELOPMENT_RULES/DATA_GOVERNANCE.md` | 数据四级分级、敏感字段清单、脂敏规则、审计保留要求 |
+| `docs/DEVELOPMENT_RULES/FRONTEND_CODE_PATTERNS.md` | 前窯API/Store/列表页/表单页/权限按鈕/loading模板 |
 | `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md` | 采集脚本编写完整规范 |
 | `docs/guides/PYTHON_COMPONENT_TEMPLATE.md` | Python组件编写模板 |
 
