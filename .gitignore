@@ -4,6 +4,7 @@ local_accounts.json
 local_accounts.yaml
 real_accounts.*
 production_accounts.*
+auth.json
 *.local
 *.private
 secure_accounts.enc

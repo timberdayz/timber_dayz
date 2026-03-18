@@ -32,6 +32,10 @@ def refresh_sales_materialized_views():
     执行频率:每5分钟
     性能:增量刷新(CONCURRENTLY),不锁表
     """
+    logger.warning(
+        "[LegacyMV] refresh_sales_materialized_views is deprecated and skipped"
+    )
+    return {"status": "skipped", "reason": "legacy_materialized_view_task"}
     db = SessionLocal()
     
     try:
@@ -74,6 +78,10 @@ def refresh_inventory_finance_views():
     刷新库存和财务物化视图
     执行频率:每10分钟
     """
+    logger.warning(
+        "[LegacyMV] refresh_inventory_finance_views is deprecated and skipped"
+    )
+    return {"status": "skipped", "reason": "legacy_materialized_view_task"}
     db = SessionLocal()
     
     try:
@@ -546,4 +554,3 @@ def trigger_system_backup():
     except Exception as e:
         logger.error(f"[ERROR] System backup task failed: {e}", exc_info=True)
         return {"status": "failed", "error": str(e)}
-

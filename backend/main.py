@@ -1005,11 +1005,11 @@ app.include_router(
     tags=["数据库设计规范验证"]
 )
 
-# [*] v4.12.0修复:物化视图管理API(修复刷新功能)
+# Legacy compatibility only: keep /api/mv available while DSS convergence completes.
 app.include_router(
     mv.router,
-    prefix="/api",  # [*] 修复:添加/api前缀,与其他路由保持一致
-    tags=["物化视图管理"]
+    prefix="/api",
+    tags=["遗留物化视图管理"]
 )
 
 # [*] v4.19.2新增:限流管理API
