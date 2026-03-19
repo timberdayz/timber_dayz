@@ -285,6 +285,13 @@ class ExecutorManager:
             except Exception as e:
                 logger.warning(f"[ExecutorManager] 强制关闭线程池时出错: {e}")
         
+        # 允许在同一 Python 进程中重新初始化执行器（测试场景与长生命周期进程兼容）
+        try:
+            ExecutorManager._instance = None
+            ExecutorManager._initialized = False
+        except Exception as e:
+            logger.warning(f"[ExecutorManager] 重置单例状态失败: {e}")
+
         logger.info("[ExecutorManager] 所有执行器已关闭")
     
     async def check_health(self, timeout: float = 2.0):
@@ -411,4 +418,3 @@ def get_executor_manager() -> ExecutorManager:
         ExecutorManager: 执行器管理器实例
     """
     return ExecutorManager()
-

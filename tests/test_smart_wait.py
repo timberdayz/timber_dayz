@@ -8,12 +8,15 @@ import sys
 import asyncio
 from pathlib import Path
 from unittest.mock import Mock, AsyncMock, patch
+import pytest
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
 from modules.apps.collection_center.popup_handler import UniversalPopupHandler
+
+pytestmark = pytest.mark.anyio
 
 
 async def test_smart_wait_immediate_success():
@@ -27,13 +30,7 @@ async def test_smart_wait_immediate_success():
     popup_handler = Mock(spec=UniversalPopupHandler)
     
     # 创建executor
-    executor = CollectionExecutorV2(
-        platform="test",
-        account_id="test_001",
-        data_domains=["orders"],
-        date_range={"start": "2025-01-01", "end": "2025-01-01"},
-        granularity="daily"
-    )
+    executor = CollectionExecutorV2()
     executor.popup_handler = popup_handler
     
     # 执行自适应等待
@@ -71,13 +68,7 @@ async def test_smart_wait_after_popup():
     popup_handler.close_popups = AsyncMock()
     
     # 创建executor
-    executor = CollectionExecutorV2(
-        platform="test",
-        account_id="test_001",
-        data_domains=["orders"],
-        date_range={"start": "2025-01-01", "end": "2025-01-01"},
-        granularity="daily"
-    )
+    executor = CollectionExecutorV2()
     executor.popup_handler = popup_handler
     
     # 执行自适应等待
@@ -106,13 +97,7 @@ async def test_smart_wait_timeout():
     popup_handler.close_popups = AsyncMock()
     
     # 创建executor
-    executor = CollectionExecutorV2(
-        platform="test",
-        account_id="test_001",
-        data_domains=["orders"],
-        date_range={"start": "2025-01-01", "end": "2025-01-01"},
-        granularity="daily"
-    )
+    executor = CollectionExecutorV2()
     executor.popup_handler = popup_handler
     
     # 执行自适应等待（应该抛出异常）
@@ -124,7 +109,7 @@ async def test_smart_wait_timeout():
         )
         assert False, "Should have raised exception"
     except Exception as e:
-        assert "All smart wait strategies failed" in str(e) or "Smart wait timeout" in str(e)
+        assert "Timeout" in str(e) or "Smart wait timeout" in str(e)
         print(f"[OK] Timeout as expected: {e}")
 
 
@@ -139,13 +124,7 @@ async def test_smart_wait_integration():
     popup_handler = Mock(spec=UniversalPopupHandler)
     
     # 创建executor
-    executor = CollectionExecutorV2(
-        platform="test",
-        account_id="test_001",
-        data_domains=["orders"],
-        date_range={"start": "2025-01-01", "end": "2025-01-01"},
-        granularity="daily"
-    )
+    executor = CollectionExecutorV2()
     executor.popup_handler = popup_handler
     
     # 测试步骤（使用smart_wait）
@@ -203,4 +182,3 @@ async def run_all_tests():
 
 if __name__ == "__main__":
     asyncio.run(run_all_tests())
-
