@@ -52,6 +52,7 @@ class ComponentVersionService:
         Note:
             v4.8.0起,file_path 应使用 Python 组件路径(.py),
             旧版 YAML 组件路径(.yaml)已废弃。
+            新注册版本默认为草稿版本，不允许直接注册为 stable。
         """
         # 检查是否已存在
         existing = self.db.execute(
@@ -73,7 +74,7 @@ class ComponentVersionService:
             version=version,
             file_path=file_path,
             description=description,
-            is_stable=is_stable,
+            is_stable=False,
             is_active=True,
             is_testing=False,
             created_by=created_by,
