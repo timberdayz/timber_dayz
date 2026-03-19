@@ -4,7 +4,10 @@ from types import SimpleNamespace
 
 from starlette.requests import Request
 
-from backend.routers.dashboard_api import get_business_overview_kpi
+from backend.routers.dashboard_api import (
+    get_business_overview_comparison,
+    get_business_overview_kpi,
+)
 
 
 class _CacheServiceUsingSingleflightOnly:
@@ -61,6 +64,39 @@ def test_business_overview_kpi_uses_singleflight_cache_on_miss(monkeypatch):
             platform=None,
             start_date=None,
             end_date=None,
+            platforms=None,
+            shops=None,
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body == expected_payload
+    assert cache_service.singleflight_calls == 1
+
+
+def test_business_overview_comparison_uses_singleflight_cache_on_miss(monkeypatch):
+    expected_payload = {
+        "success": True,
+        "data": {"metrics": {"sales_amount": {"today": 1}}},
+        "message": "ok",
+    }
+    cache_service = _CacheServiceUsingSingleflightOnly(expected_payload)
+    request = _make_request(cache_service)
+
+    class _MetabaseServiceShouldNotBeCalled:
+        async def query_question(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("Metabase should not be queried when cache service handles miss via singleflight")
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api.get_metabase_service",
+        lambda: _MetabaseServiceShouldNotBeCalled(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_comparison(
+            request=request,
+            granularity="monthly",
+            date="2026-03-01",
             platforms=None,
             shops=None,
         )
