@@ -39,8 +39,17 @@ def test_prod_compose_uses_container_internal_database_urls():
     backend_env = compose["services"]["backend"]["environment"]
     worker_env = compose["services"]["celery-worker"]["environment"]
 
-    assert backend_env["DATABASE_URL"] == "postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp"
-    assert worker_env["DATABASE_URL"] == "postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp"
+    assert backend_env["DATABASE_URL"] == "${DATABASE_URL}"
+    assert worker_env["DATABASE_URL"] == "${DATABASE_URL}"
+
+
+def test_prod_compose_does_not_keep_legacy_secret_fallbacks():
+    compose_text = (PROJECT_ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
+
+    assert "erp_pass_2025" not in compose_text
+    assert "redis_pass_2025" not in compose_text
+    assert "xihong-erp-secret-key-prod-2025" not in compose_text
+    assert "xihong-erp-jwt-secret-prod-2025" not in compose_text
 
 
 def test_prod_compose_forces_production_runtime_mode():

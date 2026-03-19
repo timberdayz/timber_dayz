@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-xihong_erp}
       POSTGRES_USER: ${POSTGRES_USER:-erp_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_pass_2025}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
@@ -44,7 +44,7 @@ services:
     image: redis:7-alpine
     container_name: xihong_erp_redis
     restart: always
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_pass_2025}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     # 生产最小端口暴露：redis 不映射宿主机端口（仅容器网络可访问）
@@ -53,7 +53,7 @@ services:
     healthcheck:
       # ⭐ v4.19.5 修复：健康检查需要提供密码（支持默认值）
       test:
-        ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_pass_2025}", "ping"]
+        ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -80,19 +80,19 @@ services:
     restart: always
     environment:
       # 数据库配置
-      DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
+      DATABASE_URL: ${DATABASE_URL}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-erp_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp_pass_2025}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-xihong_erp}
 
       # Redis配置
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
 
       # 安全配置
-      SECRET_KEY: ${SECRET_KEY:-xihong-erp-secret-key-prod-2025}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-xihong-erp-jwt-secret-prod-2025}
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
       REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
 
@@ -248,11 +248,11 @@ services:
     # - data_processing: 数据处理任务（可选，如果不需要可以移除）
     command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=4
     environment:
-      DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       # ⚠️ 重要：Celery 使用 CELERY_BROKER_URL 和 CELERY_RESULT_BACKEND，不是 REDIS_URL
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/0
       ENVIRONMENT: "production"
       APP_ENV: production
       DB_POOL_SIZE: 2
@@ -315,10 +315,10 @@ services:
     command: celery -A backend.celery_app beat --loglevel=info
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       # ⚠️ 重要：Celery 使用 CELERY_BROKER_URL 和 CELERY_RESULT_BACKEND，不是 REDIS_URL
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/0
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -363,7 +363,7 @@ services:
     # 生产最小端口暴露：celery-exporter 不映射宿主机端口（监控侧在容器网络内抓取）
     environment:
       # ⚠️ ovalmoney/celery-exporter 使用 CELERY_EXPORTER_BROKER_URL 环境变量
-      CELERY_EXPORTER_BROKER_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
+      CELERY_EXPORTER_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
