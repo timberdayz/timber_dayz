@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from datetime import date
 import pandas as pd
+import pytest
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent
@@ -76,24 +77,27 @@ def test_database_migration():
 def test_shop_resolver():
     """测试2：店铺解析器"""
     from modules.services.shop_resolver import get_shop_resolver
-    
+    import json
+    import tempfile
+
     resolver = get_shop_resolver()
-    
-    # 测试路径规则
-    result = resolver.resolve(
-        'profiles/shopee/account1/shop_sg_001/products/file.xlsx',
-        'shopee'
-    )
-    assert result.shop_id is not None, "路径规则解析失败"
-    assert result.confidence >= 0.85, f"置信度过低: {result.confidence}"
-    print(f"  - 路径规则: shop_id={result.shop_id}, 置信度={result.confidence:.2f}")
-    
-    # 测试文件名正则
-    result = resolver.resolve(
-        'data/raw/shopee_shop123_products_daily.xlsx',
-        'shopee'
-    )
-    print(f"  - 文件名正则: shop_id={result.shop_id}, 置信度={result.confidence:.2f}")
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        base = Path(tmp_dir)
+        data_file = base / "profiles" / "shopee" / "account1" / "shop_sg_001" / "products" / "file.xlsx"
+        data_file.parent.mkdir(parents=True, exist_ok=True)
+        data_file.write_text("mock", encoding="utf-8")
+        meta_file = data_file.with_suffix(".meta.json")
+        meta_file.write_text(
+            json.dumps({"business_metadata": {"shop_id": "shop_sg_001"}}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        result = resolver.resolve(str(data_file), "shopee")
+
+    assert result.shop_id == "shop_sg_001", "meta.json 解析失败"
+    assert result.confidence >= 0.9, f"置信度过低: {result.confidence}"
+    print(f"  - meta.json规则: shop_id={result.shop_id}, 置信度={result.confidence:.2f}")
 
 
 def test_smart_date_parser():
@@ -140,6 +144,10 @@ def test_product_hierarchy_ingestion():
     session = Session(engine)
     
     try:
+        from sqlalchemy import inspect
+        if 'fact_product_metrics' not in inspect(engine).get_table_names():
+            pytest.skip("当前数据库未初始化 fact_product_metrics 表")
+
         # 查询测试数据（如果已入库）
         products = session.execute(
             select(FactProductMetric).where(
@@ -246,4 +254,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

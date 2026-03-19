@@ -244,7 +244,17 @@ class DataQueryService:
                 df = pd.read_sql_query(text(sql), conn, params=params)
             return df
         except Exception:
-            return pd.DataFrame()
+            return pd.DataFrame(columns=[
+                'platform_code',
+                'shop_id',
+                'platform_sku',
+                'metric_date',
+                'metric_type',
+                'metric_value',
+                'metric_value_rmb',
+                'product_title',
+                'source_catalog_id',
+            ])
     
     # ========================================
     # 产品指标查询
@@ -336,7 +346,18 @@ class DataQueryService:
                 df = pd.read_sql_query(text(sql), conn, params=params)
             return df
         except Exception:
-            return pd.DataFrame()
+            return pd.DataFrame(columns=[
+                'platform_code',
+                'shop_id',
+                'platform_sku',
+                'product_title',
+                'metric_date',
+                'metric_type',
+                'metric_value',
+                'currency',
+                'metric_value_rmb',
+                'granularity',
+            ])
     
     @cached(ttl_seconds=300)
     def get_top_products(
@@ -760,4 +781,3 @@ if __name__ == '__main__':
     print("\nCatalog状态...")
     status = service.get_catalog_status()
     print(f"总文件数: {status['total']}")
-

@@ -1162,49 +1162,6 @@ def _upsert_order(session: Session,
         f"订单 {platform_code}/{shop_id}/{order_id} 应导入到 b_class.fact_{platform_code}_orders_daily"
     )
     return  # 直接返回,不执行任何操作
-    
-    # [DEPRECATED] 以下代码已注释
-    """
-    existing = session.execute(
-        select(FactOrder).where(
-            FactOrder.platform_code == platform_code,
-            FactOrder.shop_id == shop_id,
-            FactOrder.order_id == order_id,
-        )
-    ).scalar_one_or_none()
-    def nz(x):
-        return float(x) if (x is not None) else 0.0
-    if existing is None:
-        session.add(
-            FactOrder(
-                platform_code=platform_code,
-                shop_id=shop_id,
-                order_id=order_id,
-                order_date_local=order_date_local,
-                currency=currency,
-                subtotal=nz(subtotal),
-                shipping_fee=nz(shipping_fee),
-                tax_amount=nz(tax_amount),
-                discount_amount=nz(discount_amount),
-                total_amount=nz(total_amount),
-            )
-        )
-    else:
-        # upsert with latest values
-        if order_date_local:
-            existing.order_date_local = order_date_local
-        if currency:
-            existing.currency = currency
-        if subtotal is not None:
-            existing.subtotal = nz(subtotal)
-        if shipping_fee is not None:
-            existing.shipping_fee = nz(shipping_fee)
-        if tax_amount is not None:
-            existing.tax_amount = nz(tax_amount)
-        if discount_amount is not None:
-            existing.discount_amount = nz(discount_amount)
-        if total_amount is not None:
-            existing.total_amount = nz(total_amount)
 
 
 def _ingest_orders_file(session: Session, cf: CatalogFile, mappings: Dict,
@@ -1696,4 +1653,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
