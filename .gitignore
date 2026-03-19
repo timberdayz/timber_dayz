@@ -175,6 +175,7 @@ reports/charts/
 task_plan.md
 findings.md
 progress.md
+.worktrees/
 
 # ui-ux-pro-max design system output
 design-system/

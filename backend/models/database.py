@@ -64,6 +64,66 @@ from backend.utils.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+MANAGED_APP_SCHEMAS = ("public", "core", "a_class", "b_class", "c_class", "finance")
+
+
+def _expand_existing_table_aliases(existing_tables: set[str]) -> set[str]:
+    aliases = set(existing_tables)
+    for table_name in list(existing_tables):
+        if "." in table_name:
+            _, unqualified_name = table_name.split(".", 1)
+            aliases.add(unqualified_name)
+    return aliases
+
+
+def _collect_existing_tables(conn_inspector) -> set[str]:
+    existing_tables = set()
+    skip_schemas = {"pg_catalog", "information_schema", "pg_toast"}
+    for schema_name in conn_inspector.get_schema_names():
+        if schema_name in skip_schemas:
+            continue
+        for table_name in conn_inspector.get_table_names(schema=schema_name):
+            if schema_name == "public" or schema_name is None:
+                existing_tables.add(table_name)
+            else:
+                existing_tables.add(f"{schema_name}.{table_name}")
+    return existing_tables
+
+
+def _pick_effective_current_revision(
+    revisions_by_schema: dict[str, str],
+    head_revision: str | None,
+) -> str | None:
+    if not revisions_by_schema:
+        return None
+    if head_revision and head_revision in revisions_by_schema.values():
+        return head_revision
+
+    for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "public"):
+        if schema_name in revisions_by_schema:
+            return revisions_by_schema[schema_name]
+
+    return next(iter(revisions_by_schema.values()))
+
+
+def _get_alembic_revisions_by_schema(connection, inspector=None) -> dict[str, str]:
+    from sqlalchemy import inspect, text
+
+    if inspector is None:
+        inspector = inspect(connection)
+
+    revisions_by_schema: dict[str, str] = {}
+    for schema_name in MANAGED_APP_SCHEMAS:
+        table_names = inspector.get_table_names(schema=schema_name)
+        if "alembic_version" not in table_names:
+            continue
+        result = connection.execute(
+            text(f'SELECT version_num FROM "{schema_name}"."alembic_version"')
+        ).fetchall()
+        if result:
+            revisions_by_schema[schema_name] = result[-1][0]
+    return revisions_by_schema
+
 # ==================== 数据库URL转换函数 ====================
 
 def get_async_database_url(database_url: str) -> str:
@@ -298,7 +358,7 @@ def init_db():
         expected_tables = set(Base.metadata.tables.keys())
 
         created_tables = existing_after - existing_before
-        missing_tables = expected_tables - existing_after
+        missing_tables = expected_tables - _expand_existing_table_aliases(existing_after)
 
         if missing_tables:
             logger.error(
@@ -343,6 +403,44 @@ def verify_schema_completeness():
         }
     """
     from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    try:
+        existing_tables = _collect_existing_tables(inspector)
+    except Exception:
+        existing_tables = set(inspector.get_table_names())
+
+    expected_tables = set(Base.metadata.tables.keys())
+    missing_tables = expected_tables - _expand_existing_table_aliases(existing_tables)
+
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        alembic_cfg = Config("alembic.ini")
+        script = ScriptDirectory.from_config(alembic_cfg)
+        head_rev = script.get_current_head()
+        with engine.connect() as conn:
+            revisions_by_schema = _get_alembic_revisions_by_schema(conn, inspector=inspect(conn))
+        current_rev = _pick_effective_current_revision(revisions_by_schema, head_rev)
+
+        migration_status = "up_to_date" if current_rev == head_rev else "outdated"
+        if current_rev is None:
+            migration_status = "not_initialized"
+    except Exception as e:
+        migration_status = f"error: {str(e)}"
+        current_rev = None
+        head_rev = None
+
+    return {
+        "all_tables_exist": len(missing_tables) == 0,
+        "missing_tables": sorted(list(missing_tables)),
+        "migration_status": migration_status,
+        "current_revision": current_rev,
+        "head_revision": head_rev,
+        "expected_table_count": len(expected_tables),
+        "actual_table_count": len(existing_tables)
+    }
     
     inspector = inspect(engine)
     # 多 schema 支持：Base.metadata.tables 的 key 为 "schema.tablename" 或 "tablename"(public)

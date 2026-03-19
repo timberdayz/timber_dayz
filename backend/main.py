@@ -210,7 +210,8 @@ async def lifespan(app: FastAPI):
         # 4. 连接池预热(<2秒)
         step_start = time.time()
         try:
-            warm_up_pool(pool_size=10)
+            warm_pool_target = max(1, min(2, settings.DB_POOL_SIZE))
+            warm_up_pool(pool_size=warm_pool_target)
             startup_metrics["pool_warmup"] = time.time() - step_start
             logger.info(f"[OK] 连接池预热完成 ({startup_metrics['pool_warmup']:.2f}秒)")
         except Exception as e:

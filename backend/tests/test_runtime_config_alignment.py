@@ -41,3 +41,34 @@ def test_prod_compose_uses_container_internal_database_urls():
 
     assert backend_env["DATABASE_URL"] == "postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp"
     assert worker_env["DATABASE_URL"] == "postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp"
+
+
+def test_prod_compose_forces_production_runtime_mode():
+    compose = _read_yaml("docker-compose.prod.yml")
+    backend_env = compose["services"]["backend"]["environment"]
+    worker_env = compose["services"]["celery-worker"]["environment"]
+
+    assert backend_env["ENVIRONMENT"] == "production"
+    assert backend_env["APP_ENV"] == "production"
+    assert worker_env["ENVIRONMENT"] == "production"
+
+
+def test_prod_compose_allows_backend_host_for_nginx_proxy():
+    compose = _read_yaml("docker-compose.prod.yml")
+    backend_env = compose["services"]["backend"]["environment"]
+
+    assert backend_env["ALLOWED_HOSTS"].endswith(",backend")
+
+
+def test_dev_compose_allows_backend_host_for_nginx_proxy():
+    compose = _read_yaml("docker-compose.dev.yml")
+    backend_env = compose["services"]["backend"]["environment"]
+
+    assert backend_env["ALLOWED_HOSTS"].endswith(",backend")
+
+
+def test_dev_celery_healthcheck_does_not_depend_on_ps_binary():
+    compose = _read_yaml("docker-compose.dev.yml")
+    health_test = compose["services"]["celery-worker"]["healthcheck"]["test"]
+
+    assert "ps aux" not in " ".join(str(part) for part in health_test)

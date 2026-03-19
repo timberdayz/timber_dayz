@@ -44,6 +44,7 @@ services:
       # ⭐ CORS：开发时前端在 5173，必须允许该来源，否则浏览器会拦截跨域请求
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:8001,http://127.0.0.1:8001}
       # ⭐ 路径配置（修复容器内路径检测问题）
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},backend
       PROJECT_ROOT: /app
       DATA_DIR: /app/data
       DATA_RAW_DIR: /app/data/raw
@@ -158,7 +159,13 @@ services:
     networks:
       - erp_network
     healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep '[c]elery.*worker' || exit 1"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, redis; r=redis.from_url(os.environ['CELERY_BROKER_URL']); r.ping(); print('ok')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
