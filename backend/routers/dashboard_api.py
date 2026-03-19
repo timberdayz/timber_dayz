@@ -127,28 +127,6 @@ async def get_business_overview_kpi(
 
         payload = await _produce_payload()
         return JSONResponse(content=payload, headers={"X-Cache": "BYPASS"})
-        
-        # 尝试从缓存获取
-        cache_status = "BYPASS"  # Redis 不可用
-        if request and hasattr(request.app.state, "cache_service"):
-            cache_service = request.app.state.cache_service
-            cached = await cache_service.get("dashboard_kpi", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
-            cache_status = "MISS"
-
-        service = get_metabase_service()
-        metabase_params = {k: v for k, v in params.items() if v is not None}
-        logger.info(f"[KPI查询] 参数: month={month}, platform={platform}")
-
-        result = await service.query_question("business_overview_kpi", metabase_params)
-        resp = success_response(data=result)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "dashboard_kpi", json.loads(resp.body.decode()), **cache_params
-            )
-        resp.headers["X-Cache"] = cache_status
-        return resp
     except MetabaseUnavailableError as e:
         logger.warning(f"业务概览KPI查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
@@ -201,20 +179,19 @@ async def get_business_overview_comparison(
         params = {"granularity": granularity, "date": date_normalized, "platforms": platforms, "shops": shops}
         cache_params = _normalize_cache_params(params)
 
-        if request and hasattr(request.app.state, "cache_service"):
-            cached = await request.app.state.cache_service.get("dashboard_comparison", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached)
+        async def _produce_payload():
+            service = get_metabase_service()
+            metabase_params = {k: v for k, v in params.items() if v is not None}
+            result = await service.query_question("business_overview_comparison", metabase_params)
+            return json.loads(success_response(data=result).body.decode())
 
-        service = get_metabase_service()
-        metabase_params = {k: v for k, v in params.items() if v is not None}
-        result = await service.query_question("business_overview_comparison", metabase_params)
-        resp = success_response(data=result)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "dashboard_comparison", json.loads(resp.body.decode()), **cache_params
-            )
-        return resp
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "dashboard_comparison",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except MetabaseUnavailableError as e:
         logger.warning(f"业务概览对比查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
