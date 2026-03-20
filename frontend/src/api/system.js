@@ -181,7 +181,7 @@ export const cleanData = async (params = {}) => {
 }
 
 // 检查系统升级
-export const checkUpgrade = async () => {
+export const checkSystemUpgrade = async () => {
   return api.get('/system/maintenance/upgrade/check')
 }
 

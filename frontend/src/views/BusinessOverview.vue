@@ -1115,6 +1115,7 @@ import {
   showError as showApiError,
   handleApiError,
 } from "@/utils/errorHandler";
+import { normalizeClearanceRankingResponse } from "@/utils/businessOverviewData";
 
 // 响应式数据
 const loading = ref(false);
@@ -2442,10 +2443,12 @@ const loadClearanceRanking = async (granularity) => {
     // 响应拦截器已处理success字段，直接使用data
     const response = await api.getClearanceRanking(params);
 
+    const rankingRows = normalizeClearanceRankingResponse(response);
+
     if (granularity === "monthly") {
-      monthlyClearanceRanking.value = response || [];
+      monthlyClearanceRanking.value = rankingRows;
     } else {
-      weeklyClearanceRanking.value = response || [];
+      weeklyClearanceRanking.value = rankingRows;
     }
   } catch (error) {
     console.error("加载滞销清理排名失败:", error);
