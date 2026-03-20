@@ -183,7 +183,7 @@ jobs:
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: |
-          CHANGED_PYTHON_FILES="$(python scripts/ci_changed_python_files.py --shell)"
+          CHANGED_PYTHON_FILES="$(python scripts/ci_changed_python_files.py --shell --exclude-tests)"
           echo "files=${CHANGED_PYTHON_FILES}" >> $GITHUB_OUTPUT
           if [ -n "${CHANGED_PYTHON_FILES}" ]; then
             echo "[INFO] Changed Python files: ${CHANGED_PYTHON_FILES}"

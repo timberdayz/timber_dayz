@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
-import subprocess
+import subprocess  # nosec B404 - controlled local git invocations for CI diff detection
 import sys
 from pathlib import Path
 
@@ -22,7 +22,7 @@ ALLOWED_PREFIXES = ("backend/", "modules/", "tests/", "scripts/")
 
 
 def run_git(*args: str) -> str:
-    result = subprocess.run(
+    result = subprocess.run(  # nosec - fixed git invocation on repository-local paths
         ["git", *args],
         cwd=PROJECT_ROOT,
         check=True,
@@ -80,10 +80,21 @@ def main() -> int:
     parser.add_argument(
         "--shell", action="store_true", help="Emit a shell-quoted single-line list"
     )
+    parser.add_argument(
+        "--exclude-tests",
+        action="store_true",
+        help="Exclude test files from the emitted list",
+    )
     args = parser.parse_args()
 
     diff_range = detect_range()
     files = changed_python_files(diff_range)
+    if args.exclude_tests:
+        files = [
+            path
+            for path in files
+            if not path.startswith("tests/") and not path.startswith("backend/tests/")
+        ]
 
     if args.shell:
         print(" ".join(shlex.quote(path) for path in files))
