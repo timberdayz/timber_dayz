@@ -4,10 +4,9 @@
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import ElementPlus from 'element-plus'
+import { ElLoadingDirective } from 'element-plus'
 import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
-import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
 // 样式文件
 import './assets/styles/variables.css'
@@ -42,13 +41,9 @@ userStore.initUserInfo()
 
 // 使用插件
 app.use(router)
-app.use(ElementPlus, {
-  locale: zhCn,
-  size: 'default'
-})
+app.directive('loading', ElLoadingDirective)
 
 // 全局属性
-app.config.globalProperties.$ELEMENT = { size: 'default' }
 
 // 错误处理
 app.config.errorHandler = (err, vm, info) => {

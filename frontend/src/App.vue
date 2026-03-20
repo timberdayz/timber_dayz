@@ -1,5 +1,6 @@
 <template>
-  <div id="app">
+  <el-config-provider :locale="zhCn" size="default">
+    <div id="app">
     <!-- 公开路由（登录、注册）不显示系统布局，直接渲染路由视图 -->
     <router-view v-if="isPublicRoute" />
     
@@ -21,12 +22,14 @@
       <!-- ICP 备案号：底部左侧悬挂，满足合规要求 -->
       <IcpFooter />
     </div>
-  </div>
+    </div>
+  </el-config-provider>
 </template>
 
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { useUserStore } from '@/stores/user'
 import { useAuthStore } from '@/stores/auth'
 // import Sidebar from '@/components/common/Sidebar.vue'  // 旧版本（保留备份）

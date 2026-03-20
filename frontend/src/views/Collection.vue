@@ -180,7 +180,7 @@
 import { ref, onMounted, nextTick, computed } from 'vue'
 import { useCollectionStore } from '@/stores/collection'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 import {
   Play,
   VideoPause,

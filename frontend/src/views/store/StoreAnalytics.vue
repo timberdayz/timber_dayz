@@ -322,7 +322,7 @@ import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import api from '@/api'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatNumber, formatCurrency, formatPercent, formatInteger } from '@/utils/dataFormatter'
 

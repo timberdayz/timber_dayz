@@ -138,7 +138,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api'
 import { ElMessage } from 'element-plus'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 
 const router = useRouter()
 const loading = ref(false)

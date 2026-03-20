@@ -155,7 +155,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 import dashboardApi from '@/api/dashboard'
 import { handleApiError } from '@/utils/errorHandler'
 

@@ -43,6 +43,7 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     sourcemap: false,
+    chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
         chunkFileNames: 'assets/js/[name]-[hash].js',
@@ -53,12 +54,70 @@ export default defineConfig({
             return
           }
 
-          if (id.includes('echarts') || id.includes('zrender') || id.includes('vue-echarts')) {
-            return 'vendor-echarts'
+          if (id.includes('vue-echarts')) {
+            return 'vendor-vue-echarts'
+          }
+
+          if (id.includes('zrender')) {
+            return 'vendor-zrender'
+          }
+
+          if (id.includes('echarts')) {
+            if (id.includes('charts') || id.includes('\\chart\\') || id.includes('/chart/')) {
+              return 'vendor-echarts-charts'
+            }
+            if (id.includes('components') || id.includes('\\component\\') || id.includes('/component/')) {
+              return 'vendor-echarts-components'
+            }
+            return 'vendor-echarts-core'
           }
 
           if (id.includes('element-plus') || id.includes('@element-plus')) {
-            return 'vendor-element-plus'
+            if (
+              id.includes('/table') || id.includes('\\table') ||
+              id.includes('/pagination') || id.includes('\\pagination') ||
+              id.includes('/descriptions') || id.includes('\\descriptions') ||
+              id.includes('/statistic') || id.includes('\\statistic')
+            ) {
+              return 'vendor-element-plus-data'
+            }
+
+            if (
+              id.includes('/date-picker') || id.includes('\\date-picker') ||
+              id.includes('/time-picker') || id.includes('\\time-picker') ||
+              id.includes('/calendar') || id.includes('\\calendar')
+            ) {
+              return 'vendor-element-plus-datetime'
+            }
+
+            if (
+              id.includes('/form') || id.includes('\\form') ||
+              id.includes('/input') || id.includes('\\input') ||
+              id.includes('/select') || id.includes('\\select') ||
+              id.includes('/checkbox') || id.includes('\\checkbox') ||
+              id.includes('/radio') || id.includes('\\radio') ||
+              id.includes('/switch') || id.includes('\\switch') ||
+              id.includes('/upload') || id.includes('\\upload')
+            ) {
+              return 'vendor-element-plus-form'
+            }
+
+            if (
+              id.includes('/message') || id.includes('\\message') ||
+              id.includes('/notification') || id.includes('\\notification') ||
+              id.includes('/message-box') || id.includes('\\message-box') ||
+              id.includes('/loading') || id.includes('\\loading') ||
+              id.includes('/dialog') || id.includes('\\dialog') ||
+              id.includes('/drawer') || id.includes('\\drawer') ||
+              id.includes('/popover') || id.includes('\\popover') ||
+              id.includes('/tooltip') || id.includes('\\tooltip') ||
+              id.includes('/overlay') || id.includes('\\overlay') ||
+              id.includes('/popper') || id.includes('\\popper')
+            ) {
+              return 'vendor-element-plus-feedback'
+            }
+
+            return 'vendor-element-plus-base'
           }
 
           if (id.includes('vue-router') || id.includes('pinia') || id.includes('/vue/')) {

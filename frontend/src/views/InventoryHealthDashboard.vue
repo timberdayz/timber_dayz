@@ -166,7 +166,7 @@
 import { ref, onMounted, nextTick } from 'vue'
 import api from '@/api'
 import { ElMessage } from 'element-plus'
-import * as echarts from 'echarts'
+import echarts from '@/utils/echarts'
 
 const loading = ref(false)
 const shopData = ref([])
