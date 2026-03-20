@@ -18,6 +18,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -50,6 +52,19 @@ jobs:
           playwright install chromium || echo "Chromium installation failed, continuing..."
         continue-on-error: true
 
+      - name: Detect changed Python files
+        id: changed-python
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          CHANGED_PYTHON_FILES="$(python scripts/ci_changed_python_files.py --shell)"
+          echo "files=${CHANGED_PYTHON_FILES}" >> $GITHUB_OUTPUT
+          if [ -n "${CHANGED_PYTHON_FILES}" ]; then
+            echo "[INFO] Changed Python files: ${CHANGED_PYTHON_FILES}"
+          else
+            echo "[INFO] No changed Python files in scoped CI paths"
+          fi
+
       - name: Create test environment
         run: |
           mkdir -p data logs temp
@@ -71,11 +86,19 @@ jobs:
 
       - name: Code formatting check
         run: |
-          black --check --diff backend/ modules/ tests/ scripts/
+          if [ -n "${{ steps.changed-python.outputs.files }}" ]; then
+            black --check --diff ${{ steps.changed-python.outputs.files }}
+          else
+            echo "No changed Python files for formatting check"
+          fi
 
       - name: Linting
         run: |
-          ruff check backend/ modules/ tests/ scripts/
+          if [ -n "${{ steps.changed-python.outputs.files }}" ]; then
+            ruff check ${{ steps.changed-python.outputs.files }}
+          else
+            echo "No changed Python files for linting"
+          fi
 
       - name: Type checking (critical modules only)
         run: |
@@ -143,6 +166,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -153,10 +178,27 @@ jobs:
         run: |
           pip install bandit safety
 
+      - name: Detect changed Python files
+        id: changed-python
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          CHANGED_PYTHON_FILES="$(python scripts/ci_changed_python_files.py --shell)"
+          echo "files=${CHANGED_PYTHON_FILES}" >> $GITHUB_OUTPUT
+          if [ -n "${CHANGED_PYTHON_FILES}" ]; then
+            echo "[INFO] Changed Python files: ${CHANGED_PYTHON_FILES}"
+          else
+            echo "[INFO] No changed Python files in scoped CI paths"
+          fi
+
       - name: Run Bandit security scan
         run: |
-          bandit -r backend/ modules/ scripts/ -x tests,backend/tests -f json -o bandit-report.json
-          bandit -r backend/ modules/ scripts/ -x tests,backend/tests
+          if [ -n "${{ steps.changed-python.outputs.files }}" ]; then
+            bandit ${{ steps.changed-python.outputs.files }} -f json -o bandit-report.json
+            bandit ${{ steps.changed-python.outputs.files }}
+          else
+            echo "No changed Python files for Bandit scan"
+          fi
 
       - name: Check for known vulnerabilities
         run: |
