@@ -120,7 +120,7 @@ async def register(
             message="注册成功,请等待管理员审批"
         )
         return success_response(
-            data=register_response.dict(),
+            data=register_response.model_dump(),
             message="注册成功,请等待管理员审批"
         )
     
@@ -192,7 +192,7 @@ async def register(
         message="注册成功,请等待管理员审批"
     )
     return success_response(
-        data=register_response.dict(),
+        data=register_response.model_dump(),
         message="注册成功,请等待管理员审批"
     )
 

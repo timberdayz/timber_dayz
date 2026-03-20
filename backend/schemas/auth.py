@@ -2,7 +2,7 @@
 认证相关的Pydantic模型
 """
 
-from pydantic import BaseModel, EmailStr, Field, validator, field_validator, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 import re
@@ -177,7 +177,8 @@ class RegisterRequest(BaseModel):
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
     department: Optional[str] = Field(None, max_length=100, description="部门")
 
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def password_strength(cls, v):
         if len(v) < 8:
             raise ValueError('密码长度至少8位')
@@ -199,7 +200,7 @@ class ApproveUserRequest(BaseModel):
     """用户审批请求"""
     role_ids: List[int] = Field(
         default_factory=list,
-        max_items=10,  # v4.19.0 P1安全要求:最多10个角色
+        max_length=10,  # v4.19.0 P1安全要求:最多10个角色
         description="角色ID列表(可选,默认operator,最多10个)"
     )
     notes: Optional[str] = Field(

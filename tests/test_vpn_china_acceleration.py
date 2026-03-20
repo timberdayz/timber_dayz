@@ -21,6 +21,7 @@ import requests
 
 class TestVpnChinaAcceleration:
     """VPN环境下的中国网站访问测试"""
+    __test__ = False
     
     def __init__(self):
         self.accelerator = VpnChinaAccelerator()

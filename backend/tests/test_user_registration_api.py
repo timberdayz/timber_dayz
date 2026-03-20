@@ -7,6 +7,7 @@
 """
 
 from datetime import datetime
+from datetime import UTC
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 import json
@@ -261,7 +262,7 @@ async def test_pending_users_list():
             full_name=f"Pending List User {i}",
             status="pending",
             is_active=False,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
         )
         for i in range(3)
     ]

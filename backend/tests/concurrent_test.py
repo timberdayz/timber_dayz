@@ -14,6 +14,7 @@ import statistics
 @dataclass
 class TestResult:
     """测试结果数据类"""
+    __test__ = False
     test_name: str
     total_requests: int
     successful_requests: int

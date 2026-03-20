@@ -20,6 +20,7 @@ from loguru import logger
 
 class TestMultiRegionRouter:
     """多国IP路由管理器测试类"""
+    __test__ = False
     
     def __init__(self):
         self.router = MultiRegionRouter()

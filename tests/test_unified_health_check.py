@@ -47,7 +47,6 @@ def test_system_discovery():
         assert expected_app in apps, f"应该能发现 {expected_app}"
     
     print(f"✅ 发现 {count} 个应用: {apps}")
-    return True
 
 
 def test_system_metadata():
@@ -71,8 +70,6 @@ def test_system_metadata():
         assert info.get("name") != app_id, f"{app_id} 应该有有意义的名称"
         
         print(f"  ✅ {app_id}: {info['name']} v{info['version']}")
-    
-    return True
 
 
 def test_system_health():
@@ -111,8 +108,6 @@ def test_system_health():
     
     # 至少要有一半应用健康
     assert healthy_count >= total_count // 2, f"健康应用数量过少: {healthy_count}/{total_count}"
-    
-    return True
 
 
 def test_system_statistics():
@@ -138,8 +133,6 @@ def test_system_statistics():
     print(f"  📱 总应用数: {stats['total_applications']}")
     print(f"  🏃 运行实例: {stats['running_instances']}")
     print(f"  ✅ 运行中应用: {len(stats['running_apps'])}")
-    
-    return True
 
 
 def run_unified_health_check():
