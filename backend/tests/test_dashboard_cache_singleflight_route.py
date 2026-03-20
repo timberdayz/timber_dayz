@@ -5,10 +5,15 @@ from types import SimpleNamespace
 from starlette.requests import Request
 
 from backend.routers.dashboard_api import (
+    get_annual_summary_by_shop,
     get_annual_summary_kpi,
+    get_annual_summary_platform_share,
+    get_annual_summary_target_completion,
+    get_annual_summary_trend,
     get_business_overview_comparison,
     get_business_overview_kpi,
     get_business_overview_shop_racing,
+    get_business_overview_traffic_ranking,
 )
 
 
@@ -173,6 +178,165 @@ def test_annual_summary_kpi_uses_singleflight_cache_on_miss(monkeypatch):
             db=None,
             granularity="monthly",
             period="2026-03",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body == expected_payload
+    assert cache_service.singleflight_calls == 1
+
+
+def test_annual_summary_by_shop_uses_singleflight_cache_on_miss(monkeypatch):
+    expected_payload = {
+        "success": True,
+        "data": [{"shop_name": "shop-a", "gmv": 1}],
+        "message": "ok",
+    }
+    cache_service = _CacheServiceUsingSingleflightOnly(expected_payload)
+    request = _make_request(cache_service)
+
+    async def _aggregate_should_not_be_called(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("Aggregate should not be queried when cache service handles miss via singleflight")
+
+    monkeypatch.setattr(
+        "backend.services.annual_cost_aggregate.get_annual_cost_aggregate_by_shop",
+        _aggregate_should_not_be_called,
+    )
+
+    response = asyncio.run(
+        get_annual_summary_by_shop(
+            request=request,
+            db=None,
+            granularity="monthly",
+            period="2026-03",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body == expected_payload
+    assert cache_service.singleflight_calls == 1
+
+
+def test_annual_summary_trend_uses_singleflight_cache_on_miss(monkeypatch):
+    expected_payload = {
+        "success": True,
+        "data": [{"period": "2026-03", "gmv": 1}],
+        "message": "ok",
+    }
+    cache_service = _CacheServiceUsingSingleflightOnly(expected_payload)
+    request = _make_request(cache_service)
+
+    class _MetabaseServiceShouldNotBeCalled:
+        async def query_question(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("Metabase should not be queried when cache service handles miss via singleflight")
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api.get_metabase_service",
+        lambda: _MetabaseServiceShouldNotBeCalled(),
+    )
+
+    response = asyncio.run(
+        get_annual_summary_trend(
+            request=request,
+            granularity="monthly",
+            period="2026-03",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body == expected_payload
+    assert cache_service.singleflight_calls == 1
+
+
+def test_annual_summary_platform_share_uses_singleflight_cache_on_miss(monkeypatch):
+    expected_payload = {
+        "success": True,
+        "data": [{"platform": "shopee", "gmv": 1}],
+        "message": "ok",
+    }
+    cache_service = _CacheServiceUsingSingleflightOnly(expected_payload)
+    request = _make_request(cache_service)
+
+    class _MetabaseServiceShouldNotBeCalled:
+        async def query_question(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("Metabase should not be queried when cache service handles miss via singleflight")
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api.get_metabase_service",
+        lambda: _MetabaseServiceShouldNotBeCalled(),
+    )
+
+    response = asyncio.run(
+        get_annual_summary_platform_share(
+            request=request,
+            granularity="monthly",
+            period="2026-03",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body == expected_payload
+    assert cache_service.singleflight_calls == 1
+
+
+def test_annual_summary_target_completion_uses_singleflight_cache_on_miss(monkeypatch):
+    expected_payload = {
+        "success": True,
+        "data": {"target_gmv": 1, "achievement_rate_gmv": 100},
+        "message": "ok",
+    }
+    cache_service = _CacheServiceUsingSingleflightOnly(expected_payload)
+    request = _make_request(cache_service)
+
+    class _MetabaseServiceShouldNotBeCalled:
+        async def query_question(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("Metabase should not be queried when cache service handles miss via singleflight")
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api.get_metabase_service",
+        lambda: _MetabaseServiceShouldNotBeCalled(),
+    )
+
+    response = asyncio.run(
+        get_annual_summary_target_completion(
+            request=request,
+            db=None,
+            granularity="monthly",
+            period="2026-03",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body == expected_payload
+    assert cache_service.singleflight_calls == 1
+
+
+def test_business_overview_traffic_ranking_uses_singleflight_cache_on_miss(monkeypatch):
+    expected_payload = {
+        "success": True,
+        "data": [{"name": "shop-a", "unique_visitors": 10}],
+        "message": "ok",
+    }
+    cache_service = _CacheServiceUsingSingleflightOnly(expected_payload)
+    request = _make_request(cache_service)
+
+    class _MetabaseServiceShouldNotBeCalled:
+        async def query_question(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("Metabase should not be queried when cache service handles miss via singleflight")
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api.get_metabase_service",
+        lambda: _MetabaseServiceShouldNotBeCalled(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_traffic_ranking(
+            request=request,
+            granularity="monthly",
+            dimension="shop",
+            date_value="2026-03-01",
+            platforms=None,
+            shops=None,
         )
     )
 

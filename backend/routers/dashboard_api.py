@@ -46,6 +46,13 @@ def metabase_unavailable_response(message: str = "Metabase服务暂时不可用�
     )
 
 
+
+
+def _is_metabase_question_missing_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "Question ID" in message or "METABASE" in message
+
+
 async def _resolve_cached_payload(
     request: Request,
     cache_type: str,
@@ -229,20 +236,19 @@ async def get_business_overview_shop_racing(
         params = {"granularity": granularity, "date": date, "group_by": group_by, "platforms": platforms}
         cache_params = _normalize_cache_params(params)
 
-        if request and hasattr(request.app.state, "cache_service"):
-            cached = await request.app.state.cache_service.get("dashboard_shop_racing", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached)
+        async def _produce_payload():
+            service = get_metabase_service()
+            metabase_params = {k: v for k, v in params.items() if v is not None}
+            result = await service.query_question("business_overview_shop_racing", metabase_params)
+            return json.loads(success_response(data=result).body.decode())
 
-        service = get_metabase_service()
-        metabase_params = {k: v for k, v in params.items() if v is not None}
-        result = await service.query_question("business_overview_shop_racing", metabase_params)
-        resp = success_response(data=result)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "dashboard_shop_racing", json.loads(resp.body.decode()), **cache_params
-            )
-        return resp
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "dashboard_shop_racing",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except MetabaseUnavailableError as e:
         logger.warning(f"店铺赛马数据查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
@@ -283,20 +289,19 @@ async def get_business_overview_traffic_ranking(
         params = {"granularity": granularity, "dimension": question_dimension, "date": date_value, "platforms": platforms, "shops": shops}
         cache_params = _normalize_cache_params(params)
 
-        if request and hasattr(request.app.state, "cache_service"):
-            cached = await request.app.state.cache_service.get("dashboard_traffic_ranking", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached)
+        async def _produce_payload():
+            service = get_metabase_service()
+            metabase_params = {k: v for k, v in params.items() if v is not None}
+            result = await service.query_question("business_overview_traffic_ranking", metabase_params)
+            return json.loads(success_response(data=result).body.decode())
 
-        service = get_metabase_service()
-        metabase_params = {k: v for k, v in params.items() if v is not None}
-        result = await service.query_question("business_overview_traffic_ranking", metabase_params)
-        resp = success_response(data=result)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "dashboard_traffic_ranking", json.loads(resp.body.decode()), **cache_params
-            )
-        return resp
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "dashboard_traffic_ranking",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except MetabaseUnavailableError as e:
         logger.warning(f"流量排名数据查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
@@ -333,21 +338,20 @@ async def get_business_overview_inventory_backlog(
         params = {"days": str(days) if days is not None else "", "platforms": platforms, "shops": shops}
         cache_params = _normalize_cache_params(params)
 
-        if request and hasattr(request.app.state, "cache_service"):
-            cached = await request.app.state.cache_service.get("dashboard_inventory_backlog", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached)
+        async def _produce_payload():
+            service = get_metabase_service()
+            metabase_params = {"days": str(days) if days else None, "platforms": platforms, "shops": shops}
+            metabase_params = {k: v for k, v in metabase_params.items() if v is not None}
+            result = await service.query_question("business_overview_inventory_backlog", metabase_params)
+            return json.loads(success_response(data=result).body.decode())
 
-        service = get_metabase_service()
-        metabase_params = {"days": str(days) if days else None, "platforms": platforms, "shops": shops}
-        metabase_params = {k: v for k, v in metabase_params.items() if v is not None}
-        result = await service.query_question("business_overview_inventory_backlog", metabase_params)
-        resp = success_response(data=result)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "dashboard_inventory_backlog", json.loads(resp.body.decode()), **cache_params
-            )
-        return resp
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "dashboard_inventory_backlog",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except MetabaseUnavailableError as e:
         logger.warning(f"库存积压数据查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
@@ -387,20 +391,19 @@ async def get_business_overview_operational_metrics(
         params = {"month": month, "platform": platform}
         cache_params = _normalize_cache_params(params)
 
-        if request and hasattr(request.app.state, "cache_service"):
-            cached = await request.app.state.cache_service.get("dashboard_operational_metrics", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached)
+        async def _produce_payload():
+            service = get_metabase_service()
+            metabase_params = {k: v for k, v in params.items() if v is not None}
+            result = await service.query_question("business_overview_operational_metrics", metabase_params)
+            return json.loads(success_response(data=result).body.decode())
 
-        service = get_metabase_service()
-        metabase_params = {k: v for k, v in params.items() if v is not None}
-        result = await service.query_question("business_overview_operational_metrics", metabase_params)
-        resp = success_response(data=result)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "dashboard_operational_metrics", json.loads(resp.body.decode()), **cache_params
-            )
-        return resp
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "dashboard_operational_metrics",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except MetabaseUnavailableError as e:
         logger.warning(f"经营指标数据查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
@@ -445,27 +448,26 @@ async def get_clearance_ranking(
         }
         cache_params = _normalize_cache_params(params)
 
-        if request and hasattr(request.app.state, "cache_service"):
-            cached = await request.app.state.cache_service.get("dashboard_clearance_ranking", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached)
+        async def _produce_payload():
+            service = get_metabase_service()
+            metabase_params = {
+                "start_date": start_date,
+                "end_date": end_date,
+                "platforms": platforms,
+                "shops": shops,
+                "limit": str(limit) if limit else None
+            }
+            metabase_params = {k: v for k, v in metabase_params.items() if v is not None}
+            result = await service.query_question("clearance_ranking", metabase_params)
+            return json.loads(success_response(data=result).body.decode())
 
-        service = get_metabase_service()
-        metabase_params = {
-            "start_date": start_date,
-            "end_date": end_date,
-            "platforms": platforms,
-            "shops": shops,
-            "limit": str(limit) if limit else None
-        }
-        metabase_params = {k: v for k, v in metabase_params.items() if v is not None}
-        result = await service.query_question("clearance_ranking", metabase_params)
-        resp = success_response(data=result)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "dashboard_clearance_ranking", json.loads(resp.body.decode()), **cache_params
-            )
-        return resp
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "dashboard_clearance_ranking",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except MetabaseUnavailableError as e:
         logger.warning(f"清仓排名数据查询失败（Metabase不可用）: {e}")
         return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
@@ -492,71 +494,62 @@ async def get_clearance_ranking(
 async def get_annual_summary_kpi(
     request: Request,
     db: AsyncSession = Depends(get_async_db),
-    granularity: str = Query(..., description="粒度(monthly|yearly)"),
-    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    granularity: str = Query(..., description="\u7c92\u5ea6(monthly|yearly)"),
+    period: str = Query(..., description="\u5468\u671f: \u6708\u5ea6YYYY-MM \u6216 \u5e74\u5ea6YYYY"),
 ):
-    """
-    年度数据总结 - 核心KPI（仅月度粒度数据）
-    返回核心 KPI + 成本与产出（总成本 = A 类 operating_costs + B 类订单成本，口径见 docs/COST_DATA_SOURCES_AND_DEFINITIONS.md）
-    """
+    """\u5e74\u5ea6\u6570\u636e\u603b\u7ed3\u6838\u5fc3 KPI\uff0c\u8865\u5145\u6210\u672c\u805a\u5408\u7ed3\u679c\u3002"""
     try:
         if granularity not in ("monthly", "yearly"):
-            raise ValueError("granularity 必须为 monthly 或 yearly")
+            raise ValueError("granularity \u5fc5\u987b\u4e3a monthly \u6216 yearly")
         params = {"granularity": granularity, "period": period}
         cache_params = _normalize_cache_params(params)
 
-        cache_status = "BYPASS"
-        if request and hasattr(request.app.state, "cache_service"):
-            cache_service = request.app.state.cache_service
-            cached = await cache_service.get("annual_summary_kpi", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
-            cache_status = "MISS"
+        async def _produce_payload():
+            service = get_metabase_service()
+            metabase_params = {k: v for k, v in params.items() if v}
+            logger.info(f"[annual-summary-kpi] granularity={granularity}, period={period}")
 
-        service = get_metabase_service()
-        metabase_params = {k: v for k, v in params.items() if v}
-        logger.info(f"[年度总结KPI] granularity={granularity}, period={period}")
+            result = await service.query_question("annual_summary_kpi", metabase_params)
+            if not isinstance(result, dict):
+                result = result or {}
 
-        result = await service.query_question("annual_summary_kpi", metabase_params)
-        if not isinstance(result, dict):
-            result = result or {}
+            from backend.services.annual_cost_aggregate import get_annual_cost_aggregate
 
-        # 成本与产出：后端聚合 A 类 + B 类，与成本文档一致
-        from backend.services.annual_cost_aggregate import get_annual_cost_aggregate
-        cost_agg = await get_annual_cost_aggregate(db, granularity, period)
-        result["total_cost"] = cost_agg["total_cost"]
-        result["gmv"] = result.get("gmv") if result.get("gmv") is not None else cost_agg["gmv"]
-        result["cost_to_revenue_ratio"] = cost_agg["cost_to_revenue_ratio"]
-        result["roi"] = cost_agg["roi"]
-        result["gross_margin"] = cost_agg["gross_margin"]
-        result["net_margin"] = cost_agg["net_margin"]
+            cost_agg = await get_annual_cost_aggregate(db, granularity, period)
+            result["total_cost"] = cost_agg["total_cost"]
+            result["gmv"] = result.get("gmv") if result.get("gmv") is not None else cost_agg["gmv"]
+            result["cost_to_revenue_ratio"] = cost_agg["cost_to_revenue_ratio"]
+            result["roi"] = cost_agg["roi"]
+            result["gross_margin"] = cost_agg["gross_margin"]
+            result["net_margin"] = cost_agg["net_margin"]
+            return json.loads(success_response(data=result).body.decode())
 
-        resp = success_response(data=result)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "annual_summary_kpi", json.loads(resp.body.decode()), **cache_params
-            )
-        resp.headers["X-Cache"] = cache_status
-        return resp
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "annual_summary_kpi",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except MetabaseUnavailableError as e:
-        logger.warning(f"年度总结KPI查询失败（Metabase不可用）: {e}")
-        return metabase_unavailable_response(str(e) or "Metabase服务暂时不可用，请稍后重试")
+        logger.warning(f"\u5e74\u5ea6\u603b\u7ed3 KPI \u67e5\u8be2\u5931\u8d25\uff08Metabase\u4e0d\u53ef\u7528\uff09: {e}")
+        return metabase_unavailable_response(str(e) or "Metabase\u670d\u52a1\u6682\u65f6\u4e0d\u53ef\u7528\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5")
     except ValueError as e:
-        logger.error(f"年度总结KPI查询失败: {e}")
+        logger.error(f"\u5e74\u5ea6\u603b\u7ed3 KPI \u53c2\u6570\u6821\u9a8c\u5931\u8d25: {e}")
         return error_response(
             ErrorCode.PARAMETER_INVALID,
             str(e),
             status_code=400,
-            recovery_suggestion="请检查请求参数",
+            recovery_suggestion="\u8bf7\u68c0\u67e5\u8bf7\u6c42\u53c2\u6570",
         )
     except Exception as e:
-        logger.error(f"年度总结KPI查询异常: {e}", exc_info=True)
+        logger.error(f"\u5e74\u5ea6\u603b\u7ed3 KPI \u67e5\u8be2\u5f02\u5e38: {e}", exc_info=True)
         return error_response(
             ErrorCode.DATABASE_QUERY_ERROR,
-            f"查询失败: {str(e)}",
+            f"\u67e5\u8be2\u5931\u8d25: {str(e)}",
             status_code=500,
             detail=str(e),
-            recovery_suggestion="请稍后重试",
+            recovery_suggestion="\u8bf7\u7a0d\u540e\u91cd\u8bd5",
         )
 
 
@@ -564,259 +557,242 @@ async def get_annual_summary_kpi(
 async def get_annual_summary_by_shop(
     request: Request,
     db: AsyncSession = Depends(get_async_db),
-    granularity: str = Query(..., description="粒度(monthly|yearly)"),
-    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    granularity: str = Query(..., description="\u7c92\u5ea6(monthly|yearly)"),
+    period: str = Query(..., description="\u5468\u671f: \u6708\u5ea6YYYY-MM \u6216 \u5e74\u5ea6YYYY"),
 ):
-    """
-    年度数据总结 - 按店铺下钻（2.3）
-    返回各店铺总成本(A+B)、GMV、成本产出比、ROI、毛利率、净利率。口径见 docs/COST_DATA_SOURCES_AND_DEFINITIONS.md；
-    店铺键约定：operating_costs.店铺ID = 'platform_code|shop_id' 时与订单侧一致。
-    """
+    """\u5e74\u5ea6\u6570\u636e\u603b\u7ed3\u6309\u5e97\u94fa\u4e0b\u94bb\u3002"""
     try:
         if granularity not in ("monthly", "yearly"):
-            raise ValueError("granularity 必须为 monthly 或 yearly")
+            raise ValueError("granularity \u5fc5\u987b\u4e3a monthly \u6216 yearly")
         params = {"granularity": granularity, "period": period}
         cache_params = _normalize_cache_params(params)
-        cache_status = "BYPASS"
-        if request and hasattr(request.app.state, "cache_service"):
-            cache_service = request.app.state.cache_service
-            cached = await cache_service.get("annual_summary_by_shop", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
-            cache_status = "MISS"
-        from backend.services.annual_cost_aggregate import get_annual_cost_aggregate_by_shop
-        data = await get_annual_cost_aggregate_by_shop(db, granularity, period)
-        resp = success_response(data=data)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "annual_summary_by_shop", json.loads(resp.body.decode()), **cache_params
-            )
-        resp.headers["X-Cache"] = cache_status
-        return resp
+
+        async def _produce_payload():
+            from backend.services.annual_cost_aggregate import get_annual_cost_aggregate_by_shop
+
+            data = await get_annual_cost_aggregate_by_shop(db, granularity, period)
+            return json.loads(success_response(data=data).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "annual_summary_by_shop",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
-        logger.error(f"年度总结按店铺查询失败: {e}")
+        logger.error(f"\u5e74\u5ea6\u603b\u7ed3\u6309\u5e97\u94fa\u67e5\u8be2\u53c2\u6570\u6821\u9a8c\u5931\u8d25: {e}")
         return error_response(
             ErrorCode.PARAMETER_INVALID,
             str(e),
             status_code=400,
-            recovery_suggestion="请检查请求参数",
+            recovery_suggestion="\u8bf7\u68c0\u67e5\u8bf7\u6c42\u53c2\u6570",
         )
     except Exception as e:
-        logger.error(f"年度总结按店铺查询异常: {e}", exc_info=True)
+        logger.error(f"\u5e74\u5ea6\u603b\u7ed3\u6309\u5e97\u94fa\u67e5\u8be2\u5f02\u5e38: {e}", exc_info=True)
         return error_response(
             ErrorCode.DATABASE_QUERY_ERROR,
-            f"查询失败: {str(e)}",
+            f"\u67e5\u8be2\u5931\u8d25: {str(e)}",
             status_code=500,
             detail=str(e),
-            recovery_suggestion="请稍后重试",
+            recovery_suggestion="\u8bf7\u7a0d\u540e\u91cd\u8bd5",
         )
 
 
 @router.get("/annual-summary/trend")
 async def get_annual_summary_trend(
     request: Request,
-    granularity: str = Query(..., description="粒度(monthly|yearly)"),
-    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    granularity: str = Query(..., description="\u7c92\u5ea6(monthly|yearly)"),
+    period: str = Query(..., description="\u5468\u671f: \u6708\u5ea6YYYY-MM \u6216 \u5e74\u5ea6YYYY"),
 ):
-    """
-    年度数据总结 - 月度/年度趋势
-    返回按月的 GMV、总成本、利润时间序列，供折线图使用。数据来自 Metabase annual_summary_trend。
-    """
+    """\u5e74\u5ea6\u6570\u636e\u603b\u7ed3\u8d8b\u52bf\u5e8f\u5217\u3002"""
     try:
         if granularity not in ("monthly", "yearly"):
-            raise ValueError("granularity 必须为 monthly 或 yearly")
+            raise ValueError("granularity \u5fc5\u987b\u4e3a monthly \u6216 yearly")
         params = {"granularity": granularity, "period": period}
         cache_params = _normalize_cache_params(params)
-        cache_status = "BYPASS"
-        if request and hasattr(request.app.state, "cache_service"):
-            cache_service = request.app.state.cache_service
-            cached = await cache_service.get("annual_summary_trend", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
-            cache_status = "MISS"
-        service = get_metabase_service()
-        result = await service.query_question("annual_summary_trend", {"granularity": granularity, "period": period})
-        data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
-        resp = success_response(data=data)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "annual_summary_trend", json.loads(resp.body.decode()), **cache_params
+
+        async def _produce_payload():
+            service = get_metabase_service()
+            result = await service.query_question(
+                "annual_summary_trend",
+                {"granularity": granularity, "period": period},
             )
-        resp.headers["X-Cache"] = cache_status
-        return resp
+            data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
+            return json.loads(success_response(data=data).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "annual_summary_trend",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
-        if "Question ID 未找到" in str(e) or "METABASE" in str(e):
-            logger.warning(f"年度总结趋势 Metabase 未配置: {e}")
+        if _is_metabase_question_missing_error(e):
+            logger.warning(f"\u5e74\u5ea6\u603b\u7ed3\u8d8b\u52bf Metabase \u95ee\u9898\u672a\u914d\u7f6e: {e}")
             return success_response(data=[])
-        logger.error(f"年度总结趋势查询失败: {e}")
+        logger.error(f"\u5e74\u5ea6\u603b\u7ed3\u8d8b\u52bf\u53c2\u6570\u6821\u9a8c\u5931\u8d25: {e}")
         return error_response(
             ErrorCode.PARAMETER_INVALID,
             str(e),
             status_code=400,
-            recovery_suggestion="请检查请求参数",
+            recovery_suggestion="\u8bf7\u68c0\u67e5\u8bf7\u6c42\u53c2\u6570",
         )
     except Exception as e:
-        logger.error(f"年度总结趋势查询异常: {e}", exc_info=True)
+        logger.error(f"\u5e74\u5ea6\u603b\u7ed3\u8d8b\u52bf\u67e5\u8be2\u5f02\u5e38: {e}", exc_info=True)
         return error_response(
             ErrorCode.DATABASE_QUERY_ERROR,
-            f"查询失败: {str(e)}",
+            f"\u67e5\u8be2\u5931\u8d25: {str(e)}",
             status_code=500,
             detail=str(e),
-            recovery_suggestion="请稍后重试",
+            recovery_suggestion="\u8bf7\u7a0d\u540e\u91cd\u8bd5",
         )
 
 
 @router.get("/annual-summary/platform-share")
 async def get_annual_summary_platform_share(
     request: Request,
-    granularity: str = Query(..., description="粒度(monthly|yearly)"),
-    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    granularity: str = Query(..., description="\u7c92\u5ea6(monthly|yearly)"),
+    period: str = Query(..., description="\u5468\u671f: \u6708\u5ea6YYYY-MM \u6216 \u5e74\u5ea6YYYY"),
 ):
-    """
-    年度数据总结 - 平台 GMV 占比
-    返回各平台（Shopee、TikTok 等）GMV 及占比，供饼图使用。数据来自 Metabase annual_summary_platform_share。
-    """
+    """\u5e74\u5ea6\u6570\u636e\u603b\u7ed3\u5e73\u53f0\u5360\u6bd4\u3002"""
     try:
         if granularity not in ("monthly", "yearly"):
-            raise ValueError("granularity 必须为 monthly 或 yearly")
+            raise ValueError("granularity \u5fc5\u987b\u4e3a monthly \u6216 yearly")
         params = {"granularity": granularity, "period": period}
         cache_params = _normalize_cache_params(params)
-        cache_status = "BYPASS"
-        if request and hasattr(request.app.state, "cache_service"):
-            cache_service = request.app.state.cache_service
-            cached = await cache_service.get("annual_summary_platform_share", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
-            cache_status = "MISS"
-        service = get_metabase_service()
-        result = await service.query_question("annual_summary_platform_share", {"granularity": granularity, "period": period})
-        data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
-        resp = success_response(data=data)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "annual_summary_platform_share", json.loads(resp.body.decode()), **cache_params
+
+        async def _produce_payload():
+            service = get_metabase_service()
+            result = await service.query_question(
+                "annual_summary_platform_share",
+                {"granularity": granularity, "period": period},
             )
-        resp.headers["X-Cache"] = cache_status
-        return resp
+            data = result if isinstance(result, list) else (result.get("data") if isinstance(result, dict) else []) or []
+            return json.loads(success_response(data=data).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "annual_summary_platform_share",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
-        if "Question ID 未找到" in str(e) or "METABASE" in str(e):
-            logger.warning(f"年度总结平台占比 Metabase 未配置: {e}")
+        if _is_metabase_question_missing_error(e):
+            logger.warning(f"\u5e74\u5ea6\u603b\u7ed3\u5e73\u53f0\u5360\u6bd4 Metabase \u95ee\u9898\u672a\u914d\u7f6e: {e}")
             return success_response(data=[])
-        logger.error(f"年度总结平台占比查询失败: {e}")
+        logger.error(f"\u5e74\u5ea6\u603b\u7ed3\u5e73\u53f0\u5360\u6bd4\u53c2\u6570\u6821\u9a8c\u5931\u8d25: {e}")
         return error_response(
             ErrorCode.PARAMETER_INVALID,
             str(e),
             status_code=400,
-            recovery_suggestion="请检查请求参数",
+            recovery_suggestion="\u8bf7\u68c0\u67e5\u8bf7\u6c42\u53c2\u6570",
         )
     except Exception as e:
-        logger.error(f"年度总结平台占比查询异常: {e}", exc_info=True)
+        logger.error(f"\u5e74\u5ea6\u603b\u7ed3\u5e73\u53f0\u5360\u6bd4\u67e5\u8be2\u5f02\u5e38: {e}", exc_info=True)
         return error_response(
             ErrorCode.DATABASE_QUERY_ERROR,
-            f"查询失败: {str(e)}",
+            f"\u67e5\u8be2\u5931\u8d25: {str(e)}",
             status_code=500,
             detail=str(e),
-            recovery_suggestion="请稍后重试",
+            recovery_suggestion="\u8bf7\u7a0d\u540e\u91cd\u8bd5",
         )
 
 
 @router.get("/annual-summary/target-completion")
 async def get_annual_summary_target_completion(
     request: Request,
-    granularity: str = Query(..., description="粒度(monthly|yearly)"),
-    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    granularity: str = Query(..., description="\u7c92\u5ea6(monthly|yearly)"),
+    period: str = Query(..., description="\u5468\u671f: \u6708\u5ea6YYYY-MM \u6216 \u5e74\u5ea6YYYY"),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """
-    年度数据总结 - 目标完成率
-    对接 a_class.sales_targets_a：按 period 汇总目标销售额，与 KPI 实际 GMV 对比得到完成率。
-    利润目标暂无独立配置时，利润完成率可为 null。
-    """
+    """\u5e74\u5ea6\u6570\u636e\u603b\u7ed3\u76ee\u6807\u5b8c\u6210\u7387\u3002"""
     try:
         if granularity not in ("monthly", "yearly"):
-            raise ValueError("granularity 必须为 monthly 或 yearly")
+            raise ValueError("granularity \u5fc5\u987b\u4e3a monthly \u6216 yearly")
         params = {"granularity": granularity, "period": period}
         cache_params = _normalize_cache_params(params)
-        cache_status = "BYPASS"
-        if request and hasattr(request.app.state, "cache_service"):
-            cache_service = request.app.state.cache_service
-            cached = await cache_service.get("annual_summary_target_completion", **cache_params)
-            if cached is not None:
-                return JSONResponse(content=cached, headers={"X-Cache": "HIT"})
-            cache_status = "MISS"
 
-        # 1) 汇总目标：月度用单月，年度用当年所有月
-        if len(period) == 4:  # YYYY
-            year_month_filter = "year_month LIKE :period_prefix"
-            db_params: dict = {"period_prefix": f"{period}-%"}
-            ym_filter_cn = '"年月" LIKE :period_prefix'
-        else:  # YYYY-MM
-            year_month_filter = "year_month = :period"
-            db_params = {"period": period}
-            ym_filter_cn = '"年月" = :period'
+        async def _produce_payload():
+            if len(period) == 4:
+                year_month_filter = "year_month LIKE :period_prefix"
+                db_params: dict = {"period_prefix": f"{period}-%"}
+                year_month_filter_cn = '"\u5e74\u6708" LIKE :period_prefix'
+            else:
+                year_month_filter = "year_month = :period"
+                db_params = {"period": period}
+                year_month_filter_cn = '"\u5e74\u6708" = :period'
 
-        try:
-            result = await db.execute(text(f"""
-                SELECT COALESCE(SUM(target_sales_amount), 0) AS target_gmv,
-                       COALESCE(SUM(target_quantity), 0) AS target_orders
-                FROM a_class.sales_targets_a
-                WHERE {year_month_filter}
-            """), db_params)
-        except Exception:
-            result = await db.execute(text(f"""
-                SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
-                       COALESCE(SUM("目标订单数"), 0) AS target_orders
-                FROM a_class.sales_targets_a
-                WHERE {ym_filter_cn}
-            """), db_params)
-        row = result.fetchone()
-        target_gmv = float(row[0]) if row and row[0] is not None else 0.0
-        target_orders = int(row[1]) if row and row[1] is not None else 0
+            try:
+                result = await db.execute(text(f"""
+                    SELECT COALESCE(SUM(target_sales_amount), 0) AS target_gmv,
+                           COALESCE(SUM(target_quantity), 0) AS target_orders
+                    FROM a_class.sales_targets_a
+                    WHERE {year_month_filter}
+                """), db_params)
+            except Exception:
+                await db.rollback()
+                result = await db.execute(text(f"""
+                    SELECT COALESCE(SUM("\u76ee\u6807\u9500\u552e\u989d"), 0) AS target_gmv,
+                           COALESCE(SUM("\u76ee\u6807\u8ba2\u5355\u6570"), 0) AS target_orders
+                    FROM a_class.sales_targets_a
+                    WHERE {year_month_filter_cn}
+                """), db_params)
 
-        # 2) 实际 GMV：调用 KPI 接口同周期数据
-        achieved_gmv = None
-        try:
-            service = get_metabase_service()
-            kpi_result = await service.query_question("annual_summary_kpi", {"granularity": granularity, "period": period})
-            if isinstance(kpi_result, dict) and kpi_result.get("gmv") is not None:
-                achieved_gmv = float(kpi_result["gmv"])
-        except Exception as e:
-            logger.warning(f"目标完成率获取实际GMV失败: {e}")
+            row = result.fetchone()
+            target_gmv = float(row[0]) if row and row[0] is not None else 0.0
+            target_orders = int(row[1]) if row and row[1] is not None else 0
 
-        achievement_rate_gmv = None
-        if target_gmv and achieved_gmv is not None:
-            achievement_rate_gmv = round(achieved_gmv / target_gmv * 100, 2)
+            achieved_gmv = None
+            try:
+                service = get_metabase_service()
+                kpi_result = await service.query_question(
+                    "annual_summary_kpi",
+                    {"granularity": granularity, "period": period},
+                )
+                if isinstance(kpi_result, dict) and kpi_result.get("gmv") is not None:
+                    achieved_gmv = float(kpi_result["gmv"])
+            except Exception as e:
+                logger.warning(f"\u76ee\u6807\u5b8c\u6210\u7387\u67e5\u8be2\u5b9e\u9645 GMV \u5931\u8d25: {e}")
 
-        data = {
-            "target_gmv": target_gmv,
-            "achieved_gmv": achieved_gmv,
-            "achievement_rate_gmv": achievement_rate_gmv,
-            "target_orders": target_orders,
-            "target_profit": None,
-            "achieved_profit": None,
-            "achievement_rate_profit": None,
-        }
-        resp = success_response(data=data)
-        if request and hasattr(request.app.state, "cache_service"):
-            await request.app.state.cache_service.set(
-                "annual_summary_target_completion", json.loads(resp.body.decode()), **cache_params
-            )
-        resp.headers["X-Cache"] = cache_status
-        return resp
+            achievement_rate_gmv = None
+            if target_gmv and achieved_gmv is not None:
+                achievement_rate_gmv = round(achieved_gmv / target_gmv * 100, 2)
+
+            data = {
+                "target_gmv": target_gmv,
+                "achieved_gmv": achieved_gmv,
+                "achievement_rate_gmv": achievement_rate_gmv,
+                "target_orders": target_orders,
+                "target_profit": None,
+                "achieved_profit": None,
+                "achievement_rate_profit": None,
+            }
+            return json.loads(success_response(data=data).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "annual_summary_target_completion",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
     except ValueError as e:
-        logger.error(f"年度总结目标完成率查询失败: {e}")
+        logger.error(f"\u5e74\u5ea6\u603b\u7ed3\u76ee\u6807\u5b8c\u6210\u7387\u53c2\u6570\u6821\u9a8c\u5931\u8d25: {e}")
         return error_response(
             ErrorCode.PARAMETER_INVALID,
             str(e),
             status_code=400,
-            recovery_suggestion="请检查请求参数",
+            recovery_suggestion="\u8bf7\u68c0\u67e5\u8bf7\u6c42\u53c2\u6570",
         )
     except Exception as e:
-        logger.error(f"年度总结目标完成率查询异常: {e}", exc_info=True)
+        logger.error(f"\u5e74\u5ea6\u603b\u7ed3\u76ee\u6807\u5b8c\u6210\u7387\u67e5\u8be2\u5f02\u5e38: {e}", exc_info=True)
         return error_response(
             ErrorCode.DATABASE_QUERY_ERROR,
-            f"查询失败: {str(e)}",
+            f"\u67e5\u8be2\u5931\u8d25: {str(e)}",
             status_code=500,
             detail=str(e),
-            recovery_suggestion="请稍后重试",
+            recovery_suggestion="\u8bf7\u7a0d\u540e\u91cd\u8bd5",
         )

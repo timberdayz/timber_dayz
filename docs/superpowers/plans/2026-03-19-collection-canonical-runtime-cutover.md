@@ -1,5 +1,7 @@
 # Collection Canonical Runtime Cutover Implementation Plan
 
+Status: completed on 2026-03-20 and merged into `main`
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将正式采集运行路径收敛为唯一的 `stable -> file_path -> executor` 主路径，并切断旧模板/原始录制脚本进入正式采集的能力。
