@@ -193,7 +193,7 @@
         <el-table-column label="产品图片" width="100">
           <template #default="{ row }">
             <el-image 
-              :src="row.thumbnail_url || '/placeholder.png'"
+              :src="row.thumbnail_url || '/placeholder.svg'"
               fit="cover"
               style="width: 60px; height: 60px; border-radius: 4px; cursor: pointer;"
               :preview-src-list="row.all_images"

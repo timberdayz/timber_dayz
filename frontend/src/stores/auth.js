@@ -6,6 +6,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import authApi from '@/api/auth'
 import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/stores/user'
+import { normalizeRoleCode, applyRolePermissions } from '@/config/rolePermissions'
 
 export const useAuthStore = defineStore('auth', () => {
   // 状态
@@ -47,8 +49,6 @@ export const useAuthStore = defineStore('auth', () => {
       // ⭐ 2026-01-30修复：登录时立即应用角色权限，避免操作员等非管理员跳转失败
       // 原因：登录页未挂载 SimpleAccountSwitcher，路由守卫检查 hasPermission 时 permissions 为空
       if (userInfo && userInfo.roles) {
-        const { useUserStore } = await import('@/stores/user')
-        const { normalizeRoleCode, applyRolePermissions } = await import('@/config/rolePermissions')
         const userStore = useUserStore()
         userStore.updateUserInfo({
           id: userInfo.id,

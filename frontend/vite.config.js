@@ -48,6 +48,25 @@ export default defineConfig({
         chunkFileNames: 'assets/js/[name]-[hash].js',
         entryFileNames: 'assets/js/[name]-[hash].js',
         assetFileNames: 'assets/[ext]/[name]-[hash].[ext]',
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return
+          }
+
+          if (id.includes('echarts') || id.includes('zrender') || id.includes('vue-echarts')) {
+            return 'vendor-echarts'
+          }
+
+          if (id.includes('element-plus') || id.includes('@element-plus')) {
+            return 'vendor-element-plus'
+          }
+
+          if (id.includes('vue-router') || id.includes('pinia') || id.includes('/vue/')) {
+            return 'vendor-vue-core'
+          }
+
+          return 'vendor-misc'
+        },
       },
     },
     // 生产环境优化配置（取消注释以启用）

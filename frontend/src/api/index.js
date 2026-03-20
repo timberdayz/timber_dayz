@@ -1,16 +1,10 @@
 import axios from "axios";
 import { ElMessage } from "element-plus";
+import { useAuthStore } from "@/stores/auth";
 
 // ⭐ v6.0.0新增：现代化认证系统改进
 // 延迟导入 authStore（使用 ESM import() 避免循环依赖，Vite 浏览器环境无 require）
-let authStore = null;
-const getAuthStore = async () => {
-  if (!authStore) {
-    const m = await import("@/stores/auth");
-    authStore = m.useAuthStore();
-  }
-  return authStore;
-};
+const getAuthStore = () => useAuthStore();
 
 // 注意：所有API直接使用真实后端API，Mock数据已全部替换
 
@@ -132,7 +126,7 @@ try {
   refreshChannel = new BroadcastChannel("token_refresh_channel");
 
   // 监听其他标签页的刷新状态（async 以支持 await getAuthStore）
-  refreshChannel.onmessage = async (event) => {
+  refreshChannel.onmessage = (event) => {
     // ⭐ v6.0.0修复：清除超时定时器（收到消息）
     if (refreshTimeout) {
       clearTimeout(refreshTimeout);
@@ -157,7 +151,7 @@ try {
       if (newToken) {
         // ⭐ v6.0.0修复：更新本地 token 和 refreshToken（确保状态一致性）
         try {
-          const store = await getAuthStore();
+          const store = getAuthStore();
           store.token = newToken;
           localStorage.setItem("access_token", newToken);
 
@@ -225,7 +219,7 @@ api.interceptors.request.use(
     if (needsAuth) {
       let token = null;
       try {
-        const store = await getAuthStore();
+        const store = getAuthStore();
         token = store.token || localStorage.getItem("access_token");
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
@@ -256,7 +250,7 @@ api.interceptors.request.use(
               }
             }
 
-            const store = await getAuthStore();
+            const store = getAuthStore();
             const success = await store.refreshAccessToken();
 
             if (success) {
@@ -438,7 +432,7 @@ api.interceptors.response.use(
       if (originalRequest._retry) {
         // 刷新失败，清除 token 并跳转登录页
         try {
-          const store = await getAuthStore();
+          const store = getAuthStore();
           await store.logout();
         } catch (err) {
           console.error("登出失败:", err);
@@ -479,7 +473,7 @@ api.interceptors.response.use(
       }
 
       try {
-        const store = await getAuthStore();
+        const store = getAuthStore();
         const refreshed = await store.refreshAccessToken();
 
         if (refreshed) {
@@ -535,7 +529,7 @@ api.interceptors.response.use(
 
           // 清除 token 并跳转登录页
           try {
-            const store = await getAuthStore();
+            const store = getAuthStore();
             await store.logout();
           } catch (err) {
             console.error("登出失败:", err);
@@ -565,7 +559,7 @@ api.interceptors.response.use(
 
         // 清除 token 并跳转登录页
         try {
-          const store = await getAuthStore();
+          const store = getAuthStore();
           await store.logout();
         } catch (err) {
           console.error("登出失败:", err);

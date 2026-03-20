@@ -4,6 +4,7 @@ JWT认证服务
 
 import jwt
 import bcrypt
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from fastapi import HTTPException, status
@@ -37,7 +38,7 @@ class AuthService:
         """创建访问令牌"""
         to_encode = data.copy()
         expire = datetime.now(timezone.utc) + timedelta(minutes=self.access_token_expire_minutes)
-        to_encode.update({"exp": expire, "type": "access"})
+        to_encode.update({"exp": expire, "type": "access", "jti": uuid.uuid4().hex})
         
         encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
         return encoded_jwt
@@ -46,7 +47,7 @@ class AuthService:
         """创建刷新令牌"""
         to_encode = data.copy()
         expire = datetime.now(timezone.utc) + timedelta(days=self.refresh_token_expire_days)
-        to_encode.update({"exp": expire, "type": "refresh"})
+        to_encode.update({"exp": expire, "type": "refresh", "jti": uuid.uuid4().hex})
         
         encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
         return encoded_jwt

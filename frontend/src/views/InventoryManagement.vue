@@ -404,7 +404,7 @@ const getProductImageUrl = (product) => {
   }
   
   // 最后使用占位图
-  return '/placeholder.png'
+  return '/placeholder.svg'
 }
 
 /**
