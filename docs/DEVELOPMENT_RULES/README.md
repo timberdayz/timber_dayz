@@ -30,3 +30,4 @@ Use this directory for deep-dive references and templates. Do not treat it as th
 
 - When detailed docs conflict with active skills, prefer skills unless the difference is a repository-specific constraint recorded in `.cursorrules`.
 - When detailed docs conflict with `.cursorrules`, update the docs so the repository constraint and the reference stay aligned.
+- GitHub release operations in this repository are tag-driven; `origin/main` is not the deployment source of truth.

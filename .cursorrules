@@ -21,6 +21,8 @@ Use this file to adapt those skills to the actual codebase.
   - `task_plan.md`
   - `findings.md`
   - `progress.md`
+- GitHub production release is tag-driven.
+- Do not treat `origin/main` drift as a release failure by itself.
 
 ## Core Repository Constraints
 
@@ -68,6 +70,13 @@ Use this file to adapt those skills to the actual codebase.
 - Do not create ad hoc backup source files such as `*_backup.py`
 - Keep new rule changes aligned with `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/skill-integration.mdc`
 - Treat `docs/guides/DEVELOPMENT_RULES.md` as historical only if it remains in the repository
+
+### Git And Release Interpretation
+
+- Local `main` tracks `cnb/main` in this repository.
+- `origin/main` is the GitHub remote-tracking branch and may lag behind release tags.
+- Production deployment is triggered by `git push origin vX.Y.Z`.
+- Push `main` to `origin` only when you intentionally want GitHub branch history to match local branch history.
 
 ## Detailed References
 

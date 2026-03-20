@@ -88,6 +88,20 @@ ruff check .
 mypy backend/
 ```
 
+### Release
+
+```bash
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+Release interpretation:
+
+- GitHub Actions production deployment is triggered by release tags.
+- `origin/main` is not the release source of truth.
+- `main`, `cnb/main`, and `origin/main` can legitimately differ if only tags are pushed to GitHub.
+- If you want GitHub branch state to match local branch state, push `main` separately.
+
 ## Repository Constraints
 
 - ORM models are defined only in `modules/core/db/schema.py`

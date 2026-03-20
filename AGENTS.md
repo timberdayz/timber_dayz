@@ -26,4 +26,11 @@ This repository uses a skill-first workflow.
 - Runtime Playwright inside backend code must stay async-first
 - Windows terminal/log output must avoid emoji
 
+## Release Model
+
+- The GitHub deployment pipeline is tag-driven, not `origin/main` driven.
+- Treat release tags such as `vX.Y.Z` as the deployment source of truth.
+- `origin/main` may lag behind the currently deployed tag and that alone is not an error.
+- Local `main` currently tracks `cnb/main`; `origin/main` is only the GitHub remote-tracking branch.
+
 Answer users in Chinese unless they explicitly ask for another language.
