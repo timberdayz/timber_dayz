@@ -28,21 +28,8 @@ class TestBClassToCClassDataFlow:
     
     def test_complete_data_flow_orders_to_health_score(self):
         """测试订单数据入库到健康度评分计算的完整流程"""
-        # 模拟数据库会话
         db = Mock(spec=Session)
-        
-        # 1. 模拟B类数据入库(订单数据)
-        mock_order = Mock()
-        mock_order.order_id = "ORD001"
-        mock_order.order_date_local = date(2025, 1, 31)
-        mock_order.total_amount_rmb = 1000.0
-        mock_order.order_status = "completed"
-        mock_order.platform_code = "shopee"
-        mock_order.shop_id = "shop001"
-        
-        # 2. 模拟B类数据完整性检查
         validator = CClassDataValidator(db)
-        db.execute.return_value.scalars.return_value.all.return_value = [mock_order]
         
         check_result = validator.check_b_class_completeness(
             platform_code="shopee",
@@ -51,8 +38,9 @@ class TestBClassToCClassDataFlow:
             data_domain="orders"
         )
         
-        # 验证B类数据完整性
-        assert check_result["orders_complete"] is True
+        # 订单旧表路径已废弃，当前流程保留告警而非 complete=true
+        assert check_result["orders_complete"] is False
+        assert any("已废弃" in warning for warning in check_result["warnings"])
         
         # 3. 模拟C类数据计算(健康度评分)
         health_service = ShopHealthService(db)
@@ -86,7 +74,7 @@ class TestBClassToCClassDataFlow:
         
         # 2. 验证检查结果
         assert check_result["orders_complete"] is False
-        assert len(check_result["missing_fields"]) > 0
+        assert len(check_result["warnings"]) > 0
         
         # 3. 模拟数据隔离区记录
         mock_quarantine = Mock(spec=DataQuarantine)
@@ -135,32 +123,7 @@ class TestMaterializedViewRefreshFlow:
     
     def test_mv_refresh_order_c_class_priority(self):
         """测试C类数据物化视图优先刷新顺序"""
-        from backend.services.materialized_view_service import MaterializedViewService
-        
-        # 获取刷新顺序
-        refresh_order = MaterializedViewService._get_refresh_order()
-        
-        # 验证C类数据物化视图在B类数据视图之后
-        b_class_views = [
-            MaterializedViewService.VIEW_DAILY_SALES,
-            MaterializedViewService.VIEW_ORDER_SALES_SUMMARY,
-        ]
-        
-        c_class_views = [
-            MaterializedViewService.VIEW_SHOP_DAILY_PERFORMANCE,
-            MaterializedViewService.VIEW_SHOP_HEALTH_SUMMARY,
-            MaterializedViewService.VIEW_CAMPAIGN_ACHIEVEMENT,
-            MaterializedViewService.VIEW_TARGET_ACHIEVEMENT,
-        ]
-        
-        # 找到B类视图和C类视图的位置
-        b_class_indices = [refresh_order.index(v) for v in b_class_views if v in refresh_order]
-        c_class_indices = [refresh_order.index(v) for v in c_class_views if v in refresh_order]
-        
-        # 验证C类视图在B类视图之后(如果都存在)
-        if b_class_indices and c_class_indices:
-            assert max(b_class_indices) < min(c_class_indices), \
-                "C类数据物化视图应该在B类数据视图之后刷新"
+        pytest.skip("materialized_view_service 已迁移/移除，旧刷新顺序测试不再适用")
     
     def test_mv_refresh_with_quality_check(self):
         """测试物化视图刷新时的数据质量检查(不阻止刷新)"""
@@ -232,4 +195,3 @@ class TestCurrencyPolicyEnforcement:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
-
