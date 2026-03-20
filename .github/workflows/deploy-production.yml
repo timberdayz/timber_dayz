@@ -69,12 +69,12 @@ jobs:
           --health-retries 5
     steps:
       - name: Checkout code (tag)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.ref }}
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -234,7 +234,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout code (tag)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.ref }}
 
@@ -290,7 +290,7 @@ jobs:
             type=sha,format=short,prefix=sha-
 
       - name: Build and push backend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.backend
@@ -303,7 +303,7 @@ jobs:
             PYTHON_VERSION=3.11
 
       - name: Build and push backend-full image (collection, Dockerfile.collection)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.collection
@@ -314,7 +314,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push frontend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.frontend
@@ -385,7 +385,7 @@ jobs:
 
     steps:
       - name: Checkout code (tag)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.ref }}
 
@@ -396,7 +396,7 @@ jobs:
           echo "Deploying with tag: ${GITHUB_REF_NAME}"
 
       - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.8.0
+        uses: webfactory/ssh-agent@v0.9.1
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
 
@@ -665,7 +665,7 @@ jobs:
       name: production
     steps:
       - name: Checkout code (main)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
 
@@ -684,7 +684,7 @@ jobs:
           echo "Deploying with tag: ${{ github.event.inputs.image_tag }}"
 
       - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.8.0
+        uses: webfactory/ssh-agent@v0.9.1
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
 
@@ -999,7 +999,7 @@ jobs:
 
       - name: Set up SSH for rollback
         if: failure()
-        uses: webfactory/ssh-agent@v0.8.0
+        uses: webfactory/ssh-agent@v0.9.1
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
 

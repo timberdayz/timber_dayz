@@ -123,6 +123,7 @@ Release interpretation:
 | [`.cursorrules`](F:/Vscode/python_programme/AI_code/xihong_erp/.cursorrules) | Repository-specific constraints |
 | [`.cursor/rules/skill-integration.mdc`](F:/Vscode/python_programme/AI_code/xihong_erp/.cursor/rules/skill-integration.mdc) | Skill adaptation rules |
 | [`docs/DEVELOPMENT_RULES/README.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/DEVELOPMENT_RULES/README.md) | Detailed reference index |
+| [`docs/guides/RELEASE_CHECKLIST.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/RELEASE_CHECKLIST.md) | Tag release and post-release verification checklist |
 | [`docs/superpowers/README.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/superpowers/README.md) | Skill-first planning/spec locations |
 | [`openspec/`](F:/Vscode/python_programme/AI_code/xihong_erp/openspec) | Historical archive only |
 
