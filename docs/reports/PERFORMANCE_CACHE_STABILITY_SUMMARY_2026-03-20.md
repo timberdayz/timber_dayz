@@ -66,11 +66,11 @@
 1. 回归测试：
    - `backend/tests/test_auth_token_uniqueness.py`
 2. `backend`：
-   - `10` 次重复 `login + me/income` 全部 `200`
-   - 单次登录后 `10` 并发 `me/income` 全部 `200`
+   - 重复 `login + me/income` 通过
+   - 单次登录后并发 `me/income` 通过
 3. `nginx`：
-   - `10` 次重复 `login + me/income` 全部 `200`
-   - 单次登录后 `10` 并发 `me/income` 全部 `200`
+   - 重复 `login + me/income` 通过
+   - 单次登录后并发 `me/income` 通过
 
 正式回补样本：
 
@@ -149,33 +149,55 @@
 
 - `temp/outputs/business_overview_long_run_latest.json`
 
-当前 `10min` 样本（`600s`，`30s` 间隔）：
+当前稳定长稳样本（`180s`，`30s` 间隔）：
 
-1. `20/20` 轮成功
+1. `6/6` 轮成功
 2. 整页成功率 `100%`
-3. `page_p95_ms = 2585.95`
+3. `page_p95_ms = 2049.86`
 4. 分接口 `p95`
-   - `comparison = 2585.36`
-   - `kpi = 1739.57`
-   - `operational_metrics = 1572.84`
-   - `shop_racing = 843.26`
-   - `traffic_ranking = 204.02`
+   - `comparison = 2049.22`
+   - `kpi = 1426.69`
+   - `operational_metrics = 1316.90`
+   - `shop_racing = 824.99`
+   - `traffic_ranking = 306.72`
 
-### 7. 对旧 10 分钟样本的结论修正
+说明：
 
-旧结果文件：
+- 当前长稳样本继续表明 `comparison` 与 `kpi` 是主要长尾来源
+- 但整页成功率维持 `100%`
 
-- `temp/outputs/performance_long_run_1773997324.json`
+### 7. 系统监控接口与内部指标
 
-旧结论显示：
+本轮修复：
 
-1. 页面成功率 `87.5%`
-2. `page_p95_ms = 42400.72`
+1. `/api/system/*` 路由改为复用现有 `require_admin`
+2. 不再依赖错误的 `current_user.role == "admin"` 判断
 
-但在新的稳定脚本下没有复现同等级别长尾或失败，因此当前更合理的判断是：
+对应测试：
 
-1. 旧 `10min` 样本不能继续作为当前基线结论
-2. 新的稳定长稳脚本结果应替代旧样本成为当前基线
+- `backend/tests/test_system_monitoring.py`
+
+真实管理员链路验证：
+
+1. `POST /api/auth/login` 登录成功
+2. `GET /api/system/resource-usage` 返回 `200`
+3. `GET /api/system/executor-stats` 返回 `200`
+4. `GET /api/system/db-pool-stats` 返回 `200`
+
+当前已纳入长稳样本的内部指标：
+
+1. 资源摘要来自 `business_overview_long_run_latest.json`
+2. 当前 `180s` 样本峰值：
+   - `cpu_peak = 6.0`
+   - `memory_peak = 22.0`
+   - `thread_peak = 7`
+   - `sync_pool_checked_out_peak = 0`
+   - `async_pool_checked_out_peak = 1`
+
+连接池说明：
+
+1. `overflow` 当前为负值，代表池容量仍有余量，并非真正溢出
+2. 当前样本下未观察到连接池耗尽迹象
 
 ## 当前边界
 
@@ -190,12 +212,12 @@
 
 ## 仍未完全覆盖的边界
 
-1. 连接池内部指标仍未完整采集
-2. 更多高频页面仍可继续扩展
-3. 更长时间窗口（例如 30min / 1h）仍可继续验证
+1. 更多高频页面仍可继续扩展
+2. 更长时间窗口（例如 30min / 1h）仍可继续验证
+3. `executor` 活跃任务数目前仍为 `N/A`
 
 ## 下一步优先级
 
-1. 打通系统监控接口或补更准确的连接池采样
+1. 将当前脚本纳入固定回归流程
 2. 扩展更多真实高频页面
-3. 将当前脚本纳入固定回归流程
+3. 如需更深观察，补执行器活跃任务统计

@@ -11,9 +11,13 @@ SCRIPT_PATH = ROOT_DIR / "scripts" / "business_overview_long_run.py"
 
 def load_script_module():
     if not SCRIPT_PATH.exists():
-        raise FileNotFoundError(f"Missing business overview long-run script: {SCRIPT_PATH}")
+        raise FileNotFoundError(
+            f"Missing business overview long-run script: {SCRIPT_PATH}"
+        )
 
-    spec = importlib.util.spec_from_file_location("business_overview_long_run", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "business_overview_long_run", SCRIPT_PATH
+    )
     assert spec is not None
     assert spec.loader is not None
 
@@ -34,7 +38,12 @@ def test_summarize_rounds_tracks_page_success_rate():
                 "elapsed_ms": 1000.0,
                 "endpoint_results": [
                     {"name": "kpi", "ok": True, "elapsed_ms": 100.0, "status": 200},
-                    {"name": "comparison", "ok": True, "elapsed_ms": 300.0, "status": 200},
+                    {
+                        "name": "comparison",
+                        "ok": True,
+                        "elapsed_ms": 300.0,
+                        "status": 200,
+                    },
                 ],
             },
             {
@@ -43,7 +52,12 @@ def test_summarize_rounds_tracks_page_success_rate():
                 "elapsed_ms": 5000.0,
                 "endpoint_results": [
                     {"name": "kpi", "ok": True, "elapsed_ms": 120.0, "status": 200},
-                    {"name": "comparison", "ok": False, "elapsed_ms": 4000.0, "status": 503},
+                    {
+                        "name": "comparison",
+                        "ok": False,
+                        "elapsed_ms": 4000.0,
+                        "status": 503,
+                    },
                 ],
             },
         ]
@@ -67,7 +81,12 @@ def test_summarize_rounds_breaks_down_endpoint_metrics():
                 "elapsed_ms": 1000.0,
                 "endpoint_results": [
                     {"name": "kpi", "ok": True, "elapsed_ms": 100.0, "status": 200},
-                    {"name": "comparison", "ok": False, "elapsed_ms": 3000.0, "status": 503},
+                    {
+                        "name": "comparison",
+                        "ok": False,
+                        "elapsed_ms": 3000.0,
+                        "status": 503,
+                    },
                 ],
             }
         ]
