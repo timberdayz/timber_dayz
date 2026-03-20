@@ -17,6 +17,7 @@ from sqlalchemy import select, func, and_, or_
 from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
+import time
 
 from backend.models.database import get_db, get_async_db
 from backend.utils.api_response import success_response, error_response, pagination_response
@@ -68,6 +69,7 @@ async def get_products(
         from modules.core.db import DimPlatform
         
         platform_table_manager = get_platform_table_manager(db)
+        query_started_at = time.perf_counter()
         
         # 构建查询条件(不包含platform,因为platform用于表名)
         conditions = ["1=1"]
@@ -89,16 +91,43 @@ async def get_products(
             platforms = [platform]
         else:
             # 跨平台查询:从dim_platforms表查询所有平台
-            platform_rows = db.execute(
+            platform_rows_result = await db.execute(
                 text("SELECT platform_code FROM dim_platforms WHERE is_active = true")
-            ).fetchall()
+            )
+            platform_rows = platform_rows_result.fetchall()
             platforms = [row[0] for row in platform_rows] if platform_rows else []
         
         if not platforms:
-            return pagination_response([], 0, page, page_size)
-        
-        # 构建UNION ALL查询(跨平台)
-        union_queries = []
+            empty_payload = {
+                'data': [],
+                'total': 0,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': 0,
+                'has_previous': False,
+                'has_next': False,
+                'stats': {
+                    'total_products': 0,
+                    'total_stock': 0,
+                    'low_stock_count': 0,
+                    'with_image_count': 0,
+                },
+                'performance': {
+                    'query_time_ms': round((time.perf_counter() - query_started_at) * 1000, 2),
+                    'data_source': 'dynamic_table',
+                },
+            }
+            return success_response(data=empty_payload)
+
+        existing_platforms = []
+        table_exists_sql = text("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'b_class'
+                AND table_name = :table_name
+            )
+        """)
         for platform_code in platforms:
             table_name = platform_table_manager.get_table_name(
                 platform=platform_code,
@@ -106,32 +135,58 @@ async def get_products(
                 sub_domain=None,
                 granularity='snapshot'
             )
+            exists_result = await db.execute(table_exists_sql, {'table_name': table_name})
+            if exists_result.scalar():
+                existing_platforms.append((platform_code, table_name))
+            else:
+                logger.info(f"[GetProducts] 跳过不存在的库存表: {table_name}")
+
+        if not existing_platforms:
+            empty_payload = {
+                'data': [],
+                'total': 0,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': 0,
+                'has_previous': False,
+                'has_next': False,
+                'stats': {
+                    'total_products': 0,
+                    'total_stock': 0,
+                    'low_stock_count': 0,
+                    'with_image_count': 0,
+                },
+                'performance': {
+                    'query_time_ms': round((time.perf_counter() - query_started_at) * 1000, 2),
+                    'data_source': 'dynamic_table',
+                },
+            }
+            return success_response(data=empty_payload)
+        
+        # 构建UNION ALL查询(跨平台)
+        union_queries = []
+        for platform_code, table_name in existing_platforms:
             union_queries.append(f"""
                 SELECT 
                     raw_data,
                     metric_date,
                     granularity,
-                    created_at,
-                    updated_at
+                    ingest_timestamp AS created_at,
+                    ingest_timestamp AS updated_at
                 FROM b_class."{table_name}"
                 WHERE {where_clause}
             """)
         
         # 查询总数(所有平台)
         count_queries = []
-        for platform_code in platforms:
-            table_name = platform_table_manager.get_table_name(
-                platform=platform_code,
-                data_domain='inventory',
-                sub_domain=None,
-                granularity='snapshot'
-            )
+        for _platform_code, table_name in existing_platforms:
             count_queries.append(f'SELECT COUNT(*) FROM b_class."{table_name}" WHERE {where_clause}')
         
         total = 0
         for count_sql in count_queries:
             try:
-                count = db.execute(text(count_sql), params).scalar() or 0
+                count_result = await db.execute(text(count_sql), params)
+                count = count_result.scalar() or 0
                 total += count
             except Exception as e:
                 logger.warning(f"查询表 {count_sql.split('FROM')[1].split('WHERE')[0].strip()} 失败(可能不存在): {e}")
@@ -149,7 +204,7 @@ async def get_products(
         params["limit"] = page_size
         params["offset"] = offset
         
-        result = db.execute(text(data_sql), params)
+        result = await db.execute(text(data_sql), params)
         rows = result.fetchall()
         
         # 转换为字典列表(从JSONB字段提取数据)
@@ -157,7 +212,8 @@ async def get_products(
             "data": [],
             "total": total,
             "page": page,
-            "page_size": page_size
+            "page_size": page_size,
+            "query_time_ms": 0,
         }
         
         for row in rows:
@@ -290,7 +346,8 @@ async def get_products(
             f"page={page}, "
             f"results={len(results)}"
         )
-        
+        mv_result["query_time_ms"] = round((time.perf_counter() - query_started_at) * 1000, 2)
+
         # 使用success_response包装分页数据(包含额外的stats和performance信息)
         pagination_data = {
             'data': results,
@@ -806,4 +863,3 @@ async def get_platform_summary(
             recovery_suggestion="请检查数据库连接和查询参数,或联系系统管理员",
             status_code=500
         )
-
