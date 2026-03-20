@@ -332,7 +332,7 @@ async def register_version(
     db: AsyncSession = Depends(get_async_db),
     http_request: Request = None,
 ):
-    """注册新版本"""
+    """注册新版本。新注册版本默认是草稿版本，不会直接成为稳定版本。"""
     try:
         service = ComponentVersionService(db)
         

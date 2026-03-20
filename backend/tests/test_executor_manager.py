@@ -15,6 +15,58 @@ import os
 from backend.services.executor_manager import ExecutorManager, get_executor_manager
 
 
+def cpu_fibonacci_task(n):
+    """模块级 CPU 测试任务，可被进程池序列化。"""
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(n - 1):
+        a, b = b, a + b
+    return b
+
+
+def multiply_task(a, b, multiplier=1):
+    return (a * b) * multiplier
+
+
+def failing_cpu_task():
+    raise ValueError("测试错误")
+
+
+def heavy_sum_task():
+    total = 0
+    for i in range(10000000):
+        total += i
+    return total
+
+
+def million_sum_task(n):
+    total = 0
+    for i in range(n):
+        total += i
+    return total
+
+
+def io_sleep_task(duration):
+    time.sleep(duration)
+    return f"完成 {duration}"
+
+
+@pytest.fixture(autouse=True)
+async def reset_executor_manager():
+    """每个测试用例前后重置单例，避免复用已关闭的执行器。"""
+    ExecutorManager._instance = None
+    ExecutorManager._initialized = False
+    yield
+    if ExecutorManager._instance is not None:
+        try:
+            await ExecutorManager._instance.shutdown(timeout=1)
+        except Exception:
+            pass
+    ExecutorManager._instance = None
+    ExecutorManager._initialized = False
+
+
 class TestExecutorManagerSingleton:
     """测试 ExecutorManager 单例模式"""
 
@@ -51,29 +103,17 @@ class TestExecutorManagerCPUIntensive:
     async def test_run_cpu_intensive_basic(self):
         """测试基本的 CPU 密集型操作"""
         executor_manager = get_executor_manager()
-        
-        def cpu_task(n):
-            """CPU 密集型任务:计算斐波那契数列"""
-            if n <= 1:
-                return n
-            a, b = 0, 1
-            for _ in range(n - 1):
-                a, b = b, a + b
-            return b
-        
-        result = await executor_manager.run_cpu_intensive(cpu_task, 30)
+
+        result = await executor_manager.run_cpu_intensive(cpu_fibonacci_task, 30)
         assert result == 832040  # 第30个斐波那契数
 
     @pytest.mark.asyncio
     async def test_run_cpu_intensive_with_kwargs(self):
         """测试带关键字参数的 CPU 密集型操作"""
         executor_manager = get_executor_manager()
-        
-        def multiply(a, b, multiplier=1):
-            return (a * b) * multiplier
-        
+
         result = await executor_manager.run_cpu_intensive(
-            multiply,
+            multiply_task,
             5,
             10,
             multiplier=2
@@ -84,12 +124,9 @@ class TestExecutorManagerCPUIntensive:
     async def test_run_cpu_intensive_error_handling(self):
         """测试 CPU 密集型操作的错误处理"""
         executor_manager = get_executor_manager()
-        
-        def failing_task():
-            raise ValueError("测试错误")
-        
+
         with pytest.raises(ValueError, match="测试错误"):
-            await executor_manager.run_cpu_intensive(failing_task)
+            await executor_manager.run_cpu_intensive(failing_cpu_task)
 
     @pytest.mark.asyncio
     async def test_run_cpu_intensive_pickle_error(self):
@@ -177,14 +214,10 @@ class TestExecutorManagerShutdown:
     async def test_shutdown_with_running_tasks(self):
         """测试关闭时等待正在运行的任务"""
         executor_manager = get_executor_manager()
-        
-        async def long_task():
-            await asyncio.sleep(0.5)
-            return "完成"
-        
+
         # 启动一个长时间运行的任务
         task = asyncio.create_task(
-            executor_manager.run_io_intensive(lambda: time.sleep(0.3))
+            executor_manager.run_io_intensive(time.sleep, 0.3)
         )
         
         # 等待一小段时间,确保任务已开始
@@ -236,17 +269,10 @@ class TestExecutorManagerConcurrency:
     async def test_concurrent_cpu_tasks(self):
         """测试并发 CPU 密集型任务"""
         executor_manager = get_executor_manager()
-        
-        def cpu_task(n):
-            """CPU 密集型任务"""
-            total = 0
-            for i in range(n):
-                total += i
-            return total
-        
+
         # 并发执行多个任务
         tasks = [
-            executor_manager.run_cpu_intensive(cpu_task, 1000000)
+            executor_manager.run_cpu_intensive(million_sum_task, 1000000)
             for _ in range(5)
         ]
         
@@ -260,15 +286,10 @@ class TestExecutorManagerConcurrency:
     async def test_concurrent_io_tasks(self):
         """测试并发 I/O 密集型任务"""
         executor_manager = get_executor_manager()
-        
-        def io_task(duration):
-            """I/O 密集型任务"""
-            time.sleep(duration)
-            return f"完成 {duration}"
-        
+
         # 并发执行多个任务
         tasks = [
-            executor_manager.run_io_intensive(io_task, 0.1)
+            executor_manager.run_io_intensive(io_sleep_task, 0.1)
             for _ in range(10)
         ]
         
@@ -281,4 +302,3 @@ class TestExecutorManagerConcurrency:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

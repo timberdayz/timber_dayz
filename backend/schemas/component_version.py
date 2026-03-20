@@ -54,7 +54,7 @@ class VersionRegisterRequest(BaseModel):
     version: str = Field(..., description="版本号(如 1.0.0)")
     file_path: str = Field(..., description="文件路径")
     description: Optional[str] = Field(None, description="版本说明")
-    is_stable: bool = Field(False, description="是否标记为稳定版本")
+    is_stable: bool = Field(False, description="是否标记为稳定版本（正式运行需通过 promote 单独提升，注册时会忽略此值）")
     created_by: Optional[str] = Field(None, description="创建人")
 
 
@@ -157,4 +157,3 @@ __all__ = [
     "TestHistoryListResponse",
     "TestResumeRequest",
 ]
-

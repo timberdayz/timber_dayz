@@ -17,9 +17,10 @@ class FakeHRIncomeService:
     async def calculate_month(self, year_month: str) -> Dict[str, Any]:
         return {
             "year_month": year_month,
-            "total_employees": 0,
-            "updated_commissions": 0,
-            "updated_performance": 0,
+            "employee_count": 0,
+            "commission_upserts": 0,
+            "performance_upserts": 0,
+            "source": "test-double",
         }
 
 
@@ -43,7 +44,6 @@ async def test_calculate_income_uses_overridden_service(auth_headers: dict[str, 
         assert resp.status_code == 200
         data = resp.json()
         assert data["year_month"] == "2025-01"
-        assert data["total_employees"] == 0
+        assert data["employee_count"] == 0
     finally:
         app.dependency_overrides.pop(hr_employee.hr_income_service_dep, None)
-

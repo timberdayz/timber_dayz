@@ -58,7 +58,7 @@ class TestCompleteCollectionToSync:
         result = db.execute(text("""
             SELECT COUNT(*) 
             FROM information_schema.tables 
-            WHERE table_schema = 'public'
+            WHERE table_schema IN ('public', 'core')
               AND table_name = 'collection_tasks'
         """)).scalar()
         assert result >= 1, "collection_tasks表不存在"

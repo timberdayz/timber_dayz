@@ -512,6 +512,7 @@ class CollectionExecutorV2:
         debug_mode: bool = False,  # v4.7.0: 调试模式
         browser = None,  # 推荐: Playwright Browser 对象, 执行器自建带指纹与会话的 context
         proxy: Optional[Dict[str, str]] = None,  # 代理预留, 当前不注入
+        runtime_manifests: Optional[Dict[str, Any]] = None,
     ) -> CollectionResult:
         """
         执行采集任务(v4.7.0 - 任务粒度优化)
@@ -665,6 +666,7 @@ class CollectionExecutorV2:
                     save_session_after_login=use_account_session_fingerprint and bool(account_id_norm),
                     session_platform=platform,
                     session_account_id=account_id_norm,
+                    runtime_manifests=runtime_manifests,
                 )
 
             # ===== 以下为旧的 YAML 组件执行流程(将被废弃) =====
@@ -1064,6 +1066,55 @@ class CollectionExecutorV2:
             logger.error(f"[PythonComponent] {component_type} exception: {e}")
             return False
 
+    def _load_runtime_manifest_component_class(self, manifest: Any):
+        """Load a Python component class from a stable runtime manifest."""
+        if manifest is None:
+            raise StepExecutionError(
+                "runtime manifest is required for stable component execution"
+            )
+
+        file_path = getattr(manifest, "file_path", None) or manifest.get("file_path")
+        platform = getattr(manifest, "platform", None) or manifest.get("platform")
+        component_type = getattr(manifest, "component_type", None) or manifest.get(
+            "component_type"
+        )
+
+        if not file_path or not platform or not component_type:
+            raise StepExecutionError(
+                "runtime manifest missing file_path/platform/component_type"
+            )
+
+        return self.component_loader.load_python_component_from_path(
+            file_path,
+            platform=platform,
+            component_type=component_type,
+        )
+
+    async def _run_runtime_manifest_component(
+        self,
+        *,
+        page,
+        manifest: Any,
+        account: Dict[str, Any],
+        config: Dict[str, Any],
+        run_args: Optional[List[Any]] = None,
+        run_kwargs: Optional[Dict[str, Any]] = None,
+    ):
+        """Execute a component resolved from a stable runtime manifest."""
+        from modules.components.base import ExecutionContext
+
+        component_class = self._load_runtime_manifest_component_class(manifest)
+        platform = getattr(manifest, "platform", None) or manifest.get("platform")
+        ctx = ExecutionContext(
+            platform=platform,
+            account=account,
+            config=config,
+        )
+        component = component_class(ctx)
+        args = run_args or []
+        kwargs = run_kwargs or {}
+        return await component.run(page, *args, **kwargs)
+
     async def _wait_verification_and_continue(
         self,
         task_id: str,
@@ -1105,6 +1156,7 @@ class CollectionExecutorV2:
         save_session_after_login: bool = False,
         session_platform: str = "",
         session_account_id: str = "",
+        runtime_manifests: Optional[Dict[str, Any]] = None,
     ) -> CollectionResult:
         """
         v4.8.0: 使用 Python 组件执行采集流程
@@ -1113,11 +1165,13 @@ class CollectionExecutorV2:
         1. Login(登录组件); 若 save_session_after_login 则在成功后保存会话
         2. Loop: Export(循环执行各数据域的导出组件)
         """
-        adapter = create_adapter(
-            platform=platform,
-            account=account,
-            config=params,
-        )
+        adapter = None
+        if runtime_manifests is None:
+            adapter = create_adapter(
+                platform=platform,
+                account=account,
+                config=params,
+            )
 
         # 1. 执行登录组件( params 中已含 reused_session 标记)；支持验证码暂停→回传→同一 page 继续
         if context.current_component_index == 0:
@@ -1128,12 +1182,22 @@ class CollectionExecutorV2:
             login_success = False
             while True:
                 try:
-                    login_success = await self._execute_python_component(
-                        page=page,
-                        adapter=adapter,
-                        component_type="login",
-                        params=params,
-                    )
+                    if runtime_manifests is not None:
+                        login_manifest = runtime_manifests.get("login")
+                        login_result = await self._run_runtime_manifest_component(
+                            page=page,
+                            manifest=login_manifest,
+                            account=account,
+                            config=params,
+                        )
+                        login_success = bool(getattr(login_result, "success", False))
+                    else:
+                        login_success = await self._execute_python_component(
+                            page=page,
+                            adapter=adapter,
+                            component_type="login",
+                            params=params,
+                        )
                     break
                 except VerificationRequiredError as e:
                     value = await self._wait_verification_and_continue(
@@ -1205,11 +1269,24 @@ class CollectionExecutorV2:
                     await self.popup_handler.close_popups(page, platform=platform)
                     
                     # 每域用含该域参数的 config 创建 adapter，以便组件从 config 读取 data_domain/sub_domain
-                    domain_adapter = create_adapter(platform=platform, account=account, config=export_params)
-                    export_result = await domain_adapter.export(
-                        page=page,
-                        data_domain=domain,
-                    )
+                    if runtime_manifests is not None:
+                        export_manifest = runtime_manifests.get("exports_by_domain", {}).get(full_domain)
+                        if export_manifest is None:
+                            raise StepExecutionError(
+                                f"runtime manifest missing for export domain {full_domain}"
+                            )
+                        export_result = await self._run_runtime_manifest_component(
+                            page=page,
+                            manifest=export_manifest,
+                            account=account,
+                            config=export_params,
+                        )
+                    else:
+                        domain_adapter = create_adapter(platform=platform, account=account, config=export_params)
+                        export_result = await domain_adapter.export(
+                            page=page,
+                            data_domain=domain,
+                        )
                     
                     if export_result.success:
                         if export_result.file_path:
@@ -1230,7 +1307,7 @@ class CollectionExecutorV2:
                 
                 except VerificationRequiredError as e:
                     value = await self._wait_verification_and_continue(
-                        task_id, e.verification_type, e.screenshot_path, page, export_params, domain_adapter, is_login=False, domain_info=full_domain
+                        task_id, e.verification_type, e.screenshot_path, page, export_params, adapter, is_login=False, domain_info=full_domain
                     )
                     if value is None:
                         context.failed_domains.append({"domain": full_domain, "error": "验证码等待超时"})
@@ -1250,7 +1327,17 @@ class CollectionExecutorV2:
                     else:
                         export_params.setdefault("params", {})["captcha_code"] = value
                     try:
-                        export_result = await domain_adapter.export(page=page, data_domain=domain)
+                        if runtime_manifests is not None:
+                            export_manifest = runtime_manifests.get("exports_by_domain", {}).get(full_domain)
+                            export_result = await self._run_runtime_manifest_component(
+                                page=page,
+                                manifest=export_manifest,
+                                account=account,
+                                config=export_params,
+                            )
+                        else:
+                            domain_adapter = create_adapter(platform=platform, account=account, config=export_params)
+                            export_result = await domain_adapter.export(page=page, data_domain=domain)
                         if export_result.success:
                             if export_result.file_path:
                                 context.collected_files.append(export_result.file_path)
@@ -2850,6 +2937,7 @@ class CollectionExecutorV2:
         browser,  # Playwright Browser对象
         max_parallel: int = 3,  # 最大并发数
         debug_mode: bool = False,
+        runtime_manifests: Optional[Dict[str, Any]] = None,
     ) -> CollectionResult:
         """
         [*] Phase 9.1: 并行执行多个数据域
@@ -2942,14 +3030,24 @@ class CollectionExecutorV2:
             'downloads_path': str(task_download_dir),
         }
         try:
-            adapter = create_adapter(platform=platform, account=account, config=params)
             step_popup_handler = StepPopupHandler(self.popup_handler, platform)
-            login_success = await self._execute_python_component(
-                page=login_page,
-                adapter=adapter,
-                component_type="login",
-                params=params,
-            )
+            if runtime_manifests is not None:
+                login_manifest = runtime_manifests.get("login")
+                login_result = await self._run_runtime_manifest_component(
+                    page=login_page,
+                    manifest=login_manifest,
+                    account=account,
+                    config=params,
+                )
+                login_success = bool(getattr(login_result, "success", False))
+            else:
+                adapter = create_adapter(platform=platform, account=account, config=params)
+                login_success = await self._execute_python_component(
+                    page=login_page,
+                    adapter=adapter,
+                    component_type="login",
+                    params=params,
+                )
             duration_ms = int((datetime.now() - login_start_time).total_seconds() * 1000)
             await self._update_status(
                 task_id, 10, "登录结束",
@@ -3019,6 +3117,7 @@ class CollectionExecutorV2:
                     domain_index=data_domains.index(domain),
                     total_domains=len(data_domains),
                     context_options=domain_context_options,
+                    runtime_manifests=runtime_manifests,
                 )
                 tasks.append(task)
             
@@ -3108,6 +3207,7 @@ class CollectionExecutorV2:
         domain_index: int,
         total_domains: int,
         context_options: Optional[Dict[str, Any]] = None,
+        runtime_manifests: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """
         [*] Phase 9.1: 在独立浏览器上下文中执行单个数据域采集(带指纹与会话)
@@ -3148,12 +3248,24 @@ class CollectionExecutorV2:
                 'downloads_path': str(task_download_dir),
             }
             
-            # 使用 create_adapter + adapter.export（与顺序路径同一套组件执行模型）
-            domain_adapter = create_adapter(platform=platform, account=account, config=params)
-            export_result = await domain_adapter.export(
-                page=domain_page,
-                data_domain=data_domain,
-            )
+            if runtime_manifests is not None:
+                export_manifest = runtime_manifests.get("exports_by_domain", {}).get(data_domain)
+                if export_manifest is None:
+                    raise StepExecutionError(
+                        f"runtime manifest missing for export domain {data_domain}"
+                    )
+                export_result = await self._run_runtime_manifest_component(
+                    page=domain_page,
+                    manifest=export_manifest,
+                    account=account,
+                    config=params,
+                )
+            else:
+                domain_adapter = create_adapter(platform=platform, account=account, config=params)
+                export_result = await domain_adapter.export(
+                    page=domain_page,
+                    data_domain=data_domain,
+                )
             file_path = export_result.file_path if export_result.success else None
             duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
             await self._update_status(
@@ -3185,4 +3297,3 @@ class CollectionExecutorV2:
                     await domain_context.close()
                 except:
                     pass
-

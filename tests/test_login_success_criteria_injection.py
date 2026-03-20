@@ -33,9 +33,10 @@ def test_injects_url_contains_and_not_contains_and_element_selector() -> None:
     # URL 不包含判断
     assert "if '/login' in current_url" in out
 
-    # 元素可见性判断
-    assert "page.locator('role=navigation').first" in out
-    assert "await _succ_elem.wait_for(state=\"visible\", timeout=10000)" in out
+    # 元素可见性判断（当前规范：唯一性检查 + expect 可见）
+    assert "_succ_elem = page.locator('role=navigation')" in out
+    assert "await expect(_succ_elem).to_have_count(1)" in out
+    assert "await expect(_succ_elem).to_be_visible(timeout=10000)" in out
 
 
 def test_no_old_block_returns_original_code() -> None:
@@ -43,4 +44,3 @@ def test_no_old_block_returns_original_code() -> None:
     crit = {"url_contains": "/welcome"}
     out = _inject_login_success_criteria_block(code, crit)
     assert out == code
-

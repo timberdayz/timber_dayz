@@ -2,7 +2,7 @@
   <div class="component-versions">
     <div class="page-header">
       <h2>采集组件库</h2>
-      <p class="subtitle">管理采集组件版本，A/B测试，快速回滚</p>
+      <p class="subtitle">管理采集组件版本，A/B测试，快速回滚。只有稳定版本可用于正式采集和定时调度。</p>
     </div>
 
     <!-- 筛选栏：筛选为空时后端按全选处理 -->
@@ -120,7 +120,7 @@
               <el-tag v-if="row.is_stable" type="success" size="small">稳定</el-tag>
               <el-tag v-if="row.is_testing" type="warning" size="small">测试中</el-tag>
               <el-tag v-if="!row.is_active" type="info" size="small">已禁用</el-tag>
-              <el-tooltip v-if="hasMultiStableConflict(row)" content="该组件类型存在多个稳定版，生产将按 updated_at 取最新" placement="top">
+              <el-tooltip v-if="hasMultiStableConflict(row)" content="该组件类型存在多个稳定版冲突。正式运行应先清理冲突，只保留一个稳定版。" placement="top">
                 <el-icon class="conflict-warning"><WarningFilled /></el-icon>
               </el-tooltip>
             </div>
@@ -598,7 +598,7 @@ const multiStableConflicts = computed(() => {
 })
 const multiStableConflictDescription = computed(() => {
   if (multiStableConflicts.value.length === 0) return ''
-  return '以下组件类型存在多个稳定版，生产将按 updated_at 取最新：' +
+  return '以下组件类型存在多个稳定版冲突。正式运行前应只保留一个稳定版：' +
     multiStableConflicts.value.map(({ platform, componentType }) => `${platform}/${componentType}`).join('、')
 })
 const hasMultiStableConflict = (row) => {

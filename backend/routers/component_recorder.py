@@ -62,17 +62,26 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
     - url_not_contains: 字符串或字符串列表，表示登录后 URL 不应包含的片段
     - element_visible_selector: 登录成功后应可见的关键元素选择器
     """
-    old_block = (
-        "        # TODO: 根据实际成功条件校验 (e.g. URL / element)\n"
-        "        return LoginResult(success=True, message=\"ok\")"
-    )
+    old_block_candidates = [
+        (
+            "        # TODO: 根据实际成功条件校验 (e.g. URL / element)\n"
+            "        return LoginResult(success=True, message=\"ok\")"
+        ),
+        (
+            "    # TODO: 根据实际成功条件校验 (e.g. URL / element)\n"
+            "    return LoginResult(success=True, message=\"ok\")"
+        ),
+    ]
 
-    if old_block not in python_code:
+    old_block = next((block for block in old_block_candidates if block in python_code), None)
+    if old_block is None:
         return python_code
 
+    indent = "        " if old_block.startswith("        ") else "    "
+
     lines: list[str] = []
-    lines.append("        # 登录成功条件：由 success_criteria 注入")
-    lines.append("        current_url = page.url")
+    lines.append(f"{indent}# 登录成功条件：由 success_criteria 注入")
+    lines.append(f"{indent}current_url = page.url")
 
     # url_contains: 字符串或字符串列表
     url_contains = crit.get("url_contains")
@@ -87,8 +96,8 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
                 url_contains_values = [str(url_contains)]
         for val in url_contains_values:
             msg = f"登录后 URL 未包含预期片段: {val}"
-            lines.append(f"        if {val!r} not in current_url:")
-            lines.append(f"            return LoginResult(success=False, message={msg!r})")
+            lines.append(f"{indent}if {val!r} not in current_url:")
+            lines.append(f"{indent}    return LoginResult(success=False, message={msg!r})")
 
     # url_not_contains: 字符串或字符串列表
     url_not_contains = crit.get("url_not_contains")
@@ -103,19 +112,18 @@ def _inject_login_success_criteria_block(python_code: str, crit: Dict[str, Any])
                 url_not_values = [str(url_not_contains)]
         for val in url_not_values:
             msg = f"登录后 URL 仍包含禁止片段: {val}"
-            lines.append(f"        if {val!r} in current_url:")
-            lines.append(f"            return LoginResult(success=False, message={msg!r})")
+            lines.append(f"{indent}if {val!r} in current_url:")
+            lines.append(f"{indent}    return LoginResult(success=False, message={msg!r})")
 
     # element_visible_selector: 登录成功后应可见的关键元素
     elem_sel = crit.get("element_visible_selector")
     if elem_sel:
-        msg = f"登录后未找到预期元素: {elem_sel}"
-        lines.append(f"        _succ_elem = page.locator({elem_sel!r})")
-        lines.append("        await expect(_succ_elem).to_have_count(1)")
-        lines.append("        await expect(_succ_elem).to_be_visible(timeout=10000)")
+        lines.append(f"{indent}_succ_elem = page.locator({elem_sel!r})")
+        lines.append(f"{indent}await expect(_succ_elem).to_have_count(1)")
+        lines.append(f"{indent}await expect(_succ_elem).to_be_visible(timeout=10000)")
 
     # 若未配置任何字段，保持默认行为（视为成功）
-    lines.append("        return LoginResult(success=True, message=\"ok\")")
+    lines.append(f"{indent}return LoginResult(success=True, message=\"ok\")")
 
     new_block = "\n".join(lines)
     updated = python_code.replace(old_block, new_block, 1)
@@ -1113,7 +1121,7 @@ async def save_component(
 
         return {
             "success": True,
-            "message": "组件已保存并创建新版本",
+            "message": "组件已保存为草稿版本，请先测试并提升为稳定版后再用于正式采集",
             "file_path": str(file_path),
             "component_type": "python",
             "version_info": {
@@ -1181,4 +1189,3 @@ async def get_recorder_status():
             "started_at": recorder_session.started_at.isoformat() if recorder_session.started_at else None
         }
     }
-

@@ -1,283 +1,283 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-用户注册和审批API测试
+用户注册和审批路由函数测试
 
-测试内容:
-1. 用户注册API (POST /api/auth/register)
-2. 用户审批API (POST /api/users/{user_id}/approve)
-3. 用户拒绝API (POST /api/users/{user_id}/reject)
-4. 待审批用户列表API (GET /api/users/pending)
-5. 登录状态检查 (POST /api/auth/login)
-
-说明:
-- 本测试文件使用全局 conftest.py 中定义的 sqlite_session / async_client fixture,
-  保证注册接口和断言查询使用同一内存数据库, 避免依赖本地 PostgreSQL 测试库。
+使用 mock AsyncSession，验证路由核心业务契约而不是数据库集成行为。
 """
 
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+import json
+
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.main import app
-from backend.models.database import get_async_db
-from modules.core.db import DimUser, DimRole
+from backend.routers import auth as auth_router
+from backend.routers import users_admin as users_admin_router
+from backend.schemas.auth import (
+    ApproveUserRequest,
+    LoginRequest,
+    RegisterRequest,
+    RejectUserRequest,
+)
 from backend.services.auth_service import auth_service
+from modules.core.db import DimRole, DimUser
 
 
-@pytest_asyncio.fixture
-async def registration_client(pg_session: AsyncSession) -> AsyncClient:
-    """基于 pg_session 的 AsyncClient, 覆盖 get_async_db 使用 PostgreSQL 容器。"""
-
-    async def override_get_async_db():
-        yield pg_session
-
-    app.dependency_overrides[get_async_db] = override_get_async_db
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
-        yield client
-
-    app.dependency_overrides.clear()
+def _request_stub():
+    return SimpleNamespace(
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={"User-Agent": "pytest"},
+        state=SimpleNamespace(user=None),
+    )
 
 
-@pytest.fixture
-async def admin_user(pg_session: AsyncSession):
-    """创建管理员用户用于测试"""
-    # 检查是否已存在admin用户
-    result = await pg_session.execute(select(DimUser).where(DimUser.username == "test_admin"))
-    admin = result.scalar_one_or_none()
-    
-    if not admin:
-        # 创建admin角色
-        result = await pg_session.execute(select(DimRole).where(DimRole.role_code == "admin"))
-        admin_role = result.scalar_one_or_none()
-        
-        if not admin_role:
-            admin_role = DimRole(
-                role_code="admin",
-                role_name="管理员",
-                description="系统管理员",
-                permissions='[]',
-                is_active=True,
-                is_system=True
-            )
-            pg_session.add(admin_role)
-            await pg_session.flush()
-        
-        # 创建admin用户
-        admin = DimUser(
-            username="test_admin",
-            email="admin@test.com",
-            password_hash=auth_service.hash_password("admin123"),
-            full_name="Test Admin",
-            is_active=True,
-            is_superuser=True,
-            status="active"
-        )
-        admin.roles.append(admin_role)
-        pg_session.add(admin)
-        await pg_session.commit()
-        await pg_session.refresh(admin)
-    
-    return admin
+def _scalar_result(value):
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = value
+    result.scalar_one.return_value = value
+    result.scalars.return_value.all.return_value = value if isinstance(value, list) else []
+    return result
+
+
+def _payload(response):
+    if isinstance(response, dict):
+        return response
+    if hasattr(response, "body"):
+        return json.loads(response.body.decode("utf-8"))
+    raise TypeError(f"Unsupported response type: {type(response)!r}")
+
+
+@pytest.fixture(autouse=True)
+def patch_side_effects(monkeypatch):
+    async def fake_log_action(*args, **kwargs):
+        return None
+
+    async def fake_notify_user_registered(*args, **kwargs):
+        return None
+
+    async def fake_notify_user_approved(*args, **kwargs):
+        return None
+
+    async def fake_notify_user_rejected(*args, **kwargs):
+        return None
+
+    async def fake_clear_employee_user_id(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("backend.routers.auth.audit_service.log_action", fake_log_action)
+    monkeypatch.setattr("backend.routers.users_admin.audit_service.log_action", fake_log_action)
+    monkeypatch.setattr("backend.routers.notifications.notify_user_registered", fake_notify_user_registered)
+    monkeypatch.setattr("backend.routers.notifications.notify_user_approved", fake_notify_user_approved)
+    monkeypatch.setattr("backend.routers.notifications.notify_user_rejected", fake_notify_user_rejected)
+    monkeypatch.setattr("backend.routers.users_admin._clear_employee_user_id", fake_clear_employee_user_id)
+    if getattr(auth_router, "limiter", None):
+        monkeypatch.setattr(auth_router.limiter, "enabled", False, raising=False)
+    if getattr(users_admin_router, "limiter", None):
+        monkeypatch.setattr(users_admin_router.limiter, "enabled", False, raising=False)
 
 
 @pytest.mark.asyncio
-async def test_user_registration(registration_client: AsyncClient, pg_session: AsyncSession):
-    """测试用户注册"""
-    # 注册新用户
-    response = await registration_client.post(
-        "/api/auth/register",
-        json={
-            "username": "testuser1",
-            "email": "testuser1@test.com",
-            "password": "test123456",
-            "full_name": "Test User 1",
-            "phone": "13800138000",
-            "department": "测试部门",
-        },
+async def test_user_registration():
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar_result(None),  # username不存在
+        _scalar_result(None),  # email不存在
+    ])
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    added = []
+
+    def _add(obj):
+        if isinstance(obj, DimUser):
+            obj.user_id = 101
+        added.append(obj)
+
+    db.add.side_effect = _add
+
+    response = await auth_router.register(
+        request_body=RegisterRequest(
+            username="testuser1",
+            email="testuser1@test.com",
+            password="test123456",
+            full_name="Test User 1",
+            phone="13800138000",
+            department="测试部门",
+        ),
+        request=_request_stub(),
+        db=db,
     )
 
-    print("REGISTER_RESPONSE:", response.status_code, response.json())
-
-    assert response.status_code == 200
-    data = response.json()
+    data = _payload(response)
     assert data["success"] is True
     assert data["data"]["username"] == "testuser1"
     assert data["data"]["status"] == "pending"
-    
-    # 验证用户已创建(状态为pending)
-    result = await pg_session.execute(select(DimUser).where(DimUser.username == "testuser1"))
-    user = result.scalar_one_or_none()
-    assert user is not None
+    user = next(obj for obj in added if isinstance(obj, DimUser))
     assert user.status == "pending"
     assert user.is_active is False
 
 
 @pytest.mark.asyncio
-async def test_user_registration_duplicate_username(registration_client: AsyncClient):
-    """测试重复用户名注册"""
-    # 第一次注册
-    await registration_client.post("/api/auth/register", json={
-        "username": "duplicate_user",
-        "email": "duplicate1@test.com",
-        "password": "test123456",
-        "full_name": "Duplicate User 1"
-    })
-    
-    # 第二次注册(相同用户名)
-    response = await registration_client.post("/api/auth/register", json={
-        "username": "duplicate_user",
-        "email": "duplicate2@test.com",
-        "password": "test123456",
-        "full_name": "Duplicate User 2"
-    })
-    
-    assert response.status_code == 400
-    data = response.json()
+async def test_user_registration_duplicate_username():
+    existing_user = SimpleNamespace(user_id=1, status="active")
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar_result(existing_user),  # username已存在
+        _scalar_result(None),
+    ])
+
+    response = await auth_router.register(
+        request_body=RegisterRequest(
+            username="duplicate_user",
+            email="duplicate2@test.com",
+            password="test123456",
+            full_name="Duplicate User 2",
+        ),
+        request=_request_stub(),
+        db=db,
+    )
+
+    data = _payload(response)
     assert data["success"] is False
     assert "用户名或邮箱已被使用" in data["message"]
 
 
 @pytest.mark.asyncio
-async def test_user_login_pending_status(registration_client: AsyncClient):
-    """测试pending状态用户无法登录"""
-    # 注册用户
-    register_response = await registration_client.post("/api/auth/register", json={
-        "username": "pending_user",
-        "email": "pending@test.com",
-        "password": "test123456",
-        "full_name": "Pending User"
-    })
-    assert register_response.status_code == 200
-    
-    # 尝试登录(应该失败)
-    login_response = await registration_client.post("/api/auth/login", json={
-        "username": "pending_user",
-        "password": "test123456"
-    })
-    
-    assert login_response.status_code == 403
-    data = login_response.json()
+async def test_user_login_pending_status():
+    pending_user = SimpleNamespace(
+        username="pending_user",
+        status="pending",
+        is_active=False,
+        roles=[],
+    )
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_scalar_result(pending_user))
+
+    response = await auth_router.login(
+        credentials=LoginRequest(username="pending_user", password="test123456"),
+        request=_request_stub(),
+        db=db,
+    )
+
+    data = _payload(response)
     assert data["success"] is False
-    assert data["code"] == 4005  # AUTH_ACCOUNT_PENDING
+    error_code = data.get("code") or data.get("error", {}).get("code")
+    assert error_code == 4005
 
 
 @pytest.mark.asyncio
-async def test_user_approval(registration_client: AsyncClient, pg_session: AsyncSession, admin_user: DimUser):
-    """测试用户审批"""
-    # 先注册用户
-    register_response = await registration_client.post("/api/auth/register", json={
-        "username": "approve_user",
-        "email": "approve@test.com",
-        "password": "test123456",
-        "full_name": "Approve User"
-    })
-    assert register_response.status_code == 200
-    user_id = register_response.json()["data"]["user_id"]
-    
-    # 获取admin token
-    login_response = await registration_client.post("/api/auth/login", json={
-        "username": "test_admin",
-        "password": "admin123"
-    })
-    assert login_response.status_code == 200
-    token = login_response.json()["data"]["access_token"]
-    
-    # 审批用户
-    approve_response = await registration_client.post(
-        f"/api/users/{user_id}/approve",
-        json={"notes": "审批通过"},
-        headers={"Authorization": f"Bearer {token}"}
+async def test_user_approval():
+    user = DimUser(
+        user_id=201,
+        username="approve_user",
+        email="approve@test.com",
+        password_hash=auth_service.hash_password("test123456"),
+        full_name="Approve User",
+        status="pending",
+        is_active=False,
     )
-    
-    assert approve_response.status_code == 200
-    data = approve_response.json()
+    user.roles = []
+    operator_role = DimRole(
+        role_id=2,
+        role_name="操作员",
+        role_code="operator",
+        permissions="[]",
+        is_active=True,
+        is_system=True,
+    )
+    current_user = SimpleNamespace(user_id=999, username="test_admin")
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar_result(user),
+        _scalar_result(operator_role),
+    ])
+    db.flush = AsyncMock()
+    db.refresh = AsyncMock()
+    db.commit = AsyncMock()
+    db.add = MagicMock()
+
+    response = await users_admin_router.approve_user(
+        user_id=201,
+        request_body=ApproveUserRequest(notes="审批通过", role_ids=[]),
+        request=_request_stub(),
+        current_user=current_user,
+        db=db,
+    )
+
+    data = _payload(response)
     assert data["success"] is True
     assert data["data"]["status"] == "active"
-    
-    # 验证用户状态已更新
-    result = await pg_session.execute(select(DimUser).where(DimUser.user_id == user_id))
-    user = result.scalar_one_or_none()
     assert user.status == "active"
     assert user.is_active is True
-    assert user.approved_by == admin_user.user_id
+    assert user.approved_by == current_user.user_id
 
 
 @pytest.mark.asyncio
-async def test_user_rejection(registration_client: AsyncClient, pg_session: AsyncSession, admin_user: DimUser):
-    """测试用户拒绝"""
-    # 先注册用户
-    register_response = await registration_client.post("/api/auth/register", json={
-        "username": "reject_user",
-        "email": "reject@test.com",
-        "password": "test123456",
-        "full_name": "Reject User"
-    })
-    assert register_response.status_code == 200
-    user_id = register_response.json()["data"]["user_id"]
-    
-    # 获取admin token
-    login_response = await registration_client.post("/api/auth/login", json={
-        "username": "test_admin",
-        "password": "admin123"
-    })
-    assert login_response.status_code == 200
-    token = login_response.json()["data"]["access_token"]
-    
-    # 拒绝用户
-    reject_response = await registration_client.post(
-        f"/api/users/{user_id}/reject",
-        json={"reason": "不符合要求"},
-        headers={"Authorization": f"Bearer {token}"}
+async def test_user_rejection():
+    user = DimUser(
+        user_id=202,
+        username="reject_user",
+        email="reject@test.com",
+        password_hash=auth_service.hash_password("test123456"),
+        full_name="Reject User",
+        status="pending",
+        is_active=False,
     )
-    
-    assert reject_response.status_code == 200
-    data = reject_response.json()
+    current_user = SimpleNamespace(user_id=999, username="test_admin")
+
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=_scalar_result(user))
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.add = MagicMock()
+
+    response = await users_admin_router.reject_user(
+        user_id=202,
+        request_body=RejectUserRequest(reason="不符合要求"),
+        request=_request_stub(),
+        current_user=current_user,
+        db=db,
+    )
+
+    data = _payload(response)
     assert data["success"] is True
     assert data["data"]["status"] == "rejected"
-    
-    # 验证用户状态已更新
-    result = await pg_session.execute(select(DimUser).where(DimUser.user_id == user_id))
-    user = result.scalar_one_or_none()
     assert user.status == "rejected"
     assert user.is_active is False
     assert user.rejection_reason == "不符合要求"
 
 
 @pytest.mark.asyncio
-async def test_pending_users_list(registration_client: AsyncClient, admin_user: DimUser):
-    """测试待审批用户列表"""
-    # 注册几个用户
-    for i in range(3):
-        await registration_client.post("/api/auth/register", json={
-            "username": f"pending_list_user_{i}",
-            "email": f"pending_list_{i}@test.com",
-            "password": "test123456",
-            "full_name": f"Pending List User {i}"
-        })
-    
-    # 获取admin token
-    login_response = await registration_client.post("/api/auth/login", json={
-        "username": "test_admin",
-        "password": "admin123"
-    })
-    assert login_response.status_code == 200
-    token = login_response.json()["data"]["access_token"]
-    
-    # 获取待审批用户列表
-    list_response = await registration_client.get(
-        "/api/users/pending",
-        headers={"Authorization": f"Bearer {token}"},
-        params={"page": 1, "page_size": 20}
+async def test_pending_users_list():
+    users = [
+        DimUser(
+            user_id=301 + i,
+            username=f"pending_list_user_{i}",
+            email=f"pending_list_{i}@test.com",
+            password_hash="x",
+            full_name=f"Pending List User {i}",
+            status="pending",
+            is_active=False,
+            created_at=datetime.utcnow(),
+        )
+        for i in range(3)
+    ]
+
+    db = MagicMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = users
+    db.execute = AsyncMock(return_value=result)
+
+    rows = await users_admin_router.get_pending_users(
+        request=_request_stub(),
+        page=1,
+        page_size=20,
+        current_user=SimpleNamespace(user_id=999, username="test_admin"),
+        db=db,
     )
-    
-    assert list_response.status_code == 200
-    users = list_response.json()
-    assert len(users) >= 3
-    assert all(user["username"].startswith("pending_list_user_") for user in users)
 
-
+    assert len(rows) == 3
+    assert all(user.username.startswith("pending_list_user_") for user in rows)

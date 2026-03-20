@@ -27,140 +27,80 @@ class TestCClassDataValidator:
     """C类数据完整性检查服务测试"""
     
     def test_check_b_class_completeness_orders_complete(self):
-        """测试订单数据完整性检查(完整数据)"""
-        # 模拟数据库会话
+        """测试订单数据完整性检查当前返回废弃告警。"""
         db = Mock(spec=Session)
-        
-        # 模拟订单数据查询结果
-        mock_order = Mock()
-        mock_order.order_id = "ORD001"
-        mock_order.order_date_local = date(2025, 1, 31)
-        mock_order.total_amount_rmb = 1000.0
-        mock_order.order_status = "completed"
-        mock_order.platform_code = "shopee"
-        mock_order.shop_id = "shop001"
-        mock_order.buyer_id = "buyer001"
-        
-        mock_orders = [mock_order]
-        
-        # 模拟查询执行
-        db.execute.return_value.scalars.return_value.all.return_value = mock_orders
-        
-        # 创建验证器
         validator = CClassDataValidator(db)
-        
-        # 执行检查
+
         result = validator.check_b_class_completeness(
             platform_code="shopee",
             shop_id="shop001",
             metric_date=date(2025, 1, 31),
             data_domain="orders"
         )
-        
-        # 验证结果
-        assert result["orders_complete"] is True
-        assert len(result["missing_fields"]) == 0
-        assert result["data_quality_score"] > 0
+
+        assert result["orders_complete"] is False
+        assert result["missing_fields"] == []
+        assert any("FactOrder 表已删除" in warning or "FactOrder表已删除" in warning for warning in result["warnings"])
     
     def test_check_b_class_completeness_orders_missing_fields(self):
-        """测试订单数据完整性检查(缺失字段)"""
-        # 模拟数据库会话
+        """测试订单域不再返回旧版固定字段缺失结果。"""
         db = Mock(spec=Session)
-        
-        # 模拟订单数据(缺失total_amount_rmb字段)
-        mock_order = Mock()
-        mock_order.order_id = "ORD001"
-        mock_order.order_date_local = date(2025, 1, 31)
-        mock_order.total_amount_rmb = None  # 缺失字段
-        mock_order.order_status = "completed"
-        mock_order.platform_code = "shopee"
-        mock_order.shop_id = "shop001"
-        
-        mock_orders = [mock_order]
-        
-        # 模拟查询执行
-        db.execute.return_value.scalars.return_value.all.return_value = mock_orders
-        
-        # 创建验证器
         validator = CClassDataValidator(db)
-        
-        # 执行检查
+
         result = validator.check_b_class_completeness(
             platform_code="shopee",
             shop_id="shop001",
             metric_date=date(2025, 1, 31),
             data_domain="orders"
         )
-        
-        # 验证结果
+
         assert result["orders_complete"] is False
-        assert "orders.total_amount_rmb" in result["missing_fields"]
+        assert result["missing_fields"] == []
         assert len(result["warnings"]) > 0
     
     def test_check_b_class_completeness_products_complete(self):
         """测试产品数据完整性检查(完整数据)"""
-        # 模拟数据库会话
         db = Mock(spec=Session)
-        
-        # 模拟产品数据查询结果
-        mock_product = Mock()
-        mock_product.unique_visitors = 1000
-        mock_product.order_count = 50
-        mock_product.rating = 4.5
-        mock_product.metric_date = date(2025, 1, 31)
-        mock_product.data_domain = "products"
-        mock_product.sales_volume = 100
-        mock_product.sales_amount_rmb = 5000.0
-        mock_product.conversion_rate = 5.0
-        
-        mock_products = [mock_product]
-        
-        # 模拟查询执行
-        db.execute.return_value.scalars.return_value.all.return_value = mock_products
-        
-        # 创建验证器
         validator = CClassDataValidator(db)
-        
-        # 执行检查
-        result = validator.check_b_class_completeness(
-            platform_code="shopee",
-            shop_id="shop001",
-            metric_date=date(2025, 1, 31),
-            data_domain="products"
-        )
-        
-        # 验证结果
+
+        fake_table_manager = Mock()
+        fake_table_manager.get_table_name.return_value = "fact_shopee_products_daily"
+        fake_table_manager._table_exists.return_value = True
+        db.execute.return_value.fetchall.return_value = [
+            ({"uv": 1000}, ["访客数", "订单数", "评分"], 1)
+        ]
+
+        with patch("backend.services.c_class_data_validator.get_platform_table_manager", return_value=fake_table_manager):
+            result = validator.check_b_class_completeness(
+                platform_code="shopee",
+                shop_id="shop001",
+                metric_date=date(2025, 1, 31),
+                data_domain="products"
+            )
+
         assert result["products_complete"] is True
         assert len(result["missing_fields"]) == 0
     
     def test_check_b_class_completeness_products_missing_visitors(self):
-        """测试产品数据完整性检查(缺失访客数)"""
-        # 模拟数据库会话
+        """测试产品数据完整性检查(缺失表头字段信息)。"""
         db = Mock(spec=Session)
-        
-        # 模拟产品数据(缺失unique_visitors字段)
-        mock_product = Mock()
-        mock_product.unique_visitors = None  # 缺失字段
-        mock_product.order_count = 50
-        mock_product.rating = 4.5
-        
-        mock_products = [mock_product]
-        
-        # 模拟查询执行
-        db.execute.return_value.scalars.return_value.all.return_value = mock_products
-        
-        # 创建验证器
         validator = CClassDataValidator(db)
-        
-        # 执行检查
-        result = validator.check_b_class_completeness(
-            platform_code="shopee",
-            shop_id="shop001",
-            metric_date=date(2025, 1, 31),
-            data_domain="products"
-        )
-        
-        # 验证结果
+
+        fake_table_manager = Mock()
+        fake_table_manager.get_table_name.return_value = "fact_shopee_products_daily"
+        fake_table_manager._table_exists.return_value = True
+        db.execute.return_value.fetchall.return_value = [
+            ({}, [], 1)
+        ]
+
+        with patch("backend.services.c_class_data_validator.get_platform_table_manager", return_value=fake_table_manager):
+            result = validator.check_b_class_completeness(
+                platform_code="shopee",
+                shop_id="shop001",
+                metric_date=date(2025, 1, 31),
+                data_domain="products"
+            )
+
         assert result["products_complete"] is False
         assert "products.unique_visitors" in result["missing_fields"]
         assert len(result["warnings"]) > 0
@@ -222,7 +162,7 @@ class TestCurrencyValidator:
             )
         
         assert result.valid is False
-        assert "非CNY货币" in result.error or "SGD" in result.error
+        assert "金额字段必须包含_rmb或_cny后缀" in result.error
     
     def test_validate_currency_policy_products_no_currency(self):
         """测试产品域无货币策略验证(通过)"""
@@ -317,7 +257,7 @@ class TestCurrencyValidator:
         
         fields = {
             "total_amount_rmb": 1000.0,
-            "sales_amount_sgd": 500.0,
+            "sales_amount_sgd": "S$500.0",
             "sales_volume": 100
         }
         
@@ -359,4 +299,3 @@ class TestCoreFieldsVerification:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
-

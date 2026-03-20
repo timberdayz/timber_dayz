@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, date as date_type
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterable, List, Optional
 import hashlib
 import os
 import re
@@ -141,6 +141,42 @@ def _compute_sha256(file_path: Path, block_size: int = 1024 * 1024, shop_id: str
     return h.hexdigest()
 
 
+def _sha256(file_path: Path) -> str:
+    """兼容测试与旧调用方的 SHA256 助手。"""
+    return _compute_sha256(Path(file_path))
+
+
+def _infer_platform_from_path(file_path: Path) -> Optional[str]:
+    """从路径推断平台（兼容旧测试辅助函数）。"""
+    parts = [part.lower() for part in Path(file_path).parts]
+    for part in parts:
+        if part in KNOWN_PLATFORMS:
+            return part
+    return None
+
+
+def _infer_domain_from_path(file_path: Path) -> Optional[str]:
+    """从路径推断数据域（兼容旧测试辅助函数）。"""
+    parts = [part.lower() for part in Path(file_path).parts]
+    for part in parts:
+        if part in KNOWN_DATA_DOMAINS:
+            return part
+        if part == "metrics":
+            return "metrics"
+    return None
+
+
+def _gather_files(base_dirs: Iterable[Path | str]):
+    """递归收集支持的文件（兼容旧测试辅助函数）。"""
+    for base_dir in base_dirs:
+        base_path = Path(base_dir)
+        if not base_path.exists():
+            continue
+        for file_path in base_path.rglob("*"):
+            if file_path.is_file() and file_path.suffix.lower() in {".xlsx", ".xls", ".csv", ".json"}:
+                yield file_path
+
+
 def _parse_date(date_str: str) -> Optional[date_type]:
     """解析日期字符串"""
     if not date_str:
@@ -254,7 +290,7 @@ def _fallback_parse_legacy(file_path: Path) -> Optional[dict]:
     }
 
 
-def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
+def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> ScanResult:
     """
     扫描data/raw目录并注册到catalog_files
     
@@ -272,6 +308,16 @@ def scan_and_register(base_dir: str = "data/raw") -> ScanResult:
     Returns:
         ScanResult: 扫描结果统计
     """
+    if isinstance(base_dir, (list, tuple, set)):
+        combined = ScanResult(seen=0, registered=0, skipped=0, new_file_ids=[])
+        for one_dir in base_dir:
+            result = scan_and_register(one_dir)
+            combined.seen += result.seen
+            combined.registered += result.registered
+            combined.skipped += result.skipped
+            combined.new_file_ids.extend(result.new_file_ids)
+        return combined
+
     base_path = Path(base_dir)
     
     if not base_path.exists():

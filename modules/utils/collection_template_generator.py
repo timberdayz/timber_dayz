@@ -2,6 +2,11 @@
 Collection Template Generator - 采集模板生成器
 =============================================
 
+注意：
+- 本工具仅保留为历史/调试用途，不再作为正式采集运行主路径的生成器。
+- 正式采集运行只认 `ComponentVersion` 当前 stable 版本对应的 `file_path`。
+- 这里生成的 `temp/recordings/` 下脚本不得直接进入正式采集链路。
+
 为不同数据类型生成标准化的采集脚本模板,支持:
 - 深链接直达模式
 - API导出优先,点击导出兜底
@@ -24,7 +29,7 @@ logger = get_logger(__name__)
 
 
 class CollectionTemplateGenerator:
-    """采集模板生成器"""
+    """历史/调试用途的采集模板生成器。"""
     
     def __init__(self, platform: str):
         self.platform = platform.lower()

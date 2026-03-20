@@ -10,8 +10,11 @@ ignore = []
 quote-style = "preserve"
 
 [tool.pytest.ini_options]
+testpaths = [
+    "tests",
+    "backend/tests",
+]
 markers = [
     "asyncio: marks tests as async (deselect with '-m \"not asyncio\"')",
 ]
 asyncio_mode = "auto"
-

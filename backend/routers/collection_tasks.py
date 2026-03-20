@@ -64,6 +64,10 @@ async def create_task(
 
     from backend.services.task_service import TaskService
     from backend.services.account_loader_service import get_account_loader_service
+    from backend.services.component_runtime_resolver import (
+        ComponentRuntimeResolver,
+        ComponentRuntimeResolverError,
+    )
 
     account_loader = get_account_loader_service()
     account_info = await account_loader.load_account_async(request.account_id, db)
@@ -86,6 +90,19 @@ async def create_task(
         logger.warning(
             f"Filtered out unsupported domains for {request.account_id}: {unsupported_domains}"
         )
+
+    try:
+        resolver = ComponentRuntimeResolver.from_async_session(db)
+        runtime_manifests = await resolver.resolve_task_manifests(
+            platform=request.platform,
+            data_domains=filtered_domains,
+            sub_domains=request.sub_domains,
+        )
+    except ComponentRuntimeResolverError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stable component not ready: {e}",
+        ) from e
 
     total_domains_count = len(filtered_domains)
     if request.sub_domains:
@@ -142,6 +159,7 @@ async def create_task(
             debug_mode=request.debug_mode,
             parallel_mode=request.parallel_mode,
             max_parallel=request.max_parallel,
+            runtime_manifests=runtime_manifests,
             app=app,
         )
     )
@@ -628,6 +646,7 @@ async def _execute_collection_task_background(
     debug_mode: bool,
     parallel_mode: bool,
     max_parallel: int,
+    runtime_manifests: Optional[Dict[str, Any]] = None,
     app: Any = None,
 ):
     """
@@ -694,6 +713,7 @@ async def _execute_collection_task_background(
                             browser=browser,
                             max_parallel=max_parallel,
                             debug_mode=debug_mode,
+                            runtime_manifests=runtime_manifests,
                         )
                     else:
                         result = await executor.execute(
@@ -707,6 +727,7 @@ async def _execute_collection_task_background(
                             granularity=granularity,
                             browser=browser,
                             debug_mode=debug_mode,
+                            runtime_manifests=runtime_manifests,
                         )
 
                     task.status = result.status

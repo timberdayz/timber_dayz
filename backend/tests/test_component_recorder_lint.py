@@ -1,10 +1,18 @@
 # -*- coding: utf-8 -*-
 """component_recorder lint 规则回归测试（8.10/8.11）。"""
 
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from backend.routers.component_recorder import (
     _analyze_python_code_for_lints,
     _inject_login_success_criteria_block,
+    save_component,
 )
+from backend.schemas.component_recorder import RecorderSaveRequest
 
 
 def _err_types(result):
@@ -87,3 +95,37 @@ class X(LoginComponent):
     assert ".nth(" not in injected
     lint = _analyze_python_code_for_lints(injected)
     assert "first_nth_usage" not in _err_types(lint)
+
+
+@pytest.mark.asyncio
+async def test_save_component_creates_non_stable_version_by_default(tmp_path: Path, monkeypatch):
+    added_versions = []
+
+    async def _execute(*args, **kwargs):
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = []
+        return result
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=_execute)
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    db.add = MagicMock(side_effect=lambda obj: added_versions.append(obj))
+
+    fake_module_file = tmp_path / "backend" / "routers" / "component_recorder.py"
+    fake_module_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_module_file.write_text("# fake\n", encoding="utf-8")
+    monkeypatch.setattr("backend.routers.component_recorder.__file__", str(fake_module_file))
+
+    request = RecorderSaveRequest(
+        platform="shopee",
+        component_type="login",
+        python_code="from modules.components.login.base import LoginResult\nasync def run(page):\n    return LoginResult(success=True, message='ok')\n",
+    )
+
+    response = await save_component(request=request, db=db, http_request=None)
+
+    assert response["success"] is True
+    assert "草稿" in response["message"]
+    assert added_versions
+    assert added_versions[-1].is_stable is False
