@@ -32,7 +32,7 @@
 1. `BusinessOverview` 成功
 2. `AnnualSummary` 成功
 3. `PerformanceDisplay` 成功
-4. `MyIncome` 在修复前样本中出现失败，但该失败现已定位为登录链路问题，不再直接归因于 `/api/hr/me/income` 本身
+4. `MyIncome` 修复前样本中出现失败，但该失败已确认来自登录链路，而不是 `/api/hr/me/income` 自身逻辑
 
 #### nginx 链路
 
@@ -45,7 +45,7 @@
 1. `BusinessOverview` 成功
 2. `AnnualSummary` 成功
 3. `PerformanceDisplay` 成功
-4. `MyIncome` 修复前样本中失败，但同样已定位为登录链路问题
+4. `MyIncome` 修复前样本中失败，但同样已确认来自登录链路
 
 ### 3. 读写混合压测
 
@@ -59,35 +59,71 @@
 2. `nginx` 链路 `10/10` 迭代成功
 3. 当前低风险写流量没有击穿核心读路径
 
-### 4. MyIncome 失败根因
+### 4. MyIncome 失败根因与修复
 
 本轮新增确认的根因：
 
-1. `/api/hr/me/income` 本身不能稳定复现业务错误
-2. 问题出在登录链路
-3. `POST /api/auth/login` 在高频登录时会偶发 `500`
+1. `/api/hr/me/income` 手工请求可稳定返回 `200`
+2. 单 token 并发访问 `/api/hr/me/income` 可稳定返回 `200`
+3. 高频登录时 `POST /api/auth/login` 会偶发 `500`
 4. 根因是会话记录使用：
    - `session_id = sha256(access_token)`
 5. 由于 token 在同秒内可重复生成，导致不同登录请求生成相同的 `session_id`
 6. 最终触发：
    - `user_sessions.session_id` 唯一键冲突
-7. 登录失败后，后续压测请求退回到无效 token，才出现 `401`
+7. 登录失败后，后续压测请求退回到无效 token，才表现为 `401`
 
 修复方式：
 
-1. 为 access token 和 refresh token 增加唯一 `jti`
-2. 从根源上消除同秒重复 token 导致的会话 ID 冲突
+1. 在 access token 和 refresh token 中加入唯一 `jti`
+2. 从根源上消除重复 token 导致的会话 ID 冲突
 
 修复后验证：
 
-1. 新增回归测试：
+1. 回归测试：
    - `backend/tests/test_auth_token_uniqueness.py`
-2. 连续创建同一用户 token 现在已唯一
-3. `20` 个并发 `login + me/income` 回归验证：
-   - `backend`：`20/20` 成功
-   - `nginx`：`20/20` 成功
+2. `backend`：
+   - `10` 次重复 `login + me/income` 全部 `200`
+   - 单次登录后 `10` 并发 `me/income` 全部 `200`
+3. `nginx`：
+   - `10` 次重复 `login + me/income` 全部 `200`
+   - 单次登录后 `10` 并发 `me/income` 全部 `200`
 
-### 5. 长时间稳定性
+### 5. BusinessOverview 子接口拆分压测
+
+本轮新增拆分探针：
+
+- `scripts/business_overview_split_probe.py`
+
+对应测试：
+
+- `backend/tests/test_business_overview_split_probe.py`
+
+结果文件：
+
+- `temp/outputs/business_overview_split_probe_latest.json`
+
+当前 `20` 轮拆分样本结论：
+
+1. `comparison`
+   - 是当前最慢的子接口
+   - 首轮冷启动样本约 `2721.75ms`
+   - 当前 `20` 轮汇总 `p95_ms = 143.68`
+
+2. `kpi`
+   - 次慢
+   - 首轮冷启动样本约 `1920.63ms`
+   - 当前 `20` 轮汇总 `p95_ms = 104.13`
+
+3. 其余接口
+   - `shop_racing` `p95_ms = 60.47`
+   - `traffic_ranking` `p95_ms = 25.48`
+   - `operational_metrics` `p95_ms = 99.07`
+
+4. 所有拆分接口当前样本下均为 `200`
+5. 在本轮拆分样本里没有复现此前 `10min` 样本中的 40 秒级长尾
+
+### 6. 长时间稳定性
 
 已有样本：
 
@@ -95,12 +131,14 @@
 
 当前状态：
 
-1. `10min` backend 长稳样本曾显示成功率下降与长尾放大
-2. 但在服务器日志中，本轮对应时间窗口没有发现同等级的 `business-overview` 5xx/503 证据
-3. 当前更合理的判断是：
-   - 该问题仍未闭环
-   - 需要用稳定压测脚本重新复验
-   - 不能直接据此下最终产品结论
+1. 旧的 `10min` backend 长稳样本显示：
+   - 页面成功率 `87.5%`
+   - `page_p95_ms = 42400.72`
+2. 但本轮新的子接口拆分探针没有复现同级别长尾
+3. 因此目前更合理的判断是：
+   - 旧样本仍需复验
+   - 当前不能直接把它作为已确认的服务端长期稳定性缺陷
+   - 需要用稳定脚本重新构造长稳样本
 
 ## 当前边界
 
@@ -109,17 +147,18 @@
 1. `BusinessOverview`
 2. `AnnualSummary`
 3. `PerformanceDisplay`
+4. 修复后的 `MyIncome` 认证链路
 
-以上页面在 `backend` 与 `nginx` 下都已有成功样本。
+以上范围已经具备较强证据支撑。
 
 以下范围仍需继续确认：
 
-1. 修复后 `MyIncome` 的正式整页压测样本
-2. `backend` 的 10 分钟以上长稳复验
+1. 修复后 `MyIncome` 的正式整页样本回补
+2. `backend` 的稳定长稳复验
 3. 连接池内部指标与更细粒度资源曲线
 
 ## 下一步优先级
 
-1. 用修复后的登录链路重新跑 `MyIncome` 整页高并发样本
-2. 用稳定脚本重新跑 `backend` 长稳样本，确认此前退化是否为脚本侧噪声
-3. 打通系统监控接口或补充更准确的连接池观测
+1. 用修复后的登录链路重跑 `MyIncome` 正式整页样本
+2. 用稳定的长稳脚本重跑 `backend` 长稳
+3. 如需继续深挖，优先盯 `comparison` 与 `kpi`
