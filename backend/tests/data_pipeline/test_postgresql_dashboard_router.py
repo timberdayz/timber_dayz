@@ -8,6 +8,7 @@ from backend.routers.dashboard_api_postgresql import (
     get_annual_summary_kpi_postgresql,
     get_business_overview_comparison_postgresql,
     get_business_overview_kpi_postgresql,
+    router,
 )
 
 
@@ -113,3 +114,19 @@ def test_postgresql_annual_summary_kpi_route_returns_service_payload(monkeypatch
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
     assert body["data"]["roi"] == -0.3
+
+
+def test_postgresql_dashboard_router_exposes_compatibility_paths():
+    paths = {route.path for route in router.routes}
+    assert "/api/dashboard/business-overview/kpi" in paths
+    assert "/api/dashboard/business-overview/comparison" in paths
+    assert "/api/dashboard/business-overview/shop-racing" in paths
+    assert "/api/dashboard/business-overview/traffic-ranking" in paths
+    assert "/api/dashboard/business-overview/inventory-backlog" in paths
+    assert "/api/dashboard/business-overview/operational-metrics" in paths
+    assert "/api/dashboard/clearance-ranking" in paths
+    assert "/api/dashboard/annual-summary/kpi" in paths
+    assert "/api/dashboard/annual-summary/trend" in paths
+    assert "/api/dashboard/annual-summary/platform-share" in paths
+    assert "/api/dashboard/annual-summary/by-shop" in paths
+    assert "/api/dashboard/annual-summary/target-completion" in paths
