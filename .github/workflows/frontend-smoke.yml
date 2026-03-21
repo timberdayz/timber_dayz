@@ -49,7 +49,7 @@ jobs:
             echo "HOST=127.0.0.1"
             echo "PORT=8001"
             echo "FRONTEND_PORT=5173"
-            echo "DATABASE_URL=sqlite:///./data/frontend_smoke.db"
+            echo "DATABASE_URL=sqlite:///$GITHUB_WORKSPACE/data/frontend_smoke.db"
             echo "JWT_SECRET_KEY=github-actions-smoke-jwt-secret"
             echo "SECRET_KEY=github-actions-smoke-secret"
             echo "ALLOWED_ORIGINS=http://127.0.0.1:5173"
@@ -80,6 +80,10 @@ jobs:
             sleep 2
           done
           echo "Backend did not become healthy in time"
+          if [ -f backend-smoke.log ]; then
+            echo "===== backend-smoke.log ====="
+            cat backend-smoke.log
+          fi
           exit 1
 
       - name: Start frontend
