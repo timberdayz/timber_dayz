@@ -57,7 +57,8 @@ from backend.routers import (
     config_management,  # Phase 3: A类数据管理API(销售目标、战役目标、经营成本)
     # superset_proxy,  # 已移除 - 迁移到Metabase
     metabase_proxy,  # Phase 2: Metabase代理API
-    dashboard_api,  # v4.6.0 DSS架构:Dashboard API(通过Metabase Question查询)
+    dashboard_api,
+    dashboard_api_postgresql,  # v4.6.0 DSS架构:Dashboard API(通过Metabase Question查询)
     hr_management,  # Phase 3: HR管理API(员工管理、员工目标、考勤记录、绩效查询)
     test_api,
     inventory,
@@ -661,10 +662,16 @@ async def root():
 # 注册路由(全部启用 - v4.1.0优化版)
 
 # [OK] v4.6.0 DSS架构重构:dashboard_api已恢复,通过Metabase Question查询提供数据
-app.include_router(
-    dashboard_api.router,
-    tags=["Dashboard"]
-)
+if os.getenv("USE_POSTGRESQL_DASHBOARD_ROUTER", "").lower() in ("1", "true", "yes"):
+    app.include_router(
+        dashboard_api_postgresql.router,
+        tags=["Dashboard"]
+    )
+else:
+    app.include_router(
+        dashboard_api.router,
+        tags=["Dashboard"]
+    )
 
 app.include_router(
     collection.router,
