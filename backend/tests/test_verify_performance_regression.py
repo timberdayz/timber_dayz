@@ -27,11 +27,15 @@ def test_build_regression_plan_for_ci():
     script = load_script_module()
 
     plan = script.build_regression_plan(mode="ci", backend_reachable=False)
+    command = " ".join(plan[0]["command"])
 
     assert [step["name"] for step in plan] == [
         "perf-regression-tests",
     ]
-    assert "pytest" in " ".join(plan[0]["command"])
+    assert "pytest" in command
+    assert "backend/tests/test_high_frequency_pages_probe.py" in command
+    assert "backend/tests/test_users_me_sessions.py" in command
+    assert "backend/tests/test_data_quarantine_compatibility.py" in command
 
 
 def test_build_regression_plan_for_local_adds_live_checks():
