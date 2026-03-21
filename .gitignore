@@ -129,6 +129,7 @@ data/**/*.ole_backup
 playwright-report/
 test-results/
 .playwright/
+output/playwright/
 
 # 密钥和证书文件
 *.key
