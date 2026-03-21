@@ -11,10 +11,13 @@ def test_sql_loader_reads_sql_file_text():
 def test_refresh_registry_exposes_dependency_order():
     from backend.services.data_pipeline.refresh_registry import (
         PIPELINE_DEPENDENCIES,
+        SQL_TARGET_PATHS,
         topologically_sort_targets,
     )
 
     assert PIPELINE_DEPENDENCIES["semantic.fact_orders_atomic"] == []
+    assert SQL_TARGET_PATHS["semantic.fact_orders_atomic"] == "sql/semantic/orders_atomic.sql"
+    assert SQL_TARGET_PATHS["api.business_overview_kpi_module"] == "sql/api_modules/business_overview_kpi_module.sql"
     ordered = topologically_sort_targets(
         [
             "api.business_overview_kpi_module",

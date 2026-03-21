@@ -28,6 +28,30 @@ PIPELINE_DEPENDENCIES: dict[str, list[str]] = {
     "api.annual_summary_by_shop_module": ["mart.annual_summary_shop_month"],
 }
 
+SQL_TARGET_PATHS: dict[str, str] = {
+    "semantic.fact_orders_atomic": "sql/semantic/orders_atomic.sql",
+    "semantic.fact_analytics_atomic": "sql/semantic/analytics_atomic.sql",
+    "semantic.fact_products_atomic": "sql/semantic/products_atomic.sql",
+    "semantic.fact_inventory_snapshot": "sql/semantic/inventory_snapshot.sql",
+    "semantic.fact_services_atomic": "sql/semantic/services_atomic.sql",
+    "mart.shop_day_kpi": "sql/mart/shop_day_kpi.sql",
+    "mart.shop_week_kpi": "sql/mart/shop_week_kpi.sql",
+    "mart.shop_month_kpi": "sql/mart/shop_month_kpi.sql",
+    "mart.platform_month_kpi": "sql/mart/platform_month_kpi.sql",
+    "mart.product_day_kpi": "sql/mart/product_day_kpi.sql",
+    "mart.inventory_current": "sql/mart/inventory_current.sql",
+    "mart.inventory_backlog_base": "sql/mart/inventory_backlog_base.sql",
+    "mart.annual_summary_shop_month": "sql/mart/annual_summary_shop_month.sql",
+    "api.business_overview_kpi_module": "sql/api_modules/business_overview_kpi_module.sql",
+    "api.business_overview_comparison_module": "sql/api_modules/business_overview_comparison_module.sql",
+    "api.business_overview_inventory_backlog_module": "sql/api_modules/business_overview_inventory_backlog_module.sql",
+    "api.clearance_ranking_module": "sql/api_modules/clearance_ranking_module.sql",
+    "api.annual_summary_kpi_module": "sql/api_modules/annual_summary_kpi_module.sql",
+    "api.annual_summary_trend_module": "sql/api_modules/annual_summary_trend_module.sql",
+    "api.annual_summary_platform_share_module": "sql/api_modules/annual_summary_platform_share_module.sql",
+    "api.annual_summary_by_shop_module": "sql/api_modules/annual_summary_by_shop_module.sql",
+}
+
 
 def _visit(
     target: str,
