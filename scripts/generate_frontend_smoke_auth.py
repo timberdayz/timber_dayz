@@ -4,16 +4,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import httpx
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-
-from scripts.create_admin_user import create_admin_user
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,6 +27,8 @@ def parse_args() -> argparse.Namespace:
 
 
 async def ensure_admin(args: argparse.Namespace):
+    from scripts.create_admin_user import create_admin_user
+
     return await create_admin_user(
         username=args.username,
         password=args.password,
