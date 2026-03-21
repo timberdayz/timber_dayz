@@ -102,11 +102,13 @@ jobs:
           exit 1
 
       - name: Run frontend smoke
+        timeout-minutes: 10
         working-directory: frontend
         env:
           FRONTEND_BASE_URL: http://127.0.0.1:5173
           PYTHON_BIN: python
-        run: npm run smoke:playwright
+          PLAYWRIGHT_ROUTE_TIMEOUT_MS: 45000
+        run: npm run smoke:playwright 2>&1 | tee ../frontend-smoke-run.log
 
       - name: Upload smoke artifacts
         if: always()
@@ -117,6 +119,7 @@ jobs:
             output/playwright/frontend-smoke/**
             backend-smoke.log
             frontend-smoke.log
+            frontend-smoke-run.log
           if-no-files-found: warn
 
       - name: Stop local services
