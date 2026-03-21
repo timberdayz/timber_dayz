@@ -165,16 +165,17 @@ const alertRules = ref([]);
 const loadSMTPConfig = async () => {
   try {
     const response = await systemAPI.getSMTPConfig();
-    if (response && response.data) {
+    const payload = response?.data || response;
+    if (payload) {
       smtpConfig.value = {
-        smtp_server: response.data.smtp_server || "",
-        smtp_port: response.data.smtp_port || 587,
-        use_tls: response.data.use_tls !== false,
-        username: response.data.username || "",
+        smtp_server: payload.smtp_server || "",
+        smtp_port: payload.smtp_port || 587,
+        use_tls: payload.use_tls !== false,
+        username: payload.username || "",
         password: "", // 密码不显示
-        from_email: response.data.from_email || "",
-        from_name: response.data.from_name || "",
-        is_active: response.data.is_active !== false,
+        from_email: payload.from_email || "",
+        from_name: payload.from_name || "",
+        is_active: payload.is_active !== false,
       };
     }
   } catch (error) {

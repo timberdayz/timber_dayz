@@ -10,8 +10,8 @@ v4.18.0: 添加response_model支持Contract-First架构
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import List, Dict
+from sqlalchemy import select, text
+from typing import Any, Dict, Iterable, List, Optional
 import yaml
 import csv
 import io
@@ -42,6 +42,56 @@ from backend.schemas.account_alignment import (
 
 router = APIRouter(prefix="/account-alignment", tags=["账号对齐"])
 logger = get_logger(__name__)
+
+LEGACY_FACT_ORDER_TABLES = {
+    "public.fact_orders",
+    "core.fact_orders",
+}
+
+
+def _isoformat_or_none(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def build_distinct_raw_store_items(rows: Iterable[tuple[Any, ...]]) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    for account, site, store_label_raw, order_count, total_gmv, first_order, last_order in rows:
+        items.append(
+            {
+                "account": account,
+                "site": site,
+                "store_label_raw": store_label_raw,
+                "order_count": int(order_count or 0),
+                "total_gmv": float(total_gmv or 0.0),
+                "suggested_target_id": _generate_suggested_id(account or "", site or "", store_label_raw or ""),
+                "first_order": _isoformat_or_none(first_order),
+                "last_order": _isoformat_or_none(last_order),
+            }
+        )
+    return items
+
+
+async def _find_legacy_fact_orders_source(db: AsyncSession) -> Optional[str]:
+    result = await db.execute(
+        text(
+            """
+            select table_schema || '.' || table_name as full_name
+            from information_schema.tables
+            where table_name = 'fact_orders'
+              and table_schema in ('public', 'core')
+            order by case when table_schema = 'public' then 0 else 1 end
+            limit 1
+            """
+        )
+    )
+    full_name = result.scalar_one_or_none()
+    if full_name in LEGACY_FACT_ORDER_TABLES:
+        return full_name
+    return None
 
 
 @router.get("/stats", response_model=AlignmentStatsResponse)
@@ -648,9 +698,11 @@ async def get_distinct_raw_stores(
         list: 唯一店铺名及其统计信息
     """
     try:
-        from sqlalchemy import text
-        
-        stmt = text("""
+        source_table = await _find_legacy_fact_orders_source(db)
+        if not source_table:
+            return DistinctRawStoresResponse(success=True, stores=[], count=0)
+
+        stmt = text(f"""
             SELECT 
                 o.account,
                 o.site,
@@ -659,7 +711,7 @@ async def get_distinct_raw_stores(
                 SUM(o.total_amount_rmb) as total_gmv,
                 MIN(o.order_date_local) as first_order,
                 MAX(o.order_date_local) as last_order
-            FROM fact_orders o
+            FROM {source_table} o
             LEFT JOIN account_aliases a ON (
                 a.platform = :platform
                 AND a.data_domain = :domain
@@ -681,12 +733,7 @@ async def get_distinct_raw_stores(
             "platform": platform,
             "domain": data_domain
         })
-        results = result.all()
-        
-        stores = []
-        for row in results:
-            store_info = f"{row[0]}:{row[1]}:{row[2]} (订单:{row[3]})"
-            stores.append(store_info)
+        stores = build_distinct_raw_store_items(result.all())
         
         return DistinctRawStoresResponse(
             success=True,

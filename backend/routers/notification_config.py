@@ -5,6 +5,8 @@
 提供SMTP配置、通知模板、告警规则管理功能
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -39,6 +41,21 @@ except ImportError:
     role_based_rate_limit = None
 
 
+def build_default_smtp_config_response() -> SMTPConfigResponse:
+    return SMTPConfigResponse(
+        id=0,
+        smtp_server="",
+        smtp_port=587,
+        use_tls=True,
+        username="",
+        from_email="",
+        from_name="",
+        is_active=False,
+        updated_at=datetime.now(timezone.utc),
+        updated_by=None,
+    )
+
+
 # ==================== SMTP配置 API ====================
 
 @router.get("/smtp-config", response_model=SMTPConfigResponse)
@@ -56,13 +73,7 @@ async def get_smtp_config(
         config = await service.get_smtp_config()
         
         if not config:
-            return error_response(
-                code=ErrorCode.DATA_NOT_FOUND,
-                message="SMTP配置不存在",
-                error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
-                detail="请先配置SMTP服务器",
-                status_code=404
-            )
+            return build_default_smtp_config_response()
         
         return SMTPConfigResponse(
             id=config.id,

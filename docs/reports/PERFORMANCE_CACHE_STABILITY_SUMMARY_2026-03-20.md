@@ -104,34 +104,50 @@ CI 接入：
 
 当前已纳入统一入口的真实页面：
 1. `UserManagement`
-2. `RoleManagement`
-3. `AccountManagement`
-4. `DataSyncFiles`
-5. `DataQuarantine`
-6. `CollectionTasks`
-7. `CollectionHistory`
-8. `SystemNotifications`
-9. `Sessions`
-10. `NotificationPreferences`
+2. `UserApproval`
+3. `RoleManagement`
+4. `AccountManagement`
+5. `DataSyncFiles`
+6. `DataQuarantine`
+7. `CollectionTasks`
+8. `CollectionHistory`
+9. `SystemNotifications`
+10. `Sessions`
+11. `NotificationPreferences`
+12. `SystemConfig`
+13. `DatabaseConfig`
+14. `SecuritySettings`
+15. `SystemLogs`
+16. `DataBackup`
+17. `SystemMaintenance`
+18. `AccountAlignment`
+19. `NotificationConfig`
 
 当前 `5` 轮样本结论：
 1. 上述页面对应请求全部返回 `200`
 2. 当前成功率均为 `100%`
 3. `DataQuarantine` 已完成 legacy schema 与 `NULL` 过滤兼容修复
 4. `Sessions` 已完成响应序列化修复
+5. `UserApproval` 已完成路由匹配修复
+6. `AccountAlignment` 已完成空源兼容与前端安全返回结构修复
+7. `NotificationConfig` 已完成无 SMTP 配置环境下的默认空态修复
 
 ## 当前边界
 目前可以较稳妥地确认：
 1. 核心页面读路径、缓存路径和统一回归入口都已具备有效样本支撑
-2. 新增 10 个真实高频页面当前都已纳入本地统一回归
+2. 新增 19 个真实高频页面当前都已纳入本地统一回归
 3. `backend` 与 `nginx` 两条链路的关键页面样本都已有正向结果
 
 ## 仍未完全覆盖的边界
-1. 更多真实高频页面仍可继续纳入统一入口
-2. 更长时间窗口，例如 `30min` 或 `1h`，仍值得继续扩展
-3. `executor` 活跃任务维度目前仍未形成稳定样本口径
+1. `AccountAlignment` 当前虽然可稳定加载，但当前环境下没有可用 legacy 订单源，因此仍是“空态样本”，不是完整业务数据样本
+2. `NotificationConfig` 当前虽然可稳定加载，但当前环境下没有 SMTP 配置，因此仍是“默认空态样本”，不是非空配置样本
+3. 更多真实高频页面仍可继续纳入统一入口
+4. 更长时间窗口，例如 `30min` 或 `1h`，仍值得继续扩展
+5. `executor` 活跃任务维度目前仍未形成稳定样本口径
 
 ## 下一步建议
 1. 继续扩更多真实高频页面到统一回归入口
-2. 如需更强保障，将 `local` live 探针纳入预发或夜间定时回归
-3. 如需更深资源观测，继续补 `executor` 活跃任务统计
+2. 若要让 `AccountAlignment` 形成真实业务样本，需要进一步接入当前 DSS 订单源，而不只是空态兼容
+3. 若要让 `NotificationConfig` 形成真实业务样本，需要准备一套非空 SMTP 配置样本
+4. 如需更强保障，将 `local` live 探针纳入预发或夜间定时回归
+5. 如需更深资源观测，继续补 `executor` 活跃任务统计

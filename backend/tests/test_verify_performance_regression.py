@@ -33,7 +33,9 @@ def test_build_regression_plan_for_ci():
         "perf-regression-tests",
     ]
     assert "pytest" in command
+    assert "backend/tests/test_account_alignment_compatibility.py" in command
     assert "backend/tests/test_high_frequency_pages_probe.py" in command
+    assert "backend/tests/test_notification_config_routes.py" in command
     assert "backend/tests/test_users_me_sessions.py" in command
     assert "backend/tests/test_data_quarantine_compatibility.py" in command
 

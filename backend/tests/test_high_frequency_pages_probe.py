@@ -29,6 +29,7 @@ def test_probe_covers_expected_pages():
     page_names = {page["name"] for page in probe.PAGE_SCENARIOS}
 
     assert "user_management" in page_names
+    assert "user_approval" in page_names
     assert "data_sync_files" in page_names
     assert "collection_tasks" in page_names
     assert "collection_history" in page_names
@@ -38,6 +39,14 @@ def test_probe_covers_expected_pages():
     assert "data_quarantine" in page_names
     assert "sessions" in page_names
     assert "notification_preferences" in page_names
+    assert "system_config" in page_names
+    assert "database_config" in page_names
+    assert "security_settings" in page_names
+    assert "system_logs" in page_names
+    assert "data_backup" in page_names
+    assert "system_maintenance" in page_names
+    assert "account_alignment" in page_names
+    assert "notification_config" in page_names
 
 
 def test_summarize_page_results_groups_by_page():

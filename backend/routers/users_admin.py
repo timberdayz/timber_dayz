@@ -245,7 +245,7 @@ async def get_deleted_users(
         total=total
     )
 
-@router.get("/{user_id}", response_model=UserResponse)
+@router.get("/{user_id:int}", response_model=UserResponse)
 async def get_user(
     user_id: int,
     current_user: DimUser = Depends(require_admin),
@@ -280,7 +280,7 @@ async def get_user(
         employee_id=emp_id, employee_code=emp_code, employee_name=emp_name
     )
 
-@router.put("/{user_id}", response_model=UserResponse)
+@router.put("/{user_id:int}", response_model=UserResponse)
 async def update_user(
     user_id: int,
     user_update: UserUpdate,
@@ -401,7 +401,7 @@ async def update_user(
         employee_id=emp_id, employee_code=emp_code, employee_name=emp_name
     )
 
-@router.delete("/{user_id}")
+@router.delete("/{user_id:int}")
 async def delete_user(
     user_id: int,
     current_user: DimUser = Depends(require_admin),
@@ -494,7 +494,7 @@ async def delete_user(
             status_code=500
         )
 
-@router.post("/{user_id}/restore")
+@router.post("/{user_id:int}/restore")
 async def restore_user(
     user_id: int,
     current_user: DimUser = Depends(require_admin),
@@ -562,7 +562,7 @@ async def restore_user(
             status_code=500
         )
 
-@router.post("/{user_id}/reset-password", response_model=ResetPasswordResponse)
+@router.post("/{user_id:int}/reset-password", response_model=ResetPasswordResponse)
 async def reset_user_password(
     user_id: int,
     request_body: ResetPasswordRequest,
@@ -654,7 +654,7 @@ async def reset_user_password(
         message="密码重置成功"
     )
 
-@router.post("/{user_id}/unlock")
+@router.post("/{user_id:int}/unlock")
 async def unlock_user_account(
     user_id: int,
     request_body: UnlockAccountRequest,
@@ -720,7 +720,7 @@ async def unlock_user_account(
         message="账户解锁成功"
     )
 
-@router.post("/{user_id}/approve")
+@router.post("/{user_id:int}/approve")
 @role_based_rate_limit(endpoint_type="default")
 async def approve_user(
     user_id: int,
@@ -839,7 +839,7 @@ async def approve_user(
         message="用户审批成功"
     )
 
-@router.post("/{user_id}/reject")
+@router.post("/{user_id:int}/reject")
 @role_based_rate_limit(endpoint_type="default")
 async def reject_user(
     user_id: int,

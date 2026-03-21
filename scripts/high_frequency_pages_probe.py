@@ -35,6 +35,13 @@ PAGE_SCENARIOS = [
         ],
     },
     {
+        "name": "user_approval",
+        "requests": [
+            {"path": "/api/users/pending", "params": {"page": 1, "page_size": 20}},
+            {"path": "/api/roles/"},
+        ],
+    },
+    {
         "name": "role_management",
         "requests": [
             {"path": "/api/roles/"},
@@ -93,6 +100,65 @@ PAGE_SCENARIOS = [
         "name": "notification_preferences",
         "requests": [
             {"path": "/api/users/me/notification-preferences"},
+        ],
+    },
+    {
+        "name": "system_config",
+        "requests": [
+            {"path": "/api/system/config"},
+        ],
+    },
+    {
+        "name": "database_config",
+        "requests": [
+            {"path": "/api/system/database/config"},
+        ],
+    },
+    {
+        "name": "security_settings",
+        "requests": [
+            {"path": "/api/system/security/password-policy"},
+            {"path": "/api/system/security/login-restrictions"},
+            {"path": "/api/system/security/ip-whitelist"},
+            {"path": "/api/system/security/session-config"},
+            {"path": "/api/system/security/2fa-config"},
+        ],
+    },
+    {
+        "name": "system_logs",
+        "requests": [
+            {"path": "/api/system/logs", "params": {"page": 1, "page_size": 20}},
+        ],
+    },
+    {
+        "name": "data_backup",
+        "requests": [
+            {"path": "/api/system/backup/backups"},
+            {"path": "/api/system/backup/config"},
+        ],
+    },
+    {
+        "name": "system_maintenance",
+        "requests": [
+            {"path": "/api/system/maintenance/cache/status"},
+            {"path": "/api/system/maintenance/data/status"},
+            {"path": "/api/system/maintenance/upgrade/check"},
+        ],
+    },
+    {
+        "name": "account_alignment",
+        "requests": [
+            {"path": "/api/account-alignment/stats"},
+            {"path": "/api/account-alignment/distinct-raw-stores"},
+            {"path": "/api/account-alignment/list-aliases"},
+        ],
+    },
+    {
+        "name": "notification_config",
+        "requests": [
+            {"path": "/api/system/notification/smtp-config"},
+            {"path": "/api/system/notification/templates"},
+            {"path": "/api/system/notification/alert-rules"},
         ],
     },
 ]
