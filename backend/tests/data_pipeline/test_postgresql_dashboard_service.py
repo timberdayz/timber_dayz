@@ -257,3 +257,171 @@ async def test_postgresql_dashboard_service_reads_real_kpi_chain(monkeypatch):
         assert result["attach_rate"] == 12
 
         await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    from backend.services.data_pipeline.refresh_runner import execute_sql_target
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS semantic"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS semantic.fact_products_atomic (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        granularity VARCHAR(32),
+                        metric_date DATE,
+                        product_id VARCHAR(128),
+                        product_name VARCHAR(256),
+                        platform_sku VARCHAR(128),
+                        sales_amount NUMERIC,
+                        order_count NUMERIC,
+                        sales_volume NUMERIC,
+                        page_views NUMERIC,
+                        unique_visitors NUMERIC,
+                        impressions NUMERIC,
+                        clicks NUMERIC,
+                        conversion_rate NUMERIC,
+                        review_count NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS semantic.fact_inventory_snapshot (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        granularity VARCHAR(32),
+                        metric_date DATE,
+                        product_id VARCHAR(128),
+                        product_name VARCHAR(256),
+                        platform_sku VARCHAR(128),
+                        sku_id VARCHAR(128),
+                        product_sku VARCHAR(128),
+                        warehouse_name VARCHAR(128),
+                        warehouse_code VARCHAR(64),
+                        available_stock NUMERIC,
+                        on_hand_stock NUMERIC,
+                        reserved_stock NUMERIC,
+                        in_transit_stock NUMERIC,
+                        stockout_qty NUMERIC,
+                        reorder_point NUMERIC,
+                        safety_stock NUMERIC,
+                        unit_cost NUMERIC,
+                        inventory_value NUMERIC,
+                        ingest_timestamp TIMESTAMP,
+                        currency_code VARCHAR(3),
+                        data_hash VARCHAR(64)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS semantic.fact_orders_atomic (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        granularity VARCHAR(32),
+                        metric_date DATE,
+                        platform_sku VARCHAR(128),
+                        product_sku VARCHAR(128),
+                        product_quantity NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO semantic.fact_products_atomic (
+                        platform_code, shop_id, granularity, metric_date, product_id,
+                        product_name, platform_sku, sales_amount, order_count, sales_volume,
+                        page_views, unique_visitors, impressions, clicks, conversion_rate, review_count
+                    )
+                    VALUES (
+                        'shopee', 'shop-a', 'daily', DATE '2026-03-01', 'p-1',
+                        'demo product', 'sku-a', 100, 10, 12,
+                        300, 200, 500, 60, 0.05, 8
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO semantic.fact_inventory_snapshot (
+                        platform_code, shop_id, granularity, metric_date, product_id, product_name,
+                        platform_sku, sku_id, product_sku, warehouse_name, warehouse_code,
+                        available_stock, on_hand_stock, reserved_stock, in_transit_stock, stockout_qty,
+                        reorder_point, safety_stock, unit_cost, inventory_value, ingest_timestamp,
+                        currency_code, data_hash
+                    )
+                    VALUES (
+                        'shopee', 'shop-a', 'snapshot', DATE '2026-03-01', 'p-1', 'demo product',
+                        'sku-a', 'sku-id-a', 'psku-a', 'main warehouse', 'WH1',
+                        450, 450, 0, 0, 0,
+                        10, 20, 5, 2250, TIMESTAMP '2026-03-01 00:00:00',
+                        'CNY', 'hash-inv-1'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO semantic.fact_orders_atomic (
+                        platform_code, shop_id, granularity, metric_date, platform_sku, product_sku, product_quantity
+                    )
+                    VALUES (
+                        'shopee', 'shop-a', 'daily', DATE '2026-03-01', 'sku-a', 'psku-a', 9
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            for target in (
+                "mart.product_day_kpi",
+                "mart.inventory_current",
+                "mart.inventory_backlog_base",
+                "api.business_overview_inventory_backlog_module",
+                "api.clearance_ranking_module",
+            ):
+                await execute_sql_target(session, target)
+            await session.commit()
+
+        monkeypatch.setattr(
+            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+            session_factory,
+        )
+        service = PostgresqlDashboardService()
+        backlog = await service.get_business_overview_inventory_backlog(min_days=30)
+        clearance = await service.get_clearance_ranking(min_days=30, limit=10)
+
+        assert len(backlog) == 1
+        assert backlog[0]["platform_code"] == "shopee"
+        assert backlog[0]["rank"] == 1
+        assert len(clearance) == 1
+        assert clearance[0]["platform_code"] == "shopee"
+        assert clearance[0]["estimated_turnover_days"] >= 30
+
+        await engine.dispose()
