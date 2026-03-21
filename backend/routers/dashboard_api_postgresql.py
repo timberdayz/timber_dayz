@@ -160,8 +160,12 @@ async def get_business_overview_shop_racing_postgresql(
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
-            service = get_metabase_service()
-            result = await service.query_question("business_overview_shop_racing", params)
+            service = get_postgresql_dashboard_service()
+            result = await service.get_business_overview_shop_racing(
+                granularity=granularity,
+                target_date=date,
+                group_by=group_by,
+            )
             return json.loads(success_response(data=result).body.decode())
 
         payload, cache_status = await _resolve_cached_payload(
@@ -188,18 +192,16 @@ async def get_business_overview_traffic_ranking_postgresql(
     shops: Optional[str] = Query(None, description="店铺ID(逗号分隔)"),
 ):
     try:
-        params = {
-            "granularity": granularity,
-            "dimension": dimension,
-            "date_value": date,
-            "platforms": platforms,
-            "shops": shops,
-        }
+        params = {"granularity": granularity, "dimension": dimension, "date": date}
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
-            service = get_metabase_service()
-            result = await service.query_question("business_overview_traffic_ranking", params)
+            service = get_postgresql_dashboard_service()
+            result = await service.get_business_overview_traffic_ranking(
+                granularity=granularity,
+                target_date=date,
+                dimension=dimension,
+            )
             return json.loads(success_response(data=result).body.decode())
 
         payload, cache_status = await _resolve_cached_payload(
@@ -260,8 +262,11 @@ async def get_business_overview_operational_metrics_postgresql(
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
-            service = get_metabase_service()
-            result = await service.query_question("business_overview_operational_metrics", params)
+            service = get_postgresql_dashboard_service()
+            result = await service.get_business_overview_operational_metrics(
+                month=month,
+                platform=platform,
+            )
             return json.loads(success_response(data=result).body.decode())
 
         payload, cache_status = await _resolve_cached_payload(

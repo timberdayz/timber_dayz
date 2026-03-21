@@ -8,6 +8,9 @@ from backend.routers.dashboard_api_postgresql import (
     get_annual_summary_kpi_postgresql,
     get_business_overview_comparison_postgresql,
     get_business_overview_kpi_postgresql,
+    get_business_overview_operational_metrics_postgresql,
+    get_business_overview_shop_racing_postgresql,
+    get_business_overview_traffic_ranking_postgresql,
     router,
 )
 
@@ -114,6 +117,85 @@ def test_postgresql_annual_summary_kpi_route_returns_service_payload(monkeypatch
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
     assert body["data"]["roi"] == -0.3
+
+
+def test_postgresql_shop_racing_route_returns_service_payload(monkeypatch):
+    class _ServiceStub:
+        async def get_business_overview_shop_racing(self, granularity, target_date, group_by):
+            return [{"name": "shop-a", "gmv": 100, "rank": 1}]
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_shop_racing_postgresql(
+            request=_make_request("/api/dashboard/business-overview/shop-racing"),
+            granularity="monthly",
+            date="2026-03-01",
+            group_by="shop",
+            platforms=None,
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["data"][0]["rank"] == 1
+
+
+def test_postgresql_traffic_ranking_route_returns_service_payload(monkeypatch):
+    class _ServiceStub:
+        async def get_business_overview_traffic_ranking(self, granularity, target_date, dimension):
+            return [{"name": "shop-a", "visitor_count": 100, "rank": 1}]
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_traffic_ranking_postgresql(
+            request=_make_request("/api/dashboard/business-overview/traffic-ranking"),
+            granularity="monthly",
+            dimension="visitor",
+            date="2026-03-01",
+            platforms=None,
+            shops=None,
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["data"][0]["rank"] == 1
+
+
+def test_postgresql_operational_metrics_route_returns_service_payload(monkeypatch):
+    class _ServiceStub:
+        async def get_business_overview_operational_metrics(self, month, platform):
+            return {
+                "monthly_target": 100,
+                "monthly_total_achieved": 80,
+                "estimated_expenses": 30,
+                "operating_result_text": "盈利",
+            }
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_operational_metrics_postgresql(
+            request=_make_request("/api/dashboard/business-overview/operational-metrics"),
+            month="2026-03-01",
+            platform=None,
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["data"]["operating_result_text"] == "盈利"
 
 
 def test_postgresql_dashboard_router_exposes_compatibility_paths():

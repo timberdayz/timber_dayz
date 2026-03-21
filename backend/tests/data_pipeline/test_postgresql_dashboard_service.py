@@ -7,6 +7,8 @@ from backend.services.postgresql_dashboard_service import (
     reduce_annual_summary_kpi_rows,
     reduce_business_overview_comparison_rows,
     reduce_business_overview_kpi_rows,
+    rank_shop_racing_rows,
+    rank_traffic_rows,
 )
 
 
@@ -154,6 +156,32 @@ def test_reduce_annual_summary_kpi_rows_yearly():
     assert result["gross_margin"] == 23.33
     assert result["net_margin"] == -10.0
     assert result["roi"] == -0.3
+
+
+def test_rank_shop_racing_rows_desc_by_gmv():
+    result = rank_shop_racing_rows(
+        [
+            {"name": "shop-b", "gmv": 50},
+            {"name": "shop-a", "gmv": 100},
+        ]
+    )
+
+    assert result[0]["name"] == "shop-a"
+    assert result[0]["rank"] == 1
+    assert result[1]["rank"] == 2
+
+
+def test_rank_traffic_rows_by_visitors():
+    result = rank_traffic_rows(
+        [
+            {"name": "shop-b", "visitor_count": 50, "page_views": 80},
+            {"name": "shop-a", "visitor_count": 100, "page_views": 120},
+        ],
+        dimension="visitor",
+    )
+
+    assert result[0]["name"] == "shop-a"
+    assert result[0]["rank"] == 1
 
 
 @pytest.mark.pg_only

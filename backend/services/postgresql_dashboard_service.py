@@ -109,6 +109,25 @@ def rank_inventory_backlog_rows(
     return filtered
 
 
+def rank_shop_racing_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered = [dict(row) for row in rows]
+    ordered.sort(key=lambda row: (_to_float(row.get("gmv")), _to_float(row.get("order_count"))), reverse=True)
+    for index, row in enumerate(ordered, start=1):
+        row["rank"] = index
+    return ordered
+
+
+def rank_traffic_rows(rows: list[dict[str, Any]], dimension: str = "visitor") -> list[dict[str, Any]]:
+    ordered = [dict(row) for row in rows]
+    if dimension == "pv":
+        ordered.sort(key=lambda row: _to_float(row.get("page_views")), reverse=True)
+    else:
+        ordered.sort(key=lambda row: _to_float(row.get("visitor_count")), reverse=True)
+    for index, row in enumerate(ordered, start=1):
+        row["rank"] = index
+    return ordered
+
+
 def reduce_annual_summary_kpi_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total_gmv = sum(_to_float(row.get("gmv")) for row in rows)
     total_cost = sum(_to_float(row.get("total_cost")) for row in rows)
@@ -300,6 +319,132 @@ class PostgresqlDashboardService:
         )
         ranked = rank_inventory_backlog_rows(rows, min_days=min_days)
         return ranked[:limit]
+
+    async def get_business_overview_shop_racing(
+        self,
+        granularity: str,
+        target_date: str,
+        group_by: str = "shop",
+    ) -> list[dict[str, Any]]:
+        period_key = _normalize_period_start(target_date)
+        rows = await self._fetch_rows(
+            """
+            SELECT granularity, period_key, platform_code, shop_id, gmv, order_count, avg_order_value, attach_rate, profit
+            FROM api.business_overview_shop_racing_module
+            WHERE granularity = :granularity
+              AND period_key = :period_key
+            """,
+            {"granularity": granularity, "period_key": period_key},
+        )
+
+        if group_by in ("platform", "account"):
+            grouped: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                key = row["platform_code"]
+                grouped.setdefault(
+                    key,
+                    {
+                        "name": key,
+                        "platform_code": key,
+                        "shop_id": "ALL",
+                        "gmv": 0.0,
+                        "order_count": 0.0,
+                        "avg_order_value": 0.0,
+                        "attach_rate": 0.0,
+                    },
+                )
+                grouped[key]["gmv"] += _to_float(row.get("gmv"))
+                grouped[key]["order_count"] += _to_float(row.get("order_count"))
+            for value in grouped.values():
+                if value["order_count"]:
+                    value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
+            return rank_shop_racing_rows(list(grouped.values()))
+
+        normalized_rows = [
+            {
+                "name": row.get("shop_id") or "unknown",
+                "platform_code": row.get("platform_code"),
+                "shop_id": row.get("shop_id") or "unknown",
+                "gmv": _to_float(row.get("gmv")),
+                "order_count": _to_float(row.get("order_count")),
+                "avg_order_value": _to_float(row.get("avg_order_value")),
+                "attach_rate": _to_float(row.get("attach_rate")),
+                "profit": _to_float(row.get("profit")),
+            }
+            for row in rows
+        ]
+        return rank_shop_racing_rows(normalized_rows)
+
+    async def get_business_overview_traffic_ranking(
+        self,
+        granularity: str,
+        target_date: str,
+        dimension: str = "visitor",
+    ) -> list[dict[str, Any]]:
+        period_key = _normalize_period_start(target_date)
+        rows = await self._fetch_rows(
+            """
+            SELECT granularity, period_key, platform_code, shop_id, visitor_count, page_views, conversion_rate
+            FROM api.business_overview_traffic_ranking_module
+            WHERE granularity = :granularity
+              AND period_key = :period_key
+            """,
+            {"granularity": granularity, "period_key": period_key},
+        )
+        normalized_rows = [
+            {
+                "name": row.get("shop_id") or row.get("platform_code") or "unknown",
+                "platform_code": row.get("platform_code"),
+                "shop_id": row.get("shop_id") or "unknown",
+                "visitor_count": _to_float(row.get("visitor_count")),
+                "page_views": _to_float(row.get("page_views")),
+                "conversion_rate": _to_float(row.get("conversion_rate")),
+            }
+            for row in rows
+        ]
+        return rank_traffic_rows(normalized_rows, dimension=dimension)
+
+    async def get_business_overview_operational_metrics(
+        self,
+        month: str,
+        platform: str | None = None,
+    ) -> dict[str, Any]:
+        period_month = _normalize_period_start(month)
+        query = """
+            SELECT *
+            FROM api.business_overview_operational_metrics_module
+            WHERE period_month = :period_month
+        """
+        params: dict[str, Any] = {"period_month": period_month}
+        if platform:
+            query += " AND platform_code = :platform_code"
+            params["platform_code"] = platform
+
+        rows = await self._fetch_rows(query, params)
+        total = {
+            "monthly_target": 0.0,
+            "monthly_total_achieved": 0.0,
+            "today_sales": 0.0,
+            "estimated_gross_profit": 0.0,
+            "estimated_expenses": 0.0,
+            "operating_result": 0.0,
+            "monthly_order_count": 0.0,
+            "today_order_count": 0.0,
+        }
+        for row in rows:
+            for key in total.keys():
+                total[key] += _to_float(row.get(key))
+
+        total["monthly_achievement_rate"] = (
+            round(total["monthly_total_achieved"] * 100.0 / total["monthly_target"], 2)
+            if total["monthly_target"]
+            else 0
+        )
+        total["time_gap"] = 0
+        total["operating_result_text"] = "盈利" if total["operating_result"] > 0 else "亏损"
+        total["monthly_order_count"] = int(total["monthly_order_count"])
+        total["today_order_count"] = int(total["today_order_count"])
+        return total
 
     async def get_annual_summary_kpi(
         self,
