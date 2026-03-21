@@ -214,19 +214,21 @@ async def execute_sql_target(
     pipeline_name: str = "refresh_sql_target",
     trigger_source: str = "system",
     context: dict | None = None,
+    run_id: str | None = None,
 ) -> str:
-    run_id = f"run_{uuid.uuid4().hex}"
+    active_run_id = run_id or f"run_{uuid.uuid4().hex}"
     await _ensure_ops_tables(db)
-    await _insert_run_log(
-        db,
-        run_id=run_id,
-        pipeline_name=pipeline_name,
-        trigger_source=trigger_source,
-        context={"target": target, **(context or {})},
-    )
+    if run_id is None:
+        await _insert_run_log(
+            db,
+            run_id=active_run_id,
+            pipeline_name=pipeline_name,
+            trigger_source=trigger_source,
+            context={"target": target, **(context or {})},
+        )
     await _insert_step_log(
         db,
-        run_id=run_id,
+        run_id=active_run_id,
         step_name="execute_sql_target",
         target_name=target,
         status="running",
@@ -240,11 +242,51 @@ async def execute_sql_target(
         await execute_sql_file(db, sql_path)
         await _sync_lineage_registry(db, target)
         await _upsert_freshness_log(db, target, "success")
-        await _update_step_log(db, run_id, target, "success")
+        await _update_step_log(db, active_run_id, target, "success")
+        if run_id is None:
+            await _update_run_log(db, active_run_id, "success")
+        return active_run_id
+    except Exception as exc:
+        await _upsert_freshness_log(db, target, "failed")
+        await _update_step_log(db, active_run_id, target, "failed", error_message=str(exc))
+        if run_id is None:
+            await _update_run_log(db, active_run_id, "failed", error_message=str(exc))
+        raise
+
+
+async def execute_refresh_plan(
+    db: AsyncSession,
+    targets: list[str],
+    pipeline_name: str = "refresh_plan",
+    trigger_source: str = "system",
+    context: dict | None = None,
+) -> str:
+    run_id = f"run_{uuid.uuid4().hex}"
+    ordered_targets = build_refresh_plan(targets)
+    await _ensure_ops_tables(db)
+    await _insert_run_log(
+        db,
+        run_id=run_id,
+        pipeline_name=pipeline_name,
+        trigger_source=trigger_source,
+        context={
+            "targets": targets,
+            "ordered_targets": ordered_targets,
+            **(context or {}),
+        },
+    )
+    try:
+        for target in ordered_targets:
+            await execute_sql_target(
+                db,
+                target,
+                pipeline_name=pipeline_name,
+                trigger_source=trigger_source,
+                context=context,
+                run_id=run_id,
+            )
         await _update_run_log(db, run_id, "success")
         return run_id
     except Exception as exc:
-        await _upsert_freshness_log(db, target, "failed")
-        await _update_step_log(db, run_id, target, "failed", error_message=str(exc))
         await _update_run_log(db, run_id, "failed", error_message=str(exc))
         raise

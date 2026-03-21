@@ -214,3 +214,92 @@ async def test_execute_sql_target_records_pipeline_metadata(tmp_path):
             refresh_registry.PIPELINE_DEPENDENCIES.clear()
             refresh_registry.PIPELINE_DEPENDENCIES.update(original_dependencies)
             await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_execute_refresh_plan_runs_multiple_targets_with_single_run_log(tmp_path):
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
+    from backend.services.data_pipeline import refresh_registry
+
+    source_sql = tmp_path / "semantic_source.sql"
+    source_sql.write_text(
+        "CREATE SCHEMA IF NOT EXISTS semantic;\n"
+        "CREATE OR REPLACE VIEW semantic.batch_source AS SELECT 1::int AS value, CURRENT_DATE AS metric_date;\n",
+        encoding="utf-8",
+    )
+    api_sql = tmp_path / "api_view.sql"
+    api_sql.write_text(
+        "CREATE SCHEMA IF NOT EXISTS api;\n"
+        "CREATE OR REPLACE VIEW api.batch_view AS SELECT value, metric_date FROM semantic.batch_source;\n",
+        encoding="utf-8",
+    )
+
+    source_target = f"semantic.batch_source_{uuid.uuid4().hex[:8]}"
+    api_target = f"api.batch_view_{uuid.uuid4().hex[:8]}"
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        original_paths = dict(refresh_registry.SQL_TARGET_PATHS)
+        original_dependencies = dict(refresh_registry.PIPELINE_DEPENDENCIES)
+        refresh_registry.SQL_TARGET_PATHS[source_target] = str(source_sql)
+        refresh_registry.SQL_TARGET_PATHS[api_target] = str(api_sql)
+        refresh_registry.PIPELINE_DEPENDENCIES[source_target] = []
+        refresh_registry.PIPELINE_DEPENDENCIES[api_target] = [source_target]
+
+        try:
+            async with session_factory() as session:
+                run_id = await execute_refresh_plan(
+                    session,
+                    targets=[api_target],
+                    pipeline_name="pytest_batch_plan",
+                    trigger_source="pytest",
+                )
+                await session.commit()
+
+                run_rows = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT COUNT(*)
+                            FROM ops.pipeline_run_log
+                            WHERE run_id = :run_id
+                            """
+                        ),
+                        {"run_id": run_id},
+                    )
+                ).scalar_one()
+                assert run_rows == 1
+
+                step_rows = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT target_name, status
+                            FROM ops.pipeline_step_log
+                            WHERE run_id = :run_id
+                            ORDER BY id
+                            """
+                        ),
+                        {"run_id": run_id},
+                    )
+                ).fetchall()
+                assert step_rows == [
+                    (source_target, "success"),
+                    (api_target, "success"),
+                ]
+        finally:
+            refresh_registry.SQL_TARGET_PATHS.clear()
+            refresh_registry.SQL_TARGET_PATHS.update(original_paths)
+            refresh_registry.PIPELINE_DEPENDENCIES.clear()
+            refresh_registry.PIPELINE_DEPENDENCIES.update(original_dependencies)
+            await engine.dispose()
