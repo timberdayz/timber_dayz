@@ -6,7 +6,8 @@ import asyncio
 import json
 from pathlib import Path
 import sys
-from urllib import request
+
+import httpx
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -16,7 +17,9 @@ from scripts.create_admin_user import create_admin_user
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate local auth payload for frontend smoke tests")
+    parser = argparse.ArgumentParser(
+        description="Generate local auth payload for frontend smoke tests"
+    )
     parser.add_argument("--backend-url", default="http://127.0.0.1:8001")
     parser.add_argument("--username", default="playwright_smoke_admin")
     parser.add_argument("--password", default="PlaywrightSmoke!1")
@@ -36,23 +39,20 @@ async def ensure_admin(args: argparse.Namespace):
 
 def login_and_fetch_payload(args: argparse.Namespace, user) -> dict:
     login_url = f"{args.backend_url.rstrip('/')}/api/auth/login"
-    body = json.dumps({"username": args.username, "password": args.password}).encode("utf-8")
-    req = request.Request(
+    response = httpx.post(
         login_url,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        json={"username": args.username, "password": args.password},
+        timeout=30,
     )
-
-    with request.urlopen(req, timeout=30) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+    response.raise_for_status()
+    payload = response.json()
 
     data = payload.get("data", payload)
     access_token = data.get("access_token")
     refresh_token = data.get("refresh_token")
 
     if not access_token or not refresh_token:
-      raise RuntimeError(f"Login payload missing tokens: {payload}")
+        raise RuntimeError(f"Login payload missing tokens: {payload}")
 
     user_info = data.get("user_info") or {
         "id": user.user_id,
