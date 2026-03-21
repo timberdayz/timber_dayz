@@ -1,4 +1,5 @@
 from pathlib import Path
+import uuid
 
 import pytest
 from sqlalchemy import text
@@ -107,3 +108,109 @@ async def test_execute_sql_target_creates_ops_tables():
             ]
 
         await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_execute_sql_target_records_pipeline_metadata(tmp_path):
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    from backend.services.data_pipeline.refresh_runner import execute_sql_target
+    from backend.services.data_pipeline import refresh_registry
+
+    sql_path = tmp_path / "fake_target.sql"
+    sql_path.write_text(
+        "CREATE SCHEMA IF NOT EXISTS semantic;\n"
+        "CREATE OR REPLACE VIEW semantic.fake_target AS SELECT 1::int AS value, CURRENT_DATE AS metric_date;\n",
+        encoding="utf-8",
+    )
+
+    target_name = f"semantic.fake_target_{uuid.uuid4().hex[:8]}"
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        original_paths = dict(refresh_registry.SQL_TARGET_PATHS)
+        original_dependencies = dict(refresh_registry.PIPELINE_DEPENDENCIES)
+        refresh_registry.SQL_TARGET_PATHS[target_name] = str(sql_path)
+        refresh_registry.PIPELINE_DEPENDENCIES[target_name] = ["semantic.fact_orders_atomic"]
+
+        try:
+            async with session_factory() as session:
+                await execute_sql_target(
+                    session,
+                    target_name,
+                    pipeline_name="pytest_pipeline",
+                    trigger_source="pytest",
+                )
+                await session.commit()
+
+                run_row = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT pipeline_name, status, trigger_source
+                            FROM ops.pipeline_run_log
+                            ORDER BY id DESC
+                            LIMIT 1
+                            """
+                        )
+                    )
+                ).fetchone()
+                assert run_row == ("pytest_pipeline", "success", "pytest")
+
+                step_row = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT target_name, status
+                            FROM ops.pipeline_step_log
+                            ORDER BY id DESC
+                            LIMIT 1
+                            """
+                        )
+                    )
+                ).fetchone()
+                assert step_row == (target_name, "success")
+
+                freshness_row = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT target_name, target_type, status
+                            FROM ops.data_freshness_log
+                            WHERE target_name = :target_name
+                            """
+                        ),
+                        {"target_name": target_name},
+                    )
+                ).fetchone()
+                assert freshness_row == (target_name, "semantic", "success")
+
+                lineage_row = (
+                    await session.execute(
+                        text(
+                            """
+                            SELECT target_name, source_name, source_type
+                            FROM ops.data_lineage_registry
+                            WHERE target_name = :target_name
+                            ORDER BY id DESC
+                            LIMIT 1
+                            """
+                        ),
+                        {"target_name": target_name},
+                    )
+                ).fetchone()
+                assert lineage_row == (target_name, "semantic.fact_orders_atomic", "semantic")
+        finally:
+            refresh_registry.SQL_TARGET_PATHS.clear()
+            refresh_registry.SQL_TARGET_PATHS.update(original_paths)
+            refresh_registry.PIPELINE_DEPENDENCIES.clear()
+            refresh_registry.PIPELINE_DEPENDENCIES.update(original_dependencies)
+            await engine.dispose()
