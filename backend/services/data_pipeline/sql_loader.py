@@ -7,7 +7,7 @@ def load_sql_text(path: str | Path) -> str:
     sql_path = Path(path)
     if not sql_path.is_absolute():
         sql_path = Path.cwd() / sql_path
-    return sql_path.read_text(encoding="utf-8")
+    return sql_path.read_text(encoding="utf-8").lstrip("\ufeff")
 
 
 def split_sql_statements(sql_text: str) -> list[str]:

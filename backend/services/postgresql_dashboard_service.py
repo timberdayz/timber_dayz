@@ -148,6 +148,7 @@ class PostgresqlDashboardService:
         month: str,
         platform: str | None = None,
     ) -> dict[str, Any]:
+        period_month = _normalize_period_start(month)
         query = """
             SELECT
                 period_month,
@@ -163,7 +164,7 @@ class PostgresqlDashboardService:
             FROM api.business_overview_kpi_module
             WHERE period_month = :period_month
         """
-        params: dict[str, Any] = {"period_month": month}
+        params: dict[str, Any] = {"period_month": period_month}
         if platform:
             query += " AND platform_code = :platform_code"
             params["platform_code"] = platform

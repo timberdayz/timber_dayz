@@ -1,3 +1,5 @@
+import pytest
+
 from backend.services.postgresql_dashboard_service import (
     PostgresqlDashboardService,
     get_postgresql_dashboard_service,
@@ -152,3 +154,106 @@ def test_reduce_annual_summary_kpi_rows_yearly():
     assert result["gross_margin"] == 23.33
     assert result["net_margin"] == -10.0
     assert result["roi"] == -0.3
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_reads_real_kpi_chain(monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    from backend.services.data_pipeline.refresh_runner import execute_sql_target
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS semantic"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS semantic.fact_orders_atomic (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        granularity VARCHAR(32),
+                        metric_date DATE,
+                        paid_amount NUMERIC,
+                        order_id VARCHAR(128),
+                        product_quantity NUMERIC,
+                        profit NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS semantic.fact_analytics_atomic (
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        granularity VARCHAR(32),
+                        metric_date DATE,
+                        visitor_count NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO semantic.fact_orders_atomic (
+                        platform_code, shop_id, granularity, metric_date,
+                        paid_amount, order_id, product_quantity, profit
+                    )
+                    VALUES (
+                        'shopee', 'shop-a', 'daily', DATE '2026-03-01',
+                        100, 'o-1', 12, 30
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO semantic.fact_analytics_atomic (
+                        platform_code, shop_id, granularity, metric_date, visitor_count
+                    )
+                    VALUES (
+                        'shopee', 'shop-a', 'daily', DATE '2026-03-01', 200
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            for target in (
+                "mart.shop_day_kpi",
+                "mart.shop_week_kpi",
+                "mart.shop_month_kpi",
+                "mart.platform_month_kpi",
+                "api.business_overview_kpi_module",
+            ):
+                await execute_sql_target(session, target)
+            await session.commit()
+
+        monkeypatch.setattr(
+            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+            session_factory,
+        )
+        service = PostgresqlDashboardService()
+        result = await service.get_business_overview_kpi("2026-03-01", None)
+
+        assert result["gmv"] == 100
+        assert result["order_count"] == 1
+        assert result["visitor_count"] == 200
+        assert result["avg_order_value"] == 100
+        assert result["attach_rate"] == 12
+
+        await engine.dispose()
