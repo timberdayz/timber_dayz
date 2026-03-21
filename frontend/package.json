@@ -12,7 +12,9 @@
     "preview": "vite preview",
     "serve": "vite preview --port 3000",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "smoke:playwright": "node scripts/playwrightFrontendSmoke.mjs",
+    "test:smoke-shared": "node --test scripts/frontendSmokeShared.test.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.1.0",
@@ -33,7 +35,8 @@
     "@vue/eslint-config-typescript": "^11.0.0",
     "eslint": "^8.45.0",
     "eslint-plugin-vue": "^9.15.0",
-    "typescript": "^5.1.6",
+    "playwright": "^1.54.2",
+    "typescript": "5.1.6",
     "unplugin-auto-import": "^0.16.6",
     "unplugin-vue-components": "^0.25.1",
     "vite": "^4.4.5",
