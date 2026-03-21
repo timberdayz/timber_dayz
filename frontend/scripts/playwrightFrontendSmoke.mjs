@@ -20,6 +20,7 @@ const repoRoot = path.resolve(__dirname, '..', '..')
 const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || 'http://127.0.0.1:5173'
 const PYTHON_BIN = process.env.PYTHON_BIN || 'python'
 const OUTPUT_ROOT = path.join(repoRoot, 'output', 'playwright', 'frontend-smoke')
+const ROUTE_TIMEOUT_MS = Number(process.env.PLAYWRIGHT_ROUTE_TIMEOUT_MS || 45000)
 
 const MAIN_CONTENT_SELECTORS = [
   '.main-content',
@@ -64,6 +65,11 @@ function sanitizeFileName(routePath) {
 
 async function writeJson(filePath, payload) {
   await fs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8')
+}
+
+function logProgress(message) {
+  const timestamp = new Date().toISOString()
+  console.log(`[frontend-smoke] ${timestamp} ${message}`)
 }
 
 async function launchBrowser() {
@@ -178,6 +184,40 @@ async function collectRouteResult(page, route, runDir) {
   }
 }
 
+async function collectRouteResultWithTimeout(page, route, runDir) {
+  const startedAt = Date.now()
+  try {
+    const result = await Promise.race([
+      collectRouteResult(page, route, runDir),
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`route timeout after ${ROUTE_TIMEOUT_MS}ms`))
+        }, ROUTE_TIMEOUT_MS)
+      }),
+    ])
+    return {
+      ...result,
+      elapsed_ms: Date.now() - startedAt,
+    }
+  } catch (error) {
+    return {
+      name: route.name,
+      path: route.path,
+      expectedTitle: route.expectedTitle,
+      actualTitle: '',
+      ok: false,
+      redirectedToLogin: false,
+      hasMainContent: false,
+      hasBlockingText: false,
+      consoleErrors: [String(error.message || error)],
+      pageErrors: [],
+      requestFailures: [],
+      screenshotPath: null,
+      elapsed_ms: Date.now() - startedAt,
+    }
+  }
+}
+
 async function main() {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   const runDir = path.join(OUTPUT_ROOT, timestamp)
@@ -186,11 +226,16 @@ async function main() {
 
   await ensureDir(runDir)
 
+  logProgress(`output dir: ${runDir}`)
   const authPayload = await generateAuthPayload()
   const storageEntries = buildAuthStorageEntries(authPayload)
+  logProgress(`auth payload ready for user: ${authPayload?.user_info?.username || 'unknown'}`)
 
   const browserLaunch = await launchBrowser()
   const browser = browserLaunch.browser
+  logProgress(
+    `browser launched (headless=${browserLaunch.headless}, fallbackUsed=${browserLaunch.fallbackUsed})`
+  )
   const context = await browser.newContext({
     viewport: { width: 1440, height: 960 },
   })
@@ -206,8 +251,10 @@ async function main() {
 
   try {
     for (const route of SMOKE_ROUTES) {
-      const result = await collectRouteResult(page, route, runDir)
+      logProgress(`route start: ${route.path}`)
+      const result = await collectRouteResultWithTimeout(page, route, runDir)
       results.push(result)
+      logProgress(`route done: ${route.path} ok=${result.ok} elapsed=${result.elapsed_ms}ms`)
     }
   } finally {
     await page.close().catch(() => {})
@@ -230,6 +277,9 @@ async function main() {
   await writeJson(runJsonPath, payload)
   await writeJson(latestPath, payload)
 
+  logProgress(
+    `summary written: total=${summary.total} passed=${summary.passed} failed=${summary.failed}`
+  )
   console.log(runJsonPath)
 
   if (summary.failed > 0) {
