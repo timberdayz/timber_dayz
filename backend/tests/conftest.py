@@ -78,9 +78,7 @@ async def pg_engine():
             from sqlalchemy import text
 
             for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
-                await conn.execute(
-                    text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"')
-                )
+                await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
 
             await conn.run_sync(Base.metadata.create_all)
 
