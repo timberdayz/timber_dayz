@@ -1,8 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { spawn } from 'node:child_process'
 
 import { chromium } from 'playwright'
 
@@ -12,7 +11,6 @@ import {
   summarizeSmokeResults,
 } from './frontendSmokeShared.mjs'
 
-const execFileAsync = promisify(execFile)
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const repoRoot = path.resolve(__dirname, '..', '..')
@@ -21,6 +19,7 @@ const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || 'http://127.0.0.1:517
 const PYTHON_BIN = process.env.PYTHON_BIN || 'python'
 const OUTPUT_ROOT = path.join(repoRoot, 'output', 'playwright', 'frontend-smoke')
 const ROUTE_TIMEOUT_MS = Number(process.env.PLAYWRIGHT_ROUTE_TIMEOUT_MS || 45000)
+const AUTH_SCRIPT_TIMEOUT_MS = Number(process.env.AUTH_SCRIPT_TIMEOUT_MS || 60000)
 
 const MAIN_CONTENT_SELECTORS = [
   '.main-content',
@@ -44,15 +43,65 @@ async function ensureDir(dirPath) {
 
 async function generateAuthPayload() {
   const scriptPath = path.join(repoRoot, 'scripts', 'generate_frontend_smoke_auth.py')
-  const { stdout } = await execFileAsync(PYTHON_BIN, [scriptPath], {
-    cwd: repoRoot,
-    encoding: 'utf-8',
+  return new Promise((resolve, reject) => {
+    const child = spawn(PYTHON_BIN, ['-u', scriptPath], {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    let stdout = ''
+    let stderr = ''
+    const timeoutId = setTimeout(() => {
+      child.kill('SIGTERM')
+      reject(
+        new Error(
+          `auth script timeout after ${AUTH_SCRIPT_TIMEOUT_MS}ms\nstdout:\n${stdout}\nstderr:\n${stderr}`
+        )
+      )
+    }, AUTH_SCRIPT_TIMEOUT_MS)
+
+    child.stdout.on('data', (chunk) => {
+      const text = chunk.toString()
+      stdout += text
+      text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .forEach((line) => logProgress(`[auth stdout] ${line}`))
+    })
+
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString()
+      stderr += text
+      text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .forEach((line) => logProgress(`[auth stderr] ${line}`))
+    })
+
+    child.on('error', (error) => {
+      clearTimeout(timeoutId)
+      reject(error)
+    })
+
+    child.on('close', (code) => {
+      clearTimeout(timeoutId)
+      if (code !== 0) {
+        reject(new Error(`auth script exited with code ${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`))
+        return
+      }
+      const lines = stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+      try {
+        resolve(JSON.parse(lines.at(-1)))
+      } catch (error) {
+        reject(new Error(`failed to parse auth payload\nstdout:\n${stdout}\nstderr:\n${stderr}\n${error}`))
+      }
+    })
   })
-  const lines = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-  return JSON.parse(lines.at(-1))
 }
 
 function buildRouteUrl(routePath) {
