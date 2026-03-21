@@ -167,6 +167,11 @@ jobs:
             echo "No changed test files found, skipping pytest"
           fi
 
+      - name: Run performance regression entry
+        if: matrix.python-version == '3.11'
+        run: |
+          python scripts/verify_performance_regression.py --mode ci
+
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.11'
         uses: codecov/codecov-action@v3
