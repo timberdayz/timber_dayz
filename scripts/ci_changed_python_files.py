@@ -85,6 +85,11 @@ def main() -> int:
         action="store_true",
         help="Exclude test files from the emitted list",
     )
+    parser.add_argument(
+        "--tests-only",
+        action="store_true",
+        help="Emit only test files from tests/ and backend/tests/",
+    )
     args = parser.parse_args()
 
     diff_range = detect_range()
@@ -94,6 +99,14 @@ def main() -> int:
             path
             for path in files
             if not path.startswith("tests/") and not path.startswith("backend/tests/")
+        ]
+    if args.tests_only:
+        files = [
+            path
+            for path in files
+            if (
+                path.startswith("tests/") or path.startswith("backend/tests/")
+            ) and Path(path).name.startswith("test_")
         ]
 
     if args.shell:
