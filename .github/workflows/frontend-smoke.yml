@@ -11,6 +11,19 @@ jobs:
   frontend-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      ENVIRONMENT: development
+      TEST_MODE: "true"
+      HOST: 127.0.0.1
+      PORT: 8001
+      FRONTEND_PORT: 5173
+      DATABASE_URL: sqlite:///${{ github.workspace }}/data/frontend_smoke.db
+      JWT_SECRET_KEY: github-actions-smoke-jwt-secret
+      SECRET_KEY: github-actions-smoke-secret
+      ALLOWED_ORIGINS: http://127.0.0.1:5173
+      ALLOWED_HOSTS: 127.0.0.1,localhost
+      REDIS_ENABLED: "false"
+      PLAYWRIGHT_HEADLESS: "true"
 
     steps:
       - name: Checkout repository
@@ -43,20 +56,6 @@ jobs:
           else
             touch .env
           fi
-          {
-            echo "ENVIRONMENT=development"
-            echo "TEST_MODE=true"
-            echo "HOST=127.0.0.1"
-            echo "PORT=8001"
-            echo "FRONTEND_PORT=5173"
-            echo "DATABASE_URL=sqlite:///$GITHUB_WORKSPACE/data/frontend_smoke.db"
-            echo "JWT_SECRET_KEY=github-actions-smoke-jwt-secret"
-            echo "SECRET_KEY=github-actions-smoke-secret"
-            echo "ALLOWED_ORIGINS=http://127.0.0.1:5173"
-            echo "ALLOWED_HOSTS=127.0.0.1,localhost"
-            echo "REDIS_ENABLED=false"
-            echo "PLAYWRIGHT_HEADLESS=true"
-          } >> .env
 
       - name: Install frontend dependencies
         working-directory: frontend
