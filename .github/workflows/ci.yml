@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov black ruff mypy
+          pip install pytest pytest-cov black==25.1.0 ruff mypy
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           # 注意: pyproject.toml 只包含工具配置（black/ruff/pytest），不是可安装包
           # 项目依赖通过 requirements.txt 安装，不需要 pip install -e .
