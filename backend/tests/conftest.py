@@ -130,6 +130,7 @@ def auth_headers() -> dict[str, str]:
         id = 1
         username = "test_admin"
         is_active = True
+        is_superuser = True
         role_id = 1
 
     async def override_current_user():
@@ -138,4 +139,3 @@ def auth_headers() -> dict[str, str]:
     app.dependency_overrides[get_current_user] = override_current_user
 
     return {"Authorization": "Bearer test-token-for-unit-tests"}
-

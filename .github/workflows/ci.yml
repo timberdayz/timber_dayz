@@ -70,6 +70,19 @@ jobs:
             echo "[INFO] No changed Python files in scoped CI paths"
           fi
 
+      - name: Detect changed test files
+        id: changed-tests
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          CHANGED_TEST_FILES="$(python scripts/ci_changed_python_files.py --shell --tests-only)"
+          echo "files=${CHANGED_TEST_FILES}" >> $GITHUB_OUTPUT
+          if [ -n "${CHANGED_TEST_FILES}" ]; then
+            echo "[INFO] Changed test files: ${CHANGED_TEST_FILES}"
+          else
+            echo "[INFO] No changed test files in scoped CI paths"
+          fi
+
       - name: Create test environment
         run: |
           mkdir -p data logs temp
@@ -147,18 +160,11 @@ jobs:
 
       - name: Run pytest (if test files exist)
         run: |
-          TEST_PATHS=""
-          if [ -d "tests" ] && [ "$(find tests -name 'test_*.py' | wc -l)" -gt 0 ]; then
-            TEST_PATHS="${TEST_PATHS} tests"
-          fi
-          if [ -d "backend/tests" ] && [ "$(find backend/tests -name 'test_*.py' | wc -l)" -gt 0 ]; then
-            TEST_PATHS="${TEST_PATHS} backend/tests"
-          fi
-
+          TEST_PATHS="${{ steps.changed-tests.outputs.files }}"
           if [ -n "${TEST_PATHS}" ]; then
             pytest ${TEST_PATHS} -v --cov=backend --cov=modules --cov-report=xml
           else
-            echo "No pytest test files found, skipping pytest"
+            echo "No changed test files found, skipping pytest"
           fi
 
       - name: Upload coverage to Codecov
