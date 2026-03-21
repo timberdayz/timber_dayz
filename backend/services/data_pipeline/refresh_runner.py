@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import asyncio
 import uuid
 
 from sqlalchemy import text
@@ -102,6 +103,29 @@ async def _insert_step_log(
             "status": status,
             "details": "{}" if details is None else __import__("json").dumps(details),
         },
+    )
+
+
+async def _insert_skipped_step_log(
+    db: AsyncSession,
+    run_id: str,
+    target_name: str,
+    reason: str,
+) -> None:
+    await _insert_step_log(
+        db,
+        run_id=run_id,
+        step_name="execute_sql_target",
+        target_name=target_name,
+        status="skipped",
+        details={"reason": reason},
+    )
+    await _update_step_log(
+        db,
+        run_id=run_id,
+        target_name=target_name,
+        status="skipped",
+        error_message=reason,
     )
 
 
@@ -215,6 +239,8 @@ async def execute_sql_target(
     trigger_source: str = "system",
     context: dict | None = None,
     run_id: str | None = None,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
 ) -> str:
     active_run_id = run_id or f"run_{uuid.uuid4().hex}"
     await _ensure_ops_tables(db)
@@ -238,20 +264,86 @@ async def execute_sql_target(
         sql_path = "sql/ops/create_pipeline_tables.sql"
     else:
         sql_path = SQL_TARGET_PATHS[target]
-    try:
-        await execute_sql_file(db, sql_path)
-        await _sync_lineage_registry(db, target)
-        await _upsert_freshness_log(db, target, "success")
-        await _update_step_log(db, active_run_id, target, "success")
-        if run_id is None:
-            await _update_run_log(db, active_run_id, "success")
-        return active_run_id
-    except Exception as exc:
-        await _upsert_freshness_log(db, target, "failed")
-        await _update_step_log(db, active_run_id, target, "failed", error_message=str(exc))
-        if run_id is None:
-            await _update_run_log(db, active_run_id, "failed", error_message=str(exc))
-        raise
+    last_error: Exception | None = None
+    attempts = max(1, max_attempts)
+    for attempt in range(1, attempts + 1):
+        try:
+            async with db.begin_nested():
+                await execute_sql_file(db, sql_path)
+            await _sync_lineage_registry(db, target)
+            await _upsert_freshness_log(db, target, "success")
+            await _update_step_log(
+                db,
+                active_run_id,
+                target,
+                "success",
+            )
+            await db.execute(
+                text(
+                    """
+                    UPDATE ops.pipeline_step_log
+                    SET details = CAST(:details AS jsonb)
+                    WHERE id = (
+                        SELECT id
+                        FROM ops.pipeline_step_log
+                        WHERE run_id = :run_id
+                          AND target_name = :target_name
+                        ORDER BY id DESC
+                        LIMIT 1
+                    )
+                    """
+                ),
+                {
+                    "run_id": active_run_id,
+                    "target_name": target,
+                    "details": __import__("json").dumps(
+                        {
+                            "target_type": _target_type(target),
+                            "attempts": attempt,
+                        }
+                    ),
+                },
+            )
+            if run_id is None:
+                await _update_run_log(db, active_run_id, "success")
+            return active_run_id
+        except Exception as exc:
+            last_error = exc
+            if attempt < attempts and retry_backoff_seconds > 0:
+                await asyncio.sleep(retry_backoff_seconds * attempt)
+
+    assert last_error is not None
+    await _upsert_freshness_log(db, target, "failed")
+    await _update_step_log(db, active_run_id, target, "failed", error_message=str(last_error))
+    await db.execute(
+        text(
+            """
+            UPDATE ops.pipeline_step_log
+            SET details = CAST(:details AS jsonb)
+            WHERE id = (
+                SELECT id
+                FROM ops.pipeline_step_log
+                WHERE run_id = :run_id
+                  AND target_name = :target_name
+                ORDER BY id DESC
+                LIMIT 1
+            )
+            """
+        ),
+        {
+            "run_id": active_run_id,
+            "target_name": target,
+            "details": __import__("json").dumps(
+                {
+                    "target_type": _target_type(target),
+                    "attempts": attempts,
+                }
+            ),
+        },
+    )
+    if run_id is None:
+        await _update_run_log(db, active_run_id, "failed", error_message=str(last_error))
+    raise last_error
 
 
 async def execute_refresh_plan(
@@ -260,6 +352,9 @@ async def execute_refresh_plan(
     pipeline_name: str = "refresh_plan",
     trigger_source: str = "system",
     context: dict | None = None,
+    continue_on_error: bool = False,
+    max_attempts: int = 1,
+    retry_backoff_seconds: float = 0.0,
 ) -> str:
     run_id = f"run_{uuid.uuid4().hex}"
     ordered_targets = build_refresh_plan(targets)
@@ -275,8 +370,24 @@ async def execute_refresh_plan(
             **(context or {}),
         },
     )
+    failed_targets: set[str] = set()
     try:
         for target in ordered_targets:
+            from backend.services.data_pipeline.refresh_registry import PIPELINE_DEPENDENCIES
+
+            failed_dependencies = [
+                dependency
+                for dependency in PIPELINE_DEPENDENCIES.get(target, [])
+                if dependency in failed_targets
+            ]
+            if failed_dependencies:
+                await _insert_skipped_step_log(
+                    db,
+                    run_id=run_id,
+                    target_name=target,
+                    reason=f"dependency_failed:{','.join(failed_dependencies)}",
+                )
+                continue
             await execute_sql_target(
                 db,
                 target,
@@ -284,9 +395,47 @@ async def execute_refresh_plan(
                 trigger_source=trigger_source,
                 context=context,
                 run_id=run_id,
+                max_attempts=max_attempts,
+                retry_backoff_seconds=retry_backoff_seconds,
             )
-        await _update_run_log(db, run_id, "success")
+        if failed_targets:
+            await _update_run_log(db, run_id, "partial_failed")
+        else:
+            await _update_run_log(db, run_id, "success")
         return run_id
     except Exception as exc:
+        if continue_on_error:
+            failed_targets.add(target)
+            for remaining_target in ordered_targets[ordered_targets.index(target) + 1 :]:
+                from backend.services.data_pipeline.refresh_registry import PIPELINE_DEPENDENCIES
+
+                failed_dependencies = [
+                    dependency
+                    for dependency in PIPELINE_DEPENDENCIES.get(remaining_target, [])
+                    if dependency in failed_targets
+                ]
+                if failed_dependencies:
+                    await _insert_skipped_step_log(
+                        db,
+                        run_id=run_id,
+                        target_name=remaining_target,
+                        reason=f"dependency_failed:{','.join(failed_dependencies)}",
+                    )
+                else:
+                    try:
+                        await execute_sql_target(
+                            db,
+                            remaining_target,
+                            pipeline_name=pipeline_name,
+                            trigger_source=trigger_source,
+                            context=context,
+                            run_id=run_id,
+                            max_attempts=max_attempts,
+                            retry_backoff_seconds=retry_backoff_seconds,
+                        )
+                    except Exception:
+                        failed_targets.add(remaining_target)
+            await _update_run_log(db, run_id, "partial_failed", error_message=str(exc))
+            return run_id
         await _update_run_log(db, run_id, "failed", error_message=str(exc))
         raise
