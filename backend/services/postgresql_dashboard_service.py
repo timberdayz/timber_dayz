@@ -522,6 +522,51 @@ class PostgresqlDashboardService:
             {"period_start": period_start, "period_end": period_end},
         )
 
+    async def get_annual_summary_target_completion(
+        self,
+        db,
+        granularity: str,
+        period: str,
+    ) -> dict[str, Any]:
+        if granularity not in ("monthly", "yearly"):
+            raise ValueError("granularity must be monthly or yearly")
+
+        if len(period) == 4:
+            year_month_filter = '"年月" LIKE :period_prefix'
+            db_params: dict[str, Any] = {"period_prefix": f"{period}-%"}
+        else:
+            year_month_filter = '"年月" = :period'
+            db_params = {"period": period}
+
+        result = await db.execute(
+            text(
+                f"""
+                SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
+                       COALESCE(SUM("目标单量"), 0) AS target_orders
+                FROM a_class.sales_targets_a
+                WHERE {year_month_filter}
+                """
+            ),
+            db_params,
+        )
+        row = result.fetchone()
+        target_gmv = float(row[0]) if row and row[0] is not None else 0.0
+        target_orders = int(row[1]) if row and row[1] is not None else 0
+
+        achieved = await self.get_annual_summary_kpi(granularity=granularity, period=period)
+        achieved_gmv = float(achieved.get("gmv") or 0)
+        achievement_rate_gmv = round(achieved_gmv / target_gmv * 100, 2) if target_gmv else None
+
+        return {
+            "target_gmv": target_gmv,
+            "achieved_gmv": achieved_gmv,
+            "achievement_rate_gmv": achievement_rate_gmv,
+            "target_orders": target_orders,
+            "target_profit": None,
+            "achieved_profit": achieved.get("profit"),
+            "achievement_rate_profit": None,
+        }
+
 
 _service: PostgresqlDashboardService | None = None
 

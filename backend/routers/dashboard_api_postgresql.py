@@ -409,43 +409,14 @@ async def get_annual_summary_target_completion_postgresql(
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
-            if len(period) == 4:
-                year_month_filter = '"年月" LIKE :period_prefix'
-                db_params: dict[str, Any] = {"period_prefix": f"{period}-%"}
-            else:
-                year_month_filter = '"年月" = :period'
-                db_params = {"period": period}
-
-            result = await db.execute(
-                text(
-                    f"""
-                    SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
-                           COALESCE(SUM("目标单量"), 0) AS target_orders
-                    FROM a_class.sales_targets_a
-                    WHERE {year_month_filter}
-                    """
-                ),
-                db_params,
-            )
-            row = result.fetchone()
-            target_gmv = float(row[0]) if row and row[0] is not None else 0.0
-            target_orders = int(row[1]) if row and row[1] is not None else 0
-
             service = get_postgresql_dashboard_service()
-            achieved = await service.get_annual_summary_kpi(granularity=granularity, period=period)
-            achieved_gmv = float(achieved.get("gmv") or 0)
-            achievement_rate_gmv = round(achieved_gmv / target_gmv * 100, 2) if target_gmv else None
+            result = await service.get_annual_summary_target_completion(
+                db=db,
+                granularity=granularity,
+                period=period,
+            )
+            return json.loads(success_response(data=result).body.decode())
 
-            data = {
-                "target_gmv": target_gmv,
-                "achieved_gmv": achieved_gmv,
-                "achievement_rate_gmv": achievement_rate_gmv,
-                "target_orders": target_orders,
-                "target_profit": None,
-                "achieved_profit": achieved.get("profit"),
-                "achievement_rate_profit": None,
-            }
-            return json.loads(success_response(data=data).body.decode())
 
         payload, cache_status = await _resolve_cached_payload(
             request,

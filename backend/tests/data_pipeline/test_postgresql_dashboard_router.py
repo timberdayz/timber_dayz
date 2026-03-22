@@ -5,7 +5,10 @@ from types import SimpleNamespace
 from starlette.requests import Request
 
 from backend.routers.dashboard_api_postgresql import (
+    get_annual_summary_by_shop_postgresql,
     get_annual_summary_kpi_postgresql,
+    get_annual_summary_target_completion_postgresql,
+    get_annual_summary_trend_postgresql,
     get_business_overview_comparison_postgresql,
     get_business_overview_kpi_postgresql,
     get_business_overview_operational_metrics_postgresql,
@@ -117,6 +120,84 @@ def test_postgresql_annual_summary_kpi_route_returns_service_payload(monkeypatch
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
     assert body["data"]["roi"] == -0.3
+
+
+def test_postgresql_annual_summary_trend_route_returns_service_payload(monkeypatch):
+    class _ServiceStub:
+        async def get_annual_summary_trend(self, granularity, period):
+            return [{"period_month": "2026-03-01", "gmv": 300, "total_cost": 100, "profit": 70}]
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_annual_summary_trend_postgresql(
+            request=_make_request("/api/dashboard/annual-summary/trend"),
+            granularity="yearly",
+            period="2026",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["data"][0]["gmv"] == 300
+
+
+def test_postgresql_annual_summary_by_shop_route_returns_service_payload(monkeypatch):
+    class _ServiceStub:
+        async def get_annual_summary_by_shop(self, granularity, period):
+            return [{"shop_id": "shop-a", "platform_code": "shopee", "gmv": 300, "roi": 0.2}]
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_annual_summary_by_shop_postgresql(
+            request=_make_request("/api/dashboard/annual-summary/by-shop"),
+            granularity="yearly",
+            period="2026",
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["data"][0]["shop_id"] == "shop-a"
+
+
+def test_postgresql_annual_summary_target_completion_route_returns_service_payload(monkeypatch):
+    class _ServiceStub:
+        async def get_annual_summary_target_completion(self, db, granularity, period):
+            return {
+                "target_gmv": 1000,
+                "achieved_gmv": 800,
+                "achievement_rate_gmv": 80.0,
+                "target_orders": 80,
+                "target_profit": None,
+                "achieved_profit": 120,
+                "achievement_rate_profit": None,
+            }
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_annual_summary_target_completion_postgresql(
+            request=_make_request("/api/dashboard/annual-summary/target-completion"),
+            granularity="yearly",
+            period="2026",
+            db=None,
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["data"]["achievement_rate_gmv"] == 80.0
 
 
 def test_postgresql_shop_racing_route_returns_service_payload(monkeypatch):

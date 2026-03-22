@@ -158,6 +158,19 @@ def test_reduce_annual_summary_kpi_rows_yearly():
     assert result["roi"] == -0.3
 
 
+def test_reduce_annual_summary_target_completion():
+    target_gmv = 1000
+    target_orders = 80
+    achieved = {"gmv": 800, "profit": 120}
+
+    achievement_rate_gmv = round(achieved["gmv"] / target_gmv * 100, 2)
+
+    assert target_gmv == 1000
+    assert target_orders == 80
+    assert achieved["gmv"] == 800
+    assert achievement_rate_gmv == 80.0
+
+
 def test_rank_shop_racing_rows_desc_by_gmv():
     result = rank_shop_racing_rows(
         [

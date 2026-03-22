@@ -49,6 +49,17 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
                 "operating_result_text": "盈利",
             }
 
+        async def get_annual_summary_target_completion(self, db, granularity, period):
+            return {
+                "target_gmv": 1000,
+                "achieved_gmv": 800,
+                "achievement_rate_gmv": 80.0,
+                "target_orders": 80,
+                "target_profit": None,
+                "achieved_profit": 120,
+                "achievement_rate_profit": None,
+            }
+
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _PostgresqlServiceStub(),
@@ -76,10 +87,17 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
             "/api/dashboard/business-overview/operational-metrics",
             params={"month": "2026-03-01"},
         )
+        target_completion = await client.get(
+            "/api/dashboard/annual-summary/target-completion",
+            params={"granularity": "yearly", "period": "2026"},
+        )
 
     shop_body = json.loads(shop_racing.content.decode("utf-8"))
     operational_body = json.loads(operational.content.decode("utf-8"))
+    target_completion_body = json.loads(target_completion.content.decode("utf-8"))
     assert shop_racing.status_code == 200
     assert shop_body["data"][0]["rank"] == 1
     assert operational.status_code == 200
     assert operational_body["data"]["operating_result_text"] == "盈利"
+    assert target_completion.status_code == 200
+    assert target_completion_body["data"]["achievement_rate_gmv"] == 80.0
