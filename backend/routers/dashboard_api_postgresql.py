@@ -16,7 +16,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 from backend.models.database import get_async_db
-from backend.services.metabase_question_service import get_metabase_service
 from backend.services.postgresql_dashboard_service import get_postgresql_dashboard_service
 from backend.utils.api_response import error_response, success_response
 from backend.utils.error_codes import ErrorCode

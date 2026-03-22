@@ -38,6 +38,17 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
                 "labor_efficiency": 0,
             }
 
+        async def get_business_overview_shop_racing(self, granularity, target_date, group_by):
+            return [{"name": "shop-a", "gmv": 123, "rank": 1}]
+
+        async def get_business_overview_operational_metrics(self, month, platform):
+            return {
+                "monthly_target": 1000,
+                "monthly_total_achieved": 800,
+                "estimated_expenses": 300,
+                "operating_result_text": "盈利",
+            }
+
     monkeypatch.setattr(
         "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
         lambda: _PostgresqlServiceStub(),
@@ -52,3 +63,23 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
     body = json.loads(response.content.decode("utf-8"))
     assert response.status_code == 200
     assert body["data"]["gmv"] == 321
+
+    async with AsyncClient(
+        transport=ASGITransport(app=switched_app),
+        base_url="http://localhost",
+    ) as client:
+        shop_racing = await client.get(
+            "/api/dashboard/business-overview/shop-racing",
+            params={"granularity": "monthly", "date": "2026-03-01", "group_by": "shop"},
+        )
+        operational = await client.get(
+            "/api/dashboard/business-overview/operational-metrics",
+            params={"month": "2026-03-01"},
+        )
+
+    shop_body = json.loads(shop_racing.content.decode("utf-8"))
+    operational_body = json.loads(operational.content.decode("utf-8"))
+    assert shop_racing.status_code == 200
+    assert shop_body["data"][0]["rank"] == 1
+    assert operational.status_code == 200
+    assert operational_body["data"]["operating_result_text"] == "盈利"
