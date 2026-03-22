@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,8 @@ BASE_URL = os.getenv("PERF_BASE_URL", "http://127.0.0.1:8001")
 ADMIN_USERNAME = os.getenv("PERF_LOGIN_USERNAME", "perf_load_admin")
 ADMIN_PASSWORD = os.getenv("PERF_LOGIN_PASSWORD", "PerfLoadAdmin#2026")
 OUTPUT_DIR = Path("temp/outputs")
+CURRENT_YEAR_MONTH = datetime.now().strftime("%Y-%m")
+CURRENT_YEAR = datetime.now().strftime("%Y")
 
 PAGE_SCENARIOS = [
     {
@@ -159,6 +162,33 @@ PAGE_SCENARIOS = [
             {"path": "/api/system/notification/smtp-config"},
             {"path": "/api/system/notification/templates"},
             {"path": "/api/system/notification/alert-rules"},
+        ],
+    },
+    {
+        "name": "permission_management",
+        "requests": [
+            {"path": "/api/system/permissions"},
+            {"path": "/api/roles/"},
+            {"path": "/api/users/", "params": {"page": 1, "page_size": 20}},
+        ],
+    },
+    {
+        "name": "data_sync_templates",
+        "requests": [
+            {"path": "/api/data-sync/platforms"},
+            {"path": "/api/data-sync/governance/detailed-coverage"},
+            {"path": "/api/field-mapping/governance/overview"},
+            {"path": "/api/field-mapping/governance/missing-templates"},
+            {"path": "/api/field-mapping/templates/list"},
+            {"path": "/api/data-sync/files", "params": {"page": 1, "page_size": 20}},
+        ],
+    },
+    {
+        "name": "expense_management",
+        "requests": [
+            {"path": "/api/expenses/shops"},
+            {"path": "/api/expenses", "params": {"year_month": CURRENT_YEAR_MONTH, "page": 1, "page_size": 20}},
+            {"path": "/api/expenses/summary/yearly", "params": {"year": CURRENT_YEAR}},
         ],
     },
 ]

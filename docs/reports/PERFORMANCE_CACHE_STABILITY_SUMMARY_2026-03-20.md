@@ -122,6 +122,9 @@ CI 接入：
 17. `SystemMaintenance`
 18. `AccountAlignment`
 19. `NotificationConfig`
+20. `PermissionManagement`
+21. `DataSyncTemplates`
+22. `ExpenseManagement`
 
 当前 `5` 轮样本结论：
 1. 上述页面对应请求全部返回 `200`
@@ -131,11 +134,14 @@ CI 接入：
 5. `UserApproval` 已完成路由匹配修复
 6. `AccountAlignment` 已完成空源兼容与前端安全返回结构修复
 7. `NotificationConfig` 已完成无 SMTP 配置环境下的默认空态修复
+8. `PermissionManagement` 已补入权限、角色、用户组合样本
+9. `DataSyncTemplates` 已补入模板治理、模板列表、文件列表组合样本
+10. `ExpenseManagement` 已补入店铺列表、月度费用列表、年度汇总组合样本
 
 ## 当前边界
 目前可以较稳妥地确认：
 1. 核心页面读路径、缓存路径和统一回归入口都已具备有效样本支撑
-2. 新增 19 个真实高频页面当前都已纳入本地统一回归
+2. 新增 22 个真实高频页面当前都已纳入本地统一回归
 3. `backend` 与 `nginx` 两条链路的关键页面样本都已有正向结果
 
 ## 仍未完全覆盖的边界

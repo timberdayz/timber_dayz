@@ -17,6 +17,7 @@ from backend.models.database import get_db, get_async_db, SessionLocal
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from backend.services.component_version_service import ComponentVersionService
+from backend.services.component_name_utils import parse_component_name
 from modules.core.db import ComponentVersion, ComponentTestHistory
 from modules.core.logger import get_logger
 from backend.schemas.component_version import (
@@ -37,6 +38,75 @@ from backend.schemas.component_version import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/component-versions", tags=["组件版本管理"])
+
+
+# canonical 组件文件清单：仅这些文件允许作为默认逻辑组件入口进入批量注册主路径
+CANONICAL_COMPONENT_FILES = {
+    "shopee": {
+        "login.py",
+        "navigation.py",
+        "date_picker.py",
+        "orders_export.py",
+        "products_export.py",
+        "analytics_export.py",
+        "finance_export.py",
+        "services_export.py",
+    },
+    "tiktok": {
+        "login.py",
+        "navigation.py",
+        "date_picker.py",
+        "shop_selector.py",
+        "export.py",
+    },
+    "miaoshou": {
+        "login.py",
+        "navigation.py",
+        "date_picker.py",
+        "export.py",
+    },
+}
+
+
+def _is_canonical_component_file(platform: str, filename: str) -> bool:
+    """Return True when the file is a canonical logical component entry."""
+    try:
+        return filename in CANONICAL_COMPONENT_FILES.get(platform, set())
+    except Exception:
+        return False
+
+
+CANONICAL_COMPONENT_NAMES = {
+    platform: {f"{platform}/{name[:-3]}" for name in filenames if name.endswith(".py")}
+    for platform, filenames in CANONICAL_COMPONENT_FILES.items()
+}
+
+
+def _get_canonical_component_names(platform: Optional[str] = None) -> list[str]:
+    """Return canonical component_name values for a platform or all platforms."""
+    if platform:
+        return sorted(CANONICAL_COMPONENT_NAMES.get(platform, set()))
+    merged: set[str] = set()
+    for names in CANONICAL_COMPONENT_NAMES.values():
+        merged.update(names)
+    return sorted(merged)
+
+
+def _filter_component_names_by_type(
+    component_names: list[str],
+    component_type: Optional[str],
+) -> list[str]:
+    """Filter canonical component names by logical component type."""
+    if not component_type:
+        return component_names
+
+    expected = component_type.strip().lower()
+    filtered: list[str] = []
+    for name in component_names:
+        _, logical_type, _, _ = parse_component_name(name)
+        if str(logical_type or "").lower() == expected:
+            filtered.append(name)
+    return filtered
 
 
 def save_test_history_sync(
@@ -173,7 +243,6 @@ async def list_versions(
             return VersionListResponse(**cached_data)
     
     try:
-        from sqlalchemy import func
         service = ComponentVersionService(db)
         
         # 构建查询条件
@@ -182,10 +251,11 @@ async def list_versions(
         # 平台筛选
         if platform:
             conditions.append(ComponentVersion.component_name.like(f"{platform}/%"))
-        
-        # 组件类型筛选
-        if component_type:
-            conditions.append(ComponentVersion.component_name.like(f"%/{component_type}%"))
+
+        canonical_names = _get_canonical_component_names(platform)
+        canonical_names = _filter_component_names_by_type(canonical_names, component_type)
+        if canonical_names:
+            conditions.append(ComponentVersion.component_name.in_(canonical_names))
         
         # 状态筛选
         if status == "stable":
@@ -203,19 +273,45 @@ async def list_versions(
             not_(ComponentVersion.component_name.like('%overlay_guard'))
         ])
         
-        # 总数
-        count_stmt = select(func.count(ComponentVersion.id)).where(*conditions)
-        count_result = await db.execute(count_stmt)
-        total = count_result.scalar() or 0
-        
-        # 分页
-        offset = (page - 1) * page_size
         stmt = select(ComponentVersion).where(*conditions).order_by(
             ComponentVersion.success_rate.desc(),
             ComponentVersion.created_at.desc()
-        ).offset(offset).limit(page_size)
+        )
         result = await db.execute(stmt)
         versions = result.scalars().all()
+
+        # canonical-first: 同一逻辑组件只保留一个“当前工作行”
+        # 选择规则：updated_at 更新更晚者优先；其后 created_at、更大的 id 作为稳定 tie-breaker
+        latest_by_component = {}
+        for row in versions:
+            current = latest_by_component.get(row.component_name)
+            if current is None:
+                latest_by_component[row.component_name] = row
+                continue
+
+            current_key = (
+                current.updated_at or current.created_at,
+                current.created_at,
+                current.id,
+            )
+            row_key = (
+                row.updated_at or row.created_at,
+                row.created_at,
+                row.id,
+            )
+            if row_key > current_key:
+                latest_by_component[row.component_name] = row
+
+        collapsed_versions = sorted(
+            latest_by_component.values(),
+            key=lambda v: (
+                -(v.success_rate or 0.0),
+                -(v.created_at.timestamp() if v.created_at else 0),
+            ),
+        )
+        total = len(collapsed_versions)
+        offset = (page - 1) * page_size
+        versions_page = collapsed_versions[offset : offset + page_size]
         
         # 格式化响应
         data = [
@@ -239,7 +335,7 @@ async def list_versions(
                 created_at=v.created_at.isoformat(),
                 updated_at=v.updated_at.isoformat()
             )
-            for v in versions
+            for v in versions_page
         ]
         
         result = VersionListResponse(
@@ -696,6 +792,16 @@ async def batch_register_python_components(
             for py_file in platform_dir.glob("*.py"):
                 # 跳过 __init__.py
                 if py_file.name.startswith("__"):
+                    continue
+                if not _is_canonical_component_file(platform, py_file.name):
+                    results.append(BatchRegisterResult(
+                        component_name=f"{platform}/{py_file.stem}",
+                        file_path=str(py_file.relative_to(project_root)).replace("\\", "/"),
+                        version="",
+                        status="skipped",
+                        error="non-canonical component file",
+                    ))
+                    skipped_count += 1
                     continue
                 
                 comp_name, default_version = parse_filename_to_component_and_version(

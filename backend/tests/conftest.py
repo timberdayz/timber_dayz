@@ -35,6 +35,16 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     loop.close()
 
 
+@pytest.fixture(autouse=True)
+def clear_app_dependency_overrides():
+    """Avoid cross-test leakage from FastAPI dependency overrides."""
+    from backend.main import app
+
+    app.dependency_overrides.clear()
+    yield
+    app.dependency_overrides.clear()
+
+
 @pytest_asyncio.fixture
 async def sqlite_session() -> AsyncGenerator[AsyncSession, None]:
     """基于内存 SQLite 的异步 Session, 适用于快速单元测试。"""
