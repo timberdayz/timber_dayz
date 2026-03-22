@@ -184,6 +184,69 @@ def test_rank_shop_racing_rows_desc_by_gmv():
     assert result[1]["rank"] == 2
 
 
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "granularity": "monthly",
+                "period_key": "2026-03-01",
+                "platform_code": "shopee",
+                "shop_id": "shop-a",
+                "gmv": 100,
+                "order_count": 10,
+                "avg_order_value": 10,
+                "attach_rate": 1.2,
+                "profit": 30,
+                "target_amount": 120,
+                "achievement_rate": 83.33,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    result = await service.get_business_overview_shop_racing(
+        granularity="monthly",
+        target_date="2026-03-01",
+        group_by="shop",
+    )
+
+    assert result[0]["target_amount"] == 120
+    assert result[0]["achievement_rate"] == 83.33
+
+
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_operational_metrics_preserves_today_and_time_gap(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        return [
+            {
+                "monthly_target": 1000,
+                "monthly_total_achieved": 800,
+                "today_sales": 120,
+                "monthly_achievement_rate": 80,
+                "time_gap": -5,
+                "estimated_gross_profit": 200,
+                "estimated_expenses": 300,
+                "operating_result": -100,
+                "monthly_order_count": 10,
+                "today_order_count": 2,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    result = await service.get_business_overview_operational_metrics(
+        month="2026-03-01",
+        platform=None,
+    )
+
+    assert result["today_sales"] == 120
+    assert result["today_order_count"] == 2
+    assert result["time_gap"] == -5
+
+
 def test_rank_traffic_rows_by_visitors():
     result = rank_traffic_rows(
         [
@@ -253,7 +316,8 @@ async def test_postgresql_dashboard_service_reads_real_kpi_chain(monkeypatch):
                         shop_id VARCHAR(256),
                         granularity VARCHAR(32),
                         metric_date DATE,
-                        visitor_count NUMERIC
+                        visitor_count NUMERIC,
+                        page_views NUMERIC
                     )
                     """
                 )
@@ -276,10 +340,10 @@ async def test_postgresql_dashboard_service_reads_real_kpi_chain(monkeypatch):
                 text(
                     """
                     INSERT INTO semantic.fact_analytics_atomic (
-                        platform_code, shop_id, granularity, metric_date, visitor_count
+                        platform_code, shop_id, granularity, metric_date, visitor_count, page_views
                     )
                     VALUES (
-                        'shopee', 'shop-a', 'daily', DATE '2026-03-01', 200
+                        'shopee', 'shop-a', 'daily', DATE '2026-03-01', 200, 300
                     )
                     """
                 )

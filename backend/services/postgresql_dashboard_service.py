@@ -349,13 +349,18 @@ class PostgresqlDashboardService:
                         "order_count": 0.0,
                         "avg_order_value": 0.0,
                         "attach_rate": 0.0,
+                        "target_amount": 0.0,
+                        "achievement_rate": 0.0,
                     },
                 )
                 grouped[key]["gmv"] += _to_float(row.get("gmv"))
                 grouped[key]["order_count"] += _to_float(row.get("order_count"))
+                grouped[key]["target_amount"] += _to_float(row.get("target_amount"))
             for value in grouped.values():
                 if value["order_count"]:
                     value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
+                if value["target_amount"]:
+                    value["achievement_rate"] = round(value["gmv"] * 100.0 / value["target_amount"], 2)
             return rank_shop_racing_rows(list(grouped.values()))
 
         normalized_rows = [
@@ -368,6 +373,8 @@ class PostgresqlDashboardService:
                 "avg_order_value": _to_float(row.get("avg_order_value")),
                 "attach_rate": _to_float(row.get("attach_rate")),
                 "profit": _to_float(row.get("profit")),
+                "target_amount": _to_float(row.get("target_amount")),
+                "achievement_rate": _to_float(row.get("achievement_rate")),
             }
             for row in rows
         ]
@@ -423,6 +430,8 @@ class PostgresqlDashboardService:
             "monthly_target": 0.0,
             "monthly_total_achieved": 0.0,
             "today_sales": 0.0,
+            "monthly_achievement_rate": 0.0,
+            "time_gap": 0.0,
             "estimated_gross_profit": 0.0,
             "estimated_expenses": 0.0,
             "operating_result": 0.0,
@@ -436,9 +445,9 @@ class PostgresqlDashboardService:
         total["monthly_achievement_rate"] = (
             round(total["monthly_total_achieved"] * 100.0 / total["monthly_target"], 2)
             if total["monthly_target"]
-            else 0
+            else round(total["monthly_achievement_rate"], 2)
         )
-        total["time_gap"] = 0
+        total["time_gap"] = round(total["time_gap"], 2)
         total["operating_result_text"] = "盈利" if total["operating_result"] > 0 else "亏损"
         total["monthly_order_count"] = int(total["monthly_order_count"])
         total["today_order_count"] = int(total["today_order_count"])

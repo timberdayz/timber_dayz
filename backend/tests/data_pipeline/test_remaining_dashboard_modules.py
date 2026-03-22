@@ -18,9 +18,13 @@ def test_business_overview_shop_racing_module_sql_asset():
             "mart.shop_day_kpi",
             "mart.shop_week_kpi",
             "mart.shop_month_kpi",
+            "a_class.target_breakdown",
+            "a_class.sales_targets",
             "gmv",
             "order_count",
             "avg_order_value",
+            "target_amount",
+            "achievement_rate",
         ),
     )
 
@@ -48,6 +52,7 @@ def test_business_overview_operational_metrics_module_sql_asset():
         "CREATE OR REPLACE VIEW api.business_overview_operational_metrics_module AS",
         (
             "mart.shop_month_kpi",
+            "mart.shop_day_kpi",
             "a_class.sales_targets_a",
             "a_class.operating_costs",
             "monthly_target",
@@ -55,3 +60,7 @@ def test_business_overview_operational_metrics_module_sql_asset():
             "estimated_expenses",
         ),
     )
+    sql_text = Path("sql/api_modules/business_overview_operational_metrics_module.sql").read_text(encoding="utf-8")
+    assert "m.gmv AS today_sales" not in sql_text
+    assert "m.order_count AS today_order_count" not in sql_text
+    assert "0::numeric AS time_gap" not in sql_text

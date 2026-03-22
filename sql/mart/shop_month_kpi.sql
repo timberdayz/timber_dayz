@@ -8,6 +8,7 @@ SELECT
     COALESCE(SUM(gmv), 0) AS gmv,
     COALESCE(SUM(order_count), 0) AS order_count,
     COALESCE(SUM(visitor_count), 0) AS visitor_count,
+    COALESCE(SUM(page_views), 0) AS page_views,
     CASE
         WHEN COALESCE(SUM(visitor_count), 0) > 0
         THEN ROUND(COALESCE(SUM(order_count), 0)::numeric * 100.0 / SUM(visitor_count), 2)

@@ -19,7 +19,8 @@ daily_traffic AS (
         metric_date::date AS period_date,
         platform_code,
         shop_id,
-        COALESCE(SUM(visitor_count), 0) AS visitor_count
+        COALESCE(SUM(visitor_count), 0) AS visitor_count,
+        COALESCE(SUM(page_views), 0) AS page_views
     FROM semantic.fact_analytics_atomic
     WHERE granularity = 'daily'
     GROUP BY metric_date::date, platform_code, shop_id
@@ -31,6 +32,7 @@ SELECT
     COALESCE(o.gmv, 0) AS gmv,
     COALESCE(o.order_count, 0) AS order_count,
     COALESCE(t.visitor_count, 0) AS visitor_count,
+    COALESCE(t.page_views, 0) AS page_views,
     CASE
         WHEN COALESCE(t.visitor_count, 0) > 0
         THEN ROUND(COALESCE(o.order_count, 0)::numeric * 100.0 / t.visitor_count, 2)
