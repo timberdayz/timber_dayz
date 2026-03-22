@@ -107,3 +107,117 @@ def test_main_contains_explicit_dashboard_router_source_log():
     text = Path("backend/main.py").read_text(encoding="utf-8")
     assert "Dashboard router source: PostgreSQL" in text
     assert "Dashboard router source: Metabase compatibility" in text
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    from backend.models.database import get_async_db
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS api"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
+            await session.execute(
+                text(
+                    """
+                    CREATE OR REPLACE VIEW api.business_overview_kpi_module AS
+                    SELECT
+                        DATE '2026-03-01' AS period_month,
+                        'shopee'::varchar AS platform_code,
+                        321::numeric AS gmv,
+                        10::numeric AS order_count,
+                        200::numeric AS visitor_count,
+                        5::numeric AS conversion_rate,
+                        32.1::numeric AS avg_order_value,
+                        1.5::numeric AS attach_rate,
+                        15::numeric AS total_items,
+                        120::numeric AS profit
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE OR REPLACE VIEW api.annual_summary_kpi_module AS
+                    SELECT
+                        DATE '2026-01-01' AS period_month,
+                        800::numeric AS gmv,
+                        300::numeric AS total_cost,
+                        120::numeric AS profit,
+                        15::numeric AS gross_margin,
+                        -22.5::numeric AS net_margin,
+                        -0.6::numeric AS roi
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS a_class.sales_targets_a (
+                        "年月" varchar(7),
+                        "目标销售额" numeric,
+                        "目标单量" numeric
+                    )
+                    """
+                )
+            )
+            await session.execute(text('DELETE FROM a_class.sales_targets_a'))
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.sales_targets_a ("年月", "目标销售额", "目标单量")
+                    VALUES ('2026-01', 1000, 80)
+                    """
+                )
+            )
+            await session.commit()
+
+        import backend.main as main_module
+
+        monkeypatch.setenv("USE_POSTGRESQL_DASHBOARD_ROUTER", "true")
+        monkeypatch.setattr(
+            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+            session_factory,
+        )
+
+        async def override_get_async_db():
+            async with session_factory() as session:
+                yield session
+
+        reloaded = importlib.reload(main_module)
+        reloaded.app.dependency_overrides[get_async_db] = override_get_async_db
+
+        async with AsyncClient(
+            transport=ASGITransport(app=reloaded.app),
+            base_url="http://localhost",
+        ) as client:
+            kpi_response = await client.get("/api/dashboard/business-overview/kpi", params={"month": "2026-03-01"})
+            target_response = await client.get(
+                "/api/dashboard/annual-summary/target-completion",
+                params={"granularity": "yearly", "period": "2026"},
+            )
+
+        kpi_body = json.loads(kpi_response.content.decode("utf-8"))
+        target_body = json.loads(target_response.content.decode("utf-8"))
+
+        assert kpi_response.status_code == 200
+        assert kpi_body["data"]["gmv"] == 321
+        assert target_response.status_code == 200
+        assert target_body["data"]["achievement_rate_gmv"] == 80.0
+
+        reloaded.app.dependency_overrides.clear()
+        monkeypatch.delenv("USE_POSTGRESQL_DASHBOARD_ROUTER", raising=False)
+        importlib.reload(main_module)
+        await engine.dispose()
