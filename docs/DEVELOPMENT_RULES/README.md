@@ -9,6 +9,12 @@ This directory is a detailed reference for repository-specific implementation st
 - Entry docs: [`AGENTS.md`](F:/Vscode/python_programme/AI_code/xihong_erp/AGENTS.md) and [`CLAUDE.md`](F:/Vscode/python_programme/AI_code/xihong_erp/CLAUDE.md)
 - Historical archive: [`openspec/`](F:/Vscode/python_programme/AI_code/xihong_erp/openspec)
 
+## Dashboard Data Architecture
+
+- The active dashboard architecture direction is PostgreSQL-first rather than Metabase-first.
+- Preferred dashboard flow is `b_class raw -> semantic -> mart -> api -> backend -> frontend`.
+- `semantic` is the standardization layer, `mart` is the aggregate layer, and `api` is the module-facing query layer.
+
 Use this directory for deep-dive references and templates. Do not treat it as the default workflow engine.
 
 ## Core Files

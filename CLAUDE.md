@@ -115,6 +115,13 @@ Release interpretation:
 - Use `datetime.now(timezone.utc)`, not `datetime.utcnow()`
 - Avoid emoji in terminal and log output
 
+## Dashboard Architecture
+
+- Dashboard cutover is PostgreSQL-first and no longer treats Metabase as the target steady-state query layer.
+- Preferred Dashboard flow is `b_class raw -> semantic -> mart -> api -> backend -> frontend`.
+- `semantic` owns standardization, `mart` owns reusable aggregation, and `api` owns page-module query contracts.
+- Use `USE_POSTGRESQL_DASHBOARD_ROUTER` to switch the runtime Dashboard router during gray rollout.
+
 ## Documentation Map
 
 | File | Purpose |
