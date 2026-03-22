@@ -238,6 +238,54 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             await session.execute(
                 text(
                     """
+                    CREATE OR REPLACE VIEW api.annual_summary_trend_module AS
+                    SELECT
+                        DATE '2026-01-01' AS period_month,
+                        800::numeric AS gmv,
+                        300::numeric AS total_cost,
+                        120::numeric AS profit
+                    UNION ALL
+                    SELECT
+                        DATE '2026-02-01', 900, 320, 140
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE OR REPLACE VIEW api.annual_summary_platform_share_module AS
+                    SELECT
+                        DATE '2026-01-01' AS period_month,
+                        'shopee'::varchar AS platform_code,
+                        800::numeric AS gmv
+                    UNION ALL
+                    SELECT
+                        DATE '2026-02-01', 'shopee', 900
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE OR REPLACE VIEW api.annual_summary_by_shop_module AS
+                    SELECT
+                        DATE '2026-01-01' AS period_month,
+                        'shopee'::varchar AS platform_code,
+                        'shop-a'::varchar AS shop_id,
+                        800::numeric AS gmv,
+                        10::numeric AS order_count,
+                        200::numeric AS visitor_count,
+                        300::numeric AS total_cost,
+                        120::numeric AS profit,
+                        15::numeric AS gross_margin,
+                        -22.5::numeric AS net_margin,
+                        -0.6::numeric AS roi
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
                     CREATE TABLE IF NOT EXISTS a_class.sales_targets_a (
                         "年月" varchar(7),
                         "目标销售额" numeric,
@@ -293,12 +341,27 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                 "/api/dashboard/annual-summary/target-completion",
                 params={"granularity": "yearly", "period": "2026"},
             )
+            trend_response = await client.get(
+                "/api/dashboard/annual-summary/trend",
+                params={"granularity": "yearly", "period": "2026"},
+            )
+            platform_share_response = await client.get(
+                "/api/dashboard/annual-summary/platform-share",
+                params={"granularity": "yearly", "period": "2026"},
+            )
+            by_shop_response = await client.get(
+                "/api/dashboard/annual-summary/by-shop",
+                params={"granularity": "yearly", "period": "2026"},
+            )
 
         kpi_body = json.loads(kpi_response.content.decode("utf-8"))
         comparison_body = json.loads(comparison_response.content.decode("utf-8"))
         shop_racing_body = json.loads(shop_racing_response.content.decode("utf-8"))
         operational_body = json.loads(operational_response.content.decode("utf-8"))
         target_body = json.loads(target_response.content.decode("utf-8"))
+        trend_body = json.loads(trend_response.content.decode("utf-8"))
+        platform_share_body = json.loads(platform_share_response.content.decode("utf-8"))
+        by_shop_body = json.loads(by_shop_response.content.decode("utf-8"))
 
         assert kpi_response.status_code == 200
         assert kpi_body["data"]["gmv"] == 321
@@ -310,6 +373,12 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
         assert operational_body["data"]["operating_result_text"] == "亏损"
         assert target_response.status_code == 200
         assert target_body["data"]["achievement_rate_gmv"] == 80.0
+        assert trend_response.status_code == 200
+        assert len(trend_body["data"]) == 2
+        assert platform_share_response.status_code == 200
+        assert platform_share_body["data"][0]["platform_code"] == "shopee"
+        assert by_shop_response.status_code == 200
+        assert by_shop_body["data"][0]["shop_id"] == "shop-a"
 
         reloaded.app.dependency_overrides.clear()
         monkeypatch.delenv("USE_POSTGRESQL_DASHBOARD_ROUTER", raising=False)
