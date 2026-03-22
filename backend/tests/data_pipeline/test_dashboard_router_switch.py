@@ -13,6 +13,13 @@ def test_environment_examples_document_dashboard_router_flags():
         assert "USE_POSTGRESQL_DASHBOARD_ROUTER=" in text
 
 
+def test_rollout_doc_covers_enable_verify_and_rollback():
+    text = Path("docs/development/POSTGRESQL_DASHBOARD_ROLLOUT.md").read_text(encoding="utf-8")
+    assert "USE_POSTGRESQL_DASHBOARD_ROUTER=true" in text
+    assert "ops.pipeline_run_log" in text
+    assert "回退" in text
+
+
 @pytest_asyncio.fixture
 async def switched_app(monkeypatch):
     import backend.main as main_module
@@ -132,6 +139,72 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             await session.execute(
                 text(
                     """
+                    CREATE OR REPLACE VIEW api.business_overview_comparison_module AS
+                    SELECT
+                        'monthly'::varchar AS granularity,
+                        DATE '2026-03-01' AS period_start,
+                        DATE '2026-03-31' AS period_end,
+                        DATE '2026-03-01' AS period_key,
+                        'shopee'::varchar AS platform_code,
+                        'shop-a'::varchar AS shop_id,
+                        321::numeric AS sales_amount,
+                        10::numeric AS sales_quantity,
+                        200::numeric AS traffic,
+                        5::numeric AS conversion_rate,
+                        32.1::numeric AS avg_order_value,
+                        1.5::numeric AS attach_rate,
+                        120::numeric AS profit,
+                        400::numeric AS target_sales_amount,
+                        12::numeric AS target_sales_quantity
+                    UNION ALL
+                    SELECT
+                        'monthly', DATE '2026-02-01', DATE '2026-02-28', DATE '2026-02-01',
+                        'shopee', 'shop-a', 300, 9, 180, 5, 33.3, 1.4, 100, 0, 0
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE OR REPLACE VIEW api.business_overview_shop_racing_module AS
+                    SELECT
+                        'monthly'::varchar AS granularity,
+                        DATE '2026-03-01' AS period_key,
+                        'shopee'::varchar AS platform_code,
+                        'shop-a'::varchar AS shop_id,
+                        321::numeric AS gmv,
+                        10::numeric AS order_count,
+                        32.1::numeric AS avg_order_value,
+                        1.5::numeric AS attach_rate,
+                        120::numeric AS profit
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE OR REPLACE VIEW api.business_overview_operational_metrics_module AS
+                    SELECT
+                        DATE '2026-03-01' AS period_month,
+                        'shopee'::varchar AS platform_code,
+                        'shop-a'::varchar AS shop_id,
+                        1000::numeric AS monthly_target,
+                        800::numeric AS monthly_total_achieved,
+                        120::numeric AS today_sales,
+                        80::numeric AS monthly_achievement_rate,
+                        0::numeric AS time_gap,
+                        200::numeric AS estimated_gross_profit,
+                        300::numeric AS estimated_expenses,
+                        -100::numeric AS operating_result,
+                        '亏损'::varchar AS operating_result_text,
+                        10::numeric AS monthly_order_count,
+                        10::numeric AS today_order_count
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
                     CREATE OR REPLACE VIEW api.business_overview_kpi_module AS
                     SELECT
                         DATE '2026-03-01' AS period_month,
@@ -204,16 +277,37 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
             base_url="http://localhost",
         ) as client:
             kpi_response = await client.get("/api/dashboard/business-overview/kpi", params={"month": "2026-03-01"})
+            comparison_response = await client.get(
+                "/api/dashboard/business-overview/comparison",
+                params={"granularity": "monthly", "date": "2026-03-01"},
+            )
+            shop_racing_response = await client.get(
+                "/api/dashboard/business-overview/shop-racing",
+                params={"granularity": "monthly", "date": "2026-03-01", "group_by": "shop"},
+            )
+            operational_response = await client.get(
+                "/api/dashboard/business-overview/operational-metrics",
+                params={"month": "2026-03-01"},
+            )
             target_response = await client.get(
                 "/api/dashboard/annual-summary/target-completion",
                 params={"granularity": "yearly", "period": "2026"},
             )
 
         kpi_body = json.loads(kpi_response.content.decode("utf-8"))
+        comparison_body = json.loads(comparison_response.content.decode("utf-8"))
+        shop_racing_body = json.loads(shop_racing_response.content.decode("utf-8"))
+        operational_body = json.loads(operational_response.content.decode("utf-8"))
         target_body = json.loads(target_response.content.decode("utf-8"))
 
         assert kpi_response.status_code == 200
         assert kpi_body["data"]["gmv"] == 321
+        assert comparison_response.status_code == 200
+        assert comparison_body["data"]["metrics"]["sales_amount"]["today"] == 321
+        assert shop_racing_response.status_code == 200
+        assert shop_racing_body["data"][0]["gmv"] == 321
+        assert operational_response.status_code == 200
+        assert operational_body["data"]["operating_result_text"] == "亏损"
         assert target_response.status_code == 200
         assert target_body["data"]["achievement_rate_gmv"] == 80.0
 

@@ -88,6 +88,34 @@ def reduce_business_overview_comparison_rows(
     }
 
 
+def aggregate_comparison_source_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def _sum(name: str) -> float:
+        return round(sum(_to_float(row.get(name)) for row in rows), 2)
+
+    sales_amount = _sum("sales_amount")
+    sales_quantity = _sum("sales_quantity")
+    traffic = _sum("traffic")
+    profit = _sum("profit")
+    target_sales_amount = _sum("target_sales_amount")
+    target_sales_quantity = _sum("target_sales_quantity")
+
+    conversion_rate = round((sales_quantity * 100.0 / traffic), 2) if traffic else 0
+    avg_order_value = round((sales_amount / sales_quantity), 2) if sales_quantity else 0
+    attach_rate = 0
+
+    return {
+        "sales_amount": sales_amount,
+        "sales_quantity": sales_quantity,
+        "traffic": traffic,
+        "conversion_rate": conversion_rate,
+        "avg_order_value": avg_order_value,
+        "attach_rate": attach_rate,
+        "profit": profit,
+        "target_sales_amount": target_sales_amount,
+        "target_sales_quantity": target_sales_quantity,
+    }
+
+
 def rank_inventory_backlog_rows(
     rows: list[dict[str, Any]],
     min_days: int = 30,
@@ -258,39 +286,9 @@ class PostgresqlDashboardService:
             },
         )
 
-        current = reduce_business_overview_kpi_rows(current_rows)
-        previous = reduce_business_overview_kpi_rows(previous_rows)
-        average = reduce_business_overview_kpi_rows(average_rows)
-
-        current_comparison = {
-            "sales_amount": current["gmv"],
-            "sales_quantity": current["order_count"],
-            "traffic": current["visitor_count"],
-            "conversion_rate": current["conversion_rate"],
-            "avg_order_value": current["avg_order_value"],
-            "attach_rate": current["attach_rate"],
-            "profit": current["profit"],
-            "target_sales_amount": 0,
-            "target_sales_quantity": 0,
-        }
-        previous_comparison = {
-            "sales_amount": previous["gmv"],
-            "sales_quantity": previous["order_count"],
-            "traffic": previous["visitor_count"],
-            "conversion_rate": previous["conversion_rate"],
-            "avg_order_value": previous["avg_order_value"],
-            "attach_rate": previous["attach_rate"],
-            "profit": previous["profit"],
-        }
-        average_comparison = {
-            "sales_amount": average["gmv"],
-            "sales_quantity": average["order_count"],
-            "traffic": average["visitor_count"],
-            "conversion_rate": average["conversion_rate"],
-            "avg_order_value": average["avg_order_value"],
-            "attach_rate": average["attach_rate"],
-            "profit": average["profit"],
-        }
+        current_comparison = aggregate_comparison_source_rows(current_rows)
+        previous_comparison = aggregate_comparison_source_rows(previous_rows)
+        average_comparison = aggregate_comparison_source_rows(average_rows)
 
         return reduce_business_overview_comparison_rows(
             current_row=current_comparison,
