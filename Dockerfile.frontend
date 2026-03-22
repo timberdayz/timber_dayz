@@ -10,7 +10,7 @@
 # ==================== 构建阶段 ====================
 # 与 GitHub 要求一致：Node 24+（可通过 build-arg 覆盖）
 ARG NODE_VERSION=24
-FROM node:${NODE_VERSION}-alpine as build
+FROM node:${NODE_VERSION}-alpine AS build
 
 LABEL maintainer="西虹ERP团队"
 LABEL description="西虹ERP系统前端构建阶段"
@@ -56,7 +56,7 @@ RUN echo "=== Building Vue application ===" && \
     npx vite build
 
 # ==================== 运行阶段 ====================
-FROM nginx:alpine as production
+FROM nginx:alpine AS production
 
 LABEL maintainer="西虹ERP团队"
 LABEL description="西虹ERP系统前端服务 - 生产版"
@@ -84,7 +84,7 @@ CMD ["nginx", "-g", "daemon off;"]
 
 # ==================== 开发阶段 ====================
 ARG NODE_VERSION=24
-FROM node:${NODE_VERSION}-alpine as development
+FROM node:${NODE_VERSION}-alpine AS development
 
 LABEL maintainer="西虹ERP团队"
 LABEL description="西虹ERP系统前端开发环境"
@@ -116,4 +116,3 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 # ==================== 默认使用生产阶段 ====================
 FROM production
-
