@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime
 import json
 import os
+import sys
+from datetime import datetime
 from pathlib import Path
 from statistics import mean
-import sys
 from typing import Any
 
 import httpx
@@ -18,9 +18,6 @@ import httpx
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-
-from backend.services.auth_service import auth_service
-
 
 BASE_URL = os.getenv("PERF_BASE_URL", "http://127.0.0.1:8001")
 ADMIN_USERNAME = os.getenv("PERF_LOGIN_USERNAME", "perf_load_admin")
@@ -246,7 +243,8 @@ def summarize_page_results(results: list[dict[str, Any]]) -> dict[str, dict[str,
 
 
 async def login_admin(client: httpx.AsyncClient) -> dict[str, str]:
-    last_error = None
+    from backend.services.auth_service import auth_service
+
     for _ in range(3):
         try:
             response = await client.post(
@@ -256,8 +254,7 @@ async def login_admin(client: httpx.AsyncClient) -> dict[str, str]:
             response.raise_for_status()
             payload = response.json()
             return {"Authorization": f"Bearer {payload['access_token']}"}
-        except Exception as exc:
-            last_error = exc
+        except Exception:
             await asyncio.sleep(1)
     token = auth_service.create_access_token(
         {

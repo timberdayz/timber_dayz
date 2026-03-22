@@ -17,7 +17,6 @@ import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ALLOWED_PREFIXES = ("backend/", "modules/", "tests/", "scripts/")
 GIT_BIN = shutil.which("git") or "git"

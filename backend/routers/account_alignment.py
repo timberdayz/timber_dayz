@@ -7,38 +7,34 @@
 v4.18.0: 添加response_model支持Contract-First架构
 """
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
-from typing import Any, Dict, Iterable, List, Optional
-import yaml
 import csv
 import io
+from typing import Any, Dict, Iterable, List, Optional
 
-from backend.models.database import get_db, get_async_db
-from backend.utils.api_response import success_response, error_response
-from backend.utils.error_codes import ErrorCode, get_error_type
-from modules.services.account_alignment import get_account_alignment_service
-from modules.core.db import AccountAlias
-from modules.core.logger import get_logger
+import yaml
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.models.database import get_async_db
 
 # v4.18.0: 导入schemas(Contract-First架构)
 from backend.schemas.account_alignment import (
-    AlignmentStatsResponse,
-    MissingSuggestionsResponse,
-    AliasListResponse,
-    AddAliasRequest,
     AddAliasResponse,
-    BatchAddAliasesRequest,
-    BatchAddAliasesResponse,
-    BackfillRequest,
+    AliasListResponse,
+    AlignmentStatsResponse,
     BackfillResponse,
-    ImportResponse,
-    UpdateAliasRequest,
-    UpdateAliasResponse,
+    BatchAddAliasesResponse,
     DistinctRawStoresResponse,
+    ImportResponse,
+    MissingSuggestionsResponse,
+    UpdateAliasResponse,
 )
+from backend.utils.api_response import error_response
+from backend.utils.error_codes import ErrorCode, get_error_type
+from modules.core.db import AccountAlias
+from modules.core.logger import get_logger
+from modules.services.account_alignment import get_account_alignment_service
 
 router = APIRouter(prefix="/account-alignment", tags=["账号对齐"])
 logger = get_logger(__name__)
@@ -195,7 +191,7 @@ async def list_all_aliases(
 
         stmt = select(AccountAlias).where(AccountAlias.platform == platform)
         if active_only:
-            stmt = stmt.where(AccountAlias.active == True)
+            stmt = stmt.where(AccountAlias.active)
 
         stmt = stmt.order_by(
             AccountAlias.account, AccountAlias.site, AccountAlias.store_label_raw
@@ -513,12 +509,12 @@ async def export_yaml_aliases(
         YAML文本内容
     """
     try:
-        from sqlalchemy import select
         from fastapi.responses import Response
+        from sqlalchemy import select
 
         stmt = select(AccountAlias).where(AccountAlias.platform == platform)
         if active_only:
-            stmt = stmt.where(AccountAlias.active == True)
+            stmt = stmt.where(AccountAlias.active)
 
         result = await db.execute(stmt)
         aliases = result.scalars().all()
@@ -537,7 +533,7 @@ async def export_yaml_aliases(
             content=yaml_content,
             media_type="application/x-yaml",
             headers={
-                "Content-Disposition": f"attachment; filename=shop_aliases_export.yaml"
+                "Content-Disposition": "attachment; filename=shop_aliases_export.yaml"
             },
         )
     except Exception as e:
@@ -565,12 +561,12 @@ async def export_csv_aliases(
         CSV文本内容
     """
     try:
-        from sqlalchemy import select
         from fastapi.responses import Response
+        from sqlalchemy import select
 
         stmt = select(AccountAlias).where(AccountAlias.platform == platform)
         if active_only:
-            stmt = stmt.where(AccountAlias.active == True)
+            stmt = stmt.where(AccountAlias.active)
 
         result = await db.execute(stmt)
         aliases = result.scalars().all()
@@ -612,7 +608,7 @@ async def export_csv_aliases(
             content=csv_content.encode("utf-8-sig"),  # BOM for Excel
             media_type="text/csv",
             headers={
-                "Content-Disposition": f"attachment; filename=shop_aliases_export.csv"
+                "Content-Disposition": "attachment; filename=shop_aliases_export.csv"
             },
         )
     except Exception as e:

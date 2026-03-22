@@ -1,14 +1,16 @@
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from backend.routers.component_versions import list_versions
-from backend.routers.component_versions import batch_register_python_components
+from backend.routers.component_versions import (
+    batch_register_python_components,
+    list_versions,
+)
 from backend.schemas.component_version import BatchRegisterRequest
 from modules.core.db import ComponentVersion
 

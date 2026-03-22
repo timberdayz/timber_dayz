@@ -6,6 +6,12 @@ line-length = 88
 select = ["E", "F", "I"]
 ignore = []
 
+[tool.ruff.lint.per-file-ignores]
+"backend/routers/component_versions.py" = ["E501"]
+"backend/routers/data_quarantine.py" = ["E501"]
+"backend/routers/users_admin.py" = ["E501"]
+"scripts/high_frequency_pages_probe.py" = ["E402"]
+
 [tool.ruff.format]
 quote-style = "preserve"
 

@@ -4,33 +4,35 @@
 包含: CRUD、恢复、密码重置、解锁、审批、拒绝、待审批列表、未关联用户、已删除用户
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
-from modules.core.db import DimUser, DimRole, UserApprovalLog, UserSession, Employee
 from backend.schemas.auth import (
-    UserCreate,
-    UserUpdate,
-    UserResponse,
     ApproveUserRequest,
-    RejectUserRequest,
     PendingUserResponse,
+    RejectUserRequest,
     ResetPasswordRequest,
     ResetPasswordResponse,
     UnlockAccountRequest,
+    UserCreate,
+    UserResponse,
+    UserUpdate,
 )
-from backend.dependencies.auth import require_admin
 from backend.services.audit_service import audit_service
 from backend.utils.api_response import (
-    success_response,
     error_response,
     pagination_response,
+    success_response,
 )
 from backend.utils.error_codes import ErrorCode, get_error_type
-from typing import List, Optional
-from datetime import datetime, timezone
+from modules.core.db import DimRole, DimUser, Employee, UserApprovalLog, UserSession
 from modules.core.logger import get_logger
 
 try:
@@ -204,9 +206,7 @@ async def get_unlinked_users(
     from sqlalchemy import and_
 
     result = await db.execute(
-        select(DimUser).where(
-            and_(DimUser.is_active == True, DimUser.status != "deleted")
-        )
+        select(DimUser).where(and_(DimUser.is_active, DimUser.status != "deleted"))
     )
     users = result.scalars().all()
     unlinked = []
@@ -357,11 +357,11 @@ async def update_user(
             user.status = "suspended"
 
             from backend.routers.notifications import (
-                revoke_all_user_sessions,
                 notify_user_suspended,
+                revoke_all_user_sessions,
             )
 
-            revoked_count = await revoke_all_user_sessions(
+            await revoke_all_user_sessions(
                 db=db,
                 user_id=user.user_id,
                 reason="Account suspended by administrator, forced logout",
@@ -478,7 +478,7 @@ async def delete_user(
 
         await db.execute(
             update(UserSession)
-            .where(UserSession.user_id == user_id, UserSession.is_active == True)
+            .where(UserSession.user_id == user_id, UserSession.is_active)
             .values(
                 is_active=False,
                 revoked_at=datetime.now(timezone.utc),
@@ -606,9 +606,10 @@ async def reset_user_password(
             status_code=404,
         )
 
-    from backend.services.auth_service import auth_service
     import secrets
     import string
+
+    from backend.services.auth_service import auth_service
 
     if request_body.generate_temp_password or not request_body.new_password:
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -631,8 +632,8 @@ async def reset_user_password(
     user.locked_until = None
 
     from backend.routers.notifications import (
-        revoke_all_user_sessions,
         notify_password_reset,
+        revoke_all_user_sessions,
     )
 
     revoked_count = await revoke_all_user_sessions(
@@ -965,7 +966,6 @@ async def get_pending_users(
     db: AsyncSession = Depends(get_async_db),
 ):
     """获取待审批用户列表"""
-    from sqlalchemy import func
 
     offset = (page - 1) * page_size
     result = await db.execute(

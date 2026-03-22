@@ -6,28 +6,28 @@
 """
 
 from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
-from backend.models.database import get_async_db
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from backend.dependencies.auth import require_admin
+from backend.models.database import get_async_db
 from backend.schemas.notification_config import (
+    AlertRuleCreate,
+    AlertRuleListResponse,
+    AlertRuleResponse,
+    AlertRuleUpdate,
+    NotificationTemplateCreate,
+    NotificationTemplateListResponse,
+    NotificationTemplateResponse,
+    NotificationTemplateUpdate,
     SMTPConfigResponse,
     SMTPConfigUpdate,
     TestEmailRequest,
-    NotificationTemplateResponse,
-    NotificationTemplateCreate,
-    NotificationTemplateUpdate,
-    NotificationTemplateListResponse,
-    AlertRuleResponse,
-    AlertRuleCreate,
-    AlertRuleUpdate,
-    AlertRuleListResponse,
 )
 from backend.services.notification_config_service import get_notification_config_service
-from backend.utils.api_response import success_response, error_response
+from backend.utils.api_response import error_response, success_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.logger import get_logger
 

@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
-
 ROOT_DIR = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT_DIR / "temp" / "outputs"
 DEFAULT_BASE_URL = "http://127.0.0.1:8001"

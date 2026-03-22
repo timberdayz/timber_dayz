@@ -4,36 +4,36 @@
 提供组件版本的CRUD、A/B测试、提升/回滚等功能
 """
 
-from typing import List, Optional, Any
-from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import not_, or_, select
-from pydantic import BaseModel, Field
-import uuid
 import sys
+import uuid
+from typing import Any, List, Optional
 
-from backend.models.database import get_db, get_async_db, SessionLocal
-from backend.utils.api_response import error_response
-from backend.utils.error_codes import ErrorCode
-from backend.services.component_version_service import ComponentVersionService
-from backend.services.component_name_utils import parse_component_name
-from modules.core.db import ComponentVersion, ComponentTestHistory
-from modules.core.logger import get_logger
+from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import not_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
+
+from backend.models.database import get_async_db
 from backend.schemas.component_version import (
+    ABTestRequest,
+    BatchRegisterRequest,
+    BatchRegisterResponse,
+    BatchRegisterResult,
+    ComponentTestRequest,
     ComponentVersionResponse,
+    TestHistoryListResponse,
+    TestHistoryResponse,
+    TestResumeRequest,
     VersionListResponse,
     VersionRegisterRequest,
-    ABTestRequest,
     VersionUpdateRequest,
-    BatchRegisterRequest,
-    BatchRegisterResult,
-    BatchRegisterResponse,
-    ComponentTestRequest,
-    TestHistoryResponse,
-    TestHistoryListResponse,
-    TestResumeRequest,
 )
+from backend.services.component_name_utils import parse_component_name
+from backend.services.component_version_service import ComponentVersionService
+from backend.utils.api_response import error_response
+from backend.utils.error_codes import ErrorCode
+from modules.core.db import ComponentTestHistory, ComponentVersion
+from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -174,7 +174,6 @@ async def save_test_history(
 ) -> None:
     """保存测试历史记录到数据库"""
     import uuid
-    from typing import Any
 
     try:
         # 计算成功率
@@ -264,7 +263,7 @@ async def list_versions(
             return VersionListResponse(**cached_data)
 
     try:
-        service = ComponentVersionService(db)
+        ComponentVersionService(db)
 
         # 构建查询条件
         conditions = []
@@ -282,11 +281,11 @@ async def list_versions(
 
         # 状态筛选
         if status == "stable":
-            conditions.append(ComponentVersion.is_stable == True)
+            conditions.append(ComponentVersion.is_stable)
         elif status == "testing":
-            conditions.append(ComponentVersion.is_testing == True)
+            conditions.append(ComponentVersion.is_testing)
         elif status == "inactive":
-            conditions.append(ComponentVersion.is_active == False)
+            conditions.append(not ComponentVersion.is_active)
 
         # v4.8.0: 排除非组件文件(config 文件、工具文件等)
         conditions.extend(
@@ -633,7 +632,7 @@ async def promote_to_stable(version_id: int, db: AsyncSession = Depends(get_asyn
             )
 
         # 提升为稳定版本
-        updated_version = service.promote_to_stable(
+        service.promote_to_stable(
             component_name=version.component_name, version=version.version
         )
 
@@ -858,11 +857,12 @@ async def batch_register_python_components(
         BatchRegisterResponse: 注册统计和详细信息
     """
     import importlib.util
-    from pathlib import Path
     from datetime import datetime, timezone
+    from pathlib import Path
+
     from backend.services.component_name_utils import (
-        parse_filename_to_component_and_version,
         is_standard_component_name,
+        parse_filename_to_component_and_version,
     )
 
     SUPPORTED_PLATFORMS = ["shopee", "tiktok", "miaoshou"]
@@ -1107,16 +1107,14 @@ async def test_component_version(
 
     重构说明:移除 WebSocket,统一使用 HTTP 轮询
     """
-    import yaml
-    import asyncio
-    from pathlib import Path
-    from datetime import datetime
-    from backend.services.component_test_service import ComponentTestService
-    from tools.test_component import TestStatus, ComponentTester, ComponentTestResult
 
     # #region agent log
     import json
-    from pathlib import Path as LogPath
+    from pathlib import Path
+
+    import yaml
+
+    from backend.services.component_test_service import ComponentTestService
     from modules.core.path_manager import get_project_root
 
     log_file = get_project_root() / ".cursor" / "debug.log"
@@ -1390,7 +1388,6 @@ async def test_component_version(
         # 进度和结果保存在 temp/ 目录下,通过状态查询接口获取
 
         # 创建进度/结果目录
-        import tempfile
         import os
 
         test_dir = project_root / "temp" / "component_tests" / test_id
@@ -1434,7 +1431,6 @@ async def test_component_version(
         def run_test_in_subprocess():
             """在独立进程中运行测试"""
             import subprocess  # nosec B404
-            import time
 
             try:
                 # 启动 subprocess
@@ -1528,12 +1524,13 @@ async def test_component_version(
 
                         stats_update_error = None
                         try:
-                            from backend.models.database import SessionLocal
                             from sqlalchemy import select
+
+                            from backend.models.database import SessionLocal
                             from tools.test_component import (
-                                TestStatus,
                                 ComponentTestResult,
                                 StepResult,
+                                TestStatus,
                             )
 
                             db = SessionLocal()
@@ -1861,6 +1858,7 @@ async def get_test_verification_screenshot(
 ):
     """返回测试验证码截图（当测试处于 verification_required 时供前端展示）。"""
     from pathlib import Path
+
     from fastapi.responses import FileResponse
 
     project_root = Path(__file__).parent.parent.parent
@@ -1922,8 +1920,8 @@ async def post_test_resume(
     body: TestResumeRequest,
 ):
     """提交验证码并恢复测试（仅当测试 status 为 verification_required 时有效）。"""
-    from pathlib import Path
     import json
+    from pathlib import Path
 
     project_root = Path(__file__).parent.parent.parent
     test_dir = project_root / "temp" / "component_tests" / test_id
