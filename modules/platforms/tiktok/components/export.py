@@ -101,6 +101,14 @@ class TiktokExporterComponent(ExportComponent):
             pass
 
     @staticmethod
+    def _build_success_result(message: str, file_path: str) -> ExportResult:
+        return ExportResult(success=True, message=message, file_path=file_path)
+
+    @staticmethod
+    def _build_error_result(message: str) -> ExportResult:
+        return ExportResult(success=False, message=message, file_path=None)
+
+    @staticmethod
     def _infer_data_type(url: str, products_default: str = "products") -> str:
         cur = str(url or "")
         if "/product-analysis" in cur:
@@ -313,7 +321,7 @@ class TiktokExporterComponent(ExportComponent):
                     async with page.expect_download(timeout=timeout_ms) as dl_info:
                         # Now click export and then any confirm/download buttons
                         if not await self._first_click(page, export_buttons, timeout=8000):
-                            return ExportResult(success=False, message="export button not found or disabled")
+                            return self._build_error_result("export button not found or disabled")
                         try:
                             await page.wait_for_timeout(800)
                         except Exception:
@@ -344,7 +352,7 @@ class TiktokExporterComponent(ExportComponent):
                     raise
 
             if download is None:
-                return ExportResult(success=False, message=f"download timeout after {timeout_ms}ms")
+                return self._build_error_result(f"download timeout after {timeout_ms}ms")
 
             # Infer data_type from URL
             url = str(getattr(page, 'url', ''))
@@ -404,11 +412,28 @@ class TiktokExporterComponent(ExportComponent):
             except Exception:
                 pass
 
+            try:
+                page.off("download", _on_dl)
+            except Exception:
+                pass
+            try:
+                page.context.off("download", _on_dl)
+            except Exception:
+                pass
+
             if self.logger:
                 self.logger.info(f"[TiktokExporter] saved: {target}")
             print(f"\n[OK] 导出成功: {target}")
-            return ExportResult(success=True, file_path=str(target), message="ok")
+            return self._build_success_result("ok", str(target))
         except Exception as e:
+            try:
+                page.off("download", _on_dl)
+            except Exception:
+                pass
+            try:
+                page.context.off("download", _on_dl)
+            except Exception:
+                pass
             if self.logger:
                 self.logger.error(f"[TiktokExporter] failed: {e}")
-            return ExportResult(success=False, message=str(e))
+            return self._build_error_result(str(e))

@@ -32,7 +32,6 @@ Use this file to adapt those skills to the actual codebase.
 - Do not create a new SQLAlchemy `Base`
 - Pydantic contracts belong in `backend/schemas/`, not `backend/routers/`
 - New backend routes should declare `response_model` when the endpoint returns a typed payload
-
 ### Backend Async Rules
 
 - New backend runtime code uses `AsyncSession`
