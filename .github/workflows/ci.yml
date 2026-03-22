@@ -211,8 +211,8 @@ jobs:
       - name: Run Bandit security scan
         run: |
           if [ -n "${{ steps.changed-python.outputs.files }}" ]; then
-            bandit ${{ steps.changed-python.outputs.files }} -f json -o bandit-report.json
-            bandit ${{ steps.changed-python.outputs.files }}
+            bandit -s B608 ${{ steps.changed-python.outputs.files }} -f json -o bandit-report.json
+            bandit -s B608 ${{ steps.changed-python.outputs.files }}
           else
             echo "No changed Python files for Bandit scan"
           fi

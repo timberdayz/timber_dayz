@@ -13,7 +13,9 @@ def load_script_module():
     if not SCRIPT_PATH.exists():
         raise FileNotFoundError(f"Missing performance regression script: {SCRIPT_PATH}")
 
-    spec = importlib.util.spec_from_file_location("verify_performance_regression", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "verify_performance_regression", SCRIPT_PATH
+    )
     assert spec is not None
     assert spec.loader is not None
 

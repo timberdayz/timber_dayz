@@ -27,7 +27,7 @@ def test_build_legacy_file_groups_returns_frontend_safe_shape():
             "platform": "shopee",
             "data_type": "orders",
             "quarantine_reason": "validation_error",
-            "raw_data": "{\"source_file\": \"orders_1.xlsx\"}",
+            "raw_data": '{"source_file": "orders_1.xlsx"}',
             "created_at": datetime(2026, 3, 21, tzinfo=timezone.utc),
         },
         {
@@ -35,7 +35,7 @@ def test_build_legacy_file_groups_returns_frontend_safe_shape():
             "platform": "shopee",
             "data_type": "orders",
             "quarantine_reason": "validation_error",
-            "raw_data": "{\"source_file\": \"orders_1.xlsx\"}",
+            "raw_data": '{"source_file": "orders_1.xlsx"}',
             "created_at": datetime(2026, 3, 21, tzinfo=timezone.utc),
         },
     ]

@@ -55,7 +55,9 @@ async def test_pending_users_route_is_not_shadowed_by_user_id():
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://localhost") as client:
-        response = await client.get("/api/users/pending", params={"page": 1, "page_size": 20})
+        response = await client.get(
+            "/api/users/pending", params={"page": 1, "page_size": 20}
+        )
 
     assert response.status_code == 200
     data = response.json()

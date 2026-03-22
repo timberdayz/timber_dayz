@@ -92,11 +92,17 @@ def build_legacy_file_groups(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]
                 "data_domain": row.get("data_type"),
                 "error_count": 0,
                 "error_types": {},
-                "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
+                "created_at": (
+                    created_at.isoformat()
+                    if hasattr(created_at, "isoformat")
+                    else created_at
+                ),
             }
         grouped[key]["error_count"] += 1
         error_type = row.get("quarantine_reason") or "unknown"
-        grouped[key]["error_types"][error_type] = grouped[key]["error_types"].get(error_type, 0) + 1
+        grouped[key]["error_types"][error_type] = (
+            grouped[key]["error_types"].get(error_type, 0) + 1
+        )
     return sorted(grouped.values(), key=lambda item: item["error_count"], reverse=True)
 
 
@@ -135,10 +141,12 @@ async def _list_legacy_rows(
     platform: Optional[str] = None,
     data_domain: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    where_clause, params = build_legacy_filter_clause(platform=platform, data_domain=data_domain)
+    where_clause, params = build_legacy_filter_clause(
+        platform=platform, data_domain=data_domain
+    )
     result = await db.execute(
         text(
-            f"""
+            f"""  # nosec B608
             select id, platform, data_type, quarantine_reason, raw_data, created_at
             from core.data_quarantine
             {where_clause}
@@ -173,9 +181,13 @@ async def list_quarantine_data(
     try:
         schema_mode = detect_quarantine_schema(await _get_quarantine_column_names(db))
         if schema_mode == "legacy":
-            rows = await _list_legacy_rows(db, platform=platform, data_domain=data_domain)
+            rows = await _list_legacy_rows(
+                db, platform=platform, data_domain=data_domain
+            )
             if error_type:
-                rows = [row for row in rows if row.get("quarantine_reason") == error_type]
+                rows = [
+                    row for row in rows if row.get("quarantine_reason") == error_type
+                ]
             total = len(rows)
             rows = rows[(page - 1) * page_size : page * page_size]
             data = [
@@ -189,13 +201,23 @@ async def list_quarantine_data(
                     "data_domain": row["data_type"],
                     "row_index": row["id"],
                     "error_type": row["quarantine_reason"],
-                    "error_message": ERROR_TYPES.get(row["quarantine_reason"], row["quarantine_reason"]),
-                    "error_type_label": ERROR_TYPES.get(row["quarantine_reason"], row["quarantine_reason"]),
-                    "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
+                    "error_message": ERROR_TYPES.get(
+                        row["quarantine_reason"], row["quarantine_reason"]
+                    ),
+                    "error_type_label": ERROR_TYPES.get(
+                        row["quarantine_reason"], row["quarantine_reason"]
+                    ),
+                    "created_at": (
+                        row["created_at"].isoformat()
+                        if hasattr(row["created_at"], "isoformat")
+                        else row["created_at"]
+                    ),
                 }
                 for row in rows
             ]
-            return pagination_response(data=data, page=page, page_size=page_size, total=total)
+            return pagination_response(
+                data=data, page=page, page_size=page_size, total=total
+            )
 
         query = select(DataQuarantine)
         conditions = []
@@ -226,7 +248,11 @@ async def list_quarantine_data(
             file_info = None
             if item.catalog_file_id:
                 file_info = (
-                    await db.execute(select(CatalogFile).where(CatalogFile.id == item.catalog_file_id))
+                    await db.execute(
+                        select(CatalogFile).where(
+                            CatalogFile.id == item.catalog_file_id
+                        )
+                    )
                 ).scalar_one_or_none()
             data.append(
                 {
@@ -238,11 +264,17 @@ async def list_quarantine_data(
                     "row_index": item.row_number,
                     "error_type": item.error_type,
                     "error_message": item.error_msg,
-                    "error_type_label": ERROR_TYPES.get(item.error_type, item.error_type),
-                    "created_at": item.created_at.isoformat() if item.created_at else None,
+                    "error_type_label": ERROR_TYPES.get(
+                        item.error_type, item.error_type
+                    ),
+                    "created_at": (
+                        item.created_at.isoformat() if item.created_at else None
+                    ),
                 }
             )
-        return pagination_response(data=data, page=page, page_size=page_size, total=total)
+        return pagination_response(
+            data=data, page=page, page_size=page_size, total=total
+        )
     except Exception as exc:
         logger.error(f"Failed to list quarantine data: {exc}", exc_info=True)
         return error_response(
@@ -281,7 +313,11 @@ async def get_quarantine_detail(
                     status_code=404,
                 )
             raw_data = _parse_raw_data(row[4])
-            file_name = raw_data.get("source_file") or raw_data.get("file_name") or f"legacy-{row[1]}-{row[2]}"
+            file_name = (
+                raw_data.get("source_file")
+                or raw_data.get("file_name")
+                or f"legacy-{row[1]}-{row[2]}"
+            )
             return {
                 "success": True,
                 "data": {
@@ -295,11 +331,15 @@ async def get_quarantine_detail(
                     "error_type": row[3],
                     "error_message": ERROR_TYPES.get(row[3], row[3]),
                     "validation_errors": {},
-                    "created_at": row[5].isoformat() if hasattr(row[5], "isoformat") else row[5],
+                    "created_at": (
+                        row[5].isoformat() if hasattr(row[5], "isoformat") else row[5]
+                    ),
                 },
             }
 
-        result = await db.execute(select(DataQuarantine).where(DataQuarantine.id == quarantine_id))
+        result = await db.execute(
+            select(DataQuarantine).where(DataQuarantine.id == quarantine_id)
+        )
         item = result.scalar_one_or_none()
         if not item:
             return error_response(
@@ -311,7 +351,9 @@ async def get_quarantine_detail(
         file_info = None
         if item.catalog_file_id:
             file_info = (
-                await db.execute(select(CatalogFile).where(CatalogFile.id == item.catalog_file_id))
+                await db.execute(
+                    select(CatalogFile).where(CatalogFile.id == item.catalog_file_id)
+                )
             ).scalar_one_or_none()
         return {
             "success": True,
@@ -353,7 +395,10 @@ async def reprocess_quarantine_data(
             "succeeded": 0,
             "failed": len(request.quarantine_ids),
             "errors": [
-                {"quarantine_id": qid, "error": "legacy schema does not support reprocess yet"}
+                {
+                    "quarantine_id": qid,
+                    "error": "legacy schema does not support reprocess yet",
+                }
                 for qid in request.quarantine_ids
             ],
         }
@@ -364,16 +409,22 @@ async def reprocess_quarantine_data(
     errors = []
     try:
         for quarantine_id in request.quarantine_ids:
-            result = await db.execute(select(DataQuarantine).where(DataQuarantine.id == quarantine_id))
+            result = await db.execute(
+                select(DataQuarantine).where(DataQuarantine.id == quarantine_id)
+            )
             item = result.scalar_one_or_none()
             if not item:
                 failed += 1
-                errors.append({"quarantine_id": quarantine_id, "error": "隔离数据不存在"})
+                errors.append(
+                    {"quarantine_id": quarantine_id, "error": "隔离数据不存在"}
+                )
                 continue
             processed += 1
             item.is_resolved = True
             item.resolved_at = datetime.now(timezone.utc)
-            item.resolution_note = f"手动重新处理 corrections={request.corrections or {}}"
+            item.resolution_note = (
+                f"手动重新处理 corrections={request.corrections or {}}"
+            )
             succeeded += 1
         await db.commit()
         return {
@@ -404,11 +455,15 @@ async def delete_quarantine_data(
         schema_mode = detect_quarantine_schema(await _get_quarantine_column_names(db))
         if request.get("all") is True:
             if schema_mode == "legacy":
-                deleted_count = (await db.execute(text("select count(*) from core.data_quarantine"))).scalar_one()
+                deleted_count = (
+                    await db.execute(text("select count(*) from core.data_quarantine"))
+                ).scalar_one()
                 await db.execute(text("delete from core.data_quarantine"))
                 await db.commit()
                 return {"success": True, "deleted": deleted_count}
-            deleted_count = (await db.execute(select(func.count()).select_from(DataQuarantine))).scalar_one()
+            deleted_count = (
+                await db.execute(select(func.count()).select_from(DataQuarantine))
+            ).scalar_one()
             await db.execute(delete(DataQuarantine))
             await db.commit()
             return {"success": True, "deleted": deleted_count}
@@ -432,7 +487,9 @@ async def delete_quarantine_data(
 
         deleted_count = 0
         for quarantine_id in quarantine_ids:
-            result = await db.execute(select(DataQuarantine).where(DataQuarantine.id == quarantine_id))
+            result = await db.execute(
+                select(DataQuarantine).where(DataQuarantine.id == quarantine_id)
+            )
             item = result.scalar_one_or_none()
             if item:
                 await db.delete(item)
@@ -460,13 +517,19 @@ async def list_quarantine_files(
     try:
         schema_mode = detect_quarantine_schema(await _get_quarantine_column_names(db))
         if schema_mode == "legacy":
-            rows = await _list_legacy_rows(db, platform=platform, data_domain=data_domain)
+            rows = await _list_legacy_rows(
+                db, platform=platform, data_domain=data_domain
+            )
             data = build_legacy_file_groups(rows)
             return {"success": True, "data": data, "total": len(data)}
 
         query = (
             select(DataQuarantine, CatalogFile)
-            .join(CatalogFile, CatalogFile.id == DataQuarantine.catalog_file_id, isouter=True)
+            .join(
+                CatalogFile,
+                CatalogFile.id == DataQuarantine.catalog_file_id,
+                isouter=True,
+            )
             .order_by(DataQuarantine.created_at.desc())
         )
         conditions = []
@@ -481,7 +544,12 @@ async def list_quarantine_files(
         grouped: Dict[tuple, Dict[str, Any]] = {}
         for item, file_info in result.fetchall():
             file_name = file_info.file_name if file_info else item.source_file
-            key = (item.catalog_file_id, file_name, item.platform_code, item.data_domain)
+            key = (
+                item.catalog_file_id,
+                file_name,
+                item.platform_code,
+                item.data_domain,
+            )
             if key not in grouped:
                 grouped[key] = {
                     "file_id": item.catalog_file_id or item.id,
@@ -490,12 +558,18 @@ async def list_quarantine_files(
                     "data_domain": item.data_domain,
                     "error_count": 0,
                     "error_types": {},
-                    "created_at": item.created_at.isoformat() if item.created_at else None,
+                    "created_at": (
+                        item.created_at.isoformat() if item.created_at else None
+                    ),
                 }
             grouped[key]["error_count"] += 1
             error_type = item.error_type or "unknown"
-            grouped[key]["error_types"][error_type] = grouped[key]["error_types"].get(error_type, 0) + 1
-        data = sorted(grouped.values(), key=lambda value: value["error_count"], reverse=True)
+            grouped[key]["error_types"][error_type] = (
+                grouped[key]["error_types"].get(error_type, 0) + 1
+            )
+        data = sorted(
+            grouped.values(), key=lambda value: value["error_count"], reverse=True
+        )
         return {"success": True, "data": data, "total": len(data)}
     except Exception as exc:
         logger.error(f"Failed to list quarantine files: {exc}", exc_info=True)
@@ -520,7 +594,9 @@ async def list_quarantine_rows_by_file(
         if schema_mode == "legacy":
             rows = await _list_legacy_rows(db)
             groups = build_legacy_file_groups(rows)
-            target_group = next((item for item in groups if item["file_id"] == file_id), None)
+            target_group = next(
+                (item for item in groups if item["file_id"] == file_id), None
+            )
             if not target_group:
                 return error_response(
                     code=ErrorCode.FILE_NOT_FOUND,
@@ -532,8 +608,16 @@ async def list_quarantine_rows_by_file(
             matched = []
             for row in rows:
                 raw_data = _parse_raw_data(row["raw_data"])
-                row_file_name = raw_data.get("source_file") or raw_data.get("file_name") or f"legacy-{row['platform']}-{row['data_type']}"
-                if row_file_name == file_name and row["platform"] == target_group["platform_code"] and row["data_type"] == target_group["data_domain"]:
+                row_file_name = (
+                    raw_data.get("source_file")
+                    or raw_data.get("file_name")
+                    or f"legacy-{row['platform']}-{row['data_type']}"
+                )
+                if (
+                    row_file_name == file_name
+                    and row["platform"] == target_group["platform_code"]
+                    and row["data_type"] == target_group["data_domain"]
+                ):
                     matched.append(row)
             total = len(matched)
             matched = matched[(page - 1) * page_size : page * page_size]
@@ -546,13 +630,28 @@ async def list_quarantine_rows_by_file(
                     "data_domain": row["data_type"],
                     "row_index": row["id"],
                     "error_type": row["quarantine_reason"],
-                    "error_message": ERROR_TYPES.get(row["quarantine_reason"], row["quarantine_reason"]),
-                    "error_type_label": ERROR_TYPES.get(row["quarantine_reason"], row["quarantine_reason"]),
-                    "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
+                    "error_message": ERROR_TYPES.get(
+                        row["quarantine_reason"], row["quarantine_reason"]
+                    ),
+                    "error_type_label": ERROR_TYPES.get(
+                        row["quarantine_reason"], row["quarantine_reason"]
+                    ),
+                    "created_at": (
+                        row["created_at"].isoformat()
+                        if hasattr(row["created_at"], "isoformat")
+                        else row["created_at"]
+                    ),
                 }
                 for row in matched
             ]
-            return {"success": True, "data": data, "total": total, "page": page, "page_size": page_size, "has_more": total > page * page_size}
+            return {
+                "success": True,
+                "data": data,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "has_more": total > page * page_size,
+            }
 
         result = await db.execute(select(CatalogFile).where(CatalogFile.id == file_id))
         file_info = result.scalar_one_or_none()
@@ -565,7 +664,9 @@ async def list_quarantine_rows_by_file(
             )
         total = (
             await db.execute(
-                select(func.count()).select_from(DataQuarantine).where(DataQuarantine.catalog_file_id == file_id)
+                select(func.count())
+                .select_from(DataQuarantine)
+                .where(DataQuarantine.catalog_file_id == file_id)
             )
         ).scalar_one()
         result = await db.execute(
@@ -591,7 +692,14 @@ async def list_quarantine_rows_by_file(
             }
             for item in rows
         ]
-        return {"success": True, "data": data, "total": total, "page": page, "page_size": page_size, "has_more": total > page * page_size}
+        return {
+            "success": True,
+            "data": data,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "has_more": total > page * page_size,
+        }
     except Exception as exc:
         logger.error(f"Failed to list quarantine rows by file: {exc}", exc_info=True)
         return error_response(
@@ -614,7 +722,7 @@ async def get_quarantine_stats(
             where_clause, params = build_legacy_filter_clause(platform=platform)
             result = await db.execute(
                 text(
-                    f"""
+                    f"""  # nosec B608
                     select platform, data_type, quarantine_reason, count(*) as count
                     from core.data_quarantine
                     {where_clause}
@@ -627,12 +735,31 @@ async def get_quarantine_stats(
             by_error_type: Dict[str, int] = {}
             by_data_domain: Dict[str, int] = {}
             total = 0
-            for platform_value, data_type, quarantine_reason, count in result.fetchall():
+            for (
+                platform_value,
+                data_type,
+                quarantine_reason,
+                count,
+            ) in result.fetchall():
                 total += count
-                by_platform[platform_value or "unknown"] = by_platform.get(platform_value or "unknown", 0) + count
-                by_error_type[quarantine_reason or "unknown"] = by_error_type.get(quarantine_reason or "unknown", 0) + count
-                by_data_domain[data_type or "unknown"] = by_data_domain.get(data_type or "unknown", 0) + count
-            return {"success": True, "data": {"total": total, "by_platform": by_platform, "by_error_type": by_error_type, "by_data_domain": by_data_domain}}
+                by_platform[platform_value or "unknown"] = (
+                    by_platform.get(platform_value or "unknown", 0) + count
+                )
+                by_error_type[quarantine_reason or "unknown"] = (
+                    by_error_type.get(quarantine_reason or "unknown", 0) + count
+                )
+                by_data_domain[data_type or "unknown"] = (
+                    by_data_domain.get(data_type or "unknown", 0) + count
+                )
+            return {
+                "success": True,
+                "data": {
+                    "total": total,
+                    "by_platform": by_platform,
+                    "by_error_type": by_error_type,
+                    "by_data_domain": by_data_domain,
+                },
+            }
 
         query = select(func.count()).select_from(DataQuarantine)
         if platform:
@@ -640,21 +767,41 @@ async def get_quarantine_stats(
         total = (await db.execute(query)).scalar_one()
 
         by_platform = {}
-        result = await db.execute(select(DataQuarantine.platform_code, func.count()).group_by(DataQuarantine.platform_code))
+        result = await db.execute(
+            select(DataQuarantine.platform_code, func.count()).group_by(
+                DataQuarantine.platform_code
+            )
+        )
         for platform_code, count in result.fetchall():
             by_platform[platform_code or "unknown"] = count
 
         by_error_type = {}
-        result = await db.execute(select(DataQuarantine.error_type, func.count()).group_by(DataQuarantine.error_type))
+        result = await db.execute(
+            select(DataQuarantine.error_type, func.count()).group_by(
+                DataQuarantine.error_type
+            )
+        )
         for error_type, count in result.fetchall():
             by_error_type[error_type or "unknown"] = count
 
         by_data_domain = {}
-        result = await db.execute(select(DataQuarantine.data_domain, func.count()).group_by(DataQuarantine.data_domain))
+        result = await db.execute(
+            select(DataQuarantine.data_domain, func.count()).group_by(
+                DataQuarantine.data_domain
+            )
+        )
         for domain, count in result.fetchall():
             by_data_domain[domain or "unknown"] = count
 
-        return {"success": True, "data": {"total": total, "by_platform": by_platform, "by_error_type": by_error_type, "by_data_domain": by_data_domain}}
+        return {
+            "success": True,
+            "data": {
+                "total": total,
+                "by_platform": by_platform,
+                "by_error_type": by_error_type,
+                "by_data_domain": by_data_domain,
+            },
+        }
     except Exception as exc:
         logger.error(f"Failed to get quarantine stats: {exc}", exc_info=True)
         return error_response(

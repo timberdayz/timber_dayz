@@ -187,7 +187,14 @@ PAGE_SCENARIOS = [
         "name": "expense_management",
         "requests": [
             {"path": "/api/expenses/shops"},
-            {"path": "/api/expenses", "params": {"year_month": CURRENT_YEAR_MONTH, "page": 1, "page_size": 20}},
+            {
+                "path": "/api/expenses",
+                "params": {
+                    "year_month": CURRENT_YEAR_MONTH,
+                    "page": 1,
+                    "page_size": 20,
+                },
+            },
             {"path": "/api/expenses/summary/yearly", "params": {"year": CURRENT_YEAR}},
         ],
     },
@@ -224,7 +231,13 @@ def summarize_page_results(results: list[dict[str, Any]]) -> dict[str, dict[str,
         summary[name] = {
             "count": len(items),
             "failed": sum(1 for item in items if not item.get("ok")),
-            "success_rate": round(sum(1 for item in items if item.get("ok")) / len(items) * 100.0, 2) if items else 0.0,
+            "success_rate": (
+                round(
+                    sum(1 for item in items if item.get("ok")) / len(items) * 100.0, 2
+                )
+                if items
+                else 0.0
+            ),
             "avg_ms": round(mean(elapsed), 2) if elapsed else 0.0,
             "p95_ms": round(percentile(elapsed, 0.95), 2) if elapsed else 0.0,
             "statuses": statuses,
@@ -256,7 +269,12 @@ async def login_admin(client: httpx.AsyncClient) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def request_once(client: httpx.AsyncClient, headers: dict[str, str], page_name: str, spec: dict[str, Any]) -> dict[str, Any]:
+async def request_once(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    page_name: str,
+    spec: dict[str, Any],
+) -> dict[str, Any]:
     started = asyncio.get_running_loop().time()
     try:
         response = await client.get(
@@ -310,7 +328,9 @@ def write_output(payload: dict[str, Any]) -> Path:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Probe next batch of real high-frequency pages")
+    parser = argparse.ArgumentParser(
+        description="Probe next batch of real high-frequency pages"
+    )
     parser.add_argument("--rounds", type=int, default=5)
     return parser.parse_args()
 

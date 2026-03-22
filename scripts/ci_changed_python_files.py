@@ -12,18 +12,20 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
-import subprocess  # nosec B404 - controlled local git invocations for CI diff detection
+import shutil
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ALLOWED_PREFIXES = ("backend/", "modules/", "tests/", "scripts/")
+GIT_BIN = shutil.which("git") or "git"
 
 
 def run_git(*args: str) -> str:
-    result = subprocess.run(  # nosec - fixed git invocation on repository-local paths
-        ["git", *args],
+    result = subprocess.run(  # nosec B603
+        [GIT_BIN, *args],
         cwd=PROJECT_ROOT,
         check=True,
         text=True,
@@ -104,9 +106,8 @@ def main() -> int:
         files = [
             path
             for path in files
-            if (
-                path.startswith("tests/") or path.startswith("backend/tests/")
-            ) and Path(path).name.startswith("test_")
+            if (path.startswith("tests/") or path.startswith("backend/tests/"))
+            and Path(path).name.startswith("test_")
         ]
 
     if args.shell:

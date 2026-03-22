@@ -84,7 +84,9 @@ class BatchAddAliasesRequest(BaseModel):
     """批量添加别名请求"""
 
     platform: str = Field(..., description="平台代码")
-    mappings: List[dict] = Field(..., description="映射列表 [{raw_shop_label, account_id}, ...]")
+    mappings: List[dict] = Field(
+        ..., description="映射列表 [{raw_shop_label, account_id}, ...]"
+    )
 
 
 class BatchAddAliasesResponse(BaseModel):

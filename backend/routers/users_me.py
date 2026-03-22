@@ -28,9 +28,11 @@ from modules.core.logger import get_logger
 try:
     from backend.middleware.rate_limiter import role_based_rate_limit
 except ImportError:
+
     def role_based_rate_limit(endpoint_type="default"):
         def decorator(func):
             return func
+
         return decorator
 
 
@@ -202,7 +204,9 @@ async def revoke_other_sessions(
     )
 
 
-@router.get("/me/notification-preferences", response_model=NotificationPreferenceListResponse)
+@router.get(
+    "/me/notification-preferences", response_model=NotificationPreferenceListResponse
+)
 @role_based_rate_limit(endpoint_type="default")
 async def get_notification_preferences(
     request: Request,
@@ -215,11 +219,15 @@ async def get_notification_preferences(
         .order_by(UserNotificationPreference.notification_type)
     )
     preferences = result.scalars().all()
-    items = [NotificationPreferenceResponse.model_validate(item) for item in preferences]
+    items = [
+        NotificationPreferenceResponse.model_validate(item) for item in preferences
+    ]
     return NotificationPreferenceListResponse(items=items, total=len(items))
 
 
-@router.put("/me/notification-preferences", response_model=NotificationPreferenceListResponse)
+@router.put(
+    "/me/notification-preferences", response_model=NotificationPreferenceListResponse
+)
 @role_based_rate_limit(endpoint_type="default")
 async def update_notification_preferences(
     batch_update: NotificationPreferenceBatchUpdate,
@@ -232,7 +240,8 @@ async def update_notification_preferences(
         result = await db.execute(
             select(UserNotificationPreference).where(
                 UserNotificationPreference.user_id == current_user.user_id,
-                UserNotificationPreference.notification_type == update_data.notification_type,
+                UserNotificationPreference.notification_type
+                == update_data.notification_type,
             )
         )
         preference = result.scalar_one_or_none()
@@ -245,19 +254,31 @@ async def update_notification_preferences(
             preference = UserNotificationPreference(
                 user_id=current_user.user_id,
                 notification_type=update_data.notification_type,
-                enabled=update_data.enabled if update_data.enabled is not None else True,
-                desktop_enabled=update_data.desktop_enabled if update_data.desktop_enabled is not None else False,
+                enabled=(
+                    update_data.enabled if update_data.enabled is not None else True
+                ),
+                desktop_enabled=(
+                    update_data.desktop_enabled
+                    if update_data.desktop_enabled is not None
+                    else False
+                ),
             )
             db.add(preference)
         updated_preferences.append(preference)
     await db.commit()
     for item in updated_preferences:
         await db.refresh(item)
-    items = [NotificationPreferenceResponse.model_validate(item) for item in updated_preferences]
+    items = [
+        NotificationPreferenceResponse.model_validate(item)
+        for item in updated_preferences
+    ]
     return NotificationPreferenceListResponse(items=items, total=len(items))
 
 
-@router.get("/me/notification-preferences/{notification_type}", response_model=NotificationPreferenceResponse)
+@router.get(
+    "/me/notification-preferences/{notification_type}",
+    response_model=NotificationPreferenceResponse,
+)
 @role_based_rate_limit(endpoint_type="default")
 async def get_notification_preference(
     notification_type: str,
@@ -285,7 +306,10 @@ async def get_notification_preference(
     return NotificationPreferenceResponse.model_validate(preference)
 
 
-@router.put("/me/notification-preferences/{notification_type}", response_model=NotificationPreferenceResponse)
+@router.put(
+    "/me/notification-preferences/{notification_type}",
+    response_model=NotificationPreferenceResponse,
+)
 @role_based_rate_limit(endpoint_type="default")
 async def update_notification_preference(
     notification_type: str,
@@ -313,7 +337,11 @@ async def update_notification_preference(
             user_id=current_user.user_id,
             notification_type=notification_type,
             enabled=update_data.enabled if update_data.enabled is not None else True,
-            desktop_enabled=update_data.desktop_enabled if update_data.desktop_enabled is not None else False,
+            desktop_enabled=(
+                update_data.desktop_enabled
+                if update_data.desktop_enabled is not None
+                else False
+            ),
         )
         db.add(preference)
         await db.commit()

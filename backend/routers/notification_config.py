@@ -24,7 +24,7 @@ from backend.schemas.notification_config import (
     AlertRuleResponse,
     AlertRuleCreate,
     AlertRuleUpdate,
-    AlertRuleListResponse
+    AlertRuleListResponse,
 )
 from backend.services.notification_config_service import get_notification_config_service
 from backend.utils.api_response import success_response, error_response
@@ -58,23 +58,23 @@ def build_default_smtp_config_response() -> SMTPConfigResponse:
 
 # ==================== SMTP配置 API ====================
 
+
 @router.get("/smtp-config", response_model=SMTPConfigResponse)
 async def get_smtp_config(
-    db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    db: AsyncSession = Depends(get_async_db), current_user=Depends(require_admin)
 ):
     """
     获取SMTP配置
-    
+
     需要管理员权限
     """
     try:
         service = get_notification_config_service(db)
         config = await service.get_smtp_config()
-        
+
         if not config:
             return build_default_smtp_config_response()
-        
+
         return SMTPConfigResponse(
             id=config.id,
             smtp_server=config.smtp_server,
@@ -85,7 +85,7 @@ async def get_smtp_config(
             from_name=config.from_name,
             is_active=config.is_active,
             updated_at=config.updated_at,
-            updated_by=config.updated_by
+            updated_by=config.updated_by,
         )
     except Exception as e:
         logger.error(f"获取SMTP配置失败: {e}", exc_info=True)
@@ -94,7 +94,7 @@ async def get_smtp_config(
             message="获取SMTP配置失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -102,59 +102,65 @@ async def get_smtp_config(
 async def update_smtp_config(
     config_update: SMTPConfigUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     更新SMTP配置
-    
+
     需要管理员权限
     密码将自动加密存储
     """
     # 限流配置
     if role_based_rate_limit:
+
         @role_based_rate_limit(requests_per_minute=5, requests_per_hour=20)
         async def _update():
             pass
+
         await _update()
-    
+
     try:
         service = get_notification_config_service(db)
-        
+
         # 转换为字典(排除None值)
         update_data = config_update.model_dump(exclude_unset=True, exclude_none=True)
-        
+
         # 测试连接(如果提供了密码或服务器配置)
-        if "password" in update_data or "smtp_server" in update_data or "smtp_port" in update_data:
+        if (
+            "password" in update_data
+            or "smtp_server" in update_data
+            or "smtp_port" in update_data
+        ):
             # 先创建临时配置对象用于测试
             existing_config = await service.get_smtp_config()
             test_config = existing_config if existing_config else None
-            
+
             # 如果更新了配置,需要先更新再测试
             if test_config:
                 for key, value in update_data.items():
                     if key != "password" and value is not None:
                         setattr(test_config, key, value)
-            
+
             # 这里暂时跳过连接测试,因为需要先保存配置才能测试
             # 实际应该在保存后测试,如果失败则回滚
-        
+
         # 更新配置
         updated_config = await service.update_smtp_config(
-            update_data,
-            updated_by_user_id=current_user.user_id
+            update_data, updated_by_user_id=current_user.user_id
         )
-        
+
         # 记录审计日志
         from backend.services.audit_service import audit_service
+
         await audit_service.log_action(
             user_id=current_user.user_id,
             action="update_smtp_config",
             resource="notification_config",
             resource_id=str(updated_config.id),
             details={"config_id": updated_config.id},
-            is_success=True
+            is_success=True,
         )
-        
+
         return SMTPConfigResponse(
             id=updated_config.id,
             smtp_server=updated_config.smtp_server,
@@ -165,7 +171,7 @@ async def update_smtp_config(
             from_name=updated_config.from_name,
             is_active=updated_config.is_active,
             updated_at=updated_config.updated_at,
-            updated_by=updated_config.updated_by
+            updated_by=updated_config.updated_by,
         )
     except Exception as e:
         await db.rollback()
@@ -175,7 +181,7 @@ async def update_smtp_config(
             message="更新SMTP配置失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -183,16 +189,16 @@ async def update_smtp_config(
 async def send_test_email(
     request: TestEmailRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     发送测试邮件
-    
+
     需要管理员权限
     """
     try:
         service = get_notification_config_service(db)
-        
+
         # 先测试SMTP连接
         is_connected, error_message = await service.test_smtp_connection()
         if not is_connected:
@@ -201,28 +207,25 @@ async def send_test_email(
                 message="SMTP连接失败",
                 error_type=get_error_type(ErrorCode.CONNECTION_ERROR),
                 detail=error_message,
-                status_code=400
+                status_code=400,
             )
-        
+
         # 发送测试邮件
         is_sent, error_message = await service.send_test_email(
-            to_email=request.to_email,
-            subject=request.subject,
-            content=request.content
+            to_email=request.to_email, subject=request.subject, content=request.content
         )
-        
+
         if not is_sent:
             return error_response(
                 code=ErrorCode.INTERNAL_SERVER_ERROR,
                 message="发送测试邮件失败",
                 error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
                 detail=error_message,
-                status_code=500
+                status_code=500,
             )
-        
+
         return success_response(
-            data={"to_email": request.to_email},
-            message="测试邮件发送成功"
+            data={"to_email": request.to_email}, message="测试邮件发送成功"
         )
     except Exception as e:
         logger.error(f"发送测试邮件失败: {e}", exc_info=True)
@@ -231,11 +234,12 @@ async def send_test_email(
             message="发送测试邮件失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
 # ==================== 通知模板 API ====================
+
 
 @router.get("/templates", response_model=NotificationTemplateListResponse)
 async def list_templates(
@@ -244,11 +248,11 @@ async def list_templates(
     page: int = Query(1, ge=1, description="页码(1-based)"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数(最大100)"),
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     获取通知模板列表(支持筛选、分页)
-    
+
     需要管理员权限
     """
     try:
@@ -257,11 +261,11 @@ async def list_templates(
             template_type=template_type,
             is_active=is_active,
             page=page,
-            page_size=page_size
+            page_size=page_size,
         )
-        
+
         total_pages = (total + page_size - 1) // page_size
-        
+
         return NotificationTemplateListResponse(
             data=[
                 NotificationTemplateResponse(
@@ -275,14 +279,14 @@ async def list_templates(
                     created_at=t.created_at,
                     updated_at=t.updated_at,
                     created_by=t.created_by,
-                    updated_by=t.updated_by
+                    updated_by=t.updated_by,
                 )
                 for t in templates
             ],
             page=page,
             page_size=page_size,
             total=total,
-            total_pages=total_pages
+            total_pages=total_pages,
         )
     except Exception as e:
         logger.error(f"获取通知模板列表失败: {e}", exc_info=True)
@@ -291,7 +295,7 @@ async def list_templates(
             message="获取通知模板列表失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -299,20 +303,19 @@ async def list_templates(
 async def create_template(
     template: NotificationTemplateCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     创建通知模板
-    
+
     需要管理员权限
     """
     try:
         service = get_notification_config_service(db)
         new_template = await service.create_template(
-            template.model_dump(),
-            created_by_user_id=current_user.user_id
+            template.model_dump(), created_by_user_id=current_user.user_id
         )
-        
+
         return NotificationTemplateResponse(
             id=new_template.id,
             template_name=new_template.template_name,
@@ -324,7 +327,7 @@ async def create_template(
             created_at=new_template.created_at,
             updated_at=new_template.updated_at,
             created_by=new_template.created_by,
-            updated_by=new_template.updated_by
+            updated_by=new_template.updated_by,
         )
     except ValueError as e:
         await db.rollback()
@@ -333,7 +336,7 @@ async def create_template(
             message="创建通知模板失败",
             error_type=get_error_type(ErrorCode.VALIDATION_ERROR),
             detail=str(e),
-            status_code=400
+            status_code=400,
         )
     except Exception as e:
         await db.rollback()
@@ -343,7 +346,7 @@ async def create_template(
             message="创建通知模板失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -351,26 +354,26 @@ async def create_template(
 async def get_template(
     template_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     获取通知模板详情
-    
+
     需要管理员权限
     """
     try:
         service = get_notification_config_service(db)
         template = await service.get_template(template_id)
-        
+
         if not template:
             return error_response(
                 code=ErrorCode.DATA_NOT_FOUND,
                 message="通知模板不存在",
                 error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
                 detail=f"模板ID {template_id} 不存在",
-                status_code=404
+                status_code=404,
             )
-        
+
         return NotificationTemplateResponse(
             id=template.id,
             template_name=template.template_name,
@@ -382,7 +385,7 @@ async def get_template(
             created_at=template.created_at,
             updated_at=template.updated_at,
             created_by=template.created_by,
-            updated_by=template.updated_by
+            updated_by=template.updated_by,
         )
     except Exception as e:
         logger.error(f"获取通知模板详情失败: {e}", exc_info=True)
@@ -391,7 +394,7 @@ async def get_template(
             message="获取通知模板详情失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -400,11 +403,11 @@ async def update_template(
     template_id: int,
     template: NotificationTemplateUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     更新通知模板
-    
+
     需要管理员权限
     """
     try:
@@ -412,18 +415,18 @@ async def update_template(
         updated_template = await service.update_template(
             template_id,
             template.model_dump(exclude_unset=True, exclude_none=True),
-            updated_by_user_id=current_user.user_id
+            updated_by_user_id=current_user.user_id,
         )
-        
+
         if not updated_template:
             return error_response(
                 code=ErrorCode.DATA_NOT_FOUND,
                 message="通知模板不存在",
                 error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
                 detail=f"模板ID {template_id} 不存在",
-                status_code=404
+                status_code=404,
             )
-        
+
         return NotificationTemplateResponse(
             id=updated_template.id,
             template_name=updated_template.template_name,
@@ -435,7 +438,7 @@ async def update_template(
             created_at=updated_template.created_at,
             updated_at=updated_template.updated_at,
             created_by=updated_template.created_by,
-            updated_by=updated_template.updated_by
+            updated_by=updated_template.updated_by,
         )
     except ValueError as e:
         await db.rollback()
@@ -444,7 +447,7 @@ async def update_template(
             message="更新通知模板失败",
             error_type=get_error_type(ErrorCode.VALIDATION_ERROR),
             detail=str(e),
-            status_code=400
+            status_code=400,
         )
     except Exception as e:
         await db.rollback()
@@ -454,7 +457,7 @@ async def update_template(
             message="更新通知模板失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -462,29 +465,28 @@ async def update_template(
 async def delete_template(
     template_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     删除通知模板
-    
+
     需要管理员权限
     """
     try:
         service = get_notification_config_service(db)
         deleted = await service.delete_template(template_id)
-        
+
         if not deleted:
             return error_response(
                 code=ErrorCode.DATA_NOT_FOUND,
                 message="通知模板不存在",
                 error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
                 detail=f"模板ID {template_id} 不存在",
-                status_code=404
+                status_code=404,
             )
-        
+
         return success_response(
-            data={"template_id": template_id},
-            message="通知模板删除成功"
+            data={"template_id": template_id}, message="通知模板删除成功"
         )
     except Exception as e:
         await db.rollback()
@@ -494,37 +496,37 @@ async def delete_template(
             message="删除通知模板失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
 # ==================== 告警规则 API ====================
 
+
 @router.get("/alert-rules", response_model=AlertRuleListResponse)
 async def list_alert_rules(
-    rule_type: Optional[str] = Query(None, description="规则类型(system/performance/security/business)"),
+    rule_type: Optional[str] = Query(
+        None, description="规则类型(system/performance/security/business)"
+    ),
     enabled: Optional[bool] = Query(None, description="是否启用"),
     page: int = Query(1, ge=1, description="页码(1-based)"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数(最大100)"),
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     获取告警规则列表(支持筛选、分页)
-    
+
     需要管理员权限
     """
     try:
         service = get_notification_config_service(db)
         rules, total = await service.list_alert_rules(
-            rule_type=rule_type,
-            enabled=enabled,
-            page=page,
-            page_size=page_size
+            rule_type=rule_type, enabled=enabled, page=page, page_size=page_size
         )
-        
+
         total_pages = (total + page_size - 1) // page_size
-        
+
         return AlertRuleListResponse(
             data=[
                 AlertRuleResponse(
@@ -539,14 +541,14 @@ async def list_alert_rules(
                     created_at=r.created_at,
                     updated_at=r.updated_at,
                     created_by=r.created_by,
-                    updated_by=r.updated_by
+                    updated_by=r.updated_by,
                 )
                 for r in rules
             ],
             page=page,
             page_size=page_size,
             total=total,
-            total_pages=total_pages
+            total_pages=total_pages,
         )
     except Exception as e:
         logger.error(f"获取告警规则列表失败: {e}", exc_info=True)
@@ -555,7 +557,7 @@ async def list_alert_rules(
             message="获取告警规则列表失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -563,20 +565,19 @@ async def list_alert_rules(
 async def create_alert_rule(
     rule: AlertRuleCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     创建告警规则
-    
+
     需要管理员权限
     """
     try:
         service = get_notification_config_service(db)
         new_rule = await service.create_alert_rule(
-            rule.model_dump(),
-            created_by_user_id=current_user.user_id
+            rule.model_dump(), created_by_user_id=current_user.user_id
         )
-        
+
         return AlertRuleResponse(
             id=new_rule.id,
             rule_name=new_rule.rule_name,
@@ -589,7 +590,7 @@ async def create_alert_rule(
             created_at=new_rule.created_at,
             updated_at=new_rule.updated_at,
             created_by=new_rule.created_by,
-            updated_by=new_rule.updated_by
+            updated_by=new_rule.updated_by,
         )
     except ValueError as e:
         await db.rollback()
@@ -598,7 +599,7 @@ async def create_alert_rule(
             message="创建告警规则失败",
             error_type=get_error_type(ErrorCode.VALIDATION_ERROR),
             detail=str(e),
-            status_code=400
+            status_code=400,
         )
     except Exception as e:
         await db.rollback()
@@ -608,7 +609,7 @@ async def create_alert_rule(
             message="创建告警规则失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -616,26 +617,26 @@ async def create_alert_rule(
 async def get_alert_rule(
     rule_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     获取告警规则详情
-    
+
     需要管理员权限
     """
     try:
         service = get_notification_config_service(db)
         rule = await service.get_alert_rule(rule_id)
-        
+
         if not rule:
             return error_response(
                 code=ErrorCode.DATA_NOT_FOUND,
                 message="告警规则不存在",
                 error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
                 detail=f"规则ID {rule_id} 不存在",
-                status_code=404
+                status_code=404,
             )
-        
+
         return AlertRuleResponse(
             id=rule.id,
             rule_name=rule.rule_name,
@@ -648,7 +649,7 @@ async def get_alert_rule(
             created_at=rule.created_at,
             updated_at=rule.updated_at,
             created_by=rule.created_by,
-            updated_by=rule.updated_by
+            updated_by=rule.updated_by,
         )
     except Exception as e:
         logger.error(f"获取告警规则详情失败: {e}", exc_info=True)
@@ -657,7 +658,7 @@ async def get_alert_rule(
             message="获取告警规则详情失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -666,11 +667,11 @@ async def update_alert_rule(
     rule_id: int,
     rule: AlertRuleUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     更新告警规则
-    
+
     需要管理员权限
     """
     try:
@@ -678,18 +679,18 @@ async def update_alert_rule(
         updated_rule = await service.update_alert_rule(
             rule_id,
             rule.model_dump(exclude_unset=True, exclude_none=True),
-            updated_by_user_id=current_user.user_id
+            updated_by_user_id=current_user.user_id,
         )
-        
+
         if not updated_rule:
             return error_response(
                 code=ErrorCode.DATA_NOT_FOUND,
                 message="告警规则不存在",
                 error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
                 detail=f"规则ID {rule_id} 不存在",
-                status_code=404
+                status_code=404,
             )
-        
+
         return AlertRuleResponse(
             id=updated_rule.id,
             rule_name=updated_rule.rule_name,
@@ -702,7 +703,7 @@ async def update_alert_rule(
             created_at=updated_rule.created_at,
             updated_at=updated_rule.updated_at,
             created_by=updated_rule.created_by,
-            updated_by=updated_rule.updated_by
+            updated_by=updated_rule.updated_by,
         )
     except ValueError as e:
         await db.rollback()
@@ -711,7 +712,7 @@ async def update_alert_rule(
             message="更新告警规则失败",
             error_type=get_error_type(ErrorCode.VALIDATION_ERROR),
             detail=str(e),
-            status_code=400
+            status_code=400,
         )
     except Exception as e:
         await db.rollback()
@@ -721,7 +722,7 @@ async def update_alert_rule(
             message="更新告警规则失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )
 
 
@@ -729,30 +730,27 @@ async def update_alert_rule(
 async def delete_alert_rule(
     rule_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(require_admin)
+    current_user=Depends(require_admin),
 ):
     """
     删除告警规则
-    
+
     需要管理员权限
     """
     try:
         service = get_notification_config_service(db)
         deleted = await service.delete_alert_rule(rule_id)
-        
+
         if not deleted:
             return error_response(
                 code=ErrorCode.DATA_NOT_FOUND,
                 message="告警规则不存在",
                 error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
                 detail=f"规则ID {rule_id} 不存在",
-                status_code=404
+                status_code=404,
             )
-        
-        return success_response(
-            data={"rule_id": rule_id},
-            message="告警规则删除成功"
-        )
+
+        return success_response(data={"rule_id": rule_id}, message="告警规则删除成功")
     except Exception as e:
         await db.rollback()
         logger.error(f"删除告警规则失败: {e}", exc_info=True)
@@ -761,5 +759,5 @@ async def delete_alert_rule(
             message="删除告警规则失败",
             error_type=get_error_type(ErrorCode.INTERNAL_SERVER_ERROR),
             detail=str(e),
-            status_code=500
+            status_code=500,
         )

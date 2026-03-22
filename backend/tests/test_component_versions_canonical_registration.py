@@ -55,12 +55,18 @@ async def test_batch_register_only_registers_canonical_components(
     fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
     fake_router_file.parent.mkdir(parents=True, exist_ok=True)
     fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
-    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+    monkeypatch.setattr(
+        "backend.routers.component_versions.__file__", str(fake_router_file)
+    )
 
     shopee_dir = project_root / "modules" / "platforms" / "shopee" / "components"
     _write_component(shopee_dir / "login.py", "ShopeeLogin", "login")
-    _write_component(shopee_dir / "products_export.py", "ShopeeProductsExport", "export")
-    _write_component(shopee_dir / "recorder_test_login.py", "ShopeeRecorderTestLogin", "login")
+    _write_component(
+        shopee_dir / "products_export.py", "ShopeeProductsExport", "export"
+    )
+    _write_component(
+        shopee_dir / "recorder_test_login.py", "ShopeeRecorderTestLogin", "login"
+    )
     _write_component(shopee_dir / "export.py", "ShopeeExporterComponent", "export")
     _write_component(shopee_dir / "analytics_config.py", "AnalyticsSelectors", "other")
 

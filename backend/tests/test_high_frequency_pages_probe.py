@@ -13,7 +13,9 @@ def load_script_module():
     if not SCRIPT_PATH.exists():
         raise FileNotFoundError(f"Missing high frequency pages probe: {SCRIPT_PATH}")
 
-    spec = importlib.util.spec_from_file_location("high_frequency_pages_probe", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "high_frequency_pages_probe", SCRIPT_PATH
+    )
     assert spec is not None
     assert spec.loader is not None
 
@@ -59,7 +61,12 @@ def test_summarize_page_results_groups_by_page():
         [
             {"page": "user_management", "ok": True, "elapsed_ms": 100.0, "status": 200},
             {"page": "user_management", "ok": True, "elapsed_ms": 120.0, "status": 200},
-            {"page": "collection_tasks", "ok": False, "elapsed_ms": 800.0, "status": 503},
+            {
+                "page": "collection_tasks",
+                "ok": False,
+                "elapsed_ms": 800.0,
+                "status": 503,
+            },
         ]
     )
 
@@ -71,7 +78,9 @@ def test_summarize_page_results_groups_by_page():
 def test_account_management_uses_trailing_slash_endpoint():
     probe = load_script_module()
 
-    account_page = next(page for page in probe.PAGE_SCENARIOS if page["name"] == "account_management")
+    account_page = next(
+        page for page in probe.PAGE_SCENARIOS if page["name"] == "account_management"
+    )
     paths = {item["path"] for item in account_page["requests"]}
 
     assert "/api/accounts/" in paths

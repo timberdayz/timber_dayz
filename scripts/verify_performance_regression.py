@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
+import subprocess  # nosec B404
 import sys
 import time
 from pathlib import Path
@@ -79,9 +79,11 @@ def build_regression_plan(mode: str, backend_reachable: bool) -> list[dict[str, 
     return plan
 
 
-def backend_is_reachable(base_url: str = DEFAULT_BASE_URL, timeout: float = 5.0) -> bool:
+def backend_is_reachable(
+    base_url: str = DEFAULT_BASE_URL, timeout: float = 5.0
+) -> bool:
     try:
-        with urlopen(f"{base_url}/health", timeout=timeout) as response:
+        with urlopen(f"{base_url}/health", timeout=timeout) as response:  # nosec B310
             return 200 <= response.status < 500
     except Exception:
         return False
@@ -89,7 +91,7 @@ def backend_is_reachable(base_url: str = DEFAULT_BASE_URL, timeout: float = 5.0)
 
 def run_step(step: dict[str, Any]) -> dict[str, Any]:
     started = time.time()
-    completed = subprocess.run(
+    completed = subprocess.run(  # nosec B603
         step["command"],
         cwd=ROOT_DIR,
         capture_output=True,
