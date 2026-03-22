@@ -101,3 +101,9 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
     assert operational_body["data"]["operating_result_text"] == "盈利"
     assert target_completion.status_code == 200
     assert target_completion_body["data"]["achievement_rate_gmv"] == 80.0
+
+
+def test_main_contains_explicit_dashboard_router_source_log():
+    text = Path("backend/main.py").read_text(encoding="utf-8")
+    assert "Dashboard router source: PostgreSQL" in text
+    assert "Dashboard router source: Metabase compatibility" in text

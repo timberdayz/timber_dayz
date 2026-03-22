@@ -663,11 +663,13 @@ async def root():
 
 # [OK] v4.6.0 DSS架构重构:dashboard_api已恢复,通过Metabase Question查询提供数据
 if os.getenv("USE_POSTGRESQL_DASHBOARD_ROUTER", "").lower() in ("1", "true", "yes"):
+    logger.info("Dashboard router source: PostgreSQL")
     app.include_router(
         dashboard_api_postgresql.router,
         tags=["Dashboard"]
     )
 else:
+    logger.info("Dashboard router source: Metabase compatibility")
     app.include_router(
         dashboard_api.router,
         tags=["Dashboard"]
