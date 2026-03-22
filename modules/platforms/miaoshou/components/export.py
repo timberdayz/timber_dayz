@@ -45,7 +45,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 # Fallback: role-based by text
                 try:
                     btn = page.get_by_role("button", name=sel.split("has-text(")[-1].rstrip(")"))
-                    if btn and btn.first.count() >= 0:
+                    if btn and await btn.first.count() >= 1:
                         try:
                             await btn.first.scroll_into_view_if_needed(timeout=800)
                         except Exception:
@@ -76,7 +76,7 @@ class MiaoshouExporterComponent(ExportComponent):
         if "product" in u or "goods" in u:
             return "products"
         if "traffic" in u or "overview" in u or "analytics" in u:
-            return "traffic"
+            return "analytics"
         # 订单页在妙手为 stat/profit_statistics/detail?platform=*
         if "profit_statistics" in u or "/stat/" in u or "order" in u:
             return "orders"
@@ -117,7 +117,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 for s in sels:
                     try:
                         el = page.locator(s).first
-                        if el.count() > 0 and await el.is_visible():
+                        if await el.count() > 0 and await el.is_visible():
                             await el.click(timeout=800)
                             closed = True
                     except Exception:
@@ -127,7 +127,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         for s in sels:
                             try:
                                 el2 = fr.locator(s).first
-                                if el2.count() > 0 and await el2.is_visible():
+                                if await el2.count() > 0 and await el2.is_visible():
                                     await el2.click(timeout=800)
                                     closed = True
                             except Exception:
@@ -357,7 +357,7 @@ class MiaoshouExporterComponent(ExportComponent):
         """
         try:
             root = page.locator("[data-field='appOrderStatus']").first
-            if not root or root.count() < 0:
+            if not root or await root.count() < 1:
                 return
             # 步骤2: 打开‘订单状态’下拉
             try:
@@ -394,21 +394,21 @@ class MiaoshouExporterComponent(ExportComponent):
                 for sc in scopes:
                     try:
                         header = sc.locator(".jx-select-dropdown__header .jx-checkbox").first
-                        if header and header.count() >= 1:
+                        if header and await header.count() >= 1:
                             inpt = header.locator(".jx-checkbox__input").first
                             toggler = header.locator(".jx-checkbox__inner").first
                             break
                     except Exception:
                         continue
                 # 兜底:通过“全选”文本反推父级 label
-                if (not header) or (header.count() < 1):
+                if (not header) or (await header.count() < 1):
                     for sc in scopes:
                         try:
                             el = sc.get_by_text("全选", exact=False).first
-                            if el and el.count() >= 1:
+                            if el and await el.count() >= 1:
                                 # 取 label 根并获取 input/inner
                                 label = el.locator("..").locator("label.jx-checkbox").first
-                                if label and label.count() >= 1:
+                                if label and await label.count() >= 1:
                                     header = label
                                     inpt = label.locator(".jx-checkbox__input").first
                                     toggler = label.locator(".jx-checkbox__inner").first
@@ -416,11 +416,11 @@ class MiaoshouExporterComponent(ExportComponent):
                         except Exception:
                             continue
                 # 最终兜底:通过角色定位复选框
-                if (not header) or (header.count() < 1):
+                if (not header) or (await header.count() < 1):
                     for sc in scopes:
                         try:
                             cb = sc.get_by_role("checkbox", name="全选").first
-                            if cb and cb.count() >= 1:
+                            if cb and await cb.count() >= 1:
                                 header = cb
                                 inpt = cb
                                 toggler = cb
@@ -441,9 +441,9 @@ class MiaoshouExporterComponent(ExportComponent):
                         break
                     try:
                         # 优先点击专用 inner;退化为点击文本或 checkbox 本体
-                        if toggler and toggler.count() >= 1:
+                        if toggler and await toggler.count() >= 1:
                             await toggler.click(timeout=1200)
-                        elif header and header.count() >= 1:
+                        elif header and await header.count() >= 1:
                             await header.click(timeout=1200)
                         else:
                             await page.get_by_text("全选", exact=False).first.click(timeout=1200)
@@ -463,7 +463,7 @@ class MiaoshouExporterComponent(ExportComponent):
             for sel in [".jx-select-dropdown", ".jx-select__dropdown", ".jx-popper"]:
                 try:
                     cand = page.locator(sel).last
-                    if cand and cand.count() >= 0:
+                    if cand and await cand.count() >= 1:
                         dropdown = cand
                         break
                 except Exception:
@@ -502,9 +502,9 @@ class MiaoshouExporterComponent(ExportComponent):
                     continue
             # Debug: count checked items
             try:
-                checked = scope.locator(".jx-checkbox__input.is-checked").count()
+                checked = await scope.locator(".jx-checkbox__input.is-checked").count()
                 if checked == 0:
-                    checked = scope.locator("label.jx-checkbox.is-checked, .jx-checkbox.is-checked").count()
+                    checked = await scope.locator("label.jx-checkbox.is-checked, .jx-checkbox.is-checked").count()
                 try:
                     print(f"[MiaoshouExporter] 订单状态勾选数: {checked}")
                 except Exception:
@@ -528,7 +528,7 @@ class MiaoshouExporterComponent(ExportComponent):
         try:
             # Prefer class hook used by Miaoshou page
             btn = page.locator("button.J_queryFormSearch").first
-            if btn and btn.count() >= 0:
+            if btn and await btn.count() >= 1:
                 await btn.click(timeout=1500)
                 return
         except Exception:
@@ -541,9 +541,9 @@ class MiaoshouExporterComponent(ExportComponent):
     async def _get_range_values(self, page: Any) -> tuple[str | None, str | None]:
         try:
             inputs = page.locator(".jx-date-editor--datetimerange input.jx-range-input")
-            if inputs.count() < 2:
+            if await inputs.count() < 2:
                 inputs = page.locator("input.jx-range-input")
-            if inputs.count() < 2:
+            if await inputs.count() < 2:
                 return (None, None)
             s = await inputs.nth(0).input_value(timeout=800)
             e = await inputs.nth(1).input_value(timeout=800)
@@ -569,9 +569,9 @@ class MiaoshouExporterComponent(ExportComponent):
                     pass
                 return
             inputs = page.locator(".jx-date-editor--datetimerange input.jx-range-input")
-            if inputs.count() < 2:
+            if await inputs.count() < 2:
                 inputs = page.locator("input.jx-range-input")
-            if inputs.count() < 2:
+            if await inputs.count() < 2:
                 return
             # start
             st = inputs.nth(0)
@@ -614,7 +614,7 @@ class MiaoshouExporterComponent(ExportComponent):
             btn = None
             for c in candidates:
                 try:
-                    if c and c.count() >= 1:
+                    if c and await c.count() >= 1:
                         btn = c
                         break
                 except Exception:
@@ -679,7 +679,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         # 1) 精确类名命中(你提供的 DOM):li.J_purchaseBillExportAllOrderBill.jx-dropdown-menu__item[role='menuitem']
                         try:
                             item_by_class = sc.locator("li.J_purchaseBillExportAllOrderBill.jx-dropdown-menu__item[role='menuitem'][aria-disabled='false']").first
-                            if item_by_class and item_by_class.count() >= 1:
+                            if item_by_class and await item_by_class.count() >= 1:
                                 try:
                                     print("[MiaoshouExporter] 点击目标(class=J_purchaseBillExportAllOrderBill)...")
                                 except Exception:
@@ -753,7 +753,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 # Try dialog confirm ('导出'/'确定'/'开始导出') immediately after selecting menu item
                                 try:
                                     footer = page.locator('.jx-dialog__footer').last
-                                    if footer and footer.count() >= 1:
+                                    if footer and await footer.count() >= 1:
                                         for _name in ['导出', '确定', '开始导出']:
                                             try:
                                                 with page.context.expect_download(timeout=120000) as dl2:
@@ -774,7 +774,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         # 2) 语义命中:role=menuitem + name
                         try:
                             item_by_role = sc.get_by_role('menuitem', name='导出全部订单').first
-                            if item_by_role and item_by_role.count() >= 1:
+                            if item_by_role and await item_by_role.count() >= 1:
                                 try:
                                     print("[MiaoshouExporter] 点击目标(role=menuitem, name=导出全部订单)...")
                                 except Exception:
@@ -847,7 +847,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 # Try dialog confirm ('导出'/'确定'/'开始导出') immediately after selecting menu item
                                 try:
                                     footer = page.locator('.jx-dialog__footer').last
-                                    if footer and footer.count() >= 1:
+                                    if footer and await footer.count() >= 1:
                                         for btn_name in ['导出', '确定', '开始导出']:
                                             try:
                                                 with page.context.expect_download(timeout=120000) as dl2:
@@ -941,7 +941,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                     # Confirm dialog if presented
                                     try:
                                         footer = page.locator('.jx-dialog__footer').last
-                                        if footer and footer.count() >= 1:
+                                        if footer and await footer.count() >= 1:
                                             for btn_name in ['导出', '确定', '开始导出']:
                                                 try:
                                                     with page.context.expect_download(timeout=120000) as dl2:
@@ -969,13 +969,13 @@ class MiaoshouExporterComponent(ExportComponent):
                 try:
                     if ctrl_id:
                         menu = page.locator(f"ul#" + ctrl_id).first
-                        if (not menu) or menu.count() < 1:
+                        if (not menu) or (await menu.count() < 1):
                             menu = page.locator(f"[id='{ctrl_id}']").first
                 except Exception:
                     menu = None
-                if (not menu) or menu.count() < 1:
+                if (not menu) or (await menu.count() < 1):
                     menu = page.locator("ul.jx-dropdown-menu[role='menu']").last
-                if menu and menu.count() >= 1:
+                if menu and await menu.count() >= 1:
                     try:
                         await menu.scroll_into_view_if_needed(timeout=800)
                     except Exception:
@@ -1037,7 +1037,7 @@ class MiaoshouExporterComponent(ExportComponent):
                     try:
                         # 优先按 class 精确命中(你提供的 DOM)
                         item_by_class = sc.locator("li.J_purchaseBillExportAllOrderBill.jx-dropdown-menu__item[role='menuitem'][aria-disabled='false']").first
-                        if item_by_class and item_by_class.count() >= 1:
+                        if item_by_class and await item_by_class.count() >= 1:
                             try: await item_by_class.scroll_into_view_if_needed(timeout=1200)
                             except Exception: pass
                             try: await item_by_class.hover(timeout=1200)
@@ -1219,9 +1219,9 @@ class MiaoshouExporterComponent(ExportComponent):
                         except Exception:
                             try:
                                 inputs = page.locator(".jx-date-editor--datetimerange input.jx-range-input")
-                                if inputs.count() < 2:
+                                if await inputs.count() < 2:
                                     inputs = page.locator("input.jx-range-input")
-                                if inputs.count() >= 2:
+                                if await inputs.count() >= 2:
                                     for i in (0, 1):
                                         box = inputs.nth(i)
                                         try:
@@ -1288,7 +1288,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         scope = header.locator('..')
                         # A. 就近checkbox by class
                         toggle = scope.locator('.jx-checkbox__input').first
-                        if toggle.count() > 0:
+                        if await toggle.count() > 0:
                             cls = (await toggle.get_attribute('class')) or ''
                             if 'is-checked' not in cls:
                                 await scope.locator('.jx-checkbox__inner').first.click(timeout=3000)
@@ -1303,7 +1303,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         # B. label.pro-checkbox-group-all-select(常见于“其他信息”)
                         container = header.locator('..').locator('..')
                         label = container.locator('label.pro-checkbox-group-all-select').first
-                        if label.count() > 0:
+                        if await label.count() > 0:
                             lcls = (await label.get_attribute('class')) or ''
                             if 'is-checked' not in lcls:
                                 await label.locator('.jx-checkbox__inner').first.click(timeout=3000)
@@ -1320,7 +1320,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             el = scope.get_by_text(selectors.group_check_all_text, exact=False).first
                             box = el.locator('..').locator('.jx-checkbox__input').first
                             ok = False
-                            if box.count() > 0:
+                            if await box.count() > 0:
                                 bcls = (await box.get_attribute('class')) or ''
                                 if 'is-checked' not in bcls:
                                     await el.click(timeout=2000)
@@ -1370,7 +1370,7 @@ class MiaoshouExporterComponent(ExportComponent):
                     with page.context.expect_download(timeout=120000) as dl_early:
                         try:
                             footer = page.locator('.jx-dialog__footer').last
-                            if footer and footer.count() >= 0:
+                            if footer and await footer.count() >= 1:
                                 await footer.get_by_role('button', name='导出').first.click(timeout=1500)
                         except Exception:
                             pass
@@ -1388,7 +1388,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 # Target dialog footer first (most reliable)
                 try:
                     footer = page.locator('.jx-dialog__footer').last
-                    if footer and footer.count() > 0:
+                    if footer and await footer.count() > 0:
                         try:
                             await footer.wait_for(timeout=2000)
                         except Exception:
@@ -1396,7 +1396,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         # a) role-based within footer
                         try:
                             fbtn = footer.get_by_role('button', name='导出').first
-                            if fbtn and fbtn.count() >= 0:
+                            if fbtn and await fbtn.count() >= 1:
                                 try:
                                     await fbtn.scroll_into_view_if_needed(timeout=800)
                                 except Exception:
@@ -1410,7 +1410,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         if not clicked:
                             try:
                                 fbtn2 = footer.locator('button.jx-button--primary').filter(has_text='导出').first
-                                if fbtn2 and fbtn2.count() >= 0:
+                                if fbtn2 and await fbtn2.count() >= 1:
                                     try:
                                         await fbtn2.scroll_into_view_if_needed(timeout=800)
                                     except Exception:
@@ -1424,7 +1424,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         if not clicked:
                             try:
                                 fspan = footer.locator('button:has-text(导出) span').first
-                                if fspan and fspan.count() >= 0:
+                                if fspan and await fspan.count() >= 1:
                                     await fspan.click(timeout=4000)
                                     clicked = True
                                     print("[MiaoshouExporter] 已点击导出按钮(footer span)")
@@ -1444,7 +1444,7 @@ class MiaoshouExporterComponent(ExportComponent):
                     for btn in btn_sels:
                         try:
                             loc = root.locator(btn).first
-                            if loc.count() >= 0:
+                            if await loc.count() >= 1:
                                 try:
                                     await loc.scroll_into_view_if_needed(timeout=800)
                                 except Exception:
@@ -1503,7 +1503,7 @@ class MiaoshouExporterComponent(ExportComponent):
                         with page.context.expect_download(timeout=15000) as dl_info:
                             try:
                                 footer = page.locator('.jx-dialog__footer').last
-                                if footer and footer.count() >= 0:
+                                if footer and await footer.count() >= 1:
                                     await footer.get_by_role('button', name='导出').first.click(timeout=1000)
                             except Exception:
                                 pass
@@ -1680,7 +1680,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             ]
                             for sel in overlay_selectors:
                                 loc = page.locator(sel)
-                                if loc and loc.count() >= 1 and await loc.first.is_visible():
+                                if loc and await loc.count() >= 1 and await loc.first.is_visible():
                                     triggered_processing = True
                                     break
                         except Exception:
@@ -1727,7 +1727,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 if download is None:
                     try:
                         footer = page.locator('.jx-dialog__footer').last
-                        if footer and footer.count() >= 1:
+                        if footer and await footer.count() >= 1:
                             for btn_name in ['导出', '确定', '开始导出']:
                                 try:
                                     with page.context.expect_download(timeout=120000) as dl_conf:
@@ -1841,7 +1841,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 tmp_name = f"{_stem}{_suffix}"
                 tmp_path = out_root / tmp_name
                 try:
-                    download.save_as(str(tmp_path))
+                    await download.save_as(str(tmp_path))
                 except Exception:
                     # In rare cases, get temp path and copy
                     try:
@@ -1874,7 +1874,7 @@ class MiaoshouExporterComponent(ExportComponent):
                     tmp_name = f"{_stem}{_suffix}"
                     tmp_path = out_root / tmp_name
                     try:
-                        download.save_as(str(tmp_path))
+                        await download.save_as(str(tmp_path))
                     except Exception:
                         try:
                             p = download.path()

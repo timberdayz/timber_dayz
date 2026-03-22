@@ -56,7 +56,7 @@ CANONICAL_COMPONENT_FILES = {
         "login.py",
         "navigation.py",
         "date_picker.py",
-        "shop_selector.py",
+        "shop_switch.py",
         "export.py",
     },
     "miaoshou": {
@@ -956,7 +956,7 @@ async def batch_register_python_components(
                             "shop_selector" in py_file.stem
                             or "shop_switch" in py_file.stem
                         ):
-                            component_type = "shop_selector"
+                            component_type = "shop_switch"
                         elif "overlay_guard" in py_file.stem:
                             component_type = "overlay_guard"
                         elif "metrics_selector" in py_file.stem:

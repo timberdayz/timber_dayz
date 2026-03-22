@@ -41,7 +41,7 @@
 | `tiktok/login` | `modules/platforms/tiktok/components/login.py` | 成熟 | 已覆盖手机号登录、2FA、信任设备、复杂分支 |
 | `tiktok/navigation` | `modules/platforms/tiktok/components/navigation.py` | 成熟 | 已覆盖 deep-link、空白页 watchdog、自愈刷新 |
 | `tiktok/date_picker` | `modules/platforms/tiktok/components/date_picker.py` | 成熟 | 已覆盖 iframe、递归 roots、服务页特殊面板 |
-| `tiktok/shop_selector` | `modules/platforms/tiktok/components/shop_selector.py` | 可用 | 现役适配层会调用，但包含交互式 fallback，后续应继续规范化 |
+| `tiktok/shop_switch` | `modules/platforms/tiktok/components/shop_switch.py` | 可用 | canonical 入口；当前内部仍委托 `shop_selector.py` 实现，后续应继续规范化 |
 | `tiktok/export` | `modules/platforms/tiktok/components/export.py` | 成熟 | 已覆盖按钮禁用、tab 切换、确认按钮、全局下载监听 |
 
 ### 排除出 canonical 的文件
@@ -95,7 +95,7 @@
   - `orders_export.py`
   - `finance_export.py`
 - TikTok：
-  - `shop_selector.py`
+  - `shop_switch.py`
 - 妙手：
   - `login.py`
   - `navigation.py`

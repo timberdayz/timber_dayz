@@ -7,6 +7,13 @@ from modules.components.metrics_selector.base import MetricsSelectorComponent, M
 
 
 class ShopeeMetricsSelector(MetricsSelectorComponent):
+    """Non-canonical placeholder component.
+
+    Kept only for compatibility with older adapter paths. Metrics selection is
+    not part of the current canonical Shopee workflow and should not be used as
+    a default maintenance target.
+    """
+
     # Component metadata (v4.8.0)
     platform = "shopee"
     component_type = "metrics_selector"
@@ -16,6 +23,8 @@ class ShopeeMetricsSelector(MetricsSelectorComponent):
         super().__init__(ctx)
 
     async def run(self, page: Any, metrics: Sequence[str]) -> MetricsSelectResult:  # type: ignore[override]
-        # Skeleton only: will implement multi-selector interaction
-        return MetricsSelectResult(success=True, selected=tuple(metrics), message="skeleton")
-
+        return MetricsSelectResult(
+            success=False,
+            selected=tuple(metrics),
+            message="metrics selector is not supported in the canonical Shopee workflow",
+        )

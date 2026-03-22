@@ -47,10 +47,9 @@ class ShopeeAdapter(PlatformAdapter):
 
     def capabilities(self) -> dict[str, dict[str, bool]]:  # type: ignore[override]
         return {
-            "products": {"date_picker": True, "export": True, "metrics": True},
+            "products": {"date_picker": True, "export": True, "metrics": False},
             "analytics": {"date_picker": True, "export": True, "metrics": False},
             "services": {"date_picker": False, "export": True, "metrics": False},
             "orders": {"date_picker": False, "export": True, "metrics": False},  # deprecated soon
             "finance": {"date_picker": False, "export": True, "metrics": False},
         }
-

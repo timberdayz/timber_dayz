@@ -52,7 +52,7 @@
 - `login.py`
 - `navigation.py`
 - `date_picker.py`
-- `shop_selector.py` / `shop_switch.py`
+- `shop_switch.py`
 - `orders_export.py`
 - `products_export.py`
 - `services_export.py`
@@ -115,7 +115,7 @@
 
 常见需要补的前置：
 - `login`
-- `shop_selector`
+- `shop_switch`
 - `navigation`
 - `date_picker`
 
@@ -184,7 +184,7 @@
 ### 最省时间的默认策略
 
 - Shopee：先补 `login`，再看是否要补 `navigation/date_picker`
-- TikTok：先补 `login + shop_selector`，再看是否要补 `navigation/date_picker`
+- TikTok：先补 `login + shop_switch`，再看是否要补 `navigation/date_picker`
 - 妙手：先补 `login + navigation`，再看是否要补 `date_picker`
 
 然后统一复用成熟 `export`。

@@ -28,6 +28,14 @@ class ShopeeProductsExport(ExportComponent):
         super().__init__(ctx)
         self.sel = selectors or ProductsSelectors()
 
+    @staticmethod
+    def _build_success_result(message: str, file_path: str) -> ExportResult:
+        return ExportResult(success=True, message=message, file_path=file_path)
+
+    @staticmethod
+    def _build_error_result(message: str) -> ExportResult:
+        return ExportResult(success=False, message=message, file_path=None)
+
     def _write_manifest(self, target: Path, cfg: dict, account_label: str, shop_name: str) -> None:
         """
         在导出文件旁生成元数据清单(.json),与服务表现保持一致字段
@@ -51,6 +59,24 @@ class ShopeeProductsExport(ExportComponent):
             manifest_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception:
             pass
+
+    @staticmethod
+    def _row_is_processing(row_text: str) -> bool:
+        text_lower = (row_text or "").lower()
+        indicators = [
+            "执行中",
+            "生成中",
+            "队列中",
+            "处理中",
+            "导出中",
+            "进行中",
+            "processing",
+            "generating",
+            "queued",
+            "exporting",
+            "in progress",
+        ]
+        return any(k in text_lower for k in indicators)
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
@@ -130,7 +156,7 @@ class ShopeeProductsExport(ExportComponent):
                 except Exception:
                     continue
             if not clicked:
-                return ExportResult(False, None, "未找到导出按钮")
+                return self._build_error_result("未找到导出按钮")
 
             await page.wait_for_timeout(1000)
 
@@ -205,7 +231,7 @@ class ShopeeProductsExport(ExportComponent):
                     if self.logger:
                         self.logger.info(f"下载完成(UI): {target}")
                     print(f"\n[OK] 导出成功: {target}")
-                    return ExportResult(True, "下载完成(UI)", None, str(target))
+                    return self._build_success_result("下载完成(UI)", str(target))
                 except Exception as e:
                     # UI监听未命中 -> 文件系统兜底
                     if self.logger:
@@ -259,7 +285,7 @@ class ShopeeProductsExport(ExportComponent):
                                 pass
                             if self.logger:
                                 self.logger.info(f"下载完成(UI-兜底): {target}")
-                            return ExportResult(True, "下载完成(UI-兜底)", None, str(target))
+                            return self._build_success_result("下载完成(UI-兜底)", str(target))
                     except Exception:
                         continue
             except Exception:
@@ -298,17 +324,17 @@ class ShopeeProductsExport(ExportComponent):
                             pass
                         if self.logger:
                             self.logger.info(f"下载完成(目录监测): {target}")
-                        return ExportResult(True, "下载完成(目录监测)", None, str(target))
+                        return self._build_success_result("下载完成(目录监测)", str(target))
                 except Exception:
                     pass
                 await page.wait_for_timeout(int(max(500, retry_interval * 1000)))
 
-            return ExportResult(False, "未捕获到下载事件,且未检测到新下载文件")
+            return self._build_error_result("未捕获到下载事件,且未检测到新下载文件")
 
         except Exception as e:
             if self.logger:
                 self.logger.error(f"[ShopeeProductsExport] 失败: {e}")
-            return ExportResult(False, None, str(e))
+            return self._build_error_result(str(e))
 
 
     async def _maybe_generate_report(self, page: Any) -> None:
@@ -424,8 +450,7 @@ class ShopeeProductsExport(ExportComponent):
                             row_text = await latest_row.inner_text(timeout=1000)
                         except Exception:
                             row_text = ""
-                        text_lower = (row_text or "").lower()
-                        if any(k in text_lower for k in ["进行中", "生成中", "processing", "generating"]):
+                        if self._row_is_processing(row_text):
                             await page.wait_for_timeout(int(min(400, max(200, retry_interval * 1000))))
                             continue
 

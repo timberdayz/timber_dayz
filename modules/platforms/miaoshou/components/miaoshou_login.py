@@ -27,6 +27,16 @@ class MiaoshouMiaoshouLogin(LoginComponent):
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
 
+    def _login_looks_successful(self, url: str) -> bool:
+        cur = str(url or "").lower()
+        if not cur:
+            return False
+        if any(marker in cur for marker in ("/welcome", "/dashboard")):
+            return True
+        if any(marker in cur for marker in ("/login", "account/login", "redirect=%2fwelcome")):
+            return False
+        return "miaoshou.com" in cur and "login" not in cur
+
     async def run(self, page: Any) -> LoginResult:
         acc = self.ctx.account or {}
         config = self.ctx.config or {}
@@ -43,7 +53,7 @@ class MiaoshouMiaoshouLogin(LoginComponent):
                     await page.locator("button.login, button.login.login-button, button:has-text('立即登录'), button.login").first.click(timeout=3000)
                     await asyncio.sleep(2.0)
                     cur = str(getattr(page, "url", ""))
-                    if "/welcome" in cur or "/dashboard" in cur or "login" not in cur.lower():
+                    if self._login_looks_successful(cur):
                         return LoginResult(success=True, message="ok")
                     # 若验证码提交后仍停留在登录页，则视为失败，避免继续执行主流程再次触发验证码
                     return LoginResult(success=False, message="验证码提交后登录未跳转或仍在登录页")
@@ -105,5 +115,8 @@ class MiaoshouMiaoshouLogin(LoginComponent):
         await expect(_el_6).to_be_visible(timeout=10000)
         await _el_6.click(timeout=10000)
 
-        # TODO: 根据实际成功条件校验 (e.g. URL / element)
-        return LoginResult(success=True, message="ok")
+        await asyncio.sleep(2.0)
+        cur = str(getattr(page, "url", ""))
+        if self._login_looks_successful(cur):
+            return LoginResult(success=True, message="ok")
+        return LoginResult(success=False, message="登录后仍停留在登录页或未进入欢迎页")

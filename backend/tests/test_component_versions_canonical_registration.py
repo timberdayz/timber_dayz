@@ -90,6 +90,40 @@ async def test_batch_register_only_registers_canonical_components(
 
 
 @pytest.mark.asyncio
+async def test_batch_register_uses_shop_switch_as_tiktok_canonical_entry(
+    component_version_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    project_root = tmp_path
+    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
+    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
+    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+
+    tiktok_dir = project_root / "modules" / "platforms" / "tiktok" / "components"
+    _write_component(tiktok_dir / "login.py", "TiktokLogin", "login")
+    _write_component(tiktok_dir / "shop_switch.py", "TiktokShopSwitch", "shop_switch")
+    _write_component(tiktok_dir / "shop_selector.py", "TiktokShopSelector", "shop_selector")
+
+    response = await batch_register_python_components(
+        request=BatchRegisterRequest(platform="tiktok"),
+        db=component_version_session,
+        http_request=None,
+    )
+
+    result = await component_version_session.execute(select(ComponentVersion))
+    rows = result.scalars().all()
+    names = sorted(v.component_name for v in rows)
+
+    assert response.success is True
+    assert names == [
+        "tiktok/login",
+        "tiktok/shop_switch",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_list_versions_only_returns_canonical_components(
     component_version_session: AsyncSession,
 ):

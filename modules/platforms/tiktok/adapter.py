@@ -11,6 +11,7 @@ from modules.platforms.tiktok.components.navigation import TiktokNavigation
 from modules.platforms.tiktok.components.date_picker import TiktokDatePicker
 from modules.platforms.tiktok.components.export import TiktokExporterComponent
 from modules.platforms.tiktok.components.shop_selector import TiktokShopSelector
+from modules.platforms.tiktok.components.shop_switch import TiktokShopSwitch
 
 
 class TiktokAdapter(PlatformAdapter):
@@ -28,8 +29,12 @@ class TiktokAdapter(PlatformAdapter):
     def exporter(self) -> TiktokExporterComponent:  # type: ignore[override]
         return TiktokExporterComponent(self.ctx)
 
+    def shop_switch(self) -> TiktokShopSwitch:
+        return TiktokShopSwitch(self.ctx)
+
     def shop_selector(self) -> TiktokShopSelector:
-        return TiktokShopSelector(self.ctx)
+        # compatibility alias; canonical entry is shop_switch()
+        return self.shop_switch()
 
     def capabilities(self) -> dict[str, dict[str, bool]]:  # type: ignore[override]
         return {

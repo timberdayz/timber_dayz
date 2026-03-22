@@ -49,6 +49,14 @@ class ShopeeServicesExport(ExportComponent):
         super().__init__(ctx)
         self.sel = selectors or ServicesSelectors()
 
+    @staticmethod
+    def _build_success_result(message: str, file_path: Optional[str] = None) -> ExportResult:
+        return ExportResult(success=True, message=message, file_path=file_path)
+
+    @staticmethod
+    def _build_error_result(message: str) -> ExportResult:
+        return ExportResult(success=False, message=message, file_path=None)
+
     # --- Capability guards -------------------------------------------------
     async def _is_sip_shop(self, page) -> bool:
         """判断是否为 SIP 附属店铺(保守、避免误杀)。
@@ -743,17 +751,17 @@ class ShopeeServicesExport(ExportComponent):
                     failures.append(spec.key)
 
             if successes and not failures:
-                return ExportResult(True, "全部成功(UI)", None, str(successes[-1]))
+                return self._build_success_result("全部成功(UI)", str(successes[-1]))
             if successes and failures:
-                return ExportResult(True, f"部分成功,失败: {','.join(failures)}", None, str(successes[-1]))
+                return self._build_success_result(f"部分成功,失败: {','.join(failures)}", str(successes[-1]))
             if (not successes) and (not failures) and skipped:
                 # 典型场景:SIP 店铺不提供服务表现 -> 全部跳过
-                return ExportResult(True, f"不适用(已跳过): {','.join(skipped)}")
-            return ExportResult(False, "services 全部导出失败")
+                return self._build_success_result(f"不适用(已跳过): {','.join(skipped)}")
+            return self._build_error_result("services 全部导出失败")
         except Exception as e:
             if self.logger:
                 self.logger.error(f"[ShopeeServicesExport] 失败: {e}")
-            return ExportResult(False, str(e))
+            return self._build_error_result(str(e))
 
 
 
@@ -800,6 +808,18 @@ class ShopeeServicesExport(ExportComponent):
             # 元数据写入失败不影响主流程
             pass
 
+    @staticmethod
+    def _row_matches_subtype(row_text: str, subtype: str) -> bool:
+        text = (row_text or "").lower()
+        subtype = (subtype or "").lower().strip()
+        if not subtype:
+            return True
+        if subtype == "ai_assistant":
+            return any(k in text for k in ["ai助手", "ai 助手", "chatbot", "assistant", "智能客服"])
+        if subtype == "agent":
+            return any(k in text for k in ["人工聊天", "人工客服", "agent", "chat agent"])
+        return True
+
     async def _wait_for_latest_export_ready(self, page, subtype: str, timeout: Optional[int] = None):
         """等待最新导出记录变为可下载状态,避免点击到旧记录。返回 Locator 或 False。"""
         try:
@@ -819,7 +839,7 @@ class ShopeeServicesExport(ExportComponent):
             # 快速路径基础:记录当前页面“下载”按钮数量,用于检测新增记录出现
             download_buttons_all = page.locator('button:has-text("下载"), a:has-text("下载"), button:has-text("Download")')
             try:
-                base_count = download_buttons_all.count()
+                base_count = await download_buttons_all.count()
             except Exception:
                 base_count = 0
             last_probe = start_time.timestamp()
@@ -848,7 +868,7 @@ class ShopeeServicesExport(ExportComponent):
                     for selector in export_list_selectors:
                         try:
                             rows = page.locator(selector)
-                            if rows.count() > 0:
+                            if await rows.count() > 0:
                                 # 取第一行作为最新记录
                                 latest_row = rows.first
                                 if self.logger:
@@ -864,7 +884,7 @@ class ShopeeServicesExport(ExportComponent):
                         try:
                             # 查找包含"下载"按钮的任何元素
                             download_buttons = page.locator('button:has-text("下载"), a:has-text("下载")')
-                            if download_buttons.count() > 0:
+                            if await download_buttons.count() > 0:
                                 first_btn = download_buttons.first
                                 # 尝试找到包含此按钮的行或容器(不做全局立即点击,避免点到历史记录)
                                 possible_containers = ['tr', 'div[class*="item"]', 'div[class*="row"]', 'li']
@@ -883,20 +903,20 @@ class ShopeeServicesExport(ExportComponent):
 
                     # 快速路径:监控“下载”按钮数量增加 -> 新记录出现即返回顶部下载按钮
                     try:
-                        cur_count = download_buttons_all.count()
+                        cur_count = await download_buttons_all.count()
                     except Exception:
                         cur_count = base_count
                     if cur_count > base_count:
                         base_count = cur_count
                         try:
                             btn_top = page.locator('table tbody tr:first-child button:has-text("下载"), tbody tr:first-child button:has-text("下载"), .latest-report .report-item:first-child :is(button,a):has-text("下载")')
-                            if btn_top.count() > 0 and await btn_top.first.is_visible() and await btn_top.first.is_enabled():
+                            if await btn_top.count() > 0 and await btn_top.first.is_visible() and await btn_top.first.is_enabled():
                                 if self.logger:
                                     self.logger.info("[ShopeeServicesExport] 发现新增下载记录,优先点击最新一条")
                                 return btn_top.first
                         except Exception:
                             pass
-                        if download_buttons_all.count() > 0:
+                        if await download_buttons_all.count() > 0:
                             return download_buttons_all.first
 
                     # 心跳探测:每 3s 再尝试一次顶部“下载”
@@ -905,15 +925,18 @@ class ShopeeServicesExport(ExportComponent):
                         last_probe = now_ts
                         try:
                             btn_top = page.locator('table tbody tr:first-child button:has-text("下载"), tbody tr:first-child button:has-text("下载"), .latest-report .report-item:first-child :is(button,a):has-text("下载")')
-                            if btn_top.count() > 0 and await btn_top.first.is_visible() and await btn_top.first.is_enabled():
+                            if await btn_top.count() > 0 and await btn_top.first.is_visible() and await btn_top.first.is_enabled():
                                 return btn_top.first
                         except Exception:
                             pass
 
 
                     if latest_row:
-                        # 检查状态文本(从配置文件获取状态指示词)
+                        # 检查记录文本与 subtype 是否匹配
                         row_text = (await latest_row.text_content()) or ""
+                        if not self._row_matches_subtype(row_text, subtype):
+                            await page.wait_for_timeout(250)
+                            continue
                         status_indicators = get_config_value('data_collection', 'export_detection.processing_indicators', [
                             "执行中", "生成中", "队列中", "处理中", "导出中", "进行中",
                             "processing", "generating", "queued", "exporting", "in progress"
@@ -936,7 +959,7 @@ class ShopeeServicesExport(ExportComponent):
                             await download_btn.first.wait_for(state='visible', timeout=min(1500, remaining_ms))
                         except Exception:
                             pass
-                        if download_btn.count() > 0:
+                        if await download_btn.count() > 0:
                             # 进一步检查按钮是否可用(非禁用状态)
                             try:
                                 first_btn = download_btn.first
@@ -1220,7 +1243,7 @@ class ShopeeServicesExport(ExportComponent):
                     el = page.locator(sel).first
                     if el.count() > 0 and await el.is_visible():
                         await el.click()
-                        await await page.wait_for_timeout(250)
+                        await page.wait_for_timeout(250)
                         opened = True
                         last = sel
                         break
@@ -1317,7 +1340,7 @@ class ShopeeServicesExport(ExportComponent):
     async def _close_notification_modal(self, page) -> None:
         """尝试关闭常见的通知/公告弹窗,避免遮挡按钮。"""
         try:
-            await await page.wait_for_timeout(300)
+            await page.wait_for_timeout(300)
             close_selectors = [
                 '.eds-modal__close', '.modal-close', '.close-btn', '.ant-modal-close', '.el-dialog__close',
                 'button[aria-label="Close"]', 'button[aria-label="关闭"]',
@@ -1380,4 +1403,3 @@ class ShopeeServicesExport(ExportComponent):
         if shop_id:
             return f"{base}{path}?cnsc_shop_id={shop_id}"
         return f"{base}{path}"
-

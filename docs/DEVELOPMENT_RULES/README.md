@@ -26,6 +26,10 @@ Use this directory for deep-dive references and templates. Do not treat it as th
 | `DATA_GOVERNANCE.md` | Data classification and sensitive-data handling |
 | `FRONTEND_CODE_PATTERNS.md` | Vue 3 + Element Plus frontend patterns |
 
+## Current Status
+
+- Current engineering state summary: [`docs/guides/ENGINEERING_STATUS.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/ENGINEERING_STATUS.md)
+
 ## Notes
 
 - When detailed docs conflict with active skills, prefer skills unless the difference is a repository-specific constraint recorded in `.cursorrules`.

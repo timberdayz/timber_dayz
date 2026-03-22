@@ -84,7 +84,9 @@ class TiktokExporterComponent(ExportComponent):
                 "account_label": account_label,
                 "shop_name": shop_name,
                 "shop_id": (self.ctx.config or {}).get("shop_id") or (self.ctx.account or {}).get("shop_id"),
-                "region": (self.ctx.account or {}).get("shop_region") or (self.ctx.account or {}).get("region"),
+                "region": (self.ctx.config or {}).get("shop_region")
+                or (self.ctx.account or {}).get("shop_region")
+                or (self.ctx.account or {}).get("region"),
                 "data_type": data_type,
                 "granularity": (cfg or {}).get("granularity"),
                 "start_date": (cfg or {}).get("start_date"),
@@ -97,6 +99,17 @@ class TiktokExporterComponent(ExportComponent):
             )
         except Exception:
             pass
+
+    @staticmethod
+    def _infer_data_type(url: str, products_default: str = "products") -> str:
+        cur = str(url or "")
+        if "/product-analysis" in cur:
+            return products_default
+        if "/data-overview" in cur:
+            return "analytics"
+        if "/service-analytics" in cur:
+            return "services"
+        return "unknown"
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         """Click "导出数据/Export" and capture download on current TikTok Compass page.
@@ -335,14 +348,7 @@ class TiktokExporterComponent(ExportComponent):
 
             # Infer data_type from URL
             url = str(getattr(page, 'url', ''))
-            if "/product-analysis" in url:
-                data_type = getattr(products_sel, 'data_type_dir', 'products')
-            elif "/data-overview" in url:
-                data_type = "traffic"
-            elif "/service-analytics" in url:
-                data_type = "services"
-            else:
-                data_type = "unknown"
+            data_type = self._infer_data_type(url, getattr(products_sel, 'data_type_dir', 'products'))
 
             # Compute output dir
             cfg = self.ctx.config or {}

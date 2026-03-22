@@ -52,7 +52,7 @@
 - `modules/platforms/tiktok/components/date_picker.py`
 - `modules/platforms/tiktok/components/login.py`
 - `modules/platforms/tiktok/components/navigation.py`
-- `modules/platforms/tiktok/components/shop_selector.py`
+- `modules/platforms/tiktok/components/shop_switch.py`
 
 ### 复杂场景重点
 - 导出按钮可见但禁用

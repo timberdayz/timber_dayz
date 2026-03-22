@@ -28,6 +28,14 @@ class ShopeeAnalyticsExport(ExportComponent):
         super().__init__(ctx)
         self.sel = selectors or AnalyticsSelectors()
 
+    @staticmethod
+    def _build_success_result(message: str, file_path: str) -> ExportResult:
+        return ExportResult(success=True, message=message, file_path=file_path)
+
+    @staticmethod
+    def _build_error_result(message: str) -> ExportResult:
+        return ExportResult(success=False, message=message, file_path=None)
+
     def _write_manifest(self, target: Path, cfg: dict, account_label: str, shop_name: str) -> None:
         """在导出文件旁生成元数据清单(.json),与服务表现保持一致字段"""
         try:
@@ -209,7 +217,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                             self.logger.info(f"[ShopeeAnalyticsExport] 已保存调试截图: {screenshot_path}")
                         except Exception:
                             pass
-                    return ExportResult(False, "未找到导出按钮")
+                    return self._build_error_result("未找到导出按钮")
 
             # 等待导出处理,并检测下载完成
             if self.logger:
@@ -403,7 +411,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                 if self.logger:
                     self.logger.info(f"下载完成(UI): {target}")
                 print(f"\n[OK] 导出成功: {target}")
-                return ExportResult(True, "下载完成(UI)", None, str(target))
+                return self._build_success_result("下载完成(UI)", str(target))
             elif downloaded_file:
                 try:
                     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -434,7 +442,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                     if self.logger:
                         self.logger.info(f"下载完成(目录即时检测): {target}")
                     print(f"\n[OK] 导出成功: {target}")
-                    return ExportResult(True, "下载完成(目录即时检测)", None, str(target))
+                    return self._build_success_result("下载完成(目录即时检测)", str(target))
                 except Exception:
                     pass
             else:
@@ -490,14 +498,14 @@ class ShopeeAnalyticsExport(ExportComponent):
                         pass
                     if self.logger:
                         self.logger.info(f"下载完成(目录监测): {target}")
-                    return ExportResult(True, "下载完成(目录监测)", None, str(target))
+                    return self._build_success_result("下载完成(目录监测)", str(target))
 
-            return ExportResult(False, "未捕获到下载事件,且未检测到新下载文件")
+            return self._build_error_result("未捕获到下载事件,且未检测到新下载文件")
 
         except Exception as e:
             if self.logger:
                 self.logger.error(f"[ShopeeAnalyticsExport] 失败: {e}")
-            return ExportResult(False, str(e))
+            return self._build_error_result(str(e))
 
 
     async def _maybe_generate_report(self, page) -> bool:
@@ -548,7 +556,7 @@ class ShopeeAnalyticsExport(ExportComponent):
             # 记录初始“下载”按钮数量,用于增量检测
             download_buttons_all = page.locator('button:has-text("下载"), a:has-text("下载"), button:has-text("Download")')
             try:
-                base_count = download_buttons_all.count()
+                base_count = await download_buttons_all.count()
             except Exception:
                 base_count = 0
 
@@ -556,7 +564,7 @@ class ShopeeAnalyticsExport(ExportComponent):
                 try:
                     # 若出现新增“下载”按钮,优先取第一条
                     try:
-                        cur_count = download_buttons_all.count()
+                        cur_count = await download_buttons_all.count()
                     except Exception:
                         cur_count = base_count
                     if cur_count > base_count:
