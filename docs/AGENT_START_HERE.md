@@ -1,5 +1,18 @@
 # Agent快速上手指南 - v4.12.2
 
+## Current Dashboard Architecture
+
+- PostgreSQL Dashboard is the primary architecture for current dashboard work.
+- Current flow: `b_class raw -> semantic -> mart -> api -> backend -> frontend`.
+- Use `USE_POSTGRESQL_DASHBOARD_ROUTER=true` when validating the new dashboard path.
+- Metabase is now a legacy fallback/debug path only.
+- Do not add new dashboard requirements by extending `dashboard_api.py` + `MetabaseQuestionService`.
+
+## Legacy Note
+
+- This file still contains historical DSS/Metabase guidance below.
+- When historical sections conflict with the PostgreSQL Dashboard design above, follow the PostgreSQL-first design.
+
 **最后更新**: 2025-11-18  
 **系统版本**: v4.12.2  
 **架构状态**: ✅ 100% SSOT合规  

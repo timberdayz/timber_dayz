@@ -106,6 +106,12 @@ logger = get_logger(__name__)
 # 获取配置
 settings = get_settings()
 
+_TRUE_VALUES = ("1", "true", "yes", "on")
+USE_POSTGRESQL_DASHBOARD_ROUTER = os.getenv(
+    "USE_POSTGRESQL_DASHBOARD_ROUTER", ""
+).lower() in _TRUE_VALUES
+ENABLE_METABASE_PROXY = os.getenv("ENABLE_METABASE_PROXY", "").lower() in _TRUE_VALUES
+
 # 安全认证
 security = HTTPBearer()
 
@@ -258,7 +264,10 @@ async def lifespan(app: FastAPI):
                 app.state.cache_service = cache_service
                 logger.info("[OK] 统一缓存服务已启用")
                 # [*] 4c8g 单机优化: 可选启动后缓存预热（不阻塞启动）
-                if os.getenv("METABASE_CACHE_WARMUP_ENABLED", "").lower() in ("true", "1", "yes"):
+                if (
+                    not USE_POSTGRESQL_DASHBOARD_ROUTER
+                    and os.getenv("METABASE_CACHE_WARMUP_ENABLED", "").lower() in ("true", "1", "yes")
+                ):
                     delay_sec = int(os.getenv("METABASE_CACHE_WARMUP_DELAY_SECONDS", "10"))
                     async def _warmup_after_startup():
                         await asyncio.sleep(delay_sec)
@@ -273,6 +282,10 @@ async def lifespan(app: FastAPI):
                             )
                     asyncio.create_task(_warmup_after_startup())
                     logger.info(f"[CacheWarmup] 已调度启动后预热(延迟 {delay_sec}s)")
+                elif USE_POSTGRESQL_DASHBOARD_ROUTER:
+                    logger.info(
+                        "[CacheWarmup] skip legacy Metabase cache warmup because PostgreSQL dashboard router is enabled"
+                    )
         except Exception as redis_err:
             logger.debug(f"[SKIP] Redis缓存未启用: {redis_err}")
         
@@ -662,7 +675,7 @@ async def root():
 # 注册路由(全部启用 - v4.1.0优化版)
 
 # [OK] v4.6.0 DSS架构重构:dashboard_api已恢复,通过Metabase Question查询提供数据
-if os.getenv("USE_POSTGRESQL_DASHBOARD_ROUTER", "").lower() in ("1", "true", "yes"):
+if USE_POSTGRESQL_DASHBOARD_ROUTER:
     logger.info("Dashboard router source: PostgreSQL")
     app.include_router(
         dashboard_api_postgresql.router,
@@ -804,12 +817,16 @@ app.include_router(
 )
 
 # ============================================================================
-# Phase 2: Metabase代理API
+# Legacy Metabase proxy API
 # ============================================================================
-app.include_router(
-    metabase_proxy.router,
-    tags=["Metabase集成", "BI Layer"]
-)
+if ENABLE_METABASE_PROXY:
+    logger.info("Metabase proxy route enabled")
+    app.include_router(
+        metabase_proxy.router,
+        tags=["Metabase集成", "BI Layer"]
+    )
+else:
+    logger.info("Metabase proxy route disabled")
 
 # ============================================================================
 # Phase 3: HR管理API(员工管理、员工目标、考勤记录、绩效查询)

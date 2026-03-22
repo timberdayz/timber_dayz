@@ -1,7 +1,8 @@
 """
-Dashboard API路由
-通过Metabase Question查询提供业务概览数据
-[add-dashboard-redis-cache-performance] Redis 缓存支持
+Legacy Dashboard API router.
+
+This file keeps the Metabase compatibility path alive for fallback only.
+The PostgreSQL-first dashboard path lives in dashboard_api_postgresql.py.
 """
 
 import json
