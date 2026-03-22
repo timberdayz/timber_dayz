@@ -4,8 +4,8 @@ This file gives repository context for AI coding agents.
 
 ## Project Overview
 
-- Project: 西虹 ERP
-- Version: `v4.20.0`
+- Project: 瑗胯櫣 ERP
+- Release model: tag-driven (`vX.Y.Z`); do not treat this file as the current release version source of truth
 - Architecture: SSOT + Contract-First + async-first backend
 - Backend: FastAPI + SQLAlchemy async + PostgreSQL
 - Frontend: Vue 3 + Element Plus + Pinia + Vite

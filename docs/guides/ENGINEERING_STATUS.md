@@ -5,7 +5,8 @@
 - Repository workflow is `skill-first`
 - Active flow is `superpowers` + `planning-with-files`
 - `openspec/` is historical archive only
-- `main`, `origin/main`, and `cnb/main` are currently aligned when release work is complete
+- Normal maintenance goal is to keep `main`, `origin/main`, and `cnb/main` aligned after synchronization work is complete
+- Short-lived drift can still happen during active work or when only release tags are pushed
 
 ## Active Source Of Truth
 
