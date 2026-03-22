@@ -197,6 +197,19 @@ def test_rank_traffic_rows_by_visitors():
     assert result[0]["rank"] == 1
 
 
+def test_rank_traffic_rows_by_page_views():
+    result = rank_traffic_rows(
+        [
+            {"name": "shop-b", "visitor_count": 50, "page_views": 180},
+            {"name": "shop-a", "visitor_count": 100, "page_views": 120},
+        ],
+        dimension="pv",
+    )
+
+    assert result[0]["name"] == "shop-b"
+    assert result[0]["rank"] == 1
+
+
 @pytest.mark.pg_only
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_reads_real_kpi_chain(monkeypatch):

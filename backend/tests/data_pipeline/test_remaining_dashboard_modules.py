@@ -38,6 +38,8 @@ def test_business_overview_traffic_ranking_module_sql_asset():
             "conversion_rate",
         ),
     )
+    sql_text = Path("sql/api_modules/business_overview_traffic_ranking_module.sql").read_text(encoding="utf-8")
+    assert "0::numeric AS page_views" not in sql_text
 
 
 def test_business_overview_operational_metrics_module_sql_asset():

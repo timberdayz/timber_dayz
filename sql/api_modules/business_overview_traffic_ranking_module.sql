@@ -8,7 +8,7 @@ WITH daily AS (
         platform_code,
         shop_id,
         visitor_count,
-        0::numeric AS page_views,
+        page_views,
         conversion_rate
     FROM mart.shop_day_kpi
 ),
@@ -19,7 +19,7 @@ weekly AS (
         platform_code,
         shop_id,
         visitor_count,
-        0::numeric AS page_views,
+        page_views,
         conversion_rate
     FROM mart.shop_week_kpi
 ),
@@ -30,7 +30,7 @@ monthly AS (
         platform_code,
         shop_id,
         visitor_count,
-        0::numeric AS page_views,
+        page_views,
         conversion_rate
     FROM mart.shop_month_kpi
 )
