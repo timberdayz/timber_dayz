@@ -1,6 +1,8 @@
 """
-Metabase代理API
-用于前端与Metabase交互的代理层
+Legacy Metabase proxy API.
+
+Retained for fallback/debug only while PostgreSQL Dashboard is the primary
+online query path.
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -185,4 +187,3 @@ async def refresh_metabase_views():
     except Exception as e:
         logger.error(f"刷新物化视图失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"刷新物化视图失败: {str(e)}")
-

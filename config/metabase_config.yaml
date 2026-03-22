@@ -1,5 +1,5 @@
 # =====================================================
-# Metabase 配置清单
+# Metabase 配置清单 (legacy fallback/debug only)
 # =====================================================
 # 用途：定义所有 Models 和 Questions 的配置
 # 使用方式：scripts/init_metabase.py 读取此文件自动创建/更新 Metabase 配置

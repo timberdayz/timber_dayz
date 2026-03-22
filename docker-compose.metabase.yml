@@ -1,5 +1,5 @@
 # =====================================================
-# Metabase BI工具 - Docker Compose配置
+# Metabase BI工具 - Docker Compose配置 (legacy fallback/debug only)
 # =====================================================
 # 用于DSS架构的BI层
 # 使用方式: docker-compose -f docker-compose.metabase.yml up -d
