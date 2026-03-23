@@ -1,5 +1,12 @@
 # 西虹ERP系统
 
+## Current Dashboard Architecture
+
+- PostgreSQL Dashboard is now the primary online query path.
+- Current flow: `b_class raw -> semantic -> mart -> api -> backend -> frontend`.
+- Enable the new router with `USE_POSTGRESQL_DASHBOARD_ROUTER=true`.
+- Metabase is kept only as a legacy fallback/debug path and is not part of the target steady-state design.
+
 **版本**: v4.12.2  
 **状态**: ✅ 生产就绪  
 **架构**: ✅ 100% SSOT合规（2025-01-31最新升级）  
@@ -20,19 +27,18 @@ docker-compose up -d postgres
 # 2. 启动系统（前后端）
 python run.py
 
-# 3. 启动Superset BI（可选，推荐）
-python scripts/start_superset.py start
-
+# 3. 如需验证新的 PostgreSQL Dashboard 主链路
+# 在 .env 中设置 USE_POSTGRESQL_DASHBOARD_ROUTER=true
+#
 # 4. 访问系统
 # 前端: http://localhost:5173
 # 后端API文档: http://localhost:8001/api/docs
-# Superset BI: http://localhost:8088 (账号: admin/admin)
 ```
 
 **或使用集成启动**:
 ```bash
-# 同时启动ERP系统和Superset
-python run.py --with-superset
+# legacy/debug only: 显式启动 Metabase
+python run.py --with-metabase
 ```
 
 ### 系统要求
@@ -42,7 +48,8 @@ python run.py --with-superset
 - **Node.js**: 24+（项目与 GitHub 要求）
 - **数据库**: PostgreSQL 15+ (Docker容器)
 - **Docker**: Docker Desktop
-- **BI平台**: Apache Superset 3.0+ (可选，Docker容器)
+- **Dashboard主链路**: PostgreSQL semantic/mart/api
+- **Legacy BI**: Metabase (可选，仅回退/调试)
 
 ---
 

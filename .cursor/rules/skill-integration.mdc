@@ -18,6 +18,11 @@ user instructions
 - Use `planning-with-files` for complex multi-step work.
 - Use `.cursorrules` only for stack-specific and safety-specific exceptions.
 - Treat `openspec/` as archive-only reference material.
+- For Dashboard architecture work, prefer the PostgreSQL path:
+  - `semantic` for standardization
+  - `mart` for reusable aggregates
+  - `api` for page-module query views
+- Treat PostgreSQL Dashboard cutover as the active direction for the Dashboard query path.
 ## Skill Mapping
 
 ### brainstorming (superpowers)
