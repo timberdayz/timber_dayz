@@ -1,7 +1,9 @@
 """
-Metabase Question查询服务
-用于通过Metabase REST API查询Question并返回数据
-支持通过名称动态查询 Question ID（优先），环境变量 ID 为向后兼容兜底。
+Legacy Metabase Question query service.
+
+Retained for fallback/debug only. PostgreSQL Dashboard is now the primary
+online query path. This service remains available for rollback and explicit
+legacy scenarios.
 """
 
 import asyncio
@@ -1002,4 +1004,3 @@ def get_metabase_service() -> MetabaseQuestionService:
     if _service_instance is None:
         _service_instance = MetabaseQuestionService()
     return _service_instance
-

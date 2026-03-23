@@ -26,6 +26,14 @@ This repository uses a skill-first workflow.
 - Runtime Playwright inside backend code must stay async-first
 - Windows terminal/log output must avoid emoji
 
+## Dashboard Architecture
+
+- The active Dashboard cutover direction is PostgreSQL-first, replacing Metabase on the online query path.
+- Dashboard data flow is `b_class raw -> semantic -> mart -> api -> backend router -> frontend`.
+- `semantic` is the standardization layer, `mart` is the reusable aggregate layer, and `api` is the page-module query layer.
+- Metabase remains a compatibility and fallback path until the PostgreSQL Dashboard cutover completes.
+- The runtime switch for the new Dashboard path is `USE_POSTGRESQL_DASHBOARD_ROUTER`.
+
 ## Release Model
 
 - The GitHub deployment pipeline is tag-driven, not `origin/main` driven.

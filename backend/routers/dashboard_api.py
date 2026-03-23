@@ -1,7 +1,8 @@
 """
-Dashboard API路由
-通过Metabase Question查询提供业务概览数据
-[add-dashboard-redis-cache-performance] Redis 缓存支持
+Legacy Dashboard API router.
+
+This file keeps the Metabase compatibility path alive for fallback only.
+The PostgreSQL-first dashboard path lives in dashboard_api_postgresql.py.
 """
 
 import json
@@ -22,6 +23,69 @@ from backend.models.database import get_async_db
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+DASHBOARD_DATA_SOURCE_MAP = {
+    "business_overview_kpi": {
+        "route": "/business-overview/kpi",
+        "source": "metabase_question",
+        "query_key": "business_overview_kpi",
+    },
+    "business_overview_comparison": {
+        "route": "/business-overview/comparison",
+        "source": "metabase_question",
+        "query_key": "business_overview_comparison",
+    },
+    "business_overview_shop_racing": {
+        "route": "/business-overview/shop-racing",
+        "source": "metabase_question",
+        "query_key": "business_overview_shop_racing",
+    },
+    "business_overview_traffic_ranking": {
+        "route": "/business-overview/traffic-ranking",
+        "source": "metabase_question",
+        "query_key": "business_overview_traffic_ranking",
+    },
+    "business_overview_inventory_backlog": {
+        "route": "/business-overview/inventory-backlog",
+        "source": "metabase_question",
+        "query_key": "business_overview_inventory_backlog",
+    },
+    "business_overview_operational_metrics": {
+        "route": "/business-overview/operational-metrics",
+        "source": "metabase_question",
+        "query_key": "business_overview_operational_metrics",
+    },
+    "clearance_ranking": {
+        "route": "/clearance-ranking",
+        "source": "metabase_question",
+        "query_key": "clearance_ranking",
+    },
+    "annual_summary_kpi": {
+        "route": "/annual-summary/kpi",
+        "source": "hybrid_metabase_postgresql",
+        "query_key": "annual_summary_kpi",
+    },
+    "annual_summary_by_shop": {
+        "route": "/annual-summary/by-shop",
+        "source": "postgresql_service",
+        "query_key": "annual_cost_aggregate_by_shop",
+    },
+    "annual_summary_trend": {
+        "route": "/annual-summary/trend",
+        "source": "metabase_question",
+        "query_key": "annual_summary_trend",
+    },
+    "annual_summary_platform_share": {
+        "route": "/annual-summary/platform-share",
+        "source": "metabase_question",
+        "query_key": "annual_summary_platform_share",
+    },
+    "annual_summary_target_completion": {
+        "route": "/annual-summary/target-completion",
+        "source": "postgresql_sql",
+        "query_key": "annual_summary_target_completion",
+    },
+}
 
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:

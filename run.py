@@ -20,7 +20,7 @@
     python run.py --backend-only       # 仅启动后端
     python run.py --frontend-only      # 仅启动前端
     python run.py --no-celery          # 不启动Celery worker
-    python run.py --use-docker --with-metabase --collection  # 采集环境（单后端带Playwright）
+    python run.py --use-docker --with-metabase --collection  # legacy/debug only: 显式启动 Metabase
 """
 
 import subprocess
@@ -593,7 +593,7 @@ def ensure_postgres_redis_docker(project_root, with_celery=True):
         return False
 
 
-def start_services_with_docker_compose(use_collection=False):
+def start_services_with_docker_compose(use_collection=False, include_metabase=False):
     """使用Docker Compose启动服务（v4.19.6新增，生产模式：确保所有服务在容器中运行）
     use_collection: 若为 True，加载 docker-compose.collection-dev.yml，使 backend 使用 Dockerfile.collection（带 Playwright）
     """
@@ -679,12 +679,13 @@ def start_services_with_docker_compose(use_collection=False):
     # [Phase 3.1] 显示当前使用的 Profile，便于排查本地/云端差异
     safe_print(f"  [INFO] Docker Compose Profile: {profile_name}")
     
-    # [NEW] 添加 Metabase 配置文件（开发环境需要端口映射）
-    if compose_metabase.exists():
-        compose_files.extend(["-f", str(compose_metabase)])
-    if compose_metabase_dev.exists():
-        compose_files.extend(["-f", str(compose_metabase_dev)])
-        safe_print("  [INFO] 已加载 Metabase 开发配置（端口映射: 8080:3000）")
+    # [NEW] 仅在 legacy/debug 场景显式加载 Metabase 配置
+    if include_metabase:
+        if compose_metabase.exists():
+            compose_files.extend(["-f", str(compose_metabase)])
+        if compose_metabase_dev.exists():
+            compose_files.extend(["-f", str(compose_metabase_dev)])
+            safe_print("  [INFO] 已加载 legacy Metabase 开发配置（端口映射: 8080:3000）")
     
     # [v4.19.x] 采集模式：使 backend 使用 Dockerfile.collection（带 Playwright）
     compose_collection_dev = project_root / "docker-compose.collection-dev.yml"
@@ -931,72 +932,43 @@ def start_services_with_docker_compose(use_collection=False):
             safe_print("    docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d celery-worker")
             return False
         
-        # [NEW] 启动 Metabase（开发环境完整测试）
-        safe_print("  [启动] Metabase BI服务...")
-        safe_print("  提示: 首次启动需要30-60秒初始化...")
-        metabase_container = "xihong_erp_metabase"
-        try:
-            # 使用 dev profile 启动 Metabase（包含端口映射）
-            cmd = ["docker-compose"] + compose_files + ["--profile", "dev", "up", "-d", "metabase"]
-            result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=120, encoding='utf-8', errors='ignore')
-            
-            if result.returncode != 0:
-                error_msg = result.stderr or result.stdout or "未知错误"
-                safe_print(f"  [WARNING] Metabase启动失败: {error_msg[:200]}")
-                safe_print("  提示: Metabase是可选服务，系统仍可正常运行")
-                # 不阻止启动，仅警告
-            else:
-                # 验证容器是否在运行
-                safe_print("  [验证] 检查Metabase容器状态...")
-                time.sleep(3)
-                
-                max_retries = 10
-                for i in range(max_retries):
-                    if check_docker_container_running(metabase_container):
-                        safe_print(f"  [OK] Metabase容器正在运行（尝试 {i+1}/{max_retries}）")
-                        break
-                    else:
+        if include_metabase:
+            safe_print("  [启动] legacy Metabase BI服务...")
+            safe_print("  提示: 首次启动需要30-60秒初始化...")
+            metabase_container = "xihong_erp_metabase"
+            try:
+                cmd = ["docker-compose"] + compose_files + ["--profile", "dev", "up", "-d", "metabase"]
+                result = subprocess.run(
+                    cmd,
+                    cwd=project_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    encoding='utf-8',
+                    errors='ignore',
+                )
+
+                if result.returncode != 0:
+                    error_msg = result.stderr or result.stdout or "未知错误"
+                    safe_print(f"  [WARNING] Metabase启动失败: {error_msg[:200]}")
+                    safe_print("  提示: Metabase是 legacy/debug 服务，不影响 PostgreSQL Dashboard 主链路")
+                else:
+                    safe_print("  [验证] 检查Metabase容器状态...")
+                    time.sleep(3)
+
+                    max_retries = 10
+                    for i in range(max_retries):
+                        if check_docker_container_running(metabase_container):
+                            safe_print(f"  [OK] Metabase容器正在运行（尝试 {i+1}/{max_retries}）")
+                            break
                         status = get_docker_container_status(metabase_container)
                         safe_print(f"  [等待] 容器状态: {status} (尝试 {i+1}/{max_retries})")
                         if i < max_retries - 1:
                             time.sleep(2)
-                
-                # 等待 Metabase 健康检查（首次启动需要更长时间）
-                safe_print("  [等待] Metabase服务初始化中（首次启动需要30-60秒）...")
-                max_health_retries = 20  # 最多等待3分钟（20 * 10秒）
-                metabase_healthy = False
-                
-                for i in range(max_health_retries):
-                    try:
-                        import urllib.request
-                        import urllib.error
-                        response = urllib.request.urlopen("http://localhost:8080/api/health", timeout=5)
-                        if response.status == 200:
-                            safe_print(f"  [OK] Metabase服务健康检查通过（尝试 {i+1}/{max_health_retries}）")
-                            metabase_healthy = True
-                            break
-                    except urllib.error.URLError:
-                        if i < max_health_retries - 1:
-                            if (i + 1) % 3 == 0:
-                                safe_print(f"  [等待] Metabase初始化中... (尝试 {i+1}/{max_health_retries})")
-                            time.sleep(10)
-                    except Exception:
-                        if i < max_health_retries - 1:
-                            time.sleep(10)
-                
-                if not metabase_healthy:
-                    safe_print("  [WARNING] Metabase健康检查超时（可能仍在初始化）")
-                    safe_print("  提示: 可以稍后访问 http://localhost:8080 检查状态")
-                    safe_print("  提示: 查看日志: docker logs xihong_erp_metabase")
-                else:
-                    safe_print("  [OK] Metabase服务已就绪")
-                    safe_print("  访问地址: http://localhost:8080")
-                    safe_print("  默认账号: admin@xihong.com / admin")
-                    
-        except Exception as e:
-            safe_print(f"  [WARNING] Metabase启动异常: {type(e).__name__}")
-            safe_print("  提示: Metabase是可选服务，系统仍可正常运行")
-        
+            except Exception as e:
+                safe_print(f"  [WARNING] Metabase启动异常: {type(e).__name__}")
+                safe_print("  提示: Metabase是 legacy/debug 服务，不影响 PostgreSQL Dashboard 主链路")
+
         return True
     except FileNotFoundError:
         safe_print("  [ERROR] docker-compose 命令未找到")
@@ -1059,7 +1031,7 @@ def main():
     parser.add_argument("--backend-only", action="store_true", help="仅启动后端")
     parser.add_argument("--frontend-only", action="store_true", help="仅启动前端")
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
-    parser.add_argument("--with-metabase", action="store_true", help="同时启动Metabase（如果未运行）")
+    parser.add_argument("--with-metabase", action="store_true", help="legacy/debug only: 显式启动 Metabase（如果未运行）")
     parser.add_argument("--no-celery", action="store_true", help="不启动Celery worker（v4.19.6新增）")
     parser.add_argument("--use-docker", action="store_true", help="使用Docker Compose启动服务（推荐，统一管理）")
     parser.add_argument("--collection", action="store_true", help="采集模式：与 --use-docker 同时使用时，backend 使用带 Playwright 的镜像（Dockerfile.collection），用于采集环境测试")
@@ -1085,7 +1057,10 @@ def main():
         safe_print("\n[模式] Docker Compose模式（统一管理服务）")
         if not args.frontend_only:
             # 启动Docker服务（Redis、PostgreSQL、Celery Worker）；--collection 时使用带 Playwright 的 backend
-            docker_success = start_services_with_docker_compose(use_collection=args.collection)
+            docker_success = start_services_with_docker_compose(
+                use_collection=args.collection,
+                include_metabase=args.with_metabase,
+            )
             if not docker_success:
                 safe_print("\n[ERROR] Docker Compose启动失败")
                 safe_print("  提示: 可以尝试手动运行: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full up -d")
@@ -1119,8 +1094,10 @@ def main():
                 sys.exit(0)
             args.no_celery = True  # 强制禁用Celery
     
-    # 检查Metabase（v4.6.0 DSS架构：已迁移到Metabase）
-    metabase_running = check_metabase()
+    # Metabase 仅用于 legacy/debug 场景，默认不检查
+    metabase_running = False
+    if args.with_metabase:
+        metabase_running = check_metabase()
     if args.with_metabase and not metabase_running:
         safe_print("\n[启动] Metabase服务...")
         try:
@@ -1212,23 +1189,23 @@ def main():
             port = frontend_port if frontend_port is not None else 5173
             safe_print("[前端] 主界面:   http://localhost:{}".format(port))
         
-        # [IMPROVE] 改进：在 Docker 模式下也检查 Metabase 状态
-        if args.use_docker:
-            # Docker 模式下，Metabase 可能已通过 start_services_with_docker_compose() 启动
+        if args.with_metabase and args.use_docker:
             metabase_running = check_metabase()
-        # 非 Docker 模式下，使用原有的 metabase_running 变量
         
         if metabase_running:
-            safe_print("[BI]   Metabase:  http://localhost:8080")
+            safe_print("[BI]   Metabase (legacy/debug):  http://localhost:8080")
             safe_print("       账号: admin@xihong.com / admin")
-            safe_print("       用途: 配置SQL模型和问题，用于数据看板")
+            safe_print("       用途: legacy fallback / debug only")
         
         safe_print("="*80)
         if args.use_docker:
             safe_print("\n[提示] Docker Compose模式：服务在容器中运行")
             if args.collection:
                 safe_print("[提示] 当前为采集模式（backend 使用 Dockerfile.collection，带 Playwright）")
-                safe_print("[提示] 停止服务: docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml -f docker-compose.metabase.yml -f docker-compose.metabase.dev.yml --profile dev-full down")
+                if args.with_metabase:
+                    safe_print("[提示] 停止服务: docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml -f docker-compose.metabase.yml -f docker-compose.metabase.dev.yml --profile dev-full down")
+                else:
+                    safe_print("[提示] 停止服务: docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml --profile dev-full down")
                 safe_print("[提示] 查看日志: docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml logs -f backend")
             else:
                 safe_print("[提示] 停止服务: docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev-full down")
@@ -1281,4 +1258,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
