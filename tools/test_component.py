@@ -753,6 +753,14 @@ class ComponentTester:
                 start_time = datetime.now()
 
                 if component_type == 'login':
+                    login_url = account_info.get('login_url')
+                    current_url = str(getattr(page, "url", "") or "")
+                    if login_url and current_url in ("", "about:blank"):
+                        try:
+                            await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+                            await page.wait_for_timeout(800)
+                        except Exception as nav_err:
+                            logger.warning("Login page pre-navigation failed: %s", nav_err)
                     # Page readiness: wait for at least one login element
                     # to be visible before executing login component.
                     # Uses .first.wait_for instead of to_have_count(1)

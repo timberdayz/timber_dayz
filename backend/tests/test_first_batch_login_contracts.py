@@ -83,3 +83,11 @@ def test_tiktok_login_key_helpers_await_count_checks():
     assert "if loc.count() > 0 and await loc.first.is_visible()" not in source
     assert "if box.count() > 0 and await box.first.is_visible()" not in source
     assert "if role.count() > 0 and await role.first.is_visible()" not in source
+
+
+def test_python_login_component_test_navigates_before_readiness_check():
+    source = open("tools/test_component.py", "r", encoding="utf-8").read()
+
+    assert "if component_type == 'login':" in source
+    assert "login_url = account_info.get('login_url')" in source
+    assert "await page.goto(login_url" in source
