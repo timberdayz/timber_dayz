@@ -101,6 +101,8 @@ services:
       APP_ENV: production
       DEBUG: "false"
       LOG_LEVEL: INFO
+      USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-false}
+      ENABLE_METABASE_PROXY: ${ENABLE_METABASE_PROXY:-false}
       # ⚠️ 重要：ALLOWED_HOSTS 必须包含 'backend'（Nginx 代理时设置的 Host 头）
       # 生产环境建议通过 .env 文件明确配置：ALLOWED_HOSTS=localhost,127.0.0.1,backend,your-domain.com
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},backend
@@ -253,6 +255,8 @@ services:
       # ⚠️ 重要：Celery 使用 CELERY_BROKER_URL 和 CELERY_RESULT_BACKEND，不是 REDIS_URL
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       ENVIRONMENT: "production"
       APP_ENV: production
       DB_POOL_SIZE: 2
@@ -319,6 +323,10 @@ services:
       # ⚠️ 重要：Celery 使用 CELERY_BROKER_URL 和 CELERY_RESULT_BACKEND，不是 REDIS_URL
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-false}
+      ENABLE_METABASE_PROXY: ${ENABLE_METABASE_PROXY:-false}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
