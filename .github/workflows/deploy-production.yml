@@ -461,6 +461,15 @@ jobs:
           else
             echo "[WARN] SSH connection test failed, but continuing with upload (may be transient issue)..."
           fi
+          if ! ssh \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              -o ConnectTimeout=30 \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+              "mkdir -p \"${PRODUCTION_PATH}\" \"${PRODUCTION_PATH}/config\" \"${PRODUCTION_PATH}/sql/init\" \"${PRODUCTION_PATH}/nginx\""; then
+            echo "[FAIL] Failed to prepare remote deployment directories under ${PRODUCTION_PATH}"
+            exit 1
+          fi
 
           # 1. 上传 docker-compose.yml（必需）
           if ! scp_with_retry docker-compose.yml ${PRODUCTION_PATH}/docker-compose.yml; then
@@ -486,24 +495,10 @@ jobs:
           fi
 
           # 4. 上传 docker-compose.metabase.yml（生产必需组件，如果存在）
-          if [ -f "docker-compose.metabase.yml" ]; then
-            if ! scp_with_retry docker-compose.metabase.yml ${PRODUCTION_PATH}/docker-compose.metabase.yml; then
-              echo "[FAIL] Failed to upload docker-compose.metabase.yml (required for production)"
-              exit 1
-            fi
-          else
-            echo "[WARN] docker-compose.metabase.yml not found (required for production, deployment may fail if Metabase is not configured)"
-          fi
-
           # 4b. 上传 4c8g overlay（4 核 8G 用户需手动追加到 compose 命令）
           if [ -f "docker-compose.cloud-4c8g.yml" ]; then
             if ! scp_with_retry docker-compose.cloud-4c8g.yml ${PRODUCTION_PATH}/docker-compose.cloud-4c8g.yml; then
               echo "[WARN] Failed to upload docker-compose.cloud-4c8g.yml (optional for 4c8g)"
-            fi
-          fi
-          if [ -f "docker-compose.metabase.4c8g.yml" ]; then
-            if ! scp_with_retry docker-compose.metabase.4c8g.yml ${PRODUCTION_PATH}/docker-compose.metabase.4c8g.yml; then
-              echo "[WARN] Failed to upload docker-compose.metabase.4c8g.yml (optional for 4c8g)"
             fi
           fi
 
@@ -512,8 +507,7 @@ jobs:
             exit 1
           fi
 
-          # 5b. 上传 config 目录（保证 metabase_config.yaml 等被 init_metabase.py 使用；卷挂载 ./config:/app/config 会覆盖镜像内目录）
-          # [FIX] SCP 要求目标父目录存在；先创建并验证，路径加引号以支持含空格的 PRODUCTION_PATH
+          # 5b. 上传 config 目录（PostgreSQL 主链路运行配置；legacy Metabase 配置不再随生产部署同步）
           if [ -d "config" ]; then
             echo "[INFO] Syncing config directory to server..."
             if ! ssh \
@@ -524,19 +518,14 @@ jobs:
                 "mkdir -p \"${PRODUCTION_PATH}/config\" && test -d \"${PRODUCTION_PATH}/config\""; then
               echo "[WARN] Failed to create or verify config directory on server (path: ${PRODUCTION_PATH}/config), skipping config upload"
             else
-              if [ -f "config/metabase_config.yaml" ]; then
-                if ! scp_with_retry config/metabase_config.yaml ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/metabase_config.yaml"; then
-                  echo "[WARN] Failed to upload config/metabase_config.yaml (init_metabase.py may fail)"
-                else
-                  echo "[OK] config/metabase_config.yaml uploaded"
-                fi
-              fi
               for f in config/*.yaml config/*.py; do
                 [ -e "$f" ] || continue
                 bn=$(basename "$f")
-                if [ "$bn" != "metabase_config.yaml" ]; then
-                  scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/${bn}" || true
+                if [ "$bn" = "metabase_config.yaml" ]; then
+                  echo "[INFO] Skipping legacy config/$bn in PostgreSQL-first production deployment"
+                  continue
                 fi
+                scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/${bn}" || true
               done
             fi
           else
@@ -748,6 +737,16 @@ jobs:
             echo "[WARN] SSH connection test failed, but continuing with upload (may be transient issue)..."
           fi
 
+          if ! ssh \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              -o ConnectTimeout=30 \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+              "mkdir -p \"${PRODUCTION_PATH}\" \"${PRODUCTION_PATH}/config\" \"${PRODUCTION_PATH}/sql/init\" \"${PRODUCTION_PATH}/nginx\""; then
+            echo "[FAIL] Failed to prepare remote deployment directories under ${PRODUCTION_PATH}"
+            exit 1
+          fi
+
           # 上传所有 compose 文件
           if ! scp_with_retry docker-compose.yml ${PRODUCTION_PATH}/docker-compose.yml; then
             exit 1
@@ -762,17 +761,8 @@ jobs:
               echo "[WARN] Failed to upload docker-compose.cloud.yml (optional file, continuing...)"
             fi
           fi
-          if [ -f "docker-compose.metabase.yml" ]; then
-            if ! scp_with_retry docker-compose.metabase.yml ${PRODUCTION_PATH}/docker-compose.metabase.yml; then
-              echo "[FAIL] Failed to upload docker-compose.metabase.yml (required for production)"
-              exit 1
-            fi
-          fi
           if [ -f "docker-compose.cloud-4c8g.yml" ]; then
             scp_with_retry docker-compose.cloud-4c8g.yml ${PRODUCTION_PATH}/docker-compose.cloud-4c8g.yml || true
-          fi
-          if [ -f "docker-compose.metabase.4c8g.yml" ]; then
-            scp_with_retry docker-compose.metabase.4c8g.yml ${PRODUCTION_PATH}/docker-compose.metabase.4c8g.yml || true
           fi
 
           # 同步远程部署脚本（方案A：deploy-tag 与 deploy-manual 共用同一套部署逻辑）
@@ -780,8 +770,7 @@ jobs:
             exit 1
           fi
 
-          # 5b. 上传 config 目录（保证 metabase_config.yaml 等被 init_metabase.py 使用；卷挂载 ./config:/app/config 会覆盖镜像内目录）
-          # [FIX] SCP 要求目标父目录存在；先创建并验证，路径加引号以支持含空格的 PRODUCTION_PATH
+          # 5b. 上传 config 目录（PostgreSQL 主链路运行配置；legacy Metabase 配置不再随生产部署同步）
           if [ -d "config" ]; then
             echo "[INFO] Syncing config directory to server..."
             if ! ssh \
@@ -792,19 +781,14 @@ jobs:
                 "mkdir -p \"${PRODUCTION_PATH}/config\" && test -d \"${PRODUCTION_PATH}/config\""; then
               echo "[WARN] Failed to create or verify config directory on server (path: ${PRODUCTION_PATH}/config), skipping config upload"
             else
-              if [ -f "config/metabase_config.yaml" ]; then
-                if ! scp_with_retry config/metabase_config.yaml ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/metabase_config.yaml"; then
-                  echo "[WARN] Failed to upload config/metabase_config.yaml (init_metabase.py may fail)"
-                else
-                  echo "[OK] config/metabase_config.yaml uploaded"
-                fi
-              fi
               for f in config/*.yaml config/*.py; do
                 [ -e "$f" ] || continue
                 bn=$(basename "$f")
-                if [ "$bn" != "metabase_config.yaml" ]; then
-                  scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/${bn}" || true
+                if [ "$bn" = "metabase_config.yaml" ]; then
+                  echo "[INFO] Skipping legacy config/$bn in PostgreSQL-first production deployment"
+                  continue
                 fi
+                scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/${bn}" || true
               done
             fi
           else

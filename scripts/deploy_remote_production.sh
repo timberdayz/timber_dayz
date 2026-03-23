@@ -16,7 +16,7 @@ set -euo pipefail
 # - docker-compose.yml (required)
 # - docker-compose.prod.yml (required in prod)
 # - docker-compose.cloud.yml (optional)
-# - docker-compose.metabase.yml (required in prod)
+# - docker-compose.metabase.yml (legacy fallback/debug only; not part of PostgreSQL-first prod deploy)
 # - .env (recommended)
 
 require_env() {
@@ -486,14 +486,6 @@ if [ -f docker-compose.cloud.yml ]; then
     echo "[INFO] CLOUD_PROFILE=4c8g: loading cloud-4c8g overlay"
   fi
 fi
-if [ -f docker-compose.metabase.yml ]; then
-  compose_cmd_base=("${compose_cmd_base[@]}" "-f" "docker-compose.metabase.yml")
-  if [ "${CLOUD_PROFILE:-}" = "4c8g" ] && [ -f docker-compose.metabase.4c8g.yml ]; then
-    compose_cmd_base=("${compose_cmd_base[@]}" "-f" "docker-compose.metabase.4c8g.yml")
-    echo "[INFO] CLOUD_PROFILE=4c8g: loading metabase.4c8g overlay"
-  fi
-fi
-
 # [BOOTSTRAP] Add --env-file to all docker-compose commands (use cleaned .env file)
 compose_cmd_base=("${compose_cmd_base[@]}" "--env-file" "${PRODUCTION_PATH}/.env.cleaned")
 
