@@ -46,3 +46,35 @@
 - [ ] **Step 2: Confirm JSON summary and failure screenshot behavior**
 - [ ] **Step 3: Re-run frontend type-check if package metadata changed**
 - [ ] **Step 4: Commit**
+
+## Status Update
+
+### Completed
+
+- [x] Shared smoke helper added
+- [x] Local Playwright frontend smoke runner added
+- [x] Python auth payload generator added
+- [x] `frontend/package.json` wired with `smoke:playwright`
+- [x] Local smoke runner verified
+- [x] GitHub manual workflow `Frontend Playwright Smoke` is working
+- [x] Successful GitHub manual run recorded: `23382736854`
+
+### Remaining Frontend Follow-up
+
+- [ ] Perform manual page acceptance on migrated core pages
+- [ ] Fix acceptance findings:
+  - visual/layout regressions
+  - API/business regressions
+- [ ] Expand smoke coverage to more high-frequency admin/config pages
+- [ ] Continue remaining visual unification migration
+- [ ] Revisit bundle-size optimization after acceptance stabilizes
+
+### Session Addendum (2026-03-23)
+
+- This smoke plan should now be treated as completed infrastructure.
+- The next frontend optimization work should continue from:
+  - manual page acceptance
+  - acceptance-driven fixes
+  - smoke coverage expansion
+  - remaining visual migration
+  - bundle-size optimization after acceptance stabilizes

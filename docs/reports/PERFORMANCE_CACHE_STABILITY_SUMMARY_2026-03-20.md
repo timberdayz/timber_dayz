@@ -157,3 +157,9 @@ CI 接入：
 3. 若要让 `NotificationConfig` 形成真实业务样本，需要准备一套非空 SMTP 配置样本
 4. 如需更强保障，将 `local` live 探针纳入预发或夜间定时回归
 5. 如需更深资源观测，继续补 `executor` 活跃任务统计
+## 会话待办
+1. `AccountAlignment`：补真实业务订单源样本，避免长期停留在空态验证
+2. `NotificationConfig`：补非空 SMTP 配置样本验证
+3. 继续扩更多真实高频页面到统一 probe
+4. 补 `30min / 1h` 长稳样本
+5. 补 `executor` 活跃任务维度监控口径

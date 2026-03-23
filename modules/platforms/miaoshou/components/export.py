@@ -1921,6 +1921,10 @@ class MiaoshouExporterComponent(ExportComponent):
             except Exception:
                 pass
             try:
+                page.context.off("download", _on_download)
+            except Exception:
+                pass
+            try:
                 page.context.off("page", _on_new_page)
             except Exception:
                 pass
@@ -1936,6 +1940,10 @@ class MiaoshouExporterComponent(ExportComponent):
             # cleanup download listener
             try:
                 page.off("download", _on_download)
+            except Exception:
+                pass
+            try:
+                page.context.off("download", _on_download)
             except Exception:
                 pass
             try:

@@ -40,3 +40,9 @@ def test_miaoshou_export_awaits_count_comparisons():
     assert "if el2.count() > 0" not in source
     assert "if inputs.count() < 2" not in source
     assert "if footer and footer.count() > 0" not in source
+
+
+def test_miaoshou_export_cleans_up_context_download_listener():
+    source = Path("modules/platforms/miaoshou/components/export.py").read_text(encoding="utf-8")
+
+    assert 'page.context.off("download", _on_download)' in source

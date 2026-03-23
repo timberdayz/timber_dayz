@@ -18,7 +18,31 @@ class ShopeeExporterComponent(ExportComponent):
         super().__init__(ctx)
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
-        # Thin adapter to existing exporter flow (page/context already set by caller)
+        # Canonical delegation path: route to domain-specific mature exporter first.
+        data_domain = str((self.ctx.config or {}).get("data_domain") or "").strip().lower()
+        if data_domain:
+            try:
+                if data_domain == "products":
+                    from modules.platforms.shopee.components.products_export import ShopeeProductsExport
+                    return await ShopeeProductsExport(self.ctx).run(page, mode)
+                if data_domain == "orders":
+                    from modules.platforms.shopee.components.orders_export import ShopeeOrdersExport
+                    return await ShopeeOrdersExport(self.ctx).run(page, mode)
+                if data_domain == "analytics":
+                    from modules.platforms.shopee.components.analytics_export import ShopeeAnalyticsExport
+                    return await ShopeeAnalyticsExport(self.ctx).run(page, mode)
+                if data_domain == "finance":
+                    from modules.platforms.shopee.components.finance_export import ShopeeFinanceExport
+                    return await ShopeeFinanceExport(self.ctx).run(page, mode)
+                if data_domain == "services":
+                    from modules.platforms.shopee.components.services_export import ShopeeServicesExport
+                    return await ShopeeServicesExport(self.ctx).run(page, mode)
+            except Exception as e:
+                if self.logger:
+                    self.logger.error(f"[ShopeeExporterComponent] canonical delegation failed for {data_domain}: {e}")
+                return ExportResult(success=False, file_path=None, message=str(e))
+
+        # Legacy fallback: thin adapter to existing exporter flow (page/context already set by caller)
         try:
             # 调用纯导出方法(跳过登录/导航/日期设置)
             from modules.services.shopee_playwright_exporter import ShopeePlaywrightExporter
@@ -49,4 +73,3 @@ class ShopeeExporterComponent(ExportComponent):
             if self.logger:
                 self.logger.error(f"[ShopeeExporterComponent] failed: {e}")
             return ExportResult(success=False, file_path=None, message=str(e))
-
