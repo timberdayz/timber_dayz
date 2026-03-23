@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from modules.core.logger import get_logger
 from modules.apps.collection_center.component_loader import ComponentLoader
+from backend.routers.component_versions import CANONICAL_COMPONENT_FILES
 
 logger = get_logger(__name__)
 
@@ -174,8 +175,11 @@ class ComponentTester:
         except Exception:
             return []
         components = []
+        canonical_files = CANONICAL_COMPONENT_FILES.get(self.platform, set())
         for f in comp_dir.glob("*.py"):
             if f.name.startswith("_"):
+                continue
+            if canonical_files and f.name not in canonical_files:
                 continue
             components.append(f.stem)
         return sorted(components)
@@ -2635,4 +2639,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-

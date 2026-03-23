@@ -11,6 +11,8 @@
 - 真实链路问题清单：`docs/guides/CANONICAL_RUNTIME_ISSUES.md`
 - 阶段性状态清单：`docs/guides/CANONICAL_COMPONENT_STATUS.md`
 - 测试执行清单：`docs/guides/CANONICAL_TEST_EXECUTION_CHECKLIST.md`
+- 优先测试短表：`docs/guides/CANONICAL_COMPONENT_PRIORITY_LIST.md`
+- 第一批实际测试对象：`docs/guides/CANONICAL_FIRST_BATCH_READY.md`
 
 > 原则：
 > - 后续编写采集脚本时，**优先看本索引列出的文件**

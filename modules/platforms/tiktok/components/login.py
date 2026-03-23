@@ -29,7 +29,7 @@ class TiktokLogin(LoginComponent):
     async def _click_if_present(self, page: Any, selector: str, timeout: int = 3000) -> bool:
         try:
             loc = page.locator(selector)
-            if loc.count() > 0:
+            if await loc.count() > 0:
                 if self.logger:
                     self.logger.info(f"[TiktokLogin] click: {selector}")
                 await loc.first.click(timeout=timeout)
@@ -43,7 +43,7 @@ class TiktokLogin(LoginComponent):
         for sel in selectors:
             try:
                 loc = page.locator(sel)
-                if loc.count() > 0:
+                if await loc.count() > 0:
                     el = loc.first
                     if await el.is_visible():
                         try:
@@ -69,7 +69,7 @@ class TiktokLogin(LoginComponent):
             for sel in selectors:
                 try:
                     loc = page.locator(sel)
-                    if loc.count() > 0 and await loc.first.is_visible():
+                    if await loc.count() > 0 and await loc.first.is_visible():
                         return True
                 except Exception:
                     pass
@@ -82,7 +82,7 @@ class TiktokLogin(LoginComponent):
     async def _click_text_if_present(self, page: Any, text: str, timeout: int = 2000) -> bool:
         try:
             loc = page.locator(f"text={text}")
-            if loc.count() > 0:
+            if await loc.count() > 0:
                 await loc.first.click(timeout=timeout)
                 if self.logger:
                     self.logger.info(f"[TiktokLogin] click text: {text}")
@@ -99,13 +99,13 @@ class TiktokLogin(LoginComponent):
         # 0) TikTok 自定义 div 复选框(class 切换 checked)
         try:
             box = page.locator("#TT4B_TSV_Verify_Check")
-            if box.count() > 0 and await box.first.is_visible():
+            if await box.count() > 0 and await box.first.is_visible():
                 cls = (await box.first.get_attribute("class")) or ""
                 if "checked" in cls:
                     return True
                 try:
                     inner = box.first.locator(".check-box-inner")
-                    if inner.count() > 0 and await inner.first.is_visible():
+                    if await inner.count() > 0 and await inner.first.is_visible():
                         await inner.first.click()
                     else:
                         await box.first.click()
@@ -134,7 +134,7 @@ class TiktokLogin(LoginComponent):
         for sel in selectors:
             try:
                 loc = page.locator(sel)
-                if loc.count() > 0 and await loc.first.is_visible():
+                if await loc.count() > 0 and await loc.first.is_visible():
                     try:
                         if await loc.first.is_checked():
                             return True
@@ -156,7 +156,7 @@ class TiktokLogin(LoginComponent):
         # 2) 自定义 role=checkbox 组件
         try:
             role = page.locator("[role='checkbox'][aria-checked]")
-            if role.count() > 0 and await role.first.is_visible():
+            if await role.count() > 0 and await role.first.is_visible():
                 state = ((await role.first.get_attribute("aria-checked")) or "").lower()
                 if state != "true":
                     await role.first.click()
@@ -192,7 +192,7 @@ class TiktokLogin(LoginComponent):
             try:
                 # 优先 ID
                 box = root.locator("#TT4B_TSV_Verify_Check")
-                if box.count() > 0 and await box.first.is_visible():
+                if await box.count() > 0 and await box.first.is_visible():
                     ok = await self._ensure_trust_device_checked(root)
                     if ok:
                         break
@@ -263,7 +263,7 @@ class TiktokLogin(LoginComponent):
             for sel in code_inputs:
                 try:
                     loc = root.locator(sel)
-                    if loc.count() > 0 and await loc.first.is_visible():
+                    if await loc.count() > 0 and await loc.first.is_visible():
                         target_root = root
                         break
                 except Exception:
@@ -273,14 +273,14 @@ class TiktokLogin(LoginComponent):
         if not target_root:
             async def has_2fa_ui(root: Any) -> bool:
                 try:
-                    if root.locator("button:has-text('\u786e\u8ba4')").count() > 0:
+                    if await root.locator("button:has-text('\u786e\u8ba4')").count() > 0:
                         return True
                 except Exception:
                     pass
                 for t in ["text=\u9a8c\u8bc1\u7801", "text=\u65e0\u6cd5\u83b7\u53d6\u9a8c\u8bc1\u7801", "text=\u53cc\u91cd\u9a8c\u8bc1"]:
                     try:
                         loc = root.locator(t)
-                        if loc.count() > 0 and await loc.first.is_visible():
+                        if await loc.count() > 0 and await loc.first.is_visible():
                             return True
                     except Exception:
                         continue
@@ -326,12 +326,12 @@ class TiktokLogin(LoginComponent):
             for es in error_texts:
                 try:
                     loc = root.locator(es)
-                    if loc.count() > 0 and await loc.first.is_visible():
+                    if await loc.count() > 0 and await loc.first.is_visible():
                         return True
                 except Exception:
                     continue
             try:
-                if root.locator("input[name*='code'][aria-invalid='true']").count() > 0:
+                if await root.locator("input[name*='code'][aria-invalid='true']").count() > 0:
                     return True
             except Exception:
                 pass
