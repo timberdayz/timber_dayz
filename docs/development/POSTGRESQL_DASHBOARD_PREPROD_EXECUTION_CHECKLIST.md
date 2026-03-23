@@ -31,6 +31,11 @@ This runs:
 Use:
 
 - `docs/development/POSTGRESQL_DASHBOARD_PREPROD_CHECK_REPORT_TEMPLATE.md`
+- or generate a first draft with:
+
+```bash
+python scripts/generate_postgresql_dashboard_preprod_report.py --base-url <base_url> --output <report_path>
+```
 
 ## 5. Decide
 
