@@ -72,3 +72,9 @@ These can remain longer as historical/operational reference even after the runti
 4. 生产灰度开启
 5. 灰度稳定后，先下线 `backend/routers/dashboard_api.py` 的 Metabase 主链路依赖
 6. 再评估 `backend/routers/metabase_proxy.py`、`backend/services/metabase_question_service.py`、`config/metabase_config.yaml`、`docker-compose.metabase.yml` 是否转入 archive/legacy 目录
+
+## Detailed Runbook
+
+Use:
+
+- `docs/development/POSTGRESQL_DASHBOARD_POST_GREY_DECOMMISSION_RUNBOOK.md`
