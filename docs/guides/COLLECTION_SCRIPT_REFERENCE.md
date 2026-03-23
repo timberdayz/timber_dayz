@@ -8,6 +8,9 @@
 - 录制与生成规范：`docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
 - 录制页产出说明：`docs/guides/RECORDER_PYTHON_OUTPUT.md`
 - 复用成熟导出组件工作流：`docs/guides/COMPONENT_REUSE_WORKFLOW.md`
+- 真实链路问题清单：`docs/guides/CANONICAL_RUNTIME_ISSUES.md`
+- 阶段性状态清单：`docs/guides/CANONICAL_COMPONENT_STATUS.md`
+- 测试执行清单：`docs/guides/CANONICAL_TEST_EXECUTION_CHECKLIST.md`
 
 > 原则：
 > - 后续编写采集脚本时，**优先看本索引列出的文件**

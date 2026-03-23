@@ -34,6 +34,16 @@ def test_shopee_adapter_does_not_advertise_metrics_capability():
     assert capabilities["products"]["metrics"] is False
 
 
+def test_tiktok_adapter_does_not_advertise_metrics_capability():
+    from modules.platforms.tiktok.adapter import TiktokAdapter
+
+    adapter = TiktokAdapter(_ctx())
+
+    capabilities = adapter.capabilities()
+
+    assert capabilities["products"]["metrics"] is False
+
+
 @pytest.mark.asyncio
 async def test_shopee_metrics_selector_returns_explicit_not_supported():
     component = ShopeeMetricsSelector(_ctx())

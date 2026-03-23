@@ -63,3 +63,32 @@ def test_tiktok_export_cleans_up_download_listeners():
 
     assert 'page.off("download", _on_dl)' in source
     assert 'page.context.off("download", _on_dl)' in source
+
+
+def test_tiktok_export_skip_logic_is_scoped_to_service_analytics_disabled_state():
+    source = Path("modules/platforms/tiktok/components/export.py").read_text(encoding="utf-8")
+
+    assert 'if "/service-analytics" in current_url and disabled_found:' in source
+    assert 'skip: service analytics has no data (export disabled)' in source
+
+
+def test_tiktok_export_awaits_expect_download_value():
+    source = Path("modules/platforms/tiktok/components/export.py").read_text(encoding="utf-8")
+
+    assert "download = dl_info.value" not in source
+    assert "download = await dl_info.value" in source
+
+
+def test_tiktok_export_scopes_confirm_clicks_to_dialogs_first():
+    source = Path("modules/platforms/tiktok/components/export.py").read_text(encoding="utf-8")
+
+    assert "async def _first_click_in_scopes" in source
+    assert "dialog_scopes = [" in source
+    assert "await self._first_click_in_scopes(page, dialog_scopes, download_buttons" in source
+
+
+def test_tiktok_export_waits_for_service_analytics_ready_after_tab_switch():
+    source = Path("modules/platforms/tiktok/components/export.py").read_text(encoding="utf-8")
+
+    assert "async def _wait_service_analytics_ready" in source
+    assert "await self._wait_service_analytics_ready(page, service_sel, export_buttons)" in source

@@ -76,6 +76,68 @@ class TiktokExporterComponent(ExportComponent):
                 continue
         return False
 
+    async def _first_click_in_scopes(
+        self,
+        page: Any,
+        scopes: Iterable[Any],
+        selectors: Iterable[str],
+        *,
+        timeout: int = 5000,
+    ) -> bool:
+        """Click the first visible/clickable selector inside narrowed scopes first."""
+        for scope in scopes:
+            try:
+                if scope is None:
+                    continue
+                try:
+                    if await scope.count() < 1:
+                        continue
+                except Exception:
+                    continue
+                for sel in selectors:
+                    try:
+                        loc = scope.locator(sel)
+                        if await loc.count() > 0:
+                            first = loc.first
+                            try:
+                                await first.scroll_into_view_if_needed(timeout=1000)
+                            except Exception:
+                                pass
+                            if await self._is_clickable(first):
+                                try:
+                                    await first.hover(timeout=800)
+                                except Exception:
+                                    pass
+                                await first.click(timeout=timeout)
+                                return True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        return False
+
+    async def _wait_service_analytics_ready(self, page: Any, service_sel: Any, export_buttons: Iterable[str]) -> None:
+        probes = list(
+            dict.fromkeys(
+                [
+                    *list(getattr(service_sel, "DATA_READY_PROBES", getattr(service_sel, "data_ready_probes", []))),
+                    "[role='tab'][aria-selected='true']:has-text(\"鑱婂ぉ璇︽儏\")",
+                    ".theme-arco-tabs-header-title-active:has-text(\"鑱婂ぉ璇︽儏\")",
+                    *list(export_buttons),
+                ]
+            )
+        )
+        for probe in probes:
+            try:
+                await page.wait_for_selector(probe, timeout=2500, state="visible")
+                return
+            except Exception:
+                continue
+        try:
+            await page.wait_for_timeout(500)
+        except Exception:
+            pass
+
     def _write_manifest(self, target: Path, cfg: dict, account_label: str, shop_name: str, data_type: str) -> None:
         try:
             from datetime import datetime
@@ -220,10 +282,7 @@ class TiktokExporterComponent(ExportComponent):
                     except Exception:
                         pass
                 if switched:
-                    try:
-                        await page.wait_for_timeout(500)
-                    except Exception:
-                        pass
+                    await self._wait_service_analytics_ready(page, service_sel, export_buttons)
 
 
             # Before waiting for download, ensure export is available and enabled
@@ -327,14 +386,23 @@ class TiktokExporterComponent(ExportComponent):
                         except Exception:
                             pass
                         # Some UIs show a confirm/download step after opening menu/dialog
+                        dialog_scopes = [
+                            page.locator("[role='dialog']").last,
+                            page.locator(".theme-arco-modal").last,
+                            page.locator(".arco-modal").last,
+                            page.locator(".theme-arco-modal-footer").last,
+                            page.locator(".arco-modal-footer").last,
+                        ]
                         for _ in range(2):
+                            if await self._first_click_in_scopes(page, dialog_scopes, download_buttons, timeout=3000):
+                                break
                             if await self._first_click(page, download_buttons, timeout=3000):
                                 break
                             try:
                                 await page.wait_for_timeout(400)
                             except Exception:
                                 pass
-                    download = dl_info.value
+                    download = await dl_info.value
                     break
                 except Exception as ex:
                     # if listener caught the download, use it

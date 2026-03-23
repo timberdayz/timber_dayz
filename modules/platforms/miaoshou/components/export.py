@@ -671,7 +671,6 @@ class MiaoshouExporterComponent(ExportComponent):
                     page.locator(".el-popper").last,
                     page.locator(".jx-select-dropdown").last,
                     page.locator(".jx-select__dropdown").last,
-                    page.locator("body"),
                 ])
                 # Try clicking the target menu item
                 for sc in scopes:
@@ -707,9 +706,9 @@ class MiaoshouExporterComponent(ExportComponent):
                                    pass
                                 # Early monitor to avoid missing instant downloads
                                 try:
-                                    with page.context.expect_download(timeout=12000) as dl_early:
+                                    async with page.context.expect_download(timeout=12000) as dl_early:
                                         await item_by_class.click(timeout=2500, force=True)
-                                    return dl_early.value
+                                    return await dl_early.value
                                 except Exception:
                                     pass
                                 # 多策略点击(用于弹出确认框的场景)
@@ -756,9 +755,9 @@ class MiaoshouExporterComponent(ExportComponent):
                                     if footer and await footer.count() >= 1:
                                         for _name in ['导出', '确定', '开始导出']:
                                             try:
-                                                with page.context.expect_download(timeout=120000) as dl2:
+                                                async with page.context.expect_download(timeout=120000) as dl2:
                                                     await footer.get_by_role('button', name=_name).first.click(timeout=1800)
-                                                return dl2.value
+                                                return await dl2.value
                                             except Exception:
                                                 continue
                                 except Exception:
@@ -802,9 +801,9 @@ class MiaoshouExporterComponent(ExportComponent):
                                     pass
                                 # Early monitor to avoid missing instant downloads
                                 try:
-                                    with page.context.expect_download(timeout=12000) as dl_early:
+                                    async with page.context.expect_download(timeout=12000) as dl_early:
                                         await item_by_role.click(timeout=2500, force=True)
-                                    return dl_early.value
+                                    return await dl_early.value
                                 except Exception:
                                     pass
                                 tried = False
@@ -850,9 +849,9 @@ class MiaoshouExporterComponent(ExportComponent):
                                     if footer and await footer.count() >= 1:
                                         for btn_name in ['导出', '确定', '开始导出']:
                                             try:
-                                                with page.context.expect_download(timeout=120000) as dl2:
+                                                async with page.context.expect_download(timeout=120000) as dl2:
                                                     await footer.get_by_role('button', name=btn_name).first.click(timeout=1800)
-                                                return dl2.value
+                                                return await dl2.value
                                             except Exception:
                                                 continue
                                 except Exception:
@@ -896,9 +895,9 @@ class MiaoshouExporterComponent(ExportComponent):
                                         pass
                                     # Early monitor to catch immediate download
                                     try:
-                                        with page.context.expect_download(timeout=12000) as dl_early:
+                                        async with page.context.expect_download(timeout=12000) as dl_early:
                                             await dd_item.click(timeout=2500, force=True)
-                                        return dl_early.value
+                                        return await dl_early.value
                                     except Exception:
                                         pass
                                     tried = False
@@ -944,9 +943,9 @@ class MiaoshouExporterComponent(ExportComponent):
                                         if footer and await footer.count() >= 1:
                                             for btn_name in ['导出', '确定', '开始导出']:
                                                 try:
-                                                    with page.context.expect_download(timeout=120000) as dl2:
+                                                    async with page.context.expect_download(timeout=120000) as dl2:
                                                         await footer.get_by_role('button', name=btn_name).first.click(timeout=1800)
-                                                    return dl2.value
+                                                    return await dl2.value
                                                 except Exception:
                                                     continue
                                     except Exception:
@@ -1007,7 +1006,7 @@ class MiaoshouExporterComponent(ExportComponent):
             except Exception:
                 pass
             # Fallback: click to open then click the item
-            with page.context.expect_download(timeout=60000) as dl_info2:
+            async with page.context.expect_download(timeout=60000) as dl_info2:
                 try:
                     await btn.click(timeout=1500)
                     try:
@@ -1031,7 +1030,6 @@ class MiaoshouExporterComponent(ExportComponent):
                     page.locator(".el-popper").last,
                     page.locator(".jx-select-dropdown").last,
                     page.locator(".jx-select__dropdown").last,
-                    page,
                 ])
                 for sc in scope_list:
                     try:
@@ -1138,18 +1136,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             break
                         except Exception:
                             continue
-                if not clicked:
-                    # Ultimate fallback: click the 2nd item in dropdown-like lists
-                    for sc in [page.locator(".jx-popper").last, page.locator(".el-popper").last, page]:
-                        try:
-                            items = sc.locator("li, .jx-dropdown-item, .menu-item, .arco-dropdown-item").all()
-                            if len(items) >= 2:
-                                await items[1].click(timeout=2500)
-                                clicked = True
-                                break
-                        except Exception:
-                            continue
-            return dl_info2.value
+            return await dl_info2.value
         except Exception:
             return None
 
@@ -1367,14 +1354,14 @@ class MiaoshouExporterComponent(ExportComponent):
 
                 # Early: wrap the very first click attempt within expect_download to avoid missing the event
                 try:
-                    with page.context.expect_download(timeout=120000) as dl_early:
+                    async with page.context.expect_download(timeout=120000) as dl_early:
                         try:
                             footer = page.locator('.jx-dialog__footer').last
                             if footer and await footer.count() >= 1:
                                 await footer.get_by_role('button', name='导出').first.click(timeout=1500)
                         except Exception:
                             pass
-                    download = dl_early.value
+                    download = await dl_early.value
                     clicked = True
                     try:
                         print("[MiaoshouExporter] 首次点击已在 expect_download 中触发")
@@ -1486,7 +1473,7 @@ class MiaoshouExporterComponent(ExportComponent):
                     if downloaded_file is None and net_candidates:
                         try:
                             candidate_url = net_candidates[-1]
-                            with page.context.expect_download(timeout=60000) as dl_info2:
+                            async with page.context.expect_download(timeout=60000) as dl_info2:
                                 await page.evaluate(
                                     "(url)=>{ fetch(url, {credentials:'include'})"
                                     ".then(r=>r.blob()).then(b=>{ const u=URL.createObjectURL(b);"
@@ -1494,20 +1481,20 @@ class MiaoshouExporterComponent(ExportComponent):
                                     " document.body.appendChild(a); a.click(); setTimeout(()=>URL.revokeObjectURL(u), 5000); }); }",
                                     candidate_url,
                                 )
-                            download = dl_info2.value
+                            download = await dl_info2.value
                         except Exception:
                             pass
 
                     # 再触发一次受保护点击,确保捕获事件
                     try:
-                        with page.context.expect_download(timeout=15000) as dl_info:
+                        async with page.context.expect_download(timeout=15000) as dl_info:
                             try:
                                 footer = page.locator('.jx-dialog__footer').last
                                 if footer and await footer.count() >= 1:
                                     await footer.get_by_role('button', name='导出').first.click(timeout=1000)
                             except Exception:
                                 pass
-                        download = dl_info.value
+                        download = await dl_info.value
                     except Exception:
                         # 回退1:短时进度监听,若仍未捕获则进入目录扫描兜底
                         try:
@@ -1730,9 +1717,9 @@ class MiaoshouExporterComponent(ExportComponent):
                         if footer and await footer.count() >= 1:
                             for btn_name in ['导出', '确定', '开始导出']:
                                 try:
-                                    with page.context.expect_download(timeout=120000) as dl_conf:
+                                    async with page.context.expect_download(timeout=120000) as dl_conf:
                                         await footer.get_by_role('button', name=btn_name).first.click(timeout=1800)
-                                    download = dl_conf.value
+                                    download = await dl_conf.value
                                     break
                                 except Exception:
                                     continue
@@ -1741,7 +1728,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 # 若仍未捕获,回退到通用按钮点击流程
                 if download is None:
                     try:
-                        with page.context.expect_download(timeout=60000) as dl_info:
+                        async with page.context.expect_download(timeout=60000) as dl_info:
                             if not await self._first_click(page, export_buttons, timeout=7000):
                                 raise RuntimeError("export button not found")
 
@@ -1752,7 +1739,7 @@ class MiaoshouExporterComponent(ExportComponent):
                             # 可能弹出确认框,再次兜底关闭遮挡
                             await self._close_popups(page)
                             await self._first_click(page, confirm_buttons, timeout=3000)
-                        download = dl_info.value
+                        download = await dl_info.value
                     except Exception:
                         try:
                             from modules.platforms.miaoshou.components.orders_config import OrdersSelectors as _OS
@@ -1768,7 +1755,7 @@ class MiaoshouExporterComponent(ExportComponent):
                 if download is None and downloaded_file is None and net_candidates:
                     try:
                         candidate_url = net_candidates[-1]
-                        with page.context.expect_download(timeout=60000) as dl_info2:
+                        async with page.context.expect_download(timeout=60000) as dl_info2:
                             await page.evaluate(
                                 "(url)=>{ fetch(url, {credentials:'include'})"
                                 ".then(r=>r.blob()).then(b=>{ const u=URL.createObjectURL(b);"
@@ -1776,7 +1763,7 @@ class MiaoshouExporterComponent(ExportComponent):
                                 " document.body.appendChild(a); a.click(); setTimeout(()=>URL.revokeObjectURL(u), 5000); }); }",
                                 candidate_url,
                             )
-                        download = dl_info2.value
+                        download = await dl_info2.value
                     except Exception:
                         pass
 

@@ -32,6 +32,24 @@ class _VariantSpec:
     path: str
 
 
+def _services_row_matches_subtype(row_text: str, subtype: str) -> bool:
+    text = (row_text or "").lower()
+    subtype = (subtype or "").lower().strip()
+    if not subtype:
+        return True
+    if subtype == "ai_assistant":
+        for key in ["ai\u52a9\u624b", "ai \u52a9\u624b", "chatbot", "assistant", "\u667a\u80fd\u5ba2\u670d"]:
+            if text.find(key) != -1:
+                return True
+        return False
+    if subtype == "agent":
+        for key in ["\u4eba\u5de5\u804a\u5929", "\u4eba\u5de5\u5ba2\u670d", "agent", "chat agent"]:
+            if text.find(key) != -1:
+                return True
+        return False
+    return True
+
+
 class ShopeeServicesExport(ExportComponent):
     """Shopee 服务表现导出器
 
@@ -57,6 +75,16 @@ class ShopeeServicesExport(ExportComponent):
     def _build_error_result(message: str) -> ExportResult:
         return ExportResult(success=False, message=message, file_path=None)
 
+    def _build_services_output_root(self, granularity: str, subtype: str) -> Path:
+        out_root = build_standard_output_root(
+            self.ctx,
+            data_type="services",
+            granularity=granularity,
+            subtype=subtype,
+        )
+        out_root.mkdir(parents=True, exist_ok=True)
+        return out_root
+
     # --- Capability guards -------------------------------------------------
     async def _is_sip_shop(self, page) -> bool:
         """判断是否为 SIP 附属店铺(保守、避免误杀)。
@@ -72,7 +100,7 @@ class ShopeeServicesExport(ExportComponent):
             for sel in candidates:
                 try:
                     loc = page.locator(sel).first
-                    if loc.count() > 0 and await loc.is_visible():
+                    if await loc.count() > 0 and await loc.is_visible():
                         return True
                 except Exception:
                     continue
@@ -260,7 +288,7 @@ class ShopeeServicesExport(ExportComponent):
                         try:
                             loc = page.locator(btn)
                             cand = loc.first
-                            if cand.count() > 0 and cand.is_visible():
+                            if await cand.count() > 0 and await cand.is_visible():
                                 # 显式屏蔽“聊天记录/Transcript”类按钮(避免误点 track-transcript-button)
                                 try:
                                     cls = (cand.get_attribute("class") or "")
@@ -309,13 +337,13 @@ class ShopeeServicesExport(ExportComponent):
 
                                     # 尝试 expect_download 监听(短超时)。若未立即开始下载,则进入统一轮询+重试机制。
                                     try:
-                                        with page.expect_download(timeout=5000) as dl_info:
+                                        async with page.expect_download(timeout=5000) as dl_info:
                                             await cand.click()
-                                        download = dl_info.value
+                                        download = await dl_info.value
 
                                         tmp_name = download.suggested_filename or f"services_{spec.key}.xlsx"
                                         tmp_path = out_root / tmp_name
-                                        download.save_as(str(tmp_path))
+                                        await download.save_as(str(tmp_path))
 
                                         ts = _dt.now().strftime("%Y%m%d_%H%M%S")
                                         filename = build_filename(
@@ -390,7 +418,7 @@ class ShopeeServicesExport(ExportComponent):
                             for trig in menu_triggers:
                                 try:
                                     t = page.locator(trig).first
-                                    if t.count() > 0 and await t.is_visible():
+                                    if await t.count() > 0 and await t.is_visible():
                                         if self.logger:
                                             self.logger.info(f"[ShopeeServicesExport] 打开更多菜单: {trig}")
                                         await t.click()
@@ -406,7 +434,7 @@ class ShopeeServicesExport(ExportComponent):
                                 for me in menu_export:
                                     try:
                                         m = page.locator(me).first
-                                        if m.count() > 0 and await m.is_visible():
+                                        if await m.count() > 0 and await m.is_visible():
                                             if self.logger:
                                                 self.logger.info(f"[ShopeeServicesExport] 点击菜单中的导出项: {me}")
                                             await m.click()
@@ -473,7 +501,7 @@ class ShopeeServicesExport(ExportComponent):
                                     for btn in self.sel.export_buttons:
                                         try:
                                             loc = page.locator(btn).first
-                                            if loc.count() > 0 and await loc.is_visible():
+                                            if await loc.count() > 0 and await loc.is_visible():
                                                 try:
                                                     await loc.click()
                                                     await page.wait_for_timeout(300)
@@ -526,13 +554,13 @@ class ShopeeServicesExport(ExportComponent):
                                 pre_files = set()
 
                             try:
-                                with page.expect_download(timeout=60000) as dl_info:
+                                async with page.expect_download(timeout=60000) as dl_info:
                                     await preferred_loc.click()
-                                download = dl_info.value
+                                download = await dl_info.value
 
                                 tmp_name = download.suggested_filename or f"services_{spec.key}.xlsx"
                                 tmp_path = out_root / tmp_name
-                                download.save_as(str(tmp_path))
+                                await download.save_as(str(tmp_path))
 
                                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                                 filename = build_filename(
@@ -618,7 +646,7 @@ class ShopeeServicesExport(ExportComponent):
                         for btn in self.sel.download_buttons:
                             try:
                                 loc = page.locator(btn)
-                                if loc.count() > 0 and await loc.first.is_visible():
+                                if await loc.count() > 0 and await loc.first.is_visible():
                                     if self.logger:
                                         self.logger.info(f"[ShopeeServicesExport] 点击下载按钮: {btn}")
                                     # 统一输出目录(预先计算,支持 UI 监听与文件系统兜底)
@@ -647,13 +675,13 @@ class ShopeeServicesExport(ExportComponent):
                                         pre_files = set()
 
                                     try:
-                                        with page.expect_download(timeout=60000) as dl_info:
+                                        async with page.expect_download(timeout=60000) as dl_info:
                                             await loc.first.click()
-                                        download = dl_info.value
+                                        download = await dl_info.value
 
                                         tmp_name = download.suggested_filename or f"services_{spec.key}.xlsx"
                                         tmp_path = out_root / tmp_name
-                                        download.save_as(str(tmp_path))
+                                        await download.save_as(str(tmp_path))
 
                                         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                                         filename = build_filename(
@@ -739,7 +767,7 @@ class ShopeeServicesExport(ExportComponent):
                                 continue
 
                     if not downloaded:
-                        ok, p = self._api_fallback(page, spec, account_label, shop_name)
+                        ok, p = await self._api_fallback(page, spec, account_label, shop_name)
                         if ok and p:
                             successes.append(p)
                         else:
@@ -810,15 +838,25 @@ class ShopeeServicesExport(ExportComponent):
 
     @staticmethod
     def _row_matches_subtype(row_text: str, subtype: str) -> bool:
-        text = (row_text or "").lower()
-        subtype = (subtype or "").lower().strip()
-        if not subtype:
-            return True
-        if subtype == "ai_assistant":
-            return any(k in text for k in ["ai助手", "ai 助手", "chatbot", "assistant", "智能客服"])
-        if subtype == "agent":
-            return any(k in text for k in ["人工聊天", "人工客服", "agent", "chat agent"])
-        return True
+        return _services_row_matches_subtype(row_text, subtype)
+
+    async def _pick_latest_matching_row(self, rows, subtype: str, scan_limit: int = 5):
+        try:
+            total = await rows.count()
+        except Exception:
+            total = 0
+        if total < 1:
+            return None
+        first_row = rows.first
+        for idx in range(min(total, max(1, scan_limit))):
+            try:
+                candidate = rows.nth(idx)
+                row_text = (await candidate.text_content()) or ""
+                if self._row_matches_subtype(row_text, subtype):
+                    return candidate
+            except Exception:
+                continue
+        return first_row
 
     async def _wait_for_latest_export_ready(self, page, subtype: str, timeout: Optional[int] = None):
         """等待最新导出记录变为可下载状态,避免点击到旧记录。返回 Locator 或 False。"""
@@ -870,7 +908,7 @@ class ShopeeServicesExport(ExportComponent):
                             rows = page.locator(selector)
                             if await rows.count() > 0:
                                 # 取第一行作为最新记录
-                                latest_row = rows.first
+                                latest_row = await self._pick_latest_matching_row(rows, subtype)
                                 if self.logger:
                                     self.logger.debug(f"[ShopeeServicesExport] 使用选择器找到记录: {selector}")
                                 break
@@ -891,7 +929,7 @@ class ShopeeServicesExport(ExportComponent):
                                 for container in possible_containers:
                                     try:
                                         cand_row = first_btn.locator(f'xpath=ancestor::{container}[1]')
-                                        if cand_row.count() > 0:
+                                        if await cand_row.count() > 0:
                                             latest_row = cand_row.first
                                             if self.logger:
                                                 self.logger.debug(f"[ShopeeServicesExport] 通过按钮找到容器: {container}")
@@ -916,8 +954,7 @@ class ShopeeServicesExport(ExportComponent):
                                 return btn_top.first
                         except Exception:
                             pass
-                        if await download_buttons_all.count() > 0:
-                            return download_buttons_all.first
+                        # 绂佹鍥為€€鍒板叏灞€绗竴涓笅杞芥寜閽?鍚﹀垯瀹规槗璇偣鍒板巻鍙茶褰?
 
                     # 心跳探测:每 3s 再尝试一次顶部“下载”
                     now_ts = datetime.now().timestamp()
@@ -1026,7 +1063,7 @@ class ShopeeServicesExport(ExportComponent):
             pass
         return params, method
 
-    def _api_fallback(self, page, spec: _VariantSpec, account_label: str, shop_name: str) -> tuple[bool, Optional[Path]]:
+    async def _api_fallback(self, page, spec: _VariantSpec, account_label: str, shop_name: str) -> tuple[bool, Optional[Path]]:
         try:
             # 1) 端点映射
             key = spec.key
@@ -1099,12 +1136,7 @@ class ShopeeServicesExport(ExportComponent):
             include_shop_id = get_config_value('data_collection', 'path_options.include_shop_id', False)
             shop_id = (self.ctx.config or {}).get("shop_id")
 
-            out_root = build_standard_output_root(
-                self.ctx,
-                data_type="services",
-                granularity=gran,
-            )
-            out_root.mkdir(parents=True, exist_ok=True)
+            out_root = self._build_services_output_root(gran, key)
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             tmp_name = f"services_{key}.xlsx"
@@ -1151,11 +1183,13 @@ class ShopeeServicesExport(ExportComponent):
             }
             """
 
-            with page.expect_download(timeout=90000) as dl_info:
-                page.evaluate(script, {"url": export_url, "method": har_method, "payloadOrQuery": params, "filename": tmp_name})
-            download = dl_info.value
+            async with page.expect_download(timeout=90000) as dl_info:
+                await page.evaluate(script, {"url": export_url, "method": har_method, "payloadOrQuery": params, "filename": tmp_name})
+            download = await dl_info.value
 
             # 4) 统一重命名
+            resolved_name = download.suggested_filename or tmp_name
+            resolved_suffix = Path(resolved_name).suffix or ".xlsx"
             target = out_root / build_filename(
                 ts=ts,
                 account_label=account_label,
@@ -1164,10 +1198,10 @@ class ShopeeServicesExport(ExportComponent):
                 granularity=gran,
                 start_date=cfg.get("start_date"),
                 end_date=cfg.get("end_date"),
-                suffix=".xlsx",
+                suffix=resolved_suffix,
             )
-            tmp_path = out_root / (download.suggested_filename or tmp_name)
-            download.save_as(str(tmp_path))
+            tmp_path = out_root / resolved_name
+            await download.save_as(str(tmp_path))
             try:
                 tmp_path.rename(target)
             except Exception:
@@ -1241,7 +1275,7 @@ class ShopeeServicesExport(ExportComponent):
             for sel in openers:
                 try:
                     el = page.locator(sel).first
-                    if el.count() > 0 and await el.is_visible():
+                    if await el.count() > 0 and await el.is_visible():
                         await el.click()
                         await page.wait_for_timeout(250)
                         opened = True
@@ -1265,7 +1299,7 @@ class ShopeeServicesExport(ExportComponent):
             for ps in panel_selectors:
                 try:
                     loc = page.locator(ps).first
-                    if loc.count() > 0:
+                    if await loc.count() > 0:
                         try:
                             await loc.wait_for(state="visible", timeout=1500)
                         except Exception:
@@ -1284,7 +1318,7 @@ class ShopeeServicesExport(ExportComponent):
                 for ps in panel_selectors:
                     try:
                         loc = page.locator(ps).first
-                        if loc.count() > 0 and await loc.is_visible():
+                        if await loc.count() > 0 and await loc.is_visible():
                             panel = loc
                             break
                     except Exception:
@@ -1305,7 +1339,7 @@ class ShopeeServicesExport(ExportComponent):
                 for sel in selectors:
                     try:
                         scope = panel.locator(sel).first if panel else page.locator(sel).first
-                        if scope.count() > 0 and await scope.is_visible():
+                        if await scope.count() > 0 and await scope.is_visible():
                             await scope.click()
                             await page.wait_for_timeout(500)
                             return True
@@ -1350,7 +1384,7 @@ class ShopeeServicesExport(ExportComponent):
             for sel in close_selectors:
                 try:
                     el = page.locator(sel).first
-                    if el.count() > 0 and await el.is_visible():
+                    if await el.count() > 0 and await el.is_visible():
                         await el.click()
                         await page.wait_for_timeout(200)
                         break
@@ -1378,11 +1412,11 @@ class ShopeeServicesExport(ExportComponent):
             for c in containers:
                 try:
                     cont = page.locator(c).first
-                    if cont.count() > 0 and await cont.is_visible():
+                    if await cont.count() > 0 and await cont.is_visible():
                         for g in gen_btns:
                             try:
                                 btn = cont.locator(g).first
-                                if btn.count() > 0 and await btn.is_visible():
+                                if await btn.count() > 0 and await btn.is_visible():
                                     if self.logger:
                                         self.logger.info(f"[ShopeeServicesExport] 点击生成按钮: {g}")
                                     await btn.click()
