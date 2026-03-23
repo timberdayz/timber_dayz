@@ -50,8 +50,8 @@ targets AS (
         COALESCE(tb.shop_id, '') AS shop_id,
         tb.period_start,
         tb.period_end,
-        COALESCE(SUM(tb.target_amount), 0) AS target_amount,
-        COALESCE(MAX(tb.achievement_rate), 0) AS achievement_rate
+        COALESCE(SUM(tb.target_amount)::numeric, 0::numeric) AS target_amount,
+        COALESCE(MAX(tb.achievement_rate)::numeric, 0::numeric) AS achievement_rate
     FROM a_class.target_breakdown tb
     INNER JOIN a_class.sales_targets st
         ON st.id = tb.target_id
@@ -73,7 +73,7 @@ SELECT
     CASE
         WHEN COALESCE(t.target_amount, 0) > 0
         THEN ROUND(b.gmv::numeric * 100.0 / t.target_amount, 2)
-        ELSE COALESCE(t.achievement_rate, 0)
+        ELSE COALESCE(t.achievement_rate, 0)::numeric
     END AS achievement_rate
 FROM base b
 LEFT JOIN targets t

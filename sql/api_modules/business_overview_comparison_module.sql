@@ -41,12 +41,12 @@ weekly AS (
 ),
 monthly_target AS (
     SELECT
-        to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
-        "店铺ID" AS shop_id,
-        COALESCE(SUM("目标销售额"), 0) AS target_sales_amount,
-        COALESCE(SUM("目标单量"), 0) AS target_sales_quantity
+        to_date(year_month || '-01', 'YYYY-MM-DD') AS period_month,
+        shop_id AS shop_id,
+        COALESCE(SUM(target_sales_amount), 0) AS target_sales_amount,
+        COALESCE(SUM(target_quantity), 0) AS target_sales_quantity
     FROM a_class.sales_targets_a
-    GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
+    GROUP BY to_date(year_month || '-01', 'YYYY-MM-DD'), shop_id
 ),
 monthly AS (
     SELECT

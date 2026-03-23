@@ -24,19 +24,19 @@ WITH day_anchors AS (
 ),
 monthly_targets AS (
     SELECT
-        to_date("骞存湀" || '-01', 'YYYY-MM-DD') AS period_month,
-        "搴楅摵ID" AS shop_id,
-        COALESCE(SUM("鐩爣閿€鍞"), 0) AS monthly_target
+        to_date(year_month || '-01', 'YYYY-MM-DD') AS period_month,
+        shop_id AS shop_id,
+        COALESCE(SUM(target_sales_amount), 0) AS monthly_target
     FROM a_class.sales_targets_a
-    GROUP BY to_date("骞存湀" || '-01', 'YYYY-MM-DD'), "搴楅摵ID"
+    GROUP BY to_date(year_month || '-01', 'YYYY-MM-DD'), shop_id
 ),
 monthly_costs AS (
     SELECT
-        to_date("骞存湀" || '-01', 'YYYY-MM-DD') AS period_month,
-        "搴楅摵ID" AS shop_id,
-        COALESCE(SUM("绉熼噾" + "宸ヨ祫" + "姘寸數璐? + "鍏朵粬鎴愭湰"), 0) AS estimated_expenses
+        to_date(year_month || '-01', 'YYYY-MM-DD') AS period_month,
+        shop_id AS shop_id,
+        COALESCE(SUM(rent + salary + utilities + other_costs), 0) AS estimated_expenses
     FROM a_class.operating_costs
-    GROUP BY to_date("骞存湀" || '-01', 'YYYY-MM-DD'), "搴楅摵ID"
+    GROUP BY to_date(year_month || '-01', 'YYYY-MM-DD'), shop_id
 ),
 daily_sales AS (
     SELECT

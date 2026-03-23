@@ -3,11 +3,11 @@ CREATE SCHEMA IF NOT EXISTS mart;
 CREATE OR REPLACE VIEW mart.annual_summary_shop_month AS
 WITH monthly_costs AS (
     SELECT
-        to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
-        "店铺ID" AS shop_id,
-        COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) AS total_cost
+        to_date(year_month || '-01', 'YYYY-MM-DD') AS period_month,
+        shop_id AS shop_id,
+        COALESCE(SUM(rent + salary + utilities + other_costs), 0) AS total_cost
     FROM a_class.operating_costs
-    GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
+    GROUP BY to_date(year_month || '-01', 'YYYY-MM-DD'), shop_id
 )
 SELECT
     m.period_month,

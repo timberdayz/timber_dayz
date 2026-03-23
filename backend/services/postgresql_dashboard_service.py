@@ -539,23 +539,39 @@ class PostgresqlDashboardService:
             raise ValueError("granularity must be monthly or yearly")
 
         if len(period) == 4:
-            year_month_filter = '"年月" LIKE :period_prefix'
+            year_month_filter = "year_month LIKE :period_prefix"
             db_params: dict[str, Any] = {"period_prefix": f"{period}-%"}
+            year_month_filter_cn = '"年月" LIKE :period_prefix'
         else:
-            year_month_filter = '"年月" = :period'
+            year_month_filter = "year_month = :period"
             db_params = {"period": period}
+            year_month_filter_cn = '"年月" = :period'
 
-        result = await db.execute(
-            text(
-                f"""
-                SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
-                       COALESCE(SUM("目标单量"), 0) AS target_orders
-                FROM a_class.sales_targets_a
-                WHERE {year_month_filter}
-                """
-            ),
-            db_params,
-        )
+        try:
+            result = await db.execute(
+                text(
+                    f"""
+                    SELECT COALESCE(SUM(target_sales_amount), 0) AS target_gmv,
+                           COALESCE(SUM(target_quantity), 0) AS target_orders
+                    FROM a_class.sales_targets_a
+                    WHERE {year_month_filter}
+                    """
+                ),
+                db_params,
+            )
+        except Exception:
+            await db.rollback()
+            result = await db.execute(
+                text(
+                    f"""
+                    SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
+                           COALESCE(SUM("目标单量"), 0) AS target_orders
+                    FROM a_class.sales_targets_a
+                    WHERE {year_month_filter_cn}
+                    """
+                ),
+                db_params,
+            )
         row = result.fetchone()
         target_gmv = float(row[0]) if row and row[0] is not None else 0.0
         target_orders = int(row[1]) if row and row[1] is not None else 0
