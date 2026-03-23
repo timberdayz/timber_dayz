@@ -798,50 +798,7 @@ if [ $? -ne 0 ]; then
 fi
 echo "[OK] Bootstrap completed successfully"
 
-# [ORDER] Phase 3 必须在 Nginx 之前：Metabase 使用 external 网络 xihong_erp_erp_network（Phase 1 已创建），
-# 且 Nginx 需在 Metabase 就绪后启动以便 /metabase/ 代理可达
-echo "[INFO] Phase 3: starting Metabase (required before Nginx)..."
-if [ -f docker-compose.metabase.yml ]; then
-  "${compose_cmd_base[@]}" up -d metabase
-  sleep 5
-  if docker ps --format "{{.Names}}" | grep -q "^xihong_erp_metabase$"; then
-    echo "[OK] Metabase container started"
-  else
-    echo "[WARN] Metabase container not found after start; check metabase logs"
-    docker logs xihong_erp_metabase --tail 50 2>&1 || true
-  fi
-else
-  echo "[FAIL] docker-compose.metabase.yml not found; Metabase is required in production"
-  exit 1
-fi
-
-# [METABASE] Phase 3.5: 等待 Metabase 健康后执行 init_metabase.py（创建/更新 Models 和 Questions）
-echo "[INFO] Phase 3.5: Waiting for Metabase to be ready, then running init_metabase.py..."
-METABASE_READY=0
-for i in $(seq 1 60); do
-  if docker exec xihong_erp_metabase curl -fsS http://localhost:3000/api/health 2>/dev/null | grep -q '"status":"ok"'; then
-    METABASE_READY=1
-    echo "[OK] Metabase is healthy"
-    break
-  fi
-  if [ "${i}" = "60" ]; then
-    echo "[WARN] Metabase health check timeout; will still attempt init_metabase.py (script has its own wait)"
-  fi
-  sleep 2
-done
-
-# 使用 backend 镜像运行 init_metabase.py（需能访问 Metabase；同网络下使用容器名）
-# METABASE_URL 使用容器名，因 Phase 3.5 时 metabase 由独立 compose 启动，run 容器通过网络访问
-# [FIX] 显式指定配置文件路径，确保容器内 /app/config/metabase_config.yaml 被使用（与 Dockerfile COPY config 一致）
-if "${compose_cmd_base[@]}" run --rm --no-deps \
-  -e METABASE_URL="${METABASE_URL:-http://xihong_erp_metabase:3000}" \
-  backend python3 /app/scripts/init_metabase.py --config /app/config/metabase_config.yaml 2>&1; then
-  echo "[OK] init_metabase.py completed successfully"
-else
-  echo "[WARN] init_metabase.py failed or returned non-zero; deployment continues (backend will fall back to env Question IDs)"
-fi
-
-echo "[INFO] Phase 4: starting application layer (backend, celery)..."
+echo "[INFO] Phase 3: starting application layer (backend, celery)..."
 "${compose_cmd_base[@]}" up -d backend celery-worker celery-beat celery-exporter
 
 echo "[INFO] Waiting for backend health..."
@@ -858,7 +815,7 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
-echo "[INFO] Phase 4b: starting frontend..."
+echo "[INFO] Phase 3b: starting frontend..."
 "${compose_cmd_base[@]}" up -d frontend
 
 echo "[INFO] Frontend health check (best-effort)..."
@@ -879,8 +836,7 @@ else
   echo "[INFO] Frontend container not found; skipping"
 fi
 
-# [ORDER] Phase 5 最后启动 Nginx：网关依赖 backend/frontend/metabase 均已就绪，且部署后需 reload 使 nginx.prod.conf 生效
-echo "[INFO] Phase 5: starting gateway (Nginx, last)..."
+echo "[INFO] Phase 4: starting gateway (Nginx, last)..."
 "${compose_cmd_base[@]}" up -d nginx
 
 echo "[INFO] Nginx health check (host, best-effort)..."
@@ -905,6 +861,14 @@ if docker ps --format '{{.Names}}' | grep -q 'xihong_erp_nginx'; then
   fi
 fi
 
+# [LEGACY CLEANUP] PostgreSQL Dashboard production no longer depends on Metabase.
+if docker ps -a --format '{{.Names}}' | grep -q '^xihong_erp_metabase$'; then
+  echo "[INFO] Removing legacy Metabase container..."
+  docker stop xihong_erp_metabase 2>/dev/null || true
+  docker rm xihong_erp_metabase 2>/dev/null || true
+  echo "[OK] Legacy Metabase container removed"
+fi
+
 # [IMAGE_CLEANUP] Clean up old Docker images (keep latest N versions)
 # 在部署成功后执行清理，释放磁盘空间
 cleanup_old_images
@@ -917,4 +881,3 @@ if [ -f "${PRODUCTION_PATH}/.env.cleaned" ]; then
   echo "[OK] Cleaned up .env.cleaned file"
 fi
 echo "[OK] Deployment completed. Tags: Backend=${BACKEND_TAG}, Frontend=${FRONTEND_TAG}"
-
