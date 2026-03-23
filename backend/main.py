@@ -39,8 +39,7 @@ import asyncio  # v4.3.3新增:支持后台任务
 from typing import List, Optional
 
 # 导入路由(全部启用 - v4.1.0优化后)
-# [WARN] v4.6.0 DSS架构重构:已删除废弃的API(metrics, store_analytics, main_views, materialized_views, field_mapping_dictionary_mv_display)
-# [OK] v4.6.0 DSS架构重构:dashboard_api已恢复,通过Metabase Question查询提供数据
+# Legacy cleanup notes for previously removed dashboard APIs.
 from backend.routers import (
     permissions,  # v4.20.0: 权限树API
     permission,  # v4.20.0: 权限列表API
@@ -55,10 +54,10 @@ from backend.routers import (
     data_quarantine,  # v4.6.0: 数据隔离区API
     data_quality,  # C类数据核心字段优化计划: 数据质量监控API
     config_management,  # Phase 3: A类数据管理API(销售目标、战役目标、经营成本)
-    # superset_proxy,  # 已移除 - 迁移到Metabase
+    # superset_proxy,  # 已移除
     metabase_proxy,  # Phase 2: Metabase代理API
     dashboard_api,
-    dashboard_api_postgresql,  # v4.6.0 DSS架构:Dashboard API(通过Metabase Question查询)
+    dashboard_api_postgresql,  # PostgreSQL-first dashboard API
     hr_management,  # Phase 3: HR管理API(员工管理、员工目标、考勤记录、绩效查询)
     test_api,
     inventory,
@@ -77,7 +76,7 @@ from backend.routers import (
     notification_config,  # v4.20.0: 通知配置API
     account_alignment,  # v4.3.6: 账号对齐API
     # procurement,  # v4.17.0: 已删除(财务域表已删除,API路由已移除)
-    # [WARN] v4.12.0移除:数据浏览器API已移除,使用Metabase替代
+    # [WARN] v4.12.0移除:旧数据浏览器API已移除
     # data_browser,  # v4.7.0: 数据库浏览器API
     sales_campaign,  # v4.11.0: 销售战役管理API
     target_management,  # v4.11.0: 目标管理API
@@ -405,8 +404,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"[ERROR] 系统启动失败: {e}")
         raise
     
-    # [WARN] v4.6.0 DSS架构重构:物化视图和C类数据计算已迁移到Metabase
-    # 不再需要后端调度器,Metabase直接查询PostgreSQL原始表
+        # Legacy dashboard scheduler notes retained for historical context only.
     
     yield
     
@@ -674,7 +672,6 @@ async def root():
 
 # 注册路由(全部启用 - v4.1.0优化版)
 
-# [OK] v4.6.0 DSS架构重构:dashboard_api已恢复,通过Metabase Question查询提供数据
 if USE_POSTGRESQL_DASHBOARD_ROUTER:
     logger.info("Dashboard router source: PostgreSQL")
     app.include_router(
@@ -958,7 +955,7 @@ app.include_router(
 #     tags=["采购管理"]
 # )
 
-# [WARN] v4.12.0移除:数据浏览器API已移除,使用Metabase替代(http://localhost:8080)
+# [WARN] v4.12.0移除:旧数据浏览器API已移除
 # v4.7.0 数据库浏览器API(查看已入库数据)
 # app.include_router(
 #     data_browser.router,
@@ -967,7 +964,7 @@ app.include_router(
 # )
 
 # v4.8.0 物化视图管理API(刷新、状态查询)
-# [WARN] v4.6.0 DSS架构重构:已删除materialized_views(Metabase直接查询原始表,不再需要物化视图)
+# [WARN] v4.6.0后旧materialized_views路由已删除
 
 # v4.11.0 销售战役管理API
 app.include_router(
@@ -997,7 +994,7 @@ app.include_router(
     tags=["绩效管理"]
 )
 
-# [WARN] v4.6.0 DSS架构重构:已删除store_analytics(使用Metabase Dashboard替代)
+# [WARN] v4.6.0后旧store_analytics路由已删除
 
 # v4.11.5 原始数据层查看API
 app.include_router(
@@ -1016,7 +1013,7 @@ app.include_router(
     tags=["数据流转追踪"]
 )
 
-# [WARN] v4.6.0 DSS架构重构:已删除metrics(使用Metabase Question API替代)
+# [WARN] v4.6.0后旧metrics路由已删除
 
 # v4.11.5 数据一致性验证API
 app.include_router(
@@ -1024,7 +1021,7 @@ app.include_router(
     tags=["数据一致性验证"]
 )
 
-# [WARN] v4.6.0 DSS架构重构:已删除main_views(使用Metabase直接查询原始表替代)
+# [WARN] v4.6.0后旧main_views路由已删除
 
 # [*] v4.12.0新增:数据库设计规范验证API
 app.include_router(
