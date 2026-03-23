@@ -186,19 +186,23 @@ async def get_business_overview_traffic_ranking_postgresql(
     request: Request,
     granularity: str = Query(..., description="时间粒度"),
     dimension: str = Query("visitor", description="排序维度"),
-    date: str = Query(..., description="日期"),
+    date: Optional[str] = Query(None, description="日期"),
+    date_value: Optional[str] = Query(None, description="legacy date alias"),
     platforms: Optional[str] = Query(None, description="平台代码(逗号分隔)"),
     shops: Optional[str] = Query(None, description="店铺ID(逗号分隔)"),
 ):
     try:
-        params = {"granularity": granularity, "dimension": dimension, "date": date}
+        target_date = date or date_value
+        if not target_date:
+            raise ValueError("date is required")
+        params = {"granularity": granularity, "dimension": dimension, "date": target_date}
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
             service = get_postgresql_dashboard_service()
             result = await service.get_business_overview_traffic_ranking(
                 granularity=granularity,
-                target_date=date,
+                target_date=target_date,
                 dimension=dimension,
             )
             return json.loads(success_response(data=result).body.decode())

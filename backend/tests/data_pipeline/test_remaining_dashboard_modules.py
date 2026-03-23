@@ -46,6 +46,12 @@ def test_business_overview_traffic_ranking_module_sql_asset():
     assert "0::numeric AS page_views" not in sql_text
 
 
+def test_business_overview_frontend_traffic_ranking_uses_date_query_param():
+    text = Path("frontend/src/views/BusinessOverview.vue").read_text(encoding="utf-8")
+    assert "date_value:" not in text
+    assert "date: dateStr" in text
+
+
 def test_business_overview_operational_metrics_module_sql_asset():
     _assert_sql_asset(
         "sql/api_modules/business_overview_operational_metrics_module.sql",

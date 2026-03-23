@@ -107,7 +107,7 @@ settings = get_settings()
 
 _TRUE_VALUES = ("1", "true", "yes", "on")
 USE_POSTGRESQL_DASHBOARD_ROUTER = os.getenv(
-    "USE_POSTGRESQL_DASHBOARD_ROUTER", ""
+    "USE_POSTGRESQL_DASHBOARD_ROUTER", "true"
 ).lower() in _TRUE_VALUES
 ENABLE_METABASE_PROXY = os.getenv("ENABLE_METABASE_PROXY", "").lower() in _TRUE_VALUES
 

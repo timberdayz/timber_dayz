@@ -47,3 +47,20 @@ def test_main_can_enable_metabase_proxy(monkeypatch):
 
     monkeypatch.delenv("ENABLE_METABASE_PROXY", raising=False)
     importlib.reload(main_module)
+
+
+def test_main_defaults_to_postgresql_dashboard_router(monkeypatch):
+    import backend.main as main_module
+
+    monkeypatch.delenv("USE_POSTGRESQL_DASHBOARD_ROUTER", raising=False)
+    reloaded = importlib.reload(main_module)
+
+    dashboard_route = next(
+        route
+        for route in reloaded.app.routes
+        if getattr(route, "path", None) == "/api/dashboard/business-overview/kpi"
+    )
+
+    assert dashboard_route.endpoint.__module__ == "backend.routers.dashboard_api_postgresql"
+
+    importlib.reload(main_module)

@@ -2,6 +2,9 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
 from backend.routers.dashboard_api_postgresql import (
@@ -249,6 +252,48 @@ def test_postgresql_traffic_ranking_route_returns_service_payload(monkeypatch):
     body = json.loads(response.body.decode("utf-8"))
     assert body["success"] is True
     assert body["data"][0]["rank"] == 1
+
+
+@pytest.mark.asyncio
+async def test_postgresql_traffic_ranking_route_accepts_date_value_alias(monkeypatch):
+    captured = {}
+
+    class _ServiceStub:
+        async def get_business_overview_traffic_ranking(self, granularity, target_date, dimension):
+            captured["granularity"] = granularity
+            captured["target_date"] = target_date
+            captured["dimension"] = dimension
+            return [{"name": "shop-a", "visitor_count": 100, "rank": 1}]
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    app = FastAPI()
+    app.include_router(router)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/api/dashboard/business-overview/traffic-ranking",
+            params={
+                "granularity": "monthly",
+                "dimension": "shop",
+                "date_value": "2026-03-01",
+            },
+        )
+
+    body = json.loads(response.content.decode("utf-8"))
+    assert response.status_code == 200
+    assert body["success"] is True
+    assert captured == {
+        "granularity": "monthly",
+        "target_date": "2026-03-01",
+        "dimension": "shop",
+    }
 
 
 def test_postgresql_operational_metrics_route_returns_service_payload(monkeypatch):
