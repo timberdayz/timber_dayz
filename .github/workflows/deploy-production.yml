@@ -525,7 +525,7 @@ jobs:
                   echo "[INFO] Skipping legacy config/$bn in PostgreSQL-first production deployment"
                   continue
                 fi
-                scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/${bn}" || true
+                scp_with_retry "$f" "${PRODUCTION_PATH}/config/${bn}" || true
               done
             fi
           else
@@ -788,7 +788,7 @@ jobs:
                   echo "[INFO] Skipping legacy config/$bn in PostgreSQL-first production deployment"
                   continue
                 fi
-                scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/${bn}" || true
+                scp_with_retry "$f" "${PRODUCTION_PATH}/config/${bn}" || true
               done
             fi
           else

@@ -76,3 +76,16 @@ def test_backend_dockerfile_includes_ops_dashboard_scripts():
     assert "COPY sql/mart /app/sql/mart" in text
     assert "COPY sql/api_modules /app/sql/api_modules" in text
     assert "COPY scripts/init_metabase.py" not in text
+
+
+def test_deploy_workflow_config_sync_uses_plain_remote_path_in_scp_helper():
+    text = Path(".github/workflows/deploy-production.yml").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert 'scp_with_retry "$f" "${PRODUCTION_PATH}/config/${bn}"' in text
+    assert (
+        'scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/${bn}"'
+        not in text
+    )
