@@ -61,3 +61,4 @@ def test_backend_dockerfile_includes_ops_dashboard_scripts():
 
     assert "check_postgresql_dashboard_ops.py" in text
     assert "smoke_postgresql_dashboard_routes.py" in text
+    assert "COPY scripts/init_metabase.py" not in text

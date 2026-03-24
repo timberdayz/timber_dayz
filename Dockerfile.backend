@@ -42,7 +42,6 @@ COPY alembic.ini /app/alembic.ini
 RUN mkdir -p /app/scripts /app/sql
 COPY scripts/create_admin_user.py /app/scripts/create_admin_user.py
 COPY scripts/bootstrap_production.py /app/scripts/bootstrap_production.py
-COPY scripts/init_metabase.py /app/scripts/init_metabase.py
 COPY scripts/check_postgresql_dashboard_ops.py /app/scripts/check_postgresql_dashboard_ops.py
 COPY scripts/smoke_postgresql_dashboard_routes.py /app/scripts/smoke_postgresql_dashboard_routes.py
 COPY scripts/verify_schema_consistency.py /app/scripts/verify_schema_consistency.py
