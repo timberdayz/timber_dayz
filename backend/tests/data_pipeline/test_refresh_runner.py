@@ -30,6 +30,29 @@ def test_split_sql_statements_handles_multiple_create_statements():
     ]
 
 
+def test_split_sql_statements_handles_tagged_dollar_quotes():
+    from backend.services.data_pipeline.sql_loader import split_sql_statements
+
+    statements = split_sql_statements(
+        """
+        DO $block$
+        BEGIN
+            EXECUTE $view$
+                CREATE OR REPLACE VIEW api.example AS
+                SELECT ';' AS value
+            $view$;
+        END
+        $block$;
+        CREATE TABLE IF NOT EXISTS ops.example_c (id BIGINT);
+        """
+    )
+
+    assert statements == [
+        "DO $block$\n        BEGIN\n            EXECUTE $view$\n                CREATE OR REPLACE VIEW api.example AS\n                SELECT ';' AS value\n            $view$;\n        END\n        $block$",
+        "CREATE TABLE IF NOT EXISTS ops.example_c (id BIGINT)",
+    ]
+
+
 def test_refresh_registry_exposes_dependency_order():
     from backend.services.data_pipeline.refresh_registry import (
         PIPELINE_DEPENDENCIES,
