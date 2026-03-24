@@ -17,6 +17,18 @@
   box-sizing: border-box;
 }
 
+.erp-page--dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.erp-page--admin {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
 /* 内容区域容器 */
 .erp-content-container {
   max-width: 1400px;
@@ -184,6 +196,119 @@
 
 .erp-panel-compact {
   padding: 16px;
+}
+
+/* ========================================
+   通用布局工具类
+   ======================================== */
+
+.erp-w-full {
+  width: 100%;
+}
+
+.erp-w-120 {
+  width: 120px;
+}
+
+.erp-w-150 {
+  width: 150px;
+}
+
+.erp-w-160 {
+  width: 160px;
+}
+
+.erp-w-180 {
+  width: 180px;
+}
+
+.erp-w-200 {
+  width: 200px;
+}
+
+.erp-w-240 {
+  width: 240px;
+}
+
+.erp-w-250 {
+  width: 250px;
+}
+
+.erp-w-300 {
+  width: 300px;
+}
+
+.erp-w-360 {
+  width: 360px;
+}
+
+.erp-mt-sm {
+  margin-top: 10px;
+}
+
+.erp-mt-md {
+  margin-top: 15px;
+}
+
+.erp-mt-lg {
+  margin-top: 20px;
+}
+
+.erp-mb-sm {
+  margin-bottom: 10px;
+}
+
+.erp-mb-md {
+  margin-bottom: 15px;
+}
+
+.erp-mb-lg {
+  margin-bottom: 20px;
+}
+
+.erp-ml-sm {
+  margin-left: 10px;
+}
+
+.erp-mr-xs {
+  margin-right: 4px;
+}
+
+.erp-flex-spacer {
+  flex: 1;
+}
+
+.erp-flex-wrap {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.erp-flex-wrap-gap-sm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.erp-text-muted {
+  color: #999;
+}
+
+.erp-text-success {
+  color: #67c23a;
+}
+
+.erp-text-danger {
+  color: #f56c6c;
+}
+
+.erp-text-secondary-small {
+  color: #666;
+  font-size: 12px;
+}
+
+.erp-tag-gap {
+  margin-right: 5px;
+  margin-bottom: 5px;
 }
 
 /* ========================================

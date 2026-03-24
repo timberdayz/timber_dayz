@@ -1,15 +1,12 @@
 <template>
-  <div class="sessions-page">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">
-          <el-icon><Monitor /></el-icon>
-          会话管理
-        </h1>
-        <p class="page-subtitle">查看和管理您的活跃登录会话</p>
-      </div>
-      <div class="header-actions">
+  <div class="sessions-page erp-page-container erp-page--admin">
+    <PageHeader
+      title="会话管理"
+      subtitle="查看和管理当前账号的活跃登录会话与设备状态。"
+      :icon="Monitor"
+      family="admin"
+    >
+      <template #actions>
         <el-button type="danger" @click="revokeAllOtherSessions" :loading="revokingAll">
           <el-icon><SwitchButton /></el-icon>
           登出所有其他设备
@@ -18,8 +15,8 @@
           <el-icon><Refresh /></el-icon>
           刷新
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 会话列表 -->
     <div class="sessions-content">
@@ -117,6 +114,7 @@ import {
   MapLocation
 } from '@element-plus/icons-vue'
 import usersApi from '@/api/users.js'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 // 响应式数据
 const sessions = ref([])
@@ -309,45 +307,8 @@ onMounted(() => {
 
 <style scoped>
 .sessions-page {
-  padding: 20px;
   background-color: #f5f7fa;
-  min-height: calc(100vh - 100px);
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  padding: 20px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.header-content {
-  flex: 1;
-}
-
-.page-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.page-subtitle {
-  margin: 8px 0 0 0;
-  font-size: 14px;
-  color: #909399;
-}
-
-.header-actions {
-  display: flex;
-  gap: 10px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .sessions-content {
@@ -451,17 +412,6 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 16px;
-  }
-
-  .header-actions {
-    width: 100%;
-    justify-content: flex-end;
-  }
-
   .session-details {
     grid-template-columns: 1fr;
   }

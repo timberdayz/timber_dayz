@@ -1,17 +1,17 @@
 <template>
-  <div class="business-overview">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <p class="page-subtitle">实时监控核心业务指标，洞察业务发展趋势</p>
-      </div>
-      <div class="header-actions">
+  <div class="business-overview erp-page-container erp-page--dashboard">
+    <PageHeader
+      title="业务概览"
+      subtitle="实时监控核心业务指标，洞察业务发展趋势。页面级刷新保留在页面本身，不走全局壳层刷新。"
+      family="dashboard"
+    >
+      <template #actions>
         <el-button type="primary" @click="refreshData" :loading="loading">
           <el-icon><Refresh /></el-icon>
           刷新数据
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 全局日期（页面级主控，各模块可跟随或手动覆盖） -->
     <div class="global-date-bar">
@@ -65,7 +65,7 @@
           value-format="YYYY-MM-01"
           placeholder="选择月份"
           size="small"
-          style="width: 140px"
+          class="control-w-140"
           @change="onKpiMonthChange"
         />
         <el-select
@@ -73,7 +73,7 @@
           placeholder="全部平台"
           clearable
           size="small"
-          style="width: 120px"
+          class="control-w-120"
           @change="onKpiFilterChange"
         >
           <el-option label="全部平台" value="" />
@@ -147,7 +147,7 @@
                 value-format="YYYY-MM-DD"
                 placeholder="选择日期"
                 size="small"
-                style="width: 140px"
+                class="control-w-140"
                 @change="onOperationalDateChange"
               />
               <el-button
@@ -290,7 +290,7 @@
                     :value-format="datePickerValueFormat"
                     :placeholder="datePickerPlaceholder"
                     size="small"
-                    style="margin-left: 12px; width: 150px"
+                    class="control-offset control-w-150"
                     @change="onComparisonDateChange"
                   />
                 </div>
@@ -328,7 +328,7 @@
                 <el-table
                   :data="comparisonTableData"
                   stripe
-                  style="width: 100%"
+                  class="erp-w-full"
                   size="small"
                   border
                   :show-header="true"
@@ -423,12 +423,12 @@
                     <el-radio-button label="weekly">周</el-radio-button>
                     <el-radio-button label="monthly">月</el-radio-button>
                   </el-radio-group>
-                  <el-radio-group
-                    v-model="racingGroupBy"
-                    size="small"
-                    style="margin-left: 12px"
-                    @change="loadShopRacingData"
-                  >
+                <el-radio-group
+                  v-model="racingGroupBy"
+                  size="small"
+                  class="control-offset"
+                  @change="loadShopRacingData"
+                >
                     <el-radio-button label="shop">店铺</el-radio-button>
                     <el-radio-button label="platform">账号</el-radio-button>
                   </el-radio-group>
@@ -439,14 +439,14 @@
                     :value-format="shopRacingDatePickerValueFormat"
                     :placeholder="shopRacingDatePickerPlaceholder"
                     size="small"
-                    style="margin-left: 12px; width: 150px"
+                    class="control-offset control-w-150"
                     @change="onShopRacingDateChange"
                   />
                   <el-button
                     size="small"
                     @click="loadShopRacingData"
                     :loading="loadingShopRacing"
-                    style="margin-left: 12px"
+                    class="control-offset"
                   >
                     <el-icon><Refresh /></el-icon>
                     刷新
@@ -458,7 +458,7 @@
               <el-table
                 :data="shopRacingData"
                 stripe
-                style="width: 100%"
+                class="erp-w-full"
                 size="small"
               >
                 <el-table-column prop="name" label="名称" width="120" />
@@ -537,7 +537,7 @@
               <el-radio-group
                 v-model="trafficRankingDimension"
                 size="small"
-                style="margin-left: 12px"
+                class="control-offset"
                 @change="loadTrafficRanking"
               >
                 <el-radio-button label="shop">店铺</el-radio-button>
@@ -550,13 +550,13 @@
                 :value-format="trafficRankingDatePickerValueFormat"
                 :placeholder="trafficRankingDatePickerPlaceholder"
                 size="small"
-                style="margin-left: 12px; width: 150px"
+                class="control-offset control-w-150"
                 @change="onTrafficRankingDateChange"
               />
               <el-button
                 size="small"
                 @click="loadTrafficRanking"
-                style="margin-left: 12px"
+                class="control-offset"
               >
                 <el-icon><Refresh /></el-icon>
                 刷新
@@ -573,10 +573,9 @@
         <el-table
           :data="trafficRankingData"
           stripe
-          style="width: 100%"
+          class="erp-w-full erp-table"
           size="small"
           v-loading="loadingTrafficRanking"
-          class="erp-table"
         >
           <el-table-column
             prop="rank"
@@ -770,7 +769,7 @@
           <el-table
             :data="inventoryBacklogProducts"
             stripe
-            style="width: 100%"
+            class="erp-w-full"
             size="small"
           >
             <el-table-column
@@ -871,7 +870,7 @@
                     value-format="YYYY-MM"
                     placeholder="选择月份"
                     size="small"
-                    style="width: 150px"
+                    class="control-w-150"
                     @change="onClearanceMonthChange"
                   />
                   <el-button
@@ -887,10 +886,9 @@
             <el-table
               :data="monthlyClearanceRanking"
               stripe
-              style="width: 100%"
+              class="erp-w-full erp-table"
               size="small"
               v-loading="loadingClearanceRanking"
-              class="erp-table"
             >
               <el-table-column
                 prop="rank"
@@ -1000,7 +998,7 @@
                     format="YYYY 第 ww 周"
                     placeholder="选择周"
                     size="small"
-                    style="width: 160px"
+                    class="control-w-160"
                     @change="onClearanceWeekChange"
                   />
                   <el-button
@@ -1016,10 +1014,9 @@
             <el-table
               :data="weeklyClearanceRanking"
               stripe
-              style="width: 100%"
+              class="erp-w-full erp-table"
               size="small"
               v-loading="loadingClearanceRanking"
-              class="erp-table"
             >
               <el-table-column
                 prop="rank"
@@ -1116,6 +1113,7 @@ import {
   handleApiError,
 } from "@/utils/errorHandler";
 import { normalizeClearanceRankingResponse } from "@/utils/businessOverviewData";
+import PageHeader from "@/components/common/PageHeader.vue";
 
 // 响应式数据
 const loading = ref(false);
@@ -2500,20 +2498,8 @@ onMounted(() => {
 
 <style scoped>
 .business-overview {
-  padding: 20px;
   background-color: #f5f7fa;
-  min-height: 100vh;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-  padding: 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 12px;
-  color: white;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .global-date-bar {
@@ -2538,15 +2524,24 @@ onMounted(() => {
   width: 150px;
 }
 
-.header-content .page-subtitle {
-  font-size: 16px;
-  opacity: 0.9;
-  margin: 0;
+.control-w-120 {
+  width: 120px;
 }
 
-.header-actions {
-  display: flex;
-  gap: 12px;
+.control-w-140 {
+  width: 140px;
+}
+
+.control-w-150 {
+  width: 150px;
+}
+
+.control-w-160 {
+  width: 160px;
+}
+
+.control-offset {
+  margin-left: 12px;
 }
 
 .kpi-section {
@@ -2903,17 +2898,6 @@ onMounted(() => {
 
 /* 响应式设计 */
 @media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    gap: 16px;
-    text-align: center;
-  }
-
-  .header-actions {
-    width: 100%;
-    justify-content: center;
-  }
-
   .kpi-content {
     flex-direction: column;
     text-align: center;

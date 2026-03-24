@@ -1,20 +1,18 @@
 <template>
-  <div class="notification-config">
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">
-          <el-icon><Bell /></el-icon>
-          通知配置
-        </h1>
-        <p class="page-subtitle">管理系统通知配置，包括SMTP服务器、通知模板和告警规则</p>
-      </div>
-      <div class="header-actions">
+  <div class="notification-config erp-page-container erp-page--admin">
+    <PageHeader
+      title="通知配置"
+      subtitle="管理系统通知配置，包括 SMTP 服务器、通知模板和告警规则。"
+      :icon="Bell"
+      family="admin"
+    >
+      <template #actions>
         <el-button @click="refreshAll" :loading="loading">
           <el-icon><Refresh /></el-icon>
           刷新
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
       <!-- SMTP配置 -->
@@ -75,7 +73,7 @@
               </el-button>
             </div>
           </template>
-          <el-table :data="templates" style="width: 100%" v-loading="loading">
+          <el-table :data="templates" class="erp-w-full" v-loading="loading">
             <el-table-column prop="template_name" label="模板名称"></el-table-column>
             <el-table-column prop="template_type" label="类型"></el-table-column>
             <el-table-column prop="subject" label="主题"></el-table-column>
@@ -108,7 +106,7 @@
               </el-button>
             </div>
           </template>
-          <el-table :data="alertRules" style="width: 100%" v-loading="loading">
+          <el-table :data="alertRules" class="erp-w-full" v-loading="loading">
             <el-table-column prop="rule_name" label="规则名称"></el-table-column>
             <el-table-column prop="alert_level" label="告警级别" width="120">
               <template #default="{ row }">
@@ -142,6 +140,7 @@ import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import { Bell, Refresh, Check, Plus } from "@element-plus/icons-vue";
 import * as systemAPI from "@/api/system";
+import PageHeader from "@/components/common/PageHeader.vue";
 
 const loading = ref(false);
 const testing = ref(false);
@@ -319,28 +318,7 @@ onMounted(() => {
 
 <style scoped>
 .notification-config {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.page-subtitle {
-  color: #909399;
-  margin: 0;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .card-header {

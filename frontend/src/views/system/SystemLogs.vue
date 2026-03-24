@@ -1,15 +1,12 @@
 <template>
-  <div class="system-logs">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">
-          <el-icon><Document /></el-icon>
-          系统日志
-        </h1>
-        <p class="page-subtitle">系统操作日志和审计追踪</p>
-      </div>
-      <div class="header-actions">
+  <div class="system-logs erp-page-container erp-page--admin">
+    <PageHeader
+      title="系统日志"
+      subtitle="查看系统操作日志、审计追踪和筛选后的导出结果。"
+      :icon="Document"
+      family="admin"
+    >
+      <template #actions>
         <el-button type="primary" @click="loadLogs" :loading="loading">
           <el-icon><Refresh /></el-icon>
           刷新日志
@@ -22,8 +19,8 @@
           <el-icon><Delete /></el-icon>
           清空日志
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 日志筛选 -->
     <el-card class="filter-card" shadow="hover">
@@ -88,7 +85,7 @@
         :data="logs"
         v-loading="loading"
         stripe
-        style="width: 100%"
+        class="erp-w-full"
         :default-sort="{ prop: 'created_at', order: 'descending' }"
       >
         <el-table-column prop="created_at" label="时间" width="180" sortable>
@@ -137,7 +134,7 @@
         :total="pagination.total"
         :page-sizes="[10, 20, 50, 100]"
         layout="total, sizes, prev, pager, next, jumper"
-        style="margin-top: 20px; justify-content: flex-end;"
+        class="logs-pagination"
         @size-change="handlePageChange"
         @current-change="handlePageChange"
       />
@@ -183,6 +180,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, Refresh, Download, Delete, Search, RefreshLeft } from '@element-plus/icons-vue'
 import * as systemAPI from '@/api/system'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 // 响应式数据
 const loading = ref(false)
@@ -358,45 +356,8 @@ onMounted(() => {
 
 <style scoped>
 .system-logs {
-  padding: 20px;
   background-color: #f5f7fa;
-  min-height: 100vh;
-}
-
-.page-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 20px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-content {
-  flex: 1;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.page-subtitle {
-  margin: 0;
-  opacity: 0.9;
-  font-size: 14px;
-}
-
-.header-actions {
-  display: flex;
-  gap: 10px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .filter-card {
@@ -438,23 +399,17 @@ onMounted(() => {
   white-space: pre-wrap;
 }
 
+.logs-pagination {
+  margin-top: 20px;
+  justify-content: flex-end;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .system-logs {
     padding: 10px;
   }
-  
-  .page-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 15px;
-  }
-  
-  .header-actions {
-    width: 100%;
-    flex-wrap: wrap;
-  }
-  
+
   .filter-form {
     flex-direction: column;
   }

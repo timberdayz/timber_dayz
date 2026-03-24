@@ -1,20 +1,18 @@
 <template>
-  <div class="system-maintenance">
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">
-          <el-icon><Tools /></el-icon>
-          系统维护
-        </h1>
-        <p class="page-subtitle">执行系统维护操作，包括缓存清理、数据清理和系统升级检查</p>
-      </div>
-      <div class="header-actions">
+  <div class="system-maintenance erp-page-container erp-page--admin">
+    <PageHeader
+      title="系统维护"
+      subtitle="执行系统维护操作，包括缓存清理、数据清理和系统升级检查。"
+      :icon="Tools"
+      family="admin"
+    >
+      <template #actions>
         <el-button @click="refreshStatus" :loading="loading">
           <el-icon><Refresh /></el-icon>
           刷新状态
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <el-row :gutter="20">
       <!-- 缓存管理 -->
@@ -40,7 +38,7 @@
               </el-descriptions-item>
             </el-descriptions>
           </div>
-          <div class="action-buttons" style="margin-top: 20px">
+          <div class="action-buttons erp-mt-lg">
             <el-button type="warning" @click="clearCache" :loading="loading">
               <el-icon><Delete /></el-icon>
               清理缓存
@@ -70,7 +68,7 @@
               </el-descriptions-item>
             </el-descriptions>
           </div>
-          <div class="action-buttons" style="margin-top: 20px">
+          <div class="action-buttons erp-mt-lg">
             <el-button type="danger" @click="cleanData" :loading="loading">
               <el-icon><Delete /></el-icon>
               清理数据
@@ -81,7 +79,7 @@
     </el-row>
 
     <!-- 系统升级 -->
-    <el-card class="upgrade-card" shadow="hover" style="margin-top: 20px">
+    <el-card class="upgrade-card erp-mt-lg" shadow="hover">
       <template #header>
         <div class="card-header">
           <span>系统升级</span>
@@ -95,13 +93,13 @@
           show-icon
           :closable="false"
         />
-        <div style="margin-top: 20px">
+        <div class="erp-mt-lg">
           <el-button type="info" @click="checkUpgrade" :loading="loading">
             <el-icon><Search /></el-icon>
             检查更新
           </el-button>
         </div>
-        <div v-if="upgradeInfo" style="margin-top: 20px">
+        <div v-if="upgradeInfo" class="erp-mt-lg">
           <el-descriptions :column="1" border>
             <el-descriptions-item label="当前版本">
               {{ upgradeInfo.current_version || '未知' }}
@@ -124,6 +122,7 @@ import { ref, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Tools, Refresh, Delete, Search } from "@element-plus/icons-vue";
 import * as systemAPI from "@/api/system";
+import PageHeader from "@/components/common/PageHeader.vue";
 
 const loading = ref(false);
 const cacheStatus = ref({
@@ -276,28 +275,7 @@ onMounted(() => {
 
 <style scoped>
 .system-maintenance {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.page-subtitle {
-  color: #909399;
-  margin: 0;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .card-header {

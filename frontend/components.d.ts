@@ -82,6 +82,7 @@ declare module 'vue' {
     JsonViewer: typeof import('./src/components/common/JsonViewer.vue')['default']
     MetabaseChart: typeof import('./src/components/charts/MetabaseChart.vue')['default']
     NotificationBell: typeof import('./src/components/common/NotificationBell.vue')['default']
+    PageHeader: typeof import('./src/components/common/PageHeader.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     Sidebar: typeof import('./src/components/common/Sidebar.vue')['default']

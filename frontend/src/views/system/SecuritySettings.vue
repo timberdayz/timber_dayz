@@ -1,21 +1,18 @@
 <template>
-  <div class="security-settings">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">
-          <el-icon><Lock /></el-icon>
-          安全设置
-        </h1>
-        <p class="page-subtitle">管理系统安全配置，包括密码策略、登录限制、会话管理和双因素认证</p>
-      </div>
-      <div class="header-actions">
+  <div class="security-settings erp-page-container erp-page--admin">
+    <PageHeader
+      title="安全设置"
+      subtitle="管理系统安全配置，包括密码策略、登录限制、会话管理和双因素认证。"
+      :icon="Lock"
+      family="admin"
+    >
+      <template #actions>
         <el-button @click="refreshAll" :loading="loading">
           <el-icon><Refresh /></el-icon>
           刷新
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 功能导航 -->
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
@@ -39,7 +36,7 @@
                 :max="128"
                 controls-position="right"
               ></el-input-number>
-              <el-text type="info" style="margin-left: 10px">建议至少8个字符</el-text>
+              <el-text type="info" class="erp-ml-sm">建议至少8个字符</el-text>
             </el-form-item>
             <el-form-item label="密码复杂度要求">
               <el-checkbox-group v-model="passwordPolicy.requirements">
@@ -56,7 +53,7 @@
                 :max="365"
                 controls-position="right"
               ></el-input-number>
-              <el-text type="info" style="margin-left: 10px">0表示永不过期</el-text>
+              <el-text type="info" class="erp-ml-sm">0表示永不过期</el-text>
             </el-form-item>
             <el-form-item label="密码历史记录数">
               <el-input-number
@@ -65,7 +62,7 @@
                 :max="10"
                 controls-position="right"
               ></el-input-number>
-              <el-text type="info" style="margin-left: 10px">禁止使用最近N个历史密码</el-text>
+              <el-text type="info" class="erp-ml-sm">禁止使用最近N个历史密码</el-text>
             </el-form-item>
           </el-form>
         </el-card>
@@ -91,7 +88,7 @@
                 :max="10"
                 controls-position="right"
               ></el-input-number>
-              <el-text type="info" style="margin-left: 10px">超过此次数将锁定账户</el-text>
+              <el-text type="info" class="erp-ml-sm">超过此次数将锁定账户</el-text>
             </el-form-item>
             <el-form-item label="锁定时间（分钟）">
               <el-input-number
@@ -100,17 +97,17 @@
                 :max="1440"
                 controls-position="right"
               ></el-input-number>
-              <el-text type="info" style="margin-left: 10px">账户锁定后的持续时间</el-text>
+              <el-text type="info" class="erp-ml-sm">账户锁定后的持续时间</el-text>
             </el-form-item>
             <el-form-item label="启用IP白名单">
               <el-switch v-model="loginRestrictions.enable_ip_whitelist"></el-switch>
-              <el-text type="info" style="margin-left: 10px">启用后仅允许白名单IP访问</el-text>
+              <el-text type="info" class="erp-ml-sm">启用后仅允许白名单IP访问</el-text>
             </el-form-item>
           </el-form>
         </el-card>
 
         <!-- IP白名单管理 -->
-        <el-card class="config-card" shadow="hover" style="margin-top: 20px">
+        <el-card class="config-card erp-mt-lg" shadow="hover">
           <template #header>
             <div class="card-header">
               <span>IP白名单</span>
@@ -120,7 +117,7 @@
               </el-button>
             </div>
           </template>
-          <el-table :data="ipWhitelist" style="width: 100%">
+          <el-table :data="ipWhitelist" class="erp-w-full">
             <el-table-column prop="ip" label="IP地址" width="200"></el-table-column>
             <el-table-column prop="description" label="描述"></el-table-column>
             <el-table-column label="操作" width="120">
@@ -159,7 +156,7 @@
                 :max="1440"
                 controls-position="right"
               ></el-input-number>
-              <el-text type="info" style="margin-left: 10px">用户无操作后自动登出时间</el-text>
+              <el-text type="info" class="erp-ml-sm">用户无操作后自动登出时间</el-text>
             </el-form-item>
             <el-form-item label="最大并发会话数">
               <el-input-number
@@ -168,7 +165,7 @@
                 :max="10"
                 controls-position="right"
               ></el-input-number>
-              <el-text type="info" style="margin-left: 10px">同一用户最多同时登录的设备数</el-text>
+              <el-text type="info" class="erp-ml-sm">同一用户最多同时登录的设备数</el-text>
             </el-form-item>
             <el-form-item label="启用会话超时检查">
               <el-switch v-model="sessionConfig.enable_timeout_check"></el-switch>
@@ -192,7 +189,7 @@
           <el-form :model="twoFactorConfig" label-width="180px" ref="twoFactorConfigFormRef">
             <el-form-item label="启用2FA">
               <el-switch v-model="twoFactorConfig.enabled"></el-switch>
-              <el-text type="info" style="margin-left: 10px">启用双因素认证增强安全性</el-text>
+              <el-text type="info" class="erp-ml-sm">启用双因素认证增强安全性</el-text>
             </el-form-item>
             <el-form-item label="2FA方法" v-if="twoFactorConfig.enabled">
               <el-radio-group v-model="twoFactorConfig.method">
@@ -237,6 +234,7 @@ import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import { Lock, Refresh, Check, Plus } from "@element-plus/icons-vue";
 import * as systemAPI from "@/api/system";
+import PageHeader from "@/components/common/PageHeader.vue";
 
 // 响应式数据
 const loading = ref(false);
@@ -517,37 +515,7 @@ onMounted(() => {
 
 <style scoped>
 .security-settings {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.header-content {
-  flex: 1;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.page-subtitle {
-  color: #909399;
-  margin: 0;
-}
-
-.header-actions {
-  display: flex;
-  gap: 12px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .config-card {

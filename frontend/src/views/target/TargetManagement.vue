@@ -1,8 +1,10 @@
 <template>
-  <div class="target-management erp-page-container">
-    <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px">
-      目标管理
-    </h1>
+  <div class="target-management erp-page-container erp-page--admin">
+    <PageHeader
+      title="目标管理"
+      subtitle="维护月度目标、产品目标与战役目标。目标拆分和详情逻辑保持不变，本轮只统一页面结构与样式基线。"
+      family="admin"
+    />
 
     <el-tabs v-model="activeTab" type="card" class="main-tabs">
       <!-- 常规月度目标 -->
@@ -13,7 +15,7 @@
             type="month"
             value-format="YYYY-MM"
             placeholder="选择月份"
-            style="width: 160px; margin-right: 12px"
+            class="month-picker"
             @change="loadMonthlyTarget"
           />
           <el-button
@@ -40,7 +42,7 @@
           </el-result>
         </div>
         <div v-else-if="monthlyTarget.loading" class="loading-state">
-          <el-icon class="is-loading" style="font-size: 24px; margin-right: 8px"><Loading /></el-icon>
+          <el-icon class="is-loading loading-icon"><Loading /></el-icon>
           加载中…
         </div>
         <div
@@ -89,7 +91,7 @@
               <el-button
                 type="primary"
                 size="small"
-                style="float: right; margin-left: 8px"
+                class="header-action-right header-action-gap"
                 :loading="dailyGenerateLoading"
                 @click="handleGenerateDailyMonthly"
               >
@@ -98,7 +100,7 @@
               <el-button
                 type="primary"
                 size="small"
-                style="float: right"
+                class="header-action-right"
                 :loading="weekdayRatiosSaving"
                 :disabled="Math.abs(weekdayRatiosSum - 1) > 0.001"
                 @click="saveWeekdayRatiosMonthly"
@@ -121,7 +123,7 @@
                     :precision="2"
                     size="small"
                     controls-position="right"
-                    style="width: 100px"
+                    class="weekday-ratio-input"
                     @change="() => applyBalanceWeekdayRatios(key)"
                   />
                   <span class="weekday-pct">{{ (weekdayRatiosForm[key] * 100).toFixed(1) }}%</span>
@@ -196,7 +198,7 @@
               v-model="selectedShopKey"
               placeholder="选择店铺"
               clearable
-              style="width: 280px; margin-bottom: 12px"
+              class="shop-selector"
               @change="onSelectedShopChange"
             >
               <el-option
@@ -256,13 +258,13 @@
             v-if="hasPermission('target:export')"
             >导出</el-button
           >
-          <div style="flex: 1"></div>
+          <div class="erp-flex-spacer"></div>
           <el-select
             v-model="filters.status"
             placeholder="状态"
             clearable
             size="small"
-            style="width: 120px"
+            class="erp-w-120"
             @change="loadTargets"
           >
             <el-option label="全部状态" value="" />
@@ -328,7 +330,7 @@
             :total="targets.total"
             :page-sizes="[10, 20, 50, 100]"
             layout="total, sizes, prev, pager, next, jumper"
-            style="margin-top: 20px; justify-content: flex-end"
+            class="target-pagination"
             @size-change="loadTargets"
             @current-change="loadTargets"
           />
@@ -353,13 +355,13 @@
             v-if="hasPermission('target:export')"
             >导出</el-button
           >
-          <div style="flex: 1"></div>
+          <div class="erp-flex-spacer"></div>
           <el-select
             v-model="filters.status"
             placeholder="状态"
             clearable
             size="small"
-            style="width: 120px"
+            class="erp-w-120"
             @change="loadTargets"
           >
             <el-option label="全部状态" value="" />
@@ -425,7 +427,7 @@
             :total="targets.total"
             :page-sizes="[10, 20, 50, 100]"
             layout="total, sizes, prev, pager, next, jumper"
-            style="margin-top: 20px; justify-content: flex-end"
+            class="target-pagination"
             @size-change="loadTargets"
             @current-change="loadTargets"
           />
@@ -470,7 +472,7 @@
             type="month"
             placeholder="选择月份"
             value-format="YYYY-MM"
-            style="width: 100%"
+            class="erp-w-full"
           />
           <div v-if="form.targetMonth" class="form-hint">
             目标名称将自动生成：{{ autoTargetName }}
@@ -488,7 +490,7 @@
             range-separator="至"
             start-placeholder="开始日期"
             end-placeholder="结束日期"
-            style="width: 100%"
+            class="erp-w-full"
           />
         </el-form-item>
         <el-form-item label="目标金额" prop="target_amount">
@@ -496,7 +498,7 @@
             v-model="form.target_amount"
             :min="0.01"
             :precision="2"
-            style="width: 100%"
+            class="erp-w-full"
           />
         </el-form-item>
         <el-form-item label="目标数量" prop="target_quantity">
@@ -504,7 +506,7 @@
             v-model="form.target_quantity"
             :min="1"
             :precision="0"
-            style="width: 100%"
+            class="erp-w-full"
           />
         </el-form-item>
 
@@ -513,7 +515,7 @@
 
         <el-tabs v-model="breakdownTab" type="border-card">
           <el-tab-pane label="按店铺拆分" name="shop">
-            <div style="margin-bottom: 10px">
+            <div class="erp-mb-sm">
               <template v-if="form.target_type === 'shop'">
                 <span v-if="availableShops.length" class="breakdown-hint"
                   >已按全部店铺初始化。修改某店百分比后，仅未修改的店铺会重新均分剩余比例；全部改完后点击「自动计算」回填金额/数量。</span
@@ -540,7 +542,7 @@
                   <el-select
                     v-model="row.shopKey"
                     placeholder="选择店铺"
-                    style="width: 100%"
+                    class="erp-w-full"
                     @change="(v) => handleShopChange($index, v)"
                   >
                     <el-option
@@ -560,7 +562,7 @@
                     :max="100"
                     :precision="2"
                     :step="1"
-                    style="width: 100%"
+                    class="erp-w-full"
                     @change="() => applyBalancePercent($index)"
                   />
                 </template>
@@ -575,7 +577,7 @@
                     v-model="row.target_amount"
                     :min="0"
                     :precision="2"
-                    style="width: 100%"
+                    class="erp-w-full"
                   />
                 </template>
               </el-table-column>
@@ -589,7 +591,7 @@
                     v-model="row.target_quantity"
                     :min="0"
                     :precision="0"
-                    style="width: 100%"
+                    class="erp-w-full"
                   />
                 </template>
               </el-table-column>
@@ -608,7 +610,7 @@
                 </template>
               </el-table-column>
             </el-table>
-            <div style="margin-top: 10px; color: #909399; font-size: 12px">
+            <div class="breakdown-summary">
               店铺拆分总和：金额 ¥{{
                 shopBreakdownTotalAmount.toFixed(2)
               }}，数量 {{ shopBreakdownTotalQuantity }}，百分比
@@ -621,7 +623,7 @@
                     : 'danger'
                 "
                 size="small"
-                style="margin-left: 10px"
+                class="erp-ml-sm"
               >
                 {{
                   shopBreakdownTotalAmount === form.target_amount &&
@@ -634,7 +636,7 @@
           </el-tab-pane>
 
           <el-tab-pane label="按时间拆分" name="time">
-            <div style="margin-bottom: 10px">
+            <div class="erp-mb-sm">
               <el-button
                 size="small"
                 type="primary"
@@ -654,7 +656,7 @@
                     v-model="row.target_amount"
                     :min="0.01"
                     :precision="2"
-                    style="width: 100%"
+                    class="erp-w-full"
                   />
                 </template>
               </el-table-column>
@@ -668,12 +670,12 @@
                     v-model="row.target_quantity"
                     :min="1"
                     :precision="0"
-                    style="width: 100%"
+                    class="erp-w-full"
                   />
                 </template>
               </el-table-column>
             </el-table>
-            <div style="margin-top: 10px; color: #909399; font-size: 12px">
+            <div class="breakdown-summary">
               时间拆分总和：金额 ¥{{
                 timeBreakdownTotalAmount.toFixed(2)
               }}，数量 {{ timeBreakdownTotalQuantity }}
@@ -685,7 +687,7 @@
                     : 'danger'
                 "
                 size="small"
-                style="margin-left: 10px"
+                class="erp-ml-sm"
               >
                 {{
                   timeBreakdownTotalAmount === form.target_amount &&
@@ -769,7 +771,7 @@
 
         <!-- 目标分解 -->
         <el-card
-          style="margin-top: 20px"
+          class="erp-mt-lg"
           v-if="
             targetDetail.data.breakdown &&
             targetDetail.data.breakdown.length > 0
@@ -833,7 +835,7 @@
 
         <!-- 时间分解（表格） -->
         <el-card
-          style="margin-top: 20px"
+          class="erp-mt-lg"
           v-if="
             targetDetail.data.time_breakdown &&
             targetDetail.data.time_breakdown.length > 0
@@ -896,13 +898,13 @@
         </el-card>
 
         <!-- 周一到周日拆分比例（一键生成日度前配置） -->
-        <el-card style="margin-top: 20px" v-if="targetDetail.data.period_start && targetDetail.data.period_end">
+        <el-card class="erp-mt-lg" v-if="targetDetail.data.period_start && targetDetail.data.period_end">
           <template #header>
             <span>周一到周日拆分比例</span>
             <el-button
               type="primary"
               size="small"
-              style="float: right"
+              class="header-action-right"
               :loading="weekdayRatiosSaving"
               :disabled="Math.abs(weekdayRatiosSum - 1) > 0.001"
               @click="saveWeekdayRatios"
@@ -923,7 +925,7 @@
                   :precision="2"
                   size="small"
                   controls-position="right"
-                  style="width: 100px"
+                  class="weekday-ratio-input"
                   @change="() => applyBalanceWeekdayRatios(key)"
                 />
                 <span class="weekday-pct">{{ (weekdayRatiosForm[key] * 100).toFixed(1) }}%</span>
@@ -934,13 +936,13 @@
         </el-card>
 
         <!-- 日度分解（日历） -->
-        <el-card style="margin-top: 20px" v-if="targetDetail.data.period_start && targetDetail.data.period_end">
+        <el-card class="erp-mt-lg" v-if="targetDetail.data.period_start && targetDetail.data.period_end">
           <template #header>
             <span>日度分解（日历）</span>
             <el-button
               type="primary"
               size="small"
-              style="float: right"
+              class="header-action-right"
               :loading="dailyGenerateLoading"
               @click="handleGenerateDaily"
             >
@@ -984,10 +986,10 @@
       <el-form :model="dayEditForm" label-width="90px">
         <el-form-item label="日期">{{ dayEditForm.date }}</el-form-item>
         <el-form-item label="目标金额">
-          <el-input-number v-model="dayEditForm.target_amount" :min="0" :precision="2" style="width: 100%" />
+          <el-input-number v-model="dayEditForm.target_amount" :min="0" :precision="2" class="erp-w-full" />
         </el-form-item>
         <el-form-item label="目标数量">
-          <el-input-number v-model="dayEditForm.target_quantity" :min="0" :precision="0" style="width: 100%" />
+          <el-input-number v-model="dayEditForm.target_quantity" :min="0" :precision="0" class="erp-w-full" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -1005,6 +1007,7 @@ import { Plus, Refresh, Download, Loading } from "@element-plus/icons-vue";
 import { useUserStore } from "@/stores/user";
 import api from "@/api";
 import { handleApiError } from "@/utils/errorHandler";
+import PageHeader from "@/components/common/PageHeader.vue";
 import {
   formatCurrency,
   formatNumber,
@@ -2112,11 +2115,16 @@ onMounted(() => {
 
 <style scoped>
 .target-management {
-  padding: 20px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .main-tabs {
   margin-bottom: 16px;
+}
+
+.month-picker {
+  width: 160px;
+  margin-right: 12px;
 }
 
 .month-bar,
@@ -2137,6 +2145,11 @@ onMounted(() => {
   color: #909399;
 }
 
+.loading-icon {
+  font-size: 24px;
+  margin-right: 8px;
+}
+
 .summary-card,
 .ratios-card,
 .shop-breakdown-card,
@@ -2150,6 +2163,34 @@ onMounted(() => {
   text-align: center;
   color: #909399;
   font-size: 14px;
+}
+
+.header-action-right {
+  float: right;
+}
+
+.header-action-gap {
+  margin-left: 8px;
+}
+
+.weekday-ratio-input {
+  width: 100px;
+}
+
+.shop-selector {
+  width: 280px;
+  margin-bottom: 12px;
+}
+
+.target-pagination {
+  margin-top: 20px;
+  justify-content: flex-end;
+}
+
+.breakdown-summary {
+  margin-top: 10px;
+  color: #909399;
+  font-size: 12px;
 }
 .action-bar {
   display: flex;

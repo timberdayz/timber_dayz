@@ -1,10 +1,10 @@
 <template>
-  <div class="permission-management">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <h1>🔑 权限管理中心</h1>
-      <p>权限管理 • 访问控制 • 安全审计</p>
-    </div>
+  <div class="permission-management erp-page-container erp-page--admin">
+    <PageHeader
+      title="权限管理"
+      subtitle="查看权限定义、资源维度与角色使用情况，统一权限审计入口。"
+      family="admin"
+    />
 
     <!-- 权限统计卡片 -->
     <el-row :gutter="20" class="stats-section">
@@ -95,7 +95,7 @@
     <el-card class="table-card">
       <template #header>
         <div class="card-header">
-          <span>📋 权限列表</span>
+          <span>权限列表</span>
           <el-tag>共 {{ filteredPermissions.length }} 个权限</el-tag>
         </div>
       </template>
@@ -104,7 +104,7 @@
         :data="filteredPermissions" 
         v-loading="loading"
         stripe
-        style="width: 100%"
+        class="erp-w-full"
       >
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="权限名称" width="200" />
@@ -130,7 +130,7 @@
               :color="getUsageColor(row)"
               :show-text="false"
             />
-            <span style="font-size: 12px; color: #666;">
+            <span class="erp-text-secondary-small">
               {{ getUsageCount(row) }} 个角色
             </span>
           </template>
@@ -170,20 +170,20 @@
               :percentage="getUsagePercentage(selectedPermission)" 
               :color="getUsageColor(selectedPermission)"
             />
-            <div style="margin-top: 10px;">
+            <div class="erp-mt-sm">
               <span>被 {{ getUsageCount(selectedPermission) }} 个角色使用</span>
             </div>
           </el-descriptions-item>
         </el-descriptions>
 
         <!-- 使用此权限的角色列表 -->
-        <div style="margin-top: 20px;">
+        <div class="erp-mt-lg">
           <h4>使用此权限的角色：</h4>
           <el-tag 
             v-for="role in getRolesUsingPermission(selectedPermission)" 
             :key="role" 
             type="primary"
-            style="margin-right: 5px; margin-bottom: 5px;"
+            class="erp-tag-gap"
           >
             {{ role }}
           </el-tag>
@@ -199,7 +199,7 @@
           :description="`正在测试权限 '${selectedPermission.name}'`"
           type="info"
           show-icon
-          style="margin-bottom: 20px;"
+          class="erp-mb-lg"
         />
         
         <el-form :model="testForm" ref="testFormRef" label-width="100px">
@@ -221,7 +221,7 @@
           </el-form-item>
         </el-form>
 
-        <div v-if="testResult" style="margin-top: 20px;">
+        <div v-if="testResult" class="erp-mt-lg">
           <el-alert
             :title="testResult.success ? '测试通过' : '测试失败'"
             :type="testResult.success ? 'success' : 'error'"
@@ -254,6 +254,7 @@ import {
   Refresh
 } from '@element-plus/icons-vue'
 import * as systemAPI from '@/api/system'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 const rolesStore = useRolesStore()
 const usersStore = useUsersStore()
@@ -507,31 +508,8 @@ onMounted(() => {
 
 <style scoped>
 .permission-management {
-  padding: 20px;
   background: #f0f2f5;
-  min-height: 100vh;
-}
-
-.page-header {
-  text-align: center;
-  margin-bottom: 30px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 40px 20px;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.page-header h1 {
-  margin: 0 0 10px 0;
-  font-size: 32px;
-  font-weight: 700;
-}
-
-.page-header p {
-  margin: 0;
-  opacity: 0.9;
-  font-size: 16px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .stats-section {
@@ -616,11 +594,7 @@ onMounted(() => {
   .permission-management {
     padding: 10px;
   }
-  
-  .page-header h1 {
-    font-size: 24px;
-  }
-  
+
   .stat-card {
     flex-direction: column;
     text-align: center;

@@ -1,29 +1,31 @@
 <template>
-  <div class="collection-history">
-    <!-- 页面标题和统计 -->
-    <div class="page-header">
-      <h2>采集历史</h2>
-      <div class="stats-row">
-        <div class="stat-item">
-          <span class="stat-value">{{ stats?.total_tasks ?? 0 }}</span>
-          <span class="stat-label">总任务数</span>
-        </div>
-        <div class="stat-item success">
-          <span class="stat-value">{{ stats?.completed ?? 0 }}</span>
-          <span class="stat-label">已完成</span>
-        </div>
-        <div class="stat-item warning">
-          <span class="stat-value">{{ stats?.running ?? 0 }}</span>
-          <span class="stat-label">运行中</span>
-        </div>
-        <div class="stat-item danger">
-          <span class="stat-value">{{ stats?.failed ?? 0 }}</span>
-          <span class="stat-label">失败</span>
-        </div>
-        <div class="stat-item info">
-          <span class="stat-value">{{ (stats?.success_rate ?? 0) }}%</span>
-          <span class="stat-label">成功率</span>
-        </div>
+  <div class="collection-history erp-page-container erp-page--admin">
+    <PageHeader
+      title="采集历史"
+      subtitle="查看采集任务历史、状态分布、失败信息和导出记录。"
+      family="admin"
+    />
+
+    <div class="stats-row">
+      <div class="stat-item">
+        <span class="stat-value">{{ stats?.total_tasks ?? 0 }}</span>
+        <span class="stat-label">总任务数</span>
+      </div>
+      <div class="stat-item success">
+        <span class="stat-value">{{ stats?.completed ?? 0 }}</span>
+        <span class="stat-label">已完成</span>
+      </div>
+      <div class="stat-item warning">
+        <span class="stat-value">{{ stats?.running ?? 0 }}</span>
+        <span class="stat-label">运行中</span>
+      </div>
+      <div class="stat-item danger">
+        <span class="stat-value">{{ stats?.failed ?? 0 }}</span>
+        <span class="stat-label">失败</span>
+      </div>
+      <div class="stat-item info">
+        <span class="stat-value">{{ (stats?.success_rate ?? 0) }}%</span>
+        <span class="stat-label">成功率</span>
       </div>
     </div>
 
@@ -97,7 +99,7 @@
             v-for="domain in row.data_domains" 
             :key="domain"
             size="small"
-            style="margin-right: 4px"
+            class="erp-mr-xs"
           >
             {{ getDomainLabel(domain) }}
           </el-tag>
@@ -203,7 +205,7 @@
             v-for="domain in currentTask?.data_domains" 
             :key="domain"
             size="small"
-            style="margin-right: 4px"
+            class="erp-mr-xs"
           >
             {{ getDomainLabel(domain) }}
           </el-tag>
@@ -231,7 +233,7 @@
             :key="domain"
             type="success"
             size="small"
-            style="margin-right: 4px"
+            class="erp-mr-xs"
           >
             {{ domain }}
           </el-tag>
@@ -275,6 +277,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Download } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 // 状态
 const loading = ref(false)
@@ -428,22 +431,14 @@ onMounted(() => {
 
 <style scoped>
 .collection-history {
-  padding: 20px;
-}
-
-.page-header {
-  margin-bottom: 24px;
-}
-
-.page-header h2 {
-  margin: 0 0 16px 0;
-  font-size: 20px;
-  font-weight: 600;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .stats-row {
   display: flex;
   gap: 24px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
 }
 
 .stat-item {

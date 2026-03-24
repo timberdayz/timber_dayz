@@ -1,15 +1,12 @@
 <template>
-  <div class="system-config">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">
-          <el-icon><Setting /></el-icon>
-          系统配置
-        </h1>
-        <p class="page-subtitle">管理系统基础配置，包括系统名称、版本、时区、语言和货币设置</p>
-      </div>
-      <div class="header-actions">
+  <div class="system-config erp-page-container erp-page--admin">
+    <PageHeader
+      title="系统配置"
+      subtitle="管理系统基础配置，包括系统名称、版本、时区、语言和货币设置。"
+      :icon="Setting"
+      family="admin"
+    >
+      <template #actions>
         <el-button type="primary" @click="saveConfig" :loading="loading">
           <el-icon><Check /></el-icon>
           保存配置
@@ -18,8 +15,8 @@
           <el-icon><Refresh /></el-icon>
           刷新
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 配置表单 -->
     <el-card class="config-card" shadow="hover">
@@ -56,7 +53,7 @@
               <el-select
                 v-model="systemConfig.timezone"
                 placeholder="选择时区"
-                style="width: 100%"
+                class="erp-w-full"
               >
                 <el-option
                   label="北京时间 (UTC+8)"
@@ -82,7 +79,7 @@
               <el-select
                 v-model="systemConfig.language"
                 placeholder="选择语言"
-                style="width: 100%"
+                class="erp-w-full"
               >
                 <el-option label="简体中文" value="zh-CN"></el-option>
                 <el-option label="English" value="en-US"></el-option>
@@ -97,7 +94,7 @@
               <el-select
                 v-model="systemConfig.currency"
                 placeholder="选择货币"
-                style="width: 100%"
+                class="erp-w-full"
               >
                 <el-option label="人民币 (CNY)" value="CNY"></el-option>
                 <el-option label="美元 (USD)" value="USD"></el-option>
@@ -111,7 +108,7 @@
     </el-card>
 
     <!-- 配置说明 -->
-    <el-card class="info-card" shadow="hover" style="margin-top: 20px">
+    <el-card class="info-card erp-mt-lg" shadow="hover">
       <el-alert
         title="配置说明"
         description="修改系统配置后需要重启系统才能生效。请谨慎操作，建议在维护时间进行配置修改。"
@@ -125,9 +122,10 @@
 
 <script setup>
 import { ref, onMounted } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage } from "element-plus";
 import { Setting, Check, Refresh } from "@element-plus/icons-vue";
 import * as systemAPI from "@/api/system";
+import PageHeader from "@/components/common/PageHeader.vue";
 
 // 响应式数据
 const loading = ref(false);
@@ -218,40 +216,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.system-config {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.header-content {
-  flex: 1;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.page-subtitle {
-  color: #909399;
-  margin: 0;
-}
-
-.header-actions {
-  display: flex;
-  gap: 12px;
-}
-
 .config-card {
   margin-bottom: 20px;
 }

@@ -1,15 +1,12 @@
 <template>
-  <div class="database-config">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">
-          <el-icon><Connection /></el-icon>
-          数据库配置
-        </h1>
-        <p class="page-subtitle">管理数据库连接配置，包括主机、端口、数据库名、用户名和密码</p>
-      </div>
-      <div class="header-actions">
+  <div class="database-config erp-page-container erp-page--admin">
+    <PageHeader
+      title="数据库配置"
+      subtitle="管理数据库连接配置，包括主机、端口、数据库名、用户名和密码。"
+      :icon="Connection"
+      family="admin"
+    >
+      <template #actions>
         <el-button type="success" @click="testConnection" :loading="testing">
           <el-icon><Connection /></el-icon>
           测试连接
@@ -22,8 +19,8 @@
           <el-icon><Refresh /></el-icon>
           刷新
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 配置表单 -->
     <el-card class="config-card" shadow="hover">
@@ -39,7 +36,7 @@
               <el-select
                 v-model="databaseConfig.type"
                 placeholder="选择数据库类型"
-                style="width: 100%"
+                class="erp-w-full"
                 disabled
               >
                 <el-option label="PostgreSQL" value="postgresql"></el-option>
@@ -66,7 +63,7 @@
                 :min="1"
                 :max="65535"
                 controls-position="right"
-                style="width: 100%"
+                class="erp-w-full"
               ></el-input-number>
             </el-form-item>
           </el-col>
@@ -106,7 +103,7 @@
     </el-card>
 
     <!-- 连接测试结果 -->
-    <el-card class="test-result-card" shadow="hover" style="margin-top: 20px" v-if="testResult">
+    <el-card class="test-result-card erp-mt-lg" shadow="hover" v-if="testResult">
       <el-alert
         :title="testResult.success ? '连接成功' : '连接失败'"
         :description="testResult.message"
@@ -114,13 +111,13 @@
         show-icon
         :closable="false"
       />
-      <div v-if="testResult.success && testResult.response_time_ms" style="margin-top: 10px">
+      <div v-if="testResult.success && testResult.response_time_ms" class="erp-mt-sm">
         <el-text type="info">响应时间: {{ testResult.response_time_ms }}ms</el-text>
       </div>
     </el-card>
 
     <!-- 配置说明 -->
-    <el-card class="info-card" shadow="hover" style="margin-top: 20px">
+    <el-card class="info-card erp-mt-lg" shadow="hover">
       <el-alert
         title="配置说明"
         description="数据库配置修改后需要重启系统才能生效。请谨慎操作，建议在维护时间进行配置修改。密码字段留空表示不修改现有密码。"
@@ -137,6 +134,7 @@ import { ref, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Connection, Check, Refresh } from "@element-plus/icons-vue";
 import * as systemAPI from "@/api/system";
+import PageHeader from "@/components/common/PageHeader.vue";
 
 // 响应式数据
 const loading = ref(false);
@@ -312,37 +310,7 @@ onMounted(() => {
 
 <style scoped>
 .database-config {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.header-content {
-  flex: 1;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.page-subtitle {
-  color: #909399;
-  margin: 0;
-}
-
-.header-actions {
-  display: flex;
-  gap: 12px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .config-card {

@@ -1,16 +1,12 @@
 <template>
-  <div class="data-backup">
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">
-          <el-icon><Folder /></el-icon>
-          数据备份
-        </h1>
-        <p class="page-subtitle">
-          管理系统数据备份与恢复，包括手动备份、自动备份配置和备份历史
-        </p>
-      </div>
-      <div class="header-actions">
+  <div class="data-backup erp-page-container erp-page--admin">
+    <PageHeader
+      title="数据备份"
+      subtitle="管理系统数据备份与恢复，包括手动备份、自动备份配置和备份历史。"
+      :icon="Folder"
+      family="admin"
+    >
+      <template #actions>
         <el-button type="primary" @click="createBackup" :loading="loading">
           <el-icon><Plus /></el-icon>
           创建备份
@@ -19,8 +15,8 @@
           <el-icon><Refresh /></el-icon>
           刷新
         </el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- 备份列表 -->
     <el-card class="backup-card" shadow="hover">
@@ -29,7 +25,7 @@
           <span>备份历史</span>
         </div>
       </template>
-      <el-table :data="backupList" style="width: 100%" v-loading="loading">
+      <el-table :data="backupList" class="erp-w-full" v-loading="loading">
         <el-table-column prop="id" label="ID" width="80"></el-table-column>
         <el-table-column prop="backup_type" label="类型" width="100">
           <template #default="{ row }">
@@ -93,7 +89,7 @@
     </el-card>
 
     <!-- 自动备份配置 -->
-    <el-card class="config-card" shadow="hover" style="margin-top: 20px">
+    <el-card class="config-card erp-mt-lg" shadow="hover">
       <template #header>
         <div class="card-header">
           <span>自动备份配置</span>
@@ -115,14 +111,14 @@
         <el-form-item label="备份计划(CRON)" v-if="autoBackupConfig.enabled">
           <el-input
             v-model="autoBackupConfig.schedule"
-            style="width: 360px"
+            class="erp-w-360"
             placeholder="例如：0 2 * * *（每天凌晨2点）"
           />
         </el-form-item>
         <el-form-item label="备份类型" v-if="autoBackupConfig.enabled">
           <el-select
             v-model="autoBackupConfig.backup_type"
-            style="width: 200px"
+            class="erp-w-200"
           >
             <el-option label="完整备份" value="full"></el-option>
             <el-option label="增量备份" value="incremental"></el-option>
@@ -145,6 +141,7 @@ import { ref, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Folder, Plus, Refresh, Check } from "@element-plus/icons-vue";
 import * as systemAPI from "@/api/system";
+import PageHeader from "@/components/common/PageHeader.vue";
 
 const loading = ref(false);
 const backupList = ref([]);
@@ -314,28 +311,7 @@ onMounted(() => {
 
 <style scoped>
 .data-backup {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.page-subtitle {
-  color: #909399;
-  margin: 0;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .card-header {

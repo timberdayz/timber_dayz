@@ -4,23 +4,17 @@ v4.6.0新增：独立的数据同步系统
 -->
 
 <template>
-  <div class="data-sync-files erp-page-container">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <h1>📁 数据同步 - 文件列表</h1>
-      <p>选择待同步文件，支持筛选和批量操作</p>
-    </div>
+  <div class="data-sync-files erp-page-container erp-page--admin">
+    <PageHeader
+      title="数据同步文件列表"
+      subtitle="选择待同步文件，支持筛选、批量同步、失败重试和治理巡检。"
+      family="admin"
+    />
 
     <!-- 数据治理概览 -->
-    <el-card class="governance-card" style="margin-bottom: 20px">
+    <el-card class="governance-card erp-card">
       <template #header>
-        <div
-          style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-          "
-        >
+        <div class="card-header-row">
           <span>数据治理概览</span>
           <el-button
             size="small"
@@ -34,7 +28,7 @@ v4.6.0新增：独立的数据同步系统
       </template>
       <div class="governance-stats">
         <div class="stat-item">
-          <div class="stat-icon" style="background: #409eff">
+          <div class="stat-icon stat-icon-primary">
             <el-icon><Document /></el-icon>
           </div>
           <div class="stat-content">
@@ -45,7 +39,7 @@ v4.6.0新增：独立的数据同步系统
           </div>
         </div>
         <div class="stat-item">
-          <div class="stat-icon" style="background: #67c23a">
+          <div class="stat-icon stat-icon-success">
             <el-icon><Check /></el-icon>
           </div>
           <div class="stat-content">
@@ -56,7 +50,7 @@ v4.6.0新增：独立的数据同步系统
           </div>
         </div>
         <div class="stat-item">
-          <div class="stat-icon" style="background: #f56c6c">
+          <div class="stat-icon stat-icon-danger">
             <el-icon><Warning /></el-icon>
           </div>
           <div class="stat-content">
@@ -67,10 +61,7 @@ v4.6.0新增：独立的数据同步系统
           </div>
         </div>
       </div>
-      <div
-        class="governance-actions"
-        style="margin-top: 20px; display: flex; gap: 10px"
-      >
+      <div class="governance-actions">
         <el-button
           type="primary"
           @click="handleRefreshFiles"
@@ -109,14 +100,14 @@ v4.6.0新增：独立的数据同步系统
     </el-card>
 
     <!-- 筛选器 -->
-    <el-card class="filter-card" style="margin-bottom: 20px">
+    <el-card class="filter-card erp-card">
       <el-form :inline="true" :model="filters">
         <el-form-item label="平台">
           <el-select
             v-model="filters.platform"
             placeholder="全部平台"
             clearable
-            style="width: 150px"
+            class="filter-select"
           >
             <el-option label="Shopee" value="shopee" />
             <el-option label="TikTok" value="tiktok" />
@@ -129,7 +120,7 @@ v4.6.0新增：独立的数据同步系统
             v-model="filters.domain"
             placeholder="全部数据域"
             clearable
-            style="width: 150px"
+            class="filter-select"
           >
             <el-option label="订单" value="orders" />
             <el-option label="产品" value="products" />
@@ -144,7 +135,7 @@ v4.6.0新增：独立的数据同步系统
             v-model="filters.sub_domain"
             placeholder="全部子类型"
             clearable
-            style="width: 150px"
+            class="filter-select"
           >
             <el-option label="AI助手" value="ai_assistant" />
             <el-option label="人工聊天" value="agent" />
@@ -155,7 +146,7 @@ v4.6.0新增：独立的数据同步系统
             v-model="filters.granularity"
             placeholder="全部粒度"
             clearable
-            style="width: 150px"
+            class="filter-select"
           >
             <el-option label="日度" value="daily" />
             <el-option label="周度" value="weekly" />
@@ -167,7 +158,7 @@ v4.6.0新增：独立的数据同步系统
             v-model="filters.status"
             placeholder="全部状态"
             clearable
-            style="width: 150px"
+            class="filter-select"
           >
             <el-option label="待同步" value="pending" />
             <el-option label="需要指派店铺" value="needs_shop" />
@@ -194,17 +185,10 @@ v4.6.0新增：独立的数据同步系统
     <!-- 同步进度显示 -->
     <el-card
       v-if="activeProgressTasks.length > 0"
-      class="progress-card"
-      style="margin-bottom: 20px"
+      class="progress-card erp-card"
     >
       <template #header>
-        <div
-          style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-          "
-        >
+        <div class="card-header-row">
           <span
             ><el-icon class="is-loading"><Loading /></el-icon> 同步进度</span
           >
@@ -246,7 +230,7 @@ v4.6.0新增：独立的数据同步系统
                 : ''
             "
             :stroke-width="12"
-            style="margin-top: 8px"
+            class="erp-mt-sm"
           />
           <div class="progress-stats" v-if="task.success_files !== undefined">
             <span class="stat-success"
@@ -265,17 +249,10 @@ v4.6.0新增：独立的数据同步系统
 
     <!-- 批量操作 -->
     <el-card
-      class="action-card"
-      style="margin-bottom: 20px"
+      class="action-card erp-card"
       v-if="selectedFiles.length > 0"
     >
-      <div
-        style="
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        "
-      >
+      <div class="card-header-row">
         <span>已选择 {{ selectedFiles.length }} 个文件</span>
         <div>
           <el-button type="primary" @click="batchSync" :loading="syncing">
@@ -293,13 +270,7 @@ v4.6.0新增：独立的数据同步系统
     <!-- 文件列表 -->
     <el-card>
       <template #header>
-        <div
-          style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-          "
-        >
+        <div class="card-header-row">
           <span>待同步文件（共 {{ files.length }} 个）</span>
           <el-button
             type="primary"
@@ -318,7 +289,7 @@ v4.6.0新增：独立的数据同步系统
         v-loading="loading"
         @selection-change="handleSelectionChange"
         stripe
-        style="width: 100%"
+        class="erp-w-full"
       >
         <el-table-column type="selection" width="55" />
         <el-table-column prop="file_name" label="文件名" min-width="200" />
@@ -413,10 +384,7 @@ v4.6.0新增：独立的数据同步系统
       </el-table>
 
       <!-- v4.18.0新增：分页组件 -->
-      <div
-        class="pagination-wrapper"
-        style="margin-top: 20px; display: flex; justify-content: flex-end"
-      >
+      <div class="pagination-wrapper">
         <el-pagination
           v-model:current-page="pagination.page"
           v-model:page-size="pagination.pageSize"
@@ -430,15 +398,9 @@ v4.6.0新增：独立的数据同步系统
     </el-card>
 
     <!-- v4.18.0新增：同步历史记录 -->
-    <el-card style="margin-top: 20px">
+    <el-card class="sync-history-card">
       <template #header>
-        <div
-          style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-          "
-        >
+        <div class="card-header-row">
           <span>同步历史记录</span>
           <el-button type="primary" link @click="() => loadSyncHistory(true)">
             <el-icon><Refresh /></el-icon>
@@ -451,12 +413,12 @@ v4.6.0新增：独立的数据同步系统
         :data="syncHistory"
         v-loading="historyLoading"
         stripe
-        style="width: 100%"
+        class="erp-w-full"
         max-height="400"
       >
         <el-table-column prop="task_id" label="任务ID" width="200">
           <template #default="{ row }">
-            <span style="font-family: monospace; font-size: 12px"
+            <span class="mono-task-id"
               >{{ row.task_id?.substring(0, 16) }}...</span
             >
           </template>
@@ -523,18 +485,18 @@ v4.6.0新增：独立的数据同步系统
                 placement="top"
                 :disabled="row.message.length <= 50"
               >
-                <span style="color: #f56c6c; font-size: 12px">
+                <span class="history-error-text">
                   {{ truncateText(row.message, 50) }}
                 </span>
               </el-tooltip>
             </div>
             <span
               v-else-if="row.status === 'completed'"
-              style="color: #67c23a; font-size: 12px"
+              class="history-success-text"
             >
               同步成功
             </span>
-            <span v-else style="color: #909399; font-size: 12px"> - </span>
+            <span v-else class="history-muted-text"> - </span>
           </template>
         </el-table-column>
       </el-table>
@@ -548,7 +510,7 @@ v4.6.0新增：独立的数据同步系统
       :close-on-click-modal="false"
     >
       <div v-if="errorDetails">
-        <el-alert type="error" :closable="false" style="margin-bottom: 20px">
+        <el-alert type="error" :closable="false" class="erp-mb-lg">
           <strong>检测到表头字段变化，请更新模板后再同步。</strong>
           <br />
           任何表头变化都需要用户手动确认，系统不会自动匹配字段。
@@ -557,21 +519,13 @@ v4.6.0新增：独立的数据同步系统
         <!-- 新增字段 -->
         <div
           v-if="errorDetails.added_fields?.length > 0"
-          style="margin-bottom: 20px"
+          class="erp-mb-lg"
         >
-          <h4
-            style="
-              color: #67c23a;
-              margin-bottom: 10px;
-              display: flex;
-              align-items: center;
-              gap: 8px;
-            "
-          >
+          <h4 class="comparison-title comparison-title-success">
             <el-icon><Plus /></el-icon>
             新增字段（{{ errorDetails.added_fields.length }}个）：
           </h4>
-          <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <div class="erp-flex-wrap-gap-sm">
             <el-tag
               v-for="field in errorDetails.added_fields"
               :key="field"
@@ -586,21 +540,13 @@ v4.6.0新增：独立的数据同步系统
         <!-- 删除字段 -->
         <div
           v-if="errorDetails.removed_fields?.length > 0"
-          style="margin-bottom: 20px"
+          class="erp-mb-lg"
         >
-          <h4
-            style="
-              color: #f56c6c;
-              margin-bottom: 10px;
-              display: flex;
-              align-items: center;
-              gap: 8px;
-            "
-          >
+          <h4 class="comparison-title comparison-title-danger">
             <el-icon><Minus /></el-icon>
             删除字段（{{ errorDetails.removed_fields.length }}个）：
           </h4>
-          <div style="display: flex; flex-wrap: wrap; gap: 8px">
+          <div class="erp-flex-wrap-gap-sm">
             <el-tag
               v-for="field in errorDetails.removed_fields"
               :key="field"
@@ -618,7 +564,7 @@ v4.6.0新增：独立的数据同步系统
             !errorDetails.added_fields?.length &&
             !errorDetails.removed_fields?.length
           "
-          style="margin-bottom: 20px"
+          class="erp-mb-lg"
         >
           <el-alert type="warning" :closable="false">
             字段顺序已变化（字段名相同但顺序不同）
@@ -626,8 +572,8 @@ v4.6.0新增：独立的数据同步系统
         </div>
 
         <!-- 表头对比表格 -->
-        <div style="margin-top: 20px" v-if="headerComparisonData.length > 0">
-          <h4 style="margin-bottom: 10px">表头对比：</h4>
+        <div class="erp-mt-lg" v-if="headerComparisonData.length > 0">
+          <h4 class="erp-mb-sm">表头对比：</h4>
           <el-table
             :data="headerComparisonData"
             border
@@ -675,12 +621,12 @@ v4.6.0新增：独立的数据同步系统
         </div>
 
         <!-- 匹配率 -->
-        <div style="margin-top: 20px">
+        <div class="erp-mt-lg">
           <strong>表头匹配率：</strong>
           <el-progress
             :percentage="errorDetails.match_rate || 0"
             :status="errorDetails.match_rate < 100 ? 'exception' : 'success'"
-            style="margin-top: 10px"
+            class="erp-mt-sm"
           />
         </div>
       </div>
@@ -716,6 +662,7 @@ import {
   RefreshRight,
 } from "@element-plus/icons-vue";
 import api from "@/api";
+import PageHeader from "@/components/common/PageHeader.vue";
 
 const router = useRouter();
 
@@ -1847,23 +1794,7 @@ onMounted(() => {
 
 <style scoped>
 .data-sync-files {
-  padding: 20px;
-}
-
-.page-header {
-  margin-bottom: 20px;
-}
-
-.page-header h1 {
-  margin: 0 0 8px 0;
-  font-size: 24px;
-  font-weight: 600;
-}
-
-.page-header p {
-  margin: 0;
-  color: #666;
-  font-size: 14px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .governance-stats {
@@ -1894,6 +1825,18 @@ onMounted(() => {
   font-size: 24px;
 }
 
+.stat-icon-primary {
+  background: #409eff;
+}
+
+.stat-icon-success {
+  background: #67c23a;
+}
+
+.stat-icon-danger {
+  background: #f56c6c;
+}
+
 .stat-content {
   flex: 1;
 }
@@ -1911,8 +1854,22 @@ onMounted(() => {
 }
 
 .governance-actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
   padding-top: 15px;
   border-top: 1px solid #ebeef5;
+}
+
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.filter-select {
+  width: 150px;
 }
 
 /* 进度卡片样式 */
@@ -1980,5 +1937,50 @@ onMounted(() => {
 .stat-skipped {
   color: #d97706;
   font-weight: 500;
+}
+
+.pagination-wrapper {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.sync-history-card {
+  margin-top: 20px;
+}
+
+.mono-task-id {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.history-error-text {
+  color: #f56c6c;
+  font-size: 12px;
+}
+
+.history-success-text {
+  color: #67c23a;
+  font-size: 12px;
+}
+
+.history-muted-text {
+  color: #909399;
+  font-size: 12px;
+}
+
+.comparison-title {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comparison-title-success {
+  color: #67c23a;
+}
+
+.comparison-title-danger {
+  color: #f56c6c;
 }
 </style>

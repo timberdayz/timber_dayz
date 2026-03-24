@@ -1,8 +1,10 @@
 <template>
-  <div class="account-management">
-    <!-- 页面头部 -->
-    <el-page-header title="返回" content="账号管理" @back="$router.back()" />
-    <p class="page-description">统一管理多平台账号，确保账号安全</p>
+  <div class="account-management erp-page-container erp-page--admin">
+    <PageHeader
+      title="账号管理"
+      subtitle="统一管理多平台账号、批量店铺配置与能力开关。"
+      family="admin"
+    />
 
     <!-- 统计卡片 -->
     <el-row :gutter="20" class="stats-row">
@@ -46,7 +48,7 @@
 
     <!-- 操作工具栏 -->
     <el-card class="toolbar-card">
-      <el-row :gutter="10" style="margin-bottom: 15px">
+      <el-row :gutter="10" class="erp-mb-md">
         <!-- 筛选 -->
         <el-col :span="4">
           <el-select v-model="filters.platform" placeholder="平台筛选" clearable @change="handleFilterChange">
@@ -107,7 +109,7 @@
       <el-table 
         :data="accountsStore.accounts" 
         v-loading="accountsStore.loading"
-        style="width: 100%"
+        class="erp-w-full"
         height="500"
       >
         <el-table-column prop="platform" label="平台" width="100" />
@@ -115,7 +117,7 @@
         <el-table-column prop="account_alias" label="账号别名" width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.account_alias">{{ row.account_alias }}</span>
-            <span v-else style="color: #999;">-</span>
+            <span v-else class="erp-text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="store_name" label="店铺名称" width="200" show-overflow-tooltip />
@@ -124,7 +126,7 @@
         <el-table-column prop="shop_id" label="店铺ID" width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.shop_id">{{ row.shop_id }}</span>
-            <span v-else style="color: #999;">-</span>
+            <span v-else class="erp-text-muted">-</span>
           </template>
         </el-table-column>
         
@@ -315,7 +317,7 @@
               title="提示" 
               type="info" 
               :closable="false"
-              style="margin-top: 20px"
+              class="erp-mt-lg"
             >
               根据店铺类型自动配置：
               <ul>
@@ -361,7 +363,7 @@
         </el-form-item>
         
         <el-form-item label="店铺列表">
-          <el-table :data="batchForm.shops" style="width: 100%">
+          <el-table :data="batchForm.shops" class="erp-w-full">
             <el-table-column label="店铺名称">
               <template #default="{ row }">
                 <el-input v-model="row.store_name" placeholder="店铺名称" size="small" />
@@ -391,7 +393,7 @@
               </template>
             </el-table-column>
           </el-table>
-          <el-button @click="addShop" style="margin-top: 10px" size="small">
+          <el-button @click="addShop" class="erp-mt-sm" size="small">
             <el-icon><Plus /></el-icon>
             添加店铺
           </el-button>
@@ -414,6 +416,7 @@ import {
   Search, Plus, Download, Refresh, Files,
   ShoppingCart, Box, Service, TrendCharts, Money, Grid
 } from '@element-plus/icons-vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 const accountsStore = useAccountsStore()
 
@@ -764,7 +767,7 @@ function getCapabilitiesText(capabilities) {
 
 <style scoped>
 .account-management {
-  padding: 20px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .page-description {

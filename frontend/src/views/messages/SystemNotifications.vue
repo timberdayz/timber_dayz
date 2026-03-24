@@ -1,12 +1,18 @@
 <template>
-  <div class="notifications-page">
+  <div class="notifications-page erp-page-container erp-page--admin">
+    <PageHeader
+      title="系统通知"
+      subtitle="查看通知列表、分组状态、未读数量和批量处理操作。"
+      family="admin"
+    />
+
     <el-card class="notifications-card">
       <template #header>
         <div class="card-header">
           <div class="header-left">
-            <h2>System Notifications</h2>
+            <h2>通知列表</h2>
             <span class="unread-badge" v-if="unreadCount > 0">
-              {{ unreadCount }} unread
+              {{ unreadCount }} 未读
             </span>
           </div>
           <div class="header-actions">
@@ -17,21 +23,21 @@
               :loading="markingAllRead"
               :icon="Check"
             >
-              Mark all as read
+              全部标记已读
             </el-button>
             <el-button 
               @click="handleDeleteAllRead"
               :loading="deletingRead"
               :icon="Delete"
             >
-              Delete read
+              删除已读
             </el-button>
             <el-button 
               @click="fetchNotifications"
               :loading="loading"
               :icon="Refresh"
             >
-              Refresh
+              刷新
             </el-button>
           </div>
         </div>
@@ -40,53 +46,53 @@
       <!-- 视图切换和过滤器 -->
       <div class="filters">
         <!-- v4.19.0: 视图切换 -->
-        <el-radio-group v-model="viewMode" @change="handleViewModeChange" style="margin-right: 16px;">
+        <el-radio-group v-model="viewMode" @change="handleViewModeChange" class="view-mode-toggle">
           <el-radio-button label="list">
-            <el-icon><List /></el-icon> List
+            <el-icon><List /></el-icon> 列表
           </el-radio-button>
           <el-radio-button label="grouped">
-            <el-icon><Folder /></el-icon> Grouped
+            <el-icon><Folder /></el-icon> 分组
           </el-radio-button>
         </el-radio-group>
         
         <el-radio-group v-model="filterStatus" @change="handleFilterChange" v-if="viewMode === 'list'">
-          <el-radio-button label="all">All</el-radio-button>
-          <el-radio-button label="unread">Unread</el-radio-button>
-          <el-radio-button label="read">Read</el-radio-button>
+          <el-radio-button label="all">全部</el-radio-button>
+          <el-radio-button label="unread">未读</el-radio-button>
+          <el-radio-button label="read">已读</el-radio-button>
         </el-radio-group>
         
         <el-select 
           v-model="filterType" 
-          placeholder="Filter by type" 
+          placeholder="按类型筛选" 
           clearable
           @change="handleFilterChange"
-          style="width: 180px;"
+          class="erp-w-180"
           v-if="viewMode === 'list'"
         >
-          <el-option label="User Registration" value="user_registered" />
-          <el-option label="User Approved" value="user_approved" />
-          <el-option label="User Rejected" value="user_rejected" />
-          <el-option label="Password Reset" value="password_reset" />
-          <el-option label="System Alert" value="system_alert" />
+          <el-option label="用户注册" value="user_registered" />
+          <el-option label="用户批准" value="user_approved" />
+          <el-option label="用户拒绝" value="user_rejected" />
+          <el-option label="密码重置" value="password_reset" />
+          <el-option label="系统告警" value="system_alert" />
         </el-select>
         
         <!-- v4.19.0: 优先级过滤 -->
         <el-select 
           v-model="filterPriority" 
-          placeholder="Filter by priority" 
+          placeholder="按优先级筛选" 
           clearable
           @change="handleFilterChange"
-          style="width: 160px;"
+          class="erp-w-160"
           v-if="viewMode === 'list'"
         >
-          <el-option label="High Priority" value="high">
-            <span class="priority-option priority-high">High</span>
+          <el-option label="高优先级" value="high">
+            <span class="priority-option priority-high">高</span>
           </el-option>
-          <el-option label="Medium Priority" value="medium">
-            <span class="priority-option priority-medium">Medium</span>
+          <el-option label="中优先级" value="medium">
+            <span class="priority-option priority-medium">中</span>
           </el-option>
-          <el-option label="Low Priority" value="low">
-            <span class="priority-option priority-low">Low</span>
+          <el-option label="低优先级" value="low">
+            <span class="priority-option priority-low">低</span>
           </el-option>
         </el-select>
       </div>
@@ -112,7 +118,7 @@
                   </el-icon>
                   <span class="group-title">{{ group.type_label }}</span>
                   <el-badge :value="group.unread_count" :hidden="group.unread_count === 0" class="group-badge" />
-                  <span class="group-count">{{ group.total_count }} notifications</span>
+                  <span class="group-count">{{ group.total_count }} 条通知</span>
                 </div>
               </template>
               
@@ -128,7 +134,7 @@
                     size="small"
                     @click="handleViewGroupNotifications(group.notification_type)"
                   >
-                    View All
+                    查看全部
                   </el-button>
                   <el-button 
                     v-if="group.unread_count > 0"
@@ -136,7 +142,7 @@
                     @click="handleMarkGroupRead(group.notification_type)"
                     :loading="markingGroupRead === group.notification_type"
                   >
-                    Mark All Read
+                    全部已读
                   </el-button>
                 </div>
               </div>
@@ -146,8 +152,8 @@
         
         <div v-else class="empty-state">
           <el-icon :size="64" color="#c0c4cc"><Bell /></el-icon>
-          <h3>No notifications</h3>
-          <p>You don't have any notifications yet.</p>
+          <h3>暂无通知</h3>
+          <p>当前没有可展示的通知。</p>
         </div>
       </div>
       
@@ -184,7 +190,7 @@
                   size="small"
                   class="priority-tag"
                 >
-                  High
+                  高优先级
                 </el-tag>
                 <el-tag 
                   :type="getTypeTagColor(notification.notification_type)"
@@ -214,7 +220,7 @@
                 size="small"
                 @click="handleMarkRead(notification)"
               >
-                Mark read
+                标记已读
               </el-button>
               <el-button
                 type="danger"
@@ -222,7 +228,7 @@
                 size="small"
                 @click="handleDelete(notification)"
               >
-                Delete
+                删除
               </el-button>
             </div>
           </div>
@@ -230,8 +236,8 @@
         
         <div v-else class="empty-state">
           <el-icon :size="64" color="#c0c4cc"><Bell /></el-icon>
-          <h3>No notifications</h3>
-          <p>You don't have any notifications yet.</p>
+          <h3>暂无通知</h3>
+          <p>当前没有可展示的通知。</p>
         </div>
       </div>
       
@@ -270,6 +276,7 @@ import {
   Folder
 } from '@element-plus/icons-vue'
 import notificationsApi from '@/api/notifications.js'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 // 状态
 const loading = ref(false)
@@ -324,7 +331,7 @@ const fetchNotifications = async () => {
     }
   } catch (error) {
     console.error('[SystemNotifications] Failed to fetch notifications:', error)
-    ElMessage.error('Failed to load notifications')
+    ElMessage.error('加载通知失败')
   } finally {
     loading.value = false
   }
@@ -336,10 +343,10 @@ const handleMarkRead = async (notification) => {
     await notificationsApi.markAsRead(notification.notification_id)
     notification.is_read = true
     unreadCount.value = Math.max(0, unreadCount.value - 1)
-    ElMessage.success('Notification marked as read')
+    ElMessage.success('已标记为已读')
   } catch (error) {
     console.error('[SystemNotifications] Failed to mark as read:', error)
-    ElMessage.error('Failed to mark notification as read')
+    ElMessage.error('标记已读失败')
   }
 }
 
@@ -353,10 +360,10 @@ const handleMarkAllRead = async () => {
       is_read: true
     }))
     unreadCount.value = 0
-    ElMessage.success('All notifications marked as read')
+    ElMessage.success('已全部标记为已读')
   } catch (error) {
     console.error('[SystemNotifications] Failed to mark all as read:', error)
-    ElMessage.error('Failed to mark all notifications as read')
+    ElMessage.error('批量标记已读失败')
   } finally {
     markingAllRead.value = false
   }
@@ -366,11 +373,11 @@ const handleMarkAllRead = async () => {
 const handleDelete = async (notification) => {
   try {
     await ElMessageBox.confirm(
-      'Are you sure you want to delete this notification?',
-      'Delete Notification',
+      '确定要删除这条通知吗？',
+      '删除通知',
       {
-        confirmButtonText: 'Delete',
-        cancelButtonText: 'Cancel',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
         type: 'warning'
       }
     )
@@ -389,11 +396,11 @@ const handleDelete = async (notification) => {
       }
     }
     
-    ElMessage.success('Notification deleted')
+    ElMessage.success('通知已删除')
   } catch (error) {
     if (error !== 'cancel') {
       console.error('[SystemNotifications] Failed to delete notification:', error)
-      ElMessage.error('Failed to delete notification')
+      ElMessage.error('删除通知失败')
     }
   }
 }
@@ -402,11 +409,11 @@ const handleDelete = async (notification) => {
 const handleDeleteAllRead = async () => {
   try {
     await ElMessageBox.confirm(
-      'Are you sure you want to delete all read notifications?',
-      'Delete Read Notifications',
+      '确定要删除所有已读通知吗？',
+      '删除已读通知',
       {
-        confirmButtonText: 'Delete',
-        cancelButtonText: 'Cancel',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
         type: 'warning'
       }
     )
@@ -415,16 +422,16 @@ const handleDeleteAllRead = async () => {
     const response = await notificationsApi.deleteAllReadNotifications()
     
     if (response && response.deleted_count > 0) {
-      ElMessage.success(`Deleted ${response.deleted_count} read notifications`)
+      ElMessage.success(`已删除 ${response.deleted_count} 条已读通知`)
       // 重新获取列表
       await fetchNotifications()
     } else {
-      ElMessage.info('No read notifications to delete')
+      ElMessage.info('没有可删除的已读通知')
     }
   } catch (error) {
     if (error !== 'cancel') {
       console.error('[SystemNotifications] Failed to delete read notifications:', error)
-      ElMessage.error('Failed to delete read notifications')
+      ElMessage.error('删除已读通知失败')
     }
   } finally {
     deletingRead.value = false
@@ -464,11 +471,11 @@ const getTypeTagColor = (type) => {
 // 获取类型标签文本
 const getTypeLabel = (type) => {
   const labels = {
-    'user_registered': 'Registration',
-    'user_approved': 'Approved',
-    'user_rejected': 'Rejected',
-    'password_reset': 'Password',
-    'system_alert': 'System'
+    'user_registered': '用户注册',
+    'user_approved': '已批准',
+    'user_rejected': '已拒绝',
+    'password_reset': '密码重置',
+    'system_alert': '系统告警'
   }
   return labels[type] || type
 }
@@ -484,10 +491,10 @@ const formatTime = (dateString) => {
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
   
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins} minutes ago`
-  if (diffHours < 24) return `${diffHours} hours ago`
-  if (diffDays < 7) return `${diffDays} days ago`
+  if (diffMins < 1) return '刚刚'
+  if (diffMins < 60) return `${diffMins} 分钟前`
+  if (diffHours < 24) return `${diffHours} 小时前`
+  if (diffDays < 7) return `${diffDays} 天前`
   
   return date.toLocaleDateString() + ' ' + date.toLocaleTimeString()
 }
@@ -507,7 +514,7 @@ const fetchNotificationGroups = async () => {
     }
   } catch (error) {
     console.error('[SystemNotifications] Failed to fetch notification groups:', error)
-    ElMessage.error('Failed to load notification groups')
+    ElMessage.error('加载通知分组失败')
   } finally {
     loadingGroups.value = false
   }
@@ -555,13 +562,13 @@ const handleMarkGroupRead = async (notificationType) => {
       // 更新总未读数
       unreadCount.value = Math.max(0, unreadCount.value - response.items.length)
       
-      ElMessage.success(`Marked ${response.items.length} notifications as read`)
+      ElMessage.success(`已标记 ${response.items.length} 条通知为已读`)
     } else {
-      ElMessage.info('No unread notifications in this group')
+      ElMessage.info('该分组下没有未读通知')
     }
   } catch (error) {
     console.error('[SystemNotifications] Failed to mark group as read:', error)
-    ElMessage.error('Failed to mark notifications as read')
+    ElMessage.error('分组标记已读失败')
   } finally {
     markingGroupRead.value = null
   }
@@ -575,7 +582,7 @@ onMounted(() => {
 
 <style scoped>
 .notifications-page {
-  padding: 20px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .notifications-card {
@@ -621,6 +628,10 @@ onMounted(() => {
   gap: 16px;
   margin-bottom: 20px;
   flex-wrap: wrap;
+}
+
+.view-mode-toggle {
+  margin-right: 16px;
 }
 
 .notifications-list {

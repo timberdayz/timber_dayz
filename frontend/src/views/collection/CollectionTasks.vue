@@ -1,5 +1,11 @@
 <template>
-  <div class="collection-tasks">
+  <div class="collection-tasks erp-page-container erp-page--admin">
+    <PageHeader
+      title="采集任务"
+      subtitle="创建快速采集任务、查看任务进度、日志与步骤时间线。"
+      family="admin"
+    />
+
     <!-- 快速采集面板 -->
     <div class="quick-collect-panel">
       <h3>快速采集</h3>
@@ -36,7 +42,7 @@
           <el-checkbox label="services">服务</el-checkbox>
         </el-checkbox-group>
 
-        <el-select v-model="quickForm.date_preset" placeholder="日期范围" style="width: 120px">
+        <el-select v-model="quickForm.date_preset" placeholder="日期范围" class="erp-w-120">
           <el-option label="今天" value="today" />
           <el-option label="昨天" value="yesterday" />
           <el-option label="最近7天" value="last_7_days" />
@@ -51,7 +57,7 @@
           start-placeholder="开始日期"
           end-placeholder="结束日期"
           value-format="YYYY-MM-DD"
-          style="width: 240px"
+          class="erp-w-240"
         />
 
         <div class="debug-mode-switch">
@@ -143,7 +149,7 @@
               v-for="domain in row.data_domains" 
               :key="domain"
               size="small"
-              style="margin-right: 4px"
+              class="erp-mr-xs"
             >
               {{ getDomainLabel(domain) }}
             </el-tag>
@@ -259,7 +265,7 @@
             <el-descriptions-item label="结束时间">{{ formatTime(detailTask.completed_at) }}</el-descriptions-item>
             <el-descriptions-item label="总耗时">{{ formatDuration(detailTask) }}</el-descriptions-item>
             <el-descriptions-item label="数据域">
-              <el-tag v-for="d in (detailTask.data_domains || [])" :key="d" size="small" style="margin-right:4px">{{ getDomainLabel(d) }}</el-tag>
+              <el-tag v-for="d in (detailTask.data_domains || [])" :key="d" size="small" class="erp-mr-xs">{{ getDomainLabel(d) }}</el-tag>
             </el-descriptions-item>
             <el-descriptions-item v-if="detailTask.completed_domains?.length" label="已完成域">
               {{ (detailTask.completed_domains || []).join(', ') }}
@@ -369,6 +375,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CaretRight, Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 // 状态
 const loading = ref(false)
@@ -805,7 +812,7 @@ onMounted(() => {
 
 <style scoped>
 .collection-tasks {
-  padding: 20px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .quick-collect-panel {

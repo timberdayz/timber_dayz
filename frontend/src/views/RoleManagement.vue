@@ -1,10 +1,10 @@
 <template>
-  <div class="role-management">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <h1>🔐 角色管理中心</h1>
-      <p>角色管理 • 权限配置 • 访问控制</p>
-    </div>
+  <div class="role-management erp-page-container erp-page--admin">
+    <PageHeader
+      title="角色管理"
+      subtitle="维护角色、描述和权限集合，统一角色权限配置入口。"
+      family="admin"
+    />
 
     <!-- 操作栏 -->
     <el-card class="action-card">
@@ -24,7 +24,7 @@
             v-model="searchKeyword"
             placeholder="搜索角色名称"
             @input="handleSearch"
-            style="width: 300px"
+            class="search-input"
           >
             <template #prefix>
               <el-icon><Search /></el-icon>
@@ -38,7 +38,7 @@
     <el-card class="table-card">
       <template #header>
         <div class="card-header">
-          <span>📋 角色列表</span>
+          <span>角色列表</span>
           <el-tag>共 {{ rolesStore.roles.length }} 个角色</el-tag>
         </div>
       </template>
@@ -47,7 +47,7 @@
         :data="rolesStore.roles" 
         v-loading="rolesStore.isLoading"
         stripe
-        style="width: 100%"
+        class="erp-w-full"
       >
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="角色名称" width="150" />
@@ -59,7 +59,7 @@
               :key="permission" 
               :type="getPermissionType(permission)"
               size="small"
-              style="margin-right: 5px; margin-bottom: 5px;"
+              class="erp-tag-gap"
             >
               {{ getPermissionText(permission) }}
             </el-tag>
@@ -167,7 +167,7 @@
               v-for="permission in selectedRole.permissions" 
               :key="permission" 
               :type="getPermissionType(permission)"
-              style="margin-right: 5px; margin-bottom: 5px;"
+              class="erp-tag-gap"
             >
               {{ getPermissionText(permission) }}
             </el-tag>
@@ -185,7 +185,7 @@
           :description="`正在为角色 '${selectedRole.name}' 配置权限`"
           type="info"
           show-icon
-          style="margin-bottom: 20px;"
+          class="erp-mb-lg"
         />
         
         <el-form :model="permissionForm" ref="permissionFormRef" label-width="100px">
@@ -195,8 +195,8 @@
                 <el-col :span="12" v-for="permission in availablePermissions" :key="permission.id">
                   <el-checkbox :label="permission.name">
                     <div>
-                      <div style="font-weight: 600;">{{ permission.description }}</div>
-                      <div style="font-size: 12px; color: #666;">{{ permission.resource }} - {{ permission.action }}</div>
+                      <div class="permission-item-title">{{ permission.description }}</div>
+                      <div class="erp-text-secondary-small">{{ permission.resource }} - {{ permission.action }}</div>
                     </div>
                   </el-checkbox>
                 </el-col>
@@ -225,6 +225,7 @@ import {
   Refresh,
   Search
 } from '@element-plus/icons-vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 const rolesStore = useRolesStore()
 
@@ -491,31 +492,8 @@ onMounted(() => {
 
 <style scoped>
 .role-management {
-  padding: 20px;
   background: #f0f2f5;
-  min-height: 100vh;
-}
-
-.page-header {
-  text-align: center;
-  margin-bottom: 30px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 40px 20px;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.page-header h1 {
-  margin: 0 0 10px 0;
-  font-size: 32px;
-  font-weight: 700;
-}
-
-.page-header p {
-  margin: 0;
-  opacity: 0.9;
-  font-size: 16px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .action-card,
@@ -531,14 +509,22 @@ onMounted(() => {
   font-weight: 600;
 }
 
+.search-input {
+  width: 300px;
+}
+
+.permission-item-title {
+  font-weight: 600;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .role-management {
     padding: 10px;
   }
-  
-  .page-header h1 {
-    font-size: 24px;
+
+  .search-input {
+    width: 100%;
   }
 }
 </style>

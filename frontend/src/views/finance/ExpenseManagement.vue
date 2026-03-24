@@ -1,14 +1,16 @@
 <template>
-  <div class="expense-management erp-page-container">
-    <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px">
-      费用管理
-    </h1>
+  <div class="expense-management erp-page-container erp-page--admin">
+    <PageHeader
+      title="费用管理"
+      subtitle="按月份或按店铺维护费用数据，保留现有双视图业务逻辑。"
+      family="admin"
+    />
 
     <!-- 模式切换 Tab -->
     <el-tabs
       v-model="viewMode"
       @tab-change="handleModeChange"
-      style="margin-bottom: 20px"
+      class="erp-mb-lg"
     >
       <el-tab-pane label="按月份查看" name="monthly">
         <template #label>
@@ -29,21 +31,21 @@
     <!-- 按月份查看模式 -->
     <div v-if="viewMode === 'monthly'">
       <!-- 操作栏 -->
-      <div class="action-bar" style="margin-bottom: 20px">
+      <div class="action-bar erp-mb-lg">
         <el-date-picker
           v-model="selectedMonth"
           type="month"
           placeholder="选择月份"
           value-format="YYYY-MM"
           size="default"
-          style="width: 180px"
+          class="erp-w-180"
           @change="handleMonthChange"
         />
         <el-button
           type="primary"
           :icon="Plus"
           @click="handleAddAllShops"
-          style="margin-left: 10px"
+          class="erp-ml-sm"
         >
           为所有店铺添加
         </el-button>
@@ -51,22 +53,22 @@
           type="success"
           @click="handleBatchSave"
           :loading="batchSaving"
-          style="margin-left: 10px"
+          class="erp-ml-sm"
         >
           批量保存
         </el-button>
         <el-button
           :icon="Refresh"
           @click="loadMonthlyExpenses"
-          style="margin-left: 10px"
+          class="erp-ml-sm"
         >
           刷新
         </el-button>
-        <div style="flex: 1"></div>
+        <div class="erp-flex-spacer"></div>
       </div>
 
       <!-- 统计卡片（月度 + 年度） -->
-      <el-row :gutter="20" style="margin-bottom: 20px">
+      <el-row :gutter="20" class="erp-mb-lg">
         <el-col :span="4">
           <el-card class="stat-card monthly">
             <div class="stat-item">
@@ -162,7 +164,7 @@
               <el-select
                 v-model="row.shop_id"
                 placeholder="选择店铺"
-                style="width: 100%"
+                class="erp-w-full"
                 :disabled="!!row.id"
                 @change="handleShopChange(row)"
               >
@@ -187,7 +189,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
-                style="width: 100%"
+                class="erp-w-full"
                 @change="updateRowTotal(row)"
               />
             </template>
@@ -204,7 +206,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
-                style="width: 100%"
+                class="erp-w-full"
                 @change="updateRowTotal(row)"
               />
             </template>
@@ -221,7 +223,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
-                style="width: 100%"
+                class="erp-w-full"
                 @change="updateRowTotal(row)"
               />
             </template>
@@ -238,7 +240,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
-                style="width: 100%"
+                class="erp-w-full"
                 @change="updateRowTotal(row)"
               />
             </template>
@@ -286,11 +288,11 @@
     <!-- 按店铺查看模式 -->
     <div v-else-if="viewMode === 'shop'">
       <!-- 操作栏 -->
-      <div class="action-bar" style="margin-bottom: 20px">
+      <div class="action-bar erp-mb-lg">
         <el-select
           v-model="selectedShopId"
           placeholder="选择店铺"
-          style="width: 250px"
+          class="erp-w-250"
           @change="handleShopSelectChange"
           filterable
         >
@@ -307,21 +309,21 @@
           placeholder="选择年份"
           value-format="YYYY"
           size="default"
-          style="width: 150px; margin-left: 10px"
+          class="erp-w-150 erp-ml-sm"
           @change="loadShopExpenses"
         />
         <el-button
           :icon="Refresh"
           @click="loadShopExpenses"
-          style="margin-left: 10px"
+          class="erp-ml-sm"
         >
           刷新
         </el-button>
-        <div style="flex: 1"></div>
+        <div class="erp-flex-spacer"></div>
       </div>
 
       <!-- 店铺年度汇总卡片 -->
-      <el-row :gutter="20" style="margin-bottom: 20px">
+      <el-row :gutter="20" class="erp-mb-lg">
         <el-col :span="4">
           <el-card class="stat-card yearly">
             <div class="stat-item">
@@ -414,7 +416,7 @@
                 placeholder="选择月份"
                 value-format="YYYY-MM"
                 size="small"
-                style="width: 100%"
+                class="erp-w-full"
               />
             </template>
           </el-table-column>
@@ -430,7 +432,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
-                style="width: 100%"
+                class="erp-w-full"
                 @change="updateShopRowTotal(row)"
               />
             </template>
@@ -447,7 +449,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
-                style="width: 100%"
+                class="erp-w-full"
                 @change="updateShopRowTotal(row)"
               />
             </template>
@@ -464,7 +466,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
-                style="width: 100%"
+                class="erp-w-full"
                 @change="updateShopRowTotal(row)"
               />
             </template>
@@ -481,7 +483,7 @@
                 :min="0"
                 :precision="2"
                 :controls="false"
-                style="width: 100%"
+                class="erp-w-full"
                 @change="updateShopRowTotal(row)"
               />
             </template>
@@ -525,7 +527,7 @@
         </el-table>
 
         <!-- 添加新月份按钮 -->
-        <div style="margin-top: 15px">
+        <div class="erp-mt-md">
           <el-button
             type="primary"
             :icon="Plus"
@@ -545,6 +547,7 @@ import { ref, reactive, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus, Refresh, Calendar, Shop } from "@element-plus/icons-vue";
 import api from "@/api";
+import PageHeader from "@/components/common/PageHeader.vue";
 
 // ==================== 公共状态 ====================
 const viewMode = ref("monthly"); // monthly | shop
@@ -1070,7 +1073,7 @@ onMounted(() => {
 
 <style scoped>
 .expense-management {
-  padding: 20px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .action-bar {

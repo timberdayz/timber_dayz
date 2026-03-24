@@ -1,10 +1,10 @@
 <template>
-  <div class="user-management">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <h1>👥 用户管理中心</h1>
-      <p>用户管理 • 权限控制 • 安全审计</p>
-    </div>
+  <div class="user-management erp-page-container erp-page--admin">
+    <PageHeader
+      title="用户管理"
+      subtitle="管理用户账号、角色分配、密码重置与软删除恢复。"
+      family="admin"
+    />
 
     <!-- 操作栏 -->
     <el-card class="action-card">
@@ -24,7 +24,7 @@
             v-model="searchKeyword"
             placeholder="搜索用户名或邮箱"
             @input="handleSearch"
-            style="width: 300px"
+            class="search-input"
           >
             <template #prefix>
               <el-icon><Search /></el-icon>
@@ -38,7 +38,7 @@
     <el-card class="table-card">
       <template #header>
         <div class="card-header">
-          <span>📋 用户列表</span>
+          <span>用户列表</span>
           <el-tag v-if="activeTab === 'active'">共 {{ usersStore.total }} 个用户</el-tag>
           <el-tag v-else type="info">共 {{ usersStore.deletedTotal }} 个已删除用户</el-tag>
         </div>
@@ -47,11 +47,11 @@
       <!-- 标签页 -->
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
         <el-tab-pane label="活跃用户" name="active">
-              <el-table 
+          <el-table 
             :data="usersStore.users" 
             v-loading="usersStore.isLoading"
             stripe
-            style="width: 100%"
+            class="erp-w-full"
           >
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="username" label="用户名" width="150" />
@@ -68,7 +68,7 @@
               v-for="role in row.roles" 
               :key="role" 
               :type="getRoleType(role)"
-              style="margin-right: 5px; margin-bottom: 5px;"
+              class="erp-tag-gap"
             >
               {{ getRoleText(role) }}
             </el-tag>
@@ -134,7 +134,7 @@
             :data="usersStore.deletedUsers" 
             v-loading="usersStore.isLoadingDeleted"
             stripe
-            style="width: 100%"
+            class="erp-w-full"
           >
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="username" label="用户名" width="150" />
@@ -143,11 +143,11 @@
             <el-table-column label="角色" width="200">
               <template #default="{ row }">
                 <el-tag 
-                  v-for="role in row.roles" 
-                  :key="role" 
-                  :type="getRoleType(role)"
-                  style="margin-right: 5px; margin-bottom: 5px;"
-                >
+              v-for="role in row.roles" 
+              :key="role" 
+              :type="getRoleType(role)"
+              class="erp-tag-gap"
+            >
                   {{ getRoleText(role) }}
                 </el-tag>
               </template>
@@ -226,7 +226,7 @@
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="createForm.is_active" />
-          <span style="margin-left: 10px;">{{ createForm.is_active ? '启用' : '禁用' }}</span>
+          <span class="erp-ml-sm">{{ createForm.is_active ? '启用' : '禁用' }}</span>
         </el-form-item>
       </el-form>
 
@@ -266,7 +266,7 @@
             placeholder="请选择关联员工（可清空解除关联）"
             clearable
             filterable
-            style="width: 100%"
+            class="erp-w-full"
           >
             <el-option
               v-for="emp in employeeOptions"
@@ -278,7 +278,7 @@
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="editForm.is_active" />
-          <span style="margin-left: 10px;">{{ editForm.is_active ? '启用' : '禁用' }}</span>
+          <span class="erp-ml-sm">{{ editForm.is_active ? '启用' : '禁用' }}</span>
         </el-form-item>
       </el-form>
 
@@ -303,7 +303,7 @@
               v-for="role in selectedUser.roles" 
               :key="role" 
               :type="getRoleType(role)"
-              style="margin-right: 5px;"
+              class="erp-mr-xs"
             >
               {{ getRoleText(role) }}
             </el-tag>
@@ -360,6 +360,7 @@ import {
   Refresh,
   Search
 } from '@element-plus/icons-vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 const usersStore = useUsersStore()
 const rolesStore = useRolesStore()
@@ -759,31 +760,8 @@ onMounted(() => {
 
 <style scoped>
 .user-management {
-  padding: 20px;
   background: #f0f2f5;
-  min-height: 100vh;
-}
-
-.page-header {
-  text-align: center;
-  margin-bottom: 30px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 40px 20px;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.page-header h1 {
-  margin: 0 0 10px 0;
-  font-size: 32px;
-  font-weight: 700;
-}
-
-.page-header p {
-  margin: 0;
-  opacity: 0.9;
-  font-size: 16px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .action-card,
@@ -804,14 +782,18 @@ onMounted(() => {
   text-align: right;
 }
 
+.search-input {
+  width: 300px;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .user-management {
     padding: 10px;
   }
-  
-  .page-header h1 {
-    font-size: 24px;
+
+  .search-input {
+    width: 100%;
   }
 }
 </style>
