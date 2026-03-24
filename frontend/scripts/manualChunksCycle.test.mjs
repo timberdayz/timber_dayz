@@ -31,3 +31,16 @@ test('build output does not create a circular import between vendor-vue-core and
     `Detected circular import between ${vueCoreFile} and ${miscFile}`,
   )
 })
+
+test('build output does not split Element Plus into mutually dependent vendor chunks', () => {
+  const files = readdirSync(jsDir)
+  const elementPlusFiles = files.filter(
+    (file) => file.startsWith('vendor-element-plus-') && file.endsWith('.js'),
+  )
+
+  assert.equal(
+    elementPlusFiles.length <= 1,
+    true,
+    `Expected at most one Element Plus vendor chunk, got: ${elementPlusFiles.join(', ')}`,
+  )
+})
