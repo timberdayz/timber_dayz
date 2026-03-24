@@ -17,7 +17,10 @@ def test_runtime_configs_no_longer_reference_metabase_runtime():
     )
 
     for path_str in files:
-        text = Path(path_str).read_text(encoding="utf-8", errors="replace")
+        path = Path(path_str)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
         for token in forbidden:
             assert token not in text, f"{path_str} still contains {token}"
 

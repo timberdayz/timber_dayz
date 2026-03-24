@@ -190,6 +190,177 @@ class PostgresqlDashboardService:
             result = await session.execute(text(query), params)
             return [dict(row) for row in result.mappings().all()]
 
+    async def _load_target_summary(
+        self,
+        granularity: str,
+        period_start: date_cls,
+        period_end: date_cls,
+        platform: str | None = None,
+    ) -> dict[str, float]:
+        async with AsyncSessionLocal() as session:
+            if granularity == "monthly":
+                if platform:
+                    try:
+                        result = await session.execute(
+                            text(
+                                """
+                                SELECT
+                                    COALESCE(SUM(tb.target_amount), 0) AS target_amount,
+                                    COALESCE(SUM(tb.target_quantity), 0) AS target_quantity
+                                FROM a_class.target_breakdown tb
+                                INNER JOIN a_class.sales_targets st ON st.id = tb.target_id
+                                WHERE st.status = 'active'
+                                  AND st.period_start <= :period_start
+                                  AND st.period_end >= :period_end
+                                  AND tb.breakdown_type = 'shop'
+                                  AND LOWER(tb.platform_code) = LOWER(:platform)
+                                """
+                            ),
+                            {
+                                "period_start": period_start,
+                                "period_end": period_end,
+                                "platform": platform,
+                            },
+                        )
+                    except Exception:
+                        await session.rollback()
+                        result = await session.execute(
+                            text(
+                                """
+                                SELECT
+                                    COALESCE(SUM(target_sales_amount), 0) AS target_amount,
+                                    COALESCE(SUM(target_quantity), 0) AS target_quantity
+                                FROM a_class.sales_targets_a
+                                WHERE year_month = :year_month
+                                """
+                            ),
+                            {"year_month": period_start.strftime("%Y-%m")},
+                        )
+                else:
+                    try:
+                        result = await session.execute(
+                            text(
+                                """
+                                SELECT
+                                    COALESCE(SUM(target_amount), 0) AS target_amount,
+                                    COALESCE(SUM(target_quantity), 0) AS target_quantity
+                                FROM a_class.sales_targets
+                                WHERE status = 'active'
+                                  AND period_start <= :period_start
+                                  AND period_end >= :period_end
+                                """
+                            ),
+                            {"period_start": period_start, "period_end": period_end},
+                        )
+                    except Exception:
+                        await session.rollback()
+                        try:
+                            result = await session.execute(
+                                text(
+                                    """
+                                    SELECT
+                                        COALESCE(SUM(target_sales_amount), 0) AS target_amount,
+                                        COALESCE(SUM(target_quantity), 0) AS target_quantity
+                                    FROM a_class.sales_targets_a
+                                    WHERE year_month = :year_month
+                                    """
+                                ),
+                                {"year_month": period_start.strftime("%Y-%m")},
+                            )
+                        except Exception:
+                            await session.rollback()
+                            try:
+                                result = await session.execute(
+                                    text(
+                                        """
+                                        SELECT
+                                            COALESCE(SUM("目标销售额"), 0) AS target_amount,
+                                            COALESCE(SUM("目标订单数"), 0) AS target_quantity
+                                        FROM a_class.sales_targets_a
+                                        WHERE "年月" = :year_month
+                                        """
+                                    ),
+                                    {"year_month": period_start.strftime("%Y-%m")},
+                                )
+                            except Exception:
+                                await session.rollback()
+                                result = await session.execute(
+                                    text(
+                                        """
+                                        SELECT
+                                            COALESCE(SUM("目标销售额"), 0) AS target_amount,
+                                            COALESCE(SUM("目标单量"), 0) AS target_quantity
+                                        FROM a_class.sales_targets_a
+                                        WHERE "年月" = :year_month
+                                        """
+                                    ),
+                                    {"year_month": period_start.strftime("%Y-%m")},
+                                )
+            else:
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT
+                            COALESCE(SUM(tb.target_amount), 0) AS target_amount,
+                            COALESCE(SUM(tb.target_quantity), 0) AS target_quantity
+                        FROM a_class.target_breakdown tb
+                        INNER JOIN a_class.sales_targets st ON st.id = tb.target_id
+                        WHERE st.status = 'active'
+                          AND tb.breakdown_type IN ('time', 'shop_time')
+                          AND tb.period_start >= :period_start
+                          AND tb.period_end <= :period_end
+                          AND (:platform IS NULL OR LOWER(COALESCE(tb.platform_code, '')) = LOWER(:platform))
+                        """
+                    ),
+                    {
+                        "period_start": period_start,
+                        "period_end": period_end,
+                        "platform": platform,
+                    },
+                )
+
+            row = result.fetchone()
+            return {
+                "target_amount": _to_float(row[0]) if row else 0.0,
+                "target_quantity": _to_float(row[1]) if row else 0.0,
+            }
+
+    async def _load_operating_expenses_summary(
+        self,
+        period_month: date_cls,
+    ) -> float | None:
+        year_month = period_month.strftime("%Y-%m")
+        async with AsyncSessionLocal() as session:
+            try:
+                result = await session.execute(
+                    text(
+                        """
+                        SELECT COALESCE(SUM(rent + salary + utilities + other_costs), 0)
+                        FROM a_class.operating_costs
+                        WHERE year_month = :year_month
+                        """
+                    ),
+                    {"year_month": year_month},
+                )
+            except Exception:
+                await session.rollback()
+                try:
+                    result = await session.execute(
+                        text(
+                            """
+                            SELECT COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0)
+                            FROM a_class.operating_costs
+                            WHERE "年月" = :year_month
+                            """
+                        ),
+                        {"year_month": year_month},
+                    )
+                except Exception:
+                    await session.rollback()
+                    return None
+            value = result.scalar_one_or_none()
+            return _to_float(value)
+
     async def get_business_overview_kpi(
         self,
         month: str,
@@ -290,11 +461,32 @@ class PostgresqlDashboardService:
         previous_comparison = aggregate_comparison_source_rows(previous_rows)
         average_comparison = aggregate_comparison_source_rows(average_rows)
 
-        return reduce_business_overview_comparison_rows(
+        reduced = reduce_business_overview_comparison_rows(
             current_row=current_comparison,
             previous_row=previous_comparison,
             average_row=average_comparison,
         )
+        current_end = (
+            current_start
+            if granularity == "daily"
+            else current_start + timedelta(days=6)
+            if granularity == "weekly"
+            else (current_start + timedelta(days=31)).replace(day=1) - timedelta(days=1)
+        )
+        target_summary = await self._load_target_summary(
+            granularity=granularity,
+            period_start=current_start,
+            period_end=current_end,
+            platform=platform,
+        )
+        reduced["target"]["sales_amount"] = round(target_summary["target_amount"], 2)
+        reduced["target"]["sales_quantity"] = round(target_summary["target_quantity"], 2)
+        reduced["target"]["achievement_rate"] = (
+            round(reduced["metrics"]["sales_amount"]["today"] * 100.0 / target_summary["target_amount"], 2)
+            if target_summary["target_amount"]
+            else 0
+        )
+        return reduced
 
     async def get_business_overview_inventory_backlog(
         self,
@@ -441,6 +633,19 @@ class PostgresqlDashboardService:
         for row in rows:
             for key in total.keys():
                 total[key] += _to_float(row.get(key))
+
+        month_end = (period_month + timedelta(days=31)).replace(day=1) - timedelta(days=1)
+        target_summary = await self._load_target_summary(
+            granularity="monthly",
+            period_start=period_month,
+            period_end=month_end,
+            platform=platform,
+        )
+        total["monthly_target"] = round(target_summary["target_amount"], 2)
+        loaded_expenses = await self._load_operating_expenses_summary(period_month)
+        if loaded_expenses is not None and total["estimated_expenses"] == 0:
+            total["estimated_expenses"] = round(loaded_expenses, 2)
+            total["operating_result"] = round(total["estimated_gross_profit"] - total["estimated_expenses"], 2)
 
         total["monthly_achievement_rate"] = (
             round(total["monthly_total_achieved"] * 100.0 / total["monthly_target"], 2)

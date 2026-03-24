@@ -32,7 +32,9 @@ def test_shop_week_kpi_sql_asset():
         "sql/mart/shop_week_kpi.sql",
         "CREATE OR REPLACE VIEW mart.shop_week_kpi AS",
         (
-            "date_trunc('week'",
+            "semantic.fact_orders_atomic",
+            "semantic.fact_analytics_atomic",
+            "granularity = 'weekly'",
             "gmv",
             "order_count",
             "visitor_count",
@@ -46,7 +48,9 @@ def test_shop_month_kpi_sql_asset():
         "sql/mart/shop_month_kpi.sql",
         "CREATE OR REPLACE VIEW mart.shop_month_kpi AS",
         (
-            "date_trunc('month'",
+            "semantic.fact_orders_atomic",
+            "semantic.fact_analytics_atomic",
+            "granularity = 'monthly'",
             "gmv",
             "order_count",
             "visitor_count",

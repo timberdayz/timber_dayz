@@ -1,30 +1,107 @@
 CREATE SCHEMA IF NOT EXISTS mart;
 
 CREATE OR REPLACE VIEW mart.shop_week_kpi AS
+WITH weekly_order_candidates AS (
+    SELECT
+        date_trunc('week', metric_date)::date AS period_week,
+        platform_code,
+        shop_id,
+        COALESCE(SUM(paid_amount), 0) AS gmv,
+        COUNT(DISTINCT order_id)::numeric AS order_count,
+        COALESCE(SUM(product_quantity), 0) AS total_items,
+        COALESCE(SUM(profit), 0) AS profit,
+        1 AS priority
+    FROM semantic.fact_orders_atomic
+    WHERE granularity = 'weekly'
+    GROUP BY date_trunc('week', metric_date)::date, platform_code, shop_id
+    UNION ALL
+    SELECT
+        date_trunc('week', metric_date)::date AS period_week,
+        platform_code,
+        shop_id,
+        COALESCE(SUM(paid_amount), 0) AS gmv,
+        COUNT(DISTINCT order_id)::numeric AS order_count,
+        COALESCE(SUM(product_quantity), 0) AS total_items,
+        COALESCE(SUM(profit), 0) AS profit,
+        2 AS priority
+    FROM semantic.fact_orders_atomic
+    WHERE granularity = 'daily'
+    GROUP BY date_trunc('week', metric_date)::date, platform_code, shop_id
+),
+weekly_orders AS (
+    SELECT period_week, platform_code, shop_id, gmv, order_count, total_items, profit
+    FROM (
+        SELECT *,
+               ROW_NUMBER() OVER (
+                   PARTITION BY period_week, platform_code, shop_id
+                   ORDER BY priority
+               ) AS rn
+        FROM weekly_order_candidates
+    ) ranked
+    WHERE rn = 1
+),
+weekly_traffic_candidates AS (
+    SELECT
+        date_trunc('week', metric_date)::date AS period_week,
+        platform_code,
+        shop_id,
+        COALESCE(SUM(visitor_count), 0) AS visitor_count,
+        COALESCE(SUM(page_views), 0) AS page_views,
+        1 AS priority
+    FROM semantic.fact_analytics_atomic
+    WHERE granularity = 'weekly'
+    GROUP BY date_trunc('week', metric_date)::date, platform_code, shop_id
+    UNION ALL
+    SELECT
+        date_trunc('week', metric_date)::date AS period_week,
+        platform_code,
+        shop_id,
+        COALESCE(SUM(visitor_count), 0) AS visitor_count,
+        COALESCE(SUM(page_views), 0) AS page_views,
+        2 AS priority
+    FROM semantic.fact_analytics_atomic
+    WHERE granularity = 'daily'
+    GROUP BY date_trunc('week', metric_date)::date, platform_code, shop_id
+),
+weekly_traffic AS (
+    SELECT period_week, platform_code, shop_id, visitor_count, page_views
+    FROM (
+        SELECT *,
+               ROW_NUMBER() OVER (
+                   PARTITION BY period_week, platform_code, shop_id
+                   ORDER BY priority
+               ) AS rn
+        FROM weekly_traffic_candidates
+    ) ranked
+    WHERE rn = 1
+)
 SELECT
-    date_trunc('week', period_date)::date AS period_week,
-    platform_code,
-    shop_id,
-    COALESCE(SUM(gmv), 0) AS gmv,
-    COALESCE(SUM(order_count), 0) AS order_count,
-    COALESCE(SUM(visitor_count), 0) AS visitor_count,
-    COALESCE(SUM(page_views), 0) AS page_views,
+    COALESCE(o.period_week, t.period_week) AS period_week,
+    COALESCE(o.platform_code, t.platform_code) AS platform_code,
+    COALESCE(o.shop_id, t.shop_id) AS shop_id,
+    COALESCE(o.gmv, 0) AS gmv,
+    COALESCE(o.order_count, 0) AS order_count,
+    COALESCE(t.visitor_count, 0) AS visitor_count,
+    COALESCE(t.page_views, 0) AS page_views,
     CASE
-        WHEN COALESCE(SUM(visitor_count), 0) > 0
-        THEN ROUND(COALESCE(SUM(order_count), 0)::numeric * 100.0 / SUM(visitor_count), 2)
+        WHEN COALESCE(t.visitor_count, 0) > 0
+        THEN ROUND(COALESCE(o.order_count, 0)::numeric * 100.0 / t.visitor_count, 2)
         ELSE 0
     END AS conversion_rate,
     CASE
-        WHEN COALESCE(SUM(order_count), 0) > 0
-        THEN ROUND(COALESCE(SUM(gmv), 0)::numeric / SUM(order_count), 2)
+        WHEN COALESCE(o.order_count, 0) > 0
+        THEN ROUND(COALESCE(o.gmv, 0)::numeric / o.order_count, 2)
         ELSE 0
     END AS avg_order_value,
     CASE
-        WHEN COALESCE(SUM(order_count), 0) > 0
-        THEN ROUND(COALESCE(SUM(total_items), 0)::numeric / SUM(order_count), 2)
+        WHEN COALESCE(o.order_count, 0) > 0
+        THEN ROUND(COALESCE(o.total_items, 0)::numeric / o.order_count, 2)
         ELSE 0
     END AS attach_rate,
-    COALESCE(SUM(total_items), 0) AS total_items,
-    COALESCE(SUM(profit), 0) AS profit
-FROM mart.shop_day_kpi
-GROUP BY date_trunc('week', period_date)::date, platform_code, shop_id;
+    COALESCE(o.total_items, 0) AS total_items,
+    COALESCE(o.profit, 0) AS profit
+FROM weekly_orders o
+FULL OUTER JOIN weekly_traffic t
+    ON o.period_week = t.period_week
+   AND o.platform_code = t.platform_code
+   AND COALESCE(o.shop_id, '') = COALESCE(t.shop_id, '');
