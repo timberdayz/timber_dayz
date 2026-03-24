@@ -18,5 +18,5 @@ def test_prod_compose_celery_services_receive_required_secrets():
 def test_prod_compose_backend_has_explicit_dashboard_router_flags():
     text = Path("docker-compose.prod.yml").read_text(encoding="utf-8", errors="replace")
 
-    assert "USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-false}" in text
-    assert "ENABLE_METABASE_PROXY: ${ENABLE_METABASE_PROXY:-false}" in text
+    assert "USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-true}" in text
+    assert "ENABLE_METABASE_PROXY: ${ENABLE_METABASE_PROXY:-false}" not in text

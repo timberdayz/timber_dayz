@@ -113,8 +113,6 @@ services:
       # CORS配置
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5174,http://localhost:80}
 
-      # Metabase配置（容器内使用Docker网络名称）
-      METABASE_URL: http://metabase:3000
     # 生产最小端口暴露：backend 不映射宿主机端口（通过 nginx 反向代理访问 /api/）
     volumes:
       - ./data:/app/data

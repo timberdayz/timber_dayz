@@ -48,8 +48,6 @@ services:
       PROJECT_ROOT: /app
       DATA_DIR: /app/data
       DATA_RAW_DIR: /app/data/raw
-      # ⭐ 业务概览等看板数据来自 Metabase，容器内需用服务名访问
-      METABASE_URL: http://metabase:3000
     volumes:
       # 挂载源代码，支持热重载
       - ./backend:/app/backend

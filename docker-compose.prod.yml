@@ -101,8 +101,7 @@ services:
       APP_ENV: production
       DEBUG: "false"
       LOG_LEVEL: INFO
-      USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-false}
-      ENABLE_METABASE_PROXY: ${ENABLE_METABASE_PROXY:-false}
+      USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-true}
       # ⚠️ 重要：ALLOWED_HOSTS 必须包含 'backend'（Nginx 代理时设置的 Host 头）
       # 生产环境建议通过 .env 文件明确配置：ALLOWED_HOSTS=localhost,127.0.0.1,backend,your-domain.com
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1},backend
@@ -324,7 +323,6 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       USE_POSTGRESQL_DASHBOARD_ROUTER: ${USE_POSTGRESQL_DASHBOARD_ROUTER:-false}
-      ENABLE_METABASE_PROXY: ${ENABLE_METABASE_PROXY:-false}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

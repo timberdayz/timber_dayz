@@ -281,7 +281,7 @@ async def lifespan(app: FastAPI):
                 logger.info("[OK] 统一缓存服务已启用")
                 # [*] 4c8g 单机优化: 可选启动后缓存预热（不阻塞启动）
                 if os.getenv("POSTGRESQL_DASHBOARD_CACHE_WARMUP_ENABLED", "").lower() in ("true", "1", "yes"):
-                    delay_sec = int(os.getenv("METABASE_CACHE_WARMUP_DELAY_SECONDS", "10"))
+                    delay_sec = int(os.getenv("POSTGRESQL_DASHBOARD_CACHE_WARMUP_DELAY_SECONDS", "10"))
                     async def _warmup_after_startup():
                         await asyncio.sleep(delay_sec)
                         try:
