@@ -32,7 +32,17 @@ WITH raw_analytics AS (
 mapped AS (
     SELECT
         platform_code,
-        COALESCE(NULLIF(TRIM(COALESCE(shop_id, '')), ''), 'unknown') AS shop_id,
+        COALESCE(
+            NULLIF(TRIM(COALESCE(shop_id, '')), ''),
+            NULLIF(TRIM(COALESCE(
+                raw_data->>'店铺',
+                raw_data->>'店铺名',
+                raw_data->>'店铺名称',
+                raw_data->>'store_name',
+                raw_data->>'store_label_raw'
+            )), ''),
+            'unknown'
+        ) AS shop_id,
         data_domain,
         granularity,
         metric_date::date AS metric_date,

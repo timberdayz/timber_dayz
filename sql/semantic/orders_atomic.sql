@@ -32,7 +32,16 @@ WITH raw_orders AS (
 mapped AS (
     SELECT
         platform_code,
-        NULLIF(TRIM(COALESCE(shop_id, '')), '') AS shop_id,
+        COALESCE(
+            NULLIF(TRIM(COALESCE(shop_id, '')), ''),
+            NULLIF(TRIM(COALESCE(
+                raw_data->>'店铺',
+                raw_data->>'店铺名',
+                raw_data->>'店铺名称',
+                raw_data->>'store_name',
+                raw_data->>'store_label_raw'
+            )), '')
+        ) AS shop_id,
         data_domain,
         granularity,
         metric_date::date AS metric_date,
@@ -57,6 +66,8 @@ mapped AS (
         COALESCE(
             raw_data->>'销售额',
             raw_data->>'销售金额',
+            raw_data->>'实付金额',
+            raw_data->>'总收入',
             raw_data->>'GMV',
             raw_data->>'订单金额',
             raw_data->>'成交金额',
@@ -66,6 +77,8 @@ mapped AS (
         COALESCE(
             raw_data->>'实付金额',
             raw_data->>'买家实付金额',
+            raw_data->>'实付金额',
+            raw_data->>'总收入',
             raw_data->>'paid_amount',
             raw_data->>'Paid Amount'
         ) AS paid_amount_raw,

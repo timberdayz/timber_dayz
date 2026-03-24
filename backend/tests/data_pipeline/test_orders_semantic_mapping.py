@@ -27,3 +27,11 @@ def test_orders_atomic_sql_exposes_core_standard_fields():
         "ingest_timestamp",
     ):
         assert field_name in sql_text
+
+
+def test_orders_atomic_sql_maps_real_paid_amount_and_store_name_fields():
+    sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8", errors="replace")
+
+    assert "实付金额" in sql_text
+    assert "总收入" in sql_text
+    assert "店铺" in sql_text

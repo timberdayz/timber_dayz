@@ -247,6 +247,206 @@ async def test_postgresql_dashboard_service_operational_metrics_preserves_today_
     assert result["time_gap"] == -5
 
 
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_comparison_loads_total_month_target_when_rows_have_none(monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.sales_targets (
+                        id INTEGER PRIMARY KEY,
+                        target_name VARCHAR(255),
+                        target_type VARCHAR(64),
+                        period_start DATE,
+                        period_end DATE,
+                        target_amount NUMERIC,
+                        target_quantity INTEGER,
+                        achieved_amount NUMERIC,
+                        achieved_quantity INTEGER,
+                        achievement_rate NUMERIC,
+                        status VARCHAR(32)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.sales_targets (
+                        id, target_name, target_type, period_start, period_end,
+                        target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate, status
+                    ) VALUES (
+                        1, '2025年9月常规月度目标', 'shop', DATE '2025-09-01', DATE '2025-09-30',
+                        1100000, 10100, 0, 0, 0, 'active'
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        monkeypatch.setattr(
+            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+            session_factory,
+        )
+        service = PostgresqlDashboardService()
+
+        async def fake_fetch_rows(query, params):
+            if "business_overview_comparison_module" in query:
+                period_key = params.get("period_key")
+                if str(period_key) == "2025-09-01":
+                    return [
+                        {
+                            "sales_amount": 5000,
+                            "sales_quantity": 50,
+                            "traffic": 1000,
+                            "conversion_rate": 5,
+                            "avg_order_value": 100,
+                            "attach_rate": 1.2,
+                            "profit": 300,
+                            "target_sales_amount": None,
+                            "target_sales_quantity": None,
+                        }
+                    ]
+                return []
+            return []
+
+        monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+        result = await service.get_business_overview_comparison(
+            granularity="monthly",
+            target_date="2025-09-01",
+            platform=None,
+        )
+
+        assert result["target"]["sales_amount"] == 1100000
+        assert result["target"]["sales_quantity"] == 10100
+
+        await engine.dispose()
+
+
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_operational_metrics_loads_total_targets_and_costs(monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.sales_targets (
+                        id INTEGER PRIMARY KEY,
+                        target_name VARCHAR(255),
+                        target_type VARCHAR(64),
+                        period_start DATE,
+                        period_end DATE,
+                        target_amount NUMERIC,
+                        target_quantity INTEGER,
+                        achieved_amount NUMERIC,
+                        achieved_quantity INTEGER,
+                        achievement_rate NUMERIC,
+                        status VARCHAR(32)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.operating_costs (
+                        "店铺ID" VARCHAR(255),
+                        "年月" VARCHAR(7),
+                        "租金" NUMERIC,
+                        "工资" NUMERIC,
+                        "水电费" NUMERIC,
+                        "其他成本" NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.sales_targets (
+                        id, target_name, target_type, period_start, period_end,
+                        target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate, status
+                    ) VALUES (
+                        1, '2025年9月常规月度目标', 'shop', DATE '2025-09-01', DATE '2025-09-30',
+                        1100000, 10100, 0, 0, 0, 'active'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.operating_costs ("店铺ID", "年月", "租金", "工资", "水电费", "其他成本")
+                    VALUES
+                        ('shopee新加坡3C店', '2025-09', 100, 200, 300, 400),
+                        ('Tiktok 2店', '2025-09', 100, 200, 200, 300)
+                    """
+                )
+            )
+            await session.commit()
+
+        monkeypatch.setattr(
+            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+            session_factory,
+        )
+        service = PostgresqlDashboardService()
+
+        async def fake_fetch_rows(query, params):
+            return [
+                {
+                    "monthly_target": 0,
+                    "monthly_total_achieved": 25000,
+                    "today_sales": 1200,
+                    "monthly_achievement_rate": 0,
+                    "time_gap": 0,
+                    "estimated_gross_profit": 3000,
+                    "estimated_expenses": 0,
+                    "operating_result": 0,
+                    "monthly_order_count": 200,
+                    "today_order_count": 12,
+                }
+            ]
+
+        monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+        result = await service.get_business_overview_operational_metrics(
+            month="2025-09-01",
+            platform=None,
+        )
+
+        assert result["monthly_target"] == 1100000
+        assert result["estimated_expenses"] == 1800
+        assert result["monthly_total_achieved"] == 25000
+
+        await engine.dispose()
+
+
 def test_rank_traffic_rows_by_visitors():
     result = rank_traffic_rows(
         [
