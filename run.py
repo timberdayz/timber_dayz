@@ -167,6 +167,59 @@ def check_redis():
         safe_print("  方式2: 确保.env中配置了正确的REDIS_URL或REDIS_PASSWORD")
         return False
 
+def ensure_postgresql_dashboard_assets(project_root):
+    """Ensure PostgreSQL Dashboard assets exist before runtime starts."""
+    use_postgresql_dashboard = os.getenv("USE_POSTGRESQL_DASHBOARD_ROUTER", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not use_postgresql_dashboard:
+        return True
+
+    script_path = project_root / "scripts" / "bootstrap_postgresql_dashboard.py"
+    if not script_path.exists():
+        safe_print("  [ERROR] 缺少 PostgreSQL Dashboard bootstrap 脚本")
+        safe_print(f"  路径: {script_path}")
+        return False
+
+    safe_print("  [检查] PostgreSQL Dashboard 资产...")
+    check_result = subprocess.run(
+        [sys.executable, str(script_path), "--check"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        encoding="utf-8",
+        errors="ignore",
+    )
+    if check_result.returncode == 0:
+        safe_print("  [OK] PostgreSQL Dashboard 资产完整")
+        return True
+
+    safe_print("  [修复] 检测到 PostgreSQL Dashboard 资产缺失，开始初始化...")
+    apply_result = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        encoding="utf-8",
+        errors="ignore",
+    )
+    if apply_result.returncode != 0:
+        safe_print("  [ERROR] PostgreSQL Dashboard 资产初始化失败")
+        output = (apply_result.stdout or apply_result.stderr or "").splitlines()[-20:]
+        for line in output:
+            if line.strip():
+                safe_print(f"    {line}")
+        return False
+
+    safe_print("  [OK] PostgreSQL Dashboard 资产初始化完成")
+    return True
+
+
 def start_backend():
     """启动后端服务（改进版）"""
     safe_print("\n[启动] 后端服务...")
@@ -985,6 +1038,11 @@ def main():
                 input("\n按回车键退出...")
                 sys.exit(1)
             
+            if not ensure_postgresql_dashboard_assets(project_root):
+                safe_print("\n[ERROR] PostgreSQL Dashboard ???????")
+                input("\n??????...")
+                sys.exit(1)
+            
             # Docker模式下，不启动本地后端和Celery worker（已经在Docker中运行）
             args.no_celery = True  # 标记为不需要本地启动Celery worker
             safe_print("\n[提示] 后端API和Celery Worker已在Docker容器中运行")
@@ -1021,6 +1079,10 @@ def main():
     try:
         # 启动后端（非Docker模式下）
         if not args.frontend_only and not args.use_docker:
+            if not ensure_postgresql_dashboard_assets(project_root):
+                safe_print("\n[ERROR] PostgreSQL Dashboard ???????")
+                input("\n??????...")
+                sys.exit(1)
             backend_process = start_backend()
             processes.append(("backend", backend_process))
             # 短暂等待，避免误判为就绪（uvicorn --reload 子进程需时间加载）

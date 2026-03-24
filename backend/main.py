@@ -208,15 +208,40 @@ async def lifespan(app: FastAPI):
         # 4. 连接池预热(<2秒)
         step_start = time.time()
         try:
+            dashboard_bootstrap_completed = False
+            from backend.models.database import AsyncSessionLocal
+            from backend.services.data_pipeline.dashboard_bootstrap import (
+                bootstrap_dashboard_assets_if_needed,
+            )
+
+            async with AsyncSessionLocal() as session:
+                dashboard_bootstrap_report = await bootstrap_dashboard_assets_if_needed(session)
+                await session.commit()
+            startup_metrics["dashboard_bootstrap"] = time.time() - step_start
+            if dashboard_bootstrap_report.get("bootstrapped"):
+                logger.info(
+                    "[OK] PostgreSQL Dashboard 璧勪骇宸茶嚜鍔ㄥ垵濮嬪寲 "
+                    f"({startup_metrics['dashboard_bootstrap']:.2f}绉? run_id={dashboard_bootstrap_report.get('run_id')})"
+                )
+            else:
+                logger.info(
+                    "[OK] PostgreSQL Dashboard 璧勪骇宸插氨缁? "
+                    f"({startup_metrics['dashboard_bootstrap']:.2f}绉?)"
+                )
+
+            dashboard_bootstrap_completed = True
             warm_pool_target = max(1, min(2, settings.DB_POOL_SIZE))
             warm_up_pool(pool_size=warm_pool_target)
             startup_metrics["pool_warmup"] = time.time() - step_start
             logger.info(f"[OK] 连接池预热完成 ({startup_metrics['pool_warmup']:.2f}秒)")
         except Exception as e:
+            if not dashboard_bootstrap_completed:
+                startup_metrics["dashboard_bootstrap"] = time.time() - step_start
+                logger.error(f"[ERROR] PostgreSQL Dashboard ???????: {e}")
+                raise
             startup_metrics["pool_warmup"] = time.time() - step_start
-            logger.warning(f"[WARN] 连接池预热失败: {e}")
+            logger.warning(f"[WARN] ???????: {e}")
         
-        # 启动完成
         startup_metrics["total"] = time.time() - startup_start
         
         logger.info(f"""

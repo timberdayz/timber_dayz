@@ -561,17 +561,31 @@ class PostgresqlDashboardService:
             )
         except Exception:
             await db.rollback()
-            result = await db.execute(
-                text(
-                    f"""
-                    SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
-                           COALESCE(SUM("目标单量"), 0) AS target_orders
-                    FROM a_class.sales_targets_a
-                    WHERE {year_month_filter_cn}
-                    """
-                ),
-                db_params,
-            )
+            try:
+                result = await db.execute(
+                    text(
+                        f"""
+                        SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
+                               COALESCE(SUM("目标订单数"), 0) AS target_orders
+                        FROM a_class.sales_targets_a
+                        WHERE {year_month_filter_cn}
+                        """
+                    ),
+                    db_params,
+                )
+            except Exception:
+                await db.rollback()
+                result = await db.execute(
+                    text(
+                        f"""
+                        SELECT COALESCE(SUM("目标销售额"), 0) AS target_gmv,
+                               COALESCE(SUM("目标单量"), 0) AS target_orders
+                        FROM a_class.sales_targets_a
+                        WHERE {year_month_filter_cn}
+                        """
+                    ),
+                    db_params,
+                )
         row = result.fetchone()
         target_gmv = float(row[0]) if row and row[0] is not None else 0.0
         target_orders = int(row[1]) if row and row[1] is not None else 0

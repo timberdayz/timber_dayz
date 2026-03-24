@@ -11,12 +11,16 @@ def test_annual_summary_shop_month_uses_current_operating_cost_columns():
             errors="replace",
         )
 
+        assert "information_schema.columns" in text
         assert "year_month" in text
+        assert '"年月"' in text
         assert "shop_id" in text
+        assert '"店铺ID"' in text
         assert "rent" in text
-        assert "salary" in text
-        assert "utilities" in text
-        assert "other_costs" in text
+        assert '"租金"' in text
+        assert '"工资"' in text
+        assert '"水电费"' in text
+        assert '"其他成本"' in text
 
 
 def test_target_completion_service_prefers_current_sales_target_columns():
@@ -32,6 +36,14 @@ def test_target_completion_service_prefers_current_sales_target_columns():
     assert "target_sales_amount" in service_text
     assert "target_quantity" in service_text
     assert "year_month" in service_text
+    assert '"年月"' in service_text
+    assert '"目标销售额"' in service_text
+    assert '"目标订单数"' in service_text
+    assert '"目标单量"' in service_text
+    assert "information_schema.columns" in sql_text
     assert "target_sales_amount" in sql_text
     assert "target_quantity" in sql_text
     assert "year_month" in sql_text
+    assert '"年月"' in sql_text
+    assert '"目标销售额"' in sql_text
+    assert '"目标订单数"' in sql_text
