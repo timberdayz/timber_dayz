@@ -60,5 +60,10 @@ def test_backend_dockerfile_includes_ops_dashboard_scripts():
     text = Path("Dockerfile.backend").read_text(encoding="utf-8", errors="replace")
 
     assert "check_postgresql_dashboard_ops.py" in text
+    assert "migrate_cloud_sync_tables.py" in text
     assert "smoke_postgresql_dashboard_routes.py" in text
+    assert "COPY sql/ops /app/sql/ops" in text
+    assert "COPY sql/semantic /app/sql/semantic" in text
+    assert "COPY sql/mart /app/sql/mart" in text
+    assert "COPY sql/api_modules /app/sql/api_modules" in text
     assert "COPY scripts/init_metabase.py" not in text
