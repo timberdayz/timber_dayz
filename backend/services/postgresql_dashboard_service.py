@@ -297,27 +297,26 @@ class PostgresqlDashboardService:
                                     {"year_month": period_start.strftime("%Y-%m")},
                                 )
             else:
-                result = await session.execute(
-                    text(
-                        """
-                        SELECT
-                            COALESCE(SUM(tb.target_amount), 0) AS target_amount,
-                            COALESCE(SUM(tb.target_quantity), 0) AS target_quantity
-                        FROM a_class.target_breakdown tb
-                        INNER JOIN a_class.sales_targets st ON st.id = tb.target_id
-                        WHERE st.status = 'active'
-                          AND tb.breakdown_type IN ('time', 'shop_time')
-                          AND tb.period_start >= :period_start
-                          AND tb.period_end <= :period_end
-                          AND (:platform IS NULL OR LOWER(COALESCE(tb.platform_code, '')) = LOWER(:platform))
-                        """
-                    ),
-                    {
-                        "period_start": period_start,
-                        "period_end": period_end,
-                        "platform": platform,
-                    },
-                )
+                query = """
+                    SELECT
+                        COALESCE(SUM(tb.target_amount), 0) AS target_amount,
+                        COALESCE(SUM(tb.target_quantity), 0) AS target_quantity
+                    FROM a_class.target_breakdown tb
+                    INNER JOIN a_class.sales_targets st ON st.id = tb.target_id
+                    WHERE st.status = 'active'
+                      AND tb.breakdown_type IN ('time', 'shop_time')
+                      AND tb.period_start >= :period_start
+                      AND tb.period_end <= :period_end
+                """
+                params = {
+                    "period_start": period_start,
+                    "period_end": period_end,
+                }
+                if platform:
+                    query += " AND LOWER(COALESCE(tb.platform_code, '')) = LOWER(:platform)"
+                    params["platform"] = platform
+
+                result = await session.execute(text(query), params)
 
             row = result.fetchone()
             return {

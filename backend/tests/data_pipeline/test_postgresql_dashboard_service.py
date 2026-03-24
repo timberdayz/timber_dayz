@@ -447,6 +447,103 @@ async def test_postgresql_dashboard_service_operational_metrics_loads_total_targ
         await engine.dispose()
 
 
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_load_target_summary_daily_without_platform_avoids_null_platform_sql_error(monkeypatch):
+    from datetime import date
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.sales_targets (
+                        id INTEGER PRIMARY KEY,
+                        target_name VARCHAR(255),
+                        target_type VARCHAR(64),
+                        period_start DATE,
+                        period_end DATE,
+                        target_amount NUMERIC,
+                        target_quantity INTEGER,
+                        achieved_amount NUMERIC,
+                        achieved_quantity INTEGER,
+                        achievement_rate NUMERIC,
+                        status VARCHAR(32)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.target_breakdown (
+                        target_id INTEGER,
+                        breakdown_type VARCHAR(64),
+                        platform_code VARCHAR(64),
+                        shop_id VARCHAR(255),
+                        period_start DATE,
+                        period_end DATE,
+                        target_amount NUMERIC,
+                        target_quantity INTEGER
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.sales_targets (
+                        id, target_name, target_type, period_start, period_end,
+                        target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate, status
+                    ) VALUES (
+                        1, '2026年3月目标', 'shop', DATE '2026-03-01', DATE '2026-03-31',
+                        1000, 80, 0, 0, 0, 'active'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.target_breakdown (
+                        target_id, breakdown_type, platform_code, shop_id, period_start, period_end, target_amount, target_quantity
+                    ) VALUES (
+                        1, 'time', 'shopee', NULL, DATE '2026-03-24', DATE '2026-03-24', 30, 2
+                    )
+                    """
+                )
+            )
+            await session.commit()
+
+        monkeypatch.setattr(
+            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+            session_factory,
+        )
+        service = PostgresqlDashboardService()
+        result = await service._load_target_summary(
+            granularity="daily",
+            period_start=date(2026, 3, 24),
+            period_end=date(2026, 3, 24),
+            platform=None,
+        )
+
+        assert result["target_amount"] == 30
+        assert result["target_quantity"] == 2
+
+        await engine.dispose()
+
+
 def test_rank_traffic_rows_by_visitors():
     result = rank_traffic_rows(
         [
