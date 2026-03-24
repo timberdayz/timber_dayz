@@ -15,6 +15,7 @@ from backend.dependencies.auth import get_current_user
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
+from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
 
 logger = get_logger(__name__)
 from backend.schemas.hr import (
@@ -42,7 +43,7 @@ async def list_employee_performance(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取员工绩效列表(从employee_performance表读取,由Metabase定时计算)"""
+    """获取员工绩效列表(从 employee_performance 表读取)"""
     try:
         query = select(EmployeePerformance)
         conditions = []
@@ -79,7 +80,7 @@ async def list_employee_commissions(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取员工提成列表(从employee_commissions表读取,由Metabase定时计算)"""
+    """获取员工提成列表(从 employee_commissions 表读取)"""
     try:
         query = select(EmployeeCommission)
         conditions = []
@@ -112,7 +113,7 @@ async def list_shop_commissions(
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """获取店铺提成列表(从shop_commissions表读取,由Metabase定时计算)"""
+    """获取店铺提成列表(从 shop_commissions 表读取)"""
     try:
         query = select(ShopCommission)
         conditions = []
@@ -501,27 +502,12 @@ async def get_shop_profit_statistics(
             for r in shop_rows
         ]
 
-        # 2. 尝试通过 Metabase 获取店铺月度销售额与利润
-        metrics_by_shop: Dict[str, Dict] = {}
+        # 2. 通过 PostgreSQL 月度店铺赛马模块获取销售额/利润/达成率
         try:
-            from backend.services.metabase_question_service import get_metabase_service
-            service = get_metabase_service()
-            metabase_result = await service.query_question("hr_shop_monthly_metrics", {"month": month_date.isoformat()})
-            if metabase_result and isinstance(metabase_result, list):
-                for row in metabase_result:
-                    if isinstance(row, dict):
-                        pc = (row.get("platform_code") or row.get("平台") or "").lower()
-                        sid = str(row.get("shop_id") or row.get("店铺ID") or "unknown").lower()
-                        key = f"{pc}|{sid}"
-                        ms = row.get("monthly_sales")
-                        mp = row.get("monthly_profit")
-                        metrics_by_shop[key] = {
-                            "monthly_sales": float(ms) if ms is not None else 0,
-                            "monthly_profit": float(mp) if mp is not None else 0,
-                            "achievement_rate": row.get("achievement_rate"),
-                        }
+            metrics_by_shop: Dict[str, Dict] = await load_shop_monthly_metrics(db, month)
         except Exception as e:
-            logger.warning(f"Metabase 店铺月度统计查询失败，将返回空数据: {e}")
+            logger.warning(f"PostgreSQL 店铺月度统计查询失败，将返回空数据: {e}")
+            metrics_by_shop = {}
 
         # 3. 获取店铺可分配利润率配置
         config_query = select(ShopCommissionConfig)
@@ -640,13 +626,6 @@ async def get_annual_profit_statistics(
             for c in config_rows
         }
 
-        metabase_svc = None
-        try:
-            from backend.services.metabase_question_service import get_metabase_service
-            metabase_svc = get_metabase_service()
-        except Exception as e:
-            logger.warning(f"Metabase 服务不可用，年度统计将返回空指标: {e}")
-
         for month_num in range(1, 13):
             month_str = f"{year}-{month_num:02d}"
             try:
@@ -654,27 +633,11 @@ async def get_annual_profit_statistics(
             except (ValueError, TypeError):
                 continue
 
-            metrics_by_shop: Dict[str, Dict] = {}
-            if metabase_svc:
-                try:
-                    metabase_result = await metabase_svc.query_question(
-                        "hr_shop_monthly_metrics", {"month": month_date.isoformat()}
-                    )
-                    if metabase_result and isinstance(metabase_result, list):
-                        for row in metabase_result:
-                            if isinstance(row, dict):
-                                pc = (row.get("platform_code") or row.get("平台") or "").lower()
-                                sid = str(row.get("shop_id") or row.get("店铺ID") or "unknown").lower()
-                                key = f"{pc}|{sid}"
-                                ms = row.get("monthly_sales")
-                                mp = row.get("monthly_profit")
-                                metrics_by_shop[key] = {
-                                    "monthly_sales": float(ms) if ms is not None else 0,
-                                    "monthly_profit": float(mp) if mp is not None else 0,
-                                    "achievement_rate": row.get("achievement_rate"),
-                                }
-                except Exception as e:
-                    logger.warning(f"Metabase 月度 {month_str} 查询失败: {e}")
+            try:
+                metrics_by_shop: Dict[str, Dict] = await load_shop_monthly_metrics(db, month_str)
+            except Exception as e:
+                logger.warning(f"PostgreSQL 月度 {month_str} 查询失败: {e}")
+                metrics_by_shop = {}
 
             assign_query = (
                 select(EmployeeShopAssignment)

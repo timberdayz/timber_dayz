@@ -4,8 +4,8 @@
 
 - PostgreSQL Dashboard is now the primary online query path.
 - Current flow: `b_class raw -> semantic -> mart -> api -> backend -> frontend`.
-- Enable the new router with `USE_POSTGRESQL_DASHBOARD_ROUTER=true`.
-- Metabase is kept only as a legacy fallback/debug path and is not part of the target steady-state design.
+- PostgreSQL Dashboard is the only online query path.
+- Metabase is no longer part of the runtime architecture.
 
 **版本**: v4.12.2  
 **状态**: ✅ 生产就绪  
@@ -27,18 +27,9 @@ docker-compose up -d postgres
 # 2. 启动系统（前后端）
 python run.py
 
-# 3. 如需验证新的 PostgreSQL Dashboard 主链路
-# 在 .env 中设置 USE_POSTGRESQL_DASHBOARD_ROUTER=true
-#
-# 4. 访问系统
+# 3. 访问系统
 # 前端: http://localhost:5173
 # 后端API文档: http://localhost:8001/api/docs
-```
-
-**或使用集成启动**:
-```bash
-# legacy/debug only: 显式启动 Metabase
-python run.py --with-metabase
 ```
 
 ### 系统要求
@@ -49,7 +40,6 @@ python run.py --with-metabase
 - **数据库**: PostgreSQL 15+ (Docker容器)
 - **Docker**: Docker Desktop
 - **Dashboard主链路**: PostgreSQL semantic/mart/api
-- **Legacy BI**: Metabase (可选，仅回退/调试)
 
 ### Collection-To-Cloud Sync
 

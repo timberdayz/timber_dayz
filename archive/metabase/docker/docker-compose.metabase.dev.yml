@@ -1,3 +1,7 @@
+# Historical only.
+# Archived from the active runtime tree after PostgreSQL Dashboard became the
+# only runtime path.
+
 # =====================================================
 # Metabase - 仅开发环境端口映射（legacy fallback/debug only）
 # =====================================================

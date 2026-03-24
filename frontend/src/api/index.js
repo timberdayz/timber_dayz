@@ -15,8 +15,8 @@ const TIMEOUTS = {
   scan: 120000, // 扫描文件120秒
   preview: 60000, // 预览文件60秒
   ingest: 180000, // 数据入库180秒
-  // Dashboard 查询：略大于后端对 Metabase 的 60s 超时，满足
-  // DB statement_timeout < Backend→Metabase < Frontend→Backend 的约束
+  // Dashboard 查询：为 PostgreSQL Dashboard 聚合接口保留更宽裕超时
+  // 保持 DB statement_timeout < Backend -> Frontend 的超时约束
   dashboard: 70000, // Dashboard 查询70秒
   collection: 300000, // 数据采集300秒（5分钟）
   mapping: 90000, // 字段映射90秒
@@ -823,7 +823,7 @@ export default {
 
   // ========== 数据库浏览器API（v4.7.0企业级增强） ==========
 
-  // ⚠️ v4.12.0移除：数据浏览器API已移除，使用Metabase替代（http://localhost:8080）
+// ⚠️ v4.12.0移除：数据浏览器API已移除
   // // 获取所有数据表列表
   // async getTables() {
   //   return await this._get('/data-browser/tables')
@@ -871,7 +871,7 @@ export default {
     return await this._get("/management/sales-detail-by-product", { params });
   },
 
-  // ⚠️ v4.12.0移除：数据浏览器字段映射和导出API已完全移除，使用Metabase替代
+// ⚠️ v4.12.0移除：数据浏览器字段映射和导出API已完全移除
 
   // 清理无效文件
   async cleanupInvalidFiles() {
@@ -1899,12 +1899,12 @@ export default {
     return await this._post("/hr/employee-targets", data);
   },
 
-  // === 绩效查询（只读，由Metabase计算） ===
+  // === 绩效查询（只读） ===
   async getHrPerformance(params = {}) {
     return await this._get("/hr/performance", { params });
   },
 
-  // === 提成查询（只读，由Metabase计算） ===
+  // === 提成查询（只读） ===
   async getHrEmployeeCommissions(params = {}) {
     return await this._get("/hr/commissions/employee", { params });
   },

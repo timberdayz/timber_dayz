@@ -54,10 +54,8 @@ from backend.routers import (
     data_quarantine,  # v4.6.0: 数据隔离区API
     data_quality,  # C类数据核心字段优化计划: 数据质量监控API
     config_management,  # Phase 3: A类数据管理API(销售目标、战役目标、经营成本)
-    # superset_proxy,  # 已移除
-    metabase_proxy,  # Phase 2: Metabase代理API
-    dashboard_api,
     dashboard_api_postgresql,  # PostgreSQL-first dashboard API
+    data_pipeline,  # PostgreSQL dashboard pipeline observability API
     hr_management,  # Phase 3: HR管理API(员工管理、员工目标、考勤记录、绩效查询)
     test_api,
     inventory,
@@ -93,7 +91,6 @@ from backend.routers import (
     data_migration,  # v5.0.0: 数据迁移API
 )
 from backend.routers import rate_limit_config  # [*] v4.19.4: 限流配置管理API(Phase 3)
-from backend.routers import cloud_sync
 from backend.models.database import init_db, get_db
 from backend.utils.config import get_settings
 from modules.core.logger import get_logger
@@ -105,12 +102,6 @@ logger = get_logger(__name__)
 
 # 获取配置
 settings = get_settings()
-
-_TRUE_VALUES = ("1", "true", "yes", "on")
-USE_POSTGRESQL_DASHBOARD_ROUTER = os.getenv(
-    "USE_POSTGRESQL_DASHBOARD_ROUTER", "true"
-).lower() in _TRUE_VALUES
-ENABLE_METABASE_PROXY = os.getenv("ENABLE_METABASE_PROXY", "").lower() in _TRUE_VALUES
 
 # 安全认证
 security = HTTPBearer()
@@ -264,10 +255,7 @@ async def lifespan(app: FastAPI):
                 app.state.cache_service = cache_service
                 logger.info("[OK] 统一缓存服务已启用")
                 # [*] 4c8g 单机优化: 可选启动后缓存预热（不阻塞启动）
-                if (
-                    not USE_POSTGRESQL_DASHBOARD_ROUTER
-                    and os.getenv("METABASE_CACHE_WARMUP_ENABLED", "").lower() in ("true", "1", "yes")
-                ):
+                if os.getenv("POSTGRESQL_DASHBOARD_CACHE_WARMUP_ENABLED", "").lower() in ("true", "1", "yes"):
                     delay_sec = int(os.getenv("METABASE_CACHE_WARMUP_DELAY_SECONDS", "10"))
                     async def _warmup_after_startup():
                         await asyncio.sleep(delay_sec)
@@ -281,11 +269,7 @@ async def lifespan(app: FastAPI):
                                 exc_info=True,
                             )
                     asyncio.create_task(_warmup_after_startup())
-                    logger.info(f"[CacheWarmup] 已调度启动后预热(延迟 {delay_sec}s)")
-                elif USE_POSTGRESQL_DASHBOARD_ROUTER:
-                    logger.info(
-                        "[CacheWarmup] skip legacy Metabase cache warmup because PostgreSQL dashboard router is enabled"
-                    )
+                    logger.info(f"[CacheWarmup] 已调度 PostgreSQL Dashboard 启动后预热(延迟 {delay_sec}s)")
         except Exception as redis_err:
             logger.debug(f"[SKIP] Redis缓存未启用: {redis_err}")
         
@@ -333,52 +317,6 @@ async def lifespan(app: FastAPI):
                     logger.info(f"[RateLimit] 使用内存存储(storage_uri={storage_uri})")
         except Exception as rate_limit_err:
             logger.warning(f"[RateLimit] 存储连接检查失败(不影响主功能): {rate_limit_err}")
-
-        # Cloud sync worker runtime (control-plane wiring only for now)
-        try:
-            from backend.services.cloud_b_class_auto_sync_runtime import (
-                CloudBClassAutoSyncRuntime,
-                should_enable_cloud_sync_worker,
-            )
-
-            enable_collection = os.getenv("ENABLE_COLLECTION", "true").lower() in ("true", "1")
-            deployment_role = os.getenv("DEPLOYMENT_ROLE", "").lower()
-            worker_enabled = should_enable_cloud_sync_worker(
-                os.getenv("CLOUD_SYNC_WORKER_ENABLED", "false"),
-                enable_collection=enable_collection,
-                deployment_role=deployment_role,
-            )
-            poll_interval_seconds = float(
-                os.getenv("CLOUD_SYNC_WORKER_POLL_INTERVAL_SECONDS", "5")
-            )
-
-            cloud_sync_runtime = CloudBClassAutoSyncRuntime(
-                worker_factory=None,
-                poll_interval_seconds=poll_interval_seconds,
-                worker_id=os.getenv("CLOUD_SYNC_WORKER_ID", "cloud-sync-worker-1"),
-            )
-            app.state.cloud_sync_runtime = cloud_sync_runtime
-
-            if worker_enabled:
-                from backend.services.cloud_b_class_auto_sync_factory import (
-                    build_cloud_sync_worker_factory_from_env,
-                )
-                cloud_sync_runtime.worker_factory = build_cloud_sync_worker_factory_from_env(
-                    dry_run=os.getenv("CLOUD_SYNC_DRY_RUN", "false").lower() in ("true", "1", "yes", "on")
-                )
-                started = await cloud_sync_runtime.start()
-                if started:
-                    logger.info("[CloudSync] cloud sync worker runtime started")
-                else:
-                    logger.warning(
-                        "[CloudSync] CLOUD_SYNC_WORKER_ENABLED=true but no worker factory is wired yet"
-                    )
-            else:
-                logger.info("[CloudSync] cloud sync worker runtime disabled")
-        except Exception as cloud_sync_runtime_err:
-            logger.warning(
-                f"[CloudSync] runtime initialization failed (non-blocking): {cloud_sync_runtime_err}"
-            )
         
         # v4.7.0新增:标记中断的采集任务并初始化调度器
         try:
@@ -482,13 +420,6 @@ async def lifespan(app: FastAPI):
             logger.info("[调度器] 采集调度器已关闭")
     except Exception as e:
         logger.debug(f"[关闭] 关闭调度器时出现异常(可忽略): {e}")
-
-    try:
-        if hasattr(app.state, "cloud_sync_runtime") and app.state.cloud_sync_runtime:
-            await app.state.cloud_sync_runtime.stop()
-            logger.info("[CloudSync] cloud sync runtime stopped")
-    except Exception as e:
-        logger.debug(f"[关闭] 关闭 cloud sync runtime 时出现异常(可忽略): {e}")
     
     # v4.12.0修复:正确取消后台任务,优雅处理CancelledError异常
     # 使用try-except包装整个关闭流程,避免CancelledError影响关闭
@@ -726,18 +657,11 @@ async def root():
 
 # 注册路由(全部启用 - v4.1.0优化版)
 
-if USE_POSTGRESQL_DASHBOARD_ROUTER:
-    logger.info("Dashboard router source: PostgreSQL")
-    app.include_router(
-        dashboard_api_postgresql.router,
-        tags=["Dashboard"]
-    )
-else:
-    logger.info("Dashboard router source: Metabase compatibility")
-    app.include_router(
-        dashboard_api.router,
-        tags=["Dashboard"]
-    )
+logger.info("Dashboard router source: PostgreSQL")
+app.include_router(
+    dashboard_api_postgresql.router,
+    tags=["Dashboard"]
+)
 
 app.include_router(
     collection.router,
@@ -816,6 +740,11 @@ app.include_router(
     tags=["数据同步"]
 )
 
+app.include_router(
+    data_pipeline.router,
+    tags=["数据管道"]
+)
+
 # v4.19.0: 通知WebSocket路由
 try:
     from backend.routers import notification_websocket
@@ -866,18 +795,6 @@ app.include_router(
     config_management.router,
     tags=["A类数据管理", "配置管理"]
 )
-
-# ============================================================================
-# Legacy Metabase proxy API
-# ============================================================================
-if ENABLE_METABASE_PROXY:
-    logger.info("Metabase proxy route enabled")
-    app.include_router(
-        metabase_proxy.router,
-        tags=["Metabase集成", "BI Layer"]
-    )
-else:
-    logger.info("Metabase proxy route disabled")
 
 # ============================================================================
 # Phase 3: HR管理API(员工管理、员工目标、考勤记录、绩效查询)
@@ -1108,11 +1025,6 @@ app.include_router(
     data_migration.router,
     prefix="/api",
     tags=["数据迁移"]
-)
-
-app.include_router(
-    cloud_sync.router,
-    tags=["Cloud Sync"]
 )
 
 # 全局异常处理(v4.6.0统一响应格式)

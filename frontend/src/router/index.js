@@ -306,7 +306,7 @@ const routes = [
       roles: ['admin']  // ✅ 仅管理员可访问
     }
   },
-  // ⚠️ v4.12.0移除：数据浏览器功能已移除，使用Metabase替代
+// ⚠️ v4.12.0移除：数据浏览器功能已移除
   // {
   //   path: '/data-browser',
   //   name: 'DataBrowser',

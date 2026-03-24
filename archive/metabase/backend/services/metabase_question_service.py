@@ -1,9 +1,8 @@
 """
 Legacy Metabase Question query service.
 
-Retained for fallback/debug only. PostgreSQL Dashboard is now the primary
-online query path. This service remains available for rollback and explicit
-legacy scenarios.
+Historical only.
+This file is not imported by runtime.
 """
 
 import asyncio

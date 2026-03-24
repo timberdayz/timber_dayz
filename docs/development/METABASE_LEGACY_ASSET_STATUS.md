@@ -1,24 +1,29 @@
 # Metabase legacy asset status
 
-Metabase assets in this repository are retained for fallback/debug only.
-They are no longer the primary dashboard architecture.
+Metabase assets in this repository are retained as historical assets only.
+They are no longer part of the runtime dashboard architecture.
 
 Current primary path:
 
 - `b_class raw -> semantic -> mart -> api -> backend -> frontend`
-- runtime switch: `USE_POSTGRESQL_DASHBOARD_ROUTER=true`
+- PostgreSQL Dashboard is the only runtime path
 
-Retained for fallback/debug only:
+Historical assets still present in the repository:
 
-- `backend/routers/metabase_proxy.py`
-- `backend/services/metabase_question_service.py`
-- `config/metabase_config.yaml`
-- `docker-compose.metabase.yml`
-- `docker-compose.metabase.dev.yml`
+- `archive/metabase/backend/routers/dashboard_api.py`
+- `archive/metabase/backend/routers/metabase_proxy.py`
+- `archive/metabase/backend/services/metabase_question_service.py`
+- `archive/metabase/scripts/init_metabase.py`
+- `archive/metabase/scripts/verify_deploy_phase35_local.py`
+- `archive/metabase/scripts/verify_deploy_full_local.py`
+- `archive/metabase/config/metabase_config.yaml`
+- `archive/metabase/docker/docker-compose.metabase.yml`
+- `archive/metabase/docker/docker-compose.metabase.dev.yml`
+- `archive/metabase/docker/docker-compose.metabase.4c8g.yml`
+- `archive/metabase/docker/docker-compose.metabase.lockdown.yml`
 
-Retention policy:
+Policy:
 
-- keep available while rollback is still required
 - do not use for new dashboard features
-- do not treat as the default runtime path
-- archive or delete only after PostgreSQL dashboard production gray finishes and rollback is no longer required
+- do not treat as runtime dependencies
+- archive or delete when historical scripts and references are cleaned up

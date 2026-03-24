@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Historical only.
+This script is not part of the runtime path for PostgreSQL Dashboard.
+
 Metabase集成验证脚本
 
 v4.12.0新增（Phase 4 - Metabase集成验证）：
@@ -443,4 +446,3 @@ async def main():
 
 if __name__ == "__main__":
     sys.exit(asyncio.run(main()))
-

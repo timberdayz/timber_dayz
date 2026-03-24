@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Historical only.
+This script is not part of the runtime path for PostgreSQL Dashboard.
+
 4c8g 单机后续优化 (optimize-4c8g-single-server-follow-up) 验收自动化脚本
 
 运行自动化测试并输出简要报告，供 7.2 验收参考。

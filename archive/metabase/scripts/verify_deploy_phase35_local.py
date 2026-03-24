@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """
+Historical only.
+This script is not part of the runtime path for PostgreSQL Dashboard.
+
 本地验证 Phase 3.5 + 集成（等效 deploy_remote_production.sh 中 Phase 3.5 与后续健康/接口检查）
 
 使用场景：已用 python run.py --use-docker --with-metabase 启动后，在本地执行此脚本，

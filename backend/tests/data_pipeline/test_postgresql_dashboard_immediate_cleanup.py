@@ -18,7 +18,6 @@ def test_agent_start_here_no_longer_instructs_new_dashboard_work_via_metabase():
 
     required_phrases = [
         "PostgreSQL Dashboard",
-        "USE_POSTGRESQL_DASHBOARD_ROUTER",
         "semantic",
         "mart",
         "api",
@@ -47,4 +46,4 @@ def test_main_no_longer_documents_metabase_as_current_dashboard_architecture():
         assert phrase not in text
 
     assert "Dashboard router source: PostgreSQL" in text
-    assert "Metabase proxy route disabled" in text
+    assert "Metabase proxy route disabled" not in text

@@ -25,7 +25,7 @@ def test_repository_rule_files_reference_postgresql_dashboard_architecture():
             "semantic",
             "mart",
             "api",
-            "USE_POSTGRESQL_DASHBOARD_ROUTER",
+            "runtime Dashboard path",
         ],
         ".cursor/rules/skill-integration.mdc": [
             "Dashboard",

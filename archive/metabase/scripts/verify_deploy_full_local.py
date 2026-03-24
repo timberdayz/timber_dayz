@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """
+Historical only.
+This script is not part of the runtime path for PostgreSQL Dashboard.
+
 方式 B：本地「生产流程」Docker 化部署验证
 
 与 deploy_remote_production.sh 相同的阶段顺序在本地执行一遍（使用本地构建的 backend，

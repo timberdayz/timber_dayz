@@ -52,7 +52,6 @@ They are gitignored and are part of the active workflow.
 ```bash
 python run.py --local
 python run.py --use-docker
-python run.py --with-metabase  # legacy/debug only
 python local_run.py
 python run.py --backend-only
 python run.py --frontend-only
@@ -121,8 +120,8 @@ Release interpretation:
 - Dashboard cutover is PostgreSQL-first and no longer treats Metabase as the target steady-state query layer.
 - Preferred Dashboard flow is `b_class raw -> semantic -> mart -> api -> backend -> frontend`.
 - `semantic` owns standardization, `mart` owns reusable aggregation, and `api` owns page-module query contracts.
-- Use `USE_POSTGRESQL_DASHBOARD_ROUTER` to switch the runtime Dashboard router during gray rollout.
-- Treat Metabase as legacy fallback/debug infrastructure unless a task explicitly requires it.
+- PostgreSQL Dashboard is the only runtime Dashboard path.
+- Metabase-related files should be treated as historical assets only.
 
 ## Documentation Map
 

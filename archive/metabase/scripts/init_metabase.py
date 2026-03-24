@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """
+Historical only.
+This script is not part of the runtime path for PostgreSQL Dashboard.
+
 Metabase 配置初始化脚本
 
 功能：

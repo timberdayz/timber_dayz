@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
+Historical only.
+This script is not part of the runtime path for PostgreSQL Dashboard.
+
 测试Metabase性能
 验证并发查询性能和响应时间
 
@@ -277,4 +280,3 @@ if __name__ == "__main__":
     else:
         print("\n[WARN] Metabase性能测试部分失败，请检查错误信息")
         sys.exit(1)
-

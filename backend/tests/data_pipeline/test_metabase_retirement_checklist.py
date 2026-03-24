@@ -7,9 +7,8 @@ def test_metabase_retirement_checklist_has_three_retention_buckets():
         errors="replace",
     )
 
-    assert "Immediate removal candidates" in text
-    assert "Remove after gray validation" in text
-    assert "Retain longer-term" in text
+    assert "Remove Now" in text
+    assert "Historical Reference Only" in text
 
 
 def test_metabase_retirement_checklist_lists_key_assets():
@@ -18,8 +17,8 @@ def test_metabase_retirement_checklist_lists_key_assets():
         errors="replace",
     )
 
-    assert "backend/routers/dashboard_api.py" in text
-    assert "backend/routers/metabase_proxy.py" in text
-    assert "backend/services/metabase_question_service.py" in text
-    assert "config/metabase_config.yaml" in text
-    assert "docker-compose.metabase.yml" in text
+    assert "archive/metabase/backend/routers/dashboard_api.py" in text
+    assert "archive/metabase/backend/routers/metabase_proxy.py" in text
+    assert "archive/metabase/backend/services/metabase_question_service.py" in text
+    assert "archive/metabase/config/metabase_config.yaml" in text
+    assert "archive/metabase/docker/docker-compose.metabase.yml" in text

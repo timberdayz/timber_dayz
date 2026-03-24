@@ -6,34 +6,30 @@
 
 ## Retirement Buckets
 
-### Immediate removal candidates
+### Remove Now
 
-These are not part of the PostgreSQL primary path and should be removed from default docs/startup behavior immediately.
+These are not part of the PostgreSQL primary path and should be removed from active runtime/docs behavior immediately.
 
 - old README guidance that still treats Superset/Metabase as the default dashboard entry
 - old `docs/AGENT_START_HERE.md` guidance that tells agents to build new dashboard work through Metabase Question
-- default runtime exposure of `backend/routers/metabase_proxy.py`
+- default runtime exposure of `archive/metabase/backend/routers/metabase_proxy.py`
 - default startup checks and banners in `run.py` that make Metabase look like a required service
 
-### Remove after gray validation
+### Historical Reference Only
 
-These assets should stay available until pre-production gray and production gray finish, because they are still valid rollback paths.
+These assets are no longer valid runtime rollback paths, but may still remain temporarily while historical scripts/docs are cleaned up.
 
-- `backend/routers/dashboard_api.py`
-- `backend/routers/metabase_proxy.py`
-- `backend/services/metabase_question_service.py`
-- `config/metabase_config.yaml`
-- `docker-compose.metabase.yml`
-- `docker-compose.metabase.dev.yml`
-- `scripts/init_metabase.py`
-
-### Retain longer-term
-
-These can remain longer as historical/operational reference even after the runtime cutover is complete.
-
-- Metabase troubleshooting and migration docs under `docs/` that are useful for historical lookup
-- archived OpenSpec material under `openspec/` mentioning Metabase
-- explicit rollback documentation that explains how to re-enable legacy Metabase paths if needed
+- `archive/metabase/backend/routers/dashboard_api.py`
+- `archive/metabase/backend/routers/metabase_proxy.py`
+- `archive/metabase/backend/services/metabase_question_service.py`
+- `archive/metabase/scripts/init_metabase.py`
+- `archive/metabase/scripts/verify_deploy_phase35_local.py`
+- `archive/metabase/scripts/verify_deploy_full_local.py`
+- `archive/metabase/config/metabase_config.yaml`
+- `archive/metabase/docker/docker-compose.metabase.yml`
+- `archive/metabase/docker/docker-compose.metabase.dev.yml`
+- `archive/metabase/docker/docker-compose.metabase.4c8g.yml`
+- `archive/metabase/docker/docker-compose.metabase.lockdown.yml`
 
 ## Current Status
 
@@ -53,9 +49,8 @@ These can remain longer as historical/operational reference even after the runti
 
 ### 仍需最终确认的事项
 - 启动日志中明确打印当前 Dashboard 路由来源
-- 生产环境默认值保持旧路由，灰度时显式打开 `USE_POSTGRESQL_DASHBOARD_ROUTER=true`
 - PostgreSQL 路由的真实数据库级接口验证范围继续扩大
-- 旧 `dashboard_api.py` 保留为回退路径，直到灰度完成
+- 历史 Metabase 资产何时转入 archive/legacy 目录
 
 ## Cutover Preconditions
 
@@ -66,12 +61,11 @@ These can remain longer as historical/operational reference even after the runti
 
 ## Final Retirement Steps
 
-1. 在预发环境默认打开 `USE_POSTGRESQL_DASHBOARD_ROUTER=true`
+1. 保持 PostgreSQL Dashboard 作为唯一运行时主链
 2. 验证关键页面与关键接口行为
 3. 观察 `ops.pipeline_run_log`、`ops.data_freshness_log`
-4. 生产灰度开启
-5. 灰度稳定后，先下线 `backend/routers/dashboard_api.py` 的 Metabase 主链路依赖
-6. 再评估 `backend/routers/metabase_proxy.py`、`backend/services/metabase_question_service.py`、`config/metabase_config.yaml`、`docker-compose.metabase.yml` 是否转入 archive/legacy 目录
+4. 确认 `archive/metabase/backend/routers/dashboard_api.py` 等历史资产已完成归档
+5. 评估其余更外围的历史 Metabase 脚本是否继续留在原路径还是再归档
 
 ## Detailed Runbook
 

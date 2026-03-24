@@ -284,7 +284,7 @@ const handleRecalculate = async () => {
   } catch (error) {
     const code = error?.response?.data?.data?.error_code
     if (code === 'PERF_CALC_NOT_READY') {
-      ElMessage.warning('绩效计算能力未就绪，请联系管理员完成 Metabase 计算方案部署')
+      ElMessage.warning('绩效计算能力未就绪，请联系管理员检查 PostgreSQL 数据链路与目标分解配置')
     } else if (code === 'PERF_CONFIG_NOT_FOUND') {
       ElMessage.warning('当前考核周期无可用绩效配置，请联系管理员配置后重试')
     } else {

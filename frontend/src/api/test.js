@@ -37,8 +37,8 @@ export async function testApiConnectivity() {
     { name: '获取财务总览', fn: () => financeApi.getFinancialOverview({ startDate: '2025-10-01', endDate: '2025-10-23' }) },
     { name: '获取利润报表', fn: () => financeApi.getProfitReport({ startDate: '2025-10-01', endDate: '2025-10-23' }) },
     
-    // 数据看板API测试（已迁移到 Metabase Question API）
-    // TODO: 添加新的 Metabase Question API 测试
+// 数据看板API测试
+// TODO: 添加 PostgreSQL Dashboard API 测试
     
     // 订单API测试
     { name: '获取订单列表', fn: () => ordersApi.getOrderList({ page: 1, pageSize: 10 }) },

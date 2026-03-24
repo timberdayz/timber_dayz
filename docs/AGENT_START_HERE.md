@@ -4,8 +4,8 @@
 
 - Dashboard 主链路是 PostgreSQL-first。
 - 当前数据流转是 `b_class raw -> semantic -> mart -> api -> backend -> frontend`。
-- 运行时切换开关是 `USE_POSTGRESQL_DASHBOARD_ROUTER=true`。
-- Metabase 仅保留为 legacy fallback/debug 路径，不再是默认设计。
+- PostgreSQL Dashboard 是唯一运行时主链。
+- Metabase 不再属于当前运行时设计。
 
 ## 你现在应该怎么理解系统
 
@@ -25,8 +25,6 @@
 - 新的 Dashboard 查询优先落到 PostgreSQL `semantic / mart / api`。
 - 新的页面模块优先接 `dashboard_api_postgresql.py`。
 - 需要观测刷新状态时，看 `ops.pipeline_run_log`、`ops.pipeline_step_log`、`ops.data_freshness_log`、`ops.data_lineage_registry`。
-- 需要切换到 PostgreSQL 主链路时，设置 `USE_POSTGRESQL_DASHBOARD_ROUTER=true`。
-
 ### 不要再做的事
 
 - 不要再把新 Dashboard 功能设计成 Metabase Question 主链路。
@@ -48,12 +46,6 @@ python run.py
 python run.py --use-docker
 ```
 
-### 仅在 legacy/debug 场景才显式启动 Metabase
-
-```bash
-python run.py --with-metabase
-```
-
 ### PostgreSQL Dashboard 相关验证
 
 ```bash
@@ -73,14 +65,8 @@ python scripts/check_postgresql_dashboard_ops.py
 - `docs/development/METABASE_LEGACY_ASSET_STATUS.md`
 - `docs/development/DASHBOARD_API_POSTGRESQL_RETIREMENT_CHECKLIST.md`
 
-## Legacy 说明
-
-- Metabase 相关文件仍保留，是为了回退和调试。
-- 当前保留状态见 `docs/development/METABASE_LEGACY_ASSET_STATUS.md`。
-- 退役顺序见 `docs/development/DASHBOARD_API_POSTGRESQL_RETIREMENT_CHECKLIST.md`。
-
 ## 一句话记忆
 
 - 新功能走 PostgreSQL。
-- 旧 Metabase 只做回退。
+- 不再依赖 Metabase 运行时。
 - 先看 `semantic / mart / api`，再看 legacy。

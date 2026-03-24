@@ -9,7 +9,8 @@
 - 按店铺下钻：A 类按「店铺ID」、B 类按 (platform_code, shop_id) 聚合；约定 店铺ID = 'platform_code|shop_id' 时与订单侧一致。
 
 B 类解析规则与 docs/AMOUNT_QUANTITY_PARSING_CONVENTION.md 及 Orders 模型一致（保留符号，正则 [^0-9.-]），
-待改为通过 Metabase Question（annual_summary_kpi / annual_summary_by_shop / annual_summary_trend）获取后删除此处对 raw_data 的解析。
+当前已处于 PostgreSQL 主链语境下；如后续继续收口，应优先改为直接复用 PostgreSQL `semantic / mart / api` 资产，
+而不是回退到 Metabase Question。
 """
 
 from typing import Optional, Dict, Any, List

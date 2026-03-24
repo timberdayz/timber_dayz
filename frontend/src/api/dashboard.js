@@ -8,7 +8,7 @@
  * - 统一参数传递：GET使用params
  * - 统一错误处理：由响应拦截器自动处理
  * 
- * 注意：所有方法都通过后端 Metabase Question 代理 API 获取数据
+ * 注意：所有方法都通过后端 PostgreSQL Dashboard API 获取数据
  */
 
 import api from './index.js'
