@@ -51,6 +51,23 @@ python run.py --with-metabase
 - **Dashboard主链路**: PostgreSQL semantic/mart/api
 - **Legacy BI**: Metabase (可选，仅回退/调试)
 
+### Collection-To-Cloud Sync
+
+The repository now includes a first executable version of local-to-cloud B-class canonical sync.
+
+Recommended local verification:
+
+```bash
+python scripts/migrate_cloud_sync_tables.py
+python scripts/sync_b_class_to_cloud.py --dry-run --batch-size 10
+python scripts/verify_cloud_sync_local.py --verify-db xihong_erp_cloud_sync_verify --table fact_shopee_orders_monthly
+```
+
+Operator notes:
+- use `CLOUD_SYNC_DRY_RUN=true` for first verification
+- use `CLOUD_SYNC_WORKER_ENABLED=true` to enable the worker runtime
+- see [`docs/deployment/CLOUD_SYNC_OPERATION_NOTES.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/deployment/CLOUD_SYNC_OPERATION_NOTES.md)
+
 ---
 
 ## 🔄 核心数据流程（v4.11.1新增）⭐⭐⭐

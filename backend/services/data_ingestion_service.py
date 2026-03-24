@@ -716,13 +716,24 @@ class DataIngestionService:
                 try:
                     from backend.utils.events import DataIngestedEvent
                     from backend.services.event_listeners import event_listener
-                    
+                    from backend.services.platform_table_manager import PlatformTableManager
+
+                    table_manager = PlatformTableManager(self.db)
+                    source_table_name = table_manager.get_table_name(
+                        platform=platform_code_for_table,
+                        data_domain=domain,
+                        sub_domain=sub_domain_value,
+                        granularity=granularity,
+                    )
+
                     event = DataIngestedEvent(
                         file_id=file_id,
-                        platform_code=platform,
+                        platform_code=platform_code_for_table,
                         data_domain=domain,
-                        granularity=getattr(file_record, 'granularity', None),
-                        row_count=imported
+                        sub_domain=sub_domain_value,
+                        granularity=granularity,
+                        source_table_name=source_table_name,
+                        row_count=imported,
                     )
                     event_listener.handle_data_ingested(event)
                     logger.info(f"[Ingest] 已触发DATA_INGESTED事件: domain={domain}, rows={imported}")
@@ -924,4 +935,3 @@ class DataIngestionService:
             except Exception as rollback_error:
                 logger.warning(f"[Ingest] 回滚事务失败: {rollback_error}")
             raise
-

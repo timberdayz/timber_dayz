@@ -35,7 +35,11 @@ class DataIngestedEvent:
     file_id: int = None
     platform_code: Optional[str] = None
     data_domain: str = None  # orders/products/inventory/traffic/services
+    sub_domain: Optional[str] = None
     granularity: Optional[str] = None  # daily/weekly/monthly/snapshot
+    source_table_name: Optional[str] = None
+    projection_preset: Optional[str] = None
+    ingest_run_id: Optional[str] = None
     row_count: int = 0
     timestamp: str = None
     
@@ -96,4 +100,3 @@ EVENT_CLASS_MAP = {
     # EventType.MV_REFRESHED: MVRefreshedEvent,  # 已废弃
     EventType.A_CLASS_UPDATED: AClassUpdatedEvent,
 }
-

@@ -61,6 +61,8 @@ from .schema import (
     FieldMappingAudit,
 )
 
+from .schema import CloudBClassSyncCheckpoint, CloudBClassSyncRun, CloudBClassSyncTask
+
 # v4.4.0: 财务域表(Modern ERP)
 from .schema import (
     # 指标公式
@@ -303,5 +305,7 @@ __all__ = [
     "EmployeePerformance",
     "EmployeeCommission",
     "ShopCommission",
+    "CloudBClassSyncCheckpoint",
+    "CloudBClassSyncRun",
+    "CloudBClassSyncTask",
 ]
-

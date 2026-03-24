@@ -35,6 +35,7 @@ Use this directory for deep-dive references and templates. Do not treat it as th
 ## Current Status
 
 - Current engineering state summary: [`docs/guides/ENGINEERING_STATUS.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/guides/ENGINEERING_STATUS.md)
+- Current cloud sync operation notes: [`docs/deployment/CLOUD_SYNC_OPERATION_NOTES.md`](F:/Vscode/python_programme/AI_code/xihong_erp/docs/deployment/CLOUD_SYNC_OPERATION_NOTES.md)
 
 ## Notes
 

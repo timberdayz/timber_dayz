@@ -60,6 +60,8 @@ from modules.core.db import (
     MaterializedViewRefreshLog,  # v4.11.4新增:物化视图刷新日志表
 )
 
+from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncRun, CloudBClassSyncTask
+
 from backend.utils.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -623,6 +625,9 @@ __all__ = [
     "DataQuarantine",
     "Account",
     "CollectionTask",
+    "CloudBClassSyncCheckpoint",
+    "CloudBClassSyncRun",
+    "CloudBClassSyncTask",
     "DataFile",
     "DataRecord",
     "FieldMapping",

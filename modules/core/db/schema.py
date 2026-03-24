@@ -847,6 +847,87 @@ class CollectionSyncPoint(Base):
     )
 
 
+class CloudBClassSyncCheckpoint(Base):
+    """Per-table checkpoint for local-to-cloud B-class sync."""
+
+    __tablename__ = "cloud_b_class_sync_checkpoints"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    table_schema = Column(String(64), nullable=False, default="b_class")
+    table_name = Column(String(255), nullable=False)
+    last_ingest_timestamp = Column(DateTime(timezone=True), nullable=True)
+    last_source_id = Column(BigInteger, nullable=True)
+    last_status = Column(String(32), nullable=False, default="pending")
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("table_schema", "table_name", name="uq_cloud_b_class_sync_checkpoint"),
+        Index("ix_cloud_b_class_sync_checkpoint_table", "table_schema", "table_name"),
+    )
+
+
+class CloudBClassSyncRun(Base):
+    """Run-level execution summary for local-to-cloud B-class sync."""
+
+    __tablename__ = "cloud_b_class_sync_runs"
+
+    run_id = Column(String(100), primary_key=True)
+    status = Column(String(32), nullable=False, default="pending")
+    total_tables = Column(Integer, nullable=False, default=0)
+    succeeded_tables = Column(Integer, nullable=False, default=0)
+    failed_tables = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    error_summary = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index("ix_cloud_b_class_sync_runs_status", "status"),
+        Index("ix_cloud_b_class_sync_runs_started_at", "started_at"),
+    )
+
+
+class CloudBClassSyncTask(Base):
+    """Durable control-plane task for automatic B-class cloud sync."""
+
+    __tablename__ = "cloud_b_class_sync_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(String(100), nullable=False, unique=True)
+    dedupe_key = Column(String(255), nullable=False)
+    source_table_name = Column(String(255), nullable=False)
+    platform_code = Column(String(32), nullable=True)
+    data_domain = Column(String(64), nullable=True)
+    sub_domain = Column(String(64), nullable=True)
+    granularity = Column(String(32), nullable=True)
+    trigger_source = Column(String(32), nullable=False, default="auto_ingest")
+    source_file_id = Column(Integer, nullable=True)
+    status = Column(String(32), nullable=False, default="pending")
+    attempt_count = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    claimed_by = Column(String(100), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    last_attempt_started_at = Column(DateTime(timezone=True), nullable=True)
+    last_attempt_finished_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    error_code = Column(String(64), nullable=True)
+    projection_preset = Column(String(128), nullable=True)
+    projection_status = Column(String(32), nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_cloud_b_class_sync_tasks_status", "status"),
+        Index("ix_cloud_b_class_sync_tasks_source_table", "source_table_name"),
+        Index("ix_cloud_b_class_sync_tasks_dedupe_key", "dedupe_key"),
+    )
+
+
 class ComponentVersion(Base):
     """
     组件版本管理表 (Phase 9.4)
