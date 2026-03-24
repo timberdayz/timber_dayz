@@ -191,7 +191,7 @@ const formatNumber = (num) => {
 const loadKPIData = async () => {
   try {
     loading.value = true
-    // TODO: 迁移到 Metabase Question API: /dashboard/business-overview/kpi
+    // TODO: 迁移到当前 PostgreSQL Dashboard API: /dashboard/business-overview/kpi
     // const res = await api.get('/dashboard/business-overview/kpi', {
     //   params: {
     //     start_date: getStartDate(),
@@ -224,7 +224,7 @@ const loadKPIData = async () => {
 
 const loadGMVTrend = async () => {
   try {
-    // TODO: 迁移到 Metabase Question API: /dashboard/business-overview/comparison
+    // TODO: 迁移到当前 PostgreSQL Dashboard API: /dashboard/business-overview/comparison
     // const data = await api.get('/dashboard/business-overview/comparison', {
     //   params: {
     //     granularity: 'daily',
@@ -232,7 +232,7 @@ const loadGMVTrend = async () => {
     //   }
     // })
     // ECharts集成后在这里渲染图表
-    console.log('GMV趋势数据: TODO - 迁移到 Metabase Question API')
+    console.log('GMV趋势数据: TODO - 迁移到 PostgreSQL Dashboard API')
   } catch (error) {
     console.error('加载GMV趋势失败:', error)
   }

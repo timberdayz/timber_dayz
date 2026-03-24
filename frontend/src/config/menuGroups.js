@@ -41,7 +41,7 @@ export const menuGroups = [
       '/data-sync/history',      // 数据同步 - 同步历史
       '/data-sync/templates',    // 数据同步 - 模板管理
       '/data-quarantine',        // 数据隔离区
-      // ⚠️ v4.12.0移除：数据浏览器功能已移除，使用Metabase替代（http://localhost:8080）
+// ⚠️ v4.12.0移除：数据浏览器功能已移除
       // '/data-browser',           // 数据浏览器
       '/data-consistency'        // v4.11.5: 数据一致性验证
     ]
@@ -233,7 +233,7 @@ export const routeDisplayNames = {
   '/hr-shop-assignment': '人员店铺归属和提成比',
   '/target-management': '目标管理',
   '/inventory-dashboard-v3': '库存看板',
-  // ⚠️ v4.12.0移除：数据浏览器功能已移除，使用Metabase替代
+// ⚠️ v4.12.0移除：数据浏览器功能已移除
   // '/data-browser': '数据浏览器',
   '/financial-management': '应收应付',  // 重命名
   // ⭐ v4.6.0新增：数据同步路由显示名称

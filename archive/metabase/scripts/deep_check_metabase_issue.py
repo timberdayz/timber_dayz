@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Historical only.
+This script is not part of the runtime path for PostgreSQL Dashboard.
+
 深度检查 Metabase 问题
 
 检查：
@@ -262,4 +265,3 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"[ERROR] 脚本执行异常: {e}", exc_info=True)
         sys.exit(1)
-

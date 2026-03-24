@@ -1,8 +1,9 @@
 """
 Legacy Dashboard API router.
 
-This file keeps the Metabase compatibility path alive for fallback only.
-The PostgreSQL-first dashboard path lives in dashboard_api_postgresql.py.
+Historical only.
+This file is not imported by runtime.
+The active runtime path lives in `dashboard_api_postgresql.py`.
 """
 
 import json

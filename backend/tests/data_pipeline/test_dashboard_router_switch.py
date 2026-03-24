@@ -113,7 +113,7 @@ async def test_main_switches_to_postgresql_dashboard_router(switched_app, monkey
 def test_main_contains_explicit_dashboard_router_source_log():
     text = Path("backend/main.py").read_text(encoding="utf-8")
     assert "Dashboard router source: PostgreSQL" in text
-    assert "Dashboard router source: Metabase compatibility" in text
+    assert "Dashboard router source: Metabase compatibility" not in text
 
 
 @pytest.mark.pg_only

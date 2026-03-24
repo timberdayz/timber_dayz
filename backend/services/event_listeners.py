@@ -1,17 +1,18 @@
 """
 事件监听器 - 数据流转流程自动化
 
-[WARN] v4.6.0 DSS架构重构:已禁用物化视图和C类数据相关事件监听
-- 物化视图:Metabase直接查询原始表,不再需要刷新
-- C类数据:由Metabase定时计算任务计算(每20分钟)
+当前 PostgreSQL Dashboard 主链采用:
+- `b_class raw -> semantic -> mart -> api -> backend -> frontend`
 
-监听的事件(已禁用):
-- DATA_INGESTED: B类数据入库完成 -> 自动刷新物化视图(已禁用)
-- MV_REFRESHED: 物化视图刷新完成 -> 自动计算C类数据(已禁用)
-- A_CLASS_UPDATED: A类数据更新 -> 自动重新计算C类数据(已禁用)
+其中 `DATA_INGESTED` 事件应触发 PostgreSQL refresh pipeline，
+但必须保持入库主流程非阻塞。
 """
 
+import asyncio
 from typing import Dict, Any, Optional
+
+from backend.models.database import AsyncSessionLocal
+from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
 from modules.core.logger import get_logger
 from backend.utils.events import (
     EventType,
@@ -23,6 +24,87 @@ from backend.utils.events import (
 logger = get_logger(__name__)
 
 
+DATA_INGESTED_PIPELINE_TARGETS: Dict[str, list[str]] = {
+    "orders": [
+        "api.business_overview_kpi_module",
+        "api.business_overview_comparison_module",
+        "api.business_overview_shop_racing_module",
+        "api.business_overview_traffic_ranking_module",
+        "api.business_overview_inventory_backlog_module",
+        "api.business_overview_operational_metrics_module",
+        "api.annual_summary_kpi_module",
+        "api.annual_summary_trend_module",
+        "api.annual_summary_platform_share_module",
+        "api.annual_summary_by_shop_module",
+    ],
+    "analytics": [
+        "api.business_overview_kpi_module",
+        "api.business_overview_comparison_module",
+        "api.business_overview_shop_racing_module",
+        "api.business_overview_traffic_ranking_module",
+        "api.business_overview_operational_metrics_module",
+        "api.annual_summary_kpi_module",
+        "api.annual_summary_trend_module",
+        "api.annual_summary_platform_share_module",
+        "api.annual_summary_by_shop_module",
+    ],
+    "traffic": [
+        "api.business_overview_comparison_module",
+        "api.business_overview_traffic_ranking_module",
+        "api.business_overview_operational_metrics_module",
+    ],
+    "products": [
+        "api.clearance_ranking_module",
+    ],
+    "inventory": [
+        "api.business_overview_inventory_backlog_module",
+        "api.clearance_ranking_module",
+    ],
+    "services": [
+        "semantic.fact_services_atomic",
+    ],
+}
+
+
+def determine_pipeline_targets_for_data_ingested(event: DataIngestedEvent) -> list[str]:
+    return list(DATA_INGESTED_PIPELINE_TARGETS.get(event.data_domain or "", []))
+
+
+async def run_pipeline_refresh_for_data_ingested_event(event: DataIngestedEvent) -> Optional[str]:
+    targets = determine_pipeline_targets_for_data_ingested(event)
+    if not targets:
+        logger.info(
+            "[事件监听] DATA_INGESTED未匹配到PostgreSQL refresh targets: "
+            f"file_id={event.file_id}, domain={event.data_domain}, granularity={event.granularity}"
+        )
+        return None
+
+    async with AsyncSessionLocal() as session:
+        run_id = await execute_refresh_plan(
+            session,
+            targets=targets,
+            pipeline_name="data_ingested_refresh",
+            trigger_source="data_ingested_event",
+            context={
+                "file_id": event.file_id,
+                "platform_code": event.platform_code,
+                "data_domain": event.data_domain,
+                "granularity": event.granularity,
+                "row_count": event.row_count,
+                "timestamp": event.timestamp,
+            },
+            continue_on_error=True,
+            max_attempts=2,
+            retry_backoff_seconds=0.1,
+        )
+        await session.commit()
+        logger.info(
+            "[事件监听] PostgreSQL refresh pipeline已完成: "
+            f"run_id={run_id}, file_id={event.file_id}, domain={event.data_domain}, targets={len(targets)}"
+        )
+        return run_id
+
+
 class EventListener:
     """事件监听器基类"""
     
@@ -30,20 +112,36 @@ class EventListener:
     def handle_data_ingested(event: DataIngestedEvent) -> None:
         """
         处理B类数据入库完成事件
-        
-        [WARN] v4.6.0 DSS架构重构:已禁用物化视图刷新
-        根据DSS架构,Metabase直接查询原始表,不再需要刷新物化视图。
-        
+
         Args:
             event: 数据入库事件
         """
-        # [WARN] v4.6.0 DSS架构重构:已禁用物化视图刷新逻辑
         logger.info(
-            f"[事件监听] 收到DATA_INGESTED事件(物化视图刷新已禁用): "
+            f"[事件监听] 收到DATA_INGESTED事件(准备触发PostgreSQL refresh): "
             f"file_id={event.file_id}, domain={event.data_domain}, "
             f"granularity={event.granularity}, rows={event.row_count}"
         )
-        logger.debug("[事件监听] DSS架构:Metabase直接查询原始表,无需刷新物化视图")
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                run_id = asyncio.run(run_pipeline_refresh_for_data_ingested_event(event))
+                logger.info(
+                    "[事件监听] 同步补跑PostgreSQL refresh完成: "
+                    f"file_id={event.file_id}, run_id={run_id}"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[事件监听] DATA_INGESTED同步触发PostgreSQL refresh失败: {exc}",
+                    exc_info=True,
+                )
+            return
+
+        task = asyncio.create_task(run_pipeline_refresh_for_data_ingested_event(event))
+        logger.info(
+            "[事件监听] 已调度PostgreSQL refresh后台任务: "
+            f"file_id={event.file_id}, task={task!r}"
+        )
     
     @staticmethod
     def handle_mv_refreshed(event: MVRefreshedEvent) -> None:
@@ -221,4 +319,3 @@ class EventListener:
 
 # 全局事件监听器实例
 event_listener = EventListener()
-

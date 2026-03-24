@@ -50,7 +50,7 @@ export const useUserStore = defineStore('user', () => {
           'component-recorder',  // ⭐ Phase 8.1新增：组件录制工具权限
           'component-versions',  // ⭐ Phase 9.4新增：组件版本管理权限
           'data-sync',  // ⭐ v4.6.0新增：数据同步权限
-          'data-quarantine',  // ⚠️ v4.12.0移除：'data-browser'已移除，使用Metabase替代
+          'data-quarantine',  // ⚠️ v4.12.0移除：'data-browser'已移除
           
           // 产品与库存（3项）
           'product-management', 'inventory-management', 'inventory-dashboard-v3',

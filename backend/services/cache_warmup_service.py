@@ -1,8 +1,8 @@
 """
 Dashboard 缓存预热服务（4c8g 单机优化）
 
-在 Backend 启动后或定时任务中对 P1 业务概览 Question 进行限流预热，
-减轻首访或高峰时对 Metabase/DB 的压力。配置通过环境变量读取，禁止硬编码敏感信息。
+在 Backend 启动后或定时任务中对 P1 PostgreSQL Dashboard 主链进行限流预热，
+减轻首访或高峰时对 PostgreSQL 的压力。配置通过环境变量读取，禁止硬编码敏感信息。
 """
 
 import os
@@ -10,10 +10,12 @@ import asyncio
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 from modules.core.logger import get_logger
+from backend.services.cache_service import get_cache_service
+from backend.services.postgresql_dashboard_service import get_postgresql_dashboard_service
 
 logger = get_logger(__name__)
 
-# P1 业务概览 Question 名称列表（与 proposal 一致）；可通过 ENV METABASE_WARMUP_P1_QUESTIONS 覆盖
+# P1 业务概览预热入口列表；可通过 ENV POSTGRESQL_DASHBOARD_WARMUP_TARGETS 覆盖
 _DEFAULT_P1_QUESTIONS = [
     "business_overview_kpi",
     "business_overview_comparison",
@@ -115,10 +117,10 @@ def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
 
 def get_p1_question_list() -> List[str]:
     """
-    从环境变量 METABASE_WARMUP_P1_QUESTIONS 读取（逗号分隔），
+    从环境变量 POSTGRESQL_DASHBOARD_WARMUP_TARGETS 读取（逗号分隔），
     未配置时使用默认 P1 列表。禁止在业务代码中散落硬编码 Question ID。
     """
-    env_val = os.getenv("METABASE_WARMUP_P1_QUESTIONS", "").strip()
+    env_val = os.getenv("POSTGRESQL_DASHBOARD_WARMUP_TARGETS", "").strip()
     if env_val:
         return [q.strip() for q in env_val.split(",") if q.strip()]
     return list(_DEFAULT_P1_QUESTIONS)
@@ -126,28 +128,32 @@ def get_p1_question_list() -> List[str]:
 
 async def run_dashboard_cache_warmup() -> Dict[str, Any]:
     """
-    执行 Dashboard P1 缓存预热：串行、限流（一次只打一个 Question），
-    Metabase 不可用时跳过本轮并记录日志；单次失败不阻塞，仅打告警日志。
+    执行 Dashboard P1 缓存预热：串行、限流（一次只预热一个入口），
+    仅预热 PostgreSQL service。
 
     Returns:
         {"skipped": True, "reason": "..."} 或 {"ok": N, "failed": M, "errors": [...]}
     """
-    from backend.services.cache_service import get_cache_service
-    from backend.services.metabase_question_service import (
-        get_metabase_service,
-        MetabaseUnavailableError,
-    )
-
     cache_service = get_cache_service()
     if not cache_service.redis_client:
         logger.warning("[CacheWarmup] Redis 未启用，跳过预热")
         return {"skipped": True, "reason": "redis_unavailable"}
 
-    service = get_metabase_service()
     questions = get_p1_question_list()
     if not questions:
         logger.info("[CacheWarmup] P1 列表为空，跳过预热")
         return {"skipped": True, "reason": "empty_p1_list"}
+
+    use_postgresql = os.getenv("USE_POSTGRESQL_DASHBOARD_ROUTER", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not use_postgresql:
+        raise RuntimeError("Metabase fallback has been retired")
+
+    postgresql_service = get_postgresql_dashboard_service()
 
     ok = 0
     failed = 0
@@ -160,9 +166,8 @@ async def run_dashboard_cache_warmup() -> Dict[str, Any]:
         cache_type, raw_params = _WARMUP_SPEC[question_name]
         params = _resolve_params(raw_params)
         cache_params = _normalize_cache_params(params)
-        metabase_params = {k: v for k, v in params.items() if v is not None}
         try:
-            result = await service.query_question(question_name, metabase_params)
+            result = await _query_postgresql_dashboard(postgresql_service, question_name, params)
             response = {
                 "success": True,
                 "data": result,
@@ -170,11 +175,6 @@ async def run_dashboard_cache_warmup() -> Dict[str, Any]:
             }
             await cache_service.set(cache_type, response, **cache_params)
             ok += 1
-        except MetabaseUnavailableError as e:
-            logger.warning(
-                f"[CacheWarmup] Metabase 不可用或熔断，跳过本轮预热(已预热 {ok} 项): {e}"
-            )
-            return {"skipped": True, "reason": "metabase_unavailable", "ok_so_far": ok}
         except Exception as e:
             logger.warning(
                 f"[CacheWarmup] 预热失败 question={question_name}: {e}",
@@ -184,3 +184,50 @@ async def run_dashboard_cache_warmup() -> Dict[str, Any]:
             failed += 1
     logger.info(f"[CacheWarmup] 完成: ok={ok}, failed={failed}")
     return {"ok": ok, "failed": failed, "errors": errors}
+
+
+async def _query_postgresql_dashboard(service, question_name: str, params: Dict[str, Any]) -> Any:
+    if question_name == "business_overview_kpi":
+        return await service.get_business_overview_kpi(
+            month=params.get("month"),
+            platform=params.get("platform"),
+        )
+    if question_name == "business_overview_comparison":
+        return await service.get_business_overview_comparison(
+            granularity=params.get("granularity"),
+            target_date=params.get("date"),
+            platform=_first_csv_value(params.get("platforms")),
+        )
+    if question_name == "business_overview_shop_racing":
+        return await service.get_business_overview_shop_racing(
+            granularity=params.get("granularity"),
+            target_date=params.get("date"),
+            group_by=params.get("group_by", "shop"),
+        )
+    if question_name == "business_overview_traffic_ranking":
+        return await service.get_business_overview_traffic_ranking(
+            granularity=params.get("granularity"),
+            target_date=params.get("date_value") or params.get("date"),
+            dimension=params.get("dimension", "visitor"),
+        )
+    if question_name == "business_overview_inventory_backlog":
+        days = params.get("days")
+        return await service.get_business_overview_inventory_backlog(min_days=int(days) if days else 30)
+    if question_name == "business_overview_operational_metrics":
+        return await service.get_business_overview_operational_metrics(
+            month=params.get("month"),
+            platform=params.get("platform"),
+        )
+    if question_name == "clearance_ranking":
+        limit = params.get("limit")
+        return await service.get_clearance_ranking(limit=int(limit) if limit else 10)
+    raise ValueError(f"unsupported_postgresql_warmup_question:{question_name}")
+
+
+def _first_csv_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text.split(",", 1)[0].strip() or None

@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
+Historical only.
+This script is not part of the runtime path for PostgreSQL Dashboard.
+
 Metabase Question ID 验证脚本
 
 用于验证所有 Metabase Question ID 是否已配置

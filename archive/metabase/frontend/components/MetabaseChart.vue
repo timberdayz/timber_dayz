@@ -1,3 +1,4 @@
+<!-- Historical only. This file is not part of the runtime path for PostgreSQL Dashboard. -->
 <template>
   <div class="metabase-chart-container" :style="{ height: `${height}px` }">
     <!-- 加载状态 -->

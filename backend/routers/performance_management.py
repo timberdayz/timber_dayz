@@ -51,6 +51,7 @@ from backend.schemas.performance import (
     PerformanceConfigResponse,
     PerformanceScoreResponse,
 )
+from backend.services.postgresql_shop_metrics_service import load_shop_monthly_target_achievement
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
@@ -791,7 +792,7 @@ async def calculate_performance_scores(
 
     绩效计算最小闭环：
     - 优先使用 a_class.target_breakdown（月度店铺目标/达成）聚合
-    - 缺失时回退使用 Metabase 店铺赛马数据估算达成率
+    - 缺失时回退使用 PostgreSQL 店铺赛马模块估算达成率
     - 写入 c_class.performance_scores（按 platform_code+shop_id+period upsert）
     """
     try:
@@ -865,43 +866,19 @@ async def calculate_performance_scores(
             rec["target"] += float(row.target_amount or 0)
             rec["achieved"] += float(row.achieved_amount or 0)
 
-        # 2) 若目标分解为空，回退 Metabase 店铺赛马（按名称映射店铺）
+        # 2) 若目标分解为空，回退 PostgreSQL 店铺赛马模块
         if not source_rows:
             try:
-                from backend.services.metabase_question_service import get_metabase_service
-
-                mbs = get_metabase_service()
-                racing = await mbs.query_question(
-                    "business_overview_shop_racing",
-                    {"granularity": "monthly", "date": f"{period}-01"},
-                )
-                if isinstance(racing, list) and racing:
-                    shop_rows = (await db.execute(select(DimShop))).scalars().all()
-                    by_name = {}
-                    for s in shop_rows:
-                        if s.shop_name:
-                            by_name.setdefault(s.shop_name.strip().lower(), s)
-                    for r in racing:
-                        name = str(r.get("name") or "").strip().lower()
-                        shop = by_name.get(name)
-                        if not shop:
-                            continue
-                        key = f"{(shop.platform_code or '').lower()}|{shop.shop_id or ''}"
-                        source_rows[key] = {
-                            "platform_code": (shop.platform_code or "").lower(),
-                            "shop_id": shop.shop_id,
-                            "target": float(r.get("target") or 0),
-                            "achieved": float(r.get("achieved") or 0),
-                        }
+                source_rows = await load_shop_monthly_target_achievement(db, period)
             except Exception as e:
-                logger.warning("绩效计算 Metabase 回退数据加载失败: %s", e)
+                logger.warning("绩效计算 PostgreSQL 店铺赛马回退数据加载失败: %s", e)
 
         if not source_rows:
             return error_response(
                 code=ErrorCode.PERF_CALC_NOT_READY,
                 message="绩效计算能力未就绪（无可用源数据）",
                 error_type=get_error_type(ErrorCode.PERF_CALC_NOT_READY),
-                recovery_suggestion="请先配置目标分解或确认 Metabase 店铺赛马数据可用",
+                recovery_suggestion="请先配置目标分解或确认 PostgreSQL 店铺赛马数据可用",
                 status_code=503,
                 data={"error_code": "PERF_CALC_NOT_READY"},
             )

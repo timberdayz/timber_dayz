@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """
+Historical only.
+This script is not part of the runtime path for PostgreSQL Dashboard.
+
 Metabase Question 集成测试（可选）
 
 前提：后端与 Metabase 已启动（如 docker-compose 或本地 run.py）。

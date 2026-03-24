@@ -227,90 +227,90 @@ export const useDashboardStore = defineStore('dashboard', {
     },
 
     /**
-     * 获取总览数据（已迁移到 Metabase Question API）
+ * 获取总览数据（待接入当前 PostgreSQL Dashboard API）
      * TODO: 迁移到 queryBusinessOverviewKpi
      */
     async fetchOverview(params = {}) {
       this.overview.loading = true
       this.overview.error = null
-      // TODO: 使用新的 Metabase Question API
+  // TODO: 使用当前 PostgreSQL Dashboard API
       this.overview.loading = false
     },
 
     /**
-     * 获取销售趋势（已迁移到 Metabase Question API）
+ * 获取销售趋势（待接入当前 PostgreSQL Dashboard API）
      * TODO: 迁移到 queryBusinessOverviewComparison
      */
     async fetchSalesTrend(params = {}) {
       this.salesTrend.loading = true
       this.salesTrend.error = null
-      // TODO: 使用新的 Metabase Question API
+  // TODO: 使用当前 PostgreSQL Dashboard API
       this.salesTrend.loading = false
     },
 
     /**
-     * 获取利润分析（已迁移到 Metabase Question API）
-     * TODO: 迁移到对应的 Metabase Question
+ * 获取利润分析（待接入当前 PostgreSQL Dashboard API）
+ * TODO: 接入对应的 PostgreSQL Dashboard 接口
      */
     async fetchProfitAnalysis(params = {}) {
       this.profitAnalysis.loading = true
       this.profitAnalysis.error = null
-      // TODO: 使用新的 Metabase Question API
+  // TODO: 使用当前 PostgreSQL Dashboard API
       this.profitAnalysis.loading = false
     },
 
     /**
-     * 获取热销商品（已迁移到 Metabase Question API）
-     * TODO: 迁移到对应的 Metabase Question
+ * 获取热销商品（待接入当前 PostgreSQL Dashboard API）
+ * TODO: 接入对应的 PostgreSQL Dashboard 接口
      */
     async fetchTopProducts(params = {}) {
       this.topProducts.loading = true
       this.topProducts.error = null
-      // TODO: 使用新的 Metabase Question API
+  // TODO: 使用当前 PostgreSQL Dashboard API
       this.topProducts.loading = false
     },
 
     /**
-     * 获取平台对比数据（已迁移到 Metabase Question API）
+ * 获取平台对比数据（待接入当前 PostgreSQL Dashboard API）
      * TODO: 迁移到 queryBusinessOverviewShopRacing
      */
     async fetchPlatformComparison(params = {}) {
       this.platformComparison.loading = true
       this.platformComparison.error = null
-      // TODO: 使用新的 Metabase Question API
+  // TODO: 使用当前 PostgreSQL Dashboard API
       this.platformComparison.loading = false
     },
 
     /**
-     * 获取订单统计（已迁移到 Metabase Question API）
-     * TODO: 迁移到对应的 Metabase Question
+ * 获取订单统计（待接入当前 PostgreSQL Dashboard API）
+ * TODO: 接入对应的 PostgreSQL Dashboard 接口
      */
     async fetchOrderStatistics(params = {}) {
       this.orderStatistics.loading = true
       this.orderStatistics.error = null
-      // TODO: 使用新的 Metabase Question API
+  // TODO: 使用当前 PostgreSQL Dashboard API
       this.orderStatistics.loading = false
     },
 
     /**
-     * 获取转化漏斗（已迁移到 Metabase Question API）
-     * TODO: 迁移到对应的 Metabase Question
+ * 获取转化漏斗（待接入当前 PostgreSQL Dashboard API）
+ * TODO: 接入对应的 PostgreSQL Dashboard 接口
      */
     async fetchConversionFunnel(params = {}) {
       this.conversionFunnel.loading = true
       this.conversionFunnel.error = null
-      // TODO: 使用新的 Metabase Question API
+  // TODO: 使用当前 PostgreSQL Dashboard API
       this.conversionFunnel.loading = false
     },
 
     /**
-     * 获取实时数据（已迁移到 Metabase Question API）
-     * TODO: 迁移到对应的 Metabase Question
+ * 获取实时数据（待接入当前 PostgreSQL Dashboard API）
+ * TODO: 接入对应的 PostgreSQL Dashboard 接口
      */
     async fetchRealtimeData(params = {}) {
       this.realtimeData.loading = true
       this.realtimeData.error = null
-      // TODO: 使用新的 Metabase Question API
+  // TODO: 使用当前 PostgreSQL Dashboard API
       this.realtimeData.loading = false
     },
 
@@ -318,7 +318,7 @@ export const useDashboardStore = defineStore('dashboard', {
      * 刷新所有数据
      */
     async refreshAll(params = {}) {
-      // TODO: 迁移到新的 Metabase Question API
+  // TODO: 迁移到当前 PostgreSQL Dashboard API
       const promises = [
         this.fetchOverview(params),
         this.fetchSalesTrend(params),

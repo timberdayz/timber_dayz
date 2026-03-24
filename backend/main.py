@@ -54,10 +54,8 @@ from backend.routers import (
     data_quarantine,  # v4.6.0: 数据隔离区API
     data_quality,  # C类数据核心字段优化计划: 数据质量监控API
     config_management,  # Phase 3: A类数据管理API(销售目标、战役目标、经营成本)
-    # superset_proxy,  # 已移除
-    metabase_proxy,  # Phase 2: Metabase代理API
-    dashboard_api,
     dashboard_api_postgresql,  # PostgreSQL-first dashboard API
+    data_pipeline,  # PostgreSQL dashboard pipeline observability API
     hr_management,  # Phase 3: HR管理API(员工管理、员工目标、考勤记录、绩效查询)
     test_api,
     inventory,
@@ -104,12 +102,6 @@ logger = get_logger(__name__)
 
 # 获取配置
 settings = get_settings()
-
-_TRUE_VALUES = ("1", "true", "yes", "on")
-USE_POSTGRESQL_DASHBOARD_ROUTER = os.getenv(
-    "USE_POSTGRESQL_DASHBOARD_ROUTER", ""
-).lower() in _TRUE_VALUES
-ENABLE_METABASE_PROXY = os.getenv("ENABLE_METABASE_PROXY", "").lower() in _TRUE_VALUES
 
 # 安全认证
 security = HTTPBearer()
@@ -263,10 +255,7 @@ async def lifespan(app: FastAPI):
                 app.state.cache_service = cache_service
                 logger.info("[OK] 统一缓存服务已启用")
                 # [*] 4c8g 单机优化: 可选启动后缓存预热（不阻塞启动）
-                if (
-                    not USE_POSTGRESQL_DASHBOARD_ROUTER
-                    and os.getenv("METABASE_CACHE_WARMUP_ENABLED", "").lower() in ("true", "1", "yes")
-                ):
+                if os.getenv("POSTGRESQL_DASHBOARD_CACHE_WARMUP_ENABLED", "").lower() in ("true", "1", "yes"):
                     delay_sec = int(os.getenv("METABASE_CACHE_WARMUP_DELAY_SECONDS", "10"))
                     async def _warmup_after_startup():
                         await asyncio.sleep(delay_sec)
@@ -280,11 +269,7 @@ async def lifespan(app: FastAPI):
                                 exc_info=True,
                             )
                     asyncio.create_task(_warmup_after_startup())
-                    logger.info(f"[CacheWarmup] 已调度启动后预热(延迟 {delay_sec}s)")
-                elif USE_POSTGRESQL_DASHBOARD_ROUTER:
-                    logger.info(
-                        "[CacheWarmup] skip legacy Metabase cache warmup because PostgreSQL dashboard router is enabled"
-                    )
+                    logger.info(f"[CacheWarmup] 已调度 PostgreSQL Dashboard 启动后预热(延迟 {delay_sec}s)")
         except Exception as redis_err:
             logger.debug(f"[SKIP] Redis缓存未启用: {redis_err}")
         
@@ -672,18 +657,11 @@ async def root():
 
 # 注册路由(全部启用 - v4.1.0优化版)
 
-if USE_POSTGRESQL_DASHBOARD_ROUTER:
-    logger.info("Dashboard router source: PostgreSQL")
-    app.include_router(
-        dashboard_api_postgresql.router,
-        tags=["Dashboard"]
-    )
-else:
-    logger.info("Dashboard router source: Metabase compatibility")
-    app.include_router(
-        dashboard_api.router,
-        tags=["Dashboard"]
-    )
+logger.info("Dashboard router source: PostgreSQL")
+app.include_router(
+    dashboard_api_postgresql.router,
+    tags=["Dashboard"]
+)
 
 app.include_router(
     collection.router,
@@ -762,6 +740,11 @@ app.include_router(
     tags=["数据同步"]
 )
 
+app.include_router(
+    data_pipeline.router,
+    tags=["数据管道"]
+)
+
 # v4.19.0: 通知WebSocket路由
 try:
     from backend.routers import notification_websocket
@@ -812,18 +795,6 @@ app.include_router(
     config_management.router,
     tags=["A类数据管理", "配置管理"]
 )
-
-# ============================================================================
-# Legacy Metabase proxy API
-# ============================================================================
-if ENABLE_METABASE_PROXY:
-    logger.info("Metabase proxy route enabled")
-    app.include_router(
-        metabase_proxy.router,
-        tags=["Metabase集成", "BI Layer"]
-    )
-else:
-    logger.info("Metabase proxy route disabled")
 
 # ============================================================================
 # Phase 3: HR管理API(员工管理、员工目标、考勤记录、绩效查询)

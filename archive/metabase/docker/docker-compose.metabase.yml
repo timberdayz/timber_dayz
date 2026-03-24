@@ -1,3 +1,7 @@
+# Historical only.
+# Archived from the active runtime tree after PostgreSQL Dashboard became the
+# only runtime path.
+
 # =====================================================
 # Metabase BI工具 - Docker Compose配置 (legacy fallback/debug only)
 # =====================================================

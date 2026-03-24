@@ -319,18 +319,14 @@ async function loadData() {
     loadDataRetried.value = false
     loadExtensionData()
   } catch (err) {
-    const isUnavailable = err && (err.code === 'METABASE_UNAVAILABLE' || err.error_code === 'METABASE_UNAVAILABLE')
     const isTimeout = err && (err.code === 'ECONNABORTED' || (err.message && String(err.message).toLowerCase().includes('timeout')))
-    if (isUnavailable || isTimeout) {
+    if (isTimeout) {
       if (!loadDataRetried.value) {
         loadDataRetried.value = true
         loading.value = false
         return loadData()
       }
-      const msg = isUnavailable
-        ? 'Metabase 服务暂时不可用，请稍后点击「刷新数据」重试'
-        : '请求超时，请稍后点击「刷新数据」重试'
-      ElMessage.warning(msg)
+      ElMessage.warning('请求超时，请稍后点击「刷新数据」重试')
     } else {
       handleApiError(err, { showMessage: true, logError: true })
     }
@@ -375,15 +371,11 @@ async function loadExtensionData() {
   }
   if (trendResult.status === 'rejected') {
     const err = trendResult.reason
-    if (!(err && (err.code === 'METABASE_UNAVAILABLE' || err.error_code === 'METABASE_UNAVAILABLE'))) {
-      handleApiError(err, { showMessage: false, logError: true })
-    }
+    handleApiError(err, { showMessage: false, logError: true })
   }
   if (shareResult.status === 'rejected') {
     const err = shareResult.reason
-    if (!(err && (err.code === 'METABASE_UNAVAILABLE' || err.error_code === 'METABASE_UNAVAILABLE'))) {
-      handleApiError(err, { showMessage: false, logError: true })
-    }
+    handleApiError(err, { showMessage: false, logError: true })
   }
   try {
     await nextTick()

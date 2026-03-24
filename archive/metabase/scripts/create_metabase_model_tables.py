@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Historical only.
+This script is not part of the runtime path for PostgreSQL Dashboard.
+
 批量创建 Metabase Model 所需的表（预创建）
 
 用途：在 Metabase 中创建 Model 之前，预先创建所有需要的表结构

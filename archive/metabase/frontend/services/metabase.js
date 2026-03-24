@@ -1,4 +1,7 @@
 /**
+ * Historical only.
+ * This file is not part of the runtime path for PostgreSQL Dashboard.
+ *
  * Metabase API服务
  * 用于与后端Metabase代理API交互
  */

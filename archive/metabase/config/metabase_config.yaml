@@ -1,3 +1,7 @@
+# Historical only.
+# Archived from active runtime configuration after PostgreSQL Dashboard became
+# the only runtime path.
+
 # =====================================================
 # Metabase 配置清单 (legacy fallback/debug only)
 # =====================================================

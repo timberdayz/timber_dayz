@@ -1,8 +1,8 @@
 """
 Legacy Metabase proxy API.
 
-Retained for fallback/debug only while PostgreSQL Dashboard is the primary
-online query path.
+Historical only.
+This file is not imported by runtime.
 """
 
 from fastapi import APIRouter, HTTPException, Query
