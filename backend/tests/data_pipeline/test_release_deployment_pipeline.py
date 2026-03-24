@@ -16,7 +16,10 @@ def test_deploy_workflow_creates_remote_directories_before_upload():
         errors="replace",
     )
 
-    assert "Failed to prepare remote deployment directories under ${PRODUCTION_PATH}" in text
+    assert (
+        "Failed to prepare remote deployment directories under ${PRODUCTION_PATH}"
+        in text
+    )
     for expected in (
         '\\"${PRODUCTION_PATH}\\"',
         '\\"${PRODUCTION_PATH}/config\\"',
@@ -32,8 +35,8 @@ def test_deploy_workflow_skips_legacy_metabase_uploads():
         errors="replace",
     )
 
-    assert 'docker-compose.metabase.yml (required for production)' not in text
-    assert 'scp_with_retry config/metabase_config.yaml' not in text
+    assert "docker-compose.metabase.yml (required for production)" not in text
+    assert "scp_with_retry config/metabase_config.yaml" not in text
 
 
 def test_remote_deploy_script_cleans_legacy_metabase_container():
@@ -43,7 +46,10 @@ def test_remote_deploy_script_cleans_legacy_metabase_container():
     )
 
     assert "xihong_erp_metabase" in text
-    assert "docker stop xihong_erp_metabase" in text or "docker rm xihong_erp_metabase" in text
+    assert (
+        "docker stop xihong_erp_metabase" in text
+        or "docker rm xihong_erp_metabase" in text
+    )
 
 
 def test_remote_deploy_script_does_not_load_metabase_compose_in_prod():
@@ -52,7 +58,10 @@ def test_remote_deploy_script_does_not_load_metabase_compose_in_prod():
         errors="replace",
     )
 
-    assert 'compose_cmd_base=("${compose_cmd_base[@]}" "-f" "docker-compose.metabase.yml")' not in text
+    assert (
+        'compose_cmd_base=("${compose_cmd_base[@]}" "-f" "docker-compose.metabase.yml")'
+        not in text
+    )
     assert "production no longer depends on Metabase" in text
 
 
