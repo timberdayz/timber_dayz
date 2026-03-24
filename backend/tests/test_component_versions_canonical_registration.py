@@ -124,7 +124,7 @@ async def test_batch_register_uses_shop_switch_as_tiktok_canonical_entry(
 
 
 @pytest.mark.asyncio
-async def test_list_versions_only_returns_canonical_components(
+async def test_list_versions_returns_all_platform_components(
     component_version_session: AsyncSession,
 ):
     now = datetime.now(timezone.utc)
@@ -183,8 +183,10 @@ async def test_list_versions_only_returns_canonical_components(
     names = sorted(item.component_name for item in response.data)
 
     assert names == [
+        "shopee/export",
         "shopee/login",
         "shopee/products_export",
+        "shopee/recorder_test_login",
     ]
 
 
@@ -276,3 +278,69 @@ async def test_list_versions_component_type_export_matches_domain_exports(
     names = [item.component_name for item in response.data]
 
     assert names == ["shopee/products_export"]
+
+
+@pytest.mark.asyncio
+async def test_list_versions_platform_only_does_not_apply_canonical_whitelist(
+    component_version_session: AsyncSession,
+):
+    now = datetime.now(timezone.utc)
+    component_version_session.add_all(
+        [
+            ComponentVersion(
+                component_name="miaoshou/login",
+                version="1.0.0",
+                file_path="modules/platforms/miaoshou/components/login.py",
+                is_stable=False,
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            ),
+            ComponentVersion(
+                component_name="miaoshou/miaoshou_login",
+                version="1.0.0",
+                file_path="modules/platforms/miaoshou/components/miaoshou_login.py",
+                is_stable=False,
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            ),
+            ComponentVersion(
+                component_name="miaoshou/login_v1_0_1",
+                version="1.0.1",
+                file_path="modules/platforms/miaoshou/components/login_v1_0_1.py",
+                is_stable=False,
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            ),
+            ComponentVersion(
+                component_name="miaoshou/orders_config",
+                version="1.0.0",
+                file_path="modules/platforms/miaoshou/components/orders_config.py",
+                is_stable=False,
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+    )
+    await component_version_session.commit()
+
+    response = await list_versions(
+        platform="miaoshou",
+        component_type=None,
+        status=None,
+        page=1,
+        page_size=20,
+        db=component_version_session,
+        request=None,
+    )
+
+    names = sorted(item.component_name for item in response.data)
+
+    assert names == [
+        "miaoshou/login",
+        "miaoshou/login_v1_0_1",
+        "miaoshou/miaoshou_login",
+    ]

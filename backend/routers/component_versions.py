@@ -6,6 +6,7 @@
 
 import sys
 import uuid
+from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -107,6 +108,38 @@ def _filter_component_names_by_type(
         if str(logical_type or "").lower() == expected:
             filtered.append(name)
     return filtered
+
+
+def _build_component_test_runtime_config(
+    request: ComponentTestRequest, component_name: str
+) -> tuple[str, dict[str, Any]]:
+    """Build runtime config for component tests from the request and component identity."""
+    _, logical_type, data_domain, sub_domain = parse_component_name(component_name)
+    logical_type = str(logical_type or "").lower()
+
+    if logical_type != "export":
+        return logical_type, {}
+
+    runtime_config: dict[str, Any] = {}
+    if data_domain:
+        runtime_config["data_domain"] = data_domain
+
+    effective_sub_domain = (request.sub_domain or sub_domain or "").strip()
+    if effective_sub_domain:
+        runtime_config["sub_domain"] = effective_sub_domain
+        if str(data_domain or "").lower() == "services":
+            runtime_config["services_subtype"] = effective_sub_domain
+
+    if request.granularity:
+        runtime_config["granularity"] = request.granularity
+    if request.start_date:
+        runtime_config["start_date"] = request.start_date
+        runtime_config["date_from"] = request.start_date
+    if request.end_date:
+        runtime_config["end_date"] = request.end_date
+        runtime_config["date_to"] = request.end_date
+
+    return logical_type, runtime_config
 
 
 def save_test_history_sync(
@@ -272,13 +305,6 @@ async def list_versions(
         if platform:
             conditions.append(ComponentVersion.component_name.like(f"{platform}/%"))
 
-        canonical_names = _get_canonical_component_names(platform)
-        canonical_names = _filter_component_names_by_type(
-            canonical_names, component_type
-        )
-        if canonical_names:
-            conditions.append(ComponentVersion.component_name.in_(canonical_names))
-
         # 状态筛选
         if status == "stable":
             conditions.append(ComponentVersion.is_stable)
@@ -306,6 +332,15 @@ async def list_versions(
         )
         result = await db.execute(stmt)
         versions = result.scalars().all()
+
+        if component_type:
+            expected = component_type.strip().lower()
+            filtered_versions = []
+            for row in versions:
+                _, logical_type, _, _ = parse_component_name(row.component_name)
+                if str(logical_type or "").lower() == expected:
+                    filtered_versions.append(row)
+            versions = filtered_versions
 
         # canonical-first: 同一逻辑组件只保留一个“当前工作行”
         # 选择规则：updated_at 更新更晚者优先；其后 created_at、更大的 id 作为稳定 tie-breaker
@@ -616,8 +651,6 @@ async def stop_ab_test(version_id: int, db: AsyncSession = Depends(get_async_db)
 async def promote_to_stable(version_id: int, db: AsyncSession = Depends(get_async_db)):
     """提升为稳定版本"""
     try:
-        service = ComponentVersionService(db)
-
         # 获取版本
         result = await db.execute(
             select(ComponentVersion).where(ComponentVersion.id == version_id)
@@ -631,10 +664,37 @@ async def promote_to_stable(version_id: int, db: AsyncSession = Depends(get_asyn
                 recovery_suggestion="请检查版本ID",
             )
 
-        # 提升为稳定版本
-        service.promote_to_stable(
-            component_name=version.component_name, version=version.version
+        now = datetime.now(timezone.utc)
+
+        stable_result = await db.execute(
+            select(ComponentVersion).where(
+                ComponentVersion.component_name == version.component_name,
+                ComponentVersion.is_stable == True,
+                ComponentVersion.id != version.id,
+            )
         )
+        for other_stable in stable_result.scalars().all():
+            other_stable.is_stable = False
+            other_stable.updated_at = now
+
+        if version.file_path:
+            same_path_result = await db.execute(
+                select(ComponentVersion).where(
+                    ComponentVersion.file_path == version.file_path,
+                    ComponentVersion.is_stable == True,
+                    ComponentVersion.id != version.id,
+                )
+            )
+            for same_path_stable in same_path_result.scalars().all():
+                same_path_stable.is_stable = False
+                same_path_stable.updated_at = now
+
+        version.is_stable = True
+        version.is_testing = False
+        version.updated_at = now
+
+        await db.commit()
+        await db.refresh(version)
 
         logger.info(
             f"Version promoted to stable: {version.component_name} v{version.version}"
@@ -1244,6 +1304,27 @@ async def test_component_version(
         if logical_component.endswith("_login"):
             logical_component = "login"
         is_discovery_component = logical_component in ("date_picker", "filters")
+        logical_type, runtime_config = _build_component_test_runtime_config(
+            request, version.component_name
+        )
+        fixed_data_domain = runtime_config.get("data_domain")
+        fixed_sub_domain = runtime_config.get("sub_domain")
+
+        if logical_type == "export":
+            if not request.granularity or not request.start_date or not request.end_date:
+                return error_response(
+                    ErrorCode.PARAMETER_INVALID,
+                    "导出组件测试需要选择粒度和日期范围",
+                    status_code=400,
+                    recovery_suggestion="请选择粒度，并设置开始日期和结束日期",
+                )
+            if str(fixed_data_domain or "").lower() == "services" and not fixed_sub_domain:
+                return error_response(
+                    ErrorCode.PARAMETER_INVALID,
+                    "服务数据域导出测试需要选择子数据域",
+                    status_code=400,
+                    recovery_suggestion="请选择服务子数据域",
+                )
 
         if is_python_component:
             # Python 组件:从文件路径提取平台和组件名
@@ -1412,6 +1493,7 @@ async def test_component_version(
             "test_dir": str(
                 test_dir
             ),  # 验证码回传：子进程轮询 verification_response.json 的目录
+            "runtime_config": runtime_config,
         }
         with open(config_path, "w", encoding="utf-8") as f:
             json_lib.dump(test_config, f, ensure_ascii=False)

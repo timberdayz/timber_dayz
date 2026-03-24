@@ -271,7 +271,7 @@
           </div>
         </div>
         
-        <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
           <span style="font-weight: 600;">测试账号:</span>
           <el-select 
             v-model="testAccountId" 
@@ -287,12 +287,67 @@
               :value="account.account_id"
             />
           </el-select>
+
+          <template v-if="isCurrentTestExport">
+            <span style="font-weight: 600;">粒度:</span>
+            <el-select
+              v-model="testGranularity"
+              size="small"
+              style="width: 140px;"
+              :disabled="testing"
+              placeholder="请选择粒度"
+            >
+              <el-option label="日报" value="daily" />
+              <el-option label="周报" value="weekly" />
+              <el-option label="月报" value="monthly" />
+            </el-select>
+
+            <span style="font-weight: 600;">日期范围:</span>
+            <el-date-picker
+              v-model="testDateRange"
+              type="daterange"
+              size="small"
+              style="width: 260px;"
+              :disabled="testing"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              value-format="YYYY-MM-DD"
+            />
+
+            <template v-if="currentTestComponent.data_domain">
+              <span style="font-weight: 600;">数据域:</span>
+              <el-tag type="info">{{ currentTestComponent.data_domain }}</el-tag>
+            </template>
+
+            <template v-if="requiresCurrentTestSubDomain">
+              <span style="font-weight: 600;">子数据域:</span>
+              <el-select
+                v-model="testSubDomain"
+                size="small"
+                style="width: 180px;"
+                :disabled="testing"
+                placeholder="请选择子数据域"
+              >
+                <el-option
+                  v-for="option in currentTestSubDomainOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </template>
+
+            <template v-else-if="currentTestComponent.sub_domain">
+              <span style="font-weight: 600;">子数据域:</span>
+              <el-tag>{{ currentTestComponent.sub_domain }}</el-tag>
+            </template>
+          </template>
           
           <el-button 
             type="primary" 
             size="small"
             :loading="testing"
-            :disabled="!testAccountId"
+            :disabled="!canStartCurrentTest"
             @click="startComponentTest"
           >
             {{ testing ? '测试中...' : '开始测试' }}
@@ -556,12 +611,19 @@ const abTestForm = reactive({
 const testDialogVisible = ref(false)
 const testing = ref(false)
 const testAccountId = ref('')
+const testGranularity = ref('daily')
+const testDateRange = ref([])
+const testSubDomain = ref('')
 const testAccounts = ref([])
 const testResult = ref(null)
 const currentTestComponent = ref({
   id: null,
   component_name: '',
-  version: ''
+  version: '',
+  file_path: '',
+  logical_type: '',
+  data_domain: '',
+  sub_domain: ''
 })
 
 // ⭐ v4.7.3: 实时进度状态
@@ -577,6 +639,78 @@ const testStatus = ref({
 const verificationRequired = ref(null) // { versionId, testId, verificationType, screenshotUrl }
 const verificationInput = ref('')
 const verificationSubmitting = ref(false)
+
+const SERVICE_SUB_DOMAIN_OPTIONS = [
+  { label: '智能客服', value: 'ai_assistant' },
+  { label: '人工客服', value: 'agent' }
+]
+
+const parseComponentMeta = (name) => {
+  const [platform = '', raw = ''] = (name || '').split('/')
+  const meta = {
+    platform,
+    raw,
+    logicalType: raw || 'unknown',
+    dataDomain: '',
+    subDomain: ''
+  }
+
+  if (raw === 'login' || raw.endsWith('_login')) {
+    meta.logicalType = 'login'
+    return meta
+  }
+  if (raw === 'navigation') {
+    meta.logicalType = 'navigation'
+    return meta
+  }
+  if (raw === 'date_picker') {
+    meta.logicalType = 'date_picker'
+    return meta
+  }
+  if (raw === 'shop_switch') {
+    meta.logicalType = 'shop_switch'
+    return meta
+  }
+  if (raw === 'filters') {
+    meta.logicalType = 'filters'
+    return meta
+  }
+  if (raw === 'export') {
+    meta.logicalType = 'export'
+    return meta
+  }
+  if (raw.endsWith('_export')) {
+    meta.logicalType = 'export'
+    const domainParts = raw.slice(0, -7).split('_').filter(Boolean)
+    if (domainParts.length > 0) {
+      meta.dataDomain = domainParts[0]
+      meta.subDomain = domainParts.slice(1).join('_')
+    }
+    return meta
+  }
+  return meta
+}
+
+const isCurrentTestExport = computed(() => currentTestComponent.value.logical_type === 'export')
+const requiresCurrentTestSubDomain = computed(() => {
+  return isCurrentTestExport.value
+    && currentTestComponent.value.data_domain === 'services'
+    && !currentTestComponent.value.sub_domain
+})
+const currentTestSubDomainOptions = computed(() => {
+  if (currentTestComponent.value.data_domain === 'services') {
+    return SERVICE_SUB_DOMAIN_OPTIONS
+  }
+  return []
+})
+const canStartCurrentTest = computed(() => {
+  if (!testAccountId.value) return false
+  if (!isCurrentTestExport.value) return true
+  if (!testGranularity.value) return false
+  if (!Array.isArray(testDateRange.value) || testDateRange.value.length !== 2) return false
+  if (requiresCurrentTestSubDomain.value && !testSubDomain.value) return false
+  return true
+})
 
 // 4.2: 同平台同类型多稳定版冲突（基于当前列表计算）
 const multiStableConflicts = computed(() => {
@@ -776,13 +910,11 @@ const deleteVersion = async (row) => {
 
 // 工具函数
 const getPlatformFromName = (name) => {
-  const parts = name.split('/')
-  return parts[0] || 'unknown'
+  return parseComponentMeta(name).platform || 'unknown'
 }
 
 const getComponentTypeFromName = (name) => {
-  const parts = name.split('/')
-  return parts[1] || 'unknown'
+  return parseComponentMeta(name).logicalType || 'unknown'
 }
 
 const getProgressColor = (rate) => {
@@ -805,7 +937,7 @@ const getLogicalTypeLabel = (compPart) => {
   if (!compPart) return '未知'
   if (compPart === 'login') return '登录'
   if (compPart === 'navigation') return '导航'
-  if (compPart.endsWith('_export')) return '导出'
+  if (compPart === 'export') return '导出'
   if (compPart === 'date_picker') return '日期'
   if (compPart === 'shop_switch') return '店铺'
   if (compPart === 'filters') return '筛选'
@@ -814,7 +946,7 @@ const getLogicalTypeLabel = (compPart) => {
 const getLogicalTypeTag = (compPart) => {
   if (compPart === 'login') return 'danger'
   if (compPart === 'navigation') return 'primary'
-  if (compPart && compPart.endsWith('_export')) return 'success'
+  if (compPart === 'export') return 'success'
   return 'info'
 }
 
@@ -855,15 +987,22 @@ const batchRegisterPythonComponents = async () => {
 
 // 测试组件方法
 const showTestDialog = async (row) => {
+  const meta = parseComponentMeta(row.component_name)
   currentTestComponent.value = {
     id: row.id,
     component_name: row.component_name,
     version: row.version,
-    file_path: row.file_path
+    file_path: row.file_path,
+    logical_type: meta.logicalType,
+    data_domain: meta.dataDomain,
+    sub_domain: meta.subDomain
   }
   
   testDialogVisible.value = true
   testAccountId.value = ''
+  testGranularity.value = 'daily'
+  testDateRange.value = []
+  testSubDomain.value = meta.subDomain || ''
   testResult.value = null
   testing.value = false
   
@@ -922,6 +1061,16 @@ const startComponentTest = async () => {
     ElMessage.warning('请选择测试账号')
     return
   }
+  if (isCurrentTestExport.value) {
+    if (!testGranularity.value || !Array.isArray(testDateRange.value) || testDateRange.value.length !== 2) {
+      ElMessage.warning('请选择导出测试的粒度和日期范围')
+      return
+    }
+    if (requiresCurrentTestSubDomain.value && !testSubDomain.value) {
+      ElMessage.warning('请选择子数据域')
+      return
+    }
+  }
   
   try {
     testing.value = true
@@ -943,9 +1092,19 @@ const startComponentTest = async () => {
       duration: 3000
     })
     
-    const response = await api.testComponentVersion(currentTestComponent.value.id, {
+    const payload = {
       account_id: testAccountId.value
-    })
+    }
+    if (isCurrentTestExport.value) {
+      payload.granularity = testGranularity.value
+      payload.start_date = testDateRange.value[0]
+      payload.end_date = testDateRange.value[1]
+      if (requiresCurrentTestSubDomain.value && testSubDomain.value) {
+        payload.sub_domain = testSubDomain.value
+      }
+    }
+
+    const response = await api.testComponentVersion(currentTestComponent.value.id, payload)
     
     // ⭐ v4.7.4: 处理后台运行模式（HTTP 轮询）
     if (response.test_id) {

@@ -139,6 +139,7 @@ async def main():
             screenshot_on_error=config.get('screenshot_on_error', True),
             output_dir=config.get('output_dir'),
             account_info=config.get('account_info'),
+            runtime_config=config.get('runtime_config'),
             progress_callback=progress_callback,  # [*] v4.7.4: 传递进度回调
             test_dir=config.get('test_dir'),  # 验证码回传：轮询 verification_response.json 的目录
         )
@@ -200,4 +201,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-

@@ -25,7 +25,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -1097,6 +1097,7 @@ async def save_component(
 
         logger.info(f"Python component saved: {component_name} v{next_ver} -> {filename}")
 
+        now = datetime.now(timezone.utc)
         new_version = ComponentVersion(
             component_name=component_name,
             version=next_ver,
@@ -1105,6 +1106,8 @@ async def save_component(
             is_active=True,
             description=f"录制工具创建 - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
             created_by="recorder",
+            created_at=now,
+            updated_at=now,
         )
         db.add(new_version)
         await db.commit()

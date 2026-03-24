@@ -95,6 +95,7 @@ class ComponentTester:
         screenshot_on_error: bool = True,
         output_dir: str = None,
         account_info: Dict[str, Any] = None,  # 新增：直接传入账号信息
+        runtime_config: Dict[str, Any] = None,
         progress_callback: Callable[[str, dict], None] = None,  # [*] v4.7.3: 进度回调
         test_dir: str = None,  # 验证码回传：轮询 verification_response.json 的目录
     ):
@@ -118,6 +119,7 @@ class ComponentTester:
         self.headless = headless
         self.screenshot_on_error = screenshot_on_error
         self._account_info = account_info  # 缓存传入的账号信息
+        self.runtime_config = dict(runtime_config or {})
         self.progress_callback = progress_callback  # [*] v4.7.3: 进度回调
         self.test_dir = Path(test_dir) if test_dir else None  # 验证码回传轮询目录
 
@@ -134,6 +136,25 @@ class ComponentTester:
         self.results: List[ComponentTestResult] = []
         
         logger.info(f"ComponentTester initialized: platform={platform}")
+
+    def _build_runtime_component_config(self) -> Dict[str, Any]:
+        cfg: Dict[str, Any] = {"output_dir": str(self.output_dir)}
+        cfg.update(self.runtime_config)
+
+        params = dict(cfg.get("params") or {})
+        if self.runtime_config.get("date_from"):
+            params["date_from"] = self.runtime_config["date_from"]
+        if self.runtime_config.get("date_to"):
+            params["date_to"] = self.runtime_config["date_to"]
+        if self.runtime_config.get("granularity"):
+            params["granularity"] = self.runtime_config["granularity"]
+        if self.runtime_config.get("sub_domain"):
+            params["sub_domain"] = self.runtime_config["sub_domain"]
+        if self.runtime_config.get("data_domain"):
+            params["data_domain"] = self.runtime_config["data_domain"]
+        if params:
+            cfg["params"] = params
+        return cfg
     
     def get_account_info(self) -> Optional[Dict[str, Any]]:
         """获取账号信息（优先使用传入的account_info）"""
@@ -532,7 +553,7 @@ class ComponentTester:
             result.error = f"加载登录组件失败: {e}"
             return False
 
-        adapter_config = {'output_dir': str(self.output_dir)}
+        adapter_config = self._build_runtime_component_config()
         if self.test_dir:
             adapter_config.setdefault('task', {})['screenshot_dir'] = str(self.test_dir)
         adapter = create_adapter(
@@ -712,7 +733,7 @@ class ComponentTester:
                             if isinstance(st, dict) and st.get('action'):
                                 await self._execute_step(page, st, account_info)
 
-                adapter_config = {'output_dir': str(self.output_dir)}
+                adapter_config = self._build_runtime_component_config()
                 if self.test_dir:
                     adapter_config.setdefault('task', {})['screenshot_dir'] = str(self.test_dir)
                 override_map = {
@@ -803,7 +824,11 @@ class ComponentTester:
                 elif component_type == 'navigation':
                     exec_result = await adapter.navigate(page, target_page=component_name)
                 elif component_type == 'export':
-                    data_domain = getattr(component_class, 'data_domain', 'orders')
+                    data_domain = (
+                        getattr(component_class, 'data_domain', None)
+                        or self.runtime_config.get('data_domain')
+                        or 'orders'
+                    )
                     exec_result = await adapter.export(page=page, data_domain=data_domain)
                 elif component_type == 'date_picker':
                     exec_result = await adapter.date_picker(page, None)

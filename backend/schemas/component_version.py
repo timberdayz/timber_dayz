@@ -106,6 +106,10 @@ class ComponentTestRequest(BaseModel):
     """测试组件请求"""
 
     account_id: str = Field(..., description="测试账号ID")
+    granularity: Optional[str] = Field(None, description="导出测试粒度")
+    start_date: Optional[str] = Field(None, description="导出测试开始日期 YYYY-MM-DD")
+    end_date: Optional[str] = Field(None, description="导出测试结束日期 YYYY-MM-DD")
+    sub_domain: Optional[str] = Field(None, description="导出测试子数据域")
 
 
 class TestHistoryResponse(BaseModel):

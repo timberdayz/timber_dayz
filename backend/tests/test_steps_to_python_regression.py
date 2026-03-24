@@ -87,9 +87,8 @@ class TestAntiPatternsAbsent:
             component_name="login",
             steps=_steps_login_with_captcha(),
         )
-        assert "to_have_count(1)" in code
-        resume_section = code[code.find("恢复路径") : code.find("恢复路径") + 1200]
-        assert ".first" not in resume_section
+        assert "恢复路径" not in code
+        assert ".first" not in code
 
     def test_captcha_detection_no_count_is_visible(self):
         code = generate_python_code(
@@ -123,9 +122,22 @@ class TestAntiPatternsAbsent:
             component_name="login",
             steps=steps,
         )
-        assert "expect(dialog).to_have_count(1)" in code
-        assert "dialog = page.locator(" in code
-        assert ".first" not in code or "dialog" not in code
+        assert "expect(dialog).to_have_count(1)" not in code
+        assert "dialog = page.locator(" not in code
+        assert "选择器为空，已跳过" in code
+
+    def test_popup_step_not_forced_optional(self):
+        steps = [
+            {"action": "click", "selector": 'role=button[name="确定"]', "step_group": "popup"},
+        ]
+        code = generate_python_code(
+            platform="test",
+            component_type="navigation",
+            component_name="nav",
+            steps=steps,
+        )
+        assert "可选步骤" not in code
+        assert "except Exception as e:" not in code
 
 
 class TestGeneratorRuntimeSeparation:
@@ -194,7 +206,7 @@ class TestGeneratorRuntimeSeparation:
             component_name="login",
             steps=steps,
         )
-        assert "if _target_url:" in code
+        assert "if _target_url and not captcha_code:" in code
         assert "domcontentloaded" in code
         assert "guard_overlays" in code
         # No post-navigation element detection loop
@@ -226,6 +238,18 @@ class TestGeneratorRuntimeSeparation:
         )
         assert "VerificationRequiredError" in code
         assert "captcha" in code.lower()
+
+    def test_otp_handling_uses_otp_type(self):
+        steps = [
+            {"action": "fill", "selector": 'role=textbox[name="验证码"]', "value": "123456", "step_group": "captcha_otp"},
+        ]
+        code = generate_python_code(
+            platform="miaoshou",
+            component_type="login",
+            component_name="login",
+            steps=steps,
+        )
+        assert "VerificationRequiredError('otp', screenshot_path)" in code or 'VerificationRequiredError("otp", screenshot_path)' in code
 
     def test_framework_code_lines_limited(self):
         """login 组件框架代码（URL 导航 + 容器设置）不超过 50 行。"""
@@ -382,9 +406,9 @@ class TestRealWorldScenarioPatterns:
             component_name="login",
             steps=_steps_login_with_captcha(),
         )
-        assert "验证码恢复失败" in code
-        assert "getattr(page" in code or "url=" in code
-        assert "cap_sel=" in code or "login_sel=" in code
+        assert "验证码恢复失败" not in code
+        assert "cap_sel=" not in code
+        assert "login_sel=" not in code
 
     def test_scope_convergence_dialog_chain_selector(self):
         steps = [
@@ -519,6 +543,22 @@ class TestBaseClassInheritance:
         assert "DateOption" in code
         assert "option: DateOption" in code
 
+    def test_date_picker_step_group_keeps_recorded_action(self):
+        steps = [{"action": "click", "selector": "input.date-picker", "step_group": "date_picker"}]
+        code = generate_python_code(
+            platform="test", component_type="date_picker", component_name="date_picker", steps=steps,
+        )
+        assert "await _el_0.click(timeout=10000)" in code
+        assert "VerificationRequiredError" not in code
+
+    def test_filters_step_group_keeps_recorded_fill(self):
+        steps = [{"action": "fill", "selector": "input[name=q]", "value": "abc", "step_group": "filters"}]
+        code = generate_python_code(
+            platform="test", component_type="navigation", component_name="nav", steps=steps,
+        )
+        assert "await _el_0.fill('abc', timeout=10000)" in code
+        assert "select_option" not in code
+
     def test_unknown_type_inherits_component_base(self):
         steps = [{"action": "click", "selector": "button.do"}]
         code = generate_python_code(
@@ -541,9 +581,9 @@ class TestWaitStepNetworkIdle:
 
 
 class TestCaptchaPostStepsReorder:
-    """7.5 验证码后非验证码步骤保留测试。"""
+    """7.5 验证码步骤保持原录制顺序。"""
 
-    def test_post_captcha_steps_reordered_before_raise(self):
+    def test_post_captcha_steps_not_reordered(self):
         steps = [
             {"action": "fill", "selector": "input[name=username]", "value": "{{account.username}}"},
             {"action": "fill", "selector": "input.captcha-text", "value": "1234", "step_group": "captcha_graphical"},
@@ -553,14 +593,28 @@ class TestCaptchaPostStepsReorder:
             platform="test", component_type="login", component_name="login", steps=steps,
         )
         assert "VerificationRequiredError" in code
-        assert "[reorder]" in code
-        reorder_idx = code.find("[reorder]")
+        assert "[reorder]" not in code
+        click_idx = code.find("input.remember-me")
         raise_idx = code.find("raise VerificationRequiredError")
-        assert reorder_idx < raise_idx, "Reordered steps should appear before raise"
+        assert raise_idx < click_idx, "Captcha pause should happen before later recorded steps"
+
+    def test_captcha_fill_rewritten_in_place(self):
+        steps = [
+            {"action": "click", "selector": 'role=textbox[name="请输入验证码"]'},
+            {"action": "fill", "selector": 'role=textbox[name="请输入验证码"]', "value": "3421432", "step_group": "captcha_graphical"},
+            {"action": "click", "selector": 'role=button[name="立即登录"]'},
+        ]
+        code = generate_python_code(
+            platform="test", component_type="login", component_name="login", steps=steps,
+        )
+        assert "恢复路径" not in code
+        assert "captcha_code = (params.get(\"captcha_code\") or params.get(\"otp\") or \"\").strip()" in code
+        assert "await _el_1.fill(value, timeout=10000)" in code
+        assert "VerificationRequiredError('graphical_captcha', screenshot_path)" in code or 'VerificationRequiredError("graphical_captcha", screenshot_path)' in code
 
 
 class TestCaptchaResumeUrlConfigurable:
-    """7.6 验证码恢复块 URL 判断可配置测试。"""
+    """7.6 已移除验证码恢复块 URL 判断逻辑。"""
 
     def test_with_success_criteria(self):
         steps = _steps_login_with_captcha()
@@ -568,8 +622,8 @@ class TestCaptchaResumeUrlConfigurable:
             platform="test", component_type="login", component_name="login",
             steps=steps, success_criteria={"url_contains": "/dashboard"},
         )
-        assert "'/dashboard' in cur" in code
-        assert "TODO: configure" not in code
+        assert "'/dashboard' in cur" not in code
+        assert "TODO: edit success condition" in code
 
     def test_without_success_criteria(self):
         steps = _steps_login_with_captcha()
@@ -577,7 +631,7 @@ class TestCaptchaResumeUrlConfigurable:
             platform="test", component_type="login", component_name="login",
             steps=steps, success_criteria=None,
         )
-        assert "TODO: configure success URL condition" in code
+        assert "TODO: edit success condition" in code
 
 
 class TestSelectorFromSelectorsUnique:

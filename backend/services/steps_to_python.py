@@ -43,7 +43,6 @@ def generate_python_code(
         符合《采集脚本编写规范》的 Python 源码字符串
     """
     lines: List[str] = []
-    captcha_info: Optional[Dict[str, Any]] = None
     cap_platform = (platform or "platform").capitalize()
     # 登录组件类名用 component_type 避免重复前缀（如 MiaoshouLogin 而非 MiaoshouMiaoshouLogin）
     cap_name = _to_class_name(component_type if component_type == "login" else (component_name or component_type))
@@ -94,12 +93,6 @@ def generate_python_code(
         lines.append("        config = self.ctx.config or {}")
         lines.append("        # 若有弹窗在此 wait 再点击关闭")
         body_indent = "        "
-        # 登录组件含验证码步骤时：在 page.goto 之前插入恢复路径（同页继续）
-        captcha_info = _find_captcha_and_login_steps(steps)
-        if captcha_info:
-            lines.append(body_indent + "params = config.get(\"params\") or {}")
-            lines.extend(_generate_login_captcha_resume_block(body_indent, captcha_info, success_criteria))
-            lines.append("")
     elif component_type == "export":
         lines.append(f"class {cap_platform}{cap_name}(ExportComponent):")
         lines.append(f'    """{platform} export component - generated from recorder. Edit as needed."""')
@@ -162,13 +155,11 @@ def generate_python_code(
         lines.append("        config = self.ctx.config or {}")
         lines.append("        acc = self.ctx.account or {}")
         body_indent = "        "
-    if component_type != "login":
-        captcha_info = None
     lines.append("")
     # URL 导航：来源优先级 + 平台默认 fallback（组件业务逻辑，保留在组件中）
     if component_type == "login":
-        if not captcha_info:
-            lines.append(body_indent + "params = config.get(\"params\") or {}")
+        lines.append(body_indent + "params = config.get(\"params\") or {}")
+        lines.append(body_indent + "captcha_code = (params.get(\"captcha_code\") or params.get(\"otp\") or \"\").strip()")
         _defaults_repr = ", ".join(f"{repr(k)}: {repr(v)}" for k, v in PLATFORM_DEFAULT_LOGIN_URLS.items())
         lines.append(body_indent + f"_platform_defaults = {{{_defaults_repr}}}")
         lines.append(body_indent + "_target_url = (")
@@ -177,7 +168,7 @@ def generate_python_code(
         lines.append(body_indent + "    or str(config.get(\"default_login_url\") or \"\").strip()")
         lines.append(body_indent + "    or _platform_defaults.get(self.platform, \"\").strip()")
         lines.append(body_indent + ")")
-        lines.append(body_indent + "if _target_url:")
+        lines.append(body_indent + "if _target_url and not captcha_code:")
         lines.append(
             body_indent
             + "    await page.goto(_target_url, wait_until=\"domcontentloaded\", timeout=60000)"
@@ -193,10 +184,9 @@ def generate_python_code(
             lines.append(body_indent + "_form = page")
         lines.append("")
 
-    had_captcha_raise = False
     _skip_indices: set = set()
     for i, step in enumerate(steps):
-        if had_captcha_raise or i in _skip_indices:
+        if i in _skip_indices:
             continue
         action = (step.get("action") or "unknown").strip().lower()
         optional = step.get("optional", False)
@@ -209,8 +199,6 @@ def generate_python_code(
         step_group = (step.get("step_group") or "").strip().lower()
         scene_tags = step.get("scene_tags") or []
         is_popup_step = step_group == "popup" or "popup" in scene_tags
-        if is_popup_step and not optional:
-            optional = True
 
         if action == "click" and selector.strip() and i + 1 < len(steps):
             next_step = steps[i + 1]
@@ -238,96 +226,51 @@ def generate_python_code(
                 lines.append(step_indent + "# TODO: set target url from config or account")
         elif action == "click":
             if is_popup_step and not selector.strip():
-                # 弹窗步骤且无具体 selector 时，生成通用 wait dialog + 点击确定/关闭；8.4 不用 .first，用 expect 唯一性
-                lines.append(step_indent + 'dialog = page.locator(".ant-modal, .jx-dialog__body, [role=\'dialog\']")')
-                lines.append(step_indent + 'await expect(dialog).to_have_count(1)')
-                lines.append(step_indent + 'await dialog.wait_for(state="visible", timeout=5000)')
-                lines.append(step_indent + 'await dialog.get_by_role("button", name="确定").click(timeout=3000)')
+                lines.append(step_indent + "# 选择器为空，已跳过（请录制时补全或人工添加）")
             else:
-                # 验证码前 click 步骤且选择器为空时：用稳健的验证码输入框选择器点击聚焦
-                is_captcha_click = False
-                if not selector.strip() and captcha_info and i + 1 < len(steps):
-                    next_step = steps[i + 1]
-                    if _is_captcha_step(next_step) and (next_step.get("action") or "").strip().lower() == "fill":
-                        is_captcha_click = True
-                if is_captcha_click:
-                    cap_sel = _build_robust_captcha_selector(captcha_info)
-                    lines.append(step_indent + "# 验证码输入框聚焦（录制选择器为空，使用兜底）；8.4 唯一性检查，不用 .first")
-                    lines.append(step_indent + f"_cap_focus = page.locator({repr(cap_sel)})")
-                    lines.append(step_indent + "await expect(_cap_focus).to_have_count(1)")
-                    lines.append(step_indent + "await _cap_focus.click(timeout=5000)")
-                else:
-                    loc_var = f"_el_{i}"
-                    scope = "_form" if component_type == "login" and not is_popup_step and not is_captcha_click else "page"
-                    loc_code = _selector_to_locator_scoped(scope, selector, step_indent, loc_var, use_first=False)
-                    if loc_code:
-                        lines.extend(loc_code)
-                        lines.append(step_indent + f"await expect({loc_var}).to_be_visible()")
-                        lines.append(step_indent + f"await {loc_var}.click(timeout=10000)")
-                    elif not selector.strip():
-                        lines.append(step_indent + "# 选择器为空，已跳过（请录制时补全或人工添加）")
+                loc_var = f"_el_{i}"
+                scope = "_form" if component_type == "login" and not is_popup_step else "page"
+                loc_code = _selector_to_locator_scoped(scope, selector, step_indent, loc_var, use_first=False)
+                if loc_code:
+                    lines.extend(loc_code)
+                    lines.append(step_indent + f"await expect({loc_var}).to_be_visible()")
+                    lines.append(step_indent + f"await {loc_var}.click(timeout=10000)")
+                elif not selector.strip():
+                    lines.append(step_indent + "# 选择器为空，已跳过（请录制时补全或人工添加）")
         elif action == "fill":
             is_captcha_step = (
                 step_group in ("captcha", "captcha_graphical", "captcha_otp")
                 or "graphical_captcha" in (scene_tags or [])
                 or "otp" in (scene_tags or [])
             )
-            if is_captcha_step and captcha_info:
-                # 6.1: 先生成 captcha fill 后的非验证码步骤（如勾选框），再 raise
-                post_captcha_steps = []
-                for j in range(i + 1, len(steps)):
-                    if not _is_captcha_step(steps[j]):
-                        post_captcha_steps.append((j, steps[j]))
-                        _skip_indices.add(j)
-                if post_captcha_steps:
-                    lines.append(step_indent + "# [reorder] 以下步骤原在验证码 fill 之后录制，已前置到 raise 之前；可能需人工调整顺序")
-                    for pj, ps in post_captcha_steps:
-                        pa = (ps.get("action") or "").strip().lower()
-                        psel = ps.get("selector") or ""
-                        if not psel and ps.get("selectors"):
-                            psel = _selector_from_selectors(ps["selectors"])
-                        pval = ps.get("value") or ""
-                        if pa == "click" and psel.strip():
-                            plv = f"_el_{pj}"
-                            plc = _selector_to_locator_scoped("page", psel, step_indent, plv, use_first=False)
-                            if plc:
-                                lines.extend(plc)
-                                lines.append(step_indent + f"await {plv}.click(timeout=10000)")
-                        elif pa == "fill" and psel.strip():
-                            plv = f"_el_{pj}"
-                            plc = _selector_to_locator_scoped("page", psel, step_indent, plv, use_first=False)
-                            if plc:
-                                lines.extend(plc)
-                                lines.append(step_indent + f"await {plv}.fill({repr(pval)}, timeout=10000)")
-                        else:
-                            lines.append(step_indent + f"# TODO: post-captcha step {pj} action={pa!r}")
-                lines.append(step_indent + "# 验证码步骤：到达即暂停，等待用户回传后同页继续")
-                lines.append(step_indent + "await asyncio.sleep(1)")
-                lines.append(step_indent + "screenshot_path = None")
-                lines.append(step_indent + "screenshot_dir = config.get(\"task\", {}).get(\"screenshot_dir\")")
-                lines.append(step_indent + "if screenshot_dir:")
-                lines.append(step_indent + "    os.makedirs(screenshot_dir, exist_ok=True)")
-                lines.append(step_indent + "    screenshot_path = os.path.join(screenshot_dir, \"captcha.png\")")
-                lines.append(step_indent + "else:")
-                lines.append(step_indent + "    import tempfile")
-                lines.append(step_indent + "    fd, screenshot_path = tempfile.mkstemp(suffix=\".png\", prefix=\"captcha_\")")
-                lines.append(step_indent + "    os.close(fd)")
-                lines.append(step_indent + "await page.screenshot(path=screenshot_path, timeout=5000)")
-                lines.append(step_indent + "raise VerificationRequiredError(\"graphical_captcha\", screenshot_path)")
-                had_captcha_raise = True
-            else:
-                loc_var = f"_el_{i}"
-                scope = "_form" if component_type == "login" and not is_captcha_step else "page"
-                loc_code = _selector_to_locator_scoped(scope, selector, step_indent, loc_var, use_first=False)
-                if loc_code:
-                    lines.extend(loc_code)
-                    lines.append(step_indent + f"await expect({loc_var}).to_be_visible()")
-                    if "{{account.username}}" in value or "{{account.password}}" in value:
-                        lines.append(step_indent + "# Value from ctx.account - use acc.get(\"username\") / acc.get(\"password\")")
-                        fill_val = "acc.get(\"password\", \"\")" if "password" in value.lower() else "acc.get(\"username\", \"\")"
-                        lines.append(step_indent + f"await {loc_var}.fill({fill_val}, timeout=10000)")
-                    else:
-                        lines.append(step_indent + f"await {loc_var}.fill({repr(value)}, timeout=10000)")
+            loc_var = f"_el_{i}"
+            scope = "_form" if component_type == "login" and not is_captcha_step else "page"
+            loc_code = _selector_to_locator_scoped(scope, selector, step_indent, loc_var, use_first=False)
+            if loc_code:
+                lines.extend(loc_code)
+                lines.append(step_indent + f"await expect({loc_var}).to_be_visible()")
+                if is_captcha_step:
+                    verification_type = "otp" if (step_group == "captcha_otp" or "otp" in (scene_tags or [])) else "graphical_captcha"
+                    lines.append(step_indent + "value = captcha_code")
+                    lines.append(step_indent + "if not value:")
+                    lines.append(step_indent + "    screenshot_path = None")
+                    lines.append(step_indent + "    screenshot_dir = config.get(\"task\", {}).get(\"screenshot_dir\")")
+                    lines.append(step_indent + "    if screenshot_dir:")
+                    lines.append(step_indent + "        os.makedirs(screenshot_dir, exist_ok=True)")
+                    lines.append(step_indent + "        screenshot_path = os.path.join(screenshot_dir, \"captcha.png\")")
+                    lines.append(step_indent + "    else:")
+                    lines.append(step_indent + "        import tempfile")
+                    lines.append(step_indent + "        fd, screenshot_path = tempfile.mkstemp(suffix=\".png\", prefix=\"captcha_\")")
+                    lines.append(step_indent + "        os.close(fd)")
+                    lines.append(step_indent + "    await page.screenshot(path=screenshot_path, timeout=5000)")
+                    lines.append(step_indent + f"    raise VerificationRequiredError({repr(verification_type)}, screenshot_path)")
+                    lines.append(step_indent + f"await {loc_var}.fill(value, timeout=10000)")
+                elif "{{account.username}}" in value or "{{account.password}}" in value:
+                    lines.append(step_indent + "# Value from ctx.account - use acc.get(\"username\") / acc.get(\"password\")")
+                    fill_val = "acc.get(\"password\", \"\")" if "password" in value.lower() else "acc.get(\"username\", \"\")"
+                    lines.append(step_indent + f"await {loc_var}.fill({fill_val}, timeout=10000)")
+                else:
+                    lines.append(step_indent + f"await {loc_var}.fill({repr(value)}, timeout=10000)")
         elif action == "select":
             loc_var = f"_el_{i}"
             loc_code = _selector_to_locator_scoped("page", selector, step_indent, loc_var, use_first=False)
@@ -398,13 +341,10 @@ def generate_python_code(
 
     # 返回语句（验证码步骤 raise 后由 run() 开头 captcha_code 分支处理，此处不生成 return 避免不可达代码）
     if component_type == "login":
-        if had_captcha_raise:
-            lines.append(body_indent + "# 验证码回传后由上方的 captcha_code 分支处理登录与返回")
-        else:
-            lines.append(body_indent + "# TODO: edit success condition - check URL change or dashboard element")
-            lines.append(body_indent + "# Example: await page.wait_for_url(\"**/dashboard**\", timeout=15000)")
-            lines.append(body_indent + "# Example: await expect(page.get_by_text(\"Welcome\")).to_be_visible(timeout=10000)")
-            lines.append(body_indent + "return LoginResult(success=True, message=\"ok\")")
+        lines.append(body_indent + "# TODO: edit success condition - check URL change or dashboard element")
+        lines.append(body_indent + "# Example: await page.wait_for_url(\"**/dashboard**\", timeout=15000)")
+        lines.append(body_indent + "# Example: await expect(page.get_by_text(\"Welcome\")).to_be_visible(timeout=10000)")
+        lines.append(body_indent + "return LoginResult(success=True, message=\"ok\")")
     elif component_type == "export":
         lines.append(body_indent + "# 下载文件")
         lines.append(body_indent + "async with page.expect_download(timeout=60000) as download_info:")

@@ -128,4 +128,7 @@ async def test_save_component_creates_non_stable_version_by_default(tmp_path: Pa
     assert response["success"] is True
     assert "草稿" in response["message"]
     assert added_versions
-    assert added_versions[-1].is_stable is False
+    saved_version = added_versions[-1]
+    assert saved_version.is_stable is False
+    assert saved_version.created_at is not None
+    assert saved_version.updated_at is not None

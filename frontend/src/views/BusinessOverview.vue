@@ -165,20 +165,20 @@
           <!-- 第一行：月目标、当月总达成、今日销售额、月达成率 -->
           <div class="metrics-row">
             <div class="metric-item">
-              <div class="metric-label">月目标(w)</div>
+              <div class="metric-label">月目标</div>
               <div class="metric-value">
                 {{ formatNumber(operationalMetrics.monthly_target) }}
               </div>
             </div>
             <div class="metric-item">
-              <div class="metric-label">当月总达成(w)</div>
+              <div class="metric-label">当月总达成</div>
               <div class="metric-value">
                 {{ formatNumber(operationalMetrics.monthly_total_achieved) }}
               </div>
             </div>
             <div class="metric-item">
               <div class="metric-label">
-                {{ operationalDateLabel }}销售额(w)
+                {{ operationalDateLabel }}销售额
               </div>
               <div class="metric-value">
                 {{ formatNumber(operationalMetrics.today_sales) }}
@@ -231,13 +231,13 @@
               </div>
             </div>
             <div class="metric-item">
-              <div class="metric-label">预估毛利(w)</div>
+              <div class="metric-label">预估毛利</div>
               <div class="metric-value">
                 {{ formatNumber(operationalMetrics.estimated_gross_profit) }}
               </div>
             </div>
             <div class="metric-item">
-              <div class="metric-label">预估费用(w)</div>
+              <div class="metric-label">预估费用</div>
               <div class="metric-value">
                 {{ formatNumber(operationalMetrics.estimated_expenses) }}
               </div>
@@ -1450,7 +1450,7 @@ const comparisonTableData = ref([]);
 const targetValue = ref(0);
 const achievedValue = ref(0);
 const targetAchievementRate = ref(0);
-const targetUnit = ref("(w)");
+const targetUnit = ref("");
 
 // 根据粒度计算列标题
 const currentPeriodLabel = computed(() => {
@@ -2131,7 +2131,7 @@ const updateComparisonTable = () => {
   // 销售额
   const salesAmount = getMetric(metrics, "sales_amount");
   tableData.push({
-    metric: "销售额(w)",
+    metric: "销售额",
     today:
       salesAmount.today !== undefined && salesAmount.today !== null ? formatNumber(salesAmount.today) : "--",
     yesterday:
@@ -2224,7 +2224,7 @@ const updateComparisonTable = () => {
   // 利润
   const profit = getMetric(metrics, "profit");
   tableData.push({
-    metric: "利润(w)",
+    metric: "利润",
     today: profit.today != null ? formatNumber(profit.today) : "--",
     yesterday: profit.yesterday != null ? formatNumber(profit.yesterday) : "--",
     average: profit.average != null ? formatNumber(profit.average) : "--",
