@@ -56,6 +56,8 @@ from sqlalchemy.sql import func  # v4.12.0新增:用户权限表
 
 Base = declarative_base()
 
+JSON_COMPAT = JSON().with_variant(JSONB, "postgresql")
+
 # -------------------- Dimension Tables --------------------
 
 class DimPlatform(Base):
@@ -1099,7 +1101,7 @@ class PlatformAccount(Base):
     
     # 能力配置(JSONB)
     capabilities = Column(
-        JSONB, 
+        JSON_COMPAT,
         nullable=False,
         default={
             "orders": True,

@@ -28,6 +28,11 @@ from modules.apps.collection_center.transition_gates import (
     evaluate_export_complete,
     evaluate_login_ready,
 )
+from backend.services.collection_contracts import (
+    count_collection_targets,
+    normalize_collection_date_range,
+    normalize_domain_subtypes,
+)
 
 logger = get_logger(__name__)
 
@@ -575,10 +580,12 @@ class CollectionExecutorV2:
         # 1.0 统一约定: 规范化 account_id, 决定是否使用按账号会话/指纹
         account_id_norm, use_account_session_fingerprint = _normalize_account_id(account_id, account)
 
-        # v4.7.0: 计算总数据域数量(含子域)
-        total_domains_count = len(data_domains)
-        if sub_domains:
-            total_domains_count = len(data_domains) * len(sub_domains)
+        normalized_sub_domains = normalize_domain_subtypes(
+            data_domains=data_domains,
+            sub_domains=sub_domains,
+        )
+        normalized_date_range = normalize_collection_date_range(date_range)
+        total_domains_count = count_collection_targets(data_domains, normalized_sub_domains)
 
         logger.info(f"Task {task_id}: Starting collection for {total_domains_count} domains (debug_mode={debug_mode}, use_account_session_fingerprint={use_account_session_fingerprint})")
 
@@ -589,9 +596,9 @@ class CollectionExecutorV2:
                 platform=platform,
                 account_id=account_id_norm or account_id,
                 data_domains=data_domains,
-                date_range=date_range,
+                date_range=normalized_date_range,
                 granularity=granularity,
-                sub_domains=sub_domains,
+                sub_domains=normalized_sub_domains,
             )
         else:
             context.account_id = account_id_norm or context.account_id
@@ -606,8 +613,8 @@ class CollectionExecutorV2:
         params = {
             'account': account,
             'params': {
-                'date_from': date_range.get('start', ''),
-                'date_to': date_range.get('end', ''),
+                'date_from': normalized_date_range.get('date_from', ''),
+                'date_to': normalized_date_range.get('date_to', ''),
                 'granularity': granularity,
             },
             'task': {
@@ -759,8 +766,8 @@ class CollectionExecutorV2:
                 
                 context.current_data_domain_index = i
                 
-                # v4.7.0: 如果有子域,循环采集每个子域
-                sub_domain_list = sub_domains if sub_domains else [None]
+                # v4.7.0: 如果当前数据域有子域,循环采集每个子域
+                sub_domain_list = normalized_sub_domains.get(domain) or [None]
                 
                 for sub_domain in sub_domain_list:
                     # v4.7.0: 构造完整域名(domain:sub_domain)
@@ -1266,7 +1273,10 @@ class CollectionExecutorV2:
                 continue
             
             context.current_data_domain_index = i
-            sub_domain_list = sub_domains if sub_domains else [None]
+            sub_domain_list = normalize_domain_subtypes(
+                data_domains=data_domains,
+                sub_domains=sub_domains,
+            ).get(domain) or [None]
             
             for sub_domain in sub_domain_list:
                 full_domain = f"{domain}:{sub_domain}" if sub_domain else domain
@@ -2994,6 +3004,7 @@ class CollectionExecutorV2:
         """
         start_time = datetime.now()
         account_id_norm, use_account_session_fingerprint = _normalize_account_id(account_id, account)
+        normalized_date_range = normalize_collection_date_range(date_range)
         logger.info(f"Task {task_id}: Starting PARALLEL collection for {len(data_domains)} domains (max_parallel={max_parallel}, use_account_session_fingerprint={use_account_session_fingerprint})")
 
         context = TaskContext(
@@ -3049,8 +3060,8 @@ class CollectionExecutorV2:
         params = {
             'account': account,
             'params': {
-                'date_from': date_range.get('start', ''),
-                'date_to': date_range.get('end', ''),
+                'date_from': normalized_date_range.get('date_from', ''),
+                'date_to': normalized_date_range.get('date_to', ''),
                 'granularity': granularity,
             },
             'task': {
@@ -3268,8 +3279,8 @@ class CollectionExecutorV2:
             params = {
                 'account': account,
                 'params': {
-                    'date_from': date_range.get('start', ''),
-                    'date_to': date_range.get('end', ''),
+                    'date_from': normalize_collection_date_range(date_range).get('date_from', ''),
+                    'date_to': normalize_collection_date_range(date_range).get('date_to', ''),
                     'granularity': granularity,
                     'data_domain': data_domain,
                 },

@@ -19,6 +19,7 @@ from backend.schemas.collection import (
     CollectionAccountResponse,
 )
 from backend.schemas.common import SuccessResponse
+from backend.services.collection_contracts import normalize_domain_subtypes
 
 logger = get_logger(__name__)
 
@@ -101,7 +102,10 @@ async def create_config(
         platform=config.platform,
         account_ids=config.account_ids,
         data_domains=config.data_domains,
-        sub_domains=config.sub_domains,
+        sub_domains=normalize_domain_subtypes(
+            data_domains=config.data_domains,
+            sub_domains=config.sub_domains,
+        ) or None,
         granularity=config.granularity,
         date_range_type=config.date_range_type,
         custom_date_start=config.custom_date_start,
@@ -156,6 +160,12 @@ async def update_config(
         raise HTTPException(status_code=404, detail="配置不存在")
 
     update_dict = update_data.model_dump(exclude_unset=True)
+    if "sub_domains" in update_dict:
+        effective_domains = update_dict.get("data_domains") or config.data_domains or []
+        update_dict["sub_domains"] = normalize_domain_subtypes(
+            data_domains=effective_domains,
+            sub_domains=update_dict.get("sub_domains"),
+        ) or None
     for key, value in update_dict.items():
         if value is not None:
             setattr(config, key, value)
@@ -236,6 +246,8 @@ async def list_accounts(
                     platform=account.get("platform", "unknown"),
                     shop_id=account.get("shop_region"),
                     status="active" if account.get("enabled", False) else "inactive",
+                    shop_type=account.get("shop_type"),
+                    capabilities=account.get("capabilities") or {},
                 )
             )
 

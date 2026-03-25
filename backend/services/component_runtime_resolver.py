@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.collection_contracts import iter_domain_targets, normalize_domain_subtypes
 from backend.services.component_name_utils import build_component_name
 from backend.services.component_version_service import ComponentVersionService
 
@@ -107,25 +108,29 @@ class ComponentRuntimeResolver:
         *,
         platform: str,
         data_domains: list[str],
-        sub_domains: Optional[list[str]] = None,
+        sub_domains: Optional[dict[str, list[str]] | list[str]] = None,
+        domain_subtypes: Optional[dict[str, list[str]]] = None,
     ) -> dict[str, Any]:
         login_manifest = await self.resolve_login_component(platform)
         exports: list[RuntimeComponentManifest] = []
         exports_by_domain: dict[str, RuntimeComponentManifest] = {}
 
-        for data_domain in data_domains:
-            effective_sub_domains = sub_domains or [None]
-            for sub_domain in effective_sub_domains:
-                export_manifest = await self.resolve_export_component(
-                    platform=platform,
-                    data_domain=data_domain,
-                    sub_domain=sub_domain,
-                )
-                domain_key = (
-                    f"{data_domain}:{sub_domain}" if sub_domain else data_domain
-                )
-                exports.append(export_manifest)
-                exports_by_domain[domain_key] = export_manifest
+        normalized_subtypes = normalize_domain_subtypes(
+            data_domains=data_domains,
+            domain_subtypes=domain_subtypes,
+            sub_domains=sub_domains,
+        )
+        for data_domain, sub_domain, domain_key in iter_domain_targets(
+            data_domains,
+            normalized_subtypes,
+        ):
+            export_manifest = await self.resolve_export_component(
+                platform=platform,
+                data_domain=data_domain,
+                sub_domain=sub_domain,
+            )
+            exports.append(export_manifest)
+            exports_by_domain[domain_key] = export_manifest
 
         return {
             "login": login_manifest,

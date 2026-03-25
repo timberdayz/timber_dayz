@@ -20,6 +20,12 @@ from backend.services.component_runtime_resolver import (
     ComponentRuntimeResolver,
     ComponentRuntimeResolverError,
 )
+from backend.services.collection_contracts import (
+    count_collection_targets,
+    normalize_collection_date_range,
+    normalize_domain_subtypes,
+)
+from backend.services.task_service import TaskService
 
 logger = get_logger(__name__)
 
@@ -53,6 +59,23 @@ async def resolve_runtime_manifests_for_config(
         data_domains=config.data_domains or [],
         sub_domains=config.sub_domains,
     )
+
+
+def build_scheduled_task_scope(
+    *,
+    config: CollectionConfig,
+    account_info: Dict[str, Any],
+) -> tuple[List[str], Dict[str, List[str]], int]:
+    task_service = TaskService(db=None)
+    filtered_domains, _ = task_service.filter_domains_by_account_capability(
+        account_info, list(config.data_domains or [])
+    )
+    normalized_sub_domains = normalize_domain_subtypes(
+        data_domains=filtered_domains,
+        sub_domains=config.sub_domains,
+    )
+    total_targets = count_collection_targets(filtered_domains, normalized_sub_domains)
+    return filtered_domains, normalized_sub_domains, total_targets
 
 
 class CollectionScheduler:
@@ -452,22 +475,42 @@ class CollectionScheduler:
                     logger.error(f"从数据库加载账号失败: {e}")
                     return
             
-            # v4.7.0: 计算总域数
-            total_domains_count = len(config.data_domains)
-            if config.sub_domains:
-                total_domains_count = len(config.data_domains) * len(config.sub_domains)
-
-            try:
-                runtime_manifests = await resolve_runtime_manifests_for_config(db, config)
-            except ComponentRuntimeResolverError as e:
-                logger.error(
-                    "Scheduled config %s blocked by stable runtime preflight: %s",
-                    config_id,
-                    e,
-                )
-                return
-            
             for account_id in account_ids:
+                try:
+                    from backend.services.account_loader_service import get_account_loader_service
+
+                    account_loader = get_account_loader_service()
+                    account_info = await account_loader.load_account_async(account_id, db)
+                except Exception as e:
+                    logger.error(f"Failed to load scheduled account {account_id}: {e}")
+                    continue
+
+                if not account_info:
+                    logger.warning(f"Scheduled account {account_id} not found or disabled")
+                    continue
+
+                filtered_domains, normalized_sub_domains, total_domains_count = build_scheduled_task_scope(
+                    config=config,
+                    account_info=account_info,
+                )
+                if not filtered_domains:
+                    logger.info(f"Scheduled account {account_id} has no supported domains for config {config_id}, skipping")
+                    continue
+
+                try:
+                    runtime_manifests = await ComponentRuntimeResolver.from_async_session(db).resolve_task_manifests(
+                        platform=config.platform,
+                        data_domains=filtered_domains,
+                        sub_domains=normalized_sub_domains,
+                    )
+                except ComponentRuntimeResolverError as e:
+                    logger.error(
+                        "Scheduled account %s blocked by stable runtime preflight: %s",
+                        account_id,
+                        e,
+                    )
+                    continue
+
                 # 检查账号冲突
                 result = await db.execute(
                     select(CollectionTask).where(
@@ -505,6 +548,8 @@ class CollectionScheduler:
                         start = today - timedelta(days=30)
                         date_range = {'start_date': start.isoformat(), 'end_date': today.isoformat()}
                 
+                normalized_date_range = normalize_collection_date_range(date_range)
+
                 # v4.7.0: 创建任务(新字段)
                 task_uuid = str(uuid.uuid4())
                 task = CollectionTask(
@@ -512,10 +557,10 @@ class CollectionScheduler:
                     config_id=config_id,
                     platform=config.platform,
                     account=account_id,
-                    data_domains=config.data_domains,
-                    sub_domains=config.sub_domains,  # v4.7.0: 数组
+                    data_domains=filtered_domains,
+                    sub_domains=normalized_sub_domains or None,
                     granularity=config.granularity,
-                    date_range=date_range,  # v4.7.0: JSON对象
+                    date_range=normalized_date_range,
                     status='pending',  # v4.7.0: 先pending,后台任务启动时改为running
                     progress=0,
                     trigger_type='scheduled',
@@ -546,9 +591,9 @@ class CollectionScheduler:
                             task_id=task_uuid,
                             platform=config.platform,
                             account_id=account_id,
-                            data_domains=config.data_domains,
-                            sub_domains=config.sub_domains,
-                            date_range=date_range,
+                            data_domains=filtered_domains,
+                            sub_domains=normalized_sub_domains,
+                            date_range=normalized_date_range,
                             granularity=config.granularity,
                             debug_mode=False,
                             parallel_mode=False,

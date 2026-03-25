@@ -18,7 +18,7 @@ class CollectionConfigCreate(BaseModel):
     platform: str = Field(..., pattern="^(shopee|tiktok|miaoshou)$", description="平台")
     account_ids: List[str] = Field(..., description="账号ID列表(空数组表示所有活跃账号)")
     data_domains: List[str] = Field(..., min_length=1, description="数据域列表")
-    sub_domains: Optional[List[str]] = Field(None, description="子域数组(v4.7.0)")
+    sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(None, description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组")
     granularity: str = Field("daily", pattern="^(daily|weekly|monthly)$", description="粒度")
     date_range_type: str = Field("yesterday", description="日期范围类型")
     custom_date_start: Optional[date] = Field(None, description="自定义开始日期")
@@ -33,7 +33,7 @@ class CollectionConfigUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     account_ids: Optional[List[str]] = None
     data_domains: Optional[List[str]] = None
-    sub_domains: Optional[List[str]] = Field(None, description="子域数组(v4.7.0)")
+    sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(None, description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组")
     granularity: Optional[str] = None
     date_range_type: Optional[str] = None
     custom_date_start: Optional[date] = None
@@ -51,7 +51,7 @@ class CollectionConfigResponse(BaseModel):
     platform: str
     account_ids: List[str]
     data_domains: List[str]
-    sub_domains: Optional[List[str]] = Field(None, description="子域数组(v4.7.0)")
+    sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(None, description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组")
     granularity: str
     date_range_type: str
     custom_date_start: Optional[date]
@@ -74,7 +74,7 @@ class TaskCreateRequest(BaseModel):
     platform: str = Field(..., pattern="^(shopee|tiktok|miaoshou)$", description="平台")
     account_id: str = Field(..., description="账号ID")
     data_domains: List[str] = Field(..., min_length=1, description="数据域列表")
-    sub_domains: Optional[List[str]] = Field(None, description="子域数组(v4.7.0)")
+    sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(None, description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组")
     granularity: str = Field("daily", pattern="^(daily|weekly|monthly)$", description="粒度")
     date_range: Dict[str, str] = Field(..., description="日期范围 {'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD'}")
     config_id: Optional[int] = Field(None, description="关联配置ID")
@@ -101,7 +101,7 @@ class TaskResponse(BaseModel):
     files_collected: int
     trigger_type: str
     data_domains: Optional[List[str]]
-    sub_domains: Optional[List[str]] = Field(None, description="子域数组(v4.7.0)")
+    sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(None, description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组")
     granularity: Optional[str]
     date_range: Optional[Dict[str, str]]
     # v4.7.0 任务粒度优化字段
@@ -144,6 +144,8 @@ class CollectionAccountResponse(BaseModel):
     platform: str
     shop_id: Optional[str] = None
     status: str = "active"
+    shop_type: Optional[str] = None
+    capabilities: Optional[Dict[str, bool]] = None
 
 
 # ==================== 历史记录与统计 ====================
@@ -257,4 +259,3 @@ class HealthCheckResponse(BaseModel):
     browser_pool: BrowserPoolStatus
     database: str
     scheduler: str
-

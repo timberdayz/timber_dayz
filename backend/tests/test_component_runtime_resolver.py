@@ -243,3 +243,58 @@ async def test_scheduler_runtime_manifest_helper_uses_stable_resolver(monkeypatc
     manifests = await resolve_runtime_manifests_for_config(db=object(), config=config)
 
     assert manifests == expected
+
+
+@pytest.mark.asyncio
+async def test_resolve_task_manifests_supports_domain_scoped_subtypes(component_version_session, tmp_path: Path, monkeypatch):
+    from backend.services.component_runtime_resolver import ComponentRuntimeResolver
+
+    monkeypatch.setattr(
+        "backend.services.component_name_utils.DATA_DOMAIN_SUB_TYPES",
+        {
+            "services": ["agent", "ai_assistant"],
+            "products": ["basic"],
+        },
+    )
+
+    relative_files = {
+        "shopee/login": "modules/platforms/shopee/components/login_v1_0_0.py",
+        "shopee/orders_export": "modules/platforms/shopee/components/orders_export_v1_0_0.py",
+        "shopee/services_agent_export": "modules/platforms/shopee/components/services_agent_export_v1_0_0.py",
+        "shopee/products_basic_export": "modules/platforms/shopee/components/products_basic_export_v1_0_0.py",
+    }
+
+    for relative_path in relative_files.values():
+        target_file = tmp_path / relative_path
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        target_file.write_text("class Dummy:\n    pass\n", encoding="utf-8")
+
+    component_version_session.add_all(
+        [
+            ComponentVersion(
+                component_name=component_name,
+                version="1.0.0",
+                file_path=relative_path,
+                is_stable=True,
+                is_active=True,
+            )
+            for component_name, relative_path in relative_files.items()
+        ]
+    )
+    await component_version_session.commit()
+
+    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    manifests = await resolver.resolve_task_manifests(
+        platform="shopee",
+        data_domains=["orders", "services", "products"],
+        domain_subtypes={
+            "services": ["agent"],
+            "products": ["basic"],
+        },
+    )
+
+    assert sorted(manifests["exports_by_domain"].keys()) == [
+        "orders",
+        "products:basic",
+        "services:agent",
+    ]

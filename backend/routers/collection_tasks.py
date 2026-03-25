@@ -28,6 +28,11 @@ from backend.schemas.collection import (
     DailyStats,
 )
 from backend.schemas.common import SuccessResponse
+from backend.services.collection_contracts import (
+    count_collection_targets,
+    normalize_collection_date_range,
+    normalize_domain_subtypes,
+)
 
 logger = get_logger(__name__)
 
@@ -91,12 +96,18 @@ async def create_task(
             f"Filtered out unsupported domains for {request.account_id}: {unsupported_domains}"
         )
 
+    normalized_sub_domains = normalize_domain_subtypes(
+        data_domains=filtered_domains,
+        sub_domains=request.sub_domains,
+    )
+    normalized_date_range = normalize_collection_date_range(request.date_range)
+
     try:
         resolver = ComponentRuntimeResolver.from_async_session(db)
         runtime_manifests = await resolver.resolve_task_manifests(
             platform=request.platform,
             data_domains=filtered_domains,
-            sub_domains=request.sub_domains,
+            sub_domains=normalized_sub_domains,
         )
     except ComponentRuntimeResolverError as e:
         raise HTTPException(
@@ -104,9 +115,7 @@ async def create_task(
             detail=f"Stable component not ready: {e}",
         ) from e
 
-    total_domains_count = len(filtered_domains)
-    if request.sub_domains:
-        total_domains_count = len(filtered_domains) * len(request.sub_domains)
+    total_domains_count = count_collection_targets(filtered_domains, normalized_sub_domains)
 
     task = CollectionTask(
         task_id=task_uuid,
@@ -116,9 +125,9 @@ async def create_task(
         config_id=request.config_id,
         trigger_type="manual",
         data_domains=filtered_domains,
-        sub_domains=request.sub_domains,
+        sub_domains=normalized_sub_domains or None,
         granularity=request.granularity,
-        date_range=request.date_range,
+        date_range=normalized_date_range,
         total_domains=total_domains_count,
         completed_domains=[],
         failed_domains=[],
@@ -153,8 +162,8 @@ async def create_task(
             platform=request.platform,
             account_id=request.account_id,
             data_domains=filtered_domains,
-            sub_domains=request.sub_domains,
-            date_range=request.date_range,
+            sub_domains=normalized_sub_domains,
+            date_range=normalized_date_range,
             granularity=request.granularity,
             debug_mode=request.debug_mode,
             parallel_mode=request.parallel_mode,

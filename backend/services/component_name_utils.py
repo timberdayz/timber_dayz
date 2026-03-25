@@ -34,7 +34,7 @@ def build_component_name(
         if not data_domain:
             raise ValueError("export component requires data_domain")
         data_domain = data_domain.strip()
-        if sub_domain and data_domain in DATA_DOMAIN_SUB_TYPES:
+        if sub_domain:
             sub = sub_domain.strip()
             return f"{platform}/{data_domain}_{sub}_export"
         return f"{platform}/{data_domain}_export"

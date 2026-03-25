@@ -18,8 +18,15 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.dialects.postgresql import JSONB
 
 from modules.core.db import Base
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
+    return "JSON"
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -118,6 +125,26 @@ async def async_client(
 
     async def override_get_async_db():
         yield sqlite_session
+
+    app.dependency_overrides[get_async_db] = override_get_async_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        yield client
+
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def pg_async_client(
+    pg_session: AsyncSession,
+) -> AsyncGenerator[AsyncClient, None]:
+    """FastAPI AsyncClient backed by PostgreSQL testcontainer session."""
+    from backend.main import app
+    from backend.models.database import get_async_db
+
+    async def override_get_async_db():
+        yield pg_session
 
     app.dependency_overrides[get_async_db] = override_get_async_db
 
