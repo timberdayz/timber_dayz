@@ -1,40 +1,46 @@
 # 本机采集环境测试（Docker）
 
-**变更**: add-local-cloud-deployment-role（方案 A）
+> Historical note：旧版本机采集环境文档曾附带 Metabase 组合方式。
+> 当前本机采集环境应以 `collection` / `backend-full` 路径为准，
+> 不再把 `--with-metabase` 或 `docker-compose.metabase*.yml` 当成默认步骤。
 
 ## 用途
 
-在开发环境下，使用与正式采集环境一致的 Docker 化架构启动项目，便于：
+在开发环境下，用与正式采集环境一致的 Docker 化方式验证：
 
-- 验证采集环境的 Docker 化是否正常
-- 减少未来部署到 Linux 服务器时因环境差异导致的问题
+- collection/full image 能否正常启动
+- 采集与同步链路是否可用
+- 本机与云端的角色边界是否符合当前部署设计
 
 ## 启动命令
 
 ```bash
-python run.py --use-docker --with-metabase --collection
+python run.py --use-docker --collection
 ```
 
-- **效果**：单后端、端口 8001，backend 使用 `Dockerfile.collection`（带 Playwright），具备采集与同步能力；前端、Postgres、Redis、Celery、Metabase 一并启动。
-- **等价 Compose 命令**（排查时可手动执行）：
-  ```bash
-  docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml -f docker-compose.metabase.yml -f docker-compose.metabase.dev.yml --profile dev-full up -d
-  ```
+等价 Compose 命令：
+
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml --profile dev-full up -d
+```
 
 ## 停止与日志
 
-- **停止**（采集模式）：
-  ```bash
-  docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml -f docker-compose.metabase.yml -f docker-compose.metabase.dev.yml --profile dev-full down
-  ```
-- **查看后端日志**：
-  ```bash
-  docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml logs -f backend
-  ```
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml --profile dev-full down
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml logs -f backend
+```
 
-## 说明
+## 当前说明
 
-- 本机采集开发使用 **Dockerfile.collection** 通过 **docker-compose.collection-dev.yml** 覆盖 backend 服务；CI 双镜像时 full 镜像由 Dockerfile.collection 构建。
-- 环境变量 `ENABLE_COLLECTION=true` 由 collection-dev 覆盖注入，采集调度器会启动；云端部署时使用 `ENABLE_COLLECTION=false` 或 `DEPLOYMENT_ROLE=cloud` 则不启动调度器。
+- 本机采集开发使用 `Dockerfile.collection`
+- `docker-compose.collection-dev.yml` 覆盖 backend 服务
+- `ENABLE_COLLECTION=true` 用于本机采集环境
+- 云端环境应使用 `ENABLE_COLLECTION=false` 或 `DEPLOYMENT_ROLE=cloud`
 
-**参见**：生产侧「本地与云端部署角色」、双镜像拉取策略、部署与日常运作流程及核对清单，见 [LOCAL_AND_CLOUD_DEPLOYMENT_ROLES.md](./LOCAL_AND_CLOUD_DEPLOYMENT_ROLES.md)。
+## 历史资料
+
+如需查看旧版本机 Metabase 组合方式，请查阅：
+
+- `archive/metabase/README.md`
+- `docs/development/METABASE_LEGACY_ASSET_STATUS.md`

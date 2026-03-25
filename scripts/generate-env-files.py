@@ -116,6 +116,10 @@ ENV_OVERRIDES = {
     },
 }
 
+LEGACY_TEMPLATE_KEYS = {
+    "VITE_METABASE_URL",
+}
+
 
 def parse_template(template_path: Path) -> List[Tuple[str, str, str]]:
     """
@@ -244,13 +248,21 @@ def generate_env_file(
     current_section = ""
     
     for var_name, var_value, comment in variables:
+        if var_name.startswith("METABASE_") or var_name in LEGACY_TEMPLATE_KEYS:
+            continue
         # 应用环境特定覆盖
         if var_name in overrides:
             var_value = overrides[var_name]
         
         # 添加注释
         if comment:
-            lines.append(comment)
+            filtered_comment_lines = [
+                line
+                for line in comment.splitlines()
+                if "metabase" not in line.lower()
+            ]
+            if filtered_comment_lines:
+                lines.append("\n".join(filtered_comment_lines))
         
         # 添加变量行
         lines.append(f"{var_name}={var_value}")
@@ -326,4 +338,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

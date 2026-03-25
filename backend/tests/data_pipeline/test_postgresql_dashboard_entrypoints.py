@@ -2,10 +2,18 @@ import importlib
 from pathlib import Path
 
 
-def test_environment_examples_no_longer_document_metabase_proxy_flag():
-    for path_str in (".env.example", "env.development.example", "env.production.example"):
+def test_environment_examples_no_longer_emit_active_metabase_variables():
+    for path_str in (
+        ".env.example",
+        "env.development.example",
+        "env.production.example",
+        "env.docker.example",
+    ):
         text = Path(path_str).read_text(encoding="utf-8")
         assert "ENABLE_METABASE_PROXY=" not in text
+        assert "METABASE_URL=" not in text
+        assert "VITE_METABASE_URL=" not in text
+        assert "METABASE_DB_HOST=" not in text
 
 
 def test_readme_documents_postgresql_dashboard_without_runtime_metabase_fallback():
