@@ -98,16 +98,6 @@ class AccountStats(BaseModel):
     platforms: int = Field(description="支持平台数")
     platform_breakdown: dict = Field(description="各平台账号数")
 
-
-class AccountImportResponse(BaseModel):
-    """账号导入响应(从local_accounts.py导入)"""
-    message: str = Field(description="导入消息")
-    imported_count: int = Field(description="成功导入数量")
-    skipped_count: int = Field(description="跳过数量")
-    failed_count: int = Field(description="失败数量")
-    details: list = Field(default_factory=list, description="详细信息")
-
-
 class BatchCreateRequest(BaseModel):
     """批量创建请求"""
     parent_account: str = Field(..., description="主账号")
@@ -115,4 +105,3 @@ class BatchCreateRequest(BaseModel):
     username: str = Field(..., description="用户名")
     password: str = Field(..., description="密码")
     shops: list = Field(..., description="店铺列表")
-

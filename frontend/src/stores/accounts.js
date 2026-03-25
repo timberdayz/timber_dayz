@@ -1,12 +1,7 @@
-/**
- * 账号管理Store (v4.7.0)
- * 
- * 使用Pinia管理账号状态
- */
-
 import { defineStore } from 'pinia'
-import accountsApi from '@/api/accounts'
 import { ElMessage } from 'element-plus'
+
+import accountsApi from '@/api/accounts'
 
 export const useAccountsStore = defineStore('accounts', {
   state: () => ({
@@ -16,56 +11,39 @@ export const useAccountsStore = defineStore('accounts', {
       active: 0,
       inactive: 0,
       platforms: 0,
-      platform_breakdown: {}
+      platform_breakdown: {},
     },
     loading: false,
     filters: {
       platform: null,
       enabled: null,
       shop_type: null,
-      search: ''
-    }
+      search: '',
+    },
   }),
 
   getters: {
-    /**
-     * 获取平台列表
-     */
     platformList: (state) => {
-      const platforms = new Set(state.accounts.map(a => a.platform))
+      const platforms = new Set(state.accounts.map((account) => account.platform))
       return Array.from(platforms).sort()
     },
 
-    /**
-     * 根据平台分组的账号
-     */
     accountsByPlatform: (state) => {
       const groups = {}
-      state.accounts.forEach(account => {
-        const platform = account.platform
-        if (!groups[platform]) {
-          groups[platform] = []
+      state.accounts.forEach((account) => {
+        if (!groups[account.platform]) {
+          groups[account.platform] = []
         }
-        groups[platform].push(account)
+        groups[account.platform].push(account)
       })
       return groups
     },
 
-    /**
-     * 活跃账号列表
-     */
-    activeAccounts: (state) => {
-      return state.accounts.filter(a => a.enabled)
-    }
+    activeAccounts: (state) => state.accounts.filter((account) => account.enabled),
   },
 
   actions: {
-    /**
-     * 加载账号列表
-     * ⭐ v4.19.0修复：添加超时机制和后台刷新支持，避免数据同步期间阻塞
-     */
     async loadAccounts(params = {}, showLoading = true) {
-      // 防重复加载
       if (this.loading && showLoading) {
         return
       }
@@ -76,15 +54,13 @@ export const useAccountsStore = defineStore('accounts', {
 
       try {
         const mergedParams = { ...this.filters, ...params }
-        
-        // ⭐ v4.19.0新增：添加超时机制，避免长时间阻塞
-        const API_TIMEOUT = 10000 // 10秒超时
-        
+        const apiTimeout = 10000
+
         this.accounts = await Promise.race([
           accountsApi.listAccounts(mergedParams),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('加载账号列表超时')), API_TIMEOUT)
-          )
+            setTimeout(() => reject(new Error('加载账号列表超时')), apiTimeout),
+          ),
         ])
       } catch (error) {
         if (error.message !== '加载账号列表超时') {
@@ -103,20 +79,14 @@ export const useAccountsStore = defineStore('accounts', {
       }
     },
 
-    /**
-     * 加载统计数据
-     * ⭐ v4.19.0修复：添加超时机制，避免数据同步期间阻塞
-     */
     async loadStats(showLoading = false) {
       try {
-        // ⭐ v4.19.0新增：添加超时机制
-        const API_TIMEOUT = 10000 // 10秒超时
-        
+        const apiTimeout = 10000
         this.stats = await Promise.race([
           accountsApi.getStats(),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('加载统计数据超时')), API_TIMEOUT)
-          )
+            setTimeout(() => reject(new Error('加载统计数据超时')), apiTimeout),
+          ),
         ])
       } catch (error) {
         if (error.message !== '加载统计数据超时') {
@@ -127,9 +97,6 @@ export const useAccountsStore = defineStore('accounts', {
       }
     },
 
-    /**
-     * 创建账号
-     */
     async createAccount(data) {
       this.loading = true
       try {
@@ -147,14 +114,11 @@ export const useAccountsStore = defineStore('accounts', {
       }
     },
 
-    /**
-     * 更新账号
-     */
     async updateAccount(accountId, data) {
       this.loading = true
       try {
         const updatedAccount = await accountsApi.updateAccount(accountId, data)
-        const index = this.accounts.findIndex(a => a.account_id === accountId)
+        const index = this.accounts.findIndex((account) => account.account_id === accountId)
         if (index !== -1) {
           this.accounts[index] = updatedAccount
         }
@@ -170,14 +134,11 @@ export const useAccountsStore = defineStore('accounts', {
       }
     },
 
-    /**
-     * 删除账号
-     */
     async deleteAccount(accountId) {
       this.loading = true
       try {
         await accountsApi.deleteAccount(accountId)
-        this.accounts = this.accounts.filter(a => a.account_id !== accountId)
+        this.accounts = this.accounts.filter((account) => account.account_id !== accountId)
         await this.loadStats()
         ElMessage.success('账号删除成功')
       } catch (error) {
@@ -189,9 +150,6 @@ export const useAccountsStore = defineStore('accounts', {
       }
     },
 
-    /**
-     * 批量创建账号
-     */
     async batchCreate(batchData) {
       this.loading = true
       try {
@@ -209,43 +167,17 @@ export const useAccountsStore = defineStore('accounts', {
       }
     },
 
-    /**
-     * 从local_accounts.py导入
-     */
-    async importFromLocal() {
-      this.loading = true
-      try {
-        const result = await accountsApi.importFromLocal()
-        await this.loadAccounts()
-        await this.loadStats()
-        ElMessage.success(result.message)
-        return result
-      } catch (error) {
-        console.error('导入失败:', error)
-        ElMessage.error(error.response?.data?.detail || '导入失败')
-        throw error
-      } finally {
-        this.loading = false
-      }
-    },
-
-    /**
-     * 更新筛选条件
-     */
     setFilters(filters) {
       this.filters = { ...this.filters, ...filters }
     },
 
-    /**
-     * 清空筛选条件
-     */
     clearFilters() {
       this.filters = {
         platform: null,
         enabled: null,
         shop_type: null,
-        search: ''
+        search: '',
       }
-    }
-  }
+    },
+  },
 })
