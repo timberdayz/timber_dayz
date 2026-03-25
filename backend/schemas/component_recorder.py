@@ -80,3 +80,39 @@ class GeneratePythonRequest(BaseModel):
     sub_domain: Optional[str] = None
     steps: List[Dict[str, Any]]
     success_criteria: Optional[Dict[str, Any]] = None
+
+
+class RecorderValidateSegmentRequest(BaseModel):
+    """录制页校验当前段请求。"""
+
+    platform: str
+    component_type: str
+    account_id: str
+    data_domain: Optional[str] = None
+    sub_domain: Optional[str] = None
+    expected_signal: str = "auto"
+    step_start: int
+    step_end: int
+    steps: List[Dict[str, Any]]
+
+
+class RecorderValidateSegmentData(BaseModel):
+    """录制页片段校验结果。"""
+
+    passed: bool
+    resolved_signal: Optional[str] = None
+    step_start: int
+    step_end: int
+    validated_steps: int = 0
+    current_url: Optional[str] = None
+    failure_step_id: Optional[int] = None
+    failure_phase: Optional[str] = None
+    error_message: Optional[str] = None
+    screenshot_url: Optional[str] = None
+    suggestions: List[str] = []
+
+
+class RecorderValidateSegmentResponse(BaseModel):
+    success: bool
+    data: Optional[RecorderValidateSegmentData] = None
+    error_message: Optional[str] = None

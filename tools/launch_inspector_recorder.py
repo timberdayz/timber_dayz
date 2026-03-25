@@ -784,6 +784,7 @@ class InspectorRecorder:
                     'url': frame.url,
                     'comment': f'Navigate to {frame.url[:50]}...' if len(frame.url) > 50 else f'Navigate to {frame.url}'
                 })
+                self._persist_live_steps()
                 logger.info(f"[Event] Navigation: {frame.url[:80]}")
         
         page.on('framenavigated', on_navigation)
@@ -817,6 +818,7 @@ class InspectorRecorder:
                 'message': dialog.message,
                 'comment': f'Handle {dialog.type} dialog'
             })
+            self._persist_live_steps()
             await dialog.dismiss()
         
         page.on('dialog', on_dialog)
@@ -831,6 +833,7 @@ class InspectorRecorder:
                 'filename': download.suggested_filename,
                 'comment': f'Download file: {download.suggested_filename}'
             })
+            self._persist_live_steps()
         
         page.on('download', on_download)
         
@@ -1143,6 +1146,7 @@ class InspectorRecorder:
                 'comment': f'Open {self.component_type}'
             }
             self._last_click_selector = primary_selector
+            self._persist_live_steps()
             logger.info(f"[Discovery] Open action recorded: {description[:50]}")
             return
         
@@ -1163,6 +1167,7 @@ class InspectorRecorder:
             'selectors': selectors,
         }
         self.available_options.append(option)
+        self._persist_live_steps()
         
         logger.info(f"[Discovery] New option discovered: {description} (key: {option_key})")
         print(f"[Discovery] Option {len(self.available_options)}: {description}")
@@ -1272,7 +1277,19 @@ class InspectorRecorder:
             step['value'] = value
         
         self.recorded_steps.append(step)
+        self._persist_live_steps()
         logger.info(f"[Event] {action.capitalize()}: {description[:50]}")
+
+    def _persist_live_steps(self):
+        """Persist the latest recorder payload so the UI can poll during recording."""
+        if not self.steps_file:
+            return
+
+        steps_data = self._build_discovery_output() if self.discovery_mode else self._build_steps_output()
+        steps_path = Path(self.steps_file)
+        steps_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(steps_path, 'w', encoding='utf-8') as f:
+            json.dump(steps_data, f, ensure_ascii=False, indent=2)
     
     def _save_steps(self):
         """

@@ -611,6 +611,29 @@
             >
               批量删除
             </el-button>
+            <el-divider direction="vertical" />
+            <el-select
+              v-model="segmentValidationSignal"
+              size="small"
+              style="width: 180px"
+              :disabled="selectedStepIndices.length === 0"
+            >
+              <el-option label="自动判断信号" value="auto" />
+              <el-option label="login_ready" value="login_ready" />
+              <el-option label="navigation_ready" value="navigation_ready" />
+              <el-option label="date_picker_ready" value="date_picker_ready" />
+              <el-option label="filters_ready" value="filters_ready" />
+              <el-option label="export_complete" value="export_complete" />
+            </el-select>
+            <el-button
+              size="small"
+              type="primary"
+              :loading="segmentValidationLoading"
+              :disabled="selectedStepIndices.length === 0"
+              @click="validateSelectedSegment"
+            >
+              校验当前段
+            </el-button>
             <span
               v-if="selectedStepIndices.length > 0"
               style="margin-left: 12px; color: #909399; font-size: 12px"
@@ -856,6 +879,42 @@
               </div>
             </template>
           </draggable>
+
+          <el-alert
+            v-if="segmentValidationResult"
+            :title="
+              segmentValidationResult.passed
+                ? '当前段校验通过'
+                : '当前段校验未通过'
+            "
+            :type="segmentValidationResult.passed ? 'success' : 'error'"
+            :closable="false"
+            show-icon
+            style="margin-top: 16px"
+          >
+            <p>
+              信号: {{ segmentValidationResult.resolved_signal || "未解析" }}
+            </p>
+            <p>
+              范围: 步骤 {{ segmentValidationResult.step_start }} -
+              {{ segmentValidationResult.step_end }}
+            </p>
+            <p v-if="segmentValidationResult.current_url">
+              URL: {{ segmentValidationResult.current_url }}
+            </p>
+            <p v-if="segmentValidationResult.failure_step_id">
+              失败步骤: {{ segmentValidationResult.failure_step_id }}
+            </p>
+            <p v-if="segmentValidationResult.error_message">
+              错误: {{ segmentValidationResult.error_message }}
+            </p>
+            <p
+              v-for="(suggestion, idx) in segmentValidationResult.suggestions || []"
+              :key="`segment-suggestion-${idx}`"
+            >
+              建议: {{ suggestion }}
+            </p>
+          </el-alert>
         </div>
 
         <!-- 空状态 -->
@@ -1013,6 +1072,9 @@ const testConfig = ref({
   testUrl: "", // 测试页面URL
   testDataDomain: "", // 测试数据域
 });
+const segmentValidationSignal = ref("auto");
+const segmentValidationLoading = ref(false);
+const segmentValidationResult = ref(null);
 
 // 计算属性
 const canStartRecording = computed(() => {
@@ -1069,6 +1131,29 @@ const updateSelectedIndices = () => {
   const allSelected = recordedSteps.value.every((step) => step.selected);
   const noneSelected = recordedSteps.value.every((step) => !step.selected);
   selectAllSteps.value = allSelected;
+};
+
+const getSelectedSegmentPayload = () => {
+  const indices = [...selectedStepIndices.value].sort((a, b) => a - b);
+  if (!indices.length) return null;
+
+  for (let i = 1; i < indices.length; i += 1) {
+    if (indices[i] !== indices[i - 1] + 1) {
+      return { error: "只能校验连续步骤，请重新选择连续区间。" };
+    }
+  }
+
+  const stepStart = indices[0] + 1;
+  const stepEnd = indices[indices.length - 1] + 1;
+  const steps = indices.map((index, offset) => {
+    const step = recordedSteps.value[index];
+    return {
+      ...step,
+      id: stepStart + offset,
+    };
+  });
+
+  return { stepStart, stepEnd, steps };
 };
 
 const batchMarkAs = (groupType) => {
@@ -1132,6 +1217,59 @@ const batchDeleteSelected = () => {
     .catch(() => {
       // 用户取消
     });
+};
+
+const validateSelectedSegment = async () => {
+  const payload = getSelectedSegmentPayload();
+  if (!payload) {
+    ElMessage.warning("请先选择要校验的步骤");
+    return;
+  }
+  if (payload.error) {
+    ElMessage.warning(payload.error);
+    return;
+  }
+
+  segmentValidationLoading.value = true;
+  segmentValidationResult.value = null;
+  try {
+    const response = await api.post("/collection/recorder/validate-segment", {
+      platform: recorderForm.value.platform,
+      component_type: recorderForm.value.componentType,
+      account_id: recorderForm.value.accountId,
+      data_domain: recorderForm.value.dataDomain || null,
+      sub_domain: recorderForm.value.subDomain || null,
+      expected_signal: segmentValidationSignal.value,
+      step_start: payload.stepStart,
+      step_end: payload.stepEnd,
+      steps: payload.steps,
+    });
+
+    if (!response.success) {
+      throw new Error(response.error_message || "校验失败");
+    }
+
+    segmentValidationResult.value = response.data || null;
+    ElMessage.success("当前段校验已完成");
+  } catch (error) {
+    const message =
+      error.response?.data?.detail ||
+      error.response?.data?.error_message ||
+      error.message ||
+      "校验失败";
+    segmentValidationResult.value = {
+      passed: false,
+      resolved_signal: segmentValidationSignal.value,
+      step_start: payload.stepStart,
+      step_end: payload.stepEnd,
+      validated_steps: payload.steps.length,
+      error_message: message,
+      suggestions: [],
+    };
+    ElMessage.error(message);
+  } finally {
+    segmentValidationLoading.value = false;
+  }
 };
 
 const recordingStatus = computed(() => {
@@ -1261,6 +1399,7 @@ watch(
 const startRecording = async () => {
   try {
     isRecording.value = true;
+    segmentValidationResult.value = null;
     recorderRuntimeStatus.value = {
       state: "starting",
       gate_stage: "login_gate",
@@ -1300,6 +1439,7 @@ const startRecording = async () => {
 const stopRecording = async () => {
   try {
     ElMessage.info("正在停止录制，请稍等...");
+    segmentValidationResult.value = null;
 
     const response = await api.post("/collection/recorder/stop");
 

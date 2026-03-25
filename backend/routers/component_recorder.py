@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.models.database import get_db, get_async_db
+from backend.services.recorder_segment_validator import RecorderSegmentValidator
 from backend.services.steps_to_python import generate_python_code
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
@@ -41,6 +42,7 @@ from backend.schemas.component_recorder import (
     RecorderStartResponse,
     RecorderStatusResponse,
     RecorderStepResponse,
+    RecorderValidateSegmentRequest,
     RecorderSaveRequest,
     GeneratePythonRequest,
 )
@@ -1089,12 +1091,17 @@ async def get_recording_steps():
     返回当前会话中录制的所有步骤
     """
     try:
+        steps = recorder_session.steps
+        if recorder_session.active and recorder_session.steps_file:
+            live_data = _parse_inspector_output()
+            if live_data.get("mode") == "steps":
+                steps = live_data.get("steps", []) or []
         return {
             "success": True,
             "data": {
                 "active": recorder_session.active,
-                "steps": recorder_session.steps,
-                "steps_count": len(recorder_session.steps),
+                "steps": steps,
+                "steps_count": len(steps),
                 "started_at": recorder_session.started_at.isoformat() if recorder_session.started_at else None
             }
         }
@@ -1106,6 +1113,25 @@ async def get_recording_steps():
             message=f"获取步骤失败: {str(e)}",
             status_code=500,
             recovery_suggestion="请确认录制会话已启动，稍后重试",
+        )
+
+
+@router.post("/recorder/validate-segment")
+async def validate_segment(
+    request: RecorderValidateSegmentRequest,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Validate a contiguous step segment from the recorder page."""
+    try:
+        validator = RecorderSegmentValidator()
+        return await validator.validate(request, db=db)
+    except Exception as e:
+        logger.error(f"Failed to validate recorder segment: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message=f"校验当前段失败: {str(e)}",
+            status_code=500,
+            recovery_suggestion="请检查所选步骤是否连续，或稍后重试",
         )
 
 
