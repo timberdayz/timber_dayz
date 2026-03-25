@@ -3,6 +3,9 @@
 """
 将fact_raw_data_*表从public schema移动到b_class schema
 
+Historical only: 本脚本包含旧版 Metabase 运维说明。
+当前现役路径应以 PostgreSQL-first dashboard 为准。
+
 执行前请确保：
 1. 已备份数据库
 2. 已停止所有数据同步任务
@@ -152,4 +155,3 @@ if __name__ == "__main__":
         sys.exit(0)
     
     migrate_tables_to_b_class()
-

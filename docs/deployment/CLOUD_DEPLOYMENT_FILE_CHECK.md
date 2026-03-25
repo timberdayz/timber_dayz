@@ -1,5 +1,8 @@
 # 云端部署文件符合性检查报告
 
+> 历史检查报告：本文包含旧版 Metabase 部署文件清单，仅作历史记录。
+> 当前生产部署主路径应以 PostgreSQL-first 运行架构为准。
+
 基于当前部署流程（`.github/workflows/deploy-production.yml`）与本地仓库结构，对云端服务器 `/opt/xihong_erp` 进行文件符合性检查。检查时间：2026-03-13。
 
 ---

@@ -38,3 +38,21 @@ def test_active_runtime_comments_no_longer_claim_metabase_processing():
         text = path.read_text(encoding="utf-8", errors="replace")
         for phrase in banned_phrases:
             assert phrase not in text
+
+
+def test_active_historical_docs_and_scripts_are_marked_historical():
+    paths = [
+        Path("docs/deployment/CLOUD_UPDATE_AND_LOCAL_VERIFICATION.md"),
+        Path("docs/deployment/CLOUD_METABASE_ACCESS.md"),
+        Path("docs/deployment/CLOUD_4C8G_REFERENCE.md"),
+        Path("docs/deployment/CLOUD_DEPLOYMENT_FILE_CHECK.md"),
+        Path("docs/deployment/CLOUD_ENV_UPDATE_CHECKLIST.md"),
+        Path("docs/guides/QUICK_START_ALL_FEATURES.md"),
+        Path("scripts/check_b_class_tables.py"),
+        Path("scripts/migrate_tables_to_b_class_schema.py"),
+        Path("scripts/test_data_sync_pipeline.py"),
+    ]
+
+    for path in paths:
+        text = path.read_text(encoding="utf-8", errors="replace").lower()
+        assert "历史" in text or "historical" in text

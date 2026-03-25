@@ -6,7 +6,7 @@
 v4.12.0新增（Phase 5 - 端到端测试）：
 - 完整数据流程测试（文件扫描 → 注册 → 同步 → 入库）
 - 数据完整性验证
-- Metabase查询验证
+- Historical only: 旧版 Metabase 查询验证
 - 输出端到端测试报告
 """
 
@@ -505,4 +505,3 @@ async def main():
 
 if __name__ == "__main__":
     sys.exit(asyncio.run(main()))
-
