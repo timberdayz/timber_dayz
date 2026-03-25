@@ -31,8 +31,7 @@ def test_active_runtime_comments_no_longer_claim_metabase_processing():
     ]
 
     banned_phrases = [
-        "鍦∕etabase涓畬鎴?",
-        "Metabase涓畬鎴?",
+        "Metabase查询",
         "DB/Metabase",
     ]
 
@@ -60,7 +59,7 @@ def test_active_historical_docs_and_scripts_are_marked_historical():
 
     for path in paths:
         text = path.read_text(encoding="utf-8", errors="replace").lower()
-        assert "历史" in text or "historical" in text
+        assert "historical" in text or "历史" in text
 
 
 def test_quick_start_no_longer_recommends_metabase_runtime_steps():
@@ -75,7 +74,7 @@ def test_quick_start_no_longer_recommends_metabase_runtime_steps():
     assert "PostgreSQL-first" in text
 
 
-def test_local_collection_docs_do_not_treat_with_metabase_as_current_path():
+def test_local_collection_docs_do_not_treat_metabase_overlay_as_current_path():
     paths = [
         Path("docs/deployment/LOCAL_COLLECTION_DEV.md"),
         Path("docs/deployment/LOCAL_AND_CLOUD_DEPLOYMENT_ROLES.md"),
@@ -97,3 +96,18 @@ def test_environment_reference_marks_metabase_variables_historical_only():
 
     assert "metabase" in text
     assert "historical" in text or "历史" in text
+
+
+def test_active_compose_entrypoints_no_longer_require_metabase_overlays():
+    collection_dev = Path("docker-compose.collection-dev.yml").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    verify_local = Path("docker-compose.verify-local.yml").read_text(
+        encoding="utf-8", errors="replace"
+    )
+
+    assert "docker-compose.metabase.yml" not in collection_dev
+    assert "docker-compose.metabase.dev.yml" not in collection_dev
+    assert "metabase:" not in verify_local
+    assert "Historical note" in collection_dev
+    assert "Historical note" in verify_local

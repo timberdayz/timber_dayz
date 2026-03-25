@@ -1,12 +1,12 @@
-# 西虹ERP系统 - 本机采集开发 Docker Compose 覆盖
-# 与 docker-compose.yml + docker-compose.dev.yml 组合使用，使 backend 使用带 Playwright 的镜像
+# Xihong ERP local collection development overlay.
+# Use with docker-compose.yml and docker-compose.dev.yml so backend runs with
+# Dockerfile.collection and Playwright enabled.
 #
-# 使用方式:
-#   python run.py --use-docker --with-metabase --collection
-# 或等价:
-#   docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml -f docker-compose.metabase.yml -f docker-compose.metabase.dev.yml --profile dev-full up -d
+# Current path:
+#   docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.collection-dev.yml --profile dev-full up -d
 #
-# 效果: 单后端、端口 8001，具备采集能力（Playwright），与正式采集环境一致
+# Historical note:
+#   Legacy Metabase overlays were removed from the active collection startup path.
 
 services:
   backend:
