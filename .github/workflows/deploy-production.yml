@@ -89,13 +89,15 @@ jobs:
       - name: Get changed files since last tag
         id: changed-files
         run: |
-          # 鑾峰彇鎵€鏈?tag锛屾寜鐗堟湰鍙锋帓搴?          git fetch --tags --force
+          # Fetch all release tags before diffing against the current tag.
+          git fetch --tags --force
 
           # 鑾峰彇褰撳墠 tag
           CURRENT_TAG="${{ github.ref_name }}"
           echo "[INFO] Current tag: ${CURRENT_TAG}"
 
-          # 鑾峰彇涓婁竴涓?tag锛堟寜鐗堟湰鍙锋帓搴忥紝鎺掗櫎褰撳墠 tag锛屽彇鏈€鏂扮殑锛?          ALL_TAGS=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$')
+          # Determine the previous release tag, excluding the current tag.
+          ALL_TAGS=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$')
           PREV_TAG=$(echo "${ALL_TAGS}" | grep -v "^${CURRENT_TAG}$" | head -n 1)
 
           if [ -z "${PREV_TAG}" ]; then
@@ -111,7 +113,8 @@ jobs:
             # 璁＄畻鏀瑰姩鐨勬枃浠讹紙鐩稿浜庨」鐩牴鐩綍锛?            # 娉ㄦ剰锛欻EAD 鎸囧悜褰撳墠 checkout 鐨?tag commit
             git diff --name-only ${PREV_TAG}..HEAD > temp/changed_files.txt || true
             
-            # 鏄剧ず鏀瑰姩鐨勬枃浠舵暟閲?            CHANGED_COUNT=$(wc -l < temp/changed_files.txt | tr -d ' ' || echo "0")
+            # Count changed files since the previous release tag.
+            CHANGED_COUNT=$(wc -l < temp/changed_files.txt | tr -d ' ' || echo "0")
             echo "[INFO] Found ${CHANGED_COUNT} changed files from ${PREV_TAG} to ${CURRENT_TAG}."
             echo "changed_count=${CHANGED_COUNT}" >> $GITHUB_OUTPUT
             
@@ -167,7 +170,8 @@ jobs:
             exit 1
           }
 
-          # 楠岃瘉琛ㄦ暟閲?          TABLE_COUNT=$(PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -t -c \
+          # Count the created tables after migration finishes.
+          TABLE_COUNT=$(PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -t -c \
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'" | tr -d ' \n')
 
           echo "[INFO] 鍒涘缓浜?${TABLE_COUNT} 寮犺〃"
@@ -179,7 +183,8 @@ jobs:
             echo "[OK] 琛ㄦ暟閲忔甯革紙${TABLE_COUNT} 寮狅級"
           fi
 
-          # 楠岃瘉鍏抽敭琛ㄦ槸鍚﹀瓨鍦?          KEY_TABLES=("dim_products" "bridge_product_keys" "fact_product_metrics" "dim_product_master")
+          # Verify the critical tables exist after migration.
+          KEY_TABLES=("dim_products" "bridge_product_keys" "fact_product_metrics" "dim_product_master")
           for table_name in "${KEY_TABLES[@]}"; do
             EXISTS=$(PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -t -c \
               "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema='public' AND table_name='${table_name}')" | tr -d ' \n')
@@ -728,13 +733,15 @@ jobs:
 
           echo "[INFO] Checking production health at: ${HEALTH_CHECK_URL}/health"
 
-          # 澧炲姞閲嶈瘯鏈哄埗鍜岃缁嗛敊璇俊鎭?          MAX_RETRIES=5
+          # Retry the external health check with diagnostics.
+          MAX_RETRIES=5
           RETRY_DELAY=10
 
           for i in $(seq 1 ${MAX_RETRIES}); do
             echo "[INFO] Health check attempt $i/${MAX_RETRIES}..."
             
-            # 浣跨敤 curl 妫€鏌ュ仴搴风姸鎬侊紝澧炲姞瓒呮椂鍜岃缁嗚緭鍑?            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 --connect-timeout 10 ${HEALTH_CHECK_URL}/health 2>/dev/null || echo "000")
+            # Probe the health endpoint with explicit timeout handling.
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 --connect-timeout 10 ${HEALTH_CHECK_URL}/health 2>/dev/null || echo "000")
             
             if [ "${HTTP_CODE}" = "200" ]; then
               echo "[OK] Production health check passed (HTTP ${HTTP_CODE})"
@@ -806,7 +813,8 @@ jobs:
               LAST_BACKUP=\$(ls -td backups/pre_deploy_* 2>/dev/null | head -1)
               if [ -n \"\${LAST_BACKUP}\" ]; then
                 echo \"Found backup: \${LAST_BACKUP}\"
-              # 杩欓噷鍙互瀹炵幇鍥炴粴閫昏緫锛堟仮澶嶉厤缃€佹媺鍙栦笂涓€涓暅鍍忕瓑锛?                echo \"[WARNING] Manual rollback required. Check backup: \${LAST_BACKUP}\"
+                # Keep rollback manual until the recovery procedure is formalized.
+                echo \"[WARNING] Manual rollback required. Check backup: \${LAST_BACKUP}\"
             else
                 echo \"[WARNING] No backup found for rollback\"
             fi
