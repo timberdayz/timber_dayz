@@ -5,13 +5,22 @@ def test_runtime_configs_no_longer_reference_metabase_runtime():
     files = (
         ".env",
         ".env.production",
+        "env.example",
+        "env.development.example",
+        "env.production.example",
+        "env.docker.example",
         "docker-compose.yml",
+        "docker-compose.collection-dev.yml",
         "docker-compose.dev.yml",
         "docker-compose.prod.yml",
+        "docker-compose.verify-local.yml",
     )
 
     forbidden = (
         "METABASE_URL",
+        "METABASE_PORT",
+        "METABASE_DB_HOST",
+        "VITE_METABASE_URL",
         "ENABLE_METABASE_PROXY",
         "metabase_app",
     )
