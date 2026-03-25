@@ -1,5 +1,9 @@
 # 云端部署更新与本地 Docker 验证指南
 
+> 历史文档：本文记录的是已退役的 Metabase 部署/验证路径。
+> 当前生产与本地验收应以 PostgreSQL-first 路径为准，不再将 Metabase、
+> `init_metabase.py`、`docker-compose.metabase*.yml` 作为现役运行或发版步骤。
+
 本文档说明：**在数据表与 Metabase 模型/Question 发生较大变更后**，如何安全地更新云端部署。云端 Metabase 访问与首次初始化见 [CLOUD_METABASE_ACCESS.md](./CLOUD_METABASE_ACCESS.md)。，以及如何在本地用 Docker 做与生产一致的验证，**避免问题只在 CI/CD 阶段才暴露**。
 
 ---

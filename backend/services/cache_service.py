@@ -408,7 +408,7 @@ class CacheService:
     async def invalidate_dashboard_business_overview(self) -> int:
         """
         写时失效：业务概览与年度总结相关 Dashboard 缓存（proposal 约定集中在此执行）。
-        在数据同步完成、经营目标/配置更新等事件后调用，确保后续请求命中 DB/Metabase 取得新数据。
+        在数据同步完成、经营目标/配置更新等事件后调用，确保后续请求命中 PostgreSQL dashboard 数据。
         Key 约定：xihong_erp:dashboard_*、xihong_erp:annual_summary_*
         """
         n1 = await self.delete_pattern(f"{self.CACHE_PREFIX}dashboard_*")

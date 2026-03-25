@@ -31,7 +31,7 @@ This repository uses a skill-first workflow.
 - The active Dashboard cutover direction is PostgreSQL-first, replacing Metabase on the online query path.
 - Dashboard data flow is `b_class raw -> semantic -> mart -> api -> backend router -> frontend`.
 - `semantic` is the standardization layer, `mart` is the reusable aggregate layer, and `api` is the page-module query layer.
-- Metabase remains a compatibility and fallback path until the PostgreSQL Dashboard cutover completes.
+- Metabase is historical-only and is no longer part of the active runtime or deployment path.
 - The runtime switch for the new Dashboard path is `USE_POSTGRESQL_DASHBOARD_ROUTER`.
 
 ## Release Model

@@ -9,9 +9,9 @@ v4.12.0新增:
 - 支持Raw -> Fact -> MV三层数据架构
 
 v4.13.0 DSS架构重构:
-- 移除字段映射应用(在Metabase中完成)
-- 移除数据标准化(在Metabase中完成)
-- 移除业务逻辑验证(在Metabase中完成)
+- 移除字段映射应用(在 PostgreSQL semantic/api 层完成)
+- 移除数据标准化(在 PostgreSQL semantic/api 层完成)
+- 移除业务逻辑验证(在 PostgreSQL semantic/api 层完成)
 - 移除数据隔离(DSS架构不隔离数据)
 
 职责:
@@ -51,7 +51,7 @@ from backend.services.raw_data_importer import get_raw_data_importer
 from backend.services.deduplication_service import DeduplicationService
 from backend.services.currency_extractor import get_currency_extractor  # [*] v4.15.0新增
 # [*] DSS架构:移除验证、标准化、隔离相关导入
-# 这些功能在DSS架构下不再使用,数据处理在Metabase中完成
+# 这些功能在DSS架构下不再使用,数据处理在 PostgreSQL semantic/api 层完成
 # from backend.services.data_validator import (
 #     validate_orders,
 #     validate_product_metrics,
@@ -347,7 +347,7 @@ class DataIngestionService:
             original_header_columns = file_original_columns  # 始终使用文件原始列名用于追溯
             
             # [*] DSS架构:跳过字段映射,直接使用原始数据
-            # DSS架构原则:数据同步只做数据采集和存储,字段映射在Metabase中完成
+            # DSS架构原则:数据同步只做数据采集和存储,字段映射在 PostgreSQL semantic/api 层完成
             enhanced_rows = all_rows  # 直接使用原始数据,保留所有原始列名
             logger.info(f"[Ingest] [DSS] 跳过字段映射,直接使用原始数据: {len(enhanced_rows)}行,{len(original_header_columns)}个字段")
             
@@ -367,7 +367,7 @@ class DataIngestionService:
                 # [*] v4.18.1重构:shop_id完全从文件元数据获取,不再逐行检查
                 file_shop_id = file_record.shop_id or 'none'
                 if not file_record.shop_id:
-                    logger.info(f"[Ingest] [v4.18.1] 文件级别shop_id为空,设为'none'(将使用Metabase关联账号管理表)")
+                    logger.info(f"[Ingest] [v4.18.1] 文件级别shop_id为空,设为'none'(将使用数据库账号主数据进行关联)")
                 
                 # 批量应用到所有行(静默处理,不逐行输出日志)
                 for row in enhanced_rows:
@@ -377,19 +377,19 @@ class DataIngestionService:
                         row["shop_id"] = file_shop_id
             
             # [*] DSS架构:跳过数据标准化,保留原始数据
-            # DSS架构原则:数据同步只做数据采集和存储,数据标准化在Metabase中完成
-            # 如果需要数据类型转换,应在Metabase中通过字段映射或计算字段处理
+            # DSS架构原则:数据同步只做数据采集和存储,数据标准化在 PostgreSQL semantic/api 层完成
+            # 如果需要数据类型转换,应在 PostgreSQL semantic/api 层通过标准化逻辑处理
             logger.info(f"[Ingest] [DSS] 跳过数据标准化,保留原始数据格式")
             # enhanced_rows 保持不变,直接使用原始数据
             
             # [*] DSS架构:移除特殊处理,保留原始数据
-            # DSS架构原则:不修改原始数据,所有数据处理在Metabase中完成
-            # 如果需要metric_date,应在Metabase中通过字段映射或计算字段处理
+            # DSS架构原则:不修改原始数据,所有数据处理在 PostgreSQL semantic/api 层完成
+            # 如果需要metric_date,应在 PostgreSQL semantic/api 层通过标准化逻辑处理
             logger.info(f"[Ingest] [DSS] 跳过特殊处理,保留原始数据完整性")
             
             # [*] DSS架构:跳过数据验证,直接使用所有数据
             # DSS架构原则:数据同步只做去重和入库,不做业务逻辑验证
-            # 业务逻辑验证应在Metabase中完成(Metabase知道字段映射关系)
+            # 业务逻辑验证应在 PostgreSQL semantic/api 层完成
             logger.info(f"[Ingest] [DSS] 跳过数据验证,所有{len(enhanced_rows)}行数据将直接进入去重和入库流程")
             validation_result = {
                 "errors": [],
@@ -635,8 +635,8 @@ class DataIngestionService:
                     # [*] v4.18.2移除:订单金额维度表功能已移除
                     # 原因:DSS架构下,数据已完整存储在 b_class.fact_raw_data_orders_* 表的 JSONB 字段中
                     # 货币代码已提取到 currency_code 系统字段,字段名已归一化
-                    # 数据标准化应在 Metabase 中完成,该表属于"只写不读"的冗余数据
-                    # 如需订单金额统计,请通过 Metabase 查询 b_class.fact_raw_data_orders_* 表
+                    # 数据标准化应在 PostgreSQL semantic/api 层完成,该表属于"只写不读"的冗余数据
+                    # 如需订单金额统计,请通过 PostgreSQL dashboard 查询链路读取 b_class.fact_raw_data_orders_* 表
                     
                 except Exception as e:
                     logger.error(f"[Ingest] [DSS] RawDataImporter入库失败: {e}", exc_info=True)

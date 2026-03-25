@@ -81,7 +81,7 @@ async def test_cache_warmup_never_uses_metabase_fallback(monkeypatch):
         lambda: _CacheServiceStub(),
     )
 
-    with pytest.raises(RuntimeError, match="Metabase fallback has been retired"):
+    with pytest.raises(RuntimeError, match="Legacy non-PostgreSQL warmup path has been retired"):
         await cache_warmup_service.run_dashboard_cache_warmup()
 
     assert stored == []

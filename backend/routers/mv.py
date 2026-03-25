@@ -1,9 +1,9 @@
 """
 Legacy materialized view management API.
 
-The preferred query architecture is DSS/Metabase. These endpoints remain
-available only as compatibility tooling for environments that still maintain
-materialized views.
+The active query architecture is PostgreSQL semantic/mart/api. These endpoints
+remain available only as compatibility tooling for environments that still
+maintain materialized views.
 """
 
 from datetime import datetime
