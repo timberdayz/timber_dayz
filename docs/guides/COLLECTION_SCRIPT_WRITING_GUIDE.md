@@ -1,5 +1,10 @@
 # 采集脚本编写规范
 
+> 2026-03-24 补充现行要求：
+> - `login` 是统一门禁；`export` 是自包含容器组件。
+> - `navigation_ready`、`date_picker_ready`、`filters_ready`、`export_complete` 都必须有可判定完成信号。
+> - `export_complete` 的首选成功标准是“文件实际下载落地且非空”，不是仅依赖 toast、按钮点击成功或弹窗关闭。
+
 本文档为西虹 ERP 数据采集相关 Python 组件（登录、导航、导出等）的**唯一成文编写依据**，使后续新增与修改采集脚本可按业界主流方式编写（Playwright 官方推荐 + 各打断类场景的检测与应对），并与现有执行器、验证码提案、popup_handler 契约一致。
 
 **API 与版本**：本规范以 **Playwright Python 当前文档与 API** 为准。若 Playwright 升级导致 sync/async 或方法签名变更，请以官方文档为准，避免歧义。

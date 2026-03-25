@@ -45,6 +45,8 @@ from datetime import datetime
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from modules.components.base import ExecutionContext
+from modules.apps.collection_center.transition_gates import evaluate_login_ready
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -76,10 +78,13 @@ class InspectorRecorder:
         self.account_info = config.get('account_info', {})
         self.trace_file = config.get('trace_file')
         self.steps_file = config.get('steps_file')
+        self.status_file = config.get('status_file')
+        self.response_file = config.get('response_file')
         self.skip_login = config.get('skip_login', False)
         self.enable_trace = config.get('enable_trace', True)
         self.use_persistent_context = config.get('use_persistent_context', True)
         self.use_fingerprint = config.get('use_fingerprint', True)
+        self.login_runtime_params: Dict[str, Any] = {}
         
         # 录制结果
         self.recorded_steps: List[Dict[str, Any]] = []
@@ -96,6 +101,95 @@ class InspectorRecorder:
             logger.info(f"[Discovery Mode] Enabled for component type: {self.component_type}")
         
         logger.info(f"InspectorRecorder initialized: {self.platform}/{self.component_type}")
+
+    def _write_status(
+        self,
+        *,
+        state: str,
+        gate_stage: str = "login_gate",
+        ready_to_record: bool = False,
+        error_message: Optional[str] = None,
+        verification_type: Optional[str] = None,
+        verification_screenshot: Optional[str] = None,
+    ) -> None:
+        if not self.status_file:
+            return
+
+        payload = {
+            "state": state,
+            "gate_stage": gate_stage,
+            "ready_to_record": ready_to_record,
+            "platform": self.platform,
+            "component_type": self.component_type,
+            "error_message": error_message,
+            "verification_type": verification_type,
+            "verification_screenshot": verification_screenshot,
+            "updated_at": datetime.now().isoformat(),
+        }
+        path = Path(self.status_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    async def _wait_for_verification_input(self, verification_type: str) -> str:
+        if not self.response_file:
+            raise RuntimeError("verification response file is not configured")
+
+        response_path = Path(self.response_file)
+        timeout_seconds = 300
+        poll_interval_seconds = 2
+        for _ in range(timeout_seconds // poll_interval_seconds):
+            await asyncio.sleep(poll_interval_seconds)
+            if response_path.exists():
+                try:
+                    with open(response_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    value = data.get("captcha_code") or data.get("otp")
+                    if value:
+                        try:
+                            response_path.unlink()
+                        except Exception:
+                            pass
+                        return str(value).strip()
+                except Exception:
+                    pass
+        raise RuntimeError("验证码输入超时")
+
+    async def _handle_login_verification(self, page, verification_error) -> None:
+        verification_type = (verification_error.verification_type or "graphical_captcha").strip().lower()
+        screenshot_name = "verification_screenshot.png"
+        screenshot_path = verification_error.screenshot_path
+        target_path = None
+        if self.status_file:
+            target_path = Path(self.status_file).parent / screenshot_name
+
+        if target_path:
+            import shutil
+            if screenshot_path and Path(screenshot_path).exists():
+                try:
+                    shutil.copy2(screenshot_path, target_path)
+                except Exception:
+                    target_path = None
+            if target_path and not target_path.exists():
+                try:
+                    await page.screenshot(path=str(target_path), timeout=5000)
+                except Exception:
+                    target_path = None
+
+        self._write_status(
+            state="login_verification_pending",
+            gate_stage="login_gate",
+            ready_to_record=False,
+            verification_type=verification_type,
+            verification_screenshot=screenshot_name if target_path else None,
+        )
+
+        value = await self._wait_for_verification_input(verification_type)
+        if verification_type in ("otp", "sms", "email_code"):
+            self.login_runtime_params["otp"] = value
+        else:
+            self.login_runtime_params["captcha_code"] = value
+        self._write_status(state="login_checking", gate_stage="login_gate", ready_to_record=False)
     
     async def record(self) -> bool:
         """
@@ -123,6 +217,7 @@ class InspectorRecorder:
         
         async with async_playwright() as p:
             # 1. 创建浏览器上下文
+            self._write_status(state="starting", gate_stage="login_gate", ready_to_record=False)
             context, browser = await self._create_context(p)
             
             # 标记 Trace 是否已保存（用于 finally 中判断）
@@ -161,12 +256,14 @@ class InspectorRecorder:
                     if login_url:
                         print(f"\n[Navigate] {login_url}")
                         await self._safe_goto(page, login_url)
+                    self._write_status(state="login_ready", gate_stage="login_gate", ready_to_record=True)
                 
                 # 4. 处理弹窗
                 await self._handle_popups(page)
                 
                 # 5. 记录初始 URL
                 self.start_url = page.url
+                self._write_status(state="inspector_recording", gate_stage="login_gate", ready_to_record=True)
                 
                 # 6. 启动 Inspector
                 print("\n" + "="*60)
@@ -339,39 +436,28 @@ class InspectorRecorder:
     
     async def _auto_login(self, page):
         """
-        自动执行登录组件（带智能登录检测 v4.8.0）
-        
-        流程：
-        1. 导航到初始页面（login_url 或平台主页）
-        2. 快速检测：检查URL是否自动跳转（持久化会话可能已登录）
-        3. 完整检测：综合URL + 元素 + Cookie检测
-        4. 如果已登录，跳过登录步骤
-        5. 如果未登录，执行登录组件
-        6. 登录后验证登录状态
+        Run recorder pre-login using the same canonical login component model as production runtime.
         """
         from modules.utils.login_status_detector import LoginStatusDetector, LoginStatus
-        
-        print(f"\n[Auto Login] ====== Starting login check for {self.platform} ======")
-        
-        # 1. 导航到初始页面
-        login_url = self.account_info.get('login_url')
-        initial_url = page.url
-        
+
+        print()
+        print(f"[Auto Login] ====== Starting login check for {self.platform} ======")
+        self._write_status(state="login_checking", gate_stage="login_gate", ready_to_record=False)
+
+        login_url = self.account_info.get("login_url")
         if login_url:
             print(f"[Auto Login] Navigating to: {login_url}")
             await self._safe_goto(page, login_url)
-        
-        # 2. 创建检测器（支持调试模式）
+
         import os
+
         debug_mode = os.environ.get("DEBUG_LOGIN_DETECTION", "false").lower() == "true"
         detector = LoginStatusDetector(self.platform, debug=debug_mode)
-        
-        # 3. 执行登录状态检测（包含等待自动跳转逻辑）
-        print(f"[Auto Login] Detecting login status (wait_for_redirect=True)...")
+
+        print("[Auto Login] Detecting login status (wait_for_redirect=True)...")
         detection_result = await detector.detect(page, wait_for_redirect=True)
-        
-        # 输出检测结果详情
-        print(f"[Auto Login] Detection Result:")
+
+        print("[Auto Login] Detection Result:")
         print(f"  - Status: {detection_result.status.value}")
         print(f"  - Confidence: {detection_result.confidence:.2f}")
         print(f"  - Method: {detection_result.detected_by}")
@@ -379,85 +465,147 @@ class InspectorRecorder:
         print(f"  - Time: {detection_result.detection_time_ms}ms")
         if detection_result.matched_pattern:
             print(f"  - Matched: {detection_result.matched_pattern}")
-        
-        # 4. 判断是否需要登录
-        needs_login = detector.needs_login(detection_result)
-        
-        if not needs_login:
-            print(f"\n[Auto Login] [SKIP] Session already logged in (confidence >= 0.7)")
+
+        if not detector.needs_login(detection_result):
+            gate_result = evaluate_login_ready(
+                status=detection_result.status.value,
+                confidence=detection_result.confidence,
+                current_url=page.url,
+                matched_signal=detection_result.matched_pattern or detection_result.detected_by,
+            )
+            print()
+            print("[Auto Login] [SKIP] Session already logged in (confidence >= 0.7)")
             print(f"[Auto Login] Current URL: {page.url}")
             logger.info(f"Session already logged in, skipping auto-login for {self.platform}")
-            print(f"[Auto Login] ====== Login check complete (skipped) ======\n")
+            self._write_status(
+                state="login_ready",
+                gate_stage=gate_result.stage,
+                ready_to_record=True,
+            )
+            print("[Auto Login] ====== Login check complete (skipped) ======")
+            print()
             return
-        
-        # 5. 需要执行登录
-        print(f"\n[Auto Login] [EXEC] Login required, executing login component...")
-        
+
+        print()
+        print("[Auto Login] [EXEC] Login required, executing login component...")
+
+        from modules.apps.collection_center.executor_v2 import VerificationRequiredError
+
         try:
-            # 尝试加载登录组件
-            from modules.apps.collection_center.component_loader import ComponentLoader
-            
-            loader = ComponentLoader()
-            login_component = loader.load(f"{self.platform}/login")
-            
-            if not login_component:
-                logger.warning(f"Login component not found for {self.platform}")
-                print("[Auto Login] [WARN] Login component not found")
-                print("[Auto Login] Please login manually in the browser")
-                print("[Auto Login] After logging in, the recording will continue")
-                return
-            
-            # 执行登录步骤
-            steps = login_component.get('steps', [])
-            print(f"[Auto Login] Found {len(steps)} login steps")
-            
-            for i, step in enumerate(steps, 1):
-                step_action = step.get('action', 'unknown')
-                step_comment = step.get('comment', '')
-                print(f"[Auto Login] Step {i}/{len(steps)}: {step_action}")
-                if step_comment:
-                    print(f"         Comment: {step_comment}")
-                
+            while True:
                 try:
-                    await self._execute_step(page, step)
-                except Exception as step_error:
-                    logger.warning(f"Step {i} failed: {step_error}")
-                    print(f"[Auto Login] [WARN] Step {i} failed: {step_error}")
-                    # 继续执行下一步，不中断整个流程
-            
-            # 6. 登录后等待页面跳转
-            print(f"[Auto Login] Waiting for post-login navigation...")
+                    await self._run_login_component(page)
+                    break
+                except VerificationRequiredError as verification_error:
+                    await self._handle_login_verification(page, verification_error)
+            print("[Auto Login] Waiting for post-login navigation...")
             await page.wait_for_timeout(3000)
-            
-            # 7. 登录后验证（清除缓存，强制重新检测）
+
             detector.clear_cache()
             post_login_result = await detector.detect(page, wait_for_redirect=True)
-            
-            print(f"\n[Auto Login] Post-login verification:")
+
+            print()
+            print("[Auto Login] Post-login verification:")
             print(f"  - Status: {post_login_result.status.value}")
             print(f"  - Confidence: {post_login_result.confidence:.2f}")
             print(f"  - URL: {page.url}")
-            
-            if post_login_result.status == LoginStatus.LOGGED_IN:
-                print(f"[Auto Login] [OK] Login successful!")
-            elif post_login_result.status == LoginStatus.NOT_LOGGED_IN:
-                print(f"[Auto Login] [WARN] Login may have failed")
-                print(f"[Auto Login] Please check browser and complete login manually if needed")
+
+            gate_result = evaluate_login_ready(
+                status=post_login_result.status.value,
+                confidence=post_login_result.confidence,
+                current_url=page.url,
+                matched_signal=post_login_result.matched_pattern or post_login_result.detected_by,
+            )
+
+            if gate_result.status == "ready":
+                self._write_status(
+                    state="login_ready",
+                    gate_stage=gate_result.stage,
+                    ready_to_record=True,
+                )
+                print("[Auto Login] [OK] Login successful!")
             else:
-                print(f"[Auto Login] [WARN] Login status uncertain")
-                print(f"[Auto Login] Please verify login in browser before proceeding")
-            
+                self._write_status(
+                    state="failed_before_recording",
+                    gate_stage=gate_result.stage,
+                    ready_to_record=False,
+                    error_message=gate_result.reason,
+                )
+                raise RuntimeError(
+                    f"Auto login was not confirmed for {self.platform}: "
+                    f"status={post_login_result.status.value}, "
+                    f"confidence={post_login_result.confidence:.2f}, url={page.url}"
+                )
         except FileNotFoundError:
             logger.warning(f"Login component not found for {self.platform}")
-            print("[Auto Login] [WARN] Login component file not found")
-            print("[Auto Login] Please login manually in the browser")
+            print("[Auto Login] [ERROR] Login component file not found")
+            self._write_status(
+                state="failed_before_recording",
+                gate_stage="login_gate",
+                ready_to_record=False,
+                error_message="login component file not found",
+            )
+            raise RuntimeError(
+                f"Auto login was not confirmed for {self.platform}: login component file not found"
+            )
         except Exception as e:
             logger.error(f"Auto login failed: {e}")
             print(f"[Auto Login] [ERROR] Auto login failed: {e}")
-            print("[Auto Login] Please complete login manually in the browser")
-        
-        print(f"[Auto Login] ====== Login check complete ======\n")
-    
+            self._write_status(
+                state="failed_before_recording",
+                gate_stage="login_gate",
+                ready_to_record=False,
+                error_message=str(e),
+            )
+            raise RuntimeError(
+                f"Auto login was not confirmed for {self.platform}: {e}"
+            ) from e
+
+        print("[Auto Login] ====== Login check complete ======")
+        print()
+
+    async def _run_login_component(self, page) -> None:
+        """Execute the recorder's login component using Python components first."""
+        from modules.apps.collection_center.component_loader import ComponentLoader
+
+        loader = ComponentLoader()
+        login_component = loader.load(f"{self.platform}/login")
+
+        if not login_component:
+            raise FileNotFoundError(f"Login component not found for {self.platform}")
+
+        python_component_class = login_component.get("_python_component_class")
+        if python_component_class:
+            print("[Auto Login] Executing canonical Python login component")
+            ctx = ExecutionContext(
+                platform=self.platform,
+                account=self.account_info,
+                logger=logger,
+                config={
+                    "reused_session": bool(self.use_persistent_context),
+                    "params": dict(self.login_runtime_params),
+                },
+            )
+            result = await python_component_class(ctx).run(page)
+            if not getattr(result, "success", False):
+                raise RuntimeError(
+                    getattr(result, "message", "login component returned unsuccessful result")
+                )
+            return
+
+        steps = login_component.get("steps", [])
+        print(f"[Auto Login] Found {len(steps)} login steps")
+        if not steps:
+            raise RuntimeError("legacy login component has no executable steps")
+
+        for i, step in enumerate(steps, 1):
+            step_action = step.get("action", "unknown")
+            step_comment = step.get("comment", "")
+            print(f"[Auto Login] Step {i}/{len(steps)}: {step_action}")
+            if step_comment:
+                print(f"         Comment: {step_comment}")
+            await self._execute_step(page, step)
+
     async def _execute_step(self, page, step: Dict[str, Any]):
         """
         执行单个步骤
@@ -1325,4 +1473,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

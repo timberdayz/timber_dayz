@@ -37,6 +37,9 @@ from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
 from backend.schemas.component_recorder import (
     RecorderStartRequest,
+    RecorderResumeRequest,
+    RecorderStartResponse,
+    RecorderStatusResponse,
     RecorderStepResponse,
     RecorderSaveRequest,
     GeneratePythonRequest,
@@ -160,6 +163,12 @@ class RecorderSession:
         self.steps_file = None  # Inspector 模式的步骤输出文件
         self.config_file = None  # Inspector 模式的配置文件
         self.trace_file = None  # Inspector 模式的 Trace 文件
+        self.status_file = None
+        self.response_file = None
+        self.state = "idle"
+        self.gate_stage = None
+        self.ready_to_record = False
+        self.error_message = None
     
     def start(self, platform: str, component_type: str, account_id: str):
         """开始录制会话"""
@@ -169,6 +178,10 @@ class RecorderSession:
         self.account_id = account_id
         self.steps = []
         self.started_at = datetime.now()
+        self.state = "starting"
+        self.gate_stage = "login_gate"
+        self.ready_to_record = False
+        self.error_message = None
         logger.info(f"Recording session started: {platform}/{component_type}")
     
     def stop(self):
@@ -233,10 +246,67 @@ class RecorderSession:
         self.steps_file = None
         self.config_file = None
         self.trace_file = None
+        self.status_file = None
+        self.response_file = None
+        self.state = "idle"
+        self.gate_stage = None
+        self.ready_to_record = False
+        self.error_message = None
 
 
 # 全局录制会话实例
 recorder_session = RecorderSession()
+
+
+def _build_recorder_status_payload(
+    *,
+    state: str,
+    gate_stage: Optional[str],
+    ready_to_record: bool,
+    active: bool,
+    platform: Optional[str],
+    component_type: Optional[str],
+    steps_count: int,
+    started_at: Optional[datetime],
+    error_message: Optional[str] = None,
+    verification_type: Optional[str] = None,
+    verification_screenshot: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "active": active,
+        "state": state,
+        "gate_stage": gate_stage,
+        "ready_to_record": ready_to_record,
+        "platform": platform,
+        "component_type": component_type,
+        "steps_count": steps_count,
+        "started_at": started_at.isoformat() if started_at else None,
+        "error_message": error_message,
+        "verification_type": verification_type,
+        "verification_screenshot": verification_screenshot,
+    }
+
+
+def _write_recorder_runtime_status(status_file: Path, payload: Dict[str, Any]) -> None:
+    status_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(status_file, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def _read_recorder_runtime_status(status_file: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not status_file:
+        return None
+    path = Path(status_file)
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception as e:
+        logger.warning(f"Failed to read recorder runtime status: {e}")
+    return None
 
 
 def _normalize_login_steps_and_suggestions(
@@ -557,11 +627,17 @@ def _launch_inspector_recorder_subprocess(
         trace_file = temp_dir / f"{platform}_{component_type}_{timestamp}_trace.zip"
         # 步骤输出文件路径
         steps_file = temp_dir / f"{platform}_{component_type}_{timestamp}_steps.json"
+        # 运行时状态文件路径
+        status_file = temp_dir / f"{platform}_{component_type}_{timestamp}_status.json"
+        # 验证码回填响应文件路径
+        response_file = temp_dir / f"{platform}_{component_type}_{timestamp}_verification_response.json"
         
         # 保存输出文件路径到session
         recorder_session.output_file = str(trace_file)
         recorder_session.steps_file = str(steps_file)
         recorder_session.recording_mode = "inspector"
+        recorder_session.status_file = str(status_file)
+        recorder_session.response_file = str(response_file)
         
         # 准备账号信息
         account_info = {
@@ -574,12 +650,26 @@ def _launch_inspector_recorder_subprocess(
         }
         
         # 构建配置文件
+        initial_status = _build_recorder_status_payload(
+            state="starting",
+            gate_stage="login_gate",
+            ready_to_record=False,
+            active=True,
+            platform=platform,
+            component_type=component_type,
+            steps_count=0,
+            started_at=recorder_session.started_at,
+        )
+        _write_recorder_runtime_status(status_file, initial_status)
+
         config = {
             'platform': platform,
             'component_type': component_type,
             'account_info': account_info,
             'trace_file': str(trace_file),
             'steps_file': str(steps_file),
+            'status_file': str(status_file),
+            'response_file': str(response_file),
             'skip_login': component_type == 'login',  # login 组件不自动登录
             'enable_trace': True,
             'use_persistent_context': True,  # 使用持久化上下文
@@ -637,7 +727,7 @@ def _launch_playwright_browser_subprocess(
     _launch_inspector_recorder_subprocess(account, platform, component_type)
 
 
-@router.post("/recorder/start")
+@router.post("/recorder/start", response_model=RecorderStartResponse)
 async def start_recording(
     request: RecorderStartRequest,
     db: AsyncSession = Depends(get_async_db)
@@ -696,13 +786,26 @@ async def start_recording(
         
         return {
             "success": True,
-            "message": "录制已开始,Playwright浏览器正在启动...",
-            "session_id": id(recorder_session),
-            "account": {
-                "account_id": account.account_id,
-                "platform": account.platform,
-                "store_name": account.store_name
-            }
+            "message": "录制流程已启动,正在进行录制前门禁检查...",
+            "data": {
+                **_build_recorder_status_payload(
+                    state=recorder_session.state,
+                    gate_stage=recorder_session.gate_stage,
+                    ready_to_record=recorder_session.ready_to_record,
+                    active=recorder_session.active,
+                    platform=recorder_session.platform,
+                    component_type=recorder_session.component_type,
+                    steps_count=len(recorder_session.steps),
+                    started_at=recorder_session.started_at,
+                    error_message=recorder_session.error_message,
+                ),
+                "session_id": id(recorder_session),
+                "account": {
+                    "account_id": account.account_id,
+                    "platform": account.platform,
+                    "store_name": account.store_name,
+                },
+            },
         }
     
     except HTTPException as he:
@@ -1179,16 +1282,97 @@ async def add_recording_step(step: Dict[str, Any]):
             status_code=500,
             recovery_suggestion="请确认录制会话处于活跃状态，稍后重试",
         )
-@router.get("/recorder/status")
+@router.get("/recorder/status", response_model=RecorderStatusResponse)
 async def get_recorder_status():
     """获取录制器状态"""
-    return {
-        "success": True,
-        "data": {
-            "active": recorder_session.active,
-            "platform": recorder_session.platform,
-            "component_type": recorder_session.component_type,
-            "steps_count": len(recorder_session.steps),
-            "started_at": recorder_session.started_at.isoformat() if recorder_session.started_at else None
-        }
-    }
+    runtime_status = _read_recorder_runtime_status(recorder_session.status_file)
+    payload = _build_recorder_status_payload(
+        state=runtime_status.get("state") if runtime_status else recorder_session.state,
+        gate_stage=runtime_status.get("gate_stage") if runtime_status else recorder_session.gate_stage,
+        ready_to_record=runtime_status.get("ready_to_record") if runtime_status else recorder_session.ready_to_record,
+        active=recorder_session.active,
+        platform=recorder_session.platform,
+        component_type=recorder_session.component_type,
+        steps_count=len(recorder_session.steps),
+        started_at=recorder_session.started_at,
+        error_message=(runtime_status or {}).get("error_message") or recorder_session.error_message,
+        verification_type=(runtime_status or {}).get("verification_type"),
+        verification_screenshot=(runtime_status or {}).get("verification_screenshot"),
+    )
+    return {"success": True, "data": payload}
+
+
+@router.get("/recorder/verification-screenshot")
+async def get_recorder_verification_screenshot():
+    from fastapi.responses import FileResponse
+
+    runtime_status = _read_recorder_runtime_status(recorder_session.status_file)
+    if not runtime_status or runtime_status.get("state") != "login_verification_pending":
+        return error_response(
+            code=ErrorCode.PARAMETER_INVALID,
+            message="当前录制流程不需要验证码截图",
+            status_code=400,
+            recovery_suggestion="请先确认录制状态为等待验证码",
+        )
+
+    filename = runtime_status.get("verification_screenshot") or "verification_screenshot.png"
+    status_dir = Path(recorder_session.status_file).parent if recorder_session.status_file else None
+    file_path = status_dir / filename if status_dir else None
+    if not file_path or not file_path.exists():
+        return error_response(
+            code=ErrorCode.FILE_NOT_FOUND,
+            message="验证码截图文件不存在",
+            status_code=404,
+            recovery_suggestion="请重新触发需要验证码的登录流程",
+        )
+
+    return FileResponse(path=str(file_path), media_type="image/png", filename=filename)
+
+
+@router.post("/recorder/resume")
+async def resume_recorder_verification(body: RecorderResumeRequest):
+    runtime_status = _read_recorder_runtime_status(recorder_session.status_file)
+    if not runtime_status or runtime_status.get("state") != "login_verification_pending":
+        return error_response(
+            code=ErrorCode.PARAMETER_INVALID,
+            message="当前录制流程不在验证码回填状态",
+            status_code=400,
+            recovery_suggestion="请先等待录制流程进入验证码回填状态",
+        )
+
+    value = body.captcha_code or body.otp
+    if not value or not value.strip():
+        return error_response(
+            code=ErrorCode.PARAMETER_INVALID,
+            message="请提供 captcha_code 或 otp",
+            status_code=400,
+            recovery_suggestion="请填写验证码后再提交",
+        )
+
+    if not recorder_session.response_file:
+        return error_response(
+            code=ErrorCode.FILE_NOT_FOUND,
+            message="验证码回填文件未初始化",
+            status_code=500,
+            recovery_suggestion="请重新开始录制流程",
+        )
+
+    response_payload = {}
+    if body.captcha_code:
+        response_payload["captcha_code"] = body.captcha_code.strip()
+    if body.otp:
+        response_payload["otp"] = body.otp.strip()
+
+    try:
+        with open(recorder_session.response_file, "w", encoding="utf-8") as f:
+            json.dump(response_payload, f, ensure_ascii=False)
+    except Exception as e:
+        return error_response(
+            code=ErrorCode.FILE_WRITE_ERROR,
+            message="写入验证码回填文件失败",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
+
+    return {"success": True, "message": "验证码已提交，录制前检查将继续执行"}

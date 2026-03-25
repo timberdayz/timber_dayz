@@ -27,6 +27,36 @@ class RecorderStepResponse(BaseModel):
     optional: bool = False
 
 
+class RecorderStatusData(BaseModel):
+    active: bool
+    state: str
+    gate_stage: Optional[str] = None
+    ready_to_record: bool = False
+    platform: Optional[str] = None
+    component_type: Optional[str] = None
+    steps_count: int = 0
+    started_at: Optional[str] = None
+    error_message: Optional[str] = None
+    verification_type: Optional[str] = None
+    verification_screenshot: Optional[str] = None
+
+
+class RecorderStartResponse(BaseModel):
+    success: bool
+    message: str
+    data: Optional[RecorderStatusData] = None
+
+
+class RecorderStatusResponse(BaseModel):
+    success: bool
+    data: RecorderStatusData
+
+
+class RecorderResumeRequest(BaseModel):
+    captcha_code: Optional[str] = None
+    otp: Optional[str] = None
+
+
 class RecorderSaveRequest(BaseModel):
     """保存组件请求。component_name 由后端从 platform+component_type+data_domain+sub_domain 推导。"""
 
