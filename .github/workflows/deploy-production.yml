@@ -1,10 +1,12 @@
 ﻿name: Deploy to Production
 
 on:
-  # [NOTE] 鏂规A锛氱敓浜у彂甯冨彧閫氳繃 push tag(v*) 瑙﹀彂锛堝悓涓€鏉℃祦姘寸嚎鍐?build -> deploy锛?  push:
+  # [NOTE] 鏂规A锛氱敓浜у彂甯冨彧閫氳繃 push tag(v*) 瑙﹀彂锛堝悓涓€鏉℃祦姘寸嚎鍐?build -> deploy锛?
+  push:
     tags:
       - "v*"
-  # [NOTE] 鎵嬪姩閮ㄧ讲锛氱敤浜庡洖婊氭垨閲嶈瘯锛堜笉浼氶噸鏂?build 闀滃儚锛屽彧閮ㄧ讲鎸囧畾 tag锛?  workflow_dispatch:
+  # [NOTE] 鎵嬪姩閮ㄧ讲锛氱敤浜庡洖婊氭垨閲嶈瘯锛堜笉浼氶噸鏂?build 闀滃儚锛屽彧閮ㄧ讲鎸囧畾 tag锛?
+  workflow_dispatch:
     inputs:
       image_tag:
         description: "Image tag to deploy (e.g., v4.19.7)"
@@ -15,7 +17,8 @@ on:
         required: true
         type: string
 
-# [NOTE] 骞跺彂鎺у埗锛氬悓涓€鏃堕棿鍙厑璁镐竴涓敓浜ч儴缃插湪杩愯锛堥伩鍏嶅甫瀹?璧勬簮鍐茬獊锛?concurrency:
+# [NOTE] 骞跺彂鎺у埗锛氬悓涓€鏃堕棿鍙厑璁镐竴涓敓浜ч儴缃插湪杩愯锛堥伩鍏嶅甫瀹?璧勬簮鍐茬獊锛?
+concurrency:
   group: deploy-production
   cancel-in-progress: true
 
