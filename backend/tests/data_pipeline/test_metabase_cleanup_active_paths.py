@@ -8,7 +8,9 @@ def test_agents_md_no_longer_describes_metabase_as_runtime_fallback():
 
 
 def test_backend_schemas_no_longer_export_metabase_contracts():
-    text = Path("backend/schemas/__init__.py").read_text(encoding="utf-8", errors="replace")
+    text = Path("backend/schemas/__init__.py").read_text(
+        encoding="utf-8", errors="replace"
+    )
 
     assert "backend.schemas.metabase" not in text
     assert "EmbeddingTokenRequest" not in text
@@ -29,8 +31,8 @@ def test_active_runtime_comments_no_longer_claim_metabase_processing():
     ]
 
     banned_phrases = [
-        "在Metabase中完成",
-        "Metabase中完成",
+        "鍦∕etabase涓畬鎴?",
+        "Metabase涓畬鎴?",
         "DB/Metabase",
     ]
 
@@ -47,6 +49,9 @@ def test_active_historical_docs_and_scripts_are_marked_historical():
         Path("docs/deployment/CLOUD_4C8G_REFERENCE.md"),
         Path("docs/deployment/CLOUD_DEPLOYMENT_FILE_CHECK.md"),
         Path("docs/deployment/CLOUD_ENV_UPDATE_CHECKLIST.md"),
+        Path("docs/deployment/ENVIRONMENT_VARIABLES_REFERENCE.md"),
+        Path("docs/deployment/LOCAL_AND_CLOUD_DEPLOYMENT_ROLES.md"),
+        Path("docs/deployment/LOCAL_COLLECTION_DEV.md"),
         Path("docs/guides/QUICK_START_ALL_FEATURES.md"),
         Path("scripts/check_b_class_tables.py"),
         Path("scripts/migrate_tables_to_b_class_schema.py"),
@@ -56,3 +61,39 @@ def test_active_historical_docs_and_scripts_are_marked_historical():
     for path in paths:
         text = path.read_text(encoding="utf-8", errors="replace").lower()
         assert "历史" in text or "historical" in text
+
+
+def test_quick_start_no_longer_recommends_metabase_runtime_steps():
+    text = Path("docs/guides/QUICK_START_ALL_FEATURES.md").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert "python run.py --use-docker --with-metabase --collection" not in text
+    assert "docker-compose -f docker-compose.metabase.yml up -d" not in text
+    assert "Metabase Web UI：http://localhost:8080" not in text
+    assert "PostgreSQL-first" in text
+
+
+def test_local_collection_docs_do_not_treat_with_metabase_as_current_path():
+    paths = [
+        Path("docs/deployment/LOCAL_COLLECTION_DEV.md"),
+        Path("docs/deployment/LOCAL_AND_CLOUD_DEPLOYMENT_ROLES.md"),
+    ]
+
+    for path in paths:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        assert "python run.py --use-docker --with-metabase --collection" not in text
+        assert "docker-compose.metabase.yml --profile dev-full up -d" not in text
+        assert "docker-compose.metabase.dev.yml" not in text
+        assert "historical" in text.lower() or "历史" in text
+
+
+def test_environment_reference_marks_metabase_variables_historical_only():
+    text = Path("docs/deployment/ENVIRONMENT_VARIABLES_REFERENCE.md").read_text(
+        encoding="utf-8",
+        errors="replace",
+    ).lower()
+
+    assert "metabase" in text
+    assert "historical" in text or "历史" in text
