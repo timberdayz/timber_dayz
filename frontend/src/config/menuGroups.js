@@ -178,6 +178,7 @@ export const menuGroups = [
     order: 12,
     defaultExpanded: false,
     items: [
+      '/admin/users/pending',    // 用户审批
       '/user-management',        // 用户管理
       '/role-management',        // 角色管理
       '/permission-management',  // 权限管理

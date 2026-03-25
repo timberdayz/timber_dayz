@@ -63,6 +63,12 @@
                     <component :is="getIconComponent(route.meta.icon)" />
                   </el-icon>
                   <span class="item-text">{{ getDisplayName(route) }}</span>
+                  <el-badge
+                    v-if="getRouteBadgeValue(route.path) > 0"
+                    :value="getRouteBadgeValue(route.path)"
+                    :max="99"
+                    class="route-badge"
+                  />
                 </el-menu-item>
               </el-menu>
             </div>
@@ -88,9 +94,10 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import usersApi from '@/api/users'
 import { menuGroups, routeDisplayNames, deprecatedRoutes } from '@/config/menuGroups'
 import {
   DataBoard,
@@ -121,6 +128,7 @@ const userStore = useUserStore()
 
 // 展开/收起状态
 const expandedGroups = ref({})
+const pendingApprovalCount = ref(0)
 
 // 当前激活的菜单
 const activeMenu = computed(() => route.path)
@@ -158,6 +166,28 @@ const getDisplayName = (routeItem) => {
     return routeDisplayNames[routeItem.path]
   }
   return routeItem.meta?.title || routeItem.path
+}
+
+const getRouteBadgeValue = (path) => {
+  if (path === '/admin/users/pending') {
+    return pendingApprovalCount.value
+  }
+  return 0
+}
+
+const fetchPendingApprovalCount = async () => {
+  if (!userStore.hasRole(['admin'])) return
+  try {
+    const response = await usersApi.getPendingUsersCount()
+    pendingApprovalCount.value = Number(response?.pending_count || 0)
+  } catch (error) {
+    console.error('加载待审批用户数量失败:', error)
+    pendingApprovalCount.value = 0
+  }
+}
+
+const handlePendingUsersUpdated = () => {
+  fetchPendingApprovalCount()
 }
 
 // 计算可见的分组
@@ -287,7 +317,20 @@ const getIconComponent = (iconName) => {
 // 组件挂载时初始化
 onMounted(() => {
   initExpandedState()
+  fetchPendingApprovalCount()
+  window.addEventListener('pending-users-updated', handlePendingUsersUpdated)
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pending-users-updated', handlePendingUsersUpdated)
+})
+
+watch(
+  () => route.fullPath,
+  () => {
+    fetchPendingApprovalCount()
+  }
+)
 </script>
 
 <style scoped>
@@ -424,6 +467,11 @@ onMounted(() => {
 
 .item-text {
   font-size: 14px;
+}
+
+.route-badge {
+  margin-left: auto;
+  margin-right: 8px;
 }
 
 /* 底部信息 */

@@ -129,6 +129,14 @@
                   <div class="notification-time">{{ formatTime(group.latest_notification.created_at) }}</div>
                 </div>
                 <div class="group-actions">
+                  <el-button
+                    v-if="getNotificationRoute(group.notification_type)"
+                    type="success"
+                    size="small"
+                    @click="goToNotificationRoute(group.notification_type)"
+                  >
+                    {{ getNotificationRouteLabel(group.notification_type) }}
+                  </el-button>
                   <el-button 
                     type="primary" 
                     size="small"
@@ -214,6 +222,15 @@
             
             <div class="notification-actions">
               <el-button
+                v-if="getNotificationRoute(notification.notification_type)"
+                type="success"
+                link
+                size="small"
+                @click="goToNotificationRoute(notification.notification_type)"
+              >
+                {{ getNotificationRouteLabel(notification.notification_type) }}
+              </el-button>
+              <el-button
                 v-if="!notification.is_read"
                 type="primary"
                 link
@@ -259,6 +276,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   Bell, 
@@ -277,6 +295,8 @@ import {
 } from '@element-plus/icons-vue'
 import notificationsApi from '@/api/notifications.js'
 import PageHeader from '@/components/common/PageHeader.vue'
+
+const router = useRouter()
 
 // 状态
 const loading = ref(false)
@@ -478,6 +498,38 @@ const getTypeLabel = (type) => {
     'system_alert': '系统告警'
   }
   return labels[type] || type
+}
+
+const getNotificationRoute = (type) => {
+  switch (type) {
+    case 'user_registered':
+      return '/admin/users/pending'
+    case 'user_approved':
+    case 'user_rejected':
+    case 'password_reset':
+      return '/user-management'
+    default:
+      return ''
+  }
+}
+
+const getNotificationRouteLabel = (type) => {
+  switch (type) {
+    case 'user_registered':
+      return '前往审批'
+    case 'user_approved':
+    case 'user_rejected':
+    case 'password_reset':
+      return '用户管理'
+    default:
+      return ''
+  }
+}
+
+const goToNotificationRoute = (type) => {
+  const target = getNotificationRoute(type)
+  if (!target) return
+  router.push(target)
 }
 
 // 格式化时间

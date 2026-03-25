@@ -546,7 +546,9 @@ async def execute_notification_action(
         raise HTTPException(status_code=400, detail="No target user associated with this notification")
     
     result = await db.execute(
-        select(DimUser).where(DimUser.user_id == target_user_id)
+        select(DimUser)
+        .where(DimUser.user_id == target_user_id)
+        .options(selectinload(DimUser.roles))
     )
     target_user = result.scalar_one_or_none()
     
@@ -573,6 +575,15 @@ async def execute_notification_action(
         target_user.is_active = True
         target_user.approved_at = datetime.now(timezone.utc)
         target_user.approved_by = current_user.user_id
+
+        if not list(getattr(target_user, "roles", []) or []):
+            role_result = await db.execute(
+                select(DimRole).where(DimRole.role_code == "operator")
+            )
+            operator_role = role_result.scalar_one_or_none()
+            if not operator_role:
+                raise HTTPException(status_code=500, detail="Default operator role not found")
+            target_user.roles.append(operator_role)
         
         await db.commit()
         
@@ -1215,4 +1226,3 @@ async def revoke_all_user_sessions(
         logger.info(f"[OK] Revoked {revoked_count} sessions for user {user_id}: {reason}")
     
     return revoked_count
-

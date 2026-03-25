@@ -989,3 +989,20 @@ async def get_pending_users(
         )
         for user in users
     ]
+
+
+@router.get("/pending-count")
+@role_based_rate_limit(endpoint_type="default")
+async def get_pending_users_count(
+    request: Request,
+    current_user: DimUser = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """获取待审批用户总数。"""
+    from sqlalchemy import func
+
+    result = await db.execute(
+        select(func.count(DimUser.user_id)).where(DimUser.status == "pending")
+    )
+    pending_count = result.scalar() or 0
+    return success_response(data={"pending_count": pending_count})

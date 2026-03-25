@@ -112,6 +112,8 @@ import usersApi from '@/api/users.js'
 import { useNotificationWebSocket } from '@/services/notificationWebSocket'
 
 const router = useRouter()
+const SYSTEM_NOTIFICATIONS_ROUTE = '/system-notifications'
+const USER_APPROVAL_ROUTE = '/admin/users/pending'
 
 // 状态
 const showPopover = ref(false)
@@ -288,23 +290,23 @@ const handleNotificationClick = async (notification) => {
   switch (notification.notification_type) {
     case 'user_registered':
       // 跳转到用户审批页面
-      router.push('/system-settings/user-approval')
+      router.push(USER_APPROVAL_ROUTE)
       break
     case 'user_approved':
     case 'user_rejected':
     case 'password_reset':
-      // 跳转到通知列表页面
-      router.push('/messages/notifications')
+      // 跳转到系统通知页面
+      router.push(SYSTEM_NOTIFICATIONS_ROUTE)
       break
     default:
-      router.push('/messages/notifications')
+      router.push(SYSTEM_NOTIFICATIONS_ROUTE)
   }
 }
 
 // 跳转到通知页面
 const goToNotifications = () => {
   showPopover.value = false
-  router.push('/messages/notifications')
+  router.push(SYSTEM_NOTIFICATIONS_ROUTE)
 }
 
 // 截断内容
@@ -416,6 +418,9 @@ const executeQuickAction = async (notification, actionType, reason, loadingKey) 
     
     if (response && response.success) {
       ElMessage.success(response.message || 'Operation successful')
+      if (actionType === 'approve_user' || actionType === 'reject_user') {
+        window.dispatchEvent(new CustomEvent('pending-users-updated'))
+      }
       
       // 标记通知为已读并移除操作按钮
       notification.is_read = true

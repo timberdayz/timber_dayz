@@ -4,7 +4,13 @@
       title="用户管理"
       subtitle="管理用户账号、角色分配、密码重置与软删除恢复。"
       family="admin"
-    />
+    >
+      <template #actions>
+        <el-button type="primary" plain @click="$router.push('/admin/users/pending')">
+          用户审批
+        </el-button>
+      </template>
+    </PageHeader>
 
     <!-- 操作栏 -->
     <el-card class="action-card">

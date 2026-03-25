@@ -1,9 +1,16 @@
 <template>
   <div class="user-approval">
-    <div class="page-header">
-      <h1>用户审批</h1>
-      <p>审批待审核的新用户注册申请</p>
-    </div>
+    <PageHeader
+      title="用户审批"
+      subtitle="审批待审核的新用户注册申请。"
+      family="admin"
+    >
+      <template #actions>
+        <el-button type="primary" plain @click="$router.push('/user-management')">
+          用户管理
+        </el-button>
+      </template>
+    </PageHeader>
 
     <el-card class="table-card">
       <template #header>
@@ -150,6 +157,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import usersApi from '@/api/users'
 import rolesApi from '@/api/roles'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 const loading = ref(false)
 const pendingUsers = ref([])
@@ -257,10 +265,12 @@ const confirmApprove = async () => {
     })
 
     // [*] 校验后端返回的审批结果，避免出现“前端提示成功但实际未生效”
-    if (result && result.status === 'active') {
+    const approvedStatus = result?.status ?? result?.data?.status
+    if (approvedStatus === 'active') {
       ElMessage.success('用户批准成功')
+      window.dispatchEvent(new CustomEvent('pending-users-updated'))
     } else {
-      ElMessage.warning(`用户已提交批准请求，但状态未变为active（当前：${result?.status || 'unknown'}）`)
+      ElMessage.warning(`用户已提交批准请求，但状态未变为active（当前：${approvedStatus || 'unknown'}）`)
     }
 
     approveDialogVisible.value = false
@@ -296,6 +306,7 @@ const confirmReject = async () => {
       })
       
       ElMessage.success('用户已拒绝')
+      window.dispatchEvent(new CustomEvent('pending-users-updated'))
       rejectDialogVisible.value = false
       await loadPendingUsers()
     } catch (error) {

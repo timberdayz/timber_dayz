@@ -130,6 +130,14 @@ export default {
   },
 
   /**
+   * 获取待审批用户数量
+   * @returns {Promise<{pending_count:number}>}
+   */
+  async getPendingUsersCount() {
+    return await api._get('/users/pending-count')
+  },
+
+  /**
    * 获取当前用户的所有活跃会话
    * @returns {Promise} 会话列表
    */
