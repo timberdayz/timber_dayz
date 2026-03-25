@@ -9,7 +9,7 @@ import api from './index'
 
 export default {
   async listAccounts(params = {}) {
-    return await api.get('/accounts', { params })
+    return await api.get('/accounts/', { params })
   },
 
   async getAccount(accountId) {

@@ -17,6 +17,12 @@ def test_runtime_files_do_not_reference_import_from_local():
         assert "import-from-local" not in text
 
 
+def test_accounts_api_uses_trailing_slash_for_list_endpoint():
+    text = Path("frontend/src/api/accounts.js").read_text(encoding="utf-8")
+
+    assert "api.get('/accounts/', { params })" in text
+
+
 def test_account_management_import_from_local_route_removed():
     paths = {route.path for route in app.routes if hasattr(route, "path")}
 
