@@ -216,7 +216,18 @@
 
         <!-- 录制说明 -->
         <el-alert
-          v-if="!isRecording"
+          v-if="recorderRuntimeState === 'failed_before_recording'"
+          type="error"
+          title="录制前检查未通过"
+          :closable="false"
+          style="margin-top: 20px"
+        >
+          <p>{{ recorderRuntimeStatus.error_message || "登录门禁未通过，未进入录制阶段" }}</p>
+          <p>请先完成自动登录或处理登录异常后，再重新开始录制。</p>
+        </el-alert>
+
+        <el-alert
+          v-else-if="!isRecording"
           type="info"
           title="录制说明"
           :closable="false"
@@ -229,6 +240,65 @@
           <p>5. 在右侧编辑和完善组件配置</p>
           <p>6. 保存后请前往版本管理页测试并提升为稳定版，只有稳定版可用于正式采集</p>
         </el-alert>
+
+        <el-alert
+          v-else-if="recorderRuntimeState !== 'inspector_recording'"
+          type="warning"
+          title="录制前检查中"
+          :closable="false"
+          style="margin-top: 20px"
+        >
+          <p>{{ recorderRuntimeStatusText }}</p>
+          <p>在通过 login gate 之前，系统不会打开真正的录制流程。</p>
+        </el-alert>
+
+        <div
+          v-if="verificationRequired"
+          class="verification-required-card"
+          style="margin-top: 20px"
+        >
+          <el-card>
+            <template #header>
+              <span>需要验证码</span>
+            </template>
+            <p
+              v-if="!isOtpVerification"
+              style="margin-bottom: 12px; color: #606266"
+            >
+              请根据下方截图输入图形验证码，提交后录制前检查会继续执行。
+            </p>
+            <p v-else style="margin-bottom: 12px; color: #606266">
+              请输入收到的短信/邮件验证码，提交后录制前检查会继续执行。
+            </p>
+            <div v-if="!isOtpVerification" style="margin-bottom: 16px">
+              <img
+                :src="verificationRequired.screenshotUrl"
+                alt="验证码截图"
+                style="
+                  max-width: 100%;
+                  max-height: 200px;
+                  border: 1px solid #dcdfe6;
+                  border-radius: 4px;
+                "
+                @error="($event.target).style.display = 'none'"
+              />
+            </div>
+            <el-input
+              v-model="verificationInput"
+              :placeholder="isOtpVerification ? '请输入短信/邮件验证码' : '请输入验证码'"
+              style="max-width: 280px; margin-right: 12px"
+              clearable
+              @keyup.enter="submitRecorderVerification"
+            />
+            <el-button
+              type="primary"
+              :loading="verificationSubmitting"
+              @click="submitRecorderVerification"
+            >
+              提交
+            </el-button>
+          </el-card>
+        </div>
 
         <el-alert
           v-else
@@ -892,6 +962,17 @@ const recorderForm = ref({
 });
 
 const isRecording = ref(false);
+const recorderRuntimeStatus = ref({
+  state: "idle",
+  gate_stage: null,
+  ready_to_record: false,
+  error_message: null,
+  verification_type: null,
+  verification_screenshot: null,
+});
+const verificationRequired = ref(null);
+const verificationInput = ref("");
+const verificationSubmitting = ref(false);
 const recordedSteps = ref([]);
 const accounts = ref([]);
 const accountsLoading = ref(false); // ⭐ Phase 9完善：账号加载状态
@@ -1054,13 +1135,51 @@ const batchDeleteSelected = () => {
 };
 
 const recordingStatus = computed(() => {
-  if (isRecording.value) {
+  if (recorderRuntimeStatus.value.state === "failed_before_recording") {
+    return { text: "门禁失败", type: "danger" };
+  } else if (recorderRuntimeStatus.value.state === "login_verification_pending") {
+    return { text: "等待验证码", type: "warning" };
+  } else if (recorderRuntimeStatus.value.state === "inspector_recording") {
     return { text: "录制中", type: "success" };
+  } else if (
+    isRecording.value &&
+    recorderRuntimeStatus.value.state &&
+    recorderRuntimeStatus.value.state !== "idle"
+  ) {
+    return { text: "检查中", type: "warning" };
   } else if (hasSteps.value) {
     return { text: "已完成", type: "info" };
   } else {
     return { text: "未开始", type: "info" };
   }
+});
+
+const recorderRuntimeState = computed(
+  () => recorderRuntimeStatus.value.state || "idle"
+);
+
+const recorderRuntimeStatusText = computed(() => {
+  const state = recorderRuntimeStatus.value.state;
+  if (state === "starting") return "录制子进程已启动，正在准备浏览器上下文。";
+  if (state === "login_checking") return "正在检查当前账号是否已满足登录门禁。";
+  if (state === "login_verification_pending")
+    return "登录过程需要验证码，提交后系统会继续完成登录门禁。";
+  if (state === "login_ready") return "登录门禁已通过，正在进入录制界面。";
+  if (state === "inspector_recording") return "浏览器已进入 Inspector 录制状态。";
+  if (state === "failed_before_recording") {
+    return recorderRuntimeStatus.value.error_message || "录制前检查失败。";
+  }
+  return "正在准备录制。";
+});
+
+const isOtpVerification = computed(() => {
+  const verificationType =
+    verificationRequired.value?.verificationType ||
+    recorderRuntimeStatus.value.verification_type ||
+    "";
+  return ["otp", "sms", "email_code"].includes(
+    String(verificationType).toLowerCase()
+  );
 });
 
 // ⭐ Phase 9完善：筛选已启用的账号
@@ -1142,7 +1261,17 @@ watch(
 const startRecording = async () => {
   try {
     isRecording.value = true;
-    ElMessage.info("正在打开浏览器窗口...");
+    recorderRuntimeStatus.value = {
+      state: "starting",
+      gate_stage: "login_gate",
+      ready_to_record: false,
+      error_message: null,
+      verification_type: null,
+      verification_screenshot: null,
+    };
+    verificationRequired.value = null;
+    verificationInput.value = "";
+    ElMessage.info("录制流程已启动，正在进行录制前检查...");
 
     const response = await api.post("/collection/recorder/start", {
       platform: recorderForm.value.platform,
@@ -1151,7 +1280,12 @@ const startRecording = async () => {
     });
 
     if (response.success) {
-      ElMessage.success("录制已开始，请在浏览器中执行操作");
+      if (response.data) {
+        recorderRuntimeStatus.value = {
+          ...recorderRuntimeStatus.value,
+          ...response.data,
+        };
+      }
 
       // 开始轮询录制状态
       startPollingSteps();
@@ -1275,6 +1409,35 @@ let pollingInterval = null;
 const startPollingSteps = () => {
   pollingInterval = setInterval(async () => {
     try {
+      const statusResponse = await api.get("/collection/recorder/status");
+      if (statusResponse.success && statusResponse.data) {
+        recorderRuntimeStatus.value = {
+          ...recorderRuntimeStatus.value,
+          ...statusResponse.data,
+        };
+        if (statusResponse.data.state === "login_verification_pending") {
+          const base = (import.meta.env.VITE_API_BASE_URL || "/api").replace(
+            /\/$/,
+            ""
+          );
+          verificationRequired.value = {
+            verificationType:
+              statusResponse.data.verification_type || "graphical_captcha",
+            screenshotUrl: `${base}/collection/recorder/verification-screenshot?ts=${Date.now()}`,
+          };
+        } else if (statusResponse.data.state !== "failed_before_recording") {
+          verificationRequired.value = null;
+        }
+        if (statusResponse.data.state === "failed_before_recording") {
+          isRecording.value = false;
+          stopPollingSteps();
+          ElMessage.error(
+            statusResponse.data.error_message || "录制前检查失败，未进入录制阶段"
+          );
+          return;
+        }
+      }
+
       const response = await api.get("/collection/recorder/steps");
 
       if (response.success && response.data) {
@@ -1290,6 +1453,31 @@ const stopPollingSteps = () => {
   if (pollingInterval) {
     clearInterval(pollingInterval);
     pollingInterval = null;
+  }
+};
+
+const submitRecorderVerification = async () => {
+  if (!verificationInput.value.trim()) return;
+  verificationSubmitting.value = true;
+  try {
+    const payload = isOtpVerification.value
+      ? { otp: verificationInput.value.trim() }
+      : { captcha_code: verificationInput.value.trim() };
+    await api.post("/collection/recorder/resume", payload);
+    ElMessage.success("验证码已提交，录制前检查将继续执行");
+    verificationRequired.value = null;
+    verificationInput.value = "";
+    recorderRuntimeStatus.value = {
+      ...recorderRuntimeStatus.value,
+      state: "login_checking",
+      error_message: null,
+    };
+  } catch (error) {
+    ElMessage.error(
+      error.response?.data?.detail || error.message || "验证码提交失败"
+    );
+  } finally {
+    verificationSubmitting.value = false;
   }
 };
 

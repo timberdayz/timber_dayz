@@ -23,6 +23,11 @@ from modules.core.logger import get_logger
 from modules.apps.collection_center.component_loader import ComponentLoader
 from modules.apps.collection_center.popup_handler import UniversalPopupHandler, StepPopupHandler
 from modules.apps.collection_center.python_component_adapter import PythonComponentAdapter, create_adapter
+from modules.apps.collection_center.transition_gates import (
+    GateStatus,
+    evaluate_export_complete,
+    evaluate_login_ready,
+)
 
 logger = get_logger(__name__)
 
@@ -258,6 +263,29 @@ class CollectionExecutorV2:
         self.use_python_components = True  # 默认使用 Python 组件
         
         logger.info("CollectionExecutorV2 initialized (Python components mode)")
+
+    async def _ensure_login_gate_ready(self, page: Any, platform: str) -> None:
+        from modules.utils.login_status_detector import LoginStatusDetector
+
+        detector = LoginStatusDetector(platform, debug=False)
+        detection_result = await detector.detect(page, wait_for_redirect=True)
+        gate_result = evaluate_login_ready(
+            status=detection_result.status.value,
+            confidence=detection_result.confidence,
+            current_url=str(getattr(page, "url", "") or ""),
+            matched_signal=detection_result.matched_pattern or detection_result.detected_by,
+        )
+        if gate_result.status is not GateStatus.READY:
+            raise StepExecutionError(
+                f"login gate not ready: status={detection_result.status.value}, "
+                f"confidence={detection_result.confidence:.2f}, url={getattr(page, 'url', '')}"
+            )
+
+    def _ensure_export_complete(self, file_path: Optional[str]) -> Optional[str]:
+        gate_result = evaluate_export_complete(file_path=file_path)
+        if gate_result.status is not GateStatus.READY:
+            raise StepExecutionError(f"export completion failed: {gate_result.reason}")
+        return file_path
     
     def _load_component_with_version(
         self,
@@ -779,6 +807,7 @@ class CollectionExecutorV2:
                             task_download_dir
                         )
                         
+                        file_path = self._ensure_export_complete(file_path) if file_path else file_path
                         if file_path:
                             context.collected_files.append(file_path)
                         # v4.7.0: 标记为成功 + 步骤结束打点
@@ -836,6 +865,7 @@ class CollectionExecutorV2:
                             params.setdefault("params", {})["captcha_code"] = value
                         try:
                             file_path = await self._execute_export_component(page, export_component, step_popup_handler, task_download_dir)
+                            file_path = self._ensure_export_complete(file_path) if file_path else file_path
                             if file_path:
                                 context.collected_files.append(file_path)
                             context.completed_domains.append(full_domain)
@@ -1215,6 +1245,7 @@ class CollectionExecutorV2:
             if not login_success:
                 raise StepExecutionError("登录组件执行失败")
 
+            await self._ensure_login_gate_ready(page, platform)
             logger.info(f"Task {task_id}: [Python] Login completed successfully (reused_session=%s)", params.get("reused_session", False))
             if save_session_after_login and session_platform and session_account_id:
                 try:
@@ -1289,8 +1320,9 @@ class CollectionExecutorV2:
                         )
                     
                     if export_result.success:
-                        if export_result.file_path:
-                            context.collected_files.append(export_result.file_path)
+                        file_path = self._ensure_export_complete(export_result.file_path)
+                        if file_path:
+                            context.collected_files.append(file_path)
                         context.completed_domains.append(full_domain)
                         logger.info(f"Task {task_id}: [Python] Successfully collected {full_domain}")
                     else:
@@ -1339,8 +1371,9 @@ class CollectionExecutorV2:
                             domain_adapter = create_adapter(platform=platform, account=account, config=export_params)
                             export_result = await domain_adapter.export(page=page, data_domain=domain)
                         if export_result.success:
-                            if export_result.file_path:
-                                context.collected_files.append(export_result.file_path)
+                            file_path = self._ensure_export_complete(export_result.file_path)
+                            if file_path:
+                                context.collected_files.append(file_path)
                             context.completed_domains.append(full_domain)
                             logger.info(f"Task {task_id}: [Python] Successfully collected {full_domain} (after verification)")
                         else:
@@ -3055,6 +3088,7 @@ class CollectionExecutorV2:
             )
             if not login_success:
                 raise StepExecutionError("登录组件执行失败")
+            await self._ensure_login_gate_ready(login_page, platform)
             cookies = await login_context.cookies()
             storage_state = await login_context.storage_state()
             logger.info(f"Task {task_id}: Login completed, extracted {len(cookies)} cookies (reused_session=%s)", reused_session)
@@ -3266,7 +3300,7 @@ class CollectionExecutorV2:
                     page=domain_page,
                     data_domain=data_domain,
                 )
-            file_path = export_result.file_path if export_result.success else None
+            file_path = self._ensure_export_complete(export_result.file_path) if export_result.success else None
             duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
             await self._update_status(
                 task_id, progress, f"[并行] 采集 {data_domain} " + ("成功" if export_result.success else "失败"),

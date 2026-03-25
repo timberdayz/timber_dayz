@@ -1,5 +1,11 @@
 # 组件协作机制
 
+> 2026-03-24 更新：
+> - `login` 是录制、测试、运行时的统一门禁，不是 `export` 内部业务步骤。
+> - `export` 是自包含容器组件。
+> - `navigation`、`shop_switch`、`date_picker`、`filters` 是 `export` 内部带标签子步骤或可复用子能力。
+> - 组件之间的衔接必须依赖可判定完成信号，而不是“点击过某个按钮就继续”。
+
 本文档说明数据采集组件之间如何协作工作。
 
 ## 目录
@@ -484,4 +490,3 @@ steps:
 - [组件录制指南](./COMPONENT_RECORDING_GUIDE.md) - 如何录制组件
 - [快速启动指南](./QUICK_START_ALL_FEATURES.md) - 系统快速上手
 - [V4.6.0 架构指南](../architecture/V4_6_0_ARCHITECTURE_GUIDE.md) - 系统架构说明
-

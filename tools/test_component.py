@@ -31,6 +31,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from modules.core.logger import get_logger
 from modules.apps.collection_center.component_loader import ComponentLoader
+from modules.apps.collection_center.transition_gates import (
+    GateStatus,
+    evaluate_export_complete,
+    evaluate_login_ready,
+)
 from backend.routers.component_versions import CANONICAL_COMPONENT_FILES
 
 logger = get_logger(__name__)
@@ -155,6 +160,38 @@ class ComponentTester:
         if params:
             cfg["params"] = params
         return cfg
+
+    async def _check_login_gate(self, page, result: ComponentTestResult, component_name: str) -> bool:
+        from modules.utils.login_status_detector import LoginStatusDetector
+
+        detector = LoginStatusDetector(self.platform, debug=False)
+        detection_result = await detector.detect(page, wait_for_redirect=True)
+        gate_result = evaluate_login_ready(
+            status=detection_result.status.value,
+            confidence=detection_result.confidence,
+            current_url=str(getattr(page, "url", "") or ""),
+            matched_signal=detection_result.matched_pattern or detection_result.detected_by,
+        )
+        if gate_result.status is GateStatus.READY:
+            return True
+
+        result.phase = "login"
+        result.phase_component_name = component_name
+        result.error = (
+            f"login gate not ready: status={detection_result.status.value}, "
+            f"confidence={detection_result.confidence:.2f}, url={getattr(page, 'url', '')}"
+        )
+        return False
+
+    def _check_export_complete_gate(self, file_path: Optional[str], result: ComponentTestResult, component_name: str) -> bool:
+        gate_result = evaluate_export_complete(file_path=file_path)
+        if gate_result.status is GateStatus.READY:
+            return True
+
+        result.phase = "export"
+        result.phase_component_name = component_name
+        result.error = gate_result.reason
+        return False
     
     def get_account_info(self) -> Optional[Dict[str, Any]]:
         """获取账号信息（优先使用传入的account_info）"""
@@ -703,19 +740,36 @@ class ComponentTester:
                 context = await browser.new_context(**context_options)
                 page = await context.new_page()
 
-                # 1.6: 非登录组件且未复用会话时先执行登录（同一 browser/context）
-                if component_type in non_login_types and not self.skip_login and not storage_state:
-                    login_ok = await self._run_login_before_non_login(
-                        browser=None,
-                        context=context,
-                        page=page,
-                        account_info=account_info,
-                        result=result,
-                    )
-                    if not login_ok:
-                        await context.close()
-                        await browser.close()
-                        return False
+                # 非登录组件统一走 login gate：先检查复用会话是否已满足，否则执行登录前置
+                if component_type in non_login_types and not self.skip_login:
+                    login_gate_ready = False
+                    if storage_state:
+                        login_gate_ready = await self._check_login_gate(
+                            page=page,
+                            result=result,
+                            component_name=f"{self.platform}/login",
+                        )
+                    if not login_gate_ready:
+                        login_ok = await self._run_login_before_non_login(
+                            browser=None,
+                            context=context,
+                            page=page,
+                            account_info=account_info,
+                            result=result,
+                        )
+                        if not login_ok:
+                            await context.close()
+                            await browser.close()
+                            return False
+                        login_gate_ready = await self._check_login_gate(
+                            page=page,
+                            result=result,
+                            component_name=f"{self.platform}/login",
+                        )
+                        if not login_gate_ready:
+                            await context.close()
+                            await browser.close()
+                            return False
 
                 # 1.8: date_picker/filters standalone 模式先导航并执行 pre_steps
                 if component_type in ('date_picker', 'filters') and standalone_test_config:
@@ -859,6 +913,13 @@ class ComponentTester:
                             result.phase_component_name = result.phase_component_name or f"{self.platform}/{component_name}"
 
                 test_passed = exec_result.success and success_criteria_passed
+                if test_passed and component_type == 'export':
+                    file_path = getattr(exec_result, "file_path", None)
+                    test_passed = self._check_export_complete_gate(
+                        file_path=file_path,
+                        result=result,
+                        component_name=f"{self.platform}/{component_name}",
+                    )
 
                 step_result = StepResult(
                     step_id='python_component_1',

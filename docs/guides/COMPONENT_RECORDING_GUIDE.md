@@ -1,5 +1,10 @@
 # 组件录制指南（历史参考，非现行规范）
 
+> 2026-03-24 补充现行要求：
+> - 录制 `export` 组件前，必须先通过 `login_gate`，否则不得打开 Inspector。
+> - 若自动登录后仍未确认 `login_ready`，录制应在门禁阶段失败，而不是从登录页继续录制。
+> - `export` 录制的是完整容器流程；`navigation`、`date_picker`、`filters` 在步骤中以标签标记，不作为顶层执行顺序单独外置。
+
 本页包含早期录制流程说明，保留用于历史排查。**现行规范请以以下文档为准**：
 
 - `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`（采集脚本编写唯一规范基线）
@@ -510,4 +515,3 @@ A:
 - [组件协作机制](./COMPONENT_COLLABORATION.md) - 组件间如何协作
 - [快速启动指南](./QUICK_START_ALL_FEATURES.md) - 系统快速上手
 - [V4.6.0 架构指南](../architecture/V4_6_0_ARCHITECTURE_GUIDE.md) - 系统架构说明
-

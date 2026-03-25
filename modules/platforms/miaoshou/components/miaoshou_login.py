@@ -40,6 +40,9 @@ class MiaoshouMiaoshouLogin(LoginComponent):
     async def run(self, page: Any) -> LoginResult:
         acc = self.ctx.account or {}
         config = self.ctx.config or {}
+        current_url = str(getattr(page, "url", "") or "")
+        if self._login_looks_successful(current_url):
+            return LoginResult(success=True, message="already logged in")
         # 若有弹窗在此 wait 再点击关闭
         # 恢复路径：若有回传的验证码/OTP，同页继续，不 goto
         params = config.get("params") or {}
