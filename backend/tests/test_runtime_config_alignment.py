@@ -107,3 +107,12 @@ def test_remote_production_deploy_does_not_start_celery_exporter_by_default():
 
     assert 'up -d backend celery-worker celery-beat celery-exporter' not in deploy_script
     assert 'up -d backend celery-worker celery-beat' in deploy_script
+
+
+def test_remote_production_deploy_removes_legacy_celery_exporter_container():
+    deploy_script = (
+        PROJECT_ROOT / "scripts" / "deploy_remote_production.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "xihong_erp_celery_exporter" in deploy_script
+    assert "Removing legacy Celery exporter container" in deploy_script

@@ -861,6 +861,14 @@ if docker ps -a --format '{{.Names}}' | grep -q '^xihong_erp_metabase$'; then
   echo "[OK] Legacy Metabase container removed"
 fi
 
+# [LEGACY CLEANUP] Cloud mainstation no longer keeps Celery exporter by default.
+if docker ps -a --format '{{.Names}}' | grep -q '^xihong_erp_celery_exporter$'; then
+  echo "[INFO] Removing legacy Celery exporter container..."
+  docker stop xihong_erp_celery_exporter 2>/dev/null || true
+  docker rm xihong_erp_celery_exporter 2>/dev/null || true
+  echo "[OK] Legacy Celery exporter container removed"
+fi
+
 # [IMAGE_CLEANUP] Clean up old Docker images (keep latest N versions)
 # 在部署成功后执行清理，释放磁盘空间
 cleanup_old_images
