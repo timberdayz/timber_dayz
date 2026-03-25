@@ -34,10 +34,10 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 2G
+          memory: 1.5G
         reservations:
           cpus: "1"
-          memory: 1G
+          memory: 768M
 
   celery-worker:
     command: celery -A backend.celery_app worker --loglevel=info --queues=data_sync,scheduled,data_processing --concurrency=2
@@ -45,10 +45,10 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: 1G
+          memory: 768M
         reservations:
           cpus: "0.5"
-          memory: 512M
+          memory: 384M
 
   redis:
     command:

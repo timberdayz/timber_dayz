@@ -81,3 +81,29 @@ def test_dev_celery_healthcheck_does_not_depend_on_ps_binary():
     health_test = compose["services"]["celery-worker"]["healthcheck"]["test"]
 
     assert "ps aux" not in " ".join(str(part) for part in health_test)
+
+
+def test_cloud_overlay_increases_celery_beat_memory_limit():
+    compose = _read_yaml("docker-compose.cloud.yml")
+    beat_limits = compose["services"]["celery-beat"]["deploy"]["resources"]["limits"]
+
+    assert beat_limits["memory"] == "256M"
+
+
+def test_cloud_4c8g_overlay_sets_balanced_backend_and_worker_memory_limits():
+    compose = _read_yaml("docker-compose.cloud-4c8g.yml")
+
+    backend_limits = compose["services"]["backend"]["deploy"]["resources"]["limits"]
+    worker_limits = compose["services"]["celery-worker"]["deploy"]["resources"]["limits"]
+
+    assert backend_limits["memory"] == "1.5G"
+    assert worker_limits["memory"] == "768M"
+
+
+def test_remote_production_deploy_does_not_start_celery_exporter_by_default():
+    deploy_script = (
+        PROJECT_ROOT / "scripts" / "deploy_remote_production.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'up -d backend celery-worker celery-beat celery-exporter' not in deploy_script
+    assert 'up -d backend celery-worker celery-beat' in deploy_script

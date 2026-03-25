@@ -791,7 +791,7 @@ fi
 echo "[OK] Bootstrap completed successfully"
 
 echo "[INFO] Phase 3: starting application layer (backend, celery)..."
-"${compose_cmd_base[@]}" up -d backend celery-worker celery-beat celery-exporter
+"${compose_cmd_base[@]}" up -d backend celery-worker celery-beat
 
 echo "[INFO] Waiting for backend health..."
 for i in $(seq 1 60); do
