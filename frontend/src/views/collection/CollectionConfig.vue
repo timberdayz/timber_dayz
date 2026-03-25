@@ -179,18 +179,24 @@
           </el-checkbox-group>
         </el-form-item>
 
-        <el-form-item 
-          v-if="form.data_domains.includes('services')" 
-          label="服务子域"
+        <el-form-item
+          v-for="domain in selectedSubtypeDomains"
+          :key="`subtype-${domain}`"
+          :label="`${getDomainLabel(domain)}子类型`"
         >
           <div class="sub-domains-group">
-            <el-checkbox-group v-model="form.sub_domains">
-              <el-checkbox label="agent">人工客服</el-checkbox>
-              <el-checkbox label="ai_assistant">智能客服</el-checkbox>
+            <el-checkbox-group v-model="form.sub_domains[domain]">
+              <el-checkbox
+                v-for="option in getSubtypeOptions(domain)"
+                :key="option.value"
+                :label="option.value"
+              >
+                {{ option.label }}
+              </el-checkbox>
             </el-checkbox-group>
-            <el-button size="small" @click="selectAllSubDomains">全选</el-button>
+            <el-button size="small" @click="selectAllSubDomains(domain)">全选</el-button>
           </div>
-          <div class="form-hint">可多选，执行时将按顺序采集</div>
+          <div class="form-hint">按数据域绑定子类型，后续新增别的数据域子类型时可直接扩展</div>
         </el-form-item>
 
         <el-form-item label="日期范围" prop="date_range_type">
@@ -236,10 +242,9 @@
 
         <el-form-item v-if="form.schedule_enabled" label="执行时间">
           <el-select v-model="form.schedule_cron" placeholder="选择执行频率">
+            <el-option label="每天 4 次（06:00/12:00/18:00/22:00）" value="0 6,12,18,22 * * *" />
             <el-option label="每天 00:00" value="0 0 * * *" />
             <el-option label="每天 06:00" value="0 6 * * *" />
-            <el-option label="每天 12:00" value="0 12 * * *" />
-            <el-option label="每天 18:00" value="0 18 * * *" />
             <el-option label="每周一 00:00" value="0 0 * * 1" />
             <el-option label="每月1号 00:00" value="0 0 1 * *" />
           </el-select>
@@ -360,6 +365,13 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, MagicStick, CopyDocument } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
+import {
+  buildDateRangeFromPreset,
+  getDatePresetLabel,
+  getSelectedSubtypeDomains,
+  getSubtypeOptions,
+  normalizeDomainSubtypeMap,
+} from '@/constants/collection'
 
 // 状态
 const loading = ref(false)
@@ -384,7 +396,7 @@ const form = reactive({
   platform: '',
   account_ids: [],
   data_domains: [],
-  sub_domains: [],  // v4.7.0: 改为数组
+  sub_domains: {},
   granularity: 'daily',  // 保留用于后端推断
   date_range_type: 'yesterday',
   custom_date_start: null,
@@ -423,12 +435,28 @@ const filteredAccounts = computed(() => {
   )
 })
 
+const selectedSubtypeDomains = computed(() =>
+  getSelectedSubtypeDomains(form.data_domains)
+)
+
 // v4.7.0: 监听平台和数据域变化，自动生成配置名
 watch([() => form.platform, () => form.data_domains], () => {
   if (!isEdit.value && form.platform && form.data_domains.length > 0) {
     generateConfigName()
   }
 }, { deep: true })
+
+watch(
+  () => [...form.data_domains],
+  (domains) => {
+    const allowedDomains = new Set(getSelectedSubtypeDomains(domains))
+    for (const domain of Object.keys(form.sub_domains || {})) {
+      if (!allowedDomains.has(domain)) {
+        delete form.sub_domains[domain]
+      }
+    }
+  }
+)
 
 // 方法
 const loadConfigs = async () => {
@@ -471,7 +499,7 @@ const editConfig = (row) => {
     platform: row.platform,
     account_ids: row.account_ids || [],
     data_domains: row.data_domains || [],
-    sub_domains: row.sub_domains || [],  // v4.7.0: 数组
+    sub_domains: normalizeDomainSubtypeMap(row.sub_domains),
     granularity: row.granularity || 'daily',
     date_range_type: row.date_range_type || 'yesterday',
     custom_date_start: row.custom_date_start,
@@ -494,7 +522,7 @@ const resetForm = () => {
     platform: '',
     account_ids: [],
     data_domains: [],
-    sub_domains: [],  // v4.7.0: 数组
+    sub_domains: {},
     granularity: 'daily',
     date_range_type: 'yesterday',
     custom_date_start: null,
@@ -563,19 +591,23 @@ const toggleActive = async (row) => {
 
 const runConfig = async (row) => {
   try {
+    const dateRange = buildDateRangeFromPreset(row.date_range_type, {
+      platform: row.platform,
+      customRange:
+        row.date_range_type === 'custom' && row.custom_date_start && row.custom_date_end
+          ? [row.custom_date_start, row.custom_date_end]
+          : [],
+    })
+
     // 为每个账号创建任务
     for (const accountId of row.account_ids) {
       await collectionApi.createTask({
         platform: row.platform,
         account_id: accountId,
         data_domains: row.data_domains,
-        sub_domain: row.sub_domain,
+        sub_domains: row.sub_domains || {},
         granularity: row.granularity,
-        date_range: {
-          type: row.date_range_type,
-          start_date: row.custom_date_start,
-          end_date: row.custom_date_end
-        }
+        date_range: dateRange
       })
     }
     ElMessage.success(`已创建 ${row.account_ids.length} 个采集任务`)
@@ -640,19 +672,7 @@ const generateConfigName = () => {
 
 // 功能2: 平台对齐的日期标签
 const getPlatformDateLabel = (dateType) => {
-  const labels = {
-    'last_7_days': {
-      'shopee': '最近7天',
-      'tiktok': '最近7天',
-      'miaoshou': '最近7天'
-    },
-    'last_30_days': {
-      'shopee': '最近30天',
-      'tiktok': '最近28天',
-      'miaoshou': '最近30天'
-    }
-  }
-  return labels[dateType]?.[form.platform] || labels[dateType]?.['shopee'] || dateType
+  return getDatePresetLabel(dateType, form.platform)
 }
 
 const getDateRangeHint = () => {
@@ -667,8 +687,8 @@ const getDateRangeHint = () => {
 }
 
 // 功能3: 服务子域全选
-const selectAllSubDomains = () => {
-  form.sub_domains = ['agent', 'ai_assistant']
+const selectAllSubDomains = (domain) => {
+  form.sub_domains[domain] = getSubtypeOptions(domain).map((option) => option.value)
 }
 
 // 功能4: 快速配置向导
@@ -747,7 +767,7 @@ const executeQuickSetup = async () => {
         platform: quickSetup.platform,
         account_ids: [],  // 所有活跃账号
         data_domains: allDomains,
-        sub_domains: ['agent', 'ai_assistant'],  // 服务域全选
+        sub_domains: { services: ['agent', 'ai_assistant'] },
         granularity: gran,
         date_range_type: schedules[gran].dateType,
         schedule_enabled: true,

@@ -70,20 +70,24 @@
           <el-form-item
             v-if="
               recorderForm.componentType === 'export' &&
-              recorderForm.dataDomain === 'services'
+              currentSubtypeOptions.length > 0
             "
-            label="服务子域"
+            label="子类型"
           >
             <el-select
               v-model="recorderForm.subDomain"
-              placeholder="选择子域（可选）"
+              placeholder="选择子类型（可选）"
               clearable
             >
-              <el-option label="智能客服 (ai_assistant)" value="ai_assistant" />
-              <el-option label="人工客服 (agent)" value="agent" />
+              <el-option
+                v-for="option in currentSubtypeOptions"
+                :key="option.value"
+                :label="`${option.label} (${option.value})`"
+                :value="option.value"
+              />
             </el-select>
             <div style="font-size: 12px; color: #909399; margin-top: 4px">
-              如果不选择子域，将录制通用的服务导出组件
+              如果该数据域存在子类型，录制时可指定到子类型级别；不选则录制该数据域的通用导出组件
             </div>
           </el-form-item>
 
@@ -949,6 +953,7 @@ import {
 import draggable from "vuedraggable";
 import api from "@/api";
 import accountsApi from "@/api/accounts"; // ⭐ Phase 9完善：导入账号管理API
+import { getSubtypeOptions } from "@/constants/collection";
 
 // 响应式数据
 const recorderForm = ref({
@@ -957,7 +962,7 @@ const recorderForm = ref({
   componentName: "",
   accountId: "",
   dataDomain: "", // 数据域（仅export组件）
-  subDomain: "", // 服务子域（仅services数据域）
+  subDomain: "", // 数据域子类型
   exampleDataDomain: "", // 示例数据域（仅navigation组件）
 });
 
@@ -1038,6 +1043,10 @@ const hasDiscoveryData = computed(
 );
 const hasRecordedData = computed(() =>
   isDiscoveryMode.value ? hasDiscoveryData.value : hasSteps.value
+);
+
+const currentSubtypeOptions = computed(() =>
+  getSubtypeOptions(recorderForm.value.dataDomain)
 );
 
 // 判断组件类型是否使用发现模式
@@ -1584,7 +1593,7 @@ const regeneratePython = async () => {
     // 8.7 与 save 请求体一致：export 时传 data_domain/sub_domain，避免子域语义漂移
     if (recorderForm.value.componentType === "export") {
       if (recorderForm.value.dataDomain) genPayload.data_domain = recorderForm.value.dataDomain;
-      if (recorderForm.value.dataDomain === "services" && recorderForm.value.subDomain) {
+      if (currentSubtypeOptions.value.length > 0 && recorderForm.value.subDomain) {
         genPayload.sub_domain = recorderForm.value.subDomain;
       }
     }
@@ -1633,7 +1642,7 @@ const saveComponent = async () => {
     };
     if (recorderForm.value.componentType === "export") {
       payload.data_domain = recorderForm.value.dataDomain;
-      if (recorderForm.value.dataDomain === "services" && recorderForm.value.subDomain) {
+      if (currentSubtypeOptions.value.length > 0 && recorderForm.value.subDomain) {
         payload.sub_domain = recorderForm.value.subDomain;
       }
     }
