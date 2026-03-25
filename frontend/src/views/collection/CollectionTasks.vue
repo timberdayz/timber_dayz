@@ -405,6 +405,7 @@ const quickForm = reactive({
   platform: '',
   account_id: '',
   data_domains: [],
+  sub_domains: {},
   date_preset: 'yesterday',
   customDateRange: [],  // [start, end] 仅当 date_preset === 'custom' 时使用
   debugMode: false  // v4.7.0: 调试模式

@@ -569,7 +569,7 @@ const runConfig = async (row) => {
         platform: row.platform,
         account_id: accountId,
         data_domains: row.data_domains,
-        sub_domain: row.sub_domain,
+        sub_domains: row.sub_domains || [],
         granularity: row.granularity,
         date_range: {
           type: row.date_range_type,
