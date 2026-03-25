@@ -19,15 +19,17 @@ class FakeCheckpointService:
         self.checkpoint = FakeCheckpoint()
         self.advanced = []
         self.failures = []
+        self.requests = []
 
-    def create_or_get_checkpoint(self, table_name):
+    def create_or_get_checkpoint(self, table_name, table_schema="b_class"):
+        self.requests.append(("get", table_name, table_schema))
         return self.checkpoint
 
-    def advance_checkpoint(self, table_name, ingest_timestamp, source_id, status):
-        self.advanced.append((table_name, ingest_timestamp, source_id, status))
+    def advance_checkpoint(self, table_name, ingest_timestamp, source_id, status, table_schema="b_class"):
+        self.advanced.append((table_name, ingest_timestamp, source_id, status, table_schema))
 
-    def mark_failure(self, table_name, message):
-        self.failures.append((table_name, message))
+    def mark_failure(self, table_name, message, table_schema="b_class"):
+        self.failures.append((table_name, message, table_schema))
 
 
 class FakeMirrorManager:
@@ -111,7 +113,7 @@ def test_sync_table_advances_checkpoint_after_successful_write():
 
     assert result["status"] == "completed"
     assert checkpoint_service.advanced == [
-        ("fact_shopee_orders_daily", rows[-1]["ingest_timestamp"], rows[-1]["id"], "completed")
+        ("fact_shopee_orders_daily", rows[-1]["ingest_timestamp"], rows[-1]["id"], "completed", "b_class")
     ]
     assert mirror_manager.ensured == [("fact_shopee_orders_daily", "orders")]
 
@@ -150,7 +152,26 @@ def test_sync_table_marks_failure_and_continues_on_single_table_error():
     result = asyncio.run(service.sync_table("fact_shopee_orders_daily"))
 
     assert result["status"] == "failed"
-    assert checkpoint_service.failures == [("fact_shopee_orders_daily", "boom")]
+    assert checkpoint_service.failures == [("fact_shopee_orders_daily", "boom", "b_class")]
+
+
+def test_sync_table_uses_isolated_checkpoint_scope_for_target_database():
+    checkpoint_service = FakeCheckpointService()
+
+    service = CloudBClassSyncService(
+        checkpoint_service=checkpoint_service,
+        mirror_manager=FakeMirrorManager(),
+        source_batch_reader=lambda *args, **kwargs: [],
+        remote_writer=lambda *args, **kwargs: {"success": True},
+        checkpoint_scope="cloud_sync:target_a",
+    )
+
+    result = asyncio.run(service.sync_table("fact_shopee_orders_daily"))
+
+    assert result["status"] == "completed"
+    assert checkpoint_service.requests == [
+        ("get", "fact_shopee_orders_daily", "cloud_sync:target_a")
+    ]
 
 
 def test_source_reader_builds_checkpointed_select_sql():

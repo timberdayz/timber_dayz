@@ -126,6 +126,7 @@ class CloudBClassSyncService:
         local_engine=None,
         cloud_engine=None,
         owns_engines: bool = False,
+        checkpoint_scope: str = "b_class",
     ) -> None:
         self.checkpoint_service = checkpoint_service
         self.mirror_manager = mirror_manager
@@ -137,6 +138,7 @@ class CloudBClassSyncService:
         self.local_engine = local_engine
         self.cloud_engine = cloud_engine
         self.owns_engines = owns_engines
+        self.checkpoint_scope = checkpoint_scope
 
     @staticmethod
     def _should_advance_checkpoint(write_succeeded: bool, dry_run: bool = False) -> bool:
@@ -240,7 +242,10 @@ class CloudBClassSyncService:
     async def sync_table(self, table_name: str, batch_size: int = 1000) -> dict[str, Any]:
         try:
             validate_b_class_table_name(table_name)
-            checkpoint = self.checkpoint_service.create_or_get_checkpoint(table_name)
+            checkpoint = self.checkpoint_service.create_or_get_checkpoint(
+                table_name,
+                table_schema=self.checkpoint_scope,
+            )
             data_domain = self._infer_data_domain(table_name)
             self.mirror_manager.ensure_cloud_mirror_table(table_name, data_domain)
 
@@ -277,6 +282,7 @@ class CloudBClassSyncService:
                     ingest_timestamp=last_row["ingest_timestamp"],
                     source_id=last_row["id"],
                     status="completed",
+                    table_schema=self.checkpoint_scope,
                 )
 
             return {
@@ -285,7 +291,11 @@ class CloudBClassSyncService:
                 "written_rows": write_result.get("written_rows", len(rows) if write_succeeded else 0),
             }
         except Exception as exc:
-            self.checkpoint_service.mark_failure(table_name, str(exc))
+            self.checkpoint_service.mark_failure(
+                table_name,
+                str(exc),
+                table_schema=self.checkpoint_scope,
+            )
             return {
                 "status": "failed",
                 "table_name": table_name,
