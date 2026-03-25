@@ -230,12 +230,6 @@ from backend.schemas.websocket import (
     NotificationMessage,
 )
 
-# ==================== Metabase ====================
-from backend.schemas.metabase import (
-    EmbeddingTokenRequest,
-    DashboardEmbedUrlRequest,
-)
-
 # ==================== 数据质量 ====================
 from backend.schemas.data_quality import (
     CClassReadinessResponse,

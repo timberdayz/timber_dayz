@@ -16,7 +16,7 @@ from backend.services.postgresql_dashboard_service import get_postgresql_dashboa
 logger = get_logger(__name__)
 
 # P1 业务概览预热入口列表；可通过 ENV POSTGRESQL_DASHBOARD_WARMUP_TARGETS 覆盖
-_DEFAULT_P1_QUESTIONS = [
+_DEFAULT_P1_TARGETS = [
     "business_overview_kpi",
     "business_overview_comparison",
     "business_overview_shop_racing",
@@ -26,7 +26,7 @@ _DEFAULT_P1_QUESTIONS = [
     "clearance_ranking",
 ]
 
-# question_name -> (cache_type, 默认参数字典；值可为 callable() 表示运行时计算)
+# target_name -> (cache_type, 默认参数字典；值可为 callable() 表示运行时计算)
 _WARMUP_SPEC: Dict[str, Tuple[str, Dict[str, Any]]] = {
     "business_overview_kpi": (
         "dashboard_kpi",
@@ -115,15 +115,15 @@ def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
     return {k: "" if v is None else str(v) for k, v in params.items()}
 
 
-def get_p1_question_list() -> List[str]:
+def get_p1_target_list() -> List[str]:
     """
     从环境变量 POSTGRESQL_DASHBOARD_WARMUP_TARGETS 读取（逗号分隔），
-    未配置时使用默认 P1 列表。禁止在业务代码中散落硬编码 Question ID。
+    未配置时使用默认 P1 列表。禁止在业务代码中散落硬编码 dashboard target 标识。
     """
     env_val = os.getenv("POSTGRESQL_DASHBOARD_WARMUP_TARGETS", "").strip()
     if env_val:
         return [q.strip() for q in env_val.split(",") if q.strip()]
-    return list(_DEFAULT_P1_QUESTIONS)
+    return list(_DEFAULT_P1_TARGETS)
 
 
 async def run_dashboard_cache_warmup() -> Dict[str, Any]:
@@ -139,8 +139,8 @@ async def run_dashboard_cache_warmup() -> Dict[str, Any]:
         logger.warning("[CacheWarmup] Redis 未启用，跳过预热")
         return {"skipped": True, "reason": "redis_unavailable"}
 
-    questions = get_p1_question_list()
-    if not questions:
+    targets = get_p1_target_list()
+    if not targets:
         logger.info("[CacheWarmup] P1 列表为空，跳过预热")
         return {"skipped": True, "reason": "empty_p1_list"}
 
@@ -151,23 +151,23 @@ async def run_dashboard_cache_warmup() -> Dict[str, Any]:
         "on",
     )
     if not use_postgresql:
-        raise RuntimeError("Metabase fallback has been retired")
+        raise RuntimeError("Legacy non-PostgreSQL warmup path has been retired")
 
     postgresql_service = get_postgresql_dashboard_service()
 
     ok = 0
     failed = 0
     errors: List[str] = []
-    for question_name in questions:
-        if question_name not in _WARMUP_SPEC:
-            errors.append(f"unknown_spec:{question_name}")
+    for target_name in targets:
+        if target_name not in _WARMUP_SPEC:
+            errors.append(f"unknown_spec:{target_name}")
             failed += 1
             continue
-        cache_type, raw_params = _WARMUP_SPEC[question_name]
+        cache_type, raw_params = _WARMUP_SPEC[target_name]
         params = _resolve_params(raw_params)
         cache_params = _normalize_cache_params(params)
         try:
-            result = await _query_postgresql_dashboard(postgresql_service, question_name, params)
+            result = await _query_postgresql_dashboard(postgresql_service, target_name, params)
             response = {
                 "success": True,
                 "data": result,
@@ -177,51 +177,51 @@ async def run_dashboard_cache_warmup() -> Dict[str, Any]:
             ok += 1
         except Exception as e:
             logger.warning(
-                f"[CacheWarmup] 预热失败 question={question_name}: {e}",
+                f"[CacheWarmup] 预热失败 target={target_name}: {e}",
                 exc_info=True,
             )
-            errors.append(f"{question_name}:{str(e)}")
+            errors.append(f"{target_name}:{str(e)}")
             failed += 1
     logger.info(f"[CacheWarmup] 完成: ok={ok}, failed={failed}")
     return {"ok": ok, "failed": failed, "errors": errors}
 
 
-async def _query_postgresql_dashboard(service, question_name: str, params: Dict[str, Any]) -> Any:
-    if question_name == "business_overview_kpi":
+async def _query_postgresql_dashboard(service, target_name: str, params: Dict[str, Any]) -> Any:
+    if target_name == "business_overview_kpi":
         return await service.get_business_overview_kpi(
             month=params.get("month"),
             platform=params.get("platform"),
         )
-    if question_name == "business_overview_comparison":
+    if target_name == "business_overview_comparison":
         return await service.get_business_overview_comparison(
             granularity=params.get("granularity"),
             target_date=params.get("date"),
             platform=_first_csv_value(params.get("platforms")),
         )
-    if question_name == "business_overview_shop_racing":
+    if target_name == "business_overview_shop_racing":
         return await service.get_business_overview_shop_racing(
             granularity=params.get("granularity"),
             target_date=params.get("date"),
             group_by=params.get("group_by", "shop"),
         )
-    if question_name == "business_overview_traffic_ranking":
+    if target_name == "business_overview_traffic_ranking":
         return await service.get_business_overview_traffic_ranking(
             granularity=params.get("granularity"),
             target_date=params.get("date_value") or params.get("date"),
             dimension=params.get("dimension", "visitor"),
         )
-    if question_name == "business_overview_inventory_backlog":
+    if target_name == "business_overview_inventory_backlog":
         days = params.get("days")
         return await service.get_business_overview_inventory_backlog(min_days=int(days) if days else 30)
-    if question_name == "business_overview_operational_metrics":
+    if target_name == "business_overview_operational_metrics":
         return await service.get_business_overview_operational_metrics(
             month=params.get("month"),
             platform=params.get("platform"),
         )
-    if question_name == "clearance_ranking":
+    if target_name == "clearance_ranking":
         limit = params.get("limit")
         return await service.get_clearance_ranking(limit=int(limit) if limit else 10)
-    raise ValueError(f"unsupported_postgresql_warmup_question:{question_name}")
+    raise ValueError(f"unsupported_postgresql_warmup_target:{target_name}")
 
 
 def _first_csv_value(value: Any) -> Optional[str]:

@@ -1,5 +1,8 @@
 # 4 核 8G 生产环境配置参考
 
+> 历史兼容说明：本文仍含旧版 Metabase 预热与参数描述。
+> 当前生产主路径应以 PostgreSQL-first dashboard 为准，不再把 Metabase 当作现役依赖。
+
 本文档说明在 4 核 8G 云服务器上部署西虹 ERP 的推荐配置，避免 Metabase 等服务占满内存导致整机卡死。
 
 ## 1. 推荐 Compose 命令与 Overlay 顺序

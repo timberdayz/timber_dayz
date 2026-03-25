@@ -1,5 +1,9 @@
 # 🚀 快速启动指南：所有功能一览
 
+> 历史说明：本文含有旧版 Metabase 启动与使用内容。
+> 当前项目的现役运行路径为 PostgreSQL-first，账号管理、业务概览和 Dashboard
+> 不应再依赖 Metabase 作为主查询层。
+
 **版本**: v2.3 + v3.0  
 **更新日期**: 2025-10-27  
 
@@ -429,4 +433,3 @@ SELECT COUNT(*) FROM dim_date;  -- 应该是4018条
 
 - `docs/METABASE_DASHBOARD_SETUP.md` - Metabase配置完整指南
 - `docs/DATA_BROWSER_AND_METABASE_TROUBLESHOOTING.md` - Metabase故障排查
-

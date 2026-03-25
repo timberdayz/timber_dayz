@@ -1,5 +1,8 @@
 # DSS Convergence Status
 
+> 历史说明：本文中的 DSS/Metabase 口径仅用于记录收敛过程。
+> 当前活跃架构应表述为 PostgreSQL `semantic / mart / api` 主路径。
+
 ## Current Rule
 
 - `DSS/Metabase` is the preferred dashboard and analytics query architecture.
