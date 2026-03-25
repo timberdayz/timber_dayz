@@ -3,7 +3,9 @@
 """
 检查 b_class schema 中的所有表
 
-用于诊断 Metabase 显示旧数据的问题
+Historical only: 本脚本保留用于排查旧版 Metabase 遗留问题。
+当前现役查询链路为 PostgreSQL semantic / mart / api，不应再把 Metabase
+作为主运行路径或主验证入口。
 """
 
 import sys
@@ -112,4 +114,3 @@ def check_b_class_tables():
 
 if __name__ == "__main__":
     check_b_class_tables()
-
