@@ -92,10 +92,6 @@
             <el-icon><Files /></el-icon>
             批量添加店铺
           </el-button>
-          <el-button @click="handleImport" :loading="importLoading">
-            <el-icon><Download /></el-icon>
-            从配置文件导入
-          </el-button>
           <el-button @click="handleRefresh" :loading="accountsStore.loading">
             <el-icon><Refresh /></el-icon>
             刷新
@@ -446,7 +442,6 @@ const showCreateDialog = ref(false)
 const showBatchDialog = ref(false)
 const activeTab = ref('basic')
 const editingAccount = ref(null)
-const importLoading = ref(false)
 
 // 表单引用
 const accountFormRef = ref(null)
@@ -548,15 +543,6 @@ async function handleRefresh() {
 /**
  * 导入
  */
-async function handleImport() {
-  importLoading.value = true
-  try {
-    await accountsStore.importFromLocal()
-  } finally {
-    importLoading.value = false
-  }
-}
-
 /**
  * 编辑账号
  */

@@ -2,36 +2,32 @@
 # -*- coding: utf-8 -*-
 
 """
-账号管理API (v4.7.0)
+账号管理 API。
 
-功能:
-- 平台账号的CRUD操作
-- 从local_accounts.py批量导入
-- 导出账号配置(备份)
-- 账号统计信息
+运行时数据源是数据库中的 `core.platform_accounts`。
+历史上的 `local_accounts.py` 仅保留为本地记录文件，不再作为生产运行路径。
 """
 
-from typing import List, Optional
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel, Field
+from __future__ import annotations
 
-from backend.models.database import get_db, get_async_db
-from modules.core.db import PlatformAccount
-from backend.services.encryption_service import get_encryption_service
-from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
+from datetime import datetime, timezone
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.models.database import get_async_db
 from backend.schemas.account import (
-    CapabilitiesModel,
     AccountCreate,
-    AccountUpdate,
     AccountResponse,
     AccountStats,
-    AccountImportResponse,
+    AccountUpdate,
     BatchCreateRequest,
 )
+from backend.services.encryption_service import get_encryption_service
+from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
+from modules.core.db import PlatformAccount
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -39,36 +35,39 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/accounts", tags=["账号管理"])
 
 
-# ImportResponse已移动到backend/schemas/account.py(重命名为AccountImportResponse)
+def _default_capabilities() -> dict:
+    return {
+        "orders": True,
+        "products": True,
+        "services": True,
+        "analytics": True,
+        "finance": True,
+        "inventory": True,
+    }
 
 
-# ==================== API Endpoints ====================
+async def _get_account_or_404(db: AsyncSession, account_id: str) -> PlatformAccount:
+    result = await db.execute(
+        select(PlatformAccount).where(PlatformAccount.account_id == account_id)
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=404, detail=f"账号 '{account_id}' 不存在")
+    return account
+
 
 @router.post("/", response_model=AccountResponse)
 async def create_account(
     account: AccountCreate,
     db: AsyncSession = Depends(get_async_db),
-    # current_user: str = Depends(get_current_user)  # 暂时注释掉认证
 ):
-    """
-    创建账号
-    
-    - 自动加密密码
-    - 检查account_id唯一性
-    - 填充审计字段
-    """
-    # 检查account_id是否已存在
-    result = await db.execute(select(PlatformAccount).where(PlatformAccount.account_id == account.account_id))
-    existing = result.scalar_one_or_none()
-    
-    if existing:
+    existing = await db.execute(
+        select(PlatformAccount).where(PlatformAccount.account_id == account.account_id)
+    )
+    if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=400, detail=f"账号ID '{account.account_id}' 已存在")
-    
-    # 加密密码
+
     encryption_service = get_encryption_service()
-    encrypted_password = encryption_service.encrypt_password(account.password)
-    
-    # 创建记录
     db_account = PlatformAccount(
         account_id=account.account_id,
         parent_account=account.parent_account,
@@ -78,34 +77,31 @@ async def create_account(
         shop_type=account.shop_type,
         shop_region=account.shop_region,
         username=account.username,
-        password_encrypted=encrypted_password,
+        password_encrypted=encryption_service.encrypt_password(account.password),
         login_url=account.login_url,
         email=account.email,
         phone=account.phone,
         region=account.region,
         currency=account.currency,
-        capabilities=account.capabilities.dict(),
+        capabilities=account.capabilities.model_dump(),
         enabled=account.enabled,
         proxy_required=account.proxy_required,
         notes=account.notes,
-        created_by="system",  # TODO: 替换为实际用户
-        updated_by="system"
+        created_by="system",
+        updated_by="system",
     )
-    
+
     db.add(db_account)
     await db.commit()
     await db.refresh(db_account)
-    
-    # ✅ 自动同步到 dim_shops
+
     try:
         await sync_platform_account_to_dim_shop(db, db_account)
         await db.commit()
-    except Exception as e:
-        logger.warning(f"[AccountManagement] 同步店铺到 dim_shops 失败: {e}", exc_info=True)
-        # 不影响账号创建流程
-    
+    except Exception as exc:
+        logger.warning(f"[AccountManagement] 同步店铺到 dim_shops 失败: {exc}", exc_info=True)
+
     logger.info(f"账号创建成功: {account.account_id}")
-    
     return db_account
 
 
@@ -115,19 +111,10 @@ async def list_accounts(
     enabled: Optional[bool] = Query(None, description="启用状态筛选"),
     shop_type: Optional[str] = Query(None, description="店铺类型筛选"),
     search: Optional[str] = Query(None, description="搜索(店铺名或账号ID)"),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
-    """
-    账号列表
-    
-    支持筛选:
-    - platform: 平台代码
-    - enabled: 启用状态
-    - shop_type: 店铺类型
-    - search: 模糊搜索店铺名或账号ID
-    """
     stmt = select(PlatformAccount)
-    
+
     if platform:
         stmt = stmt.where(PlatformAccount.platform.ilike(platform))
     if enabled is not None:
@@ -136,150 +123,97 @@ async def list_accounts(
         stmt = stmt.where(PlatformAccount.shop_type == shop_type)
     if search:
         stmt = stmt.where(
-            (PlatformAccount.store_name.ilike(f"%{search}%")) |
-            (PlatformAccount.account_id.ilike(f"%{search}%"))
+            PlatformAccount.store_name.ilike(f"%{search}%")
+            | PlatformAccount.account_id.ilike(f"%{search}%")
         )
-    
+
     stmt = stmt.order_by(PlatformAccount.created_at.desc())
     result = await db.execute(stmt)
     accounts = result.scalars().all()
-    
     logger.info(f"查询账号列表: {len(accounts)} 条记录")
-    
     return accounts
 
 
 @router.get("/{account_id}", response_model=AccountResponse)
 async def get_account(
     account_id: str,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
-    """
-    获取账号详情
-    
-    密码字段不返回
-    """
-    result = await db.execute(select(PlatformAccount).where(PlatformAccount.account_id == account_id))
-    account = result.scalar_one_or_none()
-    
-    if not account:
-        raise HTTPException(status_code=404, detail=f"账号 '{account_id}' 不存在")
-    
-    return account
+    return await _get_account_or_404(db, account_id)
 
 
 @router.put("/{account_id}", response_model=AccountResponse)
 async def update_account(
     account_id: str,
     account_update: AccountUpdate,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
-    """
-    更新账号
-    
-    - 密码更新时重新加密
-    - 更新审计字段
-    """
-    result = await db.execute(select(PlatformAccount).where(PlatformAccount.account_id == account_id))
-    db_account = result.scalar_one_or_none()
-    
-    if not db_account:
-        raise HTTPException(status_code=404, detail=f"账号 '{account_id}' 不存在")
-    
-    # 更新字段
-    update_data = account_update.dict(exclude_unset=True)
-    
-    # 特殊处理密码
-    if "password" in update_data and update_data["password"]:
+    db_account = await _get_account_or_404(db, account_id)
+    update_data = account_update.model_dump(exclude_unset=True)
+
+    password = update_data.pop("password", None)
+    if password:
         encryption_service = get_encryption_service()
-        encrypted_password = encryption_service.encrypt_password(update_data["password"])
-        db_account.password_encrypted = encrypted_password
-        update_data.pop("password")
-    
-    # 特殊处理capabilities
-    if "capabilities" in update_data:
-        capabilities_value = update_data["capabilities"]
-        if not isinstance(capabilities_value, dict):
-            if hasattr(capabilities_value, "dict"):
-                update_data["capabilities"] = capabilities_value.dict()
-            else:
-                # 其他情况,尝试转换为字典
-                update_data["capabilities"] = dict(capabilities_value) if capabilities_value else {}
-    
-    # 更新其他字段
+        db_account.password_encrypted = encryption_service.encrypt_password(password)
+
+    capabilities = update_data.get("capabilities")
+    if capabilities is not None and hasattr(capabilities, "model_dump"):
+        update_data["capabilities"] = capabilities.model_dump()
+
     for field, value in update_data.items():
         setattr(db_account, field, value)
-    
-    # 更新审计字段
-    db_account.updated_by = "system"  # TODO: 替换为实际用户
+
+    db_account.updated_by = "system"
     db_account.updated_at = datetime.now(timezone.utc)
-    
+
     await db.commit()
     await db.refresh(db_account)
-    
-    # ✅ 自动同步到 dim_shops
+
     try:
         await sync_platform_account_to_dim_shop(db, db_account)
         await db.commit()
-    except Exception as e:
-        logger.warning(f"[AccountManagement] 同步店铺到 dim_shops 失败: {e}", exc_info=True)
-        # 不影响账号更新流程
-    
+    except Exception as exc:
+        logger.warning(f"[AccountManagement] 同步店铺到 dim_shops 失败: {exc}", exc_info=True)
+
     logger.info(f"账号更新成功: {account_id}")
-    
     return db_account
 
 
 @router.delete("/{account_id}")
 async def delete_account(
     account_id: str,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
-    """
-    删除账号
-    
-    硬删除(不可恢复)
-    """
-    result = await db.execute(select(PlatformAccount).where(PlatformAccount.account_id == account_id))
-    db_account = result.scalar_one_or_none()
-    
-    if not db_account:
-        raise HTTPException(status_code=404, detail=f"账号 '{account_id}' 不存在")
-    
+    db_account = await _get_account_or_404(db, account_id)
     await db.delete(db_account)
     await db.commit()
-    
     logger.info(f"账号删除成功: {account_id}")
-    
     return {"message": f"账号 '{account_id}' 已删除"}
 
 
 @router.post("/batch", response_model=List[AccountResponse])
 async def batch_create_accounts(
     batch_request: BatchCreateRequest,
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
-    """
-    批量创建账号(多店铺)
-    
-    用于一次性添加多个店铺(共用同一主账号)
-    """
-    created_accounts = []
+    created_accounts: list[PlatformAccount] = []
     encryption_service = get_encryption_service()
     encrypted_password = encryption_service.encrypt_password(batch_request.password)
-    
+
     for shop in batch_request.shops:
-        account_id = f"{batch_request.platform}_{shop.get('shop_region', 'unknown').lower()}_{shop.get('store_name', 'shop')}"
-        
-        # 检查是否已存在
-        result = await db.execute(select(PlatformAccount).where(PlatformAccount.account_id == account_id))
-        existing = result.scalar_one_or_none()
-        
-        if existing:
-            logger.warning(f"账号 {account_id} 已存在,跳过")
+        account_id = (
+            f"{batch_request.platform}_"
+            f"{shop.get('shop_region', 'unknown').lower()}_"
+            f"{shop.get('store_name', 'shop')}"
+        )
+
+        existing = await db.execute(
+            select(PlatformAccount).where(PlatformAccount.account_id == account_id)
+        )
+        if existing.scalar_one_or_none() is not None:
+            logger.warning(f"账号 {account_id} 已存在, 跳过")
             continue
-        
-        # 创建账号
+
         db_account = PlatformAccount(
             account_id=account_id,
             parent_account=batch_request.parent_account,
@@ -294,173 +228,48 @@ async def batch_create_accounts(
             region="CN",
             currency=shop.get("currency", "CNY"),
             capabilities={
-                "orders": True,
-                "products": True,
-                "services": shop.get("shop_type") == "local",  # 本地店支持客服
-                "analytics": True,
-                "finance": True,
-                "inventory": True
+                **_default_capabilities(),
+                "services": shop.get("shop_type") == "local",
             },
             enabled=True,
             created_by="system",
-            updated_by="system"
+            updated_by="system",
         )
-        
         db.add(db_account)
         created_accounts.append(db_account)
-    
+
     await db.commit()
-    
-    # ✅ 批量同步到 dim_shops
+
     for db_account in created_accounts:
         try:
             await sync_platform_account_to_dim_shop(db, db_account)
-        except Exception as e:
-            logger.warning(f"[AccountManagement] 同步店铺失败 {db_account.account_id}: {e}", exc_info=True)
-    
+        except Exception as exc:
+            logger.warning(f"[AccountManagement] 同步店铺失败 {db_account.account_id}: {exc}", exc_info=True)
+
     await db.commit()
-    
     logger.info(f"批量创建成功: {len(created_accounts)} 个账号")
-    
     return created_accounts
-
-
-@router.post("/import-from-local", response_model=AccountImportResponse)
-async def import_from_local_accounts(
-    db: AsyncSession = Depends(get_async_db)
-):
-    """
-    从local_accounts.py导入账号
-    
-    - 跳过已存在的账号
-    - 加密密码
-    - 返回导入统计
-    """
-    try:
-        from local_accounts import LOCAL_ACCOUNTS
-    except ImportError:
-        raise HTTPException(status_code=500, detail="无法导入local_accounts模块")
-    
-    imported_count = 0
-    skipped_count = 0
-    failed_count = 0
-    details = []
-    
-    encryption_service = get_encryption_service()
-    
-    for platform_group, accounts in LOCAL_ACCOUNTS.items():
-        for account in accounts:
-            account_id = account.get('account_id')
-            
-            try:
-                # 检查是否已存在
-                result = await db.execute(select(PlatformAccount).where(PlatformAccount.account_id == account_id))
-                existing = result.scalar_one_or_none()
-                
-                if existing:
-                    skipped_count += 1
-                    details.append({"account_id": account_id, "status": "skipped", "reason": "已存在"})
-                    continue
-                
-                # 加密密码
-                encrypted_password = encryption_service.encrypt_password(
-                    account.get('password', '')
-                )
-                
-                # 创建记录
-                db_account = PlatformAccount(
-                    account_id=account_id,
-                    platform=account.get('platform', ''),
-                    store_name=account.get('store_name', ''),
-                    username=account.get('username', ''),
-                    password_encrypted=encrypted_password,
-                    login_url=account.get('login_url', ''),
-                    email=account.get('E-mail', ''),
-                    phone=account.get('phone', ''),
-                    region=account.get('region', 'CN'),
-                    currency=account.get('currency', 'CNY'),
-                    shop_region=account.get('shop_region', ''),
-                    capabilities=account.get('capabilities', {
-                        "orders": True,
-                        "products": True,
-                        "services": True,
-                        "analytics": True,
-                        "finance": True,
-                        "inventory": True
-                    }),
-                    enabled=account.get('enabled', False),
-                    proxy_required=account.get('proxy_required', False),
-                    notes=account.get('notes', ''),
-                    created_by="import",
-                    updated_by="import"
-                )
-                
-                db.add(db_account)
-                imported_count += 1
-                details.append({"account_id": account_id, "status": "imported"})
-                
-            except Exception as e:
-                failed_count += 1
-                details.append({"account_id": account_id, "status": "failed", "reason": str(e)})
-                logger.error(f"导入账号失败 {account_id}: {e}")
-    
-    await db.commit()
-    
-    # ✅ 同步所有导入的账号到 dim_shops
-    result = await db.execute(select(PlatformAccount).where(PlatformAccount.created_by == "import"))
-    imported_accounts = result.scalars().all()
-    
-    for db_account in imported_accounts:
-        try:
-            await sync_platform_account_to_dim_shop(db, db_account)
-        except Exception as e:
-            logger.warning(f"[AccountManagement] 同步店铺失败 {db_account.account_id}: {e}", exc_info=True)
-    
-    await db.commit()
-    
-    logger.info(f"导入完成: 成功{imported_count}, 跳过{skipped_count}, 失败{failed_count}")
-    
-    return AccountImportResponse(
-        message=f"导入完成:成功 {imported_count} 个,跳过 {skipped_count} 个,失败 {failed_count} 个",
-        imported_count=imported_count,
-        skipped_count=skipped_count,
-        failed_count=failed_count,
-        details=details
-    )
 
 
 @router.get("/stats/summary", response_model=AccountStats)
 async def get_account_stats(
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ):
-    """
-    获取账号统计信息
-    
-    - 总账号数
-    - 活跃账号数
-    - 禁用账号数
-    - 支持平台数
-    - 各平台账号数分布
-    """
     result = await db.execute(select(PlatformAccount))
     all_accounts = result.scalars().all()
-    
+
     total = len(all_accounts)
-    active = sum(1 for a in all_accounts if a.enabled)
+    active = sum(1 for account in all_accounts if account.enabled)
     inactive = total - active
-    
-    # 平台分布
-    platform_breakdown = {}
+
+    platform_breakdown: dict[str, int] = {}
     for account in all_accounts:
-        platform = account.platform
-        platform_breakdown[platform] = platform_breakdown.get(platform, 0) + 1
-    
-    platforms = len(platform_breakdown)
-    
+        platform_breakdown[account.platform] = platform_breakdown.get(account.platform, 0) + 1
+
     return AccountStats(
         total=total,
         active=active,
         inactive=inactive,
-        platforms=platforms,
-        platform_breakdown=platform_breakdown
+        platforms=len(platform_breakdown),
+        platform_breakdown=platform_breakdown,
     )
