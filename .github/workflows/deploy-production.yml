@@ -99,7 +99,7 @@ jobs:
           PREV_TAG=$(echo "${ALL_TAGS}" | grep -v "^${CURRENT_TAG}$" | head -n 1)
 
           if [ -z "${PREV_TAG}" ]; then
-            echo "[INFO] 鏈壘鍒颁笂涓€涓?tag锛屽皢楠岃瘉鎵€鏈夋枃浠讹紙棣栨鍙戝竷鎴栧彧鏈変竴涓?tag锛?
+            echo "[INFO] No previous release tag found; validating the full file set."
             echo "has_prev_tag=false" >> $GITHUB_OUTPUT
             echo "prev_tag=" >> $GITHUB_OUTPUT
             echo "changed_count=0" >> $GITHUB_OUTPUT
@@ -112,7 +112,7 @@ jobs:
             git diff --name-only ${PREV_TAG}..HEAD > temp/changed_files.txt || true
             
             # 鏄剧ず鏀瑰姩鐨勬枃浠舵暟閲?            CHANGED_COUNT=$(wc -l < temp/changed_files.txt | tr -d ' ' || echo "0")
-            echo "[INFO] 鍙戠幇 ${CHANGED_COUNT} 涓敼鍔ㄦ枃浠讹紙浠?${PREV_TAG} 鍒?${CURRENT_TAG}锛?
+            echo "[INFO] Found ${CHANGED_COUNT} changed files from ${PREV_TAG} to ${CURRENT_TAG}."
             echo "changed_count=${CHANGED_COUNT}" >> $GITHUB_OUTPUT
             
             # 鏄剧ず鍓?0涓敼鍔ㄧ殑鏂囦欢锛堢敤浜庤皟璇曪級
@@ -122,9 +122,9 @@ jobs:
               
               # 鏄剧ず鏀瑰姩鐨?router 鏂囦欢鏁伴噺
               ROUTER_COUNT=$(grep -c "^backend/routers/.*\.py$" temp/changed_files.txt || echo "0")
-              echo "[INFO] 鍏朵腑 router 鏂囦欢: ${ROUTER_COUNT} 涓?
+              echo "[INFO] Changed router files: ${ROUTER_COUNT}"
             else
-              echo "[INFO] 娌℃湁鍙戠幇鏀瑰姩鏂囦欢锛堝彲鑳芥槸 tag 鎸囧悜鍚屼竴涓?commit锛?
+              echo "[INFO] No changed files detected; the tag may point to an existing commit."
             fi
           fi
 
@@ -133,7 +133,7 @@ jobs:
         run: |
           echo "[INFO] 楠岃瘉鍏抽敭琛ㄧ殑澶栭敭绾︽潫..."
           python scripts/test_migration_foreign_keys.py || {
-            echo "[FAIL] 鍏抽敭琛ㄥ閿害鏉熼獙璇佸け璐?
+            echo "[FAIL] Critical table foreign key verification failed"
             exit 1
           }
           echo "[OK] 鍏抽敭琛ㄥ閿害鏉熼獙璇侀€氳繃"
@@ -149,7 +149,7 @@ jobs:
           echo "[INFO] 绛夊緟 PostgreSQL 灏辩华..."
           for i in $(seq 1 30); do
             if PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -c "SELECT 1" >/dev/null 2>&1; then
-              echo "[OK] PostgreSQL 宸插氨缁?
+              echo "[OK] PostgreSQL is ready"
               break
             fi
             if [ $i -eq 30 ]; then
@@ -163,7 +163,7 @@ jobs:
           echo "[INFO] 鎵ц鏁版嵁搴撹縼绉?.."
           alembic upgrade heads || {
             echo "[FAIL] 杩佺Щ鎵ц澶辫触"
-            echo "[INFO] 璇锋鏌ヨ縼绉昏剼鏈腑鐨勯敊璇?
+            echo "[INFO] Please inspect the migration script output above."
             exit 1
           }
 
@@ -186,7 +186,7 @@ jobs:
             if [ "${EXISTS}" = "t" ]; then
               echo "[OK] 琛?${table_name} 瀛樺湪"
             else
-              echo "[FAIL] 琛?${table_name} 涓嶅瓨鍦?
+              echo "[FAIL] Required table missing: ${table_name}"
               exit 1
             fi
           done
