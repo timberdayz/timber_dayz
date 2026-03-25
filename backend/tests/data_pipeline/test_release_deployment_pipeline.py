@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_deploy_workflow_syncs_nginx_prod_conf():
-    text = Path(".github/workflows/deploy-production.yml").read_text(
+    text = Path("scripts/build_deploy_bundle.sh").read_text(
         encoding="utf-8",
         errors="replace",
     )
@@ -17,7 +17,7 @@ def test_deploy_workflow_creates_remote_directories_before_upload():
     )
 
     assert (
-        "Failed to prepare remote deployment directories under ${PRODUCTION_PATH}"
+        "Failed to prepare remote deployment directory under ${PRODUCTION_PATH}"
         in text
     )
     for expected in (
@@ -25,6 +25,7 @@ def test_deploy_workflow_creates_remote_directories_before_upload():
         '\\"${PRODUCTION_PATH}/config\\"',
         '\\"${PRODUCTION_PATH}/sql/init\\"',
         '\\"${PRODUCTION_PATH}/nginx\\"',
+        '\\"${PRODUCTION_PATH}/nginx/ssl\\"',
     ):
         assert expected in text
 
@@ -78,14 +79,34 @@ def test_backend_dockerfile_includes_ops_dashboard_scripts():
     assert "COPY scripts/init_metabase.py" not in text
 
 
-def test_deploy_workflow_config_sync_uses_plain_remote_path_in_scp_helper():
+def test_deploy_bundle_builder_skips_legacy_metabase_config():
+    text = Path("scripts/build_deploy_bundle.sh").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert 'for file in config/*.yaml config/*.py; do' in text
+    assert 'if [ "${base_name}" = "metabase_config.yaml" ]; then' in text
+    assert 'copy_if_exists "${file}" "${BUNDLE_DIR}/config/${base_name}"' in text
+
+
+def test_deploy_workflow_builds_and_uploads_single_deploy_bundle():
     text = Path(".github/workflows/deploy-production.yml").read_text(
         encoding="utf-8",
         errors="replace",
     )
 
-    assert 'scp_with_retry "$f" "${PRODUCTION_PATH}/config/${bn}"' in text
-    assert (
-        'scp_with_retry "$f" ${PRODUCTION_USER}@${PRODUCTION_HOST}:"${PRODUCTION_PATH}/config/${bn}"'
-        not in text
+    assert "deploy_bundle.tgz" in text
+    assert 'BUNDLE_PATH="$(scripts/build_deploy_bundle.sh "$(pwd)" "temp/deploy_bundle.tgz")"' in text
+    assert 'scp_with_retry "${BUNDLE_PATH}" ${PRODUCTION_PATH}/deploy_bundle.tgz' in text
+    assert 'tar -xzf \\"${PRODUCTION_PATH}/deploy_bundle.tgz\\"' in text
+
+
+def test_deploy_workflow_no_longer_scp_uploads_sql_and_nginx_files_individually():
+    text = Path(".github/workflows/deploy-production.yml").read_text(
+        encoding="utf-8",
+        errors="replace",
     )
+
+    assert 'for f in sql/init/*.sql; do' not in text
+    assert 'scp_with_retry nginx/nginx.prod.conf ${PRODUCTION_PATH}/nginx/nginx.prod.conf' not in text

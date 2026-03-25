@@ -1,12 +1,10 @@
-name: Deploy to Production
+﻿name: Deploy to Production
 
 on:
-  # [NOTE] 方案A：生产发布只通过 push tag(v*) 触发（同一条流水线内 build -> deploy）
-  push:
+  # [NOTE] 鏂规A锛氱敓浜у彂甯冨彧閫氳繃 push tag(v*) 瑙﹀彂锛堝悓涓€鏉℃祦姘寸嚎鍐?build -> deploy锛?  push:
     tags:
       - "v*"
-  # [NOTE] 手动部署：用于回滚或重试（不会重新 build 镜像，只部署指定 tag）
-  workflow_dispatch:
+  # [NOTE] 鎵嬪姩閮ㄧ讲锛氱敤浜庡洖婊氭垨閲嶈瘯锛堜笉浼氶噸鏂?build 闀滃儚锛屽彧閮ㄧ讲鎸囧畾 tag锛?  workflow_dispatch:
     inputs:
       image_tag:
         description: "Image tag to deploy (e.g., v4.19.7)"
@@ -17,8 +15,7 @@ on:
         required: true
         type: string
 
-# [NOTE] 并发控制：同一时间只允许一个生产部署在运行（避免带宽/资源冲突）
-concurrency:
+# [NOTE] 骞跺彂鎺у埗锛氬悓涓€鏃堕棿鍙厑璁镐竴涓敓浜ч儴缃插湪杩愯锛堥伩鍏嶅甫瀹?璧勬簮鍐茬獊锛?concurrency:
   group: deploy-production
   cancel-in-progress: true
 
@@ -29,7 +26,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  # 检查是否配置了必要的 secrets
+  # 妫€鏌ユ槸鍚﹂厤缃簡蹇呰鐨?secrets
   check-config:
     runs-on: ubuntu-latest
     outputs:
@@ -53,7 +50,7 @@ jobs:
     needs: check-config
     if: ${{ needs.check-config.outputs.can_deploy == 'true' && github.event_name == 'push' }}
     services:
-      # 添加临时 PostgreSQL 服务用于迁移测试
+      # 娣诲姞涓存椂 PostgreSQL 鏈嶅姟鐢ㄤ簬杩佺Щ娴嬭瘯
       postgres:
         image: postgres:15
         env:
@@ -85,139 +82,133 @@ jobs:
       - name: Create temp directory
         run: mkdir -p temp
 
-      # [FIX] 计算本次发布改动的文件（只验证改动文件，避免历史遗留问题阻断新发布）
+      # [FIX] 璁＄畻鏈鍙戝竷鏀瑰姩鐨勬枃浠讹紙鍙獙璇佹敼鍔ㄦ枃浠讹紝閬垮厤鍘嗗彶閬楃暀闂闃绘柇鏂板彂甯冿級
       - name: Get changed files since last tag
         id: changed-files
         run: |
-          # 获取所有 tag，按版本号排序
-          git fetch --tags --force
+          # 鑾峰彇鎵€鏈?tag锛屾寜鐗堟湰鍙锋帓搴?          git fetch --tags --force
 
-          # 获取当前 tag
+          # 鑾峰彇褰撳墠 tag
           CURRENT_TAG="${{ github.ref_name }}"
           echo "[INFO] Current tag: ${CURRENT_TAG}"
 
-          # 获取上一个 tag（按版本号排序，排除当前 tag，取最新的）
-          ALL_TAGS=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$')
+          # 鑾峰彇涓婁竴涓?tag锛堟寜鐗堟湰鍙锋帓搴忥紝鎺掗櫎褰撳墠 tag锛屽彇鏈€鏂扮殑锛?          ALL_TAGS=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$')
           PREV_TAG=$(echo "${ALL_TAGS}" | grep -v "^${CURRENT_TAG}$" | head -n 1)
 
           if [ -z "${PREV_TAG}" ]; then
-            echo "[INFO] 未找到上一个 tag，将验证所有文件（首次发布或只有一个 tag）"
+            echo "[INFO] 鏈壘鍒颁笂涓€涓?tag锛屽皢楠岃瘉鎵€鏈夋枃浠讹紙棣栨鍙戝竷鎴栧彧鏈変竴涓?tag锛?
             echo "has_prev_tag=false" >> $GITHUB_OUTPUT
             echo "prev_tag=" >> $GITHUB_OUTPUT
             echo "changed_count=0" >> $GITHUB_OUTPUT
           else
-            echo "[INFO] 上一个 tag: ${PREV_TAG}"
+            echo "[INFO] 涓婁竴涓?tag: ${PREV_TAG}"
             echo "has_prev_tag=true" >> $GITHUB_OUTPUT
             echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
             
-            # 计算改动的文件（相对于项目根目录）
-            # 注意：HEAD 指向当前 checkout 的 tag commit
+            # 璁＄畻鏀瑰姩鐨勬枃浠讹紙鐩稿浜庨」鐩牴鐩綍锛?            # 娉ㄦ剰锛欻EAD 鎸囧悜褰撳墠 checkout 鐨?tag commit
             git diff --name-only ${PREV_TAG}..HEAD > temp/changed_files.txt || true
             
-            # 显示改动的文件数量
-            CHANGED_COUNT=$(wc -l < temp/changed_files.txt | tr -d ' ' || echo "0")
-            echo "[INFO] 发现 ${CHANGED_COUNT} 个改动文件（从 ${PREV_TAG} 到 ${CURRENT_TAG}）"
+            # 鏄剧ず鏀瑰姩鐨勬枃浠舵暟閲?            CHANGED_COUNT=$(wc -l < temp/changed_files.txt | tr -d ' ' || echo "0")
+            echo "[INFO] 鍙戠幇 ${CHANGED_COUNT} 涓敼鍔ㄦ枃浠讹紙浠?${PREV_TAG} 鍒?${CURRENT_TAG}锛?
             echo "changed_count=${CHANGED_COUNT}" >> $GITHUB_OUTPUT
             
-            # 显示前10个改动的文件（用于调试）
+            # 鏄剧ず鍓?0涓敼鍔ㄧ殑鏂囦欢锛堢敤浜庤皟璇曪級
             if [ "${CHANGED_COUNT}" -gt 0 ]; then
-              echo "[INFO] 改动的文件（前10个）:"
+              echo "[INFO] 鏀瑰姩鐨勬枃浠讹紙鍓?0涓級:"
               head -10 temp/changed_files.txt | sed 's/^/  - /'
               
-              # 显示改动的 router 文件数量
+              # 鏄剧ず鏀瑰姩鐨?router 鏂囦欢鏁伴噺
               ROUTER_COUNT=$(grep -c "^backend/routers/.*\.py$" temp/changed_files.txt || echo "0")
-              echo "[INFO] 其中 router 文件: ${ROUTER_COUNT} 个"
+              echo "[INFO] 鍏朵腑 router 鏂囦欢: ${ROUTER_COUNT} 涓?
             else
-              echo "[INFO] 没有发现改动文件（可能是 tag 指向同一个 commit）"
+              echo "[INFO] 娌℃湁鍙戠幇鏀瑰姩鏂囦欢锛堝彲鑳芥槸 tag 鎸囧悜鍚屼竴涓?commit锛?
             fi
           fi
 
-      # [NEW] 关键表外键约束验证（只检查关键表，避免Column级别外键的误报）
+      # [NEW] 鍏抽敭琛ㄥ閿害鏉熼獙璇侊紙鍙鏌ュ叧閿〃锛岄伩鍏岰olumn绾у埆澶栭敭鐨勮鎶ワ級
       - name: Verify Critical Tables Foreign Keys (Release Gate)
         run: |
-          echo "[INFO] 验证关键表的外键约束..."
+          echo "[INFO] 楠岃瘉鍏抽敭琛ㄧ殑澶栭敭绾︽潫..."
           python scripts/test_migration_foreign_keys.py || {
-            echo "[FAIL] 关键表外键约束验证失败"
+            echo "[FAIL] 鍏抽敭琛ㄥ閿害鏉熼獙璇佸け璐?
             exit 1
           }
-          echo "[OK] 关键表外键约束验证通过"
+          echo "[OK] 鍏抽敭琛ㄥ閿害鏉熼獙璇侀€氳繃"
 
-      # [NEW] 数据库迁移测试（在临时数据库中执行迁移）
+      # [NEW] 鏁版嵁搴撹縼绉绘祴璇曪紙鍦ㄤ复鏃舵暟鎹簱涓墽琛岃縼绉伙級
       - name: Validate Database Migrations (Release Gate)
         env:
           DATABASE_URL: postgresql://migration_test_user:migration_test_pass@localhost:5432/migration_test_db
         run: |
-          echo "[INFO] 在临时数据库中测试迁移..."
+          echo "[INFO] 鍦ㄤ复鏃舵暟鎹簱涓祴璇曡縼绉?.."
 
-          # 等待 PostgreSQL 就绪
-          echo "[INFO] 等待 PostgreSQL 就绪..."
+          # 绛夊緟 PostgreSQL 灏辩华
+          echo "[INFO] 绛夊緟 PostgreSQL 灏辩华..."
           for i in $(seq 1 30); do
             if PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -c "SELECT 1" >/dev/null 2>&1; then
-              echo "[OK] PostgreSQL 已就绪"
+              echo "[OK] PostgreSQL 宸插氨缁?
               break
             fi
             if [ $i -eq 30 ]; then
-              echo "[FAIL] PostgreSQL 启动超时"
+              echo "[FAIL] PostgreSQL 鍚姩瓒呮椂"
               exit 1
             fi
             sleep 1
           done
 
-          # 执行迁移
-          echo "[INFO] 执行数据库迁移..."
+          # 鎵ц杩佺Щ
+          echo "[INFO] 鎵ц鏁版嵁搴撹縼绉?.."
           alembic upgrade heads || {
-            echo "[FAIL] 迁移执行失败"
-            echo "[INFO] 请检查迁移脚本中的错误"
+            echo "[FAIL] 杩佺Щ鎵ц澶辫触"
+            echo "[INFO] 璇锋鏌ヨ縼绉昏剼鏈腑鐨勯敊璇?
             exit 1
           }
 
-          # 验证表数量
-          TABLE_COUNT=$(PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -t -c \
+          # 楠岃瘉琛ㄦ暟閲?          TABLE_COUNT=$(PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -t -c \
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'" | tr -d ' \n')
 
-          echo "[INFO] 创建了 ${TABLE_COUNT} 张表"
+          echo "[INFO] 鍒涘缓浜?${TABLE_COUNT} 寮犺〃"
 
           if [ "${TABLE_COUNT}" -lt 50 ]; then
-            echo "[WARNING] 表数量过少（期望至少 50 张，实际 ${TABLE_COUNT} 张）"
-            echo "[INFO] 这可能表示迁移不完整"
+            echo "[WARNING] 琛ㄦ暟閲忚繃灏戯紙鏈熸湜鑷冲皯 50 寮狅紝瀹為檯 ${TABLE_COUNT} 寮狅級"
+            echo "[INFO] 杩欏彲鑳借〃绀鸿縼绉讳笉瀹屾暣"
           else
-            echo "[OK] 表数量正常（${TABLE_COUNT} 张）"
+            echo "[OK] 琛ㄦ暟閲忔甯革紙${TABLE_COUNT} 寮狅級"
           fi
 
-          # 验证关键表是否存在
-          KEY_TABLES=("dim_products" "bridge_product_keys" "fact_product_metrics" "dim_product_master")
+          # 楠岃瘉鍏抽敭琛ㄦ槸鍚﹀瓨鍦?          KEY_TABLES=("dim_products" "bridge_product_keys" "fact_product_metrics" "dim_product_master")
           for table_name in "${KEY_TABLES[@]}"; do
             EXISTS=$(PGPASSWORD=migration_test_pass psql -h localhost -U migration_test_user -d migration_test_db -t -c \
               "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema='public' AND table_name='${table_name}')" | tr -d ' \n')
             if [ "${EXISTS}" = "t" ]; then
-              echo "[OK] 表 ${table_name} 存在"
+              echo "[OK] 琛?${table_name} 瀛樺湪"
             else
-              echo "[FAIL] 表 ${table_name} 不存在"
+              echo "[FAIL] 琛?${table_name} 涓嶅瓨鍦?
               exit 1
             fi
           done
 
-          echo "[OK] 数据库迁移测试通过"
+          echo "[OK] 鏁版嵁搴撹縼绉绘祴璇曢€氳繃"
 
-      # [NOTE] 发布门禁：tag 发布必须通过这些检查；失败会阻断 build 和 deploy
-      # [FIX] 只验证改动的 router 文件，避免历史遗留问题阻断新发布
+      # [NOTE] 鍙戝竷闂ㄧ锛歵ag 鍙戝竷蹇呴』閫氳繃杩欎簺妫€鏌ワ紱澶辫触浼氶樆鏂?build 鍜?deploy
+      # [FIX] 鍙獙璇佹敼鍔ㄧ殑 router 鏂囦欢锛岄伩鍏嶅巻鍙查仐鐣欓棶棰橀樆鏂柊鍙戝竷
       - name: Validate API Contracts (Release Gate)
         run: |
           if [ "${{ steps.changed-files.outputs.has_prev_tag }}" == "true" ] && [ -f "temp/changed_files.txt" ]; then
-            echo "[INFO] 只验证改动的 router 文件..."
+            echo "[INFO] 鍙獙璇佹敼鍔ㄧ殑 router 鏂囦欢..."
             python scripts/validate_api_contracts.py --changed-files temp/changed_files.txt
           else
-            echo "[INFO] 未找到改动文件列表，验证所有文件..."
+            echo "[INFO] 鏈壘鍒版敼鍔ㄦ枃浠跺垪琛紝楠岃瘉鎵€鏈夋枃浠?.."
             python scripts/validate_api_contracts.py
           fi
 
       - name: Validate Frontend API Methods (Release Gate)
         run: |
           if [ "${{ steps.changed-files.outputs.has_prev_tag }}" == "true" ] && [ -f "temp/changed_files.txt" ]; then
-            echo "[INFO] 只验证改动的前端文件..."
+            echo "[INFO] 鍙獙璇佹敼鍔ㄧ殑鍓嶇鏂囦欢..."
             python scripts/validate_frontend_api_methods.py --changed-files temp/changed_files.txt
           else
-            echo "[INFO] 未找到改动文件列表，验证所有前端文件..."
+            echo "[INFO] 鏈壘鍒版敼鍔ㄦ枃浠跺垪琛紝楠岃瘉鎵€鏈夊墠绔枃浠?.."
             python scripts/validate_frontend_api_methods.py
           fi
 
@@ -256,10 +247,10 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            # [FIX] 同时推送带 v 前缀的 tag（v4.20.5 / 4.20.5），避免部署端找不到 manifest
+            # [FIX] 鍚屾椂鎺ㄩ€佸甫 v 鍓嶇紑鐨?tag锛坴4.20.5 / 4.20.5锛夛紝閬垮厤閮ㄧ讲绔壘涓嶅埌 manifest
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
-            # [FIX] 固定 sha tag 规则，避免生成非法 tag
+            # [FIX] 鍥哄畾 sha tag 瑙勫垯锛岄伩鍏嶇敓鎴愰潪娉?tag
             type=sha,format=short,prefix=sha-
 
       - name: Extract metadata (tags, labels) for backend-full (collection)
@@ -268,8 +259,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}
           tags: |
-            # full 镜像仅随 tag 发布（v4.22.4-full / 4.22.4-full）
-            type=semver,pattern={{version}}-full
+            # full 闀滃儚浠呴殢 tag 鍙戝竷锛坴4.22.4-full / 4.22.4-full锛?            type=semver,pattern={{version}}-full
             type=semver,pattern={{major}}.{{minor}}-full
             type=semver,pattern=v{{version}}-full
             type=semver,pattern=v{{major}}.{{minor}}-full
@@ -283,10 +273,9 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            # [FIX] 同时推送带 v 前缀的 tag（v4.20.5 / 4.20.5）
-            type=semver,pattern=v{{version}}
+            # [FIX] 鍚屾椂鎺ㄩ€佸甫 v 鍓嶇紑鐨?tag锛坴4.20.5 / 4.20.5锛?            type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
-            # [FIX] 固定 sha tag 规则，避免生成非法 tag
+            # [FIX] 鍥哄畾 sha tag 瑙勫垯锛岄伩鍏嶇敓鎴愰潪娉?tag
             type=sha,format=short,prefix=sha-
 
       - name: Build and push backend image
@@ -328,7 +317,7 @@ jobs:
             NODE_VERSION=24
             VITE_API_URL=${{ secrets.VITE_API_URL || 'http://localhost:8001' }}
 
-      # [NEW] 混合模式：同时推送到 CNB.cool（国内镜像仓库，加速部署）
+      # [NEW] 娣峰悎妯″紡锛氬悓鏃舵帹閫佸埌 CNB.cool锛堝浗鍐呴暅鍍忎粨搴擄紝鍔犻€熼儴缃诧級
       - name: Log in to CNB Registry
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: docker/login-action@v3
@@ -340,18 +329,17 @@ jobs:
       - name: Push backend image to CNB
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
-          # 获取镜像标签（从 ref 中提取，例如 v4.22.4）
-          TAG="${GITHUB_REF#refs/tags/}"
+          # 鑾峰彇闀滃儚鏍囩锛堜粠 ref 涓彁鍙栵紝渚嬪 v4.22.4锛?          TAG="${GITHUB_REF#refs/tags/}"
           echo "[INFO] Pushing backend to CNB with tag: ${TAG}"
 
-          # 从 GHCR 拉取镜像（刚构建的）
+          # 浠?GHCR 鎷夊彇闀滃儚锛堝垰鏋勫缓鐨勶級
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${TAG}
 
-          # 标记为 CNB 镜像
+          # 鏍囪涓?CNB 闀滃儚
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${TAG} \
             docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_BACKEND }}:${TAG}
 
-          # 推送到 CNB
+          # 鎺ㄩ€佸埌 CNB
           docker push docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_BACKEND }}:${TAG}
 
           echo "[OK] Backend image pushed to CNB successfully"
@@ -359,18 +347,18 @@ jobs:
       - name: Push frontend image to CNB
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
-          # 获取镜像标签
+          # 鑾峰彇闀滃儚鏍囩
           TAG="${GITHUB_REF#refs/tags/}"
           echo "[INFO] Pushing frontend to CNB with tag: ${TAG}"
 
-          # 从 GHCR 拉取镜像（刚构建的）
+          # 浠?GHCR 鎷夊彇闀滃儚锛堝垰鏋勫缓鐨勶級
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${TAG}
 
-          # 标记为 CNB 镜像
+          # 鏍囪涓?CNB 闀滃儚
           docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${TAG} \
             docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_FRONTEND }}:${TAG}
 
-          # 推送到 CNB
+          # 鎺ㄩ€佸埌 CNB
           docker push docker.cnb.cool/${{ secrets.CNB_IMAGE_NAME_FRONTEND }}:${TAG}
 
           echo "[OK] Frontend image pushed to CNB successfully"
@@ -413,17 +401,14 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          # [NOTE] 方案A1：直接使用 SCP 上传 compose 文件（移除 git pull，更简单、更稳定）
-          # compose 文件很小，对 5MB 带宽影响很小，不需要配置服务器 git 凭据
-          echo "[INFO] Uploading compose files via SCP..."
+          echo "[INFO] Uploading deployment bundle via SCP..."
 
-          # [FIX] SCP 重试函数（处理网络连接不稳定问题）
           scp_with_retry() {
             local file="$1"
             local remote_path="$2"
             local max_retries=3
             local retry_delay=5
-            
+
             for i in $(seq 1 ${max_retries}); do
               echo "[INFO] Upload attempt ${i}/${max_retries} for $(basename ${file})..."
               if scp \
@@ -450,7 +435,6 @@ jobs:
             done
           }
 
-          # [FIX] 测试 SSH 连接（在上传前验证连接可用性）
           echo "[INFO] Testing SSH connection..."
           if ssh \
               -o ConnectTimeout=10 \
@@ -461,147 +445,45 @@ jobs:
           else
             echo "[WARN] SSH connection test failed, but continuing with upload (may be transient issue)..."
           fi
+
+          echo "[INFO] Building deployment bundle..."
+          chmod +x scripts/build_deploy_bundle.sh
+          BUNDLE_PATH="$(scripts/build_deploy_bundle.sh "$(pwd)" "temp/deploy_bundle.tgz")"
+          echo "[OK] Deployment bundle created: ${BUNDLE_PATH}"
+
           if ! ssh \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
               -o ConnectTimeout=30 \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-              "mkdir -p \"${PRODUCTION_PATH}\" \"${PRODUCTION_PATH}/config\" \"${PRODUCTION_PATH}/sql/init\" \"${PRODUCTION_PATH}/nginx\""; then
-            echo "[FAIL] Failed to prepare remote deployment directories under ${PRODUCTION_PATH}"
+              "mkdir -p \"${PRODUCTION_PATH}\""; then
+            echo "[FAIL] Failed to prepare remote deployment directory under ${PRODUCTION_PATH}"
             exit 1
           fi
 
-          # 1. 上传 docker-compose.yml（必需）
-          if ! scp_with_retry docker-compose.yml ${PRODUCTION_PATH}/docker-compose.yml; then
+          if ! scp_with_retry "${BUNDLE_PATH}" ${PRODUCTION_PATH}/deploy_bundle.tgz; then
             exit 1
           fi
 
-          # 2. 上传 docker-compose.prod.yml（必需，如果存在）
-          if [ -f "docker-compose.prod.yml" ]; then
-            if ! scp_with_retry docker-compose.prod.yml ${PRODUCTION_PATH}/docker-compose.prod.yml; then
-              exit 1
-            fi
-          else
-            echo "[WARN] docker-compose.prod.yml not found, skipping..."
-          fi
-
-          # 3. 上传 docker-compose.cloud.yml（可选，如果存在）
-          if [ -f "docker-compose.cloud.yml" ]; then
-            if ! scp_with_retry docker-compose.cloud.yml ${PRODUCTION_PATH}/docker-compose.cloud.yml; then
-              echo "[WARN] Failed to upload docker-compose.cloud.yml (optional file, continuing...)"
-            fi
-          else
-            echo "[INFO] docker-compose.cloud.yml not found, skipping (optional file)..."
-          fi
-
-          # 4. 上传 docker-compose.metabase.yml（生产必需组件，如果存在）
-          # 4b. 上传 4c8g overlay（4 核 8G 用户需手动追加到 compose 命令）
-          if [ -f "docker-compose.cloud-4c8g.yml" ]; then
-            if ! scp_with_retry docker-compose.cloud-4c8g.yml ${PRODUCTION_PATH}/docker-compose.cloud-4c8g.yml; then
-              echo "[WARN] Failed to upload docker-compose.cloud-4c8g.yml (optional for 4c8g)"
-            fi
-          fi
-
-          # 5. 上传远程部署脚本（方案A：避免在 workflow 中维护超长 bash -c 片段）
-          if ! scp_with_retry scripts/deploy_remote_production.sh ${PRODUCTION_PATH}/deploy_remote_production.sh; then
+          if ! ssh \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              -o ConnectTimeout=30 \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+              "mkdir -p \"${PRODUCTION_PATH}\" \"${PRODUCTION_PATH}/config\" \"${PRODUCTION_PATH}/sql/init\" \"${PRODUCTION_PATH}/nginx\" \"${PRODUCTION_PATH}/nginx/ssl\" && tar -xzf \"${PRODUCTION_PATH}/deploy_bundle.tgz\" -C \"${PRODUCTION_PATH}\" && rm -f \"${PRODUCTION_PATH}/deploy_bundle.tgz\" && chmod +x \"${PRODUCTION_PATH}/deploy_remote_production.sh\""; then
+            echo "[FAIL] Failed to extract deployment bundle on server"
             exit 1
           fi
 
-          # 5b. 上传 config 目录（PostgreSQL 主链路运行配置；legacy Metabase 配置不再随生产部署同步）
-          if [ -d "config" ]; then
-            echo "[INFO] Syncing config directory to server..."
-            if ! ssh \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                -o ConnectTimeout=30 \
-                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "mkdir -p \"${PRODUCTION_PATH}/config\" && test -d \"${PRODUCTION_PATH}/config\""; then
-              echo "[WARN] Failed to create or verify config directory on server (path: ${PRODUCTION_PATH}/config), skipping config upload"
-            else
-              for f in config/*.yaml config/*.py; do
-                [ -e "$f" ] || continue
-                bn=$(basename "$f")
-                if [ "$bn" = "metabase_config.yaml" ]; then
-                  echo "[INFO] Skipping legacy config/$bn in PostgreSQL-first production deployment"
-                  continue
-                fi
-                scp_with_retry "$f" "${PRODUCTION_PATH}/config/${bn}" || true
-              done
-            fi
-          else
-            echo "[WARN] config directory not found, skipping config sync"
-          fi
-
-          # 5c. 上传 sql/init 目录（Postgres 首次启动时执行，含 metabase_app 创建）
-          if [ -d "sql/init" ]; then
-            echo "[INFO] Syncing sql/init directory to server..."
-            if ! ssh \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                -o ConnectTimeout=30 \
-                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "mkdir -p ${PRODUCTION_PATH}/sql/init"; then
-              echo "[WARN] Failed to create sql/init directory on server, continuing..."
-            else
-              for f in sql/init/*.sql; do
-                [ -e "$f" ] || continue
-                bn=$(basename "$f")
-                if scp_with_retry "$f" ${PRODUCTION_PATH}/sql/init/"$bn"; then
-                  echo "[OK] sql/init/$bn uploaded"
-                else
-                  echo "[WARN] Failed to upload sql/init/$bn (continuing...)"
-                fi
-              done
-              echo "[OK] sql/init sync completed"
-            fi
-          else
-            echo "[WARN] sql/init directory not found, skipping (Postgres init scripts; metabase_app may need manual CREATE DATABASE)"
-          fi
-
-          # 6. 上传 Nginx 配置文件（生产必需组件）
-          if [ -d "nginx" ]; then
-            # 确保服务器上 nginx 目录存在
-            if ! ssh \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                -o ConnectTimeout=30 \
-                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "mkdir -p ${PRODUCTION_PATH}/nginx"; then
-              echo "[WARN] Failed to create nginx directory on server, but continuing..."
-            fi
-
-            # 上传 nginx.prod.conf（生产必需）
-            if [ -f "nginx/nginx.prod.conf" ]; then
-              if ! scp_with_retry nginx/nginx.prod.conf ${PRODUCTION_PATH}/nginx/nginx.prod.conf; then
-                echo "[FAIL] Failed to upload nginx/nginx.prod.conf (required for production)"
-                exit 1
-              fi
-            else
-              echo "[WARN] nginx/nginx.prod.conf not found (required for production, deployment may fail if Nginx is not configured)"
-            fi
-
-            # 确保 SSL 证书目录存在（SSL 证书通常不需要通过 Git 同步，这里只是确保目录存在）
-            if ! ssh \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                -o ConnectTimeout=30 \
-                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "mkdir -p ${PRODUCTION_PATH}/nginx/ssl"; then
-              echo "[WARN] Failed to create nginx/ssl directory on server, but continuing..."
-            fi
-          else
-            echo "[WARN] nginx directory not found, skipping Nginx configuration sync..."
-          fi
-
-          echo "[OK] All compose files and Nginx configuration synced successfully via SCP"
-
+          rm -f "${BUNDLE_PATH}"
+          echo "[OK] Deployment bundle synced successfully via SCP"
       - name: Backup current deployment
         env:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          # [FIX] 使用 bash -c 远程执行，避免 heredoc 语法问题
+          # [FIX] 浣跨敤 bash -c 杩滅▼鎵ц锛岄伩鍏?heredoc 璇硶闂
           ssh \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
@@ -621,9 +503,8 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
-          # [FIX] 方案A：部署逻辑统一封装到脚本，避免超长 bash -c 片段导致引号/换行问题
-          # 通过 stdin 传递 token，避免把 token 写进远程命令行参数
-          # [NEW] 混合模式：同时传递 GHCR 和 CNB token，优先使用 CNB（国内更快）
+          # [FIX] 鏂规A锛氶儴缃查€昏緫缁熶竴灏佽鍒拌剼鏈紝閬垮厤瓒呴暱 bash -c 鐗囨瀵艰嚧寮曞彿/鎹㈣闂
+          # 閫氳繃 stdin 浼犻€?token锛岄伩鍏嶆妸 token 鍐欒繘杩滅▼鍛戒护琛屽弬鏁?          # [NEW] 娣峰悎妯″紡锛氬悓鏃朵紶閫?GHCR 鍜?CNB token锛屼紭鍏堜娇鐢?CNB锛堝浗鍐呮洿蹇級
           printf '%s\n%s\n' "${{ secrets.GITHUB_TOKEN }}" "${{ secrets.CNB_TOKEN }}" | ssh \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
@@ -690,15 +571,14 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          echo "[INFO] Uploading compose files via SCP..."
+          echo "[INFO] Uploading deployment bundle via SCP..."
 
-          # [FIX] SCP 重试函数（处理网络连接不稳定问题）
           scp_with_retry() {
             local file="$1"
             local remote_path="$2"
             local max_retries=3
             local retry_delay=5
-            
+
             for i in $(seq 1 ${max_retries}); do
               echo "[INFO] Upload attempt ${i}/${max_retries} for $(basename ${file})..."
               if scp \
@@ -725,7 +605,6 @@ jobs:
             done
           }
 
-          # [FIX] 测试 SSH 连接（在上传前验证连接可用性）
           echo "[INFO] Testing SSH connection..."
           if ssh \
               -o ConnectTimeout=10 \
@@ -737,127 +616,37 @@ jobs:
             echo "[WARN] SSH connection test failed, but continuing with upload (may be transient issue)..."
           fi
 
+          echo "[INFO] Building deployment bundle..."
+          chmod +x scripts/build_deploy_bundle.sh
+          BUNDLE_PATH="$(scripts/build_deploy_bundle.sh "$(pwd)" "temp/deploy_bundle.tgz")"
+          echo "[OK] Deployment bundle created: ${BUNDLE_PATH}"
+
           if ! ssh \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
               -o ConnectTimeout=30 \
               ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-              "mkdir -p \"${PRODUCTION_PATH}\" \"${PRODUCTION_PATH}/config\" \"${PRODUCTION_PATH}/sql/init\" \"${PRODUCTION_PATH}/nginx\""; then
-            echo "[FAIL] Failed to prepare remote deployment directories under ${PRODUCTION_PATH}"
+              "mkdir -p \"${PRODUCTION_PATH}\""; then
+            echo "[FAIL] Failed to prepare remote deployment directory under ${PRODUCTION_PATH}"
             exit 1
           fi
 
-          # 上传所有 compose 文件
-          if ! scp_with_retry docker-compose.yml ${PRODUCTION_PATH}/docker-compose.yml; then
-            exit 1
-          fi
-          if [ -f "docker-compose.prod.yml" ]; then
-            if ! scp_with_retry docker-compose.prod.yml ${PRODUCTION_PATH}/docker-compose.prod.yml; then
-              exit 1
-            fi
-          fi
-          if [ -f "docker-compose.cloud.yml" ]; then
-            if ! scp_with_retry docker-compose.cloud.yml ${PRODUCTION_PATH}/docker-compose.cloud.yml; then
-              echo "[WARN] Failed to upload docker-compose.cloud.yml (optional file, continuing...)"
-            fi
-          fi
-          if [ -f "docker-compose.cloud-4c8g.yml" ]; then
-            scp_with_retry docker-compose.cloud-4c8g.yml ${PRODUCTION_PATH}/docker-compose.cloud-4c8g.yml || true
-          fi
-
-          # 同步远程部署脚本（方案A：deploy-tag 与 deploy-manual 共用同一套部署逻辑）
-          if ! scp_with_retry scripts/deploy_remote_production.sh ${PRODUCTION_PATH}/deploy_remote_production.sh; then
+          if ! scp_with_retry "${BUNDLE_PATH}" ${PRODUCTION_PATH}/deploy_bundle.tgz; then
             exit 1
           fi
 
-          # 5b. 上传 config 目录（PostgreSQL 主链路运行配置；legacy Metabase 配置不再随生产部署同步）
-          if [ -d "config" ]; then
-            echo "[INFO] Syncing config directory to server..."
-            if ! ssh \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                -o ConnectTimeout=30 \
-                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "mkdir -p \"${PRODUCTION_PATH}/config\" && test -d \"${PRODUCTION_PATH}/config\""; then
-              echo "[WARN] Failed to create or verify config directory on server (path: ${PRODUCTION_PATH}/config), skipping config upload"
-            else
-              for f in config/*.yaml config/*.py; do
-                [ -e "$f" ] || continue
-                bn=$(basename "$f")
-                if [ "$bn" = "metabase_config.yaml" ]; then
-                  echo "[INFO] Skipping legacy config/$bn in PostgreSQL-first production deployment"
-                  continue
-                fi
-                scp_with_retry "$f" "${PRODUCTION_PATH}/config/${bn}" || true
-              done
-            fi
-          else
-            echo "[WARN] config directory not found, skipping config sync"
+          if ! ssh \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              -o ConnectTimeout=30 \
+              ${PRODUCTION_USER}@${PRODUCTION_HOST} \
+              "mkdir -p \"${PRODUCTION_PATH}\" \"${PRODUCTION_PATH}/config\" \"${PRODUCTION_PATH}/sql/init\" \"${PRODUCTION_PATH}/nginx\" \"${PRODUCTION_PATH}/nginx/ssl\" && tar -xzf \"${PRODUCTION_PATH}/deploy_bundle.tgz\" -C \"${PRODUCTION_PATH}\" && rm -f \"${PRODUCTION_PATH}/deploy_bundle.tgz\" && chmod +x \"${PRODUCTION_PATH}/deploy_remote_production.sh\""; then
+            echo "[FAIL] Failed to extract deployment bundle on server"
+            exit 1
           fi
 
-          # 5c. 上传 sql/init 目录（Postgres 首次启动时执行，含 metabase_app 创建）
-          if [ -d "sql/init" ]; then
-            echo "[INFO] Syncing sql/init directory to server..."
-            if ! ssh \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                -o ConnectTimeout=30 \
-                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "mkdir -p ${PRODUCTION_PATH}/sql/init"; then
-              echo "[WARN] Failed to create sql/init directory on server, continuing..."
-            else
-              for f in sql/init/*.sql; do
-                [ -e "$f" ] || continue
-                bn=$(basename "$f")
-                if scp_with_retry "$f" ${PRODUCTION_PATH}/sql/init/"$bn"; then
-                  echo "[OK] sql/init/$bn uploaded"
-                else
-                  echo "[WARN] Failed to upload sql/init/$bn (continuing...)"
-                fi
-              done
-              echo "[OK] sql/init sync completed"
-            fi
-          else
-            echo "[WARN] sql/init directory not found, skipping (Postgres init scripts; metabase_app may need manual CREATE DATABASE)"
-          fi
-
-          # 上传 Nginx 配置文件（生产必需组件）
-          if [ -d "nginx" ]; then
-            # 确保服务器上 nginx 目录存在
-            if ! ssh \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                -o ConnectTimeout=30 \
-                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "mkdir -p ${PRODUCTION_PATH}/nginx"; then
-              echo "[WARN] Failed to create nginx directory on server, but continuing..."
-            fi
-
-            # 上传 nginx.prod.conf（生产必需）
-            if [ -f "nginx/nginx.prod.conf" ]; then
-              if ! scp_with_retry nginx/nginx.prod.conf ${PRODUCTION_PATH}/nginx/nginx.prod.conf; then
-                echo "[FAIL] Failed to upload nginx/nginx.prod.conf (required for production)"
-                exit 1
-              fi
-            else
-              echo "[WARN] nginx/nginx.prod.conf not found (required for production, deployment may fail if Nginx is not configured)"
-            fi
-
-            # 确保 SSL 证书目录存在（SSL 证书通常不需要通过 Git 同步，这里只是确保目录存在）
-            if ! ssh \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=10 \
-                -o ConnectTimeout=30 \
-                ${PRODUCTION_USER}@${PRODUCTION_HOST} \
-                "mkdir -p ${PRODUCTION_PATH}/nginx/ssl"; then
-              echo "[WARN] Failed to create nginx/ssl directory on server, but continuing..."
-            fi
-          else
-            echo "[WARN] nginx directory not found, skipping Nginx configuration sync..."
-          fi
-
-          echo "[OK] All compose files and Nginx configuration synced successfully via SCP"
-
+          rm -f "${BUNDLE_PATH}"
+          echo "[OK] Deployment bundle synced successfully via SCP"
       - name: Backup current deployment
         env:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
@@ -883,8 +672,7 @@ jobs:
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
           IMAGE_TAG: ${{ steps.image-tag.outputs.tag }}
         run: |
-          # [FIX] 方案A：与 deploy-tag 使用同一脚本，确保手动部署/回滚路径与自动发布一致
-          # [NEW] 混合模式：同时传递 GHCR 和 CNB token，优先使用 CNB（国内更快）
+          # [FIX] 鏂规A锛氫笌 deploy-tag 浣跨敤鍚屼竴鑴氭湰锛岀‘淇濇墜鍔ㄩ儴缃?鍥炴粴璺緞涓庤嚜鍔ㄥ彂甯冧竴鑷?          # [NEW] 娣峰悎妯″紡锛氬悓鏃朵紶閫?GHCR 鍜?CNB token锛屼紭鍏堜娇鐢?CNB锛堝浗鍐呮洿蹇級
           printf '%s\n%s\n' "${{ secrets.GITHUB_TOKEN }}" "${{ secrets.CNB_TOKEN }}" | ssh \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=10 \
@@ -915,18 +703,18 @@ jobs:
             exit 0
           fi
 
-          # [FIX] 域名备案期间，如果配置了 HTTPS 但 SSL 证书未配置，自动降级到 HTTP
+          # [FIX] 鍩熷悕澶囨鏈熼棿锛屽鏋滈厤缃簡 HTTPS 浣?SSL 璇佷功鏈厤缃紝鑷姩闄嶇骇鍒?HTTP
           HEALTH_CHECK_URL="${PRODUCTION_URL}"
           if [[ "${PRODUCTION_URL}" == https://* ]]; then
             echo "[INFO] PRODUCTION_URL is HTTPS, attempting HTTPS health check first..."
             
-            # 先尝试 HTTPS（如果 SSL 已配置）
+            # 鍏堝皾璇?HTTPS锛堝鏋?SSL 宸查厤缃級
             HTTPS_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 --connect-timeout 5 ${PRODUCTION_URL}/health 2>/dev/null || echo "000")
             
             if [ "${HTTPS_CODE}" = "200" ]; then
               echo "[OK] HTTPS health check passed, using HTTPS"
             else
-              # HTTPS 失败，降级到 HTTP（域名备案期间，SSL 证书可能未配置）
+              # HTTPS 澶辫触锛岄檷绾у埌 HTTP锛堝煙鍚嶅妗堟湡闂达紝SSL 璇佷功鍙兘鏈厤缃級
               HTTP_URL="${PRODUCTION_URL/https:\/\//http:\/\/}"
               echo "[INFO] HTTPS health check failed (HTTP ${HTTPS_CODE}), domain may be in ICP filing process"
               echo "[INFO] Falling back to HTTP for health check: ${HTTP_URL}/health"
@@ -937,15 +725,13 @@ jobs:
 
           echo "[INFO] Checking production health at: ${HEALTH_CHECK_URL}/health"
 
-          # 增加重试机制和详细错误信息
-          MAX_RETRIES=5
+          # 澧炲姞閲嶈瘯鏈哄埗鍜岃缁嗛敊璇俊鎭?          MAX_RETRIES=5
           RETRY_DELAY=10
 
           for i in $(seq 1 ${MAX_RETRIES}); do
             echo "[INFO] Health check attempt $i/${MAX_RETRIES}..."
             
-            # 使用 curl 检查健康状态，增加超时和详细输出
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 --connect-timeout 10 ${HEALTH_CHECK_URL}/health 2>/dev/null || echo "000")
+            # 浣跨敤 curl 妫€鏌ュ仴搴风姸鎬侊紝澧炲姞瓒呮椂鍜岃缁嗚緭鍑?            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 --connect-timeout 10 ${HEALTH_CHECK_URL}/health 2>/dev/null || echo "000")
             
             if [ "${HTTP_CODE}" = "200" ]; then
               echo "[OK] Production health check passed (HTTP ${HTTP_CODE})"
@@ -972,7 +758,7 @@ jobs:
                 echo "  5. If domain is in ICP filing process, ensure DNS points to server IP"
                 echo "  6. Check server firewall/security group allows port 80 (HTTP)"
                 
-                # 尝试获取更多诊断信息
+                # 灏濊瘯鑾峰彇鏇村璇婃柇淇℃伅
                 echo "[INFO] Attempting to get more diagnostic information..."
                 curl -v --max-time 10 ${HEALTH_CHECK_URL}/health 2>&1 | head -20 || true
                 
@@ -1002,7 +788,7 @@ jobs:
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER || 'root' }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH || '/opt/xihong_erp' }}
         run: |
-          # [FIX] 避免 heredoc 语法问题，使用 bash -c 执行远程命令
+          # [FIX] 閬垮厤 heredoc 璇硶闂锛屼娇鐢?bash -c 鎵ц杩滅▼鍛戒护
           ssh \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
@@ -1013,12 +799,11 @@ jobs:
             
               echo \"[WARNING] Deployment failed, attempting rollback...\"
             
-            # 查找上一个成功的部署备份
+            # 鏌ユ壘涓婁竴涓垚鍔熺殑閮ㄧ讲澶囦唤
               LAST_BACKUP=\$(ls -td backups/pre_deploy_* 2>/dev/null | head -1)
               if [ -n \"\${LAST_BACKUP}\" ]; then
                 echo \"Found backup: \${LAST_BACKUP}\"
-              # 这里可以实现回滚逻辑（恢复配置、拉取上一个镜像等）
-                echo \"[WARNING] Manual rollback required. Check backup: \${LAST_BACKUP}\"
+              # 杩欓噷鍙互瀹炵幇鍥炴粴閫昏緫锛堟仮澶嶉厤缃€佹媺鍙栦笂涓€涓暅鍍忕瓑锛?                echo \"[WARNING] Manual rollback required. Check backup: \${LAST_BACKUP}\"
             else
                 echo \"[WARNING] No backup found for rollback\"
             fi
@@ -1032,10 +817,9 @@ jobs:
           fields: repo,message,commit,author,action,eventName,ref,workflow
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        continue-on-error: true # 如果 SLACK_WEBHOOK_URL 未配置会静默失败
+        continue-on-error: true # 濡傛灉 SLACK_WEBHOOK_URL 鏈厤缃細闈欓粯澶辫触
 
-  # 当部署被跳过时显示消息
-  skip-notification:
+  # 褰撻儴缃茶璺宠繃鏃舵樉绀烘秷鎭?  skip-notification:
     runs-on: ubuntu-latest
     needs: check-config
     if: ${{ needs.check-config.outputs.can_deploy == 'false' }}
