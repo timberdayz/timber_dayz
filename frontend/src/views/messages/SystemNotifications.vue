@@ -4,7 +4,16 @@
       title="系统通知"
       subtitle="查看通知列表、分组状态、未读数量和批量处理操作。"
       family="admin"
-    />
+    >
+      <template #actions>
+        <el-button type="primary" plain @click="router.push('/admin/users/pending')">
+          用户审批
+        </el-button>
+        <el-button plain @click="router.push('/user-management')">
+          用户管理
+        </el-button>
+      </template>
+    </PageHeader>
 
     <el-card class="notifications-card">
       <template #header>

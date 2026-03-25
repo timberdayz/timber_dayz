@@ -1,8 +1,8 @@
 <template>
-  <div class="user-approval">
+  <div class="user-approval erp-page-container erp-page--admin">
     <PageHeader
       title="用户审批"
-      subtitle="审批待审核的新用户注册申请。"
+      subtitle="审批待审核的新用户注册申请，并保持与用户管理页联动。"
       family="admin"
     >
       <template #actions>
@@ -15,11 +15,16 @@
     <el-card class="table-card">
       <template #header>
         <div class="card-header">
-          <span>待审批用户列表</span>
-          <el-button @click="refreshUsers" :loading="loading">
-            <el-icon><Refresh /></el-icon>
-            刷新
-          </el-button>
+          <div class="card-header__title">
+            <span>待审批用户列表</span>
+            <el-tag v-if="total > 0" type="warning">{{ total }} 待审批</el-tag>
+          </div>
+          <div class="card-header__actions">
+            <el-button @click="refreshUsers" :loading="loading">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -344,33 +349,29 @@ onMounted(() => {
 
 <style scoped>
 .user-approval {
-  padding: 20px;
-  background: #f0f2f5;
-  min-height: 100vh;
-}
-
-.page-header {
-  margin-bottom: 20px;
-}
-
-.page-header h1 {
-  font-size: 24px;
-  color: #333;
-  margin-bottom: 8px;
-}
-
-.page-header p {
-  color: #666;
-  font-size: 14px;
+  min-height: calc(100vh - var(--header-height));
 }
 
 .table-card {
-  margin-top: 20px;
+  margin-bottom: 20px;
+  border-radius: 8px;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.card-header__title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.card-header__actions {
+  display: flex;
   align-items: center;
 }
 
