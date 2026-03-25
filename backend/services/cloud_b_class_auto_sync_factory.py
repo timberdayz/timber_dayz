@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import os
 
 from sqlalchemy import create_engine, inspect as sa_inspect
+from sqlalchemy.engine import make_url
 
 from backend.models.database import DATABASE_URL, SessionLocal
 from backend.services.cloud_b_class_auto_sync_worker import CloudBClassAutoSyncWorker
@@ -27,12 +29,30 @@ class NoOpCloudBClassMirrorManager:
         return None
 
 
+def _build_checkpoint_scope_key(cloud_database_url: str | None, dry_run: bool) -> str:
+    if dry_run:
+        return "cloud_sync:dry_run"
+
+    if not cloud_database_url:
+        return "cloud_sync:local"
+
+    parsed = make_url(cloud_database_url)
+    identity = (
+        f"{parsed.drivername.split('+', 1)[0]}://"
+        f"{parsed.host or ''}:{parsed.port or ''}/"
+        f"{parsed.database or ''}"
+    )
+    digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
+    return f"cloud_sync:{digest}"
+
+
 def _build_cloud_sync_service(
     *,
     local_engine,
     cloud_engine,
     session_factory,
     dry_run: bool,
+    checkpoint_scope: str,
 ) -> CloudBClassSyncService:
     checkpoint_service = CloudBClassSyncCheckpointService(session_factory())
     mirror_manager = NoOpCloudBClassMirrorManager() if dry_run else CloudBClassMirrorManager(cloud_engine)
@@ -52,6 +72,7 @@ def _build_cloud_sync_service(
         local_engine=local_engine,
         cloud_engine=cloud_engine,
         owns_engines=False,
+        checkpoint_scope=checkpoint_scope,
     )
 
 
@@ -62,12 +83,14 @@ def build_cloud_sync_service_from_env(dry_run: bool = False) -> CloudBClassSyncS
 
     local_engine = create_engine(DATABASE_URL)
     cloud_engine = create_engine(cloud_database_url) if cloud_database_url else local_engine
+    checkpoint_scope = _build_checkpoint_scope_key(cloud_database_url, dry_run)
 
     service = _build_cloud_sync_service(
         local_engine=local_engine,
         cloud_engine=cloud_engine,
         session_factory=SessionLocal,
         dry_run=dry_run,
+        checkpoint_scope=checkpoint_scope,
     )
     service.owns_engines = True
     return service
@@ -79,6 +102,10 @@ class CloudSyncWorkerFactory:
         self.cloud_engine = cloud_engine
         self.session_factory = session_factory
         self.dry_run = dry_run
+        self.checkpoint_scope = _build_checkpoint_scope_key(
+            str(cloud_engine.url) if hasattr(cloud_engine, "url") else None,
+            dry_run,
+        )
 
     def __call__(self):
         db = self.session_factory()
@@ -87,6 +114,7 @@ class CloudSyncWorkerFactory:
             cloud_engine=self.cloud_engine,
             session_factory=self.session_factory,
             dry_run=self.dry_run,
+            checkpoint_scope=self.checkpoint_scope,
         )
         return CloudBClassAutoSyncWorker(db=db, sync_executor=service)
 
