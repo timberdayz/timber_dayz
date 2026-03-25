@@ -1,11 +1,14 @@
 import argparse
+import pytest
 
 from backend.services.cloud_b_class_auto_sync_factory import (
     _build_checkpoint_scope_key,
     CloudSyncWorkerFactory,
+    build_cloud_sync_runtime_from_env,
     build_cloud_sync_service_from_env,
     build_cloud_sync_worker_factory_from_env,
 )
+from backend.services.cloud_b_class_auto_sync_runtime import CloudBClassAutoSyncRuntime
 
 
 def test_build_cloud_sync_service_from_env_supports_dry_run(monkeypatch):
@@ -67,3 +70,39 @@ def test_checkpoint_scope_key_changes_with_cloud_target():
     assert scope_a.startswith("cloud_sync:")
     assert scope_b.startswith("cloud_sync:")
     assert scope_a != scope_b
+
+
+def test_build_cloud_sync_runtime_from_env_returns_none_when_worker_disabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_COLLECTION", "true")
+    monkeypatch.setenv("DEPLOYMENT_ROLE", "local")
+    monkeypatch.setenv("CLOUD_SYNC_WORKER_ENABLED", "false")
+    monkeypatch.delenv("CLOUD_DATABASE_URL", raising=False)
+
+    runtime = build_cloud_sync_runtime_from_env()
+
+    assert runtime is None
+
+
+def test_build_cloud_sync_runtime_from_env_requires_cloud_database_url(monkeypatch):
+    monkeypatch.setenv("ENABLE_COLLECTION", "true")
+    monkeypatch.setenv("DEPLOYMENT_ROLE", "local")
+    monkeypatch.setenv("CLOUD_SYNC_WORKER_ENABLED", "true")
+    monkeypatch.delenv("CLOUD_DATABASE_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="CLOUD_DATABASE_URL"):
+        build_cloud_sync_runtime_from_env()
+
+
+def test_build_cloud_sync_runtime_from_env_returns_runtime_when_enabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_COLLECTION", "true")
+    monkeypatch.setenv("DEPLOYMENT_ROLE", "local")
+    monkeypatch.setenv("CLOUD_SYNC_WORKER_ENABLED", "true")
+    monkeypatch.setenv("CLOUD_DATABASE_URL", "postgresql://erp_user:erp_pass_2025@localhost:15433/xihong_erp")
+    monkeypatch.setenv("CLOUD_SYNC_POLL_INTERVAL_SECONDS", "9")
+    monkeypatch.setenv("CLOUD_SYNC_WORKER_ID", "cloud-sync-worker-test")
+
+    runtime = build_cloud_sync_runtime_from_env(dry_run=True)
+
+    assert isinstance(runtime, CloudBClassAutoSyncRuntime)
+    assert runtime.poll_interval_seconds == 9.0
+    assert runtime.worker_id == "cloud-sync-worker-test"

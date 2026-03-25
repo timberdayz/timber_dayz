@@ -53,6 +53,19 @@ async def test_runtime_reports_not_configured_without_worker_factory():
     assert health["status"] == "not_configured"
 
 
+@pytest.mark.asyncio
+async def test_runtime_stop_without_start_marks_stopped():
+    runtime = CloudBClassAutoSyncRuntime(
+        worker_factory=lambda: FakeWorker(),
+        poll_interval_seconds=0.01,
+        worker_id="worker-1",
+    )
+
+    await runtime.stop()
+
+    assert runtime.get_health()["status"] == "stopped"
+
+
 def test_should_enable_cloud_sync_worker():
     assert should_enable_cloud_sync_worker("true", True, "local") is True
     assert should_enable_cloud_sync_worker("false", True, "local") is False

@@ -94,6 +94,7 @@ from backend.routers import rate_limit_config  # [*] v4.19.4: 限流配置管理
 from backend.models.database import init_db, get_db
 from backend.utils.config import get_settings
 from modules.core.logger import get_logger
+from backend.services.cloud_b_class_auto_sync_factory import build_cloud_sync_runtime_from_env
 from backend.utils.postgres_path import auto_configure_postgres_path
 from sqlalchemy.orm import Session
 
@@ -124,6 +125,7 @@ async def lifespan(app: FastAPI):
     
     # 后台任务列表(用于关闭时正确取消)
     background_tasks = []
+    app.state.cloud_sync_runtime = None
     
     startup_start = time.time()
     logger.info("[启动] 西虹ERP系统后端服务启动中...")
@@ -269,6 +271,21 @@ async def lifespan(app: FastAPI):
             logger.debug(f"[SKIP] 后台修复任务未启动: {repair_err}")
         
         # v4.6.3新增:初始化Redis缓存(可选,不影响主流程)
+        try:
+            cloud_sync_runtime = build_cloud_sync_runtime_from_env()
+            app.state.cloud_sync_runtime = cloud_sync_runtime
+            if cloud_sync_runtime is None:
+                logger.info("[CloudSync] Cloud sync worker not enabled")
+            else:
+                started = await cloud_sync_runtime.start()
+                if started:
+                    logger.info("[CloudSync] Cloud sync worker started")
+                else:
+                    logger.warning("[CloudSync] Cloud sync worker not started because runtime is not configured")
+        except Exception as cloud_sync_err:
+            logger.error(f"[CloudSync] Failed to start cloud sync worker: {cloud_sync_err}")
+            raise
+
         try:
             from backend.utils.redis_client import init_redis
             redis_client = await init_redis(app)
@@ -422,6 +439,14 @@ async def lifespan(app: FastAPI):
     logger.info("[关闭] 西虹ERP系统后端服务关闭")
     
     # v4.19.0新增:停止资源监控服务
+    try:
+        cloud_sync_runtime = getattr(app.state, "cloud_sync_runtime", None)
+        if cloud_sync_runtime is not None:
+            await cloud_sync_runtime.stop()
+            logger.info("[CloudSync] Cloud sync worker stopped")
+    except Exception as e:
+        logger.warning(f"[Shutdown] Failed to stop cloud sync worker cleanly: {e}")
+
     try:
         if hasattr(app.state, 'resource_monitor') and app.state.resource_monitor:
             await app.state.resource_monitor.stop()
