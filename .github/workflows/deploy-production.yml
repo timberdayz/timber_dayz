@@ -281,7 +281,8 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            # [FIX] 鍚屾椂鎺ㄩ€佸甫 v 鍓嶇紑鐨?tag锛坴4.20.5 / 4.20.5锛?            type=semver,pattern=v{{version}}
+            # Keep the v-prefixed release tag for frontend images.
+            type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
             # [FIX] 鍥哄畾 sha tag 瑙勫垯锛岄伩鍏嶇敓鎴愰潪娉?tag
             type=sha,format=short,prefix=sha-

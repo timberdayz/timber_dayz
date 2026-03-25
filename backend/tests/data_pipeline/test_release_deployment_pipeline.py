@@ -120,3 +120,13 @@ def test_deploy_workflow_sets_cnb_tag_on_a_real_command_line():
 
     assert '\n          TAG="${GITHUB_REF#refs/tags/}"' in text
     assert '# 鑾峰彇闀滃儚鏍囩锛堜粠 ref 涓彁鍙栵紝渚嬪 v4.22.4锛?          TAG="${GITHUB_REF#refs/tags/}"' not in text
+
+
+def test_deploy_workflow_frontend_metadata_keeps_v_prefixed_release_tag_rule():
+    text = Path(".github/workflows/deploy-production.yml").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert '\n            type=semver,pattern=v{{version}}' in text
+    assert '# [FIX] 鍚屾椂鎺ㄩ€佸甫 v 鍓嶇紑鐨?tag锛坴4.20.5 / 4.20.5锛?            type=semver,pattern=v{{version}}' not in text
