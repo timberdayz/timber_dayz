@@ -110,3 +110,13 @@ def test_deploy_workflow_no_longer_scp_uploads_sql_and_nginx_files_individually(
 
     assert 'for f in sql/init/*.sql; do' not in text
     assert 'scp_with_retry nginx/nginx.prod.conf ${PRODUCTION_PATH}/nginx/nginx.prod.conf' not in text
+
+
+def test_deploy_workflow_sets_cnb_tag_on_a_real_command_line():
+    text = Path(".github/workflows/deploy-production.yml").read_text(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert '\n          TAG="${GITHUB_REF#refs/tags/}"' in text
+    assert '# 鑾峰彇闀滃儚鏍囩锛堜粠 ref 涓彁鍙栵紝渚嬪 v4.22.4锛?          TAG="${GITHUB_REF#refs/tags/}"' not in text

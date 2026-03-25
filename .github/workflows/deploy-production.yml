@@ -337,7 +337,8 @@ jobs:
       - name: Push backend image to CNB
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
-          # 鑾峰彇闀滃儚鏍囩锛堜粠 ref 涓彁鍙栵紝渚嬪 v4.22.4锛?          TAG="${GITHUB_REF#refs/tags/}"
+          # Extract the release tag from refs/tags/vX.Y.Z.
+          TAG="${GITHUB_REF#refs/tags/}"
           echo "[INFO] Pushing backend to CNB with tag: ${TAG}"
 
           # 浠?GHCR 鎷夊彇闀滃儚锛堝垰鏋勫缓鐨勶級
