@@ -137,176 +137,176 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
-import { Folder, Plus, Refresh, Check } from "@element-plus/icons-vue";
-import * as systemAPI from "@/api/system";
-import PageHeader from "@/components/common/PageHeader.vue";
+import { ref, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Folder, Plus, Refresh, Check } from '@element-plus/icons-vue'
+import * as systemAPI from '@/api/system'
+import PageHeader from '@/components/common/PageHeader.vue'
 
-const loading = ref(false);
-const backupList = ref([]);
+const loading = ref(false)
+const backupList = ref([])
 const autoBackupConfig = ref({
   enabled: false,
-  schedule: "0 2 * * *",
-  backup_type: "full",
-  retention_days: 30,
-});
+  schedule: '0 2 * * *',
+  backup_type: 'full',
+  retention_days: 30
+})
 
 const formatFileSize = (bytes) => {
-  if (!bytes) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
-};
+  if (!bytes) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
+}
 
 const loadBackupList = async () => {
   try {
-    loading.value = true;
-    const response = await systemAPI.getBackupList();
+    loading.value = true
+    const response = await systemAPI.getBackupList()
     // 后端返回 BackupListResponse: {data: [...], page, page_size, total, total_pages}
     // 响应拦截器在无 success 字段时，会返回原始对象
     if (response && Array.isArray(response.data)) {
-      backupList.value = response.data;
+      backupList.value = response.data
     } else if (Array.isArray(response)) {
-      backupList.value = response;
+      backupList.value = response
     } else {
-      backupList.value = [];
+      backupList.value = []
     }
   } catch (error) {
-    console.error("加载备份列表失败:", error);
+    console.error('加载备份列表失败:', error)
     ElMessage.error(
-      error.response?.data?.message || error.message || "加载备份列表失败"
-    );
+      error.response?.data?.message || error.message || '加载备份列表失败'
+    )
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const createBackup = async () => {
   try {
-    await ElMessageBox.confirm("确定要创建备份吗？", "确认备份", {
-      type: "warning",
-    });
-    loading.value = true;
-    const response = await systemAPI.createBackup({ backup_type: "full" });
+    await ElMessageBox.confirm('确定要创建备份吗？', '确认备份', {
+      type: 'warning'
+    })
+    loading.value = true
+    const response = await systemAPI.createBackup({ backup_type: 'full' })
     if (response && response.success !== false) {
-      ElMessage.success("备份创建成功");
-      await loadBackupList();
+      ElMessage.success('备份创建成功')
+      await loadBackupList()
     } else {
-      ElMessage.error(response?.message || "创建备份失败");
+      ElMessage.error(response?.message || '创建备份失败')
     }
   } catch (error) {
-    if (error !== "cancel") {
-      console.error("创建备份失败:", error);
+    if (error !== 'cancel') {
+      console.error('创建备份失败:', error)
       ElMessage.error(
-        error.response?.data?.message || error.message || "创建备份失败"
-      );
+        error.response?.data?.message || error.message || '创建备份失败'
+      )
     }
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const downloadBackup = async (backupId) => {
   try {
-    loading.value = true;
-    const response = await systemAPI.downloadBackup(backupId);
+    loading.value = true
+    const response = await systemAPI.downloadBackup(backupId)
     // 处理文件下载
-    const blob = new Blob([response.data]);
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `backup_${backupId}.tar.gz`;
-    link.click();
-    window.URL.revokeObjectURL(url);
-    ElMessage.success("备份下载成功");
+    const blob = new Blob([response.data])
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `backup_${backupId}.tar.gz`
+    link.click()
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('备份下载成功')
   } catch (error) {
-    console.error("下载备份失败:", error);
+    console.error('下载备份失败:', error)
     ElMessage.error(
-      error.response?.data?.message || error.message || "下载备份失败"
-    );
+      error.response?.data?.message || error.message || '下载备份失败'
+    )
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const restoreBackup = async (backupId) => {
   try {
     await ElMessageBox.confirm(
-      "恢复备份将覆盖当前数据，此操作不可逆。确定要继续吗？",
-      "确认恢复",
+      '恢复备份将覆盖当前数据，此操作不可逆。确定要继续吗？',
+      '确认恢复',
       {
-        type: "warning",
-        confirmButtonText: "确定恢复",
-        cancelButtonText: "取消",
+        type: 'warning',
+        confirmButtonText: '确定恢复',
+        cancelButtonText: '取消'
       }
-    );
-    loading.value = true;
+    )
+    loading.value = true
     const response = await systemAPI.restoreBackup(backupId, {
       confirmed: true,
-      confirmed_by: [],
-    });
+      confirmed_by: []
+    })
     if (response && response.success !== false) {
-      ElMessage.success("备份恢复成功");
+      ElMessage.success('备份恢复成功')
     } else {
-      ElMessage.error(response?.message || "恢复备份失败");
+      ElMessage.error(response?.message || '恢复备份失败')
     }
   } catch (error) {
-    if (error !== "cancel") {
-      console.error("恢复备份失败:", error);
+    if (error !== 'cancel') {
+      console.error('恢复备份失败:', error)
       ElMessage.error(
-        error.response?.data?.message || error.message || "恢复备份失败"
-      );
+        error.response?.data?.message || error.message || '恢复备份失败'
+      )
     }
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const loadAutoBackupConfig = async () => {
   try {
-    const response = await systemAPI.getAutoBackupConfig();
+    const response = await systemAPI.getAutoBackupConfig()
     // 后端返回 AutoBackupConfigResponse: {enabled, schedule, backup_type, retention_days, ...}
-    const data = response?.data || response;
+    const data = response?.data || response
     if (data) {
       autoBackupConfig.value = {
         enabled: Boolean(data.enabled),
-        schedule: data.schedule || "0 2 * * *",
-        backup_type: data.backup_type || "full",
-        retention_days: data.retention_days ?? 30,
-      };
+        schedule: data.schedule || '0 2 * * *',
+        backup_type: data.backup_type || 'full',
+        retention_days: data.retention_days ?? 30
+      }
     }
   } catch (error) {
-    console.error("加载自动备份配置失败:", error);
+    console.error('加载自动备份配置失败:', error)
   }
-};
+}
 
 const saveAutoBackupConfig = async () => {
   try {
-    loading.value = true;
+    loading.value = true
     const response = await systemAPI.updateAutoBackupConfig(
       autoBackupConfig.value
-    );
+    )
     if (response && response.success !== false) {
-      ElMessage.success("自动备份配置保存成功");
+      ElMessage.success('自动备份配置保存成功')
     } else {
-      ElMessage.error(response?.message || "保存自动备份配置失败");
+      ElMessage.error(response?.message || '保存自动备份配置失败')
     }
   } catch (error) {
-    console.error("保存自动备份配置失败:", error);
+    console.error('保存自动备份配置失败:', error)
     ElMessage.error(
-      error.response?.data?.message || error.message || "保存自动备份配置失败"
-    );
+      error.response?.data?.message || error.message || '保存自动备份配置失败'
+    )
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 onMounted(() => {
-  loadBackupList();
-  loadAutoBackupConfig();
-});
+  loadBackupList()
+  loadAutoBackupConfig()
+})
 </script>
 
 <style scoped>

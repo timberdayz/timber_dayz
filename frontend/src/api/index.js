@@ -1,10 +1,10 @@
-import axios from "axios";
-import { ElMessage } from "element-plus";
-import { useAuthStore } from "@/stores/auth";
+import axios from 'axios'
+import { ElMessage } from 'element-plus'
+import { useAuthStore } from '@/stores/auth'
 
 // ⭐ v6.0.0新增：现代化认证系统改进
 // 延迟导入 authStore（使用 ESM import() 避免循环依赖，Vite 浏览器环境无 require）
-const getAuthStore = () => useAuthStore();
+const getAuthStore = () => useAuthStore()
 
 // 注意：所有API直接使用真实后端API，Mock数据已全部替换
 
@@ -20,22 +20,22 @@ const TIMEOUTS = {
   dashboard: 70000, // Dashboard 查询70秒
   collection: 300000, // 数据采集300秒（5分钟）
   mapping: 90000, // 字段映射90秒
-  sync: 120000, // ⭐ v4.19.5 新增：数据同步120秒（2分钟）
-};
+  sync: 120000 // ⭐ v4.19.5 新增：数据同步120秒（2分钟）
+}
 
 // ⭐ v6.0.0新增：不需要认证的接口列表
-const NO_AUTH_PATHS = ["/auth/login", "/auth/refresh", "/health"];
+const NO_AUTH_PATHS = ['/auth/login', '/auth/refresh', '/health']
 
 /** 跳转登录页（兼容 Hash 路由：使用 #/login 而非 /login） */
 function redirectToLogin() {
-  const hash = window.location.hash;
-  if (hash === "#/login" || hash.startsWith("#/login?")) return;
-  ElMessage.warning("登录已过期，请重新登录");
-  window.location.href = `${window.location.origin}${window.location.pathname || "/"}#/login`;
+  const hash = window.location.hash
+  if (hash === '#/login' || hash.startsWith('#/login?')) return
+  ElMessage.warning('登录已过期，请重新登录')
+  window.location.href = `${window.location.origin}${window.location.pathname || '/'}#/login`
 }
 
 // ⭐ v6.0.0新增：CSRF Token 名称（Phase 3: CSRF 保护）
-const CSRF_COOKIE_NAME = "csrf_token";
+const CSRF_COOKIE_NAME = 'csrf_token'
 
 /**
  * 从 Cookie 读取 CSRF Token
@@ -45,18 +45,18 @@ const CSRF_COOKIE_NAME = "csrf_token";
  * @returns {string|null} CSRF Token 或 null
  */
 function getCsrfTokenFromCookie() {
-  const cookies = document.cookie.split(";");
+  const cookies = document.cookie.split(';')
   for (const cookie of cookies) {
-    const [name, value] = cookie.trim().split("=");
+    const [name, value] = cookie.trim().split('=')
     if (name === CSRF_COOKIE_NAME) {
-      return decodeURIComponent(value);
+      return decodeURIComponent(value)
     }
   }
-  return null;
+  return null
 }
 
 // ⭐ v6.0.0新增：Token 刷新预检查配置（Phase 4: 优化 Token 过期时间）
-const TOKEN_REFRESH_THRESHOLD_MINUTES = 5; // 过期前 5 分钟自动刷新
+const TOKEN_REFRESH_THRESHOLD_MINUTES = 5 // 过期前 5 分钟自动刷新
 
 /**
  * 解析 JWT Token 获取过期时间
@@ -67,30 +67,30 @@ const TOKEN_REFRESH_THRESHOLD_MINUTES = 5; // 过期前 5 分钟自动刷新
  * @returns {number|null} 过期时间戳（秒）或 null
  */
 function getTokenExpiration(token) {
-  if (!token) return null;
+  if (!token) return null
 
   try {
     // JWT 格式：header.payload.signature
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
 
     // 解析 payload（Base64Url 编码）
-    const payload = parts[1];
+    const payload = parts[1]
     // Base64Url 转 Base64
-    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
     // 解码
     const jsonPayload = decodeURIComponent(
       atob(base64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join(""),
-    );
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    )
 
-    const data = JSON.parse(jsonPayload);
-    return data.exp || null;
+    const data = JSON.parse(jsonPayload)
+    return data.exp || null
   } catch (error) {
-    console.warn("[Auth] 解析 token 过期时间失败:", error);
-    return null;
+    console.warn('[Auth] 解析 token 过期时间失败:', error)
+    return null
   }
 }
 
@@ -103,132 +103,132 @@ function getTokenExpiration(token) {
  * @returns {boolean} 是否即将过期（过期前 5 分钟）
  */
 function isTokenExpiringSoon(token) {
-  const exp = getTokenExpiration(token);
-  if (!exp) return false;
+  const exp = getTokenExpiration(token)
+  if (!exp) return false
 
-  const now = Math.floor(Date.now() / 1000);
-  const thresholdSeconds = TOKEN_REFRESH_THRESHOLD_MINUTES * 60;
+  const now = Math.floor(Date.now() / 1000)
+  const thresholdSeconds = TOKEN_REFRESH_THRESHOLD_MINUTES * 60
 
   // 如果距离过期时间小于阈值，返回 true
-  return exp - now < thresholdSeconds;
+  return exp - now < thresholdSeconds
 }
 
 // ⭐ v6.0.0新增：Token 刷新锁（防止多个请求同时触发刷新）
-let isRefreshing = false;
-let failedQueue = [];
+let isRefreshing = false
+let failedQueue = []
 
 // ⭐ v6.0.0修复：多标签页同步机制（防止多个标签页同时刷新 token）
-let refreshChannel = null;
-let refreshTimeout = null; // ⭐ v6.0.0修复：超时机制，防止消息丢失或延迟
+let refreshChannel = null
+let refreshTimeout = null // ⭐ v6.0.0修复：超时机制，防止消息丢失或延迟
 
 try {
   // 使用 BroadcastChannel API 在标签页之间同步刷新状态
-  refreshChannel = new BroadcastChannel("token_refresh_channel");
+  refreshChannel = new BroadcastChannel('token_refresh_channel')
 
   // 监听其他标签页的刷新状态（async 以支持 await getAuthStore）
   refreshChannel.onmessage = (event) => {
     // ⭐ v6.0.0修复：清除超时定时器（收到消息）
     if (refreshTimeout) {
-      clearTimeout(refreshTimeout);
-      refreshTimeout = null;
+      clearTimeout(refreshTimeout)
+      refreshTimeout = null
     }
 
-    if (event.data.type === "refresh_started") {
+    if (event.data.type === 'refresh_started') {
       // 其他标签页开始刷新，标记本地状态
-      isRefreshing = true;
+      isRefreshing = true
 
       // ⭐ v6.0.0修复：设置超时机制（30秒），如果超时则重置状态
       refreshTimeout = setTimeout(() => {
-        console.warn("[Auth] BroadcastChannel 消息超时，重置刷新状态");
-        isRefreshing = false;
-        refreshTimeout = null;
-      }, 30000); // 30秒超时
-    } else if (event.data.type === "refresh_completed") {
+        console.warn('[Auth] BroadcastChannel 消息超时，重置刷新状态')
+        isRefreshing = false
+        refreshTimeout = null
+      }, 30000) // 30秒超时
+    } else if (event.data.type === 'refresh_completed') {
       // 其他标签页刷新完成，更新本地 token 并处理队列
-      const newToken = event.data.token;
-      const newRefreshToken = event.data.refresh_token; // ⭐ v6.0.0修复：同时更新 refresh_token
+      const newToken = event.data.token
+      const newRefreshToken = event.data.refresh_token // ⭐ v6.0.0修复：同时更新 refresh_token
 
       if (newToken) {
         // ⭐ v6.0.0修复：更新本地 token 和 refreshToken（确保状态一致性）
         try {
-          const store = getAuthStore();
-          store.token = newToken;
-          localStorage.setItem("access_token", newToken);
+          const store = getAuthStore()
+          store.token = newToken
+          localStorage.setItem('access_token', newToken)
 
           // ⭐ v6.0.0修复：如果响应中包含 refresh_token，也同步更新
           if (newRefreshToken) {
-            store.refreshToken = newRefreshToken;
-            localStorage.setItem("refresh_token", newRefreshToken);
+            store.refreshToken = newRefreshToken
+            localStorage.setItem('refresh_token', newRefreshToken)
           }
         } catch (error) {
           // 如果 authStore 未初始化，只更新 localStorage
           console.warn(
-            "[Auth] authStore 未初始化，只更新 localStorage:",
-            error,
-          );
-          localStorage.setItem("access_token", newToken);
+            '[Auth] authStore 未初始化，只更新 localStorage:',
+            error
+          )
+          localStorage.setItem('access_token', newToken)
           if (newRefreshToken) {
-            localStorage.setItem("refresh_token", newRefreshToken);
+            localStorage.setItem('refresh_token', newRefreshToken)
           }
         }
 
         // 处理队列中的请求
         failedQueue.forEach(({ resolve }) => {
-          resolve(newToken);
-        });
-        failedQueue = [];
+          resolve(newToken)
+        })
+        failedQueue = []
       }
-      isRefreshing = false;
-    } else if (event.data.type === "refresh_failed") {
+      isRefreshing = false
+    } else if (event.data.type === 'refresh_failed') {
       // 其他标签页刷新失败，拒绝队列中的请求
-      const refreshError = new Error("Token refresh failed");
+      const refreshError = new Error('Token refresh failed')
       failedQueue.forEach(({ reject }) => {
-        reject(refreshError);
-      });
-      failedQueue = [];
-      isRefreshing = false;
+        reject(refreshError)
+      })
+      failedQueue = []
+      isRefreshing = false
     }
-  };
+  }
 } catch (error) {
   // BroadcastChannel 不支持时（如某些浏览器），降级为单标签页模式
-  console.warn("[Auth] BroadcastChannel 不支持，多标签页同步功能不可用");
+  console.warn('[Auth] BroadcastChannel 不支持，多标签页同步功能不可用')
 }
 
 // 创建axios实例
 // ⭐ 修复：使用相对路径，通过Vite代理访问后端（支持Docker和本地模式）
-const apiBaseURL = import.meta.env.VITE_API_BASE_URL || "/api";
+const apiBaseURL = import.meta.env.VITE_API_BASE_URL || '/api'
 const api = axios.create({
   baseURL: apiBaseURL, // 使用环境变量或相对路径（通过Vite代理）
   timeout: TIMEOUTS.default,
   headers: {
-    "Content-Type": "application/json",
-  },
-});
+    'Content-Type': 'application/json'
+  }
+})
 
 // 请求拦截器（async 以支持 await getAuthStore，Vite/ESM 无 require）
 api.interceptors.request.use(
   async (config) => {
     // 记录请求开始时间（用于计算响应时间）
     config.metadata = {
-      startTime: Date.now(),
-    };
+      startTime: Date.now()
+    }
 
     // ⭐ v6.0.0新增：自动添加 Authorization Header
     // 排除不需要认证的接口
-    const needsAuth = !NO_AUTH_PATHS.some((path) => config.url.includes(path));
+    const needsAuth = !NO_AUTH_PATHS.some((path) => config.url.includes(path))
     if (needsAuth) {
-      let token = null;
+      let token = null
       try {
-        const store = getAuthStore();
-        token = store.token || localStorage.getItem("access_token");
+        const store = getAuthStore()
+        token = store.token || localStorage.getItem('access_token')
         if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+          config.headers.Authorization = `Bearer ${token}`
         }
       } catch (error) {
         // 如果 authStore 未初始化，从 localStorage 读取
-        token = localStorage.getItem("access_token");
+        token = localStorage.getItem('access_token')
         if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+          config.headers.Authorization = `Bearer ${token}`
         }
       }
 
@@ -238,343 +238,343 @@ api.interceptors.request.use(
         // 在后台触发刷新，不阻塞当前请求
         (async () => {
           try {
-            console.log("[Auth] Token 即将过期，后台触发刷新");
-            isRefreshing = true;
+            console.log('[Auth] Token 即将过期，后台触发刷新')
+            isRefreshing = true
 
             // 通知其他标签页开始刷新
             if (refreshChannel) {
               try {
-                refreshChannel.postMessage({ type: "refresh_started" });
+                refreshChannel.postMessage({ type: 'refresh_started' })
               } catch (e) {
-                console.warn("[Auth] 无法通知其他标签页:", e);
+                console.warn('[Auth] 无法通知其他标签页:', e)
               }
             }
 
-            const store = getAuthStore();
-            const success = await store.refreshAccessToken();
+            const store = getAuthStore()
+            const success = await store.refreshAccessToken()
 
             if (success) {
-              console.log("[Auth] 后台 Token 刷新成功");
+              console.log('[Auth] 后台 Token 刷新成功')
               // 通知其他标签页刷新完成
               if (refreshChannel) {
                 try {
                   refreshChannel.postMessage({
-                    type: "refresh_completed",
+                    type: 'refresh_completed',
                     token: store.token,
-                    refresh_token: store.refreshToken,
-                  });
+                    refresh_token: store.refreshToken
+                  })
                 } catch (e) {
-                  console.warn("[Auth] 无法通知其他标签页:", e);
+                  console.warn('[Auth] 无法通知其他标签页:', e)
                 }
               }
             } else {
-              console.warn("[Auth] 后台 Token 刷新失败");
+              console.warn('[Auth] 后台 Token 刷新失败')
               // 通知其他标签页刷新失败
               if (refreshChannel) {
                 try {
-                  refreshChannel.postMessage({ type: "refresh_failed" });
+                  refreshChannel.postMessage({ type: 'refresh_failed' })
                 } catch (e) {
-                  console.warn("[Auth] 无法通知其他标签页:", e);
+                  console.warn('[Auth] 无法通知其他标签页:', e)
                 }
               }
             }
           } catch (error) {
-            console.error("[Auth] 后台 Token 刷新异常:", error);
+            console.error('[Auth] 后台 Token 刷新异常:', error)
           } finally {
-            isRefreshing = false;
+            isRefreshing = false
           }
-        })();
+        })()
       }
     }
 
     // ⭐ v6.0.0新增：自动添加 CSRF Token（Phase 3: CSRF 保护）
     // 对于 POST/PUT/DELETE 请求，从 Cookie 读取 CSRF Token 并添加到 Header
-    const method = config.method?.toUpperCase();
-    if (method && ["POST", "PUT", "DELETE", "PATCH"].includes(method)) {
+    const method = config.method?.toUpperCase()
+    if (method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
       // 从 Cookie 读取 CSRF Token
-      const csrfToken = getCsrfTokenFromCookie();
+      const csrfToken = getCsrfTokenFromCookie()
       if (csrfToken) {
-        config.headers["X-CSRF-Token"] = csrfToken;
+        config.headers['X-CSRF-Token'] = csrfToken
       }
     }
 
     // 根据API路径动态设置超时时间
     if (!config.timeout || config.timeout === TIMEOUTS.default) {
-      if (config.url.includes("/scan")) {
-        config.timeout = TIMEOUTS.scan;
-      } else if (config.url.includes("/preview")) {
-        config.timeout = TIMEOUTS.preview;
-      } else if (config.url.includes("/ingest")) {
-        config.timeout = TIMEOUTS.ingest;
-      } else if (config.url.includes("/dashboard")) {
-        config.timeout = TIMEOUTS.dashboard;
-      } else if (config.url.includes("/collection")) {
-        config.timeout = TIMEOUTS.collection;
-      } else if (config.url.includes("/mapping")) {
-        config.timeout = TIMEOUTS.mapping;
+      if (config.url.includes('/scan')) {
+        config.timeout = TIMEOUTS.scan
+      } else if (config.url.includes('/preview')) {
+        config.timeout = TIMEOUTS.preview
+      } else if (config.url.includes('/ingest')) {
+        config.timeout = TIMEOUTS.ingest
+      } else if (config.url.includes('/dashboard')) {
+        config.timeout = TIMEOUTS.dashboard
+      } else if (config.url.includes('/collection')) {
+        config.timeout = TIMEOUTS.collection
+      } else if (config.url.includes('/mapping')) {
+        config.timeout = TIMEOUTS.mapping
       } else if (
-        config.url.includes("/data-sync/batch") ||
-        config.url.includes("/data-sync/batch-by-ids")
+        config.url.includes('/data-sync/batch') ||
+        config.url.includes('/data-sync/batch-by-ids')
       ) {
         // ⭐ v4.17.0优化：批量同步API应该立即返回task_id，但给60秒缓冲时间
         // 批量同步是异步任务，不需要等待完成，但API调用本身可能需要一些时间
-        config.timeout = 60000; // 60秒
-      } else if (config.url.includes("/data-sync/single")) {
+        config.timeout = 60000 // 60秒
+      } else if (config.url.includes('/data-sync/single')) {
         // ⭐ v4.19.5 新增：单文件同步超时（120秒）
         // 单文件同步是异步任务，API会立即返回task_id，但给足够时间处理任务提交
-        config.timeout = TIMEOUTS.sync; // 120秒
+        config.timeout = TIMEOUTS.sync // 120秒
       }
     }
 
-    return config;
+    return config
   },
   (error) => {
-    return Promise.reject(error);
-  },
-);
+    return Promise.reject(error)
+  }
+)
 
 // 响应拦截器（v4.6.0统一响应格式 - 首先判断success字段）
 api.interceptors.response.use(
   (response) => {
-    const data = response.data;
+    const data = response.data
 
     // 首先判断success字段（统一响应格式）
-    if (data && typeof data === "object" && "success" in data) {
+    if (data && typeof data === 'object' && 'success' in data) {
       if (data.success === true) {
         // API成功：提取data字段返回给调用方（组件收到data内容）
         // 空数据处理：如果data为空（null、undefined），返回整个响应对象（包括success、message等）
         if (data.data === null || data.data === undefined) {
-          return data; // 返回整个响应对象，前端可访问success、message等字段
+          return data // 返回整个响应对象，前端可访问success、message等字段
         }
-        return data.data; // 组件收到的是data字段内容，无需再检查success字段
+        return data.data // 组件收到的是data字段内容，无需再检查success字段
       } else if (data.success === false) {
         // API业务错误：提取error字段，抛出错误（组件通过catch捕获）
-        const apiError = new Error(data.message || "操作失败");
-        apiError.code = data.error?.code;
-        apiError.type = data.error?.type;
-        apiError.detail = data.error?.detail;
-        apiError.recovery_suggestion = data.error?.recovery_suggestion;
-        apiError.isApiError = true; // 标记为API业务错误
-        apiError.response = response; // 保留response对象
+        const apiError = new Error(data.message || '操作失败')
+        apiError.code = data.error?.code
+        apiError.type = data.error?.type
+        apiError.detail = data.error?.detail
+        apiError.recovery_suggestion = data.error?.recovery_suggestion
+        apiError.isApiError = true // 标记为API业务错误
+        apiError.response = response // 保留response对象
         // ⭐ v4.14.0新增：保留data字段（用于传递结构化错误数据如表头变化详情）
-        apiError.data = data.data;
-        apiError.error_code = data.data?.error_code; // 方便前端检查错误类型
-        return Promise.reject(apiError);
+        apiError.data = data.data
+        apiError.error_code = data.data?.error_code // 方便前端检查错误类型
+        return Promise.reject(apiError)
       }
     }
 
     // 兼容旧格式（如果没有success字段，直接返回data）
-    return data;
+    return data
   },
   async (error) => {
-    const config = error.config;
+    const config = error.config
 
     // 初始化重试计数器
     if (!config.retryCount) {
-      config.retryCount = 0;
+      config.retryCount = 0
     }
 
     // 自动重试机制（仅网络错误和超时）
     const shouldRetry =
       config.retryCount < 3 &&
-      (error.code === "ECONNABORTED" ||
-        error.code === "ETIMEDOUT" ||
-        !error.response);
+      (error.code === 'ECONNABORTED' ||
+        error.code === 'ETIMEDOUT' ||
+        !error.response)
 
     if (shouldRetry) {
-      config.retryCount += 1;
+      config.retryCount += 1
       console.warn(
-        `请求失败，正在重试 (${config.retryCount}/3): ${config.url}`,
-      );
+        `请求失败，正在重试 (${config.retryCount}/3): ${config.url}`
+      )
 
       // 等待递增时间后重试（1秒、2秒、3秒）
       await new Promise((resolve) =>
-        setTimeout(resolve, config.retryCount * 1000),
-      );
+        setTimeout(resolve, config.retryCount * 1000)
+      )
 
-      return api(config);
+      return api(config)
     }
 
     // ⭐ v6.0.0新增：自动 Token 刷新机制
     // 检测 401 Unauthorized 错误
     if (error.response && error.response.status === 401) {
-      const originalRequest = error.config;
+      const originalRequest = error.config
 
       // 排除登录、刷新 token 等接口（避免无限循环）
       if (NO_AUTH_PATHS.some((path) => originalRequest.url.includes(path))) {
         // 登录/刷新接口返回 401，直接返回错误
-        const responseData = error.response.data;
+        const responseData = error.response.data
         if (
           responseData &&
-          typeof responseData === "object" &&
-          "success" in responseData &&
+          typeof responseData === 'object' &&
+          'success' in responseData &&
           responseData.success === false
         ) {
-          const apiError = new Error(responseData.message || "认证失败");
-          apiError.code = responseData.error?.code || 401;
-          apiError.type = responseData.error?.type || "AuthError";
-          apiError.detail = responseData.error?.detail;
+          const apiError = new Error(responseData.message || '认证失败')
+          apiError.code = responseData.error?.code || 401
+          apiError.type = responseData.error?.type || 'AuthError'
+          apiError.detail = responseData.error?.detail
           apiError.recovery_suggestion =
-            responseData.error?.recovery_suggestion;
-          apiError.isApiError = true;
-          apiError.response = error.response;
-          return Promise.reject(apiError);
+            responseData.error?.recovery_suggestion
+          apiError.isApiError = true
+          apiError.response = error.response
+          return Promise.reject(apiError)
         }
-        const httpError = new Error(error.response.data?.message || "认证失败");
-        httpError.code = 401;
-        httpError.type = "AuthError";
-        httpError.isApiError = true;
-        httpError.response = error.response;
-        return Promise.reject(httpError);
+        const httpError = new Error(error.response.data?.message || '认证失败')
+        httpError.code = 401
+        httpError.type = 'AuthError'
+        httpError.isApiError = true
+        httpError.response = error.response
+        return Promise.reject(httpError)
       }
 
       // 如果请求已经重试过（避免无限循环）
       if (originalRequest._retry) {
         // 刷新失败，清除 token 并跳转登录页
         try {
-          const store = getAuthStore();
-          await store.logout();
+          const store = getAuthStore()
+          await store.logout()
         } catch (err) {
-          console.error("登出失败:", err);
+          console.error('登出失败:', err)
           // 清除 localStorage
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("refresh_token");
-          localStorage.removeItem("user_info");
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('refresh_token')
+          localStorage.removeItem('user_info')
         }
-        redirectToLogin();
-        return Promise.reject(error);
+        redirectToLogin()
+        return Promise.reject(error)
       }
 
       // 如果正在刷新 token，将请求加入队列
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
+          failedQueue.push({ resolve, reject })
         })
           .then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-            return api(originalRequest);
+            originalRequest.headers.Authorization = `Bearer ${token}`
+            return api(originalRequest)
           })
           .catch((err) => {
-            return Promise.reject(err);
-          });
+            return Promise.reject(err)
+          })
       }
 
       // 标记为正在刷新
-      originalRequest._retry = true;
-      isRefreshing = true;
+      originalRequest._retry = true
+      isRefreshing = true
 
       // ⭐ v6.0.0修复：通知其他标签页开始刷新
       if (refreshChannel) {
         try {
-          refreshChannel.postMessage({ type: "refresh_started" });
+          refreshChannel.postMessage({ type: 'refresh_started' })
         } catch (error) {
-          console.warn("[Auth] 无法通知其他标签页刷新状态:", error);
+          console.warn('[Auth] 无法通知其他标签页刷新状态:', error)
         }
       }
 
       try {
-        const store = getAuthStore();
-        const refreshed = await store.refreshAccessToken();
+        const store = getAuthStore()
+        const refreshed = await store.refreshAccessToken()
 
         if (refreshed) {
           // 刷新成功，更新 token
-          const newToken = store.token || localStorage.getItem("access_token");
+          const newToken = store.token || localStorage.getItem('access_token')
 
           // ⭐ v6.0.0修复：处理队列中的请求（成功时 resolve，失败时 reject）
           failedQueue.forEach(({ resolve }) => {
-            resolve(newToken);
-          });
-          failedQueue = [];
+            resolve(newToken)
+          })
+          failedQueue = []
 
           // ⭐ v6.0.0修复：通知其他标签页刷新完成（包含 refresh_token）
           if (refreshChannel) {
             try {
               const newRefreshToken =
-                store.refreshToken || localStorage.getItem("refresh_token"); // ⭐ v6.0.0修复：获取 refresh_token
+                store.refreshToken || localStorage.getItem('refresh_token') // ⭐ v6.0.0修复：获取 refresh_token
               refreshChannel.postMessage({
-                type: "refresh_completed",
+                type: 'refresh_completed',
                 token: newToken,
-                refresh_token: newRefreshToken, // ⭐ v6.0.0修复：同时发送 refresh_token
-              });
+                refresh_token: newRefreshToken // ⭐ v6.0.0修复：同时发送 refresh_token
+              })
             } catch (error) {
-              console.warn("[Auth] 无法通知其他标签页刷新完成:", error);
+              console.warn('[Auth] 无法通知其他标签页刷新完成:', error)
             }
           }
 
           // ⭐ v6.0.0修复：清除超时定时器（刷新成功）
           if (refreshTimeout) {
-            clearTimeout(refreshTimeout);
-            refreshTimeout = null;
+            clearTimeout(refreshTimeout)
+            refreshTimeout = null
           }
 
           // 更新原始请求的 token 并重试
-          originalRequest.headers.Authorization = `Bearer ${newToken}`;
-          return api(originalRequest);
+          originalRequest.headers.Authorization = `Bearer ${newToken}`
+          return api(originalRequest)
         } else {
           // ⭐ v6.0.0修复：刷新失败，拒绝队列中的所有请求
-          const refreshError = new Error("Token refresh failed");
+          const refreshError = new Error('Token refresh failed')
           failedQueue.forEach(({ reject }) => {
-            reject(refreshError);
-          });
-          failedQueue = [];
+            reject(refreshError)
+          })
+          failedQueue = []
 
           // ⭐ v6.0.0修复：通知其他标签页刷新失败
           if (refreshChannel) {
             try {
-              refreshChannel.postMessage({ type: "refresh_failed" });
+              refreshChannel.postMessage({ type: 'refresh_failed' })
             } catch (error) {
-              console.warn("[Auth] 无法通知其他标签页刷新失败:", error);
+              console.warn('[Auth] 无法通知其他标签页刷新失败:', error)
             }
           }
 
           // 清除 token 并跳转登录页
           try {
-            const store = getAuthStore();
-            await store.logout();
+            const store = getAuthStore()
+            await store.logout()
           } catch (err) {
-            console.error("登出失败:", err);
-            localStorage.removeItem("access_token");
-            localStorage.removeItem("refresh_token");
-            localStorage.removeItem("user_info");
+            console.error('登出失败:', err)
+            localStorage.removeItem('access_token')
+            localStorage.removeItem('refresh_token')
+            localStorage.removeItem('user_info')
           }
-          redirectToLogin();
-          return Promise.reject(refreshError);
+          redirectToLogin()
+          return Promise.reject(refreshError)
         }
       } catch (refreshError) {
         // ⭐ v6.0.0修复：刷新失败，拒绝队列中的所有请求
-        console.error("Token 刷新失败:", refreshError);
+        console.error('Token 刷新失败:', refreshError)
         failedQueue.forEach(({ reject }) => {
-          reject(refreshError);
-        });
-        failedQueue = [];
+          reject(refreshError)
+        })
+        failedQueue = []
 
         // ⭐ v6.0.0修复：通知其他标签页刷新失败
         if (refreshChannel) {
           try {
-            refreshChannel.postMessage({ type: "refresh_failed" });
+            refreshChannel.postMessage({ type: 'refresh_failed' })
           } catch (error) {
-            console.warn("[Auth] 无法通知其他标签页刷新失败:", error);
+            console.warn('[Auth] 无法通知其他标签页刷新失败:', error)
           }
         }
 
         // 清除 token 并跳转登录页
         try {
-          const store = getAuthStore();
-          await store.logout();
+          const store = getAuthStore()
+          await store.logout()
         } catch (err) {
-          console.error("登出失败:", err);
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("refresh_token");
-          localStorage.removeItem("user_info");
+          console.error('登出失败:', err)
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('refresh_token')
+          localStorage.removeItem('user_info')
         }
-        redirectToLogin();
-        return Promise.reject(refreshError);
+        redirectToLogin()
+        return Promise.reject(refreshError)
       } finally {
-        isRefreshing = false;
+        isRefreshing = false
         // ⭐ v6.0.0修复：清除超时定时器（刷新完成或失败）
         if (refreshTimeout) {
-          clearTimeout(refreshTimeout);
-          refreshTimeout = null;
+          clearTimeout(refreshTimeout)
+          refreshTimeout = null
         }
       }
     }
@@ -582,40 +582,40 @@ api.interceptors.response.use(
     // 网络错误或HTTP错误（404、500等）
     if (error.response) {
       // HTTP错误（404、500等）：检查响应格式
-      const responseData = error.response.data;
+      const responseData = error.response.data
       if (
         responseData &&
-        typeof responseData === "object" &&
-        "success" in responseData &&
+        typeof responseData === 'object' &&
+        'success' in responseData &&
         responseData.success === false
       ) {
         // 统一错误格式：提取error字段
-        const apiError = new Error(responseData.message || "请求失败");
-        apiError.code = responseData.error?.code || error.response.status;
-        apiError.type = responseData.error?.type || "SystemError";
-        apiError.detail = responseData.error?.detail;
-        apiError.recovery_suggestion = responseData.error?.recovery_suggestion;
-        apiError.isApiError = true;
-        apiError.response = error.response;
-        return Promise.reject(apiError);
+        const apiError = new Error(responseData.message || '请求失败')
+        apiError.code = responseData.error?.code || error.response.status
+        apiError.type = responseData.error?.type || 'SystemError'
+        apiError.detail = responseData.error?.detail
+        apiError.recovery_suggestion = responseData.error?.recovery_suggestion
+        apiError.isApiError = true
+        apiError.response = error.response
+        return Promise.reject(apiError)
       }
       // 非统一格式的HTTP错误：包装为统一格式
       const httpError = new Error(
-        error.response.data?.message || `HTTP ${error.response.status} 错误`,
-      );
-      httpError.code = error.response.status;
-      httpError.type = "SystemError";
-      httpError.isApiError = true;
-      httpError.response = error.response;
-      return Promise.reject(httpError);
+        error.response.data?.message || `HTTP ${error.response.status} 错误`
+      )
+      httpError.code = error.response.status
+      httpError.type = 'SystemError'
+      httpError.isApiError = true
+      httpError.response = error.response
+      return Promise.reject(httpError)
     }
 
     // 真正的网络错误（无响应）
-    const message = error.message || "网络连接失败，请检查网络";
-    const networkError = new Error(message);
-    networkError.isNetworkError = true; // 标记为网络错误
-    networkError.code = "NETWORK_ERROR";
-    networkError.type = "NetworkError";
+    const message = error.message || '网络连接失败，请检查网络'
+    const networkError = new Error(message)
+    networkError.isNetworkError = true // 标记为网络错误
+    networkError.code = 'NETWORK_ERROR'
+    networkError.type = 'NetworkError'
 
     // 记录网络错误日志（性能监控）
     if (
@@ -623,79 +623,79 @@ api.interceptors.response.use(
       error.config.metadata &&
       error.config.metadata.startTime
     ) {
-      const duration = Date.now() - error.config.metadata.startTime;
-      const url = error.config.url || error.config.baseURL + error.config.url;
+      const duration = Date.now() - error.config.metadata.startTime
+      const url = error.config.url || error.config.baseURL + error.config.url
       console.error(
-        `[网络错误] ${error.config.method?.toUpperCase()} ${url} - 错误: ${message}, 响应时间: ${duration}ms`,
-      );
+        `[网络错误] ${error.config.method?.toUpperCase()} ${url} - 错误: ${message}, 响应时间: ${duration}ms`
+      )
     }
 
-    return Promise.reject(networkError);
-  },
-);
+    return Promise.reject(networkError)
+  }
+)
 
 // API方法
 export default {
   // 内部通用方法
   async _get(path, config = {}) {
-    return await api.get(path, config);
+    return await api.get(path, config)
   },
   async _post(path, data, config = {}) {
-    return await api.post(path, data, config);
+    return await api.post(path, data, config)
   },
   async _put(path, data) {
-    return await api.put(path, data);
+    return await api.put(path, data)
   },
   async _patch(path, data) {
-    return await api.patch(path, data);
+    return await api.patch(path, data)
   },
   async _delete(path, config = {}) {
-    return await api.delete(path, config);
+    return await api.delete(path, config)
   },
   async get(path, config = {}) {
-    return await api.get(path, config);
+    return await api.get(path, config)
   },
   async post(path, data, config = {}) {
-    return await api.post(path, data, config);
+    return await api.post(path, data, config)
   },
   async put(path, data, config = {}) {
-    return await api.put(path, data, config);
+    return await api.put(path, data, config)
   },
   async delete(path, config = {}) {
-    return await api.delete(path, config);
+    return await api.delete(path, config)
   },
   // 健康检查
   async healthCheck() {
-    return await this._get("/health");
+    return await this._get('/health')
   },
 
   // 扫描文件
   async scanFiles() {
-    return await this._post("/field-mapping/scan", {
-      directories: ["temp/outputs"],
-    });
+    return await this._post('/field-mapping/scan', {
+      directories: ['temp/outputs']
+    })
   },
 
   // 获取文件分组
   async getFileGroups() {
     // 使用模块化后端的文件分组API
-    return await this._get("/field-mapping/file-groups");
+    return await this._get('/field-mapping/file-groups')
   },
 
   // 预览文件（仅支持 file_id）
   async previewFile({ fileId, headerRow = 0 }) {
-    return await this._post("/field-mapping/preview", {
+    return await this._post('/field-mapping/preview', {
       file_id: fileId,
-      header_row: headerRow,
-    });
+      header_row: headerRow
+    })
   },
 
   // 获取字段映射建议
   async getFieldMappings({ columns, dataDomain }) {
-    return await this._post("/field-mapping/generate-mapping", {
+    return await this._post('/field-mapping/generate-mapping', {
       columns,
-      data_domain: dataDomain,
-    });
+      data_domain: dataDomain
+    })
   },
 
   /**
@@ -711,29 +711,29 @@ export default {
    */
   async applyTemplate({ columns, platform, domain, granularity, sheetName }) {
     // ⚠️ 旧版API，仅为兼容性保留
-    return await this._post("/field-mapping/apply-template", {
+    return await this._post('/field-mapping/apply-template', {
       columns,
       platform,
       domain,
       granularity,
-      sheet_name: sheetName,
-    });
+      sheet_name: sheetName
+    })
   },
 
   // 获取默认核心字段推荐
   async getDefaultDeduplicationFields({ dataDomain, subDomain }) {
     if (!dataDomain) {
-      throw new Error("数据域为必填项");
+      throw new Error('数据域为必填项')
     }
     return await this._get(
-      "/field-mapping/templates/default-deduplication-fields",
+      '/field-mapping/templates/default-deduplication-fields',
       {
         params: {
           data_domain: dataDomain,
-          sub_domain: subDomain || null,
-        },
-      },
-    );
+          sub_domain: subDomain || null
+        }
+      }
+    )
   },
 
   // 保存模板
@@ -749,12 +749,12 @@ export default {
     headerRow,
     headerColumns,
     subDomain,
-    deduplicationFields,
+    deduplicationFields
   }) {
     // 兼容domain和dataDomain两种参数名
-    const finalDomain = dataDomain || domain;
+    const finalDomain = dataDomain || domain
     if (!platform || !finalDomain) {
-      throw new Error("平台和数据域为必填项");
+      throw new Error('平台和数据域为必填项')
     }
 
     // ⭐ v4.14.0新增：验证deduplication_fields必填
@@ -764,34 +764,34 @@ export default {
       deduplicationFields.length === 0
     ) {
       throw new Error(
-        "核心字段（deduplicationFields）为必填项，请至少选择1个字段",
-      );
+        '核心字段（deduplicationFields）为必填项，请至少选择1个字段'
+      )
     }
 
-    return await this._post("/field-mapping/templates/save", {
+    return await this._post('/field-mapping/templates/save', {
       platform,
       data_domain: finalDomain,
       granularity: granularity || null,
       header_columns: headerColumns || [], // ⭐ v4.6.0 DSS架构：使用header_columns
-      template_name: `${platform}_${finalDomain}_${subDomain || ""}_${
-        granularity || "all"
+      template_name: `${platform}_${finalDomain}_${subDomain || ''}_${
+        granularity || 'all'
       }_v1`, // 默认模板名称
-      created_by: "web_ui",
+      created_by: 'web_ui',
       header_row: headerRow || 0,
       sub_domain: subDomain || null,
       sheet_name: sheetName || null,
       deduplication_fields: deduplicationFields, // ⭐ v4.14.0新增：核心字段列表（必填）
       // ⭐ 向后兼容：如果提供了mappings，也传递（后端会忽略）
-      mappings: mappings || {},
-    });
+      mappings: mappings || {}
+    })
   },
 
   // 数据验证
   async validateRows({ domain, rows }) {
-    return await this._post("/field-mapping/validate", {
+    return await this._post('/field-mapping/validate', {
       data_domain: domain,
-      rows,
-    });
+      rows
+    })
   },
 
   // 数据入库（仅支持 file_id）
@@ -803,27 +803,27 @@ export default {
     mappings = {},
     rows = [],
     header_row = 0,
-    header_columns = [],
+    header_columns = []
   }) {
-    return await this._post("/field-mapping/ingest", {
+    return await this._post('/field-mapping/ingest', {
       file_id: fileId,
       platform,
       data_domain: domain,
       mappings, // 向后兼容：保留mappings参数
       rows,
       header_row, // ⭐ v4.6.1新增：传递header_row参数
-      header_columns, // ⭐ v4.6.0 DSS架构：传递原始表头字段列表
-    });
+      header_columns // ⭐ v4.6.0 DSS架构：传递原始表头字段列表
+    })
   },
 
   // 获取Catalog状态
   async getCatalogStatus() {
-    return await this._get("/field-mapping/catalog-status");
+    return await this._get('/field-mapping/catalog-status')
   },
 
   // ========== 数据库浏览器API（v4.7.0企业级增强） ==========
 
-// ⚠️ v4.12.0移除：数据浏览器API已移除
+  // ⚠️ v4.12.0移除：数据浏览器API已移除
   // // 获取所有数据表列表
   // async getTables() {
   //   return await this._get('/data-browser/tables')
@@ -848,45 +848,45 @@ export default {
 
   // 获取订单汇总（orders域主视图）
   async getOrderSummary(params = {}) {
-    return await this._get("/main-views/orders/summary", { params });
+    return await this._get('/main-views/orders/summary', { params })
   },
 
   // 获取流量汇总（traffic域主视图）
   async getTrafficSummary(params = {}) {
-    return await this._get("/main-views/traffic/summary", { params });
+    return await this._get('/main-views/traffic/summary', { params })
   },
 
   // 获取库存明细（inventory域主视图）
   async getInventoryBySku(params = {}) {
-    return await this._get("/main-views/inventory/by-sku", { params });
+    return await this._get('/main-views/inventory/by-sku', { params })
   },
 
   // 获取主视图信息
   async getMainViewsInfo() {
-    return await this._get("/main-views/main-views/info");
+    return await this._get('/main-views/main-views/info')
   },
 
   // 获取销售明细（产品ID级别）
   async getSalesDetailByProduct(params = {}) {
-    return await this._get("/management/sales-detail-by-product", { params });
+    return await this._get('/management/sales-detail-by-product', { params })
   },
 
-// ⚠️ v4.12.0移除：数据浏览器字段映射和导出API已完全移除
+  // ⚠️ v4.12.0移除：数据浏览器字段映射和导出API已完全移除
 
   // 清理无效文件
   async cleanupInvalidFiles() {
-    return await this._post("/field-mapping/cleanup");
+    return await this._post('/field-mapping/cleanup')
   },
 
   // 获取任务进度
   async getTaskProgress(taskId) {
-    return await this._get(`/field-mapping/progress/${taskId}`);
+    return await this._get(`/field-mapping/progress/${taskId}`)
   },
 
   // 列出所有任务
   async listTasks(status) {
-    const params = status ? `?status=${status}` : "";
-    return await this._get(`/field-mapping/progress${params}`);
+    const params = status ? `?status=${status}` : ''
+    return await this._get(`/field-mapping/progress${params}`)
   },
 
   // ========== 数据采集API ==========
@@ -897,133 +897,133 @@ export default {
     account,
     dataDomains,
     dateRange,
-    granularity = "daily",
+    granularity = 'daily'
   }) {
-    return await this._post("/collection/start", {
+    return await this._post('/collection/start', {
       platform,
       account,
       data_domains: dataDomains,
       date_range: dateRange,
-      granularity,
-    });
+      granularity
+    })
   },
 
   // 获取采集任务状态
   async getCollectionStatus(taskId) {
-    return await this._get(`/collection/status/${taskId}`);
+    return await this._get(`/collection/status/${taskId}`)
   },
 
   // 获取全局采集状态
   async getGlobalCollectionStatus() {
-    return await this._get("/collection/status");
+    return await this._get('/collection/status')
   },
 
   // 获取采集历史
   async getCollectionHistory(limit = 50, platform = null) {
-    const params = new URLSearchParams();
-    if (limit) params.append("limit", limit);
-    if (platform) params.append("platform", platform);
-    const query = params.toString() ? `?${params.toString()}` : "";
-    return await this._get(`/collection/history${query}`);
+    const params = new URLSearchParams()
+    if (limit) params.append('limit', limit)
+    if (platform) params.append('platform', platform)
+    const query = params.toString() ? `?${params.toString()}` : ''
+    return await this._get(`/collection/history${query}`)
   },
 
   // 平台登录
   async platformLogin(platform, account) {
     return await this._post(`/collection/platforms/${platform}/login`, {
       platform,
-      account,
-    });
+      account
+    })
   },
 
   // 获取平台店铺列表
   async getPlatformShops(platform, account) {
     return await this._get(
-      `/collection/platforms/${platform}/shops?account=${account}`,
-    );
+      `/collection/platforms/${platform}/shops?account=${account}`
+    )
   },
 
   // 获取支持的平台列表
   async getCollectionPlatforms() {
-    return await this._get("/collection/platforms");
+    return await this._get('/collection/platforms')
   },
 
   // 取消采集任务
   async cancelCollectionTask(taskId) {
-    return await this._delete(`/collection/tasks/${taskId}`);
+    return await this._delete(`/collection/tasks/${taskId}`)
   },
 
   // 获取文件完整路径
   async getFilePath(fileName, platform, domain) {
     return await this._get(
       `/field-mapping/files?file_name=${encodeURIComponent(
-        fileName,
+        fileName
       )}&platform=${encodeURIComponent(platform)}&domain=${encodeURIComponent(
-        domain,
-      )}`,
-    );
+        domain
+      )}`
+    )
   },
 
   // 获取文件完整信息（仅支持 file_id）
   async getFileInfo(fileId) {
     return await this._get(
-      `/field-mapping/file-info?file_id=${encodeURIComponent(fileId)}`,
-    );
+      `/field-mapping/file-info?file_id=${encodeURIComponent(fileId)}`
+    )
   },
 
   // ========== 字段映射增强API ==========
 
   // 获取支持的数据域列表
   async getDataDomains() {
-    return await this._get("/field-mapping/data-domains");
+    return await this._get('/field-mapping/data-domains')
   },
 
   // 获取指定数据域的字段映射
   async getDomainFieldMappings(domain) {
-    return await this._get(`/field-mapping/field-mappings/${domain}`);
+    return await this._get(`/field-mapping/field-mappings/${domain}`)
   },
 
   // 批量验证数据
   async bulkValidate(payload) {
-    return await this._post("/field-mapping/bulk-validate", payload);
+    return await this._post('/field-mapping/bulk-validate', payload)
   },
 
   // 获取模板缓存统计
   async getTemplateCacheStats() {
-    return await this._get("/field-mapping/template-cache/stats");
+    return await this._get('/field-mapping/template-cache/stats')
   },
 
   // 清理过期模板
   async cleanupTemplateCache(days = 30) {
-    return await this._post("/field-mapping/template-cache/cleanup", { days });
+    return await this._post('/field-mapping/template-cache/cleanup', { days })
   },
 
   // 查找相似模板
   async findSimilarTemplates(platform, domain, columns) {
     return await this._get(
       `/field-mapping/template-cache/similar?platform=${platform}&domain=${domain}&columns=${columns.join(
-        ",",
-      )}`,
-    );
+        ','
+      )}`
+    )
   },
 
   // 获取商品成本信息
   async getProductCost(platform, shopId, sku) {
     return await this._get(
-      `/field-mapping/cost-auto-fill/product?platform=${platform}&shop_id=${shopId}&sku=${sku}`,
-    );
+      `/field-mapping/cost-auto-fill/product?platform=${platform}&shop_id=${shopId}&sku=${sku}`
+    )
   },
 
   // 批量更新成本价
   async batchUpdateCosts(costUpdates) {
     return await this._post(
-      "/field-mapping/cost-auto-fill/batch-update",
-      costUpdates,
-    );
+      '/field-mapping/cost-auto-fill/batch-update',
+      costUpdates
+    )
   },
 
   // 自动填充成本价
   async autoFillCosts(data) {
-    return await this._post("/field-mapping/cost-auto-fill/auto-fill", data);
+    return await this._post('/field-mapping/cost-auto-fill/auto-fill', data)
   },
 
   // ========== 后端健康检查（v4.4.1新增）==========
@@ -1034,18 +1034,18 @@ export default {
    */
   async checkBackendHealth() {
     try {
-      const response = await this._get("/health");
+      const response = await this._get('/health')
       return {
-        healthy: response.status === "healthy",
-        database: response.database?.status === "connected",
-        message: response.status === "healthy" ? "后端正常" : "后端异常",
-      };
+        healthy: response.status === 'healthy',
+        database: response.database?.status === 'connected',
+        message: response.status === 'healthy' ? '后端正常' : '后端异常'
+      }
     } catch (error) {
       return {
         healthy: false,
         database: false,
-        message: "后端未启动",
-      };
+        message: '后端未启动'
+      }
     }
   },
 
@@ -1059,17 +1059,17 @@ export default {
    * @returns {Promise} 模板列表
    */
   async getTemplatesList({ platform, dataDomain }) {
-    const params = {};
+    const params = {}
     if (platform) {
-      params.platform = platform;
+      params.platform = platform
     }
     if (dataDomain) {
-      params.data_domain = dataDomain;
+      params.data_domain = dataDomain
     }
-    const queryString = new URLSearchParams(params).toString();
+    const queryString = new URLSearchParams(params).toString()
     return await this._get(
-      `/field-mapping/templates/list${queryString ? "?" + queryString : ""}`,
-    );
+      `/field-mapping/templates/list${queryString ? '?' + queryString : ''}`
+    )
   },
 
   /**
@@ -1077,7 +1077,7 @@ export default {
    * @param {number} templateId - 模板ID
    */
   async deleteTemplate(templateId) {
-    return await this._delete(`/field-mapping/templates/${templateId}`);
+    return await this._delete(`/field-mapping/templates/${templateId}`)
   },
 
   /**
@@ -1088,10 +1088,10 @@ export default {
    * @returns {Promise} 应用结果
    */
   async applyTemplateById({ templateId, columns }) {
-    return await this._post("/field-mapping/templates/apply", {
+    return await this._post('/field-mapping/templates/apply', {
       template_id: templateId,
-      columns,
-    });
+      columns
+    })
   },
 
   /**
@@ -1102,10 +1102,10 @@ export default {
    * @returns {Promise} 表头变化检测结果
    */
   async detectHeaderChanges({ templateId, currentColumns }) {
-    return await this._post("/field-mapping/templates/detect-header-changes", {
+    return await this._post('/field-mapping/templates/detect-header-changes', {
       template_id: templateId,
-      current_columns: currentColumns,
-    });
+      current_columns: currentColumns
+    })
   },
 
   // ========== 治理统计（v4.5.0新增）==========
@@ -1116,8 +1116,8 @@ export default {
    * @returns {Promise} {pending_files, template_coverage, today_auto_ingested, missing_templates_count}
    */
   async getGovernanceOverview(platform = null) {
-    const params = platform ? `?platform=${platform}` : "";
-    return await this._get(`/field-mapping/governance/overview${params}`);
+    const params = platform ? `?platform=${platform}` : ''
+    return await this._get(`/field-mapping/governance/overview${params}`)
   },
 
   /**
@@ -1126,10 +1126,10 @@ export default {
    * @returns {Promise} [{domain, granularity, file_count}]
    */
   async getMissingTemplates(platform = null) {
-    const params = platform ? `?platform=${platform}` : "";
+    const params = platform ? `?platform=${platform}` : ''
     return await this._get(
-      `/field-mapping/governance/missing-templates${params}`,
-    );
+      `/field-mapping/governance/missing-templates${params}`
+    )
   },
 
   /**
@@ -1138,8 +1138,8 @@ export default {
    * @returns {Promise} [{file_id, file_name, platform, domain, granularity, ...}]
    */
   async getPendingFiles(params = {}) {
-    const query = new URLSearchParams(params).toString();
-    return await this._get(`/field-mapping/governance/pending-files?${query}`);
+    const query = new URLSearchParams(params).toString()
+    return await this._get(`/field-mapping/governance/pending-files?${query}`)
   },
 
   // ========== 自动入库（v4.5.0新增）==========
@@ -1159,10 +1159,10 @@ export default {
    * @param {number} headerRow - 表头行（0-based，0=Excel第1行）
    */
   async previewFileWithHeaderRow(fileId, headerRow = 0) {
-    return await this._post("/data-sync/preview", {
+    return await this._post('/data-sync/preview', {
       file_id: fileId,
-      header_row: headerRow,
-    });
+      header_row: headerRow
+    })
   },
 
   /**
@@ -1177,7 +1177,7 @@ export default {
    * @param {number} filters.limit - 数量限制
    */
   async getDataSyncFiles(filters = {}) {
-    return await this._get("/data-sync/files", { params: filters });
+    return await this._get('/data-sync/files', { params: filters })
   },
 
   /**
@@ -1187,7 +1187,7 @@ export default {
    * @param {number} params.limit - 数量限制
    */
   async getSyncHistory(params = {}) {
-    return await this._get("/data-sync/tasks", { params });
+    return await this._get('/data-sync/tasks', { params })
   },
 
   async startSingleAutoIngest(
@@ -1195,25 +1195,25 @@ export default {
     onlyWithTemplate = true,
     allowQuarantine = true,
     useTemplateHeaderRow = true,
-    cancelToken = null,
+    cancelToken = null
   ) {
-    const config = {};
+    const config = {}
     if (cancelToken) {
-      config.cancelToken = cancelToken;
+      config.cancelToken = cancelToken
     }
     // ⭐ v4.12.0更新：统一使用data-sync API（移除双维护）
     const response = await this._post(
-      "/data-sync/single",
+      '/data-sync/single',
       {
         file_id: fileId,
         only_with_template: onlyWithTemplate,
         allow_quarantine: allowQuarantine,
-        use_template_header_row: useTemplateHeaderRow, // ⭐ v4.6.0新增
+        use_template_header_row: useTemplateHeaderRow // ⭐ v4.6.0新增
       },
-      config,
-    );
+      config
+    )
     // 新API返回格式：{success, file_id, file_name, status, message, task_id}
-    return response;
+    return response
   },
 
   /**
@@ -1230,9 +1230,9 @@ export default {
    */
   async startBatchAutoIngest(config) {
     // ⭐ v4.12.0更新：统一使用data-sync API（移除双维护）
-    const response = await this._post("/data-sync/batch", config);
+    const response = await this._post('/data-sync/batch', config)
     // 新API返回格式：{success, task_id, summary}
-    return response;
+    return response
   },
 
   /**
@@ -1243,12 +1243,12 @@ export default {
   async getAutoIngestProgress(taskId) {
     // ⭐ v4.12.0更新：统一使用data-sync API（移除双维护）
     // ⭐ 修复：响应拦截器已提取data字段，response就是data内容
-    const data = await this._get(`/data-sync/progress/${taskId}`);
+    const data = await this._get(`/data-sync/progress/${taskId}`)
     if (data) {
       // ⭐ 修复：直接返回数据对象，而不是包装在{success, data}中（前端直接使用）
       return {
         task_id: data.task_id,
-        type: data.task_type || "auto_ingest",
+        type: data.task_type || 'auto_ingest',
         total: data.total_files || 0,
         total_files: data.total_files || 0, // ⭐ 兼容两种字段名
         processed: data.processed_files || 0,
@@ -1265,21 +1265,21 @@ export default {
         success_files: data.success_files || 0, // ⭐ 新增：成功文件数
         failed_files: data.failed_files || 0, // ⭐ 新增：失败文件数
         status:
-          data.status === "completed"
-            ? "completed"
-            : data.status === "failed"
-              ? "failed"
-              : data.status === "processing"
-                ? "processing"
-                : "running",
+          data.status === 'completed'
+            ? 'completed'
+            : data.status === 'failed'
+              ? 'failed'
+              : data.status === 'processing'
+                ? 'processing'
+                : 'running',
         percentage:
           data.file_progress ||
           (data.total_files > 0
             ? Math.round((data.processed_files / data.total_files) * 100)
             : 0),
         files: [],
-        current_file: data.current_file || "",
-        current_stage: data.status === "processing" ? "正在处理..." : "",
+        current_file: data.current_file || '',
+        current_stage: data.status === 'processing' ? '正在处理...' : '',
         estimated_time_remaining: null,
         errors: data.errors || [],
         warnings: data.warnings || [],
@@ -1287,11 +1287,11 @@ export default {
         elapsed_seconds: data.start_time
           ? Math.round((new Date() - new Date(data.start_time)) / 1000)
           : null,
-        quality_check: data.task_details?.quality_check || null,
-      };
+        quality_check: data.task_details?.quality_check || null
+      }
     }
     // ⭐ 修复：返回null而不是{success: false, data: null}，前端会检查null
-    return null;
+    return null
   },
 
   /**
@@ -1304,11 +1304,11 @@ export default {
    */
   async analyzeDataLoss(params = {}) {
     try {
-      const data = await this._get("/data-sync/loss-analysis", { params });
-      return data;
+      const data = await this._get('/data-sync/loss-analysis', { params })
+      return data
     } catch (error) {
-      console.error("[API] 数据丢失分析失败:", error);
-      throw error;
+      console.error('[API] 数据丢失分析失败:', error)
+      throw error
     }
   },
 
@@ -1323,11 +1323,11 @@ export default {
    */
   async checkDataLossAlert(params = {}) {
     try {
-      const data = await this._get("/data-sync/loss-alert", { params });
-      return data;
+      const data = await this._get('/data-sync/loss-alert', { params })
+      return data
     } catch (error) {
-      console.error("[API] 数据丢失预警检查失败:", error);
-      throw error;
+      console.error('[API] 数据丢失预警检查失败:', error)
+      throw error
     }
   },
 
@@ -1338,13 +1338,13 @@ export default {
    */
   async getMappingQuality(fileId) {
     try {
-      const data = await this._get("/data-sync/mapping-quality", {
-        params: { file_id: fileId },
-      });
-      return data;
+      const data = await this._get('/data-sync/mapping-quality', {
+        params: { file_id: fileId }
+      })
+      return data
     } catch (error) {
-      console.error("[API] 获取字段映射质量评分失败:", error);
-      throw error;
+      console.error('[API] 获取字段映射质量评分失败:', error)
+      throw error
     }
   },
 
@@ -1356,8 +1356,8 @@ export default {
    */
   async getTaskLogs(taskId, limit = 50) {
     return await this._get(`/field-mapping/auto-ingest/task/${taskId}/logs`, {
-      limit,
-    });
+      limit
+    })
   },
 
   /**
@@ -1368,8 +1368,8 @@ export default {
    */
   async getTaskLogsByFileId(fileId, limit = 50) {
     return await this._get(`/field-mapping/auto-ingest/file/${fileId}/logs`, {
-      limit,
-    });
+      limit
+    })
   },
 
   // 原始数据层查看API（v4.11.5新增）
@@ -1382,8 +1382,8 @@ export default {
    */
   async viewRawExcel(fileId, headerRow = 0, limit = 100) {
     return await this._get(`/raw-layer/view/${fileId}`, {
-      params: { header_row: headerRow, limit },
-    });
+      params: { header_row: headerRow, limit }
+    })
   },
 
   /**
@@ -1395,8 +1395,8 @@ export default {
    */
   async viewStagingData(fileId, limit = 100, offset = 0) {
     return await this._get(`/raw-layer/staging/${fileId}`, {
-      params: { limit, offset },
-    });
+      params: { limit, offset }
+    })
   },
 
   /**
@@ -1407,8 +1407,8 @@ export default {
    */
   async compareRawAndStaging(fileId, headerRow = 0) {
     return await this._get(`/raw-layer/compare/${fileId}`, {
-      params: { header_row: headerRow },
-    });
+      params: { header_row: headerRow }
+    })
   },
 
   // 数据流转追踪API（v4.11.5新增）
@@ -1418,7 +1418,7 @@ export default {
    * @returns {Promise} 任务数据流转信息
    */
   async traceTaskDataFlow(taskId) {
-    return await this._get(`/data-flow/trace/task/${taskId}`);
+    return await this._get(`/data-flow/trace/task/${taskId}`)
   },
 
   /**
@@ -1429,8 +1429,8 @@ export default {
    */
   async traceFileDataFlow(fileId, headerRow = 0) {
     return await this._get(`/data-flow/trace/file/${fileId}`, {
-      params: { header_row: headerRow },
-    });
+      params: { header_row: headerRow }
+    })
   },
 
   /**
@@ -1445,48 +1445,48 @@ export default {
         `${this.baseURL}/raw-layer/export-lost-data/${fileId}`,
         {
           params: { header_row: headerRow },
-          responseType: "blob",
-          timeout: 60000,
-        },
-      );
+          responseType: 'blob',
+          timeout: 60000
+        }
+      )
 
       // 创建下载链接
       const blob = new Blob([response.data], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
 
       // 从Content-Disposition头获取文件名
-      const contentDisposition = response.headers["content-disposition"];
+      const contentDisposition = response.headers['content-disposition']
       if (contentDisposition) {
         const filenameMatch = contentDisposition.match(
-          /filename\*=UTF-8''(.+)/,
-        );
+          /filename\*=UTF-8''(.+)/
+        )
         if (filenameMatch) {
-          link.download = decodeURIComponent(filenameMatch[1]);
+          link.download = decodeURIComponent(filenameMatch[1])
         } else {
-          const filenameMatch2 = contentDisposition.match(/filename="(.+)"/);
+          const filenameMatch2 = contentDisposition.match(/filename="(.+)"/)
           if (filenameMatch2) {
-            link.download = filenameMatch2[1];
+            link.download = filenameMatch2[1]
           } else {
-            link.download = `lost_data_${fileId}_${new Date().getTime()}.xlsx`;
+            link.download = `lost_data_${fileId}_${new Date().getTime()}.xlsx`
           }
         }
       } else {
-        link.download = `lost_data_${fileId}_${new Date().getTime()}.xlsx`;
+        link.download = `lost_data_${fileId}_${new Date().getTime()}.xlsx`
       }
 
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
 
-      return { success: true };
+      return { success: true }
     } catch (error) {
-      console.error("[API] 导出丢失数据失败:", error);
-      throw error;
+      console.error('[API] 导出丢失数据失败:', error)
+      throw error
     }
   },
 
@@ -1505,12 +1505,12 @@ export default {
     shopId,
     startDate,
     endDate,
-    granularity = "daily",
+    granularity = 'daily'
   ) {
-    const params = { start_date: startDate, end_date: endDate, granularity };
-    if (platformCode) params.platform_code = platformCode;
-    if (shopId) params.shop_id = shopId;
-    return await this._get("/metrics/attach-rate/trend", { params });
+    const params = { start_date: startDate, end_date: endDate, granularity }
+    if (platformCode) params.platform_code = platformCode
+    if (shopId) params.shop_id = shopId
+    return await this._get('/metrics/attach-rate/trend', { params })
   },
 
   /**
@@ -1525,16 +1525,16 @@ export default {
   async getAttachRateComparison(
     platforms,
     shops,
-    dateRange = "7d",
+    dateRange = '7d',
     startDate,
-    endDate,
+    endDate
   ) {
-    const params = { date_range: dateRange };
-    if (platforms) params.platforms = platforms;
-    if (shops) params.shops = shops;
-    if (startDate) params.start_date = startDate;
-    if (endDate) params.end_date = endDate;
-    return await this._get("/metrics/attach-rate/comparison", { params });
+    const params = { date_range: dateRange }
+    if (platforms) params.platforms = platforms
+    if (shops) params.shops = shops
+    if (startDate) params.start_date = startDate
+    if (endDate) params.end_date = endDate
+    return await this._get('/metrics/attach-rate/comparison', { params })
   },
 
   // 平台对比分析API（v4.11.5增强）
@@ -1550,11 +1550,11 @@ export default {
     platforms,
     startDate,
     endDate,
-    metrics = "gmv,orders,attach_rate,conversion_rate,aov",
+    metrics = 'gmv,orders,attach_rate,conversion_rate,aov'
   ) {
-    const params = { start_date: startDate, end_date: endDate, metrics };
-    if (platforms) params.platforms = platforms;
-    return await this._get("/metrics/platform/comparison", { params });
+    const params = { start_date: startDate, end_date: endDate, metrics }
+    if (platforms) params.platforms = platforms
+    return await this._get('/metrics/platform/comparison', { params })
   },
 
   // 数据一致性验证API（v4.11.5新增）
@@ -1567,10 +1567,10 @@ export default {
    * @returns {Promise} 跨平台一致性检查结果
    */
   async checkCrossPlatformConsistency(shopId, platforms, startDate, endDate) {
-    const params = { start_date: startDate, end_date: endDate };
-    if (shopId) params.shop_id = shopId;
-    if (platforms) params.platforms = platforms;
-    return await this._get("/data-consistency/cross-platform", { params });
+    const params = { start_date: startDate, end_date: endDate }
+    if (shopId) params.shop_id = shopId
+    if (platforms) params.platforms = platforms
+    return await this._get('/data-consistency/cross-platform', { params })
   },
 
   /**
@@ -1581,12 +1581,12 @@ export default {
    * @returns {Promise} 计算数据一致性验证结果
    */
   async checkCalculatedVsSourceConsistency(platformCode, shopId, metricDate) {
-    const params = { metric_date: metricDate };
-    if (platformCode) params.platform_code = platformCode;
-    if (shopId) params.shop_id = shopId;
-    return await this._get("/data-consistency/calculated-vs-source", {
-      params,
-    });
+    const params = { metric_date: metricDate }
+    if (platformCode) params.platform_code = platformCode
+    if (shopId) params.shop_id = shopId
+    return await this._get('/data-consistency/calculated-vs-source', {
+      params
+    })
   },
 
   /**
@@ -1604,18 +1604,18 @@ export default {
     shopId,
     startDate,
     endDate,
-    metric = "gmv",
-    threshold = 3.0,
+    metric = 'gmv',
+    threshold = 3.0
   ) {
     const params = {
       start_date: startDate,
       end_date: endDate,
       metric,
-      threshold,
-    };
-    if (platformCode) params.platform_code = platformCode;
-    if (shopId) params.shop_id = shopId;
-    return await this._get("/data-consistency/anomaly-detection", { params });
+      threshold
+    }
+    if (platformCode) params.platform_code = platformCode
+    if (shopId) params.shop_id = shopId
+    return await this._get('/data-consistency/anomaly-detection', { params })
   },
 
   /**
@@ -1625,9 +1625,9 @@ export default {
    * @returns {Promise} {success, logs, total}
    */
   async getRefreshLog(viewName = null, limit = 50) {
-    const params = { limit };
-    if (viewName) params.view_name = viewName;
-    return await this._get("/mv/refresh-log", params);
+    const params = { limit }
+    if (viewName) params.view_name = viewName
+    return await this._get('/mv/refresh-log', params)
   },
 
   /**
@@ -1636,9 +1636,9 @@ export default {
    * @returns {Promise} {success, message, details}
    */
   async clearAllData(confirm = true) {
-    return await this._post("/field-mapping/database/clear-all-data", {
-      confirm,
-    });
+    return await this._post('/field-mapping/database/clear-all-data', {
+      confirm
+    })
   },
 
   /**
@@ -1647,38 +1647,38 @@ export default {
    * @returns {Promise} {success, file_id, status, message}
    */
   async autoIngestSingleFile(fileId) {
-    return await this._post("/field-mapping/auto-ingest/single", {
+    return await this._post('/field-mapping/auto-ingest/single', {
       file_id: fileId,
       only_with_template: true,
-      allow_quarantine: true,
-    });
+      allow_quarantine: true
+    })
   },
 
   // ========== 物化视图管理API（v4.9.0完整版）==========
 
   // 刷新所有物化视图
   async refreshAllMV() {
-    return await this._post("/mv/refresh-all");
+    return await this._post('/mv/refresh-all')
   },
 
   // 获取所有视图状态
   async getAllMVStatus() {
-    return await this._get("/mv/status");
+    return await this._get('/mv/status')
   },
 
   // 查询销售趋势
   async querySalesTrend(params) {
-    return await this._get("/mv/query/sales-trend", { params });
+    return await this._get('/mv/query/sales-trend', { params })
   },
 
   // 查询TopN产品
   async queryTopProducts(params) {
-    return await this._get("/mv/query/top-products", { params });
+    return await this._get('/mv/query/top-products', { params })
   },
 
   // 查询店铺汇总
   async queryShopSummary(params) {
-    return await this._get("/mv/query/shop-summary", { params });
+    return await this._get('/mv/query/shop-summary', { params })
   },
 
   /**
@@ -1696,7 +1696,7 @@ export default {
    * @returns {Promise} 产品列表（包含分页信息）
    */
   async getProducts(params = {}) {
-    return await this._get("/products/products", { params });
+    return await this._get('/products/products', { params })
   },
 
   // ========== 字段映射辞典物化视图显示标识API（v4.10.2新增）==========
@@ -1706,19 +1706,19 @@ export default {
     return await this._put(
       `/field-mapping/dictionary/field/${fieldCode}/mv-display`,
       {
-        is_mv_display: isMvDisplay,
-      },
-    );
+        is_mv_display: isMvDisplay
+      }
+    )
   },
 
   // 批量更新字段的物化视图显示标识
   async batchUpdateFieldMvDisplay(updates) {
     return await this._put(
-      "/field-mapping/dictionary/fields/mv-display/batch",
+      '/field-mapping/dictionary/fields/mv-display/batch',
       {
-        updates: updates,
-      },
-    );
+        updates: updates
+      }
+    )
   },
 
   // ========== 销售相关API（新增 - 支持Mock数据开关） ==========
@@ -1726,301 +1726,301 @@ export default {
   // 获取店铺销售表现（v4.11.0：从dashboard API获取）
   async getShopPerformance(params = {}) {
     // TODO: 需要创建专门的API端点，暂时使用dashboard数据
-    return await this._get("/dashboard/shop-performance", { params });
+    return await this._get('/dashboard/shop-performance', { params })
   },
 
   // 获取销售PK排名（v4.11.0：从dashboard API获取）
   async getPKRanking(params = {}) {
     // TODO: 需要创建专门的API端点，暂时使用dashboard数据
-    return await this._get("/dashboard/pk-ranking", { params });
+    return await this._get('/dashboard/pk-ranking', { params })
   },
 
   // 获取销售战役列表
   async getCampaigns(params = {}) {
-    return await this._get("/sales-campaigns", { params });
+    return await this._get('/sales-campaigns', { params })
   },
 
   // 获取销售战役详情
   async getCampaignDetail(id) {
-    return await this._get(`/sales-campaigns/${id}`);
+    return await this._get(`/sales-campaigns/${id}`)
   },
 
   // 创建销售战役
   async createCampaign(data) {
-    return await this._post("/sales-campaigns", data);
+    return await this._post('/sales-campaigns', data)
   },
 
   // 更新销售战役
   async updateCampaign(id, data) {
-    return await this._put(`/sales-campaigns/${id}`, data);
+    return await this._put(`/sales-campaigns/${id}`, data)
   },
 
   // 删除销售战役
   async deleteCampaign(id) {
-    return await this._delete(`/sales-campaigns/${id}`);
+    return await this._delete(`/sales-campaigns/${id}`)
   },
 
   // 计算销售战役达成情况
   async calculateCampaignAchievement(id) {
-    return await this._post(`/sales-campaigns/${id}/calculate`);
+    return await this._post(`/sales-campaigns/${id}/calculate`)
   },
 
   // ========== 人力资源API（v4.21.0 业界标准优化）==========
 
   // === 部门管理 ===
   async getHrDepartments(params = {}) {
-    return await this._get("/hr/departments", { params });
+    return await this._get('/hr/departments', { params })
   },
   async getHrDepartment(departmentId) {
-    return await this._get(`/hr/departments/${departmentId}`);
+    return await this._get(`/hr/departments/${departmentId}`)
   },
   async createHrDepartment(data) {
-    return await this._post("/hr/departments", data);
+    return await this._post('/hr/departments', data)
   },
   async updateHrDepartment(departmentId, data) {
-    return await this._put(`/hr/departments/${departmentId}`, data);
+    return await this._put(`/hr/departments/${departmentId}`, data)
   },
   async deleteHrDepartment(departmentId) {
-    return await this._delete(`/hr/departments/${departmentId}`);
+    return await this._delete(`/hr/departments/${departmentId}`)
   },
 
   // === 职位管理 ===
   async getHrPositions(params = {}) {
-    return await this._get("/hr/positions", { params });
+    return await this._get('/hr/positions', { params })
   },
   async createHrPosition(data) {
-    return await this._post("/hr/positions", data);
+    return await this._post('/hr/positions', data)
   },
   async updateHrPosition(positionId, data) {
-    return await this._put(`/hr/positions/${positionId}`, data);
+    return await this._put(`/hr/positions/${positionId}`, data)
   },
   async deleteHrPosition(positionId) {
-    return await this._delete(`/hr/positions/${positionId}`);
+    return await this._delete(`/hr/positions/${positionId}`)
   },
 
   // === 员工管理 ===
   async getHrEmployees(params = {}) {
-    return await this._get("/hr/employees", { params });
+    return await this._get('/hr/employees', { params })
   },
   async getHrEmployeeCount(status = null) {
-    const params = status ? { status } : {};
-    return await this._get("/hr/employees/count", { params });
+    const params = status ? { status } : {}
+    return await this._get('/hr/employees/count', { params })
   },
   async getHrEmployee(employeeCode) {
-    return await this._get(`/hr/employees/${employeeCode}`);
+    return await this._get(`/hr/employees/${employeeCode}`)
   },
   async getHrMeProfile() {
-    return await this._get("/hr/me/profile");
+    return await this._get('/hr/me/profile')
   },
   async getMyIncome(yearMonth = null) {
-    const params = yearMonth ? { year_month: yearMonth } : {};
-    return await this._get("/hr/me/income", { params });
+    const params = yearMonth ? { year_month: yearMonth } : {}
+    return await this._get('/hr/me/income', { params })
   },
   async putHrMeProfile(data) {
-    return await this._put("/hr/me/profile", data);
+    return await this._put('/hr/me/profile', data)
   },
   async createHrEmployee(data) {
-    return await this._post("/hr/employees", data);
+    return await this._post('/hr/employees', data)
   },
   async updateHrEmployee(employeeCode, data) {
-    return await this._put(`/hr/employees/${employeeCode}`, data);
+    return await this._put(`/hr/employees/${employeeCode}`, data)
   },
   async deleteHrEmployee(employeeCode) {
-    return await this._delete(`/hr/employees/${employeeCode}`);
+    return await this._delete(`/hr/employees/${employeeCode}`)
   },
 
   // === 排班班次 ===
   async getHrWorkShifts(params = {}) {
-    return await this._get("/hr/work-shifts", { params });
+    return await this._get('/hr/work-shifts', { params })
   },
   async createHrWorkShift(data) {
-    return await this._post("/hr/work-shifts", data);
+    return await this._post('/hr/work-shifts', data)
   },
 
   // === 考勤管理 ===
   async getHrAttendance(params = {}) {
-    return await this._get("/hr/attendance", { params });
+    return await this._get('/hr/attendance', { params })
   },
   async createHrAttendance(data) {
-    return await this._post("/hr/attendance", data);
+    return await this._post('/hr/attendance', data)
   },
   async updateHrAttendance(recordId, data) {
-    return await this._put(`/hr/attendance/${recordId}`, data);
+    return await this._put(`/hr/attendance/${recordId}`, data)
   },
 
   // === 假期类型 ===
   async getHrLeaveTypes(params = {}) {
-    return await this._get("/hr/leave-types", { params });
+    return await this._get('/hr/leave-types', { params })
   },
   async createHrLeaveType(data) {
-    return await this._post("/hr/leave-types", data);
+    return await this._post('/hr/leave-types', data)
   },
 
   // === 请假记录 ===
   async getHrLeaveRecords(params = {}) {
-    return await this._get("/hr/leave-records", { params });
+    return await this._get('/hr/leave-records', { params })
   },
   async createHrLeaveRecord(data) {
-    return await this._post("/hr/leave-records", data);
+    return await this._post('/hr/leave-records', data)
   },
   async approveHrLeaveRecord(recordId, data) {
-    return await this._put(`/hr/leave-records/${recordId}/approve`, data);
+    return await this._put(`/hr/leave-records/${recordId}/approve`, data)
   },
 
   // === 加班记录 ===
   async getHrOvertimeRecords(params = {}) {
-    return await this._get("/hr/overtime-records", { params });
+    return await this._get('/hr/overtime-records', { params })
   },
   async createHrOvertimeRecord(data) {
-    return await this._post("/hr/overtime-records", data);
+    return await this._post('/hr/overtime-records', data)
   },
 
   // === 薪资结构 ===
   async getHrSalaryStructures(params = {}) {
-    return await this._get("/hr/salary-structures", { params });
+    return await this._get('/hr/salary-structures', { params })
   },
   async getHrSalaryStructure(employeeCode) {
-    return await this._get(`/hr/salary-structures/${employeeCode}`);
+    return await this._get(`/hr/salary-structures/${employeeCode}`)
   },
   async createHrSalaryStructure(data) {
-    return await this._post("/hr/salary-structures", data);
+    return await this._post('/hr/salary-structures', data)
   },
 
   // === 工资单 ===
   async getHrPayrollRecords(params = {}) {
-    return await this._get("/hr/payroll-records", { params });
+    return await this._get('/hr/payroll-records', { params })
   },
 
   // === 员工目标 ===
   async getHrEmployeeTargets(params = {}) {
-    return await this._get("/hr/employee-targets", { params });
+    return await this._get('/hr/employee-targets', { params })
   },
   async createHrEmployeeTarget(data) {
-    return await this._post("/hr/employee-targets", data);
+    return await this._post('/hr/employee-targets', data)
   },
 
   // === 绩效查询（只读） ===
   async getHrPerformance(params = {}) {
-    return await this._get("/hr/performance", { params });
+    return await this._get('/hr/performance', { params })
   },
 
   // === 提成查询（只读） ===
   async getHrEmployeeCommissions(params = {}) {
-    return await this._get("/hr/commissions/employee", { params });
+    return await this._get('/hr/commissions/employee', { params })
   },
   async getHrShopCommissions(params = {}) {
-    return await this._get("/hr/commissions/shop", { params });
+    return await this._get('/hr/commissions/shop', { params })
   },
 
   // === 员工店铺归属与提成比（add-employee-shop-assignment-page）===
   async getHrEmployeeShopAssignments(params = {}) {
-    return await this._get("/hr/employee-shop-assignments", { params });
+    return await this._get('/hr/employee-shop-assignments', { params })
   },
   async createHrEmployeeShopAssignment(data) {
-    return await this._post("/hr/employee-shop-assignments", data);
+    return await this._post('/hr/employee-shop-assignments', data)
   },
   async updateHrEmployeeShopAssignment(id, data) {
-    return await this._put(`/hr/employee-shop-assignments/${id}`, data);
+    return await this._put(`/hr/employee-shop-assignments/${id}`, data)
   },
   async deleteHrEmployeeShopAssignment(id) {
-    return await this._delete(`/hr/employee-shop-assignments/${id}`);
+    return await this._delete(`/hr/employee-shop-assignments/${id}`)
   },
   async getHrShopProfitStatistics(params = {}) {
-    return await this._get("/hr/shop-profit-statistics", { params });
+    return await this._get('/hr/shop-profit-statistics', { params })
   },
   async getHrShopCommissionConfig() {
-    return await this._get("/hr/shop-commission-config");
+    return await this._get('/hr/shop-commission-config')
   },
   async putHrShopCommissionConfig(platformCode, shopId, data) {
-    return await this._put(`/hr/shop-commission-config/${platformCode}/${shopId}`, data);
+    return await this._put(`/hr/shop-commission-config/${platformCode}/${shopId}`, data)
   },
   async getHrAnnualProfitStatistics(params = {}) {
-    return await this._get("/hr/annual-profit-statistics", { params });
+    return await this._get('/hr/annual-profit-statistics', { params })
   },
   async copyHrEmployeeShopAssignmentsFromPrevMonth(data) {
-    return await this._post("/hr/employee-shop-assignments/copy-from-prev-month", data);
+    return await this._post('/hr/employee-shop-assignments/copy-from-prev-month', data)
   },
 
   // === 旧版绩效API（保留兼容性） ===
   // 获取绩效评分列表
   async getPerformanceScores(params = {}) {
-    return await this._get("/performance/scores", { params });
+    return await this._get('/performance/scores', { params })
   },
 
   // 获取店铺绩效详情
   async getShopPerformanceDetail(platformCode, shopId, period) {
     return await this._get(`/performance/scores/${shopId}`, {
-      params: { platform_code: platformCode, period },
-    });
+      params: { platform_code: platformCode, period }
+    })
   },
 
   // 获取绩效配置列表
   async getPerformanceConfigs(params = {}) {
-    return await this._get("/performance/config", { params });
+    return await this._get('/performance/config', { params })
   },
 
   // 创建绩效配置
   async createPerformanceConfig(config) {
-    return await this._post("/performance/config", config);
+    return await this._post('/performance/config', config)
   },
 
   // 更新绩效配置
   async updatePerformanceConfig(configId, config) {
-    return await this._put(`/performance/config/${configId}`, config);
+    return await this._put(`/performance/config/${configId}`, config)
   },
 
   // 计算绩效评分
   async calculatePerformanceScores(period, configId) {
-    return await this._post("/performance/scores/calculate", null, {
-      params: { period, config_id: configId },
-    });
+    return await this._post('/performance/scores/calculate', null, {
+      params: { period, config_id: configId }
+    })
   },
 
   // ========== 目标管理API ==========
 
   // 获取目标列表
   async getTargets(params = {}) {
-    return await this._get("/targets", { params });
+    return await this._get('/targets', { params })
   },
 
   // 获取供目标管理使用的店铺列表（来自账号管理 platform_accounts）
   async getTargetShops() {
-    return await this._get("/targets/shops");
+    return await this._get('/targets/shops')
   },
 
   // 按月份获取目标（常规月度目标页用）
-  async getTargetByMonth(month, targetType = "shop") {
-    return await this._get("/targets/by-month", { params: { month, target_type: targetType } });
+  async getTargetByMonth(month, targetType = 'shop') {
+    return await this._get('/targets/by-month', { params: { month, target_type: targetType } })
   },
 
   // 获取目标详情
   async getTargetDetail(id) {
-    return await this._get(`/targets/${id}`);
+    return await this._get(`/targets/${id}`)
   },
 
   // 创建目标
   async createTarget(data) {
-    return await this._post("/targets", data);
+    return await this._post('/targets', data)
   },
 
   // 更新目标
   async updateTarget(id, data) {
-    return await this._put(`/targets/${id}`, data);
+    return await this._put(`/targets/${id}`, data)
   },
 
   // 删除目标
   async deleteTarget(id) {
-    return await this._delete(`/targets/${id}`);
+    return await this._delete(`/targets/${id}`)
   },
 
   // 创建目标分解
   async createTargetBreakdown(targetId, breakdown) {
-    return await this._post(`/targets/${targetId}/breakdown`, breakdown);
+    return await this._post(`/targets/${targetId}/breakdown`, breakdown)
   },
 
   // 一键生成日度分解（月度目标按天均分）
   async generateDailyBreakdown(targetId, options = {}) {
-    return await this._post(`/targets/${targetId}/breakdown/generate-daily`, options);
+    return await this._post(`/targets/${targetId}/breakdown/generate-daily`, options)
   },
 
   // ========== 库存API ==========
@@ -2028,53 +2028,53 @@ export default {
   // 获取滞销清理排名（v4.11.0：从dashboard API获取）
   async getClearanceRanking(params = {}) {
     // TODO: 需要创建专门的API端点，暂时使用dashboard数据
-    return await this._get("/dashboard/clearance-ranking", { params });
+    return await this._get('/dashboard/clearance-ranking', { params })
   },
 
   // ========== 店铺分析API ==========
 
   // 获取店铺GMV趋势
   async getStoreGMVTrend(params = {}) {
-    return await this._get("/store-analytics/gmv-trend", { params });
+    return await this._get('/store-analytics/gmv-trend', { params })
   },
 
   // 获取店铺转化率分析
   async getStoreConversionAnalysis(params = {}) {
-    return await this._get("/store-analytics/conversion-analysis", { params });
+    return await this._get('/store-analytics/conversion-analysis', { params })
   },
 
   // 获取店铺健康度评分
   async getStoreHealthScores(params = {}) {
-    return await this._get("/store-analytics/health-scores", { params });
+    return await this._get('/store-analytics/health-scores', { params })
   },
 
   // 计算店铺健康度评分
   async calculateStoreHealthScores(params = {}) {
-    return await this._post("/store-analytics/health-scores/calculate", null, {
-      params,
-    });
+    return await this._post('/store-analytics/health-scores/calculate', null, {
+      params
+    })
   },
 
   // 获取店铺流量分析
   async getStoreTrafficAnalysis(params = {}) {
-    return await this._get("/store-analytics/traffic-analysis", { params });
+    return await this._get('/store-analytics/traffic-analysis', { params })
   },
 
   // 获取店铺对比分析
   async getStoreComparison(params = {}) {
-    return await this._get("/store-analytics/comparison", { params });
+    return await this._get('/store-analytics/comparison', { params })
   },
 
   // 获取店铺预警提醒
   async getStoreAlerts(params = {}) {
-    return await this._get("/store-analytics/alerts", { params });
+    return await this._get('/store-analytics/alerts', { params })
   },
 
   // 生成店铺预警
   async generateStoreAlerts(params = {}) {
-    return await this._post("/store-analytics/alerts/generate", null, {
-      params,
-    });
+    return await this._post('/store-analytics/alerts/generate', null, {
+      params
+    })
   },
 
   // ========== 业务概览API（v4.11.0新增） ==========
@@ -2082,86 +2082,86 @@ export default {
   // 获取业务概览5个核心KPI指标
   // v4.x.x 更新：支持 month 和 platform 参数
   async getBusinessOverviewKPI(params = {}) {
-    const queryParams = new URLSearchParams();
+    const queryParams = new URLSearchParams()
     // 新参数：月份（格式：YYYY-MM-DD）和平台筛选
-    if (params.month) queryParams.append("month", params.month);
-    if (params.platform) queryParams.append("platform", params.platform);
+    if (params.month) queryParams.append('month', params.month)
+    if (params.platform) queryParams.append('platform', params.platform)
     // 保留旧参数用于兼容
-    if (params.platforms) queryParams.append("platforms", params.platforms);
-    if (params.shops) queryParams.append("shops", params.shops);
-    if (params.start_date) queryParams.append("start_date", params.start_date);
-    if (params.end_date) queryParams.append("end_date", params.end_date);
-    const queryString = queryParams.toString();
+    if (params.platforms) queryParams.append('platforms', params.platforms)
+    if (params.shops) queryParams.append('shops', params.shops)
+    if (params.start_date) queryParams.append('start_date', params.start_date)
+    if (params.end_date) queryParams.append('end_date', params.end_date)
+    const queryString = queryParams.toString()
     return await this._get(
-      `/dashboard/business-overview/kpi${queryString ? "?" + queryString : ""}`,
-    );
+      `/dashboard/business-overview/kpi${queryString ? '?' + queryString : ''}`
+    )
   },
 
   // 获取业务概览数据对比（日/周/月度）
   async getBusinessOverviewComparison(params) {
-    const queryParams = new URLSearchParams();
-    queryParams.append("granularity", params.granularity);
-    queryParams.append("date", params.date);
-    if (params.platforms) queryParams.append("platforms", params.platforms);
-    if (params.shops) queryParams.append("shops", params.shops);
+    const queryParams = new URLSearchParams()
+    queryParams.append('granularity', params.granularity)
+    queryParams.append('date', params.date)
+    if (params.platforms) queryParams.append('platforms', params.platforms)
+    if (params.shops) queryParams.append('shops', params.shops)
     return await this._get(
-      `/dashboard/business-overview/comparison?${queryParams.toString()}`,
-    );
+      `/dashboard/business-overview/comparison?${queryParams.toString()}`
+    )
   },
 
   // 获取店铺赛马数据
   async getBusinessOverviewShopRacing(params) {
-    const queryParams = new URLSearchParams();
-    queryParams.append("granularity", params.granularity);
-    queryParams.append("date", params.date);
-    queryParams.append("group_by", params.group_by || "shop");
-    if (params.platforms) queryParams.append("platforms", params.platforms);
+    const queryParams = new URLSearchParams()
+    queryParams.append('granularity', params.granularity)
+    queryParams.append('date', params.date)
+    queryParams.append('group_by', params.group_by || 'shop')
+    if (params.platforms) queryParams.append('platforms', params.platforms)
     return await this._get(
-      `/dashboard/business-overview/shop-racing?${queryParams.toString()}`,
-    );
+      `/dashboard/business-overview/shop-racing?${queryParams.toString()}`
+    )
   },
 
   // 获取流量排名数据
   async getBusinessOverviewTrafficRanking(params = {}) {
-    const queryParams = new URLSearchParams();
+    const queryParams = new URLSearchParams()
     if (params.granularity)
-      queryParams.append("granularity", params.granularity);
-    if (params.dimension) queryParams.append("dimension", params.dimension);
-    if (params.date) queryParams.append("date_value", params.date); // 后端API使用date_value参数
-    if (params.platforms) queryParams.append("platforms", params.platforms);
-    if (params.shops) queryParams.append("shops", params.shops);
-    const queryString = queryParams.toString();
+      queryParams.append('granularity', params.granularity)
+    if (params.dimension) queryParams.append('dimension', params.dimension)
+    if (params.date) queryParams.append('date_value', params.date) // 后端API使用date_value参数
+    if (params.platforms) queryParams.append('platforms', params.platforms)
+    if (params.shops) queryParams.append('shops', params.shops)
+    const queryString = queryParams.toString()
     return await this._get(
       `/dashboard/business-overview/traffic-ranking${
-        queryString ? "?" + queryString : ""
-      }`,
-    );
+        queryString ? '?' + queryString : ''
+      }`
+    )
   },
 
   async getBusinessOverviewInventoryBacklog(params = {}) {
-    const queryParams = new URLSearchParams();
-    if (params.days) queryParams.append("days", params.days);
-    if (params.platforms) queryParams.append("platforms", params.platforms);
-    if (params.shops) queryParams.append("shops", params.shops);
-    const queryString = queryParams.toString();
+    const queryParams = new URLSearchParams()
+    if (params.days) queryParams.append('days', params.days)
+    if (params.platforms) queryParams.append('platforms', params.platforms)
+    if (params.shops) queryParams.append('shops', params.shops)
+    const queryString = queryParams.toString()
     return await this._get(
       `/dashboard/business-overview/inventory-backlog${
-        queryString ? "?" + queryString : ""
-      }`,
-    );
+        queryString ? '?' + queryString : ''
+      }`
+    )
   },
 
   // 获取经营指标数据（与核心KPI同参数：month YYYY-MM-01，platform）
   async getBusinessOverviewOperationalMetrics(params = {}) {
-    const queryParams = new URLSearchParams();
-    if (params.month) queryParams.append("month", params.month);
-    if (params.platform) queryParams.append("platform", params.platform);
-    const queryString = queryParams.toString();
+    const queryParams = new URLSearchParams()
+    if (params.month) queryParams.append('month', params.month)
+    if (params.platform) queryParams.append('platform', params.platform)
+    const queryString = queryParams.toString()
     return await this._get(
       `/dashboard/business-overview/operational-metrics${
-        queryString ? "?" + queryString : ""
-      }`,
-    );
+        queryString ? '?' + queryString : ''
+      }`
+    )
   },
 
   // ========== 数据同步 - 数据治理（v4.6.0新增）==========
@@ -2171,7 +2171,7 @@ export default {
    * @returns {Promise} {platforms: string[]}
    */
   async getAvailablePlatforms() {
-    return await this._get("/data-sync/platforms");
+    return await this._get('/data-sync/platforms')
   },
 
   /**
@@ -2179,7 +2179,7 @@ export default {
    * @returns {Promise} {pending_count, ingested_count, failed_count, total_count}
    */
   async getDataSyncGovernanceStats() {
-    return await this._get("/data-sync/governance/stats");
+    return await this._get('/data-sync/governance/stats')
   },
 
   /**
@@ -2188,8 +2188,8 @@ export default {
    * @returns {Promise} {template_coverage, missing_templates_count, ...}
    */
   async getTemplateCoverage(platform = null) {
-    const params = platform ? { platform } : {};
-    return await this._get("/field-mapping/governance/overview", { params });
+    const params = platform ? { platform } : {}
+    return await this._get('/field-mapping/governance/overview', { params })
   },
 
   /**
@@ -2198,10 +2198,10 @@ export default {
    * @returns {Promise} [{domain, granularity, file_count}]
    */
   async getMissingTemplates(platform = null) {
-    const params = platform ? { platform } : {};
-    return await this._get("/field-mapping/governance/missing-templates", {
-      params,
-    });
+    const params = platform ? { platform } : {}
+    return await this._get('/field-mapping/governance/missing-templates', {
+      params
+    })
   },
 
   /**
@@ -2209,7 +2209,7 @@ export default {
    * @returns {Promise} {summary, covered, missing, needs_update}
    */
   async getDetailedTemplateCoverage() {
-    return await this._get("/data-sync/governance/detailed-coverage");
+    return await this._get('/data-sync/governance/detailed-coverage')
   },
 
   /**
@@ -2217,7 +2217,7 @@ export default {
    * @returns {Promise} {task_id, file_count, message}
    */
   async syncAllWithTemplate() {
-    return await this._post("/data-sync/batch-all");
+    return await this._post('/data-sync/batch-all')
   },
 
   /**
@@ -2232,14 +2232,14 @@ export default {
     fileIds,
     onlyWithTemplate = true,
     allowQuarantine = true,
-    useTemplateHeaderRow = true,
+    useTemplateHeaderRow = true
   }) {
-    return await this._post("/data-sync/batch-by-ids", {
+    return await this._post('/data-sync/batch-by-ids', {
       file_ids: fileIds,
       only_with_template: onlyWithTemplate,
       allow_quarantine: allowQuarantine,
-      use_template_header_row: useTemplateHeaderRow,
-    });
+      use_template_header_row: useTemplateHeaderRow
+    })
   },
 
   /**
@@ -2248,7 +2248,7 @@ export default {
    * @returns {Promise} {task_id, status, total_files, processed_files, success_files, failed_files, progress, details}
    */
   async getSyncTaskProgress(taskId) {
-    return await this._get(`/data-sync/progress/${taskId}`);
+    return await this._get(`/data-sync/progress/${taskId}`)
   },
 
   /**
@@ -2256,7 +2256,7 @@ export default {
    * @returns {Promise} {deleted_counts, total_deleted_rows, reset_files_count}
    */
   async cleanupDatabase() {
-    return await this._post("/data-sync/cleanup-database");
+    return await this._post('/data-sync/cleanup-database')
   },
 
   /**
@@ -2265,7 +2265,7 @@ export default {
    */
   async refreshPendingFiles() {
     // 调用扫描文件API（修复：使用正确的API路径）
-    return await this._post("/field-mapping/scan");
+    return await this._post('/field-mapping/scan')
   },
 
   // ==================== 组件版本管理API (Phase 9.4) ====================
@@ -2276,7 +2276,7 @@ export default {
    * @returns {Promise} {data, total, page, page_size}
    */
   async getComponentVersions(params) {
-    return await this._get("/component-versions", { params });
+    return await this._get('/component-versions', { params })
   },
 
   /**
@@ -2285,7 +2285,7 @@ export default {
    * @returns {Promise} 版本详情
    */
   async getComponentVersion(versionId) {
-    return await this._get(`/component-versions/${versionId}`);
+    return await this._get(`/component-versions/${versionId}`)
   },
 
   /**
@@ -2294,7 +2294,7 @@ export default {
    * @returns {Promise} 注册的版本信息
    */
   async registerComponentVersion(data) {
-    return await this._post("/component-versions", data);
+    return await this._post('/component-versions', data)
   },
 
   /**
@@ -2304,7 +2304,7 @@ export default {
    * @returns {Promise} {success, message, test_start_at, test_end_at}
    */
   async startABTest(versionId, data) {
-    return await this._post(`/component-versions/${versionId}/ab-test`, data);
+    return await this._post(`/component-versions/${versionId}/ab-test`, data)
   },
 
   /**
@@ -2313,7 +2313,7 @@ export default {
    * @returns {Promise} {success, message}
    */
   async stopABTest(versionId) {
-    return await this._post(`/component-versions/${versionId}/stop-ab-test`);
+    return await this._post(`/component-versions/${versionId}/stop-ab-test`)
   },
 
   /**
@@ -2322,7 +2322,7 @@ export default {
    * @returns {Promise} {success, message}
    */
   async promoteToStable(versionId) {
-    return await this._post(`/component-versions/${versionId}/promote`);
+    return await this._post(`/component-versions/${versionId}/promote`)
   },
 
   /**
@@ -2332,7 +2332,7 @@ export default {
    * @returns {Promise} {success, message}
    */
   async updateComponentVersion(versionId, data) {
-    return await this._patch(`/component-versions/${versionId}`, data);
+    return await this._patch(`/component-versions/${versionId}`, data)
   },
 
   /**
@@ -2342,7 +2342,7 @@ export default {
    * @returns {Promise} {success, message, test_result, version_info}
    */
   async testComponentVersion(versionId, data) {
-    return await this._post(`/component-versions/${versionId}/test`, data);
+    return await this._post(`/component-versions/${versionId}/test`, data)
   },
 
   /**
@@ -2353,8 +2353,8 @@ export default {
    */
   async getTestStatus(versionId, testId) {
     return await this._get(
-      `/component-versions/${versionId}/test/${testId}/status`,
-    );
+      `/component-versions/${versionId}/test/${testId}/status`
+    )
   },
 
   /**
@@ -2364,8 +2364,8 @@ export default {
    * @returns {string} 截图 URL（用于 img src）
    */
   getTestVerificationScreenshotUrl(versionId, testId) {
-    const base = (apiBaseURL || '').replace(/\/$/, '');
-    return `${base}/component-versions/${versionId}/test/${testId}/verification-screenshot`;
+    const base = (apiBaseURL || '').replace(/\/$/, '')
+    return `${base}/component-versions/${versionId}/test/${testId}/verification-screenshot`
   },
 
   /**
@@ -2377,8 +2377,8 @@ export default {
   async resumeTest(versionId, testId, data) {
     return await this._post(
       `/component-versions/${versionId}/test/${testId}/resume`,
-      data,
-    );
+      data
+    )
   },
 
   /**
@@ -2387,7 +2387,7 @@ export default {
    * @returns {Promise} {success, component_name, versions}
    */
   async getComponentStatistics(componentName) {
-    return await this._get(`/component-versions/${componentName}/statistics`);
+    return await this._get(`/component-versions/${componentName}/statistics`)
   },
 
   /**
@@ -2396,7 +2396,7 @@ export default {
    * @returns {Promise} {success, message, deleted_version}
    */
   async deleteComponentVersion(versionId) {
-    return await this._delete(`/component-versions/${versionId}`);
+    return await this._delete(`/component-versions/${versionId}`)
   },
 
   /**
@@ -2406,11 +2406,11 @@ export default {
    */
   async batchRegisterPythonComponents(params = {}) {
     return await this._post(
-      "/component-versions/batch-register-python",
-      params,
-    );
-  },
-};
+      '/component-versions/batch-register-python',
+      params
+    )
+  }
+}
 
 // v4.20.0: 系统管理API
-export * from "./system.js";
+export * from './system.js'

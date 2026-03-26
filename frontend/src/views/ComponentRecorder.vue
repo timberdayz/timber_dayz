@@ -930,8 +930,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ref, computed, watch, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   VideoPlay as RecordIcon,
   VideoPlay,
@@ -948,248 +948,248 @@ import {
   CircleClose,
   Clock,
   List,
-  Setting,
-} from "@element-plus/icons-vue";
-import draggable from "vuedraggable";
-import api from "@/api";
-import accountsApi from "@/api/accounts"; // ⭐ Phase 9完善：导入账号管理API
-import { getSubtypeOptions } from "@/constants/collection";
+  Setting
+} from '@element-plus/icons-vue'
+import draggable from 'vuedraggable'
+import api from '@/api'
+import accountsApi from '@/api/accounts' // ⭐ Phase 9完善：导入账号管理API
+import { getSubtypeOptions } from '@/constants/collection'
 
 // 响应式数据
 const recorderForm = ref({
-  platform: "",
-  componentType: "",
-  componentName: "",
-  accountId: "",
-  dataDomain: "", // 数据域（仅export组件）
-  subDomain: "", // 数据域子类型
-  exampleDataDomain: "", // 示例数据域（仅navigation组件）
-});
+  platform: '',
+  componentType: '',
+  componentName: '',
+  accountId: '',
+  dataDomain: '', // 数据域（仅export组件）
+  subDomain: '', // 数据域子类型
+  exampleDataDomain: '' // 示例数据域（仅navigation组件）
+})
 
-const isRecording = ref(false);
+const isRecording = ref(false)
 const recorderRuntimeStatus = ref({
-  state: "idle",
+  state: 'idle',
   gate_stage: null,
   ready_to_record: false,
   error_message: null,
   verification_type: null,
-  verification_screenshot: null,
-});
-const verificationRequired = ref(null);
-const verificationInput = ref("");
-const verificationSubmitting = ref(false);
-const recordedSteps = ref([]);
-const accounts = ref([]);
-const accountsLoading = ref(false); // ⭐ Phase 9完善：账号加载状态
+  verification_screenshot: null
+})
+const verificationRequired = ref(null)
+const verificationInput = ref('')
+const verificationSubmitting = ref(false)
+const recordedSteps = ref([])
+const accounts = ref([])
+const accountsLoading = ref(false) // ⭐ Phase 9完善：账号加载状态
 
 // 步骤→Python：生成的 Python 代码（主路径保存 .py）
-const pythonCode = ref("");
+const pythonCode = ref('')
 
 // 登录字段与代码质量提示
-const loginFieldSuggestions = ref([]);
-const lintErrors = ref([]);
-const lintWarnings = ref([]);
+const loginFieldSuggestions = ref([])
+const lintErrors = ref([])
+const lintWarnings = ref([])
 // 8.6 lint 类型到简短标签（错误）
 const lintErrorLabel = (type) => {
   const map = {
-    syntax_error: "[语法]",
-    wait_for_timeout_usage: "[固定等待]",
-    fixed_sleep_usage: "[固定sleep]",
-    count_is_visible_pattern: "[单次检测]",
-    swallow_exception_pattern: "[吞错]",
-    first_nth_usage: "[.first/.nth]",
-  };
-  return map[type] || `[${type}]`;
-};
+    syntax_error: '[语法]',
+    wait_for_timeout_usage: '[固定等待]',
+    fixed_sleep_usage: '[固定sleep]',
+    count_is_visible_pattern: '[单次检测]',
+    swallow_exception_pattern: '[吞错]',
+    first_nth_usage: '[.first/.nth]'
+  }
+  return map[type] || `[${type}]`
+}
 // 8.6 lint 类型到简短标签（警告，当前后端已无 warning 项，预留）
-const lintWarningLabel = (type) => (type ? `[${type}]` : "");
+const lintWarningLabel = (type) => (type ? `[${type}]` : '')
 // 登录成功条件（保存时写入组件）
-const successCriteriaUrlContains = ref("");
+const successCriteriaUrlContains = ref('')
 
 // Phase 11: 发现模式数据
-const recordingMode = ref("steps"); // 'steps' 或 'discovery'
-const openAction = ref(null); // 发现模式的打开动作
-const availableOptions = ref([]); // 发现模式的可用选项
-const defaultOption = ref(""); // 默认选项 key
+const recordingMode = ref('steps') // 'steps' 或 'discovery'
+const openAction = ref(null) // 发现模式的打开动作
+const availableOptions = ref([]) // 发现模式的可用选项
+const defaultOption = ref('') // 默认选项 key
 
 // Phase 12: 测试配置
 const testConfig = ref({
-  type: "url", // 'url' 或 'data_domain'
-  testUrl: "", // 测试页面URL
-  testDataDomain: "", // 测试数据域
-});
+  type: 'url', // 'url' 或 'data_domain'
+  testUrl: '', // 测试页面URL
+  testDataDomain: '' // 测试数据域
+})
 
 // 计算属性
 const canStartRecording = computed(() => {
   const baseCheck =
     recorderForm.value.platform &&
     recorderForm.value.componentType &&
-    recorderForm.value.accountId;
+    recorderForm.value.accountId
 
   // 导出组件必须选择数据域
-  if (recorderForm.value.componentType === "export") {
-    return baseCheck && recorderForm.value.dataDomain;
+  if (recorderForm.value.componentType === 'export') {
+    return baseCheck && recorderForm.value.dataDomain
   }
 
-  return baseCheck;
-});
+  return baseCheck
+})
 
-const hasSteps = computed(() => recordedSteps.value.length > 0);
+const hasSteps = computed(() => recordedSteps.value.length > 0)
 
 // Phase 11: 发现模式相关计算属性
-const isDiscoveryMode = computed(() => recordingMode.value === "discovery");
+const isDiscoveryMode = computed(() => recordingMode.value === 'discovery')
 const hasDiscoveryData = computed(
   () => openAction.value !== null || availableOptions.value.length > 0
-);
+)
 const hasRecordedData = computed(() =>
   isDiscoveryMode.value ? hasDiscoveryData.value : hasSteps.value
-);
+)
 
 const currentSubtypeOptions = computed(() =>
   getSubtypeOptions(recorderForm.value.dataDomain)
-);
+)
 
 // 判断组件类型是否使用发现模式
 const isDiscoveryComponentType = computed(() => {
-  return ["date_picker", "filters"].includes(recorderForm.value.componentType);
-});
+  return ['date_picker', 'filters'].includes(recorderForm.value.componentType)
+})
 
 // Phase 12.3: 批量选择和标记相关
-const selectAllSteps = ref(false);
+const selectAllSteps = ref(false)
 
 const selectedStepIndices = computed(() => {
   return recordedSteps.value
     .map((step, index) => (step.selected ? index : -1))
-    .filter((index) => index !== -1);
-});
+    .filter((index) => index !== -1)
+})
 
 const isIndeterminate = computed(() => {
-  const selectedCount = selectedStepIndices.value.length;
-  return selectedCount > 0 && selectedCount < recordedSteps.value.length;
-});
+  const selectedCount = selectedStepIndices.value.length
+  return selectedCount > 0 && selectedCount < recordedSteps.value.length
+})
 
 const handleSelectAll = (val) => {
   recordedSteps.value.forEach((step) => {
-    step.selected = val;
-  });
-};
+    step.selected = val
+  })
+}
 
 const updateSelectedIndices = () => {
-  const allSelected = recordedSteps.value.every((step) => step.selected);
-  const noneSelected = recordedSteps.value.every((step) => !step.selected);
-  selectAllSteps.value = allSelected;
-};
+  const allSelected = recordedSteps.value.every((step) => step.selected)
+  const noneSelected = recordedSteps.value.every((step) => !step.selected)
+  selectAllSteps.value = allSelected
+}
 
 const batchMarkAs = (groupType) => {
   recordedSteps.value.forEach((step) => {
     if (step.selected) {
-      step.step_group = groupType === "normal" ? undefined : groupType;
+      step.step_group = groupType === 'normal' ? undefined : groupType
     }
-  });
+  })
   // 取消选择
   recordedSteps.value.forEach((step) => {
-    step.selected = false;
-  });
-  selectAllSteps.value = false;
-};
+    step.selected = false
+  })
+  selectAllSteps.value = false
+}
 
 // Phase 12.4: 批量设为可选/必选
 const batchSetOptionalSelected = (optional) => {
-  let count = 0;
+  let count = 0
   recordedSteps.value.forEach((step) => {
     if (step.selected) {
-      step.optional = optional;
-      count++;
+      step.optional = optional
+      count++
     }
-  });
-  ElMessage.success(`已设置 ${count} 个步骤为${optional ? "可选" : "必选"}`);
+  })
+  ElMessage.success(`已设置 ${count} 个步骤为${optional ? '可选' : '必选'}`)
   // 取消选择
   recordedSteps.value.forEach((step) => {
-    step.selected = false;
-  });
-  selectAllSteps.value = false;
-};
+    step.selected = false
+  })
+  selectAllSteps.value = false
+}
 
 // Phase 12.4: 批量删除
 const batchDeleteSelected = () => {
-  const selectedCount = selectedStepIndices.value.length;
+  const selectedCount = selectedStepIndices.value.length
   if (selectedCount === 0) {
-    ElMessage.warning("请先选择要删除的步骤");
-    return;
+    ElMessage.warning('请先选择要删除的步骤')
+    return
   }
 
   ElMessageBox.confirm(
     `确定要删除选中的 ${selectedCount} 个步骤吗？`,
-    "确认删除",
+    '确认删除',
     {
-      confirmButtonText: "删除",
-      cancelButtonText: "取消",
-      type: "warning",
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
     }
   )
     .then(() => {
       // 从后向前删除，避免索引错位
       const sortedIndices = [...selectedStepIndices.value].sort(
         (a, b) => b - a
-      );
+      )
       sortedIndices.forEach((index) => {
-        recordedSteps.value.splice(index, 1);
-      });
-      ElMessage.success(`已删除 ${selectedCount} 个步骤`);
-      selectAllSteps.value = false;
+        recordedSteps.value.splice(index, 1)
+      })
+      ElMessage.success(`已删除 ${selectedCount} 个步骤`)
+      selectAllSteps.value = false
     })
     .catch(() => {
       // 用户取消
-    });
-};
+    })
+}
 
 const recordingStatus = computed(() => {
-  if (recorderRuntimeStatus.value.state === "failed_before_recording") {
-    return { text: "门禁失败", type: "danger" };
-  } else if (recorderRuntimeStatus.value.state === "login_verification_pending") {
-    return { text: "等待验证码", type: "warning" };
-  } else if (recorderRuntimeStatus.value.state === "inspector_recording") {
-    return { text: "录制中", type: "success" };
+  if (recorderRuntimeStatus.value.state === 'failed_before_recording') {
+    return { text: '门禁失败', type: 'danger' }
+  } else if (recorderRuntimeStatus.value.state === 'login_verification_pending') {
+    return { text: '等待验证码', type: 'warning' }
+  } else if (recorderRuntimeStatus.value.state === 'inspector_recording') {
+    return { text: '录制中', type: 'success' }
   } else if (
     isRecording.value &&
     recorderRuntimeStatus.value.state &&
-    recorderRuntimeStatus.value.state !== "idle"
+    recorderRuntimeStatus.value.state !== 'idle'
   ) {
-    return { text: "检查中", type: "warning" };
+    return { text: '检查中', type: 'warning' }
   } else if (hasSteps.value) {
-    return { text: "已完成", type: "info" };
+    return { text: '已完成', type: 'info' }
   } else {
-    return { text: "未开始", type: "info" };
+    return { text: '未开始', type: 'info' }
   }
-});
+})
 
 const recorderRuntimeState = computed(
-  () => recorderRuntimeStatus.value.state || "idle"
-);
+  () => recorderRuntimeStatus.value.state || 'idle'
+)
 
 const recorderRuntimeStatusText = computed(() => {
-  const state = recorderRuntimeStatus.value.state;
-  if (state === "starting") return "录制子进程已启动，正在准备浏览器上下文。";
-  if (state === "login_checking") return "正在检查当前账号是否已满足登录门禁。";
-  if (state === "login_verification_pending")
-    return "登录过程需要验证码，提交后系统会继续完成登录门禁。";
-  if (state === "login_ready") return "登录门禁已通过，正在进入录制界面。";
-  if (state === "inspector_recording") return "浏览器已进入 Inspector 录制状态。";
-  if (state === "failed_before_recording") {
-    return recorderRuntimeStatus.value.error_message || "录制前检查失败。";
+  const state = recorderRuntimeStatus.value.state
+  if (state === 'starting') return '录制子进程已启动，正在准备浏览器上下文。'
+  if (state === 'login_checking') return '正在检查当前账号是否已满足登录门禁。'
+  if (state === 'login_verification_pending')
+    return '登录过程需要验证码，提交后系统会继续完成登录门禁。'
+  if (state === 'login_ready') return '登录门禁已通过，正在进入录制界面。'
+  if (state === 'inspector_recording') return '浏览器已进入 Inspector 录制状态。'
+  if (state === 'failed_before_recording') {
+    return recorderRuntimeStatus.value.error_message || '录制前检查失败。'
   }
-  return "正在准备录制。";
-});
+  return '正在准备录制。'
+})
 
 const isOtpVerification = computed(() => {
   const verificationType =
     verificationRequired.value?.verificationType ||
     recorderRuntimeStatus.value.verification_type ||
-    "";
-  return ["otp", "sms", "email_code"].includes(
+    ''
+  return ['otp', 'sms', 'email_code'].includes(
     String(verificationType).toLowerCase()
-  );
-});
+  )
+})
 
 // ⭐ Phase 9完善：筛选已启用的账号
 const filteredAccounts = computed(() => {
@@ -1199,14 +1199,14 @@ const filteredAccounts = computed(() => {
       !recorderForm.value.platform ||
       (account.platform &&
         account.platform.toLowerCase() ===
-          recorderForm.value.platform.toLowerCase());
+          recorderForm.value.platform.toLowerCase())
     // 只显示启用的账号
-    const isEnabled = account.enabled !== false;
-    return matchesPlatform && isEnabled;
-  });
+    const isEnabled = account.enabled !== false
+    return matchesPlatform && isEnabled
+  })
 
-  return filtered;
-});
+  return filtered
+})
 
 // ⭐ Phase 5: 自动生成组件名称（支持数据域和子域）
 watch(
@@ -1214,40 +1214,40 @@ watch(
     recorderForm.value.platform,
     recorderForm.value.componentType,
     recorderForm.value.dataDomain,
-    recorderForm.value.subDomain,
+    recorderForm.value.subDomain
   ],
   ([platform, componentType, dataDomain, subDomain]) => {
     if (platform && componentType) {
-      if (componentType === "export" && dataDomain) {
+      if (componentType === 'export' && dataDomain) {
         // 导出组件名称：{platform}_{dataDomain}_export 或 {platform}_{dataDomain}_{subDomain}_export
         if (subDomain) {
-          recorderForm.value.componentName = `${platform}_${dataDomain}_${subDomain}_export`;
+          recorderForm.value.componentName = `${platform}_${dataDomain}_${subDomain}_export`
         } else {
-          recorderForm.value.componentName = `${platform}_${dataDomain}_export`;
+          recorderForm.value.componentName = `${platform}_${dataDomain}_export`
         }
       } else {
         // 其他组件名称：{platform}_{componentType}
-        recorderForm.value.componentName = `${platform}_${componentType}`;
+        recorderForm.value.componentName = `${platform}_${componentType}`
       }
     }
   },
   { immediate: true }
-);
+)
 
 // 数据域变化时清空子域
 const onDataDomainChange = () => {
-  recorderForm.value.subDomain = "";
-};
+  recorderForm.value.subDomain = ''
+}
 
 // 组件类型变化时清空相关字段
 watch(
   () => recorderForm.value.componentType,
   () => {
-    recorderForm.value.dataDomain = "";
-    recorderForm.value.subDomain = "";
-    recorderForm.value.exampleDataDomain = "";
+    recorderForm.value.dataDomain = ''
+    recorderForm.value.subDomain = ''
+    recorderForm.value.exampleDataDomain = ''
   }
-);
+)
 
 // ⭐ Phase 9完善：监听平台变化，自动刷新账号列表
 watch(
@@ -1255,485 +1255,485 @@ watch(
   (newPlatform) => {
     if (newPlatform) {
       // 清空已选账号
-      recorderForm.value.accountId = "";
+      recorderForm.value.accountId = ''
       // 重新加载该平台的账号
-      loadAccounts();
+      loadAccounts()
     } else {
-      accounts.value = [];
+      accounts.value = []
     }
   }
-);
+)
 
 // YAML 相关逻辑已废弃，采集组件统一使用 Python 代码作为主输出
 
 // 方法
 const startRecording = async () => {
   try {
-    isRecording.value = true;
+    isRecording.value = true
     recorderRuntimeStatus.value = {
-      state: "starting",
-      gate_stage: "login_gate",
+      state: 'starting',
+      gate_stage: 'login_gate',
       ready_to_record: false,
       error_message: null,
       verification_type: null,
-      verification_screenshot: null,
-    };
-    verificationRequired.value = null;
-    verificationInput.value = "";
-    ElMessage.info("录制流程已启动，正在进行录制前检查...");
+      verification_screenshot: null
+    }
+    verificationRequired.value = null
+    verificationInput.value = ''
+    ElMessage.info('录制流程已启动，正在进行录制前检查...')
 
-    const response = await api.post("/collection/recorder/start", {
+    const response = await api.post('/collection/recorder/start', {
       platform: recorderForm.value.platform,
       component_type: recorderForm.value.componentType,
-      account_id: recorderForm.value.accountId,
-    });
+      account_id: recorderForm.value.accountId
+    })
 
     if (response.success) {
       if (response.data) {
         recorderRuntimeStatus.value = {
           ...recorderRuntimeStatus.value,
-          ...response.data,
-        };
+          ...response.data
+        }
       }
 
       // 开始轮询录制状态
-      startPollingSteps();
+      startPollingSteps()
     }
   } catch (error) {
-    console.error("启动录制失败:", error);
-    ElMessage.error("启动录制失败: " + error.message);
-    isRecording.value = false;
+    console.error('启动录制失败:', error)
+    ElMessage.error('启动录制失败: ' + error.message)
+    isRecording.value = false
   }
-};
+}
 
 const stopRecording = async () => {
   try {
-    ElMessage.info("正在停止录制，请稍等...");
+    ElMessage.info('正在停止录制，请稍等...')
 
-    const response = await api.post("/collection/recorder/stop");
+    const response = await api.post('/collection/recorder/stop')
 
     if (response.success) {
-      isRecording.value = false;
+      isRecording.value = false
 
       // Phase 11: 根据模式处理不同的响应
-      if (response.mode === "discovery") {
+      if (response.mode === 'discovery') {
         // 发现模式
-        recordingMode.value = "discovery";
-        openAction.value = response.open_action;
-        availableOptions.value = response.available_options || [];
-        defaultOption.value = response.default_option || "";
-        recordedSteps.value = []; // 清空步骤
-        pythonCode.value = "";
+        recordingMode.value = 'discovery'
+        openAction.value = response.open_action
+        availableOptions.value = response.available_options || []
+        defaultOption.value = response.default_option || ''
+        recordedSteps.value = [] // 清空步骤
+        pythonCode.value = ''
 
         // Phase 12.2: 自动填充测试配置（从录制结果中获取）
         if (response.test_config && response.test_config.test_url) {
-          testConfig.value.type = "url";
-          testConfig.value.testUrl = response.test_config.test_url;
+          testConfig.value.type = 'url'
+          testConfig.value.testUrl = response.test_config.test_url
           console.log(
-            "[ComponentRecorder] Auto-filled test_url:",
+            '[ComponentRecorder] Auto-filled test_url:',
             response.test_config.test_url
-          );
+          )
         } else if (
           response.test_config &&
           response.test_config.test_data_domain
         ) {
-          testConfig.value.type = "data_domain";
+          testConfig.value.type = 'data_domain'
           testConfig.value.testDataDomain =
-            response.test_config.test_data_domain;
+            response.test_config.test_data_domain
         }
 
         if (availableOptions.value.length > 0) {
           ElMessage.success(
             `录制完成，共发现 ${availableOptions.value.length} 个选项`
-          );
+          )
         } else {
           ElMessage.warning(
-            "录制完成，但未发现任何选项。请确保点击了日期/筛选选项。"
-          );
+            '录制完成，但未发现任何选项。请确保点击了日期/筛选选项。'
+          )
         }
       } else {
         // 步骤模式
-        recordingMode.value = "steps";
-        openAction.value = null;
-        availableOptions.value = [];
+        recordingMode.value = 'steps'
+        openAction.value = null
+        availableOptions.value = []
 
-        if (response.platform) recorderForm.value.platform = response.platform;
+        if (response.platform) recorderForm.value.platform = response.platform
         if (response.component_type)
-          recorderForm.value.componentType = response.component_type;
+          recorderForm.value.componentType = response.component_type
 
         if (response.steps && response.steps.length > 0) {
-          recordedSteps.value = response.steps;
-          pythonCode.value = response.python_code || "";
+          recordedSteps.value = response.steps
+          pythonCode.value = response.python_code || ''
 
           // 登录字段建议与代码质量提示
           loginFieldSuggestions.value =
-            response.login_field_suggestions || [];
-          lintErrors.value = response.lint_errors || [];
-          lintWarnings.value = response.lint_warnings || [];
+            response.login_field_suggestions || []
+          lintErrors.value = response.lint_errors || []
+          lintWarnings.value = response.lint_warnings || []
 
           if (lintErrors.value.length > 0) {
             ElMessage.error(
-              "生成的代码存在规范错误，请根据下方提示修复后再保存。"
-            );
+              '生成的代码存在规范错误，请根据下方提示修复后再保存。'
+            )
           } else if (!pythonCode.value) {
             ElMessage.warning(
-              "未生成代码，请检查步骤或使用「重新生成」按钮"
-            );
+              '未生成代码，请检查步骤或使用「重新生成」按钮'
+            )
           } else {
             ElMessage.success(
               `录制完成，共记录 ${response.steps.length} 个步骤`
-            );
+            )
             if (loginFieldSuggestions.value?.length) {
               ElMessage.info(
                 `已根据录制内容为登录字段应用账号变量（共 ${
                   loginFieldSuggestions.value.length
                 } 处），可在下方代码中查看。`
-              );
+              )
             }
             if (lintWarnings.value?.length) {
               ElMessage.warning(
                 `生成的代码存在 ${lintWarnings.value.length} 条规范建议，可根据提示逐步优化。`
-              );
+              )
             }
           }
         } else {
-          recordedSteps.value = [];
-          pythonCode.value = "";
+          recordedSteps.value = []
+          pythonCode.value = ''
           ElMessage.warning(
-            "录制完成，但未记录到任何步骤。请确保在Inspector中进行了操作。"
-          );
+            '录制完成，但未记录到任何步骤。请确保在Inspector中进行了操作。'
+          )
         }
       }
 
-      stopPollingSteps();
+      stopPollingSteps()
     }
   } catch (error) {
-    console.error("停止录制失败:", error);
-    ElMessage.error("停止录制失败: " + error.message);
+    console.error('停止录制失败:', error)
+    ElMessage.error('停止录制失败: ' + error.message)
   }
-};
+}
 
-let pollingInterval = null;
+let pollingInterval = null
 
 const startPollingSteps = () => {
   pollingInterval = setInterval(async () => {
     try {
-      const statusResponse = await api.get("/collection/recorder/status");
+      const statusResponse = await api.get('/collection/recorder/status')
       if (statusResponse.success && statusResponse.data) {
         recorderRuntimeStatus.value = {
           ...recorderRuntimeStatus.value,
-          ...statusResponse.data,
-        };
-        if (statusResponse.data.state === "login_verification_pending") {
-          const base = (import.meta.env.VITE_API_BASE_URL || "/api").replace(
+          ...statusResponse.data
+        }
+        if (statusResponse.data.state === 'login_verification_pending') {
+          const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(
             /\/$/,
-            ""
-          );
+            ''
+          )
           verificationRequired.value = {
             verificationType:
-              statusResponse.data.verification_type || "graphical_captcha",
-            screenshotUrl: `${base}/collection/recorder/verification-screenshot?ts=${Date.now()}`,
-          };
-        } else if (statusResponse.data.state !== "failed_before_recording") {
-          verificationRequired.value = null;
+              statusResponse.data.verification_type || 'graphical_captcha',
+            screenshotUrl: `${base}/collection/recorder/verification-screenshot?ts=${Date.now()}`
+          }
+        } else if (statusResponse.data.state !== 'failed_before_recording') {
+          verificationRequired.value = null
         }
-        if (statusResponse.data.state === "failed_before_recording") {
-          isRecording.value = false;
-          stopPollingSteps();
+        if (statusResponse.data.state === 'failed_before_recording') {
+          isRecording.value = false
+          stopPollingSteps()
           ElMessage.error(
-            statusResponse.data.error_message || "录制前检查失败，未进入录制阶段"
-          );
-          return;
+            statusResponse.data.error_message || '录制前检查失败，未进入录制阶段'
+          )
+          return
         }
       }
 
-      const response = await api.get("/collection/recorder/steps");
+      const response = await api.get('/collection/recorder/steps')
 
       if (response.success && response.data) {
-        recordedSteps.value = response.data.steps || [];
+        recordedSteps.value = response.data.steps || []
       }
     } catch (error) {
-      console.error("获取录制步骤失败:", error);
+      console.error('获取录制步骤失败:', error)
     }
-  }, 1000); // 每秒轮询一次
-};
+  }, 1000) // 每秒轮询一次
+}
 
 const stopPollingSteps = () => {
   if (pollingInterval) {
-    clearInterval(pollingInterval);
-    pollingInterval = null;
+    clearInterval(pollingInterval)
+    pollingInterval = null
   }
-};
+}
 
 const submitRecorderVerification = async () => {
-  if (!verificationInput.value.trim()) return;
-  verificationSubmitting.value = true;
+  if (!verificationInput.value.trim()) return
+  verificationSubmitting.value = true
   try {
     const payload = isOtpVerification.value
       ? { otp: verificationInput.value.trim() }
-      : { captcha_code: verificationInput.value.trim() };
-    await api.post("/collection/recorder/resume", payload);
-    ElMessage.success("验证码已提交，录制前检查将继续执行");
-    verificationRequired.value = null;
-    verificationInput.value = "";
+      : { captcha_code: verificationInput.value.trim() }
+    await api.post('/collection/recorder/resume', payload)
+    ElMessage.success('验证码已提交，录制前检查将继续执行')
+    verificationRequired.value = null
+    verificationInput.value = ''
     recorderRuntimeStatus.value = {
       ...recorderRuntimeStatus.value,
-      state: "login_checking",
-      error_message: null,
-    };
+      state: 'login_checking',
+      error_message: null
+    }
   } catch (error) {
     ElMessage.error(
-      error.response?.data?.detail || error.message || "验证码提交失败"
-    );
+      error.response?.data?.detail || error.message || '验证码提交失败'
+    )
   } finally {
-    verificationSubmitting.value = false;
+    verificationSubmitting.value = false
   }
-};
+}
 
 const addStep = () => {
   recordedSteps.value.push({
     id: Date.now(),
-    action: "click",
-    selector: "",
-    comment: "",
-    optional: false,
-  });
-};
+    action: 'click',
+    selector: '',
+    comment: '',
+    optional: false
+  })
+}
 
 const deleteStep = (index) => {
-  recordedSteps.value.splice(index, 1);
-};
+  recordedSteps.value.splice(index, 1)
+}
 
 // Phase 11: 发现模式辅助函数
 const getOpenActionSelector = () => {
-  if (!openAction.value || !openAction.value.selectors) return "";
-  const selectors = openAction.value.selectors;
+  if (!openAction.value || !openAction.value.selectors) return ''
+  const selectors = openAction.value.selectors
   // 优先使用 text 类型
   for (const sel of selectors) {
-    if (sel.type === "text") return sel.value;
+    if (sel.type === 'text') return sel.value
   }
   // 其次使用 css 类型
   for (const sel of selectors) {
-    if (sel.type === "css") return sel.value;
+    if (sel.type === 'css') return sel.value
   }
-  return selectors[0]?.value || "";
-};
+  return selectors[0]?.value || ''
+}
 
 const addOption = () => {
   availableOptions.value.push({
     key: `option_${Date.now()}`,
-    text: "新选项",
-    selectors: [],
-  });
-};
+    text: '新选项',
+    selectors: []
+  })
+}
 
 const deleteOption = (index) => {
-  const deletedKey = availableOptions.value[index]?.key;
-  availableOptions.value.splice(index, 1);
+  const deletedKey = availableOptions.value[index]?.key
+  availableOptions.value.splice(index, 1)
   // 如果删除的是默认选项，重置默认选项
   if (deletedKey === defaultOption.value && availableOptions.value.length > 0) {
-    defaultOption.value = availableOptions.value[0].key;
+    defaultOption.value = availableOptions.value[0].key
   }
-};
+}
 
 const setDefaultOption = (key) => {
-  defaultOption.value = key;
-};
+  defaultOption.value = key
+}
 
 const getStepStatusType = (status) => {
   const types = {
-    passed: "success",
-    failed: "danger",
-    running: "warning",
-    pending: "info",
-  };
-  return types[status] || "info";
-};
+    passed: 'success',
+    failed: 'danger',
+    running: 'warning',
+    pending: 'info'
+  }
+  return types[status] || 'info'
+}
 
 const getStepStatusIcon = (status) => {
   const icons = {
-    passed: "CircleCheck",
-    failed: "CircleClose",
-    running: "Loading",
-    pending: "Clock",
-  };
-  return icons[status] || "Clock";
-};
+    passed: 'CircleCheck',
+    failed: 'CircleClose',
+    running: 'Loading',
+    pending: 'Clock'
+  }
+  return icons[status] || 'Clock'
+}
 
 const getFixSuggestion = (step) => {
-  if (!step.error) return "";
+  if (!step.error) return ''
 
-  const error = step.error.toLowerCase();
+  const error = step.error.toLowerCase()
 
-  if (error.includes("timeout")) {
-    return "建议：增加timeout值或检查网络延迟";
-  } else if (error.includes("not found") || error.includes("unable to find")) {
-    return "建议：检查selector是否正确，或添加等待步骤";
-  } else if (error.includes("click")) {
-    return "建议：元素可能被遮挡，尝试添加滚动或等待动画完成";
-  } else if (error.includes("network")) {
-    return "建议：检查网络连接或增加重试次数";
+  if (error.includes('timeout')) {
+    return '建议：增加timeout值或检查网络延迟'
+  } else if (error.includes('not found') || error.includes('unable to find')) {
+    return '建议：检查selector是否正确，或添加等待步骤'
+  } else if (error.includes('click')) {
+    return '建议：元素可能被遮挡，尝试添加滚动或等待动画完成'
+  } else if (error.includes('network')) {
+    return '建议：检查网络连接或增加重试次数'
   } else {
-    return "建议：检查步骤配置是否正确";
+    return '建议：检查步骤配置是否正确'
   }
-};
+}
 
 const regeneratePython = async () => {
   if (!recordedSteps.value.length) {
-    ElMessage.warning("暂无步骤，无法重新生成");
-    return;
+    ElMessage.warning('暂无步骤，无法重新生成')
+    return
   }
   try {
     const genPayload = {
       platform: recorderForm.value.platform,
       component_type: recorderForm.value.componentType,
       component_name: recorderForm.value.componentName,
-      steps: recordedSteps.value,
-    };
+      steps: recordedSteps.value
+    }
     // 8.7 与 save 请求体一致：export 时传 data_domain/sub_domain，避免子域语义漂移
-    if (recorderForm.value.componentType === "export") {
-      if (recorderForm.value.dataDomain) genPayload.data_domain = recorderForm.value.dataDomain;
+    if (recorderForm.value.componentType === 'export') {
+      if (recorderForm.value.dataDomain) genPayload.data_domain = recorderForm.value.dataDomain
       if (currentSubtypeOptions.value.length > 0 && recorderForm.value.subDomain) {
-        genPayload.sub_domain = recorderForm.value.subDomain;
+        genPayload.sub_domain = recorderForm.value.subDomain
       }
     }
-    const res = await api.post("/collection/recorder/generate-python", genPayload);
+    const res = await api.post('/collection/recorder/generate-python', genPayload)
     if (res.success && res.python_code) {
-      pythonCode.value = res.python_code;
-      loginFieldSuggestions.value = res.login_field_suggestions || [];
-      lintErrors.value = res.lint_errors || [];
-      lintWarnings.value = res.lint_warnings || [];
+      pythonCode.value = res.python_code
+      loginFieldSuggestions.value = res.login_field_suggestions || []
+      lintErrors.value = res.lint_errors || []
+      lintWarnings.value = res.lint_warnings || []
 
       if (lintErrors.value.length > 0) {
         ElMessage.error(
-          "生成的代码存在规范错误，请根据下方提示修复后再保存。"
-        );
+          '生成的代码存在规范错误，请根据下方提示修复后再保存。'
+        )
       } else {
-        ElMessage.success("已重新生成 Python 代码");
+        ElMessage.success('已重新生成 Python 代码')
         if (lintWarnings.value?.length) {
           ElMessage.warning(
             `生成的代码存在 ${lintWarnings.value.length} 条规范建议，可根据提示逐步优化。`
-          );
+          )
         }
       }
     } else {
-      ElMessage.warning("重新生成失败");
+      ElMessage.warning('重新生成失败')
     }
   } catch (e) {
-    console.error("重新生成 Python 失败:", e);
-    ElMessage.error("重新生成失败: " + (e.message || "未知错误"));
+    console.error('重新生成 Python 失败:', e)
+    ElMessage.error('重新生成失败: ' + (e.message || '未知错误'))
   }
-};
+}
 
 const saveComponent = async () => {
   try {
     if (!pythonCode.value || !pythonCode.value.trim()) {
-      ElMessage.warning("当前只支持保存 Python 组件，请先生成或编辑 Python 代码");
-      return;
+      ElMessage.warning('当前只支持保存 Python 组件，请先生成或编辑 Python 代码')
+      return
     }
-    if (recorderForm.value.componentType === "export" && !recorderForm.value.dataDomain) {
-      ElMessage.warning("导出组件必须选择数据域");
-      return;
+    if (recorderForm.value.componentType === 'export' && !recorderForm.value.dataDomain) {
+      ElMessage.warning('导出组件必须选择数据域')
+      return
     }
 
     const payload = {
       platform: recorderForm.value.platform,
-      component_type: recorderForm.value.componentType,
-    };
-    if (recorderForm.value.componentType === "export") {
-      payload.data_domain = recorderForm.value.dataDomain;
+      component_type: recorderForm.value.componentType
+    }
+    if (recorderForm.value.componentType === 'export') {
+      payload.data_domain = recorderForm.value.dataDomain
       if (currentSubtypeOptions.value.length > 0 && recorderForm.value.subDomain) {
-        payload.sub_domain = recorderForm.value.subDomain;
+        payload.sub_domain = recorderForm.value.subDomain
       }
     }
-    payload.python_code = pythonCode.value.trim();
+    payload.python_code = pythonCode.value.trim()
     if (
-      recorderForm.value.componentType === "login" &&
+      recorderForm.value.componentType === 'login' &&
       successCriteriaUrlContains.value &&
       successCriteriaUrlContains.value.trim()
     ) {
       payload.success_criteria = {
-        url_contains: successCriteriaUrlContains.value.trim(),
-      };
+        url_contains: successCriteriaUrlContains.value.trim()
+      }
     }
 
-    const response = await api.post("/collection/recorder/save", payload);
+    const response = await api.post('/collection/recorder/save', payload)
 
     if (response.success) {
-      const versionInfo = response.version_info;
+      const versionInfo = response.version_info
 
       // 显示版本信息
       ElMessage.success({
         message: `${response.message} (v${versionInfo.version})`,
-        duration: 3000,
-      });
+        duration: 3000
+      })
 
       // 询问是否前往组件版本管理并测试
       ElMessageBox.confirm(
         `组件已成功保存并注册为版本 v${versionInfo.version}。是否前往组件版本管理页并执行测试？`,
-        "保存成功",
+        '保存成功',
         {
-          confirmButtonText: "前往版本管理并测试",
-          cancelButtonText: "继续录制",
-          type: "success",
+          confirmButtonText: '前往版本管理并测试',
+          cancelButtonText: '继续录制',
+          type: 'success'
         }
       )
         .then(() => {
-          window.open("/component-versions", "_blank");
+          window.open('/component-versions', '_blank')
         })
         .catch(() => {
           // 用户选择继续录制，不做任何操作
-        });
+        })
     }
   } catch (error) {
-    console.error("保存组件失败:", error);
-    const msg = error?.response?.data?.message || error?.message || "保存失败";
-    ElMessage.error("保存组件失败: " + msg);
+    console.error('保存组件失败:', error)
+    const msg = error?.response?.data?.message || error?.message || '保存失败'
+    ElMessage.error('保存组件失败: ' + msg)
     // 7.3.2：服务端因 lint 阻断时，展示错误详情以便用户修复
-    const payload = error?.response?.data?.data;
+    const payload = error?.response?.data?.data
     if (payload?.lint_errors?.length) {
-      lintErrors.value = payload.lint_errors;
-      lintWarnings.value = payload.lint_warnings || [];
+      lintErrors.value = payload.lint_errors
+      lintWarnings.value = payload.lint_warnings || []
     }
   }
-};
+}
 
 const loadAccounts = async () => {
-  accountsLoading.value = true;
+  accountsLoading.value = true
   try {
     // ⭐ Phase 9完善：使用新的账号管理API
-    const params = {};
+    const params = {}
 
     // 如果已选择平台，只加载该平台的账号
     if (recorderForm.value.platform) {
-      params.platform = recorderForm.value.platform;
+      params.platform = recorderForm.value.platform
     }
 
-    const response = await accountsApi.listAccounts(params);
+    const response = await accountsApi.listAccounts(params)
 
     // 新API直接返回账号数组
-    accounts.value = response || [];
+    accounts.value = response || []
 
     console.log(
       `[ComponentRecorder] 加载了 ${accounts.value.length} 个账号（平台：${
-        recorderForm.value.platform || "全部"
+        recorderForm.value.platform || '全部'
       }）`
-    );
+    )
   } catch (error) {
-    console.error("加载账号列表失败:", error);
-    ElMessage.error("加载账号列表失败: " + error.message);
-    accounts.value = [];
+    console.error('加载账号列表失败:', error)
+    ElMessage.error('加载账号列表失败: ' + error.message)
+    accounts.value = []
   } finally {
-    accountsLoading.value = false;
+    accountsLoading.value = false
   }
-};
+}
 
 // 生命周期
 onMounted(() => {
   // ⭐ Phase 9完善：初始化时不加载账号，等选择平台后再加载
   // 这样可以避免不必要的API调用
-  console.log("[ComponentRecorder] 组件已挂载，等待选择平台后加载账号");
-});
+  console.log('[ComponentRecorder] 组件已挂载，等待选择平台后加载账号')
+})
 </script>
 
 <style scoped>

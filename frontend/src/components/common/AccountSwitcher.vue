@@ -223,18 +223,18 @@ const getRoleName = (role) => {
 
 const handleCommand = (command) => {
   switch (command) {
-    case 'personal-settings':
-      router.push('/personal-settings')
-      break
-    case 'system-settings':
-      router.push('/system-settings')
-      break
-    case 'add-account':
-      addAccount()
-      break
-    case 'logout':
-      logout()
-      break
+  case 'personal-settings':
+    router.push('/personal-settings')
+    break
+  case 'system-settings':
+    router.push('/system-settings')
+    break
+  case 'add-account':
+    addAccount()
+    break
+  case 'logout':
+    logout()
+    break
   }
 }
 

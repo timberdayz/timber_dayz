@@ -543,23 +543,23 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Refresh, Calendar, Shop } from "@element-plus/icons-vue";
-import api from "@/api";
-import PageHeader from "@/components/common/PageHeader.vue";
+import { ref, reactive, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Refresh, Calendar, Shop } from '@element-plus/icons-vue'
+import api from '@/api'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 // ==================== 公共状态 ====================
-const viewMode = ref("monthly"); // monthly | shop
-const availableShops = ref([]);
-const loading = ref(false);
-const monthlyError = ref(null); // 月度数据加载错误状态
-const shopError = ref(null); // 店铺数据加载错误状态
+const viewMode = ref('monthly') // monthly | shop
+const availableShops = ref([])
+const loading = ref(false)
+const monthlyError = ref(null) // 月度数据加载错误状态
+const shopError = ref(null) // 店铺数据加载错误状态
 
 // ==================== 按月份查看模式 ====================
-const selectedMonth = ref(null);
-const monthlyTableData = ref([]);
-const batchSaving = ref(false);
+const selectedMonth = ref(null)
+const monthlyTableData = ref([])
+const batchSaving = ref(false)
 
 // 月度汇总
 const monthlySummary = reactive({
@@ -567,8 +567,8 @@ const monthlySummary = reactive({
   total_rent: 0,
   total_salary: 0,
   total_utilities: 0,
-  total_other: 0,
-});
+  total_other: 0
+})
 
 // 年度汇总
 const yearlySummary = reactive({
@@ -576,13 +576,13 @@ const yearlySummary = reactive({
   total_rent: 0,
   total_salary: 0,
   total_utilities: 0,
-  total_other_costs: 0,
-});
+  total_other_costs: 0
+})
 
 // ==================== 按店铺查看模式 ====================
-const selectedShopId = ref(null);
-const selectedYear = ref(null);
-const shopTableData = ref([]);
+const selectedShopId = ref(null)
+const selectedYear = ref(null)
+const shopTableData = ref([])
 
 // 店铺汇总
 const shopSummary = reactive({
@@ -591,63 +591,63 @@ const shopSummary = reactive({
   total_salary: 0,
   total_utilities: 0,
   total_other_costs: 0,
-  month_count: 0,
-});
+  month_count: 0
+})
 
 // ==================== 公共方法 ====================
 const formatNumber = (num) => {
-  if (num === null || num === undefined) return "0.00";
-  return Number(num).toFixed(2);
-};
+  if (num === null || num === undefined) return '0.00'
+  return Number(num).toFixed(2)
+}
 
 // 加载店铺列表
 const loadShops = async () => {
   try {
-    const data = await api.get("/expenses/shops");
+    const data = await api.get('/expenses/shops')
     availableShops.value = Array.isArray(data)
       ? data
-      : (data?.data ?? data ?? []);
+      : (data?.data ?? data ?? [])
   } catch (error) {
-    console.error("加载店铺列表失败:", error);
-    ElMessage.error(error.message || "加载店铺列表失败");
-    availableShops.value = [];
+    console.error('加载店铺列表失败:', error)
+    ElMessage.error(error.message || '加载店铺列表失败')
+    availableShops.value = []
   }
-};
+}
 
 // 模式切换处理
 const handleModeChange = (mode) => {
-  if (mode === "monthly" && selectedMonth.value) {
-    loadMonthlyExpenses();
-  } else if (mode === "shop" && selectedShopId.value) {
-    loadShopExpenses();
+  if (mode === 'monthly' && selectedMonth.value) {
+    loadMonthlyExpenses()
+  } else if (mode === 'shop' && selectedShopId.value) {
+    loadShopExpenses()
   }
-};
+}
 
 // ==================== 按月份模式方法 ====================
 
 // 加载月度费用
 const loadMonthlyExpenses = async () => {
   if (!selectedMonth.value) {
-    ElMessage.warning("请先选择月份");
-    return;
+    ElMessage.warning('请先选择月份')
+    return
   }
 
-  loading.value = true;
-  monthlyError.value = null; // 重置错误状态
+  loading.value = true
+  monthlyError.value = null // 重置错误状态
   try {
     // 并行加载月度数据和年度汇总
     const [monthlyRes, yearlyRes] = await Promise.all([
-      api.get("/expenses", {
-        params: { year_month: selectedMonth.value, page_size: 1000 },
+      api.get('/expenses', {
+        params: { year_month: selectedMonth.value, page_size: 1000 }
       }),
-      api.get("/expenses/summary/yearly", {
-        params: { year: selectedMonth.value.substring(0, 4) },
-      }),
-    ]);
+      api.get('/expenses/summary/yearly', {
+        params: { year: selectedMonth.value.substring(0, 4) }
+      })
+    ])
 
     // 处理月度数据
-    const existingData = monthlyRes.items || [];
-    const shopIdSet = new Set(existingData.map((item) => item.shop_id));
+    const existingData = monthlyRes.items || []
+    const shopIdSet = new Set(existingData.map((item) => item.shop_id))
 
     // 为没有数据的店铺创建空白行
     const newRows = availableShops.value
@@ -662,8 +662,8 @@ const loadMonthlyExpenses = async () => {
         utilities: 0,
         other_costs: 0,
         total: 0,
-        saving: false,
-      }));
+        saving: false
+      }))
 
     // 合并现有数据和空白行，只保留当月数据
     monthlyTableData.value = [
@@ -674,55 +674,55 @@ const loadMonthlyExpenses = async () => {
           shop_name:
             availableShops.value.find((s) => s.shop_id === item.shop_id)
               ?.shop_name || item.shop_id,
-          saving: false,
+          saving: false
         })),
-      ...newRows,
-    ];
+      ...newRows
+    ]
 
     // 计算月度汇总（只计算已保存的数据）
-    calculateMonthlySummary();
+    calculateMonthlySummary()
 
     // 更新年度汇总
     if (yearlyRes) {
-      yearlySummary.total_amount = yearlyRes.total_amount || 0;
-      yearlySummary.total_rent = yearlyRes.total_rent || 0;
-      yearlySummary.total_salary = yearlyRes.total_salary || 0;
-      yearlySummary.total_utilities = yearlyRes.total_utilities || 0;
-      yearlySummary.total_other_costs = yearlyRes.total_other_costs || 0;
+      yearlySummary.total_amount = yearlyRes.total_amount || 0
+      yearlySummary.total_rent = yearlyRes.total_rent || 0
+      yearlySummary.total_salary = yearlyRes.total_salary || 0
+      yearlySummary.total_utilities = yearlyRes.total_utilities || 0
+      yearlySummary.total_other_costs = yearlyRes.total_other_costs || 0
     }
   } catch (error) {
-    console.error("加载费用数据失败:", error);
+    console.error('加载费用数据失败:', error)
     // 设置错误状态，区分"无数据"和"加载失败"
     monthlyError.value = {
-      message: error.message || "加载费用数据失败",
-      recovery: error.recovery_suggestion || "请检查网络连接或联系管理员",
-    };
-    monthlyTableData.value = [];
-    ElMessage.error(monthlyError.value.message);
+      message: error.message || '加载费用数据失败',
+      recovery: error.recovery_suggestion || '请检查网络连接或联系管理员'
+    }
+    monthlyTableData.value = []
+    ElMessage.error(monthlyError.value.message)
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 计算月度汇总
 const calculateMonthlySummary = () => {
-  monthlySummary.total_amount = 0;
-  monthlySummary.total_rent = 0;
-  monthlySummary.total_salary = 0;
-  monthlySummary.total_utilities = 0;
-  monthlySummary.total_other = 0;
+  monthlySummary.total_amount = 0
+  monthlySummary.total_rent = 0
+  monthlySummary.total_salary = 0
+  monthlySummary.total_utilities = 0
+  monthlySummary.total_other = 0
 
   // 只计算已保存的数据（有ID的行）
   monthlyTableData.value
     .filter((item) => item.id)
     .forEach((item) => {
-      monthlySummary.total_amount += Number(item.total) || 0;
-      monthlySummary.total_rent += Number(item.rent) || 0;
-      monthlySummary.total_salary += Number(item.salary) || 0;
-      monthlySummary.total_utilities += Number(item.utilities) || 0;
-      monthlySummary.total_other += Number(item.other_costs) || 0;
-    });
-};
+      monthlySummary.total_amount += Number(item.total) || 0
+      monthlySummary.total_rent += Number(item.rent) || 0
+      monthlySummary.total_salary += Number(item.salary) || 0
+      monthlySummary.total_utilities += Number(item.utilities) || 0
+      monthlySummary.total_other += Number(item.other_costs) || 0
+    })
+}
 
 // 更新行合计
 const updateRowTotal = (row) => {
@@ -730,38 +730,38 @@ const updateRowTotal = (row) => {
     (Number(row.rent) || 0) +
     (Number(row.salary) || 0) +
     (Number(row.utilities) || 0) +
-    (Number(row.other_costs) || 0);
-  calculateMonthlySummary();
-};
+    (Number(row.other_costs) || 0)
+  calculateMonthlySummary()
+}
 
 // 店铺选择变化
 const handleShopChange = (row) => {
-  const shop = availableShops.value.find((s) => s.shop_id === row.shop_id);
+  const shop = availableShops.value.find((s) => s.shop_id === row.shop_id)
   if (shop) {
-    row.shop_name = shop.shop_name;
+    row.shop_name = shop.shop_name
   }
-};
+}
 
 // 月份变化
 const handleMonthChange = () => {
   if (selectedMonth.value) {
-    loadMonthlyExpenses();
+    loadMonthlyExpenses()
   } else {
-    monthlyTableData.value = [];
-    calculateMonthlySummary();
+    monthlyTableData.value = []
+    calculateMonthlySummary()
   }
-};
+}
 
 // 为所有店铺添加空白行
 const handleAddAllShops = () => {
   if (!selectedMonth.value) {
-    ElMessage.warning("请先选择月份");
-    return;
+    ElMessage.warning('请先选择月份')
+    return
   }
 
   const existingShopIds = new Set(
-    monthlyTableData.value.map((row) => row.shop_id),
-  );
+    monthlyTableData.value.map((row) => row.shop_id)
+  )
   const newRows = availableShops.value
     .filter((shop) => !existingShopIds.has(shop.shop_id))
     .map((shop) => ({
@@ -774,31 +774,31 @@ const handleAddAllShops = () => {
       utilities: 0,
       other_costs: 0,
       total: 0,
-      saving: false,
-    }));
+      saving: false
+    }))
 
   if (newRows.length === 0) {
-    ElMessage.info("所有店铺已有数据");
-    return;
+    ElMessage.info('所有店铺已有数据')
+    return
   }
 
-  monthlyTableData.value.push(...newRows);
-  ElMessage.success(`已为 ${newRows.length} 个店铺添加空白行`);
-};
+  monthlyTableData.value.push(...newRows)
+  ElMessage.success(`已为 ${newRows.length} 个店铺添加空白行`)
+}
 
 // 保存单行
 const handleSaveRow = async (row) => {
   if (!row.shop_id) {
-    ElMessage.warning("请选择店铺");
-    return;
+    ElMessage.warning('请选择店铺')
+    return
   }
 
   if (!selectedMonth.value) {
-    ElMessage.warning("请先选择月份");
-    return;
+    ElMessage.warning('请先选择月份')
+    return
   }
 
-  row.saving = true;
+  row.saving = true
   try {
     const payload = {
       shop_id: row.shop_id,
@@ -806,51 +806,51 @@ const handleSaveRow = async (row) => {
       rent: Number(row.rent) || 0,
       salary: Number(row.salary) || 0,
       utilities: Number(row.utilities) || 0,
-      other_costs: Number(row.other_costs) || 0,
-    };
+      other_costs: Number(row.other_costs) || 0
+    }
 
-    await api.post("/expenses", payload);
-    ElMessage.success("保存成功");
-    await loadMonthlyExpenses();
+    await api.post('/expenses', payload)
+    ElMessage.success('保存成功')
+    await loadMonthlyExpenses()
   } catch (error) {
-    console.error("保存失败:", error);
-    ElMessage.error(error.message || "保存失败");
+    console.error('保存失败:', error)
+    ElMessage.error(error.message || '保存失败')
   } finally {
-    row.saving = false;
+    row.saving = false
   }
-};
+}
 
 // 删除单行
 const handleDeleteRow = async (row, index) => {
   if (!row.id) {
-    monthlyTableData.value.splice(index, 1);
-    calculateMonthlySummary();
-    return;
+    monthlyTableData.value.splice(index, 1)
+    calculateMonthlySummary()
+    return
   }
 
   try {
     await ElMessageBox.confirm(
       `确定要删除 ${row.shop_name || row.shop_id} 的费用记录吗？`,
-      "确认删除",
-      { type: "warning" },
-    );
+      '确认删除',
+      { type: 'warning' }
+    )
 
-    await api.delete(`/expenses/${row.id}`);
-    ElMessage.success("删除成功");
-    await loadMonthlyExpenses();
+    await api.delete(`/expenses/${row.id}`)
+    ElMessage.success('删除成功')
+    await loadMonthlyExpenses()
   } catch (error) {
-    if (error !== "cancel") {
-      console.error("删除失败:", error);
-      ElMessage.error(error.message || "删除失败");
+    if (error !== 'cancel') {
+      console.error('删除失败:', error)
+      ElMessage.error(error.message || '删除失败')
     }
   }
-};
+}
 
 // 批量保存
 const handleBatchSave = async () => {
   if (!selectedMonth.value) {
-    ElMessage.warning("请先选择月份");
-    return;
+    ElMessage.warning('请先选择月份')
+    return
   }
 
   const rowsToSave = monthlyTableData.value.filter(
@@ -859,24 +859,24 @@ const handleBatchSave = async () => {
       (row.rent > 0 ||
         row.salary > 0 ||
         row.utilities > 0 ||
-        row.other_costs > 0),
-  );
+        row.other_costs > 0)
+  )
 
   if (rowsToSave.length === 0) {
-    ElMessage.warning("没有需要保存的数据");
-    return;
+    ElMessage.warning('没有需要保存的数据')
+    return
   }
 
   try {
     await ElMessageBox.confirm(
       `确定要批量保存 ${rowsToSave.length} 条费用记录吗？`,
-      "确认批量保存",
-      { type: "info" },
-    );
+      '确认批量保存',
+      { type: 'info' }
+    )
 
-    batchSaving.value = true;
-    let successCount = 0;
-    let failCount = 0;
+    batchSaving.value = true
+    let successCount = 0
+    let failCount = 0
 
     for (const row of rowsToSave) {
       try {
@@ -886,96 +886,96 @@ const handleBatchSave = async () => {
           rent: Number(row.rent) || 0,
           salary: Number(row.salary) || 0,
           utilities: Number(row.utilities) || 0,
-          other_costs: Number(row.other_costs) || 0,
-        };
+          other_costs: Number(row.other_costs) || 0
+        }
 
-        await api.post("/expenses", payload);
-        successCount++;
+        await api.post('/expenses', payload)
+        successCount++
       } catch (error) {
-        console.error(`保存店铺 ${row.shop_name || row.shop_id} 失败:`, error);
-        failCount++;
+        console.error(`保存店铺 ${row.shop_name || row.shop_id} 失败:`, error)
+        failCount++
       }
     }
 
     if (failCount === 0) {
-      ElMessage.success(`成功保存 ${successCount} 条记录`);
+      ElMessage.success(`成功保存 ${successCount} 条记录`)
     } else {
-      ElMessage.warning(`成功保存 ${successCount} 条，失败 ${failCount} 条`);
+      ElMessage.warning(`成功保存 ${successCount} 条，失败 ${failCount} 条`)
     }
 
-    await loadMonthlyExpenses();
+    await loadMonthlyExpenses()
   } catch (error) {
-    if (error !== "cancel") {
-      console.error("批量保存失败:", error);
-      ElMessage.error(error.message || "批量保存失败");
+    if (error !== 'cancel') {
+      console.error('批量保存失败:', error)
+      ElMessage.error(error.message || '批量保存失败')
     }
   } finally {
-    batchSaving.value = false;
+    batchSaving.value = false
   }
-};
+}
 
 // ==================== 按店铺模式方法 ====================
 
 // 店铺选择变化
 const handleShopSelectChange = () => {
   if (selectedShopId.value) {
-    loadShopExpenses();
+    loadShopExpenses()
   } else {
-    shopTableData.value = [];
-    resetShopSummary();
+    shopTableData.value = []
+    resetShopSummary()
   }
-};
+}
 
 // 加载店铺费用
 const loadShopExpenses = async () => {
   if (!selectedShopId.value) {
-    ElMessage.warning("请先选择店铺");
-    return;
+    ElMessage.warning('请先选择店铺')
+    return
   }
 
-  loading.value = true;
+  loading.value = true
   try {
-    const params = { shop_id: selectedShopId.value };
+    const params = { shop_id: selectedShopId.value }
     if (selectedYear.value) {
-      params.year = selectedYear.value;
+      params.year = selectedYear.value
     }
 
-    const res = await api.get("/expenses/by-shop", { params });
+    const res = await api.get('/expenses/by-shop', { params })
 
     // 处理数据
     shopTableData.value = (res.items || []).map((item) => ({
       ...item,
-      saving: false,
-    }));
+      saving: false
+    }))
 
     // 更新汇总
     if (res.summary) {
-      shopSummary.total_amount = res.summary.total_amount || 0;
-      shopSummary.total_rent = res.summary.total_rent || 0;
-      shopSummary.total_salary = res.summary.total_salary || 0;
-      shopSummary.total_utilities = res.summary.total_utilities || 0;
-      shopSummary.total_other_costs = res.summary.total_other_costs || 0;
-      shopSummary.month_count = res.summary.month_count || 0;
+      shopSummary.total_amount = res.summary.total_amount || 0
+      shopSummary.total_rent = res.summary.total_rent || 0
+      shopSummary.total_salary = res.summary.total_salary || 0
+      shopSummary.total_utilities = res.summary.total_utilities || 0
+      shopSummary.total_other_costs = res.summary.total_other_costs || 0
+      shopSummary.month_count = res.summary.month_count || 0
     } else {
-      resetShopSummary();
+      resetShopSummary()
     }
   } catch (error) {
-    console.error("加载店铺费用失败:", error);
-    ElMessage.error(error.message || "加载店铺费用失败");
+    console.error('加载店铺费用失败:', error)
+    ElMessage.error(error.message || '加载店铺费用失败')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 重置店铺汇总
 const resetShopSummary = () => {
-  shopSummary.total_amount = 0;
-  shopSummary.total_rent = 0;
-  shopSummary.total_salary = 0;
-  shopSummary.total_utilities = 0;
-  shopSummary.total_other_costs = 0;
-  shopSummary.month_count = 0;
-};
+  shopSummary.total_amount = 0
+  shopSummary.total_rent = 0
+  shopSummary.total_salary = 0
+  shopSummary.total_utilities = 0
+  shopSummary.total_other_costs = 0
+  shopSummary.month_count = 0
+}
 
 // 更新店铺行合计
 const updateShopRowTotal = (row) => {
@@ -983,37 +983,37 @@ const updateShopRowTotal = (row) => {
     (Number(row.rent) || 0) +
     (Number(row.salary) || 0) +
     (Number(row.utilities) || 0) +
-    (Number(row.other_costs) || 0);
-};
+    (Number(row.other_costs) || 0)
+}
 
 // 添加月份行
 const handleAddMonthRow = () => {
   if (!selectedShopId.value) {
-    ElMessage.warning("请先选择店铺");
-    return;
+    ElMessage.warning('请先选择店铺')
+    return
   }
 
   shopTableData.value.push({
     id: null,
     shop_id: selectedShopId.value,
-    year_month: "",
+    year_month: '',
     rent: 0,
     salary: 0,
     utilities: 0,
     other_costs: 0,
     total: 0,
-    saving: false,
-  });
-};
+    saving: false
+  })
+}
 
 // 保存店铺行
 const handleSaveShopRow = async (row) => {
   if (!row.year_month) {
-    ElMessage.warning("请选择月份");
-    return;
+    ElMessage.warning('请选择月份')
+    return
   }
 
-  row.saving = true;
+  row.saving = true
   try {
     const payload = {
       shop_id: selectedShopId.value,
@@ -1021,54 +1021,54 @@ const handleSaveShopRow = async (row) => {
       rent: Number(row.rent) || 0,
       salary: Number(row.salary) || 0,
       utilities: Number(row.utilities) || 0,
-      other_costs: Number(row.other_costs) || 0,
-    };
+      other_costs: Number(row.other_costs) || 0
+    }
 
-    await api.post("/expenses", payload);
-    ElMessage.success("保存成功");
-    await loadShopExpenses();
+    await api.post('/expenses', payload)
+    ElMessage.success('保存成功')
+    await loadShopExpenses()
   } catch (error) {
-    console.error("保存失败:", error);
-    ElMessage.error(error.message || "保存失败");
+    console.error('保存失败:', error)
+    ElMessage.error(error.message || '保存失败')
   } finally {
-    row.saving = false;
+    row.saving = false
   }
-};
+}
 
 // 删除店铺行
 const handleDeleteShopRow = async (row, index) => {
   if (!row.id) {
-    shopTableData.value.splice(index, 1);
-    return;
+    shopTableData.value.splice(index, 1)
+    return
   }
 
   try {
     await ElMessageBox.confirm(
       `确定要删除 ${row.year_month} 的费用记录吗？`,
-      "确认删除",
-      { type: "warning" },
-    );
+      '确认删除',
+      { type: 'warning' }
+    )
 
-    await api.delete(`/expenses/${row.id}`);
-    ElMessage.success("删除成功");
-    await loadShopExpenses();
+    await api.delete(`/expenses/${row.id}`)
+    ElMessage.success('删除成功')
+    await loadShopExpenses()
   } catch (error) {
-    if (error !== "cancel") {
-      console.error("删除失败:", error);
-      ElMessage.error(error.message || "删除失败");
+    if (error !== 'cancel') {
+      console.error('删除失败:', error)
+      ElMessage.error(error.message || '删除失败')
     }
   }
-};
+}
 
 // ==================== 生命周期 ====================
 onMounted(() => {
-  loadShops();
+  loadShops()
   // 默认选择当前月份和年份
-  const now = new Date();
-  selectedMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  selectedYear.value = `${now.getFullYear()}`;
-  loadMonthlyExpenses();
-});
+  const now = new Date()
+  selectedMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  selectedYear.value = `${now.getFullYear()}`
+  loadMonthlyExpenses()
+})
 </script>
 
 <style scoped>

@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Reading } from '@element-plus/icons-vue'
 
 const features = [
-  "快速入门",
-  "功能说明",
-  "操作步骤",
-  "最佳实践",
-  "常见场景"
+  '快速入门',
+  '功能说明',
+  '操作步骤',
+  '最佳实践',
+  '常见场景'
 ]
 </script>
 

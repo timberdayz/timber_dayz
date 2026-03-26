@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Setting } from '@element-plus/icons-vue'
 
 const features = [
-  "通知方式设置",
-  "提醒频率设置",
-  "预警阈值设置",
-  "免打扰时段",
-  "消息订阅管理"
+  '通知方式设置',
+  '提醒频率设置',
+  '预警阈值设置',
+  '免打扰时段',
+  '消息订阅管理'
 ]
 </script>
 

@@ -338,23 +338,23 @@ export const createTaskWebSocket = (taskId, token, callbacks = {}) => {
       const message = JSON.parse(event.data)
       
       switch (message.type) {
-        case 'connected':
-          console.log(`[WS] ${message.message}`)
-          break
-        case 'progress':
-          callbacks.onProgress?.(message)
-          break
-        case 'log':
-          callbacks.onLog?.(message)
-          break
-        case 'complete':
-          callbacks.onComplete?.(message)
-          break
-        case 'verification_required':
-          callbacks.onVerification?.(message)
-          break
-        default:
-          console.log(`[WS] Unknown message type: ${message.type}`)
+      case 'connected':
+        console.log(`[WS] ${message.message}`)
+        break
+      case 'progress':
+        callbacks.onProgress?.(message)
+        break
+      case 'log':
+        callbacks.onLog?.(message)
+        break
+      case 'complete':
+        callbacks.onComplete?.(message)
+        break
+      case 'verification_required':
+        callbacks.onVerification?.(message)
+        break
+      default:
+        console.log(`[WS] Unknown message type: ${message.type}`)
       }
     } catch (e) {
       console.error('[WS] Failed to parse message:', e)
@@ -362,7 +362,7 @@ export const createTaskWebSocket = (taskId, token, callbacks = {}) => {
   }
   
   ws.onerror = (error) => {
-    console.error(`[WS] Error:`, error)
+    console.error('[WS] Error:', error)
     callbacks.onError?.(error)
   }
   

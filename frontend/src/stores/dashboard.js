@@ -233,7 +233,7 @@ export const useDashboardStore = defineStore('dashboard', {
     async fetchOverview(params = {}) {
       this.overview.loading = true
       this.overview.error = null
-  // TODO: 使用当前 PostgreSQL Dashboard API
+      // TODO: 使用当前 PostgreSQL Dashboard API
       this.overview.loading = false
     },
 
@@ -244,7 +244,7 @@ export const useDashboardStore = defineStore('dashboard', {
     async fetchSalesTrend(params = {}) {
       this.salesTrend.loading = true
       this.salesTrend.error = null
-  // TODO: 使用当前 PostgreSQL Dashboard API
+      // TODO: 使用当前 PostgreSQL Dashboard API
       this.salesTrend.loading = false
     },
 
@@ -255,7 +255,7 @@ export const useDashboardStore = defineStore('dashboard', {
     async fetchProfitAnalysis(params = {}) {
       this.profitAnalysis.loading = true
       this.profitAnalysis.error = null
-  // TODO: 使用当前 PostgreSQL Dashboard API
+      // TODO: 使用当前 PostgreSQL Dashboard API
       this.profitAnalysis.loading = false
     },
 
@@ -266,7 +266,7 @@ export const useDashboardStore = defineStore('dashboard', {
     async fetchTopProducts(params = {}) {
       this.topProducts.loading = true
       this.topProducts.error = null
-  // TODO: 使用当前 PostgreSQL Dashboard API
+      // TODO: 使用当前 PostgreSQL Dashboard API
       this.topProducts.loading = false
     },
 
@@ -277,7 +277,7 @@ export const useDashboardStore = defineStore('dashboard', {
     async fetchPlatformComparison(params = {}) {
       this.platformComparison.loading = true
       this.platformComparison.error = null
-  // TODO: 使用当前 PostgreSQL Dashboard API
+      // TODO: 使用当前 PostgreSQL Dashboard API
       this.platformComparison.loading = false
     },
 
@@ -288,7 +288,7 @@ export const useDashboardStore = defineStore('dashboard', {
     async fetchOrderStatistics(params = {}) {
       this.orderStatistics.loading = true
       this.orderStatistics.error = null
-  // TODO: 使用当前 PostgreSQL Dashboard API
+      // TODO: 使用当前 PostgreSQL Dashboard API
       this.orderStatistics.loading = false
     },
 
@@ -299,7 +299,7 @@ export const useDashboardStore = defineStore('dashboard', {
     async fetchConversionFunnel(params = {}) {
       this.conversionFunnel.loading = true
       this.conversionFunnel.error = null
-  // TODO: 使用当前 PostgreSQL Dashboard API
+      // TODO: 使用当前 PostgreSQL Dashboard API
       this.conversionFunnel.loading = false
     },
 
@@ -310,7 +310,7 @@ export const useDashboardStore = defineStore('dashboard', {
     async fetchRealtimeData(params = {}) {
       this.realtimeData.loading = true
       this.realtimeData.error = null
-  // TODO: 使用当前 PostgreSQL Dashboard API
+      // TODO: 使用当前 PostgreSQL Dashboard API
       this.realtimeData.loading = false
     },
 
@@ -318,7 +318,7 @@ export const useDashboardStore = defineStore('dashboard', {
      * 刷新所有数据
      */
     async refreshAll(params = {}) {
-  // TODO: 迁移到当前 PostgreSQL Dashboard API
+      // TODO: 迁移到当前 PostgreSQL Dashboard API
       const promises = [
         this.fetchOverview(params),
         this.fetchSalesTrend(params),

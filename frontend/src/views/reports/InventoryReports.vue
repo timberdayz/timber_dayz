@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Document } from '@element-plus/icons-vue'
 
 const features = [
-  "库存余额报表",
-  "库存流水报表",
-  "库龄分析报表",
-  "呆滞库存报表",
-  "库存周转率"
+  '库存余额报表',
+  '库存流水报表',
+  '库龄分析报表',
+  '呆滞库存报表',
+  '库存周转率'
 ]
 </script>
 

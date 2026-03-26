@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Document } from '@element-plus/icons-vue'
 
 const features = [
-  "报表设计器",
-  "维度自定义",
-  "指标自定义",
-  "报表保存",
-  "报表分享"
+  '报表设计器',
+  '维度自定义',
+  '指标自定义',
+  '报表保存',
+  '报表分享'
 ]
 </script>
 

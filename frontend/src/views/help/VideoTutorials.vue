@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { VideoPlay } from '@element-plus/icons-vue'
 
 const features = [
-  "入门视频",
-  "功能演示",
-  "实战案例",
-  "技巧分享",
-  "在线学习"
+  '入门视频',
+  '功能演示',
+  '实战案例',
+  '技巧分享',
+  '在线学习'
 ]
 </script>
 

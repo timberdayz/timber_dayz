@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Document } from '@element-plus/icons-vue'
 
 const features = [
-  "店铺销售报表",
-  "SKU销售报表",
-  "时间维度报表",
-  "平台对比报表",
-  "自定义维度"
+  '店铺销售报表',
+  'SKU销售报表',
+  '时间维度报表',
+  '平台对比报表',
+  '自定义维度'
 ]
 </script>
 

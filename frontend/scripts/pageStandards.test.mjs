@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {
   normalizeSalesTargetsResponse,
   buildSalesTargetMutationPayload,
-  getPageFamilyClass,
+  getPageFamilyClass
 } from '../src/utils/pageStandards.js'
 
 test('normalizeSalesTargetsResponse normalizes direct arrays and wrapped data', () => {
@@ -20,12 +20,12 @@ test('buildSalesTargetMutationPayload keeps only editable fields', () => {
     buildSalesTargetMutationPayload({
       target_sales_amount: 1200.5,
       target_order_count: 42,
-      shop_id: 'shop-1',
+      shop_id: 'shop-1'
     }),
     {
       target_sales_amount: 1200.5,
-      target_order_count: 42,
-    },
+      target_order_count: 42
+    }
   )
 })
 

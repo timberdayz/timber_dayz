@@ -12,19 +12,19 @@ export default defineConfig({
     AutoImport({
       resolvers: [ElementPlusResolver()],
       imports: ['vue', 'vue-router', 'pinia'],
-      dts: true,
+      dts: true
     }),
     Components({
       resolvers: [ElementPlusResolver({
         importStyle: false
       })],
-      dts: true,
-    }),
+      dts: true
+    })
   ],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src'),
-    },
+      '@': resolve(__dirname, 'src')
+    }
   },
   server: {
     port: 5173,
@@ -50,9 +50,9 @@ export default defineConfig({
         chunkFileNames: 'assets/js/[name]-[hash].js',
         entryFileNames: 'assets/js/[name]-[hash].js',
         assetFileNames: 'assets/[ext]/[name]-[hash].[ext]',
-        manualChunks: resolveManualChunk,
-      },
-    },
+        manualChunks: resolveManualChunk
+      }
+    }
     // 生产环境优化配置（取消注释以启用）
     // 说明: 启用后会移除console.log、压缩代码，提升性能和安全性
     // 使用方法: 删除下面的注释符号（//）即可启用
@@ -66,6 +66,6 @@ export default defineConfig({
     // }
   },
   optimizeDeps: {
-    include: ['vue', 'vue-router', 'pinia', 'element-plus', 'echarts', 'axios'],
-  },
+    include: ['vue', 'vue-router', 'pinia', 'element-plus', 'echarts', 'axios']
+  }
 })

@@ -308,15 +308,15 @@ const handleCommand = (command) => {
   
   // 处理其他命令
   switch (command) {
-    case 'personal-settings':
-      router.push('/personal-settings')
-      break
-    case 'system-settings':
-      router.push('/system-config')
-      break
-    case 'logout':
-      logout()
-      break
+  case 'personal-settings':
+    router.push('/personal-settings')
+    break
+  case 'system-settings':
+    router.push('/system-config')
+    break
+  case 'logout':
+    logout()
+    break
   }
 }
 

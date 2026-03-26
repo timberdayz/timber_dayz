@@ -511,27 +511,27 @@ const getTypeLabel = (type) => {
 
 const getNotificationRoute = (type) => {
   switch (type) {
-    case 'user_registered':
-      return '/admin/users/pending'
-    case 'user_approved':
-    case 'user_rejected':
-    case 'password_reset':
-      return '/user-management'
-    default:
-      return ''
+  case 'user_registered':
+    return '/admin/users/pending'
+  case 'user_approved':
+  case 'user_rejected':
+  case 'password_reset':
+    return '/user-management'
+  default:
+    return ''
   }
 }
 
 const getNotificationRouteLabel = (type) => {
   switch (type) {
-    case 'user_registered':
-      return '前往审批'
-    case 'user_approved':
-    case 'user_rejected':
-    case 'password_reset':
-      return '用户管理'
-    default:
-      return ''
+  case 'user_registered':
+    return '前往审批'
+  case 'user_approved':
+  case 'user_rejected':
+  case 'password_reset':
+    return '用户管理'
+  default:
+    return ''
   }
 }
 

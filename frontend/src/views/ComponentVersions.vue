@@ -884,10 +884,10 @@ const deleteVersion = async (row) => {
         (v) => v.component_name === row.component_name && v.id !== row.id
       )
       if (others.length > 0) {
-        message += `\n\n此为稳定版，删除后建议将其他版本提升为稳定版。`
+        message += '\n\n此为稳定版，删除后建议将其他版本提升为稳定版。'
       }
     }
-    message += `\n\n若为该组件的最后一条版本记录，将同时删除磁盘上的组件文件。`
+    message += '\n\n若为该组件的最后一条版本记录，将同时删除磁盘上的组件文件。'
     await ElMessageBox.confirm(message, '确认删除', {
       type: 'warning',
       confirmButtonText: '删除',
@@ -1114,7 +1114,7 @@ const startComponentTest = async () => {
       startPollingTestStatus(response.test_id, currentTestComponent.value.id)
       
       // 显示启动成功消息
-    if (response.success) {
+      if (response.success) {
         ElMessage.success({
           message: response.message || '测试已启动，请查看实时进度',
           duration: 3000
@@ -1151,21 +1151,21 @@ const startComponentTest = async () => {
           })
         } else {
           ElMessage.warning({
-            message: `测试失败。请查看下方步骤详情`,
+            message: '测试失败。请查看下方步骤详情',
             duration: 5000
           })
         }
       }
         
-        // 刷新版本列表（更新统计信息）
-        loadVersions(false) // ⭐ v4.19.0修复：后台刷新，不显示loading
-      } else {
+      // 刷新版本列表（更新统计信息）
+      loadVersions(false) // ⭐ v4.19.0修复：后台刷新，不显示loading
+    } else {
       // ⭐ 既没有 test_id 也没有 test_result（异常情况）
       testing.value = false
       ElMessage.error({
         message: response.message || '测试启动失败：未收到有效响应',
         duration: 5000
-        })
+      })
     }
   } catch (error) {
     console.error('组件测试失败:', error)
@@ -1173,9 +1173,9 @@ const startComponentTest = async () => {
   } finally {
     // 注意：如果使用轮询，testing 状态将由轮询回调控制
     if (!testStatus.value.testId) {
-    testing.value = false
+      testing.value = false
+    }
   }
-}
 }
 
 // ⭐ v4.7.4: HTTP 轮询获取测试进度（替代 WebSocket）

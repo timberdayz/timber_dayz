@@ -27,18 +27,18 @@ export const METRIC_FIELDS = [
 
 export function getStandardFieldsByDomain(domain) {
   switch (domain) {
-    case 'orders':
-      return ORDER_FIELDS
-    case 'products':
-      return PRODUCT_FIELDS
-    case 'traffic':
-      return TRAFFIC_FIELDS
-    case 'services':
-      return SERVICE_FIELDS
-    case 'metrics':
-      return METRIC_FIELDS
-    default:
-      return PRODUCT_FIELDS // 默认返回产品字段
+  case 'orders':
+    return ORDER_FIELDS
+  case 'products':
+    return PRODUCT_FIELDS
+  case 'traffic':
+    return TRAFFIC_FIELDS
+  case 'services':
+    return SERVICE_FIELDS
+  case 'metrics':
+    return METRIC_FIELDS
+  default:
+    return PRODUCT_FIELDS // 默认返回产品字段
   }
 }
 

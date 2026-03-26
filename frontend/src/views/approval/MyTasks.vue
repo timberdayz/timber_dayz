@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { List } from '@element-plus/icons-vue'
 
 const features = [
-  "待办任务列表",
-  "任务详情查看",
-  "审批/拒绝操作",
-  "审批意见填写",
-  "任务提醒"
+  '待办任务列表',
+  '任务详情查看',
+  '审批/拒绝操作',
+  '审批意见填写',
+  '任务提醒'
 ]
 </script>
 

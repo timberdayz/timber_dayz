@@ -196,127 +196,127 @@ v4.6.0新增：独立的数据同步系统
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { ElMessage } from "element-plus";
-import api from "@/api";
-import DeduplicationFieldsSelector from "@/components/DeduplicationFieldsSelector.vue";
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import api from '@/api'
+import DeduplicationFieldsSelector from '@/components/DeduplicationFieldsSelector.vue'
 
-const route = useRoute();
-const router = useRouter();
+const route = useRoute()
+const router = useRouter()
 
 // 状态
-const loadingPreview = ref(false);
-const savingTemplate = ref(false);
-const fileInfo = ref({});
-const headerRow = ref(0);
-const showPreview = ref(false);
-const previewData = ref([]);
-const headerColumns = ref([]);
-const sampleData = ref({});
-const deduplicationFields = ref([]); // v4.14.0新增：核心字段列表
-const deduplicationFieldsValid = ref(false); // v4.14.0新增：核心字段验证状态
+const loadingPreview = ref(false)
+const savingTemplate = ref(false)
+const fileInfo = ref({})
+const headerRow = ref(0)
+const showPreview = ref(false)
+const previewData = ref([])
+const headerColumns = ref([])
+const sampleData = ref({})
+const deduplicationFields = ref([]) // v4.14.0新增：核心字段列表
+const deduplicationFieldsValid = ref(false) // v4.14.0新增：核心字段验证状态
 
 // 计算属性
 const headerColumnsWithSamples = computed(() => {
   return headerColumns.value.map((field) => ({
     field,
-    sample: sampleData.value[field] || null,
-  }));
-});
+    sample: sampleData.value[field] || null
+  }))
+})
 
 // 加载文件信息
 const loadFileInfo = async () => {
-  const fileId = route.params.fileId;
+  const fileId = route.params.fileId
   if (!fileId) {
-    ElMessage.warning("文件ID不存在");
-    router.push("/data-sync/files");
-    return;
+    ElMessage.warning('文件ID不存在')
+    router.push('/data-sync/files')
+    return
   }
 
   try {
     // 修复：查询所有状态的文件（status: null），避免已同步/失败文件找不到
-    const data = await api.getDataSyncFiles({ limit: 500, status: null });
-    const file = data.files?.find((f) => f.id === parseInt(fileId));
+    const data = await api.getDataSyncFiles({ limit: 500, status: null })
+    const file = data.files?.find((f) => f.id === parseInt(fileId))
     if (file) {
-      fileInfo.value = file;
+      fileInfo.value = file
       // 如果有模板，使用模板的表头行
       if (
         file.has_template &&
         file.template_header_row !== undefined &&
         file.template_header_row !== null
       ) {
-        headerRow.value = file.template_header_row;
+        headerRow.value = file.template_header_row
       }
     } else {
-      ElMessage.error("文件不存在或未注册");
-      router.push("/data-sync/files");
+      ElMessage.error('文件不存在或未注册')
+      router.push('/data-sync/files')
     }
   } catch (error) {
-    ElMessage.error(error.message || "加载文件信息失败");
+    ElMessage.error(error.message || '加载文件信息失败')
   }
-};
+}
 
 // 预览数据
 const handlePreview = async () => {
-  const fileId = route.params.fileId;
+  const fileId = route.params.fileId
   if (!fileId) {
-    ElMessage.warning("文件ID不存在");
-    return;
+    ElMessage.warning('文件ID不存在')
+    return
   }
 
-  loadingPreview.value = true;
+  loadingPreview.value = true
   try {
     const data = await api.previewFileWithHeaderRow(
       parseInt(fileId),
       headerRow.value
-    );
-    previewData.value = data.preview_data || [];
-    headerColumns.value = data.header_columns || [];
-    sampleData.value = data.sample_data || {};
-    showPreview.value = true;
-    ElMessage.success("预览成功");
+    )
+    previewData.value = data.preview_data || []
+    headerColumns.value = data.header_columns || []
+    sampleData.value = data.sample_data || {}
+    showPreview.value = true
+    ElMessage.success('预览成功')
   } catch (error) {
-    ElMessage.error(error.message || "预览失败");
+    ElMessage.error(error.message || '预览失败')
   } finally {
-    loadingPreview.value = false;
+    loadingPreview.value = false
   }
-};
+}
 
 // 重新预览
 const handleRepreview = () => {
-  handlePreview();
-};
+  handlePreview()
+}
 
 // v4.14.0新增：处理核心字段变化
 const handleDeduplicationFieldsChange = (fields) => {
-  deduplicationFields.value = fields;
-};
+  deduplicationFields.value = fields
+}
 
 // v4.14.0新增：处理验证状态变化
 const handleValidationChange = (isValid) => {
-  deduplicationFieldsValid.value = isValid;
-};
+  deduplicationFieldsValid.value = isValid
+}
 
 // 保存模板
 const handleSaveTemplate = async () => {
   if (headerColumns.value.length === 0) {
-    ElMessage.warning("请先预览数据");
-    return;
+    ElMessage.warning('请先预览数据')
+    return
   }
 
   if (!fileInfo.value.platform || !fileInfo.value.domain) {
-    ElMessage.warning("文件信息不完整，无法保存模板");
-    return;
+    ElMessage.warning('文件信息不完整，无法保存模板')
+    return
   }
 
   // v4.14.0新增：验证核心字段必填
   if (!deduplicationFields.value || deduplicationFields.value.length === 0) {
-    ElMessage.warning("请至少选择1个核心字段用于数据去重");
-    return;
+    ElMessage.warning('请至少选择1个核心字段用于数据去重')
+    return
   }
 
-  savingTemplate.value = true;
+  savingTemplate.value = true
   try {
     const result = await api.saveTemplate({
       platform: fileInfo.value.platform,
@@ -328,31 +328,31 @@ const handleSaveTemplate = async () => {
       deduplicationFields: deduplicationFields.value, // v4.14.0新增：核心字段列表（必填）
       template_name: `${fileInfo.value.platform}_${fileInfo.value.domain}_${
         fileInfo.value.granularity
-      }_${fileInfo.value.sub_domain || "default"}_v1`,
-    });
+      }_${fileInfo.value.sub_domain || 'default'}_v1`
+    })
 
     // 检查响应结果
     if (result && (result.success || result.template_id)) {
-      ElMessage.success(result.message || "模板保存成功");
+      ElMessage.success(result.message || '模板保存成功')
       // 更新文件信息以刷新"可用模板"状态
-      await loadFileInfo();
+      await loadFileInfo()
     } else {
-      ElMessage.error(result?.message || "模板保存失败：未知错误");
+      ElMessage.error(result?.message || '模板保存失败：未知错误')
     }
   } catch (error) {
-    console.error("保存模板失败:", error);
+    console.error('保存模板失败:', error)
     // 显示详细错误信息
-    const errorMessage = error.message || error.detail || "保存模板失败";
-    ElMessage.error(`模板保存失败: ${errorMessage}`);
+    const errorMessage = error.message || error.detail || '保存模板失败'
+    ElMessage.error(`模板保存失败: ${errorMessage}`)
   } finally {
-    savingTemplate.value = false;
+    savingTemplate.value = false
   }
-};
+}
 
 // 初始化
 onMounted(() => {
-  loadFileInfo();
-});
+  loadFileInfo()
+})
 </script>
 
 <style scoped>
