@@ -216,6 +216,183 @@ async def test_postgresql_dashboard_service_shop_racing_preserves_target_fields(
     assert result[0]["achievement_rate"] == 83.33
 
 
+@pytest.mark.pg_only
+@pytest.mark.asyncio
+async def test_postgresql_dashboard_service_shop_racing_monthly_aggregates_shop_time_targets_without_duplicates(monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from testcontainers.postgres import PostgresContainer
+    from urllib.parse import urlparse, urlunparse
+
+    from backend.services.data_pipeline.refresh_runner import execute_sql_target
+
+    with PostgresContainer("postgres:15") as pg:
+        sync_url = pg.get_connection_url()
+        parsed = urlparse(sync_url)._replace(scheme="postgresql+asyncpg")
+        async_url = urlunparse(parsed)
+        engine = create_async_engine(async_url, echo=False)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS mart"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS a_class"))
+            await session.execute(text("CREATE SCHEMA IF NOT EXISTS api"))
+
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE mart.shop_day_kpi (
+                        period_date DATE,
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        gmv NUMERIC,
+                        order_count NUMERIC,
+                        avg_order_value NUMERIC,
+                        attach_rate NUMERIC,
+                        profit NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE mart.shop_week_kpi (
+                        period_week DATE,
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        gmv NUMERIC,
+                        order_count NUMERIC,
+                        avg_order_value NUMERIC,
+                        attach_rate NUMERIC,
+                        profit NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE mart.shop_month_kpi (
+                        period_month DATE,
+                        platform_code VARCHAR(32),
+                        shop_id VARCHAR(256),
+                        gmv NUMERIC,
+                        order_count NUMERIC,
+                        visitor_count NUMERIC,
+                        page_views NUMERIC,
+                        conversion_rate NUMERIC,
+                        avg_order_value NUMERIC,
+                        attach_rate NUMERIC,
+                        total_items NUMERIC,
+                        profit NUMERIC
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.sales_targets (
+                        id INTEGER PRIMARY KEY,
+                        target_name VARCHAR(255),
+                        target_type VARCHAR(64),
+                        period_start DATE,
+                        period_end DATE,
+                        target_amount NUMERIC,
+                        target_quantity INTEGER,
+                        achieved_amount NUMERIC,
+                        achieved_quantity INTEGER,
+                        achievement_rate NUMERIC,
+                        status VARCHAR(32)
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    CREATE TABLE a_class.target_breakdown (
+                        target_id INTEGER,
+                        breakdown_type VARCHAR(64),
+                        platform_code VARCHAR(64),
+                        shop_id VARCHAR(255),
+                        period_start DATE,
+                        period_end DATE,
+                        target_amount NUMERIC,
+                        target_quantity INTEGER,
+                        achievement_rate NUMERIC
+                    )
+                    """
+                )
+            )
+
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO mart.shop_month_kpi (
+                        period_month, platform_code, shop_id, gmv, order_count,
+                        visitor_count, page_views, conversion_rate, avg_order_value,
+                        attach_rate, total_items, profit
+                    ) VALUES (
+                        DATE '2025-09-01', 'shopee', 'shop-3c', 100, 10,
+                        0, 0, 0, 10, 1.2, 12, 30
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.sales_targets (
+                        id, target_name, target_type, period_start, period_end,
+                        target_amount, target_quantity, achieved_amount, achieved_quantity, achievement_rate, status
+                    ) VALUES (
+                        1, '2025-09 target', 'shop', DATE '2025-09-01', DATE '2025-09-30',
+                        300, 30, 0, 0, 0, 'active'
+                    )
+                    """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO a_class.target_breakdown (
+                        target_id, breakdown_type, platform_code, shop_id, period_start, period_end,
+                        target_amount, target_quantity, achievement_rate
+                    ) VALUES
+                        (1, 'shop_time', 'shopee', 'shop-3c', DATE '2025-09-01', DATE '2025-09-01', 100, 10, 0),
+                        (1, 'shop_time', 'shopee', 'shop-3c', DATE '2025-09-02', DATE '2025-09-02', 100, 10, 0),
+                        (1, 'shop_time', 'shopee', 'shop-3c', DATE '2025-09-03', DATE '2025-09-03', 100, 10, 0)
+                    """
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            await execute_sql_target(session, "api.business_overview_shop_racing_module")
+            await session.commit()
+
+        monkeypatch.setattr(
+            "backend.services.postgresql_dashboard_service.AsyncSessionLocal",
+            session_factory,
+        )
+        service = PostgresqlDashboardService()
+        result = await service.get_business_overview_shop_racing(
+            granularity="monthly",
+            target_date="2025-09-01",
+            group_by="shop",
+        )
+
+        assert len(result) == 1
+        assert result[0]["shop_id"] == "shop-3c"
+        assert result[0]["gmv"] == 100
+        assert result[0]["target_amount"] == 300
+        assert result[0]["achievement_rate"] == 33.33
+
+        await engine.dispose()
+
+
 @pytest.mark.asyncio
 async def test_postgresql_dashboard_service_operational_metrics_preserves_today_and_time_gap(monkeypatch):
     service = PostgresqlDashboardService()

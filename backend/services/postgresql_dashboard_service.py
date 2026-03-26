@@ -518,7 +518,7 @@ class PostgresqlDashboardService:
         period_key = _normalize_period_start(target_date)
         rows = await self._fetch_rows(
             """
-            SELECT granularity, period_key, platform_code, shop_id, gmv, order_count, avg_order_value, attach_rate, profit
+            SELECT granularity, period_key, platform_code, shop_id, gmv, order_count, avg_order_value, attach_rate, profit, target_amount, achievement_rate
             FROM api.business_overview_shop_racing_module
             WHERE granularity = :granularity
               AND period_key = :period_key

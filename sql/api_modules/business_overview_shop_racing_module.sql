@@ -43,21 +43,6 @@ WITH base AS (
         attach_rate,
         profit
     FROM mart.shop_month_kpi
-),
-targets AS (
-    SELECT
-        tb.platform_code,
-        COALESCE(tb.shop_id, '') AS shop_id,
-        tb.period_start,
-        tb.period_end,
-        COALESCE(SUM(tb.target_amount)::numeric, 0::numeric) AS target_amount,
-        COALESCE(MAX(tb.achievement_rate)::numeric, 0::numeric) AS achievement_rate
-    FROM a_class.target_breakdown tb
-    INNER JOIN a_class.sales_targets st
-        ON st.id = tb.target_id
-       AND st.status = 'active'
-    WHERE tb.breakdown_type IN ('shop', 'shop_time')
-    GROUP BY tb.platform_code, COALESCE(tb.shop_id, ''), tb.period_start, tb.period_end
 )
 SELECT
     b.granularity,
@@ -73,11 +58,40 @@ SELECT
     CASE
         WHEN COALESCE(t.target_amount, 0) > 0
         THEN ROUND(b.gmv::numeric * 100.0 / t.target_amount, 2)
-        ELSE COALESCE(t.achievement_rate, 0)::numeric
+        ELSE 0::numeric
     END AS achievement_rate
 FROM base b
-LEFT JOIN targets t
-    ON b.platform_code = t.platform_code
-   AND COALESCE(b.shop_id, '') = COALESCE(t.shop_id, '')
-   AND t.period_start <= b.period_end
-   AND t.period_end >= b.period_start;
+LEFT JOIN LATERAL (
+    WITH shop_target AS (
+        SELECT COALESCE(SUM(tb.target_amount)::numeric, 0::numeric) AS target_amount
+        FROM a_class.target_breakdown tb
+        INNER JOIN a_class.sales_targets st
+            ON st.id = tb.target_id
+           AND st.status = 'active'
+        WHERE tb.breakdown_type = 'shop'
+          AND tb.platform_code = b.platform_code
+          AND COALESCE(tb.shop_id, '') = COALESCE(b.shop_id, '')
+          AND tb.period_start <= b.period_end
+          AND tb.period_end >= b.period_start
+    ),
+    shop_time_target AS (
+        SELECT COALESCE(SUM(tb.target_amount)::numeric, 0::numeric) AS target_amount
+        FROM a_class.target_breakdown tb
+        INNER JOIN a_class.sales_targets st
+            ON st.id = tb.target_id
+           AND st.status = 'active'
+        WHERE tb.breakdown_type = 'shop_time'
+          AND tb.platform_code = b.platform_code
+          AND COALESCE(tb.shop_id, '') = COALESCE(b.shop_id, '')
+          AND tb.period_start <= b.period_end
+          AND tb.period_end >= b.period_start
+    )
+    SELECT
+        CASE
+            WHEN b.granularity = 'monthly' AND (SELECT target_amount FROM shop_target) > 0
+            THEN (SELECT target_amount FROM shop_target)
+            WHEN (SELECT target_amount FROM shop_time_target) > 0
+            THEN (SELECT target_amount FROM shop_time_target)
+            ELSE (SELECT target_amount FROM shop_target)
+        END AS target_amount
+) t ON TRUE;

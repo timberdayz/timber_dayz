@@ -2,31 +2,31 @@ CREATE SCHEMA IF NOT EXISTS semantic;
 
 CREATE OR REPLACE VIEW semantic.fact_orders_atomic AS
 WITH raw_orders AS (
-    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code, "店铺" AS source_store_label, "站点" AS source_site_label, "采购账号" AS source_account_label
+    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code
     FROM b_class.fact_shopee_orders_daily
     UNION ALL
-    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code, "店铺" AS source_store_label, "站点" AS source_site_label, "采购账号" AS source_account_label
+    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code
     FROM b_class.fact_shopee_orders_weekly
     UNION ALL
-    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code, "店铺" AS source_store_label, "站点" AS source_site_label, "采购账号" AS source_account_label
+    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code
     FROM b_class.fact_shopee_orders_monthly
     UNION ALL
-    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code, "店铺" AS source_store_label, "站点" AS source_site_label, "采购账号" AS source_account_label
+    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code
     FROM b_class.fact_tiktok_orders_daily
     UNION ALL
-    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code, "店铺" AS source_store_label, "站点" AS source_site_label, "采购账号" AS source_account_label
+    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code
     FROM b_class.fact_tiktok_orders_weekly
     UNION ALL
-    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code, "店铺" AS source_store_label, "站点" AS source_site_label, "采购账号" AS source_account_label
+    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code
     FROM b_class.fact_tiktok_orders_monthly
     UNION ALL
-    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code, "店铺" AS source_store_label, "站点" AS source_site_label, "采购账号" AS source_account_label
+    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code
     FROM b_class.fact_miaoshou_orders_daily
     UNION ALL
-    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code, "店铺" AS source_store_label, "站点" AS source_site_label, "采购账号" AS source_account_label
+    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code
     FROM b_class.fact_miaoshou_orders_weekly
     UNION ALL
-    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code, "店铺" AS source_store_label, "站点" AS source_site_label, "采购账号" AS source_account_label
+    SELECT platform_code, shop_id, data_domain, granularity, metric_date, period_start_date, period_end_date, period_start_time, period_end_time, raw_data, header_columns, data_hash, ingest_timestamp, currency_code
     FROM b_class.fact_miaoshou_orders_monthly
 ),
 mapped AS (
@@ -36,7 +36,6 @@ mapped AS (
         NULLIF(
             TRIM(
                 COALESCE(
-                    source_store_label,
                     raw_data->>'店铺',
                     raw_data->>'店铺名',
                     raw_data->>'店铺名称',
@@ -49,7 +48,6 @@ mapped AS (
         NULLIF(
             TRIM(
                 COALESCE(
-                    source_account_label,
                     raw_data->>'采购账号',
                     raw_data->>'账号',
                     raw_data->>'account',
@@ -58,7 +56,7 @@ mapped AS (
             ),
             ''
         ) AS source_account,
-        NULLIF(TRIM(COALESCE(source_site_label, raw_data->>'站点', raw_data->>'site')), '') AS source_site,
+        NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), '') AS source_site,
         data_domain,
         granularity,
         metric_date::date AS metric_date,
