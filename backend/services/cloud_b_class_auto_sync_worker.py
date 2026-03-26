@@ -30,7 +30,18 @@ class CloudBClassAutoSyncWorker:
             select(CloudBClassSyncTask)
             .where(
                 or_(
-                    CloudBClassSyncTask.status.in_(("pending", "retry_waiting")),
+                    CloudBClassSyncTask.status == "pending",
+                    (
+                        CloudBClassSyncTask.status == "retry_waiting"
+                    )
+                    & (
+                        CloudBClassSyncTask.next_retry_at.is_(None)
+                    )
+                    | (
+                        (CloudBClassSyncTask.status == "retry_waiting")
+                        & (CloudBClassSyncTask.next_retry_at.is_not(None))
+                        & (CloudBClassSyncTask.next_retry_at <= now)
+                    ),
                     (
                         CloudBClassSyncTask.status == "running"
                     )
