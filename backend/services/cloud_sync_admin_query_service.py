@@ -134,6 +134,24 @@ class CloudSyncAdminQueryService:
             rows.append(row.model_dump())
         return rows
 
+    async def list_events(self, *, limit: int = 20) -> list[dict]:
+        stmt = select(CloudBClassSyncTask).order_by(CloudBClassSyncTask.id.desc()).limit(limit)
+        tasks = (await self.db.execute(stmt)).scalars().all()
+        events = []
+        for task in tasks:
+            timestamp = task.last_attempt_finished_at or task.last_attempt_started_at or task.created_at
+            events.append(
+                {
+                    "title": f"{task.source_table_name} {task.status}",
+                    "status": task.status,
+                    "job_id": task.job_id,
+                    "source_table_name": task.source_table_name,
+                    "timestamp": _iso(timestamp),
+                    "last_error": task.last_error,
+                }
+            )
+        return events
+
     def _serialize_task(self, task: CloudBClassSyncTask) -> CloudSyncTaskRow:
         return CloudSyncTaskRow(
             job_id=task.job_id,

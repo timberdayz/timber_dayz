@@ -53,6 +53,15 @@ async def list_cloud_sync_tables(
     return await _maybe_await(service.list_table_states())
 
 
+@router.get("/api/cloud-sync/events")
+async def list_cloud_sync_events(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_query_service(db)
+    return await _maybe_await(service.list_events())
+
+
 @router.post("/api/cloud-sync/tasks/trigger")
 async def trigger_cloud_sync_task(
     payload: ManualTriggerRequest,

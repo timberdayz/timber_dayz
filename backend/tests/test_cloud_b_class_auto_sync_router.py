@@ -186,6 +186,31 @@ async def test_tables_endpoint_returns_table_rows(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_events_endpoint_returns_recent_items(monkeypatch):
+    from backend.routers import cloud_sync
+
+    class FakeQueryService:
+        async def list_events(self):
+            return [
+                {
+                    "title": "task queued",
+                    "status": "pending",
+                    "timestamp": "2026-03-26T10:00:00+00:00",
+                }
+            ]
+
+    monkeypatch.setattr(cloud_sync, "build_query_service", lambda *args, **kwargs: FakeQueryService())
+
+    app = _build_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.get("/api/cloud-sync/events")
+
+        assert response.status_code == 200
+        assert response.json()[0]["title"] == "task queued"
+
+
+@pytest.mark.asyncio
 async def test_table_action_endpoints(monkeypatch):
     from backend.routers import cloud_sync
 
