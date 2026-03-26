@@ -965,32 +965,77 @@ async def calculate_performance_scores(
             )
 
         # 3) 计算分数并排名
+        metrics_by_shop = {}
+        try:
+            metrics_by_shop = await load_shop_monthly_metrics(db, period)
+        except Exception as e:
+            logger.warning("缁╂晥璁＄畻 PostgreSQL 搴楅摵鏈堝害鎸囨爣鍔犺浇澶辫触: %s", e)
+
         calc_list = []
         for rec in source_rows.values():
+            platform_code = rec["platform_code"]
+            current_shop_id = rec["shop_id"]
+            key = f"{platform_code}|{current_shop_id}"
             target = float(rec["target"] or 0)
             achieved = float(rec["achieved"] or 0)
-            rate = (achieved / target) if target > 0 else 0.0
+            rate = (achieved / target) if target > 0 else _rate_percent_to_fraction(rec.get("achievement_rate"))
+            sales_rate = _normalize_rate_percent(rate)
             sales_score = _score_by_rate(config.sales_max_score, rate)
-            profit_score = _score_by_rate(config.profit_max_score, rate)
-            key_product_score = _score_by_rate(config.key_product_max_score, rate)
-            operation_score = _score_by_rate(config.operation_max_score, rate)
-            total_score = round(sales_score + profit_score + key_product_score + operation_score, 4)
+            profit_achieved = metrics_by_shop.get(key, {}).get("monthly_profit")
+
             calc_list.append(
                 {
-                    "platform_code": rec["platform_code"],
-                    "shop_id": rec["shop_id"],
-                    "rate": rate,
+                    "platform_code": platform_code,
+                    "shop_id": current_shop_id,
                     "sales_score": sales_score,
-                    "profit_score": profit_score,
-                    "key_product_score": key_product_score,
-                    "operation_score": operation_score,
-                    "total_score": total_score,
+                    "profit_score": 0.0,
+                    "key_product_score": 0.0,
+                    "operation_score": 0.0,
+                    "total_score": round(sales_score, 4),
+                    "rank": None,
+                    "performance_coefficient": 1.0,
+                    "score_details": {
+                        "sales": {
+                            "status": "calculated",
+                            "source": "target_breakdown" if tb_rows else "api.business_overview_shop_racing_module",
+                            "target": target,
+                            "achieved": achieved,
+                            "rate": sales_rate,
+                            "calculation": f"min(达成率 {sales_rate or 0:.2f}%, 100%) * 销售满分 {config.sales_max_score}",
+                        },
+                        "profit": {
+                            "status": "pending_design",
+                            "source": "api.business_overview_shop_racing_module",
+                            "target": None,
+                            "achieved": profit_achieved,
+                            "rate": None,
+                            "message": "毛利目标链路尚未设计完成，当前仅预留接口，不参与绩效得分。",
+                        },
+                        "key_product": {
+                            "status": "pending_design",
+                            "source": None,
+                            "target": None,
+                            "achieved": None,
+                            "rate": None,
+                            "message": "重点产品链路尚未设计完成，当前仅预留接口，不参与绩效得分。",
+                        },
+                        "operation": {
+                            "status": "pending_design",
+                            "source": None,
+                            "target": None,
+                            "achieved": None,
+                            "rate": None,
+                            "message": "运营得分链路尚未设计完成，当前仅预留接口，不参与绩效得分。",
+                        },
+                        "summary": {
+                            "status": "partial",
+                            "ready_dimensions": ["sales"],
+                            "pending_dimensions": ["profit", "key_product", "operation"],
+                            "message": "当前仅销售额维度完成独立计算，其余维度待业务链路设计完成后接入。",
+                        },
+                    },
                 }
             )
-        calc_list.sort(key=lambda x: x["total_score"], reverse=True)
-        for idx, row in enumerate(calc_list, start=1):
-            row["rank"] = idx
-            row["performance_coefficient"] = round(1.0 + ((row["total_score"] - 80.0) / 100.0), 4)
 
         # 4) upsert c_class.performance_scores
         upserts = 0
@@ -1004,12 +1049,7 @@ async def calculate_performance_scores(
                     )
                 )
             ).scalar_one_or_none()
-            details = {
-                "sales": {"rate": row["rate"]},
-                "profit": {"rate": row["rate"]},
-                "key_product": {"rate": row["rate"]},
-                "operation": {"rate": row["rate"]},
-            }
+            details = row["score_details"]
             if existed:
                 existed.total_score = row["total_score"]
                 existed.sales_score = row["sales_score"]
