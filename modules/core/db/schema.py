@@ -240,6 +240,7 @@ class AccountAlias(Base):
         # 查询索引
         Index('ix_account_alias_platform_domain', 'platform', 'data_domain'),
         Index('ix_account_alias_target', 'target_id', 'active'),
+        {"schema": "core"},
     )
 
 

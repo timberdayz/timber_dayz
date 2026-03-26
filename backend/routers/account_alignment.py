@@ -744,7 +744,7 @@ async def get_distinct_raw_stores(
                 MIN(o.order_date_local) as first_order,
                 MAX(o.order_date_local) as last_order
             FROM {source_table} o
-            LEFT JOIN account_aliases a ON (
+            LEFT JOIN core.account_aliases a ON (
                 a.platform = :platform
                 AND a.data_domain = :domain
                 AND a.account = o.account

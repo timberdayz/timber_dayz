@@ -48,7 +48,7 @@ def test_orders_atomic_sql_maps_real_paid_amount_and_store_name_fields():
 def test_orders_atomic_sql_resolves_shop_aliases_via_account_aliases():
     sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8", errors="replace")
 
-    assert "public.account_aliases" in sql_text
+    assert "core.account_aliases" in sql_text
     assert "core.platform_accounts" in sql_text
     assert "store_label_raw" in sql_text
     assert "target_type" in sql_text
@@ -101,7 +101,7 @@ async def _create_orders_b_class_tables(session) -> None:
     await session.execute(
         text(
             """
-            CREATE TABLE public.account_aliases (
+            CREATE TABLE core.account_aliases (
                 id SERIAL PRIMARY KEY,
                 platform VARCHAR(32) NOT NULL,
                 data_domain VARCHAR(64) NOT NULL,
@@ -147,7 +147,7 @@ async def test_orders_atomic_resolves_shop_alias_to_target_shop_id():
             await session.execute(
                 text(
                     """
-                    INSERT INTO public.account_aliases (
+                    INSERT INTO core.account_aliases (
                         platform, data_domain, account, site, store_label_raw,
                         target_type, target_id, confidence, active
                     ) VALUES (
@@ -226,7 +226,7 @@ async def test_orders_atomic_resolves_shop_alias_to_platform_account_when_alias_
             await session.execute(
                 text(
                     """
-                    INSERT INTO public.account_aliases (
+                    INSERT INTO core.account_aliases (
                         platform, data_domain, account, site, store_label_raw,
                         target_type, target_id, confidence, active
                     ) VALUES (

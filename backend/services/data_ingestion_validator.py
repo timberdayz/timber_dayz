@@ -96,7 +96,7 @@ class DataIngestionValidator:
             result = self.db.execute(text("""
                 SELECT EXISTS (
                     SELECT 1 FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
+                    WHERE table_schema = 'core' 
                     AND table_name = 'account_aliases'
                 )
             """))
@@ -156,7 +156,7 @@ class DataIngestionValidator:
             result = self.db.execute(text("""
                 SELECT column_name, data_type, is_nullable
                 FROM information_schema.columns 
-                WHERE table_schema = 'public' 
+                WHERE table_schema = 'core' 
                 AND table_name = 'account_aliases'
                 ORDER BY ordinal_position
             """))
@@ -212,4 +212,3 @@ def validate_data_ingestion_process(db: Session) -> IngestionValidationResult:
     """
     validator = DataIngestionValidator(db)
     return validator.validate_ingestion_process()
-

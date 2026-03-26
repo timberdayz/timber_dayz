@@ -289,7 +289,7 @@ alias_resolved AS (
                 THEN COALESCE(NULLIF(TRIM(pa.shop_id), ''), NULLIF(TRIM(pa.account_id), ''))
                 ELSE NULLIF(TRIM(aa.target_id), '')
             END AS resolved_shop_id
-        FROM public.account_aliases aa
+        FROM core.account_aliases aa
         LEFT JOIN core.platform_accounts pa
             ON LOWER(COALESCE(aa.target_type, '')) = 'account'
            AND LOWER(COALESCE(pa.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
