@@ -52,7 +52,10 @@ from backend.schemas.performance import (
     PerformanceScoreResponse,
 )
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
-from backend.services.postgresql_shop_metrics_service import load_shop_monthly_target_achievement
+from backend.services.postgresql_shop_metrics_service import (
+    load_shop_monthly_metrics,
+    load_shop_monthly_target_achievement,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/performance", tags=["绩效管理"])
@@ -379,6 +382,66 @@ def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, Any]:
     return {k: ("" if v is None else str(v)) for k, v in params.items()}
 
 
+def _normalize_rate_percent(raw_rate: Optional[Any]) -> Optional[float]:
+    if raw_rate is None:
+        return None
+    rate = float(raw_rate)
+    if 0 <= rate <= 1:
+        rate *= 100.0
+    return round(rate, 4)
+
+
+def _rate_percent_to_fraction(raw_rate: Optional[Any]) -> float:
+    if raw_rate is None:
+        return 0.0
+    rate = float(raw_rate)
+    if rate > 1:
+        rate /= 100.0
+    return max(0.0, rate)
+
+
+def _metric_status(details: Dict[str, Any], metric: str) -> Optional[str]:
+    return _score_details_field(details, metric, "status")
+
+
+def _metric_is_calculated(details: Dict[str, Any], metric: str) -> bool:
+    return _metric_status(details, metric) == "calculated"
+
+
+def _summary_is_complete(details: Dict[str, Any]) -> bool:
+    return _score_details_field(details, "summary", "status") == "complete"
+
+
+def _public_metric_score(score_value: Optional[float], details: Dict[str, Any], metric: str) -> Optional[float]:
+    return score_value if _metric_is_calculated(details, metric) else None
+
+
+def _public_total_score(total_score: Optional[float], details: Dict[str, Any]) -> Optional[float]:
+    return total_score if _summary_is_complete(details) else None
+
+
+def _public_rank(rank: Optional[int], details: Dict[str, Any]) -> Optional[int]:
+    return rank if _summary_is_complete(details) else None
+
+
+def _public_coefficient(coefficient: Optional[float], details: Dict[str, Any]) -> Optional[float]:
+    return coefficient if _summary_is_complete(details) else None
+
+
+def _build_metric_detail(details: Dict[str, Any], metric: str, score_value: Optional[float]) -> Dict[str, Any]:
+    metric_details = _score_details_field(details, metric) or {}
+    return {
+        "status": metric_details.get("status", "missing"),
+        "source": metric_details.get("source"),
+        "message": metric_details.get("message"),
+        "score": _public_metric_score(score_value, details, metric),
+        "target": metric_details.get("target"),
+        "achieved": metric_details.get("achieved"),
+        "rate": metric_details.get("rate"),
+        "calculation": metric_details.get("calculation"),
+    }
+
+
 async def invalidate_performance_related_caches(cache_service) -> None:
     await cache_service.invalidate("performance_scores")
     await cache_service.invalidate("performance_scores_shop")
@@ -644,19 +707,20 @@ async def list_performance_scores(
                     "sales_target": _score_details_field(details, "sales", "target"),
                     "sales_achieved": _score_details_field(details, "sales", "achieved"),
                     "sales_rate": _score_details_field(details, "sales", "rate"),
-                    "sales_score": getattr(s, "sales_score", None),
+                    "sales_score": _public_metric_score(getattr(s, "sales_score", None), details, "sales"),
                     "profit_target": _score_details_field(details, "profit", "target"),
                     "profit_achieved": _score_details_field(details, "profit", "achieved"),
                     "profit_rate": _score_details_field(details, "profit", "rate"),
-                    "profit_score": getattr(s, "profit_score", None),
+                    "profit_score": _public_metric_score(getattr(s, "profit_score", None), details, "profit"),
                     "key_product_target": _score_details_field(details, "key_product", "target"),
                     "key_product_achieved": _score_details_field(details, "key_product", "achieved"),
                     "key_product_rate": _score_details_field(details, "key_product", "rate"),
-                    "key_product_score": getattr(s, "key_product_score", None),
-                    "operation_score": getattr(s, "operation_score", None),
-                    "total_score": getattr(s, "total_score", None),
-                    "rank": getattr(s, "rank", None),
-                    "performance_coefficient": getattr(s, "performance_coefficient", None),
+                    "key_product_score": _public_metric_score(getattr(s, "key_product_score", None), details, "key_product"),
+                    "operation_score": _public_metric_score(getattr(s, "operation_score", None), details, "operation"),
+                    "total_score": _public_total_score(getattr(s, "total_score", None), details),
+                    "rank": _public_rank(getattr(s, "rank", None), details),
+                    "performance_coefficient": _public_coefficient(getattr(s, "performance_coefficient", None), details),
+                    "score_details": details,
                 }
         score_responses = []
         for s in paged_shops:
@@ -682,6 +746,7 @@ async def list_performance_scores(
                 "total_score": p["total_score"] if p else None,
                 "rank": p["rank"] if p else None,
                 "performance_coefficient": p["performance_coefficient"] if p else None,
+                "score_details": p["score_details"] if p else None,
             }
             score_responses.append(row)
 
@@ -762,9 +827,22 @@ async def get_shop_performance(
             )
         )).scalar_one_or_none()
         
-        score_data = PerformanceScoreResponse.model_validate(score).model_dump()
-        if shop:
-            score_data["shop_name"] = shop.shop_name
+        details = getattr(score, "score_details", None) or {}
+        score_data = {
+            "id": score.id,
+            "platform_code": score.platform_code,
+            "shop_id": score.shop_id,
+            "shop_name": shop.shop_name if shop else None,
+            "period": score.period,
+            "total_score": _public_total_score(score.total_score, details),
+            "rank": _public_rank(score.rank, details),
+            "performance_coefficient": _public_coefficient(score.performance_coefficient, details),
+            "sales_score": _build_metric_detail(details, "sales", score.sales_score),
+            "profit_score": _build_metric_detail(details, "profit", score.profit_score),
+            "key_product_score": _build_metric_detail(details, "key_product", score.key_product_score),
+            "operation_score": _build_metric_detail(details, "operation", score.operation_score),
+            "score_details": details,
+        }
 
         result = {"success": True, "data": score_data}
         if request and hasattr(request.app.state, "cache_service"):
