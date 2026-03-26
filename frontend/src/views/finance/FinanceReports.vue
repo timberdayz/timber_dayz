@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Document } from '@element-plus/icons-vue'
 
 const features = [
-  "损益表（P&L）",
-  "现金流量表",
-  "资产负债表",
-  "店铺级财务报表",
-  "SKU级利润分析"
+  '损益表（P&L）',
+  '现金流量表',
+  '资产负债表',
+  '店铺级财务报表',
+  'SKU级利润分析'
 ]
 </script>
 

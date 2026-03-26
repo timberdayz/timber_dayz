@@ -397,7 +397,7 @@ import {
   buildDateRangeFromPreset,
   getDatePresetLabel,
   getSelectedSubtypeDomains,
-  getSubtypeOptions,
+  getSubtypeOptions
 } from '@/constants/collection'
 
 // 状态
@@ -509,7 +509,7 @@ const createQuickTask = async () => {
   try {
     const dateRange = buildDateRangeFromPreset(quickForm.date_preset, {
       platform: quickForm.platform,
-      customRange: quickForm.customDateRange,
+      customRange: quickForm.customDateRange
     })
     if (!dateRange || !dateRange.start_date || !dateRange.end_date) {
       ElMessage.warning('请选择有效的日期范围')

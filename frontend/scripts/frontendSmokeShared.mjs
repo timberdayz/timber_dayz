@@ -26,7 +26,7 @@ export const SMOKE_ROUTES = [
   { name: 'InventoryDashboardV3', path: '/inventory-dashboard-v3', expectedTitle: '库存看板v3' },
   { name: 'InventoryHealth', path: '/inventory-health', expectedTitle: '库存健康仪表盘' },
   { name: 'ProductQuality', path: '/product-quality', expectedTitle: '产品质量仪表盘' },
-  { name: 'SalesAnalysis', path: '/sales-analysis', expectedTitle: '销售分析' },
+  { name: 'SalesAnalysis', path: '/sales-analysis', expectedTitle: '销售分析' }
 ]
 
 const ADMIN_PERMISSIONS = [
@@ -37,7 +37,7 @@ const ADMIN_PERMISSIONS = [
   'target:read',
   'user-management',
   'role-management',
-  'permission-management',
+  'permission-management'
 ]
 
 export function buildAuthStorageEntries(authPayload) {
@@ -56,11 +56,11 @@ export function buildAuthStorageEntries(authPayload) {
       name: userInfo.full_name || userInfo.username,
       email: userInfo.email,
       avatar: '',
-      roles,
+      roles
     }),
     activeRole,
     roles: JSON.stringify(roles),
-    permissions: JSON.stringify(ADMIN_PERMISSIONS),
+    permissions: JSON.stringify(ADMIN_PERMISSIONS)
   }
 }
 
@@ -72,13 +72,13 @@ export function summarizeSmokeResults(results) {
       consoleErrors: item.consoleErrors || [],
       pageErrors: item.pageErrors || [],
       requestFailures: item.requestFailures || [],
-      screenshotPath: item.screenshotPath || null,
+      screenshotPath: item.screenshotPath || null
     }))
 
   return {
     total: results.length,
     passed: results.length - failedRoutes.length,
     failed: failedRoutes.length,
-    failedRoutes,
+    failedRoutes
   }
 }

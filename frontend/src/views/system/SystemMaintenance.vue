@@ -118,159 +118,159 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
-import { Tools, Refresh, Delete, Search } from "@element-plus/icons-vue";
-import * as systemAPI from "@/api/system";
-import PageHeader from "@/components/common/PageHeader.vue";
+import { ref, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Tools, Refresh, Delete, Search } from '@element-plus/icons-vue'
+import * as systemAPI from '@/api/system'
+import PageHeader from '@/components/common/PageHeader.vue'
 
-const loading = ref(false);
+const loading = ref(false)
 const cacheStatus = ref({
   redis_connected: false,
   memory_used: 0,
-  key_count: 0,
-});
+  key_count: 0
+})
 const dataStatus = ref({
   system_logs_count: 0,
   task_logs_count: 0,
-  temp_files_size: 0,
-});
-const upgradeInfo = ref(null);
+  temp_files_size: 0
+})
+const upgradeInfo = ref(null)
 
 const formatFileSize = (bytes) => {
-  if (!bytes) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
-};
+  if (!bytes) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+}
 
 const refreshStatus = async () => {
   try {
-    loading.value = true;
-    await Promise.all([loadCacheStatus(), loadDataStatus()]);
-    ElMessage.success("状态刷新成功");
+    loading.value = true
+    await Promise.all([loadCacheStatus(), loadDataStatus()])
+    ElMessage.success('状态刷新成功')
   } catch (error) {
-    console.error("刷新状态失败:", error);
+    console.error('刷新状态失败:', error)
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const loadCacheStatus = async () => {
   try {
-    const response = await systemAPI.getCacheStatus();
+    const response = await systemAPI.getCacheStatus()
     if (response && response.data) {
       cacheStatus.value = {
         redis_connected: response.data.redis_connected || false,
         memory_used: response.data.memory_used || 0,
-        key_count: response.data.key_count || 0,
-      };
+        key_count: response.data.key_count || 0
+      }
     }
   } catch (error) {
-    console.error("加载缓存状态失败:", error);
+    console.error('加载缓存状态失败:', error)
   }
-};
+}
 
 const clearCache = async () => {
   try {
-    await ElMessageBox.confirm("确定要清理缓存吗？此操作不可逆。", "确认清理", {
-      type: "warning",
-    });
-    loading.value = true;
-    const response = await systemAPI.clearCache({ cache_type: "all" });
+    await ElMessageBox.confirm('确定要清理缓存吗？此操作不可逆。', '确认清理', {
+      type: 'warning'
+    })
+    loading.value = true
+    const response = await systemAPI.clearCache({ cache_type: 'all' })
     if (response && (response.success !== false)) {
-      ElMessage.success("缓存清理成功");
-      await loadCacheStatus();
+      ElMessage.success('缓存清理成功')
+      await loadCacheStatus()
     } else {
-      ElMessage.error(response?.message || "清理缓存失败");
+      ElMessage.error(response?.message || '清理缓存失败')
     }
   } catch (error) {
-    if (error !== "cancel") {
-      console.error("清理缓存失败:", error);
-      ElMessage.error(error.response?.data?.message || error.message || "清理缓存失败");
+    if (error !== 'cancel') {
+      console.error('清理缓存失败:', error)
+      ElMessage.error(error.response?.data?.message || error.message || '清理缓存失败')
     }
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const loadDataStatus = async () => {
   try {
-    const response = await systemAPI.getDataStatus();
+    const response = await systemAPI.getDataStatus()
     if (response && response.data) {
       dataStatus.value = {
         system_logs_count: response.data.system_logs_count || 0,
         task_logs_count: response.data.task_logs_count || 0,
-        temp_files_size: response.data.temp_files_size || 0,
-      };
+        temp_files_size: response.data.temp_files_size || 0
+      }
     }
   } catch (error) {
-    console.error("加载数据状态失败:", error);
+    console.error('加载数据状态失败:', error)
   }
-};
+}
 
 const cleanData = async () => {
   try {
     await ElMessageBox.confirm(
-      "确定要清理数据吗？此操作不可逆，将删除历史日志和临时文件。",
-      "确认清理",
+      '确定要清理数据吗？此操作不可逆，将删除历史日志和临时文件。',
+      '确认清理',
       {
-        type: "warning",
-        confirmButtonText: "确定清理",
-        cancelButtonText: "取消",
+        type: 'warning',
+        confirmButtonText: '确定清理',
+        cancelButtonText: '取消'
       }
-    );
-    loading.value = true;
+    )
+    loading.value = true
     const response = await systemAPI.cleanData({
       clean_system_logs: true,
       clean_task_logs: true,
       clean_temp_files: true,
-      retention_days: 30,
-    });
+      retention_days: 30
+    })
     if (response && (response.success !== false)) {
-      ElMessage.success("数据清理成功");
-      await loadDataStatus();
+      ElMessage.success('数据清理成功')
+      await loadDataStatus()
     } else {
-      ElMessage.error(response?.message || "清理数据失败");
+      ElMessage.error(response?.message || '清理数据失败')
     }
   } catch (error) {
-    if (error !== "cancel") {
-      console.error("清理数据失败:", error);
-      ElMessage.error(error.response?.data?.message || error.message || "清理数据失败");
+    if (error !== 'cancel') {
+      console.error('清理数据失败:', error)
+      ElMessage.error(error.response?.data?.message || error.message || '清理数据失败')
     }
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const checkUpgrade = async () => {
   try {
-    loading.value = true;
-    const response = await systemAPI.checkSystemUpgrade();
+    loading.value = true
+    const response = await systemAPI.checkSystemUpgrade()
     if (response && response.data) {
       upgradeInfo.value = {
         current_version: response.data.current_version,
         latest_version: response.data.latest_version,
-        release_notes: response.data.release_notes,
-      };
+        release_notes: response.data.release_notes
+      }
       if (response.data.has_update) {
-        ElMessage.info("发现新版本");
+        ElMessage.info('发现新版本')
       } else {
-        ElMessage.success("当前已是最新版本");
+        ElMessage.success('当前已是最新版本')
       }
     }
   } catch (error) {
-    console.error("检查更新失败:", error);
-    ElMessage.error(error.response?.data?.message || error.message || "检查更新失败");
+    console.error('检查更新失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '检查更新失败')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 onMounted(() => {
-  refreshStatus();
-});
+  refreshStatus()
+})
 </script>
 
 <style scoped>

@@ -47,7 +47,7 @@ export const useSalesTargetsStore = defineStore('salesTargets', () => {
       const payload = {
         shop_id: form.shop_id,
         year_month: form.year_month,
-        ...buildSalesTargetMutationPayload(form),
+        ...buildSalesTargetMutationPayload(form)
       }
       const response = await salesTargetsApi.create(payload)
       ElMessage.success('创建销售目标成功')
@@ -97,6 +97,6 @@ export const useSalesTargetsStore = defineStore('salesTargets', () => {
     fetchTargets,
     createTarget,
     updateTarget,
-    deleteTarget,
+    deleteTarget
   }
 })

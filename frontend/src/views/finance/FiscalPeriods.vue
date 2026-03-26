@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Calendar } from '@element-plus/icons-vue'
 
 const features = [
-  "会计期间设置",
-  "期间开账/关账",
-  "期间数据锁定",
-  "期初余额设置",
-  "期间报表查看"
+  '会计期间设置',
+  '期间开账/关账',
+  '期间数据锁定',
+  '期初余额设置',
+  '期间报表查看'
 ]
 </script>
 

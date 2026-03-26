@@ -1028,9 +1028,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, reactive } from "vue";
-import { useRoute } from "vue-router";
-import { ElMessage } from "element-plus";
+import { ref, computed, onMounted, reactive } from 'vue'
+import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import {
   UserFilled,
   Refresh,
@@ -1039,503 +1039,503 @@ import {
   User,
   Clock,
   CircleClose,
-  DataLine,
-} from "@element-plus/icons-vue";
-import api from "@/api";
+  DataLine
+} from '@element-plus/icons-vue'
+import api from '@/api'
 
 // ============================================================================
 // 响应式数据
 // ============================================================================
 
-const route = useRoute();
-const loading = ref(false);
-const validTabs = ["employees", "departments", "positions", "attendance", "salary"];
+const route = useRoute()
+const loading = ref(false)
+const validTabs = ['employees', 'departments', 'positions', 'attendance', 'salary']
 const activeTab = ref(
-  validTabs.includes(route.query.tab) ? route.query.tab : "employees"
-);
+  validTabs.includes(route.query.tab) ? route.query.tab : 'employees'
+)
 
 // 员工数据
-const employees = ref([]);
-const loadingEmployees = ref(false);
-const searchKeyword = ref("");
-const departmentFilter = ref("");
-const statusFilter = ref("");
+const employees = ref([])
+const loadingEmployees = ref(false)
+const searchKeyword = ref('')
+const departmentFilter = ref('')
+const statusFilter = ref('')
 const pagination = reactive({
   page: 1,
   pageSize: 20,
-  total: 0,
-});
+  total: 0
+})
 const employeeStats = reactive({
   active: 0,
   probation: 0,
   inactive: 0,
-  total: 0,
-});
+  total: 0
+})
 
 // 部门数据
-const departments = ref([]);
-const loadingDepartments = ref(false);
+const departments = ref([])
+const loadingDepartments = ref(false)
 
 // 职位数据
-const positions = ref([]);
-const loadingPositions = ref(false);
+const positions = ref([])
+const loadingPositions = ref(false)
 
 // 考勤数据
-const attendanceRecords = ref([]);
-const loadingAttendance = ref(false);
-const attendanceDateRange = ref([]);
+const attendanceRecords = ref([])
+const loadingAttendance = ref(false)
+const attendanceDateRange = ref([])
 
 // 薪资数据
-const payrollRecords = ref([]);
-const loadingPayroll = ref(false);
-const salaryMonth = ref("");
+const payrollRecords = ref([])
+const loadingPayroll = ref(false)
+const salaryMonth = ref('')
 
 // 弹窗控制
-const employeeDialogVisible = ref(false);
-const departmentDialogVisible = ref(false);
-const positionDialogVisible = ref(false);
-const employeeDetailVisible = ref(false);
+const employeeDialogVisible = ref(false)
+const departmentDialogVisible = ref(false)
+const positionDialogVisible = ref(false)
+const employeeDetailVisible = ref(false)
 
 // 编辑状态
-const editingEmployee = ref(null);
-const editingDepartment = ref(null);
-const editingPosition = ref(null);
-const selectedEmployee = ref(null);
+const editingEmployee = ref(null)
+const editingDepartment = ref(null)
+const editingPosition = ref(null)
+const selectedEmployee = ref(null)
 
 // 表单数据
 const employeeForm = reactive({
-  employee_code: "",
-  name: "",
-  gender: "",
-  birth_date: "",
-  phone: "",
-  email: "",
+  employee_code: '',
+  name: '',
+  gender: '',
+  birth_date: '',
+  phone: '',
+  email: '',
   department_id: null,
   position_id: null,
-  hire_date: "",
-  status: "active",
+  hire_date: '',
+  status: 'active',
   user_id: null,
-  id_number: "",
-  contract_type: "",
-  address: "",
-  emergency_contact: "",
-  emergency_phone: "",
-});
+  id_number: '',
+  contract_type: '',
+  address: '',
+  emergency_contact: '',
+  emergency_phone: ''
+})
 
 // 关联登录账号下拉选项（未关联用户 + 当前已关联用户）
-const linkedUserOptions = ref([]);
+const linkedUserOptions = ref([])
 
 const departmentForm = reactive({
-  department_code: "",
-  department_name: "",
+  department_code: '',
+  department_name: '',
   parent_id: null,
   level: 1,
-  description: "",
-});
+  description: ''
+})
 
 const positionForm = reactive({
-  position_code: "",
-  position_name: "",
+  position_code: '',
+  position_name: '',
   position_level: 1,
   department_id: null,
   min_salary: null,
   max_salary: null,
-  description: "",
-});
+  description: ''
+})
 
 // 保存状态
-const savingEmployee = ref(false);
-const savingDepartment = ref(false);
-const savingPosition = ref(false);
+const savingEmployee = ref(false)
+const savingDepartment = ref(false)
+const savingPosition = ref(false)
 
 // 表单引用
-const employeeFormRef = ref(null);
-const departmentFormRef = ref(null);
-const positionFormRef = ref(null);
+const employeeFormRef = ref(null)
+const departmentFormRef = ref(null)
+const positionFormRef = ref(null)
 
 // 表单验证规则
 const employeeRules = {
   employee_code: [
-    { required: false },
+    { required: false }
   ],
-  name: [{ required: true, message: "请输入姓名", trigger: "blur" }],
-  status: [{ required: true, message: "请选择状态", trigger: "change" }],
-};
+  name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
+  status: [{ required: true, message: '请选择状态', trigger: 'change' }]
+}
 
 const departmentRules = {
   department_code: [
-    { required: true, message: "请输入部门编码", trigger: "blur" },
+    { required: true, message: '请输入部门编码', trigger: 'blur' }
   ],
   department_name: [
-    { required: true, message: "请输入部门名称", trigger: "blur" },
-  ],
-};
+    { required: true, message: '请输入部门名称', trigger: 'blur' }
+  ]
+}
 
 const positionRules = {
   position_code: [
-    { required: true, message: "请输入职位编码", trigger: "blur" },
+    { required: true, message: '请输入职位编码', trigger: 'blur' }
   ],
   position_name: [
-    { required: true, message: "请输入职位名称", trigger: "blur" },
-  ],
-};
+    { required: true, message: '请输入职位名称', trigger: 'blur' }
+  ]
+}
 
 // 最近月份列表
 const recentMonths = computed(() => {
-  const months = [];
-  const now = new Date();
+  const months = []
+  const now = new Date()
   for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
     months.push(
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
-    );
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    )
   }
-  return months;
-});
+  return months
+})
 
 // ============================================================================
 // 生命周期
 // ============================================================================
 
 onMounted(async () => {
-  salaryMonth.value = recentMonths.value[0];
-  await loadInitialData();
-});
+  salaryMonth.value = recentMonths.value[0]
+  await loadInitialData()
+})
 
 // ============================================================================
 // 数据加载方法
 // ============================================================================
 
 const loadInitialData = async () => {
-  loading.value = true;
+  loading.value = true
   try {
-    await Promise.all([loadDepartments(), loadPositions(), loadEmployees()]);
+    await Promise.all([loadDepartments(), loadPositions(), loadEmployees()])
   } catch (error) {
-    console.error("加载初始数据失败:", error);
-    ElMessage.error("加载数据失败，请刷新重试");
+    console.error('加载初始数据失败:', error)
+    ElMessage.error('加载数据失败，请刷新重试')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const refreshData = () => {
-  loadInitialData();
-  ElMessage.success("数据已刷新");
-};
+  loadInitialData()
+  ElMessage.success('数据已刷新')
+}
 
 const handleTabChange = (tabName) => {
-  if (tabName === "attendance" && attendanceRecords.value.length === 0) {
-    loadAttendance();
-  } else if (tabName === "salary" && payrollRecords.value.length === 0) {
-    loadPayroll();
+  if (tabName === 'attendance' && attendanceRecords.value.length === 0) {
+    loadAttendance()
+  } else if (tabName === 'salary' && payrollRecords.value.length === 0) {
+    loadPayroll()
   }
-};
+}
 
 // 加载部门列表
 const loadDepartments = async () => {
-  loadingDepartments.value = true;
+  loadingDepartments.value = true
   try {
-    const data = await api.getHrDepartments({ status: "active" });
-    departments.value = data || [];
+    const data = await api.getHrDepartments({ status: 'active' })
+    departments.value = data || []
   } catch (error) {
-    console.error("加载部门列表失败:", error);
-    departments.value = [];
+    console.error('加载部门列表失败:', error)
+    departments.value = []
   } finally {
-    loadingDepartments.value = false;
+    loadingDepartments.value = false
   }
-};
+}
 
 // 加载职位列表
 const loadPositions = async () => {
-  loadingPositions.value = true;
+  loadingPositions.value = true
   try {
-    const data = await api.getHrPositions({ status: "active" });
-    positions.value = data || [];
+    const data = await api.getHrPositions({ status: 'active' })
+    positions.value = data || []
   } catch (error) {
-    console.error("加载职位列表失败:", error);
-    positions.value = [];
+    console.error('加载职位列表失败:', error)
+    positions.value = []
   } finally {
-    loadingPositions.value = false;
+    loadingPositions.value = false
   }
-};
+}
 
 // 加载员工列表
 const loadEmployees = async () => {
-  loadingEmployees.value = true;
+  loadingEmployees.value = true
   try {
     const params = {
       page: pagination.page,
-      page_size: pagination.pageSize,
-    };
-    if (searchKeyword.value) params.keyword = searchKeyword.value;
-    if (departmentFilter.value) params.department_id = departmentFilter.value;
-    if (statusFilter.value) params.status = statusFilter.value;
+      page_size: pagination.pageSize
+    }
+    if (searchKeyword.value) params.keyword = searchKeyword.value
+    if (departmentFilter.value) params.department_id = departmentFilter.value
+    if (statusFilter.value) params.status = statusFilter.value
 
-    const data = await api.getHrEmployees(params);
-    employees.value = data || [];
+    const data = await api.getHrEmployees(params)
+    employees.value = data || []
 
     // 加载员工统计
-    await loadEmployeeStats();
+    await loadEmployeeStats()
   } catch (error) {
-    console.error("加载员工列表失败:", error);
-    employees.value = [];
+    console.error('加载员工列表失败:', error)
+    employees.value = []
   } finally {
-    loadingEmployees.value = false;
+    loadingEmployees.value = false
   }
-};
+}
 
 // 加载员工统计
 const loadEmployeeStats = async () => {
   try {
     const [activeRes, probationRes, inactiveRes] = await Promise.all([
-      api.getHrEmployeeCount("active"),
-      api.getHrEmployeeCount("probation"),
-      api.getHrEmployeeCount("inactive"),
-    ]);
-    employeeStats.active = activeRes?.count || 0;
-    employeeStats.probation = probationRes?.count || 0;
-    employeeStats.inactive = inactiveRes?.count || 0;
+      api.getHrEmployeeCount('active'),
+      api.getHrEmployeeCount('probation'),
+      api.getHrEmployeeCount('inactive')
+    ])
+    employeeStats.active = activeRes?.count || 0
+    employeeStats.probation = probationRes?.count || 0
+    employeeStats.inactive = inactiveRes?.count || 0
     employeeStats.total =
-      employeeStats.active + employeeStats.probation + employeeStats.inactive;
+      employeeStats.active + employeeStats.probation + employeeStats.inactive
   } catch (error) {
-    console.error("加载员工统计失败:", error);
+    console.error('加载员工统计失败:', error)
   }
-};
+}
 
 // 加载考勤记录
 const loadAttendance = async () => {
-  loadingAttendance.value = true;
+  loadingAttendance.value = true
   try {
-    const params = {};
+    const params = {}
     if (attendanceDateRange.value && attendanceDateRange.value.length === 2) {
-      params.start_date = attendanceDateRange.value[0];
-      params.end_date = attendanceDateRange.value[1];
+      params.start_date = attendanceDateRange.value[0]
+      params.end_date = attendanceDateRange.value[1]
     }
-    const data = await api.getHrAttendance(params);
-    attendanceRecords.value = data || [];
+    const data = await api.getHrAttendance(params)
+    attendanceRecords.value = data || []
   } catch (error) {
-    console.error("加载考勤记录失败:", error);
-    attendanceRecords.value = [];
+    console.error('加载考勤记录失败:', error)
+    attendanceRecords.value = []
   } finally {
-    loadingAttendance.value = false;
+    loadingAttendance.value = false
   }
-};
+}
 
 // 加载工资单
 const loadPayroll = async () => {
-  loadingPayroll.value = true;
+  loadingPayroll.value = true
   try {
     const data = await api.getHrPayrollRecords({
-      year_month: salaryMonth.value,
-    });
-    payrollRecords.value = data || [];
+      year_month: salaryMonth.value
+    })
+    payrollRecords.value = data || []
   } catch (error) {
-    console.error("加载工资单失败:", error);
-    payrollRecords.value = [];
+    console.error('加载工资单失败:', error)
+    payrollRecords.value = []
   } finally {
-    loadingPayroll.value = false;
+    loadingPayroll.value = false
   }
-};
+}
 
 // ============================================================================
 // 员工操作方法
 // ============================================================================
 
 const showEmployeeDialog = async (employee = null) => {
-  editingEmployee.value = employee;
+  editingEmployee.value = employee
   if (employee) {
     Object.assign(employeeForm, {
       employee_code: employee.employee_code,
       name: employee.name,
-      gender: employee.gender || "",
-      birth_date: employee.birth_date || "",
-      phone: employee.phone || "",
-      email: employee.email || "",
+      gender: employee.gender || '',
+      birth_date: employee.birth_date || '',
+      phone: employee.phone || '',
+      email: employee.email || '',
       department_id: employee.department_id,
       position_id: employee.position_id,
-      hire_date: employee.hire_date || "",
+      hire_date: employee.hire_date || '',
       status: employee.status,
       user_id: employee.user_id ?? null,
-      id_number: employee.id_number || "",
-      contract_type: employee.contract_type || "",
-      address: employee.address || "",
-      emergency_contact: employee.emergency_contact || "",
-      emergency_phone: employee.emergency_phone || "",
-    });
+      id_number: employee.id_number || '',
+      contract_type: employee.contract_type || '',
+      address: employee.address || '',
+      emergency_contact: employee.emergency_contact || '',
+      emergency_phone: employee.emergency_phone || ''
+    })
   } else {
     Object.assign(employeeForm, {
-      employee_code: "",
-      name: "",
-      gender: "",
-      birth_date: "",
-      phone: "",
-      email: "",
+      employee_code: '',
+      name: '',
+      gender: '',
+      birth_date: '',
+      phone: '',
+      email: '',
       department_id: null,
       position_id: null,
-      hire_date: "",
-      status: "active",
+      hire_date: '',
+      status: 'active',
       user_id: null,
-      id_number: "",
-      contract_type: "",
-      address: "",
-      emergency_contact: "",
-      emergency_phone: "",
-    });
+      id_number: '',
+      contract_type: '',
+      address: '',
+      emergency_contact: '',
+      emergency_phone: ''
+    })
   }
   try {
-    const res = await usersApi.getUnlinkedUsers();
-    const list = res?.data ?? res;
-    const arr = Array.isArray(list) ? list : (list ?? []);
-    linkedUserOptions.value = [...arr];
+    const res = await usersApi.getUnlinkedUsers()
+    const list = res?.data ?? res
+    const arr = Array.isArray(list) ? list : (list ?? [])
+    linkedUserOptions.value = [...arr]
     if (employee?.user_id && employee?.username) {
-      const has = linkedUserOptions.value.some((u) => u.id === employee.user_id);
+      const has = linkedUserOptions.value.some((u) => u.id === employee.user_id)
       if (!has) {
-        linkedUserOptions.value = [{ id: employee.user_id, username: employee.username, email: '' }, ...linkedUserOptions.value];
+        linkedUserOptions.value = [{ id: employee.user_id, username: employee.username, email: '' }, ...linkedUserOptions.value]
       }
     }
   } catch (e) {
-    linkedUserOptions.value = [];
+    linkedUserOptions.value = []
     if (employee?.user_id && employee?.username) {
-      linkedUserOptions.value = [{ id: employee.user_id, username: employee.username, email: '' }];
+      linkedUserOptions.value = [{ id: employee.user_id, username: employee.username, email: '' }]
     }
   }
-  employeeDialogVisible.value = true;
-};
+  employeeDialogVisible.value = true
+}
 
 /** 提交前清洗：空字符串转 null，避免后端 422；创建时不传员工编号由后端自动生成 */
 function cleanEmployeePayload(isCreate) {
-  const raw = { ...employeeForm };
-  const cleaned = {};
+  const raw = { ...employeeForm }
+  const cleaned = {}
   for (const [k, v] of Object.entries(raw)) {
-    if (v === "" || v === undefined) {
-      cleaned[k] = null;
-    } else if (typeof v === "string" && v.trim() === "") {
-      cleaned[k] = null;
+    if (v === '' || v === undefined) {
+      cleaned[k] = null
+    } else if (typeof v === 'string' && v.trim() === '') {
+      cleaned[k] = null
     } else {
-      cleaned[k] = v;
+      cleaned[k] = v
     }
   }
   if (isCreate) {
-    cleaned.employee_code = null;
+    cleaned.employee_code = null
   }
-  return cleaned;
+  return cleaned
 }
 
 const saveEmployee = async () => {
-  if (!employeeFormRef.value) return;
-  await employeeFormRef.value.validate();
+  if (!employeeFormRef.value) return
+  await employeeFormRef.value.validate()
 
-  savingEmployee.value = true;
+  savingEmployee.value = true
   try {
     if (editingEmployee.value) {
-      const payload = cleanEmployeePayload(false);
-      await api.updateHrEmployee(payload.employee_code, payload);
-      ElMessage.success("员工信息已更新");
+      const payload = cleanEmployeePayload(false)
+      await api.updateHrEmployee(payload.employee_code, payload)
+      ElMessage.success('员工信息已更新')
     } else {
-      const payload = cleanEmployeePayload(true);
-      await api.createHrEmployee(payload);
-      ElMessage.success("员工已添加");
+      const payload = cleanEmployeePayload(true)
+      await api.createHrEmployee(payload)
+      ElMessage.success('员工已添加')
     }
-    employeeDialogVisible.value = false;
-    await loadEmployees();
+    employeeDialogVisible.value = false
+    await loadEmployees()
   } catch (error) {
-    console.error("保存员工失败:", error);
-    ElMessage.error(error.response?.data?.detail || error.message || "保存失败");
+    console.error('保存员工失败:', error)
+    ElMessage.error(error.response?.data?.detail || error.message || '保存失败')
   } finally {
-    savingEmployee.value = false;
+    savingEmployee.value = false
   }
-};
+}
 
 const deleteEmployee = async (employee) => {
   try {
-    await api.deleteHrEmployee(employee.employee_code);
-    ElMessage.success("员工已删除");
-    await loadEmployees();
+    await api.deleteHrEmployee(employee.employee_code)
+    ElMessage.success('员工已删除')
+    await loadEmployees()
   } catch (error) {
-    console.error("删除员工失败:", error);
-    ElMessage.error(error.message || "删除失败");
+    console.error('删除员工失败:', error)
+    ElMessage.error(error.message || '删除失败')
   }
-};
+}
 
 const viewEmployeeDetail = (employee) => {
-  selectedEmployee.value = employee;
-  employeeDetailVisible.value = true;
-};
+  selectedEmployee.value = employee
+  employeeDetailVisible.value = true
+}
 
 const resetFilters = () => {
-  searchKeyword.value = "";
-  departmentFilter.value = "";
-  statusFilter.value = "";
-  pagination.page = 1;
-  loadEmployees();
-};
+  searchKeyword.value = ''
+  departmentFilter.value = ''
+  statusFilter.value = ''
+  pagination.page = 1
+  loadEmployees()
+}
 
 // ============================================================================
 // 部门操作方法
 // ============================================================================
 
 const showDepartmentDialog = (department = null) => {
-  editingDepartment.value = department;
+  editingDepartment.value = department
   if (department) {
     Object.assign(departmentForm, {
       department_code: department.department_code,
       department_name: department.department_name,
       parent_id: department.parent_id,
       level: department.level,
-      description: department.description || "",
-    });
+      description: department.description || ''
+    })
   } else {
     Object.assign(departmentForm, {
-      department_code: "",
-      department_name: "",
+      department_code: '',
+      department_name: '',
       parent_id: null,
       level: 1,
-      description: "",
-    });
+      description: ''
+    })
   }
-  departmentDialogVisible.value = true;
-};
+  departmentDialogVisible.value = true
+}
 
 const saveDepartment = async () => {
-  if (!departmentFormRef.value) return;
-  await departmentFormRef.value.validate();
+  if (!departmentFormRef.value) return
+  await departmentFormRef.value.validate()
 
-  savingDepartment.value = true;
+  savingDepartment.value = true
   try {
     if (editingDepartment.value) {
-      await api.updateHrDepartment(editingDepartment.value.id, departmentForm);
-      ElMessage.success("部门信息已更新");
+      await api.updateHrDepartment(editingDepartment.value.id, departmentForm)
+      ElMessage.success('部门信息已更新')
     } else {
-      await api.createHrDepartment(departmentForm);
-      ElMessage.success("部门已添加");
+      await api.createHrDepartment(departmentForm)
+      ElMessage.success('部门已添加')
     }
-    departmentDialogVisible.value = false;
-    await loadDepartments();
+    departmentDialogVisible.value = false
+    await loadDepartments()
   } catch (error) {
-    console.error("保存部门失败:", error);
-    ElMessage.error(error.message || "保存失败");
+    console.error('保存部门失败:', error)
+    ElMessage.error(error.message || '保存失败')
   } finally {
-    savingDepartment.value = false;
+    savingDepartment.value = false
   }
-};
+}
 
 const deleteDepartment = async (department) => {
   try {
-    await api.deleteHrDepartment(department.id);
-    ElMessage.success("部门已删除");
-    await loadDepartments();
+    await api.deleteHrDepartment(department.id)
+    ElMessage.success('部门已删除')
+    await loadDepartments()
   } catch (error) {
-    console.error("删除部门失败:", error);
-    ElMessage.error(error.message || "删除失败");
+    console.error('删除部门失败:', error)
+    ElMessage.error(error.message || '删除失败')
   }
-};
+}
 
 // ============================================================================
 // 职位操作方法
 // ============================================================================
 
 const showPositionDialog = (position = null) => {
-  editingPosition.value = position;
+  editingPosition.value = position
   if (position) {
     Object.assign(positionForm, {
       position_code: position.position_code,
@@ -1544,184 +1544,184 @@ const showPositionDialog = (position = null) => {
       department_id: position.department_id,
       min_salary: position.min_salary,
       max_salary: position.max_salary,
-      description: position.description || "",
-    });
+      description: position.description || ''
+    })
   } else {
     Object.assign(positionForm, {
-      position_code: "",
-      position_name: "",
+      position_code: '',
+      position_name: '',
       position_level: 1,
       department_id: null,
       min_salary: null,
       max_salary: null,
-      description: "",
-    });
+      description: ''
+    })
   }
-  positionDialogVisible.value = true;
-};
+  positionDialogVisible.value = true
+}
 
 const savePosition = async () => {
-  if (!positionFormRef.value) return;
-  await positionFormRef.value.validate();
+  if (!positionFormRef.value) return
+  await positionFormRef.value.validate()
 
-  savingPosition.value = true;
+  savingPosition.value = true
   try {
     if (editingPosition.value) {
-      await api.updateHrPosition(editingPosition.value.id, positionForm);
-      ElMessage.success("职位信息已更新");
+      await api.updateHrPosition(editingPosition.value.id, positionForm)
+      ElMessage.success('职位信息已更新')
     } else {
-      await api.createHrPosition(positionForm);
-      ElMessage.success("职位已添加");
+      await api.createHrPosition(positionForm)
+      ElMessage.success('职位已添加')
     }
-    positionDialogVisible.value = false;
-    await loadPositions();
+    positionDialogVisible.value = false
+    await loadPositions()
   } catch (error) {
-    console.error("保存职位失败:", error);
-    ElMessage.error(error.message || "保存失败");
+    console.error('保存职位失败:', error)
+    ElMessage.error(error.message || '保存失败')
   } finally {
-    savingPosition.value = false;
+    savingPosition.value = false
   }
-};
+}
 
 const deletePosition = async (position) => {
   try {
-    await api.deleteHrPosition(position.id);
-    ElMessage.success("职位已删除");
-    await loadPositions();
+    await api.deleteHrPosition(position.id)
+    ElMessage.success('职位已删除')
+    await loadPositions()
   } catch (error) {
-    console.error("删除职位失败:", error);
-    ElMessage.error(error.message || "删除失败");
+    console.error('删除职位失败:', error)
+    ElMessage.error(error.message || '删除失败')
   }
-};
+}
 
 // ============================================================================
 // 考勤操作方法
 // ============================================================================
 
 const showAttendanceDialog = () => {
-  ElMessage.info("考勤记录添加功能开发中...");
-};
+  ElMessage.info('考勤记录添加功能开发中...')
+}
 
 // ============================================================================
 // 辅助方法
 // ============================================================================
 
 const getDepartmentName = (departmentId) => {
-  if (!departmentId) return "-";
-  const dept = departments.value.find((d) => d.id === departmentId);
-  return dept?.department_name || "-";
-};
+  if (!departmentId) return '-'
+  const dept = departments.value.find((d) => d.id === departmentId)
+  return dept?.department_name || '-'
+}
 
 const getPositionName = (positionId) => {
-  if (!positionId) return "-";
-  const pos = positions.value.find((p) => p.id === positionId);
-  return pos?.position_name || "-";
-};
+  if (!positionId) return '-'
+  const pos = positions.value.find((p) => p.id === positionId)
+  return pos?.position_name || '-'
+}
 
 const getEmployeeName = (employeeCode) => {
-  const emp = employees.value.find((e) => e.employee_code === employeeCode);
-  return emp?.name || employeeCode;
-};
+  const emp = employees.value.find((e) => e.employee_code === employeeCode)
+  return emp?.name || employeeCode
+}
 
 const getStatusType = (status) => {
-  const map = { active: "success", inactive: "danger", probation: "warning" };
-  return map[status] || "info";
-};
+  const map = { active: 'success', inactive: 'danger', probation: 'warning' }
+  return map[status] || 'info'
+}
 
 const getStatusLabel = (status) => {
-  const map = { active: "在职", inactive: "已离职", probation: "试用期" };
-  return map[status] || status;
-};
+  const map = { active: '在职', inactive: '已离职', probation: '试用期' }
+  return map[status] || status
+}
 
 const getGenderLabel = (gender) => {
-  const map = { male: "男", female: "女", other: "其他" };
-  return map[gender] || "-";
-};
+  const map = { male: '男', female: '女', other: '其他' }
+  return map[gender] || '-'
+}
 
 const getContractTypeLabel = (type) => {
   const map = {
-    fixed_term: "固定期限",
-    indefinite: "无固定期限",
-    internship: "实习",
-    part_time: "兼职",
-  };
-  return map[type] || "-";
-};
+    fixed_term: '固定期限',
+    indefinite: '无固定期限',
+    internship: '实习',
+    part_time: '兼职'
+  }
+  return map[type] || '-'
+}
 
 const getAttendanceStatusType = (status) => {
   const map = {
-    normal: "success",
-    late: "warning",
-    early_leave: "warning",
-    absent: "danger",
-    leave: "info",
-  };
-  return map[status] || "info";
-};
+    normal: 'success',
+    late: 'warning',
+    early_leave: 'warning',
+    absent: 'danger',
+    leave: 'info'
+  }
+  return map[status] || 'info'
+}
 
 const getAttendanceStatusLabel = (status) => {
   const map = {
-    normal: "正常",
-    late: "迟到",
-    early_leave: "早退",
-    absent: "缺勤",
-    leave: "请假",
-  };
-  return map[status] || status;
-};
+    normal: '正常',
+    late: '迟到',
+    early_leave: '早退',
+    absent: '缺勤',
+    leave: '请假'
+  }
+  return map[status] || status
+}
 
 const getPayrollStatusType = (status) => {
-  const map = { draft: "info", confirmed: "warning", paid: "success" };
-  return map[status] || "info";
-};
+  const map = { draft: 'info', confirmed: 'warning', paid: 'success' }
+  return map[status] || 'info'
+}
 
 const getPayrollStatusLabel = (status) => {
-  const map = { draft: "草稿", confirmed: "已确认", paid: "已发放" };
-  return map[status] || status;
-};
+  const map = { draft: '草稿', confirmed: '已确认', paid: '已发放' }
+  return map[status] || status
+}
 
 const formatMoney = (value) => {
-  if (value === null || value === undefined) return "-";
-  return `¥${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
+  if (value === null || value === undefined) return '-'
+  return `¥${Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
 
 const formatTime = (datetime) => {
-  if (!datetime) return "-";
+  if (!datetime) return '-'
   try {
-    const date = new Date(datetime);
-    return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+    const date = new Date(datetime)
+    return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
   } catch {
-    return "-";
+    return '-'
   }
-};
+}
 
 const getPayrollSummary = (param) => {
-  const { columns } = param;
-  const sums = [];
+  const { columns } = param
+  const sums = []
   columns.forEach((column, index) => {
     if (index === 0) {
-      sums[index] = "合计";
+      sums[index] = '合计'
     } else if (
       [
-        "base_salary",
-        "performance_salary",
-        "allowances",
-        "gross_salary",
-        "total_deductions",
-        "net_salary",
+        'base_salary',
+        'performance_salary',
+        'allowances',
+        'gross_salary',
+        'total_deductions',
+        'net_salary'
       ].includes(column.property)
     ) {
       const values = payrollRecords.value.map(
-        (item) => Number(item[column.property]) || 0,
-      );
-      const sum = values.reduce((acc, val) => acc + val, 0);
-      sums[index] = formatMoney(sum);
+        (item) => Number(item[column.property]) || 0
+      )
+      const sum = values.reduce((acc, val) => acc + val, 0)
+      sums[index] = formatMoney(sum)
     } else {
-      sums[index] = "";
+      sums[index] = ''
     }
-  });
-  return sums;
-};
+  })
+  return sums
+}
 </script>
 
 <style scoped>

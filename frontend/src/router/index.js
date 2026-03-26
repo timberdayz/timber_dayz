@@ -306,7 +306,7 @@ const routes = [
       roles: ['admin']  // ✅ 仅管理员可访问
     }
   },
-// ⚠️ v4.12.0移除：数据浏览器功能已移除
+  // ⚠️ v4.12.0移除：数据浏览器功能已移除
   // {
   //   path: '/data-browser',
   //   name: 'DataBrowser',
@@ -1076,19 +1076,19 @@ router.beforeEach((to, from, next) => {
   
   // ✅ 权限检查（管理员跳过，符合RBAC标准）
   if (!isAdmin && to.meta.permission) {
-      if (!userStore.hasPermission(to.meta.permission)) {
+    if (!userStore.hasPermission(to.meta.permission)) {
       console.warn(`[权限拦截] 缺少权限: ${to.meta.permission}`)
       next('/business-overview')
-        return
+      return
     }
   }
   
   // ✅ 角色权限检查（所有人都需要检查角色）
   if (to.meta.roles && to.meta.roles.length > 0) {
-      if (!userStore.hasRole(to.meta.roles)) {
+    if (!userStore.hasRole(to.meta.roles)) {
       console.warn(`[权限拦截] 角色不匹配，需要: ${to.meta.roles.join(', ')}`)
-        next('/business-overview')
-        return
+      next('/business-overview')
+      return
     }
   }
   

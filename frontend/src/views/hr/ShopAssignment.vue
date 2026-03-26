@@ -358,7 +358,7 @@ const form = ref({
   platform_code: '',
   shop_id: '',
   commission_ratio: 0.05,
-  role: 'supervisor',
+  role: 'supervisor'
 })
 
 const shopsFiltered = computed(() => {
@@ -381,7 +381,7 @@ const configTableRows = computed(() => {
         _person: p,
         _isAddRow: false,
         _isFirst: isFirst,
-        _shopKey: shopKey,
+        _shopKey: shopKey
       })
       isFirst = false
     }
@@ -391,7 +391,7 @@ const configTableRows = computed(() => {
       _person: null,
       _isAddRow: true,
       _isFirst: isFirst,
-      _shopKey: shopKey,
+      _shopKey: shopKey
     })
   }
   return rows
@@ -462,7 +462,7 @@ async function handleSaveRow(row) {
       id: p.id,
       employee_code: p.employee_code,
       role: p.role === 'supervisor' ? 'supervisor' : 'operator',
-      commission_ratio: p.commission_ratio ?? 0,
+      commission_ratio: p.commission_ratio ?? 0
     }))
     const assRes = await api.getHrEmployeeShopAssignments({ year_month: configMonth.value, platform_code: shop.platform_code, shop_id: shop.shop_id, page: 1, page_size: 100 })
     const assData = assRes?.data ?? assRes ?? {}
@@ -570,7 +570,7 @@ async function loadConfigData() {
       api.getHrEmployeeShopAssignments({ year_month: configMonth.value, page: 1, page_size: 1000 }),
       api.getTargetShops(),
       api.getHrShopProfitStatistics({ month: configMonth.value }).catch(() => ({ data: [] })),
-      api.getHrShopCommissionConfig().catch(() => ({ data: [] })),
+      api.getHrShopCommissionConfig().catch(() => ({ data: [] }))
     ])
     const shopData = shopsRes?.data ?? shopsRes ?? []
     const shopList = Array.isArray(shopData) ? shopData : (shopData?.data ?? shopData ?? [])
@@ -593,7 +593,7 @@ async function loadConfigData() {
         saving: false,
         monthly_sales: 0,
         monthly_profit: 0,
-        achievement_rate: null,
+        achievement_rate: null
       }
     }
     for (const st of statsList) {
@@ -622,7 +622,7 @@ async function loadConfigData() {
           saving: false,
           monthly_sales: 0,
           monthly_profit: 0,
-          achievement_rate: null,
+          achievement_rate: null
         }
       }
       const p = {
@@ -630,7 +630,7 @@ async function loadConfigData() {
         employee_code: a.employee_code,
         employee_name: a.employee_name,
         role: a.role === 'supervisor' ? 'supervisor' : 'operator',
-        commission_ratio: a.commission_ratio ?? 0,
+        commission_ratio: a.commission_ratio ?? 0
       }
       byShop[key].assignments.push(p)
     }
@@ -670,7 +670,7 @@ async function loadAnnualData() {
     annualData.value = {
       year: data.year ?? year,
       by_employee: data.by_employee ?? [],
-      by_shop: data.by_shop ?? [],
+      by_shop: data.by_shop ?? []
     }
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '加载年度统计失败')
@@ -709,7 +709,7 @@ async function submitForm() {
       employee_code: form.value.employee_code,
       employee_name: emp?.name,
       role: form.value.role || 'operator',
-      commission_ratio: form.value.commission_ratio ?? 0,
+      commission_ratio: form.value.commission_ratio ?? 0
     }
     if ((shop.assignments || []).some((x) => x.employee_code === p.employee_code && x.role === p.role)) {
       ElMessage.warning('该人员已添加')
@@ -727,7 +727,7 @@ async function submitForm() {
         platform_code: form.value.platform_code,
         shop_id: form.value.shop_id,
         commission_ratio: form.value.commission_ratio ?? 0,
-        role: form.value.role || 'operator',
+        role: form.value.role || 'operator'
       })
       ElMessage.success('已新增')
       dialogVisible.value = false

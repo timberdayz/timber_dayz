@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Document } from '@element-plus/icons-vue'
 
 const features = [
-  "申请列表",
-  "申请进度跟踪",
-  "申请撤回",
-  "申请详情",
-  "审批历史"
+  '申请列表',
+  '申请进度跟踪',
+  '申请撤回',
+  '申请详情',
+  '审批历史'
 ]
 </script>
 

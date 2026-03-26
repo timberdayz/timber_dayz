@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
 
 const features = [
-  "问题分类",
-  "问题搜索",
-  "解决方案",
-  "反馈建议",
-  "联系支持"
+  '问题分类',
+  '问题搜索',
+  '解决方案',
+  '反馈建议',
+  '联系支持'
 ]
 </script>
 
