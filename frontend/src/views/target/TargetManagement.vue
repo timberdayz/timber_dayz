@@ -433,6 +433,79 @@
           />
         </el-card>
       </el-tab-pane>
+
+      <!-- 运营目标 -->
+      <el-tab-pane label="运营目标" name="operation">
+        <div class="list-action-bar">
+          <el-button
+            type="primary"
+            :icon="Plus"
+            @click="handleCreate"
+            v-if="hasPermission('target:create')"
+          >
+            创建目标
+          </el-button>
+          <el-button :icon="Refresh" @click="loadTargets">刷新</el-button>
+          <div class="erp-flex-spacer"></div>
+          <el-select
+            v-model="filters.status"
+            placeholder="状态"
+            clearable
+            size="small"
+            class="erp-w-120"
+            @change="loadTargets"
+          >
+            <el-option label="全部状态" value="" />
+            <el-option label="进行中" value="active" />
+            <el-option label="已完成" value="completed" />
+            <el-option label="已取消" value="cancelled" />
+          </el-select>
+        </div>
+        <el-card>
+          <el-table
+            :data="targets.data"
+            stripe
+            v-loading="targets.loading"
+            class="erp-table"
+          >
+            <el-table-column prop="target_name" label="目标名称" width="220" fixed="left" show-overflow-tooltip />
+            <el-table-column prop="metric_name" label="运营指标" width="160" />
+            <el-table-column prop="metric_direction" label="方向" width="140" />
+            <el-table-column prop="target_value" label="目标值" width="120" align="right" />
+            <el-table-column prop="max_score" label="满分" width="100" align="right" />
+            <el-table-column prop="penalty_enabled" label="罚分" width="100">
+              <template #default="{ row }">{{ row.penalty_enabled ? '启用' : '关闭' }}</template>
+            </el-table-column>
+            <el-table-column prop="manual_score_enabled" label="人工评分" width="100">
+              <template #default="{ row }">{{ row.manual_score_enabled ? '是' : '否' }}</template>
+            </el-table-column>
+            <el-table-column prop="period_start" label="开始时间" width="120" />
+            <el-table-column prop="period_end" label="结束时间" width="120" />
+            <el-table-column prop="status" label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="getStatusTagType(row.status)" size="small">{{ getStatusLabel(row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="180" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" @click="handleView(row)">查看</el-button>
+                <el-button size="small" type="primary" @click="handleEdit(row)" v-if="hasPermission('target:update')">编辑</el-button>
+                <el-button size="small" type="danger" @click="handleDelete(row)" v-if="hasPermission('target:delete')">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            v-model:current-page="targets.page"
+            v-model:page-size="targets.pageSize"
+            :total="targets.total"
+            :page-sizes="[10, 20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            class="target-pagination"
+            @size-change="loadTargets"
+            @current-change="loadTargets"
+          />
+        </el-card>
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 创建/编辑对话框 -->
@@ -445,7 +518,7 @@
       <el-form
         ref="formRef"
         :model="form"
-        :rules="formRules"
+        :rules="effectiveFormRules"
         label-width="120px"
       >
         <el-form-item
@@ -509,6 +582,45 @@
             class="erp-w-full"
           />
         </el-form-item>
+        <el-form-item v-if="form.target_type === 'shop'" label="目标毛利" prop="target_profit_amount">
+          <el-input-number v-model="form.target_profit_amount" :min="0" :precision="2" class="erp-w-full" />
+        </el-form-item>
+        <template v-if="form.target_type === 'operation'">
+          <el-form-item label="运营指标" prop="metric_code">
+            <el-select v-model="form.metric_code" class="erp-w-full" @change="handleOperationMetricChange">
+              <el-option v-for="item in operationMetricOptions" :key="item.code" :label="item.label" :value="item.code" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="指标方向">
+            <el-input :model-value="selectedOperationMetric?.direction || form.metric_direction || '-'" readonly />
+          </el-form-item>
+          <el-form-item label="目标值" prop="target_value">
+            <el-input-number v-model="form.target_value" :min="0" :precision="2" class="erp-w-full" />
+          </el-form-item>
+          <el-form-item label="满分" prop="max_score">
+            <el-input-number v-model="form.max_score" :min="0" :precision="2" class="erp-w-full" />
+          </el-form-item>
+          <el-form-item label="启用罚分">
+            <el-switch v-model="form.penalty_enabled" />
+          </el-form-item>
+          <template v-if="form.penalty_enabled">
+            <el-form-item label="罚分阈值">
+              <el-input-number v-model="form.penalty_threshold" :precision="2" class="erp-w-full" />
+            </el-form-item>
+            <el-form-item label="每单位罚分">
+              <el-input-number v-model="form.penalty_per_unit" :precision="2" class="erp-w-full" />
+            </el-form-item>
+            <el-form-item label="最大罚分">
+              <el-input-number v-model="form.penalty_max" :precision="2" class="erp-w-full" />
+            </el-form-item>
+          </template>
+          <el-form-item label="人工评分">
+            <el-switch v-model="form.manual_score_enabled" />
+          </el-form-item>
+          <el-form-item v-if="form.manual_score_enabled" label="人工打分值">
+            <el-input-number v-model="form.manual_score_value" :min="0" :precision="2" class="erp-w-full" />
+          </el-form-item>
+        </template>
 
         <!-- 目标拆分 -->
         <el-divider>目标拆分</el-divider>
@@ -1001,95 +1113,95 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Download, Loading } from '@element-plus/icons-vue'
-import { useUserStore } from '@/stores/user'
-import api from '@/api'
-import { handleApiError } from '@/utils/errorHandler'
-import PageHeader from '@/components/common/PageHeader.vue'
+import { ref, reactive, onMounted, computed, watch } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { Plus, Refresh, Download, Loading } from "@element-plus/icons-vue";
+import { useUserStore } from "@/stores/user";
+import api from "@/api";
+import { handleApiError } from "@/utils/errorHandler";
+import PageHeader from "@/components/common/PageHeader.vue";
 import {
   formatCurrency,
   formatNumber,
   formatPercent,
-  formatInteger
-} from '@/utils/dataFormatter'
+  formatInteger,
+} from "@/utils/dataFormatter";
 
-const userStore = useUserStore()
+const userStore = useUserStore();
 
 // 页面 Tab：常规月度 | 产品 | 战役
-const activeTab = ref('shop')
+const activeTab = ref("shop");
 const monthStr = ref(
   (() => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-  })()
-)
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  })(),
+);
 const monthlyTarget = reactive({
   target: null,
   breakdowns: [],
   loading: false,
-  error: null
-})
-const monthlyCalendarDate = ref(new Date())
-const shopDailyCalendarDate = ref(new Date())
-const selectedShopKey = ref('')
+  error: null,
+});
+const monthlyCalendarDate = ref(new Date());
+const shopDailyCalendarDate = ref(new Date());
+const selectedShopKey = ref("");
 const shopOptionsForMonthly = computed(() => {
-  const shopRows = monthlyTarget.breakdowns.filter((b) => b.breakdown_type === 'shop')
+  const shopRows = monthlyTarget.breakdowns.filter((b) => b.breakdown_type === "shop");
   if (shopRows.length) {
     return shopRows.map((b) => ({
       platform_code: b.platform_code,
       shop_id: b.shop_id,
-      shop_name: b.shop_name || `${b.platform_code}-${b.shop_id}`
-    }))
+      shop_name: b.shop_name || `${b.platform_code}-${b.shop_id}`,
+    }));
   }
-  return availableShops.value
-})
+  return availableShops.value;
+});
 const shopBreakdownFromMonthly = computed(() =>
-  monthlyTarget.breakdowns.filter((b) => b.breakdown_type === 'shop')
-)
+  monthlyTarget.breakdowns.filter((b) => b.breakdown_type === "shop"),
+);
 const timeBreakdownMonthly = computed(() =>
-  monthlyTarget.breakdowns.filter((b) => b.breakdown_type === 'time')
-)
+  monthlyTarget.breakdowns.filter((b) => b.breakdown_type === "time"),
+);
 const shopTimeBreakdownMonthly = computed(() =>
-  monthlyTarget.breakdowns.filter((b) => b.breakdown_type === 'shop_time')
-)
+  monthlyTarget.breakdowns.filter((b) => b.breakdown_type === "shop_time"),
+);
 
 // 角色代码规范化（中文 → 英文）
 const normalizeRoleCode = (role) => {
-  if (!role) return ''
+  if (!role) return "";
   const map = {
-    管理员: 'admin',
-    主管: 'manager',
-    经理: 'manager',
-    操作员: 'operator',
-    运营: 'operator',
-    财务: 'finance'
-  }
-  return map[role] || role
-}
+    管理员: "admin",
+    主管: "manager",
+    经理: "manager",
+    操作员: "operator",
+    运营: "operator",
+    财务: "finance",
+  };
+  return map[role] || role;
+};
 
 // 权限检查 - 使用系统统一权限架构（基于 activeRole + permissions）
 const hasPermission = (permission) => {
   // 获取当前激活的角色（与 SimpleAccountSwitcher 保持一致）
-  const activeRole = normalizeRoleCode(localStorage.getItem('activeRole'))
+  const activeRole = normalizeRoleCode(localStorage.getItem("activeRole"));
 
   // 管理员拥有所有目标管理权限
-  if (activeRole === 'admin') return true
+  if (activeRole === "admin") return true;
 
   // 检查用户是否拥有管理员角色（即使不是当前激活角色）
-  const userRoles = (userStore.roles || []).map(normalizeRoleCode)
-  if (userRoles.includes('admin')) return true
+  const userRoles = (userStore.roles || []).map(normalizeRoleCode);
+  if (userRoles.includes("admin")) return true;
 
   // 主管角色的目标管理权限（根据权限矩阵，主管不能访问目标管理）
   // 但保留只读权限作为防御性设计
-  if (activeRole === 'manager') {
-    return ['target:read', 'target:export'].includes(permission)
+  if (activeRole === "manager") {
+    return ["target:read", "target:export"].includes(permission);
   }
 
   // 其他角色只有只读权限
-  return permission === 'target:read'
-}
+  return permission === "target:read";
+};
 
 // 目标列表数据
 const targets = reactive({
@@ -1098,904 +1210,1039 @@ const targets = reactive({
   page: 1,
   pageSize: 20,
   loading: false,
-  error: null // 错误状态：区分"无数据"和"加载失败"
-})
+  error: null, // 错误状态：区分"无数据"和"加载失败"
+});
 
 const filters = reactive({
-  targetType: '',
-  status: ''
-})
+  targetType: "",
+  status: "",
+});
 
 // 按月份加载常规月度目标（常规月度 Tab）
 const loadMonthlyTarget = async () => {
-  monthlyTarget.error = null
-  if (activeTab.value !== 'shop' || !monthStr.value) return
-  monthlyTarget.loading = true
+  monthlyTarget.error = null;
+  if (activeTab.value !== "shop" || !monthStr.value) return;
+  monthlyTarget.loading = true;
   try {
-    const response = await api.getTargetByMonth(monthStr.value, 'shop')
-    const data = response?.data ?? response
-    monthlyTarget.target = data?.target ?? null
-    monthlyTarget.breakdowns = Array.isArray(data?.breakdowns) ? data.breakdowns : []
+    const response = await api.getTargetByMonth(monthStr.value, "shop");
+    const data = response?.data ?? response;
+    monthlyTarget.target = data?.target ?? null;
+    monthlyTarget.breakdowns = Array.isArray(data?.breakdowns) ? data.breakdowns : [];
     if (monthlyTarget.target?.period_start) {
-      monthlyCalendarDate.value = new Date(monthlyTarget.target.period_start + 'T12:00:00')
-      shopDailyCalendarDate.value = new Date(monthlyTarget.target.period_start + 'T12:00:00')
+      monthlyCalendarDate.value = new Date(monthlyTarget.target.period_start + "T12:00:00");
+      shopDailyCalendarDate.value = new Date(monthlyTarget.target.period_start + "T12:00:00");
     }
-    syncWeekdayRatiosFromMonthly()
+    syncWeekdayRatiosFromMonthly();
   } catch (e) {
-    const err = handleApiError(e, { showMessage: false, logError: true })
-    monthlyTarget.error = err?.message || '加载失败'
-    monthlyTarget.target = null
-    monthlyTarget.breakdowns = []
+    const err = handleApiError(e, { showMessage: false, logError: true });
+    monthlyTarget.error = err?.message || "加载失败";
+    monthlyTarget.target = null;
+    monthlyTarget.breakdowns = [];
   } finally {
-    monthlyTarget.loading = false
+    monthlyTarget.loading = false;
   }
-}
+};
 
 const syncWeekdayRatiosFromMonthly = () => {
-  clearWeekdayRatiosLocks()
-  const ratios = monthlyTarget.target?.weekday_ratios
-  if (ratios && typeof ratios === 'object') {
+  clearWeekdayRatiosLocks();
+  const ratios = monthlyTarget.target?.weekday_ratios;
+  if (ratios && typeof ratios === "object") {
     Object.keys(weekdayLabels).forEach((k) => {
-      const v = Number(ratios[k])
-      if (!Number.isNaN(v)) weekdayRatiosForm[k] = Math.round(v * 100) / 100
-    })
+      const v = Number(ratios[k]);
+      if (!Number.isNaN(v)) weekdayRatiosForm[k] = Math.round(v * 100) / 100;
+    });
   } else {
     Object.keys(weekdayLabels).forEach((k) => {
-      weekdayRatiosForm[k] = defaultRatio
-    })
+      weekdayRatiosForm[k] = defaultRatio;
+    });
   }
-}
+};
 
 const openCreateForMonth = async () => {
-  form.id = null
-  form.target_name = ''
-  form.target_type = 'shop'
-  form.targetMonth = monthStr.value
-  form.dateRange = []
-  form.target_amount = 0
-  form.target_quantity = 0
-  shopBreakdown.value = []
-  timeBreakdown.value = []
-  breakdownTab.value = 'shop'
-  if (availableShops.value.length === 0) await loadTargetShops()
-  applyShopBreakdownFromAvailableShops()
-  dialogVisible.value = true
-}
+  form.id = null;
+  form.target_name = "";
+  form.target_type = "shop";
+  form.targetMonth = monthStr.value;
+  form.dateRange = [];
+  form.target_amount = 0;
+  form.target_quantity = 0;
+  form.target_profit_amount = 0;
+  form.metric_code = "";
+  form.metric_name = "";
+  form.metric_direction = "";
+  form.target_value = 0;
+  form.max_score = 20;
+  form.penalty_enabled = false;
+  form.penalty_threshold = 0;
+  form.penalty_per_unit = 0;
+  form.penalty_max = 0;
+  form.manual_score_enabled = false;
+  form.manual_score_value = 0;
+  shopBreakdown.value = [];
+  timeBreakdown.value = [];
+  breakdownTab.value = "shop";
+  if (availableShops.value.length === 0) await loadTargetShops();
+  applyShopBreakdownFromAvailableShops();
+  dialogVisible.value = true;
+};
 
 const applyShopBreakdownFromAvailableShops = () => {
-  const list = availableShops.value || []
-  const n = Math.max(1, list.length)
-  const pct = Math.round((100 / n) * 100) / 100
+  const list = availableShops.value || [];
+  const n = Math.max(1, list.length);
+  const pct = Math.round((100 / n) * 100) / 100;
   shopBreakdown.value = list.map((s, i) => ({
     shopKey: getShopKey(s),
     platform_code: s.platform_code,
     shop_id: s.shop_id,
-    shop_name: s.shop_name || '',
+    shop_name: s.shop_name || "",
     target_amount: 0,
     target_quantity: 0,
     target_percent: i === list.length - 1 ? 100 - pct * (list.length - 1) : pct,
-    percentLocked: false
-  }))
-}
+    percentLocked: false,
+  }));
+};
 
 const saveWeekdayRatiosMonthly = async () => {
-  if (!monthlyTarget.target?.id) return
+  if (!monthlyTarget.target?.id) return;
   if (Math.abs(weekdayRatiosSum.value - 1) > 0.001) {
-    ElMessage.warning('比例合计须为 100%')
-    return
+    ElMessage.warning("比例合计须为 100%");
+    return;
   }
-  weekdayRatiosSaving.value = true
+  weekdayRatiosSaving.value = true;
   try {
-    const weekday_ratios = {}
+    const weekday_ratios = {};
     Object.keys(weekdayLabels).forEach((k) => {
-      weekday_ratios[k] = Number(weekdayRatiosForm[k]) || 0
-    })
-    await api.updateTarget(monthlyTarget.target.id, { weekday_ratios })
-    ElMessage.success('比例已保存')
-    await loadMonthlyTarget()
+      weekday_ratios[k] = Number(weekdayRatiosForm[k]) || 0;
+    });
+    await api.updateTarget(monthlyTarget.target.id, { weekday_ratios });
+    ElMessage.success("比例已保存");
+    await loadMonthlyTarget();
   } catch (error) {
-    handleApiError(error, { showMessage: true, logError: true })
+    handleApiError(error, { showMessage: true, logError: true });
   } finally {
-    weekdayRatiosSaving.value = false
+    weekdayRatiosSaving.value = false;
   }
-}
+};
 
 const handleGenerateDailyMonthly = async () => {
-  if (!monthlyTarget.target?.id) return
-  dailyGenerateLoading.value = true
+  if (!monthlyTarget.target?.id) return;
+  dailyGenerateLoading.value = true;
   try {
-    const weekday_ratios = {}
+    const weekday_ratios = {};
     Object.keys(weekdayLabels).forEach((k) => {
-      weekday_ratios[k] = Number(weekdayRatiosForm[k]) || 0
-    })
+      weekday_ratios[k] = Number(weekdayRatiosForm[k]) || 0;
+    });
     const res = await api.generateDailyBreakdown(monthlyTarget.target.id, {
       overwrite: true,
-      weekday_ratios: Object.keys(weekday_ratios).length ? weekday_ratios : undefined
-    })
-    const msg = res?.message || (res?.data ? `已生成 ${res.data?.created ?? 0} 条日度分解` : '生成成功')
-    ElMessage.success(msg)
-    await loadMonthlyTarget()
+      weekday_ratios: Object.keys(weekday_ratios).length ? weekday_ratios : undefined,
+    });
+    const msg = res?.message || (res?.data ? `已生成 ${res.data?.created ?? 0} 条日度分解` : "生成成功");
+    ElMessage.success(msg);
+    await loadMonthlyTarget();
   } catch (error) {
-    handleApiError(error, { showMessage: true, logError: true })
+    handleApiError(error, { showMessage: true, logError: true });
   } finally {
-    dailyGenerateLoading.value = false
+    dailyGenerateLoading.value = false;
   }
-}
+};
 
 const isDayInMonthlyRange = (dayStr) => {
-  if (!monthlyTarget.target?.period_start || !monthlyTarget.target?.period_end) return false
-  return dayStr >= monthlyTarget.target.period_start && dayStr <= monthlyTarget.target.period_end
-}
+  if (!monthlyTarget.target?.period_start || !monthlyTarget.target?.period_end) return false;
+  return dayStr >= monthlyTarget.target.period_start && dayStr <= monthlyTarget.target.period_end;
+};
 
 const getMonthlyDailyBreakdown = (dayStr) => {
-  const list = timeBreakdownMonthly.value
+  const list = timeBreakdownMonthly.value;
   return list.find(
     (b) =>
-      (b.period_start === dayStr || b.period_end === dayStr) && b.period_start === b.period_end
-  ) || null
-}
+      (b.period_start === dayStr || b.period_end === dayStr) && b.period_start === b.period_end,
+  ) || null;
+};
 
 const handleMonthlyDayClick = (dayStr) => {
-  const b = getMonthlyDailyBreakdown(dayStr)
-  dayEditForm.date = dayStr
-  dayEditForm.target_amount = b ? Number(b.target_amount) || 0 : 0
-  dayEditForm.target_quantity = b ? Number(b.target_quantity) || 0 : 0
-  dayEditForm.breakdown_id = b?.id ?? null
-  dayEditForm.editMode = 'time'
-  dayEditForm.platform_code = ''
-  dayEditForm.shop_id = ''
-  dayEditVisible.value = true
-}
+  const b = getMonthlyDailyBreakdown(dayStr);
+  dayEditForm.date = dayStr;
+  dayEditForm.target_amount = b ? Number(b.target_amount) || 0 : 0;
+  dayEditForm.target_quantity = b ? Number(b.target_quantity) || 0 : 0;
+  dayEditForm.breakdown_id = b?.id ?? null;
+  dayEditForm.editMode = "time";
+  dayEditForm.platform_code = "";
+  dayEditForm.shop_id = "";
+  dayEditVisible.value = true;
+};
 
 const onSelectedShopChange = () => {
   if (monthlyTarget.target?.period_start) {
-    shopDailyCalendarDate.value = new Date(monthlyTarget.target.period_start + 'T12:00:00')
+    shopDailyCalendarDate.value = new Date(monthlyTarget.target.period_start + "T12:00:00");
   }
-}
+};
 
 const getShopDailyBreakdown = (dayStr) => {
-  if (!selectedShopKey.value) return null
-  const [platform_code, shop_id] = selectedShopKey.value.split('|')
+  if (!selectedShopKey.value) return null;
+  const [platform_code, shop_id] = selectedShopKey.value.split("|");
   const list = shopTimeBreakdownMonthly.value.filter(
-    (b) => b.platform_code === platform_code && String(b.shop_id) === String(shop_id)
-  )
+    (b) => b.platform_code === platform_code && String(b.shop_id) === String(shop_id),
+  );
   return list.find(
     (b) =>
-      (b.period_start === dayStr || b.period_end === dayStr) && b.period_start === b.period_end
-  ) || null
-}
+      (b.period_start === dayStr || b.period_end === dayStr) && b.period_start === b.period_end,
+  ) || null;
+};
 
 const handleShopDayClick = (dayStr) => {
-  const b = getShopDailyBreakdown(dayStr)
-  dayEditForm.date = dayStr
-  dayEditForm.target_amount = b ? Number(b.target_amount) || 0 : 0
-  dayEditForm.target_quantity = b ? Number(b.target_quantity) || 0 : 0
-  dayEditForm.breakdown_id = b?.id ?? null
-  dayEditForm.editMode = 'shop_time'
-  const [platform_code, shop_id] = selectedShopKey.value.split('|')
-  dayEditForm.platform_code = platform_code || ''
-  dayEditForm.shop_id = shop_id || ''
-  dayEditVisible.value = true
-}
+  const b = getShopDailyBreakdown(dayStr);
+  dayEditForm.date = dayStr;
+  dayEditForm.target_amount = b ? Number(b.target_amount) || 0 : 0;
+  dayEditForm.target_quantity = b ? Number(b.target_quantity) || 0 : 0;
+  dayEditForm.breakdown_id = b?.id ?? null;
+  dayEditForm.editMode = "shop_time";
+  const [platform_code, shop_id] = selectedShopKey.value.split("|");
+  dayEditForm.platform_code = platform_code || "";
+  dayEditForm.shop_id = shop_id || "";
+  dayEditVisible.value = true;
+};
 
 // 目标详情
 const targetDetail = reactive({
   data: null,
-  loading: false
-})
+  loading: false,
+});
 
 // 对话框状态
-const dialogVisible = ref(false)
-const detailVisible = ref(false)
-const submitting = ref(false)
-const formRef = ref(null)
-const breakdownTab = ref('shop')
+const dialogVisible = ref(false);
+const detailVisible = ref(false);
+const submitting = ref(false);
+const formRef = ref(null);
+const breakdownTab = ref("shop");
 // 日度分解：日历显示的月份、一键生成 loading、单日编辑
-const detailCalendarDate = ref(new Date())
-const dailyGenerateLoading = ref(false)
-const dayEditVisible = ref(false)
-const dayEditSaving = ref(false)
+const detailCalendarDate = ref(new Date());
+const dailyGenerateLoading = ref(false);
+const dayEditVisible = ref(false);
+const dayEditSaving = ref(false);
 const dayEditForm = reactive({
-  date: '',
+  date: "",
   target_amount: 0,
   target_quantity: 0,
   breakdown_id: null,
-  editMode: 'time',
-  platform_code: '',
-  shop_id: ''
-})
+  editMode: "time",
+  platform_code: "",
+  shop_id: "",
+});
 // 周一到周日拆分比例（1=周一…7=周日，和为 1）；与店铺拆分一致：仅重算未锁定的项
-const weekdayLabels = { '1': '周一', '2': '周二', '3': '周三', '4': '周四', '5': '周五', '6': '周六', '7': '周日' }
-const defaultRatio = Math.round((1 / 7) * 100) / 100
+const weekdayLabels = { "1": "周一", "2": "周二", "3": "周三", "4": "周四", "5": "周五", "6": "周六", "7": "周日" };
+const defaultRatio = Math.round((1 / 7) * 100) / 100;
 const weekdayRatiosForm = reactive({
-  '1': defaultRatio, '2': defaultRatio, '3': defaultRatio, '4': defaultRatio,
-  '5': defaultRatio, '6': defaultRatio, '7': defaultRatio
-})
+  "1": defaultRatio, "2": defaultRatio, "3": defaultRatio, "4": defaultRatio,
+  "5": defaultRatio, "6": defaultRatio, "7": defaultRatio,
+});
 const weekdayRatiosLocked = reactive({
-  '1': false, '2': false, '3': false, '4': false, '5': false, '6': false, '7': false
-})
-const weekdayRatiosSaving = ref(false)
+  "1": false, "2": false, "3": false, "4": false, "5": false, "6": false, "7": false,
+});
+const weekdayRatiosSaving = ref(false);
 const weekdayRatiosSum = computed(() => {
-  return Object.keys(weekdayLabels).reduce((s, k) => s + (Number(weekdayRatiosForm[k]) || 0), 0)
-})
+  return Object.keys(weekdayLabels).reduce((s, k) => s + (Number(weekdayRatiosForm[k]) || 0), 0);
+});
 
 const clearWeekdayRatiosLocks = () => {
-  Object.keys(weekdayLabels).forEach((k) => { weekdayRatiosLocked[k] = false })
-}
+  Object.keys(weekdayLabels).forEach((k) => { weekdayRatiosLocked[k] = false; });
+};
 
 const applyBalanceWeekdayRatios = (editedKey) => {
-  const keys = Object.keys(weekdayLabels)
-  if (editedKey === null || editedKey === undefined || editedKey === '-1') {
-    clearWeekdayRatiosLocks()
-    keys.forEach((k) => { weekdayRatiosForm[k] = defaultRatio })
-    return
+  const keys = Object.keys(weekdayLabels);
+  if (editedKey === null || editedKey === undefined || editedKey === "-1") {
+    clearWeekdayRatiosLocks();
+    keys.forEach((k) => { weekdayRatiosForm[k] = defaultRatio; });
+    return;
   }
-  weekdayRatiosLocked[editedKey] = true
+  weekdayRatiosLocked[editedKey] = true;
   const lockedSum = keys
     .filter((k) => weekdayRatiosLocked[k])
-    .reduce((s, k) => s + (Number(weekdayRatiosForm[k]) || 0), 0)
-  let remainder = Math.round((1 - lockedSum) * 100) / 100
+    .reduce((s, k) => s + (Number(weekdayRatiosForm[k]) || 0), 0);
+  let remainder = Math.round((1 - lockedSum) * 100) / 100;
   if (remainder < 0) {
-    ElMessage.warning('已锁定比例之和不能超过 100%')
-    remainder = 0
+    ElMessage.warning("已锁定比例之和不能超过 100%");
+    remainder = 0;
   }
-  const unlockedKeys = keys.filter((k) => !weekdayRatiosLocked[k])
-  if (unlockedKeys.length === 0) return
-  const each = Math.round((remainder / unlockedKeys.length) * 100) / 100
+  const unlockedKeys = keys.filter((k) => !weekdayRatiosLocked[k]);
+  if (unlockedKeys.length === 0) return;
+  const each = Math.round((remainder / unlockedKeys.length) * 100) / 100;
   unlockedKeys.forEach((k, i) => {
     weekdayRatiosForm[k] =
       i === unlockedKeys.length - 1
         ? Math.round((remainder - each * (unlockedKeys.length - 1)) * 100) / 100
-        : each
-  })
-}
+        : each;
+  });
+};
 
 // 表单数据
 const form = reactive({
   id: null,
-  target_name: '',
-  target_type: '',
-  targetMonth: '', // 店铺目标时用：YYYY-MM
+  target_name: "",
+  target_type: "",
+  targetMonth: "", // 店铺目标时用：YYYY-MM
   dateRange: [],
   target_amount: 0,
-  target_quantity: 0
-})
+  target_quantity: 0,
+  target_profit_amount: 0,
+  metric_code: "",
+  metric_name: "",
+  metric_direction: "",
+  target_value: 0,
+  max_score: 20,
+  penalty_enabled: false,
+  penalty_threshold: 0,
+  penalty_per_unit: 0,
+  penalty_max: 0,
+  manual_score_enabled: false,
+  manual_score_value: 0,
+});
 
 // 店铺拆分数据：每行 { shopKey, platform_code, shop_id, shop_name, target_amount, target_quantity, target_percent }
-const shopBreakdown = ref([])
+const shopBreakdown = ref([]);
 
 // 时间拆分数据
-const timeBreakdown = ref([])
+const timeBreakdown = ref([]);
 
 // 店铺列表（来自 GET /targets/shops，账号管理 platform_accounts）
-const availableShops = ref([])
-const shopsLoading = ref(false)
+const availableShops = ref([]);
+const shopsLoading = ref(false);
+
+const operationMetricOptions = [
+  { code: "customer_satisfaction", label: "客户满意度", direction: "higher_better" },
+  { code: "complaint_count", label: "客诉", direction: "lower_better" },
+  { code: "reply_timeliness", label: "回复及时率", direction: "higher_better" },
+  { code: "training_check", label: "培训检核", direction: "higher_better" },
+  { code: "exam_score", label: "考试", direction: "higher_better" },
+  { code: "manual_other", label: "其他", direction: "manual_score" },
+];
 
 // 计算属性
 const dialogTitle = computed(() => {
-  return form.id ? '编辑目标' : '创建目标'
-})
+  return form.id ? "编辑目标" : "创建目标";
+});
 
 // 店铺目标时自动生成的名称，如「2026年1月常规月度目标」
 const autoTargetName = computed(() => {
-  if (!form.targetMonth) return ''
-  const [y, m] = form.targetMonth.split('-')
-  return `${y}年${parseInt(m, 10)}月常规月度目标`
-})
+  if (!form.targetMonth) return "";
+  const [y, m] = form.targetMonth.split("-");
+  return `${y}年${parseInt(m, 10)}月常规月度目标`;
+});
 
 const shopBreakdownTotalAmount = computed(() => {
   return shopBreakdown.value.reduce(
     (sum, item) => sum + (item.target_amount || 0),
-    0
-  )
-})
+    0,
+  );
+});
 
 const shopBreakdownTotalQuantity = computed(() => {
   return shopBreakdown.value.reduce(
     (sum, item) => sum + (item.target_quantity || 0),
-    0
-  )
-})
+    0,
+  );
+});
 
 const shopBreakdownTotalPercent = computed(() => {
   return shopBreakdown.value.reduce(
     (sum, item) => sum + (Number(item.target_percent) || 0),
-    0
-  )
-})
+    0,
+  );
+});
 
 function getShopKey(s) {
-  return `${s.platform_code || ''}|${s.shop_id || ''}`
+  return `${s.platform_code || ""}|${s.shop_id || ""}`;
 }
 
 const timeBreakdownTotalAmount = computed(() => {
   return timeBreakdown.value.reduce(
     (sum, item) => sum + (item.target_amount || 0),
-    0
-  )
-})
+    0,
+  );
+});
 
 const timeBreakdownTotalQuantity = computed(() => {
   return timeBreakdown.value.reduce(
     (sum, item) => sum + (item.target_quantity || 0),
-    0
-  )
-})
+    0,
+  );
+});
+
+const selectedOperationMetric = computed(() => {
+  return operationMetricOptions.find((item) => item.code === form.metric_code) || null;
+});
 
 // 表单验证规则（按目标类型生效：店铺用 targetMonth，产品/战役用 target_name + dateRange）
 const formRules = computed(() => {
-  const isShop = form.target_type === 'shop'
+  const isShop = form.target_type === "shop";
+  const isOperation = form.target_type === "operation";
   return {
     target_name: isShop
       ? []
       : [
-        { required: true, message: '目标名称不能为空', trigger: 'blur' },
-        {
-          min: 2,
-          max: 100,
-          message: '目标名称长度2-100字符',
-          trigger: 'blur'
-        }
-      ],
+          { required: true, message: "目标名称不能为空", trigger: "blur" },
+          {
+            min: 2,
+            max: 100,
+            message: "目标名称长度2-100字符",
+            trigger: "blur",
+          },
+        ],
     target_type: [
-      { required: true, message: '请选择目标类型', trigger: 'change' }
+      { required: true, message: "请选择目标类型", trigger: "change" },
     ],
     targetMonth: isShop
-      ? [{ required: true, message: '请选择目标月份', trigger: 'change' }]
+      ? [{ required: true, message: "请选择目标月份", trigger: "change" }]
       : [],
     dateRange: isShop
       ? []
       : [
-        { required: true, message: '请选择时间周期', trigger: 'change' },
-        {
-          validator: (rule, value, callback) => {
-            if (!value || value.length !== 2) {
-              callback(new Error('请选择开始和结束日期'))
-            } else if (new Date(value[1]) <= new Date(value[0])) {
-              callback(new Error('结束时间必须大于开始时间'))
-            } else {
-              callback()
-            }
+          { required: true, message: "请选择时间周期", trigger: "change" },
+          {
+            validator: (rule, value, callback) => {
+              if (!value || value.length !== 2) {
+                callback(new Error("请选择开始和结束日期"));
+              } else if (new Date(value[1]) <= new Date(value[0])) {
+                callback(new Error("结束时间必须大于开始时间"));
+              } else {
+                callback();
+              }
+            },
+            trigger: "change",
           },
-          trigger: 'change'
-        }
-      ],
+        ],
     target_amount: [
-      { required: true, message: '目标金额不能为空', trigger: 'blur' },
+      { required: true, message: "目标金额不能为空", trigger: "blur" },
       {
-        type: 'number',
+        type: "number",
         min: 0.01,
-        message: '目标金额必须大于0',
-        trigger: 'blur'
-      }
+        message: "目标金额必须大于0",
+        trigger: "blur",
+      },
     ],
     target_quantity: [
-      { required: true, message: '目标数量不能为空', trigger: 'blur' },
-      { type: 'number', min: 1, message: '目标数量必须大于0', trigger: 'blur' }
-    ]
-  }
-})
+      { required: true, message: "目标数量不能为空", trigger: "blur" },
+      { type: "number", min: 1, message: "目标数量必须大于0", trigger: "blur" },
+    ],
+  };
+});
+
+const effectiveFormRules = computed(() => {
+  const isShop = form.target_type === "shop";
+  const isOperation = form.target_type === "operation";
+  return {
+    target_name: isShop
+      ? []
+      : [
+          { required: true, message: "目标名称不能为空", trigger: "blur" },
+          { min: 2, max: 100, message: "目标名称长度2-100字符", trigger: "blur" },
+        ],
+    targetMonth: isShop ? [{ required: true, message: "请选择目标月份", trigger: "change" }] : [],
+    dateRange: isShop
+      ? []
+      : [
+          { required: true, message: "请选择时间周期", trigger: "change" },
+          {
+            validator: (rule, value, callback) => {
+              if (!value || value.length !== 2) {
+                callback(new Error("请选择开始和结束日期"));
+              } else if (new Date(value[1]) <= new Date(value[0])) {
+                callback(new Error("结束时间必须大于开始时间"));
+              } else {
+                callback();
+              }
+            },
+            trigger: "change",
+          },
+        ],
+    target_amount: isOperation
+      ? []
+      : [
+          { required: true, message: "目标金额不能为空", trigger: "blur" },
+          { type: "number", min: 0.01, message: "目标金额必须大于0", trigger: "blur" },
+        ],
+    target_quantity: isOperation
+      ? []
+      : [
+          { required: true, message: "目标数量不能为空", trigger: "blur" },
+          { type: "number", min: 1, message: "目标数量必须大于0", trigger: "blur" },
+        ],
+    target_profit_amount: isShop
+      ? [{ type: "number", min: 0, message: "目标毛利不能小于0", trigger: "blur" }]
+      : [],
+    metric_code: isOperation
+      ? [{ required: true, message: "请选择运营指标", trigger: "change" }]
+      : [],
+    target_value: isOperation
+      ? [{ required: true, message: "请输入目标值", trigger: "blur" }]
+      : [],
+    max_score: isOperation
+      ? [{ required: true, message: "请输入满分", trigger: "blur" }]
+      : [],
+  };
+});
 
 // 加载供目标管理使用的店铺列表（来自账号管理）
 const loadTargetShops = async () => {
-  shopsLoading.value = true
+  shopsLoading.value = true;
   try {
-    const data = await api.getTargetShops()
+    const data = await api.getTargetShops();
     availableShops.value = Array.isArray(data)
       ? data
-      : (data?.data ?? data ?? [])
+      : (data?.data ?? data ?? []);
   } catch (e) {
-    handleApiError(e, { showMessage: true, logError: true })
-    availableShops.value = []
+    handleApiError(e, { showMessage: true, logError: true });
+    availableShops.value = [];
   } finally {
-    shopsLoading.value = false
+    shopsLoading.value = false;
   }
-}
+  if (form.target_type === "operation") {
+    handleOperationMetricChange();
+  }
+};
+
+const handleOperationMetricChange = () => {
+  const selected = selectedOperationMetric.value;
+  form.metric_name = selected?.label || "";
+  form.metric_direction = selected?.direction || "";
+  form.manual_score_enabled = selected?.direction === "manual_score";
+  if (!form.penalty_enabled) {
+    form.penalty_threshold = 0;
+    form.penalty_per_unit = 0;
+    form.penalty_max = 0;
+  }
+};
 
 // 加载目标列表
 const loadTargets = async () => {
-  targets.loading = true
-  targets.error = null // 重置错误状态
+  targets.loading = true;
+  targets.error = null; // 重置错误状态
   try {
     const response = await api.getTargets({
       target_type: filters.targetType || undefined,
       status: filters.status || undefined,
       page: targets.page,
-      page_size: targets.pageSize
-    })
+      page_size: targets.pageSize,
+    });
 
     // 处理分页响应（后端返回 { items, total, page, page_size } 或兼容旧格式）
     if (response && Array.isArray(response)) {
-      targets.data = response
-      targets.total = response.length
+      targets.data = response;
+      targets.total = response.length;
     } else if (
       response &&
-      typeof response === 'object' &&
-      'items' in response
+      typeof response === "object" &&
+      "items" in response
     ) {
-      targets.data = response.items ?? []
-      targets.total = Number(response.total ?? 0)
-      if (response.page != null) targets.page = response.page
-      if (response.page_size != null) targets.pageSize = response.page_size
+      targets.data = response.items ?? [];
+      targets.total = Number(response.total ?? 0);
+      if (response.page != null) targets.page = response.page;
+      if (response.page_size != null) targets.pageSize = response.page_size;
     } else {
-      targets.data = response?.data ?? response ?? []
+      targets.data = response?.data ?? response ?? [];
       targets.total = Number(
-        response?.total ?? response?.pagination?.total ?? 0
-      )
+        response?.total ?? response?.pagination?.total ?? 0,
+      );
     }
   } catch (error) {
     // 设置错误状态，区分"无数据"和"加载失败"
-    const errorInfo = handleApiError(error, { showMessage: false, logError: true })
+    const errorInfo = handleApiError(error, { showMessage: false, logError: true });
     targets.error = {
-      message: errorInfo.message || '加载失败',
+      message: errorInfo.message || "加载失败",
       code: errorInfo.code,
-      recovery: errorInfo.recovery || '请检查网络连接或稍后重试'
-    }
-    targets.data = []
-    targets.total = 0
+      recovery: errorInfo.recovery || "请检查网络连接或稍后重试",
+    };
+    targets.data = [];
+    targets.total = 0;
     // 显示错误提示（延迟显示，避免与 loading 状态冲突）
-    ElMessage.error(targets.error.message)
+    ElMessage.error(targets.error.message);
   } finally {
-    targets.loading = false
+    targets.loading = false;
   }
-}
+};
 
 // 查看详情（后端返回 { target, breakdowns }，整理为 targetDetail.data.breakdown / time_breakdown）
 const handleView = async (row) => {
-  detailVisible.value = true
-  targetDetail.loading = true
+  detailVisible.value = true;
+  targetDetail.loading = true;
   try {
-    const response = await api.getTargetDetail(row.id)
-    const res = response || {}
-    const target = res.target || res
-    const breakdowns = res.breakdowns || res.breakdown || []
+    const response = await api.getTargetDetail(row.id);
+    const res = response || {};
+    const target = res.target || res;
+    const breakdowns = res.breakdowns || res.breakdown || [];
     targetDetail.data = {
       ...target,
-      breakdown: breakdowns.filter((b) => b.breakdown_type === 'shop'),
-      time_breakdown: breakdowns.filter((b) => b.breakdown_type === 'time')
-    }
+      breakdown: breakdowns.filter((b) => b.breakdown_type === "shop"),
+      time_breakdown: breakdowns.filter((b) => b.breakdown_type === "time"),
+    };
     if (targetDetail.data.period_start) {
-      detailCalendarDate.value = new Date(targetDetail.data.period_start + 'T12:00:00')
+      detailCalendarDate.value = new Date(targetDetail.data.period_start + "T12:00:00");
     }
-    syncWeekdayRatiosFromDetail()
+    syncWeekdayRatiosFromDetail();
   } catch (error) {
-    handleApiError(error, { showMessage: true, logError: true })
+    handleApiError(error, { showMessage: true, logError: true });
   } finally {
-    targetDetail.loading = false
+    targetDetail.loading = false;
   }
-}
+};
 
 // 刷新目标详情（用于生成日度或编辑单日后更新日历）
 const refreshDetail = async () => {
-  if (!targetDetail.data?.id) return
-  targetDetail.loading = true
+  if (!targetDetail.data?.id) return;
+  targetDetail.loading = true;
   try {
-    const response = await api.getTargetDetail(targetDetail.data.id)
-    const res = response || {}
-    const target = res.target || res
-    const breakdowns = res.breakdowns || res.breakdown || []
+    const response = await api.getTargetDetail(targetDetail.data.id);
+    const res = response || {};
+    const target = res.target || res;
+    const breakdowns = res.breakdowns || res.breakdown || [];
     targetDetail.data = {
       ...target,
-      breakdown: breakdowns.filter((b) => b.breakdown_type === 'shop'),
-      time_breakdown: breakdowns.filter((b) => b.breakdown_type === 'time')
-    }
-    syncWeekdayRatiosFromDetail()
+      breakdown: breakdowns.filter((b) => b.breakdown_type === "shop"),
+      time_breakdown: breakdowns.filter((b) => b.breakdown_type === "time"),
+    };
+    syncWeekdayRatiosFromDetail();
   } catch (error) {
-    handleApiError(error, { showMessage: true, logError: true })
+    handleApiError(error, { showMessage: true, logError: true });
   } finally {
-    targetDetail.loading = false
+    targetDetail.loading = false;
   }
-}
+};
 
 // 从目标详情同步周一到周日比例到表单
 const syncWeekdayRatiosFromDetail = () => {
-  clearWeekdayRatiosLocks()
-  const ratios = targetDetail.data?.weekday_ratios
-  if (ratios && typeof ratios === 'object') {
+  clearWeekdayRatiosLocks();
+  const ratios = targetDetail.data?.weekday_ratios;
+  if (ratios && typeof ratios === "object") {
     Object.keys(weekdayLabels).forEach((k) => {
-      const v = Number(ratios[k])
-      if (!Number.isNaN(v)) weekdayRatiosForm[k] = Math.round(v * 100) / 100
-    })
+      const v = Number(ratios[k]);
+      if (!Number.isNaN(v)) weekdayRatiosForm[k] = Math.round(v * 100) / 100;
+    });
   } else {
-    Object.keys(weekdayLabels).forEach((k) => { weekdayRatiosForm[k] = defaultRatio })
+    Object.keys(weekdayLabels).forEach((k) => { weekdayRatiosForm[k] = defaultRatio; });
   }
-}
+};
 
 // 保存周一到周日比例
 const saveWeekdayRatios = async () => {
-  if (!targetDetail.data?.id) return
+  if (!targetDetail.data?.id) return;
   if (Math.abs(weekdayRatiosSum.value - 1) > 0.001) {
-    ElMessage.warning('比例合计须为 100%')
-    return
+    ElMessage.warning("比例合计须为 100%");
+    return;
   }
-  weekdayRatiosSaving.value = true
+  weekdayRatiosSaving.value = true;
   try {
-    const weekday_ratios = {}
-    Object.keys(weekdayLabels).forEach((k) => { weekday_ratios[k] = Number(weekdayRatiosForm[k]) || 0 })
-    await api.updateTarget(targetDetail.data.id, { weekday_ratios })
-    ElMessage.success('比例已保存')
-    await refreshDetail()
+    const weekday_ratios = {};
+    Object.keys(weekdayLabels).forEach((k) => { weekday_ratios[k] = Number(weekdayRatiosForm[k]) || 0; });
+    await api.updateTarget(targetDetail.data.id, { weekday_ratios });
+    ElMessage.success("比例已保存");
+    await refreshDetail();
   } catch (error) {
-    handleApiError(error, { showMessage: true, logError: true })
+    handleApiError(error, { showMessage: true, logError: true });
   } finally {
-    weekdayRatiosSaving.value = false
+    weekdayRatiosSaving.value = false;
   }
-}
+};
 
 // 日度分解：判断某日是否在目标周期内
 const isDayInTargetRange = (dayStr) => {
-  if (!targetDetail.data?.period_start || !targetDetail.data?.period_end) return false
-  return dayStr >= targetDetail.data.period_start && dayStr <= targetDetail.data.period_end
-}
+  if (!targetDetail.data?.period_start || !targetDetail.data?.period_end) return false;
+  return dayStr >= targetDetail.data.period_start && dayStr <= targetDetail.data.period_end;
+};
 
 // 日历格子显示日期数字
 const getDayNumber = (dayStr) => {
-  if (!dayStr) return ''
-  const d = dayStr.split('-')
-  return d.length === 3 ? d[2] : ''
-}
+  if (!dayStr) return "";
+  const d = dayStr.split("-");
+  return d.length === 3 ? d[2] : "";
+};
 
 // 根据日期取当日分解（period_start 或 period_end 等于该日）
 const getDailyBreakdown = (dayStr) => {
-  const list = targetDetail.data?.time_breakdown || []
-  return list.find((b) => (b.period_start === dayStr || b.period_end === dayStr) && b.period_start === b.period_end) || null
-}
+  const list = targetDetail.data?.time_breakdown || [];
+  return list.find((b) => (b.period_start === dayStr || b.period_end === dayStr) && b.period_start === b.period_end) || null;
+};
 
 // 一键生成日度（使用当前表单的周一到周日比例）
 const handleGenerateDaily = async () => {
-  if (!targetDetail.data?.id) return
-  dailyGenerateLoading.value = true
+  if (!targetDetail.data?.id) return;
+  dailyGenerateLoading.value = true;
   try {
-    const weekday_ratios = {}
-    Object.keys(weekdayLabels).forEach((k) => { weekday_ratios[k] = Number(weekdayRatiosForm[k]) || 0 })
+    const weekday_ratios = {};
+    Object.keys(weekdayLabels).forEach((k) => { weekday_ratios[k] = Number(weekdayRatiosForm[k]) || 0; });
     const res = await api.generateDailyBreakdown(targetDetail.data.id, {
       overwrite: true,
-      weekday_ratios: Object.keys(weekday_ratios).length ? weekday_ratios : undefined
-    })
-    const msg = res?.message || res?.data ? `已生成 ${res.data?.created ?? 0} 条日度分解` : '生成成功'
-    ElMessage.success(msg)
-    await refreshDetail()
+      weekday_ratios: Object.keys(weekday_ratios).length ? weekday_ratios : undefined,
+    });
+    const msg = res?.message || res?.data ? `已生成 ${res.data?.created ?? 0} 条日度分解` : "生成成功";
+    ElMessage.success(msg);
+    await refreshDetail();
   } catch (error) {
-    handleApiError(error, { showMessage: true, logError: true })
+    handleApiError(error, { showMessage: true, logError: true });
   } finally {
-    dailyGenerateLoading.value = false
+    dailyGenerateLoading.value = false;
   }
-}
+};
 
 // 点击某日打开编辑
 const handleDayClick = (dayStr) => {
-  const b = getDailyBreakdown(dayStr)
-  dayEditForm.date = dayStr
-  dayEditForm.target_amount = b ? Number(b.target_amount) || 0 : 0
-  dayEditForm.target_quantity = b ? Number(b.target_quantity) || 0 : 0
-  dayEditForm.breakdown_id = b?.id ?? null
-  dayEditForm.editMode = 'time'
-  dayEditForm.platform_code = ''
-  dayEditForm.shop_id = ''
-  dayEditVisible.value = true
-}
+  const b = getDailyBreakdown(dayStr);
+  dayEditForm.date = dayStr;
+  dayEditForm.target_amount = b ? Number(b.target_amount) || 0 : 0;
+  dayEditForm.target_quantity = b ? Number(b.target_quantity) || 0 : 0;
+  dayEditForm.breakdown_id = b?.id ?? null;
+  dayEditForm.editMode = "time";
+  dayEditForm.platform_code = "";
+  dayEditForm.shop_id = "";
+  dayEditVisible.value = true;
+};
 
 // 保存单日目标（创建或更新分解）；支持汇总(time)与按店铺(shop_time)
 const saveDayEdit = async () => {
-  const targetId = monthlyTarget.target?.id ?? targetDetail.data?.id
-  if (!targetId || !dayEditForm.date) return
-  dayEditSaving.value = true
+  const targetId = monthlyTarget.target?.id ?? targetDetail.data?.id;
+  if (!targetId || !dayEditForm.date) return;
+  dayEditSaving.value = true;
   try {
     const payload = {
-      breakdown_type: dayEditForm.editMode || 'time',
+      breakdown_type: dayEditForm.editMode || "time",
       period_start: dayEditForm.date,
       period_end: dayEditForm.date,
       period_label: dayEditForm.date,
       target_amount: Number(dayEditForm.target_amount) || 0,
-      target_quantity: Math.max(0, Math.floor(Number(dayEditForm.target_quantity) || 0))
+      target_quantity: Math.max(0, Math.floor(Number(dayEditForm.target_quantity) || 0)),
+    };
+    if (dayEditForm.editMode === "shop_time" && dayEditForm.platform_code && dayEditForm.shop_id) {
+      payload.platform_code = dayEditForm.platform_code;
+      payload.shop_id = dayEditForm.shop_id;
     }
-    if (dayEditForm.editMode === 'shop_time' && dayEditForm.platform_code && dayEditForm.shop_id) {
-      payload.platform_code = dayEditForm.platform_code
-      payload.shop_id = dayEditForm.shop_id
-    }
-    await api.createTargetBreakdown(targetId, payload)
-    ElMessage.success('已保存')
-    dayEditVisible.value = false
-    if (monthlyTarget.target?.id === targetId) await loadMonthlyTarget()
-    else await refreshDetail()
+    await api.createTargetBreakdown(targetId, payload);
+    ElMessage.success("已保存");
+    dayEditVisible.value = false;
+    if (monthlyTarget.target?.id === targetId) await loadMonthlyTarget();
+    else await refreshDetail();
   } catch (error) {
-    handleApiError(error, { showMessage: true, logError: true })
+    handleApiError(error, { showMessage: true, logError: true });
   } finally {
-    dayEditSaving.value = false
+    dayEditSaving.value = false;
   }
-}
+};
 
 // 创建目标：类型由当前 Tab 决定（产品目标 Tab→product，战役目标 Tab→campaign），不再让用户选择
 const handleCreate = async () => {
-  form.id = null
-  form.target_name = ''
-  form.target_type = activeTab.value
-  form.targetMonth = ''
-  form.dateRange = []
-  form.target_amount = 0
-  form.target_quantity = 0
-  shopBreakdown.value = []
-  timeBreakdown.value = []
-  breakdownTab.value = 'shop'
-  if (availableShops.value.length === 0) await loadTargetShops()
-  if (form.target_type === 'shop') applyShopBreakdownFromAvailableShops()
-  dialogVisible.value = true
-}
+  form.id = null;
+  form.target_name = "";
+  form.target_type = activeTab.value;
+  form.targetMonth = "";
+  form.dateRange = [];
+  form.target_amount = 0;
+  form.target_quantity = 0;
+  form.target_profit_amount = 0;
+  form.metric_code = "";
+  form.metric_name = "";
+  form.metric_direction = "";
+  form.target_value = 0;
+  form.max_score = 20;
+  form.penalty_enabled = false;
+  form.penalty_threshold = 0;
+  form.penalty_per_unit = 0;
+  form.penalty_max = 0;
+  form.manual_score_enabled = false;
+  form.manual_score_value = 0;
+  shopBreakdown.value = [];
+  timeBreakdown.value = [];
+  breakdownTab.value = "shop";
+  if (availableShops.value.length === 0) await loadTargetShops();
+  if (form.target_type === "shop") applyShopBreakdownFromAvailableShops();
+  dialogVisible.value = true;
+};
 
 // 编辑目标
 const handleEdit = async (row) => {
-  form.id = row.id
-  form.target_name = row.target_name
-  form.target_type = row.target_type
-  if (row.target_type === 'shop' && row.period_start) {
-    form.targetMonth = row.period_start.slice(0, 7)
-    form.dateRange = []
+  form.id = row.id;
+  form.target_name = row.target_name;
+  form.target_type = row.target_type;
+  if (row.target_type === "shop" && row.period_start) {
+    form.targetMonth = row.period_start.slice(0, 7);
+    form.dateRange = [];
   } else {
-    form.targetMonth = ''
-    form.dateRange = [new Date(row.period_start), new Date(row.period_end)]
+    form.targetMonth = "";
+    form.dateRange = [new Date(row.period_start), new Date(row.period_end)];
   }
-  form.target_amount = row.target_amount
-  form.target_quantity = row.target_quantity
+  form.target_amount = row.target_amount;
+  form.target_quantity = row.target_quantity;
+  form.target_profit_amount = row.target_profit_amount || 0;
+  form.metric_code = row.metric_code || "";
+  form.metric_name = row.metric_name || "";
+  form.metric_direction = row.metric_direction || "";
+  form.target_value = row.target_value || 0;
+  form.max_score = row.max_score || 20;
+  form.penalty_enabled = !!row.penalty_enabled;
+  form.penalty_threshold = row.penalty_threshold || 0;
+  form.penalty_per_unit = row.penalty_per_unit || 0;
+  form.penalty_max = row.penalty_max || 0;
+  form.manual_score_enabled = !!row.manual_score_enabled;
+  form.manual_score_value = row.manual_score_value || 0;
 
-  if (availableShops.value.length === 0) await loadTargetShops()
+  if (availableShops.value.length === 0) await loadTargetShops();
 
-  const detailResponse = await api.getTargetDetail(row.id)
+  const detailResponse = await api.getTargetDetail(row.id);
   const breakdowns =
-    detailResponse?.breakdowns || detailResponse?.breakdown || []
-  const shopList = breakdowns.filter((b) => b.breakdown_type === 'shop')
-  const total = Number(row.target_amount) || 1
+    detailResponse?.breakdowns || detailResponse?.breakdown || [];
+  const shopList = breakdowns.filter((b) => b.breakdown_type === "shop");
+  const total = Number(row.target_amount) || 1;
   shopBreakdown.value = shopList.map((b) => {
-    const pct = total > 0 ? ((Number(b.target_amount) || 0) / total) * 100 : 0
+    const pct = total > 0 ? ((Number(b.target_amount) || 0) / total) * 100 : 0;
     return {
-      shopKey: `${b.platform_code || ''}|${b.shop_id || ''}`,
+      shopKey: `${b.platform_code || ""}|${b.shop_id || ""}`,
       platform_code: b.platform_code,
       shop_id: b.shop_id,
-      shop_name: b.shop_name || '',
+      shop_name: b.shop_name || "",
       target_amount: b.target_amount ?? 0,
       target_quantity: b.target_quantity ?? 0,
       target_percent: Math.round(pct * 100) / 100,
-      percentLocked: false
-    }
-  })
+      percentLocked: false,
+    };
+  });
   timeBreakdown.value =
-    breakdowns.filter((b) => b.breakdown_type === 'time') || []
+    breakdowns.filter((b) => b.breakdown_type === "time") || [];
 
-  breakdownTab.value = 'shop'
-  dialogVisible.value = true
-}
+  breakdownTab.value = "shop";
+  dialogVisible.value = true;
+};
 
 // 删除目标
 const handleDelete = async (row) => {
   try {
     await ElMessageBox.confirm(
       `确定要删除目标"${row.target_name}"吗？`,
-      '确认删除',
+      "确认删除",
       {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        type: "warning",
+      },
+    );
 
-    await api.deleteTarget(row.id)
-    ElMessage.success('删除成功')
-    loadTargets()
+    await api.deleteTarget(row.id);
+    ElMessage.success("删除成功");
+    loadTargets();
   } catch (error) {
     // 用户取消或删除失败
   }
-}
+};
 
 // 目标类型变化：店铺目标默认带出全部店铺行并均分百分比，产品/战役清空由用户手动添加
 const handleTargetTypeChange = () => {
-  timeBreakdown.value = []
-  if (form.target_type === 'shop') {
-    const list = availableShops.value || []
-    const n = Math.max(1, list.length)
-    const pct = Math.round((100 / n) * 100) / 100
+  timeBreakdown.value = [];
+  if (form.target_type === "shop") {
+    const list = availableShops.value || [];
+    const n = Math.max(1, list.length);
+    const pct = Math.round((100 / n) * 100) / 100;
     shopBreakdown.value = list.map((s, i) => ({
       shopKey: getShopKey(s),
       platform_code: s.platform_code,
       shop_id: s.shop_id,
-      shop_name: s.shop_name || '',
+      shop_name: s.shop_name || "",
       target_amount: 0,
       target_quantity: 0,
       target_percent: i === list.length - 1 ? 100 - pct * (n - 1) : pct,
-      percentLocked: false
-    }))
+      percentLocked: false,
+    }));
   } else {
-    shopBreakdown.value = []
+    shopBreakdown.value = [];
   }
-}
+};
 
 // 添加店铺拆分（产品/战役时手动添加）
 const handleAddShopBreakdown = () => {
   shopBreakdown.value.push({
-    shopKey: '',
-    platform_code: '',
-    shop_id: '',
-    shop_name: '',
+    shopKey: "",
+    platform_code: "",
+    shop_id: "",
+    shop_name: "",
     target_amount: 0,
     target_quantity: 0,
     target_percent: 0,
-    percentLocked: false
-  })
-}
+    percentLocked: false,
+  });
+};
 
 // 删除店铺拆分
 const handleRemoveShopBreakdown = (index) => {
-  shopBreakdown.value.splice(index, 1)
-  applyBalancePercent(-1)
-}
+  shopBreakdown.value.splice(index, 1);
+  applyBalancePercent(-1);
+};
 
 // 店铺选择变化：根据 shopKey 回填 platform_code / shop_id / shop_name
 const handleShopChange = (index, val) => {
-  const s = availableShops.value.find((x) => getShopKey(x) === val)
+  const s = availableShops.value.find((x) => getShopKey(x) === val);
   if (s) {
-    const row = shopBreakdown.value[index]
-    row.platform_code = s.platform_code
-    row.shop_id = s.shop_id
-    row.shop_name = s.shop_name || ''
+    const row = shopBreakdown.value[index];
+    row.platform_code = s.platform_code;
+    row.shop_id = s.shop_id;
+    row.shop_name = s.shop_name || "";
   }
-}
+};
 
 // 比例平衡：仅重算「未锁定」行的百分比，使总和 100%。用户修改过的行视为锁定，不再被自动改写。
 // editedIndex 为本次修改的行索引，-1 表示全部均分（并清除所有锁定）
 const applyBalancePercent = (editedIndex) => {
-  const rows = shopBreakdown.value
-  if (rows.length === 0) return
+  const rows = shopBreakdown.value;
+  if (rows.length === 0) return;
   if (editedIndex === -1 || rows.length === 1) {
-    rows.forEach((r) => { r.percentLocked = false })
-    const each = Math.round((100 / rows.length) * 100) / 100
+    rows.forEach((r) => { r.percentLocked = false; });
+    const each = Math.round((100 / rows.length) * 100) / 100;
     rows.forEach((r, i) => {
       r.target_percent =
-        i === rows.length - 1 ? 100 - each * (rows.length - 1) : each
-    })
-    return
+        i === rows.length - 1 ? 100 - each * (rows.length - 1) : each;
+    });
+    return;
   }
-  rows[editedIndex].percentLocked = true
+  rows[editedIndex].percentLocked = true;
   const lockedSum = rows
     .filter((r) => r.percentLocked)
-    .reduce((s, r) => s + (Number(r.target_percent) || 0), 0)
-  let remainder = Math.round((100 - lockedSum) * 100) / 100
+    .reduce((s, r) => s + (Number(r.target_percent) || 0), 0);
+  let remainder = Math.round((100 - lockedSum) * 100) / 100;
   if (remainder < 0) {
-    ElMessage.warning('已锁定比例之和不能超过 100%')
-    remainder = 0
+    ElMessage.warning("已锁定比例之和不能超过 100%");
+    remainder = 0;
   }
-  const unlocked = rows.filter((r) => !r.percentLocked)
-  if (unlocked.length === 0) return
-  const each = Math.round((remainder / unlocked.length) * 100) / 100
+  const unlocked = rows.filter((r) => !r.percentLocked);
+  if (unlocked.length === 0) return;
+  const each = Math.round((remainder / unlocked.length) * 100) / 100;
   unlocked.forEach((r, i) => {
     r.target_percent =
       i === unlocked.length - 1
         ? Math.round((remainder - each * (unlocked.length - 1)) * 100) / 100
-        : each
-  })
-}
+        : each;
+  });
+};
 
 // 自动计算店铺拆分：按目标百分比 × 总目标 回填金额与数量，最后一行用余数保证总和一致
 const handleAutoCalculateShop = () => {
-  const rows = shopBreakdown.value
+  const rows = shopBreakdown.value;
   if (rows.length === 0) {
-    ElMessage.warning('请先添加店铺或选择店铺目标以加载全部店铺')
-    return
+    ElMessage.warning("请先添加店铺或选择店铺目标以加载全部店铺");
+    return;
   }
-  const totalAmount = Number(form.target_amount) || 0
-  const totalQty = Number(form.target_quantity) || 0
-  let sumAmount = 0
-  let sumQty = 0
+  const totalAmount = Number(form.target_amount) || 0;
+  const totalQty = Number(form.target_quantity) || 0;
+  let sumAmount = 0;
+  let sumQty = 0;
   rows.forEach((item, index) => {
-    const pct = (Number(item.target_percent) || 0) / 100
+    const pct = (Number(item.target_percent) || 0) / 100;
     if (index === rows.length - 1) {
-      item.target_amount = Math.round((totalAmount - sumAmount) * 100) / 100
-      item.target_quantity = totalQty - sumQty
+      item.target_amount = Math.round((totalAmount - sumAmount) * 100) / 100;
+      item.target_quantity = totalQty - sumQty;
     } else {
-      item.target_amount = Math.round(totalAmount * pct * 100) / 100
-      item.target_quantity = Math.floor(totalQty * pct)
-      sumAmount += item.target_amount
-      sumQty += item.target_quantity
+      item.target_amount = Math.round(totalAmount * pct * 100) / 100;
+      item.target_quantity = Math.floor(totalQty * pct);
+      sumAmount += item.target_amount;
+      sumQty += item.target_quantity;
     }
-  })
-  ElMessage.success('已按目标百分比回填金额与数量')
-}
+  });
+  ElMessage.success("已按目标百分比回填金额与数量");
+};
 
 // 自动计算时间拆分
 const handleAutoCalculateTime = () => {
   if (!form.dateRange || form.dateRange.length !== 2) {
-    ElMessage.warning('请先选择时间周期')
-    return
+    ElMessage.warning("请先选择时间周期");
+    return;
   }
 
-  const start = new Date(form.dateRange[0])
-  const end = new Date(form.dateRange[1])
-  const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24))
-  const weeks = Math.ceil(days / 7)
+  const start = new Date(form.dateRange[0]);
+  const end = new Date(form.dateRange[1]);
+  const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+  const weeks = Math.ceil(days / 7);
 
-  timeBreakdown.value = []
-  let currentDate = new Date(start)
+  timeBreakdown.value = [];
+  let currentDate = new Date(start);
 
   for (let i = 0; i < weeks; i++) {
-    const weekStart = new Date(currentDate)
-    let weekEnd = new Date(currentDate) // Fixed: changed from const to let
-    weekEnd.setDate(weekEnd.getDate() + 6)
-    if (weekEnd > end) weekEnd = new Date(end)
+    const weekStart = new Date(currentDate);
+    let weekEnd = new Date(currentDate); // Fixed: changed from const to let
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    if (weekEnd > end) weekEnd = new Date(end);
 
     const weekDays =
-      Math.ceil((weekEnd - weekStart) / (1000 * 60 * 60 * 24)) + 1
-    const weekAmount = (form.target_amount / days) * weekDays
-    const weekQuantity = Math.floor((form.target_quantity / days) * weekDays)
+      Math.ceil((weekEnd - weekStart) / (1000 * 60 * 60 * 24)) + 1;
+    const weekAmount = (form.target_amount / days) * weekDays;
+    const weekQuantity = Math.floor((form.target_quantity / days) * weekDays);
 
     timeBreakdown.value.push({
       week: `第${i + 1}周`,
-      period_start: weekStart.toISOString().split('T')[0],
-      period_end: weekEnd.toISOString().split('T')[0],
+      period_start: weekStart.toISOString().split("T")[0],
+      period_end: weekEnd.toISOString().split("T")[0],
       target_amount: weekAmount,
-      target_quantity: weekQuantity
-    })
+      target_quantity: weekQuantity,
+    });
 
-    currentDate.setDate(currentDate.getDate() + 7)
+    currentDate.setDate(currentDate.getDate() + 7);
   }
 
-  ElMessage.success('自动计算完成')
-}
+  ElMessage.success("自动计算完成");
+};
 
 // 提交表单
 const handleSubmit = async () => {
-  if (!formRef.value) return
+  if (!formRef.value) return;
+  if (form.target_type === "operation") {
+    handleOperationMetricChange();
+  }
 
-  if (form.target_type === 'shop') {
-    form.target_name = autoTargetName.value
+  if (form.target_type === "shop") {
+    form.target_name = autoTargetName.value;
     if (!form.targetMonth) {
-      ElMessage.warning('请选择目标月份')
-      return
+      ElMessage.warning("请选择目标月份");
+      return;
     }
   }
 
   // 验证拆分总和
-  if (breakdownTab.value === 'shop') {
+  if (form.target_type !== "operation" && breakdownTab.value === "shop") {
     const okAmount =
-      Math.abs(shopBreakdownTotalAmount.value - form.target_amount) < 0.02
-    const okQty = shopBreakdownTotalQuantity.value === form.target_quantity
+      Math.abs(shopBreakdownTotalAmount.value - form.target_amount) < 0.02;
+    const okQty = shopBreakdownTotalQuantity.value === form.target_quantity;
     if (!okAmount || !okQty) {
       ElMessage.warning(
-        '店铺拆分总和需等于总目标，可使用「自动计算」按百分比回填'
-      )
-      return
+        "店铺拆分总和需等于总目标，可使用「自动计算」按百分比回填",
+      );
+      return;
     }
-  } else {
+  } else if (form.target_type !== "operation") {
     if (
       timeBreakdownTotalAmount.value !== form.target_amount ||
       timeBreakdownTotalQuantity.value !== form.target_quantity
     ) {
-      ElMessage.warning('时间拆分总和必须等于总目标')
-      return
+      ElMessage.warning("时间拆分总和必须等于总目标");
+      return;
     }
   }
 
   await formRef.value.validate(async (valid) => {
-    if (!valid) return
-    submitting.value = true
+    if (!valid) return;
+    submitting.value = true;
     try {
-      let periodStart, periodEnd
-      if (form.target_type === 'shop' && form.targetMonth) {
-        const [y, m] = form.targetMonth.split('-')
-        periodStart = `${y}-${m}-01`
-        const lastDay = new Date(parseInt(y, 10), parseInt(m, 10), 0)
-        periodEnd = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
+      let periodStart, periodEnd;
+      if (form.target_type === "shop" && form.targetMonth) {
+        const [y, m] = form.targetMonth.split("-");
+        periodStart = `${y}-${m}-01`;
+        const lastDay = new Date(parseInt(y, 10), parseInt(m, 10), 0);
+        periodEnd = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, "0")}-${String(lastDay.getDate()).padStart(2, "0")}`;
       } else if (form.dateRange && form.dateRange.length === 2) {
-        const d0 = form.dateRange[0]
-        const d1 = form.dateRange[1]
+        const d0 = form.dateRange[0];
+        const d1 = form.dateRange[1];
         periodStart =
-          typeof d0 === 'string'
+          typeof d0 === "string"
             ? d0.slice(0, 10)
-            : d0.toISOString().slice(0, 10)
+            : d0.toISOString().slice(0, 10);
         periodEnd =
-          typeof d1 === 'string'
+          typeof d1 === "string"
             ? d1.slice(0, 10)
-            : d1.toISOString().slice(0, 10)
+            : d1.toISOString().slice(0, 10);
       } else {
-        ElMessage.warning('请选择时间周期或目标月份')
-        submitting.value = false
-        return
+        ElMessage.warning("请选择时间周期或目标月份");
+        submitting.value = false;
+        return;
       }
 
       const data = {
@@ -2004,113 +2251,139 @@ const handleSubmit = async () => {
         period_start: periodStart,
         period_end: periodEnd,
         target_amount: form.target_amount,
-        target_quantity: form.target_quantity
-      }
+        target_quantity: form.target_quantity,
+        target_profit_amount: form.target_profit_amount,
+        metric_code: form.metric_code || undefined,
+        metric_name: form.metric_name || undefined,
+        metric_direction: form.metric_direction || undefined,
+        target_value: form.metric_code ? Number(form.target_value) || 0 : undefined,
+        max_score: form.metric_code ? Number(form.max_score) || 0 : undefined,
+        penalty_enabled: !!form.penalty_enabled,
+        penalty_threshold: form.penalty_enabled ? Number(form.penalty_threshold) || 0 : undefined,
+        penalty_per_unit: form.penalty_enabled ? Number(form.penalty_per_unit) || 0 : undefined,
+        penalty_max: form.penalty_enabled ? Number(form.penalty_max) || 0 : undefined,
+        manual_score_enabled: !!form.manual_score_enabled,
+        manual_score_value: form.manual_score_enabled ? Number(form.manual_score_value) || 0 : undefined,
+      };
 
-      let response
+      let response;
       if (form.id) {
-        response = await api.updateTarget(form.id, data)
+        response = await api.updateTarget(form.id, data);
       } else {
-        response = await api.createTarget(data)
+        response = await api.createTarget(data);
       }
 
-      const targetId = response?.id ?? form.id
+      const targetId = response?.id ?? form.id;
       if (
-        breakdownTab.value === 'shop' &&
+        breakdownTab.value === "shop" &&
         shopBreakdown.value.length > 0 &&
         targetId
       ) {
         for (const row of shopBreakdown.value) {
-          if (!row.platform_code || !row.shop_id) continue
+          if (!row.platform_code || !row.shop_id) continue;
           await api.createTargetBreakdown(targetId, {
-            breakdown_type: 'shop',
+            breakdown_type: "shop",
             platform_code: row.platform_code,
             shop_id: row.shop_id,
             target_amount: row.target_amount ?? 0,
-            target_quantity: row.target_quantity ?? 0
-          })
+            target_quantity: row.target_quantity ?? 0,
+          });
         }
       }
 
-      ElMessage.success(form.id ? '更新成功' : '创建成功')
-      dialogVisible.value = false
-      if (form.target_type === 'shop') loadMonthlyTarget()
-      else loadTargets()
+      ElMessage.success(form.id ? "更新成功" : "创建成功");
+      dialogVisible.value = false;
+      if (form.target_type === "shop") loadMonthlyTarget();
+      else loadTargets();
     } catch (error) {
-      handleApiError(error, { showMessage: true, logError: true })
+      handleApiError(error, { showMessage: true, logError: true });
     } finally {
-      submitting.value = false
+      submitting.value = false;
     }
-  })
-}
+  });
+};
 
 // 关闭对话框
 const handleDialogClose = () => {
-  formRef.value?.resetFields()
-  form.targetMonth = ''
-  shopBreakdown.value = []
-  timeBreakdown.value = []
-}
+  formRef.value?.resetFields();
+  form.targetMonth = "";
+  form.target_profit_amount = 0;
+  form.metric_code = "";
+  form.metric_name = "";
+  form.metric_direction = "";
+  form.target_value = 0;
+  form.max_score = 20;
+  form.penalty_enabled = false;
+  form.penalty_threshold = 0;
+  form.penalty_per_unit = 0;
+  form.penalty_max = 0;
+  form.manual_score_enabled = false;
+  form.manual_score_value = 0;
+  shopBreakdown.value = [];
+  timeBreakdown.value = [];
+};
 
 // 导出
 const handleExport = () => {
-  ElMessage.info('导出功能开发中（Mock阶段）')
+  ElMessage.info("导出功能开发中（Mock阶段）");
   // TODO: 实现Excel导出功能
-}
+};
 
 // 辅助函数
 const getTargetTypeLabel = (type) => {
   const map = {
-    shop: '店铺目标',
-    product: '产品目标',
-    campaign: '战役目标'
-  }
-  return map[type] || type
-}
+    shop: "店铺目标",
+    product: "产品目标",
+    campaign: "战役目标",
+    operation: "运营目标",
+  };
+  return map[type] || type;
+};
 
 const getTargetTypeTagType = (type) => {
   const map = {
-    shop: 'success',
-    product: 'warning',
-    campaign: 'info'
-  }
-  return map[type] || ''
-}
+    shop: "success",
+    product: "warning",
+    campaign: "info",
+    operation: "danger",
+  };
+  return map[type] || "";
+};
 
 const getStatusLabel = (status) => {
   const map = {
-    active: '进行中',
-    completed: '已完成',
-    cancelled: '已取消'
-  }
-  return map[status] || status
-}
+    active: "进行中",
+    completed: "已完成",
+    cancelled: "已取消",
+  };
+  return map[status] || status;
+};
 
 const getStatusTagType = (status) => {
   const map = {
-    active: 'success',
-    completed: 'info',
-    cancelled: 'danger'
-  }
-  return map[status] || ''
-}
+    active: "success",
+    completed: "info",
+    cancelled: "danger",
+  };
+  return map[status] || "";
+};
 
 watch(activeTab, (tab) => {
-  if (tab === 'shop') loadMonthlyTarget()
-  else if (tab === 'product' || tab === 'campaign') {
-    filters.targetType = tab
-    loadTargets()
+  if (tab === "shop") loadMonthlyTarget();
+  else if (tab === "product" || tab === "campaign" || tab === "operation") {
+    filters.targetType = tab;
+    loadTargets();
   }
-})
+});
 
 onMounted(() => {
-  loadTargetShops()
-  if (activeTab.value === 'shop') loadMonthlyTarget()
+  loadTargetShops();
+  if (activeTab.value === "shop") loadMonthlyTarget();
   else {
-    filters.targetType = activeTab.value
-    loadTargets()
+    filters.targetType = activeTab.value;
+    loadTargets();
   }
-})
+});
 </script>
 
 <style scoped>

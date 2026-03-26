@@ -442,6 +442,87 @@ def _build_metric_detail(details: Dict[str, Any], metric: str, score_value: Opti
     }
 
 
+def _calculate_operation_metric_score(target: Any) -> tuple[float, Dict[str, Any]]:
+    direction = getattr(target, "metric_direction", None)
+    target_value = getattr(target, "target_value", None)
+    achieved_value = getattr(target, "achieved_value", None)
+    max_score = float(getattr(target, "max_score", 0) or 0)
+    penalty_enabled = bool(getattr(target, "penalty_enabled", False))
+    penalty_threshold = getattr(target, "penalty_threshold", None)
+    penalty_per_unit = float(getattr(target, "penalty_per_unit", 0) or 0)
+    penalty_max = float(getattr(target, "penalty_max", 0) or 0)
+    manual_score_enabled = bool(getattr(target, "manual_score_enabled", False))
+    manual_score_value = getattr(target, "manual_score_value", None)
+
+    if direction == "manual_score" or manual_score_enabled:
+        score = max(0.0, min(float(manual_score_value or 0), max_score))
+        return score, {
+            "status": "calculated",
+            "source": "target_management_manual_score",
+            "target": target_value,
+            "achieved": achieved_value,
+            "rate": None,
+            "calculation": f"manual_score={score:.2f}",
+            "message": None,
+        }
+
+    if target_value in (None, 0) or achieved_value is None:
+        return 0.0, {
+            "status": "pending_design",
+            "source": "target_management",
+            "target": target_value,
+            "achieved": achieved_value,
+            "rate": None,
+            "calculation": None,
+            "message": "运营目标缺少目标值或实际值，当前不参与绩效得分。",
+        }
+
+    target_float = float(target_value)
+    achieved_float = float(achieved_value)
+
+    if direction == "higher_better":
+        ratio = min(max(achieved_float / target_float, 0.0), 1.0)
+        score = max_score * ratio
+        calc_text = f"min({achieved_float:.2f}/{target_float:.2f}, 1) * {max_score:.2f}"
+        return round(score, 4), {
+            "status": "calculated",
+            "source": "target_management",
+            "target": target_float,
+            "achieved": achieved_float,
+            "rate": round(ratio * 100, 4),
+            "calculation": calc_text,
+            "message": None,
+        }
+
+    if direction == "lower_better":
+        ratio = 1.0 if achieved_float <= target_float else min(max(target_float / achieved_float, 0.0), 1.0)
+        score = max_score * ratio
+        penalty = 0.0
+        if penalty_enabled and penalty_threshold is not None and achieved_float > float(penalty_threshold):
+            penalty = min((achieved_float - float(penalty_threshold)) * penalty_per_unit, penalty_max)
+        score = max(score - penalty, -max_score)
+        calc_text = f"base=min({target_float:.2f}/{max(achieved_float, 1e-9):.2f}, 1) * {max_score:.2f}; penalty={penalty:.2f}"
+        return round(score, 4), {
+            "status": "calculated",
+            "source": "target_management",
+            "target": target_float,
+            "achieved": achieved_float,
+            "rate": round(ratio * 100, 4),
+            "calculation": calc_text,
+            "message": None,
+        }
+
+    return 0.0, {
+        "status": "pending_design",
+        "source": "target_management",
+        "target": target_value,
+        "achieved": achieved_value,
+        "rate": None,
+        "calculation": None,
+        "message": "运营目标方向未配置，当前不参与绩效得分。",
+    }
+
+
 async def invalidate_performance_related_caches(cache_service) -> None:
     await cache_service.invalidate("performance_scores")
     await cache_service.invalidate("performance_scores_shop")
@@ -942,10 +1023,14 @@ async def calculate_performance_scores(
                     "shop_id": row.shop_id,
                     "target": 0.0,
                     "achieved": 0.0,
+                    "target_profit_amount": 0.0,
+                    "achieved_profit_amount": 0.0,
                 },
             )
             rec["target"] += float(row.target_amount or 0)
             rec["achieved"] += float(row.achieved_amount or 0)
+            rec["target_profit_amount"] += float(getattr(row, "target_profit_amount", 0) or 0)
+            rec["achieved_profit_amount"] += float(getattr(row, "achieved_profit_amount", 0) or 0)
 
         # 2) 若目标分解为空，回退 PostgreSQL 店铺赛马模块
         if not source_rows:
@@ -971,6 +1056,16 @@ async def calculate_performance_scores(
         except Exception as e:
             logger.warning("缁╂晥璁＄畻 PostgreSQL 搴楅摵鏈堝害鎸囨爣鍔犺浇澶辫触: %s", e)
 
+        operation_target_query = (
+            select(SalesTarget)
+            .where(SalesTarget.target_type == "operation")
+            .where(SalesTarget.period_start <= period_end)
+            .where(SalesTarget.period_end >= period_start)
+            .order_by(SalesTarget.created_at.desc())
+            .limit(1)
+        )
+        operation_target = (await db.execute(operation_target_query)).scalar_one_or_none()
+
         calc_list = []
         for rec in source_rows.values():
             platform_code = rec["platform_code"]
@@ -978,20 +1073,40 @@ async def calculate_performance_scores(
             key = f"{platform_code}|{current_shop_id}"
             target = float(rec["target"] or 0)
             achieved = float(rec["achieved"] or 0)
+            target_profit = float(rec.get("target_profit_amount") or 0)
             rate = (achieved / target) if target > 0 else _rate_percent_to_fraction(rec.get("achievement_rate"))
             sales_rate = _normalize_rate_percent(rate)
             sales_score = _score_by_rate(config.sales_max_score, rate)
-            profit_achieved = metrics_by_shop.get(key, {}).get("monthly_profit")
+            profit_achieved = float(
+                rec.get("achieved_profit_amount")
+                or metrics_by_shop.get(key, {}).get("monthly_profit")
+                or 0.0
+            )
+            profit_rate_fraction = (profit_achieved / target_profit) if target_profit > 0 else None
+            profit_rate = _normalize_rate_percent(profit_rate_fraction)
+            profit_score = _score_by_rate(config.profit_max_score, profit_rate_fraction) if target_profit > 0 else 0.0
+            operation_score, operation_details = _calculate_operation_metric_score(operation_target) if operation_target else (
+                0.0,
+                {
+                    "status": "pending_design",
+                    "source": None,
+                    "target": None,
+                    "achieved": None,
+                    "rate": None,
+                    "calculation": None,
+                            "message": None if target_profit > 0 else "Profit target pipeline is not ready.",
+                },
+            )
 
             calc_list.append(
                 {
                     "platform_code": platform_code,
                     "shop_id": current_shop_id,
                     "sales_score": sales_score,
-                    "profit_score": 0.0,
+                    "profit_score": profit_score,
                     "key_product_score": 0.0,
-                    "operation_score": 0.0,
-                    "total_score": round(sales_score, 4),
+                    "operation_score": operation_score,
+                    "total_score": round(sales_score + profit_score + operation_score, 4),
                     "rank": None,
                     "performance_coefficient": 1.0,
                     "score_details": {
@@ -1001,15 +1116,16 @@ async def calculate_performance_scores(
                             "target": target,
                             "achieved": achieved,
                             "rate": sales_rate,
-                            "calculation": f"min(达成率 {sales_rate or 0:.2f}%, 100%) * 销售满分 {config.sales_max_score}",
+                            "calculation": f"min(rate {sales_rate or 0:.2f}%, 100%) * sales max {config.sales_max_score}",
                         },
                         "profit": {
-                            "status": "pending_design",
-                            "source": "api.business_overview_shop_racing_module",
-                            "target": None,
+                            "status": "calculated" if target_profit > 0 else "pending_design",
+                            "source": "target_breakdown + api.business_overview_shop_racing_module" if target_profit > 0 else "api.business_overview_shop_racing_module",
+                            "target": target_profit if target_profit > 0 else None,
                             "achieved": profit_achieved,
-                            "rate": None,
-                            "message": "毛利目标链路尚未设计完成，当前仅预留接口，不参与绩效得分。",
+                            "rate": profit_rate,
+                            "calculation": f"min(rate {profit_rate or 0:.2f}%, 100%) * profit max {config.profit_max_score}" if target_profit > 0 else None,
+                            "message": None if target_profit > 0 else "Profit target pipeline is not ready.",
                         },
                         "key_product": {
                             "status": "pending_design",
@@ -1017,21 +1133,22 @@ async def calculate_performance_scores(
                             "target": None,
                             "achieved": None,
                             "rate": None,
-                            "message": "重点产品链路尚未设计完成，当前仅预留接口，不参与绩效得分。",
+                            "message": "Key product target pipeline is not ready.",
                         },
                         "operation": {
-                            "status": "pending_design",
-                            "source": None,
-                            "target": None,
-                            "achieved": None,
-                            "rate": None,
-                            "message": "运营得分链路尚未设计完成，当前仅预留接口，不参与绩效得分。",
+                            "status": operation_details["status"],
+                            "source": operation_details["source"],
+                            "target": operation_details["target"],
+                            "achieved": operation_details["achieved"],
+                            "rate": operation_details["rate"],
+                            "calculation": operation_details["calculation"],
+                            "message": operation_details["message"],
                         },
                         "summary": {
-                            "status": "partial",
-                            "ready_dimensions": ["sales"],
-                            "pending_dimensions": ["profit", "key_product", "operation"],
-                            "message": "当前仅销售额维度完成独立计算，其余维度待业务链路设计完成后接入。",
+                            "status": "complete" if (target_profit > 0 and operation_details["status"] == "calculated") else ("partial" if target_profit > 0 or operation_details["status"] == "calculated" else "partial"),
+                            "ready_dimensions": ["sales", "profit", "operation"] if (target_profit > 0 and operation_details["status"] == "calculated") else (["sales", "profit"] if target_profit > 0 else (["sales", "operation"] if operation_details["status"] == "calculated" else ["sales"])),
+                            "pending_dimensions": ["key_product"] if (target_profit > 0 and operation_details["status"] == "calculated") else (["key_product", "operation"] if target_profit > 0 else (["profit", "key_product"] if operation_details["status"] == "calculated" else ["profit", "key_product", "operation"])),
+                            "message": "Sales, profit, and operation dimensions are independently calculated." if (target_profit > 0 and operation_details["status"] == "calculated") else ("Sales and profit dimensions are independently calculated." if target_profit > 0 else ("Sales and operation dimensions are independently calculated." if operation_details["status"] == "calculated" else "Only sales dimension is independently calculated.")),
                         },
                     },
                 }
