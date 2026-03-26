@@ -1450,7 +1450,7 @@ const comparisonTableData = ref([])
 const targetValue = ref(0)
 const achievedValue = ref(0)
 const targetAchievementRate = ref(0)
-const targetUnit = ref('')
+const targetUnit = ref("")
 
 // 根据粒度计算列标题
 const currentPeriodLabel = computed(() => {

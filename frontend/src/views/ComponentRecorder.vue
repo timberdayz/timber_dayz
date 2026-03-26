@@ -1092,9 +1092,6 @@ const testConfig = ref({
   testUrl: '', // 测试页面URL
   testDataDomain: '' // 测试数据域
 })
-const segmentValidationSignal = ref("auto");
-const segmentValidationLoading = ref(false);
-const segmentValidationResult = ref(null);
 const segmentValidationSignal = ref('auto')
 const segmentValidationLoading = ref(false)
 const segmentValidationResult = ref(null)

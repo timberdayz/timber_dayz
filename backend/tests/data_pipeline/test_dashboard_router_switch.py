@@ -176,7 +176,9 @@ async def test_switched_app_serves_real_postgresql_dashboard_routes(monkeypatch)
                         10::numeric AS order_count,
                         32.1::numeric AS avg_order_value,
                         1.5::numeric AS attach_rate,
-                        120::numeric AS profit
+                        120::numeric AS profit,
+                        400::numeric AS target_amount,
+                        80::numeric AS achievement_rate
                     """
                 )
             )
