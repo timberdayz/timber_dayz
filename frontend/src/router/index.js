@@ -1054,6 +1054,7 @@ router.beforeEach((to, from, next) => {
       if (!authStore.user) {
         authStore.initAuth()
       }
+      userStore.hydrateFromStorage()
       isLoggedIn = true
     }
   }

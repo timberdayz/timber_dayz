@@ -1,3 +1,5 @@
+import { buildPersistedAuthState } from '../src/utils/authSession.js'
+
 export const SMOKE_ROUTES = [
   { name: 'BusinessOverview', path: '/business-overview', expectedTitle: '业务概览' },
   { name: 'SalesDashboardV3', path: '/sales-dashboard-v3', expectedTitle: '销售看板v3' },
@@ -29,39 +31,8 @@ export const SMOKE_ROUTES = [
   { name: 'SalesAnalysis', path: '/sales-analysis', expectedTitle: '销售分析' },
 ]
 
-const ADMIN_PERMISSIONS = [
-  'business-overview',
-  'sales-dashboard',
-  'system-settings',
-  'inventory-management',
-  'target:read',
-  'user-management',
-  'role-management',
-  'permission-management',
-]
-
 export function buildAuthStorageEntries(authPayload) {
-  const userInfo = authPayload?.user_info || {}
-  const roles = Array.isArray(userInfo.roles) && userInfo.roles.length > 0 ? userInfo.roles : ['admin']
-  const activeRole = roles.includes('admin') ? 'admin' : roles[0]
-  const serializedUser = JSON.stringify(userInfo)
-
-  return {
-    access_token: authPayload?.access_token || '',
-    refresh_token: authPayload?.refresh_token || '',
-    user_info: serializedUser,
-    userInfo: JSON.stringify({
-      id: userInfo.id,
-      username: userInfo.username,
-      name: userInfo.full_name || userInfo.username,
-      email: userInfo.email,
-      avatar: '',
-      roles,
-    }),
-    activeRole,
-    roles: JSON.stringify(roles),
-    permissions: JSON.stringify(ADMIN_PERMISSIONS),
-  }
+  return buildPersistedAuthState(authPayload)
 }
 
 export function summarizeSmokeResults(results) {
