@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import re
+import socket
+import os
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import make_url
 
 from backend.schemas.cloud_sync_admin import (
     CloudSyncCheckpointState,
@@ -41,6 +44,14 @@ def _sanitize_error_text(value: str | None) -> str | None:
     return sanitized
 
 
+def _probe_tcp_target(host: str, port: int, timeout_seconds: float = 1.0) -> tuple[bool, str | None]:
+    try:
+        with socket.create_connection((host, port), timeout=timeout_seconds):
+            return True, None
+    except Exception as exc:
+        return False, _sanitize_error_text(str(exc))
+
+
 class CloudSyncAdminQueryService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -64,6 +75,9 @@ class CloudSyncAdminQueryService:
             and _as_utc(task.finished_at) >= now - timedelta(hours=24)
         )
 
+        cloud_db_health = self._probe_cloud_db_health()
+        tunnel_health = self._probe_tunnel_health(cloud_db_health)
+
         payload = CloudSyncHealthSummary(
             worker=CloudSyncWorkerHealth(
                 status=(runtime_health or {}).get("status", "not_started"),
@@ -72,8 +86,8 @@ class CloudSyncAdminQueryService:
                 last_error=_sanitize_error_text((runtime_health or {}).get("last_error")),
                 last_heartbeat_at=(runtime_health or {}).get("last_heartbeat_at"),
             ),
-            tunnel=CloudSyncDependencyHealth(status="unknown"),
-            cloud_db=CloudSyncDependencyHealth(status="unknown"),
+            tunnel=CloudSyncDependencyHealth(**tunnel_health),
+            cloud_db=CloudSyncDependencyHealth(**cloud_db_health),
             queue=CloudSyncQueueSummary(
                 pending=sum(1 for task in tasks if task.status == "pending"),
                 running=sum(1 for task in tasks if task.status == "running"),
@@ -191,3 +205,62 @@ class CloudSyncAdminQueryService:
         if task is None:
             return CloudSyncLatestTaskState()
         return CloudSyncLatestTaskState(**self._serialize_task(task).model_dump())
+
+    def _probe_cloud_db_health(self) -> dict:
+        cloud_database_url = os.getenv("CLOUD_DATABASE_URL")
+        if not cloud_database_url:
+            return {
+                "status": "unknown",
+                "last_checked_at": _iso(datetime.now(timezone.utc)),
+                "error": None,
+            }
+
+        try:
+            parsed = make_url(cloud_database_url)
+            host = parsed.host or "127.0.0.1"
+            port = int(parsed.port or 5432)
+        except Exception as exc:
+            return {
+                "status": "unreachable",
+                "last_checked_at": _iso(datetime.now(timezone.utc)),
+                "error": _sanitize_error_text(str(exc)),
+            }
+
+        ok, error = _probe_tcp_target(host, port)
+        return {
+            "status": "reachable" if ok else "unreachable",
+            "last_checked_at": _iso(datetime.now(timezone.utc)),
+            "error": error,
+        }
+
+    def _probe_tunnel_health(self, cloud_db_health: dict) -> dict:
+        tunnel_enabled = str(os.getenv("CLOUD_SYNC_TUNNEL_ENABLED", "")).lower() in {"1", "true", "yes", "on"}
+        tunnel_host = os.getenv("CLOUD_SYNC_TUNNEL_HOST")
+        tunnel_port = os.getenv("CLOUD_SYNC_TUNNEL_PORT")
+        cloud_database_url = os.getenv("CLOUD_DATABASE_URL")
+
+        if tunnel_enabled and tunnel_host and tunnel_port:
+            ok, error = _probe_tcp_target(tunnel_host, int(tunnel_port))
+            return {
+                "status": "healthy" if ok else "unhealthy",
+                "last_checked_at": _iso(datetime.now(timezone.utc)),
+                "error": error,
+            }
+
+        if cloud_database_url:
+            try:
+                parsed = make_url(cloud_database_url)
+                if (parsed.host or "").lower() in {"127.0.0.1", "localhost"}:
+                    return {
+                        "status": "healthy" if cloud_db_health["status"] == "reachable" else "unhealthy",
+                        "last_checked_at": _iso(datetime.now(timezone.utc)),
+                        "error": cloud_db_health.get("error"),
+                    }
+            except Exception:
+                pass
+
+        return {
+            "status": "unknown",
+            "last_checked_at": _iso(datetime.now(timezone.utc)),
+            "error": None,
+        }

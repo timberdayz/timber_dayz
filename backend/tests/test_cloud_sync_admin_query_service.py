@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import socket
 
 import pytest
 import pytest_asyncio
@@ -107,3 +108,40 @@ async def test_query_service_redacts_credentials_in_errors(cloud_sync_sqlite_ses
     assert rows[0]["last_error"] is not None
     assert "super-secret" not in rows[0]["last_error"]
     assert "***" in rows[0]["last_error"]
+
+
+@pytest.mark.asyncio
+async def test_health_summary_probes_local_forwarded_cloud_db(monkeypatch, seeded_cloud_sync_query_data):
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL",
+        f"postgresql://erp_user:secret-pass@127.0.0.1:{port}/xihong_erp",
+    )
+
+    service = CloudSyncAdminQueryService(seeded_cloud_sync_query_data)
+    payload = await service.get_health_summary()
+
+    listener.close()
+
+    assert payload["cloud_db"]["status"] == "reachable"
+    assert payload["tunnel"]["status"] == "healthy"
+    assert payload["cloud_db"]["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_health_summary_redacts_cloud_db_probe_error(monkeypatch, seeded_cloud_sync_query_data):
+    monkeypatch.setenv(
+        "CLOUD_DATABASE_URL",
+        "postgresql://erp_user:secret-pass@127.0.0.1:1/xihong_erp",
+    )
+
+    service = CloudSyncAdminQueryService(seeded_cloud_sync_query_data)
+    payload = await service.get_health_summary()
+
+    assert payload["cloud_db"]["status"] == "unreachable"
+    assert payload["cloud_db"]["error"] is not None
+    assert "secret-pass" not in payload["cloud_db"]["error"]
