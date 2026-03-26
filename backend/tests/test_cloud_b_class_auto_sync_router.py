@@ -23,12 +23,21 @@ async def test_cloud_sync_health_endpoint_returns_worker_status(monkeypatch):
 
     monkeypatch.setattr(
         cloud_sync,
-        "build_health_provider",
-        lambda: lambda request=None: {
-            "worker": {"status": "idle"},
-            "tunnel": {"status": "healthy"},
-            "queue": {"pending": 0},
-        },
+        "build_query_service",
+        lambda *args, **kwargs: type(
+            "FakeQueryService",
+            (),
+            {
+                "get_health_summary": staticmethod(
+                    lambda runtime_health=None: {
+                        "worker": {"status": "idle"},
+                        "tunnel": {"status": "healthy"},
+                        "cloud_db": {"status": "reachable"},
+                        "queue": {"pending": 0, "running": 0, "retry_waiting": 0},
+                    }
+                )
+            },
+        )(),
     )
 
     app = _build_test_app()
@@ -39,14 +48,15 @@ async def test_cloud_sync_health_endpoint_returns_worker_status(monkeypatch):
         body = response.json()
         assert "worker" in body
         assert "tunnel" in body
+        assert "cloud_db" in body
 
 
 @pytest.mark.asyncio
 async def test_manual_trigger_endpoint_enqueues_task(monkeypatch):
     from backend.routers import cloud_sync
 
-    class FakeDispatchService:
-        def enqueue_manual(self, source_table_name: str):
+    class FakeCommandService:
+        async def trigger_sync(self, source_table_name: str):
             return {
                 "job_id": "job-1",
                 "status": "pending",
@@ -55,8 +65,8 @@ async def test_manual_trigger_endpoint_enqueues_task(monkeypatch):
 
     monkeypatch.setattr(
         cloud_sync,
-        "build_dispatch_service",
-        lambda: FakeDispatchService(),
+        "build_command_service",
+        lambda *args, **kwargs: FakeCommandService(),
     )
 
     app = _build_test_app()
@@ -74,14 +84,26 @@ async def test_manual_trigger_endpoint_enqueues_task(monkeypatch):
 async def test_list_and_get_task_endpoints(monkeypatch):
     from backend.routers import cloud_sync
 
-    class FakeDispatchService:
-        def list_tasks(self):
-            return [{"job_id": "job-1", "status": "pending", "source_table_name": "fact_shopee_orders_daily"}]
+    class FakeQueryService:
+        async def list_tasks(self):
+            return [
+                {
+                    "job_id": "job-1",
+                    "status": "pending",
+                    "source_table_name": "fact_shopee_orders_daily",
+                    "attempt_count": 1,
+                }
+            ]
 
-        def get_task(self, job_id: str):
-            return {"job_id": job_id, "status": "pending", "source_table_name": "fact_shopee_orders_daily"}
+        async def get_task(self, job_id: str):
+            return {
+                "job_id": job_id,
+                "status": "pending",
+                "source_table_name": "fact_shopee_orders_daily",
+                "attempt_count": 1,
+            }
 
-    monkeypatch.setattr(cloud_sync, "build_dispatch_service", lambda: FakeDispatchService())
+    monkeypatch.setattr(cloud_sync, "build_query_service", lambda *args, **kwargs: FakeQueryService())
 
     app = _build_test_app()
     transport = ASGITransport(app=app)
@@ -91,19 +113,21 @@ async def test_list_and_get_task_endpoints(monkeypatch):
 
         assert list_response.status_code == 200
         assert list_response.json()[0]["job_id"] == "job-1"
+        assert list_response.json()[0]["attempt_count"] == 1
         assert get_response.status_code == 200
         assert get_response.json()["job_id"] == "job-1"
+        assert get_response.json()["attempt_count"] == 1
 
 
 @pytest.mark.asyncio
 async def test_retry_task_endpoint(monkeypatch):
     from backend.routers import cloud_sync
 
-    class FakeDispatchService:
-        def retry(self, job_id: str):
+    class FakeCommandService:
+        async def retry_task(self, job_id: str):
             return {"job_id": job_id, "status": "pending"}
 
-    monkeypatch.setattr(cloud_sync, "build_dispatch_service", lambda: FakeDispatchService())
+    monkeypatch.setattr(cloud_sync, "build_command_service", lambda *args, **kwargs: FakeCommandService())
 
     app = _build_test_app()
     transport = ASGITransport(app=app)
@@ -118,11 +142,11 @@ async def test_retry_task_endpoint(monkeypatch):
 async def test_manual_trigger_endpoint_rejects_invalid_table_name(monkeypatch):
     from backend.routers import cloud_sync
 
-    class FakeDispatchService:
-        def enqueue_manual(self, source_table_name: str):
+    class FakeCommandService:
+        async def trigger_sync(self, source_table_name: str):
             return {"job_id": "job-1"}
 
-    monkeypatch.setattr(cloud_sync, "build_dispatch_service", lambda: FakeDispatchService())
+    monkeypatch.setattr(cloud_sync, "build_command_service", lambda *args, **kwargs: FakeCommandService())
 
     app = _build_test_app()
     transport = ASGITransport(app=app)
@@ -133,3 +157,63 @@ async def test_manual_trigger_endpoint_rejects_invalid_table_name(monkeypatch):
         )
 
         assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_tables_endpoint_returns_table_rows(monkeypatch):
+    from backend.routers import cloud_sync
+
+    class FakeQueryService:
+        async def list_table_states(self):
+            return [
+                {
+                    "source_table_name": "fact_shopee_orders_daily",
+                    "checkpoint": {"last_source_id": 321},
+                    "latest_task": {"job_id": "job-1"},
+                    "projection": {"status": "pending"},
+                }
+            ]
+
+    monkeypatch.setattr(cloud_sync, "build_query_service", lambda *args, **kwargs: FakeQueryService())
+
+    app = _build_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        response = await client.get("/api/cloud-sync/tables")
+
+        assert response.status_code == 200
+        assert response.json()[0]["source_table_name"] == "fact_shopee_orders_daily"
+
+
+@pytest.mark.asyncio
+async def test_table_action_endpoints(monkeypatch):
+    from backend.routers import cloud_sync
+
+    class FakeCommandService:
+        async def dry_run_table(self, table_name: str):
+            return {"status": "accepted", "source_table_name": table_name}
+
+        async def repair_checkpoint(self, table_name: str):
+            return {"status": "accepted", "source_table_name": table_name}
+
+        async def refresh_projection(self, table_name: str):
+            return {"status": "accepted", "source_table_name": table_name}
+
+        async def cancel_task(self, job_id: str):
+            return {"job_id": job_id, "status": "cancelled"}
+
+    monkeypatch.setattr(cloud_sync, "build_command_service", lambda *args, **kwargs: FakeCommandService())
+
+    app = _build_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        dry_run_response = await client.post("/api/cloud-sync/tables/fact_shopee_orders_daily/dry-run")
+        repair_response = await client.post("/api/cloud-sync/tables/fact_shopee_orders_daily/repair-checkpoint")
+        projection_response = await client.post("/api/cloud-sync/tables/fact_shopee_orders_daily/refresh-projection")
+        cancel_response = await client.post("/api/cloud-sync/tasks/job-1/cancel")
+
+        assert dry_run_response.status_code == 200
+        assert repair_response.status_code == 200
+        assert projection_response.status_code == 200
+        assert cancel_response.status_code == 200
+        assert cancel_response.json()["status"] == "cancelled"
