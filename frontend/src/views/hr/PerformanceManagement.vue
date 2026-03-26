@@ -144,92 +144,45 @@
           <el-descriptions-item label="店铺名称" :span="2">{{ performanceDetail.data.shop_name }}</el-descriptions-item>
           <el-descriptions-item label="考核周期">{{ performanceDetail.data.period }}</el-descriptions-item>
           <el-descriptions-item label="总分">
-            <el-tag :type="performanceDetail.data.total_score >= 90 ? 'success' : performanceDetail.data.total_score >= 80 ? 'warning' : 'danger'" size="large">
-              {{ performanceDetail.data.total_score.toFixed(1) }}
+            <el-tag :type="performanceDetail.data.total_score != null ? (performanceDetail.data.total_score >= 90 ? 'success' : performanceDetail.data.total_score >= 80 ? 'warning' : 'danger') : 'info'" size="large">
+              {{ performanceDetail.data.total_score != null ? performanceDetail.data.total_score.toFixed(1) : '未完成' }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="排名">
-            <el-tag :type="performanceDetail.data.rank === 1 ? 'success' : performanceDetail.data.rank === 2 ? 'warning' : performanceDetail.data.rank === 3 ? 'info' : ''" size="small">
-              第{{ performanceDetail.data.rank }}名
+            <el-tag :type="performanceDetail.data.rank === 1 ? 'success' : performanceDetail.data.rank === 2 ? 'warning' : performanceDetail.data.rank === 3 ? 'info' : 'info'" size="small">
+              {{ performanceDetail.data.rank != null ? `第${performanceDetail.data.rank}名` : '未完成' }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="绩效系数">
-            <el-tag :type="performanceDetail.data.performance_coefficient >= 1.2 ? 'success' : performanceDetail.data.performance_coefficient >= 1.0 ? 'warning' : 'danger'" size="small">
-              {{ performanceDetail.data.performance_coefficient.toFixed(2) }}
+            <el-tag :type="performanceDetail.data.performance_coefficient != null ? (performanceDetail.data.performance_coefficient >= 1.2 ? 'success' : performanceDetail.data.performance_coefficient >= 1.0 ? 'warning' : 'danger') : 'info'" size="small">
+              {{ performanceDetail.data.performance_coefficient != null ? performanceDetail.data.performance_coefficient.toFixed(2) : '未完成' }}
             </el-tag>
           </el-descriptions-item>
         </el-descriptions>
         
-        <!-- 得分详情 -->
         <el-card style="margin-top: 20px;">
           <template #header>
             <span>得分详情</span>
           </template>
-          
-          <!-- 销售额得分 -->
-          <el-card shadow="never" style="margin-bottom: 15px;">
+          <el-card
+            v-for="card in detailMetricCards"
+            :key="card.key"
+            shadow="never"
+            style="margin-bottom: 15px;"
+          >
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-weight: bold;">销售额得分（权重{{ weightConfig.sales_weight }}%）</span>
-              <el-tag :type="performanceDetail.data.sales_score.score >= 27 ? 'success' : performanceDetail.data.sales_score.score >= 24 ? 'warning' : 'danger'" size="small">
-                {{ performanceDetail.data.sales_score.score.toFixed(1) }}分
+              <span style="font-weight: bold;">{{ card.label }}（权重{{ card.weight }}%）</span>
+              <el-tag :type="metricTagType(card.metric, card.successThreshold, card.warningThreshold)" size="small">
+                {{ metricScoreText(card.metric) }}
               </el-tag>
             </div>
             <el-descriptions :column="2" size="small" border>
-              <el-descriptions-item label="目标">{{ formatCurrency(performanceDetail.data.sales_score.target) }}</el-descriptions-item>
-              <el-descriptions-item label="达成">{{ formatCurrency(performanceDetail.data.sales_score.achieved) }}</el-descriptions-item>
-              <el-descriptions-item label="达成率">{{ performanceDetail.data.sales_score.rate.toFixed(1) }}%</el-descriptions-item>
-              <el-descriptions-item label="计算方式">{{ performanceDetail.data.sales_score.calculation }}</el-descriptions-item>
-            </el-descriptions>
-          </el-card>
-          
-          <!-- 毛利得分 -->
-          <el-card shadow="never" style="margin-bottom: 15px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-weight: bold;">毛利得分（权重{{ weightConfig.profit_weight }}%）</span>
-              <el-tag :type="performanceDetail.data.profit_score.score >= 22.5 ? 'success' : performanceDetail.data.profit_score.score >= 20 ? 'warning' : 'danger'" size="small">
-                {{ performanceDetail.data.profit_score.score.toFixed(1) }}分
-              </el-tag>
-            </div>
-            <el-descriptions :column="2" size="small" border>
-              <el-descriptions-item label="目标">{{ formatCurrency(performanceDetail.data.profit_score.target) }}</el-descriptions-item>
-              <el-descriptions-item label="达成">{{ formatCurrency(performanceDetail.data.profit_score.achieved) }}</el-descriptions-item>
-              <el-descriptions-item label="达成率">{{ performanceDetail.data.profit_score.rate.toFixed(1) }}%</el-descriptions-item>
-              <el-descriptions-item label="计算方式">{{ performanceDetail.data.profit_score.calculation }}</el-descriptions-item>
-            </el-descriptions>
-          </el-card>
-          
-          <!-- 重点产品得分 -->
-          <el-card shadow="never" style="margin-bottom: 15px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-weight: bold;">重点产品得分（权重{{ weightConfig.key_product_weight }}%）</span>
-              <el-tag :type="performanceDetail.data.key_product_score.score >= 22.5 ? 'success' : performanceDetail.data.key_product_score.score >= 20 ? 'warning' : 'danger'" size="small">
-                {{ performanceDetail.data.key_product_score.score.toFixed(1) }}分
-              </el-tag>
-            </div>
-            <el-descriptions :column="2" size="small" border>
-              <el-descriptions-item label="目标">{{ performanceDetail.data.key_product_score.target }}</el-descriptions-item>
-              <el-descriptions-item label="达成">{{ performanceDetail.data.key_product_score.achieved }}</el-descriptions-item>
-              <el-descriptions-item label="达成率">{{ performanceDetail.data.key_product_score.rate.toFixed(1) }}%</el-descriptions-item>
-              <el-descriptions-item label="计算方式">{{ performanceDetail.data.key_product_score.calculation }}</el-descriptions-item>
-              <el-descriptions-item label="滞销清理">{{ performanceDetail.data.key_product_score.breakdown.backlog_clearance }}</el-descriptions-item>
-              <el-descriptions-item label="服务得分">{{ performanceDetail.data.key_product_score.breakdown.service_score }}</el-descriptions-item>
-            </el-descriptions>
-          </el-card>
-          
-          <!-- 运营得分 -->
-          <el-card shadow="never">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-weight: bold;">运营得分（权重{{ weightConfig.operation_weight }}%）</span>
-              <el-tag :type="performanceDetail.data.operation_score.score >= 18 ? 'success' : performanceDetail.data.operation_score.score >= 16 ? 'warning' : 'danger'" size="small">
-                {{ performanceDetail.data.operation_score.score.toFixed(1) }}分
-              </el-tag>
-            </div>
-            <el-descriptions :column="2" size="small" border>
-              <el-descriptions-item label="原始得分">{{ performanceDetail.data.operation_score.score_raw.toFixed(1) }}分</el-descriptions-item>
-              <el-descriptions-item label="计算方式">{{ performanceDetail.data.operation_score.calculation }}</el-descriptions-item>
-              <el-descriptions-item label="订单履约率">{{ performanceDetail.data.operation_score.breakdown.order_fulfillment_rate.toFixed(1) }}%</el-descriptions-item>
-              <el-descriptions-item label="客户满意度">{{ performanceDetail.data.operation_score.breakdown.customer_satisfaction.toFixed(1) }}%</el-descriptions-item>
-              <el-descriptions-item label="库存周转率">{{ performanceDetail.data.operation_score.breakdown.inventory_turnover.toFixed(1) }}%</el-descriptions-item>
+              <el-descriptions-item label="状态">{{ isMetricCalculated(card.metric) ? '已计算' : '未就绪' }}</el-descriptions-item>
+              <el-descriptions-item label="数据来源">{{ card.metric?.source || '—' }}</el-descriptions-item>
+              <el-descriptions-item label="目标">{{ metricValueText(card.metric, 'target', card.targetType) }}</el-descriptions-item>
+              <el-descriptions-item label="达成">{{ metricValueText(card.metric, 'achieved', card.achievedType) }}</el-descriptions-item>
+              <el-descriptions-item label="达成率">{{ metricValueText(card.metric, 'rate', 'percent') }}</el-descriptions-item>
+              <el-descriptions-item label="说明">{{ metricMessageText(card.metric) }}</el-descriptions-item>
             </el-descriptions>
           </el-card>
         </el-card>
@@ -413,6 +366,82 @@ function formatCell(v) {
 }
 
 // 加载绩效列表
+function isMetricCalculated(metric) {
+  return metric?.status === 'calculated'
+}
+
+function metricTagType(metric, successThreshold, warningThreshold) {
+  if (!isMetricCalculated(metric)) return 'info'
+  const score = Number(metric?.score || 0)
+  if (score >= successThreshold) return 'success'
+  if (score >= warningThreshold) return 'warning'
+  return 'danger'
+}
+
+function metricScoreText(metric) {
+  if (!isMetricCalculated(metric) || metric?.score == null) return '未就绪'
+  return `${Number(metric.score).toFixed(1)}分`
+}
+
+function metricValueText(metric, field, valueType = 'text') {
+  const value = metric?.[field]
+  if (value == null || value === '') return '—'
+  if (valueType === 'currency') return formatCurrency(value)
+  if (valueType === 'percent') return formatPercent(value)
+  if (typeof value === 'number') return Number(value).toFixed(1)
+  return String(value)
+}
+
+function metricMessageText(metric) {
+  return metric?.calculation || metric?.message || '—'
+}
+
+const detailMetricCards = computed(() => {
+  const data = performanceDetail.data || {}
+  return [
+    {
+      key: 'sales_score',
+      label: '销售额得分',
+      weight: weightConfig.sales_weight,
+      metric: data.sales_score,
+      successThreshold: 27,
+      warningThreshold: 24,
+      targetType: 'currency',
+      achievedType: 'currency',
+    },
+    {
+      key: 'profit_score',
+      label: '毛利得分',
+      weight: weightConfig.profit_weight,
+      metric: data.profit_score,
+      successThreshold: 22.5,
+      warningThreshold: 20,
+      targetType: 'currency',
+      achievedType: 'currency',
+    },
+    {
+      key: 'key_product_score',
+      label: '重点产品得分',
+      weight: weightConfig.key_product_weight,
+      metric: data.key_product_score,
+      successThreshold: 22.5,
+      warningThreshold: 20,
+      targetType: 'text',
+      achievedType: 'text',
+    },
+    {
+      key: 'operation_score',
+      label: '运营得分',
+      weight: weightConfig.operation_weight,
+      metric: data.operation_score,
+      successThreshold: 18,
+      warningThreshold: 16,
+      targetType: 'text',
+      achievedType: 'text',
+    },
+  ]
+})
+
 const loadPerformanceList = async () => {
   performanceList.loading = true
   loadError.value = false
@@ -472,7 +501,7 @@ const handleRecalculate = async () => {
   calculating.value = true
   try {
     await api.calculatePerformanceScores(period)
-    ElMessage.success('已触发绩效计算，请稍后刷新查看结果')
+    ElMessage.success('已完成当月店铺绩效、个人绩效和提成重算，请刷新查看最新结果')
     await loadPerformanceList()
   } catch (error) {
     const code = error?.response?.data?.data?.error_code
@@ -496,7 +525,7 @@ const handleViewDetail = async (row) => {
     const period = typeof filters.period === 'string' ? filters.period : 
       (filters.period ? `${filters.period.getFullYear()}-${String(filters.period.getMonth() + 1).padStart(2, '0')}` : undefined)
     const response = await api.getShopPerformanceDetail(row.platform_code, row.shop_id, period)
-    performanceDetail.data = response || {}
+    performanceDetail.data = response?.data ?? response ?? {}
   } catch (error) {
     handleApiError(error, { showMessage: true, logError: true })
   } finally {

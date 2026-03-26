@@ -16,7 +16,9 @@ from unittest.mock import AsyncMock, MagicMock
 from starlette.requests import Request
 
 from backend.routers.hr_employee import get_my_income
-from backend.routers.performance_management import calculate_performance_scores
+import backend.routers.performance_management as performance_management_module
+from backend.routers.performance_management import calculate_performance_scores, list_performance_scores
+from modules.core.db import PerformanceScore
 
 
 def _json_body(resp) -> dict:
@@ -66,6 +68,215 @@ def test_calculate_returns_400_when_period_invalid():
     assert resp.status_code == 400
     body = _json_body(resp)
     assert body["success"] is False
+
+
+def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeypatch):
+    class _ScalarOneResult:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+    class _ScalarsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    config = SimpleNamespace(
+        id=1,
+        sales_max_score=30,
+        profit_max_score=25,
+        key_product_max_score=25,
+        operation_max_score=20,
+    )
+
+    execute_calls = {"n": 0}
+
+    async def _execute(_stmt):
+        execute_calls["n"] += 1
+        n = execute_calls["n"]
+        if n == 1:
+            return _ScalarOneResult(config)
+        if n == 2:
+            return _ScalarsResult([])
+        if n == 3:
+            return _ScalarOneResult(None)
+        raise AssertionError(f"unexpected execute call #{n}")
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    async def _fake_source_rows(_db, _period):
+        return {
+            "shopee|shop-1": {
+                "platform_code": "shopee",
+                "shop_id": "shop-1",
+                "target": 1000.0,
+                "achieved": 800.0,
+            }
+        }
+
+    income_calls = {"count": 0}
+
+    class _FakeIncomeService:
+        def __init__(self, db, metabase_service=None):
+            self.db = db
+            self.metabase_service = metabase_service
+
+        async def calculate_month(self, year_month):
+            income_calls["count"] += 1
+            assert year_month == "2025-01"
+            return {
+                "year_month": year_month,
+                "employee_count": 2,
+                "commission_upserts": 2,
+                "performance_upserts": 2,
+                "source": "test",
+            }
+
+    monkeypatch.setattr(
+        performance_management_module,
+        "load_shop_monthly_target_achievement",
+        _fake_source_rows,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "HRIncomeCalculationService",
+        _FakeIncomeService,
+        raising=False,
+    )
+
+    resp = asyncio.run(
+        performance_management_module.calculate_performance_scores(
+            period="2025-01", config_id=None, db=db
+        )
+    )
+
+    body = _json_body(resp)
+    assert body["success"] is True
+    assert income_calls["count"] == 1
+    assert db.commit.await_count == 1
+    assert body["data"]["shop_performance_upserts"] == 1
+    assert body["data"]["commission_upserts"] == 2
+    assert body["data"]["employee_performance_upserts"] == 2
+    perf_score_rows = [
+        call.args[0]
+        for call in db.add.call_args_list
+        if call.args and isinstance(call.args[0], PerformanceScore)
+    ]
+    assert len(perf_score_rows) == 1
+    created = perf_score_rows[0]
+    assert created.sales_score == 24.0
+    assert created.profit_score == 0.0
+    assert created.key_product_score == 0.0
+    assert created.operation_score == 0.0
+    assert created.total_score == 24.0
+    assert created.score_details["sales"]["status"] == "calculated"
+    assert created.score_details["profit"]["status"] == "pending_design"
+    assert created.score_details["key_product"]["status"] == "pending_design"
+    assert created.score_details["operation"]["status"] == "pending_design"
+
+
+def test_list_scores_shop_hides_pending_dimensions_from_partial_results():
+    class _ShopRows:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    class _PerfRows:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    db = AsyncMock()
+    shop = SimpleNamespace(
+        platform="Shopee",
+        store_name="Shop 1",
+        shop_id="shop-1",
+        account_id=None,
+        id=1,
+        enabled=True,
+    )
+    score = SimpleNamespace(
+        platform_code="shopee",
+        shop_id="shop-1",
+        period="2025-01",
+        sales_score=24.0,
+        profit_score=0.0,
+        key_product_score=0.0,
+        operation_score=0.0,
+        total_score=24.0,
+        rank=1,
+        performance_coefficient=1.0,
+        score_details={
+            "sales": {"status": "calculated", "target": 1000.0, "achieved": 800.0, "rate": 80.0},
+            "profit": {"status": "pending_design", "achieved": 200.0},
+            "key_product": {"status": "pending_design"},
+            "operation": {"status": "pending_design"},
+            "summary": {"status": "partial"},
+        },
+    )
+
+    execute_calls = {"n": 0}
+
+    async def _execute(_stmt):
+        execute_calls["n"] += 1
+        if execute_calls["n"] == 1:
+            return _ShopRows([shop])
+        if execute_calls["n"] == 2:
+            return _PerfRows([(score,)])
+        raise AssertionError(f"unexpected execute call #{execute_calls['n']}")
+
+    db.execute = AsyncMock(side_effect=_execute)
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/performance/scores",
+            "headers": [],
+            "client": ("127.0.0.1", 8001),
+            "app": SimpleNamespace(state=SimpleNamespace()),
+        }
+    )
+
+    resp = asyncio.run(
+        list_performance_scores(
+            request=request,
+            period="2025-01",
+            platform_code=None,
+            shop_id=None,
+            group_by="shop",
+            page=1,
+            page_size=20,
+            db=db,
+        )
+    )
+
+    body = _json_body(resp)
+    row = body["data"][0]
+    assert row["sales_score"] == 24.0
+    assert row["profit_score"] is None
+    assert row["key_product_score"] is None
+    assert row["operation_score"] is None
+    assert row["total_score"] is None
+    assert row["rank"] is None
+    assert row["performance_coefficient"] is None
 
 
 def test_my_income_unlinked_returns_linked_false_and_audit_called(monkeypatch):
