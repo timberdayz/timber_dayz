@@ -306,6 +306,17 @@ const routes = [
       roles: ['admin']  // ✅ 仅管理员可访问
     }
   },
+  {
+    path: '/cloud-sync',
+    name: 'CloudSyncManagement',
+    component: () => import('../views/CloudSyncManagement.vue'),
+    meta: {
+      title: '云端同步管理',
+      icon: 'Connection',
+      permission: 'data-sync',
+      roles: ['admin']
+    }
+  },
 // ⚠️ v4.12.0移除：数据浏览器功能已移除
   // {
   //   path: '/data-browser',
