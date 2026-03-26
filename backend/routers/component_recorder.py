@@ -34,6 +34,8 @@ from backend.models.database import get_db, get_async_db
 from backend.services.component_test_service import ComponentTestService
 from backend.services.recorder_segment_validator import RecorderSegmentValidator
 from backend.services.steps_to_python import generate_python_code
+from backend.services.verification_service import VerificationService
+from backend.services.verification_state_store import VerificationStateStore
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
@@ -275,6 +277,10 @@ def _build_recorder_status_payload(
     error_message: Optional[str] = None,
     verification_type: Optional[str] = None,
     verification_screenshot: Optional[str] = None,
+    verification_id: Optional[str] = None,
+    verification_message: Optional[str] = None,
+    verification_expires_at: Optional[str] = None,
+    verification_attempt_count: int = 0,
 ) -> Dict[str, Any]:
     return {
         "active": active,
@@ -288,6 +294,10 @@ def _build_recorder_status_payload(
         "error_message": error_message,
         "verification_type": verification_type,
         "verification_screenshot": verification_screenshot,
+        "verification_id": verification_id,
+        "verification_message": verification_message,
+        "verification_expires_at": verification_expires_at,
+        "verification_attempt_count": verification_attempt_count,
     }
 
 
@@ -311,6 +321,30 @@ def _read_recorder_runtime_status(status_file: Optional[str]) -> Optional[Dict[s
     except Exception as e:
         logger.warning(f"Failed to read recorder runtime status: {e}")
     return None
+
+
+def _build_verification_payload_from_runtime_status(
+    runtime_status: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    verification_id = str((runtime_status or {}).get("verification_id") or "").strip()
+    if not verification_id:
+        return None
+    return {
+        "state": runtime_status.get("state"),
+        "verification_type": runtime_status.get("verification_type"),
+        "verification_id": verification_id,
+        "owner_type": "recorder",
+        "owner_id": str(recorder_session.account_id or recorder_session.platform or "recorder"),
+        "phase": "login",
+        "current_url": runtime_status.get("current_url"),
+        "screenshot_url": runtime_status.get("verification_screenshot"),
+        "message": runtime_status.get("verification_message"),
+        "created_at": runtime_status.get("created_at"),
+        "expires_at": runtime_status.get("verification_expires_at"),
+        "attempt_count": runtime_status.get("verification_attempt_count", 0),
+        "account_id": recorder_session.account_id,
+        "store_name": None,
+    }
 
 
 def _normalize_login_steps_and_suggestions(
@@ -1319,6 +1353,10 @@ async def get_recorder_status():
         error_message=(runtime_status or {}).get("error_message") or recorder_session.error_message,
         verification_type=(runtime_status or {}).get("verification_type"),
         verification_screenshot=(runtime_status or {}).get("verification_screenshot"),
+        verification_id=(runtime_status or {}).get("verification_id"),
+        verification_message=(runtime_status or {}).get("verification_message"),
+        verification_expires_at=(runtime_status or {}).get("verification_expires_at"),
+        verification_attempt_count=(runtime_status or {}).get("verification_attempt_count") or 0,
     )
     return {"success": True, "data": payload}
 
@@ -1412,5 +1450,25 @@ async def resume_recorder_verification(body: RecorderResumeRequest):
             detail=str(e),
             recovery_suggestion="请稍后重试",
         )
+
+    verification_id = str((runtime_status or {}).get("verification_id") or "").strip()
+    if verification_id:
+        try:
+            store = VerificationStateStore()
+            existing_payload = _build_verification_payload_from_runtime_status(runtime_status or {})
+            if existing_payload:
+                store.save(existing_payload)
+            submitted_payload = VerificationService(store=store).mark_submitted(
+                verification_id=verification_id
+            )
+            if recorder_session.status_file:
+                updated_runtime_status = dict(runtime_status or {})
+                updated_runtime_status["state"] = submitted_payload["state"]
+                updated_runtime_status["verification_attempt_count"] = submitted_payload.get(
+                    "attempt_count", updated_runtime_status.get("verification_attempt_count", 0)
+                )
+                _write_recorder_runtime_status(Path(recorder_session.status_file), updated_runtime_status)
+        except Exception as e:
+            logger.warning(f"Failed to mark recorder verification submitted: {e}")
 
     return {"success": True, "message": "验证码已提交，录制前检查将继续执行"}

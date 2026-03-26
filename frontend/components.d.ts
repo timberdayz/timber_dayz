@@ -89,6 +89,7 @@ declare module 'vue' {
     SimpleHeader: typeof import('./src/components/common/SimpleHeader.vue')['default']
     SimpleSidebar: typeof import('./src/components/common/SimpleSidebar.vue')['default']
     UnderDevelopment: typeof import('./src/components/common/UnderDevelopment.vue')['default']
+    VerificationResumeDialog: typeof import('./src/components/verification/VerificationResumeDialog.vue')['default']
   }
   export interface ComponentCustomProperties {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

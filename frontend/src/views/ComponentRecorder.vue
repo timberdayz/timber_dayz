@@ -252,54 +252,6 @@
           <p>在通过 login gate 之前，系统不会打开真正的录制流程。</p>
         </el-alert>
 
-        <div
-          v-if="verificationRequired"
-          class="verification-required-card"
-          style="margin-top: 20px"
-        >
-          <el-card>
-            <template #header>
-              <span>需要验证码</span>
-            </template>
-            <p
-              v-if="!isOtpVerification"
-              style="margin-bottom: 12px; color: #606266"
-            >
-              请根据下方截图输入图形验证码，提交后录制前检查会继续执行。
-            </p>
-            <p v-else style="margin-bottom: 12px; color: #606266">
-              请输入收到的短信/邮件验证码，提交后录制前检查会继续执行。
-            </p>
-            <div v-if="!isOtpVerification" style="margin-bottom: 16px">
-              <img
-                :src="verificationRequired.screenshotUrl"
-                alt="验证码截图"
-                style="
-                  max-width: 100%;
-                  max-height: 200px;
-                  border: 1px solid #dcdfe6;
-                  border-radius: 4px;
-                "
-                @error="($event.target).style.display = 'none'"
-              />
-            </div>
-            <el-input
-              v-model="verificationInput"
-              :placeholder="isOtpVerification ? '请输入短信/邮件验证码' : '请输入验证码'"
-              style="max-width: 280px; margin-right: 12px"
-              clearable
-              @keyup.enter="submitRecorderVerification"
-            />
-            <el-button
-              type="primary"
-              :loading="verificationSubmitting"
-              @click="submitRecorderVerification"
-            >
-              提交
-            </el-button>
-          </el-card>
-        </div>
-
         <el-alert
           v-else
           type="warning"
@@ -996,6 +948,20 @@
     </div>
 
     <!-- 测试对话框已迁移至组件版本管理页，此处不再提供「测试组件」入口 -->
+    <VerificationResumeDialog
+      :visible="Boolean(verificationRequired)"
+      :verification-type="verificationRequired?.verificationType || recorderRuntimeStatus.verification_type || ''"
+      :screenshot-url="verificationRequired?.screenshotUrl || ''"
+      :message="recorderRuntimeStatus.verification_message || ''"
+      :expires-at="recorderRuntimeStatus.verification_expires_at || ''"
+      :submitting="verificationSubmitting"
+      title="录制前登录需要验证码"
+      subtitle="当前流程尚未进入正式录制，请在此处完成验证码回填后继续。"
+      submit-text="提交并继续"
+      cancel-text="取消录制"
+      @submit="submitRecorderVerification"
+      @cancel="stopRecording"
+    />
   </div>
 </template>
 
@@ -1023,6 +989,7 @@ import {
 import draggable from "vuedraggable";
 import api from "@/api";
 import accountsApi from "@/api/accounts"; // ⭐ Phase 9完善：导入账号管理API
+import VerificationResumeDialog from "@/components/verification/VerificationResumeDialog.vue";
 
 // 响应式数据
 const recorderForm = ref({
@@ -1043,9 +1010,12 @@ const recorderRuntimeStatus = ref({
   error_message: null,
   verification_type: null,
   verification_screenshot: null,
+  verification_id: null,
+  verification_message: null,
+  verification_expires_at: null,
+  verification_attempt_count: 0,
 });
 const verificationRequired = ref(null);
-const verificationInput = ref("");
 const verificationSubmitting = ref(false);
 const recordedSteps = ref([]);
 const accounts = ref([]);
@@ -1611,17 +1581,17 @@ const stopPollingSteps = () => {
   }
 };
 
-const submitRecorderVerification = async () => {
-  if (!verificationInput.value.trim()) return;
+const submitRecorderVerification = async (submittedValue) => {
+  const verificationValue = String(submittedValue || "").trim();
+  if (!verificationValue) return;
   verificationSubmitting.value = true;
   try {
     const payload = isOtpVerification.value
-      ? { otp: verificationInput.value.trim() }
-      : { captcha_code: verificationInput.value.trim() };
+      ? { otp: verificationValue }
+      : { captcha_code: verificationValue };
     await api.post("/collection/recorder/resume", payload);
     ElMessage.success("验证码已提交，录制前检查将继续执行");
     verificationRequired.value = null;
-    verificationInput.value = "";
     recorderRuntimeStatus.value = {
       ...recorderRuntimeStatus.value,
       state: "login_checking",
