@@ -256,54 +256,6 @@
           <p>在通过 login gate 之前，系统不会打开真正的录制流程。</p>
         </el-alert>
 
-        <div
-          v-if="verificationRequired"
-          class="verification-required-card"
-          style="margin-top: 20px"
-        >
-          <el-card>
-            <template #header>
-              <span>需要验证码</span>
-            </template>
-            <p
-              v-if="!isOtpVerification"
-              style="margin-bottom: 12px; color: #606266"
-            >
-              请根据下方截图输入图形验证码，提交后录制前检查会继续执行。
-            </p>
-            <p v-else style="margin-bottom: 12px; color: #606266">
-              请输入收到的短信/邮件验证码，提交后录制前检查会继续执行。
-            </p>
-            <div v-if="!isOtpVerification" style="margin-bottom: 16px">
-              <img
-                :src="verificationRequired.screenshotUrl"
-                alt="验证码截图"
-                style="
-                  max-width: 100%;
-                  max-height: 200px;
-                  border: 1px solid #dcdfe6;
-                  border-radius: 4px;
-                "
-                @error="($event.target).style.display = 'none'"
-              />
-            </div>
-            <el-input
-              v-model="verificationInput"
-              :placeholder="isOtpVerification ? '请输入短信/邮件验证码' : '请输入验证码'"
-              style="max-width: 280px; margin-right: 12px"
-              clearable
-              @keyup.enter="submitRecorderVerification"
-            />
-            <el-button
-              type="primary"
-              :loading="verificationSubmitting"
-              @click="submitRecorderVerification"
-            >
-              提交
-            </el-button>
-          </el-card>
-        </div>
-
         <el-alert
           v-else
           type="warning"
@@ -1000,11 +952,90 @@
     </div>
 
     <!-- 测试对话框已迁移至组件版本管理页，此处不再提供「测试组件」入口 -->
+    <el-dialog
+      :model-value="Boolean(verificationRequired)"
+      width="520px"
+      :show-close="false"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :destroy-on-close="false"
+      class="verification-dialog"
+    >
+      <template #header>
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <span style="font-size: 18px; font-weight: 600">录制前登录需要验证码</span>
+          <span style="font-size: 13px; color: #909399">
+            当前流程尚未进入正式录制，请在此处完成验证码回填后继续。
+          </span>
+        </div>
+      </template>
+
+      <div style="display: flex; flex-direction: column; gap: 16px">
+        <el-alert
+          :title="
+            isOtpVerification
+              ? '请输入收到的短信或邮件验证码'
+              : '请根据下方截图输入图形验证码'
+          "
+          type="warning"
+          :closable="false"
+          show-icon
+        />
+
+        <div
+          v-if="!isOtpVerification && verificationRequired?.screenshotUrl"
+          style="
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 180px;
+            background: #f5f7fa;
+            border: 1px solid #e4e7ed;
+            border-radius: 8px;
+            padding: 12px;
+          "
+        >
+          <img
+            :src="verificationRequired.screenshotUrl"
+            alt="验证码截图"
+            style="
+              max-width: 100%;
+              max-height: 220px;
+              border: 1px solid #dcdfe6;
+              border-radius: 4px;
+              background: #fff;
+            "
+            @error="($event.target).style.display = 'none'"
+          />
+        </div>
+
+        <el-input
+          ref="verificationInputRef"
+          v-model="verificationInput"
+          :placeholder="isOtpVerification ? '请输入短信/邮件验证码' : '请输入图片中的验证码'"
+          clearable
+          @keyup.enter="submitRecorderVerification"
+        />
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px">
+          <el-button @click="stopRecording" :disabled="verificationSubmitting">
+            取消录制
+          </el-button>
+          <el-button
+            type="primary"
+            :loading="verificationSubmitting"
+            @click="submitRecorderVerification"
+          >
+            提交并继续
+          </el-button>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   VideoPlay as RecordIcon,
@@ -1052,6 +1083,7 @@ const recorderRuntimeStatus = ref({
 const verificationRequired = ref(null)
 const verificationInput = ref('')
 const verificationSubmitting = ref(false)
+const verificationInputRef = ref(null)
 const recordedSteps = ref([])
 const accounts = ref([])
 const accountsLoading = ref(false) // ⭐ Phase 9完善：账号加载状态
@@ -1414,6 +1446,15 @@ watch(
     } else {
       accounts.value = []
     }
+  }
+)
+
+watch(
+  () => verificationRequired.value,
+  async value => {
+    if (!value) return
+    await nextTick()
+    verificationInputRef.value?.focus?.()
   }
 )
 
