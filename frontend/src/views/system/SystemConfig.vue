@@ -121,98 +121,98 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
-import { ElMessage } from "element-plus";
-import { Setting, Check, Refresh } from "@element-plus/icons-vue";
-import * as systemAPI from "@/api/system";
-import PageHeader from "@/components/common/PageHeader.vue";
+import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Setting, Check, Refresh } from '@element-plus/icons-vue'
+import * as systemAPI from '@/api/system'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 // 响应式数据
-const loading = ref(false);
-const configFormRef = ref(null);
+const loading = ref(false)
+const configFormRef = ref(null)
 
 const systemConfig = ref({
-  system_name: "",
-  version: "",
-  timezone: "Asia/Shanghai",
-  language: "zh-CN",
-  currency: "CNY",
-});
+  system_name: '',
+  version: '',
+  timezone: 'Asia/Shanghai',
+  language: 'zh-CN',
+  currency: 'CNY'
+})
 
 // 表单验证规则
 const rules = {
   system_name: [
-    { required: true, message: "请输入系统名称", trigger: "blur" },
-    { max: 128, message: "系统名称不能超过128个字符", trigger: "blur" },
+    { required: true, message: '请输入系统名称', trigger: 'blur' },
+    { max: 128, message: '系统名称不能超过128个字符', trigger: 'blur' }
   ],
   timezone: [
-    { required: true, message: "请选择时区", trigger: "change" },
+    { required: true, message: '请选择时区', trigger: 'change' }
   ],
   language: [
-    { required: true, message: "请选择语言", trigger: "change" },
+    { required: true, message: '请选择语言', trigger: 'change' }
   ],
   currency: [
-    { required: true, message: "请选择货币", trigger: "change" },
-  ],
-};
+    { required: true, message: '请选择货币', trigger: 'change' }
+  ]
+}
 
 // 加载系统配置
 const loadSystemConfig = async () => {
   try {
-    loading.value = true;
-    const response = await systemAPI.getSystemConfig();
+    loading.value = true
+    const response = await systemAPI.getSystemConfig()
     if (response && response.data) {
       systemConfig.value = {
-        system_name: response.data.system_name || "",
-        version: response.data.version || "",
-        timezone: response.data.timezone || "Asia/Shanghai",
-        language: response.data.language || "zh-CN",
-        currency: response.data.currency || "CNY",
-      };
+        system_name: response.data.system_name || '',
+        version: response.data.version || '',
+        timezone: response.data.timezone || 'Asia/Shanghai',
+        language: response.data.language || 'zh-CN',
+        currency: response.data.currency || 'CNY'
+      }
     } else if (response) {
       // 兼容直接返回配置对象的情况
       systemConfig.value = {
-        system_name: response.system_name || "",
-        version: response.version || "",
-        timezone: response.timezone || "Asia/Shanghai",
-        language: response.language || "zh-CN",
-        currency: response.currency || "CNY",
-      };
+        system_name: response.system_name || '',
+        version: response.version || '',
+        timezone: response.timezone || 'Asia/Shanghai',
+        language: response.language || 'zh-CN',
+        currency: response.currency || 'CNY'
+      }
     }
   } catch (error) {
-    console.error("加载系统配置失败:", error);
-    ElMessage.error(error.response?.data?.message || error.message || "加载系统配置失败");
+    console.error('加载系统配置失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '加载系统配置失败')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 保存配置
 const saveConfig = async () => {
   try {
-    await configFormRef.value.validate();
-    loading.value = true;
-    const response = await systemAPI.updateSystemConfig(systemConfig.value);
+    await configFormRef.value.validate()
+    loading.value = true
+    const response = await systemAPI.updateSystemConfig(systemConfig.value)
     if (response && (response.success !== false)) {
-      ElMessage.success("系统配置保存成功");
-      await loadSystemConfig();
+      ElMessage.success('系统配置保存成功')
+      await loadSystemConfig()
     } else {
-      ElMessage.error(response?.message || "保存系统配置失败");
+      ElMessage.error(response?.message || '保存系统配置失败')
     }
   } catch (error) {
-    if (error.message !== "validation failed") {
-      console.error("保存系统配置失败:", error);
-      ElMessage.error(error.response?.data?.message || error.message || "保存系统配置失败");
+    if (error.message !== 'validation failed') {
+      console.error('保存系统配置失败:', error)
+      ElMessage.error(error.response?.data?.message || error.message || '保存系统配置失败')
     }
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 初始化
 onMounted(() => {
-  loadSystemConfig();
-});
+  loadSystemConfig()
+})
 </script>
 
 <style scoped>

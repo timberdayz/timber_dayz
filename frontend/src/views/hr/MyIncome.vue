@@ -134,7 +134,7 @@ async function loadIncome() {
       ...income.value,
       ...data,
       period: data.period ?? selectedMonth.value,
-      loading: false,
+      loading: false
     }
     loadError.value = false
   } catch (e) {

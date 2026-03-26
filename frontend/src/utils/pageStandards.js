@@ -13,7 +13,7 @@ export function normalizeSalesTargetsResponse(response) {
 export function buildSalesTargetMutationPayload(form) {
   return {
     target_sales_amount: Number(form?.target_sales_amount) || 0,
-    target_order_count: Number(form?.target_order_count) || 0,
+    target_order_count: Number(form?.target_order_count) || 0
   }
 }
 

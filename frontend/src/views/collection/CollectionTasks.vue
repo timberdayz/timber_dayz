@@ -42,11 +42,28 @@
           <el-checkbox label="services">服务</el-checkbox>
         </el-checkbox-group>
 
+        <div
+          v-for="domain in selectedSubtypeDomains"
+          :key="`quick-subtype-${domain}`"
+          class="sub-domain-section"
+        >
+          <span class="sub-domain-label">{{ getDomainLabel(domain) }}子类型</span>
+          <el-checkbox-group v-model="quickForm.sub_domains[domain]" class="sub-domain-checkboxes">
+            <el-checkbox
+              v-for="option in getSubtypeOptions(domain)"
+              :key="option.value"
+              :label="option.value"
+            >
+              {{ option.label }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </div>
+
         <el-select v-model="quickForm.date_preset" placeholder="日期范围" class="erp-w-120">
           <el-option label="今天" value="today" />
           <el-option label="昨天" value="yesterday" />
-          <el-option label="最近7天" value="last_7_days" />
-          <el-option label="最近30天" value="last_30_days" />
+          <el-option :label="getDatePresetLabel('last_7_days', quickForm.platform)" value="last_7_days" />
+          <el-option :label="getDatePresetLabel('last_30_days', quickForm.platform)" value="last_30_days" />
           <el-option label="自定义" value="custom" />
         </el-select>
         <el-date-picker
@@ -371,11 +388,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CaretRight, Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
 import PageHeader from '@/components/common/PageHeader.vue'
+import {
+  buildDateRangeFromPreset,
+  getDatePresetLabel,
+  getSelectedSubtypeDomains,
+  getSubtypeOptions
+} from '@/constants/collection'
 
 // 状态
 const loading = ref(false)
@@ -418,6 +441,22 @@ const filteredAccounts = computed(() => {
     acc.platform?.toLowerCase() === quickForm.platform.toLowerCase()
   )
 })
+
+const selectedSubtypeDomains = computed(() =>
+  getSelectedSubtypeDomains(quickForm.data_domains)
+)
+
+watch(
+  () => [...quickForm.data_domains],
+  (domains) => {
+    const allowedDomains = new Set(getSelectedSubtypeDomains(domains))
+    for (const domain of Object.keys(quickForm.sub_domains || {})) {
+      if (!allowedDomains.has(domain)) {
+        delete quickForm.sub_domains[domain]
+      }
+    }
+  }
+)
 
 const canCreateTask = computed(() => {
   if (!quickForm.platform || !quickForm.account_id || quickForm.data_domains.length === 0) return false
@@ -468,7 +507,10 @@ const loadAccounts = async () => {
 const createQuickTask = async () => {
   creating.value = true
   try {
-    const dateRange = getDateRange(quickForm.date_preset, quickForm.customDateRange)
+    const dateRange = buildDateRangeFromPreset(quickForm.date_preset, {
+      platform: quickForm.platform,
+      customRange: quickForm.customDateRange
+    })
     if (!dateRange || !dateRange.start_date || !dateRange.end_date) {
       ElMessage.warning('请选择有效的日期范围')
       creating.value = false
@@ -479,7 +521,7 @@ const createQuickTask = async () => {
       platform: quickForm.platform,
       account_id: quickForm.account_id,
       data_domains: quickForm.data_domains,
-      sub_domains: [],  // v4.7.0: 子域数组
+      sub_domains: quickForm.sub_domains,
       granularity: 'daily',
       date_range: dateRange,
       debug_mode: quickForm.debugMode  // v4.7.0: 调试模式
@@ -672,35 +714,7 @@ const disconnectTaskWebSocket = (taskId) => {
 
 const onPlatformChange = () => {
   quickForm.account_id = ''
-}
-
-const getDateRange = (preset, customRange = null) => {
-  const today = new Date()
-  const formatDate = (d) => d.toISOString().split('T')[0]
-  if (preset === 'custom' && Array.isArray(customRange) && customRange.length === 2) {
-    return { start_date: customRange[0], end_date: customRange[1] }
-  }
-  switch (preset) {
-    case 'today':
-      return { start_date: formatDate(today), end_date: formatDate(today) }
-    case 'yesterday': {
-      const yesterday = new Date(today)
-      yesterday.setDate(yesterday.getDate() - 1)
-      return { start_date: formatDate(yesterday), end_date: formatDate(yesterday) }
-    }
-    case 'last_7_days': {
-      const last7 = new Date(today)
-      last7.setDate(last7.getDate() - 7)
-      return { start_date: formatDate(last7), end_date: formatDate(today) }
-    }
-    case 'last_30_days': {
-      const last30 = new Date(today)
-      last30.setDate(last30.getDate() - 30)
-      return { start_date: formatDate(last30), end_date: formatDate(today) }
-    }
-    default:
-      return {}
-  }
+  quickForm.sub_domains = {}
 }
 
 const getPlatformTagType = (platform) => {

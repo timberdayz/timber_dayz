@@ -34,5 +34,5 @@ export default {
 
   async getStats() {
     return await api.get('/accounts/stats/summary')
-  },
+  }
 }

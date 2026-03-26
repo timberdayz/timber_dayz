@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { OfficeBuilding } from '@element-plus/icons-vue'
 
 const features = [
-  "供应商档案管理",
-  "供应商分类和标签",
-  "供应商表现评估",
-  "采购历史统计",
-  "联系人管理"
+  '供应商档案管理',
+  '供应商分类和标签',
+  '供应商表现评估',
+  '采购历史统计',
+  '联系人管理'
 ]
 </script>
 

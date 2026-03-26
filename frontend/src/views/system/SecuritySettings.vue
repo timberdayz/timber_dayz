@@ -230,270 +230,270 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
-import { ElMessage } from "element-plus";
-import { Lock, Refresh, Check, Plus } from "@element-plus/icons-vue";
-import * as systemAPI from "@/api/system";
-import PageHeader from "@/components/common/PageHeader.vue";
+import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Lock, Refresh, Check, Plus } from '@element-plus/icons-vue'
+import * as systemAPI from '@/api/system'
+import PageHeader from '@/components/common/PageHeader.vue'
 
 // 响应式数据
-const loading = ref(false);
-const activeTab = ref("password");
-const addIPDialogVisible = ref(false);
+const loading = ref(false)
+const activeTab = ref('password')
+const addIPDialogVisible = ref(false)
 
-const passwordPolicyFormRef = ref(null);
-const loginRestrictionsFormRef = ref(null);
-const sessionConfigFormRef = ref(null);
-const twoFactorConfigFormRef = ref(null);
+const passwordPolicyFormRef = ref(null)
+const loginRestrictionsFormRef = ref(null)
+const sessionConfigFormRef = ref(null)
+const twoFactorConfigFormRef = ref(null)
 
 // 密码策略
 const passwordPolicy = ref({
   min_length: 8,
-  requirements: ["require_uppercase", "require_lowercase", "require_digits"],
+  requirements: ['require_uppercase', 'require_lowercase', 'require_digits'],
   max_age_days: 90,
-  history_count: 3,
-});
+  history_count: 3
+})
 
 // 登录限制
 const loginRestrictions = ref({
   max_failed_attempts: 5,
   lockout_duration_minutes: 30,
-  enable_ip_whitelist: false,
-});
+  enable_ip_whitelist: false
+})
 
 // IP白名单
-const ipWhitelist = ref([]);
+const ipWhitelist = ref([])
 
 // 会话配置
 const sessionConfig = ref({
   timeout_minutes: 15,
   max_concurrent_sessions: 5,
-  enable_timeout_check: true,
-});
+  enable_timeout_check: true
+})
 
 // 2FA配置
 const twoFactorConfig = ref({
   enabled: false,
-  method: "totp",
-  code_validity_seconds: 300,
-});
+  method: 'totp',
+  code_validity_seconds: 300
+})
 
 // 新IP
 const newIP = ref({
-  ip: "",
-  description: "",
-});
+  ip: '',
+  description: ''
+})
 
 // 加载密码策略
 const loadPasswordPolicy = async () => {
   try {
-    const response = await systemAPI.getPasswordPolicy();
+    const response = await systemAPI.getPasswordPolicy()
     if (response && response.data) {
       passwordPolicy.value = {
         min_length: response.data.min_length || 8,
         requirements: response.data.requirements || [],
         max_age_days: response.data.max_age_days || 90,
-        history_count: response.data.history_count || 3,
-      };
+        history_count: response.data.history_count || 3
+      }
     }
   } catch (error) {
-    console.error("加载密码策略失败:", error);
+    console.error('加载密码策略失败:', error)
   }
-};
+}
 
 // 保存密码策略
 const savePasswordPolicy = async () => {
   try {
-    loading.value = true;
-    const response = await systemAPI.updatePasswordPolicy(passwordPolicy.value);
+    loading.value = true
+    const response = await systemAPI.updatePasswordPolicy(passwordPolicy.value)
     if (response && (response.success !== false)) {
-      ElMessage.success("密码策略保存成功");
+      ElMessage.success('密码策略保存成功')
     } else {
-      ElMessage.error(response?.message || "保存密码策略失败");
+      ElMessage.error(response?.message || '保存密码策略失败')
     }
   } catch (error) {
-    console.error("保存密码策略失败:", error);
-    ElMessage.error(error.response?.data?.message || error.message || "保存密码策略失败");
+    console.error('保存密码策略失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '保存密码策略失败')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 加载登录限制
 const loadLoginRestrictions = async () => {
   try {
-    const response = await systemAPI.getLoginRestrictions();
+    const response = await systemAPI.getLoginRestrictions()
     if (response && response.data) {
       loginRestrictions.value = {
         max_failed_attempts: response.data.max_failed_attempts || 5,
         lockout_duration_minutes: response.data.lockout_duration_minutes || 30,
-        enable_ip_whitelist: response.data.enable_ip_whitelist || false,
-      };
+        enable_ip_whitelist: response.data.enable_ip_whitelist || false
+      }
     }
   } catch (error) {
-    console.error("加载登录限制失败:", error);
+    console.error('加载登录限制失败:', error)
   }
-};
+}
 
 // 保存登录限制
 const saveLoginRestrictions = async () => {
   try {
-    loading.value = true;
-    const response = await systemAPI.updateLoginRestrictions(loginRestrictions.value);
+    loading.value = true
+    const response = await systemAPI.updateLoginRestrictions(loginRestrictions.value)
     if (response && (response.success !== false)) {
-      ElMessage.success("登录限制保存成功");
+      ElMessage.success('登录限制保存成功')
     } else {
-      ElMessage.error(response?.message || "保存登录限制失败");
+      ElMessage.error(response?.message || '保存登录限制失败')
     }
   } catch (error) {
-    console.error("保存登录限制失败:", error);
-    ElMessage.error(error.response?.data?.message || error.message || "保存登录限制失败");
+    console.error('保存登录限制失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '保存登录限制失败')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 加载IP白名单
 const loadIPWhitelist = async () => {
   try {
-    const response = await systemAPI.getIPWhitelist();
+    const response = await systemAPI.getIPWhitelist()
     if (response && response.data) {
-      ipWhitelist.value = response.data.ips || [];
+      ipWhitelist.value = response.data.ips || []
     }
   } catch (error) {
-    console.error("加载IP白名单失败:", error);
+    console.error('加载IP白名单失败:', error)
   }
-};
+}
 
 // 添加IP
 const showAddIPDialog = () => {
-  newIP.value = { ip: "", description: "" };
-  addIPDialogVisible.value = true;
-};
+  newIP.value = { ip: '', description: '' }
+  addIPDialogVisible.value = true
+}
 
 const addIP = async () => {
   if (!newIP.value.ip) {
-    ElMessage.warning("请输入IP地址");
-    return;
+    ElMessage.warning('请输入IP地址')
+    return
   }
   try {
-    loading.value = true;
-    const response = await systemAPI.addIPToWhitelist(newIP.value.ip);
+    loading.value = true
+    const response = await systemAPI.addIPToWhitelist(newIP.value.ip)
     if (response && (response.success !== false)) {
-      ElMessage.success("IP添加成功");
-      addIPDialogVisible.value = false;
-      await loadIPWhitelist();
+      ElMessage.success('IP添加成功')
+      addIPDialogVisible.value = false
+      await loadIPWhitelist()
     } else {
-      ElMessage.error(response?.message || "添加IP失败");
+      ElMessage.error(response?.message || '添加IP失败')
     }
   } catch (error) {
-    console.error("添加IP失败:", error);
-    ElMessage.error(error.response?.data?.message || error.message || "添加IP失败");
+    console.error('添加IP失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '添加IP失败')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 删除IP
 const removeIP = async (ip) => {
   try {
-    loading.value = true;
-    const response = await systemAPI.removeIPFromWhitelist(ip);
+    loading.value = true
+    const response = await systemAPI.removeIPFromWhitelist(ip)
     if (response && (response.success !== false)) {
-      ElMessage.success("IP删除成功");
-      await loadIPWhitelist();
+      ElMessage.success('IP删除成功')
+      await loadIPWhitelist()
     } else {
-      ElMessage.error(response?.message || "删除IP失败");
+      ElMessage.error(response?.message || '删除IP失败')
     }
   } catch (error) {
-    console.error("删除IP失败:", error);
-    ElMessage.error(error.response?.data?.message || error.message || "删除IP失败");
+    console.error('删除IP失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '删除IP失败')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 加载会话配置
 const loadSessionConfig = async () => {
   try {
-    const response = await systemAPI.getSessionConfig();
+    const response = await systemAPI.getSessionConfig()
     if (response && response.data) {
       sessionConfig.value = {
         timeout_minutes: response.data.timeout_minutes || 15,
         max_concurrent_sessions: response.data.max_concurrent_sessions || 5,
-        enable_timeout_check: response.data.enable_timeout_check !== false,
-      };
+        enable_timeout_check: response.data.enable_timeout_check !== false
+      }
     }
   } catch (error) {
-    console.error("加载会话配置失败:", error);
+    console.error('加载会话配置失败:', error)
   }
-};
+}
 
 // 保存会话配置
 const saveSessionConfig = async () => {
   try {
-    loading.value = true;
-    const response = await systemAPI.updateSessionConfig(sessionConfig.value);
+    loading.value = true
+    const response = await systemAPI.updateSessionConfig(sessionConfig.value)
     if (response && (response.success !== false)) {
-      ElMessage.success("会话配置保存成功");
+      ElMessage.success('会话配置保存成功')
     } else {
-      ElMessage.error(response?.message || "保存会话配置失败");
+      ElMessage.error(response?.message || '保存会话配置失败')
     }
   } catch (error) {
-    console.error("保存会话配置失败:", error);
-    ElMessage.error(error.response?.data?.message || error.message || "保存会话配置失败");
+    console.error('保存会话配置失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '保存会话配置失败')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 加载2FA配置
 const load2FAConfig = async () => {
   try {
-    const response = await systemAPI.get2FAConfig();
+    const response = await systemAPI.get2FAConfig()
     if (response && response.data) {
       twoFactorConfig.value = {
         enabled: response.data.enabled || false,
-        method: response.data.method || "totp",
-        code_validity_seconds: response.data.code_validity_seconds || 300,
-      };
+        method: response.data.method || 'totp',
+        code_validity_seconds: response.data.code_validity_seconds || 300
+      }
     }
   } catch (error) {
-    console.error("加载2FA配置失败:", error);
+    console.error('加载2FA配置失败:', error)
   }
-};
+}
 
 // 保存2FA配置
 const save2FAConfig = async () => {
   try {
-    loading.value = true;
-    const response = await systemAPI.update2FAConfig(twoFactorConfig.value);
+    loading.value = true
+    const response = await systemAPI.update2FAConfig(twoFactorConfig.value)
     if (response && (response.success !== false)) {
-      ElMessage.success("2FA配置保存成功");
+      ElMessage.success('2FA配置保存成功')
     } else {
-      ElMessage.error(response?.message || "保存2FA配置失败");
+      ElMessage.error(response?.message || '保存2FA配置失败')
     }
   } catch (error) {
-    console.error("保存2FA配置失败:", error);
-    ElMessage.error(error.response?.data?.message || error.message || "保存2FA配置失败");
+    console.error('保存2FA配置失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '保存2FA配置失败')
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // Tab切换
 const handleTabChange = (tabName) => {
-  if (tabName === "password") {
-    loadPasswordPolicy();
-  } else if (tabName === "login") {
-    loadLoginRestrictions();
-    loadIPWhitelist();
-  } else if (tabName === "session") {
-    loadSessionConfig();
-  } else if (tabName === "2fa") {
-    load2FAConfig();
+  if (tabName === 'password') {
+    loadPasswordPolicy()
+  } else if (tabName === 'login') {
+    loadLoginRestrictions()
+    loadIPWhitelist()
+  } else if (tabName === 'session') {
+    loadSessionConfig()
+  } else if (tabName === '2fa') {
+    load2FAConfig()
   }
-};
+}
 
 // 刷新所有
 const refreshAll = async () => {
@@ -502,15 +502,15 @@ const refreshAll = async () => {
     loadLoginRestrictions(),
     loadIPWhitelist(),
     loadSessionConfig(),
-    load2FAConfig(),
-  ]);
-  ElMessage.success("刷新成功");
-};
+    load2FAConfig()
+  ])
+  ElMessage.success('刷新成功')
+}
 
 // 初始化
 onMounted(() => {
-  loadPasswordPolicy();
-});
+  loadPasswordPolicy()
+})
 </script>
 
 <style scoped>

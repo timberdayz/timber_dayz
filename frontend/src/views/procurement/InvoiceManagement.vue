@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Document } from '@element-plus/icons-vue'
 
 const features = [
-  "发票上传和识别",
-  "三单匹配（PO-GRN-Invoice）",
-  "发票状态跟踪",
-  "发票附件管理",
-  "发票报表导出"
+  '发票上传和识别',
+  '三单匹配（PO-GRN-Invoice）',
+  '发票状态跟踪',
+  '发票附件管理',
+  '发票报表导出'
 ]
 </script>
 

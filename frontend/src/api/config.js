@@ -93,42 +93,42 @@ function handleResponseError(error) {
 
   // 根据HTTP状态码处理
   switch (status) {
-    case 400:
-      return Promise.reject(new Error(data?.detail || '请求参数错误'))
+  case 400:
+    return Promise.reject(new Error(data?.detail || '请求参数错误'))
     
-    case 401:
-      // 未授权，清除token并跳转登录
-      localStorage.removeItem('auth_token')
-      window.location.href = '/login'
-      return Promise.reject(new Error('登录已过期，请重新登录'))
+  case 401:
+    // 未授权，清除token并跳转登录
+    localStorage.removeItem('auth_token')
+    window.location.href = '/login'
+    return Promise.reject(new Error('登录已过期，请重新登录'))
     
-    case 403:
-      return Promise.reject(new Error(data?.detail || '没有权限访问该资源'))
+  case 403:
+    return Promise.reject(new Error(data?.detail || '没有权限访问该资源'))
     
-    case 404:
-      return Promise.reject(new Error(data?.detail || '请求的资源不存在'))
+  case 404:
+    return Promise.reject(new Error(data?.detail || '请求的资源不存在'))
     
-    case 422:
-      // 数据验证错误
-      if (data?.detail && Array.isArray(data.detail)) {
-        const errors = data.detail.map(err => err.msg).join('; ')
-        return Promise.reject(new Error(`数据验证失败: ${errors}`))
-      }
-      return Promise.reject(new Error(data?.detail || '数据验证失败'))
+  case 422:
+    // 数据验证错误
+    if (data?.detail && Array.isArray(data.detail)) {
+      const errors = data.detail.map(err => err.msg).join('; ')
+      return Promise.reject(new Error(`数据验证失败: ${errors}`))
+    }
+    return Promise.reject(new Error(data?.detail || '数据验证失败'))
     
-    case 429:
-      return Promise.reject(new Error('请求过于频繁，请稍后再试'))
+  case 429:
+    return Promise.reject(new Error('请求过于频繁，请稍后再试'))
     
-    case 500:
-      return Promise.reject(new Error(data?.detail || '服务器内部错误'))
+  case 500:
+    return Promise.reject(new Error(data?.detail || '服务器内部错误'))
     
-    case 502:
-    case 503:
-    case 504:
-      return Promise.reject(new Error('服务暂时不可用，请稍后再试'))
+  case 502:
+  case 503:
+  case 504:
+    return Promise.reject(new Error('服务暂时不可用，请稍后再试'))
     
-    default:
-      return Promise.reject(new Error(data?.detail || error.message || '请求失败'))
+  default:
+    return Promise.reject(new Error(data?.detail || error.message || '请求失败'))
   }
 }
 

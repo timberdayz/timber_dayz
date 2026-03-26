@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Setting } from '@element-plus/icons-vue'
 
 const features = [
-  "流程设计器",
-  "审批节点配置",
-  "审批人设置",
-  "审批条件配置",
-  "流程测试"
+  '流程设计器',
+  '审批节点配置',
+  '审批人设置',
+  '审批条件配置',
+  '流程测试'
 ]
 </script>
 

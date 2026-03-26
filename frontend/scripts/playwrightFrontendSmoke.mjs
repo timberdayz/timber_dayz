@@ -8,7 +8,7 @@ import { chromium } from 'playwright'
 import {
   SMOKE_ROUTES,
   buildAuthStorageEntries,
-  summarizeSmokeResults,
+  summarizeSmokeResults
 } from './frontendSmokeShared.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -25,7 +25,7 @@ const MAIN_CONTENT_SELECTORS = [
   '.main-content',
   '.erp-page-container',
   '.page-header',
-  'h1',
+  'h1'
 ]
 
 const BLOCKING_TEXT_PATTERNS = [
@@ -34,7 +34,7 @@ const BLOCKING_TEXT_PATTERNS = [
   'Unauthorized',
   '401',
   '403',
-  '500 Internal Server Error',
+  '500 Internal Server Error'
 ]
 
 async function ensureDir(dirPath) {
@@ -46,7 +46,7 @@ async function generateAuthPayload() {
   return new Promise((resolve, reject) => {
     const child = spawn(PYTHON_BIN, ['-u', scriptPath], {
       cwd: repoRoot,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe']
     })
 
     let stdout = ''
@@ -128,14 +128,14 @@ async function launchBrowser() {
     return {
       browser: await chromium.launch({ headless: requestedHeadless }),
       headless: requestedHeadless,
-      fallbackUsed: false,
+      fallbackUsed: false
     }
   } catch (error) {
     if (requestedHeadless && String(error?.message || '').includes('chrome-headless-shell')) {
       return {
         browser: await chromium.launch({ headless: false }),
         headless: false,
-        fallbackUsed: true,
+        fallbackUsed: true
       }
     }
     throw error
@@ -167,7 +167,7 @@ async function collectRouteResult(page, route, runDir) {
       requestFailures.push({
         url,
         status: 0,
-        error: request.failure()?.errorText || 'request failed',
+        error: request.failure()?.errorText || 'request failed'
       })
     }
   }
@@ -223,7 +223,7 @@ async function collectRouteResult(page, route, runDir) {
       consoleErrors,
       pageErrors,
       requestFailures,
-      screenshotPath,
+      screenshotPath
     }
   } finally {
     page.off('console', onConsole)
@@ -242,11 +242,11 @@ async function collectRouteResultWithTimeout(page, route, runDir) {
         setTimeout(() => {
           reject(new Error(`route timeout after ${ROUTE_TIMEOUT_MS}ms`))
         }, ROUTE_TIMEOUT_MS)
-      }),
+      })
     ])
     return {
       ...result,
-      elapsed_ms: Date.now() - startedAt,
+      elapsed_ms: Date.now() - startedAt
     }
   } catch (error) {
     return {
@@ -262,7 +262,7 @@ async function collectRouteResultWithTimeout(page, route, runDir) {
       pageErrors: [],
       requestFailures: [],
       screenshotPath: null,
-      elapsed_ms: Date.now() - startedAt,
+      elapsed_ms: Date.now() - startedAt
     }
   }
 }
@@ -286,7 +286,7 @@ async function main() {
     `browser launched (headless=${browserLaunch.headless}, fallbackUsed=${browserLaunch.fallbackUsed})`
   )
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 960 },
+    viewport: { width: 1440, height: 960 }
   })
 
   await context.addInitScript((entries) => {
@@ -317,10 +317,10 @@ async function main() {
     generated_at: new Date().toISOString(),
     launch: {
       headless: browserLaunch.headless,
-      fallbackUsed: browserLaunch.fallbackUsed,
+      fallbackUsed: browserLaunch.fallbackUsed
     },
     results,
-    summary,
+    summary
   }
 
   await writeJson(runJsonPath, payload)

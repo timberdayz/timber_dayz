@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Money } from '@element-plus/icons-vue'
 
 const features = [
-  "汇率查询和维护",
-  "历史汇率查看",
-  "汇率预警设置",
-  "汇率API配置",
-  "货币符号标准化"
+  '汇率查询和维护',
+  '历史汇率查看',
+  '汇率预警设置',
+  '汇率API配置',
+  '货币符号标准化'
 ]
 </script>
 

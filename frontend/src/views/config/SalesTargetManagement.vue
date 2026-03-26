@@ -167,27 +167,27 @@ const currentEditId = ref(null)
 
 const filters = reactive({
   shop_id: '',
-  year_month: '',
+  year_month: ''
 })
 
 const form = reactive({
   shop_id: '',
   year_month: '',
   target_sales_amount: 0,
-  target_order_count: 0,
+  target_order_count: 0
 })
 
 const formRules = {
   shop_id: [{ required: true, message: '请选择店铺', trigger: 'change' }],
   year_month: [{ required: true, message: '请选择月份', trigger: 'change' }],
   target_sales_amount: [{ required: true, message: '请输入目标销售额', trigger: 'blur' }],
-  target_order_count: [{ required: true, message: '请输入目标订单数', trigger: 'blur' }],
+  target_order_count: [{ required: true, message: '请输入目标订单数', trigger: 'blur' }]
 }
 
 function buildQueryParams() {
   return {
     ...(filters.shop_id && { shop_id: filters.shop_id }),
-    ...(filters.year_month && { year_month: filters.year_month }),
+    ...(filters.year_month && { year_month: filters.year_month })
   }
 }
 
@@ -245,7 +245,7 @@ async function confirmDelete(row) {
     await ElMessageBox.confirm(
       `确定要删除店铺 ${row.shop_id} 在 ${row.year_month} 的销售目标吗？`,
       '确认删除',
-      { type: 'warning' },
+      { type: 'warning' }
     )
     await store.deleteTarget(row.id)
     await loadTargets(false)
@@ -259,7 +259,7 @@ async function confirmDelete(row) {
 function formatAmount(value) {
   return new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 2
   }).format(Number(value) || 0)
 }
 

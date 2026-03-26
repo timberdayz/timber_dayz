@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Document } from '@element-plus/icons-vue'
 
 const features = [
-  "P&L明细",
-  "成本分析",
-  "利润分析",
-  "费用明细",
-  "税务报表"
+  'P&L明细',
+  '成本分析',
+  '利润分析',
+  '费用明细',
+  '税务报表'
 ]
 </script>
 

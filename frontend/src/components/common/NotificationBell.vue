@@ -288,18 +288,18 @@ const handleNotificationClick = async (notification) => {
   showPopover.value = false
   
   switch (notification.notification_type) {
-    case 'user_registered':
-      // 跳转到用户审批页面
-      router.push(USER_APPROVAL_ROUTE)
-      break
-    case 'user_approved':
-    case 'user_rejected':
-    case 'password_reset':
-      // 跳转到系统通知页面
-      router.push(SYSTEM_NOTIFICATIONS_ROUTE)
-      break
-    default:
-      router.push(SYSTEM_NOTIFICATIONS_ROUTE)
+  case 'user_registered':
+    // 跳转到用户审批页面
+    router.push(USER_APPROVAL_ROUTE)
+    break
+  case 'user_approved':
+  case 'user_rejected':
+  case 'password_reset':
+    // 跳转到系统通知页面
+    router.push(SYSTEM_NOTIFICATIONS_ROUTE)
+    break
+  default:
+    router.push(SYSTEM_NOTIFICATIONS_ROUTE)
   }
 }
 

@@ -11,15 +11,15 @@ export const useAccountsStore = defineStore('accounts', {
       active: 0,
       inactive: 0,
       platforms: 0,
-      platform_breakdown: {},
+      platform_breakdown: {}
     },
     loading: false,
     filters: {
       platform: null,
       enabled: null,
       shop_type: null,
-      search: '',
-    },
+      search: ''
+    }
   }),
 
   getters: {
@@ -39,7 +39,7 @@ export const useAccountsStore = defineStore('accounts', {
       return groups
     },
 
-    activeAccounts: (state) => state.accounts.filter((account) => account.enabled),
+    activeAccounts: (state) => state.accounts.filter((account) => account.enabled)
   },
 
   actions: {
@@ -59,8 +59,8 @@ export const useAccountsStore = defineStore('accounts', {
         this.accounts = await Promise.race([
           accountsApi.listAccounts(mergedParams),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('加载账号列表超时')), apiTimeout),
-          ),
+            setTimeout(() => reject(new Error('加载账号列表超时')), apiTimeout)
+          )
         ])
       } catch (error) {
         if (error.message !== '加载账号列表超时') {
@@ -85,8 +85,8 @@ export const useAccountsStore = defineStore('accounts', {
         this.stats = await Promise.race([
           accountsApi.getStats(),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('加载统计数据超时')), apiTimeout),
-          ),
+            setTimeout(() => reject(new Error('加载统计数据超时')), apiTimeout)
+          )
         ])
       } catch (error) {
         if (error.message !== '加载统计数据超时') {
@@ -176,8 +176,8 @@ export const useAccountsStore = defineStore('accounts', {
         platform: null,
         enabled: null,
         shop_type: null,
-        search: '',
+        search: ''
       }
-    },
-  },
+    }
+  }
 })
