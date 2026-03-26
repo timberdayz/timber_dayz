@@ -92,7 +92,10 @@ async def _create_orders_b_class_tables(session) -> None:
                     header_columns JSONB,
                     data_hash VARCHAR(128),
                     ingest_timestamp TIMESTAMP,
-                    currency_code VARCHAR(8)
+                    currency_code VARCHAR(8),
+                    "店铺" VARCHAR(256),
+                    "站点" VARCHAR(128),
+                    "采购账号" VARCHAR(256)
                 )
                 """
             )
@@ -164,14 +167,14 @@ async def test_orders_atomic_resolves_shop_alias_to_target_shop_id():
                         platform_code, shop_id, data_domain, granularity,
                         metric_date, period_start_date, period_end_date,
                         period_start_time, period_end_time, raw_data, header_columns,
-                        data_hash, ingest_timestamp, currency_code
+                        data_hash, ingest_timestamp, currency_code, "店铺", "站点", "采购账号"
                     ) VALUES (
                         'shopee', 'none', 'orders', 'monthly',
                         DATE '2025-09-25', DATE '2025-09-01', DATE '2025-09-30',
                         TIMESTAMP '2025-09-01 00:00:00', TIMESTAMP '2025-09-30 23:59:59',
                         '{"店铺":"3C店","站点":"新加坡","订单号":"SO-1","实付金额":"100","产品数量":"2"}'::jsonb,
                         '["店铺","站点","订单号","实付金额","产品数量"]'::jsonb,
-                        'hash-shop-alias-1', TIMESTAMP '2025-09-26 10:00:00', 'SGD'
+                        'hash-shop-alias-1', TIMESTAMP '2025-09-26 10:00:00', 'SGD', '3C店', '新加坡', NULL
                     )
                     """
                 )
@@ -243,14 +246,14 @@ async def test_orders_atomic_resolves_shop_alias_to_platform_account_when_alias_
                         platform_code, shop_id, data_domain, granularity,
                         metric_date, period_start_date, period_end_date,
                         period_start_time, period_end_time, raw_data, header_columns,
-                        data_hash, ingest_timestamp, currency_code
+                        data_hash, ingest_timestamp, currency_code, "店铺", "站点", "采购账号"
                     ) VALUES (
                         'tiktok', 'none', 'orders', 'monthly',
                         DATE '2025-09-24', DATE '2025-09-01', DATE '2025-09-30',
                         TIMESTAMP '2025-09-01 00:00:00', TIMESTAMP '2025-09-30 23:59:59',
                         '{"店铺":"菲律宾1店","站点":"菲律宾","订单号":"TK-1","买家实付金额":"88","产品数量":"1"}'::jsonb,
                         '["店铺","站点","订单号","买家实付金额","产品数量"]'::jsonb,
-                        'hash-account-alias-1', TIMESTAMP '2025-09-25 10:00:00', 'PHP'
+                        'hash-account-alias-1', TIMESTAMP '2025-09-25 10:00:00', 'PHP', '菲律宾1店', '菲律宾', NULL
                     )
                     """
                 )
