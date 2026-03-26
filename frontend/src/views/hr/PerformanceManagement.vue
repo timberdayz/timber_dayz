@@ -472,7 +472,7 @@ const handleRecalculate = async () => {
   calculating.value = true
   try {
     await api.calculatePerformanceScores(period)
-    ElMessage.success('已触发绩效计算，请稍后刷新查看结果')
+    ElMessage.success('已完成当月店铺绩效、个人绩效和提成重算，请刷新查看最新结果')
     await loadPerformanceList()
   } catch (error) {
     const code = error?.response?.data?.data?.error_code

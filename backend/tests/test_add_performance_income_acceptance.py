@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 from starlette.requests import Request
 
 from backend.routers.hr_employee import get_my_income
+import backend.routers.performance_management as performance_management_module
 from backend.routers.performance_management import calculate_performance_scores
 
 
@@ -66,6 +67,106 @@ def test_calculate_returns_400_when_period_invalid():
     assert resp.status_code == 400
     body = _json_body(resp)
     assert body["success"] is False
+
+
+def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeypatch):
+    class _ScalarOneResult:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+    class _ScalarsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    config = SimpleNamespace(
+        id=1,
+        sales_max_score=30,
+        profit_max_score=25,
+        key_product_max_score=25,
+        operation_max_score=20,
+    )
+
+    execute_calls = {"n": 0}
+
+    async def _execute(_stmt):
+        execute_calls["n"] += 1
+        n = execute_calls["n"]
+        if n == 1:
+            return _ScalarOneResult(config)
+        if n == 2:
+            return _ScalarsResult([])
+        if n == 3:
+            return _ScalarOneResult(None)
+        raise AssertionError(f"unexpected execute call #{n}")
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    async def _fake_source_rows(_db, _period):
+        return {
+            "shopee|shop-1": {
+                "platform_code": "shopee",
+                "shop_id": "shop-1",
+                "target": 1000.0,
+                "achieved": 800.0,
+            }
+        }
+
+    income_calls = {"count": 0}
+
+    class _FakeIncomeService:
+        def __init__(self, db, metabase_service=None):
+            self.db = db
+            self.metabase_service = metabase_service
+
+        async def calculate_month(self, year_month):
+            income_calls["count"] += 1
+            assert year_month == "2025-01"
+            return {
+                "year_month": year_month,
+                "employee_count": 2,
+                "commission_upserts": 2,
+                "performance_upserts": 2,
+                "source": "test",
+            }
+
+    monkeypatch.setattr(
+        performance_management_module,
+        "load_shop_monthly_target_achievement",
+        _fake_source_rows,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "HRIncomeCalculationService",
+        _FakeIncomeService,
+        raising=False,
+    )
+
+    resp = asyncio.run(
+        performance_management_module.calculate_performance_scores(
+            period="2025-01", config_id=None, db=db
+        )
+    )
+
+    body = _json_body(resp)
+    assert body["success"] is True
+    assert income_calls["count"] == 1
+    assert db.commit.await_count == 1
+    assert body["data"]["shop_performance_upserts"] == 1
+    assert body["data"]["commission_upserts"] == 2
+    assert body["data"]["employee_performance_upserts"] == 2
 
 
 def test_my_income_unlinked_returns_linked_false_and_audit_called(monkeypatch):

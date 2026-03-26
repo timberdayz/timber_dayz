@@ -51,6 +51,7 @@ from backend.schemas.performance import (
     PerformanceConfigResponse,
     PerformanceScoreResponse,
 )
+from backend.services.hr_income_calculation_service import HRIncomeCalculationService
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_target_achievement
 
 logger = get_logger(__name__)
@@ -381,6 +382,8 @@ def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, Any]:
 async def invalidate_performance_related_caches(cache_service) -> None:
     await cache_service.invalidate("performance_scores")
     await cache_service.invalidate("performance_scores_shop")
+    await cache_service.invalidate("hr_shop_profit_statistics")
+    await cache_service.invalidate("hr_annual_profit_statistics")
 
 
 @router.get("/scores", response_model=Dict[str, Any])
@@ -956,6 +959,8 @@ async def calculate_performance_scores(
                     )
                 )
             upserts += 1
+        income_service = HRIncomeCalculationService(db=db)
+        income_result = await income_service.calculate_month(period)
         await db.commit()
         try:
             from backend.services.cache_service import get_cache_service
@@ -963,7 +968,14 @@ async def calculate_performance_scores(
         except Exception as inv_err:
             logger.warning(f"[PerformanceManagement] 写时失效绩效缓存失败: {inv_err}")
         return success_response(
-            data={"period": period, "upserts": upserts},
+            data={
+                "period": period,
+                "upserts": upserts,
+                "shop_performance_upserts": upserts,
+                "employee_count": income_result.get("employee_count", 0),
+                "commission_upserts": income_result.get("commission_upserts", 0),
+                "employee_performance_upserts": income_result.get("performance_upserts", 0),
+            },
             message="绩效计算完成",
         )
     except HTTPException:
