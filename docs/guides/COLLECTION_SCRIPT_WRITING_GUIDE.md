@@ -45,6 +45,61 @@
 
 ---
 
+## 3.5 检测层标准（强制）
+
+“检测”是采集脚本的核心逻辑，不是附属逻辑。关键步骤必须明确写出：
+
+1. **前置检测（pre-check）**：当前为什么可以做这一步。
+2. **动作执行（action）**：推进页面状态。
+3. **后置检测（post-check）**：动作后目标状态是否真的达成。
+
+### 3.5.1 编写规则
+
+- **动作成功不等于业务成功**：点击登录、点击关闭弹窗、点击导出，都不应直接判定业务成功。
+- **检测优先用可观察状态**：URL/路由变化、关键元素可见/消失、checkbox 勾选状态、文件存在且非空，优先于“按钮刚刚点过”的主观推断。
+- **检测应结构化**：推荐至少保留 `stage/status/reason/current_url/matched_signal/screenshot_path` 等上下文。
+- **检测必须有 timeout 和失败语义**：超时后要说明是“仍在登录页”“checkbox 未勾选”“弹窗未关闭”“文件未落地”，不得静默继续。
+- **检测失败不得吞掉**：禁止通过 `except Exception: pass` 忽略关键检测失败。
+
+### 3.5.2 推荐分层
+
+- `detect_*`：只探测当前状态，不产生副作用。
+- `ensure_*`：将页面推进到目标状态，如 `ensure_popup_closed()`、`ensure_remember_me_checked()`。
+- `wait_*`：等待目标状态真正达成，如 `wait_navigation_ready()`、`wait_export_complete()`。
+
+推荐直接采用这些命名，而不是使用含糊的方法名：
+
+- `detect_login_ready()`
+- `ensure_remember_me_checked()`
+- `ensure_popup_closed()`
+- `wait_navigation_ready()`
+- `wait_export_complete()`
+
+### 3.5.3 典型场景标准
+
+- **登录成功检测**
+  至少满足以下之一，推荐双信号：
+  - URL 已离开登录页或重定向参数页
+  - 欢迎页/工作台关键元素可见
+  - 登录表单消失且主导航出现
+
+- **“记住我”勾选检测**
+  不得 blind click。应先检测当前状态，若业务要求必须勾选则：
+  - 未勾选 -> click
+  - click 后再次检测为 checked
+  - 若仍未 checked，则失败
+
+- **弹窗关闭检测**
+  不得只点击关闭按钮就继续。应至少满足：
+  - dialog 容器 hidden/detached
+  - overlay 不再遮挡主交互区域
+  - 下一步目标元素恢复可见/可交互
+
+- **验证码恢复后的登录检测**
+  验证码回填并重新点击登录后，必须再次执行完整的登录成功检测；不得因为“验证码已提交”就直接返回登录成功。
+
+---
+
 ## 4. 复杂交互（悬停→内容出现→点击）
 
 模拟真人操作（如下拉菜单、级联菜单）时，推荐流程：
@@ -105,6 +160,7 @@ params = config.get("params") or {} # captcha_code, otp, login_url_override, ...
 - 验证码恢复路径**必须在 `page.goto` 之前**（避免重试时刷新页面丢失已填内容）。
 - 检测到验证码时 `raise VerificationRequiredError(type, screenshot_path)` 暂停等待回传。
 - 恢复路径从 `config["params"]["captcha_code"]` 或 `config["params"]["otp"]` 读取回传值。
+- 验证码回填后的提交动作，**必须**再经过登录成功检测（见 3.5），不得因为“验证码已提交”直接返回 `success=True`。
 
 完整模板参见 `docs/guides/PYTHON_COMPONENT_TEMPLATE.md`。
 

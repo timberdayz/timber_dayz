@@ -567,16 +567,60 @@ class InspectorRecorder:
     async def _run_login_component(self, page) -> None:
         """Execute the recorder's login component using Python components first."""
         from modules.apps.collection_center.component_loader import ComponentLoader
+        from backend.models.database import SessionLocal
+        from backend.services.component_version_service import ComponentVersionService
 
         loader = ComponentLoader()
-        login_component = loader.load(f"{self.platform}/login")
+        python_component_class = None
 
-        if not login_component:
-            raise FileNotFoundError(f"Login component not found for {self.platform}")
+        db = SessionLocal()
+        try:
+            svc = ComponentVersionService(db)
+            preferred_version = svc.select_version_for_use(
+                f"{self.platform}/login",
+                enable_ab_test=False,
+            )
+        finally:
+            db.close()
 
-        python_component_class = login_component.get("_python_component_class")
+        if (
+            preferred_version
+            and str(getattr(preferred_version, "file_path", "")).strip().endswith(".py")
+            and hasattr(loader, "load_python_component_from_path")
+        ):
+            python_component_class = loader.load_python_component_from_path(
+                preferred_version.file_path,
+                version_id=getattr(preferred_version, "id", None),
+                platform=self.platform,
+                component_type="login",
+            )
+            print(
+                "[Auto Login] Executing versioned Python login component "
+                f"v{getattr(preferred_version, 'version', 'unknown')}"
+            )
+        else:
+            login_component = loader.load(f"{self.platform}/login")
+
+            if not login_component:
+                raise FileNotFoundError(f"Login component not found for {self.platform}")
+
+            python_component_class = login_component.get("_python_component_class")
+            if not python_component_class:
+                steps = login_component.get("steps", [])
+                print(f"[Auto Login] Found {len(steps)} login steps")
+                if not steps:
+                    raise RuntimeError("legacy login component has no executable steps")
+
+                for i, step in enumerate(steps, 1):
+                    step_action = step.get("action", "unknown")
+                    step_comment = step.get("comment", "")
+                    print(f"[Auto Login] Step {i}/{len(steps)}: {step_action}")
+                    if step_comment:
+                        print(f"         Comment: {step_comment}")
+                    await self._execute_step(page, step)
+                return
+
         if python_component_class:
-            print("[Auto Login] Executing canonical Python login component")
             ctx = ExecutionContext(
                 platform=self.platform,
                 account=self.account_info,
@@ -592,19 +636,6 @@ class InspectorRecorder:
                     getattr(result, "message", "login component returned unsuccessful result")
                 )
             return
-
-        steps = login_component.get("steps", [])
-        print(f"[Auto Login] Found {len(steps)} login steps")
-        if not steps:
-            raise RuntimeError("legacy login component has no executable steps")
-
-        for i, step in enumerate(steps, 1):
-            step_action = step.get("action", "unknown")
-            step_comment = step.get("comment", "")
-            print(f"[Auto Login] Step {i}/{len(steps)}: {step_action}")
-            if step_comment:
-                print(f"         Comment: {step_comment}")
-            await self._execute_step(page, step)
 
     async def _execute_step(self, page, step: Dict[str, Any]):
         """
@@ -784,6 +815,7 @@ class InspectorRecorder:
                     'url': frame.url,
                     'comment': f'Navigate to {frame.url[:50]}...' if len(frame.url) > 50 else f'Navigate to {frame.url}'
                 })
+                self._persist_live_steps()
                 logger.info(f"[Event] Navigation: {frame.url[:80]}")
         
         page.on('framenavigated', on_navigation)
@@ -817,6 +849,7 @@ class InspectorRecorder:
                 'message': dialog.message,
                 'comment': f'Handle {dialog.type} dialog'
             })
+            self._persist_live_steps()
             await dialog.dismiss()
         
         page.on('dialog', on_dialog)
@@ -831,6 +864,7 @@ class InspectorRecorder:
                 'filename': download.suggested_filename,
                 'comment': f'Download file: {download.suggested_filename}'
             })
+            self._persist_live_steps()
         
         page.on('download', on_download)
         
@@ -1143,6 +1177,7 @@ class InspectorRecorder:
                 'comment': f'Open {self.component_type}'
             }
             self._last_click_selector = primary_selector
+            self._persist_live_steps()
             logger.info(f"[Discovery] Open action recorded: {description[:50]}")
             return
         
@@ -1163,6 +1198,7 @@ class InspectorRecorder:
             'selectors': selectors,
         }
         self.available_options.append(option)
+        self._persist_live_steps()
         
         logger.info(f"[Discovery] New option discovered: {description} (key: {option_key})")
         print(f"[Discovery] Option {len(self.available_options)}: {description}")
@@ -1272,7 +1308,19 @@ class InspectorRecorder:
             step['value'] = value
         
         self.recorded_steps.append(step)
+        self._persist_live_steps()
         logger.info(f"[Event] {action.capitalize()}: {description[:50]}")
+
+    def _persist_live_steps(self):
+        """Persist the latest recorder payload so the UI can poll during recording."""
+        if not self.steps_file:
+            return
+
+        steps_data = self._build_discovery_output() if self.discovery_mode else self._build_steps_output()
+        steps_path = Path(self.steps_file)
+        steps_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(steps_path, 'w', encoding='utf-8') as f:
+            json.dump(steps_data, f, ensure_ascii=False, indent=2)
     
     def _save_steps(self):
         """

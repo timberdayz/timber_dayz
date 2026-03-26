@@ -31,6 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.models.database import get_db, get_async_db
+from backend.services.component_test_service import ComponentTestService
+from backend.services.recorder_segment_validator import RecorderSegmentValidator
 from backend.services.steps_to_python import generate_python_code
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
@@ -41,6 +43,7 @@ from backend.schemas.component_recorder import (
     RecorderStartResponse,
     RecorderStatusResponse,
     RecorderStepResponse,
+    RecorderValidateSegmentRequest,
     RecorderSaveRequest,
     GeneratePythonRequest,
 )
@@ -51,6 +54,7 @@ logger = get_logger(__name__)
 # v4.8.0: 仅支持 Inspector 模式(移除 Codegen)
 # 保留常量用于兼容性
 RECORDING_MODE = "inspector"
+SEGMENT_VALIDATION_ARTIFACT_DIR = Path("temp") / "recordings" / "segment_validation"
 
 router = APIRouter()
 
@@ -639,15 +643,8 @@ def _launch_inspector_recorder_subprocess(
         recorder_session.status_file = str(status_file)
         recorder_session.response_file = str(response_file)
         
-        # 准备账号信息
-        account_info = {
-            'account_id': account.account_id,
-            'platform': account.platform,
-            'store_name': account.store_name,
-            'login_url': account.login_url,
-            'username': account.username,
-            'password': account.password_encrypted,  # 加密密码
-        }
+        # 准备账号信息（统一走 ComponentTestService，避免录制器与测试器账号结构漂移）
+        account_info = ComponentTestService.prepare_account_info(account)
         
         # 构建配置文件
         initial_status = _build_recorder_status_payload(
@@ -1089,12 +1086,17 @@ async def get_recording_steps():
     返回当前会话中录制的所有步骤
     """
     try:
+        steps = recorder_session.steps
+        if recorder_session.active and recorder_session.steps_file:
+            live_data = _parse_inspector_output()
+            if live_data.get("mode") == "steps":
+                steps = live_data.get("steps", []) or []
         return {
             "success": True,
             "data": {
                 "active": recorder_session.active,
-                "steps": recorder_session.steps,
-                "steps_count": len(recorder_session.steps),
+                "steps": steps,
+                "steps_count": len(steps),
                 "started_at": recorder_session.started_at.isoformat() if recorder_session.started_at else None
             }
         }
@@ -1106,6 +1108,25 @@ async def get_recording_steps():
             message=f"获取步骤失败: {str(e)}",
             status_code=500,
             recovery_suggestion="请确认录制会话已启动，稍后重试",
+        )
+
+
+@router.post("/recorder/validate-segment")
+async def validate_segment(
+    request: RecorderValidateSegmentRequest,
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Validate a contiguous step segment from the recorder page."""
+    try:
+        validator = RecorderSegmentValidator()
+        return await validator.validate(request, db=db)
+    except Exception as e:
+        logger.error(f"Failed to validate recorder segment: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.INTERNAL_SERVER_ERROR,
+            message=f"校验当前段失败: {str(e)}",
+            status_code=500,
+            recovery_suggestion="请检查所选步骤是否连续，或稍后重试",
         )
 
 
@@ -1327,6 +1348,23 @@ async def get_recorder_verification_screenshot():
         )
 
     return FileResponse(path=str(file_path), media_type="image/png", filename=filename)
+
+
+@router.get("/recorder/segment-artifact")
+async def get_recorder_segment_artifact(name: str):
+    from fastapi.responses import FileResponse
+
+    safe_name = Path(name).name
+    file_path = SEGMENT_VALIDATION_ARTIFACT_DIR / safe_name
+    if not file_path.exists():
+        return error_response(
+            code=ErrorCode.FILE_NOT_FOUND,
+            message="片段校验截图不存在",
+            status_code=404,
+            recovery_suggestion="请重新执行片段校验后再查看截图",
+        )
+
+    return FileResponse(path=str(file_path), media_type="image/png", filename=safe_name)
 
 
 @router.post("/recorder/resume")

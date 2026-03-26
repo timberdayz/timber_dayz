@@ -37,6 +37,7 @@ from modules.apps.collection_center.transition_gates import (
     evaluate_login_ready,
 )
 from backend.routers.component_versions import CANONICAL_COMPONENT_FILES
+from modules.apps.collection_center.python_component_adapter import create_adapter
 
 logger = get_logger(__name__)
 
@@ -241,6 +242,47 @@ class ComponentTester:
                 continue
             components.append(f.stem)
         return sorted(components)
+
+    def _resolve_versioned_component_class(
+        self,
+        component_name: str,
+        component_type: str,
+    ):
+        """Resolve the preferred Python component class via component_versions when available."""
+        try:
+            from backend.models.database import SessionLocal
+            from backend.services.component_version_service import ComponentVersionService
+
+            db = SessionLocal()
+            try:
+                svc = ComponentVersionService(db)
+                selected_version = svc.select_version_for_use(
+                    component_name,
+                    enable_ab_test=False,
+                )
+            finally:
+                db.close()
+
+            if (
+                selected_version
+                and str(getattr(selected_version, "file_path", "")).strip().endswith(".py")
+                and hasattr(self.component_loader, "load_python_component_from_path")
+            ):
+                platform, _ = component_name.split("/", 1)
+                return self.component_loader.load_python_component_from_path(
+                    selected_version.file_path,
+                    version_id=getattr(selected_version, "id", None),
+                    platform=platform,
+                    component_type=component_type,
+                )
+        except Exception as e:
+            logger.warning(
+                "Failed to resolve versioned component %s: %s",
+                component_name,
+                e,
+            )
+
+        return None
     
     async def test_component(self, component_name: str) -> ComponentTestResult:
         """
@@ -1843,6 +1885,21 @@ class ComponentTester:
                 
                 # 尝试加载 navigation 组件
                 try:
+                    nav_class = self._resolve_versioned_component_class(
+                        f"{self.platform}/navigation",
+                        "navigation",
+                    )
+                    if nav_class:
+                        adapter = create_adapter(
+                            platform=self.platform,
+                            account=account_info,
+                            config=self._build_runtime_component_config(),
+                            is_test_mode=True,
+                            override_navigation_class=nav_class,
+                        )
+                        nav_result = await adapter.navigate(page, test_data_domain)
+                        return bool(nav_result.success)
+
                     nav_component = self.component_loader.load(f"{self.platform}/navigation")
                     nav_steps = nav_component.get('steps', [])
                     
@@ -1988,6 +2045,26 @@ class ComponentTester:
             bool: 是否成功
         """
         try:
+            login_class = self._resolve_versioned_component_class(
+                f"{self.platform}/login",
+                "login",
+            )
+            if login_class:
+                adapter = create_adapter(
+                    platform=self.platform,
+                    account=account_info,
+                    config=self._build_runtime_component_config(),
+                    is_test_mode=True,
+                    override_login_class=login_class,
+                )
+                login_result = await adapter.login(page)
+                if login_result.success:
+                    await page.wait_for_timeout(2000)
+                    return True
+                logger.error(f"Versioned auto login failed: {login_result.message}")
+                print(f"    [FAIL] Versioned auto login failed: {login_result.message}")
+                return False
+
             # 加载登录组件
             login_component = self.component_loader.load(f"{self.platform}/login")
             login_steps = login_component.get('steps', [])

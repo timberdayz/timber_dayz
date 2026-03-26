@@ -341,7 +341,11 @@ def generate_python_code(
 
     # 返回语句（验证码步骤 raise 后由 run() 开头 captcha_code 分支处理，此处不生成 return 避免不可达代码）
     if component_type == "login":
-        lines.append(body_indent + "# TODO: edit success condition - check URL change or dashboard element")
+        lines.append(body_indent + "# TODO: replace the placeholder below with explicit login_ready detection")
+        lines.append(body_indent + "# Standard: pre-check -> action -> post-check")
+        lines.append(body_indent + "# Action success does not equal business success")
+        lines.append(body_indent + "# Prefer helper names such as detect_login_ready / ensure_popup_closed / wait_export_complete")
+        lines.append(body_indent + "# Check at least one observable signal: URL left login page, dashboard marker visible, blocking popup absent")
         lines.append(body_indent + "# Example: await page.wait_for_url(\"**/dashboard**\", timeout=15000)")
         lines.append(body_indent + "# Example: await expect(page.get_by_text(\"Welcome\")).to_be_visible(timeout=10000)")
         lines.append(body_indent + "return LoginResult(success=True, message=\"ok\")")
