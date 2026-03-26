@@ -99,3 +99,23 @@ async def test_runtime_stop_closes_worker_factory_when_supported():
     await runtime.stop()
 
     assert factory.closed is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_reports_error_when_worker_loop_crashes():
+    class FailingWorker:
+        def run_one(self, worker_id: str):
+            raise RuntimeError("worker_crashed")
+
+    runtime = CloudBClassAutoSyncRuntime(
+        worker_factory=lambda: FailingWorker(),
+        poll_interval_seconds=0.01,
+        worker_id="worker-1",
+    )
+
+    await runtime.start()
+    await asyncio.sleep(0.03)
+    health = runtime.get_health()
+
+    assert health["status"] == "error"
+    assert health["last_error"] == "worker_crashed"

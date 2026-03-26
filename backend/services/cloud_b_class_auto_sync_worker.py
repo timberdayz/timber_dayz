@@ -11,6 +11,7 @@ from modules.core.db import CloudBClassSyncTask
 class CloudBClassAutoSyncWorker:
     """Claim and execute automatic cloud-sync tasks."""
 
+    MAX_RETRY_ATTEMPTS = 4
     RETRYABLE_ERROR_CODES = {
         "cloud_db_unavailable",
         "tunnel_unhealthy",
@@ -89,7 +90,10 @@ class CloudBClassAutoSyncWorker:
             error_code = str(exc)
             task.last_error = str(exc)
             task.error_code = error_code
-            if error_code in self.RETRYABLE_ERROR_CODES:
+            if (
+                error_code in self.RETRYABLE_ERROR_CODES
+                and int(task.attempt_count or 0) <= self.MAX_RETRY_ATTEMPTS
+            ):
                 task.status = "retry_waiting"
                 task.next_retry_at = self._compute_next_retry_at(task.attempt_count, error_code)
             else:
