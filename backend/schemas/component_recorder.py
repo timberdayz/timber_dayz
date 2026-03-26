@@ -39,6 +39,10 @@ class RecorderStatusData(BaseModel):
     error_message: Optional[str] = None
     verification_type: Optional[str] = None
     verification_screenshot: Optional[str] = None
+    verification_id: Optional[str] = None
+    verification_message: Optional[str] = None
+    verification_expires_at: Optional[str] = None
+    verification_attempt_count: int = 0
 
 
 class RecorderStartResponse(BaseModel):

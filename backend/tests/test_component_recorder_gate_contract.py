@@ -39,12 +39,36 @@ def test_build_recorder_status_payload_exposes_gate_fields():
     assert payload["error_message"] == "login not confirmed"
 
 
+def test_build_recorder_status_payload_exposes_shared_verification_fields():
+    payload = _build_recorder_status_payload(
+        state="login_verification_pending",
+        gate_stage="login_gate",
+        ready_to_record=False,
+        active=True,
+        platform="miaoshou",
+        component_type="export",
+        steps_count=0,
+        started_at=None,
+        verification_type="graphical_captcha",
+        verification_screenshot="verification_screenshot.png",
+        verification_id="verify-1",
+        verification_message="login requires verification",
+        verification_expires_at="2026-03-26T21:30:00+00:00",
+        verification_attempt_count=1,
+    )
+
+    assert payload["verification_id"] == "verify-1"
+    assert payload["verification_message"] == "login requires verification"
+    assert payload["verification_expires_at"] == "2026-03-26T21:30:00+00:00"
+    assert payload["verification_attempt_count"] == 1
+
+
 @pytest.mark.asyncio
 async def test_resume_recorder_verification_writes_response_file(tmp_path):
     status_path = tmp_path / "status.json"
     response_path = tmp_path / "verification_response.json"
     status_path.write_text(
-        '{"state":"login_verification_pending","gate_stage":"login_gate","ready_to_record":false}',
+        '{"state":"login_verification_pending","gate_stage":"login_gate","ready_to_record":false,"verification_id":"verify-1","verification_type":"graphical_captcha","verification_message":"login requires verification","verification_expires_at":"2026-03-26T21:30:00+00:00","verification_attempt_count":0}',
         encoding="utf-8",
     )
 
@@ -58,6 +82,64 @@ async def test_resume_recorder_verification_writes_response_file(tmp_path):
     assert body["success"] is True
     assert response_path.exists()
     assert '"captcha_code": "1234"' in response_path.read_text(encoding="utf-8")
+    updated_status = status_path.read_text(encoding="utf-8")
+    assert '"state": "verification_submitted"' in updated_status
+
+
+@pytest.mark.asyncio
+async def test_resume_recorder_verification_uses_shared_verification_request(tmp_path, monkeypatch):
+    status_path = tmp_path / "status.json"
+    response_path = tmp_path / "verification_response.json"
+    status_path.write_text(
+        '{"state":"login_verification_pending","gate_stage":"login_gate","ready_to_record":false}',
+        encoding="utf-8",
+    )
+
+    recorder_session.status_file = str(status_path)
+    recorder_session.response_file = str(response_path)
+
+    captured = {}
+
+    class _FakeVerificationService:
+        def __init__(self, store=None):
+            self.store = store
+
+        def mark_submitted(self, *, verification_id: str):
+            captured["verification_id"] = verification_id
+            return {"state": "verification_submitted"}
+
+    class _FakeVerificationStore:
+        def save(self, payload):
+            captured["saved_payload"] = payload
+            return payload
+
+    monkeypatch.setattr(
+        component_recorder_router,
+        "VerificationService",
+        _FakeVerificationService,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        component_recorder_router,
+        "VerificationStateStore",
+        _FakeVerificationStore,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        component_recorder_router,
+        "_read_recorder_runtime_status",
+        lambda path: {
+            "state": "login_verification_pending",
+            "verification_id": "verify-1",
+        },
+    )
+
+    body = await resume_recorder_verification(
+        RecorderResumeRequest(captcha_code="1234")
+    )
+
+    assert body["success"] is True
+    assert captured["verification_id"] == "verify-1"
 
 
 @pytest.mark.asyncio

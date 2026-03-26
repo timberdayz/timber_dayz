@@ -48,6 +48,8 @@ sys.path.insert(0, str(project_root))
 from modules.components.base import ExecutionContext
 from modules.apps.collection_center.transition_gates import evaluate_login_ready
 from modules.core.logger import get_logger
+from backend.services.verification_service import VerificationService
+from backend.services.verification_state_store import VerificationStateStore
 
 logger = get_logger(__name__)
 
@@ -96,6 +98,10 @@ class InspectorRecorder:
         self.open_action: Optional[Dict[str, Any]] = None  # 打开动作
         self.available_options: List[Dict[str, Any]] = []  # 发现的选项
         self._last_click_selector: Optional[str] = None  # 上次点击的选择器（用于检测重复 open）
+        self._verification_store = VerificationStateStore()
+        self._verification_service = VerificationService(store=self._verification_store)
+        self._active_verification_id: Optional[str] = None
+        self._active_verification_payload: Optional[Dict[str, Any]] = None
         
         if self.discovery_mode:
             logger.info(f"[Discovery Mode] Enabled for component type: {self.component_type}")
@@ -124,6 +130,12 @@ class InspectorRecorder:
             "error_message": error_message,
             "verification_type": verification_type,
             "verification_screenshot": verification_screenshot,
+            "verification_id": self._active_verification_id,
+            "verification_message": (self._active_verification_payload or {}).get("message"),
+            "verification_expires_at": (self._active_verification_payload or {}).get("expires_at"),
+            "verification_attempt_count": (self._active_verification_payload or {}).get("attempt_count", 0),
+            "current_url": str(getattr(getattr(self, "_current_page", None), "url", "") or ""),
+            "created_at": (self._active_verification_payload or {}).get("created_at"),
             "updated_at": datetime.now().isoformat(),
         }
         path = Path(self.status_file)
@@ -183,8 +195,32 @@ class InspectorRecorder:
             verification_type=verification_type,
             verification_screenshot=screenshot_name if target_path else None,
         )
+        verification_payload = self._verification_service.raise_required(
+            owner_type="recorder",
+            owner_id=str(self.account_info.get("account_id") or self.platform),
+            verification_type=verification_type,
+            phase="login",
+            current_url=str(getattr(page, "url", "") or ""),
+            screenshot_url=screenshot_name if target_path else None,
+            message="login requires verification",
+            account_id=str(self.account_info.get("account_id") or "") or None,
+            store_name=str(self.account_info.get("store_name") or "") or None,
+        )
+        self._active_verification_id = verification_payload["verification_id"]
+        self._active_verification_payload = verification_payload
+        self._write_status(
+            state="login_verification_pending",
+            gate_stage="login_gate",
+            ready_to_record=False,
+            verification_type=verification_type,
+            verification_screenshot=screenshot_name if target_path else None,
+        )
 
         value = await self._wait_for_verification_input(verification_type)
+        if self._active_verification_id:
+            self._active_verification_payload = self._verification_service.mark_retrying(
+                verification_id=self._active_verification_id
+            )
         if verification_type in ("otp", "sms", "email_code"):
             self.login_runtime_params["otp"] = value
         else:
@@ -229,12 +265,14 @@ class InspectorRecorder:
                 existing_pages = context.pages
                 if existing_pages:
                     page = existing_pages[0]
+                    self._current_page = page
                     logger.info(f"Using existing page from persistent context (total: {len(existing_pages)})")
                     # 关闭多余的空白页面
                     for extra_page in existing_pages[1:]:
                         await extra_page.close()
                 else:
                     page = await context.new_page()
+                    self._current_page = page
                     logger.info("Created new page")
                 
                 # 2. 启动 Trace 录制
