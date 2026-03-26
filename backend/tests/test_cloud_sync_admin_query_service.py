@@ -87,3 +87,23 @@ async def test_table_state_row_contains_checkpoint_and_projection_sections(seede
     assert row["checkpoint"]["last_source_id"] == 321
     assert row["latest_task"]["job_id"] == "job-1"
     assert row["projection"]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_query_service_redacts_credentials_in_errors(cloud_sync_sqlite_session):
+    task = CloudBClassSyncTask(
+        job_id="job-sensitive",
+        dedupe_key="fact_sensitive",
+        source_table_name="fact_sensitive",
+        status="failed",
+        last_error="postgresql://erp_user:super-secret@db.example.com/xihong_erp failed",
+    )
+    cloud_sync_sqlite_session.add(task)
+    await cloud_sync_sqlite_session.commit()
+
+    service = CloudSyncAdminQueryService(cloud_sync_sqlite_session)
+    rows = await service.list_tasks()
+
+    assert rows[0]["last_error"] is not None
+    assert "super-secret" not in rows[0]["last_error"]
+    assert "***" in rows[0]["last_error"]

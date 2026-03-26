@@ -10,8 +10,10 @@ from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from backend.services.cloud_sync_admin_command_service import CloudSyncAdminCommandService
 from backend.services.cloud_sync_admin_query_service import CloudSyncAdminQueryService
+from modules.core.logger import get_logger
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 class ManualTriggerRequest(BaseModel):
@@ -30,6 +32,16 @@ async def _maybe_await(value):
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def _actor_repr(current_user) -> str:
+    return str(
+        getattr(current_user, "user_id", None)
+        or getattr(current_user, "id", None)
+        or current_user.get("user_id")
+        if isinstance(current_user, dict)
+        else "unknown"
+    )
 
 
 @router.get("/api/cloud-sync/health")
@@ -69,6 +81,7 @@ async def trigger_cloud_sync_task(
     current_user=Depends(require_admin),
 ):
     service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=trigger_sync table=%s", _actor_repr(current_user), payload.source_table_name)
     return await _maybe_await(service.trigger_sync(payload.source_table_name))
 
 
@@ -101,6 +114,7 @@ async def retry_cloud_sync_task(
     current_user=Depends(require_admin),
 ):
     service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=retry_task job_id=%s", _actor_repr(current_user), job_id)
     return await _maybe_await(service.retry_task(job_id))
 
 
@@ -111,6 +125,7 @@ async def cancel_cloud_sync_task(
     current_user=Depends(require_admin),
 ):
     service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=cancel_task job_id=%s", _actor_repr(current_user), job_id)
     return await _maybe_await(service.cancel_task(job_id))
 
 
@@ -121,6 +136,7 @@ async def dry_run_cloud_sync_table(
     current_user=Depends(require_admin),
 ):
     service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=dry_run table=%s", _actor_repr(current_user), table_name)
     return await _maybe_await(service.dry_run_table(table_name))
 
 
@@ -131,6 +147,7 @@ async def repair_cloud_sync_checkpoint(
     current_user=Depends(require_admin),
 ):
     service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=repair_checkpoint table=%s", _actor_repr(current_user), table_name)
     return await _maybe_await(service.repair_checkpoint(table_name))
 
 
@@ -141,4 +158,5 @@ async def refresh_cloud_sync_projection(
     current_user=Depends(require_admin),
 ):
     service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=refresh_projection table=%s", _actor_repr(current_user), table_name)
     return await _maybe_await(service.refresh_projection(table_name))

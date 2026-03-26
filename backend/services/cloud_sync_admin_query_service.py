@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import re
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +32,15 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+def _sanitize_error_text(value: str | None) -> str | None:
+    if not value:
+        return value
+
+    sanitized = re.sub(r'://([^:/\s]+):([^@/\s]+)@', r'://\1:***@', value)
+    sanitized = re.sub(r'(?i)\b(password|secret|token)=([^\s&]+)', r'\1=***', sanitized)
+    return sanitized
+
+
 class CloudSyncAdminQueryService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -59,7 +69,7 @@ class CloudSyncAdminQueryService:
                 status=(runtime_health or {}).get("status", "not_started"),
                 worker_id=(runtime_health or {}).get("worker_id"),
                 poll_interval_seconds=(runtime_health or {}).get("poll_interval_seconds"),
-                last_error=(runtime_health or {}).get("last_error"),
+                last_error=_sanitize_error_text((runtime_health or {}).get("last_error")),
                 last_heartbeat_at=(runtime_health or {}).get("last_heartbeat_at"),
             ),
             tunnel=CloudSyncDependencyHealth(status="unknown"),
@@ -119,7 +129,7 @@ class CloudSyncAdminQueryService:
                     last_source_id=getattr(checkpoint, "last_source_id", None),
                     last_ingest_timestamp=_iso(getattr(checkpoint, "last_ingest_timestamp", None)),
                     last_status=getattr(checkpoint, "last_status", None),
-                    last_error=getattr(checkpoint, "last_error", None),
+                    last_error=_sanitize_error_text(getattr(checkpoint, "last_error", None)),
                 ),
                 latest_task=self._serialize_task_state(latest_task),
                 projection=CloudSyncProjectionState(
@@ -129,7 +139,9 @@ class CloudSyncAdminQueryService:
                 last_success_at=_iso(getattr(latest_task, "finished_at", None))
                 if getattr(latest_task, "status", None) == "completed"
                 else None,
-                latest_error=getattr(latest_task, "last_error", None) or getattr(checkpoint, "last_error", None),
+                latest_error=_sanitize_error_text(
+                    getattr(latest_task, "last_error", None) or getattr(checkpoint, "last_error", None)
+                ),
             )
             rows.append(row.model_dump())
         return rows
@@ -147,7 +159,7 @@ class CloudSyncAdminQueryService:
                     "job_id": task.job_id,
                     "source_table_name": task.source_table_name,
                     "timestamp": _iso(timestamp),
-                    "last_error": task.last_error,
+                    "last_error": _sanitize_error_text(task.last_error),
                 }
             )
         return events
@@ -167,7 +179,7 @@ class CloudSyncAdminQueryService:
             last_attempt_finished_at=_iso(task.last_attempt_finished_at),
             projection_status=task.projection_status,
             projection_preset=task.projection_preset,
-            last_error=task.last_error,
+            last_error=_sanitize_error_text(task.last_error),
             error_code=task.error_code,
             created_at=_iso(task.created_at),
             updated_at=_iso(task.updated_at),
