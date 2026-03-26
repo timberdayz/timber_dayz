@@ -91,6 +91,7 @@ from backend.routers import (
     data_migration,  # v5.0.0: 数据迁移API
 )
 from backend.routers import rate_limit_config  # [*] v4.19.4: 限流配置管理API(Phase 3)
+from backend.routers import cloud_sync as cloud_sync_router
 from backend.models.database import init_db, get_db
 from backend.utils.config import get_settings
 from modules.core.logger import get_logger
@@ -1075,6 +1076,11 @@ app.include_router(
     data_migration.router,
     prefix="/api",
     tags=["数据迁移"]
+)
+
+app.include_router(
+    cloud_sync_router.router,
+    tags=["云端同步管理"]
 )
 
 # 全局异常处理(v4.6.0统一响应格式)
