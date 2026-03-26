@@ -7,6 +7,10 @@ from sqlalchemy import create_engine, inspect as sa_inspect
 from sqlalchemy.engine import make_url
 
 from backend.models.database import DATABASE_URL, SessionLocal
+from backend.services.cloud_b_class_auto_sync_runtime import (
+    CloudBClassAutoSyncRuntime,
+    should_enable_cloud_sync_worker,
+)
 from backend.services.cloud_b_class_auto_sync_worker import CloudBClassAutoSyncWorker
 from backend.services.cloud_b_class_mirror_manager import CloudBClassMirrorManager
 from backend.services.cloud_b_class_sync_checkpoint_service import (
@@ -139,4 +143,23 @@ def build_cloud_sync_worker_factory_from_env(dry_run: bool = False):
         cloud_engine=cloud_engine,
         session_factory=SessionLocal,
         dry_run=dry_run,
+    )
+
+
+def build_cloud_sync_runtime_from_env(dry_run: bool = False):
+    enabled_flag = os.getenv("CLOUD_SYNC_WORKER_ENABLED")
+    enable_collection = os.getenv("ENABLE_COLLECTION", "true").lower() in {"true", "1", "yes", "on"}
+    deployment_role = os.getenv("DEPLOYMENT_ROLE", "")
+
+    if not should_enable_cloud_sync_worker(enabled_flag, enable_collection, deployment_role):
+        return None
+
+    worker_factory = build_cloud_sync_worker_factory_from_env(dry_run=dry_run)
+    poll_interval_seconds = float(os.getenv("CLOUD_SYNC_POLL_INTERVAL_SECONDS", "5"))
+    worker_id = os.getenv("CLOUD_SYNC_WORKER_ID", "cloud-sync-worker-1")
+
+    return CloudBClassAutoSyncRuntime(
+        worker_factory=worker_factory,
+        poll_interval_seconds=poll_interval_seconds,
+        worker_id=worker_id,
     )

@@ -18,6 +18,7 @@ export const menuGroups = [
     order: 1,
     defaultExpanded: true,
     items: [
+      '/cloud-sync',             // 云端同步管理
       '/business-overview',
       '/annual-summary'
     ]

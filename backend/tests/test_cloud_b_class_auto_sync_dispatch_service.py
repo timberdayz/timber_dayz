@@ -67,3 +67,40 @@ def test_enqueue_or_coalesce_increments_trigger_count():
         ).delete()
         db.commit()
         db.close()
+
+
+def test_enqueue_or_coalesce_reuses_existing_running_task():
+    db = _build_session()
+    table_name = "fact_shopee_orders_daily_test_running_reuse"
+    try:
+        db.query(CloudBClassSyncTask).filter(
+            CloudBClassSyncTask.source_table_name == table_name
+        ).delete()
+        db.commit()
+
+        task = CloudBClassSyncTask(
+            job_id="job-running",
+            dedupe_key=table_name,
+            source_table_name=table_name,
+            platform_code="shopee",
+            data_domain="orders",
+            granularity="daily",
+            status="running",
+            attempt_count=1,
+            metadata_json={"trigger_count": 1},
+        )
+        db.add(task)
+        db.commit()
+
+        service = CloudBClassAutoSyncDispatchService(db)
+        result = service.enqueue_or_coalesce(_build_event(table_name))
+
+        assert result["job_id"] == "job-running"
+        assert result["coalesced"] is True
+        assert result["metadata"]["trigger_count"] == 2
+    finally:
+        db.query(CloudBClassSyncTask).filter(
+            CloudBClassSyncTask.source_table_name == table_name
+        ).delete()
+        db.commit()
+        db.close()

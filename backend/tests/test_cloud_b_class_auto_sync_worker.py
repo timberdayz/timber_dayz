@@ -155,3 +155,91 @@ def test_worker_supports_async_sync_executor():
         db.query(CloudBClassSyncTask).delete()
         db.commit()
         db.close()
+
+
+def test_worker_heartbeat_extends_lease():
+    db = _build_session()
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        task = _create_task(db)
+
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=FakeSyncExecutor(), lease_seconds=300)
+        claimed = worker.claim_next_task(worker_id="worker-1")
+        original_lease = claimed.lease_expires_at
+
+        worker.heartbeat(claimed.id, worker_id="worker-1")
+        refreshed = db.get(type(task), task.id)
+
+        assert refreshed.heartbeat_at is not None
+        assert refreshed.lease_expires_at >= original_lease
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
+def test_worker_marks_retryable_failure_as_failed_after_retry_limit():
+    db = _build_session()
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        pending_task = _create_task(db)
+        pending_task.attempt_count = 4
+        db.commit()
+
+        executor = FakeSyncExecutor(should_fail=True, error_code="cloud_db_unavailable")
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=executor)
+        asyncio.run(worker.run_one(worker_id="worker-1"))
+        refreshed = db.get(type(pending_task), pending_task.id)
+
+        assert refreshed.status == "failed"
+        assert refreshed.next_retry_at is None
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
+def test_worker_does_not_claim_retry_waiting_task_before_next_retry_at():
+    db = _build_session()
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        task = _create_task(db, status="retry_waiting")
+        task.next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        db.commit()
+
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=FakeSyncExecutor())
+        claimed = worker.claim_next_task(worker_id="worker-1")
+
+        assert claimed is None
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
+def test_worker_claims_retry_waiting_task_after_next_retry_at():
+    db = _build_session()
+    try:
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        task = _create_task(db, status="retry_waiting")
+        task.next_retry_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=FakeSyncExecutor())
+        claimed = worker.claim_next_task(worker_id="worker-1")
+
+        assert claimed is not None
+        assert claimed.id == task.id
+        assert claimed.status == "running"
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()

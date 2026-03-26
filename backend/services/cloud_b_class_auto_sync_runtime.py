@@ -58,6 +58,7 @@ class CloudBClassAutoSyncRuntime:
                 pass
         if self.worker_factory is not None and hasattr(self.worker_factory, "close"):
             self.worker_factory.close()
+        self._task = None
         self._status = "stopped"
 
     async def _run_loop(self) -> None:

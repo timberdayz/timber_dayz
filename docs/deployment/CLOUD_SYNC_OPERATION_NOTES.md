@@ -14,10 +14,16 @@ The repository now contains a first executable version of local-to-cloud B-class
   - `python scripts/sync_b_class_to_cloud.py --dry-run --batch-size 10`
 - auto sync control-plane API:
   - `GET /api/cloud-sync/health`
+  - `GET /api/cloud-sync/tables`
   - `POST /api/cloud-sync/tasks/trigger`
   - `GET /api/cloud-sync/tasks`
   - `GET /api/cloud-sync/tasks/{job_id}`
   - `POST /api/cloud-sync/tasks/{job_id}/retry`
+  - `POST /api/cloud-sync/tasks/{job_id}/cancel`
+  - `POST /api/cloud-sync/tables/{table_name}/dry-run`
+  - `POST /api/cloud-sync/tables/{table_name}/repair-checkpoint`
+  - `POST /api/cloud-sync/tables/{table_name}/refresh-projection`
+  - `GET /api/cloud-sync/events`
 
 ## Recommended First Verification
 
@@ -42,15 +48,21 @@ Recommended env vars for the first automatic test:
 
 ```env
 CLOUD_SYNC_WORKER_ENABLED=true
-CLOUD_SYNC_DRY_RUN=true
-CLOUD_SYNC_WORKER_POLL_INTERVAL_SECONDS=5
+CLOUD_SYNC_POLL_INTERVAL_SECONDS=5
+CLOUD_SYNC_WORKER_ID=cloud-sync-worker-1
 ```
 
 Required for real cloud writes:
 
 ```env
+CLOUD_SYNC_WORKER_ENABLED=true
+ENABLE_COLLECTION=true
+DEPLOYMENT_ROLE=local
 CLOUD_DATABASE_URL=postgresql://...
 ```
+
+See also:
+- `docs/deployment/CLOUD_SYNC_ADMIN_CONSOLE_RUNBOOK.md`
 
 ## Important Boundaries
 
