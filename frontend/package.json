@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "serve": "vite preview --port 3000",
-    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path ../.gitignore",
     "type-check": "vue-tsc --noEmit",
     "smoke:playwright": "node scripts/playwrightFrontendSmoke.mjs",
     "test:smoke-shared": "node --test scripts/frontendSmokeShared.test.mjs"
@@ -30,6 +30,7 @@
     "vuedraggable": "^4.1.0"
   },
   "devDependencies": {
+    "@rushstack/eslint-patch": "^1.14.0",
     "@types/nprogress": "^0.2.3",
     "@vitejs/plugin-vue": "^4.2.3",
     "@vue/eslint-config-typescript": "^11.0.0",
