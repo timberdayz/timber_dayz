@@ -297,14 +297,14 @@ const formRules = {
   dateRange: [
     { required: true, message: '请选择时间范围', trigger: 'change' },
     { validator: (rule, value, callback) => {
-        if (!value || value.length !== 2) {
-          callback(new Error('请选择开始和结束日期'))
-        } else if (value[1] <= value[0]) {
-          callback(new Error('结束时间必须大于开始时间'))
-        } else {
-          callback()
-        }
-      }, trigger: 'change' }
+      if (!value || value.length !== 2) {
+        callback(new Error('请选择开始和结束日期'))
+      } else if (value[1] <= value[0]) {
+        callback(new Error('结束时间必须大于开始时间'))
+      } else {
+        callback()
+      }
+    }, trigger: 'change' }
   ],
   target_amount: [
     { required: true, message: '目标销售额不能为空', trigger: 'blur' },

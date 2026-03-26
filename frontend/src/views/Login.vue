@@ -103,13 +103,13 @@ const isValidRedirect = (url) => {
   // 禁止协议（http:, https:, javascript:, data: 等）
   if (/^[a-z]+:/i.test(url)) return false
   // 禁止协议相对URL（//evil.com）
-  if (url.startsWith("//")) return false
+  if (url.startsWith('//')) return false
   // 禁止反斜杠（某些浏览器会转换）
-  if (url.includes("\\")) return false
+  if (url.includes('\\')) return false
   // 只允许以 / 开头
-  if (!url.startsWith("/")) return false
+  if (!url.startsWith('/')) return false
   // 防止 /\/evil.com 这种绕过（第二个字符是 / 或 \）
-  if (url.length > 1 && (url[1] === "/" || url[1] === "\\")) return false
+  if (url.length > 1 && (url[1] === '/' || url[1] === '\\')) return false
   return true
 }
 

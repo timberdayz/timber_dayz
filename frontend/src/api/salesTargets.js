@@ -23,5 +23,5 @@ export default {
 
   async copyLastMonth(targetMonth) {
     return await api._post(`/config/sales-targets/copy-last-month?target_month=${encodeURIComponent(targetMonth)}`)
-  },
+  }
 }

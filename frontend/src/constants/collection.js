@@ -1,8 +1,8 @@
 export const DOMAIN_SUBTYPE_OPTIONS = {
   services: [
     { label: '人工客服', value: 'agent' },
-    { label: '智能客服', value: 'ai_assistant' },
-  ],
+    { label: '智能客服', value: 'ai_assistant' }
+  ]
 }
 
 export const getSubtypeOptions = (domain) => DOMAIN_SUBTYPE_OPTIONS[domain] || []
@@ -47,30 +47,30 @@ export const buildDateRangeFromPreset = (
   if (preset === 'custom' && Array.isArray(customRange) && customRange.length === 2) {
     return {
       start_date: customRange[0],
-      end_date: customRange[1],
+      end_date: customRange[1]
     }
   }
 
   switch (preset) {
-    case 'today':
-      return { start_date: formatDate(today), end_date: formatDate(today) }
-    case 'yesterday': {
-      const yesterday = new Date(today)
-      yesterday.setDate(yesterday.getDate() - 1)
-      return { start_date: formatDate(yesterday), end_date: formatDate(yesterday) }
-    }
-    case 'last_7_days': {
-      const start = new Date(today)
-      start.setDate(start.getDate() - 7)
-      return { start_date: formatDate(start), end_date: formatDate(today) }
-    }
-    case 'last_30_days': {
-      const span = String(platform).toLowerCase() === 'tiktok' ? 28 : 30
-      const start = new Date(today)
-      start.setDate(start.getDate() - span)
-      return { start_date: formatDate(start), end_date: formatDate(today) }
-    }
-    default:
-      return {}
+  case 'today':
+    return { start_date: formatDate(today), end_date: formatDate(today) }
+  case 'yesterday': {
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+    return { start_date: formatDate(yesterday), end_date: formatDate(yesterday) }
+  }
+  case 'last_7_days': {
+    const start = new Date(today)
+    start.setDate(start.getDate() - 7)
+    return { start_date: formatDate(start), end_date: formatDate(today) }
+  }
+  case 'last_30_days': {
+    const span = String(platform).toLowerCase() === 'tiktok' ? 28 : 30
+    const start = new Date(today)
+    start.setDate(start.getDate() - span)
+    return { start_date: formatDate(start), end_date: formatDate(today) }
+  }
+  default:
+    return {}
   }
 }

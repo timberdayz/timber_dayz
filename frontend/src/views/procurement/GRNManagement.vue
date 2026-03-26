@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Box } from '@element-plus/icons-vue'
 
 const features = [
-  "创建入库单",
-  "关联采购订单",
-  "入库数量核对",
-  "质量检验记录",
-  "自动过账到库存"
+  '创建入库单',
+  '关联采购订单',
+  '入库数量核对',
+  '质量检验记录',
+  '自动过账到库存'
 ]
 </script>
 

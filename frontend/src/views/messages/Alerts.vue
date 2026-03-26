@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Warning } from '@element-plus/icons-vue'
 
 const features = [
-  "库存预警",
-  "订单异常",
-  "财务异常",
-  "采集失败",
-  "系统异常"
+  '库存预警',
+  '订单异常',
+  '财务异常',
+  '采集失败',
+  '系统异常'
 ]
 </script>
 

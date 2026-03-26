@@ -518,18 +518,18 @@ const getDateRange = (preset) => {
   const formatDate = (d) => d.toISOString().split('T')[0]
   
   switch (preset) {
-    case 'today':
-      return { start_date: formatDate(today), end_date: formatDate(today) }
-    case 'yesterday':
-      const yesterday = new Date(today)
-      yesterday.setDate(yesterday.getDate() - 1)
-      return { start_date: formatDate(yesterday), end_date: formatDate(yesterday) }
-    case 'last_7_days':
-      const last7 = new Date(today)
-      last7.setDate(last7.getDate() - 7)
-      return { start_date: formatDate(last7), end_date: formatDate(today) }
-    default:
-      return {}
+  case 'today':
+    return { start_date: formatDate(today), end_date: formatDate(today) }
+  case 'yesterday':
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+    return { start_date: formatDate(yesterday), end_date: formatDate(yesterday) }
+  case 'last_7_days':
+    const last7 = new Date(today)
+    last7.setDate(last7.getDate() - 7)
+    return { start_date: formatDate(last7), end_date: formatDate(today) }
+  default:
+    return {}
   }
 }
 

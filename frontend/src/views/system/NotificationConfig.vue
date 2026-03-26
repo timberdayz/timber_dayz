@@ -136,184 +136,184 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
-import { ElMessage } from "element-plus";
-import { Bell, Refresh, Check, Plus } from "@element-plus/icons-vue";
-import * as systemAPI from "@/api/system";
-import PageHeader from "@/components/common/PageHeader.vue";
+import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Bell, Refresh, Check, Plus } from '@element-plus/icons-vue'
+import * as systemAPI from '@/api/system'
+import PageHeader from '@/components/common/PageHeader.vue'
 
-const loading = ref(false);
-const testing = ref(false);
-const activeTab = ref("smtp");
-const smtpFormRef = ref(null);
+const loading = ref(false)
+const testing = ref(false)
+const activeTab = ref('smtp')
+const smtpFormRef = ref(null)
 
 const smtpConfig = ref({
-  smtp_server: "",
+  smtp_server: '',
   smtp_port: 587,
   use_tls: true,
-  username: "",
-  password: "",
-  from_email: "",
-  from_name: "",
-  is_active: true,
-});
+  username: '',
+  password: '',
+  from_email: '',
+  from_name: '',
+  is_active: true
+})
 
-const templates = ref([]);
-const alertRules = ref([]);
+const templates = ref([])
+const alertRules = ref([])
 
 const loadSMTPConfig = async () => {
   try {
-    const response = await systemAPI.getSMTPConfig();
-    const payload = response?.data || response;
+    const response = await systemAPI.getSMTPConfig()
+    const payload = response?.data || response
     if (payload) {
       smtpConfig.value = {
-        smtp_server: payload.smtp_server || "",
+        smtp_server: payload.smtp_server || '',
         smtp_port: payload.smtp_port || 587,
         use_tls: payload.use_tls !== false,
-        username: payload.username || "",
-        password: "", // 密码不显示
-        from_email: payload.from_email || "",
-        from_name: payload.from_name || "",
-        is_active: payload.is_active !== false,
-      };
+        username: payload.username || '',
+        password: '', // 密码不显示
+        from_email: payload.from_email || '',
+        from_name: payload.from_name || '',
+        is_active: payload.is_active !== false
+      }
     }
   } catch (error) {
-    console.error("加载SMTP配置失败:", error);
+    console.error('加载SMTP配置失败:', error)
   }
-};
+}
 
 const saveSMTPConfig = async () => {
   try {
-    await smtpFormRef.value.validate();
-    loading.value = true;
-    const response = await systemAPI.updateSMTPConfig(smtpConfig.value);
+    await smtpFormRef.value.validate()
+    loading.value = true
+    const response = await systemAPI.updateSMTPConfig(smtpConfig.value)
     if (response && (response.success !== false)) {
-      ElMessage.success("SMTP配置保存成功");
+      ElMessage.success('SMTP配置保存成功')
     } else {
-      ElMessage.error(response?.message || "保存SMTP配置失败");
+      ElMessage.error(response?.message || '保存SMTP配置失败')
     }
   } catch (error) {
-    if (error.message !== "validation failed") {
-      console.error("保存SMTP配置失败:", error);
-      ElMessage.error(error.response?.data?.message || error.message || "保存SMTP配置失败");
+    if (error.message !== 'validation failed') {
+      console.error('保存SMTP配置失败:', error)
+      ElMessage.error(error.response?.data?.message || error.message || '保存SMTP配置失败')
     }
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const testSMTP = async () => {
   try {
-    await smtpFormRef.value.validate();
-    testing.value = true;
+    await smtpFormRef.value.validate()
+    testing.value = true
     const response = await systemAPI.testSMTPConnection({
       smtp_server: smtpConfig.value.smtp_server,
       smtp_port: smtpConfig.value.smtp_port,
       use_tls: smtpConfig.value.use_tls,
       username: smtpConfig.value.username,
-      password: smtpConfig.value.password,
-    });
+      password: smtpConfig.value.password
+    })
     if (response && response.data && response.data.success) {
-      ElMessage.success("SMTP连接测试成功");
+      ElMessage.success('SMTP连接测试成功')
     } else {
-      ElMessage.error(response?.data?.message || response?.message || "SMTP连接测试失败");
+      ElMessage.error(response?.data?.message || response?.message || 'SMTP连接测试失败')
     }
   } catch (error) {
-    if (error.message !== "validation failed") {
-      console.error("测试SMTP连接失败:", error);
-      ElMessage.error(error.response?.data?.message || error.message || "测试SMTP连接失败");
+    if (error.message !== 'validation failed') {
+      console.error('测试SMTP连接失败:', error)
+      ElMessage.error(error.response?.data?.message || error.message || '测试SMTP连接失败')
     }
   } finally {
-    testing.value = false;
+    testing.value = false
   }
-};
+}
 
 const loadTemplates = async () => {
   try {
-    const response = await systemAPI.getNotificationTemplates();
+    const response = await systemAPI.getNotificationTemplates()
     if (response && response.data) {
-      templates.value = response.data.templates || response.data || [];
+      templates.value = response.data.templates || response.data || []
     }
   } catch (error) {
-    console.error("加载通知模板失败:", error);
+    console.error('加载通知模板失败:', error)
   }
-};
+}
 
 const loadAlertRules = async () => {
   try {
-    const response = await systemAPI.getAlertRules();
+    const response = await systemAPI.getAlertRules()
     if (response && response.data) {
-      alertRules.value = response.data.rules || response.data || [];
+      alertRules.value = response.data.rules || response.data || []
     }
   } catch (error) {
-    console.error("加载告警规则失败:", error);
+    console.error('加载告警规则失败:', error)
   }
-};
+}
 
 const showTemplateDialog = () => {
-  ElMessage.info("模板编辑功能开发中");
-};
+  ElMessage.info('模板编辑功能开发中')
+}
 
 const editTemplate = (template) => {
-  ElMessage.info("模板编辑功能开发中");
-};
+  ElMessage.info('模板编辑功能开发中')
+}
 
 const deleteTemplate = async (templateId) => {
   try {
-    const response = await systemAPI.deleteNotificationTemplate(templateId);
+    const response = await systemAPI.deleteNotificationTemplate(templateId)
     if (response && (response.success !== false)) {
-      ElMessage.success("模板删除成功");
-      await loadTemplates();
+      ElMessage.success('模板删除成功')
+      await loadTemplates()
     } else {
-      ElMessage.error(response?.message || "删除模板失败");
+      ElMessage.error(response?.message || '删除模板失败')
     }
   } catch (error) {
-    console.error("删除模板失败:", error);
-    ElMessage.error(error.response?.data?.message || error.message || "删除模板失败");
+    console.error('删除模板失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '删除模板失败')
   }
-};
+}
 
 const showAlertRuleDialog = () => {
-  ElMessage.info("告警规则编辑功能开发中");
-};
+  ElMessage.info('告警规则编辑功能开发中')
+}
 
 const editAlertRule = (rule) => {
-  ElMessage.info("告警规则编辑功能开发中");
-};
+  ElMessage.info('告警规则编辑功能开发中')
+}
 
 const deleteAlertRule = async (ruleId) => {
   try {
-    const response = await systemAPI.deleteAlertRule(ruleId);
+    const response = await systemAPI.deleteAlertRule(ruleId)
     if (response && (response.success !== false)) {
-      ElMessage.success("告警规则删除成功");
-      await loadAlertRules();
+      ElMessage.success('告警规则删除成功')
+      await loadAlertRules()
     } else {
-      ElMessage.error(response?.message || "删除告警规则失败");
+      ElMessage.error(response?.message || '删除告警规则失败')
     }
   } catch (error) {
-    console.error("删除告警规则失败:", error);
-    ElMessage.error(error.response?.data?.message || error.message || "删除告警规则失败");
+    console.error('删除告警规则失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '删除告警规则失败')
   }
-};
+}
 
 const handleTabChange = (tabName) => {
-  if (tabName === "smtp") {
-    loadSMTPConfig();
-  } else if (tabName === "templates") {
-    loadTemplates();
-  } else if (tabName === "alerts") {
-    loadAlertRules();
+  if (tabName === 'smtp') {
+    loadSMTPConfig()
+  } else if (tabName === 'templates') {
+    loadTemplates()
+  } else if (tabName === 'alerts') {
+    loadAlertRules()
   }
-};
+}
 
 const refreshAll = async () => {
-  await Promise.all([loadSMTPConfig(), loadTemplates(), loadAlertRules()]);
-  ElMessage.success("刷新成功");
-};
+  await Promise.all([loadSMTPConfig(), loadTemplates(), loadAlertRules()])
+  ElMessage.success('刷新成功')
+}
 
 onMounted(() => {
-  loadSMTPConfig();
-});
+  loadSMTPConfig()
+})
 </script>
 
 <style scoped>

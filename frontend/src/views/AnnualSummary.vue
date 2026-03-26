@@ -173,7 +173,7 @@ const targetCompletion = ref({
   target_orders: 0,
   target_profit: null,
   achieved_profit: null,
-  achievement_rate_profit: null,
+  achievement_rate_profit: null
 })
 const byShopList = ref([])
 const periodMonth = ref(
@@ -196,7 +196,7 @@ const kpiData = ref([
   { key: 'gmv', title: 'GMV', value: '0.00', change: '较上月 0.00%', changeType: 'neutral' },
   { key: 'order_count', title: '订单数', value: '0', change: '较上月 0.00%', changeType: 'neutral' },
   { key: 'attach_rate', title: '连带率', value: '0.00', change: '较上月 0.00%', changeType: 'neutral' },
-  { key: 'labor_efficiency', title: '人效', value: '0.00', change: '较上月 0.00%', changeType: 'neutral' },
+  { key: 'labor_efficiency', title: '人效', value: '0.00', change: '较上月 0.00%', changeType: 'neutral' }
 ])
 
 const costData = ref([
@@ -205,7 +205,7 @@ const costData = ref([
   { key: 'cost_to_revenue_ratio', title: '成本产出比', value: '0.00%', sub: '总成本/GMV' },
   { key: 'roi', title: 'ROI', value: '0.00%', sub: '(GMV-总成本)/总成本' },
   { key: 'gross_margin', title: '毛利率', value: '0.00%', sub: '(GMV-COGS)/GMV' },
-  { key: 'net_margin', title: '净利率', value: '0.00%', sub: '(GMV-总成本)/GMV' },
+  { key: 'net_margin', title: '净利率', value: '0.00%', sub: '(GMV-总成本)/GMV' }
 ])
 
 function formatChange(num) {
@@ -263,7 +263,7 @@ async function loadData() {
   try {
     const res = await dashboardApi.queryAnnualSummaryKpi({
       granularity: granularity.value,
-      period: period.value,
+      period: period.value
     })
     const data = res?.data || res
     if (!data) return
@@ -354,7 +354,7 @@ async function loadExtensionData() {
     dashboardApi.queryAnnualSummaryByShop(params),
     dashboardApi.queryAnnualSummaryTrend(params),
     dashboardApi.queryAnnualSummaryPlatformShare(params),
-    dashboardApi.queryAnnualSummaryTargetCompletion(params),
+    dashboardApi.queryAnnualSummaryTargetCompletion(params)
   ])
   byShopList.value = byShopResult.status === 'fulfilled' ? unwrapList(byShopResult.value) : []
   trendData.value = trendResult.status === 'fulfilled' ? unwrapList(trendResult.value) : []
@@ -367,7 +367,7 @@ async function loadExtensionData() {
     target_orders: tc.target_orders ?? 0,
     target_profit: tc.target_profit ?? null,
     achieved_profit: tc.achieved_profit ?? null,
-    achievement_rate_profit: tc.achievement_rate_profit ?? null,
+    achievement_rate_profit: tc.achievement_rate_profit ?? null
   }
   if (trendResult.status === 'rejected') {
     const err = trendResult.reason
@@ -406,8 +406,8 @@ function renderTrendChart() {
     series: [
       { name: 'GMV', type: 'line', data: gmvSeries, smooth: true },
       { name: '总成本', type: 'line', data: costSeries, smooth: true },
-      { name: '利润', type: 'line', data: profitSeries, smooth: true },
-    ],
+      { name: '利润', type: 'line', data: profitSeries, smooth: true }
+    ]
   })
   setTimeout(() => chart.resize(), 50)
 }
@@ -425,7 +425,7 @@ function renderPlatformShareChart() {
   chart.setOption({
     tooltip: { trigger: 'item' },
     legend: { orient: 'vertical', left: 'left' },
-    series: [{ type: 'pie', radius: '60%', data, label: { formatter: '{b}: {d}%' } }],
+    series: [{ type: 'pie', radius: '60%', data, label: { formatter: '{b}: {d}%' } }]
   })
   setTimeout(() => chart.resize(), 50)
 }

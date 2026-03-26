@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Clock } from '@element-plus/icons-vue'
 
 const features = [
-  "历史记录查询",
-  "按状态筛选",
-  "按类型筛选",
-  "审批统计",
-  "导出记录"
+  '历史记录查询',
+  '按状态筛选',
+  '按类型筛选',
+  '审批统计',
+  '导出记录'
 ]
 </script>
 

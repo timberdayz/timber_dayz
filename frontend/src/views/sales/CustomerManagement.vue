@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { UserFilled } from '@element-plus/icons-vue'
 
 const features = [
-  "客户档案管理",
-  "客户分类和标签",
-  "客户价值分析（RFM模型）",
-  "客户生命周期管理",
-  "客户联系记录"
+  '客户档案管理',
+  '客户分类和标签',
+  '客户价值分析（RFM模型）',
+  '客户生命周期管理',
+  '客户联系记录'
 ]
 </script>
 

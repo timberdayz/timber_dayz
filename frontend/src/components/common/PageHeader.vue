@@ -24,20 +24,20 @@ import { getPageFamilyClass } from '@/utils/pageStandards.js'
 const props = defineProps({
   title: {
     type: String,
-    required: true,
+    required: true
   },
   subtitle: {
     type: String,
-    default: '',
+    default: ''
   },
   icon: {
     type: Object,
-    default: null,
+    default: null
   },
   family: {
     type: String,
-    default: 'admin',
-  },
+    default: 'admin'
+  }
 })
 
 const familyClass = computed(() => getPageFamilyClass(props.family))

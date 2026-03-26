@@ -48,7 +48,7 @@ export const useDataSyncStore = defineStore('dataSync', () => {
         api.post('/data-sync/single', {
           file_id: fileId,
           only_with_template: options.onlyWithTemplate ?? true,
-          allow_quarantine: options.allowQuarantine ?? true,
+          allow_quarantine: options.allowQuarantine ?? true
         }),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('API响应超时，任务可能已提交')), API_TIMEOUT)
@@ -190,7 +190,7 @@ export const useDataSyncStore = defineStore('dataSync', () => {
           since_hours: options.sinceHours,
           limit: options.limit ?? 100,
           only_with_template: options.onlyWithTemplate ?? true,
-          allow_quarantine: options.allowQuarantine ?? true,
+          allow_quarantine: options.allowQuarantine ?? true
         }),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('API响应超时')), API_TIMEOUT)
@@ -305,7 +305,7 @@ export const useDataSyncStore = defineStore('dataSync', () => {
     fetchTasks,
     startPolling,
     stopPolling,
-    reset,
+    reset
   }
 })
 

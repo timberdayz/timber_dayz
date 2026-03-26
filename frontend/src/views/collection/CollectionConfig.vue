@@ -370,7 +370,7 @@ import {
   getDatePresetLabel,
   getSelectedSubtypeDomains,
   getSubtypeOptions,
-  normalizeDomainSubtypeMap,
+  normalizeDomainSubtypeMap
 } from '@/constants/collection'
 
 // 状态
@@ -596,7 +596,7 @@ const runConfig = async (row) => {
       customRange:
         row.date_range_type === 'custom' && row.custom_date_start && row.custom_date_end
           ? [row.custom_date_start, row.custom_date_end]
-          : [],
+          : []
     })
 
     // 为每个账号创建任务

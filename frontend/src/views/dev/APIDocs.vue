@@ -15,11 +15,11 @@ import UnderDevelopment from '@/components/common/UnderDevelopment.vue'
 import { Document } from '@element-plus/icons-vue'
 
 const features = [
-  "API列表",
-  "接口详情",
-  "参数说明",
-  "示例代码",
-  "在线调试"
+  'API列表',
+  '接口详情',
+  '参数说明',
+  '示例代码',
+  '在线调试'
 ]
 </script>
 

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {
   SMOKE_ROUTES,
   buildAuthStorageEntries,
-  summarizeSmokeResults,
+  summarizeSmokeResults
 } from './frontendSmokeShared.mjs'
 
 test('smoke routes cover the agreed core frontend pages', () => {
@@ -38,7 +38,7 @@ test('smoke routes cover the agreed core frontend pages', () => {
     '/inventory-dashboard-v3',
     '/inventory-health',
     '/product-quality',
-    '/sales-analysis',
+    '/sales-analysis'
   ])
 })
 
@@ -51,8 +51,8 @@ test('buildAuthStorageEntries produces the localStorage keys required by auth an
       username: 'xihong',
       email: 'xihong@xihong.com',
       full_name: '系统管理员',
-      roles: ['admin'],
-    },
+      roles: ['admin']
+    }
   })
 
   assert.equal(entries.access_token, 'access-token')
@@ -72,8 +72,8 @@ test('summarizeSmokeResults counts passed and failed routes with failure details
       ok: false,
       consoleErrors: ['boom'],
       pageErrors: [],
-      requestFailures: [{ url: '/api/x', status: 500 }],
-    },
+      requestFailures: [{ url: '/api/x', status: 500 }]
+    }
   ])
 
   assert.equal(summary.total, 2)
