@@ -1,15 +1,15 @@
 """
-账号管理相关的Pydantic Schemas
-用于账号CRUD、导入导出、统计等API
+账号管理相关的 Pydantic Schemas
+用于账号 CRUD、批量创建、统计以及未匹配别名提示。
 """
 
-from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CapabilitiesModel(BaseModel):
-    """能力配置模型"""
     orders: bool = Field(default=True, description="订单数据")
     products: bool = Field(default=True, description="商品数据")
     services: bool = Field(default=True, description="客服数据")
@@ -19,17 +19,17 @@ class CapabilitiesModel(BaseModel):
 
 
 class AccountCreate(BaseModel):
-    """创建账号请求模型"""
     account_id: str = Field(..., description="账号唯一标识")
-    parent_account: Optional[str] = Field(None, description="主账号(多店铺共用时填写)")
+    parent_account: Optional[str] = Field(None, description="主账号")
     platform: str = Field(..., description="平台代码")
-    account_alias: Optional[str] = Field(None, description="账号别名(用于关联导出数据中的自定义名称)")
+    account_alias: Optional[str] = Field(None, description="账号别名")
     store_name: str = Field(..., description="店铺名称")
-    shop_type: Optional[str] = Field(None, description="店铺类型: local/global")
-    shop_region: Optional[str] = Field(None, description="店铺区域: SG/MY/GLOBAL等")
+    shop_type: Optional[str] = Field(None, description="店铺类型")
+    shop_region: Optional[str] = Field(None, description="店铺区域")
+    shop_id: Optional[str] = Field(None, description="标准店铺ID")
     username: str = Field(..., description="登录用户名")
-    password: str = Field(..., description="登录密码(明文,后端加密)")
-    login_url: Optional[str] = Field(None, description="登录URL")
+    password: str = Field(..., description="登录密码")
+    login_url: Optional[str] = Field(None, description="登录 URL")
     email: Optional[str] = Field(None, description="邮箱")
     phone: Optional[str] = Field(None, description="手机号")
     region: str = Field(default="CN", description="账号注册地区")
@@ -41,15 +41,15 @@ class AccountCreate(BaseModel):
 
 
 class AccountUpdate(BaseModel):
-    """更新账号请求模型(所有字段可选)"""
     parent_account: Optional[str] = None
     platform: Optional[str] = None
     account_alias: Optional[str] = None
     store_name: Optional[str] = None
     shop_type: Optional[str] = None
     shop_region: Optional[str] = None
+    shop_id: Optional[str] = None
     username: Optional[str] = None
-    password: Optional[str] = None  # 如果提供则重新加密
+    password: Optional[str] = None
     login_url: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -62,7 +62,6 @@ class AccountUpdate(BaseModel):
 
 
 class AccountResponse(BaseModel):
-    """账号响应模型(不含密码)"""
     id: int
     account_id: str
     parent_account: Optional[str]
@@ -71,8 +70,8 @@ class AccountResponse(BaseModel):
     store_name: str
     shop_type: Optional[str]
     shop_region: Optional[str]
+    shop_id: Optional[str]
     username: str
-    # 密码不返回！
     login_url: Optional[str]
     email: Optional[str]
     phone: Optional[str]
@@ -86,22 +85,35 @@ class AccountResponse(BaseModel):
     updated_at: datetime
     created_by: Optional[str]
     updated_by: Optional[str]
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
 class AccountStats(BaseModel):
-    """账号统计模型"""
     total: int = Field(description="总账号数")
     active: int = Field(description="活跃账号数")
     inactive: int = Field(description="禁用账号数")
     platforms: int = Field(description="支持平台数")
     platform_breakdown: dict = Field(description="各平台账号数")
 
+
 class BatchCreateRequest(BaseModel):
-    """批量创建请求"""
     parent_account: str = Field(..., description="主账号")
     platform: str = Field(..., description="平台代码")
     username: str = Field(..., description="用户名")
     password: str = Field(..., description="密码")
     shops: list = Field(..., description="店铺列表")
+
+
+class UnmatchedShopAliasItem(BaseModel):
+    platform: str = Field(description="平台代码")
+    site: Optional[str] = Field(default=None, description="站点")
+    store_label_raw: str = Field(description="原始店铺别名")
+    row_count: int = Field(description="命中行数")
+    order_count: int = Field(description="订单数")
+    paid_amount: float = Field(description="支付金额汇总")
+
+
+class UnmatchedShopAliasResponse(BaseModel):
+    items: list[UnmatchedShopAliasItem] = Field(default_factory=list, description="未匹配店铺别名列表")
+    count: int = Field(default=0, description="未匹配条数")

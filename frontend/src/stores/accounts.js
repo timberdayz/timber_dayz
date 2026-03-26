@@ -6,6 +6,7 @@ import accountsApi from '@/api/accounts'
 export const useAccountsStore = defineStore('accounts', {
   state: () => ({
     accounts: [],
+    unmatchedShopAliases: [],
     stats: {
       total: 0,
       active: 0,
@@ -79,7 +80,7 @@ export const useAccountsStore = defineStore('accounts', {
       }
     },
 
-    async loadStats(showLoading = false) {
+    async loadStats() {
       try {
         const apiTimeout = 10000
         this.stats = await Promise.race([
@@ -97,12 +98,32 @@ export const useAccountsStore = defineStore('accounts', {
       }
     },
 
+    async loadUnmatchedShopAliases() {
+      try {
+        const apiTimeout = 10000
+        const response = await Promise.race([
+          accountsApi.getUnmatchedShopAliases(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('加载未匹配店铺别名超时')), apiTimeout)
+          )
+        ])
+        this.unmatchedShopAliases = response.items || []
+      } catch (error) {
+        if (error.message !== '加载未匹配店铺别名超时') {
+          console.error('加载未匹配店铺别名失败:', error)
+        } else {
+          console.warn('加载未匹配店铺别名超时，但可能仍在后台加载')
+        }
+      }
+    },
+
     async createAccount(data) {
       this.loading = true
       try {
         const newAccount = await accountsApi.createAccount(data)
         this.accounts.unshift(newAccount)
         await this.loadStats()
+        await this.loadUnmatchedShopAliases()
         ElMessage.success('账号创建成功')
         return newAccount
       } catch (error) {
@@ -123,6 +144,7 @@ export const useAccountsStore = defineStore('accounts', {
           this.accounts[index] = updatedAccount
         }
         await this.loadStats()
+        await this.loadUnmatchedShopAliases()
         ElMessage.success('账号更新成功')
         return updatedAccount
       } catch (error) {
@@ -140,6 +162,7 @@ export const useAccountsStore = defineStore('accounts', {
         await accountsApi.deleteAccount(accountId)
         this.accounts = this.accounts.filter((account) => account.account_id !== accountId)
         await this.loadStats()
+        await this.loadUnmatchedShopAliases()
         ElMessage.success('账号删除成功')
       } catch (error) {
         console.error('删除账号失败:', error)
@@ -156,6 +179,7 @@ export const useAccountsStore = defineStore('accounts', {
         const newAccounts = await accountsApi.batchCreate(batchData)
         this.accounts.unshift(...newAccounts)
         await this.loadStats()
+        await this.loadUnmatchedShopAliases()
         ElMessage.success(`成功创建 ${newAccounts.length} 个账号`)
         return newAccounts
       } catch (error) {

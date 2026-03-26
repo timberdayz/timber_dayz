@@ -7,6 +7,28 @@
     />
 
     <!-- 统计卡片 -->
+    <el-alert
+      v-if="accountsStore.unmatchedShopAliases.length > 0"
+      type="warning"
+      :closable="false"
+      class="erp-mb-lg"
+      show-icon
+    >
+      <template #title>
+        仍有 {{ accountsStore.unmatchedShopAliases.length }} 个未匹配店铺别名，补充“账号别名”后即可参与业务概览归属
+      </template>
+      <div class="unmatched-aliases">
+        <div
+          v-for="item in accountsStore.unmatchedShopAliases.slice(0, 8)"
+          :key="`${item.platform}-${item.site}-${item.store_label_raw}`"
+          class="unmatched-alias-item"
+        >
+          <span class="unmatched-alias-name">{{ item.platform }} / {{ item.site || '未标注站点' }} / {{ item.store_label_raw }}</span>
+          <span class="unmatched-alias-meta">订单 {{ item.order_count }}，金额 {{ Number(item.paid_amount || 0).toFixed(2) }}</span>
+        </div>
+      </div>
+    </el-alert>
+
     <el-row :gutter="20" class="stats-row">
       <el-col :span="6">
         <el-card shadow="hover">
@@ -509,6 +531,7 @@ onMounted(async () => {
   // 首次加载显示loading
   await accountsStore.loadAccounts({}, true)
   await accountsStore.loadStats(false) // 统计数据后台加载，不显示loading
+  await accountsStore.loadUnmatchedShopAliases()
 })
 
 /**
@@ -774,6 +797,27 @@ function getCapabilitiesText(capabilities) {
 .toolbar-card,
 .table-card {
   margin-bottom: 20px;
+}
+
+.unmatched-aliases {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.unmatched-alias-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.unmatched-alias-name {
+  font-weight: 600;
+}
+
+.unmatched-alias-meta {
+  color: #909399;
 }
 
 .capabilities-tags {

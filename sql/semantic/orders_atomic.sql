@@ -246,13 +246,13 @@ alias_resolved AS (
     SELECT
         d.platform_code,
         CASE
-            WHEN alias_map.resolved_shop_id IS NOT NULL
+            WHEN account_map.resolved_shop_id IS NOT NULL
                  AND (
                     d.shop_id IS NULL
                     OR LOWER(d.shop_id) IN ('none', 'unknown')
                     OR (d.store_label_raw IS NOT NULL AND LOWER(d.shop_id) = LOWER(d.store_label_raw))
                  )
-            THEN alias_map.resolved_shop_id
+            THEN account_map.resolved_shop_id
             ELSE COALESCE(d.shop_id, 'unknown')
         END AS shop_id,
         d.data_domain,
@@ -284,34 +284,18 @@ alias_resolved AS (
     FROM deduplicated d
     LEFT JOIN LATERAL (
         SELECT
-            CASE
-                WHEN LOWER(COALESCE(aa.target_type, 'shop')) = 'account'
-                THEN COALESCE(NULLIF(TRIM(pa.shop_id), ''), NULLIF(TRIM(pa.account_id), ''))
-                ELSE NULLIF(TRIM(aa.target_id), '')
-            END AS resolved_shop_id
-        FROM core.account_aliases aa
-        LEFT JOIN core.platform_accounts pa
-            ON LOWER(COALESCE(aa.target_type, '')) = 'account'
-           AND LOWER(COALESCE(pa.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
-           AND pa.account_id = aa.target_id
-        WHERE aa.active = TRUE
-          AND LOWER(COALESCE(aa.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
-          AND LOWER(COALESCE(aa.data_domain, 'orders')) = LOWER(COALESCE(d.data_domain, 'orders'))
-          AND LOWER(COALESCE(aa.store_label_raw, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+            COALESCE(NULLIF(TRIM(pa.shop_id), ''), NULLIF(TRIM(pa.account_id), '')) AS resolved_shop_id
+        FROM core.platform_accounts pa
+        WHERE LOWER(COALESCE(pa.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
           AND (
-                COALESCE(NULLIF(TRIM(aa.account), ''), '') = ''
-                OR LOWER(aa.account) = LOWER(COALESCE(d.source_account, ''))
-          )
-          AND (
-                COALESCE(NULLIF(TRIM(aa.site), ''), '') = ''
-                OR LOWER(aa.site) = LOWER(COALESCE(d.source_site, ''))
+                LOWER(COALESCE(pa.account_alias, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+                OR LOWER(COALESCE(pa.store_name, '')) = LOWER(COALESCE(d.store_label_raw, ''))
           )
         ORDER BY
-            CASE WHEN COALESCE(NULLIF(TRIM(aa.account), ''), '') <> '' THEN 0 ELSE 1 END,
-            CASE WHEN COALESCE(NULLIF(TRIM(aa.site), ''), '') <> '' THEN 0 ELSE 1 END,
-            aa.id
+            CASE WHEN LOWER(COALESCE(pa.account_alias, '')) = LOWER(COALESCE(d.store_label_raw, '')) THEN 0 ELSE 1 END,
+            pa.id
         LIMIT 1
-    ) alias_map ON TRUE
+    ) account_map ON TRUE
     WHERE d.rn = 1
 )
 SELECT

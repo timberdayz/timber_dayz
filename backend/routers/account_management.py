@@ -3,9 +3,7 @@
 
 """
 账号管理 API。
-
-运行时数据源是数据库中的 `core.platform_accounts`。
-历史上的 `local_accounts.py` 仅保留为本地记录文件，不再作为生产运行路径。
+运行时数据源为数据库中的 `core.platform_accounts`。
 """
 
 from __future__ import annotations
@@ -13,8 +11,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.database import get_async_db
@@ -24,6 +22,8 @@ from backend.schemas.account import (
     AccountStats,
     AccountUpdate,
     BatchCreateRequest,
+    UnmatchedShopAliasItem,
+    UnmatchedShopAliasResponse,
 )
 from backend.services.encryption_service import get_encryption_service
 from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
@@ -56,9 +56,22 @@ async def _get_account_or_404(db: AsyncSession, account_id: str) -> PlatformAcco
     return account
 
 
+async def _invalidate_dashboard_cache(request: Request | None) -> None:
+    if request is None:
+        return
+    cache_service = getattr(request.app.state, "cache_service", None)
+    if cache_service is None:
+        return
+    try:
+        await cache_service.invalidate_dashboard_business_overview()
+    except Exception as exc:
+        logger.warning(f"[AccountManagement] 失效 Dashboard 缓存失败: {exc}", exc_info=True)
+
+
 @router.post("/", response_model=AccountResponse)
 async def create_account(
     account: AccountCreate,
+    request: Request,
     db: AsyncSession = Depends(get_async_db),
 ):
     existing = await db.execute(
@@ -76,6 +89,7 @@ async def create_account(
         store_name=account.store_name,
         shop_type=account.shop_type,
         shop_region=account.shop_region,
+        shop_id=account.shop_id,
         username=account.username,
         password_encrypted=encryption_service.encrypt_password(account.password),
         login_url=account.login_url,
@@ -101,6 +115,7 @@ async def create_account(
     except Exception as exc:
         logger.warning(f"[AccountManagement] 同步店铺到 dim_shops 失败: {exc}", exc_info=True)
 
+    await _invalidate_dashboard_cache(request)
     logger.info(f"账号创建成功: {account.account_id}")
     return db_account
 
@@ -110,7 +125,7 @@ async def list_accounts(
     platform: Optional[str] = Query(None, description="平台筛选"),
     enabled: Optional[bool] = Query(None, description="启用状态筛选"),
     shop_type: Optional[str] = Query(None, description="店铺类型筛选"),
-    search: Optional[str] = Query(None, description="搜索(店铺名或账号ID)"),
+    search: Optional[str] = Query(None, description="搜索店铺名称或账号ID"),
     db: AsyncSession = Depends(get_async_db),
 ):
     stmt = select(PlatformAccount)
@@ -134,6 +149,116 @@ async def list_accounts(
     return accounts
 
 
+@router.get("/unmatched-shop-aliases", response_model=UnmatchedShopAliasResponse)
+async def get_unmatched_shop_aliases(
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(
+        text(
+            """
+            WITH raw_candidates AS (
+                SELECT
+                    'shopee'::varchar AS platform,
+                    NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), '') AS site,
+                    NULLIF(
+                        TRIM(
+                            COALESCE(
+                                raw_data->>'店铺',
+                                raw_data->>'店铺名',
+                                raw_data->>'店铺名称',
+                                raw_data->>'store_name',
+                                raw_data->>'store_label_raw'
+                            )
+                        ),
+                        ''
+                    ) AS store_label_raw,
+                    COALESCE(raw_data->>'订单号', raw_data->>'order_id') AS order_id,
+                    COALESCE(NULLIF(raw_data->>'实付金额', '')::numeric, 0) AS paid_amount
+                FROM b_class.fact_shopee_orders_daily
+                WHERE COALESCE(shop_id, '') IN ('', 'none', 'unknown')
+                UNION ALL
+                SELECT
+                    'shopee'::varchar,
+                    NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), ''),
+                    NULLIF(TRIM(COALESCE(raw_data->>'店铺', raw_data->>'店铺名', raw_data->>'店铺名称', raw_data->>'store_name', raw_data->>'store_label_raw')), ''),
+                    COALESCE(raw_data->>'订单号', raw_data->>'order_id'),
+                    COALESCE(NULLIF(raw_data->>'实付金额', '')::numeric, 0)
+                FROM b_class.fact_shopee_orders_weekly
+                WHERE COALESCE(shop_id, '') IN ('', 'none', 'unknown')
+                UNION ALL
+                SELECT
+                    'shopee'::varchar,
+                    NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), ''),
+                    NULLIF(TRIM(COALESCE(raw_data->>'店铺', raw_data->>'店铺名', raw_data->>'店铺名称', raw_data->>'store_name', raw_data->>'store_label_raw')), ''),
+                    COALESCE(raw_data->>'订单号', raw_data->>'order_id'),
+                    COALESCE(NULLIF(raw_data->>'实付金额', '')::numeric, 0)
+                FROM b_class.fact_shopee_orders_monthly
+                WHERE COALESCE(shop_id, '') IN ('', 'none', 'unknown')
+                UNION ALL
+                SELECT
+                    'tiktok'::varchar,
+                    NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), ''),
+                    NULLIF(TRIM(COALESCE(raw_data->>'店铺', raw_data->>'店铺名', raw_data->>'店铺名称', raw_data->>'store_name', raw_data->>'store_label_raw')), ''),
+                    COALESCE(raw_data->>'订单号', raw_data->>'order_id'),
+                    COALESCE(NULLIF(raw_data->>'买家实付金额', '')::numeric, 0)
+                FROM b_class.fact_tiktok_orders_daily
+                WHERE COALESCE(shop_id, '') IN ('', 'none', 'unknown')
+                UNION ALL
+                SELECT
+                    'tiktok'::varchar,
+                    NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), ''),
+                    NULLIF(TRIM(COALESCE(raw_data->>'店铺', raw_data->>'店铺名', raw_data->>'店铺名称', raw_data->>'store_name', raw_data->>'store_label_raw')), ''),
+                    COALESCE(raw_data->>'订单号', raw_data->>'order_id'),
+                    COALESCE(NULLIF(raw_data->>'买家实付金额', '')::numeric, 0)
+                FROM b_class.fact_tiktok_orders_weekly
+                WHERE COALESCE(shop_id, '') IN ('', 'none', 'unknown')
+                UNION ALL
+                SELECT
+                    'tiktok'::varchar,
+                    NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), ''),
+                    NULLIF(TRIM(COALESCE(raw_data->>'店铺', raw_data->>'店铺名', raw_data->>'店铺名称', raw_data->>'store_name', raw_data->>'store_label_raw')), ''),
+                    COALESCE(raw_data->>'订单号', raw_data->>'order_id'),
+                    COALESCE(NULLIF(raw_data->>'买家实付金额', '')::numeric, 0)
+                FROM b_class.fact_tiktok_orders_monthly
+                WHERE COALESCE(shop_id, '') IN ('', 'none', 'unknown')
+            ),
+            grouped AS (
+                SELECT
+                    platform,
+                    site,
+                    store_label_raw,
+                    COUNT(*) AS row_count,
+                    COUNT(DISTINCT order_id) AS order_count,
+                    COALESCE(SUM(paid_amount), 0) AS paid_amount
+                FROM raw_candidates
+                WHERE store_label_raw IS NOT NULL
+                GROUP BY platform, site, store_label_raw
+            )
+            SELECT
+                g.platform,
+                g.site,
+                g.store_label_raw,
+                g.row_count,
+                g.order_count,
+                g.paid_amount
+            FROM grouped g
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM core.platform_accounts pa
+                WHERE LOWER(COALESCE(pa.platform, '')) = LOWER(g.platform)
+                  AND (
+                        LOWER(COALESCE(pa.account_alias, '')) = LOWER(g.store_label_raw)
+                        OR LOWER(COALESCE(pa.store_name, '')) = LOWER(g.store_label_raw)
+                  )
+            )
+            ORDER BY g.paid_amount DESC, g.row_count DESC, g.platform, g.store_label_raw
+            """
+        )
+    )
+    items = [UnmatchedShopAliasItem(**dict(row)) for row in result.mappings().all()]
+    return UnmatchedShopAliasResponse(items=items, count=len(items))
+
+
 @router.get("/{account_id}", response_model=AccountResponse)
 async def get_account(
     account_id: str,
@@ -146,6 +271,7 @@ async def get_account(
 async def update_account(
     account_id: str,
     account_update: AccountUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_async_db),
 ):
     db_account = await _get_account_or_404(db, account_id)
@@ -175,6 +301,7 @@ async def update_account(
     except Exception as exc:
         logger.warning(f"[AccountManagement] 同步店铺到 dim_shops 失败: {exc}", exc_info=True)
 
+    await _invalidate_dashboard_cache(request)
     logger.info(f"账号更新成功: {account_id}")
     return db_account
 
@@ -182,11 +309,13 @@ async def update_account(
 @router.delete("/{account_id}")
 async def delete_account(
     account_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_async_db),
 ):
     db_account = await _get_account_or_404(db, account_id)
     await db.delete(db_account)
     await db.commit()
+    await _invalidate_dashboard_cache(request)
     logger.info(f"账号删除成功: {account_id}")
     return {"message": f"账号 '{account_id}' 已删除"}
 
@@ -194,6 +323,7 @@ async def delete_account(
 @router.post("/batch", response_model=List[AccountResponse])
 async def batch_create_accounts(
     batch_request: BatchCreateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_async_db),
 ):
     created_accounts: list[PlatformAccount] = []
@@ -211,7 +341,7 @@ async def batch_create_accounts(
             select(PlatformAccount).where(PlatformAccount.account_id == account_id)
         )
         if existing.scalar_one_or_none() is not None:
-            logger.warning(f"账号 {account_id} 已存在, 跳过")
+            logger.warning(f"账号 {account_id} 已存在，跳过")
             continue
 
         db_account = PlatformAccount(
@@ -247,6 +377,7 @@ async def batch_create_accounts(
             logger.warning(f"[AccountManagement] 同步店铺失败 {db_account.account_id}: {exc}", exc_info=True)
 
     await db.commit()
+    await _invalidate_dashboard_cache(request)
     logger.info(f"批量创建成功: {len(created_accounts)} 个账号")
     return created_accounts
 

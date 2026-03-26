@@ -34,5 +34,9 @@ export default {
 
   async getStats() {
     return await api.get('/accounts/stats/summary')
+  },
+
+  async getUnmatchedShopAliases() {
+    return await api.get('/accounts/unmatched-shop-aliases')
   }
 }

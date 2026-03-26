@@ -18,7 +18,6 @@ export const menuGroups = [
     order: 1,
     defaultExpanded: true,
     items: [
-      '/cloud-sync',             // 云端同步管理
       '/business-overview',
       '/annual-summary'
     ]
@@ -31,6 +30,7 @@ export const menuGroups = [
     defaultExpanded: true,
     badge: 'core',  // 核心功能标识
     items: [
+      '/cloud-sync',             // 云端同步管理
       '/collection-config',      // 采集配置
       '/collection-tasks',       // 采集任务
       '/collection-history',     // 采集历史
