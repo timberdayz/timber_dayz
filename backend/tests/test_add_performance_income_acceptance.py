@@ -17,7 +17,8 @@ from starlette.requests import Request
 
 from backend.routers.hr_employee import get_my_income
 import backend.routers.performance_management as performance_management_module
-from backend.routers.performance_management import calculate_performance_scores
+from backend.routers.performance_management import calculate_performance_scores, list_performance_scores
+from modules.core.db import PerformanceScore
 
 
 def _json_body(resp) -> dict:
@@ -167,6 +168,115 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
     assert body["data"]["shop_performance_upserts"] == 1
     assert body["data"]["commission_upserts"] == 2
     assert body["data"]["employee_performance_upserts"] == 2
+    perf_score_rows = [
+        call.args[0]
+        for call in db.add.call_args_list
+        if call.args and isinstance(call.args[0], PerformanceScore)
+    ]
+    assert len(perf_score_rows) == 1
+    created = perf_score_rows[0]
+    assert created.sales_score == 24.0
+    assert created.profit_score == 0.0
+    assert created.key_product_score == 0.0
+    assert created.operation_score == 0.0
+    assert created.total_score == 24.0
+    assert created.score_details["sales"]["status"] == "calculated"
+    assert created.score_details["profit"]["status"] == "pending_design"
+    assert created.score_details["key_product"]["status"] == "pending_design"
+    assert created.score_details["operation"]["status"] == "pending_design"
+
+
+def test_list_scores_shop_hides_pending_dimensions_from_partial_results():
+    class _ShopRows:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    class _PerfRows:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    db = AsyncMock()
+    shop = SimpleNamespace(
+        platform="Shopee",
+        store_name="Shop 1",
+        shop_id="shop-1",
+        account_id=None,
+        id=1,
+        enabled=True,
+    )
+    score = SimpleNamespace(
+        platform_code="shopee",
+        shop_id="shop-1",
+        period="2025-01",
+        sales_score=24.0,
+        profit_score=0.0,
+        key_product_score=0.0,
+        operation_score=0.0,
+        total_score=24.0,
+        rank=1,
+        performance_coefficient=1.0,
+        score_details={
+            "sales": {"status": "calculated", "target": 1000.0, "achieved": 800.0, "rate": 80.0},
+            "profit": {"status": "pending_design", "achieved": 200.0},
+            "key_product": {"status": "pending_design"},
+            "operation": {"status": "pending_design"},
+            "summary": {"status": "partial"},
+        },
+    )
+
+    execute_calls = {"n": 0}
+
+    async def _execute(_stmt):
+        execute_calls["n"] += 1
+        if execute_calls["n"] == 1:
+            return _ShopRows([shop])
+        if execute_calls["n"] == 2:
+            return _PerfRows([(score,)])
+        raise AssertionError(f"unexpected execute call #{execute_calls['n']}")
+
+    db.execute = AsyncMock(side_effect=_execute)
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/performance/scores",
+            "headers": [],
+            "client": ("127.0.0.1", 8001),
+            "app": SimpleNamespace(state=SimpleNamespace()),
+        }
+    )
+
+    resp = asyncio.run(
+        list_performance_scores(
+            request=request,
+            period="2025-01",
+            platform_code=None,
+            shop_id=None,
+            group_by="shop",
+            page=1,
+            page_size=20,
+            db=db,
+        )
+    )
+
+    body = _json_body(resp)
+    row = body["data"][0]
+    assert row["sales_score"] == 24.0
+    assert row["profit_score"] is None
+    assert row["key_product_score"] is None
+    assert row["operation_score"] is None
+    assert row["total_score"] is None
+    assert row["rank"] is None
+    assert row["performance_coefficient"] is None
 
 
 def test_my_income_unlinked_returns_linked_false_and_audit_called(monkeypatch):
