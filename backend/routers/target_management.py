@@ -508,6 +508,20 @@ async def create_target(
             period_end=request.period_end,
             target_amount=request.target_amount,
             target_quantity=request.target_quantity,
+            target_profit_amount=request.target_profit_amount,
+            achieved_profit_amount=request.achieved_profit_amount,
+            metric_code=request.metric_code,
+            metric_name=request.metric_name,
+            metric_direction=request.metric_direction,
+            target_value=request.target_value,
+            achieved_value=request.achieved_value,
+            max_score=request.max_score,
+            penalty_enabled=request.penalty_enabled,
+            penalty_threshold=request.penalty_threshold,
+            penalty_per_unit=request.penalty_per_unit,
+            penalty_max=request.penalty_max,
+            manual_score_enabled=request.manual_score_enabled,
+            manual_score_value=request.manual_score_value,
             description=request.description,
             created_by=current_user.username if current_user else "admin",  # ✅ 2026-01-08: 从current_user获取
             status="active"
@@ -593,7 +607,7 @@ async def update_target(
             )
         
         # 更新字段
-        update_data = request.dict(exclude_unset=True)
+        update_data = request.model_dump(exclude_unset=True)
         
         # 验证日期
         if "period_start" in update_data or "period_end" in update_data:

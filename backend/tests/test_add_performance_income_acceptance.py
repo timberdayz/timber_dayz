@@ -88,6 +88,12 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
         def all(self):
             return self._rows
 
+        def scalar_one_or_none(self):
+            return self._rows[0] if self._rows else None
+
+        def scalar_one_or_none(self):
+            return self._rows[0] if self._rows else None
+
     db = AsyncMock()
     db.add = MagicMock()
     db.commit = AsyncMock()
@@ -110,6 +116,8 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
         if n == 2:
             return _ScalarsResult([])
         if n == 3:
+            return _ScalarOneResult(None)
+        if n == 4:
             return _ScalarOneResult(None)
         raise AssertionError(f"unexpected execute call #{n}")
 
@@ -204,6 +212,9 @@ def test_list_scores_shop_hides_pending_dimensions_from_partial_results():
         def all(self):
             return self._rows
 
+        def scalar_one_or_none(self):
+            return self._rows[0] if self._rows else None
+
     db = AsyncMock()
     shop = SimpleNamespace(
         platform="Shopee",
@@ -277,6 +288,234 @@ def test_list_scores_shop_hides_pending_dimensions_from_partial_results():
     assert row["total_score"] is None
     assert row["rank"] is None
     assert row["performance_coefficient"] is None
+
+
+def test_calculate_profit_score_from_profit_target_and_actual(monkeypatch):
+    class _ScalarOneResult:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+    class _ScalarsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+        def scalar_one_or_none(self):
+            return self._rows[0] if self._rows else None
+
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    config = SimpleNamespace(
+        id=1,
+        sales_max_score=30,
+        profit_max_score=25,
+        key_product_max_score=25,
+        operation_max_score=20,
+    )
+    target_breakdown_row = SimpleNamespace(
+        platform_code="shopee",
+        shop_id="shop-1",
+        target_amount=1000.0,
+        achieved_amount=800.0,
+        target_profit_amount=500.0,
+        achieved_profit_amount=200.0,
+    )
+
+    execute_calls = {"n": 0}
+
+    async def _execute(_stmt):
+        execute_calls["n"] += 1
+        n = execute_calls["n"]
+        if n == 1:
+            return _ScalarOneResult(config)
+        if n == 2:
+            return _ScalarsResult([target_breakdown_row])
+        if n == 3:
+            return _ScalarOneResult(None)
+        if n == 4:
+            return _ScalarOneResult(None)
+        raise AssertionError(f"unexpected execute call #{n}")
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    async def _fake_metrics(_db, _period):
+        return {
+            "shopee|shop-1": {
+                "monthly_sales": 800.0,
+                "monthly_profit": 200.0,
+                "achievement_rate": 80.0,
+            }
+        }
+
+    class _FakeIncomeService:
+        def __init__(self, db, metabase_service=None):
+            self.db = db
+
+        async def calculate_month(self, year_month):
+            return {
+                "year_month": year_month,
+                "employee_count": 0,
+                "commission_upserts": 0,
+                "performance_upserts": 0,
+            }
+
+    monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
+    monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
+
+    resp = asyncio.run(
+        performance_management_module.calculate_performance_scores(
+            period="2025-01", config_id=None, db=db
+        )
+    )
+
+    body = _json_body(resp)
+    assert body["success"] is True
+    perf_score_rows = [
+        call.args[0]
+        for call in db.add.call_args_list
+        if call.args and isinstance(call.args[0], PerformanceScore)
+    ]
+    assert len(perf_score_rows) == 1
+    created = perf_score_rows[0]
+    assert created.sales_score == 24.0
+    assert created.profit_score == 10.0
+    assert created.total_score == 34.0
+    assert created.score_details["profit"]["status"] == "calculated"
+    assert created.score_details["profit"]["target"] == 500.0
+    assert created.score_details["profit"]["achieved"] == 200.0
+    assert created.score_details["profit"]["rate"] == 40.0
+
+
+def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
+    class _ScalarOneResult:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+    class _ScalarsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+        def scalar_one_or_none(self):
+            return self._rows[0] if self._rows else None
+
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    config = SimpleNamespace(
+        id=1,
+        sales_max_score=30,
+        profit_max_score=25,
+        key_product_max_score=25,
+        operation_max_score=20,
+    )
+    target_breakdown_row = SimpleNamespace(
+        platform_code="shopee",
+        shop_id="shop-1",
+        target_amount=1000.0,
+        achieved_amount=800.0,
+        target_profit_amount=500.0,
+        achieved_profit_amount=200.0,
+    )
+    operation_target = SimpleNamespace(
+        id=2,
+        target_type="operation",
+        target_name="2025-01 客诉目标",
+        period_start=SimpleNamespace(),
+        period_end=SimpleNamespace(),
+        metric_code="complaint_count",
+        metric_name="客诉",
+        metric_direction="lower_better",
+        target_value=3.0,
+        achieved_value=6.0,
+        max_score=20.0,
+        penalty_enabled=True,
+        penalty_threshold=5.0,
+        penalty_per_unit=2.0,
+        penalty_max=10.0,
+        manual_score_enabled=False,
+        manual_score_value=None,
+    )
+
+    execute_calls = {"n": 0}
+
+    async def _execute(_stmt):
+        execute_calls["n"] += 1
+        n = execute_calls["n"]
+        if n == 1:
+            return _ScalarOneResult(config)
+        if n == 2:
+            return _ScalarsResult([target_breakdown_row])
+        if n == 3:
+            return _ScalarsResult([operation_target])
+        if n == 4:
+            return _ScalarOneResult(None)
+        raise AssertionError(f"unexpected execute call #{n}")
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    async def _fake_metrics(_db, _period):
+        return {
+            "shopee|shop-1": {
+                "monthly_sales": 800.0,
+                "monthly_profit": 200.0,
+                "achievement_rate": 80.0,
+            }
+        }
+
+    class _FakeIncomeService:
+        def __init__(self, db, metabase_service=None):
+            self.db = db
+
+        async def calculate_month(self, year_month):
+            return {
+                "year_month": year_month,
+                "employee_count": 0,
+                "commission_upserts": 0,
+                "performance_upserts": 0,
+            }
+
+    monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
+    monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
+
+    resp = asyncio.run(
+        performance_management_module.calculate_performance_scores(
+            period="2025-01", config_id=None, db=db
+        )
+    )
+
+    body = _json_body(resp)
+    assert body["success"] is True
+    perf_score_rows = [
+        call.args[0]
+        for call in db.add.call_args_list
+        if call.args and isinstance(call.args[0], PerformanceScore)
+    ]
+    assert len(perf_score_rows) == 1
+    created = perf_score_rows[0]
+    assert created.operation_score == 8.0
+    assert created.total_score == 42.0
+    assert created.score_details["operation"]["status"] == "calculated"
+    assert created.score_details["operation"]["target"] == 3.0
+    assert created.score_details["operation"]["achieved"] == 6.0
 
 
 def test_my_income_unlinked_returns_linked_false_and_audit_called(monkeypatch):

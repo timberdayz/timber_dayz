@@ -2416,7 +2416,7 @@ class SalesTarget(Base):
     """
     目标管理表(A类数据:用户配置)
     
-    用途:存储销售目标配置(店铺/产品/战役级别)
+    用途:存储绩效目标配置(店铺/产品/战役/运营级别)
     达成数据:从fact_orders表自动计算(C类数据)
     
     表结构以本模型为 SSOT:增删改列须在 migrations/versions 中新增迁移,
@@ -2428,18 +2428,34 @@ class SalesTarget(Base):
     
     # 目标基本信息
     target_name = Column(String(200), nullable=False, comment="目标名称")
-    target_type = Column(String(32), nullable=False, comment="目标类型:shop/product/campaign")
+    target_type = Column(String(32), nullable=False, comment="目标类型:shop/product/campaign/operation")
     period_start = Column(Date, nullable=False, comment="开始时间")
     period_end = Column(Date, nullable=False, comment="结束时间")
     
     # 目标值(A类:用户配置)
     target_amount = Column(Float, nullable=False, default=0.0, comment="目标销售额(CNY)")
     target_quantity = Column(Integer, nullable=False, default=0, comment="目标订单数/销量")
+    target_profit_amount = Column(Float, nullable=False, default=0.0, comment="目标毛利(CNY)")
     
     # 达成值(C类:系统自动计算)
     achieved_amount = Column(Float, nullable=False, default=0.0, comment="实际销售额(CNY)")
     achieved_quantity = Column(Integer, nullable=False, default=0, comment="实际订单数/销量")
+    achieved_profit_amount = Column(Float, nullable=False, default=0.0, comment="实际毛利(CNY)")
     achievement_rate = Column(Float, nullable=False, default=0.0, comment="达成率(百分比)")
+
+    # 运营目标字段
+    metric_code = Column(String(64), nullable=True, comment="运营指标编码")
+    metric_name = Column(String(128), nullable=True, comment="运营指标名称")
+    metric_direction = Column(String(32), nullable=True, comment="指标方向:higher_better/lower_better/manual_score")
+    target_value = Column(Float, nullable=True, comment="运营指标目标值")
+    achieved_value = Column(Float, nullable=True, comment="运营指标实际值")
+    max_score = Column(Float, nullable=True, comment="指标满分")
+    penalty_enabled = Column(Boolean, nullable=False, default=False, comment="是否启用罚分")
+    penalty_threshold = Column(Float, nullable=True, comment="罚分阈值")
+    penalty_per_unit = Column(Float, nullable=True, comment="每超出一单位罚分")
+    penalty_max = Column(Float, nullable=True, comment="最大罚分")
+    manual_score_enabled = Column(Boolean, nullable=False, default=False, comment="是否允许人工打分")
+    manual_score_value = Column(Float, nullable=True, comment="人工打分值")
     
     # 状态
     status = Column(String(32), nullable=False, default="active", comment="状态:active/completed/cancelled")
@@ -2457,6 +2473,7 @@ class SalesTarget(Base):
         CheckConstraint("period_end >= period_start", name="chk_target_dates"),
         CheckConstraint("target_amount >= 0", name="chk_target_amount"),
         CheckConstraint("target_quantity >= 0", name="chk_target_quantity"),
+        CheckConstraint("target_profit_amount >= 0", name="chk_target_profit_amount"),
         Index("ix_sales_targets_type", "target_type"),
         Index("ix_sales_targets_status", "status"),
         Index("ix_sales_targets_period", "period_start", "period_end"),
@@ -2496,11 +2513,18 @@ class TargetBreakdown(Base):
     # 目标值(A类:用户配置)
     target_amount = Column(Float, nullable=False, default=0.0, comment="目标销售额(CNY)")
     target_quantity = Column(Integer, nullable=False, default=0, comment="目标订单数/销量")
+    target_profit_amount = Column(Float, nullable=False, default=0.0, comment="目标毛利(CNY)")
     
     # 达成值(C类:系统自动计算)
     achieved_amount = Column(Float, nullable=False, default=0.0, comment="实际销售额(CNY)")
     achieved_quantity = Column(Integer, nullable=False, default=0, comment="实际订单数/销量")
+    achieved_profit_amount = Column(Float, nullable=False, default=0.0, comment="实际毛利(CNY)")
     achievement_rate = Column(Float, nullable=False, default=0.0, comment="达成率(百分比)")
+
+    # 运营目标/人工评分扩展字段
+    target_value = Column(Float, nullable=True, comment="运营指标目标值")
+    achieved_value = Column(Float, nullable=True, comment="运营指标实际值")
+    manual_score_value = Column(Float, nullable=True, comment="人工打分值")
     
     # 审计字段
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

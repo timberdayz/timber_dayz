@@ -433,6 +433,79 @@
           />
         </el-card>
       </el-tab-pane>
+
+      <!-- 运营目标 -->
+      <el-tab-pane label="运营目标" name="operation">
+        <div class="list-action-bar">
+          <el-button
+            type="primary"
+            :icon="Plus"
+            @click="handleCreate"
+            v-if="hasPermission('target:create')"
+          >
+            创建目标
+          </el-button>
+          <el-button :icon="Refresh" @click="loadTargets">刷新</el-button>
+          <div class="erp-flex-spacer"></div>
+          <el-select
+            v-model="filters.status"
+            placeholder="状态"
+            clearable
+            size="small"
+            class="erp-w-120"
+            @change="loadTargets"
+          >
+            <el-option label="全部状态" value="" />
+            <el-option label="进行中" value="active" />
+            <el-option label="已完成" value="completed" />
+            <el-option label="已取消" value="cancelled" />
+          </el-select>
+        </div>
+        <el-card>
+          <el-table
+            :data="targets.data"
+            stripe
+            v-loading="targets.loading"
+            class="erp-table"
+          >
+            <el-table-column prop="target_name" label="目标名称" width="220" fixed="left" show-overflow-tooltip />
+            <el-table-column prop="metric_name" label="运营指标" width="160" />
+            <el-table-column prop="metric_direction" label="方向" width="140" />
+            <el-table-column prop="target_value" label="目标值" width="120" align="right" />
+            <el-table-column prop="max_score" label="满分" width="100" align="right" />
+            <el-table-column prop="penalty_enabled" label="罚分" width="100">
+              <template #default="{ row }">{{ row.penalty_enabled ? '启用' : '关闭' }}</template>
+            </el-table-column>
+            <el-table-column prop="manual_score_enabled" label="人工评分" width="100">
+              <template #default="{ row }">{{ row.manual_score_enabled ? '是' : '否' }}</template>
+            </el-table-column>
+            <el-table-column prop="period_start" label="开始时间" width="120" />
+            <el-table-column prop="period_end" label="结束时间" width="120" />
+            <el-table-column prop="status" label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="getStatusTagType(row.status)" size="small">{{ getStatusLabel(row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="180" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" @click="handleView(row)">查看</el-button>
+                <el-button size="small" type="primary" @click="handleEdit(row)" v-if="hasPermission('target:update')">编辑</el-button>
+                <el-button size="small" type="danger" @click="handleDelete(row)" v-if="hasPermission('target:delete')">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            v-model:current-page="targets.page"
+            v-model:page-size="targets.pageSize"
+            :total="targets.total"
+            :page-sizes="[10, 20, 50, 100]"
+            layout="total, sizes, prev, pager, next, jumper"
+            class="target-pagination"
+            @size-change="loadTargets"
+            @current-change="loadTargets"
+          />
+        </el-card>
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 创建/编辑对话框 -->
@@ -445,7 +518,7 @@
       <el-form
         ref="formRef"
         :model="form"
-        :rules="formRules"
+        :rules="effectiveFormRules"
         label-width="120px"
       >
         <el-form-item
@@ -509,6 +582,45 @@
             class="erp-w-full"
           />
         </el-form-item>
+        <el-form-item v-if="form.target_type === 'shop'" label="目标毛利" prop="target_profit_amount">
+          <el-input-number v-model="form.target_profit_amount" :min="0" :precision="2" class="erp-w-full" />
+        </el-form-item>
+        <template v-if="form.target_type === 'operation'">
+          <el-form-item label="运营指标" prop="metric_code">
+            <el-select v-model="form.metric_code" class="erp-w-full" @change="handleOperationMetricChange">
+              <el-option v-for="item in operationMetricOptions" :key="item.code" :label="item.label" :value="item.code" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="指标方向">
+            <el-input :model-value="selectedOperationMetric?.direction || form.metric_direction || '-'" readonly />
+          </el-form-item>
+          <el-form-item label="目标值" prop="target_value">
+            <el-input-number v-model="form.target_value" :min="0" :precision="2" class="erp-w-full" />
+          </el-form-item>
+          <el-form-item label="满分" prop="max_score">
+            <el-input-number v-model="form.max_score" :min="0" :precision="2" class="erp-w-full" />
+          </el-form-item>
+          <el-form-item label="启用罚分">
+            <el-switch v-model="form.penalty_enabled" />
+          </el-form-item>
+          <template v-if="form.penalty_enabled">
+            <el-form-item label="罚分阈值">
+              <el-input-number v-model="form.penalty_threshold" :precision="2" class="erp-w-full" />
+            </el-form-item>
+            <el-form-item label="每单位罚分">
+              <el-input-number v-model="form.penalty_per_unit" :precision="2" class="erp-w-full" />
+            </el-form-item>
+            <el-form-item label="最大罚分">
+              <el-input-number v-model="form.penalty_max" :precision="2" class="erp-w-full" />
+            </el-form-item>
+          </template>
+          <el-form-item label="人工评分">
+            <el-switch v-model="form.manual_score_enabled" />
+          </el-form-item>
+          <el-form-item v-if="form.manual_score_enabled" label="人工打分值">
+            <el-input-number v-model="form.manual_score_value" :min="0" :precision="2" class="erp-w-full" />
+          </el-form-item>
+        </template>
 
         <!-- 目标拆分 -->
         <el-divider>目标拆分</el-divider>
@@ -1154,6 +1266,18 @@ const openCreateForMonth = async () => {
   form.dateRange = [];
   form.target_amount = 0;
   form.target_quantity = 0;
+  form.target_profit_amount = 0;
+  form.metric_code = "";
+  form.metric_name = "";
+  form.metric_direction = "";
+  form.target_value = 0;
+  form.max_score = 20;
+  form.penalty_enabled = false;
+  form.penalty_threshold = 0;
+  form.penalty_per_unit = 0;
+  form.penalty_max = 0;
+  form.manual_score_enabled = false;
+  form.manual_score_value = 0;
   shopBreakdown.value = [];
   timeBreakdown.value = [];
   breakdownTab.value = "shop";
@@ -1359,6 +1483,18 @@ const form = reactive({
   dateRange: [],
   target_amount: 0,
   target_quantity: 0,
+  target_profit_amount: 0,
+  metric_code: "",
+  metric_name: "",
+  metric_direction: "",
+  target_value: 0,
+  max_score: 20,
+  penalty_enabled: false,
+  penalty_threshold: 0,
+  penalty_per_unit: 0,
+  penalty_max: 0,
+  manual_score_enabled: false,
+  manual_score_value: 0,
 });
 
 // 店铺拆分数据：每行 { shopKey, platform_code, shop_id, shop_name, target_amount, target_quantity, target_percent }
@@ -1370,6 +1506,15 @@ const timeBreakdown = ref([]);
 // 店铺列表（来自 GET /targets/shops，账号管理 platform_accounts）
 const availableShops = ref([]);
 const shopsLoading = ref(false);
+
+const operationMetricOptions = [
+  { code: "customer_satisfaction", label: "客户满意度", direction: "higher_better" },
+  { code: "complaint_count", label: "客诉", direction: "lower_better" },
+  { code: "reply_timeliness", label: "回复及时率", direction: "higher_better" },
+  { code: "training_check", label: "培训检核", direction: "higher_better" },
+  { code: "exam_score", label: "考试", direction: "higher_better" },
+  { code: "manual_other", label: "其他", direction: "manual_score" },
+];
 
 // 计算属性
 const dialogTitle = computed(() => {
@@ -1422,9 +1567,14 @@ const timeBreakdownTotalQuantity = computed(() => {
   );
 });
 
+const selectedOperationMetric = computed(() => {
+  return operationMetricOptions.find((item) => item.code === form.metric_code) || null;
+});
+
 // 表单验证规则（按目标类型生效：店铺用 targetMonth，产品/战役用 target_name + dateRange）
 const formRules = computed(() => {
   const isShop = form.target_type === "shop";
+  const isOperation = form.target_type === "operation";
   return {
     target_name: isShop
       ? []
@@ -1476,6 +1626,61 @@ const formRules = computed(() => {
   };
 });
 
+const effectiveFormRules = computed(() => {
+  const isShop = form.target_type === "shop";
+  const isOperation = form.target_type === "operation";
+  return {
+    target_name: isShop
+      ? []
+      : [
+          { required: true, message: "目标名称不能为空", trigger: "blur" },
+          { min: 2, max: 100, message: "目标名称长度2-100字符", trigger: "blur" },
+        ],
+    targetMonth: isShop ? [{ required: true, message: "请选择目标月份", trigger: "change" }] : [],
+    dateRange: isShop
+      ? []
+      : [
+          { required: true, message: "请选择时间周期", trigger: "change" },
+          {
+            validator: (rule, value, callback) => {
+              if (!value || value.length !== 2) {
+                callback(new Error("请选择开始和结束日期"));
+              } else if (new Date(value[1]) <= new Date(value[0])) {
+                callback(new Error("结束时间必须大于开始时间"));
+              } else {
+                callback();
+              }
+            },
+            trigger: "change",
+          },
+        ],
+    target_amount: isOperation
+      ? []
+      : [
+          { required: true, message: "目标金额不能为空", trigger: "blur" },
+          { type: "number", min: 0.01, message: "目标金额必须大于0", trigger: "blur" },
+        ],
+    target_quantity: isOperation
+      ? []
+      : [
+          { required: true, message: "目标数量不能为空", trigger: "blur" },
+          { type: "number", min: 1, message: "目标数量必须大于0", trigger: "blur" },
+        ],
+    target_profit_amount: isShop
+      ? [{ type: "number", min: 0, message: "目标毛利不能小于0", trigger: "blur" }]
+      : [],
+    metric_code: isOperation
+      ? [{ required: true, message: "请选择运营指标", trigger: "change" }]
+      : [],
+    target_value: isOperation
+      ? [{ required: true, message: "请输入目标值", trigger: "blur" }]
+      : [],
+    max_score: isOperation
+      ? [{ required: true, message: "请输入满分", trigger: "blur" }]
+      : [],
+  };
+});
+
 // 加载供目标管理使用的店铺列表（来自账号管理）
 const loadTargetShops = async () => {
   shopsLoading.value = true;
@@ -1489,6 +1694,21 @@ const loadTargetShops = async () => {
     availableShops.value = [];
   } finally {
     shopsLoading.value = false;
+  }
+  if (form.target_type === "operation") {
+    handleOperationMetricChange();
+  }
+};
+
+const handleOperationMetricChange = () => {
+  const selected = selectedOperationMetric.value;
+  form.metric_name = selected?.label || "";
+  form.metric_direction = selected?.direction || "";
+  form.manual_score_enabled = selected?.direction === "manual_score";
+  if (!form.penalty_enabled) {
+    form.penalty_threshold = 0;
+    form.penalty_per_unit = 0;
+    form.penalty_max = 0;
   }
 };
 
@@ -1714,6 +1934,18 @@ const handleCreate = async () => {
   form.dateRange = [];
   form.target_amount = 0;
   form.target_quantity = 0;
+  form.target_profit_amount = 0;
+  form.metric_code = "";
+  form.metric_name = "";
+  form.metric_direction = "";
+  form.target_value = 0;
+  form.max_score = 20;
+  form.penalty_enabled = false;
+  form.penalty_threshold = 0;
+  form.penalty_per_unit = 0;
+  form.penalty_max = 0;
+  form.manual_score_enabled = false;
+  form.manual_score_value = 0;
   shopBreakdown.value = [];
   timeBreakdown.value = [];
   breakdownTab.value = "shop";
@@ -1736,6 +1968,18 @@ const handleEdit = async (row) => {
   }
   form.target_amount = row.target_amount;
   form.target_quantity = row.target_quantity;
+  form.target_profit_amount = row.target_profit_amount || 0;
+  form.metric_code = row.metric_code || "";
+  form.metric_name = row.metric_name || "";
+  form.metric_direction = row.metric_direction || "";
+  form.target_value = row.target_value || 0;
+  form.max_score = row.max_score || 20;
+  form.penalty_enabled = !!row.penalty_enabled;
+  form.penalty_threshold = row.penalty_threshold || 0;
+  form.penalty_per_unit = row.penalty_per_unit || 0;
+  form.penalty_max = row.penalty_max || 0;
+  form.manual_score_enabled = !!row.manual_score_enabled;
+  form.manual_score_value = row.manual_score_value || 0;
 
   if (availableShops.value.length === 0) await loadTargetShops();
 
@@ -1941,6 +2185,9 @@ const handleAutoCalculateTime = () => {
 // 提交表单
 const handleSubmit = async () => {
   if (!formRef.value) return;
+  if (form.target_type === "operation") {
+    handleOperationMetricChange();
+  }
 
   if (form.target_type === "shop") {
     form.target_name = autoTargetName.value;
@@ -1951,7 +2198,7 @@ const handleSubmit = async () => {
   }
 
   // 验证拆分总和
-  if (breakdownTab.value === "shop") {
+  if (form.target_type !== "operation" && breakdownTab.value === "shop") {
     const okAmount =
       Math.abs(shopBreakdownTotalAmount.value - form.target_amount) < 0.02;
     const okQty = shopBreakdownTotalQuantity.value === form.target_quantity;
@@ -1961,7 +2208,7 @@ const handleSubmit = async () => {
       );
       return;
     }
-  } else {
+  } else if (form.target_type !== "operation") {
     if (
       timeBreakdownTotalAmount.value !== form.target_amount ||
       timeBreakdownTotalQuantity.value !== form.target_quantity
@@ -2005,6 +2252,18 @@ const handleSubmit = async () => {
         period_end: periodEnd,
         target_amount: form.target_amount,
         target_quantity: form.target_quantity,
+        target_profit_amount: form.target_profit_amount,
+        metric_code: form.metric_code || undefined,
+        metric_name: form.metric_name || undefined,
+        metric_direction: form.metric_direction || undefined,
+        target_value: form.metric_code ? Number(form.target_value) || 0 : undefined,
+        max_score: form.metric_code ? Number(form.max_score) || 0 : undefined,
+        penalty_enabled: !!form.penalty_enabled,
+        penalty_threshold: form.penalty_enabled ? Number(form.penalty_threshold) || 0 : undefined,
+        penalty_per_unit: form.penalty_enabled ? Number(form.penalty_per_unit) || 0 : undefined,
+        penalty_max: form.penalty_enabled ? Number(form.penalty_max) || 0 : undefined,
+        manual_score_enabled: !!form.manual_score_enabled,
+        manual_score_value: form.manual_score_enabled ? Number(form.manual_score_value) || 0 : undefined,
       };
 
       let response;
@@ -2048,6 +2307,18 @@ const handleSubmit = async () => {
 const handleDialogClose = () => {
   formRef.value?.resetFields();
   form.targetMonth = "";
+  form.target_profit_amount = 0;
+  form.metric_code = "";
+  form.metric_name = "";
+  form.metric_direction = "";
+  form.target_value = 0;
+  form.max_score = 20;
+  form.penalty_enabled = false;
+  form.penalty_threshold = 0;
+  form.penalty_per_unit = 0;
+  form.penalty_max = 0;
+  form.manual_score_enabled = false;
+  form.manual_score_value = 0;
   shopBreakdown.value = [];
   timeBreakdown.value = [];
 };
@@ -2064,6 +2335,7 @@ const getTargetTypeLabel = (type) => {
     shop: "店铺目标",
     product: "产品目标",
     campaign: "战役目标",
+    operation: "运营目标",
   };
   return map[type] || type;
 };
@@ -2073,6 +2345,7 @@ const getTargetTypeTagType = (type) => {
     shop: "success",
     product: "warning",
     campaign: "info",
+    operation: "danger",
   };
   return map[type] || "";
 };
@@ -2097,7 +2370,7 @@ const getStatusTagType = (status) => {
 
 watch(activeTab, (tab) => {
   if (tab === "shop") loadMonthlyTarget();
-  else if (tab === "product" || tab === "campaign") {
+  else if (tab === "product" || tab === "campaign" || tab === "operation") {
     filters.targetType = tab;
     loadTargets();
   }
