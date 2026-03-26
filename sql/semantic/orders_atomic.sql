@@ -32,16 +32,31 @@ WITH raw_orders AS (
 mapped AS (
     SELECT
         platform_code,
-        COALESCE(
-            NULLIF(TRIM(COALESCE(shop_id, '')), ''),
-            NULLIF(TRIM(COALESCE(
-                raw_data->>'店铺',
-                raw_data->>'店铺名',
-                raw_data->>'店铺名称',
-                raw_data->>'store_name',
-                raw_data->>'store_label_raw'
-            )), '')
-        ) AS shop_id,
+        NULLIF(TRIM(COALESCE(shop_id, '')), '') AS source_shop_id,
+        NULLIF(
+            TRIM(
+                COALESCE(
+                    raw_data->>'店铺',
+                    raw_data->>'店铺名',
+                    raw_data->>'店铺名称',
+                    raw_data->>'store_name',
+                    raw_data->>'store_label_raw'
+                )
+            ),
+            ''
+        ) AS store_label_raw,
+        NULLIF(
+            TRIM(
+                COALESCE(
+                    raw_data->>'采购账号',
+                    raw_data->>'账号',
+                    raw_data->>'account',
+                    raw_data->>'account_alias'
+                )
+            ),
+            ''
+        ) AS source_account,
+        NULLIF(TRIM(COALESCE(raw_data->>'站点', raw_data->>'site')), '') AS source_site,
         data_domain,
         granularity,
         metric_date::date AS metric_date,
@@ -77,7 +92,6 @@ mapped AS (
         COALESCE(
             raw_data->>'实付金额',
             raw_data->>'买家实付金额',
-            raw_data->>'实付金额',
             raw_data->>'总收入',
             raw_data->>'paid_amount',
             raw_data->>'Paid Amount'
@@ -159,7 +173,10 @@ mapped AS (
 cleaned AS (
     SELECT
         platform_code,
-        COALESCE(shop_id, 'unknown') AS shop_id,
+        COALESCE(source_shop_id, 'unknown') AS shop_id,
+        store_label_raw,
+        source_account,
+        source_site,
         data_domain,
         granularity,
         metric_date,
@@ -224,6 +241,78 @@ deduplicated AS (
                 ingest_timestamp DESC
         ) AS rn
     FROM cleaned
+),
+alias_resolved AS (
+    SELECT
+        d.platform_code,
+        CASE
+            WHEN alias_map.resolved_shop_id IS NOT NULL
+                 AND (
+                    d.shop_id IS NULL
+                    OR LOWER(d.shop_id) IN ('none', 'unknown')
+                    OR (d.store_label_raw IS NOT NULL AND LOWER(d.shop_id) = LOWER(d.store_label_raw))
+                 )
+            THEN alias_map.resolved_shop_id
+            ELSE COALESCE(d.shop_id, 'unknown')
+        END AS shop_id,
+        d.data_domain,
+        d.granularity,
+        d.metric_date,
+        d.period_start_date,
+        d.period_end_date,
+        d.period_start_time,
+        d.period_end_time,
+        d.order_id,
+        d.order_status,
+        d.sales_amount,
+        d.paid_amount,
+        d.profit,
+        d.product_quantity,
+        d.buyer_count,
+        d.product_id,
+        d.platform_sku,
+        d.sku_id,
+        d.product_sku,
+        d.product_name,
+        d.order_time,
+        d.payment_time,
+        d.raw_data,
+        d.header_columns,
+        d.data_hash,
+        d.ingest_timestamp,
+        d.currency_code
+    FROM deduplicated d
+    LEFT JOIN LATERAL (
+        SELECT
+            CASE
+                WHEN LOWER(COALESCE(aa.target_type, 'shop')) = 'account'
+                THEN COALESCE(NULLIF(TRIM(pa.shop_id), ''), NULLIF(TRIM(pa.account_id), ''))
+                ELSE NULLIF(TRIM(aa.target_id), '')
+            END AS resolved_shop_id
+        FROM public.account_aliases aa
+        LEFT JOIN core.platform_accounts pa
+            ON LOWER(COALESCE(aa.target_type, '')) = 'account'
+           AND LOWER(COALESCE(pa.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
+           AND pa.account_id = aa.target_id
+        WHERE aa.active = TRUE
+          AND LOWER(COALESCE(aa.platform, '')) = LOWER(COALESCE(d.platform_code, ''))
+          AND LOWER(COALESCE(aa.data_domain, 'orders')) = LOWER(COALESCE(d.data_domain, 'orders'))
+          AND LOWER(COALESCE(aa.store_label_raw, '')) = LOWER(COALESCE(d.store_label_raw, ''))
+          AND (
+                COALESCE(NULLIF(TRIM(aa.account), ''), '') = ''
+                OR LOWER(aa.account) = LOWER(COALESCE(d.source_account, ''))
+          )
+          AND (
+                COALESCE(NULLIF(TRIM(aa.site), ''), '') = ''
+                OR LOWER(aa.site) = LOWER(COALESCE(d.source_site, ''))
+          )
+        ORDER BY
+            CASE WHEN COALESCE(NULLIF(TRIM(aa.account), ''), '') <> '' THEN 0 ELSE 1 END,
+            CASE WHEN COALESCE(NULLIF(TRIM(aa.site), ''), '') <> '' THEN 0 ELSE 1 END,
+            aa.id
+        LIMIT 1
+    ) alias_map ON TRUE
+    WHERE d.rn = 1
 )
 SELECT
     platform_code,
@@ -256,5 +345,4 @@ SELECT
     data_hash,
     ingest_timestamp,
     currency_code
-FROM deduplicated
-WHERE rn = 1;
+FROM alias_resolved;
