@@ -96,3 +96,11 @@ def test_build_gate_failure_result_uses_export_gate_reason():
     assert result["data"]["passed"] is False
     assert result["data"]["resolved_signal"] == "export_complete"
     assert result["data"]["error_message"] == "download file missing"
+
+
+def test_build_artifact_url_exposes_recorder_segment_artifact_route():
+    validator = RecorderSegmentValidator()
+
+    url = validator.build_artifact_url("failure.png")
+
+    assert url == "/api/collection/recorder/segment-artifact?name=failure.png"

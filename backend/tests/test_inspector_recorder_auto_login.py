@@ -97,6 +97,101 @@ async def test_inspector_recorder_auto_login_executes_python_login_component(mon
 
 
 @pytest.mark.asyncio
+async def test_inspector_recorder_auto_login_prefers_versioned_login_component(monkeypatch):
+    recorder = InspectorRecorder(
+        {
+            "platform": "miaoshou",
+            "component_type": "export",
+            "account_info": {
+                "account_id": "acc-1",
+                "login_url": "https://erp.91miaoshou.com/login",
+            },
+        }
+    )
+    page = _FakePage()
+    calls: list[str] = []
+
+    async def _safe_goto(_page, url):
+        _page.url = url
+
+    monkeypatch.setattr(recorder, "_safe_goto", _safe_goto)
+
+    class _Detector:
+        def __init__(self, platform: str, debug: bool = False):
+            self.platform = platform
+
+        async def detect(self, page, wait_for_redirect: bool = True):
+            if calls:
+                return _DetectorResult("logged_in", 0.95, "post-login")
+            return _DetectorResult("not_logged_in", 0.95, "pre-login")
+
+        def needs_login(self, result):
+            return result.status.value != "logged_in"
+
+        def clear_cache(self):
+            return None
+
+    class _FakeVersion:
+        id = 91
+        version = "1.0.2"
+        file_path = "modules/platforms/miaoshou/components/login_v1_0_2.py"
+
+    class _FakeVersionService:
+        def __init__(self, db):
+            self.db = db
+
+        def select_version_for_use(self, component_name: str, force_version=None, enable_ab_test=True):
+            assert component_name == "miaoshou/login"
+            return _FakeVersion()
+
+    class _FakeSession:
+        def close(self):
+            return None
+
+    class _FakeLoginComponent:
+        def __init__(self, ctx: ExecutionContext):
+            self.ctx = ctx
+
+        async def run(self, page):
+            calls.append("run")
+            page.url = "https://erp.91miaoshou.com/welcome"
+            return LoginResult(success=True, message="ok")
+
+    class _Loader:
+        def load(self, path: str):
+            raise AssertionError("should prefer versioned login component from file_path")
+
+        def load_python_component_from_path(self, file_path: str, version_id=None, platform=None, component_type=None):
+            assert file_path.endswith("login_v1_0_2.py")
+            assert version_id == 91
+            assert platform == "miaoshou"
+            assert component_type == "login"
+            return _FakeLoginComponent
+
+    monkeypatch.setattr(
+        "modules.utils.login_status_detector.LoginStatusDetector",
+        _Detector,
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.component_loader.ComponentLoader",
+        _Loader,
+    )
+    monkeypatch.setattr(
+        "backend.models.database.SessionLocal",
+        lambda: _FakeSession(),
+    )
+    monkeypatch.setattr(
+        "backend.services.component_version_service.ComponentVersionService",
+        _FakeVersionService,
+    )
+
+    await recorder._auto_login(page)
+
+    assert calls == ["run"]
+    assert page.url.endswith("/welcome")
+
+
+@pytest.mark.asyncio
 async def test_inspector_recorder_auto_login_requires_confirmed_logged_in(monkeypatch):
     recorder = InspectorRecorder(
         {

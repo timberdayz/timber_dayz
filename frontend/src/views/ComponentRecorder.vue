@@ -908,6 +908,21 @@
             <p v-if="segmentValidationResult.error_message">
               错误: {{ segmentValidationResult.error_message }}
             </p>
+            <div
+              v-if="segmentValidationResult.screenshot_url"
+              style="margin-top: 12px"
+            >
+              <img
+                :src="segmentValidationResult.screenshot_url"
+                alt="片段校验截图"
+                style="
+                  max-width: 100%;
+                  max-height: 220px;
+                  border: 1px solid #dcdfe6;
+                  border-radius: 4px;
+                "
+              />
+            </div>
             <p
               v-for="(suggestion, idx) in segmentValidationResult.suggestions || []"
               :key="`segment-suggestion-${idx}`"

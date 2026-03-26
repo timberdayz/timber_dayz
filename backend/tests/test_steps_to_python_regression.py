@@ -213,7 +213,7 @@ class TestGeneratorRuntimeSeparation:
         assert "for _el_name, _el_loc in _login_element_candidates" not in code
 
     def test_login_success_condition_template(self):
-        """生成代码包含登录成功条件模板（TODO 注释）。"""
+        """生成代码包含登录成功检测模板，而不是只提示 wait_for_url。"""
         steps = [
             {"action": "fill", "selector": "input[name=username]", "value": "{{account.username}}"},
             {"action": "fill", "selector": "input[name=password]", "value": "{{account.password}}"},
@@ -225,8 +225,9 @@ class TestGeneratorRuntimeSeparation:
             component_name="login",
             steps=steps,
         )
-        assert "TODO: edit success condition" in code
-        assert "wait_for_url" in code
+        assert "TODO: replace the placeholder below with explicit login_ready detection" in code
+        assert "Action success does not equal business success" in code
+        assert "pre-check -> action -> post-check" in code
 
     def test_captcha_handling_preserved(self):
         """验证码处理逻辑保留在组件中。"""
@@ -623,7 +624,7 @@ class TestCaptchaResumeUrlConfigurable:
             steps=steps, success_criteria={"url_contains": "/dashboard"},
         )
         assert "'/dashboard' in cur" not in code
-        assert "TODO: edit success condition" in code
+        assert "TODO: replace the placeholder below with explicit login_ready detection" in code
 
     def test_without_success_criteria(self):
         steps = _steps_login_with_captcha()
@@ -631,7 +632,7 @@ class TestCaptchaResumeUrlConfigurable:
             platform="test", component_type="login", component_name="login",
             steps=steps, success_criteria=None,
         )
-        assert "TODO: edit success condition" in code
+        assert "TODO: replace the placeholder below with explicit login_ready detection" in code
 
 
 class TestSelectorFromSelectorsUnique:

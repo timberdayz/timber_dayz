@@ -78,9 +78,28 @@ class PlatformLogin(LoginComponent):
     def __init__(self, ctx: ExecutionContext) -> None:
         super().__init__(ctx)
 
+    async def _login_ready(self, page: Any) -> bool:
+        """登录成功检测：动作成功不等于业务成功。"""
+        cur = str(getattr(page, "url", "") or "").lower()
+        if "/login" in cur:
+            return False
+        # 至少保留一个 URL/页面特征信号；推荐双信号
+        return "/welcome" in cur or await page.get_by_text("工作台").is_visible()
+
+    async def _checkbox_checked(self, locator) -> bool:
+        try:
+            return await locator.is_checked()
+        except Exception:
+            aria_checked = await locator.get_attribute("aria-checked")
+            return str(aria_checked).lower() == "true"
+
     async def run(self, page: Any) -> LoginResult:
         acc = self.ctx.account or {}
         config = self.ctx.config or {}
+
+        # -- pre-check：已登录则直接跳过 --
+        if await self._login_ready(page):
+            return LoginResult(success=True, message="already logged in")
 
         # -- 验证码恢复路径（必须在 page.goto 之前）--
         # 若有回传的验证码/OTP，同页继续，不重新导航
@@ -96,8 +115,9 @@ class PlatformLogin(LoginComponent):
                     login_btn = page.get_by_role("button", name="登录")
                     await expect(login_btn).to_have_count(1)
                     await login_btn.click(timeout=3000)
-                    await page.wait_for_url("**/welcome**", timeout=15000)
-                    return LoginResult(success=True, message="ok")
+                    if await self._login_ready(page):
+                        return LoginResult(success=True, message="ok")
+                    return LoginResult(success=False, message="验证码提交后仍未满足登录成功条件")
                 except Exception as e:
                     ctx_info = f"url={getattr(page, 'url', '')}"
                     return LoginResult(success=False, message=f"captcha resume failed: {e} ({ctx_info})")
@@ -127,14 +147,25 @@ class PlatformLogin(LoginComponent):
         await expect(password_input).to_be_visible()
         await password_input.fill(acc.get("password", ""), timeout=10000)
 
+        # -- pre-check + action + post-check：记住我（如业务要求必须勾选） --
+        remember_me = form.get_by_role("checkbox", name="记住我")
+        await expect(remember_me).to_be_visible()
+        if not await self._checkbox_checked(remember_me):
+            await remember_me.click(timeout=10000)
+            if not await self._checkbox_checked(remember_me):
+                return LoginResult(success=False, message="记住我复选框点击后仍未勾选")
+
         # -- 提交登录 --
         login_btn = form.get_by_role("button", name="登录")
         await expect(login_btn).to_be_visible()
         await login_btn.click(timeout=10000)
 
-        # -- 登录成功条件（必须编辑） --
-        await page.wait_for_url("**/welcome**", timeout=15000)
-        return LoginResult(success=True, message="ok")
+        # -- post-check：登录成功条件（必须编辑） --
+        # 标准：pre-check -> action -> post-check
+        # 动作成功不等于业务成功；至少校验 URL/关键元素/弹窗状态中的一个，推荐双信号
+        if await self._login_ready(page):
+            return LoginResult(success=True, message="ok")
+        return LoginResult(success=False, message="登录按钮点击后仍未满足登录成功条件")
 ```
 
 ---
@@ -281,7 +312,48 @@ await username.fill(value)
 await page.locator("input.username").first.click()
 ```
 
-### 3. 日志输出（禁止 Emoji）
+### 3. 检测层模板（强制）
+
+所有关键步骤按下面顺序编写，不得省略 post-check：
+
+```python
+# pre-check
+await expect(locator).to_be_visible()
+
+# action
+await locator.click(timeout=10000)
+
+# post-check
+if not await target_state_detector():
+    return LoginResult(success=False, message="目标状态未达成")
+```
+
+常见 `target_state_detector()`：
+
+- 登录：URL 已离开登录页，且欢迎页/工作台元素可见
+- checkbox：`is_checked()` 或 `aria-checked=true`
+- 弹窗关闭：dialog hidden/detached，overlay 不再遮挡
+- 导出：文件存在且非空
+
+推荐 helper 命名：
+
+- `detect_login_ready()`
+- `ensure_remember_me_checked()`
+- `ensure_popup_closed()`
+- `wait_navigation_ready()`
+- `wait_export_complete()`
+
+### 4. 弹窗关闭模板
+
+```python
+dialog = page.get_by_role("dialog", name="导出确认")
+await expect(dialog).to_be_visible()
+confirm_btn = dialog.get_by_role("button", name="确定")
+await confirm_btn.click(timeout=10000)
+await expect(dialog).to_be_hidden(timeout=10000)
+```
+
+### 5. 日志输出（禁止 Emoji）
 
 使用 ASCII 符号代替 Emoji（Windows 编码兼容性）：
 
@@ -296,7 +368,7 @@ if self.logger:
 # self.logger.info("\u2705 Login successful")  # 禁止使用 emoji
 ```
 
-### 4. 错误处理
+### 6. 错误处理
 
 返回 `ResultBase` 子类，关键失败需包含可诊断信息：
 
@@ -315,7 +387,7 @@ async def run(self, page: Any) -> LoginResult:
         )
 ```
 
-### 5. 组件元数据（必须）
+### 7. 组件元数据（必须）
 
 ```python
 class MyComponent(ExportComponent):
@@ -324,7 +396,7 @@ class MyComponent(ExportComponent):
     data_domain = "orders"        # 数据域（export 组件必需）
 ```
 
-### 6. 等待策略
+### 8. 等待策略
 
 ```python
 # 推荐：条件等待

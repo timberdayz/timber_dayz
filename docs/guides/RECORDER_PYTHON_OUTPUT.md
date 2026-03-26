@@ -14,7 +14,9 @@
 4. **编辑**：文本框支持直接编辑。可按《采集脚本编写规范》微调：
    - 将 `page.locator(selector)` 改为 `get_by_role` / `get_by_label` / `get_by_text` 等更稳定的定位；
    - 补充弹窗、复杂交互、下载等处的注释或实现；
-   - 调整 `expect(locator).to_be_visible()` 或超时等等待逻辑。
+   - 调整 `expect(locator).to_be_visible()` 或超时等等待逻辑；
+   - **补齐检测层**：把关键步骤写成 `pre-check -> action -> post-check`，尤其是登录成功、checkbox 勾选、弹窗关闭、导出完成。
+   - 优先提炼为可复用 helper：`detect_* / ensure_* / wait_*`。
 
 ---
 
@@ -57,6 +59,8 @@
 - 从前端：开始录制 → 停止 → 在「Python 代码」区域看到并可编辑生成的代码 → 保存。
 - 确认磁盘上存在 `modules/platforms/{platform}/components/{component_name}.py`，且可被执行器加载（无语法错误、符合组件契约）。
 - 生成代码具备：组件契约（`async def run(...)`、返回 ResultBase 子类）、get_by_* 优先、click/fill 前 `expect(...).to_be_visible()` 等（可人工抽查或小脚本检查）。
+- 对登录组件，**必须**人工确认“点击登录后是否真的做了登录成功检测”；仅看到 `click()` 或 `wait_for_url()` 注释不算完成。
+- 对涉及 checkbox / popup / 导出的步骤，**必须**人工确认模板中存在状态检测而不是只有点击动作。
 
 ---
 

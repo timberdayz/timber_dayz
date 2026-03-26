@@ -20,6 +20,9 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 
+SEGMENT_VALIDATION_ARTIFACT_ROUTE = "/api/collection/recorder/segment-artifact"
+
+
 STEP_GROUP_SIGNAL_MAP = {
     "navigation": "navigation_ready",
     "date_picker": "date_picker_ready",
@@ -114,6 +117,10 @@ class RecorderSegmentValidator:
             ],
         }
         return suggestion_map.get(resolved_signal, [])
+
+    def build_artifact_url(self, filename: str) -> str:
+        safe_name = Path(filename).name
+        return f"{SEGMENT_VALIDATION_ARTIFACT_ROUTE}?name={safe_name}"
 
     def build_gate_failure_result(
         self,
@@ -383,7 +390,7 @@ class RecorderSegmentValidator:
                             failure_step_id=request.step_start,
                             failure_phase="login",
                             error_message=login_error,
-                            screenshot_url=str(artifact_path),
+                            screenshot_url=self.build_artifact_url(artifact_path.name),
                         )
 
                 actionable_steps = [
@@ -423,7 +430,7 @@ class RecorderSegmentValidator:
                             failure_step_id=step.get("id"),
                             failure_phase=request.component_type,
                             error_message=str(e),
-                            screenshot_url=str(artifact_path),
+                            screenshot_url=self.build_artifact_url(artifact_path.name),
                         )
 
                 current_url = page.url
@@ -447,7 +454,7 @@ class RecorderSegmentValidator:
                         failure_step_id=request.step_end,
                         failure_phase=request.component_type,
                         error_message=signal_error,
-                        screenshot_url=str(artifact_path),
+                        screenshot_url=self.build_artifact_url(artifact_path.name),
                     )
 
                 await context.close()

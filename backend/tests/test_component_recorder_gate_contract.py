@@ -1,9 +1,12 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
+import backend.routers.component_recorder as component_recorder_router
 
 from backend.routers.component_recorder import (
     _build_recorder_status_payload,
+    _launch_inspector_recorder_subprocess,
     get_recording_steps,
+    get_recorder_segment_artifact,
     recorder_session,
     resume_recorder_verification,
     start_recording,
@@ -167,3 +170,81 @@ async def test_validate_segment_returns_structured_validation_payload(monkeypatc
     assert body["success"] is True
     assert body["data"]["resolved_signal"] == "navigation_ready"
     assert body["data"]["validated_steps"] == 2
+
+
+@pytest.mark.asyncio
+async def test_get_recorder_segment_artifact_serves_validation_screenshot(tmp_path, monkeypatch):
+    artifact_dir = tmp_path / "segment_validation"
+    artifact_dir.mkdir(parents=True)
+    artifact_path = artifact_dir / "failure.png"
+    artifact_path.write_bytes(b"fake-png")
+    monkeypatch.setattr(
+        component_recorder_router,
+        "SEGMENT_VALIDATION_ARTIFACT_DIR",
+        artifact_dir,
+        raising=False,
+    )
+
+    response = await get_recorder_segment_artifact(name="failure.png")
+
+    assert str(response.path).endswith("failure.png")
+
+
+def test_launch_inspector_recorder_subprocess_uses_prepared_account_info(monkeypatch):
+    captured = {}
+
+    class _FakeProcess:
+        pid = 4321
+
+    def _fake_prepare_account_info(account):
+        return {
+            "account_id": account.account_id,
+            "platform": account.platform,
+            "username": account.username,
+            "password": "plain-password",
+            "login_url": "https://erp.91miaoshou.com",
+            "store_name": account.store_name,
+        }
+
+    def _fake_json_dump(data, fp, ensure_ascii=False, indent=2):
+        captured["config"] = data
+        fp.write("{}")
+
+    class _FakeComponentTestService:
+        @staticmethod
+        def prepare_account_info(account):
+            return _fake_prepare_account_info(account)
+
+    monkeypatch.setattr(
+        component_recorder_router,
+        "ComponentTestService",
+        _FakeComponentTestService,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.routers.component_recorder.subprocess.Popen",
+        lambda *args, **kwargs: _FakeProcess(),
+    )
+    monkeypatch.setattr(
+        "backend.routers.component_recorder.json.dump",
+        _fake_json_dump,
+    )
+
+    account = PlatformAccount(
+        account_id="acc-1",
+        platform="miaoshou",
+        store_name="Miaoshou Test Store",
+        username="user@example.com",
+        password_encrypted="encrypted-password",
+        login_url="https://erp.91miaoshou.com/login",
+        capabilities={},
+        enabled=True,
+    )
+
+    _launch_inspector_recorder_subprocess(account, "miaoshou", "export")
+
+    assert captured["config"]["account_info"]["password"] == "plain-password"
+    assert (
+        captured["config"]["account_info"]["login_url"]
+        == "https://erp.91miaoshou.com"
+    )
