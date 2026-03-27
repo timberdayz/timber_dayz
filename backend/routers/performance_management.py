@@ -442,6 +442,56 @@ def _build_metric_detail(details: Dict[str, Any], metric: str, score_value: Opti
     }
 
 
+async def _load_shop_monthly_product_metrics(
+    db: AsyncSession,
+    year_month: str,
+) -> Dict[str, Dict[str, float]]:
+    period_start = datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
+    if period_start.month == 12:
+        period_end = period_start.replace(year=period_start.year + 1, month=1, day=1) - timedelta(days=1)
+    else:
+        period_end = period_start.replace(month=period_start.month + 1, day=1) - timedelta(days=1)
+
+    result = await db.execute(
+        text(
+            """
+            select
+              lower(platform_code) as platform_code,
+              shop_id,
+              platform_sku,
+              product_id,
+              coalesce(sum(sales_amount), 0) as sales_amount,
+              coalesce(sum(order_count), 0) as order_count
+            from mart.product_day_kpi
+            where period_date >= :period_start
+              and period_date <= :period_end
+            group by lower(platform_code), shop_id, platform_sku, product_id
+            """
+        ),
+        {"period_start": period_start, "period_end": period_end},
+    )
+
+    metrics: Dict[str, Dict[str, float]] = {}
+    for row in result.mappings().all():
+        platform_code = row.get("platform_code") or ""
+        shop_id = row.get("shop_id") or ""
+        sales_amount = float(row.get("sales_amount") or 0.0)
+        order_count = float(row.get("order_count") or 0.0)
+        platform_sku = row.get("platform_sku")
+        product_id = row.get("product_id")
+        if platform_sku:
+            metrics[f"{platform_code}|{shop_id}|sku:{platform_sku}"] = {
+                "sales_amount": sales_amount,
+                "order_count": order_count,
+            }
+        if product_id is not None:
+            metrics[f"{platform_code}|{shop_id}|pid:{product_id}"] = {
+                "sales_amount": sales_amount,
+                "order_count": order_count,
+            }
+    return metrics
+
+
 def _calculate_operation_metric_score(target: Any) -> tuple[float, Dict[str, Any]]:
     direction = getattr(target, "metric_direction", None)
     target_value = getattr(target, "target_value", None)
@@ -1065,6 +1115,57 @@ async def calculate_performance_scores(
             .limit(1)
         )
         operation_target = (await db.execute(operation_target_query)).scalar_one_or_none()
+        product_target_query = (
+            select(SalesTarget)
+            .where(SalesTarget.target_type == "product")
+            .where(SalesTarget.period_start <= period_end)
+            .where(SalesTarget.period_end >= period_start)
+            .order_by(SalesTarget.created_at.desc())
+        )
+        product_targets = (await db.execute(product_target_query)).scalars().all()
+        product_metrics_by_shop = {}
+        try:
+            product_metrics_by_shop = await _load_shop_monthly_product_metrics(db, period)
+        except Exception as e:
+            logger.warning("Product monthly metrics load failed: %s", e)
+
+        product_target_by_shop: Dict[str, Dict[str, Any]] = {}
+        for product_target in product_targets:
+            if not getattr(product_target, "platform_sku", None) and getattr(product_target, "product_id", None) is None:
+                continue
+            breakdown_rows = (
+                await db.execute(
+                    select(TargetBreakdown).where(
+                        TargetBreakdown.target_id == product_target.id,
+                        TargetBreakdown.breakdown_type.in_(["shop", "shop_time"]),
+                    )
+                )
+            ).scalars().all()
+            for breakdown_row in breakdown_rows:
+                shop_key = f"{(breakdown_row.platform_code or '').lower()}|{breakdown_row.shop_id or ''}"
+                product_key = None
+                if getattr(product_target, "platform_sku", None):
+                    product_key = f"{shop_key}|sku:{product_target.platform_sku}"
+                elif getattr(product_target, "product_id", None) is not None:
+                    product_key = f"{shop_key}|pid:{product_target.product_id}"
+                metrics = product_metrics_by_shop.get(product_key or "", {})
+                rec = product_target_by_shop.setdefault(
+                    shop_key,
+                    {"target_amount": 0.0, "achieved_amount": 0.0, "products": []},
+                )
+                target_amount = float(getattr(breakdown_row, "target_amount", 0) or 0)
+                achieved_amount = float(metrics.get("sales_amount", 0.0))
+                rec["target_amount"] += target_amount
+                rec["achieved_amount"] += achieved_amount
+                rec["products"].append(
+                    {
+                        "product_id": getattr(product_target, "product_id", None),
+                        "platform_sku": getattr(product_target, "platform_sku", None),
+                        "company_sku": getattr(product_target, "company_sku", None),
+                        "target_amount": target_amount,
+                        "achieved_amount": achieved_amount,
+                    }
+                )
 
         calc_list = []
         for rec in source_rows.values():
@@ -1085,6 +1186,11 @@ async def calculate_performance_scores(
             profit_rate_fraction = (profit_achieved / target_profit) if target_profit > 0 else None
             profit_rate = _normalize_rate_percent(profit_rate_fraction)
             profit_score = _score_by_rate(config.profit_max_score, profit_rate_fraction) if target_profit > 0 else 0.0
+            key_product_target = float(product_target_by_shop.get(key, {}).get("target_amount", 0.0))
+            key_product_achieved = float(product_target_by_shop.get(key, {}).get("achieved_amount", 0.0))
+            key_product_rate_fraction = (key_product_achieved / key_product_target) if key_product_target > 0 else None
+            key_product_rate = _normalize_rate_percent(key_product_rate_fraction)
+            key_product_score = _score_by_rate(config.key_product_max_score, key_product_rate_fraction) if key_product_target > 0 else 0.0
             operation_score, operation_details = _calculate_operation_metric_score(operation_target) if operation_target else (
                 0.0,
                 {
@@ -1094,7 +1200,7 @@ async def calculate_performance_scores(
                     "achieved": None,
                     "rate": None,
                     "calculation": None,
-                            "message": None if target_profit > 0 else "Profit target pipeline is not ready.",
+                    "message": "Operation target pipeline is not ready.",
                 },
             )
 
@@ -1104,9 +1210,9 @@ async def calculate_performance_scores(
                     "shop_id": current_shop_id,
                     "sales_score": sales_score,
                     "profit_score": profit_score,
-                    "key_product_score": 0.0,
+                    "key_product_score": key_product_score,
                     "operation_score": operation_score,
-                    "total_score": round(sales_score + profit_score + operation_score, 4),
+                    "total_score": round(sales_score + profit_score + key_product_score + operation_score, 4),
                     "rank": None,
                     "performance_coefficient": 1.0,
                     "score_details": {
@@ -1128,12 +1234,13 @@ async def calculate_performance_scores(
                             "message": None if target_profit > 0 else "Profit target pipeline is not ready.",
                         },
                         "key_product": {
-                            "status": "pending_design",
-                            "source": None,
-                            "target": None,
-                            "achieved": None,
-                            "rate": None,
-                            "message": "Key product target pipeline is not ready.",
+                            "status": "calculated" if key_product_target > 0 else "pending_design",
+                            "source": "target_management + mart.product_day_kpi" if key_product_target > 0 else None,
+                            "target": key_product_target if key_product_target > 0 else None,
+                            "achieved": key_product_achieved if key_product_target > 0 else None,
+                            "rate": key_product_rate if key_product_target > 0 else None,
+                            "calculation": f"min(rate {key_product_rate or 0:.2f}%, 100%) * key product max {config.key_product_max_score}" if key_product_target > 0 else None,
+                            "message": None if key_product_target > 0 else "Key product target pipeline is not ready.",
                         },
                         "operation": {
                             "status": operation_details["status"],
@@ -1145,10 +1252,27 @@ async def calculate_performance_scores(
                             "message": operation_details["message"],
                         },
                         "summary": {
-                            "status": "complete" if (target_profit > 0 and operation_details["status"] == "calculated") else ("partial" if target_profit > 0 or operation_details["status"] == "calculated" else "partial"),
-                            "ready_dimensions": ["sales", "profit", "operation"] if (target_profit > 0 and operation_details["status"] == "calculated") else (["sales", "profit"] if target_profit > 0 else (["sales", "operation"] if operation_details["status"] == "calculated" else ["sales"])),
-                            "pending_dimensions": ["key_product"] if (target_profit > 0 and operation_details["status"] == "calculated") else (["key_product", "operation"] if target_profit > 0 else (["profit", "key_product"] if operation_details["status"] == "calculated" else ["profit", "key_product", "operation"])),
-                            "message": "Sales, profit, and operation dimensions are independently calculated." if (target_profit > 0 and operation_details["status"] == "calculated") else ("Sales and profit dimensions are independently calculated." if target_profit > 0 else ("Sales and operation dimensions are independently calculated." if operation_details["status"] == "calculated" else "Only sales dimension is independently calculated.")),
+                            "status": "complete" if (target_profit > 0 and key_product_target > 0 and operation_details["status"] == "calculated") else "partial",
+                            "ready_dimensions": [
+                                dimension
+                                for dimension, ready in [
+                                    ("sales", True),
+                                    ("profit", target_profit > 0),
+                                    ("key_product", key_product_target > 0),
+                                    ("operation", operation_details["status"] == "calculated"),
+                                ]
+                                if ready
+                            ],
+                            "pending_dimensions": [
+                                dimension
+                                for dimension, ready in [
+                                    ("profit", target_profit > 0),
+                                    ("key_product", key_product_target > 0),
+                                    ("operation", operation_details["status"] == "calculated"),
+                                ]
+                                if not ready
+                            ],
+                            "message": "Sales, profit, key product, and operation dimensions are independently calculated." if (target_profit > 0 and key_product_target > 0 and operation_details["status"] == "calculated") else "Partial dimensions are independently calculated.",
                         },
                     },
                 }

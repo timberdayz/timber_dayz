@@ -1988,6 +1988,10 @@ export default {
     return await this._get('/targets/shops')
   },
 
+  async getTargetProducts(params = {}) {
+    return await this._get("/targets/products", { params });
+  },
+
   // 按月份获取目标（常规月度目标页用）
   async getTargetByMonth(month, targetType = 'shop') {
     return await this._get('/targets/by-month', { params: { month, target_type: targetType } })

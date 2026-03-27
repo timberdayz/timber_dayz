@@ -293,6 +293,9 @@
                 <el-tag :type="getTargetTypeTagType(row.target_type)" size="small">{{ getTargetTypeLabel(row.target_type) }}</el-tag>
               </template>
             </el-table-column>
+            <el-table-column prop="platform_sku" label="??SKU" width="180" show-overflow-tooltip />
+            <el-table-column prop="company_sku" label="??SKU" width="160" show-overflow-tooltip />
+            <el-table-column prop="product_id" label="??ID" width="120" />
             <el-table-column prop="period_start" label="开始时间" width="120" />
             <el-table-column prop="period_end" label="结束时间" width="120" />
             <el-table-column prop="target_amount" label="目标金额" width="150" align="right" sortable>
@@ -585,6 +588,38 @@
         <el-form-item v-if="form.target_type === 'shop'" label="目标毛利" prop="target_profit_amount">
           <el-input-number v-model="form.target_profit_amount" :min="0" :precision="2" class="erp-w-full" />
         </el-form-item>
+        <template v-if="form.target_type === 'product'">
+          <el-form-item label="产品" prop="platform_sku">
+            <el-select
+              v-model="form.platform_sku"
+              filterable
+              remote
+              reserve-keyword
+              clearable
+              :remote-method="handleProductSearch"
+              :loading="productOptionsLoading"
+              class="erp-w-full"
+              placeholder="请输入SKU或产品名称搜索"
+              @change="handleProductSelect"
+            >
+              <el-option
+                v-for="item in productOptions"
+                :key="`${item.platform_code || ''}-${item.shop_id || ''}-${item.platform_sku || ''}`"
+                :label="`${item.product_title || item.platform_sku || '未命名产品'} (${item.platform_sku || '-'})`"
+                :value="item.platform_sku"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="平台SKU">
+            <el-input v-model="form.platform_sku" readonly />
+          </el-form-item>
+          <el-form-item label="公司SKU">
+            <el-input v-model="form.company_sku" readonly />
+          </el-form-item>
+          <el-form-item label="产品ID">
+            <el-input-number v-model="form.product_id" :min="1" :precision="0" class="erp-w-full" />
+          </el-form-item>
+        </template>
         <template v-if="form.target_type === 'operation'">
           <el-form-item label="运营指标" prop="metric_code">
             <el-select v-model="form.metric_code" class="erp-w-full" @change="handleOperationMetricChange">
@@ -1267,6 +1302,9 @@ const openCreateForMonth = async () => {
   form.target_amount = 0;
   form.target_quantity = 0;
   form.target_profit_amount = 0;
+  form.product_id = null;
+  form.platform_sku = "";
+  form.company_sku = "";
   form.metric_code = "";
   form.metric_name = "";
   form.metric_direction = "";
@@ -1484,6 +1522,9 @@ const form = reactive({
   target_amount: 0,
   target_quantity: 0,
   target_profit_amount: 0,
+  product_id: null,
+  platform_sku: "",
+  company_sku: "",
   metric_code: "",
   metric_name: "",
   metric_direction: "",
@@ -1506,6 +1547,8 @@ const timeBreakdown = ref([]);
 // 店铺列表（来自 GET /targets/shops，账号管理 platform_accounts）
 const availableShops = ref([]);
 const shopsLoading = ref(false);
+const productOptions = ref([]);
+const productOptionsLoading = ref(false);
 
 const operationMetricOptions = [
   { code: "customer_satisfaction", label: "客户满意度", direction: "higher_better" },
@@ -1669,6 +1712,9 @@ const effectiveFormRules = computed(() => {
     target_profit_amount: isShop
       ? [{ type: "number", min: 0, message: "目标毛利不能小于0", trigger: "blur" }]
       : [],
+    platform_sku: form.target_type === "product"
+      ? [{ required: true, message: "?????", trigger: "change" }]
+      : [],
     metric_code: isOperation
       ? [{ required: true, message: "请选择运营指标", trigger: "change" }]
       : [],
@@ -1698,6 +1744,32 @@ const loadTargetShops = async () => {
   if (form.target_type === "operation") {
     handleOperationMetricChange();
   }
+};
+
+const loadTargetProducts = async (keyword = "") => {
+  productOptionsLoading.value = true;
+  try {
+    const response = await api.getTargetProducts({ keyword, limit: 20 });
+    const data = response?.data ?? response ?? [];
+    productOptions.value = Array.isArray(data) ? data : [];
+  } catch (e) {
+    handleApiError(e, { showMessage: true, logError: true });
+    productOptions.value = [];
+  } finally {
+    productOptionsLoading.value = false;
+  }
+};
+
+const handleProductSearch = async (keyword) => {
+  await loadTargetProducts(keyword || "");
+};
+
+const handleProductSelect = (platformSku) => {
+  const selected = productOptions.value.find((item) => item.platform_sku === platformSku);
+  if (!selected) return;
+  form.platform_sku = selected.platform_sku || "";
+  form.company_sku = selected.company_sku || "";
+  form.product_id = selected.product_id ?? null;
 };
 
 const handleOperationMetricChange = () => {
@@ -1935,6 +2007,9 @@ const handleCreate = async () => {
   form.target_amount = 0;
   form.target_quantity = 0;
   form.target_profit_amount = 0;
+  form.product_id = null;
+  form.platform_sku = "";
+  form.company_sku = "";
   form.metric_code = "";
   form.metric_name = "";
   form.metric_direction = "";
@@ -1951,6 +2026,7 @@ const handleCreate = async () => {
   breakdownTab.value = "shop";
   if (availableShops.value.length === 0) await loadTargetShops();
   if (form.target_type === "shop") applyShopBreakdownFromAvailableShops();
+  if (form.target_type === "product") await loadTargetProducts();
   dialogVisible.value = true;
 };
 
@@ -1969,6 +2045,9 @@ const handleEdit = async (row) => {
   form.target_amount = row.target_amount;
   form.target_quantity = row.target_quantity;
   form.target_profit_amount = row.target_profit_amount || 0;
+  form.product_id = row.product_id ?? null;
+  form.platform_sku = row.platform_sku || "";
+  form.company_sku = row.company_sku || "";
   form.metric_code = row.metric_code || "";
   form.metric_name = row.metric_name || "";
   form.metric_direction = row.metric_direction || "";
@@ -1982,6 +2061,7 @@ const handleEdit = async (row) => {
   form.manual_score_value = row.manual_score_value || 0;
 
   if (availableShops.value.length === 0) await loadTargetShops();
+  if (form.target_type === "product") await loadTargetProducts(form.platform_sku || form.company_sku || "");
 
   const detailResponse = await api.getTargetDetail(row.id);
   const breakdowns =
@@ -2253,6 +2333,9 @@ const handleSubmit = async () => {
         target_amount: form.target_amount,
         target_quantity: form.target_quantity,
         target_profit_amount: form.target_profit_amount,
+        product_id: form.product_id || undefined,
+        platform_sku: form.platform_sku || undefined,
+        company_sku: form.company_sku || undefined,
         metric_code: form.metric_code || undefined,
         metric_name: form.metric_name || undefined,
         metric_direction: form.metric_direction || undefined,
@@ -2308,6 +2391,9 @@ const handleDialogClose = () => {
   formRef.value?.resetFields();
   form.targetMonth = "";
   form.target_profit_amount = 0;
+  form.product_id = null;
+  form.platform_sku = "";
+  form.company_sku = "";
   form.metric_code = "";
   form.metric_name = "";
   form.metric_direction = "";

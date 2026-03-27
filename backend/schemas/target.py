@@ -14,9 +14,12 @@ class TargetCreateRequest(BaseModel):
     period_start: date = Field(..., description="开始日期")
     period_end: date = Field(..., description="结束日期")
     target_amount: float = Field(0.0, ge=0, description="目标销售额(CNY)")
-    target_quantity: int = Field(0, ge=0, description="目标订单数/销量")
+    target_quantity: int = Field(0, ge=0, description="目标数量")
     target_profit_amount: float = Field(0.0, ge=0, description="目标毛利(CNY)")
     achieved_profit_amount: float = Field(0.0, ge=0, description="实际毛利(CNY)")
+    product_id: Optional[int] = Field(None, description="产品ID")
+    platform_sku: Optional[str] = Field(None, description="平台SKU")
+    company_sku: Optional[str] = Field(None, description="公司SKU")
     metric_code: Optional[str] = Field(None, description="运营指标编码")
     metric_name: Optional[str] = Field(None, description="运营指标名称")
     metric_direction: Optional[str] = Field(
@@ -44,6 +47,9 @@ class TargetUpdateRequest(BaseModel):
     target_quantity: Optional[int] = Field(None, ge=0)
     target_profit_amount: Optional[float] = Field(None, ge=0)
     achieved_profit_amount: Optional[float] = Field(None, ge=0)
+    product_id: Optional[int] = None
+    platform_sku: Optional[str] = None
+    company_sku: Optional[str] = None
     metric_code: Optional[str] = None
     metric_name: Optional[str] = None
     metric_direction: Optional[str] = None
@@ -75,6 +81,9 @@ class BreakdownCreateRequest(BaseModel):
     target_quantity: int = Field(0, ge=0)
     target_profit_amount: float = Field(0.0, ge=0)
     achieved_profit_amount: float = Field(0.0, ge=0)
+    product_id: Optional[int] = None
+    platform_sku: Optional[str] = None
+    company_sku: Optional[str] = None
     target_value: Optional[float] = None
     achieved_value: Optional[float] = None
     manual_score_value: Optional[float] = None
@@ -100,6 +109,9 @@ class TargetResponse(BaseModel):
     achieved_amount: float
     achieved_quantity: int
     achieved_profit_amount: float
+    product_id: Optional[int] = None
+    platform_sku: Optional[str] = None
+    company_sku: Optional[str] = None
     achievement_rate: float
     metric_code: Optional[str] = None
     metric_name: Optional[str] = None
@@ -140,6 +152,9 @@ class BreakdownResponse(BaseModel):
     achieved_amount: float
     achieved_quantity: int
     achieved_profit_amount: float
+    product_id: Optional[int] = None
+    platform_sku: Optional[str] = None
+    company_sku: Optional[str] = None
     achievement_rate: float
     target_value: Optional[float] = None
     achieved_value: Optional[float] = None

@@ -2437,6 +2437,9 @@ class SalesTarget(Base):
     target_amount = Column(Float, nullable=False, default=0.0, comment="目标销售额(CNY)")
     target_quantity = Column(Integer, nullable=False, default=0, comment="目标订单数/销量")
     target_profit_amount = Column(Float, nullable=False, default=0.0, comment="目标毛利(CNY)")
+    product_id = Column(Integer, nullable=True, comment="产品ID")
+    platform_sku = Column(String(128), nullable=True, comment="平台SKU")
+    company_sku = Column(String(128), nullable=True, comment="公司SKU")
     
     # 达成值(C类:系统自动计算)
     achieved_amount = Column(Float, nullable=False, default=0.0, comment="实际销售额(CNY)")
@@ -2515,6 +2518,9 @@ class TargetBreakdown(Base):
     target_amount = Column(Float, nullable=False, default=0.0, comment="目标销售额(CNY)")
     target_quantity = Column(Integer, nullable=False, default=0, comment="目标订单数/销量")
     target_profit_amount = Column(Float, nullable=False, default=0.0, comment="目标毛利(CNY)")
+    product_id = Column(Integer, nullable=True, comment="产品ID")
+    platform_sku = Column(String(128), nullable=True, comment="平台SKU")
+    company_sku = Column(String(128), nullable=True, comment="公司SKU")
     
     # 达成值(C类:系统自动计算)
     achieved_amount = Column(Float, nullable=False, default=0.0, comment="实际销售额(CNY)")
