@@ -229,11 +229,7 @@ class MiaoshouOrdersExport(ExportComponent):
             subtype = str(cfg.get("orders_subtype") or "shopee").strip().lower()
             time_selection = cfg.get("time_selection") or {}
             time_mode = str(time_selection.get("mode") or "").strip().lower()
-            date_preset = str(
-                time_selection.get("preset")
-                or cfg.get("date_preset")
-                or ""
-            ).strip()
+            date_preset = str(time_selection.get("preset") or "").strip()
             custom_range = cfg.get("custom_date_range")
             if not custom_range and time_mode == "custom":
                 custom_range = {
@@ -243,6 +239,11 @@ class MiaoshouOrdersExport(ExportComponent):
                     "end_time": time_selection.get("end_time", "23:59:59"),
                 }
 
+            await page.goto(
+                self._orders_detail_url(subtype),
+                wait_until="domcontentloaded",
+                timeout=60000,
+            )
             await self._wait_navigation_ready(page)
             await self._ensure_popup_closed(page)
             await self._ensure_orders_subtype_selected(page, subtype)

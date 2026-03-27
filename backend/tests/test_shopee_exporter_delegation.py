@@ -19,7 +19,7 @@ class _FakeProductsExport:
         self.ctx = ctx
 
     async def run(self, page, mode=None):
-        return ExportResult(success=True, message="delegated", file_path="temp/outputs/products.xlsx")
+        return ExportResult(success=True, message="delegated", file_path="downloads/shopee/products.xlsx")
 
 
 @pytest.mark.asyncio
@@ -35,4 +35,4 @@ async def test_shopee_generic_exporter_delegates_to_products_export(monkeypatch:
 
     assert result.success is True
     assert result.message == "delegated"
-    assert result.file_path == "temp/outputs/products.xlsx"
+    assert result.file_path == "downloads/shopee/products.xlsx"

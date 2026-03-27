@@ -4,7 +4,7 @@ from modules.apps.collection_center.python_component_adapter import PythonCompon
 
 
 class _FakeExportResult:
-    def __init__(self, success=True, message="ok", file_path="temp/outputs/demo.xlsx"):
+    def __init__(self, success=True, message="ok", file_path="data/raw/2026/demo.xlsx"):
         self.success = success
         self.message = message
         self.file_path = file_path
@@ -23,7 +23,7 @@ class _FakeGenericExportComponent:
         self.ctx = ctx
 
     async def run(self, page):
-        return _FakeExportResult(file_path="temp/outputs/generic.xlsx")
+        return _FakeExportResult(file_path="data/raw/2026/generic.xlsx")
 
 
 def _account():
@@ -39,7 +39,7 @@ async def test_tiktok_services_domain_uses_canonical_export(monkeypatch: pytest.
     result = await adapter.export(page=object(), data_domain="services")
 
     assert result.success is True
-    assert result.file_path == "temp/outputs/demo.xlsx"
+    assert result.file_path == "data/raw/2026/demo.xlsx"
 
 
 @pytest.mark.asyncio
@@ -51,7 +51,7 @@ async def test_miaoshou_inventory_domain_uses_canonical_export(monkeypatch: pyte
     result = await adapter.export(page=object(), data_domain="inventory")
 
     assert result.success is True
-    assert result.file_path == "temp/outputs/demo.xlsx"
+    assert result.file_path == "data/raw/2026/demo.xlsx"
 
 
 @pytest.mark.asyncio

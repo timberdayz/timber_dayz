@@ -22,6 +22,7 @@ from backend.schemas.collection import (
     TaskCreateRequest,
     ResumeTaskRequest,
     TaskResponse,
+    CollectionVerificationItem,
     TaskLogResponse,
     TaskHistoryResponse,
     TaskStatsResponse,
@@ -107,10 +108,14 @@ def _build_task_verification_item(task: CollectionTask) -> Optional[dict]:
         "account_id": task.account,
         "verification_id": task.task_id,
         "platform": task.platform,
+        "status": task.status,
         "verification_type": task.verification_type,
         "verification_message": getattr(task, "current_step", None)
         or getattr(task, "error_message", None),
         "verification_screenshot": getattr(task, "verification_screenshot", None),
+        "verification_expires_at": None,
+        "verification_attempt_count": 0,
+        "created_at": getattr(task, "created_at", None),
     }
 
 
@@ -270,6 +275,38 @@ async def list_tasks(
     result = await db.execute(stmt)
     tasks = result.scalars().all()
     return [_build_task_response_payload(task) for task in tasks]
+
+
+@router.get("/tasks/verification-items", response_model=List[CollectionVerificationItem])
+async def list_verification_items(
+    platform: Optional[str] = Query(None, description="按平台筛选"),
+    verification_type: Optional[str] = Query(None, description="按验证码类型筛选"),
+    account_id: Optional[str] = Query(None, description="按账号筛选"),
+    status: Optional[str] = Query("paused", description="按状态筛选"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    stmt = select(CollectionTask)
+
+    if platform:
+        stmt = stmt.where(CollectionTask.platform == platform)
+    if account_id:
+        stmt = stmt.where(CollectionTask.account == account_id)
+    if status:
+        stmt = stmt.where(CollectionTask.status == status)
+
+    stmt = stmt.order_by(desc(CollectionTask.created_at))
+    result = await db.execute(stmt)
+    tasks = result.scalars().all()
+
+    items = []
+    for task in tasks:
+        item = _build_task_verification_item(task)
+        if not item:
+            continue
+        if verification_type and item["verification_type"] != verification_type:
+            continue
+        items.append(item)
+    return items
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)

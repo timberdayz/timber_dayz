@@ -1,6 +1,10 @@
 import axios from "axios";
 import { ElMessage } from "element-plus";
 import { useAuthStore } from "@/stores/auth";
+import {
+  hasAnyPersistedAuthArtifact,
+  readPersistedAuthState,
+} from "@/utils/authSession";
 
 // ⭐ v6.0.0新增：现代化认证系统改进
 // 延迟导入 authStore（使用 ESM import() 避免循环依赖，Vite 浏览器环境无 require）
@@ -426,6 +430,11 @@ api.interceptors.response.use(
         httpError.isApiError = true;
         httpError.response = error.response;
         return Promise.reject(httpError);
+      }
+
+      const persistedState = readPersistedAuthState(localStorage);
+      if (!hasAnyPersistedAuthArtifact(persistedState)) {
+        return Promise.reject(error);
       }
 
       // 如果请求已经重试过（避免无限循环）

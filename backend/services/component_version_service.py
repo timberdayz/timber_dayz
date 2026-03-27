@@ -16,6 +16,10 @@ from sqlalchemy import select, and_, or_
 
 from modules.core.db import ComponentVersion
 from modules.core.logger import get_logger
+from backend.services.active_collection_components import (
+    is_active_component_name,
+    is_archive_only_file,
+)
 
 logger = get_logger(__name__)
 
@@ -87,6 +91,9 @@ class ComponentVersionService:
         logger.info(f"Registered version: {component_name} v{version}")
         
         return version_obj
+
+    def is_runtime_eligible(self, component_name: str, file_path: str) -> bool:
+        return is_active_component_name(component_name) and not is_archive_only_file(file_path)
     
     def get_stable_version(self, component_name: str) -> Optional[ComponentVersion]:
         """

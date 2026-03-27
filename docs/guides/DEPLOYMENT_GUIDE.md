@@ -421,7 +421,7 @@ python scripts/etl_cli.py status --detail
 
 ```bash
 # 执行ETL
-python scripts/etl_cli.py run temp/outputs
+python scripts/etl_cli.py run data/raw
 
 # 检查失败文件
 python scripts/etl_cli.py status --quarantine

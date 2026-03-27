@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 
 from playwright.sync_api import sync_playwright, Browser, Page, BrowserContext
+from modules.core.path_manager import get_downloads_dir
 
 from modules.utils.sessions.session_manager import SessionManager
 from modules.utils.otp.verification_service import VerificationCodeService
@@ -95,7 +96,7 @@ class ShopeeWorkflowManager:
         ]
         
         # 输出目录
-        self.output_base = Path("temp/outputs/shopee_workflow")
+        self.output_base = Path(get_downloads_dir()) / "shopee_workflow"
         self.output_base.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"[START] 初始化Shopee工作流管理器: {self.workflow_id}")

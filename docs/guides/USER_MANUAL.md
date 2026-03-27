@@ -37,7 +37,7 @@ python scripts/etl_cli.py --help
 将您的Excel数据文件放到以下目录：
 
 ```
-temp/outputs/
+data/raw/
 ├── shopee/
 │   ├── account1/
 │   │   └── products_20241016.xlsx
@@ -54,7 +54,7 @@ temp/outputs/
 
 ```bash
 # 一键完成扫描+入库
-python scripts/etl_cli.py run temp/outputs --verbose
+python scripts/etl_cli.py run data/raw --verbose
 
 # 查看状态
 python scripts/etl_cli.py status
@@ -86,7 +86,7 @@ python scripts/etl_cli.py status
 ```
 1. 数据采集
    ↓
-2. 文件存储 (temp/outputs/)
+2. 文件存储 (data/raw/)
    ↓
 3. 文件扫描 (catalog_files表)
    ↓
@@ -130,7 +130,7 @@ python scripts/etl_cli.py status
    - 点击"开始采集"
 
 3. **查看采集结果**
-   - 采集完成后文件自动保存到`temp/outputs/`
+- 采集完成后正式文件统一保存到 `data/raw/`
    - 可以在"数据管理中心"查看文件列表
 
 ---
@@ -143,10 +143,10 @@ python scripts/etl_cli.py status
 
 ```bash
 # 完整流程
-python scripts/etl_cli.py run temp/outputs --verbose
+python scripts/etl_cli.py run data/raw --verbose
 
 # 分步执行
-python scripts/etl_cli.py scan temp/outputs    # 步骤1：扫描
+python scripts/etl_cli.py scan data/raw    # 步骤1：扫描
 python scripts/etl_cli.py ingest --limit 100   # 步骤2：入库
 python scripts/etl_cli.py status                # 步骤3：查看
 ```
@@ -345,14 +345,14 @@ your_platform:
 ### Q1: 文件扫描后找不到？
 
 **检查**:
-1. 文件是否在`temp/outputs/`目录下
+1. 文件是否在 `data/raw/` 目录下
 2. 文件格式是否支持（.xlsx/.xls/.csv）
 3. 文件是否被其他程序占用
 
 **解决**:
 ```bash
 # 重新扫描
-python scripts/etl_cli.py scan temp/outputs
+python scripts/etl_cli.py scan data/raw
 
 # 查看catalog
 python scripts/etl_cli.py status
@@ -444,8 +444,8 @@ sqlite3 data/unified_erp_system.db ".dump" > backup.sql
 
 **备份数据文件**:
 ```bash
-# 复制temp/outputs目录
-cp -r temp/outputs backups/outputs_20241016/
+# 复制 data/raw 目录
+cp -r data/raw backups/raw_20241016/
 ```
 
 ---
@@ -498,7 +498,7 @@ import time
 
 def hourly_job():
     # 每小时执行ETL
-    os.system('python scripts/etl_cli.py run temp/outputs')
+os.system('python scripts/etl_cli.py run data/raw')
 
 schedule.every().hour.at(":05").do(hourly_job)
 
@@ -563,7 +563,7 @@ print(f"总大小: {stats['total_size_mb']:.2f} MB")
 python scripts/etl_cli.py --help
 
 # 扫描文件
-python scripts/etl_cli.py scan temp/outputs
+python scripts/etl_cli.py scan data/raw
 
 # 查看状态
 python scripts/etl_cli.py status --detail
@@ -572,7 +572,7 @@ python scripts/etl_cli.py status --detail
 python scripts/etl_cli.py ingest --limit 100 -v
 
 # 完整流程
-python scripts/etl_cli.py run temp/outputs
+python scripts/etl_cli.py run data/raw
 
 # 重试失败
 python scripts/etl_cli.py retry --all

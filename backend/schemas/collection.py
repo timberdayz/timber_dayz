@@ -144,6 +144,20 @@ class TaskResponse(BaseModel):
     verification_expires_at: Optional[str] = Field(None, description="验证码过期时间")
     verification_attempt_count: int = Field(0, description="验证码提交次数")
 
+
+class CollectionVerificationItem(BaseModel):
+    task_id: str
+    account_id: str
+    verification_id: str
+    platform: str
+    status: str
+    verification_type: str
+    verification_message: Optional[str] = None
+    verification_screenshot: Optional[str] = None
+    verification_expires_at: Optional[str] = None
+    verification_attempt_count: int = 0
+    created_at: Optional[datetime] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 

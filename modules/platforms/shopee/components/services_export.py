@@ -3,7 +3,7 @@ Shopee 服务表现(Services)导出组件
 
 职责:
 - 在同一数据域下,分别导出两个子类型:AI 助手(ai_assistant)、人工聊天(agent)
-- 统一落盘到 temp/outputs/shopee/<account>/<shop>/services/<granularity>/
+- 统一写入工作下载目录，正式文件后续由执行器提升到 data/raw
 - 文件名以 variant 标识子类型:...__services.ai_assistant__manual.xlsx / ...__services.agent__manual.xlsx
 
 说明:

@@ -101,23 +101,52 @@
       <div class="section-header">
         <h3>待回填验证码</h3>
       </div>
+      <div class="verification-summary">
+        <div class="verification-summary-card">
+          <div class="summary-value">{{ verificationSummary.total }}</div>
+          <div class="summary-label">待回填总数</div>
+        </div>
+        <div class="verification-summary-card">
+          <div class="summary-value">{{ verificationSummary.graphical }}</div>
+          <div class="summary-label">图形验证码</div>
+        </div>
+        <div class="verification-summary-card">
+          <div class="summary-value">{{ verificationSummary.otp }}</div>
+          <div class="summary-label">OTP</div>
+        </div>
+        <div class="verification-summary-card">
+          <div class="summary-value">{{ verificationSummary.expired }}</div>
+          <div class="summary-label">已过期</div>
+        </div>
+      </div>
       <div class="pending-verification-list">
         <div
           v-for="item in pendingVerificationItems"
-          :key="`${item.task_id}-${item.account}`"
+          :key="`${item.task_id}-${item.account_id}-${item.verification_id}`"
           class="pending-verification-item"
         >
           <div class="pending-verification-meta">
             <el-tag :type="getPlatformTagType(item.platform)" size="small">
               {{ item.platform }}
             </el-tag>
-            <span>{{ item.account }}</span>
+            <span>{{ item.account_id }}</span>
             <span>{{ item.task_id?.slice(0, 8) }}...</span>
-            <span>{{ item.current_step || '等待验证码' }}</span>
+            <span>{{ item.verification_message || '等待验证码' }}</span>
           </div>
-          <el-button size="small" type="primary" @click="showResumeDialog(item)">
-            立即回填
-          </el-button>
+          <div class="pending-verification-actions">
+            <el-button size="small" @click="viewVerificationScreenshot(item)">
+              查看截图
+            </el-button>
+            <el-button size="small" @click="copyTaskId(item.task_id)">
+              复制任务ID
+            </el-button>
+            <el-button size="small" @click="focusTaskRow(item.task_id)">
+              定位任务
+            </el-button>
+            <el-button size="small" type="primary" @click="showResumeDialog(item)">
+              立即回填
+            </el-button>
+          </div>
         </div>
       </div>
     </div>
@@ -141,8 +170,11 @@
       </div>
 
       <el-table 
+        ref="taskTableRef"
         v-loading="loading" 
         :data="tasks" 
+        :row-key="row => row.task_id"
+        :row-class-name="getTaskRowClassName"
         stripe
       >
         <el-table-column label="任务ID" width="120">
@@ -277,7 +309,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CaretRight, Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
@@ -288,6 +320,7 @@ const loading = ref(false)
 const accountsLoading = ref(false)
 const creating = ref(false)
 const tasks = ref([])
+const verificationItems = ref([])
 const accounts = ref([])
 const taskLogs = ref([])
 const statusFilter = ref('')
@@ -296,6 +329,8 @@ const currentTask = ref(null)
 const currentVerificationItem = ref(null)
 const verificationSubmitting = ref(false)
 const verificationErrorMessage = ref('')
+const taskTableRef = ref(null)
+const highlightedTaskId = ref('')
 
 // v4.7.4: HTTP 轮询（替代 WebSocket）
 const pollingIntervals = ref({})
@@ -327,10 +362,20 @@ const canCreateTask = computed(() => {
 })
 
 const pendingVerificationItems = computed(() => {
-  return tasks.value.filter(task => task.status === 'paused' && task.verification_type)
+  return verificationItems.value
 })
 
 const verificationDialogVisible = computed(() => Boolean(currentVerificationItem.value))
+
+const verificationSummary = computed(() => {
+  const items = verificationItems.value
+  return {
+    total: items.length,
+    graphical: items.filter(item => !['otp', 'sms', 'email_code'].includes(String(item.verification_type || '').toLowerCase())).length,
+    otp: items.filter(item => ['otp', 'sms', 'email_code'].includes(String(item.verification_type || '').toLowerCase())).length,
+    expired: items.filter(item => item.status === 'expired').length
+  }
+})
 
 // 方法
 const loadTasks = async () => {
@@ -340,6 +385,7 @@ const loadTasks = async () => {
     if (statusFilter.value) params.status = statusFilter.value
     
     tasks.value = await collectionApi.getTasks(params)
+    verificationItems.value = await collectionApi.getVerificationItems()
     
     // v4.7.4: 为运行中的任务启动 HTTP 轮询
     tasks.value
@@ -423,7 +469,7 @@ const retryTask = async (row) => {
 }
 
 const showResumeDialog = (row) => {
-  currentTask.value = row
+  currentTask.value = tasks.value.find(task => task.task_id === row.task_id) || row
   currentVerificationItem.value = {
     taskId: row.task_id,
     verificationType: row.verification_type || 'graphical_captcha',
@@ -432,6 +478,42 @@ const showResumeDialog = (row) => {
     expiresAt: row.verification_expires_at || ''
   }
   verificationErrorMessage.value = ''
+}
+
+const viewVerificationScreenshot = (item) => {
+  const url = collectionApi.getTaskScreenshotUrl(item.task_id)
+  window.open(url, '_blank', 'noopener')
+}
+
+const copyTaskId = async (taskId) => {
+  const value = String(taskId || '').trim()
+  if (!value) return
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value)
+    } else {
+      const input = document.createElement('textarea')
+      input.value = value
+      document.body.appendChild(input)
+      input.select()
+      document.execCommand('copy')
+      document.body.removeChild(input)
+    }
+    ElMessage.success('任务ID已复制')
+  } catch (error) {
+    ElMessage.error('复制失败: ' + (error.message || '未知错误'))
+  }
+}
+
+const getTaskRowClassName = ({ row }) => {
+  return row?.task_id && row.task_id === highlightedTaskId.value ? 'task-row-highlight' : ''
+}
+
+const focusTaskRow = async (taskId) => {
+  highlightedTaskId.value = taskId
+  await nextTick()
+  const row = document.querySelector('.task-row-highlight')
+  row?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
 }
 
 const submitVerification = async (submittedValue) => {
@@ -750,6 +832,33 @@ onMounted(() => {
   gap: 10px;
 }
 
+.verification-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.verification-summary-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #f2e3c2;
+}
+
+.summary-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #303133;
+  line-height: 1.2;
+}
+
+.summary-label {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+
 .pending-verification-item {
   display: flex;
   justify-content: space-between;
@@ -768,6 +877,17 @@ onMounted(() => {
   gap: 10px;
   color: #606266;
   font-size: 13px;
+}
+
+.pending-verification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+:deep(.task-row-highlight) {
+  --el-table-tr-bg-color: #fff7e6;
 }
 
 .task-id {

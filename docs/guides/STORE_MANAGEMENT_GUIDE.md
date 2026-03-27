@@ -154,10 +154,10 @@ streamlit run frontend_streamlit/store_management.py
 ### 目录结构
 
 ```
-temp/outputs/
+downloads/
 ├── shopee/
 │   ├── MyStore_SG/          # 店铺专属目录
-│   │   ├── downloads/       # 下载的数据文件（或直接落盘到 temp/outputs/shopee/.../products/<粒度>/）
+│   │   ├── downloads/       # 工作下载目录，正式文件后续提升到 data/raw/
 │   │   ├── collection_record_20250114_143022.json  # 采集记录
 │   │   └── ...
 │   └── MyStore_MY/          # 另一个店铺
@@ -210,8 +210,8 @@ temp/logs/
     "data_types": ["orders", "products", "analytics"]
   },
   "file_paths": {
-    "base_path": "temp/outputs/shopee/MyStore_SG",
-    "downloads_path": "temp/outputs/shopee/MyStore_SG/downloads",
+"base_path": "downloads/shopee/MyStore_SG",
+"downloads_path": "downloads/shopee/MyStore_SG/downloads",
     "screenshots_path": "temp/media/screenshots/shopee/MyStore_SG"
   }
 }

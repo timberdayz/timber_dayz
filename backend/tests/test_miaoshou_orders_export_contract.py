@@ -24,11 +24,11 @@ def test_miaoshou_orders_export_builds_orders_detail_url_by_subtype():
 def test_miaoshou_orders_export_returns_success_message_and_file_path():
     component = MiaoshouOrdersExport(_ctx())
 
-    result = type(component)._build_success_result("ok", "temp/outputs/miaoshou/orders.xlsx")
+    result = type(component)._build_success_result("ok", "data/raw/2026/miaoshou_orders_monthly_20260327_120000.xlsx")
 
     assert result.success is True
     assert result.message == "ok"
-    assert result.file_path == "temp/outputs/miaoshou/orders.xlsx"
+    assert result.file_path == "data/raw/2026/miaoshou_orders_monthly_20260327_120000.xlsx"
 
 
 def test_miaoshou_orders_export_returns_error_message_in_message_field():

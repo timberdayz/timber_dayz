@@ -53,6 +53,10 @@ async def test_batch_register_only_registers_canonical_components(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "backend.routers.component_versions.is_active_component_name",
+        lambda name: name in {"shopee/login", "shopee/products_export"},
+    )
     project_root = tmp_path
     fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
     fake_router_file.parent.mkdir(parents=True, exist_ok=True)
@@ -95,6 +99,10 @@ async def test_batch_register_uses_shop_switch_as_tiktok_canonical_entry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "backend.routers.component_versions.is_active_component_name",
+        lambda name: name in {"tiktok/login", "tiktok/shop_switch"},
+    )
     project_root = tmp_path
     fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
     fake_router_file.parent.mkdir(parents=True, exist_ok=True)
@@ -352,6 +360,10 @@ async def test_batch_register_includes_miaoshou_orders_export_when_present(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "backend.routers.component_versions.is_active_component_name",
+        lambda name: name in {"miaoshou/login", "miaoshou/orders_export"},
+    )
     project_root = tmp_path
     fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
     fake_router_file.parent.mkdir(parents=True, exist_ok=True)
@@ -386,6 +398,10 @@ async def test_batch_register_accepts_any_domain_export_filename_by_rule(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "backend.routers.component_versions.is_active_component_name",
+        lambda name: name == "shopee/services_agent_export",
+    )
     project_root = tmp_path
     fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
     fake_router_file.parent.mkdir(parents=True, exist_ok=True)
@@ -416,6 +432,10 @@ async def test_batch_register_skips_legacy_generic_export_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "backend.routers.component_versions.is_active_component_name",
+        lambda name: name == "tiktok/orders_export",
+    )
     project_root = tmp_path
     fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
     fake_router_file.parent.mkdir(parents=True, exist_ok=True)
@@ -438,3 +458,37 @@ async def test_batch_register_skips_legacy_generic_export_file(
 
     assert response.success is True
     assert names == ["tiktok/orders_export"]
+
+
+@pytest.mark.asyncio
+async def test_batch_register_skips_non_active_canonical_files_by_default(
+    component_version_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    project_root = tmp_path
+    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
+    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
+    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+    monkeypatch.setattr(
+        "backend.routers.component_versions.is_active_component_name",
+        lambda name: name == "miaoshou/login",
+    )
+
+    miaoshou_dir = project_root / "modules" / "platforms" / "miaoshou" / "components"
+    _write_component(miaoshou_dir / "login.py", "MiaoshouLogin", "login")
+    _write_component(miaoshou_dir / "orders_export.py", "MiaoshouOrdersExport", "export")
+
+    response = await batch_register_python_components(
+        request=BatchRegisterRequest(platform="miaoshou"),
+        db=component_version_session,
+        http_request=None,
+    )
+
+    result = await component_version_session.execute(select(ComponentVersion))
+    rows = result.scalars().all()
+    names = sorted(v.component_name for v in rows)
+
+    assert response.success is True
+    assert names == ["miaoshou/login"]

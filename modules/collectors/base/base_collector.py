@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 import json
 
+from modules.core.path_manager import get_downloads_dir
+
 
 class CollectionStatus(Enum):
     """采集状态"""
@@ -124,7 +126,7 @@ class BaseCollector(ABC):
         self.login_time = None
         
         # 文件管理
-        self.downloads_path = Path(f"temp/outputs/{platform}_{account_id}")
+        self.downloads_path = Path(get_downloads_dir()) / f"{platform}_{account_id}"
         self.screenshot_dir = Path(f"temp/media/screenshots/{platform}_{account_id}")
         self.session_dir = Path(f"temp/sessions/{platform}_{account_id}")
         
@@ -567,7 +569,7 @@ class BaseCollector(ABC):
         """导出采集报告"""
         if not output_path:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = f"temp/outputs/collection_report_{self.platform}_{self.account_id}_{timestamp}.json"
+            output_path = f"temp/reports/collection_report_{self.platform}_{self.account_id}_{timestamp}.json"
         
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)

@@ -193,7 +193,7 @@ data_collection:
 
 ### 1. 数据文件
 
-- **位置**: `temp/outputs/shopee_data/`
+- **工作下载位置**: `downloads/shopee_data/`
 - **格式**: Excel、CSV、JSON
 - **内容**: 运营数据、分析报告、用户画像
 

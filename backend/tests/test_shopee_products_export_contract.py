@@ -24,11 +24,11 @@ def test_shopee_products_export_returns_error_message_in_message_field():
 def test_shopee_products_export_returns_success_message_and_file_path():
     component = ShopeeProductsExport(_ctx())
 
-    result = type(component)._build_success_result("下载完成(UI)", "temp/outputs/file.xlsx")
+    result = type(component)._build_success_result("下载完成(UI)", "data/raw/2026/shopee_products_monthly_20260327_120000.xlsx")
 
     assert result.success is True
     assert result.message == "下载完成(UI)"
-    assert result.file_path == "temp/outputs/file.xlsx"
+    assert result.file_path == "data/raw/2026/shopee_products_monthly_20260327_120000.xlsx"
 
 
 def test_shopee_products_export_processing_status_detection_covers_task_states():

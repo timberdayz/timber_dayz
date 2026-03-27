@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import logging
 from playwright.sync_api import sync_playwright, Browser, Page, BrowserContext
+from modules.core.path_manager import get_downloads_dir
 
 # 导入智能代理管理器
 try:
@@ -58,7 +59,7 @@ class ShopeeCollector:
             self.proxy_manager = None
         
         # 账号专属目录结构 - 按店铺隔离数据
-        self.base_path = Path("temp/outputs/shopee_data") / self.store_name
+        self.base_path = Path(get_downloads_dir()) / "shopee_data" / self.store_name
         self.downloads_path = self.base_path / "downloads"
         self.screenshot_dir = Path("temp/media/screenshots/shopee") / self.store_name
         self.session_dir = Path("temp/sessions/shopee") / self.store_name

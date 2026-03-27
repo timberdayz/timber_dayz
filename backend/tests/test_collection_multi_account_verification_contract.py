@@ -3,9 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from backend.routers.collection_tasks import (
     _build_task_response_payload,
     _build_task_verification_item,
+    list_verification_items,
 )
 
 
@@ -62,3 +65,39 @@ def test_build_task_verification_item_is_scoped_per_account():
     assert first["account_id"] == "acc-1"
     assert second["account_id"] == "acc-2"
     assert first != second
+
+
+@pytest.mark.asyncio
+async def test_list_verification_items_filters_paused_verification_tasks():
+    paused = _make_task(task_id="task-1", account="acc-1", status="paused")
+    running = _make_task(task_id="task-2", account="acc-2", status="running")
+    no_verification = _make_task(
+        task_id="task-3",
+        account="acc-3",
+        status="paused",
+        verification_type=None,
+    )
+
+    class _Result:
+        def scalars(self):
+            class _Scalars:
+                def all(self_inner):
+                    return [paused, running, no_verification]
+
+            return _Scalars()
+
+    class _FakeDb:
+        async def execute(self, stmt):
+            return _Result()
+
+    items = await list_verification_items(
+        platform=None,
+        verification_type=None,
+        account_id=None,
+        status="paused",
+        db=_FakeDb(),
+    )
+
+    assert len(items) == 1
+    assert items[0]["task_id"] == "task-1"
+    assert items[0]["account_id"] == "acc-1"

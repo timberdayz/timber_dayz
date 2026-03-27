@@ -82,7 +82,7 @@ streamlit run frontend_streamlit/main.py
 
 1. 文件是否在正确目录：
    ```bash
-   ls temp/outputs/**/*.xlsx
+ls data/raw/**/*.xlsx
    ```
 
 2. 文件格式是否支持：
@@ -96,7 +96,7 @@ streamlit run frontend_streamlit/main.py
 
 ```bash
 # 检查扫描结果
-python scripts/etl_cli.py scan temp/outputs
+python scripts/etl_cli.py scan data/raw
 
 # 查看详细状态
 python scripts/etl_cli.py status --detail
@@ -182,7 +182,7 @@ python -c "import pandas as pd; df = pd.read_excel('your_file.xlsx'); print(df.s
 
 ```bash
 # 检查文件数量
-ls temp/outputs/**/*.xlsx | wc -l
+ls data/raw/**/*.xlsx | wc -l
 
 # 检查缓存
 python -c "from modules.services.cache_service import get_cache_stats; print(get_cache_stats())"
@@ -194,7 +194,7 @@ python -c "from modules.services.cache_service import get_cache_stats; print(get
 2. 减少扫描目录：
    ```bash
    # 只扫描特定平台
-   python scripts/etl_cli.py scan temp/outputs/shopee
+python scripts/etl_cli.py scan data/raw
    ```
 
 ---
@@ -212,7 +212,7 @@ python -c "from modules.services.cache_service import get_cache_stats; print(get
 
 2. 文件是否很大：
    ```bash
-   ls -lh temp/outputs/**/*.xlsx | sort -k5 -hr | head
+ls -lh data/raw/**/*.xlsx | sort -k5 -hr | head
    ```
 
 **优化**:
@@ -451,7 +451,7 @@ rm data/unified_erp_system.db
 python -m alembic upgrade head
 
 # 4. 重新入库数据
-python scripts/etl_cli.py run temp/outputs
+python scripts/etl_cli.py run data/raw
 ```
 
 ---

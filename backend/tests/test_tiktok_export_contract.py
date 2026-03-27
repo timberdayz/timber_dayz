@@ -41,11 +41,11 @@ def test_tiktok_export_infers_analytics_domain_not_traffic():
 def test_tiktok_export_returns_success_message_and_file_path():
     component = TiktokExporterComponent(_ctx())
 
-    result = type(component)._build_success_result("ok", "temp/outputs/tiktok.xlsx")
+    result = type(component)._build_success_result("ok", "data/raw/2026/tiktok_products_monthly_20260327_120000.xlsx")
 
     assert result.success is True
     assert result.message == "ok"
-    assert result.file_path == "temp/outputs/tiktok.xlsx"
+    assert result.file_path == "data/raw/2026/tiktok_products_monthly_20260327_120000.xlsx"
 
 
 def test_tiktok_export_returns_error_message_in_message_field():

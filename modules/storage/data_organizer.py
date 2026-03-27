@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 import shutil
+from modules.core.path_manager import get_downloads_dir
 
 # 导入本地账号配置
 try:
@@ -38,8 +39,8 @@ class AccountStorageInfo:
 class DataOrganizer:
     """数据存储组织器"""
     
-    def __init__(self, base_output_dir: str = "temp/outputs"):
-        self.base_output_dir = Path(base_output_dir)
+    def __init__(self, base_output_dir: str | None = None):
+        self.base_output_dir = Path(base_output_dir) if base_output_dir else Path(get_downloads_dir())
         self.account_storage_map = {}
         self._initialize_storage_structure()
     

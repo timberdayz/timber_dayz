@@ -7,7 +7,8 @@ Shopee Playwright 安全导出器
 - 在浏览器上下文内发起请求与下载,规避裸 requests 风险
 - 支持列出账号下所有店铺(实时拉取)
 - 支持“商品表现-按周”导出:export -> report_id -> download_link -> 等待下载
-- 统一分类输出路径:temp/outputs/<platform>/<account>/<shop_name>/<data_type>/<granularity>/
+- 统一写入工作下载目录:downloads/<platform>/<account>/<shop_name>/<data_type>/<granularity>/
+  正式文件后续由执行器/注册链路提升到 data/raw/
   文件命名:YYYYMMDD_HHMMSS__<account>__<shop>__<data_type>__<granularity>__<start>_<end>.xlsx
 - 日期控件探测与分析
 """
@@ -4107,4 +4108,3 @@ def _safe_slug(s: str) -> str:
         return _ss(s)
     except Exception:
         return "".join(c if (c.isalnum() or c in "-_.") else "_" for c in (s or "")).strip("._") or "unknown"
-

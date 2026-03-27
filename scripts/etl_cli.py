@@ -375,8 +375,8 @@ def run(source_dir, limit, domain, verbose):
     这是一个便捷命令，等同于先运行scan再运行ingest。
     
     示例:
-        python scripts/etl_cli.py run temp/outputs
-        python scripts/etl_cli.py run temp/outputs --limit 50 -v
+        python scripts/etl_cli.py run data/raw
+        python scripts/etl_cli.py run data/raw --limit 50 -v
     """
     from modules.services.catalog_scanner import scan_and_register
     from modules.services.ingestion_worker import run_once

@@ -21,6 +21,7 @@ from typing import Dict, Any, Optional
 
 from modules.core.base_app import BaseApplication
 from modules.core.logger import get_logger
+from modules.core.path_manager import get_downloads_dir
 
 logger = get_logger(__name__)
 
@@ -2638,8 +2639,9 @@ class CollectionCenterApp(BaseApplication):
                                 try:
                                     include_shop_id = _get('data_collection', 'path_options.include_shop_id', True)
                                     gran = granularity if granularity else 'manual'
+                                    from modules.core.path_manager import get_downloads_dir
                                     out_root = build_output_path(
-                                        root='temp/outputs', platform=pf, account_label=account_label,
+                                        root=get_downloads_dir(), platform=pf, account_label=account_label,
                                         shop_name=shop_name, data_type=d, granularity=gran, shop_id=shop_id,
                                         include_shop_id=include_shop_id,
                                     )
@@ -3802,7 +3804,7 @@ class CollectionCenterApp(BaseApplication):
                             start_date,
                             end_date,
                             account_label=account_label,
-                            output_root=Path('temp/outputs'),
+                            output_root=Path(get_downloads_dir()),
                             enable_diagnostics=False,
                             enable_compare_diagnostics=enable_compare,
                             enable_recording_mode=enable_recording,
@@ -3830,7 +3832,7 @@ class CollectionCenterApp(BaseApplication):
                         start_date=start_date,
                         end_date=end_date,
                         account_label=account_label,
-                        output_root=Path('temp/outputs'),
+                        output_root=Path(get_downloads_dir()),
                         enable_diagnostics=False,  # 旧诊断模式已被录制模式替代
                         enable_compare_diagnostics=enable_compare,
                         enable_recording_mode=enable_recording,
@@ -3961,7 +3963,8 @@ class CollectionCenterApp(BaseApplication):
             # 计划落盘路径(与 Shopee 规格一致)
             from pathlib import Path
             safe_shop = f"{shop_name}__{shop_id}"
-            base_dir = Path("temp/outputs") / "tiktok" / account_label / safe_shop / data_type / granularity
+            from modules.core.path_manager import get_downloads_dir
+            base_dir = Path(get_downloads_dir()) / "tiktok" / account_label / safe_shop / data_type / granularity
             filename = f"{data_type}_{granularity}_{start_date}_{end_date}.xlsx"
             target = base_dir / filename
             manifest = Path(str(target) + ".json")
@@ -4268,7 +4271,7 @@ class CollectionCenterApp(BaseApplication):
                     start_date=start_date,
                     end_date=end_date,
                     account_label=account_label,
-                    output_root=Path('temp/outputs'),
+                    output_root=Path(get_downloads_dir()),
                     enable_diagnostics=False,
                     enable_compare_diagnostics=False,
                     enable_recording_mode=False,
@@ -4435,7 +4438,7 @@ class CollectionCenterApp(BaseApplication):
                         start_date=start_date,
                         end_date=end_date,
                         account_label=account_label,
-                        output_root=Path('temp/outputs')
+                        output_root=Path(get_downloads_dir())
                     )
                     if ok:
                         print(f"\n[OK] 服务层导出成功: {path}")
@@ -4491,7 +4494,8 @@ class CollectionCenterApp(BaseApplication):
             from modules.utils.logger import logger
             def _safe(s: str) -> str:
                 return "".join(c if c.isalnum() or c in "._-" else "_" for c in str(s))
-            downloads_dir = Path("temp/outputs") / "shopee" / _safe(account_label) / _safe(shop.name) / ".downloads"
+            from modules.core.path_manager import get_downloads_dir
+            downloads_dir = Path(get_downloads_dir()) / "shopee" / _safe(account_label) / _safe(shop.name) / ".downloads"
             downloads_dir.mkdir(parents=True, exist_ok=True)
             cfg = {"downloads_path": str(downloads_dir), "granularity": granularity, "start_date": str(start_date), "end_date": str(end_date), "shop_name": getattr(shop, 'name', None), "one_click": bool(getattr(self, "_one_click_mode", False))}
             if date_preset:

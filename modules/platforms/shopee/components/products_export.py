@@ -15,7 +15,7 @@ class ShopeeProductsExport(ExportComponent):
     """Shopee 商品表现(Products)导出组件
 
     - 只依赖 products_config 中的 URL/选择器
-    - 统一落盘到 temp/outputs/shopee/<账号>/<店铺>/products/<粒度>/
+    - 统一写入工作下载目录，正式文件后续由执行器提升到 data/raw
     - 优先 UI 导出(点击->等待->下载),后续可扩展 API 备选
     """
 

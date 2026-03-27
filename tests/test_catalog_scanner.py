@@ -74,25 +74,25 @@ class TestPlatformInference:
     
     def test_shopee_platform(self):
         """测试Shopee平台识别"""
-        path = Path("temp/outputs/shopee/account1/file.xlsx")
+        path = Path("downloads/shopee/account1/file.xlsx")
         platform = _infer_platform_from_path(path)
         assert platform == "shopee"
     
     def test_tiktok_platform(self):
         """测试TikTok平台识别"""
-        path = Path("temp/outputs/tiktok/shop123/data.xlsx")
+        path = Path("downloads/tiktok/shop123/data.xlsx")
         platform = _infer_platform_from_path(path)
         assert platform == "tiktok"
     
     def test_miaoshou_platform(self):
         """测试妙手平台识别"""
-        path = Path("temp/outputs/miaoshou/data/report.xlsx")
+        path = Path("downloads/miaoshou/data/report.xlsx")
         platform = _infer_platform_from_path(path)
         assert platform == "miaoshou"
     
     def test_unknown_platform(self):
         """测试未知平台"""
-        path = Path("temp/outputs/unknown/file.xlsx")
+        path = Path("downloads/unknown/file.xlsx")
         platform = _infer_platform_from_path(path)
         # 应该返回None或generic
         assert platform is None or platform == "generic"
@@ -103,25 +103,25 @@ class TestDomainInference:
     
     def test_orders_domain(self):
         """测试订单域识别"""
-        path = Path("temp/outputs/shopee/orders/report.xlsx")
+        path = Path("downloads/shopee/orders/report.xlsx")
         domain = _infer_domain_from_path(path)
         assert domain == "orders"
     
     def test_products_domain(self):
         """测试产品域识别"""
-        path = Path("temp/outputs/shopee/products/data.xlsx")
+        path = Path("downloads/shopee/products/data.xlsx")
         domain = _infer_domain_from_path(path)
         assert domain == "products"
     
     def test_metrics_domain(self):
         """测试指标域识别"""
-        path = Path("temp/outputs/shopee/metrics/stats.xlsx")
+        path = Path("downloads/shopee/metrics/stats.xlsx")
         domain = _infer_domain_from_path(path)
         assert domain == "metrics"
     
     def test_unknown_domain(self):
         """测试未知域"""
-        path = Path("temp/outputs/shopee/unknown/file.xlsx")
+        path = Path("downloads/shopee/unknown/file.xlsx")
         domain = _infer_domain_from_path(path)
         assert domain is None
 

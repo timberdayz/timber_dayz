@@ -134,6 +134,16 @@ export const getTasks = async (params = {}) => {
 }
 
 /**
+ * 获取待回填验证码项
+ * @param {Object} params - 查询参数
+ * @returns {Promise<Array>}
+ */
+export const getVerificationItems = async (params = {}) => {
+  const response = await api.get('/collection/tasks/verification-items', { params })
+  return response || []
+}
+
+/**
  * 获取任务详情
  * @param {string} taskId - 任务UUID
  * @returns {Promise<Object>} 任务详情

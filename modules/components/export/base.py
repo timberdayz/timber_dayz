@@ -6,6 +6,7 @@ from typing import Any, Optional
 from pathlib import Path
 
 from modules.components.base import ComponentBase, ResultBase
+from modules.core.path_manager import get_downloads_dir
 
 
 class ExportMode(str, Enum):
@@ -22,12 +23,14 @@ class ExportResult(ResultBase):
 def build_standard_output_root(
     ctx, data_type: str, granularity: str, *, subtype: str | None = None
 ) -> Path:
-    """Compute the unified output directory for any exporter.
+    """Compute the unified working directory for any exporter.
 
     Path shape:
-      temp/outputs/<platform>/<account>/<shop>[__shop_id]/<data_type>/<subtype?>/<granularity>
+      <downloads_root>/<platform>/<account>/<shop>[__shop_id]/<data_type>/<subtype?>/<granularity>
 
     Notes:
+    - Exporters should write into a working/download directory first
+    - Formal raw-data promotion is handled later by the executor/catalog pipeline
     - include_shop_id is read from config and defaults to True in new architecture
     - Resolves account_label/shop_name/shop_id using robust fallbacks
     """
@@ -67,9 +70,14 @@ def build_standard_output_root(
     include_shop_id = get_config_value(
         "data_collection", "path_options.include_shop_id", True
     )
+    work_root = (
+        cfg.get("download_dir")
+        or cfg.get("downloads_path")
+        or get_downloads_dir()
+    )
 
     return build_output_path(
-        root=Path("temp/outputs"),
+        root=Path(work_root),
         platform=getattr(ctx, "platform", "unknown"),
         account_label=account_label,
         shop_name=shop_name,
@@ -86,4 +94,3 @@ class ExportComponent(ComponentBase):
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         raise NotImplementedError("Implementations must be async: async def run(self, page, mode=...) -> ExportResult")
-

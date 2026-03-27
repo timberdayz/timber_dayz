@@ -23,7 +23,7 @@
 **操作**: 点击页面顶部的 `🔍 扫描采集文件` 按钮
 
 **系统执行**:
-- 扫描 `temp/outputs/` 目录
+- 扫描 `data/raw/` 目录（正式采集原始数据目录）
 - 自动识别平台（支持中文识别：虾皮→shopee, 妙手→miaoshou）
 - 解析文件元数据（账号、店铺、数据域、粒度）
 - 写入catalog_files数据库表
@@ -88,7 +88,7 @@
 平台:   shopee ✅        数据域: products
 账号:   虾皮巴西_东朗照明主体    店铺: the_king_s_lucky_shop
 粒度:   daily            日期范围: 2025-09-23 到 2025-09-23
-文件路径: ✅ temp/outputs/shopee/.../20250924_185940__虾皮巴西_东朗照明主体__the_king_s_lucky_shop__products__daily__2025-09-23_2025-09-23.xlsx
+文件路径: ✅ data/raw/2025/shopee_products_daily_20250924_185940.xlsx
 ```
 
 **重要提示**:
@@ -294,7 +294,7 @@ status           - 状态
 
 **解决方法**:
 1. 点击 `🔍 扫描采集文件` 重新扫描
-2. 检查文件是否在 `temp/outputs/` 目录
+2. 检查文件是否在 `data/raw/` 目录
 3. 如果文件在其他位置，移动到标准目录
 
 ### 问题3: 数据预览不显示
@@ -406,7 +406,7 @@ status           - 状态
 ## 📊 数据流向
 
 ```
-Excel文件 (temp/outputs/)
+Excel文件 (data/raw/)
     ↓
 字段映射系统（Vue.js前端）
     ↓

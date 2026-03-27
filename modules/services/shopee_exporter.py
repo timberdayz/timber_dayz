@@ -18,6 +18,7 @@ from typing import Dict, Optional, Tuple
 
 import requests
 from modules.utils.logger import logger
+from modules.core.path_manager import get_downloads_dir
 
 
 class ShopeeExporter:
@@ -58,13 +59,13 @@ class ShopeeExporter:
             shop_id: 店铺ID (cnsc_shop_id)
             start_date: 开始日期 YYYY-MM-DD
             end_date: 结束日期 YYYY-MM-DD  
-            output_dir: 输出目录,默认 temp/outputs
+            output_dir: 输出目录,默认 downloads
             
         Returns:
             (成功标志, 消息, 文件路径)
         """
         if not output_dir:
-            output_dir = Path("temp/outputs")
+            output_dir = Path(get_downloads_dir())
             output_dir.mkdir(parents=True, exist_ok=True)
             
         try:

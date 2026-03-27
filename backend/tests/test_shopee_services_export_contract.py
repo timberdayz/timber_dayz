@@ -16,11 +16,11 @@ def _ctx():
 def test_shopee_services_export_returns_success_message_and_file_path():
     component = ShopeeServicesExport(_ctx())
 
-    result = type(component)._build_success_result("全部成功(UI)", "temp/outputs/services.xlsx")
+    result = type(component)._build_success_result("全部成功(UI)", "data/raw/2026/shopee_services_agent_daily_20260327_120000.xlsx")
 
     assert result.success is True
     assert result.message == "全部成功(UI)"
-    assert result.file_path == "temp/outputs/services.xlsx"
+    assert result.file_path == "data/raw/2026/shopee_services_agent_daily_20260327_120000.xlsx"
 
 
 def test_shopee_services_export_returns_error_message_in_message_field():

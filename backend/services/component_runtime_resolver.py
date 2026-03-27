@@ -7,6 +7,10 @@ from typing import Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.collection_contracts import iter_domain_targets, normalize_domain_subtypes
+from backend.services.active_collection_components import (
+    is_active_component_name,
+    is_archive_only_file,
+)
 from backend.services.component_name_utils import build_component_name
 from backend.services.component_version_service import ComponentVersionService
 
@@ -147,6 +151,9 @@ class ComponentRuntimeResolver:
         data_domain: Optional[str] = None,
         sub_domain: Optional[str] = None,
     ) -> RuntimeComponentManifest:
+        if not is_active_component_name(component_name):
+            raise NoStableComponentVersionError(component_name)
+
         stable_versions = await self._load_stable_versions(component_name)
 
         if not stable_versions:
@@ -157,6 +164,8 @@ class ComponentRuntimeResolver:
 
         stable_version = stable_versions[0]
         file_path = str(stable_version["file_path"])
+        if is_archive_only_file(file_path):
+            raise MissingStableComponentFileError(component_name, file_path)
         absolute_path = self.project_root / file_path
         if not absolute_path.exists():
             raise MissingStableComponentFileError(component_name, file_path)

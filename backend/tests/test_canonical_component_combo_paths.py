@@ -14,7 +14,7 @@ class _FakeExportResult:
     def __init__(self):
         self.success = True
         self.message = "exported"
-        self.file_path = "temp/outputs/shopee/products.xlsx"
+        self.file_path = "data/raw/2026/shopee_products_monthly_20260327_120000.xlsx"
 
 
 class _FakeLoginComponent:
@@ -52,4 +52,4 @@ async def test_shopee_login_plus_products_export_combo_uses_shared_context():
     assert login_result.success is True
     assert login_result.message == "logged-in"
     assert export_result.success is True
-    assert export_result.file_path == "temp/outputs/shopee/products.xlsx"
+    assert export_result.file_path == "data/raw/2026/shopee_products_monthly_20260327_120000.xlsx"

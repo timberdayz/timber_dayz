@@ -41,12 +41,16 @@ def collection_app():
 
 
 @pytest.mark.asyncio
-async def test_resolve_runtime_component_requires_stable_version(component_version_session, tmp_path: Path):
+async def test_resolve_runtime_component_requires_stable_version(component_version_session, tmp_path: Path, monkeypatch):
     from backend.services.component_runtime_resolver import (
         ComponentRuntimeResolver,
         NoStableComponentVersionError,
     )
 
+    monkeypatch.setattr(
+        "backend.services.component_runtime_resolver.is_active_component_name",
+        lambda name: True,
+    )
     resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
 
     with pytest.raises(NoStableComponentVersionError):
@@ -58,12 +62,16 @@ async def test_resolve_runtime_component_requires_stable_version(component_versi
 
 
 @pytest.mark.asyncio
-async def test_resolve_runtime_component_rejects_multiple_stable_versions(component_version_session, tmp_path: Path):
+async def test_resolve_runtime_component_rejects_multiple_stable_versions(component_version_session, tmp_path: Path, monkeypatch):
     from backend.services.component_runtime_resolver import (
         ComponentRuntimeResolver,
         MultipleStableComponentVersionsError,
     )
 
+    monkeypatch.setattr(
+        "backend.services.component_runtime_resolver.is_active_component_name",
+        lambda name: True,
+    )
     component_version_session.add_all(
         [
             ComponentVersion(
@@ -95,12 +103,16 @@ async def test_resolve_runtime_component_rejects_multiple_stable_versions(compon
 
 
 @pytest.mark.asyncio
-async def test_resolve_runtime_component_rejects_missing_file_path(component_version_session, tmp_path: Path):
+async def test_resolve_runtime_component_rejects_missing_file_path(component_version_session, tmp_path: Path, monkeypatch):
     from backend.services.component_runtime_resolver import (
         ComponentRuntimeResolver,
         MissingStableComponentFileError,
     )
 
+    monkeypatch.setattr(
+        "backend.services.component_runtime_resolver.is_active_component_name",
+        lambda name: True,
+    )
     component_version_session.add(
         ComponentVersion(
             component_name="shopee/orders_export",
@@ -123,9 +135,13 @@ async def test_resolve_runtime_component_rejects_missing_file_path(component_ver
 
 
 @pytest.mark.asyncio
-async def test_resolve_runtime_component_returns_manifest_for_single_stable(component_version_session, tmp_path: Path):
+async def test_resolve_runtime_component_returns_manifest_for_single_stable(component_version_session, tmp_path: Path, monkeypatch):
     from backend.services.component_runtime_resolver import ComponentRuntimeResolver
 
+    monkeypatch.setattr(
+        "backend.services.component_runtime_resolver.is_active_component_name",
+        lambda name: True,
+    )
     relative_path = "modules/platforms/shopee/components/orders_export_v1_2_0.py"
     target_file = tmp_path / relative_path
     target_file.parent.mkdir(parents=True, exist_ok=True)
@@ -250,6 +266,10 @@ async def test_resolve_task_manifests_supports_domain_scoped_subtypes(component_
     from backend.services.component_runtime_resolver import ComponentRuntimeResolver
 
     monkeypatch.setattr(
+        "backend.services.component_runtime_resolver.is_active_component_name",
+        lambda name: True,
+    )
+    monkeypatch.setattr(
         "backend.services.component_name_utils.DATA_DOMAIN_SUB_TYPES",
         {
             "services": ["agent", "ai_assistant"],
@@ -298,3 +318,69 @@ async def test_resolve_task_manifests_supports_domain_scoped_subtypes(component_
         "products:basic",
         "services:agent",
     ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_resolver_rejects_non_active_component_name(component_version_session, tmp_path: Path):
+    from backend.services.component_runtime_resolver import (
+        ComponentRuntimeResolver,
+        NoStableComponentVersionError,
+    )
+
+    relative_path = "modules/platforms/shopee/components/orders_export_v1_0_0.py"
+    target_file = tmp_path / relative_path
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_text("class Dummy:\n    pass\n", encoding="utf-8")
+
+    component_version_session.add(
+        ComponentVersion(
+            component_name="shopee/orders_export",
+            version="1.0.0",
+            file_path=relative_path,
+            is_stable=True,
+            is_active=True,
+        )
+    )
+    await component_version_session.commit()
+
+    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+
+    with pytest.raises(NoStableComponentVersionError):
+        await resolver.resolve_export_component(
+            platform="shopee",
+            data_domain="orders",
+            sub_domain=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_runtime_resolver_rejects_archive_only_stable_file(component_version_session, tmp_path: Path):
+    from backend.services.component_runtime_resolver import (
+        ComponentRuntimeResolver,
+        MissingStableComponentFileError,
+    )
+
+    relative_path = "modules/platforms/miaoshou/archive/orders_export_v1_0_0.py"
+    target_file = tmp_path / relative_path
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_text("class Dummy:\n    pass\n", encoding="utf-8")
+
+    component_version_session.add(
+        ComponentVersion(
+            component_name="miaoshou/orders_export",
+            version="1.0.0",
+            file_path=relative_path,
+            is_stable=True,
+            is_active=True,
+        )
+    )
+    await component_version_session.commit()
+
+    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+
+    with pytest.raises(MissingStableComponentFileError):
+        await resolver.resolve_export_component(
+            platform="miaoshou",
+            data_domain="orders",
+            sub_domain=None,
+        )

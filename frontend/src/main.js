@@ -37,8 +37,10 @@ authStore.initAuth()
 
 // 初始化用户信息（用于权限检查）
 const userStore = useUserStore()
-userStore.hydrateFromStorage()
-userStore.initUserInfo()
+if (authStore.isLoggedIn) {
+  userStore.hydrateFromStorage()
+  userStore.initUserInfo()
+}
 
 // 使用插件
 app.use(router)

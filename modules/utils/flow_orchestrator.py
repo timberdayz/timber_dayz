@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from modules.utils.logger import get_logger
+from modules.core.path_manager import get_downloads_dir
 from modules.utils.recording_registry import (
     RecordingType,
     ensure_index,
@@ -221,7 +222,7 @@ class FlowOrchestrator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{timestamp}_{data_type.value}_{shop_id}.{file_extension}"
 
-        output_dir = Path("temp/outputs") / self.platform / shop_id / data_type.value
+        output_dir = Path(get_downloads_dir()) / self.platform / shop_id / data_type.value
         return output_dir / filename
 
     def _run_script(self, script_path: str, page, account: Dict):
@@ -246,4 +247,3 @@ class FlowOrchestrator:
 
 
 __all__ = ["FlowOrchestrator", "RecordingType"]
-

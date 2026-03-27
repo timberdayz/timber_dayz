@@ -66,6 +66,10 @@ function stopFallbackPolling() {
 }
 
 async function fallbackFetchUnreadCountOnce() {
+  if (!getWebSocketUrl()) {
+    unreadCount.value = 0
+    return
+  }
   try {
     const response = await notificationsApi.getUnreadCount()
     if (response && typeof response.unread_count === 'number') {
