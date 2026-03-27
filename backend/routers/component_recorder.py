@@ -347,6 +347,13 @@ def _build_verification_payload_from_runtime_status(
     }
 
 
+def _get_recorder_verification_store_path() -> Optional[Path]:
+    base_path = recorder_session.status_file or recorder_session.response_file
+    if not base_path:
+        return None
+    return Path(base_path).parent / "verification_state.json"
+
+
 def _normalize_login_steps_and_suggestions(
     steps: List[Dict[str, Any]],
     component_type: str,
@@ -1454,7 +1461,9 @@ async def resume_recorder_verification(body: RecorderResumeRequest):
     verification_id = str((runtime_status or {}).get("verification_id") or "").strip()
     if verification_id:
         try:
-            store = VerificationStateStore()
+            store = VerificationStateStore(
+                storage_path=_get_recorder_verification_store_path()
+            )
             existing_payload = _build_verification_payload_from_runtime_status(runtime_status or {})
             if existing_payload:
                 store.save(existing_payload)

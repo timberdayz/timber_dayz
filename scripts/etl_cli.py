@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
+from modules.core.path_manager import get_data_raw_dir
+
 
 @click.group()
 def cli():
@@ -24,18 +26,18 @@ def cli():
 
 @cli.command()
 @click.argument('directories', nargs=-1, type=click.Path(exists=True))
-@click.option('--source', default='temp/outputs', help='来源标识')
+@click.option('--source', default='data/raw', help='来源标识')
 def scan(directories, source):
     """
     📂 扫描目录并注册文件到catalog
     
     示例:
-        python scripts/etl_cli.py scan temp/outputs
-        python scripts/etl_cli.py scan temp/outputs data/input/manual_uploads
+        python scripts/etl_cli.py scan data/raw
+        python scripts/etl_cli.py scan data/raw data/input/manual_uploads
     """
     from modules.services.catalog_scanner import scan_and_register
     
-    paths = [Path(d) for d in directories] if directories else [Path('temp/outputs')]
+    paths = [Path(d) for d in directories] if directories else [Path(get_data_raw_dir())]
     
     click.echo("=" * 70)
     click.echo("📂 文件扫描与注册")

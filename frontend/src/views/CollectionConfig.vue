@@ -173,11 +173,14 @@
         </el-form-item>
 
         <el-form-item label="数据粒度">
-          <el-radio-group v-model="form.granularity">
+          <el-radio-group v-model="form.granularity" :disabled="form.date_range_type !== 'custom'">
             <el-radio label="daily">日报</el-radio>
             <el-radio label="weekly">周报</el-radio>
             <el-radio label="monthly">月报</el-radio>
           </el-radio-group>
+          <span v-if="form.date_range_type !== 'custom'" style="margin-left: 12px; color: #909399; font-size: 12px;">
+            快捷时间将自动映射粒度
+          </span>
         </el-form-item>
 
         <el-form-item label="日期范围">
@@ -232,7 +235,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
@@ -270,6 +273,12 @@ const form = reactive({
 })
 
 const customDateRange = ref([])
+const PRESET_GRANULARITY_MAP = {
+  today: 'daily',
+  yesterday: 'daily',
+  last_7_days: 'weekly',
+  last_30_days: 'monthly'
+}
 
 // 表单验证规则
 const formRules = {
@@ -286,6 +295,16 @@ const filteredAccounts = computed(() => {
     acc.platform?.toLowerCase() === form.platform.toLowerCase()
   )
 })
+
+watch(
+  () => form.date_range_type,
+  (nextType) => {
+    if (nextType && nextType !== 'custom') {
+      form.granularity = PRESET_GRANULARITY_MAP[nextType] || 'daily'
+    }
+  },
+  { immediate: true }
+)
 
 // 方法
 const loadConfigs = async () => {

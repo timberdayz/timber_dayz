@@ -109,6 +109,9 @@ async def test_resume_recorder_verification_uses_shared_verification_request(tmp
             return {"state": "verification_submitted"}
 
     class _FakeVerificationStore:
+        def __init__(self, storage_path=None):
+            captured["storage_path"] = storage_path
+
         def save(self, payload):
             captured["saved_payload"] = payload
             return payload
@@ -140,6 +143,7 @@ async def test_resume_recorder_verification_uses_shared_verification_request(tmp
 
     assert body["success"] is True
     assert captured["verification_id"] == "verify-1"
+    assert str(captured["storage_path"]).endswith("verification_state.json")
 
 
 @pytest.mark.asyncio

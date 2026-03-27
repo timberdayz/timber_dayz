@@ -19,6 +19,13 @@ import unicodedata
 from dataclasses import dataclass
 
 from modules.core.logger import get_logger
+from modules.core.file_naming import StandardFileName
+from modules.core.path_manager import (
+    get_data_input_dir,
+    get_data_raw_dir,
+    get_downloads_dir,
+    get_output_dir,
+)
 
 logger = get_logger(__name__)
 
@@ -41,8 +48,8 @@ class FilePathResolver:
     基于文件名反向推导完整文件路径
     """
     
-    # 标准路径模板
-    PATH_TEMPLATE = "temp/outputs/{platform}/{account}/{shop}/{data_type}/{granularity}/{filename}"
+    # Legacy 路径模板，仅用于兼容历史 temp/outputs 目录。
+    LEGACY_PATH_TEMPLATE = "temp/outputs/{platform}/{account}/{shop}/{data_type}/{granularity}/{filename}"
     
     # 平台关键词映射(支持中文)
     PLATFORM_KEYWORDS = {
@@ -62,17 +69,46 @@ class FilePathResolver:
         'services': ['service', 'services', '服务', 'customer'],
     }
     
-    # 搜索基础目录
-    SEARCH_BASE_DIRS = [
-        Path('temp/outputs'),
-        Path('downloads'),
-        Path('data/input'),
-        Path('profiles'),  # 浏览器下载目录
-    ]
-    
     def __init__(self):
         """初始化文件路径解析器"""
         pass
+
+    @staticmethod
+    def _get_search_base_dirs() -> List[Path]:
+        """
+        获取文件搜索目录，正式链路优先 data/raw。
+
+        顺序体现路径语义：
+        1. data/raw       正式采集数据真源
+        2. downloads      临时下载目录（尚未提升为正式文件）
+        3. data/input     手工输入数据
+        4. temp/outputs   历史兼容目录，不再是正式主链路
+        """
+        return [
+            Path(get_data_raw_dir()),
+            Path(get_downloads_dir()),
+            Path(get_data_input_dir()),
+            Path(get_output_dir()),
+        ]
+
+    @staticmethod
+    def _rebuild_standard_file_path(filename: str) -> Optional[str]:
+        """
+        从标准文件名重建 canonical data/raw 路径。
+
+        标准命名格式由 StandardFileName 定义，正式采集文件统一落到 data/raw/YYYY/。
+        """
+        try:
+            parsed = StandardFileName.parse(filename)
+        except ValueError:
+            return None
+
+        timestamp = parsed.get("timestamp", "")
+        year = timestamp[:4]
+        if len(year) != 4 or not year.isdigit():
+            return None
+
+        return str((Path(get_data_raw_dir()) / year / filename).as_posix())
     
     def parse_filename(self, filename: str) -> Optional[ParsedFileMetadata]:
         """
@@ -230,6 +266,11 @@ class FilePathResolver:
         Returns:
             完整文件路径,如果解析失败返回None
         """
+        standard_path = self._rebuild_standard_file_path(filename)
+        if standard_path:
+            logger.debug(f"重建标准 data/raw 路径: {filename} -> {standard_path}")
+            return standard_path
+
         parsed = self.parse_filename(filename)
         
         if not parsed or parsed.platform == 'unknown':
@@ -245,7 +286,7 @@ class FilePathResolver:
             shop = parsed.shop
         
         # 构建路径
-        path = self.PATH_TEMPLATE.format(
+        path = self.LEGACY_PATH_TEMPLATE.format(
             platform=parsed.platform,
             account=account,
             shop=shop,
@@ -303,7 +344,7 @@ class FilePathResolver:
         # 3. 如果标准路径没找到,递归搜索基础目录
         if not locations:
             logger.debug(f"标准路径未找到文件,开始递归搜索: {filename}")
-            for base_dir in self.SEARCH_BASE_DIRS:
+            for base_dir in self._get_search_base_dirs():
                 if not base_dir.exists():
                     continue
                 
@@ -383,4 +424,3 @@ def get_file_path_resolver() -> FilePathResolver:
     if _resolver_instance is None:
         _resolver_instance = FilePathResolver()
     return _resolver_instance
-

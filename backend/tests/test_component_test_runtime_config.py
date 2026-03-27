@@ -1,3 +1,5 @@
+import pytest
+
 from backend.routers.component_versions import _build_component_test_runtime_config
 from backend.schemas.component_version import ComponentTestRequest
 
@@ -5,9 +7,8 @@ from backend.schemas.component_version import ComponentTestRequest
 def test_build_component_test_runtime_config_for_export_services_main_component():
     request = ComponentTestRequest(
         account_id="acc-1",
-        granularity="daily",
-        start_date="2026-03-01",
-        end_date="2026-03-07",
+        time_mode="preset",
+        date_preset="last_7_days",
         sub_domain="agent",
     )
 
@@ -20,11 +21,16 @@ def test_build_component_test_runtime_config_for_export_services_main_component(
         "data_domain": "services",
         "sub_domain": "agent",
         "services_subtype": "agent",
-        "granularity": "daily",
-        "start_date": "2026-03-01",
-        "end_date": "2026-03-07",
-        "date_from": "2026-03-01",
-        "date_to": "2026-03-07",
+        "granularity": "weekly",
+        "time_selection": {
+            "mode": "preset",
+            "preset": "last_7_days",
+        },
+        "date_preset": "last_7_days",
+        "start_date": "2026-03-21",
+        "end_date": "2026-03-27",
+        "date_from": "2026-03-21",
+        "date_to": "2026-03-27",
     }
 
 
@@ -32,6 +38,7 @@ def test_build_component_test_runtime_config_prefers_fixed_sub_domain_from_compo
     request = ComponentTestRequest(
         account_id="acc-1",
         granularity="weekly",
+        time_mode="custom",
         start_date="2026-03-01",
         end_date="2026-03-31",
         sub_domain=None,
@@ -45,14 +52,15 @@ def test_build_component_test_runtime_config_prefers_fixed_sub_domain_from_compo
     assert runtime_config["data_domain"] == "services"
     assert runtime_config["sub_domain"] == "agent"
     assert runtime_config["services_subtype"] == "agent"
+    assert runtime_config["granularity"] == "weekly"
+    assert runtime_config["time_selection"]["mode"] == "custom"
 
 
 def test_build_component_test_runtime_config_for_login_ignores_export_fields():
     request = ComponentTestRequest(
         account_id="acc-1",
-        granularity="daily",
-        start_date="2026-03-01",
-        end_date="2026-03-07",
+        time_mode="preset",
+        date_preset="today",
         sub_domain="agent",
     )
 
@@ -62,3 +70,15 @@ def test_build_component_test_runtime_config_for_login_ignores_export_fields():
 
     assert logical_type == "login"
     assert runtime_config == {}
+
+
+def test_build_component_test_runtime_config_rejects_custom_without_granularity():
+    request = ComponentTestRequest(
+        account_id="acc-1",
+        time_mode="custom",
+        start_date="2026-03-01",
+        end_date="2026-03-07",
+    )
+
+    with pytest.raises(ValueError, match="granularity is required for custom"):
+        _build_component_test_runtime_config(request, "miaoshou/orders_export")

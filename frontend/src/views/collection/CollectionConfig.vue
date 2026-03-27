@@ -407,6 +407,12 @@ const form = reactive({
 
 const customDateRange = ref([])
 const generatedName = ref('')  // v4.7.0: 自动生成的配置名
+const PRESET_GRANULARITY_MAP = {
+  today: 'daily',
+  yesterday: 'daily',
+  last_7_days: 'weekly',
+  last_30_days: 'monthly'
+}
 
 // v4.7.0: 快速配置状态
 const quickSetupVisible = ref(false)
@@ -456,6 +462,16 @@ watch(
       }
     }
   }
+)
+
+watch(
+  () => form.date_range_type,
+  (nextType) => {
+    if (nextType && nextType !== 'custom') {
+      form.granularity = PRESET_GRANULARITY_MAP[nextType] || 'daily'
+    }
+  },
+  { immediate: true }
 )
 
 // 方法
@@ -680,7 +696,7 @@ const getDateRangeHint = () => {
   
   const hints = {
     'shopee': '与Shopee平台日期控件对齐：今天/昨天/7天/30天',
-    'tiktok': '与TikTok平台日期控件对齐：今天/昨天/7天/28天',
+    'tiktok': '与TikTok平台日期控件对齐：今天/昨天/7天/30天',
     'miaoshou': '与妙手ERP日期控件对齐：今天/昨天/7天/30天'
   }
   return hints[form.platform] || ''

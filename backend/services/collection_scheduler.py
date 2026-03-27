@@ -21,9 +21,12 @@ from backend.services.component_runtime_resolver import (
     ComponentRuntimeResolverError,
 )
 from backend.services.collection_contracts import (
+    build_date_range_from_time_selection,
     count_collection_targets,
+    derive_granularity_from_time_selection,
     normalize_collection_date_range,
     normalize_domain_subtypes,
+    normalize_time_selection,
 )
 from backend.services.task_service import TaskService
 
@@ -525,30 +528,17 @@ class CollectionScheduler:
                     logger.warning(f"Account {account_id} has conflict task, skipping")
                     continue
                 
-                # v4.7.0: 构建日期范围
-                date_range = {}
-                if config.date_range_type == 'custom' and config.custom_date_start and config.custom_date_end:
-                    date_range = {
-                        'start_date': config.custom_date_start.isoformat(),
-                        'end_date': config.custom_date_end.isoformat()
-                    }
-                else:
-                    # 使用date_range_type(today/yesterday/last_7_days等)
-                    from datetime import date, timedelta
-                    today = date.today()
-                    if config.date_range_type == 'today':
-                        date_range = {'start_date': today.isoformat(), 'end_date': today.isoformat()}
-                    elif config.date_range_type == 'yesterday':
-                        yesterday = today - timedelta(days=1)
-                        date_range = {'start_date': yesterday.isoformat(), 'end_date': yesterday.isoformat()}
-                    elif config.date_range_type == 'last_7_days':
-                        start = today - timedelta(days=7)
-                        date_range = {'start_date': start.isoformat(), 'end_date': today.isoformat()}
-                    elif config.date_range_type == 'last_30_days':
-                        start = today - timedelta(days=30)
-                        date_range = {'start_date': start.isoformat(), 'end_date': today.isoformat()}
-                
-                normalized_date_range = normalize_collection_date_range(date_range)
+                time_selection = normalize_time_selection(
+                    date_range_type=config.date_range_type,
+                    custom_date_start=config.custom_date_start,
+                    custom_date_end=config.custom_date_end,
+                )
+                normalized_date_range = build_date_range_from_time_selection(time_selection)
+                normalized_date_range["time_selection"] = time_selection
+                effective_granularity = derive_granularity_from_time_selection(
+                    time_selection,
+                    config.granularity,
+                )
 
                 # v4.7.0: 创建任务(新字段)
                 task_uuid = str(uuid.uuid4())
@@ -559,7 +549,7 @@ class CollectionScheduler:
                     account=account_id,
                     data_domains=filtered_domains,
                     sub_domains=normalized_sub_domains or None,
-                    granularity=config.granularity,
+                    granularity=effective_granularity,
                     date_range=normalized_date_range,
                     status='pending',  # v4.7.0: 先pending,后台任务启动时改为running
                     progress=0,
@@ -594,7 +584,7 @@ class CollectionScheduler:
                             data_domains=filtered_domains,
                             sub_domains=normalized_sub_domains,
                             date_range=normalized_date_range,
-                            granularity=config.granularity,
+                            granularity=effective_granularity,
                             debug_mode=False,
                             parallel_mode=False,
                             max_parallel=3,

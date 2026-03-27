@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 
 from modules.core.logger import get_logger
+from modules.core.path_manager import get_data_raw_dir
 from modules.apps.collection_center.component_loader import ComponentLoader
 from modules.apps.collection_center.popup_handler import UniversalPopupHandler, StepPopupHandler
 from modules.apps.collection_center.python_component_adapter import PythonComponentAdapter, create_adapter
@@ -2743,7 +2744,7 @@ class CollectionExecutorV2:
                 
                 # 2. 准备目标目录(data/raw/YYYY/)
                 year = datetime.now().strftime("%Y")
-                target_dir = Path("data/raw") / year
+                target_dir = Path(get_data_raw_dir()) / year
                 target_dir.mkdir(parents=True, exist_ok=True)
                 
                 target_path = target_dir / standard_filename

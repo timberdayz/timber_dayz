@@ -29,9 +29,12 @@ from backend.schemas.collection import (
 )
 from backend.schemas.common import SuccessResponse
 from backend.services.collection_contracts import (
+    build_date_range_from_time_selection,
     count_collection_targets,
+    derive_granularity_from_time_selection,
     normalize_collection_date_range,
     normalize_domain_subtypes,
+    normalize_time_selection,
 )
 
 logger = get_logger(__name__)
@@ -100,7 +103,16 @@ async def create_task(
         data_domains=filtered_domains,
         sub_domains=request.sub_domains,
     )
-    normalized_date_range = normalize_collection_date_range(request.date_range)
+    time_selection = normalize_time_selection(
+        time_selection=request.time_selection.model_dump(exclude_none=True) if request.time_selection else None,
+        date_range=request.date_range,
+    )
+    effective_granularity = derive_granularity_from_time_selection(
+        time_selection,
+        request.granularity,
+    )
+    normalized_date_range = build_date_range_from_time_selection(time_selection)
+    normalized_date_range["time_selection"] = time_selection
 
     try:
         resolver = ComponentRuntimeResolver.from_async_session(db)
@@ -126,7 +138,7 @@ async def create_task(
         trigger_type="manual",
         data_domains=filtered_domains,
         sub_domains=normalized_sub_domains or None,
-        granularity=request.granularity,
+        granularity=effective_granularity,
         date_range=normalized_date_range,
         total_domains=total_domains_count,
         completed_domains=[],
@@ -164,7 +176,7 @@ async def create_task(
             data_domains=filtered_domains,
             sub_domains=normalized_sub_domains,
             date_range=normalized_date_range,
-            granularity=request.granularity,
+            granularity=effective_granularity,
             debug_mode=request.debug_mode,
             parallel_mode=request.parallel_mode,
             max_parallel=request.max_parallel,

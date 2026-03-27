@@ -546,7 +546,7 @@ class CatalogFile(Base):
     # source identification
     file_path = Column(String(1024), nullable=False)
     file_name = Column(String(255), nullable=False)
-    source = Column(String(64), nullable=False, default="temp/outputs")  # temp/outputs or data/input/manual_uploads
+    source = Column(String(64), nullable=False, default="data/raw")  # 正式采集文件统一来自 data/raw，temp/outputs 仅保留 legacy 兼容
 
     file_size = Column(Integer, nullable=True)
     file_hash = Column(String(64), nullable=True)  # sha256 or md5

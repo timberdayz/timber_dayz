@@ -62,7 +62,7 @@ app.add_middleware(
 
 # Pydantic模型
 class ScanRequest(BaseModel):
-    directories: List[str] = ["temp/outputs"]
+    directories: List[str] = ["data/raw"]
     max_files: int = 5000
 
 class ScanResponse(BaseModel):

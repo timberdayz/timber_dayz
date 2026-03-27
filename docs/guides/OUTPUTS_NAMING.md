@@ -4,19 +4,28 @@
 
 本规范适用于所有平台（Shopee、Amazon、Lazada、妙手 ERP 等）的本地落盘输出，目标是保证路径唯一、稳定、可预测，降低数据入库与自动化处理的路径错误率。
 
+> 2026-03-27 更新：正式采集原始数据已统一收口到 `data/raw/`。`temp/outputs/` 仅保留给 legacy 兼容和临时诊断用途，不再是正式采集主链路。
+
 ## 目录结构
 
-- 根目录：`temp/outputs/<platform>/`
+- 正式原始数据根目录：`data/raw/<year>/`
+- 浏览器临时下载目录：任务级 `downloads/` 或 `output/playwright/work/`
 - 账号目录：`<account_slug>/`
 - 店铺目录：`<shop_slug>__<shop_id>`（默认启用 include_shop_id = true）
 - 数据类型目录：`products`/`traffic`/`services`/`orders`/`finance`
 - 子类型目录（可选）：如 `services/ai_assistant`、`services/agent`
 - 粒度目录：`daily`/`weekly`/`monthly`/`manual`
 
-完整路径：
+Legacy 组件内部下载工作目录历史上可能仍出现：
 
 ```
 temp/outputs/<platform>/<account_slug>/<shop_slug>__<shop_id>/<data_type>[/<subtype>]/<granularity>/
+```
+
+但正式文件在校验和命名后，最终应提升到：
+
+```
+data/raw/<year>/<standard_filename>
 
 可选（配置开关）:
 - 如需兼容历史环境，可将 `path_options.include_shop_id` 设为 false，此时店铺目录为 `<shop_slug>`（不推荐）。
@@ -56,6 +65,7 @@ temp/outputs/<platform>/<account_slug>/<shop_slug>__<shop_id>/<data_type>[/<subt
 ## 工具脚本
 
 - 目录规范化与清理：`temp/development/cleanup_outputs.py`
+  - 该脚本仅用于 legacy `temp/outputs` 清理，不属于正式主链路
   - 预演：`python temp/development/cleanup_outputs.py --base temp/outputs/<platform> --preflight`
   - 执行：`python temp/development/cleanup_outputs.py --base temp/outputs/<platform> --apply`
   - 选项：

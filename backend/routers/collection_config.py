@@ -19,7 +19,12 @@ from backend.schemas.collection import (
     CollectionAccountResponse,
 )
 from backend.schemas.common import SuccessResponse
-from backend.services.collection_contracts import normalize_domain_subtypes
+from backend.services.collection_contracts import (
+    build_legacy_collection_date_fields,
+    derive_granularity_from_time_selection,
+    normalize_domain_subtypes,
+    normalize_time_selection,
+)
 
 logger = get_logger(__name__)
 
@@ -115,6 +120,22 @@ async def create_config(
         retry_count=config.retry_count,
     )
 
+    time_selection = normalize_time_selection(
+        time_selection=config.time_selection.model_dump(exclude_none=True) if config.time_selection else None,
+        date_range_type=config.date_range_type,
+        custom_date_start=config.custom_date_start,
+        custom_date_end=config.custom_date_end,
+    )
+    if time_selection:
+        db_config.granularity = derive_granularity_from_time_selection(
+            time_selection,
+            config.granularity,
+        )
+        legacy_fields = build_legacy_collection_date_fields(time_selection)
+        db_config.date_range_type = legacy_fields["date_range_type"]
+        db_config.custom_date_start = legacy_fields["custom_date_start"]
+        db_config.custom_date_end = legacy_fields["custom_date_end"]
+
     db.add(db_config)
     await db.commit()
     await db.refresh(db_config)
@@ -166,9 +187,26 @@ async def update_config(
             data_domains=effective_domains,
             sub_domains=update_dict.get("sub_domains"),
         ) or None
+    time_selection_input = update_dict.pop("time_selection", None)
     for key, value in update_dict.items():
         if value is not None:
             setattr(config, key, value)
+
+    time_selection = normalize_time_selection(
+        time_selection=time_selection_input,
+        date_range_type=update_dict.get("date_range_type") or config.date_range_type,
+        custom_date_start=update_dict.get("custom_date_start") or config.custom_date_start,
+        custom_date_end=update_dict.get("custom_date_end") or config.custom_date_end,
+    )
+    if time_selection:
+        config.granularity = derive_granularity_from_time_selection(
+            time_selection,
+            update_dict.get("granularity") or config.granularity,
+        )
+        legacy_fields = build_legacy_collection_date_fields(time_selection)
+        config.date_range_type = legacy_fields["date_range_type"]
+        config.custom_date_start = legacy_fields["custom_date_start"]
+        config.custom_date_end = legacy_fields["custom_date_end"]
 
     await db.commit()
     await db.refresh(config)

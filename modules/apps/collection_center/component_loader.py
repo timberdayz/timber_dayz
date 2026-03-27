@@ -10,6 +10,7 @@ optimize-component-version-management: 添加 load_python_component_from_path
 import hashlib
 import os
 import re
+import sys
 import importlib
 import importlib.util
 import inspect
@@ -565,8 +566,10 @@ class ComponentLoader:
             )
         module = importlib.util.module_from_spec(spec)
         try:
+            sys.modules[unique_name] = module
             spec.loader.exec_module(module)
         except Exception as e:
+            sys.modules.pop(unique_name, None)
             raise ValueError(
                 f"Failed to load component from {file_path}: {e} "
                 f"(version_id={version_id})"
@@ -844,4 +847,3 @@ class ComponentLoader:
             result[plat] = components
         
         return result
-

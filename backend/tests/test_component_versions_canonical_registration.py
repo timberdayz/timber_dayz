@@ -344,3 +344,37 @@ async def test_list_versions_platform_only_does_not_apply_canonical_whitelist(
         "miaoshou/login_v1_0_1",
         "miaoshou/miaoshou_login",
     ]
+
+
+@pytest.mark.asyncio
+async def test_batch_register_includes_miaoshou_orders_export_when_present(
+    component_version_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    project_root = tmp_path
+    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
+    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
+    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+
+    miaoshou_dir = project_root / "modules" / "platforms" / "miaoshou" / "components"
+    _write_component(miaoshou_dir / "login.py", "MiaoshouLogin", "login")
+    _write_component(miaoshou_dir / "orders_export.py", "MiaoshouOrdersExport", "export")
+    _write_component(miaoshou_dir / "orders_config.py", "OrdersSelectors", "other")
+
+    response = await batch_register_python_components(
+        request=BatchRegisterRequest(platform="miaoshou"),
+        db=component_version_session,
+        http_request=None,
+    )
+
+    result = await component_version_session.execute(select(ComponentVersion))
+    rows = result.scalars().all()
+    names = sorted(v.component_name for v in rows)
+
+    assert response.success is True
+    assert names == [
+        "miaoshou/login",
+        "miaoshou/orders_export",
+    ]

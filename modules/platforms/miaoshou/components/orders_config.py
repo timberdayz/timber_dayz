@@ -29,6 +29,46 @@ EXPORT_BUTTON_SELECTORS: Final[List[str]] = [
     "[role='button']:has-text(导出)",
 ]
 
+EXPORT_MENU_ITEMS: Final[List[str]] = [
+    "导出全部订单",
+    "导出所选订单",
+    "导出任务记录",
+]
+
+EXPORT_PROGRESS_TITLES: Final[List[str]] = [
+    "正在导出",
+]
+
+EXPORT_PROGRESS_TEXTS: Final[List[str]] = [
+    "正在导出订单",
+    "正在导出",
+    "导出成功,正在下载",
+    "导出成功",
+    "正在下载",
+]
+
+DATE_SHORTCUTS: Final[List[str]] = [
+    "今天",
+    "昨天",
+    "近7天",
+    "近30天",
+    "近90天",
+]
+
+CUSTOM_DATE_INPUT_NAMES: Final[List[str]] = [
+    "开始日期",
+    "结束日期",
+]
+
+CUSTOM_TIME_INPUT_NAMES: Final[List[str]] = [
+    "开始时间",
+    "结束时间",
+]
+
+SEARCH_BUTTON_TEXTS: Final[List[str]] = [
+    "搜索",
+]
+
 # 公告/通知等弹窗关闭(尽量与其他 Miaoshou 配置保持一致,便于统一关闭)
 POPUP_CLOSE_SELECTORS: Final[List[str]] = [
     # Ant Design 常见关闭按钮
@@ -86,9 +126,15 @@ class OrdersSelectors:
     subtypes: List[str] = tuple(ORDER_SUBTYPES)  # type: ignore[assignment]
 
     export_buttons: List[str] = tuple(EXPORT_BUTTON_SELECTORS)  # type: ignore[assignment]
+    export_menu_items: List[str] = tuple(EXPORT_MENU_ITEMS)  # type: ignore[assignment]
+    export_progress_titles: List[str] = tuple(EXPORT_PROGRESS_TITLES)  # type: ignore[assignment]
+    export_progress_texts: List[str] = tuple(EXPORT_PROGRESS_TEXTS)  # type: ignore[assignment]
+    date_shortcuts: List[str] = tuple(DATE_SHORTCUTS)  # type: ignore[assignment]
+    custom_date_input_names: List[str] = tuple(CUSTOM_DATE_INPUT_NAMES)  # type: ignore[assignment]
+    custom_time_input_names: List[str] = tuple(CUSTOM_TIME_INPUT_NAMES)  # type: ignore[assignment]
+    search_button_texts: List[str] = tuple(SEARCH_BUTTON_TEXTS)  # type: ignore[assignment]
     popup_close_buttons: List[str] = tuple(POPUP_CLOSE_SELECTORS)  # type: ignore[assignment]
     close_poll_max_rounds: int = CLOSE_POLL_MAX_ROUNDS
     close_poll_interval_ms: int = CLOSE_POLL_INTERVAL_MS
     progress_texts: List[str] = tuple(PROGRESS_TEXTS)  # type: ignore[assignment]
     data_type_dir: str = DATA_TYPE_DIR
-

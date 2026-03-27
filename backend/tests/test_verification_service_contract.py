@@ -62,6 +62,33 @@ def test_verification_state_store_advances_through_resume_flow():
     assert resolved["state"] == "verification_resolved"
 
 
+def test_verification_state_store_persists_payload_across_store_instances(tmp_path):
+    storage_path = tmp_path / "verification-store.json"
+
+    first_store = VerificationStateStore(storage_path=storage_path)
+    first_service = VerificationService(store=first_store)
+    payload = first_service.raise_required(
+        owner_type="recorder",
+        owner_id="session-1",
+        verification_type="graphical_captcha",
+        phase="login",
+        current_url="https://example.com/login",
+        screenshot_url="/api/verification.png",
+        message="captcha required",
+    )
+
+    second_store = VerificationStateStore(storage_path=storage_path)
+    second_service = VerificationService(store=second_store)
+    submitted = second_service.mark_submitted(
+        verification_id=payload["verification_id"]
+    )
+
+    assert submitted["state"] == "verification_submitted"
+    assert submitted["owner_id"] == "session-1"
+    assert submitted["message"] == "captcha required"
+    assert storage_path.exists()
+
+
 def test_verification_resume_request_requires_exactly_one_value():
     with pytest.raises(ValidationError):
         VerificationResumeRequest(captcha_code="1234", otp="567890")

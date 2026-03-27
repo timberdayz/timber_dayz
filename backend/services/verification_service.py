@@ -46,7 +46,11 @@ class VerificationService:
         return self.store.save(payload)
 
     def mark_submitted(self, *, verification_id: str) -> dict:
-        return self.store.update_state(verification_id, "verification_submitted")
+        return self.store.update_state(
+            verification_id,
+            "verification_submitted",
+            increment_attempt=True,
+        )
 
     def mark_retrying(self, *, verification_id: str) -> dict:
         return self.store.update_state(verification_id, "verification_retrying")

@@ -7,6 +7,7 @@
 import sys
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -31,6 +32,13 @@ from backend.schemas.component_version import (
 )
 from backend.services.component_name_utils import parse_component_name
 from backend.services.component_version_service import ComponentVersionService
+from backend.services.verification_service import VerificationService
+from backend.services.verification_state_store import VerificationStateStore
+from backend.services.collection_contracts import (
+    build_date_range_from_time_selection,
+    derive_granularity_from_time_selection,
+    normalize_time_selection,
+)
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.db import ComponentTestHistory, ComponentVersion
@@ -65,6 +73,7 @@ CANONICAL_COMPONENT_FILES = {
         "navigation.py",
         "date_picker.py",
         "export.py",
+        "orders_export.py",
     },
 }
 
@@ -81,6 +90,10 @@ CANONICAL_COMPONENT_NAMES = {
     platform: {f"{platform}/{name[:-3]}" for name in filenames if name.endswith(".py")}
     for platform, filenames in CANONICAL_COMPONENT_FILES.items()
 }
+
+
+def _get_test_verification_store_path(test_dir) -> Path:
+    return test_dir / "verification_state.json"
 
 
 def _get_canonical_component_names(platform: Optional[str] = None) -> list[str]:
@@ -130,14 +143,37 @@ def _build_component_test_runtime_config(
         if str(data_domain or "").lower() == "services":
             runtime_config["services_subtype"] = effective_sub_domain
 
-    if request.granularity:
+    time_selection = normalize_time_selection(
+        time_selection=request.time_selection.model_dump(exclude_none=True)
+        if request.time_selection
+        else None,
+        time_mode=request.time_mode,
+        date_preset=request.date_preset,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        start_time=request.start_time,
+        end_time=request.end_time,
+    )
+    if time_selection:
+        runtime_config["time_selection"] = time_selection
+        runtime_config["granularity"] = derive_granularity_from_time_selection(
+            time_selection,
+            request.granularity,
+        )
+        if time_selection["mode"] == "custom":
+            runtime_config["custom_date_range"] = {
+                "start_date": time_selection["start_date"],
+                "end_date": time_selection["end_date"],
+                "start_time": time_selection["start_time"],
+                "end_time": time_selection["end_time"],
+            }
+        else:
+            runtime_config["date_preset"] = time_selection["preset"]
+
+        normalized_date_range = build_date_range_from_time_selection(time_selection)
+        runtime_config.update(normalized_date_range)
+    elif request.granularity:
         runtime_config["granularity"] = request.granularity
-    if request.start_date:
-        runtime_config["start_date"] = request.start_date
-        runtime_config["date_from"] = request.start_date
-    if request.end_date:
-        runtime_config["end_date"] = request.end_date
-        runtime_config["date_to"] = request.end_date
 
     return logical_type, runtime_config
 
@@ -991,6 +1027,7 @@ async def batch_register_python_components(
                             "component", py_file
                         )
                         module = importlib.util.module_from_spec(spec)
+                        sys.modules["component"] = module
                         spec.loader.exec_module(module)
 
                         for attr_name in dir(module):
@@ -1003,13 +1040,12 @@ async def batch_register_python_components(
                                 )
                                 break
                     except Exception:
+                        sys.modules.pop("component", None)
                         # 从文件名推断
                         if "login" in py_file.stem:
                             component_type = "login"
                         elif "navigation" in py_file.stem:
                             component_type = "navigation"
-                        elif "export" in py_file.stem:
-                            component_type = "export"
                         elif "date_picker" in py_file.stem:
                             component_type = "date_picker"
                         elif (
@@ -1023,8 +1059,12 @@ async def batch_register_python_components(
                             component_type = "metrics_selector"
                         elif "analytics" in py_file.stem:
                             component_type = "analytics"
+                        elif "export" in py_file.stem:
+                            component_type = "export"
                         else:
                             component_type = "other"
+                    else:
+                        sys.modules.pop("component", None)
 
                     # 检查是否已存在(基于 component_name + version,这是唯一约束)
                     existing_result = await db.execute(
@@ -1311,12 +1351,12 @@ async def test_component_version(
         fixed_sub_domain = runtime_config.get("sub_domain")
 
         if logical_type == "export":
-            if not request.granularity or not request.start_date or not request.end_date:
+            if "granularity" not in runtime_config or "time_selection" not in runtime_config:
                 return error_response(
                     ErrorCode.PARAMETER_INVALID,
-                    "导出组件测试需要选择粒度和日期范围",
+                    "导出组件测试需要提供快捷时间或自定义时间范围",
                     status_code=400,
-                    recovery_suggestion="请选择粒度，并设置开始日期和结束日期",
+                    recovery_suggestion="请选择快捷时间，或选择自定义时间范围并提供粒度",
                 )
             if str(fixed_data_domain or "").lower() == "services" and not fixed_sub_domain:
                 return error_response(
@@ -1925,6 +1965,12 @@ async def get_test_status(
         resp["verification_screenshot"] = progress_data.get(
             "verification_screenshot", ""
         )
+        resp["verification_id"] = progress_data.get("verification_id")
+        resp["verification_message"] = progress_data.get("verification_message")
+        resp["verification_expires_at"] = progress_data.get("verification_expires_at")
+        resp["verification_attempt_count"] = progress_data.get(
+            "verification_attempt_count", 0
+        )
         resp["verification_screenshot_url"] = (
             f"/component-versions/{version_id}/test/{test_id}/verification-screenshot"
         )
@@ -2067,6 +2113,26 @@ async def post_test_resume(
             detail=str(e),
             recovery_suggestion="请稍后重试",
         )
+    return {"success": True, "message": "验证码已提交，测试将继续执行"}
+
+
+    verification_id = str(progress_data.get("verification_id") or "").strip()
+    if verification_id:
+        try:
+            store = VerificationStateStore(
+                storage_path=_get_test_verification_store_path(test_dir)
+            )
+            submitted_payload = VerificationService(store=store).mark_submitted(
+                verification_id=verification_id
+            )
+            progress_data["status"] = submitted_payload["state"]
+            progress_data["verification_attempt_count"] = submitted_payload.get(
+                "attempt_count", progress_data.get("verification_attempt_count", 0)
+            )
+            with open(progress_path, "w", encoding="utf-8") as f:
+                json.dump(progress_data, f, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"Mark component test verification submitted failed: {e}")
     return {"success": True, "message": "验证码已提交，测试将继续执行"}
 
 

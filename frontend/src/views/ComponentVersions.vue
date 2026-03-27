@@ -289,30 +289,61 @@
           </el-select>
 
           <template v-if="isCurrentTestExport">
-            <span style="font-weight: 600;">粒度:</span>
+            <span style="font-weight: 600;">时间方式:</span>
             <el-select
-              v-model="testGranularity"
+              v-model="testTimeMode"
               size="small"
               style="width: 140px;"
               :disabled="testing"
-              placeholder="请选择粒度"
             >
-              <el-option label="日报" value="daily" />
-              <el-option label="周报" value="weekly" />
-              <el-option label="月报" value="monthly" />
+              <el-option label="快捷时间" value="preset" />
+              <el-option label="自定义时间" value="custom" />
             </el-select>
 
-            <span style="font-weight: 600;">日期范围:</span>
-            <el-date-picker
-              v-model="testDateRange"
-              type="daterange"
-              size="small"
-              style="width: 260px;"
-              :disabled="testing"
-              start-placeholder="开始日期"
-              end-placeholder="结束日期"
-              value-format="YYYY-MM-DD"
-            />
+            <template v-if="testTimeMode === 'preset'">
+              <span style="font-weight: 600;">快捷时间:</span>
+              <el-select
+                v-model="testDatePreset"
+                size="small"
+                style="width: 160px;"
+                :disabled="testing"
+              >
+                <el-option label="今天" value="today" />
+                <el-option label="昨天" value="yesterday" />
+                <el-option label="近7天" value="last_7_days" />
+                <el-option label="近30天" value="last_30_days" />
+              </el-select>
+
+              <span style="font-weight: 600;">粒度:</span>
+              <el-tag type="info">{{ testDerivedGranularityLabel }}</el-tag>
+            </template>
+
+            <template v-else>
+              <span style="font-weight: 600;">粒度:</span>
+              <el-select
+                v-model="testGranularity"
+                size="small"
+                style="width: 140px;"
+                :disabled="testing"
+                placeholder="请选择粒度"
+              >
+                <el-option label="日报" value="daily" />
+                <el-option label="周报" value="weekly" />
+                <el-option label="月报" value="monthly" />
+              </el-select>
+
+              <span style="font-weight: 600;">日期范围:</span>
+              <el-date-picker
+                v-model="testDateRange"
+                type="daterange"
+                size="small"
+                style="width: 260px;"
+                :disabled="testing"
+                start-placeholder="开始日期"
+                end-placeholder="结束日期"
+                value-format="YYYY-MM-DD"
+              />
+            </template>
 
             <template v-if="currentTestComponent.data_domain">
               <span style="font-weight: 600;">数据域:</span>
@@ -611,6 +642,8 @@ const abTestForm = reactive({
 const testDialogVisible = ref(false)
 const testing = ref(false)
 const testAccountId = ref('')
+const testTimeMode = ref('preset')
+const testDatePreset = ref('today')
 const testGranularity = ref('daily')
 const testDateRange = ref([])
 const testSubDomain = ref('')
@@ -691,6 +724,19 @@ const parseComponentMeta = (name) => {
   return meta
 }
 
+const PRESET_GRANULARITY_MAP = {
+  today: 'daily',
+  yesterday: 'daily',
+  last_7_days: 'weekly',
+  last_30_days: 'monthly'
+}
+
+const GRANULARITY_LABEL_MAP = {
+  daily: '日报',
+  weekly: '周报',
+  monthly: '月报'
+}
+
 const isCurrentTestExport = computed(() => currentTestComponent.value.logical_type === 'export')
 const requiresCurrentTestSubDomain = computed(() => {
   return isCurrentTestExport.value
@@ -703,11 +749,26 @@ const currentTestSubDomainOptions = computed(() => {
   }
   return []
 })
+const testEffectiveGranularity = computed(() => {
+  if (testTimeMode.value === 'preset') {
+    return PRESET_GRANULARITY_MAP[testDatePreset.value] || 'daily'
+  }
+  return testGranularity.value
+})
+
+const testDerivedGranularityLabel = computed(() => {
+  return GRANULARITY_LABEL_MAP[testEffectiveGranularity.value] || testEffectiveGranularity.value
+})
+
 const canStartCurrentTest = computed(() => {
   if (!testAccountId.value) return false
   if (!isCurrentTestExport.value) return true
-  if (!testGranularity.value) return false
-  if (!Array.isArray(testDateRange.value) || testDateRange.value.length !== 2) return false
+  if (testTimeMode.value === 'preset') {
+    if (!testDatePreset.value) return false
+  } else {
+    if (!testGranularity.value) return false
+    if (!Array.isArray(testDateRange.value) || testDateRange.value.length !== 2) return false
+  }
   if (requiresCurrentTestSubDomain.value && !testSubDomain.value) return false
   return true
 })
@@ -1000,6 +1061,8 @@ const showTestDialog = async (row) => {
   
   testDialogVisible.value = true
   testAccountId.value = ''
+  testTimeMode.value = 'preset'
+  testDatePreset.value = 'today'
   testGranularity.value = 'daily'
   testDateRange.value = []
   testSubDomain.value = meta.subDomain || ''
@@ -1062,9 +1125,16 @@ const startComponentTest = async () => {
     return
   }
   if (isCurrentTestExport.value) {
-    if (!testGranularity.value || !Array.isArray(testDateRange.value) || testDateRange.value.length !== 2) {
-      ElMessage.warning('请选择导出测试的粒度和日期范围')
-      return
+    if (testTimeMode.value === 'preset') {
+      if (!testDatePreset.value) {
+        ElMessage.warning('请选择快捷时间')
+        return
+      }
+    } else {
+      if (!testGranularity.value || !Array.isArray(testDateRange.value) || testDateRange.value.length !== 2) {
+        ElMessage.warning('请选择自定义时间范围和粒度')
+        return
+      }
     }
     if (requiresCurrentTestSubDomain.value && !testSubDomain.value) {
       ElMessage.warning('请选择子数据域')
@@ -1096,9 +1166,14 @@ const startComponentTest = async () => {
       account_id: testAccountId.value
     }
     if (isCurrentTestExport.value) {
-      payload.granularity = testGranularity.value
-      payload.start_date = testDateRange.value[0]
-      payload.end_date = testDateRange.value[1]
+      payload.granularity = testEffectiveGranularity.value
+      payload.time_mode = testTimeMode.value
+      if (testTimeMode.value === 'preset') {
+        payload.date_preset = testDatePreset.value
+      } else {
+        payload.start_date = testDateRange.value[0]
+        payload.end_date = testDateRange.value[1]
+      }
       if (requiresCurrentTestSubDomain.value && testSubDomain.value) {
         payload.sub_domain = testSubDomain.value
       }

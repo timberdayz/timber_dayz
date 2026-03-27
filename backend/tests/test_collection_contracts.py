@@ -1,4 +1,5 @@
 from backend.services.collection_contracts import (
+    build_legacy_collection_date_fields,
     count_collection_targets,
     iter_domain_targets,
     normalize_collection_date_range,
@@ -91,4 +92,16 @@ def test_normalize_collection_date_range_prefers_start_date_end_date():
         "end_date": "2026-03-07",
         "date_from": "2026-03-01",
         "date_to": "2026-03-07",
+    }
+
+
+def test_build_legacy_collection_date_fields_for_preset():
+    legacy = build_legacy_collection_date_fields(
+        {"mode": "preset", "preset": "yesterday"}
+    )
+
+    assert legacy == {
+        "date_range_type": "yesterday",
+        "custom_date_start": None,
+        "custom_date_end": None,
     }

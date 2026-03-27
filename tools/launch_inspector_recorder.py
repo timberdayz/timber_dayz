@@ -98,7 +98,9 @@ class InspectorRecorder:
         self.open_action: Optional[Dict[str, Any]] = None  # 打开动作
         self.available_options: List[Dict[str, Any]] = []  # 发现的选项
         self._last_click_selector: Optional[str] = None  # 上次点击的选择器（用于检测重复 open）
-        self._verification_store = VerificationStateStore()
+        self._verification_store = VerificationStateStore(
+            storage_path=self._get_verification_store_path()
+        )
         self._verification_service = VerificationService(store=self._verification_store)
         self._active_verification_id: Optional[str] = None
         self._active_verification_payload: Optional[Dict[str, Any]] = None
@@ -107,6 +109,12 @@ class InspectorRecorder:
             logger.info(f"[Discovery Mode] Enabled for component type: {self.component_type}")
         
         logger.info(f"InspectorRecorder initialized: {self.platform}/{self.component_type}")
+
+    def _get_verification_store_path(self) -> Optional[Path]:
+        base_path = self.status_file or self.response_file
+        if not base_path:
+            return None
+        return Path(base_path).parent / "verification_state.json"
 
     def _write_status(
         self,

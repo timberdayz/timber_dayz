@@ -1218,7 +1218,7 @@ const validateSelectedSegment = async () => {
   segmentValidationLoading.value = true;
   segmentValidationResult.value = null;
   try {
-    const response = await api.post("/collection/recorder/validate-segment", {
+    const response = resolveApiPayload(await api.post("/collection/recorder/validate-segment", {
       platform: recorderForm.value.platform,
       component_type: recorderForm.value.componentType,
       account_id: recorderForm.value.accountId,
@@ -1228,13 +1228,13 @@ const validateSelectedSegment = async () => {
       step_start: payload.stepStart,
       step_end: payload.stepEnd,
       steps: payload.steps,
-    });
+    }));
 
-    if (!response.success) {
-      throw new Error(response.error_message || "校验失败");
+    if (!response) {
+      throw new Error("校验失败");
     }
 
-    segmentValidationResult.value = response.data || null;
+    segmentValidationResult.value = response || null;
     ElMessage.success("当前段校验已完成");
   } catch (error) {
     const message =
@@ -1304,6 +1304,13 @@ const isOtpVerification = computed(() => {
     String(verificationType).toLowerCase()
   );
 });
+
+const resolveApiPayload = (response) => {
+  if (response && typeof response === "object" && "success" in response) {
+    return response.data ?? response;
+  }
+  return response;
+};
 
 // ⭐ Phase 9完善：筛选已启用的账号
 const filteredAccounts = computed(() => {
@@ -1394,22 +1401,19 @@ const startRecording = async () => {
       verification_screenshot: null,
     };
     verificationRequired.value = null;
-    verificationInput.value = "";
     ElMessage.info("录制流程已启动，正在进行录制前检查...");
 
-    const response = await api.post("/collection/recorder/start", {
+    const response = resolveApiPayload(await api.post("/collection/recorder/start", {
       platform: recorderForm.value.platform,
       component_type: recorderForm.value.componentType,
       account_id: recorderForm.value.accountId,
-    });
+    }));
 
-    if (response.success) {
-      if (response.data) {
-        recorderRuntimeStatus.value = {
-          ...recorderRuntimeStatus.value,
-          ...response.data,
-        };
-      }
+    if (response) {
+      recorderRuntimeStatus.value = {
+        ...recorderRuntimeStatus.value,
+        ...response,
+      };
 
       // 开始轮询录制状态
       startPollingSteps();
@@ -1426,9 +1430,9 @@ const stopRecording = async () => {
     ElMessage.info("正在停止录制，请稍等...");
     segmentValidationResult.value = null;
 
-    const response = await api.post("/collection/recorder/stop");
+    const response = resolveApiPayload(await api.post("/collection/recorder/stop"));
 
-    if (response.success) {
+    if (response) {
       isRecording.value = false;
 
       // Phase 11: 根据模式处理不同的响应
@@ -1534,39 +1538,39 @@ let pollingInterval = null;
 const startPollingSteps = () => {
   pollingInterval = setInterval(async () => {
     try {
-      const statusResponse = await api.get("/collection/recorder/status");
-      if (statusResponse.success && statusResponse.data) {
+      const statusResponse = resolveApiPayload(await api.get("/collection/recorder/status"));
+      if (statusResponse) {
         recorderRuntimeStatus.value = {
           ...recorderRuntimeStatus.value,
-          ...statusResponse.data,
+          ...statusResponse,
         };
-        if (statusResponse.data.state === "login_verification_pending") {
+        if (statusResponse.state === "login_verification_pending") {
           const base = (import.meta.env.VITE_API_BASE_URL || "/api").replace(
             /\/$/,
             ""
           );
           verificationRequired.value = {
             verificationType:
-              statusResponse.data.verification_type || "graphical_captcha",
+              statusResponse.verification_type || "graphical_captcha",
             screenshotUrl: `${base}/collection/recorder/verification-screenshot?ts=${Date.now()}`,
           };
-        } else if (statusResponse.data.state !== "failed_before_recording") {
+        } else if (statusResponse.state !== "failed_before_recording") {
           verificationRequired.value = null;
         }
-        if (statusResponse.data.state === "failed_before_recording") {
+        if (statusResponse.state === "failed_before_recording") {
           isRecording.value = false;
           stopPollingSteps();
           ElMessage.error(
-            statusResponse.data.error_message || "录制前检查失败，未进入录制阶段"
+            statusResponse.error_message || "录制前检查失败，未进入录制阶段"
           );
           return;
         }
       }
 
-      const response = await api.get("/collection/recorder/steps");
+      const response = resolveApiPayload(await api.get("/collection/recorder/steps"));
 
-      if (response.success && response.data) {
-        recordedSteps.value = response.data.steps || [];
+      if (response) {
+        recordedSteps.value = response.steps || [];
       }
     } catch (error) {
       console.error("获取录制步骤失败:", error);
@@ -1713,8 +1717,8 @@ const regeneratePython = async () => {
         genPayload.sub_domain = recorderForm.value.subDomain;
       }
     }
-    const res = await api.post("/collection/recorder/generate-python", genPayload);
-    if (res.success && res.python_code) {
+    const res = resolveApiPayload(await api.post("/collection/recorder/generate-python", genPayload));
+    if (res?.python_code) {
       pythonCode.value = res.python_code;
       loginFieldSuggestions.value = res.login_field_suggestions || [];
       lintErrors.value = res.lint_errors || [];
@@ -1773,9 +1777,9 @@ const saveComponent = async () => {
       };
     }
 
-    const response = await api.post("/collection/recorder/save", payload);
+    const response = resolveApiPayload(await api.post("/collection/recorder/save", payload));
 
-    if (response.success) {
+    if (response) {
       const versionInfo = response.version_info;
 
       // 显示版本信息

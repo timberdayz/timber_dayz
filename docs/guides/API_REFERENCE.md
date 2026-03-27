@@ -465,7 +465,7 @@ rate = get_cached_exchange_rate('USD', datetime(2024, 10, 16))
 扫描目录并注册文件到catalog。
 
 **参数**:
-- `paths` (Optional[Iterable[Path]]) - 扫描目录列表，默认`['temp/outputs', 'data/input/manual_uploads']`
+- `paths` (Optional[Iterable[Path]]) - 扫描目录列表，默认`['data/raw']`
 
 **返回**: `ScanResult`
 - `seen` (int) - 扫描的文件数
@@ -478,7 +478,7 @@ rate = get_cached_exchange_rate('USD', datetime(2024, 10, 16))
 from modules.services.catalog_scanner import scan_and_register
 from pathlib import Path
 
-result = scan_and_register([Path('temp/outputs')])
+result = scan_and_register([Path('data/raw')])
 
 print(f"扫描: {result.seen}, 新注册: {result.registered}")
 ```

@@ -6,11 +6,25 @@ v4.18.0: 从backend/routers/collection.py迁移到schemas(Contract-First架构)
 """
 
 from datetime import datetime, date
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field, ConfigDict
 
 
 # ==================== 采集配置 ====================
+
+
+class TimeSelectionPayload(BaseModel):
+    """统一时间选择模型"""
+
+    mode: Literal["preset", "custom"] = Field(..., description="时间模式")
+    preset: Optional[Literal["today", "yesterday", "last_7_days", "last_30_days"]] = Field(
+        None,
+        description="快捷时间预设",
+    )
+    start_date: Optional[str] = Field(None, description="自定义开始日期 YYYY-MM-DD")
+    end_date: Optional[str] = Field(None, description="自定义结束日期 YYYY-MM-DD")
+    start_time: Optional[str] = Field("00:00:00", description="自定义开始时间 HH:MM:SS")
+    end_time: Optional[str] = Field("23:59:59", description="自定义结束时间 HH:MM:SS")
 
 class CollectionConfigCreate(BaseModel):
     """创建采集配置请求(v4.7.0)"""
@@ -23,6 +37,7 @@ class CollectionConfigCreate(BaseModel):
     date_range_type: str = Field("yesterday", description="日期范围类型")
     custom_date_start: Optional[date] = Field(None, description="自定义开始日期")
     custom_date_end: Optional[date] = Field(None, description="自定义结束日期")
+    time_selection: Optional[TimeSelectionPayload] = Field(None, description="统一时间选择模型")
     schedule_enabled: bool = Field(False, description="是否启用定时")
     schedule_cron: Optional[str] = Field(None, description="Cron表达式")
     retry_count: int = Field(3, ge=0, le=10, description="重试次数")
@@ -38,6 +53,7 @@ class CollectionConfigUpdate(BaseModel):
     date_range_type: Optional[str] = None
     custom_date_start: Optional[date] = None
     custom_date_end: Optional[date] = None
+    time_selection: Optional[TimeSelectionPayload] = Field(None, description="统一时间选择模型")
     schedule_enabled: Optional[bool] = None
     schedule_cron: Optional[str] = None
     retry_count: Optional[int] = None
@@ -56,6 +72,7 @@ class CollectionConfigResponse(BaseModel):
     date_range_type: str
     custom_date_start: Optional[date]
     custom_date_end: Optional[date]
+    time_selection: Optional[TimeSelectionPayload] = None
     schedule_enabled: bool
     schedule_cron: Optional[str]
     retry_count: int
@@ -75,8 +92,9 @@ class TaskCreateRequest(BaseModel):
     account_id: str = Field(..., description="账号ID")
     data_domains: List[str] = Field(..., min_length=1, description="数据域列表")
     sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(None, description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组")
-    granularity: str = Field("daily", pattern="^(daily|weekly|monthly)$", description="粒度")
-    date_range: Dict[str, str] = Field(..., description="日期范围 {'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD'}")
+    granularity: Optional[str] = Field("daily", pattern="^(daily|weekly|monthly)$", description="粒度")
+    date_range: Optional[Dict[str, str]] = Field(None, description="日期范围 {'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD'}")
+    time_selection: Optional[TimeSelectionPayload] = Field(None, description="统一时间选择模型")
     config_id: Optional[int] = Field(None, description="关联配置ID")
     debug_mode: bool = Field(False, description="调试模式(临时有头浏览器)")
     parallel_mode: bool = Field(False, description="[*] Phase 9.1: 并行执行模式(多域并行采集)")
@@ -104,6 +122,7 @@ class TaskResponse(BaseModel):
     sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(None, description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组")
     granularity: Optional[str]
     date_range: Optional[Dict[str, str]]
+    time_selection: Optional[TimeSelectionPayload] = None
     # v4.7.0 任务粒度优化字段
     total_domains: int = Field(0, description="总数据域数量")
     completed_domains: Optional[List[str]] = Field(None, description="已完成的数据域")

@@ -36,8 +36,11 @@ from modules.apps.collection_center.transition_gates import (
     evaluate_export_complete,
     evaluate_login_ready,
 )
+from backend.services.verification_service import VerificationService
+from backend.services.verification_state_store import VerificationStateStore
 from backend.routers.component_versions import CANONICAL_COMPONENT_FILES
 from modules.apps.collection_center.python_component_adapter import create_adapter
+from backend.services.collection_contracts import build_date_range_from_time_selection
 
 logger = get_logger(__name__)
 
@@ -143,11 +146,24 @@ class ComponentTester:
         
         logger.info(f"ComponentTester initialized: platform={platform}")
 
+    def _get_verification_store(self) -> VerificationStateStore:
+        storage_path = self.test_dir / "verification_state.json" if self.test_dir else None
+        return VerificationStateStore(storage_path=storage_path)
+
     def _build_runtime_component_config(self) -> Dict[str, Any]:
         cfg: Dict[str, Any] = {"output_dir": str(self.output_dir)}
         cfg.update(self.runtime_config)
 
         params = dict(cfg.get("params") or {})
+        time_selection = self.runtime_config.get("time_selection")
+        if time_selection:
+            cfg["time_selection"] = time_selection
+            params["time_selection"] = time_selection
+            normalized_date_range = build_date_range_from_time_selection(time_selection)
+            params["date_from"] = normalized_date_range["date_from"]
+            params["date_to"] = normalized_date_range["date_to"]
+            cfg["start_date"] = normalized_date_range["start_date"]
+            cfg["end_date"] = normalized_date_range["end_date"]
         if self.runtime_config.get("date_from"):
             params["date_from"] = self.runtime_config["date_from"]
         if self.runtime_config.get("date_to"):
@@ -518,12 +534,29 @@ class ComponentTester:
             else:
                 verification_screenshot = Path(screenshot_path).name if screenshot_path else ""
 
+            verification_service = VerificationService(store=self._get_verification_store())
+            verification_payload = verification_service.raise_required(
+                owner_type="component_test",
+                owner_id=str(self.account_id),
+                verification_type=verification_type,
+                phase="login",
+                current_url=str(getattr(page, "url", "") or ""),
+                screenshot_url=verification_screenshot or None,
+                message="login requires verification",
+                account_id=str(self.account_id or "") or None,
+                store_name=str((self.account_info or {}).get("store_name") or "") or None,
+            )
+
             if self.progress_callback:
                 try:
                     import asyncio
                     data = {
                         "verification_type": verification_type,
                         "verification_screenshot": verification_screenshot,
+                        "verification_id": verification_payload["verification_id"],
+                        "verification_message": verification_payload["message"],
+                        "verification_expires_at": verification_payload["expires_at"],
+                        "verification_attempt_count": verification_payload.get("attempt_count", 0),
                         "step_index": 1,
                         "step_total": 1,
                         "action": f"Execute Python component: {component_name}",
@@ -556,6 +589,9 @@ class ComponentTester:
 
             if not value:
                 result.error = "验证码输入超时"
+                verification_service.mark_failed(
+                    verification_id=verification_payload["verification_id"]
+                )
                 if self.progress_callback:
                     try:
                         merge_data = {"verification_timeout": True, "error": result.error}
@@ -576,7 +612,19 @@ class ComponentTester:
             else:
                 params["captcha_code"] = value
 
-            return await adapter.login(page)
+            verification_service.mark_retrying(
+                verification_id=verification_payload["verification_id"]
+            )
+            login_result = await adapter.login(page)
+            if login_result and getattr(login_result, "success", False):
+                verification_service.mark_resolved(
+                    verification_id=verification_payload["verification_id"]
+                )
+            else:
+                verification_service.mark_failed(
+                    verification_id=verification_payload["verification_id"]
+                )
+            return login_result
 
     async def _run_login_before_non_login(
         self,

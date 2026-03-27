@@ -7,7 +7,7 @@
 - BatchRegisterRequest / BatchRegisterResult / BatchRegisterResponse
 """
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -102,13 +102,35 @@ class BatchRegisterResponse(BaseModel):
     details: List[BatchRegisterResult]
 
 
+class TimeSelectionPayload(BaseModel):
+    """统一时间选择模型"""
+
+    mode: Literal["preset", "custom"] = Field(..., description="时间模式")
+    preset: Optional[Literal["today", "yesterday", "last_7_days", "last_30_days"]] = Field(
+        None,
+        description="快捷时间预设",
+    )
+    start_date: Optional[str] = Field(None, description="自定义开始日期 YYYY-MM-DD")
+    end_date: Optional[str] = Field(None, description="自定义结束日期 YYYY-MM-DD")
+    start_time: Optional[str] = Field("00:00:00", description="自定义开始时间 HH:MM:SS")
+    end_time: Optional[str] = Field("23:59:59", description="自定义结束时间 HH:MM:SS")
+
+
 class ComponentTestRequest(BaseModel):
     """测试组件请求"""
 
     account_id: str = Field(..., description="测试账号ID")
-    granularity: Optional[str] = Field(None, description="导出测试粒度")
+    granularity: Optional[str] = Field(None, description="导出测试粒度(快捷时间将自动推导)")
+    time_mode: Optional[Literal["preset", "custom"]] = Field(None, description="时间选择模式")
+    date_preset: Optional[Literal["today", "yesterday", "last_7_days", "last_30_days"]] = Field(
+        None,
+        description="快捷时间预设",
+    )
     start_date: Optional[str] = Field(None, description="导出测试开始日期 YYYY-MM-DD")
     end_date: Optional[str] = Field(None, description="导出测试结束日期 YYYY-MM-DD")
+    start_time: Optional[str] = Field(None, description="导出测试开始时间 HH:MM:SS")
+    end_time: Optional[str] = Field(None, description="导出测试结束时间 HH:MM:SS")
+    time_selection: Optional[TimeSelectionPayload] = Field(None, description="统一时间选择模型")
     sub_domain: Optional[str] = Field(None, description="导出测试子数据域")
 
 
@@ -156,6 +178,7 @@ __all__ = [
     "BatchRegisterRequest",
     "BatchRegisterResult",
     "BatchRegisterResponse",
+    "TimeSelectionPayload",
     "ComponentTestRequest",
     "TestHistoryResponse",
     "TestHistoryListResponse",

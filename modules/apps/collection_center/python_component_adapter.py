@@ -48,7 +48,7 @@ DATA_DOMAIN_EXPORT_MAP = {
         "services": "TiktokExport",
     },
     "miaoshou": {
-        "orders": "MiaoshouExport",
+        "orders": "MiaoshouOrdersExport",
         "products": "MiaoshouExport",
         "warehouse": "MiaoshouExport",
         "inventory": "MiaoshouExport",
