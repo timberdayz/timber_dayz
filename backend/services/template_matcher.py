@@ -5,7 +5,7 @@
 
 v4.5.0新增:
 - 提供统一的模板查找和应用逻辑
-- 避免手动映射和自动入库的重复逻辑
+- 避免不同同步入口的重复逻辑
 - 确保模板选择策略一致性
 
 v4.18.2新增:
@@ -14,7 +14,7 @@ v4.18.2新增:
 
 调用方:
 - FieldMappingEnhanced.vue(手动映射)
-- auto_ingest_orchestrator.py(自动入库)
+- data_sync_service.py(统一同步编排)
 """
 
 from typing import Optional, Dict, List, Any
@@ -536,4 +536,3 @@ def get_template_matcher(db: AsyncSession) -> TemplateMatcher:
     v4.19.0更新:移除同步/异步双模式支持,统一为异步架构
     """
     return TemplateMatcher(db)
-

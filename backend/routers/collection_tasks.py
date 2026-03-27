@@ -53,6 +53,67 @@ VERIFICATION_POLL_INTERVAL = 1.5
 # 任务 API
 # ============================================================
 
+def _build_task_response_payload(task: CollectionTask) -> dict:
+    verification_type = getattr(task, "verification_type", None)
+    verification_message = None
+    if verification_type:
+        verification_message = getattr(task, "current_step", None) or getattr(
+            task, "error_message", None
+        )
+
+    return {
+        "id": task.id,
+        "task_id": task.task_id,
+        "platform": task.platform,
+        "account": task.account,
+        "status": task.status,
+        "progress": getattr(task, "progress", 0) or 0,
+        "current_step": getattr(task, "current_step", None),
+        "files_collected": getattr(task, "files_collected", 0) or 0,
+        "trigger_type": task.trigger_type,
+        "data_domains": getattr(task, "data_domains", None),
+        "sub_domains": getattr(task, "sub_domains", None),
+        "granularity": getattr(task, "granularity", None),
+        "date_range": getattr(task, "date_range", None),
+        "time_selection": getattr(task, "time_selection", None),
+        "total_domains": getattr(task, "total_domains", 0) or 0,
+        "completed_domains": getattr(task, "completed_domains", None),
+        "failed_domains": getattr(task, "failed_domains", None),
+        "current_domain": getattr(task, "current_domain", None),
+        "debug_mode": getattr(task, "debug_mode", False) or False,
+        "error_message": getattr(task, "error_message", None),
+        "duration_seconds": getattr(task, "duration_seconds", None),
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+        "started_at": getattr(task, "started_at", None),
+        "completed_at": getattr(task, "completed_at", None),
+        "verification_type": verification_type,
+        "verification_screenshot": getattr(task, "verification_screenshot", None),
+        "verification_id": task.task_id if verification_type else None,
+        "verification_message": verification_message,
+        "verification_expires_at": None,
+        "verification_attempt_count": 0,
+    }
+
+
+def _build_task_verification_item(task: CollectionTask) -> Optional[dict]:
+    if getattr(task, "status", None) != "paused" or not getattr(
+        task, "verification_type", None
+    ):
+        return None
+
+    return {
+        "task_id": task.task_id,
+        "account_id": task.account,
+        "verification_id": task.task_id,
+        "platform": task.platform,
+        "verification_type": task.verification_type,
+        "verification_message": getattr(task, "current_step", None)
+        or getattr(task, "error_message", None),
+        "verification_screenshot": getattr(task, "verification_screenshot", None),
+    }
+
+
 @router.post("/tasks", response_model=TaskResponse)
 async def create_task(
     request: TaskCreateRequest,
@@ -185,7 +246,7 @@ async def create_task(
         )
     )
 
-    return task
+    return _build_task_response_payload(task)
 
 
 @router.get("/tasks", response_model=List[TaskResponse])
@@ -208,7 +269,7 @@ async def list_tasks(
     stmt = stmt.order_by(desc(CollectionTask.created_at)).offset(offset).limit(limit)
     result = await db.execute(stmt)
     tasks = result.scalars().all()
-    return tasks
+    return [_build_task_response_payload(task) for task in tasks]
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
@@ -223,7 +284,7 @@ async def get_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    return task
+    return _build_task_response_payload(task)
 
 
 @router.delete("/tasks/{task_id}", response_model=SuccessResponse[None])
@@ -313,7 +374,7 @@ async def retry_task(
     await db.commit()
 
     logger.info(f"Created retry task: {new_task.task_id} (original: {task_id})")
-    return new_task
+    return _build_task_response_payload(new_task)
 
 
 @router.post("/tasks/{task_id}/resume", response_model=TaskResponse)
@@ -365,13 +426,14 @@ async def resume_task(
         task_id=task.id,
         level="info",
         message="用户已提交验证码，等待执行器继续",
-        details={"previous_status": "paused"},
+details={"previous_status": "paused"},
     )
+    task.status = "verification_submitted"
     db.add(log)
     await db.commit()
 
     logger.info(f"Resumed task: {task_id} (verification submitted)")
-    return task
+    return _build_task_response_payload(task)
 
 
 @router.get("/tasks/{task_id}/logs", response_model=List[TaskLogResponse])

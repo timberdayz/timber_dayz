@@ -1,4 +1,5 @@
 from tools.test_component import ComponentTester
+from pathlib import Path
 
 
 def test_component_tester_builds_export_runtime_config():
@@ -30,3 +31,9 @@ def test_component_tester_builds_export_runtime_config():
     }
     assert cfg["params"]["granularity"] == "weekly"
     assert cfg["params"]["sub_domain"] == "agent"
+
+
+def test_component_tester_does_not_reference_removed_public_account_info_attr():
+    source = Path("tools/test_component.py").read_text(encoding="utf-8")
+
+    assert "self.account_info" not in source

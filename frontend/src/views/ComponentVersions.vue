@@ -454,34 +454,6 @@
         </el-card>
       </div>
 
-      <!-- 验证码回传：需要验证码时展示截图与输入框 -->
-      <div v-if="verificationRequired" class="verification-required-card" style="margin-bottom: 20px;">
-        <el-card>
-          <template #header>
-            <span>需要验证码</span>
-          </template>
-          <p v-if="verificationRequired.verificationType !== 'otp' && verificationRequired.verificationType !== 'sms' && verificationRequired.verificationType !== 'email_code'" style="margin-bottom: 12px; color: #606266;">
-            请根据下方截图输入图形验证码
-          </p>
-          <p v-else style="margin-bottom: 12px; color: #606266;">
-            请输入收到的短信/邮件验证码
-          </p>
-          <div v-if="verificationRequired.verificationType !== 'otp' && verificationRequired.verificationType !== 'sms' && verificationRequired.verificationType !== 'email_code'" style="margin-bottom: 16px;">
-            <img :src="verificationRequired.screenshotUrl" alt="验证码截图" style="max-width: 100%; max-height: 200px; border: 1px solid #dcdfe6; border-radius: 4px;" @error="($event.target).style.display='none'" />
-          </div>
-          <el-input
-            v-model="verificationInput"
-            :placeholder="verificationRequired.verificationType === 'otp' || verificationRequired.verificationType === 'sms' || verificationRequired.verificationType === 'email_code' ? '请输入短信/邮件验证码' : '请输入验证码'"
-            style="max-width: 280px; margin-right: 12px;"
-            clearable
-            @keyup.enter="submitVerification"
-          />
-          <el-button type="primary" :loading="verificationSubmitting" @click="submitVerification">
-            提交
-          </el-button>
-        </el-card>
-      </div>
-
       <!-- 测试结果（复用测试结果组件样式） -->
       <div v-if="testResult" class="test-results">
         <!-- ⭐ 验证标准失败警告 -->
@@ -604,6 +576,22 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <VerificationResumeDialog
+      :visible="Boolean(verificationRequired)"
+      :verification-type="verificationRequired?.verificationType || ''"
+      :screenshot-url="verificationRequired?.screenshotUrl || ''"
+      :message="verificationRequired?.message || ''"
+      :error-message="verificationErrorMessage"
+      :expires-at="verificationRequired?.expiresAt || ''"
+      :submitting="verificationSubmitting"
+      title="组件测试需要验证码"
+      subtitle="当前测试流程已暂停，请先完成验证码回填后继续。"
+      submit-text="提交并继续"
+      cancel-text="取消测试"
+      @submit="submitVerification"
+      @cancel="closeTestDialog"
+    />
   </div>
 </template>
 
@@ -612,6 +600,7 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Loading, WarningFilled } from '@element-plus/icons-vue'
 import api from '@/api'
+import VerificationResumeDialog from '@/components/verification/VerificationResumeDialog.vue'
 // v4.7.4: 移除 WebSocket，改用 HTTP 轮询
 
 // 数据
@@ -670,8 +659,8 @@ const testStatus = ref({
 
 // 验证码回传：当 status 为 verification_required 时展示
 const verificationRequired = ref(null) // { versionId, testId, verificationType, screenshotUrl }
-const verificationInput = ref('')
 const verificationSubmitting = ref(false)
+const verificationErrorMessage = ref('')
 
 const SERVICE_SUB_DOMAIN_OPTIONS = [
   { label: '智能客服', value: 'ai_assistant' },
@@ -1155,7 +1144,7 @@ const startComponentTest = async () => {
       logs: []
     }
     verificationRequired.value = null
-    verificationInput.value = ''
+    verificationErrorMessage.value = ''
     
     ElMessage.info({
       message: '正在打开浏览器窗口，请稍候...',
@@ -1303,12 +1292,16 @@ const startPollingTestStatus = (testId, versionId) => {
           versionId,
           testId,
           verificationType: response.verification_type || 'graphical_captcha',
-          screenshotUrl: api.getTestVerificationScreenshotUrl(versionId, testId)
+          screenshotUrl: api.getTestVerificationScreenshotUrl(versionId, testId),
+          message: response.verification_message || '',
+          expiresAt: response.verification_expires_at || ''
         }
+        verificationErrorMessage.value = ''
       }
 
       if (response.status === 'completed' || response.status === 'failed') {
         verificationRequired.value = null
+        verificationErrorMessage.value = ''
         if (response.verification_timeout) {
           ElMessage.warning({ message: '验证码输入超时', duration: 5000 })
         }
@@ -1386,21 +1379,23 @@ const startPollingTestStatus = (testId, versionId) => {
 }
 
 // 验证码回传：用户输入后提交
-const submitVerification = async () => {
+const submitVerification = async (submittedValue) => {
   const v = verificationRequired.value
-  if (!v || !verificationInput.value.trim()) return
+  const value = String(submittedValue || '').trim()
+  if (!v || !value) return
   verificationSubmitting.value = true
   try {
+    verificationErrorMessage.value = ''
     const isOtp = ['otp', 'sms', 'email_code'].includes((v.verificationType || '').toLowerCase())
     await api.resumeTest(v.versionId, v.testId, isOtp
-      ? { otp: verificationInput.value.trim() }
-      : { captcha_code: verificationInput.value.trim() }
+      ? { otp: value }
+      : { captcha_code: value }
     )
-    ElMessage.success('验证码已提交，测试将继续执行')
+    ElMessage.info('验证码已提交，系统正在恢复执行')
     verificationRequired.value = null
-    verificationInput.value = ''
   } catch (err) {
-    ElMessage.error(err.response?.data?.detail || err.message || '提交失败')
+    verificationErrorMessage.value = err.response?.data?.detail || err.message || '提交失败'
+    ElMessage.error(verificationErrorMessage.value)
   } finally {
     verificationSubmitting.value = false
   }

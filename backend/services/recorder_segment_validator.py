@@ -11,7 +11,10 @@ from sqlalchemy import select
 from backend.services.component_test_service import ComponentTestService
 from modules.apps.collection_center.transition_gates import (
     GateStatus,
+    evaluate_date_picker_ready,
     evaluate_export_complete,
+    evaluate_filters_ready,
+    evaluate_navigation_ready,
 )
 from modules.core.db import PlatformAccount
 from modules.core.logger import get_logger
@@ -307,14 +310,29 @@ class RecorderSegmentValidator:
                 if str(step.get("action") or "").strip().lower() == "navigate":
                     expected_url = self._replace_variables(str(step.get("url") or "").strip(), account_info)
                     break
-            if expected_url and expected_url not in page.url:
-                return "target url not reached"
             await expect(page.locator("body")).to_be_visible(timeout=10000)
-            return None
+            gate = evaluate_navigation_ready(
+                current_url=page.url,
+                expected_url=expected_url or None,
+                target_marker_visible=True,
+            )
+            if gate.status is GateStatus.READY:
+                return None
+            return gate.reason
 
-        if resolved_signal in {"date_picker_ready", "filters_ready"}:
+        if resolved_signal == "date_picker_ready":
             await expect(page.locator("body")).to_be_visible(timeout=10000)
-            return None
+            gate = evaluate_date_picker_ready(value_applied=True)
+            if gate.status is GateStatus.READY:
+                return None
+            return gate.reason
+
+        if resolved_signal == "filters_ready":
+            await expect(page.locator("body")).to_be_visible(timeout=10000)
+            gate = evaluate_filters_ready(results_refreshed=True)
+            if gate.status is GateStatus.READY:
+                return None
+            return gate.reason
 
         if resolved_signal == "login_ready":
             return None

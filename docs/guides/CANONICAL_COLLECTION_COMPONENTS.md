@@ -1,108 +1,123 @@
-# Canonical 采集组件清单
+# Canonical 采集组件规则
 
-本文档用于定义当前项目中**每个平台、每个逻辑槽位**应保留的唯一 canonical 组件入口，并标注其当前成熟度，避免用户在多个重复组件、测试件或历史别名之间猜测该改哪一个。
+本文档定义 V2 架构下哪些文件才算“正式逻辑组件入口”，哪些文件只能视为历史兼容层或辅助文件。
 
-## 评估标准
+## 目标
 
-- **成熟**：已包含真实业务流程、复杂交互处理、下载/状态/异常兜底，可直接作为 canonical 迁移基础
-- **可用**：已具备主流程，但仍偏薄或存在已知规则欠账，需要后续继续优化
-- **排除**：不应作为用户默认维护对象，包括测试件、基类壳子、历史别名、配置文件
+V2 的核心原则是：
 
-## Shopee
+- 一个逻辑组件只保留一个 canonical 源文件
+- 正式测试、批量注册、后续迁移都围绕 canonical 文件展开
+- 兼容文件、录制草稿、配置文件不能再冒充正式组件入口
 
-### Canonical 槽位
+## Canonical 文件命名
 
-| 槽位 | 当前基础文件 | 成熟度 | 说明 |
-|------|--------------|--------|------|
-| `shopee/login` | `modules/platforms/shopee/components/login.py` | 可用 | 统一委托 `LoginService`，是当前正确入口 |
-| `shopee/navigation` | `modules/platforms/shopee/components/navigation.py` | 可用 | 深链导航可用，但仍是轻量实现 |
-| `shopee/date_picker` | `modules/platforms/shopee/components/date_picker.py` | 可用 | 通过 `RecipeExecutor` 复用，适合作为前置组件 |
-| `shopee/orders_export` | `modules/platforms/shopee/components/orders_export.py` | 可用 | 具备导出与下载重试，但复杂度中等 |
-| `shopee/products_export` | `modules/platforms/shopee/components/products_export.py` | 成熟 | 已覆盖“最新记录下载 / 文件系统兜底” |
-| `shopee/analytics_export` | `modules/platforms/shopee/components/analytics_export.py` | 成熟 | 已覆盖“生成报告 / 最新下载按钮 / 重试与兜底” |
-| `shopee/finance_export` | `modules/platforms/shopee/components/finance_export.py` | 可用 | 可复用，但复杂度低于 products/services |
-| `shopee/services_export` | `modules/platforms/shopee/components/services_export.py` | 成熟 | 已覆盖“最新记录 / 状态轮询 / HAR/API 兜底” |
+### 固定槽位
 
-### 排除出 canonical 的文件
+以下文件名天然属于 canonical 组件入口：
 
-| 文件 | 原因 |
-|------|------|
-| `modules/platforms/shopee/components/export.py` | 通用基类薄封装，不应作为用户直接维护的业务导出组件 |
-| `modules/platforms/shopee/components/metrics_selector.py` | skeleton only，明确不是成熟组件 |
-| `modules/platforms/shopee/components/recorder_test_login.py` | 录制测试件，不应作为正式登录组件 |
-| `modules/platforms/shopee/components/*_config.py` | 配置文件，不是逻辑组件入口 |
+- `login.py`
+- `navigation.py`
+- `date_picker.py`
+- `shop_switch.py`
+- `filters.py`
 
-## TikTok
+对应逻辑组件名格式：
 
-### Canonical 槽位
+- `platform/login`
+- `platform/navigation`
+- `platform/date_picker`
+- `platform/shop_switch`
+- `platform/filters`
 
-| 槽位 | 当前基础文件 | 成熟度 | 说明 |
-|------|--------------|--------|------|
-| `tiktok/login` | `modules/platforms/tiktok/components/login.py` | 成熟 | 已覆盖手机号登录、2FA、信任设备、复杂分支 |
-| `tiktok/navigation` | `modules/platforms/tiktok/components/navigation.py` | 成熟 | 已覆盖 deep-link、空白页 watchdog、自愈刷新 |
-| `tiktok/date_picker` | `modules/platforms/tiktok/components/date_picker.py` | 成熟 | 已覆盖 iframe、递归 roots、服务页特殊面板 |
-| `tiktok/shop_switch` | `modules/platforms/tiktok/components/shop_switch.py` | 可用 | canonical 入口；当前内部仍委托 `shop_selector.py` 实现，后续应继续规范化 |
-| `tiktok/export` | `modules/platforms/tiktok/components/export.py` | 成熟 | 已覆盖按钮禁用、tab 切换、确认按钮、全局下载监听 |
+### 数据域导出槽位
 
-### 排除出 canonical 的文件
+任意 `*_export.py` 都属于 canonical 导出组件入口，例如：
 
-| 文件 | 原因 |
-|------|------|
-| `modules/platforms/tiktok/components/*_config.py` | 配置文件，不是逻辑组件入口 |
-| `modules/platforms/tiktok/components/config_registry.py` | 注册中心，不是组件入口 |
+- `orders_export.py`
+- `products_export.py`
+- `analytics_export.py`
+- `finance_export.py`
+- `services_export.py`
+- `services_agent_export.py`
 
-## 妙手 Miaoshou
+对应逻辑组件名格式：
 
-### Canonical 槽位
+- `platform/orders_export`
+- `platform/products_export`
+- `platform/services_agent_export`
 
-| 槽位 | 当前基础文件 | 成熟度 | 说明 |
-|------|--------------|--------|------|
-| `miaoshou/login` | `modules/platforms/miaoshou/components/login.py` | 可用 | 正式入口是 `login.py`，当前实现委托到 `miaoshou_login.py` |
-| `miaoshou/navigation` | `modules/platforms/miaoshou/components/navigation.py` | 可用 | 兼容导航件，可作为最小前置，但仍偏轻量 |
-| `miaoshou/date_picker` | `modules/platforms/miaoshou/components/date_picker.py` | 可用 | 已有快捷项与直接输入双路径，但仍需继续规范化 |
-| `miaoshou/export` | `modules/platforms/miaoshou/components/export.py` | 成熟 | 已覆盖 dropdown / dialog / iframe / 下载 tap / 多级 fallback |
+## 非 Canonical 文件
 
-### 排除出 canonical 的文件
+以下文件不应作为默认维护目标，也不应进入默认批量注册主链路。
 
-| 文件 | 原因 |
-|------|------|
-| `modules/platforms/miaoshou/components/miaoshou_login.py` | 历史生成实现，保留为 `login.py` 的底层实现细节，不应单独暴露给用户 |
-| `modules/platforms/miaoshou/components/*_config.py` | 配置文件，不是逻辑组件入口 |
-| `modules/platforms/miaoshou/components/overlay_guard.py` | 抗干扰工具件，不是逻辑组件入口 |
+### 版本化运行时文件
 
-## 当前推荐迁移策略
+这类文件是运行时产物，不是主维护入口：
 
-### 直接作为迁移基础的成熟组件
+- `login_v1_0_3.py`
+- `orders_export_v1_0_0.py`
 
-- Shopee：
-  - `products_export.py`
-  - `analytics_export.py`
-  - `services_export.py`
-- TikTok：
-  - `login.py`
-  - `navigation.py`
-  - `date_picker.py`
-  - `export.py`
-- 妙手：
-  - `export.py`
+### 配置文件
 
-### 可作为前置基础但后续仍需优化的组件
+这类文件只承载选择器、文案、候选项，不是逻辑组件：
 
-- Shopee：
-  - `login.py`
-  - `navigation.py`
-  - `date_picker.py`
-  - `orders_export.py`
-  - `finance_export.py`
-- TikTok：
-  - `shop_switch.py`
-- 妙手：
-  - `login.py`
-  - `navigation.py`
-  - `date_picker.py`
+- `*_config.py`
+- `config_registry.py`
 
-## 使用建议
+### 辅助/守卫文件
 
-1. 后续“批量注册 Python 组件”时，应以本清单中的 canonical 槽位为目标。
-2. 用户默认应只维护本清单中的 canonical 组件。
-3. 排除列表中的文件不应作为默认编辑对象暴露给用户。
+这类文件是 helper，不是逻辑组件：
+
+- `overlay_guard.py`
+- 其他仅提供工具函数或常量的文件
+
+### 录制/兼容层文件
+
+这类文件属于历史迁移资产，不再作为默认主入口：
+
+- `miaoshou_login.py`
+- `recorder_*`
+- `*_recorder.py`
+- `*_test_*.py`
+
+## V2 默认维护原则
+
+后续新开发或重构时，默认只编辑：
+
+- `modules/platforms/<platform>/components/` 下的 canonical 文件
+
+不应默认编辑：
+
+- 版本化文件
+- 录制生成中间文件
+- 兼容包装层
+- 配置文件之外的历史辅助层
+
+## 与版本管理的关系
+
+V2 下应区分两层：
+
+1. canonical 源文件  
+用于日常开发、重构、代码审查
+
+2. stable/versioned 运行时文件  
+用于组件版本管理、正式运行、回滚
+
+这意味着：
+
+- 开发源头看 canonical
+- 运行入口看 stable `file_path`
+- 不再长期保留第三层“兼容主实现文件”作为默认维护对象
+
+## 当前迁移策略
+
+V2 第一阶段不会立即删除历史文件，但会逐步收敛为：
+
+- 批量注册优先识别 canonical 规则
+- 文档与 UI 默认展示 canonical 组件语义
+- 历史兼容文件保留在磁盘上，但退出默认维护主路径
+
+## 一句话规则
+
+如果一个文件不是固定槽位文件，且也不是 `*_export.py`，那它默认就不应该被当成新的正式采集组件入口。

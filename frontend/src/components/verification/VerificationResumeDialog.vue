@@ -19,8 +19,28 @@
 
     <div style="display: flex; flex-direction: column; gap: 16px">
       <el-alert
-        :title="isOtp ? '请输入收到的短信或邮件验证码' : '请根据下方截图输入图形验证码'"
+        v-if="submitting"
+        title="验证码已提交，系统正在恢复执行，请勿重复提交。"
+        type="info"
+        :closable="false"
+        show-icon
+      />
+
+      <el-alert
+        :title="
+          isOtp
+            ? '请输入收到的短信或邮件验证码'
+            : '请根据下方截图输入图形验证码'
+        "
         type="warning"
+        :closable="false"
+        show-icon
+      />
+
+      <el-alert
+        v-if="errorMessage"
+        :title="errorMessage"
+        type="error"
         :closable="false"
         show-icon
       />
@@ -34,7 +54,7 @@
       </div>
 
       <div
-        v-if="!isOtp && screenshotUrl"
+        v-if="!isOtp && screenshotUrl && !screenshotLoadFailed"
         style="
           display: flex;
           justify-content: center;
@@ -56,15 +76,35 @@
             border-radius: 4px;
             background: #fff;
           "
-          @error="($event.target).style.display = 'none'"
+          @error="handleImageError"
         />
+      </div>
+
+      <div
+        v-else-if="!isOtp"
+        style="
+          min-height: 120px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          background: #fafafa;
+          border: 1px dashed #dcdfe6;
+          border-radius: 8px;
+          color: #909399;
+          padding: 12px;
+          font-size: 13px;
+        "
+      >
+        验证码截图暂不可用，请根据当前页面或稍后重试。
       </div>
 
       <el-input
         ref="inputRef"
         v-model="localValue"
-        :placeholder="isOtp ? '请输入短信/邮件验证码' : '请输入图片中的验证码'"
+        :placeholder="isOtp ? '请输入短信或邮件验证码' : '请输入图片中的验证码'"
         clearable
+        :disabled="submitting"
         @keyup.enter="submit"
       />
 
@@ -89,6 +129,7 @@ const props = defineProps({
   screenshotUrl: { type: String, default: "" },
   submitting: { type: Boolean, default: false },
   message: { type: String, default: "" },
+  errorMessage: { type: String, default: "" },
   expiresAt: { type: String, default: "" },
   title: { type: String, default: "需要验证码" },
   subtitle: {
@@ -100,9 +141,9 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["submit", "cancel"]);
-
 const localValue = ref("");
 const inputRef = ref(null);
+const screenshotLoadFailed = ref(false);
 
 const isOtp = computed(() =>
   ["otp", "sms", "email_code"].includes(
@@ -116,13 +157,19 @@ const submit = () => {
   emit("submit", value);
 };
 
+const handleImageError = () => {
+  screenshotLoadFailed.value = true;
+};
+
 watch(
-  () => props.visible,
-  async (visible) => {
+  () => [props.visible, props.screenshotUrl],
+  async ([visible]) => {
     if (!visible) {
       localValue.value = "";
+      screenshotLoadFailed.value = false;
       return;
     }
+    screenshotLoadFailed.value = false;
     await nextTick();
     inputRef.value?.focus?.();
   }

@@ -38,14 +38,30 @@ def normalize_time_selection(
     date_range: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     raw: Dict[str, Any] = dict(time_selection or {})
+    explicit_preset = str(raw.get("preset") or date_preset or date_range_type or "").strip().lower()
+    explicit_start = (
+        raw.get("start_date")
+        or _normalize_date_like(start_date)
+        or _normalize_date_like(custom_date_start)
+        or _normalize_date_like((date_range or {}).get("start_date"))
+        or _normalize_date_like((date_range or {}).get("start"))
+        or _normalize_date_like((date_range or {}).get("date_from"))
+    )
+    explicit_end = (
+        raw.get("end_date")
+        or _normalize_date_like(end_date)
+        or _normalize_date_like(custom_date_end)
+        or _normalize_date_like((date_range or {}).get("end_date"))
+        or _normalize_date_like((date_range or {}).get("end"))
+        or _normalize_date_like((date_range or {}).get("date_to"))
+    )
+    has_custom_fields = bool(explicit_start or explicit_end)
 
     mode = str(
         raw.get("mode")
         or time_mode
-        or ("preset" if date_preset else "")
-        or ("custom" if start_date or end_date else "")
-        or ("custom" if custom_date_start or custom_date_end else "")
-        or ("custom" if (date_range or {}).get("start_date") or (date_range or {}).get("start") else "")
+        or ("preset" if explicit_preset and explicit_preset != "custom" else "")
+        or ("custom" if has_custom_fields else "")
         or ("preset" if date_range_type and date_range_type != "custom" else "")
         or ("custom" if date_range_type == "custom" else "")
     ).strip().lower()
@@ -54,7 +70,9 @@ def normalize_time_selection(
         return {}
 
     if mode == "preset":
-        preset = str(raw.get("preset") or date_preset or date_range_type or "").strip().lower()
+        if has_custom_fields:
+            raise ValueError("preset time selection cannot include custom range fields")
+        preset = explicit_preset
         if preset not in TIME_PRESET_TO_GRANULARITY:
             raise ValueError(f"invalid date preset: {preset or 'empty'}")
         return {
@@ -63,22 +81,10 @@ def normalize_time_selection(
         }
 
     if mode == "custom":
-        start = (
-            raw.get("start_date")
-            or _normalize_date_like(start_date)
-            or _normalize_date_like(custom_date_start)
-            or _normalize_date_like((date_range or {}).get("start_date"))
-            or _normalize_date_like((date_range or {}).get("start"))
-            or _normalize_date_like((date_range or {}).get("date_from"))
-        )
-        end = (
-            raw.get("end_date")
-            or _normalize_date_like(end_date)
-            or _normalize_date_like(custom_date_end)
-            or _normalize_date_like((date_range or {}).get("end_date"))
-            or _normalize_date_like((date_range or {}).get("end"))
-            or _normalize_date_like((date_range or {}).get("date_to"))
-        )
+        if explicit_preset and explicit_preset != "custom":
+            raise ValueError("custom time selection cannot include preset fields")
+        start = explicit_start
+        end = explicit_end
         if not start or not end:
             raise ValueError("custom time selection requires start_date and end_date")
         return {

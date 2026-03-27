@@ -139,6 +139,10 @@ class TaskResponse(BaseModel):
     # 验证码暂停(v4.7.x 验证码优化)
     verification_type: Optional[str] = Field(None, description="验证码类型(如 graphical_captcha/otp)")
     verification_screenshot: Optional[str] = Field(None, description="验证码截图路径或URL")
+    verification_id: Optional[str] = Field(None, description="验证码实例ID")
+    verification_message: Optional[str] = Field(None, description="验证码提示信息")
+    verification_expires_at: Optional[str] = Field(None, description="验证码过期时间")
+    verification_attempt_count: int = Field(0, description="验证码提交次数")
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -80,3 +80,93 @@ def evaluate_export_complete(*, file_path: Optional[str]) -> GateResult:
         reason="download file confirmed",
         matched_signal="file_exists",
     )
+
+
+def evaluate_navigation_ready(
+    *,
+    current_url: Optional[str],
+    expected_url: Optional[str] = None,
+    target_marker_visible: bool = False,
+) -> GateResult:
+    current = str(current_url or "").strip()
+    expected = str(expected_url or "").strip()
+
+    if expected and expected not in current:
+        return GateResult(
+            stage="navigation",
+            status=GateStatus.FAILED,
+            reason="target url not reached",
+            current_url=current or None,
+        )
+
+    if not target_marker_visible:
+        return GateResult(
+            stage="navigation",
+            status=GateStatus.FAILED,
+            reason="target marker not visible",
+            current_url=current or None,
+        )
+
+    return GateResult(
+        stage="navigation",
+        status=GateStatus.READY,
+        reason="navigation confirmed",
+        current_url=current or None,
+        matched_signal="url_and_marker" if expected else "marker_visible",
+    )
+
+
+def evaluate_date_picker_ready(
+    *,
+    value_applied: bool = False,
+    panel_closed: bool = False,
+) -> GateResult:
+    if value_applied:
+        return GateResult(
+            stage="date_picker",
+            status=GateStatus.READY,
+            reason="date picker value applied",
+            matched_signal="value_applied",
+        )
+
+    if panel_closed:
+        return GateResult(
+            stage="date_picker",
+            status=GateStatus.READY,
+            reason="date picker panel closed",
+            matched_signal="panel_closed",
+        )
+
+    return GateResult(
+        stage="date_picker",
+        status=GateStatus.FAILED,
+        reason="date picker state not confirmed",
+    )
+
+
+def evaluate_filters_ready(
+    *,
+    results_refreshed: bool = False,
+    filter_value_applied: bool = False,
+) -> GateResult:
+    if results_refreshed:
+        return GateResult(
+            stage="filters",
+            status=GateStatus.READY,
+            reason="filter results refreshed",
+            matched_signal="results_refreshed",
+        )
+
+    if filter_value_applied:
+        return GateResult(
+            stage="filters",
+            status=GateStatus.READY,
+            reason="filter value applied",
+            matched_signal="filter_value_applied",
+        )
+
+    return GateResult(
+        stage="filters",
+        status=GateStatus.FAILED,
+        reason="filter state not confirmed",
+    )

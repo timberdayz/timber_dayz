@@ -378,3 +378,63 @@ async def test_batch_register_includes_miaoshou_orders_export_when_present(
         "miaoshou/login",
         "miaoshou/orders_export",
     ]
+
+
+@pytest.mark.asyncio
+async def test_batch_register_accepts_any_domain_export_filename_by_rule(
+    component_version_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    project_root = tmp_path
+    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
+    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
+    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+
+    shopee_dir = project_root / "modules" / "platforms" / "shopee" / "components"
+    _write_component(shopee_dir / "services_agent_export.py", "ShopeeServicesAgentExport", "export")
+    _write_component(shopee_dir / "services_config.py", "ServicesSelectors", "other")
+
+    response = await batch_register_python_components(
+        request=BatchRegisterRequest(platform="shopee"),
+        db=component_version_session,
+        http_request=None,
+    )
+
+    result = await component_version_session.execute(select(ComponentVersion))
+    rows = result.scalars().all()
+    names = sorted(v.component_name for v in rows)
+
+    assert response.success is True
+    assert names == ["shopee/services_agent_export"]
+
+
+@pytest.mark.asyncio
+async def test_batch_register_skips_legacy_generic_export_file(
+    component_version_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    project_root = tmp_path
+    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
+    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
+    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+
+    tiktok_dir = project_root / "modules" / "platforms" / "tiktok" / "components"
+    _write_component(tiktok_dir / "export.py", "TiktokExport", "export")
+    _write_component(tiktok_dir / "orders_export.py", "TiktokOrdersExport", "export")
+
+    response = await batch_register_python_components(
+        request=BatchRegisterRequest(platform="tiktok"),
+        db=component_version_session,
+        http_request=None,
+    )
+
+    result = await component_version_session.execute(select(ComponentVersion))
+    rows = result.scalars().all()
+    names = sorted(v.component_name for v in rows)
+
+    assert response.success is True
+    assert names == ["tiktok/orders_export"]

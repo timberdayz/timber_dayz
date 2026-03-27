@@ -544,7 +544,7 @@ class ComponentTester:
                 screenshot_url=verification_screenshot or None,
                 message="login requires verification",
                 account_id=str(self.account_id or "") or None,
-                store_name=str((self.account_info or {}).get("store_name") or "") or None,
+                store_name=str((self._account_info or {}).get("store_name") or "") or None,
             )
 
             if self.progress_callback:

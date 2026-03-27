@@ -15,7 +15,6 @@ from pathlib import Path
 from backend.models.database import get_async_db, CatalogFile
 from backend.utils.api_response import success_response, error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
-from backend.services.auto_ingest_orchestrator import get_auto_ingest_orchestrator
 from backend.services.data_validator import validate_orders, validate_product_metrics, validate_services
 from backend.services.data_importer import (
     stage_orders,
@@ -34,9 +33,6 @@ from backend.routers._field_mapping_helpers import (
 logger = get_logger(__name__)
 
 router = APIRouter()
-
-AUTO_INGEST_MAX_PER_SCAN = 20
-
 
 @router.get("/file-groups")
 async def get_file_groups(db: AsyncSession = Depends(get_async_db)):
@@ -405,55 +401,20 @@ async def scan_files(db: AsyncSession = Depends(get_async_db)):
         result = scan_and_register(str(scan_dir))
         logger.info(f"扫描完成: 发现{result.seen}个文件, 新注册{result.registered}个, 跳过{result.skipped}个")
 
-        auto_ingest_results: List[Dict[str, Any]] = []
-        new_file_ids = result.new_file_ids[:AUTO_INGEST_MAX_PER_SCAN]
-
-        if result.new_file_ids:
-            if len(result.new_file_ids) > AUTO_INGEST_MAX_PER_SCAN:
-                logger.warning(
-                    "[AutoIngest] 本次扫描新增文件 %s 个,超过限制 %s 个,"
-                    "仅自动处理前 %s 个。其余将在定时任务中处理。",
-                    len(result.new_file_ids),
-                    AUTO_INGEST_MAX_PER_SCAN,
-                    AUTO_INGEST_MAX_PER_SCAN,
-                )
-
-            orchestrator = get_auto_ingest_orchestrator(db)
-
-            for file_id in new_file_ids:
-                try:
-                    ingest_result = await orchestrator.ingest_single_file(
-                        file_id=file_id,
-                        only_with_template=True,
-                        allow_quarantine=True,
-                    )
-                    auto_ingest_results.append(ingest_result)
-                except Exception as ingest_error:
-                    logger.error(
-                        "[AutoIngest] 扫描后自动入库失败: file_id=%s, error=%s",
-                        file_id,
-                        ingest_error,
-                        exc_info=True,
-                    )
-                    auto_ingest_results.append(
-                        {
-                            "success": False,
-                            "file_id": file_id,
-                            "status": "failed",
-                            "message": str(ingest_error),
-                        }
-                    )
-        
         data = {
             "total_files": result.seen,
             "registered": result.registered,
             "orphaned_removed": 0,
             "db_records": result.seen,
             "new_file_ids": result.new_file_ids,
-            "auto_ingest": auto_ingest_results,
+            "auto_ingest": [],
+            "sync_triggered": False,
         }
         
-        return success_response(data=data, message="文件扫描完成")
+        return success_response(
+            data=data,
+            message="文件扫描完成，已完成目录注册，未触发自动入库"
+        )
     except Exception as e:
         logger.error(f"扫描失败: {str(e)}", exc_info=True)
         return error_response(

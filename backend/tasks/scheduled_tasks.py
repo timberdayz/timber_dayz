@@ -15,7 +15,6 @@ sys.path.insert(0, str(root_dir))
 
 from backend.celery_app import celery_app
 from backend.models.database import SessionLocal
-from backend.services.auto_ingest_orchestrator import AutoIngestOrchestrator
 from modules.core.db import CatalogFile
 from sqlalchemy import select, text
 import logging

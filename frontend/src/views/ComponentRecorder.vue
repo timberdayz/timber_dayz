@@ -953,6 +953,7 @@
       :verification-type="verificationRequired?.verificationType || recorderRuntimeStatus.verification_type || ''"
       :screenshot-url="verificationRequired?.screenshotUrl || ''"
       :message="recorderRuntimeStatus.verification_message || ''"
+      :error-message="verificationErrorMessage"
       :expires-at="recorderRuntimeStatus.verification_expires_at || ''"
       :submitting="verificationSubmitting"
       title="录制前登录需要验证码"
@@ -1017,6 +1018,7 @@ const recorderRuntimeStatus = ref({
 });
 const verificationRequired = ref(null);
 const verificationSubmitting = ref(false);
+const verificationErrorMessage = ref("");
 const recordedSteps = ref([]);
 const accounts = ref([]);
 const accountsLoading = ref(false); // ⭐ Phase 9完善：账号加载状态
@@ -1401,6 +1403,7 @@ const startRecording = async () => {
       verification_screenshot: null,
     };
     verificationRequired.value = null;
+    verificationErrorMessage.value = "";
     ElMessage.info("录制流程已启动，正在进行录制前检查...");
 
     const response = resolveApiPayload(await api.post("/collection/recorder/start", {
@@ -1554,8 +1557,10 @@ const startPollingSteps = () => {
               statusResponse.verification_type || "graphical_captcha",
             screenshotUrl: `${base}/collection/recorder/verification-screenshot?ts=${Date.now()}`,
           };
+          verificationErrorMessage.value = "";
         } else if (statusResponse.state !== "failed_before_recording") {
           verificationRequired.value = null;
+          verificationErrorMessage.value = "";
         }
         if (statusResponse.state === "failed_before_recording") {
           isRecording.value = false;
@@ -1590,11 +1595,12 @@ const submitRecorderVerification = async (submittedValue) => {
   if (!verificationValue) return;
   verificationSubmitting.value = true;
   try {
+    verificationErrorMessage.value = "";
     const payload = isOtpVerification.value
       ? { otp: verificationValue }
       : { captcha_code: verificationValue };
     await api.post("/collection/recorder/resume", payload);
-    ElMessage.success("验证码已提交，录制前检查将继续执行");
+    ElMessage.info("验证码已提交，系统正在恢复执行");
     verificationRequired.value = null;
     recorderRuntimeStatus.value = {
       ...recorderRuntimeStatus.value,
@@ -1602,9 +1608,9 @@ const submitRecorderVerification = async (submittedValue) => {
       error_message: null,
     };
   } catch (error) {
-    ElMessage.error(
-      error.response?.data?.detail || error.message || "验证码提交失败"
-    );
+    verificationErrorMessage.value =
+      error.response?.data?.detail || error.message || "验证码提交失败";
+    ElMessage.error(verificationErrorMessage.value);
   } finally {
     verificationSubmitting.value = false;
   }

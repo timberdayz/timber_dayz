@@ -31,6 +31,10 @@ from backend.schemas.component_version import (
     VersionUpdateRequest,
 )
 from backend.services.component_name_utils import parse_component_name
+from backend.services.collection_component_topology import (
+    build_component_name_from_filename,
+    is_canonical_component_filename,
+)
 from backend.services.component_version_service import ComponentVersionService
 from backend.services.verification_service import VerificationService
 from backend.services.verification_state_store import VerificationStateStore
@@ -81,7 +85,7 @@ CANONICAL_COMPONENT_FILES = {
 def _is_canonical_component_file(platform: str, filename: str) -> bool:
     """Return True when the file is a canonical logical component entry."""
     try:
-        return filename in CANONICAL_COMPONENT_FILES.get(platform, set())
+        return is_canonical_component_filename(filename)
     except Exception:
         return False
 
@@ -98,11 +102,21 @@ def _get_test_verification_store_path(test_dir) -> Path:
 
 def _get_canonical_component_names(platform: Optional[str] = None) -> list[str]:
     """Return canonical component_name values for a platform or all platforms."""
-    if platform:
-        return sorted(CANONICAL_COMPONENT_NAMES.get(platform, set()))
+    project_root = Path(__file__).parent.parent.parent
+    platforms_dir = project_root / "modules" / "platforms"
+    target_platforms = [platform] if platform else ["shopee", "tiktok", "miaoshou"]
+
     merged: set[str] = set()
-    for names in CANONICAL_COMPONENT_NAMES.values():
-        merged.update(names)
+    for platform_name in target_platforms:
+        platform_dir = platforms_dir / platform_name / "components"
+        if not platform_dir.exists():
+            continue
+        for py_file in platform_dir.glob("*.py"):
+            if py_file.name.startswith("__"):
+                continue
+            if not is_canonical_component_filename(py_file.name):
+                continue
+            merged.add(build_component_name_from_filename(platform_name, py_file.name))
     return sorted(merged)
 
 
@@ -2100,21 +2114,6 @@ async def post_test_resume(
         response_data["captcha_code"] = body.captcha_code.strip()
     if body.otp:
         response_data["otp"] = body.otp.strip()
-    response_path = test_dir / "verification_response.json"
-    try:
-        with open(response_path, "w", encoding="utf-8") as f:
-            json.dump(response_data, f, ensure_ascii=False)
-    except Exception as e:
-        logger.warning(f"Write verification_response.json failed: {e}")
-        return error_response(
-            ErrorCode.FILE_WRITE_ERROR,
-            "写入回传文件失败",
-            status_code=500,
-            detail=str(e),
-            recovery_suggestion="请稍后重试",
-        )
-    return {"success": True, "message": "验证码已提交，测试将继续执行"}
-
 
     verification_id = str(progress_data.get("verification_id") or "").strip()
     if verification_id:
@@ -2133,6 +2132,20 @@ async def post_test_resume(
                 json.dump(progress_data, f, ensure_ascii=False)
         except Exception as e:
             logger.warning(f"Mark component test verification submitted failed: {e}")
+
+    response_path = test_dir / "verification_response.json"
+    try:
+        with open(response_path, "w", encoding="utf-8") as f:
+            json.dump(response_data, f, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"Write verification_response.json failed: {e}")
+        return error_response(
+            ErrorCode.FILE_WRITE_ERROR,
+            "写入回传文件失败",
+            status_code=500,
+            detail=str(e),
+            recovery_suggestion="请稍后重试",
+        )
     return {"success": True, "message": "验证码已提交，测试将继续执行"}
 
 

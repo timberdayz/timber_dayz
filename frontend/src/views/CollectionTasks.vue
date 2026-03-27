@@ -97,6 +97,31 @@
       </div>
     </div>
 
+    <div v-if="pendingVerificationItems.length" class="pending-verification-panel">
+      <div class="section-header">
+        <h3>待回填验证码</h3>
+      </div>
+      <div class="pending-verification-list">
+        <div
+          v-for="item in pendingVerificationItems"
+          :key="`${item.task_id}-${item.account}`"
+          class="pending-verification-item"
+        >
+          <div class="pending-verification-meta">
+            <el-tag :type="getPlatformTagType(item.platform)" size="small">
+              {{ item.platform }}
+            </el-tag>
+            <span>{{ item.account }}</span>
+            <span>{{ item.task_id?.slice(0, 8) }}...</span>
+            <span>{{ item.current_step || '等待验证码' }}</span>
+          </div>
+          <el-button size="small" type="primary" @click="showResumeDialog(item)">
+            立即回填
+          </el-button>
+        </div>
+      </div>
+    </div>
+
     <!-- 任务列表 -->
     <div class="tasks-section">
       <div class="section-header">
@@ -233,43 +258,21 @@
       </div>
     </el-dialog>
 
-    <!-- 验证码对话框 -->
-    <el-dialog 
-      v-model="verificationDialogVisible" 
-      title="需要验证"
-      width="500px"
-      :close-on-click-modal="false"
-    >
-      <div class="verification-content">
-        <el-alert 
-          type="warning" 
-          :closable="false"
-          title="任务需要验证码才能继续"
-        />
-        
-        <img 
-          v-if="verificationScreenshot" 
-          :src="verificationScreenshot" 
-          class="verification-screenshot"
-        />
-        
-        <el-form>
-          <el-form-item label="验证码">
-            <el-input 
-              v-model="verificationCode" 
-              placeholder="请输入验证码"
-            />
-          </el-form-item>
-        </el-form>
-      </div>
-      
-      <template #footer>
-        <el-button @click="skipVerification">跳过</el-button>
-        <el-button type="primary" @click="submitVerification">
-          提交验证码
-        </el-button>
-      </template>
-    </el-dialog>
+    <VerificationResumeDialog
+      :visible="verificationDialogVisible"
+      :verification-type="currentVerificationItem?.verificationType || ''"
+      :screenshot-url="currentVerificationItem?.screenshotUrl || ''"
+      :message="currentVerificationItem?.message || ''"
+      :error-message="verificationErrorMessage"
+      :expires-at="currentVerificationItem?.expiresAt || ''"
+      :submitting="verificationSubmitting"
+      title="任务验证码回填"
+      subtitle="当前采集任务已暂停，请先完成验证码回填后继续。"
+      submit-text="提交并继续"
+      cancel-text="取消任务"
+      @submit="submitVerification"
+      @cancel="skipVerification"
+    />
   </div>
 </template>
 
@@ -278,6 +281,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CaretRight, Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
+import VerificationResumeDialog from '@/components/verification/VerificationResumeDialog.vue'
 
 // 状态
 const loading = ref(false)
@@ -288,10 +292,10 @@ const accounts = ref([])
 const taskLogs = ref([])
 const statusFilter = ref('')
 const logsDialogVisible = ref(false)
-const verificationDialogVisible = ref(false)
-const verificationScreenshot = ref('')
-const verificationCode = ref('')
 const currentTask = ref(null)
+const currentVerificationItem = ref(null)
+const verificationSubmitting = ref(false)
+const verificationErrorMessage = ref('')
 
 // v4.7.4: HTTP 轮询（替代 WebSocket）
 const pollingIntervals = ref({})
@@ -321,6 +325,12 @@ const canCreateTask = computed(() => {
          quickForm.account_id && 
          quickForm.data_domains.length > 0
 })
+
+const pendingVerificationItems = computed(() => {
+  return tasks.value.filter(task => task.status === 'paused' && task.verification_type)
+})
+
+const verificationDialogVisible = computed(() => Boolean(currentVerificationItem.value))
 
 // 方法
 const loadTasks = async () => {
@@ -414,21 +424,37 @@ const retryTask = async (row) => {
 
 const showResumeDialog = (row) => {
   currentTask.value = row
-  verificationCode.value = ''
-  verificationScreenshot.value = row.error_screenshot_path || ''
-  verificationDialogVisible.value = true
+  currentVerificationItem.value = {
+    taskId: row.task_id,
+    verificationType: row.verification_type || 'graphical_captcha',
+    screenshotUrl: row.verification_type ? collectionApi.getTaskScreenshotUrl(row.task_id) : '',
+    message: row.verification_message || row.current_step || '任务需要验证码才能继续',
+    expiresAt: row.verification_expires_at || ''
+  }
+  verificationErrorMessage.value = ''
 }
 
-const submitVerification = async () => {
+const submitVerification = async (submittedValue) => {
   if (!currentTask.value) return
+  const value = String(submittedValue || '').trim()
+  if (!value) return
   
   try {
-    await collectionApi.resumeTask(currentTask.value.task_id, verificationCode.value)
-    ElMessage.success('任务已恢复')
-    verificationDialogVisible.value = false
+    verificationSubmitting.value = true
+    verificationErrorMessage.value = ''
+    const verificationType = String(currentVerificationItem.value?.verificationType || '').toLowerCase()
+    const payload = ['otp', 'sms', 'email_code'].includes(verificationType)
+      ? { otp: value }
+      : { captcha_code: value }
+    await collectionApi.resumeTask(currentTask.value.task_id, payload)
+    ElMessage.info('验证码已提交，系统正在恢复执行')
+    currentVerificationItem.value = null
     loadTasks()
   } catch (error) {
-    ElMessage.error('恢复失败: ' + error.message)
+    verificationErrorMessage.value = error.message || '恢复失败'
+    ElMessage.error('恢复失败: ' + verificationErrorMessage.value)
+  } finally {
+    verificationSubmitting.value = false
   }
 }
 
@@ -438,7 +464,8 @@ const skipVerification = async () => {
   try {
     await collectionApi.cancelTask(currentTask.value.task_id)
     ElMessage.info('任务已跳过')
-    verificationDialogVisible.value = false
+    currentVerificationItem.value = null
+    verificationErrorMessage.value = ''
     loadTasks()
   } catch (error) {
     ElMessage.error('操作失败: ' + error.message)
@@ -486,11 +513,17 @@ const startPollingTask = (taskId) => {
       }
       
       // 检查是否需要验证码
-      if (taskDetail.status === 'paused' && taskDetail.verification_required) {
+      if (taskDetail.status === 'paused' && taskDetail.verification_type) {
         stopPollingTask(taskId)
         currentTask.value = task
-        verificationScreenshot.value = taskDetail.error_screenshot_path || ''
-        verificationDialogVisible.value = true
+        currentVerificationItem.value = {
+          taskId,
+          verificationType: taskDetail.verification_type || 'graphical_captcha',
+          screenshotUrl: collectionApi.getTaskScreenshotUrl(taskId),
+          message: taskDetail.verification_message || taskDetail.current_step || '任务需要验证码才能继续',
+          expiresAt: taskDetail.verification_expires_at || ''
+        }
+        verificationErrorMessage.value = ''
       }
     } catch (error) {
       console.error('轮询任务状态失败:', error)
@@ -701,6 +734,40 @@ onMounted(() => {
 .header-actions {
   display: flex;
   gap: 12px;
+}
+
+.pending-verification-panel {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: #fff7e6;
+  border: 1px solid #f5d19a;
+  border-radius: 12px;
+}
+
+.pending-verification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pending-verification-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #f2e3c2;
+  border-radius: 10px;
+}
+
+.pending-verification-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #606266;
+  font-size: 13px;
 }
 
 .task-id {

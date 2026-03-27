@@ -71,3 +71,23 @@ def test_build_date_range_from_time_selection_for_last_30_days_is_inclusive():
         "date_from": "2026-02-26",
         "date_to": "2026-03-27",
     }
+
+
+def test_normalize_time_selection_rejects_preset_plus_custom_fields():
+    with pytest.raises(ValueError, match="preset time selection cannot include custom"):
+        normalize_time_selection(
+            time_mode="preset",
+            date_preset="today",
+            start_date="2026-03-01",
+            end_date="2026-03-07",
+        )
+
+
+def test_normalize_time_selection_rejects_custom_plus_preset_fields():
+    with pytest.raises(ValueError, match="custom time selection cannot include preset"):
+        normalize_time_selection(
+            time_mode="custom",
+            date_preset="today",
+            start_date="2026-03-01",
+            end_date="2026-03-07",
+        )

@@ -4,7 +4,7 @@
 数据同步服务(Data Sync Service)
 
 v4.12.0新增:
-- 统一的数据同步入口,整合AutoIngestOrchestrator的功能
+- 统一的数据同步入口
 - 移除HTTP调用,改为直接函数调用DataIngestionService
 - 支持单文件和批量同步
 
@@ -679,4 +679,3 @@ class DataSyncService:
                 'status': 'failed',
                 'message': error_message
             }
-

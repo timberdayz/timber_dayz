@@ -1354,11 +1354,7 @@ export default {
    * @param {number} limit - 返回数量限制
    * @returns {Promise} {success, task_id, logs, total}
    */
-  async getTaskLogs(taskId, limit = 50) {
-    return await this._get(`/field-mapping/auto-ingest/task/${taskId}/logs`, {
-      limit
-    })
-  },
+  // [Deprecated] Legacy auto-ingest task logs compatibility helper.
 
   /**
    * 通过文件ID获取任务日志（v4.11.5新增）
@@ -1366,11 +1362,7 @@ export default {
    * @param {number} limit - 返回数量限制
    * @returns {Promise} {success, file_id, logs, total}
    */
-  async getTaskLogsByFileId(fileId, limit = 50) {
-    return await this._get(`/field-mapping/auto-ingest/file/${fileId}/logs`, {
-      limit
-    })
-  },
+  // [Deprecated] Legacy auto-ingest file logs compatibility helper.
 
   // 原始数据层查看API（v4.11.5新增）
   /**
@@ -1646,13 +1638,7 @@ export default {
    * @param {number} fileId - 文件ID
    * @returns {Promise} {success, file_id, status, message}
    */
-  async autoIngestSingleFile(fileId) {
-    return await this._post('/field-mapping/auto-ingest/single', {
-      file_id: fileId,
-      only_with_template: true,
-      allow_quarantine: true
-    })
-  },
+  // [Deprecated] Compatibility alias for startSingleAutoIngest().
 
   // ========== 物化视图管理API（v4.9.0完整版）==========
 
