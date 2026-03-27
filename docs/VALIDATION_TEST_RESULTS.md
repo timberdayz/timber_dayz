@@ -46,7 +46,7 @@
 - ✅ 报告包含完整的问题详情和建议
 - ✅ 报告按严重程度和分类分组
 
-**报告位置**: `temp/outputs/database_design_validation_report_20251120_181038.json`
+**报告位置**: `temp/reports/database_design_validation_report_20251120_181038.json`（历史运行可能仍位于 `temp/outputs/`）
 
 ### 3. API端点测试
 

@@ -197,7 +197,7 @@ Metabase查询 → 前端展示
 - `PROJECT_ROOT`：项目根目录（默认自动检测）
 - `DATA_DIR`：数据目录（默认：项目根目录/data）
 - `DATA_RAW_DIR`：原始数据目录（默认：DATA_DIR/raw）
-- `OUTPUT_DIR`：输出目录（默认：项目根目录/temp/outputs）
+- `OUTPUT_DIR`：legacy 输出目录（默认：项目根目录/temp/outputs，仅用于兼容历史路径与临时诊断）
 - `DOWNLOADS_DIR`：下载目录（默认：项目根目录/downloads）
 
 ### Metabase配置（必需）
@@ -256,6 +256,11 @@ root = get_project_root()
 data_raw = get_data_raw_dir()
 downloads = get_downloads_dir()
 outputs = get_output_dir()
+
+# 说明:
+# - data_raw: 正式采集原始数据目录
+# - downloads: 工作下载目录
+# - outputs: legacy 兼容输出目录
 ```
 
 ## 故障排查

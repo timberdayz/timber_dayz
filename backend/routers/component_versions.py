@@ -35,6 +35,10 @@ from backend.services.collection_component_topology import (
     build_component_name_from_filename,
     is_canonical_component_filename,
 )
+from backend.services.active_collection_components import (
+    is_active_component_name,
+    is_archive_only_file,
+)
 from backend.services.component_version_service import ComponentVersionService
 from backend.services.verification_service import VerificationService
 from backend.services.verification_state_store import VerificationStateStore
@@ -714,6 +718,17 @@ async def promote_to_stable(version_id: int, db: AsyncSession = Depends(get_asyn
                 recovery_suggestion="请检查版本ID",
             )
 
+        if not is_active_component_name(version.component_name):
+            return {
+                "success": False,
+                "message": "inactive components cannot be promoted to stable from the default path",
+            }
+        if version.file_path and is_archive_only_file(version.file_path):
+            return {
+                "success": False,
+                "message": "archive-only component files cannot be promoted to stable",
+            }
+
         now = datetime.now(timezone.utc)
 
         stable_result = await db.execute(
@@ -1025,6 +1040,18 @@ async def batch_register_python_components(
                 if not comp_name:
                     continue
                 component_name = comp_name
+                if not is_active_component_name(component_name):
+                    results.append(
+                        BatchRegisterResult(
+                            component_name=component_name,
+                            file_path=str(py_file.relative_to(project_root)).replace("\\", "/"),
+                            version="",
+                            status="skipped",
+                            error="inactive component",
+                        )
+                    )
+                    skipped_count += 1
+                    continue
                 relative_path = str(py_file.relative_to(project_root)).replace(
                     "\\", "/"
                 )

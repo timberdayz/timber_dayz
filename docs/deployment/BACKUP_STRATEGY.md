@@ -28,8 +28,10 @@
 - **内容**:
   - `data/` - 业务数据目录
   - `uploads/` - 上传文件
-  - `downloads/` - 下载文件
-  - `temp/outputs/`, `temp/cache/`, `temp/logs/` - 重要临时文件
+  - `downloads/` - 工作下载文件
+  - `data/raw/` - 正式采集原始数据
+  - `temp/cache/`, `temp/logs/` - 重要临时文件
+  - `temp/outputs/` - legacy 兼容输出目录（如仍存在历史诊断文件可按需备份）
 - **格式**: tar.gz 归档
 - **脚本**: `scripts/backup_all.sh`（集成）
 

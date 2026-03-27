@@ -245,7 +245,7 @@ print(result)
 
 如需进一步优化或遇到问题：
 
-1. 查看详细测试报告：`temp/outputs/multi_region_router_test_report.json`
+1. 查看详细测试报告：`temp/reports/multi_region_router_test_report.json`（若已迁移）或历史 `temp/outputs/` 位置
 2. 检查系统日志：`logs/` 目录
 3. 运行诊断测试：选择主菜单中的多国路由测试
 

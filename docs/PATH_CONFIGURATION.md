@@ -85,13 +85,13 @@ input_dir = get_data_input_dir()
 ```python
 from modules.core.path_manager import get_output_dir
 
-# 获取输出目录（temp/outputs）
+# 获取输出目录（legacy temp/outputs）
 output_dir = get_output_dir()
 # 返回: Path对象，例如: F:\Vscode\python_programme\AI_code\xihong_erp\temp\outputs
 ```
 
 **环境变量**:
-- `OUTPUT_DIR` - 覆盖输出目录路径
+- `OUTPUT_DIR` - 覆盖 legacy 输出目录路径（兼容历史工具/诊断）
 
 ### 下载目录
 
@@ -122,7 +122,7 @@ $env:DATA_DIR = "D:\Data\xihong_erp\data"
 # 设置原始数据目录
 $env:DATA_RAW_DIR = "D:\Data\xihong_erp\data\raw"
 
-# 设置输出目录
+# 设置 legacy 输出目录
 $env:OUTPUT_DIR = "D:\Data\xihong_erp\temp\outputs"
 
 # 设置下载目录
@@ -141,7 +141,7 @@ export DATA_DIR="/data/xihong_erp/data"
 # 设置原始数据目录
 export DATA_RAW_DIR="/data/xihong_erp/data/raw"
 
-# 设置输出目录
+# 设置 legacy 输出目录
 export OUTPUT_DIR="/data/xihong_erp/temp/outputs"
 
 # 设置下载目录
@@ -408,7 +408,7 @@ raw_dir = get_data_raw_dir()
 - [ ] `get_project_root()` 返回正确的项目根目录
 - [ ] `get_data_raw_dir()` 返回正确的原始数据目录
 - [ ] `get_data_input_dir()` 返回正确的输入数据目录
-- [ ] `get_output_dir()` 返回正确的输出目录
+- [ ] `get_output_dir()` 返回正确的 legacy 输出目录
 - [ ] `get_downloads_dir()` 返回正确的下载目录
 - [ ] 所有目录路径都存在且可访问
 - [ ] 环境变量配置正确（如果使用）
@@ -438,4 +438,3 @@ raw_dir = get_data_raw_dir()
 1. 查看故障排查章节
 2. 检查相关文档
 3. 联系系统架构组
-

@@ -19,6 +19,7 @@ from typing import Dict, Any, Optional, List, Type
 import yaml
 
 from modules.core.logger import get_logger
+from backend.services.active_collection_components import is_archive_only_file
 
 logger = get_logger(__name__)
 
@@ -502,6 +503,11 @@ class ComponentLoader:
             raise ValueError(
                 f"Component path outside allowed dir (version_id={version_id}, file_path={file_path}, "
                 f"resolved={resolved}, allowed_base={allowed_base})"
+            )
+        if is_archive_only_file(file_path) or "\\archive\\" in resolved or "/archive/" in resolved:
+            raise ValueError(
+                f"archive component paths are not allowed in default runtime/test loading "
+                f"(version_id={version_id}, file_path={file_path}, resolved={resolved})"
             )
         if "components" not in resolved:
             raise ValueError(

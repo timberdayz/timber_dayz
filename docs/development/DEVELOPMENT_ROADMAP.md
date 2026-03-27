@@ -223,7 +223,7 @@
 
 - 决策摘要：
 
-  - 入库权威=DB 清单（catalog_files），目录级月清单可选；temp/outputs 为主，支持 data/input/manual_uploads 手动上传；
+  - 入库权威=DB 清单（catalog_files），正式采集原始数据目录为 data/raw，支持 data/input/manual_uploads 手动上传；
   - 数据域顺序=Orders/Products → Metrics（日/周/月）；
   - 主键幂等策略：订单（platform+shop_id+order_id）、产品（platform+shop_id+platform_sku）、指标（platform+shop_id+sku+metric_date+metric_type）；
   - 汇率：exchangerate.host 每日拉取，RMB 归一，失败固定汇率兜底；
@@ -241,7 +241,7 @@
      - 定义事实：fact_orders、fact_order_items、fact_product_metrics（含粒度与日期主键）
      - 建立 Alembic 初始迁移（SQLite first，Postgres-ready）
   2. DB-1 入库管道
-     - 扫描 temp/outputs 与 data/input/manual_uploads；登记 catalog_files（hash/size/source）
+     - 扫描 data/raw 与 data/input/manual_uploads；登记 catalog_files（hash/size/source）
      - manifest-first；缺失清单回填（路径/文件名+Excel 表头嗅探）；
      - 幂等 upsert + quarantine 失败记录
   3. DB-2 汇率与 RMB 归一
