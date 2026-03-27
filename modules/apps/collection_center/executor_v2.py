@@ -424,9 +424,7 @@ class CollectionExecutorV2:
         """
         return [
             {'component': 'login', 'required': True, 'index': 0},
-            {'component': 'shop_switch', 'required': False, 'index': 1},
-            {'component': 'navigation', 'required': False, 'index': 2},
-            {'component': 'export', 'required': True, 'index': 3},
+            {'component': 'export', 'required': True, 'index': 1},
         ]
     
     def _evaluate_condition(self, condition: Optional[str], params: Dict[str, Any]) -> bool:

@@ -4,6 +4,7 @@ from modules.apps.collection_center.transition_gates import (
     evaluate_filters_ready,
     evaluate_navigation_ready,
 )
+from modules.apps.collection_center.executor_v2 import CollectionExecutorV2
 
 
 def test_navigation_ready_requires_url_and_marker_signal():
@@ -50,3 +51,12 @@ def test_filters_ready_fails_when_no_observable_signal_present():
 
     assert gate.status is GateStatus.FAILED
     assert gate.reason == "filter state not confirmed"
+
+
+def test_executor_default_order_is_login_then_export_only():
+    executor = CollectionExecutorV2()
+
+    assert executor._get_default_execution_order() == [
+        {"component": "login", "required": True, "index": 0},
+        {"component": "export", "required": True, "index": 1},
+    ]

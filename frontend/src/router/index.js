@@ -5,6 +5,10 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useAuthStore } from '@/stores/auth'
+import {
+  hasPersistedAuthSession,
+  readPersistedAuthState,
+} from '@/utils/authSession'
 
 const routes = [
   {
@@ -1044,13 +1048,13 @@ router.beforeEach((to, from, next) => {
   
   // ⭐ v4.19.5 修复：改进登录状态检查逻辑
   // 优先检查 authStore，如果未初始化则检查 localStorage
+  const persistedState = readPersistedAuthState(localStorage)
   let isLoggedIn = authStore.isLoggedIn
   
   if (!isLoggedIn) {
     // 降级：检查 localStorage 中的 token
-    const savedToken = localStorage.getItem('access_token')
-    if (savedToken && savedToken.length > 0) {
-      // 如果有 token 但没有用户信息，尝试恢复
+    if (hasPersistedAuthSession(persistedState)) {
+      // 仅恢复完整持久化会话，避免 token 残留把匿名状态误判成已登录
       if (!authStore.user) {
         authStore.initAuth()
       }
@@ -1061,7 +1065,7 @@ router.beforeEach((to, from, next) => {
   
   // 最后检查 userStore（向后兼容）
   if (!isLoggedIn) {
-    isLoggedIn = userStore.token && userStore.token.length > 0
+    isLoggedIn = Boolean(userStore.token && userStore.userInfo)
   }
   
   // ⭐ v4.19.0: 如果已登录，访问公开路由应该重定向到默认页面

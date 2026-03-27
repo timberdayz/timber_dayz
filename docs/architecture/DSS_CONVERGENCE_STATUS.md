@@ -24,6 +24,6 @@
 
 - `backend/routers/management.py`
 - `backend/routers/data_flow.py`
-- `backend/routers/auto_ingest.py`
+- `backend/routers/auto_ingest.py` (governance-only surface retained; legacy runtime routes retired)
 - `backend/services/c_class_data_service.py`
 - `backend/routers/inventory_management.py`

@@ -2,6 +2,9 @@
   <div class="component-recorder">
     <!-- 页面标题 -->
     <div class="page-header">
+      <div class="v2-surface-hint">
+        V2: 录制页只负责草稿生成和页面分析，正式测试与 stable 发布请转到组件版本管理。
+      </div>
       <h1>组件录制工具</h1>
       <p class="subtitle">可视化录制和编辑数据采集组件。保存后生成的是草稿版本，不会直接进入正式采集。</p>
     </div>

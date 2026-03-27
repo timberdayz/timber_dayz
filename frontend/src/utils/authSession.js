@@ -109,6 +109,16 @@ export function readPersistedAuthState(storage) {
   }
 }
 
+export function hasPersistedAuthSession(state) {
+  return Boolean(state?.accessToken && state?.authUser)
+}
+
+export function hasAnyPersistedAuthArtifact(state) {
+  return Boolean(
+    state?.accessToken || state?.refreshToken || state?.authUser || state?.userInfo
+  )
+}
+
 export function clearPersistedAuthState(storage) {
   ;[
     'token',

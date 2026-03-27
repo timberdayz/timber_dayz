@@ -5,6 +5,10 @@
 适用对象: 本人主导的采集组件开发  
 适用范围: 外部平台页面探索、采集组件草稿生成、检测层设计、稳定版沉淀
 
+V2 榛樿涓绘祦绋? `pwcli 鎺㈢储 -> agent 鍒嗘瀽 -> canonical Python 缁勪欢 -> 鏈湴楠岃瘉 -> 缁勪欢鐗堟湰绠＄悊娴嬭瘯 -> stable`
+
+V2 椤跺眰姝ｅ紡閲囬泦闃舵鍙 `login -> export`锛宯avigation / shop_switch / date_picker / filters 鏄?`export` 鍐呴儴 helper锛屼笉鍐嶄綔涓虹嫭绔嬫寮忛噰闆嗛樁娈点€?
+
 ---
 
 ## 1. 目的

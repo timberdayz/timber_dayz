@@ -577,6 +577,32 @@ def ensure_postgres_redis_docker(project_root, with_celery=True):
     services = ["redis", "postgres"]
     if with_celery:
         services.append("celery-worker")
+
+    try:
+        ps_result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            encoding="utf-8",
+            errors="ignore",
+            cwd=project_root,
+        )
+        if ps_result.returncode == 0:
+            running_names = {
+                line.strip()
+                for line in (ps_result.stdout or "").splitlines()
+                if line.strip()
+            }
+            required_names = {"xihong_erp_postgres", "xihong_erp_redis"}
+            if with_celery:
+                required_names.add("xihong_erp_celery_worker")
+            if required_names.issubset(running_names):
+                safe_print("  [OK] 复用已运行的本地 Docker 基础服务")
+                return True
+    except Exception as e:
+        safe_print(f"  [WARNING] 检查已有 Docker 基础服务失败，将尝试直接启动: {e}")
+
     try:
         safe_print("  [启动] " + ", ".join(services) + "...")
         cmd = ["docker-compose"] + compose_files + profiles + ["up", "-d"] + services

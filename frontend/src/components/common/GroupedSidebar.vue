@@ -97,6 +97,7 @@
 import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useAuthStore } from '@/stores/auth'
 import usersApi from '@/api/users'
 import { menuGroups, routeDisplayNames, deprecatedRoutes } from '@/config/menuGroups'
 import {
@@ -125,6 +126,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const authStore = useAuthStore()
 
 // 展开/收起状态
 const expandedGroups = ref({})
@@ -176,7 +178,10 @@ const getRouteBadgeValue = (path) => {
 }
 
 const fetchPendingApprovalCount = async () => {
-  if (!userStore.hasRole(['admin'])) return
+  if (!authStore.isLoggedIn || !userStore.hasRole(['admin'])) {
+    pendingApprovalCount.value = 0
+    return
+  }
   try {
     const response = await usersApi.getPendingUsersCount()
     pendingApprovalCount.value = Number(response?.pending_count || 0)

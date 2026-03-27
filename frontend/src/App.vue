@@ -5,7 +5,7 @@
     <router-view v-if="isPublicRoute" />
     
     <!-- 受保护路由显示完整系统布局（侧边栏 + 顶部栏 + 主内容） -->
-    <div v-else class="app-layout">
+    <div v-else-if="showProtectedLayout" class="app-layout">
       <!-- 侧边栏：使用分组菜单（企业级ERP标准） -->
       <GroupedSidebar />
       
@@ -22,6 +22,7 @@
       <!-- ICP 备案号：底部左侧悬挂，满足合规要求 -->
       <IcpFooter />
     </div>
+    <div v-else class="auth-pending-shell"></div>
     </div>
   </el-config-provider>
 </template>
@@ -52,6 +53,8 @@ const isPublicRoute = computed(() => {
   return publicPaths.includes(route.path)
 })
 
+const showProtectedLayout = computed(() => !isPublicRoute.value && authStore.isLoggedIn)
+
 onMounted(() => {
   // ⭐ v4.19.5 修复：确保认证状态已恢复（main.js 中已调用，这里作为兜底）
   if (!authStore.isLoggedIn) {
@@ -59,7 +62,9 @@ onMounted(() => {
   }
   
   // 初始化用户信息（用于权限检查）
-  userStore.initUserInfo()
+  if (authStore.isLoggedIn) {
+    userStore.initUserInfo()
+  }
   console.log('🚀 西虹ERP系统前端已启动')
 })
 </script>
@@ -85,6 +90,10 @@ html, body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+.auth-pending-shell {
+  min-height: 100vh;
 }
 
 /* 应用布局 */

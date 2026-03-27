@@ -18,6 +18,14 @@ class _FakeExportComponent:
         return _FakeExportResult()
 
 
+class _FakeGenericExportComponent:
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    async def run(self, page):
+        return _FakeExportResult(file_path="temp/outputs/generic.xlsx")
+
+
 def _account():
     return {"username": "u", "password": "p"}
 
@@ -44,3 +52,22 @@ async def test_miaoshou_inventory_domain_uses_canonical_export(monkeypatch: pyte
 
     assert result.success is True
     assert result.file_path == "temp/outputs/demo.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_export_does_not_fallback_to_generic_export_component_in_v2(monkeypatch: pytest.MonkeyPatch):
+    adapter = PythonComponentAdapter(platform="tiktok", account=_account(), config={})
+
+    def _loader(component_name: str):
+        if component_name == "orders_export":
+            return None
+        if component_name == "export":
+            return _FakeGenericExportComponent
+        return None
+
+    monkeypatch.setattr(adapter, "_load_component_class", _loader)
+
+    result = await adapter.export(page=object(), data_domain="orders")
+
+    assert result.success is False
+    assert "Failed to load canonical export component" in result.message

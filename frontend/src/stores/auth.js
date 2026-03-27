@@ -7,6 +7,7 @@ import { useUserStore } from '@/stores/user'
 import { normalizeRoleCode, applyRolePermissions } from '@/config/rolePermissions'
 import {
   clearPersistedAuthState,
+  hasAnyPersistedAuthArtifact,
   readPersistedAuthState,
   writePersistedAuthState,
 } from '@/utils/authSession'
@@ -62,15 +63,21 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const logout = async () => {
-    token.value = ''
-    refreshToken.value = ''
-    user.value = null
-    clearPersistedAuthState(localStorage)
+    const persistedState = readPersistedAuthState(localStorage)
+    const shouldRevokeSession =
+      hasAnyPersistedAuthArtifact(persistedState) || !!token.value || !!user.value
 
     try {
-      await authApi.logout()
+      if (shouldRevokeSession) {
+        await authApi.logout()
+      }
     } catch (_) {
       // ignore backend logout failure
+    } finally {
+      token.value = ''
+      refreshToken.value = ''
+      user.value = null
+      clearPersistedAuthState(localStorage)
     }
 
     ElMessage.success('已登出')

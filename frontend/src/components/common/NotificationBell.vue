@@ -110,8 +110,10 @@ import {
 import notificationsApi from '@/api/notifications.js'
 import usersApi from '@/api/users.js'
 import { useNotificationWebSocket } from '@/services/notificationWebSocket'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const SYSTEM_NOTIFICATIONS_ROUTE = '/system-notifications'
 const USER_APPROVAL_ROUTE = '/admin/users/pending'
 
@@ -136,6 +138,7 @@ let unsubscribe = null
 // v4.19.0: 浏览器原生通知
 const notificationPreferences = ref({}) // notification_type -> { enabled, desktop_enabled }
 const notificationPermission = ref('default') // 'default', 'granted', 'denied'
+const isAuthenticated = computed(() => authStore.isLoggedIn)
 
 // 检查浏览器通知权限
 const checkNotificationPermission = () => {
@@ -146,6 +149,10 @@ const checkNotificationPermission = () => {
 
 // 获取通知偏好
 const fetchNotificationPreferences = async () => {
+  if (!isAuthenticated.value) {
+    notificationPreferences.value = {}
+    return
+  }
   try {
     const response = await usersApi.getNotificationPreferences()
     if (response && response.items) {
@@ -231,6 +238,11 @@ const showDesktopNotification = (notification) => {
 
 // 获取通知列表
 const fetchNotifications = async () => {
+  if (!isAuthenticated.value) {
+    notifications.value = []
+    unreadCount.value = 0
+    return
+  }
   loading.value = true
   try {
     const response = await notificationsApi.getNotifications({
@@ -441,6 +453,10 @@ const executeQuickAction = async (notification, actionType, reason, loadingKey) 
 
 // 生命周期
 onMounted(() => {
+  if (!isAuthenticated.value) {
+    return
+  }
+
   // v4.19.0: 检查浏览器通知权限
   checkNotificationPermission()
   
@@ -474,7 +490,7 @@ onUnmounted(() => {
 })
 
 watch(showPopover, (newVal) => {
-  if (newVal) {
+  if (newVal && isAuthenticated.value) {
     onPopoverShow()
   }
 })

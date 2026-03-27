@@ -2,7 +2,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
 import authApi from '@/api/auth'
-import { clearPersistedAuthState, readPersistedAuthState } from '@/utils/authSession'
+import {
+  clearPersistedAuthState,
+  hasPersistedAuthSession,
+  readPersistedAuthState,
+} from '@/utils/authSession'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('access_token') || localStorage.getItem('token') || '')
@@ -85,6 +89,11 @@ export const useUserStore = defineStore('user', () => {
 
   const initUserInfo = async () => {
     const state = readPersistedAuthState(localStorage)
+
+    if (!hasPersistedAuthSession(state)) {
+      logout()
+      return
+    }
 
     if (state.accessToken) {
       hydrateFromStorage()

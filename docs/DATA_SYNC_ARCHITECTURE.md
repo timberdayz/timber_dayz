@@ -209,7 +209,7 @@ python -m celery -A backend.celery_app beat
 
 **实现位置**：
 - `frontend/src/views/FieldMappingEnhanced.vue`：`pollSyncProgress()`方法
-- `frontend/src/api/index.js`：`getAutoIngestProgress()`方法
+- `frontend/src/api/index.js`：`/data-sync/progress/{task_id}` 兼容查询逻辑（旧 `getAutoIngestProgress()` helper 已不再作为主调用入口）
 
 ### 数据治理概览自动刷新
 
@@ -236,7 +236,7 @@ python -m celery -A backend.celery_app beat
 - `quarantined`：隔离行数（映射自`quarantined_rows`）
 - `failed`：失败行数（映射自`error_rows`）
 
-**映射位置**：`frontend/src/api/index.js`的`getAutoIngestProgress()`方法自动完成字段映射。
+**映射位置**：统一由 `data-sync/progress/{task_id}` 响应适配逻辑完成，旧 `getAutoIngestProgress()` 仅保留为未使用兼容 helper。
 
 ---
 

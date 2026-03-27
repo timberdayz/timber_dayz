@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional, Type
 
 from modules.components.base import ExecutionContext, ResultBase
 from modules.core.logger import get_logger
+from backend.services.collection_component_topology import is_canonical_component_filename
 
 
 logger = get_logger("python_component_adapter")
@@ -265,15 +266,22 @@ class PythonComponentAdapter:
                 )
             
             module_name = f"{data_domain}_export"
+            canonical_filename = f"{module_name}.py"
+            if not is_canonical_component_filename(canonical_filename):
+                return AdapterResult(
+                    success=False,
+                    message=f"Invalid canonical export component filename: {canonical_filename}",
+                )
             component_class = (
                 self._override_export_class
                 or self._load_component_class(module_name)
             )
-            if not component_class:
-                component_class = self._load_component_class("export")
             
             if not component_class:
-                return AdapterResult(success=False, message=f"Failed to load export component for {data_domain}")
+                return AdapterResult(
+                    success=False,
+                    message=f"Failed to load canonical export component for {data_domain}",
+                )
             
             component = component_class(self.ctx)
             result = await component.run(page)
