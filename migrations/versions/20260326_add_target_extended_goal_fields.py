@@ -34,6 +34,9 @@ def upgrade() -> None:
         "sales_targets",
         sa.Column("achieved_profit_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
     )
+    _add_column_if_missing("sales_targets", sa.Column("product_id", sa.Integer(), nullable=True))
+    _add_column_if_missing("sales_targets", sa.Column("platform_sku", sa.String(length=128), nullable=True))
+    _add_column_if_missing("sales_targets", sa.Column("company_sku", sa.String(length=128), nullable=True))
     _add_column_if_missing("sales_targets", sa.Column("metric_code", sa.String(length=64), nullable=True))
     _add_column_if_missing("sales_targets", sa.Column("metric_name", sa.String(length=128), nullable=True))
     _add_column_if_missing("sales_targets", sa.Column("metric_direction", sa.String(length=32), nullable=True))
@@ -61,6 +64,9 @@ def upgrade() -> None:
         "target_breakdown",
         sa.Column("achieved_profit_amount", sa.Float(), nullable=False, server_default=sa.text("0")),
     )
+    _add_column_if_missing("target_breakdown", sa.Column("product_id", sa.Integer(), nullable=True))
+    _add_column_if_missing("target_breakdown", sa.Column("platform_sku", sa.String(length=128), nullable=True))
+    _add_column_if_missing("target_breakdown", sa.Column("company_sku", sa.String(length=128), nullable=True))
     _add_column_if_missing("target_breakdown", sa.Column("target_value", sa.Float(), nullable=True))
     _add_column_if_missing("target_breakdown", sa.Column("achieved_value", sa.Float(), nullable=True))
     _add_column_if_missing("target_breakdown", sa.Column("manual_score_value", sa.Float(), nullable=True))
@@ -72,6 +78,9 @@ def downgrade() -> None:
         "manual_score_value",
         "achieved_value",
         "target_value",
+        "company_sku",
+        "platform_sku",
+        "product_id",
         "achieved_profit_amount",
         "target_profit_amount",
     ]:
@@ -92,6 +101,9 @@ def downgrade() -> None:
         "metric_direction",
         "metric_name",
         "metric_code",
+        "company_sku",
+        "platform_sku",
+        "product_id",
         "achieved_profit_amount",
         "target_profit_amount",
     ]:

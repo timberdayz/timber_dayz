@@ -40,6 +40,9 @@ from modules.core.db import (
     TargetBreakdown,
     # [DELETED] v4.19.0: FactOrder 已删除,使用 b_class.fact_{platform}_orders_{granularity} 替代
     DimShop,
+    DimProduct,
+    DimProductMaster,
+    BridgeProductKeys,
     DimUser,  # ✅ 2026-01-08: 添加用户模型用于权限检查
     PlatformAccount,  # 目标管理用店铺列表:来自账号管理 core.platform_accounts
 )
@@ -235,6 +238,73 @@ async def list_target_shops(
             message="查询店铺列表失败",
             error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
             detail=error_str,
+            recovery_suggestion="请检查数据库连接或联系管理员",
+            status_code=500,
+        )
+
+
+@router.get("/products", response_model=Dict[str, Any])
+async def list_target_products(
+    keyword: Optional[str] = Query(None, description="产品关键字/SKU"),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: DimUser = Depends(get_current_user),
+):
+    """获取产品目标可选产品列表。"""
+    try:
+        query = (
+            select(
+                DimProduct.platform_code,
+                DimProduct.shop_id,
+                DimProduct.platform_sku,
+                DimProduct.product_title,
+                BridgeProductKeys.product_id,
+                DimProductMaster.company_sku,
+            )
+            .select_from(DimProduct)
+            .outerjoin(
+                BridgeProductKeys,
+                and_(
+                    BridgeProductKeys.platform_code == DimProduct.platform_code,
+                    BridgeProductKeys.shop_id == DimProduct.shop_id,
+                    BridgeProductKeys.platform_sku == DimProduct.platform_sku,
+                ),
+            )
+            .outerjoin(
+                DimProductMaster,
+                DimProductMaster.product_id == BridgeProductKeys.product_id,
+            )
+        )
+        if keyword:
+            pattern = f"%{keyword.strip()}%"
+            query = query.where(
+                or_(
+                    DimProduct.platform_sku.ilike(pattern),
+                    DimProduct.product_title.ilike(pattern),
+                    DimProductMaster.company_sku.ilike(pattern),
+                )
+            )
+        query = query.order_by(DimProduct.platform_code, DimProduct.shop_id, DimProduct.platform_sku).limit(limit)
+        rows = (await db.execute(query)).all()
+        items = [
+            {
+                "platform_code": row[0],
+                "shop_id": row[1],
+                "platform_sku": row[2],
+                "product_title": row[3],
+                "product_id": row[4],
+                "company_sku": row[5],
+            }
+            for row in rows
+        ]
+        return {"success": True, "data": items}
+    except Exception as e:
+        logger.error(f"查询产品列表失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="查询产品列表失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
             recovery_suggestion="请检查数据库连接或联系管理员",
             status_code=500,
         )
@@ -510,6 +580,9 @@ async def create_target(
             target_quantity=request.target_quantity,
             target_profit_amount=request.target_profit_amount,
             achieved_profit_amount=request.achieved_profit_amount,
+            product_id=request.product_id,
+            platform_sku=request.platform_sku,
+            company_sku=request.company_sku,
             metric_code=request.metric_code,
             metric_name=request.metric_name,
             metric_direction=request.metric_direction,
