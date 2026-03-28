@@ -5,20 +5,14 @@ from __future__ import annotations
 This adapter wires platform-specific component implementations.
 No side effects on import.
 """
-from modules.components.base import ExecutionContext
 from modules.platforms.adapter_base import PlatformAdapter
-from modules.platforms.shopee.components.login import ShopeeLogin
-from modules.platforms.shopee.components.metrics_selector import ShopeeMetricsSelector
-from modules.platforms.shopee.components.orders_export import ShopeeOrdersExport
-from modules.platforms.shopee.components.finance_export import ShopeeFinanceExport
-from modules.platforms.shopee.components.services_export import ShopeeServicesExport
 
 
 class ShopeeAdapter(PlatformAdapter):
     platform_id: str = "shopee"
 
-    def login(self) -> ShopeeLogin:  # type: ignore[override]
-        return ShopeeLogin(self.ctx)
+    def login(self):  # type: ignore[override]
+        raise NotImplementedError("shopee/login is no longer a default adapter surface in V2")
 
     def navigation(self):  # type: ignore[override]
         raise NotImplementedError("shopee/navigation is no longer a default adapter surface in V2")
@@ -30,17 +24,17 @@ class ShopeeAdapter(PlatformAdapter):
         raise NotImplementedError("shopee/export is no longer a default adapter surface in V2")
 
 
-    def orders_export(self) -> ShopeeOrdersExport:
-        return ShopeeOrdersExport(self.ctx)
+    def orders_export(self):
+        raise NotImplementedError("shopee/orders_export is no longer a default adapter surface in V2")
 
-    def finance_export(self) -> ShopeeFinanceExport:
-        return ShopeeFinanceExport(self.ctx)
+    def finance_export(self):
+        raise NotImplementedError("shopee/finance_export is no longer a default adapter surface in V2")
 
-    def services_export(self) -> ShopeeServicesExport:
-        return ShopeeServicesExport(self.ctx)
+    def services_export(self):
+        raise NotImplementedError("shopee/services_export is no longer a default adapter surface in V2")
 
-    def metrics_selector(self) -> ShopeeMetricsSelector:
-        return ShopeeMetricsSelector(self.ctx)
+    def metrics_selector(self):
+        raise NotImplementedError("shopee/metrics_selector is no longer a default adapter surface in V2")
 
     def capabilities(self) -> dict[str, dict[str, bool]]:  # type: ignore[override]
         return {

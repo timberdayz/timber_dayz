@@ -14,7 +14,6 @@ from pathlib import Path
 from playwright.sync_api import Page, Browser, BrowserContext, Playwright
 
 from modules.core.logger import get_logger
-from modules.utils.shopee_login_handler import ShopeeLoginHandler
 from modules.utils.smart_verification_handler_v2 import SmartVerificationHandlerV2
 from modules.utils.persistent_browser_manager import PersistentBrowserManager
 
@@ -54,7 +53,7 @@ class LoginOrchestrator:
         self.verification_handler = None
 
         # 支持的平台列表
-        self.supported_platforms = ['miaoshou', 'shopee', 'tiktok', 'miaoshou_erp']
+        self.supported_platforms = ['miaoshou', 'miaoshou_erp']
 
         # 邮箱OTP自动化开关
         self.auto_email_otp = True
@@ -64,10 +63,6 @@ class LoginOrchestrator:
         platform_lower = platform.lower()
         if platform_lower in ['miaoshou', 'miaoshou_erp', '妙手erp']:
             return 'miaoshou'
-        elif platform_lower in ['shopee']:
-            return 'shopee'
-        elif platform_lower in ['tiktok', 'tiktok_shop']:
-            return 'tiktok'
         else:
             raise ValueError(f"不支持的平台: {platform}")
     

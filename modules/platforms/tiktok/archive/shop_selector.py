@@ -177,4 +177,3 @@ class TiktokShopSelector:
         except Exception as e:
             self._log("error", f"failed: {e}")
             return ShopSelectResult(success=False, message=str(e))
-

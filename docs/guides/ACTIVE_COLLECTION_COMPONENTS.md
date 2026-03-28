@@ -42,6 +42,20 @@
 - `navigation.py`
 - `date_picker.py`
 
+当前已进入 `modules/platforms/shopee/archive/` 的第一批文件：
+
+- `login_v1_0_1.py`
+- `recorder_test_login.py`
+- `metrics_selector.py`
+
+当前 Shopee 平台旧组件已整体退出 `components/` 主链路，历史业务组件与配置文件已移入 `modules/platforms/shopee/archive/`。
+
+当前已进入 `modules/platforms/tiktok/archive/` 的第一批文件：
+
+- `shop_selector.py`
+
+当前 TikTok 平台旧组件已整体退出 `components/` 主链路，历史业务组件与配置文件已移入 `modules/platforms/tiktok/archive/`。
+
 ## Archive 前置条件
 
 某个旧文件只有在满足下面条件后，才允许移动到：

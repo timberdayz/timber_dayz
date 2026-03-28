@@ -6,14 +6,13 @@ This adapter provides component factories for TikTok Shop platform.
 No side effects on import.
 """
 from modules.platforms.adapter_base import PlatformAdapter
-from modules.platforms.tiktok.components.login import TiktokLogin
 
 
 class TiktokAdapter(PlatformAdapter):
     platform_id: str = "tiktok"
 
-    def login(self) -> TiktokLogin:  # type: ignore[override]
-        return TiktokLogin(self.ctx)
+    def login(self):  # type: ignore[override]
+        raise NotImplementedError("tiktok/login is no longer a default adapter surface in V2")
 
     def navigation(self):  # type: ignore[override]
         raise NotImplementedError("tiktok/navigation is no longer a default adapter surface in V2")

@@ -31,6 +31,8 @@ def test_shopee_adapter_rejects_legacy_default_slots_until_v2_migration():
     adapter = ShopeeAdapter(_ctx("shopee"))
 
     with pytest.raises(NotImplementedError):
+        adapter.login()
+    with pytest.raises(NotImplementedError):
         adapter.navigation()
     with pytest.raises(NotImplementedError):
         adapter.date_picker()
@@ -41,6 +43,8 @@ def test_shopee_adapter_rejects_legacy_default_slots_until_v2_migration():
 def test_tiktok_adapter_rejects_legacy_default_slots_until_v2_migration():
     adapter = TiktokAdapter(_ctx("tiktok"))
 
+    with pytest.raises(NotImplementedError):
+        adapter.login()
     with pytest.raises(NotImplementedError):
         adapter.navigation()
     with pytest.raises(NotImplementedError):
