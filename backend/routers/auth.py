@@ -566,7 +566,7 @@ async def refresh_token(
     
     try:
         # [*] v4.19.0 P0安全要求:验证token并获取用户ID
-        payload = auth_service.verify_token(refresh_token_value)
+        payload = auth_service.verify_token(refresh_token_value, "refresh")
         user_id = payload.get("user_id")
         
         if not user_id:
@@ -658,7 +658,7 @@ async def refresh_token(
             new_session_id = hashlib.sha256(new_tokens["access_token"].encode()).hexdigest()
             
             # 从refresh token中获取user_id
-            payload = auth_service.verify_token(refresh_token_value)
+            payload = auth_service.verify_token(refresh_token_value, "refresh")
             user_id = payload.get("user_id")
             
             if user_id:
