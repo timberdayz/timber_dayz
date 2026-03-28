@@ -44,6 +44,26 @@ logger = get_logger(__name__)
 settings = get_settings()
 
 
+def _resolve_limiter_storage(limiter_instance) -> Optional[object]:
+    """Resolve the underlying limits storage across slowapi/limits versions."""
+    if limiter_instance is None:
+        return None
+
+    for attr_name in ("_storage", "storage", "_storage_backend", "storage_backend"):
+        if hasattr(limiter_instance, attr_name):
+            storage = getattr(limiter_instance, attr_name)
+            if storage is not None:
+                return storage
+
+    inner_limiter = getattr(limiter_instance, "_limiter", None)
+    if inner_limiter is not None and hasattr(inner_limiter, "storage"):
+        storage = getattr(inner_limiter, "storage")
+        if storage is not None:
+            return storage
+
+    return None
+
+
 def get_rate_limit_key(request: Request) -> str:
     """
     获取限流键(用户级限流)
@@ -472,15 +492,7 @@ def role_based_rate_limit(endpoint_type: str = "default"):
                     # slowapi 的存储后端可能通过不同方式暴露
                     storage = None
                     try:
-                        # 方法1:尝试访问 storage 属性(标准方式)
-                        if hasattr(limiter, 'storage'):
-                            storage = limiter.storage
-                        # 方法2:尝试访问 _storage_backend(内部实现)
-                        elif hasattr(limiter, '_storage_backend'):
-                            storage = limiter._storage_backend
-                        # 方法3:尝试访问 storage_backend(可能的属性名)
-                        elif hasattr(limiter, 'storage_backend'):
-                            storage = limiter.storage_backend
+                        storage = _resolve_limiter_storage(limiter)
                     except Exception as e:
                         logger.warning(f"[RateLimit] 无法访问限流器存储: {e}")
                     
@@ -597,12 +609,7 @@ def role_based_rate_limit(endpoint_type: str = "default"):
                     # [OK] v4.19.5 改进:正确访问 slowapi 存储后端
                     storage = None
                     try:
-                        if hasattr(limiter, 'storage'):
-                            storage = limiter.storage
-                        elif hasattr(limiter, '_storage_backend'):
-                            storage = limiter._storage_backend
-                        elif hasattr(limiter, 'storage_backend'):
-                            storage = limiter.storage_backend
+                        storage = _resolve_limiter_storage(limiter)
                     except Exception:
                         pass
                     
@@ -665,4 +672,3 @@ async def check_redis_connection() -> bool:
     except Exception as e:
         logger.debug(f"[RateLimit] Redis 连接检查失败: {e}")
         return False
-

@@ -39,6 +39,7 @@ from modules.apps.collection_center.transition_gates import (
 from backend.services.verification_service import VerificationService
 from backend.services.verification_state_store import VerificationStateStore
 from backend.routers.component_versions import CANONICAL_COMPONENT_FILES
+from backend.services.active_collection_components import list_active_component_names
 from modules.apps.collection_center.python_component_adapter import create_adapter
 from backend.services.collection_contracts import build_date_range_from_time_selection
 
@@ -250,11 +251,18 @@ class ComponentTester:
         except Exception:
             return []
         components = []
+        active_names = {
+            name.split("/", 1)[1]
+            for name in list_active_component_names()
+            if name.startswith(f"{self.platform}/")
+        }
         canonical_files = CANONICAL_COMPONENT_FILES.get(self.platform, set())
         for f in comp_dir.glob("*.py"):
             if f.name.startswith("_"):
                 continue
             if canonical_files and f.name not in canonical_files:
+                continue
+            if active_names and f.stem not in active_names:
                 continue
             components.append(f.stem)
         return sorted(components)

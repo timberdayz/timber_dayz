@@ -4,7 +4,7 @@ import pytest
 
 from modules.components.base import ExecutionContext
 from modules.components.login.base import LoginResult
-from modules.platforms.miaoshou.components.miaoshou_login import MiaoshouMiaoshouLogin
+from modules.platforms.miaoshou.components.login import MiaoshouLogin
 from modules.utils.login_status_detector import LoginStatus
 from tools.launch_inspector_recorder import InspectorRecorder
 
@@ -255,7 +255,7 @@ async def test_inspector_recorder_auto_login_requires_confirmed_logged_in(monkey
 
 @pytest.mark.asyncio
 async def test_miaoshou_login_reused_session_short_circuits():
-    component = MiaoshouMiaoshouLogin(
+    component = MiaoshouLogin(
         ExecutionContext(
             platform="miaoshou",
             account={"login_url": "https://erp.91miaoshou.com/login"},
