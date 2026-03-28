@@ -94,6 +94,25 @@ class SyncProgressTracker:
             await self.db.rollback()
             raise
 
+    async def set_runner(
+        self,
+        task_id: str,
+        *,
+        runner_kind: str,
+        external_runner_id: str,
+    ) -> Dict[str, Any]:
+        try:
+            updated = await self.task_center.set_runner(
+                task_id,
+                runner_kind=runner_kind,
+                external_runner_id=external_runner_id,
+            )
+            return self._task_to_dict(updated)
+        except Exception as e:
+            logger.error("[SyncProgress] Failed to set runner for task %s: %s", task_id, e, exc_info=True)
+            await self.db.rollback()
+            raise
+
     async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         max_retries = 3
         retry_count = 0
