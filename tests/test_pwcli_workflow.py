@@ -17,7 +17,7 @@ def test_build_work_dir_uses_platform_and_work_tag(tmp_path: Path):
         work_tag="login",
     )
 
-    assert result == tmp_path / "output" / "playwright" / "work" / "miaoshou-login"
+    assert result == tmp_path / "output" / "playwright" / "work" / "miaoshou" / "login"
 
 
 def test_build_step_snapshot_path_formats_step_name_and_phase(tmp_path: Path):
@@ -28,17 +28,17 @@ def test_build_step_snapshot_path_formats_step_name_and_phase(tmp_path: Path):
         phase="before",
     )
 
-    assert path.name == "01-submit-login-before.txt"
+    assert path.name == "01-submit-login-before.md"
 
 
 def test_build_note_path_uses_step_prefix(tmp_path: Path):
     path = build_note_path(work_dir=tmp_path, step="04")
 
-    assert path.name == "04-note.txt"
+    assert path.name == "04-note.md"
 
 
 def test_validate_work_package_requires_before_after_pairs(tmp_path: Path):
-    (tmp_path / "01-open-login-before.txt").write_text("before", encoding="utf-8")
+    (tmp_path / "01-open-login-before.md").write_text("before", encoding="utf-8")
 
     report = validate_work_package(tmp_path)
 
@@ -47,11 +47,11 @@ def test_validate_work_package_requires_before_after_pairs(tmp_path: Path):
 
 
 def test_build_pack_manifest_sorts_steps_and_includes_notes(tmp_path: Path):
-    (tmp_path / "02-submit-login-after.txt").write_text("after-2", encoding="utf-8")
-    (tmp_path / "02-submit-login-before.txt").write_text("before-2", encoding="utf-8")
-    (tmp_path / "02-note.txt").write_text("action=click 登录按钮", encoding="utf-8")
-    (tmp_path / "01-open-login-after.txt").write_text("after-1", encoding="utf-8")
-    (tmp_path / "01-open-login-before.txt").write_text("before-1", encoding="utf-8")
+    (tmp_path / "02-submit-login-after.md").write_text("after-2", encoding="utf-8")
+    (tmp_path / "02-submit-login-before.md").write_text("before-2", encoding="utf-8")
+    (tmp_path / "02-note.md").write_text("action=click 登录按钮", encoding="utf-8")
+    (tmp_path / "01-open-login-after.md").write_text("after-1", encoding="utf-8")
+    (tmp_path / "01-open-login-before.md").write_text("before-1", encoding="utf-8")
     (tmp_path / "02-captcha-visible.png").write_bytes(b"png")
 
     manifest = build_pack_manifest(
@@ -63,13 +63,13 @@ def test_build_pack_manifest_sorts_steps_and_includes_notes(tmp_path: Path):
     assert manifest["platform"] == "miaoshou"
     assert manifest["work_tag"] == "login"
     assert [step["step"] for step in manifest["steps"]] == ["01", "02"]
-    assert manifest["steps"][1]["note_path"].endswith("02-note.txt")
+    assert manifest["steps"][1]["note_path"].endswith("02-note.md")
     assert manifest["steps"][1]["screenshots"][0].endswith("02-captcha-visible.png")
 
 
 def test_write_pack_manifest_creates_evidence_pack_file(tmp_path: Path):
-    (tmp_path / "01-open-login-before.txt").write_text("before", encoding="utf-8")
-    (tmp_path / "01-open-login-after.txt").write_text("after", encoding="utf-8")
+    (tmp_path / "01-open-login-before.md").write_text("before", encoding="utf-8")
+    (tmp_path / "01-open-login-after.md").write_text("after", encoding="utf-8")
 
     output = write_pack_manifest(
         tmp_path,
@@ -79,3 +79,13 @@ def test_write_pack_manifest_creates_evidence_pack_file(tmp_path: Path):
 
     assert output.name == "evidence-pack.json"
     assert output.exists()
+
+
+def test_validate_work_package_still_recognizes_legacy_txt_files(tmp_path: Path):
+    (tmp_path / "01-open-login-before.txt").write_text("before", encoding="utf-8")
+    (tmp_path / "01-open-login-after.txt").write_text("after", encoding="utf-8")
+
+    report = validate_work_package(tmp_path)
+
+    assert report["ok"] is True
+    assert report["errors"] == []

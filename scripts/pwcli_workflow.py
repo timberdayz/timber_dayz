@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 
-SNAPSHOT_RE = re.compile(r"^(?P<step>\d+)-(?P<name>.+)-(?P<phase>before|after)\.txt$")
-NOTE_RE = re.compile(r"^(?P<step>\d+)-note\.txt$")
+SNAPSHOT_RE = re.compile(r"^(?P<step>\d+)-(?P<name>.+)-(?P<phase>before|after)\.(md|txt)$", re.IGNORECASE)
+NOTE_RE = re.compile(r"^(?P<step>\d+)-note\.(md|txt)$", re.IGNORECASE)
 SCREENSHOT_RE = re.compile(r"^(?P<step>\d+)-(?P<name>.+)\.(png|jpg|jpeg)$", re.IGNORECASE)
 
 
@@ -32,7 +32,7 @@ def normalize_step_name(name: str) -> str:
 
 
 def build_work_dir(repo_root: Path, platform: str, work_tag: str) -> Path:
-    return repo_root / "output" / "playwright" / "work" / f"{sanitize_token(platform)}-{sanitize_token(work_tag)}"
+    return repo_root / "output" / "playwright" / "work" / sanitize_token(platform) / sanitize_token(work_tag)
 
 
 def build_session_name(platform: str, work_tag: str) -> str:
@@ -43,11 +43,11 @@ def build_step_snapshot_path(work_dir: Path, step: str | int, name: str, phase: 
     norm_phase = str(phase or "").strip().lower()
     if norm_phase not in {"before", "after"}:
         raise ValueError(f"Unsupported phase: {phase}")
-    return work_dir / f"{normalize_step_id(step)}-{normalize_step_name(name)}-{norm_phase}.txt"
+    return work_dir / f"{normalize_step_id(step)}-{normalize_step_name(name)}-{norm_phase}.md"
 
 
 def build_note_path(work_dir: Path, step: str | int) -> Path:
-    return work_dir / f"{normalize_step_id(step)}-note.txt"
+    return work_dir / f"{normalize_step_id(step)}-note.md"
 
 
 def build_screenshot_path(work_dir: Path, step: str | int, name: str, ext: str = "png") -> Path:

@@ -19,6 +19,8 @@ user instructions
 - Use `.cursorrules` only for stack-specific and safety-specific exceptions.
 - Treat `openspec/` as archive-only reference material.
 - For collection authoring conversations, prefer the already-loaded PowerShell `pwcli` helper commands when they exist in the active shell profile, instead of reintroducing manual setup or longer fallback wrappers.
+- When the shell already exposes `pwsnap`, `pwnote`, `pwshot`, or `pwpack`, prefer them over longer snapshot-saving examples.
+- Prefer `.md` for `pwcli` snapshot and note evidence artifacts unless the user explicitly asks for another format.
 - For Dashboard architecture work, prefer the PostgreSQL path:
   - `semantic` for standardization
   - `mart` for reusable aggregates

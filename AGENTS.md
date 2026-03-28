@@ -30,7 +30,12 @@ This repository uses a skill-first workflow.
   - `Save-PwcliShopeeState`
   - `Save-PwcliTiktokState`
   - `Show-PwcliPaths`
+  - `pwsnap`
+  - `pwnote`
+  - `pwshot`
+  - `pwpack`
 - When these commands already exist, prefer them in user-facing guidance over longer repo-local wrapper commands or manual function definitions.
+- When collecting snapshot or note evidence for agent consumption, prefer Markdown artifacts (`.md`) over `.txt` unless the user explicitly asks for another format.
 - Treat repo-local scripts such as `scripts/pwcli.ps1`, `scripts/pw-open.ps1`, `scripts/pw-step.ps1`, `scripts/pw-note.ps1`, `scripts/pw-shot.ps1`, and `scripts/pw-pack.ps1` as implementation assets or fallback paths unless the user explicitly asks to use or modify them.
 - When discussing how to record or explore pages, prefer the shortest already-available user command path, then describe any lower-level fallback only if needed.
 

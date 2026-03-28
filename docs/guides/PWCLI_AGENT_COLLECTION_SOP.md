@@ -253,6 +253,17 @@ Set-Alias pwcli-script .\scripts\pwcli.ps1
 pwcli-script --help
 ```
 
+如果终端 profile 已预置快捷命令，优先直接使用：
+
+- `pwcli`
+- `Open-PwcliMiaoshou`
+- `Open-PwcliShopee`
+- `Open-PwcliTiktok`
+- `pwsnap`
+- `pwnote`
+- `pwshot`
+- `pwpack`
+
 ### 4.3 最小命令集
 
 在仓库主流程里，推荐优先使用以下包装命令，而不是每次手工拼接原始 `pwcli` 参数：
@@ -271,6 +282,13 @@ pwcli-script --help
 - `pw-shot`: 为复杂步骤补截图
 - `pw-pack`: 校验证据包并生成 `evidence-pack.json`
 
+在已加载 PowerShell profile 的终端中，推荐优先使用更短的用户命令：
+
+- `pwsnap <name>`: 保存 `pwcli snapshot` 完整输出到 `<name>.md`
+- `pwnote <name> <text...>`: 保存一步说明到 `<name>.md`
+- `pwshot <name>`: 保存当前截图到 `<name>.png`
+- `pwpack -Platform <platform> -WorkTag <tag>`: 生成 `evidence-pack.json`
+
 说明：
 
 - 这些命令是 `pwcli` 的工作流包装层，不替代 `pwcli` 本身。
@@ -287,6 +305,20 @@ pwcli-script --help
 - 浏览器事件回放或录制脚本生成
 
 v1 只负责：低成本、统一地收集可交给 agent 的正式组件证据包。
+
+### 4.4.1 证据文件后缀
+
+默认推荐：
+
+- snapshot 输出使用 `.md`
+- note 输出使用 `.md`
+- screenshot 使用 `.png`
+
+原因：
+
+- `pwcli snapshot` 输出本身就是 Markdown 风格结构
+- `.md` 更适合人和 agent 共同阅读
+- 相比 `.txt`，语义更明确
 
 ### 4.5 工作目录约定
 
