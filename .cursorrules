@@ -32,6 +32,22 @@ Use this file to adapt those skills to the actual codebase.
 - Do not default to `tools/record_component.py`, `tools/launch_inspector_recorder.py`, backend `/recorder`, or frontend recorder pages for new collection component work unless the user explicitly asks to inspect or maintain the legacy recorder path.
 - Legacy recorder scripts and recorder APIs are maintenance-only, not the primary workflow.
 
+## pwcli Environment Rules
+
+- Assume new PowerShell terminals may already auto-load project-specific `pwcli` helper functions from the user's PowerShell profile.
+- Before suggesting setup commands, inspect the active shell environment for existing user-facing commands such as:
+  - `pwcli`
+  - `Open-PwcliMiaoshou`
+  - `Open-PwcliShopee`
+  - `Open-PwcliTiktok`
+  - `Save-PwcliMiaoshouState`
+  - `Save-PwcliShopeeState`
+  - `Save-PwcliTiktokState`
+  - `Show-PwcliPaths`
+- If those commands exist, prefer them in all user-facing instructions.
+- Do not ask the user to redefine `pwcli` manually or switch to longer repo-local wrapper commands when the profile-provided commands already cover the task.
+- Repo-local wrapper scripts remain valid fallback or implementation targets, but they are secondary to already-loaded user-facing terminal commands.
+
 ## Core Repository Constraints
 
 ### Architecture

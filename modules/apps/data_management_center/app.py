@@ -185,7 +185,7 @@ class DataManagementCenterApp(BaseApplication):
                     return (None, None)
 
             dpl = _count("dim_platforms")
-            ds = _count("dim_shops")
+            ds = _count("core.dim_shops")
             dp = _count("dim_products")
             dcr = _count("dim_currency_rates")
             fp = _count("fact_product_metrics")
@@ -336,4 +336,3 @@ class DataManagementCenterApp(BaseApplication):
         except Exception as e:
             logger.error(f"运行异常: {e}")
             return False
-

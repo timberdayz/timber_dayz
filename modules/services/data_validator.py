@@ -75,7 +75,7 @@ class DataValidator:
             
             # 外键规则
             'foreign_keys': {
-                'shop_id': {'table': 'dim_shops', 'column': 'shop_id'},
+                'shop_id': {'table': 'core.dim_shops', 'column': 'shop_id'},
                 'product_id': {'table': 'dim_products', 'column': 'product_id'},
                 'order_id': {'table': 'fact_orders', 'column': 'order_id'},
                 'customer_id': {'table': 'dim_customers', 'column': 'customer_id'}

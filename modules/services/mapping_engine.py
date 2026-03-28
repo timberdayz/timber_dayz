@@ -83,7 +83,7 @@ class SmartMappingEngine:
         return {
             "shop_id": {
                 "patterns": ["shop", "store", "店铺", "商店"],
-                "target_table": "dim_shops",
+                "target_table": "core.dim_shops",
                 "target_field": "shop_id"
             },
             "product_id": {

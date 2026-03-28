@@ -18,6 +18,22 @@ This repository uses a skill-first workflow.
 - Treat legacy recorder scripts, `/recorder` APIs, and recorder-oriented docs as historical or maintenance-only unless explicitly requested.
 - Primary workflow reference for collection authoring is `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`.
 
+## pwcli Command Precedence
+
+- In this repository, new PowerShell terminals are expected to auto-load user-facing `pwcli` helper commands from the PowerShell profile.
+- Before suggesting new command setup steps, first check whether the environment already exposes:
+  - `pwcli`
+  - `Open-PwcliMiaoshou`
+  - `Open-PwcliShopee`
+  - `Open-PwcliTiktok`
+  - `Save-PwcliMiaoshouState`
+  - `Save-PwcliShopeeState`
+  - `Save-PwcliTiktokState`
+  - `Show-PwcliPaths`
+- When these commands already exist, prefer them in user-facing guidance over longer repo-local wrapper commands or manual function definitions.
+- Treat repo-local scripts such as `scripts/pwcli.ps1`, `scripts/pw-open.ps1`, `scripts/pw-step.ps1`, `scripts/pw-note.ps1`, `scripts/pw-shot.ps1`, and `scripts/pw-pack.ps1` as implementation assets or fallback paths unless the user explicitly asks to use or modify them.
+- When discussing how to record or explore pages, prefer the shortest already-available user command path, then describe any lower-level fallback only if needed.
+
 ## Rule Sources
 
 1. User instructions

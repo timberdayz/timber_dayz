@@ -62,7 +62,7 @@ a_targets AS (
     WHERE t."年月" = to_char(s.month_start, 'YYYY-MM')
       -- 如果提供了平台参数，通过 dim_shops 关联筛选
       [[AND EXISTS (
-          SELECT 1 FROM dim_shops ds 
+          SELECT 1 FROM core.dim_shops ds 
           WHERE ds.shop_id = t."店铺ID" 
             AND LOWER(ds.platform_code) = LOWER({{platform}})
       )]]
@@ -76,7 +76,7 @@ a_costs AS (
     WHERE c."年月" = to_char(s.month_start, 'YYYY-MM')
       -- 如果提供了平台参数，通过 dim_shops 关联筛选
       [[AND EXISTS (
-          SELECT 1 FROM dim_shops ds 
+          SELECT 1 FROM core.dim_shops ds 
           WHERE ds.shop_id = c."店铺ID" 
             AND LOWER(ds.platform_code) = LOWER({{platform}})
       )]]
