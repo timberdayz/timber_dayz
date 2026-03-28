@@ -38,6 +38,7 @@ Define the first executable cleanup wave with a strictly bounded scope after the
 - completed:
   - migration contract test
   - reversible archive/rename migration file
-- pending:
   - temporary PostgreSQL rehearsal
-  - post-rehearsal completeness verification
+  - post-rehearsal schema completeness verification
+- pending:
+  - execution decision for a real environment

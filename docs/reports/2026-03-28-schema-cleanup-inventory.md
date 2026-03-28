@@ -212,6 +212,29 @@ Reason for choosing archive/rename first:
 - it is safer than direct drop for a production-visible duplicate
 - it allows rehearsal validation before any destructive cleanup decision
 
+## Wave 1 Rehearsal
+
+Wave-1 was rehearsed on a temporary PostgreSQL database.
+
+Observed result:
+
+- migrated revision: `20260328_schema_cleanup_wave1`
+- migration status: `up_to_date`
+- `all_tables_exist = true`
+- `missing_tables = []`
+- before upgrade:
+  - `public.target_breakdown = true`
+- after upgrade:
+  - `public.target_breakdown = false`
+  - `public.target_breakdown__archive_wave1 = true`
+  - `a_class.target_breakdown = true`
+
+Interpretation:
+
+- the approved wave-1 migration now has real rehearsal evidence
+- the archive/rename strategy behaved as intended
+- this closes the technical validation for wave 1 and keeps the remaining higher-risk duplicates out of scope
+
 ## Related Documents
 
 - `docs/superpowers/specs/2026-03-28-database-schema-cleanup-design.md`
