@@ -6,6 +6,7 @@ from modules.core.db import DimShop, EntityAlias, StagingRawData
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATABASE_CONFIG_PATH = PROJECT_ROOT / "backend/models/database.py"
 
 
 def _read_text(path: Path) -> str:
@@ -22,6 +23,15 @@ def _count_refs(paths: list[Path], literals: list[str]) -> tuple[int, list[str]]
             total += count
             matched.append(str(path.relative_to(PROJECT_ROOT)).replace("\\", "/"))
     return total, matched
+
+
+def _search_path_has_public_before_target(target_schema: str) -> bool:
+    content = _read_text(DATABASE_CONFIG_PATH)
+    marker = "search_path=public,b_class,a_class,c_class,core,finance"
+    if marker not in content:
+        return False
+    order = ["public", "b_class", "a_class", "c_class", "core", "finance"]
+    return order.index("public") < order.index(target_schema)
 
 
 def collect_wave2_candidate_proofs() -> dict[str, dict[str, object]]:
@@ -94,6 +104,9 @@ def collect_wave2_candidate_proofs() -> dict[str, dict[str, object]]:
             "model_schema": model_schema,
             "model_fullname": model.__table__.fullname,
             "risk_level": config["risk_level"],
+            "search_path_public_before_target": _search_path_has_public_before_target(
+                config["expected_target_schema"]
+            ),
             "runtime_read_file_count": len(read_files),
             "runtime_read_files": read_files,
             "runtime_write_file_count": len(write_files),

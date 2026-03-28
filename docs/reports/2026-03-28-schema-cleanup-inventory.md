@@ -311,6 +311,7 @@ Interpretation:
 See:
 
 - `docs/reports/2026-03-28-schema-cleanup-wave2-production-evidence.md`
+- `docs/reports/2026-03-28-dim-shops-runtime-alignment-investigation.md`
 
 ## Related Documents
 

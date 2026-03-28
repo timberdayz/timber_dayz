@@ -22,6 +22,7 @@ def test_dim_shops_is_flagged_as_high_risk_with_live_read_and_write_paths():
     assert candidate["risk_level"] == "high"
     assert candidate["runtime_read_file_count"] > 0
     assert candidate["runtime_write_file_count"] > 0
+    assert candidate["search_path_public_before_target"] is True
     assert candidate["ready_for_wave2_migration"] is False
 
 

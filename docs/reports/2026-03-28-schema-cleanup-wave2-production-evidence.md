@@ -54,3 +54,7 @@ This means wave 2 must remain split:
 1. Keep `entity_aliases` and `staging_raw_data` in proof mode, but treat them as lower operational risk because both copies are empty in production.
 2. Escalate `dim_shops` as a runtime/schema-alignment issue, not just a cleanup candidate.
 3. Do not draft a shared wave-2 migration for all three tables.
+
+See also:
+
+- `docs/reports/2026-03-28-dim-shops-runtime-alignment-investigation.md`
