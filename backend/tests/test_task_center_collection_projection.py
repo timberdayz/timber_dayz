@@ -257,3 +257,147 @@ async def test_collection_background_failure_updates_task_center_status(
     mirrored = await TaskCenterService(task_center_sqlite_session).get_task(task.task_id)
 
     assert mirrored["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_collection_cancel_updates_task_center_status(task_center_sqlite_session):
+    from backend.routers.collection_tasks import cancel_or_delete_task
+
+    task = CollectionTask(
+        task_id="collection-task-cancel-1",
+        platform="shopee",
+        account="acc-1",
+        status="running",
+        trigger_type="manual",
+    )
+    task_center_sqlite_session.add(task)
+    await task_center_sqlite_session.commit()
+    await task_center_sqlite_session.refresh(task)
+
+    await TaskCenterService(task_center_sqlite_session).create_task(
+        task_id=task.task_id,
+        task_family="collection",
+        task_type="manual",
+        status="running",
+        platform_code=task.platform,
+        account_id=task.account,
+    )
+
+    await cancel_or_delete_task(task_id=task.task_id, db=task_center_sqlite_session)
+
+    mirrored = await TaskCenterService(task_center_sqlite_session).get_task(task.task_id)
+
+    assert mirrored["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_collection_retry_creates_task_center_row(task_center_sqlite_session):
+    from backend.routers.collection_tasks import retry_task
+
+    original_task = CollectionTask(
+        task_id="collection-task-retry-1",
+        platform="shopee",
+        account="acc-1",
+        status="failed",
+        trigger_type="manual",
+    )
+    task_center_sqlite_session.add(original_task)
+    await task_center_sqlite_session.commit()
+    await task_center_sqlite_session.refresh(original_task)
+
+    retried = await retry_task(task_id=original_task.task_id, db=task_center_sqlite_session)
+
+    mirrored = await TaskCenterService(task_center_sqlite_session).get_task(retried["task_id"])
+
+    assert mirrored is not None
+    assert mirrored["status"] == "pending"
+    assert mirrored["task_family"] == "collection"
+
+
+@pytest.mark.asyncio
+async def test_collection_resume_updates_task_center_status(task_center_sqlite_session):
+    from backend.routers.collection_tasks import resume_task
+    from backend.schemas.collection import ResumeTaskRequest
+
+    task = CollectionTask(
+        id=1,
+        task_id="collection-task-resume-1",
+        platform="shopee",
+        account="acc-1",
+        status="paused",
+        trigger_type="manual",
+        verification_type="graphical_captcha",
+    )
+    task_center_sqlite_session.add(task)
+    await task_center_sqlite_session.commit()
+
+    await TaskCenterService(task_center_sqlite_session).create_task(
+        task_id=task.task_id,
+        task_family="collection",
+        task_type="manual",
+        status="paused",
+        platform_code=task.platform,
+        account_id=task.account,
+    )
+
+    redis = SimpleNamespace(set=_async_noop)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(redis=redis)))
+
+    await resume_task(
+        task_id=task.task_id,
+        body=ResumeTaskRequest(captcha_code="1234"),
+        request=request,
+        db=task_center_sqlite_session,
+    )
+
+    mirrored = await TaskCenterService(task_center_sqlite_session).get_task(task.task_id)
+
+    assert mirrored["status"] == "running"
+    assert mirrored["details_json"]["collection"]["raw_status"] == "verification_submitted"
+
+
+@pytest.mark.asyncio
+async def test_collection_verification_pause_updates_task_center_status(
+    task_center_sqlite_session,
+    task_center_session_factory,
+    monkeypatch,
+):
+    from backend.models import database as database_module
+    from backend.routers.collection_tasks import _on_verification_required
+
+    task = CollectionTask(
+        task_id="collection-task-pause-1",
+        platform="shopee",
+        account="acc-1",
+        status="running",
+        trigger_type="manual",
+    )
+    task_center_sqlite_session.add(task)
+    await task_center_sqlite_session.commit()
+
+    await TaskCenterService(task_center_sqlite_session).create_task(
+        task_id=task.task_id,
+        task_family="collection",
+        task_type="manual",
+        status="running",
+        platform_code=task.platform,
+        account_id=task.account,
+    )
+
+    monkeypatch.setattr(database_module, "AsyncSessionLocal", task_center_session_factory)
+
+    value = await _on_verification_required(
+        task_id=task.task_id,
+        verification_type="graphical_captcha",
+        screenshot_path="temp/task.png",
+        app=None,
+    )
+
+    mirrored = await TaskCenterService(task_center_sqlite_session).get_task(task.task_id)
+
+    assert value is None
+    assert mirrored["status"] == "paused"
+
+
+async def _async_noop(*args, **kwargs):
+    return None

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,6 +70,8 @@ async def get_task_center_task(
 ):
     service = TaskCenterService(db)
     task = await service.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
     return success_response(data=task)
 
 
@@ -80,5 +82,8 @@ async def get_task_center_logs(
     db: AsyncSession = Depends(get_async_db),
 ):
     service = TaskCenterService(db)
+    task = await service.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
     logs = await service.list_logs(task_id, limit=limit)
     return success_response(data={"items": logs})

@@ -114,3 +114,17 @@ async def test_task_center_tasks_endpoint_reports_total_beyond_page_size(
     payload = response.json()["data"]
     assert len(payload["items"]) == 2
     assert payload["total"] == 3
+
+
+@pytest.mark.asyncio
+async def test_task_center_detail_returns_404_when_task_missing(task_center_async_client):
+    response = await task_center_async_client.get("/api/task-center/tasks/missing-task")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_task_center_logs_returns_404_when_task_missing(task_center_async_client):
+    response = await task_center_async_client.get("/api/task-center/tasks/missing-task/logs")
+
+    assert response.status_code == 404
