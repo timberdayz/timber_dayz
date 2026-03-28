@@ -84,6 +84,40 @@ def _seed_public_target_breakdown_duplicate(temp_engine) -> None:
         )
 
 
+def _ensure_public_dim_shops_duplicate(temp_engine) -> None:
+    with temp_engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+        public_exists = conn.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'dim_shops'
+                LIMIT 1
+                """
+            )
+        ).scalar()
+        core_exists = conn.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'core' AND table_name = 'dim_shops'
+                LIMIT 1
+                """
+            )
+        ).scalar()
+        if core_exists and not public_exists:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE public.dim_shops
+                    (LIKE core.dim_shops INCLUDING ALL)
+                    """
+                )
+            )
+
+
 def _verify_schema_completeness(database_url: str) -> dict[str, object]:
     env = os.environ.copy()
     env["DATABASE_URL"] = database_url
@@ -146,6 +180,60 @@ def run_wave1_rehearsal() -> dict[str, object]:
                 "public_target_breakdown_exists_after": public_after,
                 "archive_table_exists_after": archive_after,
                 "a_class_target_breakdown_exists_after": a_class_after,
+            }
+        )
+        return completeness
+    finally:
+        _drop_temp_database(admin_engine, database_name)
+        admin_engine.dispose()
+
+
+def run_dim_shops_public_retirement_rehearsal() -> dict[str, object]:
+    settings = get_settings()
+    base_url = make_url(settings.DATABASE_URL)
+    admin_engine = create_engine(
+        _admin_url(settings.DATABASE_URL),
+        isolation_level="AUTOCOMMIT",
+        future=True,
+    )
+
+    database_name = _temp_db_name()
+    temp_url = base_url.set(database=database_name).render_as_string(hide_password=False)
+    env = os.environ.copy()
+    env["DATABASE_URL"] = temp_url
+
+    try:
+        _create_temp_database(admin_engine, database_name)
+
+        _run_command(["alembic", "upgrade", "20260328_dim_shops_core"], env=env)
+
+        temp_engine = create_engine(temp_url, future=True)
+        try:
+            _ensure_public_dim_shops_duplicate(temp_engine)
+            public_before = _table_exists(temp_engine, "public", "dim_shops")
+            core_before = _table_exists(temp_engine, "core", "dim_shops")
+        finally:
+            temp_engine.dispose()
+
+        _run_command(["alembic", "upgrade", "head"], env=env)
+
+        temp_engine = create_engine(temp_url, future=True)
+        try:
+            public_after = _table_exists(temp_engine, "public", "dim_shops")
+            archive_after = _table_exists(temp_engine, "public", "dim_shops__archive_retired")
+            core_after = _table_exists(temp_engine, "core", "dim_shops")
+        finally:
+            temp_engine.dispose()
+
+        completeness = _verify_schema_completeness(temp_url)
+        completeness.update(
+            {
+                "database_name": database_name,
+                "public_dim_shops_exists_before": public_before,
+                "core_dim_shops_exists_before": core_before,
+                "public_dim_shops_exists_after": public_after,
+                "archive_dim_shops_exists_after": archive_after,
+                "core_dim_shops_exists_after": core_after,
             }
         )
         return completeness
