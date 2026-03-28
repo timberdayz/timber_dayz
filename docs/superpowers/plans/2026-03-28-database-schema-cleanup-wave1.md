@@ -32,3 +32,12 @@ Define the first executable cleanup wave with a strictly bounded scope after the
 2. implement a reversible archive/rename migration
 3. rehearse upgrade on a temporary PostgreSQL database
 4. confirm schema completeness still passes after the rehearsal
+
+## Current status
+
+- completed:
+  - migration contract test
+  - reversible archive/rename migration file
+- pending:
+  - temporary PostgreSQL rehearsal
+  - post-rehearsal completeness verification
