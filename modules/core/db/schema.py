@@ -850,6 +850,112 @@ class CollectionSyncPoint(Base):
     )
 
 
+class TaskCenterTask(Base):
+    """Generic durable task control-plane record for long-running jobs."""
+
+    __tablename__ = "task_center_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(100), nullable=False)
+    task_family = Column(String(32), nullable=False)
+    task_type = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False, default="pending")
+    trigger_source = Column(String(32), nullable=True)
+    priority = Column(Integer, nullable=False, default=5)
+    runner_kind = Column(String(32), nullable=True)
+    external_runner_id = Column(String(128), nullable=True)
+    parent_task_id = Column(Integer, ForeignKey("task_center_tasks.id", ondelete="SET NULL"), nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    claimed_by = Column(String(100), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    platform_code = Column(String(32), nullable=True)
+    account_id = Column(String(100), nullable=True)
+    source_file_id = Column(Integer, nullable=True)
+    source_table_name = Column(String(255), nullable=True)
+    current_step = Column(String(255), nullable=True)
+    current_item = Column(String(500), nullable=True)
+    total_items = Column(Integer, nullable=False, default=0)
+    processed_items = Column(Integer, nullable=False, default=0)
+    success_items = Column(Integer, nullable=False, default=0)
+    failed_items = Column(Integer, nullable=False, default=0)
+    skipped_items = Column(Integer, nullable=False, default=0)
+    total_rows = Column(Integer, nullable=False, default=0)
+    processed_rows = Column(Integer, nullable=False, default=0)
+    valid_rows = Column(Integer, nullable=False, default=0)
+    error_rows = Column(Integer, nullable=False, default=0)
+    quarantined_rows = Column(Integer, nullable=False, default=0)
+    progress_percent = Column(Float, nullable=False, default=0.0)
+    error_summary = Column(Text, nullable=True)
+    details_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    parent_task = relationship("TaskCenterTask", remote_side=[id], backref="child_tasks")
+    logs = relationship("TaskCenterLog", back_populates="task", cascade="all, delete-orphan")
+    links = relationship("TaskCenterLink", back_populates="task", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("task_id", name="uq_task_center_tasks_task_id"),
+        Index("ix_task_center_tasks_family_status", "task_family", "status"),
+        Index("ix_task_center_tasks_created", "created_at"),
+        Index("ix_task_center_tasks_runner", "runner_kind", "external_runner_id"),
+        Index("ix_task_center_tasks_source_file", "source_file_id"),
+        Index("ix_task_center_tasks_source_table", "source_table_name"),
+        CheckConstraint(
+            "status IN ('pending', 'queued', 'running', 'paused', 'retry_waiting', 'partial_success', 'completed', 'failed', 'cancelled', 'interrupted')",
+            name="chk_task_center_tasks_status",
+        ),
+    )
+
+
+class TaskCenterLog(Base):
+    """Append-only operational log rows for a generic task."""
+
+    __tablename__ = "task_center_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_pk = Column(Integer, ForeignKey("task_center_tasks.id", ondelete="CASCADE"), nullable=False)
+    level = Column(String(16), nullable=False, default="info")
+    event_type = Column(String(32), nullable=False, default="progress")
+    message = Column(Text, nullable=False)
+    details_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    task = relationship("TaskCenterTask", back_populates="logs")
+
+    __table_args__ = (
+        Index("ix_task_center_logs_task", "task_pk"),
+        Index("ix_task_center_logs_created", "created_at"),
+        Index("ix_task_center_logs_level", "level"),
+    )
+
+
+class TaskCenterLink(Base):
+    """Indexed task-to-subject links for reverse lookup."""
+
+    __tablename__ = "task_center_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_pk = Column(Integer, ForeignKey("task_center_tasks.id", ondelete="CASCADE"), nullable=False)
+    subject_type = Column(String(32), nullable=False)
+    subject_id = Column(String(128), nullable=True)
+    subject_key = Column(String(255), nullable=True)
+    details_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    task = relationship("TaskCenterTask", back_populates="links")
+
+    __table_args__ = (
+        Index("ix_task_center_links_task_subject", "task_pk", "subject_type"),
+        Index("ix_task_center_links_subject_id", "subject_type", "subject_id"),
+        Index("ix_task_center_links_subject_key", "subject_type", "subject_key"),
+    )
+
+
 class CloudBClassSyncCheckpoint(Base):
     """Per-table checkpoint for local-to-cloud B-class sync."""
 
