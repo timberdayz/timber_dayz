@@ -3,458 +3,393 @@
 """
 数据同步进度跟踪服务(Sync Progress Tracker)
 
-v4.12.0新增:
-- 使用数据库存储的进度跟踪器(持久化)
-- 替代内存存储的ProgressTracker(用于数据同步场景)
-- 支持服务重启后恢复进度
-
-v4.18.2更新:
-- 支持异步数据库操作(AsyncSession)
-- 移除阻塞的 time.sleep(),改用 asyncio.sleep()
-- 所有方法改为 async def
-
-职责:
-- 创建、更新、查询同步任务进度
-- 持久化存储,支持历史查询
-- 与现有ProgressTracker并行运行(不同场景)
+兼容层职责:
+- 保持现有 data-sync 任务跟踪接口和返回字段
+- 将底层存储切换到 task center
+- 在内部将 legacy `processing` 状态映射到 canonical `running`
 """
 
-from typing import Dict, Any, Optional, List
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from datetime import datetime, timezone
-import asyncio
+from __future__ import annotations
 
-from modules.core.db import SyncProgressTask
-from modules.core.logger import get_logger
+import asyncio
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.services.task_center_service import TaskCenterService
 from backend.utils.data_formatter import format_datetime
+from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class SyncProgressTracker:
-    """
-    数据同步进度跟踪器(数据库存储,支持异步)
-    
-    v4.18.2更新:支持 AsyncSession,所有方法改为 async def
-    
-    职责:
-    - 创建、更新、查询同步任务进度
-    - 持久化存储,支持历史查询
-    - 与现有ProgressTracker并行运行(不同场景)
-    """
-    
+    """Data-sync progress compatibility adapter backed by task center."""
+
+    TASK_FAMILY = "data_sync"
+
     def __init__(self, db: AsyncSession):
-        """
-        [*] v4.18.2更新:完全过渡到异步架构,只接受AsyncSession
-        """
         self.db = db
-    
+        self.task_center = TaskCenterService(db)
+
     async def create_task(
         self,
         task_id: str,
         total_files: int,
-        task_type: str = "bulk_ingest"
+        task_type: str = "bulk_ingest",
     ) -> Dict[str, Any]:
-        """
-        创建进度跟踪任务
-        
-        Args:
-            task_id: 任务ID
-            total_files: 总文件数
-            task_type: 任务类型(bulk_ingest/single_file)
-            
-        Returns:
-            任务信息字典
-        """
         try:
-            # 检查任务是否已存在
-            result = await self.db.execute(
-                select(SyncProgressTask).where(SyncProgressTask.task_id == task_id)
-            )
-            existing_task = result.scalar_one_or_none()
-            
+            existing_task = await self.task_center.get_task(task_id)
             if existing_task:
-                logger.warning(f"[SyncProgress] Task {task_id} already exists, updating instead")
+                logger.warning(
+                    "[SyncProgress] Task %s already exists in task center, returning existing row",
+                    task_id,
+                )
                 return self._task_to_dict(existing_task)
-            
-            # 创建新任务
-            task = SyncProgressTask(
+
+            task = await self.task_center.create_task(
                 task_id=task_id,
+                task_family=self.TASK_FAMILY,
                 task_type=task_type,
-                total_files=total_files,
-                processed_files=0,
-                current_file="",
                 status="pending",
+                total_items=total_files,
+                processed_items=0,
+                success_items=0,
+                failed_items=0,
+                skipped_items=0,
                 total_rows=0,
                 processed_rows=0,
                 valid_rows=0,
                 error_rows=0,
                 quarantined_rows=0,
-                file_progress=0.0,
-                row_progress=0.0,
-                start_time=datetime.now(timezone.utc),
-                errors=[],
-                warnings=[],
-                task_details={}
+                progress_percent=0.0,
+                started_at=datetime.now(timezone.utc),
+                details_json={
+                    "errors": [],
+                    "warnings": [],
+                    "message": None,
+                    "row_progress": 0.0,
+                    "task_details": {},
+                },
             )
-            
-            self.db.add(task)
-            await self.db.commit()
-            
-            logger.info(f"[SyncProgress] Created task {task_id}: {total_files} files")
+            logger.info("[SyncProgress] Created task %s: %s files", task_id, total_files)
             return self._task_to_dict(task)
-            
         except Exception as e:
-            logger.error(f"[SyncProgress] Failed to create task {task_id}: {e}", exc_info=True)
+            logger.error("[SyncProgress] Failed to create task %s: %s", task_id, e, exc_info=True)
             await self.db.rollback()
             raise
-    
-    async def update_task(
-        self,
-        task_id: str,
-        updates: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        更新任务进度
-        
-        Args:
-            task_id: 任务ID
-            updates: 更新字段字典
-            
-        Returns:
-            更新后的任务信息字典
-        """
+
+    async def update_task(self, task_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            result = await self.db.execute(
-                select(SyncProgressTask).where(SyncProgressTask.task_id == task_id)
-            )
-            task = result.scalar_one_or_none()
-            
-            if not task:
+            current = await self.task_center.get_task(task_id)
+            if not current:
                 raise ValueError(f"Task {task_id} not found")
-            
-            # [*] v4.17.1修复:合并task_details而不是覆盖
-            if "task_details" in updates:
-                current_details = task.task_details or {}
-                new_details = updates["task_details"]
-                # 合并字典(新值覆盖旧值)
-                if isinstance(current_details, dict) and isinstance(new_details, dict):
-                    merged_details = {**current_details, **new_details}
-                    updates["task_details"] = merged_details
-                # 如果不是字典,直接使用新值
-            
-            # 更新字段
-            for key, value in updates.items():
-                if hasattr(task, key):
-                    setattr(task, key, value)
-            
-            # 自动计算进度百分比
-            if task.total_files > 0:
-                task.file_progress = round(
-                    task.processed_files / task.total_files * 100, 2
-                )
-            
-            if task.total_rows > 0:
-                task.row_progress = round(
-                    task.processed_rows / task.total_rows * 100, 2
-                )
-            
-            # 更新时间戳
-            task.updated_at = datetime.now(timezone.utc)
-            
-            await self.db.commit()
-            
-            return self._task_to_dict(task)
-            
+
+            payload = self._legacy_updates_to_task_center(current, updates)
+            updated = await self.task_center.update_task(task_id, **payload)
+            return self._task_to_dict(updated)
         except Exception as e:
-            logger.error(f"[SyncProgress] Failed to update task {task_id}: {e}", exc_info=True)
+            logger.error("[SyncProgress] Failed to update task %s: %s", task_id, e, exc_info=True)
             await self.db.rollback()
             raise
-    
+
     async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """
-        获取任务进度
-        
-        Args:
-            task_id: 任务ID
-            
-        Returns:
-            任务信息字典,如果不存在则返回None
-        """
         max_retries = 3
         retry_count = 0
-        
+
         while retry_count < max_retries:
             try:
-                # [*] 修复:每次查询前先回滚,确保使用干净的事务
                 try:
                     await self.db.rollback()
-                except:
-                    pass  # 如果回滚失败(可能没有活动事务),忽略
-                
-                # 尝试查询
-                result = await self.db.execute(
-                    select(SyncProgressTask).where(SyncProgressTask.task_id == task_id)
-                )
-                task = result.scalar_one_or_none()
-                
+                except Exception:
+                    pass
+
+                task = await self.task_center.get_task(task_id)
                 if not task:
                     return None
-                
                 return self._task_to_dict(task)
-                
             except Exception as query_error:
                 error_str = str(query_error)
-                # 检查是否是事务错误
                 is_transaction_error = (
-                    'InFailedSqlTransaction' in error_str or 
-                    'current transaction is aborted' in error_str.lower() or
-                    'transaction' in error_str.lower()
+                    "InFailedSqlTransaction" in error_str
+                    or "current transaction is aborted" in error_str.lower()
+                    or "transaction" in error_str.lower()
                 )
-                
+
                 if is_transaction_error and retry_count < max_retries - 1:
                     retry_count += 1
-                    logger.warning(f"[SyncProgress] Transaction error detected (retry {retry_count}/{max_retries}), rolling back: {query_error}")
+                    logger.warning(
+                        "[SyncProgress] Transaction error detected (retry %s/%s), rolling back: %s",
+                        retry_count,
+                        max_retries,
+                        query_error,
+                    )
                     try:
                         await self.db.rollback()
-                    except:
+                    except Exception:
                         pass
-                    # [*] v4.18.2修复:使用 asyncio.sleep 替代 time.sleep
                     await asyncio.sleep(0.1 * retry_count)
                     continue
-                else:
-                    # 其他错误或重试次数用完,记录并返回None
-                    logger.error(f"[SyncProgress] Failed to get task {task_id} (retry {retry_count}/{max_retries}): {query_error}", exc_info=True)
-                    try:
-                        await self.db.rollback()
-                    except:
-                        pass
-                    return None
-        
+
+                logger.error(
+                    "[SyncProgress] Failed to get task %s (retry %s/%s): %s",
+                    task_id,
+                    retry_count,
+                    max_retries,
+                    query_error,
+                    exc_info=True,
+                )
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+                return None
+
         return None
-    
+
     async def complete_task(
         self,
         task_id: str,
         success: bool = True,
-        error: Optional[str] = None
+        error: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        完成任务
-        
-        Args:
-            task_id: 任务ID
-            success: 是否成功
-            error: 错误信息(可选)
-            
-        Returns:
-            任务信息字典
-        """
         try:
-            result = await self.db.execute(
-                select(SyncProgressTask).where(SyncProgressTask.task_id == task_id)
-            )
-            task = result.scalar_one_or_none()
-            
-            if not task:
+            current = await self.task_center.get_task(task_id)
+            if not current:
                 raise ValueError(f"Task {task_id} not found")
-            
-            task.status = "completed" if success else "failed"
-            task.end_time = datetime.now(timezone.utc)
-            task.updated_at = datetime.now(timezone.utc)
-            
+
+            details = self._details_from_task_center(current)
             if error:
-                errors = task.errors or []
-                errors.append({
-                    "time": datetime.now(timezone.utc).isoformat(),
-                    "message": error
-                })
-                task.errors = errors
-            
-            await self.db.commit()
-            
-            logger.info(f"[SyncProgress] Completed task {task_id}: {'success' if success else 'failed'}")
-            return self._task_to_dict(task)
-            
+                errors = list(details.get("errors", []))
+                errors.append(
+                    {
+                        "time": datetime.now(timezone.utc).isoformat(),
+                        "message": error,
+                    }
+                )
+                details["errors"] = errors
+                details["message"] = error
+
+            updated = await self.task_center.update_task(
+                task_id,
+                status="completed" if success else "failed",
+                finished_at=datetime.now(timezone.utc),
+                error_summary=error if error else current.get("error_summary"),
+                details_json=details,
+            )
+            logger.info(
+                "[SyncProgress] Completed task %s: %s",
+                task_id,
+                "success" if success else "failed",
+            )
+            return self._task_to_dict(updated)
         except Exception as e:
-            logger.error(f"[SyncProgress] Failed to complete task {task_id}: {e}", exc_info=True)
+            logger.error("[SyncProgress] Failed to complete task %s: %s", task_id, e, exc_info=True)
             await self.db.rollback()
             raise
-    
+
     async def add_error(self, task_id: str, error: str) -> None:
-        """
-        添加错误信息
-        
-        Args:
-            task_id: 任务ID
-            error: 错误信息
-        """
         try:
-            result = await self.db.execute(
-                select(SyncProgressTask).where(SyncProgressTask.task_id == task_id)
-            )
-            task = result.scalar_one_or_none()
-            
-            if task:
-                errors = task.errors or []
-                errors.append({
+            current = await self.task_center.get_task(task_id)
+            if not current:
+                return
+
+            details = self._details_from_task_center(current)
+            errors = list(details.get("errors", []))
+            errors.append(
+                {
                     "time": datetime.now(timezone.utc).isoformat(),
-                    "message": error
-                })
-                task.errors = errors
-                task.updated_at = datetime.now(timezone.utc)
-                await self.db.commit()
-                
+                    "message": error,
+                }
+            )
+            details["errors"] = errors
+            details["message"] = error
+
+            await self.task_center.update_task(
+                task_id,
+                error_summary=error,
+                details_json=details,
+            )
         except Exception as e:
-            logger.error(f"[SyncProgress] Failed to add error to task {task_id}: {e}", exc_info=True)
+            logger.error("[SyncProgress] Failed to add error to task %s: %s", task_id, e, exc_info=True)
             await self.db.rollback()
-    
+
     async def add_warning(self, task_id: str, warning: str) -> None:
-        """
-        添加警告信息
-        
-        Args:
-            task_id: 任务ID
-            warning: 警告信息
-        """
         try:
-            result = await self.db.execute(
-                select(SyncProgressTask).where(SyncProgressTask.task_id == task_id)
-            )
-            task = result.scalar_one_or_none()
-            
-            if task:
-                warnings = task.warnings or []
-                warnings.append({
+            current = await self.task_center.get_task(task_id)
+            if not current:
+                return
+
+            details = self._details_from_task_center(current)
+            warnings = list(details.get("warnings", []))
+            warnings.append(
+                {
                     "time": datetime.now(timezone.utc).isoformat(),
-                    "message": warning
-                })
-                task.warnings = warnings
-                task.updated_at = datetime.now(timezone.utc)
-                await self.db.commit()
-                
+                    "message": warning,
+                }
+            )
+            details["warnings"] = warnings
+
+            await self.task_center.update_task(task_id, details_json=details)
         except Exception as e:
-            logger.error(f"[SyncProgress] Failed to add warning to task {task_id}: {e}", exc_info=True)
+            logger.error("[SyncProgress] Failed to add warning to task %s: %s", task_id, e, exc_info=True)
             await self.db.rollback()
-    
+
     async def list_tasks(
         self,
         status: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> List[Dict[str, Any]]:
-        """
-        列出所有任务
-        
-        Args:
-            status: 状态筛选(可选)
-            limit: 返回数量限制
-            
-        Returns:
-            任务列表
-        """
         try:
-            stmt = select(SyncProgressTask)
-            if status:
-                stmt = stmt.where(SyncProgressTask.status == status)
-            stmt = stmt.order_by(SyncProgressTask.start_time.desc()).limit(limit)
-            result = await self.db.execute(stmt)
-            tasks = result.scalars().all()
-            
-            return [self._task_to_dict(task) for task in tasks]
-            
-        except Exception as e:
-            logger.error(f"[SyncProgress] Failed to list tasks: {e}", exc_info=True)
-            return []
-    
-    async def delete_task(self, task_id: str) -> bool:
-        """
-        删除任务
-        
-        Args:
-            task_id: 任务ID
-            
-        Returns:
-            是否删除成功
-        """
-        try:
-            result = await self.db.execute(
-                select(SyncProgressTask).where(SyncProgressTask.task_id == task_id)
+            rows = await self.task_center.list_tasks(
+                task_family=self.TASK_FAMILY,
+                status=self._legacy_status_to_task_center(status) if status else None,
+                limit=limit,
             )
-            task = result.scalar_one_or_none()
-            
-            if task:
-                await self.db.delete(task)
-                await self.db.commit()
-                logger.info(f"[SyncProgress] Deleted task {task_id}")
-                return True
-            
-            return False
-            
+            return [self._task_to_dict(row) for row in rows]
         except Exception as e:
-            logger.error(f"[SyncProgress] Failed to delete task {task_id}: {e}", exc_info=True)
+            logger.error("[SyncProgress] Failed to list tasks: %s", e, exc_info=True)
+            return []
+
+    async def delete_task(self, task_id: str) -> bool:
+        try:
+            deleted = await self.task_center.delete_task(task_id)
+            if deleted:
+                logger.info("[SyncProgress] Deleted task %s", task_id)
+            return deleted
+        except Exception as e:
+            logger.error("[SyncProgress] Failed to delete task %s: %s", task_id, e, exc_info=True)
             await self.db.rollback()
             return False
-    
-    def _task_to_dict(self, task: SyncProgressTask) -> Dict[str, Any]:
-        """
-        将任务对象转换为字典
-        
-        Args:
-            task: 任务对象
-            
-        Returns:
-            任务信息字典
-        """
-        task_details = task.task_details or {}
+
+    def _legacy_updates_to_task_center(
+        self,
+        current: Dict[str, Any],
+        updates: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        details = self._details_from_task_center(current)
+
+        field_map = {
+            "task_type": "task_type",
+            "total_files": "total_items",
+            "processed_files": "processed_items",
+            "current_file": "current_item",
+            "total_rows": "total_rows",
+            "processed_rows": "processed_rows",
+            "valid_rows": "valid_rows",
+            "error_rows": "error_rows",
+            "quarantined_rows": "quarantined_rows",
+        }
+        for legacy_key, task_center_key in field_map.items():
+            if legacy_key in updates:
+                payload[task_center_key] = updates[legacy_key]
+
+        if "status" in updates:
+            payload["status"] = self._legacy_status_to_task_center(updates["status"])
+
+        if "message" in updates:
+            details["message"] = updates["message"]
+
+        if "task_details" in updates:
+            current_task_details = details.get("task_details", {})
+            new_task_details = updates["task_details"]
+            if isinstance(current_task_details, dict) and isinstance(new_task_details, dict):
+                details["task_details"] = {**current_task_details, **new_task_details}
+            else:
+                details["task_details"] = new_task_details
+
+        if "row_progress" in updates:
+            details["row_progress"] = updates["row_progress"]
+
+        total_items = payload.get("total_items", current.get("total_items", 0)) or 0
+        processed_items = payload.get("processed_items", current.get("processed_items", 0)) or 0
+        if "file_progress" in updates:
+            payload["progress_percent"] = updates["file_progress"]
+        elif total_items > 0:
+            payload["progress_percent"] = round(processed_items / total_items * 100, 2)
+
+        total_rows = payload.get("total_rows", current.get("total_rows", 0)) or 0
+        processed_rows = payload.get("processed_rows", current.get("processed_rows", 0)) or 0
+        if "row_progress" not in details and total_rows > 0:
+            details["row_progress"] = round(processed_rows / total_rows * 100, 2)
+        elif total_rows > 0 and "processed_rows" in payload:
+            details["row_progress"] = round(processed_rows / total_rows * 100, 2)
+
+        payload["details_json"] = details
+        return payload
+
+    def _task_to_dict(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        details = self._details_from_task_center(task)
+        task_details = details.get("task_details", {})
+        errors = details.get("errors", [])
+        warnings = details.get("warnings", [])
+        total_rows = task.get("total_rows", 0) or 0
+        processed_rows = task.get("processed_rows", 0) or 0
+
+        row_progress = details.get("row_progress")
+        if row_progress is None and total_rows > 0:
+            row_progress = round(processed_rows / total_rows * 100, 2)
+        elif row_progress is None:
+            row_progress = 0.0
+
         return {
-            "task_id": task.task_id,
-            "task_type": task.task_type,
-            "total_files": task.total_files,
-            "processed_files": task.processed_files,
-            "current_file": task.current_file,
-            "status": task.status,
-            "total_rows": task.total_rows,
-            "processed_rows": task.processed_rows,
-            "valid_rows": task.valid_rows,
-            "error_rows": task.error_rows,
-            "quarantined_rows": task.quarantined_rows,
-            "file_progress": task.file_progress,
-            "row_progress": task.row_progress,
-            # [*] 修复:使用format_datetime确保返回带Z标识符的UTC时间
-            "start_time": format_datetime(task.start_time),
-            "end_time": format_datetime(task.end_time),
-            "updated_at": format_datetime(task.updated_at),
-            "errors": task.errors or [],
-            # [*] v4.15.0修复:从errors中提取最后一条错误消息作为message
-            "message": self._extract_message_from_errors(task.errors) if task.errors else None,
-            "warnings": task.warnings or [],
+            "task_id": task["task_id"],
+            "task_type": task["task_type"],
+            "total_files": task.get("total_items", 0) or 0,
+            "processed_files": task.get("processed_items", 0) or 0,
+            "current_file": task.get("current_item") or "",
+            "status": self._task_center_status_to_legacy(task.get("status")),
+            "total_rows": total_rows,
+            "processed_rows": processed_rows,
+            "valid_rows": task.get("valid_rows", 0) or 0,
+            "error_rows": task.get("error_rows", 0) or 0,
+            "quarantined_rows": task.get("quarantined_rows", 0) or 0,
+            "file_progress": task.get("progress_percent", 0.0) or 0.0,
+            "row_progress": row_progress,
+            "start_time": format_datetime(task.get("started_at") or task.get("created_at")),
+            "end_time": format_datetime(task.get("finished_at")),
+            "updated_at": format_datetime(task.get("updated_at")),
+            "errors": errors,
+            "message": details.get("message") or self._extract_message_from_errors(errors),
+            "warnings": warnings,
             "task_details": task_details,
-            # [*] 新增:从task_details中提取文件统计信息(用于前端显示)
             "success_files": task_details.get("success_files", 0),
             "failed_files": task_details.get("failed_files", 0),
             "skipped_files": task_details.get("skipped_files", 0),
         }
-    
-    def _extract_message_from_errors(self, errors: List[Dict[str, Any]]) -> Optional[str]:
-        """
-        从错误列表中提取最后一条错误消息
-        
-        Args:
-            errors: 错误列表
-            
-        Returns:
-            最后一条错误消息,如果没有则返回None
-        """
-        if not errors or len(errors) == 0:
+
+    @staticmethod
+    def _details_from_task_center(task: Dict[str, Any]) -> Dict[str, Any]:
+        details = task.get("details_json") or {}
+        return {
+            "errors": list(details.get("errors", [])),
+            "warnings": list(details.get("warnings", [])),
+            "message": details.get("message"),
+            "row_progress": details.get("row_progress"),
+            "task_details": dict(details.get("task_details", {})),
+        }
+
+    @staticmethod
+    def _legacy_status_to_task_center(status: Optional[str]) -> Optional[str]:
+        if status is None:
             return None
-        
-        # 获取最后一条错误消息
+        return {"processing": "running"}.get(status, status)
+
+    @staticmethod
+    def _task_center_status_to_legacy(status: Optional[str]) -> Optional[str]:
+        if status is None:
+            return None
+        return {"running": "processing"}.get(status, status)
+
+    def _extract_message_from_errors(self, errors: List[Dict[str, Any]]) -> Optional[str]:
+        if not errors:
+            return None
+
         last_error = errors[-1]
         if isinstance(last_error, dict):
             return last_error.get("message")
-        elif isinstance(last_error, str):
+        if isinstance(last_error, str):
             return last_error
-        else:
-            return str(last_error)
-
+        return str(last_error)

@@ -49,6 +49,10 @@ class TaskCenterRepository:
         await self.db.refresh(link)
         return link
 
+    async def delete_task(self, task: TaskCenterTask) -> None:
+        await self.db.delete(task)
+        await self.db.commit()
+
     async def list_tasks(
         self,
         *,

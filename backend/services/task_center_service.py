@@ -136,6 +136,13 @@ class TaskCenterService:
         )
         return [self._task_to_dict(row) for row in rows]
 
+    async def delete_task(self, task_id: str) -> bool:
+        task = await self.repository.get_task_by_task_id(task_id)
+        if task is None:
+            return False
+        await self.repository.delete_task(task)
+        return True
+
     @staticmethod
     def _iso(value: datetime | None) -> str | None:
         if value is None:
