@@ -84,6 +84,27 @@ Phase A runtime alignment is now landed locally:
 - a dedicated Alembic migration now ensures `core.dim_shops` exists in upgraded environments without forcing `public.dim_shops` retirement in the same step
 - focused read/write tests for target management, performance, and employee-shop assignment paths pass against the canonical `core.dim_shops`
 
+## Phase B readiness
+
+The active unqualified `dim_shops` references that still blocked direct archive were reduced in the runtime-facing paths:
+
+- `modules/services/data_validator.py`
+- `modules/services/mapping_engine.py`
+- `modules/apps/data_management_center/app.py`
+- `sql/metabase_questions/business_overview_operational_metrics.sql`
+
+All four now target `core.dim_shops`.
+
+Phase B retirement artifacts now exist locally:
+
+- archive migration for `public.dim_shops`
+- temporary PostgreSQL rehearsal proving:
+  - `public.dim_shops` exists before upgrade
+  - `public.dim_shops` is renamed away after upgrade
+  - `public.dim_shops__archive_retired` exists after upgrade
+  - `core.dim_shops` remains present
+  - schema completeness still passes
+
 ## Recommended next step
 
 Do not draft a `dim_shops` cleanup migration yet.
@@ -91,9 +112,9 @@ Do not draft a `dim_shops` cleanup migration yet.
 Instead, run a dedicated alignment task:
 
 1. keep `core.dim_shops` as the only runtime canonical table
-2. record and review the local alignment changes against production rollout needs
-3. only after runtime ownership stays stable, revisit `public.dim_shops` cleanup
+2. review the local archive migration against production rollout timing
+3. if approved, apply the `public.dim_shops` archive migration in a controlled environment
 
 ## Conclusion
 
-`dim_shops` has now been removed from generic wave-2 duplicate cleanup handling and moved into a dedicated runtime/schema-alignment track.
+`dim_shops` has now been removed from generic wave-2 duplicate cleanup handling and moved into a dedicated runtime/schema-alignment track, with local Phase A and Phase B archive work both implemented and rehearsed.
