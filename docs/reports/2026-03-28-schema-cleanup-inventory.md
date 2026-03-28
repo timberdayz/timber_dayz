@@ -288,6 +288,30 @@ Result:
   - dim-shops dimension/FK proof track
 - the next evidence gap is production duplicate-state inspection rather than more static grep alone
 
+## Wave 2 Production-State Evidence
+
+Production duplicate-state evidence now exists and further splits the three tables:
+
+- `entity_aliases`
+  - `public = 0 rows`
+  - `b_class = 0 rows`
+- `staging_raw_data`
+  - `public = 0 rows`
+  - `b_class = 0 rows`
+- `dim_shops`
+  - `public = 0 rows`
+  - `core = 29 rows`
+  - `core` latest observed `updated_at = 2026-01-27 13:51:47.359293+00`
+
+Interpretation:
+
+- `entity_aliases` and `staging_raw_data` remain blocked mainly by ownership proof, not by live divergence
+- `dim_shops` is now clearly a runtime/schema-alignment problem because production data lives only in `core` while the current ORM model still resolves to `public`
+
+See:
+
+- `docs/reports/2026-03-28-schema-cleanup-wave2-production-evidence.md`
+
 ## Related Documents
 
 - `docs/superpowers/specs/2026-03-28-database-schema-cleanup-design.md`

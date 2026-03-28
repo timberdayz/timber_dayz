@@ -87,6 +87,14 @@ All three still have active blockers that are qualitatively different from `targ
   - latest update timestamp if available
   - obvious divergence
 
+Current status:
+
+- completed for the first production snapshot
+- result:
+  - `entity_aliases`: both copies empty
+  - `staging_raw_data`: both copies empty
+  - `dim_shops`: `public` empty, `core` populated
+
 ### Step 3: Candidate split
 
 After proof, split wave 2 into:
@@ -113,3 +121,8 @@ Wave 2 planning is complete only when:
 - production duplicate-state evidence is recorded
 - candidate groups are split by risk
 - the next migration contract scope is narrow enough to rehearse independently
+
+## Current recommendation after production evidence
+
+- `entity_aliases` and `staging_raw_data` can continue on a lower-risk proof track
+- `dim_shops` should be treated as a separate runtime/schema-alignment investigation before any cleanup design
