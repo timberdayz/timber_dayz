@@ -156,6 +156,12 @@ Candidates:
 
 These need additional runtime/read-path proof.
 
+Current interpretation after code audit:
+
+- `entity_aliases`: alias-governance risk, not just duplicate-table risk
+- `staging_raw_data`: pipeline staging risk, not just duplicate-table risk
+- `dim_shops`: FK and shared-dimension risk, highest-impact of the three
+
 ### Wave 3: Extra-only historical tables
 
 Separate project after the duplicate cleanup waves.
@@ -234,6 +240,25 @@ Interpretation:
 - the approved wave-1 migration now has real rehearsal evidence
 - the archive/rename strategy behaved as intended
 - this closes the technical validation for wave 1 and keeps the remaining higher-risk duplicates out of scope
+
+## Wave 2 Planning Update
+
+`wave 2` is now explicitly separated from `wave 1`.
+
+Reasons:
+
+- `EntityAlias`, `StagingRawData`, and `DimShop` ORM models still resolve to `public`
+- code references for `dim_shops` are broad and include composite foreign-key relationships
+- migration/doc history claims `b_class` or `core` ownership, but runtime proof has not caught up yet
+
+Therefore:
+
+- `wave 2` remains plan-and-proof only
+- no migration file should be written for these three tables until proof helpers and production-state evidence are added
+
+See:
+
+- `docs/superpowers/plans/2026-03-28-database-schema-cleanup-wave2.md`
 
 ## Related Documents
 
