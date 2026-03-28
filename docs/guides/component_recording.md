@@ -1,8 +1,13 @@
 # 组件录制指南（历史文档，YAML 已废弃）
 
-自 v4.20 起，组件录制与保存已统一为**前端录制器 + 后端 /recorder API**，仅支持 **Python 组件**（`modules/platforms/<platform>/components/*.py`）。本页描述的命令行工具 `tools/record_component.py` 已废弃，仅作参考。
+> Legacy-only note:
+> - New collection component authoring must use `pwcli + playwright skill + agent`.
+> - Do not use `tools/record_component.py`, Inspector recorder flows, or `/recorder` as the default path for new component work.
+> - Current primary reference: `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`.
 
-**当前推荐**：使用前端「组件录制」页完成录制与保存，详见 `docs/guides/RECORDER_PYTHON_OUTPUT.md`。
+自 v4.20 起，仓库曾一度使用**前端录制器 + 后端 /recorder API** 作为组件录制与保存路径，仅支持 **Python 组件**（`modules/platforms/<platform>/components/*.py`）。本页描述的命令行工具 `tools/record_component.py` 已废弃，仅作历史参考。
+
+**当前主流程**：使用 `pwcli + playwright skill + agent` 完成页面探索、证据收集、组件生成与优化，详见 `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`。
 
 ---
 
@@ -361,4 +366,3 @@ python tools/test_component.py -p shopee -c login -a MyStore_SG
 - [组件 Schema 规范](component_schema.md)
 - [组件测试指南](component_testing.md)
 - [平台适配指南](platform_adaptation.md)
-

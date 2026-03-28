@@ -24,6 +24,14 @@ Use this file to adapt those skills to the actual codebase.
 - GitHub production release is tag-driven.
 - Do not treat `origin/main` drift as a release failure by itself.
 
+## Collection Authoring Rules
+
+- Active collection component recording and authoring uses `pwcli + playwright skill + agent`.
+- Prefer `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md` over recorder-oriented or Inspector-oriented legacy docs.
+- Use `pwcli` to explore pages, collect snapshots, and capture evidence for agent-driven canonical Python components.
+- Do not default to `tools/record_component.py`, `tools/launch_inspector_recorder.py`, backend `/recorder`, or frontend recorder pages for new collection component work unless the user explicitly asks to inspect or maintain the legacy recorder path.
+- Legacy recorder scripts and recorder APIs are maintenance-only, not the primary workflow.
+
 ## Core Repository Constraints
 
 ### Architecture
@@ -88,4 +96,5 @@ Use this file to adapt those skills to the actual codebase.
 
 - `docs/DEVELOPMENT_RULES/README.md`
 - `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
+- `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`
 - `.cursor/rules/skill-integration.mdc`

@@ -1,5 +1,10 @@
 # 组件录制指南（历史参考，非现行规范）
 
+> Legacy-only note:
+> - New collection component authoring must use `pwcli + playwright skill + agent`.
+> - Do not use Inspector recorder, `/recorder`, or `tools/record_component.py` as the default workflow for new component work.
+> - Current primary reference: `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`.
+
 > 2026-03-24 补充现行要求：
 > - 录制 `export` 组件前，必须先通过 `login_gate`，否则不得打开 Inspector。
 > - 若自动登录后仍未确认 `login_ready`，录制应在门禁阶段失败，而不是从登录页继续录制。

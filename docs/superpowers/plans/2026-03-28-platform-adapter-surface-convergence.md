@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status note (2026-03-28):** This convergence plan is functionally landed. Legacy default adapter surfaces have been locked down, key archive moves were completed, and this file should now be treated as a historical execution plan. Do not reopen the unchecked steps below as default backlog unless a new gap is first confirmed in `task_plan.md`.
+
 **Goal:** Remove the old platform-adapter and legacy collection-center surface as a default execution path across all collection platforms, so only the approved V2 active components remain in the live workflow and old helper/export components can safely move to archive.
 
 **Architecture:** This work targets the old adapter entrypoints, not the new V2 runtime. The key rule is that `modules/apps/collection_center/app.py`, `modules/services/platform_adapter.py`, and per-platform adapters must stop exposing legacy `navigation/date_picker/exporter/shop_selector` component chains as active production behavior. V2 active components remain the only supported runtime path; old adapter capabilities should either be downgraded to explicit unsupported paths or redirected to canonical V2 components where that mapping is safe.

@@ -9,6 +9,15 @@ This repository uses a skill-first workflow.
 - Treat `.cursorrules` as a repository-specific constraint file, not as a replacement for skills.
 - Treat `openspec/` as a historical archive only. Do not use OpenSpec as the active workflow unless the user explicitly asks to inspect archived OpenSpec material.
 
+## Collection Authoring Workflow
+
+- The active collection component authoring workflow is `pwcli + playwright skill + agent`.
+- Use `pwcli` for page exploration, snapshots, state comparison, and locator discovery.
+- Use agent-generated canonical Python components as the only supported output path for new collection work.
+- Do not default to `tools/record_component.py`, `tools/launch_inspector_recorder.py`, backend `/recorder` flows, or frontend recorder flows for new component authoring unless the user explicitly asks to inspect or maintain the legacy recorder path.
+- Treat legacy recorder scripts, `/recorder` APIs, and recorder-oriented docs as historical or maintenance-only unless explicitly requested.
+- Primary workflow reference for collection authoring is `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`.
+
 ## Rule Sources
 
 1. User instructions

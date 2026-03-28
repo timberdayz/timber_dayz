@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status note (2026-03-28):** This workbench plan has already been reflected into active code paths: backend verification-item projection exists, `GET /collection/tasks/verification-items` exists, the frontend task page already consumes `getVerificationItems()`, and the pending-verification panel plus UI smoke coverage are present. Treat the unchecked steps below as historical execution scaffolding, not current implementation backlog.
+
 **Goal:** Upgrade the collection task page into a stable multi-account verification workbench that separates pending human verification items from the raw task table while keeping the shared verification dialog and collection owner model intact.
 
 **Architecture:** Add a dedicated collection verification-item projection on the backend, then upgrade the task page to consume that projection through a dedicated enhanced panel. Reuse the shared verification dialog and keep captcha image readability improvements inside that component instead of creating a separate page.

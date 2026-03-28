@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status note (2026-03-28):** This plan is no longer a from-scratch implementation queue. Core `task_center_*` schema/service/router/tests and migrations are already present in the codebase, and production has already been audited at migration head with read-only smoke checks. The unchecked steps below remain historical implementation structure, not the current source of truth. For live backlog, refer to `task_plan.md` and treat the remaining work as production write-path calibration plus any later cleanup gaps.
+
 **Goal:** Land a durable task center that becomes the common control-plane for long-running data-sync, collection, and cloud-sync work while preserving current frontend task APIs during migration.
 
 **Architecture:** Add new generic `task_center_*` tables and a dedicated task-center service first. Migrate data-sync onto the new store before replacing the in-memory legacy progress path, then mirror collection and cloud-sync into the task center through compatibility adapters so existing APIs remain stable while storage converges.
