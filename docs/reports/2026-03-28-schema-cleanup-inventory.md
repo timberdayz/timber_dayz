@@ -260,6 +260,34 @@ See:
 
 - `docs/superpowers/plans/2026-03-28-database-schema-cleanup-wave2.md`
 
+## Wave 2 Proof Helper Update
+
+Static proof helpers now distinguish the three wave-2 candidates:
+
+- `entity_aliases`
+  - expected target schema: `b_class`
+  - ORM model schema: `public`
+  - audited runtime read/write files: none found
+  - interpretation: medium risk, but still blocked because runtime ownership is not proven
+- `staging_raw_data`
+  - expected target schema: `b_class`
+  - ORM model schema: `public`
+  - audited runtime read/write files: none found
+  - interpretation: medium risk, but still blocked because runtime ownership is not proven
+- `dim_shops`
+  - expected target schema: `core`
+  - ORM model schema: `public`
+  - audited runtime read files: `7`
+  - audited runtime write files: `3`
+  - interpretation: highest risk of the three because it remains live in both read and write paths
+
+Result:
+
+- `wave 2` is now split conceptually into:
+  - alias/staging proof track
+  - dim-shops dimension/FK proof track
+- the next evidence gap is production duplicate-state inspection rather than more static grep alone
+
 ## Related Documents
 
 - `docs/superpowers/specs/2026-03-28-database-schema-cleanup-design.md`
