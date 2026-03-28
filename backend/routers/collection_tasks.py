@@ -8,6 +8,7 @@
 import os
 import uuid
 import asyncio
+import inspect
 from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Path
@@ -37,6 +38,7 @@ from backend.services.collection_contracts import (
     normalize_domain_subtypes,
     normalize_time_selection,
 )
+from backend.services.task_center_service import TaskCenterService
 
 logger = get_logger(__name__)
 
@@ -50,11 +52,110 @@ VERIFICATION_WAIT_TIMEOUT = int(os.getenv("VERIFICATION_TIMEOUT", "300"))
 VERIFICATION_POLL_INTERVAL = 1.5
 
 
+def _collection_task_details_payload(task: CollectionTask) -> dict:
+    return {
+        "collection": {
+            "raw_status": getattr(task, "status", None),
+            "config_id": getattr(task, "config_id", None),
+            "trigger_type": getattr(task, "trigger_type", None),
+            "data_domains": getattr(task, "data_domains", None),
+            "sub_domains": getattr(task, "sub_domains", None),
+            "granularity": getattr(task, "granularity", None),
+            "date_range": getattr(task, "date_range", None),
+            "total_domains": getattr(task, "total_domains", 0),
+            "completed_domains": getattr(task, "completed_domains", None),
+            "failed_domains": getattr(task, "failed_domains", None),
+            "current_domain": getattr(task, "current_domain", None),
+            "debug_mode": getattr(task, "debug_mode", False),
+            "verification_type": getattr(task, "verification_type", None),
+            "verification_screenshot": getattr(task, "verification_screenshot", None),
+        }
+    }
+
+
+def _collection_status_to_task_center(status: Optional[str]) -> Optional[str]:
+    if status is None:
+        return None
+    return {
+        "verification_submitted": "running",
+    }.get(status, status)
+
+
+async def _mirror_collection_task(
+    db: AsyncSession,
+    task: CollectionTask,
+) -> dict:
+    from backend.services.task_center_service import TaskCenterService
+
+    try:
+        service = TaskCenterService(db)
+        payload = {
+            "task_family": "collection",
+            "task_type": getattr(task, "trigger_type", None) or "manual",
+            "status": _collection_status_to_task_center(getattr(task, "status", None)) or "pending",
+            "trigger_source": getattr(task, "trigger_type", None),
+            "platform_code": getattr(task, "platform", None),
+            "account_id": getattr(task, "account", None),
+            "current_step": getattr(task, "current_step", None),
+            "progress_percent": float(getattr(task, "progress", 0) or 0),
+            "success_items": len(getattr(task, "completed_domains", None) or []),
+            "failed_items": len(getattr(task, "failed_domains", None) or []),
+            "details_json": _collection_task_details_payload(task),
+            "started_at": getattr(task, "started_at", None),
+            "finished_at": getattr(task, "completed_at", None),
+            "error_summary": getattr(task, "error_message", None),
+        }
+
+        existing = await service.get_task(task.task_id)
+        if existing:
+            return await service.update_task(task.task_id, **payload)
+        return await service.create_task(task_id=task.task_id, **payload)
+    except Exception as exc:
+        logger.debug("Collection task mirror skipped for %s: %s", getattr(task, "task_id", "unknown"), exc)
+        return {}
+
+
+async def _mirror_collection_task_log(
+    db: AsyncSession,
+    task_id: str,
+    *,
+    level: str,
+    event_type: str,
+    message: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    from backend.services.task_center_service import TaskCenterService
+
+    try:
+        service = TaskCenterService(db)
+        task = await service.get_task(task_id)
+        if task is None:
+            return
+        await service.append_log(
+            task_id,
+            level=level,
+            event_type=event_type,
+            message=message,
+            details_json=details,
+        )
+    except Exception as exc:
+        logger.debug("Collection task log mirror skipped for %s: %s", task_id, exc)
+
+
 # ============================================================
 # 任务 API
 # ============================================================
 
 def _build_task_response_payload(task: CollectionTask) -> dict:
+    normalized_date_range = normalize_collection_date_range(getattr(task, "date_range", None))
+    time_selection = None
+    if "time_selection" in normalized_date_range:
+        time_selection = normalized_date_range.pop("time_selection")
+    elif isinstance(getattr(task, "date_range", None), dict):
+        time_selection = task.date_range.get("time_selection")
+    if time_selection is None:
+        time_selection = getattr(task, "time_selection", None)
+
     verification_type = getattr(task, "verification_type", None)
     verification_message = None
     if verification_type:
@@ -75,8 +176,8 @@ def _build_task_response_payload(task: CollectionTask) -> dict:
         "data_domains": getattr(task, "data_domains", None),
         "sub_domains": getattr(task, "sub_domains", None),
         "granularity": getattr(task, "granularity", None),
-        "date_range": getattr(task, "date_range", None),
-        "time_selection": getattr(task, "time_selection", None),
+        "date_range": normalized_date_range,
+        "time_selection": time_selection,
         "total_domains": getattr(task, "total_domains", 0) or 0,
         "completed_domains": getattr(task, "completed_domains", None),
         "failed_domains": getattr(task, "failed_domains", None),
@@ -231,6 +332,16 @@ async def create_task(
     db.add(log)
     await db.commit()
 
+    await _mirror_collection_task(db, task)
+    await _mirror_collection_task_log(
+        db,
+        task.task_id,
+        level="info",
+        event_type="state_change",
+        message=log.message,
+        details=log.details,
+    )
+
     logger.info(f"Created collection task: {task_uuid} ({request.platform}/{request.account_id}) - {total_domains_count} domains, debug_mode={request.debug_mode}")
 
     app = getattr(fastapi_request, "app", None)
@@ -341,8 +452,10 @@ async def cancel_or_delete_task(
         raise HTTPException(status_code=404, detail="任务不存在")
 
     if task.status in TERMINAL_TASK_STATUSES:
+        await _mirror_collection_task(db, task)
         await db.delete(task)
         await db.commit()
+        await TaskCenterService(db).delete_task(task.task_id)
         logger.info("Deleted terminal task: %s (status=%s)", task_id, task.status)
         return SuccessResponse(success=True, message="任务已删除", data=None)
     else:
@@ -359,6 +472,15 @@ async def cancel_or_delete_task(
         )
         db.add(log)
         await db.commit()
+        await _mirror_collection_task(db, task)
+        await _mirror_collection_task_log(
+            db,
+            task.task_id,
+            level="info",
+            event_type="state_change",
+            message=log.message,
+            details=log.details,
+        )
         logger.info("Cancelled task: %s", task_id)
         return SuccessResponse(success=True, message="任务已取消", data=None)
 
@@ -409,6 +531,15 @@ async def retry_task(
     )
     db.add(log)
     await db.commit()
+    await _mirror_collection_task(db, new_task)
+    await _mirror_collection_task_log(
+        db,
+        new_task.task_id,
+        level="info",
+        event_type="state_change",
+        message=log.message,
+        details=log.details,
+    )
 
     logger.info(f"Created retry task: {new_task.task_id} (original: {task_id})")
     return _build_task_response_payload(new_task)
@@ -468,6 +599,20 @@ details={"previous_status": "paused"},
     task.status = "verification_submitted"
     db.add(log)
     await db.commit()
+    refresh_result = getattr(db, "refresh", None)
+    if refresh_result is not None:
+        maybe_refresh = refresh_result(task)
+        if inspect.isawaitable(maybe_refresh):
+            await maybe_refresh
+    await _mirror_collection_task(db, task)
+    await _mirror_collection_task_log(
+        db,
+        task.task_id,
+        level="info",
+        event_type="verification",
+        message=log.message,
+        details=log.details,
+    )
 
     logger.info(f"Resumed task: {task_id} (verification submitted)")
     return _build_task_response_payload(task)
@@ -688,6 +833,16 @@ async def _collection_step_status_callback(
                 log = CollectionTaskLog(task_id=task.id, level=log_level, message=message, details=details)
                 session.add(log)
             await session.commit()
+            await _mirror_collection_task(session, task)
+            if details is not None:
+                await _mirror_collection_task_log(
+                    session,
+                    task.task_id,
+                    level=log_level,
+                    event_type="progress",
+                    message=message,
+                    details=details,
+                )
     except Exception as e:
         logger.error(f"Step status callback failed for task {task_id}: {e}")
 
@@ -729,6 +884,7 @@ async def _on_verification_required(
                 task.verification_screenshot = screenshot_path
                 task.status = "paused"
                 await session.commit()
+                await _mirror_collection_task(session, task)
     except Exception as e:
         logger.error(f"Verification persist failed for task {task_id}: {e}")
     redis_client = getattr(app, "state", None) and getattr(app.state, "redis", None) if app else None
@@ -789,6 +945,7 @@ async def _execute_collection_task_background(
             task.status = "running"
             task.started_at = datetime.now(timezone.utc)
             await db.commit()
+            await _mirror_collection_task(db, task)
 
             try:
                 from backend.services.account_loader_service import get_account_loader_service
@@ -805,6 +962,7 @@ async def _execute_collection_task_background(
                 task.error_message = f"账号加载失败: {str(e)}"
                 task.completed_at = datetime.now(timezone.utc)
                 await db.commit()
+                await _mirror_collection_task(db, task)
                 return
 
             executor = CollectionExecutorV2(
@@ -859,6 +1017,7 @@ async def _execute_collection_task_background(
                     task.completed_domains = result.completed_domains
                     task.failed_domains = result.failed_domains
                     await db.commit()
+                    await _mirror_collection_task(db, task)
                     logger.info(f"Task {task_id} completed: {result.status}, files={result.files_collected}")
                 finally:
                     await browser.close()
@@ -874,5 +1033,6 @@ async def _execute_collection_task_background(
                     task.error_message = str(e)
                     task.completed_at = datetime.now(timezone.utc)
                     await db.commit()
+                    await _mirror_collection_task(db, task)
             except Exception as db_error:
                 logger.error(f"Failed to update task status: {db_error}")

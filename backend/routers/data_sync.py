@@ -472,6 +472,42 @@ async def sync_single_file(
         
         # 生成task_id
         task_id = f"single_file_{body.file_id}_{uuid.uuid4().hex[:8]}"
+
+        async def _attach_task_subject_links() -> None:
+            from backend.services.platform_table_manager import PlatformTableManager
+            from backend.services.task_center_service import TaskCenterService
+
+            task_center_service = TaskCenterService(db)
+            source_table_name = None
+            if (
+                catalog_file.platform_code
+                and catalog_file.data_domain
+                and catalog_file.granularity
+            ):
+                source_table_name = PlatformTableManager(db).get_table_name(
+                    platform=catalog_file.platform_code,
+                    data_domain=catalog_file.data_domain,
+                    sub_domain=catalog_file.sub_domain,
+                    granularity=catalog_file.granularity,
+                )
+
+            await task_center_service.update_task(
+                task_id,
+                source_file_id=catalog_file.id,
+                platform_code=catalog_file.platform_code,
+                source_table_name=source_table_name,
+            )
+            await task_center_service.add_link(
+                task_id,
+                subject_type="catalog_file",
+                subject_id=str(catalog_file.id),
+            )
+            if source_table_name:
+                await task_center_service.add_link(
+                    task_id,
+                    subject_type="source_table",
+                    subject_key=source_table_name,
+                )
         
         # v4.19.1: 提交 Celery 任务,添加降级处理
         try:
@@ -485,9 +521,23 @@ async def sync_single_file(
                 task_type="single_file",
                 total_files=1
             )
+            await _attach_task_subject_links()
             # 可选:更新消息说明任务已提交
+            submission_task_details = {
+                "submission_args": {
+                    "file_id": body.file_id,
+                },
+                "submission_kwargs": {
+                    "only_with_template": body.only_with_template,
+                    "allow_quarantine": body.allow_quarantine,
+                    "use_template_header_row": body.use_template_header_row,
+                    "user_id": user_id,
+                },
+                "priority": body.priority,
+            }
             await progress_tracker.update_task(task_id, {
-                "message": "任务已提交,等待Celery worker处理"
+                "message": "任务已提交,等待Celery worker处理",
+                "task_details": submission_task_details,
             })
             
             # [*] Phase 4.2: 增加用户任务计数
@@ -503,6 +553,11 @@ async def sync_single_file(
                     'user_id': user_id  # [*] Phase 4.2: 添加用户ID(用于审计和配额管理)
                 },
                 priority=body.priority  # [*] Phase 4: 任务优先级(1-10,10最高)
+            )
+            await progress_tracker.set_runner(
+                task_id,
+                runner_kind="celery",
+                external_runner_id=celery_task.id,
             )
             
             logger.info(
@@ -535,6 +590,26 @@ async def sync_single_file(
                     task_id=task_id,
                     task_type="single_file",
                     total_files=1
+                )
+                await _attach_task_subject_links()
+                await progress_tracker.update_task(
+                    task_id,
+                    {
+                        "message": "Celery不可用,使用降级模式",
+                        "task_details": {
+                            "submission_args": {
+                                "file_id": body.file_id,
+                            },
+                            "submission_kwargs": {
+                                "only_with_template": body.only_with_template,
+                                "allow_quarantine": body.allow_quarantine,
+                                "use_template_header_row": body.use_template_header_row,
+                                "user_id": user_id,
+                            },
+                            "priority": body.priority,
+                            "fallback": True,
+                        },
+                    },
                 )
                 
                 # [*] Phase 4.2: 增加用户任务计数(降级模式也需要配额管理)
@@ -2508,4 +2583,3 @@ async def retry_celery_task(
             status_code=500,
             detail=f"重试任务失败: {str(e)}"
         )
-

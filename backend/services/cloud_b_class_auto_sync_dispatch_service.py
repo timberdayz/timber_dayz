@@ -5,6 +5,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.services.task_center_sync_service import TaskCenterSyncService
 from modules.core.db import CloudBClassSyncTask
 
 
@@ -17,6 +18,7 @@ class CloudBClassAutoSyncDispatchService:
         self.db = db
 
     def enqueue_or_coalesce(self, event) -> dict:
+        task_center = TaskCenterSyncService(self.db)
         dedupe_key = self._build_dedupe_key(event)
         existing = self._find_existing_task(dedupe_key)
 
@@ -29,6 +31,22 @@ class CloudBClassAutoSyncDispatchService:
                 existing.source_file_id = event.file_id
             self.db.commit()
             self.db.refresh(existing)
+            mirrored = task_center.get_task(existing.job_id)
+            if mirrored is not None:
+                task_center.update_task(
+                    mirrored,
+                    status=existing.status,
+                    platform_code=existing.platform_code,
+                    source_file_id=existing.source_file_id,
+                    source_table_name=existing.source_table_name,
+                    details_json={
+                        "cloud_sync": {
+                            "metadata": existing.metadata_json or {},
+                            "projection_preset": existing.projection_preset,
+                            "projection_status": existing.projection_status,
+                        }
+                    },
+                )
             return {
                 "job_id": existing.job_id,
                 "task_id": existing.id,
@@ -57,6 +75,37 @@ class CloudBClassAutoSyncDispatchService:
         self.db.add(task)
         self.db.commit()
         self.db.refresh(task)
+        task_center.create_task(
+            task_id=task.job_id,
+            task_family="cloud_sync",
+            task_type="auto_sync",
+            status=task.status,
+            trigger_source=task.trigger_source,
+            platform_code=task.platform_code,
+            source_file_id=task.source_file_id,
+            source_table_name=task.source_table_name,
+            details_json={
+                "cloud_sync": {
+                    "data_domain": task.data_domain,
+                    "sub_domain": task.sub_domain,
+                    "granularity": task.granularity,
+                    "projection_preset": task.projection_preset,
+                    "metadata": task.metadata_json or {},
+                }
+            },
+            created_at=task.created_at,
+        )
+        task_center.add_link(
+            task.job_id,
+            subject_type="source_table",
+            subject_key=task.source_table_name,
+        )
+        if task.source_file_id is not None:
+            task_center.add_link(
+                task.job_id,
+                subject_type="catalog_file",
+                subject_id=str(task.source_file_id),
+            )
         return {
             "job_id": task.job_id,
             "task_id": task.id,

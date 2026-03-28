@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_, select
 
+from backend.services.task_center_sync_service import TaskCenterSyncService
 from modules.core.db import CloudBClassSyncTask
 
 
@@ -25,6 +26,7 @@ class CloudBClassAutoSyncWorker:
         self.lease_seconds = lease_seconds
 
     def claim_next_task(self, worker_id: str) -> CloudBClassSyncTask | None:
+        task_center = TaskCenterSyncService(self.db)
         now = datetime.now(timezone.utc)
         stmt = (
             select(CloudBClassSyncTask)
@@ -65,9 +67,20 @@ class CloudBClassAutoSyncWorker:
         task.attempt_count = int(task.attempt_count or 0) + 1
         self.db.commit()
         self.db.refresh(task)
+        mirrored = task_center.get_task(task.job_id)
+        if mirrored is not None:
+            task_center.update_task(
+                mirrored,
+                status="running",
+                claimed_by=worker_id,
+                heartbeat_at=task.heartbeat_at,
+                lease_expires_at=task.lease_expires_at,
+                attempt_count=task.attempt_count,
+            )
         return task
 
     def heartbeat(self, task_id: int, worker_id: str) -> None:
+        task_center = TaskCenterSyncService(self.db)
         task = self.db.get(CloudBClassSyncTask, task_id)
         if task is None or task.claimed_by != worker_id:
             return
@@ -75,6 +88,13 @@ class CloudBClassAutoSyncWorker:
         task.heartbeat_at = now
         task.lease_expires_at = now + timedelta(seconds=self.lease_seconds)
         self.db.commit()
+        mirrored = task_center.get_task(task.job_id)
+        if mirrored is not None:
+            task_center.update_task(
+                mirrored,
+                heartbeat_at=task.heartbeat_at,
+                lease_expires_at=task.lease_expires_at,
+            )
 
     async def _maybe_await(self, value):
         if inspect.isawaitable(value):
@@ -82,6 +102,7 @@ class CloudBClassAutoSyncWorker:
         return value
 
     async def run_one(self, worker_id: str) -> CloudBClassSyncTask | None:
+        task_center = TaskCenterSyncService(self.db)
         task = self.claim_next_task(worker_id=worker_id)
         if task is None:
             return None
@@ -115,6 +136,25 @@ class CloudBClassAutoSyncWorker:
             task.lease_expires_at = None
             self.db.commit()
             self.db.refresh(task)
+            mirrored = task_center.get_task(task.job_id)
+            if mirrored is not None:
+                task_center.update_task(
+                    mirrored,
+                    status=task.status,
+                    claimed_by=task.claimed_by,
+                    heartbeat_at=task.heartbeat_at,
+                    lease_expires_at=task.lease_expires_at,
+                    next_retry_at=task.next_retry_at,
+                    error_summary=task.last_error,
+                    finished_at=task.finished_at or task.last_attempt_finished_at,
+                    details_json={
+                        "cloud_sync": {
+                            "error_code": task.error_code,
+                            "projection_status": task.projection_status,
+                            "attempt_count": task.attempt_count,
+                        }
+                    },
+                )
 
         return task
 

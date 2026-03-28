@@ -61,6 +61,7 @@ from modules.core.db import (
 )
 
 from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncRun, CloudBClassSyncTask
+from modules.core.db import TaskCenterTask, TaskCenterLog, TaskCenterLink
 
 from backend.utils.config import get_settings
 
@@ -628,6 +629,9 @@ __all__ = [
     "CloudBClassSyncCheckpoint",
     "CloudBClassSyncRun",
     "CloudBClassSyncTask",
+    "TaskCenterTask",
+    "TaskCenterLog",
+    "TaskCenterLink",
     "DataFile",
     "DataRecord",
     "FieldMapping",
