@@ -192,6 +192,26 @@ Wave-1 recommendation must therefore be narrowed:
 - keep `target_breakdown` as the only currently proven low-risk duplicate
 - move `performance_config`, `sales_campaigns`, and `sales_campaign_shops` behind a schema-alignment prerequisite
 
+## Wave 1 Reset
+
+The wave-1 preplan is now fixed to this scope:
+
+- approved: `public.target_breakdown`
+- blocked:
+  - `public.performance_config`
+  - `public.sales_campaigns`
+  - `public.sales_campaign_shops`
+
+Planned first-step operation for the approved table:
+
+- `archive_rename`
+
+Reason for choosing archive/rename first:
+
+- it preserves rollback space
+- it is safer than direct drop for a production-visible duplicate
+- it allows rehearsal validation before any destructive cleanup decision
+
 ## Related Documents
 
 - `docs/superpowers/specs/2026-03-28-database-schema-cleanup-design.md`
