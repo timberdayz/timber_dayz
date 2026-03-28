@@ -94,6 +94,7 @@ class DimShop(Base):
     __table_args__ = (
         Index("ix_dim_shops_platform_shop", "platform_code", "shop_id"),
         Index("ix_dim_shops_platform_slug", "platform_code", "shop_slug"),
+        {"schema": "core"},
     )
 
 
@@ -2511,7 +2512,7 @@ class SalesCampaignShop(Base):
         UniqueConstraint("campaign_id", "platform_code", "shop_id", name="uq_campaign_shop"),
         ForeignKeyConstraint(
             ["platform_code", "shop_id"],
-            ["dim_shops.platform_code", "dim_shops.shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
             name="fk_campaign_shop"
         ),
         Index("ix_campaign_shops_campaign", "campaign_id"),
@@ -2697,7 +2698,7 @@ class ShopHealthScore(Base):
         UniqueConstraint("platform_code", "shop_id", "metric_date", "granularity", name="uq_shop_health"),
         ForeignKeyConstraint(
             ["platform_code", "shop_id"],
-            ["dim_shops.platform_code", "dim_shops.shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
             name="fk_shop_health"
         ),
         CheckConstraint("health_score >= 0 AND health_score <= 100", name="chk_health_score"),
@@ -2748,7 +2749,7 @@ class ShopAlert(Base):
     __table_args__ = (
         ForeignKeyConstraint(
             ["platform_code", "shop_id"],
-            ["dim_shops.platform_code", "dim_shops.shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
             name="fk_shop_alert"
         ),
         CheckConstraint("alert_level IN ('critical', 'warning', 'info')", name="chk_alert_level"),
@@ -2800,7 +2801,7 @@ class PerformanceScore(Base):
         UniqueConstraint("platform_code", "shop_id", "period", name="uq_performance_shop_period"),
         ForeignKeyConstraint(
             ["platform_code", "shop_id"],
-            ["dim_shops.platform_code", "dim_shops.shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
             name="fk_performance_shop"
         ),
         CheckConstraint("total_score >= 0 AND total_score <= 100", name="chk_total_score"),
@@ -2898,7 +2899,7 @@ class ClearanceRanking(Base):
         UniqueConstraint("platform_code", "shop_id", "metric_date", "granularity", name="uq_clearance_ranking"),
         ForeignKeyConstraint(
             ["platform_code", "shop_id"],
-            ["dim_shops.platform_code", "dim_shops.shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
             name="fk_clearance_ranking"
         ),
         Index("ix_clearance_ranking_date", "metric_date", "granularity"),
@@ -3657,7 +3658,7 @@ class EmployeeShopAssignment(Base):
         UniqueConstraint("employee_code", "platform_code", "shop_id", "year_month", name="uq_employee_shop_assignments_a"),
         ForeignKeyConstraint(
             ["platform_code", "shop_id"],
-            ["dim_shops.platform_code", "dim_shops.shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
             ondelete="RESTRICT",
             name="fk_employee_shop_assignments_shop_a",
         ),
@@ -3691,7 +3692,7 @@ class ShopCommissionConfig(Base):
         UniqueConstraint("year_month", "platform_code", "shop_id", name="uq_shop_commission_config_a"),
         ForeignKeyConstraint(
             ["platform_code", "shop_id"],
-            ["dim_shops.platform_code", "dim_shops.shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
             ondelete="RESTRICT",
             name="fk_shop_commission_config_shop_a",
         ),

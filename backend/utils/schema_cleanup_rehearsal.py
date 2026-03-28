@@ -15,7 +15,6 @@ from backend.utils.config import get_settings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MERGE_REVISION = "20260328_task_center_merge"
-WAVE1_REVISION = "20260328_schema_cleanup_wave1"
 
 
 def _admin_url(database_url: str) -> URL:
@@ -147,7 +146,6 @@ def run_wave1_rehearsal() -> dict[str, object]:
                 "public_target_breakdown_exists_after": public_after,
                 "archive_table_exists_after": archive_after,
                 "a_class_target_breakdown_exists_after": a_class_after,
-                "head_revision": WAVE1_REVISION,
             }
         )
         return completeness

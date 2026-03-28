@@ -11,7 +11,7 @@ def test_wave2_candidates_expose_model_schema_and_expected_target():
     assert report["staging_raw_data"]["model_schema"] == "public"
 
     assert report["dim_shops"]["expected_target_schema"] == "core"
-    assert report["dim_shops"]["model_schema"] == "public"
+    assert report["dim_shops"]["model_schema"] == "core"
 
 
 def test_dim_shops_is_flagged_as_high_risk_with_live_read_and_write_paths():
