@@ -36,6 +36,12 @@
 - `login_v1_0_1.py`
 - `login_v1_0_2.py`
 
+当前已进入 `modules/platforms/miaoshou/archive/` 的第二批文件：
+
+- `export.py`
+- `navigation.py`
+- `date_picker.py`
+
 ## Archive 前置条件
 
 某个旧文件只有在满足下面条件后，才允许移动到：

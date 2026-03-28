@@ -28,16 +28,25 @@ def _import_string(path: str):
     return getattr(mod, class_name)
 
 
-def get_adapter(platform: str, ctx: ExecutionContext) -> PlatformAdapter:
+def get_adapter(
+    platform: str,
+    ctx: ExecutionContext,
+    *,
+    allow_legacy_surface: bool = False,
+) -> PlatformAdapter:
     """Return a platform adapter instance for the given platform id.
 
     Args:
         platform: platform id like 'shopee', 'miaoshou', 'tiktok'
         ctx: execution context
     """
+    if not allow_legacy_surface:
+        raise NotImplementedError(
+            "legacy platform adapter surface is disabled in V2; "
+            "use canonical V2 components and component version management instead"
+        )
     key = (platform or "").lower()
     if key not in _REGISTRY:
         raise ValueError(f"Unsupported platform: {platform}")
     cls = _import_string(_REGISTRY[key])
     return cls(ctx)  # type: ignore[return-value]
-

@@ -7,11 +7,6 @@ No side effects on import.
 """
 from modules.platforms.adapter_base import PlatformAdapter
 from modules.platforms.tiktok.components.login import TiktokLogin
-from modules.platforms.tiktok.components.navigation import TiktokNavigation
-from modules.platforms.tiktok.components.date_picker import TiktokDatePicker
-from modules.platforms.tiktok.components.export import TiktokExporterComponent
-from modules.platforms.tiktok.components.shop_selector import TiktokShopSelector
-from modules.platforms.tiktok.components.shop_switch import TiktokShopSwitch
 
 
 class TiktokAdapter(PlatformAdapter):
@@ -20,26 +15,25 @@ class TiktokAdapter(PlatformAdapter):
     def login(self) -> TiktokLogin:  # type: ignore[override]
         return TiktokLogin(self.ctx)
 
-    def navigation(self) -> TiktokNavigation:  # type: ignore[override]
-        return TiktokNavigation(self.ctx)
+    def navigation(self):  # type: ignore[override]
+        raise NotImplementedError("tiktok/navigation is no longer a default adapter surface in V2")
 
-    def date_picker(self) -> TiktokDatePicker:  # type: ignore[override]
-        return TiktokDatePicker(self.ctx)
+    def date_picker(self):  # type: ignore[override]
+        raise NotImplementedError("tiktok/date_picker is no longer a default adapter surface in V2")
 
-    def exporter(self) -> TiktokExporterComponent:  # type: ignore[override]
-        return TiktokExporterComponent(self.ctx)
+    def exporter(self):  # type: ignore[override]
+        raise NotImplementedError("tiktok/export is no longer a default adapter surface in V2")
 
-    def shop_switch(self) -> TiktokShopSwitch:
-        return TiktokShopSwitch(self.ctx)
+    def shop_switch(self):
+        raise NotImplementedError("tiktok/shop_switch is no longer a default adapter surface in V2")
 
-    def shop_selector(self) -> TiktokShopSelector:
-        # compatibility alias; canonical entry is shop_switch()
-        return self.shop_switch()
+    def shop_selector(self):
+        raise NotImplementedError("tiktok/shop_selector is no longer a default adapter surface in V2")
 
     def capabilities(self) -> dict[str, dict[str, bool]]:  # type: ignore[override]
         return {
-            "products": {"date_picker": True, "export": True, "metrics": False},
-            "analytics": {"date_picker": True, "export": True, "metrics": False},
-            "orders": {"date_picker": True, "export": True, "metrics": False},
-            "finance": {"date_picker": False, "export": True, "metrics": False},
+            "products": {"date_picker": False, "export": False, "metrics": False},
+            "analytics": {"date_picker": False, "export": False, "metrics": False},
+            "orders": {"date_picker": False, "export": False, "metrics": False},
+            "finance": {"date_picker": False, "export": False, "metrics": False},
         }

@@ -8,9 +8,6 @@ No side effects on import.
 from modules.components.base import ExecutionContext
 from modules.platforms.adapter_base import PlatformAdapter
 from modules.platforms.shopee.components.login import ShopeeLogin
-from modules.platforms.shopee.components.navigation import ShopeeNavigation
-from modules.platforms.shopee.components.date_picker import ShopeeDatePicker
-from modules.platforms.shopee.components.export import ShopeeExporterComponent
 from modules.platforms.shopee.components.metrics_selector import ShopeeMetricsSelector
 from modules.platforms.shopee.components.orders_export import ShopeeOrdersExport
 from modules.platforms.shopee.components.finance_export import ShopeeFinanceExport
@@ -23,14 +20,14 @@ class ShopeeAdapter(PlatformAdapter):
     def login(self) -> ShopeeLogin:  # type: ignore[override]
         return ShopeeLogin(self.ctx)
 
-    def navigation(self) -> ShopeeNavigation:  # type: ignore[override]
-        return ShopeeNavigation(self.ctx)
+    def navigation(self):  # type: ignore[override]
+        raise NotImplementedError("shopee/navigation is no longer a default adapter surface in V2")
 
-    def date_picker(self) -> ShopeeDatePicker:  # type: ignore[override]
-        return ShopeeDatePicker(self.ctx)
+    def date_picker(self):  # type: ignore[override]
+        raise NotImplementedError("shopee/date_picker is no longer a default adapter surface in V2")
 
-    def exporter(self) -> ShopeeExporterComponent:  # type: ignore[override]
-        return ShopeeExporterComponent(self.ctx)
+    def exporter(self):  # type: ignore[override]
+        raise NotImplementedError("shopee/export is no longer a default adapter surface in V2")
 
 
     def orders_export(self) -> ShopeeOrdersExport:
@@ -47,9 +44,9 @@ class ShopeeAdapter(PlatformAdapter):
 
     def capabilities(self) -> dict[str, dict[str, bool]]:  # type: ignore[override]
         return {
-            "products": {"date_picker": True, "export": True, "metrics": False},
-            "analytics": {"date_picker": True, "export": True, "metrics": False},
-            "services": {"date_picker": False, "export": True, "metrics": False},
-            "orders": {"date_picker": False, "export": True, "metrics": False},  # deprecated soon
-            "finance": {"date_picker": False, "export": True, "metrics": False},
+            "products": {"date_picker": False, "export": False, "metrics": False},
+            "analytics": {"date_picker": False, "export": False, "metrics": False},
+            "services": {"date_picker": False, "export": False, "metrics": False},
+            "orders": {"date_picker": False, "export": False, "metrics": False},
+            "finance": {"date_picker": False, "export": False, "metrics": False},
         }
