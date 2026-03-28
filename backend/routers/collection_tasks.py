@@ -50,6 +50,86 @@ VERIFICATION_WAIT_TIMEOUT = int(os.getenv("VERIFICATION_TIMEOUT", "300"))
 VERIFICATION_POLL_INTERVAL = 1.5
 
 
+def _collection_task_details_payload(task: CollectionTask) -> dict:
+    return {
+        "collection": {
+            "config_id": getattr(task, "config_id", None),
+            "trigger_type": getattr(task, "trigger_type", None),
+            "data_domains": getattr(task, "data_domains", None),
+            "sub_domains": getattr(task, "sub_domains", None),
+            "granularity": getattr(task, "granularity", None),
+            "date_range": getattr(task, "date_range", None),
+            "total_domains": getattr(task, "total_domains", 0),
+            "completed_domains": getattr(task, "completed_domains", None),
+            "failed_domains": getattr(task, "failed_domains", None),
+            "current_domain": getattr(task, "current_domain", None),
+            "debug_mode": getattr(task, "debug_mode", False),
+            "verification_type": getattr(task, "verification_type", None),
+            "verification_screenshot": getattr(task, "verification_screenshot", None),
+        }
+    }
+
+
+def _collection_status_to_task_center(status: Optional[str]) -> Optional[str]:
+    if status is None:
+        return None
+    return status
+
+
+async def _mirror_collection_task(
+    db: AsyncSession,
+    task: CollectionTask,
+) -> dict:
+    from backend.services.task_center_service import TaskCenterService
+
+    service = TaskCenterService(db)
+    payload = {
+        "task_family": "collection",
+        "task_type": getattr(task, "trigger_type", None) or "manual",
+        "status": _collection_status_to_task_center(getattr(task, "status", None)) or "pending",
+        "trigger_source": getattr(task, "trigger_type", None),
+        "platform_code": getattr(task, "platform", None),
+        "account_id": getattr(task, "account", None),
+        "current_step": getattr(task, "current_step", None),
+        "progress_percent": float(getattr(task, "progress", 0) or 0),
+        "success_items": len(getattr(task, "completed_domains", None) or []),
+        "failed_items": len(getattr(task, "failed_domains", None) or []),
+        "details_json": _collection_task_details_payload(task),
+        "started_at": getattr(task, "started_at", None),
+        "finished_at": getattr(task, "completed_at", None),
+        "error_summary": getattr(task, "error_message", None),
+    }
+
+    existing = await service.get_task(task.task_id)
+    if existing:
+        return await service.update_task(task.task_id, **payload)
+    return await service.create_task(task_id=task.task_id, **payload)
+
+
+async def _mirror_collection_task_log(
+    db: AsyncSession,
+    task_id: str,
+    *,
+    level: str,
+    event_type: str,
+    message: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    from backend.services.task_center_service import TaskCenterService
+
+    service = TaskCenterService(db)
+    task = await service.get_task(task_id)
+    if task is None:
+        return
+    await service.append_log(
+        task_id,
+        level=level,
+        event_type=event_type,
+        message=message,
+        details_json=details,
+    )
+
+
 # ============================================================
 # 任务 API
 # ============================================================
@@ -230,6 +310,16 @@ async def create_task(
     )
     db.add(log)
     await db.commit()
+
+    await _mirror_collection_task(db, task)
+    await _mirror_collection_task_log(
+        db,
+        task.task_id,
+        level="info",
+        event_type="state_change",
+        message=log.message,
+        details=log.details,
+    )
 
     logger.info(f"Created collection task: {task_uuid} ({request.platform}/{request.account_id}) - {total_domains_count} domains, debug_mode={request.debug_mode}")
 
@@ -688,6 +778,16 @@ async def _collection_step_status_callback(
                 log = CollectionTaskLog(task_id=task.id, level=log_level, message=message, details=details)
                 session.add(log)
             await session.commit()
+            await _mirror_collection_task(session, task)
+            if details is not None:
+                await _mirror_collection_task_log(
+                    session,
+                    task.task_id,
+                    level=log_level,
+                    event_type="progress",
+                    message=message,
+                    details=details,
+                )
     except Exception as e:
         logger.error(f"Step status callback failed for task {task_id}: {e}")
 
