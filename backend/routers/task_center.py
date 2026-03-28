@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.database import get_async_db
+from modules.core.db import TaskCenterTask
 from backend.services.task_center_service import TaskCenterService
 from backend.utils.api_response import success_response
 
@@ -20,6 +22,13 @@ async def list_task_center_tasks(
 ):
     service = TaskCenterService(db)
     offset = (page - 1) * page_size
+    count_stmt = select(func.count(TaskCenterTask.id))
+    if family:
+        count_stmt = count_stmt.where(TaskCenterTask.task_family == family)
+    if status:
+        count_stmt = count_stmt.where(TaskCenterTask.status == status)
+    total_result = await db.execute(count_stmt)
+    total = total_result.scalar() or 0
     items = await service.list_tasks(
         task_family=family,
         status=status,
@@ -29,7 +38,7 @@ async def list_task_center_tasks(
     return success_response(
         data={
             "items": items,
-            "total": len(items),
+            "total": total,
             "page": page,
             "page_size": page_size,
         }

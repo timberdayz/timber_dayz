@@ -111,6 +111,49 @@ async def test_collection_task_creation_writes_task_center_row(
 
 
 @pytest.mark.asyncio
+async def test_collection_task_create_api_accepts_time_selection_payload(
+    task_center_sqlite_session,
+    collection_async_client,
+    monkeypatch,
+):
+    from backend.services import account_loader_service, component_runtime_resolver
+    from backend.routers import collection_tasks
+
+    monkeypatch.setattr(
+        account_loader_service,
+        "get_account_loader_service",
+        lambda: _AccountLoaderStub(),
+    )
+    monkeypatch.setattr(
+        component_runtime_resolver.ComponentRuntimeResolver,
+        "from_async_session",
+        classmethod(lambda cls, db: _ResolverStub()),
+    )
+
+    async def _noop_background(**kwargs):
+        return None
+
+    monkeypatch.setattr(collection_tasks, "_execute_collection_task_background", _noop_background)
+
+    response = await collection_async_client.post(
+        "/api/collection/tasks",
+        json={
+            "platform": "shopee",
+            "account_id": "acc-1",
+            "data_domains": ["orders"],
+            "time_selection": {
+                "mode": "preset",
+                "preset": "yesterday",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["task_id"]
+
+
+@pytest.mark.asyncio
 async def test_collection_task_log_is_mirrored_to_task_center(
     task_center_sqlite_session,
     task_center_session_factory,
@@ -153,3 +196,64 @@ async def test_collection_task_log_is_mirrored_to_task_center(
     assert len(logs) == 1
     assert logs[0]["message"] == "采集中"
     assert logs[0]["event_type"] == "progress"
+
+
+@pytest.mark.asyncio
+async def test_collection_background_failure_updates_task_center_status(
+    task_center_sqlite_session,
+    task_center_session_factory,
+    monkeypatch,
+):
+    from backend.models import database as database_module
+    from backend.routers.collection_tasks import _execute_collection_task_background
+    from backend.services import account_loader_service
+
+    task = CollectionTask(
+        task_id="collection-task-bg-1",
+        platform="shopee",
+        account="acc-1",
+        status="pending",
+        trigger_type="manual",
+    )
+    task_center_sqlite_session.add(task)
+    await task_center_sqlite_session.commit()
+    await task_center_sqlite_session.refresh(task)
+
+    await TaskCenterService(task_center_sqlite_session).create_task(
+        task_id=task.task_id,
+        task_family="collection",
+        task_type="manual",
+        status="pending",
+        platform_code=task.platform,
+        account_id=task.account,
+    )
+
+    class _MissingAccountLoader:
+        async def load_account_async(self, account_id, db):
+            return None
+
+    monkeypatch.setattr(database_module, "AsyncSessionLocal", task_center_session_factory)
+    monkeypatch.setattr(
+        account_loader_service,
+        "get_account_loader_service",
+        lambda: _MissingAccountLoader(),
+    )
+
+    await _execute_collection_task_background(
+        task_id=task.task_id,
+        platform=task.platform,
+        account_id=task.account,
+        data_domains=["orders"],
+        sub_domains=None,
+        date_range={"start": "2026-03-01", "end": "2026-03-01"},
+        granularity="daily",
+        debug_mode=False,
+        parallel_mode=False,
+        max_parallel=1,
+        runtime_manifests={},
+        app=None,
+    )
+
+    mirrored = await TaskCenterService(task_center_sqlite_session).get_task(task.task_id)
+
+    assert mirrored["status"] == "failed"

@@ -14,12 +14,26 @@ class TaskCenterSyncService:
     def __init__(self, db: Session):
         self.db = db
 
+    @staticmethod
+    def _is_missing_table_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return (
+            'relation "task_center_tasks" does not exist' in message
+            or "no such table: task_center_tasks" in message
+            or 'relation "task_center_logs" does not exist' in message
+            or "no such table: task_center_logs" in message
+            or 'relation "task_center_links" does not exist' in message
+            or "no such table: task_center_links" in message
+        )
+
     def get_task(self, task_id: str) -> TaskCenterTask | None:
         try:
             return self.db.execute(
                 select(TaskCenterTask).where(TaskCenterTask.task_id == task_id)
             ).scalar_one_or_none()
-        except (OperationalError, ProgrammingError):
+        except (OperationalError, ProgrammingError) as exc:
+            if not self._is_missing_table_error(exc):
+                raise
             self.db.rollback()
             return None
 
@@ -29,7 +43,9 @@ class TaskCenterSyncService:
             self.db.add(task)
             self.db.commit()
             self.db.refresh(task)
-        except (OperationalError, ProgrammingError):
+        except (OperationalError, ProgrammingError) as exc:
+            if not self._is_missing_table_error(exc):
+                raise
             self.db.rollback()
         return task
 
@@ -41,7 +57,9 @@ class TaskCenterSyncService:
             task.updated_at = datetime.now(timezone.utc)
             self.db.commit()
             self.db.refresh(task)
-        except (OperationalError, ProgrammingError):
+        except (OperationalError, ProgrammingError) as exc:
+            if not self._is_missing_table_error(exc):
+                raise
             self.db.rollback()
         return task
 
@@ -69,7 +87,9 @@ class TaskCenterSyncService:
             self.db.commit()
             self.db.refresh(log)
             return log
-        except (OperationalError, ProgrammingError):
+        except (OperationalError, ProgrammingError) as exc:
+            if not self._is_missing_table_error(exc):
+                raise
             self.db.rollback()
             return None
 
@@ -97,6 +117,8 @@ class TaskCenterSyncService:
             self.db.commit()
             self.db.refresh(link)
             return link
-        except (OperationalError, ProgrammingError):
+        except (OperationalError, ProgrammingError) as exc:
+            if not self._is_missing_table_error(exc):
+                raise
             self.db.rollback()
             return None

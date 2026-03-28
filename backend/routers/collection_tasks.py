@@ -135,6 +135,15 @@ async def _mirror_collection_task_log(
 # ============================================================
 
 def _build_task_response_payload(task: CollectionTask) -> dict:
+    normalized_date_range = normalize_collection_date_range(getattr(task, "date_range", None))
+    time_selection = None
+    if "time_selection" in normalized_date_range:
+        time_selection = normalized_date_range.pop("time_selection")
+    elif isinstance(getattr(task, "date_range", None), dict):
+        time_selection = task.date_range.get("time_selection")
+    if time_selection is None:
+        time_selection = getattr(task, "time_selection", None)
+
     verification_type = getattr(task, "verification_type", None)
     verification_message = None
     if verification_type:
@@ -155,8 +164,8 @@ def _build_task_response_payload(task: CollectionTask) -> dict:
         "data_domains": getattr(task, "data_domains", None),
         "sub_domains": getattr(task, "sub_domains", None),
         "granularity": getattr(task, "granularity", None),
-        "date_range": getattr(task, "date_range", None),
-        "time_selection": getattr(task, "time_selection", None),
+        "date_range": normalized_date_range,
+        "time_selection": time_selection,
         "total_domains": getattr(task, "total_domains", 0) or 0,
         "completed_domains": getattr(task, "completed_domains", None),
         "failed_domains": getattr(task, "failed_domains", None),
@@ -889,6 +898,7 @@ async def _execute_collection_task_background(
             task.status = "running"
             task.started_at = datetime.now(timezone.utc)
             await db.commit()
+            await _mirror_collection_task(db, task)
 
             try:
                 from backend.services.account_loader_service import get_account_loader_service
@@ -905,6 +915,7 @@ async def _execute_collection_task_background(
                 task.error_message = f"账号加载失败: {str(e)}"
                 task.completed_at = datetime.now(timezone.utc)
                 await db.commit()
+                await _mirror_collection_task(db, task)
                 return
 
             executor = CollectionExecutorV2(
@@ -959,6 +970,7 @@ async def _execute_collection_task_background(
                     task.completed_domains = result.completed_domains
                     task.failed_domains = result.failed_domains
                     await db.commit()
+                    await _mirror_collection_task(db, task)
                     logger.info(f"Task {task_id} completed: {result.status}, files={result.files_collected}")
                 finally:
                     await browser.close()
@@ -974,5 +986,6 @@ async def _execute_collection_task_background(
                     task.error_message = str(e)
                     task.completed_at = datetime.now(timezone.utc)
                     await db.commit()
+                    await _mirror_collection_task(db, task)
             except Exception as db_error:
                 logger.error(f"Failed to update task status: {db_error}")

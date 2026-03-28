@@ -90,3 +90,27 @@ async def test_task_center_can_lookup_tasks_by_catalog_file(
     assert response.status_code == 200
     payload = response.json()["data"]
     assert payload["items"][0]["task_id"] == "task-center-1"
+
+
+@pytest.mark.asyncio
+async def test_task_center_tasks_endpoint_reports_total_beyond_page_size(
+    task_center_sqlite_session,
+    task_center_async_client,
+):
+    service = TaskCenterService(task_center_sqlite_session)
+    for index in range(3):
+        await service.create_task(
+            task_id=f"task-center-page-{index}",
+            task_family="data_sync",
+            task_type="single_file",
+            status="running",
+        )
+
+    response = await task_center_async_client.get(
+        "/api/task-center/tasks?family=data_sync&status=running&page=1&page_size=2"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert len(payload["items"]) == 2
+    assert payload["total"] == 3
