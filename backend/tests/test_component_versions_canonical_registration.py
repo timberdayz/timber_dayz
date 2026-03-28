@@ -134,7 +134,12 @@ async def test_batch_register_uses_shop_switch_as_tiktok_canonical_entry(
 @pytest.mark.asyncio
 async def test_list_versions_returns_all_platform_components(
     component_version_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "backend.routers.component_versions.list_active_component_names",
+        lambda: ["shopee/login", "shopee/products_export"],
+    )
     now = datetime.now(timezone.utc)
     component_version_session.add_all(
         [
@@ -191,17 +196,20 @@ async def test_list_versions_returns_all_platform_components(
     names = sorted(item.component_name for item in response.data)
 
     assert names == [
-        "shopee/export",
         "shopee/login",
         "shopee/products_export",
-        "shopee/recorder_test_login",
     ]
 
 
 @pytest.mark.asyncio
 async def test_list_versions_collapses_multiple_versions_to_single_working_row(
     component_version_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "backend.routers.component_versions.list_active_component_names",
+        lambda: ["shopee/login"],
+    )
     older = datetime(2026, 3, 20, tzinfo=timezone.utc)
     newer = datetime(2026, 3, 21, tzinfo=timezone.utc)
     component_version_session.add_all(
@@ -247,7 +255,12 @@ async def test_list_versions_collapses_multiple_versions_to_single_working_row(
 @pytest.mark.asyncio
 async def test_list_versions_component_type_export_matches_domain_exports(
     component_version_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "backend.routers.component_versions.list_active_component_names",
+        lambda: ["shopee/products_export", "shopee/login"],
+    )
     now = datetime.now(timezone.utc)
     component_version_session.add_all(
         [
@@ -291,7 +304,12 @@ async def test_list_versions_component_type_export_matches_domain_exports(
 @pytest.mark.asyncio
 async def test_list_versions_platform_only_does_not_apply_canonical_whitelist(
     component_version_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(
+        "backend.routers.component_versions.list_active_component_names",
+        lambda: ["miaoshou/login"],
+    )
     now = datetime.now(timezone.utc)
     component_version_session.add_all(
         [
@@ -349,9 +367,55 @@ async def test_list_versions_platform_only_does_not_apply_canonical_whitelist(
 
     assert names == [
         "miaoshou/login",
-        "miaoshou/login_v1_0_1",
-        "miaoshou/miaoshou_login",
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_versions_defaults_to_active_manifest_components_only(
+    component_version_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    now = datetime.now(timezone.utc)
+    component_version_session.add_all(
+        [
+            ComponentVersion(
+                component_name="miaoshou/login",
+                version="1.0.3",
+                file_path="modules/platforms/miaoshou/components/login_v1_0_3.py",
+                is_stable=True,
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            ),
+            ComponentVersion(
+                component_name="shopee/orders_export",
+                version="1.0.0",
+                file_path="modules/platforms/shopee/components/orders_export.py",
+                is_stable=False,
+                is_active=True,
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+    )
+    await component_version_session.commit()
+
+    monkeypatch.setattr(
+        "backend.routers.component_versions.list_active_component_names",
+        lambda: ["miaoshou/login"],
+    )
+
+    response = await list_versions(
+        platform=None,
+        component_type=None,
+        status=None,
+        page=1,
+        page_size=20,
+        db=component_version_session,
+        request=None,
+    )
+
+    assert [item.component_name for item in response.data] == ["miaoshou/login"]
 
 
 @pytest.mark.asyncio

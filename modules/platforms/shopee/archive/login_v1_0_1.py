@@ -1,5 +1,5 @@
 """
-Generated component: miaoshou/login
+Generated component: shopee/login
 Please align with docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md
 Complex interactions, popups, download handling: add explicit wait/comment as needed.
 """
@@ -17,10 +17,10 @@ from modules.components.login.base import LoginComponent, LoginResult
 from modules.apps.collection_center.executor_v2 import VerificationRequiredError
 
 
-class MiaoshouLogin(LoginComponent):
-    """miaoshou login component - generated from recorder. Edit as needed."""
+class ShopeeLogin(LoginComponent):
+    """shopee login component - generated from recorder. Edit as needed."""
 
-    platform = 'miaoshou'
+    platform = 'shopee'
     component_type = "login"
     data_domain = None
 
@@ -48,42 +48,26 @@ class MiaoshouLogin(LoginComponent):
         # Container scope: defaults to page; narrow down if needed
         _form = page
 
-        # Fill: 手机号/子账号/邮箱
-        # 建议迁移到 get_by_*
-        _el_1 = _form.locator('input.account-input')
+        # Fill: 子母账号登录名(XX:main)/手机/邮箱
+        _el_1 = _form.get_by_role('textbox', name='子母账号登录名(XX:main)/手机/邮箱')
         await expect(_el_1).to_be_visible()
         # Value from ctx.account - use acc.get("username") / acc.get("password")
         await _el_1.fill(acc.get("username", ""), timeout=10000)
 
-        # Fill: 密码
-        # 建议迁移到 get_by_*
-        _el_3 = _form.locator('input.password-input')
-        await expect(_el_3).to_be_visible()
-        # Value from ctx.account - use acc.get("username") / acc.get("password")
-        await _el_3.fill(acc.get("password", ""), timeout=10000)
+        # Click: span
+        _el_2 = _form.get_by_label('记住我')
+        await expect(_el_2).to_be_visible()
+        await _el_2.click(timeout=10000)
 
-        # Fill: 请输入验证码
-        _el_5 = page.get_by_role('textbox', name='请输入验证码')
+        # Fill: input
+        _el_4 = _form.get_by_role('checkbox', name='记住我')
+        await expect(_el_4).to_be_visible()
+        await _el_4.fill('记住我', timeout=10000)
+
+        # Click: 登入
+        _el_5 = _form.get_by_role('button', name='登入')
         await expect(_el_5).to_be_visible()
-        value = captcha_code
-        if not value:
-            screenshot_path = None
-            screenshot_dir = config.get("task", {}).get("screenshot_dir")
-            if screenshot_dir:
-                os.makedirs(screenshot_dir, exist_ok=True)
-                screenshot_path = os.path.join(screenshot_dir, "captcha.png")
-            else:
-                import tempfile
-                fd, screenshot_path = tempfile.mkstemp(suffix=".png", prefix="captcha_")
-                os.close(fd)
-            await page.screenshot(path=screenshot_path, timeout=5000)
-            raise VerificationRequiredError('graphical_captcha', screenshot_path)
-        await _el_5.fill(value, timeout=10000)
-
-        # Click: 立即登录
-        _el_6 = _form.get_by_role('button', name='立即登录')
-        await expect(_el_6).to_be_visible()
-        await _el_6.click(timeout=10000)
+        await _el_5.click(timeout=10000)
 
         # TODO: edit success condition - check URL change or dashboard element
         # Example: await page.wait_for_url("**/dashboard**", timeout=15000)

@@ -38,6 +38,7 @@ from backend.services.collection_component_topology import (
 from backend.services.active_collection_components import (
     is_active_component_name,
     is_archive_only_file,
+    list_active_component_names,
 )
 from backend.services.component_version_service import ComponentVersionService
 from backend.services.verification_service import VerificationService
@@ -354,6 +355,9 @@ async def list_versions(
 
         # 构建查询条件
         conditions = []
+        active_component_names = list_active_component_names()
+        if active_component_names:
+            conditions.append(ComponentVersion.component_name.in_(active_component_names))
 
         # 平台筛选
         if platform:
