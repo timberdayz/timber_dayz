@@ -9,7 +9,7 @@
 
 It is currently a runtime/schema alignment defect with three layers of contradiction:
 
-1. ORM model ownership still resolves to `public`
+1. ORM model ownership originally resolved to `public`
 2. backend runtime search path puts `public` ahead of `core`
 3. production live rows exist only in `core.dim_shops`
 
@@ -22,9 +22,13 @@ That combination means unqualified runtime access to `dim_shops` is structurally
 - `modules/core/db/schema.py`
   - `DimShop.__tablename__ = "dim_shops"`
   - no schema is declared
-- Result:
+- Original result:
   - ORM full name = `dim_shops`
   - effective schema = `public`
+
+- Phase A result:
+  - ORM full name = `core.dim_shops`
+  - effective schema = `core`
 
 ### 2. Backend runtime search path
 
@@ -71,18 +75,25 @@ That means the cleanup problem is secondary. The first-order problem is:
 - why is production live data in `core.dim_shops`
 - while current ORM/runtime path still points to `public.dim_shops`
 
+## Phase A outcome
+
+Phase A runtime alignment is now landed locally:
+
+- `DimShop` ORM is explicitly bound to `core`
+- schema-level foreign key references that pointed at unqualified `dim_shops` were updated to `core.dim_shops`
+- a dedicated Alembic migration now ensures `core.dim_shops` exists in upgraded environments without forcing `public.dim_shops` retirement in the same step
+- focused read/write tests for target management, performance, and employee-shop assignment paths pass against the canonical `core.dim_shops`
+
 ## Recommended next step
 
 Do not draft a `dim_shops` cleanup migration yet.
 
 Instead, run a dedicated alignment task:
 
-1. identify whether current business flows that query `DimShop` are degraded, bypassed, or backfilled through other sources
-2. decide the canonical ownership target:
-   - move ORM to `core`
-   - or repopulate `public`
-3. only after runtime ownership is corrected, revisit duplicate cleanup
+1. keep `core.dim_shops` as the only runtime canonical table
+2. record and review the local alignment changes against production rollout needs
+3. only after runtime ownership stays stable, revisit `public.dim_shops` cleanup
 
 ## Conclusion
 
-`dim_shops` should be removed from generic wave-2 duplicate cleanup handling and tracked as a dedicated runtime/schema-alignment investigation.
+`dim_shops` has now been removed from generic wave-2 duplicate cleanup handling and moved into a dedicated runtime/schema-alignment track.

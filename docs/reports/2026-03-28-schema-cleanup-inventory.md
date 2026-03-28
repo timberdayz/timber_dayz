@@ -276,10 +276,10 @@ Static proof helpers now distinguish the three wave-2 candidates:
   - interpretation: medium risk, but still blocked because runtime ownership is not proven
 - `dim_shops`
   - expected target schema: `core`
-  - ORM model schema: `public`
+  - ORM model schema: `core`
   - audited runtime read files: `7`
   - audited runtime write files: `3`
-  - interpretation: highest risk of the three because it remains live in both read and write paths
+  - interpretation: highest risk of the three because it remains live in both read and write paths; runtime alignment was required before any cleanup discussion
 
 Result:
 
@@ -306,7 +306,7 @@ Production duplicate-state evidence now exists and further splits the three tabl
 Interpretation:
 
 - `entity_aliases` and `staging_raw_data` remain blocked mainly by ownership proof, not by live divergence
-- `dim_shops` is now clearly a runtime/schema-alignment problem because production data lives only in `core` while the current ORM model still resolves to `public`
+- `dim_shops` is now clearly a runtime/schema-alignment problem because production data lives only in `core`; Phase A has aligned the ORM to `core`, but cleanup is still deferred
 
 See:
 
