@@ -253,7 +253,42 @@ Set-Alias pwcli-script .\scripts\pwcli.ps1
 pwcli-script --help
 ```
 
-### 4.3 工作目录约定
+### 4.3 最小命令集
+
+在仓库主流程里，推荐优先使用以下包装命令，而不是每次手工拼接原始 `pwcli` 参数：
+
+- `pw-open.ps1`
+- `pw-step.ps1`
+- `pw-note.ps1`
+- `pw-shot.ps1`
+- `pw-pack.ps1`
+
+职责划分：
+
+- `pw-open`: 打开平台工作会话
+- `pw-step`: 采集某一步的 `before / after` 完整 snapshot 输出
+- `pw-note`: 为复杂步骤补一句语义说明
+- `pw-shot`: 为复杂步骤补截图
+- `pw-pack`: 校验证据包并生成 `evidence-pack.json`
+
+说明：
+
+- 这些命令是 `pwcli` 的工作流包装层，不替代 `pwcli` 本身。
+- 正式组件仍然由 agent 基于证据包生成，而不是由这些命令直接生成。
+
+### 4.4 v1 范围冻结
+
+当前最小命令工作流 v1 **不包含**：
+
+- 自动调用 agent
+- 自动生成正式组件
+- 自动提升 stable
+- 替代版本管理测试链路
+- 浏览器事件回放或录制脚本生成
+
+v1 只负责：低成本、统一地收集可交给 agent 的正式组件证据包。
+
+### 4.5 工作目录约定
 
 为避免产物散落，按 skill 约定，在仓库内统一使用：
 
@@ -268,7 +303,7 @@ Set-Location output\playwright\shopee-orders
 - `output/playwright/tiktok-products`
 - `output/playwright/miaoshou-warehouse`
 
-### 4.4 会话命名
+### 4.6 会话命名
 
 建议每个探索任务固定会话名，避免串状态：
 
@@ -282,7 +317,7 @@ $env:PLAYWRIGHT_CLI_SESSION = "shopee-orders"
 $env:PLAYWRIGHT_CLI_SESSION = "tiktok-products"
 ```
 
-### 4.5 登录态持久化策略
+### 4.7 登录态持久化策略
 
 默认 `pwcli open` 会使用内存中的临时浏览器资料目录。若输出里出现：
 
