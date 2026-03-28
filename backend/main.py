@@ -89,6 +89,7 @@ from backend.routers import (
     component_recorder,  # [*] Phase 8.1: UI化组件录制工具API
     rate_limit,  # [*] v4.19.2: 限流管理API
     data_migration,  # v5.0.0: 数据迁移API
+    task_center,  # task center unified read APIs
 )
 from backend.routers import rate_limit_config  # [*] v4.19.4: 限流配置管理API(Phase 3)
 from backend.routers import cloud_sync as cloud_sync_router
@@ -1081,6 +1082,12 @@ app.include_router(
 app.include_router(
     cloud_sync_router.router,
     tags=["云端同步管理"]
+)
+
+app.include_router(
+    task_center.router,
+    prefix="/api",
+    tags=["任务中心"]
 )
 
 # 全局异常处理(v4.6.0统一响应格式)

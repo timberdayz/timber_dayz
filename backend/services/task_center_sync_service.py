@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,24 +15,34 @@ class TaskCenterSyncService:
         self.db = db
 
     def get_task(self, task_id: str) -> TaskCenterTask | None:
-        return self.db.execute(
-            select(TaskCenterTask).where(TaskCenterTask.task_id == task_id)
-        ).scalar_one_or_none()
+        try:
+            return self.db.execute(
+                select(TaskCenterTask).where(TaskCenterTask.task_id == task_id)
+            ).scalar_one_or_none()
+        except (OperationalError, ProgrammingError):
+            self.db.rollback()
+            return None
 
     def create_task(self, **fields: Any) -> TaskCenterTask:
         task = TaskCenterTask(**fields)
-        self.db.add(task)
-        self.db.commit()
-        self.db.refresh(task)
+        try:
+            self.db.add(task)
+            self.db.commit()
+            self.db.refresh(task)
+        except (OperationalError, ProgrammingError):
+            self.db.rollback()
         return task
 
     def update_task(self, task: TaskCenterTask, **updates: Any) -> TaskCenterTask:
-        for key, value in updates.items():
-            if hasattr(task, key):
-                setattr(task, key, value)
-        task.updated_at = datetime.now(timezone.utc)
-        self.db.commit()
-        self.db.refresh(task)
+        try:
+            for key, value in updates.items():
+                if hasattr(task, key):
+                    setattr(task, key, value)
+            task.updated_at = datetime.now(timezone.utc)
+            self.db.commit()
+            self.db.refresh(task)
+        except (OperationalError, ProgrammingError):
+            self.db.rollback()
         return task
 
     def append_log(
@@ -53,10 +64,14 @@ class TaskCenterSyncService:
             message=message,
             details_json=details_json,
         )
-        self.db.add(log)
-        self.db.commit()
-        self.db.refresh(log)
-        return log
+        try:
+            self.db.add(log)
+            self.db.commit()
+            self.db.refresh(log)
+            return log
+        except (OperationalError, ProgrammingError):
+            self.db.rollback()
+            return None
 
     def add_link(
         self,
@@ -77,7 +92,11 @@ class TaskCenterSyncService:
             subject_key=subject_key,
             details_json=details_json,
         )
-        self.db.add(link)
-        self.db.commit()
-        self.db.refresh(link)
-        return link
+        try:
+            self.db.add(link)
+            self.db.commit()
+            self.db.refresh(link)
+            return link
+        except (OperationalError, ProgrammingError):
+            self.db.rollback()
+            return None

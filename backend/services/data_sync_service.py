@@ -35,7 +35,6 @@ from modules.core.logger import get_logger
 from backend.services.template_matcher import get_template_matcher
 from backend.services.excel_parser import ExcelParser
 from backend.services.data_ingestion_service import DataIngestionService
-from backend.services.progress_tracker import progress_tracker
 from backend.services.c_class_data_validator import get_c_class_data_validator
 from backend.services.executor_manager import get_executor_manager  # v4.19.0新增:使用统一执行器管理器
 
@@ -67,7 +66,6 @@ class DataSyncService:
         """
         self.db = db
         self.template_matcher = get_template_matcher(db)
-        self.progress_tracker = progress_tracker
         self.ingestion_service = DataIngestionService(db)
     
     def _safe_resolve_path(self, file_path: str) -> str:
