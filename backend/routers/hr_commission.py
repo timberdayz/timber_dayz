@@ -166,9 +166,7 @@ async def list_employee_shop_assignments(
         if conditions:
             base_query = base_query.where(and_(*conditions))
 
-        count_query = select(func.count(EmployeeShopAssignment.id)).select_from(
-            base_query.subquery()
-        )
+        count_query = select(func.count()).select_from(base_query.subquery())
         total_result = await db.execute(count_query)
         total = total_result.scalar() or 0
 

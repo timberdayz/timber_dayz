@@ -1,0 +1,320 @@
+# Schema Cleanup Inventory
+
+**Date:** 2026-03-28
+**Scope:** Local DB reality, production DB reality, ORM canonical schema expectations
+
+## Goal
+
+Provide the first authoritative inventory of duplicated, misplaced, and extra tables so schema cleanup can proceed in small, evidence-driven waves instead of direct production table deletion.
+
+## Sources
+
+- ORM metadata from `modules/core/db/schema.py`
+- local DB inspection via `scripts/analyze_schema_cleanup_candidates.py`
+- production DB inspection gathered during deploy/migration audit
+
+## High-Level Summary
+
+### Local DB
+
+`scripts/analyze_schema_cleanup_candidates.py` reported:
+- expected tables: `120`
+- actual table names: `186`
+- duplicate groups: `0`
+- misplaced tables: `64`
+- missing tables: `3`
+- extra-only tables: `69`
+
+Important note:
+- local DB is not a reliable “final canonical” environment
+- it reflects a mixed historical state and should be used only as one input to the cleanup plan
+
+### Production DB
+
+Production remains the most important runtime source of truth.
+
+Observed during live inspection:
+- duplicated table groups still exist across target schema and `public`
+- task-center tables are now live runtime tables in `public`
+- production app is healthy, so cleanup must avoid breaking active reads/writes
+
+## Canonical Keep Groups
+
+These are not cleanup candidates in wave 1:
+
+- `public.task_center_tasks`
+- `public.task_center_logs`
+- `public.task_center_links`
+- `public.cloud_b_class_sync_tasks`
+- `public.cloud_b_class_sync_runs`
+- `public.cloud_b_class_sync_checkpoints`
+- dynamic `b_class.fact_*` tables
+- `cloud_b_class.fact_*` mirror tables
+
+Reason:
+- these are active runtime or operational control-plane assets
+
+## Likely Cleanup Candidates
+
+These are the first candidates to prove and then remove from `public` if the target schema copy is authoritative:
+
+- `performance_config`
+- `sales_campaigns`
+- `sales_campaign_shops`
+- `target_breakdown`
+- `entity_aliases`
+- `staging_raw_data`
+- `dim_shops`
+
+Recommended action:
+- prove target schema usage with tests and runtime checks first
+- do not drop directly from production by hand
+
+## Misplaced-But-Not-Duplicate Tables
+
+The inventory tool flagged many tables whose ORM canonical schema is still effectively `public`, while the actual table lives in:
+- `core`
+- `a_class`
+- `c_class`
+- `finance`
+- `b_class`
+
+Examples:
+- `accounts -> core`
+- `collection_tasks -> core`
+- `collection_task_logs -> core`
+- `component_versions -> core`
+- `sync_progress_tasks -> core`
+- many finance-domain tables -> `finance`
+- performance and campaign tables -> `a_class` / `c_class`
+
+Interpretation:
+- this is primarily a schema-alignment issue
+- not an immediate table-drop issue
+
+## Production-Specific Duplicate Groups
+
+Observed on production:
+
+- `performance_config` in `a_class` and `public`
+- `sales_campaigns` in `a_class` and `public`
+- `sales_campaign_shops` in `a_class` and `public`
+- `target_breakdown` in `a_class` and `public`
+- `entity_aliases` in `b_class` and `public`
+- `staging_raw_data` in `b_class` and `public`
+- `dim_shops` in `core` and `public`
+
+These are the most important cleanup targets because they are:
+- visible in live production
+- conceptually duplicated
+- likely products of historical migration phases
+
+## Extra-Only Tables Requiring Manual Review
+
+The local audit also shows many extra-only tables not directly represented by current ORM expectations.
+
+Examples:
+- `campaign_targets`
+- `dim_date`
+- `fact_sales_orders`
+- `pipeline_run_log`
+- `pipeline_step_log`
+- `data_freshness_log`
+
+These should not enter wave 1.
+
+Recommended action:
+- classify them separately as legacy support, ops tables, or dead leftovers
+
+## Wave Recommendations
+
+### Wave 0: Inventory only
+
+Completed in this report.
+
+### Wave 1: Low-risk public duplicate cleanup
+
+Target after proof:
+- `public.performance_config`
+- `public.sales_campaigns`
+- `public.sales_campaign_shops`
+- `public.target_breakdown`
+
+Preconditions:
+- target schema rows are current
+- no active runtime code reads public copies
+- feature smoke tests pass
+
+### Wave 2: Higher-risk operational duplicates
+
+Do not execute until after wave 1 is proven.
+
+Candidates:
+- `public.entity_aliases`
+- `public.staging_raw_data`
+- `public.dim_shops`
+
+These need additional runtime/read-path proof.
+
+Current interpretation after code audit:
+
+- `entity_aliases`: alias-governance risk, not just duplicate-table risk
+- `staging_raw_data`: pipeline staging risk, not just duplicate-table risk
+- `dim_shops`: FK and shared-dimension risk, highest-impact of the three
+
+### Wave 3: Extra-only historical tables
+
+Separate project after the duplicate cleanup waves.
+
+## Immediate Next Steps
+
+1. Add proof tests for low-risk duplicate candidates
+2. Write a first cleanup migration wave for approved `public` duplicates
+3. Rehearse cleanup on a temporary PostgreSQL database
+4. Only then decide whether to schedule production cleanup
+
+## Proof Audit Update
+
+Focused proof coverage was added for the nominal wave-1 set:
+
+- `target_breakdown`
+- `performance_config`
+- `sales_campaigns`
+- `sales_campaign_shops`
+
+Current conclusion:
+
+- `target_breakdown` is the only candidate that currently has authoritative `a_class` runtime proof.
+- `performance_config`, `sales_campaigns`, and `sales_campaign_shops` are not ready for cleanup yet.
+
+Why the other three are blocked:
+
+- their current ORM model schema is still `public`
+- the audited runtime files do not explicitly reference `a_class.<table>`
+- dropping the `public` copy now would risk breaking active ORM-backed reads and writes
+
+Wave-1 recommendation must therefore be narrowed:
+
+- keep `target_breakdown` as the only currently proven low-risk duplicate
+- move `performance_config`, `sales_campaigns`, and `sales_campaign_shops` behind a schema-alignment prerequisite
+
+## Wave 1 Reset
+
+The wave-1 preplan is now fixed to this scope:
+
+- approved: `public.target_breakdown`
+- blocked:
+  - `public.performance_config`
+  - `public.sales_campaigns`
+  - `public.sales_campaign_shops`
+
+Planned first-step operation for the approved table:
+
+- `archive_rename`
+
+Reason for choosing archive/rename first:
+
+- it preserves rollback space
+- it is safer than direct drop for a production-visible duplicate
+- it allows rehearsal validation before any destructive cleanup decision
+
+## Wave 1 Rehearsal
+
+Wave-1 was rehearsed on a temporary PostgreSQL database.
+
+Observed result:
+
+- migrated revision: `20260328_schema_cleanup_wave1`
+- migration status: `up_to_date`
+- `all_tables_exist = true`
+- `missing_tables = []`
+- before upgrade:
+  - `public.target_breakdown = true`
+- after upgrade:
+  - `public.target_breakdown = false`
+  - `public.target_breakdown__archive_wave1 = true`
+  - `a_class.target_breakdown = true`
+
+Interpretation:
+
+- the approved wave-1 migration now has real rehearsal evidence
+- the archive/rename strategy behaved as intended
+- this closes the technical validation for wave 1 and keeps the remaining higher-risk duplicates out of scope
+
+## Wave 2 Planning Update
+
+`wave 2` is now explicitly separated from `wave 1`.
+
+Reasons:
+
+- `EntityAlias`, `StagingRawData`, and `DimShop` ORM models still resolve to `public`
+- code references for `dim_shops` are broad and include composite foreign-key relationships
+- migration/doc history claims `b_class` or `core` ownership, but runtime proof has not caught up yet
+
+Therefore:
+
+- `wave 2` remains plan-and-proof only
+- no migration file should be written for these three tables until proof helpers and production-state evidence are added
+
+See:
+
+- `docs/superpowers/plans/2026-03-28-database-schema-cleanup-wave2.md`
+
+## Wave 2 Proof Helper Update
+
+Static proof helpers now distinguish the three wave-2 candidates:
+
+- `entity_aliases`
+  - expected target schema: `b_class`
+  - ORM model schema: `public`
+  - audited runtime read/write files: none found
+  - interpretation: medium risk, but still blocked because runtime ownership is not proven
+- `staging_raw_data`
+  - expected target schema: `b_class`
+  - ORM model schema: `public`
+  - audited runtime read/write files: none found
+  - interpretation: medium risk, but still blocked because runtime ownership is not proven
+- `dim_shops`
+  - expected target schema: `core`
+  - ORM model schema: `core`
+  - audited runtime read files: `7`
+  - audited runtime write files: `3`
+  - interpretation: highest risk of the three because it remains live in both read and write paths; runtime alignment was required before any cleanup discussion
+
+Result:
+
+- `wave 2` is now split conceptually into:
+  - alias/staging proof track
+  - dim-shops dimension/FK proof track
+- the next evidence gap is production duplicate-state inspection rather than more static grep alone
+
+## Wave 2 Production-State Evidence
+
+Production duplicate-state evidence now exists and further splits the three tables:
+
+- `entity_aliases`
+  - `public = 0 rows`
+  - `b_class = 0 rows`
+- `staging_raw_data`
+  - `public = 0 rows`
+  - `b_class = 0 rows`
+- `dim_shops`
+  - `public = 0 rows`
+  - `core = 29 rows`
+  - `core` latest observed `updated_at = 2026-01-27 13:51:47.359293+00`
+
+Interpretation:
+
+- `entity_aliases` and `staging_raw_data` remain blocked mainly by ownership proof, not by live divergence
+- `dim_shops` is now clearly a runtime/schema-alignment problem because production data lives only in `core`; Phase A has aligned the ORM to `core`, but cleanup is still deferred
+
+See:
+
+- `docs/reports/2026-03-28-schema-cleanup-wave2-production-evidence.md`
+- `docs/reports/2026-03-28-dim-shops-runtime-alignment-investigation.md`
+
+## Related Documents
+
+- `docs/superpowers/specs/2026-03-28-database-schema-cleanup-design.md`
+- `docs/superpowers/plans/2026-03-28-database-schema-cleanup.md`
+- `docs/deployment/2026-03-28-production-deploy-and-migration-report.md`
