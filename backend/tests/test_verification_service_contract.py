@@ -100,3 +100,16 @@ def test_verification_resume_request_requires_exactly_one_value():
 
     assert body.captcha_code == "1234"
     assert body.otp is None
+
+
+def test_verification_resume_request_allows_manual_completed_without_code():
+    body = VerificationResumeRequest(manual_completed=True)
+
+    assert body.manual_completed is True
+    assert body.captcha_code is None
+    assert body.otp is None
+
+
+def test_verification_resume_request_rejects_manual_completed_when_code_present():
+    with pytest.raises(ValidationError):
+        VerificationResumeRequest(captcha_code="1234", manual_completed=True)

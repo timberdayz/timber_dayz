@@ -185,6 +185,34 @@ async def test_shopee_login_raises_verification_required_when_otp_is_needed_with
 
 
 @pytest.mark.asyncio
+async def test_shopee_login_raises_slide_captcha_when_slider_verification_is_visible(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    component = ShopeeLogin(
+        _ctx(
+            config={
+                "task": {"screenshot_dir": str(tmp_path)},
+                "params": {},
+            }
+        )
+    )
+    page = _FakePage("https://seller.shopee.cn/account/signin")
+
+    monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
+    monkeypatch.setattr(component, "_is_slide_captcha_visible", AsyncMock(return_value=True))
+
+    with pytest.raises(VerificationRequiredError) as exc_info:
+        await component.run(page)
+
+    assert exc_info.value.verification_type == "slide_captcha"
+    assert page.screenshot_paths
+
+
+@pytest.mark.asyncio
 async def test_shopee_login_resume_with_runtime_otp_reaches_homepage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

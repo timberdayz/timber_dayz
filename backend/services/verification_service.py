@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from backend.services.verification_state_store import VerificationStateStore
+from backend.services.verification_protocol import verification_input_mode
 
 
 class VerificationService:
@@ -30,6 +31,7 @@ class VerificationService:
         payload = {
             "state": "verification_required",
             "verification_type": verification_type,
+            "verification_input_mode": verification_input_mode(verification_type),
             "verification_id": uuid4().hex,
             "owner_type": owner_type,
             "owner_id": owner_id,

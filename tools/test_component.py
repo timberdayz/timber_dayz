@@ -43,6 +43,11 @@ from modules.apps.collection_center.browser_config_helper import (
 )
 from backend.services.verification_service import VerificationService
 from backend.services.verification_state_store import VerificationStateStore
+from backend.services.verification_protocol import (
+    MANUAL_COMPLETED_TOKEN,
+    apply_verification_result_to_params,
+    verification_input_mode,
+)
 from backend.routers.component_versions import CANONICAL_COMPONENT_FILES
 from backend.services.active_collection_components import list_active_component_names
 from modules.apps.collection_center.python_component_adapter import create_adapter
@@ -633,6 +638,7 @@ class ComponentTester:
                     import asyncio
                     data = {
                         "verification_type": verification_type,
+                        "verification_input_mode": verification_input_mode(verification_type),
                         "verification_screenshot": verification_screenshot,
                         "verification_id": verification_payload["verification_id"],
                         "verification_message": verification_payload["message"],
@@ -656,6 +662,7 @@ class ComponentTester:
                 result.error = "验证码需要回传，但 test_dir 未配置"
                 return AdapterResult(success=False, message=result.error)
             value = None
+            manual_completed = False
             for _ in range(verification_timeout_seconds // poll_interval_seconds):
                 await asyncio.sleep(poll_interval_seconds)
                 if response_file.exists():
@@ -663,12 +670,15 @@ class ComponentTester:
                         with open(response_file, "r", encoding="utf-8") as f:
                             data = json.load(f)
                         value = data.get("captcha_code") or data.get("otp")
-                        if value:
+                        manual_completed = bool(data.get("manual_completed"))
+                        if value or manual_completed:
+                            if manual_completed and not value:
+                                value = MANUAL_COMPLETED_TOKEN
                             break
                     except Exception:
                         pass
 
-            if not value:
+            if not value and not manual_completed:
                 result.error = "验证码输入超时"
                 verification_service.mark_failed(
                     verification_id=verification_payload["verification_id"]
@@ -687,11 +697,11 @@ class ComponentTester:
             # 同一 page 继续：将回传值写入 adapter 的 ctx.config.params，再次执行 login
             if adapter.ctx.config is None:
                 adapter.ctx.config = {}
-            params = adapter.ctx.config.setdefault("params", {})
-            if (verification_type or "").lower() in ("otp", "sms", "email_code"):
-                params["otp"] = value
-            else:
-                params["captcha_code"] = value
+            apply_verification_result_to_params(
+                adapter.ctx.config,
+                verification_type=verification_type,
+                value=value,
+            )
 
             verification_service.mark_retrying(
                 verification_id=verification_payload["verification_id"]

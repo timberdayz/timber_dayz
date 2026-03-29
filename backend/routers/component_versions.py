@@ -43,6 +43,10 @@ from backend.services.active_collection_components import (
 from backend.services.component_version_service import ComponentVersionService
 from backend.services.verification_service import VerificationService
 from backend.services.verification_state_store import VerificationStateStore
+from backend.services.verification_protocol import (
+    extract_resume_submission,
+    verification_input_mode,
+)
 from backend.services.collection_contracts import (
     build_date_range_from_time_selection,
     derive_granularity_from_time_selection,
@@ -2052,6 +2056,9 @@ async def get_test_status(
         resp["verification_type"] = progress_data.get(
             "verification_type", "graphical_captcha"
         )
+        resp["verification_input_mode"] = verification_input_mode(
+            progress_data.get("verification_type")
+        )
         resp["verification_screenshot"] = progress_data.get(
             "verification_screenshot", ""
         )
@@ -2177,19 +2184,18 @@ async def post_test_resume(
             status_code=400,
             recovery_suggestion="请重新发起测试",
         )
-    value = body.captcha_code or body.otp
-    if not value or not value.strip():
+    value, response_data = extract_resume_submission(
+        captcha_code=body.captcha_code,
+        otp=body.otp,
+        manual_completed=body.manual_completed,
+    )
+    if not response_data:
         return error_response(
             ErrorCode.PARAMETER_INVALID,
-            "请提供 captcha_code 或 otp",
+            "请提供 captcha_code、otp 或 manual_completed",
             status_code=400,
-            recovery_suggestion="请填写验证码或OTP",
+            recovery_suggestion="请填写验证码/OTP，或在完成人工验证后点击继续",
         )
-    response_data = {}
-    if body.captcha_code:
-        response_data["captcha_code"] = body.captcha_code.strip()
-    if body.otp:
-        response_data["otp"] = body.otp.strip()
 
     verification_id = str(progress_data.get("verification_id") or "").strip()
     if verification_id:

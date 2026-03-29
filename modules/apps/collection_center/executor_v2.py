@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 
 from modules.core.logger import get_logger
+from backend.services.verification_protocol import apply_verification_result_to_params
 from modules.core.path_manager import get_data_raw_dir
 from modules.apps.collection_center.component_loader import ComponentLoader
 from modules.apps.collection_center.browser_config_helper import (
@@ -1245,10 +1246,11 @@ class CollectionExecutorV2:
                     )
                     if value is None:
                         raise StepExecutionError("验证码等待超时")
-                    if (e.verification_type or "").lower() in ("otp", "sms", "email_code"):
-                        params.setdefault("params", {})["otp"] = value
-                    else:
-                        params.setdefault("params", {})["captcha_code"] = value
+                    apply_verification_result_to_params(
+                        params,
+                        verification_type=e.verification_type,
+                        value=value,
+                    )
                     # 同一 page 继续：再次执行登录组件(组件内根据 params 中的 captcha_code/otp 填入并提交)
                     continue
 
@@ -1367,10 +1369,11 @@ class CollectionExecutorV2:
                             failed_domains=context.failed_domains,
                             total_domains=total_domains_count,
                         )
-                    if (e.verification_type or "").lower() in ("otp", "sms", "email_code"):
-                        export_params.setdefault("params", {})["otp"] = value
-                    else:
-                        export_params.setdefault("params", {})["captcha_code"] = value
+                    apply_verification_result_to_params(
+                        export_params,
+                        verification_type=e.verification_type,
+                        value=value,
+                    )
                     try:
                         if runtime_manifests is not None:
                             export_manifest = runtime_manifests.get("exports_by_domain", {}).get(full_domain)

@@ -64,6 +64,39 @@ class MiaoshouDatePicker(DatePickerComponent):
             pass
         await locator.fill(value, timeout=1500)
 
+    async def _read_combobox_value(self, page: Any, name: str) -> str:
+        locator = page.get_by_role("combobox", name=name).first
+        await locator.wait_for(state="visible", timeout=5000)
+        try:
+            value = (await locator.input_value()).strip()
+            if value:
+                return value
+        except Exception:
+            pass
+        try:
+            value = (await locator.text_content() or "").strip()
+            if value:
+                return value
+        except Exception:
+            pass
+        return ""
+
+    async def _wait_custom_range_applied(self, page: Any, date_range: MiaoshouCustomDateRange) -> None:
+        expected_start = f"{date_range.start_date} {date_range.start_time}"
+        expected_end = f"{date_range.end_date} {date_range.end_time}"
+
+        for _ in range(10):
+            start_value = await self._read_combobox_value(page, "开始时间")
+            end_value = await self._read_combobox_value(page, "结束时间")
+            if expected_start in start_value and expected_end in end_value:
+                return
+            try:
+                await page.wait_for_timeout(200)
+            except Exception:
+                continue
+
+        raise RuntimeError("自定义时间范围未正确应用")
+
     async def apply_custom_range(self, page: Any, date_range: MiaoshouCustomDateRange) -> DatePickResult:
         await self._open(page)
         await self._fill_input_by_name(page, "开始日期", date_range.start_date)
@@ -71,6 +104,7 @@ class MiaoshouDatePicker(DatePickerComponent):
         await self._fill_input_by_name(page, "结束日期", date_range.end_date)
         await self._fill_input_by_name(page, "结束时间", date_range.end_time)
         await page.get_by_role("button", name="确定").first.click(timeout=1000)
+        await self._wait_custom_range_applied(page, date_range)
         return DatePickResult(success=True, message="ok", option=DateOption.YESTERDAY)
 
     async def run(self, page: Any, option: DateOption) -> DatePickResult:  # type: ignore[override]

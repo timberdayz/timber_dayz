@@ -583,6 +583,7 @@
     <VerificationResumeDialog
       :visible="Boolean(verificationRequired)"
       :verification-type="verificationRequired?.verificationType || ''"
+      :verification-input-mode="verificationRequired?.verificationInputMode || ''"
       :screenshot-url="verificationRequired?.screenshotUrl || ''"
       :message="verificationRequired?.message || ''"
       :error-message="verificationErrorMessage"
@@ -1295,6 +1296,7 @@ const startPollingTestStatus = (testId, versionId) => {
           versionId,
           testId,
           verificationType: response.verification_type || 'graphical_captcha',
+          verificationInputMode: response.verification_input_mode || '',
           screenshotUrl: api.getTestVerificationScreenshotUrl(versionId, testId),
           message: response.verification_message || '',
           expiresAt: response.verification_expires_at || ''
@@ -1383,18 +1385,24 @@ const startPollingTestStatus = (testId, versionId) => {
 }
 
 // 验证码回传：用户输入后提交
-const submitVerification = async (submittedValue) => {
+const submitVerification = async (submitted) => {
   const v = verificationRequired.value
-  const value = String(submittedValue || '').trim()
-  if (!v || !value) return
+  if (!v) return
   verificationSubmitting.value = true
   try {
     verificationErrorMessage.value = ''
-    const isOtp = ['otp', 'sms', 'email_code'].includes((v.verificationType || '').toLowerCase())
-    await api.resumeTest(v.versionId, v.testId, isOtp
-      ? { otp: value }
-      : { captcha_code: value }
-    )
+    const inputMode = String(v.verificationInputMode || '').toLowerCase()
+    const isManual = inputMode === 'manual_continue'
+    const value = String(submitted?.value || '').trim()
+    let payload
+    if (isManual) {
+      payload = { manual_completed: true }
+    } else {
+      if (!value) return
+      const isOtp = ['otp', 'sms', 'email_code'].includes((v.verificationType || '').toLowerCase())
+      payload = isOtp ? { otp: value } : { captcha_code: value }
+    }
+    await api.resumeTest(v.versionId, v.testId, payload)
     ElMessage.info('验证码已提交，系统正在恢复执行')
     verificationRequired.value = null
   } catch (err) {

@@ -293,6 +293,7 @@
     <VerificationResumeDialog
       :visible="verificationDialogVisible"
       :verification-type="currentVerificationItem?.verificationType || ''"
+      :verification-input-mode="currentVerificationItem?.verificationInputMode || ''"
       :screenshot-url="currentVerificationItem?.screenshotUrl || ''"
       :message="currentVerificationItem?.message || ''"
       :error-message="verificationErrorMessage"
@@ -473,6 +474,7 @@ const showResumeDialog = (row) => {
   currentVerificationItem.value = {
     taskId: row.task_id,
     verificationType: row.verification_type || 'graphical_captcha',
+    verificationInputMode: row.verification_input_mode || '',
     screenshotUrl: row.verification_type ? collectionApi.getTaskScreenshotUrl(row.task_id) : '',
     message: row.verification_message || row.current_step || '任务需要验证码才能继续',
     expiresAt: row.verification_expires_at || ''
@@ -516,18 +518,24 @@ const focusTaskRow = async (taskId) => {
   row?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
 }
 
-const submitVerification = async (submittedValue) => {
+const submitVerification = async (submitted) => {
   if (!currentTask.value) return
-  const value = String(submittedValue || '').trim()
-  if (!value) return
   
   try {
     verificationSubmitting.value = true
     verificationErrorMessage.value = ''
     const verificationType = String(currentVerificationItem.value?.verificationType || '').toLowerCase()
-    const payload = ['otp', 'sms', 'email_code'].includes(verificationType)
-      ? { otp: value }
-      : { captcha_code: value }
+    const inputMode = String(currentVerificationItem.value?.verificationInputMode || '').toLowerCase()
+    const value = String(submitted?.value || '').trim()
+    let payload
+    if (inputMode === 'manual_continue') {
+      payload = { manual_completed: true }
+    } else {
+      if (!value) return
+      payload = ['otp', 'sms', 'email_code'].includes(verificationType)
+        ? { otp: value }
+        : { captcha_code: value }
+    }
     await collectionApi.resumeTask(currentTask.value.task_id, payload)
     ElMessage.info('验证码已提交，系统正在恢复执行')
     currentVerificationItem.value = null

@@ -101,3 +101,17 @@ async def test_list_verification_items_filters_paused_verification_tasks():
     assert len(items) == 1
     assert items[0]["task_id"] == "task-1"
     assert items[0]["account_id"] == "acc-1"
+
+
+def test_build_task_response_payload_exposes_manual_continue_mode_for_slide_captcha():
+    payload = _build_task_response_payload(_make_task(verification_type="slide_captcha"))
+
+    assert payload["verification_type"] == "slide_captcha"
+    assert payload["verification_input_mode"] == "manual_continue"
+
+
+def test_build_task_verification_item_exposes_manual_continue_mode_for_slide_captcha():
+    item = _build_task_verification_item(_make_task(verification_type="slide_captcha"))
+
+    assert item["verification_type"] == "slide_captcha"
+    assert item["verification_input_mode"] == "manual_continue"

@@ -92,6 +92,37 @@ class ShopeeLogin(LoginComponent):
     def _phone_otp_switch_locator(self, page: Any) -> Any:
         return page.get_by_role("button", name=re.compile("鍙戦€佽嚦鐢佃瘽", re.IGNORECASE)).first
 
+    async def _is_slide_captcha_visible(self, page: Any) -> bool:
+        indicators = (
+            "滑动验证",
+            "请拖动滑块",
+            "拖动滑块",
+            "向右滑动",
+        )
+        for text in indicators:
+            try:
+                locator = page.get_by_text(text, exact=False).first
+                if await self._locator_is_visible(locator, timeout=500):
+                    return True
+            except Exception:
+                continue
+        selectors = (
+            '[class*="captcha-slider"]',
+            '[class*="slider"]',
+            '[id*="captcha"]',
+            '[data-nc-idx]',
+            '.nc_wrapper',
+            '.nc-container',
+        )
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if await self._locator_is_visible(locator, timeout=500):
+                    return True
+            except Exception:
+                continue
+        return False
+
     async def _locator_is_visible(self, locator: Any, timeout: int = 500) -> bool:
         try:
             return bool(await locator.is_visible(timeout=timeout))
@@ -178,6 +209,17 @@ class ShopeeLogin(LoginComponent):
         await page.screenshot(path=screenshot_path, timeout=5000)
         raise VerificationRequiredError("otp", screenshot_path)
 
+    async def _raise_slide_captcha_verification_required(self, page: Any, config: dict[str, Any]) -> None:
+        screenshot_dir = (config or {}).get("task", {}).get("screenshot_dir")
+        if screenshot_dir:
+            os.makedirs(screenshot_dir, exist_ok=True)
+            screenshot_path = os.path.join(screenshot_dir, "shopee-login-slide-captcha.png")
+        else:
+            fd, screenshot_path = tempfile.mkstemp(suffix=".png", prefix="shopee_login_slide_")
+            os.close(fd)
+        await page.screenshot(path=screenshot_path, timeout=5000)
+        raise VerificationRequiredError("slide_captcha", screenshot_path)
+
     async def _submit_resumed_otp(self, page: Any, otp_value: str) -> LoginResult:
         await self._ensure_phone_otp_mode(page)
         await self._fill_otp(page, otp_value)
@@ -200,6 +242,7 @@ class ShopeeLogin(LoginComponent):
         params = config.get("params") or {}
         current_url = str(getattr(page, "url", "") or "")
         otp_value = str(params.get("captcha_code") or params.get("otp") or "").strip()
+        manual_completed = bool(params.get("manual_completed"))
 
         if self._login_looks_successful(current_url):
             await self._cleanup_after_login(page)
@@ -236,6 +279,11 @@ class ShopeeLogin(LoginComponent):
             if self._homepage_looks_ready(str(getattr(page, "url", "") or "")):
                 await self._cleanup_after_login(page)
                 return LoginResult(success=True, message="ok")
+
+            if await self._is_slide_captcha_visible(page):
+                if not manual_completed:
+                    await self._raise_slide_captcha_verification_required(page, config)
+                return LoginResult(success=False, message="slide captcha still present after manual completion")
 
             if await self._is_otp_visible(page):
                 await self._ensure_phone_otp_mode(page)

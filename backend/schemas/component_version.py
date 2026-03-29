@@ -1,5 +1,5 @@
 """
-组件版本管理 API 契约 (Contract-First)
+组件版本管理 API 合同 (Contract-First)
 
 从 `backend/routers/component_versions.py` 提取的 Pydantic 模型：
 - ComponentVersionResponse / VersionListResponse
@@ -9,7 +9,7 @@
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ComponentVersionResponse(BaseModel):
@@ -54,19 +54,18 @@ class VersionRegisterRequest(BaseModel):
     version: str = Field(..., description="版本号(如 1.0.0)")
     file_path: str = Field(..., description="文件路径")
     description: Optional[str] = Field(None, description="版本说明")
-    is_stable: bool = Field(False, description="是否标记为稳定版本（正式运行需通过 promote 单独提升，注册时会忽略此值）")
+    is_stable: bool = Field(
+        False,
+        description="是否标记为稳定版本(正式运行需通过 promote 单独提升,注册时会忽略此值)",
+    )
     created_by: Optional[str] = Field(None, description="创建人")
 
 
 class ABTestRequest(BaseModel):
     """启动 A/B 测试请求。"""
 
-    test_ratio: float = Field(
-        ..., ge=0.05, le=0.5, description="测试流量比例(0.05-0.5)"
-    )
-    duration_days: int = Field(
-        ..., ge=1, le=30, description="测试持续天数(1-30)"
-    )
+    test_ratio: float = Field(..., ge=0.05, le=0.5, description="测试流量比例(0.05-0.5)")
+    duration_days: int = Field(..., ge=1, le=30, description="测试持续天数(1-30)")
 
 
 class VersionUpdateRequest(BaseModel):
@@ -167,6 +166,20 @@ class TestResumeRequest(BaseModel):
 
     captcha_code: Optional[str] = Field(None, description="图形验证码")
     otp: Optional[str] = Field(None, description="短信/OTP 验证码")
+    manual_completed: Optional[bool] = Field(None, description="用户已手动完成滑块等验证,请求继续")
+
+    @model_validator(mode="after")
+    def validate_exactly_one_value(self):
+        captcha = (self.captcha_code or "").strip()
+        otp = (self.otp or "").strip()
+        manual_completed = bool(self.manual_completed)
+        filled_count = sum(1 for value in (captcha, otp) if value) + (1 if manual_completed else 0)
+        if filled_count != 1:
+            raise ValueError("exactly one of captcha_code, otp, or manual_completed is required")
+        self.captcha_code = captcha or None
+        self.otp = otp or None
+        self.manual_completed = True if manual_completed else None
+        return self
 
 
 __all__ = [

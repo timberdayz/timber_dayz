@@ -39,6 +39,10 @@ from backend.services.collection_contracts import (
     normalize_time_selection,
 )
 from backend.services.task_center_service import TaskCenterService
+from backend.services.verification_protocol import (
+    extract_resume_submission,
+    verification_input_mode,
+)
 
 logger = get_logger(__name__)
 
@@ -195,6 +199,9 @@ def _build_task_response_payload(task: CollectionTask) -> dict:
         "verification_message": verification_message,
         "verification_expires_at": None,
         "verification_attempt_count": 0,
+        "verification_input_mode": verification_input_mode(verification_type)
+        if verification_type
+        else None,
     }
 
 
@@ -216,6 +223,9 @@ def _build_task_verification_item(task: CollectionTask) -> Optional[dict]:
         "verification_screenshot": getattr(task, "verification_screenshot", None),
         "verification_expires_at": None,
         "verification_attempt_count": 0,
+        "verification_input_mode": verification_input_mode(
+            getattr(task, "verification_type", None)
+        ),
         "created_at": getattr(task, "created_at", None),
     }
 
@@ -570,9 +580,13 @@ async def resume_task(
         )
 
     payload = body or ResumeTaskRequest()
-    value = payload.captcha_code or payload.otp
-    if not value or not (value := value.strip()):
-        raise HTTPException(status_code=400, detail="请提供 captcha_code 或 otp")
+    value, response_payload = extract_resume_submission(
+        captcha_code=payload.captcha_code,
+        otp=payload.otp,
+        manual_completed=payload.manual_completed,
+    )
+    if not response_payload:
+        raise HTTPException(status_code=400, detail="请提供 captcha_code、otp 或 manual_completed")
 
     redis_client = None
     if request and getattr(request, "app", None):

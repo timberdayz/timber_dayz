@@ -49,6 +49,27 @@ class MiaoshouOrdersExport(ExportComponent):
     def _build_error_result(message: str) -> ExportResult:
         return ExportResult(success=False, message=message, file_path=None)
 
+    @staticmethod
+    def _resolve_preset_option(raw: str | None) -> DateOption:
+        value = str(raw or "").strip()
+        normalized = value.lower()
+        mapping = {
+            "今天": DateOption.TODAY_REALTIME,
+            "today": DateOption.TODAY_REALTIME,
+            "today_realtime": DateOption.TODAY_REALTIME,
+            "昨天": DateOption.YESTERDAY,
+            "yesterday": DateOption.YESTERDAY,
+            "近7天": DateOption.LAST_7_DAYS,
+            "last_7_days": DateOption.LAST_7_DAYS,
+            "last7days": DateOption.LAST_7_DAYS,
+            "近30天": DateOption.LAST_30_DAYS,
+            "last_30_days": DateOption.LAST_30_DAYS,
+            "last30days": DateOption.LAST_30_DAYS,
+            "近60天": DateOption.LAST_30_DAYS,
+            "last_60_days": DateOption.LAST_30_DAYS,
+        }
+        return mapping.get(value, mapping.get(normalized, DateOption.YESTERDAY))
+
     async def _first_visible(self, page: Any, names: list[str], *, role: str = "button", timeout: int = 1500) -> Any | None:
         for name in names:
             try:
@@ -76,7 +97,11 @@ class MiaoshouOrdersExport(ExportComponent):
 
     async def _ensure_orders_subtype_selected(self, page: Any, subtype: str) -> None:
         label = subtype.strip().capitalize()
-        target = page.get_by_text(label, exact=True).first
+        platform_label = page.get_by_text("平台", exact=True).first
+        platform_row = platform_label.locator(
+            "xpath=ancestor::*[.//*[@role='radiogroup']][1]"
+        ).first
+        target = platform_row.get_by_text(label, exact=True).first
         await target.wait_for(state="visible", timeout=5000)
         try:
             checked = await target.evaluate(
@@ -199,12 +224,7 @@ class MiaoshouOrdersExport(ExportComponent):
                     ),
                 )
             else:
-                preset_option = {
-                    "今天": DateOption.TODAY_REALTIME,
-                    "昨天": DateOption.YESTERDAY,
-                    "近7天": DateOption.LAST_7_DAYS,
-                    "近30天": DateOption.LAST_30_DAYS,
-                }.get(date_preset or "昨天", DateOption.YESTERDAY)
+                preset_option = self._resolve_preset_option(date_preset or "昨天")
                 date_result = await self.date_picker_component.run(page, preset_option)
             if not date_result.success:
                 raise RuntimeError(date_result.message or "date picker failed")
@@ -216,7 +236,7 @@ class MiaoshouOrdersExport(ExportComponent):
             await self._wait_search_results_ready(page)
 
             await self._ensure_export_menu_open(page)
-            async with page.context.expect_download(timeout=180000) as dl_info:
+            async with page.expect_download(timeout=180000) as dl_info:
                 await self._click_export_all_orders(page)
             download = await dl_info.value
 

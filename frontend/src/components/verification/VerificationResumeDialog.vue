@@ -20,18 +20,14 @@
     <div style="display: flex; flex-direction: column; gap: 16px">
       <el-alert
         v-if="submitting"
-        title="验证码已提交，系统正在恢复执行，请勿重复提交。"
+        title="验证信息已提交，系统正在恢复执行，请勿重复提交。"
         type="info"
         :closable="false"
         show-icon
       />
 
       <el-alert
-        :title="
-          isOtp
-            ? '请输入收到的短信或邮件验证码'
-            : '请根据下方截图输入图形验证码'
-        "
+        :title="instructionTitle"
         type="warning"
         :closable="false"
         show-icon
@@ -54,7 +50,7 @@
       </div>
 
       <div
-        v-if="!isOtp && screenshotUrl && !screenshotLoadFailed"
+        v-if="showScreenshot && screenshotUrl && !screenshotLoadFailed"
         style="
           display: flex;
           justify-content: center;
@@ -81,7 +77,7 @@
       </div>
 
       <div
-        v-else-if="!isOtp"
+        v-else-if="showScreenshot"
         style="
           min-height: 120px;
           display: flex;
@@ -96,13 +92,31 @@
           font-size: 13px;
         "
       >
-        验证码截图暂不可用，请根据当前页面或稍后重试。
+        验证截图暂时不可用，请根据当前页面操作或稍后重试。
+      </div>
+
+      <div
+        v-if="isManualContinue"
+        style="
+          padding: 12px;
+          border-radius: 8px;
+          background: #f5f7fa;
+          border: 1px solid #e4e7ed;
+          font-size: 13px;
+          color: #606266;
+          line-height: 1.7;
+        "
+      >
+        <div>请在当前有头浏览器中手动完成滑块或人工验证。</div>
+        <div>完成后点击下方“我已完成验证，继续”。</div>
+        <div>不要关闭浏览器，也不要刷新当前页面。</div>
       </div>
 
       <el-input
+        v-else
         ref="inputRef"
         v-model="localValue"
-        :placeholder="isOtp ? '请输入短信或邮件验证码' : '请输入图片中的验证码'"
+        :placeholder="inputPlaceholder"
         clearable
         :disabled="submitting"
         @keyup.enter="submit"
@@ -113,7 +127,7 @@
           {{ cancelText }}
         </el-button>
         <el-button type="primary" :loading="submitting" @click="submit">
-          {{ submitText }}
+          {{ resolvedSubmitText }}
         </el-button>
       </div>
     </div>
@@ -126,15 +140,16 @@ import { computed, nextTick, ref, watch } from "vue";
 const props = defineProps({
   visible: { type: Boolean, default: false },
   verificationType: { type: String, default: "graphical_captcha" },
+  verificationInputMode: { type: String, default: "" },
   screenshotUrl: { type: String, default: "" },
   submitting: { type: Boolean, default: false },
   message: { type: String, default: "" },
   errorMessage: { type: String, default: "" },
   expiresAt: { type: String, default: "" },
-  title: { type: String, default: "需要验证码" },
+  title: { type: String, default: "需要验证" },
   subtitle: {
     type: String,
-    default: "当前流程已暂停，请先完成验证码回填后继续。",
+    default: "当前流程已暂停，请先完成验证后继续。",
   },
   submitText: { type: String, default: "提交并继续" },
   cancelText: { type: String, default: "取消" },
@@ -147,14 +162,44 @@ const screenshotLoadFailed = ref(false);
 
 const isOtp = computed(() =>
   ["otp", "sms", "email_code"].includes(
-    String(props.verificationType || "").toLowerCase()
-  )
+    String(props.verificationType || "").toLowerCase(),
+  ),
 );
 
+const isManualContinue = computed(
+  () => String(props.verificationInputMode || "").toLowerCase() === "manual_continue",
+);
+
+const showScreenshot = computed(() => !isOtp.value || isManualContinue.value);
+
+const instructionTitle = computed(() => {
+  if (isManualContinue.value) {
+    return "请在浏览器中手动完成滑块或人工验证，完成后点击继续";
+  }
+  return isOtp.value
+    ? "请输入收到的短信或邮件验证码"
+    : "请根据下方截图输入图形验证码";
+});
+
+const inputPlaceholder = computed(() =>
+  isOtp.value ? "请输入短信或邮件验证码" : "请输入图片中的验证码",
+);
+
+const resolvedSubmitText = computed(() => {
+  if (isManualContinue.value) {
+    return "我已完成验证，继续";
+  }
+  return props.submitText;
+});
+
 const submit = () => {
+  if (isManualContinue.value) {
+    emit("submit", { manualCompleted: true });
+    return;
+  }
   const value = String(localValue.value || "").trim();
   if (!value) return;
-  emit("submit", value);
+  emit("submit", { value });
 };
 
 const handleImageError = () => {
@@ -162,7 +207,7 @@ const handleImageError = () => {
 };
 
 watch(
-  () => [props.visible, props.screenshotUrl],
+  () => [props.visible, props.screenshotUrl, props.verificationInputMode],
   async ([visible]) => {
     if (!visible) {
       localValue.value = "";
@@ -171,7 +216,9 @@ watch(
     }
     screenshotLoadFailed.value = false;
     await nextTick();
-    inputRef.value?.focus?.();
-  }
+    if (!isManualContinue.value) {
+      inputRef.value?.focus?.();
+    }
+  },
 );
 </script>

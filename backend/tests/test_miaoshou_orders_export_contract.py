@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from modules.components.base import ExecutionContext
+from modules.components.date_picker.base import DateOption
 from modules.platforms.miaoshou.components.orders_config import OrdersSelectors
 from modules.platforms.miaoshou.components.orders_export import MiaoshouOrdersExport
 
@@ -41,6 +42,15 @@ def test_miaoshou_orders_export_returns_error_message_in_message_field():
     assert result.file_path is None
 
 
+def test_miaoshou_orders_export_resolves_preset_aliases_from_ui_runtime_config():
+    component = MiaoshouOrdersExport(_ctx())
+
+    assert component._resolve_preset_option("last_7_days") is DateOption.LAST_7_DAYS
+    assert component._resolve_preset_option("last_30_days") is DateOption.LAST_30_DAYS
+    assert component._resolve_preset_option("yesterday") is DateOption.YESTERDAY
+    assert component._resolve_preset_option("今天") is DateOption.TODAY_REALTIME
+
+
 def test_miaoshou_orders_config_declares_export_menu_entries_and_progress_titles():
     selectors = OrdersSelectors()
 
@@ -64,7 +74,7 @@ def test_miaoshou_orders_config_declares_date_shortcuts_and_custom_inputs():
 def test_miaoshou_orders_export_source_captures_download_before_menu_click():
     source = Path("modules/platforms/miaoshou/components/orders_export.py").read_text(encoding="utf-8")
 
-    assert "async with page.context.expect_download(" in source
+    assert "async with page.expect_download(" in source
     assert "导出全部订单" in source
     assert "正在导出" in source
     assert "await self._click_search(page)" in source
@@ -73,5 +83,7 @@ def test_miaoshou_orders_export_source_captures_download_before_menu_click():
 def test_miaoshou_orders_export_scopes_orders_subtype_to_platform_row_instead_of_global_text_match():
     source = Path("modules/platforms/miaoshou/components/orders_export.py").read_text(encoding="utf-8")
 
-    assert 'get_by_text(label, exact=True).first' not in source
+    assert 'target = page.get_by_text(label, exact=True).first' not in source
+    assert "platform_label = page.get_by_text(\"平台\", exact=True).first" in source
+    assert "platform_row" in source
     assert "平台" in source

@@ -187,6 +187,7 @@ export const retryTask = async (taskId) => {
  * @param {Object} payload - 验证码内容，与后端 ResumeTaskRequest 一致
  * @param {string} [payload.captcha_code] - 图形验证码
  * @param {string} [payload.otp] - 短信/邮箱验证码
+ * @param {boolean} [payload.manual_completed] - 用户已手动完成滑块等验证
  * @returns {Promise<Object>} 恢复的任务
  */
 export const resumeTask = async (taskId, payload = {}) => {
@@ -196,6 +197,9 @@ export const resumeTask = async (taskId, payload = {}) => {
   }
   if (payload?.otp != null && String(payload.otp).trim()) {
     body.otp = String(payload.otp).trim()
+  }
+  if (payload?.manual_completed === true) {
+    body.manual_completed = true
   }
   const response = await api.post(`/collection/tasks/${taskId}/resume`, body)
   return response

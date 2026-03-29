@@ -21,7 +21,7 @@ def test_orders_export_searches_before_export_menu_and_download():
     search_index = source.index("await self._click_search(page)")
     wait_index = source.index("await self._wait_search_results_ready(page)")
     menu_index = source.index("await self._ensure_export_menu_open(page)")
-    download_index = source.index("async with page.context.expect_download(")
+    download_index = source.index("async with page.expect_download(")
 
     assert search_index < wait_index < menu_index < download_index
 

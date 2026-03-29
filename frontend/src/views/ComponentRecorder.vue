@@ -954,6 +954,7 @@
     <VerificationResumeDialog
       :visible="Boolean(verificationRequired)"
       :verification-type="verificationRequired?.verificationType || recorderRuntimeStatus.verification_type || ''"
+      :verification-input-mode="verificationRequired?.verificationInputMode || recorderRuntimeStatus.verification_input_mode || ''"
       :screenshot-url="verificationRequired?.screenshotUrl || ''"
       :message="recorderRuntimeStatus.verification_message || ''"
       :error-message="verificationErrorMessage"
@@ -1310,6 +1311,14 @@ const isOtpVerification = computed(() => {
   );
 });
 
+const isManualContinueVerification = computed(() => {
+  const inputMode =
+    verificationRequired.value?.verificationInputMode ||
+    recorderRuntimeStatus.value.verification_input_mode ||
+    "";
+  return String(inputMode).toLowerCase() === "manual_continue";
+});
+
 const resolveApiPayload = (response) => {
   if (response && typeof response === "object" && "success" in response) {
     return response.data ?? response;
@@ -1558,6 +1567,8 @@ const startPollingSteps = () => {
           verificationRequired.value = {
             verificationType:
               statusResponse.verification_type || "graphical_captcha",
+            verificationInputMode:
+              statusResponse.verification_input_mode || "",
             screenshotUrl: `${base}/collection/recorder/verification-screenshot?ts=${Date.now()}`,
           };
           verificationErrorMessage.value = "";
@@ -1593,15 +1604,20 @@ const stopPollingSteps = () => {
   }
 };
 
-const submitRecorderVerification = async (submittedValue) => {
-  const verificationValue = String(submittedValue || "").trim();
-  if (!verificationValue) return;
+const submitRecorderVerification = async (submitted) => {
+  const verificationValue = String(submitted?.value || "").trim();
   verificationSubmitting.value = true;
   try {
     verificationErrorMessage.value = "";
-    const payload = isOtpVerification.value
-      ? { otp: verificationValue }
-      : { captcha_code: verificationValue };
+    let payload;
+    if (isManualContinueVerification.value) {
+      payload = { manual_completed: true };
+    } else {
+      if (!verificationValue) return;
+      payload = isOtpVerification.value
+        ? { otp: verificationValue }
+        : { captcha_code: verificationValue };
+    }
     await api.post("/collection/recorder/resume", payload);
     ElMessage.info("验证码已提交，系统正在恢复执行");
     verificationRequired.value = null;

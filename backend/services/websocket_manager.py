@@ -14,6 +14,7 @@ from typing import Dict, Set
 from fastapi import WebSocket
 
 from modules.core.logger import get_logger
+from backend.services.verification_protocol import verification_input_mode
 
 logger = get_logger(__name__)
 
@@ -125,6 +126,7 @@ class ConnectionManager:
             "type": "verification_required",
             "task_id": task_id,
             "verification_type": verification_type,
+            "verification_input_mode": verification_input_mode(verification_type),
             "screenshot_path": screenshot_path,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })

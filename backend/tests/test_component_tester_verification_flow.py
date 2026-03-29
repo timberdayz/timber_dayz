@@ -97,3 +97,81 @@ async def test_post_test_resume_marks_progress_as_verification_submitted():
     updated_progress = json.loads(progress_path.read_text(encoding="utf-8"))
     assert updated_progress["status"] == "verification_submitted"
     assert updated_progress["verification_attempt_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_test_status_exposes_manual_continue_mode_for_slide_captcha():
+    test_id = f"pytest-{uuid.uuid4().hex[:8]}"
+    test_dir = _make_test_dir(test_id)
+    progress_path = test_dir / "progress.json"
+    progress_path.write_text(
+        json.dumps(
+            {
+                "status": "verification_required",
+                "progress": 10,
+                "current_step": "Waiting for verification",
+                "verification_type": "slide_captcha",
+                "verification_screenshot": "verification_screenshot.png",
+                "verification_id": "verify-2",
+                "verification_message": "manual slider verification required",
+                "verification_expires_at": "2026-03-27T20:30:00+00:00",
+                "verification_attempt_count": 0,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    resp = await get_test_status(version_id=1, test_id=test_id, db=None)
+
+    assert resp["verification_type"] == "slide_captcha"
+    assert resp["verification_input_mode"] == "manual_continue"
+
+
+@pytest.mark.asyncio
+async def test_post_test_resume_accepts_manual_completed_for_slide_captcha():
+    test_id = f"pytest-{uuid.uuid4().hex[:8]}"
+    test_dir = _make_test_dir(test_id)
+    progress_path = test_dir / "progress.json"
+    store_path = test_dir / "verification_state.json"
+
+    store = VerificationStateStore(storage_path=store_path)
+    payload = VerificationService(store=store).raise_required(
+        owner_type="component_test",
+        owner_id="acc-1",
+        verification_type="slide_captcha",
+        phase="login",
+        current_url="https://example.com/login",
+        screenshot_url="verification_screenshot.png",
+        message="manual slider verification required",
+        account_id="acc-1",
+        store_name="Test Store",
+    )
+
+    progress_path.write_text(
+        json.dumps(
+            {
+                "status": "verification_required",
+                "verification_type": "slide_captcha",
+                "verification_screenshot": "verification_screenshot.png",
+                "verification_id": payload["verification_id"],
+                "verification_message": payload["message"],
+                "verification_expires_at": payload["expires_at"],
+                "verification_attempt_count": 0,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    body = await post_test_resume(
+        version_id=1,
+        test_id=test_id,
+        body=ComponentTestResumeRequest(manual_completed=True),
+    )
+
+    assert body["success"] is True
+    updated_progress = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert updated_progress["status"] == "verification_submitted"
+    response_payload = json.loads((test_dir / "verification_response.json").read_text(encoding="utf-8"))
+    assert response_payload == {"manual_completed": True}

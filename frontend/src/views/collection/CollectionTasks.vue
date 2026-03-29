@@ -353,7 +353,7 @@
     <!-- 验证码/OTP 对话框：与后端 verification_type、verification_screenshot 对接 -->
     <el-dialog 
       v-model="verificationDialogVisible" 
-      :title="verificationType === 'otp' ? '需要短信/邮箱验证码' : '需要验证码'"
+      :title="verificationType === 'otp' ? '需要短信/邮箱验证码' : (verificationInputMode === 'manual_continue' ? '需要人工验证' : '需要验证码')"
       width="500px"
       :close-on-click-modal="false"
     >
@@ -361,14 +361,14 @@
         <el-alert 
           type="warning" 
           :closable="false"
-          :title="verificationType === 'otp' ? '任务需要输入短信或邮箱验证码(OTP)才能继续' : '任务需要验证码才能继续'"
+          :title="verificationType === 'otp' ? '任务需要输入短信或邮箱验证码(OTP)才能继续' : (verificationInputMode === 'manual_continue' ? '请在当前有头浏览器中完成滑块或人工验证后点击继续' : '任务需要验证码才能继续')"
         />
         <img 
           v-if="verificationScreenshotUrl" 
           :src="verificationScreenshotUrl" 
           class="verification-screenshot"
         />
-        <el-form>
+        <el-form v-if="verificationInputMode !== 'manual_continue'">
           <el-form-item :label="verificationType === 'otp' ? '验证码(OTP)' : '验证码'">
             <el-input 
               v-model="verificationCode" 
@@ -376,11 +376,14 @@
             />
           </el-form-item>
         </el-form>
+        <div v-else class="slider-tip">
+          请在当前有头浏览器中手动完成滑块或人工验证，完成后点击下方“我已完成验证，继续”。
+        </div>
       </div>
       <template #footer>
         <el-button @click="skipVerification">取消</el-button>
         <el-button type="primary" @click="submitVerification">
-          提交
+          {{ verificationInputMode === 'manual_continue' ? '我已完成验证，继续' : '提交' }}
         </el-button>
       </template>
     </el-dialog>
@@ -417,6 +420,7 @@ const verificationDialogVisible = ref(false)
 const verificationScreenshot = ref('')
 const verificationScreenshotUrl = ref('')
 const verificationType = ref('')
+const verificationInputMode = ref('')
 const verificationCode = ref('')
 const currentTask = ref(null)
 
@@ -583,6 +587,7 @@ const showResumeDialog = (row) => {
   currentTask.value = row
   verificationCode.value = ''
   verificationType.value = row.verification_type || ''
+  verificationInputMode.value = row.verification_input_mode || ''
   verificationScreenshot.value = row.verification_screenshot || row.error_screenshot_path || ''
   verificationScreenshotUrl.value = row.task_id ? collectionApi.getTaskScreenshotUrl(row.task_id) : ''
   verificationDialogVisible.value = true
@@ -591,12 +596,14 @@ const showResumeDialog = (row) => {
 const submitVerification = async () => {
   if (!currentTask.value) return
   const code = (verificationCode.value || '').trim()
-  if (!code) {
+  if (verificationInputMode.value !== 'manual_continue' && !code) {
     ElMessage.warning('请输入验证码')
     return
   }
   const isOtp = (verificationType.value || '').toLowerCase() === 'otp' || /^(sms|email_code)$/i.test(verificationType.value)
-  const payload = isOtp ? { otp: code } : { captcha_code: code }
+  const payload = verificationInputMode.value === 'manual_continue'
+    ? { manual_completed: true }
+    : (isOtp ? { otp: code } : { captcha_code: code })
   try {
     await collectionApi.resumeTask(currentTask.value.task_id, payload)
     ElMessage.success('已提交，任务将自动继续')
@@ -689,9 +696,11 @@ const connectTaskWebSocket = (taskId) => {
       if (task) {
         task.status = 'paused'
         task.verification_type = message.verification_type || ''
+        task.verification_input_mode = message.verification_input_mode || ''
         task.verification_screenshot = message.screenshot_path || ''
         currentTask.value = task
         verificationType.value = task.verification_type || ''
+        verificationInputMode.value = task.verification_input_mode || ''
         verificationScreenshotUrl.value = collectionApi.getTaskScreenshotUrl(taskId)
         verificationDialogVisible.value = true
       }
