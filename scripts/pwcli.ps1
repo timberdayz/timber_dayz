@@ -3,4 +3,5 @@ param(
     [object[]]$CliArgs
 )
 
-& npx --yes --package @playwright/cli playwright-cli @CliArgs
+$ScriptPath = Join-Path $PSScriptRoot "pwcli_native.py"
+& python $ScriptPath @CliArgs

@@ -38,6 +38,9 @@ from modules.apps.collection_center.transition_gates import (
     evaluate_export_complete,
     evaluate_login_ready,
 )
+from modules.apps.collection_center.browser_config_helper import (
+    enforce_official_playwright_browser,
+)
 from backend.services.verification_service import VerificationService
 from backend.services.verification_state_store import VerificationStateStore
 from backend.routers.component_versions import CANONICAL_COMPONENT_FILES
@@ -149,9 +152,21 @@ class ComponentTester:
         
         logger.info(f"ComponentTester initialized: platform={platform}")
 
-    def _get_browser_channel(self) -> str:
-        channel = str(os.getenv("PLAYWRIGHT_BROWSER_CHANNEL", "chrome") or "").strip()
-        return channel or "chrome"
+    def _build_browser_launch_kwargs(
+        self,
+        *,
+        headless: Optional[bool] = None,
+        args: Optional[List[str]] = None,
+        slow_mo: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        launch_kwargs: Dict[str, Any] = {
+            "headless": self.headless if headless is None else headless,
+        }
+        if args is not None:
+            launch_kwargs["args"] = list(args)
+        if slow_mo is not None:
+            launch_kwargs["slow_mo"] = slow_mo
+        return enforce_official_playwright_browser(launch_kwargs)
 
     def _get_verification_store(self) -> VerificationStateStore:
         storage_path = self.test_dir / "verification_state.json" if self.test_dir else None
@@ -186,8 +201,6 @@ class ComponentTester:
         return cfg
 
     def _persistent_context_mode(self, component_type: str) -> Optional[str]:
-        if component_type == "login":
-            return "ephemeral"
         if component_type in ["export", "date_picker", "filters"] and not self.skip_login:
             return "reused"
         return None
@@ -273,8 +286,26 @@ class ComponentTester:
             spec = importlib.util.spec_from_file_location("local_accounts", accounts_file)
             local_accounts = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(local_accounts)
-            
-            return getattr(local_accounts, "ACCOUNTS", {}).get(self.account_id)
+
+            if hasattr(local_accounts, "get_all_local_accounts"):
+                for account in local_accounts.get_all_local_accounts():
+                    if isinstance(account, dict) and account.get("account_id") == self.account_id:
+                        return account
+
+            accounts_dict = getattr(local_accounts, "ACCOUNTS", {})
+            if isinstance(accounts_dict, dict):
+                return accounts_dict.get(self.account_id)
+
+            local_accounts_dict = getattr(local_accounts, "LOCAL_ACCOUNTS", {})
+            if isinstance(local_accounts_dict, dict):
+                for entries in local_accounts_dict.values():
+                    if not isinstance(entries, list):
+                        continue
+                    for account in entries:
+                        if isinstance(account, dict) and account.get("account_id") == self.account_id:
+                            return account
+
+            return None
         except Exception as e:
             logger.error(f"Failed to load account: {e}")
             return None
@@ -844,11 +875,10 @@ class ComponentTester:
 
         try:
             async with async_playwright() as p:
-                browser_channel = self._get_browser_channel()
                 browser = await p.chromium.launch(
-                    channel=browser_channel,
-                    headless=self.headless,
-                    args=['--start-maximized'] if not self.headless else []
+                    **self._build_browser_launch_kwargs(
+                        args=['--start-maximized'] if not self.headless else []
+                    )
                 )
                 # 1.7: 与生产对齐——会话 + 指纹，使用 new_context(storage_state=..., **fp_options)
                 context_options = {}
@@ -1319,14 +1349,10 @@ class ComponentTester:
                         # 使用 launch_persistent_context
                         context = await p.chromium.launch_persistent_context(
                             user_data_dir=str(profile_path),
-                            channel=browser_channel,
-                            headless=self.headless,
-                            args=[
-                                '--no-sandbox',
-                                '--disable-blink-features=AutomationControlled',
-                                '--disable-dev-shm-usage',
-                            ],
-                            slow_mo=50,
+                            **self._build_browser_launch_kwargs(
+                                args=['--start-maximized'] if not self.headless else [],
+                                slow_mo=50,
+                            ),
                             **context_options
                         )
                         
@@ -1344,9 +1370,9 @@ class ComponentTester:
                         print(f"  [WARN] Persistent context failed, using normal context")
                         # 降级到普通上下文
                         browser = await p.chromium.launch(
-                            channel=browser_channel,
-                            headless=self.headless,
-                            args=(['--start-maximized'] if not self.headless else []) + ['--disable-blink-features=AutomationControlled']
+                            **self._build_browser_launch_kwargs(
+                                args=['--start-maximized'] if not self.headless else []
+                            )
                         )
                         context = await browser.new_context(
                             viewport=None if not self.headless else {'width': 1920, 'height': 1080}
@@ -1355,9 +1381,9 @@ class ComponentTester:
                 else:
                     # 普通模式：创建新的浏览器上下文（有头时最大化便于观察）
                     browser = await p.chromium.launch(
-                        channel=browser_channel,
-                        headless=self.headless,
-                        args=(['--start-maximized'] if not self.headless else []) + ['--disable-blink-features=AutomationControlled']
+                        **self._build_browser_launch_kwargs(
+                            args=['--start-maximized'] if not self.headless else []
+                        )
                     )
                     context = await browser.new_context(
                         viewport=None if not self.headless else {'width': 1920, 'height': 1080}

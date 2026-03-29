@@ -433,16 +433,11 @@ pwcli snapshot
 pwcli snapshot --filename ".\01-home.md"
 pwcli click e3
 pwcli fill e8 "text"
-pwcli hover e10
 pwcli press Enter
 pwcli screenshot --filename ".\01-home.png"
 pwcli reload
-pwcli tab-list
-pwcli tab-select 0
-pwcli tracing-start
-pwcli tracing-stop
-pwcli console warning
-pwcli network
+pwcli list
+pwcli state-save ".\session-state.json"
 ```
 
 说明：
@@ -753,9 +748,10 @@ pwcli snapshot --filename ".\login-after.md"
 此时使用：
 
 ```powershell
-pwcli tracing-start
+pwcli snapshot --filename ".\debug-before.md"
 # 复现流程
-pwcli tracing-stop
+pwcli screenshot --filename ".\debug-after.png"
+pwcli snapshot --filename ".\debug-after.md"
 ```
 
 ---

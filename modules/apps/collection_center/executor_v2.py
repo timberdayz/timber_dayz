@@ -22,6 +22,9 @@ from concurrent.futures import ThreadPoolExecutor
 from modules.core.logger import get_logger
 from modules.core.path_manager import get_data_raw_dir
 from modules.apps.collection_center.component_loader import ComponentLoader
+from modules.apps.collection_center.browser_config_helper import (
+    enforce_official_playwright_browser,
+)
 from modules.apps.collection_center.popup_handler import UniversalPopupHandler, StepPopupHandler
 from modules.apps.collection_center.python_component_adapter import PythonComponentAdapter, create_adapter
 from modules.apps.collection_center.transition_gates import (
@@ -516,12 +519,13 @@ class CollectionExecutorV2:
         logger.info(f"Starting browser: environment={settings.ENVIRONMENT}, headless={browser_config['headless']}, slow_mo={browser_config.get('slow_mo', 0)}")
         
         playwright = await async_playwright().start()
-        browser = await playwright.chromium.launch(**browser_config)
+        browser = await playwright.chromium.launch(
+            **enforce_official_playwright_browser(browser_config)
+        )
         
         # 创建浏览器上下文(反检测指纹)；下载路径由组件通过 download.save_as() 指定，不传 downloads_path
         context = await browser.new_context(
             viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             locale='zh-CN',
             timezone_id='Asia/Shanghai',
             accept_downloads=True,

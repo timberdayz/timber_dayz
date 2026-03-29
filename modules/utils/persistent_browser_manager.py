@@ -19,6 +19,9 @@ from datetime import datetime
 from loguru import logger
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright
+from modules.apps.collection_center.browser_config_helper import (
+    enforce_official_playwright_browser,
+)
 from .sessions.session_manager import SessionManager
 from .sessions.device_fingerprint import DeviceFingerprintManager
 
@@ -117,6 +120,7 @@ class PersistentBrowserManager:
                 ],
                 'slow_mo': 100  # 稍微减慢操作速度,更像真实用户
             }
+            launch_options = enforce_official_playwright_browser(launch_options)
 
             # 构建上下文参数
             context_options = {
@@ -262,12 +266,14 @@ class PersistentBrowserManager:
             logger.warning("使用回退模式创建普通浏览器上下文")
 
             browser = self.playwright.chromium.launch(
-                headless=False,
-                args=[
-                    '--no-sandbox',
-                    '--disable-blink-features=AutomationControlled',
-                    f'--user-agent={fingerprint["user_agent"]}'
-                ]
+                **enforce_official_playwright_browser({
+                    'headless': False,
+                    'args': [
+                        '--no-sandbox',
+                        '--disable-blink-features=AutomationControlled',
+                        f'--user-agent={fingerprint["user_agent"]}'
+                    ]
+                })
             )
 
             context = browser.new_context(

@@ -111,10 +111,11 @@ class MiaoshouLogin(LoginComponent):
         self,
         page: Any,
         *,
-        timeout_ms: int = 30000,
+        timeout_ms: int = 60000,
         poll_ms: int = 500,
     ) -> str:
         waited = 0
+        cleanup_attempted = False
         while waited <= timeout_ms:
             try:
                 remaining = max(timeout_ms - waited, 1)
@@ -125,6 +126,14 @@ class MiaoshouLogin(LoginComponent):
             error_text = await self._find_visible_login_error(page)
             if error_text:
                 return error_text
+
+            current_url = str(getattr(page, "url", "") or "")
+            if self._login_looks_successful(current_url) and not cleanup_attempted:
+                cleanup_attempted = True
+                try:
+                    await self._cleanup_after_login(page)
+                except Exception:
+                    pass
 
             if await self._homepage_ready(page):
                 return "success"

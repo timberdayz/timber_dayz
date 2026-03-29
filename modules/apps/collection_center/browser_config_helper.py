@@ -5,9 +5,32 @@
 """
 
 import os
+from typing import Any, Dict
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def enforce_official_playwright_browser(launch_args: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """
+    强制使用 Playwright 官方默认浏览器。
+
+    活跃采集/测试路径一律不允许通过 channel 或 executable_path
+    切到系统安装的 Chrome / Edge，避免运行时落到 branded channel。
+    """
+    normalized = dict(launch_args or {})
+    removed = {}
+
+    for key in ("channel", "executable_path", "executablePath", "browser"):
+        if key in normalized:
+            removed[key] = normalized.pop(key)
+
+    if removed:
+        logger.info(
+            f"Removed branded browser overrides from Playwright launch args: {', '.join(sorted(removed.keys()))}"
+        )
+
+    return normalized
 
 
 def get_browser_launch_args(debug_mode: bool = False) -> dict:
@@ -36,7 +59,7 @@ def get_browser_launch_args(debug_mode: bool = False) -> dict:
             browser_config['headless'] = False
             logger.info("Debug mode enabled: forcing headful browser")
         
-        return browser_config
+        return enforce_official_playwright_browser(browser_config)
     
     except Exception as e:
         # 降级到默认配置
@@ -50,22 +73,21 @@ def get_browser_launch_args(debug_mode: bool = False) -> dict:
             headless = False
         
         if environment == "production":
-            return {
+            return enforce_official_playwright_browser({
                 'headless': headless or True,  # 生产环境强制无头(除非调试)
                 'slow_mo': 0,
                 'args': [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-blink-features=AutomationControlled',
                 ]
-            }
+            })
         else:
-            return {
+            return enforce_official_playwright_browser({
                 'headless': headless,
                 'slow_mo': slow_mo if slow_mo > 0 else 100,
                 'args': []
-            }
+            })
 
 
 def get_browser_context_args() -> dict:
@@ -78,9 +100,7 @@ def get_browser_context_args() -> dict:
     """
     return {
         'viewport': {'width': 1920, 'height': 1080},
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'locale': 'zh-CN',
         'timezone_id': 'Asia/Shanghai',
         'accept_downloads': True,
     }
-

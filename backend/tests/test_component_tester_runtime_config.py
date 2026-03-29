@@ -39,17 +39,17 @@ def test_component_tester_does_not_reference_removed_public_account_info_attr():
     assert "self.account_info" not in source
 
 
-def test_component_tester_prefers_stable_browser_channel_over_bundled_chromium():
+def test_component_tester_uses_official_playwright_default_browser():
     source = Path("tools/test_component.py").read_text(encoding="utf-8")
 
-    assert "PLAYWRIGHT_BROWSER_CHANNEL" in source
-    assert '"chrome"' in source or "'chrome'" in source
+    assert "PLAYWRIGHT_BROWSER_CHANNEL" not in source
+    assert "channel=browser_channel" not in source
 
 
-def test_component_tester_uses_ephemeral_persistent_context_for_login():
+def test_component_tester_uses_default_browser_context_for_login():
     tester = ComponentTester(platform="tiktok", account_id="acc-1")
 
-    assert tester._persistent_context_mode("login") == "ephemeral"
+    assert tester._persistent_context_mode("login") is None
 
 
 def test_component_tester_uses_reused_persistent_context_for_export():

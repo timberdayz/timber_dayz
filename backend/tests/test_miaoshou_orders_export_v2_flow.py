@@ -38,3 +38,17 @@ def test_orders_export_treats_progress_as_intermediate_and_file_as_final_signal(
 
     assert "await self._wait_export_progress_ready(page)" in source
     assert "if not tmp_path.exists() or tmp_path.stat().st_size <= 0" in source
+
+
+def test_orders_export_waits_for_export_menuitem_visibility_before_click():
+    source = _source()
+
+    assert 'get_by_role("menuitem"' in source
+    assert '.wait_for(state="visible"' in source
+
+
+def test_orders_export_uses_named_date_inputs_in_custom_range_path():
+    source = _source()
+
+    assert "apply_custom_range(" in source
+    assert "MiaoshouCustomDateRange(" in source

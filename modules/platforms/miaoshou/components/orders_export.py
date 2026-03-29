@@ -3,10 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import re
 from typing import Any
 
 from modules.components.base import ExecutionContext
+from modules.components.date_picker.base import DateOption
 from modules.components.export.base import ExportComponent, ExportMode, ExportResult, build_standard_output_root
+from modules.components.navigation.base import TargetPage
+from modules.platforms.miaoshou.components.date_picker import MiaoshouCustomDateRange, MiaoshouDatePicker
+from modules.platforms.miaoshou.components.filters import MiaoshouFilters
+from modules.platforms.miaoshou.components.navigation import MiaoshouNavigation
 from modules.platforms.miaoshou.components.orders_config import OrdersSelectors
 from modules.utils.path_sanitizer import build_filename
 
@@ -27,6 +33,9 @@ class MiaoshouOrdersExport(ExportComponent):
     def __init__(self, ctx: ExecutionContext, selectors: OrdersSelectors | None = None) -> None:
         super().__init__(ctx)
         self.sel = selectors or OrdersSelectors()
+        self.navigation_component = MiaoshouNavigation(ctx, self.sel)
+        self.date_picker_component = MiaoshouDatePicker(ctx, self.sel)
+        self.filters_component = MiaoshouFilters(ctx)
 
     def _orders_detail_url(self, subtype: str) -> str:
         subtype_norm = (subtype or "shopee").strip().lower()
@@ -40,21 +49,15 @@ class MiaoshouOrdersExport(ExportComponent):
     def _build_error_result(message: str) -> ExportResult:
         return ExportResult(success=False, message=message, file_path=None)
 
-    async def _first_visible(self, page: Any, names: list[str], *, role: str = "button") -> Any | None:
+    async def _first_visible(self, page: Any, names: list[str], *, role: str = "button", timeout: int = 1500) -> Any | None:
         for name in names:
             try:
                 locator = page.get_by_role(role, name=name).first
-                await locator.wait_for(state="visible", timeout=1200)
+                await locator.wait_for(state="visible", timeout=timeout)
                 return locator
             except Exception:
                 continue
         return None
-
-    async def _wait_navigation_ready(self, page: Any) -> None:
-        await page.get_by_text("利润明细", exact=False).first.wait_for(state="visible", timeout=15000)
-        export_btn = await self._first_visible(page, ["导出数据"])
-        if export_btn is None:
-            raise RuntimeError("导出数据按钮不可见")
 
     async def _ensure_popup_closed(self, page: Any) -> None:
         for _ in range(self.sel.close_poll_max_rounds):
@@ -62,7 +65,7 @@ class MiaoshouOrdersExport(ExportComponent):
             for selector in self.sel.popup_close_buttons:
                 try:
                     locator = page.locator(selector).first
-                    if await locator.count() > 0:
+                    if await locator.count() > 0 and await locator.is_visible():
                         await locator.click(timeout=500)
                         closed_any = True
                 except Exception:
@@ -90,74 +93,6 @@ class MiaoshouOrdersExport(ExportComponent):
         if not checked:
             await target.click(timeout=1500)
 
-    async def _open_date_picker(self, page: Any) -> None:
-        trigger = page.get_by_text("下单时间", exact=False).first
-        await trigger.click(timeout=1500)
-        await self._wait_date_picker_ready(page)
-
-    async def _wait_date_picker_ready(self, page: Any) -> None:
-        shortcut_found = False
-        for name in self.sel.date_shortcuts:
-            locator = page.get_by_role("button", name=name).first
-            if await locator.count() > 0:
-                await locator.wait_for(state="visible", timeout=5000)
-                shortcut_found = True
-                break
-        if not shortcut_found:
-            raise RuntimeError("日期快捷按钮不可见")
-        await page.get_by_role("button", name="确定").first.wait_for(state="visible", timeout=5000)
-
-    async def _fill_input_by_name(self, page: Any, name: str, value: str) -> None:
-        locator = page.get_by_role("textbox", name=name).first
-        await locator.wait_for(state="visible", timeout=5000)
-        await locator.click(timeout=1000)
-        try:
-            await locator.press("Control+A")
-        except Exception:
-            pass
-        await locator.fill(value, timeout=1500)
-
-    async def _ensure_date_preset_selected(self, page: Any, preset: str) -> None:
-        button = page.get_by_role("button", name=preset).first
-        await button.wait_for(state="visible", timeout=5000)
-        await button.click(timeout=1000)
-        await page.get_by_role("button", name="确定").first.click(timeout=1000)
-
-    async def _ensure_custom_date_range_selected(self, page: Any, date_range: CustomDateRange) -> None:
-        await self._fill_input_by_name(page, "开始日期", date_range.start_date)
-        await self._fill_input_by_name(page, "开始时间", date_range.start_time)
-        await self._fill_input_by_name(page, "结束日期", date_range.end_date)
-        await self._fill_input_by_name(page, "结束时间", date_range.end_time)
-        await page.get_by_role("button", name="确定").first.click(timeout=1000)
-
-    async def _wait_filters_ready(self, page: Any) -> None:
-        full_select = page.get_by_role("checkbox", name="全选").first
-        await full_select.wait_for(state="visible", timeout=5000)
-
-    async def _ensure_order_statuses_selected(self, page: Any, statuses: list[str] | None = None, *, select_all: bool = True) -> None:
-        trigger = page.get_by_role("combobox", name="订单状态 :").first
-        await trigger.click(timeout=1500)
-        await self._wait_filters_ready(page)
-        if select_all:
-            full_select = page.get_by_role("checkbox", name="全选").first
-            checked = await full_select.is_checked()
-            if not checked:
-                await full_select.click(timeout=1000)
-            try:
-                await page.keyboard.press("Escape")
-            except Exception:
-                pass
-            return
-
-        for status in statuses or []:
-            box = page.get_by_role("checkbox", name=status).first
-            if not await box.is_checked():
-                await box.click(timeout=1000)
-        try:
-            await page.keyboard.press("Escape")
-        except Exception:
-            pass
-
     async def _click_search(self, page: Any) -> None:
         search_button = await self._first_visible(page, list(self.sel.search_button_texts))
         if search_button is None:
@@ -169,10 +104,13 @@ class MiaoshouOrdersExport(ExportComponent):
         await page.get_by_text("订单信息", exact=False).first.wait_for(state="visible", timeout=15000)
 
     async def _ensure_export_menu_open(self, page: Any) -> None:
-        button = await self._first_visible(page, ["导出数据"])
+        button = await self._first_visible(page, list(self.sel.export_button_texts))
         if button is None:
             raise RuntimeError("导出数据按钮不可见")
-        await button.hover(timeout=1500)
+        try:
+            await button.click(timeout=1500)
+        except Exception:
+            await button.hover(timeout=1500)
         await page.get_by_role("menuitem", name="导出全部订单").first.wait_for(state="visible", timeout=5000)
 
     async def _click_export_all_orders(self, page: Any) -> None:
@@ -244,15 +182,16 @@ class MiaoshouOrdersExport(ExportComponent):
                 wait_until="domcontentloaded",
                 timeout=60000,
             )
-            await self._wait_navigation_ready(page)
+            nav_result = await self.navigation_component.run(page, TargetPage.ORDERS)
+            if not nav_result.success:
+                raise RuntimeError(nav_result.message or "navigation failed")
             await self._ensure_popup_closed(page)
             await self._ensure_orders_subtype_selected(page, subtype)
 
-            await self._open_date_picker(page)
             if custom_range:
-                await self._ensure_custom_date_range_selected(
+                date_result = await self.date_picker_component.apply_custom_range(
                     page,
-                    CustomDateRange(
+                    MiaoshouCustomDateRange(
                         start_date=str(custom_range["start_date"]),
                         end_date=str(custom_range["end_date"]),
                         start_time=str(custom_range.get("start_time", "00:00:00")),
@@ -260,9 +199,19 @@ class MiaoshouOrdersExport(ExportComponent):
                     ),
                 )
             else:
-                await self._ensure_date_preset_selected(page, date_preset or "昨天")
+                preset_option = {
+                    "今天": DateOption.TODAY_REALTIME,
+                    "昨天": DateOption.YESTERDAY,
+                    "近7天": DateOption.LAST_7_DAYS,
+                    "近30天": DateOption.LAST_30_DAYS,
+                }.get(date_preset or "昨天", DateOption.YESTERDAY)
+                date_result = await self.date_picker_component.run(page, preset_option)
+            if not date_result.success:
+                raise RuntimeError(date_result.message or "date picker failed")
 
-            await self._ensure_order_statuses_selected(page, select_all=True)
+            filter_result = await self.filters_component.run(page, {"select_all": True})
+            if not filter_result.success:
+                raise RuntimeError(filter_result.message or "filters failed")
             await self._click_search(page)
             await self._wait_search_results_ready(page)
 

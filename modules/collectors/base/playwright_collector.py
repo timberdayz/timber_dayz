@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from playwright.sync_api import sync_playwright, Browser, Page, BrowserContext
 import logging
+from modules.apps.collection_center.browser_config_helper import (
+    enforce_official_playwright_browser,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,12 +71,13 @@ class PlaywrightCollector:
                 logger.info(f"[LINK] 使用代理: {self.proxy_config.get('server', 'unknown')}")
             
             # 启动浏览器
-            self.browser = self.playwright.chromium.launch(**launch_args)
+            self.browser = self.playwright.chromium.launch(
+                **enforce_official_playwright_browser(launch_args)
+            )
             
             # 创建上下文
             context_args = {
                 "viewport": {"width": 1920, "height": 1080},
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "accept_downloads": True,
                 "bypass_csp": True,
                 "ignore_https_errors": True,
