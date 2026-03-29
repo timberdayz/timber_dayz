@@ -89,3 +89,17 @@ def test_validate_work_package_still_recognizes_legacy_txt_files(tmp_path: Path)
 
     assert report["ok"] is True
     assert report["errors"] == []
+
+
+def test_build_pack_manifest_fills_step_name_even_when_note_is_scanned_first(tmp_path: Path):
+    (tmp_path / "01-note.md").write_text("expected=login_success", encoding="utf-8")
+    (tmp_path / "01-open-login-before.md").write_text("before", encoding="utf-8")
+    (tmp_path / "01-open-login-after.md").write_text("after", encoding="utf-8")
+
+    manifest = build_pack_manifest(
+        tmp_path,
+        platform="miaoshou",
+        work_tag="login",
+    )
+
+    assert manifest["steps"][0]["name"] == "open-login"

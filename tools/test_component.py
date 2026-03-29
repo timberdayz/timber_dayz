@@ -15,6 +15,8 @@ import os
 import argparse
 import asyncio
 import json
+import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
@@ -147,6 +149,10 @@ class ComponentTester:
         
         logger.info(f"ComponentTester initialized: platform={platform}")
 
+    def _get_browser_channel(self) -> str:
+        channel = str(os.getenv("PLAYWRIGHT_BROWSER_CHANNEL", "chrome") or "").strip()
+        return channel or "chrome"
+
     def _get_verification_store(self) -> VerificationStateStore:
         storage_path = self.test_dir / "verification_state.json" if self.test_dir else None
         return VerificationStateStore(storage_path=storage_path)
@@ -178,6 +184,42 @@ class ComponentTester:
         if params:
             cfg["params"] = params
         return cfg
+
+    def _persistent_context_mode(self, component_type: str) -> Optional[str]:
+        if component_type == "login":
+            return "ephemeral"
+        if component_type in ["export", "date_picker", "filters"] and not self.skip_login:
+            return "reused"
+        return None
+
+    def _login_readiness_candidates(self, component_name: str) -> List[tuple[str, str]]:
+        base_candidates: List[tuple[str, str]] = [
+            ("input[type='password']", "input[type='password']"),
+            ("input[name*='password' i]", "input[name*='password' i]"),
+            ("button:has-text('登录')", "button:has-text('登录')"),
+            ("button[type='submit']", "button[type='submit']"),
+        ]
+
+        if self.platform == "tiktok":
+            return base_candidates + [
+                ("input[placeholder*='手机号']", "input[placeholder*='手机号']"),
+                ("input[placeholder*='邮箱']", "input[placeholder*='邮箱']"),
+                ("text=使用邮箱登录", "text=使用邮箱登录"),
+                ("text=使用手机号登录", "text=使用手机号登录"),
+                ("input[placeholder*='验证码']", "input[placeholder*='验证码']"),
+                ("button:has-text('确认')", "button:has-text('确认')"),
+            ]
+
+        if self.platform == "shopee":
+            return base_candidates + [
+                ("input[name='loginKey']", "input[name='loginKey']"),
+                ("input[placeholder*='手机号']", "input[placeholder*='手机号']"),
+                ("input[placeholder*='邮箱']", "input[placeholder*='邮箱']"),
+                ("button:has-text('登入')", "button:has-text('登入')"),
+                ("button:has-text('Login')", "button:has-text('Login')"),
+            ]
+
+        return base_candidates
 
     async def _check_login_gate(self, page, result: ComponentTestResult, component_name: str) -> bool:
         from modules.utils.login_status_detector import LoginStatusDetector
@@ -802,7 +844,9 @@ class ComponentTester:
 
         try:
             async with async_playwright() as p:
+                browser_channel = self._get_browser_channel()
                 browser = await p.chromium.launch(
+                    channel=browser_channel,
                     headless=self.headless,
                     args=['--start-maximized'] if not self.headless else []
                 )
@@ -934,15 +978,11 @@ class ComponentTester:
                             await page.wait_for_timeout(800)
                         except Exception as nav_err:
                             logger.warning("Login page pre-navigation failed: %s", nav_err)
-                    # Page readiness: wait for at least one login element
-                    # to be visible before executing login component.
-                    # Uses .first.wait_for instead of to_have_count(1)
-                    # to handle pages with multiple password inputs.
+                    # Page readiness: wait for platform-specific login signals
+                    # before executing the login component itself.
                     _readiness_candidates = [
-                        ("input[type='password']", page.locator("input[type='password']")),
-                        ("input[name*='password' i]", page.locator("input[name*='password' i]")),
-                        ("button:has-text('登录')", page.locator("button:has-text('登录')")),
-                        ("button[type='submit']", page.locator("button[type='submit']")),
+                        (selector_name, page.locator(selector_expr))
+                        for selector_name, selector_expr in self._login_readiness_candidates(component_name)
                     ]
                     _page_ready = False
                     for _cand_name, _cand_loc in _readiness_candidates:
@@ -1225,7 +1265,9 @@ class ComponentTester:
         
         # Phase 12.5: 判断是否需要使用持久化上下文
         component_type = component.get('type', '')
-        use_persistent_context = component_type in ['export', 'date_picker', 'filters'] and not self.skip_login
+        persistent_context_mode = self._persistent_context_mode(component_type)
+        use_persistent_context = persistent_context_mode is not None
+        ephemeral_profile_dir = None
         
         browser = None  # 持久化上下文不直接管理浏览器
         
@@ -1240,23 +1282,31 @@ class ComponentTester:
                 if use_persistent_context:
                     # 使用持久化浏览器上下文（复用登录状态）
                     try:
-                        from modules.utils.sessions.session_manager import SessionManager
                         from modules.utils.sessions.device_fingerprint import DeviceFingerprintManager
-                        
-                        session_manager = SessionManager()
                         fingerprint_manager = DeviceFingerprintManager()
                         
                         # 获取 profile 路径
                         account_id = self.account_id or account_info.get('account_id', 'default')
-                        profile_path = session_manager.get_persistent_profile_path(self.platform, account_id)
+                        if persistent_context_mode == "reused":
+                            from modules.utils.sessions.session_manager import SessionManager
+
+                            session_manager = SessionManager()
+                            profile_path = session_manager.get_persistent_profile_path(self.platform, account_id)
+                            logger.info(f"[PERSISTENT] Using persistent context: {profile_path}")
+                            print(f"  [PERSISTENT] Using persistent session for {self.platform}/{account_id}")
+                        else:
+                            ephemeral_profile_dir = tempfile.mkdtemp(
+                                prefix=f"{self.platform}_{component_type}_",
+                                dir=str(self.output_dir),
+                            )
+                            profile_path = Path(ephemeral_profile_dir)
+                            logger.info(f"[PERSISTENT] Using ephemeral persistent context: {profile_path}")
+                            print(f"  [PERSISTENT] Using ephemeral persistent session for {self.platform}/{account_id}")
                         
                         # 获取指纹配置
                         fingerprint = fingerprint_manager.get_or_create_fingerprint(
                             self.platform, account_id, account_info
                         )
-                        
-                        logger.info(f"[PERSISTENT] Using persistent context: {profile_path}")
-                        print(f"  [PERSISTENT] Using persistent session for {self.platform}/{account_id}")
                         
                         # 构建上下文选项
                         context_options = {
@@ -1269,6 +1319,7 @@ class ComponentTester:
                         # 使用 launch_persistent_context
                         context = await p.chromium.launch_persistent_context(
                             user_data_dir=str(profile_path),
+                            channel=browser_channel,
                             headless=self.headless,
                             args=[
                                 '--no-sandbox',
@@ -1293,6 +1344,7 @@ class ComponentTester:
                         print(f"  [WARN] Persistent context failed, using normal context")
                         # 降级到普通上下文
                         browser = await p.chromium.launch(
+                            channel=browser_channel,
                             headless=self.headless,
                             args=(['--start-maximized'] if not self.headless else []) + ['--disable-blink-features=AutomationControlled']
                         )
@@ -1303,6 +1355,7 @@ class ComponentTester:
                 else:
                     # 普通模式：创建新的浏览器上下文（有头时最大化便于观察）
                     browser = await p.chromium.launch(
+                        channel=browser_channel,
                         headless=self.headless,
                         args=(['--start-maximized'] if not self.headless else []) + ['--disable-blink-features=AutomationControlled']
                     )
@@ -1576,6 +1629,12 @@ class ComponentTester:
             logger.error(f"Browser test failed: {e}", exc_info=True)
             result.error = str(e) if str(e) else type(e).__name__
             return False
+        finally:
+            if ephemeral_profile_dir:
+                try:
+                    shutil.rmtree(ephemeral_profile_dir, ignore_errors=True)
+                except Exception as cleanup_err:
+                    logger.warning(f"Failed to cleanup ephemeral persistent context: {cleanup_err}")
     
     async def _verify_success_criteria(self, page, success_criteria: list) -> bool:
         """

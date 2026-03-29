@@ -242,7 +242,9 @@ def save_test_history_sync(
             step_results=step_results_json,
             error_message=test_result.error,
             tested_by="version_manager",
+            tested_at=datetime.now(timezone.utc),
         )
+        history.tested_at = datetime.now(timezone.utc)
         db.add(history)
         db.commit()
         logger.info(f"Test history saved (sync): {history.test_id}")
@@ -303,6 +305,7 @@ async def save_test_history(
             tested_by="version_manager",  # 来自版本管理页
         )
 
+        history.tested_at = datetime.now(timezone.utc)
         db.add(history)
         await db.commit()
         logger.info(f"Test history saved: {history.test_id}")

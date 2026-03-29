@@ -40,3 +40,13 @@ def test_miaoshou_stable_login_file_does_not_keep_placeholder_success_logic():
 
     assert "returning success placeholder without post-login gate" not in source
     assert 'return LoginResult(success=True, message="ok")' not in source
+
+
+def test_miaoshou_login_component_no_longer_depends_on_legacy_login_form_css():
+    source = Path(
+        "modules/platforms/miaoshou/components/login.py"
+    ).read_text(encoding="utf-8")
+
+    assert "#J_loginRegisterForm" not in source
+    assert "input.account-input" not in source
+    assert "get_by_role(" in source

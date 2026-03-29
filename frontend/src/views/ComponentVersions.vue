@@ -1300,11 +1300,12 @@ const startPollingTestStatus = (testId, versionId) => {
           expiresAt: response.verification_expires_at || ''
         }
         verificationErrorMessage.value = ''
+      } else {
+        verificationRequired.value = null
+        verificationErrorMessage.value = ''
       }
 
       if (response.status === 'completed' || response.status === 'failed') {
-        verificationRequired.value = null
-        verificationErrorMessage.value = ''
         if (response.verification_timeout) {
           ElMessage.warning({ message: '验证码输入超时', duration: 5000 })
         }

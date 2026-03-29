@@ -41,3 +41,11 @@ def test_frontend_eslint_patch_dependency_is_declared():
     package_json = json.loads((FRONTEND_ROOT / "package.json").read_text(encoding="utf-8"))
 
     assert "@rushstack/eslint-patch" in package_json["devDependencies"]
+
+
+def test_component_versions_closes_verification_dialog_after_submission():
+    text = (PROJECT_ROOT / "frontend/src/views/ComponentVersions.vue").read_text(encoding="utf-8")
+
+    assert "verificationRequired.value = null" in text
+    assert "} else {" in text
+    assert "verificationRequired.value = null" in text

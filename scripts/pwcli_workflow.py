@@ -79,6 +79,8 @@ def scan_work_dir(work_dir: Path) -> dict[str, Any]:
                     "screenshots": [],
                 },
             )
+            if not info.get("name"):
+                info["name"] = snapshot_match.group("name")
             info[f"{snapshot_match.group('phase')}_path"] = str(path)
             continue
 
@@ -113,6 +115,8 @@ def scan_work_dir(work_dir: Path) -> dict[str, Any]:
                     "screenshots": [],
                 },
             )
+            if not info.get("name"):
+                info["name"] = screenshot_match.group("name")
             info["screenshots"].append(str(path))
             continue
 
