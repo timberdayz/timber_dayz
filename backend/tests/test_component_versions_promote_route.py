@@ -89,3 +89,37 @@ async def test_promote_to_stable_route_rejects_archive_only_file(monkeypatch):
 
     assert response["success"] is False
     assert db.commit.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_promote_to_stable_invalidates_component_versions_cache():
+    target = ComponentVersion(
+        id=101,
+        component_name="miaoshou/login",
+        version="1.0.2",
+        file_path="modules/platforms/miaoshou/components/login_v1_0_2.py",
+        is_stable=False,
+        is_active=True,
+        is_testing=False,
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    async def _execute(stmt, *args, **kwargs):
+        sql = str(stmt)
+        if "WHERE component_versions.id =" in sql:
+            return _ScalarResult(target)
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+
+    cache_service = MagicMock()
+    cache_service.invalidate = AsyncMock()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(cache_service=cache_service)))
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=_execute)
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    response = await promote_to_stable(version_id=101, db=db, http_request=request)
+
+    assert response["success"] is True
+    cache_service.invalidate.assert_awaited_once_with("component_versions")

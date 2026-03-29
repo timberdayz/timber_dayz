@@ -201,7 +201,7 @@ class ComponentTester:
         return cfg
 
     def _persistent_context_mode(self, component_type: str) -> Optional[str]:
-        if component_type in ["export", "date_picker", "filters"] and not self.skip_login:
+        if component_type in ["login", "export", "date_picker", "filters"] and not self.skip_login:
             return "reused"
         return None
 

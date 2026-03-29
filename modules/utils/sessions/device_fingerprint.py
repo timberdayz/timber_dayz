@@ -266,6 +266,13 @@ class DeviceFingerprintManager:
             logger.error(f"保存设备指纹失败: {e}")
         
         return fingerprint
+
+    def _sanitize_context_headers(self, headers: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        raw = dict(headers or {})
+        allowed: Dict[str, str] = {}
+        if raw.get("Accept-Language"):
+            allowed["Accept-Language"] = str(raw["Accept-Language"])
+        return allowed
     
     def _generate_fingerprint(
         self, 
@@ -331,10 +338,6 @@ class DeviceFingerprintManager:
             "forced_colors": "none",
             "extra_http_headers": {
                 "Accept-Language": accept_language,
-                "Accept-Encoding": "gzip, deflate, br",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-                "Cache-Control": "max-age=0",
-                "Upgrade-Insecure-Requests": "1",
             },
             "permissions": {
                 "geolocation": "denied",
@@ -381,7 +384,9 @@ class DeviceFingerprintManager:
             "color_scheme": fingerprint["color_scheme"],
             "reduced_motion": fingerprint["reduced_motion"],
             "forced_colors": fingerprint["forced_colors"],
-            "extra_http_headers": fingerprint["extra_http_headers"],
+            "extra_http_headers": self._sanitize_context_headers(
+                fingerprint.get("extra_http_headers")
+            ),
             "permissions": list(fingerprint["permissions"].keys()),
             "ignore_https_errors": True,  # 忽略HTTPS错误
             "java_script_enabled": True,

@@ -17,6 +17,7 @@ This repository uses a skill-first workflow.
 - Do not default to `tools/record_component.py`, `tools/launch_inspector_recorder.py`, backend `/recorder` flows, or frontend recorder flows for new component authoring unless the user explicitly asks to inspect or maintain the legacy recorder path.
 - Treat legacy recorder scripts, `/recorder` APIs, and recorder-oriented docs as historical or maintenance-only unless explicitly requested.
 - Primary workflow reference for collection authoring is `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`.
+- Collection testing/runtime environment baseline reference is `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md`.
 
 ## pwcli Command Precedence
 

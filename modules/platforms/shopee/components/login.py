@@ -30,51 +30,67 @@ class ShopeeLogin(LoginComponent):
             return False
         return True
 
+    def _homepage_looks_ready(self, url: str) -> bool:
+        cur = str(url or "").strip().lower()
+        if not cur:
+            return False
+        if not self._login_looks_successful(cur):
+            return False
+        parsed = re.sub(r"#.*$", "", cur)
+        return parsed.startswith("https://seller.shopee.cn/?") and "cnsc_shop_id=" in parsed
+
     def _otp_mode_from_title(self, title: str) -> str | None:
         text = str(title or "").strip()
         if not text:
             return None
-        if "验证电话号码" in text or "发送至您电话" in text or "发送至电话" in text:
+        if (
+            "\u9a8c\u8bc1\u7535\u8bdd\u53f7\u7801" in text
+            or "\u53d1\u9001\u81f3\u60a8\u7535\u8bdd" in text
+            or "\u53d1\u9001\u81f3\u7535\u8bdd" in text
+        ):
             return "phone"
-        if "邮箱验证" in text or "发送至您邮箱" in text or "发送至邮箱" in text:
+        if (
+            "\u90ae\u7bb1\u9a8c\u8bc1" in text
+            or "\u53d1\u9001\u81f3\u60a8\u90ae\u7bb1" in text
+            or "\u53d1\u9001\u81f3\u90ae\u7bb1" in text
+        ):
             return "email"
         return None
 
     def _known_login_error_texts(self) -> tuple[str, ...]:
         return (
-            "账号或密码有误",
-            "账号或密码有误，请检查后重试",
-            "登录失败",
+            "璐﹀彿鎴栧瘑鐮佹湁璇",
+            "璐﹀彿鎴栧瘑鐮佹湁璇紝璇锋鏌ュ悗閲嶈瘯",
+            "鐧诲綍澶辫触",
         )
 
     def _known_otp_error_texts(self) -> tuple[str, ...]:
         return (
-            "验证码填错了",
-            "请填入正确的验证码",
-            "验证码错误",
+            "楠岃瘉鐮佸～閿欎簡",
+            "璇峰～鍏ユ纭殑楠岃瘉鐮",
+            "楠岃瘉鐮侀敊璇",
             "OTP",
         )
 
     def _username_locator(self, page: Any) -> Any:
-        return page.locator('input[placeholder*="子母账号登录名"], input[placeholder*="手机"], input[placeholder*="邮箱"]').first
+        return page.locator(
+            'input[placeholder*="瀛愭瘝璐﹀彿鐧诲綍鍚"], input[placeholder*="鎵嬫満"], input[placeholder*="閭"]'
+        ).first
 
     def _password_locator(self, page: Any) -> Any:
         return page.locator('input[type="password"]').first
 
     def _login_button_locator(self, page: Any) -> Any:
-        return page.get_by_role("button", name=re.compile("登录|登入", re.IGNORECASE)).first
+        return page.get_by_role("button", name=re.compile("鐧诲綍|鐧诲叆", re.IGNORECASE)).first
 
     def _otp_input_locator(self, page: Any) -> Any:
-        return page.locator('input[placeholder*="请输入"]').first
+        return page.locator('input[placeholder*="璇疯緭鍏"]').first
 
     def _otp_confirm_locator(self, page: Any) -> Any:
-        return page.get_by_role("button", name=re.compile("确认", re.IGNORECASE)).first
+        return page.get_by_role("button", name=re.compile("纭", re.IGNORECASE)).first
 
     def _phone_otp_switch_locator(self, page: Any) -> Any:
-        return page.get_by_role("button", name=re.compile("发送至电话", re.IGNORECASE)).first
-
-    def _email_otp_switch_locator(self, page: Any) -> Any:
-        return page.get_by_role("button", name=re.compile("发送至邮箱", re.IGNORECASE)).first
+        return page.get_by_role("button", name=re.compile("鍙戦€佽嚦鐢佃瘽", re.IGNORECASE)).first
 
     async def _locator_is_visible(self, locator: Any, timeout: int = 500) -> bool:
         try:
@@ -100,12 +116,12 @@ class ShopeeLogin(LoginComponent):
 
     async def _otp_mode(self, page: Any) -> str | None:
         texts = (
-            "验证电话号码",
-            "请输入已发送至您电话的OTP码以验证身份",
-            "邮箱验证",
-            "请输入已发送至您邮箱的OTP以验证您的身份",
-            "发送至电话",
-            "发送至邮箱",
+            "楠岃瘉鐢佃瘽鍙风爜",
+            "璇疯緭鍏ュ凡鍙戦€佽嚦鎮ㄧ數璇濈殑OTP鐮佷互楠岃瘉韬唤",
+            "閭楠岃瘉",
+            "璇疯緭鍏ュ凡鍙戦€佽嚦鎮ㄩ偖绠辩殑OTP浠ラ獙璇佹偍鐨勮韩浠",
+            "鍙戦€佽嚦鐢佃瘽",
+            "鍙戦€佽嚦閭",
         )
         for text in texts:
             try:
@@ -172,7 +188,7 @@ class ShopeeLogin(LoginComponent):
         if otp_error:
             return LoginResult(success=False, message=otp_error)
 
-        if self._login_looks_successful(str(getattr(page, "url", "") or "")):
+        if self._homepage_looks_ready(str(getattr(page, "url", "") or "")):
             await self._cleanup_after_login(page)
             return LoginResult(success=True, message="ok")
 
@@ -205,7 +221,7 @@ class ShopeeLogin(LoginComponent):
             await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(800)
 
-            if self._login_looks_successful(str(getattr(page, "url", "") or "")):
+            if self._homepage_looks_ready(str(getattr(page, "url", "") or "")):
                 await self._cleanup_after_login(page)
                 return LoginResult(success=True, message="ok")
 
@@ -217,7 +233,7 @@ class ShopeeLogin(LoginComponent):
             if login_error:
                 return LoginResult(success=False, message=login_error)
 
-            if self._login_looks_successful(str(getattr(page, "url", "") or "")):
+            if self._homepage_looks_ready(str(getattr(page, "url", "") or "")):
                 await self._cleanup_after_login(page)
                 return LoginResult(success=True, message="ok")
 

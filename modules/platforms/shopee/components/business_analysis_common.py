@@ -37,6 +37,19 @@ ALLOWED_PRESETS_BY_DOMAIN: Final[dict[str, list[str]]] = {
 
 ALLOWED_GRANULARITIES: Final[set[str]] = {"daily", "weekly", "monthly"}
 
+PRESET_LABELS: Final[dict[str, str]] = {
+    "today_realtime": "今日实时",
+    "yesterday": "昨天",
+    "last_7_days": "过去7天",
+    "last_30_days": "过去30天",
+}
+
+GRANULARITY_LABELS: Final[dict[str, str]] = {
+    "daily": "按日",
+    "weekly": "按周",
+    "monthly": "按月",
+}
+
 
 def build_domain_path(data_domain: str) -> str:
     normalized = str(data_domain or "").strip().lower()
@@ -85,3 +98,19 @@ def normalize_time_request(data_domain: str, *, time_mode: str, value: str) -> d
         "time_mode": normalized_mode,
         "value": normalized_value,
     }
+
+
+def preset_label(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    try:
+        return PRESET_LABELS[normalized]
+    except KeyError as exc:
+        raise ValueError(f"unsupported preset {value!r}") from exc
+
+
+def granularity_label(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    try:
+        return GRANULARITY_LABELS[normalized]
+    except KeyError as exc:
+        raise ValueError(f"unsupported granularity {value!r}") from exc

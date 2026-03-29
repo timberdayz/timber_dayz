@@ -26,8 +26,18 @@ class MiaoshouDatePicker(DatePickerComponent):
         self.sel = selectors or OrdersSelectors()
 
     async def _open(self, page: Any) -> None:
-        trigger = page.get_by_text("下单时间", exact=False).first
-        await trigger.click(timeout=1500)
+        trigger = None
+        for name in ("开始时间", "结束时间"):
+            try:
+                candidate = page.get_by_role("combobox", name=name).first
+                await candidate.click(timeout=1500)
+                trigger = candidate
+                break
+            except Exception:
+                continue
+        if trigger is None:
+            trigger = page.get_by_text("下单时间", exact=False).first
+            await trigger.click(timeout=1500)
         await self._wait_ready(page)
 
     async def _wait_ready(self, page: Any) -> None:
@@ -76,5 +86,4 @@ class MiaoshouDatePicker(DatePickerComponent):
         button = page.get_by_role("button", name=label).first
         await button.wait_for(state="visible", timeout=5000)
         await button.click(timeout=1000)
-        await page.get_by_role("button", name="确定").first.click(timeout=1000)
         return DatePickResult(success=True, message="ok", option=option)

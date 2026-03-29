@@ -68,3 +68,10 @@ def test_miaoshou_orders_export_source_captures_download_before_menu_click():
     assert "导出全部订单" in source
     assert "正在导出" in source
     assert "await self._click_search(page)" in source
+
+
+def test_miaoshou_orders_export_scopes_orders_subtype_to_platform_row_instead_of_global_text_match():
+    source = Path("modules/platforms/miaoshou/components/orders_export.py").read_text(encoding="utf-8")
+
+    assert 'get_by_text(label, exact=True).first' not in source
+    assert "平台" in source

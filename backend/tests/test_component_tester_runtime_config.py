@@ -46,10 +46,10 @@ def test_component_tester_uses_official_playwright_default_browser():
     assert "channel=browser_channel" not in source
 
 
-def test_component_tester_uses_default_browser_context_for_login():
+def test_component_tester_uses_reused_persistent_context_for_login():
     tester = ComponentTester(platform="tiktok", account_id="acc-1")
 
-    assert tester._persistent_context_mode("login") is None
+    assert tester._persistent_context_mode("login") == "reused"
 
 
 def test_component_tester_uses_reused_persistent_context_for_export():

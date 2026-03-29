@@ -31,10 +31,14 @@ class _FakeLocator:
         self.visible = visible
         self.clicked = False
         self.filled_values: list[str] = []
+        self.children: dict[str, "_FakeLocator"] = {}
 
     @property
     def first(self) -> "_FakeLocator":
         return self
+
+    async def count(self) -> int:
+        return 1 if self.visible else 0
 
     async def is_visible(self, timeout: int | None = None) -> bool:
         return self.visible
@@ -45,6 +49,9 @@ class _FakeLocator:
     async def fill(self, value: str, timeout: int | None = None) -> None:
         self.filled_values.append(value)
 
+    def locator(self, selector: str) -> "_FakeLocator":
+        return self.children.get(selector, _FakeLocator(visible=False))
+
 
 class _FakePage:
     def __init__(self, url: str = "about:blank") -> None:
@@ -52,6 +59,8 @@ class _FakePage:
         self.goto_calls: list[str] = []
         self.timeout_calls: list[int] = []
         self.screenshot_paths: list[str] = []
+        self.text_map: dict[str, _FakeLocator] = {}
+        self.selector_map: dict[str, _FakeLocator] = {}
 
     async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
         self.goto_calls.append(url)
@@ -63,12 +72,30 @@ class _FakePage:
     async def screenshot(self, path: str, timeout: int = 5000) -> None:
         self.screenshot_paths.append(path)
 
+    def locator(self, selector: str) -> _FakeLocator:
+        return self.selector_map.get(selector, _FakeLocator(visible=False))
+
+    def get_by_text(self, text: str, exact: bool = False) -> _FakeLocator:
+        return self.text_map.get(text, _FakeLocator(visible=False))
+
+    def get_by_role(self, role: str, name=None) -> _FakeLocator:
+        key = f"{role}:{name.pattern if hasattr(name, 'pattern') else name}"
+        return self.selector_map.get(key, _FakeLocator(visible=False))
+
 
 def test_shopee_login_success_detection_accepts_homepage_urls() -> None:
     component = ShopeeLogin(_ctx())
 
     assert component._login_looks_successful("https://seller.shopee.cn/?cnsc_shop_id=1") is True
     assert component._login_looks_successful("https://seller.shopee.cn/portal/sale/order") is True
+
+
+def test_shopee_login_homepage_detection_rejects_non_homepage_urls() -> None:
+    component = ShopeeLogin(_ctx())
+
+    assert component._homepage_looks_ready("https://seller.shopee.cn/?cnsc_shop_id=1") is True
+    assert component._homepage_looks_ready("https://seller.shopee.cn/datacenter/home?cnsc_shop_id=1") is False
+    assert component._homepage_looks_ready("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1") is False
 
 
 def test_shopee_login_success_detection_rejects_signin_urls() -> None:
@@ -187,3 +214,24 @@ async def test_shopee_login_resume_with_runtime_otp_reaches_homepage(
     assert result.success is True
     assert result.message == "ok"
     assert cleaned == ["https://seller.shopee.cn/?cnsc_shop_id=1227491331"]
+
+
+@pytest.mark.asyncio
+async def test_shopee_login_fresh_submit_does_not_treat_non_homepage_url_as_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = ShopeeLogin(_ctx())
+    page = _FakePage("about:blank")
+
+    async def _fake_submit(current_page) -> None:
+        current_page.url = "https://seller.shopee.cn/datacenter/home?cnsc_shop_id=1227491331"
+
+    monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_submit_credentials", AsyncMock(side_effect=_fake_submit))
+    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
+
+    result = await component.run(page)
+
+    assert result.success is False
+    assert result.message == "login did not reach homepage or otp step"

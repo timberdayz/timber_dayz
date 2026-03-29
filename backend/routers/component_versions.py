@@ -101,6 +101,32 @@ CANONICAL_COMPONENT_NAMES = {
 }
 
 
+def _derive_python_test_component_name(
+    *,
+    version_component_name: str,
+    logical_component: str,
+    component_path: Path,
+) -> str:
+    """Preserve domain-specific python component names for version-page tests."""
+    normalized_logical = str(logical_component or "").strip()
+    if normalized_logical != "export":
+        return normalized_logical
+
+    version_tail = (
+        version_component_name.split("/")[-1]
+        if "/" in str(version_component_name or "")
+        else str(version_component_name or "")
+    )
+    if str(version_tail or "").endswith("_export"):
+        return version_tail
+
+    stem = component_path.stem
+    if stem.endswith("_export"):
+        return stem
+
+    return normalized_logical
+
+
 def _get_test_verification_store_path(test_dir) -> Path:
     return test_dir / "verification_state.json"
 
@@ -709,7 +735,11 @@ async def stop_ab_test(version_id: int, db: AsyncSession = Depends(get_async_db)
 
 
 @router.post("/{version_id}/promote")
-async def promote_to_stable(version_id: int, db: AsyncSession = Depends(get_async_db)):
+async def promote_to_stable(
+    version_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    http_request: Request = None,
+):
     """提升为稳定版本"""
     try:
         # 获取版本
@@ -767,6 +797,14 @@ async def promote_to_stable(version_id: int, db: AsyncSession = Depends(get_asyn
 
         await db.commit()
         await db.refresh(version)
+
+        if http_request and hasattr(http_request.app.state, "cache_service"):
+            try:
+                cache_service = http_request.app.state.cache_service
+                await cache_service.invalidate("component_versions")
+                logger.debug("[Cache] component_versions invalidated after promote")
+            except Exception as ce:
+                logger.warning(f"[Cache] Failed to invalidate component_versions: {ce}")
 
         logger.info(
             f"Version promoted to stable: {version.component_name} v{version.version}"
@@ -1495,7 +1533,11 @@ async def test_component_version(
             )
         # 使用逻辑组件名（如 login、orders_export），供 component_loader 按类名约定查找；Python 已用 parse_component_name 得到 logical_component
         if is_python_component:
-            component_name = logical_component
+            component_name = _derive_python_test_component_name(
+                version_component_name=version.component_name,
+                logical_component=logical_component,
+                component_path=component_path,
+            )
         else:
             component_name = (
                 version.component_name.split("/")[-1]
