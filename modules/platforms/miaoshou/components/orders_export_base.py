@@ -25,10 +25,11 @@ class CustomDateRange:
     end_time: str = "23:59:59"
 
 
-class MiaoshouOrdersExport(ExportComponent):
+class MiaoshouOrdersExportBase(ExportComponent):
     platform = "miaoshou"
     component_type = "export"
     data_domain = "orders"
+    sub_domain: str | None = None
 
     def __init__(self, ctx: ExecutionContext, selectors: OrdersSelectors | None = None) -> None:
         super().__init__(ctx)
@@ -36,6 +37,10 @@ class MiaoshouOrdersExport(ExportComponent):
         self.navigation_component = MiaoshouNavigation(ctx, self.sel)
         self.date_picker_component = MiaoshouDatePicker(ctx, self.sel)
         self.filters_component = MiaoshouFilters(ctx)
+
+    def _resolved_subtype(self) -> str:
+        cfg = self.ctx.config or {}
+        return str(cfg.get("orders_subtype") or self.sub_domain or "shopee").strip().lower()
 
     def _orders_detail_url(self, subtype: str) -> str:
         subtype_norm = (subtype or "shopee").strip().lower()
@@ -147,13 +152,13 @@ class MiaoshouOrdersExport(ExportComponent):
         progress = page.get_by_role("progressbar").first
         await progress.wait_for(state="visible", timeout=10000)
 
-    async def _wait_export_complete(self, page: Any, download: Any) -> Path:
+    async def _wait_export_complete(self, page: Any, download: Any, *, subtype: str) -> Path:
         try:
             await self._wait_export_progress_ready(page)
         except Exception:
             pass
 
-        out_root = build_standard_output_root(self.ctx, data_type="orders", granularity="manual", subtype="shopee")
+        out_root = build_standard_output_root(self.ctx, data_type="orders", granularity="manual", subtype=subtype)
         out_root.mkdir(parents=True, exist_ok=True)
 
         raw_name = getattr(download, "suggested_filename", None) or "orders.xlsx"
@@ -189,7 +194,10 @@ class MiaoshouOrdersExport(ExportComponent):
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         try:
             cfg = self.ctx.config or {}
-            subtype = str(cfg.get("orders_subtype") or "shopee").strip().lower()
+            subtype = self._resolved_subtype()
+            cfg.setdefault("orders_subtype", subtype)
+            self.ctx.config = cfg
+
             time_selection = cfg.get("time_selection") or {}
             time_mode = str(time_selection.get("mode") or "").strip().lower()
             date_preset = str(time_selection.get("preset") or "").strip()
@@ -240,7 +248,7 @@ class MiaoshouOrdersExport(ExportComponent):
                 await self._click_export_all_orders(page)
             download = await dl_info.value
 
-            target = await self._wait_export_complete(page, download)
+            target = await self._wait_export_complete(page, download, subtype=subtype)
             return self._build_success_result("download complete", str(target))
         except Exception as e:
             return self._build_error_result(str(e))

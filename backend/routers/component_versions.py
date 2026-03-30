@@ -86,7 +86,8 @@ CANONICAL_COMPONENT_FILES = {
         "navigation.py",
         "date_picker.py",
         "export.py",
-        "orders_export.py",
+        "orders_shopee_export.py",
+        "orders_tiktok_export.py",
     },
 }
 

@@ -76,3 +76,15 @@ def test_component_tester_login_readiness_candidates_include_shopee_specific_sig
 
     assert "input[name='loginKey']" in selectors
     assert "button:has-text('登录')" in selectors
+
+
+def test_component_tester_headed_paths_request_start_maximized():
+    source = Path("tools/test_component.py").read_text(encoding="utf-8")
+
+    assert "args=['--start-maximized'] if not self.headless else []" in source
+
+
+def test_component_tester_headed_persistent_context_does_not_force_fixed_viewport():
+    source = Path("tools/test_component.py").read_text(encoding="utf-8")
+
+    assert "'viewport': None if not self.headless else" in source

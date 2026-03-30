@@ -170,7 +170,7 @@ const isManualContinue = computed(
   () => String(props.verificationInputMode || "").toLowerCase() === "manual_continue",
 );
 
-const showScreenshot = computed(() => !isOtp.value || isManualContinue.value);
+const showScreenshot = computed(() => Boolean(props.screenshotUrl));
 
 const instructionTitle = computed(() => {
   if (isManualContinue.value) {

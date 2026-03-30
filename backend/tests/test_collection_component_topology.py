@@ -15,6 +15,8 @@ def test_fixed_slots_are_canonical():
 
 def test_domain_export_files_are_canonical():
     assert is_canonical_component_filename("orders_export.py") is True
+    assert is_canonical_component_filename("orders_shopee_export.py") is True
+    assert is_canonical_component_filename("orders_tiktok_export.py") is True
     assert is_canonical_component_filename("products_export.py") is True
     assert is_canonical_component_filename("services_agent_export.py") is True
 
@@ -37,8 +39,8 @@ def test_legacy_component_filename_detection():
 def test_build_component_name_from_filename():
     assert build_component_name_from_filename("miaoshou", "login.py") == "miaoshou/login"
     assert (
-        build_component_name_from_filename("miaoshou", "orders_export.py")
-        == "miaoshou/orders_export"
+        build_component_name_from_filename("miaoshou", "orders_shopee_export.py")
+        == "miaoshou/orders_shopee_export"
     )
     assert (
         build_component_name_from_filename("tiktok", "services_agent_export.py")

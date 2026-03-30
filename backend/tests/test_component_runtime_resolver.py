@@ -321,6 +321,59 @@ async def test_resolve_task_manifests_supports_domain_scoped_subtypes(component_
 
 
 @pytest.mark.asyncio
+async def test_runtime_resolver_supports_miaoshou_orders_subtypes(component_version_session, tmp_path: Path, monkeypatch):
+    from backend.services.component_runtime_resolver import ComponentRuntimeResolver
+
+    monkeypatch.setattr(
+        "backend.services.component_runtime_resolver.is_active_component_name",
+        lambda name: True,
+    )
+    monkeypatch.setattr(
+        "backend.services.component_name_utils.DATA_DOMAIN_SUB_TYPES",
+        {
+            "orders": ["shopee", "tiktok"],
+        },
+    )
+
+    relative_files = {
+        "miaoshou/login": "modules/platforms/miaoshou/components/login.py",
+        "miaoshou/orders_shopee_export": "modules/platforms/miaoshou/components/orders_shopee_export.py",
+        "miaoshou/orders_tiktok_export": "modules/platforms/miaoshou/components/orders_tiktok_export.py",
+    }
+
+    for relative_path in relative_files.values():
+        target_file = tmp_path / relative_path
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        target_file.write_text("class Dummy:\n    pass\n", encoding="utf-8")
+
+    component_version_session.add_all(
+        [
+            ComponentVersion(
+                component_name=component_name,
+                version="1.0.0",
+                file_path=relative_path,
+                is_stable=True,
+                is_active=True,
+            )
+            for component_name, relative_path in relative_files.items()
+        ]
+    )
+    await component_version_session.commit()
+
+    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    manifests = await resolver.resolve_task_manifests(
+        platform="miaoshou",
+        data_domains=["orders"],
+        domain_subtypes={"orders": ["shopee", "tiktok"]},
+    )
+
+    assert sorted(manifests["exports_by_domain"].keys()) == [
+        "orders:shopee",
+        "orders:tiktok",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_runtime_resolver_rejects_non_active_component_name(component_version_session, tmp_path: Path):
     from backend.services.component_runtime_resolver import (
         ComponentRuntimeResolver,
@@ -360,14 +413,14 @@ async def test_runtime_resolver_rejects_archive_only_stable_file(component_versi
         MissingStableComponentFileError,
     )
 
-    relative_path = "modules/platforms/miaoshou/archive/orders_export_v1_0_0.py"
+    relative_path = "modules/platforms/miaoshou/archive/orders_shopee_export_v1_0_0.py"
     target_file = tmp_path / relative_path
     target_file.parent.mkdir(parents=True, exist_ok=True)
     target_file.write_text("class Dummy:\n    pass\n", encoding="utf-8")
 
     component_version_session.add(
         ComponentVersion(
-            component_name="miaoshou/orders_export",
+            component_name="miaoshou/orders_shopee_export",
             version="1.0.0",
             file_path=relative_path,
             is_stable=True,
@@ -382,5 +435,5 @@ async def test_runtime_resolver_rejects_archive_only_stable_file(component_versi
         await resolver.resolve_export_component(
             platform="miaoshou",
             data_domain="orders",
-            sub_domain=None,
+            sub_domain="shopee",
         )

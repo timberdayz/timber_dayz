@@ -29,6 +29,7 @@ Use this file to adapt those skills to the actual codebase.
 - Active collection component recording and authoring uses `pwcli + playwright skill + agent`.
 - Prefer `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md` over recorder-oriented or Inspector-oriented legacy docs.
 - Prefer `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md` when diagnosing browser/profile/fingerprint/runtime drift issues.
+- Prefer `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md` when converting failed collection tests into `pwcli + agent` debugging tasks.
 - Use `pwcli` to explore pages, collect snapshots, and capture evidence for agent-driven canonical Python components.
 - Do not default to `tools/record_component.py`, `tools/launch_inspector_recorder.py`, backend `/recorder`, or frontend recorder pages for new collection component work unless the user explicitly asks to inspect or maintain the legacy recorder path.
 - Legacy recorder scripts and recorder APIs are maintenance-only, not the primary workflow.

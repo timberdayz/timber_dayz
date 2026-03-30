@@ -105,6 +105,7 @@ V2 椤跺眰姝ｅ紡閲囬泦闃舵鍙 `login -> export`锛宯avigatio
 - `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
 - `docs/guides/RECORDER_PYTHON_OUTPUT.md`
 - `docs/guides/COMPONENT_REUSE_WORKFLOW.md`
+- `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md`
 
 若本文与上述规范冲突，以上述规范为准。
 

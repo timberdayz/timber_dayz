@@ -1350,7 +1350,7 @@ class ComponentTester:
                         
                         # 构建上下文选项
                         context_options = {
-                            'viewport': fingerprint.get('viewport', {'width': 1920, 'height': 1080}),
+                            'viewport': None if not self.headless else fingerprint.get('viewport', {'width': 1920, 'height': 1080}),
                             'user_agent': fingerprint.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'),
                             'locale': fingerprint.get('locale', 'zh-CN'),
                             'timezone_id': fingerprint.get('timezone', 'Asia/Shanghai'),

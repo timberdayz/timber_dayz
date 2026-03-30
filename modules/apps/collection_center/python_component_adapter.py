@@ -49,7 +49,7 @@ DATA_DOMAIN_EXPORT_MAP = {
         "services": "TiktokExport",
     },
     "miaoshou": {
-        "orders": "MiaoshouOrdersExport",
+        "orders": "MiaoshouOrdersShopeeExport",
         "products": "MiaoshouExport",
         "warehouse": "MiaoshouExport",
         "inventory": "MiaoshouExport",
@@ -258,14 +258,27 @@ class PythonComponentAdapter:
             # 获取对应的导出组件类名
             domain_map = DATA_DOMAIN_EXPORT_MAP.get(self.platform, {})
             export_class_name = domain_map.get(data_domain)
-            
+            module_name = f"{data_domain}_export"
+
+            if self.platform == "miaoshou" and data_domain == "orders":
+                subtype = str(
+                    self.config.get("orders_subtype")
+                    or self.config.get("sub_domain")
+                    or "shopee"
+                ).strip().lower()
+                if subtype == "tiktok":
+                    export_class_name = "MiaoshouOrdersTiktokExport"
+                    module_name = "orders_tiktok_export"
+                else:
+                    export_class_name = "MiaoshouOrdersShopeeExport"
+                    module_name = "orders_shopee_export"
+              
             if not export_class_name:
                 return AdapterResult(
                     success=False,
                     message=f"Unknown data domain: {data_domain} for platform {self.platform}"
                 )
-            
-            module_name = f"{data_domain}_export"
+              
             canonical_filename = f"{module_name}.py"
             if not is_canonical_component_filename(canonical_filename):
                 return AdapterResult(

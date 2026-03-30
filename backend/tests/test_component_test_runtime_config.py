@@ -2,6 +2,7 @@ import pytest
 
 from backend.routers.component_versions import _build_component_test_runtime_config
 from backend.schemas.component_version import ComponentTestRequest
+from backend.services.collection_contracts import build_date_range_from_time_selection
 
 
 def test_build_component_test_runtime_config_for_export_services_main_component():
@@ -16,6 +17,10 @@ def test_build_component_test_runtime_config_for_export_services_main_component(
         request, "shopee/services_export"
     )
 
+    normalized_range = build_date_range_from_time_selection(
+        {"mode": "preset", "preset": "last_7_days"}
+    )
+
     assert logical_type == "export"
     assert runtime_config == {
         "data_domain": "services",
@@ -27,10 +32,10 @@ def test_build_component_test_runtime_config_for_export_services_main_component(
             "preset": "last_7_days",
         },
         "date_preset": "last_7_days",
-        "start_date": "2026-03-21",
-        "end_date": "2026-03-27",
-        "date_from": "2026-03-21",
-        "date_to": "2026-03-27",
+        "start_date": normalized_range["start_date"],
+        "end_date": normalized_range["end_date"],
+        "date_from": normalized_range["date_from"],
+        "date_to": normalized_range["date_to"],
     }
 
 
@@ -81,4 +86,4 @@ def test_build_component_test_runtime_config_rejects_custom_without_granularity(
     )
 
     with pytest.raises(ValueError, match="granularity is required for custom"):
-        _build_component_test_runtime_config(request, "miaoshou/orders_export")
+        _build_component_test_runtime_config(request, "miaoshou/orders_shopee_export")

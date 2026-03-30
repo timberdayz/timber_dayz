@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from modules.components.base import ExecutionContext
@@ -64,6 +65,45 @@ class MiaoshouDatePicker(DatePickerComponent):
             pass
         await locator.fill(value, timeout=1500)
 
+    async def _type_range_inputs(self, page: Any, date_range: MiaoshouCustomDateRange) -> bool:
+        start_str = f"{date_range.start_date} {date_range.start_time}"
+        end_str = f"{date_range.end_date} {date_range.end_time}"
+        try:
+            inputs = page.locator(".jx-date-editor--datetimerange input.jx-range-input")
+            if await inputs.count() < 2:
+                inputs = page.locator("input.jx-range-input")
+            if await inputs.count() < 2:
+                return False
+
+            start_input = inputs.nth(0)
+            await start_input.click(timeout=1500)
+            try:
+                await start_input.press("Control+A")
+            except Exception:
+                pass
+            await start_input.fill(start_str, timeout=1500)
+            try:
+                await start_input.press("Enter")
+            except Exception:
+                pass
+            await page.wait_for_timeout(120)
+
+            end_input = inputs.nth(1)
+            await end_input.click(timeout=1500)
+            try:
+                await end_input.press("Control+A")
+            except Exception:
+                pass
+            await end_input.fill(end_str, timeout=1500)
+            try:
+                await end_input.press("Enter")
+            except Exception:
+                pass
+            await page.wait_for_timeout(120)
+            return True
+        except Exception:
+            return False
+
     async def _read_combobox_value(self, page: Any, name: str) -> str:
         locator = page.get_by_role("combobox", name=name).first
         await locator.wait_for(state="visible", timeout=5000)
@@ -81,14 +121,31 @@ class MiaoshouDatePicker(DatePickerComponent):
             pass
         return ""
 
-    async def _wait_custom_range_applied(self, page: Any, date_range: MiaoshouCustomDateRange) -> None:
-        expected_start = f"{date_range.start_date} {date_range.start_time}"
-        expected_end = f"{date_range.end_date} {date_range.end_time}"
+    @staticmethod
+    def _matches_expected_display(actual: str, date_str: str, time_str: str) -> bool:
+        normalized = " ".join((actual or "").split())
+        if not normalized:
+            return False
+        if date_str not in normalized:
+            return False
 
+        variants = {
+            time_str,
+            time_str[:5],
+        }
+        try:
+            variants.add(datetime.strptime(time_str, "%H:%M:%S").strftime("%H:%M"))
+        except Exception:
+            pass
+        return any(part and part in normalized for part in variants)
+
+    async def _wait_custom_range_applied(self, page: Any, date_range: MiaoshouCustomDateRange) -> None:
         for _ in range(10):
             start_value = await self._read_combobox_value(page, "开始时间")
             end_value = await self._read_combobox_value(page, "结束时间")
-            if expected_start in start_value and expected_end in end_value:
+            if self._matches_expected_display(start_value, date_range.start_date, date_range.start_time) and self._matches_expected_display(
+                end_value, date_range.end_date, date_range.end_time
+            ):
                 return
             try:
                 await page.wait_for_timeout(200)
@@ -97,13 +154,22 @@ class MiaoshouDatePicker(DatePickerComponent):
 
         raise RuntimeError("自定义时间范围未正确应用")
 
+    async def _click_confirm_if_visible(self, page: Any) -> None:
+        try:
+            confirm = page.get_by_role("button", name="确定").first
+            await confirm.click(timeout=1000)
+        except Exception:
+            return
+
     async def apply_custom_range(self, page: Any, date_range: MiaoshouCustomDateRange) -> DatePickResult:
         await self._open(page)
-        await self._fill_input_by_name(page, "开始日期", date_range.start_date)
-        await self._fill_input_by_name(page, "开始时间", date_range.start_time)
-        await self._fill_input_by_name(page, "结束日期", date_range.end_date)
-        await self._fill_input_by_name(page, "结束时间", date_range.end_time)
-        await page.get_by_role("button", name="确定").first.click(timeout=1000)
+        used_range_inputs = await self._type_range_inputs(page, date_range)
+        if not used_range_inputs:
+            await self._fill_input_by_name(page, "开始日期", date_range.start_date)
+            await self._fill_input_by_name(page, "开始时间", date_range.start_time)
+            await self._fill_input_by_name(page, "结束日期", date_range.end_date)
+            await self._fill_input_by_name(page, "结束时间", date_range.end_time)
+        await self._click_confirm_if_visible(page)
         await self._wait_custom_range_applied(page, date_range)
         return DatePickResult(success=True, message="ok", option=DateOption.YESTERDAY)
 

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-SOURCE_PATH = Path("modules/platforms/miaoshou/components/orders_export.py")
+SOURCE_PATH = Path("modules/platforms/miaoshou/components/orders_export_base.py")
 
 
 def _source() -> str:

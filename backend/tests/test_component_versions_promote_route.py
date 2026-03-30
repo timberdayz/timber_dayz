@@ -63,9 +63,9 @@ async def test_promote_to_stable_route_works_with_async_session():
 async def test_promote_to_stable_route_rejects_archive_only_file(monkeypatch):
     target = ComponentVersion(
         id=99,
-        component_name="miaoshou/orders_export",
+        component_name="miaoshou/orders_shopee_export",
         version="1.0.0",
-        file_path="modules/platforms/miaoshou/archive/orders_export_v1_0_0.py",
+        file_path="modules/platforms/miaoshou/archive/orders_shopee_export_v1_0_0.py",
         is_stable=False,
         is_active=True,
         is_testing=False,

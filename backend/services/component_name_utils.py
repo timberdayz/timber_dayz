@@ -9,6 +9,7 @@ from typing import Optional, Tuple, List
 
 # 有子类型的数据域
 DATA_DOMAIN_SUB_TYPES = {
+    "orders": ["shopee", "tiktok"],
     "services": ["agent", "ai_assistant"],
 }
 

@@ -419,14 +419,14 @@ async def test_list_versions_defaults_to_active_manifest_components_only(
 
 
 @pytest.mark.asyncio
-async def test_batch_register_includes_miaoshou_orders_export_when_present(
+async def test_batch_register_includes_split_miaoshou_order_exports_when_present(
     component_version_session: AsyncSession,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
         "backend.routers.component_versions.is_active_component_name",
-        lambda name: name in {"miaoshou/login", "miaoshou/orders_export"},
+        lambda name: name in {"miaoshou/login", "miaoshou/orders_shopee_export", "miaoshou/orders_tiktok_export"},
     )
     project_root = tmp_path
     fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
@@ -436,7 +436,8 @@ async def test_batch_register_includes_miaoshou_orders_export_when_present(
 
     miaoshou_dir = project_root / "modules" / "platforms" / "miaoshou" / "components"
     _write_component(miaoshou_dir / "login.py", "MiaoshouLogin", "login")
-    _write_component(miaoshou_dir / "orders_export.py", "MiaoshouOrdersExport", "export")
+    _write_component(miaoshou_dir / "orders_shopee_export.py", "MiaoshouOrdersShopeeExport", "export")
+    _write_component(miaoshou_dir / "orders_tiktok_export.py", "MiaoshouOrdersTiktokExport", "export")
     _write_component(miaoshou_dir / "orders_config.py", "OrdersSelectors", "other")
 
     response = await batch_register_python_components(
@@ -452,7 +453,8 @@ async def test_batch_register_includes_miaoshou_orders_export_when_present(
     assert response.success is True
     assert names == [
         "miaoshou/login",
-        "miaoshou/orders_export",
+        "miaoshou/orders_shopee_export",
+        "miaoshou/orders_tiktok_export",
     ]
 
 
