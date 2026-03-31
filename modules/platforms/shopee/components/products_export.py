@@ -394,6 +394,100 @@ class ShopeeProductsExport(ExportComponent):
         )
         return variants
 
+    async def _current_popup_header_text(self, page: Any) -> str | None:
+        panel = await self._find_date_panel(page)
+        containers = [panel] if panel is not None else [page]
+        selectors = (
+            ".arco-picker-header",
+            ".ant-picker-header",
+            '[class*="picker-header"]',
+            '[class*="calendar-header"]',
+            '[class*="header"]',
+        )
+        for container in containers:
+            for selector in selectors:
+                try:
+                    locator = container.locator(selector).first
+                    if await locator.count() > 0 and await locator.is_visible(timeout=500):
+                        text_content = await locator.text_content()
+                        if text_content and text_content.strip():
+                            return text_content
+                except Exception:
+                    continue
+        return None
+
+    async def _click_popup_nav_button(self, page: Any, direction: str) -> bool:
+        panel = await self._find_date_panel(page)
+        containers = [panel] if panel is not None else [page]
+        selector_map = {
+            "prev": (
+                'button[aria-label*="previous"]',
+                'button[aria-label*="prev"]',
+                '[class*="prev"]',
+                '[class*="left"]',
+            ),
+            "next": (
+                'button[aria-label*="next"]',
+                '[class*="next"]',
+                '[class*="right"]',
+            ),
+        }
+        for container in containers:
+            for selector in selector_map.get(direction, ()):
+                try:
+                    locator = container.locator(selector).first
+                    if await locator.count() > 0 and await locator.is_visible(timeout=500):
+                        await locator.click(timeout=5000)
+                        if hasattr(page, "wait_for_timeout"):
+                            await page.wait_for_timeout(250)
+                        return True
+                except Exception:
+                    continue
+        return False
+
+    async def _navigate_month_panel_to_year(self, page: Any, target_year: int) -> bool:
+        for _ in range(8):
+            header_text = await self._current_popup_header_text(page)
+            if header_text and str(target_year) in header_text:
+                return True
+            current_year_match = re.search(r"(20\d{2})", header_text or "")
+            if current_year_match:
+                current_year = int(current_year_match.group(1))
+                direction = "next" if current_year < target_year else "prev"
+            else:
+                direction = "prev"
+            if not await self._click_popup_nav_button(page, direction):
+                return False
+        header_text = await self._current_popup_header_text(page)
+        return bool(header_text and str(target_year) in header_text)
+
+    async def _navigate_calendar_panel_to_month(self, page: Any, target_year: int, target_month: int) -> bool:
+        target_signatures = (
+            f"{target_year}.{target_month:02d}",
+            f"{target_year}-{target_month:02d}",
+            f"{target_year}\u5e74{target_month}\u6708",
+            f"{target_month}\u6708{target_year}",
+            f"{target_year} {target_month}",
+        )
+        normalized_signatures = tuple(self._normalize_date_text(signature) for signature in target_signatures)
+        for _ in range(12):
+            header_text = await self._current_popup_header_text(page)
+            normalized_header = self._normalize_date_text(header_text)
+            if normalized_header and any(signature in normalized_header for signature in normalized_signatures):
+                return True
+
+            current_year_match = re.search(r"(20\d{2})", header_text or "")
+            current_month_match = re.search(r"(\d{1,2})\s*\u6708", header_text or "")
+            if current_year_match and current_month_match:
+                current_year = int(current_year_match.group(1))
+                current_month = int(current_month_match.group(1))
+                direction = "next" if (current_year, current_month) < (target_year, target_month) else "prev"
+            else:
+                direction = "prev"
+            if not await self._click_popup_nav_button(page, direction):
+                return False
+        return False
+
     async def _current_date_summary_text(self, page: Any) -> str | None:
         trigger = await self._find_date_picker_trigger(page)
         if trigger is None:
@@ -760,7 +854,42 @@ class ShopeeProductsExport(ExportComponent):
                 continue
         return False
 
+    async def _select_calendar_day(self, page: Any, day: int) -> bool:
+        day_candidates = (str(day), f"{day:02d}")
+        panel = await self._find_date_panel(page)
+        containers = [panel] if panel is not None else [page]
+        for container in containers:
+            for candidate in day_candidates:
+                try:
+                    matches = container.get_by_text(candidate, exact=True)
+                    locators = []
+                    if hasattr(matches, "last"):
+                        locators.append(matches.last)
+                    if hasattr(matches, "first"):
+                        locators.append(matches.first)
+                    else:
+                        locators.append(matches)
+                    for locator in locators:
+                        if locator is None:
+                            continue
+                        if await locator.is_visible(timeout=1000):
+                            await locator.click(timeout=5000)
+                            if hasattr(page, "wait_for_timeout"):
+                                await page.wait_for_timeout(300)
+                            return True
+                except Exception:
+                    continue
+        return False
+
     async def _select_month_value(self, page: Any, iso_date: str) -> bool:
+        try:
+            target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
+        except ValueError:
+            return False
+
+        if not await self._navigate_month_panel_to_year(page, target_date.year):
+            return False
+
         for candidate in self._month_label_candidates(iso_date):
             clicked = await self._click_text_option(page, candidate)
             if clicked:
@@ -768,6 +897,17 @@ class ShopeeProductsExport(ExportComponent):
         return False
 
     async def _select_week_range_value(self, page: Any, start_date: str, end_date: str) -> bool:
+        try:
+            end_value = datetime.strptime(str(end_date), "%Y-%m-%d")
+        except ValueError:
+            return False
+
+        if not await self._navigate_calendar_panel_to_month(page, end_value.year, end_value.month):
+            return False
+
+        if await self._select_calendar_day(page, end_value.day):
+            return True
+
         for candidate in self._week_range_label_candidates(start_date, end_date):
             clicked = await self._click_text_option(page, candidate)
             if clicked:
@@ -779,6 +919,8 @@ class ShopeeProductsExport(ExportComponent):
             clicked = await self._click_text_option(page, candidate)
             if not clicked:
                 continue
+            if await self._select_calendar_day(page, end_value.day):
+                return True
             for range_candidate in self._week_range_label_candidates(start_date, end_date):
                 if await self._click_text_option(page, range_candidate):
                     return True

@@ -41,11 +41,38 @@ class TiktokProductsExport(ExportComponent):
             return False
         return "/compass/product-analysis" in current
 
+    def _is_homepage(self, url: str) -> bool:
+        current = str(url or "").strip().lower()
+        if not current:
+            return False
+        return "/homepage" in current
+
     def _is_login_page(self, url: str) -> bool:
         current = str(url or "").strip().lower()
         if not current:
             return False
         return "/account/login" in current
+
+    async def _locator_is_visible(self, locator: Any, timeout: int = 500) -> bool:
+        try:
+            return bool(await locator.is_visible(timeout=timeout))
+        except Exception:
+            return False
+
+    async def _login_surface_looks_ready(self, page: Any) -> bool:
+        probes = (
+            page.locator("input[type='password']").first,
+            page.locator("input[type='tel']").first,
+            page.locator("input[type='email']").first,
+            page.locator("input[placeholder*='手机号']").first,
+            page.locator("input[placeholder*='邮箱']").first,
+            page.get_by_text("使用邮箱登录", exact=False).first,
+            page.get_by_text("使用手机号登录", exact=False).first,
+        )
+        for probe in probes:
+            if await self._locator_is_visible(probe, timeout=300):
+                return True
+        return False
 
     def _products_page_url(self, region: str) -> str:
         return f"https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region={region}"
@@ -81,11 +108,37 @@ class TiktokProductsExport(ExportComponent):
     async def _run_export(self, page: Any):
         return await TiktokExport(self.ctx).run(page, mode=ExportMode.STANDARD)
 
+    async def _wait_for_entry_state(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 15000,
+        poll_ms: int = 500,
+    ) -> str:
+        elapsed = 0
+        while elapsed <= timeout_ms:
+            current_url = str(getattr(page, "url", "") or "")
+            if self._products_page_looks_ready(current_url):
+                return "products"
+            if self._is_homepage(current_url):
+                return "homepage"
+            if self._is_login_page(current_url) and await self._login_surface_looks_ready(page):
+                return "login"
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            elapsed += poll_ms
+        return "unknown"
+
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
+        entry_state = await self._wait_for_entry_state(page)
         current_url = str(getattr(page, "url", "") or "")
+
+        if entry_state == "login":
+            return ExportResult(success=False, message="login required before products export", file_path=None)
+
         region = self._target_region() or self._target_region_from_page_url(current_url)
 
-        if not self._products_page_looks_ready(current_url):
+        if entry_state != "products":
             target_url = self._products_page_url(region) if region else self._generic_products_page_url()
             await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             if hasattr(page, "wait_for_timeout"):

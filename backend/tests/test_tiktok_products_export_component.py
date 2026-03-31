@@ -30,6 +30,8 @@ class _FakePage:
         self.goto_calls: list[str] = []
         self.wait_calls: list[int] = []
         self.redirect_to_login = False
+        self.visible_selectors: set[str] = set()
+        self.visible_texts: set[str] = set()
 
     async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
         self.goto_calls.append(url)
@@ -40,6 +42,31 @@ class _FakePage:
 
     async def wait_for_timeout(self, ms: int) -> None:
         self.wait_calls.append(ms)
+
+    def locator(self, selector: str):
+        return _FakeLocator(visible=selector in self.visible_selectors)
+
+    def get_by_text(self, text: str, exact: bool = False):
+        return _FakeLocator(visible=text in self.visible_texts)
+
+    def get_by_role(self, role: str, name=None):
+        key = f"{role}:{name.pattern if hasattr(name, 'pattern') else name}"
+        return _FakeLocator(visible=key in self.visible_selectors)
+
+
+class _FakeLocator:
+    def __init__(self, *, visible: bool = False) -> None:
+        self._visible = visible
+
+    @property
+    def first(self):
+        return self
+
+    async def is_visible(self, timeout: int | None = None) -> bool:
+        return self._visible
+
+    async def count(self) -> int:
+        return 1 if self._visible else 0
 
 
 def test_tiktok_products_export_detects_products_page_url() -> None:
@@ -108,6 +135,59 @@ async def test_tiktok_products_export_navigates_to_products_page_and_runs_helper
     export_mock.assert_awaited_once()
     assert result.success is True
     assert result.file_path == "temp/products.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_returns_login_required_when_entry_state_is_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
+    page.visible_selectors.add("input[type='password']")
+    component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
+
+    switch_mock = AsyncMock()
+    date_mock = AsyncMock()
+    export_mock = AsyncMock()
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    assert result.success is False
+    assert result.message == "login required before products export"
+    assert page.goto_calls == []
+    switch_mock.assert_not_awaited()
+    date_mock.assert_not_awaited()
+    export_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_does_not_treat_blank_login_shell_as_stable_login_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/account/login")
+    component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "weekly"}))
+
+    async def _advance_page(ms: int) -> None:
+        page.wait_calls.append(ms)
+        if len(page.wait_calls) >= 2:
+            page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_7_DAYS))
+    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
+
+    monkeypatch.setattr(page, "wait_for_timeout", _advance_page)
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    assert len(page.wait_calls) >= 2
+    assert result.success is True
 
 
 @pytest.mark.asyncio
@@ -183,6 +263,36 @@ async def test_tiktok_products_export_returns_clear_error_when_products_deep_lin
     switch_mock.assert_not_awaited()
     date_mock.assert_not_awaited()
     export_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_waits_for_entry_state_to_settle_before_branching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("about:blank")
+    component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "weekly"}))
+
+    async def _advance_page(ms: int) -> None:
+        page.wait_calls.append(ms)
+        if len(page.wait_calls) >= 2:
+            page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_7_DAYS))
+    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
+
+    monkeypatch.setattr(page, "wait_for_timeout", _advance_page)
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    assert len(page.wait_calls) >= 2
+    assert page.goto_calls == [
+        "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG"
+    ]
+    assert result.success is True
 
 
 @pytest.mark.asyncio
