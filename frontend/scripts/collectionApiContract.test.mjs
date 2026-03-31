@@ -15,6 +15,8 @@ const apiPath = path.resolve(__dirname, '../src/api/collection.js')
 const apiSource = fs.readFileSync(apiPath, 'utf8')
 const viewPath = path.resolve(__dirname, '../src/views/collection/CollectionConfig.vue')
 const viewSource = fs.readFileSync(viewPath, 'utf8')
+const tasksViewPath = path.resolve(__dirname, '../src/views/collection/CollectionTasks.vue')
+const tasksViewSource = fs.readFileSync(tasksViewPath, 'utf8')
 
 test('collection api default export exposes getTaskScreenshotUrl', () => {
   assert.equal(
@@ -105,5 +107,43 @@ test('CollectionConfig exposes explicit granularity control for custom time sele
     viewSource.includes('v-for="option in availableDomainOptions"'),
     true,
     'data domain options should come from the platform-aware domain list'
+  )
+
+  assert.equal(
+    viewSource.includes('label="执行模式"'),
+    true,
+    'config page should expose execution mode selection'
+  )
+})
+
+test('CollectionConfig hands execution off to CollectionTasks after creating tasks', () => {
+  assert.equal(
+    viewSource.includes("useRouter"),
+    true,
+    'config page should use router navigation for task handoff'
+  )
+
+  assert.equal(
+    viewSource.includes("name: 'CollectionTasks'"),
+    true,
+    'config execution should navigate to the CollectionTasks route'
+  )
+
+  assert.equal(
+    viewSource.includes('task_ids'),
+    true,
+    'config execution should pass created task ids to the task page'
+  )
+
+  assert.equal(
+    tasksViewSource.includes('useRoute'),
+    true,
+    'task page should read route query filters from config handoff'
+  )
+
+  assert.equal(
+    tasksViewSource.includes('task_ids'),
+    true,
+    'task page should consume task_ids from route query'
   )
 })

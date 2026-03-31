@@ -149,14 +149,6 @@
       <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">
           <el-button 
-            v-if="row.status === 'failed'"
-            size="small" 
-            type="primary"
-            @click="retryTask(row)"
-          >
-            重试
-          </el-button>
-          <el-button 
             size="small"
             @click="showDetails(row)"
           >
@@ -260,13 +252,6 @@
 
       <template #footer>
         <el-button @click="detailDialogVisible = false">关闭</el-button>
-        <el-button 
-          v-if="currentTask?.status === 'failed'"
-          type="primary" 
-          @click="retryTask(currentTask)"
-        >
-          重试任务
-        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -337,16 +322,6 @@ const loadStats = async () => {
 const showDetails = (row) => {
   currentTask.value = row
   detailDialogVisible.value = true
-}
-
-const retryTask = async (row) => {
-  try {
-    await collectionApi.retryTask(row.task_id)
-    ElMessage.success('已创建重试任务')
-    detailDialogVisible.value = false
-  } catch (error) {
-    ElMessage.error('重试失败: ' + error.message)
-  }
 }
 
 const exportHistory = () => {

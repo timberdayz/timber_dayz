@@ -134,6 +134,54 @@
       </div>
     </el-alert>
 
+    <div v-if="pendingVerificationItems.length" class="pending-verification-panel">
+      <div class="section-header">
+        <h3>待处理队列</h3>
+      </div>
+      <div class="verification-summary">
+        <div class="verification-summary-card">
+          <div class="summary-value">{{ verificationSummary.total }}</div>
+          <div class="summary-label">待处理总数</div>
+        </div>
+        <div class="verification-summary-card">
+          <div class="summary-value">{{ verificationSummary.graphical }}</div>
+          <div class="summary-label">验证码</div>
+        </div>
+        <div class="verification-summary-card">
+          <div class="summary-value">{{ verificationSummary.manual }}</div>
+          <div class="summary-label">人工处理</div>
+        </div>
+      </div>
+      <div class="pending-verification-list">
+        <div
+          v-for="item in pendingVerificationItems"
+          :key="item.task_id"
+          class="pending-verification-item"
+        >
+          <div class="pending-verification-meta">
+            <el-tag :type="getPlatformTagType(item.platform)" size="small">
+              {{ item.platform }}
+            </el-tag>
+            <span>{{ item.account || item.account_id }}</span>
+            <span>{{ item.task_id?.slice(0, 8) }}...</span>
+            <span>{{ getStatusLabel(item.status) }}</span>
+            <span>{{ item.verification_message || item.current_step || '等待处理' }}</span>
+          </div>
+          <div class="pending-verification-actions">
+            <el-button size="small" @click="copyTaskId(item.task_id)">
+              复制任务ID
+            </el-button>
+            <el-button size="small" @click="focusTaskRow(item.task_id)">
+              定位任务
+            </el-button>
+            <el-button size="small" type="primary" @click="showResumeDialog(item)">
+              立即处理
+            </el-button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 任务列表 -->
     <div class="tasks-section">
       <div class="section-header">
@@ -152,9 +200,12 @@
         </div>
       </div>
 
-      <el-table 
+      <el-table
+        ref="taskTableRef"
         v-loading="loading" 
         :data="tasks" 
+        :row-key="row => row.task_id"
+        :row-class-name="getTaskRowClassName"
         stripe
       >
         <el-table-column label="任务ID" width="120">
@@ -360,52 +411,32 @@
       </div>
     </el-dialog>
 
-    <!-- 验证码/OTP 对话框：与后端 verification_type、verification_screenshot 对接 -->
-    <el-dialog 
-      v-model="verificationDialogVisible" 
-      :title="verificationType === 'otp' ? '需要短信/邮箱验证码' : (verificationInputMode === 'manual_continue' ? '需要人工验证' : '需要验证码')"
-      width="500px"
-      :close-on-click-modal="false"
-    >
-      <div class="verification-content">
-        <el-alert 
-          type="warning" 
-          :closable="false"
-          :title="verificationType === 'otp' ? '任务需要输入短信或邮箱验证码(OTP)才能继续' : (verificationInputMode === 'manual_continue' ? '请在当前有头浏览器中完成滑块或人工验证后点击继续' : '任务需要验证码才能继续')"
-        />
-        <img 
-          v-if="verificationScreenshotUrl" 
-          :src="verificationScreenshotUrl" 
-          class="verification-screenshot"
-        />
-        <el-form v-if="verificationInputMode !== 'manual_continue'">
-          <el-form-item :label="verificationType === 'otp' ? '验证码(OTP)' : '验证码'">
-            <el-input 
-              v-model="verificationCode" 
-              :placeholder="verificationType === 'otp' ? '请输入短信/邮箱验证码' : '请输入验证码'"
-            />
-          </el-form-item>
-        </el-form>
-        <div v-else class="slider-tip">
-          请在当前有头浏览器中手动完成滑块或人工验证，完成后点击下方“我已完成验证，继续”。
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="skipVerification">取消</el-button>
-        <el-button type="primary" @click="submitVerification">
-          {{ verificationInputMode === 'manual_continue' ? '我已完成验证，继续' : '提交' }}
-        </el-button>
-      </template>
-    </el-dialog>
+    <VerificationResumeDialog
+      :visible="verificationDialogVisible"
+      :verification-type="verificationType"
+      :verification-input-mode="verificationInputMode"
+      :screenshot-url="verificationScreenshotUrl"
+      :submitting="false"
+      :message="currentTask?.verification_message || currentTask?.current_step || ''"
+      :error-message="''"
+      title="任务验证码回填"
+      subtitle="当前采集任务已暂停，请先完成验证或人工处理后继续。"
+      submit-text="提交并继续"
+      cancel-text="取消任务"
+      @submit="submitVerification"
+      @cancel="skipVerification"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CaretRight, Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
 import PageHeader from '@/components/common/PageHeader.vue'
+import VerificationResumeDialog from '@/components/verification/VerificationResumeDialog.vue'
 import {
   buildTimeSelectionPayload,
   getDatePresetLabel,
@@ -413,11 +444,14 @@ import {
   getSubtypeOptions
 } from '@/constants/collection'
 
+const route = useRoute()
+
 // 状态
 const loading = ref(false)
 const accountsLoading = ref(false)
 const creating = ref(false)
 const tasks = ref([])
+const verificationItems = ref([])
 const accounts = ref([])
 const taskLogs = ref([])
 const statusFilter = ref('')
@@ -426,6 +460,8 @@ const detailDrawerVisible = ref(false)
 const detailTask = ref(null)
 const detailLogs = ref([])
 const detailLogsLoading = ref(false)
+const taskTableRef = ref(null)
+const highlightedTaskId = ref('')
 const verificationDialogVisible = ref(false)
 const verificationScreenshot = ref('')
 const verificationScreenshotUrl = ref('')
@@ -465,6 +501,20 @@ const filteredAccounts = computed(() => {
 const selectedSubtypeDomains = computed(() =>
   getSelectedSubtypeDomains(quickForm.data_domains)
 )
+
+const pendingVerificationItems = computed(() => verificationItems.value || [])
+
+const verificationSummary = computed(() => {
+  const items = pendingVerificationItems.value
+  return {
+    total: items.length,
+    graphical: items.filter((item) => String(item.verification_type || '').toLowerCase() !== 'manual_intervention').length,
+    manual: items.filter((item) => String(item.verification_type || '').toLowerCase() === 'manual_intervention').length,
+  }
+})
+
+const isLegacyVerificationStatus = (task) =>
+  ['verification_required', 'paused'].includes(task.status) && task.verification_type
 
 watch(
   () => [...quickForm.data_domains],
@@ -516,6 +566,14 @@ const loadTasks = async () => {
     if (statusFilter.value) params.status = statusFilter.value
     
     tasks.value = await collectionApi.getTasks(params)
+    verificationItems.value = await collectionApi.getVerificationItems()
+    if (route.query.task_ids) {
+      const taskIds = String(route.query.task_ids).split(',').filter(Boolean)
+      const matchedTask = tasks.value.find((task) => taskIds.includes(task.task_id))
+      if (matchedTask) {
+        await focusTaskRow(matchedTask.task_id)
+      }
+    }
     syncVerificationDialogFromTasks(tasks.value)
     
     // 为运行中的任务建立WebSocket连接
@@ -532,7 +590,8 @@ const loadTasks = async () => {
 
 const syncVerificationDialogFromTasks = (taskList) => {
   const verificationTask = (taskList || []).find(
-    (task) => ['verification_required', 'paused'].includes(task.status) && task.verification_type
+    (task) => isLegacyVerificationStatus(task)
+      || (task.status === 'manual_intervention_required' && task.verification_type)
   )
   if (!verificationTask) {
     return
@@ -543,6 +602,29 @@ const syncVerificationDialogFromTasks = (taskList) => {
   }
 
   showResumeDialog(verificationTask)
+}
+
+const copyTaskId = async (taskId) => {
+  const value = String(taskId || '').trim()
+  if (!value) return
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value)
+    }
+    ElMessage.success('任务ID已复制')
+  } catch (error) {
+    ElMessage.error('复制失败: ' + (error.message || '未知错误'))
+  }
+}
+
+const getTaskRowClassName = ({ row }) =>
+  row?.task_id && row.task_id === highlightedTaskId.value ? 'task-row-highlight' : ''
+
+const focusTaskRow = async (taskId) => {
+  highlightedTaskId.value = taskId
+  await nextTick()
+  const row = document.querySelector('.task-row-highlight')
+  row?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
 }
 
 const loadAccounts = async () => {
@@ -965,6 +1047,78 @@ onUnmounted(() => {
   background: white;
   border-radius: 12px;
   padding: 20px;
+}
+
+.pending-verification-panel {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: #fff7e6;
+  border: 1px solid #f5d19a;
+  border-radius: 12px;
+}
+
+.pending-verification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.verification-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.verification-summary-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #f2e3c2;
+}
+
+.summary-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #303133;
+  line-height: 1.2;
+}
+
+.summary-label {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.pending-verification-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #f2e3c2;
+  border-radius: 10px;
+}
+
+.pending-verification-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.pending-verification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+:deep(.task-row-highlight) {
+  --el-table-tr-bg-color: #fff7e6;
 }
 
 .section-header {

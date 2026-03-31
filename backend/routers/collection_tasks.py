@@ -208,7 +208,7 @@ def _build_task_response_payload(task: CollectionTask) -> dict:
 
 
 def _build_task_verification_item(task: CollectionTask) -> Optional[dict]:
-    if getattr(task, "status", None) not in ("verification_required", "paused") or not getattr(
+    if getattr(task, "status", None) not in ("verification_required", "paused", "manual_intervention_required") or not getattr(
         task, "verification_type", None
     ):
         return None
@@ -415,7 +415,7 @@ async def list_verification_items(
     if account_id:
         stmt = stmt.where(CollectionTask.account == account_id)
     if status == "verification_required":
-        stmt = stmt.where(CollectionTask.status.in_(["verification_required", "paused"]))
+        stmt = stmt.where(CollectionTask.status.in_(["verification_required", "paused", "manual_intervention_required"]))
     elif status:
         stmt = stmt.where(CollectionTask.status == status)
 
