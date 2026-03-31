@@ -95,6 +95,15 @@ class ComponentTestResult:
     phase_component_version: str = None  # 如 1.0.0
 
 
+class HeadfulLoginFallbackRequired(Exception):
+    """Signal that login must be retried in a headed browser for manual completion."""
+
+    def __init__(self, verification_type: str, screenshot_path: Optional[str] = None):
+        self.verification_type = verification_type
+        self.screenshot_path = screenshot_path
+        super().__init__(f"Headful login fallback required: {verification_type}")
+
+
 class ComponentTester:
     """
     组件测试器
@@ -268,20 +277,20 @@ class ComponentTester:
         account = account_info or {}
         account_id = str(self.account_id or account.get("account_id") or "").strip()
         if not account_id:
-            return False
+            return False, context, page
 
         try:
             storage_state = await context.storage_state()
         except Exception as e:
             logger.warning("Failed to read context storage_state for %s/%s: %s", self.platform, account_id, e)
-            return False
+            return False, context, page
 
         try:
             from modules.apps.collection_center.executor_v2 import _save_session_async
             return await _save_session_async(self.platform, account_id, storage_state)
         except Exception as e:
             logger.warning("Failed to save session for %s/%s: %s", self.platform, account_id, e)
-            return False
+            return False, context, page
 
     async def _check_login_gate(self, page, result: ComponentTestResult, component_name: str) -> bool:
         from modules.utils.login_status_detector import LoginStatusDetector
@@ -630,6 +639,8 @@ class ComponentTester:
         page,
         component_name: str,
         result: ComponentTestResult,
+        *,
+        allow_headful_fallback: bool = True,
     ):
         """执行登录并支持验证码暂停与回传：捕获 VerificationRequiredError 后写 progress、轮询 verification_response.json、同 page 填入继续。"""
         from modules.apps.collection_center.executor_v2 import VerificationRequiredError
@@ -642,6 +653,13 @@ class ComponentTester:
         except VerificationRequiredError as e:
             verification_type = (e.verification_type or "graphical_captcha").strip().lower()
             screenshot_path = e.screenshot_path
+
+            if (
+                allow_headful_fallback
+                and self.headless
+                and verification_input_mode(verification_type) == "manual_continue"
+            ):
+                raise HeadfulLoginFallbackRequired(verification_type, screenshot_path)
 
             # 确保截图在 test_dir 内，便于后端 GET verification-screenshot 读取
             verification_screenshot = "verification_screenshot.png"
@@ -761,6 +779,154 @@ class ComponentTester:
                 )
             return login_result
 
+    async def _build_component_browser_context_options(
+        self,
+        *,
+        account_id: str,
+        account_info: Dict[str, Any],
+        storage_state: Optional[Dict[str, Any]] = None,
+        headless: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        context_options: Dict[str, Any] = {}
+        if account_id:
+            try:
+                from modules.apps.collection_center.executor_v2 import (
+                    _build_playwright_context_options_from_fingerprint,
+                    _get_fingerprint_context_options_async,
+                )
+
+                fp_options = await _get_fingerprint_context_options_async(
+                    self.platform,
+                    account_id,
+                    account_info,
+                )
+                context_options = _build_playwright_context_options_from_fingerprint(fp_options)
+            except Exception as e:
+                logger.warning("Fingerprint load failed for component browser context: %s", e)
+
+        context_options.setdefault("accept_downloads", True)
+        if storage_state:
+            context_options["storage_state"] = storage_state
+        if not context_options.get("viewport"):
+            effective_headless = self.headless if headless is None else headless
+            context_options["viewport"] = (
+                None if not effective_headless else {"width": 1920, "height": 1080}
+            )
+        if "locale" not in context_options:
+            context_options["locale"] = "zh-CN"
+        return context_options
+
+    async def _recreate_context_with_saved_session(
+        self,
+        *,
+        browser,
+        old_context,
+        account_info: Dict[str, Any],
+    ):
+        account_id = str(self.account_id or account_info.get("account_id") or "").strip()
+        storage_state = None
+        if account_id:
+            try:
+                from modules.apps.collection_center.executor_v2 import _load_or_bootstrap_session_async
+
+                session_data = await _load_or_bootstrap_session_async(
+                    self.platform,
+                    account_id,
+                    account_info,
+                    max_age_days=30,
+                )
+                if session_data and isinstance(session_data.get("storage_state"), dict):
+                    storage_state = session_data["storage_state"]
+            except Exception as e:
+                logger.warning("Reload saved session failed for %s/%s: %s", self.platform, account_id, e)
+
+        context_options = await self._build_component_browser_context_options(
+            account_id=account_id,
+            account_info=account_info,
+            storage_state=storage_state,
+            headless=self.headless,
+        )
+
+        try:
+            await old_context.close()
+        except Exception as e:
+            logger.debug("Close old context before session recreation failed: %s", e)
+
+        new_context = await browser.new_context(**context_options)
+        new_page = await new_context.new_page()
+        await self._prime_page_for_login_gate(new_page, account_info)
+        return new_context, new_page
+
+    async def _run_headful_login_fallback(
+        self,
+        *,
+        browser,
+        old_context,
+        account_info: Dict[str, Any],
+        login_class,
+        component_name: str,
+        result: ComponentTestResult,
+    ):
+        from playwright.async_api import async_playwright
+        from modules.apps.collection_center.python_component_adapter import create_adapter
+
+        account_id = str(self.account_id or account_info.get("account_id") or "").strip()
+        adapter_config = self._build_runtime_component_config()
+        if self.test_dir:
+            adapter_config.setdefault("task", {})["screenshot_dir"] = str(self.test_dir)
+
+        async with async_playwright() as playwright:
+            headed_browser = await playwright.chromium.launch(
+                **self._build_browser_launch_kwargs(
+                    headless=False,
+                    args=["--start-maximized"],
+                )
+            )
+            try:
+                context_options = await self._build_component_browser_context_options(
+                    account_id=account_id,
+                    account_info=account_info,
+                    storage_state=None,
+                    headless=False,
+                )
+                headed_context = await headed_browser.new_context(**context_options)
+                try:
+                    headed_page = await headed_context.new_page()
+                    adapter = create_adapter(
+                        platform=self.platform,
+                        account=account_info,
+                        config=adapter_config,
+                        step_callback=self.progress_callback,
+                        is_test_mode=True,
+                        override_login_class=login_class,
+                    )
+
+                    exec_result = await self._run_login_with_verification_support(
+                        adapter=adapter,
+                        page=headed_page,
+                        component_name=component_name,
+                        result=result,
+                        allow_headful_fallback=False,
+                    )
+                    if not exec_result.success:
+                        return False, old_context, None
+
+                    await self._save_context_session(headed_context, account_info)
+                finally:
+                    await headed_context.close()
+            finally:
+                await headed_browser.close()
+
+        if browser is None:
+            return False, old_context, None
+
+        new_context, new_page = await self._recreate_context_with_saved_session(
+            browser=browser,
+            old_context=old_context,
+            account_info=account_info,
+        )
+        return True, new_context, new_page
+
     async def _run_login_before_non_login(
         self,
         browser,
@@ -768,7 +934,7 @@ class ComponentTester:
         page,
         account_info: Dict[str, Any],
         result: ComponentTestResult,
-    ) -> bool:
+    ):
         """
         1.6: 非登录组件测试前先登录或复用会话。若无会话则选平台稳定版 login 按 file_path 加载并执行，
         支持验证码暂停与回传；同一 context 内执行，失败时设置 result.phase=login 并返回 False。
@@ -798,7 +964,7 @@ class ComponentTester:
             result.phase = 'login'
             result.phase_component_name = f"{self.platform}/login"
             result.error = "无稳定版登录组件或 file_path 无效，无法先登录"
-            return False
+            return False, context, page
 
         loader = ComponentLoader()
         try:
@@ -828,20 +994,31 @@ class ComponentTester:
         )
 
         login_display_name = f"{self.platform}/login"
-        exec_result = await self._run_login_with_verification_support(
-            adapter=adapter,
-            page=page,
-            component_name=login_display_name,
-            result=result,
-        )
+        try:
+            exec_result = await self._run_login_with_verification_support(
+                adapter=adapter,
+                page=page,
+                component_name=login_display_name,
+                result=result,
+            )
+        except HeadfulLoginFallbackRequired:
+            ok, new_context, new_page = await self._run_headful_login_fallback(
+                browser=browser,
+                old_context=context,
+                account_info=account_info,
+                login_class=login_class,
+                component_name=login_display_name,
+                result=result,
+            )
+            return ok, (new_context or context), (new_page or page)
         if not exec_result.success:
             result.phase = 'login'
             result.phase_component_name = login_display_name
             result.phase_component_version = getattr(stable_login, 'version', '') or ''
             result.error = result.error or getattr(exec_result, 'message', '登录失败')
-            return False
+            return False, context, page
         await self._save_context_session(context, account_info)
-        return True
+        return True, context, page
 
     async def _test_python_component_with_browser(
         self,
@@ -984,8 +1161,8 @@ class ComponentTester:
                             component_name=f"{self.platform}/login",
                         )
                     if not login_gate_ready:
-                        login_ok = await self._run_login_before_non_login(
-                            browser=None,
+                        login_ok, context, page = await self._run_login_before_non_login(
+                            browser=browser,
                             context=context,
                             page=page,
                             account_info=account_info,

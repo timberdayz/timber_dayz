@@ -379,6 +379,25 @@ class ShopeeProductsExport(ExportComponent):
             target_date.strftime("%Y-%m"),
         )
 
+    def _resolve_custom_target(self, config: dict[str, Any]) -> dict[str, Any]:
+        granularity = str(config.get("granularity") or "").strip().lower()
+        start_date, end_date = self._custom_range_bounds(config)
+        target_iso_date = start_date or end_date
+        if not target_iso_date:
+            raise ValueError("custom date selection requires start_date")
+
+        target_date = datetime.strptime(str(target_iso_date), "%Y-%m-%d")
+        return {
+            "granularity": granularity,
+            "target_iso_date": target_iso_date,
+            "target_year": target_date.year,
+            "target_month": target_date.month,
+            "target_day": target_date.day,
+            "target_month_label_zh": self._month_label_candidates(target_iso_date)[0],
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+
     async def _find_month_leaf_locator(self, page: Any, iso_date: str) -> Any | None:
         panel = await self._find_date_panel(page)
         containers = [panel] if panel is not None else [page]
@@ -761,14 +780,16 @@ class ShopeeProductsExport(ExportComponent):
         config = self.ctx.config or {}
         custom_selection = self._custom_time_selection(config)
         if custom_selection is not None:
-            granularity = str(config.get("granularity") or "").strip().lower()
-            start_date, end_date = self._custom_range_bounds(config)
+            target = self._resolve_custom_target(config)
+            granularity = target["granularity"]
+            start_date = target["start_date"]
+            end_date = target["end_date"]
             await self._open_date_picker(page)
 
             if granularity in {"day", "daily", "d"}:
                 if not await self._hover_text_option(page, "\u6309\u65e5"):
                     raise RuntimeError("date option was not clicked")
-                if not end_date or not await self._select_single_day_value(page, end_date):
+                if not target["target_iso_date"] or not await self._select_single_day_value(page, target["target_iso_date"]):
                     raise RuntimeError("date option was not clicked")
                 if not await self._wait_custom_date_selection_applied(
                     page,
@@ -796,7 +817,7 @@ class ShopeeProductsExport(ExportComponent):
             if granularity in {"month", "monthly", "m"}:
                 if not await self._hover_text_option(page, "\u6309\u6708"):
                     raise RuntimeError("date option was not clicked")
-                if not end_date or not await self._select_month_value(page, end_date):
+                if not target["target_iso_date"] or not await self._select_month_value(page, target["target_iso_date"]):
                     raise RuntimeError("date option was not clicked")
                 if not await self._wait_custom_date_selection_applied(
                     page,

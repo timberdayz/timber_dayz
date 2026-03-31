@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 
 from modules.core.logger import get_logger
-from backend.services.verification_protocol import apply_verification_result_to_params
+from backend.services.verification_protocol import apply_verification_result_to_params, verification_input_mode
 from modules.core.path_manager import get_data_raw_dir
 from modules.apps.collection_center.component_loader import ComponentLoader
 from modules.apps.collection_center.browser_config_helper import (
@@ -1339,6 +1339,170 @@ class CollectionExecutorV2:
             logger.error(f"Verification callback failed for task {task_id}: {e}")
             return None
 
+    @staticmethod
+    def _requires_headful_login_fallback(verification_type: str | None) -> bool:
+        return verification_input_mode(verification_type) == "manual_continue"
+
+    async def _prime_runtime_page_for_login_gate(self, page: Any, account: Dict[str, Any]) -> None:
+        current_url = str(getattr(page, "url", "") or "").strip().lower()
+        if current_url and current_url != "about:blank":
+            return
+
+        login_url = str(account.get("login_url") or "").strip()
+        if not login_url:
+            return
+
+        await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(800)
+
+    async def _recreate_runtime_page_with_saved_session(
+        self,
+        *,
+        browser,
+        old_context,
+        platform: str,
+        account: Dict[str, Any],
+        account_id: str,
+    ):
+        storage_state = None
+        if account_id:
+            session_data = await _load_or_bootstrap_session_async(
+                platform,
+                account_id,
+                account,
+            )
+            if session_data and isinstance(session_data.get("storage_state"), dict):
+                storage_state = session_data["storage_state"]
+
+        if account_id:
+            fp_options = await _get_fingerprint_context_options_async(platform, account_id, account)
+            context_options = _build_playwright_context_options_from_fingerprint(fp_options)
+        else:
+            from modules.apps.collection_center.browser_config_helper import get_browser_context_args
+
+            context_options = get_browser_context_args()
+
+        context_options.setdefault("accept_downloads", True)
+        if storage_state:
+            context_options["storage_state"] = storage_state
+        if not context_options.get("viewport"):
+            context_options["viewport"] = {"width": 1920, "height": 1080}
+        if "locale" not in context_options:
+            context_options["locale"] = "zh-CN"
+
+        try:
+            await old_context.close()
+        except Exception as e:
+            logger.debug("Close old runtime context before session recreation failed: %s", e)
+
+        new_context = await browser.new_context(**context_options)
+        new_page = await new_context.new_page()
+        await self._prime_runtime_page_for_login_gate(new_page, account)
+        return new_context, new_page
+
+    async def _run_headful_login_fallback(
+        self,
+        *,
+        task_id: str,
+        platform: str,
+        account: Dict[str, Any],
+        params: Dict[str, Any],
+        browser,
+        old_context,
+        session_platform: str,
+        session_account_id: str,
+        runtime_manifests: Optional[Dict[str, Any]] = None,
+    ):
+        from playwright.async_api import async_playwright
+
+        account_id = session_account_id or str(account.get("account_id") or "").strip()
+
+        async with async_playwright() as playwright:
+            headed_browser = await playwright.chromium.launch(
+                **enforce_official_playwright_browser({"headless": False, "args": ["--start-maximized"]})
+            )
+            try:
+                if account_id:
+                    fp_options = await _get_fingerprint_context_options_async(platform, account_id, account)
+                    context_options = _build_playwright_context_options_from_fingerprint(fp_options)
+                else:
+                    from modules.apps.collection_center.browser_config_helper import get_browser_context_args
+
+                    context_options = get_browser_context_args()
+                context_options.setdefault("accept_downloads", True)
+                context_options["viewport"] = None
+                context_options.setdefault("locale", "zh-CN")
+
+                headed_context = await headed_browser.new_context(**context_options)
+                try:
+                    headed_page = await headed_context.new_page()
+                    while True:
+                        try:
+                            if runtime_manifests is not None:
+                                login_manifest = runtime_manifests.get("login")
+                                login_result = await self._run_runtime_manifest_component(
+                                    page=headed_page,
+                                    manifest=login_manifest,
+                                    account=account,
+                                    config=params,
+                                )
+                                login_success = bool(getattr(login_result, "success", False))
+                            else:
+                                adapter = create_adapter(
+                                    platform=platform,
+                                    account=account,
+                                    config=params,
+                                )
+                                login_success = await self._execute_python_component(
+                                    page=headed_page,
+                                    adapter=adapter,
+                                    component_type="login",
+                                    params=params,
+                                )
+                            if not login_success:
+                                return False, old_context, None
+                            break
+                        except VerificationRequiredError as e:
+                            value = await self._wait_verification_and_continue(
+                                task_id,
+                                e.verification_type,
+                                e.screenshot_path,
+                                headed_page,
+                                params,
+                                None,
+                                is_login=True,
+                            )
+                            if value is None:
+                                return False, old_context, None
+                            apply_verification_result_to_params(
+                                params,
+                                verification_type=e.verification_type,
+                                value=value,
+                            )
+                            continue
+
+                    await self._ensure_login_gate_ready(headed_page, platform)
+                    if session_platform and session_account_id:
+                        storage_state = await headed_context.storage_state()
+                        await _save_session_async(session_platform, session_account_id, storage_state)
+                finally:
+                    await headed_context.close()
+            finally:
+                await headed_browser.close()
+
+        if browser is None:
+            return False, old_context, None
+
+        new_context, new_page = await self._recreate_runtime_page_with_saved_session(
+            browser=browser,
+            old_context=old_context,
+            platform=platform,
+            account=account,
+            account_id=account_id,
+        )
+        return True, new_context, new_page
+
     async def _execute_with_python_components(
         self,
         task_id: str,
@@ -1346,6 +1510,8 @@ class CollectionExecutorV2:
         account: Dict[str, Any],
         params: Dict[str, Any],
         context: TaskContext,
+        browser,
+        play_context,
         page,
         step_popup_handler: StepPopupHandler,
         task_download_dir: Path,

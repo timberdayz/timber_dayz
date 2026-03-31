@@ -187,6 +187,76 @@ def test_shopee_products_export_maps_granularity_to_summary_preset_labels() -> N
     assert component._target_date_label({"granularity": "monthly"}) == "过去30天"
 
 
+def test_shopee_products_export_resolve_custom_target_uses_start_date_for_daily() -> None:
+    component = ShopeeProductsExport(
+        _ctx(
+            {
+                "granularity": "daily",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-03-09",
+                    "end_date": "2026-03-15",
+                },
+            }
+        )
+    )
+
+    target = component._resolve_custom_target(component.ctx.config or {})
+
+    assert target["granularity"] == "daily"
+    assert target["target_iso_date"] == "2026-03-09"
+    assert target["target_year"] == 2026
+    assert target["target_month"] == 3
+    assert target["target_day"] == 9
+
+
+def test_shopee_products_export_resolve_custom_target_uses_start_date_for_weekly() -> None:
+    component = ShopeeProductsExport(
+        _ctx(
+            {
+                "granularity": "weekly",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2025-11-03",
+                    "end_date": "2025-11-09",
+                },
+            }
+        )
+    )
+
+    target = component._resolve_custom_target(component.ctx.config or {})
+
+    assert target["granularity"] == "weekly"
+    assert target["target_iso_date"] == "2025-11-03"
+    assert target["target_year"] == 2025
+    assert target["target_month"] == 11
+    assert target["target_day"] == 3
+
+
+def test_shopee_products_export_resolve_custom_target_uses_start_date_for_monthly() -> None:
+    component = ShopeeProductsExport(
+        _ctx(
+            {
+                "granularity": "monthly",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2025-11-01",
+                    "end_date": "2025-11-30",
+                },
+            }
+        )
+    )
+
+    target = component._resolve_custom_target(component.ctx.config or {})
+
+    assert target["granularity"] == "monthly"
+    assert target["target_iso_date"] == "2025-11-01"
+    assert target["target_year"] == 2025
+    assert target["target_month"] == 11
+    assert target["target_day"] == 1
+    assert target["target_month_label_zh"] == "十一月"
+
+
 @pytest.mark.asyncio
 async def test_shopee_products_export_current_date_label_reads_trigger_summary_text(
     monkeypatch: pytest.MonkeyPatch,
@@ -503,7 +573,7 @@ async def test_shopee_products_export_custom_monthly_uses_month_mode_instead_of_
     await component._ensure_date_selection(page)
 
     component._hover_text_option.assert_awaited_once_with(page, "按月")
-    component._select_month_value.assert_awaited_once_with(page, "2026-03-31")
+    component._select_month_value.assert_awaited_once_with(page, "2026-03-01")
     component._click_text_option.assert_not_awaited()
 
 
