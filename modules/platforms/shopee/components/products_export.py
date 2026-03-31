@@ -148,9 +148,69 @@ class ShopeeProductsExport(ExportComponent):
                 continue
         return None
 
+    async def _find_date_panel(self, page: Any) -> Any | None:
+        common_selectors = (
+            ".arco-trigger-popup",
+            ".arco-picker-dropdown",
+            ".ant-picker-dropdown",
+            '[class*="picker-dropdown"]',
+            '[class*="dropdown"]',
+            '[class*="popup"]',
+            "body > div",
+        )
+
+        anchor_texts = (
+            self.sel.preset_labels.get("today_realtime", ""),
+            self.sel.granularity_labels.get("daily", ""),
+        )
+
+        for selector in common_selectors:
+            try:
+                locator = page.locator(selector)
+                for anchor in anchor_texts:
+                    if anchor:
+                        locator = locator.filter(has_text=anchor)
+                count = await locator.count()
+                for idx in range(count - 1, -1, -1):
+                    candidate = locator.nth(idx)
+                    if await candidate.is_visible(timeout=500):
+                        return candidate
+            except Exception:
+                continue
+
+        fallback_locators = (
+            page.locator("div"),
+            page.locator("ul"),
+        )
+        best_panel = None
+        best_text_len = None
+        for locator in fallback_locators:
+            try:
+                filtered = locator
+                for anchor in anchor_texts:
+                    if anchor:
+                        filtered = filtered.filter(has_text=anchor)
+                count = await filtered.count()
+                for idx in range(count):
+                    candidate = filtered.nth(idx)
+                    if not await candidate.is_visible(timeout=300):
+                        continue
+                    try:
+                        text_content = await candidate.text_content() or ""
+                    except Exception:
+                        text_content = ""
+                    text_len = len(text_content)
+                    if best_text_len is None or text_len < best_text_len:
+                        best_panel = candidate
+                        best_text_len = text_len
+            except Exception:
+                continue
+        return best_panel
+
     async def _find_date_option_locator(self, page: Any, text: str) -> Any | None:
+        panel = await self._find_date_panel(page)
         try:
-            matches = page.get_by_text(text, exact=False)
+            matches = panel.get_by_text(text, exact=False) if panel is not None else page.get_by_text(text, exact=False)
         except Exception:
             return None
 

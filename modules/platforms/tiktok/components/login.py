@@ -294,23 +294,53 @@ class TiktokLogin(LoginComponent):
         config = self.ctx.config or {}
         account = self.ctx.account or {}
         region = str(config.get("shop_region") or account.get("shop_region") or "").strip().upper()
+        signal_count = 0
+        current_url = str(getattr(page, "url", "") or "").strip().lower()
+
+        if "/homepage" in current_url:
+            signal_count += 1
 
         if region:
             for token in (region, f"{region} ", f"{region} Singapore"):
                 try:
                     if await self._locator_is_visible(page.get_by_text(token, exact=False).first, timeout=300):
-                        return True
+                        signal_count += 1
+                        break
                 except Exception:
                     continue
 
-        for text in ("TikTok Shop",):
+        for text in ("TikTok Shop", "首页", "数据分析", "订单", "商品"):
             try:
                 if await self._locator_is_visible(page.get_by_text(text, exact=False).first, timeout=300):
-                    return True
+                    signal_count += 1
             except Exception:
                 continue
 
-        return False
+        for selector in (
+            'a[href*="/homepage"]',
+            'a[href*="/compass/"]',
+            'a[href*="/product"]',
+            'a[href*="/order"]',
+        ):
+            try:
+                if await self._locator_is_visible(page.locator(selector).first, timeout=300):
+                    signal_count += 1
+            except Exception:
+                continue
+
+        if signal_count < 2:
+            return False
+
+        if await self._is_otp_visible(page):
+            return False
+
+        if await self._locator_is_visible(self._password_locator(page), timeout=300):
+            return False
+
+        if await self._locator_is_visible(self._login_button_locator(page), timeout=300):
+            return False
+
+        return True
 
     async def _data_overview_dom_looks_ready(self, page: Any) -> bool:
         for probe in AnalyticsSelectors.DATA_READY_PROBES:

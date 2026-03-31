@@ -102,6 +102,20 @@ class _DateMenuPage(_FakePage):
         super().__init__(url)
         self.text_matches = text_matches
 
+    def locator(self, selector: str):
+        return _FakeLocator(visible=False, count=0)
+
+    def get_by_text(self, text: str, exact: bool = False):
+        return self.text_matches.get(
+            text,
+            _FakeTextMatch(_FakeLocator(visible=False, count=0), _FakeLocator(visible=False, count=0)),
+        )
+
+
+class _FakePanel:
+    def __init__(self, text_matches: dict[str, _FakeTextMatch]) -> None:
+        self.text_matches = text_matches
+
     def get_by_text(self, text: str, exact: bool = False):
         return self.text_matches.get(
             text,
@@ -222,6 +236,25 @@ async def test_shopee_products_export_click_text_option_prefers_date_menu_entry_
     assert summary.clicked is False
     assert menu_item.hovered is True
     assert menu_item.clicked is True
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_find_date_option_locator_prefers_panel_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _DateMenuPage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1",
+        {"过去7天": _FakeTextMatch(_FakeLocator("过去7天", visible=True), _FakeLocator("过去7天", visible=True))},
+    )
+    panel_item = _FakeLocator("过去7天", visible=True)
+    panel = _FakePanel({"过去7天": _FakeTextMatch(_FakeLocator("过去7天", visible=True), panel_item)})
+    component = ShopeeProductsExport(_ctx())
+
+    monkeypatch.setattr(component, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
+
+    locator = await component._find_date_option_locator(page, "过去7天")
+
+    assert locator is panel_item
 
 
 @pytest.mark.asyncio
