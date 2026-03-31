@@ -81,10 +81,10 @@ test('resolveAccountIdsForConfigRun preserves explicit account ids', () => {
   )
 })
 
-test('getAvailableDomainOptions restricts miaoshou to orders only', () => {
+test('getAvailableDomainOptions keeps full domain list for miaoshou config setup', () => {
   assert.deepEqual(
     getAvailableDomainOptions('miaoshou').map((item) => item.value),
-    ['orders']
+    ['orders', 'products', 'analytics', 'finance', 'services', 'inventory']
   )
 })
 

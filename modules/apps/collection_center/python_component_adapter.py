@@ -43,7 +43,7 @@ DATA_DOMAIN_EXPORT_MAP = {
     },
     "tiktok": {
         "orders": "TiktokExport",  # TikTok 使用通用导出
-        "products": "TiktokExport",
+        "products": "TiktokProductsExport",
         "finance": "TiktokExport",
         "analytics": "TiktokExport",
         "services": "TiktokExport",

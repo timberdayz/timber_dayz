@@ -18,20 +18,13 @@ export const DEFAULT_DOMAIN_OPTIONS = [
   { label: '库存', value: 'inventory' }
 ]
 
-export const PLATFORM_DOMAIN_OPTION_OVERRIDES = {
-  miaoshou: [
-    { label: '订单', value: 'orders' }
-  ]
-}
-
 export const getSubtypeOptions = (domain) => DOMAIN_SUBTYPE_OPTIONS[domain] || []
 
 export const getSelectedSubtypeDomains = (dataDomains = []) =>
   (dataDomains || []).filter((domain) => getSubtypeOptions(domain).length > 0)
 
 export const getAvailableDomainOptions = (platform = '') => {
-  const normalizedPlatform = String(platform || '').toLowerCase()
-  return PLATFORM_DOMAIN_OPTION_OVERRIDES[normalizedPlatform] || DEFAULT_DOMAIN_OPTIONS
+  return DEFAULT_DOMAIN_OPTIONS
 }
 
 export const normalizeDomainSubtypeMap = (rawValue) => {

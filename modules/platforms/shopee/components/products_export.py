@@ -48,6 +48,10 @@ class ShopeeProductsExport(ExportComponent):
     def _normalize_date_text(self, value: str | None) -> str:
         return re.sub(r"\s+", "", str(value or "").strip().lower())
 
+    def _build_loose_text_pattern(self, text: str):
+        escaped = [re.escape(char) for char in str(text or "").strip()]
+        return re.compile(r"\s*".join(escaped), re.IGNORECASE)
+
     def _region_text_candidates(self, region_value: str | None) -> tuple[str, ...]:
         normalized = self._normalize_text(region_value)
         if not normalized:
@@ -200,7 +204,7 @@ class ShopeeProductsExport(ExportComponent):
                     except Exception:
                         text_content = ""
                     text_len = len(text_content)
-                    if best_text_len is None or text_len < best_text_len:
+                    if best_text_len is None or text_len > best_text_len:
                         best_panel = candidate
                         best_text_len = text_len
             except Exception:
@@ -210,31 +214,48 @@ class ShopeeProductsExport(ExportComponent):
     async def _find_date_option_locator(self, page: Any, text: str) -> Any | None:
         panel = await self._find_date_panel(page)
         try:
-            matches = panel.get_by_text(text, exact=False) if panel is not None else page.get_by_text(text, exact=False)
+            pattern = self._build_loose_text_pattern(text)
+            matches = panel.get_by_text(pattern, exact=False) if panel is not None else None
         except Exception:
+            matches = None
+
+        async def _pick_visible_locator(match_group: Any) -> Any | None:
+            if match_group is None:
+                return None
+            candidates: list[Any] = []
+            if hasattr(match_group, "last"):
+                candidates.append(match_group.last)
+            if hasattr(match_group, "first"):
+                candidates.append(match_group.first)
+            elif match_group is not None:
+                candidates.append(match_group)
+
+            seen: set[int] = set()
+            for locator in candidates:
+                if locator is None:
+                    continue
+                marker = id(locator)
+                if marker in seen:
+                    continue
+                seen.add(marker)
+                try:
+                    if await locator.is_visible(timeout=2000):
+                        return locator
+                except Exception:
+                    continue
             return None
 
-        candidates: list[Any] = []
-        if hasattr(matches, "last"):
-            candidates.append(matches.last)
-        if hasattr(matches, "first"):
-            candidates.append(matches.first)
-        elif matches is not None:
-            candidates.append(matches)
+        panel_locator = await _pick_visible_locator(matches)
+        if panel_locator is not None:
+            return panel_locator
 
-        seen: set[int] = set()
-        for locator in candidates:
-            if locator is None:
-                continue
-            marker = id(locator)
-            if marker in seen:
-                continue
-            seen.add(marker)
-            try:
-                if await locator.is_visible(timeout=2000):
-                    return locator
-            except Exception:
-                continue
+        try:
+            global_matches = page.get_by_text(pattern, exact=False)
+        except Exception:
+            return None
+        global_locator = await _pick_visible_locator(global_matches)
+        if global_locator is not None:
+            return global_locator
         return None
 
     async def _hover_text_option(self, page: Any, text: str) -> bool:

@@ -46,6 +46,29 @@ async def collection_config_async_client(collection_config_sqlite_session):
     app.dependency_overrides.pop(get_async_db, None)
 
 
+def test_build_collection_config_record_sets_explicit_timestamps():
+    from backend.routers.collection_config import _build_collection_config_record
+    from backend.schemas.collection import CollectionConfigCreate, TimeSelectionPayload
+
+    record = _build_collection_config_record(
+        config_name="miaoshou-orders-v1",
+        config=CollectionConfigCreate(
+            name="miaoshou-orders-v1",
+            platform="miaoshou",
+            account_ids=["miaoshou_real_001"],
+            data_domains=["orders"],
+            sub_domains={"orders": ["shopee", "tiktok"]},
+            granularity="weekly",
+            time_selection=TimeSelectionPayload(mode="preset", preset="last_7_days"),
+            schedule_enabled=False,
+            retry_count=3,
+        ),
+    )
+
+    assert record.created_at is not None
+    assert record.updated_at is not None
+
+
 @pytest.mark.asyncio
 async def test_create_config_normalizes_time_selection_and_sub_domains(collection_config_async_client):
     response = await collection_config_async_client.post(
@@ -91,7 +114,7 @@ async def test_create_config_normalizes_time_selection_and_sub_domains(collectio
 
 
 @pytest.mark.asyncio
-async def test_create_config_rejects_miaoshou_unsupported_domain(collection_config_async_client):
+async def test_create_config_allows_miaoshou_products_domain(collection_config_async_client):
     response = await collection_config_async_client.post(
         "/api/collection/configs",
         json={
@@ -109,8 +132,10 @@ async def test_create_config_rejects_miaoshou_unsupported_domain(collection_conf
         },
     )
 
-    assert response.status_code == 400
-    assert "无效的数据域" in response.text
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["platform"] == "miaoshou"
+    assert payload["data_domains"] == ["products"]
 
 
 @pytest.mark.asyncio

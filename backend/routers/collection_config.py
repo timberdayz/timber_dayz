@@ -4,6 +4,7 @@
 拆分自 collection.py，包含采集配置 CRUD 和账号列表端点。
 """
 
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Path
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,33 @@ from backend.services.collection_contracts import (
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["数据采集-配置"])
+
+
+def _build_collection_config_record(
+    *,
+    config_name: str,
+    config: CollectionConfigCreate,
+) -> CollectionConfig:
+    now = datetime.now(timezone.utc)
+    return CollectionConfig(
+        name=config_name,
+        platform=config.platform,
+        account_ids=config.account_ids,
+        data_domains=config.data_domains,
+        sub_domains=normalize_domain_subtypes(
+            data_domains=config.data_domains,
+            sub_domains=config.sub_domains,
+        ) or None,
+        granularity=config.granularity,
+        date_range_type=config.date_range_type,
+        custom_date_start=config.custom_date_start,
+        custom_date_end=config.custom_date_end,
+        schedule_enabled=config.schedule_enabled,
+        schedule_cron=config.schedule_cron,
+        retry_count=config.retry_count,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 @router.get("/configs", response_model=List[CollectionConfigResponse])
@@ -103,22 +131,9 @@ async def create_config(
     if len(config.account_ids) == 0:
         logger.info(f"Config uses all active accounts for platform: {config.platform}")
 
-    db_config = CollectionConfig(
-        name=config_name,
-        platform=config.platform,
-        account_ids=config.account_ids,
-        data_domains=config.data_domains,
-        sub_domains=normalize_domain_subtypes(
-            data_domains=config.data_domains,
-            sub_domains=config.sub_domains,
-        ) or None,
-        granularity=config.granularity,
-        date_range_type=config.date_range_type,
-        custom_date_start=config.custom_date_start,
-        custom_date_end=config.custom_date_end,
-        schedule_enabled=config.schedule_enabled,
-        schedule_cron=config.schedule_cron,
-        retry_count=config.retry_count,
+    db_config = _build_collection_config_record(
+        config_name=config_name,
+        config=config,
     )
 
     time_selection = normalize_time_selection(
@@ -213,6 +228,7 @@ async def update_config(
         config.date_range_type = legacy_fields["date_range_type"]
         config.custom_date_start = legacy_fields["custom_date_start"]
         config.custom_date_end = legacy_fields["custom_date_end"]
+    config.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(config)

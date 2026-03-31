@@ -166,8 +166,15 @@ def test_collection_config_response_derives_time_selection_from_legacy_fields():
     }
 
 
-def test_get_supported_config_data_domains_restricts_miaoshou_to_orders():
-    assert get_supported_config_data_domains("miaoshou") == ["orders"]
+def test_get_supported_config_data_domains_keeps_default_domains_for_miaoshou():
+    assert get_supported_config_data_domains("miaoshou") == [
+        "orders",
+        "products",
+        "analytics",
+        "finance",
+        "services",
+        "inventory",
+    ]
 
 
 def test_get_supported_config_data_domains_keeps_default_domains_for_other_platforms():
