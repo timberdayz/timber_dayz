@@ -219,6 +219,43 @@ async def test_shopee_products_export_current_date_label_reads_trigger_summary_t
 
 
 @pytest.mark.asyncio
+async def test_shopee_products_export_current_date_label_recognizes_range_summary_variant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx())
+
+    monkeypatch.setattr(
+        component,
+        "_find_date_picker_trigger",
+        AsyncMock(return_value=_FakeLocator("统计时间 过去7 天 24-03-2026 - 30-03-2026 (GMT+08)")),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_visible_text", AsyncMock(return_value=False))
+
+    current = await component._current_date_label(page)
+
+    assert current == "过去7天"
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_current_date_label_uses_visible_match_not_hidden_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _DateMenuPage(
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1",
+        {"过去30天": _FakeTextMatch(_FakeLocator("过去30天", visible=False), _FakeLocator("过去30天", visible=True))},
+    )
+    component = ShopeeProductsExport(_ctx())
+
+    monkeypatch.setattr(component, "_find_date_picker_trigger", AsyncMock(return_value=None), raising=False)
+
+    current = await component._current_date_label(page)
+
+    assert current == "过去30天"
+
+
+@pytest.mark.asyncio
 async def test_shopee_products_export_open_date_picker_falls_back_to_summary_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -395,6 +432,76 @@ async def test_shopee_products_export_ensure_date_selection_raises_when_quick_op
 
     with pytest.raises(RuntimeError, match="date option"):
         await component._ensure_date_selection(page)
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_custom_weekly_uses_week_mode_instead_of_quick_preset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(
+        _ctx(
+            {
+                "shop_name": "shop-a",
+                "granularity": "weekly",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-03-09",
+                    "end_date": "2026-03-15",
+                },
+                "start_date": "2026-03-09",
+                "end_date": "2026-03-15",
+            }
+        )
+    )
+
+    monkeypatch.setattr(component, "_current_date_label", AsyncMock(return_value="今日实时"))
+    monkeypatch.setattr(component, "_open_date_picker", AsyncMock())
+    monkeypatch.setattr(component, "_click_text_option", AsyncMock(return_value=False))
+    monkeypatch.setattr(component, "_hover_text_option", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_week_range_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_custom_date_selection_applied", AsyncMock(return_value=True), raising=False)
+
+    await component._ensure_date_selection(page)
+
+    component._hover_text_option.assert_awaited_once_with(page, "按周")
+    component._select_week_range_value.assert_awaited_once_with(page, "2026-03-09", "2026-03-15")
+    component._click_text_option.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_custom_monthly_uses_month_mode_instead_of_quick_preset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(
+        _ctx(
+            {
+                "shop_name": "shop-a",
+                "granularity": "monthly",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-03-01",
+                    "end_date": "2026-03-31",
+                },
+                "start_date": "2026-03-01",
+                "end_date": "2026-03-31",
+            }
+        )
+    )
+
+    monkeypatch.setattr(component, "_current_date_label", AsyncMock(return_value="今日实时"))
+    monkeypatch.setattr(component, "_open_date_picker", AsyncMock())
+    monkeypatch.setattr(component, "_click_text_option", AsyncMock(return_value=False))
+    monkeypatch.setattr(component, "_hover_text_option", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_month_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_custom_date_selection_applied", AsyncMock(return_value=True), raising=False)
+
+    await component._ensure_date_selection(page)
+
+    component._hover_text_option.assert_awaited_once_with(page, "按月")
+    component._select_month_value.assert_awaited_once_with(page, "2026-03-31")
+    component._click_text_option.assert_not_awaited()
 
 
 @pytest.mark.asyncio

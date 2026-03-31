@@ -29,10 +29,14 @@ class _FakePage:
         self.url = url
         self.goto_calls: list[str] = []
         self.wait_calls: list[int] = []
+        self.redirect_to_login = False
 
     async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
         self.goto_calls.append(url)
-        self.url = url
+        if self.redirect_to_login:
+            self.url = "https://seller.tiktokshopglobalselling.com/account/login"
+        else:
+            self.url = url
 
     async def wait_for_timeout(self, ms: int) -> None:
         self.wait_calls.append(ms)
@@ -61,6 +65,24 @@ def test_tiktok_products_export_maps_supported_granularity_to_quick_date_option(
     assert component._date_option_from_context() is None
 
 
+def test_tiktok_products_export_uses_current_url_shop_region_when_context_is_missing() -> None:
+    component = TiktokProductsExport(
+        _ctx(
+            {
+                "granularity": "weekly",
+            }
+        )
+    )
+    component.ctx.account["shop_region"] = ""
+
+    assert (
+        component._target_region_from_page_url(
+            "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+        )
+        == "SG"
+    )
+
+
 @pytest.mark.asyncio
 async def test_tiktok_products_export_navigates_to_products_page_and_runs_helpers(
     monkeypatch: pytest.MonkeyPatch,
@@ -86,6 +108,81 @@ async def test_tiktok_products_export_navigates_to_products_page_and_runs_helper
     export_mock.assert_awaited_once()
     assert result.success is True
     assert result.file_path == "temp/products.xlsx"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_falls_back_to_current_url_region_before_deep_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    component = TiktokProductsExport(_ctx({"granularity": "weekly"}))
+    component.ctx.account["shop_region"] = ""
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_7_DAYS))
+    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    assert page.goto_calls == [
+        "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG"
+    ]
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_uses_generic_products_deep_link_when_no_region_is_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("about:blank")
+    component = TiktokProductsExport(_ctx({"granularity": "weekly"}))
+    component.ctx.account["shop_region"] = ""
+
+    switch_mock = AsyncMock()
+    date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_7_DAYS))
+    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    assert page.goto_calls == [
+        "https://seller.tiktokshopglobalselling.com/compass/product-analysis"
+    ]
+    switch_mock.assert_not_awaited()
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_returns_clear_error_when_products_deep_link_redirects_to_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("about:blank")
+    page.redirect_to_login = True
+    component = TiktokProductsExport(_ctx({"granularity": "weekly"}))
+    component.ctx.account["shop_region"] = ""
+
+    switch_mock = AsyncMock()
+    date_mock = AsyncMock()
+    export_mock = AsyncMock()
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    assert result.success is False
+    assert result.message == "login required before products export"
+    switch_mock.assert_not_awaited()
+    date_mock.assert_not_awaited()
+    export_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio

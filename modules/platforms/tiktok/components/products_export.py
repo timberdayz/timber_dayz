@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from modules.components.base import ExecutionContext
 from modules.components.date_picker.base import DateOption
@@ -26,14 +27,31 @@ class TiktokProductsExport(ExportComponent):
         region = str(config.get("shop_region") or account.get("shop_region") or "").strip().upper()
         return region or None
 
+    def _target_region_from_page_url(self, url: str) -> str | None:
+        try:
+            query = dict(parse_qsl(urlsplit(str(url or "")).query))
+            region = str(query.get("shop_region") or "").strip().upper()
+            return region or None
+        except Exception:
+            return None
+
     def _products_page_looks_ready(self, url: str) -> bool:
         current = str(url or "").strip().lower()
         if not current:
             return False
         return "/compass/product-analysis" in current
 
+    def _is_login_page(self, url: str) -> bool:
+        current = str(url or "").strip().lower()
+        if not current:
+            return False
+        return "/account/login" in current
+
     def _products_page_url(self, region: str) -> str:
         return f"https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region={region}"
+
+    def _generic_products_page_url(self) -> str:
+        return "https://seller.tiktokshopglobalselling.com/compass/product-analysis"
 
     def _date_option_from_context(self) -> DateOption | None:
         config = self.ctx.config or {}
@@ -64,23 +82,31 @@ class TiktokProductsExport(ExportComponent):
         return await TiktokExport(self.ctx).run(page, mode=ExportMode.STANDARD)
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
-        region = self._target_region()
-        if not region:
-            return ExportResult(success=False, message="shop_region is required", file_path=None)
-
         current_url = str(getattr(page, "url", "") or "")
+        region = self._target_region() or self._target_region_from_page_url(current_url)
+
         if not self._products_page_looks_ready(current_url):
-            await page.goto(self._products_page_url(region), wait_until="domcontentloaded", timeout=60000)
+            target_url = self._products_page_url(region) if region else self._generic_products_page_url()
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(800)
+            current_url = str(getattr(page, "url", "") or "")
+            region = region or self._target_region_from_page_url(current_url)
 
-        switch_result = await self._run_shop_switch(page)
-        if not getattr(switch_result, "success", False):
-            return ExportResult(
-                success=False,
-                message=getattr(switch_result, "message", "shop switch failed"),
-                file_path=None,
-            )
+        if self._is_login_page(current_url):
+            return ExportResult(success=False, message="login required before products export", file_path=None)
+
+        if region:
+            if self.ctx.config is None:
+                self.ctx.config = {}
+            self.ctx.config["shop_region"] = region
+            switch_result = await self._run_shop_switch(page)
+            if not getattr(switch_result, "success", False):
+                return ExportResult(
+                    success=False,
+                    message=getattr(switch_result, "message", "shop switch failed"),
+                    file_path=None,
+                )
 
         date_option = self._date_option_from_context()
         if date_option is not None:

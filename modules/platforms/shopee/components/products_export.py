@@ -107,8 +107,29 @@ class ShopeeProductsExport(ExportComponent):
 
     async def _visible_text(self, page: Any, text: str) -> bool:
         try:
-            locator = page.get_by_text(text, exact=False).first
-            return bool(await locator.is_visible(timeout=1000))
+            matches = page.get_by_text(text, exact=False)
+            candidates: list[Any] = []
+            if hasattr(matches, "last"):
+                candidates.append(matches.last)
+            if hasattr(matches, "first"):
+                candidates.append(matches.first)
+            elif matches is not None:
+                candidates.append(matches)
+
+            seen: set[int] = set()
+            for locator in candidates:
+                if locator is None:
+                    continue
+                marker = id(locator)
+                if marker in seen:
+                    continue
+                seen.add(marker)
+                try:
+                    if await locator.is_visible(timeout=1000):
+                        return True
+                except Exception:
+                    continue
+            return False
         except Exception:
             return False
 
@@ -282,6 +303,17 @@ class ShopeeProductsExport(ExportComponent):
             normalized_label = self._normalize_date_text(label)
             if normalized_label and normalized_label in content:
                 return label
+
+        # Real Shopee summaries may use variant surface text such as
+        # "过去7 天" / "过去30 天" while config targets stay normalized.
+        variant_map = {
+            "过去7天": ("过去7天", "过去7天", "过去7天", "过去7天", "过去7 天"),
+            "过去30天": ("过去30天", "过去30 天"),
+        }
+        for canonical, variants in variant_map.items():
+            normalized_variants = tuple(self._normalize_date_text(item) for item in variants)
+            if any(variant and variant in content for variant in normalized_variants):
+                return canonical
         return None
 
     def _single_day_target_value(self, config: dict[str, Any]) -> str | None:
@@ -292,6 +324,116 @@ class ShopeeProductsExport(ExportComponent):
             or str(config.get("date_from") or "").strip()
             or None
         )
+
+    def _custom_time_selection(self, config: dict[str, Any]) -> dict[str, Any] | None:
+        time_selection = config.get("time_selection")
+        if not isinstance(time_selection, dict):
+            return None
+        if str(time_selection.get("mode") or "").strip().lower() != "custom":
+            return None
+        return time_selection
+
+    def _custom_range_bounds(self, config: dict[str, Any]) -> tuple[str | None, str | None]:
+        custom_selection = self._custom_time_selection(config) or {}
+        start_value = (
+            str(custom_selection.get("start_date") or "").strip()
+            or str(config.get("start_date") or "").strip()
+            or str(config.get("date_from") or "").strip()
+            or None
+        )
+        end_value = (
+            str(custom_selection.get("end_date") or "").strip()
+            or str(config.get("end_date") or "").strip()
+            or str(config.get("date_to") or "").strip()
+            or None
+        )
+        return start_value, end_value
+
+    def _month_label_candidates(self, iso_date: str) -> tuple[str, ...]:
+        try:
+            target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
+        except ValueError:
+            return ()
+
+        zh_months = (
+            "",
+            "\u4e00\u6708",
+            "\u4e8c\u6708",
+            "\u4e09\u6708",
+            "\u56db\u6708",
+            "\u4e94\u6708",
+            "\u516d\u6708",
+            "\u4e03\u6708",
+            "\u516b\u6708",
+            "\u4e5d\u6708",
+            "\u5341\u6708",
+            "\u5341\u4e00\u6708",
+            "\u5341\u4e8c\u6708",
+        )
+        month_num = target_date.month
+        return (
+            zh_months[month_num],
+            f"{month_num}\u6708",
+            f"{month_num:02d}\u6708",
+            target_date.strftime("%Y.%m"),
+            target_date.strftime("%Y-%m"),
+        )
+
+    def _week_range_label_candidates(self, start_date: str, end_date: str) -> tuple[str, ...]:
+        try:
+            start_value = datetime.strptime(str(start_date), "%Y-%m-%d")
+            end_value = datetime.strptime(str(end_date), "%Y-%m-%d")
+        except ValueError:
+            return ()
+
+        variants = (
+            f"{start_value.strftime('%d-%m-%Y')} - {end_value.strftime('%d-%m-%Y')}",
+            f"{start_value.strftime('%d-%m-%Y')}-{end_value.strftime('%d-%m-%Y')}",
+            f"{start_value.strftime('%d/%m/%Y')} - {end_value.strftime('%d/%m/%Y')}",
+            f"{start_value.strftime('%Y-%m-%d')} - {end_value.strftime('%Y-%m-%d')}",
+        )
+        return variants
+
+    async def _current_date_summary_text(self, page: Any) -> str | None:
+        trigger = await self._find_date_picker_trigger(page)
+        if trigger is None:
+            return None
+        try:
+            return await trigger.text_content()
+        except Exception:
+            return None
+
+    async def _wait_custom_date_selection_applied(
+        self,
+        page: Any,
+        *,
+        granularity: str,
+        start_date: str | None,
+        end_date: str | None,
+        timeout_ms: int = 2500,
+        poll_ms: int = 250,
+    ) -> bool:
+        expected_signatures: tuple[str, ...] = ()
+        if granularity == "weekly" and start_date and end_date:
+            expected_signatures = self._week_range_label_candidates(start_date, end_date)
+        elif granularity == "monthly" and end_date:
+            expected_signatures = self._month_label_candidates(end_date)
+        elif granularity == "daily" and end_date:
+            expected_signatures = (datetime.strptime(end_date, "%Y-%m-%d").strftime("%d-%m-%Y"),)
+
+        normalized_signatures = tuple(
+            self._normalize_date_text(signature) for signature in expected_signatures if signature
+        )
+        waited = 0
+        while waited <= timeout_ms:
+            summary = await self._current_date_summary_text(page)
+            normalized_summary = self._normalize_date_text(summary)
+            if normalized_summary and any(signature in normalized_summary for signature in normalized_signatures):
+                return True
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return False
 
     async def _wait_date_selection_applied(
         self,
@@ -497,6 +639,56 @@ class ShopeeProductsExport(ExportComponent):
 
     async def _ensure_date_selection(self, page: Any) -> None:
         config = self.ctx.config or {}
+        custom_selection = self._custom_time_selection(config)
+        if custom_selection is not None:
+            granularity = str(config.get("granularity") or "").strip().lower()
+            start_date, end_date = self._custom_range_bounds(config)
+            await self._open_date_picker(page)
+
+            if granularity in {"day", "daily", "d"}:
+                if not await self._hover_text_option(page, "\u6309\u65e5"):
+                    raise RuntimeError("date option was not clicked")
+                if not end_date or not await self._select_single_day_value(page, end_date):
+                    raise RuntimeError("date option was not clicked")
+                if not await self._wait_custom_date_selection_applied(
+                    page,
+                    granularity="daily",
+                    start_date=start_date,
+                    end_date=end_date,
+                ):
+                    raise RuntimeError("date selection did not apply")
+                return
+
+            if granularity in {"week", "weekly", "w"}:
+                if not await self._hover_text_option(page, "\u6309\u5468"):
+                    raise RuntimeError("date option was not clicked")
+                if not start_date or not end_date or not await self._select_week_range_value(page, start_date, end_date):
+                    raise RuntimeError("date option was not clicked")
+                if not await self._wait_custom_date_selection_applied(
+                    page,
+                    granularity="weekly",
+                    start_date=start_date,
+                    end_date=end_date,
+                ):
+                    raise RuntimeError("date selection did not apply")
+                return
+
+            if granularity in {"month", "monthly", "m"}:
+                if not await self._hover_text_option(page, "\u6309\u6708"):
+                    raise RuntimeError("date option was not clicked")
+                if not end_date or not await self._select_month_value(page, end_date):
+                    raise RuntimeError("date option was not clicked")
+                if not await self._wait_custom_date_selection_applied(
+                    page,
+                    granularity="monthly",
+                    start_date=start_date,
+                    end_date=end_date,
+                ):
+                    raise RuntimeError("date selection did not apply")
+                return
+
+            raise RuntimeError("unsupported custom date granularity")
+
         target_text = self._target_date_label(config)
         current_label = await self._current_date_label(page)
         if current_label == target_text:
@@ -566,6 +758,30 @@ class ShopeeProductsExport(ExportComponent):
                     return True
             except Exception:
                 continue
+        return False
+
+    async def _select_month_value(self, page: Any, iso_date: str) -> bool:
+        for candidate in self._month_label_candidates(iso_date):
+            clicked = await self._click_text_option(page, candidate)
+            if clicked:
+                return True
+        return False
+
+    async def _select_week_range_value(self, page: Any, start_date: str, end_date: str) -> bool:
+        for candidate in self._week_range_label_candidates(start_date, end_date):
+            clicked = await self._click_text_option(page, candidate)
+            if clicked:
+                return True
+
+        # Some week pickers render month/year first, then the concrete week range.
+        month_hint = self._month_label_candidates(end_date)
+        for candidate in month_hint:
+            clicked = await self._click_text_option(page, candidate)
+            if not clicked:
+                continue
+            for range_candidate in self._week_range_label_candidates(start_date, end_date):
+                if await self._click_text_option(page, range_candidate):
+                    return True
         return False
 
     async def _trigger_export(self, page: Any) -> None:
