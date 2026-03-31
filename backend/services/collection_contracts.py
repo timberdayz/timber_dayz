@@ -14,6 +14,19 @@ TIME_PRESET_TO_GRANULARITY: Dict[str, str] = {
     "last_30_days": "monthly",
 }
 
+DEFAULT_CONFIG_DATA_DOMAINS: List[str] = [
+    "orders",
+    "products",
+    "analytics",
+    "finance",
+    "services",
+    "inventory",
+]
+
+PLATFORM_CONFIG_DATA_DOMAIN_OVERRIDES: Dict[str, List[str]] = {
+    "miaoshou": ["orders"],
+}
+
 
 def _normalize_date_like(value: Any) -> str:
     if value is None:
@@ -21,6 +34,13 @@ def _normalize_date_like(value: Any) -> str:
     if isinstance(value, date):
         return value.isoformat()
     return str(value).strip()
+
+
+def get_supported_config_data_domains(platform: str | None) -> List[str]:
+    normalized_platform = str(platform or "").strip().lower()
+    if normalized_platform in PLATFORM_CONFIG_DATA_DOMAIN_OVERRIDES:
+        return list(PLATFORM_CONFIG_DATA_DOMAIN_OVERRIDES[normalized_platform])
+    return list(DEFAULT_CONFIG_DATA_DOMAINS)
 
 
 def normalize_time_selection(

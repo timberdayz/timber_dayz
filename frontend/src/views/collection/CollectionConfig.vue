@@ -170,12 +170,13 @@
 
         <el-form-item label="数据域" prop="data_domains">
           <el-checkbox-group v-model="form.data_domains">
-            <el-checkbox label="orders">订单</el-checkbox>
-            <el-checkbox label="products">产品</el-checkbox>
-            <el-checkbox label="analytics">流量分析</el-checkbox>
-            <el-checkbox label="finance">财务</el-checkbox>
-            <el-checkbox label="services">服务</el-checkbox>
-            <el-checkbox label="inventory">库存</el-checkbox>
+            <el-checkbox
+              v-for="option in availableDomainOptions"
+              :key="option.value"
+              :label="option.value"
+            >
+              {{ option.label }}
+            </el-checkbox>
           </el-checkbox-group>
         </el-form-item>
 
@@ -232,6 +233,20 @@
             end-placeholder="结束日期"
             value-format="YYYY-MM-DD"
           />
+        </el-form-item>
+
+        <el-form-item
+          v-if="form.date_range_type === 'custom'"
+          label="自定义粒度"
+        >
+          <el-select v-model="form.granularity" placeholder="请选择粒度">
+            <el-option label="日度" value="daily" />
+            <el-option label="周度" value="weekly" />
+            <el-option label="月度" value="monthly" />
+          </el-select>
+          <div class="form-hint">
+            自定义时间范围需要显式指定粒度，供任务调度、输出命名和下游入库使用
+          </div>
         </el-form-item>
 
         <el-divider content-position="left">定时配置</el-divider>
@@ -313,7 +328,7 @@
         <div v-if="quickSetupStep === 2" class="setup-step">
           <el-descriptions :column="1" border>
             <el-descriptions-item label="平台">{{ quickSetup.platform }}</el-descriptions-item>
-            <el-descriptions-item label="数据域">全部6个</el-descriptions-item>
+            <el-descriptions-item label="数据域">{{ getQuickSetupDomainSummary() }}</el-descriptions-item>
             <el-descriptions-item label="账号">该平台所有活跃账号</el-descriptions-item>
             <el-descriptions-item label="配置数量">{{ getQuickSetupConfigCount() }}</el-descriptions-item>
             <el-descriptions-item label="预计任务">{{ getQuickSetupTaskCount() }}</el-descriptions-item>
@@ -367,10 +382,12 @@ import { Plus, Refresh, MagicStick, CopyDocument } from '@element-plus/icons-vue
 import collectionApi from '@/api/collection'
 import {
   buildTimeSelectionPayload,
+  getAvailableDomainOptions,
   getDatePresetLabel,
   getSelectedSubtypeDomains,
   getSubtypeOptions,
-  normalizeDomainSubtypeMap
+  normalizeDomainSubtypeMap,
+  resolveAccountIdsForConfigRun
 } from '@/constants/collection'
 
 // 状态
@@ -439,12 +456,17 @@ const formRules = {
 const filteredAccounts = computed(() => {
   if (!form.platform) return accounts.value
   return accounts.value.filter(acc => 
-    acc.platform?.toLowerCase() === form.platform.toLowerCase()
+    acc.platform?.toLowerCase() === form.platform.toLowerCase() &&
+    acc.status === 'active'
   )
 })
 
 const selectedSubtypeDomains = computed(() =>
   getSelectedSubtypeDomains(form.data_domains)
+)
+
+const availableDomainOptions = computed(() =>
+  getAvailableDomainOptions(form.platform)
 )
 
 // v4.7.0: 监听平台和数据域变化，自动生成配置名
@@ -453,6 +475,14 @@ watch([() => form.platform, () => form.data_domains], () => {
     generateConfigName()
   }
 }, { deep: true })
+
+watch(
+  () => form.platform,
+  (platform) => {
+    const allowed = new Set(getAvailableDomainOptions(platform).map((option) => option.value))
+    form.data_domains = (form.data_domains || []).filter((domain) => allowed.has(domain))
+  }
+)
 
 watch(
   () => [...form.data_domains],
@@ -612,9 +642,9 @@ const toggleActive = async (row) => {
 
 const runConfig = async (row) => {
   try {
-    const accountIds = resolveConfigAccountIds(row)
+    const accountIds = resolveAccountIdsForConfigRun(row, accounts.value)
     if (accountIds.length === 0) {
-      ElMessage.warning('该配置没有可用账号，无法创建采集任务')
+      ElMessage.warning('该配置没有可用活跃账号，无法创建采集任务')
       return
     }
 
@@ -630,35 +660,20 @@ const runConfig = async (row) => {
       return
     }
 
-    for (const accountId of resolveConfigAccountIds(row)) {
+    for (const accountId of accountIds) {
       await collectionApi.createTask({
         platform: row.platform,
         account_id: accountId,
         data_domains: row.data_domains,
         sub_domains: row.sub_domains || {},
         granularity: row.granularity,
-        time_selection: buildTimeSelectionPayload(row.date_range_type, {
-          customRange:
-            row.date_range_type === 'custom' && row.custom_date_start && row.custom_date_end
-              ? [row.custom_date_start, row.custom_date_end]
-              : []
-        })
+        time_selection: timeSelection
       })
     }
     ElMessage.success(`已创建 ${accountIds.length} 个采集任务`)
   } catch (error) {
     ElMessage.error('执行失败: ' + error.message)
   }
-}
-
-const resolveConfigAccountIds = (row) => {
-  const explicitAccountIds = Array.isArray(row.account_ids) ? row.account_ids : []
-  if (explicitAccountIds.length > 0) {
-    return explicitAccountIds
-  }
-  return accounts.value
-    .filter((account) => account.platform?.toLowerCase() === row.platform?.toLowerCase())
-    .map((account) => account.id)
 }
 
 const onPlatformChange = () => {
@@ -764,9 +779,17 @@ const getQuickSetupConfigCount = () => {
 
 const getQuickSetupTaskCount = () => {
   const accountCount = accounts.value.filter(
-    acc => acc.platform === quickSetup.platform
+    acc => acc.platform === quickSetup.platform && acc.status === 'active'
   ).length
   return accountCount * getQuickSetupConfigCount()
+}
+
+const getQuickSetupDomainValues = () =>
+  getAvailableDomainOptions(quickSetup.platform).map((option) => option.value)
+
+const getQuickSetupDomainSummary = () => {
+  const domains = getQuickSetupDomainValues()
+  return domains.length === 0 ? '当前无可用数据域' : `${domains.length} 个支持数据域`
 }
 
 const getQuickSetupConfigs = () => {
@@ -784,7 +807,7 @@ const getQuickSetupConfigs = () => {
   granularities.forEach(g => {
     configs.push({
       name: `${quickSetup.platform}-all-${g}`,
-      description: `${quickSetup.platform}平台全部数据域${g === 'daily' ? '日' : g === 'weekly' ? '周' : '月'}度采集 - ${schedules[g].desc}`
+      description: `${quickSetup.platform}平台支持数据域${g === 'daily' ? '日' : g === 'weekly' ? '周' : '月'}度采集 - ${schedules[g].desc}`
     })
   })
   
@@ -804,7 +827,7 @@ const executeQuickSetup = async () => {
       'monthly': { cron: '0 5 1 * *', dateType: 'last_30_days' }
     }
     
-    const allDomains = ['orders', 'products', 'services', 'analytics', 'finance', 'inventory']
+    const allDomains = getQuickSetupDomainValues()
     const defaultSubDomains = Object.fromEntries(
       getSelectedSubtypeDomains(allDomains).map((domain) => [
         domain,

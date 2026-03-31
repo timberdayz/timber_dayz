@@ -24,6 +24,29 @@ class TimeSelectionPayload(BaseModel):
     start_time: Optional[str] = Field("00:00:00", description="自定义开始时间 HH:MM:SS")
     end_time: Optional[str] = Field("23:59:59", description="自定义结束时间 HH:MM:SS")
 
+    @model_validator(mode="after")
+    def validate_payload_shape(self):
+        mode = self.mode
+        if mode == "preset":
+            if not self.preset:
+                raise ValueError("preset time selection requires preset")
+            if self.start_date or self.end_date:
+                raise ValueError("preset time selection cannot include custom range fields")
+            self.start_time = "00:00:00"
+            self.end_time = "23:59:59"
+            return self
+
+        if mode == "custom":
+            if self.preset:
+                raise ValueError("custom time selection cannot include preset fields")
+            if not self.start_date or not self.end_date:
+                raise ValueError("custom time selection requires start_date and end_date")
+            self.start_time = self.start_time or "00:00:00"
+            self.end_time = self.end_time or "23:59:59"
+            return self
+
+        return self
+
 
 class CollectionConfigCreate(BaseModel):
     """创建采集配置请求(v4.7.0)"""
@@ -93,6 +116,21 @@ class CollectionConfigResponse(BaseModel):
     created_by: Optional[str]
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def hydrate_time_selection(self):
+        if self.time_selection is None:
+            mode = "custom" if self.date_range_type == "custom" else "preset"
+            payload = {"mode": mode}
+            if mode == "preset" and self.date_range_type:
+                payload["preset"] = self.date_range_type
+            elif mode == "custom" and self.custom_date_start and self.custom_date_end:
+                payload["start_date"] = self.custom_date_start.isoformat()
+                payload["end_date"] = self.custom_date_end.isoformat()
+            else:
+                return self
+            self.time_selection = TimeSelectionPayload.model_validate(payload)
+        return self
 
 
 class TaskCreateRequest(BaseModel):

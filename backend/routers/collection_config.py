@@ -22,6 +22,7 @@ from backend.schemas.common import SuccessResponse
 from backend.services.collection_contracts import (
     build_legacy_collection_date_fields,
     derive_granularity_from_time_selection,
+    get_supported_config_data_domains,
     normalize_domain_subtypes,
     normalize_time_selection,
 )
@@ -94,7 +95,7 @@ async def create_config(
         if existing:
             raise HTTPException(status_code=400, detail="配置名称已存在")
 
-    valid_domains = ["orders", "products", "services", "analytics", "finance", "inventory"]
+    valid_domains = get_supported_config_data_domains(config.platform)
     for domain in config.data_domains:
         if domain not in valid_domains:
             raise HTTPException(status_code=400, detail=f"无效的数据域: {domain}")
@@ -181,8 +182,13 @@ async def update_config(
         raise HTTPException(status_code=404, detail="配置不存在")
 
     update_dict = update_data.model_dump(exclude_unset=True)
+    effective_platform = config.platform
+    effective_domains = update_dict.get("data_domains") or config.data_domains or []
+    valid_domains = get_supported_config_data_domains(effective_platform)
+    for domain in effective_domains:
+        if domain not in valid_domains:
+            raise HTTPException(status_code=400, detail=f"无效的数据域: {domain}")
     if "sub_domains" in update_dict:
-        effective_domains = update_dict.get("data_domains") or config.data_domains or []
         update_dict["sub_domains"] = normalize_domain_subtypes(
             data_domains=effective_domains,
             sub_domains=update_dict.get("sub_domains"),
@@ -194,9 +200,9 @@ async def update_config(
 
     time_selection = normalize_time_selection(
         time_selection=time_selection_input,
-        date_range_type=update_dict.get("date_range_type") or config.date_range_type,
-        custom_date_start=update_dict.get("custom_date_start") or config.custom_date_start,
-        custom_date_end=update_dict.get("custom_date_end") or config.custom_date_end,
+        date_range_type=None if time_selection_input is not None else (update_dict.get("date_range_type") or config.date_range_type),
+        custom_date_start=None if time_selection_input is not None else (update_dict.get("custom_date_start") or config.custom_date_start),
+        custom_date_end=None if time_selection_input is not None else (update_dict.get("custom_date_end") or config.custom_date_end),
     )
     if time_selection:
         config.granularity = derive_granularity_from_time_selection(
