@@ -5,10 +5,30 @@ export const DOMAIN_SUBTYPE_OPTIONS = {
   ]
 }
 
+export const DEFAULT_DOMAIN_OPTIONS = [
+  { label: '订单', value: 'orders' },
+  { label: '产品', value: 'products' },
+  { label: '流量分析', value: 'analytics' },
+  { label: '财务', value: 'finance' },
+  { label: '服务', value: 'services' },
+  { label: '库存', value: 'inventory' }
+]
+
+export const PLATFORM_DOMAIN_OPTION_OVERRIDES = {
+  miaoshou: [
+    { label: '订单', value: 'orders' }
+  ]
+}
+
 export const getSubtypeOptions = (domain) => DOMAIN_SUBTYPE_OPTIONS[domain] || []
 
 export const getSelectedSubtypeDomains = (dataDomains = []) =>
   (dataDomains || []).filter((domain) => getSubtypeOptions(domain).length > 0)
+
+export const getAvailableDomainOptions = (platform = '') => {
+  const normalizedPlatform = String(platform || '').toLowerCase()
+  return PLATFORM_DOMAIN_OPTION_OVERRIDES[normalizedPlatform] || DEFAULT_DOMAIN_OPTIONS
+}
 
 export const normalizeDomainSubtypeMap = (rawValue) => {
   if (!rawValue) return {}
@@ -73,4 +93,45 @@ export const buildDateRangeFromPreset = (
   default:
     return {}
   }
+}
+
+export const buildTimeSelectionPayload = (
+  preset,
+  {
+    customRange = [],
+    startTime = '00:00:00',
+    endTime = '23:59:59'
+  } = {}
+) => {
+  if (preset === 'custom' && Array.isArray(customRange) && customRange.length === 2) {
+    return {
+      mode: 'custom',
+      start_date: customRange[0],
+      end_date: customRange[1],
+      start_time: startTime,
+      end_time: endTime
+    }
+  }
+
+  if (preset === 'today' || preset === 'yesterday' || preset === 'last_7_days' || preset === 'last_30_days') {
+    return {
+      mode: 'preset',
+      preset
+    }
+  }
+
+  return null
+}
+
+export const resolveAccountIdsForConfigRun = (config = {}, accounts = []) => {
+  const explicit = Array.isArray(config.account_ids) ? config.account_ids.filter(Boolean) : []
+  if (explicit.length > 0) {
+    return explicit
+  }
+
+  const platform = String(config.platform || '').toLowerCase()
+  return (accounts || [])
+    .filter((account) => String(account.platform || '').toLowerCase() === platform)
+    .filter((account) => String(account.status || '').toLowerCase() === 'active')
+    .map((account) => account.id)
 }
