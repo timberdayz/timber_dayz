@@ -17,7 +17,7 @@ def _make_task(**overrides):
         task_id="task-1",
         platform="miaoshou",
         account="acc-1",
-        status="paused",
+        status="verification_required",
         progress=40,
         current_step="等待验证码",
         files_collected=0,
@@ -98,3 +98,50 @@ async def test_resume_task_accepts_manual_completed_for_slide_captcha():
     assert task.status == "verification_submitted"
     assert body["verification_type"] == "slide_captcha"
     redis.set.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_verification_required_broadcasts_websocket_event(monkeypatch):
+    from backend.routers.collection_tasks import _on_verification_required
+
+    task = _make_task()
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = task
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock()
+
+    class _SessionManager:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    broadcast = AsyncMock()
+    monkeypatch.setattr(
+        "backend.models.database.AsyncSessionLocal",
+        lambda: _SessionManager(),
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks.connection_manager.send_verification_required",
+        broadcast,
+    )
+
+    app = SimpleNamespace(state=SimpleNamespace(redis=None))
+    value = await _on_verification_required(
+        task_id="task-1",
+        verification_type="graphical_captcha",
+        screenshot_path="temp/task.png",
+        app=app,
+    )
+
+    assert value is None
+    assert task.status == "verification_required"
+    broadcast.assert_awaited_once_with(
+        "task-1",
+        "graphical_captcha",
+        "temp/task.png",
+    )

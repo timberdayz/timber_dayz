@@ -366,7 +366,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, MagicStick, CopyDocument } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
 import {
-  buildDateRangeFromPreset,
+  buildTimeSelectionPayload,
   getDatePresetLabel,
   getSelectedSubtypeDomains,
   getSubtypeOptions,
@@ -390,6 +390,8 @@ const filters = reactive({
 })
 
 // 表单数据（v4.7.0）
+const DEFAULT_GRANULARITY = 'daily'
+
 const form = reactive({
   id: null,
   name: '',
@@ -397,7 +399,7 @@ const form = reactive({
   account_ids: [],
   data_domains: [],
   sub_domains: {},
-  granularity: 'daily',  // 保留用于后端推断
+  granularity: DEFAULT_GRANULARITY,  // 保留用于后端推断
   date_range_type: 'yesterday',
   custom_date_start: null,
   custom_date_end: null,
@@ -539,7 +541,7 @@ const resetForm = () => {
     account_ids: [],
     data_domains: [],
     sub_domains: {},
-    granularity: 'daily',
+    granularity: DEFAULT_GRANULARITY,
     date_range_type: 'yesterday',
     custom_date_start: null,
     custom_date_end: null,
@@ -565,6 +567,9 @@ const submitForm = async () => {
       data.custom_date_start = customDateRange.value[0]
       data.custom_date_end = customDateRange.value[1]
     }
+    data.time_selection = buildTimeSelectionPayload(data.date_range_type, {
+      customRange: customDateRange.value
+    })
     
     delete data.id
     
@@ -607,29 +612,53 @@ const toggleActive = async (row) => {
 
 const runConfig = async (row) => {
   try {
-    const dateRange = buildDateRangeFromPreset(row.date_range_type, {
-      platform: row.platform,
+    const accountIds = resolveConfigAccountIds(row)
+    if (accountIds.length === 0) {
+      ElMessage.warning('该配置没有可用账号，无法创建采集任务')
+      return
+    }
+
+    const timeSelection = buildTimeSelectionPayload(row.date_range_type, {
       customRange:
         row.date_range_type === 'custom' && row.custom_date_start && row.custom_date_end
           ? [row.custom_date_start, row.custom_date_end]
           : []
     })
 
-    // 为每个账号创建任务
-    for (const accountId of row.account_ids) {
+    if (!timeSelection) {
+      ElMessage.warning('该配置的时间选择无效，无法创建采集任务')
+      return
+    }
+
+    for (const accountId of resolveConfigAccountIds(row)) {
       await collectionApi.createTask({
         platform: row.platform,
         account_id: accountId,
         data_domains: row.data_domains,
         sub_domains: row.sub_domains || {},
         granularity: row.granularity,
-        date_range: dateRange
+        time_selection: buildTimeSelectionPayload(row.date_range_type, {
+          customRange:
+            row.date_range_type === 'custom' && row.custom_date_start && row.custom_date_end
+              ? [row.custom_date_start, row.custom_date_end]
+              : []
+        })
       })
     }
-    ElMessage.success(`已创建 ${row.account_ids.length} 个采集任务`)
+    ElMessage.success(`已创建 ${accountIds.length} 个采集任务`)
   } catch (error) {
     ElMessage.error('执行失败: ' + error.message)
   }
+}
+
+const resolveConfigAccountIds = (row) => {
+  const explicitAccountIds = Array.isArray(row.account_ids) ? row.account_ids : []
+  if (explicitAccountIds.length > 0) {
+    return explicitAccountIds
+  }
+  return accounts.value
+    .filter((account) => account.platform?.toLowerCase() === row.platform?.toLowerCase())
+    .map((account) => account.id)
 }
 
 const onPlatformChange = () => {
@@ -776,6 +805,12 @@ const executeQuickSetup = async () => {
     }
     
     const allDomains = ['orders', 'products', 'services', 'analytics', 'finance', 'inventory']
+    const defaultSubDomains = Object.fromEntries(
+      getSelectedSubtypeDomains(allDomains).map((domain) => [
+        domain,
+        getSubtypeOptions(domain).map((option) => option.value)
+      ])
+    )
     
     for (const gran of granularities) {
       const configData = {
@@ -783,7 +818,7 @@ const executeQuickSetup = async () => {
         platform: quickSetup.platform,
         account_ids: [],  // 所有活跃账号
         data_domains: allDomains,
-        sub_domains: { services: ['agent', 'ai_assistant'] },
+        sub_domains: defaultSubDomains,
         granularity: gran,
         date_range_type: schedules[gran].dateType,
         schedule_enabled: true,

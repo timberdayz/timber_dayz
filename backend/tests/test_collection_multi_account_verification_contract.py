@@ -19,7 +19,7 @@ def _make_task(**overrides):
         task_id="task-1",
         platform="miaoshou",
         account="acc-1",
-        status="paused",
+        status="verification_required",
         progress=40,
         current_step="等待验证码",
         files_collected=0,
@@ -68,13 +68,13 @@ def test_build_task_verification_item_is_scoped_per_account():
 
 
 @pytest.mark.asyncio
-async def test_list_verification_items_filters_paused_verification_tasks():
-    paused = _make_task(task_id="task-1", account="acc-1", status="paused")
+async def test_list_verification_items_filters_verification_required_tasks():
+    paused = _make_task(task_id="task-1", account="acc-1", status="verification_required")
     running = _make_task(task_id="task-2", account="acc-2", status="running")
     no_verification = _make_task(
         task_id="task-3",
         account="acc-3",
-        status="paused",
+        status="verification_required",
         verification_type=None,
     )
 
@@ -94,7 +94,7 @@ async def test_list_verification_items_filters_paused_verification_tasks():
         platform=None,
         verification_type=None,
         account_id=None,
-        status="paused",
+        status="verification_required",
         db=_FakeDb(),
     )
 

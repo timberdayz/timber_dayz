@@ -42,6 +42,16 @@ class MiaoshouOrdersExportBase(ExportComponent):
         cfg = self.ctx.config or {}
         return str(cfg.get("orders_subtype") or self.sub_domain or "shopee").strip().lower()
 
+    @staticmethod
+    def _orders_subtype_label(subtype: str) -> str:
+        normalized = str(subtype or "").strip().lower()
+        mapping = {
+            "shopee": "Shopee",
+            "tiktok": "TikTok",
+            "lazada": "Lazada",
+        }
+        return mapping.get(normalized, normalized.capitalize())
+
     def _orders_detail_url(self, subtype: str) -> str:
         subtype_norm = (subtype or "shopee").strip().lower()
         return f"{self.sel.base_url}{self.sel.deep_link_template.format(platform=subtype_norm)}"
@@ -101,7 +111,7 @@ class MiaoshouOrdersExportBase(ExportComponent):
             await page.wait_for_timeout(self.sel.close_poll_interval_ms)
 
     async def _ensure_orders_subtype_selected(self, page: Any, subtype: str) -> None:
-        label = subtype.strip().capitalize()
+        label = self._orders_subtype_label(subtype)
         platform_label = page.get_by_text("平台", exact=True).first
         platform_row = platform_label.locator(
             "xpath=ancestor::*[.//*[@role='radiogroup']][1]"

@@ -8,6 +8,7 @@ from typing import Any
 from modules.apps.collection_center.executor_v2 import VerificationRequiredError
 from modules.components.base import ExecutionContext
 from modules.components.login.base import LoginComponent, LoginResult
+from modules.platforms.tiktok.archive.analytics_config import AnalyticsSelectors
 
 
 class TiktokLogin(LoginComponent):
@@ -89,7 +90,7 @@ class TiktokLogin(LoginComponent):
 
     def _otp_input_locator(self, page: Any) -> Any:
         return page.locator(
-            '#TT4B_TSV_Verify_Code_Input, input[name="code"], input[name*="otp"], input[placeholder*="验证码"]'
+            '#TT4B_TSV_Verify_Code_Input, input[name="code"], input[name*="otp"], input[placeholder*="验证码"], input[autocomplete="one-time-code"], input[inputmode="numeric"]'
         ).first
 
     def _otp_confirm_locator(self, page: Any) -> Any:
@@ -120,6 +121,49 @@ class TiktokLogin(LoginComponent):
     async def _find_visible_otp_error(self, page: Any) -> str | None:
         return await self._find_visible_text(page, self._known_otp_error_texts())
 
+    async def _count_visible_texts(self, page: Any, texts: tuple[str, ...]) -> int:
+        count = 0
+        for text in texts:
+            try:
+                locator = page.get_by_text(text, exact=False).first
+                if await self._locator_is_visible(locator):
+                    count += 1
+            except Exception:
+                continue
+        return count
+
+    async def _first_visible_locator(
+        self,
+        locators: tuple[Any, ...],
+        *,
+        timeout: int = 500,
+    ) -> Any | None:
+        for locator in locators:
+            if await self._locator_is_visible(locator, timeout=timeout):
+                return locator
+        return None
+
+    def _otp_input_locators(self, page: Any) -> tuple[Any, ...]:
+        return (
+            self._otp_input_locator(page),
+            page.get_by_role("textbox", name=re.compile("验证码", re.IGNORECASE)).first,
+        )
+
+    def _otp_confirm_locators(self, page: Any) -> tuple[Any, ...]:
+        return (
+            self._otp_confirm_locator(page),
+            page.locator('button:has-text("确认"), button:has-text("确定")').first,
+        )
+
+    def _otp_surface_texts(self) -> tuple[str, ...]:
+        return (
+            "双重验证",
+            "在这台设备上不再询问",
+            "本机不再询问",
+            "没有收到验证码",
+            "发送验证码",
+        )
+
     async def _current_login_mode(self, page: Any) -> str:
         if await self._locator_is_visible(self._email_input_locator(page), timeout=300):
             return "email"
@@ -129,29 +173,66 @@ class TiktokLogin(LoginComponent):
             return "email"
         return "phone"
 
-    async def _ensure_login_mode(self, page: Any, target_mode: str) -> None:
-        current_mode = await self._current_login_mode(page)
-        if current_mode == target_mode:
-            return
+    async def _wait_for_login_surface_ready(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 10000,
+        poll_ms: int = 500,
+    ) -> bool:
+        elapsed = 0
+        while elapsed <= timeout_ms:
+            probes = (
+                self._phone_input_locator(page),
+                self._email_input_locator(page),
+                self._password_locator(page),
+                self._login_button_locator(page),
+                self._email_login_switch_locator(page),
+                self._phone_login_switch_locator(page),
+            )
+            for probe in probes:
+                if await self._locator_is_visible(probe, timeout=300):
+                    return True
+            await page.wait_for_timeout(poll_ms)
+            elapsed += poll_ms
+        return False
 
-        switch = (
-            self._phone_login_switch_locator(page)
-            if target_mode == "phone"
-            else self._email_login_switch_locator(page)
-        )
-        if not await self._locator_is_visible(switch, timeout=1500):
-            raise RuntimeError(f"cannot switch login mode to {target_mode}")
-        await switch.click(timeout=5000)
-        await page.wait_for_timeout(500)
+    async def _ensure_login_mode(self, page: Any, target_mode: str) -> None:
+        for _ in range(6):
+            current_mode = await self._current_login_mode(page)
+            if current_mode == target_mode:
+                return
+
+            switch = (
+                self._phone_login_switch_locator(page)
+                if target_mode == "phone"
+                else self._email_login_switch_locator(page)
+            )
+            if await self._locator_is_visible(switch, timeout=500):
+                await switch.click(timeout=5000)
+            await page.wait_for_timeout(500)
 
         current_mode = await self._current_login_mode(page)
         if current_mode != target_mode:
-            raise RuntimeError(f"failed to switch login mode to {target_mode}")
+            raise RuntimeError(f"cannot switch login mode to {target_mode}")
 
     async def _is_otp_visible(self, page: Any) -> bool:
-        input_visible = await self._locator_is_visible(self._otp_input_locator(page), timeout=1000)
-        confirm_visible = await self._locator_is_visible(self._otp_confirm_locator(page), timeout=1000)
-        return input_visible and confirm_visible
+        input_locator = await self._first_visible_locator(self._otp_input_locators(page), timeout=1000)
+        confirm_locator = await self._first_visible_locator(self._otp_confirm_locators(page), timeout=1000)
+        input_visible = input_locator is not None
+        confirm_visible = confirm_locator is not None
+        surface_text = await self._find_visible_text(page, self._otp_surface_texts())
+        surface_text_count = await self._count_visible_texts(page, self._otp_surface_texts())
+
+        if input_visible and confirm_visible:
+            return True
+        if input_visible and surface_text:
+            return True
+        if confirm_visible and surface_text:
+            return True
+        if surface_text_count >= 2:
+            return True
+        return False
 
     async def _fill_credentials(self, page: Any, account: dict[str, Any]) -> None:
         mode = await self._current_login_mode(page)
@@ -167,7 +248,10 @@ class TiktokLogin(LoginComponent):
         await self._login_button_locator(page).click(timeout=5000)
 
     async def _fill_otp(self, page: Any, otp_value: str) -> None:
-        await self._otp_input_locator(page).fill(otp_value, timeout=5000)
+        locator = await self._first_visible_locator(self._otp_input_locators(page), timeout=1000)
+        if locator is None:
+            locator = self._otp_input_locator(page)
+        await locator.fill(otp_value, timeout=5000)
 
     async def _ensure_trust_device_checked(self, page: Any) -> None:
         try:
@@ -198,10 +282,102 @@ class TiktokLogin(LoginComponent):
             pass
 
     async def _confirm_otp(self, page: Any) -> None:
-        await self._otp_confirm_locator(page).click(timeout=5000)
+        locator = await self._first_visible_locator(self._otp_confirm_locators(page), timeout=1000)
+        if locator is None:
+            locator = self._otp_confirm_locator(page)
+        await locator.click(timeout=5000)
 
     async def _cleanup_after_login(self, page: Any) -> None:
         return None
+
+    async def _homepage_dom_looks_ready(self, page: Any) -> bool:
+        config = self.ctx.config or {}
+        account = self.ctx.account or {}
+        region = str(config.get("shop_region") or account.get("shop_region") or "").strip().upper()
+
+        if region:
+            for token in (region, f"{region} ", f"{region} Singapore"):
+                try:
+                    if await self._locator_is_visible(page.get_by_text(token, exact=False).first, timeout=300):
+                        return True
+                except Exception:
+                    continue
+
+        for text in ("TikTok Shop",):
+            try:
+                if await self._locator_is_visible(page.get_by_text(text, exact=False).first, timeout=300):
+                    return True
+            except Exception:
+                continue
+
+        return False
+
+    async def _data_overview_dom_looks_ready(self, page: Any) -> bool:
+        for probe in AnalyticsSelectors.DATA_READY_PROBES:
+            try:
+                if await self._locator_is_visible(page.locator(probe).first, timeout=300):
+                    return True
+            except Exception:
+                continue
+
+        for text in ("GMV",):
+            try:
+                if await self._locator_is_visible(page.get_by_text(text, exact=False).first, timeout=300):
+                    return True
+            except Exception:
+                continue
+
+        return False
+
+    def _login_success_target(self) -> str:
+        config = self.ctx.config or {}
+        params = config.get("params") or {}
+        target = str(params.get("login_success_target") or "homepage").strip().lower()
+        return target if target in {"homepage", "data_overview"} else "homepage"
+
+    async def _target_looks_ready(self, page: Any) -> bool:
+        cur = str(getattr(page, "url", "") or "").strip().lower()
+        if not self._login_looks_successful(cur):
+            return False
+
+        if self._login_success_target() == "data_overview":
+            if "/compass/data-overview" not in cur:
+                return False
+            return await self._data_overview_dom_looks_ready(page)
+
+        if "/homepage" not in cur:
+            return False
+        return await self._homepage_dom_looks_ready(page)
+
+    async def _wait_for_post_login_outcome(
+        self,
+        page: Any,
+        *,
+        phase: str,
+        timeout_ms: int = 90000,
+        poll_ms: int = 1000,
+    ) -> str:
+        elapsed = 0
+        while elapsed <= timeout_ms:
+            login_error = await self._find_visible_login_error(page)
+            if login_error:
+                return "login_error"
+
+            otp_error = await self._find_visible_otp_error(page)
+            if otp_error and phase == "post_otp_submit":
+                return "otp_error"
+
+            if await self._target_looks_ready(page):
+                return "success"
+
+            if await self._is_otp_visible(page):
+                if phase == "post_credentials":
+                    return "otp"
+
+            await page.wait_for_timeout(poll_ms)
+            elapsed += poll_ms
+
+        return "timeout"
 
     async def _raise_otp_verification_required(self, page: Any, config: dict[str, Any]) -> None:
         screenshot_dir = (config or {}).get("task", {}).get("screenshot_dir")
@@ -215,23 +391,19 @@ class TiktokLogin(LoginComponent):
         raise VerificationRequiredError("otp", screenshot_path)
 
     async def _submit_resumed_otp(self, page: Any, otp_value: str) -> LoginResult:
-        await self._fill_otp(page, otp_value)
         await self._ensure_trust_device_checked(page)
+        await self._fill_otp(page, otp_value)
         await self._confirm_otp(page)
-        await page.wait_for_timeout(800)
-
-        otp_error = await self._find_visible_otp_error(page)
-        if otp_error:
-            return LoginResult(success=False, message=otp_error)
-
-        if self._login_looks_successful(str(getattr(page, "url", "") or "")):
+        outcome = await self._wait_for_post_login_outcome(page, phase="post_otp_submit")
+        if outcome == "success":
             await self._cleanup_after_login(page)
             return LoginResult(success=True, message="ok")
-
-        if not await self._is_otp_visible(page):
-            await self._cleanup_after_login(page)
-            return LoginResult(success=True, message="ok")
-
+        if outcome == "otp_error":
+            otp_error = await self._find_visible_otp_error(page)
+            return LoginResult(success=False, message=otp_error or "otp verification failed")
+        if outcome == "login_error":
+            login_error = await self._find_visible_login_error(page)
+            return LoginResult(success=False, message=login_error or "login failed after otp submit")
         return LoginResult(success=False, message="otp did not leave verification screen")
 
     async def run(self, page: Any) -> LoginResult:
@@ -259,6 +431,7 @@ class TiktokLogin(LoginComponent):
 
             await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(800)
+            await self._wait_for_login_surface_ready(page)
 
             if self._login_looks_successful(str(getattr(page, "url", "") or "")):
                 await self._cleanup_after_login(page)
@@ -268,17 +441,14 @@ class TiktokLogin(LoginComponent):
             await self._ensure_login_mode(page, target_mode)
             await self._fill_credentials(page, acc)
             await self._submit_credentials(page)
-            await page.wait_for_timeout(800)
-
-            login_error = await self._find_visible_login_error(page)
-            if login_error:
-                return LoginResult(success=False, message=login_error)
-
-            if self._login_looks_successful(str(getattr(page, "url", "") or "")):
+            outcome = await self._wait_for_post_login_outcome(page, phase="post_credentials")
+            if outcome == "success":
                 await self._cleanup_after_login(page)
                 return LoginResult(success=True, message="ok")
-
-            if await self._is_otp_visible(page):
+            if outcome == "login_error":
+                login_error = await self._find_visible_login_error(page)
+                return LoginResult(success=False, message=login_error or "login failed")
+            if outcome == "otp":
                 await self._ensure_trust_device_checked(page)
                 if not otp_value:
                     await self._raise_otp_verification_required(page, config)

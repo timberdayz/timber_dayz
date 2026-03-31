@@ -27,7 +27,7 @@ Notes:
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
@@ -724,7 +724,7 @@ class CollectionTask(Base):
     task_id = Column(String(100), nullable=False)  # UUID任务标识
     platform = Column(String(50), nullable=False)
     account = Column(String(100), nullable=False)  # 账号ID
-    status = Column(String(20), default="pending", nullable=False)  # pending/queued/running/paused/completed/partial_success/failed/cancelled/interrupted
+    status = Column(String(32), default="pending", nullable=False)  # pending/queued/running/verification_required/verification_submitted/completed/partial_success/failed/cancelled/interrupted
     
     # 关联配置(可选,快速采集时为空)
     config_id = Column(Integer, ForeignKey("collection_configs.id", ondelete="SET NULL"), nullable=True)
@@ -801,7 +801,12 @@ class CollectionTaskLog(Base):
     level = Column(String(10), nullable=False)  # info/warning/error
     message = Column(Text, nullable=False)
     details = Column(JSON, nullable=True)  # 步骤可观测: step_id/component/data_domain/success/duration_ms/error
-    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    timestamp = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
     
     # 关系
     task = relationship("CollectionTask", back_populates="logs")

@@ -43,6 +43,7 @@ from backend.services.verification_protocol import (
     extract_resume_submission,
     verification_input_mode,
 )
+from backend.services.websocket_manager import connection_manager
 
 logger = get_logger(__name__)
 
@@ -81,6 +82,7 @@ def _collection_status_to_task_center(status: Optional[str]) -> Optional[str]:
     if status is None:
         return None
     return {
+        "verification_required": "paused",
         "verification_submitted": "running",
     }.get(status, status)
 
@@ -206,7 +208,7 @@ def _build_task_response_payload(task: CollectionTask) -> dict:
 
 
 def _build_task_verification_item(task: CollectionTask) -> Optional[dict]:
-    if getattr(task, "status", None) != "paused" or not getattr(
+    if getattr(task, "status", None) not in ("verification_required", "paused") or not getattr(
         task, "verification_type", None
     ):
         return None
@@ -403,7 +405,7 @@ async def list_verification_items(
     platform: Optional[str] = Query(None, description="按平台筛选"),
     verification_type: Optional[str] = Query(None, description="按验证码类型筛选"),
     account_id: Optional[str] = Query(None, description="按账号筛选"),
-    status: Optional[str] = Query("paused", description="按状态筛选"),
+    status: Optional[str] = Query("verification_required", description="按状态筛选"),
     db: AsyncSession = Depends(get_async_db),
 ):
     stmt = select(CollectionTask)
@@ -412,7 +414,9 @@ async def list_verification_items(
         stmt = stmt.where(CollectionTask.platform == platform)
     if account_id:
         stmt = stmt.where(CollectionTask.account == account_id)
-    if status:
+    if status == "verification_required":
+        stmt = stmt.where(CollectionTask.status.in_(["verification_required", "paused"]))
+    elif status:
         stmt = stmt.where(CollectionTask.status == status)
 
     stmt = stmt.order_by(desc(CollectionTask.created_at))
@@ -564,7 +568,7 @@ async def resume_task(
 ):
     """
     继续任务(验证码恢复)。
-    仅当任务处于 paused 且为「等待验证」时接受请求体中的 captcha_code 或 otp，
+    仅当任务处于 verification_required/paused 且为「等待验证」时接受请求体中的 captcha_code 或 otp，
     写入 Redis 供执行器在同一 page 内填入后继续；否则返回 4xx。
     """
     result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
@@ -573,7 +577,7 @@ async def resume_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    if task.status != "paused":
+    if task.status not in ("verification_required", "paused"):
         raise HTTPException(
             status_code=400,
             detail="验证已超时或任务已结束，请重新发起采集",
@@ -608,7 +612,7 @@ async def resume_task(
         task_id=task.id,
         level="info",
         message="用户已提交验证码，等待执行器继续",
-details={"previous_status": "paused"},
+        details={"previous_status": task.status},
     )
     task.status = "verification_submitted"
     db.add(log)
@@ -857,6 +861,12 @@ async def _collection_step_status_callback(
                     message=message,
                     details=details,
                 )
+            await connection_manager.send_progress(
+                task_id,
+                progress,
+                message,
+                status=getattr(task, "status", None) or "running",
+            )
     except Exception as e:
         logger.error(f"Step status callback failed for task {task_id}: {e}")
 
@@ -896,9 +906,14 @@ async def _on_verification_required(
             if task:
                 task.verification_type = verification_type
                 task.verification_screenshot = screenshot_path
-                task.status = "paused"
+                task.status = "verification_required"
                 await session.commit()
                 await _mirror_collection_task(session, task)
+                await connection_manager.send_verification_required(
+                    task_id,
+                    verification_type,
+                    screenshot_path,
+                )
     except Exception as e:
         logger.error(f"Verification persist failed for task {task_id}: {e}")
     redis_client = getattr(app, "state", None) and getattr(app.state, "redis", None) if app else None
@@ -917,6 +932,18 @@ async def _on_verification_required(
                     await redis_client.delete(key)
                 except Exception:
                     pass
+                try:
+                    async with AsyncSessionLocal() as session:
+                        result = await session.execute(
+                            select(CollectionTask).where(CollectionTask.task_id == task_id)
+                        )
+                        task = result.scalar_one_or_none()
+                        if task:
+                            task.status = "running"
+                            await session.commit()
+                            await _mirror_collection_task(session, task)
+                except Exception as e:
+                    logger.warning(f"Task {task_id}: failed to switch status back to running after verification: {e}")
                 return val
         except Exception as e:
             logger.debug(f"Redis get during verification wait: {e}")
@@ -977,6 +1004,12 @@ async def _execute_collection_task_background(
                 task.completed_at = datetime.now(timezone.utc)
                 await db.commit()
                 await _mirror_collection_task(db, task)
+                await connection_manager.send_complete(
+                    task_id,
+                    "failed",
+                    files_collected=getattr(task, "files_collected", 0) or 0,
+                    error_message=task.error_message,
+                )
                 return
 
             executor = CollectionExecutorV2(
@@ -1032,6 +1065,12 @@ async def _execute_collection_task_background(
                     task.failed_domains = result.failed_domains
                     await db.commit()
                     await _mirror_collection_task(db, task)
+                    await connection_manager.send_complete(
+                        task_id,
+                        result.status,
+                        files_collected=result.files_collected,
+                        error_message=result.error_message,
+                    )
                     logger.info(f"Task {task_id} completed: {result.status}, files={result.files_collected}")
                 finally:
                     await browser.close()
@@ -1048,5 +1087,11 @@ async def _execute_collection_task_background(
                     task.completed_at = datetime.now(timezone.utc)
                     await db.commit()
                     await _mirror_collection_task(db, task)
+                    await connection_manager.send_complete(
+                        task_id,
+                        "failed",
+                        files_collected=getattr(task, "files_collected", 0) or 0,
+                        error_message=str(e),
+                    )
             except Exception as db_error:
                 logger.error(f"Failed to update task status: {db_error}")

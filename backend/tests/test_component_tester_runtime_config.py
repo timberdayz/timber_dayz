@@ -1,5 +1,8 @@
 from tools.test_component import ComponentTester
 from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
 
 
 def test_component_tester_builds_export_runtime_config():
@@ -46,16 +49,28 @@ def test_component_tester_uses_official_playwright_default_browser():
     assert "channel=browser_channel" not in source
 
 
-def test_component_tester_uses_reused_persistent_context_for_login():
+def test_component_tester_disables_reused_persistent_context_for_login():
     tester = ComponentTester(platform="tiktok", account_id="acc-1")
 
-    assert tester._persistent_context_mode("login") == "reused"
+    assert tester._persistent_context_mode("login") is None
 
 
 def test_component_tester_uses_reused_persistent_context_for_export():
     tester = ComponentTester(platform="tiktok", account_id="acc-1")
 
     assert tester._persistent_context_mode("export") == "reused"
+
+
+def test_component_tester_uses_reused_persistent_context_for_navigation():
+    tester = ComponentTester(platform="miaoshou", account_id="acc-1")
+
+    assert tester._persistent_context_mode("navigation") == "reused"
+
+
+def test_component_tester_skip_login_disables_reused_persistent_context_for_non_login_components():
+    tester = ComponentTester(platform="shopee", account_id="acc-1", skip_login=True)
+
+    assert tester._persistent_context_mode("export") is None
 
 
 def test_component_tester_login_readiness_candidates_include_tiktok_specific_signals():
@@ -88,3 +103,64 @@ def test_component_tester_headed_persistent_context_does_not_force_fixed_viewpor
     source = Path("tools/test_component.py").read_text(encoding="utf-8")
 
     assert "'viewport': None if not self.headless else" in source
+
+
+class _FakeProbePage:
+    def __init__(self, url: str = "about:blank"):
+        self.url = url
+        self.goto = AsyncMock()
+        self.wait_for_timeout = AsyncMock()
+
+
+@pytest.mark.asyncio
+async def test_component_tester_primes_login_gate_page_when_storage_state_starts_at_blank():
+    tester = ComponentTester(platform="shopee", account_id="acc-1")
+    page = _FakeProbePage()
+
+    await tester._prime_page_for_login_gate(page, {"login_url": "https://seller.shopee.cn"})
+
+    page.goto.assert_awaited_once_with(
+        "https://seller.shopee.cn",
+        wait_until="domcontentloaded",
+        timeout=60000,
+    )
+
+
+@pytest.mark.asyncio
+async def test_component_tester_primes_login_gate_page_skips_when_already_on_real_url():
+    tester = ComponentTester(platform="shopee", account_id="acc-1")
+    page = _FakeProbePage("https://seller.shopee.cn/")
+
+    await tester._prime_page_for_login_gate(page, {"login_url": "https://seller.shopee.cn"})
+
+    page.goto.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_component_tester_persists_session_after_login_success(monkeypatch):
+    tester = ComponentTester(platform="shopee", account_id="acc-1")
+
+    fake_context = AsyncMock()
+    fake_context.storage_state = AsyncMock(return_value={"cookies": [], "origins": []})
+
+    saved = {}
+
+    async def _fake_save(platform, account_id, storage_state):
+        saved["platform"] = platform
+        saved["account_id"] = account_id
+        saved["storage_state"] = storage_state
+        return True
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._save_session_async",
+        _fake_save,
+    )
+
+    ok = await tester._save_context_session(fake_context, {"account_id": "acc-1"})
+
+    assert ok is True
+    assert saved == {
+        "platform": "shopee",
+        "account_id": "acc-1",
+        "storage_state": {"cookies": [], "origins": []},
+    }

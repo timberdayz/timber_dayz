@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
+from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -39,6 +42,49 @@ class ShopeeProductsExport(ExportComponent):
     def _known_throttled_texts(self) -> tuple[str, ...]:
         return self.sel.throttled_texts
 
+    def _normalize_text(self, value: str | None) -> str:
+        return " ".join(str(value or "").strip().lower().split())
+
+    def _normalize_date_text(self, value: str | None) -> str:
+        return re.sub(r"\s+", "", str(value or "").strip().lower())
+
+    def _region_text_candidates(self, region_value: str | None) -> tuple[str, ...]:
+        normalized = self._normalize_text(region_value)
+        if not normalized:
+            return ()
+        mapping = {
+            "sg": ("新加坡", "sg", "singapore"),
+            "my": ("马来西亚", "my", "malaysia"),
+            "ph": ("菲律宾", "ph", "philippines"),
+            "th": ("泰国", "th", "thailand"),
+            "vn": ("越南", "vn", "vietnam"),
+            "id": ("印度尼西亚", "印尼", "id", "indonesia"),
+            "tw": ("台湾", "tw", "taiwan"),
+            "br": ("巴西", "br", "brazil"),
+        }
+        return mapping.get(normalized, (normalized,))
+
+    def _shop_name_looks_selected(
+        self,
+        current_label: str | None,
+        target_shop: str | None,
+        target_region: str | None = None,
+    ) -> bool:
+        current = self._normalize_text(current_label)
+        target = self._normalize_text(target_shop)
+        if not current or not target:
+            return False
+        if "所有店铺" in current:
+            return False
+        region_candidates = self._region_text_candidates(target_region)
+        if region_candidates:
+            region_part = current.split("/", 1)[0].strip() if "/" in current else current
+            normalized_region_part = self._normalize_text(region_part)
+            normalized_candidates = tuple(self._normalize_text(candidate) for candidate in region_candidates)
+            if normalized_region_part not in normalized_candidates:
+                return False
+        return target in current
+
     def _is_export_throttled(self, text: str) -> bool:
         content = str(text or "").strip().lower()
         if not content:
@@ -61,6 +107,147 @@ class ShopeeProductsExport(ExportComponent):
             return bool(await locator.is_visible(timeout=1000))
         except Exception:
             return False
+
+    async def _visible_text_content(self, page: Any, selectors: tuple[str, ...]) -> str | None:
+        locator = await self._first_visible_locator(page, selectors)
+        if locator is None:
+            return None
+        try:
+            return await locator.text_content()
+        except Exception:
+            return None
+
+    def _date_trigger_fallback_texts(self) -> tuple[str, ...]:
+        candidates = [
+            "\u7edf\u8ba1\u65f6\u95f4",
+            *self.sel.preset_labels.values(),
+            *self.sel.granularity_labels.values(),
+            "\u4eca\u5929",
+        ]
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            normalized = self._normalize_text(candidate)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(candidate)
+        return tuple(deduped)
+
+    async def _find_date_picker_trigger(self, page: Any) -> Any | None:
+        trigger = await self._first_visible_locator(page, self.sel.date_picker_triggers)
+        if trigger is not None:
+            return trigger
+
+        for text in self._date_trigger_fallback_texts():
+            try:
+                locator = page.get_by_text(text, exact=False).first
+                if await locator.is_visible(timeout=1000):
+                    return locator
+            except Exception:
+                continue
+        return None
+
+    async def _find_date_option_locator(self, page: Any, text: str) -> Any | None:
+        try:
+            matches = page.get_by_text(text, exact=False)
+        except Exception:
+            return None
+
+        candidates: list[Any] = []
+        if hasattr(matches, "last"):
+            candidates.append(matches.last)
+        if hasattr(matches, "first"):
+            candidates.append(matches.first)
+        elif matches is not None:
+            candidates.append(matches)
+
+        seen: set[int] = set()
+        for locator in candidates:
+            if locator is None:
+                continue
+            marker = id(locator)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            try:
+                if await locator.is_visible(timeout=2000):
+                    return locator
+            except Exception:
+                continue
+        return None
+
+    async def _hover_text_option(self, page: Any, text: str) -> bool:
+        locator = await self._find_date_option_locator(page, text)
+        if locator is None:
+            return False
+        try:
+            await locator.hover(timeout=5000)
+        except Exception:
+            return False
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(300)
+        return True
+
+    def _match_known_date_label(self, value: str | None) -> str | None:
+        content = self._normalize_date_text(value)
+        if not content:
+            return None
+
+        for label in (
+            *self.sel.preset_labels.values(),
+            *self.sel.granularity_labels.values(),
+        ):
+            normalized_label = self._normalize_date_text(label)
+            if normalized_label and normalized_label in content:
+                return label
+        return None
+
+    def _single_day_target_value(self, config: dict[str, Any]) -> str | None:
+        return (
+            str(config.get("end_date") or "").strip()
+            or str(config.get("date_to") or "").strip()
+            or str(config.get("start_date") or "").strip()
+            or str(config.get("date_from") or "").strip()
+            or None
+        )
+
+    async def _wait_date_selection_applied(
+        self,
+        page: Any,
+        target_label: str,
+        *,
+        timeout_ms: int = 2500,
+        poll_ms: int = 250,
+    ) -> bool:
+        waited = 0
+        while waited <= timeout_ms:
+            current_label = await self._current_date_label(page)
+            if current_label == target_label:
+                return True
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return False
+
+    async def _wait_shop_selection_applied(
+        self,
+        page: Any,
+        target_shop: str,
+        target_region: str | None,
+        *,
+        timeout_ms: int = 2500,
+        poll_ms: int = 250,
+    ) -> bool:
+        waited = 0
+        while waited <= timeout_ms:
+            current_shop_label = await self._visible_text_content(page, self.sel.shop_switch_triggers)
+            if self._shop_name_looks_selected(current_shop_label, target_shop, target_region):
+                return True
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return False
 
     def _current_shop_id(self, page: Any) -> str | None:
         try:
@@ -118,9 +305,17 @@ class ShopeeProductsExport(ExportComponent):
             or account.get("selected_shop_name")
             or ""
         ).strip()
+        target_region = str(
+            cfg.get("shop_region")
+            or cfg.get("region")
+            or account.get("shop_region")
+            or account.get("region")
+            or ""
+        ).strip()
         if not target_shop:
             return
-        if await self._visible_text(page, target_shop):
+        current_shop_label = await self._visible_text_content(page, self.sel.shop_switch_triggers)
+        if self._shop_name_looks_selected(current_shop_label, target_shop, target_region):
             return
 
         trigger = await self._first_visible_locator(page, self.sel.shop_switch_triggers)
@@ -129,48 +324,168 @@ class ShopeeProductsExport(ExportComponent):
         await trigger.click(timeout=5000)
         await page.wait_for_timeout(800)
 
+        for candidate in self._region_text_candidates(target_region):
+            if not candidate:
+                continue
+            try:
+                region_locator = page.get_by_text(candidate, exact=False).first
+                if await region_locator.is_visible(timeout=1000):
+                    await region_locator.click(timeout=5000)
+                    await page.wait_for_timeout(300)
+                    break
+            except Exception:
+                continue
+
         try:
             target = page.get_by_text(target_shop, exact=False).first
             if await target.is_visible(timeout=1500):
                 await target.click(timeout=5000)
-                await page.wait_for_timeout(1200)
+                applied = await self._wait_shop_selection_applied(page, target_shop, target_region)
+                if not applied:
+                    await page.wait_for_timeout(1200)
         except Exception:
             pass
 
-    async def _ensure_date_selection(self, page: Any) -> None:
-        config = self.ctx.config or {}
+    async def _current_date_label(self, page: Any) -> str | None:
+        trigger = await self._find_date_picker_trigger(page)
+        if trigger is not None:
+            try:
+                summary_text = await trigger.text_content()
+            except Exception:
+                summary_text = None
+            matched = self._match_known_date_label(summary_text)
+            if matched:
+                return matched
+
+        for text in (
+            *self.sel.preset_labels.values(),
+            *self.sel.granularity_labels.values(),
+        ):
+            if await self._visible_text(page, text):
+                return text
+        return None
+
+    def _target_date_label(self, config: dict[str, Any]) -> str:
+        time_selection = config.get("time_selection")
+        if isinstance(time_selection, dict):
+            if str(time_selection.get("mode") or "").strip().lower() == "preset" and time_selection.get("preset"):
+                normalized = normalize_time_request(
+                    "products",
+                    time_mode="preset",
+                    value=str(time_selection["preset"]),
+                )
+                return preset_label(normalized["value"])
+
+        if config.get("date_preset"):
+            normalized = normalize_time_request(
+                "products",
+                time_mode="preset",
+                value=str(config["date_preset"]),
+            )
+            return preset_label(normalized["value"])
+
         if "preset" in config:
             normalized = normalize_time_request(
                 "products",
                 time_mode="preset",
                 value=str(config["preset"]),
             )
-            target_text = preset_label(normalized["value"])
-            await self._open_date_picker(page)
-            await self._click_text_option(page, target_text)
-            return
-        granularity = str(config.get("granularity") or "daily")
+            return preset_label(normalized["value"])
+
+        granularity = str(config.get("granularity") or "daily").strip().lower()
+        preset_by_granularity = {
+            "day": "yesterday",
+            "daily": "yesterday",
+            "d": "yesterday",
+            "week": "last_7_days",
+            "weekly": "last_7_days",
+            "w": "last_7_days",
+            "month": "last_30_days",
+            "monthly": "last_30_days",
+            "m": "last_30_days",
+        }
+        preset_value = preset_by_granularity.get(granularity)
+        if preset_value:
+            return preset_label(preset_value)
         normalized = normalize_time_request(
             "products",
             time_mode="granularity",
             value=granularity,
         )
-        target_text = granularity_label(normalized["value"])
+        return granularity_label(normalized["value"])
+
+    async def _ensure_date_selection(self, page: Any) -> None:
+        config = self.ctx.config or {}
+        target_text = self._target_date_label(config)
+        current_label = await self._current_date_label(page)
+        if current_label == target_text:
+            return
         await self._open_date_picker(page)
-        await self._click_text_option(page, target_text)
+        if target_text == self.sel.preset_labels.get("yesterday"):
+            direct_clicked = await self._click_text_option(page, target_text)
+            if direct_clicked:
+                applied = await self._wait_date_selection_applied(page, target_text)
+                if not applied:
+                    raise RuntimeError("date selection did not apply")
+                return
+            day_mode_clicked = await self._hover_text_option(page, "\u6309\u65e5")
+            if not day_mode_clicked:
+                raise RuntimeError("date option was not clicked")
+            single_day_target = self._single_day_target_value(config)
+            if single_day_target:
+                selected = await self._select_single_day_value(page, single_day_target)
+                if not selected:
+                    raise RuntimeError("date option was not clicked")
+                applied = await self._wait_date_selection_applied(page, target_text)
+                if not applied:
+                    raise RuntimeError("date selection did not apply")
+            return
+        clicked = await self._click_text_option(page, target_text)
+        if not clicked:
+            raise RuntimeError("date option was not clicked")
+        applied = await self._wait_date_selection_applied(page, target_text)
+        if not applied:
+            raise RuntimeError("date selection did not apply")
 
     async def _open_date_picker(self, page: Any) -> None:
-        trigger = await self._first_visible_locator(page, self.sel.date_picker_triggers)
+        trigger = await self._find_date_picker_trigger(page)
         if trigger is None:
             return
         await trigger.click(timeout=5000)
         await page.wait_for_timeout(600)
 
-    async def _click_text_option(self, page: Any, text: str) -> None:
-        locator = page.get_by_text(text, exact=False).first
-        if await locator.is_visible(timeout=2000):
+    async def _click_text_option(self, page: Any, text: str) -> bool:
+        locator = await self._find_date_option_locator(page, text)
+        if locator is not None:
+            try:
+                await locator.hover(timeout=5000)
+            except Exception:
+                pass
             await locator.click(timeout=5000)
             await page.wait_for_timeout(900)
+            return True
+        return False
+
+    async def _select_single_day_value(self, page: Any, iso_date: str) -> bool:
+        try:
+            target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
+        except ValueError:
+            return False
+
+        for candidate in (
+            target_date.strftime("%d-%m-%Y"),
+            str(int(target_date.strftime("%d"))),
+            target_date.strftime("%d"),
+        ):
+            try:
+                locator = page.get_by_text(candidate, exact=True).first
+                if await locator.is_visible(timeout=1500):
+                    await locator.click(timeout=5000)
+                    await page.wait_for_timeout(900)
+                    return True
+            except Exception:
+                continue
+        return False
 
     async def _trigger_export(self, page: Any) -> None:
         button = await self._first_visible_locator(page, self.sel.export_buttons)
@@ -190,10 +505,45 @@ class ShopeeProductsExport(ExportComponent):
                 return True
         return False
 
+    async def _wait_export_post_action_state(
+        self,
+        page: Any,
+        timeout_ms: int = 3000,
+        poll_ms: int = 500,
+    ) -> str:
+        waited = 0
+        while waited <= timeout_ms:
+            if await self._detect_export_throttled(page):
+                return "throttled"
+
+            waiter = self._download_waiter
+            if waiter is not None and waiter.done():
+                return "download_started"
+
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+
+        return "unknown"
+
     async def _wait_export_retry_ready(self, page: Any) -> bool:
         if hasattr(page, "wait_for_timeout"):
             await page.wait_for_timeout(1500)
         return not await self._detect_export_throttled(page)
+
+    def _build_download_target_path(self, out_root: Path, suggested_filename: str) -> Path:
+        candidate = out_root / suggested_filename
+        if not candidate.exists():
+            return candidate
+
+        stem = Path(suggested_filename).stem or "products-export"
+        suffix = "".join(Path(suggested_filename).suffixes) or ".xlsx"
+        index = 1
+        while True:
+            retry_candidate = out_root / f"{stem}-{index}{suffix}"
+            if not retry_candidate.exists():
+                return retry_candidate
+            index += 1
 
     async def _wait_download_complete(self, page: Any) -> str | None:
         waiter = self._download_waiter
@@ -216,10 +566,17 @@ class ShopeeProductsExport(ExportComponent):
         out_root = build_standard_output_root(self.ctx, data_type="products", granularity=granularity)
         out_root.mkdir(parents=True, exist_ok=True)
         suggested = getattr(download, "suggested_filename", None) or "products-export.xlsx"
-        target = out_root / suggested
+        target = self._build_download_target_path(out_root, suggested)
         try:
             await download.save_as(str(target))
         except Exception:
+            return None
+        try:
+            if not target.exists():
+                return None
+            if target.stat().st_size <= 0:
+                return None
+        except OSError:
             return None
         return str(target)
 
@@ -230,13 +587,21 @@ class ShopeeProductsExport(ExportComponent):
             await self._ensure_date_selection(page)
 
             await self._trigger_export(page)
-            throttled = await self._detect_export_throttled(page)
+            post_action_state = await self._wait_export_post_action_state(page)
+            if post_action_state == "throttled":
+                throttled = True
+            else:
+                throttled = await self._detect_export_throttled(page)
             if throttled:
                 retry_ready = await self._wait_export_retry_ready(page)
                 if not retry_ready:
                     return ExportResult(success=False, message="export throttled and retry not ready")
                 await self._trigger_export(page)
-                throttled = await self._detect_export_throttled(page)
+                retry_post_action_state = await self._wait_export_post_action_state(page)
+                if retry_post_action_state == "throttled":
+                    throttled = True
+                else:
+                    throttled = await self._detect_export_throttled(page)
                 if throttled:
                     await self._cancel_download_waiter()
                     return ExportResult(success=False, message="export throttled and retry not ready")

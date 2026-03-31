@@ -10,9 +10,9 @@ DOMAIN_PATHS: Final[dict[str, str]] = {
 }
 
 DOMAIN_LABELS: Final[dict[str, str]] = {
-    "products": "商品",
-    "services": "服务",
-    "analytics": "流量",
+    "products": "\u5546\u54c1",
+    "services": "\u670d\u52a1",
+    "analytics": "\u6d41\u91cf",
 }
 
 ALLOWED_PRESETS_BY_DOMAIN: Final[dict[str, list[str]]] = {
@@ -38,16 +38,16 @@ ALLOWED_PRESETS_BY_DOMAIN: Final[dict[str, list[str]]] = {
 ALLOWED_GRANULARITIES: Final[set[str]] = {"daily", "weekly", "monthly"}
 
 PRESET_LABELS: Final[dict[str, str]] = {
-    "today_realtime": "今日实时",
-    "yesterday": "昨天",
-    "last_7_days": "过去7天",
-    "last_30_days": "过去30天",
+    "today_realtime": "\u4eca\u65e5\u5b9e\u65f6",
+    "yesterday": "\u6628\u5929",
+    "last_7_days": "\u8fc7\u53bb7\u5929",
+    "last_30_days": "\u8fc7\u53bb30\u5929",
 }
 
 GRANULARITY_LABELS: Final[dict[str, str]] = {
-    "daily": "按日",
-    "weekly": "按周",
-    "monthly": "按月",
+    "daily": "\u6309\u65e5",
+    "weekly": "\u6309\u5468",
+    "monthly": "\u6309\u6708",
 }
 
 

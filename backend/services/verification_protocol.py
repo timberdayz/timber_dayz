@@ -4,7 +4,9 @@ from typing import Any
 
 
 MANUAL_COMPLETED_TOKEN = "__manual_completed__"
-MANUAL_CONTINUE_TYPES = frozenset({"slide_captcha", "manual_verification"})
+MANUAL_CONTINUE_TYPES = frozenset(
+    {"slide_captcha", "manual_verification", "manual_intervention"}
+)
 OTP_TYPES = frozenset({"otp", "sms", "email_code"})
 
 

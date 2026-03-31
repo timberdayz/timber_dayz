@@ -335,10 +335,11 @@ export const getHealth = async () => {
 export const createTaskWebSocket = (taskId, token, callbacks = {}) => {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const wsHost = import.meta.env.VITE_API_BASE_URL?.replace(/^https?:\/\//, '') || window.location.host
+  const effectiveToken = token || localStorage.getItem('access_token') || ''
   
   let wsUrl = `${wsProtocol}//${wsHost}/api/collection/ws/collection/${taskId}`
-  if (token) {
-    wsUrl += `?token=${encodeURIComponent(token)}`
+  if (effectiveToken) {
+    wsUrl += `?token=${encodeURIComponent(effectiveToken)}`
   }
   
   const ws = new WebSocket(wsUrl)
@@ -420,6 +421,7 @@ export default {
   deleteTask,
   retryTask,
   resumeTask,
+  getTaskScreenshotUrl,
   getTaskLogs,
   
   // 历史和统计

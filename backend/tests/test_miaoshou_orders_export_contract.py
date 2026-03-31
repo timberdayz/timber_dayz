@@ -94,3 +94,11 @@ def test_miaoshou_orders_export_scopes_orders_subtype_to_platform_row_instead_of
 def test_miaoshou_order_export_wrappers_fix_sub_domains():
     assert MiaoshouOrdersShopeeExport.sub_domain == "shopee"
     assert MiaoshouOrdersTiktokExport.sub_domain == "tiktok"
+
+
+def test_miaoshou_orders_export_maps_platform_subtype_to_ui_labels():
+    component = MiaoshouOrdersExportBase(_ctx())
+
+    assert component._orders_subtype_label("shopee") == "Shopee"
+    assert component._orders_subtype_label("tiktok") == "TikTok"
+    assert component._orders_subtype_label("lazada") == "Lazada"

@@ -206,7 +206,11 @@ class ComponentTester:
         return cfg
 
     def _persistent_context_mode(self, component_type: str) -> Optional[str]:
-        if component_type in ["login", "export", "date_picker", "filters"] and not self.skip_login:
+        if self.skip_login:
+            return None
+        if component_type == "login":
+            return None
+        if component_type in ["export", "navigation", "date_picker", "filters", "shop_switch"]:
             return "reused"
         return None
 
@@ -238,6 +242,46 @@ class ComponentTester:
             ]
 
         return base_candidates
+
+    def _login_gate_probe_url(self, account_info: Optional[Dict[str, Any]]) -> Optional[str]:
+        account = account_info or {}
+        return str(
+            account.get("login_url")
+            or self.runtime_config.get("default_login_url")
+            or ""
+        ).strip() or None
+
+    async def _prime_page_for_login_gate(self, page, account_info: Optional[Dict[str, Any]]) -> None:
+        current_url = str(getattr(page, "url", "") or "").strip().lower()
+        if current_url and current_url != "about:blank":
+            return
+
+        probe_url = self._login_gate_probe_url(account_info)
+        if not probe_url:
+            return
+
+        await page.goto(probe_url, wait_until="domcontentloaded", timeout=60000)
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(800)
+
+    async def _save_context_session(self, context, account_info: Optional[Dict[str, Any]]) -> bool:
+        account = account_info or {}
+        account_id = str(self.account_id or account.get("account_id") or "").strip()
+        if not account_id:
+            return False
+
+        try:
+            storage_state = await context.storage_state()
+        except Exception as e:
+            logger.warning("Failed to read context storage_state for %s/%s: %s", self.platform, account_id, e)
+            return False
+
+        try:
+            from modules.apps.collection_center.executor_v2 import _save_session_async
+            return await _save_session_async(self.platform, account_id, storage_state)
+        except Exception as e:
+            logger.warning("Failed to save session for %s/%s: %s", self.platform, account_id, e)
+            return False
 
     async def _check_login_gate(self, page, result: ComponentTestResult, component_name: str) -> bool:
         from modules.utils.login_status_detector import LoginStatusDetector
@@ -796,6 +840,7 @@ class ComponentTester:
             result.phase_component_version = getattr(stable_login, 'version', '') or ''
             result.error = result.error or getattr(exec_result, 'message', '登录失败')
             return False
+        await self._save_context_session(context, account_info)
         return True
 
     async def _test_python_component_with_browser(
@@ -893,14 +938,20 @@ class ComponentTester:
                 # 1.7: 与生产对齐——会话 + 指纹，使用 new_context(storage_state=..., **fp_options)
                 context_options = {}
                 storage_state = None
-                if account_id:
+                allow_session_reuse = bool(account_id) and component_type != 'login'
+                if allow_session_reuse:
                     try:
                         from modules.apps.collection_center.executor_v2 import (
-                            _load_session_async,
+                            _load_or_bootstrap_session_async,
                             _get_fingerprint_context_options_async,
                             _build_playwright_context_options_from_fingerprint,
                         )
-                        session_data = await _load_session_async(self.platform, account_id, max_age_days=30)
+                        session_data = await _load_or_bootstrap_session_async(
+                            self.platform,
+                            account_id,
+                            account_info,
+                            max_age_days=30,
+                        )
                         if session_data and isinstance(session_data.get('storage_state'), dict):
                             storage_state = session_data['storage_state']
                         fp_options = await _get_fingerprint_context_options_async(
@@ -926,6 +977,7 @@ class ComponentTester:
                 if component_type in non_login_types and not self.skip_login:
                     login_gate_ready = False
                     if storage_state:
+                        await self._prime_page_for_login_gate(page, account_info)
                         login_gate_ready = await self._check_login_gate(
                             page=page,
                             result=result,
@@ -1053,6 +1105,8 @@ class ComponentTester:
                         component_name=component_name,
                         result=result,
                     )
+                    if exec_result.success:
+                        await self._save_context_session(context, account_info)
                 elif component_type == 'navigation':
                     exec_result = await adapter.navigate(page, target_page=component_name)
                 elif component_type == 'export':

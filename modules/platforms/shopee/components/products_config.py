@@ -11,26 +11,30 @@ from modules.platforms.shopee.components.business_analysis_common import (
 
 
 EXPORT_BUTTON_SELECTORS: Final[tuple[str, ...]] = (
-    'button:has-text("导出数据")',
-    'button:has-text("导出")',
-    '[role="button"]:has-text("导出数据")',
-    '[role="button"]:has-text("导出")',
+    'button:has-text("\u4e0b\u8f7d\u6570\u636e")',
+    'button:has-text("\u5bfc\u51fa\u6570\u636e")',
+    'button:has-text("\u4e0b\u8f7d")',
+    'button:has-text("\u5bfc\u51fa")',
+    '[role="button"]:has-text("\u4e0b\u8f7d\u6570\u636e")',
+    '[role="button"]:has-text("\u5bfc\u51fa\u6570\u636e")',
+    '[role="button"]:has-text("\u4e0b\u8f7d")',
+    '[role="button"]:has-text("\u5bfc\u51fa")',
 )
 
 THROTTLED_TEXTS: Final[tuple[str, ...]] = (
-    "点击过快",
-    "操作过于频繁",
-    "请稍后再试",
+    "\u70b9\u51fb\u8fc7\u5feb",
+    "\u64cd\u4f5c\u8fc7\u4e8e\u9891\u7e41",
+    "\u8bf7\u7a0d\u540e\u518d\u8bd5",
 )
 
 BUSINESS_ANALYSIS_ENTRY_SELECTORS: Final[tuple[str, ...]] = (
-    'a:has-text("商业分析")',
+    'a:has-text("\u5546\u4e1a\u5206\u6790")',
     'a[href*="/datacenter"]',
 )
 
 PRODUCTS_ENTRY_SELECTORS: Final[tuple[str, ...]] = (
-    'a:has-text("商品")',
-    'a:has-text("商品概览")',
+    'a:has-text("\u5546\u54c1")',
+    'a:has-text("\u5546\u54c1\u6982\u89c8")',
     'a[href*="/datacenter/product/overview"]',
 )
 
@@ -42,14 +46,18 @@ SHOP_SWITCH_TRIGGER_SELECTORS: Final[tuple[str, ...]] = (
 )
 
 DATE_PICKER_TRIGGER_SELECTORS: Final[tuple[str, ...]] = (
-    'button:has-text("今天实时")',
-    'button:has-text("今日实时")',
-    'button:has-text("昨天")',
-    'button:has-text("过去7天")',
-    'button:has-text("过去30天")',
-    '[role="button"]:has-text("昨天")',
-    '[role="button"]:has-text("过去7天")',
-    '[role="button"]:has-text("过去30天")',
+    'button:has-text("\u4eca\u65e5\u5b9e\u65f6")',
+    'button:has-text("\u6628\u5929")',
+    'button:has-text("\u8fd17\u5929")',
+    'button:has-text("\u8fd130\u5929")',
+    'button:has-text("\u6309\u5468")',
+    'button:has-text("\u6309\u6708")',
+    '[role="button"]:has-text("\u4eca\u65e5\u5b9e\u65f6")',
+    '[role="button"]:has-text("\u6628\u5929")',
+    '[role="button"]:has-text("\u8fd17\u5929")',
+    '[role="button"]:has-text("\u8fd130\u5929")',
+    '[role="button"]:has-text("\u6309\u5468")',
+    '[role="button"]:has-text("\u6309\u6708")',
 )
 
 

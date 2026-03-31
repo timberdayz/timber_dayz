@@ -76,6 +76,16 @@
           value-format="YYYY-MM-DD"
           class="erp-w-240"
         />
+        <el-select
+          v-if="quickForm.date_preset === 'custom'"
+          v-model="quickForm.granularity"
+          placeholder="选择粒度"
+          class="erp-w-120"
+        >
+          <el-option label="日报" value="daily" />
+          <el-option label="周报" value="weekly" />
+          <el-option label="月报" value="monthly" />
+        </el-select>
 
         <div class="debug-mode-switch">
           <el-switch 
@@ -217,7 +227,7 @@
               取消
             </el-button>
             <el-button 
-              v-if="row.status === 'paused'"
+              v-if="['verification_required', 'paused'].includes(row.status)"
               size="small" 
               type="success"
               @click="showResumeDialog(row)"
@@ -397,7 +407,7 @@ import { CaretRight, Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
 import PageHeader from '@/components/common/PageHeader.vue'
 import {
-  buildDateRangeFromPreset,
+  buildTimeSelectionPayload,
   getDatePresetLabel,
   getSelectedSubtypeDomains,
   getSubtypeOptions
@@ -426,6 +436,11 @@ const currentTask = ref(null)
 
 // WebSocket连接
 const wsConnections = ref({})
+const DEFAULT_GRANULARITY = 'daily'
+const ACTIVE_TASK_POLL_INTERVAL = 3000
+const IDLE_TASK_POLL_INTERVAL = 30000
+const ACTIVE_TASK_STATUSES = ['pending', 'queued', 'running', 'verification_required', 'verification_submitted', 'paused']
+let tasksRefreshTimer = null
 
 // 快速采集表单（v4.7.0 + 扩展：日期自定义）
 const quickForm = reactive({
@@ -435,6 +450,7 @@ const quickForm = reactive({
   sub_domains: {},
   date_preset: 'yesterday',
   customDateRange: [],  // [start, end] 仅当 date_preset === 'custom' 时使用
+  granularity: DEFAULT_GRANULARITY,
   debugMode: false  // v4.7.0: 调试模式
 })
 
@@ -465,10 +481,25 @@ watch(
 const canCreateTask = computed(() => {
   if (!quickForm.platform || !quickForm.account_id || quickForm.data_domains.length === 0) return false
   if (quickForm.date_preset === 'custom') {
-    return Array.isArray(quickForm.customDateRange) && quickForm.customDateRange.length === 2
+    return Array.isArray(quickForm.customDateRange)
+      && quickForm.customDateRange.length === 2
+      && Boolean(quickForm.granularity)
   }
   return true
 })
+
+const hasActiveTasks = (taskList = tasks.value) =>
+  (taskList || []).some(task => ACTIVE_TASK_STATUSES.includes(task.status))
+
+const scheduleTaskRefresh = (taskList = tasks.value) => {
+  if (tasksRefreshTimer) {
+    clearTimeout(tasksRefreshTimer)
+  }
+  const nextInterval = hasActiveTasks(taskList) ? ACTIVE_TASK_POLL_INTERVAL : IDLE_TASK_POLL_INTERVAL
+  tasksRefreshTimer = setTimeout(() => {
+    void loadTasks()
+  }, nextInterval)
+}
 
 // 任务详情抽屉：步骤日志按时间排序
 const sortedDetailLogs = computed(() => {
@@ -485,16 +516,33 @@ const loadTasks = async () => {
     if (statusFilter.value) params.status = statusFilter.value
     
     tasks.value = await collectionApi.getTasks(params)
+    syncVerificationDialogFromTasks(tasks.value)
     
     // 为运行中的任务建立WebSocket连接
     tasks.value
-      .filter(t => t.status === 'running')
+      .filter(t => ACTIVE_TASK_STATUSES.includes(t.status))
       .forEach(t => connectTaskWebSocket(t.task_id))
   } catch (error) {
     ElMessage.error('加载任务失败: ' + error.message)
   } finally {
     loading.value = false
+    scheduleTaskRefresh(tasks.value)
   }
+}
+
+const syncVerificationDialogFromTasks = (taskList) => {
+  const verificationTask = (taskList || []).find(
+    (task) => ['verification_required', 'paused'].includes(task.status) && task.verification_type
+  )
+  if (!verificationTask) {
+    return
+  }
+
+  if (verificationDialogVisible.value && currentTask.value?.task_id === verificationTask.task_id) {
+    return
+  }
+
+  showResumeDialog(verificationTask)
 }
 
 const loadAccounts = async () => {
@@ -511,11 +559,10 @@ const loadAccounts = async () => {
 const createQuickTask = async () => {
   creating.value = true
   try {
-    const dateRange = buildDateRangeFromPreset(quickForm.date_preset, {
-      platform: quickForm.platform,
+    const timeSelection = buildTimeSelectionPayload(quickForm.date_preset, {
       customRange: quickForm.customDateRange
     })
-    if (!dateRange || !dateRange.start_date || !dateRange.end_date) {
+    if (!timeSelection) {
       ElMessage.warning('请选择有效的日期范围')
       creating.value = false
       return
@@ -526,8 +573,10 @@ const createQuickTask = async () => {
       account_id: quickForm.account_id,
       data_domains: quickForm.data_domains,
       sub_domains: quickForm.sub_domains,
-      granularity: 'daily',
-      date_range: dateRange,
+      granularity: quickForm.date_preset === 'custom' ? quickForm.granularity : undefined,
+      time_selection: buildTimeSelectionPayload(quickForm.date_preset, {
+        customRange: quickForm.customDateRange
+      }),
       debug_mode: quickForm.debugMode  // v4.7.0: 调试模式
     })
     
@@ -681,6 +730,7 @@ const connectTaskWebSocket = (taskId) => {
       if (task) {
         task.status = message.status
         task.files_collected = message.files_collected
+        task.progress = ['completed', 'partial_success'].includes(message.status) ? 100 : task.progress
       }
       
       if (message.status === 'completed') {
@@ -690,11 +740,12 @@ const connectTaskWebSocket = (taskId) => {
       }
       
       disconnectTaskWebSocket(taskId)
+      void loadTasks()
     },
     onVerification: (message) => {
       const task = tasks.value.find(t => t.task_id === taskId)
       if (task) {
-        task.status = 'paused'
+        task.status = 'verification_required'
         task.verification_type = message.verification_type || ''
         task.verification_input_mode = message.verification_input_mode || ''
         task.verification_screenshot = message.screenshot_path || ''
@@ -742,7 +793,10 @@ const getDomainLabel = (domain) => {
 const getStatusTagType = (status) => {
   const types = {
     running: 'primary', queued: 'info', completed: 'success',
-    failed: 'danger', cancelled: 'warning', paused: 'warning',
+    failed: 'danger', cancelled: 'warning',
+    verification_required: 'warning',
+    verification_submitted: 'info',
+    paused: 'warning',
     partial_success: 'warning'  // v4.7.0: 部分成功显示为warning
   }
   return types[status] || 'info'
@@ -751,7 +805,10 @@ const getStatusTagType = (status) => {
 const getStatusLabel = (status) => {
   const labels = {
     pending: '等待', queued: '排队', running: '运行中',
-    completed: '完成', failed: '失败', cancelled: '已取消', paused: '暂停',
+    completed: '完成', failed: '失败', cancelled: '已取消',
+    verification_required: '等待验证码',
+    verification_submitted: '验证码已提交',
+    paused: '等待验证码',
     partial_success: '部分成功'  // v4.7.0: 新状态
   }
   return labels[status] || status
@@ -823,14 +880,14 @@ const getStepLabel = (log) => {
 onMounted(() => {
   loadTasks()
   loadAccounts()
-  
-  // 定时刷新
-  const interval = setInterval(loadTasks, 30000)
-  onUnmounted(() => {
-    clearInterval(interval)
-    // 关闭所有WebSocket连接
-    Object.keys(wsConnections.value).forEach(disconnectTaskWebSocket)
-  })
+})
+
+onUnmounted(() => {
+  if (tasksRefreshTimer) {
+    clearTimeout(tasksRefreshTimer)
+    tasksRefreshTimer = null
+  }
+  Object.keys(wsConnections.value).forEach(disconnectTaskWebSocket)
 })
 </script>
 

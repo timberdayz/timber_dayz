@@ -85,6 +85,95 @@ async def _load_session_async(platform: str, account_id: str, max_age_days: int 
     return await loop.run_in_executor(_get_executor_pool(), _load)
 
 
+def _bootstrap_session_from_profile_sync(
+    platform: str,
+    account_id: str,
+    account_config: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Best-effort bridge from persistent profile to storage_state session."""
+    from playwright.sync_api import sync_playwright
+    from modules.utils.sessions.session_manager import SessionManager
+
+    session_manager = SessionManager()
+    profile_path = session_manager.get_persistent_profile_path(platform, account_id)
+
+    try:
+        if not profile_path.exists() or not any(profile_path.iterdir()):
+            logger.debug("No persistent profile found for %s/%s", platform, account_id)
+            return None
+    except Exception:
+        logger.debug("Persistent profile probe failed for %s/%s", platform, account_id)
+        return None
+
+    launch_options = enforce_official_playwright_browser({"headless": True})
+
+    try:
+        with sync_playwright() as playwright:
+            context = playwright.chromium.launch_persistent_context(
+                user_data_dir=str(profile_path),
+                accept_downloads=False,
+                **launch_options,
+            )
+            try:
+                storage_state = context.storage_state()
+            finally:
+                context.close()
+    except Exception as e:
+        logger.warning(
+            "Bootstrap session from profile failed for %s/%s: %s",
+            platform,
+            account_id,
+            e,
+        )
+        return None
+
+    try:
+        session_manager.save_session(
+            platform,
+            account_id,
+            storage_state,
+            metadata={
+                "bootstrapped_from_profile": True,
+                "saved_at": time.time(),
+            },
+        )
+    except Exception as e:
+        logger.warning(
+            "Saving bootstrapped session failed for %s/%s: %s",
+            platform,
+            account_id,
+            e,
+        )
+
+    return {"storage_state": storage_state}
+
+
+async def _load_or_bootstrap_session_async(
+    platform: str,
+    account_id: str,
+    account_config: Optional[Dict[str, Any]] = None,
+    *,
+    max_age_days: int = 30,
+) -> Optional[Dict[str, Any]]:
+    session_data = await _load_session_async(
+        platform,
+        account_id,
+        max_age_days=max_age_days,
+    )
+    if session_data and isinstance(session_data.get("storage_state"), dict):
+        return session_data
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        _get_executor_pool(),
+        lambda: _bootstrap_session_from_profile_sync(
+            platform,
+            account_id,
+            account_config=account_config,
+        ),
+    )
+
+
 async def _save_session_async(platform: str, account_id: str, storage_state: Dict[str, Any]) -> bool:
     """在线程池中保存会话。"""
     from modules.utils.sessions.session_manager import SessionManager
@@ -93,6 +182,51 @@ async def _save_session_async(platform: str, account_id: str, storage_state: Dic
         sm = SessionManager()
         return sm.save_session(platform, account_id, storage_state)
     return await loop.run_in_executor(_get_executor_pool(), _save)
+
+
+def _build_runtime_task_params(
+    *,
+    task_id: str,
+    account: Dict[str, Any],
+    platform: str,
+    granularity: str,
+    normalized_date_range: Dict[str, Any],
+    task_download_dir: Union[str, Path],
+    screenshot_dir: Union[str, Path],
+    reused_session: bool,
+) -> Dict[str, Any]:
+    params: Dict[str, Any] = {
+        "account": account,
+        "params": {
+            "date_from": normalized_date_range.get("date_from", ""),
+            "date_to": normalized_date_range.get("date_to", ""),
+            "granularity": granularity,
+        },
+        "task": {
+            "id": task_id,
+            "download_dir": str(task_download_dir),
+            "screenshot_dir": str(screenshot_dir),
+        },
+        "platform": platform,
+        "reused_session": reused_session,
+        "downloads_path": str(task_download_dir),
+        "start_date": normalized_date_range.get("start_date"),
+        "end_date": normalized_date_range.get("end_date"),
+    }
+
+    time_selection = normalized_date_range.get("time_selection")
+    if time_selection:
+        params["time_selection"] = time_selection
+        params["params"]["time_selection"] = time_selection
+        if str(time_selection.get("mode") or "").strip().lower() == "custom":
+            params["custom_date_range"] = {
+                "start_date": time_selection.get("start_date"),
+                "end_date": time_selection.get("end_date"),
+                "start_time": time_selection.get("start_time", "00:00:00"),
+                "end_time": time_selection.get("end_time", "23:59:59"),
+            }
+
+    return params
 
 
 async def _get_fingerprint_context_options_async(
@@ -614,40 +748,16 @@ class CollectionExecutorV2:
 
         step_popup_handler = StepPopupHandler(self.popup_handler, platform)
 
-        params = {
-            'account': account,
-            'params': {
-                'date_from': normalized_date_range.get('date_from', ''),
-                'date_to': normalized_date_range.get('date_to', ''),
-                'granularity': granularity,
-            },
-            'task': {
-                'id': task_id,
-                'download_dir': str(task_download_dir),
-                'screenshot_dir': str(self.screenshots_dir / task_id),
-            },
-            'platform': platform,
-            'downloads_path': str(task_download_dir),  # 供组件 ctx.config.get("downloads_path") 使用，与 task.download_dir 一致
-        }
-
-        # 获取 browser: 优先使用入参 browser, 否则从 page 取(后关闭传入的 page/context)
-        browser_instance = browser
-        page_context_to_close = None
-        if browser_instance is None and page is not None:
-            try:
-                browser_instance = page.context.browser
-                page_context_to_close = page.context
-            except Exception as e:
-                logger.warning("Could not get browser from page: %s", e)
-        if browser_instance is None:
-            raise ValueError("execute() requires either browser= or page= to be provided")
-
         # 加载会话与指纹(仅当 use_account_session_fingerprint 时)
         storage_state: Optional[Dict[str, Any]] = None
         reused_session = False
         if use_account_session_fingerprint and account_id_norm:
             try:
-                session_data = await _load_session_async(platform, account_id_norm)
+                session_data = await _load_or_bootstrap_session_async(
+                    platform,
+                    account_id_norm,
+                    account,
+                )
                 if session_data and isinstance(session_data.get("storage_state"), dict):
                     storage_state = session_data["storage_state"]
                     reused_session = True
@@ -675,6 +785,29 @@ class CollectionExecutorV2:
         context_options.setdefault("accept_downloads", True)
         if storage_state:
             context_options["storage_state"] = storage_state
+
+        params = _build_runtime_task_params(
+            task_id=task_id,
+            account=account,
+            platform=platform,
+            granularity=granularity,
+            normalized_date_range=normalized_date_range,
+            task_download_dir=task_download_dir,
+            screenshot_dir=self.screenshots_dir / task_id,
+            reused_session=reused_session,
+        )
+
+        # 获取 browser: 优先使用入参 browser, 否则从 page 取(后关闭传入的 page/context)
+        browser_instance = browser
+        page_context_to_close = None
+        if browser_instance is None and page is not None:
+            try:
+                browser_instance = page.context.browser
+                page_context_to_close = page.context
+            except Exception as e:
+                logger.warning("Could not get browser from page: %s", e)
+        if browser_instance is None:
+            raise ValueError("execute() requires either browser= or page= to be provided")
 
         # 执行器统一建 context: 由执行器创建带指纹与可选会话的 context
         play_context = await browser_instance.new_context(**context_options)
@@ -2735,7 +2868,7 @@ class CollectionExecutorV2:
                 
                 # 推断数据域(从文件路径或data_domains列表)
                 data_domain = self._infer_data_domain_from_path(file_path, data_domains, idx)
-                sub_domain = self._infer_sub_domain_from_path(file_path)
+                sub_domain = self._infer_sub_domain_from_path(file_path, data_domain=data_domain)
                 
                 # 1. 生成标准文件名
                 ext = source_path.suffix.lstrip('.') or 'xlsx'
@@ -2854,7 +2987,7 @@ class CollectionExecutorV2:
         
         return "unknown"
     
-    def _infer_sub_domain_from_path(self, file_path: str) -> str:
+    def _infer_sub_domain_from_path(self, file_path: str, data_domain: Optional[str] = None) -> str:
         """
         从文件路径推断子数据域
         
@@ -2864,14 +2997,35 @@ class CollectionExecutorV2:
         Returns:
             str: 子数据域(空字符串表示无子域)
         """
-        path_lower = file_path.lower()
-        
-        # 检测 services 子域
-        if 'agent' in path_lower or 'ai_assistant' in path_lower:
-            return 'agent'
-        if 'ai' in path_lower and 'assistant' in path_lower:
-            return 'ai_assistant'
-        
+        from backend.services.component_name_utils import DATA_DOMAIN_SUB_TYPES
+
+        path_lower = str(file_path or "").lower().replace("\\", "/")
+        path_parts = [part for part in path_lower.split("/") if part]
+
+        candidate_domains: List[str] = []
+        if data_domain:
+            candidate_domains.append(str(data_domain).strip().lower())
+        candidate_domains.extend(
+            domain for domain in DATA_DOMAIN_SUB_TYPES.keys()
+            if domain not in candidate_domains
+        )
+
+        for domain in candidate_domains:
+            allowed_subtypes = [str(item).strip().lower() for item in DATA_DOMAIN_SUB_TYPES.get(domain, [])]
+            if not allowed_subtypes:
+                continue
+
+            if domain in path_parts:
+                domain_index = path_parts.index(domain)
+                trailing_parts = path_parts[domain_index + 1:]
+                for subtype in allowed_subtypes:
+                    if subtype in trailing_parts:
+                        return subtype
+
+            for subtype in allowed_subtypes:
+                if f"/{subtype}/" in path_lower:
+                    return subtype
+
         return ""
     
     async def _update_status(
@@ -3030,7 +3184,11 @@ class CollectionExecutorV2:
         reused_session = False
         if use_account_session_fingerprint and account_id_norm:
             try:
-                session_data = await _load_session_async(platform, account_id_norm)
+                session_data = await _load_or_bootstrap_session_async(
+                    platform,
+                    account_id_norm,
+                    account,
+                )
                 if session_data and isinstance(session_data.get("storage_state"), dict):
                     storage_state = session_data["storage_state"]
                     reused_session = True
@@ -3063,22 +3221,16 @@ class CollectionExecutorV2:
         login_context = await browser.new_context(**login_context_options)
         login_page = await login_context.new_page()
 
-        params = {
-            'account': account,
-            'params': {
-                'date_from': normalized_date_range.get('date_from', ''),
-                'date_to': normalized_date_range.get('date_to', ''),
-                'granularity': granularity,
-            },
-            'task': {
-                'id': task_id,
-                'download_dir': str(task_download_dir),
-                'screenshot_dir': str(self.screenshots_dir / task_id),
-            },
-            'platform': platform,
-            'reused_session': reused_session,
-            'downloads_path': str(task_download_dir),
-        }
+        params = _build_runtime_task_params(
+            task_id=task_id,
+            account=account,
+            platform=platform,
+            granularity=granularity,
+            normalized_date_range=normalized_date_range,
+            task_download_dir=task_download_dir,
+            screenshot_dir=self.screenshots_dir / task_id,
+            reused_session=reused_session,
+        )
         try:
             step_popup_handler = StepPopupHandler(self.popup_handler, platform)
             if runtime_manifests is not None:
@@ -3282,22 +3434,18 @@ class CollectionExecutorV2:
             )
             
             # 准备参数（与顺序路径一致的 config 结构）
-            params = {
-                'account': account,
-                'params': {
-                    'date_from': normalize_collection_date_range(date_range).get('date_from', ''),
-                    'date_to': normalize_collection_date_range(date_range).get('date_to', ''),
-                    'granularity': granularity,
-                    'data_domain': data_domain,
-                },
-                'task': {
-                    'id': task_id,
-                    'download_dir': str(task_download_dir),
-                    'screenshot_dir': str(self.screenshots_dir / task_id),
-                },
-                'platform': platform,
-                'downloads_path': str(task_download_dir),
-            }
+            normalized_date_range = normalize_collection_date_range(date_range)
+            params = _build_runtime_task_params(
+                task_id=task_id,
+                account=account,
+                platform=platform,
+                granularity=granularity,
+                normalized_date_range=normalized_date_range,
+                task_download_dir=task_download_dir,
+                screenshot_dir=self.screenshots_dir / task_id,
+                reused_session=bool(storage_state),
+            )
+            params['params']['data_domain'] = data_domain
             
             if runtime_manifests is not None:
                 export_manifest = runtime_manifests.get("exports_by_domain", {}).get(data_domain)

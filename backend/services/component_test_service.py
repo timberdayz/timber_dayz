@@ -65,6 +65,12 @@ class ComponentTestService:
             'password': plaintext_password,  # 使用明文密码
             'store_name': account.store_name,
             'login_url': login_url or account.login_url,
+            'email': getattr(account, 'email', None) or '',
+            'phone': getattr(account, 'phone', None) or '',
+            'region': getattr(account, 'region', None) or '',
+            'currency': getattr(account, 'currency', None) or '',
+            'shop_region': getattr(account, 'shop_region', None) or '',
+            'notes': getattr(account, 'notes', None) or '',
             'cookies_file': getattr(account, 'cookies_file', None),
             'capabilities': account.capabilities or {},
         }
@@ -433,4 +439,3 @@ class ComponentTestService:
             else:
                 db.rollback()
             # 不抛出异常,测试历史保存失败不应影响主流程
-

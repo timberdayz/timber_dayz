@@ -42,7 +42,7 @@ services:
 
   # ==================== Redis缓存和消息队列 ====================
   redis:
-    image: redis:latest
+    image: redis:7-alpine
     container_name: xihong_erp_redis
     # 生产最小端口暴露：redis 不映射宿主机端口（仅容器网络可访问）
     # 如需本地开发直连 redis，请使用 docker-compose.dev.yml 覆盖端口映射
@@ -51,9 +51,10 @@ services:
     networks:
       - erp_network
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_pass_2025}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_pass_2025}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -96,10 +97,10 @@ services:
     env_file:
       - .env
     environment:
-      # 数据库配置：优先使用 .env 中的 DATABASE_URL（密码含 @/% 时需 URL 编码：%→%25 @→%40）
-      # 未设置时回退到简单密码，供本地开发使用
-      DATABASE_URL: ${DATABASE_URL:-postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp}
+      # 容器内必须使用容器网络地址，不能继承 .env 中的 localhost
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_user}:${POSTGRES_PASSWORD:-erp_pass_2025}@postgres:5432/${POSTGRES_DB:-xihong_erp}
       DATABASE_ECHO: ${DATABASE_ECHO:-false}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2025}@redis:6379/0
 
       # 应用配置
       APP_ENV: ${APP_ENV:-production}
@@ -119,6 +120,7 @@ services:
       - ./temp:/app/temp
       - ./logs:/app/logs
       - ./downloads:/app/downloads
+      - ./profiles:/app/profiles
       - ./config:/app/config
     networks:
       - erp_network

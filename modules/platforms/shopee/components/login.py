@@ -76,6 +76,42 @@ class ShopeeLogin(LoginComponent):
 
         return True
 
+    async def _session_shell_looks_ready(self, page: Any, url: str) -> bool:
+        current = str(url or "").strip()
+        if not self._login_looks_successful(current):
+            return False
+        if self._homepage_looks_ready(current):
+            return False
+        if await self._is_otp_visible(page):
+            return False
+        if await self._locator_is_visible(self._password_locator(page), timeout=300):
+            return False
+        if await self._locator_is_visible(self._login_button_locator(page), timeout=300):
+            return False
+
+        signal_count = 0
+        username = str((self.ctx.account or {}).get("username") or "").strip()
+        if username:
+            try:
+                username_locator = page.get_by_text(username, exact=False).first
+                if await self._locator_is_visible(username_locator, timeout=500):
+                    signal_count += 1
+            except Exception:
+                pass
+
+        for selector in (
+            'a[href="/"]',
+            'button[aria-haspopup="menu"]',
+        ):
+            try:
+                locator = page.locator(selector).first
+                if await self._locator_is_visible(locator, timeout=500):
+                    signal_count += 1
+            except Exception:
+                continue
+
+        return signal_count >= 2
+
     def _otp_mode_from_title(self, title: str) -> str | None:
         text = str(title or "").strip()
         if not text:
@@ -284,6 +320,27 @@ class ShopeeLogin(LoginComponent):
         await page.screenshot(path=screenshot_path, timeout=5000)
         raise VerificationRequiredError("slide_captcha", screenshot_path)
 
+    async def _raise_manual_intervention_required(
+        self,
+        page: Any,
+        config: dict[str, Any],
+    ) -> None:
+        screenshot_dir = (config or {}).get("task", {}).get("screenshot_dir")
+        if screenshot_dir:
+            os.makedirs(screenshot_dir, exist_ok=True)
+            screenshot_path = os.path.join(
+                screenshot_dir,
+                "shopee-login-manual-intervention.png",
+            )
+        else:
+            fd, screenshot_path = tempfile.mkstemp(
+                suffix=".png",
+                prefix="shopee_login_manual_",
+            )
+            os.close(fd)
+        await page.screenshot(path=screenshot_path, timeout=5000)
+        raise VerificationRequiredError("manual_intervention", screenshot_path)
+
     async def _wait_for_post_login_outcome(
         self,
         page: Any,
@@ -294,6 +351,7 @@ class ShopeeLogin(LoginComponent):
     ) -> str:
         waited = 0
         homepage_stable_hits = 0
+        session_shell_hits = 0
         while waited <= timeout_ms:
             login_error = await self._find_visible_login_error(page)
             if login_error:
@@ -309,6 +367,13 @@ class ShopeeLogin(LoginComponent):
                     homepage_stable_hits = 0
             else:
                 homepage_stable_hits = 0
+
+            if await self._session_shell_looks_ready(page, current_url):
+                session_shell_hits += 1
+                if session_shell_hits >= 2:
+                    return "manual_intervention"
+            else:
+                session_shell_hits = 0
 
             if phase == "post_credentials":
                 if await self._is_slide_captcha_visible(page):
@@ -351,6 +416,8 @@ class ShopeeLogin(LoginComponent):
         if outcome == "success":
             await self._cleanup_after_login(page)
             return LoginResult(success=True, message="ok")
+        if outcome == "manual_intervention":
+            await self._raise_manual_intervention_required(page, self.ctx.config or {})
         if outcome not in {"timeout", "otp", "slide_captcha"}:
             return LoginResult(success=False, message=outcome)
         return LoginResult(success=False, message="otp did not reach homepage")
@@ -392,6 +459,8 @@ class ShopeeLogin(LoginComponent):
                     if not otp_value:
                         await self._raise_otp_verification_required(page, config)
                     return await self._submit_resumed_otp(page, otp_value)
+                if outcome == "manual_intervention":
+                    await self._raise_manual_intervention_required(page, config)
                 if outcome == "slide_captcha":
                     await self._raise_slide_captcha_verification_required(page, config)
                 if outcome != "timeout":
@@ -434,6 +503,8 @@ class ShopeeLogin(LoginComponent):
                 if not otp_value:
                     await self._raise_otp_verification_required(page, config)
                 return await self._submit_resumed_otp(page, otp_value)
+            if outcome == "manual_intervention":
+                await self._raise_manual_intervention_required(page, config)
             if outcome != "timeout":
                 return LoginResult(success=False, message=outcome)
 

@@ -64,7 +64,7 @@
       >
         <img
           :src="screenshotUrl"
-          alt="验证码截图"
+          alt="验证截图"
           style="
             max-width: 100%;
             max-height: 220px;
@@ -107,8 +107,8 @@
           line-height: 1.7;
         "
       >
-        <div>请在当前有头浏览器中手动完成滑块或人工验证。</div>
-        <div>完成后点击下方“我已完成验证，继续”。</div>
+        <div>{{ manualContinueSummary }}</div>
+        <div>完成后点击下方“我已处理完，继续”。</div>
         <div>不要关闭浏览器，也不要刷新当前页面。</div>
       </div>
 
@@ -160,26 +160,40 @@ const localValue = ref("");
 const inputRef = ref(null);
 const screenshotLoadFailed = ref(false);
 
+const normalizedType = computed(() =>
+  String(props.verificationType || "").toLowerCase(),
+);
+
 const isOtp = computed(() =>
-  ["otp", "sms", "email_code"].includes(
-    String(props.verificationType || "").toLowerCase(),
-  ),
+  ["otp", "sms", "email_code"].includes(normalizedType.value),
 );
 
 const isManualContinue = computed(
   () => String(props.verificationInputMode || "").toLowerCase() === "manual_continue",
 );
 
+const isManualIntervention = computed(
+  () => normalizedType.value === "manual_intervention",
+);
+
 const showScreenshot = computed(() => Boolean(props.screenshotUrl));
 
 const instructionTitle = computed(() => {
   if (isManualContinue.value) {
-    return "请在浏览器中手动完成滑块或人工验证，完成后点击继续";
+    return isManualIntervention.value
+      ? "检测到特殊情况需要用户处理，请在浏览器中处理完成后点击继续"
+      : "请在浏览器中手动完成滑块或人工验证，完成后点击继续";
   }
   return isOtp.value
     ? "请输入收到的短信或邮件验证码"
     : "请根据下方截图输入图形验证码";
 });
+
+const manualContinueSummary = computed(() =>
+  isManualIntervention.value
+    ? "请在当前有头浏览器中处理特殊情况页面。"
+    : "请在当前有头浏览器中手动完成滑块或人工验证。",
+);
 
 const inputPlaceholder = computed(() =>
   isOtp.value ? "请输入短信或邮件验证码" : "请输入图片中的验证码",
@@ -187,7 +201,7 @@ const inputPlaceholder = computed(() =>
 
 const resolvedSubmitText = computed(() => {
   if (isManualContinue.value) {
-    return "我已完成验证，继续";
+    return "我已处理完，继续";
   }
   return props.submitText;
 });

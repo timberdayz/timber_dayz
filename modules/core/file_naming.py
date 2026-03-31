@@ -20,12 +20,18 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
 
+from backend.services.component_name_utils import DATA_DOMAIN_SUB_TYPES
+
 
 class StandardFileName:
     """标准化文件命名工具"""
     
     # 已知的子数据域(用于解析识别)- v4.3.5: 明确包含完整名称
-    KNOWN_SUB_DOMAINS = {'agent', 'ai_assistant', 'ai', 'assistant'}
+    KNOWN_SUB_DOMAINS = {
+        value.lower()
+        for values in DATA_DOMAIN_SUB_TYPES.values()
+        for value in values
+    } | {'ai', 'assistant'}
     
     # 已知的数据域
     KNOWN_DATA_DOMAINS = {'orders', 'products', 'services', 'traffic', 'finance', 'analytics', 'inventory'}  # v4.10.0更新:traffic域已废弃(兼容性保留),统一使用analytics域
@@ -233,4 +239,3 @@ def parse_filename(filename: str) -> Dict:
 def validate_filename(filename: str) -> bool:
     """便捷函数:验证文件名格式"""
     return StandardFileName.validate(filename)
-

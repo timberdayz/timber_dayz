@@ -55,6 +55,19 @@ def build_screenshot_path(work_dir: Path, step: str | int, name: str, ext: str =
     return work_dir / f"{normalize_step_id(step)}-{normalize_step_name(name)}.{suffix}"
 
 
+def build_capture_paths(
+    work_dir: Path,
+    name: str,
+    *,
+    screenshot_ext: str = "png",
+) -> tuple[Path, Path]:
+    base_name = sanitize_token(Path(str(name or "")).stem)
+    return (
+        work_dir / f"{base_name}.md",
+        work_dir / f"{base_name}.{str(screenshot_ext or 'png').lstrip('.').lower()}",
+    )
+
+
 def scan_work_dir(work_dir: Path) -> dict[str, Any]:
     steps: dict[str, dict[str, Any]] = {}
     warnings: list[str] = []
@@ -201,6 +214,11 @@ def _build_cli() -> argparse.ArgumentParser:
     shot.add_argument("--name", required=True)
     shot.add_argument("--ext", default="png")
 
+    capture = sub.add_parser("capture-paths", help="print normalized snapshot/screenshot paths")
+    capture.add_argument("--work-dir", required=True)
+    capture.add_argument("--name", required=True)
+    capture.add_argument("--ext", default="png")
+
     pack = sub.add_parser("pack", help="validate a work dir and write evidence-pack.json")
     pack.add_argument("--work-dir", required=True)
     pack.add_argument("--platform")
@@ -231,6 +249,23 @@ def main() -> int:
 
     if args.command == "screenshot-path":
         print(build_screenshot_path(Path(args.work_dir), args.step, args.name, args.ext))
+        return 0
+
+    if args.command == "capture-paths":
+        snapshot_path, screenshot_path = build_capture_paths(
+            Path(args.work_dir),
+            args.name,
+            screenshot_ext=args.ext,
+        )
+        print(
+            json.dumps(
+                {
+                    "snapshot_path": str(snapshot_path),
+                    "screenshot_path": str(screenshot_path),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
 
     if args.command == "pack":

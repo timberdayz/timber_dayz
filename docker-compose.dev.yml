@@ -55,6 +55,7 @@ services:
       - ./models:/app/models
       - ./migrations:/app/migrations
       - ./tools:/app/tools
+      - ./profiles:/app/profiles
       - ./data:/app/data
       - ./logs:/app/logs
       - ./temp:/app/temp
@@ -82,8 +83,8 @@ services:
   # ⭐ 生产构建必须在 CI 中设置 VITE_API_URL（GitHub Secrets），否则会指向 localhost
   frontend:
     build:
-      context: ./frontend
-      dockerfile: ../Dockerfile.frontend
+      context: .
+      dockerfile: Dockerfile.frontend
       target: development
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8001}
@@ -95,7 +96,20 @@ services:
       - ./frontend/public:/app/public
     command: npm run dev -- --host 0.0.0.0
     ports:
-      - "${FRONTEND_PORT:-5174}:80" # 开发环境可以暴露端口
+      - "${FRONTEND_PORT:-5174}:5173" # 开发环境 Vite 服务监听 5173
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:5173/",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     profiles:
       - dev-full
 

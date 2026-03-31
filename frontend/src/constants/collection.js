@@ -1,4 +1,8 @@
 export const DOMAIN_SUBTYPE_OPTIONS = {
+  orders: [
+    { label: 'Shopee', value: 'shopee' },
+    { label: 'TikTok', value: 'tiktok' }
+  ],
   services: [
     { label: '人工客服', value: 'agent' },
     { label: '智能客服', value: 'ai_assistant' }
@@ -73,4 +77,32 @@ export const buildDateRangeFromPreset = (
   default:
     return {}
   }
+}
+
+export const buildTimeSelectionPayload = (
+  preset,
+  {
+    customRange = [],
+    startTime = '00:00:00',
+    endTime = '23:59:59'
+  } = {}
+) => {
+  if (preset === 'custom' && Array.isArray(customRange) && customRange.length === 2) {
+    return {
+      mode: 'custom',
+      start_date: customRange[0],
+      end_date: customRange[1],
+      start_time: startTime,
+      end_time: endTime
+    }
+  }
+
+  if (preset === 'today' || preset === 'yesterday' || preset === 'last_7_days' || preset === 'last_30_days') {
+    return {
+      mode: 'preset',
+      preset
+    }
+  }
+
+  return null
 }

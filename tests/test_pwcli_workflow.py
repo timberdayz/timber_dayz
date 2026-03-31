@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from scripts.pwcli_workflow import (
+    build_capture_paths,
     build_note_path,
     build_pack_manifest,
     build_step_snapshot_path,
@@ -35,6 +36,16 @@ def test_build_note_path_uses_step_prefix(tmp_path: Path):
     path = build_note_path(work_dir=tmp_path, step="04")
 
     assert path.name == "04-note.md"
+
+
+def test_build_capture_paths_reuses_name_for_snapshot_and_screenshot(tmp_path: Path):
+    snapshot_path, screenshot_path = build_capture_paths(
+        work_dir=tmp_path,
+        name="09-date-picker-open",
+    )
+
+    assert snapshot_path.name == "09-date-picker-open.md"
+    assert screenshot_path.name == "09-date-picker-open.png"
 
 
 def test_validate_work_package_requires_before_after_pairs(tmp_path: Path):

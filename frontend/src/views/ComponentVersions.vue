@@ -86,7 +86,7 @@
           <template #default="{ row }">
             <div class="component-name">
               <el-tag size="small" type="info">{{ getPlatformFromName(row.component_name) }}</el-tag>
-              <span>{{ getComponentTypeFromName(row.component_name) }}</span>
+              <span>{{ getComponentSummary(row.component_name) }}</span>
             </div>
           </template>
         </el-table-column>
@@ -108,11 +108,11 @@
         <el-table-column label="类型" width="100">
           <template #default="{ row }">
             <el-tag 
-              :type="getLogicalTypeTag(getComponentTypeFromName(row.component_name))" 
+              :type="getLogicalTypeTag(getLogicalTypeFromName(row.component_name))" 
               size="small"
               effect="plain"
             >
-              {{ getLogicalTypeLabel(getComponentTypeFromName(row.component_name)) }}
+              {{ getLogicalTypeLabel(getLogicalTypeFromName(row.component_name)) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -123,7 +123,7 @@
               <el-tag v-if="row.is_stable" type="success" size="small">稳定</el-tag>
               <el-tag v-if="row.is_testing" type="warning" size="small">测试中</el-tag>
               <el-tag v-if="!row.is_active" type="info" size="small">已禁用</el-tag>
-              <el-tooltip v-if="hasMultiStableConflict(row)" content="该组件类型存在多个稳定版冲突。正式运行应先清理冲突，只保留一个稳定版。" placement="top">
+              <el-tooltip v-if="hasMultiStableConflict(row)" content="该运行组件存在多个稳定版冲突。正式运行应先清理冲突，只保留一个稳定版。" placement="top">
                 <el-icon class="conflict-warning"><WarningFilled /></el-icon>
               </el-tooltip>
             </div>
@@ -770,31 +770,22 @@ const canStartCurrentTest = computed(() => {
 const multiStableConflicts = computed(() => {
   const map = new Map()
   for (const row of versions.value) {
-    const platform = getPlatformFromName(row.component_name)
-    const compType = getComponentTypeFromName(row.component_name)
-    const key = `${platform}/${compType}`
     if (row.is_stable) {
+      const key = row.component_name
       map.set(key, (map.get(key) || 0) + 1)
     }
   }
   return Array.from(map.entries())
     .filter(([, count]) => count > 1)
-    .map(([key]) => {
-      const [p, t] = key.split('/')
-      return { platform: p, componentType: t }
-    })
+    .map(([componentName]) => componentName)
 })
 const multiStableConflictDescription = computed(() => {
   if (multiStableConflicts.value.length === 0) return ''
-  return '以下组件类型存在多个稳定版冲突。正式运行前应只保留一个稳定版：' +
-    multiStableConflicts.value.map(({ platform, componentType }) => `${platform}/${componentType}`).join('、')
+  return '以下运行组件存在多个稳定版冲突。正式运行前应只保留一个稳定版：' +
+    multiStableConflicts.value.join('、')
 })
 const hasMultiStableConflict = (row) => {
-  const platform = getPlatformFromName(row.component_name)
-  const compType = getComponentTypeFromName(row.component_name)
-  return multiStableConflicts.value.some(
-    (c) => c.platform === platform && c.componentType === compType
-  )
+  return multiStableConflicts.value.includes(row.component_name)
 }
 
 // 方法
@@ -967,8 +958,16 @@ const getPlatformFromName = (name) => {
   return parseComponentMeta(name).platform || 'unknown'
 }
 
-const getComponentTypeFromName = (name) => {
+const getLogicalTypeFromName = (name) => {
   return parseComponentMeta(name).logicalType || 'unknown'
+}
+
+const getComponentSummary = (name) => {
+  const meta = parseComponentMeta(name)
+  if (meta.logicalType === 'export' && meta.dataDomain) {
+    return meta.subDomain ? `${meta.dataDomain}/${meta.subDomain}` : meta.dataDomain
+  }
+  return getLogicalTypeLabel(meta.logicalType || 'unknown')
 }
 
 const getProgressColor = (rate) => {

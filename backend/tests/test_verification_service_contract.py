@@ -113,3 +113,21 @@ def test_verification_resume_request_allows_manual_completed_without_code():
 def test_verification_resume_request_rejects_manual_completed_when_code_present():
     with pytest.raises(ValidationError):
         VerificationResumeRequest(captcha_code="1234", manual_completed=True)
+
+
+def test_verification_payload_maps_manual_intervention_to_manual_continue():
+    store = VerificationStateStore()
+    service = VerificationService(store=store)
+
+    payload = service.raise_required(
+        owner_type="component_test",
+        owner_id="test-1",
+        verification_type="manual_intervention",
+        phase="login",
+        current_url="https://seller.shopee.cn/portal/merchant/setting",
+        screenshot_url="/api/verification.png",
+        message="special case requires manual handling",
+    )
+
+    assert payload["verification_type"] == "manual_intervention"
+    assert payload["verification_input_mode"] == "manual_continue"

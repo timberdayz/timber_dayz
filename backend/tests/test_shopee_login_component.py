@@ -192,6 +192,40 @@ async def test_shopee_login_post_otp_submit_does_not_fail_while_otp_modal_is_sti
     assert outcome == "success"
 
 
+@pytest.mark.asyncio
+async def test_shopee_login_detects_post_login_special_page_as_manual_intervention(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    component = ShopeeLogin(
+        _ctx(
+            account={
+                "username": "huangjiajumain",
+                "password": "pass",
+                "login_url": "https://seller.shopee.cn/account/signin?next=%2F",
+            },
+            config={
+                "task": {"screenshot_dir": str(tmp_path)},
+                "params": {"otp": "123456"},
+            },
+        )
+    )
+    page = _FakePage("https://seller.shopee.cn/portal/merchant/setting")
+
+    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_is_slide_captcha_visible", AsyncMock(return_value=False))
+    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
+    monkeypatch.setattr(component, "_homepage_dom_looks_ready", AsyncMock(return_value=False))
+    monkeypatch.setattr(component, "_session_shell_looks_ready", AsyncMock(return_value=True))
+
+    with pytest.raises(VerificationRequiredError) as exc_info:
+        await component._submit_resumed_otp(page, "123456")
+
+    assert exc_info.value.verification_type == "manual_intervention"
+    assert page.screenshot_paths
+
+
 def test_shopee_login_success_detection_rejects_signin_urls() -> None:
     component = ShopeeLogin(_ctx())
 

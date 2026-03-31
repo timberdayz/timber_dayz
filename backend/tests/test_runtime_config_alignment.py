@@ -20,6 +20,16 @@ def test_dev_backend_mounts_tools_directory():
     ), "backend dev container must mount tools into /app/tools for runtime subprocesses"
 
 
+def test_dev_backend_mounts_profiles_directory_for_session_reuse():
+    compose = _read_yaml("docker-compose.dev.yml")
+    volumes = compose["services"]["backend"]["volumes"]
+
+    assert any(
+        str(volume).startswith("./profiles:/app/profiles")
+        for volume in volumes
+    ), "backend dev container must mount profiles into /app/profiles for session reuse"
+
+
 def test_backend_image_copies_runtime_tool_scripts():
     dockerfile = (PROJECT_ROOT / "Dockerfile.backend").read_text(encoding="utf-8")
 
@@ -81,6 +91,23 @@ def test_dev_celery_healthcheck_does_not_depend_on_ps_binary():
     health_test = compose["services"]["celery-worker"]["healthcheck"]["test"]
 
     assert "ps aux" not in " ".join(str(part) for part in health_test)
+
+
+def test_dev_frontend_uses_vite_port_instead_of_nginx_port():
+    compose = _read_yaml("docker-compose.dev.yml")
+    frontend = compose["services"]["frontend"]
+
+    assert frontend["build"]["context"] == "."
+    assert frontend["build"]["dockerfile"] == "Dockerfile.frontend"
+    assert frontend["ports"] == ["${FRONTEND_PORT:-5174}:5173"]
+    assert frontend["healthcheck"]["test"] == [
+        "CMD",
+        "wget",
+        "--quiet",
+        "--tries=1",
+        "--spider",
+        "http://localhost:5173/",
+    ]
 
 
 def test_cloud_overlay_increases_celery_beat_memory_limit():
