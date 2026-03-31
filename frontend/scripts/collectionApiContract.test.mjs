@@ -114,6 +114,12 @@ test('CollectionConfig exposes explicit granularity control for custom time sele
     true,
     'config page should expose execution mode selection'
   )
+
+  assert.equal(
+    viewSource.includes('<el-table-column label="执行模式"'),
+    true,
+    'config list should display execution mode'
+  )
 })
 
 test('CollectionConfig hands execution off to CollectionTasks after creating tasks', () => {

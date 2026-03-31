@@ -66,6 +66,13 @@
           {{ row.account_ids?.length || 0 }}
         </template>
       </el-table-column>
+      <el-table-column label="执行模式" width="100">
+        <template #default="{ row }">
+          <el-tag :type="row.execution_mode === 'headed' ? 'warning' : 'info'">
+            {{ getExecutionModeLabel(row.execution_mode) }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="数据域" min-width="180">
         <template #default="{ row }">
           <el-tag 
@@ -728,6 +735,10 @@ const getDomainLabel = (domain) => {
     inventory: '库存'
   }
   return labels[domain] || domain
+}
+
+const getExecutionModeLabel = (mode) => {
+  return mode === 'headed' ? '有头模式' : '无头模式'
 }
 
 // ========== v4.7.0: 新功能方法 ==========
