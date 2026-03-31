@@ -41,6 +41,12 @@ test('CollectionTasks is the single runtime intervention surface', () => {
   )
 
   assert.equal(
+    tasksSource.includes('sortedPendingVerificationItems'),
+    true,
+    'task page should sort pending intervention items before rendering'
+  )
+
+  assert.equal(
     tasksSource.includes('getVerificationItems'),
     true,
     'task page should consume the dedicated verification-items data source for the waiting queue'
@@ -70,5 +76,11 @@ test('CollectionHistory does not expose runtime retry or intervention actions', 
     historySource.includes('verification'),
     false,
     'history page should not expose verification handling'
+  )
+
+  assert.equal(
+    historySource.includes('执行模式'),
+    true,
+    'history page should still display execution mode for audit visibility'
   )
 })

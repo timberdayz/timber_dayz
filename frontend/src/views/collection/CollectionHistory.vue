@@ -141,6 +141,11 @@
           {{ formatDuration(row.duration_seconds) }}
         </template>
       </el-table-column>
+      <el-table-column label="执行模式" width="100">
+        <template #default="{ row }">
+          {{ getExecutionModeLabel(row.execution_mode) }}
+        </template>
+      </el-table-column>
       <el-table-column label="完成时间" width="160">
         <template #default="{ row }">
           {{ formatTime(row.updated_at) }}
@@ -213,6 +218,9 @@
         </el-descriptions-item>
         <el-descriptions-item label="耗时">
           {{ formatDuration(currentTask?.duration_seconds) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="执行模式">
+          {{ getExecutionModeLabel(currentTask?.execution_mode) }}
         </el-descriptions-item>
         
         <!-- v4.7.0: 域级别统计 -->
@@ -381,6 +389,10 @@ const getStatusLabel = (status) => {
     cancelled: '已取消'
   }
   return labels[status] || status
+}
+
+const getExecutionModeLabel = (mode) => {
+  return mode === 'headed' ? '有头模式' : '无头模式'
 }
 
 const formatDuration = (seconds) => {

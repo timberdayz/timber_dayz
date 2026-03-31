@@ -154,7 +154,7 @@
       </div>
       <div class="pending-verification-list">
         <div
-          v-for="item in pendingVerificationItems"
+          v-for="item in sortedPendingVerificationItems"
           :key="item.task_id"
           class="pending-verification-item"
         >
@@ -504,6 +504,17 @@ const selectedSubtypeDomains = computed(() =>
 
 const pendingVerificationItems = computed(() => verificationItems.value || [])
 
+const sortedPendingVerificationItems = computed(() =>
+  [...pendingVerificationItems.value].sort((a, b) => {
+    const aManual = String(a.verification_type || '').toLowerCase() === 'manual_intervention' ? 0 : 1
+    const bManual = String(b.verification_type || '').toLowerCase() === 'manual_intervention' ? 0 : 1
+    if (aManual !== bManual) {
+      return aManual - bManual
+    }
+    return String(a.created_at || '').localeCompare(String(b.created_at || ''))
+  })
+)
+
 const verificationSummary = computed(() => {
   const items = pendingVerificationItems.value
   return {
@@ -564,6 +575,7 @@ const loadTasks = async () => {
   try {
     const params = {}
     if (statusFilter.value) params.status = statusFilter.value
+    if (route.query.config_id) params.config_id = route.query.config_id
     
     tasks.value = await collectionApi.getTasks(params)
     verificationItems.value = await collectionApi.getVerificationItems()

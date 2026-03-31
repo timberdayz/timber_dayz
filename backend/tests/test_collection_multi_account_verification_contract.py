@@ -57,6 +57,18 @@ def test_build_task_response_payload_exposes_verification_contract_fields():
     assert payload["verification_attempt_count"] == 0
 
 
+def test_build_task_response_payload_exposes_config_scope_and_execution_mode():
+    payload = _build_task_response_payload(
+        _make_task(
+            config_id=42,
+            debug_mode=True,
+        )
+    )
+
+    assert payload["config_id"] == 42
+    assert payload["execution_mode"] == "headed"
+
+
 def test_build_task_verification_item_is_scoped_per_account():
     first = _build_task_verification_item(_make_task(task_id="task-1", account="acc-1"))
     second = _build_task_verification_item(_make_task(task_id="task-1", account="acc-2"))

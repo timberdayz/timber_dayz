@@ -191,6 +191,7 @@ class TaskResponse(BaseModel):
     current_step: Optional[str]
     files_collected: int
     trigger_type: str
+    config_id: Optional[int] = None
     data_domains: Optional[List[str]]
     sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(
         None,
@@ -204,6 +205,7 @@ class TaskResponse(BaseModel):
     failed_domains: Optional[List[Dict[str, str]]] = Field(None, description="失败的数据域")
     current_domain: Optional[str] = Field(None, description="当前数据域")
     debug_mode: bool = Field(False, description="调试模式")
+    execution_mode: Literal["headless", "headed"] = "headless"
     error_message: Optional[str]
     duration_seconds: Optional[int]
     created_at: datetime

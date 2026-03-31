@@ -179,6 +179,7 @@ def _build_task_response_payload(task: CollectionTask) -> dict:
         "current_step": getattr(task, "current_step", None),
         "files_collected": getattr(task, "files_collected", 0) or 0,
         "trigger_type": task.trigger_type,
+        "config_id": getattr(task, "config_id", None),
         "data_domains": getattr(task, "data_domains", None),
         "sub_domains": getattr(task, "sub_domains", None),
         "granularity": getattr(task, "granularity", None),
@@ -189,6 +190,7 @@ def _build_task_response_payload(task: CollectionTask) -> dict:
         "failed_domains": getattr(task, "failed_domains", None),
         "current_domain": getattr(task, "current_domain", None),
         "debug_mode": getattr(task, "debug_mode", False) or False,
+        "execution_mode": "headed" if getattr(task, "debug_mode", False) else "headless",
         "error_message": getattr(task, "error_message", None),
         "duration_seconds": getattr(task, "duration_seconds", None),
         "created_at": task.created_at,
@@ -381,6 +383,7 @@ async def create_task(
 async def list_tasks(
     platform: Optional[str] = Query(None, description="按平台筛选"),
     status: Optional[str] = Query(None, description="按状态筛选"),
+    config_id: Optional[int] = Query(None, description="按配置筛选"),
     limit: int = Query(50, ge=1, le=100, description="返回数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
     db: AsyncSession = Depends(get_async_db)
@@ -393,6 +396,8 @@ async def list_tasks(
 
     if status:
         stmt = stmt.where(CollectionTask.status == status)
+    if config_id is not None:
+        stmt = stmt.where(CollectionTask.config_id == config_id)
 
     stmt = stmt.order_by(desc(CollectionTask.created_at)).offset(offset).limit(limit)
     result = await db.execute(stmt)

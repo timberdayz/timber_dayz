@@ -146,4 +146,10 @@ test('CollectionConfig hands execution off to CollectionTasks after creating tas
     true,
     'task page should consume task_ids from route query'
   )
+
+  assert.equal(
+    tasksViewSource.includes('config_id'),
+    true,
+    'task page should consume config_id from route query'
+  )
 })
