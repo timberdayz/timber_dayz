@@ -420,6 +420,23 @@ class TiktokLogin(LoginComponent):
         await page.screenshot(path=screenshot_path, timeout=5000)
         raise VerificationRequiredError("otp", screenshot_path)
 
+    async def _raise_manual_intervention_required(self, page: Any, config: dict[str, Any]) -> None:
+        screenshot_dir = (config or {}).get("task", {}).get("screenshot_dir")
+        if screenshot_dir:
+            os.makedirs(screenshot_dir, exist_ok=True)
+            screenshot_path = os.path.join(
+                screenshot_dir,
+                "tiktok-login-manual-intervention.png",
+            )
+        else:
+            fd, screenshot_path = tempfile.mkstemp(
+                suffix=".png",
+                prefix="tiktok_login_manual_",
+            )
+            os.close(fd)
+        await page.screenshot(path=screenshot_path, timeout=5000)
+        raise VerificationRequiredError("manual_intervention", screenshot_path)
+
     async def _submit_resumed_otp(self, page: Any, otp_value: str) -> LoginResult:
         await self._ensure_trust_device_checked(page)
         await self._fill_otp(page, otp_value)
@@ -434,6 +451,8 @@ class TiktokLogin(LoginComponent):
         if outcome == "login_error":
             login_error = await self._find_visible_login_error(page)
             return LoginResult(success=False, message=login_error or "login failed after otp submit")
+        if outcome == "timeout":
+            await self._raise_manual_intervention_required(page, self.ctx.config or {})
         return LoginResult(success=False, message="otp did not leave verification screen")
 
     async def run(self, page: Any) -> LoginResult:
@@ -442,6 +461,7 @@ class TiktokLogin(LoginComponent):
         params = config.get("params") or {}
         current_url = str(getattr(page, "url", "") or "")
         otp_value = str(params.get("captcha_code") or params.get("otp") or "").strip()
+        manual_completed = bool(params.get("manual_completed"))
 
         if self._login_looks_successful(current_url):
             await self._cleanup_after_login(page)
@@ -450,6 +470,28 @@ class TiktokLogin(LoginComponent):
         try:
             if otp_value and await self._is_otp_visible(page):
                 return await self._submit_resumed_otp(page, otp_value)
+
+            if manual_completed:
+                outcome = await self._wait_for_post_login_outcome(
+                    page,
+                    phase="post_manual_verification",
+                    timeout_ms=10000,
+                    poll_ms=300,
+                )
+                if outcome == "success":
+                    await self._cleanup_after_login(page)
+                    return LoginResult(success=True, message="ok")
+                if outcome == "otp":
+                    await self._ensure_trust_device_checked(page)
+                    if not otp_value:
+                        await self._raise_otp_verification_required(page, config)
+                    return await self._submit_resumed_otp(page, otp_value)
+                if outcome == "timeout":
+                    await self._raise_manual_intervention_required(page, config)
+                return LoginResult(
+                    success=False,
+                    message="manual verification did not reach otp or homepage",
+                )
 
             login_url = str(acc.get("login_url") or "").strip()
             if not login_url:
@@ -483,6 +525,8 @@ class TiktokLogin(LoginComponent):
                 if not otp_value:
                     await self._raise_otp_verification_required(page, config)
                 return await self._submit_resumed_otp(page, otp_value)
+            if outcome == "timeout":
+                await self._raise_manual_intervention_required(page, config)
 
             return LoginResult(success=False, message="login did not reach homepage or otp step")
         except VerificationRequiredError:

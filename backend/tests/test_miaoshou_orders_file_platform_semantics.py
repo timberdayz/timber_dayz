@@ -24,11 +24,21 @@ def test_register_single_file_uses_business_platform_and_preserves_miaoshou_sour
     tmp_path,
     monkeypatch,
 ):
+    import backend.services.platform_table_manager as platform_table_manager_module
     from modules.services import catalog_scanner as catalog_scanner_module
 
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.db'}", future=True)
     CatalogFile.__table__.create(engine)
     monkeypatch.setattr(catalog_scanner_module, "_get_engine", lambda: engine)
+    monkeypatch.setattr(
+        platform_table_manager_module,
+        "get_platform_table_manager",
+        lambda _session: type(
+            "_NoopTableManager",
+            (),
+            {"ensure_table_exists": staticmethod(lambda **_kwargs: "fact_tiktok_orders_weekly")},
+        )(),
+    )
 
     raw_dir = tmp_path / "data" / "raw" / "2026"
     raw_dir.mkdir(parents=True, exist_ok=True)

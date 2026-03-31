@@ -60,11 +60,11 @@ async def get_file_groups(db: AsyncSession = Depends(get_async_db)):
         # 优先使用source_platform,如果为NULL则使用platform_code
         # 仅允许白名单平台,防止遗留/脏数据(如日期/unknown)进入平台下拉
         platforms_result = await db.execute(text("""
-            SELECT DISTINCT LOWER(COALESCE(source_platform, platform_code)) AS p
+            SELECT DISTINCT LOWER(platform_code) AS p
             FROM catalog_files
-            WHERE (source_platform IS NOT NULL AND source_platform <> '')
-               OR (platform_code IS NOT NULL AND platform_code <> '')
-            AND LOWER(COALESCE(source_platform, platform_code)) IN ('shopee','tiktok','miaoshou')
+            WHERE platform_code IS NOT NULL
+              AND platform_code <> ''
+              AND LOWER(platform_code) IN ('shopee','tiktok','miaoshou')
             ORDER BY p
         """))
         platforms = [row[0] for row in platforms_result]
@@ -120,7 +120,7 @@ async def get_file_groups(db: AsyncSession = Depends(get_async_db)):
         # 查询所有文件(返回id与关键元数据)
         files_result = await db.execute(text("""
             SELECT id, 
-                   COALESCE(source_platform, platform_code) AS platform,
+                   platform_code AS platform,
                    data_domain, 
                    file_name, 
                    sub_domain, 
@@ -128,11 +128,11 @@ async def get_file_groups(db: AsyncSession = Depends(get_async_db)):
                    date_from, 
                    date_to
             FROM catalog_files 
-            WHERE (source_platform IS NOT NULL AND source_platform <> '')
-               OR (platform_code IS NOT NULL AND platform_code <> '')
+            WHERE platform_code IS NOT NULL
+              AND platform_code <> ''
               AND data_domain IS NOT NULL
               AND file_name IS NOT NULL
-              AND LOWER(COALESCE(source_platform, platform_code)) IN ('shopee','tiktok','miaoshou')
+              AND LOWER(platform_code) IN ('shopee','tiktok','miaoshou')
             ORDER BY platform, data_domain, file_name
         """))
         

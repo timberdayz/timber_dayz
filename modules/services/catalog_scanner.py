@@ -524,6 +524,16 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                                     meta_for_resolver['shop_id'] = legacy['shop_id']
                     
                     # 3. 解析店铺归属(全域智能解析)- [*] v4.17.3修复:先解析店铺归属,再计算hash
+                    resolved_dimensions = _resolve_catalog_dimensions(
+                        file_metadata,
+                        business_metadata=business_metadata,
+                        collection_info=collection_info,
+                    )
+                    norm_platform = resolved_dimensions['platform_code']
+                    norm_source_platform = resolved_dimensions['source_platform']
+                    norm_domain = resolved_dimensions['data_domain']
+                    norm_granularity = resolved_dimensions['granularity']
+                    norm_sub_domain = resolved_dimensions['sub_domain']
                     resolver = get_shop_resolver()
                     # 如果.meta.json提供了shop_id,直接以最高置信度使用,不再推断
                     if meta_for_resolver.get('shop_id'):
@@ -536,7 +546,7 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                     else:
                         resolved_shop = resolver.resolve(
                             file_path=str(file_path),
-                            platform_code=file_metadata['source_platform'],
+                            platform_code=norm_source_platform,
                             file_metadata=meta_for_resolver  # [*] 传递.meta.json中的shop_id/account
                         )
                     
@@ -550,9 +560,7 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                     }
                     
                     # v4.3.6: miaoshou平台特殊处理需要提前计算norm_platform
-                    norm_platform = normalize_platform(file_metadata['source_platform'])
                     # [*] 需要提前计算norm_domain(用于判断订单和库存数据域)
-                    norm_domain = normalize_data_domain(file_metadata.get('data_domain', ''))
                     
                     # [*] v4.18.1重构:简化shop_id逻辑
                     # 规则:shop_id完全从伴生JSON文件获取,如果没有则设为'none'
@@ -577,9 +585,6 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                     
                     # 4. 标准化与校验(v4.3.5: 强制小写化 + 白名单)
                     # norm_platform和norm_domain已在上面计算
-                    norm_granularity = normalize_granularity(file_metadata['granularity'])
-                    norm_sub_domain = file_metadata.get('sub_domain', '').lower().strip()
-                    
                     # [*] 新增:services数据域,如果sub_domain为空,默认设置为'agent'(适用于所有平台)
                     if norm_domain == 'services' and not norm_sub_domain:
                         norm_sub_domain = 'agent'
@@ -614,9 +619,9 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                         source="data/raw",  # 新的数据源标识
                         
                         # v4.3.5: 强制小写化后的字段
-                        source_platform=norm_platform,
+                        source_platform=norm_source_platform,
                         data_domain=norm_domain,
-                        sub_domain=norm_sub_domain,
+                        sub_domain=norm_sub_domain or None,
                         granularity=norm_granularity,
                         
                         # [*] 账号和店铺归属(从.meta.json提取)
@@ -658,9 +663,9 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                         # v4.18.0: 更新为相对路径格式
                         existing.file_path = relative_file_path
                         existing.file_name = file_path.name
-                        existing.source_platform = norm_platform
+                        existing.source_platform = norm_source_platform
                         existing.data_domain = norm_domain
-                        existing.sub_domain = norm_sub_domain
+                        existing.sub_domain = norm_sub_domain or None
                         existing.granularity = norm_granularity
                         existing.platform_code = norm_platform  # v4.3.5: 兼容性字段同步
                         existing.storage_layer = 'raw'
@@ -688,7 +693,7 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                             shop_id_str = str(initial_shop_id)
                             has_date_pattern = bool(re.search(r'\d{8}', shop_id_str))
                             has_snapshot = '_snapshot_' in shop_id_str.lower()
-                            if (norm_platform == 'miaoshou' and 
+                            if (norm_source_platform == 'miaoshou' and 
                                 norm_domain in ['inventory', 'orders'] and 
                                 (has_date_pattern or has_snapshot)):
                                 logger.warning(
@@ -857,6 +862,8 @@ def register_single_file(file_path: str) -> Optional[int]:
         date_from = None
         date_to = None
         meta_for_resolver = {}
+        business_metadata = {}
+        collection_info = {}
         
         if meta_file.exists():
             try:
@@ -864,9 +871,10 @@ def register_single_file(file_path: str) -> Optional[int]:
                 quality_data = meta_content.get('data_quality', {})
                 quality_score = quality_data.get('quality_score')
                 biz_meta = meta_content.get('business_metadata', {})
+                business_metadata = biz_meta or {}
                 date_from = _parse_date(biz_meta.get('date_from'))
                 date_to = _parse_date(biz_meta.get('date_to'))
-                collection_info = meta_content.get('collection_info', {})
+                collection_info = meta_content.get('collection_info', {}) or {}
                 meta_account = collection_info.get('account')
                 meta_shop_id = collection_info.get('shop_id')
                 if meta_shop_id:
@@ -890,6 +898,16 @@ def register_single_file(file_path: str) -> Optional[int]:
                     meta_for_resolver['shop_id'] = legacy['shop_id']
         
         # 3. [*] v4.17.3修复:先解析店铺归属,再计算hash
+        resolved_dimensions = _resolve_catalog_dimensions(
+            file_metadata,
+            business_metadata=business_metadata,
+            collection_info=collection_info,
+        )
+        norm_platform = resolved_dimensions['platform_code']
+        norm_source_platform = resolved_dimensions['source_platform']
+        norm_domain = resolved_dimensions['data_domain']
+        norm_granularity = resolved_dimensions['granularity']
+        norm_sub_domain = resolved_dimensions['sub_domain']
         resolver = get_shop_resolver()
         if meta_for_resolver.get('shop_id'):
             resolved_shop = type('RS', (), {
@@ -901,7 +919,7 @@ def register_single_file(file_path: str) -> Optional[int]:
         else:
             resolved_shop = resolver.resolve(
                 file_path=str(file_path_obj),
-                platform_code=file_metadata['source_platform'],
+                platform_code=norm_source_platform,
                 file_metadata=meta_for_resolver
             )
         
@@ -913,10 +931,8 @@ def register_single_file(file_path: str) -> Optional[int]:
             'source': resolved_shop.source,
             'detail': resolved_shop.detail
         }
-        norm_platform = normalize_platform(file_metadata['source_platform'])
         
         # [*] 需要先获取norm_domain(在判断之前)
-        norm_domain = normalize_data_domain(file_metadata.get('data_domain', ''))
         
         # [*] v4.18.1重构:简化shop_id逻辑
         # 规则:shop_id完全从伴生JSON文件获取,如果没有则设为'none'
@@ -940,10 +956,6 @@ def register_single_file(file_path: str) -> Optional[int]:
         )
         
         # 6. 标准化与校验
-        norm_domain = normalize_data_domain(file_metadata['data_domain'])
-        norm_granularity = normalize_granularity(file_metadata['granularity'])
-        norm_sub_domain = file_metadata.get('sub_domain', '').lower().strip()
-        
         # [*] 新增:services数据域,如果sub_domain为空,默认设置为'agent'(适用于所有平台)
         if norm_domain == 'services' and not norm_sub_domain:
             norm_sub_domain = 'agent'
@@ -979,9 +991,9 @@ def register_single_file(file_path: str) -> Optional[int]:
             # v4.18.0: 更新为相对路径格式
             existing.file_path = relative_file_path
             existing.file_name = file_path_obj.name
-            existing.source_platform = norm_platform
+            existing.source_platform = norm_source_platform
             existing.data_domain = norm_domain
-            existing.sub_domain = norm_sub_domain
+            existing.sub_domain = norm_sub_domain or None
             existing.granularity = norm_granularity
             existing.platform_code = norm_platform
             existing.storage_layer = 'raw'
@@ -1004,7 +1016,7 @@ def register_single_file(file_path: str) -> Optional[int]:
                 shop_id_str = str(initial_shop_id)
                 has_date_pattern = bool(re.search(r'\d{8}', shop_id_str))
                 has_snapshot = '_snapshot_' in shop_id_str.lower()
-                if (norm_platform == 'miaoshou' and 
+                if (norm_source_platform == 'miaoshou' and 
                     norm_domain in ['inventory', 'orders'] and 
                     (has_date_pattern or has_snapshot)):
                     logger.warning(
@@ -1056,9 +1068,9 @@ def register_single_file(file_path: str) -> Optional[int]:
                 file_size=file_path_obj.stat().st_size,
                 file_hash=file_hash,
                 source="data/raw",
-                source_platform=norm_platform,
+                source_platform=norm_source_platform,
                 data_domain=norm_domain,
-                sub_domain=norm_sub_domain,
+                sub_domain=norm_sub_domain or None,
                 granularity=norm_granularity,
                 account=meta_for_resolver.get('account'),
                 shop_id=initial_shop_id,

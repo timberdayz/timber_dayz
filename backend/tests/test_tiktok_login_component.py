@@ -262,6 +262,87 @@ async def test_tiktok_login_resume_with_runtime_otp_reaches_success(
 
 
 @pytest.mark.asyncio
+async def test_tiktok_login_raises_manual_intervention_when_post_credentials_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    component = TiktokLogin(
+        _ctx(
+            config={
+                "task": {"screenshot_dir": str(tmp_path)},
+                "params": {},
+            }
+        )
+    )
+    page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
+
+    monkeypatch.setattr(component, "_wait_for_login_surface_ready", AsyncMock(return_value=True))
+    monkeypatch.setattr(component, "_ensure_login_mode", AsyncMock())
+    monkeypatch.setattr(component, "_fill_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_submit_credentials", AsyncMock())
+    monkeypatch.setattr(component, "_wait_for_post_login_outcome", AsyncMock(return_value="timeout"))
+
+    with pytest.raises(VerificationRequiredError) as exc_info:
+        await component.run(page)
+
+    assert exc_info.value.verification_type == "manual_intervention"
+    assert page.screenshot_paths
+
+
+@pytest.mark.asyncio
+async def test_tiktok_login_submit_resumed_otp_raises_manual_intervention_when_homepage_never_stabilizes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    component = TiktokLogin(
+        _ctx(
+            config={
+                "task": {"screenshot_dir": str(tmp_path)},
+                "params": {"otp": "123456"},
+            }
+        )
+    )
+    page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
+
+    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=True))
+    monkeypatch.setattr(component, "_ensure_trust_device_checked", AsyncMock())
+    monkeypatch.setattr(component, "_fill_otp", AsyncMock())
+    monkeypatch.setattr(component, "_confirm_otp", AsyncMock())
+    monkeypatch.setattr(component, "_wait_for_post_login_outcome", AsyncMock(return_value="timeout"))
+
+    with pytest.raises(VerificationRequiredError) as exc_info:
+        await component.run(page)
+
+    assert exc_info.value.verification_type == "manual_intervention"
+    assert page.screenshot_paths
+
+
+@pytest.mark.asyncio
+async def test_tiktok_login_manual_completed_timeout_re_raises_manual_intervention(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    component = TiktokLogin(
+        _ctx(
+            config={
+                "task": {"screenshot_dir": str(tmp_path)},
+                "params": {"manual_completed": True},
+            }
+        )
+    )
+    page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
+
+    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
+    monkeypatch.setattr(component, "_wait_for_post_login_outcome", AsyncMock(return_value="timeout"))
+
+    with pytest.raises(VerificationRequiredError) as exc_info:
+        await component.run(page)
+
+    assert exc_info.value.verification_type == "manual_intervention"
+    assert page.screenshot_paths
+
+
+@pytest.mark.asyncio
 async def test_tiktok_login_submit_resumed_otp_checks_trust_device_before_filling_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
