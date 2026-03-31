@@ -134,6 +134,10 @@
       </div>
     </el-alert>
 
+    <div v-if="activeConfigId" class="active-config-banner">
+      当前正在查看由配置 #{{ activeConfigId }} 创建的任务。
+    </div>
+
     <div v-if="pendingVerificationItems.length" class="pending-verification-panel">
       <div class="section-header">
         <h3>待处理队列</h3>
@@ -152,31 +156,38 @@
           <div class="summary-label">人工处理</div>
         </div>
       </div>
-      <div class="pending-verification-list">
-        <div
-          v-for="item in sortedPendingVerificationItems"
-          :key="item.task_id"
-          class="pending-verification-item"
-        >
-          <div class="pending-verification-meta">
-            <el-tag :type="getPlatformTagType(item.platform)" size="small">
-              {{ item.platform }}
-            </el-tag>
-            <span>{{ item.account || item.account_id }}</span>
-            <span>{{ item.task_id?.slice(0, 8) }}...</span>
-            <span>{{ getStatusLabel(item.status) }}</span>
-            <span>{{ item.verification_message || item.current_step || '等待处理' }}</span>
-          </div>
-          <div class="pending-verification-actions">
-            <el-button size="small" @click="copyTaskId(item.task_id)">
-              复制任务ID
-            </el-button>
-            <el-button size="small" @click="focusTaskRow(item.task_id)">
-              定位任务
-            </el-button>
-            <el-button size="small" type="primary" @click="showResumeDialog(item)">
-              立即处理
-            </el-button>
+      <div
+        v-for="group in groupedPendingVerificationItems"
+        :key="group.key"
+        class="pending-group"
+      >
+        <div class="pending-group-title">{{ group.title }}</div>
+        <div class="pending-verification-list">
+          <div
+            v-for="item in group.items"
+            :key="item.task_id"
+            class="pending-verification-item"
+          >
+            <div class="pending-verification-meta">
+              <el-tag :type="getPlatformTagType(item.platform)" size="small">
+                {{ item.platform }}
+              </el-tag>
+              <span>{{ item.account || item.account_id }}</span>
+              <span>{{ item.task_id?.slice(0, 8) }}...</span>
+              <span>{{ getStatusLabel(item.status) }}</span>
+              <span>{{ item.verification_message || item.current_step || '等待处理' }}</span>
+            </div>
+            <div class="pending-verification-actions">
+              <el-button size="small" @click="copyTaskId(item.task_id)">
+                复制任务ID
+              </el-button>
+              <el-button size="small" @click="focusTaskRow(item.task_id)">
+                定位任务
+              </el-button>
+              <el-button size="small" type="primary" @click="showResumeDialog(item)">
+                立即处理
+              </el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -342,6 +353,8 @@
             <el-descriptions-item label="开始时间">{{ formatTime(detailTask.started_at) }}</el-descriptions-item>
             <el-descriptions-item label="结束时间">{{ formatTime(detailTask.completed_at) }}</el-descriptions-item>
             <el-descriptions-item label="总耗时">{{ formatDuration(detailTask) }}</el-descriptions-item>
+            <el-descriptions-item label="来源配置">{{ detailTask.config_id || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="执行模式">{{ getExecutionModeLabel(detailTask.execution_mode) }}</el-descriptions-item>
             <el-descriptions-item label="数据域">
               <el-tag v-for="d in (detailTask.data_domains || [])" :key="d" size="small" class="erp-mr-xs">{{ getDomainLabel(d) }}</el-tag>
             </el-descriptions-item>
@@ -445,6 +458,7 @@ import {
 } from '@/constants/collection'
 
 const route = useRoute()
+const activeConfigId = computed(() => route.query.config_id || '')
 
 // 状态
 const loading = ref(false)
@@ -514,6 +528,26 @@ const sortedPendingVerificationItems = computed(() =>
     return String(a.created_at || '').localeCompare(String(b.created_at || ''))
   })
 )
+
+const groupedPendingVerificationItems = computed(() => {
+  const groups = [
+    {
+      key: 'manual',
+      title: '人工处理',
+      items: sortedPendingVerificationItems.value.filter(
+        (item) => String(item.verification_type || '').toLowerCase() === 'manual_intervention'
+      ),
+    },
+    {
+      key: 'captcha',
+      title: '验证码处理',
+      items: sortedPendingVerificationItems.value.filter(
+        (item) => String(item.verification_type || '').toLowerCase() !== 'manual_intervention'
+      ),
+    },
+  ]
+  return groups.filter((group) => group.items.length > 0)
+})
 
 const verificationSummary = computed(() => {
   const items = pendingVerificationItems.value
@@ -908,6 +942,10 @@ const getStatusLabel = (status) => {
   return labels[status] || status
 }
 
+const getExecutionModeLabel = (mode) => {
+  return mode === 'headed' ? '有头模式' : '无头模式'
+}
+
 const getProgressStatus = (status) => {
   if (status === 'completed') return 'success'
   if (status === 'failed') return 'exception'
@@ -1055,6 +1093,16 @@ onUnmounted(() => {
   font-size: 0.9em;
 }
 
+.active-config-banner {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #ecf5ff;
+  border: 1px solid #b3d8ff;
+  color: #1f4e79;
+  font-size: 13px;
+}
+
 .tasks-section {
   background: white;
   border-radius: 12px;
@@ -1073,6 +1121,17 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.pending-group {
+  margin-bottom: 14px;
+}
+
+.pending-group-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #8c5700;
 }
 
 .verification-summary {

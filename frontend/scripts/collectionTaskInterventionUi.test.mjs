@@ -47,6 +47,12 @@ test('CollectionTasks is the single runtime intervention surface', () => {
   )
 
   assert.equal(
+    tasksSource.includes('groupedPendingVerificationItems'),
+    true,
+    'task page should group pending intervention items before rendering'
+  )
+
+  assert.equal(
     tasksSource.includes('getVerificationItems'),
     true,
     'task page should consume the dedicated verification-items data source for the waiting queue'
@@ -62,6 +68,12 @@ test('CollectionTasks is the single runtime intervention surface', () => {
     tasksSource.includes('executionMode') || tasksSource.includes('debugMode'),
     true,
     'task page should expose a task-level execution mode override'
+  )
+
+  assert.equal(
+    tasksSource.includes('config_id'),
+    true,
+    'task page should expose config scope awareness'
   )
 })
 
