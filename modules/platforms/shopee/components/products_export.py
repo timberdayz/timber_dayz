@@ -379,6 +379,32 @@ class ShopeeProductsExport(ExportComponent):
             target_date.strftime("%Y-%m"),
         )
 
+    async def _find_month_leaf_locator(self, page: Any, iso_date: str) -> Any | None:
+        panel = await self._find_date_panel(page)
+        containers = [panel] if panel is not None else [page]
+        for candidate in self._month_label_candidates(iso_date):
+            for container in containers:
+                try:
+                    matches = container.get_by_text(candidate, exact=True)
+                except Exception:
+                    continue
+                locators = []
+                if hasattr(matches, "last"):
+                    locators.append(matches.last)
+                if hasattr(matches, "first"):
+                    locators.append(matches.first)
+                else:
+                    locators.append(matches)
+                for locator in locators:
+                    if locator is None:
+                        continue
+                    try:
+                        if await locator.is_visible(timeout=1000):
+                            return locator
+                    except Exception:
+                        continue
+        return None
+
     def _week_range_label_candidates(self, start_date: str, end_date: str) -> tuple[str, ...]:
         try:
             start_value = datetime.strptime(str(start_date), "%Y-%m-%d")
@@ -890,11 +916,17 @@ class ShopeeProductsExport(ExportComponent):
         if not await self._navigate_month_panel_to_year(page, target_date.year):
             return False
 
-        for candidate in self._month_label_candidates(iso_date):
-            clicked = await self._click_text_option(page, candidate)
-            if clicked:
-                return True
-        return False
+        locator = await self._find_month_leaf_locator(page, iso_date)
+        if locator is None:
+            return False
+        try:
+            await locator.hover(timeout=5000)
+        except Exception:
+            pass
+        await locator.click(timeout=5000)
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(300)
+        return True
 
     async def _select_week_range_value(self, page: Any, start_date: str, end_date: str) -> bool:
         try:

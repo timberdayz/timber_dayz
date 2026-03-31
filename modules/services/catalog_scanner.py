@@ -190,6 +190,47 @@ def _parse_date(date_str: str) -> Optional[date_type]:
             return None
 
 
+def _resolve_catalog_dimensions(
+    file_metadata: dict,
+    *,
+    business_metadata: Optional[dict] = None,
+    collection_info: Optional[dict] = None,
+) -> dict:
+    business_metadata = business_metadata or {}
+    collection_info = collection_info or {}
+
+    platform_code = normalize_platform(
+        business_metadata.get("source_platform") or file_metadata.get("source_platform", "")
+    )
+    data_domain = normalize_data_domain(
+        business_metadata.get("data_domain") or file_metadata.get("data_domain", "")
+    )
+    granularity = normalize_granularity(
+        business_metadata.get("granularity") or file_metadata.get("granularity", "")
+    )
+
+    raw_sub_domain = business_metadata.get("sub_domain")
+    if raw_sub_domain is None:
+        raw_sub_domain = file_metadata.get("sub_domain", "")
+    sub_domain = str(raw_sub_domain or "").strip().lower()
+
+    if data_domain == "orders":
+        sub_domain = ""
+    elif data_domain == "services" and not sub_domain:
+        sub_domain = "agent"
+
+    collection_platform = normalize_platform(collection_info.get("collection_platform") or "")
+    source_platform = collection_platform or platform_code
+
+    return {
+        "platform_code": platform_code,
+        "source_platform": source_platform,
+        "data_domain": data_domain,
+        "granularity": granularity,
+        "sub_domain": sub_domain,
+    }
+
+
 def _is_repaired_cache(file_path: Path) -> bool:
     """判断是否为自动修复缓存目录下的文件(data/raw/repaired/**)。"""
     parts = [p.lower() for p in file_path.parts]
@@ -401,6 +442,8 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                     quality_score = None
                     date_from = None
                     date_to = None
+                    business_metadata = {}
+                    collection_info = {}
                     
                     # 用于传递给ShopResolver的元数据
                     meta_for_resolver = {}
@@ -415,11 +458,12 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                             
                             # 提取日期范围
                             biz_meta = meta_content.get('business_metadata', {})
+                            business_metadata = biz_meta or {}
                             date_from = _parse_date(biz_meta.get('date_from'))
                             date_to = _parse_date(biz_meta.get('date_to'))
                             
                             # [*] 提取账号和店铺信息(collection_info)
-                            collection_info = meta_content.get('collection_info', {})
+                            collection_info = meta_content.get('collection_info', {}) or {}
                             meta_account = collection_info.get('account')
                             meta_shop_id = collection_info.get('shop_id')
                             
@@ -427,8 +471,13 @@ def scan_and_register(base_dir: str | Path | List[Path | str] = "data/raw") -> S
                             # 检测并统一处理包含日期的shop_id(如 products_snapshot_20250926)
                             if meta_shop_id and file_metadata:
                                 # 提前计算norm_platform和norm_domain用于判断
-                                temp_norm_platform = normalize_platform(file_metadata.get('source_platform', ''))
-                                temp_norm_domain = normalize_data_domain(file_metadata.get('data_domain', ''))
+                                temp_dimensions = _resolve_catalog_dimensions(
+                                    file_metadata,
+                                    business_metadata=business_metadata,
+                                    collection_info=collection_info,
+                                )
+                                temp_norm_platform = temp_dimensions['source_platform']
+                                temp_norm_domain = temp_dimensions['data_domain']
                                 
                                 # 检测是否包含日期格式或snapshot关键字
                                 shop_id_str = str(meta_shop_id)

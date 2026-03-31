@@ -430,6 +430,32 @@ class CollectionExecutorV2:
         if gate_result.status is not GateStatus.READY:
             raise StepExecutionError(f"export completion failed: {gate_result.reason}")
         return file_path
+
+    def _resolve_file_landing_semantics(
+        self,
+        *,
+        platform: str,
+        data_domain: str,
+        sub_domain: Optional[str],
+    ) -> Dict[str, str]:
+        collection_platform = str(platform or "").strip().lower()
+        business_platform = collection_platform
+        landing_sub_domain = str(sub_domain or "").strip().lower()
+        normalized_domain = str(data_domain or "").strip().lower()
+
+        if (
+            collection_platform == "miaoshou"
+            and normalized_domain == "orders"
+            and landing_sub_domain in {"shopee", "tiktok"}
+        ):
+            business_platform = landing_sub_domain
+            landing_sub_domain = ""
+
+        return {
+            "business_platform": business_platform,
+            "landing_sub_domain": landing_sub_domain,
+            "collection_platform": collection_platform,
+        }
     
     def _load_component_with_version(
         self,
@@ -2870,13 +2896,19 @@ class CollectionExecutorV2:
                 data_domain = self._infer_data_domain_from_path(file_path, data_domains, idx)
                 sub_domain = self._infer_sub_domain_from_path(file_path, data_domain=data_domain)
                 
+                landing_semantics = self._resolve_file_landing_semantics(
+                    platform=platform,
+                    data_domain=data_domain,
+                    sub_domain=sub_domain,
+                )
+
                 # 1. 生成标准文件名
                 ext = source_path.suffix.lstrip('.') or 'xlsx'
                 standard_filename = StandardFileName.generate(
-                    source_platform=platform,
+                    source_platform=landing_semantics["business_platform"],
                     data_domain=data_domain,
                     granularity=granularity,
-                    sub_domain=sub_domain,
+                    sub_domain=landing_semantics["landing_sub_domain"],
                     ext=ext
                 )
                 
@@ -2902,9 +2934,9 @@ class CollectionExecutorV2:
                 # 4. 生成 .meta.json 伴生文件
                 try:
                     business_metadata = {
-                        "source_platform": platform,
+                        "source_platform": landing_semantics["business_platform"],
                         "data_domain": data_domain,
-                        "sub_domain": sub_domain,
+                        "sub_domain": landing_semantics["landing_sub_domain"],
                         "granularity": granularity,
                         "date_from": date_from,
                         "date_to": date_to,
@@ -2913,7 +2945,7 @@ class CollectionExecutorV2:
                     
                     collection_info = {
                         "method": "python_component",
-                        "collection_platform": platform,
+                        "collection_platform": landing_semantics["collection_platform"],
                         "account": account_label,
                         "shop_id": shop_id,
                         "original_path": str(source_path),

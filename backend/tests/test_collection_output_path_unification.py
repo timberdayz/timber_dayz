@@ -139,7 +139,7 @@ def test_executor_infers_services_ai_assistant_without_collapsing_to_agent():
 
 
 @pytest.mark.asyncio
-async def test_executor_process_files_preserves_orders_sub_domain_in_meta(tmp_path, monkeypatch):
+async def test_executor_process_files_normalizes_miaoshou_orders_into_business_platform_files(tmp_path, monkeypatch):
     raw_dir = tmp_path / "custom-raw-root"
     download_root = tmp_path / "temp" / "downloads" / "task-1" / "miaoshou" / "acc" / "shop" / "orders" / "tiktok" / "manual"
     download_root.mkdir(parents=True, exist_ok=True)
@@ -180,5 +180,7 @@ async def test_executor_process_files_preserves_orders_sub_domain_in_meta(tmp_pa
     )
 
     assert processed
-    assert "_orders_tiktok_weekly_" in Path(processed[0]).name
-    assert captured["business_metadata"]["sub_domain"] == "tiktok"
+    assert Path(processed[0]).name.startswith("tiktok_orders_weekly_")
+    assert captured["business_metadata"]["source_platform"] == "tiktok"
+    assert captured["business_metadata"]["sub_domain"] == ""
+    assert captured["collection_info"]["collection_platform"] == "miaoshou"

@@ -513,14 +513,16 @@ async def test_shopee_products_export_select_month_value_navigates_year_before_c
 ) -> None:
     page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
     component = ShopeeProductsExport(_ctx())
+    month_leaf = _FakeLocator("2月", visible=True)
 
     monkeypatch.setattr(component, "_navigate_month_panel_to_year", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_click_text_option", AsyncMock(side_effect=[False, True]))
+    monkeypatch.setattr(component, "_find_month_leaf_locator", AsyncMock(return_value=month_leaf), raising=False)
 
     selected = await component._select_month_value(page, "2026-02-01")
 
     assert selected is True
     component._navigate_month_panel_to_year.assert_awaited_once_with(page, 2026)
+    assert month_leaf.clicked is True
 
 
 @pytest.mark.asyncio
