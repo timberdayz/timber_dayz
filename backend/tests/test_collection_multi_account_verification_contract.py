@@ -57,6 +57,18 @@ def test_build_task_response_payload_exposes_verification_contract_fields():
     assert payload["verification_attempt_count"] == 0
 
 
+def test_build_task_response_payload_exposes_config_scope_and_execution_mode():
+    payload = _build_task_response_payload(
+        _make_task(
+            config_id=42,
+            debug_mode=True,
+        )
+    )
+
+    assert payload["config_id"] == 42
+    assert payload["execution_mode"] == "headed"
+
+
 def test_build_task_verification_item_is_scoped_per_account():
     first = _build_task_verification_item(_make_task(task_id="task-1", account="acc-1"))
     second = _build_task_verification_item(_make_task(task_id="task-1", account="acc-2"))
@@ -115,3 +127,38 @@ def test_build_task_verification_item_exposes_manual_continue_mode_for_slide_cap
 
     assert item["verification_type"] == "slide_captcha"
     assert item["verification_input_mode"] == "manual_continue"
+
+
+@pytest.mark.asyncio
+async def test_list_verification_items_includes_manual_intervention_required_tasks():
+    manual = _make_task(
+        task_id="task-manual",
+        account="acc-manual",
+        status="manual_intervention_required",
+        verification_type="manual_intervention",
+        current_step="需要人工处理页面异常",
+    )
+    paused = _make_task(task_id="task-paused", account="acc-paused", status="verification_required")
+
+    class _Result:
+        def scalars(self):
+            class _Scalars:
+                def all(self_inner):
+                    return [manual, paused]
+
+            return _Scalars()
+
+    class _FakeDb:
+        async def execute(self, stmt):
+            return _Result()
+
+    items = await list_verification_items(
+        platform=None,
+        verification_type=None,
+        account_id=None,
+        status="verification_required",
+        db=_FakeDb(),
+    )
+
+    assert len(items) == 2
+    assert {item["task_id"] for item in items} == {"task-manual", "task-paused"}

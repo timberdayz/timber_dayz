@@ -81,6 +81,10 @@ def build_scheduled_task_scope(
     return filtered_domains, normalized_sub_domains, total_targets
 
 
+def resolve_config_debug_mode(config: CollectionConfig | Any) -> bool:
+    return str(getattr(config, "execution_mode", "headless") or "headless").strip().lower() == "headed"
+
+
 class CollectionScheduler:
     """
     采集调度器
@@ -559,7 +563,7 @@ class CollectionScheduler:
                     completed_domains=[],
                     failed_domains=[],
                     current_domain=None,
-                    debug_mode=False,  # 定时任务默认不使用调试模式
+                    debug_mode=resolve_config_debug_mode(config),
                     created_at=datetime.now(timezone.utc)
                 )
                 
@@ -585,7 +589,7 @@ class CollectionScheduler:
                             sub_domains=normalized_sub_domains,
                             date_range=normalized_date_range,
                             granularity=effective_granularity,
-                            debug_mode=False,
+                            debug_mode=resolve_config_debug_mode(config),
                             parallel_mode=False,
                             max_parallel=3,
                             runtime_manifests=runtime_manifests,

@@ -66,6 +66,13 @@
           {{ row.account_ids?.length || 0 }}
         </template>
       </el-table-column>
+      <el-table-column label="执行模式" width="100">
+        <template #default="{ row }">
+          <el-tag :type="row.execution_mode === 'headed' ? 'warning' : 'info'">
+            {{ getExecutionModeLabel(row.execution_mode) }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="数据域" min-width="180">
         <template #default="{ row }">
           <el-tag 
@@ -251,6 +258,16 @@
 
         <el-divider content-position="left">定时配置</el-divider>
 
+        <el-form-item label="执行模式">
+          <el-radio-group v-model="form.execution_mode">
+            <el-radio-button label="headless">无头模式</el-radio-button>
+            <el-radio-button label="headed">有头模式</el-radio-button>
+          </el-radio-group>
+          <div class="form-hint">
+            无头模式用于日常和定时采集；有头模式适合测试、页面观察和需要人工干预的场景
+          </div>
+        </el-form-item>
+
         <el-form-item label="启用定时">
           <el-switch v-model="form.schedule_enabled" />
         </el-form-item>
@@ -377,6 +394,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, MagicStick, CopyDocument } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
@@ -389,6 +407,8 @@ import {
   normalizeDomainSubtypeMap,
   resolveAccountIdsForConfigRun
 } from '@/constants/collection'
+
+const router = useRouter()
 
 // 状态
 const loading = ref(false)
@@ -420,6 +440,7 @@ const form = reactive({
   date_range_type: 'yesterday',
   custom_date_start: null,
   custom_date_end: null,
+  execution_mode: 'headless',
   schedule_enabled: false,
   schedule_cron: ''
 })
@@ -552,6 +573,7 @@ const editConfig = (row) => {
     date_range_type: row.date_range_type || 'yesterday',
     custom_date_start: row.custom_date_start,
     custom_date_end: row.custom_date_end,
+    execution_mode: row.execution_mode || 'headless',
     schedule_enabled: row.schedule_enabled || false,
     schedule_cron: row.schedule_cron || ''
   })
@@ -575,6 +597,7 @@ const resetForm = () => {
     date_range_type: 'yesterday',
     custom_date_start: null,
     custom_date_end: null,
+    execution_mode: 'headless',
     schedule_enabled: false,
     schedule_cron: ''
   })
@@ -660,17 +683,30 @@ const runConfig = async (row) => {
       return
     }
 
+    const createdTaskIds = []
     for (const accountId of accountIds) {
-      await collectionApi.createTask({
+      const task = await collectionApi.createTask({
         platform: row.platform,
         account_id: accountId,
         data_domains: row.data_domains,
         sub_domains: row.sub_domains || {},
         granularity: row.granularity,
-        time_selection: timeSelection
+        time_selection: timeSelection,
+        debug_mode: row.execution_mode === 'headed'
       })
+      if (task?.task_id) {
+        createdTaskIds.push(task.task_id)
+      }
     }
     ElMessage.success(`已创建 ${accountIds.length} 个采集任务`)
+    await router.push({
+      name: 'CollectionTasks',
+      query: {
+        source: 'config',
+        config_id: row.id,
+        task_ids: createdTaskIds.join(',')
+      }
+    })
   } catch (error) {
     ElMessage.error('执行失败: ' + error.message)
   }
@@ -699,6 +735,10 @@ const getDomainLabel = (domain) => {
     inventory: '库存'
   }
   return labels[domain] || domain
+}
+
+const getExecutionModeLabel = (mode) => {
+  return mode === 'headed' ? '有头模式' : '无头模式'
 }
 
 // ========== v4.7.0: 新功能方法 ==========
@@ -844,6 +884,7 @@ const executeQuickSetup = async () => {
         sub_domains: defaultSubDomains,
         granularity: gran,
         date_range_type: schedules[gran].dateType,
+        execution_mode: 'headless',
         schedule_enabled: true,
         schedule_cron: schedules[gran].cron,
         retry_count: 3

@@ -682,6 +682,7 @@ class CollectionConfig(Base):
     date_range_type = Column(String(20), default="yesterday", nullable=False)  # today/yesterday/last_7_days/custom
     custom_date_start = Column(Date, nullable=True)  # 自定义开始日期
     custom_date_end = Column(Date, nullable=True)  # 自定义结束日期
+    execution_mode = Column(String(20), default="headless", nullable=False)  # 默认执行模式: headless/headed
     schedule_enabled = Column(Boolean, default=False, nullable=False)  # 是否启用定时
     schedule_cron = Column(String(50), nullable=True)  # Cron表达式
     retry_count = Column(Integer, default=3, nullable=False)  # 重试次数

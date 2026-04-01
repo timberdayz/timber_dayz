@@ -55,6 +55,7 @@ def _build_collection_config_record(
         schedule_enabled=config.schedule_enabled,
         schedule_cron=config.schedule_cron,
         retry_count=config.retry_count,
+        execution_mode=config.execution_mode,
         created_at=now,
         updated_at=now,
     )

@@ -366,6 +366,12 @@ const pendingVerificationItems = computed(() => {
   return verificationItems.value
 })
 
+const pendingInterventionItems = computed(() =>
+  tasks.value.filter((task) =>
+    ['verification_required', 'paused', 'manual_intervention_required'].includes(task.status)
+  )
+)
+
 const verificationDialogVisible = computed(() => Boolean(currentVerificationItem.value))
 
 const verificationSummary = computed(() => {

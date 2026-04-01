@@ -69,6 +69,27 @@ def test_build_collection_config_record_sets_explicit_timestamps():
     assert record.updated_at is not None
 
 
+def test_build_collection_config_record_defaults_execution_mode_to_headless():
+    from backend.routers.collection_config import _build_collection_config_record
+    from backend.schemas.collection import CollectionConfigCreate, TimeSelectionPayload
+
+    record = _build_collection_config_record(
+        config_name="shopee-orders-v1",
+        config=CollectionConfigCreate(
+            name="shopee-orders-v1",
+            platform="shopee",
+            account_ids=["acc-1"],
+            data_domains=["orders"],
+            granularity="daily",
+            time_selection=TimeSelectionPayload(mode="preset", preset="yesterday"),
+            schedule_enabled=False,
+            retry_count=3,
+        ),
+    )
+
+    assert record.execution_mode == "headless"
+
+
 @pytest.mark.asyncio
 async def test_create_config_normalizes_time_selection_and_sub_domains(collection_config_async_client):
     response = await collection_config_async_client.post(
@@ -99,6 +120,7 @@ async def test_create_config_normalizes_time_selection_and_sub_domains(collectio
     assert payload["data_domains"] == ["orders", "services"]
     assert payload["sub_domains"] == {"services": ["agent"]}
     assert payload["granularity"] == "weekly"
+    assert payload["execution_mode"] == "headless"
     assert payload["date_range_type"] == "last_7_days"
     assert payload["custom_date_start"] is None
     assert payload["custom_date_end"] is None
@@ -136,6 +158,53 @@ async def test_create_config_allows_miaoshou_products_domain(collection_config_a
     payload = response.json()
     assert payload["platform"] == "miaoshou"
     assert payload["data_domains"] == ["products"]
+
+
+@pytest.mark.asyncio
+async def test_create_config_persists_execution_mode(collection_config_async_client):
+    response = await collection_config_async_client.post(
+        "/api/collection/configs",
+        json={
+            "name": "shopee-orders-headed-v1",
+            "platform": "shopee",
+            "account_ids": ["acc-1"],
+            "data_domains": ["orders"],
+            "granularity": "daily",
+            "execution_mode": "headed",
+            "time_selection": {
+                "mode": "preset",
+                "preset": "yesterday",
+            },
+            "schedule_enabled": False,
+            "retry_count": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["execution_mode"] == "headed"
+
+
+def test_collection_config_record_reuses_execution_mode_field_when_present():
+    from backend.routers.collection_config import _build_collection_config_record
+    from backend.schemas.collection import CollectionConfigCreate, TimeSelectionPayload
+
+    record = _build_collection_config_record(
+        config_name="shopee-orders-headed-v2",
+        config=CollectionConfigCreate(
+            name="shopee-orders-headed-v2",
+            platform="shopee",
+            account_ids=["acc-1"],
+            data_domains=["orders"],
+            execution_mode="headed",
+            granularity="daily",
+            time_selection=TimeSelectionPayload(mode="preset", preset="today"),
+            schedule_enabled=False,
+            retry_count=3,
+        ),
+    )
+
+    assert record.execution_mode == "headed"
 
 
 @pytest.mark.asyncio
@@ -184,6 +253,7 @@ async def test_update_config_normalizes_custom_time_selection_and_sub_domains(
     assert payload["data_domains"] == ["services"]
     assert payload["sub_domains"] == {"services": ["agent"]}
     assert payload["granularity"] == "monthly"
+    assert payload["execution_mode"] == "headless"
     assert payload["date_range_type"] == "custom"
     assert payload["custom_date_start"] == "2026-03-01"
     assert payload["custom_date_end"] == "2026-03-31"
@@ -195,3 +265,40 @@ async def test_update_config_normalizes_custom_time_selection_and_sub_domains(
         "start_time": "00:00:00",
         "end_time": "23:59:59",
     }
+
+
+@pytest.mark.asyncio
+async def test_update_config_can_switch_execution_mode(
+    collection_config_async_client,
+    collection_config_sqlite_session,
+):
+    config = CollectionConfig(
+        name="shopee-orders-headless-v1",
+        platform="shopee",
+        account_ids=[],
+        data_domains=["orders"],
+        sub_domains=None,
+        granularity="daily",
+        date_range_type="yesterday",
+        custom_date_start=None,
+        custom_date_end=None,
+        schedule_enabled=False,
+        schedule_cron=None,
+        retry_count=3,
+        is_active=True,
+        execution_mode="headless",
+    )
+    collection_config_sqlite_session.add(config)
+    await collection_config_sqlite_session.commit()
+    await collection_config_sqlite_session.refresh(config)
+
+    response = await collection_config_async_client.put(
+        f"/api/collection/configs/{config.id}",
+        json={
+            "execution_mode": "headed",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["execution_mode"] == "headed"

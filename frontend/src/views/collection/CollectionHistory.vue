@@ -141,6 +141,11 @@
           {{ formatDuration(row.duration_seconds) }}
         </template>
       </el-table-column>
+      <el-table-column label="执行模式" width="100">
+        <template #default="{ row }">
+          {{ getExecutionModeLabel(row.execution_mode) }}
+        </template>
+      </el-table-column>
       <el-table-column label="完成时间" width="160">
         <template #default="{ row }">
           {{ formatTime(row.updated_at) }}
@@ -148,14 +153,6 @@
       </el-table-column>
       <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">
-          <el-button 
-            v-if="row.status === 'failed'"
-            size="small" 
-            type="primary"
-            @click="retryTask(row)"
-          >
-            重试
-          </el-button>
           <el-button 
             size="small"
             @click="showDetails(row)"
@@ -222,6 +219,9 @@
         <el-descriptions-item label="耗时">
           {{ formatDuration(currentTask?.duration_seconds) }}
         </el-descriptions-item>
+        <el-descriptions-item label="执行模式">
+          {{ getExecutionModeLabel(currentTask?.execution_mode) }}
+        </el-descriptions-item>
         
         <!-- v4.7.0: 域级别统计 -->
         <el-descriptions-item v-if="currentTask?.total_domains" label="总数据域" :span="2">
@@ -260,13 +260,6 @@
 
       <template #footer>
         <el-button @click="detailDialogVisible = false">关闭</el-button>
-        <el-button 
-          v-if="currentTask?.status === 'failed'"
-          type="primary" 
-          @click="retryTask(currentTask)"
-        >
-          重试任务
-        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -339,16 +332,6 @@ const showDetails = (row) => {
   detailDialogVisible.value = true
 }
 
-const retryTask = async (row) => {
-  try {
-    await collectionApi.retryTask(row.task_id)
-    ElMessage.success('已创建重试任务')
-    detailDialogVisible.value = false
-  } catch (error) {
-    ElMessage.error('重试失败: ' + error.message)
-  }
-}
-
 const exportHistory = () => {
   // 导出为CSV
   const headers = ['任务ID', '平台', '账号', '数据域', '状态', '文件数', '耗时', '完成时间']
@@ -406,6 +389,10 @@ const getStatusLabel = (status) => {
     cancelled: '已取消'
   }
   return labels[status] || status
+}
+
+const getExecutionModeLabel = (mode) => {
+  return mode === 'headed' ? '有头模式' : '无头模式'
 }
 
 const formatDuration = (seconds) => {

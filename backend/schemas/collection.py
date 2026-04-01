@@ -64,6 +64,7 @@ class CollectionConfigCreate(BaseModel):
     custom_date_start: Optional[date] = Field(None, description="自定义开始日期")
     custom_date_end: Optional[date] = Field(None, description="自定义结束日期")
     time_selection: Optional[TimeSelectionPayload] = Field(None, description="统一时间选择模型")
+    execution_mode: Literal["headless", "headed"] = Field("headless", description="默认执行模式")
     schedule_enabled: bool = Field(False, description="是否启用定时")
     schedule_cron: Optional[str] = Field(None, description="Cron表达式")
     retry_count: int = Field(3, ge=0, le=10, description="重试次数")
@@ -84,6 +85,7 @@ class CollectionConfigUpdate(BaseModel):
     custom_date_start: Optional[date] = None
     custom_date_end: Optional[date] = None
     time_selection: Optional[TimeSelectionPayload] = Field(None, description="统一时间选择模型")
+    execution_mode: Optional[Literal["headless", "headed"]] = Field(None, description="默认执行模式")
     schedule_enabled: Optional[bool] = None
     schedule_cron: Optional[str] = None
     retry_count: Optional[int] = None
@@ -107,6 +109,7 @@ class CollectionConfigResponse(BaseModel):
     custom_date_start: Optional[date]
     custom_date_end: Optional[date]
     time_selection: Optional[TimeSelectionPayload] = None
+    execution_mode: Literal["headless", "headed"] = "headless"
     schedule_enabled: bool
     schedule_cron: Optional[str]
     retry_count: int
@@ -188,6 +191,7 @@ class TaskResponse(BaseModel):
     current_step: Optional[str]
     files_collected: int
     trigger_type: str
+    config_id: Optional[int] = None
     data_domains: Optional[List[str]]
     sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(
         None,
@@ -201,6 +205,7 @@ class TaskResponse(BaseModel):
     failed_domains: Optional[List[Dict[str, str]]] = Field(None, description="失败的数据域")
     current_domain: Optional[str] = Field(None, description="当前数据域")
     debug_mode: bool = Field(False, description="调试模式")
+    execution_mode: Literal["headless", "headed"] = "headless"
     error_message: Optional[str]
     duration_seconds: Optional[int]
     created_at: datetime
