@@ -15,7 +15,8 @@ const constantsSource = fs.readFileSync(constantsPath, 'utf8')
 const configSource = fs.readFileSync(configViewPath, 'utf8')
 const tasksSource = fs.readFileSync(tasksViewPath, 'utf8')
 const routerSource = fs.readFileSync(routerPath, 'utf8')
-const rootTasksSource = fs.readFileSync(rootTasksViewPath, 'utf8')
+const rootTasksExists = fs.existsSync(rootTasksViewPath)
+const rootTasksSource = rootTasksExists ? fs.readFileSync(rootTasksViewPath, 'utf8') : ''
 
 test('collection constants expose orders sub-domain options', () => {
   assert.equal(
@@ -87,8 +88,8 @@ test('router uses collection subdirectory views as canonical collection entry po
 
 test('legacy root CollectionTasks view is no longer the default collection entry point', () => {
   assert.equal(
-    rootTasksSource.includes('VerificationResumeDialog'),
-    true,
-    'legacy root task page may remain as reference but should not be the canonical router target'
+    rootTasksExists,
+    false,
+    'legacy root CollectionTasks.vue should be removed to avoid duplicate maintenance targets'
   )
 })
