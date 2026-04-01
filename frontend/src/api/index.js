@@ -1189,6 +1189,14 @@ export default {
     return await this._get("/data-sync/files", { params: filters });
   },
 
+  async getDataSyncFileDeleteImpact(fileId) {
+    return await this._get(`/data-sync/files/${fileId}/delete-impact`);
+  },
+
+  async deleteDataSyncFile(fileId) {
+    return await this._delete(`/data-sync/files/${fileId}`);
+  },
+
   /**
    * v4.18.0新增：获取同步历史记录
    * @param {Object} params - 查询参数
