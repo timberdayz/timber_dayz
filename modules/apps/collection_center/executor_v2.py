@@ -854,6 +854,8 @@ class CollectionExecutorV2:
                     account=account,
                     params=params,
                     context=context,
+                    browser=browser_instance,
+                    play_context=play_context,
                     page=page,
                     step_popup_handler=step_popup_handler,
                     task_download_dir=task_download_dir,
@@ -1566,6 +1568,19 @@ class CollectionExecutorV2:
                         )
                     break
                 except VerificationRequiredError as e:
+                    if self._requires_headful_login_fallback(e.verification_type):
+                        login_success, play_context, page = await self._run_headful_login_fallback(
+                            task_id=task_id,
+                            platform=platform,
+                            account=account,
+                            params=params,
+                            browser=browser,
+                            old_context=play_context,
+                            session_platform=session_platform,
+                            session_account_id=session_account_id,
+                            runtime_manifests=runtime_manifests,
+                        )
+                        break
                     value = await self._wait_verification_and_continue(
                         task_id, e.verification_type, e.screenshot_path, page, params, adapter, is_login=True
                     )

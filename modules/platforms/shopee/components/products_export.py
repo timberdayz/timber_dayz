@@ -349,7 +349,7 @@ class ShopeeProductsExport(ExportComponent):
         )
         return start_value, end_value
 
-    def _month_label_candidates(self, iso_date: str) -> tuple[str, ...]:
+    def _month_leaf_labels(self, iso_date: str) -> tuple[str, ...]:
         try:
             target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
         except ValueError:
@@ -370,13 +370,20 @@ class ShopeeProductsExport(ExportComponent):
             "\u5341\u4e00\u6708",
             "\u5341\u4e8c\u6708",
         )
-        month_num = target_date.month
+        return (zh_months[target_date.month],)
+
+    def _month_summary_signatures(self, iso_date: str) -> tuple[str, ...]:
+        try:
+            target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
+        except ValueError:
+            return ()
+
         return (
-            zh_months[month_num],
-            f"{month_num}\u6708",
-            f"{month_num:02d}\u6708",
             target_date.strftime("%Y.%m"),
             target_date.strftime("%Y-%m"),
+            f"{target_date.year}\u5e74{target_date.month}\u6708",
+            f"{target_date.month}\u6708{target_date.year}",
+            f"\u6309\u6708{target_date.strftime('%Y.%m')}",
         )
 
     def _resolve_custom_target(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -393,7 +400,7 @@ class ShopeeProductsExport(ExportComponent):
             "target_year": target_date.year,
             "target_month": target_date.month,
             "target_day": target_date.day,
-            "target_month_label_zh": self._month_label_candidates(target_iso_date)[0],
+            "target_month_label_zh": self._month_leaf_labels(target_iso_date)[0],
             "start_date": start_date,
             "end_date": end_date,
         }
@@ -401,7 +408,7 @@ class ShopeeProductsExport(ExportComponent):
     async def _find_month_leaf_locator(self, page: Any, iso_date: str) -> Any | None:
         panel = await self._find_date_panel(page)
         containers = [panel] if panel is not None else [page]
-        for candidate in self._month_label_candidates(iso_date):
+        for candidate in self._month_leaf_labels(iso_date):
             for container in containers:
                 try:
                     matches = container.get_by_text(candidate, exact=True)
@@ -461,24 +468,15 @@ class ShopeeProductsExport(ExportComponent):
                     continue
         return None
 
-    async def _click_popup_nav_button(self, page: Any, direction: str) -> bool:
+    async def _click_popup_nav_button_from_selectors(
+        self,
+        page: Any,
+        selector_groups: tuple[str, ...],
+    ) -> bool:
         panel = await self._find_date_panel(page)
         containers = [panel] if panel is not None else [page]
-        selector_map = {
-            "prev": (
-                'button[aria-label*="previous"]',
-                'button[aria-label*="prev"]',
-                '[class*="prev"]',
-                '[class*="left"]',
-            ),
-            "next": (
-                'button[aria-label*="next"]',
-                '[class*="next"]',
-                '[class*="right"]',
-            ),
-        }
         for container in containers:
-            for selector in selector_map.get(direction, ()):
+            for selector in selector_groups:
                 try:
                     locator = container.locator(selector).first
                     if await locator.count() > 0 and await locator.is_visible(timeout=500):
@@ -489,6 +487,77 @@ class ShopeeProductsExport(ExportComponent):
                 except Exception:
                     continue
         return False
+
+    async def _click_popup_year_nav_button(self, page: Any, direction: str) -> bool:
+        selector_map = {
+            "prev": (
+                'button[aria-label*="previous year"]',
+                '.arco-picker-header-super-prev-btn',
+                '.ant-picker-header-super-prev-btn',
+                '[class*="super-prev"]',
+                '[class*="double-left"]',
+            ),
+            "next": (
+                'button[aria-label*="next year"]',
+                '.arco-picker-header-super-next-btn',
+                '.ant-picker-header-super-next-btn',
+                '[class*="super-next"]',
+                '[class*="double-right"]',
+            ),
+        }
+        return await self._click_popup_nav_button_from_selectors(page, selector_map.get(direction, ()))
+
+    async def _click_popup_month_nav_button(self, page: Any, direction: str) -> bool:
+        selector_map = {
+            "prev": (
+                'button[aria-label*="previous month"]',
+                '.arco-picker-header-prev-btn:not([class*="super"])',
+                '.ant-picker-header-prev-btn:not([class*="super"])',
+                '[class*="prev-btn"]:not([class*="super"])',
+                '[class*="prev"]:not([class*="super"])',
+            ),
+            "next": (
+                'button[aria-label*="next month"]',
+                '.arco-picker-header-next-btn:not([class*="super"])',
+                '.ant-picker-header-next-btn:not([class*="super"])',
+                '[class*="next-btn"]:not([class*="super"])',
+                '[class*="next"]:not([class*="super"])',
+            ),
+        }
+        return await self._click_popup_nav_button_from_selectors(page, selector_map.get(direction, ()))
+
+    def _parse_calendar_header_year_month(self, header_text: str | None) -> tuple[int, int] | None:
+        text = str(header_text or "").strip()
+        if not text:
+            return None
+
+        year_match = re.search(r"(20\d{2})", text)
+        if not year_match:
+            return None
+        year = int(year_match.group(1))
+
+        month_match = re.search(r"(\d{1,2})\s*\u6708", text)
+        if month_match:
+            return year, int(month_match.group(1))
+
+        zh_months = {
+            "\u4e00\u6708": 1,
+            "\u4e8c\u6708": 2,
+            "\u4e09\u6708": 3,
+            "\u56db\u6708": 4,
+            "\u4e94\u6708": 5,
+            "\u516d\u6708": 6,
+            "\u4e03\u6708": 7,
+            "\u516b\u6708": 8,
+            "\u4e5d\u6708": 9,
+            "\u5341\u6708": 10,
+            "\u5341\u4e00\u6708": 11,
+            "\u5341\u4e8c\u6708": 12,
+        }
+        for label, month in zh_months.items():
+            if label in text:
+                return year, month
+        return None
 
     async def _navigate_month_panel_to_year(self, page: Any, target_year: int) -> bool:
         for _ in range(8):
@@ -501,37 +570,27 @@ class ShopeeProductsExport(ExportComponent):
                 direction = "next" if current_year < target_year else "prev"
             else:
                 direction = "prev"
-            if not await self._click_popup_nav_button(page, direction):
+            if not await self._click_popup_year_nav_button(page, direction):
                 return False
         header_text = await self._current_popup_header_text(page)
         return bool(header_text and str(target_year) in header_text)
 
     async def _navigate_calendar_panel_to_month(self, page: Any, target_year: int, target_month: int) -> bool:
-        target_signatures = (
-            f"{target_year}.{target_month:02d}",
-            f"{target_year}-{target_month:02d}",
-            f"{target_year}\u5e74{target_month}\u6708",
-            f"{target_month}\u6708{target_year}",
-            f"{target_year} {target_month}",
-        )
-        normalized_signatures = tuple(self._normalize_date_text(signature) for signature in target_signatures)
-        for _ in range(12):
+        for _ in range(24):
             header_text = await self._current_popup_header_text(page)
-            normalized_header = self._normalize_date_text(header_text)
-            if normalized_header and any(signature in normalized_header for signature in normalized_signatures):
+            current = self._parse_calendar_header_year_month(header_text)
+            if current == (target_year, target_month):
                 return True
 
-            current_year_match = re.search(r"(20\d{2})", header_text or "")
-            current_month_match = re.search(r"(\d{1,2})\s*\u6708", header_text or "")
-            if current_year_match and current_month_match:
-                current_year = int(current_year_match.group(1))
-                current_month = int(current_month_match.group(1))
+            if current is not None:
+                current_year, current_month = current
                 direction = "next" if (current_year, current_month) < (target_year, target_month) else "prev"
             else:
                 direction = "prev"
-            if not await self._click_popup_nav_button(page, direction):
+            if not await self._click_popup_month_nav_button(page, direction):
                 return False
-        return False
+        header_text = await self._current_popup_header_text(page)
+        return self._parse_calendar_header_year_month(header_text) == (target_year, target_month)
 
     async def _current_date_summary_text(self, page: Any) -> str | None:
         trigger = await self._find_date_picker_trigger(page)
@@ -555,10 +614,10 @@ class ShopeeProductsExport(ExportComponent):
         expected_signatures: tuple[str, ...] = ()
         if granularity == "weekly" and start_date and end_date:
             expected_signatures = self._week_range_label_candidates(start_date, end_date)
-        elif granularity == "monthly" and end_date:
-            expected_signatures = self._month_label_candidates(end_date)
-        elif granularity == "daily" and end_date:
-            expected_signatures = (datetime.strptime(end_date, "%Y-%m-%d").strftime("%d-%m-%Y"),)
+        elif granularity == "monthly" and start_date:
+            expected_signatures = self._month_summary_signatures(start_date)
+        elif granularity == "daily" and start_date:
+            expected_signatures = (datetime.strptime(start_date, "%Y-%m-%d").strftime("%d-%m-%Y"),)
 
         normalized_signatures = tuple(
             self._normalize_date_text(signature) for signature in expected_signatures if signature
@@ -886,20 +945,9 @@ class ShopeeProductsExport(ExportComponent):
         except ValueError:
             return False
 
-        for candidate in (
-            target_date.strftime("%d-%m-%Y"),
-            str(int(target_date.strftime("%d"))),
-            target_date.strftime("%d"),
-        ):
-            try:
-                locator = page.get_by_text(candidate, exact=True).first
-                if await locator.is_visible(timeout=1500):
-                    await locator.click(timeout=5000)
-                    await page.wait_for_timeout(900)
-                    return True
-            except Exception:
-                continue
-        return False
+        if not await self._navigate_calendar_panel_to_month(page, target_date.year, target_date.month):
+            return False
+        return await self._select_calendar_day(page, target_date.day)
 
     async def _select_calendar_day(self, page: Any, day: int) -> bool:
         day_candidates = (str(day), f"{day:02d}")
@@ -944,6 +992,8 @@ class ShopeeProductsExport(ExportComponent):
             await locator.hover(timeout=5000)
         except Exception:
             pass
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(150)
         await locator.click(timeout=5000)
         if hasattr(page, "wait_for_timeout"):
             await page.wait_for_timeout(300)
@@ -951,14 +1001,14 @@ class ShopeeProductsExport(ExportComponent):
 
     async def _select_week_range_value(self, page: Any, start_date: str, end_date: str) -> bool:
         try:
-            end_value = datetime.strptime(str(end_date), "%Y-%m-%d")
+            start_value = datetime.strptime(str(start_date), "%Y-%m-%d")
         except ValueError:
             return False
 
-        if not await self._navigate_calendar_panel_to_month(page, end_value.year, end_value.month):
+        if not await self._navigate_calendar_panel_to_month(page, start_value.year, start_value.month):
             return False
 
-        if await self._select_calendar_day(page, end_value.day):
+        if await self._select_calendar_day(page, start_value.day):
             return True
 
         for candidate in self._week_range_label_candidates(start_date, end_date):
@@ -966,17 +1016,6 @@ class ShopeeProductsExport(ExportComponent):
             if clicked:
                 return True
 
-        # Some week pickers render month/year first, then the concrete week range.
-        month_hint = self._month_label_candidates(end_date)
-        for candidate in month_hint:
-            clicked = await self._click_text_option(page, candidate)
-            if not clicked:
-                continue
-            if await self._select_calendar_day(page, end_value.day):
-                return True
-            for range_candidate in self._week_range_label_candidates(start_date, end_date):
-                if await self._click_text_option(page, range_candidate):
-                    return True
         return False
 
     async def _trigger_export(self, page: Any) -> None:
