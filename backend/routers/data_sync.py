@@ -79,6 +79,15 @@ from backend.schemas.data_sync import (
     RetryTaskResponse,  # [*] Phase 1.4.3: 任务状态管理
 )
 
+from backend.schemas.catalog_file_delete import (
+    CatalogFileDeleteImpactResponse,
+    CatalogFileDeleteResultResponse,
+)
+from backend.services.catalog_file_delete_service import (
+    CatalogFileDeleteNotFoundError,
+    CatalogFileDeleteService,
+)
+
 logger = get_logger(__name__)
 router = APIRouter()
 
@@ -405,6 +414,65 @@ async def list_files(
             detail=str(e),
             recovery_suggestion="请检查查询参数和数据库连接,或联系系统管理员",
             status_code=500
+        )
+
+
+@router.get("/data-sync/files/{file_id}/delete-impact")
+async def get_file_delete_impact(
+    file_id: int = Path(..., description="文件ID"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        service = CatalogFileDeleteService(db)
+        impact = await service.analyze_delete_impact(file_id)
+        payload = CatalogFileDeleteImpactResponse.model_validate(impact.to_dict())
+        return success_response(data=payload.model_dump(), message="获取删除影响成功")
+    except CatalogFileDeleteNotFoundError as exc:
+        return error_response(
+            code=ErrorCode.DATA_NOT_FOUND,
+            message="文件不存在",
+            error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
+            detail=str(exc),
+            status_code=404,
+        )
+    except Exception as exc:
+        logger.error(f"[DataSync DeleteImpact] 查询失败: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="获取删除影响失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            status_code=500,
+        )
+
+
+@router.delete("/data-sync/files/{file_id}")
+async def delete_catalog_file(
+    file_id: int = Path(..., description="文件ID"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        service = CatalogFileDeleteService(db)
+        result = await service.delete_catalog_file(file_id, force=True)
+        payload = CatalogFileDeleteResultResponse.model_validate(result.to_dict())
+        return success_response(data=payload.model_dump(), message="删除文件成功")
+    except CatalogFileDeleteNotFoundError as exc:
+        return error_response(
+            code=ErrorCode.DATA_NOT_FOUND,
+            message="文件不存在",
+            error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
+            detail=str(exc),
+            status_code=404,
+        )
+    except Exception as exc:
+        await db.rollback()
+        logger.error(f"[DataSync Delete] 删除失败: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="删除文件失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            status_code=500,
         )
 
 

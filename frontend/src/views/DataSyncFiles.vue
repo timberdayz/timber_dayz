@@ -379,6 +379,15 @@ v4.6.0新增：独立的数据同步系统
               <el-icon><Upload /></el-icon>
               同步
             </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              @click="handleDeleteFile(row)"
+              :loading="deletingFiles.includes(row.id)"
+            >
+              <el-icon><Delete /></el-icon>
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -670,6 +679,7 @@ const router = useRouter()
 const loading = ref(false)
 const syncing = ref(false)
 const syncingFiles = ref([])
+const deletingFiles = ref([])
 const files = ref([])
 const selectedFiles = ref([])
 const statsLoading = ref(false)
@@ -1036,6 +1046,89 @@ const handleSelectionChange = (selection) => {
 // 查看详情
 const viewDetail = (fileId) => {
   router.push(`/data-sync/file-detail/${fileId}`)
+}
+
+const buildDeleteImpactHtml = (impact) => {
+  const warnings = (impact.warnings || [])
+    .map((item) => `<li>${item}</li>`)
+    .join('')
+
+  return `
+    <div style="line-height:1.7;">
+      <div><strong>文件名：</strong>${impact.file_name || '-'}</div>
+      <div><strong>平台：</strong>${impact.platform_code || '-'}</div>
+      <div><strong>来源平台：</strong>${impact.source_platform || '-'}</div>
+      <div><strong>数据域：</strong>${impact.data_domain || '-'}</div>
+      <div><strong>粒度：</strong>${impact.granularity || '-'}</div>
+      <div><strong>状态：</strong>${impact.status || '-'}</div>
+      <div><strong>本地文件：</strong>${impact.local_file_exists ? '存在' : '不存在'}</div>
+      <div><strong>伴生文件：</strong>${impact.meta_file_exists ? '存在' : '不存在'}</div>
+      <div><strong>Quarantine 行数：</strong>${impact.quarantine_rows || 0}</div>
+      <div><strong>Staging 行数：</strong>${impact.staging_rows || 0}</div>
+      <div><strong>事实表：</strong>${impact.fact_table_name || '-'}</div>
+      <div><strong>事实表行数：</strong>${impact.fact_rows || 0}</div>
+      ${
+        warnings
+          ? `<div style="margin-top:8px;"><strong>警告：</strong><ul style="margin:4px 0 0 20px;">${warnings}</ul></div>`
+          : ''
+      }
+      <div style="margin-top:10px;color:#c45656;"><strong>此操作不可撤销，仅建议测试环境使用。</strong></div>
+    </div>
+  `
+}
+
+const handleDeleteFile = async (row) => {
+  const fileId = row.id
+  deletingFiles.value.push(fileId)
+
+  try {
+    const needsImpact = ['ingested', 'partial_success'].includes(row.status)
+
+    if (!needsImpact) {
+      await ElMessageBox.confirm(
+        '将删除该文件、伴生 .meta.json 和注册记录。此操作不可撤销，是否继续？',
+        '确认删除',
+        {
+          type: 'warning',
+          confirmButtonText: '确认删除',
+          cancelButtonText: '取消'
+        }
+      )
+    } else {
+      const impactResult = await api.getDataSyncFileDeleteImpact(fileId)
+      const impact = impactResult?.data || impactResult
+
+      await ElMessageBox.confirm(
+        buildDeleteImpactHtml(impact),
+        '确认删除已同步文件',
+        {
+          type: 'warning',
+          confirmButtonText: '确认删除',
+          cancelButtonText: '取消',
+          dangerouslyUseHTMLString: true
+        }
+      )
+    }
+
+    const deleteResult = await api.deleteDataSyncFile(fileId)
+    const payload = deleteResult?.data || deleteResult
+    ElMessage.success(deleteResult?.message || '删除成功')
+
+    selectedFiles.value = selectedFiles.value.filter((id) => id !== fileId)
+    await loadFiles(false)
+    await loadGovernanceStats(false)
+
+    if ((payload?.warnings || []).length > 0) {
+      ElMessage.warning(payload.warnings[0])
+    }
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      console.error('删除文件失败:', error)
+      ElMessage.error(error.message || '删除文件失败')
+    }
+  } finally {
+    deletingFiles.value = deletingFiles.value.filter((id) => id !== fileId)
+  }
 }
 
 // 单文件同步 v4.18.0更新：改为异步处理，支持进度轮询
