@@ -75,6 +75,12 @@ test('CollectionTasks is the single runtime intervention surface', () => {
     true,
     'task page should expose config scope awareness'
   )
+
+  assert.equal(
+    tasksSource.includes('clearConfigFilter'),
+    true,
+    'task page should allow clearing config-scoped task filters'
+  )
 })
 
 test('CollectionHistory does not expose runtime retry or intervention actions', () => {

@@ -136,6 +136,7 @@
 
     <div v-if="activeConfigId" class="active-config-banner">
       当前正在查看由配置 #{{ activeConfigId }} 创建的任务。
+      <el-button size="small" text @click="clearConfigFilter">清除筛选</el-button>
     </div>
 
     <div v-if="pendingVerificationItems.length" class="pending-verification-panel">
@@ -444,7 +445,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CaretRight, Refresh, QuestionFilled } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
@@ -458,7 +459,15 @@ import {
 } from '@/constants/collection'
 
 const route = useRoute()
+const router = useRouter()
 const activeConfigId = computed(() => route.query.config_id || '')
+
+const clearConfigFilter = async () => {
+  await router.push({
+    name: 'CollectionTasks',
+    query: {}
+  })
+}
 
 // 状态
 const loading = ref(false)
