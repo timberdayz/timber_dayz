@@ -9,6 +9,7 @@ const constantsPath = path.resolve(__dirname, '../src/constants/collection.js')
 const configViewPath = path.resolve(__dirname, '../src/views/collection/CollectionConfig.vue')
 const tasksViewPath = path.resolve(__dirname, '../src/views/collection/CollectionTasks.vue')
 const routerPath = path.resolve(__dirname, '../src/router/index.js')
+const rootConfigViewPath = path.resolve(__dirname, '../src/views/CollectionConfig.vue')
 const rootTasksViewPath = path.resolve(__dirname, '../src/views/CollectionTasks.vue')
 const legacyCollectionCenterPath = path.resolve(__dirname, '../src/views/Collection.vue')
 
@@ -16,6 +17,7 @@ const constantsSource = fs.readFileSync(constantsPath, 'utf8')
 const configSource = fs.readFileSync(configViewPath, 'utf8')
 const tasksSource = fs.readFileSync(tasksViewPath, 'utf8')
 const routerSource = fs.readFileSync(routerPath, 'utf8')
+const rootConfigExists = fs.existsSync(rootConfigViewPath)
 const rootTasksExists = fs.existsSync(rootTasksViewPath)
 const rootTasksSource = rootTasksExists ? fs.readFileSync(rootTasksViewPath, 'utf8') : ''
 const legacyCollectionCenterExists = fs.existsSync(legacyCollectionCenterPath)
@@ -93,6 +95,14 @@ test('legacy root CollectionTasks view is no longer the default collection entry
     rootTasksExists,
     false,
     'legacy root CollectionTasks.vue should be removed to avoid duplicate maintenance targets'
+  )
+})
+
+test('legacy root CollectionConfig view is no longer the default collection entry point', () => {
+  assert.equal(
+    rootConfigExists,
+    false,
+    'legacy root CollectionConfig.vue should be removed to avoid duplicate maintenance targets'
   )
 })
 
