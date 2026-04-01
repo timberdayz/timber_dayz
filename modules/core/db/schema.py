@@ -698,6 +698,7 @@ class CollectionConfig(Base):
         UniqueConstraint("name", "platform", name="uq_collection_configs_name_platform"),
         Index("ix_collection_configs_platform", "platform"),
         Index("ix_collection_configs_active", "is_active"),
+        {"schema": "core"},
     )
 
 
@@ -728,7 +729,7 @@ class CollectionTask(Base):
     status = Column(String(32), default="pending", nullable=False)  # pending/queued/running/verification_required/verification_submitted/completed/partial_success/failed/cancelled/interrupted
     
     # 关联配置(可选,快速采集时为空)
-    config_id = Column(Integer, ForeignKey("collection_configs.id", ondelete="SET NULL"), nullable=True)
+    config_id = Column(Integer, ForeignKey("core.collection_configs.id", ondelete="SET NULL"), nullable=True)
     
     # 进度跟踪
     progress = Column(Integer, default=0, nullable=False)  # 0-100
@@ -757,7 +758,7 @@ class CollectionTask(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)  # 任务实际开始执行时间(v4.7+ 步骤可观测)
     completed_at = Column(DateTime(timezone=True), nullable=True)  # 任务结束时间(终态时写入)
     retry_count = Column(Integer, default=0, nullable=False)
-    parent_task_id = Column(Integer, ForeignKey("collection_tasks.id", ondelete="SET NULL"), nullable=True)
+    parent_task_id = Column(Integer, ForeignKey("core.collection_tasks.id", ondelete="SET NULL"), nullable=True)
     
     # 验证码状态
     verification_type = Column(String(50), nullable=True)  # sms_code/email_code/slider/image/2fa
@@ -783,6 +784,7 @@ class CollectionTask(Base):
         Index("ix_collection_tasks_status", "status"),
         Index("ix_collection_tasks_config", "config_id"),
         Index("ix_collection_tasks_created", "created_at"),
+        {"schema": "core"},
     )
 
 
@@ -798,7 +800,7 @@ class CollectionTaskLog(Base):
     __tablename__ = "collection_task_logs"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    task_id = Column(Integer, ForeignKey("collection_tasks.id", ondelete="CASCADE"), nullable=False)
+    task_id = Column(Integer, ForeignKey("core.collection_tasks.id", ondelete="CASCADE"), nullable=False)
     level = Column(String(10), nullable=False)  # info/warning/error
     message = Column(Text, nullable=False)
     details = Column(JSON, nullable=True)  # 步骤可观测: step_id/component/data_domain/success/duration_ms/error
@@ -816,6 +818,7 @@ class CollectionTaskLog(Base):
         Index("ix_collection_task_logs_task", "task_id"),
         Index("ix_collection_task_logs_level", "level"),
         Index("ix_collection_task_logs_time", "timestamp"),
+        {"schema": "core"},
     )
 
 
@@ -2479,6 +2482,7 @@ class SalesCampaign(Base):
         Index("ix_sales_campaigns_status", "status"),
         Index("ix_sales_campaigns_dates", "start_date", "end_date"),
         Index("ix_sales_campaigns_type", "campaign_type"),
+        {"schema": "a_class"},
     )
 
 
@@ -2494,7 +2498,7 @@ class SalesCampaignShop(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     
     # 关联字段
-    campaign_id = Column(Integer, ForeignKey("sales_campaigns.id", ondelete="CASCADE"), nullable=False)
+    campaign_id = Column(Integer, ForeignKey("a_class.sales_campaigns.id", ondelete="CASCADE"), nullable=False)
     platform_code = Column(String(32), nullable=True)
     shop_id = Column(String(64), nullable=True)
     
@@ -2523,6 +2527,7 @@ class SalesCampaignShop(Base):
         ),
         Index("ix_campaign_shops_campaign", "campaign_id"),
         Index("ix_campaign_shops_shop", "platform_code", "shop_id"),
+        {"schema": "a_class"},
     )
 
 
@@ -2866,6 +2871,7 @@ class PerformanceConfig(Base):
             name="chk_weights_range"
         ),
         Index("ix_performance_config_active", "is_active", "effective_from"),
+        {"schema": "a_class"},
     )
 
 

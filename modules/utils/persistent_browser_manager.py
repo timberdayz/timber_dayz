@@ -25,6 +25,14 @@ from modules.apps.collection_center.browser_config_helper import (
 from .sessions.session_manager import SessionManager
 from .sessions.device_fingerprint import DeviceFingerprintManager
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def default_downloads_path(platform: str) -> Path:
+    path = REPO_ROOT / "downloads" / str(platform or "").lower()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
 
 class PersistentBrowserManager:
     """持久化浏览器管理器"""
@@ -171,8 +179,7 @@ class PersistentBrowserManager:
             # 默认下载目录(未外部覆盖时):downloads/<platform>
             try:
                 if not context_options.get('downloads_path'):
-                    droot = Path.cwd() / 'downloads' / str(platform).lower()
-                    droot.mkdir(parents=True, exist_ok=True)
+                    droot = default_downloads_path(platform)
                     context_options['downloads_path'] = str(droot)
                     logger.debug(f"设置默认downloads_path: {context_options['downloads_path']}")
             except Exception as e:

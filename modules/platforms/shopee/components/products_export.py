@@ -52,6 +52,13 @@ class ShopeeProductsExport(ExportComponent):
         escaped = [re.escape(char) for char in str(text or "").strip()]
         return re.compile(r"\s*".join(escaped), re.IGNORECASE)
 
+    def _build_month_leaf_pattern(self, text: str):
+        escaped = re.escape(str(text or "").strip())
+        return re.compile(rf"(?<![\u4e00-\u9fff])\s*{escaped}\s*(?![\u4e00-\u9fff])")
+
+    def _calendar_month_key(self, year: int, month: int) -> int:
+        return year * 12 + month
+
     def _region_text_candidates(self, region_value: str | None) -> tuple[str, ...]:
         normalized = self._normalize_text(region_value)
         if not normalized:
@@ -240,33 +247,7 @@ class ShopeeProductsExport(ExportComponent):
         except Exception:
             matches = None
 
-        async def _pick_visible_locator(match_group: Any) -> Any | None:
-            if match_group is None:
-                return None
-            candidates: list[Any] = []
-            if hasattr(match_group, "last"):
-                candidates.append(match_group.last)
-            if hasattr(match_group, "first"):
-                candidates.append(match_group.first)
-            elif match_group is not None:
-                candidates.append(match_group)
-
-            seen: set[int] = set()
-            for locator in candidates:
-                if locator is None:
-                    continue
-                marker = id(locator)
-                if marker in seen:
-                    continue
-                seen.add(marker)
-                try:
-                    if await locator.is_visible(timeout=2000):
-                        return locator
-                except Exception:
-                    continue
-            return None
-
-        panel_locator = await _pick_visible_locator(matches)
+        panel_locator = await self._pick_visible_locator(matches, timeout_ms=2000)
         if panel_locator is not None:
             return panel_locator
 
@@ -274,7 +255,7 @@ class ShopeeProductsExport(ExportComponent):
             global_matches = page.get_by_text(pattern, exact=False)
         except Exception:
             return None
-        global_locator = await _pick_visible_locator(global_matches)
+        global_locator = await self._pick_visible_locator(global_matches, timeout_ms=2000)
         if global_locator is not None:
             return global_locator
         return None
@@ -372,6 +353,41 @@ class ShopeeProductsExport(ExportComponent):
         )
         return (zh_months[target_date.month],)
 
+    async def _pick_visible_locator(self, match_group: Any, *, timeout_ms: int = 1000) -> Any | None:
+        if match_group is None:
+            return None
+
+        candidates: list[Any] = []
+        try:
+            if hasattr(match_group, "count") and hasattr(match_group, "nth"):
+                count = await match_group.count()
+                for idx in range(count):
+                    candidates.append(match_group.nth(idx))
+        except Exception:
+            pass
+
+        if hasattr(match_group, "last"):
+            candidates.append(match_group.last)
+        if hasattr(match_group, "first"):
+            candidates.append(match_group.first)
+        elif not candidates:
+            candidates.append(match_group)
+
+        seen: set[int] = set()
+        for locator in candidates:
+            if locator is None:
+                continue
+            marker = id(locator)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            try:
+                if await locator.is_visible(timeout=timeout_ms):
+                    return locator
+            except Exception:
+                continue
+        return None
+
     def _month_summary_signatures(self, iso_date: str) -> tuple[str, ...]:
         try:
             target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
@@ -407,28 +423,39 @@ class ShopeeProductsExport(ExportComponent):
 
     async def _find_month_leaf_locator(self, page: Any, iso_date: str) -> Any | None:
         panel = await self._find_date_panel(page)
-        containers = [panel] if panel is not None else [page]
+        for candidate in self._month_leaf_labels(iso_date):
+            pattern = self._build_month_leaf_pattern(candidate)
+            if panel is not None:
+                try:
+                    panel_locator = await self._pick_visible_locator(panel.get_by_text(pattern, exact=False))
+                    if panel_locator is not None:
+                        return panel_locator
+                except Exception:
+                    pass
+            try:
+                page_locator = await self._pick_visible_locator(page.get_by_text(pattern, exact=False))
+                if page_locator is not None:
+                    return page_locator
+            except Exception:
+                pass
+
+        containers = [panel, page] if panel is not None else [page]
+        seen_containers: set[int] = set()
         for candidate in self._month_leaf_labels(iso_date):
             for container in containers:
+                if container is None:
+                    continue
+                marker = id(container)
+                if marker in seen_containers:
+                    continue
+                seen_containers.add(marker)
                 try:
                     matches = container.get_by_text(candidate, exact=True)
                 except Exception:
                     continue
-                locators = []
-                if hasattr(matches, "last"):
-                    locators.append(matches.last)
-                if hasattr(matches, "first"):
-                    locators.append(matches.first)
-                else:
-                    locators.append(matches)
-                for locator in locators:
-                    if locator is None:
-                        continue
-                    try:
-                        if await locator.is_visible(timeout=1000):
-                            return locator
-                    except Exception:
-                        continue
+                locator = await self._pick_visible_locator(matches)
+                if locator is not None:
+                    return locator
         return None
 
     def _week_range_label_candidates(self, start_date: str, end_date: str) -> tuple[str, ...]:
@@ -505,7 +532,30 @@ class ShopeeProductsExport(ExportComponent):
                 '[class*="double-right"]',
             ),
         }
-        return await self._click_popup_nav_button_from_selectors(page, selector_map.get(direction, ()))
+        if await self._click_popup_nav_button_from_selectors(page, selector_map.get(direction, ())):
+            return True
+
+        text_map = {
+            "prev": ("<<", "\u00ab", "\u300a\u300a"),
+            "next": (">>", "\u00bb", "\u300b\u300b"),
+        }
+        panel = await self._find_date_panel(page)
+        containers = [panel, page] if panel is not None else [page]
+        for container in containers:
+            if container is None:
+                continue
+            for label in text_map.get(direction, ()):
+                try:
+                    locator = await self._pick_visible_locator(container.get_by_text(label, exact=True))
+                    if locator is None:
+                        continue
+                    await locator.click(timeout=5000)
+                    if hasattr(page, "wait_for_timeout"):
+                        await page.wait_for_timeout(250)
+                    return True
+                except Exception:
+                    continue
+        return False
 
     async def _click_popup_month_nav_button(self, page: Any, direction: str) -> bool:
         selector_map = {
@@ -526,7 +576,7 @@ class ShopeeProductsExport(ExportComponent):
         }
         return await self._click_popup_nav_button_from_selectors(page, selector_map.get(direction, ()))
 
-    def _parse_calendar_header_year_month(self, header_text: str | None) -> tuple[int, int] | None:
+    def _parse_calendar_header_month_year_zh(self, header_text: str | None) -> tuple[int, int] | None:
         text = str(header_text or "").strip()
         if not text:
             return None
@@ -540,57 +590,111 @@ class ShopeeProductsExport(ExportComponent):
         if month_match:
             return year, int(month_match.group(1))
 
-        zh_months = {
-            "\u4e00\u6708": 1,
-            "\u4e8c\u6708": 2,
-            "\u4e09\u6708": 3,
-            "\u56db\u6708": 4,
-            "\u4e94\u6708": 5,
-            "\u516d\u6708": 6,
-            "\u4e03\u6708": 7,
-            "\u516b\u6708": 8,
-            "\u4e5d\u6708": 9,
-            "\u5341\u6708": 10,
-            "\u5341\u4e00\u6708": 11,
-            "\u5341\u4e8c\u6708": 12,
-        }
-        for label, month in zh_months.items():
+        zh_months = (
+            ("\u5341\u4e00\u6708", 11),
+            ("\u5341\u4e8c\u6708", 12),
+            ("\u5341\u6708", 10),
+            ("\u4e00\u6708", 1),
+            ("\u4e8c\u6708", 2),
+            ("\u4e09\u6708", 3),
+            ("\u56db\u6708", 4),
+            ("\u4e94\u6708", 5),
+            ("\u516d\u6708", 6),
+            ("\u4e03\u6708", 7),
+            ("\u516b\u6708", 8),
+            ("\u4e5d\u6708", 9),
+        )
+        for label, month in zh_months:
             if label in text:
                 return year, month
         return None
 
+    def _parse_calendar_header_year_month(self, header_text: str | None) -> tuple[int, int] | None:
+        parsed = self._parse_calendar_header_month_year_zh(header_text)
+        if parsed is not None:
+            return parsed
+
+        text = str(header_text or "").strip()
+        if not text:
+            return None
+
+        year_match = re.search(r"(20\d{2})", text)
+        if not year_match:
+            return None
+        year = int(year_match.group(1))
+
+        month_match = re.search(r"(\d{1,2})\s*\u6708", text)
+        if month_match:
+            return year, int(month_match.group(1))
+        return None
+
+    def _parse_month_panel_year(self, header_text: str | None) -> int | None:
+        text = str(header_text or "").strip()
+        if not text or not re.fullmatch(r"20\d{2}", text):
+            return None
+        return int(text)
+
+    async def _wait_calendar_header_changed(
+        self,
+        page: Any,
+        previous_header: str | None,
+        *,
+        timeout_ms: int = 1500,
+        poll_ms: int = 150,
+    ) -> str | None:
+        previous = str(previous_header or "").strip()
+        waited = 0
+        while waited <= timeout_ms:
+            current = await self._current_popup_header_text(page)
+            if str(current or "").strip() and str(current or "").strip() != previous:
+                return current
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return None
+
     async def _navigate_month_panel_to_year(self, page: Any, target_year: int) -> bool:
+        header_text = await self._current_popup_header_text(page)
         for _ in range(8):
-            header_text = await self._current_popup_header_text(page)
-            if header_text and str(target_year) in header_text:
+            current_year = self._parse_month_panel_year(header_text)
+            if current_year == target_year:
                 return True
-            current_year_match = re.search(r"(20\d{2})", header_text or "")
-            if current_year_match:
-                current_year = int(current_year_match.group(1))
+            if current_year is not None:
                 direction = "next" if current_year < target_year else "prev"
             else:
                 direction = "prev"
             if not await self._click_popup_year_nav_button(page, direction):
                 return False
-        header_text = await self._current_popup_header_text(page)
-        return bool(header_text and str(target_year) in header_text)
+            updated_header = await self._wait_calendar_header_changed(page, header_text)
+            if updated_header is None:
+                return False
+            header_text = updated_header
+        return self._parse_month_panel_year(header_text) == target_year
 
     async def _navigate_calendar_panel_to_month(self, page: Any, target_year: int, target_month: int) -> bool:
+        header_text = await self._current_popup_header_text(page)
         for _ in range(24):
-            header_text = await self._current_popup_header_text(page)
-            current = self._parse_calendar_header_year_month(header_text)
+            current = self._parse_calendar_header_month_year_zh(header_text)
             if current == (target_year, target_month):
                 return True
 
             if current is not None:
                 current_year, current_month = current
-                direction = "next" if (current_year, current_month) < (target_year, target_month) else "prev"
+                direction = (
+                    "next"
+                    if self._calendar_month_key(current_year, current_month)
+                    < self._calendar_month_key(target_year, target_month)
+                    else "prev"
+                )
             else:
                 direction = "prev"
             if not await self._click_popup_month_nav_button(page, direction):
                 return False
-        header_text = await self._current_popup_header_text(page)
-        return self._parse_calendar_header_year_month(header_text) == (target_year, target_month)
+            updated_header = await self._wait_calendar_header_changed(page, header_text)
+            if updated_header is None:
+                return False
+            header_text = updated_header
+        return self._parse_calendar_header_month_year_zh(header_text) == (target_year, target_month)
 
     async def _current_date_summary_text(self, page: Any) -> str | None:
         trigger = await self._find_date_picker_trigger(page)

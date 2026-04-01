@@ -18,7 +18,7 @@ import sys
 import os
 
 
-from sqlalchemy import engine_from_config
+from sqlalchemy import engine_from_config, text
 from sqlalchemy import pool
 
 from alembic import context
@@ -91,8 +91,10 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_schemas=True,
         compare_type=True,
         compare_server_default=True,
+        version_table_schema="core",
     )
 
     with context.begin_transaction():
@@ -117,11 +119,14 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        connection.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            include_schemas=True,
             compare_type=True,
             compare_server_default=True,
+            version_table_schema="core",
         )
 
         with context.begin_transaction():

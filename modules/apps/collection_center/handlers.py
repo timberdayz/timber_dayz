@@ -24,6 +24,7 @@ except ImportError:
     psutil = None
 
 from modules.core.logger import get_logger
+from modules.utils.account_identity import resolve_account_session_id
 
 logger = get_logger(__name__)
 
@@ -487,10 +488,7 @@ if __name__ == "__main__":
                 print("[BOT] 启动 TikTok 组件化自动登录(同步)...")
                 with sync_playwright() as p:
                     pb = PersistentBrowserManager(p)
-                    account_id = (
-                        account.get('store_name') or account.get('username') or
-                        str(account.get('account_id') or 'account')
-                    )
+                    account_id = resolve_account_session_id(account)
                     ctx = pb.get_or_create_persistent_context('tiktok', str(account_id), account)
                     page = ctx.new_page()
 
@@ -572,10 +570,7 @@ if __name__ == "__main__":
                 print("[BOT] 启动 妙手ERP 组件化自动登录(同步)...")
                 with sync_playwright() as p:
                     pb = PersistentBrowserManager(p)
-                    account_id = (
-                        account.get('store_name') or account.get('username') or
-                        str(account.get('account_id') or 'account')
-                    )
+                    account_id = resolve_account_session_id(account)
                     ctx = pb.get_or_create_persistent_context('miaoshou', str(account_id), account)
                     page = ctx.new_page()
 
@@ -1387,7 +1382,7 @@ with sync_playwright() as playwright:
         account_label = account.get('store_name') or account.get('username') or str(account.get('account_id') or 'account')
         with sync_playwright() as p:
             pb = PersistentBrowserManager(p)
-            account_id = str(account_label)
+            account_id = resolve_account_session_id(account)
             ctx = pb.get_or_create_persistent_context(plat, account_id, account)
             page = ctx.new_page()
             # 内部将完成:导航、登录检测/自动登录、停留在后台首页
@@ -1413,7 +1408,7 @@ with sync_playwright() as playwright:
         account_label = account.get('store_name') or account.get('username') or str(account.get('account_id') or 'account')
         with sync_playwright() as p:
             pb = PersistentBrowserManager(p)
-            account_id = str(account_label)
+            account_id = resolve_account_session_id(account)
             ctx = pb.get_or_create_persistent_context(plat, account_id, account)
             page = ctx.new_page()
             # 完整流程交由页面内 pause 完成

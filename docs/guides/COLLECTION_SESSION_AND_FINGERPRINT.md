@@ -33,3 +33,15 @@
 ## 运维提醒
 
 - **避免同一账号并发执行采集任务**，以防会话文件 load/save 竞态。若需支持同账号并发，可后续通过任务排队或账号级锁处理。
+
+## 2026-04 对齐更新
+
+- `SessionManager`、`PersistentBrowserManager`、`pwcli` 账号模式现在统一以仓库根目录为锚点，不再依赖当前工作目录。
+- 账号级会话命名统一优先使用 `account_id`，缺失时才回退到 `username`、`store_name`、`name`、`label`。
+- `pwcli` 人工调试如果要与正式采集共享账号级持久会话，必须带账号参数：
+  - `Open-PwcliTiktok -AccountId '<account_id>'`
+  - `Open-PwcliShopee -AccountId '<account_id>'`
+  - `Save-PwcliTiktokState -AccountId '<account_id>'`
+  - `Save-PwcliShopeeState -AccountId '<account_id>'`
+- 不带 `AccountId` 的 `pwcli` 会话仍可用于临时探索，但它属于平台级共享调试空间，不应视为正式账号级持久会话来源。
+- TikTok 如果打开后仍然回到登录页，优先判断为“该账号当前会话失效，需要重新登录刷新”，而不是继续排查会话命名空间。

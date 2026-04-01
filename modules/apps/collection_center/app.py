@@ -22,6 +22,7 @@ from typing import Dict, Any, Optional
 from modules.core.base_app import BaseApplication
 from modules.core.logger import get_logger
 from modules.core.path_manager import get_downloads_dir
+from modules.utils.account_identity import resolve_account_session_id
 
 logger = get_logger(__name__)
 
@@ -593,11 +594,7 @@ class CollectionCenterApp(BaseApplication):
             with sync_playwright() as p:
                 print("[LOC] 步骤1: 获取页面对象...")
                 pb = PersistentBrowserManager(p)
-                account_id = (
-                    account.get("store_name")
-                    or account.get("username")
-                    or str(account.get("account_id") or "account")
-                )
+                account_id = resolve_account_session_id(account)
                 ctx = pb.get_or_create_persistent_context("tiktok", str(account_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 try:
@@ -783,11 +780,7 @@ class CollectionCenterApp(BaseApplication):
             with sync_playwright() as p:
                 print("[LOC] 步骤1: 获取页面对象...")
                 pb = PersistentBrowserManager(p)
-                account_id = (
-                    account.get("store_name")
-                    or account.get("username")
-                    or str(account.get("account_id") or "account")
-                )
+                account_id = resolve_account_session_id(account)
                 ctx = pb.get_or_create_persistent_context("tiktok", str(account_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 try:
@@ -974,11 +967,7 @@ class CollectionCenterApp(BaseApplication):
             with sync_playwright() as p:
                 print("[LOC] 步骤1: 获取页面对象...")
                 pb = PersistentBrowserManager(p)
-                account_id = (
-                    account.get("store_name")
-                    or account.get("username")
-                    or str(account.get("account_id") or "account")
-                )
+                account_id = resolve_account_session_id(account)
                 ctx = pb.get_or_create_persistent_context("tiktok", str(account_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
 
@@ -1130,7 +1119,7 @@ class CollectionCenterApp(BaseApplication):
             from modules.components.navigation.base import TargetPage
             with sync_playwright() as p:
                 pb = PersistentBrowserManager(p)
-                acct_id = account.get("store_name") or account.get("username") or str(account.get("account_id") or "account")
+                acct_id = resolve_account_session_id(account)
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity, "data_domain": "products"}, logger=get_logger(__name__))
@@ -1187,7 +1176,7 @@ class CollectionCenterApp(BaseApplication):
             from modules.components.navigation.base import TargetPage
             with sync_playwright() as p:
                 pb = PersistentBrowserManager(p)
-                acct_id = account.get("store_name") or account.get("username") or str(account.get("account_id") or "account")
+                acct_id = resolve_account_session_id(account)
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity, "data_domain": "traffic"}, logger=get_logger(__name__))
@@ -1225,7 +1214,7 @@ class CollectionCenterApp(BaseApplication):
             from modules.components.navigation.base import TargetPage
             with sync_playwright() as p:
                 pb = PersistentBrowserManager(p)
-                acct_id = account.get("store_name") or account.get("username") or str(account.get("account_id") or "account")
+                acct_id = resolve_account_session_id(account)
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity, "data_domain": "services"}, logger=get_logger(__name__))
@@ -1272,7 +1261,7 @@ class CollectionCenterApp(BaseApplication):
             from modules.components.navigation.base import TargetPage
             with sync_playwright() as p:
                 pb = PersistentBrowserManager(p)
-                acct_id = account.get("store_name") or account.get("username") or str(account.get("account_id") or "account")
+                acct_id = resolve_account_session_id(account)
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 # 先登录一次(若已登录会自动跳过),避免在每个子类型循环中重复尝试登录导致卡顿/识别异常
@@ -1347,7 +1336,7 @@ class CollectionCenterApp(BaseApplication):
             from modules.components.navigation.base import TargetPage
             with sync_playwright() as p:
                 pb = PersistentBrowserManager(p)
-                acct_id = account.get("store_name") or account.get("username") or str(account.get("account_id") or "account")
+                acct_id = resolve_account_session_id(account)
                 ctx = pb.get_or_create_persistent_context("miaoshou", str(acct_id), account)
                 page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                 exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity, "data_domain": "finance"}, logger=get_logger(__name__))
@@ -1557,7 +1546,8 @@ class CollectionCenterApp(BaseApplication):
                     account_label = account.get("label") or account.get("store_name") or account.get("username") or str(account.get("account_id") or "account")
                     print(f"\n[USER] 账号: {account_label} [miaoshou]")
                     pb = PersistentBrowserManager(p)
-                    ctx = pb.get_or_create_persistent_context("miaoshou", str(account_label), account)
+                    session_account_id = resolve_account_session_id(account)
+                    ctx = pb.get_or_create_persistent_context("miaoshou", str(session_account_id), account)
                     page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
                     # 构造上下文
                     exec_ctx = ExecutionContext(platform="miaoshou", account=account, config={"granularity": granularity}, logger=get_logger(__name__))
@@ -1656,7 +1646,7 @@ class CollectionCenterApp(BaseApplication):
                                 except Exception:
                                     pass
                     # 关闭上下文(防泄露)
-                    try: pb.close_context("miaoshou", str(account_label))
+                    try: pb.close_context("miaoshou", str(session_account_id))
                     except Exception: pass
             print("\n[DATA] 批量结果汇总:")
             print(f"   总任务: {total} | [OK] 成功: {ok} | [NEXT] 跳过: {skip} | [FAIL] 失败: {fail}")
@@ -1809,7 +1799,8 @@ class CollectionCenterApp(BaseApplication):
                     print(f"\n[USER] 账号: {account_label}")
 
                     pb = PersistentBrowserManager(p)
-                    ctx = pb.get_or_create_persistent_context("tiktok", str(account_label), account)
+                    session_account_id = resolve_account_session_id(account)
+                    ctx = pb.get_or_create_persistent_context("tiktok", str(session_account_id), account)
                     page = ctx.pages[0] if getattr(ctx, "pages", None) else ctx.new_page()
 
                     try:
@@ -1994,11 +1985,11 @@ class CollectionCenterApp(BaseApplication):
                                         pass
                     finally:
                         try:
-                            pb.save_context_state(ctx, "tiktok", str(account_label))
+                            pb.save_context_state(ctx, "tiktok", str(session_account_id))
                         except Exception:
                             pass
                         try:
-                            pb.close_context("tiktok", str(account_label))
+                            pb.close_context("tiktok", str(session_account_id))
                         except Exception:
                             pass
 
@@ -2277,7 +2268,7 @@ class CollectionCenterApp(BaseApplication):
                 from modules.utils.persistent_browser_manager import PersistentBrowserManager
                 with sync_playwright() as p:
                     pb = PersistentBrowserManager(p)
-                    account_id = account.get("store_name") or account.get("name") or account.get("username") or "account"
+                    account_id = resolve_account_session_id(account)
                     ctx = pb.get_or_create_persistent_context(platform, str(account_id), account)
                     page = ctx.new_page()
                     try:
@@ -4523,13 +4514,7 @@ class CollectionCenterApp(BaseApplication):
 
                 try:
                     bm = exporter.pb
-                    account_id = (
-                        account.get('account_id')
-                        or account.get('username')
-                        or account.get('store_name')
-                        or account.get('label')
-                        or 'unknown'
-                    )
+                    account_id = resolve_account_session_id(account, fallback="unknown")
                     context = bm.get_or_create_persistent_context(
                         platform="shopee",
                         account_id=str(account_id),
@@ -4604,13 +4589,7 @@ class CollectionCenterApp(BaseApplication):
                 try:
                     with sync_playwright() as pw:
                         bm = PersistentBrowserManager(pw)
-                        account_id = (
-                            account.get('account_id')
-                            or account.get('username')
-                            or account.get('store_name')
-                            or account.get('label')
-                            or 'unknown'
-                        )
+                        account_id = resolve_account_session_id(account, fallback="unknown")
 
                         try:
                             context = bm.get_or_create_persistent_context(

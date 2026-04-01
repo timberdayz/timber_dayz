@@ -32,3 +32,14 @@ def test_alembic_has_single_head_after_execution_mode_migration():
     heads = script.get_heads()
 
     assert len(heads) == 1
+
+
+def test_collection_execution_mode_migration_revision_fits_alembic_version_column():
+    migration_path = _find_execution_mode_migration()
+    namespace: dict[str, object] = {}
+    exec(migration_path.read_text(encoding="utf-8"), namespace)
+
+    revision = namespace["revision"]
+
+    assert isinstance(revision, str)
+    assert len(revision) <= 32

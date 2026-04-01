@@ -1,6 +1,6 @@
 """add execution_mode to collection_configs
 
-Revision ID: 20260401_collection_execution_mode
+Revision ID: 20260401_collection_exec_mode
 Revises: 20260328_dim_shops_archive
 Create Date: 2026-04-01
 """
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "20260401_collection_execution_mode"
+revision = "20260401_collection_exec_mode"
 down_revision = "20260328_dim_shops_archive"
 branch_labels = None
 depends_on = None

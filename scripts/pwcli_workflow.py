@@ -18,6 +18,12 @@ def sanitize_token(value: str) -> str:
     return cleaned or "unknown"
 
 
+def _session_manager_safe_token(value: str) -> str:
+    text = str(value or "").strip()
+    safe = "".join(ch for ch in text if ch.isalnum() or ch in "_-")
+    return safe or "default"
+
+
 def normalize_step_id(step: str | int) -> str:
     if isinstance(step, int):
         return f"{step:02d}"
@@ -37,6 +43,15 @@ def build_work_dir(repo_root: Path, platform: str, work_tag: str) -> Path:
 
 def build_session_name(platform: str, work_tag: str) -> str:
     return f"{sanitize_token(platform)}-{sanitize_token(work_tag)}"
+
+
+def build_runtime_profile_dir(repo_root: Path, platform: str, account_id: str) -> Path:
+    return (
+        repo_root
+        / "profiles"
+        / _session_manager_safe_token(platform.lower())
+        / _session_manager_safe_token(account_id)
+    )
 
 
 def build_step_snapshot_path(work_dir: Path, step: str | int, name: str, phase: str) -> Path:
@@ -198,6 +213,16 @@ def _build_cli() -> argparse.ArgumentParser:
     session.add_argument("--platform", required=True)
     session.add_argument("--work-tag", required=True)
 
+    runtime_profile = sub.add_parser("runtime-profile-dir", help="print runtime account profile dir")
+    runtime_profile.add_argument("--repo-root", required=True)
+    runtime_profile.add_argument("--platform", required=True)
+    runtime_profile.add_argument("--account-id", required=True)
+
+    runtime_profile_json = sub.add_parser("runtime-profile-dir-json", help="print runtime account profile dir as JSON string")
+    runtime_profile_json.add_argument("--repo-root", required=True)
+    runtime_profile_json.add_argument("--platform", required=True)
+    runtime_profile_json.add_argument("--account-id", required=True)
+
     snapshot = sub.add_parser("snapshot-path", help="print normalized snapshot path")
     snapshot.add_argument("--work-dir", required=True)
     snapshot.add_argument("--step", required=True)
@@ -237,6 +262,14 @@ def main() -> int:
 
     if args.command == "session-name":
         print(build_session_name(args.platform, args.work_tag))
+        return 0
+
+    if args.command == "runtime-profile-dir":
+        print(build_runtime_profile_dir(Path(args.repo_root), args.platform, args.account_id))
+        return 0
+
+    if args.command == "runtime-profile-dir-json":
+        print(json.dumps(str(build_runtime_profile_dir(Path(args.repo_root), args.platform, args.account_id))))
         return 0
 
     if args.command == "snapshot-path":

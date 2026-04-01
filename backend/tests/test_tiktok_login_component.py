@@ -547,6 +547,38 @@ async def test_tiktok_login_post_otp_wait_accepts_homepage_url_plus_left_nav_sig
 
 
 @pytest.mark.asyncio
+async def test_tiktok_login_post_otp_wait_accepts_authenticated_shell_without_homepage_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokLogin(_ctx(config={}))
+    page = _FakePage("https://seller.tiktokglobalshop.com/account/login")
+
+    monkeypatch.setattr(component, "_find_visible_login_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_find_visible_otp_error", AsyncMock(return_value=None))
+    monkeypatch.setattr(component, "_is_otp_visible", AsyncMock(return_value=False))
+
+    async def _advance_page(ms: int) -> None:
+        page.timeout_calls.append(ms)
+        if len(page.timeout_calls) >= 2:
+            page.url = "https://seller.tiktokshopglobalselling.com/order/list?shop_region=SG"
+            page.text_map["订单"] = _FakeLocator()
+            page.text_map["商品"] = _FakeLocator()
+            page.selector_map['a[href*="/order"]'] = _FakeLocator()
+            page.selector_map['a[href*="/product"]'] = _FakeLocator()
+
+    monkeypatch.setattr(page, "wait_for_timeout", _advance_page)
+
+    outcome = await component._wait_for_post_login_outcome(
+        page,
+        phase="post_otp_submit",
+        timeout_ms=10,
+        poll_ms=1,
+    )
+
+    assert outcome == "success"
+
+
+@pytest.mark.asyncio
 async def test_tiktok_login_wait_for_login_surface_ready_handles_delayed_login_surface(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

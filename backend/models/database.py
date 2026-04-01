@@ -68,6 +68,7 @@ from backend.utils.config import get_settings
 logger = logging.getLogger(__name__)
 
 MANAGED_APP_SCHEMAS = ("public", "core", "a_class", "b_class", "c_class", "finance")
+PRIMARY_ALEMBIC_SCHEMA = "core"
 
 
 def _expand_existing_table_aliases(existing_tables: set[str]) -> set[str]:
@@ -99,12 +100,17 @@ def _pick_effective_current_revision(
 ) -> str | None:
     if not revisions_by_schema:
         return None
-    if head_revision and head_revision in revisions_by_schema.values():
-        return head_revision
+
+    primary_revision = revisions_by_schema.get(PRIMARY_ALEMBIC_SCHEMA)
+    if primary_revision:
+        return primary_revision
 
     for schema_name in ("core", "a_class", "b_class", "c_class", "finance", "public"):
         if schema_name in revisions_by_schema:
             return revisions_by_schema[schema_name]
+
+    if head_revision and head_revision in revisions_by_schema.values():
+        return head_revision
 
     return next(iter(revisions_by_schema.values()))
 
@@ -116,6 +122,15 @@ def _get_alembic_revisions_by_schema(connection, inspector=None) -> dict[str, st
         inspector = inspect(connection)
 
     revisions_by_schema: dict[str, str] = {}
+
+    primary_table_names = inspector.get_table_names(schema=PRIMARY_ALEMBIC_SCHEMA)
+    if "alembic_version" in primary_table_names:
+        result = connection.execute(
+            text(f'SELECT version_num FROM "{PRIMARY_ALEMBIC_SCHEMA}"."alembic_version"')
+        ).fetchall()
+        if result:
+            return {PRIMARY_ALEMBIC_SCHEMA: result[-1][0]}
+
     for schema_name in MANAGED_APP_SCHEMAS:
         table_names = inspector.get_table_names(schema=schema_name)
         if "alembic_version" not in table_names:

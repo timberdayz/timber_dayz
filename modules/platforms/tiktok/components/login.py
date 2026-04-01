@@ -359,6 +359,42 @@ class TiktokLogin(LoginComponent):
 
         return False
 
+    async def _session_shell_looks_ready(self, page: Any) -> bool:
+        current_url = str(getattr(page, "url", "") or "").strip().lower()
+        if not self._login_looks_successful(current_url):
+            return False
+        if await self._target_looks_ready(page):
+            return False
+        if await self._is_otp_visible(page):
+            return False
+        if await self._locator_is_visible(self._password_locator(page), timeout=300):
+            return False
+        if await self._locator_is_visible(self._login_button_locator(page), timeout=300):
+            return False
+
+        signal_count = 0
+        for text in ("TikTok Shop", "棣栭〉", "鏁版嵁鍒嗘瀽", "璁㈠崟", "鍟嗗搧", "Seller Center"):
+            try:
+                if await self._locator_is_visible(page.get_by_text(text, exact=False).first, timeout=300):
+                    signal_count += 1
+            except Exception:
+                continue
+
+        for selector in (
+            'a[href*="/homepage"]',
+            'a[href*="/compass/"]',
+            'a[href*="/product"]',
+            'a[href*="/order"]',
+            'a[href*="/manage"]',
+        ):
+            try:
+                if await self._locator_is_visible(page.locator(selector).first, timeout=300):
+                    signal_count += 1
+            except Exception:
+                continue
+
+        return signal_count >= 2
+
     def _login_success_target(self) -> str:
         config = self.ctx.config or {}
         params = config.get("params") or {}
@@ -388,6 +424,7 @@ class TiktokLogin(LoginComponent):
         poll_ms: int = 1000,
     ) -> str:
         elapsed = 0
+        session_shell_hits = 0
         while elapsed <= timeout_ms:
             login_error = await self._find_visible_login_error(page)
             if login_error:
@@ -399,6 +436,13 @@ class TiktokLogin(LoginComponent):
 
             if await self._target_looks_ready(page):
                 return "success"
+
+            if await self._session_shell_looks_ready(page):
+                session_shell_hits += 1
+                if session_shell_hits >= 2:
+                    return "success"
+            else:
+                session_shell_hits = 0
 
             if await self._is_otp_visible(page):
                 if phase == "post_credentials":

@@ -4,6 +4,7 @@ from scripts.pwcli_workflow import (
     build_capture_paths,
     build_note_path,
     build_pack_manifest,
+    build_runtime_profile_dir,
     build_step_snapshot_path,
     build_work_dir,
     validate_work_package,
@@ -19,6 +20,16 @@ def test_build_work_dir_uses_platform_and_work_tag(tmp_path: Path):
     )
 
     assert result == tmp_path / "output" / "playwright" / "work" / "miaoshou" / "login"
+
+
+def test_build_runtime_profile_dir_matches_session_manager_normalization(tmp_path: Path):
+    result = build_runtime_profile_dir(
+        repo_root=tmp_path,
+        platform="tiktok",
+        account_id="Tiktok 2店",
+    )
+
+    assert result == tmp_path / "profiles" / "tiktok" / "Tiktok2店"
 
 
 def test_build_step_snapshot_path_formats_step_name_and_phase(tmp_path: Path):

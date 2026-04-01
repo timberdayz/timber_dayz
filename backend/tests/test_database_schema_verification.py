@@ -48,3 +48,17 @@ def test_pick_effective_current_revision_falls_back_to_latest_known_revision_whe
     )
 
     assert chosen == "20260217_started_completed"
+
+
+def test_pick_effective_current_revision_does_not_let_public_override_core():
+    revisions = {
+        "public": "20260401_collection_exec_mode",
+        "core": "20260328_dim_shops_archive",
+    }
+
+    chosen = db_module._pick_effective_current_revision(
+        revisions_by_schema=revisions,
+        head_revision="20260401_collection_exec_mode",
+    )
+
+    assert chosen == "20260328_dim_shops_archive"

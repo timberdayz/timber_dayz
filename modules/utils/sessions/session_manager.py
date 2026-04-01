@@ -15,9 +15,18 @@ from typing import Dict, Optional, Any, Union, List
 from datetime import datetime, timedelta
 from loguru import logger
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 class SessionManager:
     """会话管理器"""
+
+    @staticmethod
+    def _repo_relative(path: Union[str, Path]) -> Path:
+        candidate = Path(path)
+        if candidate.is_absolute():
+            return candidate
+        return REPO_ROOT / candidate
 
     def __init__(self, base_path: Union[str, Path] = "data/sessions"):
         """
@@ -26,20 +35,29 @@ class SessionManager:
         Args:
             base_path: 会话存储基础路径
         """
-        self.base_path = Path(base_path)
+        self.base_path = self._repo_relative(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
 
         # 会话存储路径
         self.sessions_path = self.base_path
-        self.profiles_path = Path("data/session_profiles")
+        self.profiles_path = self._repo_relative("data/session_profiles")
         self.profiles_path.mkdir(parents=True, exist_ok=True)
 
         # 持久化Profile路径(每账号独立目录)
-        self.persistent_profiles_path = Path("profiles")
+        self.persistent_profiles_path = self._repo_relative("profiles")
         self.persistent_profiles_path.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"初始化会话管理器: {self.base_path}")
         logger.info(f"持久化Profile路径: {self.persistent_profiles_path}")
+
+    def describe_storage_targets(self, platform: str, account_id: str) -> Dict[str, str]:
+        return {
+            "platform": str(platform or "").strip().lower(),
+            "account_id": str(account_id or "").strip(),
+            "session_path": str(self.get_session_path(platform, account_id)),
+            "persistent_profile_path": str(self.get_persistent_profile_path(platform, account_id)),
+            "legacy_profile_path": str(self.get_profile_path(platform, account_id)),
+        }
 
     def get_persistent_profile_path(self, platform: str, account_id: str) -> Path:
         """

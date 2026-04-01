@@ -6,7 +6,9 @@ param(
     [string]$WorkTag,
 
     [Parameter(Mandatory = $true)]
-    [string]$Url
+    [string]$Url,
+
+    [string]$AccountId
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,14 +23,18 @@ $SessionName = python $Helper session-name --platform $Platform --work-tag $Work
 
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 
-& $Pwcli --session $SessionName open $Url
+if ($AccountId) {
+    & $Pwcli --session $SessionName open $Url --account-id $AccountId
+} else {
+    & $Pwcli --session $SessionName open $Url
+}
 $ExitCode = $LASTEXITCODE
 
 if ($ExitCode -ne 0) {
     exit $ExitCode
 }
 
-if (Test-Path $StateFile) {
+if (-not $AccountId -and (Test-Path $StateFile)) {
     & $Pwcli --session $SessionName state-load $StateFile
     $StateExitCode = $LASTEXITCODE
 
