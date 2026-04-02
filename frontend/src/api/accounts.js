@@ -1,42 +1,100 @@
 /**
- * 账号管理 API 服务。
- *
- * 运行时数据源为数据库中的 `core.platform_accounts`。
- * 历史导入入口已移除。
+ * 主账号 / 店铺账号 / 店铺别名 API 服务。
  */
 
 import api from './index'
 
 export default {
-  async listAccounts(params = {}) {
-    return await api.get('/accounts/', { params })
+  async listMainAccounts(params = {}) {
+    return await api.get('/main-accounts', { params })
   },
 
-  async getAccount(accountId) {
-    return await api.get(`/accounts/${accountId}`)
+  async createMainAccount(data) {
+    return await api.post('/main-accounts', data)
   },
 
-  async createAccount(data) {
-    return await api.post('/accounts/', data)
+  async updateMainAccount(mainAccountId, data) {
+    return await api.put(`/main-accounts/${mainAccountId}`, data)
   },
 
-  async updateAccount(accountId, data) {
-    return await api.put(`/accounts/${accountId}`, data)
+  async deleteMainAccount(mainAccountId) {
+    return await api.delete(`/main-accounts/${mainAccountId}`)
   },
 
-  async deleteAccount(accountId) {
-    return await api.delete(`/accounts/${accountId}`)
+  async listShopAccounts(params = {}) {
+    return await api.get('/shop-accounts', { params })
   },
 
-  async batchCreate(batchData) {
-    return await api.post('/accounts/batch', batchData)
+  async createShopAccount(data) {
+    return await api.post('/shop-accounts', data)
   },
 
-  async getStats() {
-    return await api.get('/accounts/stats/summary')
+  async updateShopAccount(shopAccountId, data) {
+    return await api.put(`/shop-accounts/${shopAccountId}`, data)
+  },
+
+  async deleteShopAccount(shopAccountId) {
+    return await api.delete(`/shop-accounts/${shopAccountId}`)
+  },
+
+  async batchCreateShopAccounts(batchData) {
+    return await api.post('/shop-accounts/batch', batchData)
+  },
+
+  async listShopAccountAliases(params = {}) {
+    return await api.get('/shop-account-aliases', { params })
+  },
+
+  async claimShopAccountAlias(data) {
+    return await api.post('/shop-account-aliases/claim', data)
+  },
+
+  async listPlatformShopDiscoveries(params = {}) {
+    return await api.get('/platform-shop-discoveries', { params })
+  },
+
+  async confirmPlatformShopDiscovery(discoveryId, data) {
+    return await api.post(`/platform-shop-discoveries/${discoveryId}/confirm`, data)
   },
 
   async getUnmatchedShopAliases() {
     return await api.get('/accounts/unmatched-shop-aliases')
-  }
+  },
+
+  async getStats() {
+    const shopAccounts = await this.listShopAccounts()
+    const platformBreakdown = {}
+    for (const item of shopAccounts || []) {
+      const key = item.platform || 'unknown'
+      platformBreakdown[key] = (platformBreakdown[key] || 0) + 1
+    }
+    return {
+      total: (shopAccounts || []).length,
+      active: (shopAccounts || []).filter((item) => item.enabled).length,
+      inactive: (shopAccounts || []).filter((item) => !item.enabled).length,
+      platforms: Object.keys(platformBreakdown).length,
+      platform_breakdown: platformBreakdown,
+    }
+  },
+
+  // compatibility wrappers for in-flight callers
+  async listAccounts(params = {}) {
+    return await this.listShopAccounts(params)
+  },
+
+  async createAccount(data) {
+    return await this.createShopAccount(data)
+  },
+
+  async updateAccount(accountId, data) {
+    return await this.updateShopAccount(accountId, data)
+  },
+
+  async deleteAccount(accountId) {
+    return await this.deleteShopAccount(accountId)
+  },
+
+  async batchCreate(batchData) {
+    return await this.batchCreateShopAccounts(batchData)
+  },
 }

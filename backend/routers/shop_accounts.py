@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.database import get_async_db
@@ -13,10 +13,51 @@ from backend.schemas.shop_account import (
     ShopAccountResponse,
     ShopAccountUpdate,
 )
-from modules.core.db import MainAccount, ShopAccount
+from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability
 
 
 router = APIRouter(prefix="/shop-accounts", tags=["店铺账号管理"])
+
+
+async def _serialize_shop_account(
+    db: AsyncSession,
+    record: ShopAccount,
+) -> ShopAccountResponse:
+    alias_result = await db.execute(
+        select(ShopAccountAlias).where(
+            ShopAccountAlias.shop_account_id == record.id,
+            ShopAccountAlias.is_active == True,
+        )
+    )
+    aliases = alias_result.scalars().all()
+    primary_alias = next((alias.alias_value for alias in aliases if alias.is_primary), None)
+    capability_result = await db.execute(
+        select(ShopAccountCapability).where(
+            ShopAccountCapability.shop_account_id == record.id
+        )
+    )
+    capabilities = {
+        row.data_domain: bool(row.enabled)
+        for row in capability_result.scalars().all()
+    }
+    return ShopAccountResponse(
+        id=record.id,
+        platform=record.platform,
+        shop_account_id=record.shop_account_id,
+        main_account_id=record.main_account_id,
+        account_alias=primary_alias,
+        alias_count=len(aliases),
+        capabilities=capabilities,
+        store_name=record.store_name,
+        platform_shop_id=record.platform_shop_id,
+        platform_shop_id_status=record.platform_shop_id_status,
+        shop_region=record.shop_region,
+        shop_type=record.shop_type,
+        enabled=record.enabled,
+        notes=record.notes,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
 
 
 async def _get_shop_account_or_404(db: AsyncSession, shop_account_id: str) -> ShopAccount:
@@ -57,7 +98,8 @@ async def list_shop_accounts(
     if enabled is not None:
         stmt = stmt.where(ShopAccount.enabled == enabled)
     result = await db.execute(stmt)
-    return result.scalars().all()
+    records = result.scalars().all()
+    return [await _serialize_shop_account(db, record) for record in records]
 
 
 @router.post("", response_model=ShopAccountResponse)
@@ -91,7 +133,7 @@ async def create_shop_account(
     db.add(record)
     await db.commit()
     await db.refresh(record)
-    return record
+    return await _serialize_shop_account(db, record)
 
 
 @router.post("/batch", response_model=List[ShopAccountResponse])
@@ -129,7 +171,7 @@ async def batch_create_shop_accounts(
     await db.commit()
     for record in created:
         await db.refresh(record)
-    return created
+    return [await _serialize_shop_account(db, record) for record in created]
 
 
 @router.put("/{shop_account_id}", response_model=ShopAccountResponse)
@@ -145,7 +187,7 @@ async def update_shop_account(
     record.updated_by = "system"
     await db.commit()
     await db.refresh(record)
-    return record
+    return await _serialize_shop_account(db, record)
 
 
 @router.delete("/{shop_account_id}")

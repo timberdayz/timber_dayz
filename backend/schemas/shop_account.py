@@ -31,6 +31,9 @@ class ShopAccountResponse(BaseModel):
     platform: str
     shop_account_id: str
     main_account_id: str
+    account_alias: Optional[str] = None
+    alias_count: int = 0
+    capabilities: dict = Field(default_factory=dict)
     store_name: str
     platform_shop_id: Optional[str]
     platform_shop_id_status: str

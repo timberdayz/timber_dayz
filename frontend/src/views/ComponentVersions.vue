@@ -275,13 +275,13 @@
         </div>
         
         <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-          <span style="font-weight: 600;">测试账号:</span>
+          <span style="font-weight: 600;">测试店铺:</span>
           <el-select 
             v-model="testAccountId" 
             size="small" 
             style="width: 300px;"
             :disabled="testing"
-            placeholder="请选择测试账号"
+            placeholder="请选择测试店铺"
           >
             <el-option
               v-for="account in testAccounts"
@@ -1067,11 +1067,11 @@ const showTestDialog = async (row) => {
 
 // 格式化账号显示标签
 const getAccountLabel = (account) => {
-  if (!account) return '未知账号'
+  if (!account) return '未知店铺'
   
-  // 优先显示：店铺名称 (账号ID)
-  const storeName = account.store_name || account.name || account.account_id
-  const accountId = account.account_id || account.id
+  // 优先显示：店铺名称 (店铺账号ID)
+  const storeName = account.store_name || account.name || account.shop_account_id || account.account_id
+  const accountId = account.shop_account_id || account.account_id || account.id
   
   // 如果有店铺区域，也显示出来
   if (account.shop_region) {
@@ -1088,9 +1088,8 @@ const loadTestAccounts = async (componentName) => {
     
     console.log('[DEBUG] Loading accounts for platform:', platform, 'from component:', componentName)
     
-    // 加载该平台的账号
+    // 加载该平台的店铺账号
     const accountsApi = await import('@/api/accounts')
-    // BUG FIX: 方法名从getAccounts改为listAccounts
     const response = await accountsApi.default.listAccounts({
       platform: platform,
       enabled: true
@@ -1106,14 +1105,14 @@ const loadTestAccounts = async (componentName) => {
     console.log('[DEBUG] testAccounts count:', testAccounts.value.length)
   } catch (error) {
     console.error('加载账号列表失败:', error)
-    ElMessage.error('加载账号列表失败: ' + error.message)
+    ElMessage.error('加载店铺账号列表失败: ' + error.message)
     testAccounts.value = []
   }
 }
 
 const startComponentTest = async () => {
   if (!testAccountId.value) {
-    ElMessage.warning('请选择测试账号')
+    ElMessage.warning('请选择测试店铺')
     return
   }
   if (isCurrentTestExport.value) {
@@ -1155,7 +1154,7 @@ const startComponentTest = async () => {
     })
     
     const payload = {
-      account_id: testAccountId.value
+      shop_account_id: testAccountId.value
     }
     if (isCurrentTestExport.value) {
       payload.granularity = testEffectiveGranularity.value

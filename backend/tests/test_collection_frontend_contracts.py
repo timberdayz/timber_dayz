@@ -49,3 +49,18 @@ def test_component_versions_closes_verification_dialog_after_submission():
     assert "verificationRequired.value = null" in text
     assert "} else {" in text
     assert "verificationRequired.value = null" in text
+
+
+def test_account_management_uses_main_and_shop_account_terms():
+    text = (PROJECT_ROOT / "frontend/src/views/AccountManagement.vue").read_text(encoding="utf-8")
+
+    assert "主账号ID" in text
+    assert "店铺账号ID" in text
+    assert "平台店铺ID" in text
+
+
+def test_component_versions_uses_test_shop_term():
+    text = (PROJECT_ROOT / "frontend/src/views/ComponentVersions.vue").read_text(encoding="utf-8")
+
+    assert "测试店铺" in text
+    assert "测试账号" not in text
