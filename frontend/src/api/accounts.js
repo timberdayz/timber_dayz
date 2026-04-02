@@ -79,7 +79,7 @@ export default {
 
   // compatibility wrappers for in-flight callers
   async listAccounts(params = {}) {
-    return await this.listShopAccounts(params)
+    return await api.get('/accounts/', { params })
   },
 
   async createAccount(data) {
