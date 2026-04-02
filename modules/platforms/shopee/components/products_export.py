@@ -180,6 +180,27 @@ class ShopeeProductsExport(ExportComponent):
                 continue
         return None
 
+    async def _find_date_summary_container(self, page: Any) -> Any | None:
+        summary_selectors = (
+            '[class*="picker"]:has-text("统计时间")',
+            '[class*="date"]:has-text("统计时间")',
+            '[class*="time"]:has-text("统计时间")',
+            'div:has-text("统计时间")',
+            'button:has-text("统计时间")',
+            '[role="button"]:has-text("统计时间")',
+        )
+        locator = await self._first_visible_locator(page, summary_selectors)
+        if locator is not None:
+            return locator
+
+        try:
+            text_locator = page.get_by_text("统计时间", exact=False).first
+            if await text_locator.is_visible(timeout=1000):
+                return text_locator
+        except Exception:
+            pass
+        return None
+
     async def _find_date_panel(self, page: Any) -> Any | None:
         common_selectors = (
             ".arco-trigger-popup",
@@ -974,7 +995,7 @@ class ShopeeProductsExport(ExportComponent):
 
         normalized_granularity = self._normalize_custom_granularity(granularity)
         parsed_summary = self._parse_date_summary(summary)
-        if parsed_summary:
+        if parsed_summary and parsed_summary.get("mode"):
             if normalized_granularity == "daily":
                 expected_date = start_date or end_date
                 return (
@@ -985,7 +1006,6 @@ class ShopeeProductsExport(ExportComponent):
                 return (
                     parsed_summary.get("mode") == "weekly"
                     and parsed_summary.get("start_date") == start_date
-                    and parsed_summary.get("end_date") == end_date
                 )
             if normalized_granularity == "monthly" and start_date:
                 try:
@@ -999,21 +1019,22 @@ class ShopeeProductsExport(ExportComponent):
                         and parsed_summary.get("month") == target_date.month
                     )
 
-        expected_signatures: list[str] = []
+        expected_label = None
+        if normalized_granularity in {"daily", "weekly", "monthly"}:
+            expected_label = self.sel.granularity_labels.get(normalized_granularity)
+        if expected_label and self._normalize_date_text(expected_label) not in normalized_summary:
+            return False
 
+        primary_signatures: list[str] = []
         if normalized_granularity == "daily":
-            expected_signatures.extend(self._date_value_signatures(start_date))
-            expected_signatures.extend(self._date_range_signatures(start_date, end_date or start_date))
+            primary_signatures.extend(self._date_value_signatures(start_date or end_date))
         elif normalized_granularity == "weekly":
-            expected_signatures.extend(self._week_range_label_candidates(start_date or "", end_date or ""))
-            expected_signatures.extend(self._date_range_signatures(start_date, end_date))
-        elif normalized_granularity == "monthly":
-            if start_date:
-                expected_signatures.extend(self._month_summary_signatures(start_date))
-            expected_signatures.extend(self._date_range_signatures(start_date, end_date))
+            primary_signatures.extend(self._date_value_signatures(start_date))
+        elif normalized_granularity == "monthly" and start_date:
+            primary_signatures.extend(self._month_summary_signatures(start_date))
 
         normalized_signatures = tuple(
-            self._normalize_date_text(signature) for signature in expected_signatures if signature
+            self._normalize_date_text(signature) for signature in primary_signatures if signature
         )
         return any(signature and signature in normalized_summary for signature in normalized_signatures)
 
@@ -1080,6 +1101,15 @@ class ShopeeProductsExport(ExportComponent):
         return self._parse_calendar_header_month_year_zh(header_text) == (target_year, target_month)
 
     async def _current_date_summary_text(self, page: Any) -> str | None:
+        summary_container = await self._find_date_summary_container(page)
+        if summary_container is not None:
+            try:
+                summary_text = await summary_container.text_content()
+            except Exception:
+                summary_text = None
+            if summary_text and "统计时间" in str(summary_text):
+                return summary_text
+
         trigger = await self._find_date_picker_trigger(page)
         if trigger is None:
             return None

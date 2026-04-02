@@ -364,6 +364,32 @@ def test_shopee_products_export_parse_date_summary_parses_monthly_summary() -> N
     }
 
 
+def test_shopee_products_export_custom_date_summary_matches_weekly_minimal_signal() -> None:
+    component = ShopeeProductsExport(_ctx())
+
+    matched = component._custom_date_summary_matches(
+        "统计时间 按周 23-02-2026",
+        granularity="weekly",
+        start_date="2026-02-23",
+        end_date="2026-03-01",
+    )
+
+    assert matched is True
+
+
+def test_shopee_products_export_custom_date_summary_matches_monthly_minimal_signal() -> None:
+    component = ShopeeProductsExport(_ctx())
+
+    matched = component._custom_date_summary_matches(
+        "统计时间 按月 2026.03",
+        granularity="monthly",
+        start_date="2026-03-01",
+        end_date="2026-03-31",
+    )
+
+    assert matched is True
+
+
 @pytest.mark.asyncio
 async def test_shopee_products_export_current_date_label_reads_trigger_summary_text(
     monkeypatch: pytest.MonkeyPatch,
@@ -396,6 +422,31 @@ async def test_shopee_products_export_current_date_label_reads_trigger_summary_t
     current = await component._current_date_label(page)
 
     assert current == "Today realtime"
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_current_date_summary_text_prefers_summary_container_over_partial_trigger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx())
+
+    monkeypatch.setattr(
+        component,
+        "_find_date_picker_trigger",
+        AsyncMock(return_value=_FakeLocator("按月")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        component,
+        "_find_date_summary_container",
+        AsyncMock(return_value=_FakeLocator("统计时间 按月 2026.02 (GMT+08)")),
+        raising=False,
+    )
+
+    summary = await component._current_date_summary_text(page)
+
+    assert summary == "统计时间 按月 2026.02 (GMT+08)"
 
 
 @pytest.mark.asyncio
