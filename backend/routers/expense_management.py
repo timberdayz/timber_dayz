@@ -36,7 +36,7 @@ from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode, get_error_type
 from modules.core.db import (
     DimUser,
-    PlatformAccount,  # 复用目标管理的店铺列表
+    ShopAccount,
 )
 from modules.core.logger import get_logger
 from backend.schemas.expense import (
@@ -69,9 +69,9 @@ async def list_expense_shops(
         logger.info(f"[ExpenseManagement] 开始查询店铺列表, 用户: {current_user.username if current_user else 'unknown'}")
         
         query = (
-            select(PlatformAccount)
-            .where(PlatformAccount.enabled == True)
-            .order_by(PlatformAccount.platform, PlatformAccount.store_name)
+            select(ShopAccount)
+            .where(ShopAccount.enabled == True)
+            .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         
         logger.debug(f"[ExpenseManagement] 执行查询: {query}")
@@ -83,8 +83,8 @@ async def list_expense_shops(
             try:
                 items.append({
                     "platform_code": r.platform.lower() if r.platform else None,
-                    "shop_id": r.shop_id or r.account_id or str(r.id),
-                    "shop_name": r.store_name or (r.account_alias or ""),
+                    "shop_id": getattr(r, "platform_shop_id", None) or getattr(r, "shop_account_id", None) or getattr(r, "shop_id", None) or getattr(r, "account_id", None) or str(r.id),
+                    "shop_name": getattr(r, "store_name", None) or getattr(r, "shop_account_id", None) or getattr(r, "account_id", None) or "",
                 })
             except Exception as item_err:
                 logger.warning(f"[ExpenseManagement] 处理店铺记录失败 (id={r.id}): {item_err}")

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import desc, select
 
 from backend.models.database import get_async_db
-from modules.core.db import CollectionConfig
+from modules.core.db import CollectionConfig, ShopAccount, ShopAccountCapability
 from modules.core.logger import get_logger
 from backend.schemas.collection import (
     CollectionConfigCreate,
@@ -293,24 +293,54 @@ async def list_accounts(
             logger.warning(f"[Cache] 读取账号列表缓存失败，回退到数据库: {e}")
 
     try:
-        from backend.services.account_loader_service import get_account_loader_service
-
-        account_loader = get_account_loader_service()
-        accounts = await account_loader.load_all_accounts_async(db, platform=platform)
-
         result = []
-        for account in accounts:
-            result.append(
-                CollectionAccountResponse(
-                    id=account.get("account_id", "unknown"),
-                    name=account.get("store_name", account.get("account_id", "unknown")),
-                    platform=account.get("platform", "unknown"),
-                    shop_id=account.get("shop_region"),
-                    status="active" if account.get("enabled", False) else "inactive",
-                    shop_type=account.get("shop_type"),
-                    capabilities=account.get("capabilities") or {},
+        try:
+            stmt = select(ShopAccount).where(ShopAccount.enabled == True)
+            if platform:
+                stmt = stmt.where(ShopAccount.platform == platform)
+            stmt = stmt.order_by(ShopAccount.platform, ShopAccount.shop_account_id)
+            accounts = (await db.execute(stmt)).scalars().all()
+
+            for account in accounts:
+                capability_rows = (
+                    await db.execute(
+                        select(ShopAccountCapability).where(
+                            ShopAccountCapability.shop_account_id == account.id
+                        )
+                    )
+                ).scalars().all()
+                capabilities = {
+                    row.data_domain: bool(row.enabled)
+                    for row in capability_rows
+                }
+                result.append(
+                    CollectionAccountResponse(
+                        id=account.shop_account_id,
+                        name=account.store_name or account.shop_account_id,
+                        platform=account.platform,
+                        shop_id=account.shop_region,
+                        status="active" if account.enabled else "inactive",
+                        shop_type=account.shop_type,
+                        capabilities=capabilities,
+                    )
                 )
-            )
+        except Exception:
+            from backend.services.account_loader_service import get_account_loader_service
+
+            account_loader = get_account_loader_service()
+            accounts = await account_loader.load_all_accounts_async(db, platform=platform)
+            for account in accounts:
+                result.append(
+                    CollectionAccountResponse(
+                        id=account.get("account_id", "unknown"),
+                        name=account.get("store_name", account.get("account_id", "unknown")),
+                        platform=account.get("platform", "unknown"),
+                        shop_id=account.get("shop_region"),
+                        status="active" if account.get("enabled", False) else "inactive",
+                        shop_type=account.get("shop_type"),
+                        capabilities=account.get("capabilities") or {},
+                    )
+                )
 
         logger.info(f"返回账号列表: {len(result)} 条记录")
 

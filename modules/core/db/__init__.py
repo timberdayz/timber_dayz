@@ -63,6 +63,7 @@ from .schema import (
 
 from .schema import CloudBClassSyncCheckpoint, CloudBClassSyncRun, CloudBClassSyncTask
 from .schema import TaskCenterTask, TaskCenterLog, TaskCenterLink
+from .schema import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability, PlatformShopDiscovery
 
 # v4.4.0: 财务域表(Modern ERP)
 from .schema import (
@@ -312,4 +313,9 @@ __all__ = [
     "TaskCenterTask",
     "TaskCenterLog",
     "TaskCenterLink",
+    "MainAccount",
+    "ShopAccount",
+    "ShopAccountAlias",
+    "ShopAccountCapability",
+    "PlatformShopDiscovery",
 ]

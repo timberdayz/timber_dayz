@@ -2,7 +2,7 @@
   <div class="account-management erp-page-container erp-page--admin">
     <PageHeader
       title="账号管理"
-      subtitle="统一管理多平台账号、批量店铺配置与能力开关。"
+      subtitle="统一管理主账号ID、店铺账号ID、平台店铺ID、店铺别名与店铺数据域能力。"
       family="admin"
     />
 
@@ -15,7 +15,7 @@
       show-icon
     >
       <template #title>
-        仍有 {{ accountsStore.unmatchedShopAliases.length }} 个未匹配店铺别名，补充“账号别名”后即可参与业务概览归属
+        仍有 {{ accountsStore.unmatchedShopAliases.length }} 个未匹配店铺别名，认领到店铺账号ID后即可参与业务概览归属
       </template>
       <div class="unmatched-aliases">
         <div
@@ -32,7 +32,7 @@
     <el-row :gutter="20" class="stats-row">
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="总账号数" :value="accountsStore.stats.total">
+          <el-statistic title="总店铺账号数" :value="accountsStore.stats.total">
             <template #suffix>
               <span class="stat-unit">个</span>
             </template>
@@ -41,7 +41,7 @@
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="活跃账号" :value="accountsStore.stats.active">
+          <el-statistic title="启用店铺账号" :value="accountsStore.stats.active">
             <template #suffix>
               <span class="stat-unit">个</span>
             </template>
@@ -50,7 +50,7 @@
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <el-statistic title="异常账号" :value="accountsStore.stats.inactive">
+          <el-statistic title="停用店铺账号" :value="accountsStore.stats.inactive">
             <template #suffix>
               <span class="stat-unit">个</span>
             </template>
@@ -92,7 +92,7 @@
         <el-col :span="6">
           <el-input 
             v-model="filters.search" 
-            placeholder="搜索店铺名或账号ID" 
+            placeholder="搜索店铺名、店铺账号ID或主账号ID"
             clearable
             @input="handleSearchChange"
           >
@@ -108,11 +108,11 @@
         <el-col :span="24">
           <el-button type="primary" @click="showCreateDialog = true">
             <el-icon><Plus /></el-icon>
-            添加账号
+            添加店铺账号
           </el-button>
           <el-button @click="showBatchDialog = true">
             <el-icon><Files /></el-icon>
-            批量添加店铺
+            批量添加店铺账号
           </el-button>
           <el-button @click="handleRefresh" :loading="accountsStore.loading">
             <el-icon><Refresh /></el-icon>
@@ -131,8 +131,9 @@
         height="500"
       >
         <el-table-column prop="platform" label="平台" width="100" />
-        <el-table-column prop="account_id" label="账号ID" width="180" show-overflow-tooltip />
-        <el-table-column prop="account_alias" label="账号别名" width="180" show-overflow-tooltip>
+        <el-table-column prop="parent_account" label="主账号ID" width="180" show-overflow-tooltip />
+        <el-table-column prop="account_id" label="店铺账号ID" width="180" show-overflow-tooltip />
+        <el-table-column prop="account_alias" label="店铺别名" width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.account_alias">{{ row.account_alias }}</span>
             <span v-else class="erp-text-muted">-</span>
@@ -141,7 +142,7 @@
         <el-table-column prop="store_name" label="店铺名称" width="200" show-overflow-tooltip />
         
         <!-- ⭐ v4.18.1新增：店铺ID列 -->
-        <el-table-column prop="shop_id" label="店铺ID" width="180" show-overflow-tooltip>
+        <el-table-column prop="shop_id" label="平台店铺ID" width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.shop_id">{{ row.shop_id }}</span>
             <span v-else class="erp-text-muted">-</span>
@@ -156,9 +157,9 @@
           </template>
         </el-table-column>
         
-        <el-table-column prop="shop_region" label="区域" width="80" />
+        <el-table-column prop="shop_region" label="店铺区域" width="100" />
         
-        <el-table-column label="能力配置" width="180">
+        <el-table-column label="店铺数据域能力" width="200">
           <template #default="{ row }">
             <el-tooltip :content="getCapabilitiesText(row.capabilities)" placement="top">
               <div class="capabilities-tags">
@@ -198,7 +199,7 @@
     <!-- 创建/编辑对话框 -->
     <el-dialog 
       v-model="showCreateDialog" 
-      :title="editingAccount ? '编辑账号' : '添加账号'"
+      :title="editingAccount ? '编辑店铺账号' : '添加店铺账号'"
       width="800px"
       :close-on-click-modal="false"
     >
@@ -215,23 +216,23 @@
               </el-select>
             </el-form-item>
             
-            <el-form-item label="账号ID" prop="account_id">
+            <el-form-item label="店铺账号ID" prop="account_id">
               <el-input v-model="accountForm.account_id" placeholder="唯一标识，如：shopee_sg_local_001" />
-              <div class="form-tip">账号的唯一标识，创建后不可修改</div>
+              <div class="form-tip">店铺级业务唯一标识，创建后不可修改</div>
             </el-form-item>
             
-            <el-form-item label="账号别名">
+            <el-form-item label="店铺别名">
               <el-input v-model="accountForm.account_alias" placeholder="用于关联导出数据中的自定义名称（如：miaoshou ERP的订单数据）" />
-              <div class="form-tip">可选，用于匹配导出数据中的账号名称（如：东朗照明主体）</div>
+              <div class="form-tip">可选，作为主别名写入店铺别名映射，后续用于原始数据归属</div>
             </el-form-item>
             
             <el-form-item label="店铺名称" prop="store_name">
               <el-input v-model="accountForm.store_name" placeholder="如：HongXi Singapore Local" />
             </el-form-item>
             
-            <el-form-item label="主账号">
+            <el-form-item label="主账号ID">
               <el-input v-model="accountForm.parent_account" placeholder="多店铺共用时填写，如：hongxikeji:main" />
-              <div class="form-tip">多个店铺共用同一登录账号时填写</div>
+              <div class="form-tip">用于共享登录身份、持久会话和浏览器 profile</div>
             </el-form-item>
             
             <el-form-item label="店铺类型">
@@ -247,14 +248,14 @@
             </el-form-item>
             
             <!-- ⭐ v4.18.1新增：店铺ID字段 -->
-            <el-form-item label="店铺ID">
+            <el-form-item label="平台店铺ID">
               <el-input v-model="accountForm.shop_id" placeholder="用于关联数据同步中的shop_id" />
-              <div class="form-tip">可选，用于匹配数据同步中的店铺标识（数据采集模块自动获取的shop_id）</div>
+              <div class="form-tip">优先由系统在首次登录 / 切店 / 采集成功后自动回填，无法识别时再人工补录</div>
             </el-form-item>
           </el-tab-pane>
           
           <!-- 登录信息 -->
-          <el-tab-pane label="登录信息" name="login">
+          <el-tab-pane label="主账号登录信息" name="login">
             <el-form-item label="用户名" prop="username">
               <el-input v-model="accountForm.username" placeholder="登录用户名" />
             </el-form-item>
@@ -291,7 +292,7 @@
           </el-tab-pane>
           
           <!-- 能力配置 -->
-          <el-tab-pane label="能力配置" name="capabilities">
+          <el-tab-pane label="店铺数据域能力" name="capabilities">
             <div class="capabilities-grid">
               <el-checkbox v-model="accountForm.capabilities.orders">
                 <div class="capability-item">
@@ -356,12 +357,12 @@
     <!-- 批量添加店铺对话框 -->
     <el-dialog 
       v-model="showBatchDialog" 
-      title="批量添加店铺"
+      title="批量添加店铺账号"
       width="700px"
       :close-on-click-modal="false"
     >
       <el-form :model="batchForm" label-width="120px">
-        <el-form-item label="主账号" required>
+        <el-form-item label="主账号ID" required>
           <el-input v-model="batchForm.parent_account" placeholder="如：hongxikeji:main" />
         </el-form-item>
         
@@ -387,7 +388,7 @@
                 <el-input v-model="row.store_name" placeholder="店铺名称" size="small" />
               </template>
             </el-table-column>
-            <el-table-column label="账号别名" width="150">
+            <el-table-column label="店铺别名" width="150">
               <template #default="{ row }">
                 <el-input v-model="row.account_alias" placeholder="可选" size="small" />
               </template>
@@ -502,6 +503,7 @@ const accountForm = reactive({
 // 表单验证规则（动态：编辑时密码可选，创建时必填）
 const formRules = computed(() => ({
   account_id: [{ required: true, message: '请输入账号ID', trigger: 'blur' }],
+  parent_account: [{ required: true, message: '请输入主账号ID', trigger: 'blur' }],
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
   store_name: [{ required: true, message: '请输入店铺名称', trigger: 'blur' }],
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],

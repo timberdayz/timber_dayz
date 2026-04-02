@@ -252,14 +252,31 @@ async def create_task(
     task_uuid = str(uuid.uuid4())
 
     from backend.services.task_service import TaskService
-    from backend.services.account_loader_service import get_account_loader_service
     from backend.services.component_runtime_resolver import (
         ComponentRuntimeResolver,
         ComponentRuntimeResolverError,
     )
 
-    account_loader = get_account_loader_service()
-    account_info = await account_loader.load_account_async(request.account_id, db)
+    account_info = None
+    try:
+        from backend.services.shop_account_loader_service import get_shop_account_loader_service
+
+        shop_account_loader = get_shop_account_loader_service()
+        shop_payload = await shop_account_loader.load_shop_account_async(request.account_id, db)
+        if shop_payload:
+            account_info = {
+                **shop_payload["compat_account"],
+                "main_account_id": shop_payload["main_account"]["main_account_id"],
+                "shop_account_id": shop_payload["shop_context"]["shop_account_id"],
+            }
+    except Exception:
+        account_info = None
+
+    if not account_info:
+        from backend.services.account_loader_service import get_account_loader_service
+
+        account_loader = get_account_loader_service()
+        account_info = await account_loader.load_account_async(request.account_id, db)
 
     if not account_info:
         raise HTTPException(status_code=404, detail=f"账号 {request.account_id} 不存在或未启用，请先在账号管理中维护")
@@ -994,10 +1011,26 @@ async def _execute_collection_task_background(
             await _mirror_collection_task(db, task)
 
             try:
-                from backend.services.account_loader_service import get_account_loader_service
+                account = None
+                try:
+                    from backend.services.shop_account_loader_service import get_shop_account_loader_service
 
-                account_loader = get_account_loader_service()
-                account = await account_loader.load_account_async(account_id, db)
+                    shop_account_loader = get_shop_account_loader_service()
+                    shop_payload = await shop_account_loader.load_shop_account_async(account_id, db)
+                    if shop_payload:
+                        account = {
+                            **shop_payload["compat_account"],
+                            "main_account_id": shop_payload["main_account"]["main_account_id"],
+                            "shop_account_id": shop_payload["shop_context"]["shop_account_id"],
+                        }
+                except Exception:
+                    account = None
+
+                if not account:
+                    from backend.services.account_loader_service import get_account_loader_service
+
+                    account_loader = get_account_loader_service()
+                    account = await account_loader.load_account_async(account_id, db)
 
                 if not account:
                     raise ValueError(f"Account {account_id} not found or disabled")

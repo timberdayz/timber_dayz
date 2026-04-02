@@ -27,7 +27,7 @@ from backend.schemas.hr import (
     CopyFromPrevMonthBody,
 )
 from modules.core.db import (
-    PlatformAccount, Employee, DimShop, DimUser,
+    ShopAccount, Employee, DimShop, DimUser,
     EmployeePerformance, EmployeeCommission, ShopCommission,
     EmployeeShopAssignment, ShopCommissionConfig, EmployeeTarget,
 )
@@ -332,9 +332,9 @@ async def get_shop_commission_config(
     """获取店铺可分配利润率配置（按月份+店铺维度，用于配置页加载）"""
     try:
         shop_query = (
-            select(PlatformAccount)
-            .where(PlatformAccount.enabled == True)
-            .order_by(PlatformAccount.platform, PlatformAccount.store_name)
+            select(ShopAccount)
+            .where(ShopAccount.enabled == True)
+            .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         shop_rows = (await db.execute(shop_query)).scalars().all()
         config_query = (
@@ -349,7 +349,7 @@ async def get_shop_commission_config(
         items = []
         for r in shop_rows:
             pc = (r.platform or "").lower()
-            sid = r.shop_id or r.account_id or str(r.id)
+            sid = getattr(r, "platform_shop_id", None) or getattr(r, "shop_account_id", None) or getattr(r, "shop_id", None) or getattr(r, "account_id", None) or str(r.id)
             key = f"{pc}|{sid}"
             items.append({
                 "platform_code": pc,
@@ -486,16 +486,16 @@ async def get_shop_profit_statistics(
 
         # 1. 获取店铺列表（platform_accounts）
         shop_query = (
-            select(PlatformAccount)
-            .where(PlatformAccount.enabled == True)
-            .order_by(PlatformAccount.platform, PlatformAccount.store_name)
+            select(ShopAccount)
+            .where(ShopAccount.enabled == True)
+            .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         shop_rows = (await db.execute(shop_query)).scalars().all()
         shop_list = [
             {
                 "platform_code": (r.platform or "").lower(),
-                "shop_id": r.shop_id or r.account_id or str(r.id),
-                "shop_name": r.store_name or (r.account_alias or ""),
+                "shop_id": getattr(r, "platform_shop_id", None) or getattr(r, "shop_account_id", None) or getattr(r, "shop_id", None) or getattr(r, "account_id", None) or str(r.id),
+                "shop_name": getattr(r, "store_name", None) or getattr(r, "shop_account_id", None) or getattr(r, "account_id", None) or "",
             }
             for r in shop_rows
         ]
@@ -589,16 +589,16 @@ async def get_annual_profit_statistics(
 
         # 1. 店铺列表（全年共用）
         shop_query = (
-            select(PlatformAccount)
-            .where(PlatformAccount.enabled == True)
-            .order_by(PlatformAccount.platform, PlatformAccount.store_name)
+            select(ShopAccount)
+            .where(ShopAccount.enabled == True)
+            .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         shop_rows = (await db.execute(shop_query)).scalars().all()
         shop_list = [
             {
                 "platform_code": (r.platform or "").lower(),
-                "shop_id": r.shop_id or r.account_id or str(r.id),
-                "shop_name": r.store_name or (r.account_alias or ""),
+                "shop_id": getattr(r, "platform_shop_id", None) or getattr(r, "shop_account_id", None) or getattr(r, "shop_id", None) or getattr(r, "account_id", None) or str(r.id),
+                "shop_name": getattr(r, "store_name", None) or getattr(r, "shop_account_id", None) or getattr(r, "account_id", None) or "",
             }
             for r in shop_rows
         ]

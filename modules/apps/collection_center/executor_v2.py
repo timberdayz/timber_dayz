@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List, Callable, Awaitable, Tuple, Union
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import parse_qs, urlparse
 
 from modules.core.logger import get_logger
 from backend.services.verification_protocol import apply_verification_result_to_params, verification_input_mode
@@ -73,6 +74,96 @@ def _normalize_account_id(account_id: Any, account: Dict[str, Any]) -> Tuple[str
     except Exception as e:
         logger.warning("Failed to normalize account_id: %s, disabling account session and fingerprint", e)
         return "", False
+
+
+def _resolve_session_scope(account_id: Any, account: Dict[str, Any]) -> Tuple[str, str, bool]:
+    """Resolve session owner and shop-account IDs for runtime execution."""
+    try:
+        shop_account_id = str(
+            account_id
+            or (account or {}).get("shop_account_id")
+            or (account or {}).get("account_id")
+            or ""
+        ).strip()
+        session_owner_id = str(
+            (account or {}).get("main_account_id")
+            or (account or {}).get("parent_account")
+            or shop_account_id
+            or ""
+        ).strip()
+        if not session_owner_id:
+            logger.warning("session owner id is missing or empty, disabling account session and fingerprint")
+            return "", shop_account_id, False
+        return session_owner_id, shop_account_id, True
+    except Exception as e:
+        logger.warning("Failed to resolve session scope: %s", e)
+        return "", "", False
+
+
+def _extract_platform_shop_context(platform: str, current_url: str) -> Dict[str, Optional[str]]:
+    parsed = urlparse(str(current_url or ""))
+    query = parse_qs(parsed.query)
+    detected_platform_shop_id = None
+    for key in ("cnsc_shop_id", "shop_id"):
+        values = query.get(key) or []
+        if values and str(values[0]).strip():
+            detected_platform_shop_id = str(values[0]).strip()
+            break
+    detected_region = None
+    for key in ("shop_region", "region"):
+        values = query.get(key) or []
+        if values and str(values[0]).strip():
+            detected_region = str(values[0]).strip().upper()
+            break
+    return {
+        "platform": str(platform or "").strip().lower() or None,
+        "detected_platform_shop_id": detected_platform_shop_id,
+        "detected_region": detected_region,
+        "current_url": str(current_url or "").strip() or None,
+    }
+
+
+async def _record_platform_shop_discovery_async(
+    *,
+    platform: str,
+    page: Any,
+    params: Dict[str, Any],
+    account: Optional[Dict[str, Any]] = None,
+) -> None:
+    main_account_id = str(params.get("main_account_id") or "").strip()
+    shop_account_id = str(params.get("shop_account_id") or "").strip()
+    if not main_account_id or not shop_account_id:
+        return
+
+    payload = _extract_platform_shop_context(platform, str(getattr(page, "url", "") or ""))
+    detected_platform_shop_id = payload.get("detected_platform_shop_id")
+    if not detected_platform_shop_id:
+        return
+
+    detected_store_name = (
+        str((account or {}).get("store_name") or params.get("shop_name") or "").strip() or None
+    )
+
+    try:
+        from backend.models.database import AsyncSessionLocal
+        from backend.services.platform_shop_discovery_service import (
+            get_platform_shop_discovery_service,
+        )
+
+        async with AsyncSessionLocal() as db:
+            service = get_platform_shop_discovery_service()
+            await service.record_runtime_discovery(
+                db,
+                platform=str(platform or "").lower(),
+                main_account_id=main_account_id,
+                shop_account_id=shop_account_id,
+                detected_store_name=detected_store_name,
+                detected_platform_shop_id=detected_platform_shop_id,
+                detected_region=payload.get("detected_region"),
+                raw_payload=payload,
+            )
+    except Exception as e:
+        logger.warning("Failed to record platform shop discovery: %s", e)
 
 
 async def _load_session_async(platform: str, account_id: str, max_age_days: int = 30) -> Optional[Dict[str, Any]]:
@@ -742,7 +833,7 @@ class CollectionExecutorV2:
         start_time = datetime.now()
 
         # 1.0 统一约定: 规范化 account_id, 决定是否使用按账号会话/指纹
-        account_id_norm, use_account_session_fingerprint = _normalize_account_id(account_id, account)
+        session_owner_id, shop_account_id, use_account_session_fingerprint = _resolve_session_scope(account_id, account)
 
         normalized_sub_domains = normalize_domain_subtypes(
             data_domains=data_domains,
@@ -758,14 +849,14 @@ class CollectionExecutorV2:
             context = TaskContext(
                 task_id=task_id,
                 platform=platform,
-                account_id=account_id_norm or account_id,
+                account_id=shop_account_id or account_id,
                 data_domains=data_domains,
                 date_range=normalized_date_range,
                 granularity=granularity,
                 sub_domains=normalized_sub_domains,
             )
         else:
-            context.account_id = account_id_norm or context.account_id
+            context.account_id = shop_account_id or context.account_id
 
         self._task_contexts[task_id] = context
 
@@ -777,28 +868,28 @@ class CollectionExecutorV2:
         # 加载会话与指纹(仅当 use_account_session_fingerprint 时)
         storage_state: Optional[Dict[str, Any]] = None
         reused_session = False
-        if use_account_session_fingerprint and account_id_norm:
+        if use_account_session_fingerprint and session_owner_id:
             try:
                 session_data = await _load_or_bootstrap_session_async(
                     platform,
-                    account_id_norm,
+                    session_owner_id,
                     account,
                 )
                 if session_data and isinstance(session_data.get("storage_state"), dict):
                     storage_state = session_data["storage_state"]
                     reused_session = True
-                    logger.info("Task %s: session loaded for %s/%s (reused_session=True)", task_id, platform, account_id_norm)
+                    logger.info("Task %s: session loaded for %s/%s (reused_session=True)", task_id, platform, session_owner_id)
                 else:
                     if session_data is None:
-                        logger.debug("Task %s: no valid session for %s/%s, will full login", task_id, platform, account_id_norm)
+                        logger.debug("Task %s: no valid session for %s/%s, will full login", task_id, platform, session_owner_id)
                     else:
                         logger.warning("Task %s: session_data missing storage_state, will full login", task_id)
             except Exception as e:
                 logger.warning("Task %s: load_session failed: %s, will full login", task_id, e)
 
-        if use_account_session_fingerprint and account_id_norm:
+        if use_account_session_fingerprint and session_owner_id:
             try:
-                fp_options = await _get_fingerprint_context_options_async(platform, account_id_norm, account, proxy=proxy)
+                fp_options = await _get_fingerprint_context_options_async(platform, session_owner_id, account, proxy=proxy)
                 context_options = _build_playwright_context_options_from_fingerprint(fp_options)
             except Exception as e:
                 logger.warning("Task %s: get fingerprint failed: %s, fallback to global context args", task_id, e)
@@ -822,6 +913,9 @@ class CollectionExecutorV2:
             screenshot_dir=self.screenshots_dir / task_id,
             reused_session=reused_session,
         )
+        params["main_account_id"] = session_owner_id
+        if shop_account_id:
+            params["shop_account_id"] = shop_account_id
 
         # 获取 browser: 优先使用入参 browser, 否则从 page 取(后关闭传入的 page/context)
         browser_instance = browser
@@ -863,9 +957,9 @@ class CollectionExecutorV2:
                     sub_domains=sub_domains,
                     total_domains_count=total_domains_count,
                     start_time=start_time,
-                    save_session_after_login=use_account_session_fingerprint and bool(account_id_norm),
+                    save_session_after_login=use_account_session_fingerprint and bool(session_owner_id),
                     session_platform=platform,
-                    session_account_id=account_id_norm,
+                    session_account_id=session_owner_id,
                     runtime_manifests=runtime_manifests,
                 )
 
@@ -1599,6 +1693,12 @@ class CollectionExecutorV2:
 
             await self._ensure_login_gate_ready(page, platform)
             logger.info(f"Task {task_id}: [Python] Login completed successfully (reused_session=%s)", params.get("reused_session", False))
+            await _record_platform_shop_discovery_async(
+                platform=platform,
+                page=page,
+                params=params,
+                account=account,
+            )
             if save_session_after_login and session_platform and session_account_id:
                 try:
                     storage_state = await page.context.storage_state()
@@ -3376,14 +3476,14 @@ class CollectionExecutorV2:
             CollectionResult: 采集结果
         """
         start_time = datetime.now()
-        account_id_norm, use_account_session_fingerprint = _normalize_account_id(account_id, account)
+        session_owner_id, shop_account_id, use_account_session_fingerprint = _resolve_session_scope(account_id, account)
         normalized_date_range = normalize_collection_date_range(date_range)
         logger.info(f"Task {task_id}: Starting PARALLEL collection for {len(data_domains)} domains (max_parallel={max_parallel}, use_account_session_fingerprint={use_account_session_fingerprint})")
 
         context = TaskContext(
             task_id=task_id,
             platform=platform,
-            account_id=account_id_norm or account_id,
+            account_id=shop_account_id or account_id,
             data_domains=data_domains,
             date_range=date_range,
             granularity=granularity,
@@ -3395,23 +3495,23 @@ class CollectionExecutorV2:
 
         storage_state: Optional[Dict[str, Any]] = None
         reused_session = False
-        if use_account_session_fingerprint and account_id_norm:
+        if use_account_session_fingerprint and session_owner_id:
             try:
                 session_data = await _load_or_bootstrap_session_async(
                     platform,
-                    account_id_norm,
+                    session_owner_id,
                     account,
                 )
                 if session_data and isinstance(session_data.get("storage_state"), dict):
                     storage_state = session_data["storage_state"]
                     reused_session = True
-                    logger.info("Task %s: [parallel] session loaded for %s/%s", task_id, platform, account_id_norm)
+                    logger.info("Task %s: [parallel] session loaded for %s/%s", task_id, platform, session_owner_id)
             except Exception as e:
                 logger.warning("Task %s: [parallel] load_session failed: %s", task_id, e)
 
-        if use_account_session_fingerprint and account_id_norm:
+        if use_account_session_fingerprint and session_owner_id:
             try:
-                fp_options = await _get_fingerprint_context_options_async(platform, account_id_norm, account, proxy=None)
+                fp_options = await _get_fingerprint_context_options_async(platform, session_owner_id, account, proxy=None)
                 login_context_options = _build_playwright_context_options_from_fingerprint(fp_options)
             except Exception as e:
                 logger.warning("Task %s: [parallel] get fingerprint failed: %s, fallback to default", task_id, e)
@@ -3444,6 +3544,9 @@ class CollectionExecutorV2:
             screenshot_dir=self.screenshots_dir / task_id,
             reused_session=reused_session,
         )
+        params["main_account_id"] = session_owner_id
+        if shop_account_id:
+            params["shop_account_id"] = shop_account_id
         try:
             step_popup_handler = StepPopupHandler(self.popup_handler, platform)
             if runtime_manifests is not None:
@@ -3471,14 +3574,20 @@ class CollectionExecutorV2:
             if not login_success:
                 raise StepExecutionError("登录组件执行失败")
             await self._ensure_login_gate_ready(login_page, platform)
+            await _record_platform_shop_discovery_async(
+                platform=platform,
+                page=login_page,
+                params=params,
+                account=account,
+            )
             cookies = await login_context.cookies()
             storage_state = await login_context.storage_state()
             logger.info(f"Task {task_id}: Login completed, extracted {len(cookies)} cookies (reused_session=%s)", reused_session)
-            if use_account_session_fingerprint and account_id_norm:
+            if use_account_session_fingerprint and session_owner_id:
                 try:
-                    ok = await _save_session_async(platform, account_id_norm, storage_state)
+                    ok = await _save_session_async(platform, session_owner_id, storage_state)
                     if ok:
-                        logger.info("Task %s: [parallel] session saved for %s/%s", task_id, platform, account_id_norm)
+                        logger.info("Task %s: [parallel] session saved for %s/%s", task_id, platform, session_owner_id)
                 except Exception as e:
                     logger.warning("Task %s: [parallel] save_session failed: %s", task_id, e)
         except Exception as e:
@@ -3504,9 +3613,9 @@ class CollectionExecutorV2:
         logger.info(f"Task {task_id}: Split into {len(domain_batches)} batches (max_parallel={max_parallel})")
         
         domain_context_options: Optional[Dict[str, Any]] = None
-        if use_account_session_fingerprint and account_id_norm:
+        if use_account_session_fingerprint and session_owner_id:
             try:
-                fp_opts = await _get_fingerprint_context_options_async(platform, account_id_norm, account, proxy=None)
+                fp_opts = await _get_fingerprint_context_options_async(platform, session_owner_id, account, proxy=None)
                 domain_context_options = _build_playwright_context_options_from_fingerprint(fp_opts)
             except Exception:
                 domain_context_options = None

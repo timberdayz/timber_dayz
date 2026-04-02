@@ -30,6 +30,7 @@ from sqlalchemy import select, func, and_, or_
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from backend.models.database import get_db, get_async_db
 from backend.utils.api_response import success_response, error_response
@@ -44,7 +45,7 @@ from modules.core.db import (
     DimProductMaster,
     BridgeProductKeys,
     DimUser,  # ✅ 2026-01-08: 添加用户模型用于权限检查
-    PlatformAccount,  # 目标管理用店铺列表:来自账号管理 core.platform_accounts
+    ShopAccount,
 )
 from backend.services.shop_sync_service import sync_platform_account_to_dim_shop
 from modules.core.logger import get_logger
@@ -197,23 +198,23 @@ async def list_target_shops(
     current_user: DimUser = Depends(get_current_user),
 ):
     """
-    获取供目标管理使用的店铺列表(来自账号管理 core.platform_accounts)。
+    获取供目标管理使用的店铺列表(来自账号管理 core.shop_accounts)。
 
     返回字段与分解接口一致:platform_code、shop_id、shop_name。
     创建按店铺分解时,若后端校验 DimShop,需保证该店铺已在 dim_shops 中存在或由同步写入。
     """
     try:
         query = (
-            select(PlatformAccount)
-            .where(PlatformAccount.enabled == True)
-            .order_by(PlatformAccount.platform, PlatformAccount.store_name)
+            select(ShopAccount)
+            .where(ShopAccount.enabled == True)
+            .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         rows = (await db.execute(query)).scalars().all()
         items = [
             {
-                "platform_code": r.platform.lower() if r.platform else None,  # ✅ 统一转小写,与 dim_shops 一致
-                "shop_id": r.shop_id or r.account_id or str(r.id),
-                "shop_name": r.store_name or (r.account_alias or ""),
+                "platform_code": r.platform.lower() if r.platform else None,
+                "shop_id": getattr(r, "platform_shop_id", None) or getattr(r, "shop_account_id", None) or getattr(r, "shop_id", None) or getattr(r, "account_id", None) or str(r.id),
+                "shop_name": getattr(r, "store_name", None) or getattr(r, "shop_account_id", None) or getattr(r, "account_id", None) or "",
             }
             for r in rows
         ]
@@ -905,17 +906,17 @@ async def create_breakdown(
             )).scalar_one_or_none()
             if not shop:
                 # ✅ 查询 platform_accounts 时也使用小写比较(platform 字段可能大小写不一致)
-                pa = (await db.execute(
-                    select(PlatformAccount).where(
-                        func.lower(PlatformAccount.platform) == normalized_platform_code,
-                        PlatformAccount.enabled == True,
+                shop_account = (await db.execute(
+                    select(ShopAccount).where(
+                        func.lower(ShopAccount.platform) == normalized_platform_code,
+                        ShopAccount.enabled == True,
                         or_(
-                            PlatformAccount.shop_id == request.shop_id,
-                            PlatformAccount.account_id == request.shop_id,
+                            ShopAccount.platform_shop_id == request.shop_id,
+                            ShopAccount.shop_account_id == request.shop_id,
                         ),
                     )
                 )).scalar_one_or_none()
-                if not pa:
+                if not shop_account:
                     return error_response(
                         code=ErrorCode.DATA_VALIDATION_FAILED,
                         message="店铺不存在",
@@ -926,7 +927,18 @@ async def create_breakdown(
                 
                 # ✅ 自动同步店铺到 dim_shops
                 try:
-                    shop = await sync_platform_account_to_dim_shop(db, pa)
+                    shop = await sync_platform_account_to_dim_shop(
+                        db,
+                        SimpleNamespace(
+                            platform=shop_account.platform,
+                            shop_id=shop_account.platform_shop_id,
+                            account_id=shop_account.shop_account_id,
+                            store_name=shop_account.store_name,
+                            account_alias=None,
+                            shop_region=shop_account.shop_region,
+                            currency="CNY",
+                        ),
+                    )
                     if not shop:
                         return error_response(
                             code=ErrorCode.DATA_VALIDATION_FAILED,
@@ -935,7 +947,7 @@ async def create_breakdown(
                             recovery_suggestion="请在账号管理中设置 shop_id 字段",
                             status_code=400
                         )
-                    logger.info(f"[TargetManagement] 自动创建店铺记录: {pa.platform}/{shop.shop_id}")
+                    logger.info(f"[TargetManagement] 自动创建店铺记录: {shop_account.platform}/{shop.shop_id}")
                 except Exception as e:
                     await db.rollback()
                     logger.error(f"[TargetManagement] 同步店铺失败: {e}", exc_info=True)

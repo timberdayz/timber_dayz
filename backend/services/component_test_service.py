@@ -15,7 +15,7 @@ import sys
 import uuid
 
 from modules.core.logger import get_logger
-from modules.core.db import PlatformAccount, ComponentTestHistory
+from modules.core.db import ComponentTestHistory
 from backend.services.encryption_service import get_encryption_service
 
 logger = get_logger(__name__)
@@ -25,7 +25,7 @@ class ComponentTestService:
     """组件测试服务(唯一实现)- 消除双维护"""
     
     @staticmethod
-    def prepare_account_info(account: PlatformAccount) -> Dict[str, Any]:
+    def prepare_account_info(account: Any) -> Dict[str, Any]:
         """
         准备账号信息(统一)
         
@@ -45,7 +45,9 @@ class ComponentTestService:
                 account.password_encrypted
             )
         except Exception as e:
-            logger.error(f"Failed to decrypt password for account {account.account_id}: {e}")
+            logger.error(
+                f"Failed to decrypt password for account {getattr(account, 'account_id', 'unknown')}: {e}"
+            )
             raise ValueError("密码解密失败,请检查账号配置")
         
         # 规范化 login_url：仅保留 origin（去掉 path/query），避免 ?redirect= 导致 goto 超时
@@ -59,8 +61,10 @@ class ComponentTestService:
             except Exception as e:
                 logger.warning(f"Normalize login_url failed, use raw: {e}")
         account_info = {
-            'account_id': account.account_id,
-            'platform': account.platform,
+            'account_id': getattr(account, 'account_id', None) or getattr(account, 'shop_account_id', None),
+            'shop_account_id': getattr(account, 'shop_account_id', None) or getattr(account, 'account_id', None),
+            'main_account_id': getattr(account, 'main_account_id', None) or getattr(account, 'parent_account', None) or '',
+            'platform': getattr(account, 'platform', None),
             'username': account.username,
             'password': plaintext_password,  # 使用明文密码
             'store_name': account.store_name,
@@ -70,12 +74,14 @@ class ComponentTestService:
             'region': getattr(account, 'region', None) or '',
             'currency': getattr(account, 'currency', None) or '',
             'shop_region': getattr(account, 'shop_region', None) or '',
+            'shop_id': getattr(account, 'platform_shop_id', None) or getattr(account, 'shop_id', None) or '',
+            'platform_shop_id': getattr(account, 'platform_shop_id', None) or getattr(account, 'shop_id', None) or '',
             'notes': getattr(account, 'notes', None) or '',
             'cookies_file': getattr(account, 'cookies_file', None),
             'capabilities': account.capabilities or {},
         }
         
-        logger.debug(f"Account info prepared for {account.account_id}")
+        logger.debug(f"Account info prepared for {account_info['account_id']}")
         return account_info  # [*] 修复:必须返回account_info！
     
     @staticmethod

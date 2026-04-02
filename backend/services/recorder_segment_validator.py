@@ -16,7 +16,6 @@ from modules.apps.collection_center.transition_gates import (
     evaluate_filters_ready,
     evaluate_navigation_ready,
 )
-from modules.core.db import PlatformAccount
 from modules.core.logger import get_logger
 
 
@@ -192,6 +191,18 @@ class RecorderSegmentValidator:
         )
 
     async def _load_account_info(self, db, *, account_id: str) -> Dict[str, Any]:
+        try:
+            from backend.services.shop_account_loader_service import get_shop_account_loader_service
+
+            shop_loader = get_shop_account_loader_service()
+            payload = await shop_loader.load_shop_account_async(account_id, db)
+            if payload:
+                return payload["compat_account"]
+        except Exception:
+            payload = None
+
+        from modules.core.db import PlatformAccount
+
         result = await db.execute(
             select(PlatformAccount).where(PlatformAccount.account_id == account_id)
         )

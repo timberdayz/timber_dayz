@@ -21,6 +21,7 @@ import sys
 import json
 import ast
 import threading
+from types import SimpleNamespace
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
@@ -787,18 +788,48 @@ async def start_recording(
                 "message": "已有活跃的录制会话,请先停止"
             }
         
-        # 验证账号存在
-        result = await db.execute(
-            select(PlatformAccount).where(PlatformAccount.account_id == request.account_id)
-        )
-        account = result.scalar_one_or_none()
+        # 验证账号存在（优先店铺账号，兼容旧账号）
+        account = None
+        try:
+            from backend.services.shop_account_loader_service import get_shop_account_loader_service
+
+            shop_loader = get_shop_account_loader_service()
+            payload = await shop_loader.load_shop_account_async(request.account_id, db)
+            if payload:
+                compat = payload["compat_account"]
+                account = SimpleNamespace(
+                    account_id=compat.get("account_id"),
+                    shop_account_id=payload["shop_context"].get("shop_account_id"),
+                    main_account_id=payload["main_account"].get("main_account_id"),
+                    platform=payload["shop_context"].get("platform"),
+                    store_name=payload["shop_context"].get("store_name"),
+                    username=payload["main_account"].get("username"),
+                    password_encrypted="",
+                    login_url=payload["main_account"].get("login_url"),
+                    capabilities=payload.get("capabilities") or {},
+                    enabled=payload["shop_context"].get("enabled"),
+                    email=compat.get("email"),
+                    phone=compat.get("phone"),
+                    region=compat.get("region"),
+                    currency=compat.get("currency"),
+                    shop_region=payload["shop_context"].get("shop_region"),
+                    shop_id=payload["shop_context"].get("platform_shop_id"),
+                )
+        except Exception:
+            account = None
+
+        if account is None:
+            result = await db.execute(
+                select(PlatformAccount).where(PlatformAccount.account_id == request.account_id)
+            )
+            account = result.scalar_one_or_none()
         
         if not account:
             return error_response(
                 code=ErrorCode.DATA_NOT_FOUND,
-                message="账号不存在",
+                message="店铺账号不存在",
                 status_code=404,
-                recovery_suggestion="请检查账号ID是否正确，或在平台管理中先添加账号",
+                recovery_suggestion="请检查店铺账号ID是否正确，或在账号管理中先添加店铺账号",
             )
         
         # 启动录制会话
