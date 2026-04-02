@@ -360,3 +360,6 @@ collector = create_shopee_collector(account, {'headless': False})
 **版本**: 1.0.0
 **更新日期**: 2025-08-24
 **维护者**: 开发团队
+> 日期组件开发参考:
+> - 设计指南: `docs/guides/DATE_COMPONENT_DESIGN_GUIDE.md`
+> - Shopee 专用检查表: `docs/templates/SHOPEE_DATE_COMPONENT_CHECKLIST_TEMPLATE.md`

@@ -269,6 +269,12 @@ class ShopeeProductsExport(ExportComponent):
         except Exception:
             return False
         if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(150)
+        try:
+            await locator.click(timeout=5000)
+        except Exception:
+            return False
+        if hasattr(page, "wait_for_timeout"):
             await page.wait_for_timeout(300)
         return True
 
@@ -296,6 +302,100 @@ class ShopeeProductsExport(ExportComponent):
             if any(variant and variant in content for variant in normalized_variants):
                 return canonical
         return None
+
+    def _preset_value_from_label(self, label: str | None) -> str | None:
+        normalized_label = self._normalize_date_text(label)
+        if not normalized_label:
+            return None
+        for key, value in self.sel.preset_labels.items():
+            if self._normalize_date_text(value) == normalized_label:
+                return key
+        return None
+
+    def _parse_summary_date_value(self, value: str | None) -> str | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(text, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        return None
+
+    def _extract_summary_date_values(self, summary: str | None) -> tuple[str, ...]:
+        text = str(summary or "")
+        if not text:
+            return ()
+        pattern = re.compile(r"\d{2}[-/]\d{2}[-/]\d{4}|\d{4}[-/]\d{2}[-/]\d{2}")
+        values: list[str] = []
+        for match in pattern.findall(text):
+            parsed_value = self._parse_summary_date_value(match)
+            if parsed_value:
+                values.append(parsed_value)
+        return tuple(values)
+
+    def _extract_summary_month_value(self, summary: str | None) -> tuple[int, int] | None:
+        text = str(summary or "").strip()
+        if not text:
+            return None
+
+        compact_match = re.search(r"(20\d{2})[./-](\d{1,2})", text)
+        if compact_match:
+            return int(compact_match.group(1)), int(compact_match.group(2))
+
+        zh_match = re.search(r"(20\d{2})\s*年\s*(\d{1,2})\s*月", text)
+        if zh_match:
+            return int(zh_match.group(1)), int(zh_match.group(2))
+
+        return None
+
+    def _parse_date_summary(self, summary: str | None) -> dict[str, Any] | None:
+        text = str(summary or "").strip()
+        if not text:
+            return None
+
+        label = self._match_known_date_label(text)
+        if not label:
+            return None
+
+        preset_value = self._preset_value_from_label(label)
+        if preset_value is not None:
+            return {
+                "mode": "preset",
+                "value": preset_value,
+                "label": label,
+            }
+
+        normalized_label = self._normalize_date_text(label)
+        if normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("monthly")):
+            month_value = self._extract_summary_month_value(text)
+            if month_value is not None:
+                year, month = month_value
+                return {
+                    "mode": "monthly",
+                    "year": year,
+                    "month": month,
+                    "label": label,
+                }
+
+        summary_dates = self._extract_summary_date_values(text)
+        if normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("weekly")) and len(summary_dates) >= 2:
+            return {
+                "mode": "weekly",
+                "start_date": summary_dates[0],
+                "end_date": summary_dates[1],
+                "label": label,
+            }
+
+        if normalized_label == self._normalize_date_text(self.sel.granularity_labels.get("daily")) and summary_dates:
+            return {
+                "mode": "daily",
+                "date": summary_dates[0],
+                "label": label,
+            }
+
+        return {"label": label}
 
     def _single_day_target_value(self, config: dict[str, Any]) -> str | None:
         return (
@@ -566,16 +666,26 @@ class ShopeeProductsExport(ExportComponent):
         selector_map = {
             "prev": (
                 'button[aria-label*="previous year"]',
+                'button[aria-label*="previous"]',
                 '.arco-picker-header-super-prev-btn',
+                '.arco-picker-header-prev-btn:not([class*="super"])',
                 '.ant-picker-header-super-prev-btn',
+                '.ant-picker-header-prev-btn:not([class*="super"])',
                 '[class*="super-prev"]',
+                '[class*="prev-btn"]:not([class*="super"])',
+                '[class*="prev"]:not([class*="super"])',
                 '[class*="double-left"]',
             ),
             "next": (
                 'button[aria-label*="next year"]',
+                'button[aria-label*="next"]',
                 '.arco-picker-header-super-next-btn',
+                '.arco-picker-header-next-btn:not([class*="super"])',
                 '.ant-picker-header-super-next-btn',
+                '.ant-picker-header-next-btn:not([class*="super"])',
                 '[class*="super-next"]',
+                '[class*="next-btn"]:not([class*="super"])',
+                '[class*="next"]:not([class*="super"])',
                 '[class*="double-right"]',
             ),
         }
@@ -595,93 +705,6 @@ class ShopeeProductsExport(ExportComponent):
                         return True
                 except Exception:
                     continue
-
-        text_map = {
-            "prev": ("<<", "\u00ab", "\u300a\u300a"),
-            "next": (">>", "\u00bb", "\u300b\u300b"),
-        }
-        for container in containers:
-            if container is None:
-                continue
-            for label in text_map.get(direction, ()):
-                try:
-                    locator = await self._pick_visible_locator(container.get_by_text(label, exact=True))
-                    if locator is None:
-                        continue
-                    await locator.click(timeout=5000)
-                    if hasattr(page, "wait_for_timeout"):
-                        await page.wait_for_timeout(250)
-                    return True
-                except Exception:
-                    continue
-
-        if header is not None:
-            try:
-                year_text = await self._current_month_panel_year_text(page)
-            except Exception:
-                year_text = None
-            try:
-                direct_children = header.locator(":scope > *")
-                count = await direct_children.count()
-                edge_children: list[Any] = []
-                for idx in range(count):
-                    candidate = direct_children.nth(idx)
-                    try:
-                        if not await candidate.is_visible(timeout=300):
-                            continue
-                        text_content = str(await candidate.text_content() or "").strip()
-                        if year_text and text_content == str(year_text or "").strip():
-                            continue
-                        edge_children.append(candidate)
-                    except Exception:
-                        continue
-                if edge_children:
-                    target = edge_children[0] if direction == "prev" else edge_children[-1]
-                    await target.click(timeout=5000)
-                    if hasattr(page, "wait_for_timeout"):
-                        await page.wait_for_timeout(250)
-                    return True
-            except Exception:
-                pass
-            try:
-                candidates = header.locator("button, [role='button'], span, div")
-                count = await candidates.count()
-                exact_arrow_children: list[Any] = []
-                for idx in range(count):
-                    candidate = candidates.nth(idx)
-                    try:
-                        if not await candidate.is_visible(timeout=300):
-                            continue
-                        text_content = str(await candidate.text_content() or "").strip()
-                        if not text_content:
-                            continue
-                        if year_text and str(text_content or "").strip() == str(year_text or "").strip():
-                            continue
-                        if any(token == text_content for token in text_map.get(direction, ())):
-                            exact_arrow_children.append(candidate)
-                    except Exception:
-                        continue
-                if exact_arrow_children:
-                    target = exact_arrow_children[0] if direction == "prev" else exact_arrow_children[-1]
-                    await target.click(timeout=5000)
-                    if hasattr(page, "wait_for_timeout"):
-                        await page.wait_for_timeout(250)
-                    return True
-            except Exception:
-                pass
-            try:
-                box = await header.bounding_box()
-                if box and box.get("width") and box.get("height"):
-                    position = {
-                        "x": 10 if direction == "prev" else max(10, float(box["width"]) - 10),
-                        "y": float(box["height"]) / 2,
-                    }
-                    await header.click(timeout=5000, position=position)
-                    if hasattr(page, "wait_for_timeout"):
-                        await page.wait_for_timeout(250)
-                    return True
-            except Exception:
-                pass
         return False
 
     async def _find_month_grid_cell(self, page: Any, month_label: str) -> Any | None:
@@ -889,10 +912,110 @@ class ShopeeProductsExport(ExportComponent):
         text = str(header_text or "").strip()
         if not text:
             return None
-        normalized = re.sub(r"[<>\u00ab\u00bb\u300a\u300b\s]+", "", text)
+        normalized = re.sub(r"[<>\u00ab\u00bb\u300a\u300b\s\u5e74]+", "", text)
         if not re.fullmatch(r"20\d{2}", normalized):
             return None
         return int(normalized)
+
+    def _normalize_custom_granularity(self, granularity: str | None) -> str:
+        normalized = str(granularity or "").strip().lower()
+        if normalized in {"day", "daily", "d"}:
+            return "daily"
+        if normalized in {"week", "weekly", "w"}:
+            return "weekly"
+        if normalized in {"month", "monthly", "m"}:
+            return "monthly"
+        return normalized
+
+    def _date_value_signatures(self, iso_date: str | None) -> tuple[str, ...]:
+        if not iso_date:
+            return ()
+        try:
+            target_date = datetime.strptime(str(iso_date), "%Y-%m-%d")
+        except ValueError:
+            return ()
+        return (
+            target_date.strftime("%d-%m-%Y"),
+            target_date.strftime("%d/%m/%Y"),
+            target_date.strftime("%Y-%m-%d"),
+            target_date.strftime("%Y/%m/%d"),
+        )
+
+    def _date_range_signatures(self, start_date: str | None, end_date: str | None) -> tuple[str, ...]:
+        if not start_date or not end_date:
+            return ()
+        start_variants = self._date_value_signatures(start_date)
+        end_variants = self._date_value_signatures(end_date)
+        if not start_variants or not end_variants:
+            return ()
+
+        signatures: list[str] = []
+        for start_variant in start_variants:
+            for end_variant in end_variants:
+                signatures.extend(
+                    (
+                        f"{start_variant} - {end_variant}",
+                        f"{start_variant}-{end_variant}",
+                    )
+                )
+        return tuple(signatures)
+
+    def _custom_date_summary_matches(
+        self,
+        summary: str | None,
+        *,
+        granularity: str,
+        start_date: str | None,
+        end_date: str | None,
+    ) -> bool:
+        normalized_summary = self._normalize_date_text(summary)
+        if not normalized_summary:
+            return False
+
+        normalized_granularity = self._normalize_custom_granularity(granularity)
+        parsed_summary = self._parse_date_summary(summary)
+        if parsed_summary:
+            if normalized_granularity == "daily":
+                expected_date = start_date or end_date
+                return (
+                    parsed_summary.get("mode") == "daily"
+                    and parsed_summary.get("date") == expected_date
+                )
+            if normalized_granularity == "weekly":
+                return (
+                    parsed_summary.get("mode") == "weekly"
+                    and parsed_summary.get("start_date") == start_date
+                    and parsed_summary.get("end_date") == end_date
+                )
+            if normalized_granularity == "monthly" and start_date:
+                try:
+                    target_date = datetime.strptime(str(start_date), "%Y-%m-%d")
+                except ValueError:
+                    target_date = None
+                if target_date is not None:
+                    return (
+                        parsed_summary.get("mode") == "monthly"
+                        and parsed_summary.get("year") == target_date.year
+                        and parsed_summary.get("month") == target_date.month
+                    )
+
+        expected_signatures: list[str] = []
+
+        if normalized_granularity == "daily":
+            expected_signatures.extend(self._date_value_signatures(start_date))
+            expected_signatures.extend(self._date_range_signatures(start_date, end_date or start_date))
+        elif normalized_granularity == "weekly":
+            expected_signatures.extend(self._week_range_label_candidates(start_date or "", end_date or ""))
+            expected_signatures.extend(self._date_range_signatures(start_date, end_date))
+        elif normalized_granularity == "monthly":
+            if start_date:
+                expected_signatures.extend(self._month_summary_signatures(start_date))
+            expected_signatures.extend(self._date_range_signatures(start_date, end_date))
+
+        normalized_signatures = tuple(
+            self._normalize_date_text(signature) for signature in expected_signatures if signature
+        )
+        return any(signature and signature in normalized_summary for signature in normalized_signatures)
 
     async def _wait_calendar_header_changed(
         self,
@@ -975,22 +1098,15 @@ class ShopeeProductsExport(ExportComponent):
         timeout_ms: int = 2500,
         poll_ms: int = 250,
     ) -> bool:
-        expected_signatures: tuple[str, ...] = ()
-        if granularity == "weekly" and start_date and end_date:
-            expected_signatures = self._week_range_label_candidates(start_date, end_date)
-        elif granularity == "monthly" and start_date:
-            expected_signatures = self._month_summary_signatures(start_date)
-        elif granularity == "daily" and start_date:
-            expected_signatures = (datetime.strptime(start_date, "%Y-%m-%d").strftime("%d-%m-%Y"),)
-
-        normalized_signatures = tuple(
-            self._normalize_date_text(signature) for signature in expected_signatures if signature
-        )
         waited = 0
         while waited <= timeout_ms:
             summary = await self._current_date_summary_text(page)
-            normalized_summary = self._normalize_date_text(summary)
-            if normalized_summary and any(signature in normalized_summary for signature in normalized_signatures):
+            if self._custom_date_summary_matches(
+                summary,
+                granularity=granularity,
+                start_date=start_date,
+                end_date=end_date,
+            ):
                 return True
             if hasattr(page, "wait_for_timeout"):
                 await page.wait_for_timeout(poll_ms)
@@ -1138,6 +1254,9 @@ class ShopeeProductsExport(ExportComponent):
                 summary_text = await trigger.text_content()
             except Exception:
                 summary_text = None
+            parsed_summary = self._parse_date_summary(summary_text)
+            if parsed_summary and parsed_summary.get("label"):
+                return str(parsed_summary["label"])
             matched = self._match_known_date_label(summary_text)
             if matched:
                 return matched
@@ -1204,12 +1323,20 @@ class ShopeeProductsExport(ExportComponent):
         custom_selection = self._custom_time_selection(config)
         if custom_selection is not None:
             target = self._resolve_custom_target(config)
-            granularity = target["granularity"]
+            granularity = self._normalize_custom_granularity(target["granularity"])
             start_date = target["start_date"]
             end_date = target["end_date"]
+            current_summary = await self._current_date_summary_text(page)
+            if self._custom_date_summary_matches(
+                current_summary,
+                granularity=granularity,
+                start_date=start_date,
+                end_date=end_date,
+            ):
+                return
             await self._open_date_picker(page)
 
-            if granularity in {"day", "daily", "d"}:
+            if granularity == "daily":
                 if not await self._hover_text_option(page, "\u6309\u65e5"):
                     raise RuntimeError("date option was not clicked")
                 if not target["target_iso_date"] or not await self._select_single_day_value(page, target["target_iso_date"]):
@@ -1223,7 +1350,7 @@ class ShopeeProductsExport(ExportComponent):
                     raise RuntimeError("date selection did not apply")
                 return
 
-            if granularity in {"week", "weekly", "w"}:
+            if granularity == "weekly":
                 if not await self._hover_text_option(page, "\u6309\u5468"):
                     raise RuntimeError("date option was not clicked")
                 if not start_date or not end_date or not await self._select_week_range_value(page, start_date, end_date):
@@ -1237,7 +1364,7 @@ class ShopeeProductsExport(ExportComponent):
                     raise RuntimeError("date selection did not apply")
                 return
 
-            if granularity in {"month", "monthly", "m"}:
+            if granularity == "monthly":
                 if not await self._hover_text_option(page, "\u6309\u6708"):
                     raise RuntimeError("date option was not clicked")
                 if not target["target_iso_date"] or not await self._select_month_value(page, target["target_iso_date"]):
@@ -1317,25 +1444,34 @@ class ShopeeProductsExport(ExportComponent):
         day_candidates = (str(day), f"{day:02d}")
         panel = await self._find_date_panel(page)
         containers = [panel] if panel is not None else [page]
+        in_view_selectors = (
+            ".arco-picker-cell-in-view",
+            ".ant-picker-cell-in-view",
+            '[class*="cell-in-view"]',
+            '[class*="in-view"]',
+        )
         for container in containers:
             for candidate in day_candidates:
-                try:
-                    matches = container.get_by_text(candidate, exact=True)
-                    locators = []
-                    if hasattr(matches, "last"):
-                        locators.append(matches.last)
-                    if hasattr(matches, "first"):
-                        locators.append(matches.first)
-                    else:
-                        locators.append(matches)
-                    for locator in locators:
-                        if locator is None:
-                            continue
-                        if await locator.is_visible(timeout=1000):
+                for in_view_selector in in_view_selectors:
+                    try:
+                        in_view_scope = container.locator(in_view_selector)
+                        matches = in_view_scope.get_by_text(candidate, exact=True)
+                        locator = await self._pick_visible_locator(matches, timeout_ms=1000)
+                        if locator is not None:
                             await locator.click(timeout=5000)
                             if hasattr(page, "wait_for_timeout"):
                                 await page.wait_for_timeout(300)
                             return True
+                    except Exception:
+                        continue
+                try:
+                    matches = container.get_by_text(candidate, exact=True)
+                    locator = await self._pick_visible_locator(matches, timeout_ms=1000)
+                    if locator is not None:
+                        await locator.click(timeout=5000)
+                        if hasattr(page, "wait_for_timeout"):
+                            await page.wait_for_timeout(300)
+                        return True
                 except Exception:
                     continue
         return False
@@ -1372,15 +1508,7 @@ class ShopeeProductsExport(ExportComponent):
         if not await self._navigate_calendar_panel_to_month(page, start_value.year, start_value.month):
             return False
 
-        if await self._select_calendar_day(page, start_value.day):
-            return True
-
-        for candidate in self._week_range_label_candidates(start_date, end_date):
-            clicked = await self._click_text_option(page, candidate)
-            if clicked:
-                return True
-
-        return False
+        return await self._select_calendar_day(page, start_value.day)
 
     async def _trigger_export(self, page: Any) -> None:
         button = await self._first_visible_locator(page, self.sel.export_buttons)

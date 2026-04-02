@@ -441,3 +441,5 @@ params = config.get("params") or {} # captcha_code, otp, login_url_override, ...
 | 运行时页面就绪检测 | 允许 | 使用 `.first.wait_for(state="visible")` 探测任一匹配即可 |
 
 本节是第 1 节"限制使用 `.first`"和第 13 节"定位器唯一性契约"的具体判定标准。
+> 日期组件专题参考:
+> `docs/guides/DATE_COMPONENT_DESIGN_GUIDE.md`

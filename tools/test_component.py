@@ -224,9 +224,7 @@ class ComponentTester:
         return None
 
     def _use_persistent_profile_for_python_component(self, component_type: str) -> bool:
-        if self.platform != "tiktok":
-            return False
-        return self._persistent_context_mode(component_type) == "reused"
+        return False
 
     def _login_readiness_candidates(self, component_name: str) -> List[tuple[str, str]]:
         base_candidates: List[tuple[str, str]] = [
@@ -257,6 +255,51 @@ class ComponentTester:
 
         return base_candidates
 
+    def _business_probe_url(
+        self,
+        component_type: Optional[str],
+        component_name: Optional[str],
+        account_info: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        if str(component_type or "").strip().lower() != "export":
+            return None
+
+        account = account_info or {}
+        data_domain = str(
+            self.runtime_config.get("data_domain")
+            or getattr(self, "current_data_domain", "")
+            or (component_name or "").replace("_export", "")
+        ).strip().lower()
+
+        if self.platform == "tiktok" and data_domain == "products":
+            region = str(
+                self.runtime_config.get("shop_region")
+                or account.get("shop_region")
+                or ""
+            ).strip().upper()
+            base = "https://seller.tiktokshopglobalselling.com/compass/product-analysis"
+            return f"{base}?shop_region={region}" if region else base
+
+        return None
+
+    def _homepage_probe_url(self, account_info: Optional[Dict[str, Any]]) -> Optional[str]:
+        account = account_info or {}
+        login_url = str(
+            account.get("login_url")
+            or self.runtime_config.get("default_login_url")
+            or ""
+        ).strip().rstrip("/")
+        if not login_url:
+            return None
+
+        if self.platform == "tiktok":
+            return f"{login_url}/homepage"
+        if self.platform == "miaoshou":
+            return f"{login_url}/welcome"
+        if self.platform == "shopee":
+            return f"{login_url}/"
+        return login_url
+
     def _login_gate_probe_url(self, account_info: Optional[Dict[str, Any]]) -> Optional[str]:
         account = account_info or {}
         return str(
@@ -265,18 +308,81 @@ class ComponentTester:
             or ""
         ).strip() or None
 
-    async def _prime_page_for_login_gate(self, page, account_info: Optional[Dict[str, Any]]) -> None:
+    def _login_gate_probe_urls(
+        self,
+        *,
+        component_type: Optional[str],
+        component_name: Optional[str],
+        account_info: Optional[Dict[str, Any]],
+    ) -> List[str]:
+        candidates = [
+            self._business_probe_url(component_type, component_name, account_info),
+            self._homepage_probe_url(account_info),
+            self._login_gate_probe_url(account_info),
+        ]
+        urls: List[str] = []
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if value and value not in urls:
+                urls.append(value)
+        return urls
+
+    async def _wait_for_probe_page_ready(self, page, *, settle_ms: int = 500) -> None:
+        for state, timeout in (("domcontentloaded", 5000), ("load", 5000), ("networkidle", 3000)):
+            try:
+                await page.wait_for_load_state(state, timeout=timeout)
+            except Exception:
+                continue
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(settle_ms)
+
+    async def _allow_tiktok_login_shell_recovery(
+        self,
+        page,
+        *,
+        timeout_ms: int = 2000,
+        poll_ms: int = 500,
+    ) -> None:
+        if self.platform != "tiktok":
+            return
+
+        current_url = str(getattr(page, "url", "") or "").strip().lower()
+        if "/account/login" not in current_url:
+            return
+
+        elapsed = 0
+        while elapsed < timeout_ms:
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            elapsed += poll_ms
+
+            current_url = str(getattr(page, "url", "") or "").strip().lower()
+            if "/account/login" not in current_url:
+                break
+
+    async def _prime_page_for_login_gate(
+        self,
+        page,
+        account_info: Optional[Dict[str, Any]],
+        *,
+        component_type: Optional[str] = None,
+        component_name: Optional[str] = None,
+    ) -> None:
         current_url = str(getattr(page, "url", "") or "").strip().lower()
         if current_url and current_url != "about:blank":
+            await self._wait_for_probe_page_ready(page)
             return
 
-        probe_url = self._login_gate_probe_url(account_info)
-        if not probe_url:
+        probe_urls = self._login_gate_probe_urls(
+            component_type=component_type,
+            component_name=component_name,
+            account_info=account_info,
+        )
+        if not probe_urls:
             return
 
-        await page.goto(probe_url, wait_until="domcontentloaded", timeout=60000)
-        if hasattr(page, "wait_for_timeout"):
-            await page.wait_for_timeout(800)
+        await page.goto(probe_urls[0], wait_until="domcontentloaded", timeout=60000)
+        await self._wait_for_probe_page_ready(page, settle_ms=800)
 
     async def _save_context_session(self, context, account_info: Optional[Dict[str, Any]]) -> bool:
         account = account_info or {}
@@ -301,6 +407,8 @@ class ComponentTester:
         from modules.utils.login_status_detector import LoginStatusDetector
 
         detector = LoginStatusDetector(self.platform, debug=False)
+        await self._wait_for_probe_page_ready(page)
+        await self._allow_tiktok_login_shell_recovery(page)
         detection_result = await detector.detect(page, wait_for_redirect=True)
         gate_result = evaluate_login_ready(
             status=detection_result.status.value,
@@ -1153,35 +1261,19 @@ class ComponentTester:
                     context_options['locale'] = 'zh-CN'
 
                 use_persistent_profile = bool(account_id) and self._use_persistent_profile_for_python_component(component_type)
-                if use_persistent_profile:
-                    from modules.utils.sessions.session_manager import SessionManager
-
-                    persistent_profile_path = SessionManager().get_persistent_profile_path(self.platform, account_id)
-                    persistent_context_options = dict(context_options)
-                    persistent_context_options.pop('storage_state', None)
-                    context = await p.chromium.launch_persistent_context(
-                        user_data_dir=str(persistent_profile_path),
-                        **self._build_browser_launch_kwargs(
-                            args=['--start-maximized'] if not self.headless else []
-                        ),
-                        **persistent_context_options,
-                    )
-                    browser = None
-                    if context.pages:
-                        page = context.pages[0]
-                        for extra_page in context.pages[1:]:
-                            await extra_page.close()
-                    else:
-                        page = await context.new_page()
-                else:
-                    context = await browser.new_context(**context_options)
-                    page = await context.new_page()
+                context = await browser.new_context(**context_options)
+                page = await context.new_page()
 
                 # 非登录组件统一走 login gate：先检查复用会话是否已满足，否则执行登录前置
                 if component_type in non_login_types and not self.skip_login:
                     login_gate_ready = False
                     if storage_state or use_persistent_profile:
-                        await self._prime_page_for_login_gate(page, account_info)
+                        await self._prime_page_for_login_gate(
+                            page,
+                            account_info,
+                            component_type=component_type,
+                            component_name=component_name,
+                        )
                         login_gate_ready = await self._check_login_gate(
                             page=page,
                             result=result,

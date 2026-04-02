@@ -38,4 +38,7 @@
   - 先选开始，再选结束；若结束 < 开始则自动交换。
   - 确认按钮可点击后再提交；必要时回退到输入框直接填充。
 - 契约测试：最小用例覆盖“打开面板 + 选择昨天 + 确认”。
+> 日期组件开发参考:
+> - 设计指南: `docs/guides/DATE_COMPONENT_DESIGN_GUIDE.md`
+> - 通用检查表: `docs/templates/DATE_COMPONENT_CHECKLIST_TEMPLATE.md`
 

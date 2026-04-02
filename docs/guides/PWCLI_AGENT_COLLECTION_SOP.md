@@ -947,3 +947,5 @@ agent 最适合做的是：
 对我本人来说，最重要的不是让 `pwcli` 直接生成最终脚本，而是坚持这条流程：
 
 `pwcli` 探索页面 -> 固化 snapshot / screenshot -> agent 做结构分析 -> agent 产出组件草稿 -> 我用真实页面验证 -> agent 做最小补丁 -> 沉淀为正式组件版本。
+> 日期组件专题参考:
+> `docs/guides/DATE_COMPONENT_DESIGN_GUIDE.md`

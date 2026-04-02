@@ -1,5 +1,6 @@
 from tools.test_component import ComponentTester
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -61,10 +62,10 @@ def test_component_tester_uses_reused_persistent_context_for_export():
     assert tester._persistent_context_mode("export") == "reused"
 
 
-def test_component_tester_prefers_profile_level_reuse_for_tiktok_python_export():
+def test_component_tester_does_not_force_profile_level_reuse_for_tiktok_python_export():
     tester = ComponentTester(platform="tiktok", account_id="acc-1")
 
-    assert tester._use_persistent_profile_for_python_component("export") is True
+    assert tester._use_persistent_profile_for_python_component("export") is False
 
 
 def test_component_tester_does_not_force_profile_level_reuse_for_shopee_python_export():
@@ -122,6 +123,7 @@ class _FakeProbePage:
         self.url = url
         self.goto = AsyncMock()
         self.wait_for_timeout = AsyncMock()
+        self.wait_for_load_state = AsyncMock()
 
 
 @pytest.mark.asyncio
@@ -129,13 +131,17 @@ async def test_component_tester_primes_login_gate_page_when_storage_state_starts
     tester = ComponentTester(platform="shopee", account_id="acc-1")
     page = _FakeProbePage()
 
-    await tester._prime_page_for_login_gate(page, {"login_url": "https://seller.shopee.cn"})
+    await tester._prime_page_for_login_gate(
+        page,
+        {"login_url": "https://seller.shopee.cn"},
+    )
 
     page.goto.assert_awaited_once_with(
-        "https://seller.shopee.cn",
+        "https://seller.shopee.cn/",
         wait_until="domcontentloaded",
         timeout=60000,
     )
+    assert page.wait_for_load_state.await_count >= 2
 
 
 @pytest.mark.asyncio
@@ -146,6 +152,95 @@ async def test_component_tester_primes_login_gate_page_skips_when_already_on_rea
     await tester._prime_page_for_login_gate(page, {"login_url": "https://seller.shopee.cn"})
 
     page.goto.assert_not_awaited()
+    assert page.wait_for_load_state.await_count >= 2
+
+
+def test_component_tester_uses_tiktok_business_probe_url_before_login_url():
+    tester = ComponentTester(
+        platform="tiktok",
+        account_id="acc-1",
+        runtime_config={"data_domain": "products"},
+    )
+
+    urls = tester._login_gate_probe_urls(
+        component_type="export",
+        component_name="products_export",
+        account_info={"login_url": "https://seller.tiktokglobalshop.com", "shop_region": "SG"},
+    )
+
+    assert urls[0] == "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG"
+    assert urls[1] == "https://seller.tiktokglobalshop.com/homepage"
+    assert urls[2] == "https://seller.tiktokglobalshop.com"
+
+
+@pytest.mark.asyncio
+async def test_component_tester_check_login_gate_waits_for_page_stability_before_detect(monkeypatch):
+    tester = ComponentTester(platform="tiktok", account_id="acc-1")
+    page = _FakeProbePage("https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG")
+    result = SimpleNamespace(phase=None, phase_component_name=None, error=None)
+
+    detected = {}
+
+    class _FakeDetector:
+        def __init__(self, platform: str, debug: bool = False):
+            self.platform = platform
+            self.debug = debug
+
+        async def detect(self, page_arg, wait_for_redirect=True):
+            detected["load_state_calls"] = page_arg.wait_for_load_state.await_count
+            return SimpleNamespace(
+                status=SimpleNamespace(value="logged_in"),
+                confidence=0.95,
+                matched_pattern="/homepage",
+                detected_by="url",
+            )
+
+    monkeypatch.setattr("modules.utils.login_status_detector.LoginStatusDetector", _FakeDetector)
+
+    ok = await tester._check_login_gate(page, result, "tiktok/login")
+
+    assert ok is True
+    assert detected["load_state_calls"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_component_tester_tiktok_login_gate_allows_login_shell_recovery_before_detect(monkeypatch):
+    tester = ComponentTester(platform="tiktok", account_id="acc-1")
+    page = _FakeProbePage("https://seller.tiktokshopglobalselling.com/account/login")
+    result = SimpleNamespace(phase=None, phase_component_name=None, error=None)
+    state = {"count": 0}
+
+    async def _advance(ms: int):
+        if ms == 500 and page.url.endswith("/account/login"):
+            state["count"] += 1
+        if state["count"] >= 2:
+            page.url = "https://seller.tiktokshopglobalselling.com/homepage?shop_region=SG"
+
+    page.wait_for_timeout = AsyncMock(side_effect=_advance)
+    detected = {}
+
+    class _FakeDetector:
+        def __init__(self, platform: str, debug: bool = False):
+            self.platform = platform
+            self.debug = debug
+
+        async def detect(self, page_arg, wait_for_redirect=True):
+            detected["url_before_detect"] = page_arg.url
+            return SimpleNamespace(
+                status=SimpleNamespace(value="logged_in"),
+                confidence=0.95,
+                matched_pattern="/homepage",
+                detected_by="url",
+            )
+
+    monkeypatch.setattr("modules.utils.login_status_detector.LoginStatusDetector", _FakeDetector)
+
+    ok = await tester._check_login_gate(page, result, "tiktok/login")
+
+    assert ok is True
+    assert detected["url_before_detect"].startswith(
+        "https://seller.tiktokshopglobalselling.com/homepage"
+    )
 
 
 @pytest.mark.asyncio
