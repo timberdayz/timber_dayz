@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List, Callable, Awaitable, Tuple, Union
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import parse_qs, urlparse
 
 from modules.core.logger import get_logger
 from backend.services.verification_protocol import apply_verification_result_to_params, verification_input_mode
@@ -97,6 +98,72 @@ def _resolve_session_scope(account_id: Any, account: Dict[str, Any]) -> Tuple[st
     except Exception as e:
         logger.warning("Failed to resolve session scope: %s", e)
         return "", "", False
+
+
+def _extract_platform_shop_context(platform: str, current_url: str) -> Dict[str, Optional[str]]:
+    parsed = urlparse(str(current_url or ""))
+    query = parse_qs(parsed.query)
+    detected_platform_shop_id = None
+    for key in ("cnsc_shop_id", "shop_id"):
+        values = query.get(key) or []
+        if values and str(values[0]).strip():
+            detected_platform_shop_id = str(values[0]).strip()
+            break
+    detected_region = None
+    for key in ("shop_region", "region"):
+        values = query.get(key) or []
+        if values and str(values[0]).strip():
+            detected_region = str(values[0]).strip().upper()
+            break
+    return {
+        "platform": str(platform or "").strip().lower() or None,
+        "detected_platform_shop_id": detected_platform_shop_id,
+        "detected_region": detected_region,
+        "current_url": str(current_url or "").strip() or None,
+    }
+
+
+async def _record_platform_shop_discovery_async(
+    *,
+    platform: str,
+    page: Any,
+    params: Dict[str, Any],
+    account: Optional[Dict[str, Any]] = None,
+) -> None:
+    main_account_id = str(params.get("main_account_id") or "").strip()
+    shop_account_id = str(params.get("shop_account_id") or "").strip()
+    if not main_account_id or not shop_account_id:
+        return
+
+    payload = _extract_platform_shop_context(platform, str(getattr(page, "url", "") or ""))
+    detected_platform_shop_id = payload.get("detected_platform_shop_id")
+    if not detected_platform_shop_id:
+        return
+
+    detected_store_name = (
+        str((account or {}).get("store_name") or params.get("shop_name") or "").strip() or None
+    )
+
+    try:
+        from backend.models.database import AsyncSessionLocal
+        from backend.services.platform_shop_discovery_service import (
+            get_platform_shop_discovery_service,
+        )
+
+        async with AsyncSessionLocal() as db:
+            service = get_platform_shop_discovery_service()
+            await service.record_runtime_discovery(
+                db,
+                platform=str(platform or "").lower(),
+                main_account_id=main_account_id,
+                shop_account_id=shop_account_id,
+                detected_store_name=detected_store_name,
+                detected_platform_shop_id=detected_platform_shop_id,
+                detected_region=payload.get("detected_region"),
+                raw_payload=payload,
+            )
+    except Exception as e:
+        logger.warning("Failed to record platform shop discovery: %s", e)
 
 
 async def _load_session_async(platform: str, account_id: str, max_age_days: int = 30) -> Optional[Dict[str, Any]]:
@@ -1626,6 +1693,12 @@ class CollectionExecutorV2:
 
             await self._ensure_login_gate_ready(page, platform)
             logger.info(f"Task {task_id}: [Python] Login completed successfully (reused_session=%s)", params.get("reused_session", False))
+            await _record_platform_shop_discovery_async(
+                platform=platform,
+                page=page,
+                params=params,
+                account=account,
+            )
             if save_session_after_login and session_platform and session_account_id:
                 try:
                     storage_state = await page.context.storage_state()
@@ -3501,6 +3574,12 @@ class CollectionExecutorV2:
             if not login_success:
                 raise StepExecutionError("登录组件执行失败")
             await self._ensure_login_gate_ready(login_page, platform)
+            await _record_platform_shop_discovery_async(
+                platform=platform,
+                page=login_page,
+                params=params,
+                account=account,
+            )
             cookies = await login_context.cookies()
             storage_state = await login_context.storage_state()
             logger.info(f"Task {task_id}: Login completed, extracted {len(cookies)} cookies (reused_session=%s)", reused_session)

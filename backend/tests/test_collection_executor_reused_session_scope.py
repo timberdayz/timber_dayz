@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from modules.apps.collection_center.executor_v2 import _resolve_session_scope
+from modules.apps.collection_center.executor_v2 import (
+    _extract_platform_shop_context,
+    _resolve_session_scope,
+)
 
 
 def test_execute_defines_reused_session_before_runtime_task_params_call():
@@ -24,3 +27,13 @@ def test_resolve_session_scope_prefers_main_account_id_over_shop_account_id():
     assert session_owner_id == "hongxikeji:main"
     assert shop_account_id == "shopee_sg_hongxi_local"
     assert use_scope is True
+
+
+def test_extract_platform_shop_context_reads_known_query_keys():
+    payload = _extract_platform_shop_context(
+        "shopee",
+        "https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1227491331&shop_region=SG",
+    )
+
+    assert payload["detected_platform_shop_id"] == "1227491331"
+    assert payload["detected_region"] == "SG"

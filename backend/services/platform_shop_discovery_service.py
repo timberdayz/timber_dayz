@@ -7,6 +7,46 @@ from modules.core.db import PlatformShopDiscovery, ShopAccount
 
 
 class PlatformShopDiscoveryService:
+    async def record_runtime_discovery(
+        self,
+        db: AsyncSession,
+        *,
+        platform: str,
+        main_account_id: str,
+        shop_account_id: str,
+        detected_store_name: str | None,
+        detected_platform_shop_id: str | None,
+        detected_region: str | None,
+        raw_payload: dict | None = None,
+    ) -> PlatformShopDiscovery | None:
+        if not detected_platform_shop_id:
+            return None
+
+        discovery = PlatformShopDiscovery(
+            platform=platform,
+            main_account_id=main_account_id,
+            detected_store_name=detected_store_name,
+            detected_platform_shop_id=detected_platform_shop_id,
+            detected_region=detected_region,
+            candidate_shop_account_ids=[shop_account_id],
+            status="detected_single_bound",
+            raw_payload=raw_payload or {},
+        )
+        db.add(discovery)
+
+        shop_account = (
+            await db.execute(
+                select(ShopAccount).where(ShopAccount.shop_account_id == shop_account_id)
+            )
+        ).scalar_one_or_none()
+        if shop_account is not None:
+            shop_account.platform_shop_id = detected_platform_shop_id
+            shop_account.platform_shop_id_status = "auto_bound"
+
+        await db.commit()
+        await db.refresh(discovery)
+        return discovery
+
     async def confirm_discovery(
         self,
         db: AsyncSession,
