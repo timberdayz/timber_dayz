@@ -744,7 +744,19 @@ try:
         prefix="/api",
         tags=["账号管理"]
     )
-    
+
+    from backend.routers import main_accounts, shop_accounts
+    app.include_router(
+        main_accounts.router,
+        prefix="/api",
+        tags=["主账号管理"]
+    )
+    app.include_router(
+        shop_accounts.router,
+        prefix="/api",
+        tags=["店铺账号管理"]
+    )
+
     # Phase 9.4: 组件版本管理API
     from backend.routers import component_versions
     app.include_router(
