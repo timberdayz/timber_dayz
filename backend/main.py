@@ -745,7 +745,12 @@ try:
         tags=["账号管理"]
     )
 
-    from backend.routers import main_accounts, shop_accounts
+    from backend.routers import (
+        main_accounts,
+        platform_shop_discoveries,
+        shop_account_aliases,
+        shop_accounts,
+    )
     app.include_router(
         main_accounts.router,
         prefix="/api",
@@ -755,6 +760,16 @@ try:
         shop_accounts.router,
         prefix="/api",
         tags=["店铺账号管理"]
+    )
+    app.include_router(
+        shop_account_aliases.router,
+        prefix="/api",
+        tags=["店铺别名管理"]
+    )
+    app.include_router(
+        platform_shop_discoveries.router,
+        prefix="/api",
+        tags=["平台店铺ID发现"]
     )
 
     # Phase 9.4: 组件版本管理API
