@@ -58,7 +58,7 @@ export default {
   },
 
   async getUnmatchedShopAliases() {
-    return await api.get('/accounts/unmatched-shop-aliases')
+    return await api.get('/shop-account-aliases/unmatched')
   },
 
   async getStats() {
@@ -77,24 +77,4 @@ export default {
     }
   },
 
-  // compatibility wrappers for in-flight callers
-  async listAccounts(params = {}) {
-    return await api.get('/accounts/', { params })
-  },
-
-  async createAccount(data) {
-    return await this.createShopAccount(data)
-  },
-
-  async updateAccount(accountId, data) {
-    return await this.updateShopAccount(accountId, data)
-  },
-
-  async deleteAccount(accountId) {
-    return await this.deleteShopAccount(accountId)
-  },
-
-  async batchCreate(batchData) {
-    return await this.batchCreateShopAccounts(batchData)
-  },
 }

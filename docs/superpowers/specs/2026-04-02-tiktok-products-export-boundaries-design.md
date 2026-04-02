@@ -21,36 +21,25 @@ The current TikTok `products_export` flow already exists, but it is still a thin
 
 - deep-link to `/compass/product-analysis`
 - rewrite `shop_region`
-- optionally apply a quick date option
+- optionally apply a simple date action
 - trigger shared export
 
-That is useful, but it is not yet equivalent to the mature Shopee products flow. For long-term component stability, the TikTok products component needs stronger runtime boundaries and confirmation signals.
+That is useful, but it is not yet equivalent to the mature Shopee products flow. For long-term component stability, the TikTok products component needs stronger runtime boundaries and a stricter date model.
 
 ## Evidence Baseline
 
 This design is based on the recorded TikTok evidence under:
 
 - `output/playwright/work/tiktok/login-2store/`
+- `output/playwright/work/tiktok/tiktok-products-date/`
 
-Relevant product-domain artifacts:
-
-- `32-products-data-picker-before.md`
-- `33-products-data-picker-open.md`
-- `34-products-data-picker-near7day-open.md`
-- `35-products-data-picker-near7day-after.md`
-- `35-products-data-picker-near28day-open.md`
-- `35-products-data-picker-near28day-after.md`
-- `36-products-data-picker-custom-open.md`
-- `37-products-data-picker-custom-after.md`
-- `38-products-export-before.md`
-- `39-products-export-after.md`
-
-These artifacts support the following facts:
+Relevant product-domain artifacts show:
 
 - TikTok products page target is `/compass/product-analysis`
 - the page exposes a visible shop-region context
-- the page exposes a date control and quick date options
-- the page exposes an export action
+- the page exposes a dual-page custom range picker
+- the page exposes shortcut labels such as recent 7 / recent 28 days, but the same page also supports full custom range selection
+- the picker remains usable as a day-grid range calendar without entering the year panel
 - export is expected to produce a real downloaded file
 
 ## Scope
@@ -60,11 +49,12 @@ This version should cover:
 1. entry-state detection
 2. products-page normalization
 3. shop-context normalization
-4. quick-date execution with confirmation
-5. export trigger with real download result
-6. failure classification and diagnostics
+4. unified time-semantic normalization into explicit date ranges
+5. TikTok custom range execution for products pages
+6. export trigger with real download result
+7. failure classification and diagnostics
 
-This version should not implement custom-date selection logic, but it must reserve a clear interface for it.
+This version should not rely on TikTok shortcut buttons as the primary model.
 
 ## Recommended Architecture
 
@@ -76,8 +66,8 @@ Recommended component roles:
   - canonical products-domain orchestrator
   - owns stage ordering, readiness checks, confirmation checks, and stage-specific failure messages
 - `modules/platforms/tiktok/components/date_picker.py`
-  - shared TikTok date picker
-  - upgraded from click helper to confirmed quick-date operator
+  - shared TikTok product date picker
+  - upgraded from click helper to confirmed custom-range operator
 - `modules/platforms/tiktok/components/shop_switch.py`
   - shared TikTok shop-context normalizer
   - upgraded from URL rewrite helper to context confirmation component
@@ -92,9 +82,9 @@ Recommended component roles:
 1. Detect entry state
 2. Normalize to products page
 3. Normalize shop context
-4. Resolve requested date behavior
-5. Apply quick date if needed
-6. Confirm target date state
+4. Normalize requested time semantics into `start_date` / `end_date`
+5. Apply the custom range on the TikTok product picker
+6. Confirm the top summary now matches the requested range
 7. Trigger export
 8. Confirm download and return `file_path`
 
@@ -148,40 +138,66 @@ Success requires:
 
 This makes shop switching a context-confirmation step rather than only a transport step.
 
+## Unified Time Semantics
+
+TikTok product pages should use the same business time semantics as Shopee:
+
+- `today`
+- `yesterday`
+- `last_7_days`
+- `last_30_days`
+- `daily`
+- `weekly`
+- `monthly`
+
+TikTok does not need a separate business concept for `last_28_days`, even if the UI exposes that label. The external semantic model stays aligned with Shopee, and TikTok implements it through custom date ranges.
+
+Examples for `2026-04-02`:
+
+- `today` -> `2026-04-02 ~ 2026-04-02`
+- `yesterday` -> `2026-04-01 ~ 2026-04-01`
+- `last_7_days` -> `2026-03-27 ~ 2026-04-02`
+- `last_30_days` -> `2026-03-04 ~ 2026-04-02`
+
 ## Date Picker Design
 
-This first mature TikTok version supports quick date options only.
+TikTok product pages should not be modeled around shortcut-button clicks. They should be modeled as a dual-page custom range picker that executes normalized time ranges.
 
-Supported mappings:
+The product date picker should separate these responsibilities:
 
-- `weekly -> LAST_7_DAYS`
-- `monthly -> LAST_28_DAYS`
+1. identify whether the TikTok product range picker exists
+2. open the range picker
+3. read the currently visible left and right calendar months
+4. navigate the left page to the start-date month using `< >` only
+5. navigate the right page to the end-date month using `< >` only
+6. select the start date on the left page
+7. select the end date on the right page
+8. confirm the collapsed page summary now matches the requested range
 
-For `daily` or explicit custom requests:
+## Date Navigation Constraints
 
-- do not attempt unsupported custom-date selection
-- expose a clear interface and state path for later implementation
+To reduce ambiguity and avoid fallback-heavy logic, the date model should enforce:
 
-The date picker should separate four responsibilities:
+- start date must always be selected on the left page
+- end date must always be selected on the right page
+- left-page navigation uses `< >` month navigation only
+- right-page navigation uses `< >` month navigation only
+- the implementation must not click the header text to enter the year panel
+- the implementation must not use `<< >>` year navigation in the primary implementation
 
-1. identify whether the shared TikTok products date control exists
-2. open the date panel
-3. execute the target quick option
-4. confirm the page has reached the target date state
-
-The last step is the key Shopee-derived discipline.
+This mirrors the Shopee principle of using a narrow, explicit model rather than broad fallback heuristics. If the strict model cannot reach the target state, the operation should fail clearly instead of guessing.
 
 ## Date Confirmation Signals
 
-The date action is not complete when the click succeeds. It is complete only when the resulting page state is confirmed.
+The date action is not complete when the clicks succeed. It is complete only when the resulting page state is confirmed.
 
 Preferred confirmation signals, in order:
 
-1. summary text or trigger text matches the target quick date state
-2. quick option shows active or selected state
-3. panel closes and the visible trigger settles on the expected range text
+1. collapsed top summary text matches the normalized `start_date` / `end_date`
+2. panel closes after the second date is selected
+3. reopened panel visually highlights the same range
 
-If the click succeeds but no confirmation signal appears within the allowed wait window, the operation should fail as `date state not confirmed`.
+If the date clicks complete but the collapsed summary does not match the requested range within the allowed wait window, the operation should fail as `date state not confirmed`.
 
 ## Export Design
 
@@ -205,7 +221,7 @@ Failures should be explicit and stage-scoped. At minimum:
 - `products page not ready`
 - `shop switch failed`
 - `date picker open failed`
-- `date option apply failed`
+- `date range apply failed`
 - `date state not confirmed`
 - `export button not found`
 - `download not observed`
@@ -221,20 +237,24 @@ The redesign should be driven by tests that verify boundaries, not only delegati
 - entry-state detection does not misclassify transient login shells
 - non-products entry deep-links to canonical products page
 - shop normalization failure stops the flow before export
-- already-satisfied quick date skips redundant execution
-- quick-date execution waits for confirmation
+- current range already satisfied causes the date stage to skip
+- custom range execution waits for confirmation
 - missing confirmation prevents export
 - export returns real `file_path`
 - missing export button or missing download returns explicit failure
 
 ### Date Picker Tests
 
-- products page date control can be found and opened
-- `LAST_7_DAYS` applies successfully
-- `LAST_28_DAYS` applies successfully
-- already-active target option can be recognized and skipped
-- click without confirmation fails clearly
-- custom-date requests remain unsupported but explicit
+- normalized `today / yesterday / last_7_days / last_30_days` resolve to explicit date ranges
+- the product picker opens into a dual-page day-grid calendar
+- left-page month can be read accurately
+- right-page month can be read accurately
+- left-page month can be navigated to the start month using `< >` only
+- right-page month can be navigated to the end month using `< >` only
+- start date is selected only on the left page
+- end date is selected only on the right page
+- summary confirmation matches the requested range
+- no logic depends on clicking the header text to enter the year panel
 
 ### Shop Switch Tests
 
@@ -247,7 +267,9 @@ The redesign should be driven by tests that verify boundaries, not only delegati
 
 This redesign does not include:
 
-- TikTok custom-date selection automation
+- shortcut-button-first TikTok date modeling
+- header-click year-panel navigation in the primary implementation
+- `<< >>` year navigation in the primary implementation
 - premature extraction of a cross-platform shared products export base
 - copying Shopee selectors or UI widgets into TikTok
 
@@ -259,6 +281,7 @@ The first implementation focus should be:
 
 - stronger entry-state handling
 - stronger shop-context confirmation
-- quick-date execution with explicit confirmation
+- shared time-semantic normalization into explicit ranges
+- dual-page custom-range execution with left-start / right-end discipline
+- summary-based confirmation after range selection
 - real download-based export success
-- future-ready hooks for custom-date support

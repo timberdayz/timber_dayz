@@ -6,7 +6,12 @@ from typing import Any
 
 from modules.components.base import ExecutionContext
 from modules.components.export.base import build_standard_output_root
-from modules.platforms.shopee.components.business_analysis_common import build_domain_path
+from modules.platforms.shopee.components.business_analysis_common import (
+    build_domain_path,
+    granularity_label,
+    normalize_time_request,
+    preset_label,
+)
 from modules.platforms.shopee.components.products_config import ProductsSelectors
 from modules.platforms.shopee.components.products_export import ShopeeProductsExport
 
@@ -40,6 +45,55 @@ class ShopeeAnalyticsExport(ShopeeProductsExport):
             await page.wait_for_timeout(1200)
         if not self._products_page_looks_ready(str(getattr(page, "url", "") or "")):
             raise RuntimeError("analytics overview page is not ready")
+
+    def _target_date_label(self, config: dict[str, Any]) -> str:
+        time_selection = config.get("time_selection")
+        if isinstance(time_selection, dict):
+            if str(time_selection.get("mode") or "").strip().lower() == "preset" and time_selection.get("preset"):
+                normalized = normalize_time_request(
+                    "analytics",
+                    time_mode="preset",
+                    value=str(time_selection["preset"]),
+                )
+                return preset_label(normalized["value"])
+
+        if config.get("date_preset"):
+            normalized = normalize_time_request(
+                "analytics",
+                time_mode="preset",
+                value=str(config["date_preset"]),
+            )
+            return preset_label(normalized["value"])
+
+        if "preset" in config:
+            normalized = normalize_time_request(
+                "analytics",
+                time_mode="preset",
+                value=str(config["preset"]),
+            )
+            return preset_label(normalized["value"])
+
+        granularity = str(config.get("granularity") or "daily").strip().lower()
+        preset_by_granularity = {
+            "day": "yesterday",
+            "daily": "yesterday",
+            "d": "yesterday",
+            "week": "last_7_days",
+            "weekly": "last_7_days",
+            "w": "last_7_days",
+            "month": "last_30_days",
+            "monthly": "last_30_days",
+            "m": "last_30_days",
+        }
+        preset_value = preset_by_granularity.get(granularity)
+        if preset_value:
+            return preset_label(preset_value)
+        normalized = normalize_time_request(
+            "analytics",
+            time_mode="granularity",
+            value=granularity,
+        )
+        return granularity_label(normalized["value"])
 
     async def _wait_download_complete(self, page: Any) -> str | None:
         waiter = self._download_waiter

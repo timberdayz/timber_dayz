@@ -1372,14 +1372,6 @@ async def test_component_version(
             shop_payload = None
 
         if account_info is None:
-            from modules.core.db import PlatformAccount
-
-            account_result = await db.execute(
-                select(PlatformAccount).where(
-                    PlatformAccount.account_id == effective_shop_account_id
-                )
-            )
-            account = account_result.scalar_one_or_none()
 
             if not account:
                 return error_response(
@@ -1388,7 +1380,6 @@ async def test_component_version(
                     status_code=404,
                     recovery_suggestion="请检查店铺账号ID",
                 )
-            account_platform = account.platform
 
         # #region agent log
         with open(log_file, "a", encoding="utf-8") as f:

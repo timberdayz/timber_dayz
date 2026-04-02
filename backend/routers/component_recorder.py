@@ -50,7 +50,7 @@ from backend.schemas.component_recorder import (
     RecorderSaveRequest,
     GeneratePythonRequest,
 )
-from modules.core.db import PlatformAccount, ComponentVersion, ComponentTestHistory
+from modules.core.db import ComponentVersion, ComponentTestHistory
 
 logger = get_logger(__name__)
 
@@ -640,7 +640,7 @@ def _enrich_steps_semantics(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]
 # ==================== API Endpoints ====================
 
 def _launch_inspector_recorder_subprocess(
-    account: PlatformAccount,
+    account: Any,
     platform: str,
     component_type: str
 ):
@@ -749,7 +749,7 @@ def _launch_inspector_recorder_subprocess(
 
 
 def _launch_playwright_browser_subprocess(
-    account: PlatformAccount,
+    account: Any,
     platform: str,
     component_type: str
 ):
@@ -818,11 +818,6 @@ async def start_recording(
         except Exception:
             account = None
 
-        if account is None:
-            result = await db.execute(
-                select(PlatformAccount).where(PlatformAccount.account_id == request.account_id)
-            )
-            account = result.scalar_one_or_none()
         
         if not account:
             return error_response(

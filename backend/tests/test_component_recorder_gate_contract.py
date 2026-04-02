@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
 import backend.routers.component_recorder as component_recorder_router
 
 from backend.routers.component_recorder import (
@@ -17,7 +18,6 @@ from backend.schemas.component_recorder import (
     RecorderStartRequest,
     RecorderValidateSegmentRequest,
 )
-from modules.core.db import PlatformAccount
 
 
 def test_build_recorder_status_payload_exposes_gate_fields():
@@ -162,7 +162,7 @@ async def test_start_recording_returns_starting_not_ready(monkeypatch):
         _FakeThread,
     )
 
-    account = PlatformAccount(
+    account = SimpleNamespace(
         account_id="acc-1",
         platform="miaoshou",
         store_name="Miaoshou Test Store",
@@ -173,10 +173,41 @@ async def test_start_recording_returns_starting_not_ready(monkeypatch):
         enabled=True,
     )
 
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = account
     db = MagicMock()
-    db.execute = AsyncMock(return_value=result)
+    db.execute = AsyncMock()
+
+    class _FakeShopLoader:
+        async def load_shop_account_async(self, account_id, db_session):
+            assert account_id == "acc-1"
+            return {
+                "main_account": {
+                    "main_account_id": "main-1",
+                    "platform": "miaoshou",
+                    "username": "user@example.com",
+                    "login_url": "https://erp.91miaoshou.com/login",
+                },
+                "shop_context": {
+                    "shop_account_id": "acc-1",
+                    "platform": "miaoshou",
+                    "store_name": "Miaoshou Test Store",
+                    "enabled": True,
+                    "shop_region": "",
+                    "platform_shop_id": None,
+                },
+                "capabilities": {},
+                "compat_account": {
+                    "account_id": "acc-1",
+                    "email": "",
+                    "phone": "",
+                    "region": "CN",
+                    "currency": "CNY",
+                },
+            }
+
+    monkeypatch.setattr(
+        "backend.services.shop_account_loader_service.get_shop_account_loader_service",
+        lambda: _FakeShopLoader(),
+    )
 
     body = await start_recording(
         request=RecorderStartRequest(
@@ -316,7 +347,7 @@ def test_launch_inspector_recorder_subprocess_uses_prepared_account_info(monkeyp
         _fake_json_dump,
     )
 
-    account = PlatformAccount(
+    account = SimpleNamespace(
         account_id="acc-1",
         platform="miaoshou",
         store_name="Miaoshou Test Store",
@@ -334,3 +365,15 @@ def test_launch_inspector_recorder_subprocess_uses_prepared_account_info(monkeyp
         captured["config"]["account_info"]["login_url"]
         == "https://erp.91miaoshou.com"
     )
+
+
+def test_component_recorder_router_uses_shop_account_loader_without_platform_account_fallback():
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "backend/routers/component_recorder.py"
+    ).read_text(encoding="utf-8")
+
+    assert "get_shop_account_loader_service" in text
+    assert "select(PlatformAccount)" not in text

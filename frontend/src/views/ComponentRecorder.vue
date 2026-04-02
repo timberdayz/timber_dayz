@@ -1871,10 +1871,14 @@ const loadAccounts = async () => {
       params.platform = recorderForm.value.platform;
     }
 
-    const response = await accountsApi.listAccounts(params);
+    const response = await accountsApi.listShopAccounts(params);
 
     // 新API直接返回账号数组
-    accounts.value = response || [];
+    accounts.value = (response || []).map((account) => ({
+      ...account,
+      account_id: account.shop_account_id || account.account_id,
+      name: account.store_name || account.name || account.shop_account_id || account.account_id,
+    }));
 
     console.log(
       `[ComponentRecorder] 加载了 ${accounts.value.length} 个账号（平台：${

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rebuild the TikTok products-domain export flow into a mature platform-specific component with explicit entry-state checks, confirmed shop normalization, confirmed quick-date execution, and real download-based export success.
+**Goal:** Rebuild the TikTok products-domain export flow into a mature platform-specific component with explicit entry-state checks, confirmed shop normalization, custom date-range execution based on shared Shopee-aligned time semantics, and real download-based export success.
 
-**Architecture:** Keep TikTok components platform-specific while upgrading their runtime boundaries to follow Shopee-grade operational discipline. `products_export.py` becomes the canonical orchestrator, `date_picker.py` confirms quick-date state instead of only clicking controls, `shop_switch.py` confirms normalized region context instead of only rewriting the URL, and `export.py` remains the download executor.
+**Architecture:** Keep TikTok components platform-specific while upgrading their runtime boundaries to follow Shopee-grade operational discipline. `products_export.py` becomes the canonical orchestrator, `date_picker.py` becomes a custom-range picker that normalizes all time semantics into `start_date/end_date`, `shop_switch.py` confirms normalized region context instead of only rewriting the URL, and `export.py` remains the download executor.
 
 **Tech Stack:** Python, async Playwright component pattern, pytest
 
@@ -21,16 +21,16 @@
 Add tests for:
 - product-page readiness detection using URL + page signals
 - shop-switch failure preventing export
-- current quick-date already satisfied causing date stage skip
-- quick-date confirmation failure preventing export
+- current date range already satisfied causing date stage skip
+- custom date-range confirmation failure preventing export
 - export success requiring non-empty `file_path`
-- unsupported custom-date request staying explicit and non-destructive
+- unified time semantics (`today`, `yesterday`, `last_7_days`, `last_30_days`) resolving into explicit custom ranges
 
 - [ ] **Step 2: Run the products-export test file and confirm new tests fail for the expected reasons**
 
 Run: `pytest backend/tests/test_tiktok_products_export_component.py -q`
 
-Expected: FAIL on the newly added assertions for readiness, confirmation, or failure classification.
+Expected: FAIL on the newly added assertions for readiness, range normalization, or failure classification.
 
 - [ ] **Step 3: Commit the red test state**
 
@@ -39,38 +39,43 @@ git add backend/tests/test_tiktok_products_export_component.py
 git commit -m "test: expand tiktok products export boundary coverage"
 ```
 
-### Task 2: Upgrade the date-picker contract from click helper to confirmed quick-date operator
+### Task 2: Upgrade the date-picker contract from click helper to confirmed custom-range operator
 
 **Files:**
 - Modify: `F:\Vscode\python_programme\AI_code\xihong_erp\backend\tests\test_tiktok_date_picker_component.py`
 - Modify: `F:\Vscode\python_programme\AI_code\xihong_erp\modules\platforms\tiktok\components\date_picker.py`
 
-- [ ] **Step 1: Add failing tests for current-state recognition and post-click confirmation**
+- [ ] **Step 1: Add failing tests for custom-range navigation and post-click confirmation**
 
 Add tests for:
-- detecting when `LAST_7_DAYS` is already active
-- detecting when `LAST_28_DAYS` is already active
-- failing when panel opens and click succeeds but no confirmation signal appears
-- keeping custom-date behavior explicit without pretending success
+- normalizing `today`, `yesterday`, `last_7_days`, and `last_30_days` into explicit date ranges
+- reading left-page and right-page visible months from the open dual-page picker
+- navigating the left page to the start month using `< >` only
+- navigating the right page to the end month using `< >` only
+- selecting the start date on the left page only
+- selecting the end date on the right page only
+- failing when date clicks complete but summary confirmation never appears
 
 - [ ] **Step 2: Run the date-picker test file and confirm failure**
 
 Run: `pytest backend/tests/test_tiktok_date_picker_component.py -q`
 
-Expected: FAIL on the new state-recognition or confirmation assertions.
+Expected: FAIL on the new normalization, pane-navigation, or confirmation assertions.
 
-- [ ] **Step 3: Implement minimal confirmation-aware date-picker logic**
+- [ ] **Step 3: Implement minimal confirmation-aware custom-range date-picker logic**
 
 Implement focused helpers in `modules/platforms/tiktok/components/date_picker.py`:
 - current page kind detection for products pages
 - date-trigger text reading
-- current quick-option recognition
-- panel-open detection
-- quick-option apply
-- post-apply confirmation wait
-- unsupported custom-date state path
+- current top summary parsing
+- range normalization into `start_date` / `end_date`
+- dual-pane month reading
+- left-pane and right-pane month navigation using `< >` only
+- left-pane start-date selection
+- right-pane end-date selection
+- post-apply summary confirmation
 
-Do not implement custom-date selection in this task.
+Do not implement header-click year-panel logic or `<< >>` year navigation in this task.
 
 - [ ] **Step 4: Run the date-picker tests and confirm green**
 
@@ -82,7 +87,7 @@ Expected: PASS
 
 ```bash
 git add backend/tests/test_tiktok_date_picker_component.py modules/platforms/tiktok/components/date_picker.py
-git commit -m "feat: harden tiktok quick date picker boundaries"
+git commit -m "feat: harden tiktok custom range date picker boundaries"
 ```
 
 ### Task 3: Upgrade shop switching from URL rewrite to confirmed context normalization
@@ -127,7 +132,7 @@ git add backend/tests/test_tiktok_shop_switch_component.py modules/platforms/tik
 git commit -m "feat: confirm tiktok shop normalization state"
 ```
 
-### Task 4: Rebuild the products orchestrator around staged readiness and confirmation
+### Task 4: Rebuild the products orchestrator around staged readiness and custom-range confirmation
 
 **Files:**
 - Modify: `F:\Vscode\python_programme\AI_code\xihong_erp\modules\platforms\tiktok\components\products_export.py`
@@ -142,8 +147,8 @@ Add helpers for:
 - entry-state detection using URL + visible signals
 - canonical products deep-link resolution
 - products-page readiness detection after navigation
-- quick-date request resolution from config
-- explicit custom-date reserved path
+- shared time-semantic normalization from config into `start_date/end_date`
+- current range summary recognition and skip path when already satisfied
 
 - [ ] **Step 2: Implement staged orchestration**
 
@@ -153,8 +158,9 @@ Update `run()` to:
 - stop on stable login-required state
 - require products-page readiness
 - normalize shop context and stop on failure
-- skip date execution when already satisfied
-- apply supported quick date and require confirmation
+- normalize time request into a custom date range
+- skip date execution when the current summary already matches
+- apply the custom range through the TikTok dual-page picker and require confirmation
 - trigger export only after earlier stages succeed
 - require non-empty `file_path`
 

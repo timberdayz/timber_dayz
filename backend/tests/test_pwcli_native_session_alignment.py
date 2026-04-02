@@ -35,6 +35,18 @@ def test_load_storage_state_payload_accepts_wrapped_session_manager_format(tmp_p
     assert payload == {"cookies": [{"name": "a"}], "origins": []}
 
 
+def test_maybe_load_default_storage_state_returns_false_for_blank_json_file(tmp_path: Path) -> None:
+    payload_path = tmp_path / "storage_state.json"
+    payload_path.write_text("", encoding="utf-8")
+
+    loaded = pwcli_native.maybe_load_default_storage_state(
+        object(),
+        {"default_state_path": str(payload_path)},
+    )
+
+    assert loaded is False
+
+
 def test_parse_open_args_accepts_account_id_option() -> None:
     url, headed, profile_dir, account_id = pwcli_native.parse_open_args(
         ["https://seller.tiktokglobalshop.com/", "--headed", "--account-id", "Tiktok 2店"]

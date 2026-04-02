@@ -13,7 +13,10 @@ $ErrorActionPreference = "Stop"
 
 $Helper = Join-Path $PSScriptRoot "pwcli_workflow.py"
 $Pwcli = Join-Path $PSScriptRoot "pwcli.ps1"
-$ResolvedSession = [string]::IsNullOrWhiteSpace($Session) ? $null : $Session.Trim()
+$ResolvedSession = $null
+if (-not [string]::IsNullOrWhiteSpace($Session)) {
+    $ResolvedSession = $Session.Trim()
+}
 
 function Invoke-PwcliCapture {
     param(

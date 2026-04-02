@@ -78,3 +78,24 @@ def test_collection_tasks_cancel_button_targets_verification_required_tasks():
 
     assert 'cancel-text="取消任务"' in text
     assert "await collectionApi.cancelTask(currentTask.value.task_id)" in text
+
+
+def test_component_versions_loads_shop_accounts_directly():
+    text = (PROJECT_ROOT / "frontend/src/views/ComponentVersions.vue").read_text(encoding="utf-8")
+
+    assert "listShopAccounts" in text
+    assert "listAccounts({" not in text
+
+
+def test_component_recorder_loads_shop_accounts_directly():
+    text = (PROJECT_ROOT / "frontend/src/views/ComponentRecorder.vue").read_text(encoding="utf-8")
+
+    assert "listShopAccounts" in text
+    assert "listAccounts(params)" not in text
+
+
+def test_accounts_api_uses_new_unmatched_alias_route():
+    text = (PROJECT_ROOT / "frontend/src/api/accounts.js").read_text(encoding="utf-8")
+
+    assert "/shop-account-aliases/unmatched" in text
+    assert "/accounts/unmatched-shop-aliases" not in text

@@ -1090,7 +1090,7 @@ const loadTestAccounts = async (componentName) => {
     
     // 加载该平台的店铺账号
     const accountsApi = await import('@/api/accounts')
-    const response = await accountsApi.default.listAccounts({
+    const response = await accountsApi.default.listShopAccounts({
       platform: platform,
       enabled: true
     })
@@ -1099,7 +1099,10 @@ const loadTestAccounts = async (componentName) => {
     console.log('[DEBUG] API response type:', Array.isArray(response) ? 'array' : typeof response)
     
     // BUG FIX: response已经是数组，不需要.data
-    testAccounts.value = response || []
+    testAccounts.value = (response || []).map((account) => ({
+      ...account,
+      account_id: account.shop_account_id || account.account_id,
+    }))
     
     console.log('[DEBUG] Final testAccounts:', testAccounts.value)
     console.log('[DEBUG] testAccounts count:', testAccounts.value.length)

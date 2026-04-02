@@ -78,3 +78,14 @@ async def test_claim_unmatched_alias_binds_to_shop_account(alias_client):
     payload = response.json()
     assert payload["platform"] == "shopee"
     assert payload["alias_value"] == "HongXi SG Raw"
+
+
+def test_shop_account_aliases_router_exposes_unmatched_route():
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "backend/routers/shop_account_aliases.py"
+    ).read_text(encoding="utf-8")
+
+    assert '@router.get("/unmatched"' in text

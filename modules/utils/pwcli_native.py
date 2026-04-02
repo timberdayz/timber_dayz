@@ -270,7 +270,11 @@ def maybe_load_default_storage_state(context, metadata: dict[str, Any]) -> bool:
     path = Path(state_path)
     if not path.exists():
         return False
-    payload = load_storage_state_payload(path)
+    try:
+        payload = load_storage_state_payload(path)
+    except json.JSONDecodeError:
+        print(f"Warning: ignoring invalid storage state file: {path}", file=sys.stderr)
+        return False
     _apply_storage_state_payload(context, metadata, payload)
     return True
 

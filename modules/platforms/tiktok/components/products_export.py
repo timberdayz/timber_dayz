@@ -83,32 +83,27 @@ class TiktokProductsExport(ExportComponent):
     def _date_option_from_context(self) -> DateOption | None:
         config = self.ctx.config or {}
         params = config.get("params") or {}
-
-        raw = str(
+        raw_candidate = (
             params.get("date_option")
-            or params.get("time_selection")
+            or params.get("date_preset")
+            or config.get("date_preset")
             or params.get("granularity")
-            or config.get("time_selection")
             or config.get("granularity")
             or ""
-        ).strip().lower()
+        )
+        raw = str(raw_candidate or "").strip().lower()
 
+        if raw in {"today", "today_realtime"}:
+            return DateOption.TODAY_REALTIME
+        if raw in {"yesterday"}:
+            return DateOption.YESTERDAY
         if raw in {"weekly", "last_7_days", "last7days", "last-7-days"}:
             return DateOption.LAST_7_DAYS
-        if raw in {"monthly", "last_28_days", "last28days", "last-28-days"}:
-            return DateOption.LAST_28_DAYS
+        if raw in {"monthly", "last_30_days", "last30days", "last-30-days", "last_28_days", "last28days", "last-28-days"}:
+            return DateOption.LAST_30_DAYS
+        if raw in {"daily", "day"}:
+            return DateOption.YESTERDAY
         return None
-
-    def _custom_date_requested(self) -> bool:
-        config = self.ctx.config or {}
-        params = config.get("params") or {}
-        for candidate in (
-            params.get("time_selection"),
-            config.get("time_selection"),
-        ):
-            if isinstance(candidate, dict) and str(candidate.get("mode") or "").strip().lower() == "custom":
-                return True
-        return False
 
     async def _run_shop_switch(self, page: Any):
         return await TiktokShopSwitch(self.ctx).run(page)
@@ -117,11 +112,10 @@ class TiktokProductsExport(ExportComponent):
         return await TiktokDatePicker(self.ctx).run(page, option)
 
     async def _date_selection_already_satisfied(self, page: Any, option: DateOption) -> bool:
-        current = await TiktokDatePicker(self.ctx)._current_option(page)
-        return current == option
+        return await TiktokDatePicker(self.ctx)._current_range_matches(page, option)
 
     async def _confirm_date_selection(self, page: Any, option: DateOption) -> bool:
-        return await TiktokDatePicker(self.ctx)._confirm_option_applied(page, option)
+        return await TiktokDatePicker(self.ctx)._current_range_matches(page, option)
 
     async def _run_export(self, page: Any):
         return await TiktokExport(self.ctx).run(page, mode=ExportMode.STANDARD)
@@ -178,13 +172,6 @@ class TiktokProductsExport(ExportComponent):
                     message=getattr(switch_result, "message", "shop switch failed"),
                     file_path=None,
                 )
-
-        if self._custom_date_requested():
-            return ExportResult(
-                success=False,
-                message="custom date is reserved for future tiktok products support",
-                file_path=None,
-            )
 
         date_option = self._date_option_from_context()
         if date_option is not None:

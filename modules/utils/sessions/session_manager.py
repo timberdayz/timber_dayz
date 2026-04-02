@@ -9,6 +9,8 @@
 """
 
 import json
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Dict, Optional, Any, Union, List
@@ -16,6 +18,25 @@ from datetime import datetime, timedelta
 from loguru import logger
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f"{path.stem}-",
+        suffix=".tmp",
+        dir=str(path.parent),
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
 
 
 class SessionManager:
@@ -150,8 +171,7 @@ class SessionManager:
             }
             
             # 保存到文件
-            with open(session_file, 'w', encoding='utf-8') as f:
-                json.dump(session_data, f, indent=2, ensure_ascii=False)
+            _write_json_atomic(session_file, session_data)
             
             logger.success(f"会话已保存: {platform}/{account_id}")
             return True
@@ -199,8 +219,7 @@ class SessionManager:
             
             # 更新最后使用时间
             session_data["last_used_at"] = time.time()
-            with open(session_file, 'w', encoding='utf-8') as f:
-                json.dump(session_data, f, indent=2, ensure_ascii=False)
+            _write_json_atomic(session_file, session_data)
             
             logger.info(f"会话已加载: {platform}/{account_id}")
             return session_data

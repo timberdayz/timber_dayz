@@ -1,4 +1,5 @@
 import types
+from pathlib import Path
 
 from backend.services.component_test_service import ComponentTestService
 from tools.test_component import ComponentTester
@@ -61,3 +62,25 @@ def test_prepare_account_info_preserves_phone_email_and_shop_region(monkeypatch)
     assert account_info["email"] == "chenzeweinbnb@163.com"
     assert account_info["phone"] == "18876067809"
     assert account_info["shop_region"] == "SG"
+
+
+def test_component_versions_router_uses_shop_account_loader_without_platform_account_fallback():
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "backend/routers/component_versions.py"
+    ).read_text(encoding="utf-8")
+
+    assert "get_shop_account_loader_service" in text
+    assert "select(PlatformAccount)" not in text
+
+
+def test_account_loader_service_is_backed_by_main_and_shop_accounts():
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "backend/services/account_loader_service.py"
+    ).read_text(encoding="utf-8")
+
+    assert "MainAccount" in text
+    assert "ShopAccount" in text
+    assert "ShopAccountCapability" in text
+    assert "PlatformAccount" not in text
