@@ -62,6 +62,14 @@ class TiktokShopSwitch:
                 continue
         return None
 
+    def _display_matches_region(self, display_name: str | None, region: str | None) -> bool:
+        if not region:
+            return False
+        text = str(display_name or "").strip().upper()
+        if not text:
+            return False
+        return text.startswith(f"{region} ") or text == region
+
     def _target_region(self, current_region: str | None) -> Optional[str]:
         config = self.ctx.config or {}
         account = self.ctx.account or {}
@@ -94,8 +102,14 @@ class TiktokShopSwitch:
             current_url = str(getattr(page, "url", "") or "")
             current_region = self._current_region_from_url(current_url)
 
+        if current_region != target_region:
+            return ShopSelectResult(success=False, message="failed to confirm target shop region")
+
         display_name = await self._current_shop_display_name(page, current_region)
         region = current_region or target_region
+
+        if not self._display_matches_region(display_name, region):
+            return ShopSelectResult(success=False, message="failed to confirm target shop region")
 
         config = self.ctx.config or {}
         config["shop_region"] = region

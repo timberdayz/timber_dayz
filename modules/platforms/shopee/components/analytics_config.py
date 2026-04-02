@@ -46,6 +46,11 @@ SHOP_SWITCH_TRIGGER_SELECTORS: Final[tuple[str, ...]] = (
 )
 
 DATE_PICKER_TRIGGER_SELECTORS: Final[tuple[str, ...]] = (
+    'div:has-text("GMT+")',
+    'button:has-text("GMT+")',
+    '[role="button"]:has-text("GMT+")',
+    '[class*="date"]:has-text("GMT+")',
+    '[class*="time"]:has-text("GMT+")',
     'button:has-text("\u6628\u5929")',
     'button:has-text("\u8fd17\u5929")',
     'button:has-text("\u8fd130\u5929")',

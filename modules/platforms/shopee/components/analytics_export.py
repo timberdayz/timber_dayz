@@ -32,11 +32,9 @@ class ShopeeAnalyticsExport(ShopeeProductsExport):
         if self._products_page_looks_ready(str(getattr(page, "url", "") or "")):
             return
         target_url = f"https://seller.shopee.cn{build_domain_path('analytics')}"
-        await page.goto(target_url, wait_until="domcontentloaded")
-        if hasattr(page, "wait_for_load_state"):
-            await page.wait_for_load_state("networkidle", timeout=20000)
+        await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
         if hasattr(page, "wait_for_timeout"):
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(1200)
         if not self._products_page_looks_ready(str(getattr(page, "url", "") or "")):
             raise RuntimeError("analytics overview page is not ready")
 

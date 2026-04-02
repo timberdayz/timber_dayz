@@ -122,7 +122,9 @@ async def test_tiktok_products_export_navigates_to_products_page_and_runs_helper
     export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", AsyncMock(return_value=False), raising=False)
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_confirm_date_selection", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_run_export", export_mock)
 
     result = await component.run(page)
@@ -181,7 +183,9 @@ async def test_tiktok_products_export_does_not_treat_blank_login_shell_as_stable
 
     monkeypatch.setattr(page, "wait_for_timeout", _advance_page)
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", AsyncMock(return_value=False), raising=False)
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_confirm_date_selection", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_run_export", export_mock)
 
     result = await component.run(page)
@@ -203,7 +207,9 @@ async def test_tiktok_products_export_falls_back_to_current_url_region_before_de
     export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", AsyncMock(return_value=False), raising=False)
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_confirm_date_selection", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_run_export", export_mock)
 
     result = await component.run(page)
@@ -227,7 +233,9 @@ async def test_tiktok_products_export_uses_generic_products_deep_link_when_no_re
     export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
 
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", AsyncMock(return_value=False), raising=False)
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_confirm_date_selection", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_run_export", export_mock)
 
     result = await component.run(page)
@@ -283,7 +291,9 @@ async def test_tiktok_products_export_waits_for_entry_state_to_settle_before_bra
 
     monkeypatch.setattr(page, "wait_for_timeout", _advance_page)
     monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", AsyncMock(return_value=False), raising=False)
     monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_confirm_date_selection", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_run_export", export_mock)
 
     result = await component.run(page)
@@ -316,3 +326,94 @@ async def test_tiktok_products_export_skips_date_picker_when_no_supported_quick_
     date_mock.assert_not_awaited()
     export_mock.assert_awaited_once()
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_skips_quick_date_apply_when_current_state_already_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "weekly"}))
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    date_state_mock = AsyncMock(return_value=True)
+    date_mock = AsyncMock()
+    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/products.xlsx"))
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    switch_mock.assert_awaited_once()
+    date_state_mock.assert_awaited_once_with(page, DateOption.LAST_7_DAYS)
+    date_mock.assert_not_awaited()
+    export_mock.assert_awaited_once()
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_stops_when_date_confirmation_does_not_settle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    component = TiktokProductsExport(_ctx({"shop_region": "SG", "granularity": "monthly"}))
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    date_state_mock = AsyncMock(return_value=False)
+    date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_28_DAYS))
+    confirm_mock = AsyncMock(return_value=False)
+    export_mock = AsyncMock()
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_confirm_date_selection", confirm_mock, raising=False)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    date_state_mock.assert_awaited_once_with(page, DateOption.LAST_28_DAYS)
+    date_mock.assert_awaited_once_with(page, DateOption.LAST_28_DAYS)
+    confirm_mock.assert_awaited_once_with(page, DateOption.LAST_28_DAYS)
+    export_mock.assert_not_awaited()
+    assert result.success is False
+    assert result.message == "date state not confirmed"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_products_export_returns_explicit_message_for_reserved_custom_date_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    component = TiktokProductsExport(
+        _ctx(
+            {
+                "shop_region": "SG",
+                "granularity": "daily",
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-02-01",
+                    "end_date": "2026-02-07",
+                },
+            }
+        )
+    )
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    date_mock = AsyncMock()
+    export_mock = AsyncMock()
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    switch_mock.assert_awaited_once()
+    date_mock.assert_not_awaited()
+    export_mock.assert_not_awaited()
+    assert result.success is False
+    assert result.message == "custom date is reserved for future tiktok products support"

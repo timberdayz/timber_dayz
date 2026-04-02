@@ -99,11 +99,29 @@ class TiktokProductsExport(ExportComponent):
             return DateOption.LAST_28_DAYS
         return None
 
+    def _custom_date_requested(self) -> bool:
+        config = self.ctx.config or {}
+        params = config.get("params") or {}
+        for candidate in (
+            params.get("time_selection"),
+            config.get("time_selection"),
+        ):
+            if isinstance(candidate, dict) and str(candidate.get("mode") or "").strip().lower() == "custom":
+                return True
+        return False
+
     async def _run_shop_switch(self, page: Any):
         return await TiktokShopSwitch(self.ctx).run(page)
 
     async def _run_date_picker(self, page: Any, option: DateOption):
         return await TiktokDatePicker(self.ctx).run(page, option)
+
+    async def _date_selection_already_satisfied(self, page: Any, option: DateOption) -> bool:
+        current = await TiktokDatePicker(self.ctx)._current_option(page)
+        return current == option
+
+    async def _confirm_date_selection(self, page: Any, option: DateOption) -> bool:
+        return await TiktokDatePicker(self.ctx)._confirm_option_applied(page, option)
 
     async def _run_export(self, page: Any):
         return await TiktokExport(self.ctx).run(page, mode=ExportMode.STANDARD)
@@ -161,15 +179,25 @@ class TiktokProductsExport(ExportComponent):
                     file_path=None,
                 )
 
+        if self._custom_date_requested():
+            return ExportResult(
+                success=False,
+                message="custom date is reserved for future tiktok products support",
+                file_path=None,
+            )
+
         date_option = self._date_option_from_context()
         if date_option is not None:
-            date_result = await self._run_date_picker(page, date_option)
-            if not getattr(date_result, "success", False):
-                return ExportResult(
-                    success=False,
-                    message=getattr(date_result, "message", "date picker failed"),
-                    file_path=None,
-                )
+            if not await self._date_selection_already_satisfied(page, date_option):
+                date_result = await self._run_date_picker(page, date_option)
+                if not getattr(date_result, "success", False):
+                    return ExportResult(
+                        success=False,
+                        message=getattr(date_result, "message", "date picker failed"),
+                        file_path=None,
+                    )
+                if not await self._confirm_date_selection(page, date_option):
+                    return ExportResult(success=False, message="date state not confirmed", file_path=None)
 
         export_result = await self._run_export(page)
         if not getattr(export_result, "success", False):

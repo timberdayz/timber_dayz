@@ -113,3 +113,44 @@ async def test_tiktok_shop_switch_rewrites_only_shop_region_and_preserves_path_a
     assert ctx.config["shop_region"] == "MY"
     assert ctx.config["shop_name"] == "acc_my"
     assert ctx.config["shop_display_name"] == "MY Malaysia(Flora Mall)"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_shop_switch_fails_when_region_cannot_be_confirmed_after_navigation() -> None:
+    ctx = _ctx(
+        account={"label": "acc"},
+        config={"shop_region": "MY"},
+    )
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG",
+        "SG Singapore(HX Home)",
+    )
+
+    async def _stubborn_goto(url: str, wait_until: str = "domcontentloaded", timeout: int = 20000) -> None:
+        page.goto_calls.append(url)
+        page.url = "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG"
+        page.store_label = "SG Singapore(HX Home)"
+
+    page.goto = _stubborn_goto
+
+    result = await TiktokShopSwitch(ctx).run(page)
+
+    assert result.success is False
+    assert result.message == "failed to confirm target shop region"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_shop_switch_fails_when_visible_store_display_disagrees_with_region() -> None:
+    ctx = _ctx(
+        account={"label": "acc"},
+        config={"shop_region": "MY"},
+    )
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=MY",
+        "SG Singapore(HX Home)",
+    )
+
+    result = await TiktokShopSwitch(ctx).run(page)
+
+    assert result.success is False
+    assert result.message == "failed to confirm target shop region"

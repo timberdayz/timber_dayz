@@ -97,6 +97,23 @@ class TiktokDatePicker(DatePickerComponent):
             return "[data-testid='time-selector-last-28-days']"
         return None
 
+    async def _current_option(self, page: Any) -> DateOption | None:
+        for option in (DateOption.LAST_7_DAYS, DateOption.LAST_28_DAYS):
+            selector = self._quick_selector(option)
+            if not selector:
+                continue
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() > 0 and await locator.is_visible(timeout=300):
+                    return option
+            except Exception:
+                continue
+        return None
+
+    async def _confirm_option_applied(self, page: Any, option: DateOption) -> bool:
+        current = await self._current_option(page)
+        return current == option
+
     async def _apply_quick_option(self, page: Any, option: DateOption) -> bool:
         selector = self._quick_selector(option)
         if not selector:
@@ -122,10 +139,16 @@ class TiktokDatePicker(DatePickerComponent):
             return DatePickResult(success=False, message=f"unsupported quick date option: {option.value}", option=option)
 
         self._current_page_kind = kind
+        if await self._current_option(page) == option:
+            return DatePickResult(success=True, message="ok", option=option)
+
         if not await self._open_panel(page):
             return DatePickResult(success=False, message="failed to open date picker panel", option=option)
 
         if not await self._apply_quick_option(page, option):
             return DatePickResult(success=False, message="failed to apply quick date option", option=option)
+
+        if not await self._confirm_option_applied(page, option):
+            return DatePickResult(success=False, message="failed to confirm quick date option", option=option)
 
         return DatePickResult(success=True, message="ok", option=option)

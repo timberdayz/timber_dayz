@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from modules.components.base import ExecutionContext
@@ -17,9 +19,10 @@ def _ctx(config: dict | None = None) -> ExecutionContext:
 
 
 class _FakeLocator:
-    def __init__(self, *, visible: bool = False, on_click=None) -> None:
+    def __init__(self, *, visible: bool = False, text: str = "", on_click=None) -> None:
         self.visible = visible
         self.clicked = 0
+        self.text = text
         self._on_click = on_click
 
     @property
@@ -36,6 +39,12 @@ class _FakeLocator:
         self.clicked += 1
         if self._on_click:
             self._on_click()
+
+    async def text_content(self) -> str:
+        return self.text
+
+    async def inner_text(self, timeout: int | None = None) -> str:
+        return self.text
 
 
 class _FakePage:
@@ -131,3 +140,43 @@ async def test_tiktok_date_picker_applies_last_28_days_for_service_analytics() -
     assert result.success is True
     assert trigger.clicked == 1
     assert quick.clicked == 1
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_skips_click_when_last_7_days_is_already_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokDatePicker(_ctx())
+    page, trigger, quick = _build_shared_picker_page(
+        "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG",
+        "[data-testid='time-selector-last-7-days']",
+    )
+
+    monkeypatch.setattr(component, "_current_option", AsyncMock(return_value=DateOption.LAST_7_DAYS), raising=False)
+
+    result = await component.run(page, DateOption.LAST_7_DAYS)
+
+    assert result.success is True
+    assert trigger.clicked == 0
+    assert quick.clicked == 0
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_fails_when_click_does_not_produce_confirmed_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokDatePicker(_ctx())
+    page, trigger, quick = _build_shared_picker_page(
+        "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG",
+        "[data-testid='time-selector-last-28-days']",
+    )
+
+    monkeypatch.setattr(component, "_current_option", AsyncMock(return_value=None), raising=False)
+    monkeypatch.setattr(component, "_confirm_option_applied", AsyncMock(return_value=False), raising=False)
+
+    result = await component.run(page, DateOption.LAST_28_DAYS)
+
+    assert trigger.clicked == 1
+    assert quick.clicked == 1
+    assert result.success is False
+    assert result.message == "failed to confirm quick date option"
