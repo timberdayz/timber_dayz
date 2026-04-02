@@ -57,6 +57,7 @@ def test_account_management_uses_main_and_shop_account_terms():
     assert "主账号ID" in text
     assert "店铺账号ID" in text
     assert "平台店铺ID" in text
+    assert "parent_account: [{ required: true" in text
 
 
 def test_component_versions_uses_test_shop_term():

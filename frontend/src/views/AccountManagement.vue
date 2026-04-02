@@ -503,6 +503,7 @@ const accountForm = reactive({
 // 表单验证规则（动态：编辑时密码可选，创建时必填）
 const formRules = computed(() => ({
   account_id: [{ required: true, message: '请输入账号ID', trigger: 'blur' }],
+  parent_account: [{ required: true, message: '请输入主账号ID', trigger: 'blur' }],
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
   store_name: [{ required: true, message: '请输入店铺名称', trigger: 'blur' }],
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],

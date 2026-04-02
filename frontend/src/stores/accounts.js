@@ -18,6 +18,10 @@ function normalizeShopAccount(shopAccount) {
   }
 }
 
+function resolveMainAccountId(payload) {
+  return String(payload.parent_account || payload.account_id || '').trim()
+}
+
 export const useAccountsStore = defineStore('accounts', {
   state: () => ({
     accounts: [],
@@ -95,13 +99,14 @@ export const useAccountsStore = defineStore('accounts', {
     async createAccount(data) {
       this.loading = true
       try {
+        const mainAccountId = resolveMainAccountId(data)
         const existingMain = this.mainAccounts.find(
-          (item) => item.platform === data.platform && item.main_account_id === data.parent_account
+          (item) => item.platform === data.platform && item.main_account_id === mainAccountId
         )
         if (!existingMain) {
           await accountsApi.createMainAccount({
             platform: data.platform,
-            main_account_id: data.parent_account,
+            main_account_id: mainAccountId,
             username: data.username,
             password: data.password,
             login_url: data.login_url,
@@ -113,7 +118,7 @@ export const useAccountsStore = defineStore('accounts', {
         const newAccount = await accountsApi.createShopAccount({
           platform: data.platform,
           shop_account_id: data.account_id,
-          main_account_id: data.parent_account,
+          main_account_id: mainAccountId,
           store_name: data.store_name,
           platform_shop_id: data.shop_id || null,
           shop_region: data.shop_region,
