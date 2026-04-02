@@ -37,3 +37,15 @@ def test_shop_account_capability_targets_shop_accounts():
     fk_targets = {fk.target_fullname for fk in ShopAccountCapability.__table__.foreign_keys}
 
     assert "core.shop_accounts.id" in fk_targets
+
+
+def test_main_account_id_is_globally_unique():
+    unique_columns = {column.name for column in MainAccount.__table__.columns if column.unique}
+
+    assert "main_account_id" in unique_columns
+
+
+def test_shop_account_id_is_globally_unique():
+    unique_columns = {column.name for column in ShopAccount.__table__.columns if column.unique}
+
+    assert "shop_account_id" in unique_columns

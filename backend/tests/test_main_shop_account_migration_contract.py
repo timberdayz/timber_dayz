@@ -25,6 +25,8 @@ def test_main_shop_account_migration_mentions_new_tables_and_old_source_table():
     assert "shop_account_capabilities" in source
     assert "platform_shop_discoveries" in source
     assert "platform_accounts" in source
+    assert 'unique=True' in source or 'sa.UniqueConstraint("main_account_id"' in source
+    assert 'sa.UniqueConstraint("shop_account_id"' in source
 
 
 def test_main_shop_account_migration_has_single_head():

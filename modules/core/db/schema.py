@@ -1266,7 +1266,6 @@ class MainAccount(Base):
     __tablename__ = "main_accounts"
 
     __table_args__ = (
-        UniqueConstraint("platform", "main_account_id", name="uq_main_accounts_platform_id"),
         Index("ix_main_accounts_platform", "platform"),
         Index("ix_main_accounts_enabled", "enabled"),
         {"schema": "core"},
@@ -1274,7 +1273,7 @@ class MainAccount(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     platform = Column(String(50), nullable=False, comment="平台代码")
-    main_account_id = Column(String(100), nullable=False, comment="主账号ID")
+    main_account_id = Column(String(100), unique=True, nullable=False, comment="主账号ID")
     username = Column(String(200), nullable=False, comment="登录用户名")
     password_encrypted = Column(Text, nullable=False, comment="加密后的密码")
     login_url = Column(Text, nullable=True, comment="登录URL")
@@ -1293,7 +1292,6 @@ class ShopAccount(Base):
     __tablename__ = "shop_accounts"
 
     __table_args__ = (
-        UniqueConstraint("platform", "shop_account_id", name="uq_shop_accounts_platform_id"),
         UniqueConstraint("platform", "platform_shop_id", name="uq_shop_accounts_platform_shop_id"),
         Index("ix_shop_accounts_main_account_id", "main_account_id"),
         Index("ix_shop_accounts_platform_shop_id", "platform_shop_id"),
@@ -1303,7 +1301,7 @@ class ShopAccount(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     platform = Column(String(50), nullable=False, comment="平台代码")
-    shop_account_id = Column(String(100), nullable=False, comment="店铺账号ID")
+    shop_account_id = Column(String(100), unique=True, nullable=False, comment="店铺账号ID")
     main_account_id = Column(
         String(100),
         ForeignKey("core.main_accounts.main_account_id", ondelete="CASCADE"),

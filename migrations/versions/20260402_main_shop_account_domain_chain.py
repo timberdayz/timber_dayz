@@ -25,7 +25,7 @@ def upgrade() -> None:
         "main_accounts",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("platform", sa.String(length=50), nullable=False),
-        sa.Column("main_account_id", sa.String(length=100), nullable=False),
+        sa.Column("main_account_id", sa.String(length=100), nullable=False, unique=True),
         sa.Column("username", sa.String(length=200), nullable=False),
         sa.Column("password_encrypted", sa.Text(), nullable=False),
         sa.Column("login_url", sa.Text(), nullable=True),
@@ -36,7 +36,6 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("created_by", sa.String(length=100), nullable=True),
         sa.Column("updated_by", sa.String(length=100), nullable=True),
-        sa.UniqueConstraint("platform", "main_account_id", name="uq_main_accounts_platform_id"),
         schema="core",
     )
     op.create_index("ix_main_accounts_platform", "main_accounts", ["platform"], schema="core")
@@ -46,7 +45,7 @@ def upgrade() -> None:
         "shop_accounts",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("platform", sa.String(length=50), nullable=False),
-        sa.Column("shop_account_id", sa.String(length=100), nullable=False),
+        sa.Column("shop_account_id", sa.String(length=100), nullable=False, unique=True),
         sa.Column("main_account_id", sa.String(length=100), nullable=False),
         sa.Column("store_name", sa.String(length=200), nullable=False),
         sa.Column("platform_shop_id", sa.String(length=256), nullable=True),
@@ -61,7 +60,6 @@ def upgrade() -> None:
         sa.Column("created_by", sa.String(length=100), nullable=True),
         sa.Column("updated_by", sa.String(length=100), nullable=True),
         sa.ForeignKeyConstraint(["main_account_id"], ["core.main_accounts.main_account_id"], ondelete="CASCADE"),
-        sa.UniqueConstraint("platform", "shop_account_id", name="uq_shop_accounts_platform_id"),
         sa.UniqueConstraint("platform", "platform_shop_id", name="uq_shop_accounts_platform_shop_id"),
         schema="core",
     )
@@ -153,7 +151,7 @@ def upgrade() -> None:
                 pa.created_by,
                 pa.updated_by
             FROM core.platform_accounts pa
-            ON CONFLICT ON CONSTRAINT uq_main_accounts_platform_id DO NOTHING
+            ON CONFLICT (main_account_id) DO NOTHING
             """
         )
     )
