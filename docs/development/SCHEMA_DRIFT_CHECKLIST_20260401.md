@@ -6,11 +6,10 @@
   - ORM 定义：`modules/core/db/schema.py`
   - 数据库真实落表：当前 PostgreSQL `information_schema.tables`
   - 现有 proof：`backend/utils/schema_cleanup_low_risk_proofs.py`、`backend/utils/schema_cleanup_wave2_proofs.py`
-- 当前 `Base.metadata` 中存在 60 张“模型 schema 与数据库真实 schema 不一致”的表。
+- 当前 `Base.metadata` 中存在 50 张“模型 schema 与数据库真实 schema 不一致”的表。
 - 分组结果：
-  - `public -> core`: 31
+  - `public -> core`: 24
   - `public -> finance`: 23
-  - `public -> a_class`: 3
   - `public -> b_class`: 2
   - `public -> c_class`: 1
 
@@ -19,28 +18,38 @@
 - `collection_configs`
 - `collection_tasks`
 - `collection_task_logs`
+- `performance_config`
+- `sales_campaigns`
+- `sales_campaign_shops`
+- `accounts`
+- `data_files`
+- `data_quarantine`
+- `data_records`
+- `field_mappings`
+- `mapping_sessions`
+- `sync_progress_tasks`
 - Alembic 版本表已固定使用 `core.alembic_version`
 - `public.alembic_version` 已归档为 `public.alembic_version__archive_retired`
 
 ## Group A: public -> a_class
 
-这些表已有现成 proof，最适合下一批处理。
+这一组已完成。
 
 - `performance_config`
   - 模型：`public`
   - 实际：`a_class`
   - 现有 proof：`expected_target_schema = a_class`
-  - 状态：可直接按“显式 schema 绑定 + 契约测试”推进
+  - 当前状态：已改为 `a_class`
 - `sales_campaigns`
   - 模型：`public`
   - 实际：`a_class`
   - 现有 proof：`expected_target_schema = a_class`
-  - 状态：同上
+  - 当前状态：已改为 `a_class`
 - `sales_campaign_shops`
   - 模型：`public`
   - 实际：`a_class`
   - 现有 proof：`expected_target_schema = a_class`
-  - 状态：同上
+  - 当前状态：已改为 `a_class`
 
 ## Group B: public -> b_class
 
@@ -71,9 +80,18 @@
 
 这一组数量最多，且很多是高频基础表，风险最高。
 
-### Core 基础维表 / 用户表
+Wave B P1 已完成以下表：
 
 - `accounts`
+- `data_files`
+- `data_quarantine`
+- `data_records`
+- `field_mappings`
+- `mapping_sessions`
+- `sync_progress_tasks`
+
+### Core 基础维表 / 用户表
+
 - `dim_platforms`
 - `dim_products`
 - `dim_product_master`
@@ -92,17 +110,11 @@
 - `collection_sync_points`
 - `component_versions`
 - `component_test_history`
-- `data_files`
-- `data_quarantine`
-- `data_records`
-- `field_mappings`
 - `field_mapping_dictionary`
 - `field_mapping_templates`
 - `field_mapping_template_items`
 - `field_mapping_audit`
 - `field_usage_tracking`
-- `mapping_sessions`
-- `sync_progress_tasks`
 
 ### Core staging / 运行轨迹
 
@@ -114,13 +126,7 @@
 ### 建议优先级
 
 - P1:
-  - `accounts`
-  - `data_files`
-  - `data_quarantine`
-  - `data_records`
-  - `field_mappings`
-  - `mapping_sessions`
-  - `sync_progress_tasks`
+  - 已完成
 - P2:
   - `dim_platforms`
   - `dim_products`
@@ -192,15 +198,13 @@
 
 ## Recommended Next Waves
 
-1. Wave A: 先处理 `public -> a_class`
-   - 范围小
-   - 已有 proof
-   - 用户面影响明确
-2. Wave B: 再处理 `public -> core` 的文件治理与元数据表
-   - `data_files` / `data_quarantine` / `data_records` / `field_mappings` / `mapping_sessions` / `sync_progress_tasks`
-3. Wave C: 再处理 `public -> finance`
+1. Wave B2: 继续处理 `public -> core` 的剩余 P2/P3
+   - `dim_platforms` / `dim_products` / `dim_product_master` / `dim_users` / `dim_roles` / `dim_vendors`
+   - `component_versions` / `component_test_history` / `collection_sync_points`
+   - `field_mapping_dictionary` / `field_mapping_templates` / `field_mapping_template_items` / `field_mapping_audit` / `field_usage_tracking`
+2. Wave C: 再处理 `public -> finance`
    - 单独按 finance 域推进
-4. Wave D: 最后处理 `public -> b_class` / `public -> c_class`
+3. Wave D: 最后处理 `public -> b_class` / `public -> c_class`
    - 先补 runtime proof，再做 ORM 显式 schema 收口
 
 ## Verification Baseline
@@ -212,3 +216,136 @@
   - 先加 schema 契约测试
   - 再改 ORM 显式 schema / 外键目标
   - 最后做运行态查询验证
+
+## Wave B2 Update
+
+- 新完成 21 张 `public -> core` 表的 ORM 对齐：
+  - `dim_platforms`
+  - `dim_products`
+  - `dim_product_master`
+  - `bridge_product_keys`
+  - `dim_exchange_rates`
+  - `dim_currency_rates`
+  - `collection_sync_points`
+  - `component_versions`
+  - `component_test_history`
+  - `field_mapping_dictionary`
+  - `field_mapping_templates`
+  - `field_mapping_template_items`
+  - `field_mapping_audit`
+  - `field_usage_tracking`
+  - `dim_metric_formulas`
+  - `dim_currencies`
+  - `dim_fiscal_calendar`
+  - `dim_vendors`
+  - `staging_orders`
+  - `staging_product_metrics`
+  - `staging_inventory`
+- 相关跨 schema 外键也已同步更新：
+  - `DimShop -> core.dim_platforms`
+  - `BridgeProductKeys -> core.dim_product_master / core.dim_products`
+  - `POHeader` / `GRNHeader` 相关供应商目标 -> `core.dim_vendors`
+  - `TaxVoucher` / `TaxReport` / `JournalEntry` 期间目标 -> `core.dim_fiscal_calendar`
+- 验证：
+  - `test_core_schema_wave_b2_contract.py` 24 项通过
+  - 相关回归测试总计 46 项通过
+  - 21 张表 ORM `count(*)` 查询全部成功
+- 当前剩余漂移量：
+  - 总计 29
+  - `public -> finance`: 23
+  - `public -> core`: 3
+  - `public -> b_class`: 2
+  - `public -> c_class`: 1
+- `public -> core` 剩余仅：
+  - `dim_users`
+  - `dim_roles`
+  - `backup_records`
+
+## Wave B3 Update
+
+- 新完成：
+  - `dim_users`
+  - `dim_roles`
+  - `backup_records`
+- `user_roles` 关联表保持在 `public`，避免引入新的数据库实际漂移；但其外键目标已改为：
+  - `core.dim_users.user_id`
+  - `core.dim_roles.role_id`
+- 相关用户链路外键也已对齐到 `core.dim_users.user_id`，覆盖：
+  - `user_sessions`
+  - `user_approval_logs`
+  - `fact_audit_logs`
+  - `fact_rate_limit_config_audit`
+  - `system_logs`
+  - `security_config`
+  - `backup_records`
+  - `smtp_config`
+  - `notification_templates`
+  - `alert_rules`
+  - `system_config`
+- 验证：
+  - `test_core_schema_wave_b3_contract.py` 4 项通过
+  - 相关回归测试总计 50 项通过
+  - `DimUser` / `DimRole` / `BackupRecord` ORM `count(*)` 查询成功
+- 当前剩余漂移量：
+  - 总计 26
+  - `public -> finance`: 23
+  - `public -> b_class`: 2
+  - `public -> c_class`: 1
+- 这意味着 `public -> core` 已全部收口完成。
+
+## Wave C Update
+
+- 新完成 23 张 `public -> finance` 表的 ORM 对齐：
+  - `allocation_rules`
+  - `approval_logs`
+  - `fact_expenses_allocated_day_shop_sku`
+  - `fact_expenses_month`
+  - `fx_rates`
+  - `gl_accounts`
+  - `grn_headers`
+  - `grn_lines`
+  - `inventory_ledger`
+  - `invoice_attachments`
+  - `invoice_headers`
+  - `invoice_lines`
+  - `journal_entries`
+  - `journal_entry_lines`
+  - `logistics_allocation_rules`
+  - `logistics_costs`
+  - `opening_balances`
+  - `po_headers`
+  - `po_lines`
+  - `return_orders`
+  - `tax_reports`
+  - `tax_vouchers`
+  - `three_way_match_log`
+- 内部 `finance -> finance` 外键已全部显式化。
+- 外部依赖仍保持正确目标：
+  - `POHeader` / `InvoiceHeader -> core.dim_vendors`
+  - `TaxVoucher` / `TaxReport` / `JournalEntry -> core.dim_fiscal_calendar`
+- 验证：
+  - `test_finance_schema_contract.py` 25 项通过
+  - 相关回归测试总计 75 项通过
+  - 23 张 finance 表 ORM `count(*)` 查询全部成功
+- 当前剩余漂移量：
+  - 总计 3
+  - `public -> b_class`: 2
+  - `public -> c_class`: 1
+- 这意味着 `public -> finance` 已全部收口完成。
+
+## Wave D Update
+
+- 新完成：
+  - `entity_aliases -> b_class`
+  - `staging_raw_data -> b_class`
+  - `clearance_rankings -> c_class`
+- 关键外键目标：
+  - `StagingRawData.file_id -> public.catalog_files.id`
+  - `ClearanceRanking -> core.dim_shops`
+- 验证：
+  - `test_wave_d_schema_contract.py` 3 项通过
+  - Wave D + 历史 schema 回归测试总计 81 项通过
+  - 3 张表 ORM `count(*)` 查询全部成功
+- 当前结果：
+  - 全库 schema 漂移 = 0
+  - `verify_schema_completeness().migration_status = up_to_date`

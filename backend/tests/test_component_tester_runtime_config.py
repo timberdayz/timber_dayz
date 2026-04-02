@@ -61,6 +61,18 @@ def test_component_tester_uses_reused_persistent_context_for_export():
     assert tester._persistent_context_mode("export") == "reused"
 
 
+def test_component_tester_prefers_profile_level_reuse_for_tiktok_python_export():
+    tester = ComponentTester(platform="tiktok", account_id="acc-1")
+
+    assert tester._use_persistent_profile_for_python_component("export") is True
+
+
+def test_component_tester_does_not_force_profile_level_reuse_for_shopee_python_export():
+    tester = ComponentTester(platform="shopee", account_id="acc-1")
+
+    assert tester._use_persistent_profile_for_python_component("export") is False
+
+
 def test_component_tester_uses_reused_persistent_context_for_navigation():
     tester = ComponentTester(platform="miaoshou", account_id="acc-1")
 

@@ -748,7 +748,7 @@ async def get_history(
     tasks = result.scalars().all()
 
     return TaskHistoryResponse(
-        data=[TaskResponse.model_validate(t) for t in tasks],
+        data=[_build_task_response_payload(task) for task in tasks],
         total=total,
         page=page,
         page_size=page_size,

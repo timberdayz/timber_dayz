@@ -5,10 +5,10 @@ def test_wave2_candidates_expose_model_schema_and_expected_target():
     report = collect_wave2_candidate_proofs()
 
     assert report["entity_aliases"]["expected_target_schema"] == "b_class"
-    assert report["entity_aliases"]["model_schema"] == "public"
+    assert report["entity_aliases"]["model_schema"] == "b_class"
 
     assert report["staging_raw_data"]["expected_target_schema"] == "b_class"
-    assert report["staging_raw_data"]["model_schema"] == "public"
+    assert report["staging_raw_data"]["model_schema"] == "b_class"
 
     assert report["dim_shops"]["expected_target_schema"] == "core"
     assert report["dim_shops"]["model_schema"] == "core"

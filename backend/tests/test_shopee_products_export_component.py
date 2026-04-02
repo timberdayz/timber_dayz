@@ -56,12 +56,23 @@ class _FakeDownload:
 
 
 class _FakeLocator:
-    def __init__(self, text: str | None = None, *, visible: bool = True, count: int = 1) -> None:
+    def __init__(
+        self,
+        text: str | None = None,
+        *,
+        visible: bool = True,
+        count: int = 1,
+        bbox: dict[str, float] | None = None,
+        selector_locators: dict[str, object] | None = None,
+    ) -> None:
         self._text = text
         self._visible = visible
         self._count = count
+        self._bbox = bbox
+        self._selector_locators = selector_locators or {}
         self.clicked = False
         self.hovered = False
+        self.last_click_kwargs: dict[str, object] = {}
 
     @property
     def first(self):
@@ -76,11 +87,18 @@ class _FakeLocator:
     async def text_content(self) -> str | None:
         return self._text
 
-    async def click(self, timeout: int | None = None) -> None:
+    async def click(self, timeout: int | None = None, **kwargs) -> None:
         self.clicked = True
+        self.last_click_kwargs = {"timeout": timeout, **kwargs}
 
     async def hover(self, timeout: int | None = None) -> None:
         self.hovered = True
+
+    async def bounding_box(self):
+        return self._bbox
+
+    def locator(self, selector: str):
+        return self._selector_locators.get(selector, _FakeLocator(visible=False, count=0))
 
 
 class _FakeTextMatch:
@@ -908,12 +926,13 @@ async def test_shopee_products_export_select_month_value_navigates_year_before_c
     month_leaf = _FakeLocator("\u4e8c\u6708", visible=True)
 
     monkeypatch.setattr(component, "_navigate_month_panel_to_year", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_find_month_leaf_locator", AsyncMock(return_value=month_leaf), raising=False)
+    monkeypatch.setattr(component, "_find_month_grid_cell", AsyncMock(return_value=month_leaf), raising=False)
 
     selected = await component._select_month_value(page, "2026-02-01")
 
     assert selected is True
     component._navigate_month_panel_to_year.assert_awaited_once_with(page, 2026)
+    component._find_month_grid_cell.assert_awaited_once_with(page, "\u4e8c\u6708")
     assert month_leaf.clicked is True
 
 
@@ -932,14 +951,12 @@ async def test_shopee_products_export_select_month_value_does_not_misclick_decem
     )
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
-    monkeypatch.setattr(component, "_navigate_month_panel_to_year", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_find_month_panel", AsyncMock(return_value=panel), raising=False)
 
-    selected = await component._select_month_value(page, "2026-02-01")
+    selected = await component._find_month_grid_cell(page, "\u4e8c\u6708")
 
-    assert selected is True
+    assert selected is february
     assert december.clicked is False
-    assert february.clicked is True
 
 
 @pytest.mark.asyncio
@@ -1045,17 +1062,18 @@ async def test_shopee_products_export_navigate_month_panel_uses_year_arrows_only
 
     monkeypatch.setattr(
         component,
-        "_current_popup_header_text",
+        "_current_month_panel_year_text",
         AsyncMock(side_effect=["2026", "2025"]),
         raising=False,
     )
-    monkeypatch.setattr(component, "_click_popup_year_nav_button", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_click_month_panel_year_nav_button", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_click_popup_month_nav_button", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_month_panel_year_changed", AsyncMock(return_value="2025"), raising=False)
 
     reached = await component._navigate_month_panel_to_year(page, 2025)
 
     assert reached is True
-    component._click_popup_year_nav_button.assert_awaited_once_with(page, "prev")
+    component._click_month_panel_year_nav_button.assert_awaited_once_with(page, "prev")
     component._click_popup_month_nav_button.assert_not_awaited()
 
 
@@ -1064,6 +1082,7 @@ def test_shopee_products_export_parse_month_panel_year() -> None:
 
     assert component._parse_month_panel_year("2025") == 2025
     assert component._parse_month_panel_year(" 2026 ") == 2026
+    assert component._parse_month_panel_year("<<2026>>") == 2026
     assert component._parse_month_panel_year("\u56db\u67082026") is None
 
 
@@ -1076,15 +1095,15 @@ async def test_shopee_products_export_navigate_month_panel_waits_for_year_change
 
     monkeypatch.setattr(
         component,
-        "_current_popup_header_text",
+        "_current_month_panel_year_text",
         AsyncMock(side_effect=["2027", "2026", "2025"]),
         raising=False,
     )
-    monkeypatch.setattr(component, "_click_popup_year_nav_button", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_click_month_panel_year_nav_button", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_click_popup_month_nav_button", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(
         component,
-        "_wait_calendar_header_changed",
+        "_wait_month_panel_year_changed",
         AsyncMock(side_effect=["2026", "2025"]),
         raising=False,
     )
@@ -1092,9 +1111,9 @@ async def test_shopee_products_export_navigate_month_panel_waits_for_year_change
     reached = await component._navigate_month_panel_to_year(page, 2025)
 
     assert reached is True
-    assert component._click_popup_year_nav_button.await_count == 2
-    component._wait_calendar_header_changed.assert_any_await(page, "2027")
-    component._wait_calendar_header_changed.assert_any_await(page, "2026")
+    assert component._click_month_panel_year_nav_button.await_count == 2
+    component._wait_month_panel_year_changed.assert_any_await(page, "2027")
+    component._wait_month_panel_year_changed.assert_any_await(page, "2026")
     component._click_popup_month_nav_button.assert_not_awaited()
 
 
@@ -1120,6 +1139,72 @@ async def test_shopee_products_export_click_popup_year_nav_button_falls_back_to_
 
 
 @pytest.mark.asyncio
+async def test_shopee_products_export_click_month_panel_year_nav_button_uses_edge_click_for_wrapped_header_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    header = _FakeLocator("<<2026>>", visible=True, bbox={"x": 0, "y": 0, "width": 120, "height": 24})
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx())
+
+    monkeypatch.setattr(component, "_find_month_panel_header", AsyncMock(return_value=header), raising=False)
+    monkeypatch.setattr(component, "_find_month_panel", AsyncMock(return_value=header), raising=False)
+    monkeypatch.setattr(component, "_current_month_panel_year_text", AsyncMock(return_value="2026"), raising=False)
+
+    clicked = await component._click_month_panel_year_nav_button(page, "prev")
+
+    assert clicked is True
+    assert header.clicked is True
+    assert header.last_click_kwargs.get("position") == {"x": 10, "y": 12.0}
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_click_month_panel_year_nav_button_uses_header_edge_click_as_last_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    header = _FakeLocator("<<2026>>", visible=True, bbox={"x": 0, "y": 0, "width": 120, "height": 24})
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx())
+
+    monkeypatch.setattr(component, "_find_month_panel_header", AsyncMock(return_value=header), raising=False)
+    monkeypatch.setattr(component, "_find_month_panel", AsyncMock(return_value=None), raising=False)
+    monkeypatch.setattr(component, "_current_month_panel_year_text", AsyncMock(return_value="2026"), raising=False)
+
+    clicked = await component._click_month_panel_year_nav_button(page, "prev")
+
+    assert clicked is True
+    assert header.clicked is True
+    assert header.last_click_kwargs.get("position") == {"x": 10, "y": 12.0}
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_click_month_panel_year_nav_button_prefers_direct_edge_children_over_header_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    left = _FakeLocator("", visible=True)
+    center = _FakeLocator("2025", visible=True)
+    right = _FakeLocator("", visible=True)
+    header = _FakeLocator(
+        "<<2025>>",
+        visible=True,
+        bbox={"x": 0, "y": 0, "width": 120, "height": 24},
+        selector_locators={":scope > *": _FakeLocatorGroup([left, center, right])},
+    )
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx())
+
+    monkeypatch.setattr(component, "_find_month_panel_header", AsyncMock(return_value=header), raising=False)
+    monkeypatch.setattr(component, "_find_month_panel", AsyncMock(return_value=header), raising=False)
+    monkeypatch.setattr(component, "_current_month_panel_year_text", AsyncMock(return_value="2025"), raising=False)
+
+    clicked = await component._click_month_panel_year_nav_button(page, "prev")
+
+    assert clicked is True
+    assert left.clicked is True
+    assert center.clicked is False
+    assert header.clicked is False
+
+
+@pytest.mark.asyncio
 async def test_shopee_products_export_find_month_leaf_locator_scans_all_visible_matches_not_only_first_last(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1134,8 +1219,55 @@ async def test_shopee_products_export_find_month_leaf_locator_scans_all_visible_
     page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
     component = ShopeeProductsExport(_ctx())
 
-    monkeypatch.setattr(component, "_find_date_panel", AsyncMock(return_value=panel), raising=False)
+    monkeypatch.setattr(component, "_find_month_panel", AsyncMock(return_value=panel), raising=False)
 
-    locator = await component._find_month_leaf_locator(page, "2026-02-01")
+    locator = await component._find_month_grid_cell(page, "\u4e8c\u6708")
 
     assert locator is target_middle
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_select_month_value_uses_month_grid_cell_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx())
+    month_cell = _FakeLocator("\u4e8c\u6708", visible=True)
+
+    monkeypatch.setattr(component, "_navigate_month_panel_to_year", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_find_month_grid_cell", AsyncMock(return_value=month_cell), raising=False)
+
+    selected = await component._select_month_value(page, "2026-02-01")
+
+    assert selected is True
+    component._find_month_grid_cell.assert_awaited_once_with(page, "\u4e8c\u6708")
+    assert month_cell.clicked is True
+
+
+@pytest.mark.asyncio
+async def test_shopee_products_export_navigate_month_panel_to_year_uses_month_panel_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.shopee.cn/datacenter/product/overview?cnsc_shop_id=1")
+    component = ShopeeProductsExport(_ctx())
+
+    monkeypatch.setattr(
+        component,
+        "_current_month_panel_year_text",
+        AsyncMock(side_effect=["2027", "2026", "2025"]),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_click_month_panel_year_nav_button", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(
+        component,
+        "_wait_month_panel_year_changed",
+        AsyncMock(side_effect=["2026", "2025"]),
+        raising=False,
+    )
+
+    reached = await component._navigate_month_panel_to_year(page, 2025)
+
+    assert reached is True
+    assert component._click_month_panel_year_nav_button.await_count == 2
+    component._wait_month_panel_year_changed.assert_any_await(page, "2027")
+    component._wait_month_panel_year_changed.assert_any_await(page, "2026")

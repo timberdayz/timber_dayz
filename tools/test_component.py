@@ -223,6 +223,11 @@ class ComponentTester:
             return "reused"
         return None
 
+    def _use_persistent_profile_for_python_component(self, component_type: str) -> bool:
+        if self.platform != "tiktok":
+            return False
+        return self._persistent_context_mode(component_type) == "reused"
+
     def _login_readiness_candidates(self, component_name: str) -> List[tuple[str, str]]:
         base_candidates: List[tuple[str, str]] = [
             ("input[type='password']", "input[type='password']"),
@@ -1147,13 +1152,35 @@ class ComponentTester:
                 if 'locale' not in context_options:
                     context_options['locale'] = 'zh-CN'
 
-                context = await browser.new_context(**context_options)
-                page = await context.new_page()
+                use_persistent_profile = bool(account_id) and self._use_persistent_profile_for_python_component(component_type)
+                if use_persistent_profile:
+                    from modules.utils.sessions.session_manager import SessionManager
+
+                    persistent_profile_path = SessionManager().get_persistent_profile_path(self.platform, account_id)
+                    persistent_context_options = dict(context_options)
+                    persistent_context_options.pop('storage_state', None)
+                    context = await p.chromium.launch_persistent_context(
+                        user_data_dir=str(persistent_profile_path),
+                        **self._build_browser_launch_kwargs(
+                            args=['--start-maximized'] if not self.headless else []
+                        ),
+                        **persistent_context_options,
+                    )
+                    browser = None
+                    if context.pages:
+                        page = context.pages[0]
+                        for extra_page in context.pages[1:]:
+                            await extra_page.close()
+                    else:
+                        page = await context.new_page()
+                else:
+                    context = await browser.new_context(**context_options)
+                    page = await context.new_page()
 
                 # 非登录组件统一走 login gate：先检查复用会话是否已满足，否则执行登录前置
                 if component_type in non_login_types and not self.skip_login:
                     login_gate_ready = False
-                    if storage_state:
+                    if storage_state or use_persistent_profile:
                         await self._prime_page_for_login_gate(page, account_info)
                         login_gate_ready = await self._check_login_gate(
                             page=page,
@@ -1170,7 +1197,8 @@ class ComponentTester:
                         )
                         if not login_ok:
                             await context.close()
-                            await browser.close()
+                            if browser:
+                                await browser.close()
                             return False
                         login_gate_ready = await self._check_login_gate(
                             page=page,
@@ -1179,7 +1207,8 @@ class ComponentTester:
                         )
                         if not login_gate_ready:
                             await context.close()
-                            await browser.close()
+                            if browser:
+                                await browser.close()
                             return False
 
                 # 1.8: date_picker/filters standalone 模式先导航并执行 pre_steps
@@ -1190,7 +1219,8 @@ class ComponentTester:
                         result.phase_component_name = f"{self.platform}/{component_name}"
                         result.error = f"{component_type} standalone 测试导航失败"
                         await context.close()
-                        await browser.close()
+                        if browser:
+                            await browser.close()
                         return False
                     pre_steps = standalone_test_config.get('pre_steps') or []
                     if isinstance(pre_steps, list):
@@ -1365,7 +1395,8 @@ class ComponentTester:
                     step_result.screenshot = str(screenshot_path)
 
                 await context.close()
-                await browser.close()
+                if browser:
+                    await browser.close()
 
                 return test_passed
 

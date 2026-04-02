@@ -71,13 +71,14 @@ class DimPlatform(Base):
 
     __table_args__ = (
         UniqueConstraint("name", name="uq_dim_platforms_name"),
+        {"schema": "core"},
     )
 
 
 class DimShop(Base):
     __tablename__ = "dim_shops"
 
-    platform_code = Column(String(32), ForeignKey("dim_platforms.platform_code", ondelete="CASCADE"), primary_key=True)
+    platform_code = Column(String(32), ForeignKey("core.dim_platforms.platform_code", ondelete="CASCADE"), primary_key=True)
     shop_id = Column(String(256), primary_key=True)  # v4.3.4: 扩展到256以支持长shop_id
 
     shop_slug = Column(String(128), nullable=True)  # human readable
@@ -119,6 +120,7 @@ class DimProduct(Base):
 
     __table_args__ = (
         Index("ix_dim_products_platform_shop", "platform_code", "shop_id"),
+        {"schema": "core"},
     )
 
 # ---- Master SKU mapping & bridge (统一SKU映射) ----
@@ -133,11 +135,15 @@ class DimProductMaster(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
+    __table_args__ = (
+        {"schema": "core"},
+    )
+
 
 class BridgeProductKeys(Base):
     __tablename__ = "bridge_product_keys"
 
-    product_id = Column(Integer, ForeignKey("dim_product_master.product_id", ondelete="CASCADE"), primary_key=True)
+    product_id = Column(Integer, ForeignKey("core.dim_product_master.product_id", ondelete="CASCADE"), primary_key=True)
     platform_code = Column(String(32), primary_key=True)
     shop_id = Column(String(64), primary_key=True)
     platform_sku = Column(String(128), primary_key=True)
@@ -146,11 +152,12 @@ class BridgeProductKeys(Base):
         # 关联至平台侧产品维表,复合外键
         ForeignKeyConstraint(
             ["platform_code", "shop_id", "platform_sku"],
-            ["dim_products.platform_code", "dim_products.shop_id", "dim_products.platform_sku"],
+            ["core.dim_products.platform_code", "core.dim_products.shop_id", "core.dim_products.platform_sku"],
             ondelete="CASCADE",
         ),
         UniqueConstraint("platform_code", "shop_id", "platform_sku", name="uq_bridge_platform_sku"),
         Index("ix_bridge_product_id", "product_id"),
+        {"schema": "core"},
     )
 
 
@@ -192,6 +199,7 @@ class DimExchangeRate(Base):
         UniqueConstraint('from_currency', 'to_currency', 'rate_date', name='uq_exchange_rate'),
         Index('ix_exchange_rate_lookup', 'from_currency', 'to_currency', 'rate_date'),
         Index('ix_exchange_rate_date', 'rate_date'),
+        {"schema": "core"},
     )
 
 
@@ -258,6 +266,7 @@ class DimCurrencyRate(Base):
 
     __table_args__ = (
         Index("ix_currency_base_quote", "base_currency", "quote_currency"),
+        {"schema": "core"},
     )
 
 
@@ -632,6 +641,7 @@ class DataQuarantine(Base):
         Index("ix_quarantine_platform_shop", "platform_code", "shop_id"),
         Index("ix_quarantine_created", "created_at"),
         Index("ix_quarantine_resolved", "is_resolved"),
+        {"schema": "core"},
     )
 
 
@@ -653,6 +663,7 @@ class Account(Base):
         UniqueConstraint("account_id", name="uq_accounts_account_id"),
         Index("ix_accounts_platform", "platform"),
         Index("ix_accounts_status", "status"),
+        {"schema": "core"},
     )
 
 
@@ -857,6 +868,7 @@ class CollectionSyncPoint(Base):
         # 索引
         Index("ix_sync_points_platform_account", "platform", "account_id"),
         Index("ix_sync_points_last_sync", "last_sync_at"),
+        {"schema": "core"},
     )
 
 
@@ -1098,6 +1110,7 @@ class ComponentVersion(Base):
         Index("ix_component_versions_name", "component_name"),
         Index("ix_component_versions_stable", "is_stable"),
         Index("ix_component_versions_success_rate", "success_rate"),
+        {"schema": "core"},
     )
 
 
@@ -1152,7 +1165,7 @@ class ComponentTestHistory(Base):
         # 外键约束(可选)
         ForeignKeyConstraint(
             ["version_id"],
-            ["component_versions.id"],
+            ["core.component_versions.id"],
             name="fk_test_history_version",
             ondelete="SET NULL"
         ),
@@ -1161,6 +1174,7 @@ class ComponentTestHistory(Base):
         Index("ix_test_history_status", "status"),
         Index("ix_test_history_tested_at", "tested_at"),
         Index("ix_test_history_version", "version_id"),
+        {"schema": "core"},
     )
 
 
@@ -1261,6 +1275,7 @@ class DataFile(Base):
     __table_args__ = (
         Index("ix_data_files_platform", "platform"),
         Index("ix_data_files_status", "status"),
+        {"schema": "core"},
     )
 
 
@@ -1277,6 +1292,7 @@ class DataRecord(Base):
     __table_args__ = (
         Index("ix_data_records_platform", "platform"),
         Index("ix_data_records_type", "record_type"),
+        {"schema": "core"},
     )
 
 
@@ -1291,7 +1307,7 @@ class FieldMapping(Base):
     __tablename__ = "field_mappings"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    file_id = Column(Integer, ForeignKey("data_files.id", ondelete="CASCADE"), nullable=True)
+    file_id = Column(Integer, ForeignKey("core.data_files.id", ondelete="CASCADE"), nullable=True)
     platform = Column(String(50), nullable=True)  # source_platform(数据来源)
     original_field = Column(String(100), nullable=False)
     standard_field = Column(String(100), nullable=False)
@@ -1313,6 +1329,7 @@ class FieldMapping(Base):
         Index("ix_field_mappings_version", "version"),
         # 方案B+新索引(精确模板匹配)
         Index("ix_field_mappings_template_key", "platform", "domain", "sub_domain", "granularity"),
+        {"schema": "core"},
     )
 
 
@@ -1329,6 +1346,7 @@ class MappingSession(Base):
     
     __table_args__ = (
         UniqueConstraint("session_id", name="uq_mapping_sessions_session_id"),
+        {"schema": "core"},
     )
 
 
@@ -1357,6 +1375,7 @@ class StagingOrders(Base):
         Index("ix_staging_orders_platform", "platform_code"),
         Index("ix_staging_orders_task", "ingest_task_id"),
         Index("ix_staging_orders_file", "file_id"),
+        {"schema": "core"},
     )
 
 
@@ -1383,6 +1402,7 @@ class StagingProductMetrics(Base):
         Index("ix_staging_metrics_platform", "platform_code"),
         Index("ix_staging_metrics_task", "ingest_task_id"),
         Index("ix_staging_metrics_file", "file_id"),
+        {"schema": "core"},
     )
 
 
@@ -1411,6 +1431,7 @@ class StagingInventory(Base):
         Index("ix_staging_inventory_task", "ingest_task_id"),
         Index("ix_staging_inventory_file", "file_id"),
         Index("ix_staging_inventory_sku", "platform_code", "shop_id", "platform_sku"),
+        {"schema": "core"},
     )
 
 
@@ -1535,6 +1556,7 @@ class FieldMappingDictionary(Base):
         Index("ix_dictionary_status", "status", "data_domain"),
         Index("ix_dictionary_mv_display", "is_mv_display", "data_domain"),  # v4.10.2新增:物化视图显示字段索引
         Index("ix_dictionary_currency_policy", "currency_policy"),  # C类数据核心字段优化计划:货币策略索引
+        {"schema": "core"},
     )
 
 
@@ -1595,6 +1617,7 @@ class FieldMappingTemplate(Base):
         Index("ix_template_status", "status", "platform"),
         # v4.5.1新增:header_row范围CHECK约束(企业级数据治理标准)
         CheckConstraint('header_row >= 0 AND header_row <= 100', name='ck_template_header_row_range'),
+        {"schema": "core"},
     )
 
 
@@ -1624,6 +1647,7 @@ class FieldMappingTemplateItem(Base):
     __table_args__ = (
         Index("ix_template_item_template", "template_id"),
         UniqueConstraint("template_id", "original_column", name="uq_template_original_column"),
+        {"schema": "core"},
     )
 
 
@@ -1651,6 +1675,7 @@ class FieldMappingAudit(Base):
     __table_args__ = (
         Index("ix_audit_entity", "entity_type", "entity_id"),
         Index("ix_audit_operator", "operator", "operated_at"),
+        {"schema": "core"},
     )
 
 
@@ -1696,6 +1721,7 @@ class DimMetricFormula(Base):
     
     __table_args__ = (
         Index("ix_metric_formula_domain", "data_domain", "active"),
+        {"schema": "core"},
     )
 
 
@@ -1709,6 +1735,10 @@ class DimCurrency(Base):
     is_base = Column(Boolean, default=False)  # CNY为基准货币
     active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        {"schema": "core"},
+    )
 
 
 class FxRate(Base):
@@ -1727,6 +1757,7 @@ class FxRate(Base):
     
     __table_args__ = (
         Index("ix_fx_rates_date_from", "rate_date", "from_currency"),
+        {"schema": "finance"},
     )
 
 
@@ -1753,6 +1784,7 @@ class DimFiscalCalendar(Base):
         Index("ix_fiscal_calendar_year_month", "period_year", "period_month"),
         Index("ix_fiscal_calendar_status", "status"),
         UniqueConstraint("period_year", "period_month", name="uq_fiscal_period"),
+        {"schema": "core"},
     )
 
 
@@ -1779,6 +1811,7 @@ class DimVendor(Base):
     
     __table_args__ = (
         Index("ix_vendors_status", "status"),
+        {"schema": "core"},
     )
 
 
@@ -1788,7 +1821,7 @@ class POHeader(Base):
     
     po_id = Column(String(64), primary_key=True)
     
-    vendor_code = Column(String(64), ForeignKey("dim_vendors.vendor_code"), nullable=False)
+    vendor_code = Column(String(64), ForeignKey("core.dim_vendors.vendor_code"), nullable=False)
     po_date = Column(Date, nullable=False)
     expected_date = Column(Date, nullable=True)
     
@@ -1808,6 +1841,7 @@ class POHeader(Base):
     __table_args__ = (
         Index("ix_po_headers_vendor_date", "vendor_code", "po_date"),
         Index("ix_po_headers_status", "status"),
+        {"schema": "finance"},
     )
 
 
@@ -1817,7 +1851,7 @@ class POLine(Base):
     
     po_line_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    po_id = Column(String(64), ForeignKey("po_headers.po_id", ondelete="CASCADE"), nullable=False)
+    po_id = Column(String(64), ForeignKey("finance.po_headers.po_id", ondelete="CASCADE"), nullable=False)
     line_number = Column(Integer, nullable=False)
     
     platform_sku = Column(String(128), nullable=False)  # 关联到BridgeProductKeys
@@ -1837,6 +1871,7 @@ class POLine(Base):
         Index("ix_po_lines_po_id", "po_id"),
         Index("ix_po_lines_sku", "platform_sku"),
         UniqueConstraint("po_id", "line_number", name="uq_po_line"),
+        {"schema": "finance"},
     )
 
 
@@ -1846,7 +1881,7 @@ class GRNHeader(Base):
     
     grn_id = Column(String(64), primary_key=True)
     
-    po_id = Column(String(64), ForeignKey("po_headers.po_id"), nullable=False)
+    po_id = Column(String(64), ForeignKey("finance.po_headers.po_id"), nullable=False)
     receipt_date = Column(Date, nullable=False)
     warehouse = Column(String(64), nullable=True)
     
@@ -1858,6 +1893,7 @@ class GRNHeader(Base):
     __table_args__ = (
         Index("ix_grn_headers_po_id", "po_id"),
         Index("ix_grn_headers_date", "receipt_date"),
+        {"schema": "finance"},
     )
 
 
@@ -1867,8 +1903,8 @@ class GRNLine(Base):
     
     grn_line_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    grn_id = Column(String(64), ForeignKey("grn_headers.grn_id", ondelete="CASCADE"), nullable=False)
-    po_line_id = Column(Integer, ForeignKey("po_lines.po_line_id"), nullable=False)
+    grn_id = Column(String(64), ForeignKey("finance.grn_headers.grn_id", ondelete="CASCADE"), nullable=False)
+    po_line_id = Column(Integer, ForeignKey("finance.po_lines.po_line_id"), nullable=False)
     
     platform_sku = Column(String(128), nullable=False)
     qty_received = Column(Integer, default=0)
@@ -1887,6 +1923,7 @@ class GRNLine(Base):
         Index("ix_grn_lines_grn_id", "grn_id"),
         Index("ix_grn_lines_po_line", "po_line_id"),
         Index("ix_grn_lines_sku", "platform_sku"),
+        {"schema": "finance"},
     )
 
 
@@ -1943,6 +1980,7 @@ class InventoryLedger(Base):
         Index("ix_inventory_ledger_type", "movement_type", "transaction_date"),
         Index("ix_inventory_ledger_grn", "link_grn_id"),
         Index("ix_inventory_ledger_order", "link_order_id"),
+        {"schema": "finance"},
     )
 
 
@@ -1952,7 +1990,7 @@ class InvoiceHeader(Base):
     
     invoice_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    vendor_code = Column(String(64), ForeignKey("dim_vendors.vendor_code"), nullable=False)
+    vendor_code = Column(String(64), ForeignKey("core.dim_vendors.vendor_code"), nullable=False)
     invoice_no = Column(String(128), nullable=False, unique=True)
     invoice_date = Column(Date, nullable=False)
     due_date = Column(Date, nullable=True)
@@ -1975,6 +2013,7 @@ class InvoiceHeader(Base):
     __table_args__ = (
         Index("ix_invoice_headers_vendor_date", "vendor_code", "invoice_date"),
         Index("ix_invoice_headers_status", "status"),
+        {"schema": "finance"},
     )
 
 
@@ -1984,9 +2023,9 @@ class InvoiceLine(Base):
     
     invoice_line_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    invoice_id = Column(Integer, ForeignKey("invoice_headers.invoice_id", ondelete="CASCADE"), nullable=False)
-    po_line_id = Column(Integer, ForeignKey("po_lines.po_line_id"), nullable=True)
-    grn_line_id = Column(Integer, ForeignKey("grn_lines.grn_line_id"), nullable=True)
+    invoice_id = Column(Integer, ForeignKey("finance.invoice_headers.invoice_id", ondelete="CASCADE"), nullable=False)
+    po_line_id = Column(Integer, ForeignKey("finance.po_lines.po_line_id"), nullable=True)
+    grn_line_id = Column(Integer, ForeignKey("finance.grn_lines.grn_line_id"), nullable=True)
     
     platform_sku = Column(String(128), nullable=False)
     qty = Column(Integer, default=0)
@@ -2001,6 +2040,7 @@ class InvoiceLine(Base):
         Index("ix_invoice_lines_invoice", "invoice_id"),
         Index("ix_invoice_lines_po_line", "po_line_id"),
         Index("ix_invoice_lines_grn_line", "grn_line_id"),
+        {"schema": "finance"},
     )
 
 
@@ -2010,7 +2050,7 @@ class InvoiceAttachment(Base):
     
     attachment_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    invoice_id = Column(Integer, ForeignKey("invoice_headers.invoice_id", ondelete="CASCADE"), nullable=False)
+    invoice_id = Column(Integer, ForeignKey("finance.invoice_headers.invoice_id", ondelete="CASCADE"), nullable=False)
     
     file_path = Column(String(1024), nullable=False)
     file_type = Column(String(32), nullable=True)  # pdf/jpg/png
@@ -2024,6 +2064,7 @@ class InvoiceAttachment(Base):
     
     __table_args__ = (
         Index("ix_invoice_attachments_invoice", "invoice_id"),
+        {"schema": "finance"},
     )
 
 
@@ -2033,9 +2074,9 @@ class ThreeWayMatchLog(Base):
     
     match_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    po_line_id = Column(Integer, ForeignKey("po_lines.po_line_id"), nullable=False)
-    grn_line_id = Column(Integer, ForeignKey("grn_lines.grn_line_id"), nullable=True)
-    invoice_line_id = Column(Integer, ForeignKey("invoice_lines.invoice_line_id"), nullable=True)
+    po_line_id = Column(Integer, ForeignKey("finance.po_lines.po_line_id"), nullable=False)
+    grn_line_id = Column(Integer, ForeignKey("finance.grn_lines.grn_line_id"), nullable=True)
+    invoice_line_id = Column(Integer, ForeignKey("finance.invoice_lines.invoice_line_id"), nullable=True)
     
     match_status = Column(String(32), default="unmatched", nullable=False)  # matched/variance/unmatched
     
@@ -2051,6 +2092,7 @@ class ThreeWayMatchLog(Base):
     __table_args__ = (
         Index("ix_three_way_match_po", "po_line_id"),
         Index("ix_three_way_match_status", "match_status"),
+        {"schema": "finance"},
     )
 
 
@@ -2060,7 +2102,7 @@ class FactExpensesMonth(Base):
     
     expense_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    period_month = Column(String(16), ForeignKey("dim_fiscal_calendar.period_code"), nullable=False)
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
     
     cost_center = Column(String(64), nullable=True)  # 成本中心
     expense_type = Column(String(128), nullable=False)  # 从FieldMappingDictionary
@@ -2084,6 +2126,7 @@ class FactExpensesMonth(Base):
         Index("ix_expenses_month_period", "period_month"),
         Index("ix_expenses_month_type", "expense_type"),
         Index("ix_expenses_month_shop", "platform_code", "shop_id"),
+        {"schema": "finance"},
     )
 
 
@@ -2109,6 +2152,7 @@ class AllocationRule(Base):
     
     __table_args__ = (
         Index("ix_allocation_rules_scope", "scope", "active"),
+        {"schema": "finance"},
     )
 
 
@@ -2118,7 +2162,7 @@ class FactExpensesAllocated(Base):
     
     allocation_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    expense_id = Column(Integer, ForeignKey("fact_expenses_month.expense_id"), nullable=False)
+    expense_id = Column(Integer, ForeignKey("finance.fact_expenses_month.expense_id"), nullable=False)
     allocation_date = Column(Date, nullable=False)
     
     platform_code = Column(String(32), nullable=False)
@@ -2135,6 +2179,7 @@ class FactExpensesAllocated(Base):
         Index("ix_expenses_allocated_date", "allocation_date"),
         Index("ix_expenses_allocated_shop", "platform_code", "shop_id", "allocation_date"),
         Index("ix_expenses_allocated_sku", "platform_code", "shop_id", "platform_sku", "allocation_date"),
+        {"schema": "finance"},
     )
 
 
@@ -2144,7 +2189,7 @@ class LogisticsCost(Base):
     
     logistics_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    grn_id = Column(String(64), ForeignKey("grn_headers.grn_id"), nullable=True)  # 入库物流
+    grn_id = Column(String(64), ForeignKey("finance.grn_headers.grn_id"), nullable=True)  # 入库物流
     order_id = Column(String(128), nullable=True)  # 销售物流
     
     logistics_provider = Column(String(128), nullable=True)
@@ -2158,7 +2203,7 @@ class LogisticsCost(Base):
     weight_kg = Column(Float, nullable=True)
     volume_m3 = Column(Float, nullable=True)
     
-    invoice_id = Column(Integer, ForeignKey("invoice_headers.invoice_id"), nullable=True)
+    invoice_id = Column(Integer, ForeignKey("finance.invoice_headers.invoice_id"), nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
@@ -2166,6 +2211,7 @@ class LogisticsCost(Base):
         Index("ix_logistics_costs_grn", "grn_id"),
         Index("ix_logistics_costs_order", "order_id"),
         Index("ix_logistics_costs_invoice", "invoice_id"),
+        {"schema": "finance"},
     )
 
 
@@ -2187,6 +2233,7 @@ class LogisticsAllocationRule(Base):
     
     __table_args__ = (
         Index("ix_logistics_alloc_rules_scope", "scope", "active"),
+        {"schema": "finance"},
     )
 
 
@@ -2196,10 +2243,10 @@ class TaxVoucher(Base):
     
     voucher_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    period_month = Column(String(16), ForeignKey("dim_fiscal_calendar.period_code"), nullable=False)
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
     voucher_type = Column(String(32), nullable=False)  # input_tax/output_tax
     
-    invoice_id = Column(Integer, ForeignKey("invoice_headers.invoice_id"), nullable=True)
+    invoice_id = Column(Integer, ForeignKey("finance.invoice_headers.invoice_id"), nullable=True)
     
     tax_amt = Column(Float, default=0.0)
     deductible_amt = Column(Float, default=0.0)  # 可抵扣金额
@@ -2212,6 +2259,7 @@ class TaxVoucher(Base):
     __table_args__ = (
         Index("ix_tax_vouchers_period", "period_month"),
         Index("ix_tax_vouchers_type", "voucher_type", "status"),
+        {"schema": "finance"},
     )
 
 
@@ -2221,7 +2269,7 @@ class TaxReport(Base):
     
     report_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    period_month = Column(String(16), ForeignKey("dim_fiscal_calendar.period_code"), nullable=False)
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
     report_type = Column(String(64), nullable=False)  # vat/export_refund
     
     status = Column(String(32), default="draft", nullable=False)  # draft/submitted
@@ -2234,6 +2282,7 @@ class TaxReport(Base):
     __table_args__ = (
         Index("ix_tax_reports_period", "period_month"),
         Index("ix_tax_reports_status", "status"),
+        {"schema": "finance"},
     )
 
 
@@ -2253,6 +2302,7 @@ class GLAccount(Base):
     
     __table_args__ = (
         Index("ix_gl_accounts_type", "account_type", "active"),
+        {"schema": "finance"},
     )
 
 
@@ -2264,7 +2314,7 @@ class JournalEntry(Base):
     
     entry_no = Column(String(64), nullable=False, unique=True)
     entry_date = Column(Date, nullable=False)
-    period_month = Column(String(16), ForeignKey("dim_fiscal_calendar.period_code"), nullable=False)
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
     
     entry_type = Column(String(64), nullable=False)  # revenue/expense/asset/adjustment
     description = Column(Text, nullable=True)
@@ -2279,6 +2329,7 @@ class JournalEntry(Base):
         Index("ix_journal_entries_date", "entry_date"),
         Index("ix_journal_entries_period", "period_month"),
         Index("ix_journal_entries_status", "status"),
+        {"schema": "finance"},
     )
 
 
@@ -2288,10 +2339,10 @@ class JournalEntryLine(Base):
     
     line_id = Column(Integer, primary_key=True, autoincrement=True)
     
-    entry_id = Column(Integer, ForeignKey("journal_entries.entry_id", ondelete="CASCADE"), nullable=False)
+    entry_id = Column(Integer, ForeignKey("finance.journal_entries.entry_id", ondelete="CASCADE"), nullable=False)
     line_number = Column(Integer, nullable=False)
     
-    account_code = Column(String(64), ForeignKey("gl_accounts.account_code"), nullable=False)
+    account_code = Column(String(64), ForeignKey("finance.gl_accounts.account_code"), nullable=False)
     
     debit_amt = Column(Float, default=0.0)
     credit_amt = Column(Float, default=0.0)
@@ -2312,6 +2363,7 @@ class JournalEntryLine(Base):
         Index("ix_journal_lines_entry", "entry_id"),
         Index("ix_journal_lines_account", "account_code"),
         UniqueConstraint("entry_id", "line_number", name="uq_journal_line"),
+        {"schema": "finance"},
     )
 
 
@@ -2341,6 +2393,7 @@ class OpeningBalance(Base):
         Index("ix_opening_balances_period", "period"),
         Index("ix_opening_balances_sku", "platform_code", "shop_id", "platform_sku"),
         UniqueConstraint("period", "platform_code", "shop_id", "platform_sku", name="uq_opening_balance"),
+        {"schema": "finance"},
     )
 
 
@@ -2362,6 +2415,7 @@ class ApprovalLog(Base):
     __table_args__ = (
         Index("ix_approval_logs_entity", "entity_type", "entity_id"),
         Index("ix_approval_logs_approver", "approver", "status"),
+        {"schema": "finance"},
     )
 
 
@@ -2389,6 +2443,7 @@ class ReturnOrder(Base):
     __table_args__ = (
         Index("ix_return_orders_original", "original_order_id"),
         Index("ix_return_orders_shop", "platform_code", "shop_id"),
+        {"schema": "finance"},
     )
 
 
@@ -2435,6 +2490,7 @@ class FieldUsageTracking(Base):
         Index("idx_usage_frontend", "frontend_component"),
         Index("idx_usage_type", "usage_type"),
         UniqueConstraint("table_name", "field_name", "api_endpoint", "frontend_component", name="uq_field_usage"),
+        {"schema": "core"},
     )
 
 
@@ -2917,6 +2973,7 @@ class ClearanceRanking(Base):
         Index("ix_clearance_ranking_date", "metric_date", "granularity"),
         Index("ix_clearance_ranking_rank", "rank"),
         Index("ix_clearance_ranking_amount", "clearance_amount"),
+        {"schema": "c_class"},
     )
 
 
@@ -2955,8 +3012,8 @@ class MaterializedViewRefreshLog(Base):
 user_roles = Table(
     'user_roles',
     Base.metadata,
-    Column('user_id', BigInteger, ForeignKey('dim_users.user_id'), primary_key=True),
-    Column('role_id', BigInteger, ForeignKey('dim_roles.role_id'), primary_key=True),
+    Column('user_id', BigInteger, ForeignKey('core.dim_users.user_id'), primary_key=True),
+    Column('role_id', BigInteger, ForeignKey('core.dim_roles.role_id'), primary_key=True),
     Column('assigned_at', DateTime(timezone=True), server_default=func.now()),
     Column('assigned_by', String(100))
 )
@@ -2993,7 +3050,7 @@ class DimUser(Base):
     approved_at = Column(DateTime(timezone=True), nullable=True, comment="审批时间")
     approved_by = Column(
         BigInteger,
-        ForeignKey('dim_users.user_id'),
+        ForeignKey('core.dim_users.user_id'),
         nullable=True,
         comment="审批人ID"
     )
@@ -3021,6 +3078,7 @@ class DimUser(Base):
     __table_args__ = (
         Index("idx_users_active", "is_active"),
         Index("idx_users_email_active", "email", "is_active"),
+        {"schema": "core"},
     )
     
     # 关系
@@ -3067,6 +3125,7 @@ class DimRole(Base):
     
     __table_args__ = (
         Index("idx_roles_active", "is_active"),
+        {"schema": "core"},
     )
     
     # 关系
@@ -3089,7 +3148,7 @@ class UserSession(Base):
     session_id = Column(String(64), primary_key=True, index=True, comment="会话ID(Token的哈希值)")
     user_id = Column(
         BigInteger,
-        ForeignKey('dim_users.user_id'),
+        ForeignKey('core.dim_users.user_id'),
         nullable=False,
         index=True
     )
@@ -3147,7 +3206,7 @@ class UserApprovalLog(Base):
     # 用户信息
     user_id = Column(
         BigInteger,
-        ForeignKey('dim_users.user_id'),
+        ForeignKey('core.dim_users.user_id'),
         nullable=False,
         index=True
     )
@@ -3161,7 +3220,7 @@ class UserApprovalLog(Base):
     )
     approved_by = Column(
         BigInteger,
-        ForeignKey('dim_users.user_id'),
+        ForeignKey('core.dim_users.user_id'),
         nullable=False,
         comment="操作人ID"
     )
@@ -3198,7 +3257,7 @@ class FactAuditLog(Base):
     log_id = Column(BigInteger, primary_key=True, index=True)
     
     # 用户信息
-    user_id = Column(BigInteger, ForeignKey("dim_users.user_id"), nullable=False)
+    user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
     username = Column(String(100), nullable=False)  # 冗余字段,便于查询
     
     # 操作信息
@@ -3286,6 +3345,7 @@ class SyncProgressTask(Base):
         Index("ix_sync_progress_status", "status", "start_time"),
         Index("ix_sync_progress_updated", "updated_at"),
         CheckConstraint("status IN ('pending', 'processing', 'completed', 'failed')", name="chk_sync_progress_status"),
+        {"schema": "core"},
     )
 
 
@@ -3356,6 +3416,7 @@ class EntityAlias(Base):
         UniqueConstraint("source_platform", "source_type", "source_name", "source_account", "source_site", name="uq_entity_alias_source"),
         Index("ix_entity_aliases_source", "source_platform", "source_type", "source_name"),
         Index("ix_entity_aliases_target", "target_type", "target_id", "active"),
+        {"schema": "b_class"},
     )
 
 
@@ -3378,7 +3439,7 @@ class StagingRawData(Base):
     __tablename__ = "staging_raw_data"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
+    file_id = Column(Integer, ForeignKey("public.catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
     row_number = Column(Integer, nullable=False)
     platform_code = Column(String(32), nullable=True, index=True)
     shop_id = Column(String(256), nullable=True, index=True)
@@ -3393,6 +3454,7 @@ class StagingRawData(Base):
     __table_args__ = (
         Index("ix_staging_raw_data_file", "file_id", "status"),
         Index("ix_staging_raw_data_domain_gran", "data_domain", "granularity"),
+        {"schema": "b_class"},
     )
 
 
@@ -4132,7 +4194,7 @@ class Notification(Base):
     notification_id = Column(BigInteger, primary_key=True, autoincrement=True)
     recipient_id = Column(
         BigInteger,
-        ForeignKey('dim_users.user_id', ondelete='CASCADE'),
+        ForeignKey('core.dim_users.user_id', ondelete='CASCADE'),
         nullable=False,
         index=True,
         comment="接收者用户ID"
@@ -4152,7 +4214,7 @@ class Notification(Base):
     # 关联数据
     related_user_id = Column(
         BigInteger,
-        ForeignKey('dim_users.user_id', ondelete='SET NULL'),
+        ForeignKey('core.dim_users.user_id', ondelete='SET NULL'),
         nullable=True,
         comment="关联用户ID(如被审批的用户)"
     )
@@ -4207,7 +4269,7 @@ class UserNotificationPreference(Base):
     preference_id = Column(BigInteger, primary_key=True, autoincrement=True)
     user_id = Column(
         BigInteger,
-        ForeignKey('dim_users.user_id', ondelete='CASCADE'),
+        ForeignKey('core.dim_users.user_id', ondelete='CASCADE'),
         nullable=False,
         index=True,
         comment="用户ID"
@@ -4329,7 +4391,7 @@ class FactRateLimitConfigAudit(Base):
     new_is_active = Column(Boolean, nullable=True)  # 变更后的启用状态
     
     # 操作人信息
-    operator_id = Column(BigInteger, ForeignKey("dim_users.user_id"), nullable=True)  # 操作人ID
+    operator_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=True)  # 操作人ID
     operator_username = Column(String(100), nullable=False)  # 操作人用户名(冗余字段)
     
     # IP和设备信息
@@ -4370,7 +4432,7 @@ class SystemLog(Base):
     level = Column(String(10), nullable=False)  # ERROR, WARN, INFO, DEBUG
     module = Column(String(64), nullable=False)  # 模块名称
     message = Column(Text, nullable=False)  # 日志消息
-    user_id = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
     ip_address = Column(String(45), nullable=True)  # IPv4/IPv6
     user_agent = Column(String(512), nullable=True)
     details = Column(JSONB, nullable=True)  # 详细信息(JSON格式)
@@ -4380,7 +4442,7 @@ class SystemLog(Base):
         Index("ix_system_logs_level", "level"),
         Index("ix_system_logs_module", "module"),
         Index("ix_system_logs_created_at", "created_at"),
-        ForeignKeyConstraint(['user_id'], ['dim_users.user_id'], name='fk_system_logs_user_id'),
+        ForeignKeyConstraint(['user_id'], ['core.dim_users.user_id'], name='fk_system_logs_user_id'),
     )
 
 
@@ -4398,12 +4460,12 @@ class SecurityConfig(Base):
     config_value = Column(JSONB, nullable=False)  # 配置值(JSON格式)
     description = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
     
     __table_args__ = (
         UniqueConstraint('config_key', name='uq_security_config_key'),  # 唯一约束
         Index('ix_security_config_key', 'config_key'),  # 索引
-        ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], name='fk_security_config_updated_by'),
+        ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_security_config_updated_by'),
     )
 
 
@@ -4422,14 +4484,15 @@ class BackupRecord(Base):
     checksum = Column(String(64), nullable=True)  # 文件校验和(SHA-256)
     status = Column(String(32), nullable=False)  # pending, completed, failed
     description = Column(Text, nullable=True)
-    created_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
     __table_args__ = (
         Index("ix_backup_records_status", "status"),
         Index("ix_backup_records_created_at", "created_at"),
-        ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], name='fk_backup_records_created_by'),
+        ForeignKeyConstraint(['created_by'], ['core.dim_users.user_id'], name='fk_backup_records_created_by'),
+        {"schema": "core"},
     )
 
 
@@ -4451,10 +4514,10 @@ class SMTPConfig(Base):
     from_name = Column(String(128), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
     
     __table_args__ = (
-        ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], name='fk_smtp_config_updated_by'),
+        ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_smtp_config_updated_by'),
     )
 
 
@@ -4475,14 +4538,14 @@ class NotificationTemplate(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    created_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
-    updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
     
     __table_args__ = (
         Index("ix_notification_templates_template_name", "template_name"),
         Index("ix_notification_templates_template_type", "template_type"),
-        ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], name='fk_notification_templates_created_by'),
-        ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], name='fk_notification_templates_updated_by'),
+        ForeignKeyConstraint(['created_by'], ['core.dim_users.user_id'], name='fk_notification_templates_created_by'),
+        ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_notification_templates_updated_by'),
     )
 
 
@@ -4504,16 +4567,16 @@ class AlertRule(Base):
     priority = Column(String(16), nullable=False, default="medium")  # low/medium/high/critical
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    created_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
-    updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
     
     __table_args__ = (
         Index("ix_alert_rules_rule_name", "rule_name"),
         Index("ix_alert_rules_rule_type", "rule_type"),
         Index("ix_alert_rules_enabled", "enabled"),
         ForeignKeyConstraint(['template_id'], ['notification_templates.id'], name='fk_alert_rules_template_id'),
-        ForeignKeyConstraint(['created_by'], ['dim_users.user_id'], name='fk_alert_rules_created_by'),
-        ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], name='fk_alert_rules_updated_by'),
+        ForeignKeyConstraint(['created_by'], ['core.dim_users.user_id'], name='fk_alert_rules_created_by'),
+        ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_alert_rules_updated_by'),
     )
 
 
@@ -4531,10 +4594,10 @@ class SystemConfig(Base):
     config_value = Column(String(512), nullable=False)
     description = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    updated_by = Column(Integer, ForeignKey("dim_users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
     
     __table_args__ = (
         UniqueConstraint('config_key', name='uq_system_config_key'),  # 唯一约束
         Index('ix_system_config_key', 'config_key'),  # 索引
-        ForeignKeyConstraint(['updated_by'], ['dim_users.user_id'], name='fk_system_config_updated_by'),
+        ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_system_config_updated_by'),
     )

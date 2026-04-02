@@ -416,6 +416,7 @@ export default {
   // 任务管理
   createTask,
   getTasks,
+  getVerificationItems,
   getTask,
   cancelTask,
   deleteTask,

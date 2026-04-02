@@ -26,6 +26,14 @@ test('collection api default export exposes getTaskScreenshotUrl', () => {
   )
 })
 
+test('collection api default export exposes getVerificationItems', () => {
+  assert.equal(
+    apiSource.includes('getVerificationItems,'),
+    true,
+    'default collection api export should expose getVerificationItems'
+  )
+})
+
 test('buildTimeSelectionPayload emits preset runtime contract', () => {
   assert.deepEqual(
     buildTimeSelectionPayload('last_7_days'),
