@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.models.database import get_async_db
 from backend.routers import main_accounts, shop_accounts
-from modules.core.db import MainAccount, ShopAccount
+from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability
 
 
 @pytest_asyncio.fixture
@@ -16,6 +16,8 @@ async def shop_account_client(monkeypatch):
         await conn.exec_driver_sql("ATTACH DATABASE ':memory:' AS core")
         await conn.run_sync(MainAccount.__table__.create)
         await conn.run_sync(ShopAccount.__table__.create)
+        await conn.run_sync(ShopAccountAlias.__table__.create)
+        await conn.run_sync(ShopAccountCapability.__table__.create)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     app = FastAPI()
