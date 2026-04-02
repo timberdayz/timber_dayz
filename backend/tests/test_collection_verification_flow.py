@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.routers.collection_tasks import resume_task
+from backend.routers.collection_tasks import cancel_or_delete_task, resume_task
 from backend.schemas.collection import ResumeTaskRequest
 
 
@@ -98,6 +98,43 @@ async def test_resume_task_accepts_manual_completed_for_slide_captcha():
     assert task.status == "verification_submitted"
     assert body["verification_type"] == "slide_captcha"
     redis.set.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_allows_verification_required_status(monkeypatch):
+    task = _make_task(status="verification_required")
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = task
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    mirror_task = AsyncMock()
+    mirror_log = AsyncMock()
+    delete_task_center = AsyncMock()
+
+    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task", mirror_task)
+    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task_log", mirror_log)
+
+    class _TaskCenterService:
+        def __init__(self, _db):
+            self.db = _db
+
+        async def delete_task(self, task_id):
+            await delete_task_center(task_id)
+
+    monkeypatch.setattr("backend.routers.collection_tasks.TaskCenterService", _TaskCenterService)
+
+    body = await cancel_or_delete_task(task_id="task-1", db=db)
+
+    assert task.status == "cancelled"
+    assert task.error_message == "用户取消"
+    assert body.success is True
+    db.commit.assert_awaited_once()
+    mirror_task.assert_awaited()
+    mirror_log.assert_awaited()
 
 
 @pytest.mark.asyncio

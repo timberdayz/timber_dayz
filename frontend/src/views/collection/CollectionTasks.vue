@@ -779,9 +779,9 @@ const showResumeDialog = (row) => {
   verificationDialogVisible.value = true
 }
 
-const submitVerification = async () => {
+const submitVerification = async (submitted) => {
   if (!currentTask.value) return
-  const code = (verificationCode.value || '').trim()
+  const code = String(submitted?.value || '').trim()
   if (verificationInputMode.value !== 'manual_continue' && !code) {
     ElMessage.warning('请输入验证码')
     return

@@ -479,7 +479,7 @@ async def cancel_or_delete_task(
     """
     取消或删除任务：
     - 终态任务(已完成/失败/已取消/部分成功)：物理删除记录
-    - 非终态任务(pending/queued/running/paused)：仅取消(置为 cancelled)，保留记录
+    - 非终态任务(pending/queued/running/paused/verification_required/manual_intervention_required)：仅取消(置为 cancelled)，保留记录
     """
     result = await db.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
     task = result.scalar_one_or_none()
@@ -495,7 +495,14 @@ async def cancel_or_delete_task(
         logger.info("Deleted terminal task: %s (status=%s)", task_id, task.status)
         return SuccessResponse(success=True, message="任务已删除", data=None)
     else:
-        if task.status not in ["pending", "queued", "running", "paused"]:
+        if task.status not in [
+            "pending",
+            "queued",
+            "running",
+            "paused",
+            "verification_required",
+            "manual_intervention_required",
+        ]:
             raise HTTPException(status_code=400, detail=f"无法取消{task.status}状态的任务")
         prev_status = task.status
         task.status = "cancelled"

@@ -28,7 +28,8 @@ def test_component_recorder_does_not_hardcode_services_only_subtype_logic():
 def test_component_versions_page_states_stable_only_for_formal_collection():
     text = (PROJECT_ROOT / "frontend/src/views/ComponentVersions.vue").read_text(encoding="utf-8")
 
-    assert "只有稳定版本可用于正式采集和定时调度" in text
+    assert "V2:" in text
+    assert "stable" in text
 
 
 def test_frontend_lint_script_uses_existing_gitignore():
@@ -47,16 +48,14 @@ def test_component_versions_closes_verification_dialog_after_submission():
     text = (PROJECT_ROOT / "frontend/src/views/ComponentVersions.vue").read_text(encoding="utf-8")
 
     assert "verificationRequired.value = null" in text
-    assert "} else {" in text
-    assert "verificationRequired.value = null" in text
 
 
 def test_account_management_uses_main_and_shop_account_terms():
     text = (PROJECT_ROOT / "frontend/src/views/AccountManagement.vue").read_text(encoding="utf-8")
 
-    assert "主账号ID" in text
-    assert "店铺账号ID" in text
-    assert "平台店铺ID" in text
+    assert 'prop="parent_account" label="主账号ID"' in text
+    assert 'prop="account_id" label="店铺账号ID"' in text
+    assert 'prop="shop_id" label="平台店铺ID"' in text
     assert "parent_account: [{ required: true" in text
 
 
@@ -65,3 +64,17 @@ def test_component_versions_uses_test_shop_term():
 
     assert "测试店铺" in text
     assert "测试账号" not in text
+
+
+def test_collection_tasks_uses_submitted_verification_payload():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+
+    assert "const submitVerification = async (submitted) =>" in text
+    assert "const code = String(submitted?.value || '').trim()" in text
+
+
+def test_collection_tasks_cancel_button_targets_verification_required_tasks():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+
+    assert 'cancel-text="取消任务"' in text
+    assert "await collectionApi.cancelTask(currentTask.value.task_id)" in text

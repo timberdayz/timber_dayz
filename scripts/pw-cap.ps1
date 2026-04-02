@@ -4,20 +4,51 @@ param(
 
     [string]$Ref,
 
-    [string]$Ext = "png"
+    [string]$Ext = "png",
+
+    [string]$Session = $env:PLAYWRIGHT_CLI_SESSION
 )
 
 $ErrorActionPreference = "Stop"
 
 $Helper = Join-Path $PSScriptRoot "pwcli_workflow.py"
 $Pwcli = Join-Path $PSScriptRoot "pwcli.ps1"
+$ResolvedSession = [string]::IsNullOrWhiteSpace($Session) ? $null : $Session.Trim()
+
+function Invoke-PwcliCapture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $pwcliArgs = @()
+    if ($ResolvedSession) {
+        $pwcliArgs += "-s=$ResolvedSession"
+    }
+    $pwcliArgs += $Arguments
+
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = (& $Pwcli @pwcliArgs 2>&1 | Out-String)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    [pscustomobject]@{
+        Output   = $output
+        ExitCode = $exitCode
+    }
+}
 
 $CapturePaths = python $Helper capture-paths --work-dir (Get-Location).Path --name $Name --ext $Ext | ConvertFrom-Json
 $SnapshotPath = $CapturePaths.snapshot_path
 $ScreenshotPath = $CapturePaths.screenshot_path
 
-$SnapshotOutput = (& $Pwcli snapshot 2>&1 | Out-String)
-$SnapshotExitCode = $LASTEXITCODE
+$SnapshotResult = Invoke-PwcliCapture -Arguments @("snapshot")
+$SnapshotOutput = $SnapshotResult.Output
+$SnapshotExitCode = $SnapshotResult.ExitCode
 
 if ($SnapshotExitCode -ne 0) {
     Write-Error $SnapshotOutput
@@ -32,11 +63,12 @@ Get-ChildItem -File | Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg")
 }
 
 if ($Ref) {
-    $ScreenshotOutput = (& $Pwcli screenshot $Ref 2>&1 | Out-String)
+    $ScreenshotResult = Invoke-PwcliCapture -Arguments @("screenshot", $Ref)
 } else {
-    $ScreenshotOutput = (& $Pwcli screenshot 2>&1 | Out-String)
+    $ScreenshotResult = Invoke-PwcliCapture -Arguments @("screenshot")
 }
-$ScreenshotExitCode = $LASTEXITCODE
+$ScreenshotOutput = $ScreenshotResult.Output
+$ScreenshotExitCode = $ScreenshotResult.ExitCode
 
 if ($ScreenshotExitCode -ne 0) {
     Write-Error $ScreenshotOutput
