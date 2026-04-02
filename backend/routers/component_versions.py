@@ -184,6 +184,8 @@ def _build_component_test_runtime_config(
         return logical_type, {}
 
     runtime_config: dict[str, Any] = {}
+    if request.shop_account_id and not request.account_id:
+        runtime_config["shop_account_id"] = request.shop_account_id
     if data_domain:
         runtime_config["data_domain"] = data_domain
 

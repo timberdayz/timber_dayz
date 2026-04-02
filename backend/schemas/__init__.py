@@ -20,6 +20,10 @@ from backend.schemas.account import (
     AccountStats,
     BatchCreateRequest,
 )
+from backend.schemas.main_account import MainAccountCreate, MainAccountUpdate, MainAccountResponse
+from backend.schemas.shop_account import ShopAccountCreate, ShopAccountUpdate, ShopAccountResponse
+from backend.schemas.shop_account_alias import ShopAccountAliasCreate, ShopAccountAliasResponse
+from backend.schemas.platform_shop_discovery import PlatformShopDiscoveryResponse
 
 # ==================== 通用响应 ====================
 from backend.schemas.common import (
