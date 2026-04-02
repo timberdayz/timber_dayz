@@ -51,8 +51,9 @@ PAGE_SCENARIOS = [
     {
         "name": "account_management",
         "requests": [
-            {"path": "/api/accounts/"},
-            {"path": "/api/accounts/stats/summary"},
+            {"path": "/api/shop-accounts"},
+            {"path": "/api/main-accounts"},
+            {"path": "/api/shop-account-aliases/unmatched"},
         ],
     },
     {

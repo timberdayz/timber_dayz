@@ -82,4 +82,6 @@ def test_account_management_uses_trailing_slash_endpoint():
     )
     paths = {item["path"] for item in account_page["requests"]}
 
-    assert "/api/accounts/" in paths
+    assert "/api/shop-accounts" in paths
+    assert "/api/main-accounts" in paths
+    assert "/api/shop-account-aliases/unmatched" in paths

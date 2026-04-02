@@ -33,4 +33,4 @@ def test_account_management_import_from_local_route_removed():
 def test_account_management_list_route_still_available():
     paths = {route.path for route in app.routes if hasattr(route, "path")}
 
-    assert "/api/accounts/" in paths
+    assert "/api/accounts/" not in paths

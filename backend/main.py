@@ -737,14 +737,6 @@ try:
         tags=["采集WebSocket"]
     )
     
-    # v4.7.0: 账号管理API
-    from backend.routers import account_management
-    app.include_router(
-        account_management.router,
-        prefix="/api",
-        tags=["账号管理"]
-    )
-
     from backend.routers import (
         main_accounts,
         platform_shop_discoveries,
