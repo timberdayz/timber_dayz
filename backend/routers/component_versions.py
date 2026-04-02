@@ -1353,23 +1353,42 @@ async def test_component_version(
                 recovery_suggestion="请先启用版本",
             )
 
-        # 2. 验证账号
-        from modules.core.db import PlatformAccount
+        # 2. 验证测试目标（优先店铺账号，兼容旧账号）
+        effective_shop_account_id = (request.shop_account_id or request.account_id or "").strip()
+        account = None
+        account_platform = None
+        account_info = None
 
-        account_result = await db.execute(
-            select(PlatformAccount).where(
-                PlatformAccount.account_id == request.account_id
-            )
-        )
-        account = account_result.scalar_one_or_none()
+        try:
+            from backend.services.shop_account_loader_service import get_shop_account_loader_service
 
-        if not account:
-            return error_response(
-                ErrorCode.DATA_NOT_FOUND,
-                "账号不存在",
-                status_code=404,
-                recovery_suggestion="请检查账号ID",
+            shop_loader = get_shop_account_loader_service()
+            shop_payload = await shop_loader.load_shop_account_async(effective_shop_account_id, db)
+            if shop_payload:
+                account = shop_payload["shop_context"]
+                account_platform = shop_payload["main_account"]["platform"]
+                account_info = shop_payload["compat_account"]
+        except Exception:
+            shop_payload = None
+
+        if account_info is None:
+            from modules.core.db import PlatformAccount
+
+            account_result = await db.execute(
+                select(PlatformAccount).where(
+                    PlatformAccount.account_id == effective_shop_account_id
+                )
             )
+            account = account_result.scalar_one_or_none()
+
+            if not account:
+                return error_response(
+                    ErrorCode.DATA_NOT_FOUND,
+                    "店铺账号不存在",
+                    status_code=404,
+                    recovery_suggestion="请检查店铺账号ID",
+                )
+            account_platform = account.platform
 
         # #region agent log
         with open(log_file, "a", encoding="utf-8") as f:
@@ -1379,8 +1398,8 @@ async def test_component_version(
                         "location": "component_versions.py:548",
                         "message": "Account found",
                         "data": {
-                            "account_id": account.account_id,
-                            "platform": account.platform,
+                            "account_id": effective_shop_account_id,
+                            "platform": account_platform,
                         },
                         "timestamp": __import__("datetime").datetime.now().isoformat(),
                         "sessionId": "debug-session",
@@ -1393,7 +1412,7 @@ async def test_component_version(
 
         logger.info(
             f"Testing component version: {version.component_name} v{version.version} "
-            f"with account: {request.account_id}"
+            f"with account: {effective_shop_account_id}"
         )
 
         # 3. 读取组件文件(支持 YAML 和 Python 组件)
@@ -1553,7 +1572,8 @@ async def test_component_version(
             )
 
         # 4. 使用统一服务准备账号信息 [*]
-        account_info = ComponentTestService.prepare_account_info(account)
+        if account_info is None:
+            account_info = ComponentTestService.prepare_account_info(account)
 
         # #region agent log
         with open(log_file, "a", encoding="utf-8") as f:
@@ -1620,7 +1640,7 @@ async def test_component_version(
 
         test_config = {
             "platform": platform,
-            "account_id": request.account_id,
+            "account_id": effective_shop_account_id,
             "component_name": component_name,
             "component_path": str(component_path),
             "headless": False,
@@ -1809,7 +1829,7 @@ async def test_component_version(
                                     db=db,
                                     component_name=version.component_name,
                                     platform=platform,
-                                    account_id=request.account_id,
+                                    account_id=effective_shop_account_id,
                                     test_result=test_result_obj,
                                     version_id=version_id,
                                     component_version=version.version,

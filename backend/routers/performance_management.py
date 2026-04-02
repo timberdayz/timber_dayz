@@ -42,7 +42,7 @@ from modules.core.db import (
     # [DELETED] v4.19.0: FactOrder 已删除
     FactProductMetric,
     DimShop,
-    PlatformAccount,
+    ShopAccount,
 )
 from modules.core.logger import get_logger
 from backend.schemas.performance import (
@@ -797,18 +797,18 @@ async def list_performance_scores(
                 await request.app.state.cache_service.set("performance_scores", result, **cache_params)
             return JSONResponse(content=result, headers={"X-Cache": cache_status})
 
-        # 按店铺：以 platform_accounts（正在经营店铺）为主，合并 performance_scores
+        # 按店铺：以 shop_accounts（正在经营店铺）为主，合并 performance_scores
         shop_query = (
-            select(PlatformAccount)
-            .where(PlatformAccount.enabled == True)
-            .order_by(PlatformAccount.platform, PlatformAccount.store_name)
+            select(ShopAccount)
+            .where(ShopAccount.enabled == True)
+            .order_by(ShopAccount.platform, ShopAccount.store_name)
         )
         shop_rows = (await db.execute(shop_query)).scalars().all()
         all_shops = [
             {
                 "platform_code": (r.platform or "").lower() if r.platform else "",
-                "shop_id": r.shop_id or r.account_id or str(r.id),
-                "shop_name": r.store_name or (r.account_alias or "") or r.account_id or "",
+                "shop_id": getattr(r, "platform_shop_id", None) or getattr(r, "shop_account_id", None) or getattr(r, "shop_id", None) or getattr(r, "account_id", None) or str(r.id),
+                "shop_name": getattr(r, "store_name", None) or getattr(r, "shop_account_id", None) or getattr(r, "account_id", None) or "",
             }
             for r in shop_rows
         ]
