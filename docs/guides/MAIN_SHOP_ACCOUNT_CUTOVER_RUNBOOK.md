@@ -249,9 +249,9 @@ python run.py --local
 
 至少检查以下接口:
 
-- `GET /api/accounts/`
 - `GET /api/main-accounts`
 - `GET /api/shop-accounts`
+- `GET /api/shop-account-aliases/unmatched`
 - `GET /api/platform-shop-discoveries`
 - `GET /api/component-versions`
 
@@ -352,9 +352,9 @@ python -m alembic downgrade 20260401_public_alembic_archive
 ### 9.2 迁移成功但页面异常
 
 优先检查:
-- `/api/accounts/`
 - `/api/main-accounts`
 - `/api/shop-accounts`
+- `/api/shop-account-aliases/unmatched`
 - 浏览器控制台
 - 后端日志
 
@@ -362,7 +362,7 @@ python -m alembic downgrade 20260401_public_alembic_archive
 
 优先检查:
 - `shop_accounts` 是否有数据
-- `/api/accounts/?platform=xxx&enabled=true` 是否返回店铺账号
+- `/api/shop-accounts?platform=xxx&enabled=true` 是否返回店铺账号
 - 页面是否真的部署了本次合并后的 `main`
 
 ---

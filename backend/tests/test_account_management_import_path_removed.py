@@ -6,7 +6,6 @@ RUNTIME_FILES = [
     Path("frontend/src/api/accounts.js"),
     Path("frontend/src/stores/accounts.js"),
     Path("frontend/src/views/AccountManagement.vue"),
-    Path("backend/routers/account_management.py"),
 ]
 
 

@@ -265,14 +265,22 @@
 | PUT | `/api/roles/{role_id}` | 更新角色 | 系统 |
 | DELETE | `/api/roles/{role_id}` | 删除角色 | 系统 |
 
-### 账号管理 (`/api/accounts`)
+### 账号管理 (`/api/main-accounts`, `/api/shop-accounts`, `/api/shop-account-aliases`)
 
 | 方法 | 路径 | 说明 | 数据分类 |
 |------|------|------|---------|
-| GET | `/api/accounts` | 查询账号列表 | 系统 |
-| POST | `/api/accounts` | 添加账号 | 系统 |
-| PUT | `/api/accounts/{account_id}` | 更新账号 | 系统 |
-| DELETE | `/api/accounts/{account_id}` | 删除账号 | 系统 |
+| GET | `/api/main-accounts` | 查询主账号列表 | 系统 |
+| POST | `/api/main-accounts` | 创建主账号 | 系统 |
+| PUT | `/api/main-accounts/{main_account_id}` | 更新主账号 | 系统 |
+| DELETE | `/api/main-accounts/{main_account_id}` | 删除主账号 | 系统 |
+| GET | `/api/shop-accounts` | 查询店铺账号列表 | 系统 |
+| POST | `/api/shop-accounts` | 创建店铺账号 | 系统 |
+| PUT | `/api/shop-accounts/{shop_account_id}` | 更新店铺账号 | 系统 |
+| DELETE | `/api/shop-accounts/{shop_account_id}` | 删除店铺账号 | 系统 |
+| POST | `/api/shop-accounts/batch` | 批量创建店铺账号 | 系统 |
+| GET | `/api/shop-account-aliases` | 查询店铺别名列表 | 系统 |
+| POST | `/api/shop-account-aliases/claim` | 认领店铺别名 | 系统 |
+| GET | `/api/shop-account-aliases/unmatched` | 查询未匹配店铺别名 | 系统 |
 
 ### 系统配置 (`/api/system`)
 

@@ -11,8 +11,8 @@
 5. 缓存统计和监控
 
 使用场景:
-- 账号列表(`/api/accounts`)
-- 统计数据(`/api/accounts/stats`)
+- 主账号列表(`/api/main-accounts`)
+- 店铺账号列表(`/api/shop-accounts`)
 - 组件版本列表(`/api/component-versions`)
 - 其他频繁查询的数据
 """

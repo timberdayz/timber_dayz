@@ -780,7 +780,7 @@ app.include_router(
     tags=["数据管理"]
 )
 
-# v4.18.0: accounts.router已删除,使用account_management.router替代(见第494-499行)
+# v4.18.0: accounts.router 已删除，账号管理已全面切换到 main_accounts / shop_accounts / shop_account_aliases
 
 app.include_router(
     field_mapping.router,

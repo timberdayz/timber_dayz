@@ -46,7 +46,7 @@ def test_api_startup():
                 categories.setdefault('Collection', []).append((path, methods))
             elif '/api/management' in path:
                 categories.setdefault('Management', []).append((path, methods))
-            elif '/api/accounts' in path:
+            elif '/api/main-accounts' in path or '/api/shop-accounts' in path or '/api/shop-account-aliases' in path:
                 categories.setdefault('Accounts', []).append((path, methods))
             elif '/api/field-mapping' in path:
                 categories.setdefault('Field Mapping', []).append((path, methods))
@@ -123,4 +123,3 @@ def test_api_startup():
 
 if __name__ == "__main__":
     test_api_startup()
-

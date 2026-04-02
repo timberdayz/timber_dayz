@@ -78,7 +78,6 @@ def collect_wave2_candidate_proofs() -> dict[str, dict[str, object]]:
             ],
             "runtime_write_files": [
                 PROJECT_ROOT / "backend/services/shop_sync_service.py",
-                PROJECT_ROOT / "backend/routers/account_management.py",
                 PROJECT_ROOT / "backend/routers/target_management.py",
             ],
             "historical_target_files": [
