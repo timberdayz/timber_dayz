@@ -1,5 +1,10 @@
 from pathlib import Path
+import os
+import subprocess
+import sys
+import time
 
+import psycopg2
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
@@ -34,3 +39,161 @@ def test_main_shop_account_migration_has_single_head():
     script = ScriptDirectory.from_config(config)
 
     assert len(script.get_heads()) == 1
+
+
+def test_main_shop_account_migration_applies_changes_to_postgres_rehearsal_db():
+    admin_conn = psycopg2.connect(
+        host="127.0.0.1",
+        port=15432,
+        user="erp_user",
+        password="erp_pass_2025",
+        dbname="postgres",
+    )
+    admin_conn.autocommit = True
+    rehearsal_db = f"xihong_erp_rehearsal_test_{int(time.time())}"
+
+    try:
+        with admin_conn.cursor() as cur:
+            cur.execute(f"DROP DATABASE IF EXISTS {rehearsal_db}")
+            cur.execute(f"CREATE DATABASE {rehearsal_db}")
+
+        conn = psycopg2.connect(
+            host="127.0.0.1",
+            port=15432,
+            user="erp_user",
+            password="erp_pass_2025",
+            dbname=rehearsal_db,
+        )
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("CREATE SCHEMA IF NOT EXISTS core")
+                    cur.execute(
+                        """
+                        CREATE TABLE core.alembic_version (
+                            version_num VARCHAR(32) NOT NULL PRIMARY KEY
+                        )
+                        """
+                    )
+                    cur.execute(
+                        "INSERT INTO core.alembic_version(version_num) VALUES (%s)",
+                        ("20260401_public_alembic_archive",),
+                    )
+                    cur.execute(
+                        """
+                        CREATE TABLE core.platform_accounts (
+                            id SERIAL PRIMARY KEY,
+                            platform VARCHAR(50) NOT NULL,
+                            account_id VARCHAR(100) NOT NULL,
+                            parent_account VARCHAR(100),
+                            username VARCHAR(200) NOT NULL,
+                            password_encrypted TEXT NOT NULL,
+                            login_url TEXT,
+                            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                            notes TEXT,
+                            extra_config JSONB,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                            created_by VARCHAR(100),
+                            updated_by VARCHAR(100),
+                            store_name VARCHAR(200) NOT NULL,
+                            shop_id VARCHAR(256),
+                            shop_region VARCHAR(50),
+                            shop_type VARCHAR(50),
+                            proxy_required BOOLEAN DEFAULT FALSE,
+                            currency VARCHAR(16),
+                            region VARCHAR(50),
+                            email VARCHAR(200),
+                            phone VARCHAR(50),
+                            account_alias VARCHAR(256),
+                            capabilities JSONB
+                        )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO core.platform_accounts (
+                            platform,
+                            account_id,
+                            parent_account,
+                            username,
+                            password_encrypted,
+                            store_name,
+                            account_alias,
+                            capabilities
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                        """,
+                        (
+                            "shopee",
+                            "shop_alpha",
+                            "main_alpha",
+                            "alpha_user",
+                            "enc",
+                            "Alpha Store",
+                            "Alpha Alias",
+                            '{"orders": true, "products": true}',
+                        ),
+                    )
+        finally:
+            conn.close()
+
+        env = os.environ.copy()
+        env["DATABASE_URL"] = (
+            f"postgresql://erp_user:erp_pass_2025@127.0.0.1:15432/{rehearsal_db}"
+        )
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
+            cwd=str(Path.cwd()),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=240,
+        )
+
+        assert result.returncode == 0, (
+            f"alembic upgrade failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+        conn = psycopg2.connect(
+            host="127.0.0.1",
+            port=15432,
+            user="erp_user",
+            password="erp_pass_2025",
+            dbname=rehearsal_db,
+        )
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = 'core'
+                          AND table_name IN (
+                              'main_accounts',
+                              'shop_accounts',
+                              'shop_account_aliases',
+                              'shop_account_capabilities',
+                              'platform_shop_discoveries'
+                          )
+                        ORDER BY table_name
+                        """
+                    )
+                    table_names = [row[0] for row in cur.fetchall()]
+                    cur.execute("SELECT version_num FROM core.alembic_version")
+                    revision = cur.fetchone()[0]
+
+            assert table_names == [
+                "main_accounts",
+                "platform_shop_discoveries",
+                "shop_account_aliases",
+                "shop_account_capabilities",
+                "shop_accounts",
+            ]
+            assert revision == "20260402_main_shop_accounts"
+        finally:
+            conn.close()
+    finally:
+        with admin_conn.cursor() as cur:
+            cur.execute(f"DROP DATABASE IF EXISTS {rehearsal_db}")
+        admin_conn.close()

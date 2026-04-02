@@ -119,7 +119,11 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        connection.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
+        # SQLAlchemy 2.x will autobegin a transaction on execute(). Commit the
+        # schema bootstrap separately so Alembic does not inherit an outer
+        # transaction that later gets rolled back on connection close.
+        with connection.begin():
+            connection.execute(text("CREATE SCHEMA IF NOT EXISTS core"))
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
