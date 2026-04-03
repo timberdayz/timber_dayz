@@ -84,6 +84,15 @@
           </el-select>
         </el-col>
         <el-col :span="4">
+          <el-switch
+            v-model="filters.include_disabled"
+            inline-prompt
+            active-text="显示历史记录"
+            inactive-text="隐藏历史记录"
+            @change="handleFilterChange"
+          />
+        </el-col>
+        <el-col :span="4">
           <el-select v-model="filters.shop_type" placeholder="店铺类型" clearable @change="handleFilterChange">
             <el-option label="本地店" value="local" />
             <el-option label="全球店" value="global" />
@@ -131,7 +140,7 @@
             <el-option
               v-for="mainAccount in accountsStore.mainAccounts"
               :key="`${mainAccount.platform}-${mainAccount.main_account_id}`"
-              :label="`${mainAccount.platform} / ${mainAccount.main_account_id}`"
+              :label="`${mainAccount.platform} / ${mainAccount.main_account_name || mainAccount.username || mainAccount.main_account_id} / ${mainAccount.main_account_id}`"
               :value="mainAccount.main_account_id"
             />
           </el-select>
@@ -158,6 +167,11 @@
         height="500"
       >
         <el-table-column prop="platform" label="平台" width="100" />
+        <el-table-column label="主账号名称" width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ getMainAccountDisplayName(row) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="parent_account" label="主账号ID" width="180" show-overflow-tooltip />
         <el-table-column prop="account_id" label="店铺账号ID" width="180" show-overflow-tooltip />
         <el-table-column prop="account_alias" label="店铺别名" width="180" show-overflow-tooltip>
@@ -262,6 +276,11 @@
               <div class="form-tip">用于共享登录身份、持久会话和浏览器 profile</div>
             </el-form-item>
             
+            <el-form-item label="主账号名称">
+              <el-input v-model="accountForm.main_account_name" placeholder="如：Shopee 新加坡主体" />
+              <div class="form-tip">用于页面显示和人工识别，不影响系统内部主账号ID</div>
+            </el-form-item>
+            
             <el-form-item label="店铺类型">
               <el-radio-group v-model="accountForm.shop_type" @change="handleShopTypeChange">
                 <el-radio label="local">本地店铺</el-radio>
@@ -283,7 +302,7 @@
           
           <!-- 登录信息 -->
           <el-tab-pane label="主账号登录信息" name="login">
-            <el-form-item label="用户名" prop="username">
+            <el-form-item label="登录用户名" prop="username">
               <el-input v-model="accountForm.username" placeholder="登录用户名" />
             </el-form-item>
             
@@ -518,6 +537,7 @@ const domainLabels = {
 const filters = reactive({
   platform: null,
   enabled: null,
+  include_disabled: false,
   shop_type: null,
   search: ''
 })
@@ -540,6 +560,7 @@ const accountFormRef = ref(null)
 const accountForm = reactive({
   account_id: '',
   parent_account: '',
+  main_account_name: '',
   platform: 'shopee',
   account_alias: '',
   store_name: '',
@@ -582,6 +603,7 @@ const formRules = computed(() => ({
 // 批量表单
 const batchForm = reactive({
   parent_account: '',
+  main_account_name: '',
   platform: 'shopee',
   username: '',
   password: '',
@@ -630,6 +652,20 @@ async function handleRefresh() {
   await accountsStore.loadAccounts({}, true)
   await accountsStore.loadStats(false) // 统计数据后台加载，不显示loading
   ElMessage.success('刷新成功')
+}
+
+function resolveMainAccountRecord(mainAccountId) {
+  return (accountsStore.mainAccounts || []).find((item) => item.main_account_id === mainAccountId) || null
+}
+
+function getMainAccountDisplayName(account) {
+  const mainAccount = resolveMainAccountRecord(account.parent_account)
+  return (
+    mainAccount?.main_account_name
+    || mainAccount?.username
+    || account.parent_account
+    || '-'
+  )
 }
 
 async function handleDiscoverCurrentShop() {
@@ -692,18 +728,20 @@ async function handleCreateShopAccountFromDiscovery() {
  */
 function handleEdit(account) {
   editingAccount.value = account
+  const mainAccount = resolveMainAccountRecord(account.parent_account)
   Object.assign(accountForm, {
     account_id: account.account_id,
     parent_account: account.parent_account || '',
+    main_account_name: mainAccount?.main_account_name || '',
     platform: account.platform,
     account_alias: account.account_alias || '',
     store_name: account.store_name,
     shop_type: account.shop_type || 'local',
     shop_region: account.shop_region || '',
     shop_id: account.shop_id || '',  // ⭐ v4.18.1新增
-    username: account.username,
+    username: mainAccount?.username || account.username || '',
     password: '', // 不显示密码
-    login_url: account.login_url || '',
+    login_url: mainAccount?.login_url || account.login_url || '',
     email: account.email || '',
     phone: account.phone || '',
     region: account.region || 'CN',
@@ -758,6 +796,7 @@ function resetForm() {
   Object.assign(accountForm, {
     account_id: '',
     parent_account: '',
+    main_account_name: '',
     platform: 'shopee',
     account_alias: '',
     store_name: '',
@@ -874,6 +913,7 @@ async function handleBatchCreate() {
     // 重置表单
     Object.assign(batchForm, {
       parent_account: '',
+      main_account_name: '',
       platform: 'shopee',
       username: '',
       password: '',

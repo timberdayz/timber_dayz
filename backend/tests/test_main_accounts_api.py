@@ -46,6 +46,7 @@ async def test_create_main_account(main_account_client):
         json={
             "platform": "shopee",
             "main_account_id": "hongxikeji:main",
+            "main_account_name": "Shopee 新加坡主体",
             "username": "demo-user",
             "password": "plain-password",
             "login_url": "https://seller.shopee.cn",
@@ -56,4 +57,5 @@ async def test_create_main_account(main_account_client):
     assert response.status_code == 200
     payload = response.json()
     assert payload["main_account_id"] == "hongxikeji:main"
+    assert payload["main_account_name"] == "Shopee 新加坡主体"
     assert payload["platform"] == "shopee"

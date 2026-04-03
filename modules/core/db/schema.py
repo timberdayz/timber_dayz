@@ -1274,6 +1274,7 @@ class MainAccount(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     platform = Column(String(50), nullable=False, comment="平台代码")
     main_account_id = Column(String(100), unique=True, nullable=False, comment="主账号ID")
+    main_account_name = Column(String(200), nullable=True, comment="主账号名称")
     username = Column(String(200), nullable=False, comment="登录用户名")
     password_encrypted = Column(Text, nullable=False, comment="加密后的密码")
     login_url = Column(Text, nullable=True, comment="登录URL")

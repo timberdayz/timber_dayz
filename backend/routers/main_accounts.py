@@ -64,6 +64,7 @@ async def create_main_account(
     record = MainAccount(
         platform=payload.platform,
         main_account_id=payload.main_account_id,
+        main_account_name=payload.main_account_name,
         username=payload.username,
         password_encrypted=encryption_service.encrypt_password(payload.password),
         login_url=payload.login_url,
