@@ -1969,6 +1969,13 @@ const getPayrollSummary = (param) => {
   min-height: 100vh;
 }
 
+.departments-content :deep(.el-table__header-wrapper th:nth-child(7)),
+.departments-content :deep(.el-table__header-wrapper th:nth-child(8)),
+.departments-content :deep(.el-table__body-wrapper td:nth-child(7)),
+.departments-content :deep(.el-table__body-wrapper td:nth-child(8)) {
+  display: none;
+}
+
 .page-header {
   display: flex;
   justify-content: space-between;

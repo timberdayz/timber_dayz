@@ -5,7 +5,7 @@ HR - 员工档案与我的信息
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_, text
+from sqlalchemy import select, func, and_, or_
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date, timezone
 from decimal import Decimal
@@ -25,8 +25,7 @@ from backend.services.hr_income_calculation_service import HRIncomeCalculationSe
 from backend.services.base_service import provide_service
 from backend.utils.year_month_utils import year_month_to_first_day
 from modules.core.db import (
-    Employee, DimUser, SalaryStructure, PayrollRecord,
-    EmployeeCommission, EmployeePerformance,
+    Employee, DimUser, PayrollRecord,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-员工档案"])
@@ -176,105 +175,6 @@ async def get_my_income(
                 "net_salary": net_salary,
             }
         },
-    )
-    if pr:
-        base_salary = float(pr.base_salary) if pr.base_salary else None
-        commission_amount = float(pr.commission or 0)
-        breakdown["payroll"] = {"base_salary": base_salary, "commission": commission_amount, "net_salary": float(pr.net_salary or 0)}
-    # 若无工资单，组合 salary_structures + employee_commissions + employee_performance
-    if base_salary is None:
-        ss_result = await db.execute(
-            select(SalaryStructure).where(
-                SalaryStructure.employee_code == employee_code,
-                SalaryStructure.status == "active"
-            ).order_by(SalaryStructure.effective_date.desc()).limit(1)
-        )
-        ss = ss_result.scalar_one_or_none()
-        if ss:
-            base_salary = float(ss.base_salary or 0) + float(ss.position_salary or 0)
-            breakdown["salary_structure"] = {"base_salary": base_salary}
-    try:
-        ec_result = await db.execute(
-            select(EmployeeCommission).where(
-                EmployeeCommission.employee_code == employee_code,
-                EmployeeCommission.year_month == period
-            )
-        )
-        ec = ec_result.scalar_one_or_none()
-        if ec:
-            commission_amount = float(ec.commission_amount or 0)
-            breakdown["commission"] = {"amount": commission_amount}
-    except Exception:
-        # 兼容历史中文列名表结构（当前环境仍存在），确保 /me/income 可用。
-        await db.rollback()
-        logger.warning("employee_commissions ORM query failed, fallback to CN column SQL")
-        ec_raw = await db.execute(
-            text(
-                """
-                select
-                  "提成金额" as commission_amount
-                from c_class.employee_commissions
-                where "员工编号" = :employee_code
-                  and "年月" = :year_month
-                limit 1
-                """
-            ),
-            {"employee_code": employee_code, "year_month": period},
-        )
-        ec_row = ec_raw.mappings().first()
-        if ec_row:
-            commission_amount = float(ec_row.get("commission_amount") or 0)
-            breakdown["commission"] = {"amount": commission_amount}
-
-    try:
-        ep_result = await db.execute(
-            select(EmployeePerformance).where(
-                EmployeePerformance.employee_code == employee_code,
-                EmployeePerformance.year_month == period
-            )
-        )
-        ep = ep_result.scalar_one_or_none()
-        if ep:
-            performance_score = float(ep.performance_score or 0)
-            achievement_rate = float(ep.achievement_rate or 0)
-            breakdown["performance"] = {"score": performance_score, "achievement_rate": achievement_rate}
-    except Exception:
-        # 兼容历史中文列名表结构（当前环境仍存在），确保 /me/income 可用。
-        await db.rollback()
-        logger.warning("employee_performance ORM query failed, fallback to CN column SQL")
-        ep_raw = await db.execute(
-            text(
-                """
-                select
-                  "绩效得分" as performance_score,
-                  "达成率" as achievement_rate
-                from c_class.employee_performance
-                where "员工编号" = :employee_code
-                  and "年月" = :year_month
-                limit 1
-                """
-            ),
-            {"employee_code": employee_code, "year_month": period},
-        )
-        ep_row = ep_raw.mappings().first()
-        if ep_row:
-            performance_score = float(ep_row.get("performance_score") or 0)
-            achievement_rate = float(ep_row.get("achievement_rate") or 0)
-            breakdown["performance"] = {
-                "score": performance_score,
-                "achievement_rate": achievement_rate,
-            }
-    total = (base_salary or 0) + commission_amount
-    await _log_me_income_access(request, current_user_id, period, "success", db)
-    return MyIncomeResponse(
-        linked=True,
-        period=period,
-        base_salary=base_salary if base_salary is not None else 0.0,
-        commission_amount=commission_amount,
-        performance_score=performance_score if performance_score is not None else 0.0,
-        achievement_rate=achievement_rate if achievement_rate is not None else 0.0,
-        total_income=total,
-        breakdown=breakdown if breakdown else {}
     )
 
 

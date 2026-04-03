@@ -396,8 +396,20 @@ def test_calculate_profit_score_from_profit_target_and_actual(monkeypatch):
                 "performance_upserts": 0,
             }
 
+    class _FakePayrollService:
+        def __init__(self, db):
+            self.db = db
+
+        async def generate_month(self, year_month):
+            return {
+                "year_month": year_month,
+                "payroll_upserts": 0,
+                "locked_conflicts": 0,
+            }
+
     monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
     monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
+    monkeypatch.setattr(performance_management_module, "PayrollGenerationService", _FakePayrollService, raising=False)
 
     resp = asyncio.run(
         performance_management_module.calculate_performance_scores(
@@ -522,8 +534,20 @@ def test_calculate_operation_score_from_operation_target_rule(monkeypatch):
                 "performance_upserts": 0,
             }
 
+    class _FakePayrollService:
+        def __init__(self, db):
+            self.db = db
+
+        async def generate_month(self, year_month):
+            return {
+                "year_month": year_month,
+                "payroll_upserts": 0,
+                "locked_conflicts": 0,
+            }
+
     monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
     monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
+    monkeypatch.setattr(performance_management_module, "PayrollGenerationService", _FakePayrollService, raising=False)
 
     resp = asyncio.run(
         performance_management_module.calculate_performance_scores(
@@ -652,9 +676,21 @@ def test_calculate_key_product_score_from_product_target_and_sku_metrics(monkeyp
                 "performance_upserts": 0,
             }
 
+    class _FakePayrollService:
+        def __init__(self, db):
+            self.db = db
+
+        async def generate_month(self, year_month):
+            return {
+                "year_month": year_month,
+                "payroll_upserts": 0,
+                "locked_conflicts": 0,
+            }
+
     monkeypatch.setattr(performance_management_module, "load_shop_monthly_metrics", _fake_metrics)
     monkeypatch.setattr(performance_management_module, "_load_shop_monthly_product_metrics", _fake_product_metrics)
     monkeypatch.setattr(performance_management_module, "HRIncomeCalculationService", _FakeIncomeService, raising=False)
+    monkeypatch.setattr(performance_management_module, "PayrollGenerationService", _FakePayrollService, raising=False)
 
     resp = asyncio.run(
         performance_management_module.calculate_performance_scores(
