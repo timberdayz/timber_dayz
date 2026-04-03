@@ -28,7 +28,33 @@ def _json_body(resp):
 def test_confirm_payroll_record_marks_draft_as_confirmed():
     module = _load_hr_salary_module()
     db = AsyncMock()
-    record = SimpleNamespace(id=1, status="draft")
+    record = SimpleNamespace(
+        id=1,
+        employee_code="EMP001",
+        year_month="2025-01",
+        base_salary=1000.0,
+        position_salary=200.0,
+        performance_salary=100.0,
+        overtime_pay=0.0,
+        commission=50.0,
+        allowances=20.0,
+        bonus=0.0,
+        gross_salary=1370.0,
+        social_insurance_personal=10.0,
+        housing_fund_personal=10.0,
+        income_tax=5.0,
+        other_deductions=0.0,
+        total_deductions=25.0,
+        net_salary=1345.0,
+        social_insurance_company=30.0,
+        housing_fund_company=30.0,
+        total_cost=1430.0,
+        status="draft",
+        pay_date=None,
+        remark=None,
+        created_at=None,
+        updated_at=None,
+    )
     db.execute = AsyncMock(return_value=_ResultOne(record))
     db.commit = AsyncMock()
     db.refresh = AsyncMock()

@@ -148,6 +148,35 @@ async def get_my_income(
         )
     )
     pr = pr_result.scalar_one_or_none()
+    if not pr:
+        await _log_me_income_access(request, current_user_id, period, "payroll_missing", db)
+        return MyIncomeResponse(
+            linked=True,
+            period=period,
+            total_income=None,
+            breakdown={},
+        )
+
+    fixed_salary = float((getattr(pr, "base_salary", 0) or 0) + (getattr(pr, "position_salary", 0) or 0))
+    commission_amount = float(getattr(pr, "commission", 0) or 0)
+    net_salary = float(getattr(pr, "net_salary", 0) or 0)
+    await _log_me_income_access(request, current_user_id, period, "success", db)
+    return MyIncomeResponse(
+        linked=True,
+        period=period,
+        base_salary=fixed_salary,
+        commission_amount=commission_amount,
+        performance_score=None,
+        achievement_rate=None,
+        total_income=net_salary,
+        breakdown={
+            "payroll": {
+                "base_salary": fixed_salary,
+                "commission": commission_amount,
+                "net_salary": net_salary,
+            }
+        },
+    )
     if pr:
         base_salary = float(pr.base_salary) if pr.base_salary else None
         commission_amount = float(pr.commission or 0)

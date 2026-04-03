@@ -582,6 +582,19 @@ class PayrollRecordResponse(BaseModel):
         from_attributes = True
 
 
+class PayrollRecordManualUpdate(BaseModel):
+    overtime_pay: Optional[Decimal] = Field(None, ge=0)
+    bonus: Optional[Decimal] = Field(None, ge=0)
+    social_insurance_personal: Optional[Decimal] = Field(None, ge=0)
+    housing_fund_personal: Optional[Decimal] = Field(None, ge=0)
+    income_tax: Optional[Decimal] = Field(None, ge=0)
+    other_deductions: Optional[Decimal] = Field(None, ge=0)
+    social_insurance_company: Optional[Decimal] = Field(None, ge=0)
+    housing_fund_company: Optional[Decimal] = Field(None, ge=0)
+    pay_date: Optional[date] = None
+    remark: Optional[str] = None
+
+
 # ================================================================
 # 员工目标
 # ================================================================

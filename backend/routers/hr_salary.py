@@ -2,6 +2,8 @@
 HR - 薪资与目标管理
 """
 
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,14 +21,121 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 from backend.schemas.hr import (
     SalaryStructureCreate, SalaryStructureResponse,
-    PayrollRecordResponse,
+    PayrollRecordResponse, PayrollRecordManualUpdate,
     EmployeeTargetCreate, EmployeeTargetResponse, EmployeeTargetUpdate,
 )
+from backend.services.payroll_generation_service import PayrollGenerationService
+
+
+def _payroll_success(record: PayrollRecord) -> Dict[str, Any]:
+    return {
+        "success": True,
+        "data": PayrollRecordResponse.model_validate(record).model_dump(mode="json"),
+    }
 from modules.core.db import (
     Employee, SalaryStructure, PayrollRecord, EmployeeTarget,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-薪资目标"])
+
+
+@router.get("/payroll-records/{employee_code}/{year_month}")
+async def get_payroll_record_detail(
+    employee_code: str,
+    year_month: str,
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        result = await db.execute(
+            select(PayrollRecord).where(
+                PayrollRecord.employee_code == employee_code,
+                PayrollRecord.year_month == year_month,
+            )
+        )
+        record = result.scalar_one_or_none()
+        if not record:
+            return error_response(ErrorCode.DATA_NOT_FOUND, "宸ヨ祫鍗曚笉瀛樺湪", status_code=404)
+        return _payroll_success(record)
+    except Exception as e:
+        logger.error(f"鑾峰彇宸ヨ祫鍗曡鎯呭け璐? {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鑾峰彇宸ヨ祫鍗曡鎯呭け璐? {str(e)}", status_code=500)
+
+
+@router.put("/payroll-records/{record_id}")
+async def update_payroll_record(
+    record_id: int,
+    body: PayrollRecordManualUpdate,
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        result = await db.execute(
+            select(PayrollRecord).where(PayrollRecord.id == record_id)
+        )
+        record = result.scalar_one_or_none()
+        if not record:
+            return error_response(ErrorCode.DATA_NOT_FOUND, "宸ヨ祫鍗曚笉瀛樺湪", status_code=404)
+        if record.status != "draft":
+            return error_response(ErrorCode.PARAMETER_INVALID, "闈瀍raft 宸ヨ祫鍗曚笉鍏佽缂栬緫", status_code=409)
+        for key, value in body.model_dump(exclude_unset=True).items():
+            setattr(record, key, value)
+        PayrollGenerationService.recalculate_record_totals(record)
+        await db.commit()
+        await db.refresh(record)
+        return _payroll_success(record)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"鏇存柊宸ヨ祫鍗曞け璐? {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鏇存柊宸ヨ祫鍗曞け璐? {str(e)}", status_code=500)
+
+
+@router.post("/payroll-records/{record_id}/confirm")
+async def confirm_payroll_record(
+    record_id: int,
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        result = await db.execute(
+            select(PayrollRecord).where(PayrollRecord.id == record_id)
+        )
+        record = result.scalar_one_or_none()
+        if not record:
+            return error_response(ErrorCode.DATA_NOT_FOUND, "宸ヨ祫鍗曚笉瀛樺湪", status_code=404)
+        if record.status == "paid":
+            return error_response(ErrorCode.PARAMETER_INVALID, "宸插彂鏀惧伐璧勫崟涓嶅彲鍐嶇‘璁?", status_code=409)
+        record.status = "confirmed"
+        await db.commit()
+        if hasattr(db, "refresh"):
+            await db.refresh(record)
+        return _payroll_success(record)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"纭宸ヨ祫鍗曞け璐? {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"纭宸ヨ祫鍗曞け璐? {str(e)}", status_code=500)
+
+
+@router.post("/payroll-records/{record_id}/reopen")
+async def reopen_payroll_record(
+    record_id: int,
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        result = await db.execute(
+            select(PayrollRecord).where(PayrollRecord.id == record_id)
+        )
+        record = result.scalar_one_or_none()
+        if not record:
+            return error_response(ErrorCode.DATA_NOT_FOUND, "宸ヨ祫鍗曚笉瀛樺湪", status_code=404)
+        if record.status == "paid":
+            return error_response(ErrorCode.PARAMETER_INVALID, "宸插彂鏀惧伐璧勫崟涓嶅彲閫€鍥?draft", status_code=409)
+        record.status = "draft"
+        await db.commit()
+        if hasattr(db, "refresh"):
+            await db.refresh(record)
+        return _payroll_success(record)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"閫€鍥炲伐璧勫崟澶辫触: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"閫€鍥炲伐璧勫崟澶辫触: {str(e)}", status_code=500)
 
 
 @router.get("/salary-structures", response_model=List[SalaryStructureResponse])
