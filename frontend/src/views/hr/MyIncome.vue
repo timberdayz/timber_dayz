@@ -1,19 +1,29 @@
 <template>
   <div class="my-income erp-page-container">
     <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">我的收入</h1>
-    <p style="color: #909399; margin-bottom: 20px;">数据来源于人员店铺归属和提成比配置及绩效管理计算，仅展示当前登录账号对应员工的收入。</p>
+    <p style="color: #909399; margin-bottom: 20px;">
+      当前页面仅展示工资单口径收入。绩效和提成会先沉淀到工资单，再在这里统一查看。
+    </p>
 
     <template v-if="!income.linked">
       <el-alert type="warning" show-icon :closable="false">
         <template #title>您尚未关联员工档案</template>
-        请联系管理员关联您的账号与员工档案后，即可查看收入明细。
+        请联系管理员关联当前账号与员工档案后，再查看工资单收入。
       </el-alert>
     </template>
 
     <template v-else>
-      <el-alert v-if="loadError" type="error" show-icon :closable="true" style="margin-bottom: 16px;" @close="loadError = false">
-        查询失败，请检查网络后重试。
+      <el-alert
+        v-if="loadError"
+        type="error"
+        show-icon
+        :closable="true"
+        style="margin-bottom: 16px;"
+        @close="loadError = false"
+      >
+        查询失败，请稍后重试。
       </el-alert>
+
       <div class="action-bar" style="margin-bottom: 20px;">
         <el-date-picker
           v-model="selectedMonth"
@@ -31,18 +41,20 @@
         <el-skeleton :rows="5" animated />
       </template>
 
+      <template v-else-if="hasNoIncomeData">
+        <el-empty>
+          <template #description>
+            <p style="margin: 0 0 8px 0;">当月工资单尚未生成</p>
+            <p style="color: #909399; margin: 0; font-size: 13px;">
+              请等待管理员完成当月绩效重算与工资单确认，或前往人力管理查看工资单记录。
+            </p>
+          </template>
+        </el-empty>
+      </template>
+
       <template v-else>
-        <template v-if="hasNoIncomeData">
-          <el-empty>
-            <template #description>
-              <p style="margin: 0 0 8px 0;">暂无收入数据</p>
-              <p style="color: #909399; margin: 0; font-size: 13px;">当前月份暂无工资单或绩效数据，请确认薪资已录入或联系管理员。</p>
-            </template>
-          </el-empty>
-        </template>
-        <template v-else>
         <el-row :gutter="20" style="margin-bottom: 20px;">
-          <el-col :span="6">
+          <el-col :span="8">
             <el-card shadow="hover">
               <template #header>当月实发</template>
               <div style="font-size: 24px; font-weight: bold; color: #409eff;">
@@ -50,50 +62,44 @@
               </div>
             </el-card>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="8">
             <el-card shadow="hover">
-              <template #header>底薪</template>
+              <template #header>固定工资</template>
               <div style="font-size: 18px;">{{ formatMoney(income.base_salary) }}</div>
             </el-card>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="8">
             <el-card shadow="hover">
               <template #header>提成</template>
               <div style="font-size: 18px;">{{ formatMoney(income.commission_amount) }}</div>
             </el-card>
           </el-col>
-          <el-col :span="6">
-            <el-card shadow="hover">
-              <template #header>绩效得分</template>
-              <div style="font-size: 18px;">{{ income.performance_score != null ? income.performance_score.toFixed(1) : '-' }}</div>
-            </el-card>
-          </el-col>
         </el-row>
 
-        <el-card v-if="income.breakdown && Object.keys(income.breakdown).length" shadow="hover">
-          <template #header>收入明细</template>
+        <el-card v-if="income.breakdown?.payroll" shadow="hover">
+          <template #header>工资单摘要</template>
           <el-descriptions :column="2" border>
-            <el-descriptions-item v-if="income.breakdown.payroll" label="工资单">底薪 {{ formatMoney(income.breakdown.payroll.base_salary) }}，提成 {{ formatMoney(income.breakdown.payroll.commission) }}</el-descriptions-item>
-            <el-descriptions-item v-if="income.breakdown.salary_structure" label="薪资结构">底薪 {{ formatMoney(income.breakdown.salary_structure.base_salary) }}</el-descriptions-item>
-            <el-descriptions-item v-if="income.breakdown.performance" label="绩效">得分 {{ income.breakdown.performance.score }}, 达成率 {{ (income.breakdown.performance.achievement_rate * 100).toFixed(1) }}%</el-descriptions-item>
-            <el-descriptions-item v-if="income.breakdown.commission" label="提成">金额 {{ formatMoney(income.breakdown.commission.amount) }}</el-descriptions-item>
+            <el-descriptions-item label="固定工资">
+              {{ formatMoney(income.breakdown.payroll.base_salary) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="提成">
+              {{ formatMoney(income.breakdown.payroll.commission) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="实发工资">
+              {{ formatMoney(income.breakdown.payroll.net_salary) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="工资月份">
+              {{ income.period || selectedMonth }}
+            </el-descriptions-item>
           </el-descriptions>
         </el-card>
-
-        <el-card style="margin-top: 20px;" shadow="hover">
-          <template #header>绩效依据</template>
-          <p>绩效得分：{{ income.performance_score != null ? income.performance_score.toFixed(1) : '-' }}</p>
-          <p>达成率：{{ income.achievement_rate != null ? (income.achievement_rate * 100).toFixed(1) + '%' : '-' }}</p>
-          <el-link type="primary" href="/#/hr-performance-management">查看绩效公示</el-link>
-        </el-card>
-        </template>
       </template>
     </template>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import api from '@/api'
 
 const selectedMonth = ref(new Date().toISOString().slice(0, 7))
@@ -102,26 +108,23 @@ const income = ref({
   linked: true,
   period: null,
   base_salary: null,
-  commission_amount: 0,
-  commission_rate: null,
-  performance_score: null,
-  achievement_rate: null,
+  commission_amount: null,
   total_income: null,
   breakdown: null,
   loading: false
 })
 
 const hasNoIncomeData = computed(() => {
-  const i = income.value
-  if (!i.linked || i.loading) return false
-  const noTotal = (i.total_income == null || i.total_income === 0)
-  const noBreakdown = !i.breakdown || Object.keys(i.breakdown).length === 0
+  const current = income.value
+  if (!current.linked || current.loading) return false
+  const noTotal = current.total_income == null
+  const noBreakdown = !current.breakdown || Object.keys(current.breakdown).length === 0
   return noTotal && noBreakdown
 })
 
 function formatMoney(val) {
   if (val == null || val === undefined) return '-'
-  return '¥' + Number(val).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
+  return '楼' + Number(val).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
 }
 
 async function loadIncome() {
@@ -136,11 +139,9 @@ async function loadIncome() {
       period: data.period ?? selectedMonth.value,
       loading: false
     }
-    loadError.value = false
   } catch (e) {
     income.value.loading = false
     loadError.value = true
-    // 契约：未关联时后端返回 200 + linked: false，此处仅处理网络/服务器异常
   }
 }
 

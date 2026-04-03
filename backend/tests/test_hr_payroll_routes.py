@@ -5,6 +5,7 @@ HR payroll route tests
 import asyncio
 import importlib
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -52,8 +53,8 @@ def test_confirm_payroll_record_marks_draft_as_confirmed():
         status="draft",
         pay_date=None,
         remark=None,
-        created_at=None,
-        updated_at=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
     )
     db.execute = AsyncMock(return_value=_ResultOne(record))
     db.commit = AsyncMock()

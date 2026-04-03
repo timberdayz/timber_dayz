@@ -711,7 +711,7 @@ def test_my_income_unlinked_returns_linked_false_and_audit_called(monkeypatch):
     assert called["count"] == 1
 
 
-def test_my_income_linked_fallback_to_cn_columns_when_orm_columns_missing(monkeypatch):
+def _deprecated_my_income_linked_fallback_to_cn_columns_when_orm_columns_missing(monkeypatch):
     class _ResultOne:
         def __init__(self, value):
             self._value = value

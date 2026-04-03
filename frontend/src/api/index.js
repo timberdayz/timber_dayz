@@ -1840,6 +1840,18 @@ export default {
   async getHrPayrollRecords(params = {}) {
     return await this._get("/hr/payroll-records", { params });
   },
+  async getHrPayrollRecord(employeeCode, yearMonth) {
+    return await this._get(`/hr/payroll-records/${employeeCode}/${yearMonth}`);
+  },
+  async updateHrPayrollRecord(recordId, data) {
+    return await this._put(`/hr/payroll-records/${recordId}`, data);
+  },
+  async confirmHrPayrollRecord(recordId) {
+    return await this._post(`/hr/payroll-records/${recordId}/confirm`);
+  },
+  async reopenHrPayrollRecord(recordId) {
+    return await this._post(`/hr/payroll-records/${recordId}/reopen`);
+  },
 
   // === 员工目标 ===
   async getHrEmployeeTargets(params = {}) {
