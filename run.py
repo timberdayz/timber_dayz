@@ -33,6 +33,10 @@ from pathlib import Path
 import platform as sys_platform
 import os
 
+BACKEND_PORT = 8001
+FRONTEND_PORT = 5173
+ACTIVE_BACKEND_PORT = BACKEND_PORT
+
 # 本地启动时加载项目根目录 .env，使 check_redis/check_postgresql 及后端能读取 REDIS_URL、DATABASE_URL 等
 _project_root = Path(__file__).resolve().parent
 _env_file = _project_root / ".env"
@@ -218,6 +222,71 @@ def ensure_postgresql_dashboard_assets(project_root):
 
     safe_print("  [OK] PostgreSQL Dashboard 资产初始化完成")
     return True
+
+
+def _is_port_in_use(port, host="127.0.0.1"):
+    """妫€鏌ユ湰鍦扮鍙ｆ槸鍚﹀凡琚崰鐢ㄣ€?"""
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        return sock.connect_ex((host, port)) == 0
+    finally:
+        sock.close()
+
+
+def _require_local_port_available(port, service_name):
+    """鍚姩鏈湴鏈嶅姟鍓嶇‘淇濈鍙ｅ彲鐢紝閬垮厤鎶婂叾浠栨湇鍔¤鍒や负褰撳墠椤圭洰銆?"""
+    if _is_port_in_use(port):
+        safe_print(f"  [ERROR] {service_name} 鎵€闇€绔彛 {port} 宸茶鍗犵敤")
+        safe_print(f"  鎻愮ず: 璇峰厛閲婃斁 localhost:{port}锛屽啀閲嶈瘯 python run.py --local")
+        return False
+    return True
+
+
+def _docker_container_health(container_name):
+    """杩斿洖 Docker 瀹瑰櫒鍋ュ悍鐘舵€侊紙healthy/running/unhealthy/...锛夈€?"""
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{if .State.Running}}running{{else}}stopped{{end}}{{end}}",
+                container_name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            encoding="utf-8",
+            errors="ignore",
+        )
+        if result.returncode != 0:
+            return "missing"
+        return (result.stdout or "").strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _wait_for_local_docker_infra(container_names, max_wait=60):
+    """绛夊緟鏈湴妯″紡鐨?Docker 渚濊禆瀹瑰櫒杩涘叆鍋ュ悍鐘舵€併€?"""
+    safe_print("  [绛夊緟] Docker 鍩虹鏈嶅姟鍋ュ悍妫€鏌?..")
+    for second in range(max_wait):
+        statuses = {name: _docker_container_health(name) for name in container_names}
+        if all(status in ("healthy", "running") for status in statuses.values()):
+            status_text = ", ".join(f"{name}={status}" for name, status in statuses.items())
+            safe_print(f"  [OK] Docker 鍩虹鏈嶅姟宸插氨缁? {status_text}")
+            return True
+        if (second + 1) % 5 == 0:
+            status_text = ", ".join(f"{name}={status}" for name, status in statuses.items())
+            safe_print(f"  绛夊緟涓?.. {second + 1}/{max_wait}绉? ({status_text})")
+        time.sleep(1)
+
+    status_text = ", ".join(
+        f"{name}={_docker_container_health(name)}" for name in container_names
+    )
+    safe_print(f"  [ERROR] Docker 鍩虹鏈嶅姟绛夊緟瓒呮椂: {status_text}")
+    return False
 
 
 def start_backend():
@@ -979,6 +1048,312 @@ def start_services_with_docker_compose(use_collection=False):
         traceback.print_exc()
         return False
 
+def _can_bind_local_port(port, host="127.0.0.1"):
+    """检查当前用户是否能在本机绑定指定端口。"""
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def _choose_local_backend_port(preferred_port=BACKEND_PORT, fallback_ports=None):
+    """为本地后端选择可绑定端口，优先默认端口，失败时回退。"""
+    candidates = [preferred_port]
+    if fallback_ports is None:
+        candidates.extend([18001, 18011, 18021, 18031, 18041])
+    else:
+        candidates.extend(fallback_ports)
+
+    for port in candidates:
+        if _can_bind_local_port(port):
+            return port
+    return None
+
+
+def _select_preferred_nvm_npm(preferred_major):
+    """优先从 nvm 目录中选择与 .nvmrc 匹配的 npm。"""
+    if not preferred_major or sys_platform.system() != "Windows":
+        return None
+
+    search_roots = []
+    nvm_home = os.environ.get("NVM_HOME", "").rstrip("\\")
+    if nvm_home:
+        search_roots.append(nvm_home)
+
+    appdata = os.path.expandvars(r"%APPDATA%")
+    if appdata:
+        default_root = os.path.join(appdata, "nvm")
+        if default_root not in search_roots:
+            search_roots.append(default_root)
+
+    for root in search_roots:
+        if not root or not os.path.isdir(root):
+            continue
+        versions = [
+            name
+            for name in os.listdir(root)
+            if name.startswith("v") and os.path.isdir(os.path.join(root, name))
+        ]
+        matching = [
+            name for name in versions if name.lstrip("v").split(".")[0] == preferred_major
+        ]
+        for version_name in sorted(matching, reverse=True):
+            npm_cmd = os.path.join(root, version_name, "npm.cmd")
+            if os.path.isfile(npm_cmd):
+                return os.path.normpath(npm_cmd)
+    return None
+
+
+def _resolve_npm_path():
+    """解析 npm 路径，Windows 下优先遵循 .nvmrc 指定主版本。"""
+    project_root = Path(__file__).resolve().parent
+    preferred_major = _read_nvmrc_version(project_root)
+
+    preferred_npm = _select_preferred_nvm_npm(preferred_major)
+    if preferred_npm:
+        return preferred_npm
+
+    npm_exe = shutil.which("npm")
+    if sys_platform.system() == "Windows" and not npm_exe:
+        npm_exe = shutil.which("npm.cmd")
+    if npm_exe:
+        return npm_exe
+
+    if sys_platform.system() == "Windows":
+        if os.environ.get("NVM_SYMLINK"):
+            symlink = os.environ.get("NVM_SYMLINK", "").rstrip("\\")
+            npm_cmd = os.path.join(symlink, "npm.cmd")
+            if os.path.isfile(npm_cmd):
+                return os.path.normpath(npm_cmd)
+
+        for candidate_dir in [
+            os.path.expandvars(r"%ProgramFiles%\nodejs"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\nodejs"),
+            os.path.expandvars(r"%APPDATA%\npm"),
+            os.path.expandvars(r"%LOCALAPPDATA%\Programs\node"),
+        ]:
+            if not candidate_dir:
+                continue
+            npm_cmd = os.path.join(candidate_dir, "npm.cmd")
+            if os.path.isfile(npm_cmd):
+                return os.path.normpath(npm_cmd)
+
+    return None
+
+
+def start_backend():
+    """启动本地后端服务。"""
+    safe_print("\n[启动] 后端服务...")
+    safe_print(f"  地址: http://localhost:{ACTIVE_BACKEND_PORT}")
+    safe_print(f"  文档: http://localhost:{ACTIVE_BACKEND_PORT}/api/docs")
+
+    project_root = Path(__file__).parent
+    if not _require_local_port_available(BACKEND_PORT, "后端服务"):
+        return None
+
+    if sys_platform.system() == "Windows":
+        work_dir = str(project_root.resolve())
+        work_dir_ps = work_dir.replace("'", "''")
+        inner_cmd = (
+            "`$env:PYTHONPATH='{}'; python -m uvicorn backend.main:app "
+            "--host 127.0.0.1 --port {} --loop asyncio"
+        ).format(work_dir_ps, ACTIVE_BACKEND_PORT)
+        cmd = (
+            'Start-Process powershell -ArgumentList "-NoExit", "-Command", "{}" '
+            '-WorkingDirectory "{}"'
+        ).format(inner_cmd.replace('"', '`"'), work_dir.replace('"', '`"'))
+
+        process = subprocess.Popen(
+            ["powershell", "-Command", cmd],
+            shell=True,
+            cwd=project_root,
+        )
+        safe_print("  [OK] 后端服务已在新窗口启动")
+        safe_print("  提示: 查看新打开的 PowerShell 窗口获取详细日志")
+        return process
+
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "backend.main:app",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(ACTIVE_BACKEND_PORT),
+            "--reload",
+        ],
+        cwd=project_root,
+    )
+    safe_print("  [OK] 后端服务已启动")
+    return process
+
+
+def start_frontend():
+    """启动本地前端服务。"""
+    safe_print("\n[启动] 前端服务...")
+    safe_print(f"  地址: http://localhost:{FRONTEND_PORT}")
+
+    frontend_dir = Path(__file__).parent / "frontend"
+    if not (frontend_dir / "package.json").exists():
+        safe_print("  [ERROR] 未找到 frontend/package.json，请确认项目结构完整")
+        return None
+    if not (frontend_dir / "node_modules").is_dir():
+        safe_print("  [ERROR] frontend/node_modules 不存在，请先在 frontend 目录执行: npm install")
+        return None
+    if not _require_local_port_available(FRONTEND_PORT, "前端服务"):
+        safe_print("  提示: 当前前端使用 strictPort=true，不会自动切换到 5174/5175")
+        return None
+
+    npm_exe = _resolve_npm_path()
+    if not npm_exe:
+        safe_print("  [ERROR] 未找到 npm。请确保已安装 Node.js 并加入 PATH")
+        safe_print("  提示: 仓库要求 Node >= 24，且优先匹配 .nvmrc")
+        return None
+
+    safe_print("  [INFO] 使用 npm: " + npm_exe)
+
+    if sys_platform.system() == "Windows":
+        frontend_path = str(frontend_dir.resolve())
+        node_bin_dir = os.path.dirname(npm_exe)
+        env = os.environ.copy()
+        env["Path"] = node_bin_dir + os.pathsep + env.get("Path", env.get("PATH", ""))
+        env["VITE_DEV_PROXY_TARGET"] = f"http://127.0.0.1:{ACTIVE_BACKEND_PORT}"
+        create_new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        process = subprocess.Popen(
+            [npm_exe, "run", "dev"],
+            cwd=frontend_path,
+            env=env,
+            shell=False,
+            creationflags=create_new_console,
+        )
+        safe_print("  [OK] 前端服务已在新窗口启动")
+        safe_print("  [INFO] Vite 使用 strictPort=true，固定监听 5173")
+        return process
+
+    env = os.environ.copy()
+    env["VITE_DEV_PROXY_TARGET"] = f"http://127.0.0.1:{ACTIVE_BACKEND_PORT}"
+    process = subprocess.Popen([npm_exe, "run", "dev"], cwd=frontend_dir, env=env)
+    safe_print("  [OK] 前端服务已启动")
+    return process
+
+
+def ensure_postgres_redis_docker(project_root, with_celery=True):
+    """本地模式下启动并等待 Postgres/Redis/Celery Docker 基础设施就绪。"""
+    safe_print(
+        "\n[本地模式] 使用 Docker 启动 Postgres、Redis"
+        + (" 与 Celery Worker" if with_celery else "")
+        + "..."
+    )
+    if not pre_flight_check_docker(project_root):
+        return False
+
+    compose_base = project_root / "docker-compose.yml"
+    compose_dev = project_root / "docker-compose.dev.yml"
+    if not compose_base.exists():
+        safe_print("  [ERROR] docker-compose.yml 不存在")
+        return False
+
+    compose_files = ["-f", str(compose_base)]
+    if compose_dev.exists():
+        compose_files.extend(["-f", str(compose_dev)])
+
+    profiles = ["--profile", "dev"]
+    if with_celery:
+        profiles.extend(["--profile", "dev-full"])
+
+    services = ["redis", "postgres"]
+    required_names = ["xihong_erp_postgres", "xihong_erp_redis"]
+    if with_celery:
+        services.append("celery-worker")
+        required_names.append("xihong_erp_celery_worker")
+
+    try:
+        ps_result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            encoding="utf-8",
+            errors="ignore",
+            cwd=project_root,
+        )
+        if ps_result.returncode == 0:
+            running_names = {
+                line.strip()
+                for line in (ps_result.stdout or "").splitlines()
+                if line.strip()
+            }
+            if set(required_names).issubset(running_names):
+                if _wait_for_local_docker_infra(required_names, max_wait=5):
+                    safe_print("  [OK] 复用已运行且健康的本地 Docker 基础服务")
+                    return True
+                safe_print("  [WARNING] 已有容器存在但未就绪，将尝试重新拉起并等待健康检查")
+    except Exception as exc:
+        safe_print(f"  [WARNING] 检查已有 Docker 基础服务失败，将尝试直接启动: {exc}")
+
+    try:
+        safe_print("  [启动] " + ", ".join(services) + "...")
+        cmd = ["docker-compose"] + compose_files + profiles + ["up", "-d"] + services
+        result = subprocess.run(
+            cmd,
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            encoding="utf-8",
+            errors="ignore",
+        )
+        if result.returncode != 0:
+            error_msg = (result.stderr or result.stdout or "未知错误")[:300]
+            safe_print(f"  [ERROR] 启动失败: {error_msg}")
+            return False
+
+        if not _wait_for_local_docker_infra(required_names, max_wait=60):
+            return False
+
+        postgres_user = os.getenv("POSTGRES_USER", "erp_user")
+        postgres_db = os.getenv("POSTGRES_DB", "xihong_erp")
+        safe_print("  [检查] PostgreSQL 连接...")
+        probe = subprocess.run(
+            [
+                "docker",
+                "exec",
+                "xihong_erp_postgres",
+                "psql",
+                "-U",
+                postgres_user,
+                "-d",
+                postgres_db,
+                "-c",
+                "SELECT 1",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            encoding="utf-8",
+            errors="ignore",
+        )
+        if probe.returncode != 0:
+            safe_print("  [ERROR] PostgreSQL 连接测试失败，本机后端无法继续启动")
+            return False
+
+        safe_print("  [OK] PostgreSQL 连接正常")
+        if with_celery:
+            safe_print("  [OK] Celery Worker 使用 Docker 容器，与本机无时钟漂移")
+        return True
+    except Exception as exc:
+        safe_print(f"  [ERROR] 启动本地 Docker 基础服务异常: {exc}")
+        return False
+
+
 def wait_for_service(port, name, max_wait=30):
     """等待服务启动"""
     import socket
@@ -1223,6 +1598,218 @@ def main():
         traceback.print_exc()
         input("\n按回车键退出...")
         sys.exit(1)
+
+def wait_for_frontend_port(port=FRONTEND_PORT, max_wait=15):
+    """等待前端 Vite 在固定端口就绪。"""
+    import socket
+
+    safe_print("\n[等待] 前端界面服务启动中...")
+    for i in range(max_wait):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            if sock.connect_ex(("127.0.0.1", port)) == 0:
+                safe_print(f"  [OK] 前端界面已就绪 (端口 {port}, {i + 1}秒)")
+                return port
+        finally:
+            sock.close()
+
+        if (i + 1) % 5 == 0:
+            safe_print(f"  等待中... {i + 1}/{max_wait}秒")
+        time.sleep(1)
+
+    safe_print("  [ERROR] 前端界面启动超时")
+    return None
+
+
+def _prompt_continue_without_celery():
+    """Redis 不可用时，交互式确认是否继续。非交互环境默认继续并禁用 Celery。"""
+    if not getattr(sys.stdin, "isatty", lambda: False)():
+        safe_print("  [INFO] 非交互环境，自动以 --no-celery 继续")
+        return True
+
+    choice = input("\n是否继续启动（不启动Celery worker）? (y/n): ").strip().lower()
+    return choice == "y"
+
+
+def main():
+    """主函数。"""
+    global ACTIVE_BACKEND_PORT
+
+    parser = argparse.ArgumentParser(description="西虹ERP系统启动脚本（修复版）")
+    parser.add_argument("--backend-only", action="store_true", help="仅启动后端")
+    parser.add_argument("--frontend-only", action="store_true", help="仅启动前端")
+    parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+    parser.add_argument("--no-celery", action="store_true", help="不启动Celery worker")
+    parser.add_argument("--use-docker", action="store_true", help="使用Docker Compose启动服务")
+    parser.add_argument(
+        "--collection",
+        action="store_true",
+        help="采集模式：与 --use-docker 同时使用时，backend 使用带 Playwright 的镜像",
+    )
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="一键本地开发：Docker 启动 Postgres/Redis/Celery，本机启动后端与前端",
+    )
+    args = parser.parse_args()
+
+    print_banner()
+    project_root = Path(__file__).resolve().parent
+
+    if args.local and not args.use_docker and not args.frontend_only:
+        safe_print("\n[模式] 一键本地开发（Docker Postgres/Redis/Celery + 本机后端/前端）")
+        if not ensure_postgres_redis_docker(project_root, with_celery=True):
+            safe_print("\n[ERROR] Docker 基础服务启动失败，请检查 Docker 与 compose 配置")
+            raise SystemExit(1)
+        args.no_celery = True
+        safe_print("  [OK] 数据库、Redis 与 Celery 已就绪，接下来启动本机后端与前端...\n")
+
+    if args.use_docker:
+        safe_print("\n[模式] Docker Compose 模式（统一管理服务）")
+        if not args.frontend_only:
+            docker_success = start_services_with_docker_compose(
+                use_collection=args.collection,
+            )
+            if not docker_success:
+                safe_print("\n[ERROR] Docker Compose 启动失败")
+                raise SystemExit(1)
+
+            if not ensure_postgresql_dashboard_assets(project_root):
+                safe_print("\n[ERROR] PostgreSQL Dashboard 资产检查失败")
+                raise SystemExit(1)
+
+            args.no_celery = True
+            safe_print("\n[提示] 后端 API 和 Celery Worker 已在 Docker 容器中运行")
+
+    if not args.use_docker and not args.frontend_only and not check_postgresql():
+        safe_print("\n[ERROR] 请先启动 PostgreSQL")
+        raise SystemExit(1)
+
+    redis_available = False
+    if not args.use_docker and not args.no_celery and not args.frontend_only:
+        redis_available = check_redis()
+        if not redis_available:
+            safe_print("\n[WARNING] Redis 不可用，Celery worker 无法启动")
+            safe_print("  选项1: 启动 Redis 后重新运行脚本")
+            safe_print("  选项2: 使用 --use-docker")
+            safe_print("  选项3: 使用 --no-celery")
+            if not _prompt_continue_without_celery():
+                safe_print("[退出] 用户取消启动")
+                raise SystemExit(0)
+            args.no_celery = True
+
+    if args.local:
+        os.environ["ENVIRONMENT"] = "development"
+
+    backend_port = BACKEND_PORT
+    if not args.frontend_only and not args.use_docker:
+        chosen_backend_port = _choose_local_backend_port(BACKEND_PORT)
+        if chosen_backend_port is None:
+            safe_print("\n[ERROR] 未找到可用于本地后端的可绑定端口")
+            raise SystemExit(1)
+        backend_port = chosen_backend_port
+        ACTIVE_BACKEND_PORT = chosen_backend_port
+        if backend_port != BACKEND_PORT:
+            safe_print(
+                f"\n[提示] 默认后端端口 {BACKEND_PORT} 在当前 Windows 环境不可绑定，"
+                f"已回退到 {backend_port}"
+            )
+    else:
+        ACTIVE_BACKEND_PORT = BACKEND_PORT
+
+    processes = []
+
+    try:
+        if not args.frontend_only and not args.use_docker:
+            if not ensure_postgresql_dashboard_assets(project_root):
+                safe_print("\n[ERROR] PostgreSQL Dashboard 资产检查失败")
+                raise SystemExit(1)
+
+            backend_process = start_backend()
+            if backend_process is None:
+                safe_print("\n[ERROR] 后端服务未启动")
+                raise SystemExit(1)
+            processes.append(("backend", backend_process))
+
+            time.sleep(2)
+            if wait_for_service(backend_port, "后端API", 20):
+                safe_print("  [OK] 后端API就绪")
+            else:
+                safe_print("  [ERROR] 后端启动失败，请查看后端窗口日志")
+                raise SystemExit(1)
+        elif args.use_docker and not args.frontend_only:
+            safe_print("\n[等待] 后端 API 容器启动中...")
+            if wait_for_service(backend_port, "后端API容器", 30):
+                safe_print("  [OK] 后端 API 容器已就绪")
+            else:
+                safe_print("  [ERROR] 后端容器未就绪，请检查 Docker 日志")
+                raise SystemExit(1)
+
+        celery_process = None
+        if not args.use_docker and not args.no_celery and not args.frontend_only:
+            if redis_available:
+                celery_process = start_celery_worker()
+                processes.append(("celery", celery_process))
+                time.sleep(3)
+            else:
+                safe_print("\n[SKIP] 跳过 Celery Worker（Redis 不可用）")
+
+        frontend_port = None
+        if not args.backend_only:
+            frontend_process = start_frontend()
+            if frontend_process is None:
+                safe_print("  [ERROR] 前端服务未启动")
+                raise SystemExit(1)
+            processes.append(("frontend", frontend_process))
+            frontend_port = wait_for_frontend_port()
+            if frontend_port is None:
+                safe_print("  [ERROR] 前端服务启动失败，请查看前端窗口日志")
+                raise SystemExit(1)
+
+        safe_print("\n" + "=" * 80)
+        safe_print("[成功] 系统启动成功")
+        safe_print("=" * 80)
+
+        if not args.frontend_only:
+            safe_print(f"[后端] API文档:  http://localhost:{backend_port}/api/docs")
+            safe_print(f"[后端] 健康检查: http://localhost:{backend_port}/health")
+
+        if args.use_docker or args.local:
+            safe_print("[任务] Celery Worker已启动（Docker容器，处理数据同步任务）")
+            safe_print("       查看日志: docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f celery-worker")
+        elif celery_process:
+            safe_print("[任务] Celery Worker已启动（处理数据同步任务）")
+
+        if not args.backend_only:
+            safe_print(f"[前端] 主界面:   http://localhost:{frontend_port}")
+
+        safe_print("=" * 80)
+
+        if not args.no_browser and not args.backend_only:
+            safe_print("\n[浏览器] 5秒后自动打开...")
+            time.sleep(5)
+            webbrowser.open(f"http://localhost:{frontend_port}")
+            safe_print("[OK] 浏览器已打开")
+
+        safe_print("\n[监控] 系统监控中... (按 Ctrl+C 退出监控)\n")
+        while True:
+            time.sleep(10)
+            if not args.frontend_only and not _is_port_in_use(backend_port):
+                safe_print("[WARNING] 后端服务似乎已停止")
+                break
+
+    except KeyboardInterrupt:
+        safe_print("\n\n[退出] 监控脚本已退出")
+        safe_print("[提示] 后端、前端和 Celery Worker 服务仍在独立窗口运行")
+    except SystemExit:
+        raise
+    except Exception as exc:
+        safe_print(f"\n[ERROR] 启动失败: {exc}")
+        import traceback
+
+        traceback.print_exc()
+        raise SystemExit(1)
+
 
 if __name__ == "__main__":
     main()

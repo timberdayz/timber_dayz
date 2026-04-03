@@ -6,8 +6,22 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import { resolve } from 'path'
 import { resolveManualChunk } from './manualChunks.js'
 
+const devProxyTarget = process.env.VITE_DEV_PROXY_TARGET || 'http://localhost:8001'
+const rootIndexFallbackPlugin = {
+  name: 'root-index-fallback',
+  configureServer(server) {
+    server.middlewares.use((req, _res, next) => {
+      if (req.url === '/' || req.url === '') {
+        req.url = '/index.html'
+      }
+      next()
+    })
+  }
+}
+
 export default defineConfig({
   plugins: [
+    rootIndexFallbackPlugin,
     vue(),
     AutoImport({
       resolvers: [ElementPlusResolver()],
@@ -33,7 +47,7 @@ export default defineConfig({
     open: false,  // 禁用自动打开浏览器，由run.py统一管理
     proxy: {
       '/api': {
-        target: 'http://localhost:8001',
+        target: devProxyTarget,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '/api')
       }
