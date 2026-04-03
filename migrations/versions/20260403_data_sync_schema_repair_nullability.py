@@ -3,8 +3,11 @@
 This follow-up repair keeps the previous compatibility columns usable by the current ORM:
 - `core.data_quarantine.source_file`
 - `core.data_quarantine.catalog_file_id`
+- `core.data_quarantine.platform_code`
 - `core.staging_orders.file_id`
+- `core.staging_orders.platform_code`
 - `core.staging_product_metrics.file_id`
+- `core.staging_product_metrics.platform_code`
 
 Revision ID: 20260403_sync_nulls
 Revises: 20260403_data_sync_schema_repair
