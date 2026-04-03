@@ -120,6 +120,33 @@
           </el-button>
         </el-col>
       </el-row>
+      <el-row :gutter="10" class="erp-mt-md">
+        <el-col :span="8">
+          <el-select
+            v-model="selectedMainAccountId"
+            placeholder="选择主账号后探测当前店铺"
+            clearable
+            class="erp-w-full"
+          >
+            <el-option
+              v-for="mainAccount in accountsStore.mainAccounts"
+              :key="`${mainAccount.platform}-${mainAccount.main_account_id}`"
+              :label="`${mainAccount.platform} / ${mainAccount.main_account_id}`"
+              :value="mainAccount.main_account_id"
+            />
+          </el-select>
+        </el-col>
+        <el-col :span="8">
+          <el-button
+            type="warning"
+            @click="handleDiscoverCurrentShop"
+            :loading="accountsStore.discoveryRunning"
+            :disabled="!selectedMainAccountId"
+          >
+            探测当前店铺
+          </el-button>
+        </el-col>
+      </el-row>
     </el-card>
 
     <!-- 账号列表 -->
@@ -424,6 +451,44 @@
         <el-button type="primary" @click="handleBatchCreate" :loading="accountsStore.loading">批量创建</el-button>
       </template>
     </el-dialog>
+    <el-dialog
+      v-model="showDiscoveryDialog"
+      title="当前店铺探测结果"
+      width="720px"
+      :close-on-click-modal="false"
+    >
+      <el-alert
+        v-if="accountsStore.currentDiscoveryError"
+        type="error"
+        :title="accountsStore.currentDiscoveryError"
+        :closable="false"
+        show-icon
+        class="erp-mb-md"
+      />
+      <template v-if="accountsStore.currentDiscoveryResult">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="主账号ID">{{ accountsStore.currentDiscoveryResult.main_account_id }}</el-descriptions-item>
+          <el-descriptions-item label="平台">{{ accountsStore.currentDiscoveryResult.platform }}</el-descriptions-item>
+          <el-descriptions-item label="匹配状态">{{ accountsStore.currentDiscoveryResult.match?.status || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="店铺名">{{ accountsStore.currentDiscoveryResult.discovery?.detected_store_name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="平台店铺ID">{{ accountsStore.currentDiscoveryResult.discovery?.detected_platform_shop_id || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="区域">{{ accountsStore.currentDiscoveryResult.discovery?.detected_region || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="URL">{{ accountsStore.currentDiscoveryResult.discovery?.current_url || '-' }}</el-descriptions-item>
+        </el-descriptions>
+        <div class="erp-mt-lg" v-if="accountsStore.currentDiscoveryResult.match?.status === 'no_match'">
+          <el-button
+            type="primary"
+            @click="handleCreateShopAccountFromDiscovery"
+            :loading="accountsStore.discoveryRunning"
+          >
+            基于探测结果创建店铺账号
+          </el-button>
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="showDiscoveryDialog = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -463,8 +528,10 @@ const platformOptions = computed(() => accountsStore.platformList)
 // 对话框状态
 const showCreateDialog = ref(false)
 const showBatchDialog = ref(false)
+const showDiscoveryDialog = ref(false)
 const activeTab = ref('basic')
 const editingAccount = ref(null)
+const selectedMainAccountId = ref('')
 
 // 表单引用
 const accountFormRef = ref(null)
@@ -563,6 +630,58 @@ async function handleRefresh() {
   await accountsStore.loadAccounts({}, true)
   await accountsStore.loadStats(false) // 统计数据后台加载，不显示loading
   ElMessage.success('刷新成功')
+}
+
+async function handleDiscoverCurrentShop() {
+  if (!selectedMainAccountId.value) {
+    ElMessage.warning('请先选择主账号')
+    return
+  }
+
+  try {
+    await accountsStore.runCurrentShopDiscovery(selectedMainAccountId.value, {
+      mode: 'current_only',
+      reuse_session: true,
+      capture_evidence: true
+    })
+  } catch (error) {
+    console.error('店铺探测失败:', error)
+  } finally {
+    showDiscoveryDialog.value = true
+  }
+}
+
+async function handleCreateShopAccountFromDiscovery() {
+  const result = accountsStore.currentDiscoveryResult
+  if (!result) return
+
+  const discovery = (accountsStore.pendingPlatformShopDiscoveries || []).find((item) => {
+    return item.main_account_id === result.main_account_id
+      && item.detected_platform_shop_id === result.discovery?.detected_platform_shop_id
+  })
+
+  if (!discovery?.id) {
+    ElMessage.warning('当前探测结果未找到可创建的 discovery 记录')
+    return
+  }
+
+  const storeName = result.discovery?.detected_store_name || 'discovered_shop'
+  const region = String(result.discovery?.detected_region || 'unknown').toLowerCase()
+  const shopAccountId = `${result.platform}_${region}_${String(storeName).replace(/\s+/g, '_').toLowerCase()}`
+
+  try {
+    await accountsStore.createShopAccountFromDiscovery(discovery.id, {
+      shop_account_id: shopAccountId,
+      store_name: storeName,
+      shop_region: result.discovery?.detected_region || null,
+      shop_type: 'local',
+      notes: 'created from current shop discovery'
+    })
+    ElMessage.success('已基于探测结果创建店铺账号')
+    showDiscoveryDialog.value = false
+  } catch (error) {
+    console.error('基于探测结果创建店铺账号失败:', error)
+  }
 }
 
 /**

@@ -27,6 +27,9 @@ export const useAccountsStore = defineStore('accounts', {
     accounts: [],
     mainAccounts: [],
     pendingPlatformShopDiscoveries: [],
+    currentDiscoveryResult: null,
+    currentDiscoveryError: '',
+    discoveryRunning: false,
     unmatchedShopAliases: [],
     stats: {
       total: 0,
@@ -93,6 +96,39 @@ export const useAccountsStore = defineStore('accounts', {
         this.unmatchedShopAliases = response.items || []
       } catch (error) {
         console.error('加载未匹配店铺别名失败:', error)
+      }
+    },
+
+    async runCurrentShopDiscovery(mainAccountId, payload = {}) {
+      this.discoveryRunning = true
+      this.currentDiscoveryError = ''
+      try {
+        const response = await accountsApi.runCurrentShopDiscovery(mainAccountId, payload)
+        this.currentDiscoveryResult = response
+        await this.loadAccounts({}, false)
+        return response
+      } catch (error) {
+        this.currentDiscoveryResult = null
+        this.currentDiscoveryError = error.response?.data?.detail || error.message || '店铺探测失败'
+        throw error
+      } finally {
+        this.discoveryRunning = false
+      }
+    },
+
+    async createShopAccountFromDiscovery(discoveryId, payload) {
+      this.discoveryRunning = true
+      this.currentDiscoveryError = ''
+      try {
+        const response = await accountsApi.createShopAccountFromDiscovery(discoveryId, payload)
+        await this.loadAccounts({}, false)
+        await this.loadStats()
+        return response
+      } catch (error) {
+        this.currentDiscoveryError = error.response?.data?.detail || error.message || '基于探测创建店铺账号失败'
+        throw error
+      } finally {
+        this.discoveryRunning = false
       }
     },
 
