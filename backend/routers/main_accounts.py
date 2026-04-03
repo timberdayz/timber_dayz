@@ -13,11 +13,16 @@ from backend.schemas.main_account import (
     MainAccountResponse,
     MainAccountUpdate,
 )
+from backend.schemas.shop_discovery import (
+    ShopDiscoveryRunRequest,
+    ShopDiscoveryRunResponse,
+)
 from backend.services.encryption_service import get_encryption_service
+from backend.services.shop_discovery_service import get_shop_discovery_service
 from modules.core.db import MainAccount
 
 
-router = APIRouter(prefix="/main-accounts", tags=["主账号管理"])
+router = APIRouter(prefix="/main-accounts", tags=["main account management"])
 
 
 async def _get_main_account_or_404(db: AsyncSession, main_account_id: str) -> MainAccount:
@@ -26,7 +31,7 @@ async def _get_main_account_or_404(db: AsyncSession, main_account_id: str) -> Ma
     )
     record = result.scalar_one_or_none()
     if record is None:
-        raise HTTPException(status_code=404, detail=f"主账号ID '{main_account_id}' 不存在")
+        raise HTTPException(status_code=404, detail=f"main_account_id '{main_account_id}' not found")
     return record
 
 
@@ -50,7 +55,10 @@ async def create_main_account(
         )
     )
     if existing.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=400, detail=f"主账号ID '{payload.main_account_id}' 已存在")
+        raise HTTPException(
+            status_code=400,
+            detail=f"main_account_id '{payload.main_account_id}' already exists",
+        )
 
     encryption_service = get_encryption_service()
     record = MainAccount(
@@ -99,4 +107,20 @@ async def delete_main_account(
     record = await _get_main_account_or_404(db, main_account_id)
     await db.delete(record)
     await db.commit()
-    return {"message": f"主账号ID '{main_account_id}' 已删除"}
+    return {"message": f"main_account_id '{main_account_id}' deleted"}
+
+
+@router.post("/{main_account_id}/shop-discovery/current", response_model=ShopDiscoveryRunResponse)
+async def run_current_shop_discovery(
+    main_account_id: str,
+    payload: ShopDiscoveryRunRequest,
+    db: AsyncSession = Depends(get_async_db),
+):
+    record = await _get_main_account_or_404(db, main_account_id)
+    service = get_shop_discovery_service()
+    return await service.run_current_discovery(
+        db,
+        platform=record.platform,
+        main_account_id=record.main_account_id,
+        request=payload,
+    )

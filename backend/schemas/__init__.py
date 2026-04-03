@@ -24,6 +24,7 @@ from backend.schemas.main_account import MainAccountCreate, MainAccountUpdate, M
 from backend.schemas.shop_account import ShopAccountCreate, ShopAccountUpdate, ShopAccountResponse
 from backend.schemas.shop_account_alias import ShopAccountAliasCreate, ShopAccountAliasResponse
 from backend.schemas.platform_shop_discovery import PlatformShopDiscoveryResponse
+from backend.schemas.shop_discovery import ShopDiscoveryRunRequest, ShopDiscoveryRunResponse
 
 # ==================== 通用响应 ====================
 from backend.schemas.common import (

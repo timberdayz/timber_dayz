@@ -115,3 +115,58 @@ async def test_confirm_platform_shop_discovery_updates_shop_account(discovery_cl
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "manual_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_create_shop_account_from_discovery(discovery_client):
+    await discovery_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "hongxikeji:main",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+
+    transport = discovery_client._transport
+    app = transport.app
+    override = app.dependency_overrides[get_async_db]
+    async for session in override():
+        session.add(
+            PlatformShopDiscovery(
+                platform="shopee",
+                main_account_id="hongxikeji:main",
+                detected_store_name="HongXi SG",
+                detected_platform_shop_id="1227491331",
+                detected_region="SG",
+                candidate_shop_account_ids=[],
+                status="detected",
+                raw_payload={"current_url": "https://seller.example/path?shop_id=1227491331"},
+            )
+        )
+        await session.commit()
+        break
+
+    response = await discovery_client.post(
+        "/api/platform-shop-discoveries/1/create-shop-account",
+        json={
+            "shop_account_id": "shopee_sg_hongxi_local",
+            "store_name": "HongXi SG",
+            "shop_region": "SG",
+            "shop_type": "local",
+            "notes": "created from discovery",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "created_shop_account"
+
+    list_response = await discovery_client.get("/api/shop-accounts")
+    assert list_response.status_code == 200
+    shop_accounts_payload = list_response.json()
+    assert len(shop_accounts_payload) == 1
+    assert shop_accounts_payload[0]["shop_account_id"] == "shopee_sg_hongxi_local"
+    assert shop_accounts_payload[0]["platform_shop_id"] == "1227491331"
