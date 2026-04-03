@@ -92,3 +92,45 @@ def test_reopen_payroll_record_rejects_paid_record():
 
     assert resp.status_code == 409
     assert _json_body(resp)["success"] is False
+
+
+def test_mark_payroll_record_paid_requires_confirmed_and_sets_pay_date():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    record = SimpleNamespace(
+        id=4,
+        employee_code="EMP004",
+        year_month="2025-01",
+        base_salary=1000.0,
+        position_salary=200.0,
+        performance_salary=100.0,
+        overtime_pay=0.0,
+        commission=50.0,
+        allowances=20.0,
+        bonus=0.0,
+        gross_salary=1370.0,
+        social_insurance_personal=10.0,
+        housing_fund_personal=10.0,
+        income_tax=5.0,
+        other_deductions=0.0,
+        total_deductions=25.0,
+        net_salary=1345.0,
+        social_insurance_company=30.0,
+        housing_fund_company=30.0,
+        total_cost=1430.0,
+        status="confirmed",
+        pay_date=None,
+        remark=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.execute = AsyncMock(return_value=_ResultOne(record))
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    resp = asyncio.run(module.mark_payroll_record_paid(4, db=db))
+
+    assert record.status == "paid"
+    assert record.pay_date is not None
+    assert db.commit.await_count == 1
+    assert resp["success"] is True

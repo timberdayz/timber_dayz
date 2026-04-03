@@ -138,6 +138,33 @@ async def reopen_payroll_record(
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"閫€鍥炲伐璧勫崟澶辫触: {str(e)}", status_code=500)
 
 
+@router.post("/payroll-records/{record_id}/pay")
+async def mark_payroll_record_paid(
+    record_id: int,
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        result = await db.execute(
+            select(PayrollRecord).where(PayrollRecord.id == record_id)
+        )
+        record = result.scalar_one_or_none()
+        if not record:
+            return error_response(ErrorCode.DATA_NOT_FOUND, "瀹搞儴绁崡鏇氱瑝鐎涙ê婀?, status_code=404)
+        if record.status != "confirmed":
+            return error_response(ErrorCode.PARAMETER_INVALID, "鍙湁宸茬‘璁ょ殑宸ヨ祫鍗曟墠鑳芥爣璁颁负宸插彂鏀?, status_code=409)
+        record.status = "paid"
+        if not getattr(record, "pay_date", None):
+            record.pay_date = date.today()
+        await db.commit()
+        if hasattr(db, "refresh"):
+            await db.refresh(record)
+        return _payroll_success(record)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"鏍囪宸插彂鏀惧伐璧勫崟澶辫触: {e}", exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鏍囪宸插彂鏀惧伐璧勫崟澶辫触: {str(e)}", status_code=500)
+
+
 @router.get("/salary-structures", response_model=List[SalaryStructureResponse])
 async def list_salary_structures(
     status: Optional[str] = Query(None, description="状态筛选"),

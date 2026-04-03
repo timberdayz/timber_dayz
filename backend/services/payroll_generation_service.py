@@ -187,6 +187,23 @@ class PayrollGenerationService:
                 return True
         return False
 
+    @classmethod
+    def _locked_conflict_detail(cls, existing: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
+        changed_fields = []
+        for field in cls.AUTO_MONEY_FIELDS:
+            existing_value = cls._to_money(getattr(existing, field, 0))
+            next_value = cls._to_money(payload.get(field, 0))
+            if existing_value != next_value:
+                changed_fields.append(field)
+        return {
+            "employee_code": getattr(existing, "employee_code", payload.get("employee_code", "")),
+            "year_month": getattr(existing, "year_month", payload.get("year_month", "")),
+            "payroll_status": getattr(existing, "status", None),
+            "changed_fields": changed_fields,
+            "current_net_salary": float(cls._to_money(getattr(existing, "net_salary", 0))),
+            "recalculated_net_salary": float(cls._to_money(payload.get("net_salary", 0))),
+        }
+
     async def generate_month(self, year_month: str) -> Dict[str, Any]:
         salary_rows = (
             await self.db.execute(
@@ -239,6 +256,7 @@ class PayrollGenerationService:
 
         payroll_upserts = 0
         locked_conflicts = 0
+        locked_conflict_details = []
         for employee_code in employee_codes:
             salary = salary_by_employee.get(employee_code)
             commission = commission_by_employee.get(employee_code)
@@ -257,6 +275,9 @@ class PayrollGenerationService:
             if locked_status in {"confirmed", "paid"}:
                 if self._has_locked_conflict(existing, payload):
                     locked_conflicts += 1
+                    locked_conflict_details.append(
+                        self._locked_conflict_detail(existing, payload)
+                    )
                 continue
 
             if existing:
@@ -274,4 +295,5 @@ class PayrollGenerationService:
             "employee_count": len(employee_codes),
             "payroll_upserts": payroll_upserts,
             "locked_conflicts": locked_conflicts,
+            "locked_conflict_details": locked_conflict_details,
         }

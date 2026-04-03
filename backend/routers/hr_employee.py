@@ -159,6 +159,28 @@ async def get_my_income(
     fixed_salary = float((getattr(pr, "base_salary", 0) or 0) + (getattr(pr, "position_salary", 0) or 0))
     commission_amount = float(getattr(pr, "commission", 0) or 0)
     net_salary = float(getattr(pr, "net_salary", 0) or 0)
+    payroll_breakdown = {
+        "base_salary": float(getattr(pr, "base_salary", 0) or 0),
+        "position_salary": float(getattr(pr, "position_salary", 0) or 0),
+        "performance_salary": float(getattr(pr, "performance_salary", 0) or 0),
+        "overtime_pay": float(getattr(pr, "overtime_pay", 0) or 0),
+        "commission": commission_amount,
+        "allowances": float(getattr(pr, "allowances", 0) or 0),
+        "bonus": float(getattr(pr, "bonus", 0) or 0),
+        "gross_salary": float(getattr(pr, "gross_salary", 0) or 0),
+        "social_insurance_personal": float(getattr(pr, "social_insurance_personal", 0) or 0),
+        "housing_fund_personal": float(getattr(pr, "housing_fund_personal", 0) or 0),
+        "income_tax": float(getattr(pr, "income_tax", 0) or 0),
+        "other_deductions": float(getattr(pr, "other_deductions", 0) or 0),
+        "total_deductions": float(getattr(pr, "total_deductions", 0) or 0),
+        "net_salary": net_salary,
+        "social_insurance_company": float(getattr(pr, "social_insurance_company", 0) or 0),
+        "housing_fund_company": float(getattr(pr, "housing_fund_company", 0) or 0),
+        "total_cost": float(getattr(pr, "total_cost", 0) or 0),
+        "status": getattr(pr, "status", None),
+        "pay_date": getattr(pr, "pay_date", None).isoformat() if getattr(pr, "pay_date", None) else None,
+        "remark": getattr(pr, "remark", None),
+    }
     await _log_me_income_access(request, current_user_id, period, "success", db)
     return MyIncomeResponse(
         linked=True,
@@ -169,11 +191,7 @@ async def get_my_income(
         achievement_rate=None,
         total_income=net_salary,
         breakdown={
-            "payroll": {
-                "base_salary": fixed_salary,
-                "commission": commission_amount,
-                "net_salary": net_salary,
-            }
+            "payroll": payroll_breakdown
         },
     )
 

@@ -77,21 +77,51 @@
         </el-row>
 
         <el-card v-if="income.breakdown?.payroll" shadow="hover">
-          <template #header>工资单摘要</template>
-          <el-descriptions :column="2" border>
-            <el-descriptions-item label="固定工资">
-              {{ formatMoney(income.breakdown.payroll.base_salary) }}
-            </el-descriptions-item>
-            <el-descriptions-item label="提成">
-              {{ formatMoney(income.breakdown.payroll.commission) }}
-            </el-descriptions-item>
-            <el-descriptions-item label="实发工资">
-              {{ formatMoney(income.breakdown.payroll.net_salary) }}
-            </el-descriptions-item>
-            <el-descriptions-item label="工资月份">
-              {{ income.period || selectedMonth }}
-            </el-descriptions-item>
-          </el-descriptions>
+          <template #header>
+            <div class="payroll-card-header">
+              <span>工资单明细</span>
+              <el-tag
+                v-if="payrollDetails.status"
+                :type="getPayrollStatusType(payrollDetails.status)"
+                size="small"
+              >
+                {{ formatPayrollStatus(payrollDetails.status) }}
+              </el-tag>
+            </div>
+          </template>
+
+          <div class="payroll-meta">
+            <span>工资月份：{{ income.period || selectedMonth }}</span>
+            <span v-if="payrollDetails.pay_date">发薪日期：{{ payrollDetails.pay_date }}</span>
+          </div>
+
+          <div
+            v-for="section in payrollSections"
+            :key="section.title"
+            class="payroll-section"
+          >
+            <div class="payroll-section-title">{{ section.title }}</div>
+            <el-descriptions :column="2" border>
+              <el-descriptions-item
+                v-for="item in section.items"
+                :key="item.key"
+                :label="item.label"
+              >
+                {{ formatMoney(item.value) }}
+              </el-descriptions-item>
+            </el-descriptions>
+          </div>
+
+          <el-alert
+            v-if="payrollDetails.remark"
+            type="info"
+            :closable="false"
+            show-icon
+            style="margin-top: 16px;"
+          >
+            <template #title>备注</template>
+            {{ payrollDetails.remark }}
+          </el-alert>
         </el-card>
       </template>
     </template>
@@ -122,9 +152,63 @@ const hasNoIncomeData = computed(() => {
   return noTotal && noBreakdown
 })
 
+const payrollDetails = computed(() => income.value.breakdown?.payroll ?? null)
+
+const payrollSections = computed(() => {
+  const payroll = payrollDetails.value
+  if (!payroll) return []
+
+  return [
+    {
+      title: '应发项',
+      items: [
+        { key: 'base_salary', label: '基本工资', value: payroll.base_salary },
+        { key: 'position_salary', label: '岗位工资', value: payroll.position_salary },
+        { key: 'performance_salary', label: '绩效工资', value: payroll.performance_salary },
+        { key: 'overtime_pay', label: '加班费', value: payroll.overtime_pay },
+        { key: 'commission', label: '提成', value: payroll.commission },
+        { key: 'allowances', label: '津贴', value: payroll.allowances },
+        { key: 'bonus', label: '奖金', value: payroll.bonus },
+        { key: 'gross_salary', label: '应发合计', value: payroll.gross_salary }
+      ]
+    },
+    {
+      title: '扣除项',
+      items: [
+        { key: 'social_insurance_personal', label: '个人社保', value: payroll.social_insurance_personal },
+        { key: 'housing_fund_personal', label: '个人公积金', value: payroll.housing_fund_personal },
+        { key: 'income_tax', label: '个税', value: payroll.income_tax },
+        { key: 'other_deductions', label: '其他扣款', value: payroll.other_deductions },
+        { key: 'total_deductions', label: '扣款合计', value: payroll.total_deductions },
+        { key: 'net_salary', label: '实发工资', value: payroll.net_salary }
+      ]
+    },
+    {
+      title: '公司成本',
+      items: [
+        { key: 'social_insurance_company', label: '公司社保', value: payroll.social_insurance_company },
+        { key: 'housing_fund_company', label: '公司公积金', value: payroll.housing_fund_company },
+        { key: 'total_cost', label: '公司总成本', value: payroll.total_cost }
+      ]
+    }
+  ]
+})
+
 function formatMoney(val) {
   if (val == null || val === undefined) return '-'
-  return '楼' + Number(val).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
+  return '¥' + Number(val).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
+}
+
+function formatPayrollStatus(status) {
+  if (status === 'confirmed') return '已确认'
+  if (status === 'paid') return '已发放'
+  return '草稿'
+}
+
+function getPayrollStatusType(status) {
+  if (status === 'confirmed') return 'success'
+  if (status === 'paid') return 'warning'
+  return 'info'
 }
 
 async function loadIncome() {
@@ -153,5 +237,32 @@ onMounted(() => {
 <style scoped>
 .my-income {
   padding: 20px;
+}
+
+.payroll-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.payroll-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.payroll-section + .payroll-section {
+  margin-top: 16px;
+}
+
+.payroll-section-title {
+  margin-bottom: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
 }
 </style>

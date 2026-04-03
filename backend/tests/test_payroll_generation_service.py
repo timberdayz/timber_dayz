@@ -234,5 +234,23 @@ def test_generate_month_reports_locked_conflict_for_confirmed_payroll():
 
     assert result["payroll_upserts"] == 0
     assert result["locked_conflicts"] == 1
+    assert result["locked_conflict_details"] == [
+        {
+            "employee_code": "EMP003",
+            "year_month": "2025-01",
+            "payroll_status": "confirmed",
+            "changed_fields": [
+                "base_salary",
+                "position_salary",
+                "performance_salary",
+                "commission",
+                "gross_salary",
+                "net_salary",
+                "total_cost",
+            ],
+            "current_net_salary": 1000.0,
+            "recalculated_net_salary": 2400.0,
+        }
+    ]
     assert added == []
     assert float(existing.net_salary) == 1000.0

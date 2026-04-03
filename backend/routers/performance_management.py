@@ -1339,6 +1339,7 @@ async def calculate_performance_scores(
                 "employee_performance_upserts": income_result.get("performance_upserts", 0),
                 "payroll_upserts": payroll_result.get("payroll_upserts", 0),
                 "payroll_locked_conflicts": payroll_result.get("locked_conflicts", 0),
+                "payroll_locked_conflict_details": payroll_result.get("locked_conflict_details", []),
             },
             message="绩效计算完成",
         )

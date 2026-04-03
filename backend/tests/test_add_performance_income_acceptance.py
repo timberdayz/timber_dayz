@@ -165,6 +165,16 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
                 "year_month": year_month,
                 "payroll_upserts": 2,
                 "locked_conflicts": 1,
+                "locked_conflict_details": [
+                    {
+                        "employee_code": "EMP001",
+                        "year_month": "2025-01",
+                        "payroll_status": "confirmed",
+                        "changed_fields": ["net_salary"],
+                        "current_net_salary": 1000.0,
+                        "recalculated_net_salary": 1200.0,
+                    }
+                ],
             }
 
     monkeypatch.setattr(
@@ -201,6 +211,16 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
     assert body["data"]["employee_performance_upserts"] == 2
     assert body["data"]["payroll_upserts"] == 2
     assert body["data"]["payroll_locked_conflicts"] == 1
+    assert body["data"]["payroll_locked_conflict_details"] == [
+        {
+            "employee_code": "EMP001",
+            "year_month": "2025-01",
+            "payroll_status": "confirmed",
+            "changed_fields": ["net_salary"],
+            "current_net_salary": 1000.0,
+            "recalculated_net_salary": 1200.0,
+        }
+    ]
     perf_score_rows = [
         call.args[0]
         for call in db.add.call_args_list
@@ -842,12 +862,22 @@ def test_my_income_linked_uses_payroll_net_salary_only_and_skips_fallback(monkey
         employee_code="EMP009",
         year_month="2025-01",
         base_salary=1000.0,
+        position_salary=200.0,
         commission=300.0,
         net_salary=1888.0,
         performance_salary=200.0,
         allowances=100.0,
         total_deductions=12.0,
         gross_salary=1900.0,
+        overtime_pay=50.0,
+        bonus=50.0,
+        social_insurance_personal=5.0,
+        housing_fund_personal=4.0,
+        income_tax=2.0,
+        other_deductions=1.0,
+        social_insurance_company=120.0,
+        housing_fund_company=80.0,
+        total_cost=2100.0,
         status="draft",
     )
     execute_calls = {"n": 0}
@@ -890,8 +920,25 @@ def test_my_income_linked_uses_payroll_net_salary_only_and_skips_fallback(monkey
     assert resp.breakdown == {
         "payroll": {
             "base_salary": 1000.0,
+            "position_salary": 200.0,
+            "performance_salary": 200.0,
+            "overtime_pay": 50.0,
             "commission": 300.0,
+            "allowances": 100.0,
+            "bonus": 50.0,
+            "gross_salary": 1900.0,
+            "social_insurance_personal": 5.0,
+            "housing_fund_personal": 4.0,
+            "income_tax": 2.0,
+            "other_deductions": 1.0,
+            "total_deductions": 12.0,
             "net_salary": 1888.0,
+            "social_insurance_company": 120.0,
+            "housing_fund_company": 80.0,
+            "total_cost": 2100.0,
+            "status": "draft",
+            "pay_date": None,
+            "remark": None,
         }
     }
     assert called["count"] == 1
