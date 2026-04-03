@@ -52,6 +52,7 @@ from backend.schemas.performance import (
     PerformanceScoreResponse,
 )
 from backend.services.hr_income_calculation_service import HRIncomeCalculationService
+from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.services.postgresql_shop_metrics_service import (
     load_shop_monthly_metrics,
     load_shop_monthly_target_achievement,
@@ -1320,6 +1321,8 @@ async def calculate_performance_scores(
             upserts += 1
         income_service = HRIncomeCalculationService(db=db)
         income_result = await income_service.calculate_month(period)
+        payroll_service = PayrollGenerationService(db=db)
+        payroll_result = await payroll_service.generate_month(period)
         await db.commit()
         try:
             from backend.services.cache_service import get_cache_service
@@ -1334,6 +1337,8 @@ async def calculate_performance_scores(
                 "employee_count": income_result.get("employee_count", 0),
                 "commission_upserts": income_result.get("commission_upserts", 0),
                 "employee_performance_upserts": income_result.get("performance_upserts", 0),
+                "payroll_upserts": payroll_result.get("payroll_upserts", 0),
+                "payroll_locked_conflicts": payroll_result.get("locked_conflicts", 0),
             },
             message="绩效计算完成",
         )

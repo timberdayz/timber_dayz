@@ -136,6 +136,7 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
         }
 
     income_calls = {"count": 0}
+    payroll_calls = {"count": 0}
 
     class _FakeIncomeService:
         def __init__(self, db, metabase_service=None):
@@ -153,6 +154,19 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
                 "source": "test",
             }
 
+    class _FakePayrollService:
+        def __init__(self, db):
+            self.db = db
+
+        async def generate_month(self, year_month):
+            payroll_calls["count"] += 1
+            assert year_month == "2025-01"
+            return {
+                "year_month": year_month,
+                "payroll_upserts": 2,
+                "locked_conflicts": 1,
+            }
+
     monkeypatch.setattr(
         performance_management_module,
         "load_shop_monthly_target_achievement",
@@ -162,6 +176,12 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
         performance_management_module,
         "HRIncomeCalculationService",
         _FakeIncomeService,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        performance_management_module,
+        "PayrollGenerationService",
+        _FakePayrollService,
         raising=False,
     )
 
@@ -174,10 +194,13 @@ def test_calculate_triggers_income_recalculation_and_returns_both_counts(monkeyp
     body = _json_body(resp)
     assert body["success"] is True
     assert income_calls["count"] == 1
+    assert payroll_calls["count"] == 1
     assert db.commit.await_count == 1
     assert body["data"]["shop_performance_upserts"] == 1
     assert body["data"]["commission_upserts"] == 2
     assert body["data"]["employee_performance_upserts"] == 2
+    assert body["data"]["payroll_upserts"] == 2
+    assert body["data"]["payroll_locked_conflicts"] == 1
     perf_score_rows = [
         call.args[0]
         for call in db.add.call_args_list
@@ -766,4 +789,124 @@ def test_my_income_linked_fallback_to_cn_columns_when_orm_columns_missing(monkey
     assert float(resp.performance_score) == 88.0
     assert abs(float(resp.achievement_rate) - 0.76) < 1e-9
     assert db.rollback.await_count >= 2
+    assert called["count"] == 1
+
+
+def test_my_income_linked_uses_payroll_net_salary_only_and_skips_fallback(monkeypatch):
+    class _ResultOne:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+    db = AsyncMock()
+    employee = SimpleNamespace(employee_code="EMP009")
+    payroll = SimpleNamespace(
+        employee_code="EMP009",
+        year_month="2025-01",
+        base_salary=1000.0,
+        commission=300.0,
+        net_salary=1888.0,
+        performance_salary=200.0,
+        allowances=100.0,
+        total_deductions=12.0,
+        gross_salary=1900.0,
+        status="draft",
+    )
+    execute_calls = {"n": 0}
+
+    async def _execute(_stmt, _params=None):
+        execute_calls["n"] += 1
+        n = execute_calls["n"]
+        if n == 1:
+            return _ResultOne(employee)
+        if n == 2:
+            return _ResultOne(payroll)
+        raise AssertionError(f"unexpected execute call #{n}")
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    called = {"count": 0}
+
+    async def _fake_log(*args, **kwargs):
+        called["count"] += 1
+
+    monkeypatch.setattr("backend.routers.hr_employee._log_me_income_access", _fake_log)
+
+    request = Request(
+        {
+            "type": "http",
+            "headers": [],
+            "client": ("127.0.0.1", 8000),
+            "method": "GET",
+            "path": "/api/hr/me/income",
+        }
+    )
+    user = SimpleNamespace(user_id=1003)
+
+    resp = asyncio.run(
+        get_my_income(request=request, year_month="2025-01", current_user=user, db=db)
+    )
+
+    assert resp.linked is True
+    assert float(resp.total_income) == 1888.0
+    assert resp.breakdown == {
+        "payroll": {
+            "base_salary": 1000.0,
+            "commission": 300.0,
+            "net_salary": 1888.0,
+        }
+    }
+    assert called["count"] == 1
+
+
+def test_my_income_linked_without_payroll_returns_empty_income_state(monkeypatch):
+    class _ResultOne:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+    db = AsyncMock()
+    employee = SimpleNamespace(employee_code="EMP010")
+    execute_calls = {"n": 0}
+
+    async def _execute(_stmt, _params=None):
+        execute_calls["n"] += 1
+        n = execute_calls["n"]
+        if n == 1:
+            return _ResultOne(employee)
+        if n == 2:
+            return _ResultOne(None)
+        raise AssertionError(f"unexpected execute call #{n}")
+
+    db.execute = AsyncMock(side_effect=_execute)
+
+    called = {"count": 0}
+
+    async def _fake_log(*args, **kwargs):
+        called["count"] += 1
+
+    monkeypatch.setattr("backend.routers.hr_employee._log_me_income_access", _fake_log)
+
+    request = Request(
+        {
+            "type": "http",
+            "headers": [],
+            "client": ("127.0.0.1", 8000),
+            "method": "GET",
+            "path": "/api/hr/me/income",
+        }
+    )
+    user = SimpleNamespace(user_id=1004)
+
+    resp = asyncio.run(
+        get_my_income(request=request, year_month="2025-01", current_user=user, db=db)
+    )
+
+    assert resp.linked is True
+    assert resp.total_income is None
+    assert resp.breakdown == {}
     assert called["count"] == 1
