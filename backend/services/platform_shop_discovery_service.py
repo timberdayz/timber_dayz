@@ -145,6 +145,13 @@ class PlatformShopDiscoveryService:
         else:
             status = "failed"
 
+        persisted_status = {
+            "auto_bound": "auto_bound",
+            "pending_confirm": "pending_confirm",
+            "no_match": "detected",
+            "failed": "failed",
+        }.get(status, "detected")
+
         discovery_record = PlatformShopDiscovery(
             platform=platform,
             main_account_id=main_account_id,
@@ -152,7 +159,7 @@ class PlatformShopDiscoveryService:
             detected_platform_shop_id=detected_platform_shop_id,
             detected_region=detected_region,
             candidate_shop_account_ids=candidates,
-            status="pending_confirm" if status == "pending_confirm" else "detected",
+            status=persisted_status,
             raw_payload={
                 **(raw_payload or {}),
                 "source": source,
