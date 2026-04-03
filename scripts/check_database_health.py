@@ -123,7 +123,7 @@ def check_table_columns(conn, table_name: str, schema: str, expected_columns: li
     missing_columns = set(expected_columns) - actual_columns
     if missing_columns:
         issues.append(f"[FAIL] {schema}.{table_name} 缺少字段: {missing_columns}")
-        recommendations.append(f"执行迁移添加缺失字段")
+        recommendations.append("执行 Alembic 迁移补齐缺失字段: alembic upgrade heads")
     
     return issues, recommendations
 
@@ -146,6 +146,10 @@ def check_critical_tables(conn) -> tuple:
         ("platform_accounts", "core", ["id", "platform", "account_alias"]),
         ("employees", "a_class", ["id", "employee_code", "name"]),
         ("departments", "a_class", ["id", "department_code", "department_name"]),
+        ("data_quarantine", "core", ["id", "source_file", "catalog_file_id"]),
+        ("staging_orders", "core", ["id", "file_id"]),
+        ("staging_product_metrics", "core", ["id", "file_id"]),
+        ("staging_inventory", "core", ["id", "file_id"]),
     ]
     
     for table_name, expected_schema, expected_columns in critical_tables:

@@ -70,6 +70,12 @@ logger = logging.getLogger(__name__)
 
 MANAGED_APP_SCHEMAS = ("public", "core", "a_class", "b_class", "c_class", "finance")
 PRIMARY_ALEMBIC_SCHEMA = "core"
+DATA_SYNC_CRITICAL_COLUMNS: dict[str, set[str]] = {
+    "core.data_quarantine": {"catalog_file_id"},
+    "core.staging_orders": {"file_id"},
+    "core.staging_product_metrics": {"file_id"},
+    "core.staging_inventory": {"file_id"},
+}
 
 
 def _expand_existing_table_aliases(existing_tables: set[str]) -> set[str]:
@@ -142,6 +148,36 @@ def _get_alembic_revisions_by_schema(connection, inspector=None) -> dict[str, st
         if result:
             revisions_by_schema[schema_name] = result[-1][0]
     return revisions_by_schema
+
+
+def _find_missing_critical_columns(
+    conn_inspector,
+    existing_tables: set[str] | None = None,
+) -> list[str]:
+    existing_aliases = _expand_existing_table_aliases(existing_tables or set())
+    missing_columns: list[str] = []
+
+    for qualified_table, required_columns in DATA_SYNC_CRITICAL_COLUMNS.items():
+        if "." in qualified_table:
+            schema_name, table_name = qualified_table.split(".", 1)
+        else:
+            schema_name, table_name = None, qualified_table
+
+        if existing_tables and qualified_table not in existing_aliases and table_name not in existing_aliases:
+            continue
+
+        try:
+            actual_columns = {
+                column["name"]
+                for column in conn_inspector.get_columns(table_name, schema=schema_name)
+            }
+        except Exception:
+            actual_columns = set()
+
+        for column_name in sorted(required_columns - actual_columns):
+            missing_columns.append(f"{qualified_table}.{column_name}")
+
+    return sorted(missing_columns)
 
 # ==================== 数据库URL转换函数 ====================
 
@@ -431,6 +467,7 @@ def verify_schema_completeness():
 
     expected_tables = set(Base.metadata.tables.keys())
     missing_tables = expected_tables - _expand_existing_table_aliases(existing_tables)
+    missing_columns = _find_missing_critical_columns(inspector, existing_tables=existing_tables)
 
     try:
         from alembic.config import Config
@@ -453,7 +490,9 @@ def verify_schema_completeness():
 
     return {
         "all_tables_exist": len(missing_tables) == 0,
+        "all_critical_columns_exist": len(missing_columns) == 0,
         "missing_tables": sorted(list(missing_tables)),
+        "missing_columns": missing_columns,
         "migration_status": migration_status,
         "current_revision": current_rev,
         "head_revision": head_rev,

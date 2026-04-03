@@ -85,6 +85,7 @@ from backend.schemas.catalog_file_delete import (
 )
 from backend.services.catalog_file_delete_service import (
     CatalogFileDeleteNotFoundError,
+    DataSyncSchemaDriftError,
     CatalogFileDeleteService,
 )
 
@@ -435,6 +436,16 @@ async def get_file_delete_impact(
             detail=str(exc),
             status_code=404,
         )
+    except DataSyncSchemaDriftError as exc:
+        logger.error(f"[DataSync DeleteImpact] Schema drift: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="获取删除影响失败：数据库结构未完成迁移，请执行 Alembic 迁移",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion=f"执行 Alembic 迁移: {exc.recovery_command}",
+            status_code=500,
+        )
     except Exception as exc:
         logger.error(f"[DataSync DeleteImpact] 查询失败: {exc}", exc_info=True)
         return error_response(
@@ -463,6 +474,17 @@ async def delete_catalog_file(
             error_type=get_error_type(ErrorCode.DATA_NOT_FOUND),
             detail=str(exc),
             status_code=404,
+        )
+    except DataSyncSchemaDriftError as exc:
+        await db.rollback()
+        logger.error(f"[DataSync Delete] Schema drift: {exc}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="删除文件失败：数据库结构未完成迁移，请执行 Alembic 迁移",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(exc),
+            recovery_suggestion=f"执行 Alembic 迁移: {exc.recovery_command}",
+            status_code=500,
         )
     except Exception as exc:
         await db.rollback()

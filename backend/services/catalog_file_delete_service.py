@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 from sqlalchemy import delete, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import CatalogFile, DataQuarantine, StagingInventory, StagingOrders, StagingProductMetrics
@@ -16,6 +17,17 @@ _SAFE_IDENTIFIER_RE = re.compile(r"^[a-z0-9_]+$")
 
 class CatalogFileDeleteNotFoundError(Exception):
     pass
+
+
+class DataSyncSchemaDriftError(RuntimeError):
+    def __init__(self, schema_table: str, column_name: str):
+        self.schema_table = schema_table
+        self.column_name = column_name
+        self.recovery_command = "alembic upgrade heads"
+        super().__init__(
+            f"数据库结构未完成迁移: 缺少 {schema_table}.{column_name}。"
+            f"请执行 Alembic 迁移: {self.recovery_command}"
+        )
 
 
 @dataclass
@@ -158,18 +170,38 @@ class CatalogFileDeleteService:
             return path_obj
         return to_absolute_path(path_value)
 
+    def _raise_schema_drift_if_needed(
+        self,
+        exc: DBAPIError,
+        schema_table: str,
+        column_name: str,
+    ) -> None:
+        error_text = f"{getattr(exc, 'orig', '')} {exc}".lower()
+        if column_name.lower() not in error_text:
+            return
+        if any(marker in error_text for marker in ("does not exist", "no such column", "undefinedcolumn")):
+            raise DataSyncSchemaDriftError(schema_table, column_name) from exc
+
     async def _count_quarantine_rows(self, file_id: int) -> int:
-        result = await self.db.execute(
-            select(text("count(*)")).select_from(DataQuarantine).where(DataQuarantine.catalog_file_id == file_id)
-        )
+        try:
+            result = await self.db.execute(
+                select(text("count(*)")).select_from(DataQuarantine).where(DataQuarantine.catalog_file_id == file_id)
+            )
+        except DBAPIError as exc:
+            self._raise_schema_drift_if_needed(exc, "core.data_quarantine", "catalog_file_id")
+            raise
         return int(result.scalar() or 0)
 
     async def _count_staging_rows(self, file_id: int) -> int:
         total = 0
         for table in (StagingOrders, StagingProductMetrics, StagingInventory):
-            result = await self.db.execute(
-                select(text("count(*)")).select_from(table).where(table.file_id == file_id)
-            )
+            try:
+                result = await self.db.execute(
+                    select(text("count(*)")).select_from(table).where(table.file_id == file_id)
+                )
+            except DBAPIError as exc:
+                self._raise_schema_drift_if_needed(exc, f"core.{table.__tablename__}", "file_id")
+                raise
             total += int(result.scalar() or 0)
         return total
 
@@ -209,14 +241,22 @@ class CatalogFileDeleteService:
     async def _delete_staging_rows(self, file_id: int) -> int:
         total = 0
         for table in (StagingOrders, StagingProductMetrics, StagingInventory):
-            result = await self.db.execute(delete(table).where(table.file_id == file_id))
+            try:
+                result = await self.db.execute(delete(table).where(table.file_id == file_id))
+            except DBAPIError as exc:
+                self._raise_schema_drift_if_needed(exc, f"core.{table.__tablename__}", "file_id")
+                raise
             total += int(result.rowcount or 0)
         return total
 
     async def _delete_quarantine_rows(self, file_id: int) -> int:
-        result = await self.db.execute(
-            delete(DataQuarantine).where(DataQuarantine.catalog_file_id == file_id)
-        )
+        try:
+            result = await self.db.execute(
+                delete(DataQuarantine).where(DataQuarantine.catalog_file_id == file_id)
+            )
+        except DBAPIError as exc:
+            self._raise_schema_drift_if_needed(exc, "core.data_quarantine", "catalog_file_id")
+            raise
         return int(result.rowcount or 0)
 
     def _delete_local_path(self, path_obj: Path | None) -> tuple[bool, str | None]:

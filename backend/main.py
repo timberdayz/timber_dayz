@@ -180,6 +180,21 @@ async def lifespan(app: FastAPI):
                     logger.error("[ERROR] 请运行: alembic upgrade heads")
                     raise RuntimeError(f"Schema incompleteness: {len(result['missing_tables'])} tables missing")
                 
+                if not result.get("all_critical_columns_exist", True):
+                    missing_columns = result.get("missing_columns", [])[:10]
+                    logger.error(
+                        f"[ERROR] 生产环境关键列缺失({len(result.get('missing_columns', []))} 列): "
+                        f"{', '.join(missing_columns)}"
+                    )
+                    if len(result.get("missing_columns", [])) > 10:
+                        logger.error(
+                            f"[ERROR] ... 还有 {len(result['missing_columns']) - 10} 个关键列缺失"
+                        )
+                    logger.error("[ERROR] 请运行: alembic upgrade heads")
+                    raise RuntimeError(
+                        f"Schema missing critical columns: {len(result.get('missing_columns', []))}"
+                    )
+
                 if result["migration_status"] not in ["up_to_date", "not_initialized"]:
                     logger.error(
                         f"[ERROR] Alembic 迁移状态异常: {result['migration_status']}"

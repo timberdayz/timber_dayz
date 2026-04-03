@@ -14,12 +14,20 @@ import sys
 import time
 from pathlib import Path
 
+from sqlalchemy import create_engine, inspect
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PORT = 5433
 PG_USER = "migration_test_user"
 PG_PASSWORD = "migration_test_pass"
 PG_DB = "migration_test_db"
 IMAGE = "postgres:15"
+DATA_SYNC_CRITICAL_COLUMNS: dict[str, set[str]] = {
+    "core.data_quarantine": {"catalog_file_id"},
+    "core.staging_orders": {"file_id"},
+    "core.staging_product_metrics": {"file_id"},
+    "core.staging_inventory": {"file_id"},
+}
 
 
 def safe_print(msg: str) -> None:
@@ -51,6 +59,30 @@ def run(cmd: list, cwd: Path = None, env: dict = None, timeout: int = 120) -> tu
         return (-1, "Command timed out")
     except FileNotFoundError:
         return (-1, f"Command not found: {cmd[0]}")
+
+
+def find_missing_data_sync_critical_columns(conn_inspector) -> list[str]:
+    missing_columns: list[str] = []
+
+    for qualified_table, required_columns in DATA_SYNC_CRITICAL_COLUMNS.items():
+        schema_name, table_name = qualified_table.split(".", 1)
+        actual_columns = {
+            column["name"]
+            for column in conn_inspector.get_columns(table_name, schema=schema_name)
+        }
+        for column_name in sorted(required_columns - actual_columns):
+            missing_columns.append(f"{qualified_table}.{column_name}")
+
+    return sorted(missing_columns)
+
+
+def verify_data_sync_critical_columns(database_url: str) -> list[str]:
+    engine = create_engine(database_url)
+    try:
+        conn_inspector = inspect(engine)
+        return find_missing_data_sync_critical_columns(conn_inspector)
+    finally:
+        engine.dispose()
 
 
 def main() -> int:
@@ -104,6 +136,13 @@ def main() -> int:
             safe_print(out[-3000:] if len(out) > 3000 else out)
             return 1
         safe_print("[OK] 迁移成功")
+        missing_columns = verify_data_sync_critical_columns(database_url)
+        if missing_columns:
+            safe_print("[FAIL] 迁移后数据同步关键列缺失")
+            for missing_column in missing_columns:
+                safe_print(f"  - {missing_column}")
+            return 1
+        safe_print("[OK] 数据同步关键列校验通过")
         return 0
     finally:
         safe_print("[INFO] 停止并删除临时容器...")
