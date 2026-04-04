@@ -617,8 +617,8 @@ async def list_performance_scores(
             cache_status = "MISS"
 
         if group_by == "person":
-            # 按人员：从 employee_performance 取数据（兼容英/中文列）
-            use_cn_fallback = False
+            # 按人员查询时，优先走 ORM；仅在当前运行库仍为中文列结构时回退到兼容 SQL。
+            use_cn_column_fallback = False
             ep_list = []
             all_ep = []
             total = 0
@@ -640,8 +640,10 @@ async def list_performance_scores(
                 all_ep = [r[0] if hasattr(r, "__getitem__") and len(r) == 1 else r for r in all_rows]
             except Exception:
                 await db.rollback()
-                use_cn_fallback = True
-                logger.warning("employee_performance ORM query failed, fallback to CN column SQL")
+                use_cn_column_fallback = True
+                logger.warning(
+                    "employee_performance ORM query failed; using Chinese-column compatibility SQL path"
+                )
 
                 if period:
                     total_sql = text(
@@ -722,7 +724,7 @@ async def list_performance_scores(
             # 取员工姓名
             codes = []
             for e in ep_list:
-                if use_cn_fallback:
+                if use_cn_column_fallback:
                     ec = e.get("employee_code")
                 else:
                     ec = getattr(e, "employee_code", None)
@@ -743,20 +745,28 @@ async def list_performance_scores(
             sorted_ep = sorted(
                 all_ep,
                 key=lambda x: float(
-                    (x.get("performance_score") if use_cn_fallback else getattr(x, "performance_score", 0))
+                    (
+                        x.get("performance_score")
+                        if use_cn_column_fallback
+                        else getattr(x, "performance_score", 0)
+                    )
                     or 0
                 ),
                 reverse=True,
             )
             rank_by_code = {}
             for i, e in enumerate(sorted_ep, 1):
-                ec = e.get("employee_code") if use_cn_fallback else getattr(e, "employee_code", None)
+                ec = (
+                    e.get("employee_code")
+                    if use_cn_column_fallback
+                    else getattr(e, "employee_code", None)
+                )
                 if ec:
                     rank_by_code[ec] = i
 
             score_responses = []
             for ep in ep_list:
-                if use_cn_fallback:
+                if use_cn_column_fallback:
                     ec = ep.get("employee_code", "")
                     scr = float(ep.get("performance_score", 0) or 0)
                     ach = float(ep.get("achievement_rate", 0) or 0) * 100
