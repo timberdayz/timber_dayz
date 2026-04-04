@@ -10,35 +10,85 @@ from backend.models.database import AsyncSessionLocal
 
 
 def _to_float(value: Any) -> float:
-    if value is None:
-        return 0.0
     return float(value)
 
 
-def reduce_business_overview_kpi_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    total_gmv = sum(_to_float(row.get("gmv")) for row in rows)
-    total_orders = int(sum(_to_float(row.get("order_count")) for row in rows))
-    total_visitors = int(sum(_to_float(row.get("visitor_count")) for row in rows))
-    total_items = sum(_to_float(row.get("total_items")) for row in rows)
-    total_profit = sum(_to_float(row.get("profit")) for row in rows)
+def _to_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
-    conversion_rate = round((total_orders * 100.0 / total_visitors), 2) if total_visitors else 0
-    avg_order_value = round((total_gmv / total_orders), 2) if total_orders else 0
-    attach_rate = round((total_items / total_orders), 2) if total_orders else 0
+
+def _round_or_none(value: float | None, digits: int = 2) -> float | None:
+    if value is None:
+        return None
+    return round(value, digits)
+
+
+def _sum_present_values(rows: list[dict[str, Any]], key: str) -> float | None:
+    values = [_to_optional_float(row.get(key)) for row in rows if row.get(key) is not None]
+    if not values:
+        return None
+    return sum(values)
+
+
+def _sort_numeric(value: Any) -> float:
+    maybe_value = _to_optional_float(value)
+    return maybe_value if maybe_value is not None else float("-inf")
+
+
+def reduce_business_overview_kpi_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total_gmv = _sum_present_values(rows, "gmv")
+    total_orders_raw = _sum_present_values(rows, "order_count")
+    total_visitors_raw = _sum_present_values(rows, "visitor_count")
+    total_items = _sum_present_values(rows, "total_items")
+    total_profit = _sum_present_values(rows, "profit")
+
+    total_orders = int(total_orders_raw) if total_orders_raw is not None else None
+    total_visitors = int(total_visitors_raw) if total_visitors_raw is not None else None
+
+    if total_orders is None or total_visitors is None:
+        conversion_rate = None
+    elif total_visitors > 0:
+        conversion_rate = round((total_orders * 100.0 / total_visitors), 2)
+    elif total_visitors == 0 and total_orders == 0:
+        conversion_rate = 0
+    else:
+        conversion_rate = None
+
+    if total_orders is None or total_gmv is None:
+        avg_order_value = None
+    elif total_orders > 0:
+        avg_order_value = round((total_gmv / total_orders), 2)
+    elif total_orders == 0 and total_gmv == 0:
+        avg_order_value = 0
+    else:
+        avg_order_value = None
+
+    if total_orders is None or total_items is None:
+        attach_rate = None
+    elif total_orders > 0:
+        attach_rate = round((total_items / total_orders), 2)
+    elif total_orders == 0 and total_items == 0:
+        attach_rate = 0
+    else:
+        attach_rate = None
 
     return {
-        "gmv": round(total_gmv, 2),
+        "gmv": _round_or_none(total_gmv, 2),
         "order_count": total_orders,
         "visitor_count": total_visitors,
         "conversion_rate": conversion_rate,
         "avg_order_value": avg_order_value,
         "attach_rate": attach_rate,
         "labor_efficiency": 0,
-        "profit": round(total_profit, 2),
+        "profit": _round_or_none(total_profit, 2),
     }
 
 
 def _change_pct(current: float, previous: float) -> float | None:
+    if current is None or previous is None:
+        return None
     if previous == 0:
         return None
     return round((current - previous) * 100.0 / previous, 2)
@@ -60,37 +110,41 @@ def reduce_business_overview_comparison_rows(
     )
     metrics: dict[str, dict[str, Any]] = {}
     for name in metric_names:
-        today = _to_float(current_row.get(name))
-        previous = _to_float(previous_row.get(name))
-        average = _to_float(average_row.get(name))
+        today = _to_optional_float(current_row.get(name))
+        previous = _to_optional_float(previous_row.get(name))
+        average = _to_optional_float(average_row.get(name))
         metrics[name] = {
-            "today": round(today, 2),
-            "yesterday": round(previous, 2),
-            "average": round(average, 2),
+            "today": _round_or_none(today, 2),
+            "yesterday": _round_or_none(previous, 2),
+            "average": _round_or_none(average, 2),
             "change": _change_pct(today, previous),
         }
 
-    target_sales_amount = _to_float(current_row.get("target_sales_amount"))
-    target_sales_quantity = _to_float(current_row.get("target_sales_quantity"))
-    achievement_rate = (
-        round(metrics["sales_amount"]["today"] * 100.0 / target_sales_amount, 2)
-        if target_sales_amount
-        else 0
-    )
+    target_sales_amount = _to_optional_float(current_row.get("target_sales_amount"))
+    target_sales_quantity = _to_optional_float(current_row.get("target_sales_quantity"))
+    if target_sales_amount is None or metrics["sales_amount"]["today"] is None:
+        achievement_rate = None
+    elif target_sales_amount > 0:
+        achievement_rate = round(metrics["sales_amount"]["today"] * 100.0 / target_sales_amount, 2)
+    elif target_sales_amount == 0 and metrics["sales_amount"]["today"] == 0:
+        achievement_rate = 0
+    else:
+        achievement_rate = None
 
     return {
         "metrics": metrics,
         "target": {
-            "sales_amount": round(target_sales_amount, 2),
-            "sales_quantity": round(target_sales_quantity, 2),
+            "sales_amount": _round_or_none(target_sales_amount, 2),
+            "sales_quantity": _round_or_none(target_sales_quantity, 2),
             "achievement_rate": achievement_rate,
         },
     }
 
 
 def aggregate_comparison_source_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    def _sum(name: str) -> float:
-        return round(sum(_to_float(row.get(name)) for row in rows), 2)
+    def _sum(name: str) -> float | None:
+        value = _sum_present_values(rows, name)
+        return _round_or_none(value, 2)
 
     sales_amount = _sum("sales_amount")
     sales_quantity = _sum("sales_quantity")
@@ -99,9 +153,25 @@ def aggregate_comparison_source_rows(rows: list[dict[str, Any]]) -> dict[str, An
     target_sales_amount = _sum("target_sales_amount")
     target_sales_quantity = _sum("target_sales_quantity")
 
-    conversion_rate = round((sales_quantity * 100.0 / traffic), 2) if traffic else 0
-    avg_order_value = round((sales_amount / sales_quantity), 2) if sales_quantity else 0
-    attach_rate = 0
+    if traffic is None or sales_quantity is None:
+        conversion_rate = None
+    elif traffic > 0:
+        conversion_rate = round((sales_quantity * 100.0 / traffic), 2)
+    elif traffic == 0 and sales_quantity == 0:
+        conversion_rate = 0
+    else:
+        conversion_rate = None
+
+    if sales_amount is None or sales_quantity is None:
+        avg_order_value = None
+    elif sales_quantity > 0:
+        avg_order_value = round((sales_amount / sales_quantity), 2)
+    elif sales_quantity == 0 and sales_amount == 0:
+        avg_order_value = 0
+    else:
+        avg_order_value = None
+
+    attach_rate = None
 
     return {
         "sales_amount": sales_amount,
@@ -123,12 +193,12 @@ def rank_inventory_backlog_rows(
     filtered = [
         dict(row)
         for row in rows
-        if _to_float(row.get("estimated_turnover_days")) >= min_days
+        if (_to_optional_float(row.get("estimated_turnover_days")) or float("-inf")) >= min_days
     ]
     filtered.sort(
         key=lambda row: (
-            _to_float(row.get("inventory_value")),
-            _to_float(row.get("estimated_turnover_days")),
+            _sort_numeric(row.get("inventory_value")),
+            _sort_numeric(row.get("estimated_turnover_days")),
         ),
         reverse=True,
     )
@@ -139,7 +209,7 @@ def rank_inventory_backlog_rows(
 
 def rank_shop_racing_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ordered = [dict(row) for row in rows]
-    ordered.sort(key=lambda row: (_to_float(row.get("gmv")), _to_float(row.get("order_count"))), reverse=True)
+    ordered.sort(key=lambda row: (_sort_numeric(row.get("gmv")), _sort_numeric(row.get("order_count"))), reverse=True)
     for index, row in enumerate(ordered, start=1):
         row["rank"] = index
     return ordered
@@ -148,25 +218,49 @@ def rank_shop_racing_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def rank_traffic_rows(rows: list[dict[str, Any]], dimension: str = "visitor") -> list[dict[str, Any]]:
     ordered = [dict(row) for row in rows]
     if dimension == "pv":
-        ordered.sort(key=lambda row: _to_float(row.get("page_views")), reverse=True)
+        ordered.sort(key=lambda row: _sort_numeric(row.get("page_views")), reverse=True)
     else:
-        ordered.sort(key=lambda row: _to_float(row.get("visitor_count")), reverse=True)
+        ordered.sort(key=lambda row: _sort_numeric(row.get("visitor_count")), reverse=True)
     for index, row in enumerate(ordered, start=1):
         row["rank"] = index
     return ordered
 
 
 def reduce_annual_summary_kpi_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    total_gmv = sum(_to_float(row.get("gmv")) for row in rows)
-    total_cost = sum(_to_float(row.get("total_cost")) for row in rows)
-    total_profit = sum(_to_float(row.get("profit")) for row in rows)
-    gross_margin = round(total_profit * 100.0 / total_gmv, 2) if total_gmv else 0
-    net_margin = round((total_profit - total_cost) * 100.0 / total_gmv, 2) if total_gmv else 0
-    roi = round((total_profit - total_cost) / total_cost, 2) if total_cost else 0
+    total_gmv = _sum_present_values(rows, "gmv")
+    total_cost = _sum_present_values(rows, "total_cost")
+    total_profit = _sum_present_values(rows, "profit")
+
+    if total_gmv is None or total_profit is None:
+        gross_margin = None
+    elif total_gmv > 0:
+        gross_margin = round(total_profit * 100.0 / total_gmv, 2)
+    elif total_gmv == 0 and total_profit == 0:
+        gross_margin = 0
+    else:
+        gross_margin = None
+
+    if total_gmv is None or total_profit is None or total_cost is None:
+        net_margin = None
+    elif total_gmv > 0:
+        net_margin = round((total_profit - total_cost) * 100.0 / total_gmv, 2)
+    elif total_gmv == 0 and total_profit == 0 and total_cost == 0:
+        net_margin = 0
+    else:
+        net_margin = None
+
+    if total_cost is None or total_profit is None:
+        roi = None
+    elif total_cost > 0:
+        roi = round((total_profit - total_cost) / total_cost, 2)
+    elif total_cost == 0 and total_profit == 0:
+        roi = 0
+    else:
+        roi = None
     return {
-        "gmv": round(total_gmv, 2),
-        "total_cost": round(total_cost, 2),
-        "profit": round(total_profit, 2),
+        "gmv": _round_or_none(total_gmv, 2),
+        "total_cost": _round_or_none(total_cost, 2),
+        "profit": _round_or_none(total_profit, 2),
         "gross_margin": gross_margin,
         "net_margin": net_margin,
         "roi": roi,
@@ -205,8 +299,8 @@ class PostgresqlDashboardService:
                             text(
                                 """
                                 SELECT
-                                    COALESCE(SUM(tb.target_amount), 0) AS target_amount,
-                                    COALESCE(SUM(tb.target_quantity), 0) AS target_quantity
+                                    SUM(tb.target_amount) AS target_amount,
+                                    SUM(tb.target_quantity) AS target_quantity
                                 FROM a_class.target_breakdown tb
                                 INNER JOIN a_class.sales_targets st ON st.id = tb.target_id
                                 WHERE st.status = 'active'
@@ -228,8 +322,8 @@ class PostgresqlDashboardService:
                             text(
                                 """
                                 SELECT
-                                    COALESCE(SUM(target_sales_amount), 0) AS target_amount,
-                                    COALESCE(SUM(target_quantity), 0) AS target_quantity
+                                    SUM(target_sales_amount) AS target_amount,
+                                    SUM(target_quantity) AS target_quantity
                                 FROM a_class.sales_targets_a
                                 WHERE year_month = :year_month
                                 """
@@ -242,8 +336,8 @@ class PostgresqlDashboardService:
                             text(
                                 """
                                 SELECT
-                                    COALESCE(SUM(target_amount), 0) AS target_amount,
-                                    COALESCE(SUM(target_quantity), 0) AS target_quantity
+                                    SUM(target_amount) AS target_amount,
+                                    SUM(target_quantity) AS target_quantity
                                 FROM a_class.sales_targets
                                 WHERE status = 'active'
                                   AND period_start <= :period_start
@@ -259,8 +353,8 @@ class PostgresqlDashboardService:
                                 text(
                                     """
                                     SELECT
-                                        COALESCE(SUM(target_sales_amount), 0) AS target_amount,
-                                        COALESCE(SUM(target_quantity), 0) AS target_quantity
+                                        SUM(target_sales_amount) AS target_amount,
+                                        SUM(target_quantity) AS target_quantity
                                     FROM a_class.sales_targets_a
                                     WHERE year_month = :year_month
                                     """
@@ -299,8 +393,8 @@ class PostgresqlDashboardService:
             else:
                 query = """
                     SELECT
-                        COALESCE(SUM(tb.target_amount), 0) AS target_amount,
-                        COALESCE(SUM(tb.target_quantity), 0) AS target_quantity
+                        SUM(tb.target_amount) AS target_amount,
+                        SUM(tb.target_quantity) AS target_quantity
                     FROM a_class.target_breakdown tb
                     INNER JOIN a_class.sales_targets st ON st.id = tb.target_id
                     WHERE st.status = 'active'
@@ -320,8 +414,8 @@ class PostgresqlDashboardService:
 
             row = result.fetchone()
             return {
-                "target_amount": _to_float(row[0]) if row else 0.0,
-                "target_quantity": _to_float(row[1]) if row else 0.0,
+                "target_amount": _to_optional_float(row[0]) if row else None,
+                "target_quantity": _to_optional_float(row[1]) if row else None,
             }
 
     async def _load_operating_expenses_summary(
@@ -334,7 +428,7 @@ class PostgresqlDashboardService:
                 result = await session.execute(
                     text(
                         """
-                        SELECT COALESCE(SUM(rent + salary + utilities + other_costs), 0)
+                        SELECT SUM(rent + salary + utilities + other_costs)
                         FROM a_class.operating_costs
                         WHERE year_month = :year_month
                         """
@@ -358,7 +452,7 @@ class PostgresqlDashboardService:
                     await session.rollback()
                     return None
             value = result.scalar_one_or_none()
-            return _to_float(value)
+            return _to_optional_float(value)
 
     async def get_business_overview_kpi(
         self,
@@ -514,17 +608,20 @@ class PostgresqlDashboardService:
         granularity: str,
         target_date: str,
         group_by: str = "shop",
+        platform: str | None = None,
     ) -> list[dict[str, Any]]:
         period_key = _normalize_period_start(target_date)
-        rows = await self._fetch_rows(
-            """
+        query = """
             SELECT granularity, period_key, platform_code, shop_id, gmv, order_count, avg_order_value, attach_rate, profit, target_amount, achievement_rate
             FROM api.business_overview_shop_racing_module
             WHERE granularity = :granularity
               AND period_key = :period_key
-            """,
-            {"granularity": granularity, "period_key": period_key},
-        )
+            """
+        params = {"granularity": granularity, "period_key": period_key}
+        if platform:
+            query += " AND platform_code = :platform_code"
+            params["platform_code"] = platform
+        rows = await self._fetch_rows(query, params)
 
         if group_by in ("platform", "account"):
             grouped: dict[str, dict[str, Any]] = {}
@@ -544,9 +641,9 @@ class PostgresqlDashboardService:
                         "achievement_rate": 0.0,
                     },
                 )
-                grouped[key]["gmv"] += _to_float(row.get("gmv"))
-                grouped[key]["order_count"] += _to_float(row.get("order_count"))
-                grouped[key]["target_amount"] += _to_float(row.get("target_amount"))
+                grouped[key]["gmv"] += _to_optional_float(row.get("gmv")) or 0.0
+                grouped[key]["order_count"] += _to_optional_float(row.get("order_count")) or 0.0
+                grouped[key]["target_amount"] += _to_optional_float(row.get("target_amount")) or 0.0
             for value in grouped.values():
                 if value["order_count"]:
                     value["avg_order_value"] = round(value["gmv"] / value["order_count"], 2)
@@ -559,13 +656,13 @@ class PostgresqlDashboardService:
                 "name": row.get("shop_id") or "unknown",
                 "platform_code": row.get("platform_code"),
                 "shop_id": row.get("shop_id") or "unknown",
-                "gmv": _to_float(row.get("gmv")),
-                "order_count": _to_float(row.get("order_count")),
-                "avg_order_value": _to_float(row.get("avg_order_value")),
-                "attach_rate": _to_float(row.get("attach_rate")),
-                "profit": _to_float(row.get("profit")),
-                "target_amount": _to_float(row.get("target_amount")),
-                "achievement_rate": _to_float(row.get("achievement_rate")),
+                "gmv": _to_optional_float(row.get("gmv")),
+                "order_count": _to_optional_float(row.get("order_count")),
+                "avg_order_value": _to_optional_float(row.get("avg_order_value")),
+                "attach_rate": _to_optional_float(row.get("attach_rate")),
+                "profit": _to_optional_float(row.get("profit")),
+                "target_amount": _to_optional_float(row.get("target_amount")),
+                "achievement_rate": _to_optional_float(row.get("achievement_rate")),
             }
             for row in rows
         ]
@@ -576,25 +673,28 @@ class PostgresqlDashboardService:
         granularity: str,
         target_date: str,
         dimension: str = "visitor",
+        platform: str | None = None,
     ) -> list[dict[str, Any]]:
         period_key = _normalize_period_start(target_date)
-        rows = await self._fetch_rows(
-            """
+        query = """
             SELECT granularity, period_key, platform_code, shop_id, visitor_count, page_views, conversion_rate
             FROM api.business_overview_traffic_ranking_module
             WHERE granularity = :granularity
               AND period_key = :period_key
-            """,
-            {"granularity": granularity, "period_key": period_key},
-        )
+            """
+        params = {"granularity": granularity, "period_key": period_key}
+        if platform:
+            query += " AND platform_code = :platform_code"
+            params["platform_code"] = platform
+        rows = await self._fetch_rows(query, params)
         normalized_rows = [
             {
                 "name": row.get("shop_id") or row.get("platform_code") or "unknown",
                 "platform_code": row.get("platform_code"),
                 "shop_id": row.get("shop_id") or "unknown",
-                "visitor_count": _to_float(row.get("visitor_count")),
-                "page_views": _to_float(row.get("page_views")),
-                "conversion_rate": _to_float(row.get("conversion_rate")),
+                "visitor_count": _to_optional_float(row.get("visitor_count")),
+                "page_views": _to_optional_float(row.get("page_views")),
+                "conversion_rate": _to_optional_float(row.get("conversion_rate")),
             }
             for row in rows
         ]
@@ -618,20 +718,23 @@ class PostgresqlDashboardService:
 
         rows = await self._fetch_rows(query, params)
         total = {
-            "monthly_target": 0.0,
-            "monthly_total_achieved": 0.0,
-            "today_sales": 0.0,
-            "monthly_achievement_rate": 0.0,
-            "time_gap": 0.0,
-            "estimated_gross_profit": 0.0,
-            "estimated_expenses": 0.0,
-            "operating_result": 0.0,
-            "monthly_order_count": 0.0,
-            "today_order_count": 0.0,
+            "monthly_target": None,
+            "monthly_total_achieved": None,
+            "today_sales": None,
+            "monthly_achievement_rate": None,
+            "time_gap": None,
+            "estimated_gross_profit": None,
+            "estimated_expenses": None,
+            "operating_result": None,
+            "monthly_order_count": None,
+            "today_order_count": None,
         }
         for row in rows:
             for key in total.keys():
-                total[key] += _to_float(row.get(key))
+                value = _to_optional_float(row.get(key))
+                if value is None:
+                    continue
+                total[key] = value if total[key] is None else total[key] + value
 
         month_end = (period_month + timedelta(days=31)).replace(day=1) - timedelta(days=1)
         target_summary = await self._load_target_summary(
@@ -640,21 +743,35 @@ class PostgresqlDashboardService:
             period_end=month_end,
             platform=platform,
         )
-        total["monthly_target"] = round(target_summary["target_amount"], 2)
+        if target_summary["target_amount"] is not None:
+            total["monthly_target"] = round(target_summary["target_amount"], 2)
         loaded_expenses = await self._load_operating_expenses_summary(period_month)
-        if loaded_expenses is not None and total["estimated_expenses"] == 0:
+        if loaded_expenses is not None and total["estimated_expenses"] in (None, 0, 0.0):
             total["estimated_expenses"] = round(loaded_expenses, 2)
+        if total["estimated_gross_profit"] is not None and total["estimated_expenses"] is not None:
             total["operating_result"] = round(total["estimated_gross_profit"] - total["estimated_expenses"], 2)
 
-        total["monthly_achievement_rate"] = (
-            round(total["monthly_total_achieved"] * 100.0 / total["monthly_target"], 2)
-            if total["monthly_target"]
-            else round(total["monthly_achievement_rate"], 2)
-        )
-        total["time_gap"] = round(total["time_gap"], 2)
+        if total["monthly_total_achieved"] is not None and total["monthly_target"] is not None:
+            if total["monthly_target"] > 0:
+                total["monthly_achievement_rate"] = round(
+                    total["monthly_total_achieved"] * 100.0 / total["monthly_target"], 2
+                )
+            elif total["monthly_target"] == 0 and total["monthly_total_achieved"] == 0:
+                total["monthly_achievement_rate"] = 0
+            else:
+                total["monthly_achievement_rate"] = None
+        else:
+            total["monthly_achievement_rate"] = _round_or_none(total["monthly_achievement_rate"], 2)
+        total["time_gap"] = _round_or_none(total["time_gap"], 2)
+        operating_result_missing = total["operating_result"] is None
+        if operating_result_missing:
+            total["operating_result"] = float("-inf")
         total["operating_result_text"] = "盈利" if total["operating_result"] > 0 else "亏损"
-        total["monthly_order_count"] = int(total["monthly_order_count"])
-        total["today_order_count"] = int(total["today_order_count"])
+        total["monthly_order_count"] = int(total["monthly_order_count"]) if total["monthly_order_count"] is not None else None
+        total["today_order_count"] = int(total["today_order_count"]) if total["today_order_count"] is not None else None
+        if operating_result_missing:
+            total["operating_result"] = None
+            total["operating_result_text"] = None
         return total
 
     async def get_annual_summary_kpi(
@@ -755,8 +872,8 @@ class PostgresqlDashboardService:
             result = await db.execute(
                 text(
                     f"""
-                    SELECT COALESCE(SUM(target_sales_amount), 0) AS target_gmv,
-                           COALESCE(SUM(target_quantity), 0) AS target_orders
+                    SELECT SUM(target_sales_amount) AS target_gmv,
+                           SUM(target_quantity) AS target_orders
                     FROM a_class.sales_targets_a
                     WHERE {year_month_filter}
                     """
@@ -791,12 +908,19 @@ class PostgresqlDashboardService:
                     db_params,
                 )
         row = result.fetchone()
-        target_gmv = float(row[0]) if row and row[0] is not None else 0.0
-        target_orders = int(row[1]) if row and row[1] is not None else 0
+        target_gmv = float(row[0]) if row and row[0] is not None else None
+        target_orders = int(row[1]) if row and row[1] is not None else None
 
         achieved = await self.get_annual_summary_kpi(granularity=granularity, period=period)
-        achieved_gmv = float(achieved.get("gmv") or 0)
-        achievement_rate_gmv = round(achieved_gmv / target_gmv * 100, 2) if target_gmv else None
+        achieved_gmv = achieved.get("gmv")
+        if target_gmv is None or achieved_gmv is None:
+            achievement_rate_gmv = None
+        elif target_gmv > 0:
+            achievement_rate_gmv = round(achieved_gmv / target_gmv * 100, 2)
+        elif target_gmv == 0 and achieved_gmv == 0:
+            achievement_rate_gmv = 0
+        else:
+            achievement_rate_gmv = None
 
         return {
             "target_gmv": target_gmv,

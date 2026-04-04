@@ -19,8 +19,7 @@ export default {
    * @param {Object} params - 查询参数
    * @param {string} params.start_date - 开始日期
    * @param {string} params.end_date - 结束日期
-   * @param {string} params.platforms - 平台代码（逗号分隔）
-   * @param {string} params.shops - 店铺ID（逗号分隔）
+   * @param {string} params.platform - 平台代码
    * @returns {Promise} KPI数据
    */
   async queryBusinessOverviewKpi(params = {}) {
@@ -32,8 +31,7 @@ export default {
    * @param {Object} params - 查询参数
    * @param {string} params.granularity - 时间粒度（daily/weekly/monthly）
    * @param {string} params.date - 日期
-   * @param {string} params.platforms - 平台代码（逗号分隔）
-   * @param {string} params.shops - 店铺ID（逗号分隔）
+   * @param {string} params.platform - 平台代码
    * @returns {Promise} 对比数据
    */
   async queryBusinessOverviewComparison(params = {}) {
@@ -46,7 +44,7 @@ export default {
    * @param {string} params.granularity - 时间粒度
    * @param {string} params.date - 日期
    * @param {string} params.group_by - 分组维度（shop/account）
-   * @param {string} params.platforms - 平台代码（逗号分隔）
+   * @param {string} params.platform - 平台代码
    * @returns {Promise} 店铺赛马数据
    */
   async queryBusinessOverviewShopRacing(params = {}) {
@@ -59,8 +57,7 @@ export default {
    * @param {string} params.granularity - 时间粒度
    * @param {string} params.dimension - 维度（shop/account）
    * @param {string} params.date_value - 日期值
-   * @param {string} params.platforms - 平台代码（逗号分隔）
-   * @param {string} params.shops - 店铺ID（逗号分隔）
+   * @param {string} params.platform - 平台代码
    * @returns {Promise} 流量排名数据
    */
   async queryBusinessOverviewTrafficRanking(params = {}) {
@@ -71,8 +68,7 @@ export default {
    * 查询库存积压数据
    * @param {Object} params - 查询参数
    * @param {number} params.days - 天数
-   * @param {string} params.platforms - 平台代码（逗号分隔）
-   * @param {string} params.shops - 店铺ID（逗号分隔）
+   * @param {string} params.platform - 平台代码
    * @returns {Promise} 库存积压数据
    */
   async queryBusinessOverviewInventoryBacklog(params = {}) {

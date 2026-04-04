@@ -3,8 +3,8 @@ CREATE SCHEMA IF NOT EXISTS api;
 CREATE OR REPLACE VIEW api.annual_summary_trend_module AS
 SELECT
     period_month,
-    COALESCE(SUM(gmv), 0) AS gmv,
-    COALESCE(SUM(total_cost), 0) AS total_cost,
-    COALESCE(SUM(profit), 0) AS profit
+    CASE WHEN COUNT(gmv) = COUNT(*) THEN SUM(gmv) END AS gmv,
+    CASE WHEN COUNT(total_cost) = COUNT(*) THEN SUM(total_cost) END AS total_cost,
+    CASE WHEN COUNT(profit) = COUNT(*) THEN SUM(profit) END AS profit
 FROM mart.annual_summary_shop_month
 GROUP BY period_month;

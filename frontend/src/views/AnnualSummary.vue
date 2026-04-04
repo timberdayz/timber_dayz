@@ -209,9 +209,9 @@ const costData = ref([
 ])
 
 function formatChange(num) {
-  if (num === null || num === undefined) return '0.00%'
+  if (num === null || num === undefined) return '--'
   const n = Number(num)
-  if (Number.isNaN(n)) return '0.00%'
+  if (Number.isNaN(n)) return '--'
   const prefix = n > 0 ? '+' : ''
   return `${prefix}${n.toFixed(2)}%`
 }
@@ -224,24 +224,24 @@ function getChangeType(num) {
 }
 
 function formatInteger(n) {
-  if (n === null || n === undefined) return '0'
+  if (n === null || n === undefined) return '--'
   const num = Number(n)
-  return Number.isNaN(num) ? '0' : num.toLocaleString()
+  return Number.isNaN(num) ? '--' : num.toLocaleString()
 }
 
 function formatCurrency(n) {
-  if (n === null || n === undefined) return '0.00'
+  if (n === null || n === undefined) return '--'
   const num = Number(n)
-  if (Number.isNaN(num)) return '0.00'
+  if (Number.isNaN(num)) return '--'
   if (num >= 1e8) return (num / 1e8).toFixed(2) + '亿'
   if (num >= 1e4) return (num / 1e4).toFixed(2) + '万'
   return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function ratioDisplay(val) {
-  if (val === null || val === undefined) return '0.00%'
+  if (val === null || val === undefined) return 'N/A'
   const num = Number(val)
-  if (Number.isNaN(num)) return '0.00%'
+  if (Number.isNaN(num)) return 'N/A'
   return (num * 100).toFixed(2) + '%'
 }
 
@@ -272,41 +272,41 @@ async function loadData() {
     const getType = (v) => getChangeType(v)
 
     const cmpLabel = granularity.value === 'monthly' ? '较上月 ' : '较去年 '
-    kpiData.value[0].value = data.conversion_rate != null ? `${Number(data.conversion_rate).toFixed(2)}%` : '0.00%'
+    kpiData.value[0].value = data.conversion_rate != null ? `${Number(data.conversion_rate).toFixed(2)}%` : 'N/A'
     kpiData.value[0].change = cmpLabel + formatChangeVal(data.conversion_rate_change)
     kpiData.value[0].changeType = getType(data.conversion_rate_change)
 
     const visitorCount = data.visitor_count ?? data.traffic?.current
-    kpiData.value[1].value = visitorCount != null ? formatInteger(visitorCount) : '0'
+    kpiData.value[1].value = visitorCount != null ? formatInteger(visitorCount) : '--'
     kpiData.value[1].change = cmpLabel + formatChangeVal(data.visitor_count_change)
     kpiData.value[1].changeType = getType(data.visitor_count_change)
 
     const aov = data.avg_order_value ?? data.average_order_value?.current
-    kpiData.value[2].value = aov != null ? formatCurrency(aov) : '0.00'
+    kpiData.value[2].value = aov != null ? formatCurrency(aov) : '--'
     kpiData.value[2].change = cmpLabel + formatChangeVal(data.avg_order_value_change)
     kpiData.value[2].changeType = getType(data.avg_order_value_change)
 
-    kpiData.value[3].value = data.gmv != null ? formatCurrency(data.gmv) : '0.00'
+    kpiData.value[3].value = data.gmv != null ? formatCurrency(data.gmv) : '--'
     kpiData.value[3].change = cmpLabel + formatChangeVal(data.gmv_change)
     kpiData.value[3].changeType = getType(data.gmv_change)
 
-    kpiData.value[4].value = data.order_count != null ? formatInteger(data.order_count) : '0'
+    kpiData.value[4].value = data.order_count != null ? formatInteger(data.order_count) : '--'
     kpiData.value[4].change = cmpLabel + formatChangeVal(data.order_count_change)
     kpiData.value[4].changeType = getType(data.order_count_change)
 
     const attachRate = data.attach_rate ?? data.attach_rate_obj?.current
-    kpiData.value[5].value = attachRate != null ? Number(attachRate).toFixed(2) : '0.00'
+    kpiData.value[5].value = attachRate != null ? Number(attachRate).toFixed(2) : '--'
     kpiData.value[5].change = cmpLabel + formatChangeVal(data.attach_rate_change ?? data.attach_rate_obj?.change)
     kpiData.value[5].changeType = getType(data.attach_rate_change ?? data.attach_rate_obj?.change)
 
     const laborEff = data.labor_efficiency ?? data.labor_efficiency_obj?.current
-    kpiData.value[6].value = laborEff != null ? formatCurrency(laborEff) : '0.00'
+    kpiData.value[6].value = laborEff != null ? formatCurrency(laborEff) : '--'
     kpiData.value[6].change = cmpLabel + formatChangeVal(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
     kpiData.value[6].changeType = getType(data.labor_efficiency_change ?? data.labor_efficiency_obj?.change)
 
-    costData.value[0].value = data.total_cost != null ? formatCurrency(data.total_cost) : '0.00'
+    costData.value[0].value = data.total_cost != null ? formatCurrency(data.total_cost) : '--'
     costData.value[0].sub = ''
-    costData.value[1].value = data.gmv != null ? formatCurrency(data.gmv) : '0.00'
+    costData.value[1].value = data.gmv != null ? formatCurrency(data.gmv) : '--'
     costData.value[1].sub = ''
     costData.value[2].value = ratioDisplayStrict(data.cost_to_revenue_ratio)
     costData.value[2].sub = '总成本/GMV'
@@ -361,10 +361,10 @@ async function loadExtensionData() {
   platformShareData.value = shareResult.status === 'fulfilled' ? unwrapList(shareResult.value) : []
   const tc = targetResult.status === 'fulfilled' ? unwrapTarget(targetResult.value) : {}
   targetCompletion.value = {
-    target_gmv: tc.target_gmv ?? 0,
+    target_gmv: tc.target_gmv ?? null,
     achieved_gmv: tc.achieved_gmv ?? null,
     achievement_rate_gmv: tc.achievement_rate_gmv ?? null,
-    target_orders: tc.target_orders ?? 0,
+    target_orders: tc.target_orders ?? null,
     target_profit: tc.target_profit ?? null,
     achieved_profit: tc.achieved_profit ?? null,
     achievement_rate_profit: tc.achievement_rate_profit ?? null

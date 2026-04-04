@@ -15,7 +15,7 @@ BEGIN
             SELECT
                 to_date(year_month || '-01', 'YYYY-MM-DD') AS period_month,
                 shop_id AS shop_id,
-                COALESCE(SUM(rent + salary + utilities + other_costs), 0) AS total_cost
+                SUM(rent + salary + utilities + other_costs) AS total_cost
             FROM a_class.operating_costs
             GROUP BY to_date(year_month || '-01', 'YYYY-MM-DD'), shop_id
         )
@@ -30,21 +30,24 @@ BEGIN
             m.avg_order_value,
             m.attach_rate,
             m.profit,
-            COALESCE(c.total_cost, 0) AS total_cost,
+            c.total_cost,
             CASE
-                WHEN COALESCE(m.gmv, 0) > 0
-                THEN ROUND(COALESCE(m.profit, 0)::numeric * 100.0 / m.gmv, 2)
-                ELSE 0
+                WHEN m.gmv IS NULL OR m.profit IS NULL THEN NULL
+                WHEN m.gmv > 0 THEN ROUND(m.profit::numeric * 100.0 / m.gmv, 2)
+                WHEN m.gmv = 0 AND m.profit = 0 THEN 0
+                ELSE NULL
             END AS gross_margin,
             CASE
-                WHEN COALESCE(m.gmv, 0) > 0
-                THEN ROUND((COALESCE(m.profit, 0) - COALESCE(c.total_cost, 0))::numeric * 100.0 / m.gmv, 2)
-                ELSE 0
+                WHEN m.gmv IS NULL OR m.profit IS NULL OR c.total_cost IS NULL THEN NULL
+                WHEN m.gmv > 0 THEN ROUND((m.profit - c.total_cost)::numeric * 100.0 / m.gmv, 2)
+                WHEN m.gmv = 0 AND m.profit = 0 AND c.total_cost = 0 THEN 0
+                ELSE NULL
             END AS net_margin,
             CASE
-                WHEN COALESCE(c.total_cost, 0) > 0
-                THEN ROUND((COALESCE(m.profit, 0) - COALESCE(c.total_cost, 0))::numeric / c.total_cost, 2)
-                ELSE 0
+                WHEN m.profit IS NULL OR c.total_cost IS NULL THEN NULL
+                WHEN c.total_cost > 0 THEN ROUND((m.profit - c.total_cost)::numeric / c.total_cost, 2)
+                WHEN c.total_cost = 0 AND m.profit = 0 THEN 0
+                ELSE NULL
             END AS roi
         FROM mart.shop_month_kpi m
         LEFT JOIN monthly_costs c
@@ -58,7 +61,7 @@ BEGIN
             SELECT
                 to_date("年月" || '-01', 'YYYY-MM-DD') AS period_month,
                 "店铺ID" AS shop_id,
-                COALESCE(SUM("租金" + "工资" + "水电费" + "其他成本"), 0) AS total_cost
+                SUM("租金" + "工资" + "水电费" + "其他成本") AS total_cost
             FROM a_class.operating_costs
             GROUP BY to_date("年月" || '-01', 'YYYY-MM-DD'), "店铺ID"
         )
@@ -73,21 +76,24 @@ BEGIN
             m.avg_order_value,
             m.attach_rate,
             m.profit,
-            COALESCE(c.total_cost, 0) AS total_cost,
+            c.total_cost,
             CASE
-                WHEN COALESCE(m.gmv, 0) > 0
-                THEN ROUND(COALESCE(m.profit, 0)::numeric * 100.0 / m.gmv, 2)
-                ELSE 0
+                WHEN m.gmv IS NULL OR m.profit IS NULL THEN NULL
+                WHEN m.gmv > 0 THEN ROUND(m.profit::numeric * 100.0 / m.gmv, 2)
+                WHEN m.gmv = 0 AND m.profit = 0 THEN 0
+                ELSE NULL
             END AS gross_margin,
             CASE
-                WHEN COALESCE(m.gmv, 0) > 0
-                THEN ROUND((COALESCE(m.profit, 0) - COALESCE(c.total_cost, 0))::numeric * 100.0 / m.gmv, 2)
-                ELSE 0
+                WHEN m.gmv IS NULL OR m.profit IS NULL OR c.total_cost IS NULL THEN NULL
+                WHEN m.gmv > 0 THEN ROUND((m.profit - c.total_cost)::numeric * 100.0 / m.gmv, 2)
+                WHEN m.gmv = 0 AND m.profit = 0 AND c.total_cost = 0 THEN 0
+                ELSE NULL
             END AS net_margin,
             CASE
-                WHEN COALESCE(c.total_cost, 0) > 0
-                THEN ROUND((COALESCE(m.profit, 0) - COALESCE(c.total_cost, 0))::numeric / c.total_cost, 2)
-                ELSE 0
+                WHEN m.profit IS NULL OR c.total_cost IS NULL THEN NULL
+                WHEN c.total_cost > 0 THEN ROUND((m.profit - c.total_cost)::numeric / c.total_cost, 2)
+                WHEN c.total_cost = 0 AND m.profit = 0 THEN 0
+                ELSE NULL
             END AS roi
         FROM mart.shop_month_kpi m
         LEFT JOIN monthly_costs c
