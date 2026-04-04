@@ -135,10 +135,98 @@ const routes = [
   {
     path: '/inventory-management',
     name: 'InventoryManagement',
-    component: () => import('../views/InventoryManagement.vue'),
+    component: () => import('../views/inventory/InventoryBalances.vue'),
     meta: {
       title: '库存管理',
       icon: 'Box',
+      permission: 'inventory-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/inventory-overview',
+    name: 'InventoryOverview',
+    component: () => import('../views/InventoryOverview.vue'),
+    meta: {
+      title: '库存总览',
+      icon: 'DataBoard',
+      permission: 'inventory-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/inventory/ledger',
+    name: 'InventoryLedger',
+    component: () => import('../views/inventory/InventoryLedger.vue'),
+    meta: {
+      title: '库存流水',
+      icon: 'List',
+      permission: 'inventory-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/inventory/adjustments',
+    name: 'InventoryAdjustments',
+    component: () => import('../views/inventory/InventoryAdjustments.vue'),
+    meta: {
+      title: '库存调整',
+      icon: 'Edit',
+      permission: 'inventory-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/inventory/grns',
+    name: 'InventoryGrns',
+    component: () => import('../views/inventory/InventoryGrns.vue'),
+    meta: {
+      title: '入库单管理',
+      icon: 'Tickets',
+      permission: 'inventory-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/inventory/alerts',
+    name: 'InventoryAlerts',
+    component: () => import('../views/inventory/InventoryAlerts.vue'),
+    meta: {
+      title: '库存预警',
+      icon: 'Warning',
+      permission: 'inventory-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/inventory/reconciliation',
+    name: 'InventoryReconciliation',
+    component: () => import('../views/inventory/InventoryReconciliation.vue'),
+    meta: {
+      title: '库存对账',
+      icon: 'Switch',
+      permission: 'inventory-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/inventory/aging',
+    name: 'InventoryAging',
+    component: () => import('../views/inventory/InventoryAging.vue'),
+    meta: {
+      title: '搴撳瓨搴撻緞',
+      icon: 'Clock',
+      permission: 'inventory-management',
+      roles: ['admin', 'manager']
+    }
+  },
+  {
+    path: '/inventory/opening-balances',
+    name: 'InventoryOpeningBalances',
+    component: () => import('../views/inventory/InventoryOpeningBalances.vue'),
+    meta: {
+      title: '期初余额',
+      icon: 'Document',
       permission: 'inventory-management',
       roles: ['admin', 'manager']
     }

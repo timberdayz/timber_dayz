@@ -354,7 +354,7 @@ onMounted(() => {
 
 const loadStats = async () => {
   try {
-    const response = await api.get('/products/stats/platform-summary')
+    const response = await api.get('/inventory-overview/summary')
     
     // 响应拦截器已提取data字段，直接使用
     if (response) {
@@ -369,7 +369,7 @@ const loadProducts = async () => {
   loading.value = true
   
   try {
-    const response = await api.get('/products/products', {
+    const response = await api.get('/inventory-overview/products', {
       params: {
         platform: filters.platform || undefined,
         keyword: filters.keyword || undefined,
@@ -393,7 +393,7 @@ const loadProducts = async () => {
 
 const loadTopProducts = async () => {
   try {
-    const response = await api.get('/products/products', {
+    const response = await api.get('/inventory-overview/products', {
       params: {
         page: 1,
         page_size: 20
@@ -422,7 +422,7 @@ const loadTopProducts = async () => {
 
 const quickView = async (product) => {
   try {
-    const response = await api.get(`/products/products/${product.platform_sku}`, {
+    const response = await api.get(`/inventory-overview/products/${product.platform_sku}`, {
       params: {
         platform: product.platform_code,
         shop_id: product.shop_id

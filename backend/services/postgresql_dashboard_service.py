@@ -190,13 +190,36 @@ def rank_inventory_backlog_rows(
     rows: list[dict[str, Any]],
     min_days: int = 30,
 ) -> list[dict[str, Any]]:
+    def _classify_risk(row: dict[str, Any]) -> str:
+        turnover_days = _to_float(row.get("estimated_turnover_days"))
+        stagnant_count = int(_to_float(row.get("stagnant_snapshot_count")))
+        if turnover_days >= 60 or stagnant_count >= 3:
+            return "high"
+        if turnover_days >= 30 or stagnant_count >= 2:
+            return "medium"
+        return "low"
+
+    def _priority_score(row: dict[str, Any]) -> float:
+        if row.get("clearance_priority_score") is not None:
+            return _to_float(row.get("clearance_priority_score"))
+        return round(
+            _to_float(row.get("inventory_value")) * 0.5
+            + _to_float(row.get("estimated_stagnant_days")) * 10
+            + _to_float(row.get("estimated_turnover_days")) * 2,
+            2,
+        )
+
     filtered = [
         dict(row)
         for row in rows
         if (_to_optional_float(row.get("estimated_turnover_days")) or float("-inf")) >= min_days
     ]
+    for row in filtered:
+        row["risk_level"] = row.get("risk_level") or _classify_risk(row)
+        row["clearance_priority_score"] = _priority_score(row)
     filtered.sort(
         key=lambda row: (
+            _sort_numeric(row.get("clearance_priority_score")),
             _sort_numeric(row.get("inventory_value")),
             _sort_numeric(row.get("estimated_turnover_days")),
         ),
@@ -584,12 +607,36 @@ class PostgresqlDashboardService:
     async def get_business_overview_inventory_backlog(
         self,
         min_days: int = 30,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         rows = await self._fetch_rows(
             "SELECT * FROM api.business_overview_inventory_backlog_module",
             {},
         )
-        return rank_inventory_backlog_rows(rows, min_days=min_days)
+        summary_rows = await self._fetch_rows(
+            "SELECT * FROM api.inventory_backlog_summary_module",
+            {},
+        )
+        summary = summary_rows[0] if summary_rows else {}
+        total_value = _to_float(summary.get("total_value"))
+        backlog_30d_value = _to_float(summary.get("backlog_30d_value"))
+        backlog_60d_value = _to_float(summary.get("backlog_60d_value"))
+        backlog_90d_value = _to_float(summary.get("backlog_90d_value"))
+        return {
+            "summary": {
+                "total_value": round(total_value, 2),
+                "backlog_30d_value": round(backlog_30d_value, 2),
+                "backlog_60d_value": round(backlog_60d_value, 2),
+                "backlog_90d_value": round(backlog_90d_value, 2),
+                "backlog_30d_ratio": round(backlog_30d_value * 100.0 / total_value, 2) if total_value else 0,
+                "backlog_60d_ratio": round(backlog_60d_value * 100.0 / total_value, 2) if total_value else 0,
+                "backlog_90d_ratio": round(backlog_90d_value * 100.0 / total_value, 2) if total_value else 0,
+                "total_quantity": int(_to_float(summary.get("total_quantity"))),
+                "high_risk_sku_count": int(_to_float(summary.get("high_risk_sku_count"))),
+                "medium_risk_sku_count": int(_to_float(summary.get("medium_risk_sku_count"))),
+                "low_risk_sku_count": int(_to_float(summary.get("low_risk_sku_count"))),
+            },
+            "top_products": rank_inventory_backlog_rows(rows, min_days=min_days),
+        }
 
     async def get_clearance_ranking(
         self,

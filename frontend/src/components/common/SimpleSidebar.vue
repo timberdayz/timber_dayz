@@ -27,6 +27,11 @@
         <span class="menu-icon">📦</span>
         <span>库存管理</span>
       </el-menu-item>
+
+      <el-menu-item index="/inventory-overview">
+        <span class="menu-icon">📊</span>
+        <span>库存总览</span>
+      </el-menu-item>
       
       <el-menu-item index="/human-resources">
         <span class="menu-icon">👥</span>

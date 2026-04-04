@@ -129,17 +129,37 @@ def test_reduce_business_overview_comparison_rows_monthly():
 def test_rank_inventory_backlog_rows_filters_and_ranks():
     result = rank_inventory_backlog_rows(
         [
-            {"platform_code": "shopee", "inventory_value": 50, "estimated_turnover_days": 20},
-            {"platform_code": "tiktok", "inventory_value": 80, "estimated_turnover_days": 45},
-            {"platform_code": "shopee", "inventory_value": 60, "estimated_turnover_days": 60},
+            {"platform_code": "shopee", "inventory_value": 50, "estimated_turnover_days": 20, "estimated_stagnant_days": 0, "stagnant_snapshot_count": 0},
+            {"platform_code": "tiktok", "inventory_value": 80, "estimated_turnover_days": 45, "estimated_stagnant_days": 10, "stagnant_snapshot_count": 1},
+            {"platform_code": "shopee", "inventory_value": 60, "estimated_turnover_days": 60, "estimated_stagnant_days": 14, "stagnant_snapshot_count": 2},
         ],
         min_days=30,
     )
 
     assert len(result) == 2
-    assert result[0]["inventory_value"] == 80
+    assert result[0]["inventory_value"] == 60
     assert result[0]["rank"] == 1
     assert result[1]["rank"] == 2
+    assert "risk_level" in result[0]
+    assert "clearance_priority_score" in result[0]
+
+
+def test_rank_inventory_backlog_rows_uses_risk_and_priority_fields():
+    result = rank_inventory_backlog_rows(
+        [
+            {
+                "platform_code": "shopee",
+                "inventory_value": 100,
+                "estimated_turnover_days": 70,
+                "estimated_stagnant_days": 12,
+                "stagnant_snapshot_count": 3,
+            }
+        ],
+        min_days=30,
+    )
+
+    assert result[0]["risk_level"] == "high"
+    assert result[0]["clearance_priority_score"] > 0
 
 
 def test_reduce_annual_summary_kpi_rows_yearly():
@@ -993,9 +1013,13 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
         async with session_factory() as session:
             for target in (
                 "mart.product_day_kpi",
+                "mart.inventory_snapshot_history",
+                "mart.inventory_snapshot_latest",
+                "mart.inventory_snapshot_change",
                 "mart.inventory_current",
                 "mart.inventory_backlog_base",
                 "api.business_overview_inventory_backlog_module",
+                "api.inventory_backlog_summary_module",
                 "api.clearance_ranking_module",
             ):
                 await execute_sql_target(session, target)
@@ -1009,9 +1033,12 @@ async def test_postgresql_dashboard_service_reads_real_inventory_chain(monkeypat
         backlog = await service.get_business_overview_inventory_backlog(min_days=30)
         clearance = await service.get_clearance_ranking(min_days=30, limit=10)
 
-        assert len(backlog) == 1
-        assert backlog[0]["platform_code"] == "shopee"
-        assert backlog[0]["rank"] == 1
+        assert "summary" in backlog
+        assert "top_products" in backlog
+        assert len(backlog["top_products"]) == 1
+        assert backlog["top_products"][0]["platform_code"] == "shopee"
+        assert backlog["top_products"][0]["rank"] == 1
+        assert "risk_level" in backlog["top_products"][0]
         assert len(clearance) == 1
         assert clearance[0]["platform_code"] == "shopee"
         assert clearance[0]["estimated_turnover_days"] >= 30

@@ -14,5 +14,13 @@ SELECT
     on_hand_stock,
     inventory_value,
     daily_avg_sales,
-    estimated_turnover_days
+    estimated_turnover_days,
+    stock_delta,
+    inventory_value_delta,
+    is_stagnant,
+    snapshot_gap_days,
+    estimated_stagnant_days,
+    stagnant_snapshot_count,
+    risk_level,
+    clearance_priority_score
 FROM mart.inventory_backlog_base;

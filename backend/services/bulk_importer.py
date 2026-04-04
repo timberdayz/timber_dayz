@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from modules.core.logger import get_logger
+from backend.services.inventory.order_posting_service import InventoryOrderPostingService
 
 logger = get_logger(__name__)
 
@@ -64,6 +65,7 @@ class BulkImporter:
             
             # 3. 批量 UPSERT 到事实表
             imported_count = self._upsert_from_staging_orders()
+            posting_result = InventoryOrderPostingService(self.db).post_pending_orders()
             
             # 4. 清理暂存表
             self.db.execute(text("TRUNCATE staging_orders"))
@@ -78,6 +80,8 @@ class BulkImporter:
             return {
                 "staged": staged_count,
                 "imported": imported_count,
+                "posted_outbounds": posting_result["posted"],
+                "skipped_outbounds": posting_result["skipped"],
                 "duration_seconds": round(duration, 2)
             }
             
@@ -372,4 +376,3 @@ def get_bulk_importer(db: Session) -> BulkImporter:
         BulkImporter 实例
     """
     return BulkImporter(db)
-

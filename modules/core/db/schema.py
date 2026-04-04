@@ -2105,6 +2105,8 @@ class InventoryLedger(Base):
     platform_code = Column(String(32), nullable=False)
     shop_id = Column(String(64), nullable=False)
     platform_sku = Column(String(128), nullable=False)
+    received_date = Column(Date, nullable=True)
+    opening_age_days = Column(Integer, nullable=True)
     
     # 交易日期与类型
     transaction_date = Column(Date, nullable=False)
@@ -2536,6 +2538,8 @@ class OpeningBalance(Base):
     platform_code = Column(String(32), nullable=False)
     shop_id = Column(String(64), nullable=False)
     platform_sku = Column(String(128), nullable=False)
+    received_date = Column(Date, nullable=True)
+    opening_age_days = Column(Integer, nullable=True)
     
     opening_qty = Column(Integer, default=0)
     opening_cost = Column(Float, default=0.0)  # 单位成本
@@ -2551,6 +2555,119 @@ class OpeningBalance(Base):
         Index("ix_opening_balances_period", "period"),
         Index("ix_opening_balances_sku", "platform_code", "shop_id", "platform_sku"),
         UniqueConstraint("period", "platform_code", "shop_id", "platform_sku", name="uq_opening_balance"),
+        {"schema": "finance"},
+    )
+
+
+class InventoryLayer(Base):
+    """库存入库层表"""
+    __tablename__ = "inventory_layers"
+
+    layer_id = Column(Integer, primary_key=True, autoincrement=True)
+
+    source_type = Column(String(32), nullable=False)
+    source_id = Column(String(64), nullable=False)
+    source_line_id = Column(String(64), nullable=True)
+
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    platform_sku = Column(String(128), nullable=False)
+    warehouse = Column(String(64), nullable=True)
+
+    received_date = Column(Date, nullable=False)
+    original_qty = Column(Integer, nullable=False, default=0)
+    remaining_qty = Column(Integer, nullable=False, default=0)
+
+    unit_cost = Column(Float, nullable=False, default=0.0)
+    base_unit_cost = Column(Float, nullable=False, default=0.0)
+
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_inventory_layers_sku", "platform_code", "shop_id", "platform_sku"),
+        Index("ix_inventory_layers_received", "received_date"),
+        Index("ix_inventory_layers_source", "source_type", "source_id"),
+        {"schema": "finance"},
+    )
+
+
+class InventoryLayerConsumption(Base):
+    """库存层消耗记录表"""
+    __tablename__ = "inventory_layer_consumptions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    outbound_ledger_id = Column(
+        Integer,
+        ForeignKey("finance.inventory_ledger.ledger_id"),
+        nullable=False,
+    )
+    layer_id = Column(
+        Integer,
+        ForeignKey("finance.inventory_layers.layer_id"),
+        nullable=False,
+    )
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    platform_sku = Column(String(128), nullable=False)
+    consumed_qty = Column(Integer, nullable=False)
+    consumed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    age_days_at_consumption = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index("ix_inventory_layer_consumptions_ledger", "outbound_ledger_id"),
+        Index("ix_inventory_layer_consumptions_layer", "layer_id"),
+        Index("ix_inventory_layer_consumptions_sku", "platform_code", "shop_id", "platform_sku"),
+        {"schema": "finance"},
+    )
+
+
+class InventoryAdjustmentHeader(Base):
+    """库存调整单头表"""
+    __tablename__ = "inventory_adjustment_headers"
+
+    adjustment_id = Column(String(64), primary_key=True)
+
+    adjustment_date = Column(Date, nullable=False)
+    status = Column(String(32), nullable=False, default="draft")  # draft/posted/cancelled
+    reason = Column(String(64), nullable=False)
+    notes = Column(Text, nullable=True)
+
+    created_by = Column(String(64), nullable=False, default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_inventory_adjustment_headers_date", "adjustment_date"),
+        Index("ix_inventory_adjustment_headers_status", "status"),
+        {"schema": "finance"},
+    )
+
+
+class InventoryAdjustmentLine(Base):
+    """库存调整单行表"""
+    __tablename__ = "inventory_adjustment_lines"
+
+    adjustment_line_id = Column(Integer, primary_key=True, autoincrement=True)
+
+    adjustment_id = Column(
+        String(64),
+        ForeignKey("finance.inventory_adjustment_headers.adjustment_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    platform_sku = Column(String(128), nullable=False)
+    qty_delta = Column(Integer, nullable=False)
+    unit_cost = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_inventory_adjustment_lines_adjustment_id", "adjustment_id"),
+        Index("ix_inventory_adjustment_lines_sku", "platform_code", "shop_id", "platform_sku"),
         {"schema": "finance"},
     )
 
