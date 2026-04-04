@@ -23,6 +23,16 @@ logger = get_logger(__name__)
 security = HTTPBearer(auto_error=False)
 
 
+def is_admin_user(current_user: DimUser) -> bool:
+    if getattr(current_user, "is_superuser", False):
+        return True
+    return any(
+        (hasattr(role, "role_code") and role.role_code == "admin")
+        or (hasattr(role, "role_name") and role.role_name == "admin")
+        for role in getattr(current_user, "roles", []) or []
+    )
+
+
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -91,16 +101,7 @@ async def require_admin(
     current_user: DimUser = Depends(get_current_user),
 ):
     """要求管理员权限。"""
-    if current_user.is_superuser:
-        return current_user
-
-    is_admin = any(
-        (hasattr(role, "role_code") and role.role_code == "admin")
-        or (hasattr(role, "role_name") and role.role_name == "admin")
-        for role in current_user.roles
-    )
-
-    if not is_admin:
+    if not is_admin_user(current_user):
         raise HTTPException(
             status_code=403,
             detail="Insufficient permissions",

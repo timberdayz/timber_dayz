@@ -1,9 +1,16 @@
 <template>
   <div class="my-income erp-page-container">
-    <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">我的收入</h1>
-    <p style="color: #909399; margin-bottom: 20px;">
-      当前页面仅展示工资单口径收入。绩效和提成会先沉淀到工资单，再在这里统一查看。
-    </p>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">我的收入</h1>
+        <p class="page-subtitle">
+          当前页面仅展示工资单口径收入。绩效和提成会先沉淀到工资单，再在这里统一查看。
+        </p>
+      </div>
+      <el-button plain @click="handleOpenPayrollRunbook">
+        工资单运行手册
+      </el-button>
+    </div>
 
     <template v-if="!income.linked">
       <el-alert type="warning" show-icon :closable="false">
@@ -130,8 +137,10 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '@/api'
 
+const router = useRouter()
 const selectedMonth = ref(new Date().toISOString().slice(0, 7))
 const loadError = ref(false)
 const income = ref({
@@ -211,6 +220,10 @@ function getPayrollStatusType(status) {
   return 'info'
 }
 
+function handleOpenPayrollRunbook() {
+  router.push({ name: 'UserGuide', query: { topic: 'hr-payroll' } })
+}
+
 async function loadIncome() {
   income.value.loading = true
   loadError.value = false
@@ -237,6 +250,25 @@ onMounted(() => {
 <style scoped>
 .my-income {
   padding: 20px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.page-subtitle {
+  margin: 8px 0 0;
+  color: #909399;
 }
 
 .payroll-card-header {

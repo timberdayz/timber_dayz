@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.dependencies.auth import get_current_user
+from backend.dependencies.auth import get_current_user, is_admin_user
 from backend.models.database import get_async_db
 from backend.schemas.hr import (
     EmployeeTargetCreate,
@@ -21,6 +21,7 @@ from backend.schemas.hr import (
     SalaryStructureCreate,
     SalaryStructureResponse,
 )
+from backend.services.audit_service import audit_service
 from backend.services.payroll_generation_service import PayrollGenerationService
 from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
@@ -30,16 +31,6 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/hr", tags=["HR-薪资目标"])
-
-
-def _is_admin_user(current_user: DimUser) -> bool:
-    if getattr(current_user, "is_superuser", False):
-        return True
-    return any(
-        (hasattr(role, "role_code") and role.role_code == "admin")
-        or (hasattr(role, "role_name") and role.role_name == "admin")
-        for role in getattr(current_user, "roles", []) or []
-    )
 
 
 def _payroll_success(record: PayrollRecord) -> Dict[str, Any]:
@@ -247,7 +238,7 @@ async def mark_payroll_record_paid(
     current_user: DimUser = Depends(get_current_user),
 ):
     try:
-        if not _is_admin_user(current_user):
+        if not is_admin_user(current_user):
             return error_response(
                 ErrorCode.PERMISSION_DENIED,
                 "需要管理员权限才能标记工资单为已发放",
@@ -268,6 +259,21 @@ async def mark_payroll_record_paid(
             record.pay_date = date.today()
         await db.commit()
         await db.refresh(record)
+        await audit_service.log_action(
+            user_id=current_user.user_id,
+            action="pay",
+            resource="payroll_record",
+            resource_id=str(record_id),
+            ip_address="system",
+            user_agent="hr_salary_router",
+            details={
+                "result_status": "paid",
+                "employee_code": record.employee_code,
+                "year_month": record.year_month,
+                "pay_date": record.pay_date.isoformat() if record.pay_date else None,
+            },
+            db=db,
+        )
         return _payroll_success(record)
     except Exception as e:
         await db.rollback()

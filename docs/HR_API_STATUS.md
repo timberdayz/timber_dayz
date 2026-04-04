@@ -1,119 +1,123 @@
-# HR管理API状态说明
+# HR API Status
 
-**更新时间**: 2025-11-21  
-**状态**: HR相关API部分实现
+**Updated**: 2026-04-04  
+**Status**: HR income and payroll chain is implemented and operational
 
----
+## Current Summary
 
-## 📊 HR功能模块状态
+The HR domain is no longer in the earlier “performance only, employee/attendance pending” state.
 
-### ✅ 已实现的API
+The following runtime capabilities are available in the repository today:
 
-#### 1. 绩效管理API
-- **后端路由**: `backend/routers/performance_management.py`
-- **API前缀**: `/api/performance`
-- **状态**: ✅ 已实现并替换Mock数据
-- **功能**:
-  - 绩效评分查询
-  - 绩效配置管理
-  - 绩效计算
-- **Mock数据替换**: ✅ 已完成（见任务9.4.1）
+- Employee profile and “my profile” APIs
+- My Income API using payroll as the final source of truth
+- Payroll record query and draft editing
+- Payroll state transitions:
+  - `confirm`
+  - `reopen`
+  - `pay`
+- Performance recalculation
+- Employee commission and employee performance recalculation
+- Payroll generation from salary structure + commission + performance
 
-### ⏳ 待实现的API
+## Implemented Areas
 
-#### 2. 员工管理API
-- **前端路由**: `/employee-management`
-- **前端Store**: `frontend/src/stores/hr.js`
-- **后端API**: ❌ 暂未实现
-- **状态**: ⏳ 等待后端开发
-- **功能需求**:
-  - 员工档案CRUD
-  - 员工信息查询
-  - 员工状态管理
+### 1. Performance management
 
-#### 3. 考勤管理API
-- **前端路由**: `/attendance-management`
-- **前端Store**: `frontend/src/stores/hr.js`
-- **后端API**: ❌ 暂未实现
-- **状态**: ⏳ 等待后端开发
-- **功能需求**:
-  - 考勤记录查询
-  - 考勤统计
-  - 考勤规则配置
+- Router: `backend/routers/performance_management.py`
+- Main route: `POST /performance/scores/calculate`
+- Status: implemented
 
----
+Capabilities:
 
-## 🔍 当前状态分析
+- performance config read/write
+- shop performance score calculation
+- employee commission recalculation
+- employee performance recalculation
+- payroll draft generation/update
+- locked payroll conflict count and detail return
 
-### 前端实现情况
-- ✅ **路由配置**: HR相关路由已配置（`frontend/src/router/index.js`）
-- ✅ **菜单配置**: HR菜单组已配置（`frontend/src/config/menuGroups.js`）
-- ✅ **Store实现**: `frontend/src/stores/hr.js`已创建（使用Mock数据）
-- ✅ **视图组件**: HR相关视图组件已创建
+### 2. Employee profile and My Income
 
-### 后端实现情况
-- ✅ **绩效管理**: 已实现（`performance_management.py`）
-- ❌ **员工管理**: 未实现
-- ❌ **考勤管理**: 未实现
+- Router: `backend/routers/hr_employee.py`
+- Main routes:
+  - `GET /api/hr/me/profile`
+  - `PUT /api/hr/me/profile`
+  - `GET /api/hr/me/income`
+- Status: implemented
 
----
+Capabilities:
 
-## 📝 Mock数据替换计划
+- current user to employee linkage
+- employee self-profile update
+- payroll-based My Income display
+- access audit logging for My Income
 
-### 已完成
-- ✅ **绩效管理**: Mock数据已替换为真实API（`/api/performance/*`）
+### 3. Payroll management
 
-### 待完成（等待后端API开发）
-- ⏳ **员工管理**: 等待后端实现`/api/employees/*` API
-- ⏳ **考勤管理**: 等待后端实现`/api/attendance/*` API
+- Router: `backend/routers/hr_salary.py`
+- Main routes:
+  - `GET /api/hr/payroll-records`
+  - `GET /api/hr/payroll-records/{employee_code}/{year_month}`
+  - `PUT /api/hr/payroll-records/{record_id}`
+  - `POST /api/hr/payroll-records/{record_id}/confirm`
+  - `POST /api/hr/payroll-records/{record_id}/reopen`
+  - `POST /api/hr/payroll-records/{record_id}/pay`
+- Status: implemented
 
----
+Capabilities:
 
-## 🎯 后续工作建议
+- payroll list and detail query
+- manual-field editing on `draft` payroll
+- `draft -> confirmed`
+- `confirmed -> draft`
+- `confirmed -> paid`
+- admin-only authorization on `pay`
+- audit logging on successful `pay`
 
-### 后端开发任务
-1. **创建员工管理API** (`backend/routers/employee_management.py`)
-   - `GET /api/employees` - 获取员工列表（分页）
-   - `GET /api/employees/{id}` - 获取员工详情
-   - `POST /api/employees` - 创建员工
-   - `PUT /api/employees/{id}` - 更新员工信息
-   - `DELETE /api/employees/{id}` - 删除员工
+### 4. Salary structures
 
-2. **创建考勤管理API** (`backend/routers/attendance_management.py`)
-   - `GET /api/attendance` - 获取考勤记录（分页）
-   - `GET /api/attendance/statistics` - 获取考勤统计
-   - `POST /api/attendance/check-in` - 打卡
-   - `POST /api/attendance/check-out` - 签退
+- Router: `backend/routers/hr_salary.py`
+- Main routes:
+  - `GET /api/hr/salary-structures`
+  - `GET /api/hr/salary-structures/{employee_code}`
+  - `POST /api/hr/salary-structures`
+- Status: implemented
 
-### 前端更新任务（后端API开发完成后）
-1. **更新`frontend/src/stores/hr.js`**
-   - 移除员工管理Mock数据
-   - 移除考勤管理Mock数据
-   - 使用真实API调用
+## Frontend Status
 
-2. **更新`frontend/src/api/index.js`**
-   - 添加员工管理API方法
-   - 添加考勤管理API方法
+### Implemented pages
 
-3. **测试验证**
-   - 测试员工管理功能
-   - 测试考勤管理功能
+- `frontend/src/views/HumanResources.vue`
+  - payroll list
+  - draft edit
+  - confirm / reopen / pay actions
+  - payroll runbook entry
+- `frontend/src/views/hr/MyIncome.vue`
+  - payroll-only income view
+  - full payroll breakdown
+  - payroll runbook entry
+- `frontend/src/views/hr/PerformanceManagement.vue`
+  - monthly recalculation trigger
+  - payroll locked-conflict dialog
 
----
+### Help and operations docs
 
-## 📌 注意事项
+- `docs/guides/HR_PAYROLL_OPERATIONS_RUNBOOK.md`
+- `frontend/src/views/help/UserGuide.vue`
+  - contains `hr-payroll` guide section
 
-1. **API设计规范**: 新开发的HR API应遵循统一的API契约标准（见`docs/API_CONTRACTS.md`）
-2. **响应格式**: 使用`success_response`、`error_response`、`pagination_response`统一格式
-3. **错误处理**: 使用统一的错误码体系（见`backend/utils/error_codes.py`）
-4. **数据格式**: 日期时间使用ISO 8601格式，金额使用Decimal类型
+## Remaining Expansion Items
 
----
+These are not missing base APIs; they are later-stage enhancements:
 
-## 🔗 相关文档
+- external payment / finance system linkage after `paid`
+- finer-grained payroll permission model beyond admin-only `pay`
+- dedicated payroll conflict list page
+- richer payroll operation dashboards / metrics
 
-- [API契约标准](docs/API_CONTRACTS.md)
-- [API设计规范](docs/DEVELOPMENT_RULES/API_DESIGN.md)
-- [Mock数据替换计划](docs/MOCK_DATA_REPLACEMENT_PLAN.md)
-- [Mock数据替换执行指南](docs/MOCK_DATA_REPLACEMENT_EXECUTION_GUIDE.md)
+## Recommended Reference Docs
 
+- `docs/guides/HR_PAYROLL_OPERATIONS_RUNBOOK.md`
+- `docs/superpowers/specs/2026-04-03-hr-income-payroll-closure-design.md`
+- `docs/superpowers/specs/2026-04-04-hr-income-payroll-end-to-end.md`

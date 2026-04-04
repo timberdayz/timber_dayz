@@ -98,6 +98,7 @@ def test_mark_payroll_record_paid_requires_confirmed_and_sets_pay_date():
     module = _load_hr_salary_module()
     db = AsyncMock()
     admin_user = SimpleNamespace(
+        user_id=9001,
         is_superuser=False,
         roles=[SimpleNamespace(role_code="admin", role_name="admin")],
     )
@@ -131,6 +132,13 @@ def test_mark_payroll_record_paid_requires_confirmed_and_sets_pay_date():
     db.execute = AsyncMock(return_value=_ResultOne(record))
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
+    audit_calls = {"count": 0, "details": None}
+
+    async def _fake_log_action(**kwargs):
+        audit_calls["count"] += 1
+        audit_calls["details"] = kwargs
+
+    module.audit_service.log_action = _fake_log_action
 
     resp = asyncio.run(module.mark_payroll_record_paid(4, db=db, current_user=admin_user))
 
@@ -138,12 +146,18 @@ def test_mark_payroll_record_paid_requires_confirmed_and_sets_pay_date():
     assert record.pay_date is not None
     assert db.commit.await_count == 1
     assert resp["success"] is True
+    assert audit_calls["count"] == 1
+    assert audit_calls["details"]["action"] == "pay"
+    assert audit_calls["details"]["resource"] == "payroll_record"
+    assert audit_calls["details"]["resource_id"] == "4"
+    assert audit_calls["details"]["details"]["result_status"] == "paid"
 
 
 def test_mark_payroll_record_paid_rejects_non_admin_user():
     module = _load_hr_salary_module()
     db = AsyncMock()
     current_user = SimpleNamespace(
+        user_id=9002,
         is_superuser=False,
         roles=[SimpleNamespace(role_code="finance", role_name="finance")],
     )

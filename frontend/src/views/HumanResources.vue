@@ -10,6 +10,9 @@
         <p class="page-subtitle">提升团队效率，优化人力资源配置</p>
       </div>
       <div class="header-actions">
+        <el-button plain @click="handleOpenPayrollRunbook">
+          工资单运行手册
+        </el-button>
         <el-button type="primary" @click="refreshData" :loading="loading">
           <el-icon><Refresh /></el-icon>
           刷新数据
@@ -1188,7 +1191,7 @@
 
 <script setup>
 import { ref, computed, onMounted, reactive } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -1208,6 +1211,7 @@ import api from '@/api'
 // ============================================================================
 
 const route = useRoute()
+const router = useRouter()
 const authStore = useAuthStore()
 const loading = ref(false)
 const validTabs = ['employees', 'departments', 'positions', 'attendance', 'salary']
@@ -1408,6 +1412,10 @@ const loadInitialData = async () => {
 const refreshData = () => {
   loadInitialData()
   ElMessage.success('数据已刷新')
+}
+
+const handleOpenPayrollRunbook = () => {
+  router.push({ name: 'UserGuide', query: { topic: 'hr-payroll' } })
 }
 
 const handleTabChange = (tabName) => {

@@ -252,6 +252,7 @@ import { useUserStore } from '@/stores/user'
 import api from '@/api'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatNumber, formatPercent, formatInteger } from '@/utils/dataFormatter'
+import { formatPayrollLockedConflictSummary } from '@/utils/payrollConflict'
 
 const userStore = useUserStore()
 
@@ -505,12 +506,7 @@ const handleRecalculate = async () => {
     const lockedConflicts = result?.payroll_locked_conflicts || 0
     const conflictDetails = result?.payroll_locked_conflict_details || []
     if (lockedConflicts > 0) {
-      const summary = conflictDetails.length
-        ? conflictDetails.map((item) => {
-            const fields = Array.isArray(item.changed_fields) ? item.changed_fields.join(', ') : ''
-            return `${item.employee_code} (${item.payroll_status}) -> ${fields}`
-          }).join('\n')
-        : `共有 ${lockedConflicts} 份已锁定工资单未被覆盖`
+      const summary = formatPayrollLockedConflictSummary(conflictDetails, lockedConflicts)
       await ElMessageBox.alert(summary, '工资单锁定冲突', {
         type: 'warning',
         confirmButtonText: '知道了'
