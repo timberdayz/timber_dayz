@@ -1,11 +1,33 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from backend.dependencies.auth import get_current_user
 from backend.routers.dashboard_api_postgresql import router
 from backend.services.postgresql_dashboard_service import PostgresqlDashboardService
+
+
+def _make_user(role_code: str = "admin") -> SimpleNamespace:
+    return SimpleNamespace(
+        is_superuser=False,
+        roles=[SimpleNamespace(role_code=role_code, role_name=role_code)],
+    )
+
+
+def _build_app_with_auth_override(user: SimpleNamespace | None = None) -> FastAPI:
+    app = FastAPI()
+    app.include_router(router)
+
+    if user is not None:
+        async def _override_current_user():
+            return user
+
+        app.dependency_overrides[get_current_user] = _override_current_user
+
+    return app
 
 
 def test_postgresql_b_cost_routes_are_registered():
@@ -31,8 +53,7 @@ async def test_postgresql_b_cost_overview_route_returns_service_payload_and_pass
         lambda: _ServiceStub(),
     )
 
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app_with_auth_override(_make_user("admin"))
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -74,8 +95,7 @@ async def test_postgresql_b_cost_shop_month_route_returns_service_payload_and_pa
         lambda: _ServiceStub(),
     )
 
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app_with_auth_override(_make_user("manager"))
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -131,8 +151,7 @@ async def test_postgresql_b_cost_order_detail_route_returns_paginated_payload_an
         lambda: _ServiceStub(),
     )
 
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app_with_auth_override(_make_user("finance"))
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -167,8 +186,7 @@ async def test_postgresql_b_cost_order_detail_route_returns_paginated_payload_an
 
 @pytest.mark.asyncio
 async def test_postgresql_b_cost_overview_route_requires_period_month():
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app_with_auth_override(_make_user("admin"))
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -181,8 +199,7 @@ async def test_postgresql_b_cost_overview_route_requires_period_month():
 
 @pytest.mark.asyncio
 async def test_postgresql_b_cost_shop_month_route_requires_period_month():
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app_with_auth_override(_make_user("admin"))
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -195,8 +212,7 @@ async def test_postgresql_b_cost_shop_month_route_requires_period_month():
 
 @pytest.mark.asyncio
 async def test_postgresql_b_cost_order_detail_route_requires_period_month():
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app_with_auth_override(_make_user("admin"))
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -209,8 +225,7 @@ async def test_postgresql_b_cost_order_detail_route_requires_period_month():
 
 @pytest.mark.asyncio
 async def test_postgresql_b_cost_order_detail_route_maps_value_error_to_400():
-    app = FastAPI()
-    app.include_router(router)
+    app = _build_app_with_auth_override(_make_user("admin"))
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -322,6 +337,7 @@ async def test_postgresql_b_cost_overview_route_normalizes_period_month_for_cach
     app = FastAPI()
     app.state.cache_service = _CacheServiceStub()
     app.include_router(router)
+    app.dependency_overrides[get_current_user] = lambda: _make_user("admin")
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -341,3 +357,89 @@ async def test_postgresql_b_cost_overview_route_normalizes_period_month_for_cach
     assert cache_calls[0][1] == "b_cost_analysis_overview"
     assert cache_calls[2][1] == "b_cost_analysis_overview"
     assert cache_calls[0][2]["period_month"] == cache_calls[2][2]["period_month"]
+
+
+@pytest.mark.asyncio
+async def test_postgresql_b_cost_overview_route_returns_401_when_unauthenticated():
+    app = FastAPI()
+    app.include_router(router)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/api/dashboard/b-cost-analysis/overview",
+            params={"period_month": "2026-03"},
+        )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_postgresql_b_cost_overview_route_returns_403_when_role_not_allowed():
+    app = _build_app_with_auth_override(_make_user("operator"))
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/api/dashboard/b-cost-analysis/overview",
+            params={"period_month": "2026-03"},
+        )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_postgresql_b_cost_overview_route_allows_finance_role(monkeypatch):
+    class _ServiceStub:
+        async def get_b_cost_analysis_overview(self, period_month, platform=None, shop_id=None):
+            return {"summary": "ok"}
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    app = _build_app_with_auth_override(_make_user("finance"))
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/api/dashboard/b-cost-analysis/overview",
+            params={"period_month": "2026-03"},
+        )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_postgresql_b_cost_overview_route_masks_internal_exception_message(monkeypatch):
+    class _ServiceStub:
+        async def get_b_cost_analysis_overview(self, period_month, platform=None, shop_id=None):
+            raise RuntimeError("db exploded: super-secret")
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    app = _build_app_with_auth_override(_make_user("admin"))
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            "/api/dashboard/b-cost-analysis/overview",
+            params={"period_month": "2026-03"},
+        )
+
+    body = json.loads(response.content.decode("utf-8"))
+    assert response.status_code == 500
+    assert body["message"] == "查询失败"
+    assert "db exploded: super-secret" not in response.text

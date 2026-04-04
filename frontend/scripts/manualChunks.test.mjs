@@ -33,21 +33,29 @@ test('resolveManualChunk keeps non-vue libraries out of vendor-vue-core', () => 
   )
 })
 
-test('resolveManualChunk keeps all Element Plus internals in one vendor chunk', () => {
+test('resolveManualChunk splits Element Plus into focused vendor chunks', () => {
   assert.equal(
     resolveManualChunk('/repo/frontend/node_modules/element-plus/es/components/message/index.mjs'),
-    'vendor-element-plus'
+    'vendor-element-plus-core'
   )
   assert.equal(
     resolveManualChunk('/repo/frontend/node_modules/element-plus/es/components/form/src/form.mjs'),
-    'vendor-element-plus'
+    'vendor-element-plus-core'
   )
   assert.equal(
     resolveManualChunk('/repo/frontend/node_modules/element-plus/es/components/date-picker/src/date-picker.mjs'),
-    'vendor-element-plus'
+    'vendor-element-plus-core'
   )
   assert.equal(
     resolveManualChunk('/repo/frontend/node_modules/@element-plus/icons-vue/dist/index.mjs'),
-    'vendor-element-plus'
+    'vendor-element-plus-icons'
+  )
+  assert.equal(
+    resolveManualChunk('/repo/frontend/node_modules/element-plus/es/components/table/src/table.mjs'),
+    'vendor-element-plus-core'
+  )
+  assert.equal(
+    resolveManualChunk('/repo/frontend/node_modules/element-plus/es/components/input/src/input.mjs'),
+    'vendor-element-plus-core'
   )
 })

@@ -13,10 +13,11 @@ import json
 from datetime import date as date_cls
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.dependencies.auth import get_current_user
 from backend.models.database import get_async_db
 from backend.services.postgresql_dashboard_service import _normalize_period_start, get_postgresql_dashboard_service
 from backend.utils.api_response import error_response, success_response
@@ -26,6 +27,7 @@ from modules.core.logger import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard-postgresql"])
+_B_COST_ALLOWED_ROLES = {"admin", "manager", "finance"}
 
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
@@ -58,6 +60,33 @@ async def _resolve_cached_payload(
         return payload, "MISS"
     payload = await producer()
     return payload, "BYPASS"
+
+
+def _extract_user_role_codes(current_user: Any) -> set[str]:
+    role_codes: set[str] = set()
+    for role in getattr(current_user, "roles", []) or []:
+        if isinstance(role, str):
+            role_codes.add(role.lower())
+            continue
+        role_code = getattr(role, "role_code", None)
+        role_name = getattr(role, "role_name", None)
+        if role_code:
+            role_codes.add(str(role_code).lower())
+        if role_name:
+            role_codes.add(str(role_name).lower())
+    return role_codes
+
+
+def _require_b_cost_role(current_user: Any) -> Any:
+    if getattr(current_user, "is_superuser", False):
+        return current_user
+    if _extract_user_role_codes(current_user) & _B_COST_ALLOWED_ROLES:
+        return current_user
+    raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+async def _get_b_cost_authorized_user(current_user: Any = Depends(get_current_user)) -> Any:
+    return _require_b_cost_role(current_user)
 
 
 @router.get("/business-overview/kpi")
@@ -319,6 +348,7 @@ async def get_b_cost_analysis_overview_postgresql(
     period_month: str = Query(..., description="month in YYYY-MM or YYYY-MM-DD"),
     platform: Optional[str] = Query(None, description="single platform code"),
     shop_id: Optional[str] = Query(None, description="shop id filter"),
+    _current_user: Any = Depends(_get_b_cost_authorized_user),
 ):
     try:
         params = {"period_month": period_month, "platform": platform, "shop_id": shop_id}
@@ -350,7 +380,7 @@ async def get_b_cost_analysis_overview_postgresql(
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
         logger.error(f"PostgreSQL b cost analysis overview query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500)
 
 
 @router.get("/b-cost-analysis/shop-month")
@@ -359,6 +389,7 @@ async def get_b_cost_analysis_shop_month_postgresql(
     period_month: str = Query(..., description="month in YYYY-MM or YYYY-MM-DD"),
     platform: Optional[str] = Query(None, description="single platform code"),
     shop_id: Optional[str] = Query(None, description="shop id filter"),
+    _current_user: Any = Depends(_get_b_cost_authorized_user),
 ):
     try:
         params = {"period_month": period_month, "platform": platform, "shop_id": shop_id}
@@ -390,7 +421,7 @@ async def get_b_cost_analysis_shop_month_postgresql(
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
         logger.error(f"PostgreSQL b cost analysis shop month query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500)
 
 
 @router.get("/b-cost-analysis/order-detail")
@@ -400,7 +431,8 @@ async def get_b_cost_analysis_order_detail_postgresql(
     platform: Optional[str] = Query(None, description="single platform code"),
     shop_id: Optional[str] = Query(None, description="shop id filter"),
     page: int = Query(1, description="page number"),
-    page_size: int = Query(20, description="page size"),
+    page_size: int = Query(20, le=200, description="page size"),
+    _current_user: Any = Depends(_get_b_cost_authorized_user),
 ):
     try:
         params = {
@@ -439,7 +471,7 @@ async def get_b_cost_analysis_order_detail_postgresql(
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
         logger.error(f"PostgreSQL b cost analysis order detail query failed: {e}", exc_info=True)
-        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, "查询失败", status_code=500)
 
 
 @router.get("/clearance-ranking")

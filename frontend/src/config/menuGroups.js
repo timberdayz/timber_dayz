@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 菜单分组配置
  * 企业级ERP标准菜单结构 - 完整版
  * 版本: v4.9.0
@@ -99,6 +99,7 @@ export const menuGroups = [
       '/financial-overview',     // v4.9.1: 财务总览
       '/financial-management',   // 应收应付
       '/expense-management',     // 费用管理
+      '/b-cost-analysis',        // B类成本分析
       '/finance-reports',        // 财务报表
       '/fx-management',          // 汇率管理
       '/fiscal-periods'          // 会计期间
