@@ -25,8 +25,12 @@ export function resolveManualChunk(id) {
     return 'vendor-echarts-core'
   }
 
-  if (id.includes('element-plus') || id.includes('@element-plus')) {
-    return 'vendor-element-plus'
+  if (id.includes('@element-plus/icons-vue')) {
+    return 'vendor-element-plus-icons'
+  }
+
+  if (id.includes('element-plus')) {
+    return 'vendor-element-plus-core'
   }
 
   return 'vendor-misc'

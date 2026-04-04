@@ -135,5 +135,26 @@ export default {
    */
   async queryAnnualSummaryTargetCompletion(params = {}) {
     return await api._get('/dashboard/annual-summary/target-completion', { params })
+  },
+
+  /**
+   * B类成本分析 - 概览 KPI
+   */
+  async queryBCostAnalysisOverview(params = {}) {
+    return await api._get('/dashboard/b-cost-analysis/overview', { params })
+  },
+
+  /**
+   * B类成本分析 - 店铺月汇总
+   */
+  async queryBCostAnalysisShopMonth(params = {}) {
+    return await api._get('/dashboard/b-cost-analysis/shop-month', { params })
+  },
+
+  /**
+   * B类成本分析 - 订单明细
+   */
+  async queryBCostAnalysisOrderDetail(params = {}) {
+    return await api._get('/dashboard/b-cost-analysis/order-detail', { params })
   }
 }

@@ -86,6 +86,78 @@ def reduce_business_overview_kpi_rows(rows: list[dict[str, Any]]) -> dict[str, A
     }
 
 
+def reduce_b_cost_analysis_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {
+            "period_month": None,
+            "platform_code": None,
+            "currency_code": None,
+            "gmv": None,
+            "purchase_amount": None,
+            "warehouse_operation_fee": None,
+            "shipping_fee": None,
+            "promotion_fee": None,
+            "platform_commission": None,
+            "platform_deduction_fee": None,
+            "platform_voucher": None,
+            "platform_service_fee": None,
+            "platform_total_cost_itemized": None,
+            "total_cost_b": None,
+            "gross_margin_ref": None,
+            "net_margin_ref": None,
+        }
+
+    def _sum(name: str) -> float | None:
+        return _round_or_none(_sum_present_values(rows, name), 2)
+
+    gmv = _sum("gmv")
+    purchase_amount = _sum("purchase_amount")
+    total_cost_b = _sum("total_cost_b")
+    if gmv is None or purchase_amount is None:
+        gross_margin_ref = None
+    elif gmv > 0:
+        gross_margin_ref = round((gmv - purchase_amount) / gmv, 4)
+    elif gmv == 0 and purchase_amount == 0:
+        gross_margin_ref = 0
+    else:
+        gross_margin_ref = None
+
+    if gmv is None or total_cost_b is None:
+        net_margin_ref = None
+    elif gmv > 0:
+        net_margin_ref = round((gmv - total_cost_b) / gmv, 4)
+    elif gmv == 0 and total_cost_b == 0:
+        net_margin_ref = 0
+    else:
+        net_margin_ref = None
+
+    platform_codes = {str(row.get("platform_code")) for row in rows if row.get("platform_code") is not None}
+    currency_codes = {str(row.get("currency_code")) for row in rows if row.get("currency_code") is not None}
+
+    period_month = rows[0].get("period_month")
+    platform_code = next(iter(platform_codes)) if len(platform_codes) == 1 else None
+    currency_code = next(iter(currency_codes)) if len(currency_codes) == 1 else None
+
+    return {
+        "period_month": period_month,
+        "platform_code": platform_code,
+        "currency_code": currency_code,
+        "gmv": gmv,
+        "purchase_amount": purchase_amount,
+        "warehouse_operation_fee": _sum("warehouse_operation_fee"),
+        "shipping_fee": _sum("shipping_fee"),
+        "promotion_fee": _sum("promotion_fee"),
+        "platform_commission": _sum("platform_commission"),
+        "platform_deduction_fee": _sum("platform_deduction_fee"),
+        "platform_voucher": _sum("platform_voucher"),
+        "platform_service_fee": _sum("platform_service_fee"),
+        "platform_total_cost_itemized": _sum("platform_total_cost_itemized"),
+        "total_cost_b": total_cost_b,
+        "gross_margin_ref": gross_margin_ref,
+        "net_margin_ref": net_margin_ref,
+    }
+
+
 def _change_pct(current: float, previous: float) -> float | None:
     if current is None or previous is None:
         return None
@@ -820,6 +892,107 @@ class PostgresqlDashboardService:
             total["operating_result"] = None
             total["operating_result_text"] = None
         return total
+
+    async def get_b_cost_analysis_overview(
+        self,
+        period_month: str,
+        platform: str | None = None,
+        shop_id: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_period = _normalize_period_start(period_month)
+        period_start = date_cls(normalized_period.year, normalized_period.month, 1)
+        if shop_id:
+            # shop_id 过滤场景优先回退到 shop_month 明细层聚合
+            rows = await self.get_b_cost_analysis_shop_month(
+                period_month=period_month,
+                platform=platform,
+                shop_id=shop_id,
+            )
+            return reduce_b_cost_analysis_rows(rows)
+
+        query = """
+            SELECT *
+            FROM api.b_cost_analysis_overview_module
+            WHERE period_month = :period_month
+        """
+        params: dict[str, Any] = {"period_month": period_start}
+        if platform:
+            query += " AND platform_code = :platform_code"
+            params["platform_code"] = platform
+        rows = await self._fetch_rows(query, params)
+        return reduce_b_cost_analysis_rows(rows)
+
+    async def get_b_cost_analysis_shop_month(
+        self,
+        period_month: str,
+        platform: str | None = None,
+        shop_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        normalized_period = _normalize_period_start(period_month)
+        period_start = date_cls(normalized_period.year, normalized_period.month, 1)
+        query = """
+            SELECT *
+            FROM api.b_cost_analysis_shop_month_module
+            WHERE period_month = :period_month
+        """
+        params: dict[str, Any] = {"period_month": period_start}
+        if platform:
+            query += " AND platform_code = :platform_code"
+            params["platform_code"] = platform
+        if shop_id:
+            query += " AND shop_id = :shop_id"
+            params["shop_id"] = shop_id
+        query += " ORDER BY platform_code, shop_id"
+        return await self._fetch_rows(query, params)
+
+    async def get_b_cost_analysis_order_detail(
+        self,
+        period_month: str,
+        platform: str | None = None,
+        shop_id: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        if page < 1:
+            raise ValueError("page must be greater than 0")
+        if page_size < 1:
+            raise ValueError("page_size must be greater than 0")
+
+        normalized_period = _normalize_period_start(period_month)
+        period_start = date_cls(normalized_period.year, normalized_period.month, 1)
+        where_sql = " WHERE period_month = :period_month"
+        params: dict[str, Any] = {"period_month": period_start}
+        if platform:
+            where_sql += " AND platform_code = :platform_code"
+            params["platform_code"] = platform
+        if shop_id:
+            where_sql += " AND shop_id = :shop_id"
+            params["shop_id"] = shop_id
+
+        count_rows = await self._fetch_rows(
+            f"SELECT COUNT(1) AS total FROM api.b_cost_analysis_order_detail_module{where_sql}",
+            params,
+        )
+        total = int(count_rows[0]["total"]) if count_rows else 0
+
+        offset = (page - 1) * page_size
+        detail_params = {**params, "limit": page_size, "offset": offset}
+        items = await self._fetch_rows(
+            f"""
+            SELECT *
+            FROM api.b_cost_analysis_order_detail_module
+            {where_sql}
+            ORDER BY order_time DESC NULLS LAST, order_id DESC
+            LIMIT :limit OFFSET :offset
+            """,
+            detail_params,
+        )
+        return {
+            "items": items,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+        }
 
     async def get_annual_summary_kpi(
         self,

@@ -104,6 +104,83 @@ mapped AS (
             raw_data->>'Profit'
         ) AS profit_raw,
         COALESCE(
+            NULLIF(TRIM(raw_data->>'采购金额'), ''),
+            NULLIF(TRIM(raw_data->>'采购价'), ''),
+            NULLIF(TRIM(raw_data->>'产品成本'), ''),
+            NULLIF(TRIM(raw_data->>'cogs'), ''),
+            NULLIF(TRIM(raw_data->>'purchase_amount'), ''),
+            NULLIF(TRIM(raw_data->>'Purchase Amount'), ''),
+            NULLIF(TRIM(raw_data->>'purchase_cost'), ''),
+            NULLIF(TRIM(raw_data->>'procurement_cost'), '')
+        ) AS purchase_amount_raw,
+        COALESCE(
+            NULLIF(TRIM(raw_data->>'订单原始金额'), ''),
+            NULLIF(TRIM(raw_data->>'产品折后价格'), ''),
+            NULLIF(TRIM(raw_data->>'产品折后金额'), ''),
+            NULLIF(TRIM(raw_data->>'产品原价'), ''),
+            NULLIF(TRIM(raw_data->>'order_original_amount'), ''),
+            NULLIF(TRIM(raw_data->>'Order Original Amount'), ''),
+            NULLIF(TRIM(raw_data->>'original_order_amount'), ''),
+            NULLIF(TRIM(raw_data->>'order_amount'), '')
+        ) AS order_original_amount_raw,
+        COALESCE(
+            NULLIF(TRIM(raw_data->>'仓库操作费'), ''),
+            NULLIF(TRIM(raw_data->>'贴单费'), ''),
+            NULLIF(TRIM(raw_data->>'warehouse_operation_fee'), ''),
+            NULLIF(TRIM(raw_data->>'Warehouse Operation Fee'), ''),
+            NULLIF(TRIM(raw_data->>'warehouse_fee'), '')
+        ) AS warehouse_operation_fee_raw,
+        COALESCE(
+            NULLIF(TRIM(raw_data->>'运费'), ''),
+            NULLIF(TRIM(raw_data->>'商家运费'), ''),
+            NULLIF(TRIM(raw_data->>'shipping_fee'), ''),
+            NULLIF(TRIM(raw_data->>'Shipping Fee'), ''),
+            NULLIF(TRIM(raw_data->>'logistics_fee'), '')
+        ) AS shipping_fee_raw,
+        COALESCE(
+            NULLIF(TRIM(raw_data->>'推广费'), ''),
+            NULLIF(TRIM(raw_data->>'平台推广费'), ''),
+            NULLIF(TRIM(raw_data->>'平台收取推广费'), ''),
+            NULLIF(TRIM(raw_data->>'营销推广费'), ''),
+            NULLIF(TRIM(raw_data->>'promotion_fee'), ''),
+            NULLIF(TRIM(raw_data->>'Promotion Fee'), ''),
+            NULLIF(TRIM(raw_data->>'campaign_fee'), '')
+        ) AS promotion_fee_raw,
+        COALESCE(
+            NULLIF(TRIM(raw_data->>'平台佣金'), ''),
+            NULLIF(TRIM(raw_data->>'佣金'), ''),
+            NULLIF(TRIM(raw_data->>'总佣金'), ''),
+            NULLIF(TRIM(raw_data->>'TikTok Shop平台佣金'), ''),
+            NULLIF(TRIM(raw_data->>'platform_commission'), ''),
+            NULLIF(TRIM(raw_data->>'Platform Commission'), ''),
+            NULLIF(TRIM(raw_data->>'commission_fee'), '')
+        ) AS platform_commission_raw,
+        COALESCE(
+            NULLIF(TRIM(raw_data->>'平台扣费'), ''),
+            NULLIF(TRIM(raw_data->>'平台扣款'), ''),
+            NULLIF(TRIM(raw_data->>'TikTok Shop平台扣费'), ''),
+            NULLIF(TRIM(raw_data->>'platform_deduction_fee'), ''),
+            NULLIF(TRIM(raw_data->>'Platform Deduction Fee'), ''),
+            NULLIF(TRIM(raw_data->>'deduction_fee'), '')
+        ) AS platform_deduction_fee_raw,
+        COALESCE(
+            NULLIF(TRIM(raw_data->>'代金券'), ''),
+            NULLIF(TRIM(raw_data->>'平台代金券'), ''),
+            NULLIF(TRIM(raw_data->>'平台优惠券'), ''),
+            NULLIF(TRIM(raw_data->>'platform_voucher'), ''),
+            NULLIF(TRIM(raw_data->>'Platform Voucher'), ''),
+            NULLIF(TRIM(raw_data->>'voucher_amount'), '')
+        ) AS platform_voucher_raw,
+        COALESCE(
+            NULLIF(TRIM(raw_data->>'服务费'), ''),
+            NULLIF(TRIM(raw_data->>'平台服务费'), ''),
+            NULLIF(TRIM(raw_data->>'平台收取服务费'), ''),
+            NULLIF(TRIM(raw_data->>'TikTok Shop平台服务费'), ''),
+            NULLIF(TRIM(raw_data->>'platform_service_fee'), ''),
+            NULLIF(TRIM(raw_data->>'Platform Service Fee'), ''),
+            NULLIF(TRIM(raw_data->>'service_fee'), '')
+        ) AS platform_service_fee_raw,
+        COALESCE(
             raw_data->>'产品数量',
             raw_data->>'商品数量',
             raw_data->>'数量',
@@ -199,6 +276,60 @@ cleaned AS (
             ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(profit_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
         END AS profit,
         CASE
+            WHEN purchase_amount_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(purchase_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(purchase_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS purchase_amount,
+        CASE
+            WHEN order_original_amount_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_original_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(order_original_amount_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS order_original_amount,
+        CASE
+            WHEN warehouse_operation_fee_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(warehouse_operation_fee_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(warehouse_operation_fee_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS warehouse_operation_fee,
+        CASE
+            WHEN shipping_fee_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(shipping_fee_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(shipping_fee_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS shipping_fee,
+        CASE
+            WHEN promotion_fee_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(promotion_fee_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(promotion_fee_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS promotion_fee,
+        CASE
+            WHEN platform_commission_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(platform_commission_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(platform_commission_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS platform_commission,
+        CASE
+            WHEN platform_deduction_fee_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(platform_deduction_fee_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(platform_deduction_fee_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS platform_deduction_fee,
+        CASE
+            WHEN platform_voucher_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(platform_voucher_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(platform_voucher_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS platform_voucher,
+        CASE
+            WHEN platform_service_fee_raw IS NULL THEN NULL
+            WHEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(platform_service_fee_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '') ~ '^-?(?:\d+(?:\.\d*)?|\.\d+)$'
+            THEN NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(platform_service_fee_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
+            ELSE NULL
+        END AS platform_service_fee,
+        CASE
             WHEN product_quantity_raw IS NULL THEN NULL
             ELSE NULLIF(REGEXP_REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(product_quantity_raw, ',', ''), ' ', ''), CHR(8212), ''), CHR(8211), ''), '[^0-9.-]', '', 'g'), '')::numeric
         END AS product_quantity,
@@ -267,6 +398,15 @@ alias_resolved AS (
         d.sales_amount,
         d.paid_amount,
         d.profit,
+        d.purchase_amount,
+        d.order_original_amount,
+        d.warehouse_operation_fee,
+        d.shipping_fee,
+        d.promotion_fee,
+        d.platform_commission,
+        d.platform_deduction_fee,
+        d.platform_voucher,
+        d.platform_service_fee,
         d.product_quantity,
         d.buyer_count,
         d.product_id,
@@ -313,9 +453,31 @@ SELECT
     COALESCE(sales_amount, 0) AS sales_amount,
     COALESCE(paid_amount, 0) AS paid_amount,
     COALESCE(profit, 0) AS profit,
+    purchase_amount,
+    order_original_amount,
+    warehouse_operation_fee,
+    shipping_fee,
+    promotion_fee,
+    platform_commission,
+    platform_deduction_fee,
+    platform_voucher,
+    platform_service_fee,
     COALESCE(product_quantity, 0) AS product_quantity,
     COALESCE(buyer_count, 0) AS buyer_count,
-    0::numeric AS platform_total_cost_itemized,
+    (
+        COALESCE(shipping_fee, 0)
+        + COALESCE(promotion_fee, 0)
+        + COALESCE(platform_commission, 0)
+        + COALESCE(platform_deduction_fee, 0)
+        + COALESCE(platform_voucher, 0)
+        + COALESCE(platform_service_fee, 0)
+    ) AS platform_total_cost_itemized,
+    (
+        order_original_amount
+        - purchase_amount
+        - profit
+        - warehouse_operation_fee
+    ) AS platform_total_cost_derived,
     product_id,
     platform_sku,
     sku_id,

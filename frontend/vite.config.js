@@ -56,6 +56,7 @@ export default defineConfig({
   build: {
     target: 'es2015',
     outDir: 'dist',
+    emptyOutDir: true,
     assetsDir: 'assets',
     sourcemap: false,
     chunkSizeWarningLimit: 900,
