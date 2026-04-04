@@ -892,6 +892,17 @@ def _resolve_npm_path():
     return None
 
 
+def _frontend_has_cli_dependency(frontend_dir, package_name):
+    """检查前端关键 CLI 依赖是否已正确安装，避免空 node_modules 误判为可启动。"""
+    package_dir = frontend_dir / "node_modules" / package_name
+    if package_dir.is_dir():
+        return True
+
+    bin_dir = frontend_dir / "node_modules" / ".bin"
+    candidates = [package_name, f"{package_name}.cmd", f"{package_name}.ps1"]
+    return any((bin_dir / candidate).exists() for candidate in candidates)
+
+
 def start_backend():
     """启动本地后端服务。"""
     safe_print("\n[启动] 后端服务...")
@@ -952,6 +963,10 @@ def start_frontend():
         return None
     if not (frontend_dir / "node_modules").is_dir():
         safe_print("  [ERROR] frontend/node_modules 不存在，请先在 frontend 目录执行: npm install")
+        return None
+    if not _frontend_has_cli_dependency(frontend_dir, "vite"):
+        safe_print("  [ERROR] frontend/node_modules 不完整，缺少 vite 依赖")
+        safe_print("  提示: 请在 frontend 目录重新执行: npm install")
         return None
     if not _require_local_port_available(FRONTEND_PORT, "前端服务"):
         safe_print("  提示: 当前前端使用 strictPort=true，不会自动切换到 5174/5175")

@@ -10,6 +10,7 @@ feature flag.
 from __future__ import annotations
 
 import json
+from datetime import date as date_cls
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -17,7 +18,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.database import get_async_db
-from backend.services.postgresql_dashboard_service import get_postgresql_dashboard_service
+from backend.services.postgresql_dashboard_service import _normalize_period_start, get_postgresql_dashboard_service
 from backend.utils.api_response import error_response, success_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
@@ -29,6 +30,17 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard-postgresql"])
 
 def _normalize_cache_params(params: Dict[str, Any]) -> Dict[str, str]:
     return {k: "" if v is None else str(v) for k, v in params.items()}
+
+
+def _normalize_period_month_for_cache(period_month: Optional[str]) -> Optional[str]:
+    if period_month is None:
+        return None
+    try:
+        normalized = _normalize_period_start(period_month)
+        month_start = date_cls(normalized.year, normalized.month, 1)
+        return month_start.isoformat()
+    except Exception:
+        return period_month
 
 
 async def _resolve_cached_payload(
@@ -298,6 +310,135 @@ async def get_business_overview_operational_metrics_postgresql(
         return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
     except Exception as e:
         logger.error(f"PostgreSQL compatibility operational metrics query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+
+
+@router.get("/b-cost-analysis/overview")
+async def get_b_cost_analysis_overview_postgresql(
+    request: Request,
+    period_month: str = Query(..., description="month in YYYY-MM or YYYY-MM-DD"),
+    platform: Optional[str] = Query(None, description="single platform code"),
+    shop_id: Optional[str] = Query(None, description="shop id filter"),
+):
+    try:
+        params = {"period_month": period_month, "platform": platform, "shop_id": shop_id}
+        cache_params = _normalize_cache_params(
+            {
+                "period_month": _normalize_period_month_for_cache(period_month),
+                "platform": platform,
+                "shop_id": shop_id,
+            }
+        )
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_b_cost_analysis_overview(
+                period_month=period_month,
+                platform=platform,
+                shop_id=shop_id,
+            )
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "b_cost_analysis_overview",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"PostgreSQL b cost analysis overview query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+
+
+@router.get("/b-cost-analysis/shop-month")
+async def get_b_cost_analysis_shop_month_postgresql(
+    request: Request,
+    period_month: str = Query(..., description="month in YYYY-MM or YYYY-MM-DD"),
+    platform: Optional[str] = Query(None, description="single platform code"),
+    shop_id: Optional[str] = Query(None, description="shop id filter"),
+):
+    try:
+        params = {"period_month": period_month, "platform": platform, "shop_id": shop_id}
+        cache_params = _normalize_cache_params(
+            {
+                "period_month": _normalize_period_month_for_cache(period_month),
+                "platform": platform,
+                "shop_id": shop_id,
+            }
+        )
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_b_cost_analysis_shop_month(
+                period_month=period_month,
+                platform=platform,
+                shop_id=shop_id,
+            )
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "b_cost_analysis_shop_month",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"PostgreSQL b cost analysis shop month query failed: {e}", exc_info=True)
+        return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
+
+
+@router.get("/b-cost-analysis/order-detail")
+async def get_b_cost_analysis_order_detail_postgresql(
+    request: Request,
+    period_month: str = Query(..., description="month in YYYY-MM or YYYY-MM-DD"),
+    platform: Optional[str] = Query(None, description="single platform code"),
+    shop_id: Optional[str] = Query(None, description="shop id filter"),
+    page: int = Query(1, description="page number"),
+    page_size: int = Query(20, description="page size"),
+):
+    try:
+        params = {
+            "period_month": period_month,
+            "platform": platform,
+            "shop_id": shop_id,
+            "page": page,
+            "page_size": page_size,
+        }
+        cache_params = _normalize_cache_params(
+            {
+                **params,
+                "period_month": _normalize_period_month_for_cache(period_month),
+            }
+        )
+
+        async def _produce_payload():
+            service = get_postgresql_dashboard_service()
+            result = await service.get_b_cost_analysis_order_detail(
+                period_month=period_month,
+                platform=platform,
+                shop_id=shop_id,
+                page=page,
+                page_size=page_size,
+            )
+            return json.loads(success_response(data=result).body.decode())
+
+        payload, cache_status = await _resolve_cached_payload(
+            request,
+            "b_cost_analysis_order_detail",
+            cache_params,
+            _produce_payload,
+        )
+        return JSONResponse(content=payload, headers={"X-Cache": cache_status})
+    except ValueError as e:
+        return error_response(ErrorCode.PARAMETER_INVALID, str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"PostgreSQL b cost analysis order detail query failed: {e}", exc_info=True)
         return error_response(ErrorCode.DATABASE_QUERY_ERROR, f"查询失败: {str(e)}", status_code=500)
 
 

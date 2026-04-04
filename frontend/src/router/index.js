@@ -675,6 +675,17 @@ const routes = [
     }
   },
   {
+    path: '/b-cost-analysis',
+    name: 'BCostAnalysis',
+    component: () => import('../views/finance/BCostAnalysis.vue'),
+    meta: {
+      title: 'B类成本分析',
+      icon: 'DataAnalysis',
+      permission: 'b-cost-analysis',
+      roles: ['admin', 'manager', 'finance']
+    }
+  },
+  {
     path: '/finance-reports',
     name: 'FinanceReports',
     component: () => import('../views/finance/FinanceReports.vue'),
