@@ -63,6 +63,12 @@ from modules.core.db import (
 from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncRun, CloudBClassSyncTask
 from modules.core.db import TaskCenterTask, TaskCenterLog, TaskCenterLink
 from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability, PlatformShopDiscovery
+from modules.core.db import (
+    InventoryAdjustmentHeader,
+    InventoryAdjustmentLine,
+    InventoryLayer,
+    InventoryLayerConsumption,
+)
 
 from backend.utils.config import get_settings
 

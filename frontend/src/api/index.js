@@ -1646,7 +1646,7 @@ export default {
    * @returns {Promise} 产品列表（包含分页信息）
    */
   async getProducts(params = {}) {
-    return await this._get("/products/products", { params });
+    return await this._get("/inventory-overview/products", { params });
   },
 
   // ========== 字段映射辞典物化视图显示标识API（v4.10.2新增）==========

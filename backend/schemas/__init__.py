@@ -180,6 +180,34 @@ from backend.schemas.target import (
     BreakdownResponse,
 )
 
+# ==================== 库存管理 ====================
+from backend.schemas.inventory import (
+    InventoryAdjustmentLineCreate,
+    InventoryAdjustmentCreateRequest,
+    InventoryAdjustmentLineResponse,
+    InventoryAdjustmentResponse,
+    InventoryGrnLineResponse,
+    InventoryGrnResponse,
+    InventoryGrnPostResponse,
+    InventoryAgingBucketResponse,
+    InventoryAgingRowResponse,
+    InventoryAgingSummaryResponse,
+    InventoryBalanceSummaryResponse,
+    InventoryBalanceDetailResponse,
+    InventoryLedgerRowResponse,
+    InventoryOpeningBalanceCreateRequest,
+    InventoryOpeningBalanceResponse,
+    InventoryAlertResponse,
+    InventoryReconciliationResponse,
+)
+from backend.schemas.inventory_overview import (
+    InventoryOverviewAlertResponse,
+    InventoryOverviewPlatformBreakdownResponse,
+    InventoryOverviewProductItemResponse,
+    InventoryOverviewProductListResponse,
+    InventoryOverviewSummaryResponse,
+)
+
 # ==================== 销售战役 ====================
 from backend.schemas.sales_campaign import (
     CampaignCreateRequest,

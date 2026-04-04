@@ -45,10 +45,15 @@ def test_inventory_backlog_base_sql_asset():
         "sql/mart/inventory_backlog_base.sql",
         "CREATE OR REPLACE VIEW mart.inventory_backlog_base AS",
         (
-            "mart.inventory_current",
+            "mart.inventory_snapshot_latest",
+            "mart.inventory_snapshot_change",
             "semantic.fact_orders_atomic",
             "estimated_turnover_days",
             "daily_avg_sales",
+            "stagnant_snapshot_count",
+            "estimated_stagnant_days",
+            "risk_level",
+            "clearance_priority_score",
             "available_stock",
             "inventory_value",
         ),
@@ -62,10 +67,29 @@ def test_inventory_backlog_module_sql_asset():
         (
             "mart.inventory_backlog_base",
             "estimated_turnover_days",
+            "stagnant_snapshot_count",
+            "estimated_stagnant_days",
+            "risk_level",
+            "clearance_priority_score",
             "inventory_value",
             "platform_code",
             "shop_id",
             "platform_sku",
+        ),
+    )
+
+
+def test_inventory_backlog_summary_module_sql_asset():
+    _assert_sql_asset(
+        "sql/api_modules/inventory_backlog_summary_module.sql",
+        "CREATE OR REPLACE VIEW api.inventory_backlog_summary_module AS",
+        (
+            "mart.inventory_backlog_base",
+            "backlog_30d_value",
+            "backlog_60d_value",
+            "backlog_90d_value",
+            "high_risk_sku_count",
+            "avg_clearance_priority_score",
         ),
     )
 
@@ -76,9 +100,12 @@ def test_clearance_ranking_module_sql_asset():
         "CREATE OR REPLACE VIEW api.clearance_ranking_module AS",
         (
             "mart.inventory_backlog_base",
-            "mart.product_day_kpi",
             "estimated_turnover_days",
             "daily_avg_sales",
+            "stagnant_snapshot_count",
+            "estimated_stagnant_days",
+            "risk_level",
+            "clearance_priority_score",
             "inventory_value",
             "platform_code",
             "shop_id",

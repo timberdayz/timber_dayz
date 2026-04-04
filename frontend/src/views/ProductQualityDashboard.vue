@@ -259,7 +259,7 @@ const loadData = async () => {
     }
     
     // 查询所有产品用于统计（使用库存管理API）
-    const allProducts = await api._get('/products/products', {
+    const allProducts = await api._get('/inventory-overview/products', {
       params: {
         platform: filters.value.platform || undefined,
         page: 1,

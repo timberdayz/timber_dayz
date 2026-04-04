@@ -81,6 +81,10 @@ from .schema import (
     GRNLine,
     # 库存流水
     InventoryLedger,
+    InventoryLayer,
+    InventoryLayerConsumption,
+    InventoryAdjustmentHeader,
+    InventoryAdjustmentLine,
     # 发票管理
     InvoiceHeader,
     InvoiceLine,
@@ -226,6 +230,10 @@ __all__ = [
     "GRNHeader",
     "GRNLine",
     "InventoryLedger",
+    "InventoryLayer",
+    "InventoryLayerConsumption",
+    "InventoryAdjustmentHeader",
+    "InventoryAdjustmentLine",
     "InvoiceHeader",
     "InvoiceLine",
     "InvoiceAttachment",

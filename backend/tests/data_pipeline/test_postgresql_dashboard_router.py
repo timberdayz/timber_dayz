@@ -13,10 +13,12 @@ from backend.routers.dashboard_api_postgresql import (
     get_annual_summary_target_completion_postgresql,
     get_annual_summary_trend_postgresql,
     get_business_overview_comparison_postgresql,
+    get_business_overview_inventory_backlog_postgresql,
     get_business_overview_kpi_postgresql,
     get_business_overview_operational_metrics_postgresql,
     get_business_overview_shop_racing_postgresql,
     get_business_overview_traffic_ranking_postgresql,
+    get_clearance_ranking_postgresql,
     router,
 )
 
@@ -338,3 +340,70 @@ def test_postgresql_dashboard_router_exposes_compatibility_paths():
     assert "/api/dashboard/annual-summary/platform-share" in paths
     assert "/api/dashboard/annual-summary/by-shop" in paths
     assert "/api/dashboard/annual-summary/target-completion" in paths
+
+
+def test_postgresql_inventory_backlog_route_returns_summary_payload(monkeypatch):
+    class _ServiceStub:
+        async def get_business_overview_inventory_backlog(self, min_days):
+            return {
+                "summary": {"total_value": 1000, "backlog_30d_value": 300},
+                "top_products": [
+                    {
+                        "platform_code": "shopee",
+                        "platform_sku": "SKU-1",
+                        "estimated_turnover_days": 45,
+                        "risk_level": "medium",
+                        "clearance_priority_score": 123.4,
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_business_overview_inventory_backlog_postgresql(
+            request=_make_request("/api/dashboard/business-overview/inventory-backlog"),
+            days=30,
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["data"]["summary"]["total_value"] == 1000
+    assert body["data"]["top_products"][0]["risk_level"] == "medium"
+
+
+def test_postgresql_clearance_ranking_route_returns_priority_fields(monkeypatch):
+    class _ServiceStub:
+        async def get_clearance_ranking(self, limit):
+            return [
+                {
+                    "platform_code": "shopee",
+                    "platform_sku": "SKU-1",
+                    "estimated_turnover_days": 80,
+                    "estimated_stagnant_days": 14,
+                    "stagnant_snapshot_count": 3,
+                    "risk_level": "high",
+                    "clearance_priority_score": 456.7,
+                }
+            ]
+
+    monkeypatch.setattr(
+        "backend.routers.dashboard_api_postgresql.get_postgresql_dashboard_service",
+        lambda: _ServiceStub(),
+    )
+
+    response = asyncio.run(
+        get_clearance_ranking_postgresql(
+            request=_make_request("/api/dashboard/clearance-ranking"),
+            limit=10,
+        )
+    )
+
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["success"] is True
+    assert body["data"][0]["risk_level"] == "high"
+    assert body["data"][0]["clearance_priority_score"] == 456.7

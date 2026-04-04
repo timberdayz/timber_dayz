@@ -54,8 +54,15 @@ export const menuGroups = [
     order: 3,
     defaultExpanded: true,
     items: [
-      '/inventory-management',   // 库存管理（v4.10.0融合：产品管理+库存看板）
-      '/inventory-dashboard-v3', // 库存看板
+      '/inventory-management',   // 真实库存管理
+      '/inventory/opening-balances',
+      '/inventory/aging',
+      '/inventory/ledger',
+      '/inventory/adjustments',
+      '/inventory/grns',
+      '/inventory/alerts',
+      '/inventory/reconciliation',
+      '/inventory-overview',     // 库存总览
       '/inventory-health',       // v4.9.0: 库存健康仪表盘
       '/product-quality'         // v4.9.0: 产品质量仪表盘
     ]
@@ -234,6 +241,14 @@ export const routeDisplayNames = {
   '/hr-performance-display': '绩效公示',
   '/hr-shop-assignment': '人员店铺归属和提成比',
   '/target-management': '目标管理',
+  '/inventory-overview': '库存总览',
+  '/inventory/opening-balances': '期初余额',
+  '/inventory/aging': '库存库龄',
+  '/inventory/ledger': '库存流水',
+  '/inventory/adjustments': '库存调整',
+  '/inventory/grns': '入库单管理',
+  '/inventory/alerts': '库存预警',
+  '/inventory/reconciliation': '库存对账',
   '/inventory-dashboard-v3': '库存看板',
   // ⚠️ v4.12.0移除：数据浏览器功能已移除
   // '/data-browser': '数据浏览器',

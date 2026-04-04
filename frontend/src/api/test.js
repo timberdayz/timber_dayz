@@ -4,7 +4,8 @@
  */
 
 import api from './index'
-import inventoryApi from './inventory'
+import inventoryOverviewApi from './inventoryOverview'
+import inventoryDomainApi from './inventoryDomain'
 import financeApi from './finance'
 import ordersApi from './orders'
 
@@ -28,9 +29,9 @@ export async function testApiConnectivity() {
     { name: '获取数据域列表', fn: () => api.getDataDomains() },
     
     // 库存API测试
-    { name: '获取库存列表', fn: () => inventoryApi.getInventoryList({ page: 1, pageSize: 10 }) },
-    { name: '获取库存汇总', fn: () => inventoryApi.getInventorySummary({}) },
-    { name: '获取低库存预警', fn: () => inventoryApi.getLowStockAlert({}) },
+    { name: '获取库存总览列表', fn: () => inventoryOverviewApi.getProducts({ page: 1, page_size: 10 }) },
+    { name: '获取库存总览汇总', fn: () => inventoryOverviewApi.getSummary({}) },
+    { name: '获取库存管理结存', fn: () => inventoryDomainApi.getBalances({}) },
     
     // 财务API测试
     { name: '获取应收账款列表', fn: () => financeApi.getAccountsReceivable({ page: 1, pageSize: 10 }) },

@@ -707,7 +707,7 @@
       <el-card class="chart-card" shadow="hover">
         <template #header>
           <div class="card-header">
-            <span>库存滞销情况</span>
+            <span>库存积压与滞销风险</span>
             <div class="header-controls">
               <el-button size="small" @click="loadInventoryBacklog">
                 <el-icon><Refresh /></el-icon>
@@ -730,7 +730,7 @@
             </el-col>
             <el-col :span="6">
               <div class="summary-item">
-                <div class="summary-label">30天滞销</div>
+                <div class="summary-label">30天+预计周转库存</div>
                 <div class="summary-value danger">
                   {{ formatCurrency(inventorySummary.backlog_30d_value) }}
                 </div>
@@ -741,7 +741,7 @@
             </el-col>
             <el-col :span="6">
               <div class="summary-item">
-                <div class="summary-label">60天滞销</div>
+                <div class="summary-label">60天+预计周转库存</div>
                 <div class="summary-value warning">
                   {{ formatCurrency(inventorySummary.backlog_60d_value) }}
                 </div>
@@ -752,7 +752,7 @@
             </el-col>
             <el-col :span="6">
               <div class="summary-item">
-                <div class="summary-label">90天滞销</div>
+                <div class="summary-label">90天+预计周转库存</div>
                 <div class="summary-value danger">
                   {{ formatCurrency(inventorySummary.backlog_90d_value) }}
                 </div>
@@ -764,7 +764,7 @@
           </el-row>
         </div>
 
-        <!-- 滞销产品Top20 -->
+        <!-- 高积压风险产品Top20 -->
         <div class="inventory-table">
           <el-table
             :data="inventoryBacklogProducts"
@@ -786,46 +786,68 @@
             />
             <el-table-column prop="platform_sku" label="SKU" width="120" />
             <el-table-column
-              prop="total_stock"
-              label="库存数量"
+              prop="available_stock"
+              label="可用库存"
               width="100"
               align="right"
             />
             <el-table-column
-              prop="age_days"
-              label="滞销天数"
+              prop="estimated_turnover_days"
+              label="预计周转天数"
               width="100"
               align="right"
             >
               <template #default="{ row }">
-                <el-tag :type="getAgeTagType(row.age_days)" size="small">
-                  {{ row.age_days }}天
+                <el-tag :type="getAgeTagType(row.estimated_turnover_days)" size="small">
+                  {{ row.estimated_turnover_days }}天
                 </el-tag>
               </template>
             </el-table-column>
             <el-table-column
-              prop="backlog_value"
-              label="滞销价值"
+              prop="estimated_stagnant_days"
+              label="估算积压天数"
+              width="120"
+              align="right"
+            />
+            <el-table-column
+              prop="stagnant_snapshot_count"
+              label="连续积压快照数"
+              width="120"
+              align="right"
+            />
+            <el-table-column
+              prop="inventory_value"
+              label="积压价值"
               width="120"
               align="right"
             >
               <template #default="{ row }">
-                {{ formatCurrency(row.backlog_value) }}
+                {{ formatCurrency(row.inventory_value) }}
               </template>
             </el-table-column>
             <el-table-column
-              prop="backlog_category"
-              label="分类"
+              prop="risk_level"
+              label="风险等级"
               width="100"
               align="center"
             >
               <template #default="{ row }">
                 <el-tag
-                  :type="getCategoryTagType(row.backlog_category)"
+                  :type="getCategoryTagType(row.risk_level)"
                   size="small"
                 >
-                  {{ row.backlog_category }}
+                  {{ row.risk_level }}
                 </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column
+              prop="clearance_priority_score"
+              label="清理优先级"
+              width="120"
+              align="right"
+            >
+              <template #default="{ row }">
+                {{ Number(row.clearance_priority_score || 0).toFixed(2) }}
               </template>
             </el-table-column>
           </el-table>

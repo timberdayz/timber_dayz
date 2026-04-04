@@ -70,9 +70,9 @@ def test_api_startup():
         print("[4/5] Verifying new routes...")
         
         new_routes = [
-            ('/api/inventory/list', 'Inventory list'),
-            ('/api/inventory/detail', 'Inventory detail'),
-            ('/api/inventory/adjust', 'Inventory adjust'),
+            ('/api/inventory/balances', 'Inventory balances'),
+            ('/api/inventory/ledger', 'Inventory ledger'),
+            ('/api/inventory-overview/products', 'Inventory overview products'),
             ('/api/inventory/low-stock-alert', 'Low stock alert'),
             ('/api/finance/accounts-receivable', 'Accounts receivable'),
             ('/api/finance/record-payment', 'Record payment'),

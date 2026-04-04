@@ -58,14 +58,14 @@ from backend.routers import (
     data_pipeline,  # PostgreSQL dashboard pipeline observability API
     hr_management,  # Phase 3: HR管理API(员工管理、员工目标、考勤记录、绩效查询)
     test_api,
-    inventory,
+    inventory_domain,
+    inventory_overview,
     # finance,  # v4.17.0: 已删除(财务域表已删除,API路由已移除)
     auth,
     users,
     roles,
     notifications,  # v4.19.0: 系统通知API
     performance,
-    inventory_management,  # v4.10.0更新:库存管理API(原产品管理)
     system,  # v4.3.5: 系统配置API
     system_logs,  # v4.20.0: 系统日志API
     security,  # v4.20.0: 安全设置API
@@ -890,12 +890,17 @@ app.include_router(
     tags=["HR管理"]
 )
 
-# 业务模块路由
 app.include_router(
-    inventory.router,
-    prefix="/api/inventory",
+    inventory_domain.router,
     tags=["库存管理"]
 )
+
+app.include_router(
+    inventory_overview.router,
+    tags=["库存总览"]
+)
+
+# 业务模块路由
 
 # v4.17.0: 财务域API已删除(财务域表已删除,API路由已移除)
 # app.include_router(
@@ -955,11 +960,6 @@ app.include_router(
 )
 
 # v4.10.0更新:库存管理API(原产品管理)
-app.include_router(
-    inventory_management.router,
-    prefix="/api/products",
-    tags=["库存管理"]
-)
 
 # v4.3.5 系统配置API(白名单平台/域/粒度)
 app.include_router(

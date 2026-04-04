@@ -10,6 +10,10 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import logging
 
+from backend.services.inventory.sales_outbound_service import (
+    InventorySalesOutboundService,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +40,7 @@ class OrderAutomation:
                     shop_id,
                     order_id as platform_order_id,
                     product_surrogate_id,
+                    sku,
                     qty,
                     gmv_cny,
                     inventory_deducted,
@@ -113,6 +118,20 @@ class OrderAutomation:
                 "qty": order.qty,
                 "inventory_id": inventory.inventory_id
             })
+
+            outbound_result = None
+            if getattr(order, "sku", None):
+                outbound_result = InventorySalesOutboundService(db).post_sale_and_consume_layers(
+                    platform_code=order.platform_code,
+                    shop_id=order.shop_id,
+                    platform_sku=str(order.sku),
+                    qty_out=int(order.qty or 0),
+                    order_id=str(order.platform_order_id),
+                    transaction_date=datetime.now(),
+                    avg_cost_before=float(inventory.avg_cost or 0.0),
+                    qty_before=int(inventory.quantity_available or 0),
+                    created_by="order_automation",
+                )
             
             # 记录库存流水
             db.execute(text("""
@@ -163,7 +182,12 @@ class OrderAutomation:
             return {
                 "success": True,
                 "quantity_deducted": order.qty,
-                "remaining_available": inventory.quantity_available - order.qty
+                "remaining_available": inventory.quantity_available - order.qty,
+                "layer_consumptions": (
+                    outbound_result.get("consumption_rows")
+                    if outbound_result
+                    else 0
+                ),
             }
             
         except Exception as e:
@@ -630,4 +654,3 @@ class InventoryAutomation:
 #             logger.error(f"[ERROR] Failed to record payment: {e}")
 #             db.rollback()
 #             return {"success": False, "error": str(e)}
-
