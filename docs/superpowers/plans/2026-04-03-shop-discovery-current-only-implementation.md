@@ -6,6 +6,7 @@
 
 **Architecture:** The implementation keeps `shop_account` as the only formal target for component testing and collection, but moves login/bootstrap semantics to `main_account`. A new `shop_discovery(current_only)` capability is added behind backend services and account-management APIs; frontend account management becomes the standard discovery entry, while the component test page gets only a lightweight fallback trigger.
 
+**Session Rule:** All automation components must reuse the persistent session owned by `main_account_id`. `shop_account_id` is a business target only and must never own a separate persistent session, profile, or storage_state.
 **Tech Stack:** FastAPI, SQLAlchemy async, Pydantic, Vue 3, Pinia, Element Plus, Playwright runtime, pytest
 
 ---
@@ -254,6 +255,21 @@ session_owner_id = main_account_id
 shop_account_id = None
 ```
 
+<<<<<<< HEAD
+=======
+- [ ] **Step 5.1: Enforce the session ownership rule in runtime code paths**
+
+```python
+# allowed
+session_owner_id = account["main_account_id"]
+
+# forbidden
+session_owner_id = account["shop_account_id"]
+```
+
+Search for and eliminate any code path that creates persistent session state keyed by `shop_account_id` when `main_account_id` is available.
+
+>>>>>>> codex/shop-discovery-current-only
 - [ ] **Step 6: Keep shop-bound runtime only after discovery or explicit shop selection**
 
 ```python
@@ -408,6 +424,10 @@ Expected: Confirms the plan still matches the approved design.
 ```markdown
 - login is main-account scoped
 - shop discovery is the cold-start shop-binding entry
+<<<<<<< HEAD
+=======
+- all automation components reuse main-account persistent sessions
+>>>>>>> codex/shop-discovery-current-only
 ```
 
 - [ ] **Step 3: Run backend verification**

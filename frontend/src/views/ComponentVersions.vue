@@ -290,6 +290,15 @@
               :value="account.account_id"
             />
           </el-select>
+          <el-button
+            v-if="testAccounts.length === 0"
+            size="small"
+            type="warning"
+            plain
+            @click="openAccountManagementForDiscovery"
+          >
+            去账号管理探测店铺
+          </el-button>
 
           <template v-if="isCurrentTestExport">
             <span style="font-weight: 600;">时间方式:</span>
@@ -1111,6 +1120,10 @@ const loadTestAccounts = async (componentName) => {
     ElMessage.error('加载店铺账号列表失败: ' + error.message)
     testAccounts.value = []
   }
+}
+
+const openAccountManagementForDiscovery = () => {
+  window.location.hash = '#/account-management'
 }
 
 const startComponentTest = async () => {

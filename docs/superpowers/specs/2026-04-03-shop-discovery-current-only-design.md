@@ -32,6 +32,43 @@
 3. `shop_discovery(current_only)` 是第一版范围，只负责识别当前页面对应的店铺上下文。
 4. `shop_switch` 不进入第一版冷启动闭环；它属于后续 `enumerate_all` 扩展能力。
 5. 账号管理页是店铺探测的标准入口；组件测试页只保留兜底快捷入口。
+6. 所有自动化组件统一复用 `main_account_id` 对应的持久会话，禁止为 `shop_account_id` 单独创建持久会话。
+
+## 2.1 统一会话规则
+
+本设计将“谁拥有会话”和“当前操作哪个业务对象”彻底拆开：
+
+- `session_owner = main_account_id`
+- `business_target = shop_account_id`
+
+适用范围：
+
+- `login`
+- `navigation`
+- `shop_discovery`
+- `shop_switch`
+- `date_picker`
+- `export`
+- 其他任何平台自动化组件
+
+规则如下：
+
+1. 自动化组件默认运行在主账号级持久会话之上。
+2. `login` 是唯一允许创建或刷新主账号级持久会话的组件。
+3. `shop_account_id` 只用于业务目标、切店上下文、能力校验和结果归属。
+4. 禁止为 `shop_account_id` 建立独立的持久会话目录、独立的 `storage_state` 或独立的 profile。
+
+由此形成统一模型：
+
+```text
+main_account_id -> session owner
+shop_account_id -> business target
+```
+
+这条规则同样适用于冷启动：
+
+- 没有 `shop_account_id` 时，仍然可以先基于 `main_account_id` 运行 `login -> navigation -> shop_discovery`
+- 探测成功后才创建或绑定 `shop_account`
 
 ## 3. 组件分层
 
@@ -43,6 +80,7 @@
 
 - 恢复或建立主账号登录态
 - 管理主账号级 `profile / storage_state / session`
+- 刷新主账号级持久会话，但不负责店铺业务归属
 
 输入：
 
@@ -79,6 +117,7 @@
 
 - 在已登录浏览器上下文中识别“当前页面正在操作哪个店铺”
 - 产出结构化店铺发现结果与证据
+- 复用主账号级持久会话，不创建店铺级会话
 
 第一版模式：
 
@@ -93,6 +132,7 @@
 
 - `shop_switch` 负责切店或枚举店铺
 - `export` 负责业务采集
+- 两者都必须运行在 `main_account_id` 的持久会话上，只消费 `shop_account` 上下文
 
 这两个组件不属于本次冷启动最小闭环的必需依赖。
 

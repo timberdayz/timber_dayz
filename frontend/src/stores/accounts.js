@@ -22,11 +22,18 @@ function resolveMainAccountId(payload) {
   return String(payload.parent_account || payload.account_id || '').trim()
 }
 
+function resolveMainAccountName(payload) {
+  return String(payload.main_account_name || '').trim()
+}
+
 export const useAccountsStore = defineStore('accounts', {
   state: () => ({
     accounts: [],
     mainAccounts: [],
     pendingPlatformShopDiscoveries: [],
+    currentDiscoveryResult: null,
+    currentDiscoveryError: '',
+    discoveryRunning: false,
     unmatchedShopAliases: [],
     stats: {
       total: 0,
@@ -60,13 +67,19 @@ export const useAccountsStore = defineStore('accounts', {
 
       try {
         const mergedParams = { ...this.filters, ...params }
+        const defaultEnabled = mergedParams.include_disabled ? mergedParams.enabled : true
         const [shopAccounts, mainAccounts, pendingDiscoveries] = await Promise.all([
-          accountsApi.listShopAccounts(mergedParams),
+          accountsApi.listShopAccounts({
+            ...mergedParams,
+            enabled: defaultEnabled,
+          }),
           accountsApi.listMainAccounts(),
           accountsApi.listPlatformShopDiscoveries(),
         ])
         this.accounts = (shopAccounts || []).map(normalizeShopAccount)
-        this.mainAccounts = mainAccounts || []
+        this.mainAccounts = (mainAccounts || []).filter((item) =>
+          mergedParams.include_disabled ? true : item.enabled
+        )
         this.pendingPlatformShopDiscoveries = pendingDiscoveries || []
       } catch (error) {
         console.error('加载店铺账号列表失败:', error)
@@ -96,6 +109,39 @@ export const useAccountsStore = defineStore('accounts', {
       }
     },
 
+    async runCurrentShopDiscovery(mainAccountId, payload = {}) {
+      this.discoveryRunning = true
+      this.currentDiscoveryError = ''
+      try {
+        const response = await accountsApi.runCurrentShopDiscovery(mainAccountId, payload)
+        this.currentDiscoveryResult = response
+        await this.loadAccounts({}, false)
+        return response
+      } catch (error) {
+        this.currentDiscoveryResult = null
+        this.currentDiscoveryError = error.response?.data?.detail || error.message || '店铺探测失败'
+        throw error
+      } finally {
+        this.discoveryRunning = false
+      }
+    },
+
+    async createShopAccountFromDiscovery(discoveryId, payload) {
+      this.discoveryRunning = true
+      this.currentDiscoveryError = ''
+      try {
+        const response = await accountsApi.createShopAccountFromDiscovery(discoveryId, payload)
+        await this.loadAccounts({}, false)
+        await this.loadStats()
+        return response
+      } catch (error) {
+        this.currentDiscoveryError = error.response?.data?.detail || error.message || '基于探测创建店铺账号失败'
+        throw error
+      } finally {
+        this.discoveryRunning = false
+      }
+    },
+
     async createAccount(data) {
       this.loading = true
       try {
@@ -107,6 +153,7 @@ export const useAccountsStore = defineStore('accounts', {
           await accountsApi.createMainAccount({
             platform: data.platform,
             main_account_id: mainAccountId,
+            main_account_name: resolveMainAccountName(data) || null,
             username: data.username,
             password: data.password,
             login_url: data.login_url,
@@ -167,6 +214,7 @@ export const useAccountsStore = defineStore('accounts', {
 
         if (current.parent_account) {
           const mainPayload = {}
+          if (data.main_account_name !== undefined) mainPayload.main_account_name = data.main_account_name
           if (data.username) mainPayload.username = data.username
           if (data.password) mainPayload.password = data.password
           if (data.login_url !== undefined) mainPayload.login_url = data.login_url
@@ -217,6 +265,7 @@ export const useAccountsStore = defineStore('accounts', {
           await accountsApi.createMainAccount({
             platform: batchData.platform,
             main_account_id: batchData.parent_account,
+            main_account_name: batchData.main_account_name || null,
             username: batchData.username,
             password: batchData.password,
             enabled: true,

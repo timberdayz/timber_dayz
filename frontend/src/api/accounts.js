@@ -57,6 +57,14 @@ export default {
     return await api.post(`/platform-shop-discoveries/${discoveryId}/confirm`, data)
   },
 
+  async runCurrentShopDiscovery(mainAccountId, data = {}) {
+    return await api.post(`/main-accounts/${mainAccountId}/shop-discovery/current`, data)
+  },
+
+  async createShopAccountFromDiscovery(discoveryId, data) {
+    return await api.post(`/platform-shop-discoveries/${discoveryId}/create-shop-account`, data)
+  },
+
   async getUnmatchedShopAliases() {
     return await api.get('/shop-account-aliases/unmatched')
   },

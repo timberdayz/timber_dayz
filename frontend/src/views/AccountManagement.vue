@@ -84,6 +84,15 @@
           </el-select>
         </el-col>
         <el-col :span="4">
+          <el-switch
+            v-model="filters.include_disabled"
+            inline-prompt
+            active-text="显示历史记录"
+            inactive-text="隐藏历史记录"
+            @change="handleFilterChange"
+          />
+        </el-col>
+        <el-col :span="4">
           <el-select v-model="filters.shop_type" placeholder="店铺类型" clearable @change="handleFilterChange">
             <el-option label="本地店" value="local" />
             <el-option label="全球店" value="global" />
@@ -120,6 +129,33 @@
           </el-button>
         </el-col>
       </el-row>
+      <el-row :gutter="10" class="erp-mt-md">
+        <el-col :span="8">
+          <el-select
+            v-model="selectedMainAccountId"
+            placeholder="选择主账号后探测当前店铺"
+            clearable
+            class="erp-w-full"
+          >
+            <el-option
+              v-for="mainAccount in accountsStore.mainAccounts"
+              :key="`${mainAccount.platform}-${mainAccount.main_account_id}`"
+              :label="`${mainAccount.platform} / ${mainAccount.main_account_name || mainAccount.username || mainAccount.main_account_id} / ${mainAccount.main_account_id}`"
+              :value="mainAccount.main_account_id"
+            />
+          </el-select>
+        </el-col>
+        <el-col :span="8">
+          <el-button
+            type="warning"
+            @click="handleDiscoverCurrentShop"
+            :loading="accountsStore.discoveryRunning"
+            :disabled="!selectedMainAccountId"
+          >
+            探测当前店铺
+          </el-button>
+        </el-col>
+      </el-row>
     </el-card>
 
     <!-- 账号列表 -->
@@ -131,6 +167,11 @@
         height="500"
       >
         <el-table-column prop="platform" label="平台" width="100" />
+        <el-table-column label="主账号名称" width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ getMainAccountDisplayName(row) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="parent_account" label="主账号ID" width="180" show-overflow-tooltip />
         <el-table-column prop="account_id" label="店铺账号ID" width="180" show-overflow-tooltip />
         <el-table-column prop="account_alias" label="店铺别名" width="180" show-overflow-tooltip>
@@ -235,6 +276,11 @@
               <div class="form-tip">用于共享登录身份、持久会话和浏览器 profile</div>
             </el-form-item>
             
+            <el-form-item label="主账号名称">
+              <el-input v-model="accountForm.main_account_name" placeholder="如：Shopee 新加坡主体" />
+              <div class="form-tip">用于页面显示和人工识别，不影响系统内部主账号ID</div>
+            </el-form-item>
+            
             <el-form-item label="店铺类型">
               <el-radio-group v-model="accountForm.shop_type" @change="handleShopTypeChange">
                 <el-radio label="local">本地店铺</el-radio>
@@ -256,7 +302,7 @@
           
           <!-- 登录信息 -->
           <el-tab-pane label="主账号登录信息" name="login">
-            <el-form-item label="用户名" prop="username">
+            <el-form-item label="登录用户名" prop="username">
               <el-input v-model="accountForm.username" placeholder="登录用户名" />
             </el-form-item>
             
@@ -424,6 +470,44 @@
         <el-button type="primary" @click="handleBatchCreate" :loading="accountsStore.loading">批量创建</el-button>
       </template>
     </el-dialog>
+    <el-dialog
+      v-model="showDiscoveryDialog"
+      title="当前店铺探测结果"
+      width="720px"
+      :close-on-click-modal="false"
+    >
+      <el-alert
+        v-if="accountsStore.currentDiscoveryError"
+        type="error"
+        :title="accountsStore.currentDiscoveryError"
+        :closable="false"
+        show-icon
+        class="erp-mb-md"
+      />
+      <template v-if="accountsStore.currentDiscoveryResult">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="主账号ID">{{ accountsStore.currentDiscoveryResult.main_account_id }}</el-descriptions-item>
+          <el-descriptions-item label="平台">{{ accountsStore.currentDiscoveryResult.platform }}</el-descriptions-item>
+          <el-descriptions-item label="匹配状态">{{ accountsStore.currentDiscoveryResult.match?.status || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="店铺名">{{ accountsStore.currentDiscoveryResult.discovery?.detected_store_name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="平台店铺ID">{{ accountsStore.currentDiscoveryResult.discovery?.detected_platform_shop_id || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="区域">{{ accountsStore.currentDiscoveryResult.discovery?.detected_region || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="URL">{{ accountsStore.currentDiscoveryResult.discovery?.current_url || '-' }}</el-descriptions-item>
+        </el-descriptions>
+        <div class="erp-mt-lg" v-if="accountsStore.currentDiscoveryResult.match?.status === 'no_match'">
+          <el-button
+            type="primary"
+            @click="handleCreateShopAccountFromDiscovery"
+            :loading="accountsStore.discoveryRunning"
+          >
+            基于探测结果创建店铺账号
+          </el-button>
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="showDiscoveryDialog = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -453,6 +537,7 @@ const domainLabels = {
 const filters = reactive({
   platform: null,
   enabled: null,
+  include_disabled: false,
   shop_type: null,
   search: ''
 })
@@ -463,8 +548,10 @@ const platformOptions = computed(() => accountsStore.platformList)
 // 对话框状态
 const showCreateDialog = ref(false)
 const showBatchDialog = ref(false)
+const showDiscoveryDialog = ref(false)
 const activeTab = ref('basic')
 const editingAccount = ref(null)
+const selectedMainAccountId = ref('')
 
 // 表单引用
 const accountFormRef = ref(null)
@@ -473,6 +560,7 @@ const accountFormRef = ref(null)
 const accountForm = reactive({
   account_id: '',
   parent_account: '',
+  main_account_name: '',
   platform: 'shopee',
   account_alias: '',
   store_name: '',
@@ -515,6 +603,7 @@ const formRules = computed(() => ({
 // 批量表单
 const batchForm = reactive({
   parent_account: '',
+  main_account_name: '',
   platform: 'shopee',
   username: '',
   password: '',
@@ -565,6 +654,72 @@ async function handleRefresh() {
   ElMessage.success('刷新成功')
 }
 
+function resolveMainAccountRecord(mainAccountId) {
+  return (accountsStore.mainAccounts || []).find((item) => item.main_account_id === mainAccountId) || null
+}
+
+function getMainAccountDisplayName(account) {
+  const mainAccount = resolveMainAccountRecord(account.parent_account)
+  return (
+    mainAccount?.main_account_name
+    || mainAccount?.username
+    || account.parent_account
+    || '-'
+  )
+}
+
+async function handleDiscoverCurrentShop() {
+  if (!selectedMainAccountId.value) {
+    ElMessage.warning('请先选择主账号')
+    return
+  }
+
+  try {
+    await accountsStore.runCurrentShopDiscovery(selectedMainAccountId.value, {
+      mode: 'current_only',
+      reuse_session: true,
+      capture_evidence: true
+    })
+  } catch (error) {
+    console.error('店铺探测失败:', error)
+  } finally {
+    showDiscoveryDialog.value = true
+  }
+}
+
+async function handleCreateShopAccountFromDiscovery() {
+  const result = accountsStore.currentDiscoveryResult
+  if (!result) return
+
+  const discovery = (accountsStore.pendingPlatformShopDiscoveries || []).find((item) => {
+    return item.main_account_id === result.main_account_id
+      && item.detected_platform_shop_id === result.discovery?.detected_platform_shop_id
+  })
+
+  if (!discovery?.id) {
+    ElMessage.warning('当前探测结果未找到可创建的 discovery 记录')
+    return
+  }
+
+  const storeName = result.discovery?.detected_store_name || 'discovered_shop'
+  const region = String(result.discovery?.detected_region || 'unknown').toLowerCase()
+  const shopAccountId = `${result.platform}_${region}_${String(storeName).replace(/\s+/g, '_').toLowerCase()}`
+
+  try {
+    await accountsStore.createShopAccountFromDiscovery(discovery.id, {
+      shop_account_id: shopAccountId,
+      store_name: storeName,
+      shop_region: result.discovery?.detected_region || null,
+      shop_type: 'local',
+      notes: 'created from current shop discovery'
+    })
+    ElMessage.success('已基于探测结果创建店铺账号')
+    showDiscoveryDialog.value = false
+  } catch (error) {
+    console.error('基于探测结果创建店铺账号失败:', error)
+  }
+}
+
 /**
  * 导入
  */
@@ -573,18 +728,20 @@ async function handleRefresh() {
  */
 function handleEdit(account) {
   editingAccount.value = account
+  const mainAccount = resolveMainAccountRecord(account.parent_account)
   Object.assign(accountForm, {
     account_id: account.account_id,
     parent_account: account.parent_account || '',
+    main_account_name: mainAccount?.main_account_name || '',
     platform: account.platform,
     account_alias: account.account_alias || '',
     store_name: account.store_name,
     shop_type: account.shop_type || 'local',
     shop_region: account.shop_region || '',
     shop_id: account.shop_id || '',  // ⭐ v4.18.1新增
-    username: account.username,
+    username: mainAccount?.username || account.username || '',
     password: '', // 不显示密码
-    login_url: account.login_url || '',
+    login_url: mainAccount?.login_url || account.login_url || '',
     email: account.email || '',
     phone: account.phone || '',
     region: account.region || 'CN',
@@ -639,6 +796,7 @@ function resetForm() {
   Object.assign(accountForm, {
     account_id: '',
     parent_account: '',
+    main_account_name: '',
     platform: 'shopee',
     account_alias: '',
     store_name: '',
@@ -755,6 +913,7 @@ async function handleBatchCreate() {
     // 重置表单
     Object.assign(batchForm, {
       parent_account: '',
+      main_account_name: '',
       platform: 'shopee',
       username: '',
       password: '',
