@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import authApi from '@/api/auth'
 import { useUserStore } from '@/stores/user'
 import { normalizeRoleCode, applyRolePermissions } from '@/config/rolePermissions'
+import { hasAnyRole, hasPermissionForRoles } from '@/utils/authRoles'
 import {
   clearPersistedAuthState,
   hasAnyPersistedAuthArtifact,
@@ -150,17 +151,11 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const hasPermission = (permission) => {
-    if (!user.value || !user.value.roles) return false
-    if (user.value.roles.includes('admin')) return true
-    return true
+    return hasPermissionForRoles(user.value?.roles, permission)
   }
 
   const hasRole = (roles) => {
-    if (!user.value || !user.value.roles) return false
-    if (Array.isArray(roles)) {
-      return roles.some((role) => user.value.roles.includes(role))
-    }
-    return user.value.roles.includes(roles)
+    return hasAnyRole(user.value?.roles, roles)
   }
 
   const initAuth = () => {
