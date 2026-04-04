@@ -195,7 +195,7 @@
                   "
                   size="small"
                 >
-                  {{ operationalMetrics.monthly_achievement_rate }}%
+                  {{ formatNullablePercent(operationalMetrics.monthly_achievement_rate) }}
                 </el-tag>
               </div>
             </div>
@@ -204,11 +204,7 @@
               <div class="metric-label">经营结果</div>
               <div class="metric-value">
                 <el-tag
-                  :type="
-                    operationalMetrics.operating_result >= 0
-                      ? 'success'
-                      : 'danger'
-                  "
+                  :type="getOperatingResultTagType(operationalMetrics.operating_result)"
                   size="small"
                 >
                   {{ operationalMetrics.operating_result_text }}
@@ -225,8 +221,8 @@
                   :type="getTimeGapTagType(operationalMetrics.time_gap)"
                   size="small"
                 >
-                  {{ operationalMetrics.time_gap > 0 ? "+" : ""
-                  }}{{ operationalMetrics.time_gap }}%
+                  {{ operationalMetrics.time_gap != null && operationalMetrics.time_gap > 0 ? "+" : ""
+                  }}{{ formatNullablePercent(operationalMetrics.time_gap) }}
                 </el-tag>
               </div>
             </div>
@@ -1787,17 +1783,17 @@ const operationalDate = ref(
   })()
 )
 const operationalMetrics = ref({
-  monthly_target: 0,
-  monthly_total_achieved: 0,
-  today_sales: 0,
-  monthly_achievement_rate: 0,
-  time_gap: 0,
-  estimated_gross_profit: 0,
-  estimated_expenses: 0,
-  operating_result: 0,
+  monthly_target: null,
+  monthly_total_achieved: null,
+  today_sales: null,
+  monthly_achievement_rate: null,
+  time_gap: null,
+  estimated_gross_profit: null,
+  estimated_expenses: null,
+  operating_result: null,
   operating_result_text: '--',
-  monthly_order_count: 0,
-  today_order_count: 0
+  monthly_order_count: null,
+  today_order_count: null
 })
 
 // 图表实例
@@ -1852,6 +1848,7 @@ const getCategoryTagType = (category) => {
 
 // 获取达成率标签类型
 const getAchievementRateTagType = (rate) => {
+  if (rate === null || rate === undefined || Number.isNaN(Number(rate))) return 'info'
   if (rate >= 100) return 'success'
   if (rate >= 80) return 'warning'
   return 'danger'
@@ -1859,10 +1856,19 @@ const getAchievementRateTagType = (rate) => {
 
 // 获取时间GAP标签类型
 const getTimeGapTagType = (gap) => {
+  if (gap === null || gap === undefined || Number.isNaN(Number(gap))) return 'info'
   if (gap > 0) return 'success'
   if (gap < 0) return 'danger'
   return 'info'
 }
+
+const getOperatingResultTagType = (value) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'info'
+  return Number(value) >= 0 ? 'success' : 'danger'
+}
+
+const formatNullablePercent = (value, decimals = 2) =>
+  value != null && !Number.isNaN(Number(value)) ? `${Number(value).toFixed(decimals)}%` : '--'
 
 // 核心KPI 筛选变化时同时刷新 KPI 与经营指标
 const onKpiMonthChange = () => {
@@ -2027,9 +2033,9 @@ const loadComparisonData = async () => {
       date: dateStr
     }
     if (kpiPlatform.value) {
-      params.platforms = kpiPlatform.value
+      params.platform = kpiPlatform.value
     }
-    console.log(`[loadComparisonData] granularity=${params.granularity}, date=${params.date}${params.platforms ? `, platform=${params.platforms}` : ''}`)
+    console.log(`[loadComparisonData] granularity=${params.granularity}, date=${params.date}${params.platform ? `, platform=${params.platform}` : ''}`)
 
     const response = await api.getBusinessOverviewComparison(params)
 
@@ -2281,7 +2287,8 @@ const loadShopRacingData = async () => {
     const response = await api.getBusinessOverviewShopRacing({
       granularity: shopRacingGranularity.value,
       date: dateStr,
-      group_by: racingGroupBy.value
+      group_by: racingGroupBy.value,
+      platform: kpiPlatform.value || undefined
     })
 
     // 后端已转为 { name, target, achieved, achievement_rate, rank } 数组
@@ -2317,17 +2324,17 @@ const loadOperationalMetrics = async () => {
     // 响应拦截器已处理success字段，直接使用data
     if (response) {
       operationalMetrics.value = {
-        monthly_target: response.monthly_target || 0,
-        monthly_total_achieved: response.monthly_total_achieved || 0,
-        today_sales: response.today_sales || 0,
-        monthly_achievement_rate: response.monthly_achievement_rate || 0,
-        time_gap: response.time_gap || 0,
-        estimated_gross_profit: response.estimated_gross_profit || 0,
-        estimated_expenses: response.estimated_expenses || 0,
-        operating_result: response.operating_result || 0,
-        operating_result_text: response.operating_result_text || '--',
-        monthly_order_count: response.monthly_order_count || 0,
-        today_order_count: response.today_order_count || 0
+        monthly_target: response.monthly_target ?? null,
+        monthly_total_achieved: response.monthly_total_achieved ?? null,
+        today_sales: response.today_sales ?? null,
+        monthly_achievement_rate: response.monthly_achievement_rate ?? null,
+        time_gap: response.time_gap ?? null,
+        estimated_gross_profit: response.estimated_gross_profit ?? null,
+        estimated_expenses: response.estimated_expenses ?? null,
+        operating_result: response.operating_result ?? null,
+        operating_result_text: response.operating_result_text ?? '--',
+        monthly_order_count: response.monthly_order_count ?? null,
+        today_order_count: response.today_order_count ?? null
       }
     }
   } catch (error) {
@@ -2369,6 +2376,9 @@ const loadTrafficRanking = async () => {
       granularity: gr,
       dimension: trafficRankingDimension.value,
       date: dateStr
+    }
+    if (kpiPlatform.value) {
+      params.platform = kpiPlatform.value
     }
 
     const response = await api.getBusinessOverviewTrafficRanking(params)

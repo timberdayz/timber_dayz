@@ -205,7 +205,7 @@ def test_postgresql_annual_summary_target_completion_route_returns_service_paylo
 
 def test_postgresql_shop_racing_route_returns_service_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_shop_racing(self, granularity, target_date, group_by):
+        async def get_business_overview_shop_racing(self, granularity, target_date, group_by, platform):
             return [{"name": "shop-a", "gmv": 100, "rank": 1}]
 
     monkeypatch.setattr(
@@ -219,6 +219,7 @@ def test_postgresql_shop_racing_route_returns_service_payload(monkeypatch):
             granularity="monthly",
             date="2026-03-01",
             group_by="shop",
+            platform="shopee",
             platforms=None,
         )
     )
@@ -230,7 +231,7 @@ def test_postgresql_shop_racing_route_returns_service_payload(monkeypatch):
 
 def test_postgresql_traffic_ranking_route_returns_service_payload(monkeypatch):
     class _ServiceStub:
-        async def get_business_overview_traffic_ranking(self, granularity, target_date, dimension):
+        async def get_business_overview_traffic_ranking(self, granularity, target_date, dimension, platform):
             return [{"name": "shop-a", "visitor_count": 100, "rank": 1}]
 
     monkeypatch.setattr(
@@ -244,6 +245,7 @@ def test_postgresql_traffic_ranking_route_returns_service_payload(monkeypatch):
             granularity="monthly",
             dimension="visitor",
             date="2026-03-01",
+            platform="shopee",
             platforms=None,
             shops=None,
         )
@@ -259,10 +261,11 @@ async def test_postgresql_traffic_ranking_route_accepts_date_value_alias(monkeyp
     captured = {}
 
     class _ServiceStub:
-        async def get_business_overview_traffic_ranking(self, granularity, target_date, dimension):
+        async def get_business_overview_traffic_ranking(self, granularity, target_date, dimension, platform):
             captured["granularity"] = granularity
             captured["target_date"] = target_date
             captured["dimension"] = dimension
+            captured["platform"] = platform
             return [{"name": "shop-a", "visitor_count": 100, "rank": 1}]
 
     monkeypatch.setattr(
@@ -283,6 +286,7 @@ async def test_postgresql_traffic_ranking_route_accepts_date_value_alias(monkeyp
                 "granularity": "monthly",
                 "dimension": "shop",
                 "date_value": "2026-03-01",
+                "platform": "shopee",
             },
         )
 
@@ -293,6 +297,7 @@ async def test_postgresql_traffic_ranking_route_accepts_date_value_alias(monkeyp
         "granularity": "monthly",
         "target_date": "2026-03-01",
         "dimension": "shop",
+        "platform": "shopee",
     }
 
 

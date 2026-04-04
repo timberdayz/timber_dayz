@@ -2052,8 +2052,7 @@ export default {
     if (params.month) queryParams.append("month", params.month);
     if (params.platform) queryParams.append("platform", params.platform);
     // 保留旧参数用于兼容
-    if (params.platforms) queryParams.append("platforms", params.platforms);
-    if (params.shops) queryParams.append("shops", params.shops);
+    if (params.platform) queryParams.append("platform", params.platform);
     if (params.start_date) queryParams.append("start_date", params.start_date);
     if (params.end_date) queryParams.append("end_date", params.end_date);
     const queryString = queryParams.toString();
@@ -2067,7 +2066,7 @@ export default {
     const queryParams = new URLSearchParams();
     queryParams.append("granularity", params.granularity);
     queryParams.append("date", params.date);
-    if (params.platforms) queryParams.append("platforms", params.platforms);
+    if (params.platform) queryParams.append("platform", params.platform);
     if (params.shops) queryParams.append("shops", params.shops);
     return await this._get(
       `/dashboard/business-overview/comparison?${queryParams.toString()}`,
@@ -2080,7 +2079,7 @@ export default {
     queryParams.append("granularity", params.granularity);
     queryParams.append("date", params.date);
     queryParams.append("group_by", params.group_by || "shop");
-    if (params.platforms) queryParams.append("platforms", params.platforms);
+    if (params.platform) queryParams.append("platform", params.platform);
     return await this._get(
       `/dashboard/business-overview/shop-racing?${queryParams.toString()}`,
     );
@@ -2093,8 +2092,7 @@ export default {
       queryParams.append("granularity", params.granularity);
     if (params.dimension) queryParams.append("dimension", params.dimension);
     if (params.date) queryParams.append("date_value", params.date); // 后端API使用date_value参数
-    if (params.platforms) queryParams.append("platforms", params.platforms);
-    if (params.shops) queryParams.append("shops", params.shops);
+    if (params.platform) queryParams.append("platform", params.platform);
     const queryString = queryParams.toString();
     return await this._get(
       `/dashboard/business-overview/traffic-ranking${
@@ -2106,8 +2104,6 @@ export default {
   async getBusinessOverviewInventoryBacklog(params = {}) {
     const queryParams = new URLSearchParams();
     if (params.days) queryParams.append("days", params.days);
-    if (params.platforms) queryParams.append("platforms", params.platforms);
-    if (params.shops) queryParams.append("shops", params.shops);
     const queryString = queryParams.toString();
     return await this._get(
       `/dashboard/business-overview/inventory-backlog${

@@ -749,7 +749,7 @@ def test_rank_traffic_rows_by_page_views():
 
 @pytest.mark.pg_only
 @pytest.mark.asyncio
-async def test_postgresql_dashboard_service_reads_real_kpi_chain(monkeypatch):
+async def test_postgresql_dashboard_service_monthly_kpi_does_not_fallback_from_daily(monkeypatch):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from testcontainers.postgres import PostgresContainer
@@ -842,11 +842,11 @@ async def test_postgresql_dashboard_service_reads_real_kpi_chain(monkeypatch):
         service = PostgresqlDashboardService()
         result = await service.get_business_overview_kpi("2026-03-01", None)
 
-        assert result["gmv"] == 100
-        assert result["order_count"] == 1
-        assert result["visitor_count"] == 200
-        assert result["avg_order_value"] == 100
-        assert result["attach_rate"] == 12
+        assert result["gmv"] is None
+        assert result["order_count"] is None
+        assert result["visitor_count"] is None
+        assert result["avg_order_value"] is None
+        assert result["attach_rate"] is None
 
         await engine.dispose()
 

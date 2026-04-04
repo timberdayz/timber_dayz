@@ -14,13 +14,12 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.database import get_async_db
 from backend.services.postgresql_dashboard_service import get_postgresql_dashboard_service
 from backend.utils.api_response import error_response, success_response
 from backend.utils.error_codes import ErrorCode
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -52,8 +51,8 @@ async def _resolve_cached_payload(
 @router.get("/business-overview/kpi")
 async def get_business_overview_kpi_postgresql(
     request: Request,
-    month: Optional[str] = Query(None, description="月份(格式:YYYY-MM-DD,传入月初日期)"),
-    platform: Optional[str] = Query(None, description="平台代码(可选)"),
+    month: Optional[str] = Query(None, description="month in YYYY-MM-DD (first day of month)"),
+    platform: Optional[str] = Query(None, description="single platform code"),
 ):
     from datetime import datetime
 
@@ -86,9 +85,9 @@ async def get_business_overview_kpi_postgresql(
 @router.get("/business-overview/comparison")
 async def get_business_overview_comparison_postgresql(
     request: Request,
-    granularity: str = Query(..., description="时间粒度(daily/weekly/monthly)"),
-    date: str = Query(..., description="日期(YYYY-MM-DD 或 YYYY-MM)"),
-    platform: Optional[str] = Query(None, description="平台代码"),
+    granularity: str = Query(..., description="daily/weekly/monthly"),
+    date: str = Query(..., description="date in YYYY-MM-DD or YYYY-MM"),
+    platform: Optional[str] = Query(None, description="single platform code"),
 ):
     try:
         params = {"granularity": granularity, "date": date, "platform": platform}
@@ -120,8 +119,8 @@ async def get_business_overview_comparison_postgresql(
 @router.get("/annual-summary/kpi")
 async def get_annual_summary_kpi_postgresql(
     request: Request,
-    granularity: str = Query(..., description="粒度(monthly|yearly)"),
-    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    granularity: str = Query(..., description="monthly|yearly"),
+    period: str = Query(..., description="YYYY-MM or YYYY"),
 ):
     try:
         params = {"granularity": granularity, "period": period}
@@ -149,13 +148,20 @@ async def get_annual_summary_kpi_postgresql(
 @router.get("/business-overview/shop-racing")
 async def get_business_overview_shop_racing_postgresql(
     request: Request,
-    granularity: str = Query(..., description="时间粒度"),
-    date: str = Query(..., description="日期"),
-    group_by: str = Query("shop", description="分组维度"),
-    platforms: Optional[str] = Query(None, description="平台代码(逗号分隔)"),
+    granularity: str = Query(..., description="granularity"),
+    date: str = Query(..., description="date"),
+    group_by: str = Query("shop", description="grouping dimension"),
+    platform: Optional[str] = Query(None, description="single platform code"),
+    platforms: Optional[str] = Query(None, description="legacy comma-separated platform list"),
 ):
     try:
-        params = {"granularity": granularity, "date": date, "group_by": group_by, "platforms": platforms}
+        effective_platform = platform or (platforms.split(",")[0].strip() if platforms else None)
+        params = {
+            "granularity": granularity,
+            "date": date,
+            "group_by": group_by,
+            "platform": effective_platform,
+        }
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
@@ -164,6 +170,7 @@ async def get_business_overview_shop_racing_postgresql(
                 granularity=granularity,
                 target_date=date,
                 group_by=group_by,
+                platform=effective_platform,
             )
             return json.loads(success_response(data=result).body.decode())
 
@@ -184,18 +191,25 @@ async def get_business_overview_shop_racing_postgresql(
 @router.get("/business-overview/traffic-ranking")
 async def get_business_overview_traffic_ranking_postgresql(
     request: Request,
-    granularity: str = Query(..., description="时间粒度"),
-    dimension: str = Query("visitor", description="排序维度"),
-    date: Optional[str] = Query(None, description="日期"),
+    granularity: str = Query(..., description="granularity"),
+    dimension: str = Query("visitor", description="ranking dimension"),
+    date: Optional[str] = Query(None, description="date"),
     date_value: Optional[str] = Query(None, description="legacy date alias"),
-    platforms: Optional[str] = Query(None, description="平台代码(逗号分隔)"),
-    shops: Optional[str] = Query(None, description="店铺ID(逗号分隔)"),
+    platform: Optional[str] = Query(None, description="single platform code"),
+    platforms: Optional[str] = Query(None, description="legacy comma-separated platform list"),
+    shops: Optional[str] = Query(None, description="legacy shop filter (currently unused)"),
 ):
     try:
         target_date = date or date_value
         if not target_date:
             raise ValueError("date is required")
-        params = {"granularity": granularity, "dimension": dimension, "date": target_date}
+        effective_platform = platform or (platforms.split(",")[0].strip() if platforms else None)
+        params = {
+            "granularity": granularity,
+            "dimension": dimension,
+            "date": target_date,
+            "platform": effective_platform,
+        }
         cache_params = _normalize_cache_params(params)
 
         async def _produce_payload():
@@ -204,6 +218,7 @@ async def get_business_overview_traffic_ranking_postgresql(
                 granularity=granularity,
                 target_date=target_date,
                 dimension=dimension,
+                platform=effective_platform,
             )
             return json.loads(success_response(data=result).body.decode())
 
@@ -224,7 +239,7 @@ async def get_business_overview_traffic_ranking_postgresql(
 @router.get("/business-overview/inventory-backlog")
 async def get_business_overview_inventory_backlog_postgresql(
     request: Request,
-    days: Optional[int] = Query(30, description="积压天数阈值"),
+    days: Optional[int] = Query(30, description="minimum turnover days"),
 ):
     try:
         params = {"days": days}
@@ -252,8 +267,8 @@ async def get_business_overview_inventory_backlog_postgresql(
 @router.get("/business-overview/operational-metrics")
 async def get_business_overview_operational_metrics_postgresql(
     request: Request,
-    month: Optional[str] = Query(None, description="月份,格式 YYYY-MM-DD 月初"),
-    platform: Optional[str] = Query(None, description="平台代码"),
+    month: Optional[str] = Query(None, description="month in YYYY-MM-DD"),
+    platform: Optional[str] = Query(None, description="single platform code"),
 ):
     from datetime import datetime
 
@@ -289,7 +304,7 @@ async def get_business_overview_operational_metrics_postgresql(
 @router.get("/clearance-ranking")
 async def get_clearance_ranking_postgresql(
     request: Request,
-    limit: int = Query(100, description="返回数量"),
+    limit: int = Query(100, description="row limit"),
 ):
     try:
         params = {"limit": limit}
@@ -317,8 +332,8 @@ async def get_clearance_ranking_postgresql(
 @router.get("/annual-summary/trend")
 async def get_annual_summary_trend_postgresql(
     request: Request,
-    granularity: str = Query(..., description="粒度(monthly|yearly)"),
-    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    granularity: str = Query(..., description="monthly|yearly"),
+    period: str = Query(..., description="YYYY-MM or YYYY"),
 ):
     try:
         params = {"granularity": granularity, "period": period}
@@ -346,8 +361,8 @@ async def get_annual_summary_trend_postgresql(
 @router.get("/annual-summary/platform-share")
 async def get_annual_summary_platform_share_postgresql(
     request: Request,
-    granularity: str = Query(..., description="粒度(monthly|yearly)"),
-    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    granularity: str = Query(..., description="monthly|yearly"),
+    period: str = Query(..., description="YYYY-MM or YYYY"),
 ):
     try:
         params = {"granularity": granularity, "period": period}
@@ -375,8 +390,8 @@ async def get_annual_summary_platform_share_postgresql(
 @router.get("/annual-summary/by-shop")
 async def get_annual_summary_by_shop_postgresql(
     request: Request,
-    granularity: str = Query(..., description="粒度(monthly|yearly)"),
-    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    granularity: str = Query(..., description="monthly|yearly"),
+    period: str = Query(..., description="YYYY-MM or YYYY"),
 ):
     try:
         params = {"granularity": granularity, "period": period}
@@ -404,8 +419,8 @@ async def get_annual_summary_by_shop_postgresql(
 @router.get("/annual-summary/target-completion")
 async def get_annual_summary_target_completion_postgresql(
     request: Request,
-    granularity: str = Query(..., description="粒度(monthly|yearly)"),
-    period: str = Query(..., description="周期: 月度YYYY-MM 或 年度YYYY"),
+    granularity: str = Query(..., description="monthly|yearly"),
+    period: str = Query(..., description="YYYY-MM or YYYY"),
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
@@ -420,7 +435,6 @@ async def get_annual_summary_target_completion_postgresql(
                 period=period,
             )
             return json.loads(success_response(data=result).body.decode())
-
 
         payload, cache_status = await _resolve_cached_payload(
             request,
