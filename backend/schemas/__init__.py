@@ -89,6 +89,8 @@ from backend.schemas.rate_limit import (
 # ==================== HR 人力/我的收入 ====================
 from backend.schemas.hr import (
     MyIncomeResponse,
+    MyIncomeBreakdown,
+    PayrollIncomeBreakdown,
     IncomeCalculationResponse,
     DepartmentCreate,
     DepartmentUpdate,

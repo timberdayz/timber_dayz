@@ -184,7 +184,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
@@ -369,8 +369,22 @@ const handleRecalculate = async () => {
   }
   calculating.value = true
   try {
-    await api.calculatePerformanceScores(period)
+    const result = await api.calculatePerformanceScores(period)
     ElMessage.success('已完成当月店铺绩效、个人绩效和提成重算，请刷新查看最新结果')
+    const lockedConflicts = result?.payroll_locked_conflicts || 0
+    const conflictDetails = result?.payroll_locked_conflict_details || []
+    if (lockedConflicts > 0) {
+      const summary = conflictDetails.length
+        ? conflictDetails.map((item) => {
+            const fields = Array.isArray(item.changed_fields) ? item.changed_fields.join(', ') : ''
+            return `${item.employee_code} (${item.payroll_status}) -> ${fields}`
+          }).join('\n')
+        : `共有 ${lockedConflicts} 份已锁定工资单未被覆盖`
+      await ElMessageBox.alert(summary, '工资单锁定冲突', {
+        type: 'warning',
+        confirmButtonText: '知道了'
+      })
+    }
     await loadPerformanceList()
   } catch (error) {
     const code = error?.response?.data?.data?.error_code

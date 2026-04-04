@@ -16,13 +16,16 @@
   - `PUT /api/hr/payroll-records/{record_id}`
   - `POST /api/hr/payroll-records/{record_id}/confirm`
   - `POST /api/hr/payroll-records/{record_id}/reopen`
+  - `POST /api/hr/payroll-records/{record_id}/pay`
+- 绩效重算响应已返回：
+  - `payroll_locked_conflicts`
+  - `payroll_locked_conflict_details`
 
 ### 仍未收口
 
 - `GET /api/hr/me/income` 在工资单缺失时仍会回退拼装 `salary_structures + employee_commissions + employee_performance`，口径仍不统一。
 - 顶层 `total_income` 仍不是严格的工资单 `net_salary` 口径。
-- `paid` 状态虽然存在，但当前没有正式的发薪流转接口与权限约束。
-- 锁定冲突当前只有计数，没有面向 HR 的冲突明细。
+- `paid` 状态已具备内部记录接口，但仍未扩展到外部支付或财务联动。
 - 前端 HR 页面虽然已有工资单查询能力，但“我的收入”和工资单页尚未完全统一到工资单口径。
 
 ## Single Source of Truth
@@ -175,9 +178,7 @@
 
 ### 后续独立议题
 
-- `POST /api/hr/payroll-records/{record_id}/pay`
-  - 本次不强行落地
-  - 需要单独定义权限、审计、`pay_date` 规则与可逆性
+- `paid` 状态的权限、审计、可逆性和财务联动仍可继续细化
 
 ## UI Rollout
 

@@ -1852,6 +1852,15 @@ export default {
   async reopenHrPayrollRecord(recordId) {
     return await this._post(`/hr/payroll-records/${recordId}/reopen`);
   },
+  async markPaidHrPayrollRecord(recordId) {
+    return await this._post(`/hr/payroll-records/${recordId}/pay`);
+  },
+  async markHrPayrollRecordPaid(recordId) {
+    return await this._post(`/hr/payroll-records/${recordId}/pay`);
+  },
+  async markHrPayrollRecordPaid(recordId) {
+    return await this._post(`/hr/payroll-records/${recordId}/pay`);
+  },
 
   // === 员工目标 ===
   async getHrEmployeeTargets(params = {}) {

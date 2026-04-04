@@ -657,7 +657,7 @@
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column label="工资单操作" width="240" fixed="right">
+                <el-table-column label="工资单操作" width="300" fixed="right">
                   <template #default="scope">
                     <el-button
                       v-if="scope.row.status === 'draft'"
@@ -674,6 +674,14 @@
                       @click="confirmPayroll(scope.row)"
                     >
                       确认
+                    </el-button>
+                    <el-button
+                      v-if="showPayrollPayAction(scope.row)"
+                      link
+                      type="primary"
+                      @click="markPayrollPaid(scope.row)"
+                    >
+                      已发放
                     </el-button>
                     <el-button
                       v-if="scope.row.status === 'confirmed'"
@@ -1182,6 +1190,7 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useAuthStore } from '@/stores/auth'
 import {
   UserFilled,
   Refresh,
@@ -1199,6 +1208,7 @@ import api from '@/api'
 // ============================================================================
 
 const route = useRoute()
+const authStore = useAuthStore()
 const loading = ref(false)
 const validTabs = ['employees', 'departments', 'positions', 'attendance', 'salary']
 const activeTab = ref(
@@ -1254,6 +1264,17 @@ const payrollForm = reactive({
   housing_fund_company: 0,
   pay_date: '',
   remark: ''
+})
+
+const isPayrollAdmin = computed(() => {
+  const user = authStore.user
+  if (!user) return false
+  if (user.is_superuser) return true
+  const roles = Array.isArray(user.roles) ? user.roles : []
+  return roles.some((role) => {
+    if (typeof role === 'string') return role === 'admin'
+    return role?.role_code === 'admin' || role?.role_name === 'admin'
+  })
 })
 
 // 弹窗控制
@@ -1578,6 +1599,24 @@ const reopenPayroll = async (record) => {
     ElMessage.error(error.response?.data?.message || error.message || '退回工资单失败')
   }
 }
+
+const markPayrollPaid = async (record) => {
+  try {
+    await ElMessageBox.confirm('标记已发放后，该工资单将进入只读状态，是否继续？', '发放工资', {
+      type: 'warning'
+    })
+    await api.markHrPayrollRecordPaid(record.id)
+    ElMessage.success('工资单已标记为已发放')
+    await loadPayroll()
+  } catch (error) {
+    if (error === 'cancel') return
+    console.error('标记已发放失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '标记已发放失败')
+  }
+}
+
+const showPayrollPayAction = (record) =>
+  record?.status === 'confirmed' && isPayrollAdmin.value
 
 const showEmployeeDialog = async (employee = null) => {
   editingEmployee.value = employee

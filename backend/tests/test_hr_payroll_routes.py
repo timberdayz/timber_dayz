@@ -97,6 +97,10 @@ def test_reopen_payroll_record_rejects_paid_record():
 def test_mark_payroll_record_paid_requires_confirmed_and_sets_pay_date():
     module = _load_hr_salary_module()
     db = AsyncMock()
+    admin_user = SimpleNamespace(
+        is_superuser=False,
+        roles=[SimpleNamespace(role_code="admin", role_name="admin")],
+    )
     record = SimpleNamespace(
         id=4,
         employee_code="EMP004",
@@ -128,9 +132,27 @@ def test_mark_payroll_record_paid_requires_confirmed_and_sets_pay_date():
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
 
-    resp = asyncio.run(module.mark_payroll_record_paid(4, db=db))
+    resp = asyncio.run(module.mark_payroll_record_paid(4, db=db, current_user=admin_user))
 
     assert record.status == "paid"
     assert record.pay_date is not None
     assert db.commit.await_count == 1
     assert resp["success"] is True
+
+
+def test_mark_payroll_record_paid_rejects_non_admin_user():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    current_user = SimpleNamespace(
+        is_superuser=False,
+        roles=[SimpleNamespace(role_code="finance", role_name="finance")],
+    )
+    record = SimpleNamespace(id=5, status="confirmed", pay_date=None)
+    db.execute = AsyncMock(return_value=_ResultOne(record))
+    db.commit = AsyncMock()
+
+    resp = asyncio.run(module.mark_payroll_record_paid(5, db=db, current_user=current_user))
+
+    assert resp.status_code == 403
+    assert _json_body(resp)["success"] is False
+    assert db.commit.await_count == 0

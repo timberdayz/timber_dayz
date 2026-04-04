@@ -22,6 +22,33 @@ from pydantic import BaseModel, Field, field_validator
 # ================================================================
 
 
+class PayrollIncomeBreakdown(BaseModel):
+    base_salary: float
+    position_salary: float
+    performance_salary: float
+    overtime_pay: float
+    commission: float
+    allowances: float
+    bonus: float
+    gross_salary: float
+    social_insurance_personal: float
+    housing_fund_personal: float
+    income_tax: float
+    other_deductions: float
+    total_deductions: float
+    net_salary: float
+    social_insurance_company: float
+    housing_fund_company: float
+    total_cost: float
+    status: Optional[str] = None
+    pay_date: Optional[str] = None
+    remark: Optional[str] = None
+
+
+class MyIncomeBreakdown(BaseModel):
+    payroll: Optional[PayrollIncomeBreakdown] = None
+
+
 class MyIncomeResponse(BaseModel):
     """我的收入响应；未关联员工时 linked=false，仅返回 linked 字段。"""
 
@@ -33,7 +60,7 @@ class MyIncomeResponse(BaseModel):
     performance_score: Optional[float] = Field(None, description="绩效得分")
     achievement_rate: Optional[float] = Field(None, description="达成率")
     total_income: Optional[float] = Field(None, description="总收入")
-    breakdown: Optional[Dict[str, Any]] = Field(None, description="明细 breakdown")
+    breakdown: Optional[MyIncomeBreakdown] = Field(None, description="明细 breakdown")
 
 
 class IncomeCalculationResponse(BaseModel):

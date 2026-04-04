@@ -153,7 +153,7 @@ async def get_my_income(
             linked=True,
             period=period,
             total_income=None,
-            breakdown={},
+            breakdown=None,
         )
 
     fixed_salary = float((getattr(pr, "base_salary", 0) or 0) + (getattr(pr, "position_salary", 0) or 0))

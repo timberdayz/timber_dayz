@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 from starlette.requests import Request
 
 from backend.routers.hr_employee import get_my_income
+from backend.schemas.hr import MyIncomeBreakdown, PayrollIncomeBreakdown
 import backend.routers.performance_management as performance_management_module
 from backend.routers.performance_management import calculate_performance_scores, list_performance_scores
 from modules.core.db import PerformanceScore
@@ -917,7 +918,9 @@ def test_my_income_linked_uses_payroll_net_salary_only_and_skips_fallback(monkey
 
     assert resp.linked is True
     assert float(resp.total_income) == 1888.0
-    assert resp.breakdown == {
+    assert isinstance(resp.breakdown, MyIncomeBreakdown)
+    assert isinstance(resp.breakdown.payroll, PayrollIncomeBreakdown)
+    assert resp.breakdown.model_dump() == {
         "payroll": {
             "base_salary": 1000.0,
             "position_salary": 200.0,
@@ -991,5 +994,5 @@ def test_my_income_linked_without_payroll_returns_empty_income_state(monkeypatch
 
     assert resp.linked is True
     assert resp.total_income is None
-    assert resp.breakdown == {}
+    assert resp.breakdown is None
     assert called["count"] == 1
