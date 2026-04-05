@@ -262,24 +262,24 @@ const switchAccount = (account) => {
     // 根据角色设置权限
     const rolePermissions = {
       'admin': [
-        'business-overview', 'sales-analysis', 'inventory-management', 'inventory-dashboard-v3',
+        'business-overview', 'sales-analysis', 'inventory:view', 'inventory:manage', 'inventory-dashboard:view',
         'human-resources', 'financial-management', 'store-management',
         'system-settings', 'account-management', 'personal-settings', 'field-mapping'
       ],
       'manager': [
-        'business-overview', 'sales-analysis', 'inventory-management', 'inventory-dashboard-v3',
+        'business-overview', 'sales-analysis', 'inventory:view', 'inventory-dashboard:view',
         'human-resources', 'financial-management', 'store-management',
         'personal-settings'
       ],
       'operator': [
-        'business-overview', 'sales-analysis', 'inventory-management', 'inventory-dashboard-v3',
+        'business-overview', 'sales-analysis', 'inventory:view', 'inventory-dashboard:view',
         'personal-settings'
       ],
       'finance': [
         'business-overview', 'financial-management', 'personal-settings'
       ],
       'inventory': [
-        'business-overview', 'inventory-management', 'inventory-dashboard-v3', 'personal-settings'
+        'business-overview', 'inventory:view', 'inventory:manage', 'inventory-dashboard:view', 'personal-settings'
       ]
     }
     

@@ -26,6 +26,10 @@ function resolveMainAccountName(payload) {
   return String(payload.main_account_name || '').trim()
 }
 
+function normalizeAliasValue(value) {
+  return String(value || '').trim()
+}
+
 export const useAccountsStore = defineStore('accounts', {
   state: () => ({
     accounts: [],
@@ -61,6 +65,20 @@ export const useAccountsStore = defineStore('accounts', {
   },
 
   actions: {
+    async syncAccountAlias(platform, shopAccountId, aliasValue) {
+      const normalizedAlias = normalizeAliasValue(aliasValue)
+      if (normalizedAlias) {
+        await accountsApi.claimShopAccountAlias({
+          platform,
+          alias_value: normalizedAlias,
+          shop_account_id: shopAccountId,
+        })
+        return
+      }
+
+      await accountsApi.clearShopAccountPrimaryAlias(shopAccountId)
+    },
+
     async loadAccounts(params = {}, showLoading = true) {
       if (this.loading && showLoading) return
       if (showLoading) this.loading = true
@@ -170,17 +188,12 @@ export const useAccountsStore = defineStore('accounts', {
           platform_shop_id: data.shop_id || null,
           shop_region: data.shop_region,
           shop_type: data.shop_type,
+          capabilities: data.capabilities,
           enabled: data.enabled,
           notes: data.notes,
         })
 
-        if (data.account_alias) {
-          await accountsApi.claimShopAccountAlias({
-            platform: data.platform,
-            alias_value: data.account_alias,
-            shop_account_id: data.account_id,
-          })
-        }
+        await this.syncAccountAlias(data.platform, data.account_id, data.account_alias)
 
         await this.loadAccounts({}, false)
         await this.loadStats()
@@ -208,6 +221,7 @@ export const useAccountsStore = defineStore('accounts', {
           platform_shop_id_status: data.shop_id ? 'manual_confirmed' : current.platform_shop_id_status,
           shop_region: data.shop_region,
           shop_type: data.shop_type,
+          capabilities: data.capabilities,
           enabled: data.enabled,
           notes: data.notes,
         })
@@ -223,6 +237,10 @@ export const useAccountsStore = defineStore('accounts', {
           if (Object.keys(mainPayload).length > 0) {
             await accountsApi.updateMainAccount(current.parent_account, mainPayload)
           }
+        }
+
+        if (data.account_alias !== undefined && normalizeAliasValue(data.account_alias) !== normalizeAliasValue(current.account_alias)) {
+          await this.syncAccountAlias(current.platform, accountId, data.account_alias)
         }
 
         await this.loadAccounts({}, false)
@@ -285,13 +303,8 @@ export const useAccountsStore = defineStore('accounts', {
         const created = await accountsApi.batchCreateShopAccounts(payloads)
 
         for (const shop of batchData.shops) {
-          if (!shop.account_alias) continue
           const generatedShopAccountId = `${batchData.platform}_${(shop.shop_region || 'unknown').toLowerCase()}_${String(shop.store_name || 'shop').replace(/\s+/g, '_').toLowerCase()}`
-          await accountsApi.claimShopAccountAlias({
-            platform: batchData.platform,
-            alias_value: shop.account_alias,
-            shop_account_id: generatedShopAccountId,
-          })
+          await this.syncAccountAlias(batchData.platform, generatedShopAccountId, shop.account_alias)
         }
 
         await this.loadAccounts({}, false)

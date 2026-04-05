@@ -1154,6 +1154,8 @@ class CollectionExecutorV2:
         params["main_account_id"] = session_owner_id
         if shop_account_id:
             params["shop_account_id"] = shop_account_id
+        session_platform = platform
+        session_account_id = session_owner_id
 
         # 获取 browser: 优先使用入参 browser, 否则从 page 取(后关闭传入的 page/context)
         browser_instance = browser
@@ -1171,6 +1173,13 @@ class CollectionExecutorV2:
         play_context = await browser_instance.new_context(**context_options)
         page = await play_context.new_page()
         params["reused_session"] = reused_session
+        adapter = None
+        if runtime_manifests is None:
+            adapter = create_adapter(
+                platform=platform,
+                account=runtime_account,
+                config=params,
+            )
         if context.current_component_index == 0 and not params.get("_main_account_shared_state_prepared"):
             async def _coordinated_login():
                 return await self._execute_shared_login_phase(
@@ -1985,7 +1994,7 @@ class CollectionExecutorV2:
                 platform=platform,
                 page=page,
                 params=params,
-                account=runtime_account,
+                account=account,
                 )
             if save_session_after_login and session_platform and session_account_id:
                 try:

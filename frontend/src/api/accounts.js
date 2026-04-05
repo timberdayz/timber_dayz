@@ -49,6 +49,10 @@ export default {
     return await api.post('/shop-account-aliases/claim', data)
   },
 
+  async clearShopAccountPrimaryAlias(shopAccountId) {
+    return await api.delete(`/shop-account-aliases/primary/${shopAccountId}`)
+  },
+
   async listPlatformShopDiscoveries(params = {}) {
     return await api.get('/platform-shop-discoveries', { params })
   },

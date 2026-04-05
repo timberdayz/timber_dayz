@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 
 from modules.components.base import ExecutionContext
 from modules.components.date_picker.base import DateOption
-from modules.platforms.tiktok.components.date_picker import TiktokDatePicker
+from modules.platforms.tiktok.components.date_picker import RangePaneState, RangePopupState, TiktokDatePicker
 
 
 def _ctx(config: dict | None = None) -> ExecutionContext:
@@ -107,11 +107,20 @@ class _HeaderLocatorGroup:
 
 
 class _CandidatePanel:
-    def __init__(self, text: str, *, visible: bool = True, header_count: int = 1, cell_count: int = 31) -> None:
+    def __init__(
+        self,
+        text: str,
+        *,
+        visible: bool = True,
+        header_count: int = 1,
+        cell_count: int = 31,
+        x: float | None = None,
+    ) -> None:
         self._text = text
         self._visible = visible
         self._header_count = header_count
         self._cell_count = cell_count
+        self._x = x
 
     async def is_visible(self, timeout: int | None = None) -> bool:
         return self._visible
@@ -124,6 +133,11 @@ class _CandidatePanel:
 
     async def text_content(self) -> str:
         return self._text
+
+    async def bounding_box(self) -> dict[str, float] | None:
+        if self._x is None:
+            return None
+        return {"x": self._x, "y": 0.0, "width": 240.0, "height": 280.0}
 
     def locator(self, selector: str):
         if selector in ('[class*="header-value"]', '[class*="picker-header"]', '[class*="header-view"]'):
@@ -184,6 +198,25 @@ class _SplitHeaderPage(_FakePage):
         raise AssertionError(f"unexpected selector: {selector}")
 
 
+class _HeaderOnlyPage(_FakePage):
+    def __init__(self) -> None:
+        super().__init__("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+
+    def locator(self, selector: str):
+        if selector in (
+            ".arco-picker-header-value",
+            '[class*="picker-header-value"]',
+            '[class*="header-value"]',
+        ):
+            return _HeaderLocatorGroup(
+                [
+                    _HeaderTextLocator("2025 year 12 month"),
+                    _HeaderTextLocator("2026 year 1 month"),
+                ]
+            )
+        raise AssertionError(f"unexpected selector: {selector}")
+
+
 class _PanelSelectionPage(_FakePage):
     def __init__(self) -> None:
         super().__init__("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
@@ -227,8 +260,30 @@ class _DuplicatePanelSelectionPage(_FakePage):
         raise AssertionError(f"unexpected selector: {selector}")
 
 
+class _PositionSortedPanelSelectionPage(_FakePage):
+    def __init__(self) -> None:
+        super().__init__("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+        self.left = _CandidatePanel("2025 year 1 month", header_count=1, cell_count=31, x=80.0)
+        self.right = _CandidatePanel("2026 year 12 month details", header_count=1, cell_count=31, x=420.0)
+
+    def locator(self, selector: str):
+        if selector in (
+            ".theme-arco-picker-panel",
+            ".arco-picker-panel",
+            '[class*="picker-panel"]',
+            '.arco-picker-range-wrapper > *',
+            '.arco-picker-range-container > *',
+            '[class*="picker-range-wrapper"] > *',
+            '[class*="picker-range-container"] > *',
+        ):
+            return _HeaderLocatorGroup([self.right, self.left])
+        raise AssertionError(f"unexpected selector: {selector}")
+
+
 class _RangeInput:
-    def __init__(self, value: str) -> None:
+    def __init__(self, container: "_RangeContainer", boundary: str, value: str) -> None:
+        self._container = container
+        self._boundary = boundary
         self._value = value
 
     @property
@@ -250,11 +305,15 @@ class _RangeInput:
     async def inner_text(self) -> str:
         return ""
 
+    async def click(self, timeout: int | None = None) -> None:
+        self._container.active = self._boundary
+
 
 class _RangeContainer:
-    def __init__(self, start_value: str, end_value: str, prefix_text: str) -> None:
-        self._start = _RangeInput(start_value)
-        self._end = _RangeInput(end_value)
+    def __init__(self, start_value: str, end_value: str, prefix_text: str, *, active: str = "start") -> None:
+        self.active = active
+        self._start = _RangeInput(self, "start", start_value)
+        self._end = _RangeInput(self, "end", end_value)
         self._prefix = prefix_text
 
     @property
@@ -272,6 +331,15 @@ class _RangeContainer:
 
     async def inner_text(self) -> str:
         return f"{self._prefix}-"
+
+    async def inner_html(self) -> str:
+        start_class = "arco-picker-input arco-picker-input-active" if self.active == "start" else "arco-picker-input"
+        end_class = "arco-picker-input arco-picker-input-active" if self.active == "end" else "arco-picker-input"
+        return (
+            f'<div class="{start_class}"><input value="{self._start._value}"></div>'
+            f'<span class="arco-picker-separator">-</span>'
+            f'<div class="{end_class}"><input value="{self._end._value}"></div>'
+        )
 
     def locator(self, selector: str):
         if selector == ".arco-picker-input":
@@ -343,6 +411,177 @@ class _NavButtonsPage(_FakePage):
         return _NavButtonsScope(self.left_buttons if pane == "left" else self.right_buttons)
 
 
+class _DayCell:
+    def __init__(self, day: int, x: float) -> None:
+        self.day = day
+        self.x = x
+        self.clicked = 0
+
+    async def is_visible(self, timeout: int | None = None) -> bool:
+        return True
+
+    async def click(self, timeout: int | None = None) -> None:
+        self.clicked += 1
+
+    async def bounding_box(self) -> dict[str, float]:
+        return {"x": self.x, "y": 20.0, "width": 24.0, "height": 24.0}
+
+
+class _CandidateBody:
+    def __init__(self, x: float, cells: list[_DayCell]) -> None:
+        self.x = x
+        self.cells = cells
+
+    async def is_visible(self, timeout: int | None = None) -> bool:
+        return True
+
+    async def bounding_box(self) -> dict[str, float]:
+        return {"x": self.x, "y": 40.0, "width": 240.0, "height": 240.0}
+
+    async def inner_text(self) -> str:
+        return " ".join(str(cell.day) for cell in self.cells)
+
+    def locator(self, selector: str):
+        if selector in (".arco-picker-cell-in-view", '[class*="cell-in-view"]'):
+            return _DayCellScope(self.cells)
+        raise AssertionError(f"unexpected body selector: {selector}")
+
+
+class _NoiseCandidate:
+    def __init__(self, x: float, width: float = 32.0) -> None:
+        self.x = x
+        self.width = width
+
+    async def is_visible(self, timeout: int | None = None) -> bool:
+        return True
+
+    async def bounding_box(self) -> dict[str, float]:
+        return {"x": self.x, "y": 50.0, "width": self.width, "height": 32.0}
+
+    def locator(self, selector: str):
+        return _HeaderLocatorGroup([])
+
+
+class _DayMatchGroup:
+    def __init__(self, cells: list[_DayCell]) -> None:
+        self._cells = cells
+
+    async def count(self) -> int:
+        return len(self._cells)
+
+    def nth(self, idx: int):
+        return self._cells[idx]
+
+    @property
+    def first(self):
+        return self._cells[0]
+
+    @property
+    def last(self):
+        return self._cells[-1]
+
+
+class _DayCellScope:
+    def __init__(self, cells: list[_DayCell]) -> None:
+        self._cells = cells
+
+    def get_by_text(self, text: str, exact: bool = False):
+        target = int(text)
+        return _DayMatchGroup([cell for cell in self._cells if cell.day == target])
+
+
+class _CalendarPaneScope:
+    def __init__(self, x: float, cells: list[_DayCell]) -> None:
+        self.x = x
+        self.cells = cells
+
+    async def bounding_box(self) -> dict[str, float]:
+        return {"x": self.x, "y": 0.0, "width": 260.0, "height": 300.0}
+
+    def locator(self, selector: str):
+        if selector in (".arco-picker-cell-in-view", '[class*="cell-in-view"]'):
+            return _DayCellScope(self.cells)
+        raise AssertionError(f"unexpected pane cell selector: {selector}")
+
+
+class _BodySelectionPage(_FakePage):
+    def __init__(self) -> None:
+        super().__init__("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+        self.left_body = _CandidateBody(90.0, [_DayCell(4, 140.0), _DayCell(29, 200.0)])
+        self.right_body = _CandidateBody(430.0, [_DayCell(4, 480.0), _DayCell(1, 520.0)])
+
+    def locator(self, selector: str):
+        if selector in (
+            ".arco-picker-body",
+            ".arco-picker-date",
+            '[class*="picker-body"]',
+            '[class*="panel-date"]',
+            '.arco-picker-panel table',
+            '[class*="picker-panel"] table',
+        ):
+            return _HeaderLocatorGroup([self.right_body, self.left_body])
+        raise AssertionError(f"unexpected selector: {selector}")
+
+
+class _PanelWithBodyScope:
+    def __init__(self, x: float, body: _CandidateBody) -> None:
+        self.x = x
+        self.body = body
+        self.noise = _NoiseCandidate(x + 20.0)
+
+    async def is_visible(self, timeout: int | None = None) -> bool:
+        return True
+
+    async def bounding_box(self) -> dict[str, float]:
+        return {"x": self.x, "y": 0.0, "width": 260.0, "height": 300.0}
+
+    async def inner_text(self) -> str:
+        return f"panel-{self.x}"
+
+    def locator(self, selector: str):
+        if selector in (".arco-picker-body", '[class*="picker-body"]'):
+            return _HeaderLocatorGroup([self.body])
+        if selector in (
+            ".arco-picker-date",
+            '[class*="panel-date"]',
+            '.arco-picker-panel table',
+            '[class*="picker-panel"] table',
+        ):
+            return _HeaderLocatorGroup([self.noise])
+        raise AssertionError(f"unexpected selector: {selector}")
+
+
+class _PanelAttachedBodyPage(_FakePage):
+    def __init__(self) -> None:
+        super().__init__("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+        self.left_body = _CandidateBody(90.0, [_DayCell(4, 140.0)])
+        self.right_body = _CandidateBody(430.0, [_DayCell(4, 480.0)])
+        self.left_panel = _PanelWithBodyScope(80.0, self.left_body)
+        self.right_panel = _PanelWithBodyScope(420.0, self.right_body)
+
+    def locator(self, selector: str):
+        if selector in (
+            ".theme-arco-picker-panel",
+            ".arco-picker-panel",
+            '[class*="picker-panel"]',
+            '.arco-picker-range-wrapper > *',
+            '.arco-picker-range-container > *',
+            '[class*="picker-range-wrapper"] > *',
+            '[class*="picker-range-container"] > *',
+        ):
+            return _HeaderLocatorGroup([self.right_panel, self.left_panel])
+        if selector in (
+            ".arco-picker-body",
+            ".arco-picker-date",
+            '[class*="picker-body"]',
+            '[class*="panel-date"]',
+            '.arco-picker-panel table',
+            '[class*="picker-panel"] table',
+        ):
+            return _HeaderLocatorGroup([])
+        raise AssertionError(f"unexpected selector: {selector}")
+
+
 class _SummaryPage(_FakePage):
     def __init__(self) -> None:
         super().__init__("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
@@ -362,7 +601,87 @@ class _SummaryPage(_FakePage):
             "div.arco-picker-input",
         ):
             return self._range
+        if selector in (
+            '#page-title-datepicker [data-tid="m4b_date_picker_range_picker"] input',
+            '[data-tid="m4b_date_picker_range_picker"] input',
+            'div.theme-arco-picker.theme-arco-picker-range input',
+            'div.arco-picker.arco-picker-range input',
+            'div.theme-arco-picker-range input',
+            'div.arco-picker-range input',
+        ):
+            return _HeaderLocatorGroup([self._range._start, self._range._end])
         raise AssertionError(f"unexpected summary selector: {selector}")
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_products_run_focuses_start_then_end_inputs_for_custom_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokDatePicker(
+        _ctx(
+            {
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2025-12-01",
+                    "end_date": "2025-12-31",
+                }
+            }
+        )
+    )
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+
+    monkeypatch.setattr(component, "_open_panel", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_current_summary_text", AsyncMock(return_value=None), raising=False)
+    monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_boundary_active", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_input_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_popup_state_has_valid_two_page_months", lambda state: True, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_popup_state",
+        AsyncMock(
+            return_value=RangePopupState(
+                left=RangePaneState(panel=None, body=None, month=(2025, 12)),
+                right=RangePaneState(panel=None, body=None, month=(2026, 1)),
+                active_boundary="start",
+            )
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_select_start_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=True), raising=False)
+
+    result = await component.run(page, DateOption.LAST_30_DAYS)
+
+    assert result.success is True
+    component._select_start_input.assert_awaited_once_with(page)
+    component._select_end_input.assert_awaited_once_with(page)
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_active_boundary_reads_active_input_from_range_html() -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _SummaryPage()
+    page._range.active = "end"
+
+    active = await component._active_boundary(page)
+
+    assert active == "end"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_select_start_input_switches_active_boundary() -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _SummaryPage()
+    page._range.active = "end"
+
+    switched = await component._select_start_input(page)
+
+    assert switched is True
+    assert await component._active_boundary(page) == "start"
 
 
 def test_tiktok_date_picker_resolve_range_maps_today_to_same_day() -> None:
@@ -415,16 +734,40 @@ async def test_tiktok_date_picker_products_run_uses_left_page_for_start_and_righ
     monkeypatch.setattr(component, "_read_visible_months", AsyncMock(return_value=((2026, 3), (2026, 4))), raising=False)
     monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_navigate_right_to_month", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_start_day_on_left", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_end_day_on_right", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_boundary_active", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_input_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_popup_state_has_valid_two_page_months", lambda state: True, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_popup_state",
+        AsyncMock(
+            side_effect=[
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 3)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 4)),
+                    active_boundary="start",
+                ),
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 3)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 4)),
+                    active_boundary="end",
+                ),
+            ]
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_select_start_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_date_from_state", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=True), raising=False)
 
     result = await component.run(page, DateOption.LAST_7_DAYS)
 
     assert result.success is True
     component._navigate_left_to_month.assert_awaited_once_with(page, 2026, 3)
-    component._select_start_day_on_left.assert_awaited_once_with(page, 27)
-    component._select_end_day_on_right.assert_awaited_once_with(page, 2)
+    component._select_start_date_from_state.assert_awaited()
+    component._select_end_date_from_state.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -439,16 +782,40 @@ async def test_tiktok_date_picker_products_run_still_uses_left_start_right_end_f
     monkeypatch.setattr(component, "_current_summary_text", AsyncMock(return_value=None), raising=False)
     monkeypatch.setattr(component, "_read_visible_months", AsyncMock(return_value=((2026, 4), (2026, 4))), raising=False)
     monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_start_day_on_left", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_end_day_on_left", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_boundary_active", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_input_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_popup_state_has_valid_two_page_months", lambda state: True, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_popup_state",
+        AsyncMock(
+            side_effect=[
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 4)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 5)),
+                    active_boundary="start",
+                ),
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 4)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 5)),
+                    active_boundary="end",
+                ),
+            ]
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_select_start_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_date_from_state", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=True), raising=False)
 
     result = await component.run(page, DateOption.TODAY_REALTIME)
 
     assert result.success is True
     component._navigate_left_to_month.assert_awaited_once_with(page, 2026, 4)
-    component._select_start_day_on_left.assert_awaited_once_with(page, 2)
-    component._select_end_day_on_left.assert_awaited_once_with(page, 2)
+    component._select_start_date_from_state.assert_awaited()
+    component._select_end_date_from_state.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -468,16 +835,91 @@ async def test_tiktok_date_picker_products_run_keeps_same_month_range_on_left_pa
     monkeypatch.setattr(component, "_current_summary_text", AsyncMock(return_value=None), raising=False)
     monkeypatch.setattr(component, "_read_visible_months", AsyncMock(return_value=((2026, 3), (2026, 4))), raising=False)
     monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_start_day_on_left", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_end_day_on_left", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_boundary_active", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_input_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_popup_state_has_valid_two_page_months", lambda state: True, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_popup_state",
+        AsyncMock(
+            side_effect=[
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 3)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 4)),
+                    active_boundary="start",
+                ),
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 3)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 4)),
+                    active_boundary="end",
+                ),
+            ]
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_select_start_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_date_from_state", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=True), raising=False)
 
     result = await component.run(page, DateOption.LAST_30_DAYS)
 
     assert result.success is True
     component._navigate_left_to_month.assert_awaited_once_with(page, 2026, 3)
-    component._select_start_day_on_left.assert_awaited_once_with(page, 1)
-    component._select_end_day_on_left.assert_awaited_once_with(page, 31)
+    component._select_start_date_from_state.assert_awaited()
+    component._select_end_date_from_state.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_products_run_rechecks_target_pane_after_start_click_for_same_month_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+
+    monkeypatch.setattr(
+        component,
+        "_resolve_range",
+        lambda option, today=None: ("2025-12-01", "2025-12-31"),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_open_panel", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_current_summary_text", AsyncMock(return_value=None), raising=False)
+    monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_boundary_active", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_input_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_popup_state_has_valid_two_page_months", lambda state: True, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_popup_state",
+        AsyncMock(
+            side_effect=[
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2025, 12)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 1)),
+                    active_boundary="start",
+                ),
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2025, 12)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 1)),
+                    active_boundary="end",
+                ),
+            ]
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_select_start_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=True), raising=False)
+
+    result = await component.run(page, DateOption.LAST_30_DAYS)
+
+    assert result.success is True
+    component._select_start_date_from_state.assert_awaited()
+    component._select_end_date_from_state.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -496,15 +938,39 @@ async def test_tiktok_date_picker_products_run_continues_after_navigation_fallba
     monkeypatch.setattr(component, "_open_panel", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_current_summary_text", AsyncMock(return_value=None), raising=False)
     monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_start_day_on_left", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_end_day_on_left", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_boundary_active", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_input_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_popup_state_has_valid_two_page_months", lambda state: True, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_popup_state",
+        AsyncMock(
+            side_effect=[
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2025, 12)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 1)),
+                    active_boundary="start",
+                ),
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2025, 12)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 1)),
+                    active_boundary="end",
+                ),
+            ]
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_select_start_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_date_from_state", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=True), raising=False)
 
     result = await component.run(page, DateOption.LAST_30_DAYS)
 
     assert result.success is True
-    component._select_start_day_on_left.assert_awaited_once_with(page, 1)
-    component._select_end_day_on_left.assert_awaited_once_with(page, 31)
+    component._select_start_date_from_state.assert_awaited()
+    component._select_end_date_from_state.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -519,8 +985,32 @@ async def test_tiktok_date_picker_products_run_fails_when_summary_confirmation_d
     monkeypatch.setattr(component, "_read_visible_months", AsyncMock(return_value=((2026, 3), (2026, 4))), raising=False)
     monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_navigate_right_to_month", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_start_day_on_left", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(component, "_select_end_day_on_right", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_boundary_active", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_input_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_popup_state_has_valid_two_page_months", lambda state: True, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_popup_state",
+        AsyncMock(
+            side_effect=[
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 3)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 4)),
+                    active_boundary="start",
+                ),
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 3)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 4)),
+                    active_boundary="end",
+                ),
+            ]
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_select_start_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_date_from_state", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=False), raising=False)
 
     result = await component.run(page, DateOption.LAST_30_DAYS)
@@ -720,6 +1210,18 @@ async def test_tiktok_date_picker_reads_split_month_headers_from_visible_panel_t
 
 
 @pytest.mark.asyncio
+async def test_tiktok_date_picker_current_pane_month_can_read_page_level_header_values() -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _HeaderOnlyPage()
+
+    left_month = await component._current_pane_month(page, "left")
+    right_month = await component._current_pane_month(page, "right")
+
+    assert left_month == (2025, 12)
+    assert right_month == (2026, 1)
+
+
+@pytest.mark.asyncio
 async def test_tiktok_date_picker_panel_scope_prefers_single_header_calendar_panels() -> None:
     component = TiktokDatePicker(_ctx())
     page = _PanelSelectionPage()
@@ -744,6 +1246,18 @@ async def test_tiktok_date_picker_panel_scope_deduplicates_overlapping_candidate
 
 
 @pytest.mark.asyncio
+async def test_tiktok_date_picker_panel_scope_prefers_visual_left_right_order_over_dom_order() -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _PositionSortedPanelSelectionPage()
+
+    left_scope = await component._panel_scope(page, "left")
+    right_scope = await component._panel_scope(page, "right")
+
+    assert await left_scope.inner_text() == "2025 year 1 month"
+    assert await right_scope.inner_text() == "2026 year 12 month details"
+
+
+@pytest.mark.asyncio
 async def test_tiktok_date_picker_current_summary_text_reads_range_input_values() -> None:
     component = TiktokDatePicker(_ctx())
     page = _SummaryPage()
@@ -752,6 +1266,26 @@ async def test_tiktok_date_picker_current_summary_text_reads_range_input_values(
 
     assert "2026/03/01" in summary
     assert "2026/03/31" in summary
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_current_range_matches_uses_input_values_as_truth_source() -> None:
+    component = TiktokDatePicker(
+        _ctx(
+            {
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2025-12-01",
+                    "end_date": "2025-12-31",
+                }
+            }
+        )
+    )
+    page = _SummaryPage()
+
+    matched = await component._current_range_matches(page, DateOption.LAST_30_DAYS)
+
+    assert matched is False
 
 
 @pytest.mark.asyncio
@@ -773,3 +1307,109 @@ async def test_tiktok_date_picker_click_month_nav_ignores_year_buttons() -> None
     assert page.left_buttons[1].clicked == 1
     assert page.right_buttons[0].clicked == 1
     assert page.right_buttons[1].clicked == 0
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_select_day_in_right_pane_ignores_same_number_in_left_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG")
+    left_four = _DayCell(4, 140.0)
+    right_four = _DayCell(4, 480.0)
+    left_scope = _CandidateBody(80.0, [left_four])
+    right_scope = _CandidateBody(420.0, [left_four, right_four])
+
+    async def _pane_body_scope(_page: Any, pane: str):
+        return left_scope if pane == "left" else right_scope
+
+    component._pane_body_scope = _pane_body_scope  # type: ignore[method-assign]
+
+    selected = await component._select_day_in_pane(page, "right", 4)
+
+    assert selected is True
+    assert left_four.clicked == 0
+    assert right_four.clicked == 1
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_pane_body_scope_prefers_visual_left_right_order_over_dom_order() -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _BodySelectionPage()
+
+    left_body = await component._pane_body_scope(page, "left")
+    right_body = await component._pane_body_scope(page, "right")
+
+    assert await left_body.bounding_box() == {"x": 90.0, "y": 40.0, "width": 240.0, "height": 240.0}
+    assert await right_body.bounding_box() == {"x": 430.0, "y": 40.0, "width": 240.0, "height": 240.0}
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_pane_body_scope_reads_body_from_panel_instead_of_page_global_candidates() -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _PanelAttachedBodyPage()
+
+    left_body = await component._pane_body_scope(page, "left")
+    right_body = await component._pane_body_scope(page, "right")
+
+    assert await left_body.bounding_box() == {"x": 90.0, "y": 40.0, "width": 240.0, "height": 240.0}
+    assert await right_body.bounding_box() == {"x": 430.0, "y": 40.0, "width": 240.0, "height": 240.0}
+
+
+def test_tiktok_date_picker_popup_state_requires_right_month_to_follow_left_month() -> None:
+    component = TiktokDatePicker(_ctx())
+    left_body = _CandidateBody(90.0, [_DayCell(1, 100.0)])
+    right_body = _CandidateBody(430.0, [_DayCell(1, 480.0)])
+    valid_state = RangePopupState(
+        left=RangePaneState(panel=None, body=left_body, month=(2026, 2)),
+        right=RangePaneState(panel=None, body=right_body, month=(2026, 3)),
+        active_boundary="start",
+    )
+    invalid_state = RangePopupState(
+        left=RangePaneState(panel=None, body=left_body, month=(2026, 2)),
+        right=RangePaneState(panel=None, body=right_body, month=(2026, 4)),
+        active_boundary="start",
+    )
+
+    assert component._popup_state_has_valid_two_page_months(valid_state) is True
+    assert component._popup_state_has_valid_two_page_months(invalid_state) is False
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_select_start_date_from_state_requires_left_month_match() -> None:
+    component = TiktokDatePicker(_ctx())
+    left_body = _CandidateBody(90.0, [_DayCell(23, 140.0)])
+    right_body = _CandidateBody(430.0, [_DayCell(23, 480.0)])
+    state = RangePopupState(
+        left=RangePaneState(panel=None, body=left_body, month=(2026, 2)),
+        right=RangePaneState(panel=None, body=right_body, month=(2026, 3)),
+        active_boundary="start",
+    )
+
+    selected = await component._select_start_date_from_state(state, datetime(2026, 2, 23))
+
+    assert selected is True
+    assert left_body.cells[0].clicked == 1
+    assert right_body.cells[0].clicked == 0
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_select_end_date_from_state_uses_right_month_for_cross_month_ranges() -> None:
+    component = TiktokDatePicker(_ctx())
+    left_body = _CandidateBody(90.0, [_DayCell(4, 140.0)])
+    right_body = _CandidateBody(430.0, [_DayCell(4, 480.0)])
+    state = RangePopupState(
+        left=RangePaneState(panel=None, body=left_body, month=(2025, 12)),
+        right=RangePaneState(panel=None, body=right_body, month=(2026, 1)),
+        active_boundary="end",
+    )
+
+    selected = await component._select_end_date_from_state(
+        state,
+        start_value=datetime(2025, 12, 29),
+        end_value=datetime(2026, 1, 4),
+    )
+
+    assert selected is True
+    assert left_body.cells[0].clicked == 0
+    assert right_body.cells[0].clicked == 1

@@ -78,6 +78,72 @@ async def test_execute_parallel_domains_requires_main_account_id_before_collecti
 
 
 @pytest.mark.asyncio
+async def test_execute_shared_login_phase_receives_adapter_in_standard_execute_path(monkeypatch):
+    class FakePage:
+        url = "about:blank"
+
+    class FakeContext:
+        def __init__(self):
+            self.browser = None
+
+        async def new_page(self):
+            return FakePage()
+
+    class FakeBrowser:
+        async def new_context(self, **kwargs):
+            return FakeContext()
+
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._load_or_bootstrap_session_async",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._get_fingerprint_context_options_async",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._build_playwright_context_options_from_fingerprint",
+        lambda _fp_options: {},
+    )
+
+    observed = {}
+
+    async def fake_execute_shared_login_phase(**kwargs):
+        observed["adapter"] = kwargs["adapter"]
+        return kwargs["play_context"], kwargs["page"], None
+
+    async def fake_execute_with_python_components(**kwargs):
+        observed["shared_state_prepared"] = kwargs["params"].get("_main_account_shared_state_prepared")
+        return "ok"
+
+    executor._execute_shared_login_phase = fake_execute_shared_login_phase
+    executor._execute_with_python_components = fake_execute_with_python_components
+
+    result = await executor.execute(
+        task_id="task-1",
+        platform="shopee",
+        account_id="shop-1",
+        account={
+            "account_id": "shop-1",
+            "main_account_id": "main-1",
+            "username": "demo",
+            "password": "secret",
+        },
+        data_domains=["products"],
+        date_range={"start": "2026-04-01", "end": "2026-04-01"},
+        granularity="daily",
+        browser=FakeBrowser(),
+    )
+
+    assert result == "ok"
+    assert observed["adapter"] is not None
+    assert observed["shared_state_prepared"] is True
+
+
+@pytest.mark.asyncio
 async def test_executor_shared_state_phase_serializes_same_main_account():
     executor = CollectionExecutorV2()
     executor._update_status = AsyncMock()

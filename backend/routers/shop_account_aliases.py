@@ -145,6 +145,36 @@ def _serialize_alias(record: ShopAccountAlias) -> ShopAccountAliasResponse:
     )
 
 
+async def _get_shop_account_or_404(db: AsyncSession, shop_account_id: str) -> ShopAccount:
+    shop_account = (
+        await db.execute(
+            select(ShopAccount).where(ShopAccount.shop_account_id == shop_account_id)
+        )
+    ).scalar_one_or_none()
+    if shop_account is None:
+        raise HTTPException(status_code=404, detail=f"shop account id '{shop_account_id}' not found")
+    return shop_account
+
+
+async def _clear_primary_aliases(
+    db: AsyncSession,
+    shop_account_db_id: int,
+    *,
+    deactivate: bool = False,
+) -> None:
+    alias_result = await db.execute(
+        select(ShopAccountAlias).where(
+            ShopAccountAlias.shop_account_id == shop_account_db_id,
+            ShopAccountAlias.is_active == True,
+            ShopAccountAlias.is_primary == True,
+        )
+    )
+    for alias in alias_result.scalars().all():
+        alias.is_primary = False
+        if deactivate:
+            alias.is_active = False
+
+
 @router.get("", response_model=List[ShopAccountAliasResponse])
 async def list_shop_account_aliases(db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(
@@ -183,32 +213,58 @@ async def claim_shop_account_alias(
     payload: ShopAccountAliasClaimRequest,
     db: AsyncSession = Depends(get_async_db),
 ):
-    shop_account = (
-        await db.execute(
-            select(ShopAccount).where(ShopAccount.shop_account_id == payload.shop_account_id)
-        )
-    ).scalar_one_or_none()
-    if shop_account is None:
-        raise HTTPException(status_code=404, detail=f"shop account id '{payload.shop_account_id}' not found")
+    shop_account = await _get_shop_account_or_404(db, payload.shop_account_id)
 
     alias_value = normalize_alias_text(payload.alias_value)
     if not alias_value:
         raise HTTPException(status_code=400, detail="alias_value is required")
+    alias_normalized = _normalize_alias(alias_value)
+
+    await _clear_primary_aliases(db, shop_account.id)
+    existing = (
+        await db.execute(
+            select(ShopAccountAlias).where(
+                ShopAccountAlias.shop_account_id == shop_account.id,
+                ShopAccountAlias.alias_normalized == alias_normalized,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        existing.alias_value = alias_value
+        existing.alias_type = "claimed"
+        existing.source = payload.source
+        existing.is_primary = True
+        existing.is_active = True
+        await db.commit()
+        await db.refresh(existing)
+        return _serialize_alias(existing)
 
     record = ShopAccountAlias(
         shop_account_id=shop_account.id,
         platform=payload.platform,
         alias_value=alias_value,
-        alias_normalized=_normalize_alias(alias_value),
+        alias_normalized=alias_normalized,
         alias_type="claimed",
         source=payload.source,
-        is_primary=False,
+        is_primary=True,
         is_active=True,
     )
     db.add(record)
     await db.commit()
     await db.refresh(record)
     return _serialize_alias(record)
+
+
+@router.delete("/primary/{shop_account_id}")
+async def clear_shop_account_primary_alias(
+    shop_account_id: str,
+    db: AsyncSession = Depends(get_async_db),
+):
+    shop_account = await _get_shop_account_or_404(db, shop_account_id)
+    await _clear_primary_aliases(db, shop_account.id, deactivate=True)
+    await db.commit()
+    return {"message": f"primary alias cleared for '{shop_account_id}'"}
 
 
 @router.get("/unmatched", response_model=UnmatchedShopAliasResponse)

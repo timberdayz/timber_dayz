@@ -14,11 +14,11 @@ export const ROLE_CONFIG = {
       'collection-config', 'collection-coverage-audit', 'collection-tasks', 'collection-history',
       'component-recorder', 'component-versions',
       'data-sync', 'data-quarantine', 'field-mapping',
-      'product-management', 'inventory-management', 'inventory-dashboard-v3',
+      'product-management', 'inventory-management', 'inventory-dashboard-v3', 'inventory:view', 'inventory:manage', 'inventory-dashboard:view',
       'purchase-orders', 'grn-management', 'vendor-management', 'invoice-management',
-      'sales-dashboard-v3', 'sales-analysis', 'customer-management', 'order-management',
+      'sales-dashboard-v3', 'sales-analysis', 'sales-detail', 'customer-management', 'order-management',
       'target:read', 'config:sales-targets',
-      'financial-management', 'expense-management', 'finance-reports',
+      'financial-management', 'expense-management', 'finance-reports', 'b-cost-analysis',
       'fx-management', 'fiscal-periods',
       'store-management', 'store-analytics', 'account-management', 'account-alignment',
       'sales-reports', 'inventory-reports', 'finance-reports-detail',
@@ -40,11 +40,11 @@ export const ROLE_CONFIG = {
     icon: 'Briefcase',
     permissions: [
       'business-overview',
-      'sales-dashboard-v3', 'sales-analysis', 'customer-management', 'order-management',
-      'inventory-management', 'inventory-dashboard-v3',
+      'sales-dashboard-v3', 'sales-analysis', 'sales-detail', 'customer-management', 'order-management',
+      'inventory-management', 'inventory-dashboard-v3', 'inventory:view', 'inventory-dashboard:view',
       'store-management', 'store-analytics',
-      'purchase-orders', 'grn-management', 'vendor-management',
-      'financial-management', 'expense-management', 'finance-reports',
+      'purchase-orders', 'grn-management', 'vendor-management', 'invoice-management',
+      'financial-management', 'expense-management', 'finance-reports', 'b-cost-analysis',
       'fx-management', 'fiscal-periods',
       'sales-reports', 'inventory-reports', 'vendor-reports',
       'employee-management', 'my-income', 'attendance-management', 'performance:read',
@@ -60,12 +60,12 @@ export const ROLE_CONFIG = {
     icon: 'User',
     permissions: [
       'business-overview',
-      'sales-dashboard-v3', 'customer-management', 'order-management',
+      'sales-dashboard-v3', 'sales-analysis', 'sales-detail', 'customer-management', 'order-management',
       'store-management', 'store-analytics',
-      'employee-management', 'my-income', 'performance:read',
+      'employee-management', 'my-income', 'performance:read', 'inventory:view', 'inventory-dashboard:view',
       'system-notifications', 'alerts', 'message-settings',
       'personal-settings',
-      'sales-dashboard', 'message-center', 'notifications'
+      'sales-dashboard', 'sales-reports', 'inventory-reports', 'vendor-reports', 'message-center', 'notifications'
     ]
   },
   finance: {
@@ -73,9 +73,9 @@ export const ROLE_CONFIG = {
     icon: 'Money',
     permissions: [
       'business-overview',
-      'sales-analysis', 'sales-dashboard-v3', 'order-management',
+      'sales-analysis', 'sales-detail', 'sales-dashboard-v3', 'order-management',
       'purchase-orders', 'grn-management', 'vendor-management', 'invoice-management',
-      'financial-management', 'expense-management', 'finance-reports', 'finance-reports-detail',
+      'financial-management', 'expense-management', 'finance-reports', 'finance-reports-detail', 'b-cost-analysis',
       'fx-management', 'fiscal-periods',
       'employee-management', 'my-income', 'performance:read',
       'system-notifications', 'alerts', 'message-settings',

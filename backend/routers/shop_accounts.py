@@ -58,6 +58,7 @@ async def _ensure_capability_rows(
     shop_account: ShopAccount,
     *,
     shop_type: str | None = None,
+    capabilities: dict[str, bool] | None = None,
 ) -> None:
     capability_result = await db.execute(
         select(ShopAccountCapability).where(
@@ -65,15 +66,26 @@ async def _ensure_capability_rows(
         )
     )
     existing = capability_result.scalars().all()
-    if existing:
-        return
+    existing_map = {
+        row.data_domain: row
+        for row in existing
+    }
+    target_capabilities = (
+        capabilities
+        if capabilities is not None
+        else _default_capabilities_for(shop_type or shop_account.shop_type)
+    )
 
-    for domain, enabled in _default_capabilities_for(shop_type or shop_account.shop_type).items():
+    for domain, enabled in target_capabilities.items():
+        capability_row = existing_map.get(domain)
+        if capability_row is not None:
+            capability_row.enabled = bool(enabled)
+            continue
         db.add(
             ShopAccountCapability(
                 shop_account_id=shop_account.id,
-                data_domain=domain,
-                enabled=enabled,
+                data_domain=str(domain),
+                enabled=bool(enabled),
             )
         )
 
@@ -90,6 +102,8 @@ async def _serialize_shop_account(
     )
     aliases = alias_result.scalars().all()
     primary_alias = next((alias.alias_value for alias in aliases if alias.is_primary), None)
+    if primary_alias is None:
+        primary_alias = next((alias.alias_value for alias in aliases), None)
     capabilities = await _load_capabilities(db, record.id, record.shop_type)
     return ShopAccountResponse(
         id=record.id,
@@ -185,7 +199,12 @@ async def create_shop_account(
     db.add(record)
     await db.commit()
     await db.refresh(record)
-    await _ensure_capability_rows(db, record, shop_type=payload.shop_type)
+    await _ensure_capability_rows(
+        db,
+        record,
+        shop_type=payload.shop_type,
+        capabilities=payload.capabilities,
+    )
     await db.commit()
     return await _serialize_shop_account(db, record)
 
@@ -195,7 +214,7 @@ async def batch_create_shop_accounts(
     payloads: List[ShopAccountCreate],
     db: AsyncSession = Depends(get_async_db),
 ):
-    created: List[ShopAccount] = []
+    created: List[tuple[ShopAccount, ShopAccountCreate]] = []
     for payload in payloads:
         await _assert_main_account_exists(db, payload.platform, payload.main_account_id)
         existing = await db.execute(
@@ -221,13 +240,18 @@ async def batch_create_shop_accounts(
             updated_by="system",
         )
         db.add(record)
-        created.append(record)
+        created.append((record, payload))
     await db.commit()
-    for record in created:
+    for record, payload in created:
         await db.refresh(record)
-        await _ensure_capability_rows(db, record, shop_type=record.shop_type)
+        await _ensure_capability_rows(
+            db,
+            record,
+            shop_type=record.shop_type,
+            capabilities=payload.capabilities,
+        )
     await db.commit()
-    return [await _serialize_shop_account(db, record) for record in created]
+    return [await _serialize_shop_account(db, record) for record, _ in created]
 
 
 @router.put("/{shop_account_id}", response_model=ShopAccountResponse)
@@ -238,9 +262,15 @@ async def update_shop_account(
 ):
     record = await _get_shop_account_or_404(db, shop_account_id)
     update_data = payload.model_dump(exclude_unset=True)
+    capabilities = update_data.pop("capabilities", None)
     for field, value in update_data.items():
         setattr(record, field, value)
-    await _ensure_capability_rows(db, record, shop_type=update_data.get("shop_type", record.shop_type))
+    await _ensure_capability_rows(
+        db,
+        record,
+        shop_type=update_data.get("shop_type", record.shop_type),
+        capabilities=capabilities,
+    )
     record.updated_at = datetime.now(timezone.utc)
     record.updated_by = "system"
     await db.commit()

@@ -320,21 +320,9 @@
               <el-input v-model="accountForm.login_url" placeholder="系统自动生成" disabled />
             </el-form-item>
             
-            <el-form-item label="邮箱">
-              <el-input v-model="accountForm.email" placeholder="example@email.com" />
-            </el-form-item>
-            
-            <el-form-item label="手机号">
-              <el-input v-model="accountForm.phone" placeholder="手机号码" />
-            </el-form-item>
-            
-            <el-form-item label="账号地区">
-              <el-input v-model="accountForm.region" placeholder="CN" />
-            </el-form-item>
-            
-            <el-form-item label="主货币">
-              <el-input v-model="accountForm.currency" placeholder="CNY" />
-            </el-form-item>
+            <el-alert type="info" :closable="false">
+              Only main-account login fields are persisted here. Legacy contact and profile fields have been retired.
+            </el-alert>
           </el-tab-pane>
           
           <!-- 能力配置 -->
@@ -570,10 +558,6 @@ const accountForm = reactive({
   username: '',
   password: '',
   login_url: '',
-  email: '',
-  phone: '',
-  region: 'CN',
-  currency: 'CNY',
   capabilities: {
     orders: true,
     products: true,
@@ -583,7 +567,6 @@ const accountForm = reactive({
     inventory: true
   },
   enabled: true,
-  proxy_required: false,
   notes: ''
 })
 
@@ -742,13 +725,8 @@ function handleEdit(account) {
     username: mainAccount?.username || account.username || '',
     password: '', // 不显示密码
     login_url: mainAccount?.login_url || account.login_url || '',
-    email: account.email || '',
-    phone: account.phone || '',
-    region: account.region || 'CN',
-    currency: account.currency || 'CNY',
     capabilities: { ...account.capabilities },
     enabled: account.enabled,
-    proxy_required: account.proxy_required,
     notes: account.notes || ''
   })
   showCreateDialog.value = true
@@ -806,10 +784,6 @@ function resetForm() {
     username: '',
     password: '',
     login_url: '',
-    email: '',
-    phone: '',
-    region: 'CN',
-    currency: 'CNY',
     capabilities: {
       orders: true,
       products: true,
@@ -819,7 +793,6 @@ function resetForm() {
       inventory: true
     },
     enabled: true,
-    proxy_required: false,
     notes: ''
   })
   activeTab.value = 'basic'

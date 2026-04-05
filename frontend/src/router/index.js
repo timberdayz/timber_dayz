@@ -56,8 +56,8 @@ const routes = [
     }
   },
   {
-    path: '/test',
-    name: 'Test',
+    path: '/test-legacy',
+    name: 'TestLegacy',
     component: () => import('../views/TestPage.vue'),
     meta: {
       title: '测试页面',
@@ -129,7 +129,7 @@ const routes = [
       title: '销售明细（产品ID级别）',
       icon: 'List',
       permission: 'sales-detail',
-      roles: ['admin', 'manager', 'operator', 'finance']
+      roles: ['admin']
     }
   },
   {
@@ -139,8 +139,8 @@ const routes = [
     meta: {
       title: '库存管理',
       icon: 'Box',
-      permission: 'inventory-management',
-      roles: ['admin', 'manager']
+      permission: 'inventory:view',
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -150,8 +150,8 @@ const routes = [
     meta: {
       title: '库存总览',
       icon: 'DataBoard',
-      permission: 'inventory-management',
-      roles: ['admin', 'manager']
+      permission: 'inventory:view',
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -161,8 +161,8 @@ const routes = [
     meta: {
       title: '库存流水',
       icon: 'List',
-      permission: 'inventory-management',
-      roles: ['admin', 'manager']
+      permission: 'inventory:view',
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -172,8 +172,8 @@ const routes = [
     meta: {
       title: '库存调整',
       icon: 'Edit',
-      permission: 'inventory-management',
-      roles: ['admin', 'manager']
+      permission: 'inventory:manage',
+      roles: ['admin']
     }
   },
   {
@@ -183,8 +183,8 @@ const routes = [
     meta: {
       title: '入库单管理',
       icon: 'Tickets',
-      permission: 'inventory-management',
-      roles: ['admin', 'manager']
+      permission: 'inventory:manage',
+      roles: ['admin']
     }
   },
   {
@@ -194,8 +194,8 @@ const routes = [
     meta: {
       title: '库存预警',
       icon: 'Warning',
-      permission: 'inventory-management',
-      roles: ['admin', 'manager']
+      permission: 'inventory:view',
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -205,8 +205,8 @@ const routes = [
     meta: {
       title: '库存对账',
       icon: 'Switch',
-      permission: 'inventory-management',
-      roles: ['admin', 'manager']
+      permission: 'inventory:view',
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -216,8 +216,8 @@ const routes = [
     meta: {
       title: '搴撳瓨搴撻緞',
       icon: 'Clock',
-      permission: 'inventory-management',
-      roles: ['admin', 'manager']
+      permission: 'inventory:view',
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -227,8 +227,8 @@ const routes = [
     meta: {
       title: '期初余额',
       icon: 'Document',
-      permission: 'inventory-management',
-      roles: ['admin', 'manager']
+      permission: 'inventory:manage',
+      roles: ['admin']
     }
   },
   {
@@ -261,7 +261,7 @@ const routes = [
       title: '店铺管理',
       icon: 'Shop',
       permission: 'store-management',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin']
     }
   },
   {
@@ -316,7 +316,7 @@ const routes = [
       title: '个人设置',
       icon: 'Setting',
       permission: 'personal-settings',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   {
@@ -327,7 +327,7 @@ const routes = [
       title: '通知偏好设置',
       icon: 'Bell',
       permission: 'personal-settings',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   {
@@ -338,7 +338,7 @@ const routes = [
       title: '会话管理',
       icon: 'Monitor',
       permission: 'personal-settings',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   // ⭐ v4.6.0 DSS架构重构：新增数据同步路由（完全独立于字段映射审核）
@@ -450,8 +450,8 @@ const routes = [
     meta: {
       title: '库存健康仪表盘',
       icon: 'Box',
-      permission: 'inventory-dashboard-v3',
-      roles: ['admin', 'manager']
+      permission: 'inventory-dashboard:view',
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -461,8 +461,8 @@ const routes = [
     meta: {
       title: '产品质量仪表盘',
       icon: 'Medal',
-      permission: 'inventory-dashboard-v3',
-      roles: ['admin', 'manager']
+      permission: 'inventory-dashboard:view',
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -517,7 +517,7 @@ const routes = [
       title: '销售看板v3',
       icon: 'TrendCharts',
       permission: 'sales-dashboard',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   {
@@ -527,8 +527,8 @@ const routes = [
     meta: {
       title: '库存看板v3',
       icon: 'DataLine',
-      permission: 'inventory-dashboard-v3',
-      roles: ['admin', 'manager']
+      permission: 'inventory-dashboard:view',
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -607,8 +607,8 @@ const routes = [
     meta: {
       title: '测试页面',
       icon: 'Setting',
-      permission: null,
-      roles: []
+      permission: 'system-settings',
+      roles: ['admin']
     }
   },
   
@@ -735,7 +735,7 @@ const routes = [
       title: '客户管理',
       icon: 'UserFilled',
       permission: 'customer-management',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin']
     }
   },
   {
@@ -746,7 +746,7 @@ const routes = [
       title: '订单管理',
       icon: 'Document',
       permission: 'order-management',
-      roles: ['admin', 'manager', 'operator']
+      roles: ['admin']
     }
   },
   {
@@ -840,7 +840,7 @@ const routes = [
       title: '销售报表',
       icon: 'Document',
       permission: 'sales-reports',
-      roles: ['admin', 'manager']
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -851,7 +851,7 @@ const routes = [
       title: '库存报表',
       icon: 'Document',
       permission: 'inventory-reports',
-      roles: ['admin', 'manager']
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -873,7 +873,7 @@ const routes = [
       title: '供应商报表',
       icon: 'Document',
       permission: 'vendor-reports',
-      roles: ['admin', 'manager']
+      roles: ['admin', 'manager', 'operator']
     }
   },
   {
@@ -896,8 +896,8 @@ const routes = [
     meta: {
       title: '我的档案',
       icon: 'UserFilled',
-      permission: null,
-      roles: []
+      permission: 'employee-management',
+      roles: ['admin', 'manager', 'operator', 'finance']
     }
   },
   {
@@ -958,7 +958,7 @@ const routes = [
       title: '我的待办',
       icon: 'List',
       permission: 'my-tasks',
-      roles: ['admin', 'manager']
+      roles: ['admin']
     }
   },
   {
@@ -969,7 +969,7 @@ const routes = [
       title: '我的申请',
       icon: 'Document',
       permission: 'my-requests',
-      roles: ['admin', 'manager']
+      roles: ['admin']
     }
   },
   {
@@ -980,7 +980,7 @@ const routes = [
       title: '审批历史',
       icon: 'Clock',
       permission: 'approval-history',
-      roles: ['admin', 'manager']
+      roles: ['admin']
     }
   },
   {
@@ -1085,7 +1085,7 @@ const routes = [
       title: '操作指南',
       icon: 'Reading',
       permission: null,
-      roles: []
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
     }
   },
   {
@@ -1096,7 +1096,7 @@ const routes = [
       title: '视频教程',
       icon: 'VideoPlay',
       permission: null,
-      roles: []
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
     }
   },
   {
@@ -1107,7 +1107,7 @@ const routes = [
       title: '常见问题',
       icon: 'QuestionFilled',
       permission: null,
-      roles: []
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
     }
   },
   

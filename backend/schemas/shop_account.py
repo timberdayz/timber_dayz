@@ -12,6 +12,7 @@ class ShopAccountCreate(BaseModel):
     platform_shop_id: Optional[str] = Field(None, description="平台店铺ID")
     shop_region: Optional[str] = Field(None, description="店铺区域")
     shop_type: Optional[str] = Field(None, description="店铺类型")
+    capabilities: Optional[dict[str, bool]] = Field(None, description="店铺数据域能力配置")
     enabled: bool = Field(default=True, description="是否启用")
     notes: Optional[str] = Field(None, description="备注")
 
@@ -22,6 +23,7 @@ class ShopAccountUpdate(BaseModel):
     platform_shop_id_status: Optional[str] = None
     shop_region: Optional[str] = None
     shop_type: Optional[str] = None
+    capabilities: Optional[dict[str, bool]] = None
     enabled: Optional[bool] = None
     notes: Optional[str] = None
 

@@ -82,6 +82,11 @@ async def test_claim_unmatched_alias_binds_to_shop_account(alias_client):
     payload = response.json()
     assert payload["platform"] == "shopee"
     assert payload["alias_value"] == "HongXi SG Raw"
+    assert payload["is_primary"] is True
+
+    shop_accounts_response = await alias_client.get("/api/shop-accounts")
+    assert shop_accounts_response.status_code == 200
+    assert shop_accounts_response.json()[0]["account_alias"] == "HongXi SG Raw"
 
 
 @pytest.mark.asyncio
@@ -102,6 +107,95 @@ async def test_claim_alias_repairs_mojibake_value(alias_client):
     assert response.status_code == 200
     payload = response.json()
     assert payload["alias_value"] == expected
+    assert payload["is_primary"] is True
+
+
+@pytest.mark.asyncio
+async def test_claim_alias_replaces_existing_primary_alias(alias_client):
+    await _seed_shop_account(alias_client)
+
+    first_response = await alias_client.post(
+        "/api/shop-account-aliases/claim",
+        json={
+            "platform": "shopee",
+            "alias_value": "HongXi SG Raw",
+            "shop_account_id": "shopee_sg_hongxi_local",
+        },
+    )
+    assert first_response.status_code == 200
+
+    second_response = await alias_client.post(
+        "/api/shop-account-aliases/claim",
+        json={
+            "platform": "shopee",
+            "alias_value": "HongXi SG New",
+            "shop_account_id": "shopee_sg_hongxi_local",
+        },
+    )
+
+    assert second_response.status_code == 200
+    assert second_response.json()["alias_value"] == "HongXi SG New"
+    assert second_response.json()["is_primary"] is True
+
+    aliases_response = await alias_client.get("/api/shop-account-aliases")
+    assert aliases_response.status_code == 200
+    active_primary_aliases = [
+        item["alias_value"]
+        for item in aliases_response.json()
+        if item["is_active"] and item["is_primary"]
+    ]
+    assert active_primary_aliases == ["HongXi SG New"]
+
+    shop_accounts_response = await alias_client.get("/api/shop-accounts")
+    assert shop_accounts_response.status_code == 200
+    assert shop_accounts_response.json()[0]["account_alias"] == "HongXi SG New"
+
+
+@pytest.mark.asyncio
+async def test_clear_primary_alias_removes_shop_account_alias_display(alias_client):
+    await _seed_shop_account(alias_client)
+    claim_response = await alias_client.post(
+        "/api/shop-account-aliases/claim",
+        json={
+            "platform": "shopee",
+            "alias_value": "HongXi SG Raw",
+            "shop_account_id": "shopee_sg_hongxi_local",
+        },
+    )
+    assert claim_response.status_code == 200
+
+    clear_response = await alias_client.delete("/api/shop-account-aliases/primary/shopee_sg_hongxi_local")
+    assert clear_response.status_code == 200
+
+    shop_accounts_response = await alias_client.get("/api/shop-accounts")
+    assert shop_accounts_response.status_code == 200
+    assert shop_accounts_response.json()[0]["account_alias"] is None
+
+
+@pytest.mark.asyncio
+async def test_shop_accounts_list_falls_back_to_active_alias_when_primary_missing(alias_client):
+    await _seed_shop_account(alias_client)
+    shop_accounts_response = await alias_client.get("/api/shop-accounts")
+    assert shop_accounts_response.status_code == 200
+    shop_account_db_id = shop_accounts_response.json()[0]["id"]
+
+    create_alias_response = await alias_client.post(
+        "/api/shop-account-aliases",
+        json={
+            "shop_account_id": shop_account_db_id,
+            "platform": "shopee",
+            "alias_value": "Legacy Alias",
+            "alias_type": "legacy",
+            "source": "migration",
+            "is_primary": False,
+            "is_active": True,
+        },
+    )
+    assert create_alias_response.status_code == 200
+
+    refreshed_shop_accounts = await alias_client.get("/api/shop-accounts")
+    assert refreshed_shop_accounts.status_code == 200
+    assert refreshed_shop_accounts.json()[0]["account_alias"] == "Legacy Alias"
 
 
 def test_shop_account_aliases_router_exposes_unmatched_route():

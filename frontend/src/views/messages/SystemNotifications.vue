@@ -6,10 +6,10 @@
       family="admin"
     >
       <template #actions>
-        <el-button type="primary" plain @click="router.push('/admin/users/pending')">
+        <el-button v-if="isAdmin" type="primary" plain @click="router.push('/admin/users/pending')">
           用户审批
         </el-button>
-        <el-button plain @click="router.push('/user-management')">
+        <el-button v-if="isAdmin" plain @click="router.push('/user-management')">
           用户管理
         </el-button>
       </template>
@@ -26,7 +26,7 @@
           </div>
           <div class="header-actions">
             <el-button 
-              v-if="unreadCount > 0"
+              v-if="isAdmin && unreadCount > 0"
               type="primary" 
               @click="handleMarkAllRead"
               :loading="markingAllRead"
@@ -35,6 +35,7 @@
               全部标记已读
             </el-button>
             <el-button 
+              v-if="isAdmin"
               @click="handleDeleteAllRead"
               :loading="deletingRead"
               :icon="Delete"
@@ -154,7 +155,7 @@
                     查看全部
                   </el-button>
                   <el-button 
-                    v-if="group.unread_count > 0"
+                    v-if="isAdmin && group.unread_count > 0"
                     size="small"
                     @click="handleMarkGroupRead(group.notification_type)"
                     :loading="markingGroupRead === group.notification_type"
@@ -284,7 +285,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
@@ -304,8 +305,11 @@ import {
 } from '@element-plus/icons-vue'
 import notificationsApi from '@/api/notifications.js'
 import PageHeader from '@/components/common/PageHeader.vue'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.hasRole(['admin']))
 
 // 状态
 const loading = ref(false)

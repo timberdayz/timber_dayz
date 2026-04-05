@@ -125,3 +125,69 @@ async def test_create_shop_account_assigns_default_capabilities(shop_account_cli
         "finance": True,
         "inventory": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_update_shop_account_persists_capabilities(shop_account_client):
+    create_main = await shop_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "hongxikeji:main",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+    assert create_main.status_code == 200
+
+    create_shop = await shop_account_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "shopee",
+            "shop_account_id": "shopee_sg_hongxi_local",
+            "main_account_id": "hongxikeji:main",
+            "store_name": "HongXi SG",
+            "shop_region": "SG",
+            "shop_type": "local",
+            "enabled": True,
+        },
+    )
+    assert create_shop.status_code == 200
+
+    update_response = await shop_account_client.put(
+        "/api/shop-accounts/shopee_sg_hongxi_local",
+        json={
+            "capabilities": {
+                "orders": True,
+                "products": False,
+                "services": False,
+                "analytics": True,
+                "finance": False,
+                "inventory": True,
+            }
+        },
+    )
+
+    assert update_response.status_code == 200
+    updated_payload = update_response.json()
+    assert updated_payload["capabilities"] == {
+        "orders": True,
+        "products": False,
+        "services": False,
+        "analytics": True,
+        "finance": False,
+        "inventory": True,
+    }
+
+    list_response = await shop_account_client.get("/api/shop-accounts")
+    assert list_response.status_code == 200
+    listed_account = list_response.json()[0]
+    assert listed_account["capabilities"] == {
+        "orders": True,
+        "products": False,
+        "services": False,
+        "analytics": True,
+        "finance": False,
+        "inventory": True,
+    }
