@@ -625,6 +625,17 @@ const routes = [
     }
   },
   {
+    path: '/collection-coverage-audit',
+    name: 'CollectionCoverageAudit',
+    component: () => import('../views/collection/CollectionCoverageAudit.vue'),
+    meta: {
+      title: '采集覆盖率巡检',
+      icon: 'DataLine',
+      permission: 'collection-coverage-audit',
+      roles: ['admin']
+    }
+  },
+  {
     path: '/collection-tasks',
     name: 'CollectionTasks',
     component: () => import('../views/collection/CollectionTasks.vue'),

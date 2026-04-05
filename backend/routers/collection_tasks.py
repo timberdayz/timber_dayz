@@ -333,7 +333,7 @@ async def create_task(
         account=request.account_id,
         status="pending",
         config_id=request.config_id,
-        trigger_type="manual",
+        trigger_type="config" if request.config_id is not None else "manual",
         data_domains=filtered_domains,
         sub_domains=normalized_sub_domains or None,
         granularity=effective_granularity,
@@ -531,6 +531,7 @@ async def cancel_or_delete_task(
 @router.post("/tasks/{task_id}/retry", response_model=TaskResponse)
 async def retry_task(
     task_id: str = Path(..., description="任务ID"),
+    request: Request = None,
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -552,7 +553,7 @@ async def retry_task(
         platform=original_task.platform,
         account=original_task.account,
         status="pending",
-        config_id=original_task.config_id,
+        config_id=getattr(original_task, "config_id", None),
         trigger_type="retry",
         data_domains=original_task.data_domains,
         sub_domains=original_task.sub_domains,
@@ -584,6 +585,42 @@ async def retry_task(
         details=log.details,
     )
 
+    try:
+        from backend.services.component_runtime_resolver import (
+            ComponentRuntimeResolver,
+            ComponentRuntimeResolverError,
+        )
+
+        resolver = ComponentRuntimeResolver.from_async_session(db)
+        runtime_manifests = await resolver.resolve_task_manifests(
+            platform=original_task.platform,
+            data_domains=original_task.data_domains or [],
+            sub_domains=original_task.sub_domains or {},
+        )
+    except ComponentRuntimeResolverError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stable component not ready: {e}",
+        ) from e
+
+    app = getattr(request, "app", None) if request else None
+    asyncio.create_task(
+        _execute_collection_task_background(
+            task_id=new_task.task_id,
+            platform=original_task.platform,
+            account_id=original_task.account,
+            data_domains=original_task.data_domains or [],
+            sub_domains=original_task.sub_domains,
+            date_range=original_task.date_range or {},
+            granularity=original_task.granularity or "daily",
+            debug_mode=getattr(original_task, "debug_mode", False) or False,
+            parallel_mode=False,
+            max_parallel=1,
+            runtime_manifests=runtime_manifests,
+            app=app,
+        )
+    )
+
     logger.info(f"Created retry task: {new_task.task_id} (original: {task_id})")
     return _build_task_response_payload(new_task)
 
@@ -606,7 +643,7 @@ async def resume_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    if task.status not in ("verification_required", "paused"):
+    if task.status not in ("verification_required", "paused", "manual_intervention_required"):
         raise HTTPException(
             status_code=400,
             detail="验证已超时或任务已结束，请重新发起采集",
@@ -928,6 +965,16 @@ async def _on_verification_required(
     返回用户提交的 captcha_code/otp 或 None(超时)。
     """
     from backend.models.database import AsyncSessionLocal
+    next_status = (
+        "manual_intervention_required"
+        if verification_input_mode(verification_type) == "manual_continue"
+        else "verification_required"
+    )
+    waiting_message = (
+        "绛夊緟浜哄伐澶勭悊"
+        if next_status == "manual_intervention_required"
+        else "绛夊緟楠岃瘉鐮佸洖濉?"
+    )
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(CollectionTask).where(CollectionTask.task_id == task_id))
@@ -935,7 +982,19 @@ async def _on_verification_required(
             if task:
                 task.verification_type = verification_type
                 task.verification_screenshot = screenshot_path
-                task.status = "verification_required"
+                task.status = next_status
+                task.current_step = waiting_message
+                session.add(
+                    CollectionTaskLog(
+                        task_id=task.id,
+                        level="info",
+                        message=waiting_message,
+                        details={
+                            "verification_type": verification_type,
+                            "waiting_status": next_status,
+                        },
+                    )
+                )
                 await session.commit()
                 await _mirror_collection_task(session, task)
                 await connection_manager.send_verification_required(
@@ -1101,11 +1160,20 @@ async def _execute_collection_task_background(
                         )
 
                     task.status = result.status
-                    task.progress = 100 if result.status in ["completed", "partial_success"] else 0
+                    if result.status in ["completed", "partial_success"]:
+                        task.progress = 100
+                    elif result.status in ["paused", "manual_intervention_required"]:
+                        task.progress = max(getattr(task, "progress", 0) or 0, 1)
+                    else:
+                        task.progress = 0
                     task.files_collected = result.files_collected
                     task.error_message = result.error_message
-                    task.completed_at = datetime.now(timezone.utc)
-                    task.duration_seconds = result.duration_seconds
+                    if result.status in ["paused", "manual_intervention_required"]:
+                        task.completed_at = None
+                        task.duration_seconds = None
+                    else:
+                        task.completed_at = datetime.now(timezone.utc)
+                        task.duration_seconds = result.duration_seconds
                     task.completed_domains = result.completed_domains
                     task.failed_domains = result.failed_domains
                     await db.commit()

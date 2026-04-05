@@ -32,6 +32,7 @@ export const menuGroups = [
     items: [
       '/cloud-sync',             // 云端同步管理
       '/collection-config',      // 采集配置
+      '/collection-coverage-audit', // 采集覆盖率巡检
       '/collection-tasks',       // 采集任务
       '/collection-history',     // 采集历史
       '/component-recorder',     // ⭐ Phase 8.1: 组件录制工具（UI化录制）

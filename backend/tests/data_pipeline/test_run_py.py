@@ -53,3 +53,80 @@ def test_start_frontend_fails_early_when_vite_dependency_missing(tmp_path, monke
 
     assert result is None
     assert any("vite" in message.lower() for message in messages)
+
+
+def test_start_backend_checks_active_backend_port(tmp_path, monkeypatch):
+    module = _load_run_module()
+    checked = []
+
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "run.py"))
+    monkeypatch.setattr(module, "ACTIVE_BACKEND_PORT", 18001)
+    monkeypatch.setattr(module, "safe_print", lambda *_: None)
+    monkeypatch.setattr(
+        module,
+        "_require_local_port_available",
+        lambda port, service_name: checked.append((port, service_name)) or True,
+    )
+
+    class DummyProcess:
+        pass
+
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: DummyProcess())
+
+    result = module.start_backend()
+
+    assert isinstance(result, DummyProcess)
+    assert checked == [(18001, "后端服务")]
+
+
+def test_warn_legacy_shop_session_artifacts_reports_detected_paths(tmp_path, monkeypatch):
+    module = _load_run_module()
+    messages = []
+
+    class _FakeSettings:
+        DATABASE_URL = "postgresql://example"
+
+    monkeypatch.setattr(module, "safe_print", messages.append)
+    monkeypatch.setattr("backend.utils.config.get_settings", lambda: _FakeSettings())
+    monkeypatch.setattr(
+        "modules.utils.sessions.legacy_shop_artifact_cleanup.collect_legacy_shop_artifacts_for_active_shops",
+        lambda project_root, database_url: [
+            Path(project_root) / "data" / "sessions" / "shopee" / "shop-1",
+            Path(project_root) / "profiles" / "shopee" / "shop-1",
+        ],
+    )
+
+    result = module.warn_legacy_shop_session_artifacts(tmp_path)
+
+    assert result is True
+    assert any("店铺级会话历史残留" in message for message in messages)
+    assert any("cleanup_legacy_shop_session_artifacts.py --delete" in message for message in messages)
+
+
+def test_warn_legacy_shop_session_artifacts_stays_quiet_when_no_paths(tmp_path, monkeypatch):
+    module = _load_run_module()
+    messages = []
+
+    class _FakeSettings:
+        DATABASE_URL = "postgresql://example"
+
+    monkeypatch.setattr(module, "safe_print", messages.append)
+    monkeypatch.setattr("backend.utils.config.get_settings", lambda: _FakeSettings())
+    monkeypatch.setattr(
+        "modules.utils.sessions.legacy_shop_artifact_cleanup.collect_legacy_shop_artifacts_for_active_shops",
+        lambda project_root, database_url: [],
+    )
+
+    result = module.warn_legacy_shop_session_artifacts(tmp_path)
+
+    assert result is True
+    assert messages == []
+
+
+def test_run_py_uses_clean_docker_wait_messages():
+    text = Path("run.py").read_text(encoding="utf-8", errors="replace")
+
+    assert "Docker 基础服务健康检查" in text
+    assert "Docker 基础服务已就绪" in text
+    assert "等待中..." in text
+    assert "Docker 基础服务等待超时" in text

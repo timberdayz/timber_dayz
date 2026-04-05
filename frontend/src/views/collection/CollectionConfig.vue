@@ -1,14 +1,15 @@
 <template>
   <div class="collection-config">
-    <!-- 页面标题 -->
     <div class="page-header">
-      <h2>采集配置管理</h2>
+      <div>
+        <h2>采集配置管理</h2>
+        <p class="page-subtitle">按日、周、月管理店铺账号采集配置，并检查覆盖缺口。</p>
+      </div>
       <div class="header-actions">
         <el-button type="success" @click="showQuickSetupDialog">
           <el-icon><MagicStick /></el-icon>
           快速配置
         </el-button>
-        <!-- 旧的录制组件功能已移至"组件录制工具"页面 -->
         <el-button type="primary" @click="showCreateDialog">
           <el-icon><Plus /></el-icon>
           新建配置
@@ -16,163 +17,215 @@
       </div>
     </div>
 
-    <!-- 筛选工具栏 -->
-    <div class="filter-bar">
-      <el-select 
-        v-model="filters.platform" 
-        placeholder="平台筛选" 
-        clearable
-        @change="loadConfigs"
-      >
-        <el-option label="Shopee" value="shopee" />
-        <el-option label="TikTok" value="tiktok" />
-        <el-option label="妙手ERP" value="miaoshou" />
-      </el-select>
-      
-      <el-select 
-        v-model="filters.is_active" 
-        placeholder="状态筛选" 
-        clearable
-        @change="loadConfigs"
-      >
-        <el-option label="已启用" :value="true" />
-        <el-option label="已禁用" :value="false" />
-      </el-select>
-      
-      <el-button @click="loadConfigs">
-        <el-icon><Refresh /></el-icon>
-        刷新
-      </el-button>
-    </div>
+    <el-card class="granularity-card">
+      <div class="granularity-toolbar">
+        <el-radio-group v-model="activeGranularity" size="large">
+          <el-radio-button label="daily">日采集</el-radio-button>
+          <el-radio-button label="weekly">周采集</el-radio-button>
+          <el-radio-button label="monthly">月采集</el-radio-button>
+        </el-radio-group>
 
-    <!-- 配置列表 -->
-    <el-table 
-      v-loading="loading" 
-      :data="configs" 
-      stripe
-      style="width: 100%"
-    >
-      <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" label="配置名称" min-width="150" />
-      <el-table-column prop="platform" label="平台" width="100">
-        <template #default="{ row }">
-          <el-tag :type="getPlatformTagType(row.platform)">
-            {{ row.platform }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="账号数" width="80">
-        <template #default="{ row }">
-          {{ row.account_ids?.length || 0 }}
-        </template>
-      </el-table-column>
-      <el-table-column label="执行模式" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.execution_mode === 'headed' ? 'warning' : 'info'">
-            {{ getExecutionModeLabel(row.execution_mode) }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="数据域" min-width="180">
-        <template #default="{ row }">
-          <el-tag 
-            v-for="domain in row.data_domains" 
-            :key="domain"
-            size="small"
-            style="margin-right: 4px"
-          >
-            {{ getDomainLabel(domain) }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="定时状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.schedule_enabled ? 'success' : 'info'">
-            {{ row.schedule_enabled ? '已启用' : '未启用' }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="is_active" label="状态" width="80">
-        <template #default="{ row }">
-          <el-switch 
-            v-model="row.is_active" 
-            @change="toggleActive(row)"
-          />
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="editConfig(row)">
-            编辑
-          </el-button>
-          <el-button size="small" type="success" @click="runConfig(row)">
-            执行
-          </el-button>
-          <el-popconfirm
-            title="确定要删除此配置吗？"
-            @confirm="deleteConfig(row)"
-          >
-            <template #reference>
-              <el-button size="small" type="danger">删除</el-button>
-            </template>
-          </el-popconfirm>
-        </template>
-      </el-table-column>
-    </el-table>
+        <div class="filter-bar">
+          <el-select v-model="filters.platform" placeholder="平台筛选" clearable @change="reloadPageData">
+            <el-option label="Shopee" value="shopee" />
+            <el-option label="TikTok" value="tiktok" />
+            <el-option label="妙手ERP" value="miaoshou" />
+          </el-select>
 
-    <!-- 创建/编辑对话框 -->
-    <el-dialog 
-      v-model="dialogVisible" 
-      :title="isEdit ? '编辑配置' : '新建配置'"
-      width="700px"
+          <el-select v-model="filters.is_active" placeholder="状态筛选" clearable @change="loadConfigs">
+            <el-option label="已启用" :value="true" />
+            <el-option label="已禁用" :value="false" />
+          </el-select>
+
+          <el-button @click="reloadPageData">
+            <el-icon><Refresh /></el-icon>
+            刷新
+          </el-button>
+        </div>
+      </div>
+
+      <div class="coverage-grid" v-loading="coverageLoading">
+        <div class="coverage-item">
+          <div class="coverage-label">店铺总数</div>
+          <div class="coverage-value">{{ currentCoverageSummary.total }}</div>
+        </div>
+        <div class="coverage-item">
+          <div class="coverage-label">当前粒度已覆盖</div>
+          <div class="coverage-value coverage-ok">{{ currentCoverageSummary.covered }}</div>
+        </div>
+        <div class="coverage-item">
+          <div class="coverage-label">当前粒度未覆盖</div>
+          <div class="coverage-value coverage-warn">{{ currentCoverageSummary.missing }}</div>
+        </div>
+        <div class="coverage-item">
+          <div class="coverage-label">全局部分覆盖</div>
+          <div class="coverage-value coverage-mid">{{ currentCoverageSummary.partial }}</div>
+        </div>
+      </div>
+
+      <el-alert
+        v-if="missingCoverageItems.length > 0"
+        type="warning"
+        :closable="false"
+        show-icon
+        class="coverage-alert"
+      >
+        <template #title>
+          当前{{ activeGranularityLabel }}仍有 {{ missingCoverageItems.length }} 个店铺账号未覆盖
+        </template>
+        <div class="missing-list">
+          <div
+            v-for="item in missingCoverageItems.slice(0, 8)"
+            :key="`${item.platform}-${item.shop_account_id}`"
+            class="missing-list-item"
+          >
+            <span>{{ item.platform }} / {{ item.main_account_name || item.main_account_id }} / {{ item.shop_account_name }}</span>
+            <span class="missing-meta">{{ item.shop_region || '未标注区域' }}</span>
+          </div>
+        </div>
+      </el-alert>
+    </el-card>
+
+    <el-card class="table-card">
+      <template #header>
+        <div class="table-header">
+          <span>{{ activeGranularityLabel }}配置列表</span>
+          <span class="table-summary">共 {{ filteredConfigs.length }} 条</span>
+        </div>
+      </template>
+
+      <el-table v-loading="loading" :data="filteredConfigs" stripe style="width: 100%">
+        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column prop="name" label="配置名称" min-width="180" />
+        <el-table-column label="平台" width="110">
+          <template #default="{ row }">
+            <el-tag :type="getPlatformTagType(row.platform)">
+              {{ row.platform }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="粒度" width="100">
+          <template #default="{ row }">
+            <el-tag type="info">{{ getGranularityLabel(row._resolvedGranularity) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="店铺账号数" width="100">
+          <template #default="{ row }">
+            {{ row.account_ids?.length || 0 }}
+          </template>
+        </el-table-column>
+        <el-table-column label="执行模式" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.execution_mode === 'headed' ? 'warning' : 'success'">
+              {{ getExecutionModeLabel(row.execution_mode) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="数据域" min-width="220">
+          <template #default="{ row }">
+            <el-tag
+              v-for="domain in row.data_domains"
+              :key="domain"
+              size="small"
+              class="domain-tag"
+            >
+              {{ getDomainLabel(domain) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="定时" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.schedule_enabled ? 'success' : 'info'">
+              {{ row.schedule_enabled ? '启用' : '关闭' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-switch v-model="row.is_active" @change="toggleActive(row)" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" @click="editConfig(row)">编辑</el-button>
+            <el-button size="small" type="success" @click="runConfig(row)">执行</el-button>
+            <el-popconfirm title="确定删除这条配置吗？" @confirm="deleteConfig(row)">
+              <template #reference>
+                <el-button size="small" type="danger">删除</el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-dialog
+      v-model="dialogVisible"
+      :title="isEdit ? `编辑${activeGranularityLabel}配置` : `新建${activeGranularityLabel}配置`"
+      width="920px"
       destroy-on-close
     >
-      <el-form 
-        ref="formRef"
-        :model="form" 
-        :rules="formRules"
-        label-width="100px"
-      >
+      <el-form ref="formRef" :model="form" :rules="formRules" label-width="110px">
         <el-form-item label="配置名称" prop="name">
-          <el-input 
-            v-model="form.name" 
-            placeholder="留空自动生成（格式：平台-数据域-v版本号）"
-          >
+          <el-input v-model="form.name" placeholder="留空自动生成（平台-数据域-v版本号）">
             <template #append v-if="!isEdit">
               <el-button @click="generateConfigName">自动生成</el-button>
             </template>
           </el-input>
-          <div class="form-hint" v-if="generatedName">
-            建议名称: {{ generatedName }}
-          </div>
+          <div class="form-hint" v-if="generatedName">建议名称：{{ generatedName }}</div>
         </el-form-item>
 
         <el-form-item label="平台" prop="platform">
-          <el-select 
-            v-model="form.platform" 
-            placeholder="请选择平台"
-            @change="onPlatformChange"
-          >
+          <el-select v-model="form.platform" placeholder="请选择平台" @change="onPlatformChange">
             <el-option label="Shopee" value="shopee" />
             <el-option label="TikTok" value="tiktok" />
             <el-option label="妙手ERP" value="miaoshou" />
           </el-select>
         </el-form-item>
 
-        <el-form-item label="选择账号" prop="account_ids">
-          <el-select 
-            v-model="form.account_ids" 
-            multiple
-            placeholder="请选择账号"
-            :loading="accountsLoading"
-          >
-            <el-option 
-              v-for="account in filteredAccounts" 
-              :key="account.id"
-              :label="account.name"
-              :value="account.id"
-            />
-          </el-select>
+        <el-form-item label="店铺账号" prop="account_ids">
+          <div class="account-selection-panel" v-loading="accountsLoading">
+            <div class="account-selection-actions">
+              <el-button size="small" @click="applyCapabilitiesFromSelectedAccounts">按店铺能力自动套用</el-button>
+              <span class="selection-summary">已选 {{ form.account_ids.length }} 个店铺账号</span>
+            </div>
+
+            <div v-if="groupedAccountsForDialog.length === 0" class="empty-tip">
+              当前平台暂无可选店铺账号
+            </div>
+
+            <div v-else class="grouped-accounts">
+              <div
+                v-for="group in groupedAccountsForDialog"
+                :key="`${group.platform}-${group.main_account_id}`"
+                class="main-account-group"
+              >
+                <div class="group-title">
+                  {{ group.main_account_name || group.main_account_id }}
+                  <span class="group-subtitle">{{ group.platform }}</span>
+                </div>
+
+                <div
+                  v-for="region in group.regions"
+                  :key="`${group.main_account_id}-${region.shop_region || 'unknown'}`"
+                  class="region-group"
+                >
+                  <div class="region-title">{{ region.shop_region || '未标注区域' }}</div>
+                  <el-checkbox-group v-model="form.account_ids" @change="applyCapabilitiesFromSelectedAccounts">
+                    <el-checkbox
+                      v-for="shop in region.shops"
+                      :key="shop.id"
+                      :label="shop.id"
+                      class="shop-checkbox"
+                    >
+                      <span>{{ shop.name }}</span>
+                      <span class="shop-meta">{{ shop.shop_type || '未分类' }}</span>
+                    </el-checkbox>
+                  </el-checkbox-group>
+                </div>
+              </div>
+            </div>
+          </div>
         </el-form-item>
 
         <el-form-item label="数据域" prop="data_domains">
@@ -204,35 +257,21 @@
             </el-checkbox-group>
             <el-button size="small" @click="selectAllSubDomains(domain)">全选</el-button>
           </div>
-          <div class="form-hint">按数据域绑定子类型，后续新增别的数据域子类型时可直接扩展</div>
         </el-form-item>
 
         <el-form-item label="日期范围" prop="date_range_type">
-          <el-select 
-            v-model="form.date_range_type" 
-            placeholder="请选择日期范围"
-          >
-            <el-option label="今天" value="today" />
-            <el-option label="昨天" value="yesterday" />
-            <el-option 
-              :label="getPlatformDateLabel('last_7_days')" 
-              value="last_7_days" 
+          <el-select v-model="form.date_range_type" placeholder="请选择日期范围">
+            <el-option
+              v-for="option in currentGranularityDateOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
             />
-            <el-option 
-              :label="getPlatformDateLabel('last_30_days')" 
-              value="last_30_days" 
-            />
-            <el-option label="自定义" value="custom" />
           </el-select>
-          <div class="form-hint">
-            {{ getDateRangeHint() }}
-          </div>
+          <div class="form-hint">当前配置会归入 {{ activeGranularityLabel }} 视图。</div>
         </el-form-item>
 
-        <el-form-item 
-          v-if="form.date_range_type === 'custom'" 
-          label="自定义日期"
-        >
+        <el-form-item v-if="form.date_range_type === 'custom'" label="自定义日期">
           <el-date-picker
             v-model="customDateRange"
             type="daterange"
@@ -242,30 +281,11 @@
           />
         </el-form-item>
 
-        <el-form-item
-          v-if="form.date_range_type === 'custom'"
-          label="自定义粒度"
-        >
-          <el-select v-model="form.granularity" placeholder="请选择粒度">
-            <el-option label="日度" value="daily" />
-            <el-option label="周度" value="weekly" />
-            <el-option label="月度" value="monthly" />
-          </el-select>
-          <div class="form-hint">
-            自定义时间范围需要显式指定粒度，供任务调度、输出命名和下游入库使用
-          </div>
-        </el-form-item>
-
-        <el-divider content-position="left">定时配置</el-divider>
-
         <el-form-item label="执行模式">
           <el-radio-group v-model="form.execution_mode">
             <el-radio-button label="headless">无头模式</el-radio-button>
             <el-radio-button label="headed">有头模式</el-radio-button>
           </el-radio-group>
-          <div class="form-hint">
-            无头模式用于日常和定时采集；有头模式适合测试、页面观察和需要人工干预的场景
-          </div>
         </el-form-item>
 
         <el-form-item label="启用定时">
@@ -291,143 +311,70 @@
       </template>
     </el-dialog>
 
-    <!-- 快速配置对话框（v4.7.0）-->
-    <el-dialog 
-      v-model="quickSetupVisible" 
-      title="快速配置向导"
-      width="600px"
-      destroy-on-close
-    >
-      <el-steps :active="quickSetupStep" align-center>
-        <el-step title="选择平台" />
-        <el-step title="选择策略" />
-        <el-step title="确认并创建" />
-      </el-steps>
-      
-      <div class="quick-setup-content">
-        <!-- 步骤1: 选择平台 -->
-        <div v-if="quickSetupStep === 0" class="setup-step">
-          <el-form label-width="100px">
-            <el-form-item label="平台">
-              <el-radio-group v-model="quickSetup.platform">
-                <el-radio label="shopee">Shopee</el-radio>
-                <el-radio label="tiktok">TikTok</el-radio>
-                <el-radio label="miaoshou">妙手ERP</el-radio>
-              </el-radio-group>
-            </el-form-item>
-          </el-form>
-        </div>
-        
-        <!-- 步骤2: 选择策略 -->
-        <div v-if="quickSetupStep === 1" class="setup-step">
-          <el-form label-width="100px">
-            <el-form-item label="配置策略">
-              <el-radio-group v-model="quickSetup.strategy">
-                <el-radio label="standard">标准配置（日度+周度+月度）</el-radio>
-                <el-radio label="custom">自定义选择</el-radio>
-              </el-radio-group>
-            </el-form-item>
-            
-            <el-form-item 
-              v-if="quickSetup.strategy === 'custom'" 
-              label="选择粒度"
-            >
-              <el-checkbox-group v-model="quickSetup.granularities">
-                <el-checkbox label="daily">日度采集（每天4次）</el-checkbox>
-                <el-checkbox label="weekly">周度采集（每周一 05:00）</el-checkbox>
-                <el-checkbox label="monthly">月度采集（每月1号 05:00）</el-checkbox>
-              </el-checkbox-group>
-            </el-form-item>
-          </el-form>
-        </div>
-        
-        <!-- 步骤3: 确认 -->
-        <div v-if="quickSetupStep === 2" class="setup-step">
-          <el-descriptions :column="1" border>
-            <el-descriptions-item label="平台">{{ quickSetup.platform }}</el-descriptions-item>
-            <el-descriptions-item label="数据域">{{ getQuickSetupDomainSummary() }}</el-descriptions-item>
-            <el-descriptions-item label="账号">该平台所有活跃账号</el-descriptions-item>
-            <el-descriptions-item label="配置数量">{{ getQuickSetupConfigCount() }}</el-descriptions-item>
-            <el-descriptions-item label="预计任务">{{ getQuickSetupTaskCount() }}</el-descriptions-item>
-          </el-descriptions>
-          
-          <el-alert 
-            type="info" 
-            :closable="false" 
-            style="margin-top: 16px"
-          >
-            <template #title>
-              将创建以下配置：
-            </template>
-            <ul>
-              <li v-for="config in getQuickSetupConfigs()" :key="config.name">
-                {{ config.name }} - {{ config.description }}
-              </li>
-            </ul>
-          </el-alert>
-        </div>
-      </div>
-      
+    <el-dialog v-model="quickSetupVisible" title="快速配置" width="540px" destroy-on-close>
+      <el-form label-width="100px">
+        <el-form-item label="平台">
+          <el-select v-model="quickSetup.platform" placeholder="请选择平台">
+            <el-option label="Shopee" value="shopee" />
+            <el-option label="TikTok" value="tiktok" />
+            <el-option label="妙手ERP" value="miaoshou" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="说明">
+          <div class="form-hint">
+            将基于当前{{ activeGranularityLabel }}视图，为所选平台创建一条面向全部店铺账号的默认配置。
+          </div>
+        </el-form-item>
+      </el-form>
       <template #footer>
-        <el-button v-if="quickSetupStep > 0" @click="quickSetupStep--">上一步</el-button>
         <el-button @click="quickSetupVisible = false">取消</el-button>
-        <el-button 
-          v-if="quickSetupStep < 2" 
-          type="primary" 
-          @click="quickSetupStep++"
-          :disabled="!canGoNextStep()"
-        >
-          下一步
-        </el-button>
-        <el-button 
-          v-if="quickSetupStep === 2" 
-          type="primary" 
-          :loading="quickSetupSubmitting"
-          @click="executeQuickSetup"
-        >
-          创建配置
-        </el-button>
+        <el-button type="primary" :loading="quickSetupSubmitting" @click="executeQuickSetup">创建</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, MagicStick, CopyDocument } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { MagicStick, Plus, Refresh } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
 import {
+  buildAutoSelectedSubDomains,
   buildTimeSelectionPayload,
   getAvailableDomainOptions,
-  getDatePresetLabel,
-  getSelectedSubtypeDomains,
   getSubtypeOptions,
+  getSelectedSubtypeDomains,
+  normalizeConfigGranularity,
   normalizeDomainSubtypeMap,
   resolveAccountIdsForConfigRun
 } from '@/constants/collection'
 
 const router = useRouter()
 
-// 状态
 const loading = ref(false)
 const accountsLoading = ref(false)
+const coverageLoading = ref(false)
 const submitting = ref(false)
 const dialogVisible = ref(false)
+const quickSetupVisible = ref(false)
+const quickSetupSubmitting = ref(false)
 const isEdit = ref(false)
-const configs = ref([])
-const accounts = ref([])
-const formRef = ref(null)
 
-// 筛选条件
+const activeGranularity = ref('daily')
+const configs = ref([])
+const flatAccounts = ref([])
+const groupedAccounts = ref([])
+const coverage = ref({ summary: {}, items: [] })
+const formRef = ref(null)
+const generatedName = ref('')
+const customDateRange = ref([])
+
 const filters = reactive({
   platform: '',
   is_active: null
 })
-
-// 表单数据（v4.7.0）
-const DEFAULT_GRANULARITY = 'daily'
 
 const form = reactive({
   id: null,
@@ -436,7 +383,7 @@ const form = reactive({
   account_ids: [],
   data_domains: [],
   sub_domains: {},
-  granularity: DEFAULT_GRANULARITY,  // 保留用于后端推断
+  granularity: 'daily',
   date_range_type: 'yesterday',
   custom_date_start: null,
   custom_date_end: null,
@@ -445,63 +392,100 @@ const form = reactive({
   schedule_cron: ''
 })
 
-const customDateRange = ref([])
-const generatedName = ref('')  // v4.7.0: 自动生成的配置名
-const PRESET_GRANULARITY_MAP = {
-  today: 'daily',
-  yesterday: 'daily',
-  last_7_days: 'weekly',
-  last_30_days: 'monthly'
-}
-
-// v4.7.0: 快速配置状态
-const quickSetupVisible = ref(false)
-const quickSetupStep = ref(0)
-const quickSetupSubmitting = ref(false)
 const quickSetup = reactive({
-  platform: '',
-  strategy: 'standard',  // standard/custom
-  granularities: ['daily', 'weekly', 'monthly']
+  platform: ''
 })
 
-// 表单验证规则（v4.7.0: name可选）
 const formRules = {
-  name: [{ required: false, message: '留空自动生成', trigger: 'blur' }],
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
-  account_ids: [{ required: false, message: '留空表示所有活跃账号', trigger: 'change' }],
-  data_domains: [{ required: true, message: '请选择至少一个数据域', trigger: 'change' }],
+  data_domains: [{ required: true, message: '请至少选择一个数据域', trigger: 'change' }],
   date_range_type: [{ required: true, message: '请选择日期范围', trigger: 'change' }]
 }
 
-// 计算属性
-const filteredAccounts = computed(() => {
-  if (!form.platform) return accounts.value
-  return accounts.value.filter(acc => 
-    acc.platform?.toLowerCase() === form.platform.toLowerCase() &&
-    acc.status === 'active'
-  )
+const activeGranularityLabel = computed(() => getGranularityLabel(activeGranularity.value))
+
+const availableDomainOptions = computed(() => getAvailableDomainOptions(form.platform))
+
+const selectedSubtypeDomains = computed(() => getSelectedSubtypeDomains(form.data_domains))
+
+const filteredConfigs = computed(() => {
+  return (configs.value || []).filter((config) => {
+    if ((config._resolvedGranularity || normalizeConfigGranularity(config)) !== activeGranularity.value) return false
+    if (filters.platform && config.platform !== filters.platform) return false
+    if (filters.is_active !== null && config.is_active !== filters.is_active) return false
+    return true
+  })
 })
 
-const selectedSubtypeDomains = computed(() =>
-  getSelectedSubtypeDomains(form.data_domains)
+const currentCoverageKey = computed(() => `${activeGranularity.value}_covered`)
+
+const coverageItems = computed(() => {
+  return (coverage.value.items || []).filter((item) => {
+    if (filters.platform && item.platform !== filters.platform) return false
+    return true
+  })
+})
+
+const missingCoverageItems = computed(() =>
+  coverageItems.value.filter((item) => !item[currentCoverageKey.value])
 )
 
-const availableDomainOptions = computed(() =>
-  getAvailableDomainOptions(form.platform)
-)
+const currentCoverageSummary = computed(() => {
+  const total = coverageItems.value.length
+  const missing = missingCoverageItems.value.length
+  const covered = total - missing
+  const partial = coverageItems.value.filter((item) => item.partial_covered).length
+  return { total, covered, missing, partial }
+})
 
-// v4.7.0: 监听平台和数据域变化，自动生成配置名
-watch([() => form.platform, () => form.data_domains], () => {
-  if (!isEdit.value && form.platform && form.data_domains.length > 0) {
-    generateConfigName()
+const groupedAccountsForDialog = computed(() => {
+  const platform = String(form.platform || '').toLowerCase()
+  if (!platform) return []
+  return groupedAccounts.value.filter((group) => String(group.platform || '').toLowerCase() === platform)
+})
+
+const selectedAccountRecords = computed(() => {
+  const selectedIds = new Set(form.account_ids || [])
+  return flatAccounts.value.filter((account) => selectedIds.has(account.id))
+})
+
+const currentGranularityDateOptions = computed(() => {
+  if (activeGranularity.value === 'weekly') {
+    return [
+      { label: '最近7天', value: 'last_7_days' },
+      { label: '按周自定义', value: 'custom' }
+    ]
   }
-}, { deep: true })
+  if (activeGranularity.value === 'monthly') {
+    return [
+      { label: '最近30天', value: 'last_30_days' },
+      { label: '按月自定义', value: 'custom' }
+    ]
+  }
+  return [
+    { label: '今天', value: 'today' },
+    { label: '昨天', value: 'yesterday' },
+    { label: '按日自定义', value: 'custom' }
+  ]
+})
+
+watch(activeGranularity, () => {
+  if (!isEdit.value) {
+    form.granularity = activeGranularity.value
+    form.date_range_type = defaultDateTypeForGranularity(activeGranularity.value)
+  }
+})
 
 watch(
   () => form.platform,
   (platform) => {
     const allowed = new Set(getAvailableDomainOptions(platform).map((option) => option.value))
     form.data_domains = (form.data_domains || []).filter((domain) => allowed.has(domain))
+    for (const domain of Object.keys(form.sub_domains || {})) {
+      if (!allowed.has(domain)) {
+        delete form.sub_domains[domain]
+      }
+    }
   }
 )
 
@@ -517,215 +501,31 @@ watch(
   }
 )
 
-watch(
-  () => form.date_range_type,
-  (nextType) => {
-    if (nextType && nextType !== 'custom') {
-      form.granularity = PRESET_GRANULARITY_MAP[nextType] || 'daily'
-    }
-  },
-  { immediate: true }
-)
-
-// 方法
-const loadConfigs = async () => {
-  loading.value = true
-  try {
-    const params = {}
-    if (filters.platform) params.platform = filters.platform
-    if (filters.is_active !== null) params.is_active = filters.is_active
-    
-    configs.value = await collectionApi.getConfigs(params)
-  } catch (error) {
-    ElMessage.error('加载配置失败: ' + error.message)
-  } finally {
-    loading.value = false
+function getGranularityLabel(value) {
+  const labels = {
+    daily: '日采集',
+    weekly: '周采集',
+    monthly: '月采集'
   }
+  return labels[value] || value
 }
 
-const loadAccounts = async () => {
-  accountsLoading.value = true
-  try {
-    accounts.value = await collectionApi.getAccounts()
-  } catch (error) {
-    ElMessage.error('加载账号失败: ' + error.message)
-  } finally {
-    accountsLoading.value = false
-  }
+function defaultDateTypeForGranularity(value) {
+  if (value === 'weekly') return 'last_7_days'
+  if (value === 'monthly') return 'last_30_days'
+  return 'yesterday'
 }
 
-const showCreateDialog = () => {
-  isEdit.value = false
-  resetForm()
-  dialogVisible.value = true
+function getPlatformTagType(platform) {
+  const types = { shopee: 'warning', tiktok: 'danger', miaoshou: 'success' }
+  return types[String(platform || '').toLowerCase()] || 'info'
 }
 
-const editConfig = (row) => {
-  isEdit.value = true
-  Object.assign(form, {
-    id: row.id,
-    name: row.name,
-    platform: row.platform,
-    account_ids: row.account_ids || [],
-    data_domains: row.data_domains || [],
-    sub_domains: normalizeDomainSubtypeMap(row.sub_domains),
-    granularity: row.granularity || 'daily',
-    date_range_type: row.date_range_type || 'yesterday',
-    custom_date_start: row.custom_date_start,
-    custom_date_end: row.custom_date_end,
-    execution_mode: row.execution_mode || 'headless',
-    schedule_enabled: row.schedule_enabled || false,
-    schedule_cron: row.schedule_cron || ''
-  })
-  
-  if (row.custom_date_start && row.custom_date_end) {
-    customDateRange.value = [row.custom_date_start, row.custom_date_end]
-  }
-  
-  dialogVisible.value = true
+function getExecutionModeLabel(mode) {
+  return mode === 'headed' ? '有头模式' : '无头模式'
 }
 
-const resetForm = () => {
-  Object.assign(form, {
-    id: null,
-    name: '',
-    platform: '',
-    account_ids: [],
-    data_domains: [],
-    sub_domains: {},
-    granularity: DEFAULT_GRANULARITY,
-    date_range_type: 'yesterday',
-    custom_date_start: null,
-    custom_date_end: null,
-    execution_mode: 'headless',
-    schedule_enabled: false,
-    schedule_cron: ''
-  })
-  customDateRange.value = []
-  generatedName.value = ''  // v4.7.0: 清空生成的名称
-}
-
-const submitForm = async () => {
-  if (!formRef.value) return
-  
-  const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
-  
-  submitting.value = true
-  try {
-    const data = { ...form }
-    
-    // 处理自定义日期
-    if (data.date_range_type === 'custom' && customDateRange.value?.length === 2) {
-      data.custom_date_start = customDateRange.value[0]
-      data.custom_date_end = customDateRange.value[1]
-    }
-    data.time_selection = buildTimeSelectionPayload(data.date_range_type, {
-      customRange: customDateRange.value
-    })
-    
-    delete data.id
-    
-    if (isEdit.value) {
-      await collectionApi.updateConfig(form.id, data)
-      ElMessage.success('配置更新成功')
-    } else {
-      await collectionApi.createConfig(data)
-      ElMessage.success('配置创建成功')
-    }
-    
-    dialogVisible.value = false
-    loadConfigs()
-  } catch (error) {
-    ElMessage.error('操作失败: ' + error.message)
-  } finally {
-    submitting.value = false
-  }
-}
-
-const deleteConfig = async (row) => {
-  try {
-    await collectionApi.deleteConfig(row.id)
-    ElMessage.success('配置删除成功')
-    loadConfigs()
-  } catch (error) {
-    ElMessage.error('删除失败: ' + error.message)
-  }
-}
-
-const toggleActive = async (row) => {
-  try {
-    await collectionApi.updateConfig(row.id, { is_active: row.is_active })
-    ElMessage.success(row.is_active ? '配置已启用' : '配置已禁用')
-  } catch (error) {
-    row.is_active = !row.is_active // 回滚
-    ElMessage.error('操作失败: ' + error.message)
-  }
-}
-
-const runConfig = async (row) => {
-  try {
-    const accountIds = resolveAccountIdsForConfigRun(row, accounts.value)
-    if (accountIds.length === 0) {
-      ElMessage.warning('该配置没有可用活跃账号，无法创建采集任务')
-      return
-    }
-
-    const timeSelection = buildTimeSelectionPayload(row.date_range_type, {
-      customRange:
-        row.date_range_type === 'custom' && row.custom_date_start && row.custom_date_end
-          ? [row.custom_date_start, row.custom_date_end]
-          : []
-    })
-
-    if (!timeSelection) {
-      ElMessage.warning('该配置的时间选择无效，无法创建采集任务')
-      return
-    }
-
-    const createdTaskIds = []
-    for (const accountId of accountIds) {
-      const task = await collectionApi.createTask({
-        platform: row.platform,
-        account_id: accountId,
-        data_domains: row.data_domains,
-        sub_domains: row.sub_domains || {},
-        granularity: row.granularity,
-        time_selection: timeSelection,
-        debug_mode: row.execution_mode === 'headed'
-      })
-      if (task?.task_id) {
-        createdTaskIds.push(task.task_id)
-      }
-    }
-    ElMessage.success(`已创建 ${accountIds.length} 个采集任务`)
-    await router.push({
-      name: 'CollectionTasks',
-      query: {
-        source: 'config',
-        config_id: row.id,
-        task_ids: createdTaskIds.join(',')
-      }
-    })
-  } catch (error) {
-    ElMessage.error('执行失败: ' + error.message)
-  }
-}
-
-const onPlatformChange = () => {
-  form.account_ids = [] // 清空已选账号
-}
-
-const getPlatformTagType = (platform) => {
-  const types = {
-    shopee: 'warning',
-    tiktok: 'danger',
-    miaoshou: 'success'
-  }
-  return types[platform?.toLowerCase()] || 'info'
-}
-
-const getDomainLabel = (domain) => {
+function getDomainLabel(domain) {
   const labels = {
     orders: '订单',
     products: '产品',
@@ -737,177 +537,306 @@ const getDomainLabel = (domain) => {
   return labels[domain] || domain
 }
 
-const getExecutionModeLabel = (mode) => {
-  return mode === 'headed' ? '有头模式' : '无头模式'
+function selectAllSubDomains(domain) {
+  form.sub_domains[domain] = getSubtypeOptions(domain).map((option) => option.value)
 }
 
-// ========== v4.7.0: 新功能方法 ==========
+async function loadConfigs() {
+  loading.value = true
+  try {
+    const params = {}
+    if (filters.platform) params.platform = filters.platform
+    if (filters.is_active !== null) params.is_active = filters.is_active
+    const response = await collectionApi.getConfigs(params)
+    configs.value = (response || []).map((item) => ({
+      ...item,
+      _resolvedGranularity: normalizeConfigGranularity(item)
+    }))
+  } catch (error) {
+    ElMessage.error(`加载配置失败: ${error.message}`)
+  } finally {
+    loading.value = false
+  }
+}
 
-// 功能1: 配置名自动生成
-const generateConfigName = () => {
+async function loadAccounts() {
+  accountsLoading.value = true
+  try {
+    const platformParam = filters.platform ? { platform: filters.platform } : {}
+    flatAccounts.value = await collectionApi.getAccounts(platformParam)
+    groupedAccounts.value = await collectionApi.getGroupedAccounts(platformParam)
+  } catch (error) {
+    ElMessage.error(`加载店铺账号失败: ${error.message}`)
+  } finally {
+    accountsLoading.value = false
+  }
+}
+
+async function loadCoverage() {
+  coverageLoading.value = true
+  try {
+    const platformParam = filters.platform ? { platform: filters.platform } : {}
+    coverage.value = await collectionApi.getConfigCoverage(platformParam)
+  } catch (error) {
+    ElMessage.error(`加载覆盖率失败: ${error.message}`)
+    coverage.value = { summary: {}, items: [] }
+  } finally {
+    coverageLoading.value = false
+  }
+}
+
+async function reloadPageData() {
+  await Promise.all([loadConfigs(), loadAccounts(), loadCoverage()])
+}
+
+function resetForm() {
+  Object.assign(form, {
+    id: null,
+    name: '',
+    platform: '',
+    account_ids: [],
+    data_domains: [],
+    sub_domains: {},
+    granularity: activeGranularity.value,
+    date_range_type: defaultDateTypeForGranularity(activeGranularity.value),
+    custom_date_start: null,
+    custom_date_end: null,
+    execution_mode: 'headless',
+    schedule_enabled: false,
+    schedule_cron: ''
+  })
+  generatedName.value = ''
+  customDateRange.value = []
+}
+
+function showCreateDialog() {
+  isEdit.value = false
+  resetForm()
+  dialogVisible.value = true
+}
+
+function showQuickSetupDialog() {
+  quickSetup.platform = filters.platform || ''
+  quickSetupVisible.value = true
+}
+
+function onPlatformChange() {
+  form.account_ids = []
+  form.data_domains = []
+  form.sub_domains = {}
+}
+
+function generateConfigName() {
   if (!form.platform || form.data_domains.length === 0) {
     generatedName.value = ''
     return
   }
-  
   const domains = [...form.data_domains].sort().join('-')
-  const baseName = `${form.platform}-${domains}`
-  
-  // 查找现有版本号
+  const baseName = `${form.platform}-${activeGranularity.value}-${domains}`
   const existingVersions = configs.value
-    .filter(c => c.name.startsWith(baseName + '-v'))
-    .map(c => {
-      const match = c.name.match(/-v(\d+)$/)
-      return match ? parseInt(match[1]) : 0
+    .filter((config) => String(config.name || '').startsWith(`${baseName}-v`))
+    .map((config) => {
+      const match = String(config.name || '').match(/-v(\d+)$/)
+      return match ? Number(match[1]) : 0
     })
-  
   const nextVersion = Math.max(0, ...existingVersions) + 1
   generatedName.value = `${baseName}-v${nextVersion}`
-  
-  // 如果name字段为空，自动填充
   if (!form.name) {
     form.name = generatedName.value
   }
 }
 
-// 功能2: 平台对齐的日期标签
-const getPlatformDateLabel = (dateType) => {
-  return getDatePresetLabel(dateType, form.platform)
-}
-
-const getDateRangeHint = () => {
-  if (!form.platform) return '请先选择平台'
-  
-  const hints = {
-    'shopee': '与Shopee平台日期控件对齐：今天/昨天/7天/30天',
-    'tiktok': '与TikTok平台日期控件对齐：今天/昨天/7天/30天',
-    'miaoshou': '与妙手ERP日期控件对齐：今天/昨天/7天/30天'
+function applyCapabilitiesFromSelectedAccounts() {
+  const selected = selectedAccountRecords.value
+  if (selected.length === 0) {
+    return
   }
-  return hints[form.platform] || ''
-}
 
-// 功能3: 服务子域全选
-const selectAllSubDomains = (domain) => {
-  form.sub_domains[domain] = getSubtypeOptions(domain).map((option) => option.value)
-}
+  const allowedByPlatform = new Set(availableDomainOptions.value.map((option) => option.value))
+  const capabilitySets = selected.map((account) =>
+    Object.entries(account.capabilities || {})
+      .filter(([, enabled]) => enabled)
+      .map(([domain]) => domain)
+      .filter((domain) => allowedByPlatform.has(domain))
+  )
 
-// 功能4: 快速配置向导
-const showQuickSetupDialog = () => {
-  quickSetupStep.value = 0
-  quickSetup.platform = ''
-  quickSetup.strategy = 'standard'
-  quickSetup.granularities = ['daily', 'weekly', 'monthly']
-  quickSetupVisible.value = true
-}
-
-const canGoNextStep = () => {
-  if (quickSetupStep.value === 0) {
-    return quickSetup.platform !== ''
+  let domains = capabilitySets[0] || []
+  for (const next of capabilitySets.slice(1)) {
+    domains = domains.filter((domain) => next.includes(domain))
   }
-  if (quickSetupStep.value === 1) {
-    return quickSetup.strategy === 'standard' || quickSetup.granularities.length > 0
+
+  form.data_domains = [...domains]
+  form.sub_domains = {
+    ...normalizeDomainSubtypeMap(form.sub_domains),
+    ...buildAutoSelectedSubDomains(domains)
   }
-  return true
-}
 
-const getQuickSetupConfigCount = () => {
-  if (quickSetup.strategy === 'standard') {
-    return 3  // 日度+周度+月度
+  if (!form.name) {
+    generateConfigName()
   }
-  return quickSetup.granularities.length
 }
 
-const getQuickSetupTaskCount = () => {
-  const accountCount = accounts.value.filter(
-    acc => acc.platform === quickSetup.platform && acc.status === 'active'
-  ).length
-  return accountCount * getQuickSetupConfigCount()
-}
-
-const getQuickSetupDomainValues = () =>
-  getAvailableDomainOptions(quickSetup.platform).map((option) => option.value)
-
-const getQuickSetupDomainSummary = () => {
-  const domains = getQuickSetupDomainValues()
-  return domains.length === 0 ? '当前无可用数据域' : `${domains.length} 个支持数据域`
-}
-
-const getQuickSetupConfigs = () => {
-  const configs = []
-  const granularities = quickSetup.strategy === 'standard' 
-    ? ['daily', 'weekly', 'monthly']
-    : quickSetup.granularities
-  
-  const schedules = {
-    'daily': { cron: '0 6,12,18,22 * * *', desc: '每天4次（06:00/12:00/18:00/22:00）' },
-    'weekly': { cron: '0 5 * * 1', desc: '每周一 05:00' },
-    'monthly': { cron: '0 5 1 * *', desc: '每月1号 05:00' }
-  }
-  
-  granularities.forEach(g => {
-    configs.push({
-      name: `${quickSetup.platform}-all-${g}`,
-      description: `${quickSetup.platform}平台支持数据域${g === 'daily' ? '日' : g === 'weekly' ? '周' : '月'}度采集 - ${schedules[g].desc}`
-    })
+function editConfig(row) {
+  isEdit.value = true
+  activeGranularity.value = row._resolvedGranularity || normalizeConfigGranularity(row)
+  Object.assign(form, {
+    id: row.id,
+    name: row.name,
+    platform: row.platform,
+    account_ids: row.account_ids || [],
+    data_domains: row.data_domains || [],
+    sub_domains: normalizeDomainSubtypeMap(row.sub_domains),
+    granularity: row._resolvedGranularity || normalizeConfigGranularity(row),
+    date_range_type: row.date_range_type || defaultDateTypeForGranularity(activeGranularity.value),
+    custom_date_start: row.custom_date_start,
+    custom_date_end: row.custom_date_end,
+    execution_mode: row.execution_mode || 'headless',
+    schedule_enabled: row.schedule_enabled || false,
+    schedule_cron: row.schedule_cron || ''
   })
-  
-  return configs
+  customDateRange.value =
+    row.custom_date_start && row.custom_date_end ? [row.custom_date_start, row.custom_date_end] : []
+  dialogVisible.value = true
 }
 
-const executeQuickSetup = async () => {
+async function submitForm() {
+  if (!formRef.value) return
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
+
+  submitting.value = true
+  try {
+    const payload = {
+      ...form,
+      granularity: activeGranularity.value,
+      sub_domains: normalizeDomainSubtypeMap(form.sub_domains)
+    }
+    if (payload.date_range_type === 'custom' && customDateRange.value.length === 2) {
+      payload.custom_date_start = customDateRange.value[0]
+      payload.custom_date_end = customDateRange.value[1]
+    }
+    payload.time_selection = buildTimeSelectionPayload(payload.date_range_type, {
+      customRange: customDateRange.value
+    })
+    delete payload.id
+
+    if (isEdit.value) {
+      await collectionApi.updateConfig(form.id, payload)
+      ElMessage.success('配置更新成功')
+    } else {
+      await collectionApi.createConfig(payload)
+      ElMessage.success('配置创建成功')
+    }
+
+    dialogVisible.value = false
+    await reloadPageData()
+  } catch (error) {
+    ElMessage.error(`操作失败: ${error.message}`)
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function deleteConfig(row) {
+  try {
+    await collectionApi.deleteConfig(row.id)
+    ElMessage.success('配置删除成功')
+    await reloadPageData()
+  } catch (error) {
+    ElMessage.error(`删除失败: ${error.message}`)
+  }
+}
+
+async function toggleActive(row) {
+  try {
+    await collectionApi.updateConfig(row.id, { is_active: row.is_active })
+    ElMessage.success(row.is_active ? '配置已启用' : '配置已禁用')
+    await loadCoverage()
+  } catch (error) {
+    row.is_active = !row.is_active
+    ElMessage.error(`操作失败: ${error.message}`)
+  }
+}
+
+async function runConfig(row) {
+  try {
+    const accountIds = resolveAccountIdsForConfigRun(row, flatAccounts.value)
+    if (accountIds.length === 0) {
+      ElMessage.warning('该配置没有可用的活跃店铺账号，无法创建采集任务')
+      return
+    }
+
+    const timeSelection = buildTimeSelectionPayload(row.date_range_type, {
+      customRange:
+        row.date_range_type === 'custom' && row.custom_date_start && row.custom_date_end
+          ? [row.custom_date_start, row.custom_date_end]
+          : []
+    })
+
+    const createdTaskIds = []
+    for (const accountId of accountIds) {
+      const task = await collectionApi.createTask({
+        platform: row.platform,
+        account_id: accountId,
+        config_id: row.id,
+        data_domains: row.data_domains,
+        sub_domains: row.sub_domains || {},
+        granularity: row._resolvedGranularity || normalizeConfigGranularity(row),
+        time_selection: timeSelection,
+        debug_mode: row.execution_mode === 'headed'
+      })
+      if (task?.task_id) {
+        createdTaskIds.push(task.task_id)
+      }
+    }
+
+    ElMessage.success(`已创建 ${accountIds.length} 个采集任务`)
+    await router.push({
+      name: 'CollectionTasks',
+      query: {
+        source: 'config',
+        config_id: row.id,
+        task_ids: createdTaskIds.join(',')
+      }
+    })
+  } catch (error) {
+    ElMessage.error(`执行失败: ${error.message}`)
+  }
+}
+
+async function executeQuickSetup() {
+  if (!quickSetup.platform) {
+    ElMessage.warning('请先选择平台')
+    return
+  }
+
   quickSetupSubmitting.value = true
   try {
-    const granularities = quickSetup.strategy === 'standard' 
-      ? ['daily', 'weekly', 'monthly']
-      : quickSetup.granularities
-    
-    const schedules = {
-      'daily': { cron: '0 6,12,18,22 * * *', dateType: 'today' },
-      'weekly': { cron: '0 5 * * 1', dateType: 'last_7_days' },
-      'monthly': { cron: '0 5 1 * *', dateType: 'last_30_days' }
-    }
-    
-    const allDomains = getQuickSetupDomainValues()
-    const defaultSubDomains = Object.fromEntries(
-      getSelectedSubtypeDomains(allDomains).map((domain) => [
-        domain,
-        getSubtypeOptions(domain).map((option) => option.value)
-      ])
-    )
-    
-    for (const gran of granularities) {
-      const configData = {
-        name: null,  // 自动生成
-        platform: quickSetup.platform,
-        account_ids: [],  // 所有活跃账号
-        data_domains: allDomains,
-        sub_domains: defaultSubDomains,
-        granularity: gran,
-        date_range_type: schedules[gran].dateType,
-        execution_mode: 'headless',
-        schedule_enabled: true,
-        schedule_cron: schedules[gran].cron,
-        retry_count: 3
-      }
-      
-      await collectionApi.createConfig(configData)
-    }
-    
-    ElMessage.success(`成功创建 ${granularities.length} 个配置！`)
+    const domains = getAvailableDomainOptions(quickSetup.platform).map((option) => option.value)
+    await collectionApi.createConfig({
+      name: '',
+      platform: quickSetup.platform,
+      account_ids: [],
+      data_domains: domains,
+      sub_domains: buildAutoSelectedSubDomains(domains),
+      granularity: activeGranularity.value,
+      date_range_type: defaultDateTypeForGranularity(activeGranularity.value),
+      execution_mode: 'headless',
+      schedule_enabled: false,
+      retry_count: 3
+    })
     quickSetupVisible.value = false
-    loadConfigs()
+    ElMessage.success(`已创建${activeGranularityLabel.value}默认配置`)
+    await reloadPageData()
   } catch (error) {
-    ElMessage.error('快速配置失败: ' + error.message)
+    ElMessage.error(`快速配置失败: ${error.message}`)
   } finally {
     quickSetupSubmitting.value = false
   }
 }
 
-// 功能5: 录制工具入口
-// 生命周期
 onMounted(() => {
-  loadConfigs()
-  loadAccounts()
+  reloadPageData()
 })
 </script>
 
@@ -919,50 +848,177 @@ onMounted(() => {
 .page-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 16px;
   margin-bottom: 20px;
 }
 
 .page-header h2 {
-  margin: 0;
-  font-size: 20px;
+  margin: 0 0 6px;
+  font-size: 22px;
   font-weight: 600;
 }
 
-.filter-bar {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
+.page-subtitle {
+  margin: 0;
+  color: #909399;
 }
 
-.filter-bar .el-select {
-  width: 150px;
-}
-
-.el-table {
-  border-radius: 8px;
-}
-
-:deep(.el-dialog__body) {
-  padding-top: 10px;
-}
-
-:deep(.el-divider__text) {
-  font-size: 14px;
-  color: #606266;
-}
-
-/* v4.7.0: 新功能样式 */
 .header-actions {
   display: flex;
   gap: 8px;
 }
 
-.form-hint {
-  font-size: 12px;
+.granularity-card,
+.table-card {
+  margin-bottom: 20px;
+}
+
+.granularity-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.filter-bar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.coverage-item {
+  padding: 16px;
+  border-radius: 12px;
+  background: #f7f8fa;
+}
+
+.coverage-label {
+  font-size: 13px;
   color: #909399;
-  margin-top: 4px;
-  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.coverage-value {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.coverage-ok {
+  color: #67c23a;
+}
+
+.coverage-warn {
+  color: #e6a23c;
+}
+
+.coverage-mid {
+  color: #409eff;
+}
+
+.coverage-alert {
+  margin-top: 12px;
+}
+
+.missing-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.missing-list-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.missing-meta {
+  color: #909399;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.table-summary {
+  color: #909399;
+  font-size: 13px;
+}
+
+.domain-tag {
+  margin-right: 4px;
+  margin-bottom: 4px;
+}
+
+.account-selection-panel {
+  width: 100%;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.account-selection-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.selection-summary,
+.form-hint,
+.group-subtitle,
+.shop-meta {
+  color: #909399;
+  font-size: 12px;
+}
+
+.grouped-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.main-account-group {
+  border: 1px solid #f0f2f5;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.group-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.region-group + .region-group {
+  margin-top: 10px;
+}
+
+.region-title {
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 6px;
+}
+
+.shop-checkbox {
+  display: flex;
+  width: 100%;
+  margin-right: 0;
+  margin-bottom: 8px;
 }
 
 .sub-domains-group {
@@ -971,25 +1027,28 @@ onMounted(() => {
   gap: 12px;
 }
 
-.sub-domains-group .el-checkbox-group {
+.sub-domains-group :deep(.el-checkbox-group) {
   flex: 1;
 }
 
-.quick-setup-content {
-  padding: 24px 0;
-  min-height: 200px;
+.empty-tip {
+  color: #909399;
 }
 
-.setup-step {
-  padding: 16px;
-}
+@media (max-width: 900px) {
+  .coverage-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
 
-:deep(.el-steps) {
-  margin-bottom: 20px;
-}
+  .page-header,
+  .granularity-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
 
-:deep(.el-descriptions) {
-  margin-bottom: 16px;
+  .header-actions,
+  .filter-bar {
+    flex-wrap: wrap;
+  }
 }
 </style>
-

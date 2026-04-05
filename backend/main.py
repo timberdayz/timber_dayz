@@ -98,6 +98,9 @@ from backend.utils.config import get_settings
 from modules.core.logger import get_logger
 from backend.services.cloud_b_class_auto_sync_factory import build_cloud_sync_runtime_from_env
 from backend.utils.postgres_path import auto_configure_postgres_path
+from modules.utils.sessions.legacy_shop_artifact_cleanup import (
+    collect_legacy_shop_artifacts_for_active_shops,
+)
 from sqlalchemy.orm import Session
 
 # 设置日志
@@ -158,6 +161,29 @@ async def lifespan(app: FastAPI):
             startup_metrics["postgres_connect"] = time.time() - step_start
             logger.error(f"[ERROR] 数据库连接失败: {e}")
             raise
+
+        try:
+            legacy_artifacts = collect_legacy_shop_artifacts_for_active_shops(
+                project_root,
+                settings.DATABASE_URL,
+            )
+            if legacy_artifacts:
+                logger.warning(
+                    "[WARNING] 检测到 %s 个店铺级会话历史残留；当前运行不会使用它们，但建议清理",
+                    len(legacy_artifacts),
+                )
+                for artifact in legacy_artifacts[:10]:
+                    logger.warning("[WARNING] legacy shop artifact: %s", artifact)
+                if len(legacy_artifacts) > 10:
+                    logger.warning(
+                        "[WARNING] ... 其余 %s 个路径已省略",
+                        len(legacy_artifacts) - 10,
+                    )
+        except Exception as legacy_artifact_error:
+            logger.warning(
+                "[WARNING] 遗留店铺会话残留检查失败: %s",
+                legacy_artifact_error,
+            )
         
         # 3. 数据库表验证(<3秒)
         # [SCHEMA MIGRATION] 生产环境:只验证,不创建;开发环境:可以使用 init_db()

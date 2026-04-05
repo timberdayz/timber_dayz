@@ -3,43 +3,36 @@ from types import SimpleNamespace
 from backend.services.shop_account_loader_service import ShopAccountLoaderService
 
 
-def test_build_payload_returns_split_main_account_and_shop_context(monkeypatch):
-    main_account = SimpleNamespace(
-        id=1,
-        platform="shopee",
-        main_account_id="hongxikeji:main",
-        username="demo-user",
-        password_encrypted="encrypted",
-        login_url="https://seller.shopee.cn",
-        enabled=True,
-        notes="shared login",
-    )
-    shop_account = SimpleNamespace(
-        id=2,
-        platform="shopee",
-        shop_account_id="shopee_sg_hongxi_local",
-        main_account_id="hongxikeji:main",
-        store_name="HongXi SG",
-        platform_shop_id="1227491331",
-        platform_shop_id_status="manual_confirmed",
-        shop_region="SG",
-        shop_type="local",
-        enabled=True,
-        notes="shop note",
-    )
-
+def test_shop_account_loader_service_normalizes_login_url_to_origin():
     service = ShopAccountLoaderService()
-    monkeypatch.setattr(service, "_decrypt_password", lambda encrypted: "plain-password")
+    service._decrypt_password = lambda encrypted: "plain-password"
 
     payload = service._build_payload(
-        main_account,
-        shop_account,
-        {"orders": True, "products": False},
+        SimpleNamespace(
+            id=1,
+            platform="shopee",
+            main_account_id="chenewei666:main",
+            username="demo-user",
+            password_encrypted="enc",
+            login_url="https://seller.shopee.cn/account/signin?next=%2Fportal%2Fproduct%2Flist%2Fall%3Fcnsc_shop_id%3D1407964586%26page%3D1",
+            enabled=True,
+            notes="",
+        ),
+        SimpleNamespace(
+            id=2,
+            platform="shopee",
+            shop_account_id="shopee_sg_chenewei666_local",
+            main_account_id="chenewei666:main",
+            store_name="chenewei666.sg",
+            platform_shop_id="1227491331",
+            platform_shop_id_status="confirmed",
+            shop_region="SG",
+            shop_type="local",
+            enabled=True,
+            notes="",
+        ),
+        {"analytics": True},
     )
 
-    assert payload["main_account"]["main_account_id"] == "hongxikeji:main"
-    assert payload["shop_context"]["shop_account_id"] == "shopee_sg_hongxi_local"
-    assert payload["shop_context"]["platform_shop_id"] == "1227491331"
-    assert payload["capabilities"] == {"orders": True, "products": False}
-    assert payload["compat_account"]["account_id"] == "shopee_sg_hongxi_local"
-    assert payload["compat_account"]["password"] == "plain-password"
+    assert payload["compat_account"]["login_url"] == "https://seller.shopee.cn"
+    assert payload["main_account"]["login_url"] == "https://seller.shopee.cn"

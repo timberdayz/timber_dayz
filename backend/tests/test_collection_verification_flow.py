@@ -101,6 +101,36 @@ async def test_resume_task_accepts_manual_completed_for_slide_captcha():
 
 
 @pytest.mark.asyncio
+async def test_resume_task_accepts_manual_intervention_required_status():
+    task = _make_task(
+        status="manual_intervention_required",
+        verification_type="manual_intervention",
+    )
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = task
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    redis = MagicMock()
+    redis.set = AsyncMock()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(redis=redis)))
+
+    body = await resume_task(
+        task_id="task-1",
+        body=ResumeTaskRequest(manual_completed=True),
+        request=request,
+        db=db,
+    )
+
+    assert task.status == "verification_submitted"
+    assert body["verification_type"] == "manual_intervention"
+    redis.set.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_cancel_task_allows_verification_required_status(monkeypatch):
     task = _make_task(status="verification_required")
 
@@ -182,3 +212,43 @@ async def test_on_verification_required_broadcasts_websocket_event(monkeypatch):
         "graphical_captcha",
         "temp/task.png",
     )
+
+
+@pytest.mark.asyncio
+async def test_on_verification_required_marks_manual_continue_types_as_manual_intervention(monkeypatch):
+    from backend.routers.collection_tasks import _on_verification_required
+
+    task = _make_task(verification_type=None, status="running")
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = task
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock()
+    session.add = MagicMock()
+
+    class _SessionManager:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    broadcast = AsyncMock()
+    monkeypatch.setattr("backend.models.database.AsyncSessionLocal", lambda: _SessionManager())
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks.connection_manager.send_verification_required",
+        broadcast,
+    )
+
+    app = SimpleNamespace(state=SimpleNamespace(redis=None))
+    value = await _on_verification_required(
+        task_id="task-1",
+        verification_type="slide_captcha",
+        screenshot_path="temp/task.png",
+        app=app,
+    )
+
+    assert value is None
+    assert task.status == "manual_intervention_required"

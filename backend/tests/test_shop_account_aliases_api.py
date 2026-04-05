@@ -42,8 +42,7 @@ async def alias_client(monkeypatch):
     await engine.dispose()
 
 
-@pytest.mark.asyncio
-async def test_claim_unmatched_alias_binds_to_shop_account(alias_client):
+async def _seed_shop_account(alias_client):
     await alias_client.post(
         "/api/main-accounts",
         json={
@@ -65,6 +64,11 @@ async def test_claim_unmatched_alias_binds_to_shop_account(alias_client):
         },
     )
 
+
+@pytest.mark.asyncio
+async def test_claim_unmatched_alias_binds_to_shop_account(alias_client):
+    await _seed_shop_account(alias_client)
+
     response = await alias_client.post(
         "/api/shop-account-aliases/claim",
         json={
@@ -80,6 +84,26 @@ async def test_claim_unmatched_alias_binds_to_shop_account(alias_client):
     assert payload["alias_value"] == "HongXi SG Raw"
 
 
+@pytest.mark.asyncio
+async def test_claim_alias_repairs_mojibake_value(alias_client):
+    await _seed_shop_account(alias_client)
+    expected = "\u0033\u0043\u5e97"
+    mojibake = expected.encode("utf-8").decode("latin1")
+
+    response = await alias_client.post(
+        "/api/shop-account-aliases/claim",
+        json={
+            "platform": "shopee",
+            "alias_value": mojibake,
+            "shop_account_id": "shopee_sg_hongxi_local",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["alias_value"] == expected
+
+
 def test_shop_account_aliases_router_exposes_unmatched_route():
     from pathlib import Path
 
@@ -89,3 +113,18 @@ def test_shop_account_aliases_router_exposes_unmatched_route():
     ).read_text(encoding="utf-8")
 
     assert '@router.get("/unmatched"' in text
+
+
+def test_shop_account_aliases_unmatched_query_keeps_complete_json_keys():
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "backend/routers/shop_account_aliases.py"
+    ).read_text(encoding="utf-8")
+
+    assert r'_CN_STORE_NAME = _u(r"\u5e97\u94fa\u540d\u79f0")' in text
+    assert r'_CN_ORDER_ID = _u(r"\u8ba2\u5355\u53f7")' in text
+    assert r'_CN_SHOPEE_PAID = _u(r"\u5b9e\u4ed8\u91d1\u989d")' in text
+    assert "raw_data->>:cn_store_name" in text
+    assert "raw_data->>:cn_order_id" in text

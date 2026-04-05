@@ -116,3 +116,44 @@ async def test_operational_metrics_aggregation_preserves_missing_values(monkeypa
     assert result["estimated_expenses"] is None
     assert result["operating_result"] is None
     assert result["today_order_count"] is None
+
+
+@pytest.mark.asyncio
+async def test_comparison_service_preserves_missing_target_summary_values(monkeypatch):
+    service = PostgresqlDashboardService()
+
+    async def fake_fetch_rows(query, params):
+        if "business_overview_comparison_module" in query:
+            period_key = params.get("period_key")
+            if str(period_key) == "2026-04-01":
+                return [
+                    {
+                        "sales_amount": 5000,
+                        "sales_quantity": 50,
+                        "traffic": 1000,
+                        "conversion_rate": 5,
+                        "avg_order_value": 100,
+                        "attach_rate": None,
+                        "profit": 300,
+                        "target_sales_amount": None,
+                        "target_sales_quantity": None,
+                    }
+                ]
+        return []
+
+    async def fake_load_target_summary(granularity, period_start, period_end, platform=None):
+        return {"target_amount": None, "target_quantity": None}
+
+    monkeypatch.setattr(service, "_fetch_rows", fake_fetch_rows)
+    monkeypatch.setattr(service, "_load_target_summary", fake_load_target_summary)
+
+    result = await service.get_business_overview_comparison(
+        granularity="monthly",
+        target_date="2026-04-01",
+        platform=None,
+    )
+
+    assert result["metrics"]["sales_amount"]["today"] == 5000
+    assert result["target"]["sales_amount"] is None
+    assert result["target"]["sales_quantity"] is None
+    assert result["target"]["achievement_rate"] == 0

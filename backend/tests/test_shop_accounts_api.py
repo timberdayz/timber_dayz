@@ -84,3 +84,44 @@ async def test_batch_create_shop_accounts_under_main_account(shop_account_client
     payload = response.json()
     assert len(payload) == 2
     assert payload[0]["main_account_id"] == "hongxikeji:main"
+    assert payload[0]["capabilities"]["orders"] is True
+    assert payload[0]["capabilities"]["services"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_shop_account_assigns_default_capabilities(shop_account_client):
+    create_main = await shop_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "hongxikeji:main",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+    assert create_main.status_code == 200
+
+    response = await shop_account_client.post(
+        "/api/shop-accounts",
+        json={
+            "platform": "shopee",
+            "shop_account_id": "shopee_sg_hongxi_local",
+            "main_account_id": "hongxikeji:main",
+            "store_name": "HongXi SG",
+            "shop_region": "SG",
+            "shop_type": "local",
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["capabilities"] == {
+        "orders": True,
+        "products": True,
+        "services": True,
+        "analytics": True,
+        "finance": True,
+        "inventory": True,
+    }

@@ -4,7 +4,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from modules.core.db import Base, CollectionConfig
+from modules.core.db import CollectionConfig
 
 
 @pytest_asyncio.fixture
@@ -14,7 +14,7 @@ async def collection_config_sqlite_engine():
     async with engine.begin() as conn:
         for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(CollectionConfig.__table__.create)
 
     yield engine
     await engine.dispose()

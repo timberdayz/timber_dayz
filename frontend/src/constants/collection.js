@@ -20,11 +20,35 @@ export const DEFAULT_DOMAIN_OPTIONS = [
 
 export const getSubtypeOptions = (domain) => DOMAIN_SUBTYPE_OPTIONS[domain] || []
 
+export const buildAutoSelectedSubDomains = (dataDomains = []) => {
+  const result = {}
+  for (const domain of dataDomains || []) {
+    const options = getSubtypeOptions(domain)
+    if (options.length > 0) {
+      result[domain] = options.map((option) => option.value)
+    }
+  }
+  return result
+}
+
 export const getSelectedSubtypeDomains = (dataDomains = []) =>
   (dataDomains || []).filter((domain) => getSubtypeOptions(domain).length > 0)
 
 export const getAvailableDomainOptions = (platform = '') => {
   return DEFAULT_DOMAIN_OPTIONS
+}
+
+export const normalizeConfigGranularity = (config = {}) => {
+  const explicit = String(config.granularity || '').toLowerCase()
+  if (explicit === 'daily' || explicit === 'weekly' || explicit === 'monthly') {
+    return explicit
+  }
+
+  const preset = String(config.date_range_type || '').toLowerCase()
+  if (preset === 'today' || preset === 'yesterday') return 'daily'
+  if (preset === 'last_7_days') return 'weekly'
+  if (preset === 'last_30_days') return 'monthly'
+  return 'daily'
 }
 
 export const normalizeDomainSubtypeMap = (rawValue) => {

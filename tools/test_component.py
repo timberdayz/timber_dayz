@@ -214,6 +214,26 @@ class ComponentTester:
             cfg["params"] = params
         return cfg
 
+    def _get_session_owner_id(self, account_info: Optional[Dict[str, Any]]) -> str:
+        account = account_info or {}
+        main_account_id = str(
+            account.get("main_account_id")
+            or account.get("parent_account")
+            or ""
+        ).strip()
+        if main_account_id:
+            return main_account_id
+
+        shop_account_id = str(
+            self.account_id
+            or account.get("shop_account_id")
+            or account.get("account_id")
+            or ""
+        ).strip() or "unknown"
+        raise ValueError(
+            f"Missing main_account_id for component test session scope: shop_account_id={shop_account_id}"
+        )
+
     def _persistent_context_mode(self, component_type: str) -> Optional[str]:
         if self.skip_login:
             return None
@@ -385,23 +405,20 @@ class ComponentTester:
         await self._wait_for_probe_page_ready(page, settle_ms=800)
 
     async def _save_context_session(self, context, account_info: Optional[Dict[str, Any]]) -> bool:
-        account = account_info or {}
-        account_id = str(self.account_id or account.get("account_id") or "").strip()
-        if not account_id:
-            return False, context, page
+        account_id = self._get_session_owner_id(account_info)
 
         try:
             storage_state = await context.storage_state()
         except Exception as e:
             logger.warning("Failed to read context storage_state for %s/%s: %s", self.platform, account_id, e)
-            return False, context, page
+            return False
 
         try:
             from modules.apps.collection_center.executor_v2 import _save_session_async
             return await _save_session_async(self.platform, account_id, storage_state)
         except Exception as e:
             logger.warning("Failed to save session for %s/%s: %s", self.platform, account_id, e)
-            return False, context, page
+            return False
 
     async def _check_login_gate(self, page, result: ComponentTestResult, component_name: str) -> bool:
         from modules.utils.login_status_detector import LoginStatusDetector
@@ -936,7 +953,7 @@ class ComponentTester:
         old_context,
         account_info: Dict[str, Any],
     ):
-        account_id = str(self.account_id or account_info.get("account_id") or "").strip()
+        account_id = self._get_session_owner_id(account_info)
         storage_state = None
         if account_id:
             try:
@@ -983,7 +1000,7 @@ class ComponentTester:
         from playwright.async_api import async_playwright
         from modules.apps.collection_center.python_component_adapter import create_adapter
 
-        account_id = str(self.account_id or account_info.get("account_id") or "").strip()
+        account_id = self._get_session_owner_id(account_info)
         adapter_config = self._build_runtime_component_config()
         if self.test_dir:
             adapter_config.setdefault("task", {})["screenshot_dir"] = str(self.test_dir)
@@ -1163,6 +1180,7 @@ class ComponentTester:
         component_type = getattr(component_class, 'component_type', 'export')
         non_login_types = ('export', 'navigation', 'date_picker', 'filters')
         account_id = (self.account_id or (account_info.get('account_id') if account_info else None)) or ''
+        session_owner_id = None
         standalone_test_config: Dict[str, Any] = {}
 
         # 1.8: 发现模式组件测试策略（date_picker/filters）
@@ -1218,6 +1236,15 @@ class ComponentTester:
             result.error = "非登录组件测试需要选择测试账号（account_id 必填）"
             return False
 
+        if component_type in non_login_types and not self.skip_login:
+            try:
+                session_owner_id = self._get_session_owner_id(account_info)
+            except ValueError as e:
+                result.phase = 'session'
+                result.phase_component_name = f"{self.platform}/{component_name}"
+                result.error = str(e)
+                return False
+
         try:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
@@ -1228,7 +1255,7 @@ class ComponentTester:
                 # 1.7: 与生产对齐——会话 + 指纹，使用 new_context(storage_state=..., **fp_options)
                 context_options = {}
                 storage_state = None
-                allow_session_reuse = bool(account_id) and component_type != 'login'
+                allow_session_reuse = bool(session_owner_id) and component_type != 'login'
                 if allow_session_reuse:
                     try:
                         from modules.apps.collection_center.executor_v2 import (
@@ -1238,14 +1265,14 @@ class ComponentTester:
                         )
                         session_data = await _load_or_bootstrap_session_async(
                             self.platform,
-                            account_id,
+                            session_owner_id,
                             account_info,
                             max_age_days=30,
                         )
                         if session_data and isinstance(session_data.get('storage_state'), dict):
                             storage_state = session_data['storage_state']
                         fp_options = await _get_fingerprint_context_options_async(
-                            self.platform, account_id, account_info
+                            self.platform, session_owner_id, account_info
                         )
                         context_options = _build_playwright_context_options_from_fingerprint(fp_options)
                     except Exception as e:
@@ -1260,7 +1287,7 @@ class ComponentTester:
                 if 'locale' not in context_options:
                     context_options['locale'] = 'zh-CN'
 
-                use_persistent_profile = bool(account_id) and self._use_persistent_profile_for_python_component(component_type)
+                use_persistent_profile = bool(session_owner_id) and self._use_persistent_profile_for_python_component(component_type)
                 context = await browser.new_context(**context_options)
                 page = await context.new_page()
 
@@ -1485,6 +1512,7 @@ class ComponentTester:
                     screenshot_path = self.output_dir / f"{component_name}_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                     await page.screenshot(path=str(screenshot_path))
                     step_result.screenshot = str(screenshot_path)
+                    await self._save_failure_artifacts(page, component_name, 'python_component_1')
 
                 await context.close()
                 if browser:
@@ -1498,6 +1526,8 @@ class ComponentTester:
             if not result.phase:
                 result.phase = component_type
                 result.phase_component_name = f"{self.platform}/{component_name}"
+            if 'page' in locals() and page is not None:
+                await self._save_failure_artifacts(page, component_name, 'python_component_1_exception')
 
             if browser:
                 try:
@@ -1662,6 +1692,14 @@ class ComponentTester:
         persistent_context_mode = self._persistent_context_mode(component_type)
         use_persistent_context = persistent_context_mode is not None
         ephemeral_profile_dir = None
+        session_owner_id = None
+
+        if use_persistent_context:
+            try:
+                session_owner_id = self._get_session_owner_id(account_info)
+            except ValueError as e:
+                result.error = str(e)
+                return False
         
         browser = None  # 持久化上下文不直接管理浏览器
         
@@ -1680,7 +1718,7 @@ class ComponentTester:
                         fingerprint_manager = DeviceFingerprintManager()
                         
                         # 获取 profile 路径
-                        account_id = self.account_id or account_info.get('account_id', 'default')
+                        account_id = session_owner_id or self.account_id or account_info.get('account_id', 'default')
                         if persistent_context_mode == "reused":
                             from modules.utils.sessions.session_manager import SessionManager
 
@@ -1926,6 +1964,7 @@ class ComponentTester:
                                 if self.screenshot_on_error:
                                     screenshot_path = await self._save_screenshot(page, component['name'], step_id)
                                     step_result.screenshot = screenshot_path
+                                    await self._save_failure_artifacts(page, component['name'], step_id)
                         else:
                             # #region agent log
                             with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
@@ -2018,6 +2057,8 @@ class ComponentTester:
             # #endregion
             logger.error(f"Browser test failed: {e}", exc_info=True)
             result.error = str(e) if str(e) else type(e).__name__
+            if 'page' in locals() and page is not None:
+                await self._save_failure_artifacts(page, component['name'], 'browser_exception')
             return False
         finally:
             if ephemeral_profile_dir:
@@ -2964,6 +3005,65 @@ class ComponentTester:
             logger.error(f"Failed to save screenshot: {e}")
             return None
     
+    async def _save_failure_artifacts(self, page, component_name: str, step_id: str) -> str | None:
+        """Save HTML/text metadata for the latest failed page state."""
+        try:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            base_dir = self.test_dir if self.test_dir else (self.output_dir / 'failure_snapshots')
+            base_dir = Path(base_dir)
+            base_dir.mkdir(parents=True, exist_ok=True)
+
+            stem = f"{component_name}_{step_id}_{timestamp}"
+            html_path = base_dir / f"{stem}.html"
+            text_path = base_dir / f"{stem}.txt"
+            json_path = base_dir / f"{stem}.json"
+
+            current_url = str(getattr(page, 'url', '') or '')
+            page_title = ''
+            page_html = ''
+            body_text = ''
+
+            try:
+                if hasattr(page, 'title'):
+                    page_title = await page.title()
+            except Exception:
+                page_title = ''
+
+            try:
+                if hasattr(page, 'content'):
+                    page_html = await page.content()
+            except Exception:
+                page_html = ''
+
+            try:
+                body = page.locator("body")
+                if hasattr(body, 'first'):
+                    body = body.first
+                if hasattr(body, 'inner_text'):
+                    body_text = await body.inner_text()
+            except Exception:
+                body_text = ''
+
+            html_path.write_text(page_html, encoding='utf-8')
+            text_path.write_text(body_text, encoding='utf-8')
+
+            payload = {
+                'component_name': component_name,
+                'step_id': step_id,
+                'platform': self.platform,
+                'account_id': self.account_id,
+                'url': current_url,
+                'title': page_title,
+                'html_path': str(html_path),
+                'text_path': str(text_path),
+                'generated_at': datetime.now().isoformat(),
+            }
+            json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding='utf-8')
+            return str(json_path)
+        except Exception as e:
+            logger.error(f"Failed to save failure artifacts: {e}")
+            return None
+
     def _diagnose_failure(self, step: Dict[str, Any], error: Exception) -> str:
         """
         诊断步骤失败原因并给出建议（Phase 12.4）

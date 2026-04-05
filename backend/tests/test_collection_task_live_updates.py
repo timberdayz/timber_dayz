@@ -173,3 +173,74 @@ async def test_execute_collection_task_background_broadcasts_complete_on_success
         files_collected=1,
         error_message=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_retry_task_requeues_background_execution(monkeypatch):
+    from backend.routers.collection_tasks import retry_task
+
+    original_task = _make_task(
+        task_id="task-original",
+        status="failed",
+        trigger_type="manual",
+        data_domains=["orders"],
+        sub_domains={"orders": ["tiktok"]},
+        granularity="daily",
+        date_range={"start": "2026-03-01", "end": "2026-03-01"},
+        retry_count=0,
+    )
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = original_task
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+
+    async def _refresh(obj):
+        if getattr(obj, "id", None) is None:
+            obj.id = 2
+        if getattr(obj, "created_at", None) is None:
+            obj.created_at = datetime.now(timezone.utc)
+        if getattr(obj, "updated_at", None) is None:
+            obj.updated_at = datetime.now(timezone.utc)
+
+    db.refresh = AsyncMock(side_effect=_refresh)
+
+    class _FakeResolver:
+        @classmethod
+        def from_async_session(cls, _db):
+            return cls()
+
+        async def resolve_task_manifests(self, **kwargs):
+            return {"login": {}, "exports": [], "exports_by_domain": {}}
+
+    scheduled = {}
+
+    def _capture_background_task(coro):
+        scheduled["coroutine_name"] = getattr(coro, "__name__", type(coro).__name__)
+        coro.close()
+        return MagicMock()
+
+    monkeypatch.setattr(
+        "backend.services.component_runtime_resolver.ComponentRuntimeResolver",
+        _FakeResolver,
+    )
+    monkeypatch.setattr(
+        "backend.routers.collection_tasks.asyncio.create_task",
+        _capture_background_task,
+    )
+    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task", AsyncMock())
+    monkeypatch.setattr("backend.routers.collection_tasks._mirror_collection_task_log", AsyncMock())
+
+    request = SimpleNamespace(app=SimpleNamespace())
+
+    body = await retry_task(
+        task_id="task-original",
+        request=request,
+        db=db,
+    )
+
+    assert body["status"] == "pending"
+    assert body["trigger_type"] == "retry"
+    assert scheduled["coroutine_name"] == "_execute_collection_task_background"

@@ -170,3 +170,5 @@ async def test_create_shop_account_from_discovery(discovery_client):
     assert len(shop_accounts_payload) == 1
     assert shop_accounts_payload[0]["shop_account_id"] == "shopee_sg_hongxi_local"
     assert shop_accounts_payload[0]["platform_shop_id"] == "1227491331"
+    assert shop_accounts_payload[0]["capabilities"]["orders"] is True
+    assert shop_accounts_payload[0]["capabilities"]["services"] is True

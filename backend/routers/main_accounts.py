@@ -18,7 +18,9 @@ from backend.schemas.shop_discovery import (
     ShopDiscoveryRunResponse,
 )
 from backend.services.encryption_service import get_encryption_service
+from backend.services.platform_login_entry_service import normalize_main_account_login_url
 from backend.services.shop_discovery_service import get_shop_discovery_service
+from backend.utils.text_normalization import coalesce_human_text, normalize_human_text
 from modules.core.db import MainAccount
 
 
@@ -35,12 +37,32 @@ async def _get_main_account_or_404(db: AsyncSession, main_account_id: str) -> Ma
     return record
 
 
+def _serialize_main_account(record: MainAccount) -> MainAccountResponse:
+    return MainAccountResponse(
+        id=record.id,
+        platform=record.platform,
+        main_account_id=record.main_account_id,
+        main_account_name=coalesce_human_text(
+            record.main_account_name,
+            record.notes,
+            record.username,
+            record.main_account_id,
+        ),
+        username=record.username,
+        login_url=record.login_url,
+        enabled=record.enabled,
+        notes=record.notes,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
 @router.get("", response_model=List[MainAccountResponse])
 async def list_main_accounts(db: AsyncSession = Depends(get_async_db)):
     result = await db.execute(
         select(MainAccount).order_by(MainAccount.platform, MainAccount.main_account_id)
     )
-    return result.scalars().all()
+    return [_serialize_main_account(record) for record in result.scalars().all()]
 
 
 @router.post("", response_model=MainAccountResponse)
@@ -64,10 +86,10 @@ async def create_main_account(
     record = MainAccount(
         platform=payload.platform,
         main_account_id=payload.main_account_id,
-        main_account_name=payload.main_account_name,
+        main_account_name=normalize_human_text(payload.main_account_name),
         username=payload.username,
         password_encrypted=encryption_service.encrypt_password(payload.password),
-        login_url=payload.login_url,
+        login_url=normalize_main_account_login_url(payload.platform, payload.login_url),
         enabled=payload.enabled,
         notes=payload.notes,
         created_by="system",
@@ -76,7 +98,7 @@ async def create_main_account(
     db.add(record)
     await db.commit()
     await db.refresh(record)
-    return record
+    return _serialize_main_account(record)
 
 
 @router.put("/{main_account_id}", response_model=MainAccountResponse)
@@ -88,16 +110,20 @@ async def update_main_account(
     record = await _get_main_account_or_404(db, main_account_id)
     update_data = payload.model_dump(exclude_unset=True)
     password = update_data.pop("password", None)
+    if "main_account_name" in update_data:
+        update_data["main_account_name"] = normalize_human_text(update_data["main_account_name"])
     if password:
         encryption_service = get_encryption_service()
         record.password_encrypted = encryption_service.encrypt_password(password)
+    if "login_url" in update_data:
+        update_data["login_url"] = normalize_main_account_login_url(record.platform, update_data.get("login_url"))
     for field, value in update_data.items():
         setattr(record, field, value)
     record.updated_at = datetime.now(timezone.utc)
     record.updated_by = "system"
     await db.commit()
     await db.refresh(record)
-    return record
+    return _serialize_main_account(record)
 
 
 @router.delete("/{main_account_id}")

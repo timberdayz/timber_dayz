@@ -290,7 +290,7 @@
               取消
             </el-button>
             <el-button 
-              v-if="['verification_required', 'paused'].includes(row.status)"
+              v-if="['verification_required', 'paused', 'manual_intervention_required'].includes(row.status)"
               size="small" 
               type="success"
               @click="showResumeDialog(row)"
@@ -461,6 +461,12 @@ import {
 const route = useRoute()
 const router = useRouter()
 const activeConfigId = computed(() => route.query.config_id || '')
+const activeTaskIds = computed(() =>
+  String(route.query.task_ids || '')
+    .split(',')
+    .map(id => id.trim())
+    .filter(Boolean)
+)
 
 const clearConfigFilter = async () => {
   await router.push({
@@ -498,7 +504,7 @@ const wsConnections = ref({})
 const DEFAULT_GRANULARITY = 'daily'
 const ACTIVE_TASK_POLL_INTERVAL = 3000
 const IDLE_TASK_POLL_INTERVAL = 30000
-const ACTIVE_TASK_STATUSES = ['pending', 'queued', 'running', 'verification_required', 'verification_submitted', 'paused']
+const ACTIVE_TASK_STATUSES = ['pending', 'queued', 'running', 'verification_required', 'verification_submitted', 'paused', 'manual_intervention_required']
 let tasksRefreshTimer = null
 
 // 快速采集表单（v4.7.0 + 扩展：日期自定义）
@@ -568,7 +574,7 @@ const verificationSummary = computed(() => {
 })
 
 const isLegacyVerificationStatus = (task) =>
-  ['verification_required', 'paused'].includes(task.status) && task.verification_type
+  ['verification_required', 'paused', 'manual_intervention_required'].includes(task.status) && task.verification_type
 
 watch(
   () => [...quickForm.data_domains],
@@ -621,6 +627,10 @@ const loadTasks = async () => {
     if (route.query.config_id) params.config_id = route.query.config_id
     
     tasks.value = await collectionApi.getTasks(params)
+    if (tasks.value.length === 0 && activeTaskIds.value.length > 0) {
+      const unfiltered = await collectionApi.getTasks(statusFilter.value ? { status: statusFilter.value } : {})
+      tasks.value = (unfiltered || []).filter(task => activeTaskIds.value.includes(task.task_id))
+    }
     verificationItems.value = await collectionApi.getVerificationItems()
     if (route.query.task_ids) {
       const taskIds = String(route.query.task_ids).split(',').filter(Boolean)
@@ -882,7 +892,9 @@ const connectTaskWebSocket = (taskId) => {
     onVerification: (message) => {
       const task = tasks.value.find(t => t.task_id === taskId)
       if (task) {
-        task.status = 'verification_required'
+        task.status = message.verification_input_mode === 'manual_continue'
+          ? 'manual_intervention_required'
+          : 'verification_required'
         task.verification_type = message.verification_type || ''
         task.verification_input_mode = message.verification_input_mode || ''
         task.verification_screenshot = message.screenshot_path || ''
@@ -953,6 +965,13 @@ const getStatusLabel = (status) => {
 
 const getExecutionModeLabel = (mode) => {
   return mode === 'headed' ? '有头模式' : '无头模式'
+}
+
+const MAIN_ACCOUNT_COORDINATION_STEP_LABELS = {
+  waiting_for_main_account_session: '等待主账号会话',
+  preparing_main_account_session: '准备主账号会话',
+  switching_target_shop: '切换目标店铺',
+  target_shop_ready: '目标店铺已就绪'
 }
 
 const getProgressStatus = (status) => {

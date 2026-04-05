@@ -97,6 +97,7 @@ def test_shopee_login_success_detection_accepts_homepage_urls() -> None:
 
     assert component._login_looks_successful("https://seller.shopee.cn/?cnsc_shop_id=1") is True
     assert component._login_looks_successful("https://seller.shopee.cn/portal/sale/order") is True
+    assert component._login_looks_successful("https://seller.shopee.cn/datacenter/home") is True
 
 
 def test_shopee_login_homepage_detection_rejects_non_homepage_urls() -> None:
@@ -242,13 +243,14 @@ def test_shopee_login_otp_mode_from_title_distinguishes_phone_and_email() -> Non
 
 
 @pytest.mark.asyncio
-async def test_shopee_login_requires_login_url() -> None:
+async def test_shopee_login_uses_platform_default_login_entry_when_account_login_url_missing() -> None:
     component = ShopeeLogin(_ctx(account={"username": "user", "password": "pass"}))
+    page = _FakePage("about:blank")
 
-    result = await component.run(_FakePage("https://seller.shopee.cn/account/signin"))
+    result = await component.run(page)
 
+    assert page.goto_calls[0].startswith("https://seller.shopee.cn/account/signin")
     assert result.success is False
-    assert result.message == "login_url is required in account"
 
 
 @pytest.mark.asyncio
@@ -267,6 +269,49 @@ async def test_shopee_login_already_logged_in_short_circuits(monkeypatch: pytest
     assert result.success is True
     assert result.message == "already logged in"
     assert cleaned == ["https://seller.shopee.cn/?cnsc_shop_id=1227491331"]
+
+
+@pytest.mark.asyncio
+async def test_shopee_login_treats_authenticated_shell_as_already_logged_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    component = ShopeeLogin(_ctx())
+    page = _FakePage("https://seller.shopee.cn/datacenter/home")
+    cleaned: list[str] = []
+
+    async def _fake_cleanup(current_page) -> None:
+        cleaned.append(str(current_page.url))
+
+    monkeypatch.setattr(component, "_cleanup_after_login", _fake_cleanup)
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert result.message == "already logged in"
+    assert cleaned == ["https://seller.shopee.cn/datacenter/home"]
+
+
+@pytest.mark.asyncio
+async def test_shopee_login_treats_post_goto_authenticated_shell_as_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = ShopeeLogin(_ctx())
+    page = _FakePage("about:blank")
+    cleaned: list[str] = []
+
+    async def _fake_goto(url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
+        page.goto_calls.append(url)
+        page.url = "https://seller.shopee.cn/datacenter/home"
+
+    async def _fake_cleanup(current_page) -> None:
+        cleaned.append(str(current_page.url))
+
+    monkeypatch.setattr(page, "goto", _fake_goto)
+    monkeypatch.setattr(component, "_cleanup_after_login", _fake_cleanup)
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert result.message == "ok"
+    assert cleaned == ["https://seller.shopee.cn/datacenter/home"]
 
 
 @pytest.mark.asyncio

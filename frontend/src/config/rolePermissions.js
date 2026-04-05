@@ -11,7 +11,7 @@ export const ROLE_CONFIG = {
     permissions: [
       'business-overview',
       'annual-summary',
-      'collection-config', 'collection-tasks', 'collection-history',
+      'collection-config', 'collection-coverage-audit', 'collection-tasks', 'collection-history',
       'component-recorder', 'component-versions',
       'data-sync', 'data-quarantine', 'field-mapping',
       'product-management', 'inventory-management', 'inventory-dashboard-v3',

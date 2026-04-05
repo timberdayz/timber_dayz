@@ -71,6 +71,7 @@ LOGIN_DETECTION_CONFIG: Dict[str, Dict[str, Any]] = {
             "/portal",
             "/seller",
             "/dashboard",
+            "/datacenter/",
             "/product/list",
             "/order/list",
         ],
@@ -479,6 +480,15 @@ class LoginStatusDetector:
         
         # 妙手ERP特殊处理:/welcome 且不包含 redirect= 表示已登录
         if self.platform == "miaoshou":
+            if "redirect=%2fwelcome/welcome" in url_lower:
+                return LoginDetectionResult(
+                    status=LoginStatus.LOGGED_IN,
+                    confidence=0.9,
+                    reason="URL redirects to miaoshou welcome shell",
+                    detected_by="url",
+                    current_url=url,
+                    matched_pattern="/welcome/welcome"
+                )
             if "/welcome" in url_lower and "redirect=" not in url_lower:
                 return LoginDetectionResult(
                     status=LoginStatus.LOGGED_IN,

@@ -316,8 +316,8 @@
               <div class="form-tip">密码将被加密存储，更新时留空表示不修改</div>
             </el-form-item>
             
-            <el-form-item label="登录URL">
-              <el-input v-model="accountForm.login_url" placeholder="https://..." />
+            <el-form-item label="标准登录入口">
+              <el-input v-model="accountForm.login_url" placeholder="系统自动生成" disabled />
             </el-form-item>
             
             <el-form-item label="邮箱">

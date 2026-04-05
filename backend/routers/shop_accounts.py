@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.database import get_async_db
@@ -13,10 +13,69 @@ from backend.schemas.shop_account import (
     ShopAccountResponse,
     ShopAccountUpdate,
 )
+from backend.utils.text_normalization import normalize_alias_text
 from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability
 
 
-router = APIRouter(prefix="/shop-accounts", tags=["店铺账号管理"])
+router = APIRouter(prefix="/shop-accounts", tags=["shop account management"])
+
+
+def _default_capabilities_for(shop_type: str | None) -> dict[str, bool]:
+    defaults = {
+        "orders": True,
+        "products": True,
+        "services": True,
+        "analytics": True,
+        "finance": True,
+        "inventory": True,
+    }
+    if shop_type == "global":
+        defaults["services"] = False
+    return defaults
+
+
+async def _load_capabilities(
+    db: AsyncSession,
+    shop_account_db_id: int,
+    shop_type: str | None,
+) -> dict[str, bool]:
+    capability_result = await db.execute(
+        select(ShopAccountCapability).where(
+            ShopAccountCapability.shop_account_id == shop_account_db_id
+        )
+    )
+    rows = capability_result.scalars().all()
+    if rows:
+        return {
+            row.data_domain: bool(row.enabled)
+            for row in rows
+        }
+    return _default_capabilities_for(shop_type)
+
+
+async def _ensure_capability_rows(
+    db: AsyncSession,
+    shop_account: ShopAccount,
+    *,
+    shop_type: str | None = None,
+) -> None:
+    capability_result = await db.execute(
+        select(ShopAccountCapability).where(
+            ShopAccountCapability.shop_account_id == shop_account.id
+        )
+    )
+    existing = capability_result.scalars().all()
+    if existing:
+        return
+
+    for domain, enabled in _default_capabilities_for(shop_type or shop_account.shop_type).items():
+        db.add(
+            ShopAccountCapability(
+                shop_account_id=shop_account.id,
+                data_domain=domain,
+                enabled=enabled,
+            )
+        )
 
 
 async def _serialize_shop_account(
@@ -31,21 +90,13 @@ async def _serialize_shop_account(
     )
     aliases = alias_result.scalars().all()
     primary_alias = next((alias.alias_value for alias in aliases if alias.is_primary), None)
-    capability_result = await db.execute(
-        select(ShopAccountCapability).where(
-            ShopAccountCapability.shop_account_id == record.id
-        )
-    )
-    capabilities = {
-        row.data_domain: bool(row.enabled)
-        for row in capability_result.scalars().all()
-    }
+    capabilities = await _load_capabilities(db, record.id, record.shop_type)
     return ShopAccountResponse(
         id=record.id,
         platform=record.platform,
         shop_account_id=record.shop_account_id,
         main_account_id=record.main_account_id,
-        account_alias=primary_alias,
+        account_alias=normalize_alias_text(primary_alias),
         alias_count=len(aliases),
         capabilities=capabilities,
         store_name=record.store_name,
@@ -66,7 +117,7 @@ async def _get_shop_account_or_404(db: AsyncSession, shop_account_id: str) -> Sh
     )
     record = result.scalar_one_or_none()
     if record is None:
-        raise HTTPException(status_code=404, detail=f"店铺账号ID '{shop_account_id}' 不存在")
+        raise HTTPException(status_code=404, detail=f"shop_account_id '{shop_account_id}' not found")
     return record
 
 
@@ -80,7 +131,7 @@ async def _assert_main_account_exists(
         )
     )
     if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=400, detail=f"主账号ID '{main_account_id}' 不存在")
+        raise HTTPException(status_code=400, detail=f"main_account_id '{main_account_id}' not found")
 
 
 @router.get("", response_model=List[ShopAccountResponse])
@@ -115,7 +166,8 @@ async def create_shop_account(
         )
     )
     if existing.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=400, detail=f"店铺账号ID '{payload.shop_account_id}' 已存在")
+        raise HTTPException(status_code=400, detail=f"shop_account_id '{payload.shop_account_id}' already exists")
+
     record = ShopAccount(
         platform=payload.platform,
         shop_account_id=payload.shop_account_id,
@@ -133,6 +185,8 @@ async def create_shop_account(
     db.add(record)
     await db.commit()
     await db.refresh(record)
+    await _ensure_capability_rows(db, record, shop_type=payload.shop_type)
+    await db.commit()
     return await _serialize_shop_account(db, record)
 
 
@@ -171,6 +225,8 @@ async def batch_create_shop_accounts(
     await db.commit()
     for record in created:
         await db.refresh(record)
+        await _ensure_capability_rows(db, record, shop_type=record.shop_type)
+    await db.commit()
     return [await _serialize_shop_account(db, record) for record in created]
 
 
@@ -181,8 +237,10 @@ async def update_shop_account(
     db: AsyncSession = Depends(get_async_db),
 ):
     record = await _get_shop_account_or_404(db, shop_account_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
         setattr(record, field, value)
+    await _ensure_capability_rows(db, record, shop_type=update_data.get("shop_type", record.shop_type))
     record.updated_at = datetime.now(timezone.utc)
     record.updated_by = "system"
     await db.commit()
@@ -198,4 +256,4 @@ async def delete_shop_account(
     record = await _get_shop_account_or_404(db, shop_account_id)
     await db.delete(record)
     await db.commit()
-    return {"message": f"店铺账号ID '{shop_account_id}' 已删除"}
+    return {"message": f"shop_account_id '{shop_account_id}' deleted"}

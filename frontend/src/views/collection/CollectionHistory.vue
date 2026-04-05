@@ -2,7 +2,7 @@
   <div class="collection-history erp-page-container erp-page--admin">
     <PageHeader
       title="采集历史"
-      subtitle="查看采集任务历史、状态分布、失败信息和导出记录。"
+      subtitle="查看采集任务历史、状态分布、失败信息和来源配置。"
       family="admin"
     />
 
@@ -24,36 +24,25 @@
         <span class="stat-label">失败</span>
       </div>
       <div class="stat-item info">
-        <span class="stat-value">{{ (stats?.success_rate ?? 0) }}%</span>
+        <span class="stat-value">{{ stats?.success_rate ?? 0 }}%</span>
         <span class="stat-label">成功率</span>
       </div>
     </div>
 
-    <!-- 筛选工具栏 -->
     <div class="filter-bar">
-      <el-select 
-        v-model="filters.platform" 
-        placeholder="平台" 
-        clearable
-        @change="loadHistory"
-      >
+      <el-select v-model="filters.platform" placeholder="平台" clearable @change="loadHistory">
         <el-option label="Shopee" value="shopee" />
         <el-option label="TikTok" value="tiktok" />
         <el-option label="妙手ERP" value="miaoshou" />
       </el-select>
-      
-      <el-select 
-        v-model="filters.status" 
-        placeholder="状态" 
-        clearable
-        @change="loadHistory"
-      >
+
+      <el-select v-model="filters.status" placeholder="状态" clearable @change="loadHistory">
         <el-option label="成功" value="completed" />
         <el-option label="部分成功" value="partial_success" />
         <el-option label="失败" value="failed" />
         <el-option label="已取消" value="cancelled" />
       </el-select>
-      
+
       <el-date-picker
         v-model="filters.date_range"
         type="daterange"
@@ -62,24 +51,19 @@
         value-format="YYYY-MM-DD"
         @change="loadHistory"
       />
-      
+
       <el-button @click="loadHistory">
         <el-icon><Refresh /></el-icon>
         刷新
       </el-button>
-      
+
       <el-button type="primary" @click="exportHistory">
         <el-icon><Download /></el-icon>
         导出
       </el-button>
     </div>
 
-    <!-- 历史列表 -->
-    <el-table 
-      v-loading="loading" 
-      :data="history" 
-      stripe
-    >
+    <el-table v-loading="loading" :data="history" stripe>
       <el-table-column label="任务ID" width="140">
         <template #default="{ row }">
           <span class="task-id">{{ row.task_id?.slice(0, 12) }}...</span>
@@ -93,10 +77,20 @@
         </template>
       </el-table-column>
       <el-table-column prop="account" label="账号" min-width="120" />
+      <el-table-column label="来源模式" width="110">
+        <template #default="{ row }">
+          {{ row.trigger_type || '-' }}
+        </template>
+      </el-table-column>
+      <el-table-column label="来源配置" width="100">
+        <template #default="{ row }">
+          {{ row.config_id || '-' }}
+        </template>
+      </el-table-column>
       <el-table-column label="数据域" min-width="150">
         <template #default="{ row }">
-          <el-tag 
-            v-for="domain in row.data_domains" 
+          <el-tag
+            v-for="domain in row.data_domains"
             :key="domain"
             size="small"
             class="erp-mr-xs"
@@ -153,17 +147,13 @@
       </el-table-column>
       <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">
-          <el-button 
-            size="small"
-            @click="showDetails(row)"
-          >
+          <el-button size="small" @click="showDetails(row)">
             详情
           </el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <!-- 分页 -->
     <div class="pagination-wrapper">
       <el-pagination
         v-model:current-page="pagination.page"
@@ -176,12 +166,7 @@
       />
     </div>
 
-    <!-- 详情对话框 -->
-    <el-dialog 
-      v-model="detailDialogVisible" 
-      title="任务详情"
-      width="700px"
-    >
+    <el-dialog v-model="detailDialogVisible" title="任务详情" width="760px">
       <el-descriptions :column="2" border>
         <el-descriptions-item label="任务ID">
           {{ currentTask?.task_id }}
@@ -192,14 +177,20 @@
         <el-descriptions-item label="账号">
           {{ currentTask?.account }}
         </el-descriptions-item>
+        <el-descriptions-item label="来源模式">
+          {{ currentTask?.trigger_type || '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="来源配置">
+          {{ currentTask?.config_id || '-' }}
+        </el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag :type="getStatusTagType(currentTask?.status)">
             {{ getStatusLabel(currentTask?.status) }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="数据域" :span="2">
-          <el-tag 
-            v-for="domain in currentTask?.data_domains" 
+          <el-tag
+            v-for="domain in currentTask?.data_domains"
             :key="domain"
             size="small"
             class="erp-mr-xs"
@@ -222,14 +213,18 @@
         <el-descriptions-item label="执行模式">
           {{ getExecutionModeLabel(currentTask?.execution_mode) }}
         </el-descriptions-item>
-        
-        <!-- v4.7.0: 域级别统计 -->
+        <el-descriptions-item label="创建时间">
+          {{ formatTime(currentTask?.created_at) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="完成时间">
+          {{ formatTime(currentTask?.updated_at) }}
+        </el-descriptions-item>
         <el-descriptions-item v-if="currentTask?.total_domains" label="总数据域" :span="2">
           {{ currentTask.total_domains }}个
         </el-descriptions-item>
         <el-descriptions-item v-if="currentTask?.completed_domains" label="成功域" :span="2">
-          <el-tag 
-            v-for="domain in currentTask.completed_domains" 
+          <el-tag
+            v-for="domain in currentTask.completed_domains"
             :key="domain"
             type="success"
             size="small"
@@ -244,20 +239,12 @@
             <span class="error-text">{{ failure.error }}</span>
           </div>
         </el-descriptions-item>
-        
-        <el-descriptions-item label="创建时间">
-          {{ formatTime(currentTask?.created_at) }}
-        </el-descriptions-item>
-        <el-descriptions-item label="完成时间">
-          {{ formatTime(currentTask?.updated_at) }}
-        </el-descriptions-item>
         <el-descriptions-item v-if="currentTask?.error_message" label="错误信息" :span="2">
           <el-alert type="error" :closable="false">
             {{ currentTask?.error_message }}
           </el-alert>
         </el-descriptions-item>
       </el-descriptions>
-
       <template #footer>
         <el-button @click="detailDialogVisible = false">关闭</el-button>
       </template>
@@ -266,34 +253,30 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh, Download } from '@element-plus/icons-vue'
+import { Download, Refresh } from '@element-plus/icons-vue'
 import collectionApi from '@/api/collection'
 import PageHeader from '@/components/common/PageHeader.vue'
 
-// 状态
 const loading = ref(false)
 const history = ref([])
 const stats = ref({})
 const detailDialogVisible = ref(false)
 const currentTask = ref(null)
 
-// 筛选条件
 const filters = reactive({
   platform: '',
   status: '',
   date_range: []
 })
 
-// 分页
 const pagination = reactive({
   page: 1,
   pageSize: 20,
   total: 0
 })
 
-// 方法
 const loadHistory = async () => {
   loading.value = true
   try {
@@ -309,7 +292,6 @@ const loadHistory = async () => {
     }
 
     const result = await collectionApi.getHistory(params)
-    // 后端返回 { data, total, page, page_size, pages }
     history.value = result.data ?? result.items ?? []
     pagination.total = result.total ?? 0
   } catch (error) {
@@ -333,19 +315,20 @@ const showDetails = (row) => {
 }
 
 const exportHistory = () => {
-  // 导出为CSV
-  const headers = ['任务ID', '平台', '账号', '数据域', '状态', '文件数', '耗时', '完成时间']
+  const headers = ['任务ID', '平台', '账号', '来源模式', '来源配置', '数据域', '状态', '文件数', '耗时', '完成时间']
   const rows = history.value.map(row => [
     row.task_id,
     row.platform,
     row.account,
+    row.trigger_type || '',
+    row.config_id || '',
     row.data_domains?.join(','),
     row.status,
     row.files_collected || 0,
     formatDuration(row.duration_seconds),
     formatTime(row.updated_at)
   ])
-  
+
   const csvContent = [headers, ...rows].map(r => r.join(',')).join('\n')
   const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
@@ -354,7 +337,7 @@ const exportHistory = () => {
   link.download = `采集历史_${new Date().toISOString().split('T')[0]}.csv`
   link.click()
   URL.revokeObjectURL(url)
-  
+
   ElMessage.success('导出成功')
 }
 
@@ -373,9 +356,9 @@ const getDomainLabel = (domain) => {
 
 const getStatusTagType = (status) => {
   const types = {
-    completed: 'success', 
-    partial_success: 'warning',  // v4.7.0
-    failed: 'danger', 
+    completed: 'success',
+    partial_success: 'warning',
+    failed: 'danger',
     cancelled: 'warning'
   }
   return types[status] || 'info'
@@ -383,9 +366,9 @@ const getStatusTagType = (status) => {
 
 const getStatusLabel = (status) => {
   const labels = {
-    completed: '成功', 
-    partial_success: '部分成功',  // v4.7.0
-    failed: '失败', 
+    completed: '成功',
+    partial_success: '部分成功',
+    failed: '失败',
     cancelled: '已取消'
   }
   return labels[status] || status
@@ -409,7 +392,6 @@ const formatTime = (time) => {
   return new Date(time).toLocaleString('zh-CN')
 }
 
-// 生命周期
 onMounted(() => {
   loadHistory()
   loadStats()
@@ -503,7 +485,6 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
-/* v4.7.0: 域级别进度显示 */
 .domain-progress {
   font-size: 12px;
   color: #606266;

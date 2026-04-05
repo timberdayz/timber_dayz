@@ -23,6 +23,60 @@ DEFAULT_CONFIG_DATA_DOMAINS: List[str] = [
     "inventory",
 ]
 
+DEFAULT_GRANULARITY_DATE_RANGE_TYPE: Dict[str, str] = {
+    "daily": "yesterday",
+    "weekly": "last_7_days",
+    "monthly": "last_30_days",
+}
+
+
+def get_default_shop_capabilities(shop_type: str | None) -> Dict[str, bool]:
+    defaults = {
+        "orders": True,
+        "products": True,
+        "services": True,
+        "analytics": True,
+        "finance": True,
+        "inventory": True,
+    }
+    if str(shop_type or "").strip().lower() == "global":
+        defaults["services"] = False
+    return defaults
+
+
+def resolve_shop_capabilities(
+    capabilities: Optional[Dict[str, bool]],
+    *,
+    shop_type: str | None = None,
+) -> Dict[str, bool]:
+    if capabilities is None:
+        return get_default_shop_capabilities(shop_type)
+
+    normalized: Dict[str, bool] = {}
+    for domain in DEFAULT_CONFIG_DATA_DOMAINS:
+        normalized[domain] = bool(capabilities.get(domain, False))
+    return normalized
+
+
+def get_recommended_config_domains(
+    capabilities: Optional[Dict[str, bool]],
+    *,
+    shop_type: str | None = None,
+) -> List[str]:
+    effective = resolve_shop_capabilities(capabilities, shop_type=shop_type)
+    return sorted([domain for domain, enabled in effective.items() if enabled])
+
+
+def build_default_sub_domains(
+    data_domains: List[str],
+) -> Dict[str, List[str]]:
+    result: Dict[str, List[str]] = {}
+    for domain in data_domains or []:
+        allowed_subtypes = _allowed_subtype_mapping().get(domain, [])
+        if allowed_subtypes:
+            result[domain] = list(allowed_subtypes)
+    return result
+
 
 def _normalize_date_like(value: Any) -> str:
     if value is None:

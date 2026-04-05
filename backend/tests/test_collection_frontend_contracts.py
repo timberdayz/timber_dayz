@@ -99,3 +99,39 @@ def test_accounts_api_uses_new_unmatched_alias_route():
 
     assert "/shop-account-aliases/unmatched" in text
     assert "/accounts/unmatched-shop-aliases" not in text
+
+
+def test_collection_config_run_passes_config_id_to_task_creation():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+
+    assert "config_id: row.id" in text
+
+
+def test_collection_tasks_uses_task_ids_hint_for_config_navigation():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+
+    assert "route.query.task_ids" in text
+    assert "matchedTask" in text
+
+
+def test_collection_history_exposes_origin_fields():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionHistory.vue").read_text(encoding="utf-8")
+
+    assert "config_id" in text
+    assert "trigger_type" in text
+
+
+def test_collection_tasks_mentions_main_account_coordination_steps():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
+
+    assert "waiting_for_main_account_session" in text or "等待主账号会话" in text
+    assert "preparing_main_account_session" in text or "准备主账号会话" in text
+    assert "switching_target_shop" in text or "切换目标店铺" in text
+    assert "target_shop_ready" in text or "目标店铺已就绪" in text
+
+
+def test_account_management_does_not_offer_free_form_login_url_editing():
+    text = (PROJECT_ROOT / "frontend/src/views/AccountManagement.vue").read_text(encoding="utf-8")
+
+    assert '<el-form-item label="登录URL">' not in text
+    assert 'v-model="accountForm.login_url"' not in text or 'disabled' in text

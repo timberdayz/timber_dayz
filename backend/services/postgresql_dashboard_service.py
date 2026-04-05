@@ -667,8 +667,8 @@ class PostgresqlDashboardService:
             period_end=current_end,
             platform=platform,
         )
-        reduced["target"]["sales_amount"] = round(target_summary["target_amount"], 2)
-        reduced["target"]["sales_quantity"] = round(target_summary["target_quantity"], 2)
+        reduced["target"]["sales_amount"] = _round_or_none(target_summary["target_amount"], 2)
+        reduced["target"]["sales_quantity"] = _round_or_none(target_summary["target_quantity"], 2)
         reduced["target"]["achievement_rate"] = (
             round(reduced["metrics"]["sales_amount"]["today"] * 100.0 / target_summary["target_amount"], 2)
             if target_summary["target_amount"]

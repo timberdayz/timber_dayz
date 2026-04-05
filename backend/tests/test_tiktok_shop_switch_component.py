@@ -154,3 +154,23 @@ async def test_tiktok_shop_switch_fails_when_visible_store_display_disagrees_wit
 
     assert result.success is False
     assert result.message == "failed to confirm target shop region"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_shop_switch_allows_missing_display_name_when_url_region_is_already_correct() -> None:
+    ctx = _ctx(
+        account={"label": "acc"},
+        config={"shop_region": "SG"},
+    )
+    page = _FakePage(
+        "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG",
+        "",
+    )
+
+    result = await TiktokShopSwitch(ctx).run(page)
+
+    assert result.success is True
+    assert result.region == "SG"
+    assert ctx.config["shop_region"] == "SG"
+    assert ctx.config["shop_name"] == "acc_sg"
+    assert "shop_display_name" not in ctx.config

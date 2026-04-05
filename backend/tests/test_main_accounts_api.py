@@ -2,7 +2,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.models.database import get_async_db
 from backend.routers import main_accounts
@@ -59,3 +59,63 @@ async def test_create_main_account(main_account_client):
     assert payload["main_account_id"] == "hongxikeji:main"
     assert payload["main_account_name"] == "Shopee 新加坡主体"
     assert payload["platform"] == "shopee"
+    assert "cnsc_shop_id=" not in (payload["login_url"] or "")
+
+
+@pytest.mark.asyncio
+async def test_create_main_account_repairs_mojibake_name(main_account_client):
+    response = await main_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "repair:main",
+            "main_account_name": "3Cåº\x97",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["main_account_name"] == "3C店"
+
+
+@pytest.mark.asyncio
+async def test_create_main_account_uses_notes_when_name_is_placeholder(main_account_client):
+    response = await main_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "fallback:main",
+            "main_account_name": "Shopee ???? (2?)",
+            "username": "demo-user",
+            "password": "plain-password",
+            "enabled": True,
+            "notes": "shopee新加坡3C店",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["main_account_name"] == "shopee新加坡3C店"
+
+
+@pytest.mark.asyncio
+async def test_create_main_account_normalizes_shop_bound_login_url(main_account_client):
+    response = await main_account_client.post(
+        "/api/main-accounts",
+        json={
+            "platform": "shopee",
+            "main_account_id": "normalize:main",
+            "main_account_name": "Shopee Main",
+            "username": "demo-user",
+            "password": "plain-password",
+            "login_url": "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fproduct%2Flist%2Fall%3Fcnsc_shop_id%3D1407964586%26page%3D1",
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["login_url"] == "https://seller.shopee.cn/account/signin?next=%2Fportal%2Fhome"

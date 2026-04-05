@@ -8,6 +8,7 @@ from typing import Any
 from playwright.async_api import expect
 
 from modules.apps.collection_center.executor_v2 import VerificationRequiredError
+from backend.services.platform_login_entry_service import get_platform_login_entry
 from modules.components.base import ExecutionContext
 from modules.components.login.base import LoginComponent, LoginResult
 
@@ -174,7 +175,7 @@ class MiaoshouLogin(LoginComponent):
         if resumed_code:
             return await self._submit_captcha_from_resume(page, resumed_code)
 
-        login_url = acc.get("login_url") or "https://erp.91miaoshou.com"
+        login_url = acc.get("login_url") or get_platform_login_entry(self.platform)
         try:
             await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
             await asyncio.sleep(1.0)

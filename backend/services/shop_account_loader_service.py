@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,18 @@ class ShopAccountLoaderService:
     def _decrypt_password(self, encrypted: str) -> str:
         return self.encryption_service.decrypt_password(encrypted)
 
+    def _normalize_login_url(self, login_url: Optional[str]) -> str:
+        raw = str(login_url or "").strip()
+        if not raw:
+            return ""
+        try:
+            parsed = urlparse(raw)
+            if parsed.netloc:
+                return f"{parsed.scheme or 'https'}://{parsed.netloc}"
+        except Exception:
+            pass
+        return raw
+
     def _build_payload(
         self,
         main_account: MainAccount,
@@ -27,6 +40,7 @@ class ShopAccountLoaderService:
         capabilities: dict[str, bool],
     ) -> Dict[str, Any]:
         plaintext_password = self._decrypt_password(main_account.password_encrypted)
+        normalized_login_url = self._normalize_login_url(main_account.login_url)
         compat_account = {
             "account_id": shop_account.shop_account_id,
             "main_account_id": main_account.main_account_id,
@@ -37,7 +51,7 @@ class ShopAccountLoaderService:
             "shop_type": shop_account.shop_type or "",
             "username": main_account.username,
             "password": plaintext_password,
-            "login_url": main_account.login_url or "",
+            "login_url": normalized_login_url,
             "enabled": shop_account.enabled,
             "capabilities": capabilities,
         }
@@ -48,7 +62,7 @@ class ShopAccountLoaderService:
                 "main_account_id": main_account.main_account_id,
                 "username": main_account.username,
                 "password": plaintext_password,
-                "login_url": main_account.login_url or "",
+                "login_url": normalized_login_url,
                 "enabled": main_account.enabled,
                 "notes": main_account.notes or "",
             },

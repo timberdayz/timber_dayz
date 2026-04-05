@@ -2,6 +2,7 @@ from tools.test_component import ComponentTester
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+import json
 
 import pytest
 
@@ -245,7 +246,7 @@ async def test_component_tester_tiktok_login_gate_allows_login_shell_recovery_be
 
 @pytest.mark.asyncio
 async def test_component_tester_persists_session_after_login_success(monkeypatch):
-    tester = ComponentTester(platform="shopee", account_id="acc-1")
+    tester = ComponentTester(platform="shopee", account_id="shop-1")
 
     fake_context = AsyncMock()
     fake_context.storage_state = AsyncMock(return_value={"cookies": [], "origins": []})
@@ -263,11 +264,104 @@ async def test_component_tester_persists_session_after_login_success(monkeypatch
         _fake_save,
     )
 
-    ok = await tester._save_context_session(fake_context, {"account_id": "acc-1"})
+    ok = await tester._save_context_session(
+        fake_context,
+        {"account_id": "shop-1", "main_account_id": "main-1"},
+    )
 
     assert ok is True
     assert saved == {
         "platform": "shopee",
-        "account_id": "acc-1",
+        "account_id": "main-1",
         "storage_state": {"cookies": [], "origins": []},
     }
+
+
+@pytest.mark.asyncio
+async def test_component_tester_recreates_context_with_main_account_session_scope(monkeypatch):
+    tester = ComponentTester(platform="shopee", account_id="shop-1")
+
+    old_context = AsyncMock()
+    new_context = AsyncMock()
+    new_page = AsyncMock()
+    new_context.new_page = AsyncMock(return_value=new_page)
+    browser = AsyncMock()
+    browser.new_context = AsyncMock(return_value=new_context)
+
+    loaded = {}
+
+    async def _fake_load(platform, account_id, account_info, max_age_days=30):
+        loaded["platform"] = platform
+        loaded["account_id"] = account_id
+        loaded["account_info"] = account_info
+        loaded["max_age_days"] = max_age_days
+        return {"storage_state": {"cookies": ["from-main"], "origins": []}}
+
+    monkeypatch.setattr(
+        "modules.apps.collection_center.executor_v2._load_or_bootstrap_session_async",
+        _fake_load,
+    )
+    monkeypatch.setattr(
+        tester,
+        "_build_component_browser_context_options",
+        AsyncMock(return_value={"storage_state": {"cookies": ["from-main"], "origins": []}}),
+    )
+    monkeypatch.setattr(tester, "_prime_page_for_login_gate", AsyncMock())
+
+    rebuilt_context, rebuilt_page = await tester._recreate_context_with_saved_session(
+        browser=browser,
+        old_context=old_context,
+        account_info={"account_id": "shop-1", "main_account_id": "main-1"},
+    )
+
+    assert rebuilt_context is new_context
+    assert rebuilt_page is new_page
+    assert loaded["platform"] == "shopee"
+    assert loaded["account_id"] == "main-1"
+
+
+class _FailureBodyLocator:
+    async def inner_text(self) -> str:
+        return "page body summary"
+
+
+class _FailureSnapshotPage:
+    url = "https://seller.tiktokshopglobalselling.com/compass/product-analysis?shop_region=SG"
+
+    async def title(self) -> str:
+        return "TikTok Page"
+
+    async def content(self) -> str:
+        return "<html><body>snapshot</body></html>"
+
+    def locator(self, selector: str):
+        assert selector == "body"
+        return _FailureBodyLocator()
+
+
+@pytest.mark.asyncio
+async def test_component_tester_save_failure_artifacts_writes_snapshot_files(tmp_path):
+    tester = ComponentTester(
+        platform="tiktok",
+        account_id="acc-1",
+        output_dir=str(tmp_path),
+        test_dir=str(tmp_path),
+    )
+    page = _FailureSnapshotPage()
+
+    snapshot_path = await tester._save_failure_artifacts(page, "products_export", "python_component_1")
+
+    assert snapshot_path is not None
+    snapshot_file = Path(snapshot_path)
+    assert snapshot_file.exists()
+
+    payload = json.loads(snapshot_file.read_text(encoding="utf-8"))
+    assert payload["url"] == page.url
+    assert payload["title"] == "TikTok Page"
+
+    html_file = Path(payload["html_path"])
+    text_file = Path(payload["text_path"])
+    assert html_file.exists()
+    assert text_file.exists()
+    assert html_file.read_text(encoding="utf-8") == "<html><body>snapshot</body></html>"
+    assert text_file.read_text(encoding="utf-8") == "page body summary"

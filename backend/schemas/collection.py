@@ -257,9 +257,83 @@ class CollectionAccountResponse(BaseModel):
     name: str
     platform: str
     shop_id: Optional[str] = None
+    shop_region: Optional[str] = None
     status: str = "active"
     shop_type: Optional[str] = None
+    main_account_id: Optional[str] = None
+    main_account_name: Optional[str] = None
     capabilities: Optional[Dict[str, bool]] = None
+
+
+class CollectionAccountGroupRegionResponse(BaseModel):
+    shop_region: Optional[str] = None
+    shops: List[CollectionAccountResponse]
+
+
+class CollectionAccountGroupResponse(BaseModel):
+    platform: str
+    main_account_id: str
+    main_account_name: Optional[str] = None
+    regions: List[CollectionAccountGroupRegionResponse]
+
+
+class CollectionConfigCoverageItem(BaseModel):
+    shop_account_id: str
+    shop_account_name: str
+    platform: str
+    main_account_id: str
+    main_account_name: Optional[str] = None
+    shop_region: Optional[str] = None
+    shop_type: Optional[str] = None
+    daily_covered: bool
+    weekly_covered: bool
+    monthly_covered: bool
+    missing_granularities: List[str]
+    partial_covered: bool
+    fully_covered: bool
+    is_partially_covered: bool = False
+    recommended_domains: List[str] = Field(default_factory=list)
+
+
+class CollectionConfigCoverageSummary(BaseModel):
+    total_shop_count: int
+    fully_covered_count: int
+    partial_covered_count: int
+    daily_covered_count: int = 0
+    weekly_covered_count: int = 0
+    monthly_covered_count: int = 0
+    daily_missing_count: int
+    weekly_missing_count: int
+    monthly_missing_count: int
+
+
+class CollectionConfigCoverageResponse(BaseModel):
+    summary: CollectionConfigCoverageSummary
+    items: List[CollectionConfigCoverageItem]
+
+
+class CollectionConfigBatchRemediationRequest(BaseModel):
+    shop_account_ids: List[str] = Field(..., min_length=1)
+    granularity: Literal["daily", "weekly", "monthly"]
+    platform: Optional[str] = None
+
+
+class CollectionConfigBatchRemediationCreatedItem(BaseModel):
+    config_id: int
+    config_name: str
+    shop_account_id: str
+    granularity: Literal["daily", "weekly", "monthly"]
+
+
+class CollectionConfigBatchRemediationSkippedItem(BaseModel):
+    shop_account_id: str
+    reason: str
+
+
+class CollectionConfigBatchRemediationResponse(BaseModel):
+    granularity: Literal["daily", "weekly", "monthly"]
+    created_configs: List[CollectionConfigBatchRemediationCreatedItem]
+    skipped_shops: List[CollectionConfigBatchRemediationSkippedItem]
 
 
 class TaskHistoryResponse(BaseModel):

@@ -1,6 +1,11 @@
 from pathlib import Path
+import asyncio
+from unittest.mock import AsyncMock
+
+import pytest
 
 from modules.apps.collection_center.executor_v2 import (
+    CollectionExecutorV2,
     _extract_platform_shop_context,
     _resolve_session_scope,
 )
@@ -37,3 +42,131 @@ def test_extract_platform_shop_context_reads_known_query_keys():
 
     assert payload["detected_platform_shop_id"] == "1227491331"
     assert payload["detected_region"] == "SG"
+
+
+@pytest.mark.asyncio
+async def test_execute_requires_main_account_id_before_collection_starts():
+    executor = CollectionExecutorV2()
+
+    with pytest.raises(ValueError, match="Missing main_account_id for collection execution"):
+        await executor.execute(
+            task_id="task-1",
+            platform="shopee",
+            account_id="shop-1",
+            account={"account_id": "shop-1"},
+            data_domains=["products"],
+            date_range={"start": "2026-04-01", "end": "2026-04-01"},
+            granularity="daily",
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_parallel_domains_requires_main_account_id_before_collection_starts():
+    executor = CollectionExecutorV2()
+
+    with pytest.raises(ValueError, match="Missing main_account_id for collection execution"):
+        await executor.execute_parallel_domains(
+            task_id="task-1",
+            platform="shopee",
+            account_id="shop-1",
+            account={"account_id": "shop-1"},
+            data_domains=["products"],
+            date_range={"start": "2026-04-01", "end": "2026-04-01"},
+            granularity="daily",
+            browser=object(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_executor_shared_state_phase_serializes_same_main_account():
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+
+    events = []
+    entered = asyncio.Event()
+
+    async def first_operation():
+        events.append("first-enter")
+        entered.set()
+        await asyncio.sleep(0.05)
+        events.append("first-exit")
+        return "first"
+
+    async def second_operation():
+        await entered.wait()
+        events.append("second-enter")
+        return "second"
+
+    results = await asyncio.gather(
+        executor._run_with_main_account_session_lock(
+            task_id="task-1",
+            platform="shopee",
+            main_account_id="main-a",
+            operation=first_operation,
+        ),
+        executor._run_with_main_account_session_lock(
+            task_id="task-2",
+            platform="shopee",
+            main_account_id="main-a",
+            operation=second_operation,
+        ),
+    )
+
+    assert results == ["first", "second"]
+
+
+def test_execute_parallel_domains_mentions_main_account_shared_state_preparation():
+    source = Path("modules/apps/collection_center/executor_v2.py").read_text(encoding="utf-8")
+
+    parallel_index = source.index("async def execute_parallel_domains(")
+    lock_markers = [
+        "_run_with_main_account_session_lock(",
+        "main_account_session_coordinator.acquire(",
+    ]
+
+    assert any(source.find(marker, parallel_index) > parallel_index for marker in lock_markers)
+
+
+def test_executor_uses_platform_login_entry_service_for_formal_collection():
+    source = Path("modules/apps/collection_center/executor_v2.py").read_text(encoding="utf-8")
+
+    assert "get_platform_login_entry" in source
+
+
+@pytest.mark.asyncio
+async def test_executor_shared_state_phase_allows_different_main_accounts():
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+
+    first_entered = asyncio.Event()
+    second_entered = asyncio.Event()
+
+    async def first_operation():
+        first_entered.set()
+        await second_entered.wait()
+        return "first"
+
+    async def second_operation():
+        second_entered.set()
+        await first_entered.wait()
+        return "second"
+
+    results = await asyncio.wait_for(
+        asyncio.gather(
+            executor._run_with_main_account_session_lock(
+                task_id="task-1",
+                platform="shopee",
+                main_account_id="main-a",
+                operation=first_operation,
+            ),
+            executor._run_with_main_account_session_lock(
+                task_id="task-2",
+                platform="shopee",
+                main_account_id="main-b",
+                operation=second_operation,
+            ),
+        ),
+        timeout=1,
+    )
+
+    assert results == ["first", "second"]

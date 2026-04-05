@@ -22,6 +22,11 @@ from urllib.parse import parse_qs, urlparse
 
 from modules.core.logger import get_logger
 from backend.services.verification_protocol import apply_verification_result_to_params, verification_input_mode
+from backend.services.main_account_session_coordinator import (
+    MainAccountSessionCoordinator,
+    get_main_account_session_coordinator,
+)
+from backend.services.platform_login_entry_service import get_platform_login_entry
 from modules.core.path_manager import get_data_raw_dir
 from modules.apps.collection_center.component_loader import ComponentLoader
 from modules.apps.collection_center.browser_config_helper import (
@@ -41,6 +46,13 @@ from backend.services.collection_contracts import (
 )
 
 logger = get_logger(__name__)
+
+MAIN_ACCOUNT_SESSION_STEP_MESSAGES = {
+    "waiting_for_main_account_session": "等待主账号会话",
+    "preparing_main_account_session": "准备主账号会话",
+    "switching_target_shop": "切换目标店铺",
+    "target_shop_ready": "目标店铺已就绪",
+}
 
 # 用于 SessionManager/DeviceFingerprintManager 同步 IO 的线程池(避免阻塞事件循环)
 _executor_pool: Optional[ThreadPoolExecutor] = None
@@ -88,11 +100,13 @@ def _resolve_session_scope(account_id: Any, account: Dict[str, Any]) -> Tuple[st
         session_owner_id = str(
             (account or {}).get("main_account_id")
             or (account or {}).get("parent_account")
-            or shop_account_id
             or ""
         ).strip()
         if not session_owner_id:
-            logger.warning("session owner id is missing or empty, disabling account session and fingerprint")
+            logger.warning(
+                "session owner id is missing or empty for shop account %s; disabling account session and fingerprint",
+                shop_account_id,
+            )
             return "", shop_account_id, False
         return session_owner_id, shop_account_id, True
     except Exception as e:
@@ -320,6 +334,12 @@ def _build_runtime_task_params(
     return params
 
 
+def _build_runtime_account(platform: str, account: Dict[str, Any]) -> Dict[str, Any]:
+    runtime_account = dict(account or {})
+    runtime_account["login_url"] = get_platform_login_entry(platform)
+    return runtime_account
+
+
 async def _get_fingerprint_context_options_async(
     platform: str, account_id: str, account: Optional[Dict[str, Any]] = None, proxy: Optional[Dict] = None
 ) -> Dict[str, Any]:
@@ -464,6 +484,7 @@ class CollectionExecutorV2:
         status_callback: Callable[..., Awaitable[None]] = None,
         is_cancelled_callback: Callable[[str], Awaitable[bool]] = None,
         verification_required_callback: Callable[[str, str, Optional[str]], Awaitable[Optional[str]]] = None,
+        main_account_session_coordinator: MainAccountSessionCoordinator = None,
     ):
         """
         初始化执行引擎
@@ -480,6 +501,9 @@ class CollectionExecutorV2:
         self.status_callback = status_callback
         self.is_cancelled_callback = is_cancelled_callback
         self.verification_required_callback = verification_required_callback
+        self.main_account_session_coordinator = (
+            main_account_session_coordinator or get_main_account_session_coordinator()
+        )
         
         # 任务上下文缓存(用于暂停/恢复)
         self._task_contexts: Dict[str, TaskContext] = {}
@@ -498,6 +522,207 @@ class CollectionExecutorV2:
         self.use_python_components = True  # 默认使用 Python 组件
         
         logger.info("CollectionExecutorV2 initialized (Python components mode)")
+
+    async def _run_with_main_account_session_lock(
+        self,
+        *,
+        task_id: str,
+        platform: str,
+        main_account_id: str,
+        operation: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        if (
+            self.main_account_session_coordinator.is_locked(platform, main_account_id)
+            or self.main_account_session_coordinator.waiter_count(platform, main_account_id) > 0
+        ):
+            await self._update_status(
+                task_id,
+                5,
+                MAIN_ACCOUNT_SESSION_STEP_MESSAGES["waiting_for_main_account_session"],
+            )
+
+        async with self.main_account_session_coordinator.acquire(platform, main_account_id):
+            await self._update_status(
+                task_id,
+                5,
+                MAIN_ACCOUNT_SESSION_STEP_MESSAGES["preparing_main_account_session"],
+            )
+            return await operation()
+
+    async def _execute_shared_login_phase(
+        self,
+        *,
+        task_id: str,
+        platform: str,
+        account: Dict[str, Any],
+        params: Dict[str, Any],
+        context: TaskContext,
+        browser: Any,
+        play_context: Any,
+        page: Any,
+        adapter: Optional[PythonComponentAdapter],
+        runtime_manifests: Optional[Dict[str, Any]],
+        session_platform: str,
+        session_account_id: str,
+        save_session_after_login: bool,
+        start_time: datetime,
+        total_domains_count: int,
+    ) -> Tuple[Any, Any, Optional[CollectionResult]]:
+        await self._update_status(task_id, 5, "姝ｅ湪鐧诲綍...")
+        await self._check_cancelled(task_id)
+        await self.popup_handler.close_popups(page, platform=platform)
+
+        login_success = False
+        while True:
+            try:
+                if runtime_manifests is not None:
+                    login_manifest = runtime_manifests.get("login")
+                    login_result = await self._run_runtime_manifest_component(
+                        page=page,
+                        manifest=login_manifest,
+                        account=account,
+                        config=params,
+                    )
+                    login_success = bool(getattr(login_result, "success", False))
+                else:
+                    login_success = await self._execute_python_component(
+                        page=page,
+                        adapter=adapter,
+                        component_type="login",
+                        params=params,
+                    )
+                break
+            except VerificationRequiredError as e:
+                if self._requires_headful_login_fallback(e.verification_type):
+                    fallback_result = await self._run_headful_login_fallback(
+                        task_id=task_id,
+                        platform=platform,
+                        account=account,
+                        params=params,
+                        browser=browser,
+                        old_context=play_context,
+                        session_platform=session_platform,
+                        session_account_id=session_account_id,
+                        runtime_manifests=runtime_manifests,
+                    )
+                    if len(fallback_result) == 4:
+                        login_success, play_context, page, fallback_outcome = fallback_result
+                    else:
+                        login_success, play_context, page = fallback_result
+                        fallback_outcome = "success" if login_success else "failed"
+                    if not login_success and fallback_outcome == "timeout":
+                        return play_context, page, self._build_verification_timeout_result(
+                            task_id=task_id,
+                            verification_type=e.verification_type,
+                            context=context,
+                            start_time=start_time,
+                            total_domains_count=total_domains_count,
+                        )
+                    break
+
+                value = await self._wait_verification_and_continue(
+                    task_id, e.verification_type, e.screenshot_path, page, params, adapter, is_login=True
+                )
+                if value is None:
+                    return play_context, page, self._build_verification_timeout_result(
+                        task_id=task_id,
+                        verification_type=e.verification_type,
+                        context=context,
+                        start_time=start_time,
+                        total_domains_count=total_domains_count,
+                    )
+                apply_verification_result_to_params(
+                    params,
+                    verification_type=e.verification_type,
+                    value=value,
+                )
+                continue
+
+        if not login_success:
+            raise StepExecutionError("鐧诲綍缁勪欢鎵ц澶辫触")
+
+        if params.get("shop_account_id"):
+            await self._update_status(
+                task_id,
+                12,
+                MAIN_ACCOUNT_SESSION_STEP_MESSAGES["switching_target_shop"],
+            )
+        await self._ensure_login_gate_ready(page, platform)
+        await self._update_status(
+            task_id,
+            15,
+            MAIN_ACCOUNT_SESSION_STEP_MESSAGES["target_shop_ready"],
+        )
+        logger.info(
+            "Task %s: [Python] Login completed successfully (reused_session=%s)",
+            task_id,
+            params.get("reused_session", False),
+        )
+        await _record_platform_shop_discovery_async(
+            platform=platform,
+            page=page,
+            params=params,
+            account=account,
+        )
+        if save_session_after_login and session_platform and session_account_id:
+            try:
+                storage_state = await page.context.storage_state()
+                ok = await _save_session_async(session_platform, session_account_id, storage_state)
+                if ok:
+                    logger.info(
+                        "Task %s: session saved for %s/%s",
+                        task_id,
+                        session_platform,
+                        session_account_id,
+                    )
+                else:
+                    logger.warning(
+                        "Task %s: session save returned False for %s/%s",
+                        task_id,
+                        session_platform,
+                        session_account_id,
+                    )
+            except Exception as e:
+                logger.warning("Task %s: save_session failed: %s", task_id, e)
+        context.current_component_index = 1
+        return play_context, page, None
+
+    @staticmethod
+    def _verification_timeout_status(verification_type: str | None) -> str:
+        return (
+            "manual_intervention_required"
+            if verification_input_mode(verification_type) == "manual_continue"
+            else "paused"
+        )
+
+    @staticmethod
+    def _verification_timeout_message(verification_type: str | None) -> str:
+        return (
+            "等待人工处理超时"
+            if verification_input_mode(verification_type) == "manual_continue"
+            else "验证码等待超时"
+        )
+
+    def _build_verification_timeout_result(
+        self,
+        *,
+        task_id: str,
+        verification_type: str | None,
+        context: TaskContext,
+        start_time: datetime,
+        total_domains_count: int,
+    ) -> CollectionResult:
+        return CollectionResult(
+            task_id=task_id,
+            status=self._verification_timeout_status(verification_type),
+            files_collected=len(context.collected_files),
+            collected_files=context.collected_files,
+            error_message=self._verification_timeout_message(verification_type),
+            duration_seconds=(datetime.now() - start_time).total_seconds(),
+            completed_domains=context.completed_domains,
+            failed_domains=context.failed_domains,
+            total_domains=total_domains_count,
+        )
 
     async def _ensure_login_gate_ready(self, page: Any, platform: str) -> None:
         from modules.utils.login_status_detector import LoginStatusDetector
@@ -834,6 +1059,17 @@ class CollectionExecutorV2:
 
         # 1.0 统一约定: 规范化 account_id, 决定是否使用按账号会话/指纹
         session_owner_id, shop_account_id, use_account_session_fingerprint = _resolve_session_scope(account_id, account)
+        if not use_account_session_fingerprint or not session_owner_id:
+            unresolved_shop_account_id = str(
+                shop_account_id
+                or account_id
+                or (account or {}).get("shop_account_id")
+                or (account or {}).get("account_id")
+                or ""
+            ).strip() or "unknown"
+            raise ValueError(
+                f"Missing main_account_id for collection execution: shop_account_id={unresolved_shop_account_id}"
+            )
 
         normalized_sub_domains = normalize_domain_subtypes(
             data_domains=data_domains,
@@ -841,6 +1077,7 @@ class CollectionExecutorV2:
         )
         normalized_date_range = normalize_collection_date_range(date_range)
         total_domains_count = count_collection_targets(data_domains, normalized_sub_domains)
+        runtime_account = _build_runtime_account(platform, account)
 
         logger.info(f"Task {task_id}: Starting collection for {total_domains_count} domains (debug_mode={debug_mode}, use_account_session_fingerprint={use_account_session_fingerprint})")
 
@@ -862,6 +1099,7 @@ class CollectionExecutorV2:
 
         task_download_dir = self.downloads_dir / task_id
         task_download_dir.mkdir(parents=True, exist_ok=True)
+        runtime_account = _build_runtime_account(platform, account)
 
         step_popup_handler = StepPopupHandler(self.popup_handler, platform)
 
@@ -873,7 +1111,7 @@ class CollectionExecutorV2:
                 session_data = await _load_or_bootstrap_session_async(
                     platform,
                     session_owner_id,
-                    account,
+                    runtime_account,
                 )
                 if session_data and isinstance(session_data.get("storage_state"), dict):
                     storage_state = session_data["storage_state"]
@@ -905,7 +1143,7 @@ class CollectionExecutorV2:
 
         params = _build_runtime_task_params(
             task_id=task_id,
-            account=account,
+            account=runtime_account,
             platform=platform,
             granularity=granularity,
             normalized_date_range=normalized_date_range,
@@ -933,6 +1171,35 @@ class CollectionExecutorV2:
         play_context = await browser_instance.new_context(**context_options)
         page = await play_context.new_page()
         params["reused_session"] = reused_session
+        if context.current_component_index == 0 and not params.get("_main_account_shared_state_prepared"):
+            async def _coordinated_login():
+                return await self._execute_shared_login_phase(
+                    task_id=task_id,
+                    platform=platform,
+                    account=runtime_account,
+                    params=params,
+                    context=context,
+                    browser=browser,
+                    play_context=play_context,
+                    page=page,
+                    adapter=adapter,
+                    runtime_manifests=runtime_manifests,
+                    session_platform=session_platform,
+                    session_account_id=session_account_id,
+                    save_session_after_login=use_account_session_fingerprint and bool(session_owner_id),
+                    start_time=start_time,
+                    total_domains_count=total_domains_count,
+                )
+
+            play_context, page, login_result = await self._run_with_main_account_session_lock(
+                task_id=task_id,
+                platform=platform,
+                main_account_id=session_owner_id,
+                operation=_coordinated_login,
+            )
+            params["_main_account_shared_state_prepared"] = True
+            if isinstance(login_result, CollectionResult):
+                return login_result
 
         if page_context_to_close is not None:
             try:
@@ -945,7 +1212,7 @@ class CollectionExecutorV2:
                 return await self._execute_with_python_components(
                     task_id=task_id,
                     platform=platform,
-                    account=account,
+                    account=runtime_account,
                     params=params,
                     context=context,
                     browser=browser_instance,
@@ -1439,12 +1706,12 @@ class CollectionExecutorV2:
     def _requires_headful_login_fallback(verification_type: str | None) -> bool:
         return verification_input_mode(verification_type) == "manual_continue"
 
-    async def _prime_runtime_page_for_login_gate(self, page: Any, account: Dict[str, Any]) -> None:
+    async def _prime_runtime_page_for_login_gate(self, page: Any, platform: str, account: Dict[str, Any]) -> None:
         current_url = str(getattr(page, "url", "") or "").strip().lower()
         if current_url and current_url != "about:blank":
             return
 
-        login_url = str(account.get("login_url") or "").strip()
+        login_url = get_platform_login_entry(platform)
         if not login_url:
             return
 
@@ -1494,7 +1761,7 @@ class CollectionExecutorV2:
 
         new_context = await browser.new_context(**context_options)
         new_page = await new_context.new_page()
-        await self._prime_runtime_page_for_login_gate(new_page, account)
+        await self._prime_runtime_page_for_login_gate(new_page, platform, account)
         return new_context, new_page
 
     async def _run_headful_login_fallback(
@@ -1557,7 +1824,7 @@ class CollectionExecutorV2:
                                     params=params,
                                 )
                             if not login_success:
-                                return False, old_context, None
+                                return False, old_context, None, "failed"
                             break
                         except VerificationRequiredError as e:
                             value = await self._wait_verification_and_continue(
@@ -1570,7 +1837,7 @@ class CollectionExecutorV2:
                                 is_login=True,
                             )
                             if value is None:
-                                return False, old_context, None
+                                return False, old_context, None, "timeout"
                             apply_verification_result_to_params(
                                 params,
                                 verification_type=e.verification_type,
@@ -1597,7 +1864,7 @@ class CollectionExecutorV2:
             account=account,
             account_id=account_id,
         )
-        return True, new_context, new_page
+        return True, new_context, new_page, "success"
 
     async def _execute_with_python_components(
         self,
@@ -1636,7 +1903,7 @@ class CollectionExecutorV2:
             )
 
         # 1. 执行登录组件( params 中已含 reused_session 标记)；支持验证码暂停→回传→同一 page 继续
-        if context.current_component_index == 0:
+        if context.current_component_index == 0 and not params.get("_main_account_shared_state_prepared"):
             await self._update_status(task_id, 5, "正在登录...")
             await self._check_cancelled(task_id)
             await self.popup_handler.close_popups(page, platform=platform)
@@ -1663,7 +1930,7 @@ class CollectionExecutorV2:
                     break
                 except VerificationRequiredError as e:
                     if self._requires_headful_login_fallback(e.verification_type):
-                        login_success, play_context, page = await self._run_headful_login_fallback(
+                        fallback_result = await self._run_headful_login_fallback(
                             task_id=task_id,
                             platform=platform,
                             account=account,
@@ -1674,10 +1941,31 @@ class CollectionExecutorV2:
                             session_account_id=session_account_id,
                             runtime_manifests=runtime_manifests,
                         )
+                        if len(fallback_result) == 4:
+                            login_success, play_context, page, fallback_outcome = fallback_result
+                        else:
+                            login_success, play_context, page = fallback_result
+                            fallback_outcome = "success" if login_success else "failed"
+                        if not login_success and fallback_outcome == "timeout":
+                            return self._build_verification_timeout_result(
+                                task_id=task_id,
+                                verification_type=e.verification_type,
+                                context=context,
+                                start_time=start_time,
+                                total_domains_count=total_domains_count,
+                            )
                         break
                     value = await self._wait_verification_and_continue(
                         task_id, e.verification_type, e.screenshot_path, page, params, adapter, is_login=True
                     )
+                    if value is None:
+                        return self._build_verification_timeout_result(
+                            task_id=task_id,
+                            verification_type=e.verification_type,
+                            context=context,
+                            start_time=start_time,
+                            total_domains_count=total_domains_count,
+                        )
                     if value is None:
                         raise StepExecutionError("验证码等待超时")
                     apply_verification_result_to_params(
@@ -1697,8 +1985,8 @@ class CollectionExecutorV2:
                 platform=platform,
                 page=page,
                 params=params,
-                account=account,
-            )
+                account=runtime_account,
+                )
             if save_session_after_login and session_platform and session_account_id:
                 try:
                     storage_state = await page.context.storage_state()
@@ -1796,6 +2084,20 @@ class CollectionExecutorV2:
                     value = await self._wait_verification_and_continue(
                         task_id, e.verification_type, e.screenshot_path, page, export_params, adapter, is_login=False, domain_info=full_domain
                     )
+                    if value is None:
+                        context.failed_domains.append(
+                            {
+                                "domain": full_domain,
+                                "error": self._verification_timeout_message(e.verification_type),
+                            }
+                        )
+                        return self._build_verification_timeout_result(
+                            task_id=task_id,
+                            verification_type=e.verification_type,
+                            context=context,
+                            start_time=start_time,
+                            total_domains_count=total_domains_count,
+                        )
                     if value is None:
                         context.failed_domains.append({"domain": full_domain, "error": "验证码等待超时"})
                         return CollectionResult(
@@ -3477,6 +3779,17 @@ class CollectionExecutorV2:
         """
         start_time = datetime.now()
         session_owner_id, shop_account_id, use_account_session_fingerprint = _resolve_session_scope(account_id, account)
+        if not use_account_session_fingerprint or not session_owner_id:
+            unresolved_shop_account_id = str(
+                shop_account_id
+                or account_id
+                or (account or {}).get("shop_account_id")
+                or (account or {}).get("account_id")
+                or ""
+            ).strip() or "unknown"
+            raise ValueError(
+                f"Missing main_account_id for collection execution: shop_account_id={unresolved_shop_account_id}"
+            )
         normalized_date_range = normalize_collection_date_range(date_range)
         logger.info(f"Task {task_id}: Starting PARALLEL collection for {len(data_domains)} domains (max_parallel={max_parallel}, use_account_session_fingerprint={use_account_session_fingerprint})")
 
@@ -3525,6 +3838,17 @@ class CollectionExecutorV2:
         if storage_state:
             login_context_options["storage_state"] = storage_state
 
+        coordinator_cm = None
+        if (
+            self.main_account_session_coordinator.is_locked(platform, session_owner_id)
+            or self.main_account_session_coordinator.waiter_count(platform, session_owner_id) > 0
+        ):
+            await self._update_status(
+                task_id,
+                5,
+                MAIN_ACCOUNT_SESSION_STEP_MESSAGES["waiting_for_main_account_session"],
+            )
+
         await self._update_status(task_id, 5, "正在登录...")
         login_start_time = datetime.now()
         await self._update_status(
@@ -3536,7 +3860,7 @@ class CollectionExecutorV2:
 
         params = _build_runtime_task_params(
             task_id=task_id,
-            account=account,
+            account=runtime_account,
             platform=platform,
             granularity=granularity,
             normalized_date_range=normalized_date_range,
@@ -3547,7 +3871,17 @@ class CollectionExecutorV2:
         params["main_account_id"] = session_owner_id
         if shop_account_id:
             params["shop_account_id"] = shop_account_id
+        adapter = None
+        if runtime_manifests is None:
+            adapter = create_adapter(platform=platform, account=runtime_account, config=params)
         try:
+            coordinator_cm = self.main_account_session_coordinator.acquire(platform, session_owner_id)
+            await coordinator_cm.__aenter__()
+            await self._update_status(
+                task_id,
+                5,
+                MAIN_ACCOUNT_SESSION_STEP_MESSAGES["preparing_main_account_session"],
+            )
             step_popup_handler = StepPopupHandler(self.popup_handler, platform)
             if runtime_manifests is not None:
                 login_manifest = runtime_manifests.get("login")
@@ -3573,7 +3907,18 @@ class CollectionExecutorV2:
             )
             if not login_success:
                 raise StepExecutionError("登录组件执行失败")
+            if params.get("shop_account_id"):
+                await self._update_status(
+                    task_id,
+                    12,
+                    MAIN_ACCOUNT_SESSION_STEP_MESSAGES["switching_target_shop"],
+                )
             await self._ensure_login_gate_ready(login_page, platform)
+            await self._update_status(
+                task_id,
+                15,
+                MAIN_ACCOUNT_SESSION_STEP_MESSAGES["target_shop_ready"],
+            )
             await _record_platform_shop_discovery_async(
                 platform=platform,
                 page=login_page,
@@ -3598,6 +3943,8 @@ class CollectionExecutorV2:
             )
             raise
         finally:
+            if coordinator_cm is not None:
+                await coordinator_cm.__aexit__(None, None, None)
             await login_page.close()
             await login_context.close()
         

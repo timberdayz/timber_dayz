@@ -16,7 +16,7 @@ def test_resolve_session_scope_prefers_main_account_id_for_session_owner():
     assert reuse_enabled is True
 
 
-def test_resolve_session_scope_falls_back_to_shop_account_id_when_main_account_missing():
+def test_resolve_session_scope_disables_reuse_when_main_account_missing():
     session_owner_id, shop_account_id, reuse_enabled = _resolve_session_scope(
         "miaoshou_real_001",
         {
@@ -24,6 +24,6 @@ def test_resolve_session_scope_falls_back_to_shop_account_id_when_main_account_m
         },
     )
 
-    assert session_owner_id == "miaoshou_real_001"
+    assert session_owner_id == ""
     assert shop_account_id == "miaoshou_real_001"
-    assert reuse_enabled is True
+    assert reuse_enabled is False

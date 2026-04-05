@@ -7,6 +7,7 @@ import tempfile
 from typing import Any
 
 from modules.apps.collection_center.executor_v2 import VerificationRequiredError
+from backend.services.platform_login_entry_service import get_platform_login_entry
 from modules.components.base import ExecutionContext
 from modules.components.login.base import LoginComponent, LoginResult
 
@@ -470,9 +471,7 @@ class ShopeeLogin(LoginComponent):
                     message="manual verification did not reach otp or homepage",
                 )
 
-            login_url = str(account.get("login_url") or "").strip()
-            if not login_url:
-                return LoginResult(success=False, message="login_url is required in account")
+            login_url = str(account.get("login_url") or get_platform_login_entry(self.platform)).strip()
 
             username = str(account.get("username") or "").strip()
             password = str(account.get("password") or "").strip()
@@ -482,7 +481,7 @@ class ShopeeLogin(LoginComponent):
             await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(800)
 
-            if self._homepage_looks_ready(str(getattr(page, "url", "") or "")):
+            if self._login_looks_successful(str(getattr(page, "url", "") or "")):
                 await self._cleanup_after_login(page)
                 return LoginResult(success=True, message="ok")
 

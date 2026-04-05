@@ -20,19 +20,20 @@ WAREHOUSE_CHECKLIST_PATH: Final[str] = "/warehouse/checklist"
 # Buttons on the warehouse page (best-effort, resilient to wording variants)
 OPEN_EXPORT_MENU_SELECTORS: Final[List[str]] = [
     # Primary exact text on Miaoshou toolbar
-    "button:has-text(导入/导出商品)",
-    "[role='button']:has-text(导入/导出商品)",
+    'button:has-text("导入/导出商品")',
+    '[role="button"]:has-text("导入/导出商品")',
     # Miaoshou jx-button variants (plain style within operate-side dropdown)
-    ".operate-side .jx-dropdown button.jx-button.is-plain:has-text(导入/导出商品)",
-    "button.jx-button.is-plain:has-text(导入/导出商品)",
-    "button.jx-button:has-text(导入/导出商品)",
-    ".pro-button:has-text(导入/导出商品)",
-    "[aria-haspopup='menu']:has-text(导入/导出商品)",
+    '.operate-side .jx-dropdown button.jx-button.is-plain:has-text("导入/导出商品")',
+    'button.jx-button.is-plain:has-text("导入/导出商品")',
+    'button.jx-button:has-text("导入/导出商品")',
+    '.pro-button:has-text("导入/导出商品")',
+    '[aria-haspopup="menu"]:has-text("导入/导出商品")',
     # Fallbacks
-    "button:has-text(导出)",
+    'button:has-text("导出")',
 ]
 MENU_EXPORT_SEARCHED_SELECTORS: Final[List[str]] = [
-    "[role='menuitem']:has-text(导出搜索的商品)",
+    ".J_warehouseChecklistExportSearch",
+    '[role="menuitem"]:has-text("导出搜索的商品")',
     "text=导出搜索的商品",
 ]
 
@@ -91,12 +92,13 @@ PROGRESS_TEXTS: Final[List[str]] = [
     "生成中",
     "处理中",
     "排队中",
+    "导出成功",
     "Generating",
     "Processing",
 ]
 
 # Data directory name used by Exporter for output layout
-DATA_TYPE_DIR: Final[str] = "warehouse"
+DATA_TYPE_DIR: Final[str] = "inventory"
 
 
 @dataclass(frozen=True)
@@ -114,4 +116,3 @@ class WarehouseSelectors:
     close_poll_interval_ms: int = CLOSE_POLL_INTERVAL_MS
     progress_texts: List[str] = tuple(PROGRESS_TEXTS)  # type: ignore[assignment]
     data_type_dir: str = DATA_TYPE_DIR
-

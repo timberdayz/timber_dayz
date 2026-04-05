@@ -108,7 +108,11 @@ class TiktokShopSwitch:
         display_name = await self._current_shop_display_name(page, current_region)
         region = current_region or target_region
 
-        if not self._display_matches_region(display_name, region):
+        # TikTok products pages can spend a short period in a skeleton state
+        # after region navigation. In that state the URL is already authoritative
+        # but the header shop chip may not have rendered yet, so only reject when
+        # a visible chip is present and it contradicts the resolved region.
+        if display_name and not self._display_matches_region(display_name, region):
             return ShopSelectResult(success=False, message="failed to confirm target shop region")
 
         config = self.ctx.config or {}

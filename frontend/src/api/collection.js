@@ -133,6 +133,21 @@ export const getTasks = async (params = {}) => {
   return response || []
 }
 
+export const getGroupedAccounts = async (params = {}) => {
+  const response = await api.get('/collection/accounts/grouped', { params })
+  return response || []
+}
+
+export const getConfigCoverage = async (params = {}) => {
+  const response = await api.get('/collection/config-coverage', { params })
+  return response || { summary: {}, items: [] }
+}
+
+export const batchRemediateConfigs = async (payload) => {
+  const response = await api.post('/collection/configs/batch-remediate', payload)
+  return response
+}
+
 /**
  * 获取待回填验证码项
  * @param {Object} params - 查询参数
@@ -412,6 +427,9 @@ export default {
   // 账号管理
   getAccounts,
   getAccountsByPlatform,
+  getGroupedAccounts,
+  getConfigCoverage,
+  batchRemediateConfigs,
   
   // 任务管理
   createTask,

@@ -15,10 +15,24 @@ from backend.schemas.shop_discovery import (
     ShopDiscoveryPayload,
     ShopDiscoveryRunResponse,
 )
-from modules.core.db import PlatformShopDiscovery, ShopAccount, ShopAccountAlias
+from modules.core.db import PlatformShopDiscovery, ShopAccount, ShopAccountAlias, ShopAccountCapability
 
 
 class PlatformShopDiscoveryService:
+    @staticmethod
+    def _default_capabilities_for(shop_type: str | None) -> dict[str, bool]:
+        defaults = {
+            "orders": True,
+            "products": True,
+            "services": True,
+            "analytics": True,
+            "finance": True,
+            "inventory": True,
+        }
+        if shop_type == "global":
+            defaults["services"] = False
+        return defaults
+
     @staticmethod
     def _normalize_alias(value: str | None) -> str:
         return " ".join(str(value or "").strip().lower().split())
@@ -273,6 +287,16 @@ class PlatformShopDiscoveryService:
             updated_by="system",
         )
         db.add(shop_account)
+        await db.flush()
+
+        for domain, enabled in self._default_capabilities_for(payload.shop_type).items():
+            db.add(
+                ShopAccountCapability(
+                    shop_account_id=shop_account.id,
+                    data_domain=domain,
+                    enabled=enabled,
+                )
+            )
 
         discovery.candidate_shop_account_ids = [payload.shop_account_id]
         discovery.status = "created_shop_account"

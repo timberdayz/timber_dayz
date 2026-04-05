@@ -224,8 +224,36 @@ def ensure_postgresql_dashboard_assets(project_root):
     return True
 
 
+def warn_legacy_shop_session_artifacts(project_root):
+    """启动期告警：提醒当前磁盘上仍有店铺级会话残留。"""
+    try:
+        from backend.utils.config import get_settings
+        from modules.utils.sessions.legacy_shop_artifact_cleanup import (
+            collect_legacy_shop_artifacts_for_active_shops,
+        )
+
+        artifacts = collect_legacy_shop_artifacts_for_active_shops(
+            Path(project_root),
+            get_settings().DATABASE_URL,
+        )
+    except Exception as e:
+        safe_print(f"  [WARNING] 遗留店铺会话残留检查失败: {e}")
+        return True
+
+    if not artifacts:
+        return True
+
+    safe_print("  [WARNING] 检测到店铺级会话历史残留，当前运行不会使用它们，但建议及时清理:")
+    for artifact in artifacts[:10]:
+        safe_print(f"    {artifact}")
+    if len(artifacts) > 10:
+        safe_print(f"    ... 其余 {len(artifacts) - 10} 个路径已省略")
+    safe_print("  提示: 可执行 `python tools/cleanup_legacy_shop_session_artifacts.py --delete` 清理")
+    return True
+
+
 def _is_port_in_use(port, host="127.0.0.1"):
-    """妫€鏌ユ湰鍦扮鍙ｆ槸鍚﹀凡琚崰鐢ㄣ€?"""
+    """检查本地端口是否已被占用。"""
     import socket
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -236,16 +264,16 @@ def _is_port_in_use(port, host="127.0.0.1"):
 
 
 def _require_local_port_available(port, service_name):
-    """鍚姩鏈湴鏈嶅姟鍓嶇‘淇濈鍙ｅ彲鐢紝閬垮厤鎶婂叾浠栨湇鍔¤鍒や负褰撳墠椤圭洰銆?"""
+    """启动本地服务前确认端口可用，避免误把其他服务当成本项目。"""
     if _is_port_in_use(port):
-        safe_print(f"  [ERROR] {service_name} 鎵€闇€绔彛 {port} 宸茶鍗犵敤")
+        safe_print(f"  [ERROR] {service_name} 所需端口 {port} 已被占用")
         safe_print(f"  鎻愮ず: 璇峰厛閲婃斁 localhost:{port}锛屽啀閲嶈瘯 python run.py --local")
         return False
     return True
 
 
 def _docker_container_health(container_name):
-    """杩斿洖 Docker 瀹瑰櫒鍋ュ悍鐘舵€侊紙healthy/running/unhealthy/...锛夈€?"""
+    """返回 Docker 容器健康状态（healthy/running/unhealthy/...）。"""
     try:
         result = subprocess.run(
             [
@@ -269,23 +297,23 @@ def _docker_container_health(container_name):
 
 
 def _wait_for_local_docker_infra(container_names, max_wait=60):
-    """绛夊緟鏈湴妯″紡鐨?Docker 渚濊禆瀹瑰櫒杩涘叆鍋ュ悍鐘舵€併€?"""
-    safe_print("  [绛夊緟] Docker 鍩虹鏈嶅姟鍋ュ悍妫€鏌?..")
+    """等待本地模式所需的 Docker 依赖容器进入健康状态。"""
+    safe_print("  [等待] Docker 基础服务健康检查...")
     for second in range(max_wait):
         statuses = {name: _docker_container_health(name) for name in container_names}
         if all(status in ("healthy", "running") for status in statuses.values()):
             status_text = ", ".join(f"{name}={status}" for name, status in statuses.items())
-            safe_print(f"  [OK] Docker 鍩虹鏈嶅姟宸插氨缁? {status_text}")
+            safe_print(f"  [OK] Docker 基础服务已就绪: {status_text}")
             return True
         if (second + 1) % 5 == 0:
             status_text = ", ".join(f"{name}={status}" for name, status in statuses.items())
-            safe_print(f"  绛夊緟涓?.. {second + 1}/{max_wait}绉? ({status_text})")
+            safe_print(f"  等待中... {second + 1}/{max_wait}秒 ({status_text})")
         time.sleep(1)
 
     status_text = ", ".join(
         f"{name}={_docker_container_health(name)}" for name in container_names
     )
-    safe_print(f"  [ERROR] Docker 鍩虹鏈嶅姟绛夊緟瓒呮椂: {status_text}")
+    safe_print(f"  [ERROR] Docker 基础服务等待超时: {status_text}")
     return False
 
 
@@ -910,7 +938,7 @@ def start_backend():
     safe_print(f"  文档: http://localhost:{ACTIVE_BACKEND_PORT}/api/docs")
 
     project_root = Path(__file__).parent
-    if not _require_local_port_available(BACKEND_PORT, "后端服务"):
+    if not _require_local_port_available(ACTIVE_BACKEND_PORT, "后端服务"):
         return None
 
     if sys_platform.system() == "Windows":
@@ -1195,6 +1223,7 @@ def main():
 
     print_banner()
     project_root = Path(__file__).resolve().parent
+    warn_legacy_shop_session_artifacts(project_root)
 
     if args.local and not args.use_docker and not args.frontend_only:
         safe_print("\n[模式] 一键本地开发（Docker Postgres/Redis/Celery + 本机后端/前端）")

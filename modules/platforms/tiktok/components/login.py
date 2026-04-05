@@ -6,6 +6,7 @@ import tempfile
 from typing import Any
 
 from modules.apps.collection_center.executor_v2 import VerificationRequiredError
+from backend.services.platform_login_entry_service import get_platform_login_entry
 from modules.components.base import ExecutionContext
 from modules.components.login.base import LoginComponent, LoginResult
 from modules.platforms.tiktok.archive.analytics_config import AnalyticsSelectors
@@ -537,9 +538,7 @@ class TiktokLogin(LoginComponent):
                     message="manual verification did not reach otp or homepage",
                 )
 
-            login_url = str(acc.get("login_url") or "").strip()
-            if not login_url:
-                return LoginResult(success=False, message="login_url is required in account")
+            login_url = str(acc.get("login_url") or get_platform_login_entry(self.platform)).strip()
 
             password = str(acc.get("password") or "").strip()
             if not password:
