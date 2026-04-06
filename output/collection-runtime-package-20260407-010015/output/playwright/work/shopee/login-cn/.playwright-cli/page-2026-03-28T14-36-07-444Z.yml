@@ -1,0 +1,485 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - link [ref=e5] [cursor=pointer]:
+      - /url: /
+      - img [ref=e6]
+    - link "中国卖家中心" [ref=e10] [cursor=pointer]:
+      - /url: /
+    - generic [ref=e12]:
+      - button "全托管服务" [ref=e16] [cursor=pointer]:
+        - img [ref=e18]
+        - generic [ref=e20]: 全托管服务
+      - button [ref=e25] [cursor=pointer]:
+        - img [ref=e27]
+      - generic [ref=e33] [cursor=pointer]:
+        - generic [ref=e34]:
+          - generic [ref=e35]: chenewei666:main
+          - generic [ref=e36]:
+            - img [ref=e38]
+            - text: 莆田市景颂进出口贸易有限公司
+        - img [ref=e43]
+  - generic [ref=e45]:
+    - list [ref=e48]:
+      - listitem [ref=e49]:
+        - generic [ref=e50] [cursor=pointer]:
+          - generic [ref=e51]: 订单
+          - img [ref=e53]
+        - list [ref=e55]:
+          - listitem [ref=e56]:
+            - link "我的订单" [ref=e58] [cursor=pointer]:
+              - /url: /portal/sale/order
+              - generic [ref=e60]: 我的订单
+          - listitem [ref=e61]:
+            - link "批量出货" [ref=e63] [cursor=pointer]:
+              - /url: /portal/sale/mass/ship
+              - generic [ref=e65]: 批量出货
+          - listitem [ref=e66]:
+            - link "退货/退款/取消" [ref=e68] [cursor=pointer]:
+              - /url: /portal/sale/returnrefundcancel
+              - generic [ref=e70]: 退货/退款/取消
+          - listitem [ref=e71]:
+            - link "物流设置" [ref=e73] [cursor=pointer]:
+              - /url: /portal/all-settings/shipping/shipping-channel
+              - generic [ref=e75]: 物流设置
+          - listitem [ref=e76]:
+            - link "物流+：海外免退服务" [ref=e78] [cursor=pointer]:
+              - /url: /portal/overseas-return-service
+              - generic [ref=e80]: 物流+：海外免退服务
+      - listitem [ref=e81]:
+        - generic [ref=e82] [cursor=pointer]:
+          - generic [ref=e83]: 商品
+          - img [ref=e85]
+        - list [ref=e87]:
+          - listitem [ref=e88]:
+            - link "全球商品" [ref=e90] [cursor=pointer]:
+              - /url: /portal/product/mtsku/list
+              - generic [ref=e92]: 全球商品
+          - listitem [ref=e93]:
+            - link "店铺商品" [ref=e95] [cursor=pointer]:
+              - /url: /portal/product/list
+              - generic [ref=e97]: 店铺商品
+          - listitem [ref=e98]:
+            - link "添加商品" [ref=e100] [cursor=pointer]:
+              - /url: /portal/product/mtsku/category
+              - generic [ref=e102]: 添加商品
+          - listitem [ref=e103]:
+            - link "商品设置" [ref=e105] [cursor=pointer]:
+              - /url: /portal/brand/entry
+              - generic [ref=e107]: 商品设置
+      - listitem [ref=e108]:
+        - generic [ref=e109] [cursor=pointer]:
+          - generic [ref=e110]: 官方仓
+          - img [ref=e112]
+        - list [ref=e114]:
+          - listitem [ref=e115]:
+            - link "官方仓服务" [ref=e117] [cursor=pointer]:
+              - /url: /portal/fbs/home
+              - generic [ref=e119]: 官方仓服务
+      - listitem [ref=e120]:
+        - generic [ref=e121] [cursor=pointer]:
+          - generic [ref=e122]: 营销中心
+          - img [ref=e124]
+        - list [ref=e126]:
+          - listitem [ref=e127]:
+            - link "营销中心" [ref=e129] [cursor=pointer]:
+              - /url: /portal/marketing
+              - generic [ref=e131]: 营销中心
+          - listitem [ref=e132]:
+            - link "Shopee广告" [ref=e134] [cursor=pointer]:
+              - /url: /portal/marketing/pas/index
+              - generic [ref=e136]: Shopee广告
+          - listitem [ref=e137]:
+            - link "折扣活动" [ref=e139] [cursor=pointer]:
+              - /url: /portal/marketing/list/discount
+              - generic [ref=e141]: 折扣活动
+          - listitem [ref=e142]:
+            - link "店内秒杀" [ref=e144] [cursor=pointer]:
+              - /url: /portal/marketing/shop-flash-sale/list
+              - generic [ref=e146]: 店内秒杀
+          - listitem [ref=e147]:
+            - link "优惠券" [ref=e149] [cursor=pointer]:
+              - /url: /portal/marketing/vouchers/list
+              - generic [ref=e151]: 优惠券
+          - listitem [ref=e152]:
+            - link "跨境活动报名" [ref=e154] [cursor=pointer]:
+              - /url: /portal/marketing/cmt-cb/list
+              - generic [ref=e156]: 跨境活动报名
+          - listitem [ref=e157]:
+            - link "联盟营销" [ref=e159] [cursor=pointer]:
+              - /url: /portal/web-seller-affiliate/dashboard
+              - generic [ref=e161]: 联盟营销
+          - listitem [ref=e162]:
+            - link "直播和短视频看板" [ref=e164] [cursor=pointer]:
+              - /url: /creator-center
+              - generic [ref=e166]: 直播和短视频看板
+          - listitem [ref=e167]:
+            - link "全球商品折扣" [ref=e169] [cursor=pointer]:
+              - /url: /portal/marketing/global-discount/list
+              - generic [ref=e171]: 全球商品折扣
+      - listitem [ref=e172]:
+        - generic [ref=e173] [cursor=pointer]:
+          - generic [ref=e174]: 客户服务
+          - img [ref=e176]
+        - list [ref=e178]:
+          - listitem [ref=e179]:
+            - link "聊聊管理" [ref=e181] [cursor=pointer]:
+              - /url: /portal/chat-management
+              - generic [ref=e183]: 聊聊管理
+          - listitem [ref=e184]:
+            - link "AI智能客服" [ref=e186] [cursor=pointer]:
+              - /url: /shop-ai-assistant/home-page
+              - generic [ref=e188]: AI智能客服
+          - listitem [ref=e189]:
+            - link "聊聊广播" [ref=e191] [cursor=pointer]:
+              - /url: /portal/crm/broadcast
+              - generic [ref=e193]: 聊聊广播
+          - listitem [ref=e194]:
+            - link "评论管理" [ref=e196] [cursor=pointer]:
+              - /url: /portal/settings/shop/rating
+              - generic [ref=e198]: 评论管理
+      - listitem [ref=e199]:
+        - generic [ref=e200] [cursor=pointer]:
+          - generic [ref=e201]: 财务
+          - img [ref=e203]
+        - list [ref=e205]:
+          - listitem [ref=e206]:
+            - link "我的收入" [ref=e208] [cursor=pointer]:
+              - /url: /portal/finance/income
+              - generic [ref=e210]: 我的收入
+          - listitem [ref=e211]:
+            - link "Shopee官方钱包" [ref=e213] [cursor=pointer]:
+              - /url: /portal/finance/cncb-wallet
+              - generic [ref=e215]: Shopee官方钱包
+          - listitem [ref=e216]:
+            - link "收款账户" [ref=e218] [cursor=pointer]:
+              - /url: /portal/finance/wallet/cards
+              - generic [ref=e220]: 收款账户
+          - listitem [ref=e221]:
+            - link "卖家保证金" [ref=e223] [cursor=pointer]:
+              - /url: /portal/deposit-management
+              - generic [ref=e225]: 卖家保证金
+      - listitem [ref=e226]:
+        - generic [ref=e227] [cursor=pointer]:
+          - generic [ref=e228]: 数据
+          - img [ref=e230]
+        - list [ref=e232]:
+          - listitem [ref=e233]:
+            - link "商业分析" [ref=e235] [cursor=pointer]:
+              - /url: /datacenter/
+              - generic [ref=e237]: 商业分析
+          - listitem [ref=e238]:
+            - link "账户健康状态" [ref=e240] [cursor=pointer]:
+              - /url: /portal/accounthealth/home
+              - generic [ref=e242]: 账户健康状态
+      - listitem [ref=e243]:
+        - generic [ref=e244] [cursor=pointer]:
+          - generic [ref=e245]: 成长
+          - img [ref=e247]
+        - list [ref=e249]:
+          - listitem [ref=e250]:
+            - link "卖家任务" [ref=e252] [cursor=pointer]:
+              - /url: /portal/seller-mission
+              - generic [ref=e254]: 卖家任务
+          - listitem [ref=e255]:
+            - link "卖家活动" [ref=e257] [cursor=pointer]:
+              - /url: /portal/seller-programmes
+              - generic [ref=e259]: 卖家活动
+      - listitem [ref=e260]:
+        - generic [ref=e261] [cursor=pointer]:
+          - generic [ref=e262]: 店铺
+          - img [ref=e264]
+        - list [ref=e266]:
+          - listitem [ref=e267]:
+            - link "店铺介绍" [ref=e269] [cursor=pointer]:
+              - /url: /portal/settings/shop/profile
+              - generic [ref=e271]: 店铺介绍
+          - listitem [ref=e272]:
+            - link "店铺装修" [ref=e274] [cursor=pointer]:
+              - /url: /portal/decoration
+              - generic [ref=e276]: 店铺装修
+      - listitem [ref=e277]:
+        - generic [ref=e278] [cursor=pointer]:
+          - generic [ref=e279]: 设置
+          - img [ref=e281]
+        - list [ref=e283]:
+          - listitem [ref=e284]:
+            - link "商家设置" [ref=e286] [cursor=pointer]:
+              - /url: /portal/merchant/setting
+              - generic [ref=e288]: 商家设置
+          - listitem [ref=e289]:
+            - link "店铺设定" [ref=e291] [cursor=pointer]:
+              - /url: /portal/all-settings/
+              - generic [ref=e293]: 店铺设定
+          - listitem [ref=e294]:
+            - link "子母账号管理" [ref=e296] [cursor=pointer]:
+              - /url: /portal/settings/subaccount
+              - generic [ref=e298]: 子母账号管理
+    - generic [ref=e301]:
+      - generic [ref=e304]:
+        - img [ref=e307]
+        - generic [ref=e311]:
+          - text: 此商家有正在等待授权的商店，请授权。
+          - link "点击此处" [ref=e312] [cursor=pointer]:
+            - /url: https://subaccount.shopee.com/merchant-shop?subaccount_sso=g5qjISJVGqXuztZ9ytehzKA%2FZYoWzPqDibsuWdhveyEEb%2BzJkFA9pT8PQk1xD5or
+      - generic [ref=e313]:
+        - generic [ref=e314]:
+          - generic [ref=e316]:
+            - generic [ref=e318]:
+              - link [ref=e319] [cursor=pointer]:
+                - /url: https://shopee.cn/edu/blog/1147
+                - img [ref=e320]
+              - link [ref=e321] [cursor=pointer]:
+                - /url: https://wesurvey.com/s2/12232/4b97/
+                - img [ref=e322]
+              - link [ref=e323] [cursor=pointer]:
+                - /url: https://mp.weixin.qq.com/s/-BrNdV7E15a9uLByW6Igww
+                - img [ref=e324]
+              - link [ref=e325] [cursor=pointer]:
+                - /url: https://shopee.cn/edu/article/15696
+                - img [ref=e326]
+              - link [ref=e327] [cursor=pointer]:
+                - /url: https://shopee.cn/edu/blog/1147
+                - img [ref=e328]
+              - link [ref=e329] [cursor=pointer]:
+                - /url: https://wesurvey.com/s2/12232/4b97/
+                - img [ref=e330]
+            - button [ref=e336] [cursor=pointer]:
+              - img [ref=e339]
+            - button [ref=e341] [cursor=pointer]:
+              - img [ref=e344]
+          - generic [ref=e346]:
+            - generic [ref=e347]: 待办清单
+            - generic [ref=e348]: 您需要处理的事情
+            - generic [ref=e350]:
+              - generic [ref=e352]:
+                - generic [ref=e353]: 订单
+                - generic [ref=e354]:
+                  - generic [ref=e355]:
+                    - generic [ref=e358] [cursor=pointer]:
+                      - generic [ref=e359]: "0"
+                      - generic [ref=e360]: 未付款
+                    - generic [ref=e363] [cursor=pointer]:
+                      - generic [ref=e364]: "0"
+                      - generic [ref=e365]: 待处理出货
+                    - generic [ref=e368] [cursor=pointer]:
+                      - generic [ref=e369]: "7"
+                      - generic [ref=e370]: 已处理出货
+                  - generic [ref=e371]:
+                    - generic [ref=e374] [cursor=pointer]:
+                      - generic [ref=e375]: "2"
+                      - generic [ref=e376]: 待取消
+                    - generic [ref=e379] [cursor=pointer]:
+                      - generic [ref=e380]: "0"
+                      - generic [ref=e381]: 待处理退货/退款
+              - generic [ref=e384]:
+                - generic [ref=e385]: 商品
+                - generic [ref=e386]:
+                  - generic [ref=e390] [cursor=pointer]:
+                    - generic [ref=e391]: "32"
+                    - generic [ref=e392]: 已售完
+                  - generic [ref=e396] [cursor=pointer]:
+                    - generic [ref=e397]: "1"
+                    - generic [ref=e398]: 已禁卖/搜索排名降低
+            - generic [ref=e399]:
+              - generic [ref=e400]: 待处理
+              - list [ref=e402]:
+                - listitem [ref=e403]:
+                  - generic [ref=e405]:
+                    - generic [ref=e406]: 以下 2 家店铺的广告余额即将用尽，请尽快充值以保证广告正常运行。
+                    - generic [ref=e408] [cursor=pointer]: 处理
+          - generic [ref=e413]:
+            - generic [ref=e414]:
+              - generic [ref=e415]:
+                - generic [ref=e416]: Shopee广告
+                - generic [ref=e417] [cursor=pointer]:
+                  - generic [ref=e418]: 更多
+                  - img [ref=e420]
+              - generic [ref=e425]: 当前店铺： 新加坡 / chenewei666.sg
+            - generic [ref=e429]:
+              - generic [ref=e431]:
+                - generic [ref=e432]:
+                  - generic [ref=e433]:
+                    - img [ref=e437]
+                    - generic [ref=e446]: 使用Shopee广告提升您的销售！
+                  - generic [ref=e451]: 了解Shopee广告更多资讯，找到正确的推广方式并使广告更有成效。
+                - button "了解更多" [ref=e453] [cursor=pointer]:
+                  - generic [ref=e454]: 了解更多
+              - img [ref=e456]
+          - generic [ref=e463]:
+            - generic [ref=e464]:
+              - generic [ref=e465]: 商业分析
+              - button "更多" [ref=e467] [cursor=pointer]:
+                - generic [ref=e468]: 更多
+                - img [ref=e470]
+            - generic [ref=e472]: 3 个店铺的数据汇总 (实时数据统计至 22:00 , GMT+8)
+            - generic [ref=e473]:
+              - generic [ref=e474]:
+                - generic [ref=e475]:
+                  - text: 总销售额
+                  - img [ref=e479] [cursor=pointer]
+                - generic [ref=e481]: ￥882.95
+              - generic [ref=e486]:
+                - generic [ref=e487]:
+                  - generic [ref=e488]:
+                    - generic [ref=e489]:
+                      - text: 总订单数
+                      - img [ref=e493] [cursor=pointer]
+                    - generic [ref=e495]: "6"
+                    - generic [ref=e496]:
+                      - text: 环比昨日 14.29%
+                      - img [ref=e498]
+                  - generic [ref=e500]:
+                    - generic [ref=e501]:
+                      - text: 商品点击量
+                      - img [ref=e505] [cursor=pointer]
+                    - generic [ref=e507]: "238"
+                    - generic [ref=e508]:
+                      - text: 环比昨日 16.78%
+                      - img [ref=e510]
+                - generic [ref=e513]:
+                  - generic [ref=e514]:
+                    - text: 总销售件数
+                    - img [ref=e518] [cursor=pointer]
+                  - generic [ref=e520]: "6"
+                  - generic [ref=e521]:
+                    - text: 环比昨日 14.29%
+                    - img [ref=e523]
+          - generic [ref=e526]:
+            - generic [ref=e527]: 操作指引
+            - generic [ref=e528]:
+              - generic [ref=e529]:
+                - img "主商品icon" [ref=e531]
+                - generic [ref=e541]:
+                  - generic [ref=e542]: 卖家设置
+                  - list [ref=e543]:
+                    - listitem [ref=e544]:
+                      - link "如何使用中国卖家中心？" [ref=e545] [cursor=pointer]:
+                        - /url: https://shopee.cn/edu/article/4548
+                    - listitem [ref=e546]:
+                      - link "如何配置子母账户权限？" [ref=e547] [cursor=pointer]:
+                        - /url: https://shopee.cn/edu/article/3905
+                    - listitem [ref=e548]:
+                      - link "如何设定商店基础信息？" [ref=e549] [cursor=pointer]:
+                        - /url: https://shopee.cn/edu/article/3904
+              - generic [ref=e550]:
+                - img "设置 icon1" [ref=e552]
+                - generic [ref=e563]:
+                  - generic [ref=e564]: 全球商品
+                  - list [ref=e565]:
+                    - listitem [ref=e566]:
+                      - link "如何上架商品？" [ref=e567] [cursor=pointer]:
+                        - /url: https://shopee.cn/edu/article/3907
+                    - listitem [ref=e568]:
+                      - link "如何查看与管理全球商品？" [ref=e569] [cursor=pointer]:
+                        - /url: https://shopee.cn/edu/article/3902
+                    - listitem [ref=e570]:
+                      - link "如何查看和管理店铺商品？" [ref=e571] [cursor=pointer]:
+                        - /url: https://shopee.cn/edu/article/3903
+        - generic [ref=e572]:
+          - generic [ref=e573]:
+            - generic [ref=e574]:
+              - generic [ref=e575]: 公告
+              - button "更多" [ref=e576] [cursor=pointer]:
+                - generic [ref=e577]: 更多
+                - img [ref=e579]
+            - generic [ref=e583]:
+              - generic [ref=e585]:
+                - generic [ref=e586] [cursor=pointer]:
+                  - paragraph [ref=e587]: 【AMS激励来啦】Shopee联盟营销4月最新激励！
+                  - paragraph [ref=e588]: 2026年AMS最新激励计划覆盖多个站点，包含 AMS 试用金激励、官方赞助佣金激励，更有专属优惠券及曝光资源，满足条件即可参与。点击了解更多详情👉
+                - generic [ref=e590]: 商家公告
+                - generic [ref=e591]: 新 · 2026年3月27日
+              - generic [ref=e593]:
+                - generic [ref=e594] [cursor=pointer]:
+                  - paragraph [ref=e595]: 货代卖家对Shopee官方货代服务感知和顾虑调研
+                  - paragraph [ref=e596]: 为优化平台政策和功能，平台特邀请货代模式发货（货物先发至货代仓再由货代送至平台转运仓）的卖家按照公司主体维度参与本次调研，所填信息将严格保密，点击“更多”填问卷。非货代卖家无需参与
+                - generic [ref=e598]: 商家公告
+                - generic [ref=e599]: 新 · 2026年3月26日
+              - generic [ref=e601]:
+                - generic [ref=e602] [cursor=pointer]:
+                  - paragraph [ref=e603]: Shopee2026年清明节放假安排通知
+                  - paragraph [ref=e604]: 此次清明放假安排包含：SLS仓库、优选仓、全托管仓库、Shopee客服团队及SLS物流时效豁免，您可根据具体放假时间安排相关跨境直邮店铺运营。详情请点击了解。
+                - generic [ref=e606]: 商家公告
+                - generic [ref=e607]: 新 · 2026年3月26日
+              - generic [ref=e609]:
+                - generic [ref=e610] [cursor=pointer]:
+                  - paragraph [ref=e611]: 4.4大促×复活节｜物流+专属彩蛋限时开启
+                  - paragraph [ref=e612]: 双节同庆，惊喜藏不住！即日起加入物流+服务，立享整月20%专属费率优惠。订单遇派送失败或退货退款，最高可获70%拨款，让您大促冲刺无后顾之忧。彩蛋已备好，立即解锁！👉 即刻加入
+                - generic [ref=e616]: Clicks.SG
+                - generic [ref=e617]: 新 · 2026年3月26日
+              - generic [ref=e619]:
+                - generic [ref=e620] [cursor=pointer]:
+                  - paragraph [ref=e621]: 倒计时5天！物流+季度榜$1000广告金最后冲刺
+                  - paragraph [ref=e622]: 本季榜单即将封榜，仅剩最后5天！立即全店加入物流+服务，每笔订单都在为您累积战力，多店加入多倍机会！冲击全站TOP 8最后窗口，错过再等一季度！👉 点击立即加入
+                - generic [ref=e626]: Clicks.SG
+                - generic [ref=e627]: 新 · 2026年3月26日
+          - generic [ref=e630]:
+            - generic [ref=e631]:
+              - generic [ref=e632]:
+                - generic [ref=e633]: 官方仓服务
+                - img "new" [ref=e634]
+              - button "更多 arrow-right" [ref=e635] [cursor=pointer]:
+                - text: 更多
+                - img "arrow-right" [ref=e636]:
+                  - img [ref=e637]
+            - generic [ref=e639]:
+              - paragraph [ref=e640]: 享受无忧操作，专注于业务增长
+              - button "了解更多 arrow-right" [ref=e641] [cursor=pointer]:
+                - text: 了解更多
+                - img "arrow-right" [ref=e642]:
+                  - img [ref=e643]
+          - generic [ref=e646]:
+            - generic [ref=e648]:
+              - text: 卖家任务
+              - button "更多" [ref=e649] [cursor=pointer]:
+                - generic [ref=e650]:
+                  - text: 更多
+                  - img [ref=e652]
+            - generic [ref=e655]:
+              - img [ref=e658]
+              - generic [ref=e661]: 您已完成了12个任务！ 查看您的奖励
+              - img [ref=e664] [cursor=pointer]
+            - generic [ref=e666]:
+              - generic [ref=e667]:
+                - generic [ref=e672]: 完成第一次直播（大于等于30分钟）
+                - generic [ref=e673]:
+                  - img [ref=e675]
+                  - generic [ref=e679]: 可获得额外2个商品置顶推广机会
+                - generic [ref=e680]:
+                  - generic [ref=e685]: Loja de brinquedos Pippi
+                  - button "开始" [ref=e686] [cursor=pointer]:
+                    - generic [ref=e687]: 开始
+              - generic [ref=e688]:
+                - generic [ref=e693]: 设置默认自动回复
+                - generic [ref=e694]:
+                  - img [ref=e696]
+                  - generic [ref=e700]: 可获得额外2个商品置顶推广机会
+                - generic [ref=e701]:
+                  - generic [ref=e706]: Zen'in Family.SG
+                  - button "开始" [ref=e707] [cursor=pointer]:
+                    - generic [ref=e708]: 开始
+              - generic [ref=e709]:
+                - generic [ref=e714]: 设置默认自动回复
+                - generic [ref=e715]:
+                  - img [ref=e717]
+                  - generic [ref=e721]: 可获得额外2个商品置顶推广机会
+                - generic [ref=e722]:
+                  - generic [ref=e727]: Clicks.SG
+                  - button "开始" [ref=e728] [cursor=pointer]:
+                    - generic [ref=e729]: 开始
+  - generic [ref=e730]:
+    - text:   
+    - generic [ref=e731]:
+      - generic [ref=e737] [cursor=pointer]:
+        - img [ref=e739]
+        - superscript [ref=e742]
+      - img [ref=e749] [cursor=pointer]
+      - generic [ref=e758] [cursor=pointer]:
+        - generic [ref=e759]:
+          - img [ref=e761]
+          - generic [ref=e764]: "1"
+        - generic [ref=e765]:
+          - text: 一些店铺无法收到新消息。如果主账号需要在服务模式下接待买家，请打开聊天分配。
+          - generic [ref=e766]:
+            - generic [ref=e767]: 稍后再说
+            - generic [ref=e768]: 立即设置

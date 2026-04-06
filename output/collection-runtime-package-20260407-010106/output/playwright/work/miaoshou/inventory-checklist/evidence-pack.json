@@ -1,0 +1,179 @@
+{
+  "platform": "miaoshou",
+  "work_tag": "inventory-checklist",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist",
+  "ok": false,
+  "errors": [
+    "Step 2 missing after snapshot",
+    "Step 4 missing before snapshot",
+    "Step 5 missing after snapshot",
+    "Step 6 missing before snapshot",
+    "Step 7 missing after snapshot",
+    "Step 9 missing after snapshot",
+    "Step 10 missing before snapshot",
+    "Step 11 missing after snapshot",
+    "Step 12 missing before snapshot",
+    "Step 13 missing after snapshot",
+    "Step 14 missing before snapshot",
+    "Step 16 missing before snapshot"
+  ],
+  "warnings": [
+    "Unrecognized evidence file: 1-warehouse-checklist.md",
+    "Unrecognized evidence file: 15-click-expot-waiting-open.md",
+    "Unrecognized evidence file: 3-select-filter-open.md",
+    "Unrecognized evidence file: open.md",
+    "Unrecognized evidence file: open.png"
+  ],
+  "steps": [
+    {
+      "step": "1",
+      "name": "warehouse-checklist",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\1-warehouse-checklist.png"
+      ]
+    },
+    {
+      "step": "2",
+      "name": "select-filter",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\2-select-filter-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\2-select-filter-before.png"
+      ]
+    },
+    {
+      "step": "3",
+      "name": "select-filter-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\3-select-filter-open.png"
+      ]
+    },
+    {
+      "step": "4",
+      "name": "select-filter",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\4-select-filter-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\4-select-filter-after.png"
+      ]
+    },
+    {
+      "step": "5",
+      "name": "click-serch",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\5-click-serch-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\5-click-serch-before.png"
+      ]
+    },
+    {
+      "step": "6",
+      "name": "click-serch",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\6-click-serch-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\6-click-serch-after.png"
+      ]
+    },
+    {
+      "step": "7",
+      "name": "click-expot",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\7-click-expot-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\7-click-expot-before.png"
+      ]
+    },
+    {
+      "step": "9",
+      "name": "click-expot",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\9-click-expot-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\9-click-expot-before.png"
+      ]
+    },
+    {
+      "step": "10",
+      "name": "click-expot",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\10-click-expot-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\10-click-expot-after.png"
+      ]
+    },
+    {
+      "step": "11",
+      "name": "click-expot-filter",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\11-click-expot-filter-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\11-click-expot-filter-before.png"
+      ]
+    },
+    {
+      "step": "12",
+      "name": "click-expot-filter",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\12-click-expot-filter-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\12-click-expot-filter-after.png"
+      ]
+    },
+    {
+      "step": "13",
+      "name": "click-expot",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\13-click-expot-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\13-click-expot-before.png"
+      ]
+    },
+    {
+      "step": "14",
+      "name": "click-expot",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\14-click-expot-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\14-click-expot-after.png"
+      ]
+    },
+    {
+      "step": "15",
+      "name": "click-expot-waiting-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\15-click-expot-waiting-open.png"
+      ]
+    },
+    {
+      "step": "16",
+      "name": "click-expot-waiting",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\16-click-expot-waiting-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\inventory-checklist\\16-click-expot-waiting-after.png"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+### Page
+- Page URL: https://seller.tiktokshopglobalselling.com/account/login
+- Page Title: TikTok Shop Seller Log In | Cross Border
+### Snapshot
+- menu "瀛︿範涓績" [ref=e1]
+- div "瀛︿範涓績" [ref=e2]
+- menuitem "瀛︿範涓績" [ref=e3]
+- div "鐢宠瘔闂" [ref=e4]
+- span "鐢宠瘔闂" [ref=e5]
+- div "鑱旂郴鎴戜滑" [ref=e6]
+- button "鑱旂郴鎴戜滑" [ref=e7]
+- div "绠€浣撲腑鏂? [ref=e8]
+- button "绠€浣撲腑鏂? [ref=e9]
+- p "绠€浣撲腑鏂? [ref=e10]
+- span "娌℃湁鏀跺埌楠岃瘉鐮侊紵" [ref=e11]
+- span "娌℃湁鏀跺埌楠岃瘉鐮侊紵" [ref=e12]
+- textbox "楠岃瘉鐮? [ref=e13]
+- link "鍙戦€侀獙璇佺爜" [ref=e14]
+- p "鍦ㄨ繖鍙拌澶囦笂涓嶅啀璇㈤棶" [ref=e15]
+- span "鍦ㄨ繖鍙拌澶囦笂涓嶅啀璇㈤棶" [ref=e16]
+- button "纭" [ref=e17]
+- link "閫夋嫨鍏朵粬鍙岄噸楠岃瘉鏂瑰紡" [ref=e18]
+- div "绔嬪嵆娉ㄥ唽" [ref=e19]
+- div "绔嬪嵆娉ㄥ唽" [ref=e20]
+- div "绔嬪嵆娉ㄥ唽" [ref=e21]
+- button "绔嬪嵆娉ㄥ唽" [ref=e22]
+- span "绔嬪嵆娉ㄥ唽" [ref=e23]

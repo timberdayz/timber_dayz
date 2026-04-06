@@ -1,0 +1,101 @@
+{
+  "platform": "shopee",
+  "work_tag": "products-export",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-export",
+  "ok": false,
+  "errors": [
+    "Step 02 missing after snapshot",
+    "Step 5 missing before snapshot",
+    "Step 6 missing after snapshot",
+    "Step 7 missing before snapshot",
+    "Step 8 missing after snapshot",
+    "Step 13 missing before snapshot",
+    "Step 14 missing after snapshot",
+    "Step 15 missing before snapshot",
+    "Step 16 missing before snapshot"
+  ],
+  "warnings": [
+    "Unrecognized evidence file: 01-homepage-ready.md",
+    "Unrecognized evidence file: 10-date-picker-daliy-chose-open.md",
+    "Unrecognized evidence file: 11-date-picker-weekly-chose-open.md",
+    "Unrecognized evidence file: 12-date-picker-monthly-chose-open.md",
+    "Unrecognized evidence file: 16-export-too-fast-open.md",
+    "Unrecognized evidence file: 3-shop-switch-open.md",
+    "Unrecognized evidence file: 4-shop-switch-step2-open.md",
+    "Unrecognized evidence file: 9-date-picker-open.md"
+  ],
+  "steps": [
+    {
+      "step": "02",
+      "name": "products-page",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-export\\02-products-page-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "5",
+      "name": "shop-switch",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-export\\5-shop-switch-after.md",
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "6",
+      "name": "products-page",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-export\\6-products-page-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "7",
+      "name": "products-page",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-export\\7-products-page-after.md",
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "8",
+      "name": "date-picker",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-export\\8-date-picker-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "13",
+      "name": "date-picker",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-export\\13-date-picker-after.md",
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "14",
+      "name": "export",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-export\\14-export-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "15",
+      "name": "export",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-export\\15-export-after.md",
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "16",
+      "name": "export-too-fast",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-export\\16-export-too-fast-after.md",
+      "note_path": null,
+      "screenshots": []
+    }
+  ]
+}

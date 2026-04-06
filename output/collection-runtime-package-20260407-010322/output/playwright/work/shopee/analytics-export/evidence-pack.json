@@ -1,0 +1,256 @@
+{
+  "platform": "shopee",
+  "work_tag": "analytics-export",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export",
+  "ok": false,
+  "errors": [
+    "Step 2 missing after snapshot",
+    "Step 4 missing before snapshot",
+    "Step 5 missing after snapshot",
+    "Step 6 missing before snapshot",
+    "Step 14 missing before snapshot",
+    "Step 15 missing after snapshot",
+    "Step 16 missing before snapshot",
+    "Step 20 missing after snapshot",
+    "Step 22 missing before snapshot",
+    "Step 24 missing before snapshot"
+  ],
+  "warnings": [
+    "Unrecognized evidence file: 1-home-page-open.md",
+    "Unrecognized evidence file: 10-deta-picker-near30days-open.md",
+    "Unrecognized evidence file: 11-deta-picker-daliy-open.md",
+    "Unrecognized evidence file: 12-deta-picker-weekly-open.md",
+    "Unrecognized evidence file: 13-deta-picker-monthly-open.md",
+    "Unrecognized evidence file: 17-too-fast-open.md",
+    "Unrecognized evidence file: 21-change-account-open.md",
+    "Unrecognized evidence file: 23-change-account-click-open.md",
+    "Unrecognized evidence file: 3-shop-swicth-open.md",
+    "Unrecognized evidence file: 4-shop-swicth-detail-open.md",
+    "Unrecognized evidence file: 7-deta-picker-open.md",
+    "Unrecognized evidence file: 8-deta-picker-yesterday-open.md",
+    "Unrecognized evidence file: 9-deta-picker-near7days-open.md"
+  ],
+  "steps": [
+    {
+      "step": "1",
+      "name": "home-page-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\1-home-page-open.png"
+      ]
+    },
+    {
+      "step": "2",
+      "name": "shop-swith",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\2-shop-swith-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\2-shop-swith-before.png"
+      ]
+    },
+    {
+      "step": "3",
+      "name": "shop-swicth-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\3-shop-swicth-open.png"
+      ]
+    },
+    {
+      "step": "4",
+      "name": "shop-swicth",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\4-shop-swicth-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\4-shop-swicth-after.png",
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\4-shop-swicth-detail-open.png"
+      ]
+    },
+    {
+      "step": "5",
+      "name": "nav-analytics",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\5-nav-analytics-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\5-nav-analytics-before.png"
+      ]
+    },
+    {
+      "step": "6",
+      "name": "nav-analytics",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\6-nav-analytics-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\6-nav-analytics-after.png"
+      ]
+    },
+    {
+      "step": "7",
+      "name": "deta-picker-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\7-deta-picker-open.png"
+      ]
+    },
+    {
+      "step": "8",
+      "name": "deta-picker-yesterday-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\8-deta-picker-yesterday-open.png"
+      ]
+    },
+    {
+      "step": "9",
+      "name": "deta-picker-near7days-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\9-deta-picker-near7days-open.png"
+      ]
+    },
+    {
+      "step": "10",
+      "name": "deta-picker-near30days-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\10-deta-picker-near30days-open.png"
+      ]
+    },
+    {
+      "step": "11",
+      "name": "deta-picker-daliy-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\11-deta-picker-daliy-open.png"
+      ]
+    },
+    {
+      "step": "12",
+      "name": "deta-picker-weekly-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\12-deta-picker-weekly-open.png"
+      ]
+    },
+    {
+      "step": "13",
+      "name": "deta-picker-monthly-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\13-deta-picker-monthly-open.png"
+      ]
+    },
+    {
+      "step": "14",
+      "name": "deta-picker",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\14-deta-picker-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\14-deta-picker-after.png"
+      ]
+    },
+    {
+      "step": "15",
+      "name": "download",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\15-download-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\15-download-before.png"
+      ]
+    },
+    {
+      "step": "16",
+      "name": "download",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\16-download-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\16-download-after.png"
+      ]
+    },
+    {
+      "step": "17",
+      "name": "too-fast-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\17-too-fast-open.png"
+      ]
+    },
+    {
+      "step": "20",
+      "name": "change-account",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\20-change-account-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\20-change-account-before.png"
+      ]
+    },
+    {
+      "step": "21",
+      "name": "change-account-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\21-change-account-open.png"
+      ]
+    },
+    {
+      "step": "22",
+      "name": "change-account-click",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\22-change-account-click-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\22-change-account-click-after.png"
+      ]
+    },
+    {
+      "step": "23",
+      "name": "change-account-click-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\23-change-account-click-open.png"
+      ]
+    },
+    {
+      "step": "24",
+      "name": "change-account-click",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\24-change-account-click-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-export\\24-change-account-click-after.png"
+      ]
+    }
+  ]
+}

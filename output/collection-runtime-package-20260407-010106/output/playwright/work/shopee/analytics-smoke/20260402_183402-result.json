@@ -1,0 +1,96 @@
+{
+  "ok": false,
+  "profile_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\profiles\\shopee",
+  "storage_state": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\state\\shopee.json",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-smoke",
+  "headless": true,
+  "result_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-smoke\\20260402_183402-result.json",
+  "screenshots": {
+    "before": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-smoke\\20260402_183402-before-open.png",
+    "after": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-smoke\\20260402_183402-after-open.png"
+  },
+  "session_mode": "storage_state",
+  "diagnostics": {
+    "url_before_ready": "https://seller.shopee.cn/datacenter/traffic/overview",
+    "ready_error": null,
+    "url_after_ready": "https://seller.shopee.cn/datacenter/traffic/overview",
+    "trigger_candidates": [
+      {
+        "selector": "button:has-text(\"昨天\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "button:has-text(\"近7天\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "button:has-text(\"近30天\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "button:has-text(\"按日\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "button:has-text(\"按周\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "button:has-text(\"按月\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "[role=\"button\"]:has-text(\"昨天\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "[role=\"button\"]:has-text(\"近7天\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "[role=\"button\"]:has-text(\"近30天\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "[role=\"button\"]:has-text(\"按日\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "[role=\"button\"]:has-text(\"按周\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      },
+      {
+        "selector": "[role=\"button\"]:has-text(\"按月\")",
+        "count": 0,
+        "visible": false,
+        "text": null
+      }
+    ],
+    "trigger_found": false,
+    "trigger_selector": null,
+    "panel_found": false,
+    "panel_text_sample": null
+  }
+}

@@ -1,0 +1,199 @@
+{
+  "platform": "tiktok",
+  "work_tag": "services-export",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export",
+  "ok": false,
+  "errors": [
+    "Step 2 missing after snapshot",
+    "Step 3 missing before snapshot",
+    "Step 5 missing after snapshot",
+    "Step 6 missing before snapshot",
+    "Step 7 missing after snapshot",
+    "Step 13 missing before snapshot",
+    "Step 14 missing before snapshot",
+    "Step 15 missing before snapshot",
+    "Step 16 missing before snapshot"
+  ],
+  "warnings": [
+    "Unrecognized evidence file: 1-homepage.md",
+    "Unrecognized evidence file: 10-services-deta-picker-weekly-open.md",
+    "Unrecognized evidence file: 11-services-deta-picker-monthly-open.md",
+    "Unrecognized evidence file: 12-services-deta-picker-custom-open.md",
+    "Unrecognized evidence file: 4-services.md",
+    "Unrecognized evidence file: 8-services-deta-picker-open.md",
+    "Unrecognized evidence file: 9-services-deta-picker-daily-open.md"
+  ],
+  "steps": [
+    {
+      "step": "1",
+      "name": "homepage",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\1-homepage.png"
+      ]
+    },
+    {
+      "step": "2",
+      "name": "close-pop-up",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\2-close-pop-up-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\2-close-pop-up-before.png"
+      ]
+    },
+    {
+      "step": "3",
+      "name": "close-pop-up",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\3-close-pop-up-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\3-close-pop-up-after.png"
+      ]
+    },
+    {
+      "step": "4",
+      "name": "services",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\4-services.png"
+      ]
+    },
+    {
+      "step": "5",
+      "name": "services-arive",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\5-services-arive-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\5-services-arive-before.png"
+      ]
+    },
+    {
+      "step": "6",
+      "name": "services-arive",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\6-services-arive-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\6-services-arive-after.png"
+      ]
+    },
+    {
+      "step": "7",
+      "name": "services-deta-picker",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\7-services-deta-picker-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\7-services-deta-picker-before.png"
+      ]
+    },
+    {
+      "step": "8",
+      "name": "services-deta-picker-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\8-services-deta-picker-open.png"
+      ]
+    },
+    {
+      "step": "9",
+      "name": "services-deta-picker-daily-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\9-services-deta-picker-daily-open.png"
+      ]
+    },
+    {
+      "step": "10",
+      "name": "services-deta-picker-weekly-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\10-services-deta-picker-weekly-open.png"
+      ]
+    },
+    {
+      "step": "11",
+      "name": "services-deta-picker-monthly-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\11-services-deta-picker-monthly-open.png"
+      ]
+    },
+    {
+      "step": "12",
+      "name": "services-deta-picker-custom-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\12-services-deta-picker-custom-open.png"
+      ]
+    },
+    {
+      "step": "13",
+      "name": "services-deta-picker-cilck",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\13-services-deta-picker-cilck-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\13-services-deta-picker-cilck-after.png"
+      ]
+    },
+    {
+      "step": "14",
+      "name": "services-deta-picker-cilck-sart-time",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\14-services-deta-picker-cilck-sart-time-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\14-services-deta-picker-cilck-sart-time-after.png"
+      ]
+    },
+    {
+      "step": "15",
+      "name": "services-deta-picker-cilck-end-time",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\15-services-deta-picker-cilck-end-time-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\15-services-deta-picker-cilck-end-time-after.png"
+      ]
+    },
+    {
+      "step": "16",
+      "name": "services-no-data-download-click",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\16-services-no-data-download-click-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\16-services-no-data-download-click-after.png"
+      ]
+    },
+    {
+      "step": "17",
+      "name": "services-have-data-download-click",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\17-services-have-data-download-click-before.md",
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\17-services-have-data-download-click-after.md",
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\17-services-have-data-download-click-after.png",
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\services-export\\17-services-have-data-download-click-before.png"
+      ]
+    }
+  ]
+}

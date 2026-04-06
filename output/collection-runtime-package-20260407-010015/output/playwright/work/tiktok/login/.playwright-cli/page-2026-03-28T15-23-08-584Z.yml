@@ -1,0 +1,41 @@
+- generic [ref=e3]:
+  - generic [ref=e5]:
+    - generic [ref=e7]:
+      - img "TikTok Shop Seller Log In | Cross Border" [ref=e8]
+      - separator [ref=e9]
+      - generic [ref=e10]: 商家中心
+    - navigation [ref=e11]:
+      - menu [ref=e12] [cursor=pointer]:
+        - menuitem "学习中心" [ref=e14]
+    - generic [ref=e15]:
+      - generic [ref=e18] [cursor=pointer]: 申诉问题
+      - button "联系我们" [ref=e24] [cursor=pointer]
+      - button "简体中文" [ref=e30] [cursor=pointer]:
+        - img [ref=e31]
+        - paragraph [ref=e35]: 简体中文
+        - img [ref=e36]
+  - generic [ref=e40]:
+    - img [ref=e42]
+    - generic [ref=e93]: 双重验证
+    - generic [ref=e44]:
+      - generic [ref=e46]:
+        - text:   
+        - text:    
+        - generic [ref=e95]:
+          - generic [ref=e97]: 你的身份验证器应用将收到 1 个验证码。 请输入此验证码继续。
+          - generic [ref=e98]:
+            - generic [ref=e99]:
+              - generic [ref=e100]:
+                - text: 验证码
+                - generic [ref=e102] [cursor=pointer]: 无法查收验证码
+              - textbox "验证码" [ref=e104]: "2313213"
+              - generic [ref=e111]: 请输入6位数字验证码
+            - generic [ref=e105]:
+              - paragraph [ref=e109]: 在这台设备上不再询问
+              - button "确认" [active] [ref=e110] [cursor=pointer]:  确认
+        - text:     
+      - generic [ref=e79]:
+        - generic [ref=e80]: 还没有 TikTok Shop 账号？
+        - button "立即注册" [ref=e84] [cursor=pointer]:
+          - generic [ref=e85]: 立即注册
+          - img [ref=e86]: 

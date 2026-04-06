@@ -1,0 +1,26 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - heading "西虹ERP系统" [level=1] [ref=e7]
+      - paragraph [ref=e8]: 用户登录
+    - generic [ref=e9]:
+      - generic [ref=e13]:
+        - img [ref=e16]
+        - textbox "用户名" [ref=e18]
+      - generic [ref=e22]:
+        - img [ref=e25]
+        - textbox "密码" [ref=e28]
+      - generic [ref=e31] [cursor=pointer]:
+        - generic [ref=e32]:
+          - checkbox "记住我"
+        - generic [ref=e34]: 记住我
+      - button "登录" [ref=e37] [cursor=pointer]:
+        - generic [ref=e38]: 登录
+      - generic [ref=e41]:
+        - generic [ref=e43] [cursor=pointer]: 注册账号
+        - generic [ref=e45] [cursor=pointer]: 忘记密码
+  - contentinfo [ref=e46]:
+    - paragraph [ref=e48]:
+      - text: ICP备案号：
+      - link "粤ICP备2026008583号" [ref=e49] [cursor=pointer]:
+        - /url: https://beian.miit.gov.cn/

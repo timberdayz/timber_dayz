@@ -1,0 +1,82 @@
+{
+  "platform": "tiktok",
+  "account_id": "Tiktok 2店",
+  "storage_state": {
+    "cookies": [
+      {
+        "name": "gd_random",
+        "value": "eyJwZXJjZW50IjowLjUwMTQ4NDE3MDA4MjcwOTd9.akhzN9PWQwMrZTGC7Kx0pHHzxUWxjVeZfxc4wpIpc2Q%3D",
+        "domain": "seller.tiktokglobalshop.com",
+        "path": "/",
+        "expires": 1775452676.822168,
+        "httpOnly": false,
+        "secure": false,
+        "sameSite": "Lax"
+      },
+      {
+        "name": "_m4b_theme_",
+        "value": "new",
+        "domain": ".tiktokglobalshop.com",
+        "path": "/",
+        "expires": 1775625484.437015,
+        "httpOnly": false,
+        "secure": false,
+        "sameSite": "Lax"
+      },
+      {
+        "name": "i18next",
+        "value": "zh-CN",
+        "domain": "seller.tiktokglobalshop.com",
+        "path": "/",
+        "expires": 1806556684,
+        "httpOnly": false,
+        "secure": false,
+        "sameSite": "Strict"
+      },
+      {
+        "name": "s_v_web_id",
+        "value": "verify_mnflhd6x_vMY5Pj5e_RPeA_4YL1_8TL4_6pCptaosmhhB",
+        "domain": "seller.tiktokglobalshop.com",
+        "path": "/",
+        "expires": -1,
+        "httpOnly": false,
+        "secure": false,
+        "sameSite": "Lax"
+      },
+      {
+        "name": "_m4b_theme_",
+        "value": "new",
+        "domain": ".tiktokshopglobalselling.com",
+        "path": "/",
+        "expires": 1775625485.089515,
+        "httpOnly": false,
+        "secure": false,
+        "sameSite": "Lax"
+      },
+      {
+        "name": "i18next",
+        "value": "zh-CN",
+        "domain": "seller.tiktokshopglobalselling.com",
+        "path": "/",
+        "expires": 1806556685,
+        "httpOnly": false,
+        "secure": false,
+        "sameSite": "Strict"
+      },
+      {
+        "name": "s_v_web_id",
+        "value": "verify_mnflhds0_pYqw4kO8_2T9P_4pJk_A41Z_AOBOQ4tKdhGu",
+        "domain": "seller.tiktokshopglobalselling.com",
+        "path": "/",
+        "expires": -1,
+        "httpOnly": false,
+        "secure": false,
+        "sameSite": "Lax"
+      }
+    ],
+    "origins": []
+  },
+  "created_at": 1775020686.2611406,
+  "last_used_at": 1775020686.2611408,
+  "metadata": {}
+}

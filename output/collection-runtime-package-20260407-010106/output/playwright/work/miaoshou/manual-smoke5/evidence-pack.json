@@ -1,0 +1,20 @@
+{
+  "platform": "miaoshou",
+  "work_tag": "manual-smoke5",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\manual-smoke5",
+  "ok": true,
+  "errors": [],
+  "warnings": [
+    "Step 01 has snapshots but missing inferred step name"
+  ],
+  "steps": [
+    {
+      "step": "01",
+      "name": null,
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\manual-smoke5\\01-open-example-before.md",
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\manual-smoke5\\01-open-example-after.md",
+      "note_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\manual-smoke5\\01-note.md",
+      "screenshots": []
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "platform": "miaoshou",
+  "work_tag": "manual-smoke4",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou\\manual-smoke4",
+  "ok": true,
+  "errors": [],
+  "warnings": [
+    "Unrecognized evidence file: test-note.md",
+    "Unrecognized evidence file: test-snap.md"
+  ],
+  "steps": []
+}

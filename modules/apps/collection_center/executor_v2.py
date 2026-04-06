@@ -313,6 +313,7 @@ def _build_runtime_task_params(
             "screenshot_dir": str(screenshot_dir),
         },
         "platform": platform,
+        "granularity": granularity,
         "reused_session": reused_session,
         "downloads_path": str(task_download_dir),
         "start_date": normalized_date_range.get("start_date"),

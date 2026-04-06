@@ -64,3 +64,33 @@ def test_runtime_task_params_include_custom_date_range_for_custom_selection():
         "start_time": "00:00:00",
         "end_time": "23:59:59",
     }
+
+
+def test_runtime_task_params_keep_top_level_granularity_for_shopee_custom_date_components():
+    normalized_date_range = {
+        "start_date": "2026-03-01",
+        "end_date": "2026-03-31",
+        "date_from": "2026-03-01",
+        "date_to": "2026-03-31",
+        "time_selection": {
+            "mode": "custom",
+            "start_date": "2026-03-01",
+            "end_date": "2026-03-31",
+            "start_time": "00:00:00",
+            "end_time": "23:59:59",
+        },
+    }
+
+    params = executor_v2._build_runtime_task_params(
+        task_id="task-3",
+        account={"account_id": "acc-3"},
+        platform="shopee",
+        granularity="monthly",
+        normalized_date_range=normalized_date_range,
+        task_download_dir="temp/downloads/task-3",
+        screenshot_dir="temp/screenshots/task-3",
+        reused_session=False,
+    )
+
+    assert params["granularity"] == "monthly"
+    assert params["params"]["granularity"] == "monthly"

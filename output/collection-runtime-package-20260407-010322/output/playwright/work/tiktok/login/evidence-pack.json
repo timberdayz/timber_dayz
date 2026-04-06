@@ -1,0 +1,84 @@
+{
+  "platform": "tiktok",
+  "work_tag": "login",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\login",
+  "ok": false,
+  "errors": [
+    "Step 04 missing after snapshot",
+    "Step 05 missing before snapshot",
+    "Step 07 missing after snapshot",
+    "Step 08 missing before snapshot",
+    "Step 13 missing after snapshot",
+    "Step 14 missing before snapshot"
+  ],
+  "warnings": [
+    "Unrecognized evidence file: 01-entry-login.md",
+    "Unrecognized evidence file: 02-login-phone-opened.md",
+    "Unrecognized evidence file: 03-login-email-opened.md",
+    "Unrecognized evidence file: 06-rest-login.md",
+    "Unrecognized evidence file: 09-otp-email-opened.md",
+    "Unrecognized evidence file: 10-invalid-wrong-otp-before-submit.md",
+    "Unrecognized evidence file: 11-invalid-wrong-otp-after-submit.md",
+    "Unrecognized evidence file: 12-rest-login.md"
+  ],
+  "steps": [
+    {
+      "step": "01",
+      "name": "entry-login",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\login\\01-entry-login.png"
+      ]
+    },
+    {
+      "step": "04",
+      "name": "wrong-userid",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\login\\04-wrong-userid-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "05",
+      "name": "wrong-userid",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\login\\05-wrong-userid-after.md",
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "07",
+      "name": "invalid-credential",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\login\\07-invalid-credential-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "08",
+      "name": "invalid-credential",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\login\\08-invalid-credential-after.md",
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "13",
+      "name": "phone-login-invalid-credential",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\login\\13-phone-login-invalid-credential-before.md",
+      "after_path": null,
+      "note_path": null,
+      "screenshots": []
+    },
+    {
+      "step": "14",
+      "name": "phone-login-invalid-credential",
+      "before_path": null,
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\tiktok\\login\\14-phone-login-invalid-credential-after.md",
+      "note_path": null,
+      "screenshots": []
+    }
+  ]
+}

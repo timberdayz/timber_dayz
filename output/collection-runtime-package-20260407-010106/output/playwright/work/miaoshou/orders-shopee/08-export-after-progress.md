@@ -1,0 +1,2915 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - link "logo" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - img "logo" [ref=e6]
+      - img [ref=e8] [cursor=pointer]
+    - list [ref=e10]:
+      - listitem [ref=e11] [cursor=pointer]:
+        - generic [ref=e12]: 首页
+      - listitem [ref=e13] [cursor=pointer]:
+        - generic [ref=e14]: 产品
+      - listitem [ref=e15] [cursor=pointer]:
+        - generic [ref=e16]: 订单
+      - listitem [ref=e17] [cursor=pointer]:
+        - generic [ref=e18]: 托管
+      - listitem [ref=e19] [cursor=pointer]:
+        - generic [ref=e20]: 广告
+      - listitem [ref=e21] [cursor=pointer]:
+        - generic [ref=e22]: 数据
+      - listitem [ref=e23] [cursor=pointer]:
+        - generic [ref=e24]: 采购
+      - listitem [ref=e25] [cursor=pointer]:
+        - generic [ref=e26]: 仓库
+      - listitem [ref=e27] [cursor=pointer]:
+        - generic [ref=e28]: 物流
+      - listitem [ref=e29] [cursor=pointer]:
+        - generic [ref=e30]: 授权
+      - listitem [ref=e31] [cursor=pointer]:
+        - generic [ref=e32]: 更多
+    - generic [ref=e33]:
+      - link " 免费培训" [ref=e34] [cursor=pointer]:
+        - /url: /customer_services/training
+        - generic [ref=e35]:
+          - generic [ref=e36]: 
+          - generic [ref=e37]: 免费培训
+      - generic [ref=e39] [cursor=pointer]:
+        - generic [ref=e40]: 
+        - text: 联系客服
+      - generic [ref=e41] [cursor=pointer]:
+        - img [ref=e43]
+        - text: 帮助
+      - generic [ref=e45]:
+        - generic [ref=e46] [cursor=pointer]:
+          - generic [ref=e47]: 
+          - text: 插件下载
+        - generic [ref=e48] [cursor=pointer]:
+          - generic [ref=e49]: 
+          - text: 同步
+        - link " 订购" [ref=e50] [cursor=pointer]:
+          - /url: /account/payment
+          - generic [ref=e51]: 
+          - text: 订购
+    - generic [ref=e52] [cursor=pointer]:
+      - img [ref=e54]
+      - generic [ref=e56]: V
+  - menubar [ref=e61]:
+    - menuitem " 今日实时" [expanded] [ref=e62]:
+      - generic [ref=e63] [cursor=pointer]:
+        - generic [ref=e64]: 
+        - generic [ref=e65]: 今日实时
+        - img [ref=e67]
+      - menu [ref=e69]:
+        - menuitem "实时概览" [ref=e70] [cursor=pointer]:
+          - generic [ref=e71]: 实时概览
+        - menuitem "实时大屏" [ref=e72] [cursor=pointer]:
+          - generic [ref=e73]: 实时大屏
+    - menuitem " 利润分析" [expanded] [ref=e74]:
+      - generic [ref=e75] [cursor=pointer]:
+        - generic [ref=e76]: 
+        - generic [ref=e77]: 利润分析
+        - img [ref=e79]
+      - menu [ref=e81]:
+        - menuitem "利润概览" [ref=e82] [cursor=pointer]:
+          - generic [ref=e83]: 利润概览
+        - menuitem "利润明细" [ref=e84] [cursor=pointer]:
+          - generic [ref=e85]: 利润明细
+        - menuitem "费用分摊" [ref=e86] [cursor=pointer]:
+          - generic [ref=e87]: 费用分摊
+        - menuitem "成本维护" [ref=e88] [cursor=pointer]:
+          - generic [ref=e89]: 成本维护
+    - menuitem " 运营分析" [expanded] [ref=e90]:
+      - generic [ref=e91] [cursor=pointer]:
+        - generic [ref=e92]: 
+        - generic [ref=e93]: 运营分析
+        - img [ref=e95]
+      - menu [ref=e97]:
+        - menuitem "产品分析" [ref=e98] [cursor=pointer]:
+          - generic [ref=e99]: 产品分析
+        - menuitem "订单分析" [ref=e100] [cursor=pointer]:
+          - generic [ref=e101]: 订单分析
+        - menuitem "店铺分析" [ref=e102] [cursor=pointer]:
+          - generic [ref=e103]: 店铺分析
+        - menuitem "动销分析" [ref=e104] [cursor=pointer]:
+          - generic [ref=e105]: 动销分析
+        - menuitem "商品销量" [ref=e106] [cursor=pointer]:
+          - generic [ref=e107]: 商品销量
+        - menuitem "售后分析" [ref=e108] [cursor=pointer]:
+          - generic [ref=e109]: 售后分析
+        - menuitem "客户分布" [ref=e110] [cursor=pointer]:
+          - generic [ref=e111]: 客户分布
+        - menuitem "托管报表" [ref=e112] [cursor=pointer]:
+          - generic [ref=e113]: 托管报表
+    - menuitem " 结算管理" [expanded] [ref=e114]:
+      - generic [ref=e115] [cursor=pointer]:
+        - generic [ref=e116]: 
+        - generic [ref=e117]: 结算管理
+        - img [ref=e119]
+      - menu [ref=e121]:
+        - menuitem "Shopee" [ref=e122] [cursor=pointer]:
+          - generic [ref=e123]: Shopee
+        - menuitem "TikTok" [ref=e124] [cursor=pointer]:
+          - generic [ref=e125]: TikTok
+        - menuitem "Ozon" [ref=e126] [cursor=pointer]:
+          - generic [ref=e127]: Ozon
+        - menuitem "SHEIN(半)" [ref=e128] [cursor=pointer]:
+          - generic [ref=e129]: SHEIN(半)
+        - menuitem "Temu(全)" [ref=e130] [cursor=pointer]:
+          - generic [ref=e131]: Temu(全)
+        - menuitem "Temu(半)" [ref=e132] [cursor=pointer]:
+          - generic [ref=e133]: Temu(半)
+    - menuitem " 店铺健康" [expanded] [ref=e134]:
+      - generic [ref=e135] [cursor=pointer]:
+        - generic [ref=e136]: 
+        - generic [ref=e137]: 店铺健康
+        - img [ref=e139]
+      - menu [ref=e141]:
+        - menuitem "Shopee" [ref=e142] [cursor=pointer]:
+          - generic [ref=e143]: Shopee
+        - menuitem "Lazada" [ref=e144] [cursor=pointer]:
+          - generic [ref=e145]: Lazada
+        - menuitem "Ozon" [ref=e146] [cursor=pointer]:
+          - generic [ref=e147]: Ozon
+    - menuitem " 仓库分析" [expanded] [ref=e148]:
+      - generic [ref=e149] [cursor=pointer]:
+        - generic [ref=e150]: 
+        - generic [ref=e151]: 仓库分析
+        - img [ref=e153]
+      - menu [ref=e155]:
+        - menuitem "商品销售" [ref=e156] [cursor=pointer]:
+          - generic [ref=e157]: 商品销售
+        - menuitem "出入统计" [ref=e158] [cursor=pointer]:
+          - generic [ref=e159]: 出入统计
+        - menuitem "周转分析" [ref=e160] [cursor=pointer]:
+          - generic [ref=e161]: 周转分析
+        - menuitem "库龄分析" [ref=e162] [cursor=pointer]:
+          - generic [ref=e163]: 库龄分析
+        - menuitem "包材统计" [ref=e164] [cursor=pointer]:
+          - generic [ref=e165]: 包材统计
+  - generic [ref=e167]:
+    - generic [ref=e168]:
+      - generic [ref=e169]: 利润明细
+      - generic [ref=e171] [cursor=pointer]: 查看帮助
+    - generic [ref=e172]:
+      - radiogroup "radio-group" [ref=e174]:
+        - generic [ref=e175]:
+          - radio "订单&产品" [checked] [ref=e176]
+          - generic [ref=e178] [cursor=pointer]: 订单&产品
+        - generic [ref=e179]:
+          - radio "订单" [ref=e180]
+          - generic [ref=e182] [cursor=pointer]: 订单
+        - generic [ref=e183]:
+          - radio "包裹" [ref=e184]
+          - generic [ref=e186] [cursor=pointer]:
+            - text: 包裹
+            - img [ref=e188]
+        - generic [ref=e190]:
+          - radio "店铺" [ref=e191]
+          - generic [ref=e193] [cursor=pointer]: 店铺
+      - generic [ref=e196] [cursor=pointer]:
+        - img [ref=e198]
+        - text: 数据更新时间须知
+    - generic [ref=e201]:
+      - generic [ref=e202]: 平台
+      - generic [ref=e203]: ：
+      - radiogroup "radio-group" [ref=e205]:
+        - generic [ref=e208] [cursor=pointer]: Shopee
+        - generic [ref=e211] [cursor=pointer]: TikTok
+        - generic [ref=e214] [cursor=pointer]: Lazada
+    - generic [ref=e215]:
+      - generic [ref=e216]: 结算
+      - generic [ref=e217]: ：
+      - radiogroup "radio-group" [ref=e220]:
+        - generic [ref=e222] [cursor=pointer]: 全部
+        - generic [ref=e224] [cursor=pointer]: 已结算
+        - generic [ref=e226] [cursor=pointer]: 未结算
+    - generic [ref=e228]:
+      - generic [ref=e230]:
+        - generic [ref=e231]:
+          - generic [ref=e232]: 订单状态
+          - generic [ref=e233]: ":"
+        - generic [ref=e236]:
+          - generic [ref=e237]:
+            - generic [ref=e239] [cursor=pointer]:
+              - generic [ref=e241]: 待发货
+              - img [ref=e243]
+            - generic [ref=e248] [cursor=pointer]: + 4
+            - combobox "订单状态 :" [ref=e250]
+          - img [ref=e3231] [cursor=pointer]
+      - generic [ref=e256]:
+        - generic [ref=e257]:
+          - generic [ref=e258]: 售后状态
+          - generic [ref=e259]: ":"
+        - generic [ref=e262]:
+          - generic [ref=e263]:
+            - combobox "售后状态 :" [ref=e265]
+            - generic [ref=e266]: 请选择
+          - img [ref=e269] [cursor=pointer]
+      - generic [ref=e272]:
+        - generic [ref=e273]:
+          - generic [ref=e274]: 站点
+          - generic [ref=e275]: ":"
+        - generic [ref=e278]:
+          - generic [ref=e279]:
+            - combobox "站点 :" [ref=e281]
+            - generic [ref=e282]: 全部
+          - img [ref=e285] [cursor=pointer]
+      - generic [ref=e290]:
+        - generic [ref=e292] [cursor=pointer]:
+          - generic:
+            - combobox [ref=e294]
+            - generic [ref=e295]: 店铺
+          - img [ref=e298]
+        - generic [ref=e301]:
+          - generic [ref=e302]:
+            - combobox [ref=e304]
+            - generic [ref=e305]: 请选择
+          - img [ref=e308] [cursor=pointer]
+      - generic [ref=e312]:
+        - generic [ref=e314] [cursor=pointer]:
+          - generic:
+            - combobox [ref=e316]
+            - generic [ref=e317]: 下单时间
+          - img [ref=e320]
+        - generic [ref=e322]:
+          - img [ref=e324]
+          - combobox "开始时间" [ref=e328]: 2026-02-01 00:00:00
+          - generic [ref=e329]: 至
+          - combobox "结束时间" [ref=e330]: 2026-02-28 23:59:59
+      - generic [ref=e331]:
+        - button "搜索" [ref=e332] [cursor=pointer]:
+          - img [ref=e334]
+          - generic [ref=e336]: 搜索
+        - button "重置" [ref=e337] [cursor=pointer]:
+          - generic [ref=e338]: 重置
+        - generic [ref=e340] [cursor=pointer]: 展开
+    - generic [ref=e341]:
+      - paragraph [ref=e342]: 实时数据
+      - generic [ref=e343]:
+        - generic [ref=e344]:
+          - generic [ref=e345]: 今日回款金额
+          - generic [ref=e346]: ￥2,634.96
+        - generic [ref=e347]:
+          - generic [ref=e348]: 昨日回款金额
+          - generic [ref=e349]: ￥3,210.64
+        - generic [ref=e350]:
+          - generic [ref=e351]:
+            - text: 今日订单数
+            - img [ref=e353]
+          - generic [ref=e355]: "48"
+        - generic [ref=e356]:
+          - generic [ref=e357]: 昨日订单数
+          - generic [ref=e358]: "60"
+        - generic [ref=e359]:
+          - generic [ref=e360]:
+            - text: 今日采购金额
+            - img [ref=e362]
+          - generic [ref=e364]: ￥1,571.80
+        - generic [ref=e365]:
+          - generic [ref=e366]: 昨日采购金额
+          - generic [ref=e367]: ￥1,797.89
+        - generic [ref=e368]:
+          - generic [ref=e369]:
+            - text: 今日采购单数
+            - img [ref=e371]
+          - generic [ref=e373]: "0"
+        - generic [ref=e374]:
+          - generic [ref=e375]: 昨日采购单数
+          - generic [ref=e376]: "0"
+        - generic [ref=e377]:
+          - generic [ref=e378]:
+            - text: 今日利润
+            - img [ref=e2564]
+          - generic [ref=e379]: ￥1,063.16
+        - generic [ref=e380]:
+          - generic [ref=e381]: 昨日利润
+          - generic [ref=e382]: ￥1,315.62
+    - generic [ref=e387]:
+      - paragraph [ref=e388]: 数据汇总
+      - generic [ref=e389]:
+        - generic [ref=e390]:
+          - generic [ref=e391]:
+            - text: 订单数
+            - img [ref=e393]
+          - generic [ref=e395]: 1,941
+        - generic [ref=e396]:
+          - generic [ref=e397]:
+            - text: 订单原始金额
+            - img [ref=e399]
+          - generic [ref=e401]: ￥148,106.24
+        - generic [ref=e402]:
+          - generic [ref=e403]:
+            - text: 买家实付
+            - img [ref=e405]
+          - generic [ref=e407]: ￥138,190.59
+        - generic [ref=e408]:
+          - generic [ref=e409]:
+            - text: 有效销售额
+            - img [ref=e411]
+          - generic [ref=e413]: ￥118,445.55
+        - generic [ref=e414]:
+          - generic [ref=e415]: 预估回款金额
+          - generic [ref=e416]: ￥76968.54
+        - generic [ref=e417]:
+          - generic [ref=e418]: 已回款金额
+          - generic [ref=e419]: ￥0
+        - generic [ref=e420]:
+          - generic [ref=e421]: 采购金额
+          - generic [ref=e422]: ￥47,744.23
+        - generic [ref=e423]:
+          - generic [ref=e424]: 运费成本
+          - generic [ref=e425]: ￥0.00
+        - generic [ref=e426]:
+          - generic [ref=e427]: 仓库操作费
+          - generic [ref=e428]: ￥6,404.94
+        - generic [ref=e429]:
+          - generic [ref=e430]: 包材费
+          - generic [ref=e431]: ￥0.00
+        - generic [ref=e432]:
+          - generic [ref=e433]: 广告成本
+          - generic [ref=e434]: ￥0.00
+        - generic [ref=e435]:
+          - generic [ref=e436]: 运营成本
+          - generic [ref=e437]: ￥0.00
+        - generic [ref=e438]:
+          - generic [ref=e439]: 其他成本
+          - generic [ref=e440]: ￥0.00
+        - generic [ref=e441]:
+          - generic [ref=e442]: 利润
+          - generic [ref=e443]: ￥22,819.37
+        - generic [ref=e444]:
+          - generic [ref=e445]:
+            - text: 成本利润率
+            - img [ref=e447]
+          - generic [ref=e449]: 42.14%
+        - generic [ref=e450]:
+          - generic [ref=e451]:
+            - text: 销售利润率
+            - img [ref=e453]
+          - generic [ref=e455]: 29.65%
+        - generic [ref=e456]:
+          - generic [ref=e457]: 待拨款金额
+          - generic [ref=e458]: ￥-160.98
+        - generic [ref=e459]:
+          - generic [ref=e460]: 已拨款金额
+          - generic [ref=e461]: ￥77,587.11
+    - generic [ref=e467]:
+      - button "帮助说明" [ref=e468] [cursor=pointer]:
+        - generic [ref=e469]:
+          - img [ref=e471]
+          - text: 帮助说明
+      - button "快速过滤" [ref=e474] [cursor=pointer]:
+        - generic [ref=e475]:
+          - text: 快速过滤
+          - img [ref=e477]
+      - generic [ref=e479]:
+        - button "同步订单" [active] [ref=e481] [cursor=pointer]:
+          - generic [ref=e482]:
+            - text: 同步订单
+            - img [ref=e484]
+        - button "获取广告花费" [ref=e487] [cursor=pointer]:
+          - generic [ref=e488]:
+            - text: 获取广告花费
+            - img [ref=e490]
+        - button "导入费用" [ref=e493] [cursor=pointer]:
+          - generic [ref=e494]:
+            - text: 导入费用
+            - img [ref=e496]
+        - button "导出数据" [ref=e499] [cursor=pointer]:
+          - generic [ref=e500]:
+            - text: 导出数据
+            - img [ref=e502]
+        - button "列配置" [ref=e504] [cursor=pointer]:
+          - generic [ref=e505]: 列配置
+    - generic [ref=e507]:
+      - generic [ref=e508]:
+        - generic [ref=e509]:
+          - generic [ref=e510]:
+            - generic [ref=e511]: 订单信息
+            - generic [ref=e513]: 订单信息
+            - generic [ref=e515]: 利润数据
+            - generic [ref=e517]: 平台收入/支出
+            - generic [ref=e519]: 订单成本
+            - generic [ref=e521]: 操作
+          - generic [ref=e522]:
+            - generic [ref=e524]: 订单编号
+            - generic [ref=e526]:
+              - text: 产品SKU
+              - generic [ref=e528] [cursor=pointer]:
+                - text: 产品详情
+                - img [ref=e530]
+            - generic [ref=e532]: 销售数量
+            - generic [ref=e533]: 店铺
+            - generic [ref=e534]: 下单时间
+            - generic [ref=e538]: 付款时间
+            - generic [ref=e542]: 发货时间
+            - generic [ref=e546]:
+              - text: 利润
+              - img [ref=e548]
+            - generic [ref=e553]:
+              - text: 成本利润率
+              - img [ref=e555]
+            - generic [ref=e560]:
+              - text: 销售利润率
+              - img [ref=e562]
+            - generic [ref=e567]:
+              - text: 预估回款金额
+              - img [ref=e569]
+            - generic [ref=e574]:
+              - text: 已结算金额
+              - img [ref=e576]
+            - generic [ref=e581]:
+              - text: 结算时间
+              - img [ref=e583]
+            - generic [ref=e588]: 买家支付
+            - generic [ref=e592]:
+              - text: 订单原始金额
+              - img [ref=e594]
+            - generic [ref=e599]: 产品原价
+            - generic [ref=e603]: 卖家产品折扣
+            - generic [ref=e604]: Shopee产品折扣
+            - generic [ref=e608]: Shopee币抵扣
+            - generic [ref=e612]: 卖家 Voucher
+            - generic [ref=e616]: Shopee Voucher
+            - generic [ref=e620]: 买家支付运费
+            - generic [ref=e624]: 卖家支付运费
+            - generic [ref=e628]: Shopee运费补贴
+            - generic [ref=e632]:
+              - text: 退货运费
+              - img [ref=e634]
+            - generic [ref=e639]: 联盟佣金
+            - generic [ref=e643]:
+              - text: Shopee平台佣金
+              - img [ref=e645]
+            - generic [ref=e650]:
+              - text: 海外退货服务费
+              - img [ref=e652]
+            - generic [ref=e657]:
+              - text: 服务费
+              - img [ref=e659]
+            - generic [ref=e664]:
+              - text: 交易手续费
+              - img [ref=e666]
+            - generic [ref=e671]: 跨境税
+            - generic [ref=e675]: 增值税（VAT）
+            - generic [ref=e679]:
+              - text: 预扣税
+              - img [ref=e681]
+            - generic [ref=e686]: 3PL运费折扣
+            - generic [ref=e690]: 包裹损失赔偿
+            - generic [ref=e694]: 卖家运费折扣
+            - generic [ref=e698]:
+              - text: 退款金额
+              - img [ref=e700]
+            - generic [ref=e705]:
+              - text: 采购成本
+              - img [ref=e707]
+              - button "批量" [ref=e709] [cursor=pointer]:
+                - generic [ref=e710]: 批量
+            - generic [ref=e714]:
+              - text: 运费成本
+              - img [ref=e716]
+            - generic [ref=e721]:
+              - text: 仓库操作费
+              - img [ref=e723]
+              - button "批量" [ref=e725] [cursor=pointer]:
+                - generic [ref=e726]: 批量
+            - generic [ref=e730]:
+              - text: 广告成本
+              - img [ref=e732]
+              - button "批量" [ref=e734] [cursor=pointer]:
+                - generic [ref=e735]: 批量
+            - generic [ref=e739]:
+              - text: 运营成本
+              - img [ref=e741]
+              - button "批量" [ref=e743] [cursor=pointer]:
+                - generic [ref=e744]: 批量
+            - generic [ref=e748]:
+              - text: 其他成本
+              - img [ref=e750]
+              - button "批量" [ref=e752] [cursor=pointer]:
+                - generic [ref=e753]: 批量
+            - generic [ref=e757]: 操作
+        - generic [ref=e758]:
+          - generic [ref=e3246]:
+            - generic [ref=e3249] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e3252]:
+              - generic [ref=e3254]: 已完成
+              - generic [ref=e3256] [cursor=pointer]: 260228VVWY6YTW
+            - generic [ref=e3260]:
+              - link [ref=e3262]:
+                - /url: javascript:;
+                - img [ref=e3264]
+              - generic [ref=e3265]:
+                - generic [ref=e3266]:
+                  - generic [ref=e3267]: 产品ID
+                  - text: ：
+                  - generic [ref=e3268]: "40360870416"
+                - generic [ref=e3269]:
+                  - generic [ref=e3270]: 平台SKU
+                  - text: ：
+                  - generic [ref=e3271]: KLM003-purple-2-035
+                - generic [ref=e3272]:
+                  - generic [ref=e3273]: SKU ID
+                  - text: ：
+                  - generic [ref=e3274]: "167252533153"
+            - generic [ref=e3277]: "1"
+            - generic [ref=e3278]: Shopee菲律宾1店
+            - generic [ref=e3279]: 2026-02-28 23:52:23
+            - generic [ref=e3280]: 2026-02-28 23:52:31
+            - generic [ref=e3281]: "--"
+            - generic [ref=e3282]: ￥ 23.06
+            - generic [ref=e3283]: 40.46%
+            - generic [ref=e3284]: 28.8%
+            - generic [ref=e3285]:
+              - text: ￥ 80.06
+              - generic [ref=e3286]: PHP 692.00
+            - generic [ref=e3287]:
+              - text: ￥ 80.06
+              - generic [ref=e3288]: PHP 692.00
+            - generic [ref=e3289]: 2026-03-20 12:43:59
+            - generic [ref=e3290]:
+              - text: ￥ 108.41
+              - generic [ref=e3291]: PHP 937.00
+            - generic [ref=e3292]:
+              - text: ￥ 108.41
+              - generic [ref=e3293]: PHP 937.00
+            - generic [ref=e3294]:
+              - text: ￥ 109.68
+              - generic [ref=e3295]: PHP 948.00
+            - generic [ref=e3296]:
+              - text: ￥ 1.27
+              - generic [ref=e3297]: PHP 0
+            - generic [ref=e3298]:
+              - text: ￥ 0.00
+              - generic [ref=e3299]: PHP 0.00
+            - generic [ref=e3300]:
+              - text: ￥ 0.00
+              - generic [ref=e3301]: PHP 0.00
+            - generic [ref=e3302]:
+              - text: ￥ 0.00
+              - generic [ref=e3303]: PHP 0.00
+            - generic [ref=e3304]:
+              - text: ￥ 0.00
+              - generic [ref=e3305]: PHP 0.00
+            - generic [ref=e3306]:
+              - text: ￥ 0.00
+              - generic [ref=e3307]: PHP 0.00
+            - generic [ref=e3308]:
+              - text: ￥ -4.17
+              - generic [ref=e3309]: PHP -36.00
+            - generic [ref=e3310]:
+              - text: ￥ 0.00
+              - generic [ref=e3311]: PHP 0.00
+            - generic [ref=e3312]:
+              - text: ￥ 0.00
+              - generic [ref=e3313]: PHP 0.00
+            - generic [ref=e3314]:
+              - text: ￥ 0.00
+              - generic [ref=e3315]: PHP 0.00
+            - generic [ref=e3316]:
+              - text: ￥ 12.96
+              - generic [ref=e3317]: PHP 112.00
+            - generic [ref=e3318]:
+              - text: ￥ 0.00
+              - generic [ref=e3319]: PHP 0.00
+            - generic [ref=e3320]:
+              - text: ￥ 6.59
+              - generic [ref=e3321]: PHP 57.00
+            - generic [ref=e3322]:
+              - text: ￥ 2.43
+              - generic [ref=e3323]: PHP 21.00
+            - generic [ref=e3324]:
+              - text: ￥ 0.00
+              - generic [ref=e3325]: PHP 0.00
+            - generic [ref=e3326]:
+              - text: ￥ 0.00
+              - generic [ref=e3327]: PHP 0.00
+            - generic [ref=e3328]:
+              - text: ￥ 0.00
+              - generic [ref=e3329]: PHP 0.00
+            - generic [ref=e3330]:
+              - text: ￥ 0.00
+              - generic [ref=e3331]: PHP 0.00
+            - generic [ref=e3332]:
+              - text: ￥ 0.00
+              - generic [ref=e3333]: PHP 0.00
+            - generic [ref=e3334]:
+              - text: ￥ 0.00
+              - generic [ref=e3335]: PHP 0.00
+            - generic [ref=e3336]:
+              - text: ￥ 0.00
+              - generic [ref=e3337]: PHP 0.00
+            - generic [ref=e3342]:
+              - generic [ref=e3343]: ￥
+              - textbox [ref=e3346]: "57.00"
+            - generic [ref=e3347]: ¥0.00
+            - generic [ref=e3350]:
+              - generic [ref=e3351]: ￥
+              - textbox [ref=e3354]
+            - generic [ref=e3357]:
+              - generic [ref=e3358]: ￥
+              - textbox [ref=e3361]
+            - generic [ref=e3364]:
+              - generic [ref=e3365]: ￥
+              - textbox [ref=e3368]
+            - generic [ref=e3371]:
+              - generic [ref=e3372]: ￥
+              - textbox [ref=e3375]
+            - generic [ref=e3377]:
+              - button "明细" [ref=e3378] [cursor=pointer]:
+                - generic [ref=e3379]: 明细
+              - button "操作日志" [ref=e3380] [cursor=pointer]:
+                - generic [ref=e3381]: 操作日志
+          - generic [ref=e3383]:
+            - generic [ref=e3386] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e3389]:
+              - generic [ref=e3391]: 已完成
+              - generic [ref=e3393] [cursor=pointer]: 260228VV2X7247
+            - generic [ref=e3397]:
+              - link [ref=e3399]:
+                - /url: javascript:;
+                - img [ref=e3401]
+              - generic [ref=e3402]:
+                - generic [ref=e3403]:
+                  - generic [ref=e3404]: 产品ID
+                  - text: ：
+                  - generic [ref=e3405]: "24794626777"
+                - generic [ref=e3406]:
+                  - generic [ref=e3407]: 平台SKU
+                  - text: ：
+                  - generic [ref=e3408]: HKR-iCF6-035
+                - generic [ref=e3409]:
+                  - generic [ref=e3410]: SKU ID
+                  - text: ：
+                  - generic [ref=e3411]: "208474117237"
+            - generic [ref=e3414]: "1"
+            - generic [ref=e3415]: Shopee菲律宾2店
+            - generic [ref=e3416]: 2026-02-28 23:37:20
+            - generic [ref=e3417]: 2026-02-28 23:37:27
+            - generic [ref=e3418]: "--"
+            - generic [ref=e3419]: ￥ 2.51
+            - generic [ref=e3420]: 5.7%
+            - generic [ref=e3421]: 5.4%
+            - generic [ref=e3422]:
+              - text: ￥ 46.51
+              - generic [ref=e3423]: PHP 402.00
+            - generic [ref=e3424]:
+              - text: ￥ 46.51
+              - generic [ref=e3425]: PHP 402.00
+            - generic [ref=e3426]: 2026-03-22 17:08:00
+            - generic [ref=e3427]:
+              - text: ￥ 62.59
+              - generic [ref=e3428]: PHP 541.00
+            - generic [ref=e3429]:
+              - text: ￥ 80.87
+              - generic [ref=e3430]: PHP 699.00
+            - generic [ref=e3431]:
+              - text: ￥ 161.74
+              - generic [ref=e3432]: PHP 1398.00
+            - generic [ref=e3433]:
+              - text: ￥ 80.87
+              - generic [ref=e3434]: PHP 0
+            - generic [ref=e3435]:
+              - text: ￥ 0.00
+              - generic [ref=e3436]: PHP 0.00
+            - generic [ref=e3437]:
+              - text: ￥ 0.00
+              - generic [ref=e3438]: PHP 0.00
+            - generic [ref=e3439]:
+              - text: ￥ 4.05
+              - generic [ref=e3440]: PHP 35.00
+            - generic [ref=e3441]:
+              - text: ￥ 13.88
+              - generic [ref=e3442]: PHP 120.00
+            - generic [ref=e3443]:
+              - text: ￥ 0.00
+              - generic [ref=e3444]: PHP 0.00
+            - generic [ref=e3445]:
+              - text: ￥ -4.17
+              - generic [ref=e3446]: PHP -36.00
+            - generic [ref=e3447]:
+              - text: ￥ 0.00
+              - generic [ref=e3448]: PHP 0.00
+            - generic [ref=e3449]:
+              - text: ￥ 0.00
+              - generic [ref=e3450]: PHP 0.00
+            - generic [ref=e3451]:
+              - text: ￥ 0.00
+              - generic [ref=e3452]: PHP 0.00
+            - generic [ref=e3453]:
+              - text: ￥ 8.10
+              - generic [ref=e3454]: PHP 70.00
+            - generic [ref=e3455]:
+              - text: ￥ 0.00
+              - generic [ref=e3456]: PHP 0.00
+            - generic [ref=e3457]:
+              - text: ￥ 8.68
+              - generic [ref=e3458]: PHP 75.00
+            - generic [ref=e3459]:
+              - text: ￥ 1.74
+              - generic [ref=e3460]: PHP 15.00
+            - generic [ref=e3461]:
+              - text: ￥ 0.00
+              - generic [ref=e3462]: PHP 0.00
+            - generic [ref=e3463]:
+              - text: ￥ 0.00
+              - generic [ref=e3464]: PHP 0.00
+            - generic [ref=e3465]:
+              - text: ￥ 0.00
+              - generic [ref=e3466]: PHP 0.00
+            - generic [ref=e3467]:
+              - text: ￥ 0.00
+              - generic [ref=e3468]: PHP 0.00
+            - generic [ref=e3469]:
+              - text: ￥ 0.00
+              - generic [ref=e3470]: PHP 0.00
+            - generic [ref=e3471]:
+              - text: ￥ 0.00
+              - generic [ref=e3472]: PHP 0.00
+            - generic [ref=e3473]:
+              - text: ￥ 0.00
+              - generic [ref=e3474]: PHP 0.00
+            - generic [ref=e3479]:
+              - generic [ref=e3480]: ￥
+              - textbox [ref=e3483]: "44.00"
+            - generic [ref=e3484]: ¥0.00
+            - generic [ref=e3487]:
+              - generic [ref=e3488]: ￥
+              - textbox [ref=e3491]
+            - generic [ref=e3494]:
+              - generic [ref=e3495]: ￥
+              - textbox [ref=e3498]
+            - generic [ref=e3501]:
+              - generic [ref=e3502]: ￥
+              - textbox [ref=e3505]
+            - generic [ref=e3508]:
+              - generic [ref=e3509]: ￥
+              - textbox [ref=e3512]
+            - generic [ref=e3514]:
+              - button "明细" [ref=e3515] [cursor=pointer]:
+                - generic [ref=e3516]: 明细
+              - button "操作日志" [ref=e3517] [cursor=pointer]:
+                - generic [ref=e3518]: 操作日志
+          - generic [ref=e3520]:
+            - generic [ref=e3523] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e3526]:
+              - generic [ref=e3528]: 已完成
+              - generic [ref=e3530] [cursor=pointer]: 260228VV0KSD8A
+            - generic [ref=e3534]:
+              - link [ref=e3536]:
+                - /url: javascript:;
+                - img [ref=e3538]
+              - generic [ref=e3539]:
+                - generic [ref=e3540]:
+                  - generic [ref=e3541]: 产品ID
+                  - text: ：
+                  - generic [ref=e3542]: "25393070494"
+                - generic [ref=e3543]:
+                  - generic [ref=e3544]: 平台SKU
+                  - text: ：
+                  - generic [ref=e3545]: HKR-DRB-2262-B
+                - generic [ref=e3546]:
+                  - generic [ref=e3547]: SKU ID
+                  - text: ：
+                  - generic [ref=e3548]: "260138152460"
+            - generic [ref=e3551]: "1"
+            - generic [ref=e3552]: Shopee4店包包
+            - generic [ref=e3553]: 2026-02-28 23:35:58
+            - generic [ref=e3554]: 2026-02-28 23:36:03
+            - generic [ref=e3555]: "--"
+            - generic [ref=e3556]: ￥ -1.08
+            - generic [ref=e3557]: "-4.24%"
+            - generic [ref=e3558]: "-4.43%"
+            - generic [ref=e3559]:
+              - text: ￥ 24.40
+              - generic [ref=e3560]: SGD 4.54
+            - generic [ref=e3561]:
+              - text: ￥ 0.00
+              - generic [ref=e3562]: SGD 0.00
+            - generic [ref=e3563]: "--"
+            - generic [ref=e3564]:
+              - text: ￥ 48.36
+              - generic [ref=e3565]: SGD 9.00
+            - generic [ref=e3566]:
+              - text: ￥ 48.36
+              - generic [ref=e3567]: SGD 9.00
+            - generic [ref=e3568]:
+              - text: ￥ 91.35
+              - generic [ref=e3569]: SGD 17.00
+            - generic [ref=e3570]:
+              - text: ￥ 42.99
+              - generic [ref=e3571]: SGD 0
+            - generic [ref=e3572]:
+              - text: ￥ 0.00
+              - generic [ref=e3573]: SGD 0.00
+            - generic [ref=e3574]:
+              - text: ￥ 0.00
+              - generic [ref=e3575]: SGD 0.00
+            - generic [ref=e3576]:
+              - text: ￥ 0.00
+              - generic [ref=e3577]: SGD 0.00
+            - generic [ref=e3578]:
+              - text: ￥ 0.00
+              - generic [ref=e3579]: SGD 0.00
+            - generic [ref=e3580]:
+              - text: ￥ 0.00
+              - generic [ref=e3581]: SGD 0.00
+            - generic [ref=e3582]:
+              - text: ￥ -12.36
+              - generic [ref=e3583]: SGD -2.30
+            - generic [ref=e3584]:
+              - text: ￥ 0.00
+              - generic [ref=e3585]: SGD 0.00
+            - generic [ref=e3586]:
+              - text: ￥ 0.00
+              - generic [ref=e3587]: SGD 0.00
+            - generic [ref=e3588]:
+              - text: ￥ 0.00
+              - generic [ref=e3589]: SGD 0.00
+            - generic [ref=e3590]:
+              - text: ￥ 7.74
+              - generic [ref=e3591]: SGD 1.44
+            - generic [ref=e3592]:
+              - text: ￥ 0.00
+              - generic [ref=e3593]: SGD 0.00
+            - generic [ref=e3594]:
+              - text: ￥ 0.00
+              - generic [ref=e3595]: SGD 0.00
+            - generic [ref=e3596]:
+              - text: ￥ 1.45
+              - generic [ref=e3597]: SGD 0.27
+            - generic [ref=e3598]:
+              - text: ￥ 0.00
+              - generic [ref=e3599]: SGD 0.00
+            - generic [ref=e3600]:
+              - text: ￥ 0.00
+              - generic [ref=e3601]: SGD 0.00
+            - generic [ref=e3602]:
+              - text: ￥ 0.00
+              - generic [ref=e3603]: SGD 0.00
+            - generic [ref=e3604]:
+              - text: ￥ 0.00
+              - generic [ref=e3605]: SGD 0.00
+            - generic [ref=e3606]:
+              - text: ￥ 0.00
+              - generic [ref=e3607]: SGD 0.00
+            - generic [ref=e3608]:
+              - text: ￥ 0.00
+              - generic [ref=e3609]: SGD 0.00
+            - generic [ref=e3610]:
+              - text: ￥ 0.00
+              - generic [ref=e3611]: SGD 0.00
+            - generic [ref=e3616]:
+              - generic [ref=e3617]: ￥
+              - textbox [ref=e3620]: "17.50"
+            - generic [ref=e3621]: ¥0.00
+            - generic [ref=e3624]:
+              - generic [ref=e3625]: ￥
+              - textbox [ref=e3628]: "7.98"
+            - generic [ref=e3631]:
+              - generic [ref=e3632]: ￥
+              - textbox [ref=e3635]
+            - generic [ref=e3638]:
+              - generic [ref=e3639]: ￥
+              - textbox [ref=e3642]
+            - generic [ref=e3645]:
+              - generic [ref=e3646]: ￥
+              - textbox [ref=e3649]
+            - generic [ref=e3651]:
+              - button "明细" [ref=e3652] [cursor=pointer]:
+                - generic [ref=e3653]: 明细
+              - button "操作日志" [ref=e3654] [cursor=pointer]:
+                - generic [ref=e3655]: 操作日志
+          - generic [ref=e3657]:
+            - generic [ref=e3660] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e3663]:
+              - generic [ref=e3665]: 已完成
+              - generic [ref=e3667] [cursor=pointer]: 260228VUPCRNV4
+            - generic [ref=e3671]:
+              - link [ref=e3673]:
+                - /url: javascript:;
+                - img [ref=e3675]
+              - generic [ref=e3676]:
+                - generic [ref=e3677]:
+                  - generic [ref=e3678]: 产品ID
+                  - text: ：
+                  - generic [ref=e3679]: "42951797282"
+                - generic [ref=e3680]:
+                  - generic [ref=e3681]: 平台SKU
+                  - text: ：
+                  - generic [ref=e3682]: HJJ-XH-SJBLBB01
+                - generic [ref=e3683]:
+                  - generic [ref=e3684]: SKU ID
+                  - text: ：
+                  - generic [ref=e3685]: "270146787223"
+            - generic [ref=e3688]: "1"
+            - generic [ref=e3689]: Shopee新加坡3店
+            - generic [ref=e3690]: 2026-02-28 23:30:36
+            - generic [ref=e3691]: 2026-02-28 23:32:01
+            - generic [ref=e3692]: "--"
+            - generic [ref=e3693]: ￥ 4.38
+            - generic [ref=e3694]: 16.22%
+            - generic [ref=e3695]: 13.96%
+            - generic [ref=e3696]:
+              - text: ￥ 31.38
+              - generic [ref=e3697]: SGD 5.84
+            - generic [ref=e3698]:
+              - text: ￥ 0.00
+              - generic [ref=e3699]: SGD 0.00
+            - generic [ref=e3700]: "--"
+            - generic [ref=e3701]:
+              - text: ￥ 75.12
+              - generic [ref=e3702]: SGD 13.98
+            - generic [ref=e3703]:
+              - text: ￥ 64.43
+              - generic [ref=e3704]: SGD 11.99
+            - generic [ref=e3705]:
+              - text: ￥ 193.34
+              - generic [ref=e3706]: SGD 35.98
+            - generic [ref=e3707]:
+              - text: ￥ 128.91
+              - generic [ref=e3708]: SGD 0
+            - generic [ref=e3709]:
+              - text: ￥ 0.00
+              - generic [ref=e3710]: SGD 0.00
+            - generic [ref=e3711]:
+              - text: ￥ 0.00
+              - generic [ref=e3712]: SGD 0.00
+            - generic [ref=e3713]:
+              - text: ￥ 0.00
+              - generic [ref=e3714]: SGD 0.00
+            - generic [ref=e3715]:
+              - text: ￥ 0.00
+              - generic [ref=e3716]: SGD 0.00
+            - generic [ref=e3717]:
+              - text: ￥ 10.69
+              - generic [ref=e3718]: SGD 1.99
+            - generic [ref=e3719]:
+              - text: ￥ -27.94
+              - generic [ref=e3720]: SGD -5.20
+            - generic [ref=e3721]:
+              - text: ￥ 0.00
+              - generic [ref=e3722]: SGD 0.00
+            - generic [ref=e3723]:
+              - text: ￥ 0.00
+              - generic [ref=e3724]: SGD 0.00
+            - generic [ref=e3725]:
+              - text: ￥ 0.00
+              - generic [ref=e3726]: SGD 0.00
+            - generic [ref=e3727]:
+              - text: ￥ 10.32
+              - generic [ref=e3728]: SGD 1.92
+            - generic [ref=e3729]:
+              - text: ￥ 0.00
+              - generic [ref=e3730]: SGD 0.00
+            - generic [ref=e3731]:
+              - text: ￥ 0.00
+              - generic [ref=e3732]: SGD 0.00
+            - generic [ref=e3733]:
+              - text: ￥ 2.26
+              - generic [ref=e3734]: SGD 0.42
+            - generic [ref=e3735]:
+              - text: ￥ 0.00
+              - generic [ref=e3736]: SGD 0.00
+            - generic [ref=e3737]:
+              - text: ￥ 0.00
+              - generic [ref=e3738]: SGD 0.00
+            - generic [ref=e3739]:
+              - text: ￥ 0.00
+              - generic [ref=e3740]: SGD 0.00
+            - generic [ref=e3741]:
+              - text: ￥ 0.00
+              - generic [ref=e3742]: SGD 0.00
+            - generic [ref=e3743]:
+              - text: ￥ 0.00
+              - generic [ref=e3744]: SGD 0.00
+            - generic [ref=e3745]:
+              - text: ￥ 0.00
+              - generic [ref=e3746]: SGD 0.00
+            - generic [ref=e3747]:
+              - text: ￥ 0.00
+              - generic [ref=e3748]: SGD 0.00
+            - generic [ref=e3753]:
+              - generic [ref=e3754]: ￥
+              - textbox [ref=e3757]: "27.00"
+            - generic [ref=e3758]: ¥0.00
+            - generic [ref=e3761]:
+              - generic [ref=e3762]: ￥
+              - textbox [ref=e3765]
+            - generic [ref=e3768]:
+              - generic [ref=e3769]: ￥
+              - textbox [ref=e3772]
+            - generic [ref=e3775]:
+              - generic [ref=e3776]: ￥
+              - textbox [ref=e3779]
+            - generic [ref=e3782]:
+              - generic [ref=e3783]: ￥
+              - textbox [ref=e3786]
+            - generic [ref=e3788]:
+              - button "明细" [ref=e3789] [cursor=pointer]:
+                - generic [ref=e3790]: 明细
+              - button "操作日志" [ref=e3791] [cursor=pointer]:
+                - generic [ref=e3792]: 操作日志
+          - generic [ref=e3794]:
+            - generic [ref=e3797] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e3800]:
+              - generic [ref=e3802]: 已完成
+              - generic [ref=e3804]: 已退货/退款
+              - generic [ref=e3806] [cursor=pointer]: 260228VUCCA1UA
+            - generic [ref=e3810]:
+              - link [ref=e3812]:
+                - /url: javascript:;
+                - img [ref=e3814]
+              - generic [ref=e3815]:
+                - generic [ref=e3816]:
+                  - generic [ref=e3817]: 产品ID
+                  - text: ：
+                  - generic [ref=e3818]: "25393070494"
+                - generic [ref=e3819]:
+                  - generic [ref=e3820]: 平台SKU
+                  - text: ：
+                  - generic [ref=e3821]: HKR-DRB-2262
+                - generic [ref=e3822]:
+                  - generic [ref=e3823]: SKU ID
+                  - text: ：
+                  - generic [ref=e3824]: "260138152461"
+            - generic [ref=e3827]: "1"
+            - generic [ref=e3828]: Shopee4店包包
+            - generic [ref=e3829]: 2026-02-28 23:24:39
+            - generic [ref=e3830]: 2026-02-28 23:25:09
+            - generic [ref=e3831]: "--"
+            - generic [ref=e3832]: ￥ -63.79
+            - generic [ref=e3833]: "-250.35%"
+            - generic [ref=e3834]: "-166.51%"
+            - generic [ref=e3835]:
+              - text: ￥ -38.31
+              - generic [ref=e3836]: SGD -7.13
+            - generic [ref=e3837]:
+              - text: ￥ -38.31
+              - generic [ref=e3838]: SGD -7.13
+            - generic [ref=e3839]: 2026-03-24 00:49:36
+            - generic [ref=e3840]:
+              - text: ￥ 59.05
+              - generic [ref=e3841]: SGD 10.99
+            - generic [ref=e3842]:
+              - text: ￥ 48.36
+              - generic [ref=e3843]: SGD 9.00
+            - generic [ref=e3844]:
+              - text: ￥ 91.35
+              - generic [ref=e3845]: SGD 17.00
+            - generic [ref=e3846]:
+              - text: ￥ 42.99
+              - generic [ref=e3847]: SGD 0
+            - generic [ref=e3848]:
+              - text: ￥ 0.00
+              - generic [ref=e3849]: SGD 0.00
+            - generic [ref=e3850]:
+              - text: ￥ 0.00
+              - generic [ref=e3851]: SGD 0.00
+            - generic [ref=e3852]:
+              - text: ￥ 0.00
+              - generic [ref=e3853]: SGD 0.00
+            - generic [ref=e3854]:
+              - text: ￥ 0.00
+              - generic [ref=e3855]: SGD 0.00
+            - generic [ref=e3856]:
+              - text: ￥ 0.00
+              - generic [ref=e3857]: SGD 0.00
+            - generic [ref=e3858]:
+              - text: ￥ -23.05
+              - generic [ref=e3859]: SGD -4.29
+            - generic [ref=e3860]:
+              - text: ￥ 0.00
+              - generic [ref=e3861]: SGD 0.00
+            - generic [ref=e3862]:
+              - text: ￥ 15.26
+              - generic [ref=e3863]: SGD 2.84
+            - generic [ref=e3864]:
+              - text: ￥ 0.00
+              - generic [ref=e3865]: SGD 0.00
+            - generic [ref=e3866]:
+              - text: ￥ 0.00
+              - generic [ref=e3867]: SGD 0.00
+            - generic [ref=e3868]:
+              - text: ￥ 0.00
+              - generic [ref=e3869]: SGD 0.00
+            - generic [ref=e3870]:
+              - text: ￥ 0.00
+              - generic [ref=e3871]: SGD 0.00
+            - generic [ref=e3872]:
+              - text: ￥ 0.00
+              - generic [ref=e3873]: SGD 0.00
+            - generic [ref=e3874]:
+              - text: ￥ 0.00
+              - generic [ref=e3875]: SGD 0.00
+            - generic [ref=e3876]:
+              - text: ￥ 0.00
+              - generic [ref=e3877]: SGD 0.00
+            - generic [ref=e3878]:
+              - text: ￥ 0.00
+              - generic [ref=e3879]: SGD 0.00
+            - generic [ref=e3880]:
+              - text: ￥ 0.00
+              - generic [ref=e3881]: SGD 0.00
+            - generic [ref=e3882]:
+              - text: ￥ 0.00
+              - generic [ref=e3883]: SGD 0.00
+            - generic [ref=e3884]:
+              - text: ￥ 0.00
+              - generic [ref=e3885]: SGD 0.00
+            - generic [ref=e3886]:
+              - text: ￥ 48.36
+              - generic [ref=e3887]: SGD 9.00
+            - generic [ref=e3892]:
+              - generic [ref=e3893]: ￥
+              - textbox [ref=e3896]: "17.50"
+            - generic [ref=e3897]: ¥0.00
+            - generic [ref=e3900]:
+              - generic [ref=e3901]: ￥
+              - textbox [ref=e3904]: "7.98"
+            - generic [ref=e3907]:
+              - generic [ref=e3908]: ￥
+              - textbox [ref=e3911]
+            - generic [ref=e3914]:
+              - generic [ref=e3915]: ￥
+              - textbox [ref=e3918]
+            - generic [ref=e3921]:
+              - generic [ref=e3922]: ￥
+              - textbox [ref=e3925]
+            - generic [ref=e3927]:
+              - button "明细" [ref=e3928] [cursor=pointer]:
+                - generic [ref=e3929]: 明细
+              - button "操作日志" [ref=e3930] [cursor=pointer]:
+                - generic [ref=e3931]: 操作日志
+          - generic [ref=e3933]:
+            - generic [ref=e3936] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e3939]:
+              - generic [ref=e3941]: 已完成
+              - generic [ref=e3943] [cursor=pointer]: 260228VSKXYGQ7
+            - generic [ref=e3947]:
+              - link [ref=e3949]:
+                - /url: javascript:;
+                - img [ref=e3951]
+              - generic [ref=e3952]:
+                - generic [ref=e3953]:
+                  - generic [ref=e3954]: 产品ID
+                  - text: ：
+                  - generic [ref=e3955]: "40467757327"
+                - generic [ref=e3956]:
+                  - generic [ref=e3957]: 平台SKU
+                  - text: ：
+                  - generic [ref=e3958]: XH-HJJ-YXSB007
+                - generic [ref=e3959]:
+                  - generic [ref=e3960]: SKU ID
+                  - text: ：
+                  - generic [ref=e3961]: "301462337641"
+            - generic [ref=e3964]: "1"
+            - generic [ref=e3965]: Shopee3C店
+            - generic [ref=e3966]: 2026-02-28 22:53:10
+            - generic [ref=e3967]: 2026-02-28 22:53:22
+            - generic [ref=e3968]: "--"
+            - generic [ref=e3969]: ￥ 46.23
+            - generic [ref=e3970]: 59.39%
+            - generic [ref=e3971]: 37.26%
+            - generic [ref=e3972]:
+              - text: ￥ 124.07
+              - generic [ref=e3973]: SGD 23.09
+            - generic [ref=e3974]:
+              - text: ￥ 124.07
+              - generic [ref=e3975]: SGD 23.09
+            - generic [ref=e3976]: 2026-03-24 10:01:42
+            - generic [ref=e3977]:
+              - text: ￥ 179.47
+              - generic [ref=e3978]: SGD 33.40
+            - generic [ref=e3979]:
+              - text: ￥ 179.47
+              - generic [ref=e3980]: SGD 33.40
+            - generic [ref=e3981]:
+              - text: ￥ 649.60
+              - generic [ref=e3982]: SGD 120.89
+            - generic [ref=e3983]:
+              - text: ￥ 470.12
+              - generic [ref=e3984]: SGD 0
+            - generic [ref=e3985]:
+              - text: ￥ 0.00
+              - generic [ref=e3986]: SGD 0.00
+            - generic [ref=e3987]:
+              - text: ￥ 0.00
+              - generic [ref=e3988]: SGD 0.00
+            - generic [ref=e3989]:
+              - text: ￥ 0.00
+              - generic [ref=e3990]: SGD 0.00
+            - generic [ref=e3991]:
+              - text: ￥ 0.00
+              - generic [ref=e3992]: SGD 0.00
+            - generic [ref=e3993]:
+              - text: ￥ 0.00
+              - generic [ref=e3994]: SGD 0.00
+            - generic [ref=e3995]:
+              - text: ￥ -23.05
+              - generic [ref=e3996]: SGD -4.29
+            - generic [ref=e3997]:
+              - text: ￥ 10.69
+              - generic [ref=e3998]: SGD 1.99
+            - generic [ref=e3999]:
+              - text: ￥ 0.00
+              - generic [ref=e4000]: SGD 0.00
+            - generic [ref=e4001]:
+              - text: ￥ 0.00
+              - generic [ref=e4002]: SGD 0.00
+            - generic [ref=e4003]:
+              - text: ￥ 28.69
+              - generic [ref=e4004]: SGD 5.34
+            - generic [ref=e4005]:
+              - text: ￥ 0.00
+              - generic [ref=e4006]: SGD 0.00
+            - generic [ref=e4007]:
+              - text: ￥ 0.00
+              - generic [ref=e4008]: SGD 0.00
+            - generic [ref=e4009]:
+              - text: ￥ 5.37
+              - generic [ref=e4010]: SGD 1.00
+            - generic [ref=e4011]:
+              - text: ￥ 0.00
+              - generic [ref=e4012]: SGD 0.00
+            - generic [ref=e4013]:
+              - text: ￥ 0.00
+              - generic [ref=e4014]: SGD 0.00
+            - generic [ref=e4015]:
+              - text: ￥ 0.00
+              - generic [ref=e4016]: SGD 0.00
+            - generic [ref=e4017]:
+              - text: ￥ 0.00
+              - generic [ref=e4018]: SGD 0.00
+            - generic [ref=e4019]:
+              - text: ￥ 0.00
+              - generic [ref=e4020]: SGD 0.00
+            - generic [ref=e4021]:
+              - text: ￥ 0.00
+              - generic [ref=e4022]: SGD 0.00
+            - generic [ref=e4023]:
+              - text: ￥ 0.00
+              - generic [ref=e4024]: SGD 0.00
+            - generic [ref=e4029]:
+              - generic [ref=e4030]: ￥
+              - textbox [ref=e4033]: "69.86"
+            - generic [ref=e4034]: ¥0.00
+            - generic [ref=e4037]:
+              - generic [ref=e4038]: ￥
+              - textbox [ref=e4041]: "7.98"
+            - generic [ref=e4044]:
+              - generic [ref=e4045]: ￥
+              - textbox [ref=e4048]
+            - generic [ref=e4051]:
+              - generic [ref=e4052]: ￥
+              - textbox [ref=e4055]
+            - generic [ref=e4058]:
+              - generic [ref=e4059]: ￥
+              - textbox [ref=e4062]
+            - generic [ref=e4064]:
+              - button "明细" [ref=e4065] [cursor=pointer]:
+                - generic [ref=e4066]: 明细
+              - button "操作日志" [ref=e4067] [cursor=pointer]:
+                - generic [ref=e4068]: 操作日志
+          - generic [ref=e4070]:
+            - generic [ref=e4073] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e4076]:
+              - generic [ref=e4078]: 已完成
+              - generic [ref=e4080] [cursor=pointer]: 260228VRW0NWD9
+            - generic [ref=e4084]:
+              - link [ref=e4086]:
+                - /url: javascript:;
+                - img [ref=e4088]
+              - generic [ref=e4089]:
+                - generic [ref=e4090]:
+                  - generic [ref=e4091]: 产品ID
+                  - text: ：
+                  - generic [ref=e4092]: "24794626777"
+                - generic [ref=e4093]:
+                  - generic [ref=e4094]: 平台SKU
+                  - text: ：
+                  - generic [ref=e4095]: HKR-iCF6-035
+                - generic [ref=e4096]:
+                  - generic [ref=e4097]: SKU ID
+                  - text: ：
+                  - generic [ref=e4098]: "208474117237"
+            - generic [ref=e4101]: "1"
+            - generic [ref=e4102]: Shopee菲律宾2店
+            - generic [ref=e4103]: 2026-02-28 22:40:16
+            - generic [ref=e4104]: 2026-03-02 11:34:45
+            - generic [ref=e4105]: "--"
+            - generic [ref=e4106]: ￥ -0.04
+            - generic [ref=e4107]: "-0.09%"
+            - generic [ref=e4108]: "-0.09%"
+            - generic [ref=e4109]:
+              - text: ￥ 43.96
+              - generic [ref=e4110]: PHP 380.00
+            - generic [ref=e4111]:
+              - text: ￥ 43.96
+              - generic [ref=e4112]: PHP 380.00
+            - generic [ref=e4113]: 2026-03-20 12:52:42
+            - generic [ref=e4114]:
+              - text: ￥ 67.57
+              - generic [ref=e4115]: PHP 584.00
+            - generic [ref=e4116]:
+              - text: ￥ 80.87
+              - generic [ref=e4117]: PHP 699.00
+            - generic [ref=e4118]:
+              - text: ￥ 161.74
+              - generic [ref=e4119]: PHP 1398.00
+            - generic [ref=e4120]:
+              - text: ￥ 80.87
+              - generic [ref=e4121]: PHP 0
+            - generic [ref=e4122]:
+              - text: ￥ 0.00
+              - generic [ref=e4123]: PHP 0.00
+            - generic [ref=e4124]:
+              - text: ￥ 0.00
+              - generic [ref=e4125]: PHP 0.00
+            - generic [ref=e4126]:
+              - text: ￥ 4.05
+              - generic [ref=e4127]: PHP 35.00
+            - generic [ref=e4128]:
+              - text: ￥ 9.26
+              - generic [ref=e4129]: PHP 80.00
+            - generic [ref=e4130]:
+              - text: ￥ 0.00
+              - generic [ref=e4131]: PHP 0.00
+            - generic [ref=e4132]:
+              - text: ￥ -6.71
+              - generic [ref=e4133]: PHP -58.00
+            - generic [ref=e4134]:
+              - text: ￥ 0.00
+              - generic [ref=e4135]: PHP 0.00
+            - generic [ref=e4136]:
+              - text: ￥ 0.00
+              - generic [ref=e4137]: PHP 0.00
+            - generic [ref=e4138]:
+              - text: ￥ 0.00
+              - generic [ref=e4139]: PHP 0.00
+            - generic [ref=e4140]:
+              - text: ￥ 8.10
+              - generic [ref=e4141]: PHP 70.00
+            - generic [ref=e4142]:
+              - text: ￥ 0.00
+              - generic [ref=e4143]: PHP 0.00
+            - generic [ref=e4144]:
+              - text: ￥ 8.68
+              - generic [ref=e4145]: PHP 75.00
+            - generic [ref=e4146]:
+              - text: ￥ 1.74
+              - generic [ref=e4147]: PHP 15.00
+            - generic [ref=e4148]:
+              - text: ￥ 0.00
+              - generic [ref=e4149]: PHP 0.00
+            - generic [ref=e4150]:
+              - text: ￥ 0.00
+              - generic [ref=e4151]: PHP 0.00
+            - generic [ref=e4152]:
+              - text: ￥ 0.00
+              - generic [ref=e4153]: PHP 0.00
+            - generic [ref=e4154]:
+              - text: ￥ 0.00
+              - generic [ref=e4155]: PHP 0.00
+            - generic [ref=e4156]:
+              - text: ￥ 0.00
+              - generic [ref=e4157]: PHP 0.00
+            - generic [ref=e4158]:
+              - text: ￥ 0.00
+              - generic [ref=e4159]: PHP 0.00
+            - generic [ref=e4160]:
+              - text: ￥ 0.00
+              - generic [ref=e4161]: PHP 0.00
+            - generic [ref=e4166]:
+              - generic [ref=e4167]: ￥
+              - textbox [ref=e4170]: "44.00"
+            - generic [ref=e4171]: ¥0.00
+            - generic [ref=e4174]:
+              - generic [ref=e4175]: ￥
+              - textbox [ref=e4178]
+            - generic [ref=e4181]:
+              - generic [ref=e4182]: ￥
+              - textbox [ref=e4185]
+            - generic [ref=e4188]:
+              - generic [ref=e4189]: ￥
+              - textbox [ref=e4192]
+            - generic [ref=e4195]:
+              - generic [ref=e4196]: ￥
+              - textbox [ref=e4199]
+            - generic [ref=e4201]:
+              - button "明细" [ref=e4202] [cursor=pointer]:
+                - generic [ref=e4203]: 明细
+              - button "操作日志" [ref=e4204] [cursor=pointer]:
+                - generic [ref=e4205]: 操作日志
+          - generic [ref=e4207]:
+            - generic [ref=e4210] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e4213]:
+              - generic [ref=e4215]: 已完成
+              - generic [ref=e4217] [cursor=pointer]: 260228VRC03BYQ
+            - generic [ref=e4221]:
+              - link [ref=e4223]:
+                - /url: javascript:;
+                - img [ref=e4225]
+              - generic [ref=e4226]:
+                - generic [ref=e4227]:
+                  - generic [ref=e4228]: 产品ID
+                  - text: ：
+                  - generic [ref=e4229]: "29481355419"
+                - generic [ref=e4230]:
+                  - generic [ref=e4231]: 平台SKU
+                  - text: ：
+                  - generic [ref=e4232]: HKR-LRI9-Squeezer-035
+                - generic [ref=e4233]:
+                  - generic [ref=e4234]: SKU ID
+                  - text: ：
+                  - generic [ref=e4235]: "258028584697"
+            - generic [ref=e4238]: "1"
+            - generic [ref=e4239]: Shopee菲律宾2店
+            - generic [ref=e4240]: 2026-02-28 22:30:49
+            - generic [ref=e4241]: 2026-03-02 14:51:20
+            - generic [ref=e4242]: "--"
+            - generic [ref=e4243]: ￥ 1.30
+            - generic [ref=e4244]: 650%
+            - generic [ref=e4245]: 86.67%
+            - generic [ref=e4246]:
+              - text: ￥ 1.50
+              - generic [ref=e4247]: PHP 13.00
+            - generic [ref=e4248]:
+              - text: ￥ 1.50
+              - generic [ref=e4249]: PHP 13.00
+            - generic [ref=e4250]: 2026-03-20 15:31:52
+            - generic [ref=e4251]:
+              - text: ￥ 4.74
+              - generic [ref=e4252]: PHP 41.00
+            - generic [ref=e4253]:
+              - text: ￥ 3.47
+              - generic [ref=e4254]: PHP 30.00
+            - generic [ref=e4255]:
+              - text: ￥ 34.71
+              - generic [ref=e4256]: PHP 300.00
+            - generic [ref=e4257]:
+              - text: ￥ 31.24
+              - generic [ref=e4258]: PHP 0
+            - generic [ref=e4259]:
+              - text: ￥ 0.00
+              - generic [ref=e4260]: PHP 0.00
+            - generic [ref=e4261]:
+              - text: ￥ 0.00
+              - generic [ref=e4262]: PHP 0.00
+            - generic [ref=e4263]:
+              - text: ￥ 0.00
+              - generic [ref=e4264]: PHP 0.00
+            - generic [ref=e4265]:
+              - text: ￥ 0.00
+              - generic [ref=e4266]: PHP 0.00
+            - generic [ref=e4267]:
+              - text: ￥ 1.27
+              - generic [ref=e4268]: PHP 11.00
+            - generic [ref=e4269]:
+              - text: ￥ -4.17
+              - generic [ref=e4270]: PHP -36.00
+            - generic [ref=e4271]:
+              - text: ￥ 2.89
+              - generic [ref=e4272]: PHP 25.00
+            - generic [ref=e4273]:
+              - text: ￥ 0.00
+              - generic [ref=e4274]: PHP 0.00
+            - generic [ref=e4275]:
+              - text: ￥ 0.00
+              - generic [ref=e4276]: PHP 0.00
+            - generic [ref=e4277]:
+              - text: ￥ 0.46
+              - generic [ref=e4278]: PHP 4.00
+            - generic [ref=e4279]:
+              - text: ￥ 0.00
+              - generic [ref=e4280]: PHP 0.00
+            - generic [ref=e4281]:
+              - text: ￥ 1.04
+              - generic [ref=e4282]: PHP 9.00
+            - generic [ref=e4283]:
+              - text: ￥ 0.12
+              - generic [ref=e4284]: PHP 1.00
+            - generic [ref=e4285]:
+              - text: ￥ 0.00
+              - generic [ref=e4286]: PHP 0.00
+            - generic [ref=e4287]:
+              - text: ￥ 0.00
+              - generic [ref=e4288]: PHP 0.00
+            - generic [ref=e4289]:
+              - text: ￥ 0.00
+              - generic [ref=e4290]: PHP 0.00
+            - generic [ref=e4291]:
+              - text: ￥ 0.00
+              - generic [ref=e4292]: PHP 0.00
+            - generic [ref=e4293]:
+              - text: ￥ 0.00
+              - generic [ref=e4294]: PHP 0.00
+            - generic [ref=e4295]:
+              - text: ￥ 0.00
+              - generic [ref=e4296]: PHP 0.00
+            - generic [ref=e4297]:
+              - text: ￥ 0.00
+              - generic [ref=e4298]: PHP 0.00
+            - generic [ref=e4303]:
+              - generic [ref=e4304]: ￥
+              - textbox [ref=e4307]: "0.20"
+            - generic [ref=e4308]: ¥0.00
+            - generic [ref=e4311]:
+              - generic [ref=e4312]: ￥
+              - textbox [ref=e4315]
+            - generic [ref=e4318]:
+              - generic [ref=e4319]: ￥
+              - textbox [ref=e4322]
+            - generic [ref=e4325]:
+              - generic [ref=e4326]: ￥
+              - textbox [ref=e4329]
+            - generic [ref=e4332]:
+              - generic [ref=e4333]: ￥
+              - textbox [ref=e4336]
+            - generic [ref=e4338]:
+              - button "明细" [ref=e4339] [cursor=pointer]:
+                - generic [ref=e4340]: 明细
+              - button "操作日志" [ref=e4341] [cursor=pointer]:
+                - generic [ref=e4342]: 操作日志
+          - generic [ref=e4344]:
+            - generic [ref=e4347] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e4350]:
+              - generic [ref=e4352]: 已完成
+              - generic [ref=e4354] [cursor=pointer]: 260228VP9VU7SU
+            - generic [ref=e4358]:
+              - link [ref=e4360]:
+                - /url: javascript:;
+                - img [ref=e4362]
+              - generic [ref=e4363]:
+                - generic [ref=e4364]:
+                  - generic [ref=e4365]: 产品ID
+                  - text: ：
+                  - generic [ref=e4366]: "43459674570"
+                - generic [ref=e4367]:
+                  - generic [ref=e4368]: 平台SKU
+                  - text: ：
+                  - generic [ref=e4369]: HKR-CKMX-BLACK-035
+                - generic [ref=e4370]:
+                  - generic [ref=e4371]: SKU ID
+                  - text: ：
+                  - generic [ref=e4372]: "270811280106"
+            - generic [ref=e4375]: "1"
+            - generic [ref=e4376]: Shopee菲律宾2店
+            - generic [ref=e4377]: 2026-02-28 21:53:47
+            - generic [ref=e4378]: 2026-03-05 12:56:46
+            - generic [ref=e4379]: "--"
+            - generic [ref=e4380]: ￥ 3.48
+            - generic [ref=e4381]: 11.23%
+            - generic [ref=e4382]: 10.09%
+            - generic [ref=e4383]:
+              - text: ￥ 34.48
+              - generic [ref=e4384]: PHP 298.00
+            - generic [ref=e4385]:
+              - text: ￥ 34.48
+              - generic [ref=e4386]: PHP 298.00
+            - generic [ref=e4387]: 2026-03-23 14:07:24
+            - generic [ref=e4388]:
+              - text: ￥ 48.25
+              - generic [ref=e4389]: PHP 417.00
+            - generic [ref=e4390]:
+              - text: ￥ 56.58
+              - generic [ref=e4391]: PHP 489.00
+            - generic [ref=e4392]:
+              - text: ￥ 127.27
+              - generic [ref=e4393]: PHP 1100.00
+            - generic [ref=e4394]:
+              - text: ￥ 70.69
+              - generic [ref=e4395]: PHP 0
+            - generic [ref=e4396]:
+              - text: ￥ 0.00
+              - generic [ref=e4397]: PHP 0.00
+            - generic [ref=e4398]:
+              - text: ￥ 0.00
+              - generic [ref=e4399]: PHP 0.00
+            - generic [ref=e4400]:
+              - text: ￥ 2.89
+              - generic [ref=e4401]: PHP 25.00
+            - generic [ref=e4402]:
+              - text: ￥ 5.44
+              - generic [ref=e4403]: PHP 47.00
+            - generic [ref=e4404]:
+              - text: ￥ 0.00
+              - generic [ref=e4405]: PHP 0.00
+            - generic [ref=e4406]:
+              - text: ￥ -13.31
+              - generic [ref=e4407]: PHP -115.00
+            - generic [ref=e4408]:
+              - text: ￥ 13.31
+              - generic [ref=e4409]: PHP 115.00
+            - generic [ref=e4410]:
+              - text: ￥ 0.00
+              - generic [ref=e4411]: PHP 0.00
+            - generic [ref=e4412]:
+              - text: ￥ 0.00
+              - generic [ref=e4413]: PHP 0.00
+            - generic [ref=e4414]:
+              - text: ￥ 6.48
+              - generic [ref=e4415]: PHP 56.00
+            - generic [ref=e4416]:
+              - text: ￥ 0.00
+              - generic [ref=e4417]: PHP 0.00
+            - generic [ref=e4418]:
+              - text: ￥ 6.25
+              - generic [ref=e4419]: PHP 54.00
+            - generic [ref=e4420]:
+              - text: ￥ 1.16
+              - generic [ref=e4421]: PHP 10.00
+            - generic [ref=e4422]:
+              - text: ￥ 0.00
+              - generic [ref=e4423]: PHP 0.00
+            - generic [ref=e4424]:
+              - text: ￥ 0.00
+              - generic [ref=e4425]: PHP 0.00
+            - generic [ref=e4426]:
+              - text: ￥ 0.00
+              - generic [ref=e4427]: PHP 0.00
+            - generic [ref=e4428]:
+              - text: ￥ 0.00
+              - generic [ref=e4429]: PHP 0.00
+            - generic [ref=e4430]:
+              - text: ￥ 0.00
+              - generic [ref=e4431]: PHP 0.00
+            - generic [ref=e4432]:
+              - text: ￥ 0.00
+              - generic [ref=e4433]: PHP 0.00
+            - generic [ref=e4434]:
+              - text: ￥ 0.00
+              - generic [ref=e4435]: PHP 0.00
+            - generic [ref=e4440]:
+              - generic [ref=e4441]: ￥
+              - textbox [ref=e4444]: "31.00"
+            - generic [ref=e4445]: ¥0.00
+            - generic [ref=e4448]:
+              - generic [ref=e4449]: ￥
+              - textbox [ref=e4452]
+            - generic [ref=e4455]:
+              - generic [ref=e4456]: ￥
+              - textbox [ref=e4459]
+            - generic [ref=e4462]:
+              - generic [ref=e4463]: ￥
+              - textbox [ref=e4466]
+            - generic [ref=e4469]:
+              - generic [ref=e4470]: ￥
+              - textbox [ref=e4473]
+            - generic [ref=e4475]:
+              - button "明细" [ref=e4476] [cursor=pointer]:
+                - generic [ref=e4477]: 明细
+              - button "操作日志" [ref=e4478] [cursor=pointer]:
+                - generic [ref=e4479]: 操作日志
+          - generic [ref=e4481]:
+            - generic [ref=e4484] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e4487]:
+              - generic [ref=e4489]: 已完成
+              - generic [ref=e4491] [cursor=pointer]: 260228VNF5BXT9
+            - generic [ref=e4495]:
+              - link [ref=e4497]:
+                - /url: javascript:;
+                - img [ref=e4499]
+              - generic [ref=e4500]:
+                - generic [ref=e4501]:
+                  - generic [ref=e4502]: 产品ID
+                  - text: ：
+                  - generic [ref=e4503]: "29318358615"
+                - generic [ref=e4504]:
+                  - generic [ref=e4505]: 平台SKU
+                  - text: ：
+                  - generic [ref=e4506]: A-00031-blue
+                - generic [ref=e4507]:
+                  - generic [ref=e4508]: SKU ID
+                  - text: ：
+                  - generic [ref=e4509]: "257083285211"
+            - generic [ref=e4512]: "1"
+            - generic [ref=e4513]: Shopee新加坡3店
+            - generic [ref=e4514]: 2026-02-28 21:38:51
+            - generic [ref=e4515]: 2026-02-28 21:43:52
+            - generic [ref=e4516]: "--"
+            - generic [ref=e4517]: ￥ 23.86
+            - generic [ref=e4518]: 52.93%
+            - generic [ref=e4519]: 34.61%
+            - generic [ref=e4520]:
+              - text: ￥ 68.94
+              - generic [ref=e4521]: SGD 12.83
+            - generic [ref=e4522]:
+              - text: ￥ 68.94
+              - generic [ref=e4523]: SGD 12.83
+            - generic [ref=e4524]: 2026-03-24 13:01:28
+            - generic [ref=e4525]:
+              - text: ￥ 118.11
+              - generic [ref=e4526]: SGD 21.98
+            - generic [ref=e4527]:
+              - text: ￥ 107.42
+              - generic [ref=e4528]: SGD 19.99
+            - generic [ref=e4529]:
+              - text: ￥ 390.97
+              - generic [ref=e4530]: SGD 72.76
+            - generic [ref=e4531]:
+              - text: ￥ 283.56
+              - generic [ref=e4532]: SGD 0
+            - generic [ref=e4533]:
+              - text: ￥ 0.00
+              - generic [ref=e4534]: SGD 0.00
+            - generic [ref=e4535]:
+              - text: ￥ 0.00
+              - generic [ref=e4536]: SGD 0.00
+            - generic [ref=e4537]:
+              - text: ￥ 0.00
+              - generic [ref=e4538]: SGD 0.00
+            - generic [ref=e4539]:
+              - text: ￥ 0.00
+              - generic [ref=e4540]: SGD 0.00
+            - generic [ref=e4541]:
+              - text: ￥ 10.69
+              - generic [ref=e4542]: SGD 1.99
+            - generic [ref=e4543]:
+              - text: ￥ -23.05
+              - generic [ref=e4544]: SGD -4.29
+            - generic [ref=e4545]:
+              - text: ￥ 0.00
+              - generic [ref=e4546]: SGD 0.00
+            - generic [ref=e4547]:
+              - text: ￥ 0.00
+              - generic [ref=e4548]: SGD 0.00
+            - generic [ref=e4549]:
+              - text: ￥ 0.00
+              - generic [ref=e4550]: SGD 0.00
+            - generic [ref=e4551]:
+              - text: ￥ 17.20
+              - generic [ref=e4552]: SGD 3.20
+            - generic [ref=e4553]:
+              - text: ￥ 0.00
+              - generic [ref=e4554]: SGD 0.00
+            - generic [ref=e4555]:
+              - text: ￥ 0.00
+              - generic [ref=e4556]: SGD 0.00
+            - generic [ref=e4557]:
+              - text: ￥ 3.55
+              - generic [ref=e4558]: SGD 0.66
+            - generic [ref=e4559]:
+              - text: ￥ 0.00
+              - generic [ref=e4560]: SGD 0.00
+            - generic [ref=e4561]:
+              - text: ￥ 0.00
+              - generic [ref=e4562]: SGD 0.00
+            - generic [ref=e4563]:
+              - text: ￥ 0.00
+              - generic [ref=e4564]: SGD 0.00
+            - generic [ref=e4565]:
+              - text: ￥ 0.00
+              - generic [ref=e4566]: SGD 0.00
+            - generic [ref=e4567]:
+              - text: ￥ 0.00
+              - generic [ref=e4568]: SGD 0.00
+            - generic [ref=e4569]:
+              - text: ￥ 0.00
+              - generic [ref=e4570]: SGD 0.00
+            - generic [ref=e4571]:
+              - text: ￥ 0.00
+              - generic [ref=e4572]: SGD 0.00
+            - generic [ref=e4577]:
+              - generic [ref=e4578]: ￥
+              - textbox [ref=e4581]: "36.00"
+            - generic [ref=e4582]: ¥0.00
+            - generic [ref=e4585]:
+              - generic [ref=e4586]: ￥
+              - textbox [ref=e4589]: "9.08"
+            - generic [ref=e4592]:
+              - generic [ref=e4593]: ￥
+              - textbox [ref=e4596]
+            - generic [ref=e4599]:
+              - generic [ref=e4600]: ￥
+              - textbox [ref=e4603]
+            - generic [ref=e4606]:
+              - generic [ref=e4607]: ￥
+              - textbox [ref=e4610]
+            - generic [ref=e4612]:
+              - button "明细" [ref=e4613] [cursor=pointer]:
+                - generic [ref=e4614]: 明细
+              - button "操作日志" [ref=e4615] [cursor=pointer]:
+                - generic [ref=e4616]: 操作日志
+          - generic [ref=e4618]:
+            - generic [ref=e4621] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e4624]:
+              - generic [ref=e4626]: 已完成
+              - generic [ref=e4628] [cursor=pointer]: 260228VNEXQBD2
+            - generic [ref=e4632]:
+              - link [ref=e4634]:
+                - /url: javascript:;
+                - img [ref=e4636]
+              - generic [ref=e4637]:
+                - generic [ref=e4638]:
+                  - generic [ref=e4639]: 产品ID
+                  - text: ：
+                  - generic [ref=e4640]: "28421131194"
+                - generic [ref=e4641]:
+                  - generic [ref=e4642]: 平台SKU
+                  - text: ：
+                  - generic [ref=e4643]: SBF001-MLD-035
+                - generic [ref=e4644]:
+                  - generic [ref=e4645]: SKU ID
+                  - text: ：
+                  - generic [ref=e4646]: "205654234487"
+            - generic [ref=e4649]: "1"
+            - generic [ref=e4650]: Shopee菲律宾1店
+            - generic [ref=e4651]: 2026-02-28 21:38:43
+            - generic [ref=e4652]: 2026-03-02 10:29:20
+            - generic [ref=e4653]: "--"
+            - generic [ref=e4654]: ￥ 6.77
+            - generic [ref=e4655]: 30.09%
+            - generic [ref=e4656]: 23.13%
+            - generic [ref=e4657]:
+              - text: ￥ 29.27
+              - generic [ref=e4658]: PHP 253.00
+            - generic [ref=e4659]:
+              - text: ￥ 29.27
+              - generic [ref=e4660]: PHP 253.00
+            - generic [ref=e4661]: 2026-03-20 11:19:26
+            - generic [ref=e4662]:
+              - text: ￥ 38.18
+              - generic [ref=e4663]: PHP 330.00
+            - generic [ref=e4664]:
+              - text: ￥ 38.18
+              - generic [ref=e4665]: PHP 330.00
+            - generic [ref=e4666]:
+              - text: ￥ 76.36
+              - generic [ref=e4667]: PHP 660.00
+            - generic [ref=e4668]:
+              - text: ￥ 38.18
+              - generic [ref=e4669]: PHP 0
+            - generic [ref=e4670]:
+              - text: ￥ 0.00
+              - generic [ref=e4671]: PHP 0.00
+            - generic [ref=e4672]:
+              - text: ￥ 0.00
+              - generic [ref=e4673]: PHP 0.00
+            - generic [ref=e4674]:
+              - text: ￥ 0.00
+              - generic [ref=e4675]: PHP 0.00
+            - generic [ref=e4676]:
+              - text: ￥ 0.00
+              - generic [ref=e4677]: PHP 0.00
+            - generic [ref=e4678]:
+              - text: ￥ 0.00
+              - generic [ref=e4679]: PHP 0.00
+            - generic [ref=e4680]:
+              - text: ￥ -4.17
+              - generic [ref=e4681]: PHP -36.00
+            - generic [ref=e4682]:
+              - text: ￥ 4.17
+              - generic [ref=e4683]: PHP 36.00
+            - generic [ref=e4684]:
+              - text: ￥ 0.00
+              - generic [ref=e4685]: PHP 0.00
+            - generic [ref=e4686]:
+              - text: ￥ 0.00
+              - generic [ref=e4687]: PHP 0.00
+            - generic [ref=e4688]:
+              - text: ￥ 4.63
+              - generic [ref=e4689]: PHP 40.00
+            - generic [ref=e4690]:
+              - text: ￥ 0.00
+              - generic [ref=e4691]: PHP 0.00
+            - generic [ref=e4692]:
+              - text: ￥ 2.66
+              - generic [ref=e4693]: PHP 23.00
+            - generic [ref=e4694]:
+              - text: ￥ 0.81
+              - generic [ref=e4695]: PHP 7.00
+            - generic [ref=e4696]:
+              - text: ￥ 0.00
+              - generic [ref=e4697]: PHP 0.00
+            - generic [ref=e4698]:
+              - text: ￥ 0.00
+              - generic [ref=e4699]: PHP 0.00
+            - generic [ref=e4700]:
+              - text: ￥ 0.00
+              - generic [ref=e4701]: PHP 0.00
+            - generic [ref=e4702]:
+              - text: ￥ 0.00
+              - generic [ref=e4703]: PHP 0.00
+            - generic [ref=e4704]:
+              - text: ￥ 0.00
+              - generic [ref=e4705]: PHP 0.00
+            - generic [ref=e4706]:
+              - text: ￥ 0.00
+              - generic [ref=e4707]: PHP 0.00
+            - generic [ref=e4708]:
+              - text: ￥ 0.00
+              - generic [ref=e4709]: PHP 0.00
+            - generic [ref=e4714]:
+              - generic [ref=e4715]: ￥
+              - textbox [ref=e4718]: "22.50"
+            - generic [ref=e4719]: ¥0.00
+            - generic [ref=e4722]:
+              - generic [ref=e4723]: ￥
+              - textbox [ref=e4726]
+            - generic [ref=e4729]:
+              - generic [ref=e4730]: ￥
+              - textbox [ref=e4733]
+            - generic [ref=e4736]:
+              - generic [ref=e4737]: ￥
+              - textbox [ref=e4740]
+            - generic [ref=e4743]:
+              - generic [ref=e4744]: ￥
+              - textbox [ref=e4747]
+            - generic [ref=e4749]:
+              - button "明细" [ref=e4750] [cursor=pointer]:
+                - generic [ref=e4751]: 明细
+              - button "操作日志" [ref=e4752] [cursor=pointer]:
+                - generic [ref=e4753]: 操作日志
+          - generic [ref=e4755]:
+            - generic [ref=e4758] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e4761]:
+              - generic [ref=e4763]: 已完成
+              - generic [ref=e4765] [cursor=pointer]: 260228VN5P42G6
+            - generic [ref=e4767]:
+              - generic [ref=e4769]:
+                - link [ref=e4771]:
+                  - /url: javascript:;
+                  - img [ref=e4773]
+                - generic [ref=e4774]:
+                  - generic [ref=e4775]:
+                    - generic [ref=e4776]: 产品ID
+                    - text: ：
+                    - generic [ref=e4777]: "26581294153"
+                  - generic [ref=e4778]:
+                    - generic [ref=e4779]: 平台SKU
+                    - text: ：
+                    - generic [ref=e4780]: XH-TD-004-White-s
+                  - generic [ref=e4781]:
+                    - generic [ref=e4782]: SKU ID
+                    - text: ：
+                    - generic [ref=e4783]: "248024618281"
+              - generic [ref=e4785]:
+                - link [ref=e4787]:
+                  - /url: javascript:;
+                  - img [ref=e4789]
+                - generic [ref=e4790]:
+                  - generic [ref=e4791]:
+                    - generic [ref=e4792]: 产品ID
+                    - text: ：
+                    - generic [ref=e4793]: "26581294153"
+                  - generic [ref=e4794]:
+                    - generic [ref=e4795]: 平台SKU
+                    - text: ：
+                    - generic [ref=e4796]: XH-TD-004-Black-s
+                  - generic [ref=e4797]:
+                    - generic [ref=e4798]: SKU ID
+                    - text: ：
+                    - generic [ref=e4799]: "248024618279"
+            - generic [ref=e4801]:
+              - generic [ref=e4802]: "1"
+              - generic [ref=e4803]: "1"
+            - generic [ref=e4804]: Shopee4店包包
+            - generic [ref=e4805]: 2026-02-28 21:33:32
+            - generic [ref=e4806]: 2026-02-28 21:33:37
+            - generic [ref=e4807]: "--"
+            - generic [ref=e4808]: ￥ 46.89
+            - generic [ref=e4809]: 67.88%
+            - generic [ref=e4810]: 40.43%
+            - generic [ref=e4811]:
+              - text: ￥ 115.97
+              - generic [ref=e4812]: SGD 21.50
+            - generic [ref=e4813]:
+              - text: ￥ 115.97
+              - generic [ref=e4814]: SGD 21.50
+            - generic [ref=e4815]: 2026-03-17 17:27:09
+            - generic [ref=e4816]:
+              - text: ￥ 159.39
+              - generic [ref=e4817]: SGD 29.55
+            - generic [ref=e4818]:
+              - text: ￥ 177.78
+              - generic [ref=e4819]: SGD 32.96
+            - generic [ref=e4820]:
+              - text: ￥ 517.58
+              - generic [ref=e4821]: SGD 95.96
+            - generic [ref=e4822]:
+              - text: ￥ 339.81
+              - generic [ref=e4823]: SGD 0
+            - generic [ref=e4824]:
+              - text: ￥ 0.00
+              - generic [ref=e4825]: SGD 0.00
+            - generic [ref=e4826]:
+              - text: ￥ 9.49
+              - generic [ref=e4827]: SGD 1.76
+            - generic [ref=e4828]:
+              - text: ￥ 8.90
+              - generic [ref=e4829]: SGD 1.65
+            - generic [ref=e4830]:
+              - text: ￥ 0.00
+              - generic [ref=e4831]: SGD 0.00
+            - generic [ref=e4832]:
+              - text: ￥ 0.00
+              - generic [ref=e4833]: SGD 0.00
+            - generic [ref=e4834]:
+              - text: ￥ -23.14
+              - generic [ref=e4835]: SGD -4.29
+            - generic [ref=e4836]:
+              - text: ￥ 10.73
+              - generic [ref=e4837]: SGD 1.99
+            - generic [ref=e4838]:
+              - text: ￥ 0.00
+              - generic [ref=e4839]: SGD 0.00
+            - generic [ref=e4840]:
+              - text: ￥ 0.00
+              - generic [ref=e4841]: SGD 0.00
+            - generic [ref=e4842]:
+              - text: ￥ 27.02
+              - generic [ref=e4843]: SGD 5.01
+            - generic [ref=e4844]:
+              - text: ￥ 0.00
+              - generic [ref=e4845]: SGD 0.00
+            - generic [ref=e4846]:
+              - text: ￥ 0.00
+              - generic [ref=e4847]: SGD 0.00
+            - generic [ref=e4848]:
+              - text: ￥ 5.07
+              - generic [ref=e4849]: SGD 0.94
+            - generic [ref=e4850]:
+              - text: ￥ 0.00
+              - generic [ref=e4851]: SGD 0.00
+            - generic [ref=e4852]:
+              - text: ￥ 0.00
+              - generic [ref=e4853]: SGD 0.00
+            - generic [ref=e4854]:
+              - text: ￥ 0.00
+              - generic [ref=e4855]: SGD 0.00
+            - generic [ref=e4856]:
+              - text: ￥ 0.00
+              - generic [ref=e4857]: SGD 0.00
+            - generic [ref=e4858]:
+              - text: ￥ 0.00
+              - generic [ref=e4859]: SGD 0.00
+            - generic [ref=e4860]:
+              - text: ￥ 0.00
+              - generic [ref=e4861]: SGD 0.00
+            - generic [ref=e4862]:
+              - text: ￥ 0.00
+              - generic [ref=e4863]: SGD 0.00
+            - generic [ref=e4865]:
+              - generic [ref=e4868]:
+                - generic [ref=e4869]: ￥
+                - textbox [ref=e4872]: "30.00"
+              - generic [ref=e4875]:
+                - generic [ref=e4876]: ￥
+                - textbox [ref=e4879]: "30.00"
+            - generic [ref=e4880]: ¥0.00
+            - generic [ref=e4883]:
+              - generic [ref=e4884]: ￥
+              - textbox [ref=e4887]: "9.08"
+            - generic [ref=e4890]:
+              - generic [ref=e4891]: ￥
+              - textbox [ref=e4894]
+            - generic [ref=e4897]:
+              - generic [ref=e4898]: ￥
+              - textbox [ref=e4901]
+            - generic [ref=e4904]:
+              - generic [ref=e4905]: ￥
+              - textbox [ref=e4908]
+            - generic [ref=e4910]:
+              - button "明细" [ref=e4911] [cursor=pointer]:
+                - generic [ref=e4912]: 明细
+              - button "操作日志" [ref=e4913] [cursor=pointer]:
+                - generic [ref=e4914]: 操作日志
+          - generic [ref=e4916]:
+            - generic [ref=e4919] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e4922]:
+              - generic [ref=e4924]: 已完成
+              - generic [ref=e4926] [cursor=pointer]: 260228VMXP2660
+            - generic [ref=e4930]:
+              - link [ref=e4932]:
+                - /url: javascript:;
+                - img [ref=e4934]
+              - generic [ref=e4935]:
+                - generic [ref=e4936]:
+                  - generic [ref=e4937]: 产品ID
+                  - text: ：
+                  - generic [ref=e4938]: "27371467354"
+                - generic [ref=e4939]:
+                  - generic [ref=e4940]: 平台SKU
+                  - text: ：
+                  - generic [ref=e4941]: SBF004-PURPLE-6-035
+                - generic [ref=e4942]:
+                  - generic [ref=e4943]: SKU ID
+                  - text: ：
+                  - generic [ref=e4944]: "227187352325"
+            - generic [ref=e4947]: "1"
+            - generic [ref=e4948]: Shopee菲律宾1店
+            - generic [ref=e4949]: 2026-02-28 21:29:37
+            - generic [ref=e4950]: 2026-03-02 12:52:04
+            - generic [ref=e4951]: "--"
+            - generic [ref=e4952]: ￥ 25.71
+            - generic [ref=e4953]: 35.23%
+            - generic [ref=e4954]: 26.05%
+            - generic [ref=e4955]:
+              - text: ￥ 98.69
+              - generic [ref=e4956]: PHP 853.00
+            - generic [ref=e4957]:
+              - text: ￥ 98.69
+              - generic [ref=e4958]: PHP 853.00
+            - generic [ref=e4959]: 2026-03-17 15:30:41
+            - generic [ref=e4960]:
+              - text: ￥ 127.15
+              - generic [ref=e4961]: PHP 1099.00
+            - generic [ref=e4962]:
+              - text: ￥ 127.15
+              - generic [ref=e4963]: PHP 1099.00
+            - generic [ref=e4964]:
+              - text: ￥ 254.30
+              - generic [ref=e4965]: PHP 2198.00
+            - generic [ref=e4966]:
+              - text: ￥ 127.15
+              - generic [ref=e4967]: PHP 0
+            - generic [ref=e4968]:
+              - text: ￥ 0.00
+              - generic [ref=e4969]: PHP 0.00
+            - generic [ref=e4970]:
+              - text: ￥ 0.00
+              - generic [ref=e4971]: PHP 0.00
+            - generic [ref=e4972]:
+              - text: ￥ 0.00
+              - generic [ref=e4973]: PHP 0.00
+            - generic [ref=e4974]:
+              - text: ￥ 0.00
+              - generic [ref=e4975]: PHP 0.00
+            - generic [ref=e4976]:
+              - text: ￥ 0.00
+              - generic [ref=e4977]: PHP 0.00
+            - generic [ref=e4978]:
+              - text: ￥ -4.17
+              - generic [ref=e4979]: PHP -36.00
+            - generic [ref=e4980]:
+              - text: ￥ 4.17
+              - generic [ref=e4981]: PHP 36.00
+            - generic [ref=e4982]:
+              - text: ￥ 0.00
+              - generic [ref=e4983]: PHP 0.00
+            - generic [ref=e4984]:
+              - text: ￥ 0.00
+              - generic [ref=e4985]: PHP 0.00
+            - generic [ref=e4986]:
+              - text: ￥ 15.27
+              - generic [ref=e4987]: PHP 132.00
+            - generic [ref=e4988]:
+              - text: ￥ 0.00
+              - generic [ref=e4989]: PHP 0.00
+            - generic [ref=e4990]:
+              - text: ￥ 7.75
+              - generic [ref=e4991]: PHP 67.00
+            - generic [ref=e4992]:
+              - text: ￥ 2.89
+              - generic [ref=e4993]: PHP 25.00
+            - generic [ref=e4994]:
+              - text: ￥ 0.00
+              - generic [ref=e4995]: PHP 0.00
+            - generic [ref=e4996]:
+              - text: ￥ 0.00
+              - generic [ref=e4997]: PHP 0.00
+            - generic [ref=e4998]:
+              - text: ￥ 0.00
+              - generic [ref=e4999]: PHP 0.00
+            - generic [ref=e5000]:
+              - text: ￥ 0.00
+              - generic [ref=e5001]: PHP 0.00
+            - generic [ref=e5002]:
+              - text: ￥ 0.00
+              - generic [ref=e5003]: PHP 0.00
+            - generic [ref=e5004]:
+              - text: ￥ 0.00
+              - generic [ref=e5005]: PHP 0.00
+            - generic [ref=e5006]:
+              - text: ￥ 0.00
+              - generic [ref=e5007]: PHP 0.00
+            - generic [ref=e5012]:
+              - generic [ref=e5013]: ￥
+              - textbox [ref=e5016]: "72.98"
+            - generic [ref=e5017]: ¥0.00
+            - generic [ref=e5020]:
+              - generic [ref=e5021]: ￥
+              - textbox [ref=e5024]
+            - generic [ref=e5027]:
+              - generic [ref=e5028]: ￥
+              - textbox [ref=e5031]
+            - generic [ref=e5034]:
+              - generic [ref=e5035]: ￥
+              - textbox [ref=e5038]
+            - generic [ref=e5041]:
+              - generic [ref=e5042]: ￥
+              - textbox [ref=e5045]
+            - generic [ref=e5047]:
+              - button "明细" [ref=e5048] [cursor=pointer]:
+                - generic [ref=e5049]: 明细
+              - button "操作日志" [ref=e5050] [cursor=pointer]:
+                - generic [ref=e5051]: 操作日志
+          - generic [ref=e5055]:
+            - generic [ref=e5058] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e5061]:
+              - generic [ref=e5063]: 已完成
+              - generic [ref=e5065] [cursor=pointer]: 260228VK9FR6U7
+            - generic [ref=e5069]:
+              - link [ref=e5071]:
+                - /url: javascript:;
+                - img [ref=e5073]
+              - generic [ref=e5074]:
+                - generic [ref=e5075]:
+                  - generic [ref=e5076]: 产品ID
+                  - text: ：
+                  - generic [ref=e5077]: "25393070494"
+                - generic [ref=e5078]:
+                  - generic [ref=e5079]: 平台SKU
+                  - text: ：
+                  - generic [ref=e5080]: HKR-DRB-Pink
+                - generic [ref=e5081]:
+                  - generic [ref=e5082]: SKU ID
+                  - text: ：
+                  - generic [ref=e5083]: "218346430446"
+            - generic [ref=e5086]: "1"
+            - generic [ref=e5087]: Shopee4店包包
+            - generic [ref=e5088]: 2026-02-28 20:59:53
+            - generic [ref=e5089]: 2026-02-28 20:59:57
+            - generic [ref=e5090]: "--"
+            - generic [ref=e5091]: ￥ 2.71
+            - generic [ref=e5092]: 12.44%
+            - generic [ref=e5093]: 11.07%
+            - generic [ref=e5094]:
+              - text: ￥ 24.49
+              - generic [ref=e5095]: SGD 4.54
+            - generic [ref=e5096]:
+              - text: ￥ 24.49
+              - generic [ref=e5097]: SGD 4.54
+            - generic [ref=e5098]: 2026-03-20 12:59:02
+            - generic [ref=e5099]:
+              - text: ￥ 48.54
+              - generic [ref=e5100]: SGD 9.00
+            - generic [ref=e5101]:
+              - text: ￥ 48.54
+              - generic [ref=e5102]: SGD 9.00
+            - generic [ref=e5103]:
+              - text: ￥ 91.69
+              - generic [ref=e5104]: SGD 17.00
+            - generic [ref=e5105]:
+              - text: ￥ 43.15
+              - generic [ref=e5106]: SGD 0
+            - generic [ref=e5107]:
+              - text: ￥ 0.00
+              - generic [ref=e5108]: SGD 0.00
+            - generic [ref=e5109]:
+              - text: ￥ 0.00
+              - generic [ref=e5110]: SGD 0.00
+            - generic [ref=e5111]:
+              - text: ￥ 0.00
+              - generic [ref=e5112]: SGD 0.00
+            - generic [ref=e5113]:
+              - text: ￥ 0.00
+              - generic [ref=e5114]: SGD 0.00
+            - generic [ref=e5115]:
+              - text: ￥ 0.00
+              - generic [ref=e5116]: SGD 0.00
+            - generic [ref=e5117]:
+              - text: ￥ -12.41
+              - generic [ref=e5118]: SGD -2.30
+            - generic [ref=e5119]:
+              - text: ￥ 0.00
+              - generic [ref=e5120]: SGD 0.00
+            - generic [ref=e5121]:
+              - text: ￥ 0.00
+              - generic [ref=e5122]: SGD 0.00
+            - generic [ref=e5123]:
+              - text: ￥ 0.00
+              - generic [ref=e5124]: SGD 0.00
+            - generic [ref=e5125]:
+              - text: ￥ 7.77
+              - generic [ref=e5126]: SGD 1.44
+            - generic [ref=e5127]:
+              - text: ￥ 0.00
+              - generic [ref=e5128]: SGD 0.00
+            - generic [ref=e5129]:
+              - text: ￥ 0.00
+              - generic [ref=e5130]: SGD 0.00
+            - generic [ref=e5131]:
+              - text: ￥ 1.46
+              - generic [ref=e5132]: SGD 0.27
+            - generic [ref=e5133]:
+              - text: ￥ 0.00
+              - generic [ref=e5134]: SGD 0.00
+            - generic [ref=e5135]:
+              - text: ￥ 0.00
+              - generic [ref=e5136]: SGD 0.00
+            - generic [ref=e5137]:
+              - text: ￥ 0.00
+              - generic [ref=e5138]: SGD 0.00
+            - generic [ref=e5139]:
+              - text: ￥ 0.00
+              - generic [ref=e5140]: SGD 0.00
+            - generic [ref=e5141]:
+              - text: ￥ 0.00
+              - generic [ref=e5142]: SGD 0.00
+            - generic [ref=e5143]:
+              - text: ￥ 0.00
+              - generic [ref=e5144]: SGD 0.00
+            - generic [ref=e5145]:
+              - text: ￥ 0.00
+              - generic [ref=e5146]: SGD 0.00
+            - generic [ref=e5151]:
+              - generic [ref=e5152]: ￥
+              - textbox [ref=e5155]: "13.80"
+            - generic [ref=e5156]: ¥0.00
+            - generic [ref=e5159]:
+              - generic [ref=e5160]: ￥
+              - textbox [ref=e5163]: "7.98"
+            - generic [ref=e5166]:
+              - generic [ref=e5167]: ￥
+              - textbox [ref=e5170]
+            - generic [ref=e5173]:
+              - generic [ref=e5174]: ￥
+              - textbox [ref=e5177]
+            - generic [ref=e5180]:
+              - generic [ref=e5181]: ￥
+              - textbox [ref=e5184]
+            - generic [ref=e5186]:
+              - button "明细" [ref=e5187] [cursor=pointer]:
+                - generic [ref=e5188]: 明细
+              - button "操作日志" [ref=e5189] [cursor=pointer]:
+                - generic [ref=e5190]: 操作日志
+          - generic [ref=e5193]:
+            - generic [ref=e5196] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e5199]:
+              - generic [ref=e5201]: 已完成
+              - generic [ref=e5203] [cursor=pointer]: 260228VK8M1UUH
+            - generic [ref=e5207]:
+              - link [ref=e5209]:
+                - /url: javascript:;
+                - img [ref=e5211]
+              - generic [ref=e5212]:
+                - generic [ref=e5213]:
+                  - generic [ref=e5214]: 产品ID
+                  - text: ：
+                  - generic [ref=e5215]: "28128327273"
+                - generic [ref=e5216]:
+                  - generic [ref=e5217]: 平台SKU
+                  - text: ：
+                  - generic [ref=e5218]: XH-PF-001
+                - generic [ref=e5219]:
+                  - generic [ref=e5220]: SKU ID
+                  - text: ：
+                  - generic [ref=e5221]: "109419027409"
+            - generic [ref=e5224]: "1"
+            - generic [ref=e5225]: Shopee4店包包
+            - generic [ref=e5226]: 2026-02-28 20:59:23
+            - generic [ref=e5227]: 2026-02-28 20:59:27
+            - generic [ref=e5228]: "--"
+            - generic [ref=e5229]: ￥ 10.20
+            - generic [ref=e5230]: 35.69%
+            - generic [ref=e5231]: 26.3%
+            - generic [ref=e5232]:
+              - text: ￥ 38.78
+              - generic [ref=e5233]: SGD 7.19
+            - generic [ref=e5234]:
+              - text: ￥ 38.78
+              - generic [ref=e5235]: SGD 7.19
+            - generic [ref=e5236]: 2026-03-21 18:01:13
+            - generic [ref=e5237]:
+              - text: ￥ 65.43
+              - generic [ref=e5238]: SGD 12.13
+            - generic [ref=e5239]:
+              - text: ￥ 67.31
+              - generic [ref=e5240]: SGD 12.48
+            - generic [ref=e5241]:
+              - text: ￥ 123.84
+              - generic [ref=e5242]: SGD 22.96
+            - generic [ref=e5243]:
+              - text: ￥ 56.53
+              - generic [ref=e5244]: SGD 0
+            - generic [ref=e5245]:
+              - text: ￥ 0.00
+              - generic [ref=e5246]: SGD 0.00
+            - generic [ref=e5247]:
+              - text: ￥ 0.00
+              - generic [ref=e5248]: SGD 0.00
+            - generic [ref=e5249]:
+              - text: ￥ 0.00
+              - generic [ref=e5250]: SGD 0.00
+            - generic [ref=e5251]:
+              - text: ￥ 1.89
+              - generic [ref=e5252]: SGD 0.35
+            - generic [ref=e5253]:
+              - text: ￥ 0.00
+              - generic [ref=e5254]: SGD 0.00
+            - generic [ref=e5255]:
+              - text: ￥ -12.41
+              - generic [ref=e5256]: SGD -2.30
+            - generic [ref=e5257]:
+              - text: ￥ 0.00
+              - generic [ref=e5258]: SGD 0.00
+            - generic [ref=e5259]:
+              - text: ￥ 0.00
+              - generic [ref=e5260]: SGD 0.00
+            - generic [ref=e5261]:
+              - text: ￥ 0.00
+              - generic [ref=e5262]: SGD 0.00
+            - generic [ref=e5263]:
+              - text: ￥ 10.79
+              - generic [ref=e5264]: SGD 2.00
+            - generic [ref=e5265]:
+              - text: ￥ 0.00
+              - generic [ref=e5266]: SGD 0.00
+            - generic [ref=e5267]:
+              - text: ￥ 0.00
+              - generic [ref=e5268]: SGD 0.00
+            - generic [ref=e5269]:
+              - text: ￥ 2.00
+              - generic [ref=e5270]: SGD 0.37
+            - generic [ref=e5271]:
+              - text: ￥ 0.00
+              - generic [ref=e5272]: SGD 0.00
+            - generic [ref=e5273]:
+              - text: ￥ 0.00
+              - generic [ref=e5274]: SGD 0.00
+            - generic [ref=e5275]:
+              - text: ￥ 0.00
+              - generic [ref=e5276]: SGD 0.00
+            - generic [ref=e5277]:
+              - text: ￥ 0.00
+              - generic [ref=e5278]: SGD 0.00
+            - generic [ref=e5279]:
+              - text: ￥ 0.00
+              - generic [ref=e5280]: SGD 0.00
+            - generic [ref=e5281]:
+              - text: ￥ 0.00
+              - generic [ref=e5282]: SGD 0.00
+            - generic [ref=e5283]:
+              - text: ￥ 0.00
+              - generic [ref=e5284]: SGD 0.00
+            - generic [ref=e5289]:
+              - generic [ref=e5290]: ￥
+              - textbox [ref=e5293]: "19.50"
+            - generic [ref=e5294]: ¥0.00
+            - generic [ref=e5297]:
+              - generic [ref=e5298]: ￥
+              - textbox [ref=e5301]: "9.08"
+            - generic [ref=e5304]:
+              - generic [ref=e5305]: ￥
+              - textbox [ref=e5308]
+            - generic [ref=e5311]:
+              - generic [ref=e5312]: ￥
+              - textbox [ref=e5315]
+            - generic [ref=e5318]:
+              - generic [ref=e5319]: ￥
+              - textbox [ref=e5322]
+            - generic [ref=e5324]:
+              - button "明细" [ref=e5325] [cursor=pointer]:
+                - generic [ref=e5326]: 明细
+              - button "操作日志" [ref=e5327] [cursor=pointer]:
+                - generic [ref=e5328]: 操作日志
+          - generic [ref=e5331]:
+            - generic [ref=e5334] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e5337]:
+              - generic [ref=e5339]: 已完成
+              - generic [ref=e5341] [cursor=pointer]: 260228VJ7EN4XU
+            - generic [ref=e5345]:
+              - link [ref=e5347]:
+                - /url: javascript:;
+                - img [ref=e5349]
+              - generic [ref=e5350]:
+                - generic [ref=e5351]:
+                  - generic [ref=e5352]: 产品ID
+                  - text: ：
+                  - generic [ref=e5353]: "26581294153"
+                - generic [ref=e5354]:
+                  - generic [ref=e5355]: 平台SKU
+                  - text: ：
+                  - generic [ref=e5356]: XH-TD-004-coffee gold-L
+                - generic [ref=e5357]:
+                  - generic [ref=e5358]: SKU ID
+                  - text: ：
+                  - generic [ref=e5359]: "234537804967"
+            - generic [ref=e5362]: "1"
+            - generic [ref=e5363]: Shopee4店包包
+            - generic [ref=e5364]: 2026-02-28 20:40:50
+            - generic [ref=e5365]: 2026-02-28 20:41:00
+            - generic [ref=e5366]: "--"
+            - generic [ref=e5367]: ￥ 22.74
+            - generic [ref=e5368]: 59.45%
+            - generic [ref=e5369]: 37.28%
+            - generic [ref=e5370]:
+              - text: ￥ 60.99
+              - generic [ref=e5371]: SGD 11.35
+            - generic [ref=e5372]:
+              - text: ￥ 0.00
+              - generic [ref=e5373]: SGD 0.00
+            - generic [ref=e5374]: "--"
+            - generic [ref=e5375]:
+              - text: ￥ 107.63
+              - generic [ref=e5376]: SGD 20.03
+            - generic [ref=e5377]:
+              - text: ￥ 102.04
+              - generic [ref=e5378]: SGD 18.99
+            - generic [ref=e5379]:
+              - text: ￥ 197.74
+              - generic [ref=e5380]: SGD 36.80
+            - generic [ref=e5381]:
+              - text: ￥ 95.70
+              - generic [ref=e5382]: SGD 0
+            - generic [ref=e5383]:
+              - text: ￥ 0.00
+              - generic [ref=e5384]: SGD 0.00
+            - generic [ref=e5385]:
+              - text: ￥ 0.00
+              - generic [ref=e5386]: SGD 0.00
+            - generic [ref=e5387]:
+              - text: ￥ 5.10
+              - generic [ref=e5388]: SGD 0.95
+            - generic [ref=e5389]:
+              - text: ￥ 0.00
+              - generic [ref=e5390]: SGD 0.00
+            - generic [ref=e5391]:
+              - text: ￥ 10.69
+              - generic [ref=e5392]: SGD 1.99
+            - generic [ref=e5393]:
+              - text: ￥ -23.05
+              - generic [ref=e5394]: SGD -4.29
+            - generic [ref=e5395]:
+              - text: ￥ 0.00
+              - generic [ref=e5396]: SGD 0.00
+            - generic [ref=e5397]:
+              - text: ￥ 0.00
+              - generic [ref=e5398]: SGD 0.00
+            - generic [ref=e5399]:
+              - text: ￥ 0.00
+              - generic [ref=e5400]: SGD 0.00
+            - generic [ref=e5401]:
+              - text: ￥ 15.53
+              - generic [ref=e5402]: SGD 2.89
+            - generic [ref=e5403]:
+              - text: ￥ 0.00
+              - generic [ref=e5404]: SGD 0.00
+            - generic [ref=e5405]:
+              - text: ￥ 0.00
+              - generic [ref=e5406]: SGD 0.00
+            - generic [ref=e5407]:
+              - text: ￥ 3.22
+              - generic [ref=e5408]: SGD 0.60
+            - generic [ref=e5409]:
+              - text: ￥ 0.00
+              - generic [ref=e5410]: SGD 0.00
+            - generic [ref=e5411]:
+              - text: ￥ 0.00
+              - generic [ref=e5412]: SGD 0.00
+            - generic [ref=e5413]:
+              - text: ￥ 0.00
+              - generic [ref=e5414]: SGD 0.00
+            - generic [ref=e5415]:
+              - text: ￥ 0.00
+              - generic [ref=e5416]: SGD 0.00
+            - generic [ref=e5417]:
+              - text: ￥ 0.00
+              - generic [ref=e5418]: SGD 0.00
+            - generic [ref=e5419]:
+              - text: ￥ 0.00
+              - generic [ref=e5420]: SGD 0.00
+            - generic [ref=e5421]:
+              - text: ￥ 0.00
+              - generic [ref=e5422]: SGD 0.00
+            - generic [ref=e5427]:
+              - generic [ref=e5428]: ￥
+              - textbox [ref=e5431]: "30.00"
+            - generic [ref=e5432]: ¥0.00
+            - generic [ref=e5435]:
+              - generic [ref=e5436]: ￥
+              - textbox [ref=e5439]: "8.25"
+            - generic [ref=e5442]:
+              - generic [ref=e5443]: ￥
+              - textbox [ref=e5446]
+            - generic [ref=e5449]:
+              - generic [ref=e5450]: ￥
+              - textbox [ref=e5453]
+            - generic [ref=e5456]:
+              - generic [ref=e5457]: ￥
+              - textbox [ref=e5460]
+            - generic [ref=e5462]:
+              - button "明细" [ref=e5463] [cursor=pointer]:
+                - generic [ref=e5464]: 明细
+              - button "操作日志" [ref=e5465] [cursor=pointer]:
+                - generic [ref=e5466]: 操作日志
+          - generic [ref=e5469]:
+            - generic [ref=e5472] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e5475]:
+              - generic [ref=e5477]: 已完成
+              - generic [ref=e5479] [cursor=pointer]: 260228VHTYXM5E
+            - generic [ref=e5483]:
+              - link [ref=e5485]:
+                - /url: javascript:;
+                - img [ref=e5487]
+              - generic [ref=e5488]:
+                - generic [ref=e5489]:
+                  - generic [ref=e5490]: 产品ID
+                  - text: ：
+                  - generic [ref=e5491]: "44006816545"
+                - generic [ref=e5492]:
+                  - generic [ref=e5493]: 平台SKU
+                  - text: ：
+                  - generic [ref=e5494]: HKR-Ishell-1.2-035
+                - generic [ref=e5495]:
+                  - generic [ref=e5496]: SKU ID
+                  - text: ：
+                  - generic [ref=e5497]: "305575622273"
+            - generic [ref=e5500]: "1"
+            - generic [ref=e5501]: Shopee菲律宾2店
+            - generic [ref=e5502]: 2026-02-28 20:33:52
+            - generic [ref=e5503]: 2026-02-28 20:34:20
+            - generic [ref=e5504]: "--"
+            - generic [ref=e5505]: ￥ 1.81
+            - generic [ref=e5506]: 13.92%
+            - generic [ref=e5507]: 12.22%
+            - generic [ref=e5508]:
+              - text: ￥ 14.81
+              - generic [ref=e5509]: PHP 128.00
+            - generic [ref=e5510]:
+              - text: ￥ 14.81
+              - generic [ref=e5511]: PHP 128.00
+            - generic [ref=e5512]: 2026-03-18 08:02:40
+            - generic [ref=e5513]:
+              - text: ￥ 24.18
+              - generic [ref=e5514]: PHP 209.00
+            - generic [ref=e5515]:
+              - text: ￥ 24.99
+              - generic [ref=e5516]: PHP 216.00
+            - generic [ref=e5517]:
+              - text: ￥ 41.19
+              - generic [ref=e5518]: PHP 356.00
+            - generic [ref=e5519]:
+              - text: ￥ 16.20
+              - generic [ref=e5520]: PHP 0
+            - generic [ref=e5521]:
+              - text: ￥ 0.00
+              - generic [ref=e5522]: PHP 0.00
+            - generic [ref=e5523]:
+              - text: ￥ 0.00
+              - generic [ref=e5524]: PHP 0.00
+            - generic [ref=e5525]:
+              - text: ￥ 1.27
+              - generic [ref=e5526]: PHP 11.00
+            - generic [ref=e5527]:
+              - text: ￥ 0.00
+              - generic [ref=e5528]: PHP 0.00
+            - generic [ref=e5529]:
+              - text: ￥ 0.00
+              - generic [ref=e5530]: PHP 0.00
+            - generic [ref=e5531]:
+              - text: ￥ -6.71
+              - generic [ref=e5532]: PHP -58.00
+            - generic [ref=e5533]:
+              - text: ￥ 6.71
+              - generic [ref=e5534]: PHP 58.00
+            - generic [ref=e5535]:
+              - text: ￥ 0.00
+              - generic [ref=e5536]: PHP 0.00
+            - generic [ref=e5537]:
+              - text: ￥ 0.00
+              - generic [ref=e5538]: PHP 0.00
+            - generic [ref=e5539]:
+              - text: ￥ 2.89
+              - generic [ref=e5540]: PHP 25.00
+            - generic [ref=e5541]:
+              - text: ￥ 0.00
+              - generic [ref=e5542]: PHP 0.00
+            - generic [ref=e5543]:
+              - text: ￥ 3.01
+              - generic [ref=e5544]: PHP 26.00
+            - generic [ref=e5545]:
+              - text: ￥ 0.58
+              - generic [ref=e5546]: PHP 5.00
+            - generic [ref=e5547]:
+              - text: ￥ 0.00
+              - generic [ref=e5548]: PHP 0.00
+            - generic [ref=e5549]:
+              - text: ￥ 0.00
+              - generic [ref=e5550]: PHP 0.00
+            - generic [ref=e5551]:
+              - text: ￥ 0.00
+              - generic [ref=e5552]: PHP 0.00
+            - generic [ref=e5553]:
+              - text: ￥ 0.00
+              - generic [ref=e5554]: PHP 0.00
+            - generic [ref=e5555]:
+              - text: ￥ 0.00
+              - generic [ref=e5556]: PHP 0.00
+            - generic [ref=e5557]:
+              - text: ￥ 0.00
+              - generic [ref=e5558]: PHP 0.00
+            - generic [ref=e5559]:
+              - text: ￥ 0.00
+              - generic [ref=e5560]: PHP 0.00
+            - generic [ref=e5565]:
+              - generic [ref=e5566]: ￥
+              - textbox [ref=e5569]: "13.00"
+            - generic [ref=e5570]: ¥0.00
+            - generic [ref=e5573]:
+              - generic [ref=e5574]: ￥
+              - textbox [ref=e5577]
+            - generic [ref=e5580]:
+              - generic [ref=e5581]: ￥
+              - textbox [ref=e5584]
+            - generic [ref=e5587]:
+              - generic [ref=e5588]: ￥
+              - textbox [ref=e5591]
+            - generic [ref=e5594]:
+              - generic [ref=e5595]: ￥
+              - textbox [ref=e5598]
+            - generic [ref=e5600]:
+              - button "明细" [ref=e5601] [cursor=pointer]:
+                - generic [ref=e5602]: 明细
+              - button "操作日志" [ref=e5603] [cursor=pointer]:
+                - generic [ref=e5604]: 操作日志
+          - generic [ref=e5607]:
+            - generic [ref=e5610] [cursor=pointer]:
+              - checkbox
+            - generic [ref=e5613]:
+              - generic [ref=e5615]: 已完成
+              - generic [ref=e5617] [cursor=pointer]: 260228VH5S0818
+            - generic [ref=e5621]:
+              - link [ref=e5623]:
+                - /url: javascript:;
+                - img [ref=e5625]
+              - generic [ref=e5626]:
+                - generic [ref=e5627]:
+                  - generic [ref=e5628]: 产品ID
+                  - text: ：
+                  - generic [ref=e5629]: "26885806813"
+                - generic [ref=e5630]:
+                  - generic [ref=e5631]: 平台SKU
+                  - text: ：
+                  - generic [ref=e5632]: HJJ-XH-ZWJM001
+                - generic [ref=e5633]:
+                  - generic [ref=e5634]: SKU ID
+                  - text: ：
+                  - generic [ref=e5635]: "258361975428"
+            - generic [ref=e5638]: "1"
+            - generic [ref=e5639]: Shopee新加坡2店
+            - generic [ref=e5640]: 2026-02-28 20:22:00
+            - generic [ref=e5641]: 2026-02-28 20:22:05
+            - generic [ref=e5642]: "--"
+            - generic [ref=e5643]: ￥ 7.85
+            - generic [ref=e5644]: 38.14%
+            - generic [ref=e5645]: 27.61%
+            - generic [ref=e5646]:
+              - text: ￥ 28.43
+              - generic [ref=e5647]: SGD 5.29
+            - generic [ref=e5648]:
+              - text: ￥ 0.00
+              - generic [ref=e5649]: SGD 0.00
+            - generic [ref=e5650]: "--"
+            - generic [ref=e5651]:
+              - text: ￥ 53.68
+              - generic [ref=e5652]: SGD 9.99
+            - generic [ref=e5653]:
+              - text: ￥ 53.68
+              - generic [ref=e5654]: SGD 9.99
+            - generic [ref=e5655]:
+              - text: ￥ 97.31
+              - generic [ref=e5656]: SGD 18.11
+            - generic [ref=e5657]:
+              - text: ￥ 43.63
+              - generic [ref=e5658]: SGD 0
+            - generic [ref=e5659]:
+              - text: ￥ 0.00
+              - generic [ref=e5660]: SGD 0.00
+            - generic [ref=e5661]:
+              - text: ￥ 0.00
+              - generic [ref=e5662]: SGD 0.00
+            - generic [ref=e5663]:
+              - text: ￥ 0.00
+              - generic [ref=e5664]: SGD 0.00
+            - generic [ref=e5665]:
+              - text: ￥ 0.00
+              - generic [ref=e5666]: SGD 0.00
+            - generic [ref=e5667]:
+              - text: ￥ 0.00
+              - generic [ref=e5668]: SGD 0.00
+            - generic [ref=e5669]:
+              - text: ￥ -12.36
+              - generic [ref=e5670]: SGD -2.30
+            - generic [ref=e5671]:
+              - text: ￥ 0.00
+              - generic [ref=e5672]: SGD 0.00
+            - generic [ref=e5673]:
+              - text: ￥ 0.00
+              - generic [ref=e5674]: SGD 0.00
+            - generic [ref=e5675]:
+              - text: ￥ 0.00
+              - generic [ref=e5676]: SGD 0.00
+            - generic [ref=e5677]:
+              - text: ￥ 8.60
+              - generic [ref=e5678]: SGD 1.60
+            - generic [ref=e5679]:
+              - text: ￥ 0.00
+              - generic [ref=e5680]: SGD 0.00
+            - generic [ref=e5681]:
+              - text: ￥ 0.00
+              - generic [ref=e5682]: SGD 0.00
+            - generic [ref=e5683]:
+              - text: ￥ 1.61
+              - generic [ref=e5684]: SGD 0.30
+            - generic [ref=e5685]:
+              - text: ￥ 0.00
+              - generic [ref=e5686]: SGD 0.00
+            - generic [ref=e5687]:
+              - text: ￥ 0.00
+              - generic [ref=e5688]: SGD 0.00
+            - generic [ref=e5689]:
+              - text: ￥ 0.00
+              - generic [ref=e5690]: SGD 0.00
+            - generic [ref=e5691]:
+              - text: ￥ 0.00
+              - generic [ref=e5692]: SGD 0.00
+            - generic [ref=e5693]:
+              - text: ￥ 0.00
+              - generic [ref=e5694]: SGD 0.00
+            - generic [ref=e5695]:
+              - text: ￥ 0.00
+              - generic [ref=e5696]: SGD 0.00
+            - generic [ref=e5697]:
+              - text: ￥ 0.00
+              - generic [ref=e5698]: SGD 0.00
+            - generic [ref=e5703]:
+              - generic [ref=e5704]: ￥
+              - textbox [ref=e5707]: "11.50"
+            - generic [ref=e5708]: ¥0.00
+            - generic [ref=e5711]:
+              - generic [ref=e5712]: ￥
+              - textbox [ref=e5715]: "9.08"
+            - generic [ref=e5718]:
+              - generic [ref=e5719]: ￥
+              - textbox [ref=e5722]
+            - generic [ref=e5725]:
+              - generic [ref=e5726]: ￥
+              - textbox [ref=e5729]
+            - generic [ref=e5732]:
+              - generic [ref=e5733]: ￥
+              - textbox [ref=e5736]
+            - generic [ref=e5738]:
+              - button "明细" [ref=e5739] [cursor=pointer]:
+                - generic [ref=e5740]: 明细
+              - button "操作日志" [ref=e5741] [cursor=pointer]:
+                - generic [ref=e5742]: 操作日志
+      - generic [ref=e2467]:
+        - generic [ref=e2468]:
+          - generic [ref=e2469]:
+            - button "全选" [ref=e2470] [cursor=pointer]:
+              - generic [ref=e2471]: 全选
+            - button "反选" [ref=e2472] [cursor=pointer]:
+              - generic [ref=e2473]: 反选
+          - generic [ref=e2474]: 1941条
+        - generic [ref=e2476]:
+          - button "上一页" [disabled] [ref=e2477]:
+            - generic:
+              - img
+          - list [ref=e2478]:
+            - listitem "第 1 页" [ref=e2479]: "1"
+            - listitem "第 2 页" [ref=e2480] [cursor=pointer]: "2"
+            - listitem "第 3 页" [ref=e2481] [cursor=pointer]: "3"
+            - listitem "第 4 页" [ref=e2482] [cursor=pointer]: "4"
+            - listitem "向后 3 页" [ref=e2483] [cursor=pointer]:
+              - img
+            - listitem "第 98 页" [ref=e5743] [cursor=pointer]: "98"
+          - button "下一页" [ref=e2485] [cursor=pointer]:
+            - generic:
+              - img
+          - generic [ref=e2486]:
+            - generic [ref=e2487]: 前往
+            - spinbutton "页" [ref=e2490]: "1"
+            - generic [ref=e2491]: 页
+          - generic [ref=e2494] [cursor=pointer]:
+            - generic:
+              - combobox [ref=e2496]
+              - generic [ref=e2497]: 20条/页
+            - img [ref=e2500]
+  - generic [ref=e2502]:
+    - generic [ref=e2504] [cursor=pointer]: 
+    - generic [ref=e2506] [cursor=pointer]: 
+    - generic [ref=e2508] [cursor=pointer]: 
+    - img [ref=e2511] [cursor=pointer]
+    - img [ref=e2515] [cursor=pointer]

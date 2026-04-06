@@ -1,0 +1,30 @@
+{
+  "platform": "shopee",
+  "work_tag": "products-monthly-year-review",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\products-monthly-year-review",
+  "ok": true,
+  "errors": [],
+  "warnings": [
+    "Unrecognized evidence file: month-01-before.md",
+    "Unrecognized evidence file: month-01-before.png",
+    "Unrecognized evidence file: month-01-note.md",
+    "Unrecognized evidence file: month-02-monthly-open.md",
+    "Unrecognized evidence file: month-02-monthly-open.png",
+    "Unrecognized evidence file: month-02-note.md",
+    "Unrecognized evidence file: month-03-after-decade-nav.md",
+    "Unrecognized evidence file: month-03-after-decade-nav.png",
+    "Unrecognized evidence file: month-03-note.md",
+    "Unrecognized evidence file: month-04-year-picked.md",
+    "Unrecognized evidence file: month-04-year-picked.png",
+    "Unrecognized evidence file: month-05-after-month-confirm.md",
+    "Unrecognized evidence file: month-05-after-month-confirm.png",
+    "Unrecognized evidence file: month-05-note.md",
+    "Unrecognized evidence file: page-2026-04-02T05-11-36-158839Z.png",
+    "Unrecognized evidence file: page-2026-04-02T05-12-18-184102Z.png",
+    "Unrecognized evidence file: shopee-month-review-01-products-page.md",
+    "Unrecognized evidence file: shopee-month-review-02-picker-open.md",
+    "Unrecognized evidence file: shopee-month-review-03-after-e239.md",
+    "Unrecognized evidence file: shopee-month-review-note.md"
+  ],
+  "steps": []
+}

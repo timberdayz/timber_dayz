@@ -1,0 +1,18 @@
+{
+  "platform": "miaoshou",
+  "work_tag": "smoke",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou-smoke",
+  "ok": true,
+  "errors": [],
+  "warnings": [],
+  "steps": [
+    {
+      "step": "01",
+      "name": "open-example",
+      "before_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou-smoke\\01-open-example-before.txt",
+      "after_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\miaoshou-smoke\\01-open-example-after.txt",
+      "note_path": null,
+      "screenshots": []
+    }
+  ]
+}

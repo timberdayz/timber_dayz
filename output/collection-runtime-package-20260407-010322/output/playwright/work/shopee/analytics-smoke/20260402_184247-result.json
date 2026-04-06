@@ -1,0 +1,241 @@
+{
+  "ok": false,
+  "profile_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\profiles\\shopee",
+  "storage_state": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\state\\shopee.json",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-smoke",
+  "headless": true,
+  "result_path": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-smoke\\20260402_184247-result.json",
+  "screenshots": {
+    "before": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-smoke\\20260402_184247-before-open.png",
+    "after": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\analytics-smoke\\20260402_184247-after-open.png"
+  },
+  "session_mode": "storage_state",
+  "environment": {
+    "final_state": "loading_blocked",
+    "timed_out": true,
+    "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+    "title": "Shopee卖家中心",
+    "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Shopee广告折扣活动店内秒杀优惠券跨境活动报名联盟营销直播和短视频看板全球商品折扣客户服务聊聊管理AI智能客服聊聊广播评论管理财务我的收入Shopee官方钱包收款账户卖家保证金数据商业分析账户健康状态成长卖家任务卖家活动店铺店铺介绍店铺装修设置商家设置店铺设定子母账号管理当前店铺新加坡 / chenewei666.sg\n  \n\n恭喜您！您已经得到免费优惠券并 获得销售额提升优惠券金额$0.00优惠",
+    "samples": [
+      {
+        "elapsed_ms": 0,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview",
+        "title": "",
+        "body_sample": "window.__performanceBodyScriptStartTime = Date.now();window.__performanceFrameworkScriptStartTime = Date.now();"
+      },
+      {
+        "elapsed_ms": 1000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Shopee广告折扣活动店内秒杀优惠券跨境活动报名联盟营销直播和"
+      },
+      {
+        "elapsed_ms": 2000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 3000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 4000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 5000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 6000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 7000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 8000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 9000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 10000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 11000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 12000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 13000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 14000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 15000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 16000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 17000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 18000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 19000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 20000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 21000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 22000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 23000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 24000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 25000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 26000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 27000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 28000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 29000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      },
+      {
+        "elapsed_ms": 30000,
+        "state": "loading_blocked",
+        "url": "https://seller.shopee.cn/datacenter/traffic/overview?cnsc_shop_id=1227491331",
+        "title": "Shopee卖家中心",
+        "body_sample": "首页首页首页商业分析商业分析商业分析流量流量流量流量概述流量概述流量概述全托管服务0there comes messages from Shopee Consignment Service Platform that required you to deal with.卖家学习中心chenewei666:main莆田市景颂进出口贸易有限公司帐户chenewei666:main莆田市景颂进出口贸易有限公司切换商家登出订单我的订单批量出货退货/退款/取消物流设置物流+：海外免退服务商品全球商品店铺商品添加商品商品设置Shopee Standard Product官方仓官方仓服务营销中心营销中心Sh"
+      }
+    ]
+  },
+  "environment_failure": true,
+  "failure_kind": "loading_blocked"
+}

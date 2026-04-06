@@ -1,0 +1,24 @@
+### Page
+- Page URL: https://seller.tiktokshopglobalselling.com/account/login
+- Page Title: TikTok Shop Seller Log In | Cross Border
+### Snapshot
+- menu "学习中心" [ref=e1]
+- div "学习中心" [ref=e2]
+- menuitem "学习中心" [ref=e3]
+- div "申诉问题" [ref=e4]
+- span "申诉问题" [ref=e5]
+- div "联系我们" [ref=e6]
+- button "联系我们" [ref=e7]
+- div "简体中文" [ref=e8]
+- button "简体中文" [ref=e9]
+- p "简体中文" [ref=e10]
+- textbox "请输入邮箱" [ref=e11]
+- span "使用手机号登录" [ref=e12]
+- textbox "请输入您的密码" [ref=e13]
+- link "忘记密码？" [ref=e14]
+- button "登录" [ref=e15]
+- div "立即注册" [ref=e16]
+- div "立即注册" [ref=e17]
+- div "立即注册" [ref=e18]
+- button "立即注册" [ref=e19]
+- span "立即注册" [ref=e20]

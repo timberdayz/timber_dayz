@@ -1,0 +1,121 @@
+{
+  "platform": "shopee",
+  "work_tag": "shopee-brazil-shop-discovery",
+  "work_dir": "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery",
+  "ok": true,
+  "errors": [],
+  "warnings": [
+    "Unrecognized evidence file: 1-homepage.md",
+    "Unrecognized evidence file: 10-shop-switch-open.md",
+    "Unrecognized evidence file: 2-shop-switch-open.md",
+    "Unrecognized evidence file: 3-shop-switch-open.md",
+    "Unrecognized evidence file: 4-shop-switch-open.md",
+    "Unrecognized evidence file: 5-shop-switch-open.md",
+    "Unrecognized evidence file: 6-shop-switch-open.md",
+    "Unrecognized evidence file: 7-shop-switch-open.md",
+    "Unrecognized evidence file: 8-shop-switch-open.md",
+    "Unrecognized evidence file: 9-shop-switch-open.md"
+  ],
+  "steps": [
+    {
+      "step": "1",
+      "name": "homepage",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery\\1-homepage.png"
+      ]
+    },
+    {
+      "step": "2",
+      "name": "shop-switch-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery\\2-shop-switch-open.png"
+      ]
+    },
+    {
+      "step": "3",
+      "name": "shop-switch-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery\\3-shop-switch-open.png"
+      ]
+    },
+    {
+      "step": "4",
+      "name": "shop-switch-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery\\4-shop-switch-open.png"
+      ]
+    },
+    {
+      "step": "5",
+      "name": "shop-switch-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery\\5-shop-switch-open.png"
+      ]
+    },
+    {
+      "step": "6",
+      "name": "shop-switch-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery\\6-shop-switch-open.png"
+      ]
+    },
+    {
+      "step": "7",
+      "name": "shop-switch-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery\\7-shop-switch-open.png"
+      ]
+    },
+    {
+      "step": "8",
+      "name": "shop-switch-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery\\8-shop-switch-open.png"
+      ]
+    },
+    {
+      "step": "9",
+      "name": "shop-switch-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery\\9-shop-switch-open.png"
+      ]
+    },
+    {
+      "step": "10",
+      "name": "shop-switch-open",
+      "before_path": null,
+      "after_path": null,
+      "note_path": null,
+      "screenshots": [
+        "F:\\Vscode\\python_programme\\AI_code\\xihong_erp\\output\\playwright\\work\\shopee\\shopee-brazil-shop-discovery\\10-shop-switch-open.png"
+      ]
+    }
+  ]
+}

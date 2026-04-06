@@ -1,0 +1,404 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - link "logo" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - img "logo" [ref=e6]
+      - list [ref=e7]:
+        - listitem [ref=e8] [cursor=pointer]:
+          - generic [ref=e9]: 首页
+        - listitem [ref=e10] [cursor=pointer]:
+          - generic [ref=e11]: 产品
+        - listitem [ref=e12] [cursor=pointer]:
+          - generic [ref=e13]: 订单
+        - listitem [ref=e14] [cursor=pointer]:
+          - generic [ref=e15]: 托管
+        - listitem [ref=e16] [cursor=pointer]:
+          - generic [ref=e17]: 广告
+        - listitem [ref=e18] [cursor=pointer]:
+          - generic [ref=e19]: 数据
+        - listitem [ref=e20] [cursor=pointer]:
+          - generic [ref=e21]: 采购
+        - listitem [ref=e22] [cursor=pointer]:
+          - generic [ref=e23]: 仓库
+        - listitem [ref=e24] [cursor=pointer]:
+          - generic [ref=e25]: 物流
+        - listitem [ref=e26] [cursor=pointer]:
+          - generic [ref=e27]: 授权
+        - listitem [ref=e28] [cursor=pointer]:
+          - generic [ref=e29]: 更多
+      - generic [ref=e30]:
+        - link " 免费培训" [ref=e31] [cursor=pointer]:
+          - /url: /customer_services/training
+          - generic [ref=e32]:
+            - generic [ref=e33]: 
+            - generic [ref=e34]: 免费培训
+        - generic [ref=e36] [cursor=pointer]:
+          - generic [ref=e37]: 
+          - text: 联系客服
+        - generic [ref=e38] [cursor=pointer]:
+          - img [ref=e40]
+          - text: 帮助
+        - generic [ref=e42]:
+          - generic [ref=e43] [cursor=pointer]:
+            - generic [ref=e44]: 
+            - text: 插件下载
+          - generic [ref=e45] [cursor=pointer]:
+            - generic [ref=e46]: 
+            - text: 同步
+          - link " 订购" [ref=e47] [cursor=pointer]:
+            - /url: /account/payment
+            - generic [ref=e48]: 
+            - text: 订购
+      - generic [ref=e49] [cursor=pointer]:
+        - img [ref=e51]
+        - generic [ref=e53]: V
+    - generic [ref=e56]:
+      - generic [ref=e57]:
+        - generic [ref=e58] [cursor=pointer]:
+          - generic [ref=e59]: 
+          - generic [ref=e60]: ERP移动端
+          - img [ref=e61]
+        - generic [ref=e62]:
+          - textbox "快速搜索功能" [ref=e64]
+          - button "搜索功能" [ref=e66] [cursor=pointer]:
+            - generic [ref=e67]: 搜索功能
+      - generic [ref=e69]:
+        - generic [ref=e70]:
+          - alert [ref=e71]:
+            - img [ref=e73]
+            - generic [ref=e75]:
+              - generic [ref=e76]: 注意：妙手ERP从未与任何培训/代运营机构合作，凡是以妙手名义要求大家缴纳培训/代运营费用的公司都是骗子，请大家提高警惕，谨防受骗！如有疑问，可拨打客服电话：14759016685 咨询。
+              - img [ref=e78] [cursor=pointer]
+          - generic [ref=e80]:
+            - generic [ref=e81]:
+              - generic [ref=e82]:
+                - img [ref=e84]
+                - text: 温馨提示：若您的店铺不再运营，可以前往店铺授权中心取消授权或删除店铺，将不再提示授权。
+              - img [ref=e87] [cursor=pointer]
+            - list [ref=e90]:
+              - listitem [ref=e91]:
+                - generic [ref=e92]:
+                  - text: 您有1个[Shopee店铺]授权异常，
+                  - link "去处理" [ref=e93] [cursor=pointer]:
+                    - /url: /auth_shop/index?platform=shopee&isAuthInvalid=1&shopType=shopee
+                    - text: 去处理
+                    - img [ref=e95]
+              - listitem [ref=e97]:
+                - generic [ref=e98]:
+                  - text: 您有1个[Shopee全球店铺]授权异常，
+                  - link "去处理" [ref=e99] [cursor=pointer]:
+                    - /url: /auth_shop/index?platform=shopee&isAuthInvalid=1&shopType=shopeeGlobal
+                    - text: 去处理
+                    - img [ref=e101]
+          - generic [ref=e103]:
+            - generic [ref=e104]:
+              - generic [ref=e105]: 待办事项
+              - button "自定义待办事项" [ref=e106] [cursor=pointer]:
+                - generic [ref=e107]: 自定义待办事项
+            - generic [ref=e108]:
+              - generic [ref=e109]:
+                - generic [ref=e110]: 
+                - text: 产品
+              - generic [ref=e111]:
+                - generic [ref=e112] [cursor=pointer]:
+                  - generic [ref=e113]: "516"
+                  - generic [ref=e114]: 待发布
+                - generic [ref=e115] [cursor=pointer]:
+                  - generic [ref=e116]: "0"
+                  - generic [ref=e117]: 发布中
+                - generic [ref=e118] [cursor=pointer]:
+                  - generic [ref=e119]: "0"
+                  - generic [ref=e120]: 今日发布失败
+            - generic [ref=e121]:
+              - generic [ref=e122]:
+                - generic [ref=e123]: 
+                - text: 订单
+              - generic [ref=e124]:
+                - generic [ref=e125] [cursor=pointer]:
+                  - generic [ref=e126]: "3"
+                  - generic [ref=e127]: 剩余发货<1天
+                - generic [ref=e128] [cursor=pointer]:
+                  - generic [ref=e129]: "46"
+                  - generic [ref=e130]: 待处理
+                - generic [ref=e131] [cursor=pointer]:
+                  - generic [ref=e132]: "0"
+                  - generic [ref=e133]: 待打单发货
+                - generic [ref=e134] [cursor=pointer]:
+                  - generic [ref=e135]: "0"
+                  - generic [ref=e136]: 交运失败
+                - generic [ref=e137] [cursor=pointer]:
+                  - generic [ref=e138]: "17"
+                  - generic [ref=e139]: 待处理售后订单
+                - generic [ref=e140] [cursor=pointer]:
+                  - generic [ref=e141]: "0"
+                  - generic [ref=e142]: 待补录单号
+            - generic [ref=e143]:
+              - generic [ref=e144]:
+                - generic [ref=e145]: 
+                - text: 采购
+              - generic [ref=e146]:
+                - generic [ref=e147] [cursor=pointer]:
+                  - generic [ref=e148]: "3"
+                  - generic [ref=e149]: 缺货建议
+                - generic [ref=e150] [cursor=pointer]:
+                  - generic [ref=e151]: "149"
+                  - generic [ref=e152]: 备货建议
+                - generic [ref=e153] [cursor=pointer]:
+                  - generic [ref=e154]: "3"
+                  - generic [ref=e155]: 待签收入库
+                - generic [ref=e156] [cursor=pointer]:
+                  - generic [ref=e157]: "0"
+                  - generic [ref=e158]: 待审核
+                - generic [ref=e159] [cursor=pointer]:
+                  - generic [ref=e160]: "0"
+                  - generic [ref=e161]: 待付款审批
+            - generic [ref=e162]:
+              - generic [ref=e163]:
+                - generic [ref=e164]: 
+                - text: 托管
+              - generic [ref=e165]:
+                - generic [ref=e166] [cursor=pointer]:
+                  - generic [ref=e167]: "0"
+                  - generic [ref=e168]: 待确认备货单
+                - generic [ref=e169] [cursor=pointer]:
+                  - generic [ref=e170]: "0"
+                  - generic [ref=e171]: 待创建发货单
+                - generic [ref=e172] [cursor=pointer]:
+                  - generic [ref=e173]: "0"
+                  - generic [ref=e174]: 待发货发货单/入库单
+          - generic [ref=e176]:
+            - generic [ref=e177]: 常用功能
+            - generic [ref=e178]:
+              - generic [ref=e179] [cursor=pointer]:
+                - img [ref=e181]
+                - generic [ref=e182]: 店铺授权
+              - generic [ref=e183] [cursor=pointer]:
+                - img [ref=e185]
+                - generic [ref=e186]: 实时数据
+              - generic [ref=e187] [cursor=pointer]:
+                - img [ref=e189]
+                - generic [ref=e190]: 订单处理
+              - generic [ref=e191] [cursor=pointer]:
+                - img [ref=e193]
+                - generic [ref=e194]: 仓储管理
+              - generic [ref=e195] [cursor=pointer]:
+                - img [ref=e197]
+                - generic [ref=e198]: 采购管理
+              - generic [ref=e199] [cursor=pointer]:
+                - img [ref=e201]
+                - generic [ref=e202]: 产品采集
+          - generic [ref=e203]:
+            - link [ref=e209] [cursor=pointer]:
+              - /url: https://erp.91miaoshou.com/common/selecting_products_tiktok/?utm_source=msgrzxsyl
+              - img [ref=e210]
+            - link [ref=e216] [cursor=pointer]:
+              - /url: https://erp.91miaoshou.com/help_center/article_3099.html?utm_source=msgrzxsyr
+              - img [ref=e217]
+          - generic [ref=e219]:
+            - generic [ref=e220]:
+              - generic [ref=e221]:
+                - tabpanel "公告消息" [ref=e222]:
+                  - generic [ref=e223]:
+                    - generic [ref=e224] [cursor=pointer]:
+                      - generic [ref=e226]: 
+                      - generic [ref=e227]:
+                        - text: 【重要通知】Shopee轻出海快速入驻通道开启！
+                        - generic [ref=e228]: 
+                      - generic [ref=e229]: 2026-03-25 18:13:06
+                    - generic [ref=e230] [cursor=pointer]:
+                      - generic [ref=e232]: 
+                      - generic [ref=e233]: 【功能更新】1、美客多支持对接墨西哥/巴西本土店 2、阿里国际新增结构化详情功能 3、更多功能，请参考详情
+                      - generic [ref=e234]: 2026-03-23 14:42:10
+                    - generic [ref=e235] [cursor=pointer]:
+                      - generic [ref=e237]: 
+                      - generic [ref=e238]: 【重要通知】1688 3月春季跨境大促开启，抢占跨境采购先机！
+                      - generic [ref=e239]: 2026-03-19 17:10:52
+                    - generic [ref=e240] [cursor=pointer]:
+                      - generic [ref=e243]: 【功能更新】1、巴西NF-e发票功能上线 2、新增TikTok FBT三方仓 3、TikTok达人邀约支持过滤90天重复邀约 4、更多功能，请参考详情
+                      - generic [ref=e244]: 2026-03-23 14:41:02
+                    - generic [ref=e245] [cursor=pointer]:
+                      - generic [ref=e248]: 【功能更新】巴西NF-e发票功能正式上线！合规开票更高效
+                      - generic [ref=e249]: 2026-03-19 17:01:58
+                    - generic [ref=e250] [cursor=pointer]:
+                      - generic [ref=e253]: 【功能更新】1、实时大屏支持Yandex平台 2、自定义面单功能优化 3、更多功能，请参考详情
+                      - generic [ref=e254]: 2026-03-10 17:49:29
+                - text:  
+              - tablist [ref=e258]:
+                - tab "公告消息" [selected] [ref=e260]:
+                  - generic [ref=e261]: 公告消息
+                - tab "直播/培训" [ref=e262]:
+                  - generic [ref=e263]: 直播/培训
+                - tab "妙手资讯" [ref=e264]
+            - button "更多" [ref=e265] [cursor=pointer]:
+              - generic [ref=e266]:
+                - text: 更多
+                - img [ref=e268]
+          - generic [ref=e271]:
+            - generic [ref=e272]:
+              - generic:
+                - tabpanel "全部"
+              - tablist [ref=e276]:
+                - tab "全部" [selected] [ref=e278]
+                - tab "Shopee" [ref=e279]
+                - tab "TikTok" [ref=e280]
+                - tab "Lazada" [ref=e281]
+                - tab "其他" [ref=e282]
+            - button "更多" [ref=e283] [cursor=pointer]:
+              - generic [ref=e284]:
+                - text: 更多
+                - img [ref=e286]
+            - generic [ref=e288]:
+              - generic [ref=e290] [cursor=pointer]:
+                - generic:
+                  - combobox [ref=e292]
+                  - generic [ref=e293]: 按销售额（CNY）
+                - img [ref=e296]
+              - generic [ref=e298]:
+                - generic [ref=e299] [cursor=pointer]: 日数据
+                - generic [ref=e300] [cursor=pointer]: 周数据
+                - generic [ref=e301] [cursor=pointer]: 月数据
+            - generic [ref=e306]:
+              - generic [ref=e307]:
+                - text: 销售额TOP10店铺
+                - img [ref=e309]
+              - generic [ref=e311]:
+                - generic [ref=e312]:
+                  - generic [ref=e313]: "01"
+                  - generic [ref=e314]: Shopee菲律宾2店
+                  - generic [ref=e315]: ￥273,087.81
+                - generic [ref=e316]:
+                  - generic [ref=e317]: "02"
+                  - generic [ref=e318]: TK新加坡1店
+                  - generic [ref=e319]: ￥228,319
+                - generic [ref=e320]:
+                  - generic [ref=e321]: "03"
+                  - generic [ref=e322]: Shopee3C店
+                  - generic [ref=e323]: ￥195,557.55
+                - generic [ref=e324]:
+                  - generic [ref=e325]: "04"
+                  - generic [ref=e326]: Shopee新加坡3店
+                  - generic [ref=e327]: ￥165,386.78
+                - generic [ref=e328]:
+                  - generic [ref=e329]: "05"
+                  - generic [ref=e330]: Shopee新加坡1店
+                  - generic [ref=e331]: ￥156,589.91
+                - generic [ref=e332]:
+                  - generic [ref=e333]: "06"
+                  - generic [ref=e334]: Shopee4店包包
+                  - generic [ref=e335]: ￥120,635.91
+                - generic [ref=e336]:
+                  - generic [ref=e337]: "07"
+                  - generic [ref=e338]: Shopee菲律宾1店
+                  - generic [ref=e339]: ￥109,152.94
+                - generic [ref=e340]:
+                  - generic [ref=e341]: "08"
+                  - generic [ref=e342]: Shopee新加坡2店
+                  - generic [ref=e343]: ￥75,291.6
+                - generic [ref=e344]:
+                  - generic [ref=e345]: "09"
+                  - generic [ref=e346]: TK马来1店
+                  - generic [ref=e347]: ￥65,954.17
+                - generic [ref=e348]:
+                  - generic [ref=e349]: "10"
+                  - generic [ref=e350]: Shopee马来1店
+                  - generic [ref=e351]: ￥59,415.72
+        - generic [ref=e352]:
+          - generic [ref=e355]:
+            - generic [ref=e356]:
+              - tabpanel "培训预告" [ref=e357]:
+                - generic [ref=e358]:
+                  - generic [ref=e361]:
+                    - generic [ref=e362]:
+                      - generic [ref=e363]:
+                        - generic [ref=e364]: 
+                        - generic "【线上直播】（1、Mercado 2、TikTok营销广告）4月1日—4月2日线上直播预告" [ref=e365]
+                      - generic [ref=e366]:
+                        - generic [ref=e367]: 
+                        - generic [ref=e368]: 线上直播
+                      - generic [ref=e369]:
+                        - generic [ref=e370]: 
+                        - generic [ref=e371]: 04月01日 16:00-17:00
+                      - generic [ref=e372]:
+                        - generic [ref=e373]: 
+                        - generic [ref=e376] [cursor=pointer]: 查询培训详情
+                    - generic [ref=e379]: 扫码预约
+                  - list [ref=e380]:
+                    - listitem [ref=e381] [cursor=pointer]:
+                      - button "幻灯片切换至索引 1" [ref=e382]
+              - text:                    
+            - tablist [ref=e386]:
+              - tab "培训预告" [selected] [ref=e388]
+              - tab "直播回放" [ref=e389]
+          - generic [ref=e390]:
+            - generic [ref=e391]:
+              - text: 自动翻译图片
+              - link [ref=e392] [cursor=pointer]:
+                - /url: /common_collect_box/index?openSetting=shopee
+                - img [ref=e394]
+            - generic [ref=e397]:
+              - generic [ref=e398]:
+                - generic [ref=e399]: 今日翻译数量： 0
+                - button "查看记录" [ref=e400] [cursor=pointer]:
+                  - generic [ref=e401]: 查看记录
+              - generic [ref=e402]:
+                - generic [ref=e403]: 昨日翻译数量： 0
+                - button "查看记录" [ref=e404] [cursor=pointer]:
+                  - generic [ref=e405]: 查看记录
+          - generic [ref=e406]:
+            - generic [ref=e408]:
+              - button "上一张幻灯片" [ref=e409] [cursor=pointer]:
+                - img [ref=e411]
+              - button "下一张幻灯片" [ref=e413] [cursor=pointer]:
+                - img [ref=e415]
+              - generic [ref=e417]:
+                - link [ref=e420] [cursor=pointer]:
+                  - /url: https://erp.91miaoshou.com/platforms/shopeesep.html
+                  - img [ref=e421]
+                - link [ref=e424] [cursor=pointer]:
+                  - /url: https://shopee.cn/s/HRjJ6co
+                  - img [ref=e425]
+                - link [ref=e428] [cursor=pointer]:
+                  - /url: https://erp.91miaoshou.com/platforms/shopeesep.html
+                  - img [ref=e429]
+                - link [ref=e432] [cursor=pointer]:
+                  - /url: https://shopee.cn/s/HRjJ6co
+                  - img [ref=e433]
+              - list [ref=e434]:
+                - listitem [ref=e435] [cursor=pointer]:
+                  - button "幻灯片切换至索引 3" [ref=e436]
+                - listitem [ref=e437] [cursor=pointer]:
+                  - button "幻灯片切换至索引 4" [ref=e438]
+            - link [ref=e444] [cursor=pointer]:
+              - /url: https://seller.tiktokglobalshop.com/account/register?channel=miaoshouERP_TikTokShop
+              - img [ref=e445]
+            - link [ref=e451] [cursor=pointer]:
+              - /url: https://seller.ozon.ru/ch/?utm_source=erp_partner&utm_medium=miaoshou&utm_campaign=banner
+              - img [ref=e452]
+            - link [ref=e458] [cursor=pointer]:
+              - /url: https://seller.kuajingmaihuo.com/login/register?erpSource=miaoshou
+              - img [ref=e459]
+            - link [ref=e465] [cursor=pointer]:
+              - /url: https://erp.91miaoshou.com/platforms/wildberries.html
+              - img [ref=e466]
+    - generic [ref=e467]:
+      - generic [ref=e469] [cursor=pointer]: 
+      - generic [ref=e471] [cursor=pointer]: 
+      - generic [ref=e473] [cursor=pointer]: 
+      - img [ref=e476] [cursor=pointer]
+      - img [ref=e480] [cursor=pointer]
+  - dialog [ref=e483]:
+    - generic [ref=e484]:
+      - banner:
+        - heading [level=2]
+        - button "关闭此对话框" [ref=e485] [cursor=pointer]:
+          - img [ref=e487]
+      - generic [ref=e489]:
+        - generic [ref=e490]:
+          - generic [ref=e491]: 【线上直播】4月1日—4月2日线上直播预告（1、Mercado 2、TikTok营销广告）
+          - generic [ref=e492]: 2026-03-27 18:18:18
+        - paragraph [ref=e495]:
+          - img "查看大图" [ref=e496]
+      - contentinfo [ref=e497]:
+        - button "关闭" [ref=e499] [cursor=pointer]:
+          - generic [ref=e500]: 关闭
