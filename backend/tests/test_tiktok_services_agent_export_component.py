@@ -374,3 +374,58 @@ async def test_tiktok_services_agent_export_treats_disabled_export_button_as_no_
     assert result.file_path is None
     assert "no exportable" in result.message
     export_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_waits_for_empty_state_after_date_selection_and_completes_successfully(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "weekly"}))
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    detail_mock = AsyncMock(return_value=True)
+    date_state_mock = AsyncMock(return_value=False)
+    date_mock = AsyncMock(return_value=DatePickResult(success=True, message="ok", option=DateOption.LAST_7_DAYS))
+    confirm_mock = AsyncMock(return_value=True)
+    export_mock = AsyncMock()
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_ensure_agent_detail_ready", detail_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "_run_date_picker", date_mock)
+    monkeypatch.setattr(component, "_confirm_date_selection", confirm_mock, raising=False)
+    monkeypatch.setattr(component, "_wait_export_readiness_state", AsyncMock(return_value="empty"))
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert result.file_path is None
+    assert "no exportable" in result.message
+    export_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_waits_for_ready_state_before_running_export(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "weekly"}))
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    detail_mock = AsyncMock(return_value=True)
+    date_state_mock = AsyncMock(return_value=True)
+    export_mock = AsyncMock(return_value=ExportResult(success=True, message="ok", file_path="temp/services-agent.xlsx"))
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_ensure_agent_detail_ready", detail_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "_wait_export_readiness_state", AsyncMock(return_value="ready"))
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    export_mock.assert_awaited_once()
+    assert result.success is True
+    assert result.file_path == "temp/services-agent.xlsx"

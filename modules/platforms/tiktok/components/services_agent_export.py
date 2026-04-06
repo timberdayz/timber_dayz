@@ -378,6 +378,53 @@ class TiktokServicesAgentExport(ExportComponent):
                 return True
         return False
 
+    async def _export_button_enabled(self, page: Any) -> bool:
+        locator = await self._export_button_locator(page)
+        if locator is None:
+            return False
+
+        try:
+            if hasattr(locator, "is_enabled"):
+                enabled = await locator.is_enabled()
+                if enabled is not None:
+                    return bool(enabled)
+        except Exception:
+            pass
+
+        for attr in ("disabled", "aria-disabled", "data-disabled", "class"):
+            try:
+                value = await locator.get_attribute(attr)
+            except Exception:
+                value = None
+            if attr == "disabled" and value is not None:
+                return False
+            text = str(value or "").strip().lower()
+            if attr == "class" and "disabled" in text:
+                return False
+            if text in {"true", "disabled"}:
+                return False
+        return True
+
+    async def _wait_export_readiness_state(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 4000,
+        poll_ms: int = 200,
+    ) -> str:
+        waited = 0
+        while waited <= timeout_ms:
+            if await self._no_exportable_data(page):
+                return "empty"
+            if await self._export_button_enabled(page):
+                return "ready"
+            if await self._export_button_locator(page) is not None:
+                return "disabled"
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return "unknown"
+
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         entry_state = await self._wait_for_entry_state(page)
         current_url = str(getattr(page, "url", "") or "")
@@ -424,7 +471,8 @@ class TiktokServicesAgentExport(ExportComponent):
                 if not await self._confirm_date_selection(page, date_option):
                     return ExportResult(success=False, message="date state not confirmed", file_path=None)
 
-        if await self._no_exportable_data(page):
+        export_state = await self._wait_export_readiness_state(page)
+        if export_state in {"empty", "disabled"}:
             return ExportResult(
                 success=True,
                 message="no exportable agent service data for selected range",
