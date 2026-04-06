@@ -9,43 +9,23 @@ const viewSource = fs.readFileSync(
   path.resolve(__dirname, '../src/views/HumanResources.vue'),
   'utf8'
 )
-const apiSource = fs.readFileSync(
-  path.resolve(__dirname, '../src/api/index.js'),
-  'utf8'
-)
 
-test('HumanResources payroll tab gates paid action behind admin visibility check', () => {
+test('HumanResources salary tab is a migration entry, not the primary salary editor', () => {
   assert.equal(
-    viewSource.includes("scope.row.status === 'confirmed'") &&
-      viewSource.includes('showPayrollPayAction') &&
-      viewSource.includes('已发放'),
+    viewSource.includes('员工薪资') &&
+      viewSource.includes('handleOpenEmployeeSalary') &&
+      viewSource.includes('薪资维护已迁移'),
     true,
-    'HumanResources.vue should guard 已发放 action with admin visibility check'
+    'HumanResources.vue salary tab should direct users to the dedicated employee salary page'
   )
 })
 
-test('HumanResources payroll tab calls dedicated paid payroll action', () => {
+test('HumanResources salary tab no longer renders payroll primary action buttons', () => {
   assert.equal(
-    viewSource.includes('markPayrollPaid') && viewSource.includes('api.markHrPayrollRecordPaid'),
-    true,
-    'HumanResources.vue should define markPayrollPaid and call payroll paid API'
-  )
-})
-
-test('frontend API exposes payroll paid helper', () => {
-  assert.equal(
-    apiSource.includes('async markHrPayrollRecordPaid(recordId)'),
-    true,
-    'frontend API should expose markHrPayrollRecordPaid'
-  )
-})
-
-test('HumanResources payroll tab derives pay action visibility from auth store roles', () => {
-  assert.equal(
-    viewSource.includes('useAuthStore') &&
-      viewSource.includes('isPayrollAdmin') &&
-      viewSource.includes('showPayrollPayAction'),
-    true,
-    'HumanResources.vue should compute payroll paid visibility from auth store roles'
+    viewSource.includes('@click="markPayrollPaid(scope.row)"') ||
+      viewSource.includes('@click="confirmPayroll(scope.row)"') ||
+      viewSource.includes('@click="showPayrollDialog(scope.row)"'),
+    false,
+    'HumanResources.vue salary tab should not expose payroll primary actions after migration'
   )
 })
