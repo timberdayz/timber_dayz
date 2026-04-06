@@ -108,6 +108,15 @@ def test_collection_config_run_uses_backend_config_run_endpoint():
     assert "for (const accountId of accountIds)" not in text
 
 
+def test_collection_config_exposes_main_account_scoping_hooks():
+    text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
+
+    assert "filters.main_account_id" in text
+    assert 'data-testid="collection-config-main-account-filter"' in text
+    assert 'data-testid="collection-config-main-account-field"' in text
+    assert "main_account_id: form.main_account_id" in text
+
+
 def test_collection_tasks_uses_task_ids_hint_for_config_navigation():
     text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionTasks.vue").read_text(encoding="utf-8")
 
