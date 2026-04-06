@@ -331,6 +331,14 @@
             </div>
           </template>
 
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 16px;"
+            title="口径说明：orders_profit 用于订单分析，contribution_profit 用于财务展示参考，profit_basis_amount 才是正式结算和利润分配的唯一基准。"
+          />
+
           <el-form :inline="true" class="filter-form">
             <el-form-item label="月份">
               <el-date-picker
@@ -602,6 +610,7 @@
               <template #default="{ row }">{{ formatCurrency(row.distributable_amount) }}</template>
             </el-table-column>
             <el-table-column prop="status" label="状态" width="100" />
+<<<<<<< HEAD
             <el-table-column label="操作" width="180" fixed="right">
               <template #default="{ row }">
                 <el-button v-if="row.status !== 'approved'" link type="success" size="small" @click="approveFollowInvestment(row)">
@@ -609,6 +618,22 @@
                 </el-button>
                 <el-button v-if="row.status === 'approved'" link type="warning" size="small" @click="reopenFollowInvestment(row)">
                   撤销审核
+=======
+            <el-table-column prop="approved_by_name" label="审核人" width="120" />
+            <el-table-column prop="approved_at" label="审核时间" width="180">
+              <template #default="{ row }">{{ formatDateTime(row.approved_at) }}</template>
+            </el-table-column>
+          <el-table-column label="操作" width="180" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="info" size="small" @click="viewSettlementDetails(row)">
+                查看明细
+              </el-button>
+              <el-button v-if="row.status !== 'approved'" link type="success" size="small" @click="approveFollowInvestment(row)">
+                审核通过
+              </el-button>
+              <el-button v-if="row.status === 'approved'" link type="warning" size="small" @click="reopenFollowInvestment(row)">
+                撤销审核
+>>>>>>> 850ba17 (feat: add profit sharing context details)
                 </el-button>
               </template>
             </el-table-column>
@@ -734,6 +759,44 @@
         </el-button>
       </template>
     </el-dialog>
+<<<<<<< HEAD
+=======
+
+    <el-drawer v-model="showSettlementDetailsDrawer" title="结算明细" size="50%">
+      <el-alert
+        v-if="financeStore.followInvestmentSettlementDetails.error"
+        type="error"
+        :closable="false"
+        :title="financeStore.followInvestmentSettlementDetails.error"
+        style="margin-bottom: 16px;"
+      />
+
+      <el-table
+        :data="financeStore.followInvestmentSettlementDetails.data"
+        v-loading="financeStore.followInvestmentSettlementDetails.loading"
+        stripe
+      >
+        <el-table-column prop="investor_user_id" label="投资人ID" width="120" />
+        <el-table-column prop="investor_name" label="投资人姓名" width="140" />
+        <el-table-column prop="contribution_amount_snapshot" label="本金快照 (¥)" width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.contribution_amount_snapshot) }}</template>
+        </el-table-column>
+        <el-table-column prop="occupied_days" label="占用天数" width="100" align="right" />
+        <el-table-column prop="weighted_capital" label="加权资金" width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.weighted_capital) }}</template>
+        </el-table-column>
+        <el-table-column prop="share_ratio" label="分配占比" width="120" align="right">
+          <template #default="{ row }">{{ formatPercentValue(row.share_ratio) }}</template>
+        </el-table-column>
+        <el-table-column prop="estimated_income" label="预计收益 (¥)" width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.estimated_income) }}</template>
+        </el-table-column>
+        <el-table-column prop="approved_income" label="已批准 (¥)" width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.approved_income) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-drawer>
+>>>>>>> 850ba17 (feat: add profit sharing context details)
   </div>
 </template>
 

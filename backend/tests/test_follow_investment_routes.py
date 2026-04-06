@@ -78,6 +78,7 @@ async def test_follow_investment_list_route_returns_service_payload(monkeypatch)
                 {
                     "id": 1,
                     "investor_user_id": 101,
+                    "investor_name": "张三",
                     "platform_code": "shopee",
                     "shop_id": "shop-1",
                     "contribution_amount": 50000,
@@ -107,6 +108,7 @@ async def test_follow_investment_list_route_returns_service_payload(monkeypatch)
     assert response.status_code == 200
     assert body["success"] is True
     assert body["data"][0]["contribution_amount"] == 50000
+    assert body["data"][0]["investor_name"] == "张三"
 
 
 @pytest.mark.asyncio
@@ -118,6 +120,7 @@ async def test_follow_investment_create_route_returns_service_payload(monkeypatc
             return {
                 "id": 2,
                 "investor_user_id": payload["investor_user_id"],
+                "investor_name": "张三",
                 "platform_code": payload["platform_code"],
                 "shop_id": payload["shop_id"],
                 "contribution_amount": payload["contribution_amount"],
@@ -153,6 +156,7 @@ async def test_follow_investment_create_route_returns_service_payload(monkeypatc
     assert response.status_code == 200
     assert body["success"] is True
     assert body["data"]["status"] == "active"
+    assert body["data"]["investor_name"] == "张三"
 
 
 @pytest.mark.asyncio
@@ -194,6 +198,7 @@ async def test_follow_investment_approve_route_returns_service_payload(monkeypat
                 "id": settlement_id,
                 "status": "approved",
                 "approved_by": approver,
+                "approved_by_name": "财务经理",
             }
 
     async def _override_db():
@@ -215,6 +220,7 @@ async def test_follow_investment_approve_route_returns_service_payload(monkeypat
     assert response.status_code == 200
     assert body["success"] is True
     assert body["data"]["status"] == "approved"
+    assert body["data"]["approved_by_name"] == "财务经理"
 
 
 @pytest.mark.asyncio
@@ -265,6 +271,8 @@ async def test_follow_investment_settlements_list_route_returns_service_payload(
                     "distribution_ratio": 0.4,
                     "distributable_amount": 32000,
                     "status": "approved",
+                    "approved_by_name": "财务经理",
+                    "approved_at": "2026-04-06T15:00:00+00:00",
                 }
             ]
 
@@ -290,6 +298,7 @@ async def test_follow_investment_settlements_list_route_returns_service_payload(
     assert response.status_code == 200
     assert body["success"] is True
     assert body["data"][0]["status"] == "approved"
+    assert body["data"][0]["approved_by_name"] == "财务经理"
 
 
 @pytest.mark.asyncio
@@ -301,12 +310,14 @@ async def test_follow_investment_settlement_details_route_returns_service_payloa
             return [
                 {
                     "investor_user_id": 101,
+                    "investor_name": "张三",
                     "contribution_amount_snapshot": 50000,
                     "occupied_days": 31,
                     "weighted_capital": 1550000,
                     "share_ratio": 0.7635,
                     "estimated_income": 24432,
                     "approved_income": 24432,
+                    "paid_income": 0,
                 }
             ]
 
@@ -329,6 +340,8 @@ async def test_follow_investment_settlement_details_route_returns_service_payloa
     assert response.status_code == 200
     assert body["success"] is True
     assert body["data"][0]["investor_user_id"] == 101
+    assert body["data"][0]["investor_name"] == "张三"
+    assert body["data"][0]["paid_income"] == 0
 
 
 @pytest.mark.asyncio
@@ -402,6 +415,7 @@ async def test_follow_investment_my_income_route_returns_current_user_payload(mo
                         "period_month": "2026-03",
                         "platform_code": "shopee",
                         "shop_id": "shop-1",
+                        "investor_name": "张三",
                         "profit_basis_amount": 80000,
                         "share_ratio": 0.7635,
                         "estimated_income": 24432,
@@ -432,3 +446,4 @@ async def test_follow_investment_my_income_route_returns_current_user_payload(mo
     assert body["success"] is True
     assert body["data"]["summary"]["estimated_income"] == 24432
     assert body["data"]["items"][0]["shop_id"] == "shop-1"
+    assert body["data"]["items"][0]["investor_name"] == "张三"

@@ -65,6 +65,7 @@
 
     <el-table :data="items" stripe v-loading="loading">
       <el-table-column prop="period_month" label="月份" width="120" />
+      <el-table-column prop="investor_name" label="投资人姓名" width="140" />
       <el-table-column prop="platform_code" label="平台" width="120" />
       <el-table-column prop="shop_id" label="店铺ID" min-width="140" />
       <el-table-column prop="profit_basis_amount" label="结算基准利润 (楼)" width="160" align="right">
@@ -82,6 +83,7 @@
       <el-table-column prop="paid_income" label="已确认 (楼)" width="140" align="right">
         <template #default="{ row }">{{ formatMoney(row.paid_income) }}</template>
       </el-table-column>
+      <el-table-column prop="approved_at" label="审核时间" width="180" />
       <el-table-column prop="status" label="状态" width="120" />
     </el-table>
   </div>

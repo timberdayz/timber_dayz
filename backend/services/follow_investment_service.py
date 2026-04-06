@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.profit_basis_service import ProfitBasisService
-from modules.core.db import ApprovalLog, FollowInvestment, FollowInvestmentDetail, FollowInvestmentSettlement, ShopProfitBasis
+from modules.core.db import ApprovalLog, DimUser, FollowInvestment, FollowInvestmentDetail, FollowInvestmentSettlement, ShopProfitBasis
 
 
 class FollowInvestmentService:
@@ -67,6 +67,17 @@ class FollowInvestmentService:
 
         return details
 
+    async def _load_user_names(self, user_ids: set[int]) -> dict[int, str]:
+        if self.db is None or not user_ids:
+            return {}
+        result = await self.db.execute(
+            select(DimUser.user_id, DimUser.full_name, DimUser.username).where(DimUser.user_id.in_(user_ids))
+        )
+        mapping: dict[int, str] = {}
+        for user_id, full_name, username in result.all():
+            mapping[int(user_id)] = full_name or username or str(user_id)
+        return mapping
+
     async def _load_active_investments(
         self,
         platform_code: str,
@@ -112,10 +123,12 @@ class FollowInvestmentService:
         if status:
             stmt = stmt.where(FollowInvestment.status == status)
         rows = (await self.db.execute(stmt.order_by(FollowInvestment.id.desc()))).scalars().all()
+        user_names = await self._load_user_names({int(row.investor_user_id) for row in rows})
         return [
             {
                 "id": row.id,
                 "investor_user_id": row.investor_user_id,
+                "investor_name": user_names.get(int(row.investor_user_id), str(row.investor_user_id)),
                 "platform_code": row.platform_code,
                 "shop_id": row.shop_id,
                 "contribution_amount": row.contribution_amount,
@@ -149,6 +162,7 @@ class FollowInvestmentService:
         return {
             "id": record.id,
             "investor_user_id": record.investor_user_id,
+            "investor_name": None,
             "platform_code": record.platform_code,
             "shop_id": record.shop_id,
             "contribution_amount": record.contribution_amount,
@@ -182,6 +196,7 @@ class FollowInvestmentService:
         return {
             "id": row.id,
             "investor_user_id": row.investor_user_id,
+            "investor_name": None,
             "platform_code": row.platform_code,
             "shop_id": row.shop_id,
             "contribution_amount": row.contribution_amount,
@@ -400,6 +415,8 @@ class FollowInvestmentService:
         if status:
             stmt = stmt.where(FollowInvestmentSettlement.status == status)
         rows = (await self.db.execute(stmt.order_by(FollowInvestmentSettlement.id.desc()))).scalars().all()
+        approver_ids = {int(row.approved_by) for row in rows if row.approved_by and str(row.approved_by).isdigit()}
+        approver_names = await self._load_user_names(approver_ids)
         return [
             {
                 "id": row.id,
@@ -411,6 +428,7 @@ class FollowInvestmentService:
                 "distributable_amount": row.distributable_amount,
                 "status": row.status,
                 "approved_by": row.approved_by,
+                "approved_by_name": approver_names.get(int(row.approved_by), row.approved_by) if row.approved_by and str(row.approved_by).isdigit() else row.approved_by,
                 "approved_at": row.approved_at.isoformat() if row.approved_at else None,
             }
             for row in rows
@@ -424,9 +442,11 @@ class FollowInvestmentService:
                 select(FollowInvestmentDetail).where(FollowInvestmentDetail.settlement_id == settlement_id)
             )
         ).scalars().all()
+        user_names = await self._load_user_names({int(row.investor_user_id) for row in rows})
         return [
             {
                 "investor_user_id": row.investor_user_id,
+                "investor_name": user_names.get(int(row.investor_user_id), str(row.investor_user_id)),
                 "contribution_amount_snapshot": row.contribution_amount_snapshot,
                 "occupied_days": row.occupied_days,
                 "weighted_capital": row.weighted_capital,
@@ -474,17 +494,20 @@ class FollowInvestmentService:
             "current_contribution_amount": 0.0,
         }
 
+        user_names = await self._load_user_names({int(user_id)})
         for detail, settlement in rows:
             items.append(
                 {
                     "period_month": settlement.period_month,
                     "platform_code": settlement.platform_code,
                     "shop_id": settlement.shop_id,
+                    "investor_name": user_names.get(int(user_id), str(user_id)),
                     "profit_basis_amount": settlement.profit_basis_amount,
                     "share_ratio": detail.share_ratio,
                     "estimated_income": detail.estimated_income,
                     "approved_income": detail.approved_income,
                     "paid_income": detail.paid_income,
+                    "approved_at": settlement.approved_at.isoformat() if settlement.approved_at else None,
                     "status": settlement.status,
                 }
             )
