@@ -601,8 +601,9 @@ async def update_config(
         config.sub_domains = summary["sub_domains"]
 
     time_selection_input = update_dict.pop("time_selection", None)
+    nullable_fields = {"schedule_cron", "custom_date_start", "custom_date_end", "sub_domains"}
     for key, value in update_dict.items():
-        if value is not None:
+        if value is not None or key in nullable_fields:
             setattr(config, key, value)
 
     time_selection = normalize_time_selection(

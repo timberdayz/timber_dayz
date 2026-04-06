@@ -10,7 +10,7 @@
           <el-icon><MagicStick /></el-icon>
           快速配置
         </el-button>
-        <el-button type="primary" @click="showCreateDialog">
+        <el-button type="primary" data-testid="collection-config-create-button" @click="showCreateDialog">
           <el-icon><Plus /></el-icon>
           新建配置
         </el-button>
@@ -142,25 +142,30 @@
       :title="isEdit ? `编辑${activeGranularityLabel}配置` : `新建${activeGranularityLabel}配置`"
       width="1100px"
       destroy-on-close
+      data-testid="collection-config-dialog"
     >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="110px">
         <div class="editor-layout">
           <div class="editor-main">
             <el-form-item label="配置名称" prop="name">
-              <el-input v-model="form.name" placeholder="留空自动生成（平台-粒度-域集合-v版本号）">
-                <template #append v-if="!isEdit">
-                  <el-button @click="generateConfigName">自动生成</el-button>
-                </template>
-              </el-input>
+              <div data-testid="collection-config-name-input">
+                <el-input v-model="form.name" placeholder="留空自动生成（平台-粒度-域集合-v版本号）">
+                  <template #append v-if="!isEdit">
+                    <el-button @click="generateConfigName">自动生成</el-button>
+                  </template>
+                </el-input>
+              </div>
               <div class="form-hint" v-if="generatedName">建议名称：{{ generatedName }}</div>
             </el-form-item>
 
             <el-form-item label="平台" prop="platform">
-              <el-select v-model="form.platform" placeholder="请选择平台" @change="onPlatformChange">
-                <el-option label="Shopee" value="shopee" />
-                <el-option label="TikTok" value="tiktok" />
-                <el-option label="妙手ERP" value="miaoshou" />
-              </el-select>
+              <div data-testid="collection-config-platform-field">
+                <el-select v-model="form.platform" placeholder="请选择平台" @change="onPlatformChange">
+                  <el-option label="Shopee" value="shopee" />
+                  <el-option label="TikTok" value="tiktok" />
+                  <el-option label="妙手ERP" value="miaoshou" />
+                </el-select>
+              </div>
             </el-form-item>
 
             <el-form-item label="日期范围" prop="date_range_type">
@@ -220,12 +225,13 @@
             <div v-if="!form.platform" class="empty-tip">先选择平台，再加载店铺维度配置。</div>
             <div v-else-if="shopScopeRows.length === 0" class="empty-tip">当前平台暂无可用店铺账号。</div>
 
-            <div v-else class="shop-scope-list">
+            <div v-else class="shop-scope-list" data-testid="collection-config-shop-scope-list">
               <el-card
                 v-for="{ scope, account } in shopScopeRows"
                 :key="scope.shop_account_id"
                 class="shop-scope-card"
                 shadow="never"
+                :data-testid="`collection-config-shop-scope-card-${scope.shop_account_id}`"
               >
                 <template #header>
                   <div class="shop-scope-card-header">
@@ -296,7 +302,12 @@
 
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitForm">
+        <el-button
+          type="primary"
+          data-testid="collection-config-save-button"
+          :loading="submitting"
+          @click="submitForm"
+        >
           {{ isEdit ? '保存' : '创建' }}
         </el-button>
       </template>
@@ -355,6 +366,7 @@ const isEdit = ref(false)
 const activeGranularity = ref('daily')
 const configs = ref([])
 const flatAccounts = ref([])
+const dialogAccounts = ref([])
 const groupedAccounts = ref([])
 const coverage = ref({ summary: {}, items: [] })
 const formRef = ref(null)
@@ -417,8 +429,9 @@ const currentCoverageSummary = computed(() => {
 })
 
 const platformAccounts = computed(() => {
+  const scopedAccounts = dialogAccounts.value.length ? dialogAccounts.value : flatAccounts.value
   const platform = String(form.platform || '').toLowerCase()
-  return flatAccounts.value.filter(
+  return scopedAccounts.filter(
     (account) => String(account.platform || '').toLowerCase() === platform && account.status === 'active'
   )
 })
@@ -531,20 +544,32 @@ function buildDefaultShopScopes(platform, existingScopes = []) {
 }
 
 function normalizeShopScopesForPayload() {
-  return (form.shop_scopes || []).map((scope) => ({
+  const validIds = new Set(platformAccounts.value.map((account) => account.id))
+  return (form.shop_scopes || [])
+    .filter((scope) => validIds.has(scope.shop_account_id))
+    .map((scope) => ({
     shop_account_id: scope.shop_account_id,
     data_domains: [...(scope.data_domains || [])],
     sub_domains: normalizeDomainSubtypeMap(scope.sub_domains),
     enabled: true
-  }))
+    }))
 }
 
 function validateShopScopes() {
-  if (!form.shop_scopes.length) {
+  const validIds = new Set(platformAccounts.value.map((account) => account.id))
+  const normalizedScopes = normalizeShopScopesForPayload()
+
+  if (!normalizedScopes.length) {
     ElMessage.warning('当前平台暂无可保存的店铺配置')
     return false
   }
-  const invalidScope = form.shop_scopes.find((scope) => !(scope.data_domains || []).length)
+  if (normalizedScopes.length !== validIds.size) {
+    ElMessage.warning('存在未覆盖或无效的店铺 scope，请重新选择平台后再保存')
+    form.shop_scopes = buildDefaultShopScopes(form.platform, normalizedScopes)
+    return false
+  }
+
+  const invalidScope = normalizedScopes.find((scope) => !(scope.data_domains || []).length)
   if (invalidScope) {
     const account = getAccountById(invalidScope.shop_account_id)
     ElMessage.warning(`${account?.name || invalidScope.shop_account_id} 至少需要选择一个数据域`)
@@ -652,6 +677,7 @@ function resetForm() {
     schedule_enabled: false,
     schedule_cron: ''
   })
+  dialogAccounts.value = []
   generatedName.value = ''
   customDateRange.value = []
 }
@@ -667,7 +693,18 @@ function showQuickSetupDialog() {
   quickSetupVisible.value = true
 }
 
-function onPlatformChange() {
+async function onPlatformChange() {
+  if (!form.platform) {
+    dialogAccounts.value = []
+    form.shop_scopes = []
+    return
+  }
+  try {
+    dialogAccounts.value = await collectionApi.getAccounts({ platform: form.platform })
+  } catch (error) {
+    dialogAccounts.value = []
+    ElMessage.error(`加载平台店铺失败: ${error.message}`)
+  }
   form.shop_scopes = buildDefaultShopScopes(form.platform)
   if (!isEdit.value) {
     form.name = ''
@@ -679,6 +716,7 @@ async function editConfig(row) {
   isEdit.value = true
   activeGranularity.value = row._resolvedGranularity || normalizeConfigGranularity(row)
   const detail = await collectionApi.getConfig(row.id)
+  dialogAccounts.value = await collectionApi.getAccounts({ platform: detail.platform })
   Object.assign(form, {
     id: detail.id,
     name: detail.name,
