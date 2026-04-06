@@ -336,3 +336,84 @@ def test_mark_payroll_record_paid_rejects_non_admin_user():
     assert resp.status_code == 403
     assert _json_body(resp)["success"] is False
     assert db.commit.await_count == 0
+
+
+def test_refresh_payroll_record_returns_latest_payload():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    record = SimpleNamespace(
+        id=51,
+        employee_code="EMP200",
+        year_month="2025-04",
+        base_salary=2000.0,
+        position_salary=500.0,
+        performance_salary=300.0,
+        overtime_pay=50.0,
+        commission=200.0,
+        allowances=100.0,
+        bonus=80.0,
+        gross_salary=3230.0,
+        social_insurance_personal=10.0,
+        housing_fund_personal=10.0,
+        income_tax=10.0,
+        other_deductions=0.0,
+        total_deductions=30.0,
+        net_salary=3200.0,
+        social_insurance_company=100.0,
+        housing_fund_company=100.0,
+        total_cost=3430.0,
+        status="draft",
+        pay_date=None,
+        remark="ok",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    class _FakeService:
+        def __init__(self, db):
+            self.db = db
+
+        async def generate_employee_month(self, employee_code, year_month):
+            return {
+                "employee_code": employee_code,
+                "year_month": year_month,
+                "payroll_upserts": 1,
+                "locked_conflicts": 0,
+                "locked_conflict_details": [],
+                "payroll_record": record,
+            }
+
+    module.PayrollGenerationService = _FakeService
+
+    resp = asyncio.run(module.refresh_payroll_record("EMP200", "2025-04", db=db))
+
+    assert resp["success"] is True
+    assert resp["data"]["employee_code"] == "EMP200"
+    assert resp["locked_conflicts"] == 0
+
+
+def test_refresh_payroll_record_returns_locked_conflicts():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+
+    class _FakeService:
+        def __init__(self, db):
+            self.db = db
+
+        async def generate_employee_month(self, employee_code, year_month):
+            return {
+                "employee_code": employee_code,
+                "year_month": year_month,
+                "payroll_upserts": 0,
+                "locked_conflicts": 1,
+                "locked_conflict_details": [{"employee_code": employee_code}],
+                "payroll_record": None,
+            }
+
+    module.PayrollGenerationService = _FakeService
+
+    resp = asyncio.run(module.refresh_payroll_record("EMP201", "2025-04", db=db))
+
+    assert resp["success"] is True
+    assert resp["locked_conflicts"] == 1
+    assert resp["locked_conflict_details"] == [{"employee_code": "EMP201"}]

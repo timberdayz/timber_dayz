@@ -177,6 +177,29 @@ async def update_salary_structure(
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鏇存柊钖祫缁撴瀯澶辫触: {str(e)}", status_code=500)
 
 
+@router.post("/payroll-records/{employee_code}/{year_month}/refresh")
+async def refresh_payroll_record(
+    employee_code: str,
+    year_month: str,
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        result = await PayrollGenerationService(db).generate_employee_month(employee_code, year_month)
+        record = result.get("payroll_record")
+        return {
+            "success": True,
+            "employee_code": result.get("employee_code", employee_code),
+            "year_month": result.get("year_month", year_month),
+            "payroll_upserts": result.get("payroll_upserts", 0),
+            "locked_conflicts": result.get("locked_conflicts", 0),
+            "locked_conflict_details": result.get("locked_conflict_details", []),
+            "data": PayrollRecordResponse.model_validate(record).model_dump(mode="json") if record else None,
+        }
+    except Exception as e:
+        logger.error("鍒锋柊鍛樺伐鏈堝害宸ヨ祫鍗曞け璐? %s", e, exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鍒锋柊鍛樺伐鏈堝害宸ヨ祫鍗曞け璐? {str(e)}", status_code=500)
+
+
 @router.get("/payroll-records", response_model=List[PayrollRecordResponse])
 async def list_payroll_records(
     employee_code: Optional[str] = Query(None, description="员工编号筛选"),
