@@ -58,14 +58,15 @@
 - `frontend/src/views/hr/PerformanceManagement.vue`
   - 发起月度绩效重算
   - 接收并展示工资单锁定冲突
+- `frontend/src/views/hr/EmployeeSalary.vue`
+  - 维护固定薪资
+  - 录入月度奖金、扣款等人工字段
+  - 刷新、确认、退回、发放工资单
 - `frontend/src/views/HumanResources.vue`
-  - 查询工资单
-  - 编辑草稿
-  - 确认工资单
-  - 退回草稿
-  - 标记已发放
+  - 继续承担员工、部门、职位、考勤等基础人力管理
 - `frontend/src/views/hr/MyIncome.vue`
   - 只展示工资单口径的完整工资单明细
+  - 不承担任何录入职责
 
 ## 4. Monthly Operation Flow
 
@@ -101,7 +102,7 @@
 
 推荐处理方式：
 
-1. 在工资单列表中找到冲突员工对应月份
+1. 在“员工薪资”页中找到冲突员工并切到对应月份
 2. 如果需要接受最新重算结果：
    - 先执行“退回草稿”
    - 再次发起绩效重算
@@ -110,6 +111,29 @@
    - 保持工资单锁定
 
 ### Step 4. 审核草稿工资单
+
+在“员工薪资”页中：
+
+- 固定薪资区域维护：
+  - 底薪
+  - 岗位工资
+  - 固定补贴
+  - 绩效比例
+  - 默认提成比例
+  - 社保/公积金基数
+  - 生效日期
+
+- 月度录入区域维护：
+  - 奖金
+  - 加班费
+  - 个人社保
+  - 个人公积金
+  - 个税
+  - 其他扣款
+  - 公司社保
+  - 公司公积金
+  - 发薪日期
+  - 备注
 
 草稿工资单允许：
 
@@ -294,7 +318,7 @@
 2. 记录 `shop_performance_upserts / commission_upserts / employee_performance_upserts / payroll_upserts`
 3. 检查是否存在 `payroll_locked_conflicts`
 4. 若有冲突，逐个处理并决定是否退回草稿
-5. 审核草稿工资单的人工字段
+5. 在“员工薪资”页维护固定薪资并审核草稿工资单的人工字段
 6. 确认工资单
 7. 由管理员标记已发放
 8. 抽查“我的收入”页面是否显示正确的 `net_salary`
