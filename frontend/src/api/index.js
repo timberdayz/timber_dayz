@@ -1843,8 +1843,14 @@ export default {
   async getHrSalaryStructure(employeeCode) {
     return await this._get(`/hr/salary-structures/${employeeCode}`)
   },
+  async getHrSalaryStructureHistory(employeeCode) {
+    return await this._get(`/hr/salary-structures/${employeeCode}/history`);
+  },
   async createHrSalaryStructure(data) {
     return await this._post('/hr/salary-structures', data)
+  },
+  async updateHrSalaryStructure(employeeCode, data) {
+    return await this._put(`/hr/salary-structures/${employeeCode}`, data);
   },
 
   // === 工资单 ===
@@ -1856,6 +1862,9 @@ export default {
   },
   async updateHrPayrollRecord(recordId, data) {
     return await this._put(`/hr/payroll-records/${recordId}`, data)
+  },
+  async refreshHrPayrollRecord(employeeCode, yearMonth) {
+    return await this._post(`/hr/payroll-records/${employeeCode}/${yearMonth}/refresh`);
   },
   async confirmHrPayrollRecord(recordId) {
     return await this._post(`/hr/payroll-records/${recordId}/confirm`)

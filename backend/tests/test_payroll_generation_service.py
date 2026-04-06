@@ -254,3 +254,151 @@ def test_generate_month_reports_locked_conflict_for_confirmed_payroll():
     ]
     assert added == []
     assert float(existing.net_salary) == 1000.0
+
+
+def test_generate_employee_month_updates_single_draft_record():
+    service_cls = _load_service_cls()
+    db = AsyncMock()
+
+    salary = SimpleNamespace(
+        employee_code="EMP010",
+        base_salary=Decimal("2000"),
+        position_salary=Decimal("500"),
+        housing_allowance=Decimal("50"),
+        transport_allowance=Decimal("50"),
+        meal_allowance=Decimal("0"),
+        communication_allowance=Decimal("0"),
+        other_allowance=Decimal("0"),
+        performance_ratio=0.2,
+        status="active",
+        effective_date="2025-01-01",
+        id=100,
+    )
+    commission = SimpleNamespace(
+        employee_code="EMP010",
+        year_month="2025-04",
+        commission_amount=Decimal("300"),
+    )
+    performance = SimpleNamespace(
+        employee_code="EMP010",
+        year_month="2025-04",
+        performance_score=75.0,
+    )
+    existing = SimpleNamespace(
+        id=101,
+        employee_code="EMP010",
+        year_month="2025-04",
+        status="draft",
+        overtime_pay=Decimal("88"),
+        bonus=Decimal("120"),
+        social_insurance_personal=Decimal("10"),
+        housing_fund_personal=Decimal("20"),
+        income_tax=Decimal("30"),
+        other_deductions=Decimal("40"),
+        social_insurance_company=Decimal("100"),
+        housing_fund_company=Decimal("100"),
+    )
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is SalaryStructure:
+                return _MockResult(rows=[salary])
+            if entity is EmployeeCommission:
+                return _MockResult(scalar_value=commission)
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=performance)
+            if entity is PayrollRecord:
+                return _MockResult(scalar_value=existing)
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: None
+
+    service = service_cls(db=db)
+    result = asyncio.run(service.generate_employee_month("EMP010", "2025-04"))
+
+    assert result["payroll_upserts"] == 1
+    assert result["locked_conflicts"] == 0
+    assert result["payroll_record"] is existing
+    assert float(existing.bonus) == 120.0
+    assert float(existing.overtime_pay) == 88.0
+    assert float(existing.performance_salary) == 375.0
+    assert float(existing.allowances) == 100.0
+    assert float(existing.net_salary) == 3383.0
+
+
+def test_generate_employee_month_reports_locked_record():
+    service_cls = _load_service_cls()
+    db = AsyncMock()
+
+    salary = SimpleNamespace(
+        employee_code="EMP011",
+        base_salary=Decimal("1000"),
+        position_salary=Decimal("500"),
+        housing_allowance=Decimal("0"),
+        transport_allowance=Decimal("0"),
+        meal_allowance=Decimal("0"),
+        communication_allowance=Decimal("0"),
+        other_allowance=Decimal("0"),
+        performance_ratio=0.2,
+        status="active",
+        effective_date="2025-01-01",
+        id=102,
+    )
+    commission = SimpleNamespace(
+        employee_code="EMP011",
+        year_month="2025-04",
+        commission_amount=Decimal("600"),
+    )
+    performance = SimpleNamespace(
+        employee_code="EMP011",
+        year_month="2025-04",
+        performance_score=100.0,
+    )
+    existing = SimpleNamespace(
+        id=103,
+        employee_code="EMP011",
+        year_month="2025-04",
+        status="confirmed",
+        base_salary=Decimal("800"),
+        position_salary=Decimal("200"),
+        performance_salary=Decimal("0"),
+        commission=Decimal("0"),
+        allowances=Decimal("0"),
+        gross_salary=Decimal("1000"),
+        total_deductions=Decimal("0"),
+        net_salary=Decimal("1000"),
+        overtime_pay=Decimal("0"),
+        bonus=Decimal("0"),
+        social_insurance_personal=Decimal("0"),
+        housing_fund_personal=Decimal("0"),
+        income_tax=Decimal("0"),
+        other_deductions=Decimal("0"),
+        social_insurance_company=Decimal("0"),
+        housing_fund_company=Decimal("0"),
+    )
+
+    async def _execute(stmt, params=None):
+        if hasattr(stmt, "column_descriptions"):
+            entity = stmt.column_descriptions[0].get("entity")
+            if entity is SalaryStructure:
+                return _MockResult(rows=[salary])
+            if entity is EmployeeCommission:
+                return _MockResult(scalar_value=commission)
+            if entity is EmployeePerformance:
+                return _MockResult(scalar_value=performance)
+            if entity is PayrollRecord:
+                return _MockResult(scalar_value=existing)
+        return _MockResult(rows=[])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = lambda obj: None
+
+    service = service_cls(db=db)
+    result = asyncio.run(service.generate_employee_month("EMP011", "2025-04"))
+
+    assert result["payroll_upserts"] == 0
+    assert result["locked_conflicts"] == 1
+    assert result["payroll_record"] is existing
+    assert result["locked_conflict_details"][0]["employee_code"] == "EMP011"

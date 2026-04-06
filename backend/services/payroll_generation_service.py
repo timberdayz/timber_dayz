@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.core.db import (
@@ -202,6 +202,103 @@ class PayrollGenerationService:
             "changed_fields": changed_fields,
             "current_net_salary": float(cls._to_money(getattr(existing, "net_salary", 0))),
             "recalculated_net_salary": float(cls._to_money(payload.get("net_salary", 0))),
+        }
+
+    async def generate_employee_month(self, employee_code: str, year_month: str) -> Dict[str, Any]:
+        salary_rows = (
+            await self.db.execute(
+                select(SalaryStructure)
+                .where(
+                    SalaryStructure.employee_code == employee_code,
+                    SalaryStructure.status == "active",
+                )
+                .order_by(desc(SalaryStructure.effective_date), desc(SalaryStructure.id))
+            )
+        ).scalars().all()
+        salary = salary_rows[0] if salary_rows else None
+        commission = (
+            await self.db.execute(
+                select(EmployeeCommission).where(
+                    EmployeeCommission.employee_code == employee_code,
+                    EmployeeCommission.year_month == year_month,
+                )
+            )
+        ).scalar_one_or_none()
+        performance = (
+            await self.db.execute(
+                select(EmployeePerformance).where(
+                    EmployeePerformance.employee_code == employee_code,
+                    EmployeePerformance.year_month == year_month,
+                )
+            )
+        ).scalar_one_or_none()
+        existing = (
+            await self.db.execute(
+                select(PayrollRecord).where(
+                    PayrollRecord.employee_code == employee_code,
+                    PayrollRecord.year_month == year_month,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if salary is None and commission is None and performance is None and existing is None:
+            return {
+                "employee_code": employee_code,
+                "year_month": year_month,
+                "payroll_upserts": 0,
+                "locked_conflicts": 0,
+                "locked_conflict_details": [],
+                "payroll_record": None,
+            }
+
+        payload = self._build_payload(
+            employee_code=employee_code,
+            year_month=year_month,
+            salary=salary,
+            commission=commission,
+            performance=performance,
+            existing=existing,
+        )
+
+        locked_status = getattr(existing, "status", None)
+        if locked_status in {"confirmed", "paid"}:
+            if self._has_locked_conflict(existing, payload):
+                return {
+                    "employee_code": employee_code,
+                    "year_month": year_month,
+                    "payroll_upserts": 0,
+                    "locked_conflicts": 1,
+                    "locked_conflict_details": [
+                        self._locked_conflict_detail(existing, payload)
+                    ],
+                    "payroll_record": existing,
+                }
+            return {
+                "employee_code": employee_code,
+                "year_month": year_month,
+                "payroll_upserts": 0,
+                "locked_conflicts": 0,
+                "locked_conflict_details": [],
+                "payroll_record": existing,
+            }
+
+        if existing:
+            for key, value in payload.items():
+                setattr(existing, key, value)
+            self._recalculate_totals(existing)
+            record = existing
+        else:
+            record = PayrollRecord(**payload)
+            self._recalculate_totals(record)
+            self.db.add(record)
+
+        return {
+            "employee_code": employee_code,
+            "year_month": year_month,
+            "payroll_upserts": 1,
+            "locked_conflicts": 0,
+            "locked_conflict_details": [],
+            "payroll_record": record,
         }
 
     async def generate_month(self, year_month: str) -> Dict[str, Any]:

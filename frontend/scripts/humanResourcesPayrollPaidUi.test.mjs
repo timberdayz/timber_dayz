@@ -22,9 +22,9 @@ test('HumanResources salary tab is a migration entry, not the primary salary edi
 
 test('HumanResources salary tab no longer renders payroll primary action buttons', () => {
   assert.equal(
-    viewSource.includes('确认工资单') &&
-      viewSource.includes('标记已发放') &&
-      viewSource.includes('@click="markPayrollPaid(scope.row)"'),
+    viewSource.includes('@click="markPayrollPaid(scope.row)"') ||
+      viewSource.includes('@click="confirmPayroll(scope.row)"') ||
+      viewSource.includes('@click="showPayrollDialog(scope.row)"'),
     false,
     'HumanResources.vue salary tab should not expose payroll primary actions after migration'
   )

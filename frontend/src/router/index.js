@@ -927,6 +927,17 @@ const routes = [
     }
   },
   {
+    path: '/employee-salary',
+    name: 'EmployeeSalary',
+    component: () => import('../views/hr/EmployeeSalary.vue'),
+    meta: {
+      title: '员工薪资',
+      icon: 'Money',
+      permission: 'human-resources',
+      roles: ['admin']
+    }
+  },
+  {
     path: '/hr-performance-management',
     name: 'HRPerformanceManagement',
     component: () => import('../views/hr/PerformanceManagement.vue'),

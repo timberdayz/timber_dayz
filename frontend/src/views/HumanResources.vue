@@ -275,6 +275,12 @@
                   </div>
                 </div>
               </template>
+              <el-alert
+                title="薪资维护已迁移到员工薪资页。固定薪资、月度奖金/扣款、工资单确认和发放请统一在员工薪资页处理。"
+                type="info"
+                :closable="false"
+                style="margin-bottom: 16px"
+              />
               <el-table
                 :data="departments"
                 style="width: 100%"
@@ -336,7 +342,7 @@
                       v-if="scope.row.status === 'draft'"
                       link
                       type="primary"
-                      @click="showPayrollDialog(scope.row)"
+                      @click="handleOpenEmployeeSalary"
                     >
                       编辑
                     </el-button>
@@ -344,7 +350,7 @@
                       v-if="scope.row.status === 'draft'"
                       link
                       type="success"
-                      @click="confirmPayroll(scope.row)"
+                      @click="handleOpenEmployeeSalary"
                     >
                       确认
                     </el-button>
@@ -352,7 +358,7 @@
                       v-if="scope.row.status === 'confirmed'"
                       link
                       type="warning"
-                      @click="reopenPayroll(scope.row)"
+                      @click="handleOpenEmployeeSalary"
                     >
                       退回草稿
                     </el-button>
@@ -364,7 +370,7 @@
                       v-if="scope.row.status === 'draft'"
                       link
                       type="primary"
-                      @click="showPayrollDialog(scope.row)"
+                      @click="handleOpenEmployeeSalary"
                     >
                       编辑
                     </el-button>
@@ -372,7 +378,7 @@
                       v-if="scope.row.status === 'draft'"
                       link
                       type="success"
-                      @click="confirmPayroll(scope.row)"
+                      @click="handleOpenEmployeeSalary"
                     >
                       确认
                     </el-button>
@@ -380,7 +386,7 @@
                       v-if="scope.row.status === 'confirmed'"
                       link
                       type="warning"
-                      @click="reopenPayroll(scope.row)"
+                      @click="handleOpenEmployeeSalary"
                     >
                       退回草稿
                     </el-button>
@@ -594,6 +600,9 @@
                         :value="month"
                       />
                     </el-select>
+                    <el-button type="primary" @click="handleOpenEmployeeSalary">
+                      前往员工薪资
+                    </el-button>
                   </div>
                 </div>
               </template>
@@ -666,7 +675,7 @@
                       v-if="scope.row.status === 'draft'"
                       link
                       type="primary"
-                      @click="showPayrollDialog(scope.row)"
+                      @click="handleOpenEmployeeSalary"
                     >
                       编辑
                     </el-button>
@@ -674,7 +683,7 @@
                       v-if="scope.row.status === 'draft'"
                       link
                       type="success"
-                      @click="confirmPayroll(scope.row)"
+                      @click="handleOpenEmployeeSalary"
                     >
                       确认
                     </el-button>
@@ -682,7 +691,7 @@
                       v-if="showPayrollPayAction(scope.row)"
                       link
                       type="primary"
-                      @click="markPayrollPaid(scope.row)"
+                      @click="handleOpenEmployeeSalary"
                     >
                       已发放
                     </el-button>
@@ -690,7 +699,7 @@
                       v-if="scope.row.status === 'confirmed'"
                       link
                       type="warning"
-                      @click="reopenPayroll(scope.row)"
+                      @click="handleOpenEmployeeSalary"
                     >
                       退回草稿
                     </el-button>
@@ -1416,6 +1425,10 @@ const refreshData = () => {
 
 const handleOpenPayrollRunbook = () => {
   router.push({ name: 'UserGuide', query: { topic: 'hr-payroll' } })
+}
+
+const handleOpenEmployeeSalary = () => {
+  router.push({ name: 'EmployeeSalary' })
 }
 
 const handleTabChange = (tabName) => {

@@ -149,6 +149,7 @@ export const menuGroups = [
     items: [
       '/human-resources',            // 人力管理（含员工/部门/职位/考勤/薪资 Tab）
       '/employee-management',        // 我的档案
+      '/employee-salary',            // 员工薪资（固定薪资 + 月度录入 + 工资单状态）
       '/my-income',              // 我的收入
       '/my-follow-investment-income', // 我的跟投收益
       '/hr-performance-management',  // 绩效管理（仅管理员）
