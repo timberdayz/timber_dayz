@@ -71,6 +71,7 @@ class CollectionConfigCreate(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="配置名称(留空自动生成)")
     platform: str = Field(..., pattern="^(shopee|tiktok|miaoshou)$", description="平台")
+    main_account_id: str = Field(..., min_length=1, description="归属主账号ID")
     shop_scopes: List[CollectionConfigShopScopePayload] = Field(
         ...,
         min_length=1,
@@ -91,6 +92,7 @@ class CollectionConfigUpdate(BaseModel):
     """更新采集配置请求"""
 
     name: Optional[str] = Field(None, min_length=1, max_length=100)
+    main_account_id: Optional[str] = Field(None, min_length=1)
     shop_scopes: Optional[List[CollectionConfigShopScopePayload]] = None
     granularity: Optional[str] = None
     date_range_type: Optional[str] = None
@@ -110,6 +112,8 @@ class CollectionConfigResponse(BaseModel):
     id: int
     name: str
     platform: str
+    main_account_id: str
+    main_account_name: Optional[str] = None
     account_ids: List[str] = Field(default_factory=list, description="兼容旧摘要字段")
     data_domains: List[str] = Field(default_factory=list, description="兼容旧摘要字段")
     sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(
@@ -468,7 +472,6 @@ class HealthCheckResponse(BaseModel):
     browser_pool: BrowserPoolStatus
     database: str
     scheduler: str
-
 
 
 

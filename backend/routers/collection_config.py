@@ -71,6 +71,7 @@ def _build_collection_config_record(
     return CollectionConfig(
         name=config_name,
         platform=config.platform,
+        main_account_id=config.main_account_id,
         account_ids=summary["account_ids"],
         data_domains=summary["data_domains"],
         sub_domains=summary["sub_domains"],
@@ -126,6 +127,7 @@ def _normalize_scope_payload(scope) -> dict:
 def _normalize_scope_rows_for_storage(
     *,
     platform: str,
+    main_account_id: str,
     raw_shop_scopes: List,
     account_map: Dict[str, CollectionAccountResponse],
 ) -> List[dict]:
@@ -146,7 +148,10 @@ def _normalize_scope_rows_for_storage(
     if extra_shop_ids:
         raise HTTPException(
             status_code=400,
-            detail=f"unknown shop scopes: {', '.join(extra_shop_ids)}",
+            detail=(
+                f"shop scopes outside selected main account {main_account_id}: "
+                f"{', '.join(extra_shop_ids)}"
+            ),
         )
 
     valid_domains = set(get_supported_config_data_domains(platform))
@@ -239,11 +244,14 @@ async def _load_collection_accounts(
     db: AsyncSession,
     *,
     platform: Optional[str] = None,
+    main_account_id: Optional[str] = None,
 ) -> List[CollectionAccountResponse]:
     try:
         stmt = select(ShopAccount).where(ShopAccount.enabled == True)
         if platform:
             stmt = stmt.where(ShopAccount.platform == platform)
+        if main_account_id:
+            stmt = stmt.where(ShopAccount.main_account_id == main_account_id)
         stmt = stmt.order_by(
             ShopAccount.platform,
             ShopAccount.main_account_id,
@@ -293,7 +301,7 @@ async def _load_collection_accounts(
 
         account_loader = get_account_loader_service()
         accounts = await account_loader.load_all_accounts_async(db, platform=platform)
-        return [
+        result = [
             CollectionAccountResponse(
                 id=account.get("account_id", "unknown"),
                 name=account.get("store_name", account.get("account_id", "unknown")),
@@ -311,11 +319,22 @@ async def _load_collection_accounts(
             )
             for account in accounts
         ]
+        if main_account_id:
+            result = [
+                account
+                for account in result
+                if (account.main_account_id or "") == main_account_id
+            ]
+        return result
 
 
 @router.get("/configs", response_model=List[CollectionConfigResponse])
 async def list_configs(
     platform: Optional[str] = Query(None, description="Filter by platform"),
+    main_account_id: Optional[str] = Query(None, description="Filter by main account"),
+    date_range_type: Optional[str] = Query(None, description="Filter by date range type"),
+    execution_mode: Optional[str] = Query(None, description="Filter by execution mode"),
+    schedule_enabled: Optional[bool] = Query(None, description="Filter by schedule enabled"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -323,6 +342,14 @@ async def list_configs(
 
     if platform:
         stmt = stmt.where(CollectionConfig.platform == platform)
+    if main_account_id:
+        stmt = stmt.where(CollectionConfig.main_account_id == main_account_id)
+    if date_range_type:
+        stmt = stmt.where(CollectionConfig.date_range_type == date_range_type)
+    if execution_mode:
+        stmt = stmt.where(CollectionConfig.execution_mode == execution_mode)
+    if schedule_enabled is not None:
+        stmt = stmt.where(CollectionConfig.schedule_enabled == schedule_enabled)
 
     if is_active is not None:
         stmt = stmt.where(CollectionConfig.is_active == is_active)
@@ -337,10 +364,15 @@ async def create_config(
     config: CollectionConfigCreate,
     db: AsyncSession = Depends(get_async_db),
 ):
-    accounts = await _load_collection_accounts(db, platform=config.platform)
+    accounts = await _load_collection_accounts(
+        db,
+        platform=config.platform,
+        main_account_id=config.main_account_id,
+    )
     account_map = {account.id: account for account in accounts}
     normalized_scopes = _normalize_scope_rows_for_storage(
         platform=config.platform,
+        main_account_id=config.main_account_id,
         raw_shop_scopes=config.shop_scopes,
         account_map=account_map,
     )
@@ -349,10 +381,11 @@ async def create_config(
     config_name = config.name
     if not config_name:
         domains_str = "-".join(sorted(summary["data_domains"]))
-        base_name = f"{config.platform}-{domains_str}"
+        base_name = f"{config.platform}-{config.main_account_id}-{domains_str}"
         stmt = select(CollectionConfig).where(
             CollectionConfig.name.like(f"{base_name}-v%"),
             CollectionConfig.platform == config.platform,
+            CollectionConfig.main_account_id == config.main_account_id,
         )
         existing_configs = (await db.execute(stmt)).scalars().all()
         existing_versions: List[int] = []
@@ -370,6 +403,7 @@ async def create_config(
         stmt = select(CollectionConfig).where(
             CollectionConfig.name == config_name,
             CollectionConfig.platform == config.platform,
+            CollectionConfig.main_account_id == config.main_account_id,
         )
         existing = (await db.execute(stmt)).scalar_one_or_none()
         if existing:
@@ -501,6 +535,7 @@ async def batch_remediate_configs(
                 select(CollectionConfig).where(
                     CollectionConfig.name == config_name,
                     CollectionConfig.platform == account.platform,
+                    CollectionConfig.main_account_id == account.main_account_id,
                 )
             )
         ).scalar_one_or_none()
@@ -510,6 +545,7 @@ async def batch_remediate_configs(
         record = CollectionConfig(
             name=config_name,
             platform=account.platform,
+            main_account_id=account.main_account_id or "",
             account_ids=[shop_account_id],
             data_domains=data_domains,
             sub_domains=sub_domains,
@@ -588,11 +624,17 @@ async def update_config(
 
     update_dict = update_data.model_dump(exclude_unset=True)
     scope_payload = update_dict.pop("shop_scopes", None)
+    selected_main_account_id = update_dict.get("main_account_id") or config.main_account_id
     if scope_payload is not None:
-        accounts = await _load_collection_accounts(db, platform=config.platform)
+        accounts = await _load_collection_accounts(
+            db,
+            platform=config.platform,
+            main_account_id=selected_main_account_id,
+        )
         account_map = {account.id: account for account in accounts}
         normalized_scopes = _normalize_scope_rows_for_storage(
             platform=config.platform,
+            main_account_id=selected_main_account_id,
             raw_shop_scopes=scope_payload,
             account_map=account_map,
         )
@@ -684,21 +726,34 @@ async def delete_config(
 @router.get("/accounts", response_model=List[CollectionAccountResponse])
 async def list_accounts(
     platform: Optional[str] = Query(None, description="Filter by platform"),
+    main_account_id: Optional[str] = Query(None, description="Filter by main account"),
     db: AsyncSession = Depends(get_async_db),
     request: Request = None,
 ):
     if request and hasattr(request.app.state, "cache_service"):
         try:
             cache_service = request.app.state.cache_service
-            cached_data = await cache_service.get("accounts_list", platform=platform or "")
+            cached_data = await cache_service.get(
+                "accounts_list",
+                platform=platform or "",
+                main_account_id=main_account_id or "",
+            )
             if cached_data is not None and isinstance(cached_data, list):
-                logger.debug("[Cache] collection accounts hit: platform=%s", platform)
+                logger.debug(
+                    "[Cache] collection accounts hit: platform=%s main_account_id=%s",
+                    platform,
+                    main_account_id,
+                )
                 return [CollectionAccountResponse(**item) for item in cached_data]
         except Exception as exc:
             logger.warning("[Cache] failed to read collection account cache: %s", exc)
 
     try:
-        result = await _load_collection_accounts(db, platform=platform)
+        result = await _load_collection_accounts(
+            db,
+            platform=platform,
+            main_account_id=main_account_id,
+        )
         logger.info("Returned collection account list: %s records", len(result))
 
         if request and hasattr(request.app.state, "cache_service"):
@@ -709,6 +764,7 @@ async def list_accounts(
                     [item.model_dump() for item in result],
                     ttl=300,
                     platform=platform or "",
+                    main_account_id=main_account_id or "",
                 )
             except Exception as exc:
                 logger.warning("[Cache] failed to write collection account cache: %s", exc)
@@ -722,10 +778,15 @@ async def list_accounts(
 @router.get("/accounts/grouped", response_model=List[CollectionAccountGroupResponse])
 async def list_grouped_accounts(
     platform: Optional[str] = Query(None, description="Filter by platform"),
+    main_account_id: Optional[str] = Query(None, description="Filter by main account"),
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        accounts = await _load_collection_accounts(db, platform=platform)
+        accounts = await _load_collection_accounts(
+            db,
+            platform=platform,
+            main_account_id=main_account_id,
+        )
         grouped: Dict[tuple[str, str], Dict[str, object]] = {}
 
         for account in accounts:
@@ -766,10 +827,15 @@ async def list_grouped_accounts(
 @router.get("/config-coverage", response_model=CollectionConfigCoverageResponse)
 async def get_config_coverage(
     platform: Optional[str] = Query(None, description="Filter by platform"),
+    main_account_id: Optional[str] = Query(None, description="Filter by main account"),
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        accounts = await _load_collection_accounts(db, platform=platform)
+        accounts = await _load_collection_accounts(
+            db,
+            platform=platform,
+            main_account_id=main_account_id,
+        )
         coverage_by_shop = {
             account.id: {"daily": False, "weekly": False, "monthly": False}
             for account in accounts
@@ -781,6 +847,8 @@ async def get_config_coverage(
         stmt = select(CollectionConfig).where(CollectionConfig.is_active == True)
         if platform:
             stmt = stmt.where(CollectionConfig.platform == platform)
+        if main_account_id:
+            stmt = stmt.where(CollectionConfig.main_account_id == main_account_id)
         configs = (await db.execute(stmt.order_by(CollectionConfig.platform, CollectionConfig.id))).scalars().all()
 
         for config in configs:
