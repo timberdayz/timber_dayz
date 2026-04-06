@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.profit_basis_service import ProfitBasisService
-from modules.core.db import FollowInvestment, FollowInvestmentDetail, FollowInvestmentSettlement
+from modules.core.db import ApprovalLog, FollowInvestment, FollowInvestmentDetail, FollowInvestmentSettlement, ShopProfitBasis
 
 
 class FollowInvestmentService:
@@ -84,13 +84,113 @@ class FollowInvestmentService:
         rows = result.scalars().all()
         return [
             {
+                "id": row.id,
                 "investor_user_id": row.investor_user_id,
                 "contribution_amount": row.contribution_amount,
                 "contribution_date": row.contribution_date,
                 "withdraw_date": row.withdraw_date,
+                "status": row.status,
+                "capital_type": row.capital_type,
+                "remark": row.remark,
             }
             for row in rows
         ]
+
+    async def list_investments(
+        self,
+        platform_code: str | None = None,
+        shop_id: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if self.db is None:
+            return []
+        stmt = select(FollowInvestment)
+        if platform_code:
+            stmt = stmt.where(FollowInvestment.platform_code == platform_code.lower())
+        if shop_id:
+            stmt = stmt.where(FollowInvestment.shop_id == shop_id)
+        if status:
+            stmt = stmt.where(FollowInvestment.status == status)
+        rows = (await self.db.execute(stmt.order_by(FollowInvestment.id.desc()))).scalars().all()
+        return [
+            {
+                "id": row.id,
+                "investor_user_id": row.investor_user_id,
+                "platform_code": row.platform_code,
+                "shop_id": row.shop_id,
+                "contribution_amount": row.contribution_amount,
+                "contribution_date": row.contribution_date.isoformat(),
+                "withdraw_date": row.withdraw_date.isoformat() if row.withdraw_date else None,
+                "capital_type": row.capital_type,
+                "status": row.status,
+                "remark": row.remark,
+            }
+            for row in rows
+        ]
+
+    async def create_investment(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.db is None:
+            return payload
+        record = FollowInvestment(
+            investor_user_id=payload["investor_user_id"],
+            platform_code=(payload["platform_code"] or "").lower(),
+            shop_id=payload["shop_id"],
+            contribution_amount=payload["contribution_amount"],
+            contribution_date=date.fromisoformat(payload["contribution_date"]),
+            withdraw_date=date.fromisoformat(payload["withdraw_date"]) if payload.get("withdraw_date") else None,
+            capital_type=payload.get("capital_type") or "working_capital",
+            status=payload.get("status") or "active",
+            remark=payload.get("remark"),
+        )
+        self.db.add(record)
+        await self.db.flush()
+        await self.db.commit()
+        await self.db.refresh(record)
+        return {
+            "id": record.id,
+            "investor_user_id": record.investor_user_id,
+            "platform_code": record.platform_code,
+            "shop_id": record.shop_id,
+            "contribution_amount": record.contribution_amount,
+            "contribution_date": record.contribution_date.isoformat(),
+            "withdraw_date": record.withdraw_date.isoformat() if record.withdraw_date else None,
+            "capital_type": record.capital_type,
+            "status": record.status,
+            "remark": record.remark,
+        }
+
+    async def update_investment(self, investment_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.db is None:
+            raise ValueError("database unavailable")
+        row = (await self.db.execute(select(FollowInvestment).where(FollowInvestment.id == investment_id))).scalar_one_or_none()
+        if not row:
+            raise ValueError("investment not found")
+        if "contribution_amount" in payload and payload["contribution_amount"] is not None:
+            row.contribution_amount = payload["contribution_amount"]
+        if "contribution_date" in payload and payload["contribution_date"]:
+            row.contribution_date = date.fromisoformat(payload["contribution_date"])
+        if "withdraw_date" in payload:
+            row.withdraw_date = date.fromisoformat(payload["withdraw_date"]) if payload["withdraw_date"] else None
+        if "status" in payload and payload["status"]:
+            row.status = payload["status"]
+        if "capital_type" in payload and payload["capital_type"]:
+            row.capital_type = payload["capital_type"]
+        if "remark" in payload:
+            row.remark = payload["remark"]
+        await self.db.commit()
+        await self.db.refresh(row)
+        return {
+            "id": row.id,
+            "investor_user_id": row.investor_user_id,
+            "platform_code": row.platform_code,
+            "shop_id": row.shop_id,
+            "contribution_amount": row.contribution_amount,
+            "contribution_date": row.contribution_date.isoformat(),
+            "withdraw_date": row.withdraw_date.isoformat() if row.withdraw_date else None,
+            "capital_type": row.capital_type,
+            "status": row.status,
+            "remark": row.remark,
+        }
 
     async def calculate_settlement(
         self,
@@ -123,7 +223,184 @@ class FollowInvestmentService:
             "distribution_ratio": distribution_ratio,
             "distributable_amount": distributable_amount,
         }
+        if self.db is not None:
+            basis_row = (
+                await self.db.execute(
+                    select(ShopProfitBasis).where(
+                        ShopProfitBasis.period_month == year_month,
+                        ShopProfitBasis.platform_code == platform_code.lower(),
+                        ShopProfitBasis.shop_id == shop_id,
+                        ShopProfitBasis.basis_version == basis["basis_version"],
+                    )
+                )
+            ).scalar_one_or_none()
+            if basis_row is None:
+                basis_row = ShopProfitBasis(
+                    period_month=year_month,
+                    platform_code=platform_code.lower(),
+                    shop_id=shop_id,
+                    orders_profit_amount=basis["orders_profit_amount"],
+                    a_class_cost_amount=basis["a_class_cost_amount"],
+                    b_class_cost_amount=basis["b_class_cost_amount"],
+                    profit_basis_amount=basis["profit_basis_amount"],
+                    basis_version=basis["basis_version"],
+                )
+                self.db.add(basis_row)
+                await self.db.flush()
+            else:
+                basis_row.orders_profit_amount = basis["orders_profit_amount"]
+                basis_row.a_class_cost_amount = basis["a_class_cost_amount"]
+                basis_row.b_class_cost_amount = basis["b_class_cost_amount"]
+                basis_row.profit_basis_amount = basis["profit_basis_amount"]
+
+            existing = (
+                await self.db.execute(
+                    select(FollowInvestmentSettlement).where(
+                        FollowInvestmentSettlement.period_month == year_month,
+                        FollowInvestmentSettlement.platform_code == platform_code.lower(),
+                        FollowInvestmentSettlement.shop_id == shop_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing and existing.status == "approved":
+                raise ValueError("settlement already approved; reopen before recalculation")
+
+            if existing is None:
+                existing = FollowInvestmentSettlement(
+                    profit_basis_id=basis_row.id,
+                    period_month=year_month,
+                    platform_code=platform_code.lower(),
+                    shop_id=shop_id,
+                )
+                self.db.add(existing)
+                await self.db.flush()
+
+            existing.profit_basis_id = basis_row.id
+            existing.profit_basis_amount = basis["profit_basis_amount"]
+            existing.distribution_ratio = distribution_ratio
+            existing.distributable_amount = distributable_amount
+            existing.status = "calculated"
+
+            await self.db.execute(
+                delete(FollowInvestmentDetail).where(FollowInvestmentDetail.settlement_id == existing.id)
+            )
+            await self.db.flush()
+
+            for detail in details:
+                self.db.add(
+                    FollowInvestmentDetail(
+                        settlement_id=existing.id,
+                        investor_user_id=detail["investor_user_id"],
+                        contribution_amount_snapshot=detail["contribution_amount_snapshot"],
+                        occupied_days=detail["occupied_days"],
+                        weighted_capital=detail["weighted_capital"],
+                        share_ratio=detail["share_ratio"],
+                        estimated_income=detail["estimated_income"],
+                        approved_income=0.0,
+                        paid_income=0.0,
+                    )
+                )
+            await self.db.commit()
+            settlement["id"] = existing.id
+            settlement["status"] = existing.status
         return {"settlement": settlement, "details": details}
+
+    async def approve_settlement(self, settlement_id: int, approver: str) -> dict[str, Any]:
+        if self.db is None:
+            raise ValueError("database unavailable")
+        settlement = (
+            await self.db.execute(
+                select(FollowInvestmentSettlement).where(FollowInvestmentSettlement.id == settlement_id)
+            )
+        ).scalar_one_or_none()
+        if not settlement:
+            raise ValueError("settlement not found")
+        settlement.status = "approved"
+        settlement.approved_by = approver
+        settlement.approved_at = datetime.now(timezone.utc)
+        details = (
+            await self.db.execute(
+                select(FollowInvestmentDetail).where(FollowInvestmentDetail.settlement_id == settlement_id)
+            )
+        ).scalars().all()
+        for detail in details:
+            detail.approved_income = detail.estimated_income
+        self.db.add(
+            ApprovalLog(
+                entity_type="follow_investment_settlement",
+                entity_id=str(settlement_id),
+                approver=approver,
+                status="approved",
+                comment="approved via finance follow investment workflow",
+            )
+        )
+        await self.db.commit()
+        return {
+            "id": settlement.id,
+            "status": settlement.status,
+            "approved_by": settlement.approved_by,
+        }
+
+    async def reopen_settlement(self, settlement_id: int) -> dict[str, Any]:
+        if self.db is None:
+            raise ValueError("database unavailable")
+        settlement = (
+            await self.db.execute(
+                select(FollowInvestmentSettlement).where(FollowInvestmentSettlement.id == settlement_id)
+            )
+        ).scalar_one_or_none()
+        if not settlement:
+            raise ValueError("settlement not found")
+        settlement.status = "draft"
+        settlement.approved_by = None
+        settlement.approved_at = None
+        details = (
+            await self.db.execute(
+                select(FollowInvestmentDetail).where(FollowInvestmentDetail.settlement_id == settlement_id)
+            )
+        ).scalars().all()
+        for detail in details:
+            detail.approved_income = 0.0
+        await self.db.commit()
+        return {
+            "id": settlement.id,
+            "status": settlement.status,
+        }
+
+    async def list_settlements(
+        self,
+        period_month: str | None = None,
+        platform_code: str | None = None,
+        shop_id: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if self.db is None:
+            return []
+        stmt = select(FollowInvestmentSettlement)
+        if period_month:
+            stmt = stmt.where(FollowInvestmentSettlement.period_month == period_month)
+        if platform_code:
+            stmt = stmt.where(FollowInvestmentSettlement.platform_code == platform_code.lower())
+        if shop_id:
+            stmt = stmt.where(FollowInvestmentSettlement.shop_id == shop_id)
+        if status:
+            stmt = stmt.where(FollowInvestmentSettlement.status == status)
+        rows = (await self.db.execute(stmt.order_by(FollowInvestmentSettlement.id.desc()))).scalars().all()
+        return [
+            {
+                "id": row.id,
+                "period_month": row.period_month,
+                "platform_code": row.platform_code,
+                "shop_id": row.shop_id,
+                "profit_basis_amount": row.profit_basis_amount,
+                "distribution_ratio": row.distribution_ratio,
+                "distributable_amount": row.distributable_amount,
+                "status": row.status,
+                "approved_by": row.approved_by,
+                "approved_at": row.approved_at.isoformat() if row.approved_at else None,
+            }
+            for row in rows
+        ]
 
     async def get_my_income(
         self,

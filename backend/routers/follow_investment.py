@@ -5,7 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.dependencies.auth import get_current_user
 from backend.models.database import get_async_db
-from backend.schemas.follow_investment import FollowInvestmentSettlementCalculateRequest
+from backend.schemas.follow_investment import (
+    FollowInvestmentCreateRequest,
+    FollowInvestmentSettlementCalculateRequest,
+    FollowInvestmentUpdateRequest,
+)
 from backend.services.follow_investment_service import FollowInvestmentService
 from backend.utils.api_response import success_response
 
@@ -40,11 +44,107 @@ async def calculate_follow_investment_settlement(
     _current_user=Depends(_require_finance_role),
 ):
     service = FollowInvestmentService(db)
-    payload = await service.calculate_settlement(
-        year_month=body.period_month,
-        platform_code=body.platform_code,
-        shop_id=body.shop_id,
-        distribution_ratio=body.distribution_ratio,
+    try:
+        payload = await service.calculate_settlement(
+            year_month=body.period_month,
+            platform_code=body.platform_code,
+            shop_id=body.shop_id,
+            distribution_ratio=body.distribution_ratio,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return success_response(data=payload)
+
+
+@router.get("")
+async def list_follow_investments(
+    platform_code: str | None = Query(None),
+    shop_id: str | None = Query(None),
+    status: str | None = Query(None),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user=Depends(_require_finance_role),
+):
+    service = FollowInvestmentService(db)
+    payload = await service.list_investments(
+        platform_code=platform_code,
+        shop_id=shop_id,
+        status=status,
+    )
+    return success_response(data=payload)
+
+
+@router.post("")
+async def create_follow_investment(
+    body: FollowInvestmentCreateRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _current_user=Depends(_require_finance_role),
+):
+    service = FollowInvestmentService(db)
+    payload = await service.create_investment(body.model_dump())
+    return success_response(data=payload)
+
+
+@router.put("/{investment_id}")
+async def update_follow_investment(
+    investment_id: int,
+    body: FollowInvestmentUpdateRequest,
+    db: AsyncSession = Depends(get_async_db),
+    _current_user=Depends(_require_finance_role),
+):
+    service = FollowInvestmentService(db)
+    try:
+        payload = await service.update_investment(investment_id, body.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return success_response(data=payload)
+
+
+@router.post("/settlements/{settlement_id}/approve")
+async def approve_follow_investment_settlement(
+    settlement_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(_require_finance_role),
+):
+    service = FollowInvestmentService(db)
+    try:
+        payload = await service.approve_settlement(
+            settlement_id=settlement_id,
+            approver=str(getattr(current_user, "user_id", None) or getattr(current_user, "username", "") or "system"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return success_response(data=payload)
+
+
+@router.post("/settlements/{settlement_id}/reopen")
+async def reopen_follow_investment_settlement(
+    settlement_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    _current_user=Depends(_require_finance_role),
+):
+    service = FollowInvestmentService(db)
+    try:
+        payload = await service.reopen_settlement(settlement_id=settlement_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return success_response(data=payload)
+
+
+@router.get("/settlements")
+async def list_follow_investment_settlements(
+    period_month: str | None = Query(None),
+    platform_code: str | None = Query(None),
+    shop_id: str | None = Query(None),
+    status: str | None = Query(None),
+    db: AsyncSession = Depends(get_async_db),
+    _current_user=Depends(_require_finance_role),
+):
+    service = FollowInvestmentService(db)
+    payload = await service.list_settlements(
+        period_month=period_month,
+        platform_code=platform_code,
+        shop_id=shop_id,
+        status=status,
     )
     return success_response(data=payload)
 

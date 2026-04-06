@@ -1,6 +1,28 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
+
+
+class FollowInvestmentCreateRequest(BaseModel):
+    investor_user_id: int
+    platform_code: str
+    shop_id: str
+    contribution_amount: float = Field(..., gt=0)
+    contribution_date: str
+    withdraw_date: Optional[str] = None
+    capital_type: str = "working_capital"
+    remark: Optional[str] = None
+
+
+class FollowInvestmentUpdateRequest(BaseModel):
+    contribution_amount: Optional[float] = Field(None, gt=0)
+    contribution_date: Optional[str] = None
+    withdraw_date: Optional[str] = None
+    status: Optional[str] = None
+    capital_type: Optional[str] = None
+    remark: Optional[str] = None
 
 
 class FollowInvestmentSettlementCalculateRequest(BaseModel):
