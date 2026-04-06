@@ -70,8 +70,8 @@ async def run_config_tasks(
         config_id=config_id,
         trigger_type="config",
         app=getattr(fastapi_request, "app", None),
-        start_background=False,
-        resolve_runtime=False,
+        start_background=True,
+        resolve_runtime=True,
     )
     return [_build_task_response_payload(task) for task in tasks]
 

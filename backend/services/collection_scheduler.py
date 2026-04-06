@@ -107,8 +107,8 @@ async def execute_scheduled_collection_config(config_id: int) -> None:
             db,
             config_id=config_id,
             trigger_type="scheduled",
-            start_background=False,
-            resolve_runtime=False,
+            start_background=True,
+            resolve_runtime=True,
         )
         logger.info("Created %s scheduled tasks for config %s", len(tasks), config_id)
 

@@ -45,14 +45,15 @@ async def test_run_config_tasks_starts_background_execution(monkeypatch):
     )
 
     app = SimpleNamespace(state=SimpleNamespace())
+    db = object()
     result = await module.run_config_tasks(
         config_id=123,
         fastapi_request=SimpleNamespace(app=app),
-        db=object(),
+        db=db,
     )
 
     create_tasks.assert_awaited_once_with(
-        object(),
+        db,
         config_id=123,
         trigger_type="config",
         app=app,

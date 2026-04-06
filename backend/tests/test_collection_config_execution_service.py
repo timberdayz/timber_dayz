@@ -92,6 +92,7 @@ async def _seed_config(session):
     config = CollectionConfig(
         name="shopee-daily-v1",
         platform="shopee",
+        main_account_id="main-shopee",
         account_ids=["shop-sg-1", "shop-my-1"],
         data_domains=["orders", "products", "services"],
         sub_domains={"services": ["agent"]},
