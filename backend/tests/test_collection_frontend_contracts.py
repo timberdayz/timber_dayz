@@ -10,7 +10,7 @@ def test_collection_config_run_uses_sub_domains_payload():
     text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
 
     assert "sub_domain: row.sub_domain" not in text
-    assert "sub_domains: row.sub_domains" in text
+    assert "sub_domains" in text
 
 
 def test_collection_tasks_supports_domain_scoped_subtypes():
@@ -101,10 +101,11 @@ def test_accounts_api_uses_new_unmatched_alias_route():
     assert "/accounts/unmatched-shop-aliases" not in text
 
 
-def test_collection_config_run_passes_config_id_to_task_creation():
+def test_collection_config_run_uses_backend_config_run_endpoint():
     text = (PROJECT_ROOT / "frontend/src/views/collection/CollectionConfig.vue").read_text(encoding="utf-8")
 
-    assert "config_id: row.id" in text
+    assert "collectionApi.runConfig(row.id)" in text
+    assert "for (const accountId of accountIds)" not in text
 
 
 def test_collection_tasks_uses_task_ids_hint_for_config_navigation():

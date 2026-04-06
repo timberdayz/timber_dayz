@@ -3,14 +3,14 @@
     <div class="page-header">
       <div>
         <h2>采集配置管理</h2>
-        <p class="page-subtitle">按日、周、月管理店铺账号采集配置，并检查覆盖缺口。</p>
+        <p class="page-subtitle">按日、周、月管理单平台多店铺采集配置，并按店铺维度设置数据域。</p>
       </div>
       <div class="header-actions">
         <el-button type="success" @click="showQuickSetupDialog">
           <el-icon><MagicStick /></el-icon>
           快速配置
         </el-button>
-        <el-button type="primary" @click="showCreateDialog">
+        <el-button type="primary" data-testid="collection-config-create-button" @click="showCreateDialog">
           <el-icon><Plus /></el-icon>
           新建配置
         </el-button>
@@ -58,32 +58,10 @@
           <div class="coverage-value coverage-warn">{{ currentCoverageSummary.missing }}</div>
         </div>
         <div class="coverage-item">
-          <div class="coverage-label">全局部分覆盖</div>
+          <div class="coverage-label">部分覆盖</div>
           <div class="coverage-value coverage-mid">{{ currentCoverageSummary.partial }}</div>
         </div>
       </div>
-
-      <el-alert
-        v-if="missingCoverageItems.length > 0"
-        type="warning"
-        :closable="false"
-        show-icon
-        class="coverage-alert"
-      >
-        <template #title>
-          当前{{ activeGranularityLabel }}仍有 {{ missingCoverageItems.length }} 个店铺账号未覆盖
-        </template>
-        <div class="missing-list">
-          <div
-            v-for="item in missingCoverageItems.slice(0, 8)"
-            :key="`${item.platform}-${item.shop_account_id}`"
-            class="missing-list-item"
-          >
-            <span>{{ item.platform }} / {{ item.main_account_name || item.main_account_id }} / {{ item.shop_account_name }}</span>
-            <span class="missing-meta">{{ item.shop_region || '未标注区域' }}</span>
-          </div>
-        </div>
-      </el-alert>
     </el-card>
 
     <el-card class="table-card">
@@ -109,9 +87,9 @@
             <el-tag type="info">{{ getGranularityLabel(row._resolvedGranularity) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="店铺账号数" width="100">
+        <el-table-column label="店铺数" width="100">
           <template #default="{ row }">
-            {{ row.account_ids?.length || 0 }}
+            {{ row.shop_scopes?.length || row.account_ids?.length || 0 }}
           </template>
         </el-table-column>
         <el-table-column label="执行模式" width="100">
@@ -121,10 +99,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="数据域" min-width="220">
+        <el-table-column label="数据域摘要" min-width="220">
           <template #default="{ row }">
             <el-tag
-              v-for="domain in row.data_domains"
+              v-for="domain in row.data_domains || []"
               :key="domain"
               size="small"
               class="domain-tag"
@@ -162,156 +140,180 @@
     <el-dialog
       v-model="dialogVisible"
       :title="isEdit ? `编辑${activeGranularityLabel}配置` : `新建${activeGranularityLabel}配置`"
-      width="920px"
+      width="1100px"
       destroy-on-close
+      data-testid="collection-config-dialog"
     >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="110px">
-        <el-form-item label="配置名称" prop="name">
-          <el-input v-model="form.name" placeholder="留空自动生成（平台-数据域-v版本号）">
-            <template #append v-if="!isEdit">
-              <el-button @click="generateConfigName">自动生成</el-button>
-            </template>
-          </el-input>
-          <div class="form-hint" v-if="generatedName">建议名称：{{ generatedName }}</div>
-        </el-form-item>
+        <div class="editor-layout">
+          <div class="editor-main">
+            <el-form-item label="配置名称" prop="name">
+              <div data-testid="collection-config-name-input">
+                <el-input v-model="form.name" placeholder="留空自动生成（平台-粒度-域集合-v版本号）">
+                  <template #append v-if="!isEdit">
+                    <el-button @click="generateConfigName">自动生成</el-button>
+                  </template>
+                </el-input>
+              </div>
+              <div class="form-hint" v-if="generatedName">建议名称：{{ generatedName }}</div>
+            </el-form-item>
 
-        <el-form-item label="平台" prop="platform">
-          <el-select v-model="form.platform" placeholder="请选择平台" @change="onPlatformChange">
-            <el-option label="Shopee" value="shopee" />
-            <el-option label="TikTok" value="tiktok" />
-            <el-option label="妙手ERP" value="miaoshou" />
-          </el-select>
-        </el-form-item>
+            <el-form-item label="平台" prop="platform">
+              <div data-testid="collection-config-platform-field">
+                <el-select v-model="form.platform" placeholder="请选择平台" @change="onPlatformChange">
+                  <el-option label="Shopee" value="shopee" />
+                  <el-option label="TikTok" value="tiktok" />
+                  <el-option label="妙手ERP" value="miaoshou" />
+                </el-select>
+              </div>
+            </el-form-item>
 
-        <el-form-item label="店铺账号" prop="account_ids">
-          <div class="account-selection-panel" v-loading="accountsLoading">
-            <div class="account-selection-actions">
-              <el-button size="small" @click="applyCapabilitiesFromSelectedAccounts">按店铺能力自动套用</el-button>
-              <span class="selection-summary">已选 {{ form.account_ids.length }} 个店铺账号</span>
+            <el-form-item label="日期范围" prop="date_range_type">
+              <el-select v-model="form.date_range_type" placeholder="请选择日期范围">
+                <el-option
+                  v-for="option in currentGranularityDateOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item v-if="form.date_range_type === 'custom'" label="自定义日期">
+              <el-date-picker
+                v-model="customDateRange"
+                type="daterange"
+                start-placeholder="开始日期"
+                end-placeholder="结束日期"
+                value-format="YYYY-MM-DD"
+              />
+            </el-form-item>
+
+            <el-form-item label="执行模式">
+              <el-radio-group v-model="form.execution_mode">
+                <el-radio-button label="headless">无头模式</el-radio-button>
+                <el-radio-button label="headed">有头模式</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
+            <el-form-item label="启用定时">
+              <el-switch v-model="form.schedule_enabled" />
+            </el-form-item>
+
+            <el-form-item v-if="form.schedule_enabled" label="执行时间">
+              <el-select v-model="form.schedule_cron" placeholder="选择执行频率">
+                <el-option label="每天 4 次（06:00/12:00/18:00/22:00）" value="0 6,12,18,22 * * *" />
+                <el-option label="每天 00:00" value="0 0 * * *" />
+                <el-option label="每天 06:00" value="0 6 * * *" />
+                <el-option label="每周一 00:00" value="0 0 * * 1" />
+                <el-option label="每月 1 号 00:00" value="0 0 1 * *" />
+              </el-select>
+            </el-form-item>
+          </div>
+
+          <div class="editor-side">
+            <div class="shop-scope-header">
+              <div>
+                <div class="scope-title">店铺维度配置</div>
+                <div class="scope-subtitle">当前平台所有可用店铺必须参与配置，每个店铺至少选择 1 个数据域。</div>
+              </div>
+              <div class="scope-actions">
+                <el-button size="small" @click="applyCapabilitiesToAllShopScopes">按店铺能力自动套用</el-button>
+              </div>
             </div>
 
-            <div v-if="groupedAccountsForDialog.length === 0" class="empty-tip">
-              当前平台暂无可选店铺账号
-            </div>
+            <div v-if="!form.platform" class="empty-tip">先选择平台，再加载店铺维度配置。</div>
+            <div v-else-if="shopScopeRows.length === 0" class="empty-tip">当前平台暂无可用店铺账号。</div>
 
-            <div v-else class="grouped-accounts">
-              <div
-                v-for="group in groupedAccountsForDialog"
-                :key="`${group.platform}-${group.main_account_id}`"
-                class="main-account-group"
+            <div v-else class="shop-scope-list" data-testid="collection-config-shop-scope-list">
+              <el-card
+                v-for="{ scope, account } in shopScopeRows"
+                :key="scope.shop_account_id"
+                class="shop-scope-card"
+                shadow="never"
+                :data-testid="`collection-config-shop-scope-card-${scope.shop_account_id}`"
               >
-                <div class="group-title">
-                  {{ group.main_account_name || group.main_account_id }}
-                  <span class="group-subtitle">{{ group.platform }}</span>
+                <template #header>
+                  <div class="shop-scope-card-header">
+                    <div>
+                      <div class="shop-scope-name">{{ account?.name || scope.shop_account_id }}</div>
+                      <div class="shop-scope-meta">
+                        {{ account?.main_account_name || account?.main_account_id || '未绑定主账号' }}
+                        <span class="dot">·</span>
+                        {{ account?.shop_region || '未标注区域' }}
+                      </div>
+                    </div>
+                    <el-tag type="success">已纳入采集</el-tag>
+                  </div>
+                </template>
+
+                <div class="scope-block">
+                  <div class="scope-label">店铺能力</div>
+                  <div class="capability-tags">
+                    <el-tag
+                      v-for="option in availableDomainOptions"
+                      :key="`${scope.shop_account_id}-cap-${option.value}`"
+                      :type="isScopeDomainAvailable(scope, option.value) ? 'success' : 'info'"
+                      size="small"
+                    >
+                      {{ option.label }}
+                    </el-tag>
+                  </div>
                 </div>
 
-                <div
-                  v-for="region in group.regions"
-                  :key="`${group.main_account_id}-${region.shop_region || 'unknown'}`"
-                  class="region-group"
-                >
-                  <div class="region-title">{{ region.shop_region || '未标注区域' }}</div>
-                  <el-checkbox-group v-model="form.account_ids" @change="applyCapabilitiesFromSelectedAccounts">
+                <div class="scope-block">
+                  <div class="scope-label">本店铺实际采集数据域</div>
+                  <el-checkbox-group v-model="scope.data_domains">
                     <el-checkbox
-                      v-for="shop in region.shops"
-                      :key="shop.id"
-                      :label="shop.id"
-                      class="shop-checkbox"
+                      v-for="option in availableDomainOptions"
+                      :key="`${scope.shop_account_id}-${option.value}`"
+                      :label="option.value"
+                      :disabled="!isScopeDomainAvailable(scope, option.value)"
                     >
-                      <span>{{ shop.name }}</span>
-                      <span class="shop-meta">{{ shop.shop_type || '未分类' }}</span>
+                      {{ option.label }}
                     </el-checkbox>
                   </el-checkbox-group>
                 </div>
-              </div>
+
+                <div
+                  v-for="domain in getSelectedSubtypeDomains(scope.data_domains)"
+                  :key="`${scope.shop_account_id}-sub-${domain}`"
+                  class="scope-block"
+                >
+                  <div class="scope-label">{{ getDomainLabel(domain) }}子类型</div>
+                  <div class="sub-domain-row">
+                    <el-checkbox-group v-model="scope.sub_domains[domain]">
+                      <el-checkbox
+                        v-for="option in getSubtypeOptions(domain)"
+                        :key="`${scope.shop_account_id}-${domain}-${option.value}`"
+                        :label="option.value"
+                      >
+                        {{ option.label }}
+                      </el-checkbox>
+                    </el-checkbox-group>
+                    <el-button size="small" @click="selectAllScopeSubDomains(scope, domain)">全选</el-button>
+                  </div>
+                </div>
+              </el-card>
             </div>
           </div>
-        </el-form-item>
-
-        <el-form-item label="数据域" prop="data_domains">
-          <el-checkbox-group v-model="form.data_domains">
-            <el-checkbox
-              v-for="option in availableDomainOptions"
-              :key="option.value"
-              :label="option.value"
-            >
-              {{ option.label }}
-            </el-checkbox>
-          </el-checkbox-group>
-        </el-form-item>
-
-        <el-form-item
-          v-for="domain in selectedSubtypeDomains"
-          :key="`subtype-${domain}`"
-          :label="`${getDomainLabel(domain)}子类型`"
-        >
-          <div class="sub-domains-group">
-            <el-checkbox-group v-model="form.sub_domains[domain]">
-              <el-checkbox
-                v-for="option in getSubtypeOptions(domain)"
-                :key="option.value"
-                :label="option.value"
-              >
-                {{ option.label }}
-              </el-checkbox>
-            </el-checkbox-group>
-            <el-button size="small" @click="selectAllSubDomains(domain)">全选</el-button>
-          </div>
-        </el-form-item>
-
-        <el-form-item label="日期范围" prop="date_range_type">
-          <el-select v-model="form.date_range_type" placeholder="请选择日期范围">
-            <el-option
-              v-for="option in currentGranularityDateOptions"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            />
-          </el-select>
-          <div class="form-hint">当前配置会归入 {{ activeGranularityLabel }} 视图。</div>
-        </el-form-item>
-
-        <el-form-item v-if="form.date_range_type === 'custom'" label="自定义日期">
-          <el-date-picker
-            v-model="customDateRange"
-            type="daterange"
-            start-placeholder="开始日期"
-            end-placeholder="结束日期"
-            value-format="YYYY-MM-DD"
-          />
-        </el-form-item>
-
-        <el-form-item label="执行模式">
-          <el-radio-group v-model="form.execution_mode">
-            <el-radio-button label="headless">无头模式</el-radio-button>
-            <el-radio-button label="headed">有头模式</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-
-        <el-form-item label="启用定时">
-          <el-switch v-model="form.schedule_enabled" />
-        </el-form-item>
-
-        <el-form-item v-if="form.schedule_enabled" label="执行时间">
-          <el-select v-model="form.schedule_cron" placeholder="选择执行频率">
-            <el-option label="每天 4 次（06:00/12:00/18:00/22:00）" value="0 6,12,18,22 * * *" />
-            <el-option label="每天 00:00" value="0 0 * * *" />
-            <el-option label="每天 06:00" value="0 6 * * *" />
-            <el-option label="每周一 00:00" value="0 0 * * 1" />
-            <el-option label="每月1号 00:00" value="0 0 1 * *" />
-          </el-select>
-        </el-form-item>
+        </div>
       </el-form>
 
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitForm">
+        <el-button
+          type="primary"
+          data-testid="collection-config-save-button"
+          :loading="submitting"
+          @click="submitForm"
+        >
           {{ isEdit ? '保存' : '创建' }}
         </el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="quickSetupVisible" title="快速配置" width="540px" destroy-on-close>
+    <el-dialog v-model="quickSetupVisible" title="快速配置" width="520px" destroy-on-close>
       <el-form label-width="100px">
         <el-form-item label="平台">
           <el-select v-model="quickSetup.platform" placeholder="请选择平台">
@@ -322,7 +324,7 @@
         </el-form-item>
         <el-form-item label="说明">
           <div class="form-hint">
-            将基于当前{{ activeGranularityLabel }}视图，为所选平台创建一条面向全部店铺账号的默认配置。
+            将基于当前{{ activeGranularityLabel }}视图，为所选平台的全部可用店铺创建一条默认配置，并按店铺能力自动套用数据域。
           </div>
         </el-form-item>
       </el-form>
@@ -347,8 +349,7 @@ import {
   getSubtypeOptions,
   getSelectedSubtypeDomains,
   normalizeConfigGranularity,
-  normalizeDomainSubtypeMap,
-  resolveAccountIdsForConfigRun
+  normalizeDomainSubtypeMap
 } from '@/constants/collection'
 
 const router = useRouter()
@@ -365,6 +366,7 @@ const isEdit = ref(false)
 const activeGranularity = ref('daily')
 const configs = ref([])
 const flatAccounts = ref([])
+const dialogAccounts = ref([])
 const groupedAccounts = ref([])
 const coverage = ref({ summary: {}, items: [] })
 const formRef = ref(null)
@@ -380,9 +382,7 @@ const form = reactive({
   id: null,
   name: '',
   platform: '',
-  account_ids: [],
-  data_domains: [],
-  sub_domains: {},
+  shop_scopes: [],
   granularity: 'daily',
   date_range_type: 'yesterday',
   custom_date_start: null,
@@ -398,38 +398,28 @@ const quickSetup = reactive({
 
 const formRules = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
-  data_domains: [{ required: true, message: '请至少选择一个数据域', trigger: 'change' }],
   date_range_type: [{ required: true, message: '请选择日期范围', trigger: 'change' }]
 }
 
 const activeGranularityLabel = computed(() => getGranularityLabel(activeGranularity.value))
-
 const availableDomainOptions = computed(() => getAvailableDomainOptions(form.platform))
 
-const selectedSubtypeDomains = computed(() => getSelectedSubtypeDomains(form.data_domains))
-
-const filteredConfigs = computed(() => {
-  return (configs.value || []).filter((config) => {
+const filteredConfigs = computed(() =>
+  (configs.value || []).filter((config) => {
     if ((config._resolvedGranularity || normalizeConfigGranularity(config)) !== activeGranularity.value) return false
     if (filters.platform && config.platform !== filters.platform) return false
     if (filters.is_active !== null && config.is_active !== filters.is_active) return false
     return true
   })
-})
+)
 
 const currentCoverageKey = computed(() => `${activeGranularity.value}_covered`)
-
-const coverageItems = computed(() => {
-  return (coverage.value.items || []).filter((item) => {
-    if (filters.platform && item.platform !== filters.platform) return false
-    return true
-  })
-})
-
+const coverageItems = computed(() =>
+  (coverage.value.items || []).filter((item) => !filters.platform || item.platform === filters.platform)
+)
 const missingCoverageItems = computed(() =>
   coverageItems.value.filter((item) => !item[currentCoverageKey.value])
 )
-
 const currentCoverageSummary = computed(() => {
   const total = coverageItems.value.length
   const missing = missingCoverageItems.value.length
@@ -438,27 +428,31 @@ const currentCoverageSummary = computed(() => {
   return { total, covered, missing, partial }
 })
 
-const groupedAccountsForDialog = computed(() => {
+const platformAccounts = computed(() => {
+  const scopedAccounts = dialogAccounts.value.length ? dialogAccounts.value : flatAccounts.value
   const platform = String(form.platform || '').toLowerCase()
-  if (!platform) return []
-  return groupedAccounts.value.filter((group) => String(group.platform || '').toLowerCase() === platform)
+  return scopedAccounts.filter(
+    (account) => String(account.platform || '').toLowerCase() === platform && account.status === 'active'
+  )
 })
 
-const selectedAccountRecords = computed(() => {
-  const selectedIds = new Set(form.account_ids || [])
-  return flatAccounts.value.filter((account) => selectedIds.has(account.id))
-})
+const shopScopeRows = computed(() =>
+  (form.shop_scopes || []).map((scope) => ({
+    scope,
+    account: platformAccounts.value.find((item) => item.id === scope.shop_account_id)
+  }))
+)
 
 const currentGranularityDateOptions = computed(() => {
   if (activeGranularity.value === 'weekly') {
     return [
-      { label: '最近7天', value: 'last_7_days' },
+      { label: '最近 7 天', value: 'last_7_days' },
       { label: '按周自定义', value: 'custom' }
     ]
   }
   if (activeGranularity.value === 'monthly') {
     return [
-      { label: '最近30天', value: 'last_30_days' },
+      { label: '最近 30 天', value: 'last_30_days' },
       { label: '按月自定义', value: 'custom' }
     ]
   }
@@ -476,37 +470,8 @@ watch(activeGranularity, () => {
   }
 })
 
-watch(
-  () => form.platform,
-  (platform) => {
-    const allowed = new Set(getAvailableDomainOptions(platform).map((option) => option.value))
-    form.data_domains = (form.data_domains || []).filter((domain) => allowed.has(domain))
-    for (const domain of Object.keys(form.sub_domains || {})) {
-      if (!allowed.has(domain)) {
-        delete form.sub_domains[domain]
-      }
-    }
-  }
-)
-
-watch(
-  () => [...form.data_domains],
-  (domains) => {
-    const allowedDomains = new Set(getSelectedSubtypeDomains(domains))
-    for (const domain of Object.keys(form.sub_domains || {})) {
-      if (!allowedDomains.has(domain)) {
-        delete form.sub_domains[domain]
-      }
-    }
-  }
-)
-
 function getGranularityLabel(value) {
-  const labels = {
-    daily: '日采集',
-    weekly: '周采集',
-    monthly: '月采集'
-  }
+  const labels = { daily: '日采集', weekly: '周采集', monthly: '月采集' }
   return labels[value] || value
 }
 
@@ -529,7 +494,7 @@ function getDomainLabel(domain) {
   const labels = {
     orders: '订单',
     products: '产品',
-    analytics: '流量',
+    analytics: '流量分析',
     finance: '财务',
     services: '服务',
     inventory: '库存'
@@ -537,8 +502,117 @@ function getDomainLabel(domain) {
   return labels[domain] || domain
 }
 
-function selectAllSubDomains(domain) {
-  form.sub_domains[domain] = getSubtypeOptions(domain).map((option) => option.value)
+function getAccountById(shopAccountId) {
+  return platformAccounts.value.find((account) => account.id === shopAccountId) || null
+}
+
+function isScopeDomainAvailable(scope, domain) {
+  const account = getAccountById(scope.shop_account_id)
+  if (!account) return false
+  return Boolean(account.capabilities?.[domain])
+}
+
+function buildScopeFromAccount(account, existingScope = null) {
+  const allowedDomains = getAvailableDomainOptions(account.platform).map((option) => option.value)
+  let dataDomains = []
+  if (existingScope?.data_domains?.length) {
+    dataDomains = existingScope.data_domains.filter(
+      (domain) => allowedDomains.includes(domain) && Boolean(account.capabilities?.[domain])
+    )
+  } else {
+    dataDomains = allowedDomains.filter((domain) => Boolean(account.capabilities?.[domain]))
+  }
+
+  const subDomains = normalizeDomainSubtypeMap(
+    existingScope?.sub_domains || buildAutoSelectedSubDomains(dataDomains)
+  )
+
+  return {
+    shop_account_id: account.id,
+    data_domains: [...dataDomains],
+    sub_domains: subDomains,
+    enabled: true
+  }
+}
+
+function buildDefaultShopScopes(platform, existingScopes = []) {
+  const accounts = flatAccounts.value.filter(
+    (account) => String(account.platform || '').toLowerCase() === String(platform || '').toLowerCase() && account.status === 'active'
+  )
+  const existingMap = Object.fromEntries((existingScopes || []).map((scope) => [scope.shop_account_id, scope]))
+  return accounts.map((account) => buildScopeFromAccount(account, existingMap[account.id])).sort((a, b) => a.shop_account_id.localeCompare(b.shop_account_id))
+}
+
+function normalizeShopScopesForPayload() {
+  const validIds = new Set(platformAccounts.value.map((account) => account.id))
+  return (form.shop_scopes || [])
+    .filter((scope) => validIds.has(scope.shop_account_id))
+    .map((scope) => ({
+    shop_account_id: scope.shop_account_id,
+    data_domains: [...(scope.data_domains || [])],
+    sub_domains: normalizeDomainSubtypeMap(scope.sub_domains),
+    enabled: true
+    }))
+}
+
+function validateShopScopes() {
+  const validIds = new Set(platformAccounts.value.map((account) => account.id))
+  const normalizedScopes = normalizeShopScopesForPayload()
+
+  if (!normalizedScopes.length) {
+    ElMessage.warning('当前平台暂无可保存的店铺配置')
+    return false
+  }
+  if (normalizedScopes.length !== validIds.size) {
+    ElMessage.warning('存在未覆盖或无效的店铺 scope，请重新选择平台后再保存')
+    form.shop_scopes = buildDefaultShopScopes(form.platform, normalizedScopes)
+    return false
+  }
+
+  const invalidScope = normalizedScopes.find((scope) => !(scope.data_domains || []).length)
+  if (invalidScope) {
+    const account = getAccountById(invalidScope.shop_account_id)
+    ElMessage.warning(`${account?.name || invalidScope.shop_account_id} 至少需要选择一个数据域`)
+    return false
+  }
+  return true
+}
+
+function selectAllScopeSubDomains(scope, domain) {
+  scope.sub_domains[domain] = getSubtypeOptions(domain).map((option) => option.value)
+}
+
+function generateConfigName() {
+  if (!form.platform || !form.shop_scopes.length) {
+    generatedName.value = ''
+    return
+  }
+  const unionDomains = Array.from(
+    new Set(form.shop_scopes.flatMap((scope) => scope.data_domains || []))
+  ).sort()
+  if (!unionDomains.length) {
+    generatedName.value = ''
+    return
+  }
+  const baseName = `${form.platform}-${activeGranularity.value}-${unionDomains.join('-')}`
+  const existingVersions = configs.value
+    .filter((config) => String(config.name || '').startsWith(`${baseName}-v`))
+    .map((config) => {
+      const match = String(config.name || '').match(/-v(\d+)$/)
+      return match ? Number(match[1]) : 0
+    })
+  const nextVersion = Math.max(0, ...existingVersions) + 1
+  generatedName.value = `${baseName}-v${nextVersion}`
+  if (!form.name) {
+    form.name = generatedName.value
+  }
+}
+
+function applyCapabilitiesToAllShopScopes() {
+  form.shop_scopes = buildDefaultShopScopes(form.platform, form.shop_scopes)
+  if (!form.name) {
+    generateConfigName()
+  }
 }
 
 async function loadConfigs() {
@@ -578,7 +652,7 @@ async function loadCoverage() {
     const platformParam = filters.platform ? { platform: filters.platform } : {}
     coverage.value = await collectionApi.getConfigCoverage(platformParam)
   } catch (error) {
-    ElMessage.error(`加载覆盖率失败: ${error.message}`)
+    ElMessage.error(`加载覆盖情况失败: ${error.message}`)
     coverage.value = { summary: {}, items: [] }
   } finally {
     coverageLoading.value = false
@@ -594,9 +668,7 @@ function resetForm() {
     id: null,
     name: '',
     platform: '',
-    account_ids: [],
-    data_domains: [],
-    sub_domains: {},
+    shop_scopes: [],
     granularity: activeGranularity.value,
     date_range_type: defaultDateTypeForGranularity(activeGranularity.value),
     custom_date_start: null,
@@ -605,6 +677,7 @@ function resetForm() {
     schedule_enabled: false,
     schedule_cron: ''
   })
+  dialogAccounts.value = []
   generatedName.value = ''
   customDateRange.value = []
 }
@@ -620,96 +693,65 @@ function showQuickSetupDialog() {
   quickSetupVisible.value = true
 }
 
-function onPlatformChange() {
-  form.account_ids = []
-  form.data_domains = []
-  form.sub_domains = {}
-}
-
-function generateConfigName() {
-  if (!form.platform || form.data_domains.length === 0) {
-    generatedName.value = ''
+async function onPlatformChange() {
+  if (!form.platform) {
+    dialogAccounts.value = []
+    form.shop_scopes = []
     return
   }
-  const domains = [...form.data_domains].sort().join('-')
-  const baseName = `${form.platform}-${activeGranularity.value}-${domains}`
-  const existingVersions = configs.value
-    .filter((config) => String(config.name || '').startsWith(`${baseName}-v`))
-    .map((config) => {
-      const match = String(config.name || '').match(/-v(\d+)$/)
-      return match ? Number(match[1]) : 0
-    })
-  const nextVersion = Math.max(0, ...existingVersions) + 1
-  generatedName.value = `${baseName}-v${nextVersion}`
-  if (!form.name) {
-    form.name = generatedName.value
+  try {
+    dialogAccounts.value = await collectionApi.getAccounts({ platform: form.platform })
+  } catch (error) {
+    dialogAccounts.value = []
+    ElMessage.error(`加载平台店铺失败: ${error.message}`)
   }
-}
-
-function applyCapabilitiesFromSelectedAccounts() {
-  const selected = selectedAccountRecords.value
-  if (selected.length === 0) {
-    return
-  }
-
-  const allowedByPlatform = new Set(availableDomainOptions.value.map((option) => option.value))
-  const capabilitySets = selected.map((account) =>
-    Object.entries(account.capabilities || {})
-      .filter(([, enabled]) => enabled)
-      .map(([domain]) => domain)
-      .filter((domain) => allowedByPlatform.has(domain))
-  )
-
-  let domains = capabilitySets[0] || []
-  for (const next of capabilitySets.slice(1)) {
-    domains = domains.filter((domain) => next.includes(domain))
-  }
-
-  form.data_domains = [...domains]
-  form.sub_domains = {
-    ...normalizeDomainSubtypeMap(form.sub_domains),
-    ...buildAutoSelectedSubDomains(domains)
-  }
-
-  if (!form.name) {
+  form.shop_scopes = buildDefaultShopScopes(form.platform)
+  if (!isEdit.value) {
+    form.name = ''
     generateConfigName()
   }
 }
 
-function editConfig(row) {
+async function editConfig(row) {
   isEdit.value = true
   activeGranularity.value = row._resolvedGranularity || normalizeConfigGranularity(row)
+  const detail = await collectionApi.getConfig(row.id)
+  dialogAccounts.value = await collectionApi.getAccounts({ platform: detail.platform })
   Object.assign(form, {
-    id: row.id,
-    name: row.name,
-    platform: row.platform,
-    account_ids: row.account_ids || [],
-    data_domains: row.data_domains || [],
-    sub_domains: normalizeDomainSubtypeMap(row.sub_domains),
-    granularity: row._resolvedGranularity || normalizeConfigGranularity(row),
-    date_range_type: row.date_range_type || defaultDateTypeForGranularity(activeGranularity.value),
-    custom_date_start: row.custom_date_start,
-    custom_date_end: row.custom_date_end,
-    execution_mode: row.execution_mode || 'headless',
-    schedule_enabled: row.schedule_enabled || false,
-    schedule_cron: row.schedule_cron || ''
+    id: detail.id,
+    name: detail.name,
+    platform: detail.platform,
+    shop_scopes: buildDefaultShopScopes(detail.platform, detail.shop_scopes || []),
+    granularity: detail._resolvedGranularity || normalizeConfigGranularity(detail),
+    date_range_type: detail.date_range_type || defaultDateTypeForGranularity(activeGranularity.value),
+    custom_date_start: detail.custom_date_start,
+    custom_date_end: detail.custom_date_end,
+    execution_mode: detail.execution_mode || 'headless',
+    schedule_enabled: detail.schedule_enabled || false,
+    schedule_cron: detail.schedule_cron || ''
   })
   customDateRange.value =
-    row.custom_date_start && row.custom_date_end ? [row.custom_date_start, row.custom_date_end] : []
+    detail.custom_date_start && detail.custom_date_end ? [detail.custom_date_start, detail.custom_date_end] : []
   dialogVisible.value = true
 }
 
 async function submitForm() {
   if (!formRef.value) return
   const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
+  if (!valid || !validateShopScopes()) return
 
   submitting.value = true
   try {
     const payload = {
-      ...form,
+      name: form.name,
+      platform: form.platform,
+      shop_scopes: normalizeShopScopesForPayload(),
       granularity: activeGranularity.value,
-      sub_domains: normalizeDomainSubtypeMap(form.sub_domains)
+      date_range_type: form.date_range_type,
+      execution_mode: form.execution_mode,
+      schedule_enabled: form.schedule_enabled,
+      schedule_cron: form.schedule_enabled ? form.schedule_cron : null,
+      retry_count: 3
     }
     if (payload.date_range_type === 'custom' && customDateRange.value.length === 2) {
       payload.custom_date_start = customDateRange.value[0]
@@ -718,7 +760,6 @@ async function submitForm() {
     payload.time_selection = buildTimeSelectionPayload(payload.date_range_type, {
       customRange: customDateRange.value
     })
-    delete payload.id
 
     if (isEdit.value) {
       await collectionApi.updateConfig(form.id, payload)
@@ -760,43 +801,19 @@ async function toggleActive(row) {
 
 async function runConfig(row) {
   try {
-    const accountIds = resolveAccountIdsForConfigRun(row, flatAccounts.value)
-    if (accountIds.length === 0) {
-      ElMessage.warning('该配置没有可用的活跃店铺账号，无法创建采集任务')
+    const tasks = await collectionApi.runConfig(row.id)
+    const taskIds = (tasks || []).map((task) => task.task_id).filter(Boolean)
+    if (!taskIds.length) {
+      ElMessage.warning('该配置没有创建出可执行的采集任务')
       return
     }
-
-    const timeSelection = buildTimeSelectionPayload(row.date_range_type, {
-      customRange:
-        row.date_range_type === 'custom' && row.custom_date_start && row.custom_date_end
-          ? [row.custom_date_start, row.custom_date_end]
-          : []
-    })
-
-    const createdTaskIds = []
-    for (const accountId of accountIds) {
-      const task = await collectionApi.createTask({
-        platform: row.platform,
-        account_id: accountId,
-        config_id: row.id,
-        data_domains: row.data_domains,
-        sub_domains: row.sub_domains || {},
-        granularity: row._resolvedGranularity || normalizeConfigGranularity(row),
-        time_selection: timeSelection,
-        debug_mode: row.execution_mode === 'headed'
-      })
-      if (task?.task_id) {
-        createdTaskIds.push(task.task_id)
-      }
-    }
-
-    ElMessage.success(`已创建 ${accountIds.length} 个采集任务`)
+    ElMessage.success(`已创建 ${taskIds.length} 个采集任务`)
     await router.push({
       name: 'CollectionTasks',
       query: {
         source: 'config',
         config_id: row.id,
-        task_ids: createdTaskIds.join(',')
+        task_ids: taskIds.join(',')
       }
     })
   } catch (error) {
@@ -812,13 +829,11 @@ async function executeQuickSetup() {
 
   quickSetupSubmitting.value = true
   try {
-    const domains = getAvailableDomainOptions(quickSetup.platform).map((option) => option.value)
+    const shopScopes = buildDefaultShopScopes(quickSetup.platform)
     await collectionApi.createConfig({
       name: '',
       platform: quickSetup.platform,
-      account_ids: [],
-      data_domains: domains,
-      sub_domains: buildAutoSelectedSubDomains(domains),
+      shop_scopes: shopScopes,
       granularity: activeGranularity.value,
       date_range_type: defaultDateTypeForGranularity(activeGranularity.value),
       execution_mode: 'headless',
@@ -864,9 +879,12 @@ onMounted(() => {
   color: #909399;
 }
 
-.header-actions {
+.header-actions,
+.filter-bar,
+.scope-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .granularity-card,
@@ -882,17 +900,10 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 
-.filter-bar {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
 .coverage-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(120px, 1fr));
   gap: 12px;
-  margin-bottom: 16px;
 }
 
 .coverage-item {
@@ -904,12 +915,12 @@ onMounted(() => {
 .coverage-label {
   font-size: 13px;
   color: #909399;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .coverage-value {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 28px;
+  font-weight: 600;
 }
 
 .coverage-ok {
@@ -924,131 +935,115 @@ onMounted(() => {
   color: #409eff;
 }
 
-.coverage-alert {
-  margin-top: 12px;
-}
-
-.missing-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.missing-list-item {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.missing-meta {
-  color: #909399;
-}
-
 .table-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.table-summary {
-  color: #909399;
-  font-size: 13px;
-}
-
-.domain-tag {
-  margin-right: 4px;
-  margin-bottom: 4px;
-}
-
-.account-selection-panel {
-  width: 100%;
-  border: 1px solid #ebeef5;
-  border-radius: 10px;
-  padding: 12px;
-  max-height: 360px;
-  overflow: auto;
-}
-
-.account-selection-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.selection-summary,
+.table-summary,
 .form-hint,
-.group-subtitle,
-.shop-meta {
+.scope-subtitle,
+.shop-scope-meta {
   color: #909399;
   font-size: 12px;
 }
 
-.grouped-accounts {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.main-account-group {
-  border: 1px solid #f0f2f5;
-  border-radius: 10px;
-  padding: 12px;
-}
-
-.group-title {
-  font-weight: 600;
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.region-group + .region-group {
-  margin-top: 10px;
-}
-
-.region-title {
-  font-size: 13px;
-  color: #606266;
+.domain-tag {
+  margin-right: 6px;
   margin-bottom: 6px;
 }
 
-.shop-checkbox {
-  display: flex;
-  width: 100%;
-  margin-right: 0;
-  margin-bottom: 8px;
+.editor-layout {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 20px;
 }
 
-.sub-domains-group {
+.editor-main,
+.editor-side {
+  min-width: 0;
+}
+
+.shop-scope-header {
   display: flex;
-  align-items: center;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.scope-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.shop-scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 62vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.shop-scope-card {
+  border: 1px solid #ebeef5;
+}
+
+.shop-scope-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 12px;
 }
 
-.sub-domains-group :deep(.el-checkbox-group) {
-  flex: 1;
+.shop-scope-name {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.scope-block {
+  margin-bottom: 14px;
+}
+
+.scope-label {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #606266;
+  font-weight: 600;
+}
+
+.capability-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sub-domain-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .empty-tip {
+  padding: 20px;
+  text-align: center;
   color: #909399;
+  background: #f7f8fa;
+  border-radius: 12px;
 }
 
-@media (max-width: 900px) {
-  .coverage-grid {
-    grid-template-columns: repeat(2, minmax(120px, 1fr));
-  }
+.dot {
+  margin: 0 6px;
+}
 
-  .page-header,
-  .granularity-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .header-actions,
-  .filter-bar {
-    flex-wrap: wrap;
+@media (max-width: 960px) {
+  .editor-layout {
+    grid-template-columns: 1fr;
   }
 }
 </style>

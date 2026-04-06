@@ -1,8 +1,8 @@
-"""
-数据采集相关的 Pydantic Schemas
-用于采集配置、任务管理、账号管理等 API
+﻿"""
+鏁版嵁閲囬泦鐩稿叧鐨?Pydantic Schemas
+鐢ㄤ簬閲囬泦閰嶇疆銆佷换鍔＄鐞嗐€佽处鍙风鐞嗙瓑 API
 
-v4.18.0: 从 backend/routers/collection.py 迁移到 schemas (Contract-First 架构)
+v4.18.0: 浠?backend/routers/collection.py 杩佺Щ鍒?schemas (Contract-First 鏋舵瀯)
 """
 
 from datetime import date, datetime
@@ -12,17 +12,17 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TimeSelectionPayload(BaseModel):
-    """统一时间选择模型"""
+    """缁熶竴鏃堕棿閫夋嫨妯″瀷"""
 
-    mode: Literal["preset", "custom"] = Field(..., description="时间模式")
+    mode: Literal["preset", "custom"] = Field(..., description="鏃堕棿妯″紡")
     preset: Optional[Literal["today", "yesterday", "last_7_days", "last_30_days"]] = Field(
         None,
-        description="快捷时间预设",
+        description="蹇嵎鏃堕棿棰勮",
     )
-    start_date: Optional[str] = Field(None, description="自定义开始日期 YYYY-MM-DD")
-    end_date: Optional[str] = Field(None, description="自定义结束日期 YYYY-MM-DD")
-    start_time: Optional[str] = Field("00:00:00", description="自定义开始时间 HH:MM:SS")
-    end_time: Optional[str] = Field("23:59:59", description="自定义结束时间 HH:MM:SS")
+    start_date: Optional[str] = Field(None, description="鑷畾涔夊紑濮嬫棩鏈?YYYY-MM-DD")
+    end_date: Optional[str] = Field(None, description="鑷畾涔夌粨鏉熸棩鏈?YYYY-MM-DD")
+    start_time: Optional[str] = Field("00:00:00", description="鑷畾涔夊紑濮嬫椂闂?HH:MM:SS")
+    end_time: Optional[str] = Field("23:59:59", description="鑷畾涔夌粨鏉熸椂闂?HH:MM:SS")
 
     @model_validator(mode="after")
     def validate_payload_shape(self):
@@ -48,16 +48,33 @@ class TimeSelectionPayload(BaseModel):
         return self
 
 
-class CollectionConfigCreate(BaseModel):
-    """创建采集配置请求(v4.7.0)"""
+class CollectionConfigShopScopePayload(BaseModel):
+    """店铺维度配置输入/输出载荷"""
 
-    name: Optional[str] = Field(None, min_length=1, max_length=100, description="配置名称(留空自动生成)")
-    platform: str = Field(..., pattern="^(shopee|tiktok|miaoshou)$", description="平台")
-    account_ids: List[str] = Field(..., description="账号ID列表(空数组表示所有活跃账号)")
-    data_domains: List[str] = Field(..., min_length=1, description="数据域列表")
+    shop_account_id: str = Field(..., min_length=1, description="店铺账号ID")
+    data_domains: List[str] = Field(..., min_length=1, description="该店铺实际采集的数据域")
     sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(
         None,
         description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组",
+    )
+    enabled: bool = Field(True, description="该店铺 scope 是否启用")
+
+
+class CollectionConfigShopScopeResponse(CollectionConfigShopScopePayload):
+    id: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CollectionConfigCreate(BaseModel):
+    """创建采集配置请求"""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=100, description="配置名称(留空自动生成)")
+    platform: str = Field(..., pattern="^(shopee|tiktok|miaoshou)$", description="平台")
+    shop_scopes: List[CollectionConfigShopScopePayload] = Field(
+        ...,
+        min_length=1,
+        description="店铺维度采集配置明细",
     )
     granularity: str = Field("daily", pattern="^(daily|weekly|monthly)$", description="粒度")
     date_range_type: str = Field("yesterday", description="日期范围类型")
@@ -71,15 +88,10 @@ class CollectionConfigCreate(BaseModel):
 
 
 class CollectionConfigUpdate(BaseModel):
-    """更新采集配置请求(v4.7.0)"""
+    """更新采集配置请求"""
 
     name: Optional[str] = Field(None, min_length=1, max_length=100)
-    account_ids: Optional[List[str]] = None
-    data_domains: Optional[List[str]] = None
-    sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(
-        None,
-        description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组",
-    )
+    shop_scopes: Optional[List[CollectionConfigShopScopePayload]] = None
     granularity: Optional[str] = None
     date_range_type: Optional[str] = None
     custom_date_start: Optional[date] = None
@@ -93,17 +105,18 @@ class CollectionConfigUpdate(BaseModel):
 
 
 class CollectionConfigResponse(BaseModel):
-    """采集配置响应(v4.7.0)"""
+    """采集配置响应"""
 
     id: int
     name: str
     platform: str
-    account_ids: List[str]
-    data_domains: List[str]
+    account_ids: List[str] = Field(default_factory=list, description="兼容旧摘要字段")
+    data_domains: List[str] = Field(default_factory=list, description="兼容旧摘要字段")
     sub_domains: Optional[Dict[str, List[str]] | List[str]] = Field(
         None,
-        description="按数据域绑定的子类型映射,兼容旧 sub_domains 数组",
+        description="兼容旧摘要字段",
     )
+    shop_scopes: List[CollectionConfigShopScopeResponse] = Field(default_factory=list)
     granularity: str
     date_range_type: str
     custom_date_start: Optional[date]
@@ -137,7 +150,7 @@ class CollectionConfigResponse(BaseModel):
 
 
 class TaskCreateRequest(BaseModel):
-    """创建采集任务请求(v4.7.0 + Phase 9.1)"""
+    """创建采集任务请求"""
 
     platform: str = Field(..., pattern="^(shopee|tiktok|miaoshou)$", description="平台")
     account_id: str = Field(..., description="账号ID")
@@ -159,11 +172,11 @@ class TaskCreateRequest(BaseModel):
 
 
 class ResumeTaskRequest(BaseModel):
-    """继续任务请求(验证码恢复: 提交验证码、OTP、或手动完成信号)"""
+    """缁х画浠诲姟璇锋眰(楠岃瘉鐮佹仮澶? 鎻愪氦楠岃瘉鐮併€丱TP銆佹垨鎵嬪姩瀹屾垚淇″彿)"""
 
-    captcha_code: Optional[str] = Field(None, description="图形验证码(人工输入)")
-    otp: Optional[str] = Field(None, description="短信/邮箱验证码(OTP)")
-    manual_completed: Optional[bool] = Field(None, description="用户已手动完成滑块等验证, 请求继续")
+    captcha_code: Optional[str] = Field(None, description="鍥惧舰楠岃瘉鐮?浜哄伐杈撳叆)")
+    otp: Optional[str] = Field(None, description="鐭俊/閭楠岃瘉鐮?OTP)")
+    manual_completed: Optional[bool] = Field(None, description="鐢ㄦ埛宸叉墜鍔ㄥ畬鎴愭粦鍧楃瓑楠岃瘉, 璇锋眰缁х画")
 
     @model_validator(mode="after")
     def validate_exactly_one_value(self):
@@ -180,7 +193,7 @@ class ResumeTaskRequest(BaseModel):
 
 
 class TaskResponse(BaseModel):
-    """任务响应(v4.7.0)"""
+    """任务响应"""
 
     id: int
     task_id: str
@@ -212,13 +225,13 @@ class TaskResponse(BaseModel):
     updated_at: datetime
     started_at: Optional[datetime] = Field(None, description="任务实际开始执行时间")
     completed_at: Optional[datetime] = Field(None, description="任务结束时间")
-    verification_type: Optional[str] = Field(None, description="验证码类型(如 graphical_captcha/otp/slide_captcha)")
+    verification_type: Optional[str] = Field(None, description="验证码类型")
     verification_screenshot: Optional[str] = Field(None, description="验证码截图路径或URL")
     verification_id: Optional[str] = Field(None, description="验证码实例ID")
     verification_message: Optional[str] = Field(None, description="验证码提示信息")
     verification_expires_at: Optional[str] = Field(None, description="验证码过期时间")
     verification_attempt_count: int = Field(0, description="验证码提交次数")
-    verification_input_mode: Optional[str] = Field(None, description="验证码交互方式(code_entry/manual_continue)")
+    verification_input_mode: Optional[str] = Field(None, description="验证码交互方式")
 
 
 class CollectionVerificationItem(BaseModel):
@@ -239,7 +252,7 @@ class CollectionVerificationItem(BaseModel):
 
 
 class TaskLogResponse(BaseModel):
-    """任务日志响应"""
+    """浠诲姟鏃ュ織鍝嶅簲"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -251,7 +264,7 @@ class TaskLogResponse(BaseModel):
 
 
 class CollectionAccountResponse(BaseModel):
-    """账号响应(脱敏,用于采集模块)"""
+    """璐﹀彿鍝嶅簲(鑴辨晱,鐢ㄤ簬閲囬泦妯″潡)"""
 
     id: str
     name: str
@@ -337,7 +350,7 @@ class CollectionConfigBatchRemediationResponse(BaseModel):
 
 
 class TaskHistoryResponse(BaseModel):
-    """任务历史分页响应"""
+    """浠诲姟鍘嗗彶鍒嗛〉鍝嶅簲"""
 
     data: List[TaskResponse]
     total: int
@@ -347,7 +360,7 @@ class TaskHistoryResponse(BaseModel):
 
 
 class DailyStats(BaseModel):
-    """每日统计"""
+    """姣忔棩缁熻"""
 
     date: date
     total: int
@@ -357,7 +370,7 @@ class DailyStats(BaseModel):
 
 
 class TaskStatsResponse(BaseModel):
-    """任务统计响应"""
+    """浠诲姟缁熻鍝嶅簲"""
 
     total_tasks: int
     completed: int
@@ -376,7 +389,7 @@ class ScheduleUpdateRequest(BaseModel):
 
 
 class CronValidateRequest(BaseModel):
-    """Cron验证请求"""
+    """Cron 验证请求"""
 
     cron_expression: str = Field(..., description="Cron表达式")
 
@@ -400,7 +413,7 @@ class ScheduleInfoResponse(BaseModel):
 
 
 class CronValidationResponse(BaseModel):
-    """Cron表达式验证响应"""
+    """Cron 表达式验证响应"""
 
     valid: bool
     error: Optional[str] = None
@@ -409,7 +422,7 @@ class CronValidationResponse(BaseModel):
 
 
 class CronPresetItem(BaseModel):
-    """Cron预设项"""
+    """Cron 预设项"""
 
     name: str
     cron: str
@@ -417,7 +430,7 @@ class CronPresetItem(BaseModel):
 
 
 class CronPresetsResponse(BaseModel):
-    """Cron预设列表响应"""
+    """Cron 预设列表响应"""
 
     presets: List[CronPresetItem]
 
@@ -455,3 +468,7 @@ class HealthCheckResponse(BaseModel):
     browser_pool: BrowserPoolStatus
     database: str
     scheduler: str
+
+
+
+

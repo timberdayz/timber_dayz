@@ -703,12 +703,58 @@ class CollectionConfig(Base):
     created_by = Column(String(100), nullable=True)  # 创建者
     
     # 关系
+    shop_scopes = relationship(
+        "CollectionConfigShopScope",
+        back_populates="config",
+        cascade="all, delete-orphan",
+    )
     tasks = relationship("CollectionTask", back_populates="config")
     
     __table_args__ = (
         UniqueConstraint("name", "platform", name="uq_collection_configs_name_platform"),
         Index("ix_collection_configs_platform", "platform"),
         Index("ix_collection_configs_active", "is_active"),
+        {"schema": "core"},
+    )
+
+
+class CollectionConfigShopScope(Base):
+    """
+    店铺维度采集配置明细表
+
+    一条记录表示某个采集配置在某个店铺上的实际采集范围。
+    """
+
+    __tablename__ = "collection_config_shop_scopes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    config_id = Column(
+        Integer,
+        ForeignKey("core.collection_configs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    shop_account_id = Column(
+        String(100),
+        ForeignKey("core.shop_accounts.shop_account_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    data_domains = Column(JSON_COMPAT, nullable=False)
+    sub_domains = Column(JSON_COMPAT, nullable=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    config = relationship("CollectionConfig", back_populates="shop_scopes")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "config_id",
+            "shop_account_id",
+            name="uq_collection_config_shop_scopes_config_shop",
+        ),
+        Index("ix_collection_config_shop_scopes_config_id", "config_id"),
+        Index("ix_collection_config_shop_scopes_shop_account_id", "shop_account_id"),
+        Index("ix_collection_config_shop_scopes_enabled", "enabled"),
         {"schema": "core"},
     )
 

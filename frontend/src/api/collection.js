@@ -74,6 +74,11 @@ export const deleteConfig = async (id) => {
   await api.delete(`/collection/configs/${id}`)
 }
 
+export const runConfig = async (id) => {
+  const response = await api.post(`/collection/configs/${id}/run`)
+  return response || []
+}
+
 // ============================================================
 // 账号 API
 // ============================================================
@@ -423,6 +428,7 @@ export default {
   createConfig,
   updateConfig,
   deleteConfig,
+  runConfig,
   
   // 账号管理
   getAccounts,
