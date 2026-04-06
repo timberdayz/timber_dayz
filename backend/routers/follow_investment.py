@@ -99,6 +99,20 @@ async def update_follow_investment(
     return success_response(data=payload)
 
 
+@router.post("/{investment_id}/archive")
+async def archive_follow_investment(
+    investment_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    _current_user=Depends(_require_finance_role),
+):
+    service = FollowInvestmentService(db)
+    try:
+        payload = await service.archive_investment(investment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return success_response(data=payload)
+
+
 @router.post("/settlements/{settlement_id}/approve")
 async def approve_follow_investment_settlement(
     settlement_id: int,
@@ -146,6 +160,17 @@ async def list_follow_investment_settlements(
         shop_id=shop_id,
         status=status,
     )
+    return success_response(data=payload)
+
+
+@router.get("/settlements/{settlement_id}/details")
+async def get_follow_investment_settlement_details(
+    settlement_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    _current_user=Depends(_require_finance_role),
+):
+    service = FollowInvestmentService(db)
+    payload = await service.get_settlement_details(settlement_id)
     return success_response(data=payload)
 
 

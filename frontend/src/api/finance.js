@@ -200,6 +200,10 @@ export default {
     return await api._put(`/finance/follow-investments/${id}`, data)
   },
 
+  async archiveFollowInvestment(id) {
+    return await api._post(`/finance/follow-investments/${id}/archive`, {})
+  },
+
   async calculateFollowInvestmentSettlement(data) {
     return await api._post('/finance/follow-investments/settlements/calculate', data)
   },
@@ -214,6 +218,10 @@ export default {
 
   async getFollowInvestmentSettlements(params = {}) {
     return await api._get('/finance/follow-investments/settlements', { params })
+  },
+
+  async getFollowInvestmentSettlementDetails(id) {
+    return await api._get(`/finance/follow-investments/settlements/${id}/details`)
   },
 
   async getMyFollowInvestmentIncome(params = {}) {

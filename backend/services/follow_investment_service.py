@@ -192,6 +192,20 @@ class FollowInvestmentService:
             "remark": row.remark,
         }
 
+    async def archive_investment(self, investment_id: int) -> dict[str, Any]:
+        if self.db is None:
+            raise ValueError("database unavailable")
+        row = (await self.db.execute(select(FollowInvestment).where(FollowInvestment.id == investment_id))).scalar_one_or_none()
+        if not row:
+            raise ValueError("investment not found")
+        row.status = "inactive"
+        await self.db.commit()
+        await self.db.refresh(row)
+        return {
+            "id": row.id,
+            "status": row.status,
+        }
+
     async def calculate_settlement(
         self,
         year_month: str,
@@ -398,6 +412,28 @@ class FollowInvestmentService:
                 "status": row.status,
                 "approved_by": row.approved_by,
                 "approved_at": row.approved_at.isoformat() if row.approved_at else None,
+            }
+            for row in rows
+        ]
+
+    async def get_settlement_details(self, settlement_id: int) -> list[dict[str, Any]]:
+        if self.db is None:
+            return []
+        rows = (
+            await self.db.execute(
+                select(FollowInvestmentDetail).where(FollowInvestmentDetail.settlement_id == settlement_id)
+            )
+        ).scalars().all()
+        return [
+            {
+                "investor_user_id": row.investor_user_id,
+                "contribution_amount_snapshot": row.contribution_amount_snapshot,
+                "occupied_days": row.occupied_days,
+                "weighted_capital": row.weighted_capital,
+                "share_ratio": row.share_ratio,
+                "estimated_income": row.estimated_income,
+                "approved_income": row.approved_income,
+                "paid_income": row.paid_income,
             }
             for row in rows
         ]
