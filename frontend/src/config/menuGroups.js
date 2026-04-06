@@ -105,7 +105,7 @@ export const menuGroups = [
     defaultExpanded: true,
     items: [
       '/financial-overview',     // v4.9.1: 财务总览
-      '/financial-management',   // 应收应付
+      '/financial-management',   // 跟投收益管理
       '/expense-management',     // 费用管理
       '/b-cost-analysis',        // B类成本分析
       '/finance-reports',        // 财务报表
@@ -150,6 +150,7 @@ export const menuGroups = [
       '/human-resources',            // 人力管理（含员工/部门/职位/考勤/薪资 Tab）
       '/employee-management',        // 我的档案
       '/my-income',              // 我的收入
+      '/my-follow-investment-income', // 我的跟投收益
       '/hr-performance-management',  // 绩效管理（仅管理员）
       '/hr-performance-display',     // 绩效公示（全员可见）
       '/hr-shop-assignment'          // 人员店铺归属和提成比
@@ -254,7 +255,8 @@ export const routeDisplayNames = {
   '/inventory-dashboard-v3': '库存看板',
   // ⚠️ v4.12.0移除：数据浏览器功能已移除
   // '/data-browser': '数据浏览器',
-  '/financial-management': '应收应付',  // 重命名
+  '/financial-management': '跟投收益管理',
+  '/my-follow-investment-income': '我的跟投收益',
   // ⭐ v4.6.0新增：数据同步路由显示名称
   '/data-sync/files': '文件列表',
   '/data-sync/tasks': '同步任务',

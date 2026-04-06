@@ -922,8 +922,8 @@ const routes = [
     meta: {
       title: '我的跟投收益',
       icon: 'Money',
-      permission: 'my-income',
-      roles: ['admin', 'manager', 'operator', 'finance']
+      permission: 'my-follow-investment-income',
+      roles: ['admin', 'manager', 'operator', 'finance', 'investor']
     }
   },
   {
