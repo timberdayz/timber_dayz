@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.dependencies.auth import get_current_user
@@ -45,5 +45,19 @@ async def calculate_follow_investment_settlement(
         platform_code=body.platform_code,
         shop_id=body.shop_id,
         distribution_ratio=body.distribution_ratio,
+    )
+    return success_response(data=payload)
+
+
+@router.get("/my-income")
+async def get_my_follow_investment_income(
+    period_month: str | None = Query(None, description="month in YYYY-MM"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(get_current_user),
+):
+    service = FollowInvestmentService(db)
+    payload = await service.get_my_income(
+        user_id=int(getattr(current_user, "user_id", 0) or 0),
+        period_month=period_month,
     )
     return success_response(data=payload)

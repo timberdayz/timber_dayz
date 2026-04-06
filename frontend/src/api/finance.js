@@ -190,6 +190,10 @@ export default {
 
   async calculateFollowInvestmentSettlement(data) {
     return await api._post('/finance/follow-investments/settlements/calculate', data)
+  },
+
+  async getMyFollowInvestmentIncome(params = {}) {
+    return await api._get('/finance/follow-investments/my-income', { params })
   }
 }
 

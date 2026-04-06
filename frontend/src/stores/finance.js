@@ -52,6 +52,21 @@ export const useFinanceStore = defineStore('finance', {
       error: null
     },
 
+    profitBasis: {
+      data: null,
+      loading: false,
+      error: null
+    },
+
+    followInvestmentSettlement: {
+      data: {
+        settlement: null,
+        details: []
+      },
+      loading: false,
+      error: null
+    },
+
     // 逾期预警
     overdueAlert: {
       data: [],
@@ -238,6 +253,55 @@ export const useFinanceStore = defineStore('finance', {
       }
     },
 
+    async fetchProfitBasis(params = {}) {
+      this.profitBasis.loading = true
+      this.profitBasis.error = null
+
+      try {
+        const response = await financeApi.getProfitBasis(params)
+        this.profitBasis.data = response.data || response
+      } catch (error) {
+        this.profitBasis.error = error.message
+        console.error('鑾峰彇鍒╂鼎缁撶畻鍩哄噯澶辫触:', error)
+      } finally {
+        this.profitBasis.loading = false
+      }
+    },
+
+    async rebuildProfitBasis(data) {
+      this.profitBasis.loading = true
+      this.profitBasis.error = null
+
+      try {
+        const response = await financeApi.rebuildProfitBasis(data)
+        this.profitBasis.data = response.data || response
+        return response
+      } catch (error) {
+        this.profitBasis.error = error.message
+        console.error('閲嶇畻鍒╂鼎缁撶畻鍩哄噯澶辫触:', error)
+        throw error
+      } finally {
+        this.profitBasis.loading = false
+      }
+    },
+
+    async calculateFollowInvestmentSettlement(data) {
+      this.followInvestmentSettlement.loading = true
+      this.followInvestmentSettlement.error = null
+
+      try {
+        const response = await financeApi.calculateFollowInvestmentSettlement(data)
+        this.followInvestmentSettlement.data = response.data || response
+        return response
+      } catch (error) {
+        this.followInvestmentSettlement.error = error.message
+        console.error('璺熸姇鏀剁泭璇曠畻澶辫触:', error)
+        throw error
+      } finally {
+        this.followInvestmentSettlement.loading = false
+      }
+    },
+
     /**
      * 获取逾期预警
      */
@@ -319,6 +383,8 @@ export const useFinanceStore = defineStore('finance', {
       this.paymentReceipts.data = []
       this.expenses.data = []
       this.profitReport.data = {}
+      this.profitBasis.data = null
+      this.followInvestmentSettlement.data = { settlement: null, details: [] }
       this.overdueAlert.data = []
       this.overview.data = {}
       this.cashFlow.data = []

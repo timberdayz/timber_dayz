@@ -322,6 +322,173 @@
           </el-table-column>
         </el-table>
       </el-tab-pane>
+      <el-tab-pane label="利润分配基准" name="profit-basis">
+        <el-card class="profit-summary">
+          <template #header>
+            <div class="card-header">
+              <span>统一利润分配基准</span>
+              <el-tag type="info">profit_basis_amount</el-tag>
+            </div>
+          </template>
+
+          <el-form :inline="true" class="filter-form">
+            <el-form-item label="月份">
+              <el-date-picker
+                v-model="profitBasisForm.period_month"
+                type="month"
+                value-format="YYYY-MM"
+                format="YYYY-MM"
+                style="width: 140px"
+              />
+            </el-form-item>
+            <el-form-item label="平台">
+              <el-select v-model="profitBasisForm.platform_code" style="width: 140px">
+                <el-option label="Shopee" value="shopee" />
+                <el-option label="TikTok" value="tiktok" />
+                <el-option label="Amazon" value="amazon" />
+                <el-option label="妙手ERP" value="miaoshou" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="店铺ID">
+              <el-input v-model="profitBasisForm.shop_id" placeholder="请输入店铺ID" style="width: 180px" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="loadProfitBasis" :loading="financeStore.profitBasis.loading">
+                查询基准
+              </el-button>
+              <el-button @click="rebuildProfitBasis" :loading="financeStore.profitBasis.loading">
+                重算基准
+              </el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-alert
+            v-if="financeStore.profitBasis.error"
+            type="error"
+            :closable="false"
+            :title="financeStore.profitBasis.error"
+            style="margin-bottom: 16px;"
+          />
+
+          <el-row v-if="financeStore.profitBasis.data" :gutter="20">
+            <el-col :span="6">
+              <div class="summary-item">
+                <div class="summary-label">订单利润</div>
+                <div class="summary-value revenue">{{ formatCurrency(financeStore.profitBasis.data.orders_profit_amount) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="summary-item">
+                <div class="summary-label">A类成本</div>
+                <div class="summary-value cost">{{ formatCurrency(financeStore.profitBasis.data.a_class_cost_amount) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="summary-item">
+                <div class="summary-label">B类成本</div>
+                <div class="summary-value cost">{{ formatCurrency(financeStore.profitBasis.data.b_class_cost_amount) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="summary-item">
+                <div class="summary-label">结算基准利润</div>
+                <div class="summary-value profit">{{ formatCurrency(financeStore.profitBasis.data.profit_basis_amount) }}</div>
+              </div>
+            </el-col>
+          </el-row>
+        </el-card>
+
+        <el-card class="profit-summary" style="margin-top: 20px;">
+          <template #header>
+            <div class="card-header">
+              <span>跟投收益试算</span>
+            </div>
+          </template>
+
+          <el-form :inline="true" class="filter-form">
+            <el-form-item label="月份">
+              <el-date-picker
+                v-model="followInvestmentForm.period_month"
+                type="month"
+                value-format="YYYY-MM"
+                format="YYYY-MM"
+                style="width: 140px"
+              />
+            </el-form-item>
+            <el-form-item label="平台">
+              <el-select v-model="followInvestmentForm.platform_code" style="width: 140px">
+                <el-option label="Shopee" value="shopee" />
+                <el-option label="TikTok" value="tiktok" />
+                <el-option label="Amazon" value="amazon" />
+                <el-option label="妙手ERP" value="miaoshou" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="店铺ID">
+              <el-input v-model="followInvestmentForm.shop_id" placeholder="请输入店铺ID" style="width: 180px" />
+            </el-form-item>
+            <el-form-item label="分配比例">
+              <el-input-number v-model="followInvestmentForm.distribution_ratio" :min="0" :max="1" :step="0.05" :precision="2" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="runFollowInvestmentSettlement" :loading="financeStore.followInvestmentSettlement.loading">
+                试算收益
+              </el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-alert
+            v-if="financeStore.followInvestmentSettlement.error"
+            type="error"
+            :closable="false"
+            :title="financeStore.followInvestmentSettlement.error"
+            style="margin-bottom: 16px;"
+          />
+
+          <el-row v-if="financeStore.followInvestmentSettlement.data?.settlement" :gutter="20" style="margin-bottom: 20px;">
+            <el-col :span="8">
+              <div class="summary-item">
+                <div class="summary-label">结算基准利润</div>
+                <div class="summary-value profit">{{ formatCurrency(financeStore.followInvestmentSettlement.data.settlement.profit_basis_amount) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="8">
+              <div class="summary-item">
+                <div class="summary-label">分配比例</div>
+                <div class="summary-value">{{ formatPercentValue(financeStore.followInvestmentSettlement.data.settlement.distribution_ratio) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="8">
+              <div class="summary-item">
+                <div class="summary-label">可分配收益</div>
+                <div class="summary-value profit">{{ formatCurrency(financeStore.followInvestmentSettlement.data.settlement.distributable_amount) }}</div>
+              </div>
+            </el-col>
+          </el-row>
+
+          <el-table
+            :data="financeStore.followInvestmentSettlement.data?.details || []"
+            v-loading="financeStore.followInvestmentSettlement.loading"
+            stripe
+          >
+            <el-table-column prop="investor_user_id" label="投资人ID" width="120" />
+            <el-table-column prop="contribution_amount_snapshot" label="本金快照 (楼)" width="150" align="right">
+              <template #default="{ row }">{{ formatCurrency(row.contribution_amount_snapshot) }}</template>
+            </el-table-column>
+            <el-table-column prop="occupied_days" label="占用天数" width="100" align="right" />
+            <el-table-column prop="weighted_capital" label="加权资金" width="150" align="right">
+              <template #default="{ row }">{{ formatCurrency(row.weighted_capital) }}</template>
+            </el-table-column>
+            <el-table-column prop="share_ratio" label="分配占比" width="120" align="right">
+              <template #default="{ row }">{{ formatPercentValue(row.share_ratio) }}</template>
+            </el-table-column>
+            <el-table-column prop="estimated_income" label="预计收益 (楼)" width="150" align="right">
+              <template #default="{ row }">
+                <span class="profit-positive">{{ formatCurrency(row.estimated_income) }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 逾期预警 -->
@@ -417,6 +584,20 @@ const financeStore = useFinanceStore()
 
 // Tab
 const activeTab = ref('ar')
+const currentMonth = new Date().toISOString().slice(0, 7)
+
+const profitBasisForm = ref({
+  period_month: currentMonth,
+  platform_code: 'shopee',
+  shop_id: ''
+})
+
+const followInvestmentForm = ref({
+  period_month: currentMonth,
+  platform_code: 'shopee',
+  shop_id: '',
+  distribution_ratio: 0.4
+})
 
 // 筛选器
 const dateRange = ref([])
@@ -449,6 +630,57 @@ const paymentForm = ref({
 })
 
 const submitting = ref(false)
+
+const loadProfitBasis = async () => {
+  if (!profitBasisForm.value.shop_id) {
+    ElMessage.warning('请输入店铺ID')
+    return
+  }
+
+  await financeStore.fetchProfitBasis({
+    period_month: profitBasisForm.value.period_month,
+    platform_code: profitBasisForm.value.platform_code,
+    shop_id: profitBasisForm.value.shop_id
+  })
+}
+
+const rebuildProfitBasis = async () => {
+  if (!profitBasisForm.value.shop_id) {
+    ElMessage.warning('请输入店铺ID')
+    return
+  }
+
+  try {
+    await financeStore.rebuildProfitBasis({
+      period_month: profitBasisForm.value.period_month,
+      platform_code: profitBasisForm.value.platform_code,
+      shop_id: profitBasisForm.value.shop_id,
+      basis_version: 'A_ONLY_V1'
+    })
+    ElMessage.success('利润分配基准已重算')
+  } catch (error) {
+    ElMessage.error('重算利润基准失败: ' + error.message)
+  }
+}
+
+const runFollowInvestmentSettlement = async () => {
+  if (!followInvestmentForm.value.shop_id) {
+    ElMessage.warning('请输入店铺ID')
+    return
+  }
+
+  try {
+    await financeStore.calculateFollowInvestmentSettlement({
+      period_month: followInvestmentForm.value.period_month,
+      platform_code: followInvestmentForm.value.platform_code,
+      shop_id: followInvestmentForm.value.shop_id,
+      distribution_ratio: followInvestmentForm.value.distribution_ratio
+    })
+    ElMessage.success('跟投收益试算完成')
+  } catch (error) {
+    ElMessage.error('跟投收益试算失败: ' + error.message)
+  }
+}
 
 // 初始化数据
 const initData = async () => {
@@ -619,6 +851,11 @@ const formatCurrency = (num) => {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(num)
+}
+
+const formatPercentValue = (num) => {
+  if (num == null || num === undefined) return '-'
+  return `${(Number(num) * 100).toFixed(2)}%`
 }
 
 const formatDateTime = (dateTime) => {

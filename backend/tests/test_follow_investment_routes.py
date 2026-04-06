@@ -92,3 +92,53 @@ async def test_follow_investment_settlement_calculate_route_requires_finance_rol
         )
 
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_follow_investment_my_income_route_returns_current_user_payload(monkeypatch):
+    from backend.routers import follow_investment as follow_investment_router
+
+    class _ServiceStub:
+        async def get_my_income(self, user_id, period_month=None):
+            return {
+                "summary": {
+                    "estimated_income": 24432,
+                    "approved_income": 24432,
+                    "paid_income": 18000,
+                    "current_contribution_amount": 50000,
+                },
+                "items": [
+                    {
+                        "period_month": "2026-03",
+                        "platform_code": "shopee",
+                        "shop_id": "shop-1",
+                        "profit_basis_amount": 80000,
+                        "share_ratio": 0.7635,
+                        "estimated_income": 24432,
+                        "approved_income": 24432,
+                        "paid_income": 18000,
+                        "status": "approved",
+                    }
+                ],
+            }
+
+    async def _override_db():
+        yield object()
+
+    app = FastAPI()
+    app.include_router(follow_investment_router.router)
+    app.dependency_overrides[get_current_user] = lambda: _make_user("operator", user_id=101)
+    app.dependency_overrides[get_async_db] = _override_db
+    monkeypatch.setattr(
+        "backend.routers.follow_investment.FollowInvestmentService",
+        lambda db: _ServiceStub(),
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/api/finance/follow-investments/my-income")
+
+    body = json.loads(response.content.decode("utf-8"))
+    assert response.status_code == 200
+    assert body["success"] is True
+    assert body["data"]["summary"]["estimated_income"] == 24432
+    assert body["data"]["items"][0]["shop_id"] == "shop-1"

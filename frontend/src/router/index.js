@@ -916,6 +916,17 @@ const routes = [
     }
   },
   {
+    path: '/my-follow-investment-income',
+    name: 'MyFollowInvestmentIncome',
+    component: () => import('../views/hr/MyFollowInvestmentIncome.vue'),
+    meta: {
+      title: '我的跟投收益',
+      icon: 'Money',
+      permission: 'my-income',
+      roles: ['admin', 'manager', 'operator', 'finance']
+    }
+  },
+  {
     path: '/hr-performance-management',
     name: 'HRPerformanceManagement',
     component: () => import('../views/hr/PerformanceManagement.vue'),

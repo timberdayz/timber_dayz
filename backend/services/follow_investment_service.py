@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.profit_basis_service import ProfitBasisService
-from modules.core.db import FollowInvestment
+from modules.core.db import FollowInvestment, FollowInvestmentDetail, FollowInvestmentSettlement
 
 
 class FollowInvestmentService:
@@ -124,3 +124,60 @@ class FollowInvestmentService:
             "distributable_amount": distributable_amount,
         }
         return {"settlement": settlement, "details": details}
+
+    async def get_my_income(
+        self,
+        user_id: int,
+        period_month: str | None = None,
+    ) -> dict[str, Any]:
+        if self.db is None:
+            return {
+                "summary": {
+                    "estimated_income": 0.0,
+                    "approved_income": 0.0,
+                    "paid_income": 0.0,
+                    "current_contribution_amount": 0.0,
+                },
+                "items": [],
+            }
+
+        stmt = (
+            select(FollowInvestmentDetail, FollowInvestmentSettlement)
+            .join(
+                FollowInvestmentSettlement,
+                FollowInvestmentDetail.settlement_id == FollowInvestmentSettlement.id,
+            )
+            .where(FollowInvestmentDetail.investor_user_id == user_id)
+        )
+        if period_month:
+            stmt = stmt.where(FollowInvestmentSettlement.period_month == period_month)
+
+        rows = (await self.db.execute(stmt)).all()
+        items: list[dict[str, Any]] = []
+        summary = {
+            "estimated_income": 0.0,
+            "approved_income": 0.0,
+            "paid_income": 0.0,
+            "current_contribution_amount": 0.0,
+        }
+
+        for detail, settlement in rows:
+            items.append(
+                {
+                    "period_month": settlement.period_month,
+                    "platform_code": settlement.platform_code,
+                    "shop_id": settlement.shop_id,
+                    "profit_basis_amount": settlement.profit_basis_amount,
+                    "share_ratio": detail.share_ratio,
+                    "estimated_income": detail.estimated_income,
+                    "approved_income": detail.approved_income,
+                    "paid_income": detail.paid_income,
+                    "status": settlement.status,
+                }
+            )
+            summary["estimated_income"] += float(detail.estimated_income or 0.0)
+            summary["approved_income"] += float(detail.approved_income or 0.0)
+            summary["paid_income"] += float(detail.paid_income or 0.0)
+            summary["current_contribution_amount"] += float(detail.contribution_amount_snapshot or 0.0)
+
+        return {"summary": summary, "items": items}
