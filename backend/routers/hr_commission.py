@@ -16,6 +16,7 @@ from backend.utils.api_response import error_response
 from backend.utils.error_codes import ErrorCode
 from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
+from backend.services.profit_basis_service import ProfitBasisService
 
 logger = get_logger(__name__)
 from backend.schemas.hr import (
@@ -29,10 +30,60 @@ from backend.schemas.hr import (
 from modules.core.db import (
     ShopAccount, Employee, DimShop, DimUser,
     EmployeePerformance, EmployeeCommission, ShopCommission,
-    EmployeeShopAssignment, ShopCommissionConfig, EmployeeTarget,
+    EmployeeShopAssignment, ShopCommissionConfig, EmployeeTarget, ShopProfitBasis,
 )
 
 router = APIRouter(prefix="/api/hr", tags=["HR-绩效提成"])
+
+
+def year_month_to_first_day(year_month: str) -> date:
+    return datetime.strptime(f"{year_month}-01", "%Y-%m-%d").date()
+
+
+def _shop_key(platform_code: str | None, shop_id: str | None) -> str:
+    return f"{(platform_code or '').lower()}|{str(shop_id or '').lower()}"
+
+
+async def _load_profit_basis_map(
+    db: AsyncSession,
+    year_month: str,
+    shop_list: List[Dict[str, Any]],
+    basis_version: str = "A_ONLY_V1",
+) -> Dict[str, Dict[str, float]]:
+    rows = (
+        await db.execute(
+            select(ShopProfitBasis).where(
+                ShopProfitBasis.period_month == year_month,
+                ShopProfitBasis.basis_version == basis_version,
+            )
+        )
+    ).scalars().all()
+    basis_by_shop: Dict[str, Dict[str, float]] = {
+        _shop_key(row.platform_code, row.shop_id): {
+            "profit_basis_amount": float(row.profit_basis_amount or 0),
+            "orders_profit_amount": float(row.orders_profit_amount or 0),
+            "a_class_cost_amount": float(row.a_class_cost_amount or 0),
+        }
+        for row in rows
+    }
+
+    service = ProfitBasisService(db)
+    for shop in shop_list:
+        key = _shop_key(shop.get("platform_code"), shop.get("shop_id"))
+        if key in basis_by_shop:
+            continue
+        basis = await service.build_profit_basis(
+            year_month=year_month,
+            platform_code=shop["platform_code"],
+            shop_id=shop["shop_id"],
+            basis_version=basis_version,
+        )
+        basis_by_shop[key] = {
+            "profit_basis_amount": float(basis.get("profit_basis_amount") or 0),
+            "orders_profit_amount": float(basis.get("orders_profit_amount") or 0),
+            "a_class_cost_amount": float(basis.get("a_class_cost_amount") or 0),
+        }
+    return basis_by_shop
 
 
 @router.get("/performance", response_model=List[EmployeePerformanceResponse])
@@ -514,6 +565,7 @@ async def get_shop_profit_statistics(
             f"{(c.platform_code or '').lower()}|{c.shop_id}": float(c.allocatable_profit_rate or 0)
             for c in config_rows
         }
+        basis_by_shop = await _load_profit_basis_map(db, month, shop_list)
 
         # 4. 获取归属配置（用于计算主管/操作员利润）：仅取该月的配置
         assign_query = (
@@ -542,9 +594,13 @@ async def get_shop_profit_statistics(
             m = metrics_by_shop.get(key) or metrics_by_shop.get(f"{s['platform_code']}|{s['shop_id']}") or {}
             monthly_sales = float(m.get("monthly_sales", 0))
             monthly_profit = float(m.get("monthly_profit", 0))
+            profit_basis_amount = float(
+                basis_by_shop.get(key, {}).get("profit_basis_amount", 0)
+            )
             achievement_rate = m.get("achievement_rate")
             allocatable_rate = allocatable_by_shop.get(key, 1.0)  # 无配置时默认 100% 可分配
             allocatable_profit = monthly_profit * allocatable_rate
+            allocatable_profit = profit_basis_amount * allocatable_rate
             ass = assign_by_shop.get(key, {})
             sup_ratios = ass.get("supervisors", [])
             op_ratios = ass.get("operators", [])
@@ -556,6 +612,7 @@ async def get_shop_profit_statistics(
                 "shop_name": s["shop_name"],
                 "monthly_sales": monthly_sales,
                 "monthly_profit": monthly_profit,
+                "profit_basis_amount": profit_basis_amount,
                 "achievement_rate": achievement_rate,
                 "supervisor_profit": supervisor_profit,
                 "operator_profit": operator_profit,
@@ -614,6 +671,7 @@ async def get_annual_profit_statistics(
                 "months": {},
                 "year_total_sales": 0.0,
                 "year_total_profit": 0.0,
+                "year_total_profit_basis": 0.0,
             }
 
         # 加载店铺可分配利润率配置（年度统计共用）
@@ -636,6 +694,7 @@ async def get_annual_profit_statistics(
             except Exception as e:
                 logger.warning(f"PostgreSQL 月度 {month_str} 查询失败: {e}")
                 metrics_by_shop = {}
+            basis_by_shop = await _load_profit_basis_map(db, month_str, shop_list)
 
             assign_query = (
                 select(EmployeeShopAssignment)
@@ -672,9 +731,12 @@ async def get_annual_profit_statistics(
                 m = metrics_by_shop.get(key) or metrics_by_shop.get(f"{s['platform_code']}|{s['shop_id']}") or {}
                 monthly_sales = float(m.get("monthly_sales", 0))
                 monthly_profit = float(m.get("monthly_profit", 0))
+                profit_basis_amount = float(
+                    basis_by_shop.get(key, {}).get("profit_basis_amount", 0)
+                )
                 achievement_rate = m.get("achievement_rate")
                 allocatable_rate = allocatable_by_shop.get(key, 1.0)
-                allocatable_profit = monthly_profit * allocatable_rate
+                allocatable_profit = profit_basis_amount * allocatable_rate
                 ass = assign_by_shop.get(key, {})
                 sup_list = ass.get("supervisors", [])
                 op_list = ass.get("operators", [])
@@ -684,12 +746,17 @@ async def get_annual_profit_statistics(
                 by_shop[key]["months"][month_key] = {
                     "monthly_sales": monthly_sales,
                     "monthly_profit": monthly_profit,
+                    "profit_basis_amount": profit_basis_amount,
                     "achievement_rate": achievement_rate,
                     "supervisor_profit": supervisor_profit,
                     "operator_profit": operator_profit,
                 }
                 by_shop[key]["year_total_sales"] += monthly_sales
                 by_shop[key]["year_total_profit"] += monthly_profit
+                by_shop[key]["year_total_profit_basis"] = (
+                    by_shop[key].get("year_total_profit_basis", 0.0)
+                    + profit_basis_amount
+                )
 
                 for emp_code, ratio in sup_list + op_list:
                     if not emp_code:
@@ -747,6 +814,7 @@ async def get_annual_profit_statistics(
                 "months": row["months"],
                 "year_total_sales": round(row["year_total_sales"], 2),
                 "year_total_profit": round(row["year_total_profit"], 2),
+                "year_total_profit_basis": round(row["year_total_profit_basis"], 2),
             }
             for row in sorted(by_shop.values(), key=lambda x: (x["platform_code"], x["shop_id"]))
         ]

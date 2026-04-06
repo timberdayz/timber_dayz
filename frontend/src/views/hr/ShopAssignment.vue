@@ -1,7 +1,7 @@
 <template>
   <div class="shop-assignment-page erp-page-container">
     <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 20px;">人员店铺归属和提成比</h1>
-    <p style="color: #909399; margin-bottom: 20px;">配置员工负责的店铺及提成比例，用于后续提成计算。本模块仅管理员可见。店铺与平台已在账号管理配置，此处仅需配置可分配利润率及主管/操作员。配置保存至数据库表 <code>a_class.employee_shop_assignments</code>。</p>
+    <p style="color: #909399; margin-bottom: 20px;">配置员工负责的店铺及提成比例，用于后续提成计算。本模块仅管理员可见。店铺与平台已在账号管理配置，此处仅需配置可分配净利润率及主管/操作员。“当月利润”为订单利润参考口径，“当月净利润”为正式结算利润口径。配置保存至数据库表 <code>a_class.employee_shop_assignments</code>。</p>
 
     <!-- Tab 切换 -->
     <el-tabs v-model="activeTab" style="margin-bottom: 20px;">
@@ -76,12 +76,17 @@
               <span v-if="row._isFirst">¥{{ formatNumber(row.monthly_profit) }}</span>
             </template>
           </el-table-column>
+          <el-table-column label="当月净利润" width="130" align="right">
+            <template #default="{ row }">
+              <span v-if="row._isFirst">¥{{ formatNumber(row.profit_basis_amount) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="当月目标达成率" width="130" align="right">
             <template #default="{ row }">
               <span v-if="row._isFirst">{{ row.achievement_rate != null ? Number(row.achievement_rate).toFixed(1) + '%' : '—' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="可分配利润率" width="140" align="right">
+          <el-table-column label="可分配净利润率" width="140" align="right">
             <template #default="{ row }">
               <span v-if="row._isFirst" class="allocatable-rate-wrap">
                 <el-input-number
@@ -183,13 +188,16 @@
           <el-table-column prop="monthly_profit" label="当月利润" width="120" align="right">
             <template #default="{ row }">¥{{ formatNumber(row.monthly_profit) }}</template>
           </el-table-column>
+          <el-table-column prop="profit_basis_amount" label="当月净利润" width="130" align="right">
+            <template #default="{ row }">¥{{ formatNumber(row.profit_basis_amount) }}</template>
+          </el-table-column>
           <el-table-column prop="achievement_rate" label="当月目标达成率" width="140" align="right">
             <template #default="{ row }">{{ row.achievement_rate != null ? Number(row.achievement_rate).toFixed(1) + '%' : '—' }}</template>
           </el-table-column>
-          <el-table-column prop="supervisor_profit" label="主管利润收入" width="130" align="right">
+          <el-table-column prop="supervisor_profit" label="主管提成" width="130" align="right">
             <template #default="{ row }">¥{{ formatNumber(row.supervisor_profit) }}</template>
           </el-table-column>
-          <el-table-column prop="operator_profit" label="操作员利润收入" width="140" align="right">
+          <el-table-column prop="operator_profit" label="操作员提成" width="140" align="right">
             <template #default="{ row }">¥{{ formatNumber(row.operator_profit) }}</template>
           </el-table-column>
         </el-table>
@@ -593,6 +601,7 @@ async function loadConfigData() {
         saving: false,
         monthly_sales: 0,
         monthly_profit: 0,
+        profit_basis_amount: 0,
         achievement_rate: null
       }
     }
@@ -601,6 +610,7 @@ async function loadConfigData() {
       if (byShop[key]) {
         byShop[key].monthly_sales = st.monthly_sales ?? 0
         byShop[key].monthly_profit = st.monthly_profit ?? 0
+        byShop[key].profit_basis_amount = st.profit_basis_amount ?? 0
         byShop[key].achievement_rate = st.achievement_rate
       }
     }
@@ -622,6 +632,7 @@ async function loadConfigData() {
           saving: false,
           monthly_sales: 0,
           monthly_profit: 0,
+          profit_basis_amount: 0,
           achievement_rate: null
         }
       }

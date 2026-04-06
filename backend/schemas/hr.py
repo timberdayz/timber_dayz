@@ -793,8 +793,8 @@ class CopyFromPrevMonthBody(BaseModel):
 
 
 class ShopCommissionConfigUpdate(BaseModel):
-    """店铺可分配利润率更新"""
+    """店铺可分配净利润率更新"""
 
     allocatable_profit_rate: float = Field(
-        ..., ge=0, le=1, description="可分配利润率 0-1，如 0.8 表示 80%"
+        ..., ge=0, le=1, description="可分配净利润率 0-1，如 0.8 表示 80%"
     )
