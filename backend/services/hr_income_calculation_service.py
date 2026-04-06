@@ -23,6 +23,7 @@ from modules.core.db import (
 )
 from modules.core.logger import get_logger
 from backend.services.postgresql_shop_metrics_service import load_shop_monthly_metrics
+from backend.services.profit_basis_service import ProfitBasisService
 
 logger = get_logger(__name__)
 
@@ -79,6 +80,24 @@ class HRIncomeCalculationService:
             for key, value in metrics_by_shop.items()
         }
 
+    async def _load_profit_basis_by_shop(self, year_month: str, assignments: list[Any]) -> Dict[str, Dict[str, float]]:
+        basis_service = ProfitBasisService(self.db)
+        shop_keys = {
+            self._shop_key(row.platform_code, row.shop_id): ((row.platform_code or "").lower(), row.shop_id)
+            for row in assignments
+        }
+        basis_by_shop: Dict[str, Dict[str, float]] = {}
+        for key, (platform_code, shop_id) in shop_keys.items():
+            basis = await basis_service.build_profit_basis(
+                year_month=year_month,
+                platform_code=platform_code,
+                shop_id=shop_id,
+            )
+            basis_by_shop[key] = {
+                "profit_basis_amount": self._to_float(basis.get("profit_basis_amount"), 0.0)
+            }
+        return basis_by_shop
+
     async def calculate_month(self, year_month: str) -> Dict[str, Any]:
         """计算并写入指定月份员工提成与绩效。"""
         try:
@@ -98,7 +117,7 @@ class HRIncomeCalculationService:
                 "employee_count": 0,
                 "commission_upserts": 0,
                 "performance_upserts": 0,
-                "source": "employee_shop_assignments + shop_commission_config + api.business_overview_shop_racing_module",
+                "source": "employee_shop_assignments + shop_commission_config + profit_basis_amount",
             }
 
         cfg_query = select(ShopCommissionConfig).where(ShopCommissionConfig.year_month == year_month)
@@ -109,6 +128,7 @@ class HRIncomeCalculationService:
         }
 
         metrics_by_shop = await self._load_shop_metrics(year_month)
+        profit_basis_by_shop = await self._load_profit_basis_by_shop(year_month, assignments)
 
         # employee_code -> 聚合结果
         agg: Dict[str, Dict[str, float]] = {}
@@ -121,11 +141,12 @@ class HRIncomeCalculationService:
                 continue
             shop_key = self._shop_key(row.platform_code, row.shop_id)
             metric = metrics_by_shop.get(shop_key, {})
+            basis = profit_basis_by_shop.get(shop_key, {})
             monthly_sales = self._to_float(metric.get("monthly_sales"), 0.0)
-            monthly_profit = self._to_float(metric.get("monthly_profit"), 0.0)
+            profit_basis_amount = self._to_float(basis.get("profit_basis_amount"), 0.0)
             achievement_rate = self._normalize_achievement_rate(metric.get("achievement_rate"))
             alloc_rate = self._to_float(allocatable_by_shop.get(shop_key, 1.0), 1.0)
-            alloc_profit = monthly_profit * alloc_rate
+            alloc_profit = profit_basis_amount * alloc_rate
 
             rec = agg.setdefault(
                 emp,
@@ -301,5 +322,5 @@ class HRIncomeCalculationService:
             "employee_count": len(agg),
             "commission_upserts": commission_upserts,
             "performance_upserts": performance_upserts,
-            "source": "employee_shop_assignments + shop_commission_config + api.business_overview_shop_racing_module",
+            "source": "employee_shop_assignments + shop_commission_config + profit_basis_amount",
         }

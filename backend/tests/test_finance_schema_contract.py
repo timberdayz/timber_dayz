@@ -5,6 +5,9 @@ from modules.core.db import (
     ApprovalLog,
     FactExpensesAllocated,
     FactExpensesMonth,
+    FollowInvestment,
+    FollowInvestmentDetail,
+    FollowInvestmentSettlement,
     FxRate,
     GLAccount,
     GRNHeader,
@@ -21,6 +24,7 @@ from modules.core.db import (
     POHeader,
     POLine,
     ReturnOrder,
+    ShopProfitBasis,
     TaxReport,
     TaxVoucher,
     ThreeWayMatchLog,
@@ -34,6 +38,9 @@ from modules.core.db import (
         (ApprovalLog, "approval_logs"),
         (FactExpensesAllocated, "fact_expenses_allocated_day_shop_sku"),
         (FactExpensesMonth, "fact_expenses_month"),
+        (FollowInvestment, "follow_investments"),
+        (FollowInvestmentSettlement, "follow_investment_settlements"),
+        (FollowInvestmentDetail, "follow_investment_details"),
         (FxRate, "fx_rates"),
         (GLAccount, "gl_accounts"),
         (GRNHeader, "grn_headers"),
@@ -50,6 +57,7 @@ from modules.core.db import (
         (POHeader, "po_headers"),
         (POLine, "po_lines"),
         (ReturnOrder, "return_orders"),
+        (ShopProfitBasis, "shop_profit_basis"),
         (TaxReport, "tax_reports"),
         (TaxVoucher, "tax_vouchers"),
         (ThreeWayMatchLog, "three_way_match_log"),
@@ -72,6 +80,8 @@ def test_finance_internal_foreign_keys_target_finance_tables():
     journal_line_targets = {fk.target_fullname for fk in JournalEntryLine.__table__.foreign_keys}
     logistics_cost_targets = {fk.target_fullname for fk in LogisticsCost.__table__.foreign_keys}
     tax_voucher_targets = {fk.target_fullname for fk in TaxVoucher.__table__.foreign_keys}
+    follow_investment_settlement_targets = {fk.target_fullname for fk in FollowInvestmentSettlement.__table__.foreign_keys}
+    follow_investment_detail_targets = {fk.target_fullname for fk in FollowInvestmentDetail.__table__.foreign_keys}
 
     assert "finance.po_headers.po_id" in po_line_targets
     assert "finance.po_headers.po_id" in grn_header_targets
@@ -86,6 +96,8 @@ def test_finance_internal_foreign_keys_target_finance_tables():
     assert "finance.grn_headers.grn_id" in logistics_cost_targets
     assert "finance.invoice_headers.invoice_id" in logistics_cost_targets
     assert "finance.invoice_headers.invoice_id" in tax_voucher_targets
+    assert "finance.shop_profit_basis.id" in follow_investment_settlement_targets
+    assert "finance.follow_investment_settlements.id" in follow_investment_detail_targets
 
 
 def test_finance_external_foreign_keys_keep_core_targets():
@@ -94,9 +106,13 @@ def test_finance_external_foreign_keys_keep_core_targets():
     tax_report_targets = {fk.target_fullname for fk in TaxReport.__table__.foreign_keys}
     tax_voucher_targets = {fk.target_fullname for fk in TaxVoucher.__table__.foreign_keys}
     journal_entry_targets = {fk.target_fullname for fk in JournalEntry.__table__.foreign_keys}
+    follow_investment_targets = {fk.target_fullname for fk in FollowInvestment.__table__.foreign_keys}
+    shop_profit_basis_targets = {fk.target_fullname for fk in ShopProfitBasis.__table__.foreign_keys}
 
     assert "core.dim_vendors.vendor_code" in po_header_targets
     assert "core.dim_vendors.vendor_code" in invoice_header_targets
     assert "core.dim_fiscal_calendar.period_code" in tax_report_targets
     assert "core.dim_fiscal_calendar.period_code" in tax_voucher_targets
     assert "core.dim_fiscal_calendar.period_code" in journal_entry_targets
+    assert "core.dim_users.user_id" in follow_investment_targets
+    assert "core.dim_fiscal_calendar.period_code" in shop_profit_basis_targets

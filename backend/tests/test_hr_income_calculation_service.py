@@ -6,6 +6,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 from modules.core.db import (
     EmployeeCommission,
     EmployeePerformance,
@@ -25,7 +27,7 @@ class _MockResult:
         return self
 
     def all(self):
-        return self._rows
+        return self._mapping_rows or self._rows
 
     def mappings(self):
         return self
@@ -98,6 +100,9 @@ def test_calculate_month_upsert_writes():
     db.commit = AsyncMock()
 
     service = HRIncomeCalculationService(db=db)
+    service._load_profit_basis_by_shop = AsyncMock(
+        return_value={"shopee|s1": {"profit_basis_amount": 1500.0}}
+    )
     result = asyncio.run(service.calculate_month("2026-03"))
 
     assert result["employee_count"] == 1
@@ -105,6 +110,10 @@ def test_calculate_month_upsert_writes():
     assert result["performance_upserts"] == 1
     assert any(isinstance(x, EmployeeCommission) for x in added)
     assert any(isinstance(x, EmployeePerformance) for x in added)
+    commission = next(x for x in added if isinstance(x, EmployeeCommission))
+    assert commission.sales_amount == pytest.approx(1000.0)
+    assert commission.commission_amount == pytest.approx(120.0)
+    assert commission.commission_rate == pytest.approx(0.12)
 
 
 def test_calculate_month_upsert_fallback_to_cn_sql_when_orm_columns_missing():
@@ -162,6 +171,9 @@ def test_calculate_month_upsert_fallback_to_cn_sql_when_orm_columns_missing():
     db.rollback = AsyncMock()
 
     service = HRIncomeCalculationService(db=db)
+    service._load_profit_basis_by_shop = AsyncMock(
+        return_value={"shopee|s2": {"profit_basis_amount": 900.0}}
+    )
     result = asyncio.run(service.calculate_month("2026-01"))
 
     assert result["employee_count"] == 1
