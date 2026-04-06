@@ -1,8 +1,8 @@
-# Follow Investment Profit Sharing Design
+# Unified Profit Basis And Follow Investment Design
 
 ## Goal
 
-为西红 ERP 设计一套“店铺跟投收益”方案，服务于“员工或外部人员投入货款/营销资金后，按店铺净利润参与收益分配”的业务场景。方案必须复用现有财务月结、店铺利润、A 类成本录入、会计期间和审批体系，不重建成本利润主线。
+为西红 ERP 建立统一的正式利润分配基准 `profit_basis_amount`，并在此基准之上落地“店铺跟投收益”能力。目标是在测试环境阶段一次性收口当前分散的利润口径，避免跟投收益、HR 提成和财务展示各用一套利润字段，导致后续误开发和误结算。
 
 ## Status Snapshot
 
@@ -13,72 +13,146 @@
 - 已有 orders 数据域利润口径
 - 已有 A 类成本录入，且广告、人工等费用可按店铺归集
 - 已有财务管理入口、店铺筛选和审批日志
+- 已有 B 类成本分析视图，可提供额外成本口径参考
 
 ### 当前缺口
 
+- 没有“唯一正式结算利润口径”字段
+- 没有“店铺月度结算利润快照”对象
 - 没有“店铺跟投本金记录”台账
 - 没有“店铺月度跟投收益试算/审批/结算”对象
 - 没有投资人查看个人跟投收益的受限视图
 
 ## Problem Framing
 
-当前业务中，部分人员不是单纯拿工资，而是向具体店铺投入货款或营销资金，并希望按投入比例参与收益分配。由于投入对象是店铺经营，而非公司股权，因此这里不适合套用“公司股东税后利润分红”模型。更合适的定义是：
+当前系统里至少存在三种利润语义：
 
-- 经营主体：店铺
-- 期间主体：月度
-- 结算口径：店铺净利润
-- 分配对象：店铺跟投人
+- `orders_profit` 或 orders 数据域月利润
+- `contribution_profit`
+- HR 提成链中当前使用的利润字段
 
-## Settlement Basis
+这些字段分别服务分析展示、历史财务页面或局部业务逻辑，但尚未被统一治理为“正式分钱基准”。如果只为跟投收益单独补一个口径，后续仍会出现：
 
-### 正式结算口径
+- 跟投收益按一个利润字段
+- HR 提成按另一个利润字段
+- 财务看板展示第三个利润字段
 
-正式收益分配必须按净利润口径，而不是 orders 数据域里尚未扣除人工、广告等期间费用的利润。
+因此应先建立统一的正式结算层，再让具体分钱规则挂在其上。
 
-优先规则：
+## Canonical Settlement Basis
 
-1. 如果现有店铺月度 `contribution_profit` 已完整包含 A 类广告、人工等店铺成本，则直接将其作为分成基准
-2. 如果现有 `contribution_profit` 尚未完整覆盖 A 类成本，则在结算层补一层“分成基准净利润”：
+### 正式结算字段
 
-```text
-profit_basis_amount = orders_profit - a_class_cost_total
-```
-
-该层仅作为跟投结算基准，不反向改写现有利润体系。
-
-### 可分配收益
-
-第一版不引入复杂亏损结转或跨店补贴，直接采用保守比例分配：
+系统新增唯一正式结算字段：
 
 ```text
-distributable_amount = max(0, profit_basis_amount × distribution_ratio)
+profit_basis_amount
 ```
 
-其中 `distribution_ratio` 为店铺跟投收益分配比例，由业务或财务配置。
+它是系统内一切正式利润分配的统一基准，用于：
 
-## Capital Allocation Logic
+- 跟投收益
+- HR 提成
+- 未来其他按利润分钱的模块
 
-同一店铺、同一期间内，跟投收益按“加权资金占用”分配，而不是按月末静态本金快照分配。
+### 推荐公式
+
+第一版推荐按 A 类净利润口径定义：
 
 ```text
-weighted_capital = contribution_amount × occupied_days
+profit_basis_amount = orders_profit - included_a_class_cost
 ```
+
+其中：
+
+- `orders_profit` 来自现有 orders 数据域店铺月利润
+- `included_a_class_cost` 来自现有 A 类成本按店铺、按月分摊结果
+
+如果未来业务确认 B 类成本也必须纳入正式分钱口径，则扩展为：
 
 ```text
-share_ratio = personal_weighted_capital / total_weighted_capital
+profit_basis_amount = orders_profit - included_a_class_cost - included_b_class_cost
 ```
+
+但在 B 类口径未完全治理稳定前，第一版不建议直接全量引入。
+
+## Relationship To Existing Profit Fields
+
+### `orders_profit`
+
+- 保留
+- 用于经营分析
+- 作为 `profit_basis_amount` 的输入之一
+
+### `contribution_profit`
+
+- 保留
+- 用于财务页展示和历史 P&L 参考
+- 不再默认视为正式分钱口径
+
+### HR 当前利润字段
+
+- 当前仅代表 HR 提成现状输入
+- 不再视为长期正式结算基准
+- 后续应迁移到 `profit_basis_amount`
+
+## Profit Basis Governance
+
+系统内利润语义固定为三层：
+
+### 1. 分析展示层
+
+- `orders_profit`
+- `contribution_profit`
+- B 类成本分析视图中的利润率和参考值
+
+这些字段继续存在，但仅用于分析和展示。
+
+### 2. 统一结算层
+
+- `profit_basis_amount`
+
+这是唯一正式结算字段。
+
+### 3. 分配规则层
+
+不同业务规则调用同一个统一结算层：
+
+- 跟投收益：
 
 ```text
-estimated_income = distributable_amount × share_ratio
+profit_basis_amount × distribution_ratio × capital_share_ratio
 ```
 
-这样可以处理月中追加投入、提前退出和多人不同持有天数的情况。
+- HR 提成：
+
+```text
+profit_basis_amount × allocatable_profit_rate × commission_ratio
+```
 
 ## Data Model
 
-新增对象尽量压缩为三层。
+新增对象分为四层。
 
-### 1. 跟投本金记录
+### 1. 店铺月度结算利润对象
+
+新增月店铺结算利润快照对象，承接统一结算口径。
+
+核心字段：
+
+- `period_month`
+- `platform_code`
+- `shop_id`
+- `orders_profit_amount`
+- `a_class_cost_amount`
+- `b_class_cost_amount`
+- `profit_basis_amount`
+- `basis_version`
+- `is_locked`
+
+该对象推荐为快照表而不是临时计算结果，便于审批、追溯和审计。
+
+### 2. 跟投本金记录
 
 记录谁在哪个店铺投了多少钱。
 
@@ -93,9 +167,9 @@ estimated_income = distributable_amount × share_ratio
 - `status`
 - `remark`
 
-### 2. 店铺月度跟投结算头
+### 3. 店铺月度跟投结算头
 
-记录该店铺该月使用的分成基准与可分配收益。
+记录该店铺该月使用的正式结算利润基准与可分配收益。
 
 核心字段：
 
@@ -109,7 +183,7 @@ estimated_income = distributable_amount × share_ratio
 - `approved_by`
 - `approved_at`
 
-### 3. 店铺月度跟投结算明细
+### 4. 店铺月度跟投结算明细
 
 记录该月每个跟投人的占比和收益。
 
@@ -126,6 +200,22 @@ estimated_income = distributable_amount × share_ratio
 - `paid_income`
 - `paid_at`
 
+## Capital Allocation Logic
+
+同一店铺、同一期间内，跟投收益按“加权资金占用”分配，而不是按月末静态本金分配。
+
+```text
+weighted_capital = contribution_amount × occupied_days
+```
+
+```text
+share_ratio = personal_weighted_capital / total_weighted_capital
+```
+
+```text
+estimated_income = distributable_amount × share_ratio
+```
+
 ## Integration Boundaries
 
 ### 必须复用
@@ -136,7 +226,12 @@ estimated_income = distributable_amount × share_ratio
 - 现有 A 类成本按店铺归集能力
 - 现有财务入口与审批日志
 
-### 不在第一版做
+### 应统一治理
+
+- HR 提成链中的利润基础字段不再被视为最终口径
+- 新的跟投收益与后续 HR 提成都应围绕 `profit_basis_amount`
+
+### 第一版不做
 
 - 公司级股权分红
 - 多项目/多业务线复合资金池
@@ -150,7 +245,7 @@ estimated_income = distributable_amount × share_ratio
 ### 财务端月度流程
 
 1. 完成当月 orders 利润与 A 类成本归集
-2. 锁定或确认本月店铺分成基准净利润
+2. 生成并锁定本月店铺 `profit_basis_amount`
 3. 读取该店铺当月有效跟投记录
 4. 计算每人 `occupied_days` 与 `weighted_capital`
 5. 生成试算结果
@@ -166,7 +261,7 @@ estimated_income = distributable_amount × share_ratio
 - 累计已支付收益
 - 分店铺收益明细
 
-并明确标注：
+页面需明确标注：
 
 - `预计收益仅供参考，以财务审核后的结算结果为准`
 
@@ -174,7 +269,10 @@ estimated_income = distributable_amount × share_ratio
 
 ### 财务管理页
 
-在现有 `FinanceManagement.vue` 新增 `跟投收益` 页签，不新开独立系统页面。
+在现有 `FinanceManagement.vue` 新增：
+
+- `结算利润口径` 区块
+- `跟投收益` 页签
 
 页签内拆为三块：
 
@@ -200,19 +298,23 @@ estimated_income = distributable_amount × share_ratio
 ## Compatibility Notes
 
 - 现有 orders 利润仍然保留为分析展示指标
-- 正式分钱只认“分成基准净利润”
+- `contribution_profit` 仍可保留在财务页展示
+- 正式分钱只认 `profit_basis_amount`
 - A 类成本继续由现有店铺成本录入维护，不复制数据
+- 跟投收益与未来 HR 提成应尽量围绕 `profit_basis_amount` 统一
 - 跟投收益是现有财务结算结果的下游应用，不反向写回 P&L
 
 ## Open Decisions
 
-1. 现有 `contribution_profit` 是否已完整覆盖用于分成的 A 类成本
-2. 员工跟投收益是否需要在个人收入页面并列展示，还是独立入口
-3. 审批通过后是否允许二次重算，还是必须先驳回结算单
+1. 第一版 `profit_basis_amount` 是否仅纳入 A 类成本，还是同步纳入已治理完成的 B 类成本
+2. HR 提成是否在第一版就切换到 `profit_basis_amount`
+3. 员工跟投收益是否需要在个人收入页面并列展示，还是独立入口
+4. 审批通过后是否允许二次重算，还是必须先驳回结算单
 
 ## Testing Strategy
 
-1. 锁定净利润口径来源测试
+1. 锁定 `profit_basis_amount` 口径来源测试
 2. 锁定加权资金占用分配测试
 3. 锁定月度试算与审批状态流转测试
 4. 锁定前端财务页跟投收益页签交互测试
+5. 锁定 HR 提成对统一利润基准的兼容性测试
