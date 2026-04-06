@@ -152,6 +152,7 @@ def test_build_collection_config_record_sets_explicit_timestamps():
         config=CollectionConfigCreate(
             name="shopee-shop-scope-v1",
             platform="shopee",
+            main_account_id="main-shopee",
             shop_scopes=[
                 CollectionConfigShopScopePayload(
                     shop_account_id="shop-sg-1",
@@ -190,6 +191,7 @@ def test_build_collection_config_record_defaults_execution_mode_to_headless():
         config=CollectionConfigCreate(
             name="shopee-shop-scope-v2",
             platform="shopee",
+            main_account_id="main-shopee",
             shop_scopes=[
                 CollectionConfigShopScopePayload(
                     shop_account_id="shop-sg-1",
@@ -218,6 +220,7 @@ async def test_create_config_persists_shop_scopes_and_time_selection(
         json={
             "name": "shopee-daily-shop-scope-v1",
             "platform": "shopee",
+            "main_account_id": "main-shopee",
             "shop_scopes": [
                 {
                     "shop_account_id": "shop-sg-1",
@@ -266,6 +269,7 @@ async def test_create_config_requires_all_active_shop_scopes(
         json={
             "name": "shopee-invalid-v1",
             "platform": "shopee",
+            "main_account_id": "main-shopee",
             "shop_scopes": [
                 {
                     "shop_account_id": "shop-sg-1",
@@ -296,6 +300,7 @@ async def test_update_config_replaces_shop_scopes_and_normalizes_custom_time_sel
     config = CollectionConfig(
         name="shopee-services-v1",
         platform="shopee",
+        main_account_id="main-shopee",
         account_ids=["shop-sg-1", "shop-my-1"],
         data_domains=["services"],
         sub_domains={"services": ["agent"]},

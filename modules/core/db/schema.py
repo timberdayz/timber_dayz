@@ -686,6 +686,12 @@ class CollectionConfig(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)  # 配置名称
     platform = Column(String(50), nullable=False)  # 平台:shopee/tiktok/miaoshou
+    main_account_id = Column(
+        String(100),
+        ForeignKey("core.main_accounts.main_account_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="归属主账号ID",
+    )
     account_ids = Column(JSON, nullable=False)  # 账号ID列表 ["acc1", "acc2"] 或 [](表示所有活跃账号)
     data_domains = Column(JSON, nullable=False)  # 数据域列表 ["orders", "products"]
     sub_domains = Column(JSON, nullable=True)  # 子域数组 ["agent", "ai_assistant"](v4.7.0改为数组)
@@ -711,8 +717,15 @@ class CollectionConfig(Base):
     tasks = relationship("CollectionTask", back_populates="config")
     
     __table_args__ = (
-        UniqueConstraint("name", "platform", name="uq_collection_configs_name_platform"),
+        UniqueConstraint(
+            "name",
+            "platform",
+            "main_account_id",
+            name="uq_collection_configs_name_platform_main_account",
+        ),
         Index("ix_collection_configs_platform", "platform"),
+        Index("ix_collection_configs_main_account_id", "main_account_id"),
+        Index("ix_collection_configs_platform_main_account_id", "platform", "main_account_id"),
         Index("ix_collection_configs_active", "is_active"),
         {"schema": "core"},
     )

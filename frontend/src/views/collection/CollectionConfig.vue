@@ -26,15 +26,74 @@
         </el-radio-group>
 
         <div class="filter-bar">
-          <el-select v-model="filters.platform" placeholder="平台筛选" clearable @change="reloadPageData">
-            <el-option label="Shopee" value="shopee" />
-            <el-option label="TikTok" value="tiktok" />
-            <el-option label="妙手ERP" value="miaoshou" />
+          <el-select
+            v-model="filters.platform"
+            class="full-width-select"
+            data-testid="collection-config-platform-filter"
+            placeholder="平台筛选"
+            clearable
+            @change="handlePlatformFilterChange"
+          >
+            <el-option
+              v-for="option in platformOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
           </el-select>
 
-          <el-select v-model="filters.is_active" placeholder="状态筛选" clearable @change="loadConfigs">
-            <el-option label="已启用" :value="true" />
-            <el-option label="已禁用" :value="false" />
+          <el-select
+            v-model="filters.main_account_id"
+            class="full-width-select"
+            data-testid="collection-config-main-account-filter"
+            placeholder="主账号筛选"
+            clearable
+            :disabled="!filters.platform"
+            @change="reloadPageData"
+          >
+            <el-option
+              v-for="option in filterMainAccountOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+
+          <el-select
+            v-model="filters.date_range_type"
+            class="full-width-select"
+            placeholder="日期范围"
+            clearable
+            @change="loadConfigs"
+          >
+            <el-option
+              v-for="option in listDateRangeOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+
+          <el-select
+            v-model="filters.execution_mode"
+            class="full-width-select"
+            placeholder="执行模式"
+            clearable
+            @change="loadConfigs"
+          >
+            <el-option label="无头模式" value="headless" />
+            <el-option label="有头模式" value="headed" />
+          </el-select>
+
+          <el-select
+            v-model="filters.schedule_enabled"
+            class="full-width-select"
+            placeholder="启用定时"
+            clearable
+            @change="loadConfigs"
+          >
+            <el-option label="启用定时" :value="true" />
+            <el-option label="未启用" :value="false" />
           </el-select>
 
           <el-button @click="reloadPageData">
@@ -78,8 +137,13 @@
         <el-table-column label="平台" width="110">
           <template #default="{ row }">
             <el-tag :type="getPlatformTagType(row.platform)">
-              {{ row.platform }}
+              {{ getPlatformLabel(row.platform) }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="主账号" min-width="180">
+          <template #default="{ row }">
+            {{ row.main_account_name || row.main_account_id || '-' }}
           </template>
         </el-table-column>
         <el-table-column label="粒度" width="100">
@@ -159,13 +223,38 @@
             </el-form-item>
 
             <el-form-item label="平台" prop="platform">
-              <div data-testid="collection-config-platform-field">
-                <el-select v-model="form.platform" placeholder="请选择平台" @change="onPlatformChange">
-                  <el-option label="Shopee" value="shopee" />
-                  <el-option label="TikTok" value="tiktok" />
-                  <el-option label="妙手ERP" value="miaoshou" />
-                </el-select>
-              </div>
+              <el-select
+                v-model="form.platform"
+                class="full-width-select"
+                data-testid="collection-config-platform-field"
+                placeholder="请选择平台"
+                @change="onPlatformChange"
+              >
+                <el-option
+                  v-for="option in platformOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="主账号" prop="main_account_id">
+              <el-select
+                v-model="form.main_account_id"
+                class="full-width-select"
+                data-testid="collection-config-main-account-field"
+                placeholder="请选择主账号"
+                :disabled="!form.platform"
+                @change="onMainAccountChange"
+              >
+                <el-option
+                  v-for="option in dialogMainAccountOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
             </el-form-item>
 
             <el-form-item label="日期范围" prop="date_range_type">
@@ -215,15 +304,15 @@
             <div class="shop-scope-header">
               <div>
                 <div class="scope-title">店铺维度配置</div>
-                <div class="scope-subtitle">当前平台所有可用店铺必须参与配置，每个店铺至少选择 1 个数据域。</div>
+                <div class="scope-subtitle">当前主账号下所有可用店铺必须参与配置，每个店铺至少选择 1 个数据域。</div>
               </div>
               <div class="scope-actions">
                 <el-button size="small" @click="applyCapabilitiesToAllShopScopes">按店铺能力自动套用</el-button>
               </div>
             </div>
 
-            <div v-if="!form.platform" class="empty-tip">先选择平台，再加载店铺维度配置。</div>
-            <div v-else-if="shopScopeRows.length === 0" class="empty-tip">当前平台暂无可用店铺账号。</div>
+            <div v-if="!form.platform || !form.main_account_id" class="empty-tip">先选择平台和主账号，再加载店铺维度配置。</div>
+            <div v-else-if="shopScopeRows.length === 0" class="empty-tip">当前主账号下暂无可用店铺账号。</div>
 
             <div v-else class="shop-scope-list" data-testid="collection-config-shop-scope-list">
               <el-card
@@ -316,10 +405,28 @@
     <el-dialog v-model="quickSetupVisible" title="快速配置" width="520px" destroy-on-close>
       <el-form label-width="100px">
         <el-form-item label="平台">
-          <el-select v-model="quickSetup.platform" placeholder="请选择平台">
-            <el-option label="Shopee" value="shopee" />
-            <el-option label="TikTok" value="tiktok" />
-            <el-option label="妙手ERP" value="miaoshou" />
+          <el-select v-model="quickSetup.platform" class="full-width-select" placeholder="请选择平台" @change="onQuickSetupPlatformChange">
+            <el-option
+              v-for="option in platformOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="主账号">
+          <el-select
+            v-model="quickSetup.main_account_id"
+            class="full-width-select"
+            placeholder="请选择主账号"
+            :disabled="!quickSetup.platform"
+          >
+            <el-option
+              v-for="option in quickSetupMainAccountOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="说明">
@@ -375,13 +482,17 @@ const customDateRange = ref([])
 
 const filters = reactive({
   platform: '',
-  is_active: null
+  main_account_id: '',
+  date_range_type: '',
+  execution_mode: '',
+  schedule_enabled: null
 })
 
 const form = reactive({
   id: null,
   name: '',
   platform: '',
+  main_account_id: '',
   shop_scopes: [],
   granularity: 'daily',
   date_range_type: 'yesterday',
@@ -393,29 +504,57 @@ const form = reactive({
 })
 
 const quickSetup = reactive({
-  platform: ''
+  platform: '',
+  main_account_id: ''
 })
 
 const formRules = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
+  main_account_id: [{ required: true, message: '请选择主账号', trigger: 'change' }],
   date_range_type: [{ required: true, message: '请选择日期范围', trigger: 'change' }]
 }
 
 const activeGranularityLabel = computed(() => getGranularityLabel(activeGranularity.value))
 const availableDomainOptions = computed(() => getAvailableDomainOptions(form.platform))
+const platformOptions = computed(() => {
+  const source = [...flatAccounts.value, ...dialogAccounts.value]
+  const values = Array.from(
+    new Set(source.map((account) => normalizePlatformCode(account.platform)).filter(Boolean))
+  )
+  return values
+    .sort((left, right) => left.localeCompare(right))
+    .map((value) => ({ value, label: getPlatformLabel(value) }))
+})
+const filterMainAccountOptions = computed(() => buildMainAccountOptions(flatAccounts.value, filters.platform))
+const dialogMainAccountOptions = computed(() => buildMainAccountOptions(dialogAccounts.value, form.platform))
+const quickSetupMainAccountOptions = computed(() => buildMainAccountOptions(flatAccounts.value, quickSetup.platform))
+const listDateRangeOptions = computed(() => [
+  { label: '今天', value: 'today' },
+  { label: '昨天', value: 'yesterday' },
+  { label: '最近 7 天', value: 'last_7_days' },
+  { label: '最近 30 天', value: 'last_30_days' },
+  { label: '自定义', value: 'custom' }
+])
 
 const filteredConfigs = computed(() =>
   (configs.value || []).filter((config) => {
     if ((config._resolvedGranularity || normalizeConfigGranularity(config)) !== activeGranularity.value) return false
-    if (filters.platform && config.platform !== filters.platform) return false
-    if (filters.is_active !== null && config.is_active !== filters.is_active) return false
+    if (filters.platform && normalizePlatformCode(config.platform) !== normalizePlatformCode(filters.platform)) return false
+    if (filters.main_account_id && config.main_account_id !== filters.main_account_id) return false
+    if (filters.date_range_type && config.date_range_type !== filters.date_range_type) return false
+    if (filters.execution_mode && config.execution_mode !== filters.execution_mode) return false
+    if (filters.schedule_enabled !== null && config.schedule_enabled !== filters.schedule_enabled) return false
     return true
   })
 )
 
 const currentCoverageKey = computed(() => `${activeGranularity.value}_covered`)
 const coverageItems = computed(() =>
-  (coverage.value.items || []).filter((item) => !filters.platform || item.platform === filters.platform)
+  (coverage.value.items || []).filter((item) => {
+    if (filters.platform && normalizePlatformCode(item.platform) !== normalizePlatformCode(filters.platform)) return false
+    if (filters.main_account_id && item.main_account_id !== filters.main_account_id) return false
+    return true
+  })
 )
 const missingCoverageItems = computed(() =>
   coverageItems.value.filter((item) => !item[currentCoverageKey.value])
@@ -431,8 +570,12 @@ const currentCoverageSummary = computed(() => {
 const platformAccounts = computed(() => {
   const scopedAccounts = dialogAccounts.value.length ? dialogAccounts.value : flatAccounts.value
   const platform = String(form.platform || '').toLowerCase()
+  const mainAccountId = String(form.main_account_id || '').trim()
   return scopedAccounts.filter(
-    (account) => String(account.platform || '').toLowerCase() === platform && account.status === 'active'
+    (account) =>
+      String(account.platform || '').toLowerCase() === platform
+      && (!mainAccountId || String(account.main_account_id || '') === mainAccountId)
+      && account.status === 'active'
   )
 })
 
@@ -473,6 +616,37 @@ watch(activeGranularity, () => {
 function getGranularityLabel(value) {
   const labels = { daily: '日采集', weekly: '周采集', monthly: '月采集' }
   return labels[value] || value
+}
+
+function normalizePlatformCode(platform) {
+  return String(platform || '').trim().toLowerCase()
+}
+
+function getPlatformLabel(platform) {
+  const labels = {
+    miaoshou: 'Miaoshou',
+    shopee: 'Shopee',
+    tiktok: 'TikTok'
+  }
+  return labels[normalizePlatformCode(platform)] || platform
+}
+
+function buildMainAccountOptions(accounts, platform) {
+  const normalizedPlatform = normalizePlatformCode(platform)
+  const options = new Map()
+
+  for (const account of accounts || []) {
+    if (normalizedPlatform && normalizePlatformCode(account.platform) !== normalizedPlatform) continue
+    const mainAccountId = String(account.main_account_id || '').trim()
+    if (!mainAccountId) continue
+    if (options.has(mainAccountId)) continue
+    options.set(mainAccountId, {
+      value: mainAccountId,
+      label: `${account.main_account_name || mainAccountId} / ${mainAccountId}`
+    })
+  }
+
+  return Array.from(options.values()).sort((left, right) => left.label.localeCompare(right.label))
 }
 
 function defaultDateTypeForGranularity(value) {
@@ -535,9 +709,13 @@ function buildScopeFromAccount(account, existingScope = null) {
   }
 }
 
-function buildDefaultShopScopes(platform, existingScopes = []) {
-  const accounts = flatAccounts.value.filter(
-    (account) => String(account.platform || '').toLowerCase() === String(platform || '').toLowerCase() && account.status === 'active'
+function buildDefaultShopScopes(platform, mainAccountId, existingScopes = []) {
+  const sourceAccounts = dialogAccounts.value.length ? dialogAccounts.value : flatAccounts.value
+  const accounts = sourceAccounts.filter(
+    (account) =>
+      normalizePlatformCode(account.platform) === normalizePlatformCode(platform)
+      && String(account.main_account_id || '') === String(mainAccountId || '')
+      && account.status === 'active'
   )
   const existingMap = Object.fromEntries((existingScopes || []).map((scope) => [scope.shop_account_id, scope]))
   return accounts.map((account) => buildScopeFromAccount(account, existingMap[account.id])).sort((a, b) => a.shop_account_id.localeCompare(b.shop_account_id))
@@ -565,7 +743,7 @@ function validateShopScopes() {
   }
   if (normalizedScopes.length !== validIds.size) {
     ElMessage.warning('存在未覆盖或无效的店铺 scope，请重新选择平台后再保存')
-    form.shop_scopes = buildDefaultShopScopes(form.platform, normalizedScopes)
+    form.shop_scopes = buildDefaultShopScopes(form.platform, form.main_account_id, normalizedScopes)
     return false
   }
 
@@ -583,7 +761,7 @@ function selectAllScopeSubDomains(scope, domain) {
 }
 
 function generateConfigName() {
-  if (!form.platform || !form.shop_scopes.length) {
+  if (!form.platform || !form.main_account_id || !form.shop_scopes.length) {
     generatedName.value = ''
     return
   }
@@ -594,7 +772,7 @@ function generateConfigName() {
     generatedName.value = ''
     return
   }
-  const baseName = `${form.platform}-${activeGranularity.value}-${unionDomains.join('-')}`
+  const baseName = `${form.platform}-${form.main_account_id}-${activeGranularity.value}-${unionDomains.join('-')}`
   const existingVersions = configs.value
     .filter((config) => String(config.name || '').startsWith(`${baseName}-v`))
     .map((config) => {
@@ -609,7 +787,7 @@ function generateConfigName() {
 }
 
 function applyCapabilitiesToAllShopScopes() {
-  form.shop_scopes = buildDefaultShopScopes(form.platform, form.shop_scopes)
+  form.shop_scopes = buildDefaultShopScopes(form.platform, form.main_account_id, form.shop_scopes)
   if (!form.name) {
     generateConfigName()
   }
@@ -620,7 +798,10 @@ async function loadConfigs() {
   try {
     const params = {}
     if (filters.platform) params.platform = filters.platform
-    if (filters.is_active !== null) params.is_active = filters.is_active
+    if (filters.main_account_id) params.main_account_id = filters.main_account_id
+    if (filters.date_range_type) params.date_range_type = filters.date_range_type
+    if (filters.execution_mode) params.execution_mode = filters.execution_mode
+    if (filters.schedule_enabled !== null) params.schedule_enabled = filters.schedule_enabled
     const response = await collectionApi.getConfigs(params)
     configs.value = (response || []).map((item) => ({
       ...item,
@@ -636,9 +817,8 @@ async function loadConfigs() {
 async function loadAccounts() {
   accountsLoading.value = true
   try {
-    const platformParam = filters.platform ? { platform: filters.platform } : {}
-    flatAccounts.value = await collectionApi.getAccounts(platformParam)
-    groupedAccounts.value = await collectionApi.getGroupedAccounts(platformParam)
+    flatAccounts.value = await collectionApi.getAccounts()
+    groupedAccounts.value = await collectionApi.getGroupedAccounts()
   } catch (error) {
     ElMessage.error(`加载店铺账号失败: ${error.message}`)
   } finally {
@@ -650,6 +830,7 @@ async function loadCoverage() {
   coverageLoading.value = true
   try {
     const platformParam = filters.platform ? { platform: filters.platform } : {}
+    if (filters.main_account_id) platformParam.main_account_id = filters.main_account_id
     coverage.value = await collectionApi.getConfigCoverage(platformParam)
   } catch (error) {
     ElMessage.error(`加载覆盖情况失败: ${error.message}`)
@@ -668,6 +849,7 @@ function resetForm() {
     id: null,
     name: '',
     platform: '',
+    main_account_id: '',
     shop_scopes: [],
     granularity: activeGranularity.value,
     date_range_type: defaultDateTypeForGranularity(activeGranularity.value),
@@ -690,38 +872,66 @@ function showCreateDialog() {
 
 function showQuickSetupDialog() {
   quickSetup.platform = filters.platform || ''
+  quickSetup.main_account_id = filters.main_account_id || ''
   quickSetupVisible.value = true
 }
 
-async function onPlatformChange() {
-  if (!form.platform) {
+function handlePlatformFilterChange() {
+  filters.main_account_id = ''
+  reloadPageData()
+}
+
+async function loadDialogAccounts(platform) {
+  if (!platform) {
     dialogAccounts.value = []
-    form.shop_scopes = []
     return
   }
   try {
-    dialogAccounts.value = await collectionApi.getAccounts({ platform: form.platform })
+    dialogAccounts.value = await collectionApi.getAccounts({ platform })
   } catch (error) {
     dialogAccounts.value = []
     ElMessage.error(`加载平台店铺失败: ${error.message}`)
   }
-  form.shop_scopes = buildDefaultShopScopes(form.platform)
+}
+
+async function onPlatformChange() {
+  if (!form.platform) {
+    form.main_account_id = ''
+    dialogAccounts.value = []
+    form.shop_scopes = []
+    return
+  }
+  form.main_account_id = ''
+  form.shop_scopes = []
+  await loadDialogAccounts(form.platform)
+  generatedName.value = ''
+}
+
+function onMainAccountChange() {
+  form.shop_scopes = []
+  if (!form.platform || !form.main_account_id) return
+  form.shop_scopes = buildDefaultShopScopes(form.platform, form.main_account_id)
   if (!isEdit.value) {
     form.name = ''
     generateConfigName()
   }
 }
 
+function onQuickSetupPlatformChange() {
+  quickSetup.main_account_id = ''
+}
+
 async function editConfig(row) {
   isEdit.value = true
   activeGranularity.value = row._resolvedGranularity || normalizeConfigGranularity(row)
   const detail = await collectionApi.getConfig(row.id)
-  dialogAccounts.value = await collectionApi.getAccounts({ platform: detail.platform })
+  await loadDialogAccounts(detail.platform)
   Object.assign(form, {
     id: detail.id,
     name: detail.name,
     platform: detail.platform,
-    shop_scopes: buildDefaultShopScopes(detail.platform, detail.shop_scopes || []),
+    main_account_id: detail.main_account_id,
+    shop_scopes: buildDefaultShopScopes(detail.platform, detail.main_account_id, detail.shop_scopes || []),
     granularity: detail._resolvedGranularity || normalizeConfigGranularity(detail),
     date_range_type: detail.date_range_type || defaultDateTypeForGranularity(activeGranularity.value),
     custom_date_start: detail.custom_date_start,
@@ -745,6 +955,7 @@ async function submitForm() {
     const payload = {
       name: form.name,
       platform: form.platform,
+      main_account_id: form.main_account_id,
       shop_scopes: normalizeShopScopesForPayload(),
       granularity: activeGranularity.value,
       date_range_type: form.date_range_type,
@@ -822,17 +1033,18 @@ async function runConfig(row) {
 }
 
 async function executeQuickSetup() {
-  if (!quickSetup.platform) {
-    ElMessage.warning('请先选择平台')
+  if (!quickSetup.platform || !quickSetup.main_account_id) {
+    ElMessage.warning('请先选择平台和主账号')
     return
   }
 
   quickSetupSubmitting.value = true
   try {
-    const shopScopes = buildDefaultShopScopes(quickSetup.platform)
+    const shopScopes = buildDefaultShopScopes(quickSetup.platform, quickSetup.main_account_id)
     await collectionApi.createConfig({
       name: '',
       platform: quickSetup.platform,
+      main_account_id: quickSetup.main_account_id,
       shop_scopes: shopScopes,
       granularity: activeGranularity.value,
       date_range_type: defaultDateTypeForGranularity(activeGranularity.value),
@@ -952,6 +1164,10 @@ onMounted(() => {
 .domain-tag {
   margin-right: 6px;
   margin-bottom: 6px;
+}
+
+.full-width-select {
+  width: 100%;
 }
 
 .editor-layout {
