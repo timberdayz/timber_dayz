@@ -535,13 +535,16 @@
             <el-table-column prop="contribution_date" label="投入日期" width="120" />
             <el-table-column prop="withdraw_date" label="退出日期" width="120" />
             <el-table-column prop="status" label="状态" width="100" />
-            <el-table-column label="操作" width="120" fixed="right">
-              <template #default="{ row }">
-                <el-button link type="primary" size="small" @click="openEditFollowInvestment(row)">
-                  编辑
-                </el-button>
-              </template>
-            </el-table-column>
+          <el-table-column label="操作" width="120" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openEditFollowInvestment(row)">
+                编辑
+              </el-button>
+              <el-button link type="danger" size="small" @click="archiveFollowInvestment(row)">
+                归档
+              </el-button>
+            </template>
+          </el-table-column>
           </el-table>
         </el-card>
 
@@ -602,13 +605,16 @@
               <template #default="{ row }">{{ formatCurrency(row.distributable_amount) }}</template>
             </el-table-column>
             <el-table-column prop="status" label="状态" width="100" />
-            <el-table-column label="操作" width="180" fixed="right">
-              <template #default="{ row }">
-                <el-button v-if="row.status !== 'approved'" link type="success" size="small" @click="approveFollowInvestment(row)">
-                  审核通过
-                </el-button>
-                <el-button v-if="row.status === 'approved'" link type="warning" size="small" @click="reopenFollowInvestment(row)">
-                  撤销审核
+          <el-table-column label="操作" width="180" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="info" size="small" @click="viewSettlementDetails(row)">
+                查看明细
+              </el-button>
+              <el-button v-if="row.status !== 'approved'" link type="success" size="small" @click="approveFollowInvestment(row)">
+                审核通过
+              </el-button>
+              <el-button v-if="row.status === 'approved'" link type="warning" size="small" @click="reopenFollowInvestment(row)">
+                撤销审核
                 </el-button>
               </template>
             </el-table-column>
@@ -734,6 +740,40 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="showSettlementDetailsDrawer" title="结算明细" size="50%">
+      <el-alert
+        v-if="financeStore.followInvestmentSettlementDetails.error"
+        type="error"
+        :closable="false"
+        :title="financeStore.followInvestmentSettlementDetails.error"
+        style="margin-bottom: 16px;"
+      />
+
+      <el-table
+        :data="financeStore.followInvestmentSettlementDetails.data"
+        v-loading="financeStore.followInvestmentSettlementDetails.loading"
+        stripe
+      >
+        <el-table-column prop="investor_user_id" label="投资人ID" width="120" />
+        <el-table-column prop="contribution_amount_snapshot" label="本金快照 (¥)" width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.contribution_amount_snapshot) }}</template>
+        </el-table-column>
+        <el-table-column prop="occupied_days" label="占用天数" width="100" align="right" />
+        <el-table-column prop="weighted_capital" label="加权资金" width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.weighted_capital) }}</template>
+        </el-table-column>
+        <el-table-column prop="share_ratio" label="分配占比" width="120" align="right">
+          <template #default="{ row }">{{ formatPercentValue(row.share_ratio) }}</template>
+        </el-table-column>
+        <el-table-column prop="estimated_income" label="预计收益 (¥)" width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.estimated_income) }}</template>
+        </el-table-column>
+        <el-table-column prop="approved_income" label="已批准 (¥)" width="140" align="right">
+          <template #default="{ row }">{{ formatCurrency(row.approved_income) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-drawer>
   </div>
 </template>
 
@@ -801,6 +841,7 @@ const expensePage = ref(1)
 const showPaymentDialog = ref(false)
 const showARDetailDialog = ref(false)
 const showFollowInvestmentDialog = ref(false)
+const showSettlementDetailsDrawer = ref(false)
 const followInvestmentDialogMode = ref('create')
 const editingFollowInvestmentId = ref(null)
 
@@ -896,6 +937,11 @@ const loadFollowInvestmentSettlements = async () => {
   })
 }
 
+const viewSettlementDetails = async (row) => {
+  await financeStore.fetchFollowInvestmentSettlementDetails(row.id)
+  showSettlementDetailsDrawer.value = true
+}
+
 const resetFollowInvestmentRecordForm = () => {
   followInvestmentRecordForm.value = {
     investor_user_id: null,
@@ -960,6 +1006,30 @@ const submitFollowInvestmentRecord = async () => {
     ElMessage.error('保存跟投记录失败: ' + error.message)
   } finally {
     submitting.value = false
+  }
+}
+
+const archiveFollowInvestment = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认归档跟投记录 #${row.id} 吗？`,
+      '归档跟投记录',
+      {
+        confirmButtonText: '确认归档',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await financeStore.archiveFollowInvestment(row.id, {
+      platform_code: followInvestmentQuery.value.platform_code || undefined,
+      shop_id: followInvestmentQuery.value.shop_id || undefined,
+      status: followInvestmentQuery.value.status || undefined
+    })
+    ElMessage.success('跟投记录已归档')
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('归档失败: ' + (error.message || error))
+    }
   }
 }
 
