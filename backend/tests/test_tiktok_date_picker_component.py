@@ -73,6 +73,96 @@ class _PanelPage(_FakePage):
         return _PanelLocator(self, selector)
 
 
+class _CustomTabLocator(_PanelLocator):
+    def __init__(self, page: "_CustomTabPage", selector: str, *, boundary: str | None = None) -> None:
+        super().__init__(page=page, selector=selector)
+        self._custom_page = page
+        self._boundary = boundary
+
+    async def click(self, timeout: int | None = None) -> None:
+        self._custom_page.clicked_selectors.append(self.selector)
+        if self.selector == "div.theme-arco-picker.theme-arco-picker-range":
+            self._custom_page.panel_opened = True
+        elif "自定义" in self.selector:
+            self._custom_page.custom_tab_selected = True
+        elif self._boundary is not None:
+            self._custom_page.active_boundary = self._boundary
+
+    async def input_value(self) -> str:
+        if self._boundary == "start":
+            return self._custom_page.start_value or ""
+        if self._boundary == "end":
+            return self._custom_page.end_value or ""
+        return ""
+
+
+class _CustomTabGroup:
+    def __init__(self, locators: list[_CustomTabLocator]) -> None:
+        self._locators = locators
+
+    async def count(self) -> int:
+        return len(self._locators)
+
+    def nth(self, idx: int):
+        return self._locators[idx]
+
+
+class _CustomTabPage(_FakePage):
+    def __init__(self, url: str) -> None:
+        super().__init__(url)
+        self.panel_opened = False
+        self.custom_tab_selected = False
+        self.clicked_selectors: list[str] = []
+        self.active_boundary = "start"
+        self.start_value = "2026/02/01"
+        self.end_value = "2026/03/11"
+
+    def locator(self, selector: str):
+        if selector in (
+            "div.theme-arco-picker.theme-arco-picker-range",
+            "div.arco-picker.arco-picker-range",
+            "div.theme-arco-picker-range",
+            "div.arco-picker-range",
+            ".theme-arco-picker",
+            ".arco-picker",
+        ):
+            return _CustomTabLocator(self, selector, boundary=None)
+        if selector in (
+            "div[role='tab']:has-text('自定义')",
+            "[role='tab']:has-text('自定义')",
+            "button:has-text('自定义')",
+            "text=自定义",
+        ):
+            visible = self.panel_opened
+            return _CustomTabLocator(self, selector if visible else "__hidden__", boundary=None) if visible else _FakeLocator(visible=False)
+        if selector in (
+            '#page-title-datepicker [data-tid="m4b_date_picker_range_picker"]',
+            '[data-tid="m4b_date_picker_range_picker"]',
+            "div.theme-arco-picker.theme-arco-picker-range",
+            "div.arco-picker.arco-picker-range",
+            "div.theme-arco-picker-range",
+            "div.arco-picker-range",
+            "div.theme-arco-picker",
+            "div.arco-picker",
+        ):
+            return _CustomTabLocator(self, selector, boundary=None)
+        if selector in (
+            '#page-title-datepicker [data-tid="m4b_date_picker_range_picker"] input',
+            '[data-tid="m4b_date_picker_range_picker"] input',
+            'div.theme-arco-picker.theme-arco-picker-range input',
+            'div.arco-picker.arco-picker-range input',
+            'div.theme-arco-picker-range input',
+            'div.arco-picker-range input',
+        ):
+            return _CustomTabGroup(
+                [
+                    _CustomTabLocator(self, "start-input", boundary="start"),
+                    _CustomTabLocator(self, "end-input", boundary="end"),
+                ]
+            )
+        return _FakeLocator(visible=False)
+
+
 class _HeaderTextLocator:
     def __init__(self, text: str, *, visible: bool = True) -> None:
         self._text = text
@@ -657,6 +747,122 @@ async def test_tiktok_date_picker_products_run_focuses_start_then_end_inputs_for
     result = await component.run(page, DateOption.LAST_30_DAYS)
 
     assert result.success is True
+    component._select_start_input.assert_awaited_once_with(page)
+    component._select_end_input.assert_awaited_once_with(page)
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_analytics_run_uses_custom_tab_and_explicit_start_end_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokDatePicker(
+        _ctx(
+            {
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-02-02",
+                    "end_date": "2026-03-30",
+                }
+            }
+        )
+    )
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/data-overview?shop_region=SG")
+
+    monkeypatch.setattr(component, "_open_panel", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_custom_tab", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_current_range_matches", AsyncMock(return_value=False), raising=False)
+    monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_navigate_right_to_month", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_boundary_active", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_input_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_popup_state_has_valid_two_page_months", lambda state: True, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_popup_state",
+        AsyncMock(
+            side_effect=[
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 2)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 3)),
+                    active_boundary="start",
+                ),
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 2)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 3)),
+                    active_boundary="end",
+                ),
+            ]
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_select_start_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=True), raising=False)
+
+    result = await component.run(page, DateOption.LAST_30_DAYS)
+
+    assert result.success is True
+    component._select_custom_tab.assert_awaited_once_with(page)
+    component._select_start_input.assert_awaited_once_with(page)
+    component._select_end_input.assert_awaited_once_with(page)
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_services_run_uses_custom_tab_and_explicit_start_end_flow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    component = TiktokDatePicker(
+        _ctx(
+            {
+                "time_selection": {
+                    "mode": "custom",
+                    "start_date": "2026-01-04",
+                    "end_date": "2026-01-31",
+                }
+            }
+        )
+    )
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+
+    monkeypatch.setattr(component, "_open_panel", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_custom_tab", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_current_range_matches", AsyncMock(return_value=False), raising=False)
+    monkeypatch.setattr(component, "_navigate_left_to_month", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_navigate_right_to_month", AsyncMock(return_value=False), raising=False)
+    monkeypatch.setattr(component, "_select_start_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_input", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_boundary_active", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_wait_input_value", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_popup_state_has_valid_two_page_months", lambda state: True, raising=False)
+    monkeypatch.setattr(
+        component,
+        "_popup_state",
+        AsyncMock(
+            side_effect=[
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 1)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 2)),
+                    active_boundary="start",
+                ),
+                RangePopupState(
+                    left=RangePaneState(panel=None, body=None, month=(2026, 1)),
+                    right=RangePaneState(panel=None, body=None, month=(2026, 2)),
+                    active_boundary="end",
+                ),
+            ]
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(component, "_select_start_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_select_end_date_from_state", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(component, "_confirm_range_applied", AsyncMock(return_value=True), raising=False)
+
+    result = await component.run(page, DateOption.LAST_30_DAYS)
+
+    assert result.success is True
+    component._select_custom_tab.assert_awaited_once_with(page)
     component._select_start_input.assert_awaited_once_with(page)
     component._select_end_input.assert_awaited_once_with(page)
 

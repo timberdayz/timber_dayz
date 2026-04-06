@@ -45,8 +45,8 @@ DATA_DOMAIN_EXPORT_MAP = {
         "orders": "TiktokExport",  # TikTok 使用通用导出
         "products": "TiktokProductsExport",
         "finance": "TiktokExport",
-        "analytics": "TiktokExport",
-        "services": "TiktokExport",
+        "analytics": "TiktokAnalyticsExport",
+        "services": "TiktokServicesAgentExport",
     },
     "miaoshou": {
         "orders": "MiaoshouOrdersShopeeExport",
@@ -259,6 +259,12 @@ class PythonComponentAdapter:
             domain_map = DATA_DOMAIN_EXPORT_MAP.get(self.platform, {})
             export_class_name = domain_map.get(data_domain)
             module_name = f"{data_domain}_export"
+
+            if self.platform == "tiktok":
+                if data_domain == "analytics":
+                    module_name = "analytics_export"
+                elif data_domain == "services":
+                    module_name = "services_agent_export"
 
             if self.platform == "miaoshou" and data_domain == "orders":
                 subtype = str(

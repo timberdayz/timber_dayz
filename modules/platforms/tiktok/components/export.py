@@ -38,13 +38,23 @@ class TiktokExport(ExportComponent):
             return "services"
         return "unknown"
 
-    def _write_manifest(self, target: Path, cfg: dict, account_label: str, shop_name: str, data_type: str) -> None:
+    def _write_manifest(
+        self,
+        target: Path,
+        cfg: dict,
+        account_label: str,
+        shop_name: str,
+        data_type: str,
+        *,
+        subtype: str | None = None,
+    ) -> None:
         meta = {
             "platform": getattr(self.ctx, "platform", "tiktok"),
             "account_label": account_label,
             "shop_name": shop_name,
             "region": (self.ctx.config or {}).get("shop_region") or (self.ctx.account or {}).get("shop_region"),
             "data_type": data_type,
+            "subtype": subtype,
             "granularity": (cfg or {}).get("granularity"),
             "file_path": str(target),
         }
@@ -78,6 +88,16 @@ class TiktokExport(ExportComponent):
             except Exception:
                 continue
         return False
+
+    def _subtype_from_context(self) -> str | None:
+        cfg = self.ctx.config or {}
+        params = cfg.get("params") or {}
+        subtype = str(
+            params.get("sub_domain")
+            or cfg.get("sub_domain")
+            or ""
+        ).strip().lower()
+        return subtype or None
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
         current_url = str(getattr(page, "url", "") or "")
@@ -121,6 +141,7 @@ class TiktokExport(ExportComponent):
             self.ctx,
             data_type=data_type,
             granularity=str(cfg.get("granularity") or "range").lower(),
+            subtype=self._subtype_from_context(),
         )
         out_root.mkdir(parents=True, exist_ok=True)
 

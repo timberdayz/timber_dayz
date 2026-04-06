@@ -6,6 +6,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from backend.routers.component_versions import (
     batch_register_python_components,
@@ -17,9 +18,14 @@ from modules.core.db import ComponentVersion
 
 @pytest_asyncio.fixture
 async def component_version_session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        echo=False,
+        poolclass=StaticPool,
+    )
 
     async with engine.begin() as conn:
+        await conn.exec_driver_sql("ATTACH DATABASE ':memory:' AS core")
         await conn.run_sync(ComponentVersion.__table__.create)
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -128,6 +134,51 @@ async def test_batch_register_uses_shop_switch_as_tiktok_canonical_entry(
     assert names == [
         "tiktok/login",
         "tiktok/shop_switch",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_batch_register_discovers_tiktok_domain_export_entries(
+    component_version_session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        "backend.routers.component_versions.is_active_component_name",
+        lambda name: name
+        in {
+            "tiktok/analytics_export",
+            "tiktok/services_agent_export",
+        },
+    )
+    project_root = tmp_path
+    fake_router_file = project_root / "backend" / "routers" / "component_versions.py"
+    fake_router_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_router_file.write_text("# fake router marker\n", encoding="utf-8")
+    monkeypatch.setattr("backend.routers.component_versions.__file__", str(fake_router_file))
+
+    tiktok_dir = project_root / "modules" / "platforms" / "tiktok" / "components"
+    _write_component(tiktok_dir / "analytics_export.py", "TiktokAnalyticsExport", "export")
+    _write_component(
+        tiktok_dir / "services_agent_export.py",
+        "TiktokServicesAgentExport",
+        "export",
+    )
+
+    response = await batch_register_python_components(
+        request=BatchRegisterRequest(platform="tiktok"),
+        db=component_version_session,
+        http_request=None,
+    )
+
+    result = await component_version_session.execute(select(ComponentVersion))
+    rows = result.scalars().all()
+    names = sorted(v.component_name for v in rows)
+
+    assert response.success is True
+    assert names == [
+        "tiktok/analytics_export",
+        "tiktok/services_agent_export",
     ]
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -119,7 +120,7 @@ async def test_tiktok_export_auto_downloads_for_traffic_after_click() -> None:
         page.download = _FakeDownload("traffic.xlsx")
 
     export_button.click = _click  # type: ignore[method-assign]
-    page.locators['button:has-text("导出")'] = export_button
+    page.locators[component._export_button_selectors()[0]] = export_button
 
     result = await component.run(page)
 
@@ -140,7 +141,7 @@ async def test_tiktok_export_auto_downloads_for_products_after_click() -> None:
         page.download = _FakeDownload("products.xlsx")
 
     export_button.click = _click  # type: ignore[method-assign]
-    page.locators['button:has-text("导出")'] = export_button
+    page.locators[component._export_button_selectors()[0]] = export_button
 
     result = await component.run(page)
 
@@ -154,21 +155,49 @@ async def test_tiktok_export_auto_downloads_for_products_after_click() -> None:
 async def test_tiktok_export_service_analytics_switches_chat_detail_before_auto_download() -> None:
     component = TiktokExport(_ctx({"shop_region": "SG", "downloads_path": "temp/tiktok-export-test"}))
     page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=SG")
-    chat_tab = _FakeLocator(visible=True)
-    export_button = _FakeLocator(visible=True)
+    call_index = {"value": 0}
 
-    async def _click_export(timeout: int | None = None) -> None:
-        export_button.clicked += 1
-        page.download = _FakeDownload("services.xlsx")
+    async def _click_first(page_obj, selectors, *, timeout=5000):  # noqa: ARG001
+        call_index["value"] += 1
+        if call_index["value"] == 2:
+            page.download = _FakeDownload("services.xlsx")
+        return True
 
-    export_button.click = _click_export  # type: ignore[method-assign]
-    page.locators['button:has-text("聊天详情")'] = chat_tab
-    page.locators['button:has-text("导出")'] = export_button
+    component._click_first = AsyncMock(side_effect=_click_first)  # type: ignore[method-assign]
 
     result = await component.run(page)
 
     assert result.success is True
-    assert chat_tab.clicked == 1
-    assert export_button.clicked == 1
+    assert component._click_first.await_count == 2  # type: ignore[attr-defined]
     assert result.file_path is not None
     assert result.file_path.endswith("services.xlsx")
+
+
+@pytest.mark.asyncio
+async def test_tiktok_export_uses_subtype_in_standard_output_root_for_services_when_config_present() -> None:
+    component = TiktokExport(
+        _ctx(
+            {
+                "shop_region": "SG",
+                "downloads_path": "temp/tiktok-export-test",
+                "granularity": "monthly",
+                "sub_domain": "agent",
+            }
+        )
+    )
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=SG")
+    call_index = {"value": 0}
+
+    async def _click_first(page_obj, selectors, *, timeout=5000):  # noqa: ARG001
+        call_index["value"] += 1
+        if call_index["value"] == 2:
+            page.download = _FakeDownload("services-agent.xlsx")
+        return True
+
+    component._click_first = AsyncMock(side_effect=_click_first)  # type: ignore[method-assign]
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert result.file_path is not None
+    assert "/services/agent/monthly/" in str(result.file_path).replace("\\", "/")

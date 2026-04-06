@@ -32,7 +32,7 @@ class TiktokDatePicker(DatePickerComponent):
     def _page_kind(self, url: str) -> str | None:
         current = str(url or "")
         if "/compass/data-overview" in current:
-            return "traffic"
+            return "analytics"
         if "/compass/product-analysis" in current:
             return "products"
         if "/compass/service-analytics" in current:
@@ -630,6 +630,26 @@ class TiktokDatePicker(DatePickerComponent):
     async def _select_end_input(self, page: Any) -> bool:
         return await self._focus_range_input(page, "end")
 
+    async def _select_custom_tab(self, page: Any) -> bool:
+        for selector in (
+            "div[role='tab']:has-text('自定义')",
+            "[role='tab']:has-text('自定义')",
+            "button:has-text('自定义')",
+            "text=自定义",
+        ):
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() <= 0:
+                    continue
+                if not await locator.is_visible(timeout=300):
+                    continue
+                await locator.click(timeout=1500)
+                await page.wait_for_timeout(200)
+                return True
+            except Exception:
+                continue
+        return False
+
     def _parse_month_header(self, text: str | None) -> tuple[int, int] | None:
         value = str(text or "").strip()
         if not value:
@@ -1201,25 +1221,72 @@ class TiktokDatePicker(DatePickerComponent):
             return DatePickResult(success=False, message="failed to confirm date range", option=option)
         return DatePickResult(success=True, message="ok", option=option)
 
+    async def _run_analytics_or_services_range(self, page: Any, option: DateOption) -> DatePickResult:
+        start_date, end_date = self._resolve_range_for_context(option)
+        if await self._current_range_matches(page, option):
+            return DatePickResult(success=True, message="ok", option=option)
+
+        if not await self._open_panel(page):
+            return DatePickResult(success=False, message="failed to open date picker panel", option=option)
+        if not await self._select_custom_tab(page):
+            return DatePickResult(success=False, message="failed to open custom date tab", option=option)
+
+        start_value = datetime.strptime(start_date, "%Y-%m-%d")
+        end_value = datetime.strptime(end_date, "%Y-%m-%d")
+        same_month_range = (
+            start_value.year == end_value.year
+            and start_value.month == end_value.month
+        )
+
+        if not await self._select_start_input(page):
+            return DatePickResult(success=False, message="failed to focus start date input", option=option)
+        if not await self._wait_boundary_active(page, "start"):
+            return DatePickResult(success=False, message="failed to activate start date input", option=option)
+        if not await self._navigate_left_to_month(page, start_value.year, start_value.month):
+            return DatePickResult(success=False, message="failed to navigate left page to start month", option=option)
+
+        start_state = await self._popup_state(page)
+        if not self._popup_state_has_valid_two_page_months(start_state):
+            return DatePickResult(success=False, message="invalid two-page calendar state", option=option)
+        if not await self._select_start_date_from_state(start_state, start_value):
+            return DatePickResult(success=False, message="failed to select start day on left page", option=option)
+        if not await self._wait_input_value(page, "start", start_date):
+            return DatePickResult(success=False, message="failed to apply start date", option=option)
+
+        if not await self._select_end_input(page):
+            return DatePickResult(success=False, message="failed to focus end date input", option=option)
+        if not await self._wait_boundary_active(page, "end"):
+            return DatePickResult(success=False, message="failed to activate end date input", option=option)
+        if not same_month_range:
+            if not await self._navigate_right_to_month(page, end_value.year, end_value.month):
+                return DatePickResult(success=False, message="failed to navigate right page to end month", option=option)
+
+        end_state = await self._popup_state(page)
+        if not self._popup_state_has_valid_two_page_months(end_state):
+            return DatePickResult(success=False, message="invalid two-page calendar state", option=option)
+        if not await self._select_end_date_from_state(
+            end_state,
+            start_value=start_value,
+            end_value=end_value,
+        ):
+            return DatePickResult(
+                success=False,
+                message="failed to select end day on left page" if same_month_range else "failed to select end day on right page",
+                option=option,
+            )
+        if not await self._wait_input_value(page, "end", end_date):
+            return DatePickResult(success=False, message="failed to apply end date", option=option)
+        if not await self._confirm_range_applied(page, start_date=start_date, end_date=end_date):
+            return DatePickResult(success=False, message="failed to confirm date range", option=option)
+        return DatePickResult(success=True, message="ok", option=option)
+
     async def run(self, page: Any, option: DateOption) -> DatePickResult:
         kind = self._page_kind(str(getattr(page, "url", "") or ""))
         if kind == "products":
             return await self._run_products_range(page, option)
 
-        if kind not in {"traffic", "services"}:
+        if kind not in {"analytics", "services"}:
             return DatePickResult(success=False, message="unsupported page for shared tiktok date picker", option=option)
 
-        if option not in {DateOption.LAST_7_DAYS, DateOption.LAST_28_DAYS, DateOption.LAST_30_DAYS}:
-            return DatePickResult(success=False, message=f"unsupported quick date option: {option.value}", option=option)
-
         self._current_page_kind = kind
-        if await self._current_option(page) == option:
-            return DatePickResult(success=True, message="ok", option=option)
-
-        if not await self._open_panel(page):
-            return DatePickResult(success=False, message="failed to open date picker panel", option=option)
-        if not await self._apply_quick_option(page, option):
-            return DatePickResult(success=False, message="failed to apply quick date option", option=option)
-        if not await self._confirm_option_applied(page, option):
-            return DatePickResult(success=False, message="failed to confirm quick date option", option=option)
-        return DatePickResult(success=True, message="ok", option=option)
+        return await self._run_analytics_or_services_range(page, option)
