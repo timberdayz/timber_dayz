@@ -79,6 +79,12 @@ export const useFinanceStore = defineStore('finance', {
       error: null
     },
 
+    followInvestmentSettlementDetails: {
+      data: [],
+      loading: false,
+      error: null
+    },
+
     // 逾期预警
     overdueAlert: {
       data: [],
@@ -344,6 +350,12 @@ export const useFinanceStore = defineStore('finance', {
       return response
     },
 
+    async archiveFollowInvestment(id, filters = {}) {
+      const response = await financeApi.archiveFollowInvestment(id)
+      await this.fetchFollowInvestments(filters)
+      return response
+    },
+
     async approveFollowInvestmentSettlement(id) {
       const response = await financeApi.approveFollowInvestmentSettlement(id)
       if (this.followInvestmentSettlement.data?.settlement?.id === id) {
@@ -372,6 +384,21 @@ export const useFinanceStore = defineStore('finance', {
         console.error('鑾峰彇璺熸姇缁撶畻鍙拌处澶辫触:', error)
       } finally {
         this.followInvestmentSettlements.loading = false
+      }
+    },
+
+    async fetchFollowInvestmentSettlementDetails(id) {
+      this.followInvestmentSettlementDetails.loading = true
+      this.followInvestmentSettlementDetails.error = null
+
+      try {
+        const response = await financeApi.getFollowInvestmentSettlementDetails(id)
+        this.followInvestmentSettlementDetails.data = response.data || response || []
+      } catch (error) {
+        this.followInvestmentSettlementDetails.error = error.message
+        console.error('获取结算明细失败:', error)
+      } finally {
+        this.followInvestmentSettlementDetails.loading = false
       }
     },
 
@@ -460,6 +487,7 @@ export const useFinanceStore = defineStore('finance', {
       this.followInvestmentSettlement.data = { settlement: null, details: [] }
       this.followInvestments.data = []
       this.followInvestmentSettlements.data = []
+      this.followInvestmentSettlementDetails.data = []
       this.overdueAlert.data = []
       this.overview.data = {}
       this.cashFlow.data = []
