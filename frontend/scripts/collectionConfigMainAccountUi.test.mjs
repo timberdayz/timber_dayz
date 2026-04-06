@@ -15,6 +15,9 @@ assert.match(viewText, /buildDefaultShopScopes\(form\.platform,\s*form\.main_acc
 assert.match(viewText, /data-testid="collection-config-main-account-filter"/, 'CollectionConfig.vue should expose a main-account filter hook')
 assert.match(viewText, /data-testid="collection-config-main-account-field"/, 'CollectionConfig.vue should expose a dialog main-account field hook')
 assert.match(viewText, /class="full-width-select"/, 'CollectionConfig.vue should apply a full-width select class to avoid collapsed platform/main-account selectors')
+assert.match(viewText, /class="collection-config-editor-dialog"/, 'CollectionConfig.vue should attach a dialog class so the editor can be constrained to viewport height')
+assert.match(viewText, /\.shop-scope-list\s*\{[\s\S]*overflow-y:\s*auto;/, 'CollectionConfig.vue should keep the shop scope list vertically scrollable')
+assert.match(viewText, /:deep\(\.collection-config-editor-dialog\s+\.el-dialog__body\)\s*\{[\s\S]*overflow:\s*hidden;/, 'CollectionConfig.vue should prevent the dialog body from expanding beyond the viewport')
 assert.ok(!viewText.includes('<el-option label="Shopee" value="shopee" />'), 'CollectionConfig.vue should not hardcode platform options in template')
 
 console.log('collectionConfigMainAccountUi.test.mjs passed')

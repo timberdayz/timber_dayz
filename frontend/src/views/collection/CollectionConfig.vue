@@ -205,10 +205,11 @@
       v-model="dialogVisible"
       :title="isEdit ? `编辑${activeGranularityLabel}配置` : `新建${activeGranularityLabel}配置`"
       width="1100px"
+      class="collection-config-editor-dialog"
       destroy-on-close
       data-testid="collection-config-dialog"
     >
-      <el-form ref="formRef" :model="form" :rules="formRules" label-width="110px">
+      <el-form ref="formRef" class="editor-form" :model="form" :rules="formRules" label-width="110px">
         <div class="editor-layout">
           <div class="editor-main">
             <el-form-item label="配置名称" prop="name">
@@ -1174,11 +1175,26 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 340px 1fr;
   gap: 20px;
+  align-items: stretch;
+  min-height: 0;
+  height: 100%;
 }
 
+.editor-form,
 .editor-main,
 .editor-side {
   min-width: 0;
+}
+
+.editor-form,
+.editor-side {
+  height: 100%;
+}
+
+.editor-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .shop-scope-header {
@@ -1198,9 +1214,10 @@ onMounted(() => {
 .shop-scope-list {
   display: flex;
   flex-direction: column;
+  flex: 1;
   gap: 12px;
-  max-height: 62vh;
-  overflow: auto;
+  min-height: 0;
+  overflow-y: auto;
   padding-right: 4px;
 }
 
@@ -1255,6 +1272,28 @@ onMounted(() => {
 
 .dot {
   margin: 0 6px;
+}
+
+:deep(.collection-config-editor-dialog) {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 32px);
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+:deep(.collection-config-editor-dialog .el-dialog__header) {
+  flex-shrink: 0;
+}
+
+:deep(.collection-config-editor-dialog .el-dialog__body) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.collection-config-editor-dialog .el-dialog__footer) {
+  flex-shrink: 0;
 }
 
 @media (max-width: 960px) {
