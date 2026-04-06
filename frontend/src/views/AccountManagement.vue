@@ -187,7 +187,11 @@
               :key="mainAccount.key"
               type="button"
               class="navigator-main-account"
-              :class="{ 'is-active': selectedMainAccountGroupKey === mainAccount.key }"
+              :class="{
+                'is-active': selectedMainAccountGroupKey === mainAccount.key,
+                'has-warning': mainAccount.missingShopIdCount > 0,
+                'has-muted': mainAccount.inactiveShopCount > 0
+              }"
               @click="selectMainAccountGroup(mainAccount.key)"
             >
               <div class="navigator-main-account__top">
@@ -199,6 +203,10 @@
                 <span>启用 {{ mainAccount.activeShopCount }}</span>
                 <span>停用 {{ mainAccount.inactiveShopCount }}</span>
                 <span v-if="mainAccount.missingShopIdCount > 0">缺少店铺ID {{ mainAccount.missingShopIdCount }}</span>
+              </div>
+              <div v-if="mainAccount.missingShopIdCount > 0 || mainAccount.inactiveShopCount > 0" class="navigator-main-account__flags">
+                <el-tag v-if="mainAccount.missingShopIdCount > 0" size="small" type="warning">待补店铺ID</el-tag>
+                <el-tag v-if="mainAccount.inactiveShopCount > 0" size="small" type="info">含停用店铺</el-tag>
               </div>
             </button>
           </section>
@@ -229,11 +237,11 @@
             </div>
 
             <div class="current-main-account-summary__actions">
-              <el-button type="primary" @click="showCreateDialog = true">
+              <el-button type="primary" @click="openCreateDialogForSelectedMainAccount">
                 <el-icon><Plus /></el-icon>
                 添加店铺账号
               </el-button>
-              <el-button @click="showBatchDialog = true">
+              <el-button @click="openBatchDialogForSelectedMainAccount">
                 <el-icon><Files /></el-icon>
                 批量添加
               </el-button>
@@ -273,12 +281,20 @@
                 <div class="workspace-card-title">当前主账号店铺列表</div>
                 <div class="workspace-card-subtitle">仅显示当前主账号下的店铺账号，保留高密度编辑能力</div>
               </div>
-              <el-tag effect="plain">{{ selectedMainAccountShops.length }} 个店铺账号</el-tag>
+              <div class="current-shop-table-toolbar">
+                <el-radio-group v-model="shopQuickFilter" size="small">
+                  <el-radio-button label="all">全部</el-radio-button>
+                  <el-radio-button label="anomalies">异常</el-radio-button>
+                  <el-radio-button label="missing_shop_id">缺少店铺ID</el-radio-button>
+                  <el-radio-button label="disabled">停用</el-radio-button>
+                </el-radio-group>
+                <el-tag effect="plain">{{ filteredSelectedMainAccountShops.length }} / {{ selectedMainAccountShops.length }} 个店铺账号</el-tag>
+              </div>
             </div>
           </template>
 
           <el-table
-            :data="selectedMainAccountShops"
+            :data="filteredSelectedMainAccountShops"
             v-loading="accountsStore.loading"
             class="erp-w-full"
             height="540"
@@ -346,85 +362,6 @@
       </div>
     </div>
 
-    <el-card v-if="false" class="table-card">
-      <el-table 
-        :data="accountsStore.accounts" 
-        v-loading="accountsStore.loading"
-        class="erp-w-full"
-        height="500"
-      >
-        <el-table-column prop="platform" label="平台" width="100" />
-        <el-table-column label="主账号名称" width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ getMainAccountDisplayName(row) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="parent_account" label="主账号ID" width="180" show-overflow-tooltip />
-        <el-table-column prop="account_id" label="店铺账号ID" width="180" show-overflow-tooltip />
-        <el-table-column prop="account_alias" label="店铺别名" width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span v-if="row.account_alias">{{ row.account_alias }}</span>
-            <span v-else class="erp-text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="store_name" label="店铺名称" width="200" show-overflow-tooltip />
-        
-        <!-- ⭐ v4.18.1新增：店铺ID列 -->
-        <el-table-column prop="shop_id" label="平台店铺ID" width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span v-if="row.shop_id">{{ row.shop_id }}</span>
-            <span v-else class="erp-text-muted">-</span>
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="店铺类型" width="100">
-          <template #default="{ row }">
-            <el-tag v-if="row.shop_type === 'local'" type="success" size="small">本地店</el-tag>
-            <el-tag v-else-if="row.shop_type === 'global'" type="warning" size="small">全球店</el-tag>
-            <el-tag v-else type="info" size="small">未设置</el-tag>
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="shop_region" label="店铺区域" width="100" />
-        
-        <el-table-column label="店铺数据域能力" width="200">
-          <template #default="{ row }">
-            <el-tooltip :content="getCapabilitiesText(row.capabilities)" placement="top">
-              <div class="capabilities-tags">
-                <el-tag 
-                  v-for="(enabled, domain) in row.capabilities" 
-                  :key="domain"
-                  :type="enabled ? 'success' : 'info'"
-                  size="small"
-                  class="capability-tag"
-                >
-                  {{ domainLabels[domain] || domain }}
-                </el-tag>
-              </div>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <el-switch 
-              v-model="row.enabled" 
-              @change="handleToggleEnabled(row)"
-              :loading="row._updating"
-            />
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="操作" width="150" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <!-- 创建/编辑对话框 -->
     <el-dialog 
       v-model="showCreateDialog" 
       :title="editingAccount ? '编辑店铺账号' : '添加店铺账号'"
@@ -735,6 +672,8 @@ const editingAccount = ref(null)
 const selectedMainAccountId = ref('')
 const selectedMainAccountGroupKey = ref('')
 
+const shopQuickFilter = ref('all')
+
 // 表单引用
 const accountFormRef = ref(null)
 
@@ -808,6 +747,21 @@ const selectedMainAccountShops = computed(() => {
   return selectedMainAccountSnapshot.value?.shops || []
 })
 
+const filteredSelectedMainAccountShops = computed(() => {
+  const shops = selectedMainAccountShops.value || []
+
+  switch (shopQuickFilter.value) {
+    case 'anomalies':
+      return shops.filter((shop) => !shop.enabled || !String(shop.shop_id || '').trim())
+    case 'missing_shop_id':
+      return shops.filter((shop) => !String(shop.shop_id || '').trim())
+    case 'disabled':
+      return shops.filter((shop) => !shop.enabled)
+    default:
+      return shops
+  }
+})
+
 watch(
   groupedMainAccounts,
   (groups) => {
@@ -818,6 +772,10 @@ watch(
   },
   { immediate: true }
 )
+
+watch(selectedMainAccountGroupKey, () => {
+  shopQuickFilter.value = 'all'
+})
 
 // ==================== 方法 ====================
 
@@ -877,6 +835,54 @@ function getMainAccountDisplayName(account) {
 
 function selectMainAccountGroup(key) {
   selectedMainAccountGroupKey.value = key
+}
+
+function applySelectedMainAccountContextToAccountForm() {
+  if (!selectedMainAccountSnapshot.value) {
+    return
+  }
+
+  const snapshot = selectedMainAccountSnapshot.value
+  Object.assign(accountForm, {
+    parent_account: snapshot.mainAccountId,
+    main_account_name: snapshot.mainAccountName || '',
+    platform: snapshot.platform || accountForm.platform,
+    username: snapshot.loginUsername || accountForm.username,
+  })
+}
+
+function openCreateDialogForSelectedMainAccount() {
+  editingAccount.value = null
+  resetForm()
+  applySelectedMainAccountContextToAccountForm()
+  showCreateDialog.value = true
+}
+
+function resetBatchForm() {
+  Object.assign(batchForm, {
+    parent_account: '',
+    main_account_name: '',
+    platform: 'shopee',
+    username: '',
+    password: '',
+    shops: [{ store_name: '', shop_type: 'local', shop_region: 'SG' }],
+  })
+}
+
+function openBatchDialogForSelectedMainAccount() {
+  resetBatchForm()
+
+  if (selectedMainAccountSnapshot.value) {
+    const snapshot = selectedMainAccountSnapshot.value
+    Object.assign(batchForm, {
+      parent_account: snapshot.mainAccountId,
+      main_account_name: snapshot.mainAccountName || '',
+      platform: snapshot.platform || batchForm.platform,
+      username: snapshot.loginUsername || '',
+    })
+  }
+
+  showBatchDialog.value = true
 }
 
 async function handleDiscoverSelectedMainAccount() {
@@ -1122,14 +1128,7 @@ async function handleBatchCreate() {
     await accountsStore.batchCreate(batchForm)
     showBatchDialog.value = false
     // 重置表单
-    Object.assign(batchForm, {
-      parent_account: '',
-      main_account_name: '',
-      platform: 'shopee',
-      username: '',
-      password: '',
-      shops: [{ store_name: '', shop_type: 'local', shop_region: 'SG' }]
-    })
+    resetBatchForm()
   } catch (error) {
     console.error('批量创建失败:', error)
   }
@@ -1248,6 +1247,15 @@ function getCapabilitiesText(capabilities) {
   box-shadow: 0 10px 26px rgba(64, 158, 255, 0.14);
 }
 
+.navigator-main-account.has-warning {
+  border-color: #f3d19e;
+  background: linear-gradient(180deg, #fffaf2 0%, #ffffff 100%);
+}
+
+.navigator-main-account.has-muted {
+  border-style: dashed;
+}
+
 .navigator-main-account__top {
   display: flex;
   align-items: flex-start;
@@ -1283,6 +1291,13 @@ function getCapabilitiesText(capabilities) {
   color: #606266;
 }
 
+.navigator-main-account__flags {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .current-main-account-summary__header {
   display: flex;
   align-items: flex-start;
@@ -1294,6 +1309,14 @@ function getCapabilitiesText(capabilities) {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 10px;
+}
+
+.current-shop-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -1398,6 +1421,10 @@ function getCapabilitiesText(capabilities) {
   }
 
   .current-main-account-summary__actions {
+    justify-content: flex-start;
+  }
+
+  .current-shop-table-toolbar {
     justify-content: flex-start;
   }
 

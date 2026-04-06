@@ -49,3 +49,37 @@ test('account management no longer keeps the legacy hidden full-table block', ()
     'account management should remove the hidden legacy table block after the grouped layout ships'
   )
 })
+
+test('current main-account actions prefill dialogs from the selected context', () => {
+  assert.equal(
+    source.includes('openCreateDialogForSelectedMainAccount'),
+    true,
+    'account management should expose a selected-main-account create action'
+  )
+
+  assert.equal(
+    source.includes('openBatchDialogForSelectedMainAccount'),
+    true,
+    'account management should expose a selected-main-account batch create action'
+  )
+})
+
+test('account management highlights navigator anomalies and exposes quick shop filters', () => {
+  assert.equal(
+    source.includes("'has-warning': mainAccount.missingShopIdCount > 0"),
+    true,
+    'account management should visually highlight main accounts with missing shop ids'
+  )
+
+  assert.equal(
+    source.includes('shopQuickFilter'),
+    true,
+    'account management should expose a quick filter state for the selected shop table'
+  )
+
+  assert.equal(
+    source.includes('filteredSelectedMainAccountShops'),
+    true,
+    'account management should derive a filtered shop list for the selected main account'
+  )
+})
