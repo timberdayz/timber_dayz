@@ -12,313 +12,57 @@ v4.6.0新增：独立的数据同步系统
       <p>管理表头模板，支持编辑、删除、查看详情</p>
     </div>
 
-    <!-- 模板数据治理看板 -->
-    <el-card class="governance-card" style="margin-bottom: 20px;">
+    <TemplateGovernancePanel
+      :detailed-coverage="detailedCoverage"
+      :loading="governanceLoading"
+      :active-tab="activeTab"
+      :get-platform-label="getPlatformLabel"
+      @refresh="loadGovernanceStats"
+      @create-missing="handleCreateTemplateForMissing"
+      @update-template="handleUpdateTemplate"
+      @update:active-tab="activeTab = $event"
+    />
+
+    <el-card class="template-builder-card" style="margin-bottom: 20px;">
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>📊 模板数据治理看板</span>
-          <el-button size="small" @click="loadGovernanceStats" :loading="governanceLoading">
-            <el-icon><Refresh /></el-icon>
-            刷新统计
+          <span>模板工作区</span>
+          <el-button text type="primary" @click="showTemplateBuilder = !showTemplateBuilder">
+            {{ showTemplateBuilder ? '收起工作区' : '展开工作区' }}
           </el-button>
         </div>
       </template>
-      
-      <!-- 统计概览 -->
-      <div class="governance-stats">
-        <div class="stat-item">
-          <div class="stat-icon" style="background: #409EFF;">
-            <el-icon><Document /></el-icon>
-          </div>
-          <div class="stat-content">
-            <div class="stat-label">模板覆盖度</div>
-            <div class="stat-value">{{ detailedCoverage.summary?.coverage_percentage || 0 }}%</div>
-          </div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-icon" style="background: #67C23A;">
-            <el-icon><Check /></el-icon>
-          </div>
-          <div class="stat-content">
-            <div class="stat-label">已覆盖</div>
-            <div class="stat-value">{{ detailedCoverage.summary?.covered_count || 0 }}</div>
-          </div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-icon" style="background: #F56C6C;">
-            <el-icon><Warning /></el-icon>
-          </div>
-          <div class="stat-content">
-            <div class="stat-label">缺少模板</div>
-            <div class="stat-value">{{ detailedCoverage.summary?.missing_count || 0 }}</div>
-          </div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-icon" style="background: #E6A23C;">
-            <el-icon><Refresh /></el-icon>
-          </div>
-          <div class="stat-content">
-            <div class="stat-label">需要更新</div>
-            <div class="stat-value">{{ detailedCoverage.summary?.needs_update_count || 0 }}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 详细覆盖情况表格 -->
-      <el-tabs v-model="activeTab" style="margin-top: 20px;">
-        <el-tab-pane label="已覆盖模板" name="covered">
-          <el-table :data="detailedCoverage.covered || []" stripe border max-height="400">
-            <el-table-column prop="platform" label="平台" width="100">
-              <template #default="{ row }">
-                {{ getPlatformLabel(row.platform) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="domain" label="数据域" width="100" />
-            <el-table-column prop="sub_domain" label="子类型" width="120" />
-            <el-table-column prop="granularity" label="粒度" width="100" />
-            <el-table-column prop="template_name" label="模板名称" min-width="200" />
-            <el-table-column prop="template_version" label="版本" width="80" />
-            <el-table-column prop="file_count" label="文件数" width="100" align="center" />
-            <el-table-column label="状态" width="120">
-              <template #default="{ row }">
-                <el-tag v-if="row.needs_update" type="warning" size="small">
-                  <el-icon><Refresh /></el-icon>
-                  需要更新
-                </el-tag>
-                <el-tag v-else type="success" size="small">
-                  <el-icon><Check /></el-icon>
-                  正常
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="update_reason" label="更新原因" min-width="200" show-overflow-tooltip />
-          </el-table>
-        </el-tab-pane>
-        
-        <el-tab-pane label="缺少模板" name="missing">
-          <el-table :data="detailedCoverage.missing || []" stripe border max-height="400">
-            <el-table-column prop="platform" label="平台" width="100">
-              <template #default="{ row }">
-                {{ getPlatformLabel(row.platform) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="domain" label="数据域" width="100" />
-            <el-table-column prop="sub_domain" label="子类型" width="120" />
-            <el-table-column prop="granularity" label="粒度" width="100" />
-            <el-table-column prop="file_count" label="待同步文件数" width="120" align="center" />
-            <el-table-column label="操作" width="150" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" type="primary" @click="handleCreateTemplateForMissing(row)">
-                  <el-icon><Plus /></el-icon>
-                  创建模板
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-        
-        <el-tab-pane label="需要更新" name="needs_update">
-          <el-table :data="detailedCoverage.needs_update || []" stripe border max-height="400">
-            <el-table-column prop="platform" label="平台" width="100">
-              <template #default="{ row }">
-                {{ getPlatformLabel(row.platform) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="domain" label="数据域" width="100" />
-            <el-table-column prop="sub_domain" label="子类型" width="120" />
-            <el-table-column prop="granularity" label="粒度" width="100" />
-            <el-table-column prop="template_name" label="模板名称" min-width="200" />
-            <el-table-column prop="file_count" label="文件数" width="100" align="center" />
-            <el-table-column prop="update_reason" label="更新原因" min-width="200" show-overflow-tooltip />
-            <el-table-column label="操作" width="150" fixed="right">
-              <template #default="{ row }">
-                <el-button size="small" type="warning" @click="handleUpdateTemplate(row)">
-                  <el-icon><Edit /></el-icon>
-                  更新模板
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-      </el-tabs>
+      <p style="margin: 0; color: #606266; font-size: 13px;">
+        用于缺少模板时创建模板，或在需要时进入旧版手动预览与保存路径。
+      </p>
     </el-card>
 
-    <!-- 文件选择区域 -->
-    <el-card class="file-selection-card" style="margin-bottom: 20px;">
-      <template #header>
-        <span>📁 文件选择</span>
-      </template>
-      <el-form :inline="true" :model="fileFilters">
-        <el-form-item label="选择平台">
-          <el-select v-model="fileFilters.platform" placeholder="全部平台" clearable style="width: 150px;" @change="handlePlatformChange">
-            <el-option
-              v-for="platform in availablePlatforms"
-              :key="platform"
-              :label="getPlatformLabel(platform)"
-              :value="platform"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="选择数据域">
-          <el-select v-model="fileFilters.domain" placeholder="全部数据域" clearable style="width: 150px;" @change="handleDomainChange">
-            <el-option label="订单" value="orders" />
-            <el-option label="产品" value="products" />
-            <el-option label="流量" value="analytics" />
-            <el-option label="服务" value="services" />
-            <el-option label="库存" value="inventory" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="选择子类型" v-if="availableSubDomains.length > 0">
-          <el-select v-model="fileFilters.sub_domain" placeholder="全部子类型" clearable style="width: 200px;">
-            <el-option v-for="sub in availableSubDomains" :key="sub.value" :label="sub.label" :value="sub.value" />
-          </el-select>
-          <el-tooltip content="子类型用于区分相同数据域下的不同数据来源" placement="top">
-            <el-icon style="margin-left: 5px; color: #909399;"><QuestionFilled /></el-icon>
-          </el-tooltip>
-        </el-form-item>
-        <el-form-item label="选择粒度">
-          <el-select v-model="fileFilters.granularity" placeholder="全部粒度" clearable style="width: 150px;">
-            <el-option label="日度" value="daily" />
-            <el-option label="周度" value="weekly" />
-            <el-option label="月度" value="monthly" />
-          </el-select>
-          <el-tooltip content="时序数据:需要数据中包含日期字段" placement="top">
-            <el-icon style="margin-left: 5px; color: #909399;"><QuestionFilled /></el-icon>
-          </el-tooltip>
-        </el-form-item>
-        <el-form-item label="选择文件">
-          <el-select v-model="selectedFileId" placeholder="请选择文件" clearable filterable style="width: 400px;" @change="handleFileChange">
-            <el-option
-              v-for="file in availableFiles"
-              :key="file.id"
-              :label="file.file_name"
-              :value="file.id"
-            />
-          </el-select>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <!-- 文件详情区域 -->
-    <el-card v-if="selectedFileId" class="file-info-card" style="margin-bottom: 20px;">
-      <template #header>
-        <span>📋 文件详情</span>
-      </template>
-      <el-descriptions :column="3" border>
-        <el-descriptions-item label="文件名">
-          {{ fileInfo.file_name || 'N/A' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="平台">
-          {{ fileInfo.platform || 'N/A' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="数据域">
-          {{ fileInfo.domain || 'N/A' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="粒度">
-          {{ fileInfo.granularity || 'N/A' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="子类型">
-          {{ fileInfo.sub_domain || 'N/A' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="可用模板">
-          <el-tag v-if="fileInfo.has_template" type="success" size="small">
-            <el-icon><Check /></el-icon>
-            有模板 ({{ fileInfo.template_name }})
-          </el-tag>
-          <el-tag v-else type="warning" size="small">
-            <el-icon><Warning /></el-icon>
-            无可用模板
-          </el-tag>
-        </el-descriptions-item>
-      </el-descriptions>
-    </el-card>
-
-    <!-- 数据预览区域 -->
-    <el-card v-if="selectedFileId" class="preview-card" style="margin-bottom: 20px;">
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>📊 数据预览 ({{ previewData.length }} 行 × {{ headerColumns.length }} 列)</span>
-          <div>
-            <el-input-number
-              v-model="headerRow"
-              :min="0"
-              :max="10"
-              :step="1"
-              controls-position="right"
-              style="width: 150px; margin-right: 10px;"
-            />
-            <span style="margin-right: 10px;">表头行 (0=Excel第1行)</span>
-            <el-button type="primary" @click="handlePreview" :loading="loadingPreview">
-              <el-icon><View /></el-icon>
-              预览数据
-            </el-button>
-            <el-button v-if="previewData.length > 0" @click="handleRepreview" :loading="loadingPreview">
-              <el-icon><Refresh /></el-icon>
-              重新预览
-            </el-button>
-          </div>
-        </div>
-      </template>
-      <div v-if="previewData.length > 0" class="preview-table-container">
-        <el-table
-          :data="previewData"
-          stripe
-          border
-          size="small"
-          style="width: max-content; min-width: 100%"
-        >
-          <el-table-column
-            v-for="(column, index) in headerColumns"
-            :key="index"
-            :prop="column"
-            :label="column"
-            width="150"
-            min-width="120"
-            show-overflow-tooltip
-            :fixed="index === 0 ? 'left' : false"
-          />
-        </el-table>
-      </div>
-      <el-empty v-else description="请选择表头行并点击预览数据" :image-size="100" />
-    </el-card>
-
-    <!-- 原始表头字段列表区域 -->
-    <el-card v-if="headerColumns.length > 0" class="header-columns-card" style="margin-bottom: 20px;">
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>📋 原始表头字段列表 ({{ headerColumns.length }} 个字段)</span>
-          <el-button type="primary" @click="handleSaveTemplate" :loading="savingTemplate" :disabled="headerColumns.length === 0 || deduplicationFields.length === 0">
-            <el-icon><Document /></el-icon>
-            保存为模板
-          </el-button>
-        </div>
-      </template>
-      <el-table :data="headerColumnsWithSamples" stripe border>
-        <el-table-column label="序号" type="index" width="60" align="center" />
-        <el-table-column label="原始表头字段" min-width="200">
-          <template #default="{ row }">
-            <div style="font-weight: bold; color: #303133;">{{ row.field }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="示例数据" min-width="200">
-          <template #default="{ row }">
-            <div v-if="row.sample" style="font-size: 12px; color: #909399; font-style: italic; padding: 4px 8px; background: #f5f7fa; border-radius: 4px;">
-              {{ row.sample }}
-            </div>
-            <span v-else style="color: #c0c4cc;">暂无数据</span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <!-- 核心字段选择器（v4.14.0新增） -->
-    <DeduplicationFieldsSelector
-      v-if="headerColumns.length > 0"
-      :available-fields="headerColumns"
-      :data-domain="fileFilters.domain"
-      :sub-domain="fileFilters.sub_domain"
-      @update:selectedFields="handleDeduplicationFieldsChange"
+    <TemplateBuilderWorkspace
+      v-show="showTemplateBuilder && !isCreateWorkbenchVisible"
+      :file-filters="fileFilters"
+      :available-platforms="availablePlatforms"
+      :available-sub-domains="availableSubDomains"
+      :get-platform-label="getPlatformLabel"
+      :available-files="availableFiles"
+      :selected-file-id="selectedFileId"
+      :file-info="fileInfo"
+      :header-row="headerRow"
+      :preview-data="previewData"
+      :header-columns="headerColumns"
+      :header-columns-with-samples="headerColumnsWithSamples"
+      :loading-preview="loadingPreview"
+      :saving-template="savingTemplate"
+      :deduplication-fields="deduplicationFields"
+      @platform-change="handlePlatformChange"
+      @domain-change="handleDomainChange"
+      @file-change="handleFileChange"
+      @preview="handlePreview"
+      @repreview="handleRepreview"
+      @save-template="handleSaveTemplate"
+      @deduplication-fields-change="handleDeduplicationFieldsChange"
       @validation-change="handleValidationChange"
+      @update:selectedFileId="selectedFileId = $event"
+      @update:headerRow="headerRow = $event"
     />
 
     <!-- 筛选器 -->
@@ -435,21 +179,68 @@ v4.6.0新增：独立的数据同步系统
         </el-table-column>
       </el-table>
     </el-card>
+
+    <TemplateUpdateWorkbenchDrawer
+      :visible="isWorkbenchVisible"
+      :context="updateWorkbenchContext"
+      @save="handleWorkbenchSave"
+      @update:visible="isWorkbenchVisible = $event"
+      @close="closeTemplateUpdateWorkbench"
+    />
+
+    <TemplateCreateWorkbenchDrawer
+      :visible="isCreateWorkbenchVisible"
+      :context="createWorkbenchContext"
+      :file-filters="fileFilters"
+      :available-platforms="availablePlatforms"
+      :available-sub-domains="availableSubDomains"
+      :get-platform-label="getPlatformLabel"
+      :available-files="availableFiles"
+      :selected-file-id="selectedFileId"
+      :file-info="fileInfo"
+      :header-row="headerRow"
+      :preview-data="previewData"
+      :header-columns="headerColumns"
+      :header-columns-with-samples="headerColumnsWithSamples"
+      :loading-preview="loadingPreview"
+      :saving-template="savingTemplate"
+      :deduplication-fields="deduplicationFields"
+      @platform-change="handlePlatformChange"
+      @domain-change="handleDomainChange"
+      @file-change="handleFileChange"
+      @preview="handlePreview"
+      @repreview="handleRepreview"
+      @save-template="handleSaveTemplate"
+      @deduplication-fields-change="handleDeduplicationFieldsChange"
+      @validation-change="handleValidationChange"
+      @update:selectedFileId="selectedFileId = $event"
+      @update:headerRow="headerRow = $event"
+      @update:visible="isCreateWorkbenchVisible = $event"
+      @close="closeTemplateCreateWorkbench"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { View, Refresh, Search, Delete, Check, Warning, Document, QuestionFilled, Plus, Edit } from '@element-plus/icons-vue'
+import { View, Refresh, Search, Delete, Check, Warning, Document } from '@element-plus/icons-vue'
 import api from '@/api'
-import DeduplicationFieldsSelector from '@/components/DeduplicationFieldsSelector.vue'
+import TemplateBuilderWorkspace from '@/components/dataSync/TemplateBuilderWorkspace.vue'
+import TemplateCreateWorkbenchDrawer from '@/components/dataSync/TemplateCreateWorkbenchDrawer.vue'
+import TemplateGovernancePanel from '@/components/dataSync/TemplateGovernancePanel.vue'
+import TemplateUpdateWorkbenchDrawer from '@/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
 
 // 状态
 const loading = ref(false)
 const loadingPreview = ref(false)
 const savingTemplate = ref(false)
 const governanceLoading = ref(false)
+const isWorkbenchVisible = ref(false)
+const isCreateWorkbenchVisible = ref(false)
+const showTemplateBuilder = ref(false)
+const createWorkbenchContext = ref(null)
+const updateWorkbenchContext = ref(null)
 const templates = ref([])
 const availablePlatforms = ref([])
 const filters = ref({
@@ -575,7 +366,41 @@ const loadGovernanceStats = async () => {
 }
 
 // 为缺少模板的组合创建模板
+const closeTemplateUpdateWorkbench = () => {
+  isWorkbenchVisible.value = false
+}
+
+const closeTemplateCreateWorkbench = () => {
+  isCreateWorkbenchVisible.value = false
+}
+
+const openTemplateUpdateWorkbench = async (row) => {
+  const templateId = row.template_id || row.id || null
+  const template = templates.value.find(item => item.id === templateId) || row
+  updateWorkbenchContext.value = {
+    template,
+    row
+  }
+
+  if (templateId) {
+    try {
+      const context = await api.getTemplateUpdateContext(templateId, row.sample_file_id || null)
+      updateWorkbenchContext.value = {
+        ...updateWorkbenchContext.value,
+        context
+      }
+    } catch (error) {
+      console.error('加载模板更新上下文失败:', error)
+    }
+  }
+
+  isWorkbenchVisible.value = true
+}
+
 const handleCreateTemplateForMissing = (row) => {
+  showTemplateBuilder.value = true
+  createWorkbenchContext.value = row
+  isCreateWorkbenchVisible.value = true
   // 设置文件筛选条件
   fileFilters.value.platform = row.platform
   fileFilters.value.domain = row.domain
@@ -598,6 +423,8 @@ const handleCreateTemplateForMissing = (row) => {
 
 // 更新需要更新的模板
 const handleUpdateTemplate = (row) => {
+  showTemplateBuilder.value = true
+  openTemplateUpdateWorkbench(row)
   // 设置文件筛选条件
   fileFilters.value.platform = row.platform
   fileFilters.value.domain = row.domain
@@ -721,6 +548,44 @@ const handleRepreview = () => {
 }
 
 // 保存模板
+const handleWorkbenchSave = async ({ deduplicationFields: selectedFields }) => {
+  const context = updateWorkbenchContext.value?.context
+  const template = context?.template
+
+  if (!template || !context?.current_header_columns?.length) {
+    ElMessage.warning('当前缺少模板或表头上下文，无法保存')
+    return
+  }
+
+  savingTemplate.value = true
+  try {
+    const result = await api.saveTemplate({
+      platform: template.platform,
+      dataDomain: template.data_domain,
+      subDomain: template.sub_domain,
+      granularity: template.granularity,
+      headerRow: template.header_row ?? 0,
+      headerColumns: context.current_header_columns,
+      deduplicationFields: selectedFields
+    })
+
+    if (result && (result.success || result.template_id)) {
+      ElMessage.success(result.message || '模板更新成功')
+      isWorkbenchVisible.value = false
+      await loadTemplates()
+      await loadGovernanceStats()
+      await loadAvailableFiles()
+    } else {
+      ElMessage.error(result?.message || '模板更新失败')
+    }
+  } catch (error) {
+    console.error('模板更新失败:', error)
+    ElMessage.error(error.message || '模板更新失败')
+  } finally {
+    savingTemplate.value = false
+  }
+}
+
 const handleSaveTemplate = async () => {
   if (!selectedFileId.value || headerColumns.value.length === 0) {
     ElMessage.warning('请先预览文件数据')

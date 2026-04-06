@@ -23,6 +23,80 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+async def _load_file_update_preview(
+    db: AsyncSession,
+    file_id: int,
+    header_row: int,
+) -> Dict[str, Any]:
+    """Load current file header/sample context for template update review."""
+    import asyncio
+    from backend.services.excel_parser import ExcelParser
+    from modules.core.db import CatalogFile
+    from modules.core.path_manager import to_absolute_path
+
+    file_result = await db.execute(
+        select(CatalogFile).where(CatalogFile.id == file_id)
+    )
+    catalog_file = file_result.scalar_one_or_none()
+
+    if not catalog_file:
+        raise ValueError(f"file_id={file_id} 对应的文件不存在")
+
+    file_path = to_absolute_path(catalog_file.file_path)
+    loop = asyncio.get_running_loop()
+    file_exists = await loop.run_in_executor(None, lambda: file_path.exists())
+    if not file_exists:
+        raise ValueError(f"文件不存在: {catalog_file.file_path}")
+
+    df = await loop.run_in_executor(
+        None,
+        ExcelParser.read_excel,
+        file_path,
+        header_row,
+        50,
+    )
+    df.columns = [str(col).strip() for col in df.columns]
+    df = df.dropna(how="all").fillna("")
+
+    header_columns = df.columns.tolist()
+    sample_data: Dict[str, str] = {}
+    if len(df) > 0:
+        first_row = df.iloc[0]
+        for col in header_columns:
+            sample_data[col] = str(first_row[col]) if first_row[col] is not None else ""
+
+    return {
+        "file": {
+            "id": catalog_file.id,
+            "file_name": catalog_file.file_name,
+            "platform": catalog_file.platform_code,
+            "domain": catalog_file.data_domain,
+            "granularity": catalog_file.granularity,
+            "sub_domain": catalog_file.sub_domain,
+        },
+        "header_columns": header_columns,
+        "sample_data": sample_data,
+        "preview_data": df.head(20).to_dict("records"),
+    }
+
+
+def _split_existing_deduplication_fields(
+    existing_fields: list[str],
+    current_header_columns: list[str],
+) -> tuple[list[str], list[str]]:
+    current_lookup = {str(field).lower(): field for field in current_header_columns}
+    available: list[str] = []
+    missing: list[str] = []
+
+    for field in existing_fields:
+        if str(field).lower() in current_lookup:
+            available.append(field)
+        else:
+            missing.append(field)
+
+    return available, missing
+
+
 @router.get("/dictionary")
 async def get_field_dictionary(
     data_domain: str = None,
@@ -857,6 +931,149 @@ async def get_default_deduplication_fields(
         )
 
 
+@router.get("/templates/{template_id}/update-context")
+async def get_template_update_context(
+    template_id: int,
+    file_id: Optional[int] = Query(None, description="用于更新模板的候选文件ID"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """Return template update context for the dedicated update workbench."""
+    from backend.services.deduplication_fields_config import (
+        get_default_deduplication_fields as get_default_deduplication_fields_config,
+    )
+    from backend.services.template_matcher import get_template_matcher
+    from modules.core.db import FieldMappingTemplate
+
+    try:
+        template_result = await db.execute(
+            select(FieldMappingTemplate).where(FieldMappingTemplate.id == template_id)
+        )
+        template = template_result.scalar_one_or_none()
+        if not template:
+            return error_response(
+                code=ErrorCode.NOT_FOUND,
+                message="模板不存在",
+                error_type=get_error_type(ErrorCode.NOT_FOUND),
+                detail=f"模板ID {template_id} 不存在",
+                recovery_suggestion="请检查模板ID是否正确",
+                status_code=404,
+            )
+
+        template_header_columns = template.header_columns or []
+        template_deduplication_fields = template.deduplication_fields or []
+
+        response_data: Dict[str, Any] = {
+            "template": {
+                "id": template.id,
+                "platform": template.platform,
+                "data_domain": template.data_domain,
+                "granularity": template.granularity,
+                "sub_domain": template.sub_domain,
+                "header_row": template.header_row or 0,
+                "template_name": template.template_name,
+                "version": template.version,
+                "status": template.status,
+                "field_count": template.field_count or len(template_header_columns),
+                "deduplication_fields": template_deduplication_fields,
+            },
+            "template_header_columns": template_header_columns,
+            "current_file": None,
+            "current_header_columns": [],
+            "sample_data": {},
+            "preview_data": [],
+            "header_changes": {
+                "detected": False,
+                "added_fields": [],
+                "removed_fields": [],
+                "match_rate": 100.0,
+                "is_exact_match": True,
+                "template_columns": template_header_columns,
+                "current_columns": template_header_columns,
+            },
+            "match_rate": 100.0,
+            "added_fields": [],
+            "removed_fields": [],
+            "existing_deduplication_fields_available": [],
+            "existing_deduplication_fields_missing": [],
+            "recommended_deduplication_fields": [],
+        }
+
+        if file_id is not None:
+            file_preview = await _load_file_update_preview(
+                db,
+                file_id,
+                template.header_row or 0,
+            )
+            current_header_columns = file_preview["header_columns"]
+            matcher = get_template_matcher(db)
+            header_changes = await matcher.detect_header_changes(
+                template_id,
+                current_header_columns,
+            )
+            current_lookup = {str(field).lower(): field for field in current_header_columns}
+            template_lookup = {str(field).lower(): field for field in template_header_columns}
+            added_fields = [
+                field for field in current_header_columns if str(field).lower() not in template_lookup
+            ]
+            removed_fields = [
+                field for field in template_header_columns if str(field).lower() not in current_lookup
+            ]
+            available_fields, missing_fields = _split_existing_deduplication_fields(
+                template_deduplication_fields,
+                current_header_columns,
+            )
+            default_fields = get_default_deduplication_fields_config(
+                template.data_domain,
+                template.sub_domain,
+            )
+            recommended_fields = [
+                field for field in default_fields if str(field).lower() in current_lookup
+            ]
+            header_changes["added_fields"] = added_fields
+            header_changes["removed_fields"] = removed_fields
+
+            response_data.update(
+                {
+                    "current_file": file_preview["file"],
+                    "current_header_columns": current_header_columns,
+                    "sample_data": file_preview.get("sample_data", {}),
+                    "preview_data": file_preview.get("preview_data", []),
+                    "header_changes": header_changes,
+                    "match_rate": header_changes.get("match_rate", 0.0),
+                    "added_fields": added_fields,
+                    "removed_fields": removed_fields,
+                    "existing_deduplication_fields_available": available_fields,
+                    "existing_deduplication_fields_missing": missing_fields,
+                    "recommended_deduplication_fields": recommended_fields,
+                }
+            )
+
+        return success_response(
+            data=response_data,
+            message="获取模板更新上下文成功",
+        )
+    except ValueError as e:
+        logger.error(f"获取模板更新上下文失败(参数错误): {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATA_VALIDATION_FAILED,
+            message="获取模板更新上下文失败",
+            error_type=get_error_type(ErrorCode.DATA_VALIDATION_FAILED),
+            detail=str(e),
+            recovery_suggestion="请检查模板和候选文件是否存在",
+            status_code=400,
+        )
+    except Exception as e:
+        logger.error(f"获取模板更新上下文失败: {e}", exc_info=True)
+        return error_response(
+            code=ErrorCode.DATABASE_QUERY_ERROR,
+            message="获取模板更新上下文失败",
+            error_type=get_error_type(ErrorCode.DATABASE_QUERY_ERROR),
+            detail=str(e),
+            recovery_suggestion="请检查数据库连接或候选文件状态",
+            status_code=500,
+        )
+
+
 @router.get("/templates/list")
 async def list_mapping_templates(
     platform: Optional[str] = Query(None, description="平台代码"),
@@ -1070,4 +1287,3 @@ async def detect_header_changes(
             recovery_suggestion="请检查数据库连接和权限,或联系系统管理员",
             status_code=500
         )
-

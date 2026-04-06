@@ -238,7 +238,8 @@ class FieldMappingTemplateService:
                     "template_name": template.template_name,
                     "version": template.version,
                     "field_count": template.field_count or len(header_columns),
-                    "status": template.status
+                    "status": template.status,
+                    "deduplication_fields": template.deduplication_fields or [],
                 },
                 "header_columns": header_columns  # v4.6.0:返回原始表头字段列表
             }
@@ -358,4 +359,3 @@ class FieldMappingTemplateService:
 def get_template_service(db: Session) -> FieldMappingTemplateService:
     """获取模板服务实例"""
     return FieldMappingTemplateService(db)
-
