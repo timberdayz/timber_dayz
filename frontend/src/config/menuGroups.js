@@ -30,7 +30,7 @@ export const menuGroups = [
     defaultExpanded: true,
     badge: 'core',  // 核心功能标识
     items: [
-      '/cloud-sync',             // 云端同步管理
+      '/cloud-sync',             // B类云端追平
       '/collection-config',      // 采集配置
       '/collection-coverage-audit', // 采集覆盖率巡检
       '/collection-tasks',       // 采集任务

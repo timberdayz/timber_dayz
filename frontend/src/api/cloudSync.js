@@ -1,6 +1,26 @@
 import api from './index'
 
 export default {
+  async getOverview() {
+    return await api.get('/cloud-sync/overview')
+  },
+
+  async getRuntime() {
+    return await api.get('/cloud-sync/runtime')
+  },
+
+  async getHistory(params = {}) {
+    return await api.get('/cloud-sync/history', { params })
+  },
+
+  async getSettings() {
+    return await api.get('/cloud-sync/settings')
+  },
+
+  async updateSettings(payload) {
+    return await api.put('/cloud-sync/settings', payload)
+  },
+
   async getHealth() {
     return await api.get('/cloud-sync/health')
   },
@@ -23,6 +43,14 @@ export default {
 
   async triggerSync(payload) {
     return await api.post('/cloud-sync/tasks/trigger', payload)
+  },
+
+  async syncNow() {
+    return await api.post('/cloud-sync/sync-now')
+  },
+
+  async retryFailed() {
+    return await api.post('/cloud-sync/retry-failed')
   },
 
   async retryTask(jobId) {

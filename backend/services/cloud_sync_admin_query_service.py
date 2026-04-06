@@ -13,14 +13,18 @@ from backend.schemas.cloud_sync_admin import (
     CloudSyncCheckpointState,
     CloudSyncDependencyHealth,
     CloudSyncHealthSummary,
+    CloudSyncHistoryRow,
     CloudSyncLatestTaskState,
+    CloudSyncOverviewSummary,
     CloudSyncProjectionState,
     CloudSyncQueueSummary,
+    CloudSyncRuntimeSummary,
+    CloudSyncSettings,
     CloudSyncTableStateRow,
     CloudSyncTaskRow,
     CloudSyncWorkerHealth,
 )
-from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncTask
+from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncTask, SystemConfig
 
 
 def _iso(value) -> str | None:
@@ -55,6 +59,25 @@ def _probe_tcp_target(host: str, port: int, timeout_seconds: float = 1.0) -> tup
 class CloudSyncAdminQueryService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _parse_bool(value: str | None, default: bool = True) -> bool:
+        if value is None:
+            return default
+        return str(value).lower() in {"1", "true", "yes", "on"}
+
+    async def _auto_sync_enabled(self) -> bool:
+        try:
+            result = await self.db.execute(
+                select(SystemConfig).where(SystemConfig.config_key == "cloud_sync_auto_sync_enabled")
+            )
+            record = result.scalars().one_or_none()
+            if record is not None:
+                return self._parse_bool(record.config_value, default=True)
+        except Exception:
+            pass
+
+        return self._parse_bool(os.getenv("CLOUD_SYNC_AUTO_SYNC_ENABLED", "true"), default=True)
 
     async def get_health_summary(self, runtime_health: dict | None = None) -> dict:
         tasks = (await self.db.execute(select(CloudBClassSyncTask))).scalars().all()
@@ -178,6 +201,90 @@ class CloudSyncAdminQueryService:
             )
         return events
 
+    async def get_overview_summary(self, runtime_health: dict | None = None) -> dict:
+        tasks = (await self.db.execute(select(CloudBClassSyncTask).order_by(CloudBClassSyncTask.id.desc()))).scalars().all()
+        failed = sum(1 for task in tasks if task.status == "failed")
+        partial_success = sum(1 for task in tasks if task.status == "partial_success")
+        pending = sum(1 for task in tasks if task.status == "pending")
+        running = sum(1 for task in tasks if task.status == "running")
+        retry_waiting = sum(1 for task in tasks if task.status == "retry_waiting")
+        latest_success = next((task for task in tasks if task.status == "completed" and task.finished_at is not None), None)
+        latest_error_task = next((task for task in tasks if task.last_error), None)
+
+        if failed or partial_success:
+            catch_up_status = "degraded"
+        elif running:
+            catch_up_status = "catching_up"
+        elif pending or retry_waiting:
+            catch_up_status = "backlog"
+        else:
+            catch_up_status = "up_to_date"
+
+        payload = CloudSyncOverviewSummary(
+            worker_status=(runtime_health or {}).get("status", "not_started"),
+            catch_up_status=catch_up_status,
+            exception_task_count=failed + partial_success,
+            failed_task_count=failed,
+            partial_success_task_count=partial_success,
+            pending_task_count=pending,
+            running_task_count=running,
+            retry_waiting_task_count=retry_waiting,
+            last_success_at=_iso(getattr(latest_success, "finished_at", None)),
+            latest_error=_sanitize_error_text(getattr(latest_error_task, "last_error", None)),
+            auto_sync_enabled=await self._auto_sync_enabled(),
+        )
+        return payload.model_dump()
+
+    async def get_runtime_summary(self, runtime_health: dict | None = None) -> dict:
+        running_task = (
+            await self.db.execute(
+                select(CloudBClassSyncTask)
+                .where(CloudBClassSyncTask.status == "running")
+                .order_by(CloudBClassSyncTask.id.desc())
+            )
+        ).scalars().first()
+        active_count = len(
+            (
+                await self.db.execute(
+                    select(CloudBClassSyncTask).where(CloudBClassSyncTask.status == "running")
+                )
+            ).scalars().all()
+        )
+        payload = CloudSyncRuntimeSummary(
+            worker_status=(runtime_health or {}).get("status", "not_started"),
+            worker_id=(runtime_health or {}).get("worker_id"),
+            is_running=active_count > 0,
+            active_task_count=active_count,
+            current_job_id=getattr(running_task, "job_id", None),
+            current_source_table_name=getattr(running_task, "source_table_name", None),
+            last_heartbeat_at=(runtime_health or {}).get("last_heartbeat_at"),
+            last_error=_sanitize_error_text((runtime_health or {}).get("last_error")),
+        )
+        return payload.model_dump()
+
+    async def list_history(self, *, limit: int = 20) -> list[dict]:
+        tasks = (
+            await self.db.execute(select(CloudBClassSyncTask).order_by(CloudBClassSyncTask.id.desc()).limit(limit))
+        ).scalars().all()
+        return [
+            CloudSyncHistoryRow(
+                job_id=task.job_id,
+                source_table_name=task.source_table_name,
+                trigger_source=task.trigger_source,
+                result_status=task.status,
+                started_at=_iso(task.last_attempt_started_at),
+                finished_at=_iso(task.last_attempt_finished_at or task.finished_at),
+                last_error=_sanitize_error_text(task.last_error),
+            ).model_dump()
+            for task in tasks
+        ]
+
+    async def get_settings(self) -> dict:
+        return CloudSyncSettings(
+            auto_sync_enabled=await self._auto_sync_enabled(),
+            pause_mode="buffer_backlog",
+        ).model_dump()
+
     def _serialize_task(self, task: CloudBClassSyncTask) -> CloudSyncTaskRow:
         return CloudSyncTaskRow(
             job_id=task.job_id,
@@ -187,6 +294,7 @@ class CloudSyncAdminQueryService:
             trigger_source=task.trigger_source,
             source_file_id=task.source_file_id,
             claimed_by=task.claimed_by,
+            next_retry_at=_iso(task.next_retry_at),
             lease_expires_at=_iso(task.lease_expires_at),
             heartbeat_at=_iso(task.heartbeat_at),
             last_attempt_started_at=_iso(task.last_attempt_started_at),

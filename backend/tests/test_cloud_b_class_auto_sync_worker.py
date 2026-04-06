@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 
 from backend.models.database import SessionLocal
@@ -24,6 +25,7 @@ class FakeSyncExecutor:
 
 
 def _build_session():
+    os.environ["CLOUD_SYNC_AUTO_SYNC_ENABLED"] = "true"
     session = SessionLocal()
     CloudBClassSyncTask.__table__.create(bind=session.bind, checkfirst=True)
     return session
@@ -238,6 +240,25 @@ def test_worker_claims_retry_waiting_task_after_next_retry_at():
         assert claimed is not None
         assert claimed.id == task.id
         assert claimed.status == "running"
+    finally:
+        db.rollback()
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        db.close()
+
+
+def test_worker_does_not_claim_task_when_auto_sync_is_paused(monkeypatch):
+    db = _build_session()
+    try:
+        monkeypatch.setenv("CLOUD_SYNC_AUTO_SYNC_ENABLED", "false")
+        db.query(CloudBClassSyncTask).delete()
+        db.commit()
+        _create_task(db)
+
+        worker = CloudBClassAutoSyncWorker(db, sync_executor=FakeSyncExecutor())
+        claimed = worker.claim_next_task(worker_id="worker-1")
+
+        assert claimed is None
     finally:
         db.rollback()
         db.query(CloudBClassSyncTask).delete()
