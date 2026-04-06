@@ -2028,6 +2028,10 @@ async def get_detailed_template_coverage(
                     ).limit(1)
                 )
                 sample_file = sample_file_result.scalar_one_or_none()
+                sample_file_info = {
+                    'sample_file_id': sample_file.id if sample_file else None,
+                    'sample_file_name': sample_file.file_name if sample_file else None,
+                }
                 
                 if sample_file:
                     try:
@@ -2064,6 +2068,7 @@ async def get_detailed_template_coverage(
                 
                 covered_list.append({
                     **combo_info,
+                    **sample_file_info,
                     'template_id': template.id,
                     'template_name': template.template_name,
                     'template_version': template.version,
@@ -2074,6 +2079,7 @@ async def get_detailed_template_coverage(
                 if needs_update:
                     needs_update_list.append({
                         **combo_info,
+                        **sample_file_info,
                         'template_id': template.id,
                         'template_name': template.template_name,
                         'update_reason': update_reason
