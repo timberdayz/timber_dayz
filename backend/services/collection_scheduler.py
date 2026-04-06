@@ -1,18 +1,20 @@
 """
-采集调度服务 - Collection Scheduler Service
+Collection scheduler service.
 
-提供定时采集任务的调度功能
-使用 APScheduler 实现 Cron 表达式调度
+This module keeps APScheduler usage behind a narrow API surface so config CRUD,
+startup recovery, and explicit schedule endpoints all share one implementation.
 """
 
+from __future__ import annotations
+
+import asyncio
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Callable, Awaitable
-from contextlib import contextmanager
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from modules.core.db import CollectionConfig, CollectionTask
 from modules.core.logger import get_logger
@@ -24,7 +26,6 @@ from backend.services.collection_contracts import (
     build_date_range_from_time_selection,
     count_collection_targets,
     derive_granularity_from_time_selection,
-    normalize_collection_date_range,
     normalize_domain_subtypes,
     normalize_time_selection,
 )
@@ -32,36 +33,32 @@ from backend.services.task_service import TaskService
 
 logger = get_logger(__name__)
 
-# 尝试导入 APScheduler
+CRON_PRESETS: Dict[str, str] = {
+    "daily_midnight": "0 0 * * *",
+    "daily_6am": "0 6 * * *",
+    "daily_four_times": "0 6,12,18,22 * * *",
+    "weekly_monday_midnight": "0 0 * * 1",
+    "monthly_first_midnight": "0 0 1 * *",
+}
+
 try:
+    from apscheduler.executors.asyncio import AsyncIOExecutor
+    from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.cron import CronTrigger
-    from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-    from apscheduler.executors.asyncio import AsyncIOExecutor
+
     APSCHEDULER_AVAILABLE = True
 except ImportError:
-    logger.warning("APScheduler not installed, scheduled tasks disabled")
     APSCHEDULER_AVAILABLE = False
+    AsyncIOExecutor = None
+    SQLAlchemyJobStore = None
     AsyncIOScheduler = None
     CronTrigger = None
+    logger.warning("APScheduler not installed, scheduled tasks disabled")
 
 
 class SchedulerError(Exception):
-    """调度器错误"""
-    pass
-
-
-async def resolve_runtime_manifests_for_config(
-    db,
-    config: CollectionConfig,
-) -> Dict[str, Any]:
-    """Resolve stable-only runtime manifests for a scheduled collection config."""
-    resolver = ComponentRuntimeResolver.from_async_session(db)
-    return await resolver.resolve_task_manifests(
-        platform=config.platform,
-        data_domains=config.data_domains or [],
-        sub_domains=config.sub_domains,
-    )
+    """Scheduler-specific error."""
 
 
 def build_scheduled_task_scope(
@@ -71,7 +68,8 @@ def build_scheduled_task_scope(
 ) -> tuple[List[str], Dict[str, List[str]], int]:
     task_service = TaskService(db=None)
     filtered_domains, _ = task_service.filter_domains_by_account_capability(
-        account_info, list(config.data_domains or [])
+        account_info,
+        list(config.data_domains or []),
     )
     normalized_sub_domains = normalize_domain_subtypes(
         data_domains=filtered_domains,
@@ -86,597 +84,240 @@ def resolve_config_debug_mode(config: CollectionConfig | Any) -> bool:
 
 
 class CollectionScheduler:
-    """
-    采集调度器
-    
-    功能:
-    1. 根据配置的 Cron 表达式创建定时任务
-    2. 管理定时任务(暂停/恢复/删除)
-    3. 应用启动时自动加载启用的配置
-    4. 支持任务冲突检测
-    """
-    
-    # 调度器实例(单例)
-    _instance: Optional['CollectionScheduler'] = None
-    _scheduler: Optional[AsyncIOScheduler] = None
-    
+    """APScheduler wrapper for collection configs."""
+
+    _instance: Optional["CollectionScheduler"] = None
+
     def __init__(
-        self, 
+        self,
         db_session_factory: Callable[[], Session],
-        task_executor: Callable[[int], Awaitable[None]] = None
+        task_executor: Optional[Callable[[int], Awaitable[None]]] = None,
     ):
-        """
-        初始化调度器
-        
-        Args:
-            db_session_factory: 数据库会话工厂函数
-            task_executor: 任务执行回调函数
-        """
         if not APSCHEDULER_AVAILABLE:
-            raise SchedulerError("APScheduler is not installed. Run: pip install apscheduler")
-        
+            raise SchedulerError("APScheduler is not installed")
+
         self.db_session_factory = db_session_factory
         self.task_executor = task_executor
         self._initialized = False
-    
+        self._scheduler: Optional[AsyncIOScheduler] = None
+
     @classmethod
     def get_instance(
         cls,
-        db_session_factory: Callable[[], Session] = None,
-        task_executor: Callable[[int], Awaitable[None]] = None
-    ) -> 'CollectionScheduler':
-        """
-        获取调度器单例
-        
-        Args:
-            db_session_factory: 数据库会话工厂(首次调用时必须提供)
-            task_executor: 任务执行回调
-            
-        Returns:
-            CollectionScheduler: 调度器实例
-        """
+        db_session_factory: Optional[Callable[[], Session]] = None,
+        task_executor: Optional[Callable[[int], Awaitable[None]]] = None,
+    ) -> "CollectionScheduler":
         if cls._instance is None:
             if db_session_factory is None:
                 raise SchedulerError("db_session_factory is required for first initialization")
-            cls._instance = cls(db_session_factory, task_executor)
-        
+            cls._instance = cls(db_session_factory=db_session_factory, task_executor=task_executor)
         return cls._instance
-    
-    @contextmanager
-    def _get_db(self):
-        """获取数据库会话的上下文管理器"""
-        db = self.db_session_factory()
-        try:
-            yield db
-        finally:
-            db.close()
-    
+
     async def initialize(self) -> None:
-        """
-        初始化调度器
-        
-        创建 APScheduler 实例并配置作业存储
-        """
         if self._initialized:
-            logger.warning("Scheduler already initialized")
             return
-        
         if not APSCHEDULER_AVAILABLE:
-            logger.error("Cannot initialize scheduler: APScheduler not available")
-            return
-        
-        try:
-            # 获取数据库URL用于作业存储
-            database_url = os.getenv('DATABASE_URL', 'sqlite:///scheduler_jobs.db')
-            
-            # 配置作业存储(使用数据库持久化)
-            jobstores = {
-                'default': SQLAlchemyJobStore(url=database_url, tablename='apscheduler_jobs')
-            }
-            
-            # 配置执行器
-            executors = {
-                'default': AsyncIOExecutor()
-            }
-            
-            # 作业默认配置
-            job_defaults = {
-                'coalesce': True,  # 合并错过的任务
-                'max_instances': 1,  # 同一任务最多运行1个实例
-                'misfire_grace_time': 60 * 5,  # 5分钟内的延迟任务仍然执行
-            }
-            
-            # 创建调度器
-            self._scheduler = AsyncIOScheduler(
-                jobstores=jobstores,
-                executors=executors,
-                job_defaults=job_defaults,
-                timezone='Asia/Shanghai'
-            )
-            
-            self._initialized = True
-            logger.info("Collection scheduler initialized")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize scheduler: {e}")
-            raise SchedulerError(f"Scheduler initialization failed: {e}")
-    
+            raise SchedulerError("APScheduler is not installed")
+
+        database_url = os.getenv("DATABASE_URL", "sqlite:///scheduler_jobs.db")
+        self._scheduler = AsyncIOScheduler(
+            jobstores={
+                "default": SQLAlchemyJobStore(url=database_url, tablename="apscheduler_jobs"),
+            },
+            executors={"default": AsyncIOExecutor()},
+            job_defaults={
+                "coalesce": True,
+                "max_instances": 1,
+                "misfire_grace_time": 300,
+            },
+            timezone="Asia/Shanghai",
+        )
+        self._initialized = True
+        logger.info("Collection scheduler initialized")
+
     async def start(self) -> None:
-        """启动调度器"""
         if not self._initialized:
             await self.initialize()
-        
         if self._scheduler and not self._scheduler.running:
             self._scheduler.start()
             logger.info("Collection scheduler started")
-    
+
     async def shutdown(self, wait: bool = True) -> None:
-        """
-        关闭调度器
-        
-        Args:
-            wait: 是否等待正在运行的任务完成
-        """
         if self._scheduler and self._scheduler.running:
             self._scheduler.shutdown(wait=wait)
             logger.info("Collection scheduler stopped")
-    
+
     async def load_all_schedules(self) -> int:
-        """
-        加载所有启用的定时配置
-        
-        Returns:
-            int: 加载的配置数量
-        """
         if not self._scheduler:
-            logger.warning("Scheduler not initialized")
             return 0
-        
-        loaded_count = 0
-        
-        # [*] v4.18.2修复:使用异步数据库操作
+
         from backend.models.database import AsyncSessionLocal
+
+        loaded_count = 0
         async with AsyncSessionLocal() as db:
-            # 查询所有启用定时的配置
             result = await db.execute(
                 select(CollectionConfig).where(
                     CollectionConfig.schedule_enabled == True,
-                    CollectionConfig.schedule_cron.isnot(None),
-                    CollectionConfig.is_active == True
+                    CollectionConfig.schedule_cron.is_not(None),
+                    CollectionConfig.is_active == True,
                 )
             )
-            configs = result.scalars().all()
-            
-            for config in configs:
-                try:
-                    await self.add_schedule(config.id, config.schedule_cron)
-                    loaded_count += 1
-                except Exception as e:
-                    logger.error(f"Failed to load schedule for config {config.id}: {e}")
-        
-        logger.info(f"Loaded {loaded_count} scheduled configurations")
+            for config in result.scalars().all():
+                await self.add_schedule(config.id, str(config.schedule_cron))
+                loaded_count += 1
         return loaded_count
-    
+
     async def add_schedule(self, config_id: int, cron_expression: str) -> str:
-        """
-        添加定时任务
-        
-        Args:
-            config_id: 配置ID
-            cron_expression: Cron 表达式 (例如: "0 8 * * *" 每天8点)
-            
-        Returns:
-            str: 作业ID
-        """
         if not self._scheduler:
             raise SchedulerError("Scheduler not initialized")
-        
-        # 生成作业ID
+        if not self.validate_cron_expression(cron_expression):
+            raise SchedulerError(f"invalid cron expression: {cron_expression}")
+
         job_id = f"collection_config_{config_id}"
-        
-        # 检查是否已存在
-        existing_job = self._scheduler.get_job(job_id)
-        if existing_job:
-            # 更新现有作业
-            self._scheduler.reschedule_job(
-                job_id,
-                trigger=CronTrigger.from_crontab(cron_expression)
-            )
-            logger.info(f"Updated schedule for config {config_id}: {cron_expression}")
+        trigger = CronTrigger.from_crontab(cron_expression)
+
+        if self._scheduler.get_job(job_id):
+            self._scheduler.reschedule_job(job_id, trigger=trigger)
+            logger.info("Rescheduled config %s with cron %s", config_id, cron_expression)
         else:
-            # 创建新作业
             self._scheduler.add_job(
                 self._execute_scheduled_task,
-                trigger=CronTrigger.from_crontab(cron_expression),
+                trigger=trigger,
                 id=job_id,
                 args=[config_id],
                 name=f"Collection Config {config_id}",
-                replace_existing=True
+                replace_existing=True,
             )
-            logger.info(f"Added schedule for config {config_id}: {cron_expression}")
-        
+            logger.info("Registered config %s with cron %s", config_id, cron_expression)
         return job_id
-    
+
     async def remove_schedule(self, config_id: int) -> bool:
-        """
-        删除定时任务
-        
-        Args:
-            config_id: 配置ID
-            
-        Returns:
-            bool: 是否成功删除
-        """
         if not self._scheduler:
             return False
-        
-        job_id = f"collection_config_{config_id}"
-        
-        try:
-            self._scheduler.remove_job(job_id)
-            logger.info(f"Removed schedule for config {config_id}")
-            return True
-        except Exception as e:
-            logger.warning(f"Failed to remove schedule for config {config_id}: {e}")
-            return False
-    
-    async def pause_schedule(self, config_id: int) -> bool:
-        """
-        暂停定时任务
-        
-        Args:
-            config_id: 配置ID
-            
-        Returns:
-            bool: 是否成功暂停
-        """
-        if not self._scheduler:
-            return False
-        
-        job_id = f"collection_config_{config_id}"
-        
-        try:
-            self._scheduler.pause_job(job_id)
-            logger.info(f"Paused schedule for config {config_id}")
-            return True
-        except Exception as e:
-            logger.warning(f"Failed to pause schedule for config {config_id}: {e}")
-            return False
-    
-    async def resume_schedule(self, config_id: int) -> bool:
-        """
-        恢复定时任务
-        
-        Args:
-            config_id: 配置ID
-            
-        Returns:
-            bool: 是否成功恢复
-        """
-        if not self._scheduler:
-            return False
-        
-        job_id = f"collection_config_{config_id}"
-        
-        try:
-            self._scheduler.resume_job(job_id)
-            logger.info(f"Resumed schedule for config {config_id}")
-            return True
-        except Exception as e:
-            logger.warning(f"Failed to resume schedule for config {config_id}: {e}")
-            return False
-    
-    def get_job_info(self, config_id: int) -> Optional[Dict[str, Any]]:
-        """
-        获取定时任务信息
-        
-        Args:
-            config_id: 配置ID
-            
-        Returns:
-            Optional[Dict]: 作业信息
-        """
-        if not self._scheduler:
-            return None
-        
         job_id = f"collection_config_{config_id}"
         job = self._scheduler.get_job(job_id)
-        
-        if not job:
+        if job is None:
+            return True
+        self._scheduler.remove_job(job_id)
+        logger.info("Removed schedule for config %s", config_id)
+        return True
+
+    async def pause_schedule(self, config_id: int) -> bool:
+        if not self._scheduler:
+            return False
+        job = self._scheduler.get_job(f"collection_config_{config_id}")
+        if job is None:
+            return False
+        self._scheduler.pause_job(job.id)
+        return True
+
+    async def resume_schedule(self, config_id: int) -> bool:
+        if not self._scheduler:
+            return False
+        job = self._scheduler.get_job(f"collection_config_{config_id}")
+        if job is None:
+            return False
+        self._scheduler.resume_job(job.id)
+        return True
+
+    def get_job_info(self, config_id: int) -> Optional[Dict[str, Any]]:
+        if not self._scheduler:
             return None
-        
+        job_id = f"collection_config_{config_id}"
+        job = self._scheduler.get_job(job_id)
+        if job is None:
+            return None
         return {
-            'id': job.id,
-            'name': job.name,
-            'next_run_time': job.next_run_time.isoformat() if job.next_run_time else None,
-            'pending': job.pending,
-            'trigger': str(job.trigger),
+            "id": job.id,
+            "job_id": job.id,
+            "name": job.name,
+            "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+            "pending": job.pending,
+            "trigger": str(job.trigger),
         }
-    
+
     def get_all_jobs(self) -> List[Dict[str, Any]]:
-        """
-        获取所有定时任务
-        
-        Returns:
-            List[Dict]: 所有作业信息
-        """
         if not self._scheduler:
             return []
-        
-        jobs = self._scheduler.get_jobs()
-        
         return [
             {
-                'id': job.id,
-                'name': job.name,
-                'next_run_time': job.next_run_time.isoformat() if job.next_run_time else None,
-                'pending': job.pending,
-                'trigger': str(job.trigger),
+                "id": job.id,
+                "job_id": job.id,
+                "name": job.name,
+                "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+                "pending": job.pending,
+                "trigger": str(job.trigger),
             }
-            for job in jobs
+            for job in self._scheduler.get_jobs()
         ]
-    
+
     async def _execute_scheduled_task(self, config_id: int) -> None:
-        """
-        执行定时任务(v4.7.0更新)
-        
-        Args:
-            config_id: 配置ID
-        """
-        logger.info(f"Executing scheduled task for config {config_id}")
-        
-        # [*] v4.18.2修复:使用异步数据库操作
         from backend.models.database import AsyncSessionLocal
+        from backend.services.collection_config_execution import create_tasks_for_config
+
+        logger.info("Executing scheduled task for config %s", config_id)
         async with AsyncSessionLocal() as db:
-            # 获取配置
             result = await db.execute(
                 select(CollectionConfig).where(
                     CollectionConfig.id == config_id,
-                    CollectionConfig.is_active == True
+                    CollectionConfig.is_active == True,
                 )
             )
             config = result.scalar_one_or_none()
-            
-            if not config:
-                logger.error(f"Config {config_id} not found or inactive")
+            if config is None:
+                logger.warning("Scheduled config %s not found or inactive", config_id)
                 return
-            
-            # 检查是否已有正在运行的任务(同一配置)
-            result = await db.execute(
-                select(CollectionTask).where(
-                    CollectionTask.config_id == config_id,
-                    CollectionTask.status.in_(['running', 'queued', 'paused'])
-                )
+            if not config.schedule_enabled or not config.schedule_cron:
+                logger.warning("Scheduled config %s is disabled or missing cron", config_id)
+                return
+
+            tasks = await create_tasks_for_config(
+                db,
+                config_id=config_id,
+                trigger_type="scheduled",
+                start_background=False,
+                resolve_runtime=False,
             )
-            existing_task = result.scalar_one_or_none()
-            
-            if existing_task:
-                logger.warning(f"Config {config_id} already has an active task: {existing_task.task_id}")
-                return
-            
-            # 为每个账号创建任务
-            account_ids = config.account_ids or []
-            
-            # v4.7.0: 如果account_ids为空,从数据库加载所有活跃账号
-            if not account_ids:
-                try:
-                    from backend.services.account_loader_service import get_account_loader_service
-                    from backend.models.database import SessionLocal
-                    import asyncio
-                    
-                    # [*] v4.18.2修复:使用run_in_executor包装同步账号加载操作
-                    def _sync_load_accounts():
-                        """同步加载账号(在executor中执行)"""
-                        temp_db = SessionLocal()
-                        try:
-                            account_loader = get_account_loader_service()
-                            accounts = account_loader.load_all_accounts(temp_db, platform=config.platform)
-                            return [acc['account_id'] for acc in accounts]
-                        finally:
-                            temp_db.close()
-                    
-                    loop = asyncio.get_running_loop()
-                    account_ids = await loop.run_in_executor(None, _sync_load_accounts)
-                    logger.info(f"从数据库加载了 {len(account_ids)} 个活跃账号(平台: {config.platform})")
-                except Exception as e:
-                    logger.error(f"从数据库加载账号失败: {e}")
-                    return
-            
-            for account_id in account_ids:
-                try:
-                    from backend.services.account_loader_service import get_account_loader_service
+            logger.info("Created %s scheduled tasks for config %s", len(tasks), config_id)
 
-                    account_loader = get_account_loader_service()
-                    account_info = await account_loader.load_account_async(account_id, db)
-                except Exception as e:
-                    logger.error(f"Failed to load scheduled account {account_id}: {e}")
-                    continue
-
-                if not account_info:
-                    logger.warning(f"Scheduled account {account_id} not found or disabled")
-                    continue
-
-                filtered_domains, normalized_sub_domains, total_domains_count = build_scheduled_task_scope(
-                    config=config,
-                    account_info=account_info,
-                )
-                if not filtered_domains:
-                    logger.info(f"Scheduled account {account_id} has no supported domains for config {config_id}, skipping")
-                    continue
-
-                try:
-                    runtime_manifests = await ComponentRuntimeResolver.from_async_session(db).resolve_task_manifests(
-                        platform=config.platform,
-                        data_domains=filtered_domains,
-                        sub_domains=normalized_sub_domains,
-                    )
-                except ComponentRuntimeResolverError as e:
-                    logger.error(
-                        "Scheduled account %s blocked by stable runtime preflight: %s",
-                        account_id,
-                        e,
-                    )
-                    continue
-
-                # 检查账号冲突
-                result = await db.execute(
-                    select(CollectionTask).where(
-                        CollectionTask.account == account_id,
-                        CollectionTask.platform == config.platform,
-                        CollectionTask.status.in_(['running', 'paused'])
-                    )
-                )
-                conflict = result.scalar_one_or_none()
-                
-                if conflict:
-                    logger.warning(f"Account {account_id} has conflict task, skipping")
-                    continue
-                
-                time_selection = normalize_time_selection(
-                    date_range_type=config.date_range_type,
-                    custom_date_start=config.custom_date_start,
-                    custom_date_end=config.custom_date_end,
-                )
-                normalized_date_range = build_date_range_from_time_selection(time_selection)
-                normalized_date_range["time_selection"] = time_selection
-                effective_granularity = derive_granularity_from_time_selection(
-                    time_selection,
-                    config.granularity,
-                )
-
-                # v4.7.0: 创建任务(新字段)
-                task_uuid = str(uuid.uuid4())
-                task = CollectionTask(
-                    task_id=task_uuid,
-                    config_id=config_id,
-                    platform=config.platform,
-                    account=account_id,
-                    data_domains=filtered_domains,
-                    sub_domains=normalized_sub_domains or None,
-                    granularity=effective_granularity,
-                    date_range=normalized_date_range,
-                    status='pending',  # v4.7.0: 先pending,后台任务启动时改为running
-                    progress=0,
-                    trigger_type='scheduled',
-                    # v4.7.0: 任务粒度优化字段
-                    total_domains=total_domains_count,
-                    completed_domains=[],
-                    failed_domains=[],
-                    current_domain=None,
-                    debug_mode=resolve_config_debug_mode(config),
-                    created_at=datetime.now(timezone.utc)
-                )
-                
-                db.add(task)
-                await db.commit()
-                await db.refresh(task)
-                
-                logger.info(f"Created scheduled task {task_uuid} for account {account_id} ({total_domains_count} domains)")
-                
-                # v4.7.0: 启动后台任务执行
-                try:
-                    import asyncio
-                    # 导入后台执行函数
-                    from backend.routers.collection import _execute_collection_task_background
-                    
-                    # 启动后台任务
-                    asyncio.create_task(
-                        _execute_collection_task_background(
-                            task_id=task_uuid,
-                            platform=config.platform,
-                            account_id=account_id,
-                            data_domains=filtered_domains,
-                            sub_domains=normalized_sub_domains,
-                            date_range=normalized_date_range,
-                            granularity=effective_granularity,
-                            debug_mode=resolve_config_debug_mode(config),
-                            parallel_mode=False,
-                            max_parallel=3,
-                            runtime_manifests=runtime_manifests,
-                            app=None,
-                        )
-                    )
-                    logger.info(f"Started background execution for task {task_uuid}")
-                except Exception as e:
-                    logger.error(f"Failed to start background task {task_uuid}: {e}")
-    
     @staticmethod
     def validate_cron_expression(cron_expression: str) -> bool:
-        """
-        验证 Cron 表达式是否有效
-        
-        Args:
-            cron_expression: Cron 表达式
-            
-        Returns:
-            bool: 是否有效
-        """
         if not APSCHEDULER_AVAILABLE:
             return False
-        
         try:
             CronTrigger.from_crontab(cron_expression)
             return True
         except Exception:
             return False
-    
+
     @staticmethod
     def get_cron_description(cron_expression: str) -> str:
-        """
-        获取 Cron 表达式的人类可读描述
-        
-        Args:
-            cron_expression: Cron 表达式
-            
-        Returns:
-            str: 描述
-        """
-        # 简单的描述生成
-        parts = cron_expression.split()
-        if len(parts) != 5:
-            return "无效的Cron表达式"
-        
-        minute, hour, day, month, weekday = parts
-        
-        descriptions = []
-        
-        # 处理常见模式
-        if minute == '0' and hour != '*':
-            descriptions.append(f"每天 {hour}:00")
-        elif minute == '0' and hour == '0':
-            descriptions.append("每天午夜")
-        elif minute == '*' and hour == '*':
-            descriptions.append("每分钟")
-        else:
-            descriptions.append(f"{minute}分 {hour}时")
-        
-        if weekday != '*':
-            weekday_names = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-            if weekday.isdigit():
-                descriptions.append(weekday_names[int(weekday) % 7])
-            else:
-                descriptions.append(f"每周{weekday}")
-        
-        if day != '*':
-            descriptions.append(f"每月{day}日")
-        
-        return ' '.join(descriptions)
+        return cron_expression
 
 
-# 常用 Cron 表达式预设
-CRON_PRESETS = {
-    # [*] v4.7.0标准预设(Phase 4.1.6)[*]
-    'daily_realtime': '0 6,12,18,22 * * *',    # 日度实时(每天4次:6点/12点/18点/22点)
-    'weekly_summary': '0 5 * * 1',              # 周度汇总(每周一 05:00)
-    'monthly_summary': '0 5 1 * *',             # 月度汇总(每月1号 05:00)
-    
-    # 其他常用预设
-    'every_day_8am': '0 8 * * *',              # 每天早上8点
-    'every_day_9am': '0 9 * * *',              # 每天早上9点
-    'every_day_midnight': '0 0 * * *',         # 每天午夜
-    'every_monday_9am': '0 9 * * 1',           # 每周一早上9点
-    'every_month_1st': '0 9 1 * *',            # 每月1日早上9点
-    'every_hour': '0 * * * *',                 # 每小时整点
-    'every_6_hours': '0 */6 * * *',            # 每6小时
-    'every_12_hours': '0 */12 * * *',          # 每12小时
-}
+async def sync_config_schedule_state(config: CollectionConfig) -> Dict[str, Any]:
+    """Make runtime scheduler state match database truth for one config."""
+    if not APSCHEDULER_AVAILABLE:
+        raise SchedulerError("APScheduler is not installed")
+
+    scheduler = CollectionScheduler.get_instance()
+    should_register = bool(
+        getattr(config, "is_active", False)
+        and getattr(config, "schedule_enabled", False)
+        and getattr(config, "schedule_cron", None)
+    )
+
+    if should_register:
+        cron_expression = str(config.schedule_cron or "").strip()
+        if not CollectionScheduler.validate_cron_expression(cron_expression):
+            raise SchedulerError(f"invalid cron expression: {cron_expression}")
+        await scheduler.add_schedule(config.id, cron_expression)
+    else:
+        await scheduler.remove_schedule(config.id)
+
+    job_info = scheduler.get_job_info(config.id)
+    return {
+        "job_registered": job_info is not None,
+        "job_id": job_info.get("job_id") if job_info else None,
+        "next_run_time": job_info.get("next_run_time") if job_info else None,
+    }

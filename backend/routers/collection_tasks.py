@@ -57,6 +57,25 @@ VERIFICATION_WAIT_TIMEOUT = int(os.getenv("VERIFICATION_TIMEOUT", "300"))
 VERIFICATION_POLL_INTERVAL = 1.5
 
 
+@router.post("/configs/{config_id}/run", response_model=List[TaskResponse])
+async def run_config_tasks(
+    config_id: int,
+    fastapi_request: Request,
+    db: AsyncSession = Depends(get_async_db),
+):
+    from backend.services.collection_config_execution import create_tasks_for_config
+
+    tasks = await create_tasks_for_config(
+        db,
+        config_id=config_id,
+        trigger_type="config",
+        app=getattr(fastapi_request, "app", None),
+        start_background=False,
+        resolve_runtime=False,
+    )
+    return [_build_task_response_payload(task) for task in tasks]
+
+
 def _collection_task_details_payload(task: CollectionTask) -> dict:
     return {
         "collection": {

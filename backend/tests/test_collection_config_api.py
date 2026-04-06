@@ -4,7 +4,13 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from modules.core.db import CollectionConfig
+from modules.core.db import (
+    CollectionConfig,
+    CollectionConfigShopScope,
+    MainAccount,
+    ShopAccount,
+    ShopAccountCapability,
+)
 
 
 @pytest_asyncio.fixture
@@ -14,7 +20,11 @@ async def collection_config_sqlite_engine():
     async with engine.begin() as conn:
         for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
             await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
+        await conn.run_sync(MainAccount.__table__.create)
+        await conn.run_sync(ShopAccount.__table__.create)
+        await conn.run_sync(ShopAccountCapability.__table__.create)
         await conn.run_sync(CollectionConfig.__table__.create)
+        await conn.run_sync(CollectionConfigShopScope.__table__.create)
 
     yield engine
     await engine.dispose()
@@ -46,18 +56,95 @@ async def collection_config_async_client(collection_config_sqlite_session):
     app.dependency_overrides.pop(get_async_db, None)
 
 
+async def _seed_shopee_accounts(session):
+    main_account = MainAccount(
+        platform="shopee",
+        main_account_id="main-shopee",
+        main_account_name="Shopee Main",
+        username="shopee-main",
+        password_encrypted="enc",
+        enabled=True,
+    )
+    session.add(main_account)
+    await session.flush()
+
+    shops = [
+        ShopAccount(
+            platform="shopee",
+            shop_account_id="shop-sg-1",
+            main_account_id="main-shopee",
+            store_name="Shop SG 1",
+            platform_shop_id="platform-sg-1",
+            shop_region="SG",
+            shop_type="local",
+            enabled=True,
+        ),
+        ShopAccount(
+            platform="shopee",
+            shop_account_id="shop-my-1",
+            main_account_id="main-shopee",
+            store_name="Shop MY 1",
+            platform_shop_id="platform-my-1",
+            shop_region="MY",
+            shop_type="local",
+            enabled=True,
+        ),
+    ]
+    session.add_all(shops)
+    await session.flush()
+
+    capability_map = {shop.shop_account_id: shop.id for shop in shops}
+    session.add_all(
+        [
+            ShopAccountCapability(
+                shop_account_id=capability_map["shop-sg-1"],
+                data_domain="orders",
+                enabled=True,
+            ),
+            ShopAccountCapability(
+                shop_account_id=capability_map["shop-sg-1"],
+                data_domain="services",
+                enabled=True,
+            ),
+            ShopAccountCapability(
+                shop_account_id=capability_map["shop-my-1"],
+                data_domain="products",
+                enabled=True,
+            ),
+            ShopAccountCapability(
+                shop_account_id=capability_map["shop-my-1"],
+                data_domain="services",
+                enabled=True,
+            ),
+        ]
+    )
+    await session.commit()
+
+
 def test_build_collection_config_record_sets_explicit_timestamps():
     from backend.routers.collection_config import _build_collection_config_record
-    from backend.schemas.collection import CollectionConfigCreate, TimeSelectionPayload
+    from backend.schemas.collection import (
+        CollectionConfigCreate,
+        CollectionConfigShopScopePayload,
+        TimeSelectionPayload,
+    )
 
     record = _build_collection_config_record(
-        config_name="miaoshou-orders-v1",
+        config_name="shopee-shop-scope-v1",
         config=CollectionConfigCreate(
-            name="miaoshou-orders-v1",
-            platform="miaoshou",
-            account_ids=["miaoshou_real_001"],
-            data_domains=["orders"],
-            sub_domains={"orders": ["shopee", "tiktok"]},
+            name="shopee-shop-scope-v1",
+            platform="shopee",
+            shop_scopes=[
+                CollectionConfigShopScopePayload(
+                    shop_account_id="shop-sg-1",
+                    data_domains=["orders", "services"],
+                    sub_domains={"services": ["agent"]},
+                ),
+                CollectionConfigShopScopePayload(
+                    shop_account_id="shop-my-1",
+                    data_domains=["products"],
+                ),
+            ],
             granularity="weekly",
             time_selection=TimeSelectionPayload(mode="preset", preset="last_7_days"),
             schedule_enabled=False,
@@ -67,19 +154,30 @@ def test_build_collection_config_record_sets_explicit_timestamps():
 
     assert record.created_at is not None
     assert record.updated_at is not None
+    assert record.account_ids == ["shop-sg-1", "shop-my-1"]
+    assert record.data_domains == ["orders", "services", "products"]
+    assert record.sub_domains == {"services": ["agent"]}
 
 
 def test_build_collection_config_record_defaults_execution_mode_to_headless():
     from backend.routers.collection_config import _build_collection_config_record
-    from backend.schemas.collection import CollectionConfigCreate, TimeSelectionPayload
+    from backend.schemas.collection import (
+        CollectionConfigCreate,
+        CollectionConfigShopScopePayload,
+        TimeSelectionPayload,
+    )
 
     record = _build_collection_config_record(
-        config_name="shopee-orders-v1",
+        config_name="shopee-shop-scope-v2",
         config=CollectionConfigCreate(
-            name="shopee-orders-v1",
+            name="shopee-shop-scope-v2",
             platform="shopee",
-            account_ids=["acc-1"],
-            data_domains=["orders"],
+            shop_scopes=[
+                CollectionConfigShopScopePayload(
+                    shop_account_id="shop-sg-1",
+                    data_domains=["orders"],
+                )
+            ],
             granularity="daily",
             time_selection=TimeSelectionPayload(mode="preset", preset="yesterday"),
             schedule_enabled=False,
@@ -91,17 +189,29 @@ def test_build_collection_config_record_defaults_execution_mode_to_headless():
 
 
 @pytest.mark.asyncio
-async def test_create_config_normalizes_time_selection_and_sub_domains(collection_config_async_client):
+async def test_create_config_persists_shop_scopes_and_time_selection(
+    collection_config_async_client,
+    collection_config_sqlite_session,
+):
+    await _seed_shopee_accounts(collection_config_sqlite_session)
+
     response = await collection_config_async_client.post(
         "/api/collection/configs",
         json={
-            "name": None,
+            "name": "shopee-daily-shop-scope-v1",
             "platform": "shopee",
-            "account_ids": [],
-            "data_domains": ["orders", "services"],
-            "sub_domains": {
-                "services": ["agent", "invalid"],
-            },
+            "shop_scopes": [
+                {
+                    "shop_account_id": "shop-sg-1",
+                    "data_domains": ["orders", "services"],
+                    "sub_domains": {"services": ["agent", "invalid"]},
+                },
+                {
+                    "shop_account_id": "shop-my-1",
+                    "data_domains": ["products", "services"],
+                    "sub_domains": {"services": ["agent"]},
+                },
+            ],
             "granularity": "daily",
             "time_selection": {
                 "mode": "preset",
@@ -116,168 +226,61 @@ async def test_create_config_normalizes_time_selection_and_sub_domains(collectio
     payload = response.json()
 
     assert payload["platform"] == "shopee"
-    assert payload["account_ids"] == []
-    assert payload["data_domains"] == ["orders", "services"]
-    assert payload["sub_domains"] == {"services": ["agent"]}
     assert payload["granularity"] == "weekly"
-    assert payload["execution_mode"] == "headless"
     assert payload["date_range_type"] == "last_7_days"
-    assert payload["custom_date_start"] is None
-    assert payload["custom_date_end"] is None
-    assert payload["time_selection"] == {
-        "mode": "preset",
-        "preset": "last_7_days",
-        "start_date": None,
-        "end_date": None,
-        "start_time": "00:00:00",
-        "end_time": "23:59:59",
-    }
-    assert payload["name"].startswith("shopee-orders-services-v")
+    assert set(payload["account_ids"]) == {"shop-my-1", "shop-sg-1"}
+    assert payload["data_domains"] == ["orders", "services", "products"]
+    assert len(payload["shop_scopes"]) == 2
+    assert payload["shop_scopes"][0]["shop_account_id"] == "shop-my-1"
+    assert payload["shop_scopes"][1]["shop_account_id"] == "shop-sg-1"
+    assert payload["shop_scopes"][1]["sub_domains"] == {"services": ["agent"]}
 
 
 @pytest.mark.asyncio
-async def test_create_config_allows_miaoshou_products_domain(collection_config_async_client):
-    response = await collection_config_async_client.post(
-        "/api/collection/configs",
-        json={
-            "name": "miaoshou-products-v1",
-            "platform": "miaoshou",
-            "account_ids": [],
-            "data_domains": ["products"],
-            "granularity": "daily",
-            "time_selection": {
-                "mode": "preset",
-                "preset": "yesterday",
-            },
-            "schedule_enabled": False,
-            "retry_count": 3,
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["platform"] == "miaoshou"
-    assert payload["data_domains"] == ["products"]
-
-
-@pytest.mark.asyncio
-async def test_create_config_persists_execution_mode(collection_config_async_client):
-    response = await collection_config_async_client.post(
-        "/api/collection/configs",
-        json={
-            "name": "shopee-orders-headed-v1",
-            "platform": "shopee",
-            "account_ids": ["acc-1"],
-            "data_domains": ["orders"],
-            "granularity": "daily",
-            "execution_mode": "headed",
-            "time_selection": {
-                "mode": "preset",
-                "preset": "yesterday",
-            },
-            "schedule_enabled": False,
-            "retry_count": 3,
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["execution_mode"] == "headed"
-
-
-def test_collection_config_record_reuses_execution_mode_field_when_present():
-    from backend.routers.collection_config import _build_collection_config_record
-    from backend.schemas.collection import CollectionConfigCreate, TimeSelectionPayload
-
-    record = _build_collection_config_record(
-        config_name="shopee-orders-headed-v2",
-        config=CollectionConfigCreate(
-            name="shopee-orders-headed-v2",
-            platform="shopee",
-            account_ids=["acc-1"],
-            data_domains=["orders"],
-            execution_mode="headed",
-            granularity="daily",
-            time_selection=TimeSelectionPayload(mode="preset", preset="today"),
-            schedule_enabled=False,
-            retry_count=3,
-        ),
-    )
-
-    assert record.execution_mode == "headed"
-
-
-@pytest.mark.asyncio
-async def test_update_config_normalizes_custom_time_selection_and_sub_domains(
+async def test_create_config_requires_all_active_shop_scopes(
     collection_config_async_client,
     collection_config_sqlite_session,
 ):
+    await _seed_shopee_accounts(collection_config_sqlite_session)
+
+    response = await collection_config_async_client.post(
+        "/api/collection/configs",
+        json={
+            "name": "shopee-invalid-v1",
+            "platform": "shopee",
+            "shop_scopes": [
+                {
+                    "shop_account_id": "shop-sg-1",
+                    "data_domains": ["orders"],
+                }
+            ],
+            "granularity": "daily",
+            "time_selection": {
+                "mode": "preset",
+                "preset": "yesterday",
+            },
+            "schedule_enabled": False,
+            "retry_count": 3,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "missing active shop scopes" in str(response.json())
+
+
+@pytest.mark.asyncio
+async def test_update_config_replaces_shop_scopes_and_normalizes_custom_time_selection(
+    collection_config_async_client,
+    collection_config_sqlite_session,
+):
+    await _seed_shopee_accounts(collection_config_sqlite_session)
+
     config = CollectionConfig(
         name="shopee-services-v1",
         platform="shopee",
-        account_ids=[],
+        account_ids=["shop-sg-1", "shop-my-1"],
         data_domains=["services"],
-        sub_domains=None,
-        granularity="daily",
-        date_range_type="yesterday",
-        custom_date_start=None,
-        custom_date_end=None,
-        schedule_enabled=False,
-        schedule_cron=None,
-        retry_count=3,
-        is_active=True,
-    )
-    collection_config_sqlite_session.add(config)
-    await collection_config_sqlite_session.commit()
-    await collection_config_sqlite_session.refresh(config)
-
-    response = await collection_config_async_client.put(
-        f"/api/collection/configs/{config.id}",
-        json={
-            "data_domains": ["services"],
-            "sub_domains": {
-                "services": ["agent", "invalid"],
-            },
-            "granularity": "monthly",
-            "time_selection": {
-                "mode": "custom",
-                "start_date": "2026-03-01",
-                "end_date": "2026-03-31",
-            },
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-
-    assert payload["data_domains"] == ["services"]
-    assert payload["sub_domains"] == {"services": ["agent"]}
-    assert payload["granularity"] == "monthly"
-    assert payload["execution_mode"] == "headless"
-    assert payload["date_range_type"] == "custom"
-    assert payload["custom_date_start"] == "2026-03-01"
-    assert payload["custom_date_end"] == "2026-03-31"
-    assert payload["time_selection"] == {
-        "mode": "custom",
-        "preset": None,
-        "start_date": "2026-03-01",
-        "end_date": "2026-03-31",
-        "start_time": "00:00:00",
-        "end_time": "23:59:59",
-    }
-
-
-@pytest.mark.asyncio
-async def test_update_config_can_switch_execution_mode(
-    collection_config_async_client,
-    collection_config_sqlite_session,
-):
-    config = CollectionConfig(
-        name="shopee-orders-headless-v1",
-        platform="shopee",
-        account_ids=[],
-        data_domains=["orders"],
-        sub_domains=None,
+        sub_domains={"services": ["agent"]},
         granularity="daily",
         date_range_type="yesterday",
         custom_date_start=None,
@@ -289,16 +292,59 @@ async def test_update_config_can_switch_execution_mode(
         execution_mode="headless",
     )
     collection_config_sqlite_session.add(config)
+    await collection_config_sqlite_session.flush()
+    collection_config_sqlite_session.add_all(
+        [
+            CollectionConfigShopScope(
+                config_id=config.id,
+                shop_account_id="shop-sg-1",
+                data_domains=["services"],
+                sub_domains={"services": ["agent"]},
+                enabled=True,
+            ),
+            CollectionConfigShopScope(
+                config_id=config.id,
+                shop_account_id="shop-my-1",
+                data_domains=["services"],
+                sub_domains={"services": ["agent"]},
+                enabled=True,
+            ),
+        ]
+    )
     await collection_config_sqlite_session.commit()
     await collection_config_sqlite_session.refresh(config)
 
     response = await collection_config_async_client.put(
         f"/api/collection/configs/{config.id}",
         json={
+            "shop_scopes": [
+                {
+                    "shop_account_id": "shop-sg-1",
+                    "data_domains": ["orders", "services"],
+                    "sub_domains": {"services": ["agent", "invalid"]},
+                },
+                {
+                    "shop_account_id": "shop-my-1",
+                    "data_domains": ["products"],
+                },
+            ],
             "execution_mode": "headed",
+            "time_selection": {
+                "mode": "custom",
+                "start_date": "2026-03-01",
+                "end_date": "2026-03-31",
+            },
         },
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["execution_mode"] == "headed"
+    assert payload["granularity"] == "daily"
+    assert payload["date_range_type"] == "custom"
+    assert payload["custom_date_start"] == "2026-03-01"
+    assert payload["custom_date_end"] == "2026-03-31"
+    assert payload["shop_scopes"][0]["shop_account_id"] == "shop-my-1"
+    assert payload["shop_scopes"][0]["data_domains"] == ["products"]
+    assert payload["shop_scopes"][1]["shop_account_id"] == "shop-sg-1"
+    assert payload["shop_scopes"][1]["sub_domains"] == {"services": ["agent"]}

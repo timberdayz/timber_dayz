@@ -329,3 +329,47 @@ def normalize_collection_date_range(
         normalized["end_date"] = end_date
         normalized["date_to"] = end_date
     return normalized
+
+
+def summarize_shop_scopes(
+    shop_scopes: List[Dict[str, Any]] | List[Any],
+) -> Dict[str, Any]:
+    account_ids: List[str] = []
+    data_domains: List[str] = []
+    domain_seen: set[str] = set()
+    merged_sub_domains: Dict[str, List[str]] = {}
+
+    for raw_scope in shop_scopes or []:
+        scope = (
+            raw_scope.model_dump(exclude_none=True)
+            if hasattr(raw_scope, "model_dump")
+            else dict(raw_scope or {})
+        )
+        if not bool(scope.get("enabled", True)):
+            continue
+
+        shop_account_id = str(scope.get("shop_account_id") or "").strip()
+        if shop_account_id:
+            account_ids.append(shop_account_id)
+
+        normalized_domains = _as_string_list(scope.get("data_domains"))
+        normalized_mapping = normalize_domain_subtypes(
+            data_domains=normalized_domains,
+            sub_domains=scope.get("sub_domains"),
+        )
+        for domain in normalized_domains:
+            if domain not in domain_seen:
+                domain_seen.add(domain)
+                data_domains.append(domain)
+
+        for domain, subtypes in normalized_mapping.items():
+            merged = merged_sub_domains.setdefault(domain, [])
+            for subtype in subtypes:
+                if subtype not in merged:
+                    merged.append(subtype)
+
+    return {
+        "account_ids": account_ids,
+        "data_domains": data_domains,
+        "sub_domains": merged_sub_domains or None,
+    }
