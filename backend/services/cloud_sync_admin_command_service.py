@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import inspect
+import os
+from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy import or_
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas.cloud_sync_admin import CloudSyncCommandResponse
@@ -18,7 +21,7 @@ from backend.services.event_listeners import determine_pipeline_targets_for_data
 from backend.services.data_pipeline.refresh_runner import execute_refresh_plan
 from backend.services.cloud_b_class_sync_utils import validate_b_class_table_name
 from backend.utils.events import DataIngestedEvent
-from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncTask
+from modules.core.db import CloudBClassSyncCheckpoint, CloudBClassSyncTask, SystemConfig
 
 
 class CloudSyncAdminCommandService:
@@ -55,6 +58,28 @@ class CloudSyncAdminCommandService:
             metadata=payload.get("metadata", {}),
         ).model_dump()
 
+    async def sync_now(self) -> dict:
+        checked_tables = await self._list_local_b_class_tables()
+        enqueued_count = 0
+        skipped_count = 0
+
+        for table_name in checked_tables:
+            if not await self._table_needs_catch_up(table_name):
+                skipped_count += 1
+                continue
+            await self.trigger_sync(table_name)
+            enqueued_count += 1
+
+        return CloudSyncCommandResponse(
+            status="submitted",
+            detail="catch_up",
+            metadata={
+                "checked_table_count": len(checked_tables),
+                "enqueued_table_count": enqueued_count,
+                "skipped_up_to_date_count": skipped_count,
+            },
+        ).model_dump()
+
     async def retry_task(self, job_id: str) -> dict:
         task = await self._get_task(job_id)
         if task is None:
@@ -84,6 +109,48 @@ class CloudSyncAdminCommandService:
             job_id=task.job_id,
             status=task.status,
             source_table_name=task.source_table_name,
+        ).model_dump()
+
+    async def retry_failed(self) -> dict:
+        stmt = select(CloudBClassSyncTask).where(
+            CloudBClassSyncTask.status.in_(["failed", "partial_success"])
+        )
+        tasks = (await self.db.execute(stmt)).scalars().all()
+
+        for task in tasks:
+            task.status = "pending"
+            task.next_retry_at = None
+
+        await self.db.commit()
+
+        return CloudSyncCommandResponse(
+            status="submitted",
+            detail="retry_failed",
+            metadata={"retried_count": len(tasks)},
+        ).model_dump()
+
+    async def update_settings(self, enabled: bool) -> dict:
+        os.environ["CLOUD_SYNC_AUTO_SYNC_ENABLED"] = "true" if enabled else "false"
+        stmt = select(SystemConfig).where(SystemConfig.config_key == "cloud_sync_auto_sync_enabled")
+        record = (await self.db.execute(stmt)).scalars().one_or_none()
+        value = "true" if enabled else "false"
+        if record is None:
+            record = SystemConfig(
+                config_key="cloud_sync_auto_sync_enabled",
+                config_value=value,
+                description="cloud sync auto sync switch",
+            )
+            self.db.add(record)
+        else:
+            record.config_value = value
+        await self.db.commit()
+        return CloudSyncCommandResponse(
+            status="updated",
+            detail="settings",
+            metadata={
+                "auto_sync_enabled": enabled,
+                "pause_mode": "buffer_backlog",
+            },
         ).model_dump()
 
     async def dry_run_table(self, source_table_name: str) -> dict:
@@ -179,6 +246,66 @@ class CloudSyncAdminCommandService:
     async def _get_task(self, job_id: str) -> CloudBClassSyncTask | None:
         stmt = select(CloudBClassSyncTask).where(CloudBClassSyncTask.job_id == job_id)
         return (await self.db.execute(stmt)).scalars().one_or_none()
+
+    async def _list_local_b_class_tables(self) -> list[str]:
+        def _inspect_tables(sync_session):
+            bind = sync_session.get_bind()
+            if bind is None:
+                return []
+            inspector = sa_inspect(bind)
+            return sorted(
+                table_name
+                for table_name in inspector.get_table_names(schema="b_class")
+                if table_name.startswith("fact_")
+            )
+
+        return await self.db.run_sync(_inspect_tables)
+
+    async def _table_needs_catch_up(self, table_name: str) -> bool:
+        checkpoint_stmt = select(CloudBClassSyncCheckpoint).where(
+            CloudBClassSyncCheckpoint.table_name == table_name,
+            or_(
+                CloudBClassSyncCheckpoint.table_schema.like("cloud_sync:%"),
+                CloudBClassSyncCheckpoint.table_schema == "cloud_sync:local",
+            ),
+        )
+        checkpoint = (await self.db.execute(checkpoint_stmt)).scalars().first()
+        if checkpoint is None or checkpoint.last_ingest_timestamp is None:
+            return True
+
+        def _latest_high_watermark(sync_session):
+            sql = text(
+                f"""
+                SELECT id, ingest_timestamp
+                FROM b_class."{table_name}"
+                ORDER BY ingest_timestamp DESC, id DESC
+                LIMIT 1
+                """
+            )
+            row = sync_session.execute(sql).mappings().first()
+            return dict(row) if row else None
+
+        latest_row = await self.db.run_sync(_latest_high_watermark)
+        if latest_row is None:
+            return False
+
+        latest_ts = latest_row.get("ingest_timestamp")
+        latest_id = int(latest_row.get("id") or 0)
+        checkpoint_ts = checkpoint.last_ingest_timestamp
+        checkpoint_id = int(checkpoint.last_source_id or 0)
+
+        if isinstance(latest_ts, str):
+            latest_ts = datetime.fromisoformat(latest_ts)
+        if latest_ts.tzinfo is None:
+            latest_ts = latest_ts.replace(tzinfo=timezone.utc)
+        if checkpoint_ts.tzinfo is None:
+            checkpoint_ts = checkpoint_ts.replace(tzinfo=timezone.utc)
+
+        if latest_ts > checkpoint_ts:
+            return True
+        if latest_ts == checkpoint_ts and latest_id > checkpoint_id:
+            return True
+        return False
 
     @staticmethod
     def _infer_data_domain(source_table_name: str) -> str:

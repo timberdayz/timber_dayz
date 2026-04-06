@@ -242,3 +242,79 @@ async def test_table_action_endpoints(monkeypatch):
         assert projection_response.status_code == 200
         assert cancel_response.status_code == 200
         assert cancel_response.json()["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_overview_runtime_history_and_settings_endpoints(monkeypatch):
+    from backend.routers import cloud_sync
+
+    class FakeQueryService:
+        async def get_overview_summary(self, runtime_health=None):
+            return {
+                "worker_status": "running",
+                "catch_up_status": "up_to_date",
+                "exception_task_count": 0,
+            }
+
+        async def get_runtime_summary(self, runtime_health=None):
+            return {
+                "worker_status": "running",
+                "is_running": False,
+                "active_task_count": 0,
+            }
+
+        async def list_history(self):
+            return [{"job_id": "job-1", "result_status": "completed"}]
+
+        async def get_settings(self):
+            return {"auto_sync_enabled": True, "pause_mode": "buffer_backlog"}
+
+    monkeypatch.setattr(cloud_sync, "build_query_service", lambda *args, **kwargs: FakeQueryService())
+
+    app = _build_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        overview_response = await client.get("/api/cloud-sync/overview")
+        runtime_response = await client.get("/api/cloud-sync/runtime")
+        history_response = await client.get("/api/cloud-sync/history")
+        settings_response = await client.get("/api/cloud-sync/settings")
+
+        assert overview_response.status_code == 200
+        assert overview_response.json()["catch_up_status"] == "up_to_date"
+        assert runtime_response.status_code == 200
+        assert "is_running" in runtime_response.json()
+        assert history_response.status_code == 200
+        assert history_response.json()[0]["job_id"] == "job-1"
+        assert settings_response.status_code == 200
+        assert settings_response.json()["auto_sync_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_sync_now_retry_failed_and_update_settings_endpoints(monkeypatch):
+    from backend.routers import cloud_sync
+
+    class FakeCommandService:
+        async def sync_now(self):
+            return {"status": "submitted", "detail": "catch_up"}
+
+        async def retry_failed(self):
+            return {"status": "submitted", "detail": "retry_failed"}
+
+        async def update_settings(self, enabled: bool):
+            return {"status": "updated", "metadata": {"auto_sync_enabled": enabled}}
+
+    monkeypatch.setattr(cloud_sync, "build_command_service", lambda *args, **kwargs: FakeCommandService())
+
+    app = _build_test_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+        sync_now_response = await client.post("/api/cloud-sync/sync-now")
+        retry_failed_response = await client.post("/api/cloud-sync/retry-failed")
+        settings_update_response = await client.put("/api/cloud-sync/settings", json={"auto_sync_enabled": False})
+
+        assert sync_now_response.status_code == 200
+        assert sync_now_response.json()["detail"] == "catch_up"
+        assert retry_failed_response.status_code == 200
+        assert retry_failed_response.json()["detail"] == "retry_failed"
+        assert settings_update_response.status_code == 200
+        assert settings_update_response.json()["metadata"]["auto_sync_enabled"] is False

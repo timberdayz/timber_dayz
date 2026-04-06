@@ -51,6 +51,7 @@ class CloudSyncLatestTaskState(BaseModel):
     trigger_source: str | None = None
     source_file_id: int | None = None
     claimed_by: str | None = None
+    next_retry_at: str | None = None
     lease_expires_at: str | None = None
     heartbeat_at: str | None = None
     last_attempt_started_at: str | None = None
@@ -88,6 +89,7 @@ class CloudSyncTaskRow(BaseModel):
     trigger_source: str | None = None
     source_file_id: int | None = None
     claimed_by: str | None = None
+    next_retry_at: str | None = None
     lease_expires_at: str | None = None
     heartbeat_at: str | None = None
     last_attempt_started_at: str | None = None
@@ -110,3 +112,43 @@ class CloudSyncCommandResponse(BaseModel):
     metadata: dict[str, Any] = {}
 
     model_config = ConfigDict(extra="allow")
+
+
+class CloudSyncOverviewSummary(BaseModel):
+    worker_status: str
+    catch_up_status: str
+    exception_task_count: int = 0
+    failed_task_count: int = 0
+    partial_success_task_count: int = 0
+    pending_task_count: int = 0
+    running_task_count: int = 0
+    retry_waiting_task_count: int = 0
+    last_success_at: str | None = None
+    latest_error: str | None = None
+    auto_sync_enabled: bool = True
+
+
+class CloudSyncRuntimeSummary(BaseModel):
+    worker_status: str
+    worker_id: str | None = None
+    is_running: bool = False
+    active_task_count: int = 0
+    current_job_id: str | None = None
+    current_source_table_name: str | None = None
+    last_heartbeat_at: str | None = None
+    last_error: str | None = None
+
+
+class CloudSyncHistoryRow(BaseModel):
+    job_id: str
+    source_table_name: str
+    trigger_source: str | None = None
+    result_status: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    last_error: str | None = None
+
+
+class CloudSyncSettings(BaseModel):
+    auto_sync_enabled: bool = True
+    pause_mode: str = "buffer_backlog"

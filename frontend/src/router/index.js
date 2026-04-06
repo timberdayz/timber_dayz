@@ -403,7 +403,7 @@ const routes = [
     name: 'CloudSyncManagement',
     component: () => import('../views/CloudSyncManagement.vue'),
     meta: {
-      title: '云端同步管理',
+      title: 'B类云端追平',
       icon: 'Connection',
       permission: 'data-sync',
       roles: ['admin']

@@ -20,6 +20,10 @@ class ManualTriggerRequest(BaseModel):
     source_table_name: str = Field(pattern=r"^fact_[a-z0-9_]+$")
 
 
+class CloudSyncSettingsRequest(BaseModel):
+    auto_sync_enabled: bool
+
+
 def build_query_service(db: AsyncSession) -> CloudSyncAdminQueryService:
     return CloudSyncAdminQueryService(db)
 
@@ -56,6 +60,48 @@ async def cloud_sync_health(
     return await _maybe_await(service.get_health_summary(runtime_health=runtime_health))
 
 
+@router.get("/api/cloud-sync/overview")
+async def cloud_sync_overview(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    runtime = getattr(request.app.state, "cloud_sync_runtime", None)
+    runtime_health = runtime.get_health() if runtime is not None else None
+    service = build_query_service(db)
+    return await _maybe_await(service.get_overview_summary(runtime_health=runtime_health))
+
+
+@router.get("/api/cloud-sync/runtime")
+async def cloud_sync_runtime_summary(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    runtime = getattr(request.app.state, "cloud_sync_runtime", None)
+    runtime_health = runtime.get_health() if runtime is not None else None
+    service = build_query_service(db)
+    return await _maybe_await(service.get_runtime_summary(runtime_health=runtime_health))
+
+
+@router.get("/api/cloud-sync/history")
+async def cloud_sync_history(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_query_service(db)
+    return await _maybe_await(service.list_history())
+
+
+@router.get("/api/cloud-sync/settings")
+async def cloud_sync_settings(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_query_service(db)
+    return await _maybe_await(service.get_settings())
+
+
 @router.get("/api/cloud-sync/tables")
 async def list_cloud_sync_tables(
     db: AsyncSession = Depends(get_async_db),
@@ -83,6 +129,41 @@ async def trigger_cloud_sync_task(
     service = build_command_service(db)
     logger.info("[CloudSyncAdmin] user=%s action=trigger_sync table=%s", _actor_repr(current_user), payload.source_table_name)
     return await _maybe_await(service.trigger_sync(payload.source_table_name))
+
+
+@router.post("/api/cloud-sync/sync-now")
+async def trigger_cloud_sync_now(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=sync_now", _actor_repr(current_user))
+    return await _maybe_await(service.sync_now())
+
+
+@router.post("/api/cloud-sync/retry-failed")
+async def retry_failed_cloud_sync_tasks(
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info("[CloudSyncAdmin] user=%s action=retry_failed", _actor_repr(current_user))
+    return await _maybe_await(service.retry_failed())
+
+
+@router.put("/api/cloud-sync/settings")
+async def update_cloud_sync_settings(
+    payload: CloudSyncSettingsRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
+):
+    service = build_command_service(db)
+    logger.info(
+        "[CloudSyncAdmin] user=%s action=update_settings auto_sync_enabled=%s",
+        _actor_repr(current_user),
+        payload.auto_sync_enabled,
+    )
+    return await _maybe_await(service.update_settings(enabled=payload.auto_sync_enabled))
 
 
 @router.get("/api/cloud-sync/tasks")

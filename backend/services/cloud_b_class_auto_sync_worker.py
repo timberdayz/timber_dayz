@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import inspect
+import os
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_, select
 
 from backend.services.task_center_sync_service import TaskCenterSyncService
-from modules.core.db import CloudBClassSyncTask
+from modules.core.db import CloudBClassSyncTask, SystemConfig
 
 
 class CloudBClassAutoSyncWorker:
@@ -25,7 +26,20 @@ class CloudBClassAutoSyncWorker:
         self.sync_executor = sync_executor
         self.lease_seconds = lease_seconds
 
+    def _auto_sync_enabled(self) -> bool:
+        try:
+            stmt = select(SystemConfig).where(SystemConfig.config_key == "cloud_sync_auto_sync_enabled")
+            record = self.db.execute(stmt).scalars().one_or_none()
+            if record is not None:
+                return str(record.config_value).lower() in {"1", "true", "yes", "on"}
+        except Exception:
+            pass
+        return str(os.getenv("CLOUD_SYNC_AUTO_SYNC_ENABLED", "true")).lower() in {"1", "true", "yes", "on"}
+
     def claim_next_task(self, worker_id: str) -> CloudBClassSyncTask | None:
+        if not self._auto_sync_enabled():
+            return None
+
         task_center = TaskCenterSyncService(self.db)
         now = datetime.now(timezone.utc)
         stmt = (
