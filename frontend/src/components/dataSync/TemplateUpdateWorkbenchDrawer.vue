@@ -7,9 +7,15 @@
     @close="handleClose"
   >
     <div class="template-update-workbench-drawer">
+      <div class="template-update-workbench-drawer__meta">
+        <el-tag size="small" type="info">Mode: {{ updateMode }}</el-tag>
+        <el-tag size="small">{{ headerSource }}</el-tag>
+      </div>
+
       <TemplateChangeSummaryCard :summary="changeSummary" />
 
       <HeaderDiffViewer
+        v-if="updateMode !== 'core-only' || addedFields.length > 0 || removedFields.length > 0"
         :template-header-columns="templateHeaderColumns"
         :current-header-columns="currentHeaderColumns"
         :added-fields="addedFields"
@@ -25,7 +31,7 @@
         :current-header-columns="currentHeaderColumns"
       />
 
-      <TemplateRawPreviewPanel :preview-data="previewData" />
+      <TemplateRawPreviewPanel v-if="updateMode !== 'core-only' && previewData.length > 0" :preview-data="previewData" />
 
       <div class="template-update-workbench-drawer__section">
         <div class="template-update-workbench-drawer__section-title">Selected Deduplication Fields</div>
@@ -97,6 +103,8 @@ const recommendedDeduplicationFields = computed(
   () => workbenchContext.value?.recommended_deduplication_fields ?? [],
 )
 const previewData = computed(() => workbenchContext.value?.preview_data ?? [])
+const updateMode = computed(() => workbenchContext.value?.update_mode ?? 'with-sample')
+const headerSource = computed(() => workbenchContext.value?.header_source ?? 'sample-file')
 
 const selectedDeduplicationFields = ref([])
 
@@ -143,6 +151,11 @@ function handleClose() {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.template-update-workbench-drawer__meta {
+  display: flex;
+  gap: 8px;
 }
 
 .template-update-workbench-drawer__section {

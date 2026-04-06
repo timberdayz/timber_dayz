@@ -91,6 +91,7 @@ declare module 'vue' {
     TemplateCreateWorkbenchDrawer: typeof import('./src/components/dataSync/TemplateCreateWorkbenchDrawer.vue')['default']
     TemplateDeduplicationReviewPanel: typeof import('./src/components/dataSync/TemplateDeduplicationReviewPanel.vue')['default']
     TemplateGovernancePanel: typeof import('./src/components/dataSync/TemplateGovernancePanel.vue')['default']
+    TemplateManualUpdateModeDialog: typeof import('./src/components/dataSync/TemplateManualUpdateModeDialog.vue')['default']
     TemplateNeedsUpdateTable: typeof import('./src/components/dataSync/TemplateNeedsUpdateTable.vue')['default']
     TemplateRawPreviewPanel: typeof import('./src/components/dataSync/TemplateRawPreviewPanel.vue')['default']
     TemplateUpdateWorkbenchDrawer: typeof import('./src/components/dataSync/TemplateUpdateWorkbenchDrawer.vue')['default']

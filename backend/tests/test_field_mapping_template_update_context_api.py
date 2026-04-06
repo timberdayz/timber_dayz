@@ -148,3 +148,65 @@ async def test_template_update_context_returns_diff_and_deduplication_groups(
     assert data["existing_deduplication_fields_available"] == ["order_id"]
     assert data["existing_deduplication_fields_missing"] == ["shop_id"]
     assert data["recommended_deduplication_fields"] == ["order_id"]
+    assert data["update_mode"] == "with-sample"
+
+
+@pytest.mark.asyncio
+async def test_template_update_context_core_only_uses_template_headers_as_field_pool(
+    template_update_context_client,
+):
+    client, session_factory = template_update_context_client
+
+    async with session_factory() as session:
+        template = FieldMappingTemplate(
+            platform="shopee",
+            data_domain="orders",
+            granularity="daily",
+            sub_domain=None,
+            header_row=1,
+            header_columns=["order_id", "platform_sku", "amount", "shop_id"],
+            deduplication_fields=["order_id", "missing_field"],
+            template_name="shopee_orders_daily_v2",
+            version=2,
+            status="published",
+            field_count=4,
+            created_by="test",
+        )
+        session.add(template)
+        await session.commit()
+        await session.refresh(template)
+
+    response = await client.get(
+        f"/api/field-mapping/templates/{template.id}/update-context",
+        params={"mode": "core-only"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+
+    data = payload["data"]
+    assert data["template"]["id"] == template.id
+    assert data["template_header_columns"] == [
+        "order_id",
+        "platform_sku",
+        "amount",
+        "shop_id",
+    ]
+    assert data["current_header_columns"] == [
+        "order_id",
+        "platform_sku",
+        "amount",
+        "shop_id",
+    ]
+    assert data["current_file"] is None
+    assert data["preview_data"] == []
+    assert data["sample_data"] == {}
+    assert data["added_fields"] == []
+    assert data["removed_fields"] == []
+    assert data["match_rate"] == 100.0
+    assert data["update_mode"] == "core-only"
+    assert data["header_source"] == "template"
+    assert data["existing_deduplication_fields_available"] == ["order_id"]
+    assert data["existing_deduplication_fields_missing"] == ["missing_field"]
+    assert data["recommended_deduplication_fields"] == ["order_id", "shop_id"]

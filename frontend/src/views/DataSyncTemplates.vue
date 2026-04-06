@@ -20,6 +20,7 @@ v4.6.0新增：独立的数据同步系统
       @refresh="loadGovernanceStats"
       @create-missing="handleCreateTemplateForMissing"
       @update-template="handleUpdateTemplate"
+      @manual-update="handleManualUpdate"
       @update:active-tab="activeTab = $event"
     />
 
@@ -167,6 +168,9 @@ v4.6.0新增：独立的数据同步系统
         <el-table-column prop="created_at" label="创建时间" width="180" />
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
+            <el-button size="small" type="primary" @click="handleManualUpdate(row)">
+              Manual Update
+            </el-button>
             <el-button size="small" @click="viewTemplateDetail(row.id)">
               <el-icon><View /></el-icon>
               查看详情
@@ -186,6 +190,12 @@ v4.6.0新增：独立的数据同步系统
       @save="handleWorkbenchSave"
       @update:visible="isWorkbenchVisible = $event"
       @close="closeTemplateUpdateWorkbench"
+    />
+
+    <TemplateManualUpdateModeDialog
+      v-model:visible="manualUpdateModeDialogVisible"
+      :template="pendingManualUpdateTemplate"
+      @select="chooseManualUpdateMode"
     />
 
     <TemplateCreateWorkbenchDrawer
@@ -229,6 +239,7 @@ import api from '@/api'
 import TemplateBuilderWorkspace from '@/components/dataSync/TemplateBuilderWorkspace.vue'
 import TemplateCreateWorkbenchDrawer from '@/components/dataSync/TemplateCreateWorkbenchDrawer.vue'
 import TemplateGovernancePanel from '@/components/dataSync/TemplateGovernancePanel.vue'
+import TemplateManualUpdateModeDialog from '@/components/dataSync/TemplateManualUpdateModeDialog.vue'
 import TemplateUpdateWorkbenchDrawer from '@/components/dataSync/TemplateUpdateWorkbenchDrawer.vue'
 
 // 状态
@@ -238,7 +249,10 @@ const savingTemplate = ref(false)
 const governanceLoading = ref(false)
 const isWorkbenchVisible = ref(false)
 const isCreateWorkbenchVisible = ref(false)
+const manualUpdateModeDialogVisible = ref(false)
 const showTemplateBuilder = ref(false)
+const pendingManualUpdateTemplate = ref(null)
+const manualUpdateMode = ref('with-sample')
 const createWorkbenchContext = ref(null)
 const updateWorkbenchContext = ref(null)
 const templates = ref([])
@@ -368,23 +382,52 @@ const loadGovernanceStats = async () => {
 // 为缺少模板的组合创建模板
 const closeTemplateUpdateWorkbench = () => {
   isWorkbenchVisible.value = false
+  updateWorkbenchContext.value = null
 }
 
 const closeTemplateCreateWorkbench = () => {
   isCreateWorkbenchVisible.value = false
 }
 
-const openTemplateUpdateWorkbench = async (row) => {
+const handleManualUpdate = (row) => {
+  pendingManualUpdateTemplate.value = row
+  manualUpdateModeDialogVisible.value = true
+}
+
+const chooseManualUpdateMode = async (mode) => {
+  manualUpdateMode.value = mode
+  manualUpdateModeDialogVisible.value = false
+
+  if (!pendingManualUpdateTemplate.value) {
+    return
+  }
+
+  if (mode === 'with-sample' && !pendingManualUpdateTemplate.value.sample_file_id) {
+    ElMessage.warning('当前模板没有可直接使用的样本文件，建议先使用 Core Fields Only')
+    return
+  }
+
+  await openTemplateUpdateWorkbench(pendingManualUpdateTemplate.value, mode)
+}
+
+const openTemplateUpdateWorkbench = async (row, mode = 'with-sample') => {
   const templateId = row.template_id || row.id || null
   const template = templates.value.find(item => item.id === templateId) || row
   updateWorkbenchContext.value = {
     template,
-    row
+    row,
+    context: {
+      update_mode: mode,
+      header_source: mode === 'core-only' ? 'template' : 'sample-file',
+    }
   }
 
   if (templateId) {
     try {
-      const context = await api.getTemplateUpdateContext(templateId, row.sample_file_id || null)
+      const context = await api.getTemplateUpdateContext(templateId, {
+        mode,
+        fileId: row.sample_file_id || null,
+      })
       updateWorkbenchContext.value = {
         ...updateWorkbenchContext.value,
         context
@@ -423,8 +466,7 @@ const handleCreateTemplateForMissing = (row) => {
 
 // 更新需要更新的模板
 const handleUpdateTemplate = (row) => {
-  showTemplateBuilder.value = true
-  openTemplateUpdateWorkbench(row)
+  handleManualUpdate(row)
   // 设置文件筛选条件
   fileFilters.value.platform = row.platform
   fileFilters.value.domain = row.domain

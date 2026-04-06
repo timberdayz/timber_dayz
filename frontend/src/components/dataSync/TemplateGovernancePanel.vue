@@ -76,6 +76,13 @@
             </template>
           </el-table-column>
           <el-table-column prop="update_reason" label="更新原因" min-width="200" show-overflow-tooltip />
+          <el-table-column label="Action" width="160" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" @click="$emit('manual-update', row)">
+                Manual Update
+              </el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </el-tab-pane>
 
@@ -137,7 +144,7 @@ const props = defineProps({
   },
 })
 
-defineEmits(['refresh', 'create-missing', 'update-template', 'update:active-tab'])
+defineEmits(['refresh', 'create-missing', 'update-template', 'manual-update', 'update:active-tab'])
 
 const summary = computed(() => props.detailedCoverage?.summary ?? {})
 </script>

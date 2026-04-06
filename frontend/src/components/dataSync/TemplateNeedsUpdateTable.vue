@@ -16,7 +16,7 @@
       <template #default="{ row }">
         <el-button size="small" type="warning" @click="$emit('update-template', row)">
           <el-icon><Edit /></el-icon>
-          更新模板
+          Manual Update
         </el-button>
       </template>
     </el-table-column>

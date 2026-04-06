@@ -934,6 +934,7 @@ async def get_default_deduplication_fields(
 @router.get("/templates/{template_id}/update-context")
 async def get_template_update_context(
     template_id: int,
+    mode: str = Query("with-sample", description="更新模式(core-only 或 with-sample)"),
     file_id: Optional[int] = Query(None, description="用于更新模板的候选文件ID"),
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -981,6 +982,8 @@ async def get_template_update_context(
             "current_header_columns": [],
             "sample_data": {},
             "preview_data": [],
+            "update_mode": mode,
+            "header_source": "template" if mode == "core-only" else "sample-file",
             "header_changes": {
                 "detected": False,
                 "added_fields": [],
@@ -998,7 +1001,38 @@ async def get_template_update_context(
             "recommended_deduplication_fields": [],
         }
 
-        if file_id is not None:
+        default_fields = get_default_deduplication_fields_config(
+            template.data_domain,
+            template.sub_domain,
+        )
+
+        if mode == "core-only":
+            available_fields, missing_fields = _split_existing_deduplication_fields(
+                template_deduplication_fields,
+                template_header_columns,
+            )
+            recommended_fields = [
+                field for field in default_fields
+                if any(str(field).lower() == str(col).lower() for col in template_header_columns)
+            ]
+            response_data.update(
+                {
+                    "current_header_columns": template_header_columns,
+                    "header_changes": {
+                        "detected": False,
+                        "added_fields": [],
+                        "removed_fields": [],
+                        "match_rate": 100.0,
+                        "is_exact_match": True,
+                        "template_columns": template_header_columns,
+                        "current_columns": template_header_columns,
+                    },
+                    "existing_deduplication_fields_available": available_fields,
+                    "existing_deduplication_fields_missing": missing_fields,
+                    "recommended_deduplication_fields": recommended_fields,
+                }
+            )
+        elif file_id is not None:
             file_preview = await _load_file_update_preview(
                 db,
                 file_id,
@@ -1021,10 +1055,6 @@ async def get_template_update_context(
             available_fields, missing_fields = _split_existing_deduplication_fields(
                 template_deduplication_fields,
                 current_header_columns,
-            )
-            default_fields = get_default_deduplication_fields_config(
-                template.data_domain,
-                template.sub_domain,
             )
             recommended_fields = [
                 field for field in default_fields if str(field).lower() in current_lookup

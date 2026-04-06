@@ -745,12 +745,13 @@ export default {
     )
   },
 
-  async getTemplateUpdateContext(templateId, fileId = null) {
+  async getTemplateUpdateContext(templateId, { mode, fileId } = {}) {
     if (!templateId) {
       throw new Error('templateId为必填项')
     }
     return await this._get(`/field-mapping/templates/${templateId}/update-context`, {
       params: {
+        mode: mode || 'with-sample',
         file_id: fileId || null
       }
     })
