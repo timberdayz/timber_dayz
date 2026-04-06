@@ -70,3 +70,23 @@ def test_component_tester_marks_export_failed_without_downloaded_file(tmp_path: 
     assert ok is False
     assert result.phase == "export"
     assert result.error == "download file missing"
+
+
+def test_component_tester_accepts_known_no_data_success_without_downloaded_file():
+    tester = ComponentTester(platform="tiktok", account_id="acc-1")
+    result = ComponentTestResult(
+        component_name="services_agent_export",
+        platform="tiktok",
+        status=_TestStatus.PENDING,
+    )
+
+    ok = tester._check_export_complete_gate(
+        file_path=None,
+        result=result,
+        component_name="tiktok/services_agent_export",
+        success_message="no exportable agent service data for selected range",
+    )
+
+    assert ok is True
+    assert result.phase is None
+    assert result.error is None

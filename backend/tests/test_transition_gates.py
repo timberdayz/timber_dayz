@@ -56,3 +56,15 @@ def test_export_complete_fails_for_empty_file(tmp_path: Path):
     result = evaluate_export_complete(file_path=str(target))
 
     assert result.status is GateStatus.FAILED
+
+
+def test_export_complete_allows_known_no_data_success_without_file():
+    result = evaluate_export_complete(
+        file_path=None,
+        component_name="tiktok/services_agent_export",
+        success_message="no exportable agent service data for selected range",
+    )
+
+    assert result.stage == "export"
+    assert result.status is GateStatus.READY
+    assert result.matched_signal == "no_file_success"

@@ -51,8 +51,37 @@ def evaluate_login_ready(
     )
 
 
-def evaluate_export_complete(*, file_path: Optional[str]) -> GateResult:
+def _allows_missing_export_file(
+    *,
+    component_name: Optional[str] = None,
+    success_message: Optional[str] = None,
+) -> bool:
+    normalized_component = str(component_name or "").strip().lower()
+    normalized_message = str(success_message or "").strip().lower()
+
+    if normalized_component != "tiktok/services_agent_export":
+        return False
+
+    return "no exportable agent service data" in normalized_message or "暂无数据" in normalized_message
+
+
+def evaluate_export_complete(
+    *,
+    file_path: Optional[str],
+    component_name: Optional[str] = None,
+    success_message: Optional[str] = None,
+) -> GateResult:
     if not file_path:
+        if _allows_missing_export_file(
+            component_name=component_name,
+            success_message=success_message,
+        ):
+            return GateResult(
+                stage="export",
+                status=GateStatus.READY,
+                reason="successful no-data export without file",
+                matched_signal="no_file_success",
+            )
         return GateResult(
             stage="export",
             status=GateStatus.FAILED,

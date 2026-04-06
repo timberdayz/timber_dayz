@@ -350,6 +350,17 @@ class TiktokServicesAgentExport(ExportComponent):
         ):
             return True
 
+        try:
+            body = page.locator("body")
+            if hasattr(body, "first"):
+                body = body.first
+            if hasattr(body, "inner_text"):
+                body_text = str(await body.inner_text() or "")
+                if "\u6682\u65e0\u6570\u636e" in body_text:
+                    return True
+        except Exception:
+            pass
+
         locator = await self._export_button_locator(page)
         if locator is None:
             return False
@@ -481,6 +492,12 @@ class TiktokServicesAgentExport(ExportComponent):
 
         export_result = await self._run_export(page)
         if not getattr(export_result, "success", False):
+            if await self._no_exportable_data(page):
+                return ExportResult(
+                    success=True,
+                    message="no exportable agent service data for selected range",
+                    file_path=None,
+                )
             return ExportResult(
                 success=False,
                 message=getattr(export_result, "message", "services agent export failed"),

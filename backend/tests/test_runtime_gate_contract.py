@@ -48,3 +48,15 @@ def test_executor_export_complete_requires_real_file(tmp_path):
 
     with pytest.raises(StepExecutionError, match="download file missing"):
         executor._ensure_export_complete(str(tmp_path / "missing.xlsx"))
+
+
+def test_executor_export_complete_allows_known_no_data_success_without_file():
+    executor = CollectionExecutorV2()
+
+    file_path = executor._ensure_export_complete(
+        None,
+        component_name="tiktok/services_agent_export",
+        success_message="no exportable agent service data for selected range",
+    )
+
+    assert file_path is None

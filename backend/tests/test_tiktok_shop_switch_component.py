@@ -73,6 +73,30 @@ class _FakePage:
         return _FakeLocator(visible=False)
 
 
+class _DelayedRefreshPage(_FakePage):
+    def __init__(self, url: str, store_label: str, target_region: str) -> None:
+        super().__init__(url, store_label)
+        self.target_region = target_region
+        self.pending_url: str | None = None
+        self.pending_label: str | None = None
+
+    async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 20000) -> None:
+        self.goto_calls.append(url)
+        self.pending_url = url
+        if self.target_region == "PH":
+            self.pending_label = "PH Philippines(DAJU Mall)"
+        elif self.target_region == "MY":
+            self.pending_label = "MY Malaysia(Flora Mall)"
+        else:
+            self.pending_label = "SG Singapore(HX Home)"
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        self.timeout_calls.append(ms)
+        if len(self.timeout_calls) >= 2 and self.pending_url:
+            self.url = self.pending_url
+            self.store_label = self.pending_label or self.store_label
+
+
 @pytest.mark.asyncio
 async def test_tiktok_shop_switch_syncs_current_region_and_display_name_from_page() -> None:
     ctx = _ctx(
@@ -174,3 +198,23 @@ async def test_tiktok_shop_switch_allows_missing_display_name_when_url_region_is
     assert ctx.config["shop_region"] == "SG"
     assert ctx.config["shop_name"] == "acc_sg"
     assert "shop_display_name" not in ctx.config
+
+
+@pytest.mark.asyncio
+async def test_tiktok_shop_switch_waits_for_delayed_region_refresh_before_confirming() -> None:
+    ctx = _ctx(
+        account={"label": "acc"},
+        config={"shop_region": "PH"},
+    )
+    page = _DelayedRefreshPage(
+        "https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=SG",
+        "SG Singapore(HX Home)",
+        "PH",
+    )
+
+    result = await TiktokShopSwitch(ctx).run(page)
+
+    assert result.success is True
+    assert ctx.config["shop_region"] == "PH"
+    assert ctx.config["shop_display_name"] == "PH Philippines(DAJU Mall)"
+    assert len(page.timeout_calls) >= 2

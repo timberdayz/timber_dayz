@@ -741,8 +741,18 @@ class CollectionExecutorV2:
                 f"confidence={detection_result.confidence:.2f}, url={getattr(page, 'url', '')}"
             )
 
-    def _ensure_export_complete(self, file_path: Optional[str]) -> Optional[str]:
-        gate_result = evaluate_export_complete(file_path=file_path)
+    def _ensure_export_complete(
+        self,
+        file_path: Optional[str],
+        *,
+        component_name: Optional[str] = None,
+        success_message: Optional[str] = None,
+    ) -> Optional[str]:
+        gate_result = evaluate_export_complete(
+            file_path=file_path,
+            component_name=component_name,
+            success_message=success_message,
+        )
         if gate_result.status is not GateStatus.READY:
             raise StepExecutionError(f"export completion failed: {gate_result.reason}")
         return file_path
@@ -2072,7 +2082,12 @@ class CollectionExecutorV2:
                         )
                     
                     if export_result.success:
-                        file_path = self._ensure_export_complete(export_result.file_path)
+                        component_name = f"{platform}/{domain}_{sub_domain}_export" if sub_domain else f"{platform}/{domain}_export"
+                        file_path = self._ensure_export_complete(
+                            export_result.file_path,
+                            component_name=component_name,
+                            success_message=getattr(export_result, "message", None),
+                        )
                         if file_path:
                             context.collected_files.append(file_path)
                         context.completed_domains.append(full_domain)
@@ -2138,7 +2153,12 @@ class CollectionExecutorV2:
                             domain_adapter = create_adapter(platform=platform, account=account, config=export_params)
                             export_result = await domain_adapter.export(page=page, data_domain=domain)
                         if export_result.success:
-                            file_path = self._ensure_export_complete(export_result.file_path)
+                            component_name = f"{platform}/{domain}_{sub_domain}_export" if sub_domain else f"{platform}/{domain}_export"
+                            file_path = self._ensure_export_complete(
+                                export_result.file_path,
+                                component_name=component_name,
+                                success_message=getattr(export_result, "message", None),
+                            )
                             if file_path:
                                 context.collected_files.append(file_path)
                             context.completed_domains.append(full_domain)
@@ -4143,7 +4163,15 @@ class CollectionExecutorV2:
                     page=domain_page,
                     data_domain=data_domain,
                 )
-            file_path = self._ensure_export_complete(export_result.file_path) if export_result.success else None
+            file_path = (
+                self._ensure_export_complete(
+                    export_result.file_path,
+                    component_name=f"{platform}/{data_domain}_export",
+                    success_message=getattr(export_result, "message", None),
+                )
+                if export_result.success
+                else None
+            )
             duration_ms = int((datetime.now() - domain_export_start).total_seconds() * 1000)
             await self._update_status(
                 task_id, progress, f"[并行] 采集 {data_domain} " + ("成功" if export_result.success else "失败"),

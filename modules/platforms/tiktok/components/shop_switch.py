@@ -55,7 +55,13 @@ class TiktokShopSwitch:
                 locator = page.get_by_text(candidate, exact=False).first
                 if await locator.count() > 0 and await locator.is_visible(timeout=500):
                     text = await locator.inner_text(timeout=500)
-                    text = str(text or "").strip()
+                    raw_text = str(text or "").strip()
+                    normalized_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+                    if len(normalized_lines) > 2:
+                        continue
+                    text = " ".join(normalized_lines)
+                    if len(text) > 80:
+                        continue
                     if text:
                         return text
             except Exception:
@@ -88,6 +94,57 @@ class TiktokShopSwitch:
         rewritten_query = urlencode(query)
         return urlunsplit((parts.scheme, parts.netloc, parts.path, rewritten_query, parts.fragment))
 
+    async def _locator_visible(self, page: Any, selector: str, timeout: int = 300) -> bool:
+        try:
+            locator = page.locator(selector).first
+            if await locator.count() <= 0:
+                return False
+            return bool(await locator.is_visible(timeout=timeout))
+        except Exception:
+            return False
+
+    async def _page_looks_loading(self, page: Any) -> bool:
+        selectors = (
+            '[data-tid="m4b_loading"]',
+            ".theme-arco-spin",
+            ".theme-m4b-loading",
+        )
+        for selector in selectors:
+            if await self._locator_visible(page, selector, timeout=150):
+                return True
+        return False
+
+    async def _confirm_target_region_after_refresh(
+        self,
+        page: Any,
+        target_region: str,
+        *,
+        timeout_ms: int = 4000,
+        poll_ms: int = 200,
+    ) -> tuple[Optional[str], Optional[str]]:
+        waited = 0
+        last_region: Optional[str] = None
+        last_display_name: Optional[str] = None
+
+        while waited <= timeout_ms:
+            current_url = str(getattr(page, "url", "") or "")
+            last_region = self._current_region_from_url(current_url)
+            if last_region == target_region:
+                last_display_name = await self._current_shop_display_name(page, last_region)
+                if last_display_name and self._display_matches_region(last_display_name, last_region):
+                    return last_region, last_display_name
+                if last_display_name and not self._display_matches_region(last_display_name, last_region):
+                    if not await self._page_looks_loading(page):
+                        return last_region, last_display_name
+                elif waited >= poll_ms and not await self._page_looks_loading(page):
+                    return last_region, None
+
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+
+        return last_region, last_display_name
+
     async def run(self, page: Any) -> ShopSelectResult:
         current_url = str(getattr(page, "url", "") or "")
         current_region = self._current_region_from_url(current_url)
@@ -98,14 +155,13 @@ class TiktokShopSwitch:
         if current_region != target_region:
             target_url = self._rewrite_shop_region(current_url, target_region)
             await page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
-            await page.wait_for_timeout(800)
-            current_url = str(getattr(page, "url", "") or "")
-            current_region = self._current_region_from_url(current_url)
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(800)
 
+        current_region, display_name = await self._confirm_target_region_after_refresh(page, target_region)
         if current_region != target_region:
             return ShopSelectResult(success=False, message="failed to confirm target shop region")
 
-        display_name = await self._current_shop_display_name(page, current_region)
         region = current_region or target_region
 
         # TikTok products pages can spend a short period in a skeleton state

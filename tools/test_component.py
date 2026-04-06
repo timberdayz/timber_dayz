@@ -444,8 +444,18 @@ class ComponentTester:
         )
         return False
 
-    def _check_export_complete_gate(self, file_path: Optional[str], result: ComponentTestResult, component_name: str) -> bool:
-        gate_result = evaluate_export_complete(file_path=file_path)
+    def _check_export_complete_gate(
+        self,
+        file_path: Optional[str],
+        result: ComponentTestResult,
+        component_name: str,
+        success_message: Optional[str] = None,
+    ) -> bool:
+        gate_result = evaluate_export_complete(
+            file_path=file_path,
+            component_name=component_name,
+            success_message=success_message,
+        )
         if gate_result.status is GateStatus.READY:
             return True
 
@@ -1477,6 +1487,7 @@ class ComponentTester:
                         file_path=file_path,
                         result=result,
                         component_name=f"{self.platform}/{component_name}",
+                        success_message=getattr(exec_result, "message", None),
                     )
 
                 step_result = StepResult(

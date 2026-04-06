@@ -159,7 +159,194 @@
     </el-card>
 
     <!-- 账号列表 -->
-    <el-card class="table-card">
+    <div class="account-management-workspace">
+      <el-card class="table-card navigator-card">
+        <template #header>
+          <div class="workspace-card-header">
+            <div>
+              <div class="workspace-card-title">主账号导航</div>
+              <div class="workspace-card-subtitle">按平台查看主账号，并切换到当前工作区</div>
+            </div>
+            <el-tag type="info" effect="plain">{{ groupedMainAccounts.length }} 个平台分组</el-tag>
+          </div>
+        </template>
+
+        <div v-if="groupedMainAccounts.length" class="account-management-navigator">
+          <section
+            v-for="platformGroup in groupedMainAccounts"
+            :key="platformGroup.platform"
+            class="navigator-platform-group"
+          >
+            <div class="navigator-platform-heading">
+              <span>{{ platformGroup.platform }}</span>
+              <el-tag size="small" effect="plain">{{ platformGroup.mainAccounts.length }} 个主账号</el-tag>
+            </div>
+
+            <button
+              v-for="mainAccount in platformGroup.mainAccounts"
+              :key="mainAccount.key"
+              type="button"
+              class="navigator-main-account"
+              :class="{ 'is-active': selectedMainAccountGroupKey === mainAccount.key }"
+              @click="selectMainAccountGroup(mainAccount.key)"
+            >
+              <div class="navigator-main-account__top">
+                <span class="navigator-main-account__name">{{ mainAccount.mainAccountName }}</span>
+                <span class="navigator-main-account__count">{{ mainAccount.shopCount }} 店</span>
+              </div>
+              <div class="navigator-main-account__meta">{{ mainAccount.mainAccountId }}</div>
+              <div class="navigator-main-account__stats">
+                <span>启用 {{ mainAccount.activeShopCount }}</span>
+                <span>停用 {{ mainAccount.inactiveShopCount }}</span>
+                <span v-if="mainAccount.missingShopIdCount > 0">缺少店铺ID {{ mainAccount.missingShopIdCount }}</span>
+              </div>
+            </button>
+          </section>
+        </div>
+
+        <el-empty
+          v-else
+          description="暂时没有符合条件的主账号或店铺账号"
+        />
+      </el-card>
+
+      <div class="account-management-detail">
+        <el-card
+          v-if="selectedMainAccountSnapshot"
+          class="table-card current-main-account-summary"
+        >
+          <div class="current-main-account-summary__header">
+            <div>
+              <div class="workspace-card-title">
+                {{ selectedMainAccountSnapshot.mainAccountName || selectedMainAccountSnapshot.mainAccountId }}
+              </div>
+              <div class="workspace-card-subtitle">
+                {{ selectedMainAccountSnapshot.platform }} / {{ selectedMainAccountSnapshot.mainAccountId }}
+                <span v-if="selectedMainAccountSnapshot.loginUsername">
+                  / {{ selectedMainAccountSnapshot.loginUsername }}
+                </span>
+              </div>
+            </div>
+
+            <div class="current-main-account-summary__actions">
+              <el-button type="primary" @click="showCreateDialog = true">
+                <el-icon><Plus /></el-icon>
+                添加店铺账号
+              </el-button>
+              <el-button @click="showBatchDialog = true">
+                <el-icon><Files /></el-icon>
+                批量添加
+              </el-button>
+              <el-button type="warning" @click="handleDiscoverSelectedMainAccount" :loading="accountsStore.discoveryRunning">
+                探测当前店铺
+              </el-button>
+            </div>
+          </div>
+
+          <div class="current-main-account-summary__stats">
+            <div class="summary-stat-card">
+              <span class="summary-stat-card__label">店铺总数</span>
+              <strong>{{ selectedMainAccountSnapshot.shopCount }}</strong>
+            </div>
+            <div class="summary-stat-card">
+              <span class="summary-stat-card__label">启用店铺</span>
+              <strong>{{ selectedMainAccountSnapshot.activeShopCount }}</strong>
+            </div>
+            <div class="summary-stat-card">
+              <span class="summary-stat-card__label">停用店铺</span>
+              <strong>{{ selectedMainAccountSnapshot.inactiveShopCount }}</strong>
+            </div>
+            <div class="summary-stat-card">
+              <span class="summary-stat-card__label">缺少平台店铺ID</span>
+              <strong>{{ selectedMainAccountSnapshot.missingShopIdCount }}</strong>
+            </div>
+          </div>
+        </el-card>
+
+        <el-card
+          v-if="selectedMainAccountSnapshot"
+          class="table-card current-main-account-shops"
+        >
+          <template #header>
+            <div class="workspace-card-header">
+              <div>
+                <div class="workspace-card-title">当前主账号店铺列表</div>
+                <div class="workspace-card-subtitle">仅显示当前主账号下的店铺账号，保留高密度编辑能力</div>
+              </div>
+              <el-tag effect="plain">{{ selectedMainAccountShops.length }} 个店铺账号</el-tag>
+            </div>
+          </template>
+
+          <el-table
+            :data="selectedMainAccountShops"
+            v-loading="accountsStore.loading"
+            class="erp-w-full"
+            height="540"
+          >
+            <el-table-column prop="store_name" label="店铺名称" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="account_id" label="店铺账号ID" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="account_alias" label="店铺别名" min-width="160" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.account_alias">{{ row.account_alias }}</span>
+                <span v-else class="erp-text-muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="shop_id" label="平台店铺ID" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.shop_id">{{ row.shop_id }}</span>
+                <span v-else class="erp-text-muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="店铺类型" width="100">
+              <template #default="{ row }">
+                <el-tag v-if="row.shop_type === 'local'" type="success" size="small">本地店</el-tag>
+                <el-tag v-else-if="row.shop_type === 'global'" type="warning" size="small">全球店</el-tag>
+                <el-tag v-else type="info" size="small">未设置</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="shop_region" label="区域" width="100" />
+            <el-table-column label="店铺数据域能力" min-width="220">
+              <template #default="{ row }">
+                <el-tooltip :content="getCapabilitiesText(row.capabilities)" placement="top">
+                  <div class="capabilities-tags">
+                    <el-tag
+                      v-for="(enabled, domain) in row.capabilities"
+                      :key="domain"
+                      :type="enabled ? 'success' : 'info'"
+                      size="small"
+                      class="capability-tag"
+                    >
+                      {{ domainLabels[domain] || domain }}
+                    </el-tag>
+                  </div>
+                </el-tooltip>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-switch
+                  v-model="row.enabled"
+                  @change="handleToggleEnabled(row)"
+                  :loading="row._updating"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="150" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" @click="handleEdit(row)">编辑</el-button>
+                <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+
+        <el-card v-else class="table-card current-main-account-empty">
+          <el-empty description="暂时没有符合条件的主账号或店铺账号" />
+        </el-card>
+      </div>
+    </div>
+
+    <el-card v-if="false" class="table-card">
       <el-table 
         :data="accountsStore.accounts" 
         v-loading="accountsStore.loading"
@@ -500,7 +687,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useAccountsStore } from '@/stores/accounts'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { 
@@ -508,6 +695,12 @@ import {
   ShoppingCart, Box, Service, TrendCharts, Money, Grid
 } from '@element-plus/icons-vue'
 import PageHeader from '@/components/common/PageHeader.vue'
+import {
+  buildAccountManagementGroups,
+  buildMainAccountSnapshot,
+  findMainAccountGroup,
+  resolveSelectedMainAccountKey,
+} from '@/utils/accountManagementView'
 
 const accountsStore = useAccountsStore()
 
@@ -540,6 +733,7 @@ const showDiscoveryDialog = ref(false)
 const activeTab = ref('basic')
 const editingAccount = ref(null)
 const selectedMainAccountId = ref('')
+const selectedMainAccountGroupKey = ref('')
 
 // 表单引用
 const accountFormRef = ref(null)
@@ -595,6 +789,36 @@ const batchForm = reactive({
   ]
 })
 
+const groupedMainAccounts = computed(() => {
+  return buildAccountManagementGroups({
+    accounts: accountsStore.accounts || [],
+    mainAccounts: accountsStore.mainAccounts || [],
+  })
+})
+
+const selectedMainAccountGroup = computed(() => {
+  return findMainAccountGroup(groupedMainAccounts.value, selectedMainAccountGroupKey.value)
+})
+
+const selectedMainAccountSnapshot = computed(() => {
+  return buildMainAccountSnapshot(selectedMainAccountGroup.value)
+})
+
+const selectedMainAccountShops = computed(() => {
+  return selectedMainAccountSnapshot.value?.shops || []
+})
+
+watch(
+  groupedMainAccounts,
+  (groups) => {
+    selectedMainAccountGroupKey.value = resolveSelectedMainAccountKey(
+      groups,
+      selectedMainAccountGroupKey.value
+    )
+  },
+  { immediate: true }
+)
+
 // ==================== 方法 ====================
 
 /**
@@ -649,6 +873,20 @@ function getMainAccountDisplayName(account) {
     || account.parent_account
     || '-'
   )
+}
+
+function selectMainAccountGroup(key) {
+  selectedMainAccountGroupKey.value = key
+}
+
+async function handleDiscoverSelectedMainAccount() {
+  if (!selectedMainAccountSnapshot.value) {
+    ElMessage.warning('请先选择主账号')
+    return
+  }
+
+  selectedMainAccountId.value = selectedMainAccountSnapshot.value.mainAccountId
+  await handleDiscoverCurrentShop()
 }
 
 async function handleDiscoverCurrentShop() {
@@ -933,6 +1171,164 @@ function getCapabilitiesText(capabilities) {
   margin-bottom: 20px;
 }
 
+.account-management-workspace {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.account-management-detail {
+  min-width: 0;
+}
+
+.workspace-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.workspace-card-subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #909399;
+}
+
+.account-management-navigator {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-height: 920px;
+  overflow-y: auto;
+}
+
+.navigator-platform-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.navigator-platform-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #606266;
+}
+
+.navigator-main-account {
+  width: 100%;
+  border: 1px solid #e4e7ed;
+  border-radius: 12px;
+  background: #fff;
+  padding: 14px 14px 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.navigator-main-account:hover {
+  border-color: #c6e2ff;
+  box-shadow: 0 8px 20px rgba(31, 35, 41, 0.08);
+  transform: translateY(-1px);
+}
+
+.navigator-main-account.is-active {
+  border-color: #409eff;
+  background: linear-gradient(180deg, #f5f9ff 0%, #ffffff 100%);
+  box-shadow: 0 10px 26px rgba(64, 158, 255, 0.14);
+}
+
+.navigator-main-account__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.navigator-main-account__name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.navigator-main-account__count {
+  font-size: 12px;
+  color: #606266;
+  white-space: nowrap;
+}
+
+.navigator-main-account__meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  word-break: break-all;
+}
+
+.navigator-main-account__stats {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.current-main-account-summary__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.current-main-account-summary__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.current-main-account-summary__stats {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-stat-card {
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+  background: #fafafa;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summary-stat-card__label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.summary-stat-card strong {
+  font-size: 22px;
+  line-height: 1;
+  color: #303133;
+}
+
+.current-main-account-empty :deep(.el-empty) {
+  padding: 48px 0;
+}
+
 .unmatched-aliases {
   display: flex;
   flex-direction: column;
@@ -984,5 +1380,29 @@ function getCapabilitiesText(capabilities) {
 
 .capability-item .el-icon {
   font-size: 18px;
+}
+
+@media (max-width: 1280px) {
+  .account-management-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .account-management-navigator {
+    max-height: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .current-main-account-summary__header {
+    flex-direction: column;
+  }
+
+  .current-main-account-summary__actions {
+    justify-content: flex-start;
+  }
+
+  .current-main-account-summary__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>
