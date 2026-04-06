@@ -57,3 +57,15 @@ def test_calculate_settlement_detail_ratios():
     assert details[0]["share_ratio"] == pytest.approx(1550000 / 2030000, rel=1e-4)
     assert details[1]["share_ratio"] == pytest.approx(480000 / 2030000, rel=1e-4)
     assert details[0]["estimated_income"] + details[1]["estimated_income"] == pytest.approx(32000, abs=0.01)
+
+
+def test_calculate_distributable_details_with_no_investments():
+    service = FollowInvestmentService(db=None)
+
+    details = service.build_settlement_details(
+        year_month="2026-03",
+        distributable_amount=32000,
+        investments=[],
+    )
+
+    assert details == []

@@ -488,6 +488,132 @@
             </el-table-column>
           </el-table>
         </el-card>
+
+        <el-card class="profit-summary" style="margin-top: 20px;">
+          <template #header>
+            <div class="card-header">
+              <span>跟投记录</span>
+              <el-button type="primary" size="small" @click="openCreateFollowInvestment">
+                新增跟投
+              </el-button>
+            </div>
+          </template>
+
+          <el-form :inline="true" class="filter-form">
+            <el-form-item label="平台">
+              <el-select v-model="followInvestmentQuery.platform_code" style="width: 140px">
+                <el-option label="Shopee" value="shopee" />
+                <el-option label="TikTok" value="tiktok" />
+                <el-option label="Amazon" value="amazon" />
+                <el-option label="妙手ERP" value="miaoshou" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="店铺ID">
+              <el-input v-model="followInvestmentQuery.shop_id" placeholder="请输入店铺ID" style="width: 180px" />
+            </el-form-item>
+            <el-form-item label="状态">
+              <el-select v-model="followInvestmentQuery.status" clearable style="width: 140px">
+                <el-option label="生效" value="active" />
+                <el-option label="停用" value="inactive" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button @click="loadFollowInvestments" :loading="financeStore.followInvestments.loading">
+                查询记录
+              </el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-table :data="financeStore.followInvestments.data" v-loading="financeStore.followInvestments.loading" stripe>
+            <el-table-column prop="id" label="ID" width="80" />
+            <el-table-column prop="investor_user_id" label="投资人ID" width="120" />
+            <el-table-column prop="platform_code" label="平台" width="120" />
+            <el-table-column prop="shop_id" label="店铺ID" min-width="140" />
+            <el-table-column prop="contribution_amount" label="本金 (楼)" width="140" align="right">
+              <template #default="{ row }">{{ formatCurrency(row.contribution_amount) }}</template>
+            </el-table-column>
+            <el-table-column prop="contribution_date" label="投入日期" width="120" />
+            <el-table-column prop="withdraw_date" label="退出日期" width="120" />
+            <el-table-column prop="status" label="状态" width="100" />
+            <el-table-column label="操作" width="120" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="openEditFollowInvestment(row)">
+                  编辑
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+
+        <el-card class="profit-summary" style="margin-top: 20px;">
+          <template #header>
+            <div class="card-header">
+              <span>结算台账</span>
+            </div>
+          </template>
+
+          <el-form :inline="true" class="filter-form">
+            <el-form-item label="月份">
+              <el-date-picker
+                v-model="settlementQuery.period_month"
+                type="month"
+                value-format="YYYY-MM"
+                format="YYYY-MM"
+                style="width: 140px"
+              />
+            </el-form-item>
+            <el-form-item label="平台">
+              <el-select v-model="settlementQuery.platform_code" style="width: 140px">
+                <el-option label="Shopee" value="shopee" />
+                <el-option label="TikTok" value="tiktok" />
+                <el-option label="Amazon" value="amazon" />
+                <el-option label="妙手ERP" value="miaoshou" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="店铺ID">
+              <el-input v-model="settlementQuery.shop_id" placeholder="请输入店铺ID" style="width: 180px" />
+            </el-form-item>
+            <el-form-item label="状态">
+              <el-select v-model="settlementQuery.status" clearable style="width: 140px">
+                <el-option label="草稿" value="draft" />
+                <el-option label="已试算" value="calculated" />
+                <el-option label="已审核" value="approved" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button @click="loadFollowInvestmentSettlements" :loading="financeStore.followInvestmentSettlements.loading">
+                查询台账
+              </el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-table :data="financeStore.followInvestmentSettlements.data" v-loading="financeStore.followInvestmentSettlements.loading" stripe>
+            <el-table-column prop="id" label="结算ID" width="100" />
+            <el-table-column prop="period_month" label="月份" width="120" />
+            <el-table-column prop="platform_code" label="平台" width="120" />
+            <el-table-column prop="shop_id" label="店铺ID" min-width="140" />
+            <el-table-column prop="profit_basis_amount" label="结算基准利润 (楼)" width="160" align="right">
+              <template #default="{ row }">{{ formatCurrency(row.profit_basis_amount) }}</template>
+            </el-table-column>
+            <el-table-column prop="distribution_ratio" label="分配比例" width="120" align="right">
+              <template #default="{ row }">{{ formatPercentValue(row.distribution_ratio) }}</template>
+            </el-table-column>
+            <el-table-column prop="distributable_amount" label="可分配收益 (楼)" width="160" align="right">
+              <template #default="{ row }">{{ formatCurrency(row.distributable_amount) }}</template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态" width="100" />
+            <el-table-column label="操作" width="180" fixed="right">
+              <template #default="{ row }">
+                <el-button v-if="row.status !== 'approved'" link type="success" size="small" @click="approveFollowInvestment(row)">
+                  审核通过
+                </el-button>
+                <el-button v-if="row.status === 'approved'" link type="warning" size="small" @click="reopenFollowInvestment(row)">
+                  撤销审核
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
       </el-tab-pane>
     </el-tabs>
 
@@ -564,6 +690,50 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="showFollowInvestmentDialog" :title="followInvestmentDialogMode === 'create' ? '新增跟投' : '编辑跟投'" width="600px">
+      <el-form :model="followInvestmentRecordForm" label-width="120px">
+        <el-form-item label="投资人ID">
+          <el-input-number v-model="followInvestmentRecordForm.investor_user_id" :min="1" />
+        </el-form-item>
+        <el-form-item label="平台">
+          <el-select v-model="followInvestmentRecordForm.platform_code" style="width: 180px">
+            <el-option label="Shopee" value="shopee" />
+            <el-option label="TikTok" value="tiktok" />
+            <el-option label="Amazon" value="amazon" />
+            <el-option label="妙手ERP" value="miaoshou" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="店铺ID">
+          <el-input v-model="followInvestmentRecordForm.shop_id" />
+        </el-form-item>
+        <el-form-item label="本金">
+          <el-input-number v-model="followInvestmentRecordForm.contribution_amount" :min="0" :precision="2" />
+        </el-form-item>
+        <el-form-item label="投入日期">
+          <el-date-picker v-model="followInvestmentRecordForm.contribution_date" type="date" value-format="YYYY-MM-DD" />
+        </el-form-item>
+        <el-form-item label="退出日期">
+          <el-date-picker v-model="followInvestmentRecordForm.withdraw_date" type="date" value-format="YYYY-MM-DD" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="followInvestmentRecordForm.status" style="width: 180px">
+            <el-option label="生效" value="active" />
+            <el-option label="停用" value="inactive" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="followInvestmentRecordForm.remark" type="textarea" rows="3" />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="showFollowInvestmentDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitFollowInvestmentRecord" :loading="submitting">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -599,6 +769,19 @@ const followInvestmentForm = ref({
   distribution_ratio: 0.4
 })
 
+const followInvestmentQuery = ref({
+  platform_code: 'shopee',
+  shop_id: '',
+  status: ''
+})
+
+const settlementQuery = ref({
+  period_month: currentMonth,
+  platform_code: 'shopee',
+  shop_id: '',
+  status: ''
+})
+
 // 筛选器
 const dateRange = ref([])
 const filters = ref({
@@ -617,6 +800,9 @@ const expensePage = ref(1)
 // 对话框
 const showPaymentDialog = ref(false)
 const showARDetailDialog = ref(false)
+const showFollowInvestmentDialog = ref(false)
+const followInvestmentDialogMode = ref('create')
+const editingFollowInvestmentId = ref(null)
 
 // 收款表单
 const paymentForm = ref({
@@ -630,6 +816,17 @@ const paymentForm = ref({
 })
 
 const submitting = ref(false)
+
+const followInvestmentRecordForm = ref({
+  investor_user_id: null,
+  platform_code: 'shopee',
+  shop_id: '',
+  contribution_amount: 0,
+  contribution_date: new Date().toISOString().split('T')[0],
+  withdraw_date: '',
+  status: 'active',
+  remark: ''
+})
 
 const loadProfitBasis = async () => {
   if (!profitBasisForm.value.shop_id) {
@@ -679,6 +876,110 @@ const runFollowInvestmentSettlement = async () => {
     ElMessage.success('跟投收益试算完成')
   } catch (error) {
     ElMessage.error('跟投收益试算失败: ' + error.message)
+  }
+}
+
+const loadFollowInvestments = async () => {
+  await financeStore.fetchFollowInvestments({
+    platform_code: followInvestmentQuery.value.platform_code || undefined,
+    shop_id: followInvestmentQuery.value.shop_id || undefined,
+    status: followInvestmentQuery.value.status || undefined
+  })
+}
+
+const loadFollowInvestmentSettlements = async () => {
+  await financeStore.fetchFollowInvestmentSettlements({
+    period_month: settlementQuery.value.period_month || undefined,
+    platform_code: settlementQuery.value.platform_code || undefined,
+    shop_id: settlementQuery.value.shop_id || undefined,
+    status: settlementQuery.value.status || undefined
+  })
+}
+
+const resetFollowInvestmentRecordForm = () => {
+  followInvestmentRecordForm.value = {
+    investor_user_id: null,
+    platform_code: 'shopee',
+    shop_id: '',
+    contribution_amount: 0,
+    contribution_date: new Date().toISOString().split('T')[0],
+    withdraw_date: '',
+    status: 'active',
+    remark: ''
+  }
+  editingFollowInvestmentId.value = null
+}
+
+const openCreateFollowInvestment = () => {
+  followInvestmentDialogMode.value = 'create'
+  resetFollowInvestmentRecordForm()
+  showFollowInvestmentDialog.value = true
+}
+
+const openEditFollowInvestment = (row) => {
+  followInvestmentDialogMode.value = 'edit'
+  editingFollowInvestmentId.value = row.id
+  followInvestmentRecordForm.value = {
+    investor_user_id: row.investor_user_id,
+    platform_code: row.platform_code,
+    shop_id: row.shop_id,
+    contribution_amount: row.contribution_amount,
+    contribution_date: row.contribution_date,
+    withdraw_date: row.withdraw_date || '',
+    status: row.status,
+    remark: row.remark || ''
+  }
+  showFollowInvestmentDialog.value = true
+}
+
+const submitFollowInvestmentRecord = async () => {
+  try {
+    submitting.value = true
+    const payload = {
+      ...followInvestmentRecordForm.value,
+      withdraw_date: followInvestmentRecordForm.value.withdraw_date || null
+    }
+    if (followInvestmentDialogMode.value === 'create') {
+      await financeStore.createFollowInvestment(payload)
+      ElMessage.success('跟投记录已创建')
+    } else {
+      await financeStore.updateFollowInvestment(
+        editingFollowInvestmentId.value,
+        payload,
+        {
+          platform_code: followInvestmentQuery.value.platform_code || undefined,
+          shop_id: followInvestmentQuery.value.shop_id || undefined,
+          status: followInvestmentQuery.value.status || undefined
+        }
+      )
+      ElMessage.success('跟投记录已更新')
+    }
+    showFollowInvestmentDialog.value = false
+    resetFollowInvestmentRecordForm()
+  } catch (error) {
+    ElMessage.error('保存跟投记录失败: ' + error.message)
+  } finally {
+    submitting.value = false
+  }
+}
+
+const approveFollowInvestment = async (row) => {
+  try {
+    await financeStore.approveFollowInvestmentSettlement(row.id)
+    ElMessage.success('结算已审核')
+    await loadFollowInvestmentSettlements()
+  } catch (error) {
+    ElMessage.error('审核失败: ' + error.message)
+  }
+}
+
+const reopenFollowInvestment = async (row) => {
+  try {
+    await financeStore.reopenFollowInvestmentSettlement(row.id)
+    ElMessage.success('结算已撤销审核')
+    await loadFollowInvestmentSettlements()
+  } catch (error) {
+    ElMessage.error('撤销审核失败: ' + error.message)
   }
 }
 
@@ -924,6 +1225,8 @@ const getProfitMarginType = (margin) => {
 
 onMounted(() => {
   initData()
+  loadFollowInvestments()
+  loadFollowInvestmentSettlements()
 })
 </script>
 

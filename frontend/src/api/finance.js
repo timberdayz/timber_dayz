@@ -188,8 +188,32 @@ export default {
     return await api._post('/finance/profit-basis/rebuild', data)
   },
 
+  async getFollowInvestments(params = {}) {
+    return await api._get('/finance/follow-investments', { params })
+  },
+
+  async createFollowInvestment(data) {
+    return await api._post('/finance/follow-investments', data)
+  },
+
+  async updateFollowInvestment(id, data) {
+    return await api._put(`/finance/follow-investments/${id}`, data)
+  },
+
   async calculateFollowInvestmentSettlement(data) {
     return await api._post('/finance/follow-investments/settlements/calculate', data)
+  },
+
+  async approveFollowInvestmentSettlement(id) {
+    return await api._post(`/finance/follow-investments/settlements/${id}/approve`, {})
+  },
+
+  async reopenFollowInvestmentSettlement(id) {
+    return await api._post(`/finance/follow-investments/settlements/${id}/reopen`, {})
+  },
+
+  async getFollowInvestmentSettlements(params = {}) {
+    return await api._get('/finance/follow-investments/settlements', { params })
   },
 
   async getMyFollowInvestmentIncome(params = {}) {

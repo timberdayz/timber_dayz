@@ -39,7 +39,7 @@
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <template #header>已支付收益</template>
+          <template #header>已确认记录</template>
           <div style="font-size: 22px; font-weight: bold; color: #e6a23c;">
             {{ formatMoney(summary.paid_income) }}
           </div>
@@ -79,7 +79,7 @@
       <el-table-column prop="approved_income" label="已批准 (楼)" width="140" align="right">
         <template #default="{ row }">{{ formatMoney(row.approved_income) }}</template>
       </el-table-column>
-      <el-table-column prop="paid_income" label="已支付 (楼)" width="140" align="right">
+      <el-table-column prop="paid_income" label="已确认 (楼)" width="140" align="right">
         <template #default="{ row }">{{ formatMoney(row.paid_income) }}</template>
       </el-table-column>
       <el-table-column prop="status" label="状态" width="120" />

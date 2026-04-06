@@ -67,6 +67,18 @@ export const useFinanceStore = defineStore('finance', {
       error: null
     },
 
+    followInvestments: {
+      data: [],
+      loading: false,
+      error: null
+    },
+
+    followInvestmentSettlements: {
+      data: [],
+      loading: false,
+      error: null
+    },
+
     // 逾期预警
     overdueAlert: {
       data: [],
@@ -302,6 +314,67 @@ export const useFinanceStore = defineStore('finance', {
       }
     },
 
+    async fetchFollowInvestments(params = {}) {
+      this.followInvestments.loading = true
+      this.followInvestments.error = null
+
+      try {
+        const response = await financeApi.getFollowInvestments(params)
+        this.followInvestments.data = response.data || response || []
+      } catch (error) {
+        this.followInvestments.error = error.message
+        console.error('鑾峰彇璺熸姇璁板綍澶辫触:', error)
+      } finally {
+        this.followInvestments.loading = false
+      }
+    },
+
+    async createFollowInvestment(data) {
+      const response = await financeApi.createFollowInvestment(data)
+      await this.fetchFollowInvestments({
+        platform_code: data.platform_code,
+        shop_id: data.shop_id
+      })
+      return response
+    },
+
+    async updateFollowInvestment(id, data, filters = {}) {
+      const response = await financeApi.updateFollowInvestment(id, data)
+      await this.fetchFollowInvestments(filters)
+      return response
+    },
+
+    async approveFollowInvestmentSettlement(id) {
+      const response = await financeApi.approveFollowInvestmentSettlement(id)
+      if (this.followInvestmentSettlement.data?.settlement?.id === id) {
+        this.followInvestmentSettlement.data.settlement.status = 'approved'
+      }
+      return response
+    },
+
+    async reopenFollowInvestmentSettlement(id) {
+      const response = await financeApi.reopenFollowInvestmentSettlement(id)
+      if (this.followInvestmentSettlement.data?.settlement?.id === id) {
+        this.followInvestmentSettlement.data.settlement.status = 'draft'
+      }
+      return response
+    },
+
+    async fetchFollowInvestmentSettlements(params = {}) {
+      this.followInvestmentSettlements.loading = true
+      this.followInvestmentSettlements.error = null
+
+      try {
+        const response = await financeApi.getFollowInvestmentSettlements(params)
+        this.followInvestmentSettlements.data = response.data || response || []
+      } catch (error) {
+        this.followInvestmentSettlements.error = error.message
+        console.error('鑾峰彇璺熸姇缁撶畻鍙拌处澶辫触:', error)
+      } finally {
+        this.followInvestmentSettlements.loading = false
+      }
+    },
+
     /**
      * 获取逾期预警
      */
@@ -385,6 +458,8 @@ export const useFinanceStore = defineStore('finance', {
       this.profitReport.data = {}
       this.profitBasis.data = null
       this.followInvestmentSettlement.data = { settlement: null, details: [] }
+      this.followInvestments.data = []
+      this.followInvestmentSettlements.data = []
       this.overdueAlert.data = []
       this.overview.data = {}
       this.cashFlow.data = []
