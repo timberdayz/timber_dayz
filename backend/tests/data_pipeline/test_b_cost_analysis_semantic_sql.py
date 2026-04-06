@@ -43,6 +43,18 @@ def test_orders_atomic_keeps_core_amount_fields_while_adding_b_cost_fields():
     assert "profit" in sql_text
 
 
+def test_orders_atomic_appends_b_cost_fields_after_legacy_columns_for_replace_safety():
+    sql_text = Path("sql/semantic/orders_atomic.sql").read_text(encoding="utf-8")
+
+    select_tail = sql_text.rsplit("SELECT", 1)[-1]
+    product_quantity_pos = select_tail.find("COALESCE(product_quantity, 0) AS product_quantity")
+    purchase_amount_pos = select_tail.find("purchase_amount,")
+
+    assert product_quantity_pos != -1
+    assert purchase_amount_pos != -1
+    assert purchase_amount_pos > product_quantity_pos
+
+
 def test_orders_atomic_covers_required_b_cost_chinese_aliases():
     sql_text = Path("sql/semantic/orders_atomic.sql").read_text(
         encoding="utf-8", errors="replace"

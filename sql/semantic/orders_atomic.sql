@@ -453,15 +453,6 @@ SELECT
     COALESCE(sales_amount, 0) AS sales_amount,
     COALESCE(paid_amount, 0) AS paid_amount,
     COALESCE(profit, 0) AS profit,
-    purchase_amount,
-    order_original_amount,
-    warehouse_operation_fee,
-    shipping_fee,
-    promotion_fee,
-    platform_commission,
-    platform_deduction_fee,
-    platform_voucher,
-    platform_service_fee,
     COALESCE(product_quantity, 0) AS product_quantity,
     COALESCE(buyer_count, 0) AS buyer_count,
     (
@@ -472,12 +463,6 @@ SELECT
         + COALESCE(platform_voucher, 0)
         + COALESCE(platform_service_fee, 0)
     ) AS platform_total_cost_itemized,
-    (
-        order_original_amount
-        - purchase_amount
-        - profit
-        - warehouse_operation_fee
-    ) AS platform_total_cost_derived,
     product_id,
     platform_sku,
     sku_id,
@@ -490,5 +475,20 @@ SELECT
     header_columns,
     data_hash,
     ingest_timestamp,
-    currency_code
+    currency_code,
+    purchase_amount,
+    order_original_amount,
+    warehouse_operation_fee,
+    shipping_fee,
+    promotion_fee,
+    platform_commission,
+    platform_deduction_fee,
+    platform_voucher,
+    platform_service_fee,
+    (
+        order_original_amount
+        - purchase_amount
+        - profit
+        - warehouse_operation_fee
+    ) AS platform_total_cost_derived
 FROM alias_resolved;
