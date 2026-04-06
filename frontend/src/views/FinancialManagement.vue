@@ -331,6 +331,14 @@
             </div>
           </template>
 
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 16px;"
+            title="口径说明：orders_profit 用于订单分析，contribution_profit 用于财务展示参考，profit_basis_amount 才是正式结算和利润分配的唯一基准。"
+          />
+
           <el-form :inline="true" class="filter-form">
             <el-form-item label="月份">
               <el-date-picker
@@ -605,6 +613,10 @@
               <template #default="{ row }">{{ formatCurrency(row.distributable_amount) }}</template>
             </el-table-column>
             <el-table-column prop="status" label="状态" width="100" />
+            <el-table-column prop="approved_by_name" label="审核人" width="120" />
+            <el-table-column prop="approved_at" label="审核时间" width="180">
+              <template #default="{ row }">{{ formatDateTime(row.approved_at) }}</template>
+            </el-table-column>
           <el-table-column label="操作" width="180" fixed="right">
             <template #default="{ row }">
               <el-button link type="info" size="small" @click="viewSettlementDetails(row)">
@@ -756,6 +768,7 @@
         stripe
       >
         <el-table-column prop="investor_user_id" label="投资人ID" width="120" />
+        <el-table-column prop="investor_name" label="投资人姓名" width="140" />
         <el-table-column prop="contribution_amount_snapshot" label="本金快照 (¥)" width="140" align="right">
           <template #default="{ row }">{{ formatCurrency(row.contribution_amount_snapshot) }}</template>
         </el-table-column>
