@@ -83,6 +83,18 @@ export const ROLE_CONFIG = {
       'sales-dashboard', 'report-center', 'message-center', 'notifications'
     ]
   },
+  investor: {
+    name: '投资人',
+    icon: 'Wallet',
+    permissions: [
+      'business-overview',
+      'personal-settings',
+      'user-guide',
+      'video-tutorials',
+      'faq',
+      'my-follow-investment-income'
+    ]
+  },
   tourist: {
     name: '游客',
     icon: 'View',
@@ -102,6 +114,7 @@ export function normalizeRoleCode(roleCode) {
     '操作员': 'operator',
     '运营': 'operator',
     '财务': 'finance',
+    '投资人': 'investor',
     '游客': 'tourist'
   }
   if (map[v]) return map[v]

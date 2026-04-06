@@ -74,7 +74,7 @@ const routes = [
       title: '业务概览',
       icon: 'DataBoard',
       permission: 'business-overview',
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist', 'investor']
     }
   },
   {
@@ -96,7 +96,7 @@ const routes = [
       title: '销售分析',
       icon: 'TrendCharts',
       permission: 'sales-analysis',
-      roles: ['admin', 'manager', 'operator', 'finance']
+      roles: ['admin', 'manager', 'operator', 'finance', 'investor']
     }
   },
   {
@@ -107,7 +107,7 @@ const routes = [
       title: '销售看板',
       icon: 'DataAnalysis',
       permission: 'sales-dashboard',
-      roles: ['admin', 'manager', 'operator', 'finance']
+      roles: ['admin', 'manager', 'operator', 'finance', 'investor']
     }
   },
   {
@@ -934,7 +934,7 @@ const routes = [
       title: '绩效公示',
       icon: 'View',
       permission: 'performance:read',
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']  // 全员可见
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist', 'investor']  // 全员可见
     }
   },
   {
@@ -1085,7 +1085,7 @@ const routes = [
       title: '操作指南',
       icon: 'Reading',
       permission: null,
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist', 'investor']
     }
   },
   {
@@ -1096,7 +1096,7 @@ const routes = [
       title: '视频教程',
       icon: 'VideoPlay',
       permission: null,
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist', 'investor']
     }
   },
   {
@@ -1107,7 +1107,7 @@ const routes = [
       title: '常见问题',
       icon: 'QuestionFilled',
       permission: null,
-      roles: ['admin', 'manager', 'operator', 'finance', 'tourist']
+      roles: ['admin', 'manager', 'operator', 'finance', 'tourist', 'investor']
     }
   },
   

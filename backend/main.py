@@ -97,6 +97,7 @@ from backend.models.database import init_db, get_db
 from backend.utils.config import get_settings
 from modules.core.logger import get_logger
 from backend.services.cloud_b_class_auto_sync_factory import build_cloud_sync_runtime_from_env
+from backend.services.system_role_service import ensure_system_roles
 from backend.utils.postgres_path import auto_configure_postgres_path
 from modules.utils.sessions.legacy_shop_artifact_cleanup import (
     collect_legacy_shop_artifacts_for_active_shops,
@@ -249,6 +250,20 @@ async def lifespan(app: FastAPI):
             else:
                 # 开发环境:仅警告
                 logger.warning(f"[WARN] 数据库表初始化部分失败: {e}")
+        
+        try:
+            from backend.models.database import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as session:
+                created_role_codes = await ensure_system_roles(session)
+
+            if created_role_codes:
+                logger.info("[OK] 系统角色补齐完成: %s", ", ".join(created_role_codes))
+            else:
+                logger.info("[OK] 系统角色已完整，无需补齐")
+        except Exception as role_seed_error:
+            logger.error(f"[ERROR] 系统角色补齐失败: {role_seed_error}")
+            raise
         
         # 4. 连接池预热(<2秒)
         step_start = time.time()
