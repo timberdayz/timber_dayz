@@ -178,6 +178,18 @@ export default {
    */
   async getExpenseRatio(params) {
     return await api.get('/expense-ratio', { params })
+  },
+
+  async getProfitBasis(params) {
+    return await api._get('/finance/profit-basis', { params })
+  },
+
+  async rebuildProfitBasis(data) {
+    return await api._post('/finance/profit-basis/rebuild', data)
+  },
+
+  async calculateFollowInvestmentSettlement(data) {
+    return await api._post('/finance/follow-investments/settlements/calculate', data)
   }
 }
 

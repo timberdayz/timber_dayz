@@ -2694,6 +2694,125 @@ class ApprovalLog(Base):
     )
 
 
+class ShopProfitBasis(Base):
+    """店铺月度统一结算利润快照表"""
+    __tablename__ = "shop_profit_basis"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+
+    orders_profit_amount = Column(Float, default=0.0, nullable=False)
+    a_class_cost_amount = Column(Float, default=0.0, nullable=False)
+    b_class_cost_amount = Column(Float, default=0.0, nullable=False)
+    profit_basis_amount = Column(Float, default=0.0, nullable=False)
+
+    basis_version = Column(String(64), default="A_ONLY_V1", nullable=False)
+    is_locked = Column(Boolean, default=False, nullable=False)
+
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("period_month", "platform_code", "shop_id", "basis_version", name="uq_shop_profit_basis"),
+        Index("ix_shop_profit_basis_period", "period_month"),
+        Index("ix_shop_profit_basis_shop", "platform_code", "shop_id"),
+        {"schema": "finance"},
+    )
+
+
+class FollowInvestment(Base):
+    """店铺跟投本金记录表"""
+    __tablename__ = "follow_investments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    investor_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+
+    contribution_amount = Column(Float, default=0.0, nullable=False)
+    contribution_date = Column(Date, nullable=False)
+    withdraw_date = Column(Date, nullable=True)
+
+    capital_type = Column(String(32), default="working_capital", nullable=False)
+    status = Column(String(32), default="active", nullable=False)
+    remark = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_follow_investments_user", "investor_user_id", "status"),
+        Index("ix_follow_investments_shop", "platform_code", "shop_id", "contribution_date"),
+        {"schema": "finance"},
+    )
+
+
+class FollowInvestmentSettlement(Base):
+    """店铺月度跟投结算头表"""
+    __tablename__ = "follow_investment_settlements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    profit_basis_id = Column(Integer, ForeignKey("finance.shop_profit_basis.id"), nullable=False)
+    period_month = Column(String(16), nullable=False)
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+
+    profit_basis_amount = Column(Float, default=0.0, nullable=False)
+    distribution_ratio = Column(Float, default=0.0, nullable=False)
+    distributable_amount = Column(Float, default=0.0, nullable=False)
+
+    status = Column(String(32), default="draft", nullable=False)
+    approved_by = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_follow_investment_settlements_period", "period_month", "status"),
+        Index("ix_follow_investment_settlements_shop", "platform_code", "shop_id"),
+        {"schema": "finance"},
+    )
+
+
+class FollowInvestmentDetail(Base):
+    """店铺月度跟投结算明细表"""
+    __tablename__ = "follow_investment_details"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    settlement_id = Column(Integer, ForeignKey("finance.follow_investment_settlements.id", ondelete="CASCADE"), nullable=False)
+    investor_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
+
+    contribution_amount_snapshot = Column(Float, default=0.0, nullable=False)
+    occupied_days = Column(Integer, default=0, nullable=False)
+    weighted_capital = Column(Float, default=0.0, nullable=False)
+    share_ratio = Column(Float, default=0.0, nullable=False)
+
+    estimated_income = Column(Float, default=0.0, nullable=False)
+    approved_income = Column(Float, default=0.0, nullable=False)
+    paid_income = Column(Float, default=0.0, nullable=False)
+
+    payment_status = Column(String(32), default="pending", nullable=False)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_follow_investment_details_settlement", "settlement_id"),
+        Index("ix_follow_investment_details_user", "investor_user_id", "settlement_id"),
+        {"schema": "finance"},
+    )
+
+
 class ReturnOrder(Base):
     """退货单表"""
     __tablename__ = "return_orders"
