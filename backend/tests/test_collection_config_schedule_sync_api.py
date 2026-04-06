@@ -143,12 +143,14 @@ async def _seed_shopee_accounts(session):
 async def test_create_config_with_schedule_enabled_registers_job_immediately(
     schedule_sync_client,
     schedule_sync_session,
+    auth_headers,
 ):
     client, fake_scheduler = schedule_sync_client
     await _seed_shopee_accounts(schedule_sync_session)
 
     response = await client.post(
         "/api/collection/configs",
+        headers=auth_headers,
         json={
             "name": "shopee-scheduled-v1",
             "platform": "shopee",
@@ -174,12 +176,14 @@ async def test_create_config_with_schedule_enabled_registers_job_immediately(
 async def test_update_config_schedule_reschedules_immediately(
     schedule_sync_client,
     schedule_sync_session,
+    auth_headers,
 ):
     client, fake_scheduler = schedule_sync_client
     await _seed_shopee_accounts(schedule_sync_session)
 
     create_response = await client.post(
         "/api/collection/configs",
+        headers=auth_headers,
         json={
             "name": "shopee-scheduled-v2",
             "platform": "shopee",
@@ -197,6 +201,7 @@ async def test_update_config_schedule_reschedules_immediately(
 
     update_response = await client.put(
         f"/api/collection/configs/{config_id}",
+        headers=auth_headers,
         json={
             "schedule_enabled": True,
             "schedule_cron": "0 12 * * *",
@@ -211,12 +216,14 @@ async def test_update_config_schedule_reschedules_immediately(
 async def test_disable_and_delete_config_remove_registered_job_immediately(
     schedule_sync_client,
     schedule_sync_session,
+    auth_headers,
 ):
     client, fake_scheduler = schedule_sync_client
     await _seed_shopee_accounts(schedule_sync_session)
 
     create_response = await client.post(
         "/api/collection/configs",
+        headers=auth_headers,
         json={
             "name": "shopee-scheduled-v3",
             "platform": "shopee",
@@ -235,6 +242,7 @@ async def test_disable_and_delete_config_remove_registered_job_immediately(
 
     disable_response = await client.put(
         f"/api/collection/configs/{config_id}",
+        headers=auth_headers,
         json={
             "schedule_enabled": False,
             "schedule_cron": None,
@@ -243,6 +251,6 @@ async def test_disable_and_delete_config_remove_registered_job_immediately(
     assert disable_response.status_code == 200
     assert fake_scheduler.remove_calls[-1] == config_id
 
-    delete_response = await client.delete(f"/api/collection/configs/{config_id}")
+    delete_response = await client.delete(f"/api/collection/configs/{config_id}", headers=auth_headers)
     assert delete_response.status_code == 200
     assert fake_scheduler.remove_calls[-1] == config_id
