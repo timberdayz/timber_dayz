@@ -72,9 +72,32 @@ class TiktokExport(ExportComponent):
 
     async def _is_clickable(self, locator: Any) -> bool:
         try:
-            return bool(await locator.is_visible(timeout=500))
+            if not await locator.is_visible(timeout=500):
+                return False
         except Exception:
             return False
+
+        try:
+            if hasattr(locator, "is_enabled"):
+                enabled = await locator.is_enabled()
+                if enabled is False:
+                    return False
+        except Exception:
+            pass
+
+        for attr in ("disabled", "aria-disabled", "data-disabled", "class"):
+            try:
+                value = await locator.get_attribute(attr)
+            except Exception:
+                value = None
+            if attr == "disabled" and value is not None:
+                return False
+            text = str(value or "").strip().lower()
+            if attr == "class" and "disabled" in text:
+                return False
+            if text in {"true", "disabled"}:
+                return False
+        return True
 
     async def _click_first(self, page: Any, selectors: Iterable[str], *, timeout: int = 5000) -> bool:
         for selector in selectors:

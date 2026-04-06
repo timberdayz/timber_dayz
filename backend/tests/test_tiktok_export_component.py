@@ -22,6 +22,8 @@ class _FakeLocator:
     def __init__(self, *, visible: bool = False) -> None:
         self.visible = visible
         self.clicked = 0
+        self.enabled = True
+        self.attrs: dict[str, str | None] = {}
 
     @property
     def first(self) -> "_FakeLocator":
@@ -33,11 +35,17 @@ class _FakeLocator:
     async def is_visible(self, timeout: int | None = None) -> bool:
         return self.visible
 
+    async def is_enabled(self) -> bool:
+        return self.enabled
+
     async def click(self, timeout: int | None = None) -> None:
         self.clicked += 1
 
     async def scroll_into_view_if_needed(self, timeout: int | None = None) -> None:
         return None
+
+    async def get_attribute(self, name: str) -> str | None:
+        return self.attrs.get(name)
 
 
 class _FakeDownload:
@@ -201,3 +209,21 @@ async def test_tiktok_export_uses_subtype_in_standard_output_root_for_services_w
     assert result.success is True
     assert result.file_path is not None
     assert "/services/agent/monthly/" in str(result.file_path).replace("\\", "/")
+
+
+@pytest.mark.asyncio
+async def test_tiktok_export_does_not_click_disabled_export_button() -> None:
+    component = TiktokExport(_ctx({"shop_region": "SG"}))
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=SG")
+    detail_tab = _FakeLocator(visible=True)
+    disabled_export_button = _FakeLocator(visible=True)
+    disabled_export_button.enabled = False
+    disabled_export_button.attrs["disabled"] = ""
+    page.locators['[role="tab"]:has-text("聊天详情")'] = detail_tab
+    page.locators['button:has-text("导出数据")'] = disabled_export_button
+
+    result = await component.run(page)
+
+    assert result.success is False
+    assert "download" in result.message.lower() or result.message == "export button not found"
+    assert disabled_export_button.clicked == 0
