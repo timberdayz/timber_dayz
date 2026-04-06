@@ -4,10 +4,11 @@ from __future__ import annotations
 HR - 薪资与目标管理
 """
 
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import and_, select
+from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.dependencies.auth import get_current_user, is_admin_user
@@ -19,6 +20,7 @@ from backend.schemas.hr import (
     PayrollRecordManualUpdate,
     PayrollRecordResponse,
     SalaryStructureCreate,
+    SalaryStructureUpdate,
     SalaryStructureResponse,
 )
 from backend.services.audit_service import audit_service
@@ -38,6 +40,37 @@ def _payroll_success(record: PayrollRecord) -> Dict[str, Any]:
         "success": True,
         "data": PayrollRecordResponse.model_validate(record).model_dump(mode="json"),
     }
+
+
+async def _load_salary_structure_versions(
+    db: AsyncSession,
+    employee_code: str,
+) -> List[SalaryStructure]:
+    result = await db.execute(
+        select(SalaryStructure)
+        .where(SalaryStructure.employee_code == employee_code)
+        .order_by(desc(SalaryStructure.effective_date), desc(SalaryStructure.id))
+    )
+    return result.scalars().all()
+
+
+def _pick_current_salary_structure(rows: List[SalaryStructure]) -> Optional[SalaryStructure]:
+    if not rows:
+        return None
+    today = date.today()
+    active_current_rows = [
+        row
+        for row in rows
+        if getattr(row, "status", None) == "active"
+        and getattr(row, "effective_date", None) is not None
+        and row.effective_date <= today
+    ]
+    if active_current_rows:
+        return active_current_rows[0]
+    active_rows = [row for row in rows if getattr(row, "status", None) == "active"]
+    if active_rows:
+        return active_rows[0]
+    return rows[0]
 
 
 @router.get("/salary-structures", response_model=List[SalaryStructureResponse])
@@ -65,16 +98,27 @@ async def get_salary_structure(
     db: AsyncSession = Depends(get_async_db),
 ):
     try:
-        result = await db.execute(
-            select(SalaryStructure).where(SalaryStructure.employee_code == employee_code)
-        )
-        structure = result.scalar_one_or_none()
+        rows = await _load_salary_structure_versions(db, employee_code)
+        structure = _pick_current_salary_structure(rows)
         if not structure:
             return error_response(ErrorCode.DATA_NOT_FOUND, f"薪资结构不存在: {employee_code}", status_code=404)
         return SalaryStructureResponse.model_validate(structure)
     except Exception as e:
         logger.error("获取薪资结构失败: %s", e, exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"获取薪资结构失败: {str(e)}", status_code=500)
+
+
+@router.get("/salary-structures/{employee_code}/history", response_model=List[SalaryStructureResponse])
+async def list_salary_structure_history(
+    employee_code: str,
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        rows = await _load_salary_structure_versions(db, employee_code)
+        return [SalaryStructureResponse.model_validate(row) for row in rows]
+    except Exception as e:
+        logger.error("鑾峰彇钖祫缁撴瀯鍘嗗彶澶辫触: %s", e, exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鑾峰彇钖祫缁撴瀯鍘嗗彶澶辫触: {str(e)}", status_code=500)
 
 
 @router.post("/salary-structures", response_model=SalaryStructureResponse, status_code=201)
@@ -90,7 +134,12 @@ async def create_salary_structure(
             return error_response(ErrorCode.DATA_NOT_FOUND, f"员工不存在: {structure.employee_code}", status_code=400)
 
         existing = await db.execute(
-            select(SalaryStructure).where(SalaryStructure.employee_code == structure.employee_code)
+            select(SalaryStructure).where(
+                and_(
+                    SalaryStructure.employee_code == structure.employee_code,
+                    SalaryStructure.effective_date == structure.effective_date,
+                )
+            )
         )
         if existing.scalar_one_or_none():
             return error_response(ErrorCode.DATA_ALREADY_EXISTS, f"薪资结构已存在: {structure.employee_code}", status_code=400)
@@ -104,6 +153,28 @@ async def create_salary_structure(
         await db.rollback()
         logger.error("创建薪资结构失败: %s", e, exc_info=True)
         return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"创建薪资结构失败: {str(e)}", status_code=500)
+
+
+@router.put("/salary-structures/{employee_code}", response_model=SalaryStructureResponse)
+async def update_salary_structure(
+    employee_code: str,
+    body: SalaryStructureUpdate,
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        rows = await _load_salary_structure_versions(db, employee_code)
+        record = _pick_current_salary_structure(rows)
+        if not record:
+            return error_response(ErrorCode.DATA_NOT_FOUND, f"钖祫缁撴瀯涓嶅瓨鍦? {employee_code}", status_code=404)
+        for key, value in body.model_dump(exclude_unset=True).items():
+            setattr(record, key, value)
+        await db.commit()
+        await db.refresh(record)
+        return SalaryStructureResponse.model_validate(record)
+    except Exception as e:
+        await db.rollback()
+        logger.error("鏇存柊钖祫缁撴瀯澶辫触: %s", e, exc_info=True)
+        return error_response(ErrorCode.INTERNAL_SERVER_ERROR, f"鏇存柊钖祫缁撴瀯澶辫触: {str(e)}", status_code=500)
 
 
 @router.get("/payroll-records", response_model=List[PayrollRecordResponse])

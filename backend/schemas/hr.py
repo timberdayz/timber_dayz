@@ -578,6 +578,22 @@ class SalaryStructureResponse(BaseModel):
         from_attributes = True
 
 
+class SalaryStructureUpdate(BaseModel):
+    base_salary: Optional[Decimal] = Field(None, ge=0, description="基本工资")
+    position_salary: Optional[Decimal] = Field(None, ge=0, description="岗位工资")
+    housing_allowance: Optional[Decimal] = Field(None, ge=0, description="住房补贴")
+    transport_allowance: Optional[Decimal] = Field(None, ge=0, description="交通补贴")
+    meal_allowance: Optional[Decimal] = Field(None, ge=0, description="餐饮补贴")
+    communication_allowance: Optional[Decimal] = Field(None, ge=0, description="通讯补贴")
+    other_allowance: Optional[Decimal] = Field(None, ge=0, description="其他补贴")
+    performance_ratio: Optional[float] = Field(None, ge=0, le=1, description="绩效工资比例")
+    commission_ratio: Optional[float] = Field(None, ge=0, le=1, description="提成比例")
+    social_insurance_base: Optional[Decimal] = Field(None, ge=0, description="社保基数")
+    housing_fund_base: Optional[Decimal] = Field(None, ge=0, description="公积金基数")
+    effective_date: Optional[date] = Field(None, description="生效日期")
+    status: Optional[str] = Field(None, description="状态")
+
+
 class PayrollRecordResponse(BaseModel):
     id: int
     employee_code: str

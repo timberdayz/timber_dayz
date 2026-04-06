@@ -18,12 +18,178 @@ class _ResultOne:
         return self._value
 
 
+class _ResultRows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
 def _load_hr_salary_module():
     return importlib.import_module("backend.routers.hr_salary")
 
 
 def _json_body(resp):
     return json.loads(resp.body.decode("utf-8"))
+
+
+def test_get_salary_structure_returns_current_effective_version():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    current = SimpleNamespace(
+        id=12,
+        employee_code="EMP100",
+        base_salary=1800.0,
+        position_salary=200.0,
+        housing_allowance=0.0,
+        transport_allowance=0.0,
+        meal_allowance=0.0,
+        communication_allowance=0.0,
+        other_allowance=0.0,
+        performance_ratio=0.2,
+        commission_ratio=0.05,
+        social_insurance_base=1500.0,
+        housing_fund_base=1500.0,
+        effective_date=datetime(2025, 2, 1, tzinfo=timezone.utc).date(),
+        status="active",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.execute = AsyncMock(return_value=_ResultRows([current]))
+
+    resp = asyncio.run(module.get_salary_structure("EMP100", db=db))
+
+    assert resp.id == 12
+    assert float(resp.base_salary) == 1800.0
+
+
+def test_list_salary_structure_history_returns_versions_desc():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    rows = [
+        SimpleNamespace(
+            id=22,
+            employee_code="EMP101",
+            base_salary=2200.0,
+            position_salary=300.0,
+            housing_allowance=0.0,
+            transport_allowance=0.0,
+            meal_allowance=0.0,
+            communication_allowance=0.0,
+            other_allowance=0.0,
+            performance_ratio=0.15,
+            commission_ratio=0.03,
+            social_insurance_base=1800.0,
+            housing_fund_base=1800.0,
+            effective_date=datetime(2025, 3, 1, tzinfo=timezone.utc).date(),
+            status="active",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        ),
+        SimpleNamespace(
+            id=21,
+            employee_code="EMP101",
+            base_salary=2000.0,
+            position_salary=200.0,
+            housing_allowance=0.0,
+            transport_allowance=0.0,
+            meal_allowance=0.0,
+            communication_allowance=0.0,
+            other_allowance=0.0,
+            performance_ratio=0.1,
+            commission_ratio=0.02,
+            social_insurance_base=1600.0,
+            housing_fund_base=1600.0,
+            effective_date=datetime(2025, 1, 1, tzinfo=timezone.utc).date(),
+            status="inactive",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        ),
+    ]
+    db.execute = AsyncMock(return_value=_ResultRows(rows))
+
+    resp = asyncio.run(module.list_salary_structure_history("EMP101", db=db))
+
+    assert [item.id for item in resp] == [22, 21]
+
+
+def test_create_salary_structure_allows_new_version_for_same_employee():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    employee = SimpleNamespace(employee_code="EMP102")
+    structure = module.SalaryStructureCreate(
+        employee_code="EMP102",
+        base_salary=1200,
+        position_salary=100,
+        housing_allowance=0,
+        transport_allowance=0,
+        meal_allowance=0,
+        communication_allowance=0,
+        other_allowance=0,
+        performance_ratio=0.1,
+        commission_ratio=0.05,
+        social_insurance_base=1000,
+        housing_fund_base=1000,
+        effective_date=datetime(2025, 4, 1, tzinfo=timezone.utc).date(),
+        status="active",
+    )
+
+    db.execute = AsyncMock(side_effect=[_ResultOne(employee), _ResultOne(None)])
+    def _add(obj):
+        obj.id = 32
+        obj.created_at = datetime.now(timezone.utc)
+        obj.updated_at = datetime.now(timezone.utc)
+
+    db.add = _add
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock(side_effect=lambda obj: None)
+
+    resp = asyncio.run(module.create_salary_structure(structure, db=db))
+
+    assert resp.employee_code == "EMP102"
+    assert float(resp.base_salary) == 1200.0
+
+
+def test_update_salary_structure_updates_selected_version():
+    module = _load_hr_salary_module()
+    db = AsyncMock()
+    record = SimpleNamespace(
+        id=41,
+        employee_code="EMP103",
+        base_salary=1400.0,
+        position_salary=100.0,
+        housing_allowance=0.0,
+        transport_allowance=0.0,
+        meal_allowance=0.0,
+        communication_allowance=0.0,
+        other_allowance=0.0,
+        performance_ratio=0.1,
+        commission_ratio=0.05,
+        social_insurance_base=1200.0,
+        housing_fund_base=1200.0,
+        effective_date=datetime(2025, 2, 1, tzinfo=timezone.utc).date(),
+        status="active",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    body = SimpleNamespace(
+        model_dump=lambda exclude_unset=True: {
+            "base_salary": 1550.0,
+            "position_salary": 150.0,
+        }
+    )
+    db.execute = AsyncMock(return_value=_ResultRows([record]))
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    resp = asyncio.run(module.update_salary_structure("EMP103", body=body, db=db))
+
+    assert float(resp.base_salary) == 1550.0
+    assert float(resp.position_salary) == 150.0
 
 
 def test_confirm_payroll_record_marks_draft_as_confirmed():
