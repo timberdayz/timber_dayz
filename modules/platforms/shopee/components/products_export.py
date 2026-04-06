@@ -21,6 +21,7 @@ from modules.platforms.shopee.components.business_analysis_common import (
     preset_label,
 )
 from modules.platforms.shopee.components.products_config import ProductsSelectors
+from modules.platforms.shopee.components.services_config import ServicesSelectors
 
 
 class ShopeeProductsExport(ExportComponent):
@@ -31,6 +32,7 @@ class ShopeeProductsExport(ExportComponent):
     def __init__(self, ctx: ExecutionContext, selectors: ProductsSelectors | None = None) -> None:
         super().__init__(ctx)
         self.sel = selectors or ProductsSelectors()
+        self.service_sel = ServicesSelectors()
         self._download_waiter: asyncio.Task | None = None
 
     def _products_page_looks_ready(self, url: str) -> bool:
@@ -1224,7 +1226,108 @@ class ShopeeProductsExport(ExportComponent):
         await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_timeout(1200)
         if not self._products_page_looks_ready(str(getattr(page, "url", "") or "")):
-            raise RuntimeError("products overview page is not ready")
+            raise RuntimeError("products performance page is not ready")
+
+    async def _wait_latest_report_panel(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 20000,
+        poll_ms: int = 500,
+    ) -> Any | None:
+        waited = 0
+        while waited <= timeout_ms:
+            panel = await self._first_visible_locator(page, self.service_sel.latest_report_panels)
+            if panel is not None:
+                return panel
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return None
+
+    async def _top_report_action(self, panel: Any) -> tuple[Any | None, str | None]:
+        try:
+            actions = panel.locator("button, a, [role='button']")
+            count = await actions.count()
+        except Exception:
+            return None, None
+
+        for idx in range(count):
+            candidate = actions.nth(idx)
+            try:
+                if not await candidate.is_visible():
+                    continue
+            except Exception:
+                continue
+            try:
+                text = (await candidate.text_content()) or ""
+            except Exception:
+                text = ""
+            normalized = str(text).strip()
+            if any(token in normalized for token in self.service_sel.panel_action_tokens):
+                return candidate, normalized
+        return None, None
+
+    async def _wait_top_report_download_button(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 180000,
+        poll_ms: int = 1500,
+    ) -> Any | None:
+        if self._download_waiter is None and hasattr(page, "wait_for_event"):
+            self._download_waiter = asyncio.create_task(
+                page.wait_for_event("download", timeout=timeout_ms)
+            )
+
+        waited = 0
+        while waited <= timeout_ms:
+            panel = await self._wait_latest_report_panel(page, timeout_ms=poll_ms, poll_ms=300)
+            if panel is not None:
+                action, text = await self._top_report_action(panel)
+                if action is not None and text:
+                    if "涓嬭浇" in text:
+                        return action
+                    if "杩涜涓" in text:
+                        if hasattr(page, "wait_for_timeout"):
+                            await page.wait_for_timeout(poll_ms)
+                        waited += poll_ms
+                        continue
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return None
+
+    async def _wait_top_report_download_button(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 180000,
+        poll_ms: int = 1500,
+    ) -> Any | None:
+        # Override the earlier mojibake variant with the actual Product page labels.
+        if self._download_waiter is None and hasattr(page, "wait_for_event"):
+            self._download_waiter = asyncio.create_task(
+                page.wait_for_event("download", timeout=timeout_ms)
+            )
+
+        waited = 0
+        while waited <= timeout_ms:
+            panel = await self._wait_latest_report_panel(page, timeout_ms=poll_ms, poll_ms=300)
+            if panel is not None:
+                action, text = await self._top_report_action(panel)
+                if action is not None and text:
+                    if "下载" in text:
+                        return action
+                    if "进行中" in text:
+                        if hasattr(page, "wait_for_timeout"):
+                            await page.wait_for_timeout(poll_ms)
+                        waited += poll_ms
+                        continue
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return None
 
     async def _ensure_shop_selected(self, page: Any) -> None:
         cfg = self.ctx.config or {}
@@ -1599,6 +1702,13 @@ class ShopeeProductsExport(ExportComponent):
             index += 1
 
     async def _wait_download_complete(self, page: Any) -> str | None:
+        button = await self._wait_top_report_download_button(page)
+        if button is not None:
+            try:
+                await button.click(timeout=5000)
+            except Exception:
+                return None
+
         waiter = self._download_waiter
         if waiter is None:
             if not hasattr(page, "wait_for_event"):

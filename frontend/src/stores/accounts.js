@@ -95,9 +95,9 @@ export const useAccountsStore = defineStore('accounts', {
           accountsApi.listPlatformShopDiscoveries(),
         ])
         this.accounts = (shopAccounts || []).map(normalizeShopAccount)
-        this.mainAccounts = (mainAccounts || []).filter((item) =>
-          mergedParams.include_disabled ? true : item.enabled
-        )
+        // Keep full main-account metadata available for edit dialogs even when
+        // disabled history is hidden from the primary shop list.
+        this.mainAccounts = mainAccounts || []
         this.pendingPlatformShopDiscoveries = pendingDiscoveries || []
       } catch (error) {
         console.error('加载店铺账号列表失败:', error)

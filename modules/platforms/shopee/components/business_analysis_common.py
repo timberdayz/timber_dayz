@@ -4,7 +4,7 @@ from typing import Final
 
 
 DOMAIN_PATHS: Final[dict[str, str]] = {
-    "products": "/datacenter/product/overview",
+    "products": "/datacenter/product/performance",
     "services": "/datacenter/service/overview",
     "analytics": "/datacenter/traffic/overview",
 }
