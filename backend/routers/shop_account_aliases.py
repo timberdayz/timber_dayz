@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from backend.schemas.account import UnmatchedShopAliasItem, UnmatchedShopAliasResponse
 from backend.schemas.shop_account_alias import ShopAccountAliasCreate, ShopAccountAliasResponse
@@ -15,7 +16,11 @@ from backend.utils.text_normalization import normalize_alias_key, normalize_alia
 from modules.core.db import ShopAccount, ShopAccountAlias
 
 
-router = APIRouter(prefix="/shop-account-aliases", tags=["Shop Account Aliases"])
+router = APIRouter(
+    prefix="/shop-account-aliases",
+    tags=["Shop Account Aliases"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 def _u(value: str) -> str:

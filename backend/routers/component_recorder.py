@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_db, get_async_db
 from backend.services.component_test_service import ComponentTestService
 from backend.services.recorder_segment_validator import RecorderSegmentValidator
@@ -59,7 +60,7 @@ logger = get_logger(__name__)
 RECORDING_MODE = "inspector"
 SEGMENT_VALIDATION_ARTIFACT_DIR = Path("temp") / "recordings" / "segment_validation"
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin)])
 
 # [*] v4.18.2修复:移除本地 save_test_history 函数,统一使用 ComponentTestService.save_test_history
 

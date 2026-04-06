@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from backend.schemas.platform_shop_discovery import (
     PlatformShopDiscoveryConfirmRequest,
@@ -16,7 +17,11 @@ from backend.services.platform_shop_discovery_service import (
 from modules.core.db import PlatformShopDiscovery
 
 
-router = APIRouter(prefix="/platform-shop-discoveries", tags=["platform shop discoveries"])
+router = APIRouter(
+    prefix="/platform-shop-discoveries",
+    tags=["platform shop discoveries"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 @router.get("", response_model=list[PlatformShopDiscoveryResponse])

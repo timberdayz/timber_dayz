@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 
 # v4.18.0: 导入schemas(Contract-First架构)
@@ -36,7 +37,11 @@ from modules.core.db import AccountAlias
 from modules.core.logger import get_logger
 from modules.services.account_alignment import get_account_alignment_service
 
-router = APIRouter(prefix="/account-alignment", tags=["账号对齐"])
+router = APIRouter(
+    prefix="/account-alignment",
+    tags=["账号对齐"],
+    dependencies=[Depends(require_admin)],
+)
 logger = get_logger(__name__)
 
 LEGACY_FACT_ORDER_TABLES = {

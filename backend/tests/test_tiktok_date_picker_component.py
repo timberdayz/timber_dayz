@@ -73,6 +73,64 @@ class _PanelPage(_FakePage):
         return _PanelLocator(self, selector)
 
 
+class _ServicePanelOpenPage(_FakePage):
+    def __init__(self) -> None:
+        super().__init__("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+        self.visible = {
+            "text=自定义",
+            "text=近 7 天",
+            "text=近 28 天",
+            "text=2026-03",
+            "text=2026-04",
+            '#page-title-datepicker [data-tid="m4b_date_picker_range_picker"]',
+            '#page-title-datepicker [data-tid="m4b_date_picker_range_picker"] input',
+        }
+
+    def locator(self, selector: str):
+        if selector in self.visible:
+            return _FakeLocator(visible=True)
+        return _FakeLocator(visible=False)
+
+
+class _ServicePanelOpenPageV2(_FakePage):
+    def __init__(self) -> None:
+        super().__init__("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+        self.visible = {
+            "text=\u81ea\u5b9a\u4e49",
+            "text=\u8fd1 7 \u5929",
+            "text=\u8fd1 28 \u5929",
+            "text=\u81ea\u7136\u65e5",
+            "text=\u81ea\u7136\u5468",
+            "text=\u81ea\u7136\u6708",
+            "text=2026-03",
+            "text=2026-04",
+            '#page-title-datepicker [data-tid="m4b_date_picker_range_picker"]',
+            '#page-title-datepicker [data-tid="m4b_date_picker_range_picker"] input',
+        }
+
+    def is_visible(self, selector: str) -> bool:
+        return selector in self.visible
+
+    def locator(self, selector: str):
+        return _PanelLocator(self, selector)
+
+
+class _ServicePanelClosedSummaryPage(_FakePage):
+    def __init__(self) -> None:
+        super().__init__("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+        self.visible = {
+            '#page-title-datepicker [data-tid="m4b_date_picker_range_picker"]',
+            '#page-title-datepicker [data-tid="m4b_date_picker_range_picker"] input',
+            "text=\u8fd1 28 \u5929",
+        }
+
+    def is_visible(self, selector: str) -> bool:
+        return selector in self.visible
+
+    def locator(self, selector: str):
+        return _PanelLocator(self, selector)
+
+
 class _CustomTabLocator(_PanelLocator):
     def __init__(self, page: "_CustomTabPage", selector: str, *, boundary: str | None = None) -> None:
         super().__init__(page=page, selector=selector)
@@ -1234,6 +1292,26 @@ async def test_tiktok_date_picker_open_panel_treats_visible_shortcuts_as_panel_o
 
     assert opened is True
     assert page.clicked_selectors == ["div.theme-arco-picker.theme-arco-picker-range"]
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_panel_open_treats_service_custom_tab_and_dual_month_headers_as_open() -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _ServicePanelOpenPageV2()
+
+    opened = await component._panel_open(page)
+
+    assert opened is True
+
+
+@pytest.mark.asyncio
+async def test_tiktok_date_picker_panel_open_does_not_treat_service_closed_summary_as_open() -> None:
+    component = TiktokDatePicker(_ctx())
+    page = _ServicePanelClosedSummaryPage()
+
+    opened = await component._panel_open(page)
+
+    assert opened is False
 
 
 @pytest.mark.asyncio

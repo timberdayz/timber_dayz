@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from backend.schemas.collection import (
     CollectionAccountGroupRegionResponse,
@@ -50,7 +51,7 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(tags=["collection-config"])
+router = APIRouter(tags=["collection-config"], dependencies=[Depends(require_admin)])
 
 
 def _build_collection_config_record(

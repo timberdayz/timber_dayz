@@ -561,6 +561,10 @@ class TiktokDatePicker(DatePickerComponent):
             "button:has-text('\u6700\u8fd17 \u5929')",
             "button:has-text('\u6700\u8fd128 \u5929')",
             "div[role='tab']:has-text('\u81ea\u5b9a\u4e49')",
+            "text=\u81ea\u5b9a\u4e49",
+            "text=\u81ea\u7136\u65e5",
+            "text=\u81ea\u7136\u5468",
+            "text=\u81ea\u7136\u6708",
             ".theme-arco-picker-dropdown",
             ".arco-picker-dropdown",
             '[class*="picker-dropdown"]',
@@ -575,6 +579,24 @@ class TiktokDatePicker(DatePickerComponent):
 
         if await self._year_grid_visible(page, "left") or await self._year_grid_visible(page, "right"):
             return True
+
+        page_kind = self._page_kind(str(getattr(page, "url", "") or ""))
+        if page_kind == "services":
+            range_locator = await self._range_locator(page)
+            if range_locator is not None:
+                service_signals = (
+                    "text=\u81ea\u5b9a\u4e49",
+                    "text=\u81ea\u7136\u65e5",
+                    "text=\u81ea\u7136\u5468",
+                    "text=\u81ea\u7136\u6708",
+                )
+                for selector in service_signals:
+                    try:
+                        locator = page.locator(selector).first
+                        if await locator.count() > 0 and await locator.is_visible(timeout=200):
+                            return True
+                    except Exception:
+                        continue
         return False
 
     async def _open_panel(self, page: Any) -> bool:

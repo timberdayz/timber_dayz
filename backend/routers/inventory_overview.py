@@ -5,6 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.dependencies.auth import get_current_user
 from backend.models.database import get_async_db
 from backend.schemas.inventory import InventoryReconciliationResponse
 from backend.schemas.inventory_overview import (
@@ -15,7 +16,11 @@ from backend.schemas.inventory_overview import (
 )
 from backend.services.inventory.overview_service import InventoryOverviewService
 
-router = APIRouter(prefix="/api/inventory-overview", tags=["库存总览"])
+router = APIRouter(
+    prefix="/api/inventory-overview",
+    tags=["库存总览"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("/summary", response_model=InventoryOverviewSummaryResponse)

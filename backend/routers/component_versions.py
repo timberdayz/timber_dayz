@@ -15,6 +15,7 @@ from sqlalchemy import not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from backend.schemas.component_version import (
     ABTestRequest,
@@ -59,7 +60,11 @@ from modules.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/component-versions", tags=["组件版本管理"])
+router = APIRouter(
+    prefix="/component-versions",
+    tags=["组件版本管理"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 # canonical 组件文件清单：仅这些文件允许作为默认逻辑组件入口进入批量注册主路径

@@ -28,7 +28,24 @@ async def shop_account_client(monkeypatch):
         async with session_factory() as session:
             yield session
 
+    async def override_current_user():
+        return type(
+            "AdminUser",
+            (),
+            {
+                "user_id": 1,
+                "id": 1,
+                "username": "admin",
+                "is_active": True,
+                "status": "active",
+                "is_superuser": True,
+                "roles": [type("Role", (), {"role_code": "admin", "role_name": "admin"})()],
+            },
+        )()
+
     app.dependency_overrides[get_async_db] = override_get_async_db
+    from backend.dependencies.auth import get_current_user
+    app.dependency_overrides[get_current_user] = override_current_user
     monkeypatch.setattr(
         "backend.routers.main_accounts.get_encryption_service",
         lambda: type("Enc", (), {"encrypt_password": lambda self, value: f"enc:{value}"})(),

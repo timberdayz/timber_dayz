@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from backend.schemas.main_account import (
     MainAccountCreate,
@@ -24,7 +25,11 @@ from backend.utils.text_normalization import coalesce_human_text, normalize_huma
 from modules.core.db import MainAccount
 
 
-router = APIRouter(prefix="/main-accounts", tags=["main account management"])
+router = APIRouter(
+    prefix="/main-accounts",
+    tags=["main account management"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 async def _get_main_account_or_404(db: AsyncSession, main_account_id: str) -> MainAccount:

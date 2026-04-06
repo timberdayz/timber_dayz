@@ -98,7 +98,15 @@ class TiktokServicesAgentExport(ExportComponent):
             return DateOption.YESTERDAY
         if raw in {"weekly", "last_7_days", "last7days", "last-7-days"}:
             return DateOption.LAST_7_DAYS
-        if raw in {"monthly", "last_30_days", "last30days", "last-30-days", "last_28_days", "last28days", "last-28-days"}:
+        if raw in {
+            "monthly",
+            "last_30_days",
+            "last30days",
+            "last-30-days",
+            "last_28_days",
+            "last28days",
+            "last-28-days",
+        }:
             return DateOption.LAST_30_DAYS
         if raw in {"daily", "day"}:
             return DateOption.YESTERDAY
@@ -118,6 +126,185 @@ class TiktokServicesAgentExport(ExportComponent):
 
     async def _run_export(self, page: Any):
         return await TiktokExport(self.ctx).run(page, mode=ExportMode.STANDARD)
+
+    def _agent_overview_tab_selectors(self) -> tuple[str, ...]:
+        return (
+            '[role="tab"]:has-text("聊天概览")',
+            'button:has-text("聊天概览")',
+            'text=聊天概览',
+            '[role="tab"]:has-text("鑱婂ぉ姒傝")',
+            'button:has-text("鑱婂ぉ姒傝")',
+            'text=鑱婂ぉ姒傝',
+        )
+
+    def _agent_detail_tab_selectors(self) -> tuple[str, ...]:
+        return (
+            '[role="tab"]:has-text("聊天详情")',
+            'button:has-text("聊天详情")',
+            'text=聊天详情',
+            '[role="tab"]:has-text("鑱婂ぉ璇︽儏")',
+            'button:has-text("鑱婂ぉ璇︽儏")',
+            'text=鑱婂ぉ璇︽儏',
+        )
+
+    def _loading_selectors(self) -> tuple[str, ...]:
+        return (
+            '[data-tid="m4b_loading"]',
+            ".theme-arco-spin",
+            ".theme-m4b-loading",
+        )
+
+    async def _click_first(self, page: Any, selectors: tuple[str, ...], *, timeout: int = 2000) -> bool:
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() <= 0:
+                    continue
+                if not await locator.is_visible(timeout=300):
+                    continue
+                try:
+                    await locator.scroll_into_view_if_needed(timeout=500)
+                except Exception:
+                    pass
+                await locator.click(timeout=timeout)
+                return True
+            except Exception:
+                continue
+        return False
+
+    async def _any_visible(self, page: Any, selectors: tuple[str, ...], *, timeout: int = 300) -> bool:
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() <= 0:
+                    continue
+                if await locator.is_visible(timeout=timeout):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    async def _tab_looks_selected(self, page: Any, selectors: tuple[str, ...]) -> bool:
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() <= 0:
+                    continue
+                if not await locator.is_visible(timeout=200):
+                    continue
+
+                explicit_false = False
+                for attr in ("aria-selected", "data-selected", "class"):
+                    try:
+                        value = await locator.get_attribute(attr)
+                    except Exception:
+                        value = None
+                    text = str(value or "").strip().lower()
+                    if not text:
+                        continue
+                    if attr == "class" and any(token in text for token in ("active", "selected", "current")):
+                        return True
+                    if text == "true":
+                        return True
+                    if attr in {"aria-selected", "data-selected"} and text == "false":
+                        explicit_false = True
+                if explicit_false:
+                    continue
+            except Exception:
+                continue
+        return False
+
+    async def _wait_tab_area_ready(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 4000,
+        poll_ms: int = 200,
+    ) -> bool:
+        waited = 0
+        overview_selectors = self._agent_overview_tab_selectors()
+        detail_selectors = self._agent_detail_tab_selectors()
+        while waited <= timeout_ms:
+            if await self._any_visible(page, overview_selectors) and await self._any_visible(page, detail_selectors):
+                return True
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return False
+
+    async def _wait_agent_detail_selected(
+        self,
+        page: Any,
+        selectors: tuple[str, ...],
+        *,
+        timeout_ms: int = 2000,
+        poll_ms: int = 200,
+    ) -> bool:
+        waited = 0
+        while waited <= timeout_ms:
+            if await self._tab_looks_selected(page, selectors):
+                return True
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return False
+
+    async def _wait_loading_gone(
+        self,
+        page: Any,
+        *,
+        timeout_ms: int = 4000,
+        poll_ms: int = 200,
+    ) -> bool:
+        waited = 0
+        selectors = self._loading_selectors()
+        while waited <= timeout_ms:
+            if not await self._any_visible(page, selectors, timeout=150):
+                return True
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            waited += poll_ms
+        return False
+
+    async def _agent_detail_business_ready(self, page: Any) -> bool:
+        export_button = await self._export_button_locator(page)
+        if export_button is not None:
+            return True
+
+        if await self._any_visible(
+            page,
+            (
+                ".theme-arco-table",
+                "table",
+                "text=Customer Service",
+                "text=客服表现详情",
+            ),
+            timeout=150,
+        ):
+            return True
+
+        return False
+
+    async def _ensure_agent_detail_ready(self, page: Any) -> bool:
+        if not await self._wait_tab_area_ready(page):
+            return False
+
+        selectors = self._agent_detail_tab_selectors()
+        if await self._tab_looks_selected(page, selectors):
+            if await self._agent_detail_business_ready(page):
+                return True
+            return await self._wait_loading_gone(page)
+
+        clicked = await self._click_first(page, selectors, timeout=2000)
+        if not clicked:
+            return False
+
+        if not await self._wait_agent_detail_selected(page, selectors):
+            return False
+
+        if await self._agent_detail_business_ready(page):
+            return True
+        return await self._wait_loading_gone(page)
 
     async def _wait_for_entry_state(
         self,
@@ -210,6 +397,9 @@ class TiktokServicesAgentExport(ExportComponent):
                     message=getattr(switch_result, "message", "shop switch failed"),
                     file_path=None,
                 )
+
+        if not await self._ensure_agent_detail_ready(page):
+            return ExportResult(success=False, message="failed to enter services agent detail page", file_path=None)
 
         date_option = self._date_option_from_context()
         if date_option is not None:

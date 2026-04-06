@@ -37,16 +37,34 @@ async def collection_coverage_session(collection_coverage_session_factory):
 @pytest_asyncio.fixture
 async def collection_coverage_client(collection_coverage_session):
     from backend.main import app
+    from backend.dependencies.auth import get_current_user
     from backend.models.database import get_async_db
 
     async def override_get_async_db():
         yield collection_coverage_session
 
+    async def override_current_user():
+        return type(
+            "AdminUser",
+            (),
+            {
+                "user_id": 1,
+                "id": 1,
+                "username": "admin",
+                "is_active": True,
+                "status": "active",
+                "is_superuser": True,
+                "roles": [type("Role", (), {"role_code": "admin", "role_name": "admin"})()],
+            },
+        )()
+
     app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://localhost") as client:
         yield client
     app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 async def _seed_accounts(session):

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.dependencies.auth import require_admin
 from backend.models.database import get_async_db
 from backend.schemas.shop_account import (
     ShopAccountCreate,
@@ -17,7 +18,11 @@ from backend.utils.text_normalization import normalize_alias_text
 from modules.core.db import MainAccount, ShopAccount, ShopAccountAlias, ShopAccountCapability
 
 
-router = APIRouter(prefix="/shop-accounts", tags=["shop account management"])
+router = APIRouter(
+    prefix="/shop-accounts",
+    tags=["shop account management"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 def _default_capabilities_for(shop_type: str | None) -> dict[str, bool]:

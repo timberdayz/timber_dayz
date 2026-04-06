@@ -6,6 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.dependencies.auth import get_current_user, require_admin
 from backend.models.database import get_async_db
 from backend.schemas.inventory import (
     InventoryAdjustmentCreateRequest,
@@ -33,7 +34,11 @@ from backend.services.inventory import (
     InventoryReconciliationService,
 )
 
-router = APIRouter(prefix="/api/inventory", tags=["库存管理"])
+router = APIRouter(
+    prefix="/api/inventory",
+    tags=["库存管理"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("/balances", response_model=List[InventoryBalanceSummaryResponse])
@@ -122,6 +127,7 @@ async def post_inventory_grn(
     shop_id: str = Query(..., description="过账所属店铺ID"),
     created_by: str = Query("system", description="操作人"),
     db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
 ):
     service = InventoryGrnService(db)
     return await service.post_grn(
@@ -161,6 +167,7 @@ async def create_inventory_adjustment(
     payload: InventoryAdjustmentCreateRequest,
     created_by: str = Query("system", description="操作人"),
     db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
 ):
     service = InventoryAdjustmentService(db)
     return await service.create_adjustment(payload=payload, created_by=created_by)
@@ -174,6 +181,7 @@ async def post_inventory_adjustment(
     adjustment_id: str,
     created_by: str = Query("system", description="操作人"),
     db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
 ):
     service = InventoryAdjustmentService(db)
     return await service.post_adjustment(
@@ -248,6 +256,7 @@ async def create_inventory_opening_balance(
     payload: InventoryOpeningBalanceCreateRequest,
     created_by: str = Query("system", description="操作人"),
     db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(require_admin),
 ):
     service = InventoryOpeningBalanceService(db)
     return await service.create_opening_balance(

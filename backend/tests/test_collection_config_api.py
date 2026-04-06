@@ -34,16 +34,34 @@ async def collection_config_sqlite_session(collection_config_session_factory):
 @pytest_asyncio.fixture
 async def collection_config_async_client(collection_config_sqlite_session):
     from backend.main import app
+    from backend.dependencies.auth import get_current_user
     from backend.models.database import get_async_db
 
     async def override_get_async_db():
         yield collection_config_sqlite_session
 
+    async def override_current_user():
+        return type(
+            "AdminUser",
+            (),
+            {
+                "user_id": 1,
+                "id": 1,
+                "username": "admin",
+                "is_active": True,
+                "status": "active",
+                "is_superuser": True,
+                "roles": [type("Role", (), {"role_code": "admin", "role_name": "admin"})()],
+            },
+        )()
+
     app.dependency_overrides[get_async_db] = override_get_async_db
+    app.dependency_overrides[get_current_user] = override_current_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://localhost") as client:
         yield client
     app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_build_collection_config_record_sets_explicit_timestamps():

@@ -85,7 +85,7 @@ async def create_role(
 
 @router.get("/", response_model=List[RoleResponse])
 async def get_roles(
-    current_user = Depends(get_current_user),
+    current_user = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取角色列表"""
@@ -107,7 +107,7 @@ async def get_roles(
 @router.get("/{role_id}", response_model=RoleResponse)
 async def get_role(
     role_id: int,
-    current_user = Depends(get_current_user),
+    current_user = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取角色详情"""
@@ -241,7 +241,7 @@ async def delete_role(
 
 @router.get("/permissions/available", response_model=TypingList[NewPermissionResponse])
 async def get_available_permissions(
-    current_user = Depends(get_current_user),
+    current_user = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db)
 ):
     """

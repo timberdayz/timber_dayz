@@ -5,8 +5,10 @@
 v4.20.0: 系统管理模块API实现
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends
-from backend.dependencies.auth import get_current_user
+from backend.dependencies.auth import require_admin
 from backend.schemas.permission import PermissionTreeNode, PermissionTreeResponse
 from backend.services.permission_service import get_permission_service
 from backend.utils.api_response import success_response
@@ -18,7 +20,7 @@ router = APIRouter(prefix="/api/permissions", tags=["权限管理"])
 
 @router.get("/tree", response_model=PermissionTreeResponse)
 async def get_permission_tree(
-    current_user = Depends(get_current_user)
+    current_user = Depends(require_admin)
 ):
     """
     获取权限树(层级结构)
