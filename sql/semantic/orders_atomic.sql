@@ -100,7 +100,6 @@ mapped AS (
             raw_data->>'利润',
             raw_data->>'profit',
             raw_data->>'毛利',
-            raw_data->>'净利润',
             raw_data->>'Profit'
         ) AS profit_raw,
         COALESCE(
