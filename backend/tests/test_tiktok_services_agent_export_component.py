@@ -31,6 +31,7 @@ class _FakePage:
         self.wait_calls: list[int] = []
         self.visible_selectors: set[str] = set()
         self.visible_texts: set[str] = set()
+        self.custom_locators: dict[str, object] = {}
 
     async def goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 60000) -> None:
         self.goto_calls.append(url)
@@ -40,6 +41,8 @@ class _FakePage:
         self.wait_calls.append(ms)
 
     def locator(self, selector: str):
+        if selector in self.custom_locators:
+            return self.custom_locators[selector]
         return _FakeLocator(visible=selector in self.visible_selectors)
 
     def get_by_text(self, text: str, exact: bool = False):
@@ -59,6 +62,18 @@ class _FakeLocator:
 
     async def count(self) -> int:
         return 1 if self._visible else 0
+
+    async def get_attribute(self, name: str) -> str | None:
+        return None
+
+
+class _AttrLocator(_FakeLocator):
+    def __init__(self, *, visible: bool = True, attrs: dict[str, str | None] | None = None) -> None:
+        super().__init__(visible=visible)
+        self._attrs = attrs or {}
+
+    async def get_attribute(self, name: str) -> str | None:
+        return self._attrs.get(name)
 
 
 class _TabLocator:
@@ -302,3 +317,60 @@ async def test_tiktok_services_agent_export_accepts_business_ready_detail_page_e
     ready = await component._ensure_agent_detail_ready(page)
 
     assert ready is True
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_treats_empty_state_as_no_exportable_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+    page.visible_selectors.add("text=暂无数据")
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "weekly"}))
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    detail_mock = AsyncMock(return_value=True)
+    date_state_mock = AsyncMock(return_value=True)
+    export_mock = AsyncMock()
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_ensure_agent_detail_ready", detail_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert result.file_path is None
+    assert "no exportable" in result.message
+    export_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tiktok_services_agent_export_treats_disabled_export_button_as_no_exportable_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _FakePage("https://seller.tiktokshopglobalselling.com/compass/service-analytics?shop_region=MY")
+    page.custom_locators['button:has-text("导出数据")'] = _AttrLocator(
+        attrs={
+            "disabled": "",
+            "class": "theme-arco-btn theme-arco-btn-disabled theme-m4b-button",
+        }
+    )
+    component = TiktokServicesAgentExport(_ctx({"shop_region": "MY", "granularity": "weekly"}))
+
+    switch_mock = AsyncMock(return_value=type("R", (), {"success": True, "message": "ok"})())
+    detail_mock = AsyncMock(return_value=True)
+    date_state_mock = AsyncMock(return_value=True)
+    export_mock = AsyncMock()
+
+    monkeypatch.setattr(component, "_run_shop_switch", switch_mock)
+    monkeypatch.setattr(component, "_ensure_agent_detail_ready", detail_mock)
+    monkeypatch.setattr(component, "_date_selection_already_satisfied", date_state_mock, raising=False)
+    monkeypatch.setattr(component, "_run_export", export_mock)
+
+    result = await component.run(page)
+
+    assert result.success is True
+    assert result.file_path is None
+    assert "no exportable" in result.message
+    export_mock.assert_not_awaited()

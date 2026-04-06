@@ -4,16 +4,11 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from modules.components.export.base import ExportComponent, ExportResult, ExportMode, build_standard_output_root
+from modules.components.export.base import ExportComponent, ExportMode, ExportResult, build_standard_output_root
 
 
 class TiktokExport(ExportComponent):
-    """Shared TikTok export helper for traffic/products pages.
-
-    This helper currently standardizes the export-entry interaction for
-    `data-overview` and `product-analysis`. Service analytics keeps a separate
-    path because its export flow and page structure differ materially.
-    """
+    """Shared TikTok export helper for traffic/products/services pages."""
 
     platform = "tiktok"
     component_type = "export"
@@ -62,10 +57,17 @@ class TiktokExport(ExportComponent):
 
     def _export_button_selectors(self) -> tuple[str, ...]:
         return (
-            'button:has-text("导出")',
-            'button:has-text("导出数据")',
+            'button:has-text("\u5bfc\u51fa\u6570\u636e")',
+            'button:has-text("\u5bfc\u51fa")',
             'button:has-text("Export")',
             '[data-testid*="export"]',
+        )
+
+    def _service_detail_tab_selectors(self) -> tuple[str, ...]:
+        return (
+            '[role="tab"]:has-text("\u804a\u5929\u8be6\u60c5")',
+            'button:has-text("\u804a\u5929\u8be6\u60c5")',
+            'text=\u804a\u5929\u8be6\u60c5',
         )
 
     async def _is_clickable(self, locator: Any) -> bool:
@@ -92,11 +94,7 @@ class TiktokExport(ExportComponent):
     def _subtype_from_context(self) -> str | None:
         cfg = self.ctx.config or {}
         params = cfg.get("params") or {}
-        subtype = str(
-            params.get("sub_domain")
-            or cfg.get("sub_domain")
-            or ""
-        ).strip().lower()
+        subtype = str(params.get("sub_domain") or cfg.get("sub_domain") or "").strip().lower()
         return subtype or None
 
     async def run(self, page: Any, mode: ExportMode = ExportMode.STANDARD) -> ExportResult:  # type: ignore[override]
@@ -107,16 +105,7 @@ class TiktokExport(ExportComponent):
             return self._build_error_result("unsupported tiktok export page")
 
         if data_type == "services":
-            await self._click_first(
-                page,
-                (
-                    'button:has-text("聊天详情")',
-                    'button:has-text("鑱婂ぉ璇︽儏")',
-                    '[role="tab"]:has-text("聊天详情")',
-                    'text=聊天详情',
-                ),
-                timeout=2000,
-            )
+            await self._click_first(page, self._service_detail_tab_selectors(), timeout=2000)
             await page.wait_for_timeout(300)
 
         if not hasattr(page, "expect_download"):
@@ -151,5 +140,4 @@ class TiktokExport(ExportComponent):
         return self._build_success_result("ok", str(target))
 
 
-# Backward-compatible alias used by older tests and references.
 TiktokExporterComponent = TiktokExport

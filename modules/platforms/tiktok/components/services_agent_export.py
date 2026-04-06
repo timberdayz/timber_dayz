@@ -129,22 +129,16 @@ class TiktokServicesAgentExport(ExportComponent):
 
     def _agent_overview_tab_selectors(self) -> tuple[str, ...]:
         return (
-            '[role="tab"]:has-text("聊天概览")',
-            'button:has-text("聊天概览")',
-            'text=聊天概览',
-            '[role="tab"]:has-text("鑱婂ぉ姒傝")',
-            'button:has-text("鑱婂ぉ姒傝")',
-            'text=鑱婂ぉ姒傝',
+            '[role="tab"]:has-text("\u804a\u5929\u6982\u89c8")',
+            'button:has-text("\u804a\u5929\u6982\u89c8")',
+            'text=\u804a\u5929\u6982\u89c8',
         )
 
     def _agent_detail_tab_selectors(self) -> tuple[str, ...]:
         return (
-            '[role="tab"]:has-text("聊天详情")',
-            'button:has-text("聊天详情")',
-            'text=聊天详情',
-            '[role="tab"]:has-text("鑱婂ぉ璇︽儏")',
-            'button:has-text("鑱婂ぉ璇︽儏")',
-            'text=鑱婂ぉ璇︽儏',
+            '[role="tab"]:has-text("\u804a\u5929\u8be6\u60c5")',
+            'button:has-text("\u804a\u5929\u8be6\u60c5")',
+            'text=\u804a\u5929\u8be6\u60c5',
         )
 
     def _loading_selectors(self) -> tuple[str, ...]:
@@ -266,6 +260,25 @@ class TiktokServicesAgentExport(ExportComponent):
             waited += poll_ms
         return False
 
+    async def _export_button_locator(self, page: Any) -> Any | None:
+        selectors = (
+            'button:has-text("\u5bfc\u51fa\u6570\u636e")',
+            'button:has-text("\u5bfc\u51fa")',
+            'button:has-text("Export")',
+            '[data-testid*="export"]',
+        )
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() <= 0:
+                    continue
+                if not await locator.is_visible(timeout=300):
+                    continue
+                return locator
+            except Exception:
+                continue
+        return None
+
     async def _agent_detail_business_ready(self, page: Any) -> bool:
         export_button = await self._export_button_locator(page)
         if export_button is not None:
@@ -277,7 +290,7 @@ class TiktokServicesAgentExport(ExportComponent):
                 ".theme-arco-table",
                 "table",
                 "text=Customer Service",
-                "text=客服表现详情",
+                "text=\u5ba2\u670d\u8868\u73b0\u8be6\u60c5",
             ),
             timeout=150,
         ):
@@ -327,21 +340,16 @@ class TiktokServicesAgentExport(ExportComponent):
             elapsed += poll_ms
         return "unknown"
 
-    async def _export_button_locator(self, page: Any) -> Any | None:
-        helper = TiktokExport(self.ctx)
-        for selector in helper._export_button_selectors():
-            try:
-                locator = page.locator(selector).first
-                if await locator.count() <= 0:
-                    continue
-                if not await locator.is_visible(timeout=300):
-                    continue
-                return locator
-            except Exception:
-                continue
-        return None
-
     async def _no_exportable_data(self, page: Any) -> bool:
+        if await self._any_visible(
+            page,
+            (
+                "text=\u6682\u65e0\u6570\u636e",
+            ),
+            timeout=150,
+        ):
+            return True
+
         locator = await self._export_button_locator(page)
         if locator is None:
             return False
@@ -359,6 +367,8 @@ class TiktokServicesAgentExport(ExportComponent):
                 value = await locator.get_attribute(attr)
             except Exception:
                 value = None
+            if attr == "disabled" and value is not None:
+                return True
             text = str(value or "").strip().lower()
             if not text:
                 continue
