@@ -239,3 +239,14 @@ def test_shop_account_aliases_unmatched_query_keeps_complete_json_keys():
     assert r'_CN_SHOPEE_PAID = _u(r"\u5b9e\u4ed8\u91d1\u989d")' in text
     assert "raw_data->>:cn_store_name" in text
     assert "raw_data->>:cn_order_id" in text
+
+
+def test_shop_account_aliases_unmatched_query_reads_semantic_orders_atomic():
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "backend/routers/shop_account_aliases.py"
+    ).read_text(encoding="utf-8")
+
+    assert "FROM semantic.fact_orders_atomic" in text

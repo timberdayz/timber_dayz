@@ -272,6 +272,34 @@ export const useAccountsStore = defineStore('accounts', {
       }
     },
 
+    async updateMainAccountEnabled(mainAccountId, enabled) {
+      this.loading = true
+      try {
+        const updated = await accountsApi.updateMainAccount(mainAccountId, { enabled })
+        const targetIndex = this.mainAccounts.findIndex((item) => {
+          return item.main_account_id === updated.main_account_id && item.platform === updated.platform
+        })
+
+        if (targetIndex >= 0) {
+          this.mainAccounts[targetIndex] = {
+            ...this.mainAccounts[targetIndex],
+            ...updated,
+          }
+        } else if (updated) {
+          this.mainAccounts.push(updated)
+        }
+
+        await this.loadAccounts({}, false)
+        return updated
+      } catch (error) {
+        console.error('更新主账号状态失败:', error)
+        ElMessage.error(error.response?.data?.detail || error.message || '更新主账号状态失败')
+        throw error
+      } finally {
+        this.loading = false
+      }
+    },
+
     async batchCreate(batchData) {
       this.loading = true
       try {

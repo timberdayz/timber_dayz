@@ -40,17 +40,18 @@ export function buildAccountManagementGroups({ accounts = [], mainAccounts = [] 
     const mainAccountMap = platformMap.get(platform)
 
     if (!mainAccountMap.has(mainAccountKey)) {
-      mainAccountMap.set(mainAccountKey, {
-        key: mainAccountKey,
-        platform,
-        mainAccountId,
-        mainAccountName: normalizeText(mainAccountMeta?.main_account_name) || mainAccountId,
-        loginUsername: normalizeText(mainAccountMeta?.username),
-        shops: [],
-        shopCount: 0,
-        activeShopCount: 0,
-        inactiveShopCount: 0,
-        missingShopIdCount: 0,
+        mainAccountMap.set(mainAccountKey, {
+          key: mainAccountKey,
+          platform,
+          mainAccountId,
+          mainAccountName: normalizeText(mainAccountMeta?.main_account_name) || mainAccountId,
+          loginUsername: normalizeText(mainAccountMeta?.username),
+          mainEnabled: mainAccountMeta?.enabled !== false,
+          shops: [],
+          shopCount: 0,
+          activeShopCount: 0,
+          inactiveShopCount: 0,
+          missingShopIdCount: 0,
       })
     }
 
@@ -101,6 +102,7 @@ export function buildMainAccountSnapshot(group) {
     mainAccountId: group.mainAccountId,
     mainAccountName: group.mainAccountName,
     loginUsername: group.loginUsername,
+    mainEnabled: group.mainEnabled,
     shopCount: group.shopCount,
     activeShopCount: group.activeShopCount,
     inactiveShopCount: group.inactiveShopCount,

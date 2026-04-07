@@ -39,7 +39,7 @@ _CN_TIKTOK_PAID = _u(r"\u652f\u4ed8\u91d1\u989d")
 _UNMATCHED_ALIAS_QUERY = """
 WITH raw_candidates AS (
     SELECT
-        'shopee'::varchar AS platform,
+        LOWER(COALESCE(platform_code, raw_data->>'platform', ''))::varchar AS platform,
         NULLIF(TRIM(COALESCE(raw_data->>:cn_site, raw_data->>'site')), '') AS site,
         NULLIF(
             TRIM(
@@ -53,31 +53,14 @@ WITH raw_candidates AS (
             ),
             ''
         ) AS store_label_raw,
-        COALESCE(raw_data->>:cn_order_id, raw_data->>'order_id') AS order_id,
-        COALESCE(NULLIF(raw_data->>:cn_shopee_paid, '')::numeric, 0) AS paid_amount
-    FROM b_class.fact_shopee_orders_daily
-    WHERE COALESCE(shop_id, '') IN ('', 'none', 'unknown')
-
-    UNION ALL
-
-    SELECT
-        'tiktok'::varchar AS platform,
-        NULLIF(TRIM(COALESCE(raw_data->>:cn_site, raw_data->>'site')), '') AS site,
-        NULLIF(
-            TRIM(
-                COALESCE(
-                    raw_data->>:cn_store,
-                    raw_data->>:cn_store_short,
-                    raw_data->>:cn_store_name,
-                    raw_data->>'store_name',
-                    raw_data->>'store_label_raw'
-                )
-            ),
-            ''
-        ) AS store_label_raw,
-        COALESCE(raw_data->>:cn_order_id, raw_data->>'order_id') AS order_id,
-        COALESCE(NULLIF(raw_data->>:cn_tiktok_paid, '')::numeric, 0) AS paid_amount
-    FROM b_class.fact_tiktok_orders_daily
+        COALESCE(order_id, raw_data->>:cn_order_id, raw_data->>'order_id') AS order_id,
+        COALESCE(
+            paid_amount,
+            NULLIF(raw_data->>:cn_shopee_paid, '')::numeric,
+            NULLIF(raw_data->>:cn_tiktok_paid, '')::numeric,
+            0
+        ) AS paid_amount
+    FROM semantic.fact_orders_atomic
     WHERE COALESCE(shop_id, '') IN ('', 'none', 'unknown')
 ),
 grouped AS (
@@ -104,7 +87,9 @@ WHERE NOT EXISTS (
     SELECT 1
     FROM core.shop_account_aliases saa
     WHERE LOWER(COALESCE(saa.platform, '')) = LOWER(g.platform)
-      AND LOWER(COALESCE(saa.alias_normalized, '')) = LOWER(g.store_label_raw)
+      AND LOWER(COALESCE(saa.alias_normalized, '')) = LOWER(
+          REGEXP_REPLACE(TRIM(COALESCE(g.store_label_raw, '')), '[[:space:]_\\-()/]+', '', 'g')
+      )
       AND saa.is_active = true
 )
 ORDER BY g.paid_amount DESC, g.row_count DESC, g.platform, g.store_label_raw

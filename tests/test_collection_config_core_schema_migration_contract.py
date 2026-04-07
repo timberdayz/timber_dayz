@@ -22,6 +22,9 @@ def test_collection_config_shop_scope_migration_moves_legacy_public_table_into_c
         with admin_conn.cursor() as cur:
             cur.execute(f"DROP DATABASE IF EXISTS {rehearsal_db}")
             cur.execute(f"CREATE DATABASE {rehearsal_db}")
+            cur.execute(
+                f"ALTER DATABASE {rehearsal_db} SET search_path TO '\"$user\"', public"
+            )
 
         conn = psycopg2.connect(
             host="127.0.0.1",

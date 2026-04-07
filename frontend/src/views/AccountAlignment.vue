@@ -57,7 +57,7 @@
       <template #header>
         <div class="card-header">
           <span>待认领店铺别名 ({{ unmatchedStores.length }})</span>
-          <span class="card-header__meta">数据来源：当前 b_class 订单事实表</span>
+          <span class="card-header__meta">数据来源：当前 semantic 订单事实表</span>
         </div>
       </template>
 

@@ -189,7 +189,7 @@
               class="navigator-main-account"
               :class="{
                 'is-active': selectedMainAccountGroupKey === mainAccount.key,
-                'has-warning': mainAccount.missingShopIdCount > 0,
+                'has-warning': mainAccount.missingShopIdCount > 0 || !mainAccount.mainEnabled,
                 'has-muted': mainAccount.inactiveShopCount > 0
               }"
               @click="selectMainAccountGroup(mainAccount.key)"
@@ -200,11 +200,13 @@
               </div>
               <div class="navigator-main-account__meta">{{ mainAccount.mainAccountId }}</div>
               <div class="navigator-main-account__stats">
+                <span>主账号 {{ mainAccount.mainEnabled ? '启用' : '停用' }}</span>
                 <span>启用 {{ mainAccount.activeShopCount }}</span>
                 <span>停用 {{ mainAccount.inactiveShopCount }}</span>
                 <span v-if="mainAccount.missingShopIdCount > 0">缺少店铺ID {{ mainAccount.missingShopIdCount }}</span>
               </div>
-              <div v-if="mainAccount.missingShopIdCount > 0 || mainAccount.inactiveShopCount > 0" class="navigator-main-account__flags">
+              <div v-if="!mainAccount.mainEnabled || mainAccount.missingShopIdCount > 0 || mainAccount.inactiveShopCount > 0" class="navigator-main-account__flags">
+                <el-tag v-if="!mainAccount.mainEnabled" size="small" type="danger">主账号已停用</el-tag>
                 <el-tag v-if="mainAccount.missingShopIdCount > 0" size="small" type="warning">待补店铺ID</el-tag>
                 <el-tag v-if="mainAccount.inactiveShopCount > 0" size="small" type="info">含停用店铺</el-tag>
               </div>
@@ -234,9 +236,26 @@
                   / {{ selectedMainAccountSnapshot.loginUsername }}
                 </span>
               </div>
+              <div class="current-main-account-summary__status">
+                <el-tag :type="selectedMainAccountSnapshot.mainEnabled ? 'success' : 'danger'" effect="plain">
+                  {{ selectedMainAccountSnapshot.mainEnabled ? '主账号已启用' : '主账号已停用' }}
+                </el-tag>
+              </div>
             </div>
 
             <div class="current-main-account-summary__actions">
+              <div class="main-account-status-switch">
+                <span class="main-account-status-switch__label">主账号状态</span>
+                <el-switch
+                  data-testid="main-account-status-switch"
+                  :model-value="selectedMainAccountSnapshot.mainEnabled"
+                  :loading="mainAccountStatusUpdating"
+                  inline-prompt
+                  active-text="启用"
+                  inactive-text="停用"
+                  @change="handleToggleMainAccountEnabled"
+                />
+              </div>
               <el-button type="primary" @click="openCreateDialogForSelectedMainAccount">
                 <el-icon><Plus /></el-icon>
                 添加店铺账号
@@ -395,7 +414,7 @@
               <el-input v-model="accountForm.store_name" placeholder="如：HongXi Singapore Local" />
             </el-form-item>
             
-            <el-form-item label="主账号ID">
+            <el-form-item prop="parent_account" label="主账号ID">
               <el-input v-model="accountForm.parent_account" placeholder="多店铺共用时填写，如：hongxikeji:main" />
               <div class="form-tip">用于共享登录身份、持久会话和浏览器 profile</div>
             </el-form-item>
@@ -671,6 +690,7 @@ const activeTab = ref('basic')
 const editingAccount = ref(null)
 const selectedMainAccountId = ref('')
 const selectedMainAccountGroupKey = ref('')
+const mainAccountStatusUpdating = ref(false)
 
 const shopQuickFilter = ref('all')
 
@@ -1091,6 +1111,23 @@ async function handleToggleEnabled(account) {
   }
 }
 
+async function handleToggleMainAccountEnabled(enabled) {
+  if (!selectedMainAccountSnapshot.value) {
+    return
+  }
+
+  mainAccountStatusUpdating.value = true
+  try {
+    await accountsStore.updateMainAccountEnabled(
+      selectedMainAccountSnapshot.value.mainAccountId,
+      enabled
+    )
+    ElMessage.success(enabled ? '主账号已启用' : '主账号已停用')
+  } finally {
+    mainAccountStatusUpdating.value = false
+  }
+}
+
 /**
  * 添加店铺
  */
@@ -1305,11 +1342,32 @@ function getCapabilitiesText(capabilities) {
   gap: 16px;
 }
 
+.current-main-account-summary__status {
+  margin-top: 10px;
+}
+
 .current-main-account-summary__actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
   gap: 10px;
+}
+
+.main-account-status-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  background: #fafafa;
+}
+
+.main-account-status-switch__label {
+  font-size: 12px;
+  color: #606266;
+  white-space: nowrap;
 }
 
 .current-shop-table-toolbar {

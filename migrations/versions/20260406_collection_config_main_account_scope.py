@@ -66,6 +66,7 @@ def upgrade() -> None:
             "main_accounts",
             ["main_account_id"],
             ["main_account_id"],
+            referent_schema=SCHEMA_NAME,
             ondelete="CASCADE",
         )
         batch_op.drop_constraint(OLD_UNIQUE, type_="unique")
