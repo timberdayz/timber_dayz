@@ -1,0 +1,34 @@
+{
+  "platform": "miaoshou",
+  "account_id": "miaoshou_real_001",
+  "region": "CN",
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Brave/120",
+  "viewport": {
+    "width": 1920,
+    "height": 1200
+  },
+  "locale": "zh-CN",
+  "timezone": "Asia/Shanghai",
+  "currency": "CNY",
+  "device_scale_factor": 1.0,
+  "is_mobile": false,
+  "has_touch": false,
+  "color_scheme": "light",
+  "reduced_motion": "no-preference",
+  "forced_colors": "none",
+  "extra_http_headers": {
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+    "Cache-Control": "max-age=0",
+    "Upgrade-Insecure-Requests": "1"
+  },
+  "permissions": {
+    "geolocation": "denied",
+    "notifications": "denied",
+    "camera": "denied",
+    "microphone": "denied"
+  },
+  "created_at": 1766470365.8990922,
+  "version": "2.0"
+}

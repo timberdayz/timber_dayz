@@ -1,0 +1,123 @@
+# XiHong ERP Repository Constraints
+
+This file contains repository-specific constraints only.
+
+Default workflow comes from skills, especially `superpowers` and `planning-with-files`.
+Use this file to adapt those skills to the actual codebase.
+
+## Priority
+
+1. User instructions
+2. Repository-specific safety and stack constraints in this file
+3. `superpowers` and `planning-with-files`
+4. Other downloaded skills
+5. Historical archive under `openspec/`
+
+## Workflow Scope
+
+- Use skills as the default process for planning, implementation, debugging, review, and verification.
+- `openspec/` is archive-only. Do not treat it as the active workflow or source of current instructions unless the user explicitly asks about historical OpenSpec artifacts.
+- Root planning files are allowed:
+  - `task_plan.md`
+  - `findings.md`
+  - `progress.md`
+- GitHub production release is tag-driven.
+- Do not treat `origin/main` drift as a release failure by itself.
+
+## Collection Authoring Rules
+
+- Active collection component recording and authoring uses `pwcli + playwright skill + agent`.
+- Prefer `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md` over recorder-oriented or Inspector-oriented legacy docs.
+- Prefer `docs/guides/COLLECTION_TEST_ENVIRONMENT_BASELINE.md` when diagnosing browser/profile/fingerprint/runtime drift issues.
+- Prefer `docs/guides/PWCLI_AGENT_DEBUGGING_SOP.md` when converting failed collection tests into `pwcli + agent` debugging tasks.
+- Use `pwcli` to explore pages, collect snapshots, and capture evidence for agent-driven canonical Python components.
+- Do not default to `tools/record_component.py`, `tools/launch_inspector_recorder.py`, backend `/recorder`, or frontend recorder pages for new collection component work unless the user explicitly asks to inspect or maintain the legacy recorder path.
+- Legacy recorder scripts and recorder APIs are maintenance-only, not the primary workflow.
+
+## pwcli Environment Rules
+
+- Assume new PowerShell terminals may already auto-load project-specific `pwcli` helper functions from the user's PowerShell profile.
+- Before suggesting setup commands, inspect the active shell environment for existing user-facing commands such as:
+  - `pwcli`
+  - `Open-PwcliMiaoshou`
+  - `Open-PwcliShopee`
+  - `Open-PwcliTiktok`
+  - `Save-PwcliMiaoshouState`
+  - `Save-PwcliShopeeState`
+  - `Save-PwcliTiktokState`
+  - `Show-PwcliPaths`
+  - `pwsnap`
+  - `pwnote`
+  - `pwshot`
+  - `pwpack`
+- If those commands exist, prefer them in all user-facing instructions.
+- Prefer `.md` for `pwcli` snapshot and note evidence files when the output is intended for human + agent review.
+- Do not ask the user to redefine `pwcli` manually or switch to longer repo-local wrapper commands when the profile-provided commands already cover the task.
+- Repo-local wrapper scripts remain valid fallback or implementation targets, but they are secondary to already-loaded user-facing terminal commands.
+
+## Core Repository Constraints
+
+### Architecture
+
+- All ORM models are defined in `modules/core/db/schema.py`
+- Do not create a new SQLAlchemy `Base`
+- Pydantic contracts belong in `backend/schemas/`, not `backend/routers/`
+- New backend routes should declare `response_model` when the endpoint returns a typed payload
+- Dashboard cutover architecture is PostgreSQL-first:
+  - `b_class` raw layer
+  - `semantic` standardization layer
+  - `mart` aggregate layer
+  - `api` module layer
+- The runtime Dashboard switch is `USE_POSTGRESQL_DASHBOARD_ROUTER`
+- Do not add new production Dashboard dependencies on Metabase when equivalent PostgreSQL assets exist
+### Backend Async Rules
+
+- New backend runtime code uses `AsyncSession`
+- FastAPI routes use `get_async_db()`, not `get_db()`
+- Do not use synchronous ORM patterns such as `db.query()` in new async code
+- Await every async database operation
+
+### Service Rules
+
+- CRUD-style services should reuse `AsyncCRUDService` from `backend/services/base_service.py`
+- Non-CRUD orchestration services may use a different shape when that is the better fit
+- Prefer dependency injection instead of direct service construction inside routers
+
+### Frontend Stack
+
+- Frontend implementation must stay in the Vue 3 ecosystem
+- Use Vue 3 + Element Plus + Pinia + Vite
+- Do not introduce React or React Native code, patterns, or dependencies
+- Frontend API access goes through `frontend/src/api/`
+
+### Playwright Rules
+
+- In backend runtime code such as FastAPI routes and async services, use `async_playwright`
+- In standalone scripts, smoke tests, and local tooling, sync Playwright is allowed when appropriate
+- Prefer Playwright official locators such as `get_by_role`, `get_by_label`, and `get_by_text`
+
+### Time And Logging
+
+- Use `datetime.now(timezone.utc)`, not `datetime.utcnow()`
+- Avoid emoji in terminal and log output because of Windows console compatibility
+- Use explicit UTF-8 when file encoding must be stated
+
+### File And Rule Hygiene
+
+- Do not create ad hoc backup source files such as `*_backup.py`
+- Keep new rule changes aligned with `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/skill-integration.mdc`
+- Treat `docs/guides/DEVELOPMENT_RULES.md` as historical only if it remains in the repository
+
+### Git And Release Interpretation
+
+- Local `main` tracks `cnb/main` in this repository.
+- `origin/main` is the GitHub remote-tracking branch and may lag behind release tags.
+- Production deployment is triggered by `git push origin vX.Y.Z`.
+- Push `main` to `origin` only when you intentionally want GitHub branch history to match local branch history.
+
+## Detailed References
+
+- `docs/DEVELOPMENT_RULES/README.md`
+- `docs/guides/COLLECTION_SCRIPT_WRITING_GUIDE.md`
+- `docs/guides/PWCLI_AGENT_COLLECTION_SOP.md`
+- `.cursor/rules/skill-integration.mdc`

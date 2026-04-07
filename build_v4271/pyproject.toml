@@ -1,0 +1,34 @@
+[tool.black]
+line-length = 88
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"backend/routers/component_versions.py" = ["E501"]
+"backend/routers/data_quarantine.py" = ["E501"]
+"backend/routers/users_admin.py" = ["E501"]
+"scripts/high_frequency_pages_probe.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "preserve"
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+    "backend/tests",
+]
+markers = [
+    "asyncio: marks tests as async (deselect with '-m \"not asyncio\"')",
+    "slow: marks slower tests",
+    "requires_browser: marks tests that require a real browser environment",
+]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore:Support for class-based `config` is deprecated:DeprecationWarning",
+    "ignore:`max_items` is deprecated and will be removed, use `max_length` instead:DeprecationWarning",
+    "ignore:Test functions should return None:pytest.PytestReturnNotNoneWarning",
+    "ignore:The default datetime adapter is deprecated as of Python 3.12:DeprecationWarning",
+]

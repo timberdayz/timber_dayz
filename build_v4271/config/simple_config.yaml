@@ -1,0 +1,93 @@
+# 简化配置文件
+accounts:
+  miaoshou:
+    username: "18876067809"
+    password: "Wei5201314@"
+    enabled: true
+
+  shopee:
+    username: ""
+    password: ""
+    enabled: false
+
+data_collection:
+  schedule:
+    daily_time: "06:00"
+    enabled: true
+
+  output_path: "./data"
+  download_timeout: 30
+  retry_count: 3
+  # 输出路径配置
+  path_options:
+    include_shop_id: false # 是否在输出路径中包含shop_id（避免重复店铺名）
+
+# 采集框架配置
+collection:
+  # 组件化优先执行（已完成纯导出方法集成，启用组件化路径）
+  component_first: true
+  # 录制/诊断归档保留策略
+  maintenance:
+    per_category_keep: 5 # 每类（平台+数据类型）保留最近N个
+    schedule: weekly # 归档计划（future）
+    dry_run_default: true # 菜单运行默认 DRY_RUN
+    # 保留天数（按分类）
+    retention_days:
+      development: 7 # 开发调试文件
+      outputs: 30 # 输出结果
+      media: 14 # 媒体文件（截图/录屏）
+      logs: 180 # 日志文件
+    # 存储体检默认阈值
+    audit:
+      top_n: 30
+      min_size_mb: 10
+    # 备份轮转配置
+    backups:
+      days: 90 # 多少天之前的备份进行轮转压缩
+      compress: true # 是否压缩为zip
+      purge_after_zip: false # 压缩后是否删除原目录（需明确授权后改为 true）
+
+platforms:
+  miaoshou:
+    enabled: true
+    base_url: "https://erp.91miaoshou.com"
+    data_types: ["orders", "products", "sales"]
+
+  shopee:
+    enabled: true
+    base_url: "https://seller.shopee.cn"
+    data_types: ["traffic", "sales"]
+    # 导出行为配置
+    export:
+      # 自动重新生成报告（当列表只有"已下载"时）
+      auto_regenerate: true
+      # API备选路径（UI失败时的备选方案，默认禁用避免timestamp error）
+      api_fallback: false
+      # 按粒度配置（可覆盖全局设置）
+      granularity_overrides:
+        daily:
+          auto_regenerate: true
+          api_fallback: false
+        weekly:
+          auto_regenerate: true
+          api_fallback: false # 周粒度timestamp容易出错，默认禁用
+        monthly:
+          auto_regenerate: true
+          api_fallback: false # 月粒度timestamp容易出错，默认禁用
+
+recording:
+  # 录制完成后自动整合设置
+  auto_integrate: true
+  auto_promote_to_stable: true
+  keep_backup_count: 3
+  # 事件文件保存与目录（A/B/C）
+  events_dir: temp/development/recordings/events
+  save_event_jsonl: false
+  max_keep_events_per_account: 3
+
+notifications:
+  email:
+    enabled: false
+    smtp_server: ""
+    username: ""
+    password: ""

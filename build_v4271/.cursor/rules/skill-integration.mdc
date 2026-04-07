@@ -1,0 +1,101 @@
+# Skill Integration Rules for XiHong ERP
+
+This repository is skill-first. Skills define the default workflow. Project rules only add repository-specific constraints.
+
+## Priority Chain
+
+```
+user instructions
+> repository-specific constraints (.cursorrules)
+> superpowers + planning-with-files
+> other skills
+> archived OpenSpec material
+```
+
+## Core Interpretation
+
+- Use `superpowers` as the default workflow engine.
+- Use `planning-with-files` for complex multi-step work.
+- Use `.cursorrules` only for stack-specific and safety-specific exceptions.
+- Treat `openspec/` as archive-only reference material.
+- For collection authoring conversations, prefer the already-loaded PowerShell `pwcli` helper commands when they exist in the active shell profile, instead of reintroducing manual setup or longer fallback wrappers.
+- When the shell already exposes `pwsnap`, `pwnote`, `pwshot`, or `pwpack`, prefer them over longer snapshot-saving examples.
+- Prefer `.md` for `pwcli` snapshot and note evidence artifacts unless the user explicitly asks for another format.
+- For Dashboard architecture work, prefer the PostgreSQL path:
+  - `semantic` for standardization
+  - `mart` for reusable aggregates
+  - `api` for page-module query views
+- Treat PostgreSQL Dashboard cutover as the active direction for the Dashboard query path.
+## Skill Mapping
+
+### brainstorming (superpowers)
+
+- Use it for new features, rule redesigns, behavior changes, and architecture discussions.
+- Default design-doc location in this repository is `docs/superpowers/specs/`.
+- Do not redirect brainstorming output into OpenSpec.
+
+### writing-plans / executing-plans (superpowers)
+
+- Default plan-doc location is `docs/superpowers/plans/`.
+- Use `writing-plans` when you want a durable implementation plan document.
+- Use `executing-plans` only when there is already a written plan to execute.
+
+### planning-with-files
+
+- Allowed and recommended for complex single-person work.
+- `task_plan.md`, `findings.md`, and `progress.md` intentionally live in project root.
+- These files are gitignored and do not violate repository rules.
+- Do not combine `planning-with-files` with OpenSpec in this repository.
+
+### test-driven-development (superpowers)
+
+- Fits naturally with Contract-First.
+- Preferred order:
+  - define contract
+  - write failing test
+  - implement minimal code
+  - verify
+
+### webapp-testing
+
+- Standalone scripts and test utilities may use sync Playwright.
+- Backend runtime code must stay async-first and use `async_playwright`.
+
+### frontend-design + ui-ux-pro-max
+
+- Adapt all design output to Vue 3 + Element Plus + Pinia + Vite.
+- Ignore React and React Native implementation advice.
+- Reuse existing frontend architecture instead of introducing a new component system.
+
+### systematic-debugging / code-review / verification skills
+
+- Use them directly. No extra workflow override is needed.
+
+## Decision Quick Reference
+
+```
+"I need to build or redesign something"
+  -> brainstorming
+  -> writing-plans or planning-with-files
+  -> test-driven-development
+
+"I need to fix a bug"
+  -> systematic-debugging
+  -> test-driven-development
+  -> verification-before-completion
+
+"I need to do a complex refactor or research task"
+  -> planning-with-files
+
+"I need to design a page or component"
+  -> ui-ux-pro-max + frontend-design
+  -> implement in Vue 3 + Element Plus
+
+"I need browser automation"
+  -> webapp-testing
+```
+
+## OpenSpec Status
+
+- Keep `openspec/` in the repository as history.
+- Do not create new OpenSpec proposals or route active work through OpenSpec unless the user explicitly asks for historical lookup or migration work.

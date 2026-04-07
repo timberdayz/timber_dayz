@@ -1,0 +1,5056 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Unified star schema ORM (SQLAlchemy) for ERP database.
+
+Tables:
+- dim_platforms
+- dim_shops
+- dim_products
+- dim_currency_rates
+- fact_orders
+- fact_order_items
+- fact_product_metrics
+- catalog_files (ingestion authority)
+
+Primary keys (confirmed):
+- Orders: (platform_code, shop_id, order_id)
+- Products: (platform_code, shop_id, platform_sku)
+- Metrics: (platform_code, shop_id, platform_sku, metric_date, metric_type)
+
+Notes:
+- Keep original currency columns and *_rmb columns.
+- Index for (platform_code, shop_id, date/granularity) as critical queries.
+- Platform code canonicalization will be handled by ingestion layer; schema stores canonical code.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+from typing import Optional
+
+from sqlalchemy import (
+    Column,
+    String,
+    Integer,
+    Float,
+    Boolean,
+    Date,
+    DateTime,
+    JSON,
+    Text,
+    ForeignKey,
+    UniqueConstraint,
+    Index,
+    ForeignKeyConstraint,
+    CheckConstraint,  # v4.5.1新增
+    text,  # v4.5.1新增
+    BigInteger,  # v4.12.0新增:用户权限表
+    Table,  # v4.12.0新增:用户权限表
+    Numeric,  # v4.12.0新增:运营数据表
+)
+from sqlalchemy.dialects.postgresql import JSONB  # v4.12.0新增:运营数据表
+from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.sql import func  # v4.12.0新增:用户权限表
+
+Base = declarative_base()
+
+JSON_COMPAT = JSON().with_variant(JSONB, "postgresql")
+
+# -------------------- Dimension Tables --------------------
+
+class DimPlatform(Base):
+    __tablename__ = "dim_platforms"
+
+    platform_code = Column(String(32), primary_key=True)  # e.g., 'shopee','miaoshou','tiktok'
+    name = Column(String(64), nullable=False)             # display name
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_dim_platforms_name"),
+        {"schema": "core"},
+    )
+
+
+class DimShop(Base):
+    __tablename__ = "dim_shops"
+
+    platform_code = Column(String(32), ForeignKey("core.dim_platforms.platform_code", ondelete="CASCADE"), primary_key=True)
+    shop_id = Column(String(256), primary_key=True)  # v4.3.4: 扩展到256以支持长shop_id
+
+    shop_slug = Column(String(128), nullable=True)  # human readable
+    shop_name = Column(String(256), nullable=True)
+    region = Column(String(16), nullable=True)
+    currency = Column(String(8), nullable=True)
+    timezone = Column(String(64), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    platform = relationship("DimPlatform", lazy="joined")
+
+    __table_args__ = (
+        Index("ix_dim_shops_platform_shop", "platform_code", "shop_id"),
+        Index("ix_dim_shops_platform_slug", "platform_code", "shop_slug"),
+        {"schema": "core"},
+    )
+
+
+class DimProduct(Base):
+    __tablename__ = "dim_products"
+
+    platform_code = Column(String(32), primary_key=True)
+    shop_id = Column(String(64), primary_key=True)
+    platform_sku = Column(String(128), primary_key=True)
+
+    product_title = Column(String(512), nullable=True)
+    category = Column(String(128), nullable=True)
+    status = Column(String(32), nullable=True)  # active/disabled/etc.
+
+    # product images
+    image_url = Column(String(1024), nullable=True)
+    image_path = Column(String(512), nullable=True)
+    image_last_fetched_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_dim_products_platform_shop", "platform_code", "shop_id"),
+        {"schema": "core"},
+    )
+
+# ---- Master SKU mapping & bridge (统一SKU映射) ----
+class DimProductMaster(Base):
+    __tablename__ = "dim_product_master"
+
+    product_id = Column(Integer, primary_key=True, autoincrement=True)
+    # 公司侧统一SKU/款号,可作为对外展示与聚合主键
+    company_sku = Column(String(128), unique=True, nullable=False)
+
+    product_title = Column(String(512), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        {"schema": "core"},
+    )
+
+
+class BridgeProductKeys(Base):
+    __tablename__ = "bridge_product_keys"
+
+    product_id = Column(Integer, ForeignKey("core.dim_product_master.product_id", ondelete="CASCADE"), primary_key=True)
+    platform_code = Column(String(32), primary_key=True)
+    shop_id = Column(String(64), primary_key=True)
+    platform_sku = Column(String(128), primary_key=True)
+
+    __table_args__ = (
+        # 关联至平台侧产品维表,复合外键
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id", "platform_sku"],
+            ["core.dim_products.platform_code", "core.dim_products.shop_id", "core.dim_products.platform_sku"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("platform_code", "shop_id", "platform_sku", name="uq_bridge_platform_sku"),
+        Index("ix_bridge_product_id", "product_id"),
+        {"schema": "core"},
+    )
+
+
+class DimExchangeRate(Base):
+    """
+    汇率维度表(v4.6.0新增)
+    
+    用途:存储和缓存汇率数据
+    - 支持全球180+货币
+    - 多源汇率API(Open Exchange Rates, ECB, BOC等)
+    - 本地缓存策略(24小时TTL)
+    
+    CNY本位币设计:
+    - 所有交易自动转换为CNY
+    - 保留原币金额和汇率(审计追溯)
+    """
+    __tablename__ = "dim_exchange_rates"
+    
+    # 主键
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 汇率维度
+    from_currency = Column(String(3), nullable=False, index=True)  # BRL/SGD/USD/...
+    to_currency = Column(String(3), nullable=False, index=True)    # CNY(默认)
+    rate_date = Column(Date, nullable=False, index=True)           # 汇率日期
+    
+    # 汇率值
+    rate = Column(Float, nullable=False)  # 汇率(精度6位小数)
+    
+    # 数据源信息
+    source = Column(String(50), nullable=True)  # open_exchange_rates/ecb/boc
+    priority = Column(Integer, default=99)      # 数据源优先级(1-99)
+    
+    # 审计字段
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint('from_currency', 'to_currency', 'rate_date', name='uq_exchange_rate'),
+        Index('ix_exchange_rate_lookup', 'from_currency', 'to_currency', 'rate_date'),
+        Index('ix_exchange_rate_date', 'rate_date'),
+        {"schema": "core"},
+    )
+
+
+
+class AccountAlias(Base):
+    """
+    账号别名映射表(v4.3.6)
+    
+    用途:将妙手(miaoshou)等ERP导出的口语化店铺名映射到统一账号ID
+    示例:
+    - platform=miaoshou, account=虾皮巴西, store_label_raw="菲律宾1店" -> target_id="shopee_ph_1"
+    - platform=miaoshou, account=虾皮巴西, store_label_raw="3C店" -> target_id="shopee_sg_3c"
+    """
+    __tablename__ = "account_aliases"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 源标识(from)
+    platform = Column(String(32), nullable=False)  # 如 'miaoshou'
+    data_domain = Column(String(64), nullable=False, default='orders')  # 仅orders需要对齐
+    account = Column(String(128), nullable=True)  # 采购账号(如"虾皮巴西_东朗照明主体")
+    site = Column(String(64), nullable=True)  # 站点(如"菲律宾")
+    store_label_raw = Column(String(256), nullable=False)  # 原始店铺名(如"菲律宾1店")
+    
+    # 目标标识(to)
+    target_type = Column(String(32), nullable=False, default='account')  # 'account' | 'shop'
+    target_id = Column(String(128), nullable=False)  # 标准账号ID或店铺ID
+    
+    # 元数据
+    confidence = Column(Float, default=1.0)  # 映射置信度(人工=1.0,自动建议<1.0)
+    active = Column(Boolean, default=True)  # 是否生效
+    notes = Column(Text, nullable=True)  # 备注
+    
+    # 审计
+    created_by = Column(String(64), default='system')
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by = Column(String(64), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        # 唯一约束:同一source组合只能映射到一个target
+        Index(
+            'uq_account_alias_source',
+            'platform', 'data_domain', 'account', 'site', 'store_label_raw',
+            unique=True
+        ),
+        # 查询索引
+        Index('ix_account_alias_platform_domain', 'platform', 'data_domain'),
+        Index('ix_account_alias_target', 'target_id', 'active'),
+        {"schema": "core"},
+    )
+
+
+class DimCurrencyRate(Base):
+    __tablename__ = "dim_currency_rates"
+
+    rate_date = Column(Date, primary_key=True)  # UTC date of rate
+    base_currency = Column(String(8), primary_key=True)   # e.g., USD
+    quote_currency = Column(String(8), primary_key=True)  # e.g., CNY
+
+    rate = Column(Float, nullable=False)
+    source = Column(String(64), nullable=True, default="exchangerate.host")
+    fetched_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_currency_base_quote", "base_currency", "quote_currency"),
+        {"schema": "core"},
+    )
+
+
+# -------------------- Fact Tables --------------------
+
+# [DELETED] v4.19.0: FactOrder 和 FactOrderItem 已删除
+# - 已被 b_class.fact_{platform}_orders_{granularity} 表替代(DSS架构)
+# - 所有订单数据现在存储在 b_class schema 下的按平台分表中
+# - 如需查询订单数据,请使用 Metabase Orders Model 或直接查询 b_class 表
+
+class FactOrderAmount(Base):
+    """
+    订单金额维度表(v4.6.0核心设计)
+    
+    维度表设计:统一字段 + 多维度列
+    - 优势:零字段爆炸,多货币支持,符合关系型范式
+    - 用途:存储订单金额维度数据(销售额/退款 × 状态 × 货币)
+    
+    维度列:
+    - metric_type: sales_amount(销售额)/ refund_amount(退款)
+    - metric_subtype: completed/paid/placed/cancelled/pending_shipment/...
+    - currency: BRL/SGD/CNY/USD/EUR/...
+    
+    示例:
+    - 销售额(已付款订单)(BRL) -> {metric_type: sales_amount, metric_subtype: paid, currency: BRL}
+    - 退款金额(SGD) -> {metric_type: refund_amount, metric_subtype: standard, currency: SGD}
+    """
+    __tablename__ = "fact_order_amounts"
+    
+    # 主键
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 关联字段(不使用外键约束,数据仓库设计模式)
+    order_id = Column(String(128), nullable=False, index=True)
+    
+    # 维度列(关键设计)
+    metric_type = Column(String(32), nullable=False, index=True)  # sales_amount/refund_amount
+    metric_subtype = Column(String(32), nullable=False, index=True)  # completed/paid/placed/cancelled/...
+    currency = Column(String(3), nullable=False, index=True)  # BRL/SGD/CNY/...
+    
+    # 金额列
+    amount_original = Column(Float, nullable=False)  # 原币金额
+    amount_cny = Column(Float, nullable=True)  # CNY金额(自动转换)
+    exchange_rate = Column(Float, nullable=True)  # 汇率(审计)
+    
+    # 审计字段
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_order_amounts_order", "order_id"),
+        Index("ix_order_amounts_metric", "metric_type", "metric_subtype"),
+        Index("ix_order_amounts_currency", "currency", "created_at"),
+        Index("ix_order_amounts_composite", "order_id", "metric_type", "metric_subtype", "currency"),
+    )
+
+
+class FactProductMetric(Base):
+    """
+    [WARN] v4.6.0 DSS架构重构:已废弃
+    - 已被fact_raw_data_products_*表替代(按data_domain+granularity分表)
+    - 表结构保留用于兼容性,但新数据应写入fact_raw_data_*表
+    - 计划在Phase 6.1中删除(需要先迁移所有数据)
+    
+    原设计说明(方案B+ 扁平化设计):
+    
+    设计理念:
+    - 宽表设计:直接存储所有指标字段,避免外键查询
+    - 支持多粒度:daily/weekly/monthly在同一表
+    - 完整业务标识:platform_code + shop_id + platform_sku + metric_date + granularity + sku_scope
+    
+    主键设计:
+    - 复合主键:platform_code + shop_id + platform_sku + metric_date + metric_type(初始设计)
+    - 唯一索引:platform_code + shop_id + platform_sku + metric_date + granularity + sku_scope(v4.10.0更新)
+    """
+    __tablename__ = "fact_product_metrics"
+    
+    # ========== 主键字段(业务标识) ==========
+    platform_code = Column(String(32), nullable=False, primary_key=True, index=True)
+    shop_id = Column(String(64), nullable=False, primary_key=True, index=True)
+    platform_sku = Column(String(128), nullable=False, primary_key=True, index=True)
+    metric_date = Column(Date, nullable=False, primary_key=True, index=True)
+    metric_type = Column(String(64), nullable=False, primary_key=True)
+    
+    # ========== 粒度与层级字段 ==========
+    granularity = Column(String(16), nullable=False, server_default='daily', index=True)
+    sku_scope = Column(String(8), nullable=False, server_default='product', index=True, comment='SKU粒度:product(商品级) | variant(规格级)')
+    data_domain = Column(String(50), nullable=True, index=True, comment='数据域:products/inventory等')
+    parent_platform_sku = Column(String(128), nullable=True, index=True, comment='父级SKU(当sku_scope=variant时指向商品级SKU)')
+    
+    # ========== 数据血缘字段 ==========
+    source_catalog_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True, comment='来源文件ID')
+    
+    # ========== 商品基础信息 ==========
+    product_name = Column(String(500), nullable=True)
+    category = Column(String(200), nullable=True)
+    brand = Column(String(100), nullable=True)
+    specification = Column(String(500), nullable=True, comment='商品规格')
+    
+    # ========== 价格信息 ==========
+    currency = Column(String(8), nullable=True)
+    price = Column(Float, nullable=False, server_default='0.0', comment='商品价格(原币)')
+    price_rmb = Column(Float, nullable=False, server_default='0.0', comment='商品价格(人民币)')
+    
+    # ========== 库存信息 ==========
+    stock = Column(Integer, nullable=False, server_default='0', comment='当前库存')
+    total_stock = Column(Integer, nullable=True, comment='总库存')
+    available_stock = Column(Integer, nullable=True, comment='可用库存')
+    reserved_stock = Column(Integer, nullable=True, comment='预留库存')
+    in_transit_stock = Column(Integer, nullable=True, comment='在途库存')
+    warehouse = Column(String(100), nullable=True, comment='仓库名称')
+    
+    # ========== 图片信息 ==========
+    image_url = Column(String(500), nullable=True)
+    
+    # ========== 销售指标 ==========
+    sales_volume = Column(Integer, nullable=False, server_default='0', comment='销量')
+    sales_amount = Column(Float, nullable=False, server_default='0.0', comment='销售额(原币)')
+    sales_amount_rmb = Column(Float, nullable=False, server_default='0.0', comment='销售额(人民币)')
+    sales_volume_7d = Column(Integer, nullable=True, comment='7天销量')
+    sales_volume_30d = Column(Integer, nullable=True, comment='30天销量')
+    sales_volume_60d = Column(Integer, nullable=True, comment='60天销量')
+    sales_volume_90d = Column(Integer, nullable=True, comment='90天销量')
+    
+    # ========== 流量指标 ==========
+    page_views = Column(Integer, nullable=False, server_default='0', comment='页面浏览量')
+    unique_visitors = Column(Integer, nullable=False, server_default='0', comment='独立访客数')
+    click_through_rate = Column(Float, nullable=True, comment='点击率')
+    order_count = Column(Integer, nullable=True, server_default='0', comment='订单数统计')
+    
+    # ========== 转化指标 ==========
+    conversion_rate = Column(Float, nullable=True, comment='转化率')
+    add_to_cart_count = Column(Integer, nullable=False, server_default='0', comment='加购数')
+    
+    # ========== 评价指标 ==========
+    rating = Column(Float, nullable=True, comment='评分')
+    review_count = Column(Integer, nullable=False, server_default='0', comment='评价数')
+    
+    # ========== 时间维度字段 ==========
+    period_start = Column(Date, nullable=True, comment='周/月统计区间起始日')
+    metric_date_utc = Column(Date, nullable=True, comment='UTC日期(按店铺时区换算)')
+    
+    # ========== 指标值字段(兼容旧设计) ==========
+    metric_value = Column(Float, nullable=False, server_default='0', comment='指标值(兼容旧设计)')
+    metric_value_rmb = Column(Float, nullable=False, server_default='0', comment='指标值(人民币,兼容旧设计)')
+    
+    # ========== 时间戳字段 ==========
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    
+    # ========== 表约束和索引 ==========
+    __table_args__ = (
+        # 唯一索引:platform_code + shop_id + platform_sku + metric_date + granularity + sku_scope
+        UniqueConstraint(
+            "platform_code", "shop_id", "platform_sku", "metric_date", "granularity", "sku_scope",
+            name="ix_product_unique_with_scope"
+        ),
+        # 外键约束:source_catalog_id -> catalog_files.id
+        ForeignKeyConstraint(
+            ["source_catalog_id"],
+            ["catalog_files.id"],
+            ondelete="SET NULL"
+        ),
+        # 外键约束:platform_code + shop_id + platform_sku -> dim_products
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id", "platform_sku"],
+            ["dim_products.platform_code", "dim_products.shop_id", "dim_products.platform_sku"]
+        ),
+        # 索引:支持父SKU聚合查询
+        Index("ix_product_parent_date", "platform_code", "shop_id", "parent_platform_sku", "metric_date"),
+        # 索引:支持平台+店铺+日期+粒度查询
+        Index("ix_metrics_plat_shop_date_gran", "platform_code", "shop_id", "metric_date", "granularity"),
+        # 索引:支持平台+店铺+指标类型查询
+        Index("ix_metrics_plat_shop_type", "platform_code", "shop_id", "metric_type"),
+    )
+
+
+class FactTraffic(Base):
+    """
+    流量数据事实表(运营数据)
+    
+    设计规则:
+    - 主键:自增ID(便于外键引用和性能优化)
+    - 业务唯一索引:platform_code + shop_id + traffic_date + granularity + metric_type + data_domain
+    - shop_id为核心字段(运营数据主键设计规则)
+    - 当shop_id为NULL时,使用account作为替代
+    """
+    __tablename__ = "fact_traffic"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform_code = Column(String(50), nullable=False, index=True)
+    shop_id = Column(String(100), nullable=True, index=True)
+    account = Column(String(100), nullable=True)
+    traffic_date = Column(Date, nullable=False, index=True)
+    granularity = Column(String(20), nullable=False)
+    metric_type = Column(String(50), nullable=False)
+    metric_value = Column(Numeric(15, 2), nullable=False, default=0.0)
+    data_domain = Column(String(50), nullable=False, default="traffic")
+    attributes = Column(JSONB, nullable=True)
+    file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        UniqueConstraint(
+            "platform_code", "shop_id", "traffic_date", "granularity", "metric_type", "data_domain",
+            name="uq_fact_traffic_business"
+        ),
+    )
+
+
+class FactService(Base):
+    """
+    服务数据事实表(运营数据)
+    
+    设计规则:
+    - 主键:自增ID(便于外键引用和性能优化)
+    - 业务唯一索引:platform_code + shop_id + service_date + granularity + metric_type + data_domain
+    - shop_id为核心字段(运营数据主键设计规则)
+    - 当shop_id为NULL时,使用account作为替代
+    """
+    __tablename__ = "fact_service"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform_code = Column(String(50), nullable=False, index=True)
+    shop_id = Column(String(100), nullable=True, index=True)
+    account = Column(String(100), nullable=True)
+    service_date = Column(Date, nullable=False, index=True)
+    granularity = Column(String(20), nullable=False)
+    metric_type = Column(String(50), nullable=False)
+    metric_value = Column(Numeric(15, 2), nullable=False, default=0.0)
+    data_domain = Column(String(50), nullable=False, default="services")
+    attributes = Column(JSONB, nullable=True)
+    file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        UniqueConstraint(
+            "platform_code", "shop_id", "service_date", "granularity", "metric_type", "data_domain",
+            name="uq_fact_service_business"
+        ),
+    )
+
+
+class FactAnalytics(Base):
+    """
+    分析数据事实表(运营数据)
+    
+    设计规则:
+    - 主键:自增ID(便于外键引用和性能优化)
+    - 业务唯一索引:platform_code + shop_id + analytics_date + granularity + metric_type + data_domain
+    - shop_id为核心字段(运营数据主键设计规则)
+    - 当shop_id为NULL时,使用account作为替代
+    """
+    __tablename__ = "fact_analytics"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform_code = Column(String(50), nullable=False, index=True)
+    shop_id = Column(String(100), nullable=True, index=True)
+    account = Column(String(100), nullable=True)
+    analytics_date = Column(Date, nullable=False, index=True)
+    granularity = Column(String(20), nullable=False)
+    metric_type = Column(String(50), nullable=False)
+    metric_value = Column(Numeric(15, 2), nullable=False, default=0.0)
+    data_domain = Column(String(50), nullable=False, default="analytics")
+    attributes = Column(JSONB, nullable=True)
+    file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        UniqueConstraint(
+            "platform_code", "shop_id", "analytics_date", "granularity", "metric_type", "data_domain",
+            name="uq_fact_analytics_business"
+        ),
+    )
+
+
+# -------------------- Ingestion Authority --------------------
+
+class CatalogFile(Base):
+    __tablename__ = "catalog_files"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # source identification
+    file_path = Column(String(1024), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    source = Column(String(64), nullable=False, default="data/raw")  # 正式采集文件统一来自 data/raw，temp/outputs 仅保留 legacy 兼容
+
+    file_size = Column(Integer, nullable=True)
+    file_hash = Column(String(64), nullable=True)  # sha256 or md5
+
+    platform_code = Column(String(32), nullable=True)
+    account = Column(String(128), nullable=True)  # [*] 账号信息(从.meta.json提取)
+    shop_id = Column(String(256), nullable=True)  # v4.3.4: 扩展到256以支持长shop_id
+    data_domain = Column(String(64), nullable=True)  # orders/products/metrics
+    granularity = Column(String(16), nullable=True)   # daily/weekly/monthly
+    date_from = Column(Date, nullable=True)
+    date_to = Column(Date, nullable=True)
+
+    # 方案B+核心字段
+    source_platform = Column(String(32), nullable=True)  # 数据来源平台(用于字段映射模板匹配)
+    sub_domain = Column(String(64), nullable=True)  # 子数据域(如services下的agent/ai_assistant)
+    
+    # 方案B+数据治理字段
+    storage_layer = Column(String(32), nullable=True, default="raw")  # raw/staging/curated/quarantine
+    quality_score = Column(Float, nullable=True)  # 0-100数据质量评分
+    validation_errors = Column(JSON, nullable=True)  # 验证错误列表
+    meta_file_path = Column(String(1024), nullable=True)  # 伴生元数据文件路径
+
+    file_metadata = Column(JSON, nullable=True)
+
+    status = Column(String(32), nullable=False, default="pending")  # pending/validated/ingested/quarantined/failed
+    error_message = Column(Text, nullable=True)
+
+    first_seen_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_processed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_catalog_files_status", "status"),
+        Index("ix_catalog_files_platform_shop", "platform_code", "shop_id"),
+        Index("ix_catalog_files_dates", "date_from", "date_to"),
+        # 方案B+新索引
+        Index("ix_catalog_source_domain", "source_platform", "data_domain"),  # 模板匹配加速
+        Index("ix_catalog_sub_domain", "sub_domain"),  # 子域查询
+        Index("ix_catalog_storage_layer", "storage_layer"),  # 分层查询
+        Index("ix_catalog_quality_score", "quality_score"),  # 质量筛选
+        UniqueConstraint("file_hash", name="uq_catalog_files_hash"),
+    )
+
+
+class DataQuarantine(Base):
+    """
+    数据隔离表
+    
+    用于存储处理失败的数据行,便于问题排查和数据恢复。
+    当ETL流程中某些数据行验证失败或入库失败时,将其隔离到此表。
+    """
+    __tablename__ = "data_quarantine"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 来源信息
+    source_file = Column(String(500), nullable=False)
+    catalog_file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True)
+    row_number = Column(Integer, nullable=True)  # 原文件中的行号
+    
+    # 数据内容(JSON格式保存原始数据)
+    row_data = Column(Text, nullable=False)
+    
+    # 错误信息
+    error_type = Column(String(100), nullable=False)  # ValueError/KeyError/IntegrityError等
+    error_msg = Column(Text, nullable=True)  # 详细错误信息
+    
+    # 元数据
+    platform_code = Column(String(32), nullable=True)
+    shop_id = Column(String(64), nullable=True)
+    data_domain = Column(String(64), nullable=True)  # orders/products/metrics
+    
+    # 处理状态
+    is_resolved = Column(Boolean, default=False)  # 是否已解决
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolution_note = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_quarantine_source_file", "source_file"),
+        Index("ix_quarantine_error_type", "error_type"),
+        Index("ix_quarantine_platform_shop", "platform_code", "shop_id"),
+        Index("ix_quarantine_created", "created_at"),
+        Index("ix_quarantine_resolved", "is_resolved"),
+        {"schema": "core"},
+    )
+
+
+# -------------------- Application Management Tables --------------------
+
+class Account(Base):
+    """账号管理表"""
+    __tablename__ = "accounts"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform = Column(String(50), nullable=False)
+    account_name = Column(String(100), nullable=False)
+    account_id = Column(String(100), nullable=False)
+    status = Column(String(20), default="active", nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("account_id", name="uq_accounts_account_id"),
+        Index("ix_accounts_platform", "platform"),
+        Index("ix_accounts_status", "status"),
+        {"schema": "core"},
+    )
+
+
+class CollectionConfig(Base):
+    """
+    数据采集配置表
+    
+    存储采集任务的配置模板,支持:
+    - 多账号批量采集
+    - 多数据域选择
+    - 定时调度
+    - 日期范围配置
+    
+    v4.7.0 更新:
+    - sub_domain -> sub_domains (改为数组,支持多选)
+    - account_ids=[] 表示使用该平台所有活跃账号
+    """
+    __tablename__ = "collection_configs"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)  # 配置名称
+    platform = Column(String(50), nullable=False)  # 平台:shopee/tiktok/miaoshou
+    main_account_id = Column(
+        String(100),
+        ForeignKey("core.main_accounts.main_account_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="归属主账号ID",
+    )
+    account_ids = Column(JSON, nullable=False)  # 账号ID列表 ["acc1", "acc2"] 或 [](表示所有活跃账号)
+    data_domains = Column(JSON, nullable=False)  # 数据域列表 ["orders", "products"]
+    sub_domains = Column(JSON, nullable=True)  # 子域数组 ["agent", "ai_assistant"](v4.7.0改为数组)
+    granularity = Column(String(20), default="daily", nullable=False)  # 粒度:daily/weekly/monthly
+    date_range_type = Column(String(20), default="yesterday", nullable=False)  # today/yesterday/last_7_days/custom
+    custom_date_start = Column(Date, nullable=True)  # 自定义开始日期
+    custom_date_end = Column(Date, nullable=True)  # 自定义结束日期
+    execution_mode = Column(String(20), default="headless", nullable=False)  # 默认执行模式: headless/headed
+    schedule_enabled = Column(Boolean, default=False, nullable=False)  # 是否启用定时
+    schedule_cron = Column(String(50), nullable=True)  # Cron表达式
+    retry_count = Column(Integer, default=3, nullable=False)  # 重试次数
+    is_active = Column(Boolean, default=True, nullable=False)  # 是否启用
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_by = Column(String(100), nullable=True)  # 创建者
+    
+    # 关系
+    shop_scopes = relationship(
+        "CollectionConfigShopScope",
+        back_populates="config",
+        cascade="all, delete-orphan",
+    )
+    tasks = relationship("CollectionTask", back_populates="config")
+    
+    __table_args__ = (
+        UniqueConstraint(
+            "name",
+            "platform",
+            "main_account_id",
+            name="uq_collection_configs_name_platform_main_account",
+        ),
+        Index("ix_collection_configs_platform", "platform"),
+        Index("ix_collection_configs_main_account_id", "main_account_id"),
+        Index("ix_collection_configs_platform_main_account_id", "platform", "main_account_id"),
+        Index("ix_collection_configs_active", "is_active"),
+        {"schema": "core"},
+    )
+
+
+class CollectionConfigShopScope(Base):
+    """
+    店铺维度采集配置明细表
+
+    一条记录表示某个采集配置在某个店铺上的实际采集范围。
+    """
+
+    __tablename__ = "collection_config_shop_scopes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    config_id = Column(
+        Integer,
+        ForeignKey("core.collection_configs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    shop_account_id = Column(
+        String(100),
+        ForeignKey("core.shop_accounts.shop_account_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    data_domains = Column(JSON_COMPAT, nullable=False)
+    sub_domains = Column(JSON_COMPAT, nullable=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    config = relationship("CollectionConfig", back_populates="shop_scopes")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "config_id",
+            "shop_account_id",
+            name="uq_collection_config_shop_scopes_config_shop",
+        ),
+        Index("ix_collection_config_shop_scopes_config_id", "config_id"),
+        Index("ix_collection_config_shop_scopes_shop_account_id", "shop_account_id"),
+        Index("ix_collection_config_shop_scopes_enabled", "enabled"),
+        {"schema": "core"},
+    )
+
+
+class CollectionTask(Base):
+    """
+    数据采集任务表
+    
+    记录每次采集任务的执行状态和结果,支持:
+    - 任务进度跟踪
+    - 错误信息记录
+    - 验证码暂停
+    - 任务恢复和重试
+    
+    v4.7.0 更新(任务粒度优化):
+    - 一个任务 = 一个账号 + 所有配置的数据域
+    - 浏览器复用,一次登录采集所有域
+    - 支持部分成功机制(单域失败不影响其他域)
+    - 新增进度跟踪字段(total_domains, completed_domains, failed_domains, current_domain)
+    - 新增 debug_mode 调试模式支持
+    - 状态新增 partial_success(部分成功)
+    """
+    __tablename__ = "collection_tasks"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(100), nullable=False)  # UUID任务标识
+    platform = Column(String(50), nullable=False)
+    account = Column(String(100), nullable=False)  # 账号ID
+    status = Column(String(32), default="pending", nullable=False)  # pending/queued/running/verification_required/verification_submitted/completed/partial_success/failed/cancelled/interrupted
+    
+    # 关联配置(可选,快速采集时为空)
+    config_id = Column(Integer, ForeignKey("core.collection_configs.id", ondelete="SET NULL"), nullable=True)
+    
+    # 进度跟踪
+    progress = Column(Integer, default=0, nullable=False)  # 0-100
+    current_step = Column(String(200), nullable=True)  # 当前执行步骤
+    files_collected = Column(Integer, default=0, nullable=False)  # 采集文件数
+    
+    # 任务配置(冗余存储,便于查询)
+    trigger_type = Column(String(20), default="manual", nullable=False)  # manual/scheduled/retry
+    data_domains = Column(JSON, nullable=True)  # ["orders", "products"]
+    sub_domains = Column(JSON, nullable=True)  # ["agent", "ai_assistant"](v4.7.0改为数组)
+    granularity = Column(String(20), nullable=True)
+    date_range = Column(JSON, nullable=True)  # {"start": "2025-01-01", "end": "2025-01-31"}
+    
+    # v4.7.0 任务粒度优化字段
+    total_domains = Column(Integer, default=0, nullable=False)  # 总数据域数量(含子域)
+    completed_domains = Column(JSON, nullable=True)  # 已完成的数据域列表 ["orders", "products:agent"]
+    failed_domains = Column(JSON, nullable=True)  # 失败的数据域及原因 [{"domain": "orders", "error": "..."}]
+    current_domain = Column(String(100), nullable=True)  # 当前正在采集的数据域(含子域,如 "services:agent")
+    
+    # 错误信息
+    error_message = Column(Text, nullable=True)
+    error_screenshot_path = Column(String(500), nullable=True)
+    
+    # 执行统计
+    duration_seconds = Column(Integer, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)  # 任务实际开始执行时间(v4.7+ 步骤可观测)
+    completed_at = Column(DateTime(timezone=True), nullable=True)  # 任务结束时间(终态时写入)
+    retry_count = Column(Integer, default=0, nullable=False)
+    parent_task_id = Column(Integer, ForeignKey("core.collection_tasks.id", ondelete="SET NULL"), nullable=True)
+    
+    # 验证码状态
+    verification_type = Column(String(50), nullable=True)  # sms_code/email_code/slider/image/2fa
+    verification_screenshot = Column(String(500), nullable=True)
+    
+    # v4.7.0 调试模式
+    debug_mode = Column(Boolean, default=False, nullable=False)  # 调试模式(生产环境临时有头模式)
+    
+    # 乐观锁版本号
+    version = Column(Integer, default=1, nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # 关系
+    config = relationship("CollectionConfig", back_populates="tasks")
+    logs = relationship("CollectionTaskLog", back_populates="task", cascade="all, delete-orphan")
+    parent_task = relationship("CollectionTask", remote_side=[id], backref="retry_tasks")
+    
+    __table_args__ = (
+        UniqueConstraint("task_id", name="uq_collection_tasks_task_id"),
+        Index("ix_collection_tasks_platform", "platform"),
+        Index("ix_collection_tasks_status", "status"),
+        Index("ix_collection_tasks_config", "config_id"),
+        Index("ix_collection_tasks_created", "created_at"),
+        {"schema": "core"},
+    )
+
+
+class CollectionTaskLog(Base):
+    """
+    采集任务日志表
+    
+    记录任务执行过程中的详细日志,便于排查问题。
+    步骤可观测(v4.7+): details 约定结构为
+    { step_id, component?, data_domain?, success?, duration_ms?, error? }，
+    供前端步骤时间线解析。step_id 如 login/export_orders/file_process。
+    """
+    __tablename__ = "collection_task_logs"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("core.collection_tasks.id", ondelete="CASCADE"), nullable=False)
+    level = Column(String(10), nullable=False)  # info/warning/error
+    message = Column(Text, nullable=False)
+    details = Column(JSON, nullable=True)  # 步骤可观测: step_id/component/data_domain/success/duration_ms/error
+    timestamp = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+    
+    # 关系
+    task = relationship("CollectionTask", back_populates="logs")
+    
+    __table_args__ = (
+        Index("ix_collection_task_logs_task", "task_id"),
+        Index("ix_collection_task_logs_level", "level"),
+        Index("ix_collection_task_logs_time", "timestamp"),
+        {"schema": "core"},
+    )
+
+
+class CollectionSyncPoint(Base):
+    """
+    增量采集同步点表 (Phase 9.2 - 已取消,保留表结构)
+    
+    注意:增量采集功能已取消(不适用于UI模拟场景),但保留表结构以维护迁移历史
+    """
+    __tablename__ = "collection_sync_points"
+    
+    # 主键
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 唯一标识(平台+账号+数据域)
+    platform = Column(String(50), nullable=False, comment="平台代码")
+    account_id = Column(String(100), nullable=False, comment="账号ID")
+    data_domain = Column(String(50), nullable=False, comment="数据域: orders/products/inventory/traffic/services")
+    
+    # 同步点信息
+    last_sync_at = Column(DateTime(timezone=True), nullable=False, comment="最后同步时间(UTC)")
+    last_sync_value = Column(String(200), nullable=True, comment="最后同步值(如最大的updated_at时间戳)")
+    
+    # 统计信息
+    total_synced_count = Column(Integer, default=0, comment="累计同步记录数")
+    last_batch_count = Column(Integer, default=0, comment="最近一次同步记录数")
+    
+    # 元数据
+    sync_mode = Column(String(20), default="incremental", comment="同步模式: full/incremental")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        # 唯一约束:一个账号+数据域只有一个同步点
+        UniqueConstraint("platform", "account_id", "data_domain", name="uq_sync_point"),
+        # 索引
+        Index("ix_sync_points_platform_account", "platform", "account_id"),
+        Index("ix_sync_points_last_sync", "last_sync_at"),
+        {"schema": "core"},
+    )
+
+
+class TaskCenterTask(Base):
+    """Generic durable task control-plane record for long-running jobs."""
+
+    __tablename__ = "task_center_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(100), nullable=False)
+    task_family = Column(String(32), nullable=False)
+    task_type = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False, default="pending")
+    trigger_source = Column(String(32), nullable=True)
+    priority = Column(Integer, nullable=False, default=5)
+    runner_kind = Column(String(32), nullable=True)
+    external_runner_id = Column(String(128), nullable=True)
+    parent_task_id = Column(Integer, ForeignKey("task_center_tasks.id", ondelete="SET NULL"), nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    claimed_by = Column(String(100), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    platform_code = Column(String(32), nullable=True)
+    account_id = Column(String(100), nullable=True)
+    source_file_id = Column(Integer, nullable=True)
+    source_table_name = Column(String(255), nullable=True)
+    current_step = Column(String(255), nullable=True)
+    current_item = Column(String(500), nullable=True)
+    total_items = Column(Integer, nullable=False, default=0)
+    processed_items = Column(Integer, nullable=False, default=0)
+    success_items = Column(Integer, nullable=False, default=0)
+    failed_items = Column(Integer, nullable=False, default=0)
+    skipped_items = Column(Integer, nullable=False, default=0)
+    total_rows = Column(Integer, nullable=False, default=0)
+    processed_rows = Column(Integer, nullable=False, default=0)
+    valid_rows = Column(Integer, nullable=False, default=0)
+    error_rows = Column(Integer, nullable=False, default=0)
+    quarantined_rows = Column(Integer, nullable=False, default=0)
+    progress_percent = Column(Float, nullable=False, default=0.0)
+    error_summary = Column(Text, nullable=True)
+    details_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    parent_task = relationship("TaskCenterTask", remote_side=[id], backref="child_tasks")
+    logs = relationship("TaskCenterLog", back_populates="task", cascade="all, delete-orphan")
+    links = relationship("TaskCenterLink", back_populates="task", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint("task_id", name="uq_task_center_tasks_task_id"),
+        Index("ix_task_center_tasks_family_status", "task_family", "status"),
+        Index("ix_task_center_tasks_created", "created_at"),
+        Index("ix_task_center_tasks_runner", "runner_kind", "external_runner_id"),
+        Index("ix_task_center_tasks_source_file", "source_file_id"),
+        Index("ix_task_center_tasks_source_table", "source_table_name"),
+        CheckConstraint(
+            "status IN ('pending', 'queued', 'running', 'paused', 'retry_waiting', 'partial_success', 'completed', 'failed', 'cancelled', 'interrupted')",
+            name="chk_task_center_tasks_status",
+        ),
+    )
+
+
+class TaskCenterLog(Base):
+    """Append-only operational log rows for a generic task."""
+
+    __tablename__ = "task_center_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_pk = Column(Integer, ForeignKey("task_center_tasks.id", ondelete="CASCADE"), nullable=False)
+    level = Column(String(16), nullable=False, default="info")
+    event_type = Column(String(32), nullable=False, default="progress")
+    message = Column(Text, nullable=False)
+    details_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    task = relationship("TaskCenterTask", back_populates="logs")
+
+    __table_args__ = (
+        Index("ix_task_center_logs_task", "task_pk"),
+        Index("ix_task_center_logs_created", "created_at"),
+        Index("ix_task_center_logs_level", "level"),
+    )
+
+
+class TaskCenterLink(Base):
+    """Indexed task-to-subject links for reverse lookup."""
+
+    __tablename__ = "task_center_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_pk = Column(Integer, ForeignKey("task_center_tasks.id", ondelete="CASCADE"), nullable=False)
+    subject_type = Column(String(32), nullable=False)
+    subject_id = Column(String(128), nullable=True)
+    subject_key = Column(String(255), nullable=True)
+    details_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    task = relationship("TaskCenterTask", back_populates="links")
+
+    __table_args__ = (
+        Index("ix_task_center_links_task_subject", "task_pk", "subject_type"),
+        Index("ix_task_center_links_subject_id", "subject_type", "subject_id"),
+        Index("ix_task_center_links_subject_key", "subject_type", "subject_key"),
+    )
+
+
+class CloudBClassSyncCheckpoint(Base):
+    """Per-table checkpoint for local-to-cloud B-class sync."""
+
+    __tablename__ = "cloud_b_class_sync_checkpoints"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    table_schema = Column(String(64), nullable=False, default="b_class")
+    table_name = Column(String(255), nullable=False)
+    last_ingest_timestamp = Column(DateTime(timezone=True), nullable=True)
+    last_source_id = Column(BigInteger, nullable=True)
+    last_status = Column(String(32), nullable=False, default="pending")
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("table_schema", "table_name", name="uq_cloud_b_class_sync_checkpoint"),
+        Index("ix_cloud_b_class_sync_checkpoint_table", "table_schema", "table_name"),
+    )
+
+
+class CloudBClassSyncRun(Base):
+    """Run-level execution summary for local-to-cloud B-class sync."""
+
+    __tablename__ = "cloud_b_class_sync_runs"
+
+    run_id = Column(String(100), primary_key=True)
+    status = Column(String(32), nullable=False, default="pending")
+    total_tables = Column(Integer, nullable=False, default=0)
+    succeeded_tables = Column(Integer, nullable=False, default=0)
+    failed_tables = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    error_summary = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index("ix_cloud_b_class_sync_runs_status", "status"),
+        Index("ix_cloud_b_class_sync_runs_started_at", "started_at"),
+    )
+
+
+class CloudBClassSyncTask(Base):
+    """Durable control-plane task for automatic B-class cloud sync."""
+
+    __tablename__ = "cloud_b_class_sync_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(String(100), nullable=False, unique=True)
+    dedupe_key = Column(String(255), nullable=False)
+    source_table_name = Column(String(255), nullable=False)
+    platform_code = Column(String(32), nullable=True)
+    data_domain = Column(String(64), nullable=True)
+    sub_domain = Column(String(64), nullable=True)
+    granularity = Column(String(32), nullable=True)
+    trigger_source = Column(String(32), nullable=False, default="auto_ingest")
+    source_file_id = Column(Integer, nullable=True)
+    status = Column(String(32), nullable=False, default="pending")
+    attempt_count = Column(Integer, nullable=False, default=0)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    claimed_by = Column(String(100), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    last_attempt_started_at = Column(DateTime(timezone=True), nullable=True)
+    last_attempt_finished_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(Text, nullable=True)
+    error_code = Column(String(64), nullable=True)
+    projection_preset = Column(String(128), nullable=True)
+    projection_status = Column(String(32), nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_cloud_b_class_sync_tasks_status", "status"),
+        Index("ix_cloud_b_class_sync_tasks_source_table", "source_table_name"),
+        Index("ix_cloud_b_class_sync_tasks_dedupe_key", "dedupe_key"),
+    )
+
+
+class ComponentVersion(Base):
+    """
+    组件版本管理表 (Phase 9.4)
+    
+    用于管理组件版本、A/B测试和自动切换稳定版本
+    
+    使用场景:
+    - 组件升级时保留旧版本
+    - A/B测试新版本组件
+    - 自动统计成功率
+    - 快速回滚到稳定版本
+    """
+    __tablename__ = "component_versions"
+    
+    # 主键
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 组件标识
+    component_name = Column(String(100), nullable=False, comment="组件名称(不含版本号): shopee/login")
+    version = Column(String(20), nullable=False, comment="版本号: 1.0.0, 1.1.0")
+    file_path = Column(String(200), nullable=False, comment="组件文件路径(相对路径)")
+    
+    # 状态标识
+    is_stable = Column(Boolean, default=False, comment="是否为稳定版本")
+    is_active = Column(Boolean, default=True, comment="是否启用(禁用的版本不会被加载)")
+    is_testing = Column(Boolean, default=False, comment="是否在A/B测试中")
+    
+    # 统计信息
+    usage_count = Column(Integer, default=0, comment="使用次数")
+    success_count = Column(Integer, default=0, comment="成功次数")
+    failure_count = Column(Integer, default=0, comment="失败次数")
+    success_rate = Column(Float, default=0.0, comment="成功率(自动计算)")
+    
+    # A/B测试配置
+    test_ratio = Column(Float, default=0.0, comment="测试流量比例(0.0-1.0)")
+    test_start_at = Column(DateTime(timezone=True), nullable=True, comment="测试开始时间")
+    test_end_at = Column(DateTime(timezone=True), nullable=True, comment="测试结束时间")
+    
+    # 元数据
+    description = Column(Text, nullable=True, comment="版本说明")
+    created_by = Column(String(100), nullable=True, comment="创建人")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        # 唯一约束:组件名+版本号唯一
+        UniqueConstraint("component_name", "version", name="uq_component_version"),
+        # 索引
+        Index("ix_component_versions_name", "component_name"),
+        Index("ix_component_versions_stable", "is_stable"),
+        Index("ix_component_versions_success_rate", "success_rate"),
+        {"schema": "core"},
+    )
+
+
+class ComponentTestHistory(Base):
+    """
+    组件测试历史记录表 (Phase 8.2 - 2025-12-17)
+    
+    用于存储组件测试的详细历史记录,包括每步执行情况
+    
+    使用场景:
+    - 查看组件历史测试结果
+    - 分析组件稳定性趋势
+    - 定位失败原因和时间点
+    - 支持测试结果对比
+    """
+    __tablename__ = "component_test_history"
+    
+    # 主键
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    test_id = Column(String(36), unique=True, nullable=False, comment="测试唯一ID (UUID)")
+    
+    # 组件标识
+    component_name = Column(String(100), nullable=False, comment="组件名称: shopee/login")
+    component_version = Column(String(20), nullable=True, comment="组件版本号(如未指定则为临时组件)")
+    version_id = Column(Integer, nullable=True, comment="关联的版本ID(外键)")
+    
+    # 测试配置
+    platform = Column(String(50), nullable=False, comment="平台代码")
+    account_id = Column(String(100), nullable=False, comment="测试账号ID")
+    headless = Column(Boolean, default=False, comment="是否无头模式")
+    
+    # 测试结果
+    status = Column(String(20), nullable=False, comment="测试状态: passed/failed/cancelled")
+    duration_ms = Column(Integer, nullable=False, comment="总耗时(毫秒)")
+    steps_total = Column(Integer, nullable=False, comment="总步骤数")
+    steps_passed = Column(Integer, nullable=False, comment="成功步骤数")
+    steps_failed = Column(Integer, nullable=False, comment="失败步骤数")
+    success_rate = Column(Float, nullable=False, comment="成功率(0.0-1.0)")
+    
+    # 详细结果(JSON存储)
+    step_results = Column(JSONB, nullable=False, comment="每步执行详情(action/status/duration/error)")
+    error_message = Column(Text, nullable=True, comment="失败原因(如有)")
+    
+    # 环境信息
+    browser_info = Column(JSONB, nullable=True, comment="浏览器信息(User-Agent等)")
+    
+    # 审计字段
+    tested_by = Column(String(100), nullable=True, comment="测试人")
+    tested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="测试时间")
+    
+    __table_args__ = (
+        # 外键约束(可选)
+        ForeignKeyConstraint(
+            ["version_id"],
+            ["core.component_versions.id"],
+            name="fk_test_history_version",
+            ondelete="SET NULL"
+        ),
+        # 索引
+        Index("ix_test_history_component", "component_name"),
+        Index("ix_test_history_status", "status"),
+        Index("ix_test_history_tested_at", "tested_at"),
+        Index("ix_test_history_version", "version_id"),
+        {"schema": "core"},
+    )
+
+
+class PlatformAccount(Base):
+    """
+    平台账号管理表 (v4.7.0)
+    
+    替代手动编辑 local_accounts.py,提供前端GUI管理
+    支持:
+    - 多平台账号统一管理
+    - 店铺级别配置(一个主账号多个店铺)
+    - 密码加密存储
+    - 能力配置(capabilities)
+    
+    表位于 core schema(core.platform_accounts),与 search_path 中 public 优先时
+    须显式指定 schema 以免查到 public 下空表导致账号列表为空。
+    """
+    __tablename__ = "platform_accounts"
+    __table_args__ = (
+        Index("ix_platform_accounts_platform", "platform"),
+        Index("ix_platform_accounts_parent", "parent_account"),
+        Index("ix_platform_accounts_enabled", "enabled"),
+        Index("ix_platform_accounts_shop_type", "shop_type"),
+        Index("ix_platform_accounts_shop_id", "shop_id"),  # [*] v4.18.1新增
+        Index("ix_platform_accounts_platform_store_name", "platform", "store_name"),  # Orders 模型店铺别称→shop_id JOIN
+        Index("ix_platform_accounts_platform_account_alias", "platform", "account_alias"),  # Orders 模型店铺别称→shop_id JOIN
+        {"schema": "core"},
+    )
+    
+    # 主键和唯一标识
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(String(100), unique=True, nullable=False, comment="账号唯一标识")
+    
+    # 账号基本信息
+    parent_account = Column(String(100), nullable=True, comment="主账号(多店铺共用时填写)")
+    platform = Column(String(50), nullable=False, comment="平台代码: shopee/tiktok/miaoshou/amazon")
+    account_alias = Column(String(200), nullable=True, comment="账号别名(用于关联导出数据中的自定义名称,如miaoshou ERP的订单数据)")
+    store_name = Column(String(200), nullable=False, comment="店铺名称")
+    
+    # 店铺信息
+    shop_type = Column(String(50), nullable=True, comment="店铺类型: local/global")
+    shop_region = Column(String(50), nullable=True, comment="店铺区域: SG/MY/GLOBAL等")
+    shop_id = Column(String(256), nullable=True, comment="店铺ID(用于关联数据同步中的shop_id,可编辑)")  # [*] v4.18.1新增
+    
+    # 登录信息(敏感)
+    username = Column(String(200), nullable=False, comment="登录用户名")
+    password_encrypted = Column(Text, nullable=False, comment="加密后的密码")
+    login_url = Column(Text, nullable=True, comment="登录URL")
+    
+    # 联系信息
+    email = Column(String(200), nullable=True, comment="邮箱")
+    phone = Column(String(50), nullable=True, comment="手机号")
+    region = Column(String(50), default="CN", comment="账号注册地区")
+    currency = Column(String(10), default="CNY", comment="主货币")
+    
+    # 能力配置(JSONB)
+    capabilities = Column(
+        JSON_COMPAT,
+        nullable=False,
+        default={
+            "orders": True,
+            "products": True,
+            "services": True,
+            "analytics": True,
+            "finance": True,
+            "inventory": True
+        },
+        comment="账号支持的数据域能力"
+    )
+    
+    # 状态和设置
+    enabled = Column(Boolean, default=True, nullable=False, comment="是否启用")
+    proxy_required = Column(Boolean, default=False, comment="是否需要代理")
+    notes = Column(Text, nullable=True, comment="备注")
+    
+    # 审计字段
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, comment="更新时间")
+    created_by = Column(String(100), nullable=True, comment="创建人")
+    updated_by = Column(String(100), nullable=True, comment="更新人")
+    
+    # 扩展字段
+    extra_config = Column(JSONB, nullable=True, default={}, comment="扩展配置")
+
+
+class MainAccount(Base):
+    """Canonical login owner for shared persistent collection sessions."""
+
+    __tablename__ = "main_accounts"
+
+    __table_args__ = (
+        Index("ix_main_accounts_platform", "platform"),
+        Index("ix_main_accounts_enabled", "enabled"),
+        {"schema": "core"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform = Column(String(50), nullable=False, comment="平台代码")
+    main_account_id = Column(String(100), unique=True, nullable=False, comment="主账号ID")
+    main_account_name = Column(String(200), nullable=True, comment="主账号名称")
+    username = Column(String(200), nullable=False, comment="登录用户名")
+    password_encrypted = Column(Text, nullable=False, comment="加密后的密码")
+    login_url = Column(Text, nullable=True, comment="登录URL")
+    enabled = Column(Boolean, default=True, nullable=False, comment="是否启用")
+    notes = Column(Text, nullable=True, comment="备注")
+    extra_config = Column(JSON_COMPAT, nullable=True, default={}, comment="扩展配置")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_by = Column(String(100), nullable=True)
+    updated_by = Column(String(100), nullable=True)
+
+
+class ShopAccount(Base):
+    """Shop-level collection target bound to a main login account."""
+
+    __tablename__ = "shop_accounts"
+
+    __table_args__ = (
+        UniqueConstraint("platform", "platform_shop_id", name="uq_shop_accounts_platform_shop_id"),
+        Index("ix_shop_accounts_main_account_id", "main_account_id"),
+        Index("ix_shop_accounts_platform_shop_id", "platform_shop_id"),
+        Index("ix_shop_accounts_enabled", "enabled"),
+        {"schema": "core"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform = Column(String(50), nullable=False, comment="平台代码")
+    shop_account_id = Column(String(100), unique=True, nullable=False, comment="店铺账号ID")
+    main_account_id = Column(
+        String(100),
+        ForeignKey("core.main_accounts.main_account_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="归属主账号ID",
+    )
+    store_name = Column(String(200), nullable=False, comment="店铺名称")
+    platform_shop_id = Column(String(256), nullable=True, comment="平台店铺ID")
+    platform_shop_id_status = Column(
+        String(32),
+        nullable=False,
+        default="missing",
+        server_default=text("'missing'"),
+        comment="平台店铺ID状态",
+    )
+    shop_region = Column(String(50), nullable=True, comment="店铺区域")
+    shop_type = Column(String(50), nullable=True, comment="店铺类型")
+    enabled = Column(Boolean, default=True, nullable=False, comment="是否启用")
+    notes = Column(Text, nullable=True, comment="备注")
+    extra_config = Column(JSON_COMPAT, nullable=True, default={}, comment="扩展配置")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_by = Column(String(100), nullable=True)
+    updated_by = Column(String(100), nullable=True)
+
+
+class ShopAccountAlias(Base):
+    """Alias mapping from raw shop labels to canonical shop accounts."""
+
+    __tablename__ = "shop_account_aliases"
+
+    __table_args__ = (
+        UniqueConstraint("platform", "alias_normalized", "is_active", name="uq_shop_account_aliases_active_alias"),
+        Index("ix_shop_account_aliases_shop_account_id", "shop_account_id"),
+        Index("ix_shop_account_aliases_platform_alias_normalized", "platform", "alias_normalized"),
+        {"schema": "core"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    shop_account_id = Column(
+        Integer,
+        ForeignKey("core.shop_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        comment="归属店铺账号",
+    )
+    platform = Column(String(50), nullable=False, comment="平台代码")
+    alias_value = Column(String(256), nullable=False, comment="别名原值")
+    alias_normalized = Column(String(256), nullable=False, comment="标准化别名")
+    alias_type = Column(String(32), nullable=True, comment="别名类型")
+    source = Column(String(64), nullable=True, comment="来源")
+    is_primary = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    is_active = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class ShopAccountCapability(Base):
+    """Final enabled data domains for a shop account."""
+
+    __tablename__ = "shop_account_capabilities"
+
+    __table_args__ = (
+        UniqueConstraint("shop_account_id", "data_domain", name="uq_shop_account_capabilities_domain"),
+        Index("ix_shop_account_capabilities_shop_account_id", "shop_account_id"),
+        {"schema": "core"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    shop_account_id = Column(
+        Integer,
+        ForeignKey("core.shop_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        comment="归属店铺账号",
+    )
+    data_domain = Column(String(64), nullable=False, comment="数据域")
+    enabled = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class PlatformShopDiscovery(Base):
+    """Auto-discovered platform shop identifiers awaiting confirmation or binding."""
+
+    __tablename__ = "platform_shop_discoveries"
+
+    __table_args__ = (
+        Index("ix_platform_shop_discoveries_main_account_id", "main_account_id"),
+        Index("ix_platform_shop_discoveries_status", "status"),
+        {"schema": "core"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform = Column(String(50), nullable=False, comment="平台代码")
+    main_account_id = Column(
+        String(100),
+        ForeignKey("core.main_accounts.main_account_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="归属主账号ID",
+    )
+    detected_store_name = Column(String(256), nullable=True, comment="识别到的店铺名")
+    detected_platform_shop_id = Column(String(256), nullable=True, comment="识别到的平台店铺ID")
+    detected_region = Column(String(50), nullable=True, comment="识别到的区域")
+    candidate_shop_account_ids = Column(JSON_COMPAT, nullable=True, default=list, comment="候选店铺账号ID列表")
+    status = Column(
+        String(32),
+        nullable=False,
+        default="detected_failed",
+        server_default=text("'detected_failed'"),
+        comment="发现状态",
+    )
+    raw_payload = Column(JSON_COMPAT, nullable=True, default=dict, comment="原始识别载荷")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class DataFile(Base):
+    """数据文件表(旧版API兼容)"""
+    __tablename__ = "data_files"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_name = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    platform = Column(String(50), nullable=False)
+    data_type = Column(String(50), nullable=False)
+    status = Column(String(50), default="pending", nullable=False)
+    discovery_time = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_data_files_platform", "platform"),
+        Index("ix_data_files_status", "status"),
+        {"schema": "core"},
+    )
+
+
+class DataRecord(Base):
+    """通用数据记录表"""
+    __tablename__ = "data_records"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform = Column(String(50), nullable=False)
+    record_type = Column(String(50), nullable=False)
+    data = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_data_records_platform", "platform"),
+        Index("ix_data_records_type", "record_type"),
+        {"schema": "core"},
+    )
+
+
+class FieldMapping(Base):
+    """
+    字段映射表(方案B+增强版)
+    
+    方案B+改进:
+    - 添加sub_domain字段(services的agent/ai_assistant)
+    - 支持更精确的模板匹配
+    """
+    __tablename__ = "field_mappings"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("core.data_files.id", ondelete="CASCADE"), nullable=True)
+    platform = Column(String(50), nullable=True)  # source_platform(数据来源)
+    original_field = Column(String(100), nullable=False)
+    standard_field = Column(String(100), nullable=False)
+    confidence = Column(Float, default=0.0, nullable=False)
+    is_manual = Column(Boolean, default=False, nullable=False)
+    version = Column(Integer, default=1, nullable=False)
+    domain = Column(String(50), nullable=True)
+    granularity = Column(String(50), nullable=True)
+    sheet_name = Column(String(100), nullable=True)
+    
+    # 方案B+新字段
+    sub_domain = Column(String(64), nullable=True, default='')  # 子数据域(agent/ai_assistant等)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_field_mappings_platform", "platform"),
+        Index("ix_field_mappings_domain", "domain"),
+        Index("ix_field_mappings_version", "version"),
+        # 方案B+新索引(精确模板匹配)
+        Index("ix_field_mappings_template_key", "platform", "domain", "sub_domain", "granularity"),
+        {"schema": "core"},
+    )
+
+
+class MappingSession(Base):
+    """字段映射会话表"""
+    __tablename__ = "mapping_sessions"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(100), nullable=False)
+    platform = Column(String(50), nullable=True)
+    domain = Column(String(50), nullable=True)
+    status = Column(String(20), default="active", nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("session_id", name="uq_mapping_sessions_session_id"),
+        {"schema": "core"},
+    )
+
+
+# -------------------- Staging Tables (ETL Layer) --------------------
+
+class StagingOrders(Base):
+    """订单数据暂存表(ETL中间层)
+    
+    v4.11.4增强:
+    - 添加ingest_task_id字段(关联同步任务)
+    - 添加file_id字段(关联文件记录)
+    - 保留order_data JSON字段作为兜底
+    """
+    __tablename__ = "staging_orders"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform_code = Column(String(32), nullable=True)
+    shop_id = Column(String(64), nullable=True)
+    order_id = Column(String(128), nullable=True)
+    order_data = Column(JSON, nullable=False)  # 原始数据JSON(兜底)
+    ingest_task_id = Column(String(64), nullable=True, index=True, comment="同步任务ID")
+    file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True, comment="文件ID")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_staging_orders_platform", "platform_code"),
+        Index("ix_staging_orders_task", "ingest_task_id"),
+        Index("ix_staging_orders_file", "file_id"),
+        {"schema": "core"},
+    )
+
+
+class StagingProductMetrics(Base):
+    """产品指标暂存表(ETL中间层)
+    
+    v4.11.4增强:
+    - 添加ingest_task_id字段(关联同步任务)
+    - 添加file_id字段(关联文件记录)
+    - 保留metric_data JSON字段作为兜底
+    """
+    __tablename__ = "staging_product_metrics"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform_code = Column(String(32), nullable=True)
+    shop_id = Column(String(64), nullable=True)
+    platform_sku = Column(String(64), nullable=True)
+    metric_data = Column(JSON, nullable=False)  # 原始数据JSON(兜底)
+    ingest_task_id = Column(String(64), nullable=True, index=True, comment="同步任务ID")
+    file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True, comment="文件ID")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_staging_metrics_platform", "platform_code"),
+        Index("ix_staging_metrics_task", "ingest_task_id"),
+        Index("ix_staging_metrics_file", "file_id"),
+        {"schema": "core"},
+    )
+
+
+class StagingInventory(Base):
+    """库存数据暂存表(ETL中间层)
+    
+    v4.11.4新增:
+    - inventory域数据暂存表
+    - 支持原始数据JSON存储
+    - 关联同步任务和文件记录
+    """
+    __tablename__ = "staging_inventory"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform_code = Column(String(32), nullable=True)
+    shop_id = Column(String(64), nullable=True)
+    platform_sku = Column(String(128), nullable=True)
+    warehouse_id = Column(String(64), nullable=True, comment="仓库ID")
+    inventory_data = Column(JSON, nullable=False)  # 原始数据JSON(兜底)
+    ingest_task_id = Column(String(64), nullable=True, index=True, comment="同步任务ID")
+    file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True, index=True, comment="文件ID")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_staging_inventory_platform", "platform_code"),
+        Index("ix_staging_inventory_task", "ingest_task_id"),
+        Index("ix_staging_inventory_file", "file_id"),
+        Index("ix_staging_inventory_sku", "platform_code", "shop_id", "platform_sku"),
+        {"schema": "core"},
+    )
+
+
+class ProductImage(Base):
+    """
+    产品图片表(v3.0新增)
+    
+    存储产品图片URL和元数据,支持SKU级图片管理
+    """
+    __tablename__ = "product_images"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 产品标识(三元组)
+    platform_code = Column(String(32), nullable=False, comment="平台编码")
+    shop_id = Column(String(64), nullable=False, comment="店铺ID")
+    platform_sku = Column(String(128), nullable=False, comment="平台SKU")
+    
+    # 图片URL
+    image_url = Column(String(1024), nullable=False, comment="原图URL")
+    thumbnail_url = Column(String(1024), nullable=False, comment="缩略图URL")
+    
+    # 图片类型和顺序
+    image_type = Column(String(20), nullable=False, default='main', comment="图片类型: main/detail/spec")
+    image_order = Column(Integer, nullable=False, default=0, comment="显示顺序")
+    
+    # 图片元数据
+    file_size = Column(Integer, nullable=True, comment="文件大小(bytes)")
+    width = Column(Integer, nullable=True, comment="图片宽度(px)")
+    height = Column(Integer, nullable=True, comment="图片高度(px)")
+    format = Column(String(10), nullable=True, comment="图片格式: JPEG/PNG/GIF")
+    
+    # 质量评分(预留v4.0 AI识别)
+    quality_score = Column(Float, nullable=True, comment="图片质量评分(0-100)")
+    is_main_image = Column(Boolean, nullable=False, default=False, comment="是否主图")
+    
+    # 时间戳
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), comment="创建时间")
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), comment="更新时间")
+    
+    __table_args__ = (
+        Index("idx_product_images_sku", "platform_sku"),
+        Index("idx_product_images_product", "platform_code", "shop_id", "platform_sku"),
+        Index("idx_product_images_order", "platform_sku", "image_order"),
+    )
+
+
+# -------------------- Field Mapping Dictionary & Templates (v4.3.7) --------------------
+
+from sqlalchemy import UniqueConstraint  # reuse imports for constraints
+
+
+class FieldMappingDictionary(Base):
+    """
+    字段映射辞典表(标准字段元数据)
+
+    单一数据源:运行时从数据库读取并缓存
+    """
+    __tablename__ = "field_mapping_dictionary"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # 标准字段标识(唯一、稳定)
+    # 支持中文或英文代码(PostgreSQL UTF-8完全支持)
+    # 中文示例:field_code="订单号", cn_name="订单号"
+    # 英文示例:field_code="order_id", cn_name="订单号"
+    field_code = Column(String(128), nullable=False, unique=True, index=True)
+
+    # 中文友好信息
+    cn_name = Column(String(128), nullable=False)
+    en_name = Column(String(128), nullable=True)
+    description = Column(Text, nullable=True)
+
+    # 数据域与分组
+    data_domain = Column(String(64), nullable=False, index=True)  # orders/products/traffic/services/general
+    field_group = Column(String(64), nullable=True)  # dimension/amount/quantity/ratio/text/datetime
+
+    # 约束与验证
+    is_required = Column(Boolean, default=False)
+    data_type = Column(String(32), nullable=True)  # string/integer/float/date/datetime/currency/ratio
+    value_range = Column(String(256), nullable=True)
+
+    # 同义词与平台特定同义词
+    synonyms = Column(JSON, nullable=True)
+    platform_synonyms = Column(JSON, nullable=True)  # {"shopee": ["xxx"]}
+
+    # 示例值
+    example_values = Column(JSON, nullable=True)
+
+    # 排序与权重
+    display_order = Column(Integer, default=999)
+    match_weight = Column(Float, default=1.0)
+
+    # 审计与版本(v4.4.0新增)
+    active = Column(Boolean, default=True)
+    version = Column(Integer, default=1, nullable=False)  # 版本号(SCD2支持)
+    status = Column(String(32), default="active", nullable=False)  # draft/active/deprecated
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by = Column(String(64), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    notes = Column(Text, nullable=True)
+    
+    # v4.6.0新增:Pattern-based Mapping(配置驱动)
+    is_pattern_based = Column(Boolean, default=False, nullable=False, comment="是否启用模式匹配")
+    field_pattern = Column(Text, nullable=True, comment="字段匹配正则表达式(支持命名组)")
+    dimension_config = Column(JSON, nullable=True, comment="维度提取配置(如订单状态、货币映射)")
+    target_table = Column(String(64), nullable=True, comment="目标表名(如fact_order_amounts)")
+    target_columns = Column(JSON, nullable=True, comment="目标列映射配置(如metric_type/metric_subtype)")
+
+    # v4.10.2新增:物化视图显示标识
+    is_mv_display = Column(Boolean, default=False, nullable=False, comment="是否需要在物化视图中显示(true=核心字段,false=辅助字段)")
+    
+    # C类数据核心字段优化计划(Phase 3):货币策略字段
+    currency_policy = Column(String(32), nullable=True, comment="货币策略(CNY/无货币/多币种)")
+    source_priority = Column(JSON, nullable=True, comment="数据源优先级(JSON数组,如[\"miaoshou\", \"shopee\"])")
+
+    __table_args__ = (
+        UniqueConstraint("cn_name", name="uq_dictionary_cn_name"),  # 确保一对一映射:每个中文名称只对应一个标准字段
+        Index("ix_dictionary_domain_group", "data_domain", "field_group"),
+        Index("ix_dictionary_required", "is_required", "data_domain"),
+        Index("ix_dictionary_status", "status", "data_domain"),
+        Index("ix_dictionary_mv_display", "is_mv_display", "data_domain"),  # v4.10.2新增:物化视图显示字段索引
+        Index("ix_dictionary_currency_policy", "currency_policy"),  # C类数据核心字段优化计划:货币策略索引
+        {"schema": "core"},
+    )
+
+
+class FieldMappingTemplate(Base):
+    """
+    字段映射模板表(头)
+    
+    v4.5.1增强:
+    - 新增header_row: 支持非0行表头
+    - 新增sub_domain: 支持子数据类型识别(ai_assistant/agent等)
+    - 新增sheet_name: 支持多工作表Excel
+    - 新增encoding: 支持非UTF-8编码
+    
+    维度:platform × data_domain × sub_domain × granularity × account
+    """
+    __tablename__ = "field_mapping_templates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # 模板维度
+    platform = Column(String(32), nullable=False, index=True)
+    data_domain = Column(String(64), nullable=False, index=True)
+    granularity = Column(String(32), nullable=True)
+    account = Column(String(128), nullable=True)
+    
+    # v4.5.1新增:数据解析配置
+    sub_domain = Column(String(64), nullable=True, comment="子数据类型(如ai_assistant/agent)")
+    header_row = Column(Integer, default=0, nullable=False, comment="表头行索引(0-based,默认0)")
+    sheet_name = Column(String(128), nullable=True, comment="Excel工作表名称")
+    encoding = Column(String(32), default='utf-8', nullable=False, comment="文件编码(默认utf-8)")
+
+    # v4.6.0新增:原始表头字段列表(替代FieldMappingTemplateItem)
+    header_columns = Column(JSONB, nullable=True, comment="原始表头字段列表(JSONB数组)")
+    
+    # v4.14.0新增:核心去重字段列表(用于data_hash计算)
+    deduplication_fields = Column(JSONB, nullable=True, comment="核心去重字段列表(JSONB数组),用于data_hash计算,不受表头变化影响")
+    
+    # 元信息
+    template_name = Column(String(256), nullable=True)
+    version = Column(Integer, default=1, nullable=False)
+    status = Column(String(32), default="draft")  # draft/published/archived
+
+    # 统计
+    field_count = Column(Integer, default=0)
+    usage_count = Column(Integer, default=0)
+    success_rate = Column(Float, default=0.0)
+
+    # 审计
+    created_by = Column(String(64), default="user")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by = Column(String(64), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    notes = Column(Text, nullable=True)
+
+    __table_args__ = (
+        # v4.5.1更新:新增sub_domain到复合索引
+        Index("ix_template_dimension_v2", "platform", "data_domain", "sub_domain", "granularity", "account"),
+        Index("ix_template_status", "status", "platform"),
+        # v4.5.1新增:header_row范围CHECK约束(企业级数据治理标准)
+        CheckConstraint('header_row >= 0 AND header_row <= 100', name='ck_template_header_row_range'),
+        {"schema": "core"},
+    )
+
+
+class FieldMappingTemplateItem(Base):
+    """
+    字段映射模板明细表
+    
+    [WARN] v4.6.0 DSS架构重构:已废弃
+    - 已被FieldMappingTemplate.header_columns JSONB字段替代
+    - 表结构保留用于兼容性,但不再使用
+    - 新代码应使用header_columns字段
+    """
+    __tablename__ = "field_mapping_template_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    template_id = Column(Integer, nullable=False, index=True)
+    original_column = Column(String(256), nullable=False)
+    standard_field = Column(String(128), nullable=False)
+
+    confidence = Column(Float, default=1.0)
+    match_method = Column(String(64), nullable=True)
+    match_reason = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_template_item_template", "template_id"),
+        UniqueConstraint("template_id", "original_column", name="uq_template_original_column"),
+        {"schema": "core"},
+    )
+
+
+class FieldMappingAudit(Base):
+    """字段映射审计日志表"""
+    __tablename__ = "field_mapping_audit"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    action = Column(String(64), nullable=False)  # create/update/apply_template
+    entity_type = Column(String(64), nullable=False)  # dictionary/template/mapping
+    entity_id = Column(Integer, nullable=True)
+
+    before_data = Column(JSON, nullable=True)
+    after_data = Column(JSON, nullable=True)
+
+    success = Column(Boolean, default=True)
+    error_message = Column(Text, nullable=True)
+
+    operator = Column(String(64), nullable=False)
+    operated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(256), nullable=True)
+
+    __table_args__ = (
+        Index("ix_audit_entity", "entity_type", "entity_id"),
+        Index("ix_audit_operator", "operator", "operated_at"),
+        {"schema": "core"},
+    )
+
+
+# -------------------- Finance Domain Tables (v4.4.0 - Modern ERP) --------------------
+
+class DimMetricFormula(Base):
+    """
+    计算指标公式辞典(自动计算指标)
+    
+    存储计算类指标的SQL表达式和依赖关系,如:
+    - CTR = clicks / NULLIF(impressions, 0)
+    - conversion_rate = orders / NULLIF(sessions, 0)
+    """
+    __tablename__ = "dim_metric_formulas"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 指标标识
+    metric_code = Column(String(128), nullable=False, unique=True, index=True)
+    cn_name = Column(String(128), nullable=False)
+    en_name = Column(String(128), nullable=True)
+    description = Column(Text, nullable=True)
+    
+    # 数据域与分组
+    data_domain = Column(String(64), nullable=False, index=True)  # sales/traffic/inventory
+    metric_type = Column(String(32), nullable=False)  # ratio/amount/count
+    
+    # 计算公式
+    sql_expr = Column(Text, nullable=False)  # SQL表达式
+    depends_on = Column(JSON, nullable=True)  # 依赖的原子字段列表 ["clicks", "impressions"]
+    aggregator = Column(String(32), nullable=True)  # SUM/AVG/MAX/MIN/CUSTOM
+    
+    # 元数据
+    unit = Column(String(32), nullable=True)  # %/CNY/count
+    display_format = Column(String(64), nullable=True)  # 0.00%/0.00
+    
+    # 审计
+    active = Column(Boolean, default=True)
+    version = Column(Integer, default=1, nullable=False)
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index("ix_metric_formula_domain", "data_domain", "active"),
+        {"schema": "core"},
+    )
+
+
+class DimCurrency(Base):
+    """货币维度表"""
+    __tablename__ = "dim_currencies"
+    
+    currency_code = Column(String(8), primary_key=True)  # CNY/USD/SGD
+    currency_name = Column(String(64), nullable=False)
+    symbol = Column(String(8), nullable=True)
+    is_base = Column(Boolean, default=False)  # CNY为基准货币
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        {"schema": "core"},
+    )
+
+
+class FxRate(Base):
+    """汇率表(CNY基准)"""
+    __tablename__ = "fx_rates"
+    
+    rate_date = Column(Date, primary_key=True)
+    from_currency = Column(String(8), primary_key=True)
+    to_currency = Column(String(8), primary_key=True)
+    
+    rate = Column(Float, nullable=False)  # Decimal(18,6) precision
+    source = Column(String(64), nullable=True, default="manual")  # manual/ecb/api
+    version = Column(Integer, default=1, nullable=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_fx_rates_date_from", "rate_date", "from_currency"),
+        {"schema": "finance"},
+    )
+
+
+class DimFiscalCalendar(Base):
+    """会计期间日历表"""
+    __tablename__ = "dim_fiscal_calendar"
+    
+    period_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    period_year = Column(Integer, nullable=False)
+    period_month = Column(Integer, nullable=False)  # 1-12
+    period_code = Column(String(16), nullable=False, unique=True)  # 2025-01
+    
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    
+    status = Column(String(32), default="open", nullable=False)  # open/closed
+    closed_by = Column(String(64), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_fiscal_calendar_year_month", "period_year", "period_month"),
+        Index("ix_fiscal_calendar_status", "status"),
+        UniqueConstraint("period_year", "period_month", name="uq_fiscal_period"),
+        {"schema": "core"},
+    )
+
+
+class DimVendor(Base):
+    """供应商维度表"""
+    __tablename__ = "dim_vendors"
+    
+    vendor_code = Column(String(64), primary_key=True)
+    vendor_name = Column(String(256), nullable=False)
+    
+    country = Column(String(64), nullable=True)
+    tax_id = Column(String(128), nullable=True)
+    payment_terms = Column(String(64), nullable=True)  # NET30/NET60
+    credit_limit = Column(Float, default=0.0)
+    
+    status = Column(String(32), default="active", nullable=False)  # active/suspended/blocked
+    
+    contact_person = Column(String(128), nullable=True)
+    contact_phone = Column(String(64), nullable=True)
+    contact_email = Column(String(128), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index("ix_vendors_status", "status"),
+        {"schema": "core"},
+    )
+
+
+class POHeader(Base):
+    """采购订单头表"""
+    __tablename__ = "po_headers"
+    
+    po_id = Column(String(64), primary_key=True)
+    
+    vendor_code = Column(String(64), ForeignKey("core.dim_vendors.vendor_code"), nullable=False)
+    po_date = Column(Date, nullable=False)
+    expected_date = Column(Date, nullable=True)
+    
+    currency = Column(String(8), nullable=False)
+    total_amt = Column(Float, default=0.0)
+    base_amt = Column(Float, default=0.0)  # CNY
+    
+    status = Column(String(32), default="draft", nullable=False)  # draft/pending_approval/approved/closed
+    approval_threshold = Column(Float, nullable=True)
+    approved_by = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index("ix_po_headers_vendor_date", "vendor_code", "po_date"),
+        Index("ix_po_headers_status", "status"),
+        {"schema": "finance"},
+    )
+
+
+class POLine(Base):
+    """采购订单行表"""
+    __tablename__ = "po_lines"
+    
+    po_line_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    po_id = Column(String(64), ForeignKey("finance.po_headers.po_id", ondelete="CASCADE"), nullable=False)
+    line_number = Column(Integer, nullable=False)
+    
+    platform_sku = Column(String(128), nullable=False)  # 关联到BridgeProductKeys
+    product_title = Column(String(512), nullable=True)
+    
+    qty_ordered = Column(Integer, default=0)
+    qty_received = Column(Integer, default=0)
+    
+    unit_price = Column(Float, nullable=False)
+    currency = Column(String(8), nullable=False)
+    line_amt = Column(Float, default=0.0)
+    base_amt = Column(Float, default=0.0)  # CNY
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_po_lines_po_id", "po_id"),
+        Index("ix_po_lines_sku", "platform_sku"),
+        UniqueConstraint("po_id", "line_number", name="uq_po_line"),
+        {"schema": "finance"},
+    )
+
+
+class GRNHeader(Base):
+    """入库单头表(Goods Receipt Note)"""
+    __tablename__ = "grn_headers"
+    
+    grn_id = Column(String(64), primary_key=True)
+    
+    po_id = Column(String(64), ForeignKey("finance.po_headers.po_id"), nullable=False)
+    receipt_date = Column(Date, nullable=False)
+    warehouse = Column(String(64), nullable=True)
+    
+    status = Column(String(32), default="pending", nullable=False)  # pending/completed/cancelled
+    
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_grn_headers_po_id", "po_id"),
+        Index("ix_grn_headers_date", "receipt_date"),
+        {"schema": "finance"},
+    )
+
+
+class GRNLine(Base):
+    """入库单行表"""
+    __tablename__ = "grn_lines"
+    
+    grn_line_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    grn_id = Column(String(64), ForeignKey("finance.grn_headers.grn_id", ondelete="CASCADE"), nullable=False)
+    po_line_id = Column(Integer, ForeignKey("finance.po_lines.po_line_id"), nullable=False)
+    
+    platform_sku = Column(String(128), nullable=False)
+    qty_received = Column(Integer, default=0)
+    
+    unit_cost = Column(Float, nullable=False)
+    currency = Column(String(8), nullable=False)
+    ext_value = Column(Float, default=0.0)  # 原币
+    base_ext_value = Column(Float, default=0.0)  # CNY
+    
+    weight_kg = Column(Float, nullable=True)
+    volume_m3 = Column(Float, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_grn_lines_grn_id", "grn_id"),
+        Index("ix_grn_lines_po_line", "po_line_id"),
+        Index("ix_grn_lines_sku", "platform_sku"),
+        {"schema": "finance"},
+    )
+
+
+class InventoryLedger(Base):
+    """
+    库存流水账表(Universal Journal模式)
+    
+    唯一库存真源,记录所有出入库事务:
+    - receipt: 采购入库
+    - sale: 销售出库
+    - return: 退货入库
+    - adjustment: 盘点调整
+    
+    支持移动加权平均成本计算
+    """
+    __tablename__ = "inventory_ledger"
+    
+    ledger_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 业务标识
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    platform_sku = Column(String(128), nullable=False)
+    received_date = Column(Date, nullable=True)
+    opening_age_days = Column(Integer, nullable=True)
+    
+    # 交易日期与类型
+    transaction_date = Column(Date, nullable=False)
+    movement_type = Column(String(32), nullable=False)  # receipt/sale/return/adjustment
+    
+    # 数量与成本
+    qty_in = Column(Integer, default=0)
+    qty_out = Column(Integer, default=0)
+    unit_cost_wac = Column(Float, nullable=False)  # 移动加权平均成本
+    ext_value = Column(Float, default=0.0)
+    base_ext_value = Column(Float, default=0.0)  # CNY
+    
+    # 成本计算辅助(移动加权平均)
+    qty_before = Column(Integer, default=0)
+    avg_cost_before = Column(Float, default=0.0)
+    qty_after = Column(Integer, default=0)
+    avg_cost_after = Column(Float, default=0.0)
+    
+    # 来源追踪
+    link_grn_id = Column(String(64), nullable=True)  # 关联入库单
+    link_order_id = Column(String(128), nullable=True)  # 关联销售订单
+    original_sale_line_id = Column(Integer, nullable=True)  # 退货关联原销售行
+    return_reason = Column(String(256), nullable=True)
+    
+    # 审计
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_inventory_ledger_sku_date", "platform_code", "shop_id", "platform_sku", "transaction_date"),
+        Index("ix_inventory_ledger_type", "movement_type", "transaction_date"),
+        Index("ix_inventory_ledger_grn", "link_grn_id"),
+        Index("ix_inventory_ledger_order", "link_order_id"),
+        {"schema": "finance"},
+    )
+
+
+class InvoiceHeader(Base):
+    """发票头表"""
+    __tablename__ = "invoice_headers"
+    
+    invoice_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    vendor_code = Column(String(64), ForeignKey("core.dim_vendors.vendor_code"), nullable=False)
+    invoice_no = Column(String(128), nullable=False, unique=True)
+    invoice_date = Column(Date, nullable=False)
+    due_date = Column(Date, nullable=True)
+    
+    currency = Column(String(8), nullable=False)
+    total_amt = Column(Float, default=0.0)
+    tax_amt = Column(Float, default=0.0)
+    base_total_amt = Column(Float, default=0.0)  # CNY
+    
+    status = Column(String(32), default="pending", nullable=False)  # pending/matched/paid
+    
+    # OCR结果
+    source_file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True)
+    ocr_result = Column(JSON, nullable=True)
+    ocr_confidence = Column(Float, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index("ix_invoice_headers_vendor_date", "vendor_code", "invoice_date"),
+        Index("ix_invoice_headers_status", "status"),
+        {"schema": "finance"},
+    )
+
+
+class InvoiceLine(Base):
+    """发票行表"""
+    __tablename__ = "invoice_lines"
+    
+    invoice_line_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    invoice_id = Column(Integer, ForeignKey("finance.invoice_headers.invoice_id", ondelete="CASCADE"), nullable=False)
+    po_line_id = Column(Integer, ForeignKey("finance.po_lines.po_line_id"), nullable=True)
+    grn_line_id = Column(Integer, ForeignKey("finance.grn_lines.grn_line_id"), nullable=True)
+    
+    platform_sku = Column(String(128), nullable=False)
+    qty = Column(Integer, default=0)
+    
+    unit_price = Column(Float, nullable=False)
+    line_amt = Column(Float, default=0.0)
+    tax_amt = Column(Float, default=0.0)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_invoice_lines_invoice", "invoice_id"),
+        Index("ix_invoice_lines_po_line", "po_line_id"),
+        Index("ix_invoice_lines_grn_line", "grn_line_id"),
+        {"schema": "finance"},
+    )
+
+
+class InvoiceAttachment(Base):
+    """发票附件表(扫描件)"""
+    __tablename__ = "invoice_attachments"
+    
+    attachment_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    invoice_id = Column(Integer, ForeignKey("finance.invoice_headers.invoice_id", ondelete="CASCADE"), nullable=False)
+    
+    file_path = Column(String(1024), nullable=False)
+    file_type = Column(String(32), nullable=True)  # pdf/jpg/png
+    file_size = Column(Integer, nullable=True)
+    
+    ocr_text = Column(Text, nullable=True)
+    ocr_fields = Column(JSON, nullable=True)  # 提取的结构化字段
+    
+    uploaded_by = Column(String(64), default="system")
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_invoice_attachments_invoice", "invoice_id"),
+        {"schema": "finance"},
+    )
+
+
+class ThreeWayMatchLog(Base):
+    """三单匹配日志表(PO-GRN-Invoice)"""
+    __tablename__ = "three_way_match_log"
+    
+    match_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    po_line_id = Column(Integer, ForeignKey("finance.po_lines.po_line_id"), nullable=False)
+    grn_line_id = Column(Integer, ForeignKey("finance.grn_lines.grn_line_id"), nullable=True)
+    invoice_line_id = Column(Integer, ForeignKey("finance.invoice_lines.invoice_line_id"), nullable=True)
+    
+    match_status = Column(String(32), default="unmatched", nullable=False)  # matched/variance/unmatched
+    
+    variance_qty = Column(Integer, default=0)
+    variance_amt = Column(Float, default=0.0)
+    variance_reason = Column(Text, nullable=True)
+    
+    approved_by = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_three_way_match_po", "po_line_id"),
+        Index("ix_three_way_match_status", "match_status"),
+        {"schema": "finance"},
+    )
+
+
+class FactExpensesMonth(Base):
+    """月度运营费用事实表"""
+    __tablename__ = "fact_expenses_month"
+    
+    expense_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
+    
+    cost_center = Column(String(64), nullable=True)  # 成本中心
+    expense_type = Column(String(128), nullable=False)  # 从FieldMappingDictionary
+    vendor = Column(String(256), nullable=True)
+    
+    currency = Column(String(8), nullable=False)
+    currency_amt = Column(Float, default=0.0)
+    base_amt = Column(Float, default=0.0)  # CNY
+    tax_amt = Column(Float, default=0.0)
+    
+    # 可选:指定店铺(不指定则需分摊)
+    platform_code = Column(String(32), nullable=True)
+    shop_id = Column(String(64), nullable=True)
+    
+    source_file_id = Column(Integer, ForeignKey("catalog_files.id", ondelete="SET NULL"), nullable=True)
+    memo = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_expenses_month_period", "period_month"),
+        Index("ix_expenses_month_type", "expense_type"),
+        Index("ix_expenses_month_shop", "platform_code", "shop_id"),
+        {"schema": "finance"},
+    )
+
+
+class AllocationRule(Base):
+    """分摊规则表"""
+    __tablename__ = "allocation_rules"
+    
+    rule_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    rule_name = Column(String(256), nullable=False)
+    scope = Column(String(64), nullable=False)  # expense/logistics
+    driver = Column(String(64), nullable=False)  # revenue_share/orders_share/units_share/weight/volume/manual
+    
+    # 权重配置(JSON格式)
+    weights = Column(JSON, nullable=True)  # {"shop_a": 0.4, "shop_b": 0.6}
+    
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    
+    active = Column(Boolean, default=True)
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_allocation_rules_scope", "scope", "active"),
+        {"schema": "finance"},
+    )
+
+
+class FactExpensesAllocated(Base):
+    """费用分摊结果表(日-店铺-SKU粒度)"""
+    __tablename__ = "fact_expenses_allocated_day_shop_sku"
+    
+    allocation_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    expense_id = Column(Integer, ForeignKey("finance.fact_expenses_month.expense_id"), nullable=False)
+    allocation_date = Column(Date, nullable=False)
+    
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    platform_sku = Column(String(128), nullable=True)  # NULL表示店铺级
+    
+    allocated_amt = Column(Float, default=0.0)  # CNY
+    allocation_driver = Column(String(64), nullable=True)
+    allocation_weight = Column(Float, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_expenses_allocated_date", "allocation_date"),
+        Index("ix_expenses_allocated_shop", "platform_code", "shop_id", "allocation_date"),
+        Index("ix_expenses_allocated_sku", "platform_code", "shop_id", "platform_sku", "allocation_date"),
+        {"schema": "finance"},
+    )
+
+
+class LogisticsCost(Base):
+    """物流成本表"""
+    __tablename__ = "logistics_costs"
+    
+    logistics_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    grn_id = Column(String(64), ForeignKey("finance.grn_headers.grn_id"), nullable=True)  # 入库物流
+    order_id = Column(String(128), nullable=True)  # 销售物流
+    
+    logistics_provider = Column(String(128), nullable=True)
+    tracking_no = Column(String(128), nullable=True)
+    cost_type = Column(String(64), nullable=False)  # freight/customs/insurance
+    
+    currency = Column(String(8), nullable=False)
+    currency_amt = Column(Float, default=0.0)
+    base_amt = Column(Float, default=0.0)  # CNY
+    
+    weight_kg = Column(Float, nullable=True)
+    volume_m3 = Column(Float, nullable=True)
+    
+    invoice_id = Column(Integer, ForeignKey("finance.invoice_headers.invoice_id"), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_logistics_costs_grn", "grn_id"),
+        Index("ix_logistics_costs_order", "order_id"),
+        Index("ix_logistics_costs_invoice", "invoice_id"),
+        {"schema": "finance"},
+    )
+
+
+class LogisticsAllocationRule(Base):
+    """物流成本分摊规则表"""
+    __tablename__ = "logistics_allocation_rules"
+    
+    rule_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    rule_name = Column(String(256), nullable=False)
+    scope = Column(String(64), nullable=False)  # domestic/international
+    driver = Column(String(64), nullable=False)  # weight/volume/revenue/order
+    
+    effective_from = Column(Date, nullable=False)
+    effective_to = Column(Date, nullable=True)
+    
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_logistics_alloc_rules_scope", "scope", "active"),
+        {"schema": "finance"},
+    )
+
+
+class TaxVoucher(Base):
+    """税务凭证表"""
+    __tablename__ = "tax_vouchers"
+    
+    voucher_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
+    voucher_type = Column(String(32), nullable=False)  # input_tax/output_tax
+    
+    invoice_id = Column(Integer, ForeignKey("finance.invoice_headers.invoice_id"), nullable=True)
+    
+    tax_amt = Column(Float, default=0.0)
+    deductible_amt = Column(Float, default=0.0)  # 可抵扣金额
+    
+    status = Column(String(32), default="pending", nullable=False)  # pending/filed/rejected
+    filing_status = Column(String(64), nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_tax_vouchers_period", "period_month"),
+        Index("ix_tax_vouchers_type", "voucher_type", "status"),
+        {"schema": "finance"},
+    )
+
+
+class TaxReport(Base):
+    """报税清单表"""
+    __tablename__ = "tax_reports"
+    
+    report_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
+    report_type = Column(String(64), nullable=False)  # vat/export_refund
+    
+    status = Column(String(32), default="draft", nullable=False)  # draft/submitted
+    export_file_path = Column(String(1024), nullable=True)
+    
+    generated_by = Column(String(64), default="system")
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    
+    __table_args__ = (
+        Index("ix_tax_reports_period", "period_month"),
+        Index("ix_tax_reports_status", "status"),
+        {"schema": "finance"},
+    )
+
+
+class GLAccount(Base):
+    """总账科目表"""
+    __tablename__ = "gl_accounts"
+    
+    account_code = Column(String(64), primary_key=True)
+    account_name = Column(String(256), nullable=False)
+    account_type = Column(String(64), nullable=False)  # asset/liability/equity/revenue/expense
+    parent_account = Column(String(64), nullable=True)
+    
+    is_debit_normal = Column(Boolean, default=True)  # 借方为正常余额
+    active = Column(Boolean, default=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_gl_accounts_type", "account_type", "active"),
+        {"schema": "finance"},
+    )
+
+
+class JournalEntry(Base):
+    """总账凭证头表"""
+    __tablename__ = "journal_entries"
+    
+    entry_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    entry_no = Column(String(64), nullable=False, unique=True)
+    entry_date = Column(Date, nullable=False)
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
+    
+    entry_type = Column(String(64), nullable=False)  # revenue/expense/asset/adjustment
+    description = Column(Text, nullable=True)
+    
+    status = Column(String(32), default="draft", nullable=False)  # draft/posted/reversed
+    
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    posted_at = Column(DateTime(timezone=True), nullable=True)
+    
+    __table_args__ = (
+        Index("ix_journal_entries_date", "entry_date"),
+        Index("ix_journal_entries_period", "period_month"),
+        Index("ix_journal_entries_status", "status"),
+        {"schema": "finance"},
+    )
+
+
+class JournalEntryLine(Base):
+    """总账凭证行表(双分录)"""
+    __tablename__ = "journal_entry_lines"
+    
+    line_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    entry_id = Column(Integer, ForeignKey("finance.journal_entries.entry_id", ondelete="CASCADE"), nullable=False)
+    line_number = Column(Integer, nullable=False)
+    
+    account_code = Column(String(64), ForeignKey("finance.gl_accounts.account_code"), nullable=False)
+    
+    debit_amt = Column(Float, default=0.0)
+    credit_amt = Column(Float, default=0.0)
+    
+    currency = Column(String(8), default="CNY")
+    currency_amt = Column(Float, default=0.0)
+    base_amt = Column(Float, default=0.0)  # CNY
+    
+    # 来源追踪
+    link_order_id = Column(String(128), nullable=True)
+    link_expense_id = Column(Integer, nullable=True)
+    link_invoice_id = Column(Integer, nullable=True)
+    
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_journal_lines_entry", "entry_id"),
+        Index("ix_journal_lines_account", "account_code"),
+        UniqueConstraint("entry_id", "line_number", name="uq_journal_line"),
+        {"schema": "finance"},
+    )
+
+
+class OpeningBalance(Base):
+    """期初余额表(数据迁移用)"""
+    __tablename__ = "opening_balances"
+    
+    balance_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    period = Column(String(16), nullable=False)  # 期初期间 2025-01
+    
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    platform_sku = Column(String(128), nullable=False)
+    received_date = Column(Date, nullable=True)
+    opening_age_days = Column(Integer, nullable=True)
+    
+    opening_qty = Column(Integer, default=0)
+    opening_cost = Column(Float, default=0.0)  # 单位成本
+    opening_value = Column(Float, default=0.0)  # 总价值 CNY
+    
+    source = Column(String(64), default="migration")  # migration/manual
+    migration_batch_id = Column(String(64), nullable=True)
+    
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_opening_balances_period", "period"),
+        Index("ix_opening_balances_sku", "platform_code", "shop_id", "platform_sku"),
+        UniqueConstraint("period", "platform_code", "shop_id", "platform_sku", name="uq_opening_balance"),
+        {"schema": "finance"},
+    )
+
+
+class InventoryLayer(Base):
+    """库存入库层表"""
+    __tablename__ = "inventory_layers"
+
+    layer_id = Column(Integer, primary_key=True, autoincrement=True)
+
+    source_type = Column(String(32), nullable=False)
+    source_id = Column(String(64), nullable=False)
+    source_line_id = Column(String(64), nullable=True)
+
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    platform_sku = Column(String(128), nullable=False)
+    warehouse = Column(String(64), nullable=True)
+
+    received_date = Column(Date, nullable=False)
+    original_qty = Column(Integer, nullable=False, default=0)
+    remaining_qty = Column(Integer, nullable=False, default=0)
+
+    unit_cost = Column(Float, nullable=False, default=0.0)
+    base_unit_cost = Column(Float, nullable=False, default=0.0)
+
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_inventory_layers_sku", "platform_code", "shop_id", "platform_sku"),
+        Index("ix_inventory_layers_received", "received_date"),
+        Index("ix_inventory_layers_source", "source_type", "source_id"),
+        {"schema": "finance"},
+    )
+
+
+class InventoryLayerConsumption(Base):
+    """库存层消耗记录表"""
+    __tablename__ = "inventory_layer_consumptions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    outbound_ledger_id = Column(
+        Integer,
+        ForeignKey("finance.inventory_ledger.ledger_id"),
+        nullable=False,
+    )
+    layer_id = Column(
+        Integer,
+        ForeignKey("finance.inventory_layers.layer_id"),
+        nullable=False,
+    )
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    platform_sku = Column(String(128), nullable=False)
+    consumed_qty = Column(Integer, nullable=False)
+    consumed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    age_days_at_consumption = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index("ix_inventory_layer_consumptions_ledger", "outbound_ledger_id"),
+        Index("ix_inventory_layer_consumptions_layer", "layer_id"),
+        Index("ix_inventory_layer_consumptions_sku", "platform_code", "shop_id", "platform_sku"),
+        {"schema": "finance"},
+    )
+
+
+class InventoryAdjustmentHeader(Base):
+    """库存调整单头表"""
+    __tablename__ = "inventory_adjustment_headers"
+
+    adjustment_id = Column(String(64), primary_key=True)
+
+    adjustment_date = Column(Date, nullable=False)
+    status = Column(String(32), nullable=False, default="draft")  # draft/posted/cancelled
+    reason = Column(String(64), nullable=False)
+    notes = Column(Text, nullable=True)
+
+    created_by = Column(String(64), nullable=False, default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_inventory_adjustment_headers_date", "adjustment_date"),
+        Index("ix_inventory_adjustment_headers_status", "status"),
+        {"schema": "finance"},
+    )
+
+
+class InventoryAdjustmentLine(Base):
+    """库存调整单行表"""
+    __tablename__ = "inventory_adjustment_lines"
+
+    adjustment_line_id = Column(Integer, primary_key=True, autoincrement=True)
+
+    adjustment_id = Column(
+        String(64),
+        ForeignKey("finance.inventory_adjustment_headers.adjustment_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    platform_sku = Column(String(128), nullable=False)
+    qty_delta = Column(Integer, nullable=False)
+    unit_cost = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_inventory_adjustment_lines_adjustment_id", "adjustment_id"),
+        Index("ix_inventory_adjustment_lines_sku", "platform_code", "shop_id", "platform_sku"),
+        {"schema": "finance"},
+    )
+
+
+class ApprovalLog(Base):
+    """审批日志表(PO/费用审批)"""
+    __tablename__ = "approval_logs"
+    
+    log_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    entity_type = Column(String(64), nullable=False)  # PO/expense
+    entity_id = Column(String(128), nullable=False)
+    
+    approver = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False)  # pending/approved/rejected
+    comment = Column(Text, nullable=True)
+    
+    approved_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_approval_logs_entity", "entity_type", "entity_id"),
+        Index("ix_approval_logs_approver", "approver", "status"),
+        {"schema": "finance"},
+    )
+
+
+class ShopProfitBasis(Base):
+    """店铺月度统一结算利润快照表"""
+    __tablename__ = "shop_profit_basis"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    period_month = Column(String(16), ForeignKey("core.dim_fiscal_calendar.period_code"), nullable=False)
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+
+    orders_profit_amount = Column(Float, default=0.0, nullable=False)
+    a_class_cost_amount = Column(Float, default=0.0, nullable=False)
+    b_class_cost_amount = Column(Float, default=0.0, nullable=False)
+    profit_basis_amount = Column(Float, default=0.0, nullable=False)
+
+    basis_version = Column(String(64), default="A_ONLY_V1", nullable=False)
+    is_locked = Column(Boolean, default=False, nullable=False)
+
+    created_by = Column(String(64), default="system")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("period_month", "platform_code", "shop_id", "basis_version", name="uq_shop_profit_basis"),
+        Index("ix_shop_profit_basis_period", "period_month"),
+        Index("ix_shop_profit_basis_shop", "platform_code", "shop_id"),
+        {"schema": "finance"},
+    )
+
+
+class FollowInvestment(Base):
+    """店铺跟投本金记录表"""
+    __tablename__ = "follow_investments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    investor_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+
+    contribution_amount = Column(Float, default=0.0, nullable=False)
+    contribution_date = Column(Date, nullable=False)
+    withdraw_date = Column(Date, nullable=True)
+
+    capital_type = Column(String(32), default="working_capital", nullable=False)
+    status = Column(String(32), default="active", nullable=False)
+    remark = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_follow_investments_user", "investor_user_id", "status"),
+        Index("ix_follow_investments_shop", "platform_code", "shop_id", "contribution_date"),
+        {"schema": "finance"},
+    )
+
+
+class FollowInvestmentSettlement(Base):
+    """店铺月度跟投结算头表"""
+    __tablename__ = "follow_investment_settlements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    profit_basis_id = Column(Integer, ForeignKey("finance.shop_profit_basis.id"), nullable=False)
+    period_month = Column(String(16), nullable=False)
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+
+    profit_basis_amount = Column(Float, default=0.0, nullable=False)
+    distribution_ratio = Column(Float, default=0.0, nullable=False)
+    distributable_amount = Column(Float, default=0.0, nullable=False)
+
+    status = Column(String(32), default="draft", nullable=False)
+    approved_by = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_follow_investment_settlements_period", "period_month", "status"),
+        Index("ix_follow_investment_settlements_shop", "platform_code", "shop_id"),
+        {"schema": "finance"},
+    )
+
+
+class FollowInvestmentDetail(Base):
+    """店铺月度跟投结算明细表"""
+    __tablename__ = "follow_investment_details"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    settlement_id = Column(Integer, ForeignKey("finance.follow_investment_settlements.id", ondelete="CASCADE"), nullable=False)
+    investor_user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
+
+    contribution_amount_snapshot = Column(Float, default=0.0, nullable=False)
+    occupied_days = Column(Integer, default=0, nullable=False)
+    weighted_capital = Column(Float, default=0.0, nullable=False)
+    share_ratio = Column(Float, default=0.0, nullable=False)
+
+    estimated_income = Column(Float, default=0.0, nullable=False)
+    approved_income = Column(Float, default=0.0, nullable=False)
+    paid_income = Column(Float, default=0.0, nullable=False)
+
+    payment_status = Column(String(32), default="pending", nullable=False)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_follow_investment_details_settlement", "settlement_id"),
+        Index("ix_follow_investment_details_user", "investor_user_id", "settlement_id"),
+        {"schema": "finance"},
+    )
+
+
+class ReturnOrder(Base):
+    """退货单表"""
+    __tablename__ = "return_orders"
+    
+    return_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    original_order_id = Column(String(128), nullable=False)
+    return_type = Column(String(32), nullable=False)  # customer/vendor
+    
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    platform_sku = Column(String(128), nullable=False)
+    
+    qty = Column(Integer, default=0)
+    refund_amt = Column(Float, default=0.0)
+    restocking_fee = Column(Float, default=0.0)
+    
+    reason = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_return_orders_original", "original_order_id"),
+        Index("ix_return_orders_shop", "platform_code", "shop_id"),
+        {"schema": "finance"},
+    )
+
+
+class FieldUsageTracking(Base):
+    """
+    字段使用追踪表(v4.7.0新增)
+    
+    用于追踪数据库字段在API和前端的使用情况,支持数据治理和元数据管理。
+    """
+    __tablename__ = "field_usage_tracking"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 字段标识(允许NULL:前端组件可能只知道API端点,不知道表/字段)
+    table_name = Column(String(64), nullable=True, index=True, comment="数据库表名")
+    field_name = Column(String(128), nullable=True, index=True, comment="数据库字段名")
+    
+    # API端点追踪
+    api_endpoint = Column(String(256), nullable=True, comment="API端点(如/api/products/products)")
+    api_param = Column(String(64), nullable=True, comment="API参数名(如keyword)")
+    api_file = Column(String(256), nullable=True, comment="API路由文件路径")
+    
+    # 前端组件追踪
+    frontend_component = Column(String(256), nullable=True, comment="前端组件(如ProductManagement.vue)")
+    frontend_param = Column(String(128), nullable=True, comment="前端参数(如filters.keyword)")
+    frontend_file = Column(String(256), nullable=True, comment="前端组件文件路径")
+    
+    # 使用方式
+    usage_type = Column(String(32), nullable=False, comment="使用类型:query/filter/sort/return")
+    source_type = Column(String(32), default="scanned", nullable=False, comment="来源类型:scanned/manual")
+    
+    # 代码上下文(可选)
+    code_snippet = Column(Text, nullable=True, comment="代码片段(用于定位)")
+    line_number = Column(Integer, nullable=True, comment="行号")
+    
+    # 审计
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_by = Column(String(64), default="scanner", nullable=False)
+    
+    __table_args__ = (
+        Index("idx_usage_field", "table_name", "field_name"),
+        Index("idx_usage_api", "api_endpoint"),
+        Index("idx_usage_frontend", "frontend_component"),
+        Index("idx_usage_type", "usage_type"),
+        UniqueConstraint("table_name", "field_name", "api_endpoint", "frontend_component", name="uq_field_usage"),
+        {"schema": "core"},
+    )
+
+
+# -------------------- Sales Campaign & Target Management (v4.11.0) --------------------
+
+class SalesCampaign(Base):
+    """
+    销售战役管理表(A类数据:用户配置)
+    
+    用途:存储销售战役配置信息,用户在系统中创建和编辑
+    达成数据:从fact_orders表自动计算(C类数据)
+    """
+    __tablename__ = "sales_campaigns"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 战役基本信息
+    campaign_name = Column(String(200), nullable=False, comment="战役名称")
+    campaign_type = Column(String(32), nullable=False, comment="战役类型:holiday/new_product/special_event")
+    start_date = Column(Date, nullable=False, comment="开始日期")
+    end_date = Column(Date, nullable=False, comment="结束日期")
+    
+    # 目标值(A类:用户配置)
+    target_amount = Column(Float, nullable=False, default=0.0, comment="目标销售额(CNY)")
+    target_quantity = Column(Integer, nullable=False, default=0, comment="目标订单数/销量")
+    
+    # 达成值(C类:系统自动计算)
+    actual_amount = Column(Float, nullable=False, default=0.0, comment="实际销售额(CNY)")
+    actual_quantity = Column(Integer, nullable=False, default=0, comment="实际订单数/销量")
+    achievement_rate = Column(Float, nullable=False, default=0.0, comment="达成率(百分比)")
+    
+    # 状态
+    status = Column(String(32), nullable=False, default="pending", comment="状态:active/completed/pending/cancelled")
+    description = Column(Text, nullable=True, comment="战役描述")
+    
+    # 审计字段
+    created_by = Column(String(64), nullable=True, comment="创建人")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        CheckConstraint("end_date >= start_date", name="chk_campaign_dates"),
+        CheckConstraint("target_amount >= 0", name="chk_campaign_amount"),
+        CheckConstraint("target_quantity >= 0", name="chk_campaign_quantity"),
+        Index("ix_sales_campaigns_status", "status"),
+        Index("ix_sales_campaigns_dates", "start_date", "end_date"),
+        Index("ix_sales_campaigns_type", "campaign_type"),
+        {"schema": "a_class"},
+    )
+
+
+class SalesCampaignShop(Base):
+    """
+    销售战役参与店铺表(A类数据:用户配置)
+    
+    用途:存储战役参与店铺及其目标配置
+    达成数据:从fact_orders表自动计算(C类数据)
+    """
+    __tablename__ = "sales_campaign_shops"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 关联字段
+    campaign_id = Column(Integer, ForeignKey("a_class.sales_campaigns.id", ondelete="CASCADE"), nullable=False)
+    platform_code = Column(String(32), nullable=True)
+    shop_id = Column(String(64), nullable=True)
+    
+    # 目标值(A类:用户配置)
+    target_amount = Column(Float, nullable=False, default=0.0, comment="目标销售额(CNY)")
+    target_quantity = Column(Integer, nullable=False, default=0, comment="目标订单数/销量")
+    
+    # 达成值(C类:系统自动计算)
+    actual_amount = Column(Float, nullable=False, default=0.0, comment="实际销售额(CNY)")
+    actual_quantity = Column(Integer, nullable=False, default=0, comment="实际订单数/销量")
+    achievement_rate = Column(Float, nullable=False, default=0.0, comment="达成率(百分比)")
+    
+    # 排名
+    rank = Column(Integer, nullable=True, comment="排名")
+    
+    # 审计字段
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "platform_code", "shop_id", name="uq_campaign_shop"),
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
+            name="fk_campaign_shop"
+        ),
+        Index("ix_campaign_shops_campaign", "campaign_id"),
+        Index("ix_campaign_shops_shop", "platform_code", "shop_id"),
+        {"schema": "a_class"},
+    )
+
+
+class SalesTarget(Base):
+    """
+    目标管理表(A类数据:用户配置)
+    
+    用途:存储绩效目标配置(店铺/产品/战役/运营级别)
+    达成数据:从fact_orders表自动计算(C类数据)
+    
+    表结构以本模型为 SSOT:增删改列须在 migrations/versions 中新增迁移,
+    本地 alembic upgrade head 验证后再发布;云端在部署时自动执行迁移。
+    """
+    __tablename__ = "sales_targets"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 目标基本信息
+    target_name = Column(String(200), nullable=False, comment="目标名称")
+    target_type = Column(String(32), nullable=False, comment="目标类型:shop/product/campaign/operation")
+    period_start = Column(Date, nullable=False, comment="开始时间")
+    period_end = Column(Date, nullable=False, comment="结束时间")
+    
+    # 目标值(A类:用户配置)
+    target_amount = Column(Float, nullable=False, default=0.0, comment="目标销售额(CNY)")
+    target_quantity = Column(Integer, nullable=False, default=0, comment="目标订单数/销量")
+    target_profit_amount = Column(Float, nullable=False, default=0.0, comment="目标毛利(CNY)")
+    product_id = Column(Integer, nullable=True, comment="产品ID")
+    platform_sku = Column(String(128), nullable=True, comment="平台SKU")
+    company_sku = Column(String(128), nullable=True, comment="公司SKU")
+    
+    # 达成值(C类:系统自动计算)
+    achieved_amount = Column(Float, nullable=False, default=0.0, comment="实际销售额(CNY)")
+    achieved_quantity = Column(Integer, nullable=False, default=0, comment="实际订单数/销量")
+    achieved_profit_amount = Column(Float, nullable=False, default=0.0, comment="实际毛利(CNY)")
+    achievement_rate = Column(Float, nullable=False, default=0.0, comment="达成率(百分比)")
+
+    # 运营目标字段
+    metric_code = Column(String(64), nullable=True, comment="运营指标编码")
+    metric_name = Column(String(128), nullable=True, comment="运营指标名称")
+    metric_direction = Column(String(32), nullable=True, comment="指标方向:higher_better/lower_better/manual_score")
+    target_value = Column(Float, nullable=True, comment="运营指标目标值")
+    achieved_value = Column(Float, nullable=True, comment="运营指标实际值")
+    max_score = Column(Float, nullable=True, comment="指标满分")
+    penalty_enabled = Column(Boolean, nullable=False, default=False, comment="是否启用罚分")
+    penalty_threshold = Column(Float, nullable=True, comment="罚分阈值")
+    penalty_per_unit = Column(Float, nullable=True, comment="每超出一单位罚分")
+    penalty_max = Column(Float, nullable=True, comment="最大罚分")
+    manual_score_enabled = Column(Boolean, nullable=False, default=False, comment="是否允许人工打分")
+    manual_score_value = Column(Float, nullable=True, comment="人工打分值")
+    
+    # 状态
+    status = Column(String(32), nullable=False, default="active", comment="状态:active/completed/cancelled")
+    description = Column(Text, nullable=True, comment="目标描述")
+    
+    # 日度分解：周一到周日拆分比例（1=周一…7=周日，和为1），用于一键生成日度时按比例分配
+    weekday_ratios = Column(JSON, nullable=True, comment="周一到周日拆分比例 {\"1\":0.14,...,\"7\":0.14} 和为1")
+    
+    # 审计字段
+    created_by = Column(String(64), nullable=True, comment="创建人")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        CheckConstraint("period_end >= period_start", name="chk_target_dates"),
+        CheckConstraint("target_amount >= 0", name="chk_target_amount"),
+        CheckConstraint("target_quantity >= 0", name="chk_target_quantity"),
+        CheckConstraint("target_profit_amount >= 0", name="chk_target_profit_amount"),
+        Index("ix_sales_targets_type", "target_type"),
+        Index("ix_sales_targets_status", "status"),
+        Index("ix_sales_targets_period", "period_start", "period_end"),
+        {"schema": "a_class"},
+    )
+
+
+class TargetBreakdown(Base):
+    """
+    目标分解表(A类数据:用户配置)
+    
+    用途:存储目标分解配置(按店铺/按时间)
+    达成数据:从fact_orders表自动计算(C类数据)
+    
+    表结构以本模型为 SSOT:增删改列须在 migrations/versions 中新增迁移,
+    本地 alembic upgrade head 验证后再发布;云端在部署时自动执行迁移。
+    """
+    __tablename__ = "target_breakdown"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 关联字段 (sales_targets 在 a_class schema)
+    target_id = Column(Integer, ForeignKey("a_class.sales_targets.id", ondelete="CASCADE"), nullable=False)
+    
+    # 分解类型
+    breakdown_type = Column(String(32), nullable=False, comment="分解类型:shop/time")
+    
+    # 店铺分解字段(breakdown_type='shop'时使用)
+    platform_code = Column(String(32), nullable=True)
+    shop_id = Column(String(64), nullable=True)
+    
+    # 时间分解字段(breakdown_type='time'时使用)
+    period_start = Column(Date, nullable=True, comment="周期开始")
+    period_end = Column(Date, nullable=True, comment="周期结束")
+    period_label = Column(String(64), nullable=True, comment="周期标签,如'第1周'、'2025-01'")
+    
+    # 目标值(A类:用户配置)
+    target_amount = Column(Float, nullable=False, default=0.0, comment="目标销售额(CNY)")
+    target_quantity = Column(Integer, nullable=False, default=0, comment="目标订单数/销量")
+    target_profit_amount = Column(Float, nullable=False, default=0.0, comment="目标毛利(CNY)")
+    product_id = Column(Integer, nullable=True, comment="产品ID")
+    platform_sku = Column(String(128), nullable=True, comment="平台SKU")
+    company_sku = Column(String(128), nullable=True, comment="公司SKU")
+    
+    # 达成值(C类:系统自动计算)
+    achieved_amount = Column(Float, nullable=False, default=0.0, comment="实际销售额(CNY)")
+    achieved_quantity = Column(Integer, nullable=False, default=0, comment="实际订单数/销量")
+    achieved_profit_amount = Column(Float, nullable=False, default=0.0, comment="实际毛利(CNY)")
+    achievement_rate = Column(Float, nullable=False, default=0.0, comment="达成率(百分比)")
+
+    # 运营目标/人工评分扩展字段
+    target_value = Column(Float, nullable=True, comment="运营指标目标值")
+    achieved_value = Column(Float, nullable=True, comment="运营指标实际值")
+    manual_score_value = Column(Float, nullable=True, comment="人工打分值")
+    
+    # 审计字段
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        CheckConstraint("breakdown_type IN ('shop', 'time', 'shop_time')", name="chk_breakdown_type"),
+        Index("ix_target_breakdown_target", "target_id"),
+        Index("ix_target_breakdown_shop", "platform_code", "shop_id"),
+        Index("ix_target_breakdown_period", "period_start", "period_end"),
+        # A类数据表,放在 a_class schema 中
+        {"schema": "a_class"},
+    )
+
+
+class ShopHealthScore(Base):
+    """
+    店铺健康度评分表(C类数据:系统自动计算)
+    
+    用途:存储店铺健康度评分和各项指标得分
+    数据来源:基于fact_orders和fact_product_metrics计算得出
+    """
+    __tablename__ = "shop_health_scores"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 业务标识
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    metric_date = Column(Date, nullable=False)
+    granularity = Column(String(16), nullable=False, default="daily", comment="粒度:daily/weekly/monthly")
+    
+    # 健康度总分(0-100)
+    health_score = Column(Float, nullable=False, default=0.0, comment="健康度总分(0-100)")
+    
+    # 各项得分(0-100)
+    gmv_score = Column(Float, nullable=False, default=0.0, comment="GMV得分")
+    conversion_score = Column(Float, nullable=False, default=0.0, comment="转化得分")
+    inventory_score = Column(Float, nullable=False, default=0.0, comment="库存得分")
+    service_score = Column(Float, nullable=False, default=0.0, comment="服务得分")
+    
+    # 基础指标(用于计算得分)
+    gmv = Column(Float, nullable=False, default=0.0, comment="GMV(CNY)")
+    conversion_rate = Column(Float, nullable=False, default=0.0, comment="转化率(百分比)")
+    inventory_turnover = Column(Float, nullable=False, default=0.0, comment="库存周转率")
+    customer_satisfaction = Column(Float, nullable=False, default=0.0, comment="客户满意度(0-5分)")
+    
+    # 风险等级
+    risk_level = Column(String(16), nullable=False, default="low", comment="风险等级:low/medium/high")
+    risk_factors = Column(JSON, nullable=True, comment="风险因素列表")
+    
+    # 审计字段
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("platform_code", "shop_id", "metric_date", "granularity", name="uq_shop_health"),
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
+            name="fk_shop_health"
+        ),
+        CheckConstraint("health_score >= 0 AND health_score <= 100", name="chk_health_score"),
+        CheckConstraint("risk_level IN ('low', 'medium', 'high')", name="chk_risk_level"),
+        Index("ix_shop_health_shop", "platform_code", "shop_id"),
+        Index("ix_shop_health_date", "metric_date"),
+        Index("ix_shop_health_score", "health_score"),
+        Index("ix_shop_health_risk", "risk_level"),
+        {"schema": "c_class"},
+    )
+
+
+class ShopAlert(Base):
+    """
+    店铺预警提醒表(C类数据:系统自动计算)
+    
+    用途:存储店铺运营预警信息
+    数据来源:基于shop_health_scores和业务规则自动生成
+    """
+    __tablename__ = "shop_alerts"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 业务标识
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    
+    # 预警信息
+    alert_type = Column(String(64), nullable=False, comment="预警类型:inventory_turnover/conversion_rate/gmv_drop/...")
+    alert_level = Column(String(16), nullable=False, comment="预警级别:critical/warning/info")
+    title = Column(String(200), nullable=False, comment="预警标题")
+    message = Column(Text, nullable=False, comment="预警内容")
+    
+    # 指标值
+    metric_value = Column(Float, nullable=True, comment="当前指标值")
+    threshold = Column(Float, nullable=True, comment="阈值")
+    metric_unit = Column(String(32), nullable=True, comment="指标单位")
+    
+    # 处理状态
+    is_resolved = Column(Boolean, nullable=False, default=False, comment="是否已解决")
+    resolved_at = Column(DateTime(timezone=True), nullable=True, comment="解决时间")
+    resolved_by = Column(String(64), nullable=True, comment="解决人")
+    
+    # 审计字段
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
+            name="fk_shop_alert"
+        ),
+        CheckConstraint("alert_level IN ('critical', 'warning', 'info')", name="chk_alert_level"),
+        Index("ix_shop_alerts_shop", "platform_code", "shop_id"),
+        Index("ix_shop_alerts_level", "alert_level"),
+        Index("ix_shop_alerts_resolved", "is_resolved"),
+        Index("ix_shop_alerts_created", "created_at"),
+        {"schema": "c_class"},
+    )
+
+
+class PerformanceScore(Base):
+    """
+    绩效评分表(C类数据:系统自动计算)
+    
+    用途:存储店铺绩效评分和明细
+    数据来源:基于fact_orders、fact_product_metrics和sales_targets计算得出
+    """
+    __tablename__ = "performance_scores"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 业务标识
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    period = Column(String(16), nullable=False, comment="考核周期,如'2025-01'")
+    
+    # 总分(0-100)
+    total_score = Column(Float, nullable=False, default=0.0, comment="总分(0-100)")
+    
+    # 各项得分(权重 × 达成率)
+    sales_score = Column(Float, nullable=False, default=0.0, comment="销售额得分(权重30%)")
+    profit_score = Column(Float, nullable=False, default=0.0, comment="毛利得分(权重25%)")
+    key_product_score = Column(Float, nullable=False, default=0.0, comment="重点产品得分(权重25%)")
+    operation_score = Column(Float, nullable=False, default=0.0, comment="运营得分(权重20%)")
+    
+    # 得分明细(JSONB存储详细计算过程)
+    score_details = Column(JSON, nullable=True, comment="得分明细(JSON格式)")
+    
+    # 排名和系数
+    rank = Column(Integer, nullable=True, comment="排名")
+    performance_coefficient = Column(Float, nullable=False, default=1.0, comment="绩效系数")
+    
+    # 审计字段
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("platform_code", "shop_id", "period", name="uq_performance_shop_period"),
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
+            name="fk_performance_shop"
+        ),
+        CheckConstraint("total_score >= 0 AND total_score <= 100", name="chk_total_score"),
+        Index("ix_performance_shop", "platform_code", "shop_id"),
+        Index("ix_performance_period", "period"),
+        Index("ix_performance_score", "total_score"),
+        Index("ix_performance_rank", "rank"),
+        {"schema": "c_class"},
+    )
+
+
+class PerformanceConfig(Base):
+    """
+    绩效权重配置表(A类数据:用户配置)
+    
+    用途:存储绩效计算规则和权重配置
+    """
+    __tablename__ = "performance_config"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 配置信息
+    config_name = Column(String(64), nullable=False, default="default", comment="配置名称")
+    
+    # 权重配置(百分比,总和必须为100)
+    sales_weight = Column(Integer, nullable=False, default=30, comment="销售额权重(%)")
+    profit_weight = Column(Integer, nullable=False, default=25, comment="毛利权重(%)")
+    key_product_weight = Column(Integer, nullable=False, default=25, comment="重点产品权重(%)")
+    operation_weight = Column(Integer, nullable=False, default=20, comment="运营权重(%)")
+    # 得分比例配置(达成率>100%得满分,<=100%得达成率*满分)
+    sales_max_score = Column(Integer, nullable=False, default=30, comment="销售额满分")
+    profit_max_score = Column(Integer, nullable=False, default=25, comment="毛利满分")
+    key_product_max_score = Column(Integer, nullable=False, default=25, comment="重点产品满分")
+    operation_max_score = Column(Integer, nullable=False, default=20, comment="运营满分")
+    
+    # 生效时间
+    is_active = Column(Boolean, nullable=False, default=True, comment="是否启用")
+    effective_from = Column(Date, nullable=False, comment="生效开始日期")
+    effective_to = Column(Date, nullable=True, comment="生效结束日期(NULL表示永久有效)")
+    
+    # 审计字段
+    created_by = Column(String(64), nullable=True, comment="创建人")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        CheckConstraint(
+            "sales_weight + profit_weight + key_product_weight + operation_weight = 100",
+            name="chk_weights_sum"
+        ),
+        CheckConstraint(
+            "sales_weight >= 0 AND sales_weight <= 100 AND "
+            "profit_weight >= 0 AND profit_weight <= 100 AND "
+            "key_product_weight >= 0 AND key_product_weight <= 100 AND "
+            "operation_weight >= 0 AND operation_weight <= 100",
+            name="chk_weights_range"
+        ),
+        Index("ix_performance_config_active", "is_active", "effective_from"),
+        {"schema": "a_class"},
+    )
+
+
+class ClearanceRanking(Base):
+    """
+    滞销清理排名表(C类数据:系统自动计算)
+    
+    用途:存储店铺滞销清理排名数据
+    数据来源:基于fact_product_metrics和fact_orders计算得出
+    """
+    __tablename__ = "clearance_rankings"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 业务标识
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(64), nullable=False)
+    metric_date = Column(Date, nullable=False)
+    granularity = Column(String(16), nullable=False, comment="粒度:monthly/weekly")
+    
+    # 清理数据
+    clearance_amount = Column(Float, nullable=False, default=0.0, comment="清理金额(CNY)")
+    clearance_quantity = Column(Integer, nullable=False, default=0, comment="清理数量")
+    
+    # 激励金额
+    incentive_amount = Column(Float, nullable=False, default=0.0, comment="激励金额(CNY)")
+    total_incentive = Column(Float, nullable=False, default=0.0, comment="总计激励(CNY)")
+    
+    # 排名
+    rank = Column(Integer, nullable=True, comment="排名")
+    
+    # 审计字段
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("platform_code", "shop_id", "metric_date", "granularity", name="uq_clearance_ranking"),
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
+            name="fk_clearance_ranking"
+        ),
+        Index("ix_clearance_ranking_date", "metric_date", "granularity"),
+        Index("ix_clearance_ranking_rank", "rank"),
+        Index("ix_clearance_ranking_amount", "clearance_amount"),
+        {"schema": "c_class"},
+    )
+
+
+# -------------------- Materialized View Management --------------------
+
+class MaterializedViewRefreshLog(Base):
+    """物化视图刷新日志表
+    
+    v4.11.4新增:
+    - 记录每次物化视图刷新的详细信息
+    - 用于监控刷新性能和审计追踪
+    - 与MaterializedViewService中的使用保持一致
+    """
+    __tablename__ = "mv_refresh_log"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    view_name = Column(String(128), nullable=False, index=True, comment="物化视图名称")
+    refresh_started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="刷新开始时间")
+    refresh_completed_at = Column(DateTime(timezone=True), nullable=True, comment="刷新完成时间")
+    duration_seconds = Column(Float, nullable=True, comment="刷新耗时(秒)")
+    row_count = Column(Integer, nullable=True, comment="刷新后行数")
+    status = Column(String(20), default="running", nullable=False, comment="状态:running/success/failed")
+    error_message = Column(Text, nullable=True, comment="错误信息(如果失败)")
+    triggered_by = Column(String(64), default="scheduler", nullable=False, comment="触发方式:scheduler/manual/api")
+    
+    __table_args__ = (
+        CheckConstraint("status IN ('running', 'success', 'failed')", name="chk_mv_refresh_status"),
+        Index("ix_mv_refresh_log_view", "view_name", "refresh_started_at"),
+        Index("ix_mv_refresh_log_status", "status", "refresh_started_at"),
+    )
+
+
+# -------------------- User and Permission Tables (v4.12.0 SSOT Migration) --------------------
+
+# 用户-角色关联表(多对多)
+user_roles = Table(
+    'user_roles',
+    Base.metadata,
+    Column('user_id', BigInteger, ForeignKey('core.dim_users.user_id'), primary_key=True),
+    Column('role_id', BigInteger, ForeignKey('core.dim_roles.role_id'), primary_key=True),
+    Column('assigned_at', DateTime(timezone=True), server_default=func.now()),
+    Column('assigned_by', String(100))
+)
+
+
+class DimUser(Base):
+    """
+    用户表
+    
+    v4.12.0迁移:从backend/models/users.py迁移到schema.py(SSOT合规性)
+    """
+    __tablename__ = "dim_users"
+    
+    user_id = Column(BigInteger, primary_key=True, index=True)
+    
+    # 用户信息
+    username = Column(String(100), unique=True, nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    full_name = Column(String(200))
+    password_hash = Column(String(255), nullable=False)  # 存储hash后的密码
+    
+    # 状态
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_superuser = Column(Boolean, default=False, nullable=False)
+    status = Column(
+        String(20),
+        default="pending",
+        nullable=False,
+        index=True,
+        comment="用户状态: pending/active/rejected/suspended/deleted"
+    )
+    
+    # 审批信息
+    approved_at = Column(DateTime(timezone=True), nullable=True, comment="审批时间")
+    approved_by = Column(
+        BigInteger,
+        ForeignKey('core.dim_users.user_id'),
+        nullable=True,
+        comment="审批人ID"
+    )
+    rejection_reason = Column(Text, nullable=True, comment="拒绝原因")
+    
+    # 数据权限(可见的平台和店铺)
+    allowed_platforms = Column(Text)  # JSON数组,如:["shopee", "tiktok"]
+    allowed_shops = Column(Text)  # JSON数组,如:["shop1", "shop2"]
+    
+    # 联系信息
+    phone = Column(String(50))
+    department = Column(String(100))
+    position = Column(String(100))
+    
+    # 登录信息
+    last_login = Column(DateTime(timezone=True))
+    login_count = Column(Integer, default=0)
+    failed_login_attempts = Column(Integer, default=0)
+    locked_until = Column(DateTime(timezone=True), nullable=True, comment="账户锁定到期时间")
+    
+    # 时间戳
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index("idx_users_active", "is_active"),
+        Index("idx_users_email_active", "email", "is_active"),
+        {"schema": "core"},
+    )
+    
+    # 关系
+    roles = relationship(
+        "DimRole",
+        secondary=user_roles,
+        back_populates="users"
+    )
+    audit_logs = relationship(
+        "FactAuditLog",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+
+
+class DimRole(Base):
+    """
+    角色表
+    
+    v4.12.0迁移:从backend/models/users.py迁移到schema.py(SSOT合规性)
+    """
+    __tablename__ = "dim_roles"
+    
+    role_id = Column(BigInteger, primary_key=True, index=True)
+    
+    # 角色信息
+    role_name = Column(String(100), unique=True, nullable=False, index=True)
+    role_code = Column(String(50), unique=True, nullable=False)  # 角色代码,如:admin, finance, warehouse
+    description = Column(Text)
+    
+    # 权限(JSON格式)
+    permissions = Column(Text, nullable=False)  # JSON数组,如:["view_sales", "edit_inventory"]
+    
+    # 数据权限范围
+    data_scope = Column(String(50), default='all')  # all/platform/shop/self
+    
+    # 状态
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_system = Column(Boolean, default=False)  # 是否系统角色(不可删除)
+    
+    # 时间戳
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        Index("idx_roles_active", "is_active"),
+        {"schema": "core"},
+    )
+    
+    # 关系
+    users = relationship(
+        "DimUser",
+        secondary=user_roles,
+        back_populates="roles"
+    )
+
+
+class UserSession(Base):
+    """
+    用户会话表(用于会话管理)
+    
+    v4.19.0新增:会话管理功能
+    用于跟踪和管理用户的活跃会话,支持强制登出其他设备
+    """
+    __tablename__ = "user_sessions"
+    
+    session_id = Column(String(64), primary_key=True, index=True, comment="会话ID(Token的哈希值)")
+    user_id = Column(
+        BigInteger,
+        ForeignKey('core.dim_users.user_id'),
+        nullable=False,
+        index=True
+    )
+    
+    # 会话信息
+    device_info = Column(String(255), nullable=True, comment="设备信息(User-Agent)")
+    ip_address = Column(String(45), nullable=True, comment="IP地址")
+    location = Column(String(100), nullable=True, comment="登录位置(可选)")
+    
+    # 时间戳
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        comment="创建时间(登录时间)"
+    )
+    expires_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        comment="过期时间"
+    )
+    last_active_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+        comment="最后活跃时间"
+    )
+    
+    # 状态
+    is_active = Column(Boolean, default=True, nullable=False, comment="是否有效")
+    revoked_at = Column(DateTime(timezone=True), nullable=True, comment="撤销时间")
+    revoked_reason = Column(String(100), nullable=True, comment="撤销原因")
+    
+    __table_args__ = (
+        Index("idx_session_user_active", "user_id", "is_active"),
+        Index("idx_session_expires", "expires_at"),
+    )
+    
+    # 关系
+    user = relationship("DimUser", backref="sessions")
+
+
+class UserApprovalLog(Base):
+    """
+    用户审批记录表(用于审计)
+    
+    v4.19.0新增:用户注册和审批流程
+    用于记录所有用户审批操作,支持审计追踪
+    """
+    __tablename__ = "user_approval_logs"
+    
+    log_id = Column(BigInteger, primary_key=True, index=True)
+    
+    # 用户信息
+    user_id = Column(
+        BigInteger,
+        ForeignKey('core.dim_users.user_id'),
+        nullable=False,
+        index=True
+    )
+    
+    # 审批信息
+    action = Column(
+        String(20),
+        nullable=False,
+        index=True,
+        comment="操作类型: approve/reject/suspend"
+    )
+    approved_by = Column(
+        BigInteger,
+        ForeignKey('core.dim_users.user_id'),
+        nullable=False,
+        comment="操作人ID"
+    )
+    reason = Column(
+        Text,
+        nullable=True,
+        comment="操作原因/备注"
+    )
+    
+    # 时间戳
+    created_at = Column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+        index=True
+    )
+    
+    __table_args__ = (
+        Index("idx_approval_user_time", "user_id", "created_at"),
+        Index("idx_approval_action_time", "action", "created_at"),
+    )
+
+
+class FactAuditLog(Base):
+    """
+    操作审计日志表
+    
+    v4.12.0迁移:从backend/models/users.py迁移到schema.py(SSOT合规性)
+    
+    用于记录所有用户操作,支持企业级ERP的审计追溯要求。
+    """
+    __tablename__ = "fact_audit_logs"
+    
+    log_id = Column(BigInteger, primary_key=True, index=True)
+    
+    # 用户信息
+    user_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=False)
+    username = Column(String(100), nullable=False)  # 冗余字段,便于查询
+    
+    # 操作信息
+    action_type = Column(String(50), nullable=False, index=True)  # create/update/delete/view/export
+    resource_type = Column(String(100), nullable=False)  # order/product/inventory/finance
+    resource_id = Column(String(150))  # 资源ID
+    
+    # 详细信息
+    action_description = Column(Text)  # 操作描述
+    changes_json = Column(Text)  # JSON格式的变更详情(before/after)
+    
+    # IP和设备信息
+    ip_address = Column(String(50))
+    user_agent = Column(String(500))
+    
+    # 结果
+    is_success = Column(Boolean, default=True)
+    error_message = Column(Text)
+    
+    # 时间戳
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    
+    __table_args__ = (
+        Index("idx_audit_user_time", "user_id", "created_at"),
+        Index("idx_audit_action_time", "action_type", "created_at"),
+        Index("idx_audit_resource", "resource_type", "resource_id"),
+        Index(
+            "idx_audit_recent",
+            "created_at",
+            postgresql_using='btree',
+            postgresql_ops={'created_at': 'DESC'}
+        ),
+    )
+    
+    # 关系
+    user = relationship("DimUser", back_populates="audit_logs")
+
+
+class SyncProgressTask(Base):
+    """
+    数据同步进度任务表
+    
+    v4.12.0新增:
+    - 用于持久化存储数据同步任务的进度信息
+    - 支持服务重启后恢复进度
+    - 替代内存存储的ProgressTracker(用于数据同步场景)
+    """
+    __tablename__ = "sync_progress_tasks"
+    
+    task_id = Column(String(100), primary_key=True, index=True, comment="任务ID")
+    
+    # 任务基本信息
+    task_type = Column(String(50), nullable=False, default="bulk_ingest", comment="任务类型:bulk_ingest/single_file")
+    total_files = Column(Integer, default=0, nullable=False, comment="总文件数")
+    processed_files = Column(Integer, default=0, nullable=False, comment="已处理文件数")
+    current_file = Column(String(500), nullable=True, comment="当前处理文件")
+    
+    # 任务状态
+    status = Column(String(20), default="pending", nullable=False, index=True, comment="状态:pending/processing/completed/failed")
+    
+    # 数据统计
+    total_rows = Column(Integer, default=0, nullable=False, comment="总行数")
+    processed_rows = Column(Integer, default=0, nullable=False, comment="已处理行数")
+    valid_rows = Column(Integer, default=0, nullable=False, comment="有效行数")
+    error_rows = Column(Integer, default=0, nullable=False, comment="错误行数")
+    quarantined_rows = Column(Integer, default=0, nullable=False, comment="隔离行数")
+    
+    # 进度百分比(计算字段,冗余存储便于查询)
+    file_progress = Column(Float, default=0.0, nullable=False, comment="文件进度百分比")
+    row_progress = Column(Float, default=0.0, nullable=False, comment="行进度百分比")
+    
+    # 时间戳
+    start_time = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True, comment="开始时间")
+    end_time = Column(DateTime(timezone=True), nullable=True, comment="结束时间")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, comment="更新时间")
+    
+    # 错误和警告(JSON格式)
+    errors = Column(JSON, nullable=True, comment="错误列表")
+    warnings = Column(JSON, nullable=True, comment="警告列表")
+    
+    # 任务详情(JSON格式,存储额外信息)
+    task_details = Column(JSON, nullable=True, comment="任务详情")
+    
+    __table_args__ = (
+        Index("ix_sync_progress_status", "status", "start_time"),
+        Index("ix_sync_progress_updated", "updated_at"),
+        CheckConstraint("status IN ('pending', 'processing', 'completed', 'failed')", name="chk_sync_progress_status"),
+        {"schema": "core"},
+    )
+
+
+# -------------------- DSS Architecture Tables (v4.6.0+) --------------------
+
+# B-Class Data Tables (按平台-数据域-子类型-粒度分表,动态创建)
+# [WARN] v4.17.0+ 架构调整:旧的固定表类已删除,所有B类数据表通过PlatformTableManager动态创建
+# 表名格式:fact_{platform}_{data_domain}_{sub_domain}_{granularity}
+# 所有表创建在b_class schema中
+
+# 以下旧的固定表类定义已删除(v4.17.0+):
+# - FactRawDataOrdersDaily, FactRawDataOrdersWeekly, FactRawDataOrdersMonthly
+# - FactRawDataProductsDaily, FactRawDataProductsWeekly, FactRawDataProductsMonthly
+# - FactRawDataTrafficDaily, FactRawDataTrafficWeekly, FactRawDataTrafficMonthly
+# - FactRawDataAnalyticsDaily, FactRawDataAnalyticsWeekly, FactRawDataAnalyticsMonthly
+# - FactRawDataServicesDaily, FactRawDataServicesWeekly, FactRawDataServicesMonthly
+# - FactRawDataServicesAiAssistantDaily, FactRawDataServicesAiAssistantWeekly, FactRawDataServicesAiAssistantMonthly
+# - FactRawDataServicesAgentWeekly, FactRawDataServicesAgentMonthly
+# - FactRawDataInventorySnapshot
+# 
+# 所有B类数据表现在通过PlatformTableManager动态创建,表名格式:
+# - 无sub_domain:fact_{platform}_{data_domain}_{granularity}(如fact_shopee_orders_daily)
+# - 有sub_domain:fact_{platform}_{data_domain}_{sub_domain}_{granularity}(如fact_shopee_services_ai_assistant_monthly)
+# 所有表创建在b_class schema中
+
+# 所有旧的固定表类定义已删除(v4.17.0+)
+# 所有B类数据表通过PlatformTableManager动态创建
+
+
+# 统一对齐表(替代dim_shops和account_aliases)
+
+class EntityAlias(Base):
+    """
+    统一实体别名表(v4.6.0+)
+    
+    替代dim_shops和account_aliases两张表,统一管理所有账号和店铺的别名映射
+    """
+    __tablename__ = "entity_aliases"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    
+    # 源标识(from)
+    source_platform = Column(String(32), nullable=False, index=True)
+    source_type = Column(String(32), nullable=False, index=True)  # 'account' | 'shop' | 'store'
+    source_name = Column(String(256), nullable=False, index=True)
+    source_account = Column(String(128), nullable=True)
+    source_site = Column(String(64), nullable=True)
+    data_domain = Column(String(64), nullable=True)
+    
+    # 目标标识(to)
+    target_type = Column(String(32), nullable=False, index=True)  # 'account' | 'shop'
+    target_id = Column(String(256), nullable=False, index=True)
+    target_name = Column(String(256), nullable=True)
+    target_platform_code = Column(String(32), nullable=True)
+    
+    # 元数据
+    confidence = Column(Float, default=1.0)
+    active = Column(Boolean, default=True, nullable=False, index=True)
+    notes = Column(Text, nullable=True)
+    
+    # 审计
+    created_by = Column(String(64), default='system')
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_by = Column(String(64), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("source_platform", "source_type", "source_name", "source_account", "source_site", name="uq_entity_alias_source"),
+        Index("ix_entity_aliases_source", "source_platform", "source_type", "source_name"),
+        Index("ix_entity_aliases_target", "target_type", "target_id", "active"),
+        {"schema": "b_class"},
+    )
+
+
+# 以下所有旧的固定表类定义已删除(v4.17.0+)
+# 所有B类数据表通过PlatformTableManager动态创建
+# 表名格式:fact_{platform}_{data_domain}_{sub_domain}_{granularity}
+# 所有表创建在b_class schema中
+
+# 统一对齐表(替代dim_shops和account_aliases)
+
+
+# Staging表(临时表,用于数据清洗)
+
+class StagingRawData(Base):
+    """
+    Staging原始数据表(ETL中间层)
+    
+    存储原始数据(JSONB格式),用于数据清洗和验证
+    """
+    __tablename__ = "staging_raw_data"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("public.catalog_files.id", ondelete="SET NULL"), nullable=True, index=True)
+    row_number = Column(Integer, nullable=False)
+    platform_code = Column(String(32), nullable=True, index=True)
+    shop_id = Column(String(256), nullable=True, index=True)
+    data_domain = Column(String(64), nullable=True, index=True)
+    granularity = Column(String(32), nullable=True)
+    metric_date = Column(Date, nullable=True)
+    raw_data = Column(JSONB, nullable=False)
+    header_columns = Column(JSONB, nullable=True)
+    status = Column(String(32), default='pending', nullable=False, index=True)  # pending/validated/ingested/failed
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_staging_raw_data_file", "file_id", "status"),
+        Index("ix_staging_raw_data_domain_gran", "data_domain", "granularity"),
+        {"schema": "b_class"},
+    )
+
+
+# A类数据表(使用中文字段名)
+
+# A类数据表(使用中文字段名)
+# 注意:中文字段名将在Alembic迁移脚本中使用text()函数实现
+# 这里先使用英文字段名定义表结构,迁移脚本中会重命名为中文
+
+class SalesTargetA(Base):
+    """
+    A类数据表:销售目标(中文字段名)
+    
+    注意:字段名在Alembic迁移脚本中将使用中文(如"店铺ID", "年月"等)
+    注意:此表将替代旧的SalesTarget表(v4.11.0),使用中文字段名
+    """
+    __tablename__ = "sales_targets_a"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    shop_id = Column(String(256), nullable=False)  # 迁移时将重命名为"店铺ID"
+    year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月",格式:'2025-01'
+    target_sales_amount = Column(Numeric(15, 2), nullable=False)  # 迁移时将重命名为"目标销售额"
+    target_quantity = Column(Integer, nullable=False)  # 迁移时将重命名为"目标订单数"
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 迁移时将重命名为"创建时间"
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)  # 迁移时将重命名为"更新时间"
+    
+    __table_args__ = (
+        UniqueConstraint("shop_id", "year_month", name="uq_sales_targets_a_shop_month"),
+        Index("ix_sales_targets_a_shop", "shop_id"),
+        Index("ix_sales_targets_a_month", "year_month"),
+        {"schema": "a_class"},
+    )
+
+
+class SalesCampaignA(Base):
+    """
+    A类数据表:销售战役(中文字段名)
+    
+    注意:此表将替代旧的SalesCampaign表(v4.11.0),使用中文字段名
+    """
+    __tablename__ = "sales_campaigns_a"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    campaign_name = Column(String(200), nullable=False)  # 迁移时将重命名为"战役名称"
+    campaign_type = Column(String(32), nullable=False)  # 迁移时将重命名为"战役类型"
+    start_date = Column(Date, nullable=False)  # 迁移时将重命名为"开始日期"
+    end_date = Column(Date, nullable=False)  # 迁移时将重命名为"结束日期"
+    target_amount = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"目标销售额"
+    target_quantity = Column(Integer, nullable=False, default=0)  # 迁移时将重命名为"目标订单数"
+    status = Column(String(32), nullable=False, default="pending")  # 迁移时将重命名为"状态"
+    description = Column(Text, nullable=True)  # 迁移时将重命名为"描述"
+    created_by = Column(String(64), nullable=True)  # 迁移时将重命名为"创建人"
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        CheckConstraint("end_date >= start_date", name="chk_sales_campaigns_a_dates"),
+        Index("ix_sales_campaigns_a_type", "campaign_type"),
+        Index("ix_sales_campaigns_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class OperatingCost(Base):
+    """
+    A类数据表:运营成本
+    
+    注意:数据库表使用中文字段名,ORM 通过 name 参数映射
+    表结构(a_class.operating_costs):
+    - id: bigint (PK)
+    - 店铺ID: character varying(256)
+    - 年月: character varying(7)
+    - 租金: numeric(15,2)
+    - 工资: numeric(15,2)
+    - 水电费: numeric(15,2)
+    - 其他成本: numeric(15,2)
+    - 创建时间: timestamp
+    - 更新时间: timestamp
+    """
+    __tablename__ = "operating_costs"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # 使用 name 参数映射到数据库中的中文列名
+    shop_id = Column("店铺ID", String(256), nullable=False)
+    year_month = Column("年月", String(7), nullable=False)
+    rent = Column("租金", Numeric(15, 2), nullable=False, default=0.0)
+    salary = Column("工资", Numeric(15, 2), nullable=False, default=0.0)
+    utilities = Column("水电费", Numeric(15, 2), nullable=False, default=0.0)
+    other_costs = Column("其他成本", Numeric(15, 2), nullable=False, default=0.0)
+    created_at = Column("创建时间", DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column("更新时间", DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("店铺ID", "年月", name="uq_operating_costs_a_shop_month"),
+        Index("ix_operating_costs_a_shop", "店铺ID"),
+        Index("ix_operating_costs_a_month", "年月"),
+        {"schema": "a_class"},
+    )
+
+
+# ============================================================================
+# A类数据表:HR人力资源模块(业界标准设计)
+# ============================================================================
+
+class Department(Base):
+    """
+    A类数据表:部门表(树形结构)
+    
+    支持多级部门架构，通过 parent_id 实现层级关系
+    """
+    __tablename__ = "departments"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    department_code = Column(String(64), nullable=False, unique=True)  # 部门编码
+    department_name = Column(String(128), nullable=False)  # 部门名称
+    parent_id = Column(BigInteger, nullable=True)  # 上级部门ID(NULL表示顶级部门)
+    level = Column(Integer, nullable=False, default=1)  # 部门层级(1=顶级)
+    sort_order = Column(Integer, nullable=False, default=0)  # 排序序号
+    manager_id = Column(BigInteger, nullable=True)  # 部门负责人ID
+    description = Column(Text, nullable=True)  # 部门描述
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_departments_a_code", "department_code"),
+        Index("ix_departments_a_parent", "parent_id"),
+        Index("ix_departments_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class Position(Base):
+    """
+    A类数据表:职位表(职级体系)
+    
+    定义公司职位/职级体系，支持职级薪资范围配置
+    """
+    __tablename__ = "positions"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    position_code = Column(String(64), nullable=False, unique=True)  # 职位编码
+    position_name = Column(String(128), nullable=False)  # 职位名称
+    position_level = Column(Integer, nullable=False, default=1)  # 职级(1-10)
+    department_id = Column(BigInteger, nullable=True)  # 所属部门ID(可选)
+    min_salary = Column(Numeric(15, 2), nullable=True)  # 薪资下限
+    max_salary = Column(Numeric(15, 2), nullable=True)  # 薪资上限
+    description = Column(Text, nullable=True)  # 职位描述/职责
+    requirements = Column(Text, nullable=True)  # 任职要求
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_positions_a_code", "position_code"),
+        Index("ix_positions_a_level", "position_level"),
+        Index("ix_positions_a_department", "department_id"),
+        {"schema": "a_class"},
+    )
+
+
+class Employee(Base):
+    """
+    A类数据表:员工档案(业界标准设计)
+    
+    包含员工基本信息、联系方式、合同信息、银行账户等完整字段
+    """
+    __tablename__ = "employees"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    
+    # === 基本信息 ===
+    employee_code = Column(String(64), nullable=False, unique=True)  # 员工编号
+    name = Column(String(128), nullable=False)  # 姓名
+    gender = Column(String(16), nullable=True)  # 性别:male/female/other
+    birth_date = Column(Date, nullable=True)  # 出生日期
+    id_type = Column(String(32), nullable=True, default="id_card")  # 证件类型:id_card/passport/other
+    id_number = Column(String(64), nullable=True)  # 证件号码
+    avatar_url = Column(String(512), nullable=True)  # 头像URL
+    
+    # === 联系方式 ===
+    phone = Column(String(32), nullable=True)  # 手机号码
+    email = Column(String(128), nullable=True)  # 邮箱
+    address = Column(String(512), nullable=True)  # 现居地址
+    emergency_contact = Column(String(128), nullable=True)  # 紧急联系人
+    emergency_phone = Column(String(32), nullable=True)  # 紧急联系人电话
+    
+    # === 组织架构 ===
+    department_id = Column(BigInteger, nullable=True)  # 所属部门ID(关联departments表)
+    position_id = Column(BigInteger, nullable=True)  # 职位ID(关联positions表)
+    manager_id = Column(BigInteger, nullable=True)  # 直属上级ID(关联employees表)
+    
+    # === 入职信息 ===
+    hire_date = Column(Date, nullable=True)  # 入职日期
+    probation_end_date = Column(Date, nullable=True)  # 试用期结束日期
+    regularization_date = Column(Date, nullable=True)  # 转正日期
+    leave_date = Column(Date, nullable=True)  # 离职日期
+    
+    # === 合同信息 ===
+    contract_type = Column(String(32), nullable=True)  # 合同类型:fixed_term/indefinite/internship/part_time
+    contract_start_date = Column(Date, nullable=True)  # 合同开始日期
+    contract_end_date = Column(Date, nullable=True)  # 合同结束日期
+    
+    # === 薪资账户 ===
+    bank_name = Column(String(128), nullable=True)  # 开户银行
+    bank_account = Column(String(64), nullable=True)  # 银行账号
+    
+    # === 状态 ===
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive/probation/leave
+    
+    # === 用户关联（add-link-user-employee-management）===
+    user_id = Column(BigInteger, nullable=True)  # 关联 dim_users.user_id，应用层唯一性校验
+    
+    # === 元数据 ===
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_employees_a_code", "employee_code"),
+        Index("ix_employees_a_department", "department_id"),
+        Index("ix_employees_a_position", "position_id"),
+        Index("ix_employees_a_manager", "manager_id"),
+        Index("ix_employees_a_status", "status"),
+        Index("ix_employees_a_hire_date", "hire_date"),
+        {"schema": "a_class"},
+    )
+
+
+class EmployeeTarget(Base):
+    """A类数据表:员工目标(中文字段名)"""
+    __tablename__ = "employee_targets"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)  # 迁移时将重命名为"员工编号"
+    year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月"
+    target_type = Column(String(32), nullable=False)  # 迁移时将重命名为"目标类型"
+    target_value = Column(Numeric(15, 2), nullable=False)  # 迁移时将重命名为"目标值"
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("employee_code", "year_month", "target_type", name="uq_employee_targets_a"),
+        Index("ix_employee_targets_a_employee", "employee_code"),
+        Index("ix_employee_targets_a_month", "year_month"),
+        {"schema": "a_class"},
+    )
+
+
+class EmployeeShopAssignment(Base):
+    """
+    A类数据表:员工店铺归属与提成比
+    
+    配置员工负责的店铺及该店铺对应的提成比例，供提成计算使用。
+    按月份配置：year_month 表示该条配置适用的月份(YYYY-MM)，每月可不同比例。
+    add-employee-shop-assignment-page 提案
+    """
+    __tablename__ = "employee_shop_assignments"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year_month = Column(String(7), nullable=False)  # 适用月份 YYYY-MM
+    employee_code = Column(String(64), nullable=False)  # 员工编号，逻辑引用 a_class.employees
+    platform_code = Column(String(32), nullable=False)  # 平台编码
+    shop_id = Column(String(256), nullable=False)  # 店铺ID
+    
+    commission_ratio = Column(Float, nullable=True)  # 提成比例(0-1)，NULL时使用薪资结构默认
+    role = Column(String(32), nullable=True)  # 角色：supervisor/operator
+    effective_from = Column(Date, nullable=True)  # 保留，可选
+    effective_to = Column(Date, nullable=True)  # 保留，可选
+    status = Column(String(32), nullable=False, default="active")  # active/inactive
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("employee_code", "platform_code", "shop_id", "year_month", name="uq_employee_shop_assignments_a"),
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
+            ondelete="RESTRICT",
+            name="fk_employee_shop_assignments_shop_a",
+        ),
+        Index("ix_employee_shop_assignments_a_employee", "employee_code"),
+        Index("ix_employee_shop_assignments_a_shop", "platform_code", "shop_id"),
+        Index("ix_employee_shop_assignments_a_year_month", "year_month"),
+        Index("ix_employee_shop_assignments_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class ShopCommissionConfig(Base):
+    """
+    A类数据表:店铺可分配利润率配置（按月）
+
+    店铺利润的百分之多少用于主管+操作员分配。按 year_month 月度更新，与 employee_shop_assignments 一致。
+    add-employee-shop-assignment-page Phase 2, 方案B 按月维度
+    """
+    __tablename__ = "shop_commission_config"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    year_month = Column(String(7), nullable=False)  # YYYY-MM，与 employee_shop_assignments 一致
+    platform_code = Column(String(32), nullable=False)
+    shop_id = Column(String(256), nullable=False)
+    allocatable_profit_rate = Column(Float, nullable=False, default=0)  # 0-1，如 0.8 表示 80%
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("year_month", "platform_code", "shop_id", name="uq_shop_commission_config_a"),
+        ForeignKeyConstraint(
+            ["platform_code", "shop_id"],
+            ["core.dim_shops.platform_code", "core.dim_shops.shop_id"],
+            ondelete="RESTRICT",
+            name="fk_shop_commission_config_shop_a",
+        ),
+        Index("ix_shop_commission_config_a_shop_month", "year_month", "platform_code", "shop_id"),
+        {"schema": "a_class"},
+    )
+
+
+class WorkShift(Base):
+    """
+    A类数据表:排班班次配置
+    
+    定义不同的工作班次（如早班、晚班、弹性工时等）
+    """
+    __tablename__ = "work_shifts"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    shift_code = Column(String(64), nullable=False, unique=True)  # 班次编码
+    shift_name = Column(String(128), nullable=False)  # 班次名称(如:早班/晚班/弹性)
+    start_time = Column(String(8), nullable=False)  # 上班时间(HH:MM格式)
+    end_time = Column(String(8), nullable=False)  # 下班时间(HH:MM格式)
+    work_hours = Column(Float, nullable=False, default=8.0)  # 标准工作时长
+    break_hours = Column(Float, nullable=False, default=1.0)  # 休息时长
+    late_tolerance = Column(Integer, nullable=False, default=15)  # 迟到容忍时间(分钟)
+    early_leave_tolerance = Column(Integer, nullable=False, default=15)  # 早退容忍时间(分钟)
+    is_flexible = Column(Boolean, nullable=False, default=False)  # 是否弹性工时
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_work_shifts_a_code", "shift_code"),
+        Index("ix_work_shifts_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class AttendanceRecord(Base):
+    """
+    A类数据表:考勤记录(业界标准设计)
+    
+    支持排班、外勤打卡、加班记录等完整考勤功能
+    """
+    __tablename__ = "attendance_records"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)  # 员工编号
+    attendance_date = Column(Date, nullable=False)  # 考勤日期
+    
+    # === 打卡信息 ===
+    clock_in_time = Column(DateTime(timezone=True), nullable=True)  # 上班打卡时间
+    clock_out_time = Column(DateTime(timezone=True), nullable=True)  # 下班打卡时间
+    clock_in_location = Column(String(256), nullable=True)  # 上班打卡位置
+    clock_out_location = Column(String(256), nullable=True)  # 下班打卡位置
+    clock_in_type = Column(String(32), nullable=True, default="normal")  # 打卡类型:normal/field/supplement
+    clock_out_type = Column(String(32), nullable=True, default="normal")  # 打卡类型:normal/field/supplement
+    
+    # === 工时信息 ===
+    shift_id = Column(BigInteger, nullable=True)  # 排班班次ID
+    work_hours = Column(Float, nullable=True)  # 实际工作时长
+    overtime_hours = Column(Float, nullable=True, default=0.0)  # 加班时长
+    
+    # === 状态 ===
+    status = Column(String(32), nullable=False, default="normal")  # 状态:normal/late/early_leave/absent/leave
+    remark = Column(String(512), nullable=True)  # 备注
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("employee_code", "attendance_date", name="uq_attendance_records_a"),
+        Index("ix_attendance_records_a_employee", "employee_code"),
+        Index("ix_attendance_records_a_date", "attendance_date"),
+        Index("ix_attendance_records_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class LeaveType(Base):
+    """
+    A类数据表:假期类型配置
+    
+    定义公司支持的假期类型（年假、病假、事假等）
+    """
+    __tablename__ = "leave_types"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    leave_code = Column(String(64), nullable=False, unique=True)  # 假期编码
+    leave_name = Column(String(128), nullable=False)  # 假期名称
+    is_paid = Column(Boolean, nullable=False, default=True)  # 是否带薪
+    max_days_per_year = Column(Float, nullable=True)  # 年度最大天数(NULL表示无限制)
+    requires_approval = Column(Boolean, nullable=False, default=True)  # 是否需要审批
+    description = Column(Text, nullable=True)  # 假期说明
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_leave_types_a_code", "leave_code"),
+        Index("ix_leave_types_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class LeaveRecord(Base):
+    """
+    A类数据表:请假记录
+    
+    记录员工请假申请和审批信息
+    """
+    __tablename__ = "leave_records"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)  # 员工编号
+    leave_type_id = Column(BigInteger, nullable=False)  # 假期类型ID
+    start_date = Column(Date, nullable=False)  # 开始日期
+    end_date = Column(Date, nullable=False)  # 结束日期
+    days = Column(Float, nullable=False)  # 请假天数
+    reason = Column(Text, nullable=True)  # 请假原因
+    
+    # === 审批信息 ===
+    approver_id = Column(BigInteger, nullable=True)  # 审批人ID
+    approval_status = Column(String(32), nullable=False, default="pending")  # 审批状态:pending/approved/rejected
+    approval_time = Column(DateTime(timezone=True), nullable=True)  # 审批时间
+    approval_remark = Column(String(512), nullable=True)  # 审批备注
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_leave_records_a_employee", "employee_code"),
+        Index("ix_leave_records_a_date", "start_date", "end_date"),
+        Index("ix_leave_records_a_status", "approval_status"),
+        {"schema": "a_class"},
+    )
+
+
+class OvertimeRecord(Base):
+    """
+    A类数据表:加班记录
+    
+    记录员工加班申请和审批信息
+    """
+    __tablename__ = "overtime_records"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)  # 员工编号
+    overtime_date = Column(Date, nullable=False)  # 加班日期
+    start_time = Column(DateTime(timezone=True), nullable=False)  # 开始时间
+    end_time = Column(DateTime(timezone=True), nullable=False)  # 结束时间
+    hours = Column(Float, nullable=False)  # 加班时长
+    overtime_type = Column(String(32), nullable=False, default="workday")  # 类型:workday/weekend/holiday
+    reason = Column(Text, nullable=True)  # 加班原因
+    
+    # === 审批信息 ===
+    approver_id = Column(BigInteger, nullable=True)  # 审批人ID
+    approval_status = Column(String(32), nullable=False, default="pending")  # 审批状态:pending/approved/rejected
+    approval_time = Column(DateTime(timezone=True), nullable=True)  # 审批时间
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_overtime_records_a_employee", "employee_code"),
+        Index("ix_overtime_records_a_date", "overtime_date"),
+        Index("ix_overtime_records_a_status", "approval_status"),
+        {"schema": "a_class"},
+    )
+
+
+# ============================================================================
+# A类数据表:薪酬管理模块
+# ============================================================================
+
+class SalaryStructure(Base):
+    """
+    A类数据表:薪资结构配置
+    
+    定义员工薪资组成结构（基本工资、绩效工资、津贴等）
+    """
+    __tablename__ = "salary_structures"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False, unique=True)  # 员工编号
+    
+    # === 固定薪资 ===
+    base_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 基本工资
+    position_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 岗位工资
+    
+    # === 津贴 ===
+    housing_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 住房补贴
+    transport_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 交通补贴
+    meal_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 餐饮补贴
+    communication_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 通讯补贴
+    other_allowance = Column(Numeric(15, 2), nullable=False, default=0.0)  # 其他补贴
+    
+    # === 绩效相关 ===
+    performance_ratio = Column(Float, nullable=False, default=0.0)  # 绩效工资比例(0-1)
+    commission_ratio = Column(Float, nullable=False, default=0.0)  # 提成比例(0-1)
+    
+    # === 社保公积金 ===
+    social_insurance_base = Column(Numeric(15, 2), nullable=True)  # 社保基数
+    housing_fund_base = Column(Numeric(15, 2), nullable=True)  # 公积金基数
+    
+    effective_date = Column(Date, nullable=False)  # 生效日期
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_salary_structures_a_employee", "employee_code"),
+        Index("ix_salary_structures_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class PayrollRecord(Base):
+    """
+    A类数据表:工资单记录
+    
+    记录每月工资计算结果
+    """
+    __tablename__ = "payroll_records"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)  # 员工编号
+    year_month = Column(String(7), nullable=False)  # 工资月份(YYYY-MM)
+    
+    # === 应发项 ===
+    base_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 基本工资
+    position_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 岗位工资
+    performance_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 绩效工资
+    overtime_pay = Column(Numeric(15, 2), nullable=False, default=0.0)  # 加班费
+    commission = Column(Numeric(15, 2), nullable=False, default=0.0)  # 提成
+    allowances = Column(Numeric(15, 2), nullable=False, default=0.0)  # 津贴合计
+    bonus = Column(Numeric(15, 2), nullable=False, default=0.0)  # 奖金
+    gross_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 应发合计
+    
+    # === 扣除项 ===
+    social_insurance_personal = Column(Numeric(15, 2), nullable=False, default=0.0)  # 社保个人部分
+    housing_fund_personal = Column(Numeric(15, 2), nullable=False, default=0.0)  # 公积金个人部分
+    income_tax = Column(Numeric(15, 2), nullable=False, default=0.0)  # 个人所得税
+    other_deductions = Column(Numeric(15, 2), nullable=False, default=0.0)  # 其他扣款
+    total_deductions = Column(Numeric(15, 2), nullable=False, default=0.0)  # 扣款合计
+    
+    # === 实发工资 ===
+    net_salary = Column(Numeric(15, 2), nullable=False, default=0.0)  # 实发工资
+    
+    # === 公司成本 ===
+    social_insurance_company = Column(Numeric(15, 2), nullable=False, default=0.0)  # 社保公司部分
+    housing_fund_company = Column(Numeric(15, 2), nullable=False, default=0.0)  # 公积金公司部分
+    total_cost = Column(Numeric(15, 2), nullable=False, default=0.0)  # 公司总成本
+    
+    # === 状态 ===
+    status = Column(String(32), nullable=False, default="draft")  # 状态:draft/confirmed/paid
+    pay_date = Column(Date, nullable=True)  # 发薪日期
+    remark = Column(Text, nullable=True)  # 备注
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("employee_code", "year_month", name="uq_payroll_records_a"),
+        Index("ix_payroll_records_a_employee", "employee_code"),
+        Index("ix_payroll_records_a_month", "year_month"),
+        Index("ix_payroll_records_a_status", "status"),
+        {"schema": "a_class"},
+    )
+
+
+class SocialInsuranceConfig(Base):
+    """
+    A类数据表:社保公积金配置
+    
+    配置社保和公积金的缴纳比例
+    """
+    __tablename__ = "social_insurance_config"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    config_name = Column(String(128), nullable=False, unique=True)  # 配置名称(如:北京2024)
+    city = Column(String(64), nullable=True)  # 所属城市
+    
+    # === 养老保险 ===
+    pension_company_ratio = Column(Float, nullable=False, default=0.16)  # 单位缴纳比例
+    pension_personal_ratio = Column(Float, nullable=False, default=0.08)  # 个人缴纳比例
+    
+    # === 医疗保险 ===
+    medical_company_ratio = Column(Float, nullable=False, default=0.10)  # 单位缴纳比例
+    medical_personal_ratio = Column(Float, nullable=False, default=0.02)  # 个人缴纳比例
+    
+    # === 失业保险 ===
+    unemployment_company_ratio = Column(Float, nullable=False, default=0.008)  # 单位缴纳比例
+    unemployment_personal_ratio = Column(Float, nullable=False, default=0.002)  # 个人缴纳比例
+    
+    # === 工伤保险 ===
+    injury_company_ratio = Column(Float, nullable=False, default=0.002)  # 单位缴纳比例(个人不缴)
+    
+    # === 生育保险 ===
+    maternity_company_ratio = Column(Float, nullable=False, default=0.008)  # 单位缴纳比例(个人不缴)
+    
+    # === 住房公积金 ===
+    housing_fund_company_ratio = Column(Float, nullable=False, default=0.12)  # 单位缴纳比例
+    housing_fund_personal_ratio = Column(Float, nullable=False, default=0.12)  # 个人缴纳比例
+    
+    # === 基数范围 ===
+    min_base = Column(Numeric(15, 2), nullable=True)  # 最低基数
+    max_base = Column(Numeric(15, 2), nullable=True)  # 最高基数
+    
+    effective_date = Column(Date, nullable=False)  # 生效日期
+    status = Column(String(32), nullable=False, default="active")  # 状态:active/inactive
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_social_insurance_config_a_name", "config_name"),
+        Index("ix_social_insurance_config_a_city", "city"),
+        {"schema": "a_class"},
+    )
+
+
+class PerformanceConfigA(Base):
+    """
+    A类数据表:绩效权重配置(中文字段名)
+    
+    注意:此表将替代旧的PerformanceConfig表(v4.11.0),使用中文字段名
+    """
+    __tablename__ = "performance_config_a"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    config_name = Column(String(128), nullable=False)  # 迁移时将重命名为"配置名称"
+    sales_weight = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"销售额权重"
+    quantity_weight = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"订单数权重"
+    quality_weight = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"质量权重"
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("config_name", name="uq_performance_config_a_name"),
+        Index("ix_performance_config_a_active", "active"),
+        {"schema": "a_class"},
+    )
+
+
+# C类数据表(使用中文字段名,由Metabase定时计算更新)
+
+class EmployeePerformance(Base):
+    """C类数据表:员工绩效(中文字段名,Metabase每20分钟更新)"""
+    __tablename__ = "employee_performance"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)  # 迁移时将重命名为"员工编号"
+    year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月"
+    actual_sales = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"实际销售额"
+    achievement_rate = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"达成率"
+    performance_score = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"绩效得分"
+    calculated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 迁移时将重命名为"计算时间"
+    
+    __table_args__ = (
+        UniqueConstraint("employee_code", "year_month", name="uq_employee_performance_c"),
+        Index("ix_employee_performance_c_employee", "employee_code"),
+        Index("ix_employee_performance_c_month", "year_month"),
+        {"schema": "c_class"},
+    )
+
+
+class EmployeeCommission(Base):
+    """C类数据表:员工提成(中文字段名,Metabase每20分钟更新)"""
+    __tablename__ = "employee_commissions"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_code = Column(String(64), nullable=False)  # 迁移时将重命名为"员工编号"
+    year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月"
+    sales_amount = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"销售额"
+    commission_amount = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"提成金额"
+    commission_rate = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"提成比例"
+    calculated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 迁移时将重命名为"计算时间"
+    
+    __table_args__ = (
+        UniqueConstraint("employee_code", "year_month", name="uq_employee_commissions_c"),
+        Index("ix_employee_commissions_c_employee", "employee_code"),
+        Index("ix_employee_commissions_c_month", "year_month"),
+        {"schema": "c_class"},
+    )
+
+
+class ShopCommission(Base):
+    """C类数据表:店铺提成(中文字段名,Metabase每20分钟更新)"""
+    __tablename__ = "shop_commissions"
+    
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    shop_id = Column(String(256), nullable=False)  # 迁移时将重命名为"店铺ID"
+    year_month = Column(String(7), nullable=False)  # 迁移时将重命名为"年月"
+    sales_amount = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"销售额"
+    commission_amount = Column(Numeric(15, 2), nullable=False, default=0.0)  # 迁移时将重命名为"提成金额"
+    commission_rate = Column(Float, nullable=False, default=0.0)  # 迁移时将重命名为"提成比例"
+    calculated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 迁移时将重命名为"计算时间"
+    
+    __table_args__ = (
+        UniqueConstraint("shop_id", "year_month", name="uq_shop_commissions_c"),
+        Index("ix_shop_commissions_c_shop", "shop_id"),
+        Index("ix_shop_commissions_c_month", "year_month"),
+        {"schema": "c_class"},
+    )
+
+
+# [REMOVED] PerformanceScoreC: 表已由迁移 20260131 合并入 c_class.performance_scores 并删除，不再定义 ORM
+
+
+# v4.19.0: 系统通知表
+
+class Notification(Base):
+    """
+    系统通知表 (v4.19.0)
+    
+    用于存储系统内部通知,如:
+    - 新用户注册通知(发给管理员)
+    - 审批结果通知(发给用户)
+    - 系统告警通知
+    """
+    __tablename__ = "notifications"
+    
+    notification_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    recipient_id = Column(
+        BigInteger,
+        ForeignKey('core.dim_users.user_id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+        comment="接收者用户ID"
+    )
+    
+    # 通知内容
+    notification_type = Column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="通知类型:user_registered, user_approved, user_rejected, system_alert"
+    )
+    title = Column(String(200), nullable=False, comment="通知标题")
+    content = Column(Text, nullable=False, comment="通知内容")
+    extra_data = Column(JSON, nullable=True, comment="扩展数据(JSON格式)")
+    
+    # 关联数据
+    related_user_id = Column(
+        BigInteger,
+        ForeignKey('core.dim_users.user_id', ondelete='SET NULL'),
+        nullable=True,
+        comment="关联用户ID(如被审批的用户)"
+    )
+    
+    # v4.19.0: 优先级
+    priority = Column(
+        String(10),
+        default="medium",
+        nullable=False,
+        index=True,
+        comment="优先级:high, medium, low"
+    )
+    
+    # 状态
+    is_read = Column(Boolean, default=False, nullable=False, index=True, comment="是否已读")
+    read_at = Column(DateTime(timezone=True), nullable=True, comment="阅读时间")
+    
+    # 时间戳
+    created_at = Column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+        comment="创建时间"
+    )
+    
+    # 关系
+    recipient = relationship(
+        "DimUser",
+        foreign_keys=[recipient_id],
+        backref="notifications"
+    )
+    
+    __table_args__ = (
+        Index("idx_notification_user_unread", "recipient_id", "is_read"),
+        Index("idx_notification_type_created", "notification_type", "created_at"),
+    )
+
+
+# v4.19.0: 用户通知偏好表
+
+class UserNotificationPreference(Base):
+    """
+    用户通知偏好表 (v4.19.0)
+    
+    用于存储用户对不同类型通知的偏好设置,如:
+    - 是否启用通知
+    - 是否启用桌面通知
+    """
+    __tablename__ = "user_notification_preferences"
+    
+    preference_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(
+        BigInteger,
+        ForeignKey('core.dim_users.user_id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+        comment="用户ID"
+    )
+    notification_type = Column(
+        String(50),
+        nullable=False,
+        comment="通知类型:user_registered, user_approved, user_rejected, system_alert等"
+    )
+    enabled = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="是否启用通知(应用内通知)"
+    )
+    desktop_enabled = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="是否启用桌面通知(浏览器原生通知)"
+    )
+    
+    # 时间戳
+    created_at = Column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+        comment="创建时间"
+    )
+    updated_at = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+        comment="更新时间"
+    )
+    
+    # 关系
+    user = relationship(
+        "DimUser",
+        foreign_keys=[user_id],
+        backref="notification_preferences"
+    )
+    
+    __table_args__ = (
+        UniqueConstraint("user_id", "notification_type", name="uq_user_notification_preference"),
+        Index("idx_user_notification_user", "user_id"),
+    )
+
+
+# [*] v4.19.4 新增:限流配置表(Phase 3)
+class DimRateLimitConfig(Base):
+    """
+    限流配置维度表
+    
+    用途:存储基于角色的限流配置,支持运行时动态调整
+    - 支持多角色、多端点类型配置
+    - 支持配置启用/禁用
+    - 支持配置版本管理
+    
+    v4.19.4 新增:Phase 3 数据库配置支持
+    """
+    __tablename__ = "dim_rate_limit_config"
+    
+    config_id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # 配置维度
+    role_code = Column(String(50), nullable=False, index=True)  # admin/manager/finance/operator/normal/anonymous
+    endpoint_type = Column(String(50), nullable=False, index=True)  # default/data_sync/auth
+    
+    # 限流值
+    limit_value = Column(String(50), nullable=False)  # "200/minute", "100/minute"
+    
+    # 配置状态
+    is_active = Column(Boolean, default=True, nullable=False, index=True)  # 是否启用
+    
+    # 配置描述
+    description = Column(Text, nullable=True)  # 配置说明
+    
+    # 审计字段
+    created_by = Column(String(100), nullable=True)  # 创建者
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_by = Column(String(100), nullable=True)  # 最后更新者
+    
+    __table_args__ = (
+        UniqueConstraint("role_code", "endpoint_type", name="uq_rate_limit_config_role_endpoint"),
+        Index("ix_rate_limit_config_active", "is_active", "role_code"),
+        Index("ix_rate_limit_config_role", "role_code", "endpoint_type"),
+    )
+
+
+# [*] v4.19.4 新增:限流配置审计日志表(Phase 3)
+class FactRateLimitConfigAudit(Base):
+    """
+    限流配置变更审计日志表
+    
+    用途:记录所有限流配置的变更历史,支持审计追溯
+    - 记录配置创建、更新、删除操作
+    - 记录变更前后的值
+    - 记录操作人和操作时间
+    
+    v4.19.4 新增:Phase 3 配置变更审计
+    """
+    __tablename__ = "fact_rate_limit_config_audit"
+    
+    audit_id = Column(BigInteger, primary_key=True, autoincrement=True, index=True)
+    
+    # 配置信息
+    config_id = Column(Integer, ForeignKey("dim_rate_limit_config.config_id"), nullable=True)  # 配置ID(删除时为NULL)
+    role_code = Column(String(50), nullable=False, index=True)  # 角色代码
+    endpoint_type = Column(String(50), nullable=False, index=True)  # 端点类型
+    
+    # 操作信息
+    action_type = Column(String(50), nullable=False, index=True)  # create/update/delete
+    old_limit_value = Column(String(50), nullable=True)  # 变更前的限流值
+    new_limit_value = Column(String(50), nullable=True)  # 变更后的限流值
+    old_is_active = Column(Boolean, nullable=True)  # 变更前的启用状态
+    new_is_active = Column(Boolean, nullable=True)  # 变更后的启用状态
+    
+    # 操作人信息
+    operator_id = Column(BigInteger, ForeignKey("core.dim_users.user_id"), nullable=True)  # 操作人ID
+    operator_username = Column(String(100), nullable=False)  # 操作人用户名(冗余字段)
+    
+    # IP和设备信息
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    
+    # 操作结果
+    is_success = Column(Boolean, default=True, nullable=False)
+    error_message = Column(Text, nullable=True)  # 错误信息(如果操作失败)
+    
+    # 时间戳
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    
+    __table_args__ = (
+        Index("idx_rate_limit_audit_config", "config_id", "created_at"),
+        Index("idx_rate_limit_audit_role", "role_code", "endpoint_type", "created_at"),
+        Index("idx_rate_limit_audit_operator", "operator_id", "created_at"),
+        Index("idx_rate_limit_audit_action", "action_type", "created_at"),
+    )
+
+
+# ==================== System Management Tables (v4.20.0) ====================
+
+class SystemLog(Base):
+    """
+    系统日志表
+    
+    用于存储应用运行时产生的结构化日志。
+    与文件日志、审计日志、任务日志不同:
+    - 文件日志:modules/core/logger.py 写入文件
+    - 审计日志:FactAuditLog 表记录用户操作
+    - 任务日志:CollectionTaskLog 表记录采集任务
+    - 系统日志:本表记录应用运行时的结构化日志
+    """
+    __tablename__ = "system_logs"
+    
+    id = Column(Integer, primary_key=True)
+    level = Column(String(10), nullable=False)  # ERROR, WARN, INFO, DEBUG
+    module = Column(String(64), nullable=False)  # 模块名称
+    message = Column(Text, nullable=False)  # 日志消息
+    user_id = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    ip_address = Column(String(45), nullable=True)  # IPv4/IPv6
+    user_agent = Column(String(512), nullable=True)
+    details = Column(JSONB, nullable=True)  # 详细信息(JSON格式)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index("ix_system_logs_level", "level"),
+        Index("ix_system_logs_module", "module"),
+        Index("ix_system_logs_created_at", "created_at"),
+        ForeignKeyConstraint(['user_id'], ['core.dim_users.user_id'], name='fk_system_logs_user_id'),
+    )
+
+
+class SecurityConfig(Base):
+    """
+    安全配置表
+    
+    用于存储系统安全相关配置(密码策略、登录限制、会话配置、2FA配置等)
+    使用JSONB存储配置值,支持灵活的配置结构
+    """
+    __tablename__ = "security_config"
+    
+    id = Column(Integer, primary_key=True)
+    config_key = Column(String(64), unique=True, nullable=False)  # password_policy, login_restrictions, session_config, 2fa_config
+    config_value = Column(JSONB, nullable=False)  # 配置值(JSON格式)
+    description = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint('config_key', name='uq_security_config_key'),  # 唯一约束
+        Index('ix_security_config_key', 'config_key'),  # 索引
+        ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_security_config_updated_by'),
+    )
+
+
+class BackupRecord(Base):
+    """
+    备份记录表
+    
+    用于记录系统备份操作的历史记录
+    """
+    __tablename__ = "backup_records"
+    
+    id = Column(Integer, primary_key=True)
+    backup_type = Column(String(32), nullable=False)  # full, incremental
+    backup_path = Column(String(512), nullable=False)  # 备份文件路径(容器内路径)
+    backup_size = Column(BigInteger, nullable=False)  # 备份大小(字节)
+    checksum = Column(String(64), nullable=True)  # 文件校验和(SHA-256)
+    status = Column(String(32), nullable=False)  # pending, completed, failed
+    description = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    __table_args__ = (
+        Index("ix_backup_records_status", "status"),
+        Index("ix_backup_records_created_at", "created_at"),
+        ForeignKeyConstraint(['created_by'], ['core.dim_users.user_id'], name='fk_backup_records_created_by'),
+        {"schema": "core"},
+    )
+
+
+class SMTPConfig(Base):
+    """
+    SMTP配置表
+    
+    用于存储邮件服务器配置(密码加密存储)
+    """
+    __tablename__ = "smtp_config"
+    
+    id = Column(Integer, primary_key=True)
+    smtp_server = Column(String(256), nullable=False)
+    smtp_port = Column(Integer, nullable=False)
+    use_tls = Column(Boolean, default=True, nullable=False)
+    username = Column(String(256), nullable=False)
+    password_encrypted = Column(Text, nullable=False)  # 加密存储
+    from_email = Column(String(256), nullable=False)
+    from_name = Column(String(128), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    
+    __table_args__ = (
+        ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_smtp_config_updated_by'),
+    )
+
+
+class NotificationTemplate(Base):
+    """
+    通知模板表
+    
+    用于存储通知内容模板(支持变量替换)
+    """
+    __tablename__ = "notification_templates"
+    
+    id = Column(Integer, primary_key=True)
+    template_name = Column(String(128), unique=True, nullable=False)
+    template_type = Column(String(64), nullable=False)  # email/sms/push
+    subject = Column(String(256), nullable=True)  # 邮件主题(email类型)
+    content = Column(Text, nullable=False)  # 模板内容(支持变量如 {{user_name}})
+    variables = Column(JSONB, nullable=True)  # 可用变量说明(JSON格式)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    
+    __table_args__ = (
+        Index("ix_notification_templates_template_name", "template_name"),
+        Index("ix_notification_templates_template_type", "template_type"),
+        ForeignKeyConstraint(['created_by'], ['core.dim_users.user_id'], name='fk_notification_templates_created_by'),
+        ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_notification_templates_updated_by'),
+    )
+
+
+class AlertRule(Base):
+    """
+    告警规则表
+    
+    用于配置系统告警规则(何时触发通知)
+    """
+    __tablename__ = "alert_rules"
+    
+    id = Column(Integer, primary_key=True)
+    rule_name = Column(String(128), unique=True, nullable=False)
+    rule_type = Column(String(64), nullable=False)  # system/performance/security/business
+    condition = Column(JSONB, nullable=False)  # 触发条件(JSON格式)
+    template_id = Column(Integer, ForeignKey("notification_templates.id"), nullable=True)
+    recipients = Column(JSONB, nullable=True)  # 收件人列表(JSON格式,支持用户ID、邮箱等)
+    enabled = Column(Boolean, default=True, nullable=False)
+    priority = Column(String(16), nullable=False, default="medium")  # low/medium/high/critical
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    
+    __table_args__ = (
+        Index("ix_alert_rules_rule_name", "rule_name"),
+        Index("ix_alert_rules_rule_type", "rule_type"),
+        Index("ix_alert_rules_enabled", "enabled"),
+        ForeignKeyConstraint(['template_id'], ['notification_templates.id'], name='fk_alert_rules_template_id'),
+        ForeignKeyConstraint(['created_by'], ['core.dim_users.user_id'], name='fk_alert_rules_created_by'),
+        ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_alert_rules_updated_by'),
+    )
+
+
+class SystemConfig(Base):
+    """
+    系统配置表
+    
+    用于存储系统基础配置(系统名称、版本、时区、语言、货币等)
+    使用键值对存储,支持灵活的配置项
+    """
+    __tablename__ = "system_config"
+    
+    id = Column(Integer, primary_key=True)
+    config_key = Column(String(64), unique=True, nullable=False)  # system_name, version, timezone, language, currency
+    config_value = Column(String(512), nullable=False)
+    description = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_by = Column(Integer, ForeignKey("core.dim_users.user_id"), nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint('config_key', name='uq_system_config_key'),  # 唯一约束
+        Index('ix_system_config_key', 'config_key'),  # 索引
+        ForeignKeyConstraint(['updated_by'], ['core.dim_users.user_id'], name='fk_system_config_updated_by'),
+    )

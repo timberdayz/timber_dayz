@@ -1,0 +1,20 @@
+# Grafana 数据源配置 - Prometheus
+# 自动配置 Prometheus 作为默认数据源
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # ⚠️ 重要：根据部署环境选择正确的地址
+    # Docker Compose 部署：使用服务名称
+    url: http://prometheus:9090
+    # 独立进程部署：使用 localhost
+    # url: http://localhost:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: "15s"
+      httpMethod: POST
+

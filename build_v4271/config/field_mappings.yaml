@@ -1,0 +1,296 @@
+# 数据字段映射配置
+# 用于标准化不同平台的数据格式
+
+# Shopee平台字段映射
+shopee:
+  product_name:
+    - "Product Name"
+    - "商品名称"
+    - "产品名称"
+    - "name"
+    - "title"
+  sku:
+    - "SKU"
+    - "sku"
+    - "商品编码"
+    - "product_sku"
+    - "item_sku"
+  price:
+    - "Price"
+    - "价格"
+    - "单价"
+    - "unit_price"
+    - "selling_price"
+  quantity:
+    - "Quantity"
+    - "数量"
+    - "库存"
+    - "stock"
+    - "inventory"
+  sales:
+    - "Sales"
+    - "销量"
+    - "已售"
+    - "sold_count"
+    - "sales_qty"
+  revenue:
+    - "Revenue"
+    - "营收"
+    - "收入"
+    - "total_revenue"
+    - "sales_amount"
+
+# Temu平台字段映射
+temu:
+  product_name:
+    - "商品标题"
+    - "Title"
+    - "产品标题"
+    - "product_title"
+    - "item_title"
+  sku:
+    - "商品SKU"
+    - "SKU Code"
+    - "编码"
+    - "item_code"
+    - "product_code"
+  price:
+    - "售价"
+    - "Selling Price"
+    - "价格"
+    - "price"
+    - "unit_price"
+  quantity:
+    - "库存数量"
+    - "Stock Qty"
+    - "数量"
+    - "inventory"
+    - "stock_quantity"
+  sales:
+    - "销售数量"
+    - "Sold Quantity"
+    - "销量"
+    - "sales_qty"
+    - "sold_count"
+  revenue:
+    - "销售额"
+    - "Sales Amount"
+    - "收益"
+    - "sales_revenue"
+    - "total_sales"
+
+# 妙手ERP平台字段映射
+miaoshou:
+  product_name:
+    - "商品名称"
+    - "产品名称"
+    - "name"
+    - "商品标题"
+  sku:
+    - "SKU"
+    - "商品编码"
+    - "sku"
+    - "编码"
+  price:
+    - "价格"
+    - "单价"
+    - "price"
+    - "售价"
+  quantity:
+    - "数量"
+    - "库存"
+    - "qty"
+    - "库存数量"
+  sales:
+    - "销量"
+    - "已售"
+    - "sales"
+    - "销售数量"
+  revenue:
+    - "营收"
+    - "收入"
+    - "revenue"
+    - "销售额"
+
+# 亚马逊平台字段映射
+amazon:
+  product_name:
+    - "Product Title"
+    - "Title"
+    - "Item Name"
+    - "product_name"
+  sku:
+    - "SKU"
+    - "ASIN"
+    - "Product ID"
+    - "seller_sku"
+  price:
+    - "Price"
+    - "Unit Price"
+    - "List Price"
+    - "selling_price"
+  quantity:
+    - "Quantity"
+    - "Available Quantity"
+    - "Stock"
+    - "inventory_quantity"
+  sales:
+    - "Units Sold"
+    - "Quantity Sold"
+    - "Sales Units"
+    - "units_ordered"
+  revenue:
+    - "Sales"
+    - "Revenue"
+    - "Total Sales"
+    - "product_sales"
+
+# 速卖通平台字段映射
+aliexpress:
+  product_name:
+    - "Product Name"
+    - "商品名称"
+    - "产品标题"
+    - "subject"
+  sku:
+    - "SKU Code"
+    - "Product SKU"
+    - "商品编码"
+    - "sku_code"
+  price:
+    - "Price"
+    - "Unit Price"
+    - "价格"
+    - "product_price"
+  quantity:
+    - "Stock"
+    - "Inventory"
+    - "库存"
+    - "available_inventory"
+  sales:
+    - "Sales Volume"
+    - "Sold Quantity"
+    - "销量"
+    - "order_count"
+  revenue:
+    - "Sales Amount"
+    - "Revenue"
+    - "销售额"
+    - "gmv"
+
+# 通用字段映射（用于未知平台）
+generic:
+  product_name:
+    - "name"
+    - "title"
+    - "product"
+    - "商品"
+    - "产品"
+    - "名称"
+    - "标题"
+  sku:
+    - "sku"
+    - "code"
+    - "id"
+    - "编码"
+    - "编号"
+  price:
+    - "price"
+    - "cost"
+    - "amount"
+    - "价格"
+    - "金额"
+    - "单价"
+  quantity:
+    - "qty"
+    - "quantity"
+    - "stock"
+    - "数量"
+    - "库存"
+  sales:
+    - "sales"
+    - "sold"
+    - "销量"
+    - "已售"
+  revenue:
+    - "revenue"
+    - "income"
+    - "营收"
+    - "收入"
+
+# 数据类型定义
+data_types:
+  product_name: "string"
+  sku: "string"
+  price: "float"
+  quantity: "integer"
+  sales: "integer"
+  revenue: "float"
+  platform: "string"
+  import_time: "datetime"
+  data_quality: "float"
+
+# 数据验证规则
+validation_rules:
+  product_name:
+    required: true
+    min_length: 1
+    max_length: 500
+  sku:
+    required: true
+    min_length: 1
+    max_length: 100
+    pattern: "^[A-Za-z0-9\\-_]+$"
+  price:
+    required: true
+    min_value: 0
+    max_value: 999999
+  quantity:
+    required: false
+    min_value: 0
+    max_value: 999999
+  sales:
+    required: false
+    min_value: 0
+    max_value: 999999
+  revenue:
+    required: false
+    min_value: 0
+    max_value: 99999999
+
+# 平台特定配置
+platform_configs:
+  shopee:
+    currency: "USD"
+    date_format: "%Y-%m-%d"
+    decimal_separator: "."
+    encoding: "utf-8"
+    file_extensions: [".csv", ".xlsx"]
+  
+  temu:
+    currency: "USD"
+    date_format: "%m/%d/%Y"
+    decimal_separator: "."
+    encoding: "utf-8"
+    file_extensions: [".csv", ".xlsx"]
+  
+  miaoshou:
+    currency: "CNY"
+    date_format: "%Y年%m月%d日"
+    decimal_separator: "."
+    encoding: "utf-8"
+    file_extensions: [".csv", ".xlsx", ".xls"]
+  
+  amazon:
+    currency: "USD"
+    date_format: "%Y-%m-%d"
+    decimal_separator: "."
+    encoding: "utf-8"
+    file_extensions: [".csv", ".txt"]
+  
+  aliexpress:
+    currency: "USD"
+    date_format: "%Y/%m/%d"
+    decimal_separator: "."
+    encoding: "utf-8"
+    file_extensions: [".csv", ".xlsx"]

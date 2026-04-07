@@ -2,8 +2,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from types import SimpleNamespace
 
 from backend.services.collection_config_execution import create_tasks_for_config
+from backend.services.component_runtime_resolver import NoStableComponentVersionError
 from modules.core.db import (
     CollectionConfig,
     CollectionConfigShopScope,
@@ -184,3 +186,128 @@ async def test_create_tasks_for_config_skips_conflicted_shop_without_blocking_ot
 
     assert len(tasks) == 1
     assert tasks[0].account == "shop-my-1"
+
+
+@pytest.mark.asyncio
+async def test_create_tasks_for_config_prunes_unsupported_subtypes_without_skipping_scope(
+    config_execution_session,
+    monkeypatch,
+):
+    config_id = await _seed_config(config_execution_session)
+
+    class _FakeResolver:
+        async def resolve_login_component(self, platform):
+            return {"component_name": f"{platform}/login"}
+
+        async def resolve_export_component(self, *, platform, data_domain, sub_domain):
+            if platform == "tiktok" and data_domain == "services" and sub_domain == "ai_assistant":
+                raise NoStableComponentVersionError(f"{platform}/{data_domain}_{sub_domain}_export")
+            suffix = f"{data_domain}_{sub_domain}_export" if sub_domain else f"{data_domain}_export"
+            return {"component_name": f"{platform}/{suffix}"}
+
+    monkeypatch.setattr(
+        "backend.services.collection_config_execution.ComponentRuntimeResolver.from_async_session",
+        lambda db: _FakeResolver(),
+    )
+
+    shop = (
+        await config_execution_session.execute(
+            select(ShopAccount).where(ShopAccount.shop_account_id == "shop-sg-1")
+        )
+    ).scalar_one()
+    config_execution_session.add_all(
+        [
+            ShopAccountCapability(shop_account_id=shop.id, data_domain="products", enabled=True),
+            ShopAccountCapability(shop_account_id=shop.id, data_domain="analytics", enabled=True),
+        ]
+    )
+    await config_execution_session.commit()
+
+    config = (
+        await config_execution_session.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
+    ).scalar_one()
+    config.platform = "tiktok"
+    await config_execution_session.commit()
+
+    scope_result = await config_execution_session.execute(
+        select(CollectionConfigShopScope).where(CollectionConfigShopScope.config_id == config_id)
+    )
+    scopes = scope_result.scalars().all()
+    for scope in scopes:
+        if scope.shop_account_id == "shop-sg-1":
+            scope.data_domains = ["products", "analytics", "services"]
+            scope.sub_domains = {"services": ["agent", "ai_assistant"]}
+        else:
+            scope.enabled = False
+    await config_execution_session.commit()
+
+    tasks = await create_tasks_for_config(
+        config_execution_session,
+        config_id=config_id,
+        trigger_type="scheduled",
+        resolve_runtime=True,
+    )
+
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task.account == "shop-sg-1"
+    assert task.data_domains == ["products", "analytics", "services"]
+    assert task.sub_domains == {"services": ["agent"]}
+    assert task.total_domains == 3
+
+
+@pytest.mark.asyncio
+async def test_create_tasks_for_config_schedules_background_only_after_commit(
+    config_execution_session,
+    monkeypatch,
+):
+    config_id = await _seed_config(config_execution_session)
+
+    class _FakeResolver:
+        async def resolve_login_component(self, platform):
+            return {"component_name": f"{platform}/login"}
+
+        async def resolve_export_component(self, *, platform, data_domain, sub_domain):
+            suffix = f"{data_domain}_{sub_domain}_export" if sub_domain else f"{data_domain}_export"
+            return {"component_name": f"{platform}/{suffix}"}
+
+    monkeypatch.setattr(
+        "backend.services.collection_config_execution.ComponentRuntimeResolver.from_async_session",
+        lambda db: _FakeResolver(),
+    )
+
+    commit_completed = False
+    scheduled_calls = []
+
+    original_commit = config_execution_session.commit
+
+    async def _commit_wrapper():
+        nonlocal commit_completed
+        await original_commit()
+        commit_completed = True
+
+    config_execution_session.commit = _commit_wrapper
+
+    def _fake_create_task(coro):
+        scheduled_calls.append(
+            {
+                "commit_completed": commit_completed,
+                "coro_name": getattr(coro, "__name__", coro.__class__.__name__),
+            }
+        )
+        coro.close()
+        return SimpleNamespace(cancel=lambda: None)
+
+    monkeypatch.setattr("asyncio.create_task", _fake_create_task)
+
+    tasks = await create_tasks_for_config(
+        config_execution_session,
+        config_id=config_id,
+        trigger_type="scheduled",
+        start_background=True,
+        resolve_runtime=True,
+    )
+
+    assert len(tasks) == 2
+    assert scheduled_calls
+    assert all(call["commit_completed"] for call in scheduled_calls)

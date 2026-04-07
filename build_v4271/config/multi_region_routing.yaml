@@ -1,0 +1,419 @@
+platform_routing:
+  '1688':
+    domains:
+    - login.1688.com
+    - 1688.com
+    platform: '1688'
+    required_region: CN
+    test_endpoints: []
+  amazon_au:
+    domains:
+    - sellercentral.amazon.com.au
+    - amazon.com.au
+    platform: amazon_au
+    required_region: AU
+    test_endpoints: []
+  amazon_br:
+    domains:
+    - sellercentral.amazon.com.br
+    - amazon.com.br
+    platform: amazon_br
+    required_region: BR
+    test_endpoints: []
+  amazon_de:
+    domains:
+    - sellercentral.amazon.de
+    - amazon.de
+    platform: amazon_de
+    required_region: DE
+    test_endpoints: []
+  amazon_jp:
+    domains:
+    - sellercentral.amazon.co.jp
+    - amazon.co.jp
+    platform: amazon_jp
+    required_region: JP
+    test_endpoints: []
+  amazon_uk:
+    domains:
+    - sellercentral.amazon.co.uk
+    - amazon.co.uk
+    platform: amazon_uk
+    required_region: GB
+    test_endpoints: []
+  amazon_us:
+    domains:
+    - sellercentral.amazon.com
+    - amazon.com
+    platform: amazon_us
+    required_region: US
+    test_endpoints: []
+  bukalapak:
+    domains:
+    - mitra.bukalapak.com
+    - bukalapak.com
+    platform: bukalapak
+    required_region: ID
+    test_endpoints: []
+  coupang:
+    domains:
+    - wing.coupang.com
+    - coupang.com
+    platform: coupang
+    required_region: KR
+    test_endpoints: []
+  ebay:
+    domains:
+    - sellerupdate.ebay.com
+    - ebay.com
+    platform: ebay
+    required_region: US
+    test_endpoints: []
+  etsy:
+    domains:
+    - etsy.com
+    platform: etsy
+    required_region: US
+    test_endpoints: []
+  gmarket:
+    domains:
+    - gsm.gmarket.co.kr
+    - gmarket.co.kr
+    platform: gmarket
+    required_region: KR
+    test_endpoints: []
+  lazada_id:
+    domains:
+    - sellercenter.lazada.co.id
+    - lazada.co.id
+    platform: lazada_id
+    required_region: ID
+    test_endpoints: []
+  lazada_my:
+    domains:
+    - sellercenter.lazada.com.my
+    - lazada.com.my
+    platform: lazada_my
+    required_region: MY
+    test_endpoints: []
+  lazada_ph:
+    domains:
+    - sellercenter.lazada.com.ph
+    - lazada.com.ph
+    platform: lazada_ph
+    required_region: PH
+    test_endpoints: []
+  lazada_sg:
+    domains:
+    - sellercenter.lazada.sg
+    - lazada.sg
+    platform: lazada_sg
+    required_region: SG
+    test_endpoints: []
+  lazada_th:
+    domains:
+    - sellercenter.lazada.co.th
+    - lazada.co.th
+    platform: lazada_th
+    required_region: TH
+    test_endpoints: []
+  lazada_vn:
+    domains:
+    - sellercenter.lazada.vn
+    - lazada.vn
+    platform: lazada_vn
+    required_region: VN
+    test_endpoints: []
+  mercadolibre:
+    domains:
+    - vendedor.mercadolibre.com.br
+    - mercadolibre.com.br
+    platform: mercadolibre
+    required_region: BR
+    test_endpoints: []
+  miaoshou_erp:
+    domains:
+    - erp.91miaoshou.com
+    - 91miaoshou.com
+    platform: miaoshou_erp
+    required_region: CN
+    test_endpoints: []
+  rakuten:
+    domains:
+    - rms.rakuten.co.jp
+    - rakuten.co.jp
+    platform: rakuten
+    required_region: JP
+    test_endpoints: []
+  sendo:
+    domains:
+    - ban.sendo.vn
+    - sendo.vn
+    platform: sendo
+    required_region: VN
+    test_endpoints: []
+  shopee_br:
+    domains:
+    - seller.shopee.com.br
+    - shopee.com.br
+    platform: shopee_br
+    required_region: BR
+    test_endpoints: []
+  shopee_id:
+    domains:
+    - seller.shopee.co.id
+    - shopee.co.id
+    platform: shopee_id
+    required_region: ID
+    test_endpoints: []
+  shopee_my:
+    domains:
+    - seller.shopee.com.my
+    - shopee.com.my
+    platform: shopee_my
+    required_region: MY
+    test_endpoints: []
+  shopee_ph:
+    domains:
+    - seller.shopee.ph
+    - shopee.ph
+    platform: shopee_ph
+    required_region: PH
+    test_endpoints: []
+  shopee_sg:
+    domains:
+    - seller.shopee.sg
+    - shopee.sg
+    platform: shopee_sg
+    required_region: SG
+    test_endpoints: []
+  shopee_th:
+    domains:
+    - seller.shopee.co.th
+    - shopee.co.th
+    platform: shopee_th
+    required_region: TH
+    test_endpoints: []
+  shopee_tw:
+    domains:
+    - seller.shopee.tw
+    - shopee.tw
+    platform: shopee_tw
+    required_region: TW
+    test_endpoints: []
+  shopee_vn:
+    domains:
+    - seller.shopee.vn
+    - shopee.vn
+    platform: shopee_vn
+    required_region: VN
+    test_endpoints: []
+  taobao:
+    domains:
+    - login.taobao.com
+    - taobao.com
+    platform: taobao
+    required_region: CN
+    test_endpoints: []
+  tiki:
+    domains:
+    - seller.tiki.vn
+    - tiki.vn
+    platform: tiki
+    required_region: VN
+    test_endpoints: []
+  tmall:
+    domains:
+    - login.tmall.com
+    - tmall.com
+    platform: tmall
+    required_region: CN
+    test_endpoints: []
+  tokopedia:
+    domains:
+    - seller.tokopedia.com
+    - tokopedia.com
+    platform: tokopedia
+    required_region: ID
+    test_endpoints: []
+  walmart:
+    domains:
+    - seller.walmart.com
+    - walmart.com
+    platform: walmart
+    required_region: US
+    test_endpoints: []
+regions:
+  AU:
+    country_code: AU
+    country_name: 澳大利亚
+    priority: 1
+    proxy_config:
+      host: australia.proxy.com
+      password: your_australia_password
+      port: 8080
+      type: http
+      username: your_australia_username
+    test_url: https://httpbin.org/ip
+  BR:
+    country_code: BR
+    country_name: 巴西
+    priority: 1
+    proxy_config:
+      host: brazil.proxy.com
+      password: your_brazil_password
+      port: 8080
+      type: http
+      username: your_brazil_username
+    test_url: https://httpbin.org/ip
+  CN:
+    country_code: CN
+    country_name: 中国
+    priority: 1
+    proxy_config:
+      description: 香港/国内代理，用于在全局VPN环境下访问中国电商平台
+      host: hk-proxy.example.com
+      password: your_china_proxy_password
+      port: 8080
+      type: http
+      username: your_china_proxy_username
+    test_url: https://httpbin.org/ip
+  DE:
+    country_code: DE
+    country_name: 德国
+    priority: 1
+    proxy_config:
+      host: germany.proxy.com
+      password: your_germany_password
+      port: 8080
+      type: http
+      username: your_germany_username
+    test_url: https://httpbin.org/ip
+  GB:
+    country_code: GB
+    country_name: 英国
+    priority: 1
+    proxy_config:
+      host: uk.proxy.com
+      password: your_uk_password
+      port: 8080
+      type: http
+      username: your_uk_username
+    test_url: https://httpbin.org/ip
+  HK:
+    country_code: HK
+    country_name: 香港
+    priority: 1
+    proxy_config:
+      host: hongkong.proxy.com
+      password: your_hongkong_password
+      port: 8080
+      type: http
+      username: your_hongkong_username
+    test_url: https://httpbin.org/ip
+  ID:
+    country_code: ID
+    country_name: 印尼
+    priority: 1
+    proxy_config:
+      host: indonesia.smartproxy.com
+      password: your_indonesia_password
+      port: 10000
+      type: http
+      username: your_indonesia_username
+    test_url: https://httpbin.org/ip
+  JP:
+    country_code: JP
+    country_name: 日本
+    priority: 1
+    proxy_config:
+      host: japan.proxy.com
+      password: your_japan_password
+      port: 8080
+      type: http
+      username: your_japan_username
+    test_url: https://httpbin.org/ip
+  KR:
+    country_code: KR
+    country_name: 韩国
+    priority: 1
+    proxy_config:
+      host: korea.proxy.com
+      password: your_korea_password
+      port: 8080
+      type: http
+      username: your_korea_username
+    test_url: https://httpbin.org/ip
+  MY:
+    country_code: MY
+    country_name: 马来西亚
+    priority: 1
+    proxy_config:
+      host: malaysia.proxy.com
+      password: your_malaysia_password
+      port: 8080
+      type: http
+      username: your_malaysia_username
+    test_url: https://httpbin.org/ip
+  PH:
+    country_code: PH
+    country_name: 菲律宾
+    priority: 1
+    proxy_config:
+      host: philippines.proxy.com
+      password: your_philippines_password
+      port: 8080
+      type: http
+      username: your_philippines_username
+    test_url: https://httpbin.org/ip
+  SG:
+    country_code: SG
+    country_name: 新加坡
+    priority: 1
+    proxy_config:
+      type: direct
+    test_url: https://httpbin.org/ip
+  TH:
+    country_code: TH
+    country_name: 泰国
+    priority: 1
+    proxy_config:
+      host: thailand.proxy.com
+      password: your_thailand_password
+      port: 8080
+      type: http
+      username: your_thailand_username
+    test_url: https://httpbin.org/ip
+  TW:
+    country_code: TW
+    country_name: 台湾
+    priority: 1
+    proxy_config:
+      host: taiwan.proxy.com
+      password: your_taiwan_password
+      port: 8080
+      type: http
+      username: your_taiwan_username
+    test_url: https://httpbin.org/ip
+  US:
+    country_code: US
+    country_name: 美国
+    priority: 1
+    proxy_config:
+      host: usa.proxy.com
+      password: your_usa_password
+      port: 8080
+      type: http
+      username: your_usa_username
+    test_url: https://httpbin.org/ip
+  VN:
+    country_code: VN
+    country_name: 越南
+    priority: 1
+    proxy_config:
+      host: vietnam.proxy.com
+      password: your_vietnam_password
+      port: 1080
+      type: socks5
+      username: your_vietnam_username
+    test_url: https://httpbin.org/ip

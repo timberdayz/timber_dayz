@@ -1,0 +1,523 @@
+# 数据库架构配置模板
+# 文件名: schema_template.yaml
+# 用途: 定义数据库表结构和关系
+
+database_name: "xihong_erp.db"
+database_type: "sqlite"
+version: "1.0.0"
+
+# 数据库连接配置
+connection:
+  host: "localhost"
+  port: 3306
+  username: ""
+  password: ""
+  database: "xihong_erp"
+  charset: "utf8mb4"
+  collation: "utf8mb4_unicode_ci"
+
+# 表结构定义
+tables:
+  # 销售数据表
+  sales_data:
+    table_name: "sales_data"
+    description: "销售数据主表"
+    columns:
+      id:
+        type: "INTEGER"
+        primary_key: true
+        auto_increment: true
+        description: "主键ID"
+      
+      platform_name:
+        type: "VARCHAR(50)"
+        nullable: false
+        description: "平台名称"
+        index: true
+      
+      order_id:
+        type: "VARCHAR(100)"
+        nullable: false
+        description: "订单ID"
+        unique: true
+        index: true
+      
+      product_title:
+        type: "VARCHAR(500)"
+        nullable: false
+        description: "商品标题"
+      
+      platform_sku:
+        type: "VARCHAR(100)"
+        nullable: true
+        description: "平台SKU"
+        index: true
+      
+      unit_price:
+        type: "DECIMAL(10,2)"
+        nullable: false
+        description: "单价"
+      
+      quantity:
+        type: "INTEGER"
+        nullable: false
+        description: "数量"
+      
+      order_amount:
+        type: "DECIMAL(10,2)"
+        nullable: false
+        description: "订单金额"
+      
+      order_time:
+        type: "DATETIME"
+        nullable: false
+        description: "下单时间"
+        index: true
+      
+      transaction_status:
+        type: "VARCHAR(50)"
+        nullable: false
+        description: "交易状态"
+        index: true
+      
+      buyer_name:
+        type: "VARCHAR(100)"
+        nullable: true
+        description: "买家姓名"
+      
+      shipping_address:
+        type: "TEXT"
+        nullable: true
+        description: "收货地址"
+      
+      payment_method:
+        type: "VARCHAR(50)"
+        nullable: true
+        description: "支付方式"
+      
+      created_at:
+        type: "DATETIME"
+        nullable: false
+        default: "CURRENT_TIMESTAMP"
+        description: "创建时间"
+      
+      updated_at:
+        type: "DATETIME"
+        nullable: false
+        default: "CURRENT_TIMESTAMP"
+        on_update: "CURRENT_TIMESTAMP"
+        description: "更新时间"
+
+  # 订单数据表
+  order_data:
+    table_name: "order_data"
+    description: "订单数据表"
+    columns:
+      id:
+        type: "INTEGER"
+        primary_key: true
+        auto_increment: true
+        description: "主键ID"
+      
+      platform_name:
+        type: "VARCHAR(50)"
+        nullable: false
+        description: "平台名称"
+        index: true
+      
+      order_id:
+        type: "VARCHAR(100)"
+        nullable: false
+        description: "订单ID"
+        unique: true
+        index: true
+      
+      buyer_name:
+        type: "VARCHAR(100)"
+        nullable: false
+        description: "买家姓名"
+      
+      order_time:
+        type: "DATETIME"
+        nullable: false
+        description: "下单时间"
+        index: true
+      
+      order_status:
+        type: "VARCHAR(50)"
+        nullable: false
+        description: "订单状态"
+        index: true
+      
+      total_amount:
+        type: "DECIMAL(10,2)"
+        nullable: false
+        description: "订单总金额"
+      
+      shipping_fee:
+        type: "DECIMAL(10,2)"
+        nullable: true
+        description: "运费"
+      
+      discount_amount:
+        type: "DECIMAL(10,2)"
+        nullable: true
+        description: "优惠金额"
+      
+      payment_method:
+        type: "VARCHAR(50)"
+        nullable: true
+        description: "支付方式"
+      
+      shipping_address:
+        type: "TEXT"
+        nullable: true
+        description: "收货地址"
+      
+      notes:
+        type: "TEXT"
+        nullable: true
+        description: "订单备注"
+      
+      created_at:
+        type: "DATETIME"
+        nullable: false
+        default: "CURRENT_TIMESTAMP"
+        description: "创建时间"
+      
+      updated_at:
+        type: "DATETIME"
+        nullable: false
+        default: "CURRENT_TIMESTAMP"
+        on_update: "CURRENT_TIMESTAMP"
+        description: "更新时间"
+
+  # 产品数据表
+  product_data:
+    table_name: "product_data"
+    description: "产品数据表"
+    columns:
+      id:
+        type: "INTEGER"
+        primary_key: true
+        auto_increment: true
+        description: "主键ID"
+      
+      platform_name:
+        type: "VARCHAR(50)"
+        nullable: false
+        description: "平台名称"
+        index: true
+      
+      platform_sku:
+        type: "VARCHAR(100)"
+        nullable: false
+        description: "平台SKU"
+        unique: true
+        index: true
+      
+      product_title:
+        type: "VARCHAR(500)"
+        nullable: false
+        description: "产品标题"
+      
+      category:
+        type: "VARCHAR(100)"
+        nullable: true
+        description: "产品分类"
+        index: true
+      
+      price:
+        type: "DECIMAL(10,2)"
+        nullable: false
+        description: "产品价格"
+      
+      stock_quantity:
+        type: "INTEGER"
+        nullable: false
+        description: "库存数量"
+      
+      status:
+        type: "VARCHAR(50)"
+        nullable: false
+        description: "产品状态"
+        index: true
+      
+      description:
+        type: "TEXT"
+        nullable: true
+        description: "产品描述"
+      
+      images:
+        type: "TEXT"
+        nullable: true
+        description: "产品图片URL列表"
+      
+      created_at:
+        type: "DATETIME"
+        nullable: false
+        default: "CURRENT_TIMESTAMP"
+        description: "创建时间"
+      
+      updated_at:
+        type: "DATETIME"
+        nullable: false
+        default: "CURRENT_TIMESTAMP"
+        on_update: "CURRENT_TIMESTAMP"
+        description: "更新时间"
+
+  # 平台配置表
+  platform_configs:
+    table_name: "platform_configs"
+    description: "平台配置表"
+    columns:
+      id:
+        type: "INTEGER"
+        primary_key: true
+        auto_increment: true
+        description: "主键ID"
+      
+      platform_name:
+        type: "VARCHAR(50)"
+        nullable: false
+        description: "平台名称"
+        unique: true
+        index: true
+      
+      config_data:
+        type: "TEXT"
+        nullable: false
+        description: "配置数据(JSON格式)"
+      
+      is_active:
+        type: "BOOLEAN"
+        nullable: false
+        default: true
+        description: "是否激活"
+      
+      created_at:
+        type: "DATETIME"
+        nullable: false
+        default: "CURRENT_TIMESTAMP"
+        description: "创建时间"
+      
+      updated_at:
+        type: "DATETIME"
+        nullable: false
+        default: "CURRENT_TIMESTAMP"
+        on_update: "CURRENT_TIMESTAMP"
+        description: "更新时间"
+
+  # 数据采集日志表
+  collection_logs:
+    table_name: "collection_logs"
+    description: "数据采集日志表"
+    columns:
+      id:
+        type: "INTEGER"
+        primary_key: true
+        auto_increment: true
+        description: "主键ID"
+      
+      platform_name:
+        type: "VARCHAR(50)"
+        nullable: false
+        description: "平台名称"
+        index: true
+      
+      collection_type:
+        type: "VARCHAR(50)"
+        nullable: false
+        description: "采集类型"
+        index: true
+      
+      status:
+        type: "VARCHAR(50)"
+        nullable: false
+        description: "采集状态"
+        index: true
+      
+      records_count:
+        type: "INTEGER"
+        nullable: true
+        description: "采集记录数"
+      
+      error_message:
+        type: "TEXT"
+        nullable: true
+        description: "错误信息"
+      
+      start_time:
+        type: "DATETIME"
+        nullable: false
+        description: "开始时间"
+        index: true
+      
+      end_time:
+        type: "DATETIME"
+        nullable: true
+        description: "结束时间"
+      
+      duration:
+        type: "INTEGER"
+        nullable: true
+        description: "持续时间(秒)"
+      
+      created_at:
+        type: "DATETIME"
+        nullable: false
+        default: "CURRENT_TIMESTAMP"
+        description: "创建时间"
+
+# 索引定义
+indexes:
+  # 销售数据表索引
+  sales_data_platform_time:
+    table: "sales_data"
+    name: "idx_sales_platform_time"
+    columns: ["platform_name", "order_time"]
+    type: "BTREE"
+  
+  sales_data_status:
+    table: "sales_data"
+    name: "idx_sales_status"
+    columns: ["transaction_status"]
+    type: "BTREE"
+  
+  # 订单数据表索引
+  order_data_platform_time:
+    table: "order_data"
+    name: "idx_order_platform_time"
+    columns: ["platform_name", "order_time"]
+    type: "BTREE"
+  
+  order_data_status:
+    table: "order_data"
+    name: "idx_order_status"
+    columns: ["order_status"]
+    type: "BTREE"
+  
+  # 产品数据表索引
+  product_data_platform:
+    table: "product_data"
+    name: "idx_product_platform"
+    columns: ["platform_name"]
+    type: "BTREE"
+  
+  product_data_category:
+    table: "product_data"
+    name: "idx_product_category"
+    columns: ["category"]
+    type: "BTREE"
+
+# 外键关系
+foreign_keys:
+  # 销售数据表外键
+  sales_order_fk:
+    table: "sales_data"
+    column: "order_id"
+    references:
+      table: "order_data"
+      column: "order_id"
+    on_delete: "CASCADE"
+    on_update: "CASCADE"
+
+# 视图定义
+views:
+  # 销售汇总视图
+  sales_summary:
+    name: "sales_summary"
+    description: "销售数据汇总视图"
+    sql: |
+      SELECT 
+        platform_name,
+        DATE(order_time) as order_date,
+        COUNT(*) as order_count,
+        SUM(order_amount) as total_amount,
+        AVG(order_amount) as avg_amount,
+        COUNT(DISTINCT buyer_name) as unique_buyers
+      FROM sales_data
+      GROUP BY platform_name, DATE(order_time)
+      ORDER BY platform_name, order_date DESC
+
+  # 产品销量视图
+  product_sales:
+    name: "product_sales"
+    description: "产品销量统计视图"
+    sql: |
+      SELECT 
+        platform_name,
+        product_title,
+        platform_sku,
+        COUNT(*) as sales_count,
+        SUM(quantity) as total_quantity,
+        SUM(order_amount) as total_revenue,
+        AVG(unit_price) as avg_price
+      FROM sales_data
+      GROUP BY platform_name, product_title, platform_sku
+      ORDER BY total_revenue DESC
+
+# 触发器定义
+triggers:
+  # 销售数据更新时间触发器
+  sales_data_update_trigger:
+    name: "sales_data_update_trigger"
+    table: "sales_data"
+    event: "UPDATE"
+    timing: "AFTER"
+    sql: |
+      UPDATE sales_data 
+      SET updated_at = CURRENT_TIMESTAMP 
+      WHERE id = NEW.id
+
+  # 订单数据更新时间触发器
+  order_data_update_trigger:
+    name: "order_data_update_trigger"
+    table: "order_data"
+    event: "UPDATE"
+    timing: "AFTER"
+    sql: |
+      UPDATE order_data 
+      SET updated_at = CURRENT_TIMESTAMP 
+      WHERE id = NEW.id
+
+# 存储过程定义
+stored_procedures:
+  # 清理过期数据存储过程
+  cleanup_old_data:
+    name: "cleanup_old_data"
+    description: "清理指定天数前的数据"
+    parameters:
+      days: "INTEGER"
+    sql: |
+      DELETE FROM sales_data 
+      WHERE order_time < DATE_SUB(NOW(), INTERVAL ? DAY);
+      
+      DELETE FROM order_data 
+      WHERE order_time < DATE_SUB(NOW(), INTERVAL ? DAY);
+      
+      DELETE FROM collection_logs 
+      WHERE start_time < DATE_SUB(NOW(), INTERVAL ? DAY);
+
+# 数据库维护配置
+maintenance:
+  # 自动清理配置
+  auto_cleanup:
+    enabled: true
+    retention_days: 90
+    schedule: "0 2 * * *"  # 每天凌晨2点执行
+  
+  # 备份配置
+  backup:
+    enabled: true
+    schedule: "0 1 * * *"  # 每天凌晨1点执行
+    retention_count: 7
+    backup_path: "backups/"
+  
+  # 优化配置
+  optimization:
+    enabled: true
+    schedule: "0 3 * * 0"  # 每周日凌晨3点执行
+    analyze_tables: true
+    vacuum_database: true
+

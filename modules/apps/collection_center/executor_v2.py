@@ -569,7 +569,7 @@ class CollectionExecutorV2:
         start_time: datetime,
         total_domains_count: int,
     ) -> Tuple[Any, Any, Optional[CollectionResult]]:
-        await self._update_status(task_id, 5, "姝ｅ湪鐧诲綍...")
+        await self._update_status(task_id, 5, "正在登录...")
         await self._check_cancelled(task_id)
         await self.popup_handler.close_popups(page, platform=platform)
 
@@ -640,7 +640,7 @@ class CollectionExecutorV2:
                 continue
 
         if not login_success:
-            raise StepExecutionError("鐧诲綍缁勪欢鎵ц澶辫触")
+            raise StepExecutionError("登录组件执行失败")
 
         if params.get("shop_account_id"):
             await self._update_status(

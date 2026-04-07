@@ -6,6 +6,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,8 @@ async def component_version_session() -> AsyncGenerator[AsyncSession, None]:
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
 
     async with engine.begin() as conn:
+        for schema_name in ("core", "a_class", "b_class", "c_class", "finance"):
+            await conn.execute(text(f"ATTACH DATABASE ':memory:' AS {schema_name}"))
         await conn.run_sync(ComponentVersion.__table__.create)
 
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -371,6 +374,50 @@ async def test_runtime_resolver_supports_miaoshou_orders_subtypes(component_vers
         "orders:shopee",
         "orders:tiktok",
     ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_resolver_supports_miaoshou_inventory_snapshot_alias(component_version_session, tmp_path: Path, monkeypatch):
+    from backend.services.component_runtime_resolver import ComponentRuntimeResolver
+
+    monkeypatch.setattr(
+        "backend.services.component_runtime_resolver.is_active_component_name",
+        lambda name: True,
+    )
+
+    relative_files = {
+        "miaoshou/login": "modules/platforms/miaoshou/components/login.py",
+        "miaoshou/inventory_snapshot_export": "modules/platforms/miaoshou/components/inventory_snapshot_export.py",
+    }
+
+    for relative_path in relative_files.values():
+        target_file = tmp_path / relative_path
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        target_file.write_text("class Dummy:\n    pass\n", encoding="utf-8")
+
+    component_version_session.add_all(
+        [
+            ComponentVersion(
+                component_name=component_name,
+                version="1.0.0",
+                file_path=relative_path,
+                is_stable=True,
+                is_active=True,
+            )
+            for component_name, relative_path in relative_files.items()
+        ]
+    )
+    await component_version_session.commit()
+
+    resolver = ComponentRuntimeResolver(component_version_session, project_root=tmp_path)
+    manifest = await resolver.resolve_export_component(
+        platform="miaoshou",
+        data_domain="inventory",
+        sub_domain=None,
+    )
+
+    assert manifest.component_name == "miaoshou/inventory_snapshot_export"
+    assert manifest.file_path == relative_files["miaoshou/inventory_snapshot_export"]
 
 
 @pytest.mark.asyncio

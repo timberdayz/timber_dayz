@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
 
 from modules.apps.collection_center.executor_v2 import (
     CollectionExecutorV2,
+    StepExecutionError,
     TaskContext,
     VerificationRequiredError,
 )
@@ -183,3 +185,95 @@ async def test_executor_manual_continue_timeout_returns_manual_intervention_requ
 
     assert result.status == "manual_intervention_required"
     assert result.error_message == "等待人工处理超时"
+
+
+@pytest.mark.asyncio
+async def test_executor_login_failure_uses_readable_chinese_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+
+    monkeypatch.setattr(
+        executor,
+        "_execute_python_component",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(StepExecutionError, match="登录组件执行失败"):
+        await executor._execute_with_python_components(
+            task_id="task-1",
+            platform="miaoshou",
+            account={"account_id": "acc-1", "login_url": "https://example.com"},
+            params={"params": {}},
+            context=TaskContext(
+                task_id="task-1",
+                platform="miaoshou",
+                account_id="acc-1",
+                data_domains=[],
+                date_range={"start": "2026-03-01", "end": "2026-03-01"},
+                granularity="daily",
+            ),
+            browser=object(),
+            play_context=object(),
+            page=object(),
+            step_popup_handler=object(),
+            task_download_dir=object(),
+            data_domains=[],
+            sub_domains=None,
+            total_domains_count=0,
+            start_time=datetime.now(),
+            save_session_after_login=False,
+            session_platform="miaoshou",
+            session_account_id="acc-1",
+            runtime_manifests=None,
+        )
+
+    executor._update_status.assert_any_await("task-1", 5, "正在登录...")
+
+
+@pytest.mark.asyncio
+async def test_executor_shared_login_phase_uses_readable_chinese_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = CollectionExecutorV2()
+    executor._update_status = AsyncMock()
+    executor._check_cancelled = AsyncMock()
+    executor._ensure_login_gate_ready = AsyncMock()
+    executor.popup_handler.close_popups = AsyncMock()
+
+    monkeypatch.setattr(
+        executor,
+        "_execute_python_component",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(StepExecutionError, match="登录组件执行失败"):
+        await executor._execute_shared_login_phase(
+            task_id="task-1",
+            platform="miaoshou",
+            account={"account_id": "acc-1", "login_url": "https://example.com"},
+            params={"params": {}},
+            context=TaskContext(
+                task_id="task-1",
+                platform="miaoshou",
+                account_id="acc-1",
+                data_domains=[],
+                date_range={"start": "2026-03-01", "end": "2026-03-01"},
+                granularity="daily",
+            ),
+            browser=object(),
+            play_context=object(),
+            page=object(),
+            adapter=object(),
+            runtime_manifests=None,
+            session_platform="miaoshou",
+            session_account_id="acc-1",
+            save_session_after_login=False,
+            start_time=datetime.now(),
+            total_domains_count=0,
+        )
+
+    executor._update_status.assert_any_await("task-1", 5, "正在登录...")

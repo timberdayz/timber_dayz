@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(timeout /t 3)",
+      "Bash(timeout /t 5)",
+      "Bash(timeout /t 8)",
+      "Bash(curl:*)"
+    ]
+  }
+}

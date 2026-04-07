@@ -1,0 +1,35 @@
+name: Outputs Directory Health Check
+
+on:
+  push:
+    paths:
+      - 'temp/development/**'
+      - 'modules/utils/path_sanitizer.py'
+      - '.github/workflows/outputs_check.yml'
+  pull_request:
+    paths:
+      - '**/*'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  check-outputs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Run outputs directory health check
+        run: |
+          # [FIX] 仓库可能未包含该脚本（历史文件/清理后被移除），缺失时不应阻断整个 CI
+          if [ -f "temp/development/check_outputs_ci.py" ]; then
+          python temp/development/check_outputs_ci.py
+          else
+            echo "[SKIP] temp/development/check_outputs_ci.py not found; skipping outputs directory health check."
+          fi

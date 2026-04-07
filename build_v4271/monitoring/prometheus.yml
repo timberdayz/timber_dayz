@@ -1,0 +1,77 @@
+# Prometheus 配置文件 - 西虹ERP系统监控
+
+global:
+  scrape_interval: 15s      # 默认抓取间隔15秒
+  evaluation_interval: 15s  # 告警规则评估间隔
+  external_labels:
+    cluster: 'xihong-erp'
+    environment: 'production'
+
+# 告警管理器配置
+alerting:
+  alertmanagers:
+    - static_configs:
+        # ⚠️ 重要：根据部署环境选择正确的地址
+        # Docker Compose 部署：使用服务名称
+        - targets:
+            - alertmanager:9093
+        # 独立进程部署：使用 localhost
+        # - targets:
+        #     - localhost:9093
+
+# 告警规则文件
+rule_files:
+  - 'alert_rules.yml'
+
+# 抓取配置
+scrape_configs:
+  # PostgreSQL 数据库监控
+  - job_name: 'postgres'
+    static_configs:
+      # ⚠️ 重要：根据部署环境选择正确的地址
+      # Docker Compose 部署：使用服务名称
+      - targets: ['postgres-exporter:9187']
+        labels:
+          instance: 'xihong-erp-postgres'
+      # 独立进程部署：使用 localhost
+      # - targets: ['localhost:9187']
+  
+  # 后端 API 监控（如果启用 Prometheus 中间件）
+  - job_name: 'backend-api'
+    static_configs:
+      # ⚠️ 重要：根据部署环境选择正确的地址
+      # Docker Compose 部署：使用服务名称
+      - targets: ['backend:8001']
+        labels:
+          instance: 'xihong-erp-backend'
+      # 独立进程部署：使用 localhost
+      # - targets: ['localhost:8001']
+    metrics_path: '/metrics'
+  
+  # Node Exporter（系统指标）
+  # ⚠️ Windows 不支持，已禁用
+  # Node Exporter 需要挂载根文件系统，在 Windows 环境下无法工作
+  # 如果需要系统指标监控，请在 Linux 服务器上运行 Node Exporter
+  # - job_name: 'node'
+  #   scrape_interval: 15s
+  #   scrape_timeout: 10s
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
+  #       labels:
+  #         instance: 'xihong-erp-node'
+  
+  # Celery 任务监控（Celery Exporter）
+  - job_name: 'celery'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    static_configs:
+      # ⚠️ 重要：根据部署环境选择正确的地址
+      # Docker Compose 部署：使用服务名称和容器内部端口（9540）
+      # docker-compose.prod.yml 中的容器名：xihong_erp_celery_exporter_prod
+      - targets: ['xihong_erp_celery_exporter_prod:9540']
+        labels:
+          job: 'celery'
+          component: 'task-queue'
+          instance: 'celery-exporter'
+      # 独立进程部署：使用 localhost 和外部端口
+      # - targets: ['localhost:9808']

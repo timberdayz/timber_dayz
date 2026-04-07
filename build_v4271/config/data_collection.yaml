@@ -1,0 +1,51 @@
+# 数据采集配置文件
+# 用于存储数据采集相关的配置选项
+
+# 输出路径配置
+path_options:
+  include_shop_id: true # 若存在 shop_id（店铺代码），输出路径在店铺目录后追加 "__{shop_id}"；无则不追加
+
+# 下载等待配置
+download:
+  wait_timeout: 30 # 等待最新导出记录就绪的超时时间（秒）
+  retry_interval: 2 # 快速轮询检查间隔（秒），用于DOM状态变化
+  heartbeat_interval: 2 # 心跳探测间隔（秒），额外探测最新一条下载按钮
+  export_retry_count: 3 # 导出按钮重试次数（防1分钟冷却/临时失败）
+  export_retry_backoff: 60 # 导出重试间隔（秒）
+
+# 导出记录检测配置
+export_detection:
+  # 状态指示词（支持中英文）
+  processing_indicators:
+    - "执行中"
+    - "生成中"
+    - "队列中"
+    - "处理中"
+    - "导出中"
+    - "进行中"
+    - "processing"
+    - "generating"
+    - "queued"
+    - "exporting"
+    - "in progress"
+
+  # 选择器优先级（按顺序尝试）
+  selectors:
+    - ".latest-report .report-item"
+    - ".report-list .report-item"
+    - ".download-list .download-item"
+    - 'table tbody tr:has(button:has-text("下载"))'
+    - 'tbody tr:has(button:has-text("下载"))'
+    - '[class*="report"]:has(button:has-text("下载"))'
+    - '[class*="download"]:has(button:has-text("下载"))'
+
+# 执行与限流配置（云端可调）
+execution:
+  # 账号并发上限（当前实现为串行，预留配置，后续启用并发器时生效）
+  max_concurrent_accounts: 1
+  # 冷却时间（毫秒）
+  account_cooldown_ms: 1500
+  shop_cooldown_ms: 800
+  domain_cooldown_ms: 400
+  # 抖动范围（毫秒）
+  jitter_ms_range: [300, 1200]

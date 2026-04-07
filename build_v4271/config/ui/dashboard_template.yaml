@@ -1,0 +1,320 @@
+# 仪表板界面配置模板
+# 文件名: dashboard_template.yaml
+# 用途: 定义Streamlit仪表板界面配置
+
+dashboard_name: "xihong_erp_dashboard"
+version: "1.0.0"
+theme: "light"
+
+# 页面配置
+pages:
+  # 主页面配置
+  main:
+    title: "西红ERP数据管理系统"
+    icon: "🏪"
+    layout: "wide"
+    sidebar_state: "expanded"
+    
+  # 数据采集页面
+  collection:
+    title: "数据采集"
+    icon: "📊"
+    layout: "wide"
+    
+  # 数据分析页面
+  analytics:
+    title: "数据分析"
+    icon: "📈"
+    layout: "wide"
+    
+  # 系统设置页面
+  settings:
+    title: "系统设置"
+    icon: "⚙️"
+    layout: "centered"
+
+# 主题配置
+theme_config:
+  primary_color: "#FF6B6B"
+  secondary_color: "#4ECDC4"
+  background_color: "#FFFFFF"
+  text_color: "#2C3E50"
+  font_family: "Arial, sans-serif"
+  
+  # 图表颜色配置
+  chart_colors:
+    - "#FF6B6B"
+    - "#4ECDC4"
+    - "#45B7D1"
+    - "#96CEB4"
+    - "#FFEAA7"
+    - "#DDA0DD"
+    - "#98D8C8"
+    - "#F7DC6F"
+
+# 布局配置
+layout:
+  # 侧边栏配置
+  sidebar:
+    width: 300
+    background_color: "#F8F9FA"
+    text_color: "#2C3E50"
+    show_logo: true
+    logo_path: "assets/logo.png"
+    
+  # 主内容区域配置
+  main_content:
+    padding: 20
+    background_color: "#FFFFFF"
+    border_radius: 10
+    
+  # 卡片配置
+  cards:
+    background_color: "#FFFFFF"
+    border_color: "#E9ECEF"
+    border_width: 1
+    border_radius: 8
+    padding: 20
+    shadow: true
+
+# 组件配置
+components:
+  # 数据表格配置
+  data_table:
+    height: 400
+    use_container_width: true
+    show_index: false
+    page_size: 20
+    max_rows: 1000
+    
+  # 图表配置
+  charts:
+    # 折线图配置
+    line_chart:
+      height: 400
+      use_container_width: true
+      show_legend: true
+      show_grid: true
+      
+    # 柱状图配置
+    bar_chart:
+      height: 400
+      use_container_width: true
+      show_legend: true
+      show_grid: true
+      
+    # 饼图配置
+    pie_chart:
+      height: 400
+      use_container_width: true
+      show_legend: true
+      
+    # 散点图配置
+    scatter_chart:
+      height: 400
+      use_container_width: true
+      show_legend: true
+      show_grid: true
+
+# 数据展示配置
+data_display:
+  # 数字指标卡片
+  metrics:
+    background_color: "#F8F9FA"
+    text_color: "#2C3E50"
+    value_font_size: "2rem"
+    label_font_size: "1rem"
+    border_radius: 8
+    padding: 20
+    
+  # 状态指示器
+  status_indicators:
+    success_color: "#28A745"
+    warning_color: "#FFC107"
+    error_color: "#DC3545"
+    info_color: "#17A2B8"
+
+# 交互配置
+interactions:
+  # 筛选器配置
+  filters:
+    # 日期筛选器
+    date_filter:
+      format: "YYYY-MM-DD"
+      default_range: 7
+      max_range: 365
+      
+    # 平台筛选器
+    platform_filter:
+      multi_select: true
+      default_all: true
+      
+    # 状态筛选器
+    status_filter:
+      multi_select: true
+      default_all: true
+      
+  # 搜索配置
+  search:
+    placeholder: "搜索订单、商品或买家..."
+    search_fields: ["order_id", "product_title", "buyer_name"]
+    case_sensitive: false
+    
+  # 排序配置
+  sorting:
+    default_sort: "order_time"
+    default_order: "desc"
+    sortable_columns: ["order_time", "order_amount", "product_title", "buyer_name"]
+
+# 通知配置
+notifications:
+  # 成功通知
+  success:
+    icon: "✅"
+    duration: 3
+    position: "top-right"
+    
+  # 错误通知
+  error:
+    icon: "❌"
+    duration: 5
+    position: "top-right"
+    
+  # 警告通知
+  warning:
+    icon: "⚠️"
+    duration: 4
+    position: "top-right"
+    
+  # 信息通知
+  info:
+    icon: "ℹ️"
+    duration: 3
+    position: "top-right"
+
+# 性能配置
+performance:
+  # 数据加载配置
+  data_loading:
+    batch_size: 1000
+    cache_duration: 300  # 5分钟
+    show_progress: true
+    
+  # 图表渲染配置
+  chart_rendering:
+    use_webgl: true
+    antialias: true
+    responsive: true
+    
+  # 内存管理
+  memory_management:
+    max_data_points: 10000
+    auto_cleanup: true
+    cleanup_interval: 300  # 5分钟
+
+# 安全配置
+security:
+  # 认证配置
+  authentication:
+    enabled: true
+    session_timeout: 3600  # 1小时
+    max_login_attempts: 3
+    
+  # 数据访问控制
+  access_control:
+    read_only_mode: false
+    data_export_limit: 10000
+    sensitive_data_masking: true
+
+# 本地化配置
+localization:
+  # 语言配置
+  language: "zh-CN"
+  date_format: "YYYY-MM-DD"
+  time_format: "HH:mm:ss"
+  number_format: "#,##0.00"
+  currency_symbol: "¥"
+  
+  # 文本配置
+  texts:
+    # 通用文本
+    common:
+      loading: "加载中..."
+      no_data: "暂无数据"
+      error: "发生错误"
+      success: "操作成功"
+      confirm: "确认"
+      cancel: "取消"
+      save: "保存"
+      delete: "删除"
+      edit: "编辑"
+      add: "添加"
+      
+    # 页面标题
+    page_titles:
+      dashboard: "仪表板"
+      collection: "数据采集"
+      analytics: "数据分析"
+      settings: "系统设置"
+      
+    # 数据标签
+    data_labels:
+      orders: "订单"
+      products: "商品"
+      revenue: "收入"
+      customers: "客户"
+      platform: "平台"
+      status: "状态"
+      date: "日期"
+      amount: "金额"
+      quantity: "数量"
+
+# 自定义配置
+custom:
+  # 自定义CSS
+  custom_css: |
+    .stButton > button {
+      background-color: #FF6B6B;
+      color: white;
+      border-radius: 8px;
+      border: none;
+      padding: 10px 20px;
+    }
+    
+    .stButton > button:hover {
+      background-color: #FF5252;
+    }
+    
+    .metric-card {
+      background-color: #F8F9FA;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 10px 0;
+    }
+    
+  # 自定义JavaScript
+  custom_js: |
+    // 自定义JavaScript代码
+    console.log('Dashboard loaded');
+    
+  # 自定义组件
+  custom_components:
+    - name: "platform_selector"
+      component: "PlatformSelector"
+      props:
+        platforms: ["miaoshou", "shopee", "temu"]
+        multi_select: true
+        
+    - name: "date_range_picker"
+      component: "DateRangePicker"
+      props:
+        default_range: 7
+        max_range: 365
+
+# 调试配置
+debug:
+  enabled: false
+  log_level: "INFO"
+  show_debug_info: false
+  performance_monitoring: false
+

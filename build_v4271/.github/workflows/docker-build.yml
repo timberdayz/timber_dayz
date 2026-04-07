@@ -1,0 +1,144 @@
+name: Docker Build and Push
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Custom tag (optional)'
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
+  IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # [FIX] 添加带 v 前缀的 tag，确保部署时能找到镜像（v4.20.4 和 4.20.4 都推送）
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            # [FIX] 避免某些事件下 {{branch}} 渲染为 "<sha>" 造成 Docker tag 非法（含尖括号）
+            # 统一使用短 sha，并使用固定前缀，确保 tag 始终符合 Docker tag 规范
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
+
+      - name: Extract metadata (tags, labels) for backend-full (collection)
+        id: meta-backend-full
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}
+          tags: |
+            type=ref,event=branch,suffix=-full
+            type=ref,event=pr,suffix=-full
+            type=semver,pattern={{version}}-full
+            type=semver,pattern={{major}}.{{minor}}-full
+            # 带 v 前缀的 full 镜像标签（v4.20.4-full / 4.20.4-full）
+            type=semver,pattern=v{{version}}-full
+            type=semver,pattern=v{{major}}.{{minor}}-full
+            # 与 backend 一致的 sha tag 规则，增加 -full 后缀
+            type=sha,format=short,prefix=sha-,suffix=-full
+            type=raw,value=latest-full,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.tag }}-full,enable=${{ github.event.inputs.tag != '' }}
+
+      - name: Extract metadata (tags, labels) for frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # [FIX] 添加带 v 前缀的 tag，确保部署时能找到镜像（v4.20.4 和 4.20.4 都推送）
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            # [FIX] 同 backend：固定 sha tag 规则，避免生成非法 tag
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event.inputs.tag != '' }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            PYTHON_VERSION=3.11
+
+      - name: Build and push backend-full image (collection, Dockerfile.collection)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.collection
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-backend-full.outputs.tags }}
+          labels: ${{ steps.meta-backend-full.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          target: production
+          build-args: |
+            NODE_VERSION=24
+            VITE_API_URL=${{ secrets.VITE_API_URL || 'http://localhost:8001' }}
+
+      - name: Image digest
+        run: |
+          echo "Backend image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}@${{ steps.meta-backend.outputs.digest }}"
+          echo "Frontend image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}@${{ steps.meta-frontend.outputs.digest }}"

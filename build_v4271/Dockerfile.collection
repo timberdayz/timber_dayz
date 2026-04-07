@@ -1,0 +1,136 @@
+# ===================================================
+# 西虹ERP系统 - 数据采集服务Dockerfile
+# 包含 Playwright 浏览器自动化支持
+# ===================================================
+
+FROM python:3.11-slim
+
+LABEL maintainer="西虹ERP团队"
+LABEL description="西虹ERP系统 - 数据采集服务（含Playwright）"
+LABEL version="4.7.0"
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    # Playwright 环境变量
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0 \
+    # 采集配置
+    PLAYWRIGHT_HEADLESS=true \
+    MAX_COLLECTION_TASKS=3 \
+    COMPONENT_TIMEOUT=300 \
+    TASK_TIMEOUT=1800
+
+# 安装系统依赖和Playwright依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # 基础依赖
+    gcc \
+    g++ \
+    libpq-dev \
+    curl \
+    wget \
+    gnupg \
+    # Playwright 浏览器依赖
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libatspi2.0-0 \
+    # 字体支持（中文/东南亚语言）
+    fonts-liberation \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    # 网络工具
+    dnsutils \
+    iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制依赖文件
+COPY requirements.txt requirements.txt
+
+# 安装Python依赖
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt && \
+    pip install uvicorn[standard]
+
+# 安装Playwright并下载Chromium
+RUN pip install playwright && \
+    playwright install chromium && \
+    playwright install-deps chromium
+
+# 复制应用代码
+COPY backend /app/backend
+COPY modules /app/modules
+COPY config /app/config
+COPY tools /app/tools
+
+# 创建必要的目录
+RUN mkdir -p \
+    /app/data \
+    /app/logs \
+    /app/temp/downloads \
+    /app/temp/screenshots \
+    /app/temp/outputs \
+    /app/data/device_fingerprints \
+    /app/data/browser_sessions
+
+# 设置权限
+RUN chmod -R 755 /app
+
+# 暴露端口（API和WebSocket）
+EXPOSE 8000
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=60s \
+    CMD curl -f http://localhost:8000/api/collection/health || exit 1
+
+# 默认启动命令
+CMD ["uvicorn", "backend.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--log-level", "info"]
+
+# ===================================================
+# 使用说明:
+# 
+# 构建镜像:
+#   docker build -f Dockerfile.collection -t xihong-erp-collection:latest .
+# 
+# 运行容器:
+#   docker run -d \
+#     --name xihong_collection \
+#     -p 8002:8000 \
+#     -v $(pwd)/data:/app/data \
+#     -v $(pwd)/config:/app/config \
+#     -v $(pwd)/temp:/app/temp \
+#     -e DATABASE_URL=postgresql://user:pass@host:5432/db \
+#     -e PLAYWRIGHT_HEADLESS=true \
+#     -e MAX_COLLECTION_TASKS=3 \
+#     xihong-erp-collection:latest
+# 
+# 环境变量:
+#   PLAYWRIGHT_HEADLESS: 是否使用无头模式（默认true）
+#   MAX_COLLECTION_TASKS: 最大并发任务数（默认3）
+#   COMPONENT_TIMEOUT: 单组件超时秒数（默认300）
+#   TASK_TIMEOUT: 单任务超时秒数（默认1800）
+#   PROXY_MODE: 代理模式（none/static/pool/rotating）
+#   PROXY_HOST/PROXY_PORT: 静态代理配置
+# ===================================================
+

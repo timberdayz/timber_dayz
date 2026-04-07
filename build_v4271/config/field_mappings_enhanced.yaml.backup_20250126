@@ -1,0 +1,388 @@
+# 增强的字段映射配置 - 按平台和数据域分段
+# 创建日期: 2025-01-26
+# 用途: 定义各平台各数据域的字段映射规则
+
+# 妙手ERP - 订单数据
+miaoshou:
+  orders:
+    order_id:
+      - "订单号"
+      - "订单编号"
+      - "Order ID"
+      - "order_no"
+      - "订单ID"
+    order_amount:
+      - "订单金额"
+      - "成交金额"
+      - "订单总额"
+      - "Order Amount"
+      - "total_amount"
+      - "总金额"
+    product_title:
+      - "商品名称"
+      - "产品名称"
+      - "商品标题"
+      - "Product Name"
+      - "商品"
+      - "产品"
+    quantity:
+      - "数量"
+      - "购买数量"
+      - "件数"
+      - "Quantity"
+      - "qty"
+    buyer_name:
+      - "买家姓名"
+      - "收货人"
+      - "Buyer Name"
+      - "买家"
+      - "客户姓名"
+    order_status:
+      - "订单状态"
+      - "状态"
+      - "Order Status"
+      - "Status"
+    order_date:
+      - "下单时间"
+      - "订单日期"
+      - "Order Date"
+      - "创建时间"
+      - "下单日期"
+    profit:
+      - "利润"
+      - "毛利"
+      - "净利润"
+      - "Profit"
+      - "利润额"
+    platform_code:
+      - "平台"
+      - "平台代码"
+      - "Platform"
+      - "来源平台"
+    shop_id:
+      - "店铺ID"
+      - "店铺编号"
+      - "Shop ID"
+      - "店铺"
+  
+  products:
+    platform_sku:
+      - "SKU"
+      - "商品编码"
+      - "产品编码"
+      - "sku"
+      - "商品SKU"
+    product_title:
+      - "商品名称"
+      - "产品名称"
+      - "标题"
+      - "商品"
+      - "产品"
+    quantity:
+      - "库存数量"
+      - "库存"
+      - "可用库存"
+      - "Stock"
+      - "数量"
+    unit_price:
+      - "售价"
+      - "价格"
+      - "单价"
+      - "Price"
+      - "销售价"
+    cost_price:
+      - "成本价"
+      - "成本"
+      - "Cost"
+      - "采购价"
+    platform_code:
+      - "平台"
+      - "平台代码"
+      - "Platform"
+    shop_id:
+      - "店铺ID"
+      - "店铺编号"
+      - "Shop ID"
+  
+  finance:
+    order_id:
+      - "订单号"
+      - "订单编号"
+      - "Order ID"
+    total_amount:
+      - "总金额"
+      - "订单总额"
+      - "Total Amount"
+      - "成交金额"
+    profit:
+      - "利润"
+      - "毛利"
+      - "净利润"
+      - "Profit"
+    cost:
+      - "成本"
+      - "成本金额"
+      - "Cost"
+    revenue:
+      - "收入"
+      - "营收"
+      - "Revenue"
+      - "销售额"
+
+# Shopee - 商品表现数据
+shopee:
+  products:
+    platform_sku:
+      - "SKU"
+      - "Item SKU"
+      - "Product SKU"
+      - "商品SKU"
+    product_title:
+      - "Product Name"
+      - "Item Name"
+      - "Title"
+      - "商品名称"
+      - "产品名称"
+    quantity:
+      - "Sales"
+      - "Sold"
+      - "Units Sold"
+      - "销量"
+      - "已售"
+    revenue:
+      - "GMV"
+      - "Revenue"
+      - "Sales Amount"
+      - "销售额"
+      - "成交额"
+    clicks:
+      - "Clicks"
+      - "Click Count"
+      - "点击数"
+      - "点击量"
+    views:
+      - "Views"
+      - "Impressions"
+      - "浏览量"
+      - "曝光量"
+    conversion_rate:
+      - "Conversion Rate"
+      - "CVR"
+      - "转化率"
+    add_to_cart:
+      - "Add to Cart"
+      - "加购"
+      - "加购数"
+    metric_date:
+      - "Date"
+      - "日期"
+      - "统计日期"
+  
+  traffic:
+    platform_sku:
+      - "SKU"
+      - "Item SKU"
+      - "商品SKU"
+    uv:
+      - "UV"
+      - "Unique Visitors"
+      - "独立访客"
+      - "访客数"
+    pv:
+      - "PV"
+      - "Page Views"
+      - "浏览量"
+      - "页面浏览量"
+    bounce_rate:
+      - "Bounce Rate"
+      - "跳出率"
+    avg_time:
+      - "Avg Time"
+      - "Average Time"
+      - "平均停留时间"
+      - "停留时长"
+    metric_date:
+      - "Date"
+      - "日期"
+      - "统计日期"
+  
+  services:
+    shop_id:
+      - "Shop ID"
+      - "店铺ID"
+      - "店铺编号"
+    response_time:
+      - "Response Time"
+      - "响应时间"
+      - "回复时长"
+    satisfaction_score:
+      - "Satisfaction Score"
+      - "满意度"
+      - "客户满意度"
+    chat_rate:
+      - "Chat Rate"
+      - "聊天率"
+      - "咨询率"
+    metric_date:
+      - "Date"
+      - "日期"
+      - "统计日期"
+
+# TikTok - 商品表现数据
+tiktok:
+  products:
+    platform_sku:
+      - "SKU"
+      - "Product SKU"
+      - "Item SKU"
+      - "商品SKU"
+    product_title:
+      - "Product Title"
+      - "Product Name"
+      - "商品名称"
+      - "产品名称"
+    quantity:
+      - "Sales Volume"
+      - "Sold"
+      - "销量"
+      - "已售"
+    revenue:
+      - "GMV"
+      - "Revenue"
+      - "销售额"
+      - "成交额"
+    clicks:
+      - "Clicks"
+      - "点击数"
+      - "点击量"
+    views:
+      - "Views"
+      - "Impressions"
+      - "浏览量"
+      - "曝光量"
+    watch_time:
+      - "Watch Time"
+      - "观看时长"
+      - "播放时长"
+    conversion_rate:
+      - "Conversion Rate"
+      - "CVR"
+      - "转化率"
+    metric_date:
+      - "Date"
+      - "日期"
+      - "统计日期"
+  
+  traffic:
+    platform_sku:
+      - "SKU"
+      - "商品SKU"
+    uv:
+      - "UV"
+      - "Unique Visitors"
+      - "独立访客"
+    pv:
+      - "PV"
+      - "Page Views"
+      - "浏览量"
+    watch_time:
+      - "Watch Time"
+      - "观看时长"
+    share_count:
+      - "Share Count"
+      - "分享数"
+      - "转发数"
+    metric_date:
+      - "Date"
+      - "日期"
+      - "统计日期"
+  
+  services:
+    shop_id:
+      - "Shop ID"
+      - "店铺ID"
+    response_time:
+      - "Response Time"
+      - "响应时间"
+    satisfaction_score:
+      - "Satisfaction Score"
+      - "满意度"
+    metric_date:
+      - "Date"
+      - "日期"
+      - "统计日期"
+
+# Amazon - 商品表现数据
+amazon:
+  products:
+    platform_sku:
+      - "SKU"
+      - "ASIN"
+      - "Product SKU"
+    product_title:
+      - "Product Title"
+      - "Product Name"
+      - "Title"
+    quantity:
+      - "Units Sold"
+      - "Sales"
+      - "Quantity"
+    revenue:
+      - "Revenue"
+      - "Sales Amount"
+      - "GMV"
+    clicks:
+      - "Clicks"
+      - "Click Count"
+    views:
+      - "Views"
+      - "Impressions"
+      - "Sessions"
+    conversion_rate:
+      - "Conversion Rate"
+      - "CVR"
+      - "Unit Session Percentage"
+    metric_date:
+      - "Date"
+      - "日期"
+
+# 通用字段（跨平台）
+generic:
+  product_title:
+    - "name"
+    - "title"
+    - "product"
+    - "商品"
+    - "产品"
+    - "item"
+  platform_sku:
+    - "sku"
+    - "code"
+    - "id"
+    - "编码"
+    - "item_id"
+  revenue:
+    - "revenue"
+    - "sales"
+    - "amount"
+    - "销售"
+    - "金额"
+    - "gmv"
+  quantity:
+    - "qty"
+    - "quantity"
+    - "count"
+    - "数量"
+    - "sold"
+  date:
+    - "date"
+    - "日期"
+    - "time"
+    - "时间"
+  shop_id:
+    - "shop"
+    - "store"
+    - "店铺"
+    - "shop_id"
+    - "store_id"
+

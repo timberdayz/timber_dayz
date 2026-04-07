@@ -1,0 +1,907 @@
+"""
+Collection config and collection account APIs.
+
+Split from `collection.py` to keep endpoint groups focused.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from backend.dependencies.auth import require_admin
+from backend.models.database import get_async_db
+from backend.schemas.collection import (
+    CollectionAccountGroupRegionResponse,
+    CollectionAccountGroupResponse,
+    CollectionAccountResponse,
+    CollectionConfigBatchRemediationCreatedItem,
+    CollectionConfigBatchRemediationRequest,
+    CollectionConfigBatchRemediationResponse,
+    CollectionConfigBatchRemediationSkippedItem,
+    CollectionConfigCoverageItem,
+    CollectionConfigCoverageResponse,
+    CollectionConfigCoverageSummary,
+    CollectionConfigCreate,
+    CollectionConfigResponse,
+    CollectionConfigUpdate,
+)
+from backend.schemas.common import SuccessResponse
+from backend.services.collection_contracts import (
+    DEFAULT_GRANULARITY_DATE_RANGE_TYPE,
+    TIME_PRESET_TO_GRANULARITY,
+    build_legacy_collection_date_fields,
+    build_default_sub_domains,
+    derive_granularity_from_time_selection,
+    get_recommended_config_domains,
+    get_supported_config_data_domains,
+    normalize_domain_subtypes,
+    normalize_time_selection,
+    resolve_shop_capabilities,
+    summarize_shop_scopes,
+)
+from modules.core.db import (
+    CollectionConfig,
+    CollectionConfigShopScope,
+    MainAccount,
+    ShopAccount,
+    ShopAccountCapability,
+)
+from modules.core.logger import get_logger
+
+
+logger = get_logger(__name__)
+
+router = APIRouter(tags=["collection-config"], dependencies=[Depends(require_admin)])
+
+
+def _build_collection_config_record(
+    *,
+    config_name: str,
+    config: CollectionConfigCreate,
+) -> CollectionConfig:
+    now = datetime.now(timezone.utc)
+    summary = summarize_shop_scopes(config.shop_scopes)
+    return CollectionConfig(
+        name=config_name,
+        platform=config.platform,
+        main_account_id=config.main_account_id,
+        account_ids=summary["account_ids"],
+        data_domains=summary["data_domains"],
+        sub_domains=summary["sub_domains"],
+        granularity=config.granularity,
+        date_range_type=config.date_range_type,
+        custom_date_start=config.custom_date_start,
+        custom_date_end=config.custom_date_end,
+        schedule_enabled=config.schedule_enabled,
+        schedule_cron=config.schedule_cron,
+        retry_count=config.retry_count,
+        execution_mode=config.execution_mode,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _resolve_config_granularity(config: CollectionConfig) -> str:
+    if config.granularity in {"daily", "weekly", "monthly"}:
+        return config.granularity
+    if config.date_range_type in TIME_PRESET_TO_GRANULARITY:
+        return TIME_PRESET_TO_GRANULARITY[config.date_range_type]
+    return "daily"
+
+
+def _config_targets_shop(
+    config: CollectionConfig,
+    *,
+    shop_account_id: str,
+    platform_shop_ids: Dict[str, List[str]],
+) -> bool:
+    if config.account_ids:
+        return shop_account_id in config.account_ids
+    return shop_account_id in platform_shop_ids.get(config.platform, [])
+
+
+def _build_batch_remediation_name(
+    *,
+    platform: str,
+    shop_account_id: str,
+    granularity: str,
+) -> str:
+    return f"batch-remediate-{granularity}-{platform}-{shop_account_id}"
+
+
+def _build_config_response(config: CollectionConfig) -> CollectionConfigResponse:
+    return CollectionConfigResponse.model_validate(config)
+
+
+def _normalize_scope_payload(scope) -> dict:
+    return scope.model_dump(exclude_none=True) if hasattr(scope, "model_dump") else dict(scope or {})
+
+
+def _normalize_scope_rows_for_storage(
+    *,
+    platform: str,
+    main_account_id: str,
+    raw_shop_scopes: List,
+    account_map: Dict[str, CollectionAccountResponse],
+) -> List[dict]:
+    expected_shop_ids = set(account_map.keys())
+    provided_shop_ids = {
+        str(_normalize_scope_payload(scope).get("shop_account_id") or "").strip()
+        for scope in raw_shop_scopes or []
+    }
+
+    missing_shop_ids = sorted(shop_id for shop_id in expected_shop_ids if shop_id not in provided_shop_ids)
+    extra_shop_ids = sorted(shop_id for shop_id in provided_shop_ids if shop_id and shop_id not in expected_shop_ids)
+
+    if missing_shop_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"missing active shop scopes: {', '.join(missing_shop_ids)}",
+        )
+    if extra_shop_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"shop scopes outside selected main account {main_account_id}: "
+                f"{', '.join(extra_shop_ids)}"
+            ),
+        )
+
+    valid_domains = set(get_supported_config_data_domains(platform))
+    normalized_rows: List[dict] = []
+    seen_shop_ids: set[str] = set()
+
+    for raw_scope in raw_shop_scopes or []:
+        scope = _normalize_scope_payload(raw_scope)
+        shop_account_id = str(scope.get("shop_account_id") or "").strip()
+        if not shop_account_id:
+            raise HTTPException(status_code=400, detail="shop_account_id is required")
+        if shop_account_id in seen_shop_ids:
+            raise HTTPException(status_code=400, detail=f"duplicate shop scope: {shop_account_id}")
+        seen_shop_ids.add(shop_account_id)
+
+        if scope.get("enabled", True) is False:
+            raise HTTPException(
+                status_code=400,
+                detail=f"active shop scope cannot be disabled: {shop_account_id}",
+            )
+
+        account = account_map[shop_account_id]
+        capabilities = resolve_shop_capabilities(
+            account.capabilities,
+            shop_type=account.shop_type,
+        )
+
+        raw_domains = [str(domain or "").strip() for domain in scope.get("data_domains") or []]
+        domains = [domain for domain in raw_domains if domain]
+        if not domains:
+            raise HTTPException(
+                status_code=400,
+                detail=f"shop scope requires at least one data domain: {shop_account_id}",
+            )
+
+        invalid_domains = sorted(domain for domain in domains if domain not in valid_domains)
+        if invalid_domains:
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid data domain for {shop_account_id}: {', '.join(invalid_domains)}",
+            )
+
+        unsupported_domains = sorted(domain for domain in domains if not capabilities.get(domain, False))
+        if unsupported_domains:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unsupported data domain for {shop_account_id}: {', '.join(unsupported_domains)}",
+            )
+
+        normalized_sub_domains = normalize_domain_subtypes(
+            data_domains=domains,
+            sub_domains=scope.get("sub_domains"),
+        ) or None
+
+        normalized_rows.append(
+            {
+                "shop_account_id": shop_account_id,
+                "data_domains": domains,
+                "sub_domains": normalized_sub_domains,
+                "enabled": True,
+            }
+        )
+
+    return sorted(normalized_rows, key=lambda item: item["shop_account_id"])
+
+
+async def _sync_runtime_schedule(config: CollectionConfig) -> Dict[str, Optional[str]]:
+    from backend.services.collection_scheduler import (
+        APSCHEDULER_AVAILABLE,
+        CollectionScheduler,
+        sync_config_schedule_state,
+    )
+
+    should_register = bool(config.is_active and config.schedule_enabled and config.schedule_cron)
+    if not APSCHEDULER_AVAILABLE:
+        if should_register:
+            raise HTTPException(status_code=503, detail="scheduler service unavailable")
+        return {"job_registered": False, "job_id": None, "next_run_time": None}
+
+    try:
+        if not should_register and CollectionScheduler._instance is None:
+            return {"job_registered": False, "job_id": None, "next_run_time": None}
+        return await sync_config_schedule_state(config)
+    except Exception as exc:
+        logger.error("Failed to sync runtime schedule for config %s: %s", config.id, exc)
+        raise HTTPException(status_code=500, detail=f"failed to sync schedule: {exc}") from exc
+
+
+async def _load_collection_accounts(
+    db: AsyncSession,
+    *,
+    platform: Optional[str] = None,
+    main_account_id: Optional[str] = None,
+) -> List[CollectionAccountResponse]:
+    try:
+        stmt = select(ShopAccount).where(ShopAccount.enabled == True)
+        if platform:
+            stmt = stmt.where(ShopAccount.platform == platform)
+        if main_account_id:
+            stmt = stmt.where(ShopAccount.main_account_id == main_account_id)
+        stmt = stmt.order_by(
+            ShopAccount.platform,
+            ShopAccount.main_account_id,
+            ShopAccount.shop_region,
+            ShopAccount.shop_account_id,
+        )
+        shop_accounts = (await db.execute(stmt)).scalars().all()
+
+        main_accounts = (
+            await db.execute(select(MainAccount).where(MainAccount.enabled == True))
+        ).scalars().all()
+        main_account_map = {
+            (record.platform, record.main_account_id): record for record in main_accounts
+        }
+
+        capability_rows = (await db.execute(select(ShopAccountCapability))).scalars().all()
+        capability_map: Dict[int, Dict[str, bool]] = defaultdict(dict)
+        for row in capability_rows:
+            capability_map[row.shop_account_id][row.data_domain] = bool(row.enabled)
+
+        result: List[CollectionAccountResponse] = []
+        for shop_account in shop_accounts:
+            main_account = main_account_map.get(
+                (shop_account.platform, shop_account.main_account_id)
+            )
+            capabilities = resolve_shop_capabilities(
+                capability_map.get(shop_account.id),
+                shop_type=shop_account.shop_type,
+            )
+            result.append(
+                CollectionAccountResponse(
+                    id=shop_account.shop_account_id,
+                    name=shop_account.store_name or shop_account.shop_account_id,
+                    platform=shop_account.platform,
+                    shop_id=shop_account.shop_region,
+                    shop_region=shop_account.shop_region,
+                    status="active" if shop_account.enabled else "inactive",
+                    shop_type=shop_account.shop_type,
+                    main_account_id=shop_account.main_account_id,
+                    main_account_name=main_account.main_account_name if main_account else None,
+                    capabilities=capabilities,
+                )
+            )
+        return result
+    except Exception:
+        from backend.services.account_loader_service import get_account_loader_service
+
+        account_loader = get_account_loader_service()
+        accounts = await account_loader.load_all_accounts_async(db, platform=platform)
+        result = [
+            CollectionAccountResponse(
+                id=account.get("account_id", "unknown"),
+                name=account.get("store_name", account.get("account_id", "unknown")),
+                platform=account.get("platform", "unknown"),
+                shop_id=account.get("shop_region"),
+                shop_region=account.get("shop_region"),
+                status="active" if account.get("enabled", False) else "inactive",
+                shop_type=account.get("shop_type"),
+                main_account_id=account.get("main_account_id") or account.get("parent_account"),
+                main_account_name=account.get("main_account_name"),
+                capabilities=resolve_shop_capabilities(
+                    account.get("capabilities"),
+                    shop_type=account.get("shop_type"),
+                ),
+            )
+            for account in accounts
+        ]
+        if main_account_id:
+            result = [
+                account
+                for account in result
+                if (account.main_account_id or "") == main_account_id
+            ]
+        return result
+
+
+@router.get("/configs", response_model=List[CollectionConfigResponse])
+async def list_configs(
+    platform: Optional[str] = Query(None, description="Filter by platform"),
+    main_account_id: Optional[str] = Query(None, description="Filter by main account"),
+    date_range_type: Optional[str] = Query(None, description="Filter by date range type"),
+    execution_mode: Optional[str] = Query(None, description="Filter by execution mode"),
+    schedule_enabled: Optional[bool] = Query(None, description="Filter by schedule enabled"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    stmt = select(CollectionConfig).options(selectinload(CollectionConfig.shop_scopes))
+
+    if platform:
+        stmt = stmt.where(CollectionConfig.platform == platform)
+    if main_account_id:
+        stmt = stmt.where(CollectionConfig.main_account_id == main_account_id)
+    if date_range_type:
+        stmt = stmt.where(CollectionConfig.date_range_type == date_range_type)
+    if execution_mode:
+        stmt = stmt.where(CollectionConfig.execution_mode == execution_mode)
+    if schedule_enabled is not None:
+        stmt = stmt.where(CollectionConfig.schedule_enabled == schedule_enabled)
+
+    if is_active is not None:
+        stmt = stmt.where(CollectionConfig.is_active == is_active)
+
+    stmt = stmt.order_by(desc(CollectionConfig.created_at))
+    result = await db.execute(stmt)
+    return [_build_config_response(config) for config in result.scalars().all()]
+
+
+@router.post("/configs", response_model=CollectionConfigResponse)
+async def create_config(
+    config: CollectionConfigCreate,
+    db: AsyncSession = Depends(get_async_db),
+):
+    accounts = await _load_collection_accounts(
+        db,
+        platform=config.platform,
+        main_account_id=config.main_account_id,
+    )
+    account_map = {account.id: account for account in accounts}
+    normalized_scopes = _normalize_scope_rows_for_storage(
+        platform=config.platform,
+        main_account_id=config.main_account_id,
+        raw_shop_scopes=config.shop_scopes,
+        account_map=account_map,
+    )
+    summary = summarize_shop_scopes(normalized_scopes)
+
+    config_name = config.name
+    if not config_name:
+        domains_str = "-".join(sorted(summary["data_domains"]))
+        base_name = f"{config.platform}-{config.main_account_id}-{domains_str}"
+        stmt = select(CollectionConfig).where(
+            CollectionConfig.name.like(f"{base_name}-v%"),
+            CollectionConfig.platform == config.platform,
+            CollectionConfig.main_account_id == config.main_account_id,
+        )
+        existing_configs = (await db.execute(stmt)).scalars().all()
+        existing_versions: List[int] = []
+        for record in existing_configs:
+            if not record.name.startswith(base_name + "-v"):
+                continue
+            try:
+                existing_versions.append(int(record.name[len(base_name) + 2 :]))
+            except ValueError:
+                continue
+        next_version = max(existing_versions, default=0) + 1
+        config_name = f"{base_name}-v{next_version}"
+        logger.info("Auto-generated collection config name: %s", config_name)
+    else:
+        stmt = select(CollectionConfig).where(
+            CollectionConfig.name == config_name,
+            CollectionConfig.platform == config.platform,
+            CollectionConfig.main_account_id == config.main_account_id,
+        )
+        existing = (await db.execute(stmt)).scalar_one_or_none()
+        if existing:
+            raise HTTPException(status_code=400, detail="config name already exists")
+
+    db_config = _build_collection_config_record(config_name=config_name, config=config)
+
+    time_selection = normalize_time_selection(
+        time_selection=config.time_selection.model_dump(exclude_none=True)
+        if config.time_selection
+        else None,
+        date_range_type=config.date_range_type,
+        custom_date_start=config.custom_date_start,
+        custom_date_end=config.custom_date_end,
+    )
+    if time_selection:
+        db_config.granularity = derive_granularity_from_time_selection(
+            time_selection,
+            config.granularity,
+        )
+        legacy_fields = build_legacy_collection_date_fields(time_selection)
+        db_config.date_range_type = legacy_fields["date_range_type"]
+        db_config.custom_date_start = legacy_fields["custom_date_start"]
+        db_config.custom_date_end = legacy_fields["custom_date_end"]
+
+    db.add(db_config)
+    await db.flush()
+
+    for scope in normalized_scopes:
+        db.add(
+            CollectionConfigShopScope(
+                config_id=db_config.id,
+                shop_account_id=scope["shop_account_id"],
+                data_domains=scope["data_domains"],
+                sub_domains=scope["sub_domains"],
+                enabled=scope["enabled"],
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+    await db.flush()
+    await _sync_runtime_schedule(db_config)
+    await db.commit()
+    result = await db.execute(
+        select(CollectionConfig)
+        .options(selectinload(CollectionConfig.shop_scopes))
+        .where(CollectionConfig.id == db_config.id)
+    )
+    db_config = result.scalar_one()
+
+    logger.info(
+        "Created collection config %s (%s) with %s domains",
+        db_config.name,
+        db_config.platform,
+        len(db_config.data_domains),
+    )
+    return _build_config_response(db_config)
+
+
+@router.post(
+    "/configs/batch-remediate",
+    response_model=CollectionConfigBatchRemediationResponse,
+)
+async def batch_remediate_configs(
+    payload: CollectionConfigBatchRemediationRequest,
+    db: AsyncSession = Depends(get_async_db),
+):
+    accounts = await _load_collection_accounts(db, platform=payload.platform)
+    account_map = {account.id: account for account in accounts}
+
+    missing_accounts = [
+        shop_account_id
+        for shop_account_id in payload.shop_account_ids
+        if shop_account_id not in account_map
+    ]
+    if missing_accounts:
+        raise HTTPException(
+            status_code=404,
+            detail=f"shop accounts not found: {', '.join(missing_accounts)}",
+        )
+
+    active_shop_ids_by_platform: Dict[str, List[str]] = defaultdict(list)
+    for account in accounts:
+        active_shop_ids_by_platform[account.platform].append(account.id)
+
+    configs = (
+        await db.execute(
+            select(CollectionConfig).where(CollectionConfig.is_active == True)
+        )
+    ).scalars().all()
+
+    created_configs: List[CollectionConfigBatchRemediationCreatedItem] = []
+    skipped_shops: List[CollectionConfigBatchRemediationSkippedItem] = []
+
+    for shop_account_id in payload.shop_account_ids:
+        account = account_map[shop_account_id]
+
+        already_covered = any(
+            _resolve_config_granularity(config) == payload.granularity
+            and _config_targets_shop(
+                config,
+                shop_account_id=shop_account_id,
+                platform_shop_ids=active_shop_ids_by_platform,
+            )
+            for config in configs
+        )
+        if already_covered:
+            skipped_shops.append(
+                CollectionConfigBatchRemediationSkippedItem(
+                    shop_account_id=shop_account_id,
+                    reason="already_covered",
+                )
+            )
+            continue
+
+        data_domains = get_recommended_config_domains(
+            account.capabilities or {},
+            shop_type=account.shop_type,
+        )
+        sub_domains = build_default_sub_domains(data_domains) or None
+        config_name = _build_batch_remediation_name(
+            platform=account.platform,
+            shop_account_id=shop_account_id,
+            granularity=payload.granularity,
+        )
+
+        duplicate = (
+            await db.execute(
+                select(CollectionConfig).where(
+                    CollectionConfig.name == config_name,
+                    CollectionConfig.platform == account.platform,
+                    CollectionConfig.main_account_id == account.main_account_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if duplicate:
+            config_name = f"{config_name}-{int(datetime.now(timezone.utc).timestamp())}"
+
+        record = CollectionConfig(
+            name=config_name,
+            platform=account.platform,
+            main_account_id=account.main_account_id or "",
+            account_ids=[shop_account_id],
+            data_domains=data_domains,
+            sub_domains=sub_domains,
+            granularity=payload.granularity,
+            date_range_type=DEFAULT_GRANULARITY_DATE_RANGE_TYPE[payload.granularity],
+            schedule_enabled=False,
+            retry_count=3,
+            execution_mode="headless",
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(record)
+        await db.flush()
+        db.add(
+            CollectionConfigShopScope(
+                config_id=record.id,
+                shop_account_id=shop_account_id,
+                data_domains=data_domains,
+                sub_domains=sub_domains,
+                enabled=True,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        )
+        configs.append(record)
+        created_configs.append(
+            CollectionConfigBatchRemediationCreatedItem(
+                config_id=record.id,
+                config_name=record.name,
+                shop_account_id=shop_account_id,
+                granularity=payload.granularity,
+            )
+        )
+
+    await db.commit()
+
+    return CollectionConfigBatchRemediationResponse(
+        granularity=payload.granularity,
+        created_configs=created_configs,
+        skipped_shops=skipped_shops,
+    )
+
+
+@router.get("/configs/{config_id}", response_model=CollectionConfigResponse)
+async def get_config(
+    config_id: int = Path(..., description="Config ID"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    result = await db.execute(
+        select(CollectionConfig)
+        .options(selectinload(CollectionConfig.shop_scopes))
+        .where(CollectionConfig.id == config_id)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="config not found")
+    return _build_config_response(config)
+
+
+@router.put("/configs/{config_id}", response_model=CollectionConfigResponse)
+async def update_config(
+    config_id: int,
+    update_data: CollectionConfigUpdate,
+    db: AsyncSession = Depends(get_async_db),
+):
+    config = (
+        await db.execute(
+            select(CollectionConfig)
+            .options(selectinload(CollectionConfig.shop_scopes))
+            .where(CollectionConfig.id == config_id)
+        )
+    ).scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="config not found")
+
+    update_dict = update_data.model_dump(exclude_unset=True)
+    scope_payload = update_dict.pop("shop_scopes", None)
+    selected_main_account_id = update_dict.get("main_account_id") or config.main_account_id
+    if scope_payload is not None:
+        accounts = await _load_collection_accounts(
+            db,
+            platform=config.platform,
+            main_account_id=selected_main_account_id,
+        )
+        account_map = {account.id: account for account in accounts}
+        normalized_scopes = _normalize_scope_rows_for_storage(
+            platform=config.platform,
+            main_account_id=selected_main_account_id,
+            raw_shop_scopes=scope_payload,
+            account_map=account_map,
+        )
+        summary = summarize_shop_scopes(normalized_scopes)
+        config.account_ids = summary["account_ids"]
+        config.data_domains = summary["data_domains"]
+        config.sub_domains = summary["sub_domains"]
+
+    time_selection_input = update_dict.pop("time_selection", None)
+    nullable_fields = {"schedule_cron", "custom_date_start", "custom_date_end", "sub_domains"}
+    for key, value in update_dict.items():
+        if value is not None or key in nullable_fields:
+            setattr(config, key, value)
+
+    time_selection = normalize_time_selection(
+        time_selection=time_selection_input,
+        date_range_type=None
+        if time_selection_input is not None
+        else (update_dict.get("date_range_type") or config.date_range_type),
+        custom_date_start=None
+        if time_selection_input is not None
+        else (update_dict.get("custom_date_start") or config.custom_date_start),
+        custom_date_end=None
+        if time_selection_input is not None
+        else (update_dict.get("custom_date_end") or config.custom_date_end),
+    )
+    if time_selection:
+        config.granularity = derive_granularity_from_time_selection(
+            time_selection,
+            update_dict.get("granularity") or config.granularity,
+        )
+        legacy_fields = build_legacy_collection_date_fields(time_selection)
+        config.date_range_type = legacy_fields["date_range_type"]
+        config.custom_date_start = legacy_fields["custom_date_start"]
+        config.custom_date_end = legacy_fields["custom_date_end"]
+
+    if scope_payload is not None:
+        config.shop_scopes.clear()
+        await db.flush()
+        for scope in normalized_scopes:
+            config.shop_scopes.append(
+                CollectionConfigShopScope(
+                    config_id=config.id,
+                    shop_account_id=scope["shop_account_id"],
+                    data_domains=scope["data_domains"],
+                    sub_domains=scope["sub_domains"],
+                    enabled=scope["enabled"],
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+
+    config.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await _sync_runtime_schedule(config)
+    await db.commit()
+    result = await db.execute(
+        select(CollectionConfig)
+        .options(selectinload(CollectionConfig.shop_scopes))
+        .where(CollectionConfig.id == config.id)
+    )
+    config = result.scalar_one()
+
+    logger.info("Updated collection config: %s", config.name)
+    return _build_config_response(config)
+
+
+@router.delete("/configs/{config_id}", response_model=SuccessResponse[None])
+async def delete_config(
+    config_id: int,
+    db: AsyncSession = Depends(get_async_db),
+):
+    config = (
+        await db.execute(select(CollectionConfig).where(CollectionConfig.id == config_id))
+    ).scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="config not found")
+
+    name = config.name
+    config.schedule_enabled = False
+    config.schedule_cron = None
+    await _sync_runtime_schedule(config)
+    await db.delete(config)
+    await db.commit()
+    logger.info("Deleted collection config: %s (id=%s)", name, config_id)
+    return SuccessResponse(success=True, message="config deleted", data=None)
+
+
+@router.get("/accounts", response_model=List[CollectionAccountResponse])
+async def list_accounts(
+    platform: Optional[str] = Query(None, description="Filter by platform"),
+    main_account_id: Optional[str] = Query(None, description="Filter by main account"),
+    db: AsyncSession = Depends(get_async_db),
+    request: Request = None,
+):
+    if request and hasattr(request.app.state, "cache_service"):
+        try:
+            cache_service = request.app.state.cache_service
+            cached_data = await cache_service.get(
+                "accounts_list",
+                platform=platform or "",
+                main_account_id=main_account_id or "",
+            )
+            if cached_data is not None and isinstance(cached_data, list):
+                logger.debug(
+                    "[Cache] collection accounts hit: platform=%s main_account_id=%s",
+                    platform,
+                    main_account_id,
+                )
+                return [CollectionAccountResponse(**item) for item in cached_data]
+        except Exception as exc:
+            logger.warning("[Cache] failed to read collection account cache: %s", exc)
+
+    try:
+        result = await _load_collection_accounts(
+            db,
+            platform=platform,
+            main_account_id=main_account_id,
+        )
+        logger.info("Returned collection account list: %s records", len(result))
+
+        if request and hasattr(request.app.state, "cache_service"):
+            try:
+                cache_service = request.app.state.cache_service
+                await cache_service.set(
+                    "accounts_list",
+                    [item.model_dump() for item in result],
+                    ttl=300,
+                    platform=platform or "",
+                    main_account_id=main_account_id or "",
+                )
+            except Exception as exc:
+                logger.warning("[Cache] failed to write collection account cache: %s", exc)
+
+        return result
+    except Exception:
+        logger.exception("Failed to load collection accounts")
+        raise HTTPException(status_code=500, detail="failed to load collection accounts")
+
+
+@router.get("/accounts/grouped", response_model=List[CollectionAccountGroupResponse])
+async def list_grouped_accounts(
+    platform: Optional[str] = Query(None, description="Filter by platform"),
+    main_account_id: Optional[str] = Query(None, description="Filter by main account"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        accounts = await _load_collection_accounts(
+            db,
+            platform=platform,
+            main_account_id=main_account_id,
+        )
+        grouped: Dict[tuple[str, str], Dict[str, object]] = {}
+
+        for account in accounts:
+            group_key = (account.platform, account.main_account_id or "")
+            if group_key not in grouped:
+                grouped[group_key] = {
+                    "platform": account.platform,
+                    "main_account_id": account.main_account_id or "",
+                    "main_account_name": account.main_account_name,
+                    "regions": defaultdict(list),
+                }
+            grouped[group_key]["regions"][account.shop_region or ""].append(account)
+
+        result: List[CollectionAccountGroupResponse] = []
+        for _, group in sorted(grouped.items(), key=lambda item: item[0]):
+            regions = []
+            for region_key, shops in sorted(group["regions"].items(), key=lambda item: item[0]):
+                regions.append(
+                    CollectionAccountGroupRegionResponse(
+                        shop_region=region_key or None,
+                        shops=sorted(shops, key=lambda item: item.id),
+                    )
+                )
+            result.append(
+                CollectionAccountGroupResponse(
+                    platform=group["platform"],
+                    main_account_id=group["main_account_id"],
+                    main_account_name=group["main_account_name"],
+                    regions=regions,
+                )
+            )
+        return result
+    except Exception:
+        logger.exception("Failed to load grouped collection accounts")
+        raise HTTPException(status_code=500, detail="failed to load grouped collection accounts")
+
+
+@router.get("/config-coverage", response_model=CollectionConfigCoverageResponse)
+async def get_config_coverage(
+    platform: Optional[str] = Query(None, description="Filter by platform"),
+    main_account_id: Optional[str] = Query(None, description="Filter by main account"),
+    db: AsyncSession = Depends(get_async_db),
+):
+    try:
+        accounts = await _load_collection_accounts(
+            db,
+            platform=platform,
+            main_account_id=main_account_id,
+        )
+        coverage_by_shop = {
+            account.id: {"daily": False, "weekly": False, "monthly": False}
+            for account in accounts
+        }
+        active_shop_ids_by_platform: Dict[str, List[str]] = defaultdict(list)
+        for account in accounts:
+            active_shop_ids_by_platform[account.platform].append(account.id)
+
+        stmt = select(CollectionConfig).where(CollectionConfig.is_active == True)
+        if platform:
+            stmt = stmt.where(CollectionConfig.platform == platform)
+        if main_account_id:
+            stmt = stmt.where(CollectionConfig.main_account_id == main_account_id)
+        configs = (await db.execute(stmt.order_by(CollectionConfig.platform, CollectionConfig.id))).scalars().all()
+
+        for config in configs:
+            granularity = _resolve_config_granularity(config)
+            if config.account_ids:
+                target_shop_ids = [shop_id for shop_id in config.account_ids if shop_id in coverage_by_shop]
+            else:
+                target_shop_ids = active_shop_ids_by_platform.get(config.platform, [])
+            for shop_id in target_shop_ids:
+                coverage_by_shop[shop_id][granularity] = True
+
+        items: List[CollectionConfigCoverageItem] = []
+        for account in accounts:
+            coverage = coverage_by_shop.get(account.id, {"daily": False, "weekly": False, "monthly": False})
+            missing = [name for name, covered in coverage.items() if not covered]
+            recommended_domains = get_recommended_config_domains(
+                account.capabilities or {},
+                shop_type=account.shop_type,
+            )
+            is_partially_covered = 0 < len(missing) < 3
+            items.append(
+                CollectionConfigCoverageItem(
+                    shop_account_id=account.id,
+                    shop_account_name=account.name,
+                    platform=account.platform,
+                    main_account_id=account.main_account_id or "",
+                    main_account_name=account.main_account_name,
+                    shop_region=account.shop_region,
+                    shop_type=account.shop_type,
+                    daily_covered=coverage["daily"],
+                    weekly_covered=coverage["weekly"],
+                    monthly_covered=coverage["monthly"],
+                    missing_granularities=missing,
+                    partial_covered=is_partially_covered,
+                    fully_covered=len(missing) == 0,
+                    is_partially_covered=is_partially_covered,
+                    recommended_domains=recommended_domains,
+                )
+            )
+
+        summary = CollectionConfigCoverageSummary(
+            total_shop_count=len(items),
+            fully_covered_count=sum(1 for item in items if item.fully_covered),
+            partial_covered_count=sum(1 for item in items if item.partial_covered),
+            daily_covered_count=sum(1 for item in items if item.daily_covered),
+            weekly_covered_count=sum(1 for item in items if item.weekly_covered),
+            monthly_covered_count=sum(1 for item in items if item.monthly_covered),
+            daily_missing_count=sum(1 for item in items if not item.daily_covered),
+            weekly_missing_count=sum(1 for item in items if not item.weekly_covered),
+            monthly_missing_count=sum(1 for item in items if not item.monthly_covered),
+        )
+
+        return CollectionConfigCoverageResponse(summary=summary, items=items)
+    except Exception:
+        logger.exception("Failed to build collection config coverage")
+        raise HTTPException(status_code=500, detail="failed to build collection config coverage")

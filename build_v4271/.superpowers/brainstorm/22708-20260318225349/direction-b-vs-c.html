@@ -1,0 +1,319 @@
+<style>
+  .split {
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    align-items: start;
+  }
+  .compare-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .compare-head {
+    padding: 16px 18px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .compare-head h3 {
+    margin-bottom: 4px;
+  }
+  .compare-head p {
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+  .preview {
+    padding: 16px 18px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.02), transparent);
+  }
+  .mini-shell {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    min-height: 280px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(0,0,0,0.06);
+  }
+  .nav {
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .nav span {
+    display: block;
+    height: 10px;
+    border-radius: 999px;
+  }
+  .main {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .topbar {
+    height: 18px;
+    border-radius: 8px;
+  }
+  .hero {
+    height: 64px;
+    border-radius: 12px;
+  }
+  .stats {
+    display: grid;
+    gap: 8px;
+  }
+  .stats span {
+    display: block;
+    border-radius: 10px;
+  }
+  .table {
+    display: grid;
+    gap: 6px;
+  }
+  .table span {
+    display: block;
+    height: 11px;
+    border-radius: 999px;
+  }
+  .modern .nav {
+    background: linear-gradient(180deg, #12263f 0%, #1d507d 100%);
+  }
+  .modern .nav span {
+    background: rgba(210, 236, 255, 0.9);
+  }
+  .modern .main {
+    background: linear-gradient(180deg, #eef7ff 0%, #fbfdff 100%);
+  }
+  .modern .topbar {
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid #d5e8f7;
+  }
+  .modern .hero {
+    background: linear-gradient(135deg, #2387eb 0%, #6fc4ff 100%);
+  }
+  .modern .stats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .modern .stats span {
+    height: 46px;
+    background: #ffffff;
+    box-shadow: 0 8px 18px rgba(36, 134, 232, 0.12);
+  }
+  .modern .table span {
+    background: #c7ddf4;
+  }
+  .dense .nav {
+    background: #171a1f;
+  }
+  .dense .nav span {
+    background: rgba(214, 219, 225, 0.86);
+  }
+  .dense .main {
+    background: #eef0f3;
+  }
+  .dense .topbar {
+    background: #dde1e7;
+  }
+  .dense .hero {
+    height: 46px;
+    background: linear-gradient(135deg, #3a4047 0%, #666d76 100%);
+  }
+  .dense .stats {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .dense .stats span {
+    height: 34px;
+    background: #ffffff;
+    border: 1px solid #d7dce2;
+    border-radius: 8px;
+  }
+  .dense .table span {
+    background: #c8ced5;
+    height: 10px;
+  }
+  .details {
+    padding: 16px 18px 18px;
+    display: grid;
+    gap: 10px;
+  }
+  .meta {
+    display: grid;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .meta strong {
+    color: var(--text-primary);
+  }
+  .band {
+    margin-top: 18px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .band h3 {
+    padding: 14px 18px 0;
+  }
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 160px 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    margin-top: 14px;
+  }
+  .compare-grid div {
+    background: var(--bg-secondary);
+    padding: 12px 14px;
+    font-size: 13px;
+  }
+  .compare-grid .head {
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  .compare-grid .row-head {
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .note {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: rgba(0, 113, 227, 0.08);
+    color: var(--text-secondary);
+    font-size: 14px;
+  }
+  @media (max-width: 900px) {
+    .split {
+      grid-template-columns: 1fr;
+    }
+    .compare-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<h2>现代数据中台型 vs 高密度运营控制台型</h2>
+<p class="subtitle">这两个方向都比现在更统一，但它们解决的是不同问题。B 更偏“看板与展示”，C 更偏“重度操作与效率”。</p>
+
+<div class="split">
+  <div class="compare-card option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="compare-head">
+      <h3>B. 现代数据中台型</h3>
+      <p>更现代、卡片感更强、数据看板气质更明显。</p>
+    </div>
+    <div class="preview">
+      <div class="mini-shell modern">
+        <div class="nav">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="main">
+          <div class="topbar"></div>
+          <div class="hero"></div>
+          <div class="stats">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="table">
+            <span></span>
+            <span></span>
+            <span style="width:88%"></span>
+            <span style="width:94%"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="details">
+      <div class="meta"><strong>视觉感受：</strong>更轻、更亮、更有“产品化平台”气质。</div>
+      <div class="meta"><strong>页面特征：</strong>大卡片、留白更充足、总览区更突出。</div>
+      <div class="meta"><strong>适合页面：</strong>总览页、分析页、经营看板、报表页。</div>
+      <div class="meta"><strong>潜在问题：</strong>如果全站都按这个方向做，配置页和高频操作页会显得偏“展示型”。</div>
+    </div>
+  </div>
+
+  <div class="compare-card option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="compare-head">
+      <h3>C. 高密度运营控制台型</h3>
+      <p>信息密度高、效率优先、视觉更硬朗，适合重度后台操作。</p>
+    </div>
+    <div class="preview">
+      <div class="mini-shell dense">
+        <div class="nav">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="main">
+          <div class="topbar"></div>
+          <div class="hero"></div>
+          <div class="stats">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="table">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span style="width:92%"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="details">
+      <div class="meta"><strong>视觉感受：</strong>更硬、更紧凑、更像调度台或风控中控台。</div>
+      <div class="meta"><strong>页面特征：</strong>信息块更密、表格更强、留白更少、操作路径更短。</div>
+      <div class="meta"><strong>适合页面：</strong>任务页、列表页、审批页、批处理页、监控页。</div>
+      <div class="meta"><strong>潜在问题：</strong>如果全站都按这个方向做，系统会显得更压迫，对普通管理页不够友好。</div>
+    </div>
+  </div>
+</div>
+
+<div class="band">
+  <h3>核心差别</h3>
+  <div class="compare-grid">
+    <div class="head">维度</div>
+    <div class="head">B. 现代数据中台型</div>
+    <div class="head">C. 高密度运营控制台型</div>
+
+    <div class="row-head">第一印象</div>
+    <div>现代、轻、平台感强</div>
+    <div>硬朗、紧凑、控制台感强</div>
+
+    <div class="row-head">信息密度</div>
+    <div>中等偏高</div>
+    <div>高</div>
+
+    <div class="row-head">卡片占比</div>
+    <div>更高，强调模块分区</div>
+    <div>更低，强调连续操作区</div>
+
+    <div class="row-head">表格气质</div>
+    <div>表格是内容的一部分</div>
+    <div>表格是主战场</div>
+
+    <div class="row-head">更适合谁</div>
+    <div>管理者、分析者、跨部门查看者</div>
+    <div>运营、审核、执行、重度后台人员</div>
+
+    <div class="row-head">全站统一风险</div>
+    <div>可能偏展示，操作页不够利落</div>
+    <div>可能偏压迫，管理页不够舒展</div>
+  </div>
+</div>
+
+<div class="note">
+  如果你们系统是典型 ERP，我仍然建议主方向用 A。<br>
+  如果你想让系统更现代，可以说：“A 为主，吸收一点 B 的现代感”；<br>
+  如果你想让任务页更利落，可以说：“A 为主，列表页吸收一点 C 的高密度特征”。
+</div>

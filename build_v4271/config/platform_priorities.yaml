@@ -1,0 +1,233 @@
+# 平台优先级和数据域配置
+# 创建日期: 2025-01-26
+# 用途: 定义各平台的数据优先级和数据域映射关系
+
+platforms:
+  miaoshou:
+    priority: 1  # 最高优先级
+    role: "权威销售和库存数据源"
+    description: "通过API授权访问所有平台的销售和库存数据"
+    data_domains:
+      orders:
+        target_tables: ["fact_orders", "fact_order_items"]
+        authority: "销售数据以妙手ERP为准"
+        required_fields:
+          - "order_id"
+          - "order_amount"
+          - "product_title"
+          - "quantity"
+      inventory:  # v4.10.0更新：从products域改为inventory域
+        target_tables: ["fact_product_metrics"]  # 入库到fact_product_metrics表，通过data_domain='inventory'区分
+        authority: "库存数据以妙手ERP为准"
+        required_fields:
+          - "platform_sku"
+          - "product_title"
+          - "total_stock"
+          - "available_stock"
+        granularity: "snapshot"  # 库存快照数据
+      finance:
+        target_tables: ["fact_orders"]
+        authority: "财务数据以妙手ERP为准"
+        required_fields:
+          - "order_id"
+          - "total_amount"
+          - "profit"
+  
+  shopee:
+    priority: 2  # 中等优先级
+    role: "运营数据源"
+    description: "主要采集运营分析数据（流量、转化、服务指标）"
+    data_domains:
+      products:
+        target_tables: ["fact_product_metrics"]
+        metrics:
+          - "clicks"
+          - "views"
+          - "conversion_rate"
+          - "add_to_cart"
+        authority: "商品运营数据以Shopee为准"
+        required_fields:
+          - "platform_sku"
+          - "product_title"
+      traffic:
+        target_tables: ["fact_product_metrics"]
+        metrics:
+          - "uv"
+          - "pv"
+          - "bounce_rate"
+          - "avg_time"
+        authority: "流量数据以Shopee为准"
+        required_fields:
+          - "platform_sku"
+      services:
+        target_tables: ["fact_service_metrics"]
+        metrics:
+          - "response_time"
+          - "satisfaction_score"
+          - "chat_rate"
+        authority: "服务数据以Shopee为准"
+        required_fields:
+          - "shop_id"
+  
+  tiktok:
+    priority: 2  # 中等优先级
+    role: "运营数据源"
+    description: "主要采集运营分析数据（流量、商品表现、服务指标）"
+    data_domains:
+      products:
+        target_tables: ["fact_product_metrics"]
+        metrics:
+          - "clicks"
+          - "views"
+          - "conversion_rate"
+          - "watch_time"
+        required_fields:
+          - "platform_sku"
+          - "product_title"
+      traffic:
+        target_tables: ["fact_product_metrics"]
+        metrics:
+          - "uv"
+          - "pv"
+          - "watch_time"
+          - "share_count"
+        required_fields:
+          - "platform_sku"
+      services:
+        target_tables: ["fact_service_metrics"]
+        metrics:
+          - "response_time"
+          - "satisfaction_score"
+        required_fields:
+          - "shop_id"
+  
+  amazon:
+    priority: 2  # 中等优先级
+    role: "运营数据源"
+    description: "主要采集运营分析数据（流量、商品表现、广告数据）"
+    data_domains:
+      products:
+        target_tables: ["fact_product_metrics"]
+        metrics:
+          - "clicks"
+          - "views"
+          - "conversion_rate"
+          - "sessions"
+        required_fields:
+          - "platform_sku"
+          - "product_title"
+      traffic:
+        target_tables: ["fact_product_metrics"]
+        metrics:
+          - "sessions"
+          - "page_views"
+          - "bounce_rate"
+        required_fields:
+          - "platform_sku"
+      advertising:
+        target_tables: ["fact_advertising_metrics"]
+        metrics:
+          - "impressions"
+          - "clicks"
+          - "spend"
+          - "acos"
+        required_fields:
+          - "campaign_id"
+          - "platform_sku"
+
+# 数据冲突解决规则
+conflict_resolution:
+  # 同一订单数据，优先级高的覆盖优先级低的
+  orders:
+    strategy: "priority_based"
+    keep: "higher_priority"
+    description: "妙手ERP的订单数据优先级最高，覆盖其他平台的订单数据"
+  
+  # 运营数据不冲突，按metric_type区分
+  metrics:
+    strategy: "metric_type_based"
+    keep: "all"
+    description: "不同平台的运营数据按metric_type区分，不冲突"
+  
+  # 商品维度数据，优先级高的覆盖
+  products:
+    strategy: "priority_based"
+    keep: "higher_priority"
+    description: "妙手ERP的商品数据优先级最高，覆盖其他平台的商品数据"
+  
+  # 财务数据，优先级高的覆盖
+  finance:
+    strategy: "priority_based"
+    keep: "higher_priority"
+    description: "妙手ERP的财务数据优先级最高"
+
+# 数据质量规则
+data_quality:
+  # 必填字段检查
+  required_fields_check: true
+  
+  # 数据类型验证
+  type_validation: true
+  
+  # 数值范围检查
+  range_validation:
+    enabled: true
+    rules:
+      revenue:
+        min: 0
+        max: 10000000  # 单笔订单最大金额
+      quantity:
+        min: 0
+        max: 100000  # 单笔订单最大数量
+      profit_margin:
+        min: -100  # 允许负利润率
+        max: 100
+  
+  # 日期范围检查
+  date_validation:
+    enabled: true
+    rules:
+      order_date:
+        min_date: "2020-01-01"  # 最早订单日期
+        max_date: "future"  # 允许未来日期（预售订单）
+  
+  # 数据清洗规则
+  cleaning_rules:
+    currency:
+      remove_symbols: ["$", "¥", "€", "£", ","]
+      decimal_places: 2
+    quantity:
+      remove_units: ["件", "个", "pcs", "units"]
+      decimal_places: 0
+    percentage:
+      remove_symbols: ["%"]
+      decimal_places: 2
+      convert_to_decimal: true  # 将百分比转换为小数（如50% → 0.5）
+
+# 映射历史配置
+mapping_history:
+  storage_path: "data/mapping_history.json"
+  backup_enabled: true
+  backup_path: "backups/mapping_history"
+  max_backups: 10
+  auto_save: true
+  
+  # 映射规则Key格式: {platform}:{data_type}[_{granularity}]
+  key_format: "{platform}:{data_type}_{granularity}"
+  
+  # 置信度阈值
+  confidence_thresholds:
+    auto_apply: 1.0  # 100%置信度自动应用
+    high: 0.95  # 95%以上高置信度
+    medium: 0.80  # 80-95%中等置信度
+    low: 0.60  # 60-80%低置信度
+    manual: 0.0  # 低于60%需要人工确认
+
+# 日志配置
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/field_mapping.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+

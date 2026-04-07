@@ -13,6 +13,7 @@ from backend.services.collection_contracts import (
     build_date_range_from_time_selection,
     count_collection_targets,
     derive_granularity_from_time_selection,
+    iter_domain_targets,
     normalize_domain_subtypes,
     normalize_time_selection,
     resolve_shop_capabilities,
@@ -26,6 +27,56 @@ from modules.core.logger import get_logger
 
 
 logger = get_logger(__name__)
+
+
+async def _resolve_runnable_scope_runtime(
+    db: AsyncSession,
+    *,
+    platform: str,
+    data_domains: List[str],
+    sub_domains: Optional[Dict[str, List[str]]],
+) -> tuple[List[str], Optional[Dict[str, List[str]]], Dict[str, Any], List[Dict[str, str]]]:
+    resolver = ComponentRuntimeResolver.from_async_session(db)
+    login_manifest = await resolver.resolve_login_component(platform)
+
+    normalized_sub_domains = normalize_domain_subtypes(
+        data_domains=data_domains,
+        sub_domains=sub_domains,
+    )
+    runnable_domains: List[str] = []
+    runnable_sub_domains: Dict[str, List[str]] = {}
+    exports = []
+    exports_by_domain: Dict[str, Any] = {}
+    skipped_targets: List[Dict[str, str]] = []
+
+    for data_domain, sub_domain, domain_key in iter_domain_targets(data_domains, normalized_sub_domains):
+        try:
+            export_manifest = await resolver.resolve_export_component(
+                platform=platform,
+                data_domain=data_domain,
+                sub_domain=sub_domain,
+            )
+        except ComponentRuntimeResolverError as exc:
+            skipped_targets.append({"domain": domain_key, "error": str(exc)})
+            continue
+
+        if data_domain not in runnable_domains:
+            runnable_domains.append(data_domain)
+        if sub_domain:
+            runnable_sub_domains.setdefault(data_domain, []).append(sub_domain)
+        exports.append(export_manifest)
+        exports_by_domain[domain_key] = export_manifest
+
+    return (
+        runnable_domains,
+        runnable_sub_domains or None,
+        {
+            "login": login_manifest,
+            "exports": exports,
+            "exports_by_domain": exports_by_domain,
+        },
+        skipped_targets,
+    )
 
 
 async def create_tasks_for_config(
@@ -80,6 +131,7 @@ async def create_tasks_for_config(
     effective_granularity = derive_granularity_from_time_selection(time_selection, config.granularity)
 
     created_tasks: List[CollectionTask] = []
+    background_start_payloads: List[Dict[str, Any]] = []
     for scope in scope_rows:
         shop = shops.get(scope.shop_account_id)
         if shop is None:
@@ -121,7 +173,8 @@ async def create_tasks_for_config(
         runtime_manifests: Optional[Dict[str, Any]] = None
         if resolve_runtime:
             try:
-                runtime_manifests = await ComponentRuntimeResolver.from_async_session(db).resolve_task_manifests(
+                filtered_domains, normalized_sub_domains, runtime_manifests, skipped_targets = await _resolve_runnable_scope_runtime(
+                    db,
                     platform=config.platform,
                     data_domains=filtered_domains,
                     sub_domains=normalized_sub_domains,
@@ -132,6 +185,20 @@ async def create_tasks_for_config(
                     config_id,
                     scope.shop_account_id,
                     exc,
+                )
+                continue
+            if skipped_targets:
+                logger.warning(
+                    "Config %s scope %s pruned unsupported runtime targets: %s",
+                    config_id,
+                    scope.shop_account_id,
+                    skipped_targets,
+                )
+            if not filtered_domains:
+                logger.warning(
+                    "Config %s scope %s has no runtime-eligible domains after preflight",
+                    config_id,
+                    scope.shop_account_id,
                 )
                 continue
 
@@ -158,26 +225,29 @@ async def create_tasks_for_config(
         created_tasks.append(task)
 
         if start_background:
-            from backend.routers.collection_tasks import _execute_collection_task_background
-
-            asyncio.create_task(
-                _execute_collection_task_background(
-                    task_id=task.task_id,
-                    platform=config.platform,
-                    account_id=scope.shop_account_id,
-                    data_domains=filtered_domains,
-                    sub_domains=normalized_sub_domains,
-                    date_range=normalized_date_range,
-                    granularity=effective_granularity,
-                    debug_mode=task.debug_mode,
-                    parallel_mode=False,
-                    max_parallel=3,
-                    runtime_manifests=runtime_manifests,
-                    app=app,
-                )
+            background_start_payloads.append(
+                {
+                    "task_id": task.task_id,
+                    "platform": config.platform,
+                    "account_id": scope.shop_account_id,
+                    "data_domains": filtered_domains,
+                    "sub_domains": normalized_sub_domains,
+                    "date_range": normalized_date_range,
+                    "granularity": effective_granularity,
+                    "debug_mode": task.debug_mode,
+                    "parallel_mode": False,
+                    "max_parallel": 3,
+                    "runtime_manifests": runtime_manifests,
+                    "app": app,
+                }
             )
 
     await db.commit()
     for task in created_tasks:
         await db.refresh(task)
+    if background_start_payloads:
+        from backend.routers.collection_tasks import _execute_collection_task_background
+
+        for payload in background_start_payloads:
+            asyncio.create_task(_execute_collection_task_background(**payload))
     return created_tasks

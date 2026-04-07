@@ -1,0 +1,133 @@
+<h2>账号管理页优化方向</h2>
+<p class="subtitle">目标：在店铺数量很多时，减少横向滚动、降低定位成本、提升批量管理效率</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">方案 A · 平台 + 主账号分组列表 + 右侧详情</div>
+        <div class="mockup-body">
+          <div class="mock-nav">筛选 | 平台 | 状态 | 搜索 | 批量操作</div>
+          <div style="display:flex; gap:12px; min-height:320px;">
+            <div class="mock-sidebar" style="width:42%;">
+              Shopee
+              <div class="placeholder" style="margin-top:10px;">主账号 A · 18 个店铺</div>
+              <div class="placeholder">主账号 B · 12 个店铺</div>
+              <div class="placeholder">主账号 C · 7 个店铺</div>
+              <div class="placeholder" style="margin-top:14px;">TikTok</div>
+              <div class="placeholder">主账号 D · 23 个店铺</div>
+            </div>
+            <div class="mock-content" style="flex:1;">
+              <div class="placeholder" style="height:54px;">主账号摘要：平台 / 登录账号 / 店铺数 / 启用数 / 异常数</div>
+              <div class="placeholder" style="height:170px; margin-top:12px;">
+                该主账号下的店铺列表
+                <br />
+                行内显示：店铺名 / 店铺ID / 别名 / 区域 / 状态 / 能力标签
+              </div>
+              <div class="placeholder" style="height:64px; margin-top:12px;">底部批量操作条：启用 / 停用 / 编辑能力 / 迁移主账号</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>方案 A</h3>
+      <p>用“平台 + 主账号”做第一层索引，店铺作为第二层明细。最适合一个主账号下挂很多店铺的场景。</p>
+      <div class="pros-cons">
+        <div class="pros">
+          <h4>优点</h4>
+          <ul>
+            <li>符合未来多店铺真实管理关系</li>
+            <li>页面滚动最少，定位速度快</li>
+            <li>天然适合加批量操作</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>代价</h4>
+          <ul>
+            <li>需要重组当前表格结构</li>
+            <li>首次进入要理解分组逻辑</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">方案 B · 平台分栏看板</div>
+        <div class="mockup-body">
+          <div class="mock-nav">搜索 | 过滤器 | 排序方式</div>
+          <div style="display:flex; gap:12px; min-height:320px;">
+            <div class="mock-content" style="flex:1;">Shopee<div class="placeholder" style="margin-top:10px; height:72px;">主账号 A<br />18 个店铺</div><div class="placeholder" style="height:72px;">主账号 B<br />12 个店铺</div></div>
+            <div class="mock-content" style="flex:1;">TikTok<div class="placeholder" style="margin-top:10px; height:72px;">主账号 C<br />9 个店铺</div><div class="placeholder" style="height:72px;">主账号 D<br />15 个店铺</div></div>
+            <div class="mock-content" style="flex:1;">Amazon<div class="placeholder" style="margin-top:10px; height:72px;">主账号 E<br />4 个店铺</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>方案 B</h3>
+      <p>按平台横向分栏，再在每栏里显示主账号卡片。视觉上直观，但平台多或主账号多时仍可能拥挤。</p>
+      <div class="pros-cons">
+        <div class="pros">
+          <h4>优点</h4>
+          <ul>
+            <li>平台差异一眼可见</li>
+            <li>适合做概览和运营看板</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>代价</h4>
+          <ul>
+            <li>宽屏依赖强</li>
+            <li>手机和小窗口表现一般</li>
+            <li>不适合高密度编辑</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">方案 C · 保留单表格，但升级筛选和密度</div>
+        <div class="mockup-body">
+          <div class="mock-nav">高级搜索 | 保存视图 | 列设置 | 紧凑模式</div>
+          <div class="placeholder" style="height:280px; margin-top:12px;">
+            超大表格
+            <br />
+            支持列显隐、冻结、快速筛选、标签过滤
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>方案 C</h3>
+      <p>保留当前平铺表格思路，只增强筛选、列管理和紧凑模式。改动最小，但结构问题没有真正解决。</p>
+      <div class="pros-cons">
+        <div class="pros">
+          <h4>优点</h4>
+          <ul>
+            <li>开发成本最低</li>
+            <li>迁移风险较小</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <h4>代价</h4>
+          <ul>
+            <li>核心问题仍然是“大宽表”</li>
+            <li>店铺数继续增长时还会失效</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">我的推荐</div>
+  <p>优先做 <strong>方案 A</strong>。它最契合你刚才认可的“平台 &gt; 主账号”管理层级，也最容易继续扩展出批量配置、异常聚合、主账号维度统计和抽屉式编辑。</p>
+</div>

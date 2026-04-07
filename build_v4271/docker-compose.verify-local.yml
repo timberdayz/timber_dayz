@@ -1,0 +1,11 @@
+# Local production-flow verification overlay.
+# Mirrors the active PostgreSQL-first deployment path for backend checks only.
+# Historical note: legacy Metabase verification ports were removed from the
+# active local verification overlay.
+
+services:
+  backend:
+    environment:
+      DATABASE_URL: postgresql://erp_user:erp_pass_2025@postgres:5432/xihong_erp
+    ports:
+      - "8001:8000"

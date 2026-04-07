@@ -1,0 +1,3428 @@
+"""
+组件测试工具 - Component Tester
+
+测试YAML组件配置是否正确执行
+
+使用方法：
+    python tools/test_component.py --platform shopee --component login --account MyStore_SG
+    python tools/test_component.py --platform shopee --component orders_export --skip-login
+    python tools/test_component.py --all --platform shopee
+    python tools/test_component.py --help
+"""
+
+import sys
+import os
+import argparse
+import asyncio
+import json
+import shutil
+import tempfile
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any, List, Optional, Callable
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+
+# [*] 注意（2025-12-21）：
+# Windows 上 Playwright 需要 ProactorEventLoop（默认），因为需要 create_subprocess_exec
+# SelectorEventLoop 不支持 subprocess，会导致 NotImplementedError
+# 所以不要设置 WindowsSelectorEventLoopPolicy
+
+# 添加项目根目录到路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from modules.core.logger import get_logger
+from modules.apps.collection_center.component_loader import ComponentLoader
+from modules.apps.collection_center.transition_gates import (
+    GateStatus,
+    evaluate_export_complete,
+    evaluate_login_ready,
+)
+from modules.apps.collection_center.browser_config_helper import (
+    enforce_official_playwright_browser,
+)
+from backend.services.verification_service import VerificationService
+from backend.services.verification_state_store import VerificationStateStore
+from backend.services.verification_protocol import (
+    MANUAL_COMPLETED_TOKEN,
+    apply_verification_result_to_params,
+    verification_input_mode,
+)
+from backend.routers.component_versions import CANONICAL_COMPONENT_FILES
+from backend.services.active_collection_components import list_active_component_names
+from modules.apps.collection_center.python_component_adapter import create_adapter
+from backend.services.collection_contracts import build_date_range_from_time_selection
+
+logger = get_logger(__name__)
+
+
+class TestStatus(Enum):
+    """测试状态"""
+    PENDING = 'pending'
+    RUNNING = 'running'
+    PASSED = 'passed'
+    FAILED = 'failed'
+    SKIPPED = 'skipped'
+
+
+@dataclass
+class StepResult:
+    """步骤测试结果"""
+    step_id: str
+    action: str
+    status: TestStatus
+    duration_ms: float = 0
+    error: str = None
+    screenshot: str = None
+
+
+@dataclass
+class ComponentTestResult:
+    """组件测试结果（含阶段可观测性 phase/phase_component_name/phase_component_version）"""
+    component_name: str
+    platform: str
+    status: TestStatus
+    start_time: str = None
+    end_time: str = None
+    duration_ms: float = 0
+    steps_total: int = 0
+    steps_passed: int = 0
+    steps_failed: int = 0
+    step_results: List[StepResult] = field(default_factory=list)
+    error: str = None
+    phase: str = None  # 失败阶段: login | session | export | navigation | date_picker | filters
+    phase_component_name: str = None  # 如 miaoshou/login
+    phase_component_version: str = None  # 如 1.0.0
+
+
+class HeadfulLoginFallbackRequired(Exception):
+    """Signal that login must be retried in a headed browser for manual completion."""
+
+    def __init__(self, verification_type: str, screenshot_path: Optional[str] = None):
+        self.verification_type = verification_type
+        self.screenshot_path = screenshot_path
+        super().__init__(f"Headful login fallback required: {verification_type}")
+
+
+class ComponentTester:
+    """
+    组件测试器
+    
+    功能：
+    1. 加载并验证组件配置
+    2. 在浏览器中执行组件步骤
+    3. 记录测试结果和截图
+    4. 生成测试报告
+    """
+    
+    def __init__(
+        self,
+        platform: str,
+        account_id: str = None,
+        skip_login: bool = False,
+        headless: bool = False,
+        screenshot_on_error: bool = True,
+        output_dir: str = None,
+        account_info: Dict[str, Any] = None,  # 新增：直接传入账号信息
+        runtime_config: Dict[str, Any] = None,
+        progress_callback: Callable[[str, dict], None] = None,  # [*] v4.7.3: 进度回调
+        test_dir: str = None,  # 验证码回传：轮询 verification_response.json 的目录
+    ):
+        """
+        初始化测试器（v4.7.3增强：支持实时进度回调）
+        
+        Args:
+            platform: 平台代码
+            account_id: 账号ID
+            skip_login: 跳过登录
+            headless: 无头模式
+            screenshot_on_error: 错误时截图
+            output_dir: 输出目录
+            account_info: 账号信息字典（优先使用，避免从文件加载）
+            progress_callback: 进度回调函数 (event_type: str, data: dict) -> None
+            test_dir: 测试目录（用于验证码回传时轮询 verification_response.json）
+        """
+        self.platform = platform
+        self.account_id = account_id
+        self.skip_login = skip_login
+        self.headless = headless
+        self.screenshot_on_error = screenshot_on_error
+        self._account_info = account_info  # 缓存传入的账号信息
+        self.runtime_config = dict(runtime_config or {})
+        self.progress_callback = progress_callback  # [*] v4.7.3: 进度回调
+        self.test_dir = Path(test_dir) if test_dir else None  # 验证码回传轮询目录
+
+        # 组件加载器
+        self.component_loader = ComponentLoader()
+
+        # 输出目录
+        if output_dir is None:
+            output_dir = Path(__file__).parent.parent / 'temp' / 'test_results'
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 测试结果
+        self.results: List[ComponentTestResult] = []
+        
+        logger.info(f"ComponentTester initialized: platform={platform}")
+
+    def _build_browser_launch_kwargs(
+        self,
+        *,
+        headless: Optional[bool] = None,
+        args: Optional[List[str]] = None,
+        slow_mo: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        launch_kwargs: Dict[str, Any] = {
+            "headless": self.headless if headless is None else headless,
+        }
+        if args is not None:
+            launch_kwargs["args"] = list(args)
+        if slow_mo is not None:
+            launch_kwargs["slow_mo"] = slow_mo
+        return enforce_official_playwright_browser(launch_kwargs)
+
+    def _get_verification_store(self) -> VerificationStateStore:
+        storage_path = self.test_dir / "verification_state.json" if self.test_dir else None
+        return VerificationStateStore(storage_path=storage_path)
+
+    def _build_runtime_component_config(self) -> Dict[str, Any]:
+        cfg: Dict[str, Any] = {"output_dir": str(self.output_dir)}
+        cfg.update(self.runtime_config)
+
+        params = dict(cfg.get("params") or {})
+        time_selection = self.runtime_config.get("time_selection")
+        if time_selection:
+            cfg["time_selection"] = time_selection
+            params["time_selection"] = time_selection
+            normalized_date_range = build_date_range_from_time_selection(time_selection)
+            params["date_from"] = normalized_date_range["date_from"]
+            params["date_to"] = normalized_date_range["date_to"]
+            cfg["start_date"] = normalized_date_range["start_date"]
+            cfg["end_date"] = normalized_date_range["end_date"]
+        if self.runtime_config.get("date_from"):
+            params["date_from"] = self.runtime_config["date_from"]
+        if self.runtime_config.get("date_to"):
+            params["date_to"] = self.runtime_config["date_to"]
+        if self.runtime_config.get("granularity"):
+            params["granularity"] = self.runtime_config["granularity"]
+        if self.runtime_config.get("sub_domain"):
+            params["sub_domain"] = self.runtime_config["sub_domain"]
+        if self.runtime_config.get("data_domain"):
+            params["data_domain"] = self.runtime_config["data_domain"]
+        if params:
+            cfg["params"] = params
+        return cfg
+
+    def _get_session_owner_id(self, account_info: Optional[Dict[str, Any]]) -> str:
+        account = account_info or {}
+        main_account_id = str(
+            account.get("main_account_id")
+            or account.get("parent_account")
+            or ""
+        ).strip()
+        if main_account_id:
+            return main_account_id
+
+        shop_account_id = str(
+            self.account_id
+            or account.get("shop_account_id")
+            or account.get("account_id")
+            or ""
+        ).strip() or "unknown"
+        raise ValueError(
+            f"Missing main_account_id for component test session scope: shop_account_id={shop_account_id}"
+        )
+
+    def _persistent_context_mode(self, component_type: str) -> Optional[str]:
+        if self.skip_login:
+            return None
+        if component_type == "login":
+            return None
+        if component_type in ["export", "navigation", "date_picker", "filters", "shop_switch"]:
+            return "reused"
+        return None
+
+    def _use_persistent_profile_for_python_component(self, component_type: str) -> bool:
+        return False
+
+    def _login_readiness_candidates(self, component_name: str) -> List[tuple[str, str]]:
+        base_candidates: List[tuple[str, str]] = [
+            ("input[type='password']", "input[type='password']"),
+            ("input[name*='password' i]", "input[name*='password' i]"),
+            ("button:has-text('登录')", "button:has-text('登录')"),
+            ("button[type='submit']", "button[type='submit']"),
+        ]
+
+        if self.platform == "tiktok":
+            return base_candidates + [
+                ("input[placeholder*='手机号']", "input[placeholder*='手机号']"),
+                ("input[placeholder*='邮箱']", "input[placeholder*='邮箱']"),
+                ("text=使用邮箱登录", "text=使用邮箱登录"),
+                ("text=使用手机号登录", "text=使用手机号登录"),
+                ("input[placeholder*='验证码']", "input[placeholder*='验证码']"),
+                ("button:has-text('确认')", "button:has-text('确认')"),
+            ]
+
+        if self.platform == "shopee":
+            return base_candidates + [
+                ("input[name='loginKey']", "input[name='loginKey']"),
+                ("input[placeholder*='手机号']", "input[placeholder*='手机号']"),
+                ("input[placeholder*='邮箱']", "input[placeholder*='邮箱']"),
+                ("button:has-text('登入')", "button:has-text('登入')"),
+                ("button:has-text('Login')", "button:has-text('Login')"),
+            ]
+
+        return base_candidates
+
+    def _business_probe_url(
+        self,
+        component_type: Optional[str],
+        component_name: Optional[str],
+        account_info: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        if str(component_type or "").strip().lower() != "export":
+            return None
+
+        account = account_info or {}
+        data_domain = str(
+            self.runtime_config.get("data_domain")
+            or getattr(self, "current_data_domain", "")
+            or (component_name or "").replace("_export", "")
+        ).strip().lower()
+
+        if self.platform == "tiktok" and data_domain == "products":
+            region = str(
+                self.runtime_config.get("shop_region")
+                or account.get("shop_region")
+                or ""
+            ).strip().upper()
+            base = "https://seller.tiktokshopglobalselling.com/compass/product-analysis"
+            return f"{base}?shop_region={region}" if region else base
+
+        return None
+
+    def _homepage_probe_url(self, account_info: Optional[Dict[str, Any]]) -> Optional[str]:
+        account = account_info or {}
+        login_url = str(
+            account.get("login_url")
+            or self.runtime_config.get("default_login_url")
+            or ""
+        ).strip().rstrip("/")
+        if not login_url:
+            return None
+
+        if self.platform == "tiktok":
+            return f"{login_url}/homepage"
+        if self.platform == "miaoshou":
+            return f"{login_url}/welcome"
+        if self.platform == "shopee":
+            return f"{login_url}/"
+        return login_url
+
+    def _login_gate_probe_url(self, account_info: Optional[Dict[str, Any]]) -> Optional[str]:
+        account = account_info or {}
+        return str(
+            account.get("login_url")
+            or self.runtime_config.get("default_login_url")
+            or ""
+        ).strip() or None
+
+    def _login_gate_probe_urls(
+        self,
+        *,
+        component_type: Optional[str],
+        component_name: Optional[str],
+        account_info: Optional[Dict[str, Any]],
+    ) -> List[str]:
+        candidates = [
+            self._business_probe_url(component_type, component_name, account_info),
+            self._homepage_probe_url(account_info),
+            self._login_gate_probe_url(account_info),
+        ]
+        urls: List[str] = []
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if value and value not in urls:
+                urls.append(value)
+        return urls
+
+    async def _wait_for_probe_page_ready(self, page, *, settle_ms: int = 500) -> None:
+        for state, timeout in (("domcontentloaded", 5000), ("load", 5000), ("networkidle", 3000)):
+            try:
+                await page.wait_for_load_state(state, timeout=timeout)
+            except Exception:
+                continue
+        if hasattr(page, "wait_for_timeout"):
+            await page.wait_for_timeout(settle_ms)
+
+    async def _allow_tiktok_login_shell_recovery(
+        self,
+        page,
+        *,
+        timeout_ms: int = 2000,
+        poll_ms: int = 500,
+    ) -> None:
+        if self.platform != "tiktok":
+            return
+
+        current_url = str(getattr(page, "url", "") or "").strip().lower()
+        if "/account/login" not in current_url:
+            return
+
+        elapsed = 0
+        while elapsed < timeout_ms:
+            if hasattr(page, "wait_for_timeout"):
+                await page.wait_for_timeout(poll_ms)
+            elapsed += poll_ms
+
+            current_url = str(getattr(page, "url", "") or "").strip().lower()
+            if "/account/login" not in current_url:
+                break
+
+    async def _prime_page_for_login_gate(
+        self,
+        page,
+        account_info: Optional[Dict[str, Any]],
+        *,
+        component_type: Optional[str] = None,
+        component_name: Optional[str] = None,
+    ) -> None:
+        current_url = str(getattr(page, "url", "") or "").strip().lower()
+        if current_url and current_url != "about:blank":
+            await self._wait_for_probe_page_ready(page)
+            return
+
+        probe_urls = self._login_gate_probe_urls(
+            component_type=component_type,
+            component_name=component_name,
+            account_info=account_info,
+        )
+        if not probe_urls:
+            return
+
+        await page.goto(probe_urls[0], wait_until="domcontentloaded", timeout=60000)
+        await self._wait_for_probe_page_ready(page, settle_ms=800)
+
+    async def _save_context_session(self, context, account_info: Optional[Dict[str, Any]]) -> bool:
+        account_id = self._get_session_owner_id(account_info)
+
+        try:
+            storage_state = await context.storage_state()
+        except Exception as e:
+            logger.warning("Failed to read context storage_state for %s/%s: %s", self.platform, account_id, e)
+            return False
+
+        try:
+            from modules.apps.collection_center.executor_v2 import _save_session_async
+            return await _save_session_async(self.platform, account_id, storage_state)
+        except Exception as e:
+            logger.warning("Failed to save session for %s/%s: %s", self.platform, account_id, e)
+            return False
+
+    async def _check_login_gate(self, page, result: ComponentTestResult, component_name: str) -> bool:
+        from modules.utils.login_status_detector import LoginStatusDetector
+
+        detector = LoginStatusDetector(self.platform, debug=False)
+        await self._wait_for_probe_page_ready(page)
+        await self._allow_tiktok_login_shell_recovery(page)
+        detection_result = await detector.detect(page, wait_for_redirect=True)
+        gate_result = evaluate_login_ready(
+            status=detection_result.status.value,
+            confidence=detection_result.confidence,
+            current_url=str(getattr(page, "url", "") or ""),
+            matched_signal=detection_result.matched_pattern or detection_result.detected_by,
+        )
+        if gate_result.status is GateStatus.READY:
+            return True
+
+        result.phase = "login"
+        result.phase_component_name = component_name
+        result.error = (
+            f"login gate not ready: status={detection_result.status.value}, "
+            f"confidence={detection_result.confidence:.2f}, url={getattr(page, 'url', '')}"
+        )
+        return False
+
+    def _check_export_complete_gate(
+        self,
+        file_path: Optional[str],
+        result: ComponentTestResult,
+        component_name: str,
+        success_message: Optional[str] = None,
+    ) -> bool:
+        gate_result = evaluate_export_complete(
+            file_path=file_path,
+            component_name=component_name,
+            success_message=success_message,
+        )
+        if gate_result.status is GateStatus.READY:
+            return True
+
+        result.phase = "export"
+        result.phase_component_name = component_name
+        result.error = gate_result.reason
+        return False
+    
+    def get_account_info(self) -> Optional[Dict[str, Any]]:
+        """获取账号信息（优先使用传入的account_info）"""
+        # 优先使用传入的账号信息
+        if self._account_info:
+            return self._account_info
+        
+        if not self.account_id:
+            return None
+        
+        # 降级：尝试从local_accounts.py加载（向后兼容）
+        try:
+            import importlib.util
+            accounts_file = Path(__file__).parent.parent / "local_accounts.py"
+            
+            if not accounts_file.exists():
+                return None
+            
+            spec = importlib.util.spec_from_file_location("local_accounts", accounts_file)
+            local_accounts = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(local_accounts)
+
+            if hasattr(local_accounts, "get_all_local_accounts"):
+                for account in local_accounts.get_all_local_accounts():
+                    if isinstance(account, dict) and account.get("account_id") == self.account_id:
+                        return account
+
+            accounts_dict = getattr(local_accounts, "ACCOUNTS", {})
+            if isinstance(accounts_dict, dict):
+                return accounts_dict.get(self.account_id)
+
+            local_accounts_dict = getattr(local_accounts, "LOCAL_ACCOUNTS", {})
+            if isinstance(local_accounts_dict, dict):
+                for entries in local_accounts_dict.values():
+                    if not isinstance(entries, list):
+                        continue
+                    for account in entries:
+                        if isinstance(account, dict) and account.get("account_id") == self.account_id:
+                            return account
+
+            return None
+        except Exception as e:
+            logger.error(f"Failed to load account: {e}")
+            return None
+    
+    def list_components(self) -> List[str]:
+        """
+        列出平台的所有组件。仅扫描 modules/platforms/{platform}/components/*.py，不再扫描 YAML。
+        """
+        try:
+            import importlib
+            from modules.apps.collection_center.component_loader import PYTHON_COMPONENT_PLATFORMS
+            if self.platform not in PYTHON_COMPONENT_PLATFORMS:
+                return []
+            base_module = importlib.import_module(PYTHON_COMPONENT_PLATFORMS[self.platform])
+            comp_dir = Path(base_module.__path__[0])
+        except Exception:
+            return []
+        components = []
+        active_names = {
+            name.split("/", 1)[1]
+            for name in list_active_component_names()
+            if name.startswith(f"{self.platform}/")
+        }
+        canonical_files = CANONICAL_COMPONENT_FILES.get(self.platform, set())
+        for f in comp_dir.glob("*.py"):
+            if f.name.startswith("_"):
+                continue
+            if canonical_files and f.name not in canonical_files:
+                continue
+            if active_names and f.stem not in active_names:
+                continue
+            components.append(f.stem)
+        return sorted(components)
+
+    def _resolve_versioned_component_class(
+        self,
+        component_name: str,
+        component_type: str,
+    ):
+        """Resolve the preferred Python component class via component_versions when available."""
+        try:
+            from backend.models.database import SessionLocal
+            from backend.services.component_version_service import ComponentVersionService
+
+            db = SessionLocal()
+            try:
+                svc = ComponentVersionService(db)
+                selected_version = svc.select_version_for_use(
+                    component_name,
+                    enable_ab_test=False,
+                )
+            finally:
+                db.close()
+
+            if (
+                selected_version
+                and str(getattr(selected_version, "file_path", "")).strip().endswith(".py")
+                and hasattr(self.component_loader, "load_python_component_from_path")
+            ):
+                platform, _ = component_name.split("/", 1)
+                return self.component_loader.load_python_component_from_path(
+                    selected_version.file_path,
+                    version_id=getattr(selected_version, "id", None),
+                    platform=platform,
+                    component_type=component_type,
+                )
+        except Exception as e:
+            logger.warning(
+                "Failed to resolve versioned component %s: %s",
+                component_name,
+                e,
+            )
+
+        return None
+    
+    async def test_component(self, component_name: str) -> ComponentTestResult:
+        """
+        测试单个组件
+        
+        Args:
+            component_name: 组件名称
+            
+        Returns:
+            ComponentTestResult: 测试结果
+        """
+        result = ComponentTestResult(
+            component_name=component_name,
+            platform=self.platform,
+            status=TestStatus.PENDING,
+            start_time=datetime.now().isoformat()
+        )
+        
+        try:
+            # 加载组件
+            component = self.component_loader.load(f"{self.platform}/{component_name}")
+            
+            # Phase 12: 判断是否为发现模式；Python 组件无 steps
+            component_type = component.get("type", "")
+            is_discovery_mode = component_type in ["date_picker", "filters"] and "open_action" in component
+            is_python = bool(component.get("_python_component_class"))
+
+            if is_python:
+                result.steps_total = 1
+                steps = []
+            elif is_discovery_mode:
+                available_options = component.get("available_options", [])
+                result.steps_total = len(available_options) + 1
+                steps = []
+            else:
+                steps = component.get("steps", [])
+                result.steps_total = len(steps)
+
+            step_label = "Python" if is_python else f"{len(steps)} steps"
+            print(f"\n[TEST] {self.platform}/{component_name} ({step_label})")
+            
+            # 验证组件结构
+            validation_passed = self._validate_component_structure(component)
+            # #region agent log
+            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({'location':'test_component.py:191','message':'test_component: validation result','data':{'validation_passed':validation_passed},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'I'})+'\n')
+            # #endregion
+            if not validation_passed:
+                result.status = TestStatus.FAILED
+                result.error = "Component structure validation failed"
+                return result
+            
+            # 如果有Playwright，执行实际测试
+            # #region agent log
+            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({'location':'test_component.py:202','message':'test_component: before _test_with_browser','data':{},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'F_G'})+'\n')
+            # #endregion
+            browser_test_passed = await self._test_with_browser(component, result)
+            # #region agent log
+            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({'location':'test_component.py:209','message':'test_component: after _test_with_browser','data':{'browser_test_passed':browser_test_passed,'step_results_count':len(result.step_results)},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'F_G'})+'\n')
+            # #endregion
+            if browser_test_passed:
+                result.status = TestStatus.PASSED
+            else:
+                result.status = TestStatus.FAILED
+        
+        except Exception as e:
+            result.status = TestStatus.FAILED
+            result.error = str(e)
+            logger.error(f"Test failed for {component_name}: {e}")
+        
+        finally:
+            result.end_time = datetime.now().isoformat()
+            if result.start_time and result.end_time:
+                start = datetime.fromisoformat(result.start_time)
+                end = datetime.fromisoformat(result.end_time)
+                result.duration_ms = (end - start).total_seconds() * 1000
+        
+        return result
+    
+    async def test_python_component(
+        self, 
+        component_path: str, 
+        component_name: str
+    ) -> ComponentTestResult:
+        """
+        测试 Python 组件（v4.8.0新增）
+        
+        Args:
+            component_path: Python 组件文件路径（可选；录制器临时组件必须传此路径按文件加载）
+            component_name: 组件名称
+            
+        Returns:
+            ComponentTestResult: 测试结果
+        """
+        result = ComponentTestResult(
+            component_name=component_name,
+            platform=self.platform,
+            status=TestStatus.PENDING,
+            start_time=datetime.now().isoformat()
+        )
+        
+        try:
+            from modules.apps.collection_center.component_loader import ComponentLoader
+            from modules.apps.collection_center.python_component_adapter import PythonComponentAdapter, create_adapter
+
+            loader = ComponentLoader()
+            component_class = None
+            # component_type 用于元数据优先类发现（兼容历史类名如 MiaoshouMiaoshouLogin）
+            comp_type_for_load = (
+                "export" if component_name.endswith("_export") else component_name
+            )
+
+            # 1. 若提供 .py 文件路径且文件存在，从路径加载（元数据优先 + 命名兜底）
+            path_obj = Path(component_path) if component_path else None
+            if path_obj and path_obj.suffix == ".py" and path_obj.exists():
+                try:
+                    component_class = loader.load_python_component_from_path(
+                        str(path_obj),
+                        version_id=None,
+                        project_root=os.getenv("PROJECT_ROOT"),
+                        platform=self.platform,
+                        component_type=comp_type_for_load,
+                    )
+                except (ValueError, FileNotFoundError) as e:
+                    result.status = TestStatus.FAILED
+                    result.error = str(e)
+                    return result
+
+            # 2. 否则按模块名从 ComponentLoader 加载（已保存的组件）
+            if not component_class:
+                component_class = loader.load_python_component(self.platform, component_name)
+
+            if not component_class:
+                result.status = TestStatus.FAILED
+                result.error = f"Failed to load Python component: {component_name}"
+                return result
+            
+            # 3. 验证组件元数据（v4.8.0: 修复方法名和返回值处理）
+            validation_result = loader.validate_python_component(component_class)
+            if not validation_result.get('valid', False):
+                result.status = TestStatus.FAILED
+                errors = validation_result.get('errors', [])
+                result.error = f"Python component validation failed: {', '.join(errors)}"
+                return result
+            
+            # 4. 获取账号信息
+            account_info = self.get_account_info()
+            if not account_info:
+                result.status = TestStatus.FAILED
+                result.error = "Account info not available"
+                return result
+
+            comp_type = getattr(component_class, 'component_type', 'export')
+            non_login_types = ('export', 'navigation', 'date_picker', 'filters')
+            if comp_type in non_login_types and not self.skip_login and not self.account_id:
+                result.status = TestStatus.FAILED
+                result.error = "非登录组件测试需要 account_id，请选择测试账号"
+                return result
+            
+            # 5. 执行 Python 组件测试
+            result.steps_total = 1  # Python 组件作为一个整体步骤
+            
+            test_passed = await self._test_python_component_with_browser(
+                component_class=component_class,
+                component_name=component_name,
+                account_info=account_info,
+                result=result
+            )
+            
+            # v4.8.0: 综合判断 - 如果有 error，即使 test_passed 为 True 也应标记失败
+            if test_passed and not result.error:
+                result.status = TestStatus.PASSED
+                result.steps_passed = 1
+            else:
+                result.status = TestStatus.FAILED
+                result.steps_failed = 1
+                if not result.error:
+                    result.error = "Test execution failed"
+        
+        except Exception as e:
+            result.status = TestStatus.FAILED
+            result.error = str(e)
+            logger.error(f"Python component test failed for {component_name}: {e}")
+        
+        finally:
+            result.end_time = datetime.now().isoformat()
+            if result.start_time and result.end_time:
+                start = datetime.fromisoformat(result.start_time)
+                end = datetime.fromisoformat(result.end_time)
+                result.duration_ms = (end - start).total_seconds() * 1000
+        
+        return result
+
+    async def _run_login_with_verification_support(
+        self,
+        adapter,
+        page,
+        component_name: str,
+        result: ComponentTestResult,
+        *,
+        allow_headful_fallback: bool = True,
+    ):
+        """执行登录并支持验证码暂停与回传：捕获 VerificationRequiredError 后写 progress、轮询 verification_response.json、同 page 填入继续。"""
+        from modules.apps.collection_center.executor_v2 import VerificationRequiredError
+
+        verification_timeout_seconds = 300  # 5 分钟
+        poll_interval_seconds = 2
+
+        try:
+            return await adapter.login(page)
+        except VerificationRequiredError as e:
+            verification_type = (e.verification_type or "graphical_captcha").strip().lower()
+            screenshot_path = e.screenshot_path
+
+            if (
+                allow_headful_fallback
+                and self.headless
+                and verification_input_mode(verification_type) == "manual_continue"
+            ):
+                raise HeadfulLoginFallbackRequired(verification_type, screenshot_path)
+
+            # 确保截图在 test_dir 内，便于后端 GET verification-screenshot 读取
+            verification_screenshot = "verification_screenshot.png"
+            if self.test_dir:
+                import shutil
+                dest = self.test_dir / verification_screenshot
+                if screenshot_path and Path(screenshot_path).exists():
+                    try:
+                        shutil.copy2(screenshot_path, dest)
+                        screenshot_path = str(dest)
+                    except Exception as ex:
+                        logger.warning(f"Copy verification screenshot to test_dir failed: {ex}")
+                else:
+                    # 组件可能未写截图，用当前页截图
+                    try:
+                        await page.screenshot(path=str(dest), timeout=5000)
+                        screenshot_path = str(dest)
+                    except Exception as ex:
+                        logger.warning(f"Page screenshot for verification failed: {ex}")
+            else:
+                verification_screenshot = Path(screenshot_path).name if screenshot_path else ""
+
+            verification_service = VerificationService(store=self._get_verification_store())
+            verification_payload = verification_service.raise_required(
+                owner_type="component_test",
+                owner_id=str(self.account_id),
+                verification_type=verification_type,
+                phase="login",
+                current_url=str(getattr(page, "url", "") or ""),
+                screenshot_url=verification_screenshot or None,
+                message="login requires verification",
+                account_id=str(self.account_id or "") or None,
+                store_name=str((self._account_info or {}).get("store_name") or "") or None,
+            )
+
+            if self.progress_callback:
+                try:
+                    import asyncio
+                    data = {
+                        "verification_type": verification_type,
+                        "verification_input_mode": verification_input_mode(verification_type),
+                        "verification_screenshot": verification_screenshot,
+                        "verification_id": verification_payload["verification_id"],
+                        "verification_message": verification_payload["message"],
+                        "verification_expires_at": verification_payload["expires_at"],
+                        "verification_attempt_count": verification_payload.get("attempt_count", 0),
+                        "step_index": 1,
+                        "step_total": 1,
+                        "action": f"Execute Python component: {component_name}",
+                    }
+                    if asyncio.iscoroutinefunction(self.progress_callback):
+                        await self.progress_callback("verification_required", data)
+                    else:
+                        self.progress_callback("verification_required", data)
+                except Exception as cb_err:
+                    logger.warning(f"Progress callback error (ignored): {cb_err}")
+
+            # 轮询 verification_response.json
+            from modules.apps.collection_center.python_component_adapter import AdapterResult
+            response_file = self.test_dir / "verification_response.json" if self.test_dir else None
+            if not response_file:
+                result.error = "验证码需要回传，但 test_dir 未配置"
+                return AdapterResult(success=False, message=result.error)
+            value = None
+            manual_completed = False
+            for _ in range(verification_timeout_seconds // poll_interval_seconds):
+                await asyncio.sleep(poll_interval_seconds)
+                if response_file.exists():
+                    try:
+                        with open(response_file, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        value = data.get("captcha_code") or data.get("otp")
+                        manual_completed = bool(data.get("manual_completed"))
+                        if value or manual_completed:
+                            if manual_completed and not value:
+                                value = MANUAL_COMPLETED_TOKEN
+                            break
+                    except Exception:
+                        pass
+
+            if not value and not manual_completed:
+                result.error = "验证码输入超时"
+                verification_service.mark_failed(
+                    verification_id=verification_payload["verification_id"]
+                )
+                if self.progress_callback:
+                    try:
+                        merge_data = {"verification_timeout": True, "error": result.error}
+                        if asyncio.iscoroutinefunction(self.progress_callback):
+                            await self.progress_callback("verification_timeout", merge_data)
+                        else:
+                            self.progress_callback("verification_timeout", merge_data)
+                    except Exception:
+                        pass
+                return AdapterResult(success=False, message=result.error)
+
+            # 同一 page 继续：将回传值写入 adapter 的 ctx.config.params，再次执行 login
+            if adapter.ctx.config is None:
+                adapter.ctx.config = {}
+            apply_verification_result_to_params(
+                adapter.ctx.config,
+                verification_type=verification_type,
+                value=value,
+            )
+
+            verification_service.mark_retrying(
+                verification_id=verification_payload["verification_id"]
+            )
+            login_result = await adapter.login(page)
+            if login_result and getattr(login_result, "success", False):
+                verification_service.mark_resolved(
+                    verification_id=verification_payload["verification_id"]
+                )
+            else:
+                verification_service.mark_failed(
+                    verification_id=verification_payload["verification_id"]
+                )
+            return login_result
+
+    async def _build_component_browser_context_options(
+        self,
+        *,
+        account_id: str,
+        account_info: Dict[str, Any],
+        storage_state: Optional[Dict[str, Any]] = None,
+        headless: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        context_options: Dict[str, Any] = {}
+        if account_id:
+            try:
+                from modules.apps.collection_center.executor_v2 import (
+                    _build_playwright_context_options_from_fingerprint,
+                    _get_fingerprint_context_options_async,
+                )
+
+                fp_options = await _get_fingerprint_context_options_async(
+                    self.platform,
+                    account_id,
+                    account_info,
+                )
+                context_options = _build_playwright_context_options_from_fingerprint(fp_options)
+            except Exception as e:
+                logger.warning("Fingerprint load failed for component browser context: %s", e)
+
+        context_options.setdefault("accept_downloads", True)
+        if storage_state:
+            context_options["storage_state"] = storage_state
+        if not context_options.get("viewport"):
+            effective_headless = self.headless if headless is None else headless
+            context_options["viewport"] = (
+                None if not effective_headless else {"width": 1920, "height": 1080}
+            )
+        if "locale" not in context_options:
+            context_options["locale"] = "zh-CN"
+        return context_options
+
+    async def _recreate_context_with_saved_session(
+        self,
+        *,
+        browser,
+        old_context,
+        account_info: Dict[str, Any],
+    ):
+        account_id = self._get_session_owner_id(account_info)
+        storage_state = None
+        if account_id:
+            try:
+                from modules.apps.collection_center.executor_v2 import _load_or_bootstrap_session_async
+
+                session_data = await _load_or_bootstrap_session_async(
+                    self.platform,
+                    account_id,
+                    account_info,
+                    max_age_days=30,
+                )
+                if session_data and isinstance(session_data.get("storage_state"), dict):
+                    storage_state = session_data["storage_state"]
+            except Exception as e:
+                logger.warning("Reload saved session failed for %s/%s: %s", self.platform, account_id, e)
+
+        context_options = await self._build_component_browser_context_options(
+            account_id=account_id,
+            account_info=account_info,
+            storage_state=storage_state,
+            headless=self.headless,
+        )
+
+        try:
+            await old_context.close()
+        except Exception as e:
+            logger.debug("Close old context before session recreation failed: %s", e)
+
+        new_context = await browser.new_context(**context_options)
+        new_page = await new_context.new_page()
+        await self._prime_page_for_login_gate(new_page, account_info)
+        return new_context, new_page
+
+    async def _run_headful_login_fallback(
+        self,
+        *,
+        browser,
+        old_context,
+        account_info: Dict[str, Any],
+        login_class,
+        component_name: str,
+        result: ComponentTestResult,
+    ):
+        from playwright.async_api import async_playwright
+        from modules.apps.collection_center.python_component_adapter import create_adapter
+
+        account_id = self._get_session_owner_id(account_info)
+        adapter_config = self._build_runtime_component_config()
+        if self.test_dir:
+            adapter_config.setdefault("task", {})["screenshot_dir"] = str(self.test_dir)
+
+        async with async_playwright() as playwright:
+            headed_browser = await playwright.chromium.launch(
+                **self._build_browser_launch_kwargs(
+                    headless=False,
+                    args=["--start-maximized"],
+                )
+            )
+            try:
+                context_options = await self._build_component_browser_context_options(
+                    account_id=account_id,
+                    account_info=account_info,
+                    storage_state=None,
+                    headless=False,
+                )
+                headed_context = await headed_browser.new_context(**context_options)
+                try:
+                    headed_page = await headed_context.new_page()
+                    adapter = create_adapter(
+                        platform=self.platform,
+                        account=account_info,
+                        config=adapter_config,
+                        step_callback=self.progress_callback,
+                        is_test_mode=True,
+                        override_login_class=login_class,
+                    )
+
+                    exec_result = await self._run_login_with_verification_support(
+                        adapter=adapter,
+                        page=headed_page,
+                        component_name=component_name,
+                        result=result,
+                        allow_headful_fallback=False,
+                    )
+                    if not exec_result.success:
+                        return False, old_context, None
+
+                    await self._save_context_session(headed_context, account_info)
+                finally:
+                    await headed_context.close()
+            finally:
+                await headed_browser.close()
+
+        if browser is None:
+            return False, old_context, None
+
+        new_context, new_page = await self._recreate_context_with_saved_session(
+            browser=browser,
+            old_context=old_context,
+            account_info=account_info,
+        )
+        return True, new_context, new_page
+
+    async def _run_login_before_non_login(
+        self,
+        browser,
+        context,
+        page,
+        account_info: Dict[str, Any],
+        result: ComponentTestResult,
+    ):
+        """
+        1.6: 非登录组件测试前先登录或复用会话。若无会话则选平台稳定版 login 按 file_path 加载并执行，
+        支持验证码暂停与回传；同一 context 内执行，失败时设置 result.phase=login 并返回 False。
+        """
+        import asyncio
+        from modules.apps.collection_center.component_loader import ComponentLoader
+        from modules.apps.collection_center.python_component_adapter import create_adapter
+
+        def _get_stable_login_version():
+            from backend.models.database import SessionLocal
+            from backend.services.component_version_service import ComponentVersionService
+
+            db = SessionLocal()
+            try:
+                svc = ComponentVersionService(db)
+                return svc.get_stable_version(f"{self.platform}/login")
+            finally:
+                db.close()
+
+        try:
+            stable_login = await asyncio.get_event_loop().run_in_executor(None, _get_stable_login_version)
+        except Exception as e:
+            logger.warning("Get stable login version failed: %s", e)
+            stable_login = None
+
+        if not stable_login or not getattr(stable_login, 'file_path', '').strip().endswith('.py'):
+            result.phase = 'login'
+            result.phase_component_name = f"{self.platform}/login"
+            result.error = "无稳定版登录组件或 file_path 无效，无法先登录"
+            return False, context, page
+
+        loader = ComponentLoader()
+        try:
+            login_class = loader.load_python_component_from_path(
+                stable_login.file_path,
+                version_id=stable_login.id,
+                platform=self.platform,
+                component_type='login',
+            )
+        except Exception as e:
+            result.phase = 'login'
+            result.phase_component_name = f"{self.platform}/login"
+            result.phase_component_version = getattr(stable_login, 'version', '') or ''
+            result.error = f"加载登录组件失败: {e}"
+            return False
+
+        adapter_config = self._build_runtime_component_config()
+        if self.test_dir:
+            adapter_config.setdefault('task', {})['screenshot_dir'] = str(self.test_dir)
+        adapter = create_adapter(
+            platform=self.platform,
+            account=account_info,
+            config=adapter_config,
+            step_callback=self.progress_callback,
+            is_test_mode=True,
+            override_login_class=login_class,
+        )
+
+        login_display_name = f"{self.platform}/login"
+        try:
+            exec_result = await self._run_login_with_verification_support(
+                adapter=adapter,
+                page=page,
+                component_name=login_display_name,
+                result=result,
+            )
+        except HeadfulLoginFallbackRequired:
+            ok, new_context, new_page = await self._run_headful_login_fallback(
+                browser=browser,
+                old_context=context,
+                account_info=account_info,
+                login_class=login_class,
+                component_name=login_display_name,
+                result=result,
+            )
+            return ok, (new_context or context), (new_page or page)
+        if not exec_result.success:
+            result.phase = 'login'
+            result.phase_component_name = login_display_name
+            result.phase_component_version = getattr(stable_login, 'version', '') or ''
+            result.error = result.error or getattr(exec_result, 'message', '登录失败')
+            return False, context, page
+        await self._save_context_session(context, account_info)
+        return True, context, page
+
+    async def _test_python_component_with_browser(
+        self,
+        component_class,
+        component_name: str,
+        account_info: Dict[str, Any],
+        result: ComponentTestResult
+    ) -> bool:
+        """
+        在浏览器中测试 Python 组件（v4.8.0新增 + 增强）
+        
+        Args:
+            component_class: Python 组件类
+            component_name: 组件名称
+            account_info: 账号信息
+            result: 测试结果对象
+            
+        Returns:
+            bool: 是否测试通过
+            
+        v4.8.0 增强:
+            - 支持 success_criteria 验证
+            - 支持步骤回调传递给适配器
+        """
+        from playwright.async_api import async_playwright
+        from modules.apps.collection_center.python_component_adapter import create_adapter
+
+        browser = None
+        component_type = getattr(component_class, 'component_type', 'export')
+        non_login_types = ('export', 'navigation', 'date_picker', 'filters')
+        account_id = (self.account_id or (account_info.get('account_id') if account_info else None)) or ''
+        session_owner_id = None
+        standalone_test_config: Dict[str, Any] = {}
+
+        # 1.8: 发现模式组件测试策略（date_picker/filters）
+        if component_type in ('date_picker', 'filters'):
+            test_mode = str(getattr(component_class, 'test_mode', '') or '').strip().lower()
+            cls_test_config = getattr(component_class, 'test_config', {}) or {}
+
+            if test_mode in ('', 'flow_only'):
+                result.phase = component_type
+                result.phase_component_name = f"{self.platform}/{component_name}"
+                result.error = (
+                    f"{component_type} 组件当前 test_mode={test_mode or 'flow_only'}，"
+                    "仅支持完整链路验证（CollectionExecutorV2.execute），不支持版本页单组件测试"
+                )
+                return False
+
+            if test_mode != 'standalone':
+                result.phase = component_type
+                result.phase_component_name = f"{self.platform}/{component_name}"
+                result.error = (
+                    f"{component_type} 组件 test_mode={test_mode} 非法；"
+                    "允许值仅 flow_only / standalone"
+                )
+                return False
+
+            if not isinstance(cls_test_config, dict):
+                result.phase = component_type
+                result.phase_component_name = f"{self.platform}/{component_name}"
+                result.error = f"{component_type} 组件 test_mode=standalone 但 test_config 不是字典"
+                return False
+
+            has_url = bool(cls_test_config.get('test_url') or cls_test_config.get('url'))
+            has_domain = bool(cls_test_config.get('test_data_domain') or cls_test_config.get('data_domain'))
+            if not has_url and not has_domain:
+                result.phase = component_type
+                result.phase_component_name = f"{self.platform}/{component_name}"
+                result.error = (
+                    f"{component_type} 组件 test_mode=standalone 缺少 test_config.url 或 "
+                    "test_config.test_data_domain"
+                )
+                return False
+
+            standalone_test_config = dict(cls_test_config)
+            if standalone_test_config.get('url') and not standalone_test_config.get('test_url'):
+                standalone_test_config['test_url'] = standalone_test_config['url']
+            if standalone_test_config.get('data_domain') and not standalone_test_config.get('test_data_domain'):
+                standalone_test_config['test_data_domain'] = standalone_test_config['data_domain']
+
+        # 1.7: 非登录组件且未 skip_login 时必须提供 account_id
+        if component_type in non_login_types and not self.skip_login and not account_id:
+            result.phase = 'session'
+            result.phase_component_name = f"{self.platform}/{component_name}"
+            result.error = "非登录组件测试需要选择测试账号（account_id 必填）"
+            return False
+
+        if component_type in non_login_types and not self.skip_login:
+            try:
+                session_owner_id = self._get_session_owner_id(account_info)
+            except ValueError as e:
+                result.phase = 'session'
+                result.phase_component_name = f"{self.platform}/{component_name}"
+                result.error = str(e)
+                return False
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    **self._build_browser_launch_kwargs(
+                        args=['--start-maximized'] if not self.headless else []
+                    )
+                )
+                # 1.7: 与生产对齐——会话 + 指纹，使用 new_context(storage_state=..., **fp_options)
+                context_options = {}
+                storage_state = None
+                allow_session_reuse = bool(session_owner_id) and component_type != 'login'
+                if allow_session_reuse:
+                    try:
+                        from modules.apps.collection_center.executor_v2 import (
+                            _load_or_bootstrap_session_async,
+                            _get_fingerprint_context_options_async,
+                            _build_playwright_context_options_from_fingerprint,
+                        )
+                        session_data = await _load_or_bootstrap_session_async(
+                            self.platform,
+                            session_owner_id,
+                            account_info,
+                            max_age_days=30,
+                        )
+                        if session_data and isinstance(session_data.get('storage_state'), dict):
+                            storage_state = session_data['storage_state']
+                        fp_options = await _get_fingerprint_context_options_async(
+                            self.platform, session_owner_id, account_info
+                        )
+                        context_options = _build_playwright_context_options_from_fingerprint(fp_options)
+                    except Exception as e:
+                        logger.warning("Session/fingerprint load failed, using default context: %s", e)
+                context_options.setdefault('accept_downloads', True)
+                if storage_state:
+                    context_options['storage_state'] = storage_state
+                if not context_options.get('viewport'):
+                    context_options['viewport'] = (
+                        None if not self.headless else {'width': 1920, 'height': 1080}
+                    )
+                if 'locale' not in context_options:
+                    context_options['locale'] = 'zh-CN'
+
+                use_persistent_profile = bool(session_owner_id) and self._use_persistent_profile_for_python_component(component_type)
+                context = await browser.new_context(**context_options)
+                page = await context.new_page()
+
+                # 非登录组件统一走 login gate：先检查复用会话是否已满足，否则执行登录前置
+                if component_type in non_login_types and not self.skip_login:
+                    login_gate_ready = False
+                    if storage_state or use_persistent_profile:
+                        await self._prime_page_for_login_gate(
+                            page,
+                            account_info,
+                            component_type=component_type,
+                            component_name=component_name,
+                        )
+                        login_gate_ready = await self._check_login_gate(
+                            page=page,
+                            result=result,
+                            component_name=f"{self.platform}/login",
+                        )
+                    if not login_gate_ready:
+                        login_ok, context, page = await self._run_login_before_non_login(
+                            browser=browser,
+                            context=context,
+                            page=page,
+                            account_info=account_info,
+                            result=result,
+                        )
+                        if not login_ok:
+                            await context.close()
+                            if browser:
+                                await browser.close()
+                            return False
+                        login_gate_ready = await self._check_login_gate(
+                            page=page,
+                            result=result,
+                            component_name=f"{self.platform}/login",
+                        )
+                        if not login_gate_ready:
+                            await context.close()
+                            if browser:
+                                await browser.close()
+                            return False
+
+                # 1.8: date_picker/filters standalone 模式先导航并执行 pre_steps
+                if component_type in ('date_picker', 'filters') and standalone_test_config:
+                    nav_ok = await self._navigate_to_test_page(page, standalone_test_config, account_info)
+                    if not nav_ok:
+                        result.phase = component_type
+                        result.phase_component_name = f"{self.platform}/{component_name}"
+                        result.error = f"{component_type} standalone 测试导航失败"
+                        await context.close()
+                        if browser:
+                            await browser.close()
+                        return False
+                    pre_steps = standalone_test_config.get('pre_steps') or []
+                    if isinstance(pre_steps, list):
+                        for st in pre_steps:
+                            if isinstance(st, dict) and st.get('action'):
+                                await self._execute_step(page, st, account_info)
+
+                adapter_config = self._build_runtime_component_config()
+                if self.test_dir:
+                    adapter_config.setdefault('task', {})['screenshot_dir'] = str(self.test_dir)
+                override_map = {
+                    'login': {'override_login_class': component_class},
+                    'navigation': {'override_navigation_class': component_class},
+                    'export': {'override_export_class': component_class},
+                    'date_picker': {'override_date_picker_class': component_class},
+                    'shop_switch': {'override_shop_switch_class': component_class},
+                    'filters': {'override_filters_class': component_class},
+                }
+                adapter = create_adapter(
+                    platform=self.platform,
+                    account=account_info,
+                    config=adapter_config,
+                    step_callback=self.progress_callback,
+                    is_test_mode=True,
+                    **(override_map.get(component_type) or {}),
+                )
+
+                if self.progress_callback:
+                    try:
+                        import asyncio
+                        if asyncio.iscoroutinefunction(self.progress_callback):
+                            await self.progress_callback('step_start', {
+                                'step_index': 1,
+                                'step_total': 1,
+                                'action': f'Execute Python component: {component_name}'
+                            })
+                        else:
+                            self.progress_callback('step_start', {
+                                'step_index': 1,
+                                'step_total': 1,
+                                'action': f'Execute Python component: {component_name}'
+                            })
+                    except Exception as cb_err:
+                        logger.warning(f"Progress callback error (ignored): {cb_err}")
+
+                start_time = datetime.now()
+
+                if component_type == 'login':
+                    login_url = account_info.get('login_url')
+                    current_url = str(getattr(page, "url", "") or "")
+                    if login_url and current_url in ("", "about:blank"):
+                        try:
+                            await page.goto(login_url, wait_until="domcontentloaded", timeout=60000)
+                            await page.wait_for_timeout(800)
+                        except Exception as nav_err:
+                            logger.warning("Login page pre-navigation failed: %s", nav_err)
+                    # Page readiness: wait for platform-specific login signals
+                    # before executing the login component itself.
+                    _readiness_candidates = [
+                        (selector_name, page.locator(selector_expr))
+                        for selector_name, selector_expr in self._login_readiness_candidates(component_name)
+                    ]
+                    _page_ready = False
+                    for _cand_name, _cand_loc in _readiness_candidates:
+                        try:
+                            await _cand_loc.first.wait_for(state="visible", timeout=15000)
+                            _page_ready = True
+                            logger.info("Login page ready: %s visible", _cand_name)
+                            break
+                        except Exception:
+                            pass
+                    if not _page_ready:
+                        _current_url = str(getattr(page, "url", ""))
+                        logger.warning(
+                            "Login page readiness timeout; url=%s; none of %s visible within 15s",
+                            _current_url,
+                            [c[0] for c in _readiness_candidates],
+                        )
+                        result.phase = 'page_readiness'
+                        result.phase_component_name = f"{self.platform}/{component_name}"
+                        result.error = (
+                            f"Login page readiness check failed; current_url={_current_url}; "
+                            f"candidates={[c[0] for c in _readiness_candidates]}; timeout=15000ms"
+                        )
+
+                    exec_result = await self._run_login_with_verification_support(
+                        adapter=adapter,
+                        page=page,
+                        component_name=component_name,
+                        result=result,
+                    )
+                    if exec_result.success:
+                        await self._save_context_session(context, account_info)
+                elif component_type == 'navigation':
+                    exec_result = await adapter.navigate(page, target_page=component_name)
+                elif component_type == 'export':
+                    data_domain = (
+                        getattr(component_class, 'data_domain', None)
+                        or self.runtime_config.get('data_domain')
+                        or 'orders'
+                    )
+                    exec_result = await adapter.export(page=page, data_domain=data_domain)
+                elif component_type == 'date_picker':
+                    exec_result = await adapter.date_picker(page, None)
+                else:
+                    exec_result = await adapter.execute_component(
+                        component_name=component_name,
+                        page=page,
+                        params={}
+                    )
+
+                duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+
+                if not exec_result.success:
+                    result.phase = component_type
+                    result.phase_component_name = f"{self.platform}/{component_name}"
+                    result.error = result.error or getattr(exec_result, "message", None) or "执行失败"
+
+                success_criteria_passed = True
+                if exec_result.success:
+                    success_criteria = getattr(component_class, 'success_criteria', [])
+                    if success_criteria:
+                        logger.info("Verifying %s success criteria for Python component...", len(success_criteria))
+                        success_criteria_passed = await self._verify_success_criteria(page, success_criteria)
+                        if not success_criteria_passed:
+                            logger.warning("Python component success criteria verification failed")
+                            result.error = result.error or "Success criteria verification failed"
+                            result.phase = result.phase or component_type
+                            result.phase_component_name = result.phase_component_name or f"{self.platform}/{component_name}"
+
+                test_passed = exec_result.success and success_criteria_passed
+                if test_passed and component_type == 'export':
+                    file_path = getattr(exec_result, "file_path", None)
+                    test_passed = self._check_export_complete_gate(
+                        file_path=file_path,
+                        result=result,
+                        component_name=f"{self.platform}/{component_name}",
+                        success_message=getattr(exec_result, "message", None),
+                    )
+
+                step_result = StepResult(
+                    step_id='python_component_1',
+                    action=f'Execute {component_name}',
+                    status=TestStatus.PASSED if test_passed else TestStatus.FAILED,
+                    duration_ms=duration_ms,
+                    error=result.error if not test_passed else None
+                )
+                result.step_results.append(step_result)
+
+                if self.progress_callback:
+                    try:
+                        event_type = 'step_success' if test_passed else 'step_failed'
+                        import asyncio
+                        step_data = {
+                            'step_index': 1,
+                            'step_total': 1,
+                            'action': f'Execute Python component: {component_name}',
+                            'duration_ms': duration_ms,
+                            'phase': result.phase,
+                            'phase_component_name': result.phase_component_name,
+                            'phase_component_version': result.phase_component_version,
+                        }
+                        if asyncio.iscoroutinefunction(self.progress_callback):
+                            await self.progress_callback(event_type, step_data)
+                        else:
+                            self.progress_callback(event_type, step_data)
+                    except Exception as cb_err:
+                        logger.warning(f"Progress callback error (ignored): {cb_err}")
+
+                if self.screenshot_on_error and not test_passed:
+                    screenshot_path = self.output_dir / f"{component_name}_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                    await page.screenshot(path=str(screenshot_path))
+                    step_result.screenshot = str(screenshot_path)
+                    await self._save_failure_artifacts(page, component_name, 'python_component_1')
+
+                await context.close()
+                if browser:
+                    await browser.close()
+
+                return test_passed
+
+        except Exception as e:
+            logger.error("Python component browser test failed: %s", e)
+            result.error = str(e)
+            if not result.phase:
+                result.phase = component_type
+                result.phase_component_name = f"{self.platform}/{component_name}"
+            if 'page' in locals() and page is not None:
+                await self._save_failure_artifacts(page, component_name, 'python_component_1_exception')
+
+            if browser:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+
+            return False
+    
+    def _validate_component_structure(self, component: Dict[str, Any]) -> bool:
+        """
+        验证组件结构。
+        支持 Python 组件（_python_component_class）、发现模式、普通 YAML 步骤组件。
+        """
+        # Python 组件：由 adapter 执行，仅需 name/platform/type
+        if component.get("_python_component_class"):
+            return bool(component.get("name") and component.get("platform") and component.get("type"))
+
+        # 检查必填字段
+        if "name" not in component:
+            logger.error("Missing required field: name")
+            return False
+
+        # Phase 12: 判断是否为发现模式组件
+        component_type = component.get("type", "")
+        is_discovery_mode = component_type in ['date_picker', 'filters'] and 'open_action' in component
+        
+        if is_discovery_mode:
+            # 发现模式组件验证
+            return self._validate_discovery_component(component)
+        
+        # 普通模式组件需要 steps
+        if 'steps' not in component:
+            logger.error(f"Missing required field: steps")
+            return False
+        
+        steps = component.get('steps', [])
+        
+        for i, step in enumerate(steps):
+            if 'action' not in step:
+                logger.error(f"Step {i+1} missing 'action' field")
+                return False
+            
+            action = step['action']
+            
+            # 验证特定动作的必填字段
+            if action == 'navigate' and 'url' not in step:
+                logger.error(f"Step {i+1}: 'navigate' requires 'url'")
+                return False
+            
+            # [OK] v4.7.0修复：wait步骤验证逻辑（与executor_v2.py对齐）
+            if action == 'wait':
+                wait_type = step.get('type', 'timeout')
+                
+                if wait_type == 'timeout':
+                    # 固定延迟必须有duration字段
+                    if 'duration' not in step:
+                        logger.error(f"Step {i+1}: wait步骤type='timeout'时必须提供'duration'字段")
+                        return False
+                
+                elif wait_type == 'selector':
+                    # 等待元素必须有selector字段
+                    if 'selector' not in step:
+                        logger.error(f"Step {i+1}: wait步骤type='selector'时必须提供'selector'字段")
+                        return False
+                    
+                    # 检测TODO占位符
+                    selector_val = step.get('selector', '')
+                    if 'TODO' in str(selector_val).upper():
+                        logger.error(f"Step {i+1}: wait步骤包含TODO占位符，请手动完善或标记为optional")
+                        logger.error(f"  当前selector: {selector_val}")
+                        return False
+                
+                elif wait_type == 'navigation':
+                    # 页面加载等待，可选的wait_until字段
+                    pass
+                
+                else:
+                    logger.error(f"Step {i+1}: wait步骤不支持的type: {wait_type}，支持: timeout/selector/navigation")
+                    return False
+            
+            if action in ['click', 'fill'] and 'selector' not in step:
+                logger.error(f"Step {i+1}: '{action}' requires 'selector'")
+                return False
+            
+            if action == 'fill' and 'value' not in step:
+                logger.error(f"Step {i+1}: 'fill' requires 'value'")
+                return False
+        
+        # [*] v4.7.1新增：检查 success_criteria 的有效性
+        success_criteria = component.get('success_criteria', [])
+        
+        if not success_criteria:
+            logger.warning("No success_criteria defined. Test will only check if steps complete without errors.")
+            logger.info("Tip: Add success_criteria to verify the component achieved its goal")
+        
+        for i, criterion in enumerate(success_criteria):
+            criterion_type = criterion.get('type')
+            value = criterion.get('value', '')
+            
+            # 检查 TODO 占位符
+            if 'TODO' in str(value).upper():
+                if criterion.get('optional', False):
+                    logger.warning(f"Criterion {i+1}: Contains TODO placeholder (optional, will be skipped)")
+                else:
+                    logger.error(f"Criterion {i+1}: Contains TODO placeholder but is not marked as optional")
+                    logger.error(f"  Current value: {value}")
+                    logger.info(f"  Fix: Either fill in the actual value OR set 'optional: true'")
+                    return False
+            
+            # 检查空值
+            if not value and criterion_type in ['url_contains', 'element_exists', 'element_visible']:
+                if not criterion.get('optional', False):
+                    logger.warning(f"Criterion {i+1}: '{criterion_type}' has empty value (not optional, may cause test to fail)")
+                    logger.info(f"  Tip: Use Playwright Inspector to find the right selector or URL pattern")
+            
+            # [*] 推荐使用官方 role-based selector
+            if criterion_type in ['element_exists', 'element_visible']:
+                selector = criterion.get('selector', '')
+                if selector and not any(prefix in selector for prefix in ['role=', 'text=', 'label=', 'placeholder=']):
+                    logger.info(f"Tip for criterion {i+1}: Consider using Playwright's role-based selectors:")
+                    logger.info(f"     role=button[name='Login']  (recommended)")
+                    logger.info(f"     text='Welcome'")
+                    logger.info(f"     label='Email'")
+        
+        return True
+    
+    async def _test_with_browser(self, component: Dict[str, Any], result: ComponentTestResult) -> bool:
+        """
+        使用浏览器执行测试（异步版本，符合Playwright官方建议）
+        
+        Phase 12.5增强：
+        1. 导出/日期/筛选器组件使用持久化浏览器上下文
+        2. 登录后立即清理弹窗和通知
+        3. 增强错误诊断信息
+        
+        Args:
+            component: 组件配置
+            result: 测试结果对象
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+        except ImportError:
+            logger.warning("Playwright not installed, skipping browser test")
+            result.status = TestStatus.SKIPPED
+            result.error = "Playwright not installed"
+            return True  # 标记为跳过但不失败
+        
+        account_info = self.get_account_info()
+        
+        # #region agent log
+        import json
+        with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps({'location':'test_component.py:293','message':'_test_with_browser: got account_info','data':{'has_account':account_info is not None,'account_id':self.account_id},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H'})+'\n')
+        # #endregion
+        
+        # Phase 12.5: 判断是否需要使用持久化上下文
+        component_type = component.get('type', '')
+        persistent_context_mode = self._persistent_context_mode(component_type)
+        use_persistent_context = persistent_context_mode is not None
+        ephemeral_profile_dir = None
+        session_owner_id = None
+
+        if use_persistent_context:
+            try:
+                session_owner_id = self._get_session_owner_id(account_info)
+            except ValueError as e:
+                result.error = str(e)
+                return False
+        
+        browser = None  # 持久化上下文不直接管理浏览器
+        
+        try:
+            async with async_playwright() as p:
+                # #region agent log
+                with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({'location':'test_component.py:301','message':'_test_with_browser: launching browser','data':{'headless':self.headless,'use_persistent':use_persistent_context},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'G'})+'\n')
+                # #endregion
+                
+                # Phase 12.5: 根据组件类型选择浏览器上下文
+                if use_persistent_context:
+                    # 使用持久化浏览器上下文（复用登录状态）
+                    try:
+                        from modules.utils.sessions.device_fingerprint import DeviceFingerprintManager
+                        fingerprint_manager = DeviceFingerprintManager()
+                        
+                        # 获取 profile 路径
+                        account_id = session_owner_id or self.account_id or account_info.get('account_id', 'default')
+                        if persistent_context_mode == "reused":
+                            from modules.utils.sessions.session_manager import SessionManager
+
+                            session_manager = SessionManager()
+                            profile_path = session_manager.get_persistent_profile_path(self.platform, account_id)
+                            logger.info(f"[PERSISTENT] Using persistent context: {profile_path}")
+                            print(f"  [PERSISTENT] Using persistent session for {self.platform}/{account_id}")
+                        else:
+                            ephemeral_profile_dir = tempfile.mkdtemp(
+                                prefix=f"{self.platform}_{component_type}_",
+                                dir=str(self.output_dir),
+                            )
+                            profile_path = Path(ephemeral_profile_dir)
+                            logger.info(f"[PERSISTENT] Using ephemeral persistent context: {profile_path}")
+                            print(f"  [PERSISTENT] Using ephemeral persistent session for {self.platform}/{account_id}")
+                        
+                        # 获取指纹配置
+                        fingerprint = fingerprint_manager.get_or_create_fingerprint(
+                            self.platform, account_id, account_info
+                        )
+                        
+                        # 构建上下文选项
+                        context_options = {
+                            'viewport': None if not self.headless else fingerprint.get('viewport', {'width': 1920, 'height': 1080}),
+                            'user_agent': fingerprint.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'),
+                            'locale': fingerprint.get('locale', 'zh-CN'),
+                            'timezone_id': fingerprint.get('timezone', 'Asia/Shanghai'),
+                        }
+                        
+                        # 使用 launch_persistent_context
+                        context = await p.chromium.launch_persistent_context(
+                            user_data_dir=str(profile_path),
+                            **self._build_browser_launch_kwargs(
+                                args=['--start-maximized'] if not self.headless else [],
+                                slow_mo=50,
+                            ),
+                            **context_options
+                        )
+                        
+                        # 持久化上下文可能已有页面
+                        if context.pages:
+                            page = context.pages[0]
+                            # 关闭多余页面
+                            for extra_page in context.pages[1:]:
+                                await extra_page.close()
+                        else:
+                            page = await context.new_page()
+                            
+                    except Exception as e:
+                        logger.warning(f"Failed to create persistent context: {e}, falling back to normal context")
+                        print(f"  [WARN] Persistent context failed, using normal context")
+                        # 降级到普通上下文
+                        browser = await p.chromium.launch(
+                            **self._build_browser_launch_kwargs(
+                                args=['--start-maximized'] if not self.headless else []
+                            )
+                        )
+                        context = await browser.new_context(
+                            viewport=None if not self.headless else {'width': 1920, 'height': 1080}
+                        )
+                        page = await context.new_page()
+                else:
+                    # 普通模式：创建新的浏览器上下文（有头时最大化便于观察）
+                    browser = await p.chromium.launch(
+                        **self._build_browser_launch_kwargs(
+                            args=['--start-maximized'] if not self.headless else []
+                        )
+                    )
+                    context = await browser.new_context(
+                        viewport=None if not self.headless else {'width': 1920, 'height': 1080}
+                    )
+                    page = await context.new_page()
+                
+                # #region agent log
+                with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({'location':'test_component.py:315','message':'_test_with_browser: browser ready','data':{'use_persistent':use_persistent_context},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'G'})+'\n')
+                # #endregion
+                
+                # Phase 12: 判断是否为发现模式组件
+                is_discovery_mode = component_type in ['date_picker', 'filters'] and 'open_action' in component
+                
+                if is_discovery_mode:
+                    # 发现模式组件测试
+                    discovery_result = await self._test_discovery_component(page, component, result, account_info)
+                    if browser:
+                        await browser.close()
+                    else:
+                        await context.close()
+                    return discovery_result
+                
+                steps = component.get('steps', [])
+                
+                # Phase 12.5: 导出组件自动登录和弹窗清理
+                if component_type == 'export' and not self.skip_login:
+                    print(f"\n  [LOGIN] Starting auto login for export component...")
+                    login_success = await self._execute_auto_login(page, account_info)
+                    if not login_success:
+                        result.error = "Auto login failed for export component"
+                        print(f"  [FAIL] Auto login failed")
+                        if browser:
+                            await browser.close()
+                        else:
+                            await context.close()
+                        return False
+                    print(f"  [OK] Auto login completed")
+                    
+                    # Phase 12.5: 登录后立即清理弹窗和通知
+                    print(f"  [POPUP] Cleaning up popups and notifications...")
+                    await self._handle_popups_and_notifications(page)
+                    await page.wait_for_timeout(1000)  # 等待页面稳定
+                    print(f"  [OK] Popup cleanup completed\n")
+            
+                # #region agent log
+                with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({'location':'test_component.py:320','message':'_test_with_browser: starting step loop','data':{'steps_count':len(steps),'steps_summary':[{'action':s.get('action'),'selector':s.get('selector')} for s in steps]},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H5,H6'})+'\n')
+                # #endregion
+                
+                for i, step in enumerate(steps):
+                    step_id = step.get('id', f'step_{i+1}')
+                    action = step.get('action', 'unknown')
+                    is_optional = step.get('optional', False)  # [OK] 读取optional标记
+                    
+                    # [*] v4.7.3: 步骤开始回调（异步）
+                    if self.progress_callback:
+                        try:
+                            if asyncio.iscoroutinefunction(self.progress_callback):
+                                await self.progress_callback('step_start', {
+                                    'step_index': i + 1,
+                                    'step_total': len(steps),
+                                    'step_id': step_id,
+                                    'action': action,
+                                    'optional': is_optional,
+                                    'selector': step.get('selector', ''),
+                                    'comment': step.get('comment', '')
+                                })
+                            else:
+                                self.progress_callback('step_start', {
+                                    'step_index': i + 1,
+                                    'step_total': len(steps),
+                                    'step_id': step_id,
+                                    'action': action,
+                                    'optional': is_optional,
+                                    'selector': step.get('selector', ''),
+                                    'comment': step.get('comment', '')
+                                })
+                        except Exception as cb_err:
+                            logger.warning(f"Progress callback error (step_start): {cb_err}")
+                    
+                    # #region agent log
+                    with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                        f.write(json.dumps({'location':'test_component.py:330','message':f'_test_with_browser: executing step {i+1}','data':{'step_id':step_id,'action':action,'has_selector':step.get('selector') is not None,'is_optional':is_optional},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'I'})+'\n')
+                    # #endregion
+                    
+                    step_result = StepResult(
+                        step_id=step_id,
+                        action=action,
+                        status=TestStatus.RUNNING
+                    )
+                    
+                    start_time = datetime.now()
+                    max_retries = step.get('max_retries', 2)  # 默认重试2次
+                    last_error = None
+                    step_succeeded = False
+                    
+                    # [*] v4.7.4: 带弹窗处理的重试机制
+                    for retry_count in range(max_retries + 1):
+                        try:
+                            await self._execute_step(page, step, account_info)
+                            step_succeeded = True
+                            step_result.status = TestStatus.PASSED
+                            result.steps_passed += 1
+                            if retry_count > 0:
+                                print(f"  [OK] Step {i+1}: {action} (retry {retry_count} succeeded)")
+                            else:
+                                print(f"  [OK] Step {i+1}: {action}")
+                            
+                            # [*] v4.7.3: 步骤成功回调（异步）
+                            if self.progress_callback:
+                                try:
+                                    if asyncio.iscoroutinefunction(self.progress_callback):
+                                        await self.progress_callback('step_success', {
+                                            'step_index': i + 1,
+                                            'step_id': step_id,
+                                            'action': action,
+                                            'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
+                                            'retry_count': retry_count
+                                        })
+                                    else:
+                                        self.progress_callback('step_success', {
+                                            'step_index': i + 1,
+                                            'step_id': step_id,
+                                            'action': action,
+                                            'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
+                                            'retry_count': retry_count
+                                        })
+                                except Exception as cb_err:
+                                    logger.warning(f"Progress callback error (step_success): {cb_err}")
+                            break  # 成功，退出重试循环
+                            
+                        except Exception as e:
+                            last_error = e
+                            # 如果不是最后一次重试，尝试处理弹窗后重试
+                            if retry_count < max_retries:
+                                logger.info(f"[RETRY] Step {i+1} failed ({type(e).__name__}), attempting popup handling before retry {retry_count + 1}...")
+                                print(f"  [RETRY] Step {i+1}: {action} - Attempting popup handling...")
+                                
+                                # [*] v4.7.4: 弹窗处理 - 尝试关闭弹窗/通知
+                                popup_handled = await self._handle_popups_and_notifications(page)
+                                if popup_handled:
+                                    logger.info(f"[POPUP] Popups handled, retrying step {i+1}")
+                                    print(f"  [POPUP] Cleared popups, retrying...")
+                                    await page.wait_for_timeout(500)  # 等待页面稳定
+                                else:
+                                    logger.info(f"[POPUP] No popups found, retrying anyway...")
+                                    await page.wait_for_timeout(300)
+                                continue  # 重试
+                    
+                    # 如果步骤没有成功，处理失败
+                    if not step_succeeded and last_error:
+                        e = last_error
+                        if isinstance(e, PlaywrightTimeout):
+                            # #region agent log
+                            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                                f.write(json.dumps({'location':'test_component.py:357','message':f'_test_with_browser: step {i+1} timeout','data':{'step_id':step_id,'action':action,'is_optional':is_optional,'error':str(e)},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'I'})+'\n')
+                            # #endregion
+                            
+                            # [OK] 检查是否为可选步骤
+                            if is_optional:
+                                step_result.status = TestStatus.SKIPPED
+                                step_result.error = f"Optional step skipped (timeout): {e}"
+                                print(f"  [SKIP] Step {i+1}: {action} - Optional, skipped")
+                            else:
+                                step_result.status = TestStatus.FAILED
+                                step_result.error = f"Timeout: {e}"
+                                result.steps_failed += 1
+                                print(f"  [FAIL] Step {i+1}: {action} - Timeout (after {max_retries} retries)")
+                                
+                                # Phase 12.4: 打印诊断建议
+                                diagnosis = self._diagnose_failure(step, e)
+                                if diagnosis:
+                                    print(diagnosis)
+                                
+                                if self.screenshot_on_error:
+                                    screenshot_path = await self._save_screenshot(page, component['name'], step_id)
+                                    step_result.screenshot = screenshot_path
+                                    await self._save_failure_artifacts(page, component['name'], step_id)
+                        else:
+                            # #region agent log
+                            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                                f.write(json.dumps({'location':'test_component.py:371','message':f'_test_with_browser: step {i+1} exception','data':{'step_id':step_id,'action':action,'is_optional':is_optional,'error_type':type(e).__name__,'error':str(e)},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'I'})+'\n')
+                            # #endregion
+                            
+                            # [OK] 检查是否为可选步骤
+                            if is_optional:
+                                step_result.status = TestStatus.SKIPPED
+                                step_result.error = f"Optional step skipped: {str(e)[:100]}"
+                                print(f"  [SKIP] Step {i+1}: {action} - Optional, skipped")
+                            else:
+                                step_result.status = TestStatus.FAILED
+                                step_result.error = str(e)
+                                result.steps_failed += 1
+                                print(f"  [FAIL] Step {i+1}: {action} - {e} (after {max_retries} retries)")
+                                
+                                # Phase 12.4: 打印诊断建议
+                                diagnosis = self._diagnose_failure(step, e)
+                                if diagnosis:
+                                    print(diagnosis)
+                                
+                                # [*] v4.7.3: 步骤失败回调（异步）
+                                if self.progress_callback:
+                                    try:
+                                        if asyncio.iscoroutinefunction(self.progress_callback):
+                                            await self.progress_callback('step_failed', {
+                                                'step_index': i + 1,
+                                                'step_id': step_id,
+                                                'action': action,
+                                                'error': str(e)[:200],
+                                                'optional': is_optional
+                                            })
+                                        else:
+                                            self.progress_callback('step_failed', {
+                                                'step_index': i + 1,
+                                                'step_id': step_id,
+                                                'action': action,
+                                                'error': str(e)[:200],
+                                                'optional': is_optional
+                                            })
+                                    except Exception as cb_err:
+                                        logger.warning(f"Progress callback error (step_failed): {cb_err}")
+                                
+                                if self.screenshot_on_error:
+                                    screenshot_path = await self._save_screenshot(page, component['name'], step_id)
+                                    step_result.screenshot = screenshot_path
+                    
+                    # 记录步骤结果
+                    end_time = datetime.now()
+                    step_result.duration_ms = (end_time - start_time).total_seconds() * 1000
+                    result.step_results.append(step_result)
+                    
+                    # [OK] 只有非可选步骤失败才停止测试
+                    if step_result.status == TestStatus.FAILED and not is_optional:
+                        logger.warning(f"Stopping test due to failed required step {i+1}")
+                        break
+                
+                # #region agent log
+                with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({'location':'test_component.py:396','message':'_test_with_browser: all steps completed, closing browser','data':{'steps_total':len(steps),'steps_passed':result.steps_passed,'steps_failed':result.steps_failed,'current_url':page.url if page else None},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H5,H7,H8'})+'\n')
+                # #endregion
+                
+                # [OK] 新增：验证success_criteria（如果有）
+                success_criteria_passed = True
+                if result.steps_failed == 0:  # 只有步骤全部成功才验证
+                    success_criteria = component.get('success_criteria', [])
+                    if success_criteria:
+                        logger.info(f"Verifying {len(success_criteria)} success criteria...")
+                        success_criteria_passed = await self._verify_success_criteria(page, success_criteria)
+                        
+                        if not success_criteria_passed:
+                            logger.warning("Success criteria verification failed")
+                            # 标记为失败，但不增加steps_failed（这不是步骤失败）
+                            result.error = "Success criteria verification failed"
+                
+                # Phase 12.5: 正确关闭浏览器/上下文
+                if browser:
+                    await browser.close()
+                else:
+                    await context.close()
+                
+                return result.steps_failed == 0 and success_criteria_passed
+        
+        except Exception as e:
+            # #region agent log
+            import traceback
+            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({'location':'test_component.py:401','message':'_test_with_browser: EXCEPTION in async with','data':{'error_type':type(e).__name__,'error':str(e),'error_repr':repr(e),'traceback':''.join(traceback.format_tb(e.__traceback__))},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'G'})+'\n')
+            # #endregion
+            logger.error(f"Browser test failed: {e}", exc_info=True)
+            result.error = str(e) if str(e) else type(e).__name__
+            if 'page' in locals() and page is not None:
+                await self._save_failure_artifacts(page, component['name'], 'browser_exception')
+            return False
+        finally:
+            if ephemeral_profile_dir:
+                try:
+                    shutil.rmtree(ephemeral_profile_dir, ignore_errors=True)
+                except Exception as cleanup_err:
+                    logger.warning(f"Failed to cleanup ephemeral persistent context: {cleanup_err}")
+    
+    async def _verify_success_criteria(self, page, success_criteria: list) -> bool:
+        """
+        验证成功标准（登录后的检查点）
+        
+        Args:
+            page: Playwright页面对象
+            success_criteria: 成功标准列表
+            
+        Returns:
+            bool: 是否所有必需的标准都满足
+        """
+        import re
+        
+        for i, criterion in enumerate(success_criteria):
+            criterion_type = criterion.get('type')
+            value = criterion.get('value', '')
+            optional = criterion.get('optional', False)
+            timeout = criterion.get('timeout', 10000)
+            comment = criterion.get('comment', '')
+            
+            logger.info(f"  Checking criterion {i+1}: {criterion_type} - {comment}")
+            
+            try:
+                if criterion_type == 'url_contains':
+                    # URL包含特定文本
+                    current_url = page.url
+                    if value not in current_url:
+                        if optional:
+                            logger.warning(f"    [SKIP] Optional criterion failed: URL does not contain '{value}' (current: {current_url})")
+                            continue
+                        else:
+                            logger.error(f"    [FAIL] URL does not contain '{value}' (current: {current_url})")
+                            return False
+                    logger.info(f"    [OK] URL contains '{value}'")
+                
+                elif criterion_type == 'url_not_contains':
+                    # URL不包含特定文本（如：已离开登录页）
+                    current_url = page.url
+                    if value in current_url:
+                        if optional:
+                            logger.warning(f"    [SKIP] Optional criterion failed: URL still contains '{value}' (current: {current_url})")
+                            continue
+                        else:
+                            logger.error(f"    [FAIL] URL still contains '{value}' (current: {current_url})")
+                            return False
+                    logger.info(f"    [OK] URL does not contain '{value}' (left {value} page)")
+                
+                elif criterion_type == 'url_matches_pattern':
+                    # URL匹配正则表达式
+                    current_url = page.url
+                    if not re.search(value, current_url):
+                        if optional:
+                            logger.warning(f"    [SKIP] Optional criterion failed: URL does not match pattern '{value}' (current: {current_url})")
+                            continue
+                        else:
+                            logger.error(f"    [FAIL] URL does not match pattern '{value}' (current: {current_url})")
+                            return False
+                    logger.info(f"    [OK] URL matches pattern '{value}'")
+                
+                elif criterion_type == 'element_exists':
+                    # 元素存在
+                    selector = criterion.get('selector', value)
+                    try:
+                        await page.wait_for_selector(selector, timeout=timeout, state='visible')
+                        logger.info(f"    [OK] Element exists: {selector}")
+                    except Exception as e:
+                        if optional:
+                            logger.warning(f"    [SKIP] Optional criterion failed: Element not found: {selector}")
+                            continue
+                        else:
+                            logger.error(f"    [FAIL] Element not found: {selector}")
+                            return False
+                
+                elif criterion_type == 'element_not_exists':
+                    # 元素不存在（如：无错误提示）
+                    selector = criterion.get('selector', value)
+                    try:
+                        await page.wait_for_selector(selector, timeout=timeout, state='visible')
+                        # 如果找到了元素，说明条件不满足
+                        if optional:
+                            logger.warning(f"    [SKIP] Optional criterion failed: Element should not exist but found: {selector}")
+                            continue
+                        else:
+                            logger.error(f"    [FAIL] Element should not exist but found: {selector}")
+                            return False
+                    except:
+                        # 超时未找到元素，说明条件满足
+                        logger.info(f"    [OK] Element does not exist: {selector}")
+                
+                elif criterion_type == 'page_contains_text':
+                    # 页面包含文本
+                    try:
+                        await page.wait_for_selector(f"text={value}", timeout=timeout)
+                        logger.info(f"    [OK] Page contains text: '{value}'")
+                    except Exception as e:
+                        if optional:
+                            logger.warning(f"    [SKIP] Optional criterion failed: Page does not contain text: '{value}'")
+                            continue
+                        else:
+                            logger.error(f"    [FAIL] Page does not contain text: '{value}'")
+                            return False
+                
+                else:
+                    logger.warning(f"    [WARN] Unknown criterion type: {criterion_type}")
+            
+            except Exception as e:
+                if optional:
+                    logger.warning(f"    [SKIP] Optional criterion error: {e}")
+                    continue
+                else:
+                    logger.error(f"    [FAIL] Criterion check error: {e}")
+                    return False
+        
+        logger.info(f"[OK] All required success criteria passed")
+        return True
+    
+    def _validate_discovery_component(self, component: Dict[str, Any]) -> bool:
+        """
+        验证发现模式组件结构（Phase 12）
+        
+        Args:
+            component: 组件配置
+            
+        Returns:
+            bool: 是否有效
+        """
+        # 验证 open_action
+        open_action = component.get('open_action')
+        if not open_action or not isinstance(open_action, dict):
+            logger.error("Discovery component missing 'open_action' or not a dictionary")
+            return False
+        
+        if 'selectors' not in open_action and 'action' not in open_action:
+            logger.error("Discovery component 'open_action' must have 'selectors' or 'action'")
+            return False
+        
+        # 验证 available_options
+        available_options = component.get('available_options', [])
+        if not available_options or not isinstance(available_options, list):
+            logger.error("Discovery component missing 'available_options' or not a list")
+            return False
+        
+        if len(available_options) == 0:
+            logger.error("Discovery component must have at least one option")
+            return False
+        
+        for i, option in enumerate(available_options):
+            if 'key' not in option:
+                logger.error(f"Option {i} missing 'key' field")
+                return False
+            if 'text' not in option:
+                logger.error(f"Option {i} missing 'text' field")
+                return False
+        
+        # 验证 test_config（推荐但可选）
+        test_config = component.get('test_config', {})
+        if not test_config:
+            logger.warning("Discovery component missing 'test_config'. Testing may require manual navigation.")
+        else:
+            test_url = test_config.get('test_url', '')
+            test_data_domain = test_config.get('test_data_domain', '')
+            if not test_url and not test_data_domain:
+                logger.warning("test_config has neither 'test_url' nor 'test_data_domain'")
+        
+        logger.info(f"[OK] Discovery component structure valid: {len(available_options)} options")
+        return True
+    
+    async def _test_discovery_component(
+        self, 
+        page, 
+        component: Dict[str, Any], 
+        result: ComponentTestResult,
+        account_info: Dict[str, Any]
+    ) -> bool:
+        """
+        测试发现模式组件（Phase 12）
+        
+        流程：
+        1. 导航到测试页面（使用 test_config）
+        2. 执行 open_action（打开选择器）
+        3. 循环测试每个 available_option
+        
+        Args:
+            page: Playwright页面对象
+            component: 组件配置
+            result: 测试结果对象
+            account_info: 账号信息
+            
+        Returns:
+            bool: 是否成功
+        """
+        from playwright.async_api import TimeoutError as PlaywrightTimeout
+        
+        component_type = component.get('type', 'unknown')
+        open_action = component.get('open_action', {})
+        available_options = component.get('available_options', [])
+        test_config = component.get('test_config', {})
+        
+        result.steps_total = len(available_options) + 1  # open_action + options
+        
+        print(f"\n[TEST] Discovery Mode: {self.platform}/{component.get('name')} ({len(available_options)} options)")
+        
+        try:
+            # Phase 12.1: 自动登录（如果未跳过）
+            if not self.skip_login:
+                print(f"\n  [LOGIN] Starting auto login...")
+                login_success = await self._execute_auto_login(page, account_info)
+                if not login_success:
+                    result.error = "Auto login failed"
+                    print(f"  [FAIL] Auto login failed")
+                    return False
+                print(f"  [OK] Auto login completed")
+                
+                # Phase 12.5: 登录后立即清理弹窗和通知
+                print(f"  [POPUP] Cleaning up popups and notifications...")
+                await self._handle_popups_and_notifications(page)
+                await page.wait_for_timeout(1000)  # 等待页面稳定
+                print(f"  [OK] Popup cleanup completed\n")
+            
+            # 步骤1: 导航到测试页面
+            nav_success = await self._navigate_to_test_page(page, test_config, account_info)
+            if not nav_success:
+                result.error = "Failed to navigate to test page"
+                return False
+            
+            print(f"  [OK] Navigated to test page")
+            
+            # 等待页面稳定
+            await page.wait_for_timeout(2000)
+            
+            # 步骤2: 测试 open_action
+            open_action_result = StepResult(
+                step_id='open_action',
+                action='click',
+                status=TestStatus.RUNNING
+            )
+            start_time = datetime.now()
+            
+            try:
+                await self._execute_open_action(page, open_action)
+                open_action_result.status = TestStatus.PASSED
+                result.steps_passed += 1
+                print(f"  [OK] Open action executed successfully")
+                
+                # 等待选择器面板出现
+                await page.wait_for_timeout(500)
+                
+            except Exception as e:
+                open_action_result.status = TestStatus.FAILED
+                open_action_result.error = str(e)
+                result.steps_failed += 1
+                result.error = f"Open action failed: {e}"
+                print(f"  [FAIL] Open action failed: {e}")
+                
+                if self.screenshot_on_error:
+                    screenshot_path = await self._save_screenshot(page, component['name'], 'open_action')
+                    open_action_result.screenshot = screenshot_path
+                
+                return False
+            finally:
+                open_action_result.duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+                result.step_results.append(open_action_result)
+            
+            # 步骤3: 测试每个选项
+            options_tested = 0
+            options_passed = 0
+            
+            for i, option in enumerate(available_options):
+                option_key = option.get('key', f'option_{i}')
+                option_text = option.get('text', option_key)
+                
+                option_result = StepResult(
+                    step_id=f'option_{option_key}',
+                    action='select_option',
+                    status=TestStatus.RUNNING
+                )
+                option_start = datetime.now()
+                
+                try:
+                    # 如果不是第一个选项，需要重新打开选择器
+                    if i > 0:
+                        await self._execute_open_action(page, open_action)
+                        await page.wait_for_timeout(500)
+                    
+                    # 点击选项
+                    await self._click_option(page, option)
+                    
+                    options_tested += 1
+                    options_passed += 1
+                    option_result.status = TestStatus.PASSED
+                    result.steps_passed += 1
+                    print(f"  [OK] Option '{option_key}' ({option_text}) - success")
+                    
+                    # 等待选择器关闭
+                    await page.wait_for_timeout(800)
+                    
+                except Exception as e:
+                    options_tested += 1
+                    option_result.status = TestStatus.FAILED
+                    option_result.error = str(e)
+                    result.steps_failed += 1
+                    print(f"  [FAIL] Option '{option_key}' ({option_text}) - {e}")
+                    
+                    if self.screenshot_on_error:
+                        screenshot_path = await self._save_screenshot(page, component['name'], f'option_{option_key}')
+                        option_result.screenshot = screenshot_path
+                    
+                finally:
+                    option_result.duration_ms = (datetime.now() - option_start).total_seconds() * 1000
+                    result.step_results.append(option_result)
+            
+            # 汇总结果
+            print(f"\n  [SUMMARY] {options_passed}/{options_tested} options passed")
+            
+            return result.steps_failed == 0
+            
+        except Exception as e:
+            logger.error(f"Discovery component test failed: {e}", exc_info=True)
+            result.error = str(e)
+            return False
+    
+    async def _navigate_to_test_page(
+        self, 
+        page, 
+        test_config: Dict[str, Any],
+        account_info: Dict[str, Any]
+    ) -> bool:
+        """
+        导航到测试页面（Phase 12）
+        
+        Args:
+            page: Playwright页面对象
+            test_config: 测试配置
+            account_info: 账号信息
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            test_url = test_config.get('test_url', '')
+            test_data_domain = test_config.get('test_data_domain', '')
+            
+            if test_url:
+                # 使用 test_url 直接导航
+                if account_info:
+                    test_url = self._replace_variables(test_url, account_info)
+                
+                logger.info(f"[NAV] Navigating to test URL: {test_url}")
+                await page.goto(test_url, wait_until='domcontentloaded', timeout=30000)
+                
+                # 等待页面加载
+                try:
+                    await page.wait_for_load_state('networkidle', timeout=10000)
+                except:
+                    pass
+                
+                return True
+                
+            elif test_data_domain:
+                # 使用 navigation 组件导航
+                logger.info(f"[NAV] Using navigation component for data_domain: {test_data_domain}")
+                
+                # 尝试加载 navigation 组件
+                try:
+                    nav_class = self._resolve_versioned_component_class(
+                        f"{self.platform}/navigation",
+                        "navigation",
+                    )
+                    if nav_class:
+                        adapter = create_adapter(
+                            platform=self.platform,
+                            account=account_info,
+                            config=self._build_runtime_component_config(),
+                            is_test_mode=True,
+                            override_navigation_class=nav_class,
+                        )
+                        nav_result = await adapter.navigate(page, test_data_domain)
+                        return bool(nav_result.success)
+
+                    nav_component = self.component_loader.load(f"{self.platform}/navigation")
+                    nav_steps = nav_component.get('steps', [])
+                    
+                    # 替换 data_domain 参数
+                    params = {'data_domain': test_data_domain}
+                    if account_info:
+                        params.update({'account': account_info})
+                    
+                    # 执行导航步骤
+                    for step in nav_steps:
+                        await self._execute_step(page, step, account_info)
+                    
+                    return True
+                    
+                except FileNotFoundError:
+                    logger.warning(f"Navigation component not found for {self.platform}, using default URL")
+                    # 降级：使用默认URL
+                    if account_info and 'login_url' in account_info:
+                        default_url = f"{account_info['login_url']}/portal/sale/order"
+                        logger.info(f"[NAV] Falling back to default URL: {default_url}")
+                        await page.goto(default_url, wait_until='domcontentloaded', timeout=30000)
+                        return True
+                    return False
+            else:
+                # 没有配置，使用默认URL
+                logger.warning("No test_config provided, using default URL")
+                if account_info and 'login_url' in account_info:
+                    default_url = f"{account_info['login_url']}/portal/sale/order"
+                    logger.info(f"[NAV] Using default URL: {default_url}")
+                    await page.goto(default_url, wait_until='domcontentloaded', timeout=30000)
+                    return True
+                return False
+                
+        except Exception as e:
+            logger.error(f"Navigation failed: {e}")
+            return False
+    
+    async def _execute_open_action(self, page, open_action: Dict[str, Any]) -> None:
+        """
+        执行打开动作（Phase 12）
+        
+        Args:
+            page: Playwright页面对象
+            open_action: 打开动作配置
+        """
+        selectors = open_action.get('selectors', [])
+        
+        for selector_info in selectors:
+            selector_type = selector_info.get('type', 'css')
+            selector_value = selector_info.get('value', '')
+            
+            try:
+                if selector_type == 'text':
+                    locator = page.get_by_text(selector_value)
+                elif selector_type == 'role':
+                    # 解析 role 选择器
+                    if '[name=' in selector_value:
+                        import re
+                        match = re.match(r'(\w+)\[name=([^\]]+)\]', selector_value)
+                        if match:
+                            role, name = match.groups()
+                            locator = page.get_by_role(role, name=name)
+                        else:
+                            locator = page.locator(f'[role="{selector_value}"]')
+                    else:
+                        locator = page.locator(f'[role="{selector_value}"]')
+                else:
+                    # css 或其他
+                    locator = page.locator(selector_value)
+                
+                count = await locator.count()
+                if count > 0:
+                    await locator.first.wait_for(state='visible', timeout=5000)
+                    await locator.first.click(timeout=5000)
+                    logger.info(f"[OK] Open action clicked: {selector_type}={selector_value}")
+                    return
+                    
+            except Exception as e:
+                logger.debug(f"Selector failed: {selector_type}={selector_value}, error: {e}")
+                continue
+        
+        # 如果所有选择器都失败
+        raise Exception(f"Failed to execute open_action: no valid selector found")
+    
+    async def _click_option(self, page, option: Dict[str, Any]) -> None:
+        """
+        点击选项（Phase 12）
+        
+        Args:
+            page: Playwright页面对象
+            option: 选项配置
+        """
+        selectors = option.get('selectors', [])
+        option_text = option.get('text', '')
+        
+        # 优先尝试配置的选择器
+        for selector_info in selectors:
+            selector_type = selector_info.get('type', 'css')
+            selector_value = selector_info.get('value', '')
+            
+            try:
+                if selector_type == 'text':
+                    locator = page.get_by_text(selector_value, exact=True)
+                elif selector_type == 'role':
+                    locator = page.get_by_role('option', name=selector_value)
+                else:
+                    locator = page.locator(selector_value)
+                
+                count = await locator.count()
+                if count > 0:
+                    await locator.first.wait_for(state='visible', timeout=5000)
+                    await locator.first.click(timeout=5000)
+                    logger.info(f"[OK] Option clicked: {selector_type}={selector_value}")
+                    return
+                    
+            except Exception as e:
+                logger.debug(f"Option selector failed: {selector_type}={selector_value}, error: {e}")
+                continue
+        
+        # 降级：使用文本定位
+        if option_text:
+            try:
+                locator = page.get_by_text(option_text, exact=True)
+                count = await locator.count()
+                if count > 0:
+                    await locator.first.click(timeout=5000)
+                    logger.info(f"[OK] Option clicked by text: {option_text}")
+                    return
+            except Exception as e:
+                logger.debug(f"Text fallback failed: {option_text}, error: {e}")
+        
+        raise Exception(f"Failed to click option '{option.get('key')}': no valid selector found")
+    
+    async def _execute_auto_login(self, page, account_info: Dict[str, Any]) -> bool:
+        """
+        执行自动登录（Phase 12.1 修复）
+        
+        Args:
+            page: Playwright页面对象
+            account_info: 账号信息
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            login_class = self._resolve_versioned_component_class(
+                f"{self.platform}/login",
+                "login",
+            )
+            if login_class:
+                adapter = create_adapter(
+                    platform=self.platform,
+                    account=account_info,
+                    config=self._build_runtime_component_config(),
+                    is_test_mode=True,
+                    override_login_class=login_class,
+                )
+                login_result = await adapter.login(page)
+                if login_result.success:
+                    await page.wait_for_timeout(2000)
+                    return True
+                logger.error(f"Versioned auto login failed: {login_result.message}")
+                print(f"    [FAIL] Versioned auto login failed: {login_result.message}")
+                return False
+
+            # 加载登录组件
+            login_component = self.component_loader.load(f"{self.platform}/login")
+            login_steps = login_component.get('steps', [])
+            
+            logger.info(f"[LOGIN] Executing login component ({len(login_steps)} steps)")
+            
+            # 执行登录步骤
+            for i, step in enumerate(login_steps):
+                try:
+                    await self._execute_step(page, step, account_info)
+                    print(f"    [OK] Login step {i+1}: {step.get('action')}")
+                except Exception as e:
+                    # 检查是否可选步骤
+                    if step.get('optional', False):
+                        print(f"    [SKIP] Login step {i+1}: {step.get('action')} (optional)")
+                        continue
+                    else:
+                        logger.error(f"Login step {i+1} failed: {e}")
+                        print(f"    [FAIL] Login step {i+1}: {step.get('action')} - {e}")
+                        return False
+            
+            # 等待登录完成
+            await page.wait_for_timeout(2000)
+            
+            return True
+            
+        except FileNotFoundError:
+            logger.error(f"Login component not found for {self.platform}")
+            print(f"    [FAIL] Login component not found: {self.platform}/login")
+            return False
+        except Exception as e:
+            logger.error(f"Auto login failed: {e}")
+            print(f"    [FAIL] Auto login exception: {e}")
+            return False
+    
+    async def _execute_step(self, page, step: Dict[str, Any], account_info: Dict[str, Any]):
+        """
+        执行单个步骤（使用Playwright官方API + 完整等待机制）
+        
+        Args:
+            page: Playwright页面对象
+            step: 步骤配置
+            account_info: 账号信息
+        """
+        action = step['action']
+        selector = step.get('selector')
+        value = step.get('value', '')
+        timeout = step.get('timeout', 30000)
+        
+        # 替换变量
+        if account_info and value:
+            value = self._replace_variables(value, account_info)
+        
+        if action == 'navigate' or action == 'goto':
+            url = step.get('url', '')
+            if account_info:
+                url = self._replace_variables(url, account_info)
+            
+            # #region agent log
+            import json
+            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({'location':'test_component.py:_execute_step:navigate','message':'Starting navigation','data':{'url':url,'action':action},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H8'})+'\n')
+            # #endregion
+            
+            # 修复1：完整的页面加载等待
+            await page.goto(url, wait_until='domcontentloaded', timeout=timeout)
+            
+            # 等待网络空闲（确保所有资源加载完成）
+            try:
+                await page.wait_for_load_state('networkidle', timeout=10000)
+            except:
+                pass  # 如果超时也继续，某些页面可能一直有网络请求
+            
+            # 额外等待1秒确保JavaScript渲染完成
+            await page.wait_for_timeout(1000)
+            
+            # #region agent log
+            with open(r'f:\Vscode\python_programme\AI_code\xihong_erp\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({'location':'test_component.py:_execute_step:navigate_done','message':'Navigation completed','data':{'final_url':page.url},'timestamp':datetime.now().timestamp()*1000,'sessionId':'debug-session','hypothesisId':'H8'})+'\n')
+            # #endregion
+            
+            logger.info(f"[OK] Page loaded and ready: {url}")
+        
+        elif action == 'click':
+            # 修复2：使用Playwright官方API
+            locator = await self._get_playwright_locator(page, selector)
+            
+            # 等待元素可见且可交互
+            await locator.wait_for(state='visible', timeout=timeout)
+            await locator.scroll_into_view_if_needed(timeout=timeout)
+            
+            await locator.click(timeout=timeout)
+        
+        elif action == 'fill':
+            # 修复2：使用Playwright官方API
+            locator = await self._get_playwright_locator(page, selector)
+            
+            # 等待元素可见且可交互
+            await locator.wait_for(state='visible', timeout=timeout)
+            await locator.scroll_into_view_if_needed(timeout=timeout)
+            
+            # 先点击聚焦，再清空，再填充
+            await locator.click(timeout=timeout)
+            await locator.fill('', timeout=timeout)  # 清空
+            await locator.fill(value, timeout=timeout)
+        
+        elif action == 'wait':
+            # [OK] v4.7.0修复：与executor_v2.py对齐，使用Playwright官方API
+            # 支持三种等待类型：
+            # 1. type='timeout': 固定时间延迟（毫秒）
+            # 2. type='selector': 等待元素出现
+            # 3. type='navigation': 等待页面加载完成
+            wait_type = step.get('type', 'timeout')
+            
+            if wait_type == 'timeout':
+                duration = step.get('duration', 1000)
+                logger.info(f"[WAIT] 等待 {duration}ms（固定延迟）")
+                await page.wait_for_timeout(duration)
+            
+            elif wait_type == 'selector':
+                selector = step.get('selector')
+                if not selector:
+                    raise ValueError("wait步骤type='selector'时必须提供selector字段")
+                
+                state = step.get('state', 'visible')
+                logger.info(f"[WAIT] 等待元素出现: {selector} (state={state})")
+                await page.wait_for_selector(selector, state=state, timeout=timeout)
+            
+            elif wait_type == 'navigation':
+                wait_until = step.get('wait_until', 'load')
+                logger.info(f"[WAIT] 等待页面加载完成 (wait_until={wait_until})")
+                await page.wait_for_load_state(wait_until, timeout=timeout)
+            
+            else:
+                raise ValueError(f"wait步骤不支持的type: {wait_type}，支持: timeout/selector/navigation")
+        
+        elif action == 'wait_for_navigation':
+            await page.wait_for_load_state('domcontentloaded', timeout=timeout)
+        
+        elif action == 'screenshot':
+            await page.screenshot(path=step.get('path', 'screenshot.png'))
+        
+        else:
+            logger.warning(f"Unknown action: {action}")
+    
+    async def _get_playwright_locator(self, page, selector: str):
+        """
+        使用Playwright官方API定位元素（推荐方式）
+        
+        优先级：
+        1. get_by_role() - 官方推荐，最稳定
+        2. get_by_label() - 表单元素
+        3. get_by_text() - 文本定位
+        4. locator() - 通用定位
+        
+        Args:
+            page: Playwright页面对象
+            selector: 选择器字符串
+            
+        Returns:
+            Locator对象
+            
+        Note:
+            [*] v4.7.3修复：使用 await locator.count() 正确检查元素存在
+        """
+        import re
+        
+        # 策略1: Playwright官方 get_by_role API
+        # 格式: role=textbox[name=手机号/子账号/邮箱]
+        if 'role=' in selector and '[name=' in selector:
+            match = re.match(r'role=(\w+)\[name=([^\]]+)\]', selector)
+            if match:
+                role, name = match.groups()
+                try:
+                    logger.debug(f"[Playwright Official] get_by_role('{role}', name='{name}')")
+                    locator = page.get_by_role(role, name=name)
+                    
+                    # [*] 修复：异步API需要await
+                    count = await locator.count()
+                    if count > 0:
+                        logger.info(f"[OK] Official API found element: get_by_role('{role}', name='{name}')")
+                        return locator
+                    else:
+                        logger.warning(f"[WARN] Element not found with get_by_role('{role}', name='{name}')")
+                except Exception as e:
+                    logger.warning(f"[WARN] get_by_role failed: {str(e)[:100]}")
+        
+        # 策略2: Playwright get_by_label API
+        # 格式: label=密码
+        if selector.startswith('label='):
+            label_text = selector[6:]
+            try:
+                logger.debug(f"[Playwright Official] get_by_label('{label_text}')")
+                locator = page.get_by_label(label_text)
+                count = await locator.count()
+                if count > 0:
+                    logger.info(f"[OK] Official API found element: get_by_label('{label_text}')")
+                    return locator
+            except Exception as e:
+                logger.warning(f"[WARN] get_by_label failed: {str(e)[:100]}")
+        
+        # 策略3: Playwright get_by_text API
+        # 格式: text=立即登录
+        if selector.startswith('text='):
+            text = selector[5:]
+            try:
+                logger.debug(f"[Playwright Official] get_by_text('{text}')")
+                locator = page.get_by_text(text)
+                count = await locator.count()
+                if count > 0:
+                    logger.info(f"[OK] Official API found element: get_by_text('{text}')")
+                    return locator
+            except Exception as e:
+                logger.warning(f"[WARN] get_by_text failed: {str(e)[:100]}")
+        
+        # 策略4: 通用 locator() API（降级方案）
+        # 支持CSS selector、XPath等
+        try:
+            logger.debug(f"[Playwright] locator('{selector}')")
+            locator = page.locator(selector).first
+            count = await locator.count()
+            if count > 0:
+                logger.info(f"[OK] Generic locator found element: {selector}")
+                return locator
+        except Exception as e:
+            logger.warning(f"[WARN] Generic locator failed: {str(e)[:100]}")
+        
+        # 策略5: 最后尝试 - CSS selector with name attribute
+        if 'name=' in selector:
+            name_match = re.search(r'\[name=([^\]]+)\]', selector)
+            if name_match:
+                name = name_match.group(1)
+                css_selector = f'[name="{name}"]'
+                try:
+                    logger.debug(f"[CSS Fallback] locator('{css_selector}')")
+                    locator = page.locator(css_selector).first
+                    count = await locator.count()
+                    if count > 0:
+                        logger.info(f"[OK] CSS fallback found element: {css_selector}")
+                        return locator
+                except Exception as e:
+                    logger.warning(f"[WARN] CSS fallback failed: {str(e)[:100]}")
+        
+        # 所有策略都失败
+        error_msg = (
+            f"[ERROR] Cannot locate element with selector: {selector}\n"
+            f"[TIP] The element might not exist yet, or the selector format is incorrect.\n"
+            f"[TIP] Supported formats:\n"
+            f"  - role=button[name=\u767b\u5f55]\n"
+            f"  - label=\u5bc6\u7801\n"
+            f"  - text=\u7acb\u5373\u767b\u5f55\n"
+            f"  - CSS selector: .class-name\n"
+            f"  - XPath: xpath=//button[@name='login']"
+        )
+        raise Exception(error_msg)
+    
+    
+    async def _handle_popups_and_notifications(self, page, max_attempts: int = 3) -> bool:
+        """
+        处理弹窗和通知（v4.7.5增强）
+        
+        Phase 12.5增强：
+        1. 多轮清理弹窗（最多3轮）
+        2. 增加更多弹窗选择器（新用户引导等）
+        3. 打印清理日志
+        
+        尝试关闭常见的弹窗、通知、遮罩层：
+        1. 按 ESC 键
+        2. 点击常见关闭按钮
+        3. 点击遮罩层外部
+        
+        Args:
+            page: Playwright页面对象
+            max_attempts: 最大清理轮数
+            
+        Returns:
+            bool: 是否成功处理了弹窗
+        """
+        total_handled = 0
+        
+        # Phase 12.5: 多轮清理
+        for attempt in range(max_attempts):
+            handled_this_round = False
+            
+            try:
+                # 策略1: 按 ESC 键关闭弹窗
+                await page.keyboard.press('Escape')
+                await page.wait_for_timeout(200)
+                
+                # 策略2: 尝试点击常见的关闭按钮
+                close_selectors = [
+                    # 通用关闭按钮
+                    '[class*="close"]',
+                    '[class*="dismiss"]',
+                    '[aria-label*="关闭"]',
+                    '[aria-label*="Close"]',
+                    'button:has-text("关闭")',
+                    'button:has-text("取消")',
+                    'button:has-text("我知道了")',
+                    'button:has-text("确定")',
+                    'button:has-text("OK")',
+                    'button:has-text("知道了")',
+                    'button:has-text("跳过")',
+                    'button:has-text("下次再说")',
+                    'button:has-text("不再提示")',
+                    # 新用户引导弹窗
+                    '[class*="guide"] [class*="close"]',
+                    '[class*="tour"] [class*="close"]',
+                    '[class*="intro"] [class*="close"]',
+                    '[class*="welcome"] [class*="close"]',
+                    # Ant Design / Element UI 关闭按钮
+                    '.ant-modal-close',
+                    '.el-dialog__close',
+                    '.el-message-box__close',
+                    '.el-notification__closeBtn',
+                    # Toast 通知
+                    '.ant-notification-close-x',
+                    '.el-message__closeBtn',
+                    '.ant-message-notice-close',
+                    # 遮罩层点击关闭（谨慎使用）
+                    # '.ant-modal-mask',
+                    # '.el-overlay',
+                    # 妙手ERP特定弹窗
+                    '[class*="modal"] [class*="btn-close"]',
+                    '[class*="dialog"] [class*="btn-close"]',
+                    '.close-btn',
+                    '.icon-close',
+                    'i[class*="close"]',
+                    'span[class*="close"]',
+                ]
+                
+                for selector in close_selectors:
+                    try:
+                        locator = page.locator(selector).first
+                        if await locator.count() > 0:
+                            is_visible = await locator.is_visible()
+                            if is_visible:
+                                await locator.click(timeout=1000)
+                                await page.wait_for_timeout(300)
+                                handled_this_round = True
+                                total_handled += 1
+                                logger.debug(f"[POPUP] Closed popup with selector: {selector}")
+                                break  # 一次只关闭一个，然后重新检测
+                    except Exception:
+                        continue
+                
+                # 如果这轮没有处理任何弹窗，退出循环
+                if not handled_this_round:
+                    break
+                    
+            except Exception as e:
+                logger.debug(f"[POPUP] Error during popup handling attempt {attempt+1}: {e}")
+                break
+        
+        if total_handled > 0:
+            logger.info(f"[POPUP] Cleared {total_handled} popup(s) in {attempt+1} attempt(s)")
+            print(f"    [POPUP] Cleared {total_handled} popup(s)")
+        
+        return total_handled > 0
+    
+    
+    def _replace_variables(self, text: str, account_info: Dict[str, Any]) -> str:
+        """替换变量"""
+        if not text or not account_info:
+            return text
+        
+        # 替换 {{account.xxx}} 格式的变量
+        import re
+        
+        def replace_match(match):
+            path = match.group(1)
+            if path.startswith('account.'):
+                key = path[8:]
+                return str(account_info.get(key, match.group(0)))
+            return match.group(0)
+        
+        return re.sub(r'\{\{(\w+(?:\.\w+)*)\}\}', replace_match, text)
+    
+    async def _save_screenshot(self, page, component_name: str, step_id: str) -> str:
+        """保存截图（异步版本）"""
+        try:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{component_name}_{step_id}_{timestamp}.png"
+            filepath = self.output_dir / 'screenshots' / filename
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 保存截图（异步API）
+            await page.screenshot(path=str(filepath))
+            
+            return str(filepath)
+        except Exception as e:
+            logger.error(f"Failed to save screenshot: {e}")
+            return None
+    
+    async def _save_failure_artifacts(self, page, component_name: str, step_id: str) -> str | None:
+        """Save HTML/text metadata for the latest failed page state."""
+        try:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            base_dir = self.test_dir if self.test_dir else (self.output_dir / 'failure_snapshots')
+            base_dir = Path(base_dir)
+            base_dir.mkdir(parents=True, exist_ok=True)
+
+            stem = f"{component_name}_{step_id}_{timestamp}"
+            html_path = base_dir / f"{stem}.html"
+            text_path = base_dir / f"{stem}.txt"
+            json_path = base_dir / f"{stem}.json"
+
+            current_url = str(getattr(page, 'url', '') or '')
+            page_title = ''
+            page_html = ''
+            body_text = ''
+
+            try:
+                if hasattr(page, 'title'):
+                    page_title = await page.title()
+            except Exception:
+                page_title = ''
+
+            try:
+                if hasattr(page, 'content'):
+                    page_html = await page.content()
+            except Exception:
+                page_html = ''
+
+            try:
+                body = page.locator("body")
+                if hasattr(body, 'first'):
+                    body = body.first
+                if hasattr(body, 'inner_text'):
+                    body_text = await body.inner_text()
+            except Exception:
+                body_text = ''
+
+            html_path.write_text(page_html, encoding='utf-8')
+            text_path.write_text(body_text, encoding='utf-8')
+
+            payload = {
+                'component_name': component_name,
+                'step_id': step_id,
+                'platform': self.platform,
+                'account_id': self.account_id,
+                'url': current_url,
+                'title': page_title,
+                'html_path': str(html_path),
+                'text_path': str(text_path),
+                'generated_at': datetime.now().isoformat(),
+            }
+            json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding='utf-8')
+            return str(json_path)
+        except Exception as e:
+            logger.error(f"Failed to save failure artifacts: {e}")
+            return None
+
+    def _diagnose_failure(self, step: Dict[str, Any], error: Exception) -> str:
+        """
+        诊断步骤失败原因并给出建议（Phase 12.4）
+        
+        Args:
+            step: 失败的步骤
+            error: 异常对象
+            
+        Returns:
+            str: 诊断建议
+        """
+        error_msg = str(error).lower()
+        action = step.get('action', '')
+        selector = step.get('selector', '')
+        
+        suggestions = []
+        
+        # 选择器相关错误
+        if 'selector' in error_msg or 'locator' in error_msg or 'resolved to' in error_msg:
+            suggestions.append("[DIAG] Selector issue detected:")
+            suggestions.append("  1. Use Playwright Inspector to re-locate the element")
+            suggestions.append("  2. Try role-based selector: role=button[name='...']")
+            suggestions.append("  3. Check if element is inside an iframe")
+        
+        # 超时错误
+        if 'timeout' in error_msg or 'timeouterror' in error_msg:
+            suggestions.append("[DIAG] Timeout detected:")
+            suggestions.append("  1. Increase timeout value in step config")
+            suggestions.append("  2. Add wait step before this action")
+            suggestions.append("  3. Check network connectivity")
+        
+        # 元素不可见
+        if 'not visible' in error_msg or 'hidden' in error_msg or 'outside' in error_msg:
+            suggestions.append("[DIAG] Element visibility issue:")
+            suggestions.append("  1. Element may need scrolling - try scroll_into_view")
+            suggestions.append("  2. Wait for animation to complete")
+            suggestions.append("  3. Check if element is blocked by another element")
+        
+        # 点击相关错误
+        if action == 'click' and ('click' in error_msg or 'intercept' in error_msg):
+            suggestions.append("[DIAG] Click failed:")
+            suggestions.append("  1. Element may be non-clickable")
+            suggestions.append("  2. Try adding force: true to step")
+            suggestions.append("  3. Wait for element to become interactive")
+        
+        # 填写相关错误
+        if action == 'fill' and ('fill' in error_msg or 'editable' in error_msg):
+            suggestions.append("[DIAG] Fill failed:")
+            suggestions.append("  1. Element may be readonly or disabled")
+            suggestions.append("  2. Try clicking the element first")
+            suggestions.append("  3. Check if element is an input/textarea")
+        
+        # 导航相关错误
+        if 'navigation' in error_msg or 'goto' in error_msg:
+            suggestions.append("[DIAG] Navigation issue:")
+            suggestions.append("  1. Check URL format and protocol")
+            suggestions.append("  2. Increase navigation timeout")
+            suggestions.append("  3. Check for redirects or authentication")
+        
+        if not suggestions:
+            suggestions.append("[DIAG] Unknown error - check step configuration")
+        
+        return "\n".join(suggestions)
+    
+    async def test_all_components(self) -> List[ComponentTestResult]:
+        """
+        测试所有组件
+        
+        Returns:
+            List[ComponentTestResult]: 所有测试结果
+        """
+        components = self.list_components()
+        
+        print(f"\n{'='*60}")
+        print(f" Testing all {self.platform} components ({len(components)} total)")
+        print('='*60)
+        
+        self.results = []
+        
+        for component_name in components:
+            result = await self.test_component(component_name)
+            self.results.append(result)
+        
+        return self.results
+    
+    def generate_report(self, format: str = 'json') -> str:
+        """
+        生成测试报告
+        
+        Args:
+            format: 报告格式（json/html）
+            
+        Returns:
+            str: 报告文件路径
+        """
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        if format == 'json':
+            report_path = self.output_dir / f"test_report_{self.platform}_{timestamp}.json"
+            
+            report = {
+                'platform': self.platform,
+                'timestamp': timestamp,
+                'summary': {
+                    'total': len(self.results),
+                    'passed': sum(1 for r in self.results if r.status == TestStatus.PASSED),
+                    'failed': sum(1 for r in self.results if r.status == TestStatus.FAILED),
+                    'skipped': sum(1 for r in self.results if r.status == TestStatus.SKIPPED),
+                },
+                'results': [
+                    {
+                        'component': r.component_name,
+                        'status': r.status.value,
+                        'duration_ms': r.duration_ms,
+                        'steps_total': r.steps_total,
+                        'steps_passed': r.steps_passed,
+                        'steps_failed': r.steps_failed,
+                        'error': r.error,
+                    }
+                    for r in self.results
+                ]
+            }
+            
+            with open(report_path, 'w', encoding='utf-8') as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+        
+        elif format == 'html':
+            report_path = self.output_dir / f"test_report_{self.platform}_{timestamp}.html"
+            
+            html = self._generate_html_report()
+            
+            with open(report_path, 'w', encoding='utf-8') as f:
+                f.write(html)
+        
+        else:
+            raise ValueError(f"Unknown format: {format}")
+        
+        print(f"\n[OK] Report saved: {report_path}")
+        return str(report_path)
+    
+    def _generate_html_report(self) -> str:
+        """生成HTML报告"""
+        passed = sum(1 for r in self.results if r.status == TestStatus.PASSED)
+        failed = sum(1 for r in self.results if r.status == TestStatus.FAILED)
+        total = len(self.results)
+        
+        rows = ""
+        for r in self.results:
+            status_class = {
+                TestStatus.PASSED: 'success',
+                TestStatus.FAILED: 'danger',
+                TestStatus.SKIPPED: 'warning',
+            }.get(r.status, 'secondary')
+            
+            rows += f"""
+            <tr>
+                <td>{r.component_name}</td>
+                <td><span class="badge bg-{status_class}">{r.status.value}</span></td>
+                <td>{r.duration_ms:.0f}ms</td>
+                <td>{r.steps_passed}/{r.steps_total}</td>
+                <td>{r.error or '-'}</td>
+            </tr>
+            """
+        
+        return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Component Test Report - {self.platform}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="p-4">
+    <div class="container">
+        <h1>Component Test Report</h1>
+        <p class="lead">Platform: {self.platform}</p>
+        
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h2>{total}</h2>
+                        <p>Total Tests</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-success text-white">
+                    <div class="card-body text-center">
+                        <h2>{passed}</h2>
+                        <p>Passed</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-danger text-white">
+                    <div class="card-body text-center">
+                        <h2>{failed}</h2>
+                        <p>Failed</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Component</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                    <th>Steps</th>
+                    <th>Error</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows}
+            </tbody>
+        </table>
+        
+        <p class="text-muted">Generated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+    </div>
+</body>
+</html>
+        """
+
+
+def create_parser() -> argparse.ArgumentParser:
+    """创建命令行参数解析器"""
+    parser = argparse.ArgumentParser(
+        description='组件测试工具 - 测试YAML组件配置',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  # 测试单个组件
+  python tools/test_component.py --platform shopee --component login --account MyStore_SG
+
+  # 测试所有组件
+  python tools/test_component.py --all --platform shopee
+
+  # 无头模式测试
+  python tools/test_component.py --platform shopee --component login --headless
+        """
+    )
+    
+    parser.add_argument(
+        '--platform', '-p',
+        choices=['shopee', 'tiktok', 'miaoshou'],
+        required=True,
+        help='目标平台'
+    )
+    
+    parser.add_argument(
+        '--component', '-c',
+        help='组件名称'
+    )
+    
+    parser.add_argument(
+        '--all',
+        action='store_true',
+        help='测试所有组件'
+    )
+    
+    parser.add_argument(
+        '--account', '-a',
+        help='账号ID'
+    )
+    
+    parser.add_argument(
+        '--skip-login',
+        action='store_true',
+        help='跳过登录'
+    )
+    
+    parser.add_argument(
+        '--headless',
+        action='store_true',
+        help='无头模式'
+    )
+    
+    parser.add_argument(
+        '--report',
+        choices=['json', 'html'],
+        default='json',
+        help='报告格式'
+    )
+    
+    parser.add_argument(
+        '--output-dir', '-o',
+        help='输出目录'
+    )
+    
+    parser.add_argument(
+        '--list',
+        action='store_true',
+        help='列出所有组件'
+    )
+    
+    return parser
+
+
+async def main():
+    """主函数"""
+    parser = create_parser()
+    args = parser.parse_args()
+    
+    tester = ComponentTester(
+        platform=args.platform,
+        account_id=args.account,
+        skip_login=args.skip_login,
+        headless=args.headless,
+        output_dir=args.output_dir
+    )
+    
+    # 列出组件
+    if args.list:
+        components = tester.list_components()
+        print(f"\n{args.platform} components:")
+        for c in components:
+            print(f"  - {c}")
+        return
+    
+    # 测试所有组件
+    if args.all:
+        results = await tester.test_all_components()
+    
+    # 测试单个组件
+    elif args.component:
+        result = await tester.test_component(args.component)
+        tester.results = [result]
+    
+    else:
+        parser.print_help()
+        return
+    
+    # 打印摘要
+    print("\n" + "="*60)
+    print(" Test Summary")
+    print("="*60)
+    
+    passed = sum(1 for r in tester.results if r.status == TestStatus.PASSED)
+    failed = sum(1 for r in tester.results if r.status == TestStatus.FAILED)
+    
+    print(f"\nTotal: {len(tester.results)}")
+    print(f"Passed: {passed}")
+    print(f"Failed: {failed}")
+    
+    # 生成报告
+    tester.generate_report(format=args.report)
+
+
+if __name__ == '__main__':
+    asyncio.run(main())

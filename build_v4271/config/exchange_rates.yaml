@@ -1,0 +1,75 @@
+# Exchange Rates API Configuration
+# v4.6.0 - 全球货币支持配置
+
+providers:
+  # Provider 1: Open Exchange Rates（推荐，全球180+货币）
+  - name: "Open Exchange Rates"
+    api_url: "https://openexchangerates.org/api/latest.json"
+    priority: 1
+    api_key_env: "OPENEXCHANGERATES_API_KEY"
+    timeout: 10
+    retry: 2
+    coverage:
+      - "全球180+货币"
+      - "实时汇率更新"
+      - "历史汇率查询"
+    
+  # Provider 2: European Central Bank（免费，欧元相关）
+  - name: "European Central Bank"
+    api_url: "https://api.exchangerate.host/latest"
+    priority: 2
+    api_key_env: null  # 免费无需密钥
+    timeout: 5
+    retry: 3
+    coverage:
+      - "欧元相关货币"
+      - "免费使用"
+      - "每日更新"
+    
+  # Provider 3: 中国银行（人民币相关）
+  - name: "Bank of China"
+    api_url: "https://www.boc.cn/sourcedb/whpj/"
+    priority: 3
+    api_key_env: null
+    timeout: 10
+    retry: 1
+    coverage:
+      - "人民币相关货币"
+      - "官方汇率"
+      - "每日更新"
+
+# 降级策略
+fallback_strategy:
+  use_historical_rate: true  # 使用最近7天的历史汇率
+  max_age_days: 7
+  alert_on_fallback: true    # 发送告警
+  default_rate_cny: 1.0      # CNY默认汇率
+
+# 缓存策略
+cache:
+  ttl_seconds: 86400  # 24小时
+  preload_currencies:  # 预加载常用货币
+    - "USD"  # 美元
+    - "EUR"  # 欧元
+    - "GBP"  # 英镑
+    - "JPY"  # 日元
+    - "SGD"  # 新加坡元
+    - "MYR"  # 马来西亚令吉
+    - "BRL"  # 巴西雷亚尔
+    - "IDR"  # 印尼盾
+    - "THB"  # 泰铢
+    - "PHP"  # 菲律宾比索
+
+# 货币配置
+currencies:
+  # 启用的货币（留空表示支持所有货币）
+  enabled: []  # 空列表表示支持所有180+货币
+  
+  # 基准货币（CNY本位币）
+  base_currency: "CNY"
+  
+  # 精度配置
+  decimal_places: 6  # 汇率精度（小数点后6位）
+  amount_decimal_places: 2  # 金额精度（小数点后2位）
+
+

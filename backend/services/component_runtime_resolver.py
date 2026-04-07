@@ -14,6 +14,10 @@ from backend.services.active_collection_components import (
 from backend.services.component_name_utils import build_component_name
 from backend.services.component_version_service import ComponentVersionService
 
+EXPORT_COMPONENT_ALIASES: dict[tuple[str, str, Optional[str]], tuple[str, ...]] = {
+    ("miaoshou", "inventory", None): ("miaoshou/inventory_snapshot_export",),
+}
+
 
 class ComponentRuntimeResolverError(Exception):
     """Base error for formal collection runtime component resolution."""
@@ -93,19 +97,26 @@ class ComponentRuntimeResolver:
         data_domain: str,
         sub_domain: Optional[str],
     ) -> RuntimeComponentManifest:
-        component_name = build_component_name(
+        component_names = self._build_export_component_names(
             platform=platform,
-            component_type="export",
             data_domain=data_domain,
             sub_domain=sub_domain,
         )
-        return await self._resolve_component(
-            component_name=component_name,
-            platform=platform,
-            component_type="export",
-            data_domain=data_domain,
-            sub_domain=sub_domain,
-        )
+        last_missing_error: Optional[NoStableComponentVersionError] = None
+        for component_name in component_names:
+            try:
+                return await self._resolve_component(
+                    component_name=component_name,
+                    platform=platform,
+                    component_type="export",
+                    data_domain=data_domain,
+                    sub_domain=sub_domain,
+                )
+            except NoStableComponentVersionError as exc:
+                last_missing_error = exc
+                continue
+
+        raise last_missing_error or NoStableComponentVersionError(component_names[0])
 
     async def resolve_task_manifests(
         self,
@@ -193,3 +204,22 @@ class ComponentRuntimeResolver:
             ]
 
         return list(await self.db.run_sync(_query))
+
+    @staticmethod
+    def _build_export_component_names(
+        *,
+        platform: str,
+        data_domain: str,
+        sub_domain: Optional[str],
+    ) -> list[str]:
+        primary = build_component_name(
+            platform=platform,
+            component_type="export",
+            data_domain=data_domain,
+            sub_domain=sub_domain,
+        )
+        candidates = [primary]
+        for alias in EXPORT_COMPONENT_ALIASES.get((platform, data_domain, sub_domain), ()):
+            if alias not in candidates:
+                candidates.append(alias)
+        return candidates

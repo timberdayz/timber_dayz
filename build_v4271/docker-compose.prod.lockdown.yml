@@ -1,0 +1,41 @@
+# =====================================================
+# 生产环境端口锁定配置
+# =====================================================
+# 目的：最小化端口暴露，只对外暴露 Nginx 的 80/443
+# 其他服务（PostgreSQL、Redis、Backend、Frontend、Celery Exporter）
+# 只在 Docker 内网 erp_network 中可访问，不映射到宿主机
+# =====================================================
+# 使用方式：
+# docker-compose -f docker-compose.yml \
+#   -f docker-compose.prod.yml \
+#   -f docker-compose.cloud.yml \
+#   -f docker-compose.prod.lockdown.yml \
+#   --profile production up -d
+# =====================================================
+
+services:
+  # PostgreSQL - 移除宿主机端口映射（仅容器网络可访问）
+  postgres:
+    ports: []  # 清空端口映射，服务仍可通过 postgres:5432 在容器网络内访问
+
+  # Redis - 移除宿主机端口映射（仅容器网络可访问）
+  redis:
+    ports: []  # 清空端口映射，服务仍可通过 redis:6379 在容器网络内访问
+
+  # Backend - 移除宿主机端口映射（仅容器网络可访问）
+  # Nginx 通过 backend:8000 访问，不受影响
+  backend:
+    ports: []  # 清空端口映射，服务仍可通过 backend:8000 在容器网络内访问
+
+  # Frontend - 移除宿主机端口映射（仅容器网络可访问）
+  # Nginx 通过 frontend:80 访问，不受影响
+  frontend:
+    ports: []  # 清空端口映射，服务仍可通过 frontend:80 在容器网络内访问
+
+  # Celery Exporter - 移除宿主机端口映射（仅容器网络可访问）
+  # 如需监控，可通过 Prometheus 在容器网络内访问
+  celery-exporter:
+    ports: []  # 清空端口映射，服务仍可通过 celery-exporter:9540 在容器网络内访问
+
+  # Nginx - 保留 80/443 端口映射（这是唯一对外暴露的端口）
+  # 不修改 nginx 的端口配置，保持 80:80 和 443:443
